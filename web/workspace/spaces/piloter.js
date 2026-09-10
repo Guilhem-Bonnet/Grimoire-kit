@@ -14,7 +14,15 @@
 // démonstration — `demo` reste toujours `false` ici.
 //
 // API consommées : api.projects(), api.health(project?), api.memoryStatus
-// (project?), api.doctor(project?), api.updateProject(project, confirm).
+// (project?), api.doctor(project?), api.updateProject(project, confirm),
+// api.agents(project?), api.agentSkill(name, skill, action),
+// api.agentFields(name, fields).
+//
+// Agents (#374) : section de la fiche projet, pas un septième espace. La
+// gestion d'agents est une facette du même objet que « kit, hôtes, standard,
+// actions » — un réglage du projet, pas un artefact qu'on façonne (ça, c'est
+// Concevoir) ni une trace d'exécution (Observer). Écritures désactivées
+// (`ctx.host.readOnly`) hors projet d'accueil, comme le reste de la fiche.
 
 const STYLE_ID = 'pl-styles';
 
@@ -36,7 +44,7 @@ function injectStyles() {
     .pl-watch-name { font-weight: 500; }
     .pl-watch-reason { color: var(--ink2); margin-left: 8px; }
     .pl-table-wrap { overflow: auto; border: 1px solid var(--line); border-radius: var(--r); }
-    .pl-table { width: 100%; border-collapse: collapse; font-size: var(--t-s); }
+    .pl-table { width: 100%; border-collapse: collapse; font-size: var(--t-s); background: var(--e1); }
     .pl-table th { text-align: left; font-size: var(--t-min); color: var(--ink3); font-weight: 500; padding: 8px var(--sp-3); border-bottom: 1px solid var(--line); background: var(--bar); position: sticky; top: 0; }
     .pl-table td { padding: 8px var(--sp-3); border-bottom: 1px solid var(--line); height: 48px; vertical-align: middle; }
     .pl-table tbody tr { cursor: pointer; }
@@ -55,6 +63,17 @@ function injectStyles() {
     .pl-insp-row { display: flex; justify-content: space-between; gap: var(--sp-2); padding: 4px 0; font-size: var(--t-s); }
     .pl-actions { display: flex; flex-direction: column; gap: 6px; margin-top: var(--sp-2); }
     .pl-preview { margin-top: 8px; padding: 8px; border: 1px dashed var(--line); border-radius: var(--r); font-size: var(--t-min); color: var(--ink2); }
+    .pl-badge { display: inline-block; padding: 1px 6px; border-radius: 999px; font-size: var(--t-min); border: 1px solid var(--line); color: var(--ink2); }
+    .pl-badge.overrides { color: var(--ink); border-color: var(--acc); }
+    .pl-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+    .pl-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; background: var(--e2); font-size: var(--t-min); }
+    .pl-chip button { border: 0; background: none; color: var(--ink3); cursor: pointer; padding: 0; font-size: var(--t-min); line-height: 1; }
+    .pl-chip button:hover { color: var(--ink); }
+    .pl-field { display: flex; flex-direction: column; gap: 4px; margin-bottom: var(--sp-2); }
+    .pl-field label { font-size: var(--t-min); color: var(--ink3); }
+    .pl-field textarea, .pl-field input[type="text"] { font: inherit; font-size: var(--t-s); padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); color: var(--ink); resize: vertical; }
+    .pl-tool-opts { display: flex; flex-wrap: wrap; gap: var(--sp-2); font-size: var(--t-s); }
+    .pl-tool-opts label { display: flex; align-items: center; gap: 4px; }
   `;
   document.head.append(style);
 }
@@ -299,12 +318,244 @@ function renderFleet(root, ctx, rows, onSelect) {
 // ── Niveau Projet (fiche) ────────────────────────────────────────────────────
 
 async function loadSheet(ctx, slug) {
-  const [health, memory, doctor] = await Promise.all([
+  const [health, memory, doctor, agents] = await Promise.all([
     ctx.api.health(slug).catch(() => null),
     ctx.api.memoryStatus(slug).catch(() => null),
     ctx.api.doctor(slug).catch(() => null),
+    ctx.api.agents(slug).catch(() => null),
   ]);
-  return { health, memory, doctor };
+  return { health, memory, doctor, agents };
+}
+
+// ── Agents (#374) : liste + inspecteur d'édition ────────────────────────────
+
+const TOOL_VERBS = ['read', 'search', 'edit', 'execute', 'web'];
+
+function usageWord(usage) {
+  if (!usage || !usage.choices) return 'jamais choisi';
+  const ago = relativeAge((Date.now() - new Date(usage.last_chosen_at).getTime()) / 60000);
+  return `${fmtInt(usage.choices)} choix · dernier ${ago}`;
+}
+
+function renderAgentsTable(ctx, agentsPayload, selectedName, onSelect) {
+  const section = document.createElement('div');
+  section.className = 'pl-section';
+  const heading = text('h3', null, 'Agents');
+  heading.dataset.term = 'agent';
+  section.append(heading);
+
+  const agents = agentsPayload?.agents || [];
+  if (!agents.length) {
+    section.append(text('p', 'lbl', "Aucun agent lisible sur ce projet — l'API des agents a répondu vide ou n'a pas répondu."));
+    return section;
+  }
+
+  const tableWrap = document.createElement('div');
+  tableWrap.className = 'pl-table-wrap';
+  const table = document.createElement('table');
+  table.className = 'pl-table';
+  const thead = document.createElement('thead');
+  const headRow = document.createElement('tr');
+  for (const label of ['Agent', 'Couche', 'Outils', 'Skills', 'Usage']) {
+    headRow.append(text('th', null, label));
+  }
+  thead.append(headRow);
+  table.append(thead);
+
+  const tbody = document.createElement('tbody');
+  for (const agent of agents) {
+    const tr = document.createElement('tr');
+    tr.tabIndex = 0;
+    tr.setAttribute('aria-current', String(agent.name === selectedName));
+    tr.addEventListener('click', () => onSelect(agent.name));
+    tr.addEventListener('keydown', (e) => { if (e.key === 'Enter') onSelect(agent.name); });
+
+    const nameCell = document.createElement('td');
+    const nameRow = row(text('span', null, agent.name));
+    if (agent.entry_point) nameRow.append(text('span', 'lbl', '· entrée'));
+    nameCell.append(nameRow);
+    tr.append(nameCell);
+
+    const layerCell = document.createElement('td');
+    const layerBadge = text('span', 'pl-badge ' + agent.layer, agent.layer);
+    if (agent.layer === 'overrides') layerBadge.dataset.term = 'override';
+    layerCell.append(layerBadge);
+    tr.append(layerCell);
+
+    tr.append(text('td', 'lbl', agent.tools.join(', ') || '—'));
+    tr.append(text('td', 'lbl', agent.skills.length ? String(agent.skills.length) : '—'));
+    tr.append(text('td', 'lbl', usageWord(agent.usage)));
+    tbody.append(tr);
+  }
+  table.append(tbody);
+  tableWrap.append(table);
+  section.append(tableWrap);
+  return section;
+}
+
+function fieldRow(labelText, node) {
+  const wrap = document.createElement('div');
+  wrap.className = 'pl-field';
+  const label = document.createElement('label');
+  label.textContent = labelText;
+  wrap.append(label, node);
+  return wrap;
+}
+
+function renderAgentInspector(ctx, agentsPayload, agent, callbacks) {
+  const block = document.createElement('div');
+  block.className = 'pl-insp-block';
+  block.dataset.agentInspector = 'true';
+  block.append(row(text('h4', null, agent.name), text('span', 'pl-badge ' + agent.layer, agent.layer)));
+  block.append(text('div', 'lbl', usageWord(agent.usage)));
+
+  const readOnly = ctx.host.readOnly;
+  const saveLabel = (verb) => (readOnly ? 'Écriture désactivée (cockpit)' : verb);
+
+  // ── Clause d'emploi ──────────────────────────────────────────────────
+  const useWhen = document.createElement('textarea');
+  useWhen.rows = 2;
+  useWhen.value = agent.use_when || '';
+  useWhen.disabled = readOnly;
+  const dontUseWhen = document.createElement('textarea');
+  dontUseWhen.rows = 2;
+  dontUseWhen.value = agent.dont_use_when || '';
+  dontUseWhen.disabled = readOnly;
+
+  const saveClauseBtn = document.createElement('button');
+  saveClauseBtn.type = 'button';
+  saveClauseBtn.className = 'btn';
+  saveClauseBtn.textContent = saveLabel('Enregistrer la clause');
+  saveClauseBtn.disabled = readOnly;
+  saveClauseBtn.addEventListener('click', async () => {
+    ctx.dock.echo(`# clause d'emploi — ${agent.name}`);
+    try {
+      await ctx.api.agentFields(agent.name, { use_when: useWhen.value, dont_use_when: dontUseWhen.value });
+      callbacks.refresh(agent.name);
+    } catch (error) {
+      ctx.dock.log('doctor', 'refusé : ' + error.message);
+    }
+  });
+
+  block.append(
+    fieldRow('use_when', useWhen),
+    fieldRow('dont_use_when', dontUseWhen),
+    saveClauseBtn,
+  );
+  if (agent.tool_boundary) block.append(text('div', 'lbl', 'Frontière : ' + agent.tool_boundary));
+
+  // ── Outils ───────────────────────────────────────────────────────────
+  const toolOpts = document.createElement('div');
+  toolOpts.className = 'pl-tool-opts';
+  const toolChecks = {};
+  for (const verb of TOOL_VERBS) {
+    const label = document.createElement('label');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = agent.tools.includes(verb);
+    cb.disabled = readOnly;
+    toolChecks[verb] = cb;
+    label.append(cb, document.createTextNode(verb));
+    toolOpts.append(label);
+  }
+  const saveToolsBtn = document.createElement('button');
+  saveToolsBtn.type = 'button';
+  saveToolsBtn.className = 'btn';
+  saveToolsBtn.textContent = saveLabel('Enregistrer les outils');
+  saveToolsBtn.disabled = readOnly;
+  saveToolsBtn.addEventListener('click', async () => {
+    const chosen = TOOL_VERBS.filter((v) => toolChecks[v].checked);
+    ctx.dock.echo(`# outils — ${agent.name} → ${chosen.join(', ')}`);
+    try {
+      await ctx.api.agentFields(agent.name, { tools: chosen });
+      callbacks.refresh(agent.name);
+    } catch (error) {
+      ctx.dock.log('doctor', 'refusé : ' + error.message);
+    }
+  });
+  block.append(fieldRow('tools', toolOpts), saveToolsBtn);
+
+  // ── Contexte ─────────────────────────────────────────────────────────
+  const contextArea = document.createElement('textarea');
+  contextArea.rows = 3;
+  contextArea.value = (agent.context || []).join('\n');
+  contextArea.disabled = readOnly;
+  contextArea.placeholder = 'un chemin de projet par ligne';
+  const saveContextBtn = document.createElement('button');
+  saveContextBtn.type = 'button';
+  saveContextBtn.className = 'btn';
+  saveContextBtn.textContent = saveLabel('Enregistrer le contexte');
+  saveContextBtn.disabled = readOnly;
+  saveContextBtn.addEventListener('click', async () => {
+    const paths = contextArea.value.split('\n').map((s) => s.trim()).filter(Boolean);
+    ctx.dock.echo(`# contexte — ${agent.name}`);
+    try {
+      await ctx.api.agentFields(agent.name, { context: paths });
+      callbacks.refresh(agent.name);
+    } catch (error) {
+      ctx.dock.log('doctor', 'refusé : ' + error.message);
+    }
+  });
+  block.append(fieldRow('context', contextArea), saveContextBtn);
+
+  // ── Skills ───────────────────────────────────────────────────────────
+  const skillsWrap = document.createElement('div');
+  skillsWrap.className = 'pl-chips';
+  for (const slug of agent.skills) {
+    const chip = document.createElement('span');
+    chip.className = 'pl-chip';
+    chip.append(document.createTextNode(slug));
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.textContent = '×';
+    remove.disabled = readOnly;
+    remove.setAttribute('aria-label', `Retirer ${slug}`);
+    remove.addEventListener('click', async () => {
+      ctx.dock.echo(`# retirer skill — ${agent.name} : ${slug}`);
+      try {
+        await ctx.api.agentSkill(agent.name, slug, 'remove');
+        callbacks.refresh(agent.name);
+      } catch (error) {
+        ctx.dock.log('doctor', 'refusé : ' + error.message);
+      }
+    });
+    chip.append(remove);
+    skillsWrap.append(chip);
+  }
+  if (!agent.skills.length) skillsWrap.append(text('span', 'lbl', 'aucun skill attaché'));
+
+  const assignRow = document.createElement('div');
+  assignRow.className = 'row';
+  assignRow.style.marginTop = '6px';
+  const select = document.createElement('select');
+  const available = (agentsPayload.skills || []).filter((s) => !agent.skills.includes(s.slug));
+  for (const skill of available) {
+    const option = document.createElement('option');
+    option.value = skill.slug;
+    option.textContent = skill.name || skill.slug;
+    select.append(option);
+  }
+  select.disabled = readOnly || !available.length;
+  const assignBtn = document.createElement('button');
+  assignBtn.type = 'button';
+  assignBtn.className = 'btn';
+  assignBtn.textContent = saveLabel('Assigner');
+  assignBtn.disabled = readOnly || !available.length;
+  assignBtn.addEventListener('click', async () => {
+    const slug = select.value;
+    if (!slug) return;
+    ctx.dock.echo(`# assigner skill — ${agent.name} : ${slug}`);
+    try {
+      await ctx.api.agentSkill(agent.name, slug, 'assign');
+      callbacks.refresh(agent.name);
+    } catch (error) {
+      ctx.dock.log('doctor', 'refusé : ' + error.message);
+    }
+  });
+  assignRow.append(select, assignBtn);
+
+  block.append(fieldRow('skills', skillsWrap), assignRow);
+  return block;
 }
 
 function renderSheet(root, ctx, slug, name, sheet, options) {
@@ -415,6 +666,47 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
   }
 
   ctx.inspector.append(actionsBlock);
+
+  // ── Agents (#374) : table dans la fiche, détail éditable dans l'inspecteur ─
+  //
+  // Le clic sélectionne un agent et rend son détail dans l'inspecteur, sans
+  // redessiner la fiche entière ni la refaire au serveur — seule une écriture
+  // réussie re-fetch `agents()` pour tenir la table et l'inspecteur à jour
+  // avec l'état réel du disque, jamais avec un optimisme local.
+  let agentsPayload = sheet.agents;
+  let selectedAgent = null;
+  let agentsSection = null;
+
+  const renderAgentBlock = () => {
+    const previous = ctx.inspector.querySelector('[data-agent-inspector]');
+    if (previous) previous.remove();
+    if (!selectedAgent || !agentsPayload) return;
+    const agent = agentsPayload.agents.find((a) => a.name === selectedAgent);
+    if (!agent) { selectedAgent = null; return; }
+    ctx.inspector.append(
+      renderAgentInspector(ctx, agentsPayload, agent, {
+        refresh: async (keepSelected) => {
+          agentsPayload = await ctx.api.agents(slug).catch(() => agentsPayload);
+          selectedAgent = keepSelected;
+          const fresh = renderAgentsTable(ctx, agentsPayload, selectedAgent, selectAgent);
+          agentsSection.replaceWith(fresh);
+          agentsSection = fresh;
+          renderAgentBlock();
+        },
+      }),
+    );
+  };
+
+  const selectAgent = (agentName) => {
+    selectedAgent = agentName === selectedAgent ? null : agentName;
+    const fresh = renderAgentsTable(ctx, agentsPayload, selectedAgent, selectAgent);
+    agentsSection.replaceWith(fresh);
+    agentsSection = fresh;
+    renderAgentBlock();
+  };
+
+  agentsSection = renderAgentsTable(ctx, agentsPayload, selectedAgent, selectAgent);
+  wrap.append(agentsSection);
 }
 
 export async function mount(root, ctx) {
