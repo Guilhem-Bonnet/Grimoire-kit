@@ -805,6 +805,17 @@ def task_dispatch(
     ] = None,
     provider: Annotated[str | None, typer.Option("--provider", help="Restreindre la cascade à ce fournisseur.")] = None,
     timeout: Annotated[float, typer.Option("--timeout", help="Timeout d'un appel fournisseur, en secondes.")] = 600.0,
+    agent: Annotated[
+        str | None,
+        typer.Option(
+            "--agent",
+            help=(
+                "Agent au nom duquel dispatcher : son `context` déclaré "
+                "(frontmatter de son fichier) s'ajoute au contrat de la tâche "
+                "dans le prompt, rien de plus (issue #373)."
+            ),
+        ),
+    ] = None,
     project_root: _PROJECT_ROOT = Path(),
     ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
     actor: _ACTOR = "cli",
@@ -847,5 +858,7 @@ def task_dispatch(
         dry_run=dry_run,
         call_timeout=timeout,
         actor=actor,
+        agent=agent,
+        project_root=project_root,
     )
     _emit_dispatch(ctx, report)

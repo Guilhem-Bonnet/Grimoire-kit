@@ -37,6 +37,7 @@ OVERRIDES_DIR = f"{GRIMOIRE_DIR}/overrides"
 
 #: Kit sub-trees, named once so scaffolder and readers cannot drift apart.
 AGENTS_SUBDIR = "agents"
+SKILLS_SUBDIR = "skills"
 WORKFLOWS_SUBDIR = "workflows"
 TEAMS_SUBDIR = "teams"
 PROMPT_TEMPLATES_SUBDIR = "prompt-templates"
@@ -111,6 +112,18 @@ def agent_dirs(project_root: Path, *, include_legacy: bool = True) -> tuple[Path
             seen.add(d)
             ordered.append(d)
     return tuple(ordered)
+
+
+def skill_dirs(project_root: Path) -> tuple[Path, Path]:
+    """Directories holding archetype-shipped skill definitions.
+
+    Mirrors :func:`agent_dirs` for a single tier pair — overrides then kit —
+    without the legacy locations skills never had. A skill an archetype
+    attaches to one of its agents (issue #375) ships as a file here, copied
+    by the scaffolder alongside that archetype's agents; :func:`collect.
+    collect_skills` reads it next to the kit's bundled, host-wide skills.
+    """
+    return (overrides_dir(project_root) / SKILLS_SUBDIR, kit_dir(project_root) / SKILLS_SUBDIR)
 
 
 def layered_files(

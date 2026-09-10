@@ -3,7 +3,7 @@
 name: "systems-debugger"
 description: "Systems Debugger & Linux Internals — Probe"
 use_when: "Diagnostiquer un incident système ou applicatif précis au niveau Linux/kernel/process."
-dont_use_when: "Observabilité continue sans incident précis (voir monitoring-specialist) ou durcissement sécurité (voir security-hardener)."
+dont_use_when: "Observabilité continue sans incident précis (voir monitoring-specialist) ou durcissement sécurité (voir ops-engineer, skill infra-security-hardening)."
 tool_boundary: "Outils de diagnostic système (strace, perf, logs) — pas d'accès au pipeline CI/CD ni aux manifestes Kubernetes."
 tools: "read, execute"
 model_affinity:

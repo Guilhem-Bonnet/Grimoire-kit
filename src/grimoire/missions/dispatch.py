@@ -74,6 +74,7 @@ __all__ = [
     "DispatchAttempt",
     "DispatchReport",
     "Uncertainty",
+    "agent_declared_context",
     "build_prompt",
     "render_invocation",
     "run_dispatch",
@@ -165,7 +166,48 @@ def _tier_chain(start_tier: str, max_tier: str | None) -> tuple[str, ...]:
     return SUPPORTED_MODEL_TIERS[start_idx : end_idx + 1]
 
 
-def build_prompt(task: MissionTask) -> str:
+def _read_declared_context(project_root: Path, paths: tuple[str, ...]) -> str:
+    """Concatène le contenu des chemins déclarés par l'agent, dans l'ordre déclaré.
+
+    Best-effort côté lecture (un fichier disparu entre la déclaration et le
+    dispatch ne doit pas faire échouer la délégation), mais l'existence est
+    déjà vérifiée à la construction de l'``AgentSpec`` (``collect.py``) — ce
+    n'est un filet que pour la course, pas la garde principale.
+    """
+    blocs: list[str] = []
+    for rel in paths:
+        fpath = project_root / rel
+        try:
+            text = fpath.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        blocs.append(f"### {rel}\n\n{text.strip()}")
+    return "\n\n".join(blocs)
+
+
+def agent_declared_context(project_root: Path, agent_name: str) -> tuple[str, ...]:
+    """Les chemins que l'agent *agent_name* déclare comme son propre contexte.
+
+    ``()`` si l'agent est introuvable ou ne déclare rien — dans les deux cas,
+    ``build_prompt`` retombe sur le comportement d'avant #373, sans régression
+    (issue #373, critère 2).
+    """
+    from grimoire.core.standard_state import is_standard_enrolled
+    from grimoire.hosts.collect import collect_agents, collect_skills
+
+    root = project_root.resolve()
+    governed = is_standard_enrolled(root)
+    skills = collect_skills(root, governed=governed)
+    agents = collect_agents(root, known_skills=frozenset(s.slug for s in skills))
+    for agent in agents:
+        if agent.name == agent_name:
+            return agent.context
+    return ()
+
+
+def build_prompt(
+    task: MissionTask, *, agent_context: tuple[str, ...] = (), project_root: Path | None = None
+) -> str:
     """Le contrat autonome envoyé au fournisseur : ce qu'il doit faire, rien de plus.
 
     Volontairement plus étroit que le context bundle du standard
@@ -174,8 +216,18 @@ def build_prompt(task: MissionTask) -> str:
     du registre de fournisseurs, seulement de ce que la tâche exige et de la
     garde qui rend le vert du check opposable — ne pas retoucher les
     vérifications, sous peine de rendre le verdict qui suit sans objet.
+
+    *agent_context* (issue #373) ajoute ce que l'agent dispatché déclare comme
+    son propre contexte (``AgentSpec.context``) — la seule chose que ce prompt
+    admet en plus du contrat de la tâche. Absent (agent sans ``context:``
+    déclaré, ou pas d'agent nommé), le prompt est identique à celui produit
+    avant #373 : aucune régression pour ces agents.
     """
     lignes = [f"Tâche {task.id} : {task.title}"]
+    if agent_context and project_root is not None:
+        bloc = _read_declared_context(project_root, agent_context)
+        if bloc:
+            lignes.append(f"\nContexte déclaré de l'agent :\n\n{bloc}")
     if task.description:
         lignes.append(f"\nContexte : {task.description}")
     if task.acceptance:
@@ -615,8 +667,16 @@ def run_dispatch(
     dry_run: bool = False,
     call_timeout: float = DEFAULT_CALL_TIMEOUT_S,
     actor: str = "cli",
+    agent: str | None = None,
+    project_root: Path | None = None,
 ) -> DispatchReport:
     """Cascade la tâche *task_id* à travers les paliers de fournisseurs.
+
+    *agent* (issue #373) nomme l'agent dispatché : son ``context`` déclaré
+    (frontmatter de son fichier, résolu par :func:`agent_declared_context`)
+    entre dans le prompt en plus du contrat de la tâche, rien de plus. Sans
+    *agent*, ou pour un agent qui ne déclare aucun contexte, le prompt est
+    identique à celui produit avant #373.
 
     Refuse avant tout appel si la classe est V2 ou si ``checks`` est vide.
     Sinon, essaie chaque palier de la chaîne, du palier de départ au plus
@@ -637,7 +697,8 @@ def run_dispatch(
     """
     task = service.require(task_id)
     verifiability = classify(task)
-    prompt = build_prompt(task)
+    declared_context = agent_declared_context(project_root, agent) if agent and project_root else ()
+    prompt = build_prompt(task, agent_context=declared_context, project_root=project_root)
 
     floor = start_tier_for(verifiability)
     if floor is None:

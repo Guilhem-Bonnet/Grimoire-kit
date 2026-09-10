@@ -519,6 +519,9 @@ class ProjectScaffolder:
     def _agents_dir(self) -> Path:
         return self._kit_dir() / layout.AGENTS_SUBDIR
 
+    def _skills_dir(self) -> Path:
+        return self._kit_dir() / layout.SKILLS_SUBDIR
+
     def _memory_dir(self) -> Path:
         """Project-owned memory store. Holds data, never kit code."""
         return self._target / "_grimoire" / "_memory"
@@ -761,6 +764,23 @@ class ProjectScaffolder:
                         src=md,
                         dst=dst,
                         label=f"{arch}/{dst.stem}",
+                    ))
+
+            # Skills attached to one of this archetype's agents (issue #375) —
+            # as installable as the agents that reference them, and collected
+            # from the same kit skills directory their `skills:` frontmatter
+            # resolves against (grimoire.hosts.collect.collect_skills).
+            skills_src = arch_dir / "skills"
+            if skills_src.is_dir():
+                skills_dst = self._skills_dir()
+                for md in sorted(skills_src.glob("*.md")):
+                    dst = skills_dst / _strip_tpl_suffix(md.name)
+                    if any(fc.dst == dst for fc in p.copies):
+                        continue
+                    p.copies.append(FileCopy(
+                        src=md,
+                        dst=dst,
+                        label=f"{arch}/skills/{dst.stem}",
                     ))
 
             # Workflows — an archetype's workflows are as installable as its agents.
