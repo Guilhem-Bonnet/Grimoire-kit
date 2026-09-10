@@ -275,8 +275,19 @@ def test_claude_model_affinity_crosses_reasoning_and_cost(project: Path) -> None
     - Sans signal fort dans un sens ou l'autre (medium/medium), `inherit`
       reste le défaut honnête.
     """
-    _write_agent(project, "petit-malin", "Tu triages à bas coût.", reasoning="medium", cost="low")
-    _write_agent(project, "gros-cerveau", "Tu raisonnes beaucoup, pour pas cher.", reasoning="high", cost="low")
+    # `tools` diffère explicitement entre les deux : sans ça, les deux fiches
+    # inférent la même frontière (read, search) et deviennent indiscernables
+    # au sens de la garde de distinction (#372) — un faux positif ici, pas
+    # une vraie régression, mais la garde n'a aucun moyen de le savoir.
+    _write_agent(project, "petit-malin", "Tu triages à bas coût.", tools="'read'", reasoning="medium", cost="low")
+    _write_agent(
+        project,
+        "gros-cerveau",
+        "Tu raisonnes beaucoup, pour pas cher.",
+        tools="'read', 'edit'",
+        reasoning="high",
+        cost="low",
+    )
     emitter = emitter_for(HostId.CLAUDE_CODE_CLI)
     assert emitter is not None
     apply_plan(emitter.plan(build_surface(project), project), project)

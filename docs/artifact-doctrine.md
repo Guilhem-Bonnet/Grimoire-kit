@@ -80,6 +80,19 @@ artefact à documenter de force : voir le test des deux questions ci-dessus.
   projet que personne ne regarde reproduit ce qu'on vient de nettoyer.
 - Le socle initial reste **par archétype**, comme le kit le fait déjà, mais assumé explicitement
   plutôt que subi.
+- **Un skill appartient à un agent par défaut** (décision du 2026-09-10, issue #372). Les skills
+  sont émis au niveau du projet : chaque tour de session paie leur description — environ soixante
+  tokens par skill — qu'ils servent ou non, et ce coût croît linéairement avec chaque skill ajouté.
+  Un skill attaché à un agent (`skills:` dans son frontmatter) ne coûte que sur les tours où cet
+  agent travaille : son corps, multiplié par les seuls tours de cet agent, jamais par ceux de la
+  session entière. Un skill ne redevient transversal que si l'instrumentation montre qu'au moins
+  deux agents le mobilisent réellement — avant #372, tout était transversal par défaut et rien
+  n'appartenait à personne : dix skills livrés, zéro rattaché. Les prompts restent transversaux :
+  ils ne se chargent qu'à l'invocation, leur rattachement n'a pas d'enjeu économique.
+  Voir `tests/unit/test_skill_attachment_cost.py` pour la mesure chiffrée (tokens par tour, avec
+  et sans attachement) et `AgentSpec.fingerprint()` / `duplicate_agent_fingerprints()`
+  (`src/grimoire/hosts/surface.py`) pour la garde qui interdit à deux agents de déclarer le même
+  faisceau outils + contexte + skills.
 
 ## <img src="../assets/icons/lightbulb.svg" width="28" height="28" alt=""> Vérification
 

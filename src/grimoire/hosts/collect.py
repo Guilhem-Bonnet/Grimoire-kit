@@ -19,6 +19,7 @@ from typing import Any
 from ruamel.yaml import YAML
 
 from grimoire.core import layout
+from grimoire.core.exceptions import GrimoireAgentError
 from grimoire.core.standard_state import active_profile_id, is_standard_enrolled
 from grimoire.data import framework_path
 from grimoire.hosts.secrets import secret_read_globs
@@ -34,6 +35,7 @@ from grimoire.hosts.surface import (
     ProjectSurface,
     SkillSpec,
     ToolVerb,
+    duplicate_agent_fingerprints,
 )
 
 _FRONTMATTER_RE = re.compile(r"\A(?:﻿)?(?:<!--.*?-->\s*)?---\s*\n(.*?)\n---\s*\n?(.*)\Z", re.DOTALL)
@@ -111,6 +113,15 @@ def _tool_verbs(raw: Any) -> tuple[ToolVerb, ...]:
         if verb not in verbs:
             verbs.append(verb)
     return tuple(verbs)
+
+
+def _str_tuple(raw: Any) -> tuple[str, ...]:
+    """Read a frontmatter list-of-strings key, tolerant of a single string."""
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, list):
+        return ()
+    return tuple(str(item).strip() for item in raw if str(item).strip())
 
 
 def infer_tools(body: str, description: str) -> tuple[ToolVerb, ...]:
@@ -198,14 +209,27 @@ def entry_agent_name(project_root: Path) -> str:
         return DEFAULT_ENTRY_AGENT
 
 
-def collect_agents(project_root: Path, *, entry_point: str | None = None) -> tuple[AgentSpec, ...]:
+def collect_agents(
+    project_root: Path,
+    *,
+    entry_point: str | None = None,
+    known_skills: frozenset[str] | None = None,
+) -> tuple[AgentSpec, ...]:
     """Read the project's personas into host-neutral specs.
 
     *entry_point* defaults to what the project declares (``agents.entry``);
     pass it explicitly to override.
+
+    *known_skills* is the set of slugs :func:`collect_skills` already
+    resolved for this project. An agent's ``skills:`` frontmatter is checked
+    against it fail-closed: a slug that resolves to nothing is a build error
+    (:class:`~grimoire.core.exceptions.GrimoireAgentError`), the same
+    treatment as an import that names a module which does not exist — not a
+    warning, and not a silent drop.
     """
     if entry_point is None:
         entry_point = entry_agent_name(project_root)
+    known_skills = known_skills or frozenset()
     specs: list[AgentSpec] = []
     for path in _agent_files(project_root):
         try:
@@ -226,6 +250,21 @@ def collect_agents(project_root: Path, *, entry_point: str | None = None) -> tup
             definition_ref = path.relative_to(project_root).as_posix()
         except ValueError:
             definition_ref = path.as_posix()
+        skills = _str_tuple(meta.get("skills"))
+        unknown = [slug for slug in skills if slug not in known_skills]
+        if unknown:
+            raise GrimoireAgentError(
+                f"L'agent « {name} » ({definition_ref}) déclare des skills introuvables : "
+                f"{', '.join(unknown)}. Un identifiant de skill doit résoudre contre "
+                "l'inventaire collecté par collect_skills(), comme un import cassé."
+            )
+        context = _str_tuple(meta.get("context"))
+        missing_context = [c for c in context if not (project_root / c).exists()]
+        if missing_context:
+            raise GrimoireAgentError(
+                f"L'agent « {name} » ({definition_ref}) déclare un contexte inexistant sur "
+                f"disque : {', '.join(missing_context)}."
+            )
         specs.append(
             AgentSpec(
                 name=name,
@@ -236,6 +275,8 @@ def collect_agents(project_root: Path, *, entry_point: str | None = None) -> tup
                 entry_point=bool(entry_point) and name == entry_point,
                 tools_origin="declared" if declared else "inferred",
                 max_turns=_max_turns(meta.get("max_turns")),
+                skills=skills,
+                context=context,
             )
         )
     return tuple(specs)
@@ -442,13 +483,28 @@ def collect_mcp_servers(project_root: Path) -> tuple[McpServerSpec, ...]:
 
 
 def build_surface(project_root: Path, *, project_name: str | None = None) -> ProjectSurface:
-    """Read *project_root* into the surface every emitter renders from."""
+    """Read *project_root* into the surface every emitter renders from.
+
+    Skills are collected before agents on purpose: an agent's ``skills:``
+    frontmatter resolves against the skill inventory, so the inventory must
+    exist first.
+    """
     root = project_root.resolve()
     governed = is_standard_enrolled(root)
+    skills = collect_skills(root, governed=governed)
+    agents = collect_agents(root, known_skills=frozenset(s.slug for s in skills))
+    duplicates = duplicate_agent_fingerprints(agents)
+    if duplicates:
+        pairs = ", ".join(f"{a} == {b}" for a, b in duplicates)
+        raise GrimoireAgentError(
+            f"Agents au faisceau identique (outils, contexte, skills) : {pairs}. "
+            "Deux agents avec le même faisceau sont le même agent sous deux noms — "
+            "fusionnez-les ou distinguez leur périmètre réel."
+        )
     return ProjectSurface(
         project_name=project_name or root.name,
-        agents=collect_agents(root),
-        skills=collect_skills(root, governed=governed),
+        agents=agents,
+        skills=skills,
         commands=collect_commands(root, governed=governed),
         hooks=governance_hooks(governed=governed),
         permissions=default_permissions(active_profile_id(root) if governed else "starter"),
