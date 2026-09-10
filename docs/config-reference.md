@@ -118,7 +118,7 @@ Valeurs acceptées :
 | Clé | Type | Défaut | Description |
 |---|---|---|---|
 | `archetype` | `string` | `"minimal"` | Archétype d'agents à utiliser. Voir [valeurs valides](#agentsarchetype). |
-| `custom_agents` | `list[string]` | `[]` | Liste d'agents personnalisés à charger. |
+| `custom_agents` | `list[string]` | `[]` | Noms suivis par `grimoire add`/`grimoire remove` — bookkeeping, pas un chargement. Les fichiers d'agent créés par `grimoire_add_agent` (MCP) ou manuellement vivent dans `_grimoire/overrides/agents/`. |
 
 ### `agents.archetype`
 
