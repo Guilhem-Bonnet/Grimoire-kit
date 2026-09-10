@@ -8,6 +8,16 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 ## [Unreleased]
 ### Ajouté
 
+- **Refonte de l'archétype `meta` — généraliste plus skills attachés (#375).**
+  Les 3 agents à faisceau distinct (`concierge`, `agent-optimizer`, `security-auditor`)
+  restent ; `art-director`, `creative-toolsmith`, `memory-keeper` et
+  `project-navigator`, tous indiscernables au sens de la garde de #372,
+  deviennent quatre skills attachés à `agent-optimizer` sans rien perdre du
+  savoir-faire ; `security-auditor` gagne un `context:` propre qui le distingue
+  désormais de `fix-loop-orchestrator`. `scaffold._plan_meta_agents` copie
+  maintenant `archetypes/meta/skills/*.md`, meta étant déployé à tout projet
+  indépendamment de l'archétype choisi.
+
 - **Premier port Rust, optionnel — `grimoire.policies` (#354).** Le moteur
   de règles a désormais un second cœur, en Rust, exposé via PyO3 depuis
   `rust/grimoire-policies-core/` ; `PolicyEngine.evaluate` l'utilise quand il
