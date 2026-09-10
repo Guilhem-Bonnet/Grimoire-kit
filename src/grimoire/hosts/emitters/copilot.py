@@ -23,6 +23,7 @@ from grimoire.hosts.emitters.base import (
     EmitPlan,
     EmittedFile,
     Emitter,
+    context_load_instruction,
     managed_header,
     map_verbs,
 )
@@ -108,7 +109,7 @@ def _agent_file(agent: AgentSpec, surface: ProjectSurface, owned_skills: tuple[S
 Tu actives la persona Grimoire **{agent.name}** du projet {surface.project_name}.
 
 1. Lis `{agent.definition_ref}` en entier — persona, règles, protocole d'activation.
-2. Lis `_grimoire/_memory/shared-context.md` s'il existe.
+2. {context_load_instruction(agent)}
 3. {role}
 4. Frontière d'outils : {", ".join(v.value for v in agent.tools)}. N'en sors pas.
 5. Rends un résultat vérifiable ; signale comme non vérifié ce que tu n'as pas vérifié.

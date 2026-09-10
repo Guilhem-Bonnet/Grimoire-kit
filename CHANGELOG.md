@@ -8,6 +8,16 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 ## [Unreleased]
 ### Ajouté
 
+- **Le fichier d'agent émis ne charge que le contexte déclaré (#379).** Un
+  agent qui déclare `context:` reçoit dans son fichier `.claude/agents/*.md`
+  (et `.github/agents/*.agent.md`) une instruction d'activation qui charge
+  ces chemins-là, et eux seuls, à la place du contexte partagé par défaut
+  qu'il n'a pas demandé. Un agent sans déclaration reçoit exactement ce qu'il
+  recevait avant — testé bit à bit. Mesuré sur trois agents de nature
+  différente (navigation, mémoire, sécurité) : le contexte partagé du kit
+  (~193 tokens) disparaît de leur activation au profit du seul contexte
+  qu'ils déclarent. Suite de #378, qui avait câblé la même déclaration côté
+  dispatch de tâche.
 - **Premier port Rust, optionnel — `grimoire.policies` (#354).** Le moteur
   de règles a désormais un second cœur, en Rust, exposé via PyO3 depuis
   `rust/grimoire-policies-core/` ; `PolicyEngine.evaluate` l'utilise quand il

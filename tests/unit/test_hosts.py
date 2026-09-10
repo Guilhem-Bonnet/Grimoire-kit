@@ -50,6 +50,7 @@ def _write_agent(
     reasoning: str = "medium",
     cost: str = "medium",
     max_turns: int | None = None,
+    context: tuple[str, ...] = (),
 ) -> None:
     (root / AGENT_DIR).mkdir(parents=True, exist_ok=True)
     header = [
@@ -67,6 +68,9 @@ def _write_agent(
     ]
     if max_turns is not None:
         header.append(f"max_turns: {max_turns}")
+    if context:
+        rendered = ", ".join(f"'{c}'" for c in context)
+        header.append(f"context: [{rendered}]")
     header += [
         "---",
         "",
@@ -250,6 +254,113 @@ def test_agent_tool_boundary_reaches_the_host_file(governed: Path) -> None:
     scribe = (governed / ".claude/agents/scribe.md").read_text(encoding="utf-8")
     assert "tools: 'Read, Glob, Grep, Edit, Write'" in scribe
     assert "model: 'haiku'" in scribe  # low reasoning demand
+
+
+def test_a_declared_context_replaces_the_default_load_not_adds_to_it(governed: Path) -> None:
+    """#379 — un agent qui déclare ``context:`` ne charge plus par défaut le
+    contexte partagé (``_grimoire/_memory/shared-context.md``) : il charge le
+    sien, et lui seul. Un agent qui ne déclare rien (``scribe``) reçoit le
+    texte d'avant #379 à l'identique — la déclaration rétrécit, elle n'amute
+    jamais par défaut."""
+    (governed / "_grimoire/_memory").mkdir(parents=True, exist_ok=True)
+    (governed / "_grimoire/_memory/notes-securite.md").write_text("Notes.", encoding="utf-8")
+    _write_agent(
+        governed,
+        "sentinelle",
+        "Tu surveilles la sécurité du dépôt.",
+        context=("_grimoire/_memory/notes-securite.md",),
+    )
+    emitter = emitter_for(HostId.CLAUDE_CODE_CLI)
+    assert emitter is not None
+    apply_plan(emitter.plan(build_surface(governed), governed), governed)
+
+    sentinelle = (governed / ".claude/agents/sentinelle.md").read_text(encoding="utf-8")
+    assert "_grimoire/_memory/notes-securite.md" in sentinelle
+    assert "shared-context.md" not in sentinelle
+
+    scribe = (governed / ".claude/agents/scribe.md").read_text(encoding="utf-8")
+    assert "Lis `_grimoire/_memory/shared-context.md` s'il existe" in scribe
+
+
+def _read_from_origin_main(relpath: str) -> str:
+    """Le corps d'un fichier tel qu'il vit sur ``origin/main`` — jamais celui du
+    worktree courant, dont ``archetypes/`` est hors périmètre pour ce lot
+    (#379) : quatre autres chantiers le retouchent en parallèle."""
+    import subprocess
+
+    return subprocess.run(
+        ["git", "show", f"origin/main:{relpath}"], capture_output=True, check=True, text=True
+    ).stdout
+
+
+def _inject_context_declaration(raw: str, context_path: str) -> str:
+    """Insère ``context: [...]`` dans le frontmatter de *raw*, juste avant le
+    ``---`` de fermeture — sans toucher au reste du fichier source."""
+    lines = raw.splitlines()
+    dashes = [i for i, line in enumerate(lines) if line.strip() == "---"]
+    closing = dashes[1]  # premier `---` = ouverture, second = fermeture
+    lines.insert(closing, f"context: ['{context_path}']")
+    return "\n".join(lines) + "\n"
+
+
+@pytest.mark.parametrize(
+    "relpath,slug",
+    [
+        ("archetypes/meta/agents/project-navigator.md", "project-navigator"),  # navigation
+        ("archetypes/meta/agents/memory-keeper.md", "memory-keeper"),  # mémoire
+        ("archetypes/meta/agents/security-auditor.md", "security-auditor"),  # sécurité
+    ],
+)
+def test_declaring_context_measurably_shrinks_what_activation_loads(
+    tmp_path: Path, relpath: str, slug: str
+) -> None:
+    """#379 — mesure avant/après sur trois agents de nature différente, lus
+    depuis ``origin/main`` sans y toucher (parallèle ``archetypes/`` en cours
+    de refonte ailleurs).
+
+    « Avant » = ce que cet agent charge sans déclaration : le fichier d'agent
+    émis, plus le contexte partagé du projet (``_grimoire/_memory/shared-
+    context.md``, taille réelle prise sur le gabarit du kit) que l'instruction
+    par défaut lui fait lire, existe-t-il ou non le concerne — c'est aussi ce
+    qu'il chargeait avant #379, le témoin. « Après » = le même agent, augmenté
+    d'une déclaration ``context:`` minimale, plus le seul fichier qu'elle
+    nomme : le contexte partagé disparaît de ce qu'il charge, remplacé par ce
+    qu'il a réellement demandé.
+    """
+    from grimoire.tools._common import estimate_tokens
+
+    raw = _read_from_origin_main(relpath)
+    shared_context_body = _read_from_origin_main("archetypes/agentic-standard/shared-context.tpl.md")
+
+    emitter = emitter_for(HostId.CLAUDE_CODE_CLI)
+    assert emitter is not None
+
+    before_root = tmp_path / "avant"
+    (before_root / "_grimoire/_memory").mkdir(parents=True, exist_ok=True)
+    (before_root / "_grimoire/_memory/shared-context.md").write_text(shared_context_body, encoding="utf-8")
+    (before_root / AGENT_DIR).mkdir(parents=True, exist_ok=True)
+    (before_root / AGENT_DIR / f"{slug}.md").write_text(raw, encoding="utf-8")
+    apply_plan(emitter.plan(build_surface(before_root), before_root), before_root)
+    before_text = (before_root / ".claude/agents" / f"{slug}.md").read_text(encoding="utf-8")
+    tokens_before = estimate_tokens(before_text) + estimate_tokens(shared_context_body)
+
+    after_root = tmp_path / "apres"
+    (after_root / "_grimoire/_memory").mkdir(parents=True, exist_ok=True)
+    context_rel = f"_grimoire/_memory/{slug}-context.md"
+    own_context_body = f"Contexte propre à {slug} : ce qu'il déclare, rien de plus."
+    (after_root / context_rel).write_text(own_context_body, encoding="utf-8")
+    (after_root / AGENT_DIR).mkdir(parents=True, exist_ok=True)
+    (after_root / AGENT_DIR / f"{slug}.md").write_text(_inject_context_declaration(raw, context_rel), encoding="utf-8")
+    apply_plan(emitter.plan(build_surface(after_root), after_root), after_root)
+    after_text = (after_root / ".claude/agents" / f"{slug}.md").read_text(encoding="utf-8")
+    tokens_after = estimate_tokens(after_text) + estimate_tokens(own_context_body)
+
+    print(f"\n[{slug}] activation : {tokens_before} tokens avant -> {tokens_after} tokens après (#379)")
+
+    assert "shared-context.md" in before_text, "le témoin sans déclaration garde le contexte partagé par défaut"
+    assert "shared-context.md" not in after_text, "le contexte déclaré remplace le partagé, il ne s'y ajoute pas"
+    assert context_rel in after_text
+    assert tokens_after < tokens_before
 
 
 def test_sub_agents_carry_effort_max_turns_and_background(governed: Path) -> None:
