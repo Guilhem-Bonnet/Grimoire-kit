@@ -27,6 +27,13 @@ Trois familles :
     confrontée au catalogue des digests du kit, et le diff d'un override contre
     son homologue du kit.
 
+``agents``
+    Les agents du projet, par couche (kit ou overrides), avec leur clause
+    d'emploi, leurs outils, leur contexte, leurs skills et leur usage réel
+    (issue #374). Les écritures (assigner/retirer un skill, modifier un champ)
+    sont dans :mod:`grimoire.tools.workspace_routes`, pour la même raison que
+    celles des tâches : elles ne doivent exister que sur l'hôte mono-projet.
+
 Rien ici ne crée de dossier, ne sème de donnée de démonstration, ni ne rend un
 zéro là où la réponse est « pas encore mesurée ». Une source absente est dite
 absente.
@@ -44,6 +51,7 @@ __all__ = [
     "MAX_FILES_PER_TIER",
     "TIERS",
     "WorkspacePathError",
+    "agents_view",
     "blueprints_view",
     "file_diff",
     "file_history",
@@ -767,3 +775,99 @@ def file_history(project_root: Path, raw_path: str | None) -> dict[str, Any]:
             sha, date, author, subject = parts
             commits.append({"sha": sha, "date": date, "author": author, "subject": subject})
     return {"path": rel, "is_repo": True, "commits": commits}
+
+
+# ── Agents ───────────────────────────────────────────────────────────────────
+#
+# Le modèle host-neutre (:class:`grimoire.hosts.surface.AgentSpec`) ne porte
+# que ce que les émetteurs de host consomment — outils, contexte, skills. La
+# clause d'emploi (``use_when``/``dont_use_when``/``tool_boundary``, voir
+# ``docs/artifact-doctrine.md``) est de la prose pour l'opérateur, jamais lue
+# par un host : alourdir l'IR d'un champ que seul le cockpit affiche serait le
+# mauvais endroit pour la porter, donc elle est relue directement depuis le
+# frontmatter ici plutôt qu'ajoutée à :class:`AgentSpec`.
+
+
+def _agent_layer(definition_ref: str) -> str:
+    """``overrides`` ou ``kit`` — le préfixe du chemin le dit sans ambiguïté."""
+    from grimoire.core import layout
+
+    prefix = f"{layout.OVERRIDES_DIR}/"
+    return "overrides" if definition_ref.replace("\\", "/").startswith(prefix) else "kit"
+
+
+def _agent_clause(project_root: Path, definition_ref: str) -> dict[str, str]:
+    """Relit ``use_when``/``dont_use_when``/``tool_boundary`` sur le fichier agent.
+
+    Un champ absent rend une chaîne vide — un agent personnalisé sans clause
+    déclarée reste affichable, il n'a simplement rien à montrer là.
+    """
+    from grimoire.hosts.collect import parse_frontmatter
+
+    try:
+        text = (project_root / definition_ref).read_text(encoding="utf-8")
+    except OSError:
+        return {"use_when": "", "dont_use_when": "", "tool_boundary": ""}
+    meta, _ = parse_frontmatter(text)
+    return {
+        "use_when": str(meta.get("use_when") or ""),
+        "dont_use_when": str(meta.get("dont_use_when") or ""),
+        "tool_boundary": str(meta.get("tool_boundary") or ""),
+    }
+
+
+def _agent_usage(project_root: Path) -> dict[str, dict[str, Any]]:
+    """Nombre de choix et dernier choix par agent, depuis le ledger de traces.
+
+    Source : ``TraceRecord.agent_id`` — porté par ``SubagentStop`` depuis le
+    correctif de l'issue #374 (:mod:`grimoire.hosts.runtime`). Un projet qui
+    n'a encore fait tourner aucun sous-agent d'un host qui les distingue rend
+    un dictionnaire vide, pas une erreur : l'absence d'usage est un fait, pas
+    une panne.
+    """
+    from grimoire.core.standard_generation import TRACES_DIR
+    from grimoire.traces.ledger import TraceLedger
+
+    usage: dict[str, dict[str, Any]] = {}
+    for trace in TraceLedger(project_root / TRACES_DIR).list_traces():
+        if not trace.agent_id:
+            continue
+        entry = usage.setdefault(trace.agent_id, {"choices": 0, "last_chosen_at": ""})
+        entry["choices"] += 1
+        if trace.started_at > str(entry["last_chosen_at"]):
+            entry["last_chosen_at"] = trace.started_at
+    for entry in usage.values():
+        entry["last_chosen_at"] = entry["last_chosen_at"] or None
+    return usage
+
+
+def agents_view(project_root: Path) -> dict[str, Any]:
+    """Les agents du projet, par couche, avec leur clause d'emploi et leur usage réel.
+
+    Base : :func:`grimoire.hosts.collect.collect_agents`, la même lecture que
+    ``grimoire host status`` et ``grimoire host sync`` — un skill ou un
+    contexte introuvable lève :class:`~grimoire.core.exceptions.GrimoireAgentError`
+    ici comme là-bas plutôt que de rendre une vue à moitié construite.
+    """
+    from grimoire.hosts import collect
+
+    root = project_root.resolve()
+    skills = collect.collect_skills(root)
+    known_skills = frozenset(s.slug for s in skills)
+    agents = collect.collect_agents(root, known_skills=known_skills)
+    usage = _agent_usage(root)
+    default_usage = {"choices": 0, "last_chosen_at": None}
+    records = [
+        {
+            **agent.to_dict(),
+            "layer": _agent_layer(agent.definition_ref),
+            **_agent_clause(root, agent.definition_ref),
+            "usage": usage.get(agent.name, default_usage),
+        }
+        for agent in agents
+    ]
+    return {
+        "agents": records,
+        "skills": [s.to_dict() for s in skills],
+        "entry_point": next((a.name for a in agents if a.entry_point), None),
+    }
