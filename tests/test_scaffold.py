@@ -93,11 +93,14 @@ class TestProjectScaffolder:
         assert len(infra_labels) >= 5, f"Expected >=5 infra agents, got {infra_labels}"
 
     def test_plan_includes_stack_agents(self, tmp_path: Path) -> None:
-        s = _scaffolder(tmp_path, stack_agents=("go-expert", "docker-expert"))
+        # Grimoire-kit#375 : les sept experts par techno (go-expert, docker-expert,
+        # etc.) sont devenus des skills attachés au généraliste stack-engineer.
+        # Le mécanisme de copie par nom (_plan_stack_agents) reste générique ;
+        # on le vérifie sur le seul agent stack livré aujourd'hui.
+        s = _scaffolder(tmp_path, stack_agents=("stack-engineer",))
         plan = s.plan()
         labels = [fc.label for fc in plan.copies]
-        assert "stack/go-expert" in labels
-        assert "stack/docker-expert" in labels
+        assert "stack/stack-engineer" in labels
 
     def test_plan_includes_vectus(self, tmp_path: Path) -> None:
         s = _scaffolder(tmp_path, feature_agents=("vectus",))
@@ -259,7 +262,7 @@ class TestProjectScaffolder:
             tmp_path,
             archetype="infra-ops",
             stacks=("go", "terraform", "docker", "kubernetes"),
-            stack_agents=("go-expert", "terraform-expert", "docker-expert", "k8s-expert"),
+            stack_agents=("stack-engineer",),
             feature_agents=("vectus",),
             backend="qdrant-local",
         )
@@ -286,11 +289,9 @@ class TestProjectScaffolder:
         skill_names = {f.stem for f in skills_dir.glob("*.md")}
         assert "infra-k8s-gitops" in skill_names
 
-        # Stack experts
-        assert "go-expert" in agent_names
-        assert "terraform-expert" in agent_names
-        assert "docker-expert" in agent_names
-        assert "k8s-expert" in agent_names
+        # Stack generalist (Grimoire-kit#375 : les experts par techno sont des
+        # skills attachés, plus des agents séparés)
+        assert "stack-engineer" in agent_names
 
         # Feature agent
         assert "vectus" in agent_names

@@ -1,0 +1,60 @@
+$schema: "grimoire-archetype-dna/v1"
+
+id: stack
+name: "Stack"
+version: "1.0.0"
+description: "Experts par technologie — 1 agent généraliste (faisceau read/edit/execute) pour toute la pile, plus un skill par technologie (Python, Go, TypeScript/React, Docker, Terraform, Ansible, Kubernetes) attaché à lui. Les sept anciens agents partageaient exactement le même faisceau d'outils et aucun contexte propre — c'était un seul agent décrit sept fois (issue #375)."
+icon: "hexagon"
+author: "grimoire-kit"
+tags: [python, go, typescript, react, docker, terraform, ansible, kubernetes, stack, polyglot]
+
+inherits: minimal
+
+agents:
+  - path: "../../archetypes/stack/agents/stack-engineer.md"
+    required: true
+    description: "Atlas — généraliste de la pile, plus les skills attachés stack-python, stack-go, stack-typescript, stack-docker, stack-terraform, stack-ansible, stack-k8s"
+
+# Skills attachés par défaut à l'agent de cet archétype (issue #375) : le
+# savoir-faire de sept anciens agents (python-expert, go-expert,
+# typescript-expert, docker-expert, terraform-expert, ansible-expert,
+# k8s-expert) qui partageaient tous le même faisceau outils {read, edit,
+# execute} sans aucun contexte propre — rien ne les distinguait au sens de la
+# garde de #372. Le contenu de chaque agent devient le corps du skill
+# correspondant, sans perte ; ce qui change, c'est que la session ne paie
+# plus sa description à chaque tour, seulement quand stack-engineer travaille
+# sur la techno concernée. Cette liste documente l'attachement ;
+# l'attachement effectif et vérifié au build est le champ `skills:` du
+# frontmatter de l'agent porteur.
+skills:
+  - path: "../../archetypes/stack/skills/stack-python.md"
+    attached_to: stack-engineer
+    description: "Ex-agent Serpent — type hints, ruff, mypy, async, pytest"
+  - path: "../../archetypes/stack/skills/stack-go.md"
+    attached_to: stack-engineer
+    description: "Ex-agent Gopher — architecture hexagonale, tests table-driven, erreurs wrappées"
+  - path: "../../archetypes/stack/skills/stack-typescript.md"
+    attached_to: stack-engineer
+    description: "Ex-agent Pixel — types stricts, hooks React, tests RTL"
+  - path: "../../archetypes/stack/skills/stack-docker.md"
+    attached_to: stack-engineer
+    description: "Ex-agent Container — Dockerfile multi-stage, docker-compose, sécurité conteneurs"
+  - path: "../../archetypes/stack/skills/stack-terraform.md"
+    attached_to: stack-engineer
+    description: "Ex-agent Terra — plan avant apply, modules, state"
+  - path: "../../archetypes/stack/skills/stack-ansible.md"
+    attached_to: stack-engineer
+    description: "Ex-agent Playbook — idempotence, dry-run, secrets chiffrés"
+  - path: "../../archetypes/stack/skills/stack-k8s.md"
+    attached_to: stack-engineer
+    description: "Ex-agent Kube — manifestes, dry-run serveur, troubleshooting pods"
+
+compatible_with: [minimal, web-app, infra-ops, fix-loop, platform-engineering, features/vector-memory]
+incompatible_with: []
+requires: []
+
+changelog:
+  - version: "1.0.0"
+    date: "2026-09-10"
+    changes:
+      - "Refonte : sept agents indiscernables (même faisceau, aucun contexte) deviennent le généraliste stack-engineer plus sept skills attachés (Grimoire-kit#375)"
