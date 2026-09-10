@@ -14,6 +14,11 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   même faisceau `{read, edit, execute}` que `backend-engineer` sans frontière
   propre, deviennent les skills attachés `platform-deploy-release` et
   `platform-reliability-sre`. Aucun savoir-faire supprimé.
+- **Archétype `creative-studio` refait — 3 agents à faisceau distinct plus 1
+  skill attaché (#375).** `blender-expert` et `illustration-expert` restent
+  des agents (contexte propre via MCP + boucle vision) ; `content-creator`,
+  au même faisceau que `brand-designer` sans frontière propre, devient le
+  skill attaché `creative-content-copywriting`. Aucun savoir-faire supprimé.
 - **Premier port Rust, optionnel — `grimoire.policies` (#354).** Le moteur
   de règles a désormais un second cœur, en Rust, exposé via PyO3 depuis
   `rust/grimoire-policies-core/` ; `PolicyEngine.evaluate` l'utilise quand il
