@@ -8,6 +8,18 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 ## [Unreleased]
 ### Ajouté
 
+- **Archétypes `web-app` et `fix-loop`/`minimal` alignés sur la forme validée
+  d'`infra-ops` (#375).** `web-app` livrait deux agents (`frontend-specialist`,
+  `fullstack-dev`) au même faisceau d'outils exact `{read, edit, execute}`,
+  sans contexte ni skill propres — la garde de distinction (#372) les
+  déclarait indiscernables. `frontend-specialist` devient le skill attaché
+  `web-frontend-ux` (composants, accessibilité WCAG 2.1 AA, revue UX,
+  performance UI) porté par `fullstack-dev`, son corps repris sans perte.
+  `fix-loop` (un seul agent, contexte propre) et `minimal` (gabarit `.tpl`
+  jamais scaffoldé comme agent) étaient déjà conformes, aucun changement.
+  Connu et hors périmètre : `fix-loop-orchestrator` partage son faisceau avec
+  `security-auditor` (archétype `meta`) — dette à régler côté méta.
+
 - **Premier port Rust, optionnel — `grimoire.policies` (#354).** Le moteur
   de règles a désormais un second cœur, en Rust, exposé via PyO3 depuis
   `rust/grimoire-policies-core/` ; `PolicyEngine.evaluate` l'utilise quand il
