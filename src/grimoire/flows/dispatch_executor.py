@@ -204,6 +204,7 @@ class DispatchExecutor:
         max_tier: str | None = None,
         call_timeout: float = DEFAULT_CALL_TIMEOUT_S,
         actor: str = DEFAULT_DISPATCH_ACTOR,
+        agent: str | None = None,
     ) -> None:
         self._project_root = project_root
         self._blueprint_path = blueprint_path
@@ -211,6 +212,12 @@ class DispatchExecutor:
         self._max_tier = max_tier
         self._call_timeout = call_timeout
         self._actor = actor
+        #: Agent (issue #373) au nom duquel tous les nodes de ce run sont
+        #: dispatchés — le run entier a un seul exécuteur, donc une seule
+        #: identité d'agent ; son ``context`` déclaré s'ajoute au contrat de
+        #: chaque node, rien de plus. ``None`` : comportement inchangé
+        #: (aucun contexte d'agent ajouté).
+        self._agent = agent
         self.last_result: NodeExecutionResult | None = None
         self.node_outcomes: dict[str, NodeDispatchOutcome] = {}
         self.host_node: str | None = None
@@ -266,6 +273,8 @@ class DispatchExecutor:
             max_tier=self._max_tier,
             call_timeout=self._call_timeout,
             actor=self._actor,
+            agent=self._agent,
+            project_root=self._project_root,
         )
         self.node_outcomes[node_id] = _node_outcome_from_report(node_id, task_id, verifiability, report)
 
