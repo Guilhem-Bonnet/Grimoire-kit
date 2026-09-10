@@ -153,6 +153,12 @@ export const api = {
   // Concevoir (lot 3) : les containers enrichis (genre, agents, équipe,
   // dernière modification) que `/api/blueprints` seul ne porte pas.
   blueprintContainers: () => get(WS + 'blueprints'),
+  // Agents du projet — clause d'emploi, outils, contexte, skills, usage réel
+  // (#374). `{agents[], skills[], entry_point}` — `skills[]` est le catalogue
+  // disponible pour l'assignation, pas seulement ceux déjà attachés. `project`
+  // cible un AUTRE projet que celui déjà résolu — même convention que
+  // `health()` juste au-dessus, pour le niveau Flotte de Piloter.
+  agents: (project) => get(WS + 'agents', project ? { project } : undefined),
 
   // ── Blueprints : éditeur de graphe (édition — atelier seulement) ───────────
   // Lecture, validation et simulation sont disponibles sur les deux hôtes
@@ -178,6 +184,13 @@ export const api = {
   createOverride: (path) => post(WS + 'file/override', { path }),
   writeFile: (path, text) => post(WS + 'file/write', { path, text }),
   run: (argv) => post(WS + 'command', { argv }),
+  // Assigner/retirer un skill, ou modifier la clause d'emploi/outils/contexte
+  // d'un agent (#374) — porte toujours sur sa copie `overrides`, jamais sur
+  // le kit ; refusé côté serveur hors projet d'accueil, comme le reste.
+  agentSkill: (name, skill, action) =>
+    post(WS + 'agents/' + encodeURIComponent(name) + '/skill', { skill, action }),
+  agentFields: (name, fields) =>
+    post(WS + 'agents/' + encodeURIComponent(name) + '/fields', fields),
   blueprintPut: (id, blueprint) => put('/api/blueprints/' + encodeURIComponent(id), blueprint),
 
   // Aligner un projet sur le kit installé (`grimoire up`). Disponible sur les

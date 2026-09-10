@@ -444,7 +444,22 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
                 return
             from grimoire.tools.workspace_routes import WORKSPACE_UNHANDLED, workspace_post
 
-            result = workspace_post(proot, path, body)
+            # Même traduction que l'atelier (``forge_http.py::do_POST``) : sans
+            # elle, un refus métier (skill inconnu, agent introuvable, chemin
+            # hors étage éditable) remontait comme une exception non attrapée
+            # jusqu'à ``http.server``, qui coupe la connexion sans réponse JSON
+            # au lieu du 400/403/404 explicable que l'atelier rend déjà.
+            try:
+                result = workspace_post(proot, path, body)
+            except FileNotFoundError as exc:
+                self._send_json(404, {"ok": False, "error": f"introuvable : {exc}"})
+                return
+            except PermissionError as exc:
+                self._send_json(403, {"ok": False, "error": str(exc)})
+                return
+            except ValueError as exc:
+                self._send_json(400, {"ok": False, "error": str(exc)})
+                return
             if result is WORKSPACE_UNHANDLED:
                 self._send_json(404, {"ok": False, "error": "route inconnue"})
             else:
