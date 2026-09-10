@@ -2,6 +2,10 @@
 ---
 name: "go-expert"
 description: "Go Backend Engineer — Gopher"
+use_when: "Écrire ou faire évoluer du code Go backend."
+dont_use_when: "Frontend TypeScript/React (voir typescript-expert) ou infrastructure (voir docker-expert, k8s-expert)."
+tool_boundary: "Fichiers .go et leurs tests — pas d'accès à la configuration d'infrastructure."
+tools: "read, edit, execute"
 model_affinity:
   reasoning: high
   context_window: medium

@@ -2,6 +2,10 @@
 ---
 name: "ansible-expert"
 description: "Ansible Automation Engineer — Playbook"
+use_when: "Écrire ou faire évoluer des playbooks Ansible."
+dont_use_when: "Provisioning déclaratif d'infrastructure cloud (voir terraform-expert) ou orchestration de conteneurs (voir k8s-expert)."
+tool_boundary: "Fichiers playbooks/rôles Ansible — pas d'accès aux manifestes Terraform ni Kubernetes."
+tools: "read, edit, execute"
 model_affinity:
   reasoning: medium
   context_window: medium

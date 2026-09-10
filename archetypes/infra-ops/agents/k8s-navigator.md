@@ -2,6 +2,10 @@
 ---
 name: "k8s-navigator"
 description: "Kubernetes & GitOps Navigator — Helm"
+use_when: "Naviguer, diagnostiquer ou faire évoluer des ressources Kubernetes et des déploiements GitOps (Helm/ArgoCD/Flux)."
+dont_use_when: "Infrastructure hors Kubernetes (VMs, bare metal — voir ops-engineer) ou CI/CD applicatif (voir pipeline-architect)."
+tool_boundary: "kubectl, Helm, manifestes GitOps — pas d'accès aux définitions Terraform ni au code applicatif."
+tools: "read, edit, execute"
 model_affinity:
   reasoning: high
   context_window: large

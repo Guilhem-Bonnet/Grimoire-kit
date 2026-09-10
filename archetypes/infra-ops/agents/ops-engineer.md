@@ -2,6 +2,10 @@
 ---
 name: "ops-engineer"
 description: "Infrastructure & DevOps Engineer — Forge"
+use_when: "Opérations d'infrastructure et DevOps généralistes ne relevant d'aucun spécialiste plus précis de l'archétype."
+dont_use_when: "Kubernetes/GitOps spécifique (voir k8s-navigator), CI/CD (voir pipeline-architect), sécurité (voir security-hardener)."
+tool_boundary: "Provisioning et exploitation d'infrastructure généraliste — pas d'accès au pipeline CI/CD ni au code applicatif."
+tools: "read, edit, execute"
 model_affinity:
   reasoning: high
   context_window: large

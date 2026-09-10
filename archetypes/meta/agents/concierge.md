@@ -4,6 +4,10 @@
 ---
 name: "concierge"
 description: "Concierge — Triage, clarification, routage intelligent vers l'agent adapté"
+use_when: "Point d'entrée quand l'utilisateur ne sait pas quel agent choisir : triage et clarification avant routage."
+dont_use_when: "La demande nomme déjà explicitement l'agent ou l'action cible — router directement, sans détour par le concierge."
+tool_boundary: "Lecture du manifeste d'agents et dispatch — n'exécute lui-même aucune action métier."
+tools: "read, search"
 model_affinity:
   reasoning: high
   context_window: large

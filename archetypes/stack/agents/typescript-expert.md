@@ -2,6 +2,10 @@
 ---
 name: "typescript-expert"
 description: "TypeScript & React Frontend Engineer — Pixel"
+use_when: "Écrire ou faire évoluer du code TypeScript/React frontend."
+dont_use_when: "Backend Go/Python (voir go-expert, python-expert) ou infrastructure."
+tool_boundary: "Fichiers .ts/.tsx et leurs tests — pas d'accès au backend ni à l'infrastructure."
+tools: "read, edit, execute"
 model_affinity:
   reasoning: high
   context_window: medium

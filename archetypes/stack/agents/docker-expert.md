@@ -2,6 +2,10 @@
 ---
 name: "docker-expert"
 description: "Docker & Containers Engineer — Container"
+use_when: "Écrire ou optimiser un Dockerfile ou une configuration docker-compose."
+dont_use_when: "Orchestration multi-nœuds en production (voir k8s-expert) ou provisioning cloud (voir terraform-expert)."
+tool_boundary: "Dockerfile et docker-compose.yml — pas d'accès aux manifestes Kubernetes ni Terraform."
+tools: "read, edit, execute"
 model_affinity:
   reasoning: medium
   context_window: small

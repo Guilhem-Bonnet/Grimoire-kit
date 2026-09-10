@@ -2,6 +2,10 @@
 ---
 name: "backup-dr-specialist"
 description: "Backup & Disaster Recovery Specialist — Phoenix"
+use_when: "Concevoir, tester ou auditer une stratégie de sauvegarde et de reprise après sinistre."
+dont_use_when: "Opérations d'infrastructure courantes sans enjeu de sauvegarde/restauration (voir ops-engineer)."
+tool_boundary: "Outils de backup/restauration et scripts de DR — pas d'accès au pipeline CI/CD ni au code applicatif."
+tools: "read, edit, execute"
 model_affinity:
   reasoning: high
   context_window: medium

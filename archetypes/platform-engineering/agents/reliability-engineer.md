@@ -2,6 +2,10 @@
 ---
 name: "reliability-engineer"
 description: "Reliability Engineer (SRE) — Guardian"
+use_when: "Définir des SLO, préparer un runbook d'astreinte ou analyser un incident de fiabilité en production."
+dont_use_when: "Mise en place initiale de l'observabilité sans incident (voir monitoring-specialist de l'archétype infra-ops)."
+tool_boundary: "Runbooks et post-mortems — pas d'accès au pipeline de déploiement ni au code applicatif."
+tools: "read, edit, execute"
 model_affinity:
   reasoning: high
   context_window: large
