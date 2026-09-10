@@ -170,20 +170,26 @@ def _agent_files(project_root: Path) -> list[Path]:
     return list(seen.values())
 
 
-def _agent_name(declared: object, path: Path) -> str | None:
+def _agent_name(path: Path) -> str | None:
     """Usable host-side name for an agent, or ``None`` when there is none.
 
-    The blank agent template ships with ``name: "{{agent_tag}}"`` and the
-    scaffold leaves unknown placeholders intact on purpose, so a declared name
-    is not necessarily a name. Falling back to the file stem is what the
-    existing Copilot wrappers already do; an unusable stem means the file
-    cannot become a sub-agent at all and is skipped rather than emitted as a
-    persona called after a placeholder.
+    Delegates to :func:`layout.agent_identity` — the same frontmatter tag
+    reading ``layout.installed_agents()`` uses — rather than parsing the
+    ``name:`` field a second time. The blank agent template ships with
+    ``name: "{{agent_tag}}"`` and the scaffold leaves unknown placeholders
+    intact on purpose; ``agent_identity`` finds no tag there, so this returns
+    ``None`` and the file is skipped rather than projected under its file
+    stem. That fallback used to make an unrendered template a different
+    "agent" for :func:`collect_agents` than for ``installed_agents`` — the
+    same file, two names, exactly the divergence issue #381 closes. A gabarit
+    en attente n'est pas un agent installé pour l'un des deux lecteurs : il ne
+    doit l'être pour aucun.
     """
-    candidate = str(declared or "").strip()
-    if candidate and _SAFE_NAME.match(candidate):
-        return candidate
-    return path.stem if _SAFE_NAME.match(path.stem) else None
+    identity = layout.agent_identity(path)
+    if identity is None:
+        return None
+    tag, _persona = identity
+    return tag if _SAFE_NAME.match(tag) else None
 
 
 DEFAULT_ENTRY_AGENT = "concierge"
@@ -237,7 +243,7 @@ def collect_agents(
         except OSError:
             continue
         meta, body = parse_frontmatter(text)
-        name = _agent_name(meta.get("name"), path)
+        name = _agent_name(path)
         if name is None:
             continue
         description = str(meta.get("description") or f"Grimoire agent {name}").strip()

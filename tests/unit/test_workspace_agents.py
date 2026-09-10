@@ -195,18 +195,32 @@ def test_un_agent_inconnu_est_un_404_et_non_une_exception_opaque(agents_project:
 
 def test_modifier_la_clause_d_emploi_et_les_outils(agents_project: Path) -> None:
     result = workspace_post(
-        agents_project, "/api/workspace/agents/custom-agent/fields",
+        agents_project, "/api/workspace/agents/art-director/fields",
         {
             "use_when": "Situation de test propre à ce projet.",
             "dont_use_when": "Jamais en dehors de ce test.",
             "tools": ["read", "execute"],
         },
     )
-    agent = next(a for a in result["agents"] if a["name"] == "custom-agent")
+    agent = next(a for a in result["agents"] if a["name"] == "art-director")
     assert agent["use_when"] == "Situation de test propre à ce projet."
     assert agent["dont_use_when"] == "Jamais en dehors de ce test."
     assert set(agent["tools"]) == {"read", "execute"}
     assert agent["layer"] == "overrides"
+
+
+def test_un_gabarit_non_rendu_n_est_pas_un_agent_du_cockpit(agents_project: Path) -> None:
+    """``custom-agent.md`` (issue #381) : un gabarit non rempli n'est pas un
+    agent installé, ni pour ``layout.installed_agents`` ni pour
+    ``collect_agents`` — le cockpit ne doit donc jamais l'offrir à l'édition."""
+    names = {a["name"] for a in wa.agents_view(agents_project)["agents"]}
+    assert "custom-agent" not in names
+
+    with pytest.raises(FileNotFoundError):
+        workspace_post(
+            agents_project, "/api/workspace/agents/custom-agent/fields",
+            {"use_when": "Ne devrait jamais s'écrire."},
+        )
 
 
 def test_un_outil_inconnu_est_refuse_sans_toucher_le_disque(agents_project: Path) -> None:

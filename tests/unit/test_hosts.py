@@ -111,15 +111,40 @@ def test_inference_grants_write_only_on_an_explicit_signal() -> None:
     assert ToolVerb.EXECUTE in infer_tools("Tu lances les tests.", "")
 
 
-def test_an_unrendered_placeholder_name_falls_back_to_the_file_name(project: Path) -> None:
-    """The blank agent template keeps `name: "{{agent_tag}}"` until it is filled in."""
+def test_an_unrendered_placeholder_name_is_not_a_collected_agent(project: Path) -> None:
+    """Un gabarit non rendu (``name: "{{agent_tag}}"``) n'est pas un agent installé.
+
+    ``layout.agent_identity`` — la lecture que le diagnostic emploie depuis
+    #349 — n'y reconnaît aucun tag, donc aucune identité : ce fichier n'existe
+    pas encore en tant qu'agent, seulement en tant que gabarit à compléter.
+    ``collect_agents`` doit s'accorder sur ce point plutôt que retomber sur le
+    nom de fichier (issue #381).
+    """
     (project / AGENT_DIR / "custom-agent.md").write_text(
         '---\nname: "{{agent_tag}}"\ndescription: "{{agent_role}}"\n---\nCorps.\n',
         encoding="utf-8",
     )
     names = {a.name for a in collect_agents(project)}
-    assert "custom-agent" in names
+    assert "custom-agent" not in names
     assert not [n for n in names if "{{" in n]
+
+
+def test_installed_agents_et_collect_agents_nomment_pareil(project: Path) -> None:
+    """Garde #381 : les deux lectures de « quel agent existe » s'accordent.
+
+    ``layout.installed_agents()`` (diagnostic, outil d'ajout) et
+    ``collect_agents()`` (construction de surface, ``host sync``, cockpit)
+    répondent à la même question sur les mêmes fichiers — gabarit non rendu
+    compris. Un même fichier nommé différemment selon le lecteur est
+    exactement le défaut de #381.
+    """
+    (project / AGENT_DIR / "custom-agent.md").write_text(
+        '---\nname: "{{agent_tag}}"\ndescription: "{{agent_role}}"\n---\nCorps.\n',
+        encoding="utf-8",
+    )
+    installed_tags = set(layout.installed_agents(project))
+    collected_names = {a.name for a in collect_agents(project)}
+    assert installed_tags == collected_names
 
 
 def test_an_override_wins_over_the_kit_tier(tmp_path: Path) -> None:

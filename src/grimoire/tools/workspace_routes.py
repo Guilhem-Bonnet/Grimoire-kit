@@ -346,15 +346,15 @@ _AGENT_LIST_FIELDS = frozenset({"skills", "context"})
 def _agent_target(project_root: Path, name: str) -> Path:
     """Fichier installé de l'agent *name*, nommé comme ``agents_view`` le nomme.
 
-    Résolu via :func:`collect_agents`, pas via
-    ``layout.installed_agents`` : ce dernier ne reconnaît un agent que si son
-    frontmatter déclare un ``name:`` littéral (regex sur le texte brut) et
-    rend invisible un agent dont le nom retombe sur le nom de fichier — cas
-    réel du gabarit ``custom-agent.md`` que certains archétypes livrent tel
-    quel, avec ``name: "{{agent_tag}}"`` non rendu. ``collect_agents`` retombe
-    sur le nom de fichier dans ce cas (:func:`grimoire.hosts.collect._agent_name`)
-    et c'est ce nom qu'``agents_view`` affiche : un agent visible à la lecture
-    doit rester résoluble à l'écriture, sous le même nom.
+    Résolu via :func:`collect_agents`, la même lecture qu'``agents_view``
+    emploie pour construire la liste affichée : un agent visible à la lecture
+    doit rester résoluble à l'écriture, sous le même nom. Depuis #381,
+    ``collect_agents`` partage avec ``layout.installed_agents`` (le
+    diagnostic, la carte de routage) la même lecture d'identité
+    (:func:`grimoire.core.layout.agent_identity`) ; un gabarit non rendu comme
+    ``custom-agent.md`` (``name: "{{agent_tag}}"`` non substitué) n'a d'identité
+    pour aucun des deux et n'apparaît donc pas ici — ce n'est pas un agent
+    installé, seulement un modèle à compléter.
     """
     from grimoire.hosts import collect
 
