@@ -26,14 +26,19 @@ class ResolvedArchetype:
 
 # Stack name → expert agent filename (without .md)
 STACK_AGENT_MAP: dict[str, str] = {
-    "go": "go-expert",
-    "python": "python-expert",
-    "javascript": "typescript-expert",
-    "typescript": "typescript-expert",
-    "docker": "docker-expert",
-    "terraform": "terraform-expert",
-    "kubernetes": "k8s-expert",
-    "ansible": "ansible-expert",
+    # Depuis la refonte de l'archétype `stack` (#375), les experts par langage
+    # sont des skills attachés à un seul généraliste. La détection d'une pile
+    # livre donc ce généraliste — et le scaffold copie ses skills avec lui,
+    # sinon son frontmatter `skills:` désignerait des fichiers absents et la
+    # collecte refuserait la surface (fail-closed, voulu).
+    "go": "stack-engineer",
+    "python": "stack-engineer",
+    "javascript": "stack-engineer",
+    "typescript": "stack-engineer",
+    "docker": "stack-engineer",
+    "terraform": "stack-engineer",
+    "kubernetes": "stack-engineer",
+    "ansible": "stack-engineer",
 }
 
 # Known archetype IDs — keep in sync with cli/app.py _KNOWN_ARCHETYPES

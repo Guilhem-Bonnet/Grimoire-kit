@@ -831,10 +831,20 @@ class ProjectScaffolder:
                 ))
 
     def _plan_stack_agents(self, p: ScaffoldPlan) -> None:
-        stack_agents_dir = self._archetypes / "stack" / "agents"
+        """Les agents de pile détectés, et les skills qu'ils déclarent.
+
+        Un agent de `stack` livré par détection — sans que l'archétype soit
+        installé — arrivait seul : ses skills restaient dans le kit, et la
+        collecte refusait la surface pour skills introuvables (#375). Les
+        skills de l'archétype partent donc avec lui, dédoublonnés contre ce
+        qu'un archétype installé aurait déjà planifié.
+        """
+        stack_dir = self._archetypes / "stack"
+        stack_agents_dir = stack_dir / "agents"
         if not stack_agents_dir.is_dir():
             return
         agents_dst = self._agents_dir()
+        planned = False
         for agent_name in self._resolved.stack_agents:
             md = stack_agents_dir / f"{agent_name}.md"
             if md.is_file():
@@ -842,6 +852,19 @@ class ProjectScaffolder:
                     src=md,
                     dst=agents_dst / md.name,
                     label=f"stack/{agent_name}",
+                ))
+                planned = True
+        skills_src = stack_dir / "skills"
+        if planned and skills_src.is_dir():
+            skills_dst = self._skills_dir()
+            for md in sorted(skills_src.glob("*.md")):
+                dst = skills_dst / _strip_tpl_suffix(md.name)
+                if any(fc.dst == dst for fc in p.copies):
+                    continue
+                p.copies.append(FileCopy(
+                    src=md,
+                    dst=dst,
+                    label=f"stack/skills/{dst.stem}",
                 ))
 
     def _plan_feature_agents(self, p: ScaffoldPlan) -> None:

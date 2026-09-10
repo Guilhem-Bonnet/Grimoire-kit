@@ -500,3 +500,14 @@ class TestProjectScaffolder:
         s.execute(plan)
         ci = (tmp_path / ".github" / "copilot-instructions.md").read_text()
         assert "grimoire init" in ci
+
+
+def test_la_detection_de_pile_livre_le_generaliste_avec_ses_skills(tmp_path: Path) -> None:
+    """#375 : un agent de pile détecté sans l'archétype installé partait seul,
+    et son frontmatter `skills:` désignait des fichiers absents du projet."""
+    s = _scaffolder(tmp_path, stack_agents=("stack-engineer",))
+    plan = s.plan()
+    labels = {fc.label for fc in plan.copies}
+    assert "stack/stack-engineer" in labels
+    assert "stack/skills/stack-python" in labels
+    assert "stack/skills/stack-go" in labels
