@@ -71,9 +71,9 @@ grimoire diff      # Drift vs archétype par défaut
 
 Voir le guide [Créer un agent](creating-agents.md). En résumé :
 
-1. Créez un fichier `.md` dans `_grimoire/agents/`
-2. Définissez le persona, les outils et les instructions
-3. Ajoutez-le dans `project-context.yaml` sous `agents.custom_agents`
+1. Appelez l'outil MCP `grimoire_add_agent("mon-agent")`, ou créez directement un fichier `.md` dans `_grimoire/overrides/agents/` — jamais dans `_grimoire/agents/` ou `_grimoire/kit/`, régénérés et écrasés à chaque `grimoire up`
+2. Définissez le persona, les outils et les instructions à partir du gabarit `custom-agent`
+3. `grimoire doctor` confirme que l'agent est installé et routable
 
 ### Puis-je utiliser Grimoire sans MCP ?
 

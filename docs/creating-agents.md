@@ -226,15 +226,15 @@ Chaque agent doit avoir un périmètre clair. Si deux agents se chevauchent, c'e
 Les `<example>` dans les prompts sont essentiels. Un agent sans exemples produit des résultats génériques. Incluez des commandes, chemins et valeurs spécifiques à votre projet.
 
 ### Keywords pour le dispatch
-Pour que le routage sémantique retrouve votre agent, ajoutez-le dans `project-context.yaml` :
+Le routage lit la clause `USE WHEN` / `DON'T USE WHEN` de l'agent lui-même (voir plus haut), pas `project-context.yaml` : `agents.custom_agents` n'est qu'une liste de noms suivie par `grimoire add`/`grimoire remove`, elle n'influence ni le dispatch ni le chargement. Décrivez donc les cas d'usage directement dans le fichier de l'agent :
 
-```yaml
-agents:
-  custom_agents:
-    - name: "gardien"
-      icon: "shield-pulse"
-      domain: "Sécurité applicative"
-      keywords: "oauth jwt rbac auth login permission security headers csp cors"
+```markdown
+<!--
+USE WHEN:
+- Question de sécurité applicative (oauth, jwt, rbac, permissions, headers)
+DON'T USE WHEN:
+- Sécurité infrastructure (voir infra-ops)
+-->
 ```
 
 ### Test de l'agent

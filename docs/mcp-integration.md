@@ -73,7 +73,7 @@ Dans `claude_desktop_config.json` :
 | `grimoire_config` | Configuration brute du projet | lecture |
 | `grimoire_memory_store` | Stocker un texte en mémoire sémantique | écriture, destructif, monde ouvert |
 | `grimoire_memory_search` | Recherche sémantique dans la mémoire | lecture, monde ouvert |
-| `grimoire_add_agent` | Ajouter un agent au projet | écriture, destructif, idempotent |
+| `grimoire_add_agent` | Créer un agent dans `_grimoire/overrides/agents/` à partir du gabarit `custom-agent` | écriture, destructif |
 | `grimoire_standard_verify` / `_audit` / `_score` / `_gate` | Le standard agentique : vérifier, auditer, scorer, opposer les gates | lecture ; `_score` persiste le score et `_gate` journalise le passage |
 | `grimoire_host_status` / `grimoire_skill` / `grimoire_command` | Les surfaces hôtes, pour un client sans émetteur | lecture |
 | `grimoire_providers_status` | Fournisseurs LLM activés, modèles par palier (cheap/mid/strong), refroidissement, dernier audit (`available`/`probed_at`/`models_seen`/`probe_note`, issue #330) et prochain choix — même donnée que `grimoire providers status` | lecture, monde ouvert |

@@ -97,7 +97,7 @@ agents:
 | Clé | Type | Défaut | Description |
 |-----|------|--------|-------------|
 | `archetype` | string | `"minimal"` | Archétype de base |
-| `custom_agents` | list[string] | `[]` | Agents personnalisés à charger |
+| `custom_agents` | list[string] | `[]` | Noms suivis par `grimoire add`/`grimoire remove` — une liste de bookkeeping, pas un mécanisme de chargement. Les fichiers d'agent réels vivent dans `_grimoire/overrides/agents/` (voir [Créer un agent](creating-agents.md)) |
 
 ### Archétypes
 

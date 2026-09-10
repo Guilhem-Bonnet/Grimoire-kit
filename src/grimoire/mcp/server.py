@@ -20,6 +20,7 @@ Or configure in your MCP client (Claude Desktop, VS Code, etc.)::
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast
@@ -387,43 +388,72 @@ def grimoire_memory_search(query: str, user_id: str = "", limit: int = 5, projec
         return _tool_error({"error": str(exc)})
 
 
-@mcp.tool(annotations=_writes(destructive=True, idempotent=True))
+_AGENT_ID_RE = re.compile(r"^[\w-]+$")
+
+
+@mcp.tool(annotations=_writes(destructive=True, idempotent=False))
 def grimoire_add_agent(agent_id: str, project_path: str = ".") -> str:
-    """Add a custom agent to the project configuration.
+    """Create a custom agent as a real, installed file in the overrides tier.
+
+    Renders the ``minimal`` archetype's ``custom-agent.tpl.md`` template into
+    ``_grimoire/overrides/agents/<agent_id>.md`` — the tier that ``doctor`` and
+    the routing map actually resolve (issue #349). Refuses when an agent with
+    this id already exists in any tier, or when the id is not a safe filename.
 
     Args:
-        agent_id: The agent identifier to add.
+        agent_id: The agent identifier to create (used as tag and filename).
         project_path: Path to project root (default: current directory).
     """
+    from grimoire.archetypes import bundled_path
+    from grimoire.core import layout
+    from grimoire.core.scaffold import _render_placeholders
+
+    if not _AGENT_ID_RE.fullmatch(agent_id):
+        return _tool_error({
+            "error": f"Invalid agent_id {agent_id!r}: must match [\\w-]+ (safe as a filename)."
+        })
+
     target = Path(project_path).resolve()
     config_path = target / "project-context.yaml"
     if not config_path.is_file():
         return _tool_error({"error": "No project-context.yaml found"})
 
+    existing = layout.installed_agents(target)
+    if agent_id in existing:
+        _, existing_path = existing[agent_id]
+        return _tool_error({
+            "error": f"Agent '{agent_id}' already exists at {existing_path}",
+            "agent_id": agent_id,
+            "path": str(existing_path),
+        })
+
+    template_path = bundled_path() / "minimal" / "agents" / "custom-agent.tpl.md"
+    if not template_path.is_file():
+        return _tool_error({"error": f"Custom agent template not found at {template_path}"})
+
+    agent_name = agent_id.replace("-", " ").replace("_", " ").title()
+    variables = {
+        "agent_tag": agent_id,
+        "agent_name": agent_name,
+        "agent_role": agent_name,
+        "agent_icon": "sparkles",
+    }
+    rendered = _render_placeholders(template_path.read_text(encoding="utf-8"), variables)
+
+    agents_dir = layout.overrides_dir(target) / layout.AGENTS_SUBDIR
+    dest = agents_dir / f"{agent_id}.md"
     try:
-        from ruamel.yaml import YAML
-
-        yaml = YAML()
-        yaml.preserve_quotes = True
-        with open(config_path, encoding="utf-8") as fh:
-            data = yaml.load(fh)
-
-        agents = data.get("agents") or {}
-        custom: list[str] = agents.get("custom_agents") or []
-
-        if agent_id in custom:
-            return json.dumps({"status": "already_present", "agent_id": agent_id})
-
-        custom.append(agent_id)
-        agents["custom_agents"] = custom
-        data["agents"] = agents
-
-        with open(config_path, "w", encoding="utf-8") as fh:
-            yaml.dump(data, fh)
-
-        return json.dumps({"status": "added", "agent_id": agent_id})
-    except Exception as exc:
+        agents_dir.mkdir(parents=True, exist_ok=True)
+        dest.write_text(rendered, encoding="utf-8")
+    except OSError as exc:
         return _tool_error({"error": str(exc)})
+
+    return json.dumps({
+        "status": "created",
+        "agent_id": agent_id,
+        "path": str(dest),
+        "tier": "overrides",
+    })
 
 
 # ── Agentic standard ──────────────────────────────────────────────────────────

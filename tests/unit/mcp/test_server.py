@@ -323,27 +323,57 @@ class TestMemorySearch:
 # ── grimoire_add_agent ────────────────────────────────────────────────────────────
 
 class TestAddAgent:
-    def test_add_agent(self, project: Path) -> None:
+    def test_add_agent_creates_override_file(self, project: Path) -> None:
         result = grimoire_add_agent("my-custom-agent", project_path=str(project))
         data = _json(result)
-        assert data["status"] == "added"
+        assert data["status"] == "created"
         assert data["agent_id"] == "my-custom-agent"
+        dest = project / "_grimoire" / "overrides" / "agents" / "my-custom-agent.md"
+        assert dest.is_file()
+        assert data["path"] == str(dest)
+        assert 'name: "my-custom-agent"' in dest.read_text(encoding="utf-8")
 
-    def test_add_agent_duplicate(self, project: Path) -> None:
+    def test_add_agent_seen_by_doctor_and_routing(self, project: Path) -> None:
+        from grimoire.core.integrity import installed_agent_tags
+        from grimoire.core.layout import installed_agents
+
+        grimoire_add_agent("routable-agent", project_path=str(project))
+
+        assert "routable-agent" in installed_agent_tags(project)
+        tags = installed_agents(project)
+        assert "routable-agent" in tags
+        _persona, path = tags["routable-agent"]
+        assert path == project / "_grimoire" / "overrides" / "agents" / "routable-agent.md"
+
+    def test_add_agent_duplicate_refused(self, project: Path) -> None:
         grimoire_add_agent("dup-agent", project_path=str(project))
         result = grimoire_add_agent("dup-agent", project_path=str(project))
         data = _json(result)
-        assert data["status"] == "already_present"
+        assert "error" in data
+        assert "dup-agent" in data["error"]
+
+    def test_add_agent_duplicate_across_tiers_refused(self, project: Path) -> None:
+        kit_agents = project / "_grimoire" / "kit" / "agents"
+        kit_agents.mkdir(parents=True)
+        (kit_agents / "existing-agent.md").write_text(
+            '---\nname: "existing-agent"\n---\n', encoding="utf-8"
+        )
+        result = grimoire_add_agent("existing-agent", project_path=str(project))
+        data = _json(result)
+        assert "error" in data
+        overrides_dest = project / "_grimoire" / "overrides" / "agents" / "existing-agent.md"
+        assert not overrides_dest.exists()
+
+    def test_add_agent_unsafe_name_refused(self, project: Path) -> None:
+        result = grimoire_add_agent("../evil", project_path=str(project))
+        data = _json(result)
+        assert "error" in data
+        assert not (project.parent / "evil.md").exists()
 
     def test_add_agent_no_project(self, tmp_path: Path) -> None:
         result = grimoire_add_agent("nope", project_path=str(tmp_path))
         data = _json(result)
         assert "error" in data
-
-    def test_add_agent_persists(self, project: Path) -> None:
-        grimoire_add_agent("persisted-agent", project_path=str(project))
-        content = (project / "project-context.yaml").read_text()
-        assert "persisted-agent" in content
 
 
 # ── grimoire_standard_* ───────────────────────────────────────────────────────
