@@ -151,7 +151,35 @@ n'a pas rendu un résultat vérifiable, il a rendu une opinion.
 """
 
 
-def _agent_file(agent: AgentSpec, surface: ProjectSurface) -> EmittedFile:
+def _attached_skill_section(skill: SkillSpec) -> str:
+    """Render *skill*'s body inline, into the file of the agent that owns it.
+
+    Claude Code has no notion of a skill scoped to one sub-agent — skills are
+    a project-level surface, auto-discovered from ``.claude/skills/`` and
+    their descriptions loaded into every turn regardless of which agent (if
+    any) is working. There is no configuration knob that says "only load
+    this skill when sub-agent X runs".
+
+    What the host *does* do lazily is the sub-agent file itself: the main
+    session only pays the short ``name``/``description`` pair for routing,
+    and the full body of ``.claude/agents/<name>.md`` is read only when that
+    sub-agent is actually dispatched, in its own context window. Folding a
+    skill's body into that file — instead of ``.claude/skills/<slug>/``,
+    which is auto-loaded independently of who is running — moves its cost
+    onto the same lazy path: paid once, when the owning agent's turn starts,
+    never before, never on any other agent's turn. This is the kit emulating
+    an attachment the host does not offer natively (issue #372, decided in
+    #371's third comment).
+    """
+    header = Emitter.frontmatter({"allowed-tools": ", ".join(map_verbs(skill.tools, _TOOL_TABLE))})
+    return f"""
+## Compétence attachée : {skill.name}
+
+{header}
+{skill.body}"""
+
+
+def _agent_file(agent: AgentSpec, surface: ProjectSurface, owned_skills: tuple[SkillSpec, ...] = ()) -> EmittedFile:
     tools = map_verbs(agent.tools, _TOOL_TABLE)
     fields: dict[str, Any] = {
         "name": agent.name,
@@ -188,6 +216,8 @@ Tu incarnes la persona Grimoire **{agent.name}** du projet {surface.project_name
 """
     if agent.entry_point:
         body = f"{body}\n{_dispatch_policy_section()}"
+    for skill in owned_skills:
+        body = f"{body}\n{_attached_skill_section(skill)}"
     return EmittedFile(relpath=CLAUDE_DIR / "agents" / f"{agent.name}.md", content=body)
 
 
@@ -346,8 +376,20 @@ class ClaudeCodeEmitter(Emitter):
     def plan(self, surface: ProjectSurface, project_root: Path) -> EmitPlan:
         del project_root  # every path is project-relative
         files: list[EmittedFile] = []
-        files.extend(_agent_file(agent, surface) for agent in surface.agents)
-        files.extend(_skill_file(skill) for skill in surface.skills)
+        by_slug = {skill.slug: skill for skill in surface.skills}
+        attached_slugs = {slug for agent in surface.agents for slug in agent.skills}
+        files.extend(
+            _agent_file(
+                agent,
+                surface,
+                owned_skills=tuple(by_slug[slug] for slug in agent.skills if slug in by_slug),
+            )
+            for agent in surface.agents
+        )
+        # A skill an agent owns is folded into that agent's own file above —
+        # emitting it again here would defeat the whole point (issue #372):
+        # only skills nobody declared stay transversal, at project scope.
+        files.extend(_skill_file(skill) for skill in surface.skills if skill.slug not in attached_slugs)
         files.extend(_command_file(command) for command in surface.commands)
         blocking = [h for h in surface.hooks if h.enforcement is Enforcement.BLOCKING]
         files.append(_readme(surface, blocking))
@@ -360,6 +402,8 @@ class ClaudeCodeEmitter(Emitter):
 
 
 def _readme(surface: ProjectSurface, blocking: list[HookSpec]) -> EmittedFile:
+    attached = sum(len(agent.skills) for agent in surface.agents)
+    transversal = len(surface.skills) - len({slug for agent in surface.agents for slug in agent.skills})
     lines = [
         managed_header(".md"),
         "",
@@ -373,7 +417,9 @@ def _readme(surface: ProjectSurface, blocking: list[HookSpec]) -> EmittedFile:
         "| Surface | Contenu |",
         "|---|---|",
         f"| Sous-agents | {len(surface.agents)} — `.claude/agents/` |",
-        f"| Skills | {len(surface.skills)} — `.claude/skills/` |",
+        f"| Skills transversales | {transversal} — `.claude/skills/`, chargées toutes sessions |",
+        f"| Skills attachées | {attached} — repliées dans le fichier de leur agent, payées "
+        "seulement quand il tourne |",
         f"| Commandes | {len(surface.commands)} — `.claude/commands/` |",
         f"| Hooks | {len(surface.hooks)} — `.claude/settings.json` |",
         "",

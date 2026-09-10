@@ -122,6 +122,21 @@ class AgentSpec:
     """Override for the host's per-turn budget, read from the agent file's
     ``max_turns:`` frontmatter key. ``None`` lets the emitter fall back to its
     own default — most agent files never set this."""
+    skills: tuple[str, ...] = ()
+    """Slugs of :class:`SkillSpec` this agent owns, read from the agent
+    file's ``skills:`` frontmatter key. A skill owned by an agent is emitted
+    into that agent's own context rather than the project-wide skill
+    directory (issue #372): the session pays its description only on the
+    turns where this agent runs, not on every turn. Resolved against the
+    project's collected skills at build time — an unknown slug is a build
+    error, not a silently dropped reference."""
+    context: tuple[str, ...] = ()
+    """Project-relative paths this agent declares as its own context, read
+    from the ``context:`` frontmatter key. Verified to exist on disk at
+    build time. This is a declared intake for
+    :mod:`grimoire.tools.context_router`, not proof that a session actually
+    loads it — the router plans context adaptively and this field only says
+    what the agent claims to need."""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -133,7 +148,47 @@ class AgentSpec:
             "affinity": self.affinity.to_dict(),
             "entry_point": self.entry_point,
             "max_turns": self.max_turns,
+            "skills": list(self.skills),
+            "context": list(self.context),
         }
+
+    def fingerprint(self) -> tuple[str, ...]:
+        """The faisceau (tools, context, skills) that must distinguish this
+        agent from every other one (issue #372's distinction guard).
+
+        Deliberately excludes ``name``, ``description`` and ``affinity``:
+        those are prose, and prose is exactly what let nine phantom agents
+        through in #346 — two agents that grant the same tools, read the
+        same context and own the same skills are the same agent wearing two
+        names, no matter how differently they are described.
+        """
+        return (
+            *sorted(t.value for t in self.tools),
+            "|",
+            *sorted(self.context),
+            "|",
+            *sorted(self.skills),
+        )
+
+
+def duplicate_agent_fingerprints(agents: tuple[AgentSpec, ...]) -> tuple[tuple[str, str], ...]:
+    """Pairs of agent names sharing an identical faisceau (issue #372).
+
+    Exact-duplicate detection only — two agents differing by one trivial
+    context path pass this guard while being functionally identical. That
+    limit is assumed: this catches the phantom-agent case (#346), not the
+    median case of near-duplicates.
+    """
+    by_fingerprint: dict[tuple[str, ...], list[str]] = {}
+    for agent in agents:
+        by_fingerprint.setdefault(agent.fingerprint(), []).append(agent.name)
+    pairs: list[tuple[str, str]] = []
+    for names in by_fingerprint.values():
+        if len(names) < 2:
+            continue
+        ordered = sorted(names)
+        pairs.extend((ordered[i], ordered[j]) for i in range(len(ordered)) for j in range(i + 1, len(ordered)))
+    return tuple(pairs)
 
 
 @dataclass(frozen=True, slots=True)
@@ -259,6 +314,10 @@ class ProjectSurface:
     """True when the project is enrolled in the agentic standard. Governance
     hooks are only emitted for enrolled projects: a blocking gate on a project
     with no gates to check would fail closed on nothing."""
+    notes: tuple[str, ...] = ()
+    """Constats non bloquants relevés en construisant la surface — par exemple
+    deux agents livrés par le kit au faisceau identique. Une dette du kit ne
+    doit pas empêcher un projet de se synchroniser ; elle doit rester visible."""
 
     def entry_agent(self) -> AgentSpec | None:
         for agent in self.agents:

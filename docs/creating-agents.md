@@ -2,6 +2,11 @@
 
 # <img src="../assets/icons/team.svg" width="32" height="32" alt=""> Créer un agent — Guide
 
+> Ce guide répond au **comment**. Avant de commencer, vérifiez le **quand** dans
+> [Doctrine — quand créer un artefact](artifact-doctrine.md) : un agent n'est justifié que si la
+> décision est impossible à écrire d'avance et qu'il a une frontière d'outils qui lui est propre.
+> Sinon, un skill ou un prompt suffit et coûte moins cher.
+
 ## <img src="../assets/icons/team.svg" width="28" height="28" alt=""> Voie rapide — Agent Forge (BM-52)
 
 `agent-forge.py` génère un scaffold rempli intelligemment depuis un besoin textuel ou des gaps détectés automatiquement.
@@ -77,6 +82,14 @@ cp _grimoire/kit/agents/custom-agent.tpl.md \
 | `{{domain}}` | Domaine d'expertise | "sécurité, authentification, RBAC" |
 | `{{learnings_file}}` | Nom du fichier learnings | "security-app" |
 | `{{domain_word}}` | Mot-clé pour decisions-log | "sécurité" |
+| `{{use_when}}` | Champ obligatoire — situation qui justifie cet agent | "Audit d'un flux OAuth2/RBAC" |
+| `{{dont_use_when}}` | Champ obligatoire — cas hors périmètre | "Sécurité infra, voir infra-ops" |
+| `{{tools}}` | Champ obligatoire — capacités (peut-il éditer, exécuter ?) | "read, edit" |
+| `{{tool_boundary}}` | Champ obligatoire — périmètre fin, chemins/commandes propres | "Endpoints /api/auth/*, pas d'accès infra" |
+
+`tools` et `tool_boundary` ne se devinent pas par copie du voisin : un agent qui hérite des mêmes
+capacités que le généraliste sans périmètre distinct n'a pas de frontière propre au sens de la
+doctrine — c'est un signal pour le retirer, pas un champ à remplir par défaut.
 
 ### 2b. Configurer model_affinity (optionnel)
 
@@ -186,7 +199,20 @@ echo "# Learnings — Gardien" > _grimoire/_memory/agent-learnings/security-app.
 
 ## <img src="../assets/icons/lightbulb.svg" width="28" height="28" alt=""> Clause "Use when"
 
-Chaque agent devrait inclure en en-tête une clause commentée `USE WHEN` qui guide le dispatch et aide l'utilisateur à choisir l'agent approprié.
+Depuis la doctrine d'emploi (voir [artifact-doctrine.md](artifact-doctrine.md)), la clause n'est
+plus une suggestion : `use_when`, `dont_use_when`, `tools` et `tool_boundary` sont des champs
+**obligatoires** du frontmatter de chaque agent livré par le kit —
+`tests/unit/test_artifact_employment_clause.py` échoue sinon.
+
+```yaml
+use_when: "Situation précise où invoquer cet agent."
+dont_use_when: "Cas hors périmètre — nommez l'agent compétent si possible."
+tools: "read, edit, execute — la capacité grossière de l'agent."
+tool_boundary: "Périmètre fin — chemins, commandes, propres à cet agent."
+```
+
+Le commentaire `USE WHEN` / `DON'T USE WHEN` en en-tête reste utile en complément : il donne à
+l'orchestrateur une version plus riche, multi-lignes, pour le routage.
 
 ```markdown
 <!--
@@ -226,15 +252,15 @@ Chaque agent doit avoir un périmètre clair. Si deux agents se chevauchent, c'e
 Les `<example>` dans les prompts sont essentiels. Un agent sans exemples produit des résultats génériques. Incluez des commandes, chemins et valeurs spécifiques à votre projet.
 
 ### Keywords pour le dispatch
-Pour que le routage sémantique retrouve votre agent, ajoutez-le dans `project-context.yaml` :
+Le routage lit la clause `USE WHEN` / `DON'T USE WHEN` de l'agent lui-même (voir plus haut), pas `project-context.yaml` : `agents.custom_agents` n'est qu'une liste de noms suivie par `grimoire add`/`grimoire remove`, elle n'influence ni le dispatch ni le chargement. Décrivez donc les cas d'usage directement dans le fichier de l'agent :
 
-```yaml
-agents:
-  custom_agents:
-    - name: "gardien"
-      icon: "shield-pulse"
-      domain: "Sécurité applicative"
-      keywords: "oauth jwt rbac auth login permission security headers csp cors"
+```markdown
+<!--
+USE WHEN:
+- Question de sécurité applicative (oauth, jwt, rbac, permissions, headers)
+DON'T USE WHEN:
+- Sécurité infrastructure (voir infra-ops)
+-->
 ```
 
 ### Test de l'agent

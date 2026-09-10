@@ -3,7 +3,7 @@ $schema: "grimoire-archetype-dna/v1"
 id: infra-ops
 name: "Infra Ops"
 version: "1.0.0"
-description: "Infrastructure & DevOps complète — 10 agents spécialisés pour Terraform, K8s, Ansible, monitoring, sécurité, backup. Périmètre homelab/auto-hébergement (Proxmox, LXC, K3s, FluxCD, Longhorn) : pensé pour un laboratoire personnel, pas pour du cloud d'entreprise (issue #347)."
+description: "Infrastructure & DevOps — 3 agents à faisceau d'outils distinct (généraliste, monitoring, debug système) pour Terraform, K8s, Ansible, monitoring, sécurité, backup ; CI/CD, sécurité, backup/DR et Kubernetes/GitOps portés par des skills attachés au généraliste plutôt que par des agents dédiés au même faisceau (issue #375). Périmètre homelab/auto-hébergement (Proxmox, LXC, K3s, FluxCD, Longhorn) : pensé pour un laboratoire personnel, pas pour du cloud d'entreprise (issue #347)."
 icon: "wrench"
 author: "grimoire-kit"
 tags: [infrastructure, devops, k8s, terraform, ansible, monitoring, security, backup, ops, homelab, self-hosted]
@@ -111,25 +111,37 @@ acceptance_criteria:
 agents:
   - path: "../../archetypes/infra-ops/agents/ops-engineer.md"
     required: true
-    description: "Forge — Terraform, Ansible, Docker Compose, LXC"
-  - path: "../../archetypes/infra-ops/agents/security-hardener.md"
-    required: true
-    description: "Vault — Sécurité, SOPS/age, TLS, fail2ban, hardening"
-  - path: "../../archetypes/infra-ops/agents/pipeline-architect.md"
-    required: true
-    description: "Flow — GitHub Actions, Taskfile, CI/CD"
+    description: "Forge — généraliste infra : Terraform, Ansible, Docker Compose, LXC, plus les skills attachés infra-pipeline-cicd, infra-security-hardening, infra-backup-dr, infra-k8s-gitops"
   - path: "../../archetypes/infra-ops/agents/monitoring-specialist.md"
     required: true
-    description: "Hawk — Prometheus, Grafana, Loki, alertes"
-  - path: "../../archetypes/infra-ops/agents/k8s-navigator.md"
-    required: false
-    description: "Helm — K3s, FluxCD, Longhorn (si K8s présent)"
-  - path: "../../archetypes/infra-ops/agents/backup-dr-specialist.md"
-    required: true
-    description: "Phoenix — Backup, DR, snapshots, restauration"
+    description: "Hawk — Prometheus, Grafana, Loki, alertes (faisceau outils distinct : read+edit, pas execute)"
   - path: "../../archetypes/infra-ops/agents/systems-debugger.md"
     required: true
-    description: "Debugger systèmes — logs, profiling, incidents"
+    description: "Debugger systèmes — logs, profiling, incidents (faisceau outils distinct : read+execute, pas edit)"
+
+# Skills attachés par défaut à un agent de cet archétype (issue #375) : le
+# savoir-faire de quatre anciens agents (pipeline-architect, security-hardener,
+# backup-dr-specialist, k8s-navigator) qui partageaient tous le faisceau
+# outils {read, edit, execute} de ops-engineer sans aucune frontière propre —
+# rien ne les distinguait au sens de la garde de #372. Le contenu de chaque
+# agent devient le corps du skill correspondant, sans perte ; ce qui change,
+# c'est que la session ne paie plus sa description à chaque tour, seulement
+# quand ops-engineer travaille (voir #377). Cette liste documente
+# l'attachement ; l'attachement effectif et vérifié au build est le champ
+# `skills:` du frontmatter de l'agent porteur.
+skills:
+  - path: "../../archetypes/infra-ops/skills/infra-pipeline-cicd.md"
+    attached_to: ops-engineer
+    description: "Ex-agent Flow — GitHub Actions, Taskfile, pipeline de déploiement, debug CI/CD"
+  - path: "../../archetypes/infra-ops/skills/infra-security-hardening.md"
+    attached_to: ops-engineer
+    description: "Ex-agent Vault — audit sécurité, secrets SOPS/age, TLS, firewall/fail2ban, hardening CIS"
+  - path: "../../archetypes/infra-ops/skills/infra-backup-dr.md"
+    attached_to: ops-engineer
+    description: "Ex-agent Phoenix — audit backup, snapshots Proxmox/Longhorn, plan DR, rétention, clés hors-site"
+  - path: "../../archetypes/infra-ops/skills/infra-k8s-gitops.md"
+    attached_to: ops-engineer
+    description: "Ex-agent Helm — workloads, FluxCD, Longhorn, troubleshooting pods, migration Compose→K3s, GPU, réseau"
 
 workflows:
   - path: "../../archetypes/fix-loop/workflows/workflow-closed-loop-fix.tpl.md"

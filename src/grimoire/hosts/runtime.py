@@ -272,6 +272,12 @@ def _record_decision(
             recipe_id=DEFAULT_DECISION_BY_EVENT.get(hook.event, hook.event.value),
             outcome=TraceOutcome.FAILURE if decision.is_refusal else TraceOutcome.SUCCESS,
             started_at=record_started_at,
+            # Quel agent était en jeu, pour que le cockpit puisse répondre à
+            # « qui a été choisi et quand » (#374) — `SubagentStop` est le seul
+            # événement qui porte un nom de sous-agent utile ; ailleurs
+            # `hook.agent_name` est vide et `TraceRecord.agent_id` garde son
+            # défaut, comme avant ce correctif.
+            agent_id=hook.agent_name,
             host_id=host_id.value,
             tool_calls=tool_calls,
             evidence_refs=[f"_grimoire-output/evidence/{task_id}"] if task_id else [],

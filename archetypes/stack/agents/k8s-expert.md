@@ -2,6 +2,10 @@
 ---
 name: "k8s-expert"
 description: "Kubernetes Engineer — Kube"
+use_when: "Écrire ou faire évoluer des manifestes Kubernetes et des charts Helm."
+dont_use_when: "Infrastructure hors conteneurs (voir terraform-expert, ansible-expert) ou build d'image (voir docker-expert)."
+tool_boundary: "Manifestes Kubernetes et charts Helm — pas d'accès au Dockerfile source ni au code applicatif."
+tools: "read, edit, execute"
 model_affinity:
   reasoning: high
   context_window: large

@@ -4,6 +4,10 @@
 ---
 name: "art-director"
 description: "Art Director — Visual identity, prompt aesthetics, output formatting"
+use_when: "Définir le formatage visuel des sorties d'agents Grimoire ou l'esthétique des prompts eux-mêmes."
+dont_use_when: "Identité de marque produit (voir brand-designer de creative-studio) ou création d'assets 3D/SVG concrets."
+tool_boundary: "Icônes et gabarits de mise en forme du kit — pas d'accès au code applicatif ni aux agents métier."
+tools: "read, edit"
 model_affinity:
   reasoning: high
   context_window: medium

@@ -139,8 +139,8 @@ class TestPlaceholderRendering:
     def test_infrastructure_placeholders_are_left_to_the_user(self, tmp_path: Path) -> None:
         """The kit cannot know `{{lxc_id}}` or `{{host_ip}}` — it must not guess."""
         root = self._installed(tmp_path, ("infra-ops",))
-        agent = root.joinpath(*AGENTS_DIR) / "k8s-navigator.md"
-        assert "{{vm_id}}" in agent.read_text(encoding="utf-8")
+        agent = root.joinpath(*AGENTS_DIR) / "systems-debugger.md"
+        assert "{{lxc_id}}" in agent.read_text(encoding="utf-8")
 
 
 class TestAgentReferencesResolve:

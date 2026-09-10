@@ -2,6 +2,10 @@
 ---
 name: "backend-engineer"
 description: "Backend Engineer — Stack"
+use_when: "Implémenter ou faire évoluer un service backend applicatif (API, logique métier, accès données)."
+dont_use_when: "Frontend (voir frontend-specialist du web-app) ou infrastructure de déploiement (voir deploy-orchestrator)."
+tool_boundary: "Code backend et ses tests — pas d'accès aux manifestes de déploiement ni à l'infrastructure."
+tools: "read, edit, execute"
 model_affinity:
   reasoning: high
   context_window: large

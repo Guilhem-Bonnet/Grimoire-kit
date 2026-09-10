@@ -4,6 +4,10 @@
 ---
 name: "blender-expert"
 description: "Blender 3D Expert — Modélisation, matériaux, éclairage, rendu via MCP + vision loop"
+use_when: "Modélisation, matériaux, éclairage ou rendu 3D via Blender, avec un MCP Blender joignable pour boucler sur le rendu réel."
+dont_use_when: "Illustration 2D/SVG (voir illustration-expert), identité de marque (voir brand-designer), ou tout projet sans pipeline 3D."
+tool_boundary: "MCP Blender (scène, matériaux, rendu), fichiers .blend et exports 3D — pas d'accès aux sources applicatives du projet."
+tools: "read, edit, execute"
 model_affinity:
   reasoning: high
   context_window: large

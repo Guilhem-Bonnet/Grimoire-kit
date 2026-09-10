@@ -26,6 +26,7 @@ tests, donc une route ajoutée sans test de cible se voit.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -106,6 +107,10 @@ def _blueprints(project_root: Path, _query: _Query) -> Any:
     return workspace_api.blueprints_view(project_root)
 
 
+def _agents(project_root: Path, _query: _Query) -> Any:
+    return workspace_api.agents_view(project_root)
+
+
 def _file_usage(project_root: Path, query: _Query) -> Any:
     return workspace_api.file_usage(project_root, _one(query, "path"))
 
@@ -156,6 +161,7 @@ GET_ROUTES: dict[str, _GetHandler] = {
     f"{PREFIX}doctor": _doctor,
     f"{PREFIX}language": _language,
     f"{PREFIX}blueprints": _blueprints,
+    f"{PREFIX}agents": _agents,
 }
 
 
@@ -308,6 +314,229 @@ POST_ROUTES: dict[str, _PostHandler] = {
 TASK_ACTIONS = ("claim", "move", "block", "close")
 
 
+# ── Agents (issue #374) ─────────────────────────────────────────────────────
+#
+# Toute écriture ici porte sur la couche ``overrides`` du projet, jamais sur
+# le kit : un projet personnalise, il ne modifie pas ce que le kit livre
+# (doctrine, ``docs/artifact-doctrine.md``). Le geste est celui de
+# ``grimoire_add_agent`` (``src/grimoire/mcp/server.py``) et de
+# ``_create_override`` ci-dessus, appliqué au frontmatter d'un agent déjà
+# installé plutôt qu'à un fichier neuf ou une copie brute : on écrit d'abord
+# dans l'override, puis on valide avec la même lecture que
+# ``collect_agents`` — la garde qui refuse déjà un skill ou un contexte
+# introuvable — et on annule l'écriture si elle échoue. Le message d'erreur
+# est donc exactement celui que ``collect`` produit, jamais dupliqué ici.
+
+#: Frontmatter d'un fichier agent : un commentaire HTML d'archétype optionnel,
+#: un bloc YAML entre ``---``, puis le corps. Même forme que
+#: ``grimoire.hosts.collect._FRONTMATTER_RE``, mais le commentaire est capturé
+#: ici (pas seulement sauté) pour pouvoir le réécrire tel quel.
+_AGENT_FM_RE = re.compile(
+    r"\A(?P<bom>﻿)?(?P<comment>(?:<!--.*?-->\s*)?)---\s*\n(?P<yaml>.*?)\n---\s*\n?(?P<body>.*)\Z",
+    re.DOTALL,
+)
+
+#: Champs de frontmatter que le cockpit sait modifier. Le reste (``name``,
+#: ``description``, ``model_affinity``…) n'est pas de la configuration au sens
+#: de l'issue — le modifier romprait l'identité de l'agent, pas son emploi.
+_AGENT_STRING_FIELDS = frozenset({"use_when", "dont_use_when", "tool_boundary", "tools"})
+_AGENT_LIST_FIELDS = frozenset({"skills", "context"})
+
+
+def _agent_target(project_root: Path, name: str) -> Path:
+    """Fichier installé de l'agent *name*, nommé comme ``agents_view`` le nomme.
+
+    Résolu via :func:`collect_agents`, pas via
+    ``layout.installed_agents`` : ce dernier ne reconnaît un agent que si son
+    frontmatter déclare un ``name:`` littéral (regex sur le texte brut) et
+    rend invisible un agent dont le nom retombe sur le nom de fichier — cas
+    réel du gabarit ``custom-agent.md`` que certains archétypes livrent tel
+    quel, avec ``name: "{{agent_tag}}"`` non rendu. ``collect_agents`` retombe
+    sur le nom de fichier dans ce cas (:func:`grimoire.hosts.collect._agent_name`)
+    et c'est ce nom qu'``agents_view`` affiche : un agent visible à la lecture
+    doit rester résoluble à l'écriture, sous le même nom.
+    """
+    from grimoire.hosts import collect
+
+    root = project_root.resolve()
+    skills = collect.collect_skills(root)
+    known_skills = frozenset(s.slug for s in skills)
+    for agent in collect.collect_agents(root, known_skills=known_skills):
+        if agent.name == name:
+            return root / agent.definition_ref
+    raise FileNotFoundError(f"agent introuvable : {name}")
+
+
+def _agent_override_path(project_root: Path, source: Path) -> Path:
+    """Le chemin overrides d'un agent installé à *source*.
+
+    Même nom de fichier qu'à la source, quel que soit l'étage d'où elle vient
+    (kit, ou un répertoire hérité) : les agents n'ont jamais qu'un seul niveau
+    de sous-dossier (``agents/<tag>.md``), donc le nom de fichier suffit à
+    reconstruire le chemin d'override sans connaître l'étage de départ.
+    """
+    from grimoire.core import layout
+
+    return layout.overrides_dir(project_root) / layout.AGENTS_SUBDIR / source.name
+
+
+def _load_agent_frontmatter(path: Path) -> tuple[str, str, Any, str]:
+    """Lit *path* en ``(bom, commentaire, données YAML éditables, corps)``."""
+    from ruamel.yaml import YAML
+
+    text = path.read_text(encoding="utf-8")
+    match = _AGENT_FM_RE.match(text)
+    if match is None:
+        raise ValueError(f"fichier agent sans frontmatter : {path}")
+    yaml = YAML()
+    yaml.preserve_quotes = True
+    yaml.default_flow_style = False
+    data = yaml.load(match.group("yaml"))
+    if not isinstance(data, dict):
+        raise ValueError(f"frontmatter d'agent invalide : {path}")
+    return match.group("bom") or "", match.group("comment"), data, match.group("body")
+
+
+def _dump_agent_frontmatter(bom: str, comment: str, data: Any, body: str) -> str:
+    """Réassemble un fichier agent après modification de son bloc YAML."""
+    import io
+
+    from ruamel.yaml import YAML
+
+    yaml = YAML()
+    yaml.preserve_quotes = True
+    yaml.default_flow_style = False
+    buf = io.StringIO()
+    yaml.dump(data, buf)
+    return f"{bom}{comment}---\n{buf.getvalue()}---\n{body}"
+
+
+def _str_list(raw: Any) -> tuple[str, ...]:
+    """Lit une clé frontmatter liste-de-chaînes, tolérante à une chaîne seule.
+
+    Même règle que ``grimoire.hosts.collect._str_tuple`` — dupliquée plutôt
+    qu'importée : quatre lignes, aucune logique métier, et l'import d'un nom
+    privé d'un autre module aurait été le mauvais genre de réutilisation.
+    """
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, list):
+        return ()
+    return tuple(str(item).strip() for item in raw if str(item).strip())
+
+
+def _apply_agent_updates(project_root: Path, name: str, updates: dict[str, Any]) -> Any:
+    """Écrit *updates* dans l'override de l'agent *name*, valide, ou annule.
+
+    Crée l'override s'il n'existe pas encore (copie de l'étage kit) ; une
+    valeur ``None``, chaîne vide ou liste vide retire la clé plutôt que
+    d'écrire une déclaration vide. La validation est celle de
+    ``collect_agents`` — skill ou contexte introuvable lève
+    ``GrimoireAgentError``, translatée en ``ValueError`` par
+    :func:`workspace_post`, avec le message que ``collect`` produit déjà.
+    """
+    from grimoire.core.exceptions import GrimoireAgentError
+    from grimoire.hosts import collect
+
+    root = project_root.resolve()
+    source = _agent_target(root, name)
+    override_path = _agent_override_path(root, source)
+    pre_existing = override_path.is_file()
+    if not pre_existing:
+        override_path.parent.mkdir(parents=True, exist_ok=True)
+        override_path.write_bytes(source.read_bytes())
+    original_text = override_path.read_text(encoding="utf-8")
+
+    bom, comment, data, body = _load_agent_frontmatter(override_path)
+    for key, value in updates.items():
+        if value in (None, "", []):
+            data.pop(key, None)
+        else:
+            data[key] = value
+    override_path.write_text(_dump_agent_frontmatter(bom, comment, data, body), encoding="utf-8")
+
+    try:
+        skills = collect.collect_skills(root)
+        collect.collect_agents(root, known_skills=frozenset(s.slug for s in skills))
+    except GrimoireAgentError:
+        if pre_existing:
+            override_path.write_text(original_text, encoding="utf-8")
+        else:
+            override_path.unlink(missing_ok=True)
+        raise
+    return workspace_api.agents_view(root)
+
+
+def _agent_skill_action(project_root: Path, name: str, body: dict[str, Any]) -> Any:
+    """Assigne ou retire un skill — l'écriture porte toujours sur la liste entière."""
+    slug = str(body.get("skill", "")).strip()
+    action = str(body.get("action", "")).strip()
+    if not slug:
+        raise ValueError("`skill` requis")
+    if action not in {"assign", "remove"}:
+        raise ValueError("`action` doit valoir « assign » ou « remove »")
+
+    root = project_root.resolve()
+    _, _, data, _ = _load_agent_frontmatter(_agent_target(root, name))
+    current = _str_list(data.get("skills"))
+    if action == "assign":
+        updated = list(current) if slug in current else [*current, slug]
+    else:
+        updated = [s for s in current if s != slug]
+    return _apply_agent_updates(root, name, {"skills": updated})
+
+
+def _agent_fields_update(project_root: Path, name: str, body: dict[str, Any]) -> Any:
+    """Modifie la clause d'emploi, les outils ou le contexte déclaré d'un agent.
+
+    Chaque champ présent dans *body* est validé pour sa propre forme ; la
+    validation croisée (skill connu, contexte qui existe sur disque) reste
+    celle de ``collect_agents``, appliquée par :func:`_apply_agent_updates`.
+    """
+    from grimoire.hosts.surface import ToolVerb
+
+    updates: dict[str, Any] = {}
+    for field in ("use_when", "dont_use_when", "tool_boundary"):
+        if field in body:
+            updates[field] = str(body[field] or "").strip()
+
+    if "tools" in body:
+        raw = body["tools"]
+        values = raw.split(",") if isinstance(raw, str) else raw
+        if not isinstance(values, list):
+            raise ValueError("`tools` doit être une liste, ou une chaîne séparée par des virgules")
+        cleaned = [str(v).strip().lower() for v in values if str(v).strip()]
+        known = {v.value for v in ToolVerb}
+        unknown = [v for v in cleaned if v not in known]
+        if unknown:
+            raise ValueError(f"outil(s) inconnu(s) : {', '.join(unknown)} — parmi {', '.join(sorted(known))}")
+        updates["tools"] = ", ".join(cleaned)
+
+    if "context" in body:
+        raw = body["context"]
+        if isinstance(raw, str):
+            raw = [raw]
+        if not isinstance(raw, list):
+            raise ValueError("`context` doit être une liste de chemins")
+        updates["context"] = [str(p).strip() for p in raw if str(p).strip()]
+
+    unknown_fields = set(body) - _AGENT_STRING_FIELDS - _AGENT_LIST_FIELDS
+    if unknown_fields:
+        raise ValueError(f"champ(s) non modifiable(s) : {', '.join(sorted(unknown_fields))}")
+    if not updates:
+        raise ValueError("aucun champ à modifier")
+    return _apply_agent_updates(project_root, name, updates)
+
+
+def _agent_route(path: str) -> tuple[str, str] | None:
+    """``(nom, action)`` depuis ``/api/workspace/agents/<nom>/<action>``, ou ``None``."""
+    rest = path[len(f"{PREFIX}agents/") :]
+    name, _, action = rest.partition("/")
+    if not name or not action or "/" in action:
+        return None
+    return name, action
+
+
 def workspace_post(project_root: Path, path: str, body: dict[str, Any]) -> Any:
     """Résout une écriture de la vue de travail pour ``project_root``.
 
@@ -329,6 +558,14 @@ def workspace_post(project_root: Path, path: str, body: dict[str, Any]) -> Any:
             task_id, _, action = tail.partition("/")
             if task_id and action in TASK_ACTIONS:
                 return _task_action(project_root, task_id, action, body)
+        if path.startswith(f"{PREFIX}agents/"):
+            parsed = _agent_route(path)
+            if parsed is not None:
+                agent_name, action = parsed
+                if action == "skill":
+                    return _agent_skill_action(project_root, agent_name, body)
+                if action == "fields":
+                    return _agent_fields_update(project_root, agent_name, body)
     except TaskRefusedError as exc:
         # Un gate rouge n'est pas une panne du serveur : c'est la réponse. On
         # la rend telle quelle, avec la preuve manquante et son remède, comme

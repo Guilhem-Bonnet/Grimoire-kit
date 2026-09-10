@@ -228,6 +228,9 @@ def host_status(
         typer.echo(json.dumps([item.to_dict() for item in payload], indent=2, ensure_ascii=False))
         raise typer.Exit(0 if all(item.in_sync for item in payload) else 1)
 
+    for note in surface.notes:
+        console.print(f"[dim][!][/dim] {note}")
+
     for item in payload:
         state = "[green]à jour[/green]" if item.in_sync else "[yellow]désynchronisé[/yellow]"
         console.print(f"[bold]{item.display_name}[/bold] {state}")

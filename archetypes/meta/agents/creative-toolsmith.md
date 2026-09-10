@@ -4,6 +4,10 @@
 ---
 name: "creative-toolsmith"
 description: "Creative Toolsmith — Tool design, framework extension, automation patterns"
+use_when: "Concevoir, auditer ou refactorer un outil/extension du framework Grimoire (CLI, module, pattern d'automatisation)."
+dont_use_when: "Créer un agent (voir agent-optimizer) ou un workflow métier (voir workflow-builder côté BMM)."
+tool_boundary: "framework/tools/ et le manifeste d'outils — pas d'accès aux agents ni au code métier du projet hôte."
+tools: "read, edit, execute"
 model_affinity:
   reasoning: extreme
   context_window: large

@@ -5,6 +5,10 @@
 ---
 name: "illustration-expert"
 description: "Illustration & SVG Expert — Icônes, illustrations vectorielles, assets visuels via MCP + vision loop"
+use_when: "Créer ou modifier des illustrations vectorielles ou icônes SVG, avec un MCP de vision pour vérifier le rendu."
+dont_use_when: "Modélisation 3D (voir blender-expert) ou définition de charte de marque (voir brand-designer)."
+tool_boundary: "Fichiers SVG et assets vectoriels, MCP vision loop — pas d'accès aux fichiers 3D ni au code applicatif."
+tools: "read, edit"
 model_affinity:
   reasoning: high
   context_window: medium

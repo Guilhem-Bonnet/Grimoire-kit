@@ -2,6 +2,10 @@
 ---
 name: "agent-optimizer"
 description: "Agent Quality Assurance & Optimizer — Sentinel"
+use_when: "Auditer la qualité d'un agent ou d'un workflow Grimoire existant, ou trancher un doublon d'agents."
+dont_use_when: "Créer un nouvel agent de zéro (voir agent-builder côté BMM) ou concevoir un outil/extension (voir creative-toolsmith)."
+tool_boundary: "Fichiers d'agents et de workflows du kit — pas d'accès au code applicatif du projet hôte."
+tools: "read, search, edit"
 model_affinity:
   reasoning: extreme
   context_window: large

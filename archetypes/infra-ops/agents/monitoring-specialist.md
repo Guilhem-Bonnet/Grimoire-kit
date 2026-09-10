@@ -2,6 +2,10 @@
 ---
 name: "monitoring-specialist"
 description: "Monitoring & Observability Specialist — Hawk"
+use_when: "Mettre en place ou diagnostiquer l'observabilité : métriques, dashboards, alerting, SLO."
+dont_use_when: "Debug d'un incident applicatif précis déjà localisé (voir systems-debugger) ou durcissement sécurité (voir ops-engineer, skill infra-security-hardening)."
+tool_boundary: "Dashboards, règles d'alerting, requêtes de métriques — pas d'accès aux manifestes Kubernetes ni au code applicatif."
+tools: "read, edit"
 model_affinity:
   reasoning: medium
   context_window: medium

@@ -2,6 +2,10 @@
 ---
 name: "deploy-orchestrator"
 description: "Deploy Orchestrator — Convoy"
+use_when: "Orchestrer un déploiement multi-service ou faire évoluer la stratégie de release."
+dont_use_when: "Développement du code applicatif lui-même (voir backend-engineer) ou fiabilité en régime établi (voir reliability-engineer)."
+tool_boundary: "Manifestes et scripts de déploiement — pas d'accès au code métier ni aux runbooks d'astreinte."
+tools: "read, edit, execute"
 model_affinity:
   reasoning: medium
   context_window: medium

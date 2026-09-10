@@ -105,3 +105,24 @@ def test_an_unwritable_ledger_does_not_fail_the_session(governed: Path) -> None:
     # The refusal still reaches the host, unchanged.
     assert rendered["hookSpecificOutput"]["permissionDecision"] == "deny"
     assert decision.is_refusal
+
+
+def test_subagent_stop_records_which_agent_was_chosen(governed: Path) -> None:
+    """The cockpit's « usage réel » (issue #374) reads this field — a
+    ``SubagentStop`` that never named its agent would leave it permanently
+    empty, no matter how the cockpit aggregates traces afterwards.
+    """
+    run_hook(
+        {"hook_event_name": "SubagentStop", "cwd": str(governed), "agent_name": "dev"},
+        host_id=HostId.CLAUDE_CODE_CLI,
+    )
+    agent_ids = [t.agent_id for t in _ledger(governed).list_traces()]
+    assert "dev" in agent_ids
+
+
+def test_pre_tool_use_without_a_subagent_name_keeps_agent_id_empty(governed: Path) -> None:
+    """No regression for the main agent : an absent ``agent_name`` must not
+    turn into the literal string ``"None"`` or any other placeholder."""
+    _call(governed, "Edit", {"file_path": "src/a.py"})
+    agent_ids = [t.agent_id for t in _ledger(governed).list_traces()]
+    assert agent_ids and all(a == "" for a in agent_ids)

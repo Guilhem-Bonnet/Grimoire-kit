@@ -19,6 +19,7 @@ exactement comme sur l'hôte mono-projet historique.
 from __future__ import annotations
 
 import json
+import sys
 import threading
 import urllib.error
 import urllib.request
@@ -390,3 +391,101 @@ def test_une_lecture_de_la_vue_de_travail_refuse_un_host_etranger(atelier: int) 
         code = exc.code
 
     assert code == 403
+
+
+# ── 7. Agents (#374) : refus explicable à travers le transport cockpit ─────
+#
+# Projet dédié plutôt que ``real_project``/``cockpit``/``cockpit_home`` : ces
+# tests écrivent un override d'agent, et les fixtures partagées ci-dessus
+# sont à portée session — les polluer romprait des tests d'autres fichiers
+# qui échantillonnent le premier agent du kit par ordre alphabétique.
+
+
+@pytest.fixture(scope="module")
+def agents_home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[int]:
+    """Un cockpit qui sert en direct un projet dédié aux tests d'agents.
+
+    Portée module, sans ``monkeypatch`` (fonction seulement par défaut) :
+    l'environnement et ``_HOME_SLUG`` sont posés et restaurés à la main.
+    """
+    import os
+    import subprocess
+
+    root = tmp_path_factory.mktemp("agents-home") / "projet-agents-home"
+    root.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q"], cwd=str(root), check=False, capture_output=True)
+    subprocess.run(
+        [sys.executable, "-m", "grimoire", "init", ".", "-y", "--name", "projet-agents-home"],
+        cwd=str(root), check=False, capture_output=True, timeout=180,
+    )
+    if not (root / "_grimoire" / "kit" / "agents").is_dir():
+        pytest.skip("`grimoire init` indisponible ici")
+
+    tmp_path = tmp_path_factory.mktemp("agents-home-cockpit")
+    previous_env = os.environ.get("GRIMOIRE_COCKPIT_HOME")
+    previous_home_slug = cmd_cockpit._HOME_SLUG
+    os.environ["GRIMOIRE_COCKPIT_HOME"] = str(tmp_path / "cockpit")
+    cmd_cockpit._HOME_SLUG = "projet-agents-home"
+    cmd_cockpit._API_CACHE.clear()
+    reg.register_project(root, "projet-agents-home")
+    serve_dir = tmp_path / "serve"
+    serve_dir.mkdir(parents=True)
+    handler = partial(cmd_cockpit._CockpitHandler, directory=str(serve_dir))
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield httpd.server_address[1]
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        cmd_cockpit._API_CACHE.clear()
+        cmd_cockpit._HOME_SLUG = previous_home_slug
+        if previous_env is None:
+            os.environ.pop("GRIMOIRE_COCKPIT_HOME", None)
+        else:
+            os.environ["GRIMOIRE_COCKPIT_HOME"] = previous_env
+
+
+def test_lire_les_agents_a_travers_le_cockpit(agents_home: int) -> None:
+    code, payload = _get(agents_home, f"{PREFIX}agents?project=projet-agents-home")
+
+    assert code == 200
+    assert payload["agents"], "l'archétype meta livre des agents"
+
+
+def test_assigner_un_skill_a_travers_le_cockpit_cree_l_override(agents_home: int) -> None:
+    code, payload = _post(
+        agents_home,
+        f"{PREFIX}agents/concierge/skill?project=projet-agents-home",
+        {"skill": "grimoire-memory", "action": "assign"},
+    )
+
+    assert code == 200
+    agent = next(a for a in payload["agents"] if a["name"] == "concierge")
+    assert "grimoire-memory" in agent["skills"]
+
+
+def test_un_skill_inconnu_a_travers_le_cockpit_rend_un_400_explicable(agents_home: int) -> None:
+    """Le correctif de ce lot : avant lui, une exception levée par
+    ``workspace_post`` sur le cockpit atteignait ``http.server`` sans être
+    traduite — la connexion se coupait sans réponse JSON, jamais un 400."""
+    code, payload = _post(
+        agents_home,
+        f"{PREFIX}agents/agent-optimizer/skill?project=projet-agents-home",
+        {"skill": "un-skill-qui-n-existe-pas", "action": "assign"},
+    )
+
+    assert code == 400
+    assert "introuvable" in payload["error"].lower()
+
+
+def test_un_agent_inconnu_a_travers_le_cockpit_rend_un_404_explicable(agents_home: int) -> None:
+    code, payload = _post(
+        agents_home,
+        f"{PREFIX}agents/n-existe-pas/skill?project=projet-agents-home",
+        {"skill": "grimoire-memory", "action": "assign"},
+    )
+
+    assert code == 404
+    assert payload["error"]

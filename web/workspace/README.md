@@ -55,7 +55,7 @@ démonstration dans cette suite, et il ne doit jamais y en avoir.
 | `fonts/` | Geist et Geist Mono en woff2 | lot 1 |
 | `glossary.js` | Chargement du glossaire et pile d'infobulles épinglables | lot 2 |
 | `api.js` | **Le seul module qui appelle `fetch`.** Cible le bon projet sur les deux hôtes | figé par le squelette |
-| `spaces/piloter.js` | Flotte et projet, KPI, « À traiter » | lot 4 |
+| `spaces/piloter.js` | Flotte et projet, KPI, « À traiter », agents (clause d'emploi, outils, contexte, skills, usage — #374) | lot 4 |
 | `spaces/concevoir.js` | Toile, zoom, éditeur de graphe, bibliothèque, inspecteur de nœud | lot 3 |
 | `spaces/executer.js` | Board gouverné, portes, carte de tâche, timeline | lot 4 |
 | `spaces/observer.js` | Runtime : KPI, coût, latence, spans, traces | lot 4 |
@@ -135,6 +135,7 @@ l'atelier mono-projet, parce que le cockpit se déclare `readOnly`.
 | `GET /api/workspace/commands` | Le catalogue des sous-commandes que la Console accepte |
 | `GET /api/workspace/doctor` | `{ok, code, timed_out, command, lines[], stderr}` |
 | `GET /api/workspace/language?path=&text=&line=&col=` | IntelliSense de Source (issue 280) : `{path, tokens[], diagnostics[], completions[]?}` — `tokens[]` : `{line, start, end, kind, glossaryId?}` ; `diagnostics[]` : `{line, start, end, severity, family, message}` ; `completions[]` (seulement si `line`/`col` fournis) : `{label, kind, insertText, detail}`. `text` porte le brouillon en cours d'édition — omis, la lecture vient du disque comme `file` |
+| `GET /api/workspace/agents` | `{agents[], skills[], entry_point}` — `agents[]` : `{name, description, definition_ref, tools[], tools_origin, affinity, entry_point, max_turns, skills[], context[], layer, use_when, dont_use_when, tool_boundary, usage: {choices, last_chosen_at}}` ; `skills[]` : le catalogue disponible pour l'assignation (#374) |
 
 ### Écritures — atelier seulement (404 sur le cockpit)
 
@@ -147,13 +148,21 @@ l'atelier mono-projet, parce que le cockpit se déclare `readOnly`.
 | `POST /api/workspace/file/override` | `{path}` | `{created, override_path, from?}` |
 | `POST /api/workspace/file/write` | `{path, text}` | Le fichier relu |
 | `POST /api/workspace/command` | `{argv[]}` | `{ok, command, argv, code, stdout, stderr, output, timed_out, duration_ms}` |
+| `POST /api/workspace/agents/<nom>/skill` | `{skill, action: "assign"\|"remove"}` | `{agents[], skills[], entry_point}` (la vue rafraîchie) — écrit toujours dans `overrides`, jamais dans le kit ; skill inconnu refusé avec le message que `collect_agents` produit déjà (#374) |
+| `POST /api/workspace/agents/<nom>/fields` | Un sous-ensemble de `{use_when, dont_use_when, tool_boundary, tools[], context[]}` | idem — `tools` validé contre les verbes connus, `context` contre l'existence sur disque |
 
 Un gate de preuve rouge **n'est pas une erreur** : il revient en 200 avec
 `blocked: true` et la preuve manquante nommée. L'interface l'affiche ; elle ne
 l'avale pas.
 
-Codes : 400 refus explicable (commande hors liste blanche, état inconnu),
-403 chemin hors projet ou étage non éditable, 404 tâche ou route inconnue.
+Codes : 400 refus explicable (commande hors liste blanche, état inconnu, skill
+ou contexte d'agent introuvable), 403 chemin hors projet ou étage non
+éditable, 404 tâche, agent ou route inconnue.
+
+Les écritures d'agents sont un cas particulier de « atelier seulement » : le
+cockpit les honore aussi, mais uniquement pour son **projet de lancement**
+(celui depuis lequel `grimoire cockpit serve` a démarré, `#356`) — jamais pour
+un autre projet du registre qu'on ne fait que regarder.
 
 ## Ce que la Console accepte
 

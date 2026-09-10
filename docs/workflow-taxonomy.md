@@ -3,6 +3,9 @@
 # <img src="../assets/icons/workflow.svg" width="32" height="32" alt=""> Taxonomie des workflows Grimoire
 
 > **ADR-002** — Clarification des trois types d'exécution dans le Grimoire Kit.
+>
+> Cette page répond au **comment** un workflow s'exécute. Pour le **quand** créer un artefact
+> (agent, skill, prompt) plutôt qu'un autre, voir [Doctrine — quand créer un artefact](artifact-doctrine.md).
 
 ## <img src="../assets/icons/workflow.svg" width="28" height="28" alt=""> Les trois catégories
 
