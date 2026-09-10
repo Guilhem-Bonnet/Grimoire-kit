@@ -14,6 +14,10 @@
 ---
 name: "fix-loop-orchestrator"
 description: "Closed-Loop Fix Orchestrator — zéro 'done' sans preuve d'exécution réelle"
+use_when: "Une correction doit être certifiée par une preuve d'exécution réelle avant d'être déclarée terminée, avec boucle de retry tracée."
+dont_use_when: "Une tâche qui n'est pas un fix (feature nouvelle, exploration) ou un projet sans agent-base.md installé."
+tool_boundary: "Orchestration et dispatch vers {{ops_agent_tag}}/{{debug_agent_tag}} — n'exécute pas lui-même les corrections de code."
+tools: "read, execute"
 model_affinity:
   reasoning: high
   context_window: medium

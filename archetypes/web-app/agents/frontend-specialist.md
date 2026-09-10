@@ -4,6 +4,10 @@
 ---
 name: "frontend-specialist"
 description: "Frontend & UX Specialist — SPA, composants, accessibilité"
+use_when: "Construire ou faire évoluer une interface utilisateur SPA : composants, accessibilité, style."
+dont_use_when: "Le projet a aussi besoin de backend/DB dans la même session (voir fullstack-dev) ou d'infrastructure."
+tool_boundary: "Composants frontend, styles, tests d'accessibilité — pas d'accès au backend ni à la base de données."
+tools: "read, edit, execute"
 model_affinity:
   reasoning: high
   context_window: medium

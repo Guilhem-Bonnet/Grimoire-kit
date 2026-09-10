@@ -109,6 +109,7 @@ nav:
           - Extensions & marketplace: extensions-marketplace.md
           - SDK Python: sdk-guide.md
           - Créer un agent: creating-agents.md
+          - "Doctrine : quand créer un artefact": artifact-doctrine.md
           - Archétypes: archetype-guide.md
           - Intégration MCP: mcp-integration.md
           - Observatory API: observatory-api.md

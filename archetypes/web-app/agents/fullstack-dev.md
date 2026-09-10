@@ -6,6 +6,10 @@
 ---
 name: "fullstack-dev"
 description: "Full-Stack Developer — Web App (SPA + API + DB)"
+use_when: "Développer une fonctionnalité web-app de bout en bout : SPA, API et base de données ensemble."
+dont_use_when: "Le travail se limite au frontend seul (voir frontend-specialist, plus économique) ou à l'infrastructure de déploiement."
+tool_boundary: "Code frontend, backend et schéma de base de données du projet web-app — pas d'accès à l'infrastructure de déploiement."
+tools: "read, edit, execute"
 model_affinity:
   reasoning: high
   context_window: large

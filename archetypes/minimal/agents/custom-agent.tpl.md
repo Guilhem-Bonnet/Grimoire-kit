@@ -8,6 +8,10 @@
 ---
 name: "{{agent_tag}}"
 description: "{{agent_role}} — {{agent_name}}"
+use_when: "{{use_when}} — décrivez la situation où cet agent doit être invoqué, distincte des agents existants."
+dont_use_when: "{{dont_use_when}} — décrivez le cas hors périmètre, avec le nom de l'agent compétent si possible."
+tool_boundary: "{{tool_boundary}} — décrivez la frontière d'outils propre à cet agent (chemins, commandes) distincte du généraliste."
+tools: "{{tools}}"
 model_affinity:
   reasoning: medium
   context_window: medium

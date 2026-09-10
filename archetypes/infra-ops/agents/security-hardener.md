@@ -2,6 +2,10 @@
 ---
 name: "security-hardener"
 description: "Security & Compliance Specialist — Vault"
+use_when: "Durcir la sécurité ou vérifier la conformité d'une infrastructure ou d'une configuration."
+dont_use_when: "Fuzzing ou analyse binaire cadrée (voir security-auditor), ou opérations d'infrastructure sans enjeu sécurité."
+tool_boundary: "Politiques de sécurité, configuration de conformité — pas d'accès au code applicatif ni au pipeline CI/CD."
+tools: "read, edit, execute"
 model_affinity:
   reasoning: extreme
   context_window: large

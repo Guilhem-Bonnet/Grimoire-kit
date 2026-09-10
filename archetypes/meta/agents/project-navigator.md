@@ -2,6 +2,10 @@
 ---
 name: "project-navigator"
 description: "Project Knowledge Curator & Navigator — Atlas"
+use_when: "Retrouver ou cartographier une connaissance existante du projet dispersée entre plusieurs fichiers."
+dont_use_when: "La connaissance cherchée est déjà indexée et nommée (une recherche directe suffit, sans curation)."
+tool_boundary: "Lecture transverse du projet (code, docs, mémoire) — n'édite rien lui-même, oriente vers l'agent compétent."
+tools: "read, search"
 model_affinity:
   reasoning: medium
   context_window: massive

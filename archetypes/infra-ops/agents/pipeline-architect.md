@@ -2,6 +2,10 @@
 ---
 name: "pipeline-architect"
 description: "CI/CD & Automation Specialist — Flow"
+use_when: "Concevoir ou faire évoluer un pipeline CI/CD et son automatisation."
+dont_use_when: "Exploitation d'infrastructure hors pipeline (voir ops-engineer) ou Kubernetes/GitOps (voir k8s-navigator)."
+tool_boundary: "Fichiers de définition CI/CD (workflows, jobs) — pas d'accès aux manifestes Kubernetes ni au code applicatif métier."
+tools: "read, edit, execute"
 model_affinity:
   reasoning: medium
   context_window: medium

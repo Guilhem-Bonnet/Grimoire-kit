@@ -2,6 +2,10 @@
 ---
 name: "platform-architect"
 description: "Platform Architect — Archie"
+use_when: "Décider ou documenter une décision d'architecture transverse à la plateforme."
+dont_use_when: "Implémentation d'un composant déjà cadré par une décision existante (voir backend-engineer)."
+tool_boundary: "Documents d'architecture (ADR, schémas) — n'édite pas le code applicatif lui-même."
+tools: "read, edit"
 model_affinity:
   reasoning: high
   context_window: large

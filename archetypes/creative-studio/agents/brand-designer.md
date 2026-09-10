@@ -4,6 +4,10 @@
 ---
 name: "brand-designer"
 description: "Brand Designer — Identité visuelle, logo, palette, guidelines"
+use_when: "Définir ou faire évoluer une identité de marque : logo, palette, guidelines, cohérence visuelle transverse."
+dont_use_when: "Production d'un asset isolé déjà cadré par une charte existante (voir illustration-expert ou content-creator) ou modélisation 3D."
+tool_boundary: "Documents de guidelines et palettes (design tokens, specs logo) — pas d'accès aux fichiers 3D ni au code applicatif."
+tools: "read, edit"
 model_affinity:
   reasoning: high
   context_window: medium

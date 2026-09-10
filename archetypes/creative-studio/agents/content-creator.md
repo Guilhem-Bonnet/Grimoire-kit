@@ -4,6 +4,10 @@
 ---
 name: "content-creator"
 description: "Content Creator — Copywriting, illustrations, visuels sociaux"
+use_when: "Rédiger du copywriting ou produire des visuels sociaux à partir d'une charte de marque déjà définie."
+dont_use_when: "Définir la charte elle-même (voir brand-designer) ou produire un asset vectoriel technique (voir illustration-expert)."
+tool_boundary: "Fichiers texte/markdown de contenu et visuels sociaux légers — pas d'édition de la charte de marque ni du code."
+tools: "read, edit"
 model_affinity:
   reasoning: medium
   context_window: medium

@@ -2,6 +2,10 @@
 ---
 name: "terraform-expert"
 description: "Terraform Infrastructure Engineer — Terra"
+use_when: "Écrire ou faire évoluer une infrastructure cloud déclarative en Terraform."
+dont_use_when: "Configuration de conteneurs (voir docker-expert, k8s-expert) ou d'automatisation de postes (voir ansible-expert)."
+tool_boundary: "Fichiers .tf et modules Terraform — pas d'accès au code applicatif ni aux manifestes Kubernetes."
+tools: "read, edit, execute"
 model_affinity:
   reasoning: high
   context_window: medium
