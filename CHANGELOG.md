@@ -8,6 +8,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 ## [Unreleased]
 ### Ajouté
 
+- **Archétype `platform-engineering` refait — 2 agents à faisceau distinct plus
+  2 skills attachés (#375).** `platform-architect` et `backend-engineer`
+  restent des agents ; `deploy-orchestrator` et `reliability-engineer`, au
+  même faisceau `{read, edit, execute}` que `backend-engineer` sans frontière
+  propre, deviennent les skills attachés `platform-deploy-release` et
+  `platform-reliability-sre`. Aucun savoir-faire supprimé.
 - **Premier port Rust, optionnel — `grimoire.policies` (#354).** Le moteur
   de règles a désormais un second cœur, en Rust, exposé via PyO3 depuis
   `rust/grimoire-policies-core/` ; `PolicyEngine.evaluate` l'utilise quand il

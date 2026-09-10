@@ -2,8 +2,8 @@ $schema: "grimoire-archetype-dna/v1"
 
 id: platform-engineering
 name: "Platform Engineering"
-version: "1.0.0"
-description: "Ingénierie de plateforme end-to-end — Architecture système, backend, déploiement, fiabilité. De l'idée au service observable en production."
+version: "1.1.0"
+description: "Ingénierie de plateforme end-to-end — 2 agents à faisceau d'outils distinct (architecte, ingénieur backend généraliste) pour l'architecture système, le backend, le déploiement, la fiabilité. De l'idée au service observable en production ; déploiement/release et fiabilité/SRE portés par des skills attachés au généraliste plutôt que par des agents dédiés au même faisceau (issue #375)."
 icon: "temple"
 author: "grimoire-kit"
 tags: [platform, architecture, backend, sre, reliability, observability, deployment, gitops, ddd, microservices, event-driven]
@@ -121,16 +121,28 @@ acceptance_criteria:
 agents:
   - path: "../../archetypes/platform-engineering/agents/platform-architect.md"
     required: true
-    description: "Archie — Architecture système, DDD, event-driven, scaling"
+    description: "Archie — Architecture système, DDD, event-driven, scaling (faisceau outils distinct : read+edit, pas execute)"
   - path: "../../archetypes/platform-engineering/agents/backend-engineer.md"
     required: true
-    description: "Stack — Backend agnostique, APIs, CQRS, event sourcing"
-  - path: "../../archetypes/platform-engineering/agents/reliability-engineer.md"
-    required: true
-    description: "Guardian — SRE, SLO/SLI, observabilité, incident response"
-  - path: "../../archetypes/platform-engineering/agents/deploy-orchestrator.md"
-    required: true
-    description: "Convoy — Déploiement progressif, GitOps, pipelines"
+    description: "Stack — généraliste backend : APIs, CQRS, event sourcing, plus les skills attachés platform-deploy-release, platform-reliability-sre"
+
+# Skills attachés par défaut à un agent de cet archétype (issue #375) : le
+# savoir-faire de deux anciens agents (deploy-orchestrator, reliability-engineer)
+# qui partageaient tous le faisceau outils {read, edit, execute} de
+# backend-engineer sans aucune frontière propre — rien ne les distinguait au
+# sens de la garde de #372. Le contenu de chaque agent devient le corps du
+# skill correspondant, sans perte ; ce qui change, c'est que la session ne
+# paie plus sa description à chaque tour, seulement quand backend-engineer
+# travaille (voir #377). Cette liste documente l'attachement ; l'attachement
+# effectif et vérifié au build est le champ `skills:` du frontmatter de
+# l'agent porteur.
+skills:
+  - path: "../../archetypes/platform-engineering/skills/platform-deploy-release.md"
+    attached_to: backend-engineer
+    description: "Ex-agent Convoy — pipeline CI/CD, rollout progressif, rollback, containerisation, Helm, feature flags"
+  - path: "../../archetypes/platform-engineering/skills/platform-reliability-sre.md"
+    attached_to: backend-engineer
+    description: "Ex-agent Guardian — SLO/SLI, observabilité, incident response, alerting, runbooks, chaos engineering"
 
 workflows: []
 
@@ -147,6 +159,10 @@ auto_detect:
   exclusive: false  # Peut coexister avec d'autres archétypes
 
 changelog:
+  - version: "1.1.0"
+    date: "2026-09-10"
+    changes:
+      - "Refonte : 2 agents à faisceau distinct (platform-architect, backend-engineer) au lieu de 4 au même faisceau ; deploy-orchestrator et reliability-engineer deviennent des skills attachés à backend-engineer, sans perte de savoir-faire (issue #375)"
   - version: "1.0.0"
     date: "2026-03-06"
     changes:
