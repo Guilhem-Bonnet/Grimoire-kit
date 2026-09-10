@@ -151,6 +151,10 @@ def layered_files(
 
 
 _AGENT_TAG_RE = re.compile(r"^name:\s*\"?([\w-]+)\"?", re.MULTILINE)
+#: A ``name:`` field is present with *some* value, valid identifier or not —
+#: distinguishes "no name declared, the file stem is the identity" from "a
+#: name is declared but unusable", which must not be treated the same way.
+_AGENT_NAME_KEY_RE = re.compile(r"^name:\s*\S", re.MULTILINE)
 _AGENT_PERSONA_RE = re.compile(r'<agent[^>]*\bname="([^"]+)"')
 
 
@@ -158,20 +162,38 @@ def agent_identity(path: Path) -> tuple[str, str] | None:
     """Return ``(tag, persona name)`` read from an agent file, or ``None``.
 
     The one parse both readers of "who is this agent" must share: the doctor
-    deciding whether an installed agent exists, and the routing map deciding
-    whether the entry-point persona can reach it. Reading either from a
-    different source than the other is how an override agent went invisible
-    to one while being routable by the other (issue #345).
+    deciding whether an installed agent exists, the routing map deciding
+    whether the entry-point persona can reach it, and — since issue #381 —
+    the host surface builder deciding whether to project a persona at all.
+    Reading either from a different source than the other is how an override
+    agent went invisible to one while being routable by the other
+    (issue #345), or how the same unrendered agent template got named
+    differently by two callers (issue #381).
+
+    Two cases both look like "no usable ``name:``" but are not the same
+    fact about the file:
+
+    - no ``name:`` field at all — a minimal, hand-written agent stub. Its
+      file stem *is* its identity; every caller of this function already
+      falls back to it, so the fallback belongs here, once.
+    - a ``name:`` field present but unusable — chiefly the blank agent
+      template's ``name: "{{agent_tag}}"``, left unrendered on purpose until
+      a user fills it in. This is not yet an agent, and no reader should
+      invent one for it by falling back to the file name.
     """
     try:
         text = path.read_text(encoding="utf-8")
     except OSError:
         return None
-    tag = _AGENT_TAG_RE.search(text)
-    if not tag:
+    tag_match = _AGENT_TAG_RE.search(text)
+    if tag_match:
+        tag = tag_match.group(1)
+    elif _AGENT_NAME_KEY_RE.search(text):
         return None
+    else:
+        tag = path.stem
     persona = _AGENT_PERSONA_RE.search(text)
-    return tag.group(1), (persona.group(1) if persona else tag.group(1))
+    return tag, (persona.group(1) if persona else tag)
 
 
 def installed_agents(project_root: Path, *, include_legacy: bool = True) -> dict[str, tuple[str, Path]]:
