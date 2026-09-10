@@ -314,6 +314,10 @@ class ProjectSurface:
     """True when the project is enrolled in the agentic standard. Governance
     hooks are only emitted for enrolled projects: a blocking gate on a project
     with no gates to check would fail closed on nothing."""
+    notes: tuple[str, ...] = ()
+    """Constats non bloquants relevés en construisant la surface — par exemple
+    deux agents livrés par le kit au faisceau identique. Une dette du kit ne
+    doit pas empêcher un projet de se synchroniser ; elle doit rester visible."""
 
     def entry_agent(self) -> AgentSpec | None:
         for agent in self.agents:

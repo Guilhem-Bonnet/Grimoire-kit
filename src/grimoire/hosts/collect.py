@@ -482,6 +482,15 @@ def collect_mcp_servers(project_root: Path) -> tuple[McpServerSpec, ...]:
     return (McpServerSpec(name="grimoire", command="grimoire-mcp"),)
 
 
+def _is_override(definition_ref: str) -> bool:
+    """Un agent vit-il dans la couche de personnalisation du projet ?
+
+    ``definition_ref`` est le chemin du fichier relatif à la racine du projet
+    (voir :func:`collect_agents`) ; la couche est donc lisible dans son préfixe.
+    """
+    return definition_ref.replace("\\", "/").startswith(f"{layout.OVERRIDES_DIR}/")
+
+
 def build_surface(project_root: Path, *, project_name: str | None = None) -> ProjectSurface:
     """Read *project_root* into the surface every emitter renders from.
 
@@ -494,14 +503,30 @@ def build_surface(project_root: Path, *, project_name: str | None = None) -> Pro
     skills = collect_skills(root, governed=governed)
     agents = collect_agents(root, known_skills=frozenset(s.slug for s in skills))
     duplicates = duplicate_agent_fingerprints(agents)
-    if duplicates:
-        pairs = ", ".join(f"{a} == {b}" for a, b in duplicates)
+    # Deux régimes, parce que deux responsabilités. Un agent créé dans les
+    # overrides du projet qui a le même faisceau qu'un autre est une erreur de
+    # l'utilisateur, et le système émergent repose sur ce refus : on lève. Deux
+    # agents livrés par le kit au même faisceau sont une dette du kit (#375) ;
+    # la faire porter à chaque projet en bloquant son `init` reviendrait à
+    # punir l'utilisateur pour notre retard. On la garde visible, sans bloquer.
+    by_name = {agent.name: agent for agent in agents}
+    strict = [pair for pair in duplicates if any(_is_override(by_name[n].definition_ref) for n in pair if n in by_name)]
+    if strict:
+        pairs = ", ".join(f"{a} == {b}" for a, b in strict)
         raise GrimoireAgentError(
             f"Agents au faisceau identique (outils, contexte, skills) : {pairs}. "
             "Deux agents avec le même faisceau sont le même agent sous deux noms — "
             "fusionnez-les ou distinguez leur périmètre réel."
         )
+    notes: tuple[str, ...] = ()
+    if duplicates:
+        pairs = ", ".join(f"{a} == {b}" for a, b in duplicates)
+        notes = (
+            f"Agents livrés par le kit au faisceau identique (outils, contexte, skills) : {pairs}. "
+            "Dette connue du kit (Grimoire-kit#375), sans effet sur ce projet.",
+        )
     return ProjectSurface(
+        notes=notes,
         project_name=project_name or root.name,
         agents=agents,
         skills=skills,

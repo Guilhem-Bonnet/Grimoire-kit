@@ -1065,3 +1065,62 @@ def test_no_host_can_open_a_session_inside_an_agent(project: Path) -> None:
             assert "session_start" in gap.fallback
         else:
             assert profile.instructions_entrypoint in gap.fallback
+
+
+def _write_agent_in(root: Path, tier_dir: str, name: str) -> None:
+    """Un agent au faisceau volontairement banal, dans la couche demandée."""
+    d = root / tier_dir
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"{name}.md").write_text(
+        "\n".join(
+            [
+                "---",
+                f'name: "{name}"',
+                f'description: "{name} — rôle de test"',
+                'tools: "read, edit"',
+                "---",
+                "Tu lis et tu édites.",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_deux_agents_du_kit_au_meme_faisceau_donnent_une_note_pas_une_erreur(tmp_path: Path) -> None:
+    """Dette du kit (Grimoire-kit#375) : visible, jamais bloquante pour le projet."""
+    from grimoire.hosts.collect import build_surface
+
+    _write_agent_in(tmp_path, "_grimoire/kit/agents", "kit-a")
+    _write_agent_in(tmp_path, "_grimoire/kit/agents", "kit-b")
+
+    surface = build_surface(tmp_path)
+
+    assert surface.notes, "la collision doit rester visible"
+    assert "kit-a == kit-b" in surface.notes[0]
+    assert "#375" in surface.notes[0]
+
+
+def test_un_agent_override_au_meme_faisceau_qu_un_autre_est_refuse(tmp_path: Path) -> None:
+    """Un agent créé dans le projet doit se distinguer : c'est le socle du système émergent."""
+    from grimoire.core.exceptions import GrimoireAgentError
+    from grimoire.hosts.collect import build_surface
+
+    _write_agent_in(tmp_path, "_grimoire/kit/agents", "kit-a")
+    _write_agent_in(tmp_path, "_grimoire/overrides/agents", "mon-agent")
+
+    with pytest.raises(GrimoireAgentError, match="faisceau identique"):
+        build_surface(tmp_path)
+
+
+def test_deux_agents_distincts_ne_laissent_aucune_note(tmp_path: Path) -> None:
+    from grimoire.hosts.collect import build_surface
+
+    _write_agent_in(tmp_path, "_grimoire/kit/agents", "kit-a")
+    d = tmp_path / "_grimoire/kit/agents"
+    (d / "kit-c.md").write_text(
+        '---\nname: "kit-c"\ndescription: "autre"\ntools: "read"\n---\nTu lis seulement.\n',
+        encoding="utf-8",
+    )
+
+    assert build_surface(tmp_path).notes == ()
