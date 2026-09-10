@@ -198,6 +198,16 @@ module = [
 ]
 ignore_missing_imports = true
 
+# Optional compiled core (issue #354): never installed via pip/extras, only
+# ever present when a contributor ran `maturin develop` locally in
+# rust/grimoire-policies-core/ or in the dedicated Rust CI job. Absent
+# everywhere else, including the normal typecheck job — suppressed here
+# rather than with an inline `type: ignore` so the comment doesn't have to
+# track whether mypy currently sees it as "not found" or "found, untyped".
+[[tool.mypy.overrides]]
+module = ["grimoire_policies_core"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]

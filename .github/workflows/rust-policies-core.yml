@@ -1,0 +1,108 @@
+name: Rust policies core
+
+# Job dédié et isolé pour le cœur Rust optionnel de grimoire.policies
+# (rust/grimoire-policies-core/, issue #354). Ne touche à rien de ce que
+# publish.yml construit ou publie : la wheel restera la wheel universelle
+# actuelle tant que ce cœur reste optionnel, et ce fichier ne déclare aucune
+# dépendance vers publish.yml ni release.yml. Un échec ici n'empêche ni un
+# merge (sauf si la branche protégée l'exige explicitement), ni une release.
+on:
+  push:
+    branches: [main, "grimoire/**"]
+    paths:
+      - "rust/grimoire-policies-core/**"
+      - "src/grimoire/policies/**"
+      - "tests/unit/test_policies.py"
+      - "tests/unit/test_policies_rust_parity.py"
+      - "tests/unit/test_security_policies.py"
+      - "pyproject.toml"
+      - ".github/workflows/rust-policies-core.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "rust/grimoire-policies-core/**"
+      - "src/grimoire/policies/**"
+      - "tests/unit/test_policies.py"
+      - "tests/unit/test_policies_rust_parity.py"
+      - "tests/unit/test_security_policies.py"
+      - "pyproject.toml"
+      - ".github/workflows/rust-policies-core.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  cargo:
+    name: "cargo fmt + test (pure logic, no Python)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "rust/grimoire-policies-core -> target"
+
+      - name: Format check
+        run: cargo fmt --manifest-path rust/grimoire-policies-core/Cargo.toml --check
+
+      - name: Unit tests
+        # --no-default-features : la feature `extension-module` de PyO3 (par
+        # défaut, requise pour que l'extension soit chargeable par Python)
+        # empêche de lier le binaire de test — voir le commentaire en tête
+        # de rust/grimoire-policies-core/Cargo.toml. La logique testée ici
+        # (evaluate_core) ne touche à aucun type PyO3, donc aucun
+        # interpréteur Python n'est nécessaire pour ce job.
+        run: cargo test --no-default-features --manifest-path rust/grimoire-policies-core/Cargo.toml
+
+  extension-parity:
+    name: "Build extension + Python parity"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "rust/grimoire-policies-core -> target"
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install package + dev deps
+        run: pip install -e ".[dev]"
+
+      - name: Build and install the compiled core
+        # `maturin develop` exige un virtualenv actif ; le runner utilise le
+        # Python de l'image, sans venv. On construit donc la roue et on
+        # l'installe, ce qui donne le même résultat sans cette contrainte.
+        run: |
+          pip install "maturin>=1.7,<2"
+          maturin build --release --manifest-path rust/grimoire-policies-core/Cargo.toml --out dist-rust
+          pip install --force-reinstall dist-rust/*.whl
+
+      - name: Verify the compiled core is importable
+        run: python -c "import grimoire_policies_core; print('grimoire_policies_core', grimoire_policies_core.__version__)"
+
+      - name: Policy tests — contract unmodified, both backends, parity
+        # tests/unit/test_policies.py est le contrat : il tourne tel quel ici
+        # (module compilé présent) et dans le job SDK normal (absent) — voir
+        # ci-sdk.yml. test_policies_rust_parity.py force chaque backend tour
+        # à tour (GRIMOIRE_POLICIES_BACKEND) et compare les verdicts.
+        run: pytest tests/unit/test_policies.py tests/unit/test_policies_rust_parity.py tests/unit/test_security_policies.py -q --tb=short
+
+      - name: Full SDK suite with the compiled core loaded
+        # Preuve que rien d'autre dans le kit ne dépend de l'absence du
+        # module compilé (import optionnel, aucun autre appelant ne le
+        # regarde) : la suite complète doit rester verte avec lui présent.
+        run: pytest tests/unit/ tests/test_agentic_standard.py -q --tb=short -x
