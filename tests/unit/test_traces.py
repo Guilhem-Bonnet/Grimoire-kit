@@ -126,6 +126,48 @@ class TestTraceLedger:
         rate = ledger.policy_block_rate()
         assert rate == 0.5
 
+    def test_agent_dispatch_counts_ignores_untagged_traces(self, tmp_path) -> None:
+        """Un gate de tâche ou un appel modèle n'est pas un choix d'agent (issue #365)."""
+        ledger = TraceLedger(tmp_path)
+        _make_trace(ledger, run_id="RUN-untagged")
+        assert ledger.agent_dispatch_counts() == {}
+
+    def test_agent_dispatch_counts_counts_and_dates_tagged_traces(self, tmp_path) -> None:
+        from grimoire.traces.ledger import AGENT_DISPATCH_TAG
+
+        ledger = TraceLedger(tmp_path)
+        for run_id, started_at in (
+            ("RUN-a1", "2026-01-01T00:00:00+00:00"),
+            ("RUN-a2", "2026-01-02T00:00:00+00:00"),
+        ):
+            ledger.record(
+                run_id=run_id,
+                workflow_instance_id="",
+                mission_id="",
+                task_id="",
+                recipe_id="grimoire.entry-persona",
+                outcome=TraceOutcome.SUCCESS,
+                started_at=started_at,
+                agent_id="concierge",
+                tags=[AGENT_DISPATCH_TAG],
+            )
+        ledger.record(
+            run_id="RUN-b1",
+            workflow_instance_id="",
+            mission_id="",
+            task_id="",
+            recipe_id="grimoire.entry-persona",
+            outcome=TraceOutcome.SUCCESS,
+            started_at="2026-01-03T00:00:00+00:00",
+            agent_id="scribe",
+            tags=[AGENT_DISPATCH_TAG],
+        )
+        counts = ledger.agent_dispatch_counts()
+        assert counts == {
+            "concierge": {"count": 2, "last_seen": "2026-01-02T00:00:00+00:00"},
+            "scribe": {"count": 1, "last_seen": "2026-01-03T00:00:00+00:00"},
+        }
+
     def test_export_otel_jsonl(self, tmp_path) -> None:
         """One `invoke_agent` parent span, plus one `execute_tool` child per call."""
         ledger = TraceLedger(tmp_path)

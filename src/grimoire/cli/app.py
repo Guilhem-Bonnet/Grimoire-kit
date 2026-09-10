@@ -1009,6 +1009,48 @@ def registry_search(
     console.print(tbl)
 
 
+@registry_app.command("dispatches")
+def registry_dispatches(ctx: typer.Context) -> None:
+    """Compter les agents réellement choisis comme persona d'entrée (issue #365).
+
+    Lit le TraceLedger du projet (`_grimoire-output/traces/traces.jsonl`),
+    pas la carte statique des agents déclarés : `registry list` dit ce qui
+    existe, cette commande dit ce qui a été *choisi*, combien de fois, et
+    quand pour la dernière fois — le fait qui manquait pour juger si un agent
+    livré sert encore à quelqu'un. Un journal absent vaut zéro choix observé,
+    jamais une erreur.
+    """
+    from grimoire.core.standard_generation import TRACES_DIR
+    from grimoire.tools._common import find_project_root
+    from grimoire.traces.ledger import TraceLedger
+
+    try:
+        root = find_project_root()
+    except FileNotFoundError:
+        console.print("[red]Not in a Grimoire project — cannot locate kit root.[/red]")
+        raise typer.Exit(1) from None
+
+    counts = TraceLedger(root / TRACES_DIR).agent_dispatch_counts()
+
+    if _get_fmt(ctx) == "json":
+        typer.echo(json.dumps(counts, indent=2, ensure_ascii=False))
+        return
+
+    if not counts:
+        console.print("[yellow]Aucun choix d'agent enregistré.[/yellow]")
+        return
+
+    tbl = Table(title="Choix d'agent observés")
+    tbl.add_column("Agent", style="bold")
+    tbl.add_column("Occurrences", justify="right")
+    tbl.add_column("Dernier choix")
+
+    for agent_id, stats in sorted(counts.items(), key=lambda kv: kv[1]["count"], reverse=True):
+        tbl.add_row(agent_id, str(stats["count"]), stats["last_seen"] or "—")
+
+    console.print(tbl)
+
+
 # ── grimoire diff ─────────────────────────────────────────────────────────────────
 
 
@@ -1522,7 +1564,7 @@ def self_version(ctx: typer.Context) -> None:
             from urllib.request import urlopen
 
             url = "https://pypi.org/pypi/grimoire-kit/json"
-            with urlopen(url, timeout=5) as resp:  # noqa: S310
+            with urlopen(url, timeout=5) as resp:
                 pypi_data = json.loads(resp.read())
                 latest = pypi_data.get("info", {}).get("version")
         except Exception:

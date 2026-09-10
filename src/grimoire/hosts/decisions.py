@@ -411,6 +411,36 @@ sous-agent : **{entry.name}** — {entry.description}
     return text, entry.name
 
 
+def _record_agent_dispatch(project_root: Path, agent_name: str, task_id: str) -> None:
+    """Journaliser dans le TraceLedger que *agent_name* a été choisi comme persona d'entrée.
+
+    Symétrique de ``MissionService._record_refusal`` : le fait constaté (ici,
+    un choix d'agent, là-bas, un gate rouge) n'est jamais la source d'un état
+    métier, seulement une entrée dans le journal d'observabilité qui permet
+    d'y répondre plus tard. Best-effort — un journal indisponible ou
+    illisible ne doit jamais faire échouer l'activation de session qu'il se
+    contente d'observer (issue #365).
+    """
+    try:
+        from grimoire.core.standard_generation import TRACES_DIR
+        from grimoire.traces.ledger import AGENT_DISPATCH_TAG, TraceLedger
+        from grimoire.traces.schemas import TraceOutcome
+
+        TraceLedger(project_root / TRACES_DIR).record(
+            run_id=f"entry-persona-{uuid.uuid4().hex[:12]}",
+            workflow_instance_id="",
+            mission_id="",
+            task_id=task_id,
+            recipe_id="grimoire.entry-persona",
+            outcome=TraceOutcome.SUCCESS,
+            started_at=datetime.now(UTC).isoformat(),
+            agent_id=agent_name,
+            tags=[AGENT_DISPATCH_TAG],
+        )
+    except Exception:  # noqa: S110 — observabilité : jamais au prix de l'activation elle-même
+        pass
+
+
 def _claimed_task_recall(project_root: Path, task_id: str) -> str:
     """The claim's recall — only for a task someone has actually claimed.
 
@@ -494,6 +524,8 @@ def decide_activation(hook: HookInput) -> Decision:
     task_id = active_task_id(hook.project_root)
     directive = activation_context_text(hook.project_root, task_id=task_id)
     persona, entry_name = entry_persona_context(hook.project_root)
+    if entry_name:
+        _record_agent_dispatch(hook.project_root, entry_name, task_id)
     recall = _claimed_task_recall(hook.project_root, task_id)
     providers_line = _providers_status_line(hook.project_root)
     context = "\n".join(part for part in (persona, recall, directive, providers_line) if part)

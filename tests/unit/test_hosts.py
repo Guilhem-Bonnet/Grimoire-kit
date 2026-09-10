@@ -1042,6 +1042,43 @@ def test_an_entry_that_names_no_agent_is_reported_not_invented(project: Path) ->
     assert entry_persona_context(project) == ("", "")
 
 
+def test_choosing_an_entry_persona_is_recorded_in_the_trace_ledger(project: Path) -> None:
+    """Le fait que #365 demande : quel agent, quand — écrit là où le choix se fait."""
+    from grimoire.core.standard_generation import TRACES_DIR
+    from grimoire.traces.ledger import TraceLedger
+
+    _session_start(project)
+    counts = TraceLedger(project / TRACES_DIR).agent_dispatch_counts()
+    assert set(counts) == {"concierge"}
+    assert counts["concierge"]["count"] == 1
+    assert counts["concierge"]["last_seen"]
+
+
+def test_no_entry_persona_writes_nothing_to_the_trace_ledger(tmp_path: Path) -> None:
+    """Symétrique du fait précédent : rien à observer, rien d'écrit."""
+    from grimoire.core.standard_generation import TRACES_DIR
+    from grimoire.traces.ledger import TraceLedger
+
+    _write_agent(tmp_path, "scribe", "Tu rédiges la documentation.")
+    assert entry_persona_context(tmp_path) == ("", "")
+    _session_start(tmp_path)
+    assert TraceLedger(tmp_path / TRACES_DIR).agent_dispatch_counts() == {}
+
+
+def test_an_unwritable_trace_ledger_never_breaks_session_start(project: Path) -> None:
+    """Best-effort : un journal illisible n'est pas au prix de l'activation elle-même."""
+    from grimoire.core.standard_generation import TRACES_DIR
+
+    traces_dir = project / TRACES_DIR
+    traces_dir.parent.mkdir(parents=True, exist_ok=True)
+    # Un fichier régulier à l'emplacement du dossier attendu fait échouer le
+    # `mkdir` du TraceLedger — exactement le type de panne qu'un journal
+    # absent ou illisible peut produire en pratique.
+    traces_dir.write_text("pas un dossier", encoding="utf-8")
+    context = _session_start(project)
+    assert "**concierge**" in context
+
+
 def test_no_host_can_open_a_session_inside_an_agent(project: Path) -> None:
     """Le manque est déclaré, pas commenté — et chaque hôte nomme son substitut."""
     del project

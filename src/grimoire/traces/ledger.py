@@ -39,7 +39,14 @@ from grimoire.traces.schemas import (
     TraceRecord,
 )
 
-__all__ = ["TraceLedger"]
+__all__ = ["AGENT_DISPATCH_TAG", "TraceLedger"]
+
+#: Tag qui marque un enregistrement comme « un agent a été choisi » plutôt
+#: qu'un gate de tâche ou un appel modèle — le seul filtre dont
+#: ``TraceLedger.agent_dispatch_counts`` a besoin. Défini ici, pas au point
+#: d'écriture (``hosts.decisions``), pour qu'écriture et lecture partagent
+#: la même constante plutôt que deux chaînes qui pourraient diverger.
+AGENT_DISPATCH_TAG = "agent.dispatch"
 
 _OTEL_SPAN_KIND_INTERNAL = "SPAN_KIND_INTERNAL"
 _OTEL_STATUS_OK = "STATUS_CODE_OK"
@@ -184,6 +191,27 @@ class TraceLedger:
         if outcome:
             traces = [t for t in traces if t.outcome == outcome]
         return traces
+
+    def agent_dispatch_counts(self) -> dict[str, dict[str, Any]]:
+        """Compter les choix d'agent journalisés par ``hosts.decisions._record_agent_dispatch``.
+
+        Filtre sur le tag ``agent.dispatch`` — le seul type d'écriture de ce
+        journal qui répond à « quel agent a été choisi », distinct des gates
+        de tâche et des appels modèle qui vivent dans le même fichier.
+        Retourne, par ``agent_id`` : le nombre d'occurrences et l'horodatage
+        (``started_at``) de la plus récente — exactement ce que l'issue #365
+        pose comme critère d'arrêt (« combien de fois, et quand pour la
+        dernière fois »).
+        """
+        counts: dict[str, dict[str, Any]] = {}
+        for trace in self._load_all():
+            if AGENT_DISPATCH_TAG not in trace.tags or not trace.agent_id:
+                continue
+            entry = counts.setdefault(trace.agent_id, {"count": 0, "last_seen": ""})
+            entry["count"] += 1
+            if trace.started_at > entry["last_seen"]:
+                entry["last_seen"] = trace.started_at
+        return counts
 
     def policy_block_rate(self, mission_id: str | None = None) -> float:
         """Fraction of tool calls that were blocked."""
