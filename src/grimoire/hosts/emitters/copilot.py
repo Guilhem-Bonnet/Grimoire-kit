@@ -65,7 +65,24 @@ _WIRE_NAMES: dict[HookEvent, str] = {
 }
 
 
-def _agent_file(agent: AgentSpec, surface: ProjectSurface) -> EmittedFile:
+def _attached_skill_section(skill: SkillSpec) -> str:
+    """Fold *skill*'s body into the file of the agent that owns it.
+
+    Same reasoning as the Claude Code emitter (see there): the custom-agent
+    contract (``.github/agents/*.agent.md``) accepts arbitrary Markdown body
+    and is read only when that agent is activated, so folding the skill body
+    in achieves the same lazy attachment — the format permits the
+    equivalent, no :class:`Degradation` needed for this part.
+    """
+    header = Emitter.frontmatter({"allowed-tools": list(map_verbs(skill.tools, _TOOL_TABLE))})
+    return f"""
+## Compétence attachée : {skill.name}
+
+{header}
+{skill.body}"""
+
+
+def _agent_file(agent: AgentSpec, surface: ProjectSurface, owned_skills: tuple[SkillSpec, ...] = ()) -> EmittedFile:
     # Pas de `model` ici : le contrat documenté pour .github/agents/*.agent.md
     # (https://code.visualstudio.com/docs/copilot/customization/custom-agents)
     # accepte un nom de modèle explicite ou une liste de repli, mais ne
@@ -96,6 +113,8 @@ Tu actives la persona Grimoire **{agent.name}** du projet {surface.project_name}
 4. Frontière d'outils : {", ".join(v.value for v in agent.tools)}. N'en sors pas.
 5. Rends un résultat vérifiable ; signale comme non vérifié ce que tu n'as pas vérifié.
 """
+    for skill in owned_skills:
+        content = f"{content}\n{_attached_skill_section(skill)}"
     return EmittedFile(relpath=GH_DIR / "agents" / f"{agent.name}.agent.md", content=content)
 
 
@@ -143,6 +162,8 @@ def _hook_file(hook: HookSpec) -> EmittedFile:
 
 
 def _readme(surface: ProjectSurface, blocking: list[HookSpec], gaps: list[Degradation]) -> EmittedFile:
+    attached = sum(len(agent.skills) for agent in surface.agents)
+    transversal = len(surface.skills) - len({slug for agent in surface.agents for slug in agent.skills})
     lines = [
         managed_header(".md"),
         "",
@@ -154,7 +175,8 @@ def _readme(surface: ProjectSurface, blocking: list[HookSpec], gaps: list[Degrad
         "| Surface | Contenu |",
         "|---|---|",
         f"| Agents | {len(surface.agents)} — `.github/agents/` |",
-        f"| Skills | {len(surface.skills)} — `.github/skills/` |",
+        f"| Skills transversales | {transversal} — `.github/skills/` |",
+        f"| Skills attachées | {attached} — repliées dans le fichier de leur agent |",
         f"| Prompts | {len([c for c in surface.commands if c.source != 'workflow'])} — `.github/prompts/` |",
         f"| Hooks | {len(surface.hooks)} — `.github/hooks/` |",
         "",
@@ -201,8 +223,19 @@ class CopilotEmitter(Emitter):
     def plan(self, surface: ProjectSurface, project_root: Path) -> EmitPlan:
         del project_root
         files: list[EmittedFile] = []
-        files.extend(_agent_file(agent, surface) for agent in surface.agents)
-        files.extend(_skill_file(skill) for skill in surface.skills)
+        by_slug = {skill.slug: skill for skill in surface.skills}
+        attached_slugs = {slug for agent in surface.agents for slug in agent.skills}
+        files.extend(
+            _agent_file(
+                agent,
+                surface,
+                owned_skills=tuple(by_slug[slug] for slug in agent.skills if slug in by_slug),
+            )
+            for agent in surface.agents
+        )
+        # A skill an agent owns is folded into that agent's own file above;
+        # only skills nobody declared stay transversal, at project scope.
+        files.extend(_skill_file(skill) for skill in surface.skills if skill.slug not in attached_slugs)
         # The kit's workflow prompts are already placed verbatim under
         # `.github/prompts/` by the scaffolder. Re-rendering them here would
         # make two writers for one path, and every sync would report a

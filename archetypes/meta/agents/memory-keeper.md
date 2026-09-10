@@ -6,6 +6,8 @@ use_when: "Vérifier ou faire évoluer la qualité de la mémoire du projet (con
 dont_use_when: "Recherche ponctuelle dans la mémoire sans enjeu de qualité (une simple lecture suffit)."
 tool_boundary: "Fichiers sous _grimoire/_memory/ — pas d'accès au code applicatif ni aux agents métier."
 tools: "read, edit"
+skills:
+  - grimoire-memory
 model_affinity:
   reasoning: medium
   context_window: medium

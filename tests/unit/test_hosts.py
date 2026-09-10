@@ -275,8 +275,19 @@ def test_claude_model_affinity_crosses_reasoning_and_cost(project: Path) -> None
     - Sans signal fort dans un sens ou l'autre (medium/medium), `inherit`
       reste le défaut honnête.
     """
-    _write_agent(project, "petit-malin", "Tu triages à bas coût.", reasoning="medium", cost="low")
-    _write_agent(project, "gros-cerveau", "Tu raisonnes beaucoup, pour pas cher.", reasoning="high", cost="low")
+    # `tools` diffère explicitement entre les deux : sans ça, les deux fiches
+    # inférent la même frontière (read, search) et deviennent indiscernables
+    # au sens de la garde de distinction (#372) — un faux positif ici, pas
+    # une vraie régression, mais la garde n'a aucun moyen de le savoir.
+    _write_agent(project, "petit-malin", "Tu triages à bas coût.", tools="'read'", reasoning="medium", cost="low")
+    _write_agent(
+        project,
+        "gros-cerveau",
+        "Tu raisonnes beaucoup, pour pas cher.",
+        tools="'read', 'edit'",
+        reasoning="high",
+        cost="low",
+    )
     emitter = emitter_for(HostId.CLAUDE_CODE_CLI)
     assert emitter is not None
     apply_plan(emitter.plan(build_surface(project), project), project)
@@ -1054,3 +1065,62 @@ def test_no_host_can_open_a_session_inside_an_agent(project: Path) -> None:
             assert "session_start" in gap.fallback
         else:
             assert profile.instructions_entrypoint in gap.fallback
+
+
+def _write_agent_in(root: Path, tier_dir: str, name: str) -> None:
+    """Un agent au faisceau volontairement banal, dans la couche demandée."""
+    d = root / tier_dir
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"{name}.md").write_text(
+        "\n".join(
+            [
+                "---",
+                f'name: "{name}"',
+                f'description: "{name} — rôle de test"',
+                'tools: "read, edit"',
+                "---",
+                "Tu lis et tu édites.",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_deux_agents_du_kit_au_meme_faisceau_donnent_une_note_pas_une_erreur(tmp_path: Path) -> None:
+    """Dette du kit (Grimoire-kit#375) : visible, jamais bloquante pour le projet."""
+    from grimoire.hosts.collect import build_surface
+
+    _write_agent_in(tmp_path, "_grimoire/kit/agents", "kit-a")
+    _write_agent_in(tmp_path, "_grimoire/kit/agents", "kit-b")
+
+    surface = build_surface(tmp_path)
+
+    assert surface.notes, "la collision doit rester visible"
+    assert "kit-a == kit-b" in surface.notes[0]
+    assert "#375" in surface.notes[0]
+
+
+def test_un_agent_override_au_meme_faisceau_qu_un_autre_est_refuse(tmp_path: Path) -> None:
+    """Un agent créé dans le projet doit se distinguer : c'est le socle du système émergent."""
+    from grimoire.core.exceptions import GrimoireAgentError
+    from grimoire.hosts.collect import build_surface
+
+    _write_agent_in(tmp_path, "_grimoire/kit/agents", "kit-a")
+    _write_agent_in(tmp_path, "_grimoire/overrides/agents", "mon-agent")
+
+    with pytest.raises(GrimoireAgentError, match="faisceau identique"):
+        build_surface(tmp_path)
+
+
+def test_deux_agents_distincts_ne_laissent_aucune_note(tmp_path: Path) -> None:
+    from grimoire.hosts.collect import build_surface
+
+    _write_agent_in(tmp_path, "_grimoire/kit/agents", "kit-a")
+    d = tmp_path / "_grimoire/kit/agents"
+    (d / "kit-c.md").write_text(
+        '---\nname: "kit-c"\ndescription: "autre"\ntools: "read"\n---\nTu lis seulement.\n',
+        encoding="utf-8",
+    )
+
+    assert build_surface(tmp_path).notes == ()
