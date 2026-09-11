@@ -19,6 +19,16 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   des agents (contexte propre via MCP + boucle vision) ; `content-creator`,
   au même faisceau que `brand-designer` sans frontière propre, devient le
   skill attaché `creative-content-copywriting`. Aucun savoir-faire supprimé.
+- **Le fichier d'agent émis ne charge que le contexte déclaré (#379).** Un
+  agent qui déclare `context:` reçoit dans son fichier `.claude/agents/*.md`
+  (et `.github/agents/*.agent.md`) une instruction d'activation qui charge
+  ces chemins-là, et eux seuls, à la place du contexte partagé par défaut
+  qu'il n'a pas demandé. Un agent sans déclaration reçoit exactement ce qu'il
+  recevait avant — testé bit à bit. Mesuré sur trois agents de nature
+  différente (navigation, mémoire, sécurité) : le contexte partagé du kit
+  (~193 tokens) disparaît de leur activation au profit du seul contexte
+  qu'ils déclarent. Suite de #378, qui avait câblé la même déclaration côté
+  dispatch de tâche.
 - **Archétypes `web-app` et `fix-loop`/`minimal` alignés sur la forme validée
   d'`infra-ops` (#375).** `web-app` livrait deux agents (`frontend-specialist`,
   `fullstack-dev`) au même faisceau d'outils exact `{read, edit, execute}`,
