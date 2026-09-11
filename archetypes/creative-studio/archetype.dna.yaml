@@ -2,8 +2,8 @@ $schema: "grimoire-archetype-dna/v1"
 
 id: creative-studio
 name: "Creative Studio"
-version: "1.0.0"
-description: "Projets créatifs — design, branding, contenu visuel, identité graphique, sites vitrines"
+version: "1.1.0"
+description: "Projets créatifs — design, branding, contenu visuel, identité graphique, sites vitrines. blender-expert et illustration-expert restent des agents à contexte propre (chaîne d'outils experte MCP + boucle vision) ; content-creator, au même faisceau que brand-designer sans frontière propre, devient un skill attaché à ce dernier (issue #375)."
 icon: "sparkle"
 author: "grimoire-kit"
 tags: [creative, design, branding, visual, identity, content, illustration, web-design]
@@ -117,6 +117,20 @@ mcp_servers:
     required_by: [blender-expert, illustration-expert]
     required: false
 
+# Skill attaché par défaut à un agent de cet archétype (issue #375) : le
+# savoir-faire de l'ex-agent content-creator, qui partageait le faisceau
+# outils {read, edit} de brand-designer sans aucune frontière propre — rien
+# ne le distinguait au sens de la garde de #372. Son contenu devient le corps
+# du skill correspondant, sans perte ; ce qui change, c'est que la session ne
+# paie plus sa description à chaque tour, seulement quand brand-designer
+# travaille (voir #377). Cette liste documente l'attachement ; l'attachement
+# effectif et vérifié au build est le champ `skills:` du frontmatter de
+# l'agent porteur.
+skills:
+  - path: "../../archetypes/creative-studio/skills/creative-content-copywriting.md"
+    attached_to: brand-designer
+    description: "Ex-agent Calliope — copywriting, article de blog SEO, contenu social, newsletter, prompt visuel"
+
 team_manifest:
   name: "Creative Team"
   agents:
@@ -124,11 +138,8 @@ team_manifest:
       role: "Direction artistique, cohérence visuelle, validation esthétique"
       scope: "Tous les livrables visuels, charte graphique, design system"
     - tag: brand-designer
-      role: "Identité de marque, logo, palette, typographie"
-      scope: "Branding, guidelines, assets de marque"
-    - tag: content-creator
-      role: "Contenu textuel et visuel, copywriting, illustrations"
-      scope: "Textes marketing, descriptions, visuels sociaux"
+      role: "Identité de marque, logo, palette, typographie, plus le skill attaché creative-content-copywriting (copywriting, contenu social — ex-agent content-creator, issue #375)"
+      scope: "Branding, guidelines, assets de marque, contenu textuel de marque"
     - tag: blender-expert
       role: "Modélisation 3D — objets, scènes, matériaux, rendu via MCP Blender + vision loop"
       scope: "Assets 3D, icônes 3D, objets low-poly, rendus, exports glTF/FBX/OBJ"
@@ -137,8 +148,7 @@ team_manifest:
       scope: "Icônes SVG, sets d'icônes, illustrations vectorielles, optimisation SVG"
   communication_protocol:
     - "[art-director→brand-designer] : briefing identité, validation palette"
-    - "[brand-designer→content-creator] : guidelines de marque, tone-of-voice"
-    - "[content-creator→art-director] : soumission visuels pour validation"
+    - "[brand-designer→art-director] : soumission contenu/visuels (skill creative-content-copywriting) pour validation"
     - "[blender-expert→art-director] : validation esthétique des assets 3D"
     - "[blender-expert→brand-designer] : cohérence brand des éléments 3D"
     - "[illustration-expert→art-director] : validation des illustrations"

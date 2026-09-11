@@ -10,6 +10,17 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 - fix(tests): le budget de temps du cockpit tient compte des runners Windows, trois fois plus lents sur cent sous-processus git, sans cesser d'attraper la régression de #340.
 ### Ajouté
 
+- **Archétype `platform-engineering` refait — 2 agents à faisceau distinct plus
+  2 skills attachés (#375).** `platform-architect` et `backend-engineer`
+  restent des agents ; `deploy-orchestrator` et `reliability-engineer`, au
+  même faisceau `{read, edit, execute}` que `backend-engineer` sans frontière
+  propre, deviennent les skills attachés `platform-deploy-release` et
+  `platform-reliability-sre`. Aucun savoir-faire supprimé.
+- **Archétype `creative-studio` refait — 3 agents à faisceau distinct plus 1
+  skill attaché (#375).** `blender-expert` et `illustration-expert` restent
+  des agents (contexte propre via MCP + boucle vision) ; `content-creator`,
+  au même faisceau que `brand-designer` sans frontière propre, devient le
+  skill attaché `creative-content-copywriting`. Aucun savoir-faire supprimé.
 - **Refonte de l'archétype `meta` — généraliste plus skills attachés (#375).**
   Les 3 agents à faisceau distinct (`concierge`, `agent-optimizer`, `security-auditor`)
   restent ; `art-director`, `creative-toolsmith`, `memory-keeper` et
