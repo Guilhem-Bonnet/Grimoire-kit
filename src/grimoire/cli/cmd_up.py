@@ -30,12 +30,17 @@ from rich.console import Console
 from rich.table import Table
 
 from grimoire.cli import cmd_setup
-from grimoire.cli.cmd_init import KNOWN_ARCHETYPES, KNOWN_BACKENDS, run_init
 from grimoire.core import layout
 from grimoire.core.config import GrimoireConfig
 from grimoire.core.exceptions import GrimoireConfigError, GrimoireError
-from grimoire.core.scaffold import TIER_SEED, write_text_if_changed
-from grimoire.hosts.sync import sync_host_surfaces
+
+# NOTE (issue #405): cmd_init/core.scaffold/hosts.sync are only needed by the
+# actual `up`/`--fix` code paths below, not by `run_env_checks` — which
+# `grimoire doctor` imports unconditionally on every run. Importing them here
+# at module level meant every `grimoire doctor .` paid for `grimoire init`'s
+# full dependency tree (scaffold, memory, missions, hosts.*) just to reach a
+# handful of socket probes. They're imported lazily, next to their one use
+# each, instead.
 
 console = Console(stderr=True)
 
@@ -511,7 +516,8 @@ def repair_project_artifacts(target: Path) -> list[str]:
     Returns the list of regenerated labels (relative paths).
     """
     from grimoire.core.archetype_resolver import ResolvedArchetype
-    from grimoire.core.scaffold import ProjectScaffolder, ScaffoldPlan
+    from grimoire.core.scaffold import TIER_SEED, ProjectScaffolder, ScaffoldPlan, write_text_if_changed
+    from grimoire.hosts.sync import sync_host_surfaces
 
     target = target.resolve()
     cfg = _load_config_quiet(target)
@@ -634,6 +640,8 @@ def _step_init(
     dry_run: bool,
 ) -> bool:
     """Run (or skip) express init. Returns True when a config is available after the step."""
+    from grimoire.cli.cmd_init import run_init
+
     config_path = target / "project-context.yaml"
     if config_path.is_file():
         state.steps.append(StepResult("init", "skipped", "project already initialized (project-context.yaml present)"))
@@ -1067,6 +1075,8 @@ def up(
       [cyan]grimoire up . --needs collab-review[/cyan] Standard init from a need profile
       [cyan]grimoire up . --no-standard[/cyan]         Skip the agentic standard step
     """
+    from grimoire.cli.cmd_init import KNOWN_ARCHETYPES, KNOWN_BACKENDS
+
     target = path.resolve()
     fmt = (ctx.obj or {}).get("output", "text")
 

@@ -7,6 +7,47 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **perf(cli): charger les sous-commandes à la demande — 60 % du temps de `doctor` était l'arbre Typer (#405).**
+  `grimoire.cli.app` importait sans condition les 20 modules `cmd_*` derrière
+  chaque sous-commande (`cmd_flow`, `cmd_host`, `cmd_memory_lexical`,
+  `cmd_cockpit`, `cmd_up`...) pour construire l'arbre Typer/Click, quelle que
+  soit la commande demandée — `grimoire --version` payait donc l'import de
+  `grimoire.flows`, `grimoire.missions.dispatch`, `grimoire.memory`, etc.
+  `grimoire.cli._lazy.LazyTyperGroup` (nouveau, `cls=` du `typer.Typer`
+  racine) remplace `add_typer()`/`command()` pour ces sous-commandes par un
+  registre nom → (module, attribut, aide courte, panneau, visibilité) ; le
+  module n'est importé qu'à la résolution réelle de la commande (dispatch, ou
+  son propre `--help`) — `grimoire --version` et `grimoire doctor .` ne
+  touchent plus aucun d'entre eux. `grimoire.cli.cmd_up` importait en outre
+  `cmd_init`/`core.scaffold`/`hosts.sync` à son propre niveau module rien que
+  pour les fonctions que `doctor` utilise réellement (`run_env_checks`) —
+  ces imports descendent maintenant dans les fonctions qui les utilisent
+  vraiment (`up()`, `_step_init`, `repair_project_artifacts`).
+  `grimoire --help` et l'aide de chaque sous-commande restent identiques au
+  caractère près (ordre des panneaux et des lignes inclus, garanti par un
+  registre `order` explicite dans `LazyTyperGroup.configure`) —
+  `scripts/compare-cli-help.py` (nouveau) le vérifie avant/après pour les 47
+  commandes. Garde de régression : `tests/unit/cli/test_lazy_startup.py`
+  (sous-processus propre) échoue si l'import de `grimoire.cli.app` amène
+  `grimoire.flows`, `grimoire.missions.dispatch`, `grimoire.memory` ou
+  `grimoire.cli.cmd_cockpit` dans `sys.modules`.
+  Mesuré par `scripts/bench-rust-cores.py` (médiane de 15, même machine) :
+
+  | commande | avant | après | cible | statut |
+  |---|---|---|---|---|
+  | `grimoire --version` | 313 ms | 89 ms | < 150 ms | atteinte |
+  | `grimoire doctor .` | 448 ms | 270 ms | < 300 ms | atteinte |
+  | `grimoire-hook PreToolUse` | 70 ms | 69 ms | < 50 ms | **non atteinte** |
+
+  `grimoire-hook` (point d'entrée séparé, `grimoire.hosts.runtime:main`) ne
+  passe jamais par `grimoire.cli.app` et n'est donc pas concerné par ce
+  mécanisme ; son coût restant vient de `grimoire.hosts.decisions` (918
+  lignes, tous les types de décision dans un seul module) et de
+  `grimoire.hosts.capabilities`/`.surface` — hors du périmètre de ce ticket
+  (« enregistrer les sous-commandes sans importer leur module », pas refondre
+  le moteur de décision des hooks). `grimoire-mcp` (`grimoire.mcp.server`)
+  vérifié : n'importe déjà pas `grimoire.cli.app`, rien à faire.
+
 - fix(flows): un abandon (ou un refus MAST) avant tout progrès n'affiche plus tous les nodes comme complétés dans `grimoire flow status` (#414). `FlowEngine.status()` dérivait `completed_nodes`/`pending_nodes` de la seule position de `current_node` dans l'ordre topologique — sur un run ABORTED/REFUSED, `current_node` devient `None` (terminal) exactement comme un run réussi, donc l'ancien découpage rendait `completed_nodes == order` en entier même quand *aucun* node n'était réellement fait. `completed_nodes` reflète désormais les `completed_steps` du dernier checkpoint réel du `RuntimeKernel` sur un run mort (liste vide si aucun checkpoint n'existe encore, c'est-à-dire un abandon avant le premier `resume()`) ; `pending_nodes` reste vide par convention (on ne sait pas si l'hôte comptait reprendre). Corrigé des deux côtés en même temps, même verdict : `rust/grimoire-flows-core/src/lib.rs` (`status_slices_core`) miroité, `grimoire flow status` (texte et JSON) en hérite sans changement de code propre. Nouveaux tests de parité sous les deux backends (`GRIMOIRE_FLOWS_BACKEND=python|rust`) : abandon avant tout progrès, abandon après k nodes, refus avant progrès, complétion normale (inchangée) — `tests/unit/test_flows_rust_parity.py`.
 
 ## [3.44.0] - 2026-09-11
