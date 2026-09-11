@@ -43,7 +43,7 @@ def _init(root: Path) -> None:
 
 @pytest.fixture(scope="module")
 def agents_project(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """Un projet réel de l'archétype ``meta`` — huit agents livrés par le kit.
+    """Un projet réel de l'archétype ``meta`` — 3 agents à faisceau distinct livrés par le kit (issue #375).
 
     Portée module : les tests mutateurs ciblent chacun un agent distinct
     (voir le commentaire sur ``AGENT_OPTIMIZER`` etc. plus bas), donc aucun ne
@@ -113,16 +113,16 @@ def test_assigner_un_skill_cree_un_override_que_collect_voit(agents_project: Pat
     """Le critère d'arrêt de l'issue, à la brique : le fichier créé dans
     ``overrides`` doit être ce que ``collect_agents``/``grimoire host status``
     lisent — pas un artefact parallèle que rien d'autre ne regarde."""
-    override = agents_project / "_grimoire/overrides/agents/art-director.md"
+    override = agents_project / "_grimoire/overrides/agents/security-auditor.md"
     assert not override.is_file()
 
     result = workspace_post(
-        agents_project, "/api/workspace/agents/art-director/skill",
+        agents_project, "/api/workspace/agents/security-auditor/skill",
         {"skill": "grimoire-agent-dispatch", "action": "assign"},
     )
 
     assert override.is_file()
-    agent = next(a for a in result["agents"] if a["name"] == "art-director")
+    agent = next(a for a in result["agents"] if a["name"] == "security-auditor")
     assert agent["layer"] == "overrides"
     assert agent["skills"] == ["grimoire-agent-dispatch"]
 
@@ -130,33 +130,36 @@ def test_assigner_un_skill_cree_un_override_que_collect_voit(agents_project: Pat
     # emprunte via `build_surface` — pas seulement la réponse de la route.
     reread = wa.agents_view(agents_project)
     assert "grimoire-agent-dispatch" in next(
-        a for a in reread["agents"] if a["name"] == "art-director"
+        a for a in reread["agents"] if a["name"] == "security-auditor"
     )["skills"]
 
 
 def test_retirer_un_skill_fait_disparaitre_la_declaration(agents_project: Path) -> None:
+    # security-auditor : mutations en séquence avec le test précédent, seul
+    # agent du trio meta sans skill baked-in — les deux tests laissent l'agent
+    # dans un état final compatible (assign puis remove ramène à []).
     workspace_post(
-        agents_project, "/api/workspace/agents/creative-toolsmith/skill",
+        agents_project, "/api/workspace/agents/security-auditor/skill",
         {"skill": "grimoire-agent-dispatch", "action": "assign"},
     )
 
     result = workspace_post(
-        agents_project, "/api/workspace/agents/creative-toolsmith/skill",
+        agents_project, "/api/workspace/agents/security-auditor/skill",
         {"skill": "grimoire-agent-dispatch", "action": "remove"},
     )
 
-    agent = next(a for a in result["agents"] if a["name"] == "creative-toolsmith")
+    agent = next(a for a in result["agents"] if a["name"] == "security-auditor")
     assert agent["skills"] == []
-    override = agents_project / "_grimoire/overrides/agents/creative-toolsmith.md"
+    override = agents_project / "_grimoire/overrides/agents/security-auditor.md"
     assert "skills:" not in override.read_text(encoding="utf-8")
 
 
 def test_un_skill_inconnu_est_refuse_avec_le_message_de_collect(agents_project: Path) -> None:
-    override = agents_project / "_grimoire/overrides/agents/memory-keeper.md"
+    override = agents_project / "_grimoire/overrides/agents/concierge.md"
 
     with pytest.raises(ValueError, match="skills introuvables"):
         workspace_post(
-            agents_project, "/api/workspace/agents/memory-keeper/skill",
+            agents_project, "/api/workspace/agents/concierge/skill",
             {"skill": "un-skill-qui-n-existe-pas", "action": "assign"},
         )
 
@@ -165,12 +168,14 @@ def test_un_skill_inconnu_est_refuse_avec_le_message_de_collect(agents_project: 
 
 
 def test_assigner_deux_fois_le_meme_skill_est_idempotent(agents_project: Path) -> None:
+    # security-auditor termine le test précédent avec skills == [] : rejouer
+    # deux fois le même assign dessus reste vérifiable exactement.
     for _ in range(2):
         result = workspace_post(
-            agents_project, "/api/workspace/agents/project-navigator/skill",
+            agents_project, "/api/workspace/agents/security-auditor/skill",
             {"skill": "grimoire-agent-dispatch", "action": "assign"},
         )
-    agent = next(a for a in result["agents"] if a["name"] == "project-navigator")
+    agent = next(a for a in result["agents"] if a["name"] == "security-auditor")
     assert agent["skills"] == ["grimoire-agent-dispatch"]
 
 
@@ -195,14 +200,14 @@ def test_un_agent_inconnu_est_un_404_et_non_une_exception_opaque(agents_project:
 
 def test_modifier_la_clause_d_emploi_et_les_outils(agents_project: Path) -> None:
     result = workspace_post(
-        agents_project, "/api/workspace/agents/art-director/fields",
+        agents_project, "/api/workspace/agents/concierge/fields",
         {
             "use_when": "Situation de test propre à ce projet.",
             "dont_use_when": "Jamais en dehors de ce test.",
             "tools": ["read", "execute"],
         },
     )
-    agent = next(a for a in result["agents"] if a["name"] == "art-director")
+    agent = next(a for a in result["agents"] if a["name"] == "concierge")
     assert agent["use_when"] == "Situation de test propre à ce projet."
     assert agent["dont_use_when"] == "Jamais en dehors de ce test."
     assert set(agent["tools"]) == {"read", "execute"}

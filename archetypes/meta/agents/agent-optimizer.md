@@ -1,11 +1,12 @@
 <!-- ARCHETYPE: meta — Adaptez les {{placeholders}} à votre projet via project-context.yaml -->
 ---
 name: "agent-optimizer"
-description: "Agent Quality Assurance & Optimizer — Sentinel"
-use_when: "Auditer la qualité d'un agent ou d'un workflow Grimoire existant, ou trancher un doublon d'agents."
-dont_use_when: "Créer un nouvel agent de zéro (voir agent-builder côté BMM) ou concevoir un outil/extension (voir creative-toolsmith)."
-tool_boundary: "Fichiers d'agents et de workflows du kit — pas d'accès au code applicatif du projet hôte."
+description: "Agent Quality Assurance & Optimizer — Sentinel — généraliste meta : arbitrage d'agents/workflows, plus les skills attachés meta-art-direction, meta-toolsmithing, meta-memory-quality, meta-project-navigation"
+use_when: "Auditer la qualité d'un agent ou d'un workflow Grimoire existant, trancher un doublon d'agents, ou l'un des quatre domaines portés par skill : direction artistique de persona/sortie, outillage framework, qualité mémoire à la demande, navigation/cartographie de la connaissance projet."
+dont_use_when: "Créer un nouvel agent de zéro (voir agent-builder côté BMM) ou fuzzer une surface d'entrée (voir security-auditor)."
+tool_boundary: "Fichiers d'agents et de workflows du kit — pas d'accès au code applicatif du projet hôte. Le périmètre s'étend au skill actif : icônes/gabarits (meta-art-direction), framework/tools/ (meta-toolsmithing), _grimoire/_memory/ (meta-memory-quality, meta-project-navigation)."
 tools: "read, search, edit"
+skills: ["meta-art-direction", "meta-toolsmithing", "meta-memory-quality", "meta-project-navigation"]
 model_affinity:
   reasoning: extreme
   context_window: large

@@ -734,15 +734,32 @@ class ProjectScaffolder:
 
     def _plan_meta_agents(self, p: ScaffoldPlan) -> None:
         meta_dir = self._archetypes / "meta" / "agents"
-        if not meta_dir.is_dir():
-            return
-        agents_dst = self._agents_dir()
-        for md in sorted(meta_dir.glob("*.md")):
-            p.copies.append(FileCopy(
-                src=md,
-                dst=agents_dst / md.name,
-                label=f"meta/{md.stem}",
-            ))
+        if meta_dir.is_dir():
+            agents_dst = self._agents_dir()
+            for md in sorted(meta_dir.glob("*.md")):
+                p.copies.append(FileCopy(
+                    src=md,
+                    dst=agents_dst / md.name,
+                    label=f"meta/{md.stem}",
+                ))
+
+        # Skills attached to a meta agent (issue #375) — meta is deployed to
+        # every project regardless of the archetype the user picked, so its
+        # skills need the same unconditional treatment as its agents: an
+        # agent's `skills:` frontmatter resolving against nothing is a build
+        # error (collect_agents), not a warning.
+        meta_skills = self._archetypes / "meta" / "skills"
+        if meta_skills.is_dir():
+            skills_dst = self._skills_dir()
+            for md in sorted(meta_skills.glob("*.md")):
+                dst = skills_dst / _strip_tpl_suffix(md.name)
+                if any(fc.dst == dst for fc in p.copies):
+                    continue
+                p.copies.append(FileCopy(
+                    src=md,
+                    dst=dst,
+                    label=f"meta/skills/{dst.stem}",
+                ))
 
     def _plan_archetype_agents(self, p: ScaffoldPlan) -> None:
         archetypes = self._resolved.archetypes or (self._resolved.archetype,)
