@@ -1,0 +1,265 @@
+name: Rust cores
+
+# Point d'entrée CI unique pour les deux cœurs Rust optionnels du kit
+# (rust/grimoire-policies-core/ et rust/grimoire-schema-core/, issue #354).
+#
+# Remplace rust-policies-core.yml et rust-schema-core.yml. Ces deux
+# workflows étaient filtrés par `paths:` : invisibles de toute PR hors de
+# leur périmètre, ils ne pouvaient donc pas devenir des checks requis de la
+# protection de `main` sans bloquer ces PR-là (un check requis qui ne se
+# déclare jamais fait échouer le merge). Résultat concret : #397 a fusionné
+# avec `cargo fmt` rouge, sans qu'aucune protection ne s'y oppose.
+#
+# Ici le déclenchement couvre TOUTE PR vers main et TOUT push sur main, sans
+# filtre `paths`. Un premier job `changes` calcule quel(s) crate(s) sont
+# concernés (dorny/paths-filter, sur les mêmes listes de chemins que les
+# anciens workflows) ; les quatre jobs par crate ne s'exécutent que si leur
+# périmètre est touché et sont sinon rapportés `skipped` par GitHub — un
+# skip satisfait un check requis, une absence de rapport ne le satisfait
+# jamais. `rust-gate` est le seul job à déclarer comme check requis dans la
+# protection de branche : il agrège les quatre jobs et échoue si l'un
+# d'eux a échoué ou a été annulé, réussit sinon (y compris quand tous ont
+# été sautés).
+#
+# Ne touche à rien de ce que publish.yml construit ou publie : la wheel
+# reste la wheel universelle actuelle tant que ces cœurs restent optionnels,
+# et ce fichier ne déclare aucune dépendance vers publish.yml ni release.yml.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      policies: ${{ steps.filter.outputs.policies }}
+      schema: ${{ steps.filter.outputs.schema }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            policies:
+              - "rust/grimoire-policies-core/**"
+              - "src/grimoire/policies/**"
+              - "tests/unit/test_policies.py"
+              - "tests/unit/test_policies_rust_parity.py"
+              - "tests/unit/test_security_policies.py"
+              - "pyproject.toml"
+              - ".github/workflows/rust-cores.yml"
+            schema:
+              - "rust/grimoire-schema-core/**"
+              - "src/grimoire/core/schema.py"
+              - "src/grimoire/core/validator.py"
+              - "tests/unit/core/test_schema.py"
+              - "tests/unit/core/test_validator.py"
+              - "tests/unit/test_schema_validator_rust_parity.py"
+              - "pyproject.toml"
+              - ".github/workflows/rust-cores.yml"
+
+  rust-policies-cargo:
+    name: "rust-policies / cargo"
+    needs: changes
+    if: needs.changes.outputs.policies == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "rust/grimoire-policies-core -> target"
+
+      - name: Format check
+        run: cargo fmt --manifest-path rust/grimoire-policies-core/Cargo.toml --check
+
+      - name: Unit tests
+        # --no-default-features : la feature `extension-module` de PyO3 (par
+        # défaut, requise pour que l'extension soit chargeable par Python)
+        # empêche de lier le binaire de test — voir le commentaire en tête
+        # de rust/grimoire-policies-core/Cargo.toml. La logique testée ici
+        # (evaluate_core) ne touche à aucun type PyO3, donc aucun
+        # interpréteur Python n'est nécessaire pour ce job.
+        run: cargo test --no-default-features --manifest-path rust/grimoire-policies-core/Cargo.toml
+
+  rust-policies-parity:
+    name: "rust-policies / parity"
+    needs: changes
+    if: needs.changes.outputs.policies == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "rust/grimoire-policies-core -> target"
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install package + dev deps
+        run: pip install -e ".[dev]"
+
+      - name: Build and install the compiled core
+        # `maturin develop` exige un virtualenv actif ; le runner utilise le
+        # Python de l'image, sans venv. On construit donc la roue et on
+        # l'installe, ce qui donne le même résultat sans cette contrainte.
+        run: |
+          pip install "maturin>=1.7,<2"
+          maturin build --release --manifest-path rust/grimoire-policies-core/Cargo.toml --out dist-rust
+          pip install --force-reinstall dist-rust/*.whl
+
+      - name: Verify the compiled core is importable
+        run: python -c "import grimoire_policies_core; print('grimoire_policies_core', grimoire_policies_core.__version__)"
+
+      - name: Policy tests — contract unmodified, both backends, parity
+        # tests/unit/test_policies.py est le contrat : il tourne tel quel ici
+        # (module compilé présent) et dans le job SDK normal (absent) — voir
+        # ci-sdk.yml. test_policies_rust_parity.py force chaque backend tour
+        # à tour (GRIMOIRE_POLICIES_BACKEND) et compare les verdicts.
+        run: pytest tests/unit/test_policies.py tests/unit/test_policies_rust_parity.py tests/unit/test_security_policies.py -q --tb=short
+
+      - name: Full SDK suite with the compiled core loaded
+        # Preuve que rien d'autre dans le kit ne dépend de l'absence du
+        # module compilé (import optionnel, aucun autre appelant ne le
+        # regarde) : la suite complète doit rester verte avec lui présent.
+        run: pytest tests/unit/ tests/test_agentic_standard.py -q --tb=short -x
+
+  rust-schema-cargo:
+    name: "rust-schema / cargo"
+    needs: changes
+    if: needs.changes.outputs.schema == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "rust/grimoire-schema-core -> target"
+
+      - name: Format check
+        run: cargo fmt --manifest-path rust/grimoire-schema-core/Cargo.toml --check
+
+      - name: Unit tests
+        # --no-default-features : la feature `extension-module` de PyO3 (par
+        # défaut, requise pour que l'extension soit chargeable par Python)
+        # empêche de lier le binaire de test — voir le commentaire en tête
+        # de rust/grimoire-schema-core/Cargo.toml. La logique testée ici
+        # (schema_core / validate_core) ne touche à aucun type PyO3, donc
+        # aucun interpréteur Python n'est nécessaire pour ce job.
+        run: cargo test --no-default-features --manifest-path rust/grimoire-schema-core/Cargo.toml
+
+  rust-schema-parity:
+    name: "rust-schema / parity"
+    needs: changes
+    if: needs.changes.outputs.schema == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "rust/grimoire-schema-core -> target"
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install package + dev deps
+        run: pip install -e ".[dev]"
+
+      - name: Build and install the compiled core
+        # `maturin develop` exige un virtualenv actif ; le runner utilise le
+        # Python de l'image, sans venv. On construit donc la roue et on
+        # l'installe, ce qui donne le même résultat sans cette contrainte
+        # (piège déjà rencontré et documenté sur le job policies).
+        run: |
+          pip install "maturin>=1.7,<2"
+          maturin build --release --manifest-path rust/grimoire-schema-core/Cargo.toml --out dist-rust
+          pip install --force-reinstall dist-rust/*.whl
+
+      - name: Verify the compiled core is importable
+        run: python -c "import grimoire_schema_core; print('grimoire_schema_core', grimoire_schema_core.__version__)"
+
+      - name: Schema/validator tests — contract unmodified, both backends, parity
+        # tests/unit/core/test_schema.py et tests/unit/core/test_validator.py
+        # sont le contrat : ils tournent tels quels ici (module compilé
+        # présent) et dans le job SDK normal (absent) — voir ci-sdk.yml.
+        # test_schema_validator_rust_parity.py force chaque backend tour à
+        # tour (GRIMOIRE_SCHEMA_BACKEND) et compare schémas/verdicts, y
+        # compris sur des entrées malformées que le validateur Python de
+        # référence rejette mal (plantage) ou pas du tout (accepte à tort).
+        run: pytest tests/unit/core/test_schema.py tests/unit/core/test_validator.py tests/unit/test_schema_validator_rust_parity.py -q --tb=short
+
+      - name: Full SDK suite with the compiled core loaded
+        # Preuve que rien d'autre dans le kit ne dépend de l'absence du
+        # module compilé (import optionnel, aucun autre appelant ne le
+        # regarde) : la suite complète doit rester verte avec lui présent.
+        run: pytest tests/unit/ tests/test_agentic_standard.py -q --tb=short -x
+
+  rust-gate:
+    name: rust-gate
+    if: always()
+    needs:
+      - changes
+      - rust-policies-cargo
+      - rust-policies-parity
+      - rust-schema-cargo
+      - rust-schema-parity
+    runs-on: ubuntu-latest
+    steps:
+      - name: Aggregate the four Rust jobs
+        # Seul ce job est déclaré comme check requis dans la protection de
+        # main. Un job sauté (crate hors périmètre de la PR) est un succès
+        # pour ce gate ; seuls `failure` et `cancelled` le font échouer.
+        run: |
+          set -eu
+          declare -A results=(
+            ["rust-policies / cargo"]="${{ needs.rust-policies-cargo.result }}"
+            ["rust-policies / parity"]="${{ needs.rust-policies-parity.result }}"
+            ["rust-schema / cargo"]="${{ needs.rust-schema-cargo.result }}"
+            ["rust-schema / parity"]="${{ needs.rust-schema-parity.result }}"
+          )
+          failed=0
+          for name in "${!results[@]}"; do
+            status="${results[$name]}"
+            echo "$name: $status"
+            if [ "$status" = "failure" ] || [ "$status" = "cancelled" ]; then
+              failed=1
+            fi
+          done
+          if [ "$failed" -eq 1 ]; then
+            echo "Au moins un job Rust a échoué ou a été annulé." >&2
+            exit 1
+          fi
+          echo "Tous les jobs Rust ont réussi ou ont été sautés (hors périmètre)."

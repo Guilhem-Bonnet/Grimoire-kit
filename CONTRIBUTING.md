@@ -136,10 +136,16 @@ crates :
 
 Deux crates existent à ce jour :
 
-| Crate | Module Python | Variable de bascule | Job CI |
+| Crate | Module Python | Variable de bascule | Jobs CI |
 |---|---|---|---|
-| `rust/grimoire-policies-core/` | `grimoire.policies.engine` (`PolicyEngine.evaluate`) | `GRIMOIRE_POLICIES_BACKEND` | `.github/workflows/rust-policies-core.yml` |
-| `rust/grimoire-schema-core/` | `grimoire.core.schema.generate_schema` + `grimoire.core.validator.validate_config` | `GRIMOIRE_SCHEMA_BACKEND` | `.github/workflows/rust-schema-core.yml` |
+| `rust/grimoire-policies-core/` | `grimoire.policies.engine` (`PolicyEngine.evaluate`) | `GRIMOIRE_POLICIES_BACKEND` | `.github/workflows/rust-cores.yml` (`rust-policies / cargo`, `rust-policies / parity`) |
+| `rust/grimoire-schema-core/` | `grimoire.core.schema.generate_schema` + `grimoire.core.validator.validate_config` | `GRIMOIRE_SCHEMA_BACKEND` | `.github/workflows/rust-cores.yml` (`rust-schema / cargo`, `rust-schema / parity`) |
+
+Les deux crates partagent le même workflow CI : `changes` détecte quel(s)
+crate(s) une PR ou un push touche et saute les jobs hors périmètre, et
+`rust-gate` — le check requis par la protection de `main` — agrège les
+quatre jobs pour rendre `cargo fmt` et `cargo test` opposables sur toute PR,
+pas seulement celles qui modifient `rust/`.
 
 ### Construire une extension localement
 
