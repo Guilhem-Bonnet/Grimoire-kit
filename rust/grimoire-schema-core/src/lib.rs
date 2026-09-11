@@ -295,7 +295,12 @@ const KNOWN_MEMORY_KEYS: &[&str] = &[
     "task_memory",
     "visualization",
 ];
-const KNOWN_AGENTS_KEYS: &[&str] = &["archetype", "custom_agents", "entry", "freshness_threshold_days"];
+const KNOWN_AGENTS_KEYS: &[&str] = &[
+    "archetype",
+    "custom_agents",
+    "entry",
+    "freshness_threshold_days",
+];
 
 // ── generate_schema ──────────────────────────────────────────────────────────
 
@@ -1393,7 +1398,9 @@ mod tests {
             ),
         ]);
         let errors = validate_core(&data);
-        assert!(errors.iter().any(|e| e.path == "agents.freshness_threshold_days"));
+        assert!(errors
+            .iter()
+            .any(|e| e.path == "agents.freshness_threshold_days"));
     }
 
     #[test]
@@ -1406,7 +1413,9 @@ mod tests {
             ),
         ]);
         let errors = validate_core(&data);
-        assert!(!errors.iter().any(|e| e.path == "agents.freshness_threshold_days"));
+        assert!(!errors
+            .iter()
+            .any(|e| e.path == "agents.freshness_threshold_days"));
     }
 
     #[test]

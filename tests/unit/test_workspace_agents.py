@@ -118,16 +118,81 @@ def test_l_usage_reel_vient_du_ledger_de_traces(agents_project: Path) -> None:
 
 
 def test_sans_historique_la_fraicheur_n_est_pas_jugee(agents_project: Path) -> None:
-    """Journal absent ou trop jeune : aucun agent n'est marqué périmé."""
+    """Journal absent ou trop jeune : aucun agent n'est marqué périmé.
+
+    ``too_recent`` vaut ``True`` ici aussi : ``concierge.md`` vient d'être
+    écrit par ``grimoire init`` (fixture de module), donc plus jeune que le
+    seuil par défaut — mais ``judged`` étant déjà faux (aucun journal), ce
+    plancher par agent ne change rien au résultat, seulement au diagnostic.
+    """
     payload = wa.agents_view(agents_project)
     assert payload["freshness_judged"] is False
     assert payload["freshness_threshold_days"] == 90
     concierge = next(a for a in payload["agents"] if a["name"] == "concierge")
-    assert concierge["freshness"] == {"last_seen": None, "days_since": None, "stale": False, "judged": False}
+    assert concierge["freshness"] == {
+        "last_seen": None,
+        "days_since": None,
+        "stale": False,
+        "too_recent": True,
+        "judged": False,
+    }
+
+
+def test_un_agent_trop_recent_n_est_pas_marque_perime(agents_project: Path) -> None:
+    """Plancher par agent : un agent plus jeune que le seuil n'est jamais périmé.
+
+    Critère d'arrêt du suivi de l'issue #396 : journal de 100 jours, seuil
+    90, agent sans ``agent.dispatch`` dont le fichier date d'hier → non
+    périmé, marqué ``too_recent`` ; le même agent avec un fichier de 100
+    jours → périmé (couvert par
+    ``test_un_agent_perime_porte_le_badge_stale`` ci-dessus).
+    """
+    import os
+    from datetime import UTC, datetime, timedelta
+
+    from grimoire.core.standard_generation import TRACES_DIR
+    from grimoire.traces.ledger import AGENT_DISPATCH_TAG, TraceLedger, TraceOutcome
+
+    root = agents_project.parent / "projet-fraicheur-recent"
+    _init(root)
+
+    # Le journal a 100 jours d'historique (seuil 90 : jugé), mais le fichier
+    # de `security-auditor` ne date que d'hier — jamais choisi, mais pas
+    # encore eu le temps de l'être.
+    yesterday = (datetime.now(UTC) - timedelta(days=1)).timestamp()
+    security_auditor_path = root / "_grimoire" / "kit" / "agents" / "security-auditor.md"
+    os.utime(security_auditor_path, (yesterday, yesterday))
+
+    ledger = TraceLedger(root / TRACES_DIR)
+    ledger.record(
+        run_id="RUN-recent",
+        workflow_instance_id="",
+        mission_id="",
+        task_id="",
+        recipe_id="grimoire.entry-persona",
+        outcome=TraceOutcome.SUCCESS,
+        started_at=(datetime.now(UTC) - timedelta(days=100)).isoformat(),
+        agent_id="concierge",
+        tags=[AGENT_DISPATCH_TAG],
+    )
+
+    payload = wa.agents_view(root)
+    assert payload["freshness_judged"] is True
+    security_auditor = next(a for a in payload["agents"] if a["name"] == "security-auditor")
+    assert security_auditor["freshness"]["too_recent"] is True
+    assert security_auditor["freshness"]["stale"] is False
 
 
 def test_un_agent_perime_porte_le_badge_stale(agents_project: Path) -> None:
-    """Un ``agent.dispatch`` vieux de 100 jours dépasse le seuil par défaut (90)."""
+    """Un ``agent.dispatch`` vieux de 100 jours dépasse le seuil par défaut (90).
+
+    Le fichier de l'agent est lui aussi vieilli à 100 jours : sans ça, le
+    plancher par agent (le fichier vient d'être créé par ``grimoire init``,
+    quelques secondes plus tôt) le marquerait ``too_recent`` plutôt que
+    ``stale`` — exactement le comportement que
+    ``test_un_agent_trop_recent_n_est_pas_marque_perime`` vérifie séparément.
+    """
+    import os
     from datetime import UTC, datetime, timedelta
 
     from grimoire.core.standard_generation import TRACES_DIR
@@ -135,6 +200,12 @@ def test_un_agent_perime_porte_le_badge_stale(agents_project: Path) -> None:
 
     root = agents_project.parent / "projet-fraicheur"
     _init(root)
+
+    old_time = (datetime.now(UTC) - timedelta(days=100)).timestamp()
+    for agent_file in ("concierge.md", "security-auditor.md"):
+        path = root / "_grimoire" / "kit" / "agents" / agent_file
+        if path.is_file():
+            os.utime(path, (old_time, old_time))
 
     ledger = TraceLedger(root / TRACES_DIR)
     ledger.record(
@@ -152,6 +223,7 @@ def test_un_agent_perime_porte_le_badge_stale(agents_project: Path) -> None:
     payload = wa.agents_view(root)
     assert payload["freshness_judged"] is True
     concierge = next(a for a in payload["agents"] if a["name"] == "concierge")
+    assert concierge["freshness"]["too_recent"] is False
     assert concierge["freshness"]["stale"] is True
     assert concierge["freshness"]["days_since"] == 100
 
