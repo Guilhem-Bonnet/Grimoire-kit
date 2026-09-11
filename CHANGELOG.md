@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- feat(core): second port Rust optionnel, `rust/grimoire-schema-core/` — `grimoire.core.schema.generate_schema` et `grimoire.core.validator.validate_config` bascule sur `GRIMOIRE_SCHEMA_BACKEND=python|rust|auto` (sœur de `GRIMOIRE_POLICIES_BACKEND`), repli Python inchangé par défaut, sans roue publiée (#354). Le cœur Rust rejette explicitement des entrées que le validateur Python de référence laisse aujourd'hui passer sans erreur (`installed_archetypes[]`, `project.repos[].name`, `user.name`/`language`/`document_language` jamais type-vérifiés malgré `schema.py`) ou fait planter (`TypeError: unhashable type` sur un `type`/`backend`/... de forme liste ou table) — vérifié dans les deux configurations, contrat des tests existants inchangé.
+
 ## [3.42.0] - 2026-09-11
 ### Ajouté
 

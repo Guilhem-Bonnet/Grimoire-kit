@@ -1,0 +1,33 @@
+[package]
+name = "grimoire-schema-core"
+version = "0.1.0"
+edition = "2021"
+description = "Coeur Rust optionnel de grimoire.core.schema/validator : generateur de schema et validateur de project-context.yaml, expose via PyO3."
+license = "MIT"
+publish = false
+
+[lib]
+name = "grimoire_schema_core"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Meme montage que rust/grimoire-policies-core/ (issue #354, premier port) :
+# pyo3 n'est requis que par la frontiere PyO3 (module `py_bridge`, en bas de
+# lib.rs). La logique pure (`validate_core`, `schema_core`) n'importe rien de
+# pyo3, d'ou `cargo test --no-default-features` ci-dessous qui ne compile
+# meme pas cette dependance.
+#
+# abi3-py312 : une seule extension binaire par (OS, arch) pour tout Python
+# >= 3.12 (plancher deja declare par requires-python dans pyproject.toml).
+# Sans objet tant que rien n'est publie, mais deja la bonne discipline a
+# prendre a chaque module porte (cf. audit sur l'issue #354, section 6).
+pyo3 = { version = "0.29", features = ["abi3-py312"], optional = true }
+
+[features]
+# Meme raisonnement que rust/grimoire-policies-core/Cargo.toml : la feature
+# `extension-module` de pyo3 (active par defaut, indispensable pour que
+# l'extension soit chargeable par Python) empeche de lier le binaire de test
+# de `cargo test` — d'ou `cargo test --no-default-features` dans le job CI
+# dedie, qui ne necessite donc aucun interprete Python installe.
+extension-module = ["dep:pyo3", "pyo3/extension-module"]
+default = ["extension-module"]

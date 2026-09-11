@@ -8,15 +8,37 @@ Usage::
 
     from grimoire.core.schema import generate_schema
     import json; print(json.dumps(generate_schema(), indent=2))
+
+Backend
+-------
+``generate_schema`` is a pure, argument-less function: the structure below
+(``_generate_schema_python``) is the reference implementation and the only
+one guaranteed to exist. ``grimoire_schema_core`` is an optional, PyO3-compiled
+Rust port of the same static document (see ``rust/grimoire-schema-core/``,
+issue #354), built together with :mod:`grimoire.core.validator`'s Rust
+port in the same crate. It is never required: nothing in the published
+distribution depends on it, it ships no compiled wheel, and if the import
+below fails ``generate_schema`` runs the pure-Python path exactly as
+before. ``GRIMOIRE_SCHEMA_BACKEND`` (sibling of ``GRIMOIRE_POLICIES_BACKEND``
+from the first port) overrides the choice in both directions, same values
+(``python``/``rust``/``auto``) — see :mod:`grimoire.core.validator` for the
+shared rationale.
 """
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
+from grimoire.core.exceptions import GrimoireValidationError
 from grimoire.core.project_types import VALID_PROJECT_TYPES
 
-__all__ = ["generate_schema"]
+__all__ = ["generate_schema", "rust_backend_available"]
+
+try:
+    import grimoire_schema_core as _rust_core
+except ImportError:  # pragma: no cover - exercised by the dedicated Rust CI job
+    _rust_core = None
 
 _VALID_TYPES = list(VALID_PROJECT_TYPES)
 _VALID_SKILL_LEVELS = sorted(["beginner", "intermediate", "expert"])
@@ -29,8 +51,50 @@ _KNOWN_ARCHETYPES = sorted([
 ])
 
 
+def rust_backend_available() -> bool:
+    """Whether the compiled ``grimoire_schema_core`` module is importable.
+
+    Purely informational (used by tests and diagnostics) — ``generate_schema``
+    and :func:`grimoire.core.validator.validate_config` each decide their
+    backend on every call via their own ``_use_rust_backend``.
+    """
+    return _rust_core is not None
+
+
+def _use_rust_backend() -> bool:
+    """Resolve which backend ``generate_schema`` should use for this call.
+
+    Reads ``GRIMOIRE_SCHEMA_BACKEND`` fresh every time rather than once at
+    import time, so tests can flip it with ``monkeypatch.setenv`` around a
+    single call without reloading the module.
+    """
+    override = os.environ.get("GRIMOIRE_SCHEMA_BACKEND", "auto").strip().lower()
+    if override == "python":
+        return False
+    if override == "rust":
+        if _rust_core is None:
+            raise GrimoireValidationError(
+                "GRIMOIRE_SCHEMA_BACKEND=rust demande le coeur Rust, mais "
+                "grimoire_schema_core est introuvable. Construire l'extension "
+                "localement (voir CONTRIBUTING.md, `maturin develop` dans "
+                "rust/grimoire-schema-core/) ou revenir a auto/python."
+            )
+        return True
+    if override not in ("auto", ""):
+        raise GrimoireValidationError(f"GRIMOIRE_SCHEMA_BACKEND invalide: {override!r} (attendu auto/python/rust)")
+    return _rust_core is not None
+
+
 def generate_schema() -> dict[str, Any]:
     """Return a JSON Schema dict for ``project-context.yaml``."""
+    if _use_rust_backend():
+        assert _rust_core is not None  # guarded by _use_rust_backend above
+        return _rust_core.generate_schema()  # type: ignore[no-any-return]
+    return _generate_schema_python()
+
+
+def _generate_schema_python() -> dict[str, Any]:
+    """Reference implementation of ``generate_schema``, in pure Python."""
     return {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": "https://grimoire-kit.dev/schemas/project-context.json",

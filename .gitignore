@@ -84,7 +84,8 @@ framework/memory/session-state.md
 # Evals — sorties brutes des runs (non committées, cf. docs/evals-protocol.md)
 evals/runs/
 
-# Cœur Rust optionnel (grimoire.policies, issue #354) — build local uniquement,
-# jamais publié. Cargo.lock reste suivi pour des builds reproductibles.
+# Cœurs Rust optionnels (grimoire.policies, grimoire.core.schema/validator,
+# issue #354) — build local uniquement, jamais publiés. Cargo.lock reste
+# suivi pour des builds reproductibles.
 rust/*/target/
 
