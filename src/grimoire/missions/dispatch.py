@@ -206,6 +206,22 @@ _UNCERTAINTIES_INSTRUCTION = (
 _UNCERTAINTIES_BLOCK_RE = re.compile(r"```grimoire-uncertainties\s*\n(.*?)```", re.DOTALL)
 
 
+def _reject_non_standard(token: str) -> float:
+    """``parse_constant`` de ``json.loads`` : refuse les jetons hors RFC 8259.
+
+    Par défaut, ``json.loads`` de CPython accepte les jetons non standards
+    ``NaN``/``Infinity``/``-Infinity`` — une extension que le cœur Rust de ce
+    port (``rust/grimoire-dispatch-core/``, strict RFC 8259 via
+    ``serde_json``) n'accepte pas nativement. La règle du port est que Rust
+    est l'oracle : c'est ce module qui s'aligne sur le comportement strict,
+    pas l'inverse. Toute occurrence de ces jetons — y compris ailleurs que
+    dans le champ effectivement lu — lève ``ValueError``, rattrapée comme un
+    JSON invalide par chaque appelant ci-dessous : un document qui en porte
+    un devient aussi peu exploitable des deux côtés que s'il était mal formé.
+    """
+    raise ValueError(f"jeton JSON hors RFC 8259 non accepté : {token}")
+
+
 def start_tier_for(verifiability: Verifiability) -> str | None:
     """Le premier palier autorisé pour cette classe — ``None`` si aucun (V2)."""
     if _use_rust_backend():
@@ -352,16 +368,20 @@ def _extract_cost_usd(stdout: str) -> float | None:
     en portant cette fonction vers Rust, issue #354) : ``isinstance(True,
     int)`` est vrai en Python, donc un ``total_cost_usd`` JSON ``true``/
     ``false`` était jusqu'ici accepté et coercé en ``1.0``/``0.0`` — un coût
-    qui n'en est pas un. ``json.loads`` accepte par ailleurs ``NaN``/
-    ``Infinity``/``-Infinity`` (extension non-RFC 8259 de CPython) ; un coût
-    non fini n'est pas plus exploitable qu'un coût absent.
+    qui n'en est pas un. ``json.loads`` acceptait par ailleurs ``NaN``/
+    ``Infinity``/``-Infinity`` (extension non-RFC 8259 de CPython, hors de ce
+    que le cœur Rust strict accepte) : ``parse_constant=_reject_non_standard``
+    les refuse désormais explicitement, où qu'ils apparaissent dans le
+    document — un coût non fini n'est pas plus exploitable qu'un coût absent,
+    et un ``1e400`` (littéral JSON valide mais hors bornes de ``float``)
+    reste couvert par le contrôle ``math.isfinite`` ci-dessous.
     """
     if _use_rust_backend():
         assert _rust_core is not None  # guarded by _use_rust_backend
         rust_cost = _rust_core.extract_cost_usd_py(stdout)
         return float(rust_cost) if rust_cost is not None else None
     try:
-        data = json.loads(stdout)
+        data = json.loads(stdout, parse_constant=_reject_non_standard)
     except (json.JSONDecodeError, ValueError):
         return None
     if not isinstance(data, dict):
@@ -464,12 +484,19 @@ def _uncertainties_search_text(stdout: str) -> str:
     Un fournisseur headless qui rend un JSON enveloppe souvent la réponse
     texte de l'ouvrier sous ``result`` (même convention que ``total_cost_usd``
     plus haut) — le bloc délimité vit alors dedans, pas dans le JSON lui-même.
+
+    ``parse_constant=_reject_non_standard`` (voir ``_extract_cost_usd``) :
+    un ``NaN``/``Infinity``/``-Infinity`` ailleurs dans l'enveloppe JSON,
+    même sans rapport avec ``result``, rend tout le document aussi peu
+    exploitable qu'un JSON mal formé des deux côtés — le cœur Rust
+    (``serde_json``, strict) rejetterait le document entier, pas seulement
+    le jeton concerné.
     """
     if _use_rust_backend():
         assert _rust_core is not None  # guarded by _use_rust_backend
         return str(_rust_core.uncertainties_search_text_py(stdout))
     try:
-        data = json.loads(stdout)
+        data = json.loads(stdout, parse_constant=_reject_non_standard)
     except (json.JSONDecodeError, ValueError):
         return stdout
     if isinstance(data, dict):
@@ -499,7 +526,7 @@ def _extract_uncertainties(stdout: str) -> tuple[tuple[Uncertainty, ...], tuple[
         return (), ()
     body = match.group(1).strip()
     try:
-        payload = json.loads(body) if body else []
+        payload = json.loads(body, parse_constant=_reject_non_standard) if body else []
     except (json.JSONDecodeError, ValueError):
         return (), (f"bloc grimoire-uncertainties illisible (JSON invalide) : {body[:200]!r}",)
     if not isinstance(payload, list):

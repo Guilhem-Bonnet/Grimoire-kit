@@ -24,9 +24,14 @@ restent le golden test : ils tournent tels quels sous les deux backends (voir
    les deux backends :
    - ``isinstance(True, int)`` est vrai en Python : un ``total_cost_usd``
      JSON ``true``/``false`` était coercé en ``1.0``/``0.0`` avant correctif.
-   - ``json.loads`` accepte ``NaN``/``Infinity``/``-Infinity`` (extension
-     non-RFC 8259 de CPython) ; un coût non fini est désormais traité comme
-     absent, comme un cœur Rust strict le ferait naturellement.
+   - ``json.loads`` acceptait par défaut ``NaN``/``Infinity``/``-Infinity``
+     (extension non-RFC 8259 de CPython) que le cœur Rust (``serde_json``,
+     strict) n'accepte pas nativement. Rust est l'oracle : plutôt que de
+     laisser Rust reproduire la laxité de Python, ``dispatch.py`` passe
+     désormais ``parse_constant=_reject_non_standard`` à chaque
+     ``json.loads`` — un document portant un de ces jetons, même ailleurs
+     que dans le champ lu, est rejeté en bloc des deux côtés (coût absent,
+     aucune incertitude extraite), pas seulement filtré après coup.
 3. Le corpus fixture de dix sorties d'ouvrier réalistes
    (``tests/fixtures/dispatch_worker_outputs/``), rejoué sur
    ``_extract_cost_usd``/``_extract_uncertainties`` sous les deux backends.
@@ -217,13 +222,28 @@ def test_extract_cost_usd_boolean_is_none_defect_fixed(backend: str, monkeypatch
 @pytest.mark.parametrize("backend", _backends_for_test())
 @pytest.mark.parametrize("token", ["NaN", "Infinity", "-Infinity"])
 def test_extract_cost_usd_non_finite_is_none(token: str, backend: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """``json.loads`` de CPython accepte ces trois jetons hors RFC 8259 —
-    un cœur Rust strict ne les accepterait pas nativement (voir le docstring
-    du module ``json`` dans ``rust/grimoire-dispatch-core/src/lib.rs``, qui
-    les reproduit explicitement). Un coût non fini reste, des deux côtés,
-    traité comme absent (corrigé côté Python dans cette même PR)."""
+    """``json.loads`` de CPython acceptait par défaut ces trois jetons hors
+    RFC 8259 — le cœur Rust (``serde_json``, strict) ne les accepte pas
+    nativement. Rust est l'oracle : ``_reject_non_standard``
+    (``parse_constant``) les rejette désormais explicitement côté Python
+    aussi, rattrapé comme un JSON invalide — un coût non fini est traité
+    comme absent des deux côtés, pour la même raison (échec de l'analyse),
+    pas seulement par un contrôle a posteriori."""
     _with_backend(backend, monkeypatch)
     assert _extract_cost_usd(f'{{"total_cost_usd": {token}}}') is None
+
+
+@pytest.mark.parametrize("backend", _backends_for_test())
+@pytest.mark.parametrize("token", ["NaN", "Infinity", "-Infinity"])
+def test_extract_cost_usd_non_finite_elsewhere_in_document_is_none(
+    token: str, backend: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Le jeton hors RFC 8259 n'a pas besoin d'être dans le champ lu pour
+    faire échouer l'analyse : un cœur Rust strict rejette le document
+    entier. ``_reject_non_standard`` reproduit ce même rejet en bloc côté
+    Python, pas un contrôle localisé au seul ``total_cost_usd``."""
+    _with_backend(backend, monkeypatch)
+    assert _extract_cost_usd(f'{{"total_cost_usd": 0.5, "other": {token}}}') is None
 
 
 # ── _extract_uncertainties : cas limites + corpus réaliste ──────────────────

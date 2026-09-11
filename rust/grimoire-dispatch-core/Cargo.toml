@@ -20,25 +20,26 @@ crate-type = ["cdylib", "rlib"]
 # du texte JSON brut et non structure : la sortie d'un ouvrier delegue
 # (`claude -p` ou equivalent), dont `_extract_cost_usd` et
 # `_extract_uncertainties` (dispatch.py) extraient respectivement un cout et
-# un bloc d'incertitudes. Plutot qu'une dependance externe (serde_json), ce
-# crate porte son propre analyseur JSON minimal (module `json`, aucun
-# `unsafe`) : la raison est une divergence reelle trouvee en portant cette
-# fonction (voir le docstring du module `json` plus bas) — `json.loads` de
-# CPython accepte par defaut les jetons non standards `NaN`/`Infinity`/
-# `-Infinity` (RFC 8259 les exclut), qu'aucun parseur JSON strict de
-# l'ecosysteme Rust (serde_json compris) n'accepte nativement. Reproduire
-# fidelement `json.loads` exige donc un parseur qui les reconnait
-# explicitement — plus simple a ecrire soi-meme qu'a obtenir d'une
-# dependance generaliste.
+# un bloc d'incertitudes — la surface la plus exposee du kit (texte non
+# maitrise produit par un fournisseur tiers). `serde_json`, strict RFC 8259,
+# est la dependance JSON de ce crate plutot qu'un analyseur maison : la
+# regle du port est que Rust est l'oracle, donc le cote strict qui fait foi
+# — c'est Python qui s'aligne dessus (`_reject_non_standard` dans
+# dispatch.py rejette desormais les jetons `NaN`/`Infinity`/`-Infinity` que
+# `json.loads` de CPython acceptait par defaut, extension hors RFC 8259),
+# jamais l'inverse. Version epinglee exactement (`=1.0.151`), sans plage
+# semver, pour que le comportement du parseur ne bouge pas sous les pieds
+# de ce crate a l'insu d'une revue.
 pyo3 = { version = "0.29", features = ["abi3-py312"], optional = true }
+serde_json = "=1.0.151"
 
 [features]
 # Meme raisonnement que les quatre crates precedents : la feature
 # `extension-module` de pyo3 (active par defaut, indispensable pour que
 # l'extension soit chargeable par Python) empeche de lier le binaire de test
 # de `cargo test` — d'ou `cargo test --no-default-features` dans le job CI
-# dedie, qui ne necessite donc aucun interprete Python installe. Le parseur
-# JSON maison et toute la logique pure de ce crate restent compiles dans les
-# deux configurations.
+# dedie, qui ne necessite donc aucun interprete Python installe. `serde_json`
+# et toute la logique pure de ce crate restent compiles dans les deux
+# configurations.
 extension-module = ["dep:pyo3", "pyo3/extension-module"]
 default = ["extension-module"]

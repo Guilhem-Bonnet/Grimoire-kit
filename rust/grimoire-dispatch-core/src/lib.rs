@@ -45,355 +45,27 @@
 //! frontiere (nouveau palier ajoute cote Python sans etre reporte ici) est un
 //! rejet explicite (`Err`), jamais une comparaison qui echoue en silence.
 //!
-//! ## Le parseur JSON maison (module `json` ci-dessous)
+//! ## JSON strict (`serde_json`) : Rust est l'oracle, pas Python
 //!
 //! `_extract_cost_usd` et `_extract_uncertainties` analysent du texte JSON
-//! brut, potentiellement produit par un fournisseur headless quelconque —
-//! contrairement aux quatre premiers ports, qui ne recevaient jamais de JSON
-//! non structure. Ce module ecrit son propre analyseur plutot que de
-//! dependre d'une bibliotheque generaliste (`serde_json` par exemple), pour
-//! une raison precise trouvee en ecrivant ce port : `json.loads` de CPython
-//! accepte par defaut trois jetons hors RFC 8259 — `NaN`, `Infinity`,
-//! `-Infinity` — qu'aucun parseur JSON strict de l'ecosysteme Rust n'accepte
-//! nativement. Un cout ou un bloc d'incertitudes embarque dans un JSON
-//! contenant un de ces jetons ailleurs dans le document (meme sans rapport
-//! avec le champ lu) ferait echouer un parseur strict alors que
-//! `json.loads` reussit — une divergence reelle, testee ci-dessous
-//! (`json_accepts_nan_and_infinity_like_cpython`).
+//! brut potentiellement produit par un fournisseur headless quelconque —
+//! la surface la plus exposee de ce port : un texte non maitrise, pas une
+//! structure deja validee. `serde_json` (RFC 8259 strict) est la dependance
+//! JSON de ce crate. Une premiere version de ce port ecrivait son propre
+//! analyseur pour reproduire une extension non standard de `json.loads` de
+//! CPython — l'acceptation par defaut des jetons hors RFC 8259 `NaN`,
+//! `Infinity`, `-Infinity`. C'etait l'inverse de ce que ce port doit
+//! demontrer : la regle est que Rust, strict, fait foi, et c'est Python qui
+//! s'aligne dessus, jamais l'inverse. Corrige : `dispatch.py` passe desormais
+//! `parse_constant=_reject_non_standard` a `json.loads`, qui leve
+//! `ValueError` sur ces trois jetons — rattrapee comme n'importe quel JSON
+//! invalide, donc identique aux deux backends (cout absent, aucune
+//! incertitude extraite). Voir `test_json_rejects_nan_and_infinity_strict_rfc8259`
+//! ci-dessous et `tests/unit/test_dispatch_rust_parity.py` cote Python.
 
 #![cfg_attr(not(feature = "extension-module"), allow(dead_code))]
 
-// ── Analyseur JSON maison (module `json`) ──────────────────────────────────
-//
-// Miroir de `json.loads` de CPython pour ce que ce crate en a besoin :
-// objets (derniere occurrence d'une cle dupliquee gagne, comme un dict
-// Python), tableaux, chaines (echappements standards + `\uXXXX`, paires de
-// substitution UTF-16 combinees), nombres (entiers, decimaux, notation
-// scientifique, signe), `true`/`false`/`null`, et les trois jetons non
-// standards `NaN`/`Infinity`/`-Infinity` que CPython accepte par defaut.
-mod json {
-    #[derive(Debug, Clone, PartialEq)]
-    pub enum Value {
-        Null,
-        Bool(bool),
-        Number(f64),
-        String(String),
-        Array(Vec<Value>),
-        Object(Vec<(String, Value)>),
-    }
-
-    impl Value {
-        pub fn as_object(&self) -> Option<&Vec<(String, Value)>> {
-            match self {
-                Value::Object(o) => Some(o),
-                _ => None,
-            }
-        }
-
-        /// Valeur d'une cle d'objet — dernier ecrit gagne, `None` si *self*
-        /// n'est pas un objet ou si la cle est absente (miroir de
-        /// `dict.get`).
-        pub fn get(&self, key: &str) -> Option<&Value> {
-            self.as_object()?
-                .iter()
-                .find(|(k, _)| k == key)
-                .map(|(_, v)| v)
-        }
-
-        pub fn as_str(&self) -> Option<&str> {
-            match self {
-                Value::String(s) => Some(s),
-                _ => None,
-            }
-        }
-
-        /// `float(x)` si *self* est un nombre JSON fini — jamais un booleen
-        /// (voir le docstring de `extract_cost_usd` : `isinstance(x, bool)`
-        /// est vrai en Python pour `True`/`False`, un defaut trouve et
-        /// corrige cote Python dans cette meme PR) ni `NaN`/`Infinity`
-        /// (un cout non fini est traite comme absent des deux cotes).
-        pub fn as_finite_cost(&self) -> Option<f64> {
-            match self {
-                Value::Number(n) if n.is_finite() => Some(*n),
-                _ => None,
-            }
-        }
-    }
-
-    pub fn parse(input: &str) -> Result<Value, String> {
-        let chars: Vec<char> = input.chars().collect();
-        let mut pos = 0usize;
-        skip_ws(&chars, &mut pos);
-        if pos >= chars.len() {
-            return Err("valeur JSON attendue : entree vide".to_string());
-        }
-        let value = parse_value(&chars, &mut pos)?;
-        skip_ws(&chars, &mut pos);
-        if pos != chars.len() {
-            return Err("caracteres en trop apres la valeur JSON".to_string());
-        }
-        Ok(value)
-    }
-
-    fn skip_ws(chars: &[char], pos: &mut usize) {
-        while *pos < chars.len() && matches!(chars[*pos], ' ' | '\t' | '\n' | '\r') {
-            *pos += 1;
-        }
-    }
-
-    fn parse_value(chars: &[char], pos: &mut usize) -> Result<Value, String> {
-        skip_ws(chars, pos);
-        if *pos >= chars.len() {
-            return Err("valeur JSON attendue".to_string());
-        }
-        match chars[*pos] {
-            '{' => parse_object(chars, pos),
-            '[' => parse_array(chars, pos),
-            '"' => parse_string(chars, pos).map(Value::String),
-            't' => parse_literal(chars, pos, "true", Value::Bool(true)),
-            'f' => parse_literal(chars, pos, "false", Value::Bool(false)),
-            'n' => parse_literal(chars, pos, "null", Value::Null),
-            'N' => parse_literal(chars, pos, "NaN", Value::Number(f64::NAN)),
-            'I' => parse_literal(chars, pos, "Infinity", Value::Number(f64::INFINITY)),
-            '-' => {
-                if chars.get(*pos + 1) == Some(&'I') {
-                    *pos += 1;
-                    parse_literal(chars, pos, "Infinity", Value::Number(f64::NEG_INFINITY))
-                } else {
-                    parse_number(chars, pos)
-                }
-            }
-            '0'..='9' => parse_number(chars, pos),
-            other => Err(format!("caractere JSON inattendu: {other:?}")),
-        }
-    }
-
-    fn parse_literal(
-        chars: &[char],
-        pos: &mut usize,
-        lit: &str,
-        value: Value,
-    ) -> Result<Value, String> {
-        let lit_chars: Vec<char> = lit.chars().collect();
-        if *pos + lit_chars.len() <= chars.len()
-            && chars[*pos..*pos + lit_chars.len()] == lit_chars[..]
-        {
-            *pos += lit_chars.len();
-            Ok(value)
-        } else {
-            Err(format!("litteral JSON attendu: {lit}"))
-        }
-    }
-
-    fn parse_object(chars: &[char], pos: &mut usize) -> Result<Value, String> {
-        *pos += 1; // '{'
-        let mut entries: Vec<(String, Value)> = Vec::new();
-        skip_ws(chars, pos);
-        if *pos < chars.len() && chars[*pos] == '}' {
-            *pos += 1;
-            return Ok(Value::Object(entries));
-        }
-        loop {
-            skip_ws(chars, pos);
-            if *pos >= chars.len() || chars[*pos] != '"' {
-                return Err("cle d'objet JSON attendue (chaine)".to_string());
-            }
-            let key = parse_string(chars, pos)?;
-            skip_ws(chars, pos);
-            if *pos >= chars.len() || chars[*pos] != ':' {
-                return Err("':' attendu apres la cle d'objet JSON".to_string());
-            }
-            *pos += 1;
-            let value = parse_value(chars, pos)?;
-            // Derniere occurrence gagne — miroir exact d'un dict Python
-            // construit par `json.loads` sur des cles dupliquees.
-            if let Some(existing) = entries.iter_mut().find(|(k, _)| *k == key) {
-                existing.1 = value;
-            } else {
-                entries.push((key, value));
-            }
-            skip_ws(chars, pos);
-            if *pos >= chars.len() {
-                return Err("objet JSON non ferme".to_string());
-            }
-            match chars[*pos] {
-                ',' => {
-                    *pos += 1;
-                }
-                '}' => {
-                    *pos += 1;
-                    break;
-                }
-                other => {
-                    return Err(format!(
-                        "',' ou '}}' attendu dans l'objet JSON, trouve {other:?}"
-                    ))
-                }
-            }
-        }
-        Ok(Value::Object(entries))
-    }
-
-    fn parse_array(chars: &[char], pos: &mut usize) -> Result<Value, String> {
-        *pos += 1; // '['
-        let mut items = Vec::new();
-        skip_ws(chars, pos);
-        if *pos < chars.len() && chars[*pos] == ']' {
-            *pos += 1;
-            return Ok(Value::Array(items));
-        }
-        loop {
-            let value = parse_value(chars, pos)?;
-            items.push(value);
-            skip_ws(chars, pos);
-            if *pos >= chars.len() {
-                return Err("tableau JSON non ferme".to_string());
-            }
-            match chars[*pos] {
-                ',' => {
-                    *pos += 1;
-                }
-                ']' => {
-                    *pos += 1;
-                    break;
-                }
-                other => {
-                    return Err(format!(
-                        "',' ou ']' attendu dans le tableau JSON, trouve {other:?}"
-                    ))
-                }
-            }
-        }
-        Ok(Value::Array(items))
-    }
-
-    fn parse_string(chars: &[char], pos: &mut usize) -> Result<String, String> {
-        *pos += 1; // '"'
-        let mut out = String::new();
-        loop {
-            if *pos >= chars.len() {
-                return Err("chaine JSON non fermee".to_string());
-            }
-            let c = chars[*pos];
-            *pos += 1;
-            match c {
-                '"' => return Ok(out),
-                '\\' => {
-                    if *pos >= chars.len() {
-                        return Err("sequence d'echappement JSON incomplete".to_string());
-                    }
-                    let esc = chars[*pos];
-                    *pos += 1;
-                    match esc {
-                        '"' => out.push('"'),
-                        '\\' => out.push('\\'),
-                        '/' => out.push('/'),
-                        'b' => out.push('\u{0008}'),
-                        'f' => out.push('\u{000C}'),
-                        'n' => out.push('\n'),
-                        'r' => out.push('\r'),
-                        't' => out.push('\t'),
-                        'u' => push_unicode_escape(chars, pos, &mut out)?,
-                        other => {
-                            return Err(format!("sequence d'echappement JSON inconnue: \\{other}"))
-                        }
-                    }
-                }
-                other => out.push(other),
-            }
-        }
-    }
-
-    fn parse_hex4(chars: &[char], pos: &mut usize) -> Result<u32, String> {
-        if *pos + 4 > chars.len() {
-            return Err("echappement unicode JSON incomplet".to_string());
-        }
-        let hex: String = chars[*pos..*pos + 4].iter().collect();
-        *pos += 4;
-        u32::from_str_radix(&hex, 16).map_err(|_| "echappement unicode JSON invalide".to_string())
-    }
-
-    /// Combine une paire de substitution UTF-16 (`\uD800`-`\uDBFF` suivi de
-    /// `\uDC00`-`\uDFFF`) en un seul caractere, comme le ferait le decodeur
-    /// UTF-16 interne de CPython. Un substitut isole (jamais suivi d'un
-    /// second `\u` valide) n'a pas d'equivalent Rust valide — une `String`
-    /// Rust doit rester de l'UTF-8 valide, contrairement a une `str` Python
-    /// qui peut porter un point de code substitut isole — remplace par
-    /// U+FFFD plutot que de faire echouer l'analyse entiere : cas
-    /// pathologique, jamais produit par un fournisseur reel, et le fuzz
-    /// leger de ce crate exige l'absence d'exception, pas une fidelite
-    /// parfaite sur ce recoin precis.
-    fn push_unicode_escape(
-        chars: &[char],
-        pos: &mut usize,
-        out: &mut String,
-    ) -> Result<(), String> {
-        let cp = parse_hex4(chars, pos)?;
-        if (0xD800..=0xDBFF).contains(&cp) {
-            if *pos + 1 < chars.len() && chars[*pos] == '\\' && chars[*pos + 1] == 'u' {
-                let save = *pos;
-                *pos += 2;
-                let low = parse_hex4(chars, pos)?;
-                if (0xDC00..=0xDFFF).contains(&low) {
-                    let combined = 0x10000u32 + ((cp - 0xD800) << 10) + (low - 0xDC00);
-                    out.push(char::from_u32(combined).unwrap_or('\u{FFFD}'));
-                } else {
-                    *pos = save;
-                    out.push('\u{FFFD}');
-                }
-            } else {
-                out.push('\u{FFFD}');
-            }
-        } else if (0xDC00..=0xDFFF).contains(&cp) {
-            out.push('\u{FFFD}');
-        } else {
-            out.push(char::from_u32(cp).unwrap_or('\u{FFFD}'));
-        }
-        Ok(())
-    }
-
-    fn parse_number(chars: &[char], pos: &mut usize) -> Result<Value, String> {
-        let start = *pos;
-        if chars[*pos] == '-' {
-            *pos += 1;
-        }
-        if *pos >= chars.len() || !chars[*pos].is_ascii_digit() {
-            return Err("nombre JSON invalide".to_string());
-        }
-        if chars[*pos] == '0' {
-            *pos += 1;
-        } else {
-            while *pos < chars.len() && chars[*pos].is_ascii_digit() {
-                *pos += 1;
-            }
-        }
-        if *pos < chars.len() && chars[*pos] == '.' {
-            *pos += 1;
-            if *pos >= chars.len() || !chars[*pos].is_ascii_digit() {
-                return Err("nombre JSON invalide (partie decimale)".to_string());
-            }
-            while *pos < chars.len() && chars[*pos].is_ascii_digit() {
-                *pos += 1;
-            }
-        }
-        if *pos < chars.len() && (chars[*pos] == 'e' || chars[*pos] == 'E') {
-            *pos += 1;
-            if *pos < chars.len() && (chars[*pos] == '+' || chars[*pos] == '-') {
-                *pos += 1;
-            }
-            if *pos >= chars.len() || !chars[*pos].is_ascii_digit() {
-                return Err("nombre JSON invalide (exposant)".to_string());
-            }
-            while *pos < chars.len() && chars[*pos].is_ascii_digit() {
-                *pos += 1;
-            }
-        }
-        let text: String = chars[start..*pos].iter().collect();
-        text.parse::<f64>()
-            .map(Value::Number)
-            .map_err(|_| "nombre JSON illisible".to_string())
-    }
-}
+use serde_json::Value;
 
 // ── Palier de cout / classe de verifiabilite ───────────────────────────────
 
@@ -588,20 +260,33 @@ fn looks_rate_limited(text: &str) -> bool {
         .any(|marker| lowered.contains(marker))
 }
 
-/// Miroir de `dispatch._extract_cost_usd`, corrige (voir le docstring du
-/// module `json` et `Value::as_finite_cost`) : `None` si *stdout* n'est pas
-/// un JSON valide, si la valeur racine n'est pas un objet, si
-/// `total_cost_usd` est absent, ou si sa valeur n'est pas un nombre fini
-/// hors booleen.
+/// `float(x)` si *value* est un nombre JSON fini — jamais un booleen (voir
+/// le docstring de `extract_cost_usd` : `isinstance(x, bool)` est vrai en
+/// Python pour `True`/`False`, un defaut trouve et corrige cote Python dans
+/// cette meme PR) ni `NaN`/`Infinity` (RFC 8259 ne les representant pas,
+/// `serde_json` ne les produit jamais depuis un JSON valide ; le controle
+/// `is_finite()` reste une defense en profondeur contre un litteral valide
+/// mais hors bornes de `f64`, ex. `1e400`, qui existe des deux cotes).
+fn as_finite_cost(value: &Value) -> Option<f64> {
+    match value {
+        Value::Number(n) => n.as_f64().filter(|f| f.is_finite()),
+        _ => None,
+    }
+}
+
+/// Miroir de `dispatch._extract_cost_usd` : `None` si *stdout* n'est pas un
+/// JSON valide (RFC 8259 strict, `serde_json`), si la valeur racine n'est
+/// pas un objet, si `total_cost_usd` est absent, ou si sa valeur n'est pas
+/// un nombre fini hors booleen.
 fn extract_cost_usd(stdout: &str) -> Option<f64> {
-    let value = json::parse(stdout).ok()?;
-    value.get("total_cost_usd")?.as_finite_cost()
+    let value: Value = serde_json::from_str(stdout).ok()?;
+    as_finite_cost(value.as_object()?.get("total_cost_usd")?)
 }
 
 /// Miroir de `dispatch._uncertainties_search_text`.
 fn uncertainties_search_text(stdout: &str) -> String {
-    match json::parse(stdout) {
-        Ok(value) => match value.get("result").and_then(json::Value::as_str) {
+    match serde_json::from_str::<Value>(stdout) {
+        Ok(value) => match value.get("result").and_then(Value::as_str) {
             Some(s) => s.to_string(),
             None => stdout.to_string(),
         },
@@ -690,7 +375,7 @@ fn extract_uncertainties(stdout: &str) -> (Vec<(String, String, String)>, Vec<St
     if trimmed.is_empty() {
         return (Vec::new(), Vec::new());
     }
-    let payload = match json::parse(trimmed) {
+    let payload: Value = match serde_json::from_str(trimmed) {
         Ok(v) => v,
         Err(_) => {
             let preview: String = trimmed.chars().take(200).collect();
@@ -703,7 +388,7 @@ fn extract_uncertainties(stdout: &str) -> (Vec<(String, String, String)>, Vec<St
         }
     };
     let items = match payload {
-        json::Value::Array(items) => items,
+        Value::Array(items) => items,
         _ => {
             let preview: String = trimmed.chars().take(200).collect();
             return (
@@ -717,9 +402,9 @@ fn extract_uncertainties(stdout: &str) -> (Vec<(String, String, String)>, Vec<St
     let mut uncertainties = Vec::new();
     let mut warnings = Vec::new();
     for item in items {
-        let where_ = item.get("where").and_then(json::Value::as_str);
-        let what_ = item.get("what").and_then(json::Value::as_str);
-        let why_ = item.get("why").and_then(json::Value::as_str);
+        let where_ = item.get("where").and_then(Value::as_str);
+        let what_ = item.get("what").and_then(Value::as_str);
+        let why_ = item.get("why").and_then(Value::as_str);
         match (where_, what_, why_) {
             (Some(w), Some(wh), Some(y)) => {
                 uncertainties.push((w.to_string(), wh.to_string(), y.to_string()))
@@ -1472,9 +1157,13 @@ mod tests {
 
     #[test]
     fn extract_cost_usd_non_finite_is_none() {
-        // json.loads accepte NaN/Infinity (voir module `json`), mais un
-        // cout non fini n'est pas un cout exploitable : traite comme
-        // absent, cote Python (corrige dans cette PR) comme cote Rust.
+        // `NaN`/`Infinity`/`-Infinity` sont hors RFC 8259 : `serde_json`
+        // (strict) rejette le document entier, donc `extract_cost_usd`
+        // rend `None` par l'echec de l'analyse elle-meme. Cote Python,
+        // `_reject_non_standard` (parse_constant) leve desormais sur ces
+        // memes jetons, rattrapee comme un JSON invalide — meme verdict,
+        // pour la meme raison, des deux cotes (voir
+        // `json_rejects_nan_and_infinity_strict_rfc8259` ci-dessus).
         assert_eq!(extract_cost_usd(r#"{"total_cost_usd": NaN}"#), None);
         assert_eq!(extract_cost_usd(r#"{"total_cost_usd": Infinity}"#), None);
         assert_eq!(extract_cost_usd(r#"{"total_cost_usd": -Infinity}"#), None);
@@ -1497,24 +1186,39 @@ mod tests {
     }
 
     #[test]
-    fn json_accepts_nan_and_infinity_like_cpython() {
-        // La divergence documentee dans le docstring du module `json` :
-        // un parseur JSON strict (serde_json compris) rejette ces jetons,
-        // `json.loads` de CPython les accepte par defaut.
-        assert!(matches!(json::parse("NaN"), Ok(json::Value::Number(n)) if n.is_nan()));
-        assert!(
-            matches!(json::parse("Infinity"), Ok(json::Value::Number(n)) if n == f64::INFINITY)
+    fn json_rejects_nan_and_infinity_strict_rfc8259() {
+        // La propriete que ce port doit demontrer : Rust est l'oracle,
+        // strict RFC 8259, et c'est Python qui s'aligne dessus
+        // (`_reject_non_standard` dans dispatch.py) — jamais l'inverse.
+        // Une premiere version de ce port faisait le contraire (analyseur
+        // maison reproduisant l'extension non standard de `json.loads` de
+        // CPython) ; corrige.
+        assert!(serde_json::from_str::<Value>("NaN").is_err());
+        assert!(serde_json::from_str::<Value>("Infinity").is_err());
+        assert!(serde_json::from_str::<Value>("-Infinity").is_err());
+    }
+
+    #[test]
+    fn extract_cost_usd_nan_elsewhere_in_document_is_none_not_just_the_field() {
+        // Un document qui porte NaN/Infinity ailleurs que dans le champ lu
+        // est rejete en bloc par le parseur strict — pas seulement le champ
+        // concerne. C'est le comportement que Python doit desormais imiter
+        // via `parse_constant` plutot que de reussir la ou Rust echoue.
+        assert_eq!(
+            extract_cost_usd(r#"{"total_cost_usd": 0.5, "other": NaN}"#),
+            None
         );
-        assert!(
-            matches!(json::parse("-Infinity"), Ok(json::Value::Number(n)) if n == f64::NEG_INFINITY)
+        assert_eq!(
+            extract_cost_usd(r#"{"total_cost_usd": 0.5, "other": Infinity}"#),
+            None
         );
     }
 
     #[test]
     fn json_parses_surrogate_pair_and_escapes() {
-        let v = json::parse(r#""😀""#).unwrap();
+        let v: Value = serde_json::from_str(r#""😀""#).unwrap();
         assert_eq!(v.as_str(), Some("\u{1F600}"));
-        let v2 = json::parse(r#""a\nb\t\"c""#).unwrap();
+        let v2: Value = serde_json::from_str(r#""a\nb\t\"c""#).unwrap();
         assert_eq!(v2.as_str(), Some("a\nb\t\"c"));
     }
 
