@@ -2,6 +2,36 @@
 
 ## Dernière release
 
+### 3.44.0 — Trois cœurs Rust optionnels de plus : hosts, flows, dispatch
+
+- **`grimoire.hosts.collect`/`.surface` portés en Rust optionnel (#412).**
+  Lecture du frontmatter d'agent et garde de distinction, bascule
+  `GRIMOIRE_HOSTS_BACKEND=python|rust|auto`. L'oracle Rust a révélé un
+  `ValueError` non rattrapé sur un chiffre Unicode non-ASCII dans
+  `_max_turns` (`"²".isdigit()` vrai, `int()` refuse) — corrigé côté Python.
+  Un verbe d'outil hors périmètre n'est plus silencieusement ignoré : une
+  note nommant les jetons rejetés apparaît désormais sous les deux backends.
+- **La machine à états du moteur de flows portée en Rust optionnel (#413).**
+  Contrat de sortie, node courant, `resume()`, `status()`, transitions du
+  kernel ; bascule `GRIMOIRE_FLOWS_BACKEND=python|rust|auto`. Divergence
+  trouvée par l'oracle : `REFUSED` manquait aux statuts terminaux côté
+  moteur de flows — un `resume()` sur un run refusé levait une erreur
+  générique au lieu du message dédié. Corrigé, les deux backends s'accordent.
+- **La cascade de dispatch et le routage de fournisseurs portés en Rust
+  optionnel (#415).** Résolution de palier, rendu d'invocation, analyse de
+  la sortie d'un ouvrier délégué, classification de revue ; bascule
+  `GRIMOIRE_DISPATCH_BACKEND=python|rust|auto`. Deux défauts trouvés par
+  l'oracle et corrigés côté Python : un coût JSON `true`/`false` était
+  coercé en `1.0`/`0.0` (`isinstance(True, int)` vrai en Python) ; le JSON
+  est désormais parsé strictement (RFC 8259), les jetons `NaN`/`Infinity`
+  que `serde_json` refuse font désormais échouer les deux côtés à
+  l'identique.
+- Chacun des trois ports garde la roue publiée `py3-none-any` — les crates
+  Rust ne quittent jamais `rust/`. Voir `CHANGELOG.md` pour le détail
+  complet.
+
+## Releases précédentes
+
 ### 3.43.1 — Le validateur, doctor et concierge alignés ; le gate Rust enfin requis
 
 - **Le validateur ne plante plus sur les champs énumérés (#409, #410).**
@@ -23,7 +53,6 @@
 - Voir `CHANGELOG.md` pour le détail complet, dont le script de mesure des
   gains Rust (#354, #404).
 
-## Releases précédentes
 
 ### 3.43.0 — Le système observe ses propres angles morts
 
