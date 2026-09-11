@@ -117,6 +117,7 @@ nav:
           - Plugin Development: plugin-development.md
           - Protocole d'évaluation: evals-protocol.md
           - R&D expérimental: rnd.md
+          - Bench cœurs Rust: rust-cores-benchmark.md
       - Référence:
           - CLI: cli-reference.md
           - Configuration: config-reference.md

@@ -6,6 +6,20 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/)
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
+### Ajouté
+
+- **chore(bench): mesurer le gain réel des cœurs Rust optionnels (#354).**
+  `scripts/bench-rust-cores.py` compare Python et Rust pour les deux cœurs
+  livrés à ce jour (`grimoire.policies.engine.PolicyEngine.evaluate` #363,
+  `grimoire.core.schema.generate_schema` / `grimoire.core.validator.validate_config`
+  #392) sur trois plans : micro (temps par appel, `timeit`, entrée réaliste
+  et entrée volumineuse), macro (`grimoire doctor`, `host sync`, `standard
+  verify`, décision `PreToolUse`, médiane de 10 exécutions contre le coût
+  fixe de `grimoire --version`), et profil (`importtime` + `cProfile` sur
+  `grimoire doctor .`). Verdict mesuré publié en commentaire sur #354 :
+  aucun des deux ports ne change un temps perceptible par l'utilisateur,
+  le surcoût de la frontière PyO3 dépassant le gain sur ces tailles
+  d'entrée. `docs/rust-cores-benchmark.md` documente comment le relancer.
 
 ## [3.43.0] - 2026-09-11
 ### Ajouté
