@@ -51,6 +51,7 @@ def _write_agent(
     cost: str = "medium",
     max_turns: int | None = None,
     context: tuple[str, ...] = (),
+    skills: tuple[str, ...] = (),
 ) -> None:
     (root / AGENT_DIR).mkdir(parents=True, exist_ok=True)
     header = [
@@ -71,11 +72,30 @@ def _write_agent(
     if context:
         rendered = ", ".join(f"'{c}'" for c in context)
         header.append(f"context: [{rendered}]")
+    if skills:
+        rendered_skills = ", ".join(f"'{s}'" for s in skills)
+        header.append(f"skills: [{rendered_skills}]")
     header += [
         "---",
         "",
     ]
     (root / AGENT_DIR / f"{name}.md").write_text("\n".join(header) + body + "\n", encoding="utf-8")
+
+
+def _write_skill(root: Path, slug: str) -> None:
+    """Drop a minimal project-tier skill definition at ``_grimoire/kit/skills/<slug>.md``.
+
+    Mirrors what the scaffolder copies for an archetype-shipped skill (issue
+    #375) — the same tier :func:`grimoire.hosts.collect.collect_skills` reads
+    to build the inventory that :func:`grimoire.hosts.collect.collect_agents`
+    now resolves for itself by default (issue #423).
+    """
+    skill_dir = root / "_grimoire" / "kit" / "skills"
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / f"{slug}.md").write_text(
+        f"---\nname: {slug}\ndescription: Skill de test {slug}\n---\nCorps du skill {slug}.\n",
+        encoding="utf-8",
+    )
 
 
 @pytest.fixture
@@ -149,6 +169,39 @@ def test_installed_agents_et_collect_agents_nomment_pareil(project: Path) -> Non
     installed_tags = set(layout.installed_agents(project))
     collected_names = {a.name for a in collect_agents(project)}
     assert installed_tags == collected_names
+
+
+def test_collect_agents_resolves_its_own_skills_without_known_skills(tmp_path: Path) -> None:
+    """Régression #423 : appeler ``collect_agents`` sans ``known_skills`` ne doit
+
+    plus jamais faire échouer un agent qui déclare un skill réellement présent.
+    Avant le correctif, ``known_skills`` non fourni retombait sur un ensemble
+    vide (``known_skills or frozenset()``), donc *tout* skill référencé était
+    « introuvable » — le défaut par défaut des agents d'archétype depuis
+    #377/#387 (``skills:`` attaché) faisait planter tout appelant qui, comme
+    ``entry_persona_context`` ou le porteur par catégorie de
+    ``grimoire/proposals.py``, ne passait pas explicitement l'inventaire.
+    """
+    _write_skill(tmp_path, "meta-art-direction")
+    _write_agent(tmp_path, "agent-optimizer", "Tu arbitres.", skills=("meta-art-direction",))
+
+    (agent,) = [a for a in collect_agents(tmp_path) if a.name == "agent-optimizer"]
+    assert agent.skills == ("meta-art-direction",)
+
+
+def test_collect_agents_still_rejects_a_skill_that_truly_does_not_exist(tmp_path: Path) -> None:
+    """La résolution automatique (#423) reste fail-closed sur un slug fantôme.
+
+    Le correctif fait résoudre l'inventaire tout seul quand ``known_skills``
+    n'est pas fourni ; il ne doit pas assouplir la garde pour autant, sinon
+    une vraie faute de frappe redevient silencieuse.
+    """
+    from grimoire.core.exceptions import GrimoireAgentError
+
+    _write_agent(tmp_path, "agent-optimizer", "Tu arbitres.", skills=("skill-qui-n-existe-pas",))
+
+    with pytest.raises(GrimoireAgentError, match="skill-qui-n-existe-pas"):
+        collect_agents(tmp_path)
 
 
 def test_an_override_wins_over_the_kit_tier(tmp_path: Path) -> None:
@@ -1131,6 +1184,41 @@ def test_the_hook_names_the_persona_it_injected(project: Path) -> None:
     )
     assert decision.detail["entry_agent"] == "concierge"
     assert "concierge" in rendered["hookSpecificOutput"]["additionalContext"]
+
+
+def test_session_start_does_not_error_when_the_entry_persona_has_attached_skills(
+    project: Path,
+) -> None:
+    """Régression #423, reproduite en conditions réelles.
+
+    Un projet d'archétype ``meta`` porte un agent (``agent-optimizer``) qui
+    déclare quatre skills attachés par défaut — la forme par défaut des
+    archétypes depuis #377/#387. Avant le correctif, ``SessionStart``
+    répondait « hook grimoire.activation en erreur » sur *tout* projet de ce
+    type, parce qu'``entry_persona_context`` appelait ``collect_agents``
+    sans lui donner l'inventaire des skills. Ici l'agent à skills est aussi
+    la persona d'entrée, le chemin le plus direct vers la régression.
+    """
+    _write_skill(project, "meta-art-direction")
+    _write_agent(
+        project,
+        "agent-optimizer",
+        "Tu arbitres la qualité des agents.",
+        skills=("meta-art-direction",),
+    )
+    (project / "project-context.yaml").write_text(
+        "project:\n  name: test-project\nagents:\n  entry: agent-optimizer\n",
+        encoding="utf-8",
+    )
+
+    rendered, decision, _ = run_hook(
+        {"hook_event_name": "SessionStart", "cwd": str(project)}, host_id=HostId.CLAUDE_CODE_CLI
+    )
+    context = rendered["hookSpecificOutput"]["additionalContext"]
+    assert "en erreur" not in context, context
+    assert "[Grimoire — persona d'entrée]" in context
+    assert "agent-optimizer" in context
+    assert decision.detail.get("entry_agent") == "agent-optimizer"
 
 
 # ── Rappel de tâche au claim (#141) ─────────────────────────────────────────

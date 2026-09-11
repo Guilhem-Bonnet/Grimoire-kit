@@ -310,6 +310,17 @@ def collect_agents(
     treatment as an import that names a module which does not exist — not a
     warning, and not a silent drop.
 
+    Left ``None`` (the default), this function resolves its own inventory
+    via :func:`collect_skills` — no caller can fall back into the gap that
+    caused issue #423: passing no inventory used to silently become an
+    *empty* one, so every agent with a ``skills:`` frontmatter (the default
+    shape of archetype agents since #377/#387) failed fail-closed as if its
+    skills did not exist, even though :func:`collect_skills` would have
+    found every one of them. Pass an explicit inventory only to reuse one
+    already collected for another purpose (e.g. :func:`build_surface`, which
+    needs the same :class:`SkillSpec` objects, not just their slugs) or to
+    deliberately test the fail-closed path with a narrower set.
+
     *notes* is an optional out-parameter (appended to in place, never
     replaced): when given, an agent declaring a ``tools:`` token that is not
     a member of :class:`ToolVerb` (a frontmatter typo, e.g. ``tools: [read,
@@ -322,7 +333,8 @@ def collect_agents(
     """
     if entry_point is None:
         entry_point = entry_agent_name(project_root)
-    known_skills = known_skills or frozenset()
+    if known_skills is None:
+        known_skills = frozenset(spec.slug for spec in collect_skills(project_root))
     specs: list[AgentSpec] = []
     for path in _agent_files(project_root):
         try:

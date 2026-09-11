@@ -7,6 +7,18 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **fix(hosts): `collect_agents` résout ses propres skills quand `known_skills` n'est pas fourni — `SessionStart` et le porteur de proposition ne plantent plus sur un agent à skills attachés (#423).**
+  `entry_persona_context` et `_category_carrier` (déclencheur de propositions)
+  appelaient `collect_agents(project_root)` sans lui passer l'inventaire des
+  skills du projet ; le défaut retombait alors sur un ensemble vide, donc
+  *tout* agent déclarant un `skills:` en frontmatter — la forme par défaut
+  des archétypes depuis #377/#387 — échouait fail-closed comme si ses
+  skills n'existaient pas. `collect_agents(project_root, *, known_skills=None, …)`
+  résout maintenant lui-même l'inventaire via `collect_skills(project_root)`
+  quand `known_skills` vaut `None`, pour qu'aucun appelant ne puisse
+  retomber dans ce trou ; un inventaire explicite reste accepté pour les
+  appelants qui en réutilisent un déjà collecté (`build_surface`, etc.).
+
 - **perf(hosts): cache JSON de l'état du standard, invalidé par empreinte — `grimoire-hook` évite `ruamel.yaml` sur cache chaud (#419).**
   Suite du découpage de `hosts/decisions.py` (#420) : le profil résiduel
   identifiait `grimoire.core.standard_state` (`active_task_id`/`active_profile_id`)
