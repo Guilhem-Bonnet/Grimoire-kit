@@ -1248,6 +1248,107 @@ def test_an_unwritable_trace_ledger_never_breaks_session_start(project: Path) ->
     assert "**concierge**" in context
 
 
+def test_recording_an_agent_miss_is_captured_in_the_trace_ledger(project: Path) -> None:
+    """Symétrique du choix (#366) : le concierge n'a trouvé aucun spécialiste (#389)."""
+    from grimoire.core.standard_generation import TRACES_DIR
+    from grimoire.hosts.decisions import record_agent_miss
+    from grimoire.traces.ledger import TraceLedger
+
+    record_agent_miss(
+        project,
+        category="tests",
+        specialty="expert-playwright",
+        fallback_agent="generic-dev",
+        reason="aucun agent e2e déclaré",
+    )
+    misses = TraceLedger(project / TRACES_DIR).agent_miss_counts()
+    assert set(misses) == {"expert-playwright"}
+    assert misses["expert-playwright"]["count"] == 1
+    assert misses["expert-playwright"]["last_seen"]
+
+
+def test_repeated_misses_on_the_same_specialty_accumulate(project: Path) -> None:
+    """Le critère d'arrêt de #389 : quelle spécialité a manqué, et combien de fois."""
+    from grimoire.core.standard_generation import TRACES_DIR
+    from grimoire.hosts.decisions import record_agent_miss
+    from grimoire.traces.ledger import TraceLedger
+
+    for _ in range(3):
+        record_agent_miss(project, category="infra", specialty="terraform")
+    misses = TraceLedger(project / TRACES_DIR).agent_miss_counts()
+    assert misses["terraform"]["count"] == 3
+
+
+def test_a_miss_without_a_nameable_specialty_is_still_counted(project: Path) -> None:
+    """Un non-choix reste un signal même quand la spécialité n'a pas pu être nommée."""
+    from grimoire.core.standard_generation import TRACES_DIR
+    from grimoire.hosts.decisions import record_agent_miss
+    from grimoire.traces.ledger import TraceLedger
+
+    record_agent_miss(project, category="design")
+    misses = TraceLedger(project / TRACES_DIR).agent_miss_counts()
+    assert misses["(non nommée)"]["count"] == 1
+
+
+def test_recording_an_agent_miss_never_stores_request_content(project: Path) -> None:
+    """Refus explicite de l'issue #389 : jamais le contenu de la demande, seulement ce qui la classe."""
+    from grimoire.core.standard_generation import TRACES_DIR
+    from grimoire.hosts.decisions import record_agent_miss
+    from grimoire.traces.ledger import TraceLedger
+
+    record_agent_miss(
+        project,
+        category="tests",
+        specialty="expert-playwright",
+        fallback_agent="generic-dev",
+        reason="aucun agent e2e déclaré",
+    )
+    trace = TraceLedger(project / TRACES_DIR)._load_all()[-1]
+    # Les seuls champs porteurs de texte sont ceux passés explicitement par
+    # l'appelant (category/specialty/reason comme étiquettes, jamais un
+    # extrait de la demande) ; tout le reste de l'enregistrement est vide.
+    assert set(trace.tags) == {
+        "agent.miss",
+        "category:tests",
+        "specialty:expert-playwright",
+        "reason:aucun agent e2e déclaré",
+    }
+    assert trace.agent_id == "generic-dev"
+    assert trace.workflow_instance_id == ""
+    assert trace.mission_id == ""
+    assert trace.task_id == ""
+    assert trace.host_id == ""
+    assert trace.model == ""
+    assert trace.tool_calls == ()
+    assert trace.policy_verdicts == ()
+    assert trace.evidence_refs == ()
+
+
+def test_recording_a_miss_reports_that_it_wrote(project: Path) -> None:
+    """Cas nominal : l'appelant doit pouvoir distinguer une écriture réelle d'un échec avalé."""
+    from grimoire.hosts.decisions import record_agent_miss
+
+    assert record_agent_miss(project, category="tests") is True
+
+
+def test_an_unwritable_trace_ledger_never_breaks_recording_a_miss(project: Path) -> None:
+    """Best-effort : un journal illisible n'est jamais au prix de la résolution qu'il observe,
+
+    mais l'appelant doit le savoir — sinon la commande annoncerait une
+    écriture qui n'a pas eu lieu (faux vert).
+    """
+    from grimoire.core.standard_generation import TRACES_DIR
+    from grimoire.hosts.decisions import record_agent_miss
+
+    traces_dir = project / TRACES_DIR
+    traces_dir.parent.mkdir(parents=True, exist_ok=True)
+    # Même panne que le test symétrique côté choix : un fichier régulier là où
+    # le TraceLedger attend un dossier fait échouer son `mkdir`.
+    traces_dir.write_text("pas un dossier", encoding="utf-8")
+    written = record_agent_miss(project, category="tests")  # ne doit jamais lever
+    assert written is False
+
+
 def test_no_host_can_open_a_session_inside_an_agent(project: Path) -> None:
     """Le manque est déclaré, pas commenté — et chaque hôte nomme son substitut."""
     del project

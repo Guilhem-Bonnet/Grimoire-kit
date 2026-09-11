@@ -198,6 +198,40 @@ Trois limites assumées :
 - **un ledger illisible n'interrompt rien** — l'observabilité ne vaut jamais une
   session cassée.
 
+Le choix de la persona d'entrée y laisse aussi un fait dédié : `hosts.decisions`
+enregistre quel agent a été retenu, quand, dans quel projet — rien du contenu
+échangé (#366). `grimoire registry dispatches` relit ce fait, agrégé par agent,
+avec le nombre de choix observés et la date du dernier.
+
+### Non-choix
+
+Le choix n'est que la moitié du signal : le concierge cherche parfois un
+spécialiste sans en trouver, ou se rabat sur un généraliste faute de mieux.
+C'est ce non-choix qui indique un besoin non couvert — sans lui, aucun
+déclencheur ne peut proposer la création d'un agent qui manque (#355).
+
+Cette résolution se fait dans le raisonnement de la persona concierge
+(`archetypes/meta/agents/concierge.md`), pas dans du code du kit qui pourrait
+l'observer lui-même. La persona appelle donc `grimoire agent-miss` à chaque
+non-choix :
+
+```bash
+grimoire agent-miss --category tests
+grimoire agent-miss --category infra --specialty terraform \
+  --fallback backend-engineer --reason "aucun agent terraform déclaré"
+```
+
+`--category` et `--specialty` classent la demande, ils n'en portent jamais le
+contenu — la persona ne transmet qu'une étiquette, jamais ce qui a été dit.
+Le fait rejoint le même journal que le choix (`agent.miss` au lieu de
+`agent.dispatch`), écrit best-effort de la même façon : un journal
+indisponible ou illisible ne fait jamais échouer la commande.
+
+`grimoire registry dispatches` montre les deux côte à côte : les choix
+d'agent, et les non-choix agrégés par spécialité manquante, avec leur
+compte et la date du plus récent — de quoi répondre à « quelle spécialité a
+manqué, et combien de fois ».
+
 ## Frontière d'outils des personas
 
 Chaque persona est projetée avec une frontière d'outils. Elle vient du champ

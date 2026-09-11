@@ -6,6 +6,19 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/)
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
+### Ajouté
+
+- **feat(core): instrumenter les non-choix du concierge (#389).** Symétrique
+  du choix d'agent (#366) : quand le concierge cherche un spécialiste et n'en
+  trouve aucun, ou se rabat sur un généraliste, `grimoire agent-miss`
+  journalise le fait dans le même TraceLedger — catégorie de la demande,
+  spécialité cherchée si nommable, agent de repli, raison, jamais le contenu
+  de la demande. La résolution se fait dans le raisonnement de la persona
+  concierge (`archetypes/meta/agents/concierge.md`, désormais instruite
+  d'appeler cette commande), pas dans du code du kit ; c'est donc le seul
+  canal d'écriture. `grimoire registry dispatches` lit désormais les deux
+  côte à côte : choix par agent, non-choix agrégés par spécialité manquante
+  avec leur compte. Écriture best-effort, comme son symétrique.
 
 - feat(core): second port Rust optionnel, `rust/grimoire-schema-core/` — `grimoire.core.schema.generate_schema` et `grimoire.core.validator.validate_config` bascule sur `GRIMOIRE_SCHEMA_BACKEND=python|rust|auto` (sœur de `GRIMOIRE_POLICIES_BACKEND`), repli Python inchangé par défaut, sans roue publiée (#354). Le cœur Rust rejette explicitement des entrées que le validateur Python de référence laisse aujourd'hui passer sans erreur (`installed_archetypes[]`, `project.repos[].name`, `user.name`/`language`/`document_language` jamais type-vérifiés malgré `schema.py`) ou fait planter (`TypeError: unhashable type` sur un `type`/`backend`/... de forme liste ou table) — vérifié dans les deux configurations, contrat des tests existants inchangé.
 
