@@ -22,13 +22,14 @@ golden test : ils tournent tels quels sous les deux backends (voir
    pourtant déjà terminal côté ``RuntimeKernel`` (aucune transition
    sortante). Corrigé dans cette même PR ; ce fichier prouve le correctif et
    la parité entre les deux backends désormais alignés.
-3. Un comportement délibérément **non changé**, documenté plutôt que
-   « corrigé » : ``FlowEngine.status()`` dérive ``completed_nodes`` de la
-   position de ``current_node`` dans l'ordre topologique — sur un run
-   ABORTED avant tout progrès, cela affiche tous les nodes comme complétés.
-   Les deux backends reproduisent ce comportement à l'identique (voir le
-   docstring de ``rust/grimoire-flows-core/src/lib.rs`` pour pourquoi ce
-   n'est pas corrigé ici).
+3. Un second défaut réel, trouvé de la même façon (issue #414, PR #413) :
+   ``FlowEngine.status()`` dérivait ``completed_nodes`` de la seule position
+   de ``current_node`` dans l'ordre topologique — sur un run ABORTED/REFUSED
+   avant tout progrès (``current_node is None``, terminal, comme un run
+   réussi), cela affichait tous les nodes comme complétés. Corrigé dans
+   cette PR pour les deux backends en même temps, même verdict :
+   ``completed_nodes`` reflète maintenant les ``completed_steps`` du
+   dernier checkpoint réel sur un run mort (vide si aucun n'existe).
 4. Un statut inconnu dans des métadonnées persistées à la main : les deux
    backends refusent (jamais un défaut silencieux), documenté plutôt que
    changé.
@@ -255,21 +256,27 @@ def test_refused_run_is_terminal_to_resume_and_status(tmp_path: Path, monkeypatc
     assert status.status == WorkflowStatus.REFUSED.value
     assert status.current_node is None
     assert status.pending_nodes == ()
+    # Issue #414 : un refus (plafond MAST) survenu avant tout `resume()`
+    # n'a checkpointé aucun node — `completed_nodes` doit rester vide,
+    # jamais l'ordre entier.
+    assert status.completed_nodes == ()
 
 
-# ── Documenté, pas corrigé : découpage completed/pending sur un abandon précoce ──
+# ── Corrigé (issue #414) : découpage completed/pending sur un run mort ─────
 
 
 @pytest.mark.parametrize("backend", ["python", "rust"])
-def test_aborted_run_status_slicing_documented_not_fixed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, backend: str) -> None:
-    """Comportement volontairement NON changé (voir le docstring de
-    ``rust/grimoire-flows-core/src/lib.rs``) : un run ABORTED avant tout
-    progrès a ``current_node is None`` (terminal), et ``status()`` dérive
-    ``completed_nodes`` de la position de ``current_node`` dans l'ordre —
-    ``None`` retombe sur ``idx = len(order)``, donc ``completed_nodes``
-    affiche TOUS les nodes comme faits alors qu'aucun ne l'est. Les deux
-    backends reproduisent ce comportement à l'identique ; ce test fige la
-    parité, pas une correction."""
+def test_aborted_run_status_slicing_reflects_real_progress(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, backend: str
+) -> None:
+    """Défaut trouvé en portant ce découpage vers Rust (issue #414, PR
+    #413) : un run ABORTED avant tout progrès a ``current_node is None``
+    (terminal) exactement comme un run terminé avec succès — l'ancien
+    découpage retombait alors sur ``idx = len(order)`` dans les deux cas,
+    affichant TOUS les nodes comme faits alors qu'aucun ne l'est. Corrigé
+    pour les deux backends : ``completed_nodes`` reflète maintenant les
+    ``completed_steps`` du dernier checkpoint réel (vide ici, puisqu'aucun
+    ``resume()`` n'a eu lieu avant l'abandon)."""
     if backend == "rust" and not rust_backend_available():
         pytest.skip("grimoire_flows_core not installed")
     _with_backend(backend, monkeypatch)
@@ -285,8 +292,37 @@ def test_aborted_run_status_slicing_documented_not_fixed(tmp_path: Path, monkeyp
     after_abort = engine.status(wfi.id)
     assert after_abort.status == WorkflowStatus.ABORTED.value
     assert after_abort.current_node is None
-    # Le défaut documenté : "tout fait" alors que rien ne l'est.
-    assert after_abort.completed_nodes == ("a", "b", "c")
+    # Corrigé : rien n'a réellement été fait avant l'abandon.
+    assert after_abort.completed_nodes == ()
+    assert after_abort.pending_nodes == ()
+
+
+@pytest.mark.parametrize("backend", ["python", "rust"])
+def test_aborted_run_after_k_nodes_keeps_only_real_checkpointed_progress(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, backend: str
+) -> None:
+    """Même correctif (issue #414), cas « abandon après k nodes » : sur le
+    blueprint à 3 nodes ``a -> b -> c``, un ``resume()`` réussi sur ``a``
+    checkpointe ``completed_steps=["a"]`` avant d'ouvrir ``b``. Un abandon
+    à ce point doit rendre ``completed_nodes == ("a",)`` — ni vide (aucun
+    progrès n'est perdu), ni l'ordre entier (``b``/``c`` ne sont pas
+    faits)."""
+    if backend == "rust" and not rust_backend_available():
+        pytest.skip("grimoire_flows_core not installed")
+    _with_backend(backend, monkeypatch)
+    engine = _engine(tmp_path)
+    bp = _write_three_node_blueprint(tmp_path)
+    wfi, _ = engine.run(bp, executor=InteractiveNodeExecutor(stream=io.StringIO()))
+    outcome = engine.resume(
+        wfi.id, output={"pins": {"out": {"contract": "c1"}}}, executor=InteractiveNodeExecutor(stream=io.StringIO())
+    )
+    assert outcome.ok and not outcome.finished and outcome.node_id == "b"
+
+    engine.abort(wfi.id, reason="test après un node")
+    after_abort = engine.status(wfi.id)
+    assert after_abort.status == WorkflowStatus.ABORTED.value
+    assert after_abort.current_node is None
+    assert after_abort.completed_nodes == ("a",)
     assert after_abort.pending_nodes == ()
 
 

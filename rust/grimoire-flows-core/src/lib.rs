@@ -59,22 +59,26 @@
 //! marquer `true` quelque part ne compile pas silencieusement — c'est
 //! exactement le role attendu de ce port (cf. commit du port #392, #412).
 //!
-//! ## Ce qui n'est pas change, et pourquoi
+//! ## Corrige : un abandon avant tout progres n'affiche plus tous les nodes comme faits
 //!
-//! `FlowEngine.status()` derive `completed_nodes` de la position de
+//! `FlowEngine.status()` derivait `completed_nodes` de la seule position de
 //! `current_node` dans l'ordre topologique (`order[:idx]`), jamais des
-//! `completed_steps` reellement checkpointes. Sur un run ABORTED avant tout
-//! progres (`current_node` devient `None` des l'abandon, donc
-//! `idx = len(order)`), cela rend `completed_nodes == order` en entier —
-//! *tous* les nodes marques faits alors qu'aucun ne l'est. Verifie
-//! empiriquement (voir le commentaire de
-//! `tests/unit/test_flows_rust_parity.py::test_aborted_run_status_slicing_documented_not_fixed`).
-//! Reproduit a l'identique par `status_slices_core` ci-dessous (memes
-//! entrees, meme sortie que Python) plutot que « corrige » : la bonne
-//! source de verite pour un run interrompu serait les `completed_steps` du
-//! dernier checkpoint, pas la position de `current_node` — un changement de
-//! forme de `FlowStatusView`, pas un correctif local sans risque. Trace
-//! comme issue plutot que patchee ici (voir la description de la PR).
+//! `completed_steps` reellement checkpointes. Sur un run ABORTED/REFUSED
+//! avant tout progres, `current_node` devient `None` (terminal) exactement
+//! comme sur un run termine avec succes — `idx = len(order)` traitait donc
+//! les deux cas de facon identique, rendant `completed_nodes == order` en
+//! entier meme quand *aucun* node n'a reellement ete complete (issue #414,
+//! trouvee en portant ce decoupage vers Rust — voir PR #413). Corrige des
+//! deux cotes en meme temps, meme verdict : `status_slices_core` ci-dessous
+//! ne retombe sur `order` en entier que pour un succes (`COMPLETED`/
+//! `VERIFIED`, ou `current_node` est bien resolu dans `order`) ; pour un
+//! run mort en cours de route (`ABORTED`/`REFUSED`) sans node courant
+//! resoluble, la source de verite devient les `completed_steps` du dernier
+//! checkpoint connu du `RuntimeKernel` (liste vide si aucun checkpoint
+//! n'existe encore — le run est mort avant le premier `resume()`).
+//! `pending_nodes` reste vide par convention sur un run mort : on ne sait
+//! pas si l'hote comptait reprendre. Voir
+//! `tests/unit/test_flows_rust_parity.py::test_aborted_run_status_slicing_reflects_real_progress`.
 //!
 //! Le statut `PAUSED` est declare dans `_WF_TRANSITIONS` (Python) mais
 //! aucune methode de `RuntimeKernel` ne l'atteint jamais — mort cote
@@ -467,22 +471,34 @@ fn compute_resume_outcome(
 
 // ── status(): decoupage completed/pending ──────────────────────────────────
 
-/// Miroir EXACT (bug documente compris, voir le docstring de ce module) de
-/// la partie de `FlowEngine.status` qui derive `completed_nodes`/
-/// `pending_nodes` depuis la position de `current_id` dans `order`. Ne
-/// tente pas de deviner l'intention "vrais nodes completes" pour un run
-/// termine hors succes (ABORTED/REFUSED) — ce serait un changement de
-/// forme de `FlowStatusView`, pas une reproduction fidele.
-fn status_slices_core(order: &[String], current_id: Option<&str>) -> (Vec<String>, Vec<String>) {
-    let idx = current_id
-        .and_then(|id| order.iter().position(|n| n == id))
-        .unwrap_or(order.len());
-    let completed = order[..idx.min(order.len())].to_vec();
-    let pending = match current_id {
-        Some(_) if idx + 1 <= order.len() => order[(idx + 1).min(order.len())..].to_vec(),
-        _ => Vec::new(),
-    };
-    (completed, pending)
+/// Decoupage completed/pending de `FlowEngine.status` (issue #414, voir le
+/// docstring de ce module). Quand `current_id` est resolu dans `order`
+/// (run en cours), decoupage positionnel inchange : `order[:idx]` /
+/// `order[idx+1:]`. Sinon (`current_id` absent — run termine, ou terminal
+/// sans node courant resoluble) : `COMPLETED`/`VERIFIED` rendent `order` en
+/// entier (succes reel, tout est fait) ; tout le reste (`ABORTED`,
+/// `REFUSED`, ou tout autre statut degenere sans node courant) rend les
+/// `completed_steps` du dernier checkpoint connu — vide si aucun checkpoint
+/// n'existe encore, jamais une invention deduite de la position. Un
+/// `current_id` non resoluble dans `order` (ne devrait jamais arriver,
+/// order et current_id venant du meme run) retombe defensivement sur
+/// `order` en entier, comme avant.
+fn status_slices_core(
+    order: &[String],
+    current_id: Option<&str>,
+    status: WorkflowStatus,
+    checkpoint_completed: &[String],
+) -> (Vec<String>, Vec<String>) {
+    if let Some(id) = current_id {
+        return match order.iter().position(|n| n == id) {
+            Some(idx) => (order[..idx].to_vec(), order[idx + 1..].to_vec()),
+            None => (order.to_vec(), Vec::new()),
+        };
+    }
+    match status {
+        WorkflowStatus::Completed | WorkflowStatus::Verified => (order.to_vec(), Vec::new()),
+        _ => (checkpoint_completed.to_vec(), Vec::new()),
+    }
 }
 
 // ── Frontiere PyO3 ───────────────────────────────────────────────────────
@@ -689,14 +705,24 @@ mod py_bridge {
     }
 
     /// Frontiere PyO3 pour le decoupage completed/pending de
-    /// `FlowEngine.status` — reproduction fidele, bug documente compris
-    /// (voir le docstring du module).
+    /// `FlowEngine.status` (issue #414, voir le docstring du module).
+    /// `checkpoint_completed` est `completed_steps` du dernier checkpoint
+    /// connu (liste vide si aucun checkpoint), deja lu cote Python — ce
+    /// crate ne fait aucune E/S.
     #[pyfunction]
     fn status_slices(
         order: Vec<String>,
         current_id: Option<String>,
+        status: &str,
+        checkpoint_completed: Vec<String>,
     ) -> PyResult<(Vec<String>, Vec<String>)> {
-        Ok(status_slices_core(&order, current_id.as_deref()))
+        let parsed = parse_status(status)?;
+        Ok(status_slices_core(
+            &order,
+            current_id.as_deref(),
+            parsed,
+            &checkpoint_completed,
+        ))
     }
 
     #[pymodule]
@@ -1304,56 +1330,84 @@ mod tests {
 
     #[test]
     fn status_slices_mid_run() {
-        let (completed, pending) = status_slices_core(&order3(), Some("b"));
+        let (completed, pending) =
+            status_slices_core(&order3(), Some("b"), WorkflowStatus::Running, &[]);
         assert_eq!(completed, vec!["a".to_string()]);
         assert_eq!(pending, vec!["c".to_string()]);
     }
 
     #[test]
     fn status_slices_finished_run_all_completed_none_pending() {
-        let (completed, pending) = status_slices_core(&order3(), None);
+        let (completed, pending) =
+            status_slices_core(&order3(), None, WorkflowStatus::Completed, &[]);
+        assert_eq!(completed, order3());
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn status_slices_verified_run_all_completed_none_pending() {
+        let (completed, pending) =
+            status_slices_core(&order3(), None, WorkflowStatus::Verified, &[]);
         assert_eq!(completed, order3());
         assert!(pending.is_empty());
     }
 
     #[test]
     fn status_slices_last_node_current_has_no_pending() {
-        let (completed, pending) = status_slices_core(&order3(), Some("c"));
+        let (completed, pending) =
+            status_slices_core(&order3(), Some("c"), WorkflowStatus::Running, &[]);
         assert_eq!(completed, vec!["a".to_string(), "b".to_string()]);
         assert!(pending.is_empty());
     }
 
     #[test]
     fn status_slices_current_id_not_in_order_treated_as_finished() {
-        // Reproduction fidele (documentee, pas corrigee) : un current_id
-        // hors de `order` retombe sur idx = len(order), comme
-        // `order.index(current_id) if current_id in order else len(order)`
-        // cote Python.
-        let (completed, pending) = status_slices_core(&order3(), Some("inconnu"));
+        // Defensif, pas dans le perimetre de l'issue #414 : un current_id
+        // hors de `order` (ne devrait jamais arriver) retombe sur `order`
+        // en entier, comme avant.
+        let (completed, pending) =
+            status_slices_core(&order3(), Some("inconnu"), WorkflowStatus::Running, &[]);
         assert_eq!(completed, order3());
         assert!(pending.is_empty());
     }
 
     #[test]
     fn status_slices_empty_order() {
-        let (completed, pending) = status_slices_core(&[], None);
+        let (completed, pending) = status_slices_core(&[], None, WorkflowStatus::Completed, &[]);
         assert!(completed.is_empty());
         assert!(pending.is_empty());
     }
 
     #[test]
-    fn status_slices_aborted_run_before_any_progress_documents_the_bug() {
-        // Le defaut documente dans le module : current_id=None (run
-        // termine, avec succes OU aborte) rend TOUJOURS completed=order en
-        // entier, meme si l'abandon a eu lieu avant tout progres reel. Ce
-        // test fige ce comportement (les deux backends doivent produire
-        // exactement ceci) plutot que de le "corriger" silencieusement ici.
-        let (completed, pending) = status_slices_core(&order3(), None);
-        assert_eq!(
-            completed,
-            order3(),
-            "documente : completed == order entier meme sur abandon precoce"
-        );
+    fn status_slices_aborted_run_before_any_progress_is_empty() {
+        // Correctif de l'issue #414 : un abandon avant tout `resume()` n'a
+        // aucun checkpoint — `completed_nodes` doit rester vide, jamais
+        // `order` en entier.
+        let (completed, pending) =
+            status_slices_core(&order3(), None, WorkflowStatus::Aborted, &[]);
+        assert!(completed.is_empty(), "corrige : aucun node reellement fait");
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn status_slices_aborted_run_after_k_nodes_reflects_last_checkpoint() {
+        // Correctif de l'issue #414 : un abandon apres k `resume()` reussis
+        // rend les k nodes reellement checkpointes, pas une position
+        // deduite de `current_node`.
+        let checkpointed = vec!["a".to_string()];
+        let (completed, pending) =
+            status_slices_core(&order3(), None, WorkflowStatus::Aborted, &checkpointed);
+        assert_eq!(completed, vec!["a".to_string()]);
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn status_slices_refused_run_before_any_progress_is_empty() {
+        // Meme correctif, meme verdict pour REFUSED (plafond MAST) que pour
+        // ABORTED — les deux sont terminaux sans reprise possible.
+        let (completed, pending) =
+            status_slices_core(&order3(), None, WorkflowStatus::Refused, &[]);
+        assert!(completed.is_empty());
         assert!(pending.is_empty());
     }
 }

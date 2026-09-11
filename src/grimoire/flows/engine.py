@@ -271,6 +271,19 @@ class FlowEngine:
             return order[0] if order else None
         return last_step_started if last_step_started is not None else (order[0] if order else None)
 
+    def _last_checkpoint_completed_steps(self, wfi: WorkflowInstance) -> tuple[str, ...]:
+        """``completed_steps`` du dernier checkpoint connu, ou ``()`` si aucun n'existe.
+
+        Seule source de vérité pour ``completed_nodes`` sur un run terminé
+        hors succès (ABORTED/REFUSED) dans :meth:`status` (issue #414) : un
+        run mort avant son premier ``resume()`` n'a jamais checkpointé quoi
+        que ce soit, donc rien n'est réellement fait.
+        """
+        checkpoints = self._kernel.list_checkpoints(wfi.id)
+        if not checkpoints:
+            return ()
+        return tuple(checkpoints[-1].state.completed_steps)
+
     def _last_refusal(self, wfi: WorkflowInstance) -> dict[str, Any] | None:
         for event in reversed(self._kernel.get_run_events(wfi.id)):
             if event.event_type is RunEventType.STEP_FAILED:
@@ -408,20 +421,37 @@ class FlowEngine:
         current_id = self._current_node(wfi, order)
 
         # Découpage completed/pending délégué à grimoire_flows_core.status_slices
-        # (issue #354) quand le backend Rust est actif — reproduction fidèle
-        # de la référence Python ci-dessous, bug documenté compris (un run
-        # ABORTED/REFUSED avant tout progrès affiche `completed_nodes` égal à
-        # `order` en entier puisque `current_node` devient `None` dès la fin
-        # du run, quelle qu'en soit la cause ; voir le docstring de
-        # rust/grimoire-flows-core/src/lib.rs — pas corrigé ici, ce serait un
-        # changement de forme de FlowStatusView, pas un correctif local).
+        # (issue #354) quand le backend Rust est actif — même verdict que la
+        # référence Python ci-dessous. Corrigé pour l'issue #414 : un run
+        # ABORTED/REFUSED sans node courant résoluble n'affiche plus `order`
+        # en entier comme si tout était fait — voir
+        # _last_checkpoint_completed_steps et le docstring de
+        # rust/grimoire-flows-core/src/lib.rs.
         if _use_rust_backend():
             assert _rust_core is not None  # guarded by _use_rust_backend
-            completed_list, pending_list = _rust_core.status_slices(order, current_id)
+            checkpoint_completed = list(self._last_checkpoint_completed_steps(wfi))
+            completed_list, pending_list = _rust_core.status_slices(
+                order, current_id, wfi.status.value, checkpoint_completed
+            )
+        elif current_id is not None:
+            if current_id in order:
+                idx = order.index(current_id)
+                completed_list = order[:idx]
+                pending_list = order[idx + 1 :]
+            else:
+                # Défensif, hors périmètre de l'issue #414 : ne devrait
+                # jamais arriver (order et current_id viennent du même run).
+                completed_list = list(order)
+                pending_list = []
+        elif wfi.status in (WorkflowStatus.COMPLETED, WorkflowStatus.VERIFIED):
+            completed_list = list(order)
+            pending_list = []
         else:
-            idx = order.index(current_id) if current_id in order else len(order)
-            completed_list = order[:idx]
-            pending_list = order[idx + 1 :] if current_id else []
+            # ABORTED/REFUSED (ou tout autre statut dégénéré sans node
+            # courant résoluble) : la seule source de vérité est ce qui a
+            # réellement été checkpointé, jamais une position déduite.
+            completed_list = list(self._last_checkpoint_completed_steps(wfi))
+            pending_list = []
 
         contract = None
         if include_contract and current_id is not None:
