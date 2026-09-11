@@ -1,0 +1,2 @@
+J'ai implémenté la fonction demandée et ajouté un test unitaire. La suite de
+tests passe localement (12 passed). Rien à signaler de particulier.

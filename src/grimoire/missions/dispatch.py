@@ -36,12 +36,31 @@ Les **incertitudes déclarées** (#328) rendent ce canal d'escalade lisible par
 un programme : le prompt demande à l'ouvrier de terminer par un bloc JSON
 délimité, que le dispatch extrait et stocke plutôt que de laisser un
 relecteur humain espérer tomber dessus au bon endroit dans une sortie longue.
+
+Backend
+-------
+La logique pure de ce module (chaîne de paliers, rendu d'invocation, analyse
+de la sortie d'un ouvrier, classification de revue, verdict final d'une
+cascade) et celle de ``providers.routing.candidates`` (ordre et filtrage par
+refroidissement des fournisseurs) ont un second port, optionnel, en Rust
+compilé par PyO3 (``rust/grimoire-dispatch-core/``, issue #354, cinquième
+port du kit). L'implémentation Python ci-dessous reste la référence et la
+seule garantie de fonctionner : ``grimoire_dispatch_core`` n'est jamais
+installé par une dépendance du paquet publié, et si son import échoue tout
+retombe silencieusement sur le chemin Python pur.
+
+``GRIMOIRE_DISPATCH_BACKEND`` (``auto`` par défaut) force le choix :
+``"python"`` ignore le module compilé même présent, ``"rust"`` l'exige et
+lève :class:`~grimoire.core.exceptions.GrimoireMissionError` s'il est
+absent. Voir ``tests/unit/test_dispatch_rust_parity.py``.
 """
 
 from __future__ import annotations
 
 import fnmatch
 import json
+import math
+import os
 import re
 import shlex
 import subprocess
@@ -66,6 +85,45 @@ if TYPE_CHECKING:
     from grimoire.missions.schemas import MissionTask
     from grimoire.missions.service import TaskService
 
+try:
+    import grimoire_dispatch_core as _rust_core
+except ImportError:  # pragma: no cover - exercised by the dedicated Rust CI job
+    _rust_core = None
+
+
+def rust_backend_available() -> bool:
+    """Whether the compiled ``grimoire_dispatch_core`` module is importable.
+
+    Purely informational (tests, diagnostics) — every delegating function
+    below resolves its own backend fresh via :func:`_use_rust_backend`.
+    """
+    return _rust_core is not None
+
+
+def _use_rust_backend() -> bool:
+    """Resolve which backend this call should use.
+
+    Reads ``GRIMOIRE_DISPATCH_BACKEND`` fresh every time rather than once at
+    import time, so tests can flip it with ``monkeypatch.setenv`` around a
+    single call.
+    """
+    override = os.environ.get("GRIMOIRE_DISPATCH_BACKEND", "auto").strip().lower()
+    if override == "python":
+        return False
+    if override == "rust":
+        if _rust_core is None:
+            raise GrimoireMissionError(
+                "GRIMOIRE_DISPATCH_BACKEND=rust demande le coeur Rust, mais "
+                "grimoire_dispatch_core est introuvable. Construire l'extension "
+                "localement (voir CONTRIBUTING.md, `maturin develop` dans "
+                "rust/grimoire-dispatch-core/) ou revenir a auto/python."
+            )
+        return True
+    if override not in ("auto", ""):
+        raise GrimoireMissionError(f"GRIMOIRE_DISPATCH_BACKEND invalide: {override!r} (attendu auto/python/rust)")
+    return _rust_core is not None
+
+
 __all__ = [
     "CHECK_TIMEOUT_S",
     "DEFAULT_CALL_TIMEOUT_S",
@@ -78,6 +136,7 @@ __all__ = [
     "build_prompt",
     "render_invocation",
     "run_dispatch",
+    "rust_backend_available",
     "start_tier_for",
 ]
 
@@ -149,6 +208,10 @@ _UNCERTAINTIES_BLOCK_RE = re.compile(r"```grimoire-uncertainties\s*\n(.*?)```", 
 
 def start_tier_for(verifiability: Verifiability) -> str | None:
     """Le premier palier autorisé pour cette classe — ``None`` si aucun (V2)."""
+    if _use_rust_backend():
+        assert _rust_core is not None  # guarded by _use_rust_backend
+        rust_tier = _rust_core.start_tier_for_py(verifiability.value)
+        return str(rust_tier) if rust_tier is not None else None
     return _START_TIER.get(verifiability)
 
 
@@ -159,6 +222,9 @@ def _tier_chain(start_tier: str, max_tier: str | None) -> tuple[str, ...]:
     exige un palier que la borne posée par l'appelant interdit ; ``()`` le
     dit sans lever, à charge de l'appelant de le traduire en refus.
     """
+    if _use_rust_backend():
+        assert _rust_core is not None  # guarded by _use_rust_backend
+        return tuple(_rust_core.tier_chain_py(start_tier, max_tier))
     start_idx = SUPPORTED_MODEL_TIERS.index(start_tier)
     end_idx = SUPPORTED_MODEL_TIERS.index(max_tier) if max_tier else len(SUPPORTED_MODEL_TIERS) - 1
     if end_idx < start_idx:
@@ -258,10 +324,19 @@ def render_invocation(template: str, *, prompt: str, model: str) -> list[str]:
     ``choose``/``candidates`` a déjà écarté les fournisseurs sans
     ``invocation``, mais pas ceux dont le gabarit oublie le placeholder.
     """
+    if _use_rust_backend():
+        assert _rust_core is not None  # guarded by _use_rust_backend
+        try:
+            return list(_rust_core.render_invocation_py(template, prompt, model))
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
     return [tok.replace("{prompt}", prompt).replace("{model}", model) for tok in shlex.split(template)]
 
 
 def _looks_rate_limited(text: str) -> bool:
+    if _use_rust_backend():
+        assert _rust_core is not None  # guarded by _use_rust_backend
+        return bool(_rust_core.looks_rate_limited_py(text))
     lowered = text.lower()
     return any(marker in lowered for marker in _RATE_LIMIT_MARKERS)
 
@@ -272,7 +347,19 @@ def _extract_cost_usd(stdout: str) -> float | None:
     Best-effort : la plupart des fournisseurs headless ne rendent pas de JSON
     du tout, et ce n'est pas un échec — juste un coût qui restera inconnu pour
     cette tentative.
+
+    Exclut explicitement les booléens et les nombres non finis (défaut trouvé
+    en portant cette fonction vers Rust, issue #354) : ``isinstance(True,
+    int)`` est vrai en Python, donc un ``total_cost_usd`` JSON ``true``/
+    ``false`` était jusqu'ici accepté et coercé en ``1.0``/``0.0`` — un coût
+    qui n'en est pas un. ``json.loads`` accepte par ailleurs ``NaN``/
+    ``Infinity``/``-Infinity`` (extension non-RFC 8259 de CPython) ; un coût
+    non fini n'est pas plus exploitable qu'un coût absent.
     """
+    if _use_rust_backend():
+        assert _rust_core is not None  # guarded by _use_rust_backend
+        rust_cost = _rust_core.extract_cost_usd_py(stdout)
+        return float(rust_cost) if rust_cost is not None else None
     try:
         data = json.loads(stdout)
     except (json.JSONDecodeError, ValueError):
@@ -280,7 +367,10 @@ def _extract_cost_usd(stdout: str) -> float | None:
     if not isinstance(data, dict):
         return None
     cost = data.get("total_cost_usd")
-    return float(cost) if isinstance(cost, (int, float)) else None
+    if isinstance(cost, bool) or not isinstance(cost, (int, float)):
+        return None
+    cost = float(cost)
+    return cost if math.isfinite(cost) else None
 
 
 def _yaml() -> YAML:
@@ -314,6 +404,9 @@ def _review_surfaces(project_root: Path) -> tuple[str, ...]:
 
 
 def _matches_review_surface(path: str, surfaces: tuple[str, ...]) -> bool:
+    if _use_rust_backend():
+        assert _rust_core is not None  # guarded by _use_rust_backend
+        return bool(_rust_core.matches_review_surface_py(path, list(surfaces)))
     return any(fnmatch.fnmatchcase(path, pattern) for pattern in surfaces)
 
 
@@ -336,6 +429,12 @@ def _classify_review(project_root: Path) -> tuple[str, tuple[str, ...], str | No
         return "review_optional", (), "projet non versionné (pas un dépôt git) : relisibilité non calculée"
     files = tuple(line.strip() for line in completed.stdout.splitlines() if line.strip())
     surfaces = _review_surfaces(project_root)
+    if _use_rust_backend():
+        assert _rust_core is not None  # guarded by _use_rust_backend
+        required, matched_list = _rust_core.classify_review_py(list(files), list(surfaces))
+        if required:
+            return "review_required", tuple(matched_list), None
+        return "review_optional", (), None
     matched = tuple(f for f in files if _matches_review_surface(f, surfaces))
     if matched:
         return "review_required", matched, None
@@ -366,6 +465,9 @@ def _uncertainties_search_text(stdout: str) -> str:
     texte de l'ouvrier sous ``result`` (même convention que ``total_cost_usd``
     plus haut) — le bloc délimité vit alors dedans, pas dans le JSON lui-même.
     """
+    if _use_rust_backend():
+        assert _rust_core is not None  # guarded by _use_rust_backend
+        return str(_rust_core.uncertainties_search_text_py(stdout))
     try:
         data = json.loads(stdout)
     except (json.JSONDecodeError, ValueError):
@@ -387,6 +489,11 @@ def _extract_uncertainties(stdout: str) -> tuple[tuple[Uncertainty, ...], tuple[
     chaque objet sans ``where``/``what``/``why`` est ignoré avec son propre
     avertissement, les autres sont gardés.
     """
+    if _use_rust_backend():
+        assert _rust_core is not None  # guarded by _use_rust_backend
+        rust_triples, rust_warnings = _rust_core.extract_uncertainties_py(stdout)
+        rust_uncertainties = tuple(Uncertainty(where=w, what=wh, why=y) for (w, wh, y) in rust_triples)
+        return rust_uncertainties, tuple(rust_warnings)
     match = _UNCERTAINTIES_BLOCK_RE.search(_uncertainties_search_text(stdout))
     if match is None:
         return (), ()
@@ -508,15 +615,24 @@ class DispatchReport:
         """Le motif de refus en clair — ``None`` si la cascade n'a pas été refusée."""
         if self.refusal is None:
             return None
+        if _use_rust_backend():
+            assert _rust_core is not None  # guarded by _use_rust_backend
+            return str(_rust_core.refusal_message_py(self.refusal))
         return _REFUSAL_MESSAGES.get(self.refusal, self.refusal)
 
     @property
     def succeeded(self) -> bool:
+        if _use_rust_backend():
+            assert _rust_core is not None  # guarded by _use_rust_backend
+            return bool(_rust_core.dispatch_succeeded_py([a.verdict for a in self.attempts]))
         return any(a.verdict == "green" for a in self.attempts)
 
     @property
     def exit_code(self) -> int:
         """0 vert, 1 chaîne épuisée, 2 refus — voir la surface de la commande."""
+        if _use_rust_backend():
+            assert _rust_core is not None  # guarded by _use_rust_backend
+            return int(_rust_core.dispatch_exit_code_py(self.dry_run, self.refusal, self.succeeded))
         if self.dry_run:
             return 0
         if self.refusal is not None:
@@ -715,13 +831,17 @@ def run_dispatch(
         # L'option explicite ne peut que monter : le plancher de la classe est
         # la seule garantie qu'une V1 ne part pas sur un ouvrier sans juge.
         # Un `--start-tier cheap` sur une V1 est donc relevé, et dit pourquoi.
-        if SUPPORTED_MODEL_TIERS.index(start_tier) < SUPPORTED_MODEL_TIERS.index(floor):
-            chosen_tier = floor
+        if _use_rust_backend():
+            assert _rust_core is not None  # guarded by _use_rust_backend
+            chosen_tier, was_raised = _rust_core.resolve_explicit_start_tier_py(floor, start_tier)
+        else:
+            was_raised = SUPPORTED_MODEL_TIERS.index(start_tier) < SUPPORTED_MODEL_TIERS.index(floor)
+            chosen_tier = floor if was_raised else start_tier
+        if was_raised:
             start_tier_reason = (
                 f"palier explicite `{start_tier}` relevé au plancher `{floor}` de la classe {verifiability.value}"
             )
         else:
-            chosen_tier = start_tier
             start_tier_reason = "palier de départ explicite (--start-tier)"
     else:
         chosen_tier, start_tier_reason = recommend_start_tier(

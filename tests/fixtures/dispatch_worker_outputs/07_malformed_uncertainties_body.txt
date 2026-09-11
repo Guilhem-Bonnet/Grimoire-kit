@@ -1,0 +1,4 @@
+Termine.
+```grimoire-uncertainties
+- doute sur le cas limite (pas au format demande)
+```

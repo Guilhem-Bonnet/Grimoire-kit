@@ -1,0 +1,44 @@
+[package]
+name = "grimoire-dispatch-core"
+version = "0.1.0"
+edition = "2021"
+description = "Coeur Rust optionnel de la cascade de dispatch (grimoire.missions.dispatch) et du routage par palier de cout (grimoire.providers.routing), expose via PyO3."
+license = "MIT"
+publish = false
+
+[lib]
+name = "grimoire_dispatch_core"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Cinquieme port Rust du kit (issue #354), meme montage que
+# rust/grimoire-policies-core/, rust/grimoire-schema-core/,
+# rust/grimoire-hosts-core/ et rust/grimoire-flows-core/ : pyo3 n'est requis
+# que par la frontiere PyO3 (module `py_bridge`, en bas de lib.rs).
+#
+# Contrairement aux quatre premiers ports, ce crate doit analyser lui-meme
+# du texte JSON brut et non structure : la sortie d'un ouvrier delegue
+# (`claude -p` ou equivalent), dont `_extract_cost_usd` et
+# `_extract_uncertainties` (dispatch.py) extraient respectivement un cout et
+# un bloc d'incertitudes. Plutot qu'une dependance externe (serde_json), ce
+# crate porte son propre analyseur JSON minimal (module `json`, aucun
+# `unsafe`) : la raison est une divergence reelle trouvee en portant cette
+# fonction (voir le docstring du module `json` plus bas) — `json.loads` de
+# CPython accepte par defaut les jetons non standards `NaN`/`Infinity`/
+# `-Infinity` (RFC 8259 les exclut), qu'aucun parseur JSON strict de
+# l'ecosysteme Rust (serde_json compris) n'accepte nativement. Reproduire
+# fidelement `json.loads` exige donc un parseur qui les reconnait
+# explicitement — plus simple a ecrire soi-meme qu'a obtenir d'une
+# dependance generaliste.
+pyo3 = { version = "0.29", features = ["abi3-py312"], optional = true }
+
+[features]
+# Meme raisonnement que les quatre crates precedents : la feature
+# `extension-module` de pyo3 (active par defaut, indispensable pour que
+# l'extension soit chargeable par Python) empeche de lier le binaire de test
+# de `cargo test` — d'ou `cargo test --no-default-features` dans le job CI
+# dedie, qui ne necessite donc aucun interprete Python installe. Le parseur
+# JSON maison et toute la logique pure de ce crate restent compiles dans les
+# deux configurations.
+extension-module = ["dep:pyo3", "pyo3/extension-module"]
+default = ["extension-module"]
