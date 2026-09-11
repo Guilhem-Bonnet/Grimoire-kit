@@ -1,6 +1,6 @@
 {
  "schema": "grimoire-kit-file-hashes/v1",
- "generated_for": "3.42.0",
+ "generated_for": "3.43.0",
  "digests": {
   "002d1e68ce00769ee09d1e94f4af260b952837f7d1557080c2fd505216c23ac0": {
    "version": "3.11.2",
@@ -1561,6 +1561,10 @@
   "6fffceb435af190e358b3c5c07000ab49bc1a9cbd182e5ead56171be4f27d413": {
    "version": "3.32.0",
    "path": "framework/tools/guardrail-policy-rules.py"
+  },
+  "70282837941d16d5c090f7ccdef8a749b7683ca1c7a77a146294265736f7ec0a": {
+   "version": "3.43.0",
+   "path": "archetypes/meta/agents/concierge.md"
   },
   "70370c10c50d4bafc61e06d58b1c8fe45b5ce7c2f4a063e9b759d6fa10d43f93": {
    "version": "3.16.0",
