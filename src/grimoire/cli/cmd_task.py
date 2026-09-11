@@ -71,6 +71,12 @@ def board_export(
         return
 
     write_board(dest, board)
+    if dest == root / _BOARD_RELPATH:
+        # Même empreinte-invalidation que le service (issue #419, second
+        # lot) : sans cet appel, seul le hook *suivant* verrait la reprojection.
+        from grimoire.core.standard_state import invalidate_cache
+
+        invalidate_cache(root)
     counts = _counts(board)
     if _fmt(ctx) == "json":
         typer.echo(json.dumps({"path": str(dest), "tasks": len(board["tasks"]), "by_status": counts}, indent=2, ensure_ascii=False))

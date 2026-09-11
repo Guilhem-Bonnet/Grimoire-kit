@@ -7,6 +7,83 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **perf(hosts): cache JSON de l'état du standard, invalidé par empreinte — `grimoire-hook` évite `ruamel.yaml` sur cache chaud (#419).**
+  Suite du découpage de `hosts/decisions.py` (#420) : le profil résiduel
+  identifiait `grimoire.core.standard_state` (`active_task_id`/`active_profile_id`)
+  + `ruamel.yaml` comme le seul poste encore compressible, ~9 ms sur
+  `PreToolUse` destructif. Deux changements distincts s'additionnent :
+  l'import de `ruamel.yaml` dans `standard_state.py` était au niveau module
+  (payé par *tout* appel de hook, même sur un projet non enrôlé, sans
+  standard-profile.yaml ni task-board.yaml à lire) — il est maintenant local
+  à `_load_mapping`, donc jamais payé quand ces fichiers n'existent pas. Sur
+  un projet enrôlé, où ils existent, un cache JSON (stdlib `json`, jamais
+  `ruamel`) sous `_grimoire-output/.runs/standard-state-cache.json` — même
+  emplacement que l'état de session éphémère existant, gitignoré — mémorise
+  `profile_id` et les tâches `in_progress` du board, invalidé par empreinte
+  fichier (`[mtime_ns, size]`) : une source modifiée est relue et le cache
+  regénéré ; un cache absent, tronqué ou au mauvais format retombe
+  silencieusement sur la lecture YAML, jamais une erreur de hook. Écriture
+  atomique (fichier temporaire + `os.replace`). Un outil MCP annoté
+  `readOnlyHint` (`grimoire_host_status`, `task_recall`) ne doit rien écrire :
+  `active_profile_id`/`resolve_active_task`/`active_task_id` et
+  `hosts.collect.build_surface` acceptent un `write_cache: bool = True` que
+  ces deux tools seuls mettent à `False` — ils lisent un cache déjà chaud
+  sans jamais le créer ni le corriger. Le cache est aussi invalidé
+  (supprimé, best-effort) juste après une écriture connue de ces YAML —
+  `setup_standard_profile`, `TaskService.project_board`, `grimoire task
+  board export` — pour que le changement soit visible dès l'appel de hook
+  suivant plutôt que celui d'après ; pas requis pour la correction, l'empreinte
+  périmée suffit, seulement pour la latence d'un cas rare.
+
+  Mesuré par `scripts/bench-rust-cores.py --macro-runs 15` (même machine,
+  projet de bench isolé non enrôlé — c'est le seul fixture du script, donc la
+  seule chose qu'il mesure ici est l'import `ruamel` devenu conditionnel) :
+
+  | commande | avant | après | cible | statut |
+  |---|---|---|---|---|
+  | `grimoire-hook PreToolUse` (tool-policy, destructif — mesure officielle #418/#419) | 62,7 ms | 55,1 ms | < 50 ms | **non atteinte** |
+
+  Le cache lui-même n'a rien à faire sur un projet non enrôlé (aucun YAML à
+  mettre en cache) : mesuré séparément sur un projet **enrôlé** (`standard
+  init --profile governed`, `_grimoire/standard/standard-profile.yaml` +
+  `task-board.yaml` réels), même méthodologie (médiane de 15 exécutions) :
+
+  | événement (décision) | avant | après |
+  |---|---|---|
+  | `PreToolUse` (tool-policy) | 75,7 ms | 54,2 ms |
+  | `SessionStart` (activation) | 73,1 ms | 70,3 ms |
+  | `UserPromptSubmit` (task-context) | 58,9 ms | 39,6 ms |
+  | `PostToolUse` (evidence-trace) | 57,0 ms | 49,0 ms |
+  | `SubagentStop` (subagent-gate) | 131,7 ms | 127,9 ms |
+  | `PreCompact` (context-capsule) | 132,1 ms | 121,2 ms |
+  | `Stop` (evidence-gate) | 144,4 ms | 127,9 ms |
+
+  (Les trois derniers événements sont plus lents dans l'absolu sur un projet
+  `governed` : `evidence-gate`/`context-capsule`/`subagent-gate` y exercent de
+  vraies vérifications de gate, hors périmètre de ce cache.) `cProfile` sur
+  cache chaud (`PreToolUse`, projet enrôlé) : ni `ruamel` ni
+  `grimoire.core.standard_state._load_mapping` n'apparaissent plus dans le
+  profil — confirmé aussi par un `sys.modules` vide de tout module `ruamel.*`
+  en sous-processus frais. **Cible des 50 ms toujours non atteinte sur la
+  mesure officielle (projet non enrôlé)**, assumé : il ne reste, sur ce
+  chemin, que le coût `dataclasses`/`inspect` de la première dataclass
+  chargée dans le process (stdlib, ~6-9 ms, inhérent à `@dataclass` sur
+  `HookInput`/`Decision`/`ToolFacts`/`ActiveTask` — `dataclasses.py` importe
+  `inspect` sans condition, aucune combinaison de `frozen`/`slots` n'y
+  change quoi que ce soit) et le moteur de politique lui-même
+  (`policies.engine`/`policies.schemas`, ~5 ms, propre à `tool-policy`,
+  aucun fichier lu). Les deux sont documentés comme incompressibles avec ce
+  mécanisme par #419 lui-même ; ni l'un ni l'autre n'a de solution triviale
+  sans réécrire ces classes à la main.
+  Tests : `tests/unit/core/test_standard_state.py` (cache créé/lu/régénéré
+  sur source modifiée/corrompu/absent, `invalidate_cache`) ; garde de
+  non-régression `tests/unit/test_hook_cost.py::test_a_warm_standard_state_cache_never_imports_ruamel`
+  (sous-processus froid puis chaud, `sys.modules` sans aucun `ruamel.*` au
+  second) ; `tests/unit/mcp/test_server.py::TestReadOnlyToolsWriteNothing`
+  (déjà existant, aucune modification requise) couvre le contrat
+  `write_cache=False`. Aucun changement de décision : les tests existants de
+  `hosts/decisions.py` et `test_hosts.py` passent sans modification.
+
 ## [3.44.1] - 2026-09-11
 
 - **perf(hosts): découper `hosts/decisions.py` par décision — `grimoire-hook` payait la moitié du fichier pour chaque appel (#419).**
