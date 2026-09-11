@@ -1,0 +1,4 @@
+Travail termine, marker.txt ecrit.
+```grimoire-uncertainties
+[{"where": "tests/test_x.py", "what": "cas limite non couvert", "why": "manque de temps"}]
+```

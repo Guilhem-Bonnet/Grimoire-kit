@@ -1,0 +1,18 @@
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[project]
+name = "grimoire-dispatch-core"
+version = "0.1.0"
+description = "Coeur Rust optionnel de la cascade de dispatch et du routage de fournisseurs (PyO3). Non publie sur PyPI — build local uniquement, voir CONTRIBUTING.md."
+requires-python = ">=3.12"
+license = { text = "MIT" }
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: 3.12",
+    "Private :: Do Not Upload",
+]
+
+[tool.maturin]
+module-name = "grimoire_dispatch_core"

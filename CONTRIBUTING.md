@@ -134,7 +134,7 @@ crates :
   `Private :: Do Not Upload` pour qu'un `maturin publish` accidentel soit
   refusé.
 
-Quatre crates existent à ce jour :
+Cinq crates existent à ce jour :
 
 | Crate | Module Python | Variable de bascule | Jobs CI |
 |---|---|---|---|
@@ -142,18 +142,19 @@ Quatre crates existent à ce jour :
 | `rust/grimoire-schema-core/` | `grimoire.core.schema.generate_schema` + `grimoire.core.validator.validate_config` | `GRIMOIRE_SCHEMA_BACKEND` | `.github/workflows/rust-cores.yml` (`rust-schema / cargo`, `rust-schema / parity`) |
 | `rust/grimoire-hosts-core/` | `grimoire.hosts.collect` (frontmatter, inférence d'outils) + `grimoire.hosts.surface` (empreinte de faisceau, garde de distinction) | `GRIMOIRE_HOSTS_BACKEND` | `.github/workflows/rust-cores.yml` (`rust-hosts / cargo`, `rust-hosts / parity`) |
 | `rust/grimoire-flows-core/` | `grimoire.flows.engine` (`check_output_against_contract`, node courant, `resume()`/`status()`) + `grimoire.runtime.kernel` (table de transitions, précondition de `advance_step`) | `GRIMOIRE_FLOWS_BACKEND` | `.github/workflows/rust-cores.yml` (`rust-flows / cargo`, `rust-flows / parity`) |
+| `rust/grimoire-dispatch-core/` | `grimoire.missions.dispatch` (chaîne de paliers, rendu d'invocation, analyse de sortie d'ouvrier, classification de revue, verdict de cascade) + `grimoire.providers.routing` (ordre et refroidissement des fournisseurs) | `GRIMOIRE_DISPATCH_BACKEND` | `.github/workflows/rust-cores.yml` (`rust-dispatch / cargo`, `rust-dispatch / parity`) |
 
-Les quatre crates partagent le même workflow CI : `changes` détecte quel(s)
+Les cinq crates partagent le même workflow CI : `changes` détecte quel(s)
 crate(s) une PR ou un push touche et saute les jobs hors périmètre, et
 `rust-gate` — le check requis par la protection de `main` — agrège les
-huit jobs pour rendre `cargo fmt` et `cargo test` opposables sur toute PR,
+dix jobs pour rendre `cargo fmt` et `cargo test` opposables sur toute PR,
 pas seulement celles qui modifient `rust/`.
 
 ### Construire une extension localement
 
 Utile seulement si vous travaillez sur le module Python concerné et voulez
 exercer le chemin Rust en local (au lieu d'attendre le job CI dédié) — le
-motif est identique pour les quatre crates, ici avec `grimoire-policies-core` :
+motif est identique pour les cinq crates, ici avec `grimoire-policies-core` :
 
 ```bash
 # En plus des prérequis Python habituels
@@ -199,9 +200,20 @@ cd -
 pytest tests/unit/test_flows_engine.py tests/unit/test_runtime.py tests/unit/test_flows_rust_parity.py
 ```
 
-Dans les quatre cas, les tests du module Python (`test_policies.py`,
+Pour `grimoire-dispatch-core` :
+
+```bash
+cd rust/grimoire-dispatch-core
+maturin develop --release
+cd -
+
+pytest tests/unit/missions/test_dispatch.py tests/unit/test_providers.py tests/unit/test_dispatch_rust_parity.py
+```
+
+Dans les cinq cas, les tests du module Python (`test_policies.py`,
 `test_schema.py`/`test_validator.py`, `test_hosts.py`,
-`test_flows_engine.py`/`test_runtime.py`) sont le contrat : ils tournent
+`test_flows_engine.py`/`test_runtime.py`,
+`test_dispatch.py`/`test_providers.py`) sont le contrat : ils tournent
 sans modification que le module compilé soit présent ou non, et servent de
 golden test aux deux implémentations. Le fichier `*_rust_parity.py` compare
 explicitement les deux backends sur les mêmes entrées (variable
@@ -213,7 +225,7 @@ Pour du travail directement sur un crate (`cargo` seul, aucun interprète
 Python requis) :
 
 ```bash
-cd rust/grimoire-schema-core   # ou rust/grimoire-policies-core, rust/grimoire-hosts-core, rust/grimoire-flows-core
+cd rust/grimoire-schema-core   # ou rust/grimoire-policies-core, rust/grimoire-hosts-core, rust/grimoire-flows-core, rust/grimoire-dispatch-core
 cargo test --no-default-features   # logique pure, aucun interprète Python requis
 cargo fmt
 ```

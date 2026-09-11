@@ -1,0 +1,2 @@
+Error: HTTP 429 Too Many Requests
+You have hit the rate limit for this API key. Please retry after some time.
