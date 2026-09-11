@@ -971,8 +971,8 @@ commande. Détail : [Persona d'entrée → Non-choix](hosts.md#non-choix).
 
 Le déclencheur d'artefact (issue #395) : à la répétition d'une même
 spécialité manquante (jamais au premier non-choix), propose un agent — ou un
-skill à attacher à l'agent de repli déjà observé — mais ne crée jamais rien
-sans acceptation explicite.
+skill à attacher à un porteur existant — mais ne crée jamais rien sans
+acceptation explicite.
 
 ```bash
 grimoire proposals list
@@ -991,6 +991,22 @@ Seuil configurable via `proposals.threshold` dans `project-context.yaml`
 (défaut 2, jamais 1). Aucune option `--auto` : accepter reste toujours un
 geste explicite. Même moteur que le cockpit (espace Piloter, section
 Agents), qui montre et actionne les mêmes propositions.
+
+**Choix du porteur (issue #402)** — la persona d'entrée du projet (le
+`concierge`, ou l'agent que `agents.entry` désigne dans
+`project-context.yaml`) route les demandes vers un spécialiste ; elle n'en
+exécute aucune elle-même, donc elle n'est jamais retenue comme porteuse d'un
+skill, même quand c'est elle que le ledger enregistre comme agent de repli
+(`grimoire agent-miss --fallback ...`). La colonne « Porteur » de
+`grimoire proposals list` (et le champ `target_agent` en JSON) montre
+l'agent réellement retenu, distinct au besoin du `fallback_agent` brut ; la
+colonne « Raison » (`carrier_reason`) explique le choix :
+
+| `carrier_reason` | Sens |
+|---|---|
+| `repli observé` | Le repli enregistré n'est pas la persona d'entrée — il est utilisé tel quel |
+| `porteur par catégorie : <agent>` | Le repli était vide ou était la persona d'entrée ; exactement un agent déclaré couvre la catégorie observée (`use_when`, ou faisceau `execute` pour une catégorie d'exécution) |
+| `persona d'entrée exclue, aucun porteur : agent` | Le repli était vide ou était la persona d'entrée, et zéro ou plusieurs agents couvrent la catégorie — la proposition devient un agent plutôt qu'un skill ambigu |
 
 ### `grimoire plugins list`
 

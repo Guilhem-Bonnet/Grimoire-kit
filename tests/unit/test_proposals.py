@@ -113,6 +113,80 @@ def test_a_fallback_agent_observed_proposes_an_attachable_skill(project: Path) -
     assert proposal.target_agent == "generic-dev"
 
 
+# ── Porteur — la persona d'entrée n'est jamais porteuse (issue #402) ────────
+
+
+def _write_agent(project: Path, name: str, *, use_when: str = "", tools: str = "") -> None:
+    """A declared agent file with an optional employment clause and tools —
+    enough for :func:`grimoire.proposals._category_carrier` to see it."""
+    dest = project / "_grimoire" / "overrides" / "agents" / f"{name}.md"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    lines = ["---", f'name: "{name}"', 'description: "Agent générique de test"']
+    if use_when:
+        lines.append(f'use_when: "{use_when}"')
+    if tools:
+        lines.append(f'tools: "{tools}"')
+    lines.append("---")
+    lines.append("")
+    lines.append("Corps.")
+    dest.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def test_a_fallback_that_is_the_entry_persona_with_no_carrier_proposes_an_agent(project: Path) -> None:
+    # Le concierge (persona d'entrée par défaut) est le repli observé, mais
+    # aucun agent déclaré ne couvre la catégorie « infra » — pas de porteur.
+    _miss(project, specialty="ansible-homelab", category="infra", fallback="concierge")
+    _miss(project, specialty="ansible-homelab", category="infra", fallback="concierge")
+    proposal = list_proposals(project)[0]
+    assert proposal.artifact_type == "agent"
+    assert proposal.fallback_agent == "concierge"  # le fait brut reste enregistré
+    assert proposal.carrier_reason == "persona d'entrée exclue, aucun porteur : agent"
+
+
+def test_a_fallback_that_is_the_entry_persona_with_one_carrier_proposes_a_skill(project: Path) -> None:
+    _write_agent(project, "infra-ops", use_when="Une demande infra ou d'exploitation.")
+    _miss(project, specialty="ansible-homelab", category="infra", fallback="concierge")
+    _miss(project, specialty="ansible-homelab", category="infra", fallback="concierge")
+    proposal = list_proposals(project)[0]
+    assert proposal.artifact_type == "skill"
+    assert proposal.target_agent == "infra-ops"
+    assert proposal.fallback_agent == "concierge"
+    assert proposal.carrier_reason == "porteur par catégorie : infra-ops"
+
+
+def test_two_agents_covering_the_category_proposes_an_agent(project: Path) -> None:
+    _write_agent(project, "infra-ops", use_when="Une demande infra ou d'exploitation.")
+    _write_agent(project, "infra-support", use_when="Support infra de premier niveau.")
+    _miss(project, specialty="ansible-homelab", category="infra", fallback="concierge")
+    _miss(project, specialty="ansible-homelab", category="infra", fallback="concierge")
+    proposal = list_proposals(project)[0]
+    assert proposal.artifact_type == "agent"
+    assert proposal.carrier_reason == "persona d'entrée exclue, aucun porteur : agent"
+
+
+def test_category_matching_is_by_whole_word_not_substring(project: Path) -> None:
+    # « ci » est une sous-chaîne de « spécifique » — un match par
+    # sous-chaîne le prendrait à tort pour un porteur de la catégorie « ci ».
+    _write_agent(project, "produit-generaliste", use_when="Une demande spécifique au produit.")
+    _miss(project, specialty="pipeline-ci", category="ci", fallback="concierge")
+    _miss(project, specialty="pipeline-ci", category="ci", fallback="concierge")
+    proposal = list_proposals(project)[0]
+    assert proposal.artifact_type == "agent"
+    assert proposal.carrier_reason == "persona d'entrée exclue, aucun porteur : agent"
+
+
+def test_an_ordinary_fallback_agent_is_used_directly_unchanged(project: Path) -> None:
+    # Un agent de repli qui n'est pas la persona d'entrée reste utilisé tel
+    # quel, même sans use_when déclaré et même si son nom ne matche aucun
+    # agent réellement collecté — la règle #402 ne change rien à ce cas.
+    _miss(project, specialty="chaos-engineering", category="infra", fallback="generic-dev")
+    _miss(project, specialty="chaos-engineering", category="infra", fallback="generic-dev")
+    proposal = list_proposals(project)[0]
+    assert proposal.artifact_type == "skill"
+    assert proposal.target_agent == "generic-dev"
+    assert proposal.carrier_reason == "repli observé"
+
+
 def _write_installed_agent(project: Path, name: str) -> None:
     dest = project / "_grimoire" / "overrides" / "agents" / f"{name}.md"
     dest.parent.mkdir(parents=True, exist_ok=True)

@@ -44,6 +44,8 @@ def _write_pending_proposal(project: Path, specialty: str) -> str:
         count=2,
         category="infra",
         fallback_agent="",
+        carrier="",
+        carrier_reason="persona d'entrée exclue, aucun porteur : agent",
         first_seen="2026-01-01T00:00:00+00:00",
         last_seen="2026-01-01T00:00:00+00:00",
     )
