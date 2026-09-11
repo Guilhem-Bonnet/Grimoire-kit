@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from grimoire.traces.ledger import TraceLedger
+from datetime import UTC, datetime
+
+from grimoire.traces.ledger import TraceLedger, compute_agent_freshness
 from grimoire.traces.schemas import (
     PolicyVerdictRef,
     TokenUsage,
@@ -310,3 +312,123 @@ class TestTraceLedger:
         t1 = _make_trace(ledger, run_id="RUN-seq")
         t2 = _make_trace(ledger, run_id="RUN-seq")
         assert t1.id != t2.id
+
+    def test_oldest_started_at_empty_ledger(self, tmp_path) -> None:
+        ledger = TraceLedger(tmp_path)
+        assert ledger.oldest_started_at() is None
+
+    def test_oldest_started_at_across_all_tags(self, tmp_path) -> None:
+        """Toute trace compte, pas seulement celles taguées `agent.dispatch` (issue #396)."""
+        from grimoire.traces.ledger import AGENT_DISPATCH_TAG
+
+        ledger = TraceLedger(tmp_path)
+        _make_trace(ledger, run_id="RUN-untagged")  # started_at="2026-01-01T00:00:00+00:00"
+        ledger.record(
+            run_id="RUN-dispatch",
+            workflow_instance_id="",
+            mission_id="",
+            task_id="",
+            recipe_id="grimoire.entry-persona",
+            outcome=TraceOutcome.SUCCESS,
+            started_at="2025-06-01T00:00:00+00:00",
+            agent_id="concierge",
+            tags=[AGENT_DISPATCH_TAG],
+        )
+        assert ledger.oldest_started_at() == "2025-06-01T00:00:00+00:00"
+
+
+class TestAgentFreshness:
+    """Règle de fraîcheur (issue #396) : le critère d'arrêt de l'issue, à la lettre.
+
+    Projet jetable dont le journal contient un ``agent.dispatch`` daté d'il y
+    a 100 jours pour ``concierge`` et rien pour ``security-auditor``.
+    """
+
+    _NOW = datetime(2026, 9, 11, tzinfo=UTC)
+    _100_DAYS_AGO = "2026-06-03T00:00:00+00:00"  # exactement 100 jours avant _NOW
+
+    def _dispatch_counts(self) -> dict[str, dict[str, object]]:
+        return {"concierge": {"count": 1, "last_seen": self._100_DAYS_AGO}}
+
+    def test_threshold_90_flags_both_agents(self) -> None:
+        report = compute_agent_freshness(
+            ["concierge", "security-auditor"],
+            self._dispatch_counts(),
+            threshold_days=90,
+            oldest_started_at=self._100_DAYS_AGO,
+            now=self._NOW,
+        )
+        assert report.judged is True
+        assert report.journal_span_days == 100
+        stale_names = {e.name for e in report.stale_entries}
+        assert stale_names == {"concierge", "security-auditor"}
+
+        concierge = next(e for e in report.entries if e.name == "concierge")
+        assert concierge.days_since == 100
+        assert concierge.stale is True
+
+        security_auditor = next(e for e in report.entries if e.name == "security-auditor")
+        assert security_auditor.last_seen is None
+        assert security_auditor.days_since is None
+        assert security_auditor.stale is True
+
+    def test_threshold_200_flags_nothing_insufficient_history(self) -> None:
+        """Le journal (100 j) est plus jeune que le seuil (200 j) : on ne juge pas."""
+        report = compute_agent_freshness(
+            ["concierge", "security-auditor"],
+            self._dispatch_counts(),
+            threshold_days=200,
+            oldest_started_at=self._100_DAYS_AGO,
+            now=self._NOW,
+        )
+        assert report.judged is False
+        assert report.journal_span_days == 100
+        assert report.stale_entries == ()
+        # Aucune entrée n'est marquée périmée, même security-auditor (jamais vu).
+        assert all(not e.stale for e in report.entries)
+
+    def test_empty_journal_is_info_without_list(self) -> None:
+        report = compute_agent_freshness(
+            ["concierge", "security-auditor"],
+            {},
+            threshold_days=90,
+            oldest_started_at=None,
+            now=self._NOW,
+        )
+        assert report.judged is False
+        assert report.journal_span_days is None
+        assert report.stale_entries == ()
+
+    def test_fresh_agent_below_threshold_is_not_stale(self) -> None:
+        counts = {"concierge": {"count": 3, "last_seen": "2026-09-01T00:00:00+00:00"}}  # 10 j
+        report = compute_agent_freshness(
+            ["concierge"],
+            counts,
+            threshold_days=90,
+            oldest_started_at="2026-01-01T00:00:00+00:00",  # journal largement > 90 j
+            now=self._NOW,
+        )
+        assert report.judged is True
+        assert report.stale_entries == ()
+
+    def test_agent_freshness_report_wraps_ledger_state(self, tmp_path) -> None:
+        """La commodité `TraceLedger.agent_freshness_report` lit son propre journal."""
+        from grimoire.traces.ledger import AGENT_DISPATCH_TAG
+
+        ledger = TraceLedger(tmp_path)
+        ledger.record(
+            run_id="RUN-old",
+            workflow_instance_id="",
+            mission_id="",
+            task_id="",
+            recipe_id="grimoire.entry-persona",
+            outcome=TraceOutcome.SUCCESS,
+            started_at=self._100_DAYS_AGO,
+            agent_id="concierge",
+            tags=[AGENT_DISPATCH_TAG],
+        )
+        report = ledger.agent_freshness_report(
+            ["concierge", "security-auditor"], threshold_days=90, now=self._NOW
+        )
+        assert report.judged is True
+        assert {e.name for e in report.stale_entries} == {"concierge", "security-auditor"}

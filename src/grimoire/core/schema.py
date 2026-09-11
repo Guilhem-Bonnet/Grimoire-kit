@@ -312,5 +312,15 @@ def _agents_schema() -> dict[str, Any]:
                 "default": [],
                 "description": "Custom agent identifiers.",
             },
+            "freshness_threshold_days": {
+                "type": "integer",
+                "minimum": 1,
+                "default": 90,
+                "description": (
+                    "Days without an agent.dispatch trace entry before `grimoire doctor` and the "
+                    "cockpit flag a delivered or overridden agent as stale. Signal only — never "
+                    "automatic removal or deprecation."
+                ),
+            },
         },
     }

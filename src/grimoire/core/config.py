@@ -207,15 +207,31 @@ class AgentsConfig:
     #: Persona that answers when a request names no role. ``""`` means the
     #: project brings its own entry point and wants none injected.
     entry: str = "concierge"
+    #: Days without an `agent.dispatch` trace entry before `grimoire doctor`
+    #: and the cockpit flag a delivered or overridden agent as stale (issue
+    #: #396). Signal only — never automatic removal or deprecation.
+    freshness_threshold_days: int = 90
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> AgentsConfig:
         raw = data.get("custom_agents") or []
         entry = data.get("entry", "concierge")
+        raw_threshold = data.get("freshness_threshold_days", 90)
+        try:
+            # `bool` is an `int` subclass in Python — reject it explicitly so
+            # `freshness_threshold_days: true` doesn't silently become `1`.
+            if isinstance(raw_threshold, bool):
+                raise TypeError
+            freshness_threshold_days = int(raw_threshold)
+            if freshness_threshold_days < 1:
+                raise ValueError
+        except (TypeError, ValueError):
+            freshness_threshold_days = 90
         return cls(
             archetype=str(data.get("archetype", "minimal")),
             custom_agents=tuple(str(a) for a in raw),
             entry="" if entry is None else str(entry).strip(),
+            freshness_threshold_days=freshness_threshold_days,
         )
 
 

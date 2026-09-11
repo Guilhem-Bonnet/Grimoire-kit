@@ -44,7 +44,10 @@ from __future__ import annotations
 import difflib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from grimoire.traces.ledger import AgentFreshness
 
 __all__ = [
     "FILE_TEXT_LIMIT",
@@ -848,7 +851,16 @@ def agents_view(project_root: Path) -> dict[str, Any]:
     ``grimoire host status`` et ``grimoire host sync`` — un skill ou un
     contexte introuvable lève :class:`~grimoire.core.exceptions.GrimoireAgentError`
     ici comme là-bas plutôt que de rendre une vue à moitié construite.
+
+    Chaque agent porte aussi sa fraîcheur (issue #396) : le même verdict que
+    ``grimoire doctor``, calculé sur le tag ``agent.dispatch`` du journal
+    (distinct de ``usage``, qui compte tout sous-agent tracé — voir
+    :func:`_agent_usage`), pour que le badge du cockpit et le contrôle doctor
+    disent toujours la même chose.
     """
+    from grimoire.core.agent_freshness import project_agent_freshness
+    from grimoire.core.config import GrimoireConfig
+    from grimoire.core.exceptions import GrimoireConfigError
     from grimoire.hosts import collect
 
     root = project_root.resolve()
@@ -857,12 +869,22 @@ def agents_view(project_root: Path) -> dict[str, Any]:
     agents = collect.collect_agents(root, known_skills=known_skills)
     usage = _agent_usage(root)
     default_usage = {"choices": 0, "last_chosen_at": None}
+
+    cfg: GrimoireConfig | None = None
+    try:
+        cfg = GrimoireConfig.from_yaml(root / "project-context.yaml")
+    except GrimoireConfigError:
+        cfg = None
+    freshness = project_agent_freshness(root, cfg)
+    freshness_by_name = {e.name: e for e in freshness.entries}
+
     records = [
         {
             **agent.to_dict(),
             "layer": _agent_layer(agent.definition_ref),
             **_agent_clause(root, agent.definition_ref),
             "usage": usage.get(agent.name, default_usage),
+            "freshness": _agent_freshness_entry(freshness_by_name.get(agent.name), judged=freshness.judged),
         }
         for agent in agents
     ]
@@ -870,6 +892,20 @@ def agents_view(project_root: Path) -> dict[str, Any]:
         "agents": records,
         "skills": [s.to_dict() for s in skills],
         "entry_point": next((a.name for a in agents if a.entry_point), None),
+        "freshness_threshold_days": freshness.threshold_days,
+        "freshness_judged": freshness.judged,
+    }
+
+
+def _agent_freshness_entry(entry: AgentFreshness | None, *, judged: bool) -> dict[str, Any]:
+    """Un agent hors surface connue (défensif) rend une entrée neutre, jamais périmée."""
+    if entry is None:
+        return {"last_seen": None, "days_since": None, "stale": False, "judged": judged}
+    return {
+        "last_seen": entry.last_seen,
+        "days_since": entry.days_since,
+        "stale": entry.stale,
+        "judged": judged,
     }
 
 

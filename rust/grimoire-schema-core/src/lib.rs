@@ -295,7 +295,7 @@ const KNOWN_MEMORY_KEYS: &[&str] = &[
     "task_memory",
     "visualization",
 ];
-const KNOWN_AGENTS_KEYS: &[&str] = &["archetype", "custom_agents", "entry"];
+const KNOWN_AGENTS_KEYS: &[&str] = &["archetype", "custom_agents", "entry", "freshness_threshold_days"];
 
 // ── generate_schema ──────────────────────────────────────────────────────────
 
@@ -712,6 +712,22 @@ fn agents_schema() -> Value {
                         ("description", s("Custom agent identifiers.")),
                     ]),
                 ),
+                (
+                    "freshness_threshold_days",
+                    obj(vec![
+                        ("type", s("integer")),
+                        ("minimum", Value::Int(1)),
+                        ("default", Value::Int(90)),
+                        (
+                            "description",
+                            s(
+                                "Days without an agent.dispatch trace entry before `grimoire doctor` and the \
+                                 cockpit flag a delivered or overridden agent as stale. Signal only — never \
+                                 automatic removal or deprecation.",
+                            ),
+                        ),
+                    ]),
+                ),
             ]),
         ),
     ])
@@ -1060,6 +1076,16 @@ fn validate_agents(section: &Value, errors: &mut Vec<RawError>) {
         }
     }
 
+    if let Some(v) = field(section, "freshness_threshold_days") {
+        let valid = matches!(v, Value::Int(i) if *i >= 1);
+        if !valid {
+            errors.push(err(
+                "agents.freshness_threshold_days",
+                "'agents.freshness_threshold_days' must be a positive integer (days).",
+            ));
+        }
+    }
+
     check_unknown_keys(section, KNOWN_AGENTS_KEYS, "agents", "agents", errors);
 }
 
@@ -1342,6 +1368,45 @@ mod tests {
         // Mirroir de test_schema_declares_agents_entry (test_validator.py).
         let agents = agents_schema();
         assert!(agents.get("properties").unwrap().get("entry").is_some());
+    }
+
+    #[test]
+    fn schema_declares_agents_freshness_threshold_days() {
+        // Mirroir de test_schema.py (issue #396).
+        let agents = agents_schema();
+        let field = agents
+            .get("properties")
+            .unwrap()
+            .get("freshness_threshold_days")
+            .expect("freshness_threshold_days");
+        assert_eq!(field.get("default"), Some(&Value::Int(90)));
+    }
+
+    #[test]
+    fn negative_freshness_threshold_is_flagged() {
+        // Mirroir de test_validator.py (issue #396).
+        let data = map(vec![
+            ("project", map(vec![("name", Value::Str("x".to_string()))])),
+            (
+                "agents",
+                map(vec![("freshness_threshold_days", Value::Int(0))]),
+            ),
+        ]);
+        let errors = validate_core(&data);
+        assert!(errors.iter().any(|e| e.path == "agents.freshness_threshold_days"));
+    }
+
+    #[test]
+    fn valid_freshness_threshold_has_no_error() {
+        let data = map(vec![
+            ("project", map(vec![("name", Value::Str("x".to_string()))])),
+            (
+                "agents",
+                map(vec![("freshness_threshold_days", Value::Int(200))]),
+            ),
+        ]);
+        let errors = validate_core(&data);
+        assert!(!errors.iter().any(|e| e.path == "agents.freshness_threshold_days"));
     }
 
     #[test]

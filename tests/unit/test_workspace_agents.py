@@ -106,6 +106,61 @@ def test_l_usage_reel_vient_du_ledger_de_traces(agents_project: Path) -> None:
     assert concierge["usage"]["last_chosen_at"]
 
 
+# ── Fraîcheur (issue #396) ───────────────────────────────────────────────────
+#
+# Distincte de ``usage`` ci-dessus : ``usage`` compte tout sous-agent tracé
+# (``SubagentStop``, tag libre), ``freshness`` ne lit que le tag
+# ``agent.dispatch`` — le même filtre que ``grimoire doctor`` et
+# ``registry dispatches``. Vérifié empiriquement dans
+# ``grimoire.hosts.runtime._record_decision`` : les deux tags ne sont pas
+# écrits par le même événement, donc un agent peut être « utilisé »
+# (sous-agent tracé) sans jamais avoir été « choisi » (``agent.dispatch``).
+
+
+def test_sans_historique_la_fraicheur_n_est_pas_jugee(agents_project: Path) -> None:
+    """Journal absent ou trop jeune : aucun agent n'est marqué périmé."""
+    payload = wa.agents_view(agents_project)
+    assert payload["freshness_judged"] is False
+    assert payload["freshness_threshold_days"] == 90
+    concierge = next(a for a in payload["agents"] if a["name"] == "concierge")
+    assert concierge["freshness"] == {"last_seen": None, "days_since": None, "stale": False, "judged": False}
+
+
+def test_un_agent_perime_porte_le_badge_stale(agents_project: Path) -> None:
+    """Un ``agent.dispatch`` vieux de 100 jours dépasse le seuil par défaut (90)."""
+    from datetime import UTC, datetime, timedelta
+
+    from grimoire.core.standard_generation import TRACES_DIR
+    from grimoire.traces.ledger import AGENT_DISPATCH_TAG, TraceLedger, TraceOutcome
+
+    root = agents_project.parent / "projet-fraicheur"
+    _init(root)
+
+    ledger = TraceLedger(root / TRACES_DIR)
+    ledger.record(
+        run_id="RUN-fraicheur",
+        workflow_instance_id="",
+        mission_id="",
+        task_id="",
+        recipe_id="grimoire.entry-persona",
+        outcome=TraceOutcome.SUCCESS,
+        started_at=(datetime.now(UTC) - timedelta(days=100)).isoformat(),
+        agent_id="concierge",
+        tags=[AGENT_DISPATCH_TAG],
+    )
+
+    payload = wa.agents_view(root)
+    assert payload["freshness_judged"] is True
+    concierge = next(a for a in payload["agents"] if a["name"] == "concierge")
+    assert concierge["freshness"]["stale"] is True
+    assert concierge["freshness"]["days_since"] == 100
+
+    security_auditor = next((a for a in payload["agents"] if a["name"] == "security-auditor"), None)
+    if security_auditor is not None:
+        assert security_auditor["freshness"]["last_seen"] is None
+        assert security_auditor["freshness"]["stale"] is True
+
+
 # ── Écriture : assigner / retirer un skill ──────────────────────────────────
 
 
