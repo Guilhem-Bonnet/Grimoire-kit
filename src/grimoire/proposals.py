@@ -17,12 +17,37 @@ place.
 
 Artifact-type decision (``docs/artifact-doctrine.md``): a skill's sequence
 must be writable in advance *and* attachable to an existing agent; a miss
-with no recorded fallback agent has, by definition, no existing surface to
-attach anything to, so it can only become an agent. Mechanically, that reads
-as: a fallback agent was observed → propose a **skill** attached to it; no
-fallback agent was ever observed → propose an **agent**. This is the one
-place in the kit that decides skill vs. agent without a human in the loop,
-and it does so from a single observable fact, not from judgment.
+with no attachable surface has, by definition, nothing to attach anything
+to, so it can only become an agent. Mechanically, that reads as: an
+attachable agent was found → propose a **skill** attached to it; none was
+found → propose an **agent**. This is the one place in the kit that decides
+skill vs. agent without a human in the loop, and it does so from observable
+facts, not from judgment.
+
+"Attachable" excludes one thing unconditionally (issue #402): the project's
+*entry persona* — the one ``grimoire.hosts.decisions.entry_persona_context``
+hands the session-start turn to, named by
+``grimoire.hosts.collect.entry_agent_name`` (``concierge`` by default). It
+routes requests to specialists; it does not do specialist work itself, so
+the doctrine's "agent that does the work" never resolves to it. Because the
+concierge is nearly always the fallback a miss records — it is the one
+running the triage that produces the miss in the first place — treating its
+name the same as any other observed fallback would turn almost every
+proposal into "skill attached to concierge", exactly backwards from the
+doctrine. So: a fallback that is *not* the entry persona is used directly
+(``carrier_reason`` "repli observé"). A fallback that is empty or *is* the
+entry persona is treated as no fallback at all, and a second, independent
+search runs before giving up on a skill: among the project's declared
+agents (minus the entry persona), one whose ``use_when`` names the miss's
+category, or — for categories that read as execution work — whose tool
+faisceau includes ``execute``, is a plausible carrier
+(:func:`_category_carrier`). Exactly one match attaches a skill there
+(``carrier_reason`` "porteur par catégorie : <name>"); zero or several
+matches are as unusable as no fallback, and fall through to proposing a
+brand-new agent (``carrier_reason`` "persona d'entrée exclue, aucun
+porteur : agent"). ``fallback_agent`` itself is never rewritten by this
+search — it stays the raw fact the ledger observed; ``carrier_reason`` is
+the separate field that explains what the déclencheur did with it.
 
 Rejection is sticky but not permanent: refusing a proposal snapshots the
 miss count at the moment of refusal (``rejected_at_count``); the same
@@ -77,6 +102,12 @@ class Proposal:
     count: int
     category: str = ""
     fallback_agent: str = ""
+    carrier_reason: str = ""
+    """Why ``target_agent`` (or the absence of one) was chosen — one of
+    "repli observé", "porteur par catégorie : <name>", or "persona
+    d'entrée exclue, aucun porteur : agent" (see :func:`_resolve_carrier`).
+    ``fallback_agent`` above stays the raw observed fact; this field is the
+    déclencheur's account of what it did with it."""
     first_seen: str = ""
     last_seen: str = ""
     created_at: str = ""
@@ -100,6 +131,7 @@ class Proposal:
             "count": self.count,
             "category": self.category,
             "fallback_agent": self.fallback_agent,
+            "carrier_reason": self.carrier_reason,
             "first_seen": self.first_seen,
             "last_seen": self.last_seen,
             "created_at": self.created_at,
@@ -145,8 +177,15 @@ def _guess_tools(category: str, specialty: str) -> str:
     return "read, search"
 
 
-def _employment_clause(specialty: str, category: str, fallback_agent: str) -> tuple[str, str]:
-    """Mechanical ``(use_when, dont_use_when)`` from the labels a miss carries."""
+def _employment_clause(specialty: str, category: str, carrier: str) -> tuple[str, str]:
+    """Mechanical ``(use_when, dont_use_when)`` from the labels a miss carries.
+
+    *carrier* is the agent the proposal actually attaches to (or empty for a
+    fresh agent proposal) — not the raw ``fallback_agent`` fact, which may
+    name the entry persona even when the proposal attaches elsewhere or
+    nowhere (see :func:`_resolve_carrier`). Naming the entry persona here
+    would misdescribe the boundary this specialist is meant to relieve.
+    """
     if category:
         use_when = (
             f"Une demande classée « {category} » cherche une compétence "
@@ -154,9 +193,9 @@ def _employment_clause(specialty: str, category: str, fallback_agent: str) -> tu
         )
     else:
         use_when = f"Une demande cherche une compétence « {specialty} » qu'aucun agent déclaré ne couvre."
-    if fallback_agent:
+    if carrier:
         dont_use_when = (
-            f"Toute demande déjà couverte par {fallback_agent} ou un autre agent déclaré — "
+            f"Toute demande déjà couverte par {carrier} ou un autre agent déclaré — "
             f"ce spécialiste n'existe que pour « {specialty} »."
         )
     else:
@@ -167,19 +206,115 @@ def _employment_clause(specialty: str, category: str, fallback_agent: str) -> tu
     return use_when, dont_use_when
 
 
+def _entry_persona_name(project_root: Path) -> str:
+    """The name ``project-context.yaml`` designates as the entry persona.
+
+    This is the configured *role*, not proof that a matching agent file
+    exists on disk — the same source ``entry_persona_context`` in
+    :mod:`grimoire.hosts.decisions` reads to decide who receives the
+    session-start hand-off (``concierge`` when unset). Best-effort: a config
+    that fails to parse yields ``""``, which simply matches nothing below
+    rather than raising into the déclencheur.
+    """
+    try:
+        from grimoire.hosts.collect import entry_agent_name
+
+        return entry_agent_name(project_root)
+    except Exception:
+        return ""
+
+
+def _category_carrier(project_root: Path, category: str, entry_name: str) -> str:
+    """The one declared agent whose surface plausibly covers *category*.
+
+    Best-effort over ``collect_agents`` — a project whose agents fail to
+    collect (unknown skill, missing context…) yields no carrier here, never
+    an exception: this function only ever *suggests* an attachment point,
+    it never blocks the déclencheur itself. The entry persona is excluded
+    unconditionally, even if its own ``use_when`` happens to mention the
+    category — it routes, it does not carry (issue #402).
+
+    A match is either textual (the category's own word appears in the
+    agent's declared ``use_when``) or structural (the category reads as
+    execution work — the same ``_EXECUTION_HINTS`` heuristic used to guess
+    a *new* agent's tools — and the candidate already carries the
+    ``execute`` tool). Two matches are as unusable as zero: attaching a
+    skill to an ambiguous carrier is worse than proposing a fresh agent a
+    human can place by hand, so anything but exactly one candidate returns
+    ``""``.
+    """
+    if not category:
+        return ""
+    try:
+        from grimoire.hosts.collect import collect_agents, parse_frontmatter
+        from grimoire.hosts.surface import ToolVerb
+
+        agents = collect_agents(project_root)
+    except Exception:
+        return ""
+
+    category_lower = category.lower()
+    is_execution_category = any(hint in category_lower for hint in _EXECUTION_HINTS)
+    candidates: list[str] = []
+    for agent in agents:
+        if entry_name and agent.name == entry_name:
+            continue
+        use_when = ""
+        try:
+            text = (project_root / agent.definition_ref).read_text(encoding="utf-8")
+            meta, _ = parse_frontmatter(text)
+            use_when = str(meta.get("use_when") or "")
+        except OSError:
+            pass
+        matches_use_when = category_lower in use_when.lower()
+        matches_execute = is_execution_category and ToolVerb.EXECUTE in agent.tools
+        if matches_use_when or matches_execute:
+            candidates.append(agent.name)
+
+    return candidates[0] if len(candidates) == 1 else ""
+
+
+def _resolve_carrier(project_root: Path, *, category: str, fallback_agent: str) -> tuple[str, str]:
+    """Who a proposal should attach to, and why (issue #402).
+
+    A fallback agent that is not the project's entry persona is a directly
+    observed carrier. An empty fallback, or one that names the entry
+    persona, is "no carrier yet" — the doctrine's routing agent never
+    attaches a skill — so a category-based search over the project's other
+    declared agents (:func:`_category_carrier`) gets a second, independent
+    chance before the déclencheur gives up and proposes a brand-new agent.
+    """
+    entry_name = _entry_persona_name(project_root)
+    if fallback_agent and fallback_agent != entry_name:
+        return fallback_agent, "repli observé"
+    carrier = _category_carrier(project_root, category, entry_name)
+    if carrier:
+        return carrier, f"porteur par catégorie : {carrier}"
+    return "", "persona d'entrée exclue, aucun porteur : agent"
+
+
 def _build_proposal(
     *,
     specialty: str,
     count: int,
     category: str,
     fallback_agent: str,
+    carrier: str,
+    carrier_reason: str,
     first_seen: str,
     last_seen: str,
 ) -> Proposal:
-    """A fresh, pending proposal from what the ledger currently observes."""
-    use_when, dont_use_when = _employment_clause(specialty, category, fallback_agent)
+    """A fresh, pending proposal from what the ledger — and, when the raw
+    fallback offers no usable carrier, a category-based search — observed.
+
+    *carrier* and *carrier_reason* come from :func:`_resolve_carrier` and
+    decide the artifact type; *fallback_agent* is stored unchanged as the
+    raw fact the ledger recorded, even when it differs from *carrier* (the
+    entry-persona case).
+    """
+    use_when, dont_use_when = _employment_clause(specialty, category, carrier)
     now = datetime.now(UTC).isoformat()
-    if fallback_agent:
+    if carrier:
         # Attachable to an existing surface → the doctrine's skill branch.
         return Proposal(
             slug=_skill_slug(specialty),
@@ -189,6 +324,7 @@ def _build_proposal(
             count=count,
             category=category,
             fallback_agent=fallback_agent,
+            carrier_reason=carrier_reason,
             first_seen=first_seen or last_seen,
             last_seen=last_seen,
             created_at=now,
@@ -197,7 +333,7 @@ def _build_proposal(
             dont_use_when=dont_use_when,
             tool_boundary="",
             tools="",
-            target_agent=fallback_agent,
+            target_agent=carrier,
         )
     return Proposal(
         slug=_agent_slug(specialty),
@@ -207,6 +343,7 @@ def _build_proposal(
         count=count,
         category=category,
         fallback_agent=fallback_agent,
+        carrier_reason=carrier_reason,
         first_seen=first_seen or last_seen,
         last_seen=last_seen,
         created_at=now,
@@ -315,18 +452,31 @@ def sync_proposals(project_root: Path, *, threshold: int | None = None) -> list[
         fallback_agent = str(stats.get("fallback_agent") or "")
         last_seen = str(stats.get("last_seen") or "")
 
-        # The naming (and so the file path) depends on the artifact type,
-        # which depends on `fallback_agent` — decided once, at creation, from
-        # whatever the ledger showed then; recomputed here only to find the
-        # existing file when the type would resolve the same way today.
-        slug = _skill_slug(specialty) if fallback_agent else _agent_slug(specialty)
-        path = proposals_dir / f"{slug}.yaml"
-        existing = _load_proposal(path)
+        # The artifact type depends on whether a carrier resolves (issue
+        # #402), and that resolution can drift between syncs — most notably,
+        # accepting *this very* proposal writes a new agent file whose
+        # mechanical `use_when` names its own category, which would then
+        # look like a category carrier to a naive re-guess. So an existing
+        # proposal is found by checking both shapes the specialty could be
+        # stored under, never by re-deriving the type first and hoping it
+        # still matches what is on disk; the type is only (re)computed below
+        # when there is genuinely nothing there yet, or a rejection is old
+        # enough to reopen.
+        agent_path = proposals_dir / f"{_agent_slug(specialty)}.yaml"
+        skill_path = proposals_dir / f"{_skill_slug(specialty)}.yaml"
+        path, existing = agent_path, _load_proposal(agent_path)
+        if existing is None:
+            existing = _load_proposal(skill_path)
+            if existing is not None:
+                path = skill_path
 
         if existing is None:
+            carrier, carrier_reason = _resolve_carrier(root, category=category, fallback_agent=fallback_agent)
+            path = skill_path if carrier else agent_path
             proposal = _build_proposal(
                 specialty=specialty, count=count, category=category,
-                fallback_agent=fallback_agent, first_seen=last_seen, last_seen=last_seen,
+                fallback_agent=fallback_agent, carrier=carrier, carrier_reason=carrier_reason,
+                first_seen=last_seen, last_seen=last_seen,
             )
             _save_proposal(path, proposal)
             results.append(proposal)
@@ -343,11 +493,19 @@ def sync_proposals(project_root: Path, *, threshold: int | None = None) -> list[
                 _save_proposal(path, refreshed)
                 results.append(refreshed)
                 continue
+            carrier, carrier_reason = _resolve_carrier(root, category=category, fallback_agent=fallback_agent)
+            new_path = skill_path if carrier else agent_path
             reopened = _build_proposal(
                 specialty=specialty, count=count, category=category,
-                fallback_agent=fallback_agent, first_seen=existing.first_seen, last_seen=last_seen,
+                fallback_agent=fallback_agent, carrier=carrier, carrier_reason=carrier_reason,
+                first_seen=existing.first_seen, last_seen=last_seen,
             )
-            _save_proposal(path, reopened)
+            if new_path != path:
+                # The re-evaluated type no longer matches the shape the
+                # rejected proposal was stored under — move it rather than
+                # leaving a stale duplicate at the old slug.
+                path.unlink(missing_ok=True)
+            _save_proposal(new_path, reopened)
             results.append(reopened)
             continue
 

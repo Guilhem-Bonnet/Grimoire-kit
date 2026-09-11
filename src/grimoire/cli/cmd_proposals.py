@@ -58,13 +58,15 @@ def proposals_list(ctx: typer.Context) -> None:
         return
 
     table = Table(title="Propositions d'artefact")
-    for column in ("Slug", "Spécialité", "Type", "Statut", "Occurrences", "Dernier non-choix"):
+    for column in ("Slug", "Spécialité", "Type", "Porteur", "Raison", "Statut", "Occurrences", "Dernier non-choix"):
         table.add_column(column)
     for proposal in proposals:
         table.add_row(
             proposal.slug,
             proposal.specialty,
             proposal.artifact_type,
+            proposal.target_agent or "—",
+            proposal.carrier_reason or "—",
             proposal.status,
             str(proposal.count),
             proposal.last_seen or "—",

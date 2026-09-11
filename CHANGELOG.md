@@ -6,6 +6,21 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/)
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
+### Corrigé
+
+- fix(core): la persona d'entrée (`concierge`) n'est plus jamais retenue
+  comme porteuse d'un skill proposé (#402). Le déclencheur de propositions
+  (#395) traitait tout agent de repli comme un porteur valide ; comme le
+  concierge est presque toujours ce repli (c'est lui qui fait le triage),
+  presque toute proposition devenait « skill attaché à concierge », contraire
+  à la doctrine (un skill s'attache à l'agent qui fait le travail). Un repli
+  qui est la persona d'entrée est désormais traité comme une absence de
+  repli : une recherche par catégorie parmi les agents déclarés (`use_when`,
+  ou faisceau `execute` pour les catégories d'exécution) propose un porteur à
+  sa place si un seul agent convient, sinon la proposition redevient un
+  agent. `fallback_agent` reste le fait brut observé ; le nouveau champ
+  `carrier_reason` explique le choix, affiché par `grimoire proposals list`
+  et le cockpit.
 
 ## [3.43.0] - 2026-09-11
 ### Ajouté

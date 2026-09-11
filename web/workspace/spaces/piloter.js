@@ -352,6 +352,11 @@ function proposalFacts(p) {
   const bits = [`${fmtInt(p.count)} non-choix`];
   if (p.category) bits.push(`catégorie « ${p.category} »`);
   if (p.artifact_type === 'skill' && p.target_agent) bits.push(`à attacher à ${p.target_agent}`);
+  // Le porteur retenu peut différer du repli brut observé (`fallback_agent`)
+  // quand ce dernier est la persona d'entrée — `carrier_reason` explique le
+  // choix (issue #402) : « repli observé », « porteur par catégorie : X »,
+  // ou « persona d'entrée exclue, aucun porteur : agent ».
+  if (p.carrier_reason) bits.push(p.carrier_reason);
   return bits.join(' · ');
 }
 
