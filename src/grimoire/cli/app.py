@@ -767,6 +767,65 @@ def remove_agent(
         console.print(f"[green]Removed agent:[/green] {agent_id}")
 
 
+# ── grimoire agent-miss ────────────────────────────────────────────────────────
+
+_miss_category_opt = typer.Option(
+    ..., "--category", help="Catégorie de la demande telle que comprise (jamais son contenu)."
+)
+_miss_specialty_opt = typer.Option("", "--specialty", help="Spécialité cherchée, si elle est nommable.")
+_miss_fallback_opt = typer.Option("", "--fallback", help="Agent de repli retenu, s'il y en a un.")
+_miss_reason_opt = typer.Option("", "--reason", help="Pourquoi aucun spécialiste ne convenait.")
+
+
+@app.command("agent-miss", rich_help_panel="Agents")
+def agent_miss(
+    ctx: typer.Context,
+    category: str = _miss_category_opt,
+    specialty: str = _miss_specialty_opt,
+    fallback: str = _miss_fallback_opt,
+    reason: str = _miss_reason_opt,
+) -> None:
+    """Journaliser un non-choix : aucun spécialiste ne convenait à la demande.
+
+    Symétrique de l'auto-journalisation du choix d'agent (issue #366) : ici,
+    la résolution vers un spécialiste échoue ou se rabat sur un généraliste.
+    Cette résolution se fait dans le raisonnement de la persona concierge
+    (`archetypes/meta/agents/concierge.md`), pas dans du code du kit qui
+    pourrait l'observer lui-même — cette commande est donc le canal que la
+    persona concierge appelle à chaque non-choix (issue #389).
+
+    Aucun contenu de la demande n'est accepté : `--category` et `--specialty`
+    ne sont que des étiquettes qui la classent. L'écriture est best-effort —
+    un journal indisponible ou illisible ne fait jamais échouer la commande.
+
+    [dim]Examples:[/dim]
+      [cyan]grimoire agent-miss --category tests[/cyan]
+      [cyan]grimoire agent-miss --category infra --specialty terraform --fallback backend-engineer --reason "aucun agent terraform déclaré"[/cyan]
+    """
+    from grimoire.hosts.decisions import record_agent_miss
+    from grimoire.tools._common import find_project_root
+
+    try:
+        root = find_project_root()
+    except FileNotFoundError:
+        root = None
+
+    # Best-effort jusqu'au bout : hors d'un projet Grimoire, il n'y a nul
+    # part où écrire — ne pas écrire, jamais écrire n'importe où (pas de
+    # repli sur le cwd courant, qui n'a aucune raison d'être un projet).
+    if root is not None:
+        record_agent_miss(root, category=category, specialty=specialty, fallback_agent=fallback, reason=reason)
+
+    if _get_fmt(ctx) == "json":
+        typer.echo(
+            json.dumps(
+                {"ok": True, "action": "agent-miss", "category": category, "specialty": specialty or None}
+            )
+        )
+    else:
+        console.print(f"[yellow]Non-choix journalisé:[/yellow] {category}" + (f" ({specialty})" if specialty else ""))
+
+
 # ── grimoire validate ─────────────────────────────────────────────────────────────
 
 _validate_path_arg = typer.Argument(Path(), help="Project root to validate.")
@@ -1011,14 +1070,18 @@ def registry_search(
 
 @registry_app.command("dispatches")
 def registry_dispatches(ctx: typer.Context) -> None:
-    """Compter les agents réellement choisis comme persona d'entrée (issue #365).
+    """Compter les choix et les non-choix d'agent observés (issues #365, #389).
 
     Lit le TraceLedger du projet (`_grimoire-output/traces/traces.jsonl`),
     pas la carte statique des agents déclarés : `registry list` dit ce qui
-    existe, cette commande dit ce qui a été *choisi*, combien de fois, et
-    quand pour la dernière fois — le fait qui manquait pour juger si un agent
-    livré sert encore à quelqu'un. Un journal absent vaut zéro choix observé,
-    jamais une erreur.
+    existe, cette commande dit ce qui a été *choisi* (persona d'entrée
+    retenue, combien de fois, la dernière fois) et ce qui a *manqué* (une
+    spécialité cherchée par le concierge sans spécialiste trouvé, écrite via
+    `grimoire agent-miss`) — le double fait qui manquait pour juger si un
+    agent livré sert encore à quelqu'un, et pour voir quelle spécialité
+    absente reviendrait assez souvent pour justifier d'en créer une. Un
+    journal absent vaut zéro choix et zéro non-choix observés, jamais une
+    erreur.
     """
     from grimoire.core.standard_generation import TRACES_DIR
     from grimoire.tools._common import find_project_root
@@ -1030,25 +1093,40 @@ def registry_dispatches(ctx: typer.Context) -> None:
         console.print("[red]Not in a Grimoire project — cannot locate kit root.[/red]")
         raise typer.Exit(1) from None
 
-    counts = TraceLedger(root / TRACES_DIR).agent_dispatch_counts()
+    ledger = TraceLedger(root / TRACES_DIR)
+    counts = ledger.agent_dispatch_counts()
+    misses = ledger.agent_miss_counts()
 
     if _get_fmt(ctx) == "json":
-        typer.echo(json.dumps(counts, indent=2, ensure_ascii=False))
+        typer.echo(json.dumps({"dispatches": counts, "misses": misses}, indent=2, ensure_ascii=False))
         return
 
     if not counts:
         console.print("[yellow]Aucun choix d'agent enregistré.[/yellow]")
+    else:
+        tbl = Table(title="Choix d'agent observés")
+        tbl.add_column("Agent", style="bold")
+        tbl.add_column("Occurrences", justify="right")
+        tbl.add_column("Dernier choix")
+
+        for agent_id, stats in sorted(counts.items(), key=lambda kv: kv[1]["count"], reverse=True):
+            tbl.add_row(agent_id, str(stats["count"]), stats["last_seen"] or "—")
+
+        console.print(tbl)
+
+    if not misses:
+        console.print("[yellow]Aucun non-choix enregistré.[/yellow]")
         return
 
-    tbl = Table(title="Choix d'agent observés")
-    tbl.add_column("Agent", style="bold")
-    tbl.add_column("Occurrences", justify="right")
-    tbl.add_column("Dernier choix")
+    miss_tbl = Table(title="Non-choix observés — spécialité manquante")
+    miss_tbl.add_column("Spécialité", style="bold")
+    miss_tbl.add_column("Occurrences", justify="right")
+    miss_tbl.add_column("Dernier non-choix")
 
-    for agent_id, stats in sorted(counts.items(), key=lambda kv: kv[1]["count"], reverse=True):
-        tbl.add_row(agent_id, str(stats["count"]), stats["last_seen"] or "—")
+    for specialty, stats in sorted(misses.items(), key=lambda kv: kv[1]["count"], reverse=True):
+        miss_tbl.add_row(specialty, str(stats["count"]), stats["last_seen"] or "—")
 
-    console.print(tbl)
+    console.print(miss_tbl)
 
 
 # ── grimoire diff ─────────────────────────────────────────────────────────────────

@@ -6,6 +6,19 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/)
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
+### Ajouté
+
+- **feat(core): instrumenter les non-choix du concierge (#389).** Symétrique
+  du choix d'agent (#366) : quand le concierge cherche un spécialiste et n'en
+  trouve aucun, ou se rabat sur un généraliste, `grimoire agent-miss`
+  journalise le fait dans le même TraceLedger — catégorie de la demande,
+  spécialité cherchée si nommable, agent de repli, raison, jamais le contenu
+  de la demande. La résolution se fait dans le raisonnement de la persona
+  concierge (`archetypes/meta/agents/concierge.md`, désormais instruite
+  d'appeler cette commande), pas dans du code du kit ; c'est donc le seul
+  canal d'écriture. `grimoire registry dispatches` lit désormais les deux
+  côte à côte : choix par agent, non-choix agrégés par spécialité manquante
+  avec leur compte. Écriture best-effort, comme son symétrique.
 
 ## [3.42.0] - 2026-09-11
 ### Ajouté

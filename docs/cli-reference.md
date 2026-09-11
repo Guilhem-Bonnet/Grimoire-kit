@@ -930,6 +930,43 @@ Recherche un agent par mot-clé.
 grimoire registry search QUERY
 ```
 
+### `grimoire registry dispatches`
+
+Compte les choix d'agent (#366) et les non-choix (#389) observés, lus dans le
+TraceLedger du projet — pas la carte statique des agents déclarés.
+
+```bash
+grimoire registry dispatches
+grimoire -o json registry dispatches
+```
+
+Deux tableaux : les agents réellement choisis comme persona d'entrée (combien
+de fois, la dernière fois), et les spécialités cherchées sans spécialiste
+trouvé (même forme). Voir [Persona d'entrée → Non-choix](hosts.md#non-choix).
+
+### `grimoire agent-miss`
+
+Journalise un non-choix : le concierge a cherché un spécialiste et n'en a
+trouvé aucun, ou s'est rabattu sur un généraliste.
+
+```bash
+grimoire agent-miss --category tests
+grimoire agent-miss --category infra --specialty terraform \
+  --fallback backend-engineer --reason "aucun agent terraform déclaré"
+```
+
+| Option | Description |
+|--------|-------------|
+| `--category` | Catégorie de la demande telle que comprise (obligatoire, jamais son contenu) |
+| `--specialty` | Spécialité cherchée, si elle est nommable |
+| `--fallback` | Agent de repli retenu, s'il y en a un |
+| `--reason` | Pourquoi aucun spécialiste ne convenait |
+
+Appelée par la persona concierge (`archetypes/meta/agents/concierge.md`), pas
+par du code du kit : cette résolution se fait dans son raisonnement. Écriture
+best-effort — un journal indisponible ou illisible ne fait jamais échouer la
+commande. Détail : [Persona d'entrée → Non-choix](hosts.md#non-choix).
+
 ### `grimoire plugins list`
 
 Liste les plugins installés (tools et backends).
@@ -1134,7 +1171,7 @@ Les commandes sont regroupées par catégorie dans `grimoire --help` :
 | Panneau | Commandes |
 |---------|-----------|
 | **Project** | `init`, `doctor`, `status`, `up` |
-| **Agents** | `add`, `remove`, `registry` |
+| **Agents** | `add`, `remove`, `agent-miss`, `registry` |
 | **Validation** | `validate`, `lint`, `check`, `schema` |
 | **Configuration** | `config`, `diff` |
 | **Utilities** | `upgrade`, `merge`, `setup`, `repair`, `completion`, `plugins` |

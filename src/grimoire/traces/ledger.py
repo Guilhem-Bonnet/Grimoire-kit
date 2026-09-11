@@ -39,7 +39,7 @@ from grimoire.traces.schemas import (
     TraceRecord,
 )
 
-__all__ = ["AGENT_DISPATCH_TAG", "TraceLedger"]
+__all__ = ["AGENT_DISPATCH_TAG", "AGENT_MISS_TAG", "TraceLedger"]
 
 #: Tag qui marque un enregistrement comme « un agent a été choisi » plutôt
 #: qu'un gate de tâche ou un appel modèle — le seul filtre dont
@@ -47,6 +47,16 @@ __all__ = ["AGENT_DISPATCH_TAG", "TraceLedger"]
 #: d'écriture (``hosts.decisions``), pour qu'écriture et lecture partagent
 #: la même constante plutôt que deux chaînes qui pourraient diverger.
 AGENT_DISPATCH_TAG = "agent.dispatch"
+
+#: Tag qui marque un enregistrement comme un « non-choix » : le concierge a
+#: cherché un spécialiste et n'en a trouvé aucun, ou s'est rabattu sur un
+#: généraliste. Symétrique d'``AGENT_DISPATCH_TAG`` (issue #366), pour le
+#: signal inverse que #389 rend mesurable.
+AGENT_MISS_TAG = "agent.miss"
+
+#: Clé d'agrégation pour un non-choix dont la spécialité cherchée n'a pas pu
+#: être nommée — jamais ignoré : le non-choix reste un signal même sans nom.
+_UNNAMED_SPECIALTY = "(non nommée)"
 
 _OTEL_SPAN_KIND_INTERNAL = "SPAN_KIND_INTERNAL"
 _OTEL_STATUS_OK = "STATUS_CODE_OK"
@@ -208,6 +218,34 @@ class TraceLedger:
             if AGENT_DISPATCH_TAG not in trace.tags or not trace.agent_id:
                 continue
             entry = counts.setdefault(trace.agent_id, {"count": 0, "last_seen": ""})
+            entry["count"] += 1
+            if trace.started_at > entry["last_seen"]:
+                entry["last_seen"] = trace.started_at
+        return counts
+
+    def agent_miss_counts(self) -> dict[str, dict[str, Any]]:
+        """Compter les non-choix journalisés par ``hosts.decisions.record_agent_miss``.
+
+        Filtre sur le tag ``agent.miss`` et agrège par spécialité cherchée
+        (encodée en tag ``specialty:<nom>``) — la clé de lecture que l'issue
+        #389 pose comme critère d'arrêt (« quelle spécialité a manqué et
+        combien de fois »). Une entrée sans spécialité nommable est comptée
+        sous ``_UNNAMED_SPECIALTY`` plutôt qu'ignorée : le non-choix reste un
+        signal même quand le concierge n'a pas su le nommer. Retourne, par
+        spécialité : le nombre d'occurrences et l'horodatage de la plus
+        récente, même forme qu'``agent_dispatch_counts`` pour que les deux se
+        lisent côte à côte.
+        """
+        counts: dict[str, dict[str, Any]] = {}
+        for trace in self._load_all():
+            if AGENT_MISS_TAG not in trace.tags:
+                continue
+            specialty = _UNNAMED_SPECIALTY
+            for tag in trace.tags:
+                if tag.startswith("specialty:"):
+                    specialty = tag.removeprefix("specialty:") or _UNNAMED_SPECIALTY
+                    break
+            entry = counts.setdefault(specialty, {"count": 0, "last_seen": ""})
             entry["count"] += 1
             if trace.started_at > entry["last_seen"]:
                 entry["last_seen"] = trace.started_at

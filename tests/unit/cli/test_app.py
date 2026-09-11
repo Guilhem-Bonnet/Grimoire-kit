@@ -555,6 +555,97 @@ class TestRegistrySearch:
         assert "analyst" in result.output
 
 
+# ── Agent miss (#389) ───────────────────────────────────────────────────────────
+
+
+class TestAgentMiss:
+    """Le canal que la persona concierge appelle quand aucun spécialiste ne convient."""
+
+    def test_agent_miss_requires_a_category(self) -> None:
+        result = runner.invoke(app, ["agent-miss"])
+        assert result.exit_code != 0
+
+    def test_agent_miss_no_project_never_fails(self, tmp_path: Path) -> None:
+        """Best-effort jusqu'au bout : pas de projet trouvé n'est pas une erreur."""
+        with patch("grimoire.tools._common.find_project_root", side_effect=FileNotFoundError("no project")):
+            result = runner.invoke(app, ["agent-miss", "--category", "tests"])
+        assert result.exit_code == 0
+
+    def test_agent_miss_writes_to_the_trace_ledger(self, tmp_path: Path) -> None:
+        from grimoire.core.standard_generation import TRACES_DIR
+        from grimoire.traces.ledger import TraceLedger
+
+        with patch("grimoire.tools._common.find_project_root", return_value=tmp_path):
+            result = runner.invoke(
+                app,
+                [
+                    "agent-miss",
+                    "--category",
+                    "tests",
+                    "--specialty",
+                    "expert-playwright",
+                    "--fallback",
+                    "generic-dev",
+                    "--reason",
+                    "aucun agent e2e déclaré",
+                ],
+            )
+        assert result.exit_code == 0
+        assert "Non-choix journalisé" in result.output
+        misses = TraceLedger(tmp_path / TRACES_DIR).agent_miss_counts()
+        assert misses["expert-playwright"]["count"] == 1
+
+    def test_agent_miss_without_specialty_falls_in_the_unnamed_bucket(self, tmp_path: Path) -> None:
+        from grimoire.core.standard_generation import TRACES_DIR
+        from grimoire.traces.ledger import TraceLedger
+
+        with patch("grimoire.tools._common.find_project_root", return_value=tmp_path):
+            runner.invoke(app, ["agent-miss", "--category", "design"])
+        misses = TraceLedger(tmp_path / TRACES_DIR).agent_miss_counts()
+        assert misses["(non nommée)"]["count"] == 1
+
+    def test_agent_miss_json_output(self, tmp_path: Path) -> None:
+        with patch("grimoire.tools._common.find_project_root", return_value=tmp_path):
+            result = runner.invoke(app, ["-o", "json", "agent-miss", "--category", "design"])
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload == {"ok": True, "action": "agent-miss", "category": "design", "specialty": None}
+
+
+class TestRegistryDispatches:
+    """Lecture agrégée des choix (#366) et des non-choix (#389) d'agent."""
+
+    def test_registry_dispatches_no_project(self) -> None:
+        with patch("grimoire.tools._common.find_project_root", side_effect=FileNotFoundError("no")):
+            result = runner.invoke(app, ["registry", "dispatches"])
+        assert result.exit_code == 1
+
+    def test_registry_dispatches_empty(self, tmp_path: Path) -> None:
+        with patch("grimoire.tools._common.find_project_root", return_value=tmp_path):
+            result = runner.invoke(app, ["registry", "dispatches"])
+        assert result.exit_code == 0
+        assert "Aucun choix d'agent" in result.output
+        assert "Aucun non-choix" in result.output
+
+    def test_registry_dispatches_shows_misses_aggregated_by_specialty(self, tmp_path: Path) -> None:
+        with patch("grimoire.tools._common.find_project_root", return_value=tmp_path):
+            runner.invoke(app, ["agent-miss", "--category", "infra", "--specialty", "terraform"])
+            runner.invoke(app, ["agent-miss", "--category", "infra", "--specialty", "terraform"])
+            result = runner.invoke(app, ["registry", "dispatches"])
+        assert result.exit_code == 0
+        assert "terraform" in result.output
+        assert "2" in result.output
+
+    def test_registry_dispatches_json_includes_both_choices_and_misses(self, tmp_path: Path) -> None:
+        with patch("grimoire.tools._common.find_project_root", return_value=tmp_path):
+            runner.invoke(app, ["agent-miss", "--category", "infra", "--specialty", "terraform"])
+            result = runner.invoke(app, ["-o", "json", "registry", "dispatches"])
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert set(payload) == {"dispatches", "misses"}
+        assert payload["misses"]["terraform"]["count"] == 1
+
+
 # ── Upgrade ───────────────────────────────────────────────────────────────────
 
 

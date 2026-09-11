@@ -168,6 +168,49 @@ class TestTraceLedger:
             "scribe": {"count": 1, "last_seen": "2026-01-03T00:00:00+00:00"},
         }
 
+    def test_agent_miss_counts_ignores_untagged_traces(self, tmp_path) -> None:
+        """Un choix d'agent (ou un gate de tâche) n'est pas un non-choix (issue #389)."""
+        ledger = TraceLedger(tmp_path)
+        _make_trace(ledger, run_id="RUN-untagged")
+        assert ledger.agent_miss_counts() == {}
+
+    def test_agent_miss_counts_counts_and_dates_by_specialty(self, tmp_path) -> None:
+        """Symétrique de ``agent_dispatch_counts`` : la clé d'agrégation est la spécialité manquante."""
+        from grimoire.traces.ledger import AGENT_MISS_TAG
+
+        ledger = TraceLedger(tmp_path)
+        for run_id, started_at in (
+            ("RUN-m1", "2026-01-01T00:00:00+00:00"),
+            ("RUN-m2", "2026-01-02T00:00:00+00:00"),
+        ):
+            ledger.record(
+                run_id=run_id,
+                workflow_instance_id="",
+                mission_id="",
+                task_id="",
+                recipe_id="grimoire.entry-persona.miss",
+                outcome=TraceOutcome.FAILURE,
+                started_at=started_at,
+                agent_id="generic-dev",
+                tags=[AGENT_MISS_TAG, "category:infra", "specialty:terraform"],
+            )
+        ledger.record(
+            run_id="RUN-m3",
+            workflow_instance_id="",
+            mission_id="",
+            task_id="",
+            recipe_id="grimoire.entry-persona.miss",
+            outcome=TraceOutcome.FAILURE,
+            started_at="2026-01-03T00:00:00+00:00",
+            agent_id="",
+            tags=[AGENT_MISS_TAG, "category:design"],
+        )
+        counts = ledger.agent_miss_counts()
+        assert counts == {
+            "terraform": {"count": 2, "last_seen": "2026-01-02T00:00:00+00:00"},
+            "(non nommée)": {"count": 1, "last_seen": "2026-01-03T00:00:00+00:00"},
+        }
+
     def test_export_otel_jsonl(self, tmp_path) -> None:
         """One `invoke_agent` parent span, plus one `execute_tool` child per call."""
         ledger = TraceLedger(tmp_path)

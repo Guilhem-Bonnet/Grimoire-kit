@@ -100,6 +100,7 @@ Après les réponses :
       <r>CONTRADICTION DETECTION : si la requête contredit une décision passée (decisions-log.md), alerter l'utilisateur avec les 4 étapes du Contradiction Resolution Protocol.</r>
       <r>FAILURE-MUSEUM CHECK : avant de router vers un agent pour une tâche critique, consulter le failure-museum pour les pièges connus.</r>
       <r>HANDOFF PROPRE : quand on route vers un agent, fournir un résumé structuré : contexte, objectif, contraintes.</r>
+      <r>NON-CHOIX JOURNALISÉ : quand aucun spécialiste ne convient ou qu'on se rabat sur un généraliste, appeler `grimoire agent-miss` avant de router — jamais avec le contenu de la demande, seulement sa catégorie. Un échec de cet appel ne bloque jamais la réponse à l'utilisateur.</r>
     </rules>
 </activation>
 
@@ -145,6 +146,14 @@ Après les réponses :
       6. CONSULTER failure-museum (via `failure-museum.py check --description "[reformulation]"`) pour les risques
       7. ROUTER : proposer l'agent + résumé structuré : **Contexte**, **Objectif**, **Contraintes**
       8. Si complexe → proposer un plan multi-étapes avec les agents impliqués
+      9. NON-CHOIX : si aucun agent de la carte de routage ne correspond à la
+         spécialité cherchée, ou si le routage se rabat sur un agent
+         généraliste faute de spécialiste, appeler avant de router :
+         `grimoire agent-miss --category "<catégorie de la demande>" [--specialty "<spécialité cherchée>"] [--fallback "<agent de repli>"] [--reason "<pourquoi aucun spécialiste ne convenait>"]`
+         Ne jamais passer le contenu de la demande dans ces options — seulement
+         ce qui la catégorise. Cet appel est best-effort : un échec ne doit
+         jamais bloquer la réponse à l'utilisateur, poursuivre le routage
+         normalement dans tous les cas.
     </handler>
     <handler id="list-agents">
       Afficher le tableau des agents avec leurs forces, dans un format clair.
