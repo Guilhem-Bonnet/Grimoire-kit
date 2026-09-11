@@ -244,6 +244,68 @@ class TestCheckMcpJson:
             checks = check_mcp_json(tmp_path)
         assert checks[0].passed is True
 
+    def test_npx_package_spec_is_not_treated_as_a_path(self, tmp_path: Path) -> None:
+        """Regression for #393: a versioned npm package spec (with a '/' and a
+        dotted suffix) must not be checked as a local file path when launched
+        through npx — the package is resolved by npx itself, not by doctor."""
+        (tmp_path / ".mcp.json").write_text(
+            json.dumps({"mcpServers": {"playwright": {
+                "command": "npx", "args": ["@playwright/mcp@0.0.80"],
+            }}}),
+            encoding="utf-8",
+        )
+        with patch("grimoire.cli.cmd_up.shutil.which", return_value="/usr/bin/npx"):
+            checks = check_mcp_json(tmp_path)
+        assert len(checks) == 1
+        assert checks[0].passed is True
+        assert checks[0].level == "info"
+        assert "@playwright/mcp@0.0.80" in checks[0].detail
+
+    def test_npx_missing_from_path_fails(self, tmp_path: Path) -> None:
+        """The launcher itself must still be checked: no npx on PATH is a FAIL."""
+        (tmp_path / ".mcp.json").write_text(
+            json.dumps({"mcpServers": {"playwright": {
+                "command": "npx", "args": ["@playwright/mcp@0.0.80"],
+            }}}),
+            encoding="utf-8",
+        )
+        with patch("grimoire.cli.cmd_up.shutil.which", return_value=None):
+            checks = check_mcp_json(tmp_path)
+        assert len(checks) == 1
+        assert checks[0].passed is False
+        assert checks[0].level == "fail"
+        assert "npx" in checks[0].detail
+        assert "npx" in checks[0].remedy
+
+    def test_other_package_launchers_skip_path_check(self, tmp_path: Path) -> None:
+        for launcher in ("bunx", "uvx", "pipx", "docker", "podman"):
+            (tmp_path / ".mcp.json").write_text(
+                json.dumps({"mcpServers": {"srv": {
+                    "command": launcher, "args": ["some/pkg@1.2.3"],
+                }}}),
+                encoding="utf-8",
+            )
+            with patch("grimoire.cli.cmd_up.shutil.which", return_value=f"/usr/bin/{launcher}"):
+                checks = check_mcp_json(tmp_path)
+            assert checks[0].passed is True, launcher
+            assert checks[0].level == "info", launcher
+
+    def test_absolute_path_argument_still_fails_for_package_launcher_command(
+        self, tmp_path: Path
+    ) -> None:
+        """Non-launcher commands keep the unchanged path check even though the
+        launcher set exists — this guards against over-broadening the bypass."""
+        (tmp_path / ".mcp.json").write_text(
+            json.dumps({"mcpServers": {"local": {
+                "command": "python", "args": ["/nonexistent/server.py"],
+            }}}),
+            encoding="utf-8",
+        )
+        with patch("grimoire.cli.cmd_up.shutil.which", return_value="/usr/bin/python"):
+            checks = check_mcp_json(tmp_path)
+        assert checks[0].passed is False
+        assert "/nonexistent/server.py" in checks[0].detail
+
 
 # ── Unit: Memory OS probes (declared-only) ───────────────────────────────────
 

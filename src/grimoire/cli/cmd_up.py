@@ -348,6 +348,23 @@ def _looks_like_path(value: str) -> bool:
     return value.startswith(("/", "./", "../", "~")) or (os.sep in value and Path(value).suffix != "")
 
 
+# Package-runner launchers: their first non-flag argument is a package spec
+# (npm registry name, PyPI name, image ref…), never a local file path, even
+# when it happens to contain a "/" and a version-like suffix
+# (e.g. "@playwright/mcp@0.0.80"). Matched on the executable's base name so
+# an absolute path to the launcher (e.g. "/usr/bin/npx") still counts.
+_PACKAGE_LAUNCHERS = frozenset({"npx", "bunx", "uvx", "pipx", "docker", "podman"})
+
+
+def _launcher_name(command: str) -> str:
+    """Base executable name for *command*, lowercased and without extension."""
+    name = Path(command).name.lower()
+    for suffix in (".exe", ".cmd", ".bat"):
+        if name.endswith(suffix):
+            return name[: -len(suffix)]
+    return name
+
+
 def _resolve_ref(target: Path, value: str) -> bool:
     """True when *value* resolves to an existing file/dir (absolute or project-relative)."""
     p = Path(value).expanduser()
@@ -400,27 +417,57 @@ def check_mcp_json(target: Path) -> list[EnvCheck]:
             continue
         broken: list[str] = []
         command = str(spec.get("command", "")).strip()
+        launcher = _launcher_name(command) if command else ""
+        is_package_launcher = launcher in _PACKAGE_LAUNCHERS
         if command:
             command_ok = shutil.which(command) is not None or _resolve_ref(target, command)
             if not command_ok:
-                broken.append(f"command '{command}' not found on PATH")
+                if is_package_launcher:
+                    broken.append(f"launcher '{command}' not found on PATH")
+                else:
+                    broken.append(f"command '{command}' not found on PATH")
         args = spec.get("args", [])
+        package_spec: str | None = None
         if isinstance(args, list):
             for arg in args:
                 arg_str = str(arg)
+                if is_package_launcher:
+                    # The launcher resolves packages itself (npm registry, PyPI,
+                    # an image ref…); its first non-flag argument is a package
+                    # spec, not a local path, even when it contains "/" and a
+                    # version suffix (e.g. "@playwright/mcp@0.0.80").
+                    if package_spec is None and arg_str and not arg_str.startswith("-"):
+                        package_spec = arg_str
+                    continue
                 if _looks_like_path(arg_str) and not _resolve_ref(target, arg_str):
                     broken.append(f"path '{arg_str}' does not exist")
         if broken:
+            remedy = (
+                f"install {launcher} (it is not on PATH) or fix the '{server_name}' entry in .mcp.json"
+                if is_package_launcher
+                else (
+                    f"install the missing tool (e.g. pip install grimoire-kit for grimoire-mcp) "
+                    f"or fix the '{server_name}' entry in .mcp.json"
+                )
+            )
             checks.append(EnvCheck(
                 f"mcp_{server_name}",
                 passed=False,
                 level="fail",
                 detail=f".mcp.json server '{server_name}': {'; '.join(broken)}",
-                remedy=(
-                    f"install the missing tool (e.g. pip install grimoire-kit for grimoire-mcp) "
-                    f"or fix the '{server_name}' entry in .mcp.json"
-                ),
+                remedy=remedy,
                 optional=False,
+            ))
+        elif is_package_launcher:
+            checks.append(EnvCheck(
+                f"mcp_{server_name}",
+                passed=True,
+                level="info",
+                detail=(
+                    f".mcp.json server '{server_name}' uses {launcher}"
+                    + (f" to run package '{package_spec}'" if package_spec else "")
+                    + " (not verified locally, resolved at launch)"
+                ),
             ))
         else:
             checks.append(EnvCheck(

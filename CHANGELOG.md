@@ -7,6 +7,18 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Corrigé
+
+- **fix(doctor): ne plus lire un spec de paquet npx/uvx/pipx/bunx/docker/podman comme un chemin (#393).**
+  `.mcp.json server '<nom>': path '<spec>' does not exist` était un faux
+  positif dès que `command` était un lanceur de paquet (ex. `npx`) et que le
+  premier argument contenait un `/` et une version (`@playwright/mcp@0.0.80`
+  ressemblait à un chemin selon l'heuristique). Pour ces lanceurs, `doctor`
+  vérifie désormais seulement que le lanceur est sur le PATH (FAIL sinon,
+  remède « installer <lanceur> ») et rapporte le paquet en INFO sans le
+  tester comme chemin. Le contrôle est inchangé pour les commandes qui
+  pointent vers un fichier ou un binaire.
+
 ## [3.43.0] - 2026-09-11
 ### Ajouté
 
