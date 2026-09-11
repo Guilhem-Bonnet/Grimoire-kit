@@ -6,21 +6,8 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/)
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
-### Ajouté
 
-- **chore(bench): mesurer le gain réel des cœurs Rust optionnels (#354).**
-  `scripts/bench-rust-cores.py` compare Python et Rust pour les deux cœurs
-  livrés à ce jour (`grimoire.policies.engine.PolicyEngine.evaluate` #363,
-  `grimoire.core.schema.generate_schema` / `grimoire.core.validator.validate_config`
-  #392) sur trois plans : micro (temps par appel, `timeit`, entrée réaliste
-  et entrée volumineuse), macro (`grimoire doctor`, `host sync`, `standard
-  verify`, décision `PreToolUse`, médiane de 10 exécutions contre le coût
-  fixe de `grimoire --version`), et profil (`importtime` + `cProfile` sur
-  `grimoire doctor .`). Verdict mesuré publié en commentaire sur #354 :
-  aucun des deux ports ne change un temps perceptible par l'utilisateur,
-  le surcoût de la frontière PyO3 dépassant le gain sur ces tailles
-  d'entrée. `docs/rust-cores-benchmark.md` documente comment le relancer.
-
+## [3.43.1] - 2026-09-11
 ### Corrigé
 
 - **fix(core): le validateur ne plante plus sur les champs énumérés et type-vérifie enfin cinq champs déclarés chaînes (#409).**
@@ -62,6 +49,32 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   agent. `fallback_agent` reste le fait brut observé ; le nouveau champ
   `carrier_reason` explique le choix, affiché par `grimoire proposals list`
   et le cockpit.
+
+### Ajouté
+
+- **`rust-gate` devient l'unique check requis pour les deux cœurs Rust
+  optionnels (#407, #408).** `rust-policies-core.yml` et
+  `rust-schema-core.yml` étaient filtrés par `paths:` : absents de toute PR
+  hors de leur périmètre, un check requis qui ne se déclare jamais bloquait
+  ces PR-là (#397 a fusionné avec `cargo fmt` rouge faute de protection
+  possible). `rust-cores.yml` se déclenche sans filtre de chemin sur toute
+  PR vers `main` ; un job `changes` calcule quel(s) crate(s) sont touchés,
+  les jobs par crate hors périmètre sont sautés (satisfaisant un check
+  requis), et `rust-gate` agrège les quatre jobs comme seul check requis à
+  ajouter à la protection de `main`.
+
+- **chore(bench): mesurer le gain réel des cœurs Rust optionnels (#354).**
+  `scripts/bench-rust-cores.py` compare Python et Rust pour les deux cœurs
+  livrés à ce jour (`grimoire.policies.engine.PolicyEngine.evaluate` #363,
+  `grimoire.core.schema.generate_schema` / `grimoire.core.validator.validate_config`
+  #392) sur trois plans : micro (temps par appel, `timeit`, entrée réaliste
+  et entrée volumineuse), macro (`grimoire doctor`, `host sync`, `standard
+  verify`, décision `PreToolUse`, médiane de 10 exécutions contre le coût
+  fixe de `grimoire --version`), et profil (`importtime` + `cProfile` sur
+  `grimoire doctor .`). Verdict mesuré publié en commentaire sur #354 :
+  aucun des deux ports ne change un temps perceptible par l'utilisateur,
+  le surcoût de la frontière PyO3 dépassant le gain sur ces tailles
+  d'entrée. `docs/rust-cores-benchmark.md` documente comment le relancer.
 
 ## [3.43.0] - 2026-09-11
 ### Ajouté
