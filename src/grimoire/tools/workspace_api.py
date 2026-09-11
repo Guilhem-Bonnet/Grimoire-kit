@@ -900,11 +900,12 @@ def agents_view(project_root: Path) -> dict[str, Any]:
 def _agent_freshness_entry(entry: AgentFreshness | None, *, judged: bool) -> dict[str, Any]:
     """Un agent hors surface connue (défensif) rend une entrée neutre, jamais périmée."""
     if entry is None:
-        return {"last_seen": None, "days_since": None, "stale": False, "judged": judged}
+        return {"last_seen": None, "days_since": None, "stale": False, "too_recent": False, "judged": judged}
     return {
         "last_seen": entry.last_seen,
         "days_since": entry.days_since,
         "stale": entry.stale,
+        "too_recent": entry.too_recent,
         "judged": judged,
     }
 

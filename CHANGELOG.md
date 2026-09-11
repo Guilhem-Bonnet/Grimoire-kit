@@ -45,6 +45,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   surfaces par `grimoire.core.agent_freshness`. Le seuil est aussi porté au
   port Rust du schéma (`rust/grimoire-schema-core/`).
 
+- fix(core): la règle de fraîcheur ne juge pas un agent plus jeune que le seuil (fichier de définition récent, marqué « trop récent ») ; job cargo remis au vert (#398)
+
 - **feat(core): instrumenter les non-choix du concierge (#389).** Symétrique
   du choix d'agent (#366) : quand le concierge cherche un spécialiste et n'en
   trouve aucun, ou se rabat sur un généraliste, `grimoire agent-miss`

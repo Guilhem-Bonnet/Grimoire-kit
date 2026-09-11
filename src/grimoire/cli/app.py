@@ -529,6 +529,8 @@ def doctor(
                     {"name": e.name, "last_seen": e.last_seen, "days_since": e.days_since}
                     for e in freshness.stale_entries
                 ]
+            if freshness.too_recent_entries:
+                freshness_entry["too_recent_agents"] = [e.name for e in freshness.too_recent_entries]
             results.append(freshness_entry)
             if fmt != "json":
                 if level == "warn":
@@ -1174,10 +1176,15 @@ def registry_dispatches(ctx: typer.Context) -> None:
             "threshold_days": freshness.threshold_days,
             "judged": freshness.judged,
             "journal_span_days": freshness.journal_span_days,
-            "never_invoked": [e.name for e in freshness.entries if e.last_seen is None] if freshness.judged else [],
+            "never_invoked": (
+                [e.name for e in freshness.entries if e.last_seen is None and not e.too_recent]
+                if freshness.judged
+                else []
+            ),
             "stale": [
                 {"name": e.name, "last_seen": e.last_seen, "days_since": e.days_since} for e in freshness.stale_entries
             ],
+            "too_recent": [e.name for e in freshness.too_recent_entries],
         }
 
     if _get_fmt(ctx) == "json":
@@ -1231,13 +1238,17 @@ def registry_dispatches(ctx: typer.Context) -> None:
     elif not freshness.stale_entries:
         console.print(f"[green]Fraîcheur des agents : aucun agent sans invocation depuis {freshness.threshold_days} j.[/green]")
     else:
-        never = [e.name for e in freshness.entries if e.last_seen is None]
+        never = [e.name for e in freshness.stale_entries if e.last_seen is None]
         if never:
             console.print(f"[yellow]Agents jamais choisis (seuil {freshness.threshold_days} j) : {', '.join(never)}[/yellow]")
         stale_seen = [e for e in freshness.stale_entries if e.last_seen is not None]
         if stale_seen:
             parts = ", ".join(f"{e.name} (il y a {e.days_since} j)" for e in stale_seen)
             console.print(f"[yellow]Agents sans invocation récente (seuil {freshness.threshold_days} j) : {parts}[/yellow]")
+
+    if freshness is not None and freshness.too_recent_entries:
+        names = ", ".join(e.name for e in freshness.too_recent_entries)
+        console.print(f"[dim]Agents trop récents pour juger (seuil {freshness.threshold_days} j) : {names}[/dim]")
 
 
 # ── grimoire diff ─────────────────────────────────────────────────────────────────

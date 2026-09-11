@@ -24,6 +24,7 @@ sa trace, pour forcer un nouveau montage — donc un nouveau fetch.
 
 from __future__ import annotations
 
+import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -33,6 +34,18 @@ from playwright.sync_api import Page
 pytest.importorskip("playwright.sync_api", reason="playwright absent — harnais e2e ignoré")
 
 AGENT = "concierge"
+
+
+def _age_agent_definition(project_root: Path, agent: str, *, days_ago: int) -> None:
+    """Vieillit le fichier de définition — le plancher par agent (issue #396,
+    suivi) n'accepterait pas de marquer périmé un agent dont le fichier vient
+    d'être créé par ``grimoire init`` (fixture de session), même avec un
+    ``agent.dispatch`` ancien : le plancher regarde la définition, pas le
+    journal.
+    """
+    old_time = (datetime.now(UTC) - timedelta(days=days_ago)).timestamp()
+    path = project_root / "_grimoire" / "kit" / "agents" / f"{agent}.md"
+    os.utime(path, (old_time, old_time))
 
 
 def _open_agent(page: Page) -> None:
@@ -74,6 +87,7 @@ def test_sans_journal_aucun_badge_perime(workspace: Page, real_project: Path) ->
 def test_un_agent_perime_porte_le_badge_dans_la_table_et_l_inspecteur(
     workspace: Page, real_project: Path
 ) -> None:
+    _age_agent_definition(real_project, AGENT, days_ago=100)
     _write_stale_dispatch(real_project, days_ago=100)
 
     _open_agent(workspace)

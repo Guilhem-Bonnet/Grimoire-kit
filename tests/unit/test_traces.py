@@ -432,3 +432,56 @@ class TestAgentFreshness:
         )
         assert report.judged is True
         assert {e.name for e in report.stale_entries} == {"concierge", "security-auditor"}
+
+    def test_agent_younger_than_threshold_is_too_recent_not_stale(self) -> None:
+        """Plancher par agent : un fichier d'hier n'a pas eu le temps d'être choisi.
+
+        Journal de 100 jours, seuil 90, agent sans dispatch dont le fichier
+        date d'hier → non périmé, marqué ``too_recent``. Symétrique du
+        plancher de journal (:attr:`FreshnessReport.judged`), une couche plus
+        bas : l'absence de données ne vaut pas absence d'usage, par agent
+        comme pour le journal dans son ensemble.
+        """
+        report = compute_agent_freshness(
+            ["security-auditor"],
+            {},  # jamais choisi
+            threshold_days=90,
+            oldest_started_at=self._100_DAYS_AGO,
+            agent_ages={"security-auditor": 1},  # fichier d'hier
+            now=self._NOW,
+        )
+        assert report.judged is True
+        entry = report.entries[0]
+        assert entry.too_recent is True
+        assert entry.stale is False
+        assert report.stale_entries == ()
+        assert report.too_recent_entries == (entry,)
+
+    def test_agent_older_than_threshold_is_stale(self) -> None:
+        """Le même agent, avec un fichier de 100 jours, est périmé."""
+        report = compute_agent_freshness(
+            ["security-auditor"],
+            {},
+            threshold_days=90,
+            oldest_started_at=self._100_DAYS_AGO,
+            agent_ages={"security-auditor": 100},
+            now=self._NOW,
+        )
+        assert report.judged is True
+        entry = report.entries[0]
+        assert entry.too_recent is False
+        assert entry.stale is True
+
+    def test_unknown_agent_age_is_judged_normally(self) -> None:
+        """Un âge non mesurable (clé absente) ne bloque rien — comportement d'avant le plancher."""
+        report = compute_agent_freshness(
+            ["security-auditor"],
+            {},
+            threshold_days=90,
+            oldest_started_at=self._100_DAYS_AGO,
+            agent_ages={},
+            now=self._NOW,
+        )
+        entry = report.entries[0]
+        assert entry.too_recent is False
+        assert entry.stale is True
