@@ -43,6 +43,17 @@ class TestGenerateSchema:
         assert field["default"] == 90
         assert field["minimum"] == 1
 
+    def test_has_proposals_property(self) -> None:
+        schema = generate_schema()
+        assert "proposals" in schema["properties"]
+
+    def test_proposals_threshold_default(self) -> None:
+        schema = generate_schema()
+        field = schema["properties"]["proposals"]["properties"]["threshold"]
+        assert field["type"] == "integer"
+        assert field["default"] == 2
+        assert field["minimum"] == 2
+
     def test_project_requires_name(self) -> None:
         schema = generate_schema()
         proj = schema["properties"]["project"]

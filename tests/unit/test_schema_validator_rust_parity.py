@@ -76,6 +76,8 @@ _WELL_FORMED_CASES: tuple[dict, ...] = (
     {"project": {"name": "x"}, "user": {"skill_level": "genius"}},
     {"project": {"name": "x"}, "memory": {"backend": "redis"}},
     {"project": {"name": "x"}, "agents": {"custom_agents": ["a", "a"]}},
+    {"project": {"name": "x"}, "proposals": {"threshold": 3}},
+    {"project": {"name": "x"}, "proposals": {"threshold": 1}},
     {"project": {"name": "x"}, "zzzzz_garbage": 42},
     {
         "project": {
