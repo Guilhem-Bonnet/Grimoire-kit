@@ -2,6 +2,31 @@
 
 ## Dernière release
 
+### 3.44.1 — CLI et hook plus rapides au démarrage, flow status corrigé sur abandon
+
+- **fix(flows): un abandon (ou un refus MAST) avant tout progrès n'affiche plus tous les nodes comme complétés dans `grimoire flow status` (#417).**
+  `FlowEngine.status()` dérivait `completed_nodes`/`pending_nodes` de la
+  seule position de `current_node` dans l'ordre topologique — sur un run
+  ABORTED/REFUSED, cela rendait `completed_nodes == order` en entier même
+  quand aucun node n'était réellement fait. `completed_nodes` reflète
+  désormais les `completed_steps` du dernier checkpoint réel du
+  `RuntimeKernel` ; comportement identique sous les deux backends
+  (`GRIMOIRE_FLOWS_BACKEND=python|rust`).
+- **perf(cli): sous-commandes chargées à la demande — `grimoire --version`
+  313→89 ms, `grimoire doctor .` 448→270 ms (#418).** `LazyTyperGroup`
+  remplace l'enregistrement direct des 20 modules `cmd_*` par un registre
+  résolu à la demande ; aide identique au caractère près (`--help` vérifié
+  avant/après pour les 47 commandes).
+- **perf(hosts): `grimoire.hosts.decisions` découpé par décision —
+  `grimoire-hook PreToolUse` 70→64 ms (#420).** Suite de mesure de #418 :
+  ce point d'entrée ne passe jamais par le CLI Typer, donc pas concerné par
+  le lazy-loading ci-dessus. Cible des 50 ms non atteinte pour
+  `PreToolUse`, assumé — le profil restant tient à trois postes
+  incompressibles (dataclasses/inspect, `standard_state`/`ruamel.yaml`,
+  moteur de politique) ; suivi en issue #419.
+
+## Releases précédentes
+
 ### 3.44.0 — Trois cœurs Rust optionnels de plus : hosts, flows, dispatch
 
 - **`grimoire.hosts.collect`/`.surface` portés en Rust optionnel (#412).**
@@ -29,8 +54,6 @@
 - Chacun des trois ports garde la roue publiée `py3-none-any` — les crates
   Rust ne quittent jamais `rust/`. Voir `CHANGELOG.md` pour le détail
   complet.
-
-## Releases précédentes
 
 ### 3.43.1 — Le validateur, doctor et concierge alignés ; le gate Rust enfin requis
 
