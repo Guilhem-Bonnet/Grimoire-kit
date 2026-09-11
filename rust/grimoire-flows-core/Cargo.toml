@@ -1,0 +1,39 @@
+[package]
+name = "grimoire-flows-core"
+version = "0.1.0"
+edition = "2021"
+description = "Coeur Rust optionnel de la machine a etats de grimoire.flows (FlowEngine + RuntimeKernel), expose via PyO3."
+license = "MIT"
+publish = false
+
+[lib]
+name = "grimoire_flows_core"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Quatrieme port Rust du kit (issue #354), meme montage que
+# rust/grimoire-policies-core/, rust/grimoire-schema-core/ et
+# rust/grimoire-hosts-core/ : pyo3 n'est requis que par la frontiere PyO3
+# (module `py_bridge`, en bas de lib.rs). Comme grimoire-policies-core et
+# grimoire-schema-core (contrairement a grimoire-hosts-core), ce crate ne
+# lit aucun texte YAML brut : `output` (la sortie soumise par l'hote a
+# resume()) est deja un dict Python analyse en amont, donc la meme
+# representation dynamique minimale (`Value`, sans dependance externe)
+# suffit.
+#
+# abi3-py312 : une seule extension binaire par (OS, arch) pour tout Python
+# >= 3.12 (plancher deja declare par requires-python dans pyproject.toml).
+# Sans objet tant que rien n'est publie, mais c'est la meme discipline que
+# les trois premiers ports.
+pyo3 = { version = "0.29", features = ["abi3-py312"], optional = true }
+
+[features]
+# Meme raisonnement que rust/grimoire-policies-core/Cargo.toml,
+# rust/grimoire-schema-core/Cargo.toml et rust/grimoire-hosts-core/Cargo.toml :
+# la feature `extension-module` de pyo3 (active par defaut, indispensable
+# pour que l'extension soit chargeable par Python) empeche de lier le
+# binaire de test de `cargo test` — d'ou `cargo test --no-default-features`
+# dans le job CI dedie, qui ne necessite donc aucun interprete Python
+# installe.
+extension-module = ["dep:pyo3", "pyo3/extension-module"]
+default = ["extension-module"]

@@ -206,8 +206,9 @@ ignore_missing_imports = true
 # `type: ignore` so the comment doesn't have to track whether mypy currently
 # sees it as "not found" or "found, untyped". `grimoire_hosts_core` is the
 # third such core (issue #354): rust/grimoire-hosts-core/.
+# `grimoire_flows_core` is the fourth: rust/grimoire-flows-core/.
 [[tool.mypy.overrides]]
-module = ["grimoire_policies_core", "grimoire_schema_core", "grimoire_hosts_core"]
+module = ["grimoire_policies_core", "grimoire_schema_core", "grimoire_hosts_core", "grimoire_flows_core"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

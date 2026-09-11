@@ -23,6 +23,7 @@ risque pas de le faire progresser par erreur.
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -36,9 +37,83 @@ from grimoire.flows.schemas import FlowRunMeta, FlowStatusView, NodeContract, Re
 from grimoire.runtime.kernel import RuntimeKernel
 from grimoire.runtime.schemas import ExecutionContext, RunEventType, WorkflowInstance, WorkflowStatus
 
-__all__ = ["FlowEngine", "check_output_against_contract"]
+__all__ = ["FlowEngine", "check_output_against_contract", "rust_backend_available"]
 
-_TERMINAL_STATUSES = (WorkflowStatus.COMPLETED, WorkflowStatus.VERIFIED, WorkflowStatus.ABORTED)
+try:
+    import grimoire_flows_core as _rust_core
+except ImportError:  # pragma: no cover - exercised by the dedicated Rust CI job
+    _rust_core = None
+
+
+def rust_backend_available() -> bool:
+    """Whether the compiled ``grimoire_flows_core`` module is importable.
+
+    Purely informational (used by tests and diagnostics) — every call site
+    below decides its own backend fresh via :func:`_use_rust_backend`.
+    """
+    return _rust_core is not None
+
+
+def _use_rust_backend() -> bool:
+    """Resolve which backend this module's Rust-optional functions should use.
+
+    Own copy of the precedent set by ``grimoire.hosts.collect``/
+    ``grimoire.hosts.surface`` (issue #354): two independent modules backed
+    by one crate (here, :mod:`grimoire.runtime.kernel` has its own copy)
+    each read their shared env var independently rather than cross-importing
+    a private module-level variable. Reads ``GRIMOIRE_FLOWS_BACKEND`` fresh
+    every call so tests can flip it with ``monkeypatch.setenv``.
+    """
+    override = os.environ.get("GRIMOIRE_FLOWS_BACKEND", "auto").strip().lower()
+    if override == "python":
+        return False
+    if override == "rust":
+        if _rust_core is None:
+            raise GrimoireRuntimeError(
+                "GRIMOIRE_FLOWS_BACKEND=rust demande le coeur Rust, mais "
+                "grimoire_flows_core est introuvable. Construire l'extension "
+                "localement (voir CONTRIBUTING.md, `maturin develop` dans "
+                "rust/grimoire-flows-core/) ou revenir a auto/python."
+            )
+        return True
+    if override not in ("auto", ""):
+        raise GrimoireRuntimeError(f"GRIMOIRE_FLOWS_BACKEND invalide: {override!r} (attendu auto/python/rust)")
+    return _rust_core is not None
+
+
+#: Miroir **corrige** de la table originale : ``REFUSED`` (terminal côté
+#: ``RuntimeKernel`` — aucune transition sortante dans ``_WF_TRANSITIONS``,
+#: écrit par ``mediate_tool`` quand les plafonds MAST (B11) sont atteints)
+#: en était absent. Sans ce correctif, ``resume()`` sur un run REFUSED
+#: levait bien une erreur, mais celle générique de
+#: ``RuntimeKernel.advance_step`` plutôt que le message nommé ci-dessous, et
+#: ``status()`` renvoyait un ``current_node`` périmé avec des
+#: ``pending_nodes`` non vides — comme si un run mort continuait de
+#: progresser. Trouvé en portant cette table vers ``grimoire_flows_core``
+#: (issue #354) : son miroir Rust, ``is_flow_terminal``, est un ``match``
+#: exhaustif sur les 9 variantes de ``WorkflowStatus`` — omettre une valeur
+#: terminale n'y compile pas silencieusement, ce qu'une comparaison
+#: Python contre un tuple permet sans broncher. Voir le docstring de
+#: ``rust/grimoire-flows-core/src/lib.rs`` et
+#: ``tests/unit/test_flows_rust_parity.py``.
+_TERMINAL_STATUSES = (
+    WorkflowStatus.COMPLETED,
+    WorkflowStatus.VERIFIED,
+    WorkflowStatus.ABORTED,
+    WorkflowStatus.REFUSED,
+)
+
+
+def _is_flow_terminal(status: WorkflowStatus) -> bool:
+    """Un run dans un de ces statuts n'a plus rien à reprendre.
+
+    Delegates to ``grimoire_flows_core.is_flow_terminal_status`` (issue
+    #354) when the Rust backend is active — see :func:`_use_rust_backend`.
+    """
+    if _use_rust_backend():
+        assert _rust_core is not None  # guarded by _use_rust_backend
+        return bool(_rust_core.is_flow_terminal_status(status.value))
+    return status in _TERMINAL_STATUSES
 
 
 def _now_iso() -> str:
@@ -51,7 +126,16 @@ def check_output_against_contract(contract: NodeContract, output: dict[str, Any]
     Forme attendue : ``{"pins": {"<pin-id>": {"contract": "<nom>", ...}}}``.
     Chaque défaut nomme le node ET la pin — jamais un échec muet — pour que
     le flow suspendu dise exactement quoi corriger.
+
+    Delegates to ``grimoire_flows_core.check_output_against_contract`` (issue
+    #354) when the Rust backend is active — see :func:`_use_rust_backend`.
+    The pure-Python path below is the reference implementation and is what
+    runs when the compiled module is absent.
     """
+    if _use_rust_backend():
+        assert _rust_core is not None  # guarded by _use_rust_backend
+        outputs = [(pin.pin_id, pin.contract) for pin in contract.outputs]
+        return list(_rust_core.check_output_against_contract(contract.node_id, outputs, output))
     if not isinstance(output, dict) or not isinstance(output.get("pins"), dict):
         return [f"node={contract.node_id} : sortie sans objet 'pins' (forme attendue : {{'pins': {{...}}}})"]
     pins_out: dict[str, Any] = output["pins"]
@@ -137,25 +221,55 @@ class FlowEngine:
         return {"run_id": wfi.id, "blueprint_id": blueprint_id, "mission_id": wfi.mission_id}
 
     def _current_node(self, wfi: WorkflowInstance, order: list[str]) -> str | None:
-        """Le node courant, recalculé depuis le kernel — jamais un compteur à côté."""
-        if wfi.status in _TERMINAL_STATUSES:
+        """Le node courant, recalculé depuis le kernel — jamais un compteur à côté.
+
+        La lecture des journaux d'événements/checkpoints (E/S) reste toujours
+        ici, sous les deux backends — seule la *décision* qui en dérive (quel
+        node est "courant" pour ce statut) délègue à
+        ``grimoire_flows_core.current_node`` (issue #354) quand le backend
+        Rust est actif ; voir :func:`_use_rust_backend`.
+        """
+        if _is_flow_terminal(wfi.status):
             return None
+
+        last_step_failed: str | None = None
+        last_step_started: str | None = None
+        has_checkpoint = False
+        checkpoint_pending_head: str | None = None
+
         if wfi.status is WorkflowStatus.BLOCKED:
             for event in reversed(self._kernel.get_run_events(wfi.id)):
                 if event.event_type is RunEventType.STEP_FAILED:
-                    return event.payload.get("step_id")
-            return order[0] if order else None
-        if wfi.status is WorkflowStatus.CHECKPOINTED:
+                    last_step_failed = event.payload.get("step_id")
+                    break
+        elif wfi.status is WorkflowStatus.CHECKPOINTED:
             checkpoints = self._kernel.list_checkpoints(wfi.id)
             if checkpoints:
+                has_checkpoint = True
                 pending = checkpoints[-1].state.pending_steps
-                return pending[0] if pending else None
+                checkpoint_pending_head = pending[0] if pending else None
+        else:
+            # RUNNING (ou CREATED, avant le tout premier advance_step ;
+            # PAUSED, jamais émis par RuntimeKernel — voir le docstring de
+            # rust/grimoire-flows-core/src/lib.rs).
+            for event in reversed(self._kernel.get_run_events(wfi.id)):
+                if event.event_type is RunEventType.STEP_STARTED:
+                    last_step_started = event.payload.get("step_id")
+                    break
+
+        if _use_rust_backend():
+            assert _rust_core is not None  # guarded by _use_rust_backend
+            return _rust_core.current_node(  # type: ignore[no-any-return]
+                wfi.status.value, order, last_step_failed, has_checkpoint, checkpoint_pending_head, last_step_started
+            )
+
+        if wfi.status is WorkflowStatus.BLOCKED:
+            return last_step_failed if last_step_failed is not None else (order[0] if order else None)
+        if wfi.status is WorkflowStatus.CHECKPOINTED:
+            if has_checkpoint:
+                return checkpoint_pending_head
             return order[0] if order else None
-        # RUNNING (ou CREATED, avant le tout premier advance_step)
-        for event in reversed(self._kernel.get_run_events(wfi.id)):
-            if event.event_type is RunEventType.STEP_STARTED:
-                return event.payload.get("step_id")
-        return order[0] if order else None
+        return last_step_started if last_step_started is not None else (order[0] if order else None)
 
     def _last_refusal(self, wfi: WorkflowInstance) -> dict[str, Any] | None:
         for event in reversed(self._kernel.get_run_events(wfi.id)):
@@ -219,7 +333,7 @@ class FlowEngine:
         wfi = self._kernel.get_instance(run_id)
         if wfi is None:
             raise GrimoireRuntimeError(f"run introuvable côté kernel : {run_id}")
-        if wfi.status in _TERMINAL_STATUSES:
+        if _is_flow_terminal(wfi.status):
             raise GrimoireRuntimeError(f"run {run_id} est {wfi.status.value}, rien à reprendre")
 
         order = list(meta.order)
@@ -241,6 +355,24 @@ class FlowEngine:
             wfi = self._kernel.fail_step(wfi.id, ctx, step_id=current_id, reason="; ".join(faults))
             return ResumeOutcome(ok=False, finished=False, node_id=current_id, faults=tuple(faults), contract=contract)
 
+        # Décision "termine / avance vers quel node" déléguée à
+        # grimoire_flows_core.resume_outcome (issue #354) quand le backend
+        # Rust est actif : elle nomme explicitement le cas "current_id
+        # absent de order" (devrait ne jamais arriver — contracts et order
+        # viennent du même blueprint) plutôt que de laisser `order.index`
+        # lever un ValueError anonyme, comme le ferait la référence Python
+        # ci-dessous si jamais cet invariant était violé.
+        if _use_rust_backend():
+            assert _rust_core is not None  # guarded by _use_rust_backend
+            try:
+                _ok, finished, next_id, _faults = _rust_core.resume_outcome(order, current_id, [])
+            except ValueError as exc:
+                raise GrimoireRuntimeError(str(exc)) from exc
+        else:
+            idx0 = order.index(current_id)
+            finished = idx0 == len(order) - 1
+            next_id = None if finished else order[idx0 + 1]
+
         idx = order.index(current_id)
         completed = order[: idx + 1]
         pending = order[idx + 1 :]
@@ -251,11 +383,11 @@ class FlowEngine:
             completed_steps=completed,
             pending_steps=pending,
         )
-        if not pending:
+        if finished:
             self._kernel.complete(wfi.id, ctx)
             return ResumeOutcome(ok=True, finished=True, node_id=current_id, contract=None)
 
-        next_id = pending[0]
+        assert next_id is not None  # finished est False => resume_outcome a nommé le node suivant
         next_contract = contracts[next_id]
         # Le node suivant n'est pas encore ouvert (pas de advance_step ici) :
         # un crash juste après cet appel laisse le kernel en CHECKPOINTED, et
@@ -274,7 +406,23 @@ class FlowEngine:
             raise GrimoireRuntimeError(f"run introuvable côté kernel : {run_id}")
         order = list(meta.order)
         current_id = self._current_node(wfi, order)
-        idx = order.index(current_id) if current_id in order else len(order)
+
+        # Découpage completed/pending délégué à grimoire_flows_core.status_slices
+        # (issue #354) quand le backend Rust est actif — reproduction fidèle
+        # de la référence Python ci-dessous, bug documenté compris (un run
+        # ABORTED/REFUSED avant tout progrès affiche `completed_nodes` égal à
+        # `order` en entier puisque `current_node` devient `None` dès la fin
+        # du run, quelle qu'en soit la cause ; voir le docstring de
+        # rust/grimoire-flows-core/src/lib.rs — pas corrigé ici, ce serait un
+        # changement de forme de FlowStatusView, pas un correctif local).
+        if _use_rust_backend():
+            assert _rust_core is not None  # guarded by _use_rust_backend
+            completed_list, pending_list = _rust_core.status_slices(order, current_id)
+        else:
+            idx = order.index(current_id) if current_id in order else len(order)
+            completed_list = order[:idx]
+            pending_list = order[idx + 1 :] if current_id else []
+
         contract = None
         if include_contract and current_id is not None:
             contract = build_node_contracts(load_blueprint(Path(meta.blueprint_path))).get(current_id)
@@ -283,8 +431,8 @@ class FlowEngine:
             blueprint_id=meta.blueprint_id,
             status=wfi.status.value,
             current_node=current_id,
-            completed_nodes=tuple(order[:idx]),
-            pending_nodes=tuple(order[idx + 1 :]) if current_id else (),
+            completed_nodes=tuple(completed_list),
+            pending_nodes=tuple(pending_list),
             last_refusal=self._last_refusal(wfi),
             contract=contract,
         )

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -22,6 +23,40 @@ from grimoire.runtime.schemas import (
     WorkflowInstance,
     WorkflowStatus,
 )
+
+try:
+    import grimoire_flows_core as _rust_core
+except ImportError:  # pragma: no cover - exercised by the dedicated Rust CI job
+    _rust_core = None
+
+
+def _use_rust_backend() -> bool:
+    """Resolve which backend this module's Rust-optional functions should use.
+
+    Own copy of :func:`grimoire.flows.engine._use_rust_backend` (same
+    precedent as ``grimoire.hosts.collect``/``grimoire.hosts.surface``, issue
+    #354): two independent Python modules backed by one crate
+    (``rust/grimoire-flows-core/``) each read the shared
+    ``GRIMOIRE_FLOWS_BACKEND`` env var independently rather than
+    cross-importing a private module-level variable. Reads it fresh every
+    call so tests can flip it with ``monkeypatch.setenv``.
+    """
+    override = os.environ.get("GRIMOIRE_FLOWS_BACKEND", "auto").strip().lower()
+    if override == "python":
+        return False
+    if override == "rust":
+        if _rust_core is None:
+            raise GrimoireRuntimeError(
+                "GRIMOIRE_FLOWS_BACKEND=rust demande le coeur Rust, mais "
+                "grimoire_flows_core est introuvable. Construire l'extension "
+                "localement (voir CONTRIBUTING.md, `maturin develop` dans "
+                "rust/grimoire-flows-core/) ou revenir a auto/python."
+            )
+        return True
+    if override not in ("auto", ""):
+        raise GrimoireRuntimeError(f"GRIMOIRE_FLOWS_BACKEND invalide: {override!r} (attendu auto/python/rust)")
+    return _rust_core is not None
+
 
 # Valid workflow status transitions.
 # REFUSED mirrors ABORTED as a terminal, non-resumable stop: it is reachable
@@ -134,8 +169,22 @@ class RuntimeKernel:
         return event
 
     def _transition(self, wfi: WorkflowInstance, to_status: WorkflowStatus, abort_reason: str = "") -> WorkflowInstance:
-        allowed = _WF_TRANSITIONS.get(wfi.status, frozenset())
-        if to_status not in allowed:
+        """Legalite de `wfi.status -> to_status`, contre `_WF_TRANSITIONS`.
+
+        Delegates to ``grimoire_flows_core.can_transition_status`` (issue
+        #354) when the Rust backend is active — see :func:`_use_rust_backend`.
+        Son miroir Rust est un `match` exhaustif sur les 9 statuts : une
+        variante ajoutee sans bras correspondant n'y compile pas, alors que
+        ``_WF_TRANSITIONS.get(wfi.status, frozenset())`` retomberait
+        silencieusement sur "aucune transition legale" pour toute cle
+        absente du dict.
+        """
+        if _use_rust_backend():
+            assert _rust_core is not None  # guarded by _use_rust_backend
+            allowed_to = bool(_rust_core.can_transition_status(wfi.status.value, to_status.value))
+        else:
+            allowed_to = to_status in _WF_TRANSITIONS.get(wfi.status, frozenset())
+        if not allowed_to:
             raise GrimoireRuntimeError(
                 f"Invalid workflow transition {wfi.status.value} → {to_status.value} for {wfi.id}"
             )
@@ -224,12 +273,27 @@ class RuntimeKernel:
         wfi = instances.get(wfi_id)
         if wfi is None:
             raise GrimoireRuntimeError(f"WorkflowInstance not found: {wfi_id}")
-        if wfi.status in (WorkflowStatus.CHECKPOINTED, WorkflowStatus.BLOCKED):
-            wfi = self._transition(wfi, WorkflowStatus.RUNNING)
-        elif wfi.status is not WorkflowStatus.RUNNING:
+        # Precondition deleguee a grimoire_flows_core.advance_step_needs_transition
+        # (issue #354) quand le backend Rust est actif : meme verdict, meme
+        # message d'erreur (le module Rust leve un ValueError deja forme
+        # avec ce texte, reconverti ici en GrimoireRuntimeError pour garder
+        # le meme type d'exception que la reference Python).
+        if _use_rust_backend():
+            assert _rust_core is not None  # guarded by _use_rust_backend
+            try:
+                needs_transition = bool(_rust_core.advance_step_needs_transition(wfi.status.value, wfi_id))
+            except ValueError as exc:
+                raise GrimoireRuntimeError(str(exc)) from exc
+        elif wfi.status in (WorkflowStatus.CHECKPOINTED, WorkflowStatus.BLOCKED):
+            needs_transition = True
+        elif wfi.status is WorkflowStatus.RUNNING:
+            needs_transition = False
+        else:
             raise GrimoireRuntimeError(
                 f"advance_step requires RUNNING, CHECKPOINTED or BLOCKED, got {wfi.status.value} for {wfi_id}"
             )
+        if needs_transition:
+            wfi = self._transition(wfi, WorkflowStatus.RUNNING)
         self._emit(RunEventType.STEP_STARTED, wfi, ctx, payload={"step_id": step_id})
         return wfi
 

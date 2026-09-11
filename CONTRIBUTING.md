@@ -134,25 +134,26 @@ crates :
   `Private :: Do Not Upload` pour qu'un `maturin publish` accidentel soit
   refusé.
 
-Trois crates existent à ce jour :
+Quatre crates existent à ce jour :
 
 | Crate | Module Python | Variable de bascule | Jobs CI |
 |---|---|---|---|
 | `rust/grimoire-policies-core/` | `grimoire.policies.engine` (`PolicyEngine.evaluate`) | `GRIMOIRE_POLICIES_BACKEND` | `.github/workflows/rust-cores.yml` (`rust-policies / cargo`, `rust-policies / parity`) |
 | `rust/grimoire-schema-core/` | `grimoire.core.schema.generate_schema` + `grimoire.core.validator.validate_config` | `GRIMOIRE_SCHEMA_BACKEND` | `.github/workflows/rust-cores.yml` (`rust-schema / cargo`, `rust-schema / parity`) |
 | `rust/grimoire-hosts-core/` | `grimoire.hosts.collect` (frontmatter, inférence d'outils) + `grimoire.hosts.surface` (empreinte de faisceau, garde de distinction) | `GRIMOIRE_HOSTS_BACKEND` | `.github/workflows/rust-cores.yml` (`rust-hosts / cargo`, `rust-hosts / parity`) |
+| `rust/grimoire-flows-core/` | `grimoire.flows.engine` (`check_output_against_contract`, node courant, `resume()`/`status()`) + `grimoire.runtime.kernel` (table de transitions, précondition de `advance_step`) | `GRIMOIRE_FLOWS_BACKEND` | `.github/workflows/rust-cores.yml` (`rust-flows / cargo`, `rust-flows / parity`) |
 
-Les trois crates partagent le même workflow CI : `changes` détecte quel(s)
+Les quatre crates partagent le même workflow CI : `changes` détecte quel(s)
 crate(s) une PR ou un push touche et saute les jobs hors périmètre, et
 `rust-gate` — le check requis par la protection de `main` — agrège les
-six jobs pour rendre `cargo fmt` et `cargo test` opposables sur toute PR,
+huit jobs pour rendre `cargo fmt` et `cargo test` opposables sur toute PR,
 pas seulement celles qui modifient `rust/`.
 
 ### Construire une extension localement
 
 Utile seulement si vous travaillez sur le module Python concerné et voulez
 exercer le chemin Rust en local (au lieu d'attendre le job CI dédié) — le
-motif est identique pour les trois crates, ici avec `grimoire-policies-core` :
+motif est identique pour les quatre crates, ici avec `grimoire-policies-core` :
 
 ```bash
 # En plus des prérequis Python habituels
@@ -188,20 +189,31 @@ cd -
 pytest tests/unit/test_hosts.py tests/unit/test_hosts_rust_parity.py
 ```
 
-Dans les trois cas, les tests du module Python (`test_policies.py`,
-`test_schema.py`/`test_validator.py`, `test_hosts.py`) sont le contrat : ils
-tournent sans modification que le module compilé soit présent ou non, et
-servent de golden test aux deux implémentations. Le fichier
-`*_rust_parity.py` compare explicitement les deux backends sur les mêmes
-entrées (variable d'environnement dédiée, voir le tableau ci-dessus et le
-docstring du module Python correspondant) ; ses cas spécifiques au Rust se
-sautent proprement (`skip`, pas `fail`) quand le module n'est pas installé.
+Pour `grimoire-flows-core` :
+
+```bash
+cd rust/grimoire-flows-core
+maturin develop --release
+cd -
+
+pytest tests/unit/test_flows_engine.py tests/unit/test_runtime.py tests/unit/test_flows_rust_parity.py
+```
+
+Dans les quatre cas, les tests du module Python (`test_policies.py`,
+`test_schema.py`/`test_validator.py`, `test_hosts.py`,
+`test_flows_engine.py`/`test_runtime.py`) sont le contrat : ils tournent
+sans modification que le module compilé soit présent ou non, et servent de
+golden test aux deux implémentations. Le fichier `*_rust_parity.py` compare
+explicitement les deux backends sur les mêmes entrées (variable
+d'environnement dédiée, voir le tableau ci-dessus et le docstring du module
+Python correspondant) ; ses cas spécifiques au Rust se sautent proprement
+(`skip`, pas `fail`) quand le module n'est pas installé.
 
 Pour du travail directement sur un crate (`cargo` seul, aucun interprète
 Python requis) :
 
 ```bash
-cd rust/grimoire-schema-core   # ou rust/grimoire-policies-core, rust/grimoire-hosts-core
+cd rust/grimoire-schema-core   # ou rust/grimoire-policies-core, rust/grimoire-hosts-core, rust/grimoire-flows-core
 cargo test --no-default-features   # logique pure, aucun interprète Python requis
 cargo fmt
 ```
