@@ -18,6 +18,7 @@ from grimoire.hosts.emitters.base import (
     EmittedFile,
     Emitter,
     JsonMerge,
+    context_load_instruction,
     managed_header,
     map_verbs,
 )
@@ -207,8 +208,7 @@ Tu incarnes la persona Grimoire **{agent.name}** du projet {surface.project_name
 
 1. Lis `{agent.definition_ref}` en entier : ce fichier porte la persona, ses
    règles et son protocole d'activation. Applique-les sans les résumer.
-2. Lis `_grimoire/_memory/shared-context.md` s'il existe, pour l'état courant du
-   projet.
+2. {context_load_instruction(agent)}
 3. {role}
 4. Ne sors pas de ta frontière d'outils : {", ".join(v.value for v in agent.tools)}.
 5. Rends un résultat vérifiable — chemins exacts, commandes réellement

@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from grimoire.bridges.schemas import HostId
-from grimoire.hosts.surface import ProjectSurface, ToolVerb
+from grimoire.hosts.surface import AgentSpec, ProjectSurface, ToolVerb
 
 #: Marker identifying a kit-generated artifact. Present in every managed file.
 MANAGED_MARKER = "grimoire:managed"
@@ -247,6 +247,31 @@ class Emitter:
                 lines.append(f"{key}: '{text}'")
         lines.append("---")
         return "\n".join(lines)
+
+
+#: Étape par défaut, envoyée aux agents qui ne déclarent rien — texte inchangé
+#: depuis avant #379, pour ne rien amputer d'un agent qui n'a rien demandé.
+DEFAULT_CONTEXT_INSTRUCTION = (
+    "Lis `_grimoire/_memory/shared-context.md` s'il existe, pour l'état "
+    "courant du projet."
+)
+
+
+def context_load_instruction(agent: AgentSpec) -> str:
+    """L'étape « charge ton contexte » émise dans le fichier d'agent.
+
+    Un agent qui déclare ``context:`` charge ces chemins-là, et eux seuls —
+    plus le contexte partagé par défaut qu'il n'a pas demandé. Un agent qui ne
+    déclare rien reçoit exactement :data:`DEFAULT_CONTEXT_INSTRUCTION`, à
+    l'identique d'avant #379 : la déclaration est un rétrécissement
+    volontaire, jamais une amputation par défaut (issue #379, critère 2).
+    """
+    if not agent.context:
+        return DEFAULT_CONTEXT_INSTRUCTION
+    if len(agent.context) == 1:
+        return f"Lis `{agent.context[0]}` s'il existe : c'est le seul contexte que tu déclares."
+    paths = ", ".join(f"`{p}`" for p in agent.context)
+    return f"Lis ton contexte déclaré, et lui seul, s'il existe : {paths}."
 
 
 def map_verbs(verbs: tuple[ToolVerb, ...], table: dict[ToolVerb, tuple[str, ...]]) -> tuple[str, ...]:

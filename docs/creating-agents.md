@@ -133,6 +133,15 @@ sous-agent doit clore sa réponse par un bloc ```grimoire-uncertainties``` ;
 Copilot documente la même règle sans nom de modèle dans son README de
 surface, pour la raison ci-dessus.
 
+**Ce que `context:` change à l'émission (issue #379) :** sans cette clé, le
+fichier d'agent émis dit toujours à l'hôte de lire `_grimoire/_memory/shared-
+context.md` s'il existe — le comportement d'avant #379, inchangé bit à bit.
+Un agent qui déclare `context:` remplace cette étape par une instruction qui
+ne nomme que ses propres chemins déclarés, vérifiés à l'existence au moment
+de la collecte : le contexte partagé du projet disparaît de son activation
+s'il ne l'a pas demandé. C'est un rétrécissement volontaire, jamais une
+amputation par défaut — un agent muet sur `context:` ne perd rien.
+
 ### 3. Écrire l'identité
 
 La section `<identity>` est la plus importante. Elle doit :
