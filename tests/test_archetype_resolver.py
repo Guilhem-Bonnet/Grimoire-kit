@@ -94,32 +94,29 @@ class TestArchetypeResolver:
 
     def test_go_produces_go_expert(self) -> None:
         result = self.resolver.resolve(_scan("go"))
-        assert "go-expert" in result.stack_agents
+        assert "stack-engineer" in result.stack_agents
 
     def test_python_produces_python_expert(self) -> None:
         result = self.resolver.resolve(_scan("python"))
-        assert "python-expert" in result.stack_agents
+        assert "stack-engineer" in result.stack_agents
 
     def test_typescript_produces_typescript_expert(self) -> None:
         result = self.resolver.resolve(_scan("typescript"))
-        assert "typescript-expert" in result.stack_agents
+        assert "stack-engineer" in result.stack_agents
 
     def test_javascript_produces_typescript_expert(self) -> None:
         """JavaScript maps to typescript-expert (same agent)."""
         result = self.resolver.resolve(_scan("javascript"))
-        assert "typescript-expert" in result.stack_agents
+        assert "stack-engineer" in result.stack_agents
 
     def test_no_duplicate_typescript_expert(self) -> None:
-        """Both js and ts should produce only one typescript-expert."""
+        """js et ts détectés ensemble ne livrent qu'un seul généraliste de pile."""
         result = self.resolver.resolve(_scan("javascript", "typescript"))
-        assert result.stack_agents.count("typescript-expert") == 1
+        assert result.stack_agents.count("stack-engineer") == 1
 
     def test_all_infra_stacks_produce_agents(self) -> None:
         result = self.resolver.resolve(_scan("terraform", "kubernetes", "ansible", "docker"))
-        assert "terraform-expert" in result.stack_agents
-        assert "k8s-expert" in result.stack_agents
-        assert "ansible-expert" in result.stack_agents
-        assert "docker-expert" in result.stack_agents
+        assert "stack-engineer" in result.stack_agents
 
     def test_unknown_stack_produces_no_agent(self) -> None:
         result = self.resolver.resolve(_scan("rust"))

@@ -8,6 +8,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 ## [Unreleased]
 ### Ajouté
 
+- **Archétype `stack` refait — un généraliste plus sept skills attachés (#375).** Les sept experts par techno (`python-expert`, `go-expert`, `typescript-expert`, `docker-expert`, `terraform-expert`, `ansible-expert`, `k8s-expert`) partageaient le même faisceau outils et aucun contexte propre — c'était un seul agent décrit sept fois. Ils deviennent des skills attachés à un nouvel agent généraliste, `stack-engineer` ; le corps de chaque agent devient le corps de son skill, rien n'est supprimé. `grimoire init --archetype stack` livre désormais un agent, et une composition `web-app,stack` reste sans note de collision pour cet archétype.
 - **Le fichier d'agent émis ne charge que le contexte déclaré (#379).** Un
   agent qui déclare `context:` reçoit dans son fichier `.claude/agents/*.md`
   (et `.github/agents/*.agent.md`) une instruction d'activation qui charge
