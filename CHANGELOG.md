@@ -23,6 +23,22 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Corrigé
 
+- **fix(core): le validateur ne plante plus sur les champs énumérés et type-vérifie enfin cinq champs déclarés chaînes (#409).**
+  `src/grimoire/core/validator.py` comparait `valeur not in <frozenset>` pour
+  neuf champs énumérés (`project.type`, `user.skill_level`,
+  `memory.backend`/`short_term_backend`, les cinq modes de couche mémoire,
+  `agents.archetype`) — une liste ou une table en entrée levait
+  `TypeError: unhashable type` au lieu d'une erreur de validation propre (un
+  scalaire hachable non-chaîne, lui, ne plantait pas et reste traité comme
+  n'importe quelle valeur inconnue : comportement inchangé, aligné sur
+  l'oracle Rust). `project.repos[].name`, `project.repos[].path`/
+  `default_branch`, les éléments d'`installed_archetypes[]` et
+  `user.name`/`language`/`document_language` n'étaient en outre jamais
+  type-vérifiés, bien que `schema.py` les déclare comme des chaînes. Le cœur
+  Rust du validateur (#392) rejetait déjà proprement ces cas et servait
+  d'oracle ; `tests/unit/test_schema_validator_rust_parity.py` passe des
+  divergences documentées à la parité stricte entre les deux backends.
+
 - **fix(doctor): ne plus lire un spec de paquet npx/uvx/pipx/bunx/docker/podman comme un chemin (#393).**
   `.mcp.json server '<nom>': path '<spec>' does not exist` était un faux
   positif dès que `command` était un lanceur de paquet (ex. `npx`) et que le

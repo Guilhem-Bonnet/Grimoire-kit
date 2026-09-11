@@ -13,17 +13,27 @@ configurations). This file proves two additional things:
 
 1. On well-formed input, the two backends produce *the same* result — not
    just "both work in isolation".
-2. On malformed input, they deliberately do **not** agree, and the
-   disagreement is the point: `validate_config`'s reference Python
-   implementation either crashes with an unhandled `TypeError` (enum-shaped
-   fields compared through `not in <frozenset>` when the value is an
-   unhashable type — a list or a mapping) or silently accepts a value it
-   should have rejected (`project.repos[].name`, `installed_archetypes[]`
-   items, `user.name`/`language`/`document_language` are never type-checked
+2. On input that used to make the two backends disagree, they now agree —
+   and reject it. Before the fix tracked by this file, `validate_config`'s
+   pure-Python reference implementation either crashed with an unhandled
+   `TypeError` (enum-shaped fields compared through `not in <frozenset>`
+   when the value is an unhashable type — a list or a mapping) or silently
+   accepted a value it should have rejected (`project.repos[].name`,
+   `project.repos[].path`/`default_branch`, `installed_archetypes[]` items,
+   `user.name`/`language`/`document_language` were never type-checked
    against the string type `schema.py` declares for them). The Rust core
-   closes both gaps. None of the inputs below appear anywhere in the
-   existing test suite — that is deliberate, it is what keeps the existing
-   contract intact while still demonstrating the gain.
+   always rejected these cleanly; `validator.py`'s `_check_enum_field`
+   helper and the added type checks close both gaps on the Python side,
+   turning the former disagreement into strict parity — same verdict, same
+   errors, under either backend. A non-string but still *hashable* scalar
+   (an int or a bool) on an enum field never crashed and never diverged
+   either way — `check_enum_field` treats it exactly like any other unknown
+   value, not as a type error (see the comment in `lib.rs`); a couple of
+   such cases are kept in `_WELL_FORMED_CASES` below as a regression guard,
+   not because this fix changed anything about them. None of the inputs
+   below appear anywhere in the existing test suite — that is deliberate,
+   it is what keeps the existing contract intact while still demonstrating
+   the gain.
 
 When the compiled core is not installed (the default contributor
 environment, and the normal CI job), the parity tests are skipped rather
@@ -71,6 +81,15 @@ def test_generate_schema_is_identical_across_backends(monkeypatch: pytest.Monkey
 _WELL_FORMED_CASES: tuple[dict, ...] = (
     {"project": {"name": "test"}},
     {"project": {"name": "x", "type": "notatype"}},
+    # A non-string *hashable* scalar (int/bool) on an enum field never
+    # crashed the reference implementation the way a list/mapping did — it
+    # just fails the plain membership test like any other unknown value.
+    # `check_enum_field` (Rust core) treats it identically: same "Unknown
+    # project type '<value>'" message, not "must be a string" (see the
+    # dedicated comment in `lib.rs`). These two already agreed across
+    # backends before this fix; kept here as a guard against regression.
+    {"project": {"name": "x", "type": 3}},
+    {"project": {"name": "x", "type": True}},
     {"project": {"name": "x", "stack": ["python", 42]}},
     {"project": {"name": "x", "repos": [{"path": "."}]}},
     {"project": {"name": "x"}, "user": {"skill_level": "genius"}},
@@ -115,7 +134,7 @@ def test_unknown_key_suggestion_agrees_across_backends(monkeypatch: pytest.Monke
     assert any("user" in e.suggestion for e in rust_errors if "uesr" in e.message)
 
 
-# ── validate_config: malformed input — this is the point of the port ───────
+# ── validate_config: previously-diverging malformed input — now strict parity ──
 
 
 @requires_rust_core
@@ -123,83 +142,110 @@ def test_unknown_key_suggestion_agrees_across_backends(monkeypatch: pytest.Monke
     "data",
     [
         {"project": {"name": "x", "type": ["webapp"]}},
+        {"project": {"name": "x", "type": ("webapp",)}},
         {"project": {"name": "x", "type": {"nested": True}}},
+        {"project": {"name": "x", "type": {"webapp"}}},
         {"project": {"name": "x"}, "memory": {"backend": ["local"]}},
         {"project": {"name": "x"}, "user": {"skill_level": {"nested": True}}},
         {"project": {"name": "x"}, "agents": {"archetype": ["minimal"]}},
         {"project": {"name": "x"}, "memory": {"knowledge_graph": ["planned"]}},
     ],
 )
-def test_rust_rejects_explicitly_what_the_python_reference_crashes_on(
+def test_previously_crashing_enum_inputs_now_reject_cleanly_on_both_backends(
     monkeypatch: pytest.MonkeyPatch, data: dict
 ) -> None:
+    """These enum-shaped fields used to reach a bare `value not in <frozenset>`
+    on a container-shaped or otherwise exotic value and either crash or drift
+    from the Rust backend. `_check_enum_field` (`validator.py`) now mirrors
+    the Rust bridge: tuple/list inputs become "must be a string", mapping
+    inputs do the same, and other exotic Python values fall back to `str()`
+    before the membership test. Both backends therefore reject these inputs
+    with the same errors instead of one of them crashing or disagreeing."""
     from grimoire.core import validator as validator_module
 
     # Preuve directe, sur l'implementation Python de reference elle-meme
     # (contournant le dispatch de backend) : ce n'est pas une supposition,
     # c'est le comportement actuel de `_validate_config_python`.
-    with pytest.raises(TypeError, match="unhashable"):
-        validator_module._validate_config_python(data)
+    python_errors = validator_module._validate_config_python(data)
+    assert python_errors
 
-    # Le meme jeu de donnees, cote Rust : rejet explicite, jamais un
-    # plantage.
-    monkeypatch.setenv("GRIMOIRE_SCHEMA_BACKEND", "rust")
-    errors = validate_config(data)
-    assert errors
-    assert any("must be a string" in e.message for e in errors)
+    rust_errors = _validate_with_backend("rust", monkeypatch, data)
+    assert _as_tuples(python_errors) == _as_tuples(rust_errors)
 
 
 @requires_rust_core
-def test_rust_rejects_non_string_repo_name_where_python_silently_accepts_it(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Python's `not repo.get("name")` is falsy-only: `123` passes through
-    with zero errors, even though `schema.py` declares `repos[].name` as a
-    string. Verified against the reference implementation."""
+def test_non_string_repo_name_rejected_on_both_backends(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`schema.py` declares `repos[].name` as a string; the Python reference
+    used to check only truthiness (`not repo.get("name")`), so `123` passed
+    through with zero errors. Verified directly against the reference
+    implementation, then cross-checked against the Rust core."""
     data = {"project": {"name": "x", "repos": [{"name": 123}]}}
 
     from grimoire.core import validator as validator_module
 
-    assert validator_module._validate_config_python(data) == []
+    python_errors = validator_module._validate_config_python(data)
+    assert any(e.path == "project.repos[0].name" for e in python_errors)
 
-    monkeypatch.setenv("GRIMOIRE_SCHEMA_BACKEND", "rust")
-    errors = validate_config(data)
-    assert any(e.path == "project.repos[0].name" for e in errors)
+    rust_errors = _validate_with_backend("rust", monkeypatch, data)
+    assert _as_tuples(python_errors) == _as_tuples(rust_errors)
 
 
 @requires_rust_core
-def test_rust_rejects_non_string_installed_archetype_items_where_python_silently_accepts_them(
+def test_non_string_repo_path_and_default_branch_rejected_on_both_backends(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Python only checks that `installed_archetypes` is a list — never
-    that its items are strings. Verified against the reference
-    implementation."""
+    """`schema.py` declares `repos[].path` and `repos[].default_branch` as
+    strings too; the Python reference never checked either. Verified
+    directly against the reference implementation, then cross-checked
+    against the Rust core."""
+    data = {"project": {"name": "x", "repos": [{"name": "x", "path": 1, "default_branch": []}]}}
+
+    from grimoire.core import validator as validator_module
+
+    python_errors = validator_module._validate_config_python(data)
+    assert {e.path for e in python_errors} == {
+        "project.repos[0].path",
+        "project.repos[0].default_branch",
+    }
+
+    rust_errors = _validate_with_backend("rust", monkeypatch, data)
+    assert _as_tuples(python_errors) == _as_tuples(rust_errors)
+
+
+@requires_rust_core
+def test_non_string_installed_archetype_items_rejected_on_both_backends(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Python used to check only that `installed_archetypes` is a list —
+    never that its items are strings, though `schema.py` declares them as
+    such. Verified directly against the reference implementation."""
     data = {"project": {"name": "x"}, "installed_archetypes": [1, 2, 3]}
 
     from grimoire.core import validator as validator_module
 
-    assert validator_module._validate_config_python(data) == []
+    python_errors = validator_module._validate_config_python(data)
+    assert len(python_errors) == 3
+    assert all("must be a string" in e.message for e in python_errors)
 
-    monkeypatch.setenv("GRIMOIRE_SCHEMA_BACKEND", "rust")
-    errors = validate_config(data)
-    assert len(errors) == 3
-    assert all("must be a string" in e.message for e in errors)
+    rust_errors = _validate_with_backend("rust", monkeypatch, data)
+    assert _as_tuples(python_errors) == _as_tuples(rust_errors)
 
 
 @requires_rust_core
-def test_rust_rejects_non_string_user_fields_where_python_silently_accepts_them(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """`_validate_user` (Python) type-checks `skill_level` only — never
-    `name`/`language`/`document_language`, though `schema.py` declares all
-    three as strings. Verified against the reference implementation."""
+def test_non_string_user_fields_rejected_on_both_backends(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`_validate_user` (Python) used to type-check `skill_level` only —
+    never `name`/`language`/`document_language`, though `schema.py` declares
+    all three as strings. Verified directly against the reference
+    implementation."""
     data = {"project": {"name": "x"}, "user": {"name": 123, "language": ["fr"]}}
 
     from grimoire.core import validator as validator_module
 
-    assert validator_module._validate_config_python(data) == []
+    python_errors = validator_module._validate_config_python(data)
+    assert {e.path for e in python_errors} == {"user.name", "user.language"}
 
-    monkeypatch.setenv("GRIMOIRE_SCHEMA_BACKEND", "rust")
-    errors = validate_config(data)
-    assert {e.path for e in errors} == {"user.name", "user.language"}
+    rust_errors = _validate_with_backend("rust", monkeypatch, data)
+    assert _as_tuples(python_errors) == _as_tuples(rust_errors)
 
 
 # ── Backend selection itself ────────────────────────────────────────────────

@@ -49,6 +49,16 @@ class TestProjectSection:
         data = {"project": {"name": "x", "type": "api"}}
         assert validate_config(data) == []
 
+    def test_tuple_type_is_rejected_as_non_string(self) -> None:
+        data = {"project": {"name": "x", "type": ("webapp",)}}
+        errs = validate_config(data)
+        assert any(e.path == "project.type" and "must be a string" in e.message for e in errs)
+
+    def test_set_type_does_not_crash(self) -> None:
+        data = {"project": {"name": "x", "type": {"webapp"}}}
+        errs = validate_config(data)
+        assert any(e.path == "project.type" and "Unknown project type" in e.message for e in errs)
+
     def test_stack_not_list(self) -> None:
         data = {"project": {"name": "x", "stack": "python"}}
         errs = validate_config(data)
