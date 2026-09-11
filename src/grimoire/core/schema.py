@@ -108,6 +108,7 @@ def _generate_schema_python() -> dict[str, Any]:
             "user": _user_schema(),
             "memory": _memory_schema(),
             "agents": _agents_schema(),
+            "proposals": _proposals_schema(),
             "installed_archetypes": {
                 "type": "array",
                 "items": {"type": "string"},
@@ -320,6 +321,30 @@ def _agents_schema() -> dict[str, Any]:
                     "Days without an agent.dispatch trace entry before `grimoire doctor` and the "
                     "cockpit flag a delivered or overridden agent as stale. Signal only — never "
                     "automatic removal or deprecation."
+                ),
+            },
+        },
+    }
+
+
+def _proposals_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "description": (
+            "Artifact-creation proposal trigger (issue #395): on a specialty's "
+            "repeated non-choice, propose an agent or skill — never create one "
+            "without explicit acceptance."
+        ),
+        "additionalProperties": False,
+        "properties": {
+            "threshold": {
+                "type": "integer",
+                "minimum": 2,
+                "default": 2,
+                "description": (
+                    "Repeated non-choices (grimoire agent-miss) on the same specialty "
+                    "before a proposal is written. Never 1 — a single non-choice never "
+                    "earns a proposal."
                 ),
             },
         },

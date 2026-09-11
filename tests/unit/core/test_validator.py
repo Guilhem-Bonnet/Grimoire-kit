@@ -167,6 +167,16 @@ class TestAgentsSection:
         errs = validate_config(data)
         assert any("agents.freshness_threshold_days" in e.path for e in errs)
 
+    def test_proposals_threshold_of_three_is_accepted(self) -> None:
+        data = {**_minimal(), "proposals": {"threshold": 3}}
+        assert validate_config(data) == []
+
+    def test_proposals_threshold_of_one_is_rejected(self) -> None:
+        """Jamais 1 — l'issue #395 est explicite : un seul non-choix n'obtient jamais de proposition."""
+        data = {**_minimal(), "proposals": {"threshold": 1}}
+        errs = validate_config(data)
+        assert any("proposals.threshold" in e.path for e in errs)
+
 
 class TestInstalledArchetypes:
     def test_not_list(self) -> None:

@@ -264,6 +264,7 @@ const KNOWN_TOP_KEYS: &[&str] = &[
     "memory",
     "agents",
     "installed_archetypes",
+    "proposals",
 ];
 const KNOWN_PROJECT_KEYS: &[&str] = &["name", "description", "type", "metaphor", "stack", "repos"];
 const KNOWN_USER_KEYS: &[&str] = &["name", "language", "document_language", "skill_level"];
@@ -301,6 +302,7 @@ const KNOWN_AGENTS_KEYS: &[&str] = &[
     "entry",
     "freshness_threshold_days",
 ];
+const KNOWN_PROPOSALS_KEYS: &[&str] = &["threshold"];
 
 // ── generate_schema ──────────────────────────────────────────────────────────
 
@@ -343,6 +345,7 @@ fn schema_core() -> Value {
                 ("user", user_schema()),
                 ("memory", memory_schema()),
                 ("agents", agents_schema()),
+                ("proposals", proposals_schema()),
                 (
                     "installed_archetypes",
                     obj(vec![
@@ -738,6 +741,40 @@ fn agents_schema() -> Value {
     ])
 }
 
+fn proposals_schema() -> Value {
+    obj(vec![
+        ("type", s("object")),
+        (
+            "description",
+            s(
+                "Artifact-creation proposal trigger (issue #395): on a specialty's \
+                 repeated non-choice, propose an agent or skill — never create one \
+                 without explicit acceptance.",
+            ),
+        ),
+        ("additionalProperties", Value::Bool(false)),
+        (
+            "properties",
+            obj(vec![(
+                "threshold",
+                obj(vec![
+                    ("type", s("integer")),
+                    ("minimum", Value::Int(2)),
+                    ("default", Value::Int(2)),
+                    (
+                        "description",
+                        s(
+                            "Repeated non-choices (grimoire agent-miss) on the same specialty \
+                             before a proposal is written. Never 1 — a single non-choice never \
+                             earns a proposal.",
+                        ),
+                    ),
+                ]),
+            )]),
+        ),
+    ])
+}
+
 // ── validate_config ──────────────────────────────────────────────────────────
 
 /// Une erreur de validation avant reconstruction cote Python. `suggestion`
@@ -1094,6 +1131,32 @@ fn validate_agents(section: &Value, errors: &mut Vec<RawError>) {
     check_unknown_keys(section, KNOWN_AGENTS_KEYS, "agents", "agents", errors);
 }
 
+fn validate_proposals(section: &Value, errors: &mut Vec<RawError>) {
+    if !section.is_map() {
+        errors.push(err("proposals", "'proposals' must be a mapping."));
+        return;
+    }
+
+    if let Some(v) = field(section, "threshold") {
+        let valid = matches!(v, Value::Int(i) if *i >= 2);
+        if !valid {
+            errors.push(err_sugg(
+                "proposals.threshold",
+                "'proposals.threshold' must be an integer of at least 2.",
+                "A single non-choice never earns a proposal — pick 2 or higher.",
+            ));
+        }
+    }
+
+    check_unknown_keys(
+        section,
+        KNOWN_PROPOSALS_KEYS,
+        "proposals",
+        "proposals",
+        errors,
+    );
+}
+
 fn validate_installed_archetypes(section: &Value, errors: &mut Vec<RawError>) {
     match section {
         Value::List(items) => {
@@ -1121,9 +1184,9 @@ fn validate_installed_archetypes(section: &Value, errors: &mut Vec<RawError>) {
 /// Coeur pur de `validate_config` (validator.py) — aucun type PyO3, testable
 /// directement par `cargo test`. Mirroir exact de l'ordre des verifications
 /// Python : section `project` (requise), puis `user`/`memory`/`agents`/
-/// `installed_archetypes` (optionnelles, seulement si presentes — presence
-/// brute, pas "presente et non nulle", voir le commentaire sur `field`
-/// ci-dessus), puis les cles inconnues de premier niveau.
+/// `installed_archetypes`/`proposals` (optionnelles, seulement si presentes —
+/// presence brute, pas "presente et non nulle", voir le commentaire sur
+/// `field` ci-dessus), puis les cles inconnues de premier niveau.
 fn validate_core(data: &Value) -> Vec<RawError> {
     let mut errors = Vec::new();
 
@@ -1156,6 +1219,9 @@ fn validate_core(data: &Value) -> Vec<RawError> {
     }
     if let Some(installed) = data.get("installed_archetypes") {
         validate_installed_archetypes(installed, &mut errors);
+    }
+    if let Some(proposals) = data.get("proposals") {
+        validate_proposals(proposals, &mut errors);
     }
 
     check_unknown_keys(data, KNOWN_TOP_KEYS, "", "top", &mut errors);
@@ -1339,6 +1405,7 @@ mod tests {
             "memory",
             "agents",
             "installed_archetypes",
+            "proposals",
         ] {
             assert!(props.get(key).is_some(), "missing property {key}");
         }
@@ -1416,6 +1483,40 @@ mod tests {
         assert!(!errors
             .iter()
             .any(|e| e.path == "agents.freshness_threshold_days"));
+    }
+
+    #[test]
+    fn schema_declares_proposals_threshold() {
+        // Mirroir de test_schema.py (issue #395).
+        let proposals = proposals_schema();
+        let field = proposals
+            .get("properties")
+            .unwrap()
+            .get("threshold")
+            .expect("threshold");
+        assert_eq!(field.get("default"), Some(&Value::Int(2)));
+        assert_eq!(field.get("minimum"), Some(&Value::Int(2)));
+    }
+
+    #[test]
+    fn proposals_threshold_of_one_is_rejected() {
+        // Mirroir de test_validator.py (issue #395) — jamais 1.
+        let data = map(vec![
+            ("project", map(vec![("name", Value::Str("x".to_string()))])),
+            ("proposals", map(vec![("threshold", Value::Int(1))])),
+        ]);
+        let errors = validate_core(&data);
+        assert!(errors.iter().any(|e| e.path == "proposals.threshold"));
+    }
+
+    #[test]
+    fn proposals_threshold_of_three_has_no_error() {
+        let data = map(vec![
+            ("project", map(vec![("name", Value::Str("x".to_string()))])),
+            ("proposals", map(vec![("threshold", Value::Int(3))])),
+        ]);
+        let errors = validate_core(&data);
+        assert!(!errors.iter().any(|e| e.path == "proposals.threshold"));
     }
 
     #[test]
