@@ -7,6 +7,60 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **perf(hosts): découper `hosts/decisions.py` par décision — `grimoire-hook` payait la moitié du fichier pour chaque appel (#419).**
+  Suite de mesure de #418 : `grimoire-hook PreToolUse` restait à 69-70 ms
+  malgré le chargement paresseux du CLI, parce que ce point d'entrée
+  (`grimoire.hosts.runtime:main`) ne passe jamais par `grimoire.cli.app`.
+  `grimoire.hosts.decisions` était un seul module de 918 lignes portant les
+  sept décisions (`grimoire.activation`, `.task-context`, `.tool-policy`,
+  `.evidence-trace`, `.evidence-gate`, `.subagent-gate`, `.context-capsule`) :
+  quelle que soit la décision demandée, tout le fichier — et donc le moteur
+  de politique (`grimoire.policies.engine`/`.schemas`) — était importé. C'est
+  devenu un paquet, un module par décision, résolu paresseusement par
+  `grimoire.hosts.decisions.run_decision` via un registre id → module ;
+  `__init__.py` ré-exporte tous les noms publics existants (et le privé
+  `_gate_summary` qu'un test pinne) par `__getattr__` de module, donc aucun
+  import existant ne change. `grimoire.hosts.surface` (446 lignes : IR
+  agent/modèle, fingerprinting, sonde du cœur Rust) est passé par le même
+  chemin : les trois enums que le hook lit sur *chaque* appel (`HookEvent`,
+  `ToolVerb`, `Enforcement`) vivent maintenant dans `grimoire.hosts.events`
+  (nouveau, réexporté par `surface.py` pour compatibilité) — et
+  `grimoire/hosts/__init__.py`, qui importait `ProjectSurface` (donc tout
+  `surface.py`) au niveau module rien que pour une ré-export dont rien dans
+  le dépôt ne se sert (`from grimoire.hosts import ProjectSurface`), le fait
+  maintenant paresseusement lui aussi.
+  Mesuré par `scripts/bench-rust-cores.py --macro-runs 15` (même machine) :
+
+  | commande | avant | après | cible | statut |
+  |---|---|---|---|---|
+  | `grimoire-hook PreToolUse` (tool-policy, destructif) | 70 ms | 64 ms | < 50 ms | **non atteinte** |
+  | `grimoire-hook PreToolUse` (lecture seule) | 69 ms | 58 ms | — | — |
+  | `grimoire-hook SessionStart` | 77 ms | 72 ms | — | — |
+  | `grimoire-hook UserPromptSubmit` | 63 ms | 49 ms | — | atteinte |
+  | `grimoire-hook PostToolUse` | 64 ms | 57 ms | — | — |
+  | `grimoire-hook SubagentStop` | 64 ms | 50 ms | — | — |
+  | `grimoire-hook PreCompact` | 65 ms | 50 ms | — | — |
+  | `grimoire-hook Stop` | 69 ms | 56 ms | — | — |
+
+  **Cible des 50 ms non atteinte pour `PreToolUse`, assumé.** Le profil
+  restant après découpage tient en trois postes incompressibles avec ce
+  mécanisme : le coût `dataclasses`/`inspect` de la première dataclass
+  chargée dans le process (stdlib, ~6-9 ms), `grimoire.core.standard_state`
+  + `ruamel.yaml` (~9 ms — nécessaire : même une commande destructive lit
+  `active_task_id`/`active_profile_id` avant que le moteur de politique ne
+  tranche, sur tous les événements sauf aucun), et le moteur de politique
+  lui-même (`policies.engine`/`policies.schemas`, ~5 ms, propre à
+  `tool-policy`). Découper `decisions.py` plus finement ne change rien à ces
+  trois postes ; les réduire est un chantier distinct (bascule de parseur
+  YAML pour le premier, hors périmètre — `ruamel.yaml` est la seule
+  dépendance YAML déclarée du kit, `pyyaml` n'est que transitive).
+  Garde de régression : `tests/unit/test_hook_cost.py` — un sous-processus
+  propre par décision vérifie qu'exécuter une décision n'importe jamais le
+  module d'une décision sœur (`test_running_one_decision_imports_only_its_own_submodule`,
+  paramétré sur les sept), plus un budget de temps large et portable dans le
+  même esprit que `_COCKPIT_REFRESH_BUDGET_SECONDS`
+  (`tests/test_invariants.py`).
+
 - **perf(cli): charger les sous-commandes à la demande — 60 % du temps de `doctor` était l'arbre Typer (#405).**
   `grimoire.cli.app` importait sans condition les 20 modules `cmd_*` derrière
   chaque sous-commande (`cmd_flow`, `cmd_host`, `cmd_memory_lexical`,

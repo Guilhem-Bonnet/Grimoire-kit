@@ -50,10 +50,20 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from enum import StrEnum
 from typing import Any
 
 from grimoire.core.exceptions import GrimoireAgentError
+
+#: Moved to :mod:`grimoire.hosts.events` (issue #419): the hook entry point
+#: needs these three enums on every call and nothing else this module
+#: defines. Re-exported here, unchanged, so every existing
+#: ``from grimoire.hosts.surface import HookEvent`` (or ``ToolVerb`` /
+#: ``Enforcement``) keeps working — same objects, same identity. The
+#: self-aliasing (``as Enforcement``, not a bare import) is what tells
+#: ``mypy --strict``'s ``no_implicit_reexport`` this re-export is deliberate.
+from grimoire.hosts.events import Enforcement as Enforcement
+from grimoire.hosts.events import HookEvent as HookEvent
+from grimoire.hosts.events import ToolVerb as ToolVerb
 
 try:
     import grimoire_hosts_core as _rust_core
@@ -92,47 +102,6 @@ def _use_rust_backend() -> bool:
     if override not in ("auto", ""):
         raise GrimoireAgentError(f"GRIMOIRE_HOSTS_BACKEND invalide: {override!r} (attendu auto/python/rust)")
     return _rust_core is not None
-
-
-class ToolVerb(StrEnum):
-    """The tool capabilities an agent may be granted, host-independently."""
-
-    READ = "read"
-    SEARCH = "search"
-    EDIT = "edit"
-    EXECUTE = "execute"
-    WEB = "web"
-
-
-class HookEvent(StrEnum):
-    """Agent lifecycle events, named once for every host.
-
-    Hosts implement a subset; :class:`grimoire.hosts.capabilities.HostProfile`
-    records which, and emitters skip — loudly — what their host lacks.
-    """
-
-    SESSION_START = "session_start"
-    USER_PROMPT_SUBMIT = "user_prompt_submit"
-    PRE_TOOL_USE = "pre_tool_use"
-    POST_TOOL_USE = "post_tool_use"
-    POST_TOOL_USE_FAILURE = "post_tool_use_failure"
-    SUBAGENT_START = "subagent_start"
-    SUBAGENT_STOP = "subagent_stop"
-    PRE_COMPACT = "pre_compact"
-    STOP = "stop"
-
-
-class Enforcement(StrEnum):
-    """How strongly a hook binds the agent.
-
-    ``BLOCKING`` is the only level that turns a rule into a constraint: the
-    host refuses the action or the closure. ``ADVISORY`` injects context and
-    hopes. The distinction is the whole point of this module — the kit's
-    governance was advisory everywhere before it existed.
-    """
-
-    BLOCKING = "blocking"
-    ADVISORY = "advisory"
 
 
 @dataclass(frozen=True, slots=True)
