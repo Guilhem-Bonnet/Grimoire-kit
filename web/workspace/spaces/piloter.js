@@ -70,6 +70,8 @@ function injectStyles() {
        clair/sombre ne garantissent pas 4.5:1 sur --e1. Texte en --ink
        (contraste garanti), --warn réservé à la bordure. */
     .pl-badge.stale { color: var(--ink); border-color: var(--warn); }
+    /* Informationnel, pas un avertissement : même traitement que .overrides. */
+    .pl-badge.fresh { color: var(--ink); border-color: var(--acc); }
     .pl-chips { display: flex; flex-wrap: wrap; gap: 4px; }
     .pl-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; background: var(--e2); font-size: var(--t-min); }
     .pl-chip button { border: 0; background: none; color: var(--ink3); cursor: pointer; padding: 0; font-size: var(--t-min); line-height: 1; }
@@ -343,12 +345,23 @@ const TOOL_VERBS = ['read', 'search', 'edit', 'execute', 'web'];
 // confondre absence de données et absence d'usage.
 function freshnessWord(freshness) {
   if (!freshness || !freshness.judged) return null;
+  // Plancher par agent : un fichier plus jeune que le seuil n'a pas eu le
+  // temps d'être choisi — ce n'est pas la même chose que « personne n'en
+  // veut ». Le dire explicitement plutôt que de laisser lire « jamais
+  // invoqué » comme un signal de dette.
+  if (freshness.too_recent) return 'trop récent pour juger';
   if (freshness.last_seen == null) return 'jamais invoqué';
   return `invoqué il y a ${fmtInt(freshness.days_since)} j`;
 }
 
 function freshnessBadge(freshness) {
-  if (!freshness || !freshness.judged || !freshness.stale) return null;
+  if (!freshness || !freshness.judged) return null;
+  if (freshness.too_recent) {
+    const badge = text('span', 'pl-badge fresh', 'trop récent');
+    badge.title = "Le fichier de définition de cet agent est plus jeune que le seuil de fraîcheur configuré — pas encore eu le temps d'être choisi.";
+    return badge;
+  }
+  if (!freshness.stale) return null;
   const badge = text('span', 'pl-badge stale', 'périmé');
   badge.title = 'Aucun agent.dispatch journalisé depuis le seuil de fraîcheur configuré (project-context.yaml: agents.freshness_threshold_days).';
   return badge;

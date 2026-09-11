@@ -81,12 +81,20 @@ class AgentFreshness:
     ``stale`` ne vaut jamais ``True`` quand le rapport parent n'est pas
     :attr:`FreshnessReport.judged` : sans assez d'historique, aucun agent
     n'est déclaré périmé (voir le docstring de :func:`compute_agent_freshness`).
+
+    ``too_recent`` vaut ``True`` quand l'agent lui-même est plus jeune que
+    ``threshold_days`` (son fichier de définition, pas le journal) : le même
+    principe qu'un journal trop jeune, un cran plus bas — un override créé
+    hier n'a pas eu le temps d'être choisi, ce n'est pas la même chose que
+    « personne n'en veut ». ``too_recent`` force ``stale`` à ``False``, quel
+    que soit ``last_seen``.
     """
 
     name: str
     last_seen: str | None
     days_since: int | None
     stale: bool
+    too_recent: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,6 +117,10 @@ class FreshnessReport:
     def stale_entries(self) -> tuple[AgentFreshness, ...]:
         return tuple(e for e in self.entries if e.stale)
 
+    @property
+    def too_recent_entries(self) -> tuple[AgentFreshness, ...]:
+        return tuple(e for e in self.entries if e.too_recent)
+
 
 def _parse_iso(value: str) -> datetime | None:
     with contextlib.suppress(ValueError):
@@ -122,6 +134,7 @@ def compute_agent_freshness(
     *,
     threshold_days: int,
     oldest_started_at: str | None,
+    agent_ages: Mapping[str, int | None] | None = None,
     now: datetime | None = None,
 ) -> FreshnessReport:
     """Croiser la liste des agents connus avec leurs derniers choix journalisés.
@@ -138,9 +151,19 @@ def compute_agent_freshness(
     son ``last_seen``. Un projet dont le journal commence hier n'a aucun
     agent périmé, il n'a simplement pas encore eu l'occasion de les voir.
 
+    La même règle vaut par agent, pas seulement pour le journal dans son
+    ensemble : *agent_ages* (jours depuis la dernière modification du fichier
+    de définition de l'agent, ``None`` quand l'âge n'a pas pu être mesuré)
+    plafonne le jugement individuel. Un agent plus jeune que *threshold_days*
+    n'a lui non plus pas eu le temps d'être choisi — un override créé hier,
+    ou un agent nouvellement livré par une mise à niveau du kit, n'est jamais
+    marqué périmé (``too_recent=True`` à la place). Un âge inconnu (clé
+    absente ou ``None``) ne bloque rien : l'agent est jugé normalement, comme
+    avant l'ajout de ce plancher.
+
     Un agent est périmé quand sa dernière date de choix remonte à
     *threshold_days* jours ou plus (borne incluse, comme « depuis N jours »),
-    ou qu'il n'a jamais été choisi.
+    ou qu'il n'a jamais été choisi — et qu'il n'est pas lui-même trop récent.
     """
     now = now or datetime.now(tz=UTC)
     journal_span_days: int | None = None
@@ -150,6 +173,7 @@ def compute_agent_freshness(
             journal_span_days = (now - oldest).days
 
     judged = journal_span_days is not None and journal_span_days >= threshold_days
+    ages = agent_ages or {}
 
     entries: list[AgentFreshness] = []
     for name in sorted(set(agent_names)):
@@ -160,8 +184,22 @@ def compute_agent_freshness(
             seen_at = _parse_iso(last_seen)
             if seen_at is not None:
                 days_since = (now - seen_at).days
-        stale = judged and (last_seen is None or (days_since is not None and days_since >= threshold_days))
-        entries.append(AgentFreshness(name=name, last_seen=last_seen, days_since=days_since, stale=stale))
+        agent_age = ages.get(name)
+        too_recent = agent_age is not None and agent_age < threshold_days
+        stale = (
+            judged
+            and not too_recent
+            and (last_seen is None or (days_since is not None and days_since >= threshold_days))
+        )
+        entries.append(
+            AgentFreshness(
+                name=name,
+                last_seen=last_seen,
+                days_since=days_since,
+                stale=stale,
+                too_recent=too_recent,
+            )
+        )
 
     return FreshnessReport(
         threshold_days=threshold_days,
@@ -376,6 +414,7 @@ class TraceLedger:
         agent_names: Iterable[str],
         *,
         threshold_days: int,
+        agent_ages: Mapping[str, int | None] | None = None,
         now: datetime | None = None,
     ) -> FreshnessReport:
         """Commodité : assemble :func:`compute_agent_freshness` depuis ce journal.
@@ -383,13 +422,16 @@ class TraceLedger:
         Lit ``agent_dispatch_counts()`` et ``oldest_started_at()`` sur *self*
         plutôt que de les faire recalculer par chaque appelant (doctor,
         cockpit, ``registry dispatches``) — les trois lisent le même journal
-        pour la même question.
+        pour la même question. *agent_ages* (âge en jours du fichier de
+        définition de chaque agent) vient de l'appelant : ce module lit des
+        traces, pas des fichiers d'agent.
         """
         return compute_agent_freshness(
             agent_names,
             self.agent_dispatch_counts(),
             threshold_days=threshold_days,
             oldest_started_at=self.oldest_started_at(),
+            agent_ages=agent_ages,
             now=now,
         )
 
