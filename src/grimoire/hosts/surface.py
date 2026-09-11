@@ -25,13 +25,73 @@ The IR is deliberately vendor-free:
 Anything a host cannot do natively is not silently dropped: emitters declare a
 degradation (:class:`Degradation`) so ``grimoire host status`` can say what is
 enforced, what is only advertised, and what is missing outright.
+
+Backend
+-------
+:meth:`AgentSpec.fingerprint` and :func:`duplicate_agent_fingerprints` — the
+distinction guard (issue #372) — optionally delegate to
+``grimoire_hosts_core``, a PyO3-compiled Rust port of this module and of
+:mod:`grimoire.hosts.collect` (``rust/grimoire-hosts-core/``, issue #354).
+Same contract as the two earlier ports (``grimoire.policies.engine``,
+``grimoire.core.validator``): never required (nothing published depends on
+it), the pure-Python path above is unchanged and is what runs when the
+compiled module is absent. ``GRIMOIRE_HOSTS_BACKEND`` (sibling of
+``GRIMOIRE_SCHEMA_BACKEND``/``GRIMOIRE_POLICIES_BACKEND``) overrides the
+choice — ``"python"`` forces this reference implementation, ``"rust"``
+forces the compiled module and raises
+:class:`~grimoire.core.exceptions.GrimoireAgentError` if it is not
+available. Defined here (not in :mod:`grimoire.hosts.collect`, which also
+uses it) because :mod:`grimoire.hosts.collect` already imports from this
+module and the reverse would cycle. See
+``tests/unit/test_hosts_rust_parity.py``.
 """
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
+
+from grimoire.core.exceptions import GrimoireAgentError
+
+try:
+    import grimoire_hosts_core as _rust_core
+except ImportError:  # pragma: no cover - exercised by the dedicated Rust CI job
+    _rust_core = None
+
+
+def rust_backend_available() -> bool:
+    """Whether the compiled ``grimoire_hosts_core`` module is importable.
+
+    Purely informational (used by tests and diagnostics) — every call site
+    below decides its own backend fresh via :func:`_use_rust_backend`.
+    """
+    return _rust_core is not None
+
+
+def _use_rust_backend() -> bool:
+    """Resolve which backend this module's Rust-optional functions should use.
+
+    Reads ``GRIMOIRE_HOSTS_BACKEND`` fresh every time rather than once at
+    import time, so tests can flip it with ``monkeypatch.setenv`` around a
+    single call without reloading the module.
+    """
+    override = os.environ.get("GRIMOIRE_HOSTS_BACKEND", "auto").strip().lower()
+    if override == "python":
+        return False
+    if override == "rust":
+        if _rust_core is None:
+            raise GrimoireAgentError(
+                "GRIMOIRE_HOSTS_BACKEND=rust demande le coeur Rust, mais "
+                "grimoire_hosts_core est introuvable. Construire l'extension "
+                "localement (voir CONTRIBUTING.md, `maturin develop` dans "
+                "rust/grimoire-hosts-core/) ou revenir a auto/python."
+            )
+        return True
+    if override not in ("auto", ""):
+        raise GrimoireAgentError(f"GRIMOIRE_HOSTS_BACKEND invalide: {override!r} (attendu auto/python/rust)")
+    return _rust_core is not None
 
 
 class ToolVerb(StrEnum):
@@ -86,6 +146,9 @@ class ModelAffinity:
 
     @classmethod
     def from_frontmatter(cls, data: dict[str, Any] | None) -> ModelAffinity:
+        if _use_rust_backend():
+            assert _rust_core is not None  # guarded by _use_rust_backend
+            return cls(**_rust_core.model_affinity_from_frontmatter(data))
         if not isinstance(data, dict):
             return cls()
         return cls(
@@ -162,6 +225,11 @@ class AgentSpec:
         same context and own the same skills are the same agent wearing two
         names, no matter how differently they are described.
         """
+        if _use_rust_backend():
+            assert _rust_core is not None  # guarded by _use_rust_backend
+            return tuple(
+                _rust_core.agent_fingerprint([t.value for t in self.tools], list(self.context), list(self.skills))
+            )
         return (
             *sorted(t.value for t in self.tools),
             "|",
@@ -171,6 +239,49 @@ class AgentSpec:
         )
 
 
+def _partition_duplicate_pairs(
+    agents: tuple[AgentSpec, ...],
+    *,
+    is_override: Any,
+) -> tuple[tuple[tuple[str, str], ...], tuple[tuple[str, str], ...]]:
+    """``(strict, duplicates)`` for *agents*, ``is_override(agent) -> bool``
+    deciding which pairs count as strict. Shared implementation for
+    :func:`duplicate_agent_fingerprints` (always non-strict — see below) and
+    :mod:`grimoire.hosts.collect`'s ``build_surface`` (override-aware),
+    delegated to :func:`grimoire_hosts_core.partition_duplicate_pairs` as a
+    single call when the Rust backend is active.
+    """
+    if _use_rust_backend():
+        assert _rust_core is not None  # guarded by _use_rust_backend
+        records = [
+            (
+                agent.name,
+                bool(is_override(agent)),
+                [t.value for t in agent.tools],
+                list(agent.context),
+                list(agent.skills),
+            )
+            for agent in agents
+        ]
+        strict_pairs, duplicate_pairs = _rust_core.partition_duplicate_pairs(records)
+        return tuple(map(tuple, strict_pairs)), tuple(map(tuple, duplicate_pairs))
+
+    by_fingerprint: dict[tuple[str, ...], list[str]] = {}
+    for agent in agents:
+        by_fingerprint.setdefault(agent.fingerprint(), []).append(agent.name)
+    duplicates: list[tuple[str, str]] = []
+    for names in by_fingerprint.values():
+        if len(names) < 2:
+            continue
+        ordered = sorted(names)
+        duplicates.extend((ordered[i], ordered[j]) for i in range(len(ordered)) for j in range(i + 1, len(ordered)))
+    by_name = {agent.name: agent for agent in agents}
+    strict = [
+        pair for pair in duplicates if any(is_override(by_name[n]) for n in pair if n in by_name)
+    ]
+    return tuple(strict), tuple(duplicates)
+
+
 def duplicate_agent_fingerprints(agents: tuple[AgentSpec, ...]) -> tuple[tuple[str, str], ...]:
     """Pairs of agent names sharing an identical faisceau (issue #372).
 
@@ -178,17 +289,14 @@ def duplicate_agent_fingerprints(agents: tuple[AgentSpec, ...]) -> tuple[tuple[s
     context path pass this guard while being functionally identical. That
     limit is assumed: this catches the phantom-agent case (#346), not the
     median case of near-duplicates.
+
+    Never "strict" on its own (every collision here is informational): the
+    override/kit distinction that decides whether a collision blocks
+    (``build_surface``, ``grimoire.hosts.collect``) needs each agent's
+    ``definition_ref``, which this function's signature does not carry.
     """
-    by_fingerprint: dict[tuple[str, ...], list[str]] = {}
-    for agent in agents:
-        by_fingerprint.setdefault(agent.fingerprint(), []).append(agent.name)
-    pairs: list[tuple[str, str]] = []
-    for names in by_fingerprint.values():
-        if len(names) < 2:
-            continue
-        ordered = sorted(names)
-        pairs.extend((ordered[i], ordered[j]) for i in range(len(ordered)) for j in range(i + 1, len(ordered)))
-    return tuple(pairs)
+    _strict, duplicates = _partition_duplicate_pairs(agents, is_override=lambda _agent: False)
+    return duplicates
 
 
 @dataclass(frozen=True, slots=True)

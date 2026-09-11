@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- feat(hosts): troisième port Rust optionnel de `grimoire.hosts.collect`/`grimoire.hosts.surface` — lecture du frontmatter d'agent et garde de distinction (issue #354). `rust/grimoire-hosts-core/`, bascule `GRIMOIRE_HOSTS_BACKEND=python|rust|auto`, jobs CI `rust-hosts / cargo` et `rust-hosts / parity` dans `.github/workflows/rust-cores.yml`, roue toujours `py3-none-any`. Divergences trouvées par l'oracle Rust : `_max_turns` plantait avec un `ValueError` non rattrapé sur un chiffre Unicode non-ASCII (`"²"`, `str.isdigit()` vrai mais `int()` refuse) — corrigé dans cette PR (`str.isascii()` en plus) ; `_tool_verbs` ignore silencieusement un verbe d'outil hors de `ToolVerb` — comportement documenté et conservé à l'identique sur les deux backends (changer ça modifierait silencieusement le périmètre d'outils d'agents existants).
+
 ## [3.43.1] - 2026-09-11
 ### Corrigé
 

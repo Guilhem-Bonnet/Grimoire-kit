@@ -48,6 +48,7 @@ jobs:
     outputs:
       policies: ${{ steps.filter.outputs.policies }}
       schema: ${{ steps.filter.outputs.schema }}
+      hosts: ${{ steps.filter.outputs.hosts }}
     steps:
       - uses: actions/checkout@v7
 
@@ -70,6 +71,14 @@ jobs:
               - "tests/unit/core/test_schema.py"
               - "tests/unit/core/test_validator.py"
               - "tests/unit/test_schema_validator_rust_parity.py"
+              - "pyproject.toml"
+              - ".github/workflows/rust-cores.yml"
+            hosts:
+              - "rust/grimoire-hosts-core/**"
+              - "src/grimoire/hosts/collect.py"
+              - "src/grimoire/hosts/surface.py"
+              - "tests/unit/test_hosts.py"
+              - "tests/unit/test_hosts_rust_parity.py"
               - "pyproject.toml"
               - ".github/workflows/rust-cores.yml"
 
@@ -227,6 +236,85 @@ jobs:
         # regarde) : la suite complète doit rester verte avec lui présent.
         run: pytest tests/unit/ tests/test_agentic_standard.py -q --tb=short -x
 
+  rust-hosts-cargo:
+    name: "rust-hosts / cargo"
+    needs: changes
+    if: needs.changes.outputs.hosts == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "rust/grimoire-hosts-core -> target"
+
+      - name: Format check
+        run: cargo fmt --manifest-path rust/grimoire-hosts-core/Cargo.toml --check
+
+      - name: Unit tests
+        # --no-default-features : la feature `extension-module` de PyO3 (par
+        # défaut, requise pour que l'extension soit chargeable par Python)
+        # empêche de lier le binaire de test — voir le commentaire en tête
+        # de rust/grimoire-hosts-core/Cargo.toml. La logique testée ici
+        # (parse_frontmatter_core, tool_verbs_core, etc.) ne touche à aucun
+        # type PyO3 — seul `yaml-rust2` est requis, aucun interpréteur
+        # Python n'est nécessaire pour ce job.
+        run: cargo test --no-default-features --manifest-path rust/grimoire-hosts-core/Cargo.toml
+
+  rust-hosts-parity:
+    name: "rust-hosts / parity"
+    needs: changes
+    if: needs.changes.outputs.hosts == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "rust/grimoire-hosts-core -> target"
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install package + dev deps
+        run: pip install -e ".[dev]"
+
+      - name: Build and install the compiled core
+        # `maturin develop` exige un virtualenv actif ; le runner utilise le
+        # Python de l'image, sans venv. On construit donc la roue et on
+        # l'installe, ce qui donne le même résultat sans cette contrainte
+        # (piège déjà rencontré et documenté sur les jobs policies/schema).
+        run: |
+          pip install "maturin>=1.7,<2"
+          maturin build --release --manifest-path rust/grimoire-hosts-core/Cargo.toml --out dist-rust
+          pip install --force-reinstall dist-rust/*.whl
+
+      - name: Verify the compiled core is importable
+        run: python -c "import grimoire_hosts_core; print('grimoire_hosts_core', grimoire_hosts_core.__version__)"
+
+      - name: Hosts tests — contract unmodified, both backends, parity
+        # tests/unit/test_hosts.py est le contrat : il tourne tel quel ici
+        # (module compilé présent) et dans le job SDK normal (absent) — voir
+        # ci-sdk.yml. test_hosts_rust_parity.py force chaque backend tour à
+        # tour (GRIMOIRE_HOSTS_BACKEND) et compare frontmatter/faisceau/notes,
+        # y compris sur le cas qui plantait le validateur Python de référence
+        # (_max_turns sur un chiffre Unicode non-ASCII, corrigé dans cette PR).
+        run: pytest tests/unit/test_hosts.py tests/unit/test_hosts_rust_parity.py -q --tb=short
+
+      - name: Full SDK suite with the compiled core loaded
+        # Preuve que rien d'autre dans le kit ne dépend de l'absence du
+        # module compilé (import optionnel, aucun autre appelant ne le
+        # regarde) : la suite complète doit rester verte avec lui présent.
+        run: pytest tests/unit/ tests/test_agentic_standard.py -q --tb=short -x
+
   rust-gate:
     name: rust-gate
     if: always()
@@ -236,9 +324,11 @@ jobs:
       - rust-policies-parity
       - rust-schema-cargo
       - rust-schema-parity
+      - rust-hosts-cargo
+      - rust-hosts-parity
     runs-on: ubuntu-latest
     steps:
-      - name: Aggregate the four Rust jobs
+      - name: Aggregate the six Rust jobs
         # Seul ce job est déclaré comme check requis dans la protection de
         # main. Un job sauté (crate hors périmètre de la PR) est un succès
         # pour ce gate ; seuls `failure` et `cancelled` le font échouer.
@@ -248,6 +338,8 @@ jobs:
             ["rust-policies / cargo"]="${{ needs.rust-policies-cargo.result }}"
             ["rust-policies / parity"]="${{ needs.rust-policies-parity.result }}"
             ["rust-schema / cargo"]="${{ needs.rust-schema-cargo.result }}"
+            ["rust-hosts / cargo"]="${{ needs.rust-hosts-cargo.result }}"
+            ["rust-hosts / parity"]="${{ needs.rust-hosts-parity.result }}"
             ["rust-schema / parity"]="${{ needs.rust-schema-parity.result }}"
           )
           failed=0

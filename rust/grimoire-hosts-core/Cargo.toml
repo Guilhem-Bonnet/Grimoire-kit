@@ -1,0 +1,45 @@
+[package]
+name = "grimoire-hosts-core"
+version = "0.1.0"
+edition = "2021"
+description = "Coeur Rust optionnel de grimoire.hosts.collect/surface : lecture des definitions d'agent et garde de distinction, expose via PyO3."
+license = "MIT"
+publish = false
+
+[lib]
+name = "grimoire_hosts_core"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Troisieme port Rust du kit (issue #354), meme montage que
+# rust/grimoire-policies-core/ et rust/grimoire-schema-core/ : pyo3 n'est
+# requis que par la frontiere PyO3 (module `py_bridge`, en bas de lib.rs).
+#
+# Contrairement aux deux premiers ports, ce crate lit lui-meme du texte
+# YAML brut (le frontmatter d'un fichier d'agent) — les deux premiers ports
+# recevaient une donnee deja analysee par ruamel cote Python. `yaml-rust2`
+# (fork maintenu de yaml-rust, aucun `unsafe`, meme resolveur de scalaires
+# YAML 1.2 que ruamel — verifie empiriquement : yes/no/on/off restent des
+# chaines dans les deux, cf. commentaire de `parse_yaml_mapping` plus bas)
+# est la seule dependance non-pyo3 de ce crate, avec sa feature `encoding`
+# desactivee (l'entree est deja une `&str` UTF-8, aucun besoin de detection
+# d'encodage).
+yaml-rust2 = { version = "0.13", default-features = false }
+
+# abi3-py312 : une seule extension binaire par (OS, arch) pour tout Python
+# >= 3.12 (plancher deja declare par requires-python dans pyproject.toml).
+# Sans objet tant que rien n'est publie, mais c'est la meme discipline que
+# les deux premiers ports.
+pyo3 = { version = "0.29", features = ["abi3-py312"], optional = true }
+
+[features]
+# Meme raisonnement que rust/grimoire-policies-core/Cargo.toml et
+# rust/grimoire-schema-core/Cargo.toml : la feature `extension-module` de
+# pyo3 (active par defaut, indispensable pour que l'extension soit
+# chargeable par Python) empeche de lier le binaire de test de `cargo test`
+# — d'ou `cargo test --no-default-features` dans le job CI dedie, qui ne
+# necessite donc aucun interprete Python installe. `yaml-rust2` reste
+# compile dans les deux configurations : la logique pure de ce crate
+# (parsing du frontmatter compris) en depend directement.
+extension-module = ["dep:pyo3", "pyo3/extension-module"]
+default = ["extension-module"]

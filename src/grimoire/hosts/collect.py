@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -35,8 +36,41 @@ from grimoire.hosts.surface import (
     ProjectSurface,
     SkillSpec,
     ToolVerb,
-    duplicate_agent_fingerprints,
+    _partition_duplicate_pairs,
 )
+
+try:
+    import grimoire_hosts_core as _rust_core
+except ImportError:  # pragma: no cover - exercised by the dedicated Rust CI job
+    _rust_core = None
+
+
+def _use_rust_backend() -> bool:
+    """Resolve which backend this module's Rust-optional functions should use.
+
+    Own copy of :func:`grimoire.hosts.surface._use_rust_backend` (same
+    precedent as ``grimoire.core.schema``/``grimoire.core.validator``, two
+    independent Python modules backed by one crate that each read their
+    shared env var independently rather than cross-importing a private
+    module-level variable). Reads ``GRIMOIRE_HOSTS_BACKEND`` fresh every
+    call so tests can flip it with ``monkeypatch.setenv``.
+    """
+    override = os.environ.get("GRIMOIRE_HOSTS_BACKEND", "auto").strip().lower()
+    if override == "python":
+        return False
+    if override == "rust":
+        if _rust_core is None:
+            raise GrimoireAgentError(
+                "GRIMOIRE_HOSTS_BACKEND=rust demande le coeur Rust, mais "
+                "grimoire_hosts_core est introuvable. Construire l'extension "
+                "localement (voir CONTRIBUTING.md, `maturin develop` dans "
+                "rust/grimoire-hosts-core/) ou revenir a auto/python."
+            )
+        return True
+    if override not in ("auto", ""):
+        raise GrimoireAgentError(f"GRIMOIRE_HOSTS_BACKEND invalide: {override!r} (attendu auto/python/rust)")
+    return _rust_core is not None
+
 
 _FRONTMATTER_RE = re.compile(r"\A(?:﻿)?(?:<!--.*?-->\s*)?---\s*\n(.*?)\n---\s*\n?(.*)\Z", re.DOTALL)
 
@@ -88,7 +122,17 @@ def _yaml() -> YAML:
 
 
 def parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
-    """Split YAML frontmatter from body; ``({}, text)`` when there is none."""
+    """Split YAML frontmatter from body; ``({}, text)`` when there is none.
+
+    Delegates to ``grimoire_hosts_core.parse_frontmatter`` (``rust/grimoire-hosts-core/``,
+    issue #354) when the Rust backend is active — see the module docstring
+    of :mod:`grimoire.hosts.surface` for ``GRIMOIRE_HOSTS_BACKEND``. The
+    pure-Python path below is the reference implementation and is what runs
+    when the compiled module is absent.
+    """
+    if _use_rust_backend():
+        assert _rust_core is not None  # guarded by _use_rust_backend
+        return _rust_core.parse_frontmatter(text)  # type: ignore[no-any-return]
     match = _FRONTMATTER_RE.match(text)
     if match is None:
         return {}, text
@@ -100,6 +144,9 @@ def parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
 
 
 def _tool_verbs(raw: Any) -> tuple[ToolVerb, ...]:
+    if _use_rust_backend():
+        assert _rust_core is not None  # guarded by _use_rust_backend
+        return tuple(ToolVerb(v) for v in _rust_core.tool_verbs(raw))
     if isinstance(raw, str):
         raw = [part.strip() for part in raw.replace(",", " ").split()]
     if not isinstance(raw, list):
@@ -117,6 +164,9 @@ def _tool_verbs(raw: Any) -> tuple[ToolVerb, ...]:
 
 def _str_tuple(raw: Any) -> tuple[str, ...]:
     """Read a frontmatter list-of-strings key, tolerant of a single string."""
+    if _use_rust_backend():
+        assert _rust_core is not None  # guarded by _use_rust_backend
+        return tuple(_rust_core.str_tuple(raw))
     if isinstance(raw, str):
         raw = [raw]
     if not isinstance(raw, list):
@@ -131,6 +181,9 @@ def infer_tools(body: str, description: str) -> tuple[ToolVerb, ...]:
     project is useless. Writing and executing are granted only on an explicit
     signal in the persona's own text.
     """
+    if _use_rust_backend():
+        assert _rust_core is not None  # guarded by _use_rust_backend
+        return tuple(ToolVerb(v) for v in _rust_core.infer_tools(body, description))
     haystack = f"{description}\n{body}".lower()
     verbs = [ToolVerb.READ, ToolVerb.SEARCH]
     if any(marker in haystack for marker in _EDIT_MARKERS):
@@ -293,13 +346,27 @@ def _max_turns(value: Any) -> int | None:
 
     Excludes ``bool`` explicitly: it is an ``int`` subclass, and ``max_turns: true``
     is a malformed override, not a turn budget of 1.
+
+    ``str.isascii()`` is checked alongside ``str.isdigit()``: some Unicode
+    characters (``"²"``, superscript two) satisfy ``isdigit()`` but make
+    ``int()`` raise ``ValueError`` — found by the Rust oracle in
+    ``rust/grimoire-hosts-core/`` (issue #354), which only ever considers
+    ASCII digits and so never had this crash to begin with. Without the
+    ``isascii()`` guard, ``max_turns: ²`` used to crash ``collect_agents``
+    (and everything built on it — ``build_surface``, ``grimoire host sync``)
+    with an unhandled exception on an otherwise valid agent file.
     """
+    if _use_rust_backend():
+        assert _rust_core is not None  # guarded by _use_rust_backend
+        return _rust_core.max_turns(value)  # type: ignore[no-any-return]
     if isinstance(value, bool):
         return None
     if isinstance(value, int) and value > 0:
         return value
-    if isinstance(value, str) and value.strip().isdigit():
-        return int(value.strip())
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped.isascii() and stripped.isdigit():
+            return int(stripped)
     return None
 
 
@@ -530,15 +597,21 @@ def build_surface(project_root: Path, *, project_name: str | None = None) -> Pro
     governed = is_standard_enrolled(root)
     skills = collect_skills(root, governed=governed)
     agents = collect_agents(root, known_skills=frozenset(s.slug for s in skills))
-    duplicates = duplicate_agent_fingerprints(agents)
     # Deux régimes, parce que deux responsabilités. Un agent créé dans les
     # overrides du projet qui a le même faisceau qu'un autre est une erreur de
     # l'utilisateur, et le système émergent repose sur ce refus : on lève. Deux
     # agents livrés par le kit au même faisceau sont une dette du kit (#375) ;
     # la faire porter à chaque projet en bloquant son `init` reviendrait à
     # punir l'utilisateur pour notre retard. On la garde visible, sans bloquer.
-    by_name = {agent.name: agent for agent in agents}
-    strict = [pair for pair in duplicates if any(_is_override(by_name[n].definition_ref) for n in pair if n in by_name)]
+    # `_partition_duplicate_pairs` (grimoire.hosts.surface) porte la logique
+    # a deux regimes elle-meme (issue #354) : delegue a
+    # `grimoire_hosts_core.partition_duplicate_pairs` en un seul appel quand
+    # le backend Rust est actif, compose sinon `duplicate_agent_fingerprints`
+    # et le filtre `_is_override` ci-dessous, a l'identique du comportement
+    # d'avant ce port.
+    strict, duplicates = _partition_duplicate_pairs(
+        agents, is_override=lambda agent: _is_override(agent.definition_ref)
+    )
     if strict:
         pairs = ", ".join(f"{a} == {b}" for a, b in strict)
         raise GrimoireAgentError(
