@@ -1,0 +1,535 @@
+"""The déclencheur — propose an artifact on repeated non-choice, never create it alone.
+
+Issue #395, third path of #355 made concrete: reading the aggregated misses
+(:meth:`grimoire.traces.ledger.TraceLedger.agent_miss_counts`, issue #394),
+this module writes a *proposal* — never the artifact itself — the moment a
+specialty's non-choice count crosses a configurable threshold (default 2,
+never 1). A proposal is a plain, project-owned YAML file under
+``_grimoire-output/proposals/<slug>.yaml`` with a ``pending`` / ``accepted`` /
+``rejected`` status; accepting one writes a real agent (or attaches a real
+skill) through the exact same path issue #367 fixed for
+``grimoire_add_agent`` (:mod:`grimoire.tools.agent_creation`). Nothing here
+ever calls an LLM: the name, role, and employment clause are mechanical
+templates filled from the category/specialty/fallback-agent labels the miss
+traces already carry — never from the content of a request, which
+:func:`grimoire.hosts.decisions.record_agent_miss` never stores in the first
+place.
+
+Artifact-type decision (``docs/artifact-doctrine.md``): a skill's sequence
+must be writable in advance *and* attachable to an existing agent; a miss
+with no recorded fallback agent has, by definition, no existing surface to
+attach anything to, so it can only become an agent. Mechanically, that reads
+as: a fallback agent was observed → propose a **skill** attached to it; no
+fallback agent was ever observed → propose an **agent**. This is the one
+place in the kit that decides skill vs. agent without a human in the loop,
+and it does so from a single observable fact, not from judgment.
+
+Rejection is sticky but not permanent: refusing a proposal snapshots the
+miss count at the moment of refusal (``rejected_at_count``); the same
+specialty is only proposed again once its count has at least doubled since —
+"a third miss right after a refusal" must not resurrect it, per the issue's
+own stop criterion.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, fields, replace
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+__all__ = [
+    "Proposal",
+    "accept_proposal",
+    "count_pending",
+    "list_proposals",
+    "reject_proposal",
+    "sync_proposals",
+]
+
+#: Never 1 — the issue is explicit: repetition, not a single non-choice, is
+#: what earns a proposal.
+DEFAULT_THRESHOLD = 2
+_MIN_THRESHOLD = 2
+
+_STATUSES = frozenset({"pending", "accepted", "rejected"})
+
+#: Substrings that mechanically suggest a specialty needs to *run* something,
+#: not just read and search — a small, documented heuristic, never a model
+#: call. Keeps freshly proposed specialists from all sharing the exact same
+#: tool boundary as soon as more than one exists (the fingerprint guard in
+#: ``grimoire.hosts.surface`` would otherwise refuse the second one on sight).
+_EXECUTION_HINTS = (
+    "infra", "ops", "terraform", "ansible", "deploy", "ci", "cd", "pipeline",
+    "docker", "kubernetes", "k8s", "build", "test", "script", "release",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class Proposal:
+    """One artifact proposal, exactly as stored on disk."""
+
+    slug: str
+    specialty: str
+    artifact_type: str  # "agent" | "skill"
+    status: str  # "pending" | "accepted" | "rejected"
+    count: int
+    category: str = ""
+    fallback_agent: str = ""
+    first_seen: str = ""
+    last_seen: str = ""
+    created_at: str = ""
+    agent_role: str = ""
+    use_when: str = ""
+    dont_use_when: str = ""
+    tool_boundary: str = ""
+    tools: str = ""
+    target_agent: str = ""
+    accepted_at: str = ""
+    accepted_path: str = ""
+    rejected_at: str = ""
+    rejected_at_count: int | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "slug": self.slug,
+            "specialty": self.specialty,
+            "artifact_type": self.artifact_type,
+            "status": self.status,
+            "count": self.count,
+            "category": self.category,
+            "fallback_agent": self.fallback_agent,
+            "first_seen": self.first_seen,
+            "last_seen": self.last_seen,
+            "created_at": self.created_at,
+            "agent_role": self.agent_role,
+            "use_when": self.use_when,
+            "dont_use_when": self.dont_use_when,
+            "tool_boundary": self.tool_boundary,
+            "tools": self.tools,
+            "target_agent": self.target_agent,
+            "accepted_at": self.accepted_at,
+            "accepted_path": self.accepted_path,
+            "rejected_at": self.rejected_at,
+            "rejected_at_count": self.rejected_at_count,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Proposal:
+        known = {f.name for f in fields(cls)}
+        return cls(**{k: v for k, v in data.items() if k in known})
+
+
+# ── Naming — mechanical, never an LLM call ──────────────────────────────────
+
+
+def _slugify(text: str) -> str:
+    """Lowercase, ASCII-ish, hyphen-separated — safe as a filename and an id."""
+    slug = re.sub(r"[^a-z0-9]+", "-", text.strip().lower()).strip("-")
+    return slug or "specialite"
+
+
+def _agent_slug(specialty: str) -> str:
+    return f"{_slugify(specialty)}-specialist"
+
+
+def _skill_slug(specialty: str) -> str:
+    return _slugify(specialty)
+
+
+def _guess_tools(category: str, specialty: str) -> str:
+    haystack = f"{category} {specialty}".lower()
+    if any(hint in haystack for hint in _EXECUTION_HINTS):
+        return "read, search, execute"
+    return "read, search"
+
+
+def _employment_clause(specialty: str, category: str, fallback_agent: str) -> tuple[str, str]:
+    """Mechanical ``(use_when, dont_use_when)`` from the labels a miss carries."""
+    if category:
+        use_when = (
+            f"Une demande classée « {category} » cherche une compétence "
+            f"« {specialty} » qu'aucun agent déclaré ne couvre."
+        )
+    else:
+        use_when = f"Une demande cherche une compétence « {specialty} » qu'aucun agent déclaré ne couvre."
+    if fallback_agent:
+        dont_use_when = (
+            f"Toute demande déjà couverte par {fallback_agent} ou un autre agent déclaré — "
+            f"ce spécialiste n'existe que pour « {specialty} »."
+        )
+    else:
+        dont_use_when = (
+            f"Toute demande déjà couverte par un agent déclaré — ce spécialiste n'existe "
+            f"que pour « {specialty} »."
+        )
+    return use_when, dont_use_when
+
+
+def _build_proposal(
+    *,
+    specialty: str,
+    count: int,
+    category: str,
+    fallback_agent: str,
+    first_seen: str,
+    last_seen: str,
+) -> Proposal:
+    """A fresh, pending proposal from what the ledger currently observes."""
+    use_when, dont_use_when = _employment_clause(specialty, category, fallback_agent)
+    now = datetime.now(UTC).isoformat()
+    if fallback_agent:
+        # Attachable to an existing surface → the doctrine's skill branch.
+        return Proposal(
+            slug=_skill_slug(specialty),
+            specialty=specialty,
+            artifact_type="skill",
+            status="pending",
+            count=count,
+            category=category,
+            fallback_agent=fallback_agent,
+            first_seen=first_seen or last_seen,
+            last_seen=last_seen,
+            created_at=now,
+            agent_role=f"Spécialiste {specialty} pour les demandes {category or 'sans catégorie'}",
+            use_when=use_when,
+            dont_use_when=dont_use_when,
+            tool_boundary="",
+            tools="",
+            target_agent=fallback_agent,
+        )
+    return Proposal(
+        slug=_agent_slug(specialty),
+        specialty=specialty,
+        artifact_type="agent",
+        status="pending",
+        count=count,
+        category=category,
+        fallback_agent=fallback_agent,
+        first_seen=first_seen or last_seen,
+        last_seen=last_seen,
+        created_at=now,
+        agent_role=f"Spécialiste {specialty} pour les demandes {category or 'sans catégorie'}",
+        use_when=use_when,
+        dont_use_when=dont_use_when,
+        tool_boundary=(
+            f"Lecture et recherche circonscrites au périmètre « {specialty} », distinct du "
+            "périmètre générique de l'agent de repli."
+        ),
+        tools=_guess_tools(category, specialty),
+    )
+
+
+# ── Storage ──────────────────────────────────────────────────────────────────
+
+
+def _proposals_dir(project_root: Path) -> Path:
+    from grimoire.core.standard_generation import PROPOSALS_DIR
+
+    return project_root.resolve() / PROPOSALS_DIR
+
+
+def _proposal_path(project_root: Path, slug: str) -> Path:
+    return _proposals_dir(project_root) / f"{slug}.yaml"
+
+
+def _load_proposal(path: Path) -> Proposal | None:
+    if not path.is_file():
+        return None
+    try:
+        from grimoire.tools._common import load_yaml
+
+        data = load_yaml(path)
+    except Exception:
+        return None
+    if not isinstance(data, dict) or data.get("status") not in _STATUSES:
+        return None
+    try:
+        return Proposal.from_dict(data)
+    except Exception:
+        return None
+
+
+def _save_proposal(path: Path, proposal: Proposal) -> None:
+    from ruamel.yaml import YAML
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    yaml = YAML()
+    yaml.default_flow_style = False
+    with path.open("w", encoding="utf-8") as fh:
+        yaml.dump(proposal.to_dict(), fh)
+
+
+def _configured_threshold(project_root: Path) -> int:
+    """``proposals.threshold`` from ``project-context.yaml`` — never below 2."""
+    config_path = project_root.resolve() / "project-context.yaml"
+    if not config_path.is_file():
+        return DEFAULT_THRESHOLD
+    try:
+        from grimoire.tools._common import load_yaml
+
+        data = load_yaml(config_path)
+        raw = data.get("proposals", {}).get("threshold") if isinstance(data, dict) else None
+        value = int(raw) if raw is not None else DEFAULT_THRESHOLD
+    except Exception:
+        return DEFAULT_THRESHOLD
+    return max(_MIN_THRESHOLD, value)
+
+
+# ── The déclencheur ──────────────────────────────────────────────────────────
+
+
+def sync_proposals(project_root: Path, *, threshold: int | None = None) -> list[Proposal]:
+    """Read the ledger's aggregated misses, refresh every proposal file.
+
+    Best-effort on the ledger read alone (issue #394's own contract: an
+    absent or unreadable trace log is zero observations, never an error) —
+    everything downstream of that read is pure local file I/O and is allowed
+    to raise, because a broken proposals directory is a real defect, not an
+    absent signal.
+    """
+    from grimoire.core.standard_generation import TRACES_DIR
+    from grimoire.traces.ledger import UNNAMED_SPECIALTY, TraceLedger
+
+    root = project_root.resolve()
+    effective_threshold = max(_MIN_THRESHOLD, threshold if threshold is not None else _configured_threshold(root))
+
+    try:
+        misses = TraceLedger(root / TRACES_DIR).agent_miss_counts()
+    except Exception:
+        misses = {}
+
+    proposals_dir = _proposals_dir(root)
+    results: list[Proposal] = []
+
+    for specialty, stats in misses.items():
+        if specialty == UNNAMED_SPECIALTY:
+            # A non-choice with nothing to name cannot become a slug — it
+            # stays a signal for `registry dispatches`, never a proposal.
+            continue
+        count = int(stats.get("count", 0) or 0)
+        if count < effective_threshold:
+            continue
+        category = str(stats.get("category") or "")
+        fallback_agent = str(stats.get("fallback_agent") or "")
+        last_seen = str(stats.get("last_seen") or "")
+
+        # The naming (and so the file path) depends on the artifact type,
+        # which depends on `fallback_agent` — decided once, at creation, from
+        # whatever the ledger showed then; recomputed here only to find the
+        # existing file when the type would resolve the same way today.
+        slug = _skill_slug(specialty) if fallback_agent else _agent_slug(specialty)
+        path = proposals_dir / f"{slug}.yaml"
+        existing = _load_proposal(path)
+
+        if existing is None:
+            proposal = _build_proposal(
+                specialty=specialty, count=count, category=category,
+                fallback_agent=fallback_agent, first_seen=last_seen, last_seen=last_seen,
+            )
+            _save_proposal(path, proposal)
+            results.append(proposal)
+            continue
+
+        if existing.status == "accepted":
+            results.append(existing)
+            continue
+
+        if existing.status == "rejected":
+            reopen_at = 2 * max(existing.rejected_at_count or effective_threshold, 1)
+            if count < reopen_at:
+                refreshed = replace(existing, count=count, last_seen=last_seen)
+                _save_proposal(path, refreshed)
+                results.append(refreshed)
+                continue
+            reopened = _build_proposal(
+                specialty=specialty, count=count, category=category,
+                fallback_agent=fallback_agent, first_seen=existing.first_seen, last_seen=last_seen,
+            )
+            _save_proposal(path, reopened)
+            results.append(reopened)
+            continue
+
+        # Still pending: refresh the observed facts, keep identity/status.
+        refreshed = replace(
+            existing,
+            count=count,
+            last_seen=last_seen,
+            category=category or existing.category,
+            fallback_agent=fallback_agent or existing.fallback_agent,
+        )
+        _save_proposal(path, refreshed)
+        results.append(refreshed)
+
+    # Proposals the current ledger no longer surfaces (rotated, pruned) stay
+    # visible if a decision was already recorded for them — a proposal
+    # accepted or rejected yesterday does not vanish because today's ledger
+    # is thinner.
+    seen = {p.slug for p in results}
+    if proposals_dir.is_dir():
+        for path in sorted(proposals_dir.glob("*.yaml")):
+            if path.stem in seen:
+                continue
+            existing = _load_proposal(path)
+            if existing is not None:
+                results.append(existing)
+                seen.add(path.stem)
+
+    return sorted(results, key=lambda p: p.slug)
+
+
+def list_proposals(project_root: Path, *, sync: bool = True, threshold: int | None = None) -> list[Proposal]:
+    """Every proposal this project has, optionally refreshed from the ledger first.
+
+    ``sync=False`` is a pure disk read (no ``TraceLedger`` involved at all) —
+    what the SessionStart line uses, so a session start never depends on the
+    trace ledger being writable.
+    """
+    if sync:
+        return sync_proposals(project_root, threshold=threshold)
+    proposals_dir = _proposals_dir(project_root)
+    if not proposals_dir.is_dir():
+        return []
+    found = (_load_proposal(path) for path in sorted(proposals_dir.glob("*.yaml")))
+    return sorted((p for p in found if p is not None), key=lambda p: p.slug)
+
+
+def count_pending(project_root: Path) -> int:
+    """Pending proposals, read straight off disk — best-effort, no ledger call."""
+    try:
+        return sum(1 for p in list_proposals(project_root, sync=False) if p.status == "pending")
+    except Exception:
+        return 0
+
+
+def accept_proposal(project_root: Path, slug: str) -> dict[str, Any]:
+    """Validate and write the real artifact — the only door creation goes through.
+
+    Never marks a proposal accepted unless the artifact was actually written
+    (and, for an agent, actually resolves without colliding with another
+    agent's tool/context/skill faisceau — the distinction guard from #372).
+    A failed write, or a write that breaks that guard, is rolled back and
+    reported honestly: this command never says it created what it did not.
+
+    Syncs first: a proposal whose threshold was only just crossed may not
+    have a file on disk yet if nobody called ``list`` in between — accepting
+    it must work the moment `grimoire proposals list` would already show it,
+    not only after a separate read.
+    """
+    root = project_root.resolve()
+    sync_proposals(root)
+    path = _proposal_path(root, slug)
+    proposal = _load_proposal(path)
+    if proposal is None:
+        return {"ok": False, "error": f"proposition introuvable : {slug}"}
+    if proposal.status == "accepted":
+        return {"ok": False, "error": "proposition déjà acceptée", "path": proposal.accepted_path}
+
+    try:
+        result = _accept_skill(root, proposal) if proposal.artifact_type == "skill" else _accept_agent(root, proposal)
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+    accepted = replace(
+        proposal,
+        status="accepted",
+        accepted_at=datetime.now(UTC).isoformat(),
+        accepted_path=str(result.get("path", "")),
+    )
+    _save_proposal(path, accepted)
+    return {"ok": True, **result}
+
+
+def _accept_agent(project_root: Path, proposal: Proposal) -> dict[str, Any]:
+    from grimoire.core.exceptions import GrimoireAgentError
+    from grimoire.hosts import collect
+    from grimoire.tools.agent_creation import AgentCreationError, create_agent_file
+
+    try:
+        result = create_agent_file(
+            project_root,
+            proposal.slug,
+            agent_role=proposal.agent_role,
+            use_when=proposal.use_when,
+            dont_use_when=proposal.dont_use_when,
+            tool_boundary=proposal.tool_boundary,
+            tools=proposal.tools,
+        )
+    except AgentCreationError as exc:
+        raise RuntimeError(exc.message) from exc
+
+    dest = Path(result["path"])
+    try:
+        skills = collect.collect_skills(project_root)
+        collect.collect_agents(project_root, known_skills=frozenset(s.slug for s in skills))
+    except GrimoireAgentError as exc:
+        dest.unlink(missing_ok=True)
+        raise RuntimeError(
+            f"agent créé puis annulé : {exc} (faisceau identique à un agent existant)"
+        ) from exc
+    return result
+
+
+def _accept_skill(project_root: Path, proposal: Proposal) -> dict[str, Any]:
+    from grimoire.core import layout
+
+    if not proposal.target_agent:
+        raise RuntimeError("aucun agent de repli à qui attacher ce skill")
+
+    skills_dir = layout.overrides_dir(project_root) / layout.SKILLS_SUBDIR
+    dest = skills_dir / f"{proposal.slug}.md"
+    if dest.is_file():
+        raise RuntimeError(f"un skill '{proposal.slug}' existe déjà à {dest}")
+
+    body = (
+        f"---\n"
+        f'name: "{proposal.slug}"\n'
+        f'description: "{proposal.use_when}"\n'
+        f"---\n\n"
+        f"# {proposal.agent_role}\n\n"
+        f"Proposé après {proposal.count} non-choix observés sur la spécialité "
+        f"« {proposal.specialty} » (catégorie « {proposal.category or 'non classée'} »).\n\n"
+        f"**Employer quand** : {proposal.use_when}\n\n"
+        f"**Ne pas employer quand** : {proposal.dont_use_when}\n\n"
+        "<!-- Ce corps est un gabarit mécanique — complétez la séquence réelle "
+        "avant de vous y fier. -->\n"
+    )
+    skills_dir.mkdir(parents=True, exist_ok=True)
+    dest.write_text(body, encoding="utf-8")
+
+    from grimoire.tools.workspace_routes import _agent_skill_action
+
+    try:
+        _agent_skill_action(project_root, proposal.target_agent, {"skill": proposal.slug, "action": "assign"})
+    except Exception as exc:
+        dest.unlink(missing_ok=True)
+        raise RuntimeError(f"skill créé puis annulé : impossible de l'attacher à {proposal.target_agent} ({exc})") from exc
+
+    return {"status": "created", "artifact_type": "skill", "path": str(dest), "attached_to": proposal.target_agent}
+
+
+def reject_proposal(project_root: Path, slug: str) -> dict[str, Any]:
+    """Mark a proposal refused, snapshotting the count it was refused at.
+
+    Syncs first, same reason as :func:`accept_proposal`: a proposal must be
+    refusable the moment it would show up in ``list``, not only after a
+    separate read materialized its file.
+    """
+    root = project_root.resolve()
+    sync_proposals(root)
+    path = _proposal_path(root, slug)
+    proposal = _load_proposal(path)
+    if proposal is None:
+        return {"ok": False, "error": f"proposition introuvable : {slug}"}
+    if proposal.status == "accepted":
+        return {"ok": False, "error": "proposition déjà acceptée — le refus n'a plus d'effet"}
+
+    rejected = replace(
+        proposal,
+        status="rejected",
+        rejected_at=datetime.now(UTC).isoformat(),
+        rejected_at_count=proposal.count,
+    )
+    _save_proposal(path, rejected)
+    return {"ok": True, "status": "rejected", "slug": slug}

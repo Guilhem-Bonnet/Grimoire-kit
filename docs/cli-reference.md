@@ -967,6 +967,31 @@ par du code du kit : cette résolution se fait dans son raisonnement. Écriture
 best-effort — un journal indisponible ou illisible ne fait jamais échouer la
 commande. Détail : [Persona d'entrée → Non-choix](hosts.md#non-choix).
 
+### `grimoire proposals`
+
+Le déclencheur d'artefact (issue #395) : à la répétition d'une même
+spécialité manquante (jamais au premier non-choix), propose un agent — ou un
+skill à attacher à l'agent de repli déjà observé — mais ne crée jamais rien
+sans acceptation explicite.
+
+```bash
+grimoire proposals list
+grimoire proposals accept terraform-specialist
+grimoire proposals reject terraform-specialist
+grimoire -o json proposals list
+```
+
+| Commande | Description |
+|----------|-------------|
+| `grimoire proposals list` | Propositions en attente, rafraîchies depuis `grimoire registry dispatches` |
+| `grimoire proposals accept <slug>` | Écrit l'artefact réel dans `_grimoire/overrides/` (même chemin que l'outil d'ajout d'agent) |
+| `grimoire proposals reject <slug>` | Marque la proposition refusée — reproposée seulement si son compte double depuis ce refus |
+
+Seuil configurable via `proposals.threshold` dans `project-context.yaml`
+(défaut 2, jamais 1). Aucune option `--auto` : accepter reste toujours un
+geste explicite. Même moteur que le cockpit (espace Piloter, section
+Agents), qui montre et actionne les mêmes propositions.
+
 ### `grimoire plugins list`
 
 Liste les plugins installés (tools et backends).

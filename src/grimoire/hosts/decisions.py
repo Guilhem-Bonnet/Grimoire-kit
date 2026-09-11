@@ -563,6 +563,28 @@ def _providers_status_line(project_root: Path) -> str:
         return ""
 
 
+def _proposals_status_line(project_root: Path) -> str:
+    """One-line pointer to pending artifact proposals, for session start (issue #395).
+
+    Pure disk read — :func:`grimoire.proposals.count_pending` never touches
+    the trace ledger, so a session start never depends on it being writable,
+    same guarantee as every other piece of this context. Silent at zero: an
+    empty line every session for a project with nothing pending would be
+    noise, not a signal, and a project that never ran the déclencheur (no
+    ``_grimoire-output/proposals/`` at all) must read exactly like one that
+    ran it and found nothing — never like a probe that failed.
+    """
+    try:
+        from grimoire.proposals import count_pending
+
+        pending = count_pending(project_root)
+        if not pending:
+            return ""
+        return f"{pending} proposition(s) d'artefact en attente, voir le cockpit ou `grimoire proposals`"
+    except Exception:
+        return ""
+
+
 def decide_activation(hook: HookInput) -> Decision:
     """Session start: hand the agent its persona, its claim's recall, then the directive.
 
@@ -576,6 +598,9 @@ def decide_activation(hook: HookInput) -> Decision:
     The providers line (issue #329) comes last of all: it is operational
     status, not identity or protocol, and it is the one part of this context
     that can legitimately be empty (no registry) without that being a defect.
+    The proposals line (issue #395) sits right next to it — same register,
+    operational rather than protocol — and is silent just as often (no
+    proposal ever crossed the repetition threshold).
     """
     task_id = active_task_id(hook.project_root)
     directive = activation_context_text(hook.project_root, task_id=task_id)
@@ -584,7 +609,10 @@ def decide_activation(hook: HookInput) -> Decision:
         _record_agent_dispatch(hook.project_root, entry_name, task_id)
     recall = _claimed_task_recall(hook.project_root, task_id)
     providers_line = _providers_status_line(hook.project_root)
-    context = "\n".join(part for part in (persona, recall, directive, providers_line) if part)
+    proposals_line = _proposals_status_line(hook.project_root)
+    context = "\n".join(
+        part for part in (persona, recall, directive, providers_line, proposals_line) if part
+    )
     return Decision(
         outcome=Outcome.ALLOW,
         context=context,

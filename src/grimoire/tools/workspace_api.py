@@ -871,3 +871,18 @@ def agents_view(project_root: Path) -> dict[str, Any]:
         "skills": [s.to_dict() for s in skills],
         "entry_point": next((a.name for a in agents if a.entry_point), None),
     }
+
+
+def proposals_view(project_root: Path) -> dict[str, Any]:
+    """Artifact-creation proposals (issue #395), refreshed from the ledger first.
+
+    ``sync=True`` (the default) — the cockpit is exactly the surface the
+    issue names for showing « les faits qui les fondent » alongside the
+    accept/refuse actions, so every read here re-runs the déclencheur rather
+    than trusting a possibly stale file. A ledger that cannot be read yields
+    an empty list, never an error — same contract as the rest of this view.
+    """
+    from grimoire.proposals import list_proposals
+
+    proposals = list_proposals(project_root.resolve())
+    return {"proposals": [p.to_dict() for p in proposals]}

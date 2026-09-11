@@ -111,6 +111,10 @@ def _agents(project_root: Path, _query: _Query) -> Any:
     return workspace_api.agents_view(project_root)
 
 
+def _proposals(project_root: Path, _query: _Query) -> Any:
+    return workspace_api.proposals_view(project_root)
+
+
 def _file_usage(project_root: Path, query: _Query) -> Any:
     return workspace_api.file_usage(project_root, _one(query, "path"))
 
@@ -162,6 +166,7 @@ GET_ROUTES: dict[str, _GetHandler] = {
     f"{PREFIX}language": _language,
     f"{PREFIX}blueprints": _blueprints,
     f"{PREFIX}agents": _agents,
+    f"{PREFIX}proposals": _proposals,
 }
 
 
@@ -537,6 +542,37 @@ def _agent_route(path: str) -> tuple[str, str] | None:
     return name, action
 
 
+# ── Propositions d'artefact (issue #395) ────────────────────────────────────
+#
+# Même moteur que la CLI (``grimoire proposals``) : :mod:`grimoire.proposals`
+# décide, écrit et valide — cette route ne fait que le brancher, comme
+# ``_agent_skill_action``/``_agent_fields_update`` le font déjà pour les
+# agents. Aucune création silencieuse : accepter écrit un artefact réel (et
+# annule si la garde de distinction le refuse), refuser ne fait que marquer
+# la proposition — jamais l'inverse.
+
+
+def _proposal_route(path: str) -> tuple[str, str] | None:
+    """``(slug, action)`` depuis ``/api/workspace/proposals/<slug>/<action>``, ou ``None``."""
+    rest = path[len(f"{PREFIX}proposals/") :]
+    slug, _, action = rest.partition("/")
+    if not slug or not action or "/" in action:
+        return None
+    return slug, action
+
+
+def _proposal_accept(project_root: Path, slug: str, _body: dict[str, Any]) -> Any:
+    from grimoire.proposals import accept_proposal
+
+    return accept_proposal(project_root, slug)
+
+
+def _proposal_reject(project_root: Path, slug: str, _body: dict[str, Any]) -> Any:
+    from grimoire.proposals import reject_proposal
+
+    return reject_proposal(project_root, slug)
+
+
 def workspace_post(project_root: Path, path: str, body: dict[str, Any]) -> Any:
     """Résout une écriture de la vue de travail pour ``project_root``.
 
@@ -566,6 +602,14 @@ def workspace_post(project_root: Path, path: str, body: dict[str, Any]) -> Any:
                     return _agent_skill_action(project_root, agent_name, body)
                 if action == "fields":
                     return _agent_fields_update(project_root, agent_name, body)
+        if path.startswith(f"{PREFIX}proposals/"):
+            parsed_proposal = _proposal_route(path)
+            if parsed_proposal is not None:
+                slug, action = parsed_proposal
+                if action == "accept":
+                    return _proposal_accept(project_root, slug, body)
+                if action == "reject":
+                    return _proposal_reject(project_root, slug, body)
     except TaskRefusedError as exc:
         # Un gate rouge n'est pas une panne du serveur : c'est la réponse. On
         # la rend telle quelle, avec la preuve manquante et son remède, comme

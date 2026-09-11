@@ -103,7 +103,7 @@ _KNOWN_ARCHETYPES = frozenset({
 
 # Known keys per section for unknown-key detection
 _KNOWN_TOP_KEYS = frozenset({
-    "project", "user", "memory", "agents", "installed_archetypes",
+    "project", "user", "memory", "agents", "installed_archetypes", "proposals",
 })
 
 _KNOWN_PROJECT_KEYS = frozenset({
@@ -128,6 +128,10 @@ _KNOWN_AGENTS_KEYS = frozenset({
     "archetype", "custom_agents", "entry",
 })
 
+_KNOWN_PROPOSALS_KEYS = frozenset({
+    "threshold",
+})
+
 # Cle -> jeu de cles connues, indexe par le `keyset_id` que
 # `grimoire_schema_core.validate_config` renvoie pour chaque erreur "Unknown
 # key" (voir le docstring de module). "" ne devrait jamais etre utilise comme
@@ -140,6 +144,7 @@ _KEYSETS: dict[str, frozenset[str]] = {
     "user": _KNOWN_USER_KEYS,
     "memory": _KNOWN_MEMORY_KEYS,
     "agents": _KNOWN_AGENTS_KEYS,
+    "proposals": _KNOWN_PROPOSALS_KEYS,
 }
 
 
@@ -266,6 +271,9 @@ def _validate_config_python(
 
     if "installed_archetypes" in data:
         _validate_installed_archetypes(data["installed_archetypes"], errors)
+
+    if "proposals" in data:
+        _validate_proposals(data["proposals"], errors)
 
     # Unknown top-level keys
     _check_unknown_keys(data, _KNOWN_TOP_KEYS, "", errors)
@@ -430,6 +438,33 @@ def _validate_agents(section: Any, errors: list[ValidationError]) -> None:
                     seen.add(agent_id)
 
     _check_unknown_keys(section, _KNOWN_AGENTS_KEYS, "agents", errors)
+
+
+def _validate_proposals(section: Any, errors: list[ValidationError]) -> None:
+    """``proposals.threshold`` — the repetition count the déclencheur (#395) waits for.
+
+    Never 1: a threshold that low would turn a single non-choice into a
+    proposal, exactly what the issue refuses. An out-of-range value is a
+    config error here, not silently clamped — the runtime clamp in
+    :mod:`grimoire.proposals` is a last line of defence, not a substitute
+    for telling the author their config does not mean what they wrote.
+    """
+    if not isinstance(section, dict):
+        errors.append(ValidationError(
+            path="proposals",
+            message="'proposals' must be a mapping.",
+        ))
+        return
+
+    threshold = section.get("threshold")
+    if threshold is not None and (not isinstance(threshold, int) or isinstance(threshold, bool) or threshold < 2):
+        errors.append(ValidationError(
+            path="proposals.threshold",
+            message="'proposals.threshold' must be an integer of at least 2.",
+            suggestion="A single non-choice never earns a proposal — pick 2 or higher.",
+        ))
+
+    _check_unknown_keys(section, _KNOWN_PROPOSALS_KEYS, "proposals", errors)
 
 
 def _validate_installed_archetypes(

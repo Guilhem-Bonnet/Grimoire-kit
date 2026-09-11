@@ -8,6 +8,26 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 ## [Unreleased]
 ### Ajouté
 
+- **feat(core): proposer un artefact à la répétition d'un non-choix (#395).**
+  Le déclencheur lit `TraceLedger.agent_miss_counts()` (#394, désormais enrichi
+  de la catégorie et de l'agent de repli les plus récents) et, quand une même
+  spécialité manquante atteint un seuil configurable (`proposals.threshold`
+  dans `project-context.yaml`, défaut 2, jamais 1), écrit une proposition
+  `pending` sous `_grimoire-output/proposals/<slug>.yaml` — nom, rôle,
+  `use_when`/`dont_use_when`/`tools` déduits mécaniquement des étiquettes
+  observées, jamais d'appel LLM. Type d'artefact selon la doctrine
+  (`docs/artifact-doctrine.md`) : un agent de repli déjà observé propose un
+  skill à lui attacher, son absence propose un agent. Jamais de création sans
+  acceptation explicite (`grimoire proposals accept <slug>`, aucune option
+  `--auto`), qui écrit l'artefact réel via le même chemin que l'outil d'ajout
+  d'agent réparé par #367 (`grimoire.tools.agent_creation`, désormais partagé)
+  et annule si la garde de distinction (#372) refuse le faisceau. Refuser
+  (`grimoire proposals reject <slug>`) marque la proposition ; la même
+  spécialité n'est reproposée que si son compte a doublé depuis le refus.
+  `grimoire proposals list` en CLI, section Propositions du cockpit (espace
+  Piloter, #382) avec les mêmes deux actions, et une ligne SessionStart à côté
+  des fournisseurs (« N proposition(s) d'artefact en attente »).
+
 - **feat(core): instrumenter les non-choix du concierge (#389).** Symétrique
   du choix d'agent (#366) : quand le concierge cherche un spécialiste et n'en
   trouve aucun, ou se rabat sur un généraliste, `grimoire agent-miss`
