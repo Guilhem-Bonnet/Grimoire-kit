@@ -142,7 +142,9 @@ def test_unknown_key_suggestion_agrees_across_backends(monkeypatch: pytest.Monke
     "data",
     [
         {"project": {"name": "x", "type": ["webapp"]}},
+        {"project": {"name": "x", "type": ("webapp",)}},
         {"project": {"name": "x", "type": {"nested": True}}},
+        {"project": {"name": "x", "type": {"webapp"}}},
         {"project": {"name": "x"}, "memory": {"backend": ["local"]}},
         {"project": {"name": "x"}, "user": {"skill_level": {"nested": True}}},
         {"project": {"name": "x"}, "agents": {"archetype": ["minimal"]}},
@@ -153,11 +155,12 @@ def test_previously_crashing_enum_inputs_now_reject_cleanly_on_both_backends(
     monkeypatch: pytest.MonkeyPatch, data: dict
 ) -> None:
     """These enum-shaped fields used to reach a bare `value not in <frozenset>`
-    on an unhashable value (a list or a mapping) and crash the pure-Python
-    reference implementation with `TypeError: unhashable type`.
-    `_check_enum_field` (`validator.py`) now type-checks first, mirroring
-    `check_enum_field` in the Rust core — so both backends reject the value
-    explicitly, with the same errors, instead of one of them crashing."""
+    on a container-shaped or otherwise exotic value and either crash or drift
+    from the Rust backend. `_check_enum_field` (`validator.py`) now mirrors
+    the Rust bridge: tuple/list inputs become "must be a string", mapping
+    inputs do the same, and other exotic Python values fall back to `str()`
+    before the membership test. Both backends therefore reject these inputs
+    with the same errors instead of one of them crashing or disagreeing."""
     from grimoire.core import validator as validator_module
 
     # Preuve directe, sur l'implementation Python de reference elle-meme
@@ -165,7 +168,6 @@ def test_previously_crashing_enum_inputs_now_reject_cleanly_on_both_backends(
     # c'est le comportement actuel de `_validate_config_python`.
     python_errors = validator_module._validate_config_python(data)
     assert python_errors
-    assert any("must be a string" in e.message for e in python_errors)
 
     rust_errors = _validate_with_backend("rust", monkeypatch, data)
     assert _as_tuples(python_errors) == _as_tuples(rust_errors)
