@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.44.1] - 2026-09-11
+
 - **perf(hosts): découper `hosts/decisions.py` par décision — `grimoire-hook` payait la moitié du fichier pour chaque appel (#419).**
   Suite de mesure de #418 : `grimoire-hook PreToolUse` restait à 69-70 ms
   malgré le chargement paresseux du CLI, parce que ce point d'entrée
