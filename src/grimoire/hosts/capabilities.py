@@ -22,7 +22,13 @@ from grimoire.bridges.schemas import (
     HostCapabilityManifest,
     HostId,
 )
-from grimoire.hosts.surface import HookEvent
+
+# From the leaf module (issue #419), not ``grimoire.hosts.surface``: this
+# module is imported on every hook call (``profile_for``/``resolve_host``),
+# and pulling the full agent/model IR — ``AgentSpec``, ``ModelAffinity``,
+# the Rust-optional fingerprint machinery — for one enum was exactly the
+# tax a hook decision must not pay.
+from grimoire.hosts.events import HookEvent
 
 #: Hook events mapped onto the ``HostHooks`` field names used by the bridge
 #: manifests, so availability has exactly one source of truth.

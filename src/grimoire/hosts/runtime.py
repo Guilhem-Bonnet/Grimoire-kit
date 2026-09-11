@@ -34,7 +34,11 @@ from grimoire.hosts.decisions import (
     Outcome,
     run_decision,
 )
-from grimoire.hosts.surface import HookEvent
+
+# From the leaf module (issue #419), not ``grimoire.hosts.surface``: this is
+# the hook entry point, invoked on every tool call — pulling the full
+# agent/model IR for one enum was the tax the split removes.
+from grimoire.hosts.events import HookEvent
 
 #: Neutral event -> the name a host writes in its configuration and payloads.
 #: Claude Code and VS Code Copilot happen to share the spelling; the table is
