@@ -3,7 +3,7 @@ $schema: "grimoire-archetype-dna/v1"
 id: web-app
 name: "Web App"
 version: "1.0.0"
-description: "Applications web full-stack — Frontend, API, base de données, CI/CD"
+description: "Applications web full-stack — un généraliste (frontend + API + base de données) ; le savoir-faire frontend/UX/accessibilité, sans frontière d'outils propre, est porté par un skill attaché (issue #375) plutôt qu'un second agent au même faisceau."
 icon: "network"
 author: "grimoire-kit"
 tags: [web, frontend, backend, api, fullstack, react, nextjs, typescript, python, go]
@@ -14,11 +14,11 @@ traits:
   - name: tdd-mandatory
     description: "Test-Driven Development obligatoire"
     rule: "Tests AVANT le code. Pour toute feature : 1) écrire le test qui échoue, 2) écrire le code minimal pour le faire passer, 3) refactorer. CC PASS = build + tests OK."
-    agents_affected: [frontend-specialist, fullstack-dev, pixel, gopher, serpent]
+    agents_affected: [fullstack-dev, gopher, serpent]
   - name: type-safety
     description: "Typage strict partout"
     rule: "TypeScript strict: true. Python avec type hints obligatoires + mypy. Go avec interfaces explicites. Zéro any/interface{} sans explication."
-    agents_affected: [pixel, gopher, serpent, frontend-specialist, fullstack-dev]
+    agents_affected: [fullstack-dev, gopher, serpent]
   - name: api-contract-first
     description: "Contrat API défini avant implémentation"
     rule: "Toute nouvelle API route → définir l'interface/type/schema OpenAPI en premier. Frontend et backend s'accordent sur le contrat avant d'implémenter."
@@ -26,7 +26,7 @@ traits:
   - name: accessibility-aware
     description: "Accessibilité WCAG 2.1 AA minimum"
     rule: "Zéro composant UI sans aria-labels. Contraste ≥ 4.5:1. Navigation clavier fonctionnelle."
-    agents_affected: [frontend-specialist, pixel]
+    agents_affected: [fullstack-dev]
   - name: tool-resolve-first
     description: "Résolution d'outils avant toute opération externe"
     rule: "Avant toute opération nécessitant un outil externe (linter, test runner, build, browser), appeler grimoire_tool_resolve pour vérifier disponibilité et alternatives."
@@ -34,7 +34,7 @@ traits:
   - name: web-aware
     description: "Accès web intuitif pour vérification et debug"
     rule: "Les agents peuvent naviguer le web via grimoire_web_fetch / grimoire_web_screenshot / grimoire_web_readability pour checker des endpoints, vérifier l'UI ou consulter des docs. Toujours disponible via urllib fallback."
-    agents_affected: [frontend-specialist, fullstack-dev]
+    agents_affected: [fullstack-dev]
 
 constraints:
   - id: no-console-log-in-prod
@@ -48,7 +48,7 @@ constraints:
   - id: no-inline-styles
     description: "Pas de styles inline si un design system est présent"
     enforcement: soft
-    checked_by: frontend-specialist
+    checked_by: fullstack-dev
 
 values:
   - name: user-experience-first
@@ -89,13 +89,13 @@ acceptance_criteria:
     enforcement: hard
     context: "Trait tdd-mandatory — cycle Red/Green/Refactor"
     triggers_on: ["src/**/*.ts", "src/**/*.tsx", "**/*.py", "**/*.go"]
-    checked_by: frontend-specialist
+    checked_by: fullstack-dev
   - id: typescript-strict-no-any
     description: "Aucun \"any\" explicite dans le code TypeScript soumis"
     enforcement: hard
     context: "Trait type-safety — strict: true obligatoire"
     triggers_on: ["**/*.ts", "**/*.tsx"]
-    checked_by: frontend-specialist
+    checked_by: fullstack-dev
   - id: api-schema-before-impl
     description: "Le schéma OpenAPI ou le type d'interface est défini avant le code API"
     enforcement: soft
@@ -107,15 +107,25 @@ acceptance_criteria:
     enforcement: soft
     context: "Trait accessibility-aware — WCAG 2.1 AA"
     triggers_on: ["**/*.tsx", "**/*.vue", "**/*.svelte"]
-    checked_by: pixel
+    checked_by: fullstack-dev
 
 agents:
-  - path: "../../archetypes/web-app/agents/frontend-specialist.md"
-    required: true
-    description: "Frontend Specialist — React, Vue, Next.js, UX"
   - path: "../../archetypes/web-app/agents/fullstack-dev.md"
     required: true
-    description: "Fullstack Dev — API, base de données, auth"
+    description: "Fullstack Dev — frontend, API, base de données, auth, plus le skill attaché web-frontend-ux (accessibilité, UX, perf UI)"
+
+# Skill attaché par défaut à fullstack-dev (issue #375) : frontend-specialist
+# partageait le même faisceau d'outils exact {read, edit, execute} que
+# fullstack-dev, sans contexte ni skill propres — rien ne les distinguait au
+# sens de la garde de #372. Son corps devient le corps du skill, sans perte ;
+# ce qui change, c'est que la session ne paie plus sa description à chaque
+# tour, seulement quand fullstack-dev travaille sur du frontend. Cette liste
+# documente l'attachement ; l'attachement effectif et vérifié au build est le
+# champ `skills:` du frontmatter de l'agent porteur.
+skills:
+  - path: "../../archetypes/web-app/skills/web-frontend-ux.md"
+    attached_to: fullstack-dev
+    description: "Ex-agent Pixel — composants, accessibilité WCAG 2.1 AA, revue UX, performance UI (Core Web Vitals)"
 
 workflows: []
 shared_context_template: "../../archetypes/web-app/shared-context.tpl.md"

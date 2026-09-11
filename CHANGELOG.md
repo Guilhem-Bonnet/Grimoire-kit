@@ -9,6 +9,18 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 ### Ajouté
 
 - **Archétype `stack` refait — un généraliste plus sept skills attachés (#375).** Les sept experts par techno (`python-expert`, `go-expert`, `typescript-expert`, `docker-expert`, `terraform-expert`, `ansible-expert`, `k8s-expert`) partageaient le même faisceau outils et aucun contexte propre — c'était un seul agent décrit sept fois. Ils deviennent des skills attachés à un nouvel agent généraliste, `stack-engineer` ; le corps de chaque agent devient le corps de son skill, rien n'est supprimé. `grimoire init --archetype stack` livre désormais un agent, et une composition `web-app,stack` reste sans note de collision pour cet archétype.
+- **Archétypes `web-app` et `fix-loop`/`minimal` alignés sur la forme validée
+  d'`infra-ops` (#375).** `web-app` livrait deux agents (`frontend-specialist`,
+  `fullstack-dev`) au même faisceau d'outils exact `{read, edit, execute}`,
+  sans contexte ni skill propres — la garde de distinction (#372) les
+  déclarait indiscernables. `frontend-specialist` devient le skill attaché
+  `web-frontend-ux` (composants, accessibilité WCAG 2.1 AA, revue UX,
+  performance UI) porté par `fullstack-dev`, son corps repris sans perte.
+  `fix-loop` (un seul agent, contexte propre) et `minimal` (gabarit `.tpl`
+  jamais scaffoldé comme agent) étaient déjà conformes, aucun changement.
+  Connu et hors périmètre : `fix-loop-orchestrator` partage son faisceau avec
+  `security-auditor` (archétype `meta`) — dette à régler côté méta.
+
 - **Premier port Rust, optionnel — `grimoire.policies` (#354).** Le moteur
   de règles a désormais un second cœur, en Rust, exposé via PyO3 depuis
   `rust/grimoire-policies-core/` ; `PolicyEngine.evaluate` l'utilise quand il
