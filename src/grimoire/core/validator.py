@@ -216,26 +216,26 @@ def _check_enum_field(
     ``agents.archetype``) without crashing on an unhashable value.
 
     ``value not in valid`` — the plain membership test this replaces —
-    raises ``TypeError: unhashable type`` when ``value`` is a ``list`` or a
-    ``dict``, before the comparison is even attempted. Mirrors
-    ``check_enum_field`` in ``rust/grimoire-schema-core/src/lib.rs``, the
-    Rust oracle this Python path must match (issue #354): a list or a
-    mapping becomes an explicit "must be a string" validation error instead
-    of an unhandled exception. Any other hashable scalar (bool/int/float)
-    still crosses the membership test as-is — it was never the source of
-    the crash.
+    raises ``TypeError: unhashable type`` on some container-shaped values
+    before the comparison is even attempted. Mirrors ``check_enum_field`` in
+    ``rust/grimoire-schema-core/src/lib.rs``, the Rust oracle this Python
+    path must match (issue #354): Python ``list``/``tuple`` inputs map to the
+    Rust list variant, Python ``dict`` inputs map to the Rust mapping
+    variant, and any other exotic value falls back to its ``str()``
+    representation the same way the PyO3 bridge does.
     """
-    if isinstance(value, (list, dict)):
-        kind = "a list" if isinstance(value, list) else "a mapping"
+    if isinstance(value, (list, tuple, dict)):
+        kind = "a mapping" if isinstance(value, dict) else "a list"
         errors.append(ValidationError(
             path=path,
             message=f"'{path}' must be a string (got {kind}).",
         ))
         return
-    if value not in valid:
+    rendered = value if isinstance(value, (str, bool, int, float)) else str(value)
+    if rendered not in valid:
         errors.append(ValidationError(
             path=path,
-            message=f"{unknown_label} '{value}'.",
+            message=f"{unknown_label} '{rendered}'.",
             suggestion=f"{valid_label}: {', '.join(sorted(valid))}",
         ))
 
