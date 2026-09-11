@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any
 
 from grimoire.core.exceptions import GrimoireError, GrimoireMissionError
 from grimoire.core.standard_generation import STANDARD_DIR
+from grimoire.core.standard_state import invalidate_cache
 from grimoire.missions.board import board_status_of, build_board, write_board
 from grimoire.missions.gates import GateRefusal, GateVerdict, check_transition
 from grimoire.missions.ledger import MissionLedger
@@ -308,6 +309,10 @@ class TaskService:
             write_board(dest, build_board(self.ledger, project=self.project_root.name))
         except (OSError, GrimoireError):
             return None
+        # Le hook lit la tâche ``in_progress`` du board via un cache dérivé,
+        # invalidé par empreinte fichier (grimoire.core.standard_state) ; sans
+        # cet appel, la reprojection ne serait visible qu'au hook *suivant*.
+        invalidate_cache(self.project_root)
         return dest
 
     # ── Contexte ───────────────────────────────────────────────────────────

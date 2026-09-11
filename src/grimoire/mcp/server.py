@@ -788,7 +788,9 @@ def task_recall(
     root = Path(project_path).resolve()
     try:
         service = _task_service(project_path, ledger_root)
-        resolved = task_id or resolve_active_task(root).task_id
+        # readOnlyHint : ce tool ne doit écrire nulle part, pas même le cache
+        # dérivé de standard_state (issue #419, second lot).
+        resolved = task_id or resolve_active_task(root, write_cache=False).task_id
         service.require(resolved)
         recall = service.recall(resolved)
         return json.dumps(recall.to_dict(), indent=2, ensure_ascii=False, default=str)
@@ -816,7 +818,9 @@ def grimoire_host_status(project_path: str = ".") -> str:
 
     target = Path(project_path).resolve()
     try:
-        surface = build_surface(target)
+        # readOnlyHint : ce tool ne doit écrire nulle part, pas même le cache
+        # dérivé de standard_state (issue #419, second lot).
+        surface = build_surface(target, write_cache=False)
     except (GrimoireError, OSError, ValueError) as exc:
         return _tool_error({"error": str(exc)})
 

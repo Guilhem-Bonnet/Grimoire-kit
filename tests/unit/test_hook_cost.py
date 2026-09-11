@@ -197,6 +197,72 @@ def test_running_one_decision_imports_only_its_own_submodule(decision_id: str, t
     )
 
 
+def _run_one_decision_reporting_ruamel(
+    decision_id: str, payload: dict[str, object], project_root: str
+) -> subprocess.CompletedProcess[str]:
+    """Like :func:`_run_one_decision`, but stderr reports whether ``ruamel`` loaded.
+
+    Used to prove the standard-state cache (issue #419, second lot) actually
+    keeps ``ruamel.yaml`` off a warm hook call, not just off the module import
+    covered by ``FORBIDDEN_AT_IMPORT`` above — that list is checked before any
+    decision runs; this checks after one runs to completion.
+    """
+    probe = (
+        "import sys, os, json\n"
+        f"sys.argv = ['grimoire-hook', '--host', 'claude-code', '--event', 'PreToolUse', "
+        f"'--project-root', {project_root!r}, '--decision', {decision_id!r}]\n"
+        "r, w = os.pipe()\n"
+        f"os.write(w, {json.dumps(payload)!r}.encode('utf-8'))\n"
+        "os.close(w)\n"
+        "os.dup2(r, 0)\n"
+        "from grimoire.hosts.runtime import main\n"
+        "main()\n"
+        "leaked = [m for m in sys.modules if m == 'ruamel' or m.startswith('ruamel.')]\n"
+        "print(','.join(leaked), file=sys.stderr)\n"
+    )
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(p for p in sys.path if p)}
+    return subprocess.run(
+        [sys.executable, "-c", probe],
+        capture_output=True,
+        text=True,
+        check=True,
+        env=env,
+        encoding="utf-8",
+    )
+
+
+def test_a_warm_standard_state_cache_never_imports_ruamel(tmp_path: Path) -> None:
+    """issue #419 (second lot): a cache hit must not pay the ``ruamel.yaml`` import.
+
+    ``decide_tool_policy`` calls ``active_task_id``/``active_profile_id`` for
+    every non-read-only tool call — exactly the destructive payload this
+    guard already uses. Both used to parse ``standard-profile.yaml`` (and
+    ``task-board.yaml``) through ``ruamel.yaml`` on every single call; a
+    fingerprint-checked JSON cache under ``_grimoire-output/.runs/`` now
+    means only a *cold* cache (or a source file that changed since) pays that
+    cost. The first subprocess call below is deliberately cold — it both
+    proves the guard measures the right thing (ruamel does load once) and
+    creates the cache the second, warm call must not touch YAML for.
+    """
+    standard_dir = tmp_path / "_grimoire" / "standard"
+    standard_dir.mkdir(parents=True)
+    (standard_dir / "standard-profile.yaml").write_text("profile: governed\n", encoding="utf-8")
+    payload = {"tool_name": "Bash", "tool_input": {"command": "rm -rf _grimoire-output/tmp"}}
+
+    cold = _run_one_decision_reporting_ruamel("grimoire.tool-policy", payload, str(tmp_path))
+    assert cold.stderr.strip(), (
+        "le premier appel (cache froid, aucun _grimoire-output/.runs/ encore écrit) "
+        "doit lire le YAML pour de vrai, donc importer ruamel — sinon ce test ne "
+        "prouve rien sur le cas chaud qui suit"
+    )
+
+    warm = _run_one_decision_reporting_ruamel("grimoire.tool-policy", payload, str(tmp_path))
+    assert not warm.stderr.strip(), (
+        f"cache chaud : {warm.stderr.strip()} a quand même été importé — le hook a relu "
+        "le YAML alors que standard-profile.yaml n'a pas changé depuis (issue #419, second lot)"
+    )
+
+
 def test_a_hook_call_stays_within_a_generous_time_budget(tmp_path: Path) -> None:
     """A portable regression guard, not the 50 ms target itself.
 

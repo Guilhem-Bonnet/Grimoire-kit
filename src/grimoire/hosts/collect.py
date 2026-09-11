@@ -626,12 +626,19 @@ def _is_override(definition_ref: str) -> bool:
     return definition_ref.replace("\\", "/").startswith(f"{layout.OVERRIDES_DIR}/")
 
 
-def build_surface(project_root: Path, *, project_name: str | None = None) -> ProjectSurface:
+def build_surface(
+    project_root: Path, *, project_name: str | None = None, write_cache: bool = True
+) -> ProjectSurface:
     """Read *project_root* into the surface every emitter renders from.
 
     Skills are collected before agents on purpose: an agent's ``skills:``
     frontmatter resolves against the skill inventory, so the inventory must
     exist first.
+
+    *write_cache* is forwarded to :func:`grimoire.core.standard_state.active_profile_id`
+    — ``False`` for a caller with a no-side-effects contract (``grimoire_host_status``,
+    a ``readOnlyHint`` MCP tool); ``True`` (default) for ``grimoire host sync``, which is
+    allowed to warm the cache for the hook calls that follow.
     """
     root = project_root.resolve()
     governed = is_standard_enrolled(root)
@@ -675,7 +682,9 @@ def build_surface(project_root: Path, *, project_name: str | None = None) -> Pro
         skills=skills,
         commands=collect_commands(root, governed=governed),
         hooks=governance_hooks(governed=governed),
-        permissions=default_permissions(active_profile_id(root) if governed else "starter"),
+        permissions=default_permissions(
+            active_profile_id(root, write_cache=write_cache) if governed else "starter"
+        ),
         mcp_servers=collect_mcp_servers(root),
         governed=governed,
     )

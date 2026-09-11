@@ -77,7 +77,7 @@ from grimoire.core.standard_generation import (
     normalize_task_id,
 )
 from grimoire.core.standard_profile_manifest import read_artifact_paths, read_profile
-from grimoire.core.standard_state import board_omits_task, task_from_board
+from grimoire.core.standard_state import board_omits_task, invalidate_cache, task_from_board
 from grimoire.data import framework_path
 
 PROFILE_MAP_PATH = Path("agentic-standard/profile-map.yaml")
@@ -816,6 +816,13 @@ def setup_standard_profile(
             )
             if configured not in result.written:
                 result.written.append(configured)
+
+    if not dry_run and (result.written or generated):
+        # Le hook lit le profil (et parfois le board) via un cache dérivé,
+        # invalidé par empreinte fichier — voir grimoire.core.standard_state.
+        # Sans cet appel, seule l'invocation *suivante* du hook verrait ce
+        # que cette commande vient d'écrire ; avec, c'est immédiat.
+        invalidate_cache(root)
 
     return result
 
