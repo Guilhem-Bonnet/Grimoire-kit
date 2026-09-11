@@ -282,15 +282,38 @@ def test_a_declared_context_replaces_the_default_load_not_adds_to_it(governed: P
     assert "Lis `_grimoire/_memory/shared-context.md` s'il existe" in scribe
 
 
-def _read_from_origin_main(relpath: str) -> str:
-    """Le corps d'un fichier tel qu'il vit sur ``origin/main`` — jamais celui du
-    worktree courant, dont ``archetypes/`` est hors périmètre pour ce lot
-    (#379) : quatre autres chantiers le retouchent en parallèle."""
-    import subprocess
+_SYNTHETIC_SHARED_CONTEXT = (
+    "# Contexte partagé du projet\n\n"
+    + "\n".join(
+        f"- Décision {i} : une ligne de contexte partagé que tout agent charge par défaut, "
+        "qu'il en ait besoin ou non, et qui pèse à chaque activation."
+        for i in range(1, 25)
+    )
+    + "\n"
+)
 
-    return subprocess.run(
-        ["git", "show", f"origin/main:{relpath}"], capture_output=True, check=True, text=True
-    ).stdout
+
+def _synthetic_agent(slug: str, role: str) -> str:
+    """Un agent de test à la taille d'un agent réel, sans dépendre des fichiers
+    livrés par le kit — ceux-ci changent de forme dans d'autres lots (#375), et
+    un test qui les lisait depuis ``origin/main`` n'avait pas cette référence
+    dans la CI. Seule la nature du rôle change entre les trois cas."""
+    body = "\n".join(
+        f"{i}. {role} — étape de raisonnement numéro {i}, décrite avec le niveau de détail "
+        "d'une persona livrée, pour que la mesure porte sur une taille réaliste."
+        for i in range(1, 21)
+    )
+    return (
+        "---\n"
+        f'name: "{slug}"\n'
+        f'description: "{slug} — {role}"\n'
+        'tools: "read, search"\n'
+        f'use_when: "Quand la tâche relève de : {role}."\n'
+        'dont_use_when: "Quand une lecture directe suffit."\n'
+        f'tool_boundary: "Lecture transverse — {role}."\n'
+        "---\n"
+        f"# {slug}\n\n{body}\n"
+    )
 
 
 def _inject_context_declaration(raw: str, context_path: str) -> str:
@@ -304,19 +327,18 @@ def _inject_context_declaration(raw: str, context_path: str) -> str:
 
 
 @pytest.mark.parametrize(
-    "relpath,slug",
+    "slug,role",
     [
-        ("archetypes/meta/agents/project-navigator.md", "project-navigator"),  # navigation
-        ("archetypes/meta/agents/memory-keeper.md", "memory-keeper"),  # mémoire
-        ("archetypes/meta/agents/security-auditor.md", "security-auditor"),  # sécurité
+        ("nav-agent", "navigation dans le projet"),
+        ("memoire-agent", "qualité de la mémoire"),
+        ("securite-agent", "audit de sécurité"),
     ],
 )
 def test_declaring_context_measurably_shrinks_what_activation_loads(
-    tmp_path: Path, relpath: str, slug: str
+    tmp_path: Path, slug: str, role: str
 ) -> None:
-    """#379 — mesure avant/après sur trois agents de nature différente, lus
-    depuis ``origin/main`` sans y toucher (parallèle ``archetypes/`` en cours
-    de refonte ailleurs).
+    """#379 — mesure avant/après sur trois agents synthétiques de nature
+    différente, à la taille d'un agent réel, sans dépendre des fichiers livrés.
 
     « Avant » = ce que cet agent charge sans déclaration : le fichier d'agent
     émis, plus le contexte partagé du projet (``_grimoire/_memory/shared-
@@ -329,8 +351,8 @@ def test_declaring_context_measurably_shrinks_what_activation_loads(
     """
     from grimoire.tools._common import estimate_tokens
 
-    raw = _read_from_origin_main(relpath)
-    shared_context_body = _read_from_origin_main("archetypes/agentic-standard/shared-context.tpl.md")
+    raw = _synthetic_agent(slug, role)
+    shared_context_body = _SYNTHETIC_SHARED_CONTEXT
 
     emitter = emitter_for(HostId.CLAUDE_CODE_CLI)
     assert emitter is not None
