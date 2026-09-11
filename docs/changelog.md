@@ -2,6 +2,33 @@
 
 ## Dernière release
 
+### 3.43.0 — Le système observe ses propres angles morts
+
+- **Le concierge journalise ses non-choix (#389).** Symétrique du choix
+  d'agent (#366) : quand aucun spécialiste ne correspond, ou qu'il se rabat
+  sur un généraliste, `grimoire agent-miss` journalise catégorie, spécialité
+  cherchée et agent de repli — jamais le contenu de la demande.
+  `grimoire registry dispatches` affiche désormais les non-choix agrégés à
+  côté des choix.
+- **La répétition d'un non-choix propose un artefact (#395).** Le
+  déclencheur lit ces non-choix et, passé un seuil configurable, écrit une
+  proposition `pending` (agent ou skill selon la doctrine) — jamais de
+  création sans acceptation explicite (`grimoire proposals accept/reject`),
+  visible en CLI et dans le cockpit.
+- **La fraîcheur des agents se signale, ne se retire jamais (#396, #398).**
+  Un agent jamais dispatché depuis un seuil configurable est signalé par
+  `grimoire doctor`, `grimoire registry dispatches` et le cockpit — jamais
+  déprécié automatiquement.
+- **Second port Rust, optionnel — le schéma et le validateur (#354, #392).**
+  `grimoire.core.schema` et `grimoire.core.validator` basculent sur
+  `GRIMOIRE_SCHEMA_BACKEND=python|rust|auto` ; le cœur Rust rejette des
+  entrées que le validateur Python laissait passer sans erreur, sans roue
+  publiée.
+- Un correctif : la clé `proposals` manquait au schéma et au port Rust
+  (#400), corrigé avant tout usage réel.
+
+## Releases précédentes
+
 ### 3.42.0 — Le modèle hybride d'agent : skills attachées, doctrine, cockpit qui les gère
 
 - **Doctrine de création d'artefact (#370) et contexte câblé sur le dispatch
