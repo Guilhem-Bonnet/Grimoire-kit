@@ -144,7 +144,7 @@ def test_a_fallback_that_is_the_entry_persona_with_no_carrier_proposes_an_agent(
 
 
 def test_a_fallback_that_is_the_entry_persona_with_one_carrier_proposes_a_skill(project: Path) -> None:
-    _write_agent(project, "infra-ops", use_when="Une demande d'infrastructure ou d'exploitation.")
+    _write_agent(project, "infra-ops", use_when="Une demande infra ou d'exploitation.")
     _miss(project, specialty="ansible-homelab", category="infra", fallback="concierge")
     _miss(project, specialty="ansible-homelab", category="infra", fallback="concierge")
     proposal = list_proposals(project)[0]
@@ -155,10 +155,21 @@ def test_a_fallback_that_is_the_entry_persona_with_one_carrier_proposes_a_skill(
 
 
 def test_two_agents_covering_the_category_proposes_an_agent(project: Path) -> None:
-    _write_agent(project, "infra-ops", use_when="Une demande d'infrastructure ou d'exploitation.")
+    _write_agent(project, "infra-ops", use_when="Une demande infra ou d'exploitation.")
     _write_agent(project, "infra-support", use_when="Support infra de premier niveau.")
     _miss(project, specialty="ansible-homelab", category="infra", fallback="concierge")
     _miss(project, specialty="ansible-homelab", category="infra", fallback="concierge")
+    proposal = list_proposals(project)[0]
+    assert proposal.artifact_type == "agent"
+    assert proposal.carrier_reason == "persona d'entrée exclue, aucun porteur : agent"
+
+
+def test_category_matching_is_by_whole_word_not_substring(project: Path) -> None:
+    # « ci » est une sous-chaîne de « spécifique » — un match par
+    # sous-chaîne le prendrait à tort pour un porteur de la catégorie « ci ».
+    _write_agent(project, "produit-generaliste", use_when="Une demande spécifique au produit.")
+    _miss(project, specialty="pipeline-ci", category="ci", fallback="concierge")
+    _miss(project, specialty="pipeline-ci", category="ci", fallback="concierge")
     proposal = list_proposals(project)[0]
     assert proposal.artifact_type == "agent"
     assert proposal.carrier_reason == "persona d'entrée exclue, aucun porteur : agent"

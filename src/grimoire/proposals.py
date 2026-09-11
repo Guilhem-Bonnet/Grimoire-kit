@@ -235,13 +235,14 @@ def _category_carrier(project_root: Path, category: str, entry_name: str) -> str
     category — it routes, it does not carry (issue #402).
 
     A match is either textual (the category's own word appears in the
-    agent's declared ``use_when``) or structural (the category reads as
-    execution work — the same ``_EXECUTION_HINTS`` heuristic used to guess
-    a *new* agent's tools — and the candidate already carries the
-    ``execute`` tool). Two matches are as unusable as zero: attaching a
-    skill to an ambiguous carrier is worse than proposing a fresh agent a
-    human can place by hand, so anything but exactly one candidate returns
-    ``""``.
+    agent's declared ``use_when``, as a whole word — a substring test would
+    let a category like ``ci`` match ``spécifique`` or ``ops`` match
+    ``développe``) or structural (the category reads as execution work —
+    the same ``_EXECUTION_HINTS`` heuristic used to guess a *new* agent's
+    tools — and the candidate already carries the ``execute`` tool). Two
+    matches are as unusable as zero: attaching a skill to an ambiguous
+    carrier is worse than proposing a fresh agent a human can place by
+    hand, so anything but exactly one candidate returns ``""``.
     """
     if not category:
         return ""
@@ -254,6 +255,7 @@ def _category_carrier(project_root: Path, category: str, entry_name: str) -> str
         return ""
 
     category_lower = category.lower()
+    category_word = re.compile(rf"\b{re.escape(category_lower)}\b")
     is_execution_category = any(hint in category_lower for hint in _EXECUTION_HINTS)
     candidates: list[str] = []
     for agent in agents:
@@ -266,7 +268,7 @@ def _category_carrier(project_root: Path, category: str, entry_name: str) -> str
             use_when = str(meta.get("use_when") or "")
         except OSError:
             pass
-        matches_use_when = category_lower in use_when.lower()
+        matches_use_when = bool(category_word.search(use_when.lower()))
         matches_execute = is_execution_category and ToolVerb.EXECUTE in agent.tools
         if matches_use_when or matches_execute:
             candidates.append(agent.name)
