@@ -203,6 +203,43 @@ def _check_unknown_keys(
             ))
 
 
+def _check_enum_field(
+    value: Any,
+    valid: frozenset[str],
+    path: str,
+    unknown_label: str,
+    valid_label: str,
+    errors: list[ValidationError],
+) -> None:
+    """Validate a scalar "string enum" field (``project.type``,
+    ``user.skill_level``, ``memory.backend``, the memory layer modes,
+    ``agents.archetype``) without crashing on an unhashable value.
+
+    ``value not in valid`` — the plain membership test this replaces —
+    raises ``TypeError: unhashable type`` when ``value`` is a ``list`` or a
+    ``dict``, before the comparison is even attempted. Mirrors
+    ``check_enum_field`` in ``rust/grimoire-schema-core/src/lib.rs``, the
+    Rust oracle this Python path must match (issue #354): a list or a
+    mapping becomes an explicit "must be a string" validation error instead
+    of an unhandled exception. Any other hashable scalar (bool/int/float)
+    still crosses the membership test as-is — it was never the source of
+    the crash.
+    """
+    if isinstance(value, (list, dict)):
+        kind = "a list" if isinstance(value, list) else "a mapping"
+        errors.append(ValidationError(
+            path=path,
+            message=f"'{path}' must be a string (got {kind}).",
+        ))
+        return
+    if value not in valid:
+        errors.append(ValidationError(
+            path=path,
+            message=f"{unknown_label} '{value}'.",
+            suggestion=f"{valid_label}: {', '.join(sorted(valid))}",
+        ))
+
+
 # ── Validators ────────────────────────────────────────────────────────────────
 
 
@@ -299,12 +336,8 @@ def _validate_project(section: Any, errors: list[ValidationError]) -> None:
 
     # project.type
     ptype = section.get("type")
-    if ptype is not None and ptype not in _VALID_TYPES:
-        errors.append(ValidationError(
-            path="project.type",
-            message=f"Unknown project type '{ptype}'.",
-            suggestion=f"Valid types: {', '.join(sorted(_VALID_TYPES))}",
-        ))
+    if ptype is not None:
+        _check_enum_field(ptype, _VALID_TYPES, "project.type", "Unknown project type", "Valid types", errors)
 
     # project.stack
     stack = section.get("stack")
@@ -335,10 +368,19 @@ def _validate_project(section: Any, errors: list[ValidationError]) -> None:
                         path=f"project.repos[{i}]",
                         message="Each repo must be a mapping with 'name'.",
                     ))
-                elif not repo.get("name"):
+                    continue
+                repo_name = repo.get("name")
+                if not repo_name:
                     errors.append(ValidationError(
                         path=f"project.repos[{i}].name",
                         message="Repo must have a 'name' field.",
+                    ))
+                elif not isinstance(repo_name, str):
+                    # Present and truthy but not a string (e.g. `name: 123`) —
+                    # schema.py declares `repos[].name` as a string.
+                    errors.append(ValidationError(
+                        path=f"project.repos[{i}].name",
+                        message="Repo 'name' must be a string.",
                     ))
 
     _check_unknown_keys(section, _KNOWN_PROJECT_KEYS, "project", errors)
@@ -353,12 +395,18 @@ def _validate_user(section: Any, errors: list[ValidationError]) -> None:
         return
 
     skill = section.get("skill_level")
-    if skill is not None and skill not in _VALID_SKILL_LEVELS:
-        errors.append(ValidationError(
-            path="user.skill_level",
-            message=f"Invalid skill level '{skill}'.",
-            suggestion=f"Valid levels: {', '.join(sorted(_VALID_SKILL_LEVELS))}",
-        ))
+    if skill is not None:
+        _check_enum_field(skill, _VALID_SKILL_LEVELS, "user.skill_level", "Invalid skill level", "Valid levels", errors)
+
+    # schema.py declares name/language/document_language as strings, but
+    # unlike skill_level they were never type-checked at all.
+    for key in ("name", "language", "document_language"):
+        value = section.get(key)
+        if value is not None and not isinstance(value, str):
+            errors.append(ValidationError(
+                path=f"user.{key}",
+                message=f"'user.{key}' must be a string.",
+            ))
 
     _check_unknown_keys(section, _KNOWN_USER_KEYS, "user", errors)
 
@@ -372,27 +420,22 @@ def _validate_memory(section: Any, errors: list[ValidationError]) -> None:
         return
 
     backend = section.get("backend")
-    if backend is not None and backend not in _VALID_BACKENDS:
-        errors.append(ValidationError(
-            path="memory.backend",
-            message=f"Unknown memory backend '{backend}'.",
-            suggestion=f"Valid backends: {', '.join(sorted(_VALID_BACKENDS))}",
-        ))
+    if backend is not None:
+        _check_enum_field(backend, _VALID_BACKENDS, "memory.backend", "Unknown memory backend", "Valid backends", errors)
     short_term_backend = section.get("short_term_backend")
-    if short_term_backend is not None and short_term_backend not in _VALID_SHORT_TERM_BACKENDS:
-        errors.append(ValidationError(
-            path="memory.short_term_backend",
-            message=f"Unknown short-term memory backend '{short_term_backend}'.",
-            suggestion=f"Valid short-term backends: {', '.join(sorted(_VALID_SHORT_TERM_BACKENDS))}",
-        ))
+    if short_term_backend is not None:
+        _check_enum_field(
+            short_term_backend,
+            _VALID_SHORT_TERM_BACKENDS,
+            "memory.short_term_backend",
+            "Unknown short-term memory backend",
+            "Valid short-term backends",
+            errors,
+        )
     for key in ("knowledge_graph", "memory_graph", "code_graph", "task_memory", "visualization"):
         mode = section.get(key)
-        if mode is not None and mode not in _VALID_LAYER_MODES:
-            errors.append(ValidationError(
-                path=f"memory.{key}",
-                message=f"Unknown memory layer mode '{mode}'.",
-                suggestion=f"Valid modes: {', '.join(sorted(_VALID_LAYER_MODES))}",
-            ))
+        if mode is not None:
+            _check_enum_field(mode, _VALID_LAYER_MODES, f"memory.{key}", "Unknown memory layer mode", "Valid modes", errors)
 
     _check_unknown_keys(section, _KNOWN_MEMORY_KEYS, "memory", errors)
 
@@ -406,12 +449,10 @@ def _validate_agents(section: Any, errors: list[ValidationError]) -> None:
         return
 
     archetype = section.get("archetype")
-    if archetype is not None and archetype not in _KNOWN_ARCHETYPES:
-        errors.append(ValidationError(
-            path="agents.archetype",
-            message=f"Unknown archetype '{archetype}'.",
-            suggestion=f"Valid archetypes: {', '.join(sorted(_KNOWN_ARCHETYPES))}",
-        ))
+    if archetype is not None:
+        _check_enum_field(
+            archetype, _KNOWN_ARCHETYPES, "agents.archetype", "Unknown archetype", "Valid archetypes", errors
+        )
 
     custom = section.get("custom_agents")
     if custom is not None:
@@ -482,3 +523,13 @@ def _validate_installed_archetypes(
             path="installed_archetypes",
             message="'installed_archetypes' must be a list of strings.",
         ))
+        return
+
+    # schema.py declares items as strings, but the container check above
+    # never verified them.
+    for i, item in enumerate(section):
+        if not isinstance(item, str):
+            errors.append(ValidationError(
+                path=f"installed_archetypes[{i}]",
+                message="Archetype identifier must be a string.",
+            ))
