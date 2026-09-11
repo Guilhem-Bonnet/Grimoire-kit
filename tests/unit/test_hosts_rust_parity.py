@@ -115,7 +115,8 @@ _TOOL_VERBS_CASES: tuple[object, ...] = (
     "read edit,search",
     ["read", "edit"],
     ["read", "read", "edit"],  # dedup, first-order preserved
-    ["read", "bogus"],  # unknown verb: silently dropped on both backends
+    ["read", "bogus"],  # unknown verb: ignored (boundary unchanged) but flagged
+    ["bogus", "read", "bogus", "reed"],  # rejects dedup, first-order preserved
     [],
     None,
     123,
@@ -134,11 +135,29 @@ def test_tool_verbs_agrees_across_backends(monkeypatch: pytest.MonkeyPatch, raw:
     assert python_verbs == rust_verbs
 
 
-def test_tool_verbs_unknown_verb_is_silently_dropped_not_rejected() -> None:
-    """Documents current behaviour (see the module docstring of
+@requires_rust_core
+@pytest.mark.parametrize("raw", _TOOL_VERBS_CASES)
+def test_tool_verbs_with_rejects_agrees_across_backends(monkeypatch: pytest.MonkeyPatch, raw: object) -> None:
+    _with_backend("python", monkeypatch)
+    python_result = collect_module._tool_verbs_with_rejects(raw)
+    _with_backend("rust", monkeypatch)
+    rust_result = collect_module._tool_verbs_with_rejects(raw)
+    assert python_result == rust_result
+
+
+def test_tool_verbs_unknown_verb_is_ignored_but_reported() -> None:
+    """Documents the current contract (see the module docstring of
     ``rust/grimoire-hosts-core/src/lib.rs``): a verb outside ``ToolVerb`` is
-    ignored, not rejected. Deliberately unchanged by this port."""
+    ignored — never granted, the tool boundary is unchanged — but it is no
+    longer silent. ``_tool_verbs`` keeps returning only the resolved verbs;
+    ``_tool_verbs_with_rejects`` also names what was rejected, which
+    ``collect_agents`` turns into a ``ProjectSurface`` note (see
+    ``test_build_surface_reports_unknown_tool_verb_in_notes_on_both_backends``
+    below)."""
     assert collect_module._tool_verbs(["read", "bogus"]) == (ToolVerb.READ,)
+    verbs, rejected = collect_module._tool_verbs_with_rejects(["read", "bogus"])
+    assert verbs == (ToolVerb.READ,)
+    assert rejected == ("bogus",)
 
 
 _STR_TUPLE_CASES: tuple[object, ...] = ("a", ["a", "b", " c "], ["a", ""], 123, None, True, [1, 2])
@@ -330,6 +349,118 @@ def test_build_surface_two_regime_override_collision_raises_on_both_backends(
         _with_backend(backend, monkeypatch)
         with pytest.raises(GrimoireAgentError, match="faisceau identique"):
             build_surface(tmp_path)
+
+
+@requires_rust_core
+def test_build_surface_reports_unknown_tool_verb_in_notes_on_both_backends(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The tool boundary an unknown verb grants is unchanged (still just
+    ``read``), but the rejection is no longer silent: ``build_surface``
+    names the agent and the rejected token in ``ProjectSurface.notes``,
+    identically under both backends."""
+    d = tmp_path / "_grimoire/kit/agents"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "typo-agent.md").write_text(
+        '---\nname: "typo-agent"\ndescription: "rôle de test"\ntools: ["read", "reed"]\n---\nCorps.\n',
+        encoding="utf-8",
+    )
+
+    _with_backend("python", monkeypatch)
+    python_notes = build_surface(tmp_path).notes
+    _with_backend("rust", monkeypatch)
+    rust_notes = build_surface(tmp_path).notes
+
+    assert python_notes == rust_notes
+    assert len(python_notes) == 1
+    assert "typo-agent" in python_notes[0]
+    assert "reed" in python_notes[0]
+
+    by_name = {a.name: a for a in collect_agents(tmp_path)}
+    assert by_name["typo-agent"].tools == (ToolVerb.READ,)
+
+
+# ── Real corpus: every agent definition the kit actually ships ─────────────
+#
+# Every parity test above exercises synthetic frontmatter, chosen to probe a
+# specific edge. This is the only test that proves `yaml-rust2` and ruamel
+# agree on what the kit *actually sends out the door* — every archetype
+# agent definition, read straight off disk. Without it, an edge in a real
+# archetype file that happens to fall outside every synthetic case above
+# would go unnoticed.
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _shipped_agent_definition_files() -> list[Path]:
+    paths = sorted(_REPO_ROOT.glob("archetypes/*/agents/*.md"))
+    # "Les .md du kit sous src/grimoire/ s'il y en a" — aucun aujourd'hui
+    # (les agents livrés vivent sous archetypes/, pas dans le paquet
+    # installable), mais ce glob les couvrirait sans modification du test
+    # si la disposition change un jour.
+    paths += sorted((_REPO_ROOT / "src" / "grimoire").rglob("*.md"))
+    return paths
+
+
+_SHIPPED_AGENT_FILES = _shipped_agent_definition_files()
+
+
+def _derive_agent_shape(text: str) -> dict[str, object]:
+    """Everything this port's pure functions derive from one agent file's
+    raw text, computed through the same call sequence ``collect_agents``
+    uses (minus the disk-dependent bits: entry-point resolution, and
+    ``skills:``/``context:`` existence checks against external state)."""
+    meta, body = parse_frontmatter(text)
+    name = str(meta.get("name") or "agent")
+    description = str(meta.get("description") or f"Grimoire agent {name}").strip()
+    declared, rejected = collect_module._tool_verbs_with_rejects(meta.get("tools"))
+    tools = declared or infer_tools(body, description)
+    skills = collect_module._str_tuple(meta.get("skills"))
+    context = collect_module._str_tuple(meta.get("context"))
+    affinity = ModelAffinity.from_frontmatter(meta.get("model_affinity"))
+    max_turns = collect_module._max_turns(meta.get("max_turns"))
+    agent = AgentSpec(
+        name=name,
+        description=description,
+        definition_ref="corpus-test.md",
+        tools=tools,
+        affinity=affinity,
+        max_turns=max_turns,
+        skills=skills,
+        context=context,
+    )
+    return {
+        "meta": meta,
+        "body": body,
+        "tools_origin": "declared" if declared else "inferred",
+        "tools": tools,
+        "rejected_verbs": rejected,
+        "affinity": affinity,
+        "max_turns": max_turns,
+        "skills": skills,
+        "context": context,
+        "fingerprint": agent.fingerprint(),
+    }
+
+
+@requires_rust_core
+@pytest.mark.skipif(not _SHIPPED_AGENT_FILES, reason="no shipped agent definitions found to check")
+@pytest.mark.parametrize(
+    "path",
+    _SHIPPED_AGENT_FILES,
+    ids=[p.relative_to(_REPO_ROOT).as_posix() for p in _SHIPPED_AGENT_FILES],
+)
+def test_every_shipped_agent_definition_parses_identically_across_backends(
+    path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    text = path.read_text(encoding="utf-8")
+
+    _with_backend("python", monkeypatch)
+    python_shape = _derive_agent_shape(text)
+    _with_backend("rust", monkeypatch)
+    rust_shape = _derive_agent_shape(text)
+
+    assert python_shape == rust_shape
 
 
 # ── Backend selection itself ────────────────────────────────────────────────

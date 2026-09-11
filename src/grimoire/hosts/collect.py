@@ -144,22 +144,45 @@ def parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
 
 
 def _tool_verbs(raw: Any) -> tuple[ToolVerb, ...]:
+    verbs, _rejected = _tool_verbs_with_rejects(raw)
+    return verbs
+
+
+def _tool_verbs_with_rejects(raw: Any) -> tuple[tuple[ToolVerb, ...], tuple[str, ...]]:
+    """Same derivation as :func:`_tool_verbs`, plus the raw tokens that did
+    not resolve to a :class:`ToolVerb` (deduplicated, first-seen order).
+
+    The tool boundary itself is unchanged by this: an unknown verb is still
+    never granted. What changes is that the rejection is no longer invisible
+    — :func:`collect_agents` turns this into a :class:`ProjectSurface`
+    note naming the agent and the unknown token(s), the same discipline as
+    the distinction guard (visible, never blocking). See the module
+    docstring of ``rust/grimoire-hosts-core/src/lib.rs`` for why this was
+    not changed into a rejection instead: doing so would silently narrow
+    the tool boundary of any existing agent file with a typo, at kit
+    upgrade time.
+    """
     if _use_rust_backend():
         assert _rust_core is not None  # guarded by _use_rust_backend
-        return tuple(ToolVerb(v) for v in _rust_core.tool_verbs(raw))
+        rust_verbs, rust_rejected = _rust_core.tool_verbs_with_rejects(raw)
+        return tuple(ToolVerb(v) for v in rust_verbs), tuple(rust_rejected)
     if isinstance(raw, str):
         raw = [part.strip() for part in raw.replace(",", " ").split()]
     if not isinstance(raw, list):
-        return ()
+        return (), ()
     verbs: list[ToolVerb] = []
+    rejected_list: list[str] = []
     for item in raw:
+        candidate = str(item).strip().lower()
         try:
-            verb = ToolVerb(str(item).strip().lower())
+            verb = ToolVerb(candidate)
         except ValueError:
+            if candidate not in rejected_list:
+                rejected_list.append(candidate)
             continue
         if verb not in verbs:
             verbs.append(verb)
-    return tuple(verbs)
+    return tuple(verbs), tuple(rejected_list)
 
 
 def _str_tuple(raw: Any) -> tuple[str, ...]:
@@ -273,6 +296,7 @@ def collect_agents(
     *,
     entry_point: str | None = None,
     known_skills: frozenset[str] | None = None,
+    notes: list[str] | None = None,
 ) -> tuple[AgentSpec, ...]:
     """Read the project's personas into host-neutral specs.
 
@@ -285,6 +309,16 @@ def collect_agents(
     (:class:`~grimoire.core.exceptions.GrimoireAgentError`), the same
     treatment as an import that names a module which does not exist — not a
     warning, and not a silent drop.
+
+    *notes* is an optional out-parameter (appended to in place, never
+    replaced): when given, an agent declaring a ``tools:`` token that is not
+    a member of :class:`ToolVerb` (a frontmatter typo, e.g. ``tools: [read,
+    reed]``) appends one note naming the agent and the rejected token(s) —
+    the tool boundary itself is unchanged (an unknown verb still grants
+    nothing), only the silence is removed. Left ``None`` by default so
+    existing callers that do not care about diagnostics see no behaviour
+    change; :func:`build_surface` passes a list and folds it into
+    :attr:`ProjectSurface.notes`.
     """
     if entry_point is None:
         entry_point = entry_agent_name(project_root)
@@ -300,8 +334,14 @@ def collect_agents(
         if name is None:
             continue
         description = str(meta.get("description") or f"Grimoire agent {name}").strip()
-        declared = _tool_verbs(meta.get("tools"))
+        declared, rejected_verbs = _tool_verbs_with_rejects(meta.get("tools"))
         tools = declared or infer_tools(body, description)
+        if rejected_verbs and notes is not None:
+            expected = ", ".join(v.value for v in ToolVerb)
+            notes.append(
+                f"Agent « {name} » : verbe(s) d'outil inconnu(s) ignoré(s) : "
+                f"{', '.join(rejected_verbs)} (attendus : {expected})."
+            )
         try:
             # POSIX separators: this path is written into a generated
             # instruction telling an agent which file to read, and a Windows
@@ -596,7 +636,8 @@ def build_surface(project_root: Path, *, project_name: str | None = None) -> Pro
     root = project_root.resolve()
     governed = is_standard_enrolled(root)
     skills = collect_skills(root, governed=governed)
-    agents = collect_agents(root, known_skills=frozenset(s.slug for s in skills))
+    tool_notes: list[str] = []
+    agents = collect_agents(root, known_skills=frozenset(s.slug for s in skills), notes=tool_notes)
     # Deux régimes, parce que deux responsabilités. Un agent créé dans les
     # overrides du projet qui a le même faisceau qu'un autre est une erreur de
     # l'utilisateur, et le système émergent repose sur ce refus : on lève. Deux
@@ -619,10 +660,11 @@ def build_surface(project_root: Path, *, project_name: str | None = None) -> Pro
             "Deux agents avec le même faisceau sont le même agent sous deux noms — "
             "fusionnez-les ou distinguez leur périmètre réel."
         )
-    notes: tuple[str, ...] = ()
+    notes: tuple[str, ...] = tuple(tool_notes)
     if duplicates:
         pairs = ", ".join(f"{a} == {b}" for a, b in duplicates)
         notes = (
+            *notes,
             f"Agents livrés par le kit au faisceau identique (outils, contexte, skills) : {pairs}. "
             "Dette connue du kit (Grimoire-kit#375), sans effet sur ce projet.",
         )

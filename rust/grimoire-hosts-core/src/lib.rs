@@ -7,9 +7,12 @@
 //!
 //! - `parse_frontmatter(text)` (`collect.py`) : separation du frontmatter
 //!   YAML et du corps d'un fichier d'agent.
-//! - `_tool_verbs(raw)`, `_str_tuple(raw)`, `infer_tools(body, description)`,
-//!   `_max_turns(value)` (`collect.py`) : lecture tolerante des cles de
-//!   frontmatter et inference du perimetre d'outils.
+//! - `_tool_verbs(raw)`/`_tool_verbs_with_rejects(raw)`, `_str_tuple(raw)`,
+//!   `infer_tools(body, description)`, `_max_turns(value)` (`collect.py`) :
+//!   lecture tolerante des cles de frontmatter et inference du perimetre
+//!   d'outils. `_tool_verbs_with_rejects` retourne aussi les jetons hors de
+//!   `ToolVerb` (perimetre inchange, rejet desormais visible — voir plus
+//!   bas).
 //! - La construction des champs purs d'un `AgentSpec` a partir de
 //!   `(name, meta, body)` deja lus — sans toucher au disque (pas de
 //!   resolution de `known_skills`, pas de verification d'existence de
@@ -64,21 +67,24 @@
 //! probleme, il est donc l'oracle qui a revele le defaut Python, exactement
 //! le role attendu de ce port (cf. commit du port #392).
 //!
-//! `_tool_verbs` (Python) accepte silencieusement un verbe d'outil hors de
-//! `ToolVerb` : il est ignore, pas rejete (`tools: [read, bogus]` donne
-//! `(ToolVerb.READ,)`, sans avertissement). C'est deliberement **non**
-//! corrige ici : la fonction elle-meme documente que "an over-granted
-//! boundary is a governance hole, while a too-narrow one is a visible
-//! failure the operator can correct" — mais un verbe inconnu aujourd'hui
-//! *retrecit* silencieusement le perimetre plutot que de l'elargir, donc ce
-//! n'est pas le trou de gouvernance vise par ce commentaire. Changer ce
-//! comportement (rejeter au lieu d'ignorer) modifierait le perimetre
+//! `_tool_verbs` (Python) acceptait silencieusement un verbe d'outil hors de
+//! `ToolVerb` : il etait ignore, sans etre rejete NI signale (`tools: [read,
+//! bogus]` donnait `(ToolVerb.READ,)`, sans avertissement). Le perimetre
+//! d'outils reste **volontairement** inchange par ce port — la fonction
+//! elle-meme documente que "an over-granted boundary is a governance hole,
+//! while a too-narrow one is a visible failure the operator can correct",
+//! et un verbe inconnu *retrecit* le perimetre plutot que de l'elargir ;
+//! rejeter au lieu d'ignorer modifierait silencieusement le perimetre
 //! d'outils de tout agent existant dont le frontmatter contient deja une
-//! coquille, silencieusement, au moment de la mise a jour du kit — ce n'est
-//! pas un correctif trivial et sans risque au sens du protocole de ce port.
-//! Le coeur Rust reproduit donc le meme comportement (silencieux) pour la
-//! parite, et la divergence de *principe* est trackee par une issue dediee
-//! (voir le corps de la PR) plutot que fixee ici.
+//! coquille, au moment de la mise a jour du kit — pas un correctif trivial
+//! et sans risque. Ce que ce port change, en revanche : le rejet n'est plus
+//! invisible. `tool_verbs_with_rejects_core` retourne aussi les jetons
+//! rejetes (dedupliques, ordre de premiere apparition) ; cote Python,
+//! `collect_agents` transforme cette liste en une note de
+//! `ProjectSurface.notes` nommant l'agent et les jetons inconnus — la meme
+//! discipline que la garde de distinction (visible, jamais bloquant). Les
+//! deux backends produisent exactement le meme ensemble de rejets et donc
+//! la meme note (voir `tests/unit/test_hosts_rust_parity.py`).
 //!
 //! Un `tools:` qui n'est ni une liste ni une chaine (par ex. `tools: 3` ou
 //! `tools: {a: b}`) est traite comme absent par les deux backends : `()`,
@@ -398,10 +404,26 @@ impl ToolVerb {
 /// Reproduit `_tool_verbs(raw)` : une chaine devient une liste par
 /// eclatement sur virgules/espaces, une liste est prise telle quelle,
 /// toute autre forme (mapping, scalaire non-chaine, `None`) donne `()`.
-/// Chaque element est ensuite `str(item).strip().lower()`, verifie contre
-/// `ToolVerb` (silencieusement ignore si inconnu — voir le docstring de
-/// module), deduplique en preservant le premier ordre d'apparition.
+/// Ignore les rejets — voir [`tool_verbs_with_rejects_core`] pour le
+/// contrat complet (le perimetre d'outils ne change pas, mais un verbe
+/// inconnu n'est plus avale sans laisser de trace ailleurs dans le pipeline).
 fn tool_verbs_core(raw: &Value) -> Vec<ToolVerb> {
+    tool_verbs_with_rejects_core(raw).0
+}
+
+/// Reproduit `_tool_verbs_with_rejects(raw)` : meme derivation que
+/// [`tool_verbs_core`] (chaine eclatee sur virgules/espaces, liste prise
+/// telle quelle, toute autre forme donne `((), ())`), mais retourne en plus
+/// les jetons qui n'ont resolu vers aucun `ToolVerb` — dedupliques en
+/// preservant le premier ordre d'apparition, comme les verbes retenus.
+///
+/// Le perimetre d'outils lui-meme reste inchange (un verbe inconnu ne
+/// devient jamais un outil) : ce que ce port change, c'est que le rejet
+/// n'est plus invisible. `collect.py::collect_agents` transforme cette
+/// liste en une note de `ProjectSurface.notes` nommant l'agent et les
+/// jetons rejetes — la meme discipline que la garde de distinction
+/// (une dette du kit reste visible, elle n'est simplement pas bloquante).
+fn tool_verbs_with_rejects_core(raw: &Value) -> (Vec<ToolVerb>, Vec<String>) {
     let items: Vec<Value> = match raw {
         Value::Str(s) => s
             .replace(',', " ")
@@ -409,18 +431,26 @@ fn tool_verbs_core(raw: &Value) -> Vec<ToolVerb> {
             .map(|part| Value::Str(part.to_string()))
             .collect(),
         Value::List(items) => items.clone(),
-        _ => return Vec::new(),
+        _ => return (Vec::new(), Vec::new()),
     };
     let mut verbs: Vec<ToolVerb> = Vec::new();
+    let mut rejected: Vec<String> = Vec::new();
     for item in &items {
         let candidate = python_str(item).trim().to_lowercase();
-        if let Some(verb) = ToolVerb::parse(&candidate) {
-            if !verbs.contains(&verb) {
-                verbs.push(verb);
+        match ToolVerb::parse(&candidate) {
+            Some(verb) => {
+                if !verbs.contains(&verb) {
+                    verbs.push(verb);
+                }
+            }
+            None => {
+                if !rejected.contains(&candidate) {
+                    rejected.push(candidate);
+                }
             }
         }
     }
-    verbs
+    (verbs, rejected)
 }
 
 /// Reproduit `_str_tuple(raw)` : une chaine devient `[raw]`, une liste est
@@ -712,7 +742,8 @@ mod py_bridge {
     use super::{
         build_agent_spec_core, infer_tools_core, max_turns_core,
         model_affinity_from_frontmatter_core, parse_frontmatter_core,
-        partition_duplicate_pairs_core, str_tuple_core, tool_verbs_core, AgentRecord, Value,
+        partition_duplicate_pairs_core, str_tuple_core, tool_verbs_core,
+        tool_verbs_with_rejects_core, AgentRecord, Value,
     };
     use pyo3::exceptions::PyTypeError;
     use pyo3::prelude::*;
@@ -809,9 +840,8 @@ mod py_bridge {
 
     /// Frontiere PyO3 pour `grimoire.hosts.collect._tool_verbs`. Retourne
     /// la liste des valeurs `ToolVerb` retenues (`"read"`, `"edit"`, ...),
-    /// dans l'ordre de premiere apparition — un verbe hors de `ToolVerb`
-    /// est ignore silencieusement, comme cote Python (voir le docstring de
-    /// module).
+    /// dans l'ordre de premiere apparition. Ignore les rejets — voir
+    /// `tool_verbs_with_rejects` pour le contrat complet.
     #[pyfunction]
     fn tool_verbs(raw: Bound<'_, PyAny>) -> PyResult<Vec<String>> {
         let value = value_from_any(&raw)?;
@@ -819,6 +849,22 @@ mod py_bridge {
             .into_iter()
             .map(|v| v.value().to_string())
             .collect())
+    }
+
+    /// Frontiere PyO3 pour `grimoire.hosts.collect._tool_verbs_with_rejects`.
+    /// Meme derivation que `tool_verbs`, plus les jetons qui n'ont resolu
+    /// vers aucun `ToolVerb` (dedupliques, ordre de premiere apparition) —
+    /// le perimetre d'outils ne change pas, mais le rejet n'est plus
+    /// invisible : `collect_agents` en fait une note de
+    /// `ProjectSurface.notes` nommant l'agent et les jetons rejetes.
+    #[pyfunction]
+    fn tool_verbs_with_rejects(raw: Bound<'_, PyAny>) -> PyResult<(Vec<String>, Vec<String>)> {
+        let value = value_from_any(&raw)?;
+        let (verbs, rejected) = tool_verbs_with_rejects_core(&value);
+        Ok((
+            verbs.into_iter().map(|v| v.value().to_string()).collect(),
+            rejected,
+        ))
     }
 
     /// Frontiere PyO3 pour `grimoire.hosts.collect._str_tuple`.
@@ -936,6 +982,7 @@ mod py_bridge {
     fn grimoire_hosts_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
         m.add_function(wrap_pyfunction!(parse_frontmatter, m)?)?;
         m.add_function(wrap_pyfunction!(tool_verbs, m)?)?;
+        m.add_function(wrap_pyfunction!(tool_verbs_with_rejects, m)?)?;
         m.add_function(wrap_pyfunction!(str_tuple, m)?)?;
         m.add_function(wrap_pyfunction!(infer_tools, m)?)?;
         m.add_function(wrap_pyfunction!(max_turns, m)?)?;
@@ -1035,14 +1082,33 @@ mod tests {
     }
 
     #[test]
-    fn tool_verbs_unknown_verb_is_silently_dropped_not_rejected() {
-        // Documente le comportement actuel (voir le docstring de module) :
-        // un verbe hors de ToolVerb n'est ni une erreur ni un outil — il
-        // disparait sans laisser de trace, sur les deux backends.
+    fn tool_verbs_unknown_verb_is_ignored_but_reported() {
+        // Le perimetre d'outils ne change pas (voir le docstring de
+        // module) : un verbe hors de ToolVerb n'est ni une erreur ni un
+        // outil. Mais il n'est plus invisible — tool_verbs_with_rejects_core
+        // le retourne pour que collect_agents puisse en faire une note.
+        let (verbs, rejects) = tool_verbs_with_rejects_core(&list_str(&["read", "bogus"]));
+        assert_eq!(verbs, vec![ToolVerb::Read]);
+        assert_eq!(rejects, vec!["bogus".to_string()]);
         assert_eq!(
             tool_verbs_core(&list_str(&["read", "bogus"])),
             vec![ToolVerb::Read]
         );
+    }
+
+    #[test]
+    fn tool_verbs_with_rejects_deduplicates_rejects_preserving_first_order() {
+        let (verbs, rejects) =
+            tool_verbs_with_rejects_core(&list_str(&["bogus", "read", "bogus", "reed"]));
+        assert_eq!(verbs, vec![ToolVerb::Read]);
+        assert_eq!(rejects, vec!["bogus".to_string(), "reed".to_string()]);
+    }
+
+    #[test]
+    fn tool_verbs_with_rejects_empty_on_all_known_verbs() {
+        let (verbs, rejects) = tool_verbs_with_rejects_core(&list_str(&["read", "edit"]));
+        assert_eq!(verbs, vec![ToolVerb::Read, ToolVerb::Edit]);
+        assert!(rejects.is_empty());
     }
 
     #[test]
