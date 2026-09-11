@@ -242,14 +242,16 @@ class TestUpAlias:
         paramètres déclarés sur la commande répondent à la même question sans
         passer par le rendu.
         """
-        import click
         from typer.main import get_command
 
         # `up` is registered lazily (issue #405) — it isn't in `.commands`
         # until resolved, so go through `get_command()` like Click itself
         # does when dispatching, instead of indexing the dict directly.
+        # `LazyTyperGroup.get_command` doesn't use its `ctx` argument, so a
+        # real click.Context isn't needed here (and `click` itself isn't a
+        # direct dependency of this project — Typer vendors its own copy).
         group = get_command(cli_app)
-        up = group.get_command(click.Context(group), "up")
+        up = group.get_command(None, "up")
         assert up is not None
         declared = {opt for param in up.params for opt in getattr(param, "opts", [])}
         missing = [
