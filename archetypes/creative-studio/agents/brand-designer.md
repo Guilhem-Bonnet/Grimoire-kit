@@ -3,11 +3,12 @@
 -->
 ---
 name: "brand-designer"
-description: "Brand Designer — Identité visuelle, logo, palette, guidelines"
-use_when: "Définir ou faire évoluer une identité de marque : logo, palette, guidelines, cohérence visuelle transverse."
-dont_use_when: "Production d'un asset isolé déjà cadré par une charte existante (voir illustration-expert ou content-creator) ou modélisation 3D."
-tool_boundary: "Documents de guidelines et palettes (design tokens, specs logo) — pas d'accès aux fichiers 3D ni au code applicatif."
+description: "Brand Designer généraliste — Identité visuelle, logo, palette, guidelines, plus le skill attaché creative-content-copywriting"
+use_when: "Définir ou faire évoluer une identité de marque (logo, palette, guidelines, cohérence visuelle transverse), ou rédiger le contenu qui en découle (copywriting, blog, social, newsletter). Ce second domaine vivait dans un agent séparé (content-creator) au même faisceau d'outils que celui-ci ; il est désormais un skill attaché, chargé seulement quand le sujet le demande (Grimoire-kit#375)."
+dont_use_when: "Production d'un asset vectoriel technique (voir illustration-expert) ou modélisation 3D (voir blender-expert)."
+tool_boundary: "Documents de guidelines, palettes et contenu textuel de marque selon le skill actif — pas d'accès aux fichiers 3D, aux assets vectoriels techniques, ni au code applicatif."
 tools: "read, edit"
+skills: ["creative-content-copywriting"]
 model_affinity:
   reasoning: high
   context_window: medium

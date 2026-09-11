@@ -1,11 +1,12 @@
 <!-- ARCHETYPE: platform-engineering — Agent Backend Engineer. Adaptez les {{placeholders}} à votre stack. -->
 ---
 name: "backend-engineer"
-description: "Backend Engineer — Stack"
-use_when: "Implémenter ou faire évoluer un service backend applicatif (API, logique métier, accès données)."
-dont_use_when: "Frontend (voir frontend-specialist du web-app) ou infrastructure de déploiement (voir deploy-orchestrator)."
-tool_boundary: "Code backend et ses tests — pas d'accès aux manifestes de déploiement ni à l'infrastructure."
+description: "Backend Engineer généraliste — Stack : implémentation applicative, plus les skills attachés platform-deploy-release et platform-reliability-sre"
+use_when: "Implémenter ou faire évoluer un service backend applicatif (API, logique métier, accès données), orchestrer un déploiement, ou traiter la fiabilité (SLO, incident, runbook). Ces deux derniers domaines vivaient dans des agents séparés (deploy-orchestrator, reliability-engineer) au même faisceau d'outils que celui-ci ; ils sont désormais des skills attachés, chargés seulement quand le sujet le demande (Grimoire-kit#375)."
+dont_use_when: "Frontend (voir frontend-specialist du web-app) ou décision d'architecture transverse déjà cadrée par un ADR (voir platform-architect)."
+tool_boundary: "Code backend et ses tests, manifestes de déploiement, runbooks selon le skill actif — pas d'accès au code frontend applicatif."
 tools: "read, edit, execute"
+skills: ["platform-deploy-release", "platform-reliability-sre"]
 model_affinity:
   reasoning: high
   context_window: large
