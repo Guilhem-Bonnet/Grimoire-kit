@@ -501,6 +501,42 @@ def doctor(
                 if chk.remedy and (not chk.passed or chk.level == "warn"):
                     console.print(f"        [dim]remedy:[/dim] [cyan]{chk.remedy}[/cyan]")
 
+    # 7bis. Agent freshness (issue #396) — jamais FAIL : une dette de dette
+    # d'usage, pas une panne. L'absence de données (journal absent ou plus
+    # jeune que le seuil) rend systématiquement INFO, sans liste.
+    with _timed_phase("agent_freshness"):
+        from grimoire.core.agent_freshness import format_freshness_detail, project_agent_freshness
+        from grimoire.core.exceptions import GrimoireAgentError
+
+        try:
+            freshness = project_agent_freshness(target, cfg)
+        except GrimoireAgentError as exc:
+            miss_entry: dict[str, Any] = {
+                "name": "agent_freshness",
+                "passed": True,
+                "detail": f"Fraîcheur des agents non évaluée : {exc}",
+                "level": "info",
+            }
+            results.append(miss_entry)
+            if fmt != "json":
+                console.print(f"  [dim]○[/dim]  {miss_entry['detail']}")
+        else:
+            level, detail = format_freshness_detail(freshness)
+            freshness_entry: dict[str, Any] = {"name": "agent_freshness", "passed": True, "detail": detail, "level": level}
+            if level == "warn":
+                freshness_entry["stale_agents"] = [
+                    {"name": e.name, "last_seen": e.last_seen, "days_since": e.days_since}
+                    for e in freshness.stale_entries
+                ]
+            results.append(freshness_entry)
+            if fmt != "json":
+                if level == "warn":
+                    console.print(f"  [yellow]WARN[/yellow]  {detail}")
+                elif level == "info":
+                    console.print(f"  [dim]○[/dim]  {detail}")
+                else:
+                    console.print(f"  [green]OK[/green]  {detail}")
+
     # 8. Python version
     _record("python", passed=True, detail=f"Python {sys.version.split()[0]}")
 
@@ -1096,13 +1132,19 @@ def registry_dispatches(ctx: typer.Context) -> None:
     spécialité cherchée par le concierge sans spécialiste trouvé, écrite via
     `grimoire agent-miss`) — le double fait qui manquait pour juger si un
     agent livré sert encore à quelqu'un, et pour voir quelle spécialité
-    absente reviendrait assez souvent pour justifier d'en créer une. Un
-    journal absent vaut zéro choix et zéro non-choix observés, jamais une
-    erreur.
+    absente reviendrait assez souvent pour justifier d'en créer une. Elle
+    gagne aussi la liste des agents connus jamais choisis ou périmés sur la
+    période (issue #396) — le même verdict que `grimoire doctor`, la même
+    règle qui refuse de confondre un journal trop jeune avec une absence
+    d'usage. Un journal absent vaut zéro choix et zéro non-choix observés,
+    jamais une erreur.
     """
+    from grimoire.core.agent_freshness import project_agent_freshness
+    from grimoire.core.config import GrimoireConfig
+    from grimoire.core.exceptions import GrimoireAgentError, GrimoireConfigError
     from grimoire.core.standard_generation import TRACES_DIR
     from grimoire.tools._common import find_project_root
-    from grimoire.traces.ledger import TraceLedger
+    from grimoire.traces.ledger import FreshnessReport, TraceLedger
 
     try:
         root = find_project_root()
@@ -1114,8 +1156,36 @@ def registry_dispatches(ctx: typer.Context) -> None:
     counts = ledger.agent_dispatch_counts()
     misses = ledger.agent_miss_counts()
 
+    cfg: GrimoireConfig | None = None
+    try:
+        cfg = GrimoireConfig.from_yaml(root / "project-context.yaml")
+    except GrimoireConfigError:
+        cfg = None
+    try:
+        freshness: FreshnessReport | None = project_agent_freshness(root, cfg)
+    except GrimoireAgentError:
+        freshness = None
+
+    freshness_payload: dict[str, Any] | None = None
+    if freshness is not None:
+        freshness_payload = {
+            "threshold_days": freshness.threshold_days,
+            "judged": freshness.judged,
+            "journal_span_days": freshness.journal_span_days,
+            "never_invoked": [e.name for e in freshness.entries if e.last_seen is None] if freshness.judged else [],
+            "stale": [
+                {"name": e.name, "last_seen": e.last_seen, "days_since": e.days_since} for e in freshness.stale_entries
+            ],
+        }
+
     if _get_fmt(ctx) == "json":
-        typer.echo(json.dumps({"dispatches": counts, "misses": misses}, indent=2, ensure_ascii=False))
+        typer.echo(
+            json.dumps(
+                {"dispatches": counts, "misses": misses, "freshness": freshness_payload},
+                indent=2,
+                ensure_ascii=False,
+            )
+        )
         return
 
     if not counts:
@@ -1133,17 +1203,39 @@ def registry_dispatches(ctx: typer.Context) -> None:
 
     if not misses:
         console.print("[yellow]Aucun non-choix enregistré.[/yellow]")
-        return
+    else:
+        miss_tbl = Table(title="Non-choix observés — spécialité manquante")
+        miss_tbl.add_column("Spécialité", style="bold")
+        miss_tbl.add_column("Occurrences", justify="right")
+        miss_tbl.add_column("Dernier non-choix")
 
-    miss_tbl = Table(title="Non-choix observés — spécialité manquante")
-    miss_tbl.add_column("Spécialité", style="bold")
-    miss_tbl.add_column("Occurrences", justify="right")
-    miss_tbl.add_column("Dernier non-choix")
+        for specialty, stats in sorted(misses.items(), key=lambda kv: kv[1]["count"], reverse=True):
+            miss_tbl.add_row(specialty, str(stats["count"]), stats["last_seen"] or "—")
 
-    for specialty, stats in sorted(misses.items(), key=lambda kv: kv[1]["count"], reverse=True):
-        miss_tbl.add_row(specialty, str(stats["count"]), stats["last_seen"] or "—")
+        console.print(miss_tbl)
 
-    console.print(miss_tbl)
+    console.print()
+    if freshness is None:
+        console.print("[dim]Fraîcheur des agents : non évaluée (liste des agents indisponible).[/dim]")
+    elif not freshness.judged:
+        span = freshness.journal_span_days
+        if span is None:
+            console.print(f"[dim]Fraîcheur des agents : aucun historique — non évaluée (seuil {freshness.threshold_days} j).[/dim]")
+        else:
+            console.print(
+                f"[dim]Fraîcheur des agents : journal de {span} j, insuffisant pour le seuil de "
+                f"{freshness.threshold_days} j — non évaluée.[/dim]"
+            )
+    elif not freshness.stale_entries:
+        console.print(f"[green]Fraîcheur des agents : aucun agent sans invocation depuis {freshness.threshold_days} j.[/green]")
+    else:
+        never = [e.name for e in freshness.entries if e.last_seen is None]
+        if never:
+            console.print(f"[yellow]Agents jamais choisis (seuil {freshness.threshold_days} j) : {', '.join(never)}[/yellow]")
+        stale_seen = [e for e in freshness.stale_entries if e.last_seen is not None]
+        if stale_seen:
+            parts = ", ".join(f"{e.name} (il y a {e.days_since} j)" for e in stale_seen)
+            console.print(f"[yellow]Agents sans invocation récente (seuil {freshness.threshold_days} j) : {parts}[/yellow]")
 
 
 # ── grimoire diff ─────────────────────────────────────────────────────────────────

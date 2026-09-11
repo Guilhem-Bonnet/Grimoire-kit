@@ -161,6 +161,15 @@ class TestAgentsConfig:
         ac = AgentsConfig.from_dict({})
         assert ac.archetype == "minimal"
         assert ac.custom_agents == ()
+        assert ac.freshness_threshold_days == 90
+
+    def test_freshness_threshold_days_from_dict(self) -> None:
+        ac = AgentsConfig.from_dict({"freshness_threshold_days": 200})
+        assert ac.freshness_threshold_days == 200
+
+    def test_freshness_threshold_days_invalid_falls_back_to_default(self) -> None:
+        for bad in (0, -5, "not-a-number", True, None):
+            assert AgentsConfig.from_dict({"freshness_threshold_days": bad}).freshness_threshold_days == 90
 
 
 # ── GrimoireConfig — from_dict ───────────────────────────────────────────────────

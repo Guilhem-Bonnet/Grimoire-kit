@@ -9,6 +9,8 @@ from __future__ import annotations
 import contextlib
 import json
 import uuid
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -39,7 +41,14 @@ from grimoire.traces.schemas import (
     TraceRecord,
 )
 
-__all__ = ["AGENT_DISPATCH_TAG", "AGENT_MISS_TAG", "TraceLedger"]
+__all__ = [
+    "AGENT_DISPATCH_TAG",
+    "AGENT_MISS_TAG",
+    "AgentFreshness",
+    "FreshnessReport",
+    "TraceLedger",
+    "compute_agent_freshness",
+]
 
 #: Tag qui marque un enregistrement comme « un agent a été choisi » plutôt
 #: qu'un gate de tâche ou un appel modèle — le seul filtre dont
@@ -61,6 +70,105 @@ _UNNAMED_SPECIALTY = "(non nommée)"
 _OTEL_SPAN_KIND_INTERNAL = "SPAN_KIND_INTERNAL"
 _OTEL_STATUS_OK = "STATUS_CODE_OK"
 _OTEL_STATUS_ERROR = "STATUS_CODE_ERROR"
+
+
+@dataclass(frozen=True, slots=True)
+class AgentFreshness:
+    """Fraîcheur d'un agent au regard du seuil configuré (issue #396).
+
+    ``last_seen``/``days_since`` sont ``None`` quand l'agent n'apparaît dans
+    aucun ``agent.dispatch`` du journal — « jamais », pas « il y a 0 jour ».
+    ``stale`` ne vaut jamais ``True`` quand le rapport parent n'est pas
+    :attr:`FreshnessReport.judged` : sans assez d'historique, aucun agent
+    n'est déclaré périmé (voir le docstring de :func:`compute_agent_freshness`).
+    """
+
+    name: str
+    last_seen: str | None
+    days_since: int | None
+    stale: bool
+
+
+@dataclass(frozen=True, slots=True)
+class FreshnessReport:
+    """Verdict de fraîcheur pour un ensemble d'agents, à un seuil donné.
+
+    ``judged`` distingue « le journal a assez d'historique pour se prononcer »
+    de « rien à signaler » : quand il vaut ``False`` (journal absent, vide, ou
+    plus jeune que ``threshold_days``), :attr:`stale_entries` est toujours
+    vide par construction — l'absence de données ne doit jamais se lire comme
+    une absence d'usage.
+    """
+
+    threshold_days: int
+    judged: bool
+    journal_span_days: int | None
+    entries: tuple[AgentFreshness, ...]
+
+    @property
+    def stale_entries(self) -> tuple[AgentFreshness, ...]:
+        return tuple(e for e in self.entries if e.stale)
+
+
+def _parse_iso(value: str) -> datetime | None:
+    with contextlib.suppress(ValueError):
+        return datetime.fromisoformat(value)
+    return None
+
+
+def compute_agent_freshness(
+    agent_names: Iterable[str],
+    dispatch_counts: Mapping[str, Mapping[str, Any]],
+    *,
+    threshold_days: int,
+    oldest_started_at: str | None,
+    now: datetime | None = None,
+) -> FreshnessReport:
+    """Croiser la liste des agents connus avec leurs derniers choix journalisés.
+
+    Règle de fraîcheur de l'issue #396 : un agent livré ou en override qui
+    n'apparaît dans aucun ``agent.dispatch`` depuis *threshold_days* est
+    signalé — jamais retiré, jamais en échec (voir les appelants CLI/cockpit,
+    ce module ne fait que calculer le verdict).
+
+    L'absence de données ne vaut jamais absence d'usage : si le journal (tout
+    tag confondu, via *oldest_started_at*) couvre moins de *threshold_days*
+    jours, aucun agent n'est jugé — :attr:`FreshnessReport.judged` est
+    ``False`` et ``stale`` reste ``False`` pour chaque entrée, quel que soit
+    son ``last_seen``. Un projet dont le journal commence hier n'a aucun
+    agent périmé, il n'a simplement pas encore eu l'occasion de les voir.
+
+    Un agent est périmé quand sa dernière date de choix remonte à
+    *threshold_days* jours ou plus (borne incluse, comme « depuis N jours »),
+    ou qu'il n'a jamais été choisi.
+    """
+    now = now or datetime.now(tz=UTC)
+    journal_span_days: int | None = None
+    if oldest_started_at:
+        oldest = _parse_iso(oldest_started_at)
+        if oldest is not None:
+            journal_span_days = (now - oldest).days
+
+    judged = journal_span_days is not None and journal_span_days >= threshold_days
+
+    entries: list[AgentFreshness] = []
+    for name in sorted(set(agent_names)):
+        stats = dispatch_counts.get(name)
+        last_seen = str(stats["last_seen"]) if stats and stats.get("last_seen") else None
+        days_since: int | None = None
+        if last_seen:
+            seen_at = _parse_iso(last_seen)
+            if seen_at is not None:
+                days_since = (now - seen_at).days
+        stale = judged and (last_seen is None or (days_since is not None and days_since >= threshold_days))
+        entries.append(AgentFreshness(name=name, last_seen=last_seen, days_since=days_since, stale=stale))
+
+    return FreshnessReport(
+        threshold_days=threshold_days,
+        judged=judged,
+        journal_span_days=journal_span_days,
+        entries=tuple(entries),
+    )
 
 
 def _now_iso() -> str:
@@ -250,6 +358,40 @@ class TraceLedger:
             if trace.started_at > entry["last_seen"]:
                 entry["last_seen"] = trace.started_at
         return counts
+
+    def oldest_started_at(self) -> str | None:
+        """Horodatage du plus ancien enregistrement du journal, tous tags confondus.
+
+        Mesure jusqu'où remonte l'historique disponible — ce dont
+        :func:`compute_agent_freshness` a besoin pour distinguer « aucun
+        agent choisi depuis N jours » d'« aucune donnée sur N jours »
+        (issue #396). ``None`` quand le journal est vide ou absent, jamais
+        une erreur.
+        """
+        starts = [t.started_at for t in self._load_all() if t.started_at]
+        return min(starts) if starts else None
+
+    def agent_freshness_report(
+        self,
+        agent_names: Iterable[str],
+        *,
+        threshold_days: int,
+        now: datetime | None = None,
+    ) -> FreshnessReport:
+        """Commodité : assemble :func:`compute_agent_freshness` depuis ce journal.
+
+        Lit ``agent_dispatch_counts()`` et ``oldest_started_at()`` sur *self*
+        plutôt que de les faire recalculer par chaque appelant (doctor,
+        cockpit, ``registry dispatches``) — les trois lisent le même journal
+        pour la même question.
+        """
+        return compute_agent_freshness(
+            agent_names,
+            self.agent_dispatch_counts(),
+            threshold_days=threshold_days,
+            oldest_started_at=self.oldest_started_at(),
+            now=now,
+        )
 
     def policy_block_rate(self, mission_id: str | None = None) -> float:
         """Fraction of tool calls that were blocked."""

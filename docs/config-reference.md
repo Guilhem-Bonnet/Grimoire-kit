@@ -119,6 +119,7 @@ Valeurs acceptées :
 |---|---|---|---|
 | `archetype` | `string` | `"minimal"` | Archétype d'agents à utiliser. Voir [valeurs valides](#agentsarchetype). |
 | `custom_agents` | `list[string]` | `[]` | Noms suivis par `grimoire add`/`grimoire remove` — bookkeeping, pas un chargement. Les fichiers d'agent créés par `grimoire_add_agent` (MCP) ou manuellement vivent dans `_grimoire/overrides/agents/`. |
+| `freshness_threshold_days` | `integer` | `90` | Jours sans `agent.dispatch` journalisé au-delà desquels `grimoire doctor` et le cockpit signalent un agent livré ou en override comme périmé. Signal seulement — jamais de retrait ni de dépréciation automatique. |
 
 ### `agents.archetype`
 

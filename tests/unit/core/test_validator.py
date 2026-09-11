@@ -141,6 +141,32 @@ class TestAgentsSection:
         errs = validate_config(data)
         assert any("Duplicate" in e.message for e in errs)
 
+    def test_valid_freshness_threshold_days(self) -> None:
+        data = {**_minimal(), "agents": {"freshness_threshold_days": 200}}
+        assert validate_config(data) == []
+
+    def test_freshness_threshold_days_zero_is_rejected(self) -> None:
+        data = {**_minimal(), "agents": {"freshness_threshold_days": 0}}
+        errs = validate_config(data)
+        assert any("agents.freshness_threshold_days" in e.path for e in errs)
+
+    def test_freshness_threshold_days_negative_is_rejected(self) -> None:
+        data = {**_minimal(), "agents": {"freshness_threshold_days": -1}}
+        errs = validate_config(data)
+        assert any("agents.freshness_threshold_days" in e.path for e in errs)
+
+    def test_freshness_threshold_days_not_int_is_rejected(self) -> None:
+        data = {**_minimal(), "agents": {"freshness_threshold_days": "90"}}
+        errs = validate_config(data)
+        assert any("agents.freshness_threshold_days" in e.path for e in errs)
+
+    def test_freshness_threshold_days_bool_is_rejected(self) -> None:
+        # `bool` est une sous-classe d'`int` en Python — vérifie que `True` n'est
+        # pas accepté comme un entier valide (isinstance(True, int) est vrai).
+        data = {**_minimal(), "agents": {"freshness_threshold_days": True}}
+        errs = validate_config(data)
+        assert any("agents.freshness_threshold_days" in e.path for e in errs)
+
 
 class TestInstalledArchetypes:
     def test_not_list(self) -> None:

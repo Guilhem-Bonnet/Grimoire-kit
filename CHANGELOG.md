@@ -8,6 +8,21 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 ## [Unreleased]
 ### Ajouté
 
+- **feat(core): règle de fraîcheur des agents — signaler, jamais retirer (#396).**
+  Un agent livré ou en override qui n'apparaît dans aucun `agent.dispatch`
+  du journal de traces depuis `agents.freshness_threshold_days` jours
+  (défaut 90, configurable dans `project-context.yaml`) est signalé, jamais
+  retiré ni déprécié automatiquement. `grimoire doctor` gagne un contrôle
+  `agent_freshness` (INFO si le journal a moins de N jours d'historique —
+  l'absence de données n'est jamais une absence d'usage —, WARN sinon,
+  jamais FAIL) ; `grimoire registry dispatches` gagne la liste des agents
+  jamais choisis ou périmés sur la période ; le cockpit (section agents,
+  #382) affiche « jamais invoqué » ou « il y a N jours » dans la colonne
+  d'usage et un badge « périmé » au-delà du seuil. Calcul centralisé dans
+  `grimoire.traces.ledger.compute_agent_freshness`, composé pour les trois
+  surfaces par `grimoire.core.agent_freshness`. Le seuil est aussi porté au
+  port Rust du schéma (`rust/grimoire-schema-core/`).
+
 - **feat(core): instrumenter les non-choix du concierge (#389).** Symétrique
   du choix d'agent (#366) : quand le concierge cherche un spécialiste et n'en
   trouve aucun, ou se rabat sur un généraliste, `grimoire agent-miss`

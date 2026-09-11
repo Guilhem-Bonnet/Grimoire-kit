@@ -125,7 +125,7 @@ _KNOWN_MEMORY_KEYS = frozenset({
 })
 
 _KNOWN_AGENTS_KEYS = frozenset({
-    "archetype", "custom_agents", "entry",
+    "archetype", "custom_agents", "entry", "freshness_threshold_days",
 })
 
 # Cle -> jeu de cles connues, indexe par le `keyset_id` que
@@ -428,6 +428,13 @@ def _validate_agents(section: Any, errors: list[ValidationError]) -> None:
                     ))
                 else:
                     seen.add(agent_id)
+
+    threshold = section.get("freshness_threshold_days")
+    if threshold is not None and (isinstance(threshold, bool) or not isinstance(threshold, int) or threshold < 1):
+        errors.append(ValidationError(
+            path="agents.freshness_threshold_days",
+            message="'agents.freshness_threshold_days' must be a positive integer (days).",
+        ))
 
     _check_unknown_keys(section, _KNOWN_AGENTS_KEYS, "agents", errors)
 
