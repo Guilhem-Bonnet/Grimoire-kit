@@ -64,6 +64,10 @@ DECISION_DIR = Path("_grimoire-output/decisions")
 SCORE_DIR = Path("_grimoire-output/standard")
 #: Where lifecycle decisions are recorded, next to the artifacts they judge.
 TRACES_DIR = Path("_grimoire-output/traces")
+#: Where artifact-creation proposals are stored, one YAML file per specialty
+#: (issue #395) — a project-owned record, never regenerated wholesale, so it
+#: lives beside the other run outputs rather than under the kit's own tiers.
+PROPOSALS_DIR = Path("_grimoire-output/proposals")
 
 #: A task id becomes a directory name in generated paths, so it is validated
 #: before it is ever joined. Kept here, with the paths it guards, so that

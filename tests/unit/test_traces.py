@@ -209,8 +209,18 @@ class TestTraceLedger:
         )
         counts = ledger.agent_miss_counts()
         assert counts == {
-            "terraform": {"count": 2, "last_seen": "2026-01-02T00:00:00+00:00"},
-            "(non nommée)": {"count": 1, "last_seen": "2026-01-03T00:00:00+00:00"},
+            "terraform": {
+                "count": 2,
+                "last_seen": "2026-01-02T00:00:00+00:00",
+                "category": "infra",
+                "fallback_agent": "generic-dev",
+            },
+            "(non nommée)": {
+                "count": 1,
+                "last_seen": "2026-01-03T00:00:00+00:00",
+                "category": "design",
+                "fallback_agent": "",
+            },
         }
 
     def test_export_otel_jsonl(self, tmp_path) -> None:

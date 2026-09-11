@@ -552,6 +552,25 @@ def test_session_start_says_nothing_about_providers_without_a_registry(project: 
     assert "Fournisseurs :" not in context
 
 
+def test_session_start_reports_pending_proposals(project: Path) -> None:
+    """Issue #395 : la ligne pointe vers le cockpit et la CLI, jamais vers du contenu."""
+    from grimoire.hosts.decisions import record_agent_miss
+    from grimoire.proposals import sync_proposals
+
+    record_agent_miss(project, category="infra", specialty="terraform")
+    record_agent_miss(project, category="infra", specialty="terraform")
+    sync_proposals(project)
+
+    context = _session_start(project)
+    assert "1 proposition(s) d'artefact en attente" in context
+    assert "grimoire proposals" in context
+
+
+def test_session_start_says_nothing_about_proposals_without_any(project: Path) -> None:
+    context = _session_start(project)
+    assert "proposition(s) d'artefact" not in context
+
+
 def test_copilot_surface_declares_its_permission_gap(governed: Path) -> None:
     emitter = emitter_for(HostId.GITHUB_COPILOT)
     assert emitter is not None

@@ -159,6 +159,11 @@ export const api = {
   // cible un AUTRE projet que celui déjà résolu — même convention que
   // `health()` juste au-dessus, pour le niveau Flotte de Piloter.
   agents: (project) => get(WS + 'agents', project ? { project } : undefined),
+  // Propositions d'artefact (#395) : le déclencheur relit le journal des
+  // non-choix à chaque appel — jamais un fichier figé — et rend les faits
+  // qui fondent chaque proposition (spécialité, catégorie, agent de repli,
+  // compte). Écritures via `proposalAction`, jamais silencieuses.
+  proposals: (project) => get(WS + 'proposals', project ? { project } : undefined),
 
   // ── Blueprints : éditeur de graphe (édition — atelier seulement) ───────────
   // Lecture, validation et simulation sont disponibles sur les deux hôtes
@@ -191,6 +196,11 @@ export const api = {
     post(WS + 'agents/' + encodeURIComponent(name) + '/skill', { skill, action }),
   agentFields: (name, fields) =>
     post(WS + 'agents/' + encodeURIComponent(name) + '/fields', fields),
+  // Accepter écrit l'artefact réel (agent ou skill attaché) ; refuser ne fait
+  // que marquer la proposition (#395). Jamais d'option automatique — chaque
+  // appel est le geste explicite que l'issue exige.
+  proposalAction: (slug, action) =>
+    post(WS + 'proposals/' + encodeURIComponent(slug) + '/' + action, {}),
   blueprintPut: (id, blueprint) => put('/api/blueprints/' + encodeURIComponent(id), blueprint),
 
   // Aligner un projet sur le kit installé (`grimoire up`). Disponible sur les

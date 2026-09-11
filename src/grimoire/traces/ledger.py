@@ -65,7 +65,11 @@ AGENT_MISS_TAG = "agent.miss"
 
 #: Clé d'agrégation pour un non-choix dont la spécialité cherchée n'a pas pu
 #: être nommée — jamais ignoré : le non-choix reste un signal même sans nom.
-_UNNAMED_SPECIALTY = "(non nommée)"
+#: Public (sans ``_``) : le déclencheur de propositions (issue #395) doit
+#: pouvoir l'exclure de son parcours sans dupliquer le littéral — une
+#: spécialité sans nom ne peut pas devenir un slug de fichier.
+UNNAMED_SPECIALTY = "(non nommée)"
+_UNNAMED_SPECIALTY = UNNAMED_SPECIALTY
 
 _OTEL_SPAN_KIND_INTERNAL = "SPAN_KIND_INTERNAL"
 _OTEL_STATUS_OK = "STATUS_CODE_OK"
@@ -376,24 +380,35 @@ class TraceLedger:
         (encodée en tag ``specialty:<nom>``) — la clé de lecture que l'issue
         #389 pose comme critère d'arrêt (« quelle spécialité a manqué et
         combien de fois »). Une entrée sans spécialité nommable est comptée
-        sous ``_UNNAMED_SPECIALTY`` plutôt qu'ignorée : le non-choix reste un
+        sous ``UNNAMED_SPECIALTY`` plutôt qu'ignorée : le non-choix reste un
         signal même quand le concierge n'a pas su le nommer. Retourne, par
-        spécialité : le nombre d'occurrences et l'horodatage de la plus
-        récente, même forme qu'``agent_dispatch_counts`` pour que les deux se
-        lisent côte à côte.
+        spécialité : le nombre d'occurrences, l'horodatage de la plus récente,
+        et — depuis l'issue #395 — la catégorie et l'agent de repli les plus
+        récents (``category``/``fallback_agent``, chaîne vide si absents du
+        dernier enregistrement) : le déclencheur de propositions d'artefact
+        en a besoin pour rédiger un ``use_when``/``dont_use_when`` et choisir
+        entre skill et agent sans jamais relire les traces lui-même. Ces deux
+        champs s'ajoutent à la forme qu'``agent_dispatch_counts`` partage
+        déjà — ils ne la remplacent pas.
         """
         counts: dict[str, dict[str, Any]] = {}
         for trace in self._load_all():
             if AGENT_MISS_TAG not in trace.tags:
                 continue
             specialty = _UNNAMED_SPECIALTY
+            category = ""
             for tag in trace.tags:
                 if tag.startswith("specialty:"):
                     specialty = tag.removeprefix("specialty:") or _UNNAMED_SPECIALTY
-                    break
-            entry = counts.setdefault(specialty, {"count": 0, "last_seen": ""})
+                elif tag.startswith("category:"):
+                    category = tag.removeprefix("category:")
+            entry = counts.setdefault(
+                specialty, {"count": 0, "last_seen": "", "category": "", "fallback_agent": ""}
+            )
             entry["count"] += 1
             if trace.started_at > entry["last_seen"]:
+                entry["category"] = category
+                entry["fallback_agent"] = trace.agent_id or ""
                 entry["last_seen"] = trace.started_at
         return counts
 

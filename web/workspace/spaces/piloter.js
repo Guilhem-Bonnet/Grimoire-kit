@@ -81,6 +81,10 @@ function injectStyles() {
     .pl-field textarea, .pl-field input[type="text"] { font: inherit; font-size: var(--t-s); padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); color: var(--ink); resize: vertical; }
     .pl-tool-opts { display: flex; flex-wrap: wrap; gap: var(--sp-2); font-size: var(--t-s); }
     .pl-tool-opts label { display: flex; align-items: center; gap: 4px; }
+    .pl-prop-row { flex-direction: column; align-items: stretch; gap: 6px; }
+    .pl-prop-head { display: flex; align-items: center; gap: var(--sp-2); }
+    .pl-prop-facts { color: var(--ink2); font-size: var(--t-s); }
+    .pl-prop-actions { display: flex; gap: var(--sp-2); }
   `;
   document.head.append(style);
 }
@@ -325,13 +329,97 @@ function renderFleet(root, ctx, rows, onSelect) {
 // ── Niveau Projet (fiche) ────────────────────────────────────────────────────
 
 async function loadSheet(ctx, slug) {
-  const [health, memory, doctor, agents] = await Promise.all([
+  const [health, memory, doctor, agents, proposals] = await Promise.all([
     ctx.api.health(slug).catch(() => null),
     ctx.api.memoryStatus(slug).catch(() => null),
     ctx.api.doctor(slug).catch(() => null),
     ctx.api.agents(slug).catch(() => null),
+    ctx.api.proposals(slug).catch(() => null),
   ]);
-  return { health, memory, doctor, agents };
+  return { health, memory, doctor, agents, proposals };
+}
+
+// ── Propositions d'artefact (#395) : à la répétition d'un non-choix ────────
+//
+// Toujours dans la fiche projet, section agents (#382) : une proposition
+// n'est rien d'autre qu'une décision différée sur un agent (ou un skill) qui
+// n'existe pas encore. Deux actions, jamais plus : accepter écrit l'artefact
+// réel dans `overrides` et re-fetch `agents()` pour que la table au-dessus
+// le montre aussitôt ; refuser ne fait que marquer la proposition. Aucune
+// des deux n'est disponible en lecture seule (cockpit hors projet d'accueil).
+
+function proposalFacts(p) {
+  const bits = [`${fmtInt(p.count)} non-choix`];
+  if (p.category) bits.push(`catégorie « ${p.category} »`);
+  if (p.artifact_type === 'skill' && p.target_agent) bits.push(`à attacher à ${p.target_agent}`);
+  return bits.join(' · ');
+}
+
+function renderProposalsSection(ctx, proposalsPayload, onChanged) {
+  const section = document.createElement('div');
+  section.className = 'pl-section';
+  section.append(text('h3', null, 'Propositions'));
+
+  const all = proposalsPayload?.proposals || [];
+  const pending = all.filter((p) => p.status === 'pending');
+  if (!pending.length) {
+    // `.soft` (--ink2), pas `.lbl` (--ink3) : à cette taille de police, --ink3
+    // ne tient pas le contraste 4.5:1 mesuré par
+    // `tests/e2e/test_workspace_shell.py::test_aucune_encre_rendue_sous_45`.
+    section.append(text('p', 'soft', 'Aucune proposition en attente — le déclencheur agit sur les non-choix répétés (`grimoire agent-miss`).'));
+    return section;
+  }
+
+  const readOnly = ctx.host.readOnly;
+  const list = document.createElement('div');
+  list.className = 'pl-watch';
+  for (const proposal of pending) {
+    const line = document.createElement('div');
+    line.className = 'pl-watch-row pl-prop-row';
+
+    const head = document.createElement('div');
+    head.className = 'pl-prop-head';
+    head.append(
+      dot('warn'),
+      text('span', 'pl-watch-name', `${proposal.specialty} (${proposal.artifact_type === 'skill' ? 'skill' : 'agent'})`),
+      text('span', 'lbl', proposalFacts(proposal)),
+    );
+    line.append(head);
+    line.append(text('div', 'pl-prop-facts', proposal.use_when));
+
+    const actions = document.createElement('div');
+    actions.className = 'pl-prop-actions';
+
+    const acceptBtn = document.createElement('button');
+    acceptBtn.type = 'button';
+    acceptBtn.className = 'btn pri';
+    acceptBtn.textContent = readOnly ? 'Écriture désactivée (cockpit)' : 'Accepter';
+    acceptBtn.disabled = readOnly;
+    acceptBtn.addEventListener('click', async () => {
+      ctx.dock.echo(`grimoire proposals accept ${proposal.slug}`);
+      const result = await ctx.api.proposalAction(proposal.slug, 'accept').catch((error) => ({ ok: false, error: error.message }));
+      if (!result.ok) { ctx.dock.echo(`refusé : ${result.error}`); return; }
+      onChanged();
+    });
+
+    const rejectBtn = document.createElement('button');
+    rejectBtn.type = 'button';
+    rejectBtn.className = 'btn';
+    rejectBtn.textContent = 'Refuser';
+    rejectBtn.disabled = readOnly;
+    rejectBtn.addEventListener('click', async () => {
+      ctx.dock.echo(`grimoire proposals reject ${proposal.slug}`);
+      const result = await ctx.api.proposalAction(proposal.slug, 'reject').catch((error) => ({ ok: false, error: error.message }));
+      if (!result.ok) { ctx.dock.echo(`refusé : ${result.error}`); return; }
+      onChanged();
+    });
+
+    actions.append(acceptBtn, rejectBtn);
+    line.append(actions);
+    list.append(line);
+  }
+  section.append(list);
+  return section;
 }
 
 // ── Agents (#374) : liste + inspecteur d'édition ────────────────────────────
@@ -757,6 +845,32 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
 
   agentsSection = renderAgentsTable(ctx, agentsPayload, selectedAgent, selectAgent);
   wrap.append(agentsSection);
+
+  // ── Propositions (#395) : section agents, sous la table ────────────────
+  //
+  // Accepter en crée un — l'agent nouvellement écrit doit apparaître dans la
+  // table juste au-dessus sans recharger toute la fiche, donc son callback
+  // re-fetch `agents()` en plus de `proposals()`.
+  let proposalsPayload = sheet.proposals;
+  let proposalsSection = null;
+
+  const refreshProposals = async () => {
+    const [freshProposals, freshAgents] = await Promise.all([
+      ctx.api.proposals(slug).catch(() => proposalsPayload),
+      ctx.api.agents(slug).catch(() => agentsPayload),
+    ]);
+    proposalsPayload = freshProposals;
+    agentsPayload = freshAgents;
+    const freshProposalsSection = renderProposalsSection(ctx, proposalsPayload, refreshProposals);
+    proposalsSection.replaceWith(freshProposalsSection);
+    proposalsSection = freshProposalsSection;
+    const freshAgentsSection = renderAgentsTable(ctx, agentsPayload, selectedAgent, selectAgent);
+    agentsSection.replaceWith(freshAgentsSection);
+    agentsSection = freshAgentsSection;
+  };
+
+  proposalsSection = renderProposalsSection(ctx, proposalsPayload, refreshProposals);
+  wrap.append(proposalsSection);
 }
 
 export async function mount(root, ctx) {
