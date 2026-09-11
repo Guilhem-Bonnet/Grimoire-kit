@@ -152,9 +152,16 @@ class TestInitCLI:
         runner.invoke(app, ["-y", "init", str(target)])
         agents_dir = target / "_grimoire" / "kit" / "agents"
         agent_names = {f.stem for f in agents_dir.glob("*.md")}
-        assert "project-navigator" in agent_names
-        assert "memory-keeper" in agent_names
+        # project-navigator, memory-keeper, art-director, creative-toolsmith
+        # became skills attached to agent-optimizer (issue #375) — the meta
+        # roster now keeps only its 3 agents at a distinct faisceau.
+        assert "concierge" in agent_names
         assert "agent-optimizer" in agent_names
+        assert "security-auditor" in agent_names
+        skills_dir = target / "_grimoire" / "kit" / "skills"
+        skill_names = {f.stem for f in skills_dir.glob("*.md")}
+        assert "meta-project-navigation" in skill_names
+        assert "meta-memory-quality" in skill_names
 
     def test_init_creates_session_branch(self, runner, app, tmp_path: Path) -> None:
         target = tmp_path / "session-test"

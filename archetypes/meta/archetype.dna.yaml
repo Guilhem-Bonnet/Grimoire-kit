@@ -1,0 +1,60 @@
+$schema: "grimoire-archetype-dna/v1"
+
+id: meta
+name: "Meta agents"
+version: "1.0.0"
+description: "Catégorie interne déployée avec chaque projet, quel que soit l'archétype choisi (issue #375). Trois agents à faisceau d'outils distinct (concierge, agent-optimizer généraliste, security-auditor) ; le savoir-faire de quatre anciens agents indiscernables (art-director, creative-toolsmith, memory-keeper, project-navigator) est porté par quatre skills attachés à agent-optimizer plutôt que par des agents dédiés au même faisceau."
+icon: "compass"
+author: "grimoire-kit"
+tags: [meta, internal, agents, quality]
+
+inherits: minimal
+
+agents:
+  - path: "../../archetypes/meta/agents/concierge.md"
+    required: true
+    description: "Marcel — point d'entrée, triage et routage (faisceau read+search, skill grimoire-agent-dispatch)"
+  - path: "../../archetypes/meta/agents/agent-optimizer.md"
+    required: true
+    description: "Sentinel — généraliste meta : arbitrage d'agents/workflows, plus les skills attachés meta-art-direction, meta-toolsmithing, meta-memory-quality, meta-project-navigation"
+  - path: "../../archetypes/meta/agents/security-auditor.md"
+    required: true
+    description: "Kael — cartographie de surfaces d'entrée, fuzzing, triage de plantages (faisceau read+execute, contexte propre : _grimoire/_memory/shared-context.md)"
+
+# Skills attachés par défaut à agent-optimizer (issue #375) : le savoir-faire
+# de quatre anciens agents (art-director, creative-toolsmith, memory-keeper,
+# project-navigator) qui partageaient tous un faisceau {read[,search], edit}
+# sans contexte ni skill propre — rien ne les distinguait au sens de la garde
+# de #372. Le contenu de chaque agent devient le corps du skill correspondant,
+# sans perte. memory-keeper documentait lui-même que sa maintenance de routine
+# (pruning, archivage) tourne déjà sans agent via les hooks du cercle
+# vertueux : seul l'audit qualité à la demande, non mécanisable, est repris.
+# project-navigator hérite en plus, chez agent-optimizer, du rôle résiduel
+# d'arbitre sur shared-context.md quand deux sources se contredisent.
+# Cette liste documente l'attachement ; l'attachement effectif et vérifié au
+# build est le champ `skills:` du frontmatter de l'agent porteur. custom-agent
+# reste un gabarit vierge (archetypes/minimal/agents/custom-agent.tpl.md),
+# hors périmètre de ce lot : ce n'est pas un agent, rien à lui attacher.
+skills:
+  - path: "../../archetypes/meta/skills/meta-art-direction.md"
+    attached_to: agent-optimizer
+    description: "Ex-agent Frida — identité visuelle d'agent, templates de sortie, palette d'icônes, review esthétique"
+  - path: "../../archetypes/meta/skills/meta-toolsmithing.md"
+    attached_to: agent-optimizer
+    description: "Ex-agent Vulcan — créer/auditer/refactorer un outil framework (CLI, module, pattern d'automatisation)"
+  - path: "../../archetypes/meta/skills/meta-memory-quality.md"
+    attached_to: agent-optimizer
+    description: "Ex-agent Mnemo — audit qualité mémoire à la demande (contradictions, doublons, fraîcheur) ; la routine tourne déjà par hooks"
+  - path: "../../archetypes/meta/skills/meta-project-navigation.md"
+    attached_to: agent-optimizer
+    description: "Ex-agent Atlas — cartographie/recherche de connaissance projet, arbitrage de shared-context.md"
+
+compatible_with: [minimal, web-app, infra-ops, platform-engineering, agentic-standard, creative-studio, fix-loop]
+incompatible_with: []
+requires: []
+
+changelog:
+  - version: "1.0.0"
+    date: "2026-09-10"
+    changes:
+      - "Refonte issue #375 : 7 agents (dont security-auditor, ajouté par #357) réduits à 3 à faisceau distinct ; 4 convertis en skills attachés à agent-optimizer ; security-auditor distingué de fix-loop-orchestrator par un contexte propre (shared-context.md)"

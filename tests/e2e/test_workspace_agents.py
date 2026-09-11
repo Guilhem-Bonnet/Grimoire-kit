@@ -6,7 +6,7 @@ voient ; le retirer le fait disparaître ; les deux sont vérifiés dans le
 navigateur, pas seulement sur la route. » Ce module fait exactement ça —
 ``tests/unit/test_workspace_agents.py`` couvre déjà la route elle-même.
 
-``creative-toolsmith`` est l'agent ciblé, jamais ``concierge`` : un autre
+``security-auditor`` est l'agent ciblé, jamais ``concierge`` : un autre
 harnais e2e (``test_workspace_source_language.py``) prend pour acquis l'ordre
 et le contenu de l'agent ``concierge`` livré par le kit, et cette suite ne
 doit pas lui faire courir un risque pour un défaut qu'elle ne teste pas.
@@ -21,7 +21,7 @@ from playwright.sync_api import Page
 
 pytest.importorskip("playwright.sync_api", reason="playwright absent — harnais e2e ignoré")
 
-AGENT = "creative-toolsmith"
+AGENT = "security-auditor"
 SKILL = "grimoire-agent-dispatch"
 
 

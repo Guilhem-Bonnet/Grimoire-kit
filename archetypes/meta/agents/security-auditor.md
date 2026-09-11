@@ -6,6 +6,8 @@ use_when: "Cartographier une surface d'entrée, fuzzer un binaire ou trier des p
 dont_use_when: "Durcissement de configuration ou de conformité déjà connue (voir security-hardener)."
 tool_boundary: "Outils de fuzzing et d'analyse binaire — pas d'accès à la configuration d'infrastructure ni au pipeline CI/CD."
 tools: "read, execute"
+context:
+  - "_grimoire/_memory/shared-context.md"
 model_affinity:
   reasoning: high
   context_window: large

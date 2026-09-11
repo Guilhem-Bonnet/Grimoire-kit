@@ -6,6 +6,8 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/)
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
+
+- fix(tests): le budget de temps du cockpit tient compte des runners Windows, trois fois plus lents sur cent sous-processus git, sans cesser d'attraper la régression de #340.
 ### Ajouté
 
 - **Archétype `platform-engineering` refait — 2 agents à faisceau distinct plus
@@ -19,6 +21,15 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   des agents (contexte propre via MCP + boucle vision) ; `content-creator`,
   au même faisceau que `brand-designer` sans frontière propre, devient le
   skill attaché `creative-content-copywriting`. Aucun savoir-faire supprimé.
+- **Refonte de l'archétype `meta` — généraliste plus skills attachés (#375).**
+  Les 3 agents à faisceau distinct (`concierge`, `agent-optimizer`, `security-auditor`)
+  restent ; `art-director`, `creative-toolsmith`, `memory-keeper` et
+  `project-navigator`, tous indiscernables au sens de la garde de #372,
+  deviennent quatre skills attachés à `agent-optimizer` sans rien perdre du
+  savoir-faire ; `security-auditor` gagne un `context:` propre qui le distingue
+  désormais de `fix-loop-orchestrator`. `scaffold._plan_meta_agents` copie
+  maintenant `archetypes/meta/skills/*.md`, meta étant déployé à tout projet
+  indépendamment de l'archétype choisi.
 - **Archétype `stack` refait — un généraliste plus sept skills attachés (#375).** Les sept experts par techno (`python-expert`, `go-expert`, `typescript-expert`, `docker-expert`, `terraform-expert`, `ansible-expert`, `k8s-expert`) partageaient le même faisceau outils et aucun contexte propre — c'était un seul agent décrit sept fois. Ils deviennent des skills attachés à un nouvel agent généraliste, `stack-engineer` ; le corps de chaque agent devient le corps de son skill, rien n'est supprimé. `grimoire init --archetype stack` livre désormais un agent, et une composition `web-app,stack` reste sans note de collision pour cet archétype.
 - **Le fichier d'agent émis ne charge que le contexte déclaré (#379).** Un
   agent qui déclare `context:` reçoit dans son fichier `.claude/agents/*.md`

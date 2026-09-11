@@ -274,9 +274,13 @@ class TestProjectScaffolder:
         md_files = list(agents_dir.glob("*.md"))
         agent_names = {f.stem for f in md_files}
 
-        # Meta agents
-        assert "project-navigator" in agent_names
-        assert "memory-keeper" in agent_names
+        # Meta agents — Grimoire-kit#375 : project-navigator et memory-keeper
+        # sont devenus des skills attachés à agent-optimizer.
+        assert "agent-optimizer" in agent_names
+        assert "concierge" in agent_names
+        skill_names = {f.stem for f in (tmp_path / "_grimoire" / "kit" / "skills").glob("*.md")}
+        assert "meta-project-navigation" in skill_names
+        assert "meta-memory-quality" in skill_names
 
         # Infra-ops agents — Grimoire-kit#375 : k8s-navigator (comme
         # pipeline-architect, security-hardener, backup-dr-specialist) est
