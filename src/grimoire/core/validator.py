@@ -11,18 +11,58 @@ Usage::
     if errors:
         for e in errors:
             print(f"  {e}")
+
+Backend
+-------
+The checks below (``_validate_config_python``) are the reference
+implementation and the only one guaranteed to exist. ``grimoire_schema_core``
+is an optional, PyO3-compiled Rust port of the same structural checks (see
+``rust/grimoire-schema-core/``, issue #354). It is never required: nothing in
+the published distribution depends on it, it ships no compiled wheel, and if
+the import below fails ``validate_config`` runs the pure-Python path exactly
+as before — silently, with no warning, same as the first port
+(``grimoire.policies.engine``).
+
+When the compiled module *is* present, ``validate_config()`` uses it by
+default. ``GRIMOIRE_SCHEMA_BACKEND`` (sibling of ``GRIMOIRE_POLICIES_BACKEND``)
+overrides that choice in both directions — ``"python"`` forces the reference
+implementation, ``"rust"`` forces the compiled module and raises
+:class:`~grimoire.core.exceptions.GrimoireValidationError` if it is not
+available. See ``tests/unit/test_schema_validator_rust_parity.py``.
+
+What crosses the PyO3 boundary and what does not
+--------------------------------------------------
+The Rust side receives the raw config data (whatever shape it has — a
+mapping, a list, a scalar, even a malformed one: that is the entire point,
+see the module docstring of ``rust/grimoire-schema-core/src/lib.rs``) and
+returns a list of 5-tuples ``(path, message, suggestion, unknown_key,
+keyset_id)``. For every error except an "unknown key" one, ``suggestion`` is
+already the final string. For an unknown key, ``suggestion`` is left empty
+and ``unknown_key``/``keyset_id`` are filled instead: the Rust core does not
+reimplement ``difflib``-based "did you mean?" fuzzy matching (a UX nicety,
+not validation logic — see the crate docstring), so
+:func:`_validate_config_rust` below recomputes it with the very same
+``_suggest_key`` used by the Python path, keyed off ``keyset_id`` via
+``_KEYSETS``.
 """
 
 from __future__ import annotations
 
 import difflib
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from grimoire.core.exceptions import GrimoireValidationError
 from grimoire.core.project_types import VALID_PROJECT_TYPES
 
-__all__ = ["ValidationError", "validate_config"]
+__all__ = ["ValidationError", "rust_backend_available", "validate_config"]
+
+try:
+    import grimoire_schema_core as _rust_core
+except ImportError:  # pragma: no cover - exercised by the dedicated Rust CI job
+    _rust_core = None
 
 # ── Validation result ─────────────────────────────────────────────────────────
 
@@ -88,6 +128,53 @@ _KNOWN_AGENTS_KEYS = frozenset({
     "archetype", "custom_agents", "entry",
 })
 
+# Cle -> jeu de cles connues, indexe par le `keyset_id` que
+# `grimoire_schema_core.validate_config` renvoie pour chaque erreur "Unknown
+# key" (voir le docstring de module). "" ne devrait jamais etre utilise comme
+# cle ici : reserve a `keyset_id == ""`, qui signifie "pas une erreur de cle
+# inconnue" et ne passe jamais par ce dictionnaire (voir
+# `_validate_config_rust`).
+_KEYSETS: dict[str, frozenset[str]] = {
+    "top": _KNOWN_TOP_KEYS,
+    "project": _KNOWN_PROJECT_KEYS,
+    "user": _KNOWN_USER_KEYS,
+    "memory": _KNOWN_MEMORY_KEYS,
+    "agents": _KNOWN_AGENTS_KEYS,
+}
+
+
+def rust_backend_available() -> bool:
+    """Whether the compiled ``grimoire_schema_core`` module is importable.
+
+    Purely informational (used by tests and diagnostics) — ``validate_config``
+    itself decides its backend on every call via :func:`_use_rust_backend`.
+    """
+    return _rust_core is not None
+
+
+def _use_rust_backend() -> bool:
+    """Resolve which backend ``validate_config`` should use for this call.
+
+    Reads ``GRIMOIRE_SCHEMA_BACKEND`` fresh every time rather than once at
+    import time, so tests can flip it with ``monkeypatch.setenv`` around a
+    single call without reloading the module.
+    """
+    override = os.environ.get("GRIMOIRE_SCHEMA_BACKEND", "auto").strip().lower()
+    if override == "python":
+        return False
+    if override == "rust":
+        if _rust_core is None:
+            raise GrimoireValidationError(
+                "GRIMOIRE_SCHEMA_BACKEND=rust demande le coeur Rust, mais "
+                "grimoire_schema_core est introuvable. Construire l'extension "
+                "localement (voir CONTRIBUTING.md, `maturin develop` dans "
+                "rust/grimoire-schema-core/) ou revenir a auto/python."
+            )
+        return True
+    if override not in ("auto", ""):
+        raise GrimoireValidationError(f"GRIMOIRE_SCHEMA_BACKEND invalide: {override!r} (attendu auto/python/rust)")
+    return _rust_core is not None
+
 
 def _suggest_key(unknown: str, known: frozenset[str]) -> str:
     """Return 'Did you mean X?' if a close match exists, else ''."""
@@ -123,6 +210,30 @@ def validate_config(
 
     Returns a list of :class:`ValidationError`; empty list means valid.
     """
+    if _use_rust_backend():
+        return _validate_config_rust(data)
+    return _validate_config_python(data, project_root=project_root)
+
+
+def _validate_config_rust(data: Any) -> list[ValidationError]:
+    """Same contract as :func:`_validate_config_python`, delegated to the
+    compiled core. See the module docstring for the tuple shape and why
+    "did you mean?" suggestions are recomputed here rather than in Rust."""
+    assert _rust_core is not None  # guarded by _use_rust_backend before this is called
+    errors: list[ValidationError] = []
+    for path, message, suggestion, unknown_key, keyset_id in _rust_core.validate_config(data):
+        if keyset_id:
+            suggestion = _suggest_key(unknown_key, _KEYSETS[keyset_id])
+        errors.append(ValidationError(path=path, message=message, suggestion=suggestion))
+    return errors
+
+
+def _validate_config_python(
+    data: Any,
+    *,
+    project_root: Path | None = None,
+) -> list[ValidationError]:
+    """Reference implementation of ``validate_config``, in pure Python."""
     errors: list[ValidationError] = []
 
     if not isinstance(data, dict):

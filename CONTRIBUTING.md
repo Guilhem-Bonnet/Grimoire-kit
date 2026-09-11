@@ -113,29 +113,39 @@ rouvertes ici pour un « objet PR cassé » qui n'existait pas — la branche al
 bien, une autre session écrivait dessus. Fermer une PR ne répare rien et lui fait
 perdre son historique de revue.
 
-## Cœur optionnel en Rust (`grimoire.policies`)
+## Cœurs optionnels en Rust
 
-`src/grimoire/policies/` (moteur de règles) a un second moteur, en Rust,
-exposé via [PyO3](https://pyo3.rs) depuis le crate `rust/grimoire-policies-core/`
-(issue [#354](https://github.com/Guilhem-Bonnet/Grimoire-kit/issues/354)).
-Deux points essentiels avant tout le reste :
+Le kit porte progressivement, module par module, certains cœurs de logique
+pure vers Rust — exposés via [PyO3](https://pyo3.rs), un crate par module
+migré (issue [#354](https://github.com/Guilhem-Bonnet/Grimoire-kit/issues/354)).
+Deux points essentiels avant tout le reste, valables pour **tous** ces
+crates :
 
-- **Ce n'est jamais nécessaire pour contribuer au kit.** Le module compilé
-  n'est installé par aucune dépendance du paquet, `pip install grimoire-kit`
-  ne le construit pas, et `grimoire.policies.engine` retombe silencieusement
-  sur son implémentation Python pure quand il est absent — ce qui est le cas
-  de loin le plus courant. N'installer que Python et suivre les
-  [Prérequis](#prérequis) ci-dessus suffit pour tout le reste du kit.
+- **Ce n'est jamais nécessaire pour contribuer au kit.** Aucun module
+  compilé n'est installé par une dépendance du paquet, `pip install
+  grimoire-kit` n'en construit aucun, et le module Python correspondant
+  retombe silencieusement sur son implémentation Python pure quand le
+  compilé est absent — ce qui est le cas de loin le plus courant. N'installer
+  que Python et suivre les [Prérequis](#prérequis) ci-dessus suffit pour
+  tout le reste du kit.
 - **Rien n'est publié.** La wheel sur PyPI reste la wheel universelle
   actuelle ; aucune roue par plateforme, aucune compilation croisée dans le
-  pipeline de publication. Le crate porte même le classifieur PyPI
+  pipeline de publication. Chaque crate porte le classifieur PyPI
   `Private :: Do Not Upload` pour qu'un `maturin publish` accidentel soit
   refusé.
 
-### Construire l'extension localement
+Deux crates existent à ce jour :
 
-Utile seulement si vous travaillez sur `grimoire.policies` elle-même et
-voulez exercer le chemin Rust en local (au lieu d'attendre le job CI dédié) :
+| Crate | Module Python | Variable de bascule | Job CI |
+|---|---|---|---|
+| `rust/grimoire-policies-core/` | `grimoire.policies.engine` (`PolicyEngine.evaluate`) | `GRIMOIRE_POLICIES_BACKEND` | `.github/workflows/rust-policies-core.yml` |
+| `rust/grimoire-schema-core/` | `grimoire.core.schema.generate_schema` + `grimoire.core.validator.validate_config` | `GRIMOIRE_SCHEMA_BACKEND` | `.github/workflows/rust-schema-core.yml` |
+
+### Construire une extension localement
+
+Utile seulement si vous travaillez sur le module Python concerné et voulez
+exercer le chemin Rust en local (au lieu d'attendre le job CI dédié) — le
+motif est identique pour les deux crates, ici avec `grimoire-policies-core` :
 
 ```bash
 # En plus des prérequis Python habituels
@@ -150,18 +160,31 @@ cd -
 pytest tests/unit/test_policies.py tests/unit/test_policies_rust_parity.py
 ```
 
-`tests/unit/test_policies.py` est le contrat : il tourne sans modification
-que le module compilé soit présent ou non, et sert de golden test aux deux
-implémentations. `tests/unit/test_policies_rust_parity.py` compare
-explicitement les deux backends sur les mêmes entrées (variable
-d'environnement `GRIMOIRE_POLICIES_BACKEND=python|rust|auto`, voir le
-docstring de `grimoire/policies/engine.py`) ; ses cas spécifiques au Rust se
-sautent proprement (`skip`, pas `fail`) quand le module n'est pas installé.
-
-Pour du travail directement sur le crate :
+Pour `grimoire-schema-core`, remplacer le nom du crate et la commande
+`pytest` finale par :
 
 ```bash
-cd rust/grimoire-policies-core
+cd rust/grimoire-schema-core
+maturin develop --release
+cd -
+
+pytest tests/unit/core/test_schema.py tests/unit/core/test_validator.py tests/unit/test_schema_validator_rust_parity.py
+```
+
+Dans les deux cas, les tests du module Python (`test_policies.py`,
+`test_schema.py`/`test_validator.py`) sont le contrat : ils tournent sans
+modification que le module compilé soit présent ou non, et servent de
+golden test aux deux implémentations. Le fichier `*_rust_parity.py` compare
+explicitement les deux backends sur les mêmes entrées (variable
+d'environnement dédiée, voir le tableau ci-dessus et le docstring du module
+Python correspondant) ; ses cas spécifiques au Rust se sautent proprement
+(`skip`, pas `fail`) quand le module n'est pas installé.
+
+Pour du travail directement sur un crate (`cargo` seul, aucun interprète
+Python requis) :
+
+```bash
+cd rust/grimoire-schema-core   # ou rust/grimoire-policies-core
 cargo test --no-default-features   # logique pure, aucun interprète Python requis
 cargo fmt
 ```
@@ -169,7 +192,7 @@ cargo fmt
 Le `--no-default-features` est nécessaire : la feature `extension-module` de
 PyO3 (active par défaut, indispensable pour que l'extension soit chargeable
 par Python) empêche de lier le binaire de test de `cargo test` — voir le
-commentaire en tête de `rust/grimoire-policies-core/Cargo.toml`.
+commentaire en tête du `Cargo.toml` du crate.
 
 ## Ajouter un outil
 
