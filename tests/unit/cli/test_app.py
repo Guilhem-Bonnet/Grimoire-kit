@@ -566,10 +566,25 @@ class TestAgentMiss:
         assert result.exit_code != 0
 
     def test_agent_miss_no_project_never_fails(self, tmp_path: Path) -> None:
-        """Best-effort jusqu'au bout : pas de projet trouvé n'est pas une erreur."""
+        """Best-effort jusqu'au bout : pas de projet trouvé n'est pas une erreur — mais ce n'est pas un faux vert non plus."""
         with patch("grimoire.tools._common.find_project_root", side_effect=FileNotFoundError("no project")):
             result = runner.invoke(app, ["agent-miss", "--category", "tests"])
         assert result.exit_code == 0
+        assert "non enregistré" in result.output
+        assert "Non-choix journalisé" not in result.output
+
+    def test_agent_miss_unwritable_ledger_never_fails_and_says_so(self, tmp_path: Path) -> None:
+        """Le journal avale l'échec (best-effort) mais la commande ne l'affirme pas écrit pour autant."""
+        from grimoire.core.standard_generation import TRACES_DIR
+
+        traces_dir = tmp_path / TRACES_DIR
+        traces_dir.parent.mkdir(parents=True, exist_ok=True)
+        traces_dir.write_text("pas un dossier", encoding="utf-8")
+        with patch("grimoire.tools._common.find_project_root", return_value=tmp_path):
+            result = runner.invoke(app, ["agent-miss", "--category", "tests"])
+        assert result.exit_code == 0
+        assert "Journal de traces indisponible : non-choix non enregistré" in result.output
+        assert "Non-choix journalisé" not in result.output
 
     def test_agent_miss_writes_to_the_trace_ledger(self, tmp_path: Path) -> None:
         from grimoire.core.standard_generation import TRACES_DIR
@@ -609,7 +624,20 @@ class TestAgentMiss:
             result = runner.invoke(app, ["-o", "json", "agent-miss", "--category", "design"])
         assert result.exit_code == 0
         payload = json.loads(result.output)
-        assert payload == {"ok": True, "action": "agent-miss", "category": "design", "specialty": None}
+        assert payload == {
+            "ok": True,
+            "action": "agent-miss",
+            "category": "design",
+            "specialty": None,
+            "written": True,
+        }
+
+    def test_agent_miss_json_output_reports_unwritten(self) -> None:
+        with patch("grimoire.tools._common.find_project_root", side_effect=FileNotFoundError("no project")):
+            result = runner.invoke(app, ["-o", "json", "agent-miss", "--category", "design"])
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["written"] is False
 
 
 class TestRegistryDispatches:

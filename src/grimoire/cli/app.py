@@ -796,7 +796,9 @@ def agent_miss(
 
     Aucun contenu de la demande n'est accepté : `--category` et `--specialty`
     ne sont que des étiquettes qui la classent. L'écriture est best-effort —
-    un journal indisponible ou illisible ne fait jamais échouer la commande.
+    un journal indisponible ou illisible ne fait jamais échouer la commande,
+    qui se contente alors de le dire plutôt que d'annoncer une écriture
+    qu'elle n'a pas pu faire.
 
     [dim]Examples:[/dim]
       [cyan]grimoire agent-miss --category tests[/cyan]
@@ -813,17 +815,32 @@ def agent_miss(
     # Best-effort jusqu'au bout : hors d'un projet Grimoire, il n'y a nul
     # part où écrire — ne pas écrire, jamais écrire n'importe où (pas de
     # repli sur le cwd courant, qui n'a aucune raison d'être un projet).
-    if root is not None:
-        record_agent_miss(root, category=category, specialty=specialty, fallback_agent=fallback, reason=reason)
+    # `written` distingue le cas nominal de l'échec silencieux : la commande
+    # ne casse jamais (la résolution qu'elle observe ne doit jamais l'être
+    # non plus), mais elle n'annonce une écriture que si elle a eu lieu —
+    # sinon le message serait un faux vert.
+    written = record_agent_miss(
+        root, category=category, specialty=specialty, fallback_agent=fallback, reason=reason
+    ) if root is not None else False
 
     if _get_fmt(ctx) == "json":
         typer.echo(
             json.dumps(
-                {"ok": True, "action": "agent-miss", "category": category, "specialty": specialty or None}
+                {
+                    "ok": True,
+                    "action": "agent-miss",
+                    "category": category,
+                    "specialty": specialty or None,
+                    "written": written,
+                }
             )
         )
-    else:
+        return
+
+    if written:
         console.print(f"[yellow]Non-choix journalisé:[/yellow] {category}" + (f" ({specialty})" if specialty else ""))
+    else:
+        console.print("[yellow]Journal de traces indisponible : non-choix non enregistré[/yellow]")
 
 
 # ── grimoire validate ─────────────────────────────────────────────────────────────

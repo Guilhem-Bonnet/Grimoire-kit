@@ -1324,8 +1324,19 @@ def test_recording_an_agent_miss_never_stores_request_content(project: Path) -> 
     assert trace.evidence_refs == ()
 
 
+def test_recording_a_miss_reports_that_it_wrote(project: Path) -> None:
+    """Cas nominal : l'appelant doit pouvoir distinguer une écriture réelle d'un échec avalé."""
+    from grimoire.hosts.decisions import record_agent_miss
+
+    assert record_agent_miss(project, category="tests") is True
+
+
 def test_an_unwritable_trace_ledger_never_breaks_recording_a_miss(project: Path) -> None:
-    """Best-effort : un journal illisible n'est jamais au prix de la résolution qu'il observe."""
+    """Best-effort : un journal illisible n'est jamais au prix de la résolution qu'il observe,
+
+    mais l'appelant doit le savoir — sinon la commande annoncerait une
+    écriture qui n'a pas eu lieu (faux vert).
+    """
     from grimoire.core.standard_generation import TRACES_DIR
     from grimoire.hosts.decisions import record_agent_miss
 
@@ -1334,7 +1345,8 @@ def test_an_unwritable_trace_ledger_never_breaks_recording_a_miss(project: Path)
     # Même panne que le test symétrique côté choix : un fichier régulier là où
     # le TraceLedger attend un dossier fait échouer son `mkdir`.
     traces_dir.write_text("pas un dossier", encoding="utf-8")
-    record_agent_miss(project, category="tests")  # ne doit jamais lever
+    written = record_agent_miss(project, category="tests")  # ne doit jamais lever
+    assert written is False
 
 
 def test_no_host_can_open_a_session_inside_an_agent(project: Path) -> None:

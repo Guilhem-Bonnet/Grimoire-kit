@@ -448,7 +448,7 @@ def record_agent_miss(
     specialty: str = "",
     fallback_agent: str = "",
     reason: str = "",
-) -> None:
+) -> bool:
     """Journaliser dans le TraceLedger un non-choix : aucun spécialiste ne convenait.
 
     Symétrique de ``_record_agent_dispatch`` (issue #366) : là un choix
@@ -465,7 +465,10 @@ def record_agent_miss(
     jamais le contenu : c'est à l'appelant de ne transmettre qu'une
     étiquette. Best-effort par construction, comme son symétrique : un
     journal indisponible ou illisible ne doit jamais faire échouer la
-    résolution qu'il se contente d'observer.
+    résolution qu'il se contente d'observer — mais l'appelant a besoin de
+    savoir si l'écriture a eu lieu pour ne jamais l'affirmer à tort. Renvoie
+    ``True`` si le fait a été écrit, ``False`` s'il a été avalé par le
+    ``except`` ci-dessous.
     """
     try:
         from grimoire.core.standard_generation import TRACES_DIR
@@ -489,8 +492,9 @@ def record_agent_miss(
             agent_id=fallback_agent,
             tags=tags,
         )
-    except Exception:  # noqa: S110 — observabilité : jamais au prix de la résolution elle-même
-        pass
+        return True
+    except Exception:  # observabilité : jamais au prix de la résolution elle-même
+        return False
 
 
 def _claimed_task_recall(project_root: Path, task_id: str) -> str:
