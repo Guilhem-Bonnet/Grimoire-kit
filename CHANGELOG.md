@@ -7,6 +7,47 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **perf(cli): charger les sous-commandes à la demande — 60 % du temps de `doctor` était l'arbre Typer (#405).**
+  `grimoire.cli.app` importait sans condition les 20 modules `cmd_*` derrière
+  chaque sous-commande (`cmd_flow`, `cmd_host`, `cmd_memory_lexical`,
+  `cmd_cockpit`, `cmd_up`...) pour construire l'arbre Typer/Click, quelle que
+  soit la commande demandée — `grimoire --version` payait donc l'import de
+  `grimoire.flows`, `grimoire.missions.dispatch`, `grimoire.memory`, etc.
+  `grimoire.cli._lazy.LazyTyperGroup` (nouveau, `cls=` du `typer.Typer`
+  racine) remplace `add_typer()`/`command()` pour ces sous-commandes par un
+  registre nom → (module, attribut, aide courte, panneau, visibilité) ; le
+  module n'est importé qu'à la résolution réelle de la commande (dispatch, ou
+  son propre `--help`) — `grimoire --version` et `grimoire doctor .` ne
+  touchent plus aucun d'entre eux. `grimoire.cli.cmd_up` importait en outre
+  `cmd_init`/`core.scaffold`/`hosts.sync` à son propre niveau module rien que
+  pour les fonctions que `doctor` utilise réellement (`run_env_checks`) —
+  ces imports descendent maintenant dans les fonctions qui les utilisent
+  vraiment (`up()`, `_step_init`, `repair_project_artifacts`).
+  `grimoire --help` et l'aide de chaque sous-commande restent identiques au
+  caractère près (ordre des panneaux et des lignes inclus, garanti par un
+  registre `order` explicite dans `LazyTyperGroup.configure`) —
+  `scripts/compare-cli-help.py` (nouveau) le vérifie avant/après pour les 47
+  commandes. Garde de régression : `tests/unit/cli/test_lazy_startup.py`
+  (sous-processus propre) échoue si l'import de `grimoire.cli.app` amène
+  `grimoire.flows`, `grimoire.missions.dispatch`, `grimoire.memory` ou
+  `grimoire.cli.cmd_cockpit` dans `sys.modules`.
+  Mesuré par `scripts/bench-rust-cores.py` (médiane de 15, même machine) :
+
+  | commande | avant | après | cible | statut |
+  |---|---|---|---|---|
+  | `grimoire --version` | 313 ms | 89 ms | < 150 ms | atteinte |
+  | `grimoire doctor .` | 448 ms | 270 ms | < 300 ms | atteinte |
+  | `grimoire-hook PreToolUse` | 70 ms | 69 ms | < 50 ms | **non atteinte** |
+
+  `grimoire-hook` (point d'entrée séparé, `grimoire.hosts.runtime:main`) ne
+  passe jamais par `grimoire.cli.app` et n'est donc pas concerné par ce
+  mécanisme ; son coût restant vient de `grimoire.hosts.decisions` (918
+  lignes, tous les types de décision dans un seul module) et de
+  `grimoire.hosts.capabilities`/`.surface` — hors du périmètre de ce ticket
+  (« enregistrer les sous-commandes sans importer leur module », pas refondre
+  le moteur de décision des hooks). `grimoire-mcp` (`grimoire.mcp.server`)
+  vérifié : n'importe déjà pas `grimoire.cli.app`, rien à faire.
+
 - feat(dispatch): cinquième port Rust optionnel de la cascade de dispatch et du routage de fournisseurs — `start_tier_for`/`_tier_chain` (plancher et chaîne de paliers par classe de vérifiabilité), la résolution `--start-tier` explicite contre le plancher, `render_invocation` (rendu d'un gabarit en argv), `_looks_rate_limited`, `_extract_cost_usd`/`_uncertainties_search_text`/`_extract_uncertainties` (analyse de la sortie d'un ouvrier délégué), `_matches_review_surface`/`_classify_review` (classification de revue), `DispatchReport.succeeded`/`.exit_code`/`.refusal_message`, et l'ordre/filtre de refroidissement de `providers.routing.candidates` (issue #354). `rust/grimoire-dispatch-core/` (dépendance `serde_json` épinglée `=1.0.151`, strict RFC 8259), bascule `GRIMOIRE_DISPATCH_BACKEND=python|rust|auto` (lue indépendamment par `grimoire.missions.dispatch` et `grimoire.providers.routing`, qui ne s'importent pas l'un l'autre), jobs CI `rust-dispatch / cargo` et `rust-dispatch / parity` dans `.github/workflows/rust-cores.yml`, roue toujours `py3-none-any`. Deux défauts trouvés par l'oracle Rust en portant `_extract_cost_usd`, corrigés côté Python dans cette même PR : `isinstance(True, int)` est vrai en Python, donc un `total_cost_usd` JSON `true`/`false` était jusqu'ici coercé en `1.0`/`0.0` — désormais exclu explicitement des deux côtés ; `json.loads` de CPython accepte par défaut les jetons hors RFC 8259 `NaN`/`Infinity`/`-Infinity`, que le cœur Rust (`serde_json`, strict) n'accepte pas nativement — **corrigé côté Python : JSON strict** (`_reject_non_standard` passé en `parse_constant` à chaque `json.loads` de `dispatch.py`, rattrapé comme un JSON invalide), un document portant un de ces jetons — même ailleurs que dans le champ lu — est désormais rejeté en bloc des deux côtés (coût absent, aucune incertitude extraite), jamais l'inverse (Rust est l'oracle, pas Python). Nouveau corpus fixture de dix sorties d'ouvrier réalistes (`tests/fixtures/dispatch_worker_outputs/`, aucune sortie enregistrée réelle trouvée dans le dépôt) et fuzz léger (200 chaînes aléatoires) prouvant qu'aucune des deux fonctions d'analyse ne lève jamais, sous aucun backend.
 
 - feat(flows): quatrième port Rust optionnel de la machine à états du moteur de flows — `check_output_against_contract`, le calcul du node courant (`FlowEngine._current_node`), la décision de `resume()`/le calcul de `ResumeOutcome`, le découpage completed/pending de `status()`, et la table de transitions de `RuntimeKernel` (`_transition`/`advance_step`) (issue #354). `rust/grimoire-flows-core/`, bascule `GRIMOIRE_FLOWS_BACKEND=python|rust|auto` (lue indépendamment par `grimoire.flows.engine` et `grimoire.runtime.kernel`), jobs CI `rust-flows / cargo` et `rust-flows / parity` dans `.github/workflows/rust-cores.yml`, roue toujours `py3-none-any`. Divergence trouvée par l'oracle Rust et corrigée dans cette PR : `FlowEngine._TERMINAL_STATUSES` omettait `REFUSED` (terminal côté `RuntimeKernel` depuis les plafonds MAST, B11) — `resume()` sur un run REFUSED levait une erreur au message générique du kernel au lieu du message nommé de `resume()`, et `status()` affichait un `current_node`/`pending_nodes` périmés comme si le run continuait de progresser ; `REFUSED` ajouté à `_TERMINAL_STATUSES`, les deux backends s'accordent désormais. Comportement documenté et volontairement non changé : `status()` dérive `completed_nodes` de la position de `current_node` dans l'ordre topologique — un run ABORTED/REFUSED avant tout progrès affiche tous les nodes comme complétés, les deux backends reproduisant ce même comportement à l'identique (voir `rust/grimoire-flows-core/src/lib.rs` et l'issue de suivi citée dans la PR). Nouveau test de parité sur le corpus réel (`registry/blueprints/*.blueprint.json`) et sur la grille complète des 9×9 transitions de `WorkflowStatus`.

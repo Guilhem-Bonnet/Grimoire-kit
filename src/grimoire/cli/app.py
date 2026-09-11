@@ -19,29 +19,8 @@ from rich.console import Console
 from rich.table import Table
 
 from grimoire.__version__ import __version__
+from grimoire.cli._lazy import LazyCommandSpec, LazyGroupSpec, LazyTyperGroup
 from grimoire.cli._shared import _AUDIT_FILENAME, _log_operation, _status_spinner
-from grimoire.cli.cmd_blueprint import blueprint_app
-from grimoire.cli.cmd_cadrage import cadrage_app
-from grimoire.cli.cmd_cockpit import cockpit_app
-from grimoire.cli.cmd_context_pack import context_pack_command
-from grimoire.cli.cmd_debugger import debugger_app
-from grimoire.cli.cmd_ext import ext_app
-from grimoire.cli.cmd_features import features_app
-from grimoire.cli.cmd_flow import flow_app
-from grimoire.cli.cmd_hooks import hooks_app
-from grimoire.cli.cmd_host import host_app
-from grimoire.cli.cmd_memory_lexical import memory_app
-from grimoire.cli.cmd_migrate import migrate_command
-from grimoire.cli.cmd_proposals import proposals_app
-from grimoire.cli.cmd_providers import providers_app
-from grimoire.cli.cmd_serve import serve as serve_cmd
-from grimoire.cli.cmd_standard import standard_app
-from grimoire.cli.cmd_stigmergy import stigmergy_app
-from grimoire.cli.cmd_task import task_app
-from grimoire.cli.cmd_up import up as up_command
-from grimoire.cli.cmd_upgrade import upgrade_command
-from grimoire.cli.cmd_web import web_app
-from grimoire.cli.cmd_workflows import workflows_app
 from grimoire.core import layout
 from grimoire.core.config import GrimoireConfig
 from grimoire.core.exceptions import GrimoireConfigError, GrimoireError
@@ -94,6 +73,10 @@ def _suggest_command() -> None:
         for group_info in app.registered_groups:
             if group_info.name:
                 _KNOWN_COMMANDS.add(group_info.name)
+        # Lazy sub-commands (issue #405) aren't in app.registered_groups —
+        # they never call add_typer()/command() at import time.
+        _KNOWN_COMMANDS.update(LazyTyperGroup._lazy_groups)
+        _KNOWN_COMMANDS.update(LazyTyperGroup._lazy_commands)
         _KNOWN_COMMANDS.update(_ALIASES)
     if arg in _KNOWN_COMMANDS:
         return
@@ -107,6 +90,7 @@ def _suggest_command() -> None:
 
 app = typer.Typer(
     name="grimoire",
+    cls=LazyTyperGroup,
     help="Grimoire Kit — Composable AI agent platform.",
     no_args_is_help=True,
     rich_markup_mode="rich",
@@ -983,35 +967,65 @@ def update_cmd() -> None:
     self_update()
 
 
-# ── grimoire up ───────────────────────────────────────────────────────────────────
-# Full one-command bring-up (init → identity → standard → doctor summary).
-# Implementation lives in cmd_up.py; registered here.
+# ── Lazy sub-commands (issue #405) ─────────────────────────────────────────────
+#
+# Every entry below used to be an eager `from grimoire.cli.cmd_X import Y` at
+# the top of this file plus an `app.add_typer(Y, ...)` / `app.command(...)(Y)`
+# call here — meaning importing `grimoire.cli.app` (hence every CLI
+# invocation, hook, and MCP call) paid for importing all of them, regardless
+# of which command was actually requested. `LazyTyperGroup` (see `_lazy.py`)
+# imports the backing module only when that specific command is resolved:
+# real dispatch, or that command's own `--help`. `grimoire --version` and
+# `grimoire doctor .` never touch any of these modules.
+#
+# Name, rich_help_panel and hidden must match what the corresponding
+# `add_typer`/`command` call passed before — they are what `grimoire --help`
+# renders without importing anything.
 
-app.command("up", rich_help_panel="Project")(up_command)
-app.command("context-pack", rich_help_panel="Data")(context_pack_command)
-
-
-# ── grimoire memory ───────────────────────────────────────────────────────────────
-
-app.add_typer(memory_app, name="memory", rich_help_panel="Data")
-
-
-# ── grimoire hooks ────────────────────────────────────────────────────────────────
-
-app.add_typer(hooks_app, name="hooks", rich_help_panel="Project")
-app.add_typer(cadrage_app, name="cadrage", rich_help_panel="Project")
-
-
-# ── grimoire migrate ──────────────────────────────────────────────────────────────
-
-app.command("migrate", rich_help_panel="Project")(migrate_command)
-app.command("upgrade", rich_help_panel="Utilities")(upgrade_command)
-
-
-# ── grimoire debugger ─────────────────────────────────────────────────────────────
-
-app.add_typer(debugger_app, name="debugger", rich_help_panel="Data")
-app.add_typer(debugger_app, name="dbg", hidden=True)
+LazyTyperGroup.configure(
+    groups={
+        "memory": LazyGroupSpec("grimoire.cli.cmd_memory_lexical", "memory_app", rich_help_panel="Data"),
+        "hooks": LazyGroupSpec("grimoire.cli.cmd_hooks", "hooks_app", rich_help_panel="Project"),
+        "cadrage": LazyGroupSpec("grimoire.cli.cmd_cadrage", "cadrage_app", rich_help_panel="Project"),
+        "debugger": LazyGroupSpec("grimoire.cli.cmd_debugger", "debugger_app", rich_help_panel="Data"),
+        "dbg": LazyGroupSpec("grimoire.cli.cmd_debugger", "debugger_app", hidden=True),
+        "workflows": LazyGroupSpec("grimoire.cli.cmd_workflows", "workflows_app", rich_help_panel="Project"),
+        "wf": LazyGroupSpec("grimoire.cli.cmd_workflows", "workflows_app", hidden=True),
+        "standard": LazyGroupSpec("grimoire.cli.cmd_standard", "standard_app", rich_help_panel="Project"),
+        "ext": LazyGroupSpec("grimoire.cli.cmd_ext", "ext_app", rich_help_panel="Project"),
+        "blueprint": LazyGroupSpec("grimoire.cli.cmd_blueprint", "blueprint_app", rich_help_panel="Project"),
+        "flow": LazyGroupSpec("grimoire.cli.cmd_flow", "flow_app", rich_help_panel="Project"),
+        "cockpit": LazyGroupSpec("grimoire.cli.cmd_cockpit", "cockpit_app", rich_help_panel="Project"),
+        "task": LazyGroupSpec("grimoire.cli.cmd_task", "task_app", rich_help_panel="Project"),
+        "stigmergy": LazyGroupSpec("grimoire.cli.cmd_stigmergy", "stigmergy_app", rich_help_panel="Data"),
+        "features": LazyGroupSpec("grimoire.cli.cmd_features", "features_app", rich_help_panel="Project"),
+        "host": LazyGroupSpec("grimoire.cli.cmd_host", "host_app", rich_help_panel="Project"),
+        "providers": LazyGroupSpec("grimoire.cli.cmd_providers", "providers_app", rich_help_panel="Project"),
+        "proposals": LazyGroupSpec("grimoire.cli.cmd_proposals", "proposals_app", rich_help_panel="Agents"),
+        "web": LazyGroupSpec("grimoire.cli.cmd_web", "web_app", rich_help_panel="Data"),
+    },
+    commands={
+        "up": LazyCommandSpec("grimoire.cli.cmd_up", "up", rich_help_panel="Project"),
+        "context-pack": LazyCommandSpec("grimoire.cli.cmd_context_pack", "context_pack_command", rich_help_panel="Data"),
+        "migrate": LazyCommandSpec("grimoire.cli.cmd_migrate", "migrate_command", rich_help_panel="Project"),
+        "upgrade": LazyCommandSpec("grimoire.cli.cmd_upgrade", "upgrade_command", rich_help_panel="Utilities"),
+        "serve": LazyCommandSpec("grimoire.cli.cmd_serve", "serve", hidden=True),  # alias déprécié — voir `cockpit serve` (#351)
+    },
+    # Exact pre-#405 order: every @app.command/app.command() in file order,
+    # then every add_typer() in call order (Typer's own populating rule) —
+    # keeps `grimoire --help`'s panel/row order byte-identical. See
+    # `LazyTyperGroup.configure`'s docstring for why this is needed.
+    order=[
+        "version", "init", "doctor", "status", "add", "remove", "agent-miss",
+        "validate", "lint", "update", "up", "context-pack", "migrate", "upgrade",
+        "serve", "diff", "schema", "check", "merge", "setup", "env", "history",
+        "repair",
+        "memory", "hooks", "cadrage", "debugger", "dbg", "registry", "workflows",
+        "wf", "standard", "ext", "blueprint", "flow", "cockpit", "task",
+        "stigmergy", "features", "host", "providers", "proposals", "web",
+        "config", "completion", "self", "plugins",
+    ],
+)
 
 
 # ── grimoire registry ─────────────────────────────────────────────────────────────
@@ -1019,25 +1033,6 @@ app.add_typer(debugger_app, name="dbg", hidden=True)
 registry_app = typer.Typer(help="Browse the agent registry.")
 _reg_query_arg = typer.Argument(None, help="Search query.")
 app.add_typer(registry_app, name="registry", rich_help_panel="Agents")
-
-
-# ── grimoire workflows ───────────────────────────────────────────────────────────
-
-app.add_typer(workflows_app, name="workflows", rich_help_panel="Project")
-app.add_typer(workflows_app, name="wf", hidden=True)
-app.add_typer(standard_app, name="standard", rich_help_panel="Project")
-app.add_typer(ext_app, name="ext", rich_help_panel="Project")
-app.add_typer(blueprint_app, name="blueprint", rich_help_panel="Project")
-app.add_typer(flow_app, name="flow", rich_help_panel="Project")
-app.add_typer(cockpit_app, name="cockpit", rich_help_panel="Project")
-app.add_typer(task_app, name="task", rich_help_panel="Project")
-app.add_typer(stigmergy_app, name="stigmergy", rich_help_panel="Data")
-app.add_typer(features_app, name="features", rich_help_panel="Project")
-app.add_typer(host_app, name="host", rich_help_panel="Project")
-app.add_typer(providers_app, name="providers", rich_help_panel="Project")
-app.add_typer(proposals_app, name="proposals", rich_help_panel="Agents")
-app.add_typer(web_app, name="web", rich_help_panel="Data")
-app.command("serve", hidden=True)(serve_cmd)  # alias déprécié — voir `cockpit serve` (#351)
 
 
 @registry_app.command("list")
