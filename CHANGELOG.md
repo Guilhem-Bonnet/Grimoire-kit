@@ -26,7 +26,9 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   spécialité n'est reproposée que si son compte a doublé depuis le refus.
   `grimoire proposals list` en CLI, section Propositions du cockpit (espace
   Piloter, #382) avec les mêmes deux actions, et une ligne SessionStart à côté
-  des fournisseurs (« N proposition(s) d'artefact en attente »).
+  des fournisseurs (« N proposition(s) d'artefact en attente ») ; clé
+  `proposals` dans le schéma (`grimoire.core.schema`) et le port Rust
+  (`rust/grimoire-schema-core/`).
 
 - **feat(core): règle de fraîcheur des agents — signaler, jamais retirer (#396).**
   Un agent livré ou en override qui n'apparaît dans aucun `agent.dispatch`
