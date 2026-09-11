@@ -19,15 +19,21 @@ configurations). This file proves two additional things:
    `TypeError` (enum-shaped fields compared through `not in <frozenset>`
    when the value is an unhashable type — a list or a mapping) or silently
    accepted a value it should have rejected (`project.repos[].name`,
-   `installed_archetypes[]` items, `user.name`/`language`/`document_language`
-   were never type-checked against the string type `schema.py` declares for
-   them). The Rust core always rejected these cleanly; `validator.py`'s
-   `_check_enum_field` helper and the three added type checks close both
-   gaps on the Python side, turning the former disagreement into strict
-   parity — same verdict, same errors, under either backend. None of the
-   inputs below appear anywhere in the existing test suite — that is
-   deliberate, it is what keeps the existing contract intact while still
-   demonstrating the gain.
+   `project.repos[].path`/`default_branch`, `installed_archetypes[]` items,
+   `user.name`/`language`/`document_language` were never type-checked
+   against the string type `schema.py` declares for them). The Rust core
+   always rejected these cleanly; `validator.py`'s `_check_enum_field`
+   helper and the added type checks close both gaps on the Python side,
+   turning the former disagreement into strict parity — same verdict, same
+   errors, under either backend. A non-string but still *hashable* scalar
+   (an int or a bool) on an enum field never crashed and never diverged
+   either way — `check_enum_field` treats it exactly like any other unknown
+   value, not as a type error (see the comment in `lib.rs`); a couple of
+   such cases are kept in `_WELL_FORMED_CASES` below as a regression guard,
+   not because this fix changed anything about them. None of the inputs
+   below appear anywhere in the existing test suite — that is deliberate,
+   it is what keeps the existing contract intact while still demonstrating
+   the gain.
 
 When the compiled core is not installed (the default contributor
 environment, and the normal CI job), the parity tests are skipped rather
@@ -75,6 +81,15 @@ def test_generate_schema_is_identical_across_backends(monkeypatch: pytest.Monkey
 _WELL_FORMED_CASES: tuple[dict, ...] = (
     {"project": {"name": "test"}},
     {"project": {"name": "x", "type": "notatype"}},
+    # A non-string *hashable* scalar (int/bool) on an enum field never
+    # crashed the reference implementation the way a list/mapping did — it
+    # just fails the plain membership test like any other unknown value.
+    # `check_enum_field` (Rust core) treats it identically: same "Unknown
+    # project type '<value>'" message, not "must be a string" (see the
+    # dedicated comment in `lib.rs`). These two already agreed across
+    # backends before this fix; kept here as a guard against regression.
+    {"project": {"name": "x", "type": 3}},
+    {"project": {"name": "x", "type": True}},
     {"project": {"name": "x", "stack": ["python", 42]}},
     {"project": {"name": "x", "repos": [{"path": "."}]}},
     {"project": {"name": "x"}, "user": {"skill_level": "genius"}},
@@ -168,6 +183,28 @@ def test_non_string_repo_name_rejected_on_both_backends(monkeypatch: pytest.Monk
 
     python_errors = validator_module._validate_config_python(data)
     assert any(e.path == "project.repos[0].name" for e in python_errors)
+
+    rust_errors = _validate_with_backend("rust", monkeypatch, data)
+    assert _as_tuples(python_errors) == _as_tuples(rust_errors)
+
+
+@requires_rust_core
+def test_non_string_repo_path_and_default_branch_rejected_on_both_backends(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`schema.py` declares `repos[].path` and `repos[].default_branch` as
+    strings too; the Python reference never checked either. Verified
+    directly against the reference implementation, then cross-checked
+    against the Rust core."""
+    data = {"project": {"name": "x", "repos": [{"name": "x", "path": 1, "default_branch": []}]}}
+
+    from grimoire.core import validator as validator_module
+
+    python_errors = validator_module._validate_config_python(data)
+    assert {e.path for e in python_errors} == {
+        "project.repos[0].path",
+        "project.repos[0].default_branch",
+    }
 
     rust_errors = _validate_with_backend("rust", monkeypatch, data)
     assert _as_tuples(python_errors) == _as_tuples(rust_errors)

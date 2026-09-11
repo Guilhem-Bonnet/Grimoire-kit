@@ -382,6 +382,19 @@ def _validate_project(section: Any, errors: list[ValidationError]) -> None:
                         path=f"project.repos[{i}].name",
                         message="Repo 'name' must be a string.",
                     ))
+                # schema.py declares `path` and `default_branch` as strings
+                # too — checked unconditionally, independent of the `name`
+                # outcome above (mirrors the Rust core).
+                for repo_key, repo_message in (
+                    ("path", "Repo 'path' must be a string."),
+                    ("default_branch", "Repo 'default_branch' must be a string."),
+                ):
+                    repo_value = repo.get(repo_key)
+                    if repo_value is not None and not isinstance(repo_value, str):
+                        errors.append(ValidationError(
+                            path=f"project.repos[{i}].{repo_key}",
+                            message=repo_message,
+                        ))
 
     _check_unknown_keys(section, _KNOWN_PROJECT_KEYS, "project", errors)
 
