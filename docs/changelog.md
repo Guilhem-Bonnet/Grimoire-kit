@@ -2,6 +2,29 @@
 
 ## Dernière release
 
+### 3.43.1 — Le validateur, doctor et concierge alignés ; le gate Rust enfin requis
+
+- **Le validateur ne plante plus sur les champs énumérés (#409, #410).**
+  Une liste ou une table sur un des neuf champs énumérés du schéma levait
+  `TypeError: unhashable type` au lieu d'une erreur de validation propre ;
+  cinq champs déclarés chaînes n'étaient en outre jamais type-vérifiés. Le
+  cœur Rust servait déjà d'oracle correct ; parité stricte désormais testée
+  entre les deux backends.
+- **`doctor` ne confond plus un paquet npx/uvx/pipx/... avec un chemin
+  (#393, #403).** `@playwright/mcp@0.0.80` ressemblait à un chemin selon
+  l'heuristique et déclenchait un faux `path does not exist`.
+- **Le concierge n'est plus jamais retenu comme porteur d'un skill proposé
+  (#402, #406).** La persona d'entrée servait presque toujours de repli, donc
+  presque toute proposition lui était attachée à tort — contraire à la
+  doctrine (un skill s'attache à l'agent qui fait le travail).
+- **`rust-gate` devient l'unique check requis pour les cœurs Rust (#407,
+  #408).** Les anciens jobs, filtrés par chemin, pouvaient rester « attendus »
+  indéfiniment sur une PR hors de leur périmètre.
+- Voir `CHANGELOG.md` pour le détail complet, dont le script de mesure des
+  gains Rust (#354, #404).
+
+## Releases précédentes
+
 ### 3.43.0 — Le système observe ses propres angles morts
 
 - **Le concierge journalise ses non-choix (#389).** Symétrique du choix
