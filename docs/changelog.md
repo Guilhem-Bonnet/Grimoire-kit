@@ -2,6 +2,35 @@
 
 ## Dernière release
 
+### 3.42.0 — Le modèle hybride d'agent : skills attachées, doctrine, cockpit qui les gère
+
+- **Doctrine de création d'artefact (#370) et contexte câblé sur le dispatch
+  (#378).** `docs/artifact-doctrine.md` fixe quand un agent, un skill ou un
+  prompt mérite d'exister ; le contexte qu'un agent déclare entre désormais
+  dans le contrat de la tâche qu'il reçoit.
+- **Cinq archétypes refaits en généraliste plus skills attachés** —
+  `platform-engineering`, `creative-studio`, `meta`, `stack`, `web-app`/
+  `fix-loop`/`minimal` et `infra-ops` (#375, #380) — plus un nouvel agent de
+  sécurité offensive `security-auditor` (#357) et le retrait des manifestes
+  d'équipe fantômes (#350).
+- **Le cockpit gère les agents du projet.** Une seule commande de service
+  ouverte sur le projet courant (#356), une table des agents avec skills et
+  usage réel, assignables depuis l'inspecteur (#382).
+- **Les skills se paient à l'usage, pas au tour de session (#377).** Une
+  skill déclarée par un agent se replie dans le fichier de cet agent au lieu
+  d'être émise pour tout le projet — mesuré à 0 token payé hors activation
+  contre 1480/tour avant. Le fichier émis ne charge plus que le contexte
+  déclaré (#379), et le choix de l'agent d'entrée est désormais tracé (#366).
+- **Premier port Rust, optionnel — `grimoire.policies` (#354).** Un second
+  cœur du moteur de règles, en Rust via PyO3, jamais publié sur PyPI et sans
+  effet quand il n'est pas construit.
+- Neuf correctifs, dont les écritures du cockpit qui répondaient 404 dès
+  qu'un projet était sélectionné (#358) et `grimoire up` qui pouvait
+  rétrograder silencieusement le profil du standard (#348). Voir
+  `CHANGELOG.md` pour le détail complet.
+
+## Releases précédentes
+
 ### 3.41.0 — Le dispatch choisit sa preuve, le flow conduit un node à la fois
 
 - **Le dispatch choisit sa cascade selon ce qu'il faut prouver — épic

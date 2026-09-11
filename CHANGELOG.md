@@ -7,9 +7,24 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
-- fix(tests): le budget de temps du cockpit tient compte des runners Windows, trois fois plus lents sur cent sous-processus git, sans cesser d'attraper la régression de #340.
+## [3.42.0] - 2026-09-11
 ### Ajouté
 
+- **Doctrine de création d'artefact et sa garde (#370).** `docs/artifact-doctrine.md`
+  pose le critère de nécessité d'un artefact (décision écrite d'avance, qui
+  l'invoque) et la règle de frontière d'outils, avec renvois depuis
+  `creating-agents.md` et `workflow-taxonomy.md`. `use_when`, `dont_use_when`,
+  `tools` et `tool_boundary` deviennent des champs obligatoires du frontmatter
+  de tout agent livré sous `archetypes/*/agents/` ; les 33 agents existants
+  reçoivent une frontière écrite à la main, et `test_artifact_employment_clause.py`
+  fait échouer tout agent livré sans les quatre champs.
+- **Le contexte déclaré d'un agent entre dans le contrat qu'on lui remet (#378).**
+  `build_prompt` lit désormais le `context` déclaré de l'agent dispatché
+  (`--agent` de `grimoire task dispatch`, ou l'agent unique d'un
+  `DispatchExecutor` de flow) et l'ajoute au contrat de la tâche, sans
+  régression pour un agent sans contexte déclaré ou un `--agent` inconnu.
+  `grimoire host status` affiche aussi les collisions de faisceau entre
+  agents livrés par le kit, jusqu'ici invisibles.
 - **Archétype `platform-engineering` refait — 2 agents à faisceau distinct plus
   2 skills attachés (#375).** `platform-architect` et `backend-engineer`
   restent des agents ; `deploy-orchestrator` et `reliability-engineer`, au
@@ -31,16 +46,6 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   maintenant `archetypes/meta/skills/*.md`, meta étant déployé à tout projet
   indépendamment de l'archétype choisi.
 - **Archétype `stack` refait — un généraliste plus sept skills attachés (#375).** Les sept experts par techno (`python-expert`, `go-expert`, `typescript-expert`, `docker-expert`, `terraform-expert`, `ansible-expert`, `k8s-expert`) partageaient le même faisceau outils et aucun contexte propre — c'était un seul agent décrit sept fois. Ils deviennent des skills attachés à un nouvel agent généraliste, `stack-engineer` ; le corps de chaque agent devient le corps de son skill, rien n'est supprimé. `grimoire init --archetype stack` livre désormais un agent, et une composition `web-app,stack` reste sans note de collision pour cet archétype.
-- **Le fichier d'agent émis ne charge que le contexte déclaré (#379).** Un
-  agent qui déclare `context:` reçoit dans son fichier `.claude/agents/*.md`
-  (et `.github/agents/*.agent.md`) une instruction d'activation qui charge
-  ces chemins-là, et eux seuls, à la place du contexte partagé par défaut
-  qu'il n'a pas demandé. Un agent sans déclaration reçoit exactement ce qu'il
-  recevait avant — testé bit à bit. Mesuré sur trois agents de nature
-  différente (navigation, mémoire, sécurité) : le contexte partagé du kit
-  (~193 tokens) disparaît de leur activation au profit du seul contexte
-  qu'ils déclarent. Suite de #378, qui avait câblé la même déclaration côté
-  dispatch de tâche.
 - **Archétypes `web-app` et `fix-loop`/`minimal` alignés sur la forme validée
   d'`infra-ops` (#375).** `web-app` livrait deux agents (`frontend-specialist`,
   `fullstack-dev`) au même faisceau d'outils exact `{read, edit, execute}`,
@@ -52,7 +57,67 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   jamais scaffoldé comme agent) étaient déjà conformes, aucun changement.
   Connu et hors périmètre : `fix-loop-orchestrator` partage son faisceau avec
   `security-auditor` (archétype `meta`) — dette à régler côté méta.
-
+- **Archétype `infra-ops` refait — un généraliste plus quatre skills attachés
+  (#380).** infra-ops livrait sept agents dont cinq au même faisceau exact
+  `{read, edit, execute}`, sans contexte ni skill propres. Réduit à trois
+  agents à faisceau distinct (`ops-engineer` généraliste, `monitoring-specialist`,
+  `systems-debugger`) ; `pipeline-architect`, `security-hardener`,
+  `backup-dr-specialist` et `k8s-navigator` deviennent quatre skills attachés
+  à `ops-engineer`, corps repris sans perte. `layout.skill_dirs()` et
+  `scaffold._plan_archetype_agents` transportent désormais les skills
+  d'archétype, jusque-là sans mécanisme de copie.
+- **Équipes fantômes retirées, périmètre de `infra-ops` documenté (#350).**
+  Les trois manifestes d'équipe livrés (team-build, team-ops, team-vision)
+  nommaient neuf agents d'une pile jamais fournie par aucun des neuf
+  archétypes du kit ; supprimés, avec un test de garde qui échoue si un
+  manifeste cite un agent absent. `infra-ops` documente désormais son
+  périmètre réel (laboratoire personnel Proxmox/K3s/FluxCD) dans le wizard
+  `grimoire init` et `archetype.dna.yaml`, plutôt que de laisser croire à un
+  usage cloud/entreprise sous un nom générique.
+- **Nouvel agent de sécurité offensive `security-auditor` (#357).**
+  Cartographie de surface, fuzzing (`hypothesis` en cœur de métier, `atheris`
+  pour les formats non structurés) et rétro-ingénierie Ghidra cadrée aux
+  seuls binaires — jamais au code Python source. Première campagne réelle
+  sur `grimoire.providers.registry.read_registry` : 0 plantage sur ~850
+  exemples générés plus 11 graines fixées, rejouables via un corpus versionné.
+- **Une seule commande de service, ouverte sur le projet courant (#356).**
+  `serve` et `cockpit serve` ouvraient la même interface pour la seule
+  différence mono/multi-projets. `cockpit serve`/`start` détecte le dossier
+  courant, enrôle le projet au registre s'il n'y était pas, et l'ouvre
+  sélectionné ; `serve` devient un alias déprécié qui délègue. Un port
+  occupé propose une alternative libre au lieu d'afficher seulement
+  l'exception.
+- **Voir et configurer les agents du projet depuis le cockpit (#382).** La
+  fiche projet de Piloter gagne une table des agents (couche, outils,
+  skills, usage réel agrégé depuis le journal de traces) ; l'inspecteur
+  permet d'assigner ou retirer des skills et d'éditer clause d'emploi,
+  outils et contexte, avec revalidation via `collect_agents` avant toute
+  écriture — un skill ou un contexte inconnu annule l'écriture.
+- **Skills attachés aux agents par défaut, payées seulement à l'usage
+  (#377).** `AgentSpec` gagne `skills` (résolus contre l'inventaire collecté,
+  fail-closed sur un slug inconnu) et `context` ; un skill déclaré par un
+  agent est replié dans le fichier de cet agent (Claude Code, Copilot)
+  plutôt qu'émis au niveau du projet, où chaque tour de session en paierait
+  la description qu'il serve ou non. Mesuré : 1480 tokens/tour avec dix
+  skills transversales contre 0 avec les mêmes dix attachées. Une garde de
+  distinction fait échouer `build_surface()` sur deux agents des overrides
+  d'un projet qui partagent le même faisceau outils + contexte + skills
+  (note non bloquante quand les deux viennent du kit — dette connue).
+- **Le fichier d'agent émis ne charge que le contexte déclaré (#379).** Un
+  agent qui déclare `context:` reçoit dans son fichier `.claude/agents/*.md`
+  (et `.github/agents/*.agent.md`) une instruction d'activation qui charge
+  ces chemins-là, et eux seuls, à la place du contexte partagé par défaut
+  qu'il n'a pas demandé. Un agent sans déclaration reçoit exactement ce qu'il
+  recevait avant — testé bit à bit. Mesuré sur trois agents de nature
+  différente (navigation, mémoire, sécurité) : le contexte partagé du kit
+  (~193 tokens) disparaît de leur activation au profit du seul contexte
+  qu'ils déclarent. Suite de #378, qui avait câblé la même déclaration côté
+  dispatch de tâche.
+- **Enregistrer quel agent a été choisi (#366).** Le choix de la persona
+  d'entrée laisse désormais un fait dans le journal de traces existant :
+  quel agent, quand, dans quel projet — rien du contenu échangé, aucune
+  télémétrie sortante. Écriture best-effort : un journal indisponible ne
+  fait jamais échouer l'activation qu'il se contente d'observer.
 - **Premier port Rust, optionnel — `grimoire.policies` (#354).** Le moteur
   de règles a désormais un second cœur, en Rust, exposé via PyO3 depuis
   `rust/grimoire-policies-core/` ; `PolicyEngine.evaluate` l'utilise quand il
@@ -67,6 +132,62 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   modification dans les deux configurations ;
   `tests/unit/test_policies_rust_parity.py` prouve que les deux
   implémentations rendent le même verdict sur les mêmes entrées.
+
+### Corrigé
+
+- **Identité d'agent unifiée entre `installed_agents` et `collect_agents`
+  (#383).** Les deux fonctions nommaient différemment le même fichier
+  gabarit non rendu (`name: "{{agent_tag}}"`) : invisible pour l'une, nommé
+  d'après le fichier pour l'autre. `layout.agent_identity()` devient la
+  lecture unique, sans jamais retomber sur le nom de fichier quand un
+  `name:` est déclaré mais inutilisable.
+- **`grimoire_add_agent` crée un vrai fichier dans `overrides/agents`
+  (#367).** L'outil se contentait d'ajouter un nom à une liste
+  (`agents.custom_agents`) jamais lue pour du chargement ou du routage ; il
+  rend désormais le gabarit `custom-agent` vers la couche que le diagnostic
+  et la carte de routage résolvent réellement, en refusant un doublon ou un
+  nom de fichier non sûr.
+- **Couche overrides rendue visible à `doctor` et à la carte de routage
+  (#349).** Un agent déposé dans `overrides/agents/` — le moyen sanctionné
+  de personnaliser un projet — était invisible au diagnostic et non
+  routable par la persona d'entrée ; les deux lecteurs passent désormais
+  par `layout.agent_dirs()` avec la même priorité de tiers que le reste du
+  kit.
+- **`grimoire up` persiste les `needs` et refuse de rétrograder le profil du
+  standard (#348).** Sans `--needs`, `up` réécrivait le manifeste du
+  standard avec le profil `starter` par défaut, désenregistrant
+  silencieusement un profil supérieur (governed, orchestrated…) installé
+  via `--needs`. Les `needs` choisis à l'installation sont désormais relus
+  depuis `install-manifest.yaml`, et une garde anti-rétrogradation préserve
+  le profil en place quand il couvre plus que celui résolu.
+- **Les écritures du cockpit répondaient 404 dès qu'un projet était
+  sélectionné (#358).** L'interface ajoute `?project=<slug>` à toute
+  requête, POST comprises, dès qu'un projet est sélectionné ; `do_POST`
+  comparait le chemin, query string incluse, à des routes exactes — la
+  totalité des écritures du cockpit (sélection de projet, alignement de
+  kit, ajout et scan de dossier, actions mémoire) était morte.
+- **Registre de test du cockpit isolé, chemins disparus ignorés au lieu
+  d'être purgés d'office (#343).** Un registre pollué de 276 chemins
+  `/tmp/pytest-of-*` disparus faisait passer `cockpit refresh` de 31s à
+  1,15s une fois filtré. Une empreinte du vrai registre en début et fin de
+  suite fait échouer tout test qui écrit hors de l'isolation `HOME` ;
+  `gen-site-data.py` ignore les chemins morts au lieu de les traiter, et le
+  cockpit nomme leur nombre plutôt que de les retirer sans le demander —
+  `cockpit prune` reste le geste de l'utilisateur.
+- **Étape d'enregistrement d'un projet rendue visible (#342).** Le cockpit
+  ne scanne jamais le disque, il lit le registre — un projet Grimoire valide
+  et jamais enregistré disparaissait donc en silence. `cockpit list` et
+  `cockpit serve` signalent désormais le dossier courant quand il porte un
+  marqueur Grimoire absent du registre, et nomment la commande d'ajout
+  attendue.
+- **Bouton d'action principale retiré de l'en-tête du cockpit (#362).**
+  Aucun écouteur d'événement n'existait pour ce bouton, qui changeait de
+  libellé selon l'espace actif sans jamais rien déclencher au clic. Un test
+  de non-régression échoue si un futur bouton littéral de l'en-tête est
+  ajouté sans écouteur ni câblage glossaire.
+- **Le budget de temps du cockpit tient compte des runners Windows (#390),**
+  trois fois plus lents sur cent sous-processus git, sans cesser d'attraper
+  la régression de #340.
 
 ## [3.41.0] - 2026-09-08
 ### Ajouté
