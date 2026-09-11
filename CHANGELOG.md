@@ -6,6 +6,8 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/)
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
+
+- fix(tests): le budget de temps du cockpit tient compte des runners Windows, trois fois plus lents sur cent sous-processus git, sans cesser d'attraper la régression de #340.
 ### Ajouté
 
 - **Refonte de l'archétype `meta` — généraliste plus skills attachés (#375).**

@@ -41,7 +41,14 @@ _yaml = YAML(typ="safe")
 #: pour la mesure, puis remis en place). Une large marge sépare les deux pour
 #: que la variance d'une machine CI plus lente ne fasse jamais échouer ce
 #: garde à tort, sans jamais s'approcher du plancher du défaut réel.
-_COCKPIT_REFRESH_BUDGET_SECONDS = 8.0
+# Le budget existe pour attraper la régression de #340 — soixante-dix secondes
+# avant correctif, une après. Il n'a pas à distinguer un runner lent d'un
+# runner rapide : sur Windows en intégration continue, le même scénario met
+# quinze secondes sans qu'aucun code n'ait changé, parce que cent sous-
+# processus git y coûtent trois fois plus. Un plafond plus haut là-bas garde
+# la garde utile — soixante-dix secondes restent hors budget — sans la faire
+# hurler sur la lenteur de la machine.
+_COCKPIT_REFRESH_BUDGET_SECONDS = 24.0 if sys.platform.startswith("win") else 8.0
 _GHOST_COUNT = 100
 
 
