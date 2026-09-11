@@ -65,6 +65,11 @@ function injectStyles() {
     .pl-preview { margin-top: 8px; padding: 8px; border: 1px dashed var(--line); border-radius: var(--r); font-size: var(--t-min); color: var(--ink2); }
     .pl-badge { display: inline-block; padding: 1px 6px; border-radius: 999px; font-size: var(--t-min); border: 1px solid var(--line); color: var(--ink2); }
     .pl-badge.overrides { color: var(--ink); border-color: var(--acc); }
+    /* --warn n'est jamais utilisé comme couleur de texte ailleurs dans la
+       coque (voir .dot.warn, toujours un fond) : ses deux variantes
+       clair/sombre ne garantissent pas 4.5:1 sur --e1. Texte en --ink
+       (contraste garanti), --warn réservé à la bordure. */
+    .pl-badge.stale { color: var(--ink); border-color: var(--warn); }
     .pl-chips { display: flex; flex-wrap: wrap; gap: 4px; }
     .pl-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; background: var(--e2); font-size: var(--t-min); }
     .pl-chip button { border: 0; background: none; color: var(--ink3); cursor: pointer; padding: 0; font-size: var(--t-min); line-height: 1; }
@@ -331,10 +336,35 @@ async function loadSheet(ctx, slug) {
 
 const TOOL_VERBS = ['read', 'search', 'edit', 'execute', 'web'];
 
-function usageWord(usage) {
-  if (!usage || !usage.choices) return 'jamais choisi';
-  const ago = relativeAge((Date.now() - new Date(usage.last_chosen_at).getTime()) / 60000);
-  return `${fmtInt(usage.choices)} choix · dernier ${ago}`;
+// Fraîcheur (#396) : verdict calculé sur le tag `agent.dispatch` du journal,
+// le même que `grimoire doctor` — distinct du compteur `usage` ci-dessous
+// (tout sous-agent tracé, #374). `judged` vaut faux quand le journal est trop
+// jeune pour le seuil configuré : dans ce cas on ne dit rien plutôt que de
+// confondre absence de données et absence d'usage.
+function freshnessWord(freshness) {
+  if (!freshness || !freshness.judged) return null;
+  if (freshness.last_seen == null) return 'jamais invoqué';
+  return `invoqué il y a ${fmtInt(freshness.days_since)} j`;
+}
+
+function freshnessBadge(freshness) {
+  if (!freshness || !freshness.judged || !freshness.stale) return null;
+  const badge = text('span', 'pl-badge stale', 'périmé');
+  badge.title = 'Aucun agent.dispatch journalisé depuis le seuil de fraîcheur configuré (project-context.yaml: agents.freshness_threshold_days).';
+  return badge;
+}
+
+function usageWord(agent) {
+  const usage = agent.usage;
+  const fresh = freshnessWord(agent.freshness);
+  const countPart = usage && usage.choices ? `${fmtInt(usage.choices)} choix` : null;
+  if (countPart && fresh) return `${countPart} · ${fresh}`;
+  if (fresh) return fresh;
+  if (countPart) {
+    const ago = relativeAge((Date.now() - new Date(usage.last_chosen_at).getTime()) / 60000);
+    return `${countPart} · dernier ${ago}`;
+  }
+  return 'jamais choisi';
 }
 
 function renderAgentsTable(ctx, agentsPayload, selectedName, onSelect) {
@@ -384,7 +414,11 @@ function renderAgentsTable(ctx, agentsPayload, selectedName, onSelect) {
 
     tr.append(text('td', 'lbl', agent.tools.join(', ') || '—'));
     tr.append(text('td', 'lbl', agent.skills.length ? String(agent.skills.length) : '—'));
-    tr.append(text('td', 'lbl', usageWord(agent.usage)));
+    const usageCell = document.createElement('td');
+    usageCell.append(text('span', 'lbl', usageWord(agent)));
+    const badge = freshnessBadge(agent.freshness);
+    if (badge) usageCell.append(document.createTextNode(' '), badge);
+    tr.append(usageCell);
     tbody.append(tr);
   }
   table.append(tbody);
@@ -407,7 +441,10 @@ function renderAgentInspector(ctx, agentsPayload, agent, callbacks) {
   block.className = 'pl-insp-block';
   block.dataset.agentInspector = 'true';
   block.append(row(text('h4', null, agent.name), text('span', 'pl-badge ' + agent.layer, agent.layer)));
-  block.append(text('div', 'lbl', usageWord(agent.usage)));
+  const usageRow = row(text('span', 'lbl', usageWord(agent)));
+  const inspBadge = freshnessBadge(agent.freshness);
+  if (inspBadge) usageRow.append(inspBadge);
+  block.append(usageRow);
 
   const readOnly = ctx.host.readOnly;
   const saveLabel = (verb) => (readOnly ? 'Écriture désactivée (cockpit)' : verb);

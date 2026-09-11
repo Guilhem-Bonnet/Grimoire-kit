@@ -36,6 +36,13 @@ class TestGenerateSchema:
         schema = generate_schema()
         assert "agents" in schema["properties"]
 
+    def test_agents_freshness_threshold_days_default(self) -> None:
+        schema = generate_schema()
+        field = schema["properties"]["agents"]["properties"]["freshness_threshold_days"]
+        assert field["type"] == "integer"
+        assert field["default"] == 90
+        assert field["minimum"] == 1
+
     def test_project_requires_name(self) -> None:
         schema = generate_schema()
         proj = schema["properties"]["project"]

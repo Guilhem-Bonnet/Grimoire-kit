@@ -670,8 +670,51 @@ class TestRegistryDispatches:
             result = runner.invoke(app, ["-o", "json", "registry", "dispatches"])
         assert result.exit_code == 0
         payload = json.loads(result.output)
-        assert set(payload) == {"dispatches", "misses"}
+        assert set(payload) == {"dispatches", "misses", "freshness"}
         assert payload["misses"]["terraform"]["count"] == 1
+
+    def test_registry_dispatches_json_freshness_is_info_without_history(self, tmp_path: Path) -> None:
+        """Issue #396 : sans agent connu ni historique, la fraîcheur n'est pas jugée."""
+        with patch("grimoire.tools._common.find_project_root", return_value=tmp_path):
+            result = runner.invoke(app, ["-o", "json", "registry", "dispatches"])
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["freshness"]["judged"] is False
+        assert payload["freshness"]["journal_span_days"] is None
+
+    def test_registry_dispatches_lists_agents_never_invoked(self, tmp_path: Path) -> None:
+        """Issue #396 : « registry dispatches » gagne la liste des agents jamais choisis."""
+        from datetime import UTC, datetime, timedelta
+
+        from grimoire.core.standard_generation import TRACES_DIR
+        from grimoire.traces.ledger import AGENT_DISPATCH_TAG, TraceLedger, TraceOutcome
+
+        ledger = TraceLedger(tmp_path / TRACES_DIR)
+        ledger.record(
+            run_id="RUN-old",
+            workflow_instance_id="",
+            mission_id="",
+            task_id="",
+            recipe_id="grimoire.entry-persona",
+            outcome=TraceOutcome.SUCCESS,
+            started_at=(datetime.now(UTC) - timedelta(days=100)).isoformat(),
+            agent_id="concierge",
+            tags=[AGENT_DISPATCH_TAG],
+        )
+        with (
+            patch("grimoire.tools._common.find_project_root", return_value=tmp_path),
+            patch(
+                "grimoire.core.agent_freshness.known_agent_names",
+                return_value=["concierge", "security-auditor"],
+            ),
+        ):
+            result = runner.invoke(app, ["-o", "json", "registry", "dispatches"])
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["freshness"]["judged"] is True
+        assert payload["freshness"]["never_invoked"] == ["security-auditor"]
+        stale_names = {e["name"] for e in payload["freshness"]["stale"]}
+        assert stale_names == {"concierge", "security-auditor"}
 
 
 # ── Upgrade ───────────────────────────────────────────────────────────────────
