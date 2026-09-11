@@ -9,6 +9,16 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 ### Ajouté
 
 - **Archétype `stack` refait — un généraliste plus sept skills attachés (#375).** Les sept experts par techno (`python-expert`, `go-expert`, `typescript-expert`, `docker-expert`, `terraform-expert`, `ansible-expert`, `k8s-expert`) partageaient le même faisceau outils et aucun contexte propre — c'était un seul agent décrit sept fois. Ils deviennent des skills attachés à un nouvel agent généraliste, `stack-engineer` ; le corps de chaque agent devient le corps de son skill, rien n'est supprimé. `grimoire init --archetype stack` livre désormais un agent, et une composition `web-app,stack` reste sans note de collision pour cet archétype.
+- **Le fichier d'agent émis ne charge que le contexte déclaré (#379).** Un
+  agent qui déclare `context:` reçoit dans son fichier `.claude/agents/*.md`
+  (et `.github/agents/*.agent.md`) une instruction d'activation qui charge
+  ces chemins-là, et eux seuls, à la place du contexte partagé par défaut
+  qu'il n'a pas demandé. Un agent sans déclaration reçoit exactement ce qu'il
+  recevait avant — testé bit à bit. Mesuré sur trois agents de nature
+  différente (navigation, mémoire, sécurité) : le contexte partagé du kit
+  (~193 tokens) disparaît de leur activation au profit du seul contexte
+  qu'ils déclarent. Suite de #378, qui avait câblé la même déclaration côté
+  dispatch de tâche.
 - **Archétypes `web-app` et `fix-loop`/`minimal` alignés sur la forme validée
   d'`infra-ops` (#375).** `web-app` livrait deux agents (`frontend-specialist`,
   `fullstack-dev`) au même faisceau d'outils exact `{read, edit, execute}`,
