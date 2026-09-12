@@ -1,0 +1,40 @@
+[package]
+name = "grimoire-traces-core"
+version = "0.1.0"
+edition = "2021"
+description = "Coeur Rust optionnel des agregations du journal de traces (grimoire.traces.ledger), de la regle de fraicheur (grimoire.core.agent_freshness) et du declencheur de propositions d'artefact (grimoire.proposals), expose via PyO3."
+license = "MIT"
+publish = false
+
+[lib]
+name = "grimoire_traces_core"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Sixieme port Rust du kit (issue #354), meme montage que
+# rust/grimoire-policies-core/, rust/grimoire-schema-core/,
+# rust/grimoire-hosts-core/, rust/grimoire-flows-core/ et
+# rust/grimoire-dispatch-core/ : pyo3 n'est requis que par la frontiere
+# PyO3 (module `py_bridge`, en bas de lib.rs).
+#
+# Comme grimoire-flows-core et grimoire-policies-core (contrairement a
+# grimoire-hosts-core et grimoire-dispatch-core), ce crate n'analyse aucun
+# texte JSON ou YAML brut : les enregistrements du journal sont deja des
+# TraceRecord Python decodes en amont (JSONL lu et parse par
+# TraceLedger._load_all, laisse en Python), donc aucune dependance JSON
+# n'est necessaire ici. Seule concession a une analyse de texte : un
+# analyseur ISO-8601 ecrit a la main (module `iso8601` ci-dessous) pour la
+# regle de fraicheur — un format suffisamment simple (chiffres et
+# separateurs fixes) pour ne justifier aucune dependance externe, et assez
+# permissif pour ne jamais paniquer sur une chaine arbitraire (voir son
+# docstring).
+pyo3 = { version = "0.29", features = ["abi3-py312"], optional = true }
+
+[features]
+# Meme raisonnement que les cinq crates precedents : la feature
+# `extension-module` de pyo3 (active par defaut, indispensable pour que
+# l'extension soit chargeable par Python) empeche de lier le binaire de test
+# de `cargo test` — d'ou `cargo test --no-default-features` dans le job CI
+# dedie, qui ne necessite donc aucun interprete Python installe.
+extension-module = ["dep:pyo3", "pyo3/extension-module"]
+default = ["extension-module"]
