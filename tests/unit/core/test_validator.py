@@ -199,6 +199,60 @@ class TestInstalledArchetypes:
         assert validate_config(data) == []
 
 
+class TestSourceSection:
+    """`source.assist` — l'assistant Source par modèle local (issue #280,
+    voie 2). Régression : la section `source` était entièrement inconnue de
+    `validate_config`, si bien que `grimoire check .` refusait l'exemple
+    documenté dans `docs/cli-reference.md` avec `Unknown key 'source'.`"""
+
+    def test_doc_example_is_accepted(self) -> None:
+        """L'exemple exact de `docs/cli-reference.md` (§ Source : suggestions
+        par modèle local) doit passer `grimoire check .` sans erreur."""
+        data = {
+            **_minimal(),
+            "source": {"assist": {"model": "qwen3-coder:30b", "allow_lan": False}},
+        }
+        assert validate_config(data) == []
+
+    def test_source_not_dict(self) -> None:
+        data = {**_minimal(), "source": "nope"}
+        errs = validate_config(data)
+        assert any("source" in e.path for e in errs)
+
+    def test_assist_not_dict(self) -> None:
+        data = {**_minimal(), "source": {"assist": "nope"}}
+        errs = validate_config(data)
+        assert any("source.assist" in e.path for e in errs)
+
+    def test_model_non_string_is_rejected(self) -> None:
+        data = {**_minimal(), "source": {"assist": {"model": 3}}}
+        errs = validate_config(data)
+        assert any("source.assist.model" in e.path for e in errs)
+
+    def test_allow_lan_non_bool_is_rejected(self) -> None:
+        data = {**_minimal(), "source": {"assist": {"allow_lan": "true"}}}
+        errs = validate_config(data)
+        assert any("source.assist.allow_lan" in e.path for e in errs)
+
+    def test_unknown_assist_key_is_rejected(self) -> None:
+        data = {**_minimal(), "source": {"assist": {"modle": "typo"}}}
+        errs = validate_config(data)
+        unknown_errs = [e for e in errs if "modle" in e.message]
+        assert len(unknown_errs) == 1
+        assert "model" in unknown_errs[0].suggestion
+
+    def test_unknown_source_key_is_rejected(self) -> None:
+        data = {**_minimal(), "source": {"asist": {"model": "x"}}}
+        errs = validate_config(data)
+        unknown_errs = [e for e in errs if "asist" in e.message]
+        assert len(unknown_errs) == 1
+        assert "assist" in unknown_errs[0].suggestion
+
+    def test_empty_source_is_accepted(self) -> None:
+        data = {**_minimal(), "source": {}}
+        assert validate_config(data) == []
+
+
 class TestValidationErrorStr:
     def test_without_suggestion(self) -> None:
         e = ValidationError(path="p", message="msg")
@@ -287,6 +341,12 @@ class TestUnknownKeys:
         errs = validate_config(data)
         assert any("archtype" in e.message for e in errs)
         assert any("archetype" in e.suggestion for e in errs if "archtype" in e.message)
+
+    def test_unknown_source_key(self) -> None:
+        data = {"project": {"name": "x"}, "source": {"asist": {}}}
+        errs = validate_config(data)
+        assert any("asist" in e.message for e in errs)
+        assert any("assist" in e.suggestion for e in errs if "asist" in e.message)
 
     def test_no_false_positive_on_known_keys(self) -> None:
         data = {

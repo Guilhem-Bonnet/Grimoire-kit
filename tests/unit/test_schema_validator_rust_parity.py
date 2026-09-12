@@ -97,6 +97,7 @@ _WELL_FORMED_CASES: tuple[dict, ...] = (
     {"project": {"name": "x"}, "agents": {"custom_agents": ["a", "a"]}},
     {"project": {"name": "x"}, "proposals": {"threshold": 3}},
     {"project": {"name": "x"}, "proposals": {"threshold": 1}},
+    {"project": {"name": "x"}, "source": {"assist": {"model": "qwen3-coder:30b", "allow_lan": False}}},
     {"project": {"name": "x"}, "zzzzz_garbage": 42},
     {
         "project": {
@@ -246,6 +247,31 @@ def test_non_string_user_fields_rejected_on_both_backends(monkeypatch: pytest.Mo
 
     rust_errors = _validate_with_backend("rust", monkeypatch, data)
     assert _as_tuples(python_errors) == _as_tuples(rust_errors)
+
+
+@requires_rust_core
+def test_source_assist_model_non_string_rejected_on_both_backends(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Regression guard for the bug that motivated this fix: `source.assist`
+    was entirely unknown to `validate_config` (issue tracked in CHANGELOG),
+    so `grimoire check .` rejected the whole `source:` section as an unknown
+    key even on the documented example. Now that it is declared, `model`
+    must still be type-checked like every other schema-declared string."""
+    data = {"project": {"name": "x"}, "source": {"assist": {"model": 3}}}
+    python_errors = _validate_with_backend("python", monkeypatch, data)
+    rust_errors = _validate_with_backend("rust", monkeypatch, data)
+    assert _as_tuples(python_errors) == _as_tuples(rust_errors)
+    assert any(e.path == "source.assist.model" for e in python_errors)
+
+
+@requires_rust_core
+def test_source_assist_unknown_key_rejected_on_both_backends(monkeypatch: pytest.MonkeyPatch) -> None:
+    data = {"project": {"name": "x"}, "source": {"assist": {"modle": "typo"}}}
+    python_errors = _validate_with_backend("python", monkeypatch, data)
+    rust_errors = _validate_with_backend("rust", monkeypatch, data)
+    assert _as_tuples(python_errors) == _as_tuples(rust_errors)
+    unknown_errs = [e for e in python_errors if "modle" in e.message]
+    assert len(unknown_errs) == 1
+    assert "model" in unknown_errs[0].suggestion
 
 
 # ── Backend selection itself ────────────────────────────────────────────────

@@ -109,6 +109,7 @@ def _generate_schema_python() -> dict[str, Any]:
             "memory": _memory_schema(),
             "agents": _agents_schema(),
             "proposals": _proposals_schema(),
+            "source": _source_schema(),
             "installed_archetypes": {
                 "type": "array",
                 "items": {"type": "string"},
@@ -346,6 +347,42 @@ def _proposals_schema() -> dict[str, Any]:
                     "before a proposal is written. Never 1 — a single non-choice never "
                     "earns a proposal."
                 ),
+            },
+        },
+    }
+
+
+def _source_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "description": "Source workspace configuration (issue #280, voie 2).",
+        "additionalProperties": False,
+        "properties": {
+            "assist": {
+                "type": "object",
+                "description": (
+                    "Local-model suggestion assist for the Source editor — opt-in, "
+                    "disabled unless `model` is set."
+                ),
+                "additionalProperties": False,
+                "properties": {
+                    "model": {
+                        "type": "string",
+                        "default": "",
+                        "description": (
+                            "Ollama model used for suggestions. Empty (default) disables "
+                            "the feature entirely."
+                        ),
+                    },
+                    "allow_lan": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": (
+                            "Second opt-in: allow a non-loopback Ollama URL. Refused unless "
+                            "explicitly set to true."
+                        ),
+                    },
+                },
             },
         },
     }

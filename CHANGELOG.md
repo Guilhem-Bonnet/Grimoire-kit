@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- fix(core): déclarer `source.assist` (`model`, `allow_lan`) dans le schéma et le validateur, Python et Rust, pour que `grimoire check .` accepte l'exemple documenté de l'assistant Source au lieu de refuser `source` comme clé inconnue (#451).
+
 ## [3.46.0] - 2026-09-12
 
 - **feat(policies): politiques temporelles par session sur la médiation d'outils — budgets, approbation préalable, refroidissement (#439).**
