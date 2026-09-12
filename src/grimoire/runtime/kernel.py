@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import uuid
@@ -89,6 +90,35 @@ _STOPPED_STATUSES = frozenset({WorkflowStatus.ABORTED, WorkflowStatus.REFUSED})
 
 def _now_iso() -> str:
     return datetime.now(tz=UTC).isoformat()
+
+
+# Borne haute d'un slug de wfi_id — généreuse (un recipe_id/blueprint_id
+# usuel tient très large dedans) : ce n'est pas une limite fonctionnelle,
+# seulement un garde-fou pour rester loin des limites de nom de fichier
+# (l'id sert de nom de fichier dans grimoire.flows.engine).
+_MAX_SLUG_LEN = 64
+
+
+def _slug_for_recipe_id(recipe_id: str) -> str:
+    """Slug utilisé pour construire ``wfi_id`` à partir de ``recipe_id``.
+
+    Garde l'identifiant complet tant qu'il tient dans ``_MAX_SLUG_LEN`` — le
+    cas de tous les blueprints réels observés à ce jour (#446 : un
+    ``recipe_id`` de 17 caractères comme ``tasklib-hardening`` perdait déjà
+    son premier caractère avec l'ancienne coupe fixe à 16). Au-delà de la
+    borne, plutôt qu'une troncature de préfixe/suffixe qui perd de
+    l'information silencieusement et peut faire coïncider deux
+    ``recipe_id`` différents, le slug est raccourci puis désambiguïsé par un
+    suffixe d'empreinte (8 hex de ``sha256`` du ``recipe_id`` **complet**,
+    pas seulement de la partie gardée) : deux identifiants longs qui ne
+    diffèrent qu'après la coupe obtiennent des empreintes différentes.
+    """
+    raw = recipe_id.replace(".", "-")
+    if len(raw) <= _MAX_SLUG_LEN:
+        return raw
+    digest = hashlib.sha256(recipe_id.encode("utf-8")).hexdigest()[:8]
+    keep = _MAX_SLUG_LEN - len(digest) - 1
+    return f"{raw[:keep]}-{digest}"
 
 
 class RuntimeKernel:
@@ -221,7 +251,7 @@ class RuntimeKernel:
         run_id = ctx.run_id or f"RUN-{uuid.uuid4().hex[:12]}"
         instances = self._load_instances()
         if wfi_id is None:
-            slug = recipe_id.replace(".", "-")[-16:]
+            slug = _slug_for_recipe_id(recipe_id)
             seq = sum(1 for k in instances if k.startswith(f"WFI-{slug}")) + 1
             wfi_id = f"WFI-{slug}-{seq:03d}"
         wfi = WorkflowInstance(

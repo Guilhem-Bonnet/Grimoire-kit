@@ -16,9 +16,10 @@ import pytest
 from grimoire.core.exceptions import GrimoireRuntimeError
 from grimoire.flows.engine import FlowEngine
 from grimoire.flows.executor import InteractiveNodeExecutor
+from grimoire.flows.schemas import FlowRunMeta
 from grimoire.missions.trace import build_task_timeline
 from grimoire.runtime.kernel import RuntimeKernel
-from grimoire.runtime.schemas import RunEventType, WorkflowStatus
+from grimoire.runtime.schemas import ExecutionContext, RunEventType, WorkflowStatus
 
 
 def _write_blueprint(tmp_path: Path) -> Path:
@@ -202,3 +203,58 @@ def test_step_events_reach_the_task_timeline(tmp_path: Path, bp: Path) -> None:
     assert any("étape a — started" in s for s in summaries)
     assert any("étape a — completed" in s for s in summaries)
     assert any("étape c — completed" in s for s in summaries)
+
+
+# --- #446 : run_id/wfi_id ne tronque plus recipe_id/blueprint_id -----------
+
+
+def test_run_id_keeps_full_blueprint_id(tmp_path: Path, bp: Path) -> None:
+    """``bp`` a l'id ``trois-nodes`` (11 caractères) : rien à tronquer, mais
+
+    ce test verrouille le comportement attendu bout-en-bout, pas seulement
+    au niveau du kernel — le ``run_id`` exposé par ``flow run`` est bien le
+    ``wfi_id`` construit sur l'id complet."""
+    engine = _engine(tmp_path)
+    wfi, _ = engine.run(bp, executor=InteractiveNodeExecutor(stream=io.StringIO()))
+    assert wfi.id == "WFI-trois-nodes-001"
+    status = engine.status(wfi.id, include_contract=False)
+    assert status.run_id == wfi.id
+    assert status.blueprint_id == "trois-nodes"
+
+
+def test_status_reads_legacy_truncated_run_id(tmp_path: Path, bp: Path) -> None:
+    """Rétro-compatibilité : un run déjà persisté sous l'ancien format tronqué
+
+    (#446, ``WFI-asklib-hardening-001`` pour le blueprint ``tasklib-hardening``)
+    reste lisible par ``status``/``list_runs`` — la lecture ne dépend que de
+    la cohérence entre le fichier de métadonnées et le kernel, jamais de la
+    forme ou de la longueur du ``run_id``."""
+    engine = _engine(tmp_path)
+    ctx = ExecutionContext(
+        run_id="RUN-legacy",
+        mission_id="MIS-flow-tasklib-hardening",
+        task_id="FLOW-tasklib-hardening",
+        workflow_instance_id="",
+        actor_id="cli",
+        host_id="local",
+        risk_profile="standard",
+    )
+    legacy_run_id = "WFI-asklib-hardening-001"
+    wfi = engine._kernel.create_instance(ctx, recipe_id="tasklib-hardening", wfi_id=legacy_run_id)
+    engine._kernel.start(wfi.id, ctx)
+    engine._save_meta(
+        FlowRunMeta(
+            run_id=legacy_run_id,
+            blueprint_id="tasklib-hardening",
+            blueprint_path=str(bp),
+            order=("a", "b", "c"),
+            created_at="2026-09-11T00:00:00+00:00",
+        )
+    )
+
+    assert legacy_run_id in engine.list_run_ids()
+    status = engine.status(legacy_run_id, include_contract=False)
+    assert status.run_id == legacy_run_id
+    assert status.blueprint_id == "tasklib-hardening"
+    runs = engine.list_runs()
+    assert any(r.run_id == legacy_run_id for r in runs)
