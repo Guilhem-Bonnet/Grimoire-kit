@@ -18,6 +18,15 @@
 // `GET /api/workspace/language` (`src/grimoire/tools/workspace_language.py`)
 // — rien n'est recalculé côté client, ce module ne fait qu'afficher.
 //
+// Suggestion par un petit modèle local (#280, voie 2, `src/grimoire/tools/
+// source_assist.py`) : `GET /api/workspace/assist` (sans coût, décide si le
+// bouton « Suggérer » et le lien « Expliquer » d'un diagnostic apparaissent)
+// et `POST /api/workspace/assist` (appelle réellement le modèle). Toujours
+// derrière l'IntelliSense déterministe ci-dessus, jamais à sa place :
+// l'insertion d'une suggestion passe par `textarea.value` + un évènement
+// `input`, exactement comme la complétion, pour que la colorisation et les
+// diagnostics se recalculent sur le résultat.
+//
 // Survol d'un identifiant → infobulle du glossaire (spec « survol d'un
 // identifiant… quand un id existe ») : la surcouche colorée a
 // `pointer-events: none` (la textarea, au-dessus, doit rester la seule à
@@ -144,7 +153,7 @@ function createDiagTip() {
   return tip;
 }
 
-function showDiagTip(tip, anchor, diagnostics) {
+function showDiagTip(tip, anchor, diagnostics, onExplain) {
   if (!anchor || !diagnostics.length) {
     tip.hidden = true;
     return;
@@ -158,10 +167,120 @@ function showDiagTip(tip, anchor, diagnostics) {
     row.append(dot, document.createTextNode(diag.message));
     tip.append(row);
   }
+  // « Expliquer » n'apparaît que si l'assistance locale est prête (#280, voie
+  // 2) — jamais un bouton mort qui laisserait deviner une capacité absente.
+  // `mousedown` + `preventDefault()` : même raison que la complétion
+  // (`renderCompletionMenu`), ne pas voler le focus de la textarea avant que
+  // le clic n'ait fini.
+  if (onExplain) {
+    const explain = document.createElement('button');
+    explain.type = 'button';
+    explain.className = 'btn sr-diag-tip-explain';
+    explain.textContent = 'Expliquer (assistant local)';
+    explain.addEventListener('mousedown', (event) => {
+      event.preventDefault();
+      onExplain(diagnostics[0]);
+    });
+    tip.append(explain);
+  }
   tip.hidden = false;
   const box = anchor.getBoundingClientRect();
   tip.style.left = `${Math.max(8, box.left)}px`;
   tip.style.top = `${box.bottom + 6}px`;
+}
+
+// ── Suggestion par un petit modèle local — derrière l'IntelliSense, jamais à
+// sa place (#280, voie 2). `refreshAssistStatus` (lecture, sans coût) décide
+// si le bouton « Suggérer » et le lien « Expliquer » de l'infobulle de
+// diagnostic apparaissent seulement — un opt-in absent ou Ollama indisponible
+// les cache entièrement, l'interface ne tente rien. `renderAssistPanel` rend
+// aussi bien une suggestion (« Insérer »/« Ignorer ») qu'un refus nommé
+// (``available: false`` — l'API n'est jamais une exception pour ce cas). ────
+
+function createAssistBar() {
+  const bar = document.createElement('div');
+  bar.className = 'sr-assist-bar';
+  const status = document.createElement('span');
+  status.className = 'sr-assist-status lbl';
+  status.hidden = true;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'btn sr-assist-btn';
+  btn.textContent = 'Suggérer';
+  btn.title = 'Suggestion par modèle local — Ctrl+Maj+Espace';
+  btn.hidden = true;
+  bar.append(status, btn);
+  return { bar, status, btn };
+}
+
+function createAssistPanel() {
+  const panel = document.createElement('div');
+  panel.className = 'sr-assist-panel';
+  panel.hidden = true;
+  return panel;
+}
+
+function renderAssistPanel(panel, result, { onInsert, onIgnore }) {
+  panel.replaceChildren();
+  const head = document.createElement('div');
+  head.className = 'sr-assist-panel-head';
+  const title = document.createElement('span');
+  title.className = 'lbl';
+  const ignoreBtn = document.createElement('button');
+  ignoreBtn.type = 'button';
+  ignoreBtn.className = 'btn';
+  ignoreBtn.textContent = 'Ignorer';
+  ignoreBtn.addEventListener('click', onIgnore);
+
+  if (!result.available) {
+    title.textContent = 'Assistant local';
+    head.append(title, ignoreBtn);
+    const msg = document.createElement('div');
+    msg.className = 'sr-assist-text lbl';
+    msg.textContent = result.reason || 'indisponible';
+    panel.append(head, msg);
+    panel.hidden = false;
+    return;
+  }
+
+  title.textContent = `Suggestion — ${result.model}`;
+  const insertBtn = document.createElement('button');
+  insertBtn.type = 'button';
+  insertBtn.className = 'btn pri';
+  insertBtn.textContent = 'Insérer';
+  insertBtn.addEventListener('click', () => onInsert(result.suggestion));
+  head.append(title, ignoreBtn, insertBtn);
+
+  const text = document.createElement('pre');
+  text.className = 'sr-assist-text mono';
+  text.textContent = result.suggestion;
+  panel.append(head, text);
+
+  // Le paquet de langage n'a rien reconnu : signalé, jamais tu ni corrigé à
+  // la place de l'utilisateur (spec « toute référence … marquée inconnu »).
+  if (result.unknown && result.unknown.length) {
+    const warn = document.createElement('div');
+    warn.className = 'sr-assist-unknown';
+    warn.append(document.createTextNode('identifiant(s) non reconnu(s) du paquet de langage : '));
+    for (const u of result.unknown) {
+      const chip = document.createElement('span');
+      chip.className = 'chip mono';
+      chip.textContent = u.text;
+      warn.append(chip);
+    }
+    panel.append(warn);
+  }
+  panel.hidden = false;
+}
+
+// L'intention se déduit du contexte du curseur, à partir des tokens déjà
+// rendus par l'IntelliSense déterministe (aucune seconde analyse côté
+// client) : sur la valeur d'une clause d'emploi, `complete-clause` ; sinon
+// `draft-body`, le cas général (persona, étape de workflow…).
+function guessAssistIntent(tokens, line) {
+  const onLine = tokens.filter((t) => t.line === line && t.kind === 'key');
+  if (onLine.some((t) => t.text === 'use_when' || t.text === 'dont_use_when')) return 'complete-clause';
+  return 'draft-body';
 }
 
 // ── Complétion : Ctrl+Espace ou déclenchée par {, @, / ──────────────────────
@@ -307,12 +426,24 @@ export function build(ctx, entry, state, hooks) {
   main.append(highlight, textarea);
   code.append(gutter, main);
 
+  // Enveloppe : la barre d'assistance et son panneau d'aperçu (#280, voie 2)
+  // entourent `.sr-code` sans en changer la disposition interne (gouttière +
+  // colonne éditeur reste `display: flex` en ligne) — voir `.sr-assist-wrap`
+  // dans source.css.
+  const wrap = document.createElement('div');
+  wrap.className = 'sr-assist-wrap';
+  const { bar: assistBar, status: assistStatusEl, btn: assistBtn } = createAssistBar();
+  const assistPanel = createAssistPanel();
+  wrap.append(assistBar, code, assistPanel);
+
   const diagTip = createDiagTip();
   const completionMenu = createCompletionMenu();
   let completionItems = [];
   let completionRequestId = 0; // écarte une réponse arrivée après une plus récente (frappe rapide)
   let diagnostics = [];
   let tokens = [];
+  let assistReady = false;
+  let assistBusy = false;
   let debounceTimer = null;
   let completionDebounceTimer = null;
   let destroyed = false;
@@ -355,7 +486,7 @@ export function build(ctx, entry, state, hooks) {
     renderHighlight(highlight, state.draft, tokens);
     diagnostics = payload.diagnostics || [];
     renderGutter(gutterNums, gutterMarks, Math.max(lineCount(), 20), diagnostics, (anchor, diags) => {
-      showDiagTip(diagTip, anchor, diags);
+      showDiagTip(diagTip, anchor, diags, assistReady ? explainDiagnostic : null);
     });
     hooks.onDiagnostics(diagnostics);
   }
@@ -364,6 +495,88 @@ export function build(ctx, entry, state, hooks) {
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(refreshLanguage, delay);
   }
+
+  // ── Suggestion par un petit modèle local (#280, voie 2) ───────────────────
+  //
+  // `refreshAssistStatus` est la seule requête que ce module envoie sans
+  // geste explicite de l'utilisateur — et c'est une lecture sans coût
+  // (jamais `/api/generate`) : elle décide seulement si le bouton
+  // « Suggérer » et le lien « Expliquer » d'un diagnostic doivent apparaître.
+  // Un fichier en lecture seule n'a pas d'assistance : insérer une
+  // suggestion n'aurait nulle part où aller.
+
+  async function refreshAssistStatus() {
+    if (!entry.editable) return;
+    let status;
+    try {
+      status = await ctx.api.assistStatus();
+    } catch {
+      return; // API locale indisponible : pas de bouton plutôt qu'une erreur visible.
+    }
+    if (destroyed) return;
+    assistReady = Boolean(status && status.enabled && status.available);
+    assistBtn.hidden = !assistReady;
+    assistStatusEl.hidden = !assistReady;
+    if (assistReady) assistStatusEl.textContent = `assistant local · ${status.model}`;
+  }
+
+  function insertAssistSuggestion(text) {
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    // Même chemin que la frappe clavier (spec « l'insertion passe par le
+    // même chemin que la saisie clavier ») : on modifie `textarea.value` et
+    // on redéclenche `input`, qui relance colorisation et diagnostics —
+    // aucun raccourci qui contournerait le recalcul.
+    textarea.value = textarea.value.slice(0, start) + text + textarea.value.slice(end);
+    const caret = start + text.length;
+    textarea.selectionStart = textarea.selectionEnd = caret;
+    textarea.dispatchEvent(new Event('input'));
+    textarea.focus();
+  }
+
+  function assistCallbacks() {
+    return {
+      onInsert: (text) => {
+        insertAssistSuggestion(text);
+        assistPanel.hidden = true;
+      },
+      onIgnore: () => { assistPanel.hidden = true; },
+    };
+  }
+
+  async function runAssist(intent, position, diagnostic) {
+    if (assistBusy) return;
+    assistBusy = true;
+    assistBtn.disabled = true;
+    let result;
+    try {
+      result = await ctx.api.assist(entry.path, { text: state.draft, position, intent, diagnostic });
+    } catch (error) {
+      result = { available: false, reason: error.message };
+    }
+    assistBusy = false;
+    assistBtn.disabled = false;
+    if (destroyed) return;
+    renderAssistPanel(assistPanel, result, assistCallbacks());
+  }
+
+  function openAssist() {
+    if (!assistReady) return;
+    const { line, col } = positionOf(textarea.value, textarea.selectionStart);
+    void runAssist(guessAssistIntent(tokens, line), { line, col });
+  }
+
+  function explainDiagnostic(diag) {
+    if (!assistReady) return;
+    void runAssist(
+      'explain-diagnostic',
+      { line: diag.line, col: diag.start },
+      { family: diag.family, message: diag.message },
+    );
+  }
+
+  assistBtn.addEventListener('click', openAssist);
+  void refreshAssistStatus();
 
   // Distinct de `completionMenu.hidden` : une frappe rapide relance la
   // requête *avant* que la précédente ait eu le temps de rendre et de lever
@@ -459,6 +672,11 @@ export function build(ctx, entry, state, hooks) {
       closeCompletion();
       return;
     }
+    if (event.key === 'Escape' && !assistPanel.hidden) {
+      event.preventDefault();
+      assistPanel.hidden = true;
+      return;
+    }
     if (!completionMenu.hidden) {
       if (event.key === 'ArrowDown') { event.preventDefault(); moveCompletionSelection(completionMenu, 1); return; }
       if (event.key === 'ArrowUp') { event.preventDefault(); moveCompletionSelection(completionMenu, -1); return; }
@@ -469,6 +687,13 @@ export function build(ctx, entry, state, hooks) {
     }
 
     const meta = event.metaKey || event.ctrlKey;
+    // Vérifié avant le déclencheur de complétion ci-dessous : les deux
+    // partagent la même touche Espace, `shiftKey` seul les distingue.
+    if (meta && event.shiftKey && event.key === ' ') {
+      event.preventDefault();
+      openAssist();
+      return;
+    }
     if (meta && event.key === ' ') {
       event.preventDefault();
       void openCompletion();
@@ -559,5 +784,5 @@ export function build(ctx, entry, state, hooks) {
   paint();
   void refreshLanguage();
 
-  return code;
+  return wrap;
 }

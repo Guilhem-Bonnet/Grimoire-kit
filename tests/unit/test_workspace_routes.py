@@ -358,6 +358,49 @@ def test_language_avec_position_rend_des_completions(atelier: int) -> None:
     assert isinstance(payload["completions"], list)
 
 
+def test_assist_status_repond_sur_les_deux_hotes_sans_opt_in(atelier: int, cockpit: int) -> None:
+    """``GET /api/workspace/assist`` (#280, voie 2) est déjà dans
+    :data:`SHARED_READS` — ce test fixe en plus la forme rendue sans opt-in :
+    aucun projet de test ne déclare ``source.assist.model``."""
+    code_a, payload_a = _get(atelier, f"{PREFIX}assist")
+    code_b, payload_b = _get(cockpit, f"{PREFIX}assist?project=projet-a")
+
+    assert code_a == code_b == 200
+    assert payload_a == payload_b == {
+        "enabled": False,
+        "model": "",
+        "available": False,
+        "reason": "assistance désactivée : définissez `source.assist.model` dans project-context.yaml",
+    }
+
+
+def test_assist_post_sans_opt_in_est_un_200_disponible_false(atelier: int) -> None:
+    """La route écrit toujours un 200 avec ``available`` — un opt-in absent
+    n'est pas une erreur de transport (spec : refus nommé, pas une exception)."""
+    path = _kit_markdown_path(atelier)
+
+    code, payload = _post(
+        atelier,
+        f"{PREFIX}assist",
+        {"path": path, "text": "contenu", "intent": "draft-body", "position": {"line": 0, "col": 0}},
+    )
+
+    assert code == 200
+    assert payload["available"] is False
+
+
+def test_assist_post_intention_inconnue_est_un_400(atelier: int) -> None:
+    path = _kit_markdown_path(atelier)
+
+    code, _ = _post(
+        atelier,
+        f"{PREFIX}assist",
+        {"path": path, "text": "contenu", "intent": "invente"},
+    )
+
+    assert code == 400
+
+
 # ── 5. Un chemin hostile est refusé, symlink compris ────────────────────────
 
 

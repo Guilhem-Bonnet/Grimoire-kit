@@ -7,6 +7,24 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **feat(cockpit): suggestions de contenu par un petit modèle local (Ollama), toujours derrière l'IntelliSense déterministe de l'espace Source, jamais à sa place (#280).**
+  Voie 2 de #280, derrière la voie 1 (IntelliSense déterministe, PR #303) :
+  `project-context.yaml: source.assist.model` (vide par défaut, opt-in) plus
+  la même sonde qu'`grimoire providers audit` (`GET /api/tags`) décident si
+  le bouton **Suggérer** de l'éditeur Source apparaît — sinon l'interface ne
+  montre rien et ne tente rien. `GET /api/workspace/assist` (sans coût) rend
+  ce statut ; `POST /api/workspace/assist` (`src/grimoire/tools/source_assist.py`,
+  projet d'accueil seulement) appelle réellement le modèle en local
+  (`http://127.0.0.1:11434`, délai borné à 10 s), avec les identifiants du
+  paquet de langage (agents, skills, workflows, patterns) injectés dans le
+  prompt, et vérifie après coup tout identifiant cité par la réponse contre
+  ce même paquet — marqué « inconnu » plutôt que corrigé à la place de
+  l'utilisateur. Panneau d'aperçu dans l'éditeur (`Ctrl+Maj+Espace`, ou le
+  bouton) avec **Insérer**/**Ignorer** ; l'insertion passe par le même
+  chemin que la frappe clavier, la colorisation et les diagnostics se
+  recalculent dessus. Aucun fournisseur distant, aucune clé, aucune écriture
+  de fichier par la route.
+
 - **feat(hosts): un override d'agent peut désormais rester partiel (`extends: kit`) et signale sa dérive au lieu de figer silencieusement une copie (#427).**
   Migration réelle 3.38.0 → 3.44.2 : quatre overrides en copie intégrale
   n'avaient plus reçu une seule mise à niveau de leur agent depuis des mois,

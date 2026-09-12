@@ -31,7 +31,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from grimoire.tools import workspace_api, workspace_exec, workspace_language
+from grimoire.tools import source_assist, workspace_api, workspace_exec, workspace_language
 
 __all__ = [
     "GET_ROUTES",
@@ -131,6 +131,18 @@ def _doctor(project_root: Path, _query: _Query) -> Any:
     return workspace_exec.doctor_view(project_root)
 
 
+def _assist_status(project_root: Path, _query: _Query) -> Any:
+    """``GET /api/workspace/assist`` — l'opt-in et la disponibilité, sans coût.
+
+    Jamais d'appel à ``/api/generate`` ici : voir
+    :func:`grimoire.tools.source_assist.assist_status`. L'éditeur l'appelle au
+    montage pour savoir si le bouton « Suggérer » doit même apparaître
+    (issue #280, voie 2 — « sinon l'interface ne montre rien et ne tente
+    rien »).
+    """
+    return source_assist.assist_status(project_root)
+
+
 def _language(project_root: Path, query: _Query) -> Any:
     """Tokens, diagnostics et complétions de l'éditeur Source (#280).
 
@@ -164,6 +176,7 @@ GET_ROUTES: dict[str, _GetHandler] = {
     f"{PREFIX}commands": _commands,
     f"{PREFIX}doctor": _doctor,
     f"{PREFIX}language": _language,
+    f"{PREFIX}assist": _assist_status,
     f"{PREFIX}blueprints": _blueprints,
     f"{PREFIX}agents": _agents,
     f"{PREFIX}proposals": _proposals,
@@ -262,6 +275,18 @@ def _write_file(project_root: Path, body: dict[str, Any]) -> Any:
     return workspace_api.file_view(root, target.relative_to(root).as_posix())
 
 
+def _assist(project_root: Path, body: dict[str, Any]) -> Any:
+    """Suggestion de contenu par un petit modèle local (issue #280, voie 2).
+
+    Jamais à la place de l'IntelliSense déterministe (:mod:`workspace_language`,
+    voie 1) : voir :mod:`grimoire.tools.source_assist` pour l'opt-in, la
+    sonde Ollama et la vérification des identifiants cités. Toujours un 200
+    côté transport — un refus (opt-in absent, Ollama indisponible, délai
+    dépassé) est une valeur (``available: False``), pas une exception.
+    """
+    return source_assist.assist_view(project_root, body)
+
+
 def _command(project_root: Path, body: dict[str, Any]) -> Any:
     argv = body.get("argv")
     if isinstance(argv, str):
@@ -313,6 +338,7 @@ POST_ROUTES: dict[str, _PostHandler] = {
     f"{PREFIX}file/override": _create_override,
     f"{PREFIX}file/write": _write_file,
     f"{PREFIX}command": _command,
+    f"{PREFIX}assist": _assist,
 }
 
 #: Les verbes qu'une tâche accepte depuis l'interface.

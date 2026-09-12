@@ -86,12 +86,17 @@ def _probe_version(resolved_path: str) -> str | None:
     return None
 
 
-def _ollama_base_url() -> str:
+def ollama_base_url() -> str:
     """``OLLAMA_HOST`` (issue #330) ou le défaut local, toujours en URL complète.
 
     La variable réelle d'Ollama prend souvent la forme ``hôte:port`` sans
     schéma (``127.0.0.1:11434``) — on complète en ``http://`` plutôt que de
     rejeter une valeur que l'outil natif accepte.
+
+    Publique depuis l'issue #280 (voie 2, suggestions par modèle local) :
+    ``source_assist`` sonde la même instance Ollama que ``providers audit``,
+    par la même résolution d'URL — jamais une seconde lecture de
+    ``OLLAMA_HOST``.
     """
     value = os.environ.get("OLLAMA_HOST", "").strip()
     if not value:
@@ -101,9 +106,14 @@ def _ollama_base_url() -> str:
     return value.rstrip("/")
 
 
-def _probe_ollama_models() -> tuple[tuple[str, ...], str | None]:
-    """Modèles connus d'Ollama sans prompt : ``GET /api/tags``, timeout 3 s."""
-    url = f"{_ollama_base_url()}/api/tags"
+def probe_ollama_models(base_url: str | None = None) -> tuple[tuple[str, ...], str | None]:
+    """Modèles connus d'Ollama sans prompt : ``GET /api/tags``, timeout 3 s.
+
+    Publique depuis l'issue #280 (voie 2) pour la même raison que
+    :func:`ollama_base_url` : ``source_assist`` valide qu'un modèle configuré
+    est réellement présent avec cette même sonde, jamais une réimplémentation.
+    """
+    url = f"{base_url or ollama_base_url()}/api/tags"
     try:
         request = urllib.request.Request(url, method="GET")  # noqa: S310 — URL locale, schéma vérifié
         with urllib.request.urlopen(request, timeout=_OLLAMA_TAGS_TIMEOUT_S) as response:  # noqa: S310
@@ -144,7 +154,7 @@ def probe_provider(provider: ProviderSpec) -> ProbeResult:
 
     models_seen: tuple[str, ...] = ()
     if name == "ollama" or provider.provider_type == "local":
-        models_seen, ollama_note = _probe_ollama_models()
+        models_seen, ollama_note = probe_ollama_models()
         if ollama_note:
             notes.append(ollama_note)
 

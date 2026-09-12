@@ -19,7 +19,9 @@
 // API consommées : api.files(tier), api.file(path), api.fileDiff(path),
 // api.fileUsage(path), api.fileHistory(path), api.createOverride(path),
 // api.writeFile(path, text), api.commands(), api.doctor(), api.run(argv),
-// api.language(path, {text, pos}).
+// api.language(path, {text, pos}). L'assistance par modèle local (#280, voie
+// 2 — api.assistStatus(), api.assist(path, {...})) vit entièrement dans
+// source-editor.js, jamais ici.
 
 import * as sourceEditor from './source-editor.js';
 

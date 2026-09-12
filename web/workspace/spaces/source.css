@@ -81,6 +81,89 @@
   background: var(--e2);
 }
 
+/* Suggestion par un petit modèle local (issue 280, voie 2) — enveloppe
+   `.sr-code` (barre au-dessus, panneau d'aperçu en dessous) sans changer sa
+   disposition interne. */
+.sr-assist-wrap {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.sr-assist-wrap > .sr-code {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.sr-assist-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 4px var(--sp-3);
+  border-bottom: 1px solid var(--line);
+  background: var(--e1);
+  flex: none;
+}
+
+.sr-assist-status {
+  margin-right: auto;
+}
+
+.sr-assist-panel {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border-top: 1px solid var(--line);
+  background: var(--e1);
+}
+
+.sr-assist-panel[hidden] {
+  display: none;
+}
+
+.sr-assist-panel-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.sr-assist-panel-head .lbl {
+  margin-right: auto;
+}
+
+.sr-assist-text {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--e2);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  font-size: var(--t-s);
+  color: var(--ink);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px;
+  overflow: auto;
+}
+
+.sr-assist-unknown {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--t-min);
+  color: var(--warn);
+}
+
+/* Lien « Expliquer » de l'infobulle de diagnostic (issue 280, voie 2) — n'existe
+   que si `showDiagTip` reçoit un `onExplain`, jamais posé sinon. */
+.sr-diag-tip-explain {
+  align-self: flex-start;
+  margin-top: 2px;
+  font-size: var(--t-min);
+}
+
 /* Source : textarea + colonne de numéros, défilement synchronisé */
 .sr-code {
   display: flex;
