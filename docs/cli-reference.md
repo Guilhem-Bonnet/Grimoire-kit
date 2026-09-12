@@ -270,6 +270,52 @@ observations à ce palier n'ont plus escaladé, et qui n'a pas retenté
 plancher d'une tâche V1). La colonne « départ recommandé » est exactement
 ce que `grimoire task dispatch` retient par défaut pour ce couple.
 
+## Comptabilité du dispatch : coût par tâche résolue et pass^k
+
+`grimoire dispatch stats` est la sœur de `providers history` : même idée
+(compter, ne pas classifier), autre source et un autre angle. `providers
+history` lit le Mission Ledger au grain de la *tentative* et compte des
+taux d'escalade par couple (type de tâche, classe) ; `dispatch stats` lit le
+journal de traces au grain de la *cascade entière* (un événement
+`dispatch.outcome` par `grimoire task dispatch` ou par node de
+`grimoire flow run --executor dispatch` réellement exécuté — jamais pour un
+refus avant tout appel ni un `--dry-run`) et répond à deux questions que
+seules des campagnes d'évals manuelles répondaient jusque-là (issue #442,
+point 5 de l'audit de positionnement du 2026-09-12) : combien coûte une
+tâche *résolue*, et à quel point une même tâche rejouée plusieurs fois
+réussit-elle systématiquement ?
+
+| Commande | Description |
+| --- | --- |
+| `grimoire dispatch stats [--since 30d] [--json]` | Coût par tâche résolue, taux d'escalade, part d'inexécutable — pour l'ensemble, par classe de vérifiabilité et par fournisseur — et pass^k sur les nœuds rejoués |
+
+**Coût par tâche résolue** : le coût total de toutes les tentatives (vertes
+et rouges confondues, un check rouge a quand même coûté un appel) divisé
+par le nombre de dispatchs *résolus* — jamais divisé par le nombre total de
+tentatives, qui sous-estimerait le coût réel d'un succès quand la cascade a
+dû escalader. `None` sans aucun dispatch résolu, jamais une division par
+zéro qui se lirait à tort comme un coût nul.
+
+**pass^k** : quand un même nœud (le node d'un blueprint de flow, identifié
+par blueprint + id de node — ou, hors flow, directement l'identifiant de la
+tâche) a été dispatché au moins deux fois, cette répétition forme une
+« série ». Une série compte comme entièrement verte seulement si *toutes*
+ses exécutions ont résolu la tâche — la fiabilité au sens strict (k
+exécutions, toutes réussies), pas une moyenne de taux de réussite
+individuels. Le taux affiché est la part de séries entièrement vertes parmi
+celles observées au moins deux fois ; une tâche jamais rejouée n'entre dans
+aucun dénominateur.
+
+`--since 30d` (ou `12h`) ne garde que les dispatchs dont l'horodatage est
+plus récent que cette ancienneté. Sans journal de traces sous
+`_grimoire-output/traces/`, la commande n'échoue jamais : elle affiche qu'il
+n'y a rien à montrer (`{"overall": null}` en JSON).
+
+Le contrôle du standard `dispatch.cost_slo` (voir
+[Contrôles gouvernés](standard/controles-gouvernes.md)) lit exactement les
+mêmes agrégats — cette commande en est la vue humaine, jamais un second
+calcul.
+
 ## Web
 
 Le groupe `grimoire web` est le chemin par lequel un agent atteint le web. Il

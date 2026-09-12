@@ -57,8 +57,10 @@ from grimoire.proposals import (
 from grimoire.traces.ledger import (
     AGENT_DISPATCH_TAG,
     AGENT_MISS_TAG,
+    DISPATCH_OUTCOME_TAG,
     TraceLedger,
     compute_agent_freshness,
+    compute_dispatch_outcome_stats,
 )
 
 requires_rust_core = pytest.mark.skipif(
@@ -301,6 +303,7 @@ def test_ledger_fixture_corpus_agrees_across_backends(fixture_path: Path, tmp_pa
     python_fresh = python_ledger.agent_freshness_report(
         ["concierge", "scribe", "generic-dev", "infra-ops"], threshold_days=30, now=datetime(2026, 11, 1, tzinfo=UTC)
     )
+    python_dispatch_stats = python_ledger.dispatch_outcome_stats()
 
     _with_backend("rust", monkeypatch)
     rust_ledger = TraceLedger(ledger_dir)
@@ -310,6 +313,7 @@ def test_ledger_fixture_corpus_agrees_across_backends(fixture_path: Path, tmp_pa
     rust_fresh = rust_ledger.agent_freshness_report(
         ["concierge", "scribe", "generic-dev", "infra-ops"], threshold_days=30, now=datetime(2026, 11, 1, tzinfo=UTC)
     )
+    rust_dispatch_stats = rust_ledger.dispatch_outcome_stats()
 
     assert python_dispatch == rust_dispatch
     assert python_miss == rust_miss
@@ -319,6 +323,7 @@ def test_ledger_fixture_corpus_agrees_across_backends(fixture_path: Path, tmp_pa
     assert [(e.name, e.last_seen, e.days_since, e.stale, e.too_recent) for e in python_fresh.entries] == [
         (e.name, e.last_seen, e.days_since, e.stale, e.too_recent) for e in rust_fresh.entries
     ]
+    assert python_dispatch_stats.to_dict() == rust_dispatch_stats.to_dict()
 
 
 @pytest.mark.parametrize("backend", _backends_for_test())
@@ -335,6 +340,111 @@ def test_ledger_fixture_corpus_never_raises_on_either_backend(
     ledger.agent_miss_counts()
     ledger.oldest_started_at()
     ledger.agent_freshness_report(["concierge"], threshold_days=30)
+    ledger.dispatch_outcome_stats()
+
+
+# ── Coût par tâche résolue et pass^k (issue #442) ────────────────────────────
+
+
+def test_dispatch_outcome_stats_on_the_enriched_fixture_matches_hand_computed_values() -> None:
+    """``10_large_multi_agent.jsonl`` porte, en plus du corpus agent.dispatch/
+    agent.miss d'origine (#429), six ``dispatch.outcome`` couvrant escalade,
+    inexécutable, deux classes, deux fournisseurs et deux séries pass^k (une
+    entièrement verte, une non) — valeurs calculées à la main puis vérifiées."""
+    ledger = TraceLedger(FIXTURES)
+    ledger._traces_path = FIXTURES / "10_large_multi_agent.jsonl"
+    stats = ledger.dispatch_outcome_stats()
+
+    assert stats.overall.total == 6
+    assert stats.overall.resolved == 4
+    assert stats.overall.inexecutable == 1
+    assert stats.overall.escalated == 1
+    assert stats.overall.total_cost_usd == pytest.approx(0.27)
+    assert stats.overall.cost_per_resolved_task_usd == pytest.approx(0.0675)
+
+    assert stats.by_class["V0"].total == 4
+    assert stats.by_class["V1"].resolved == 2
+    assert stats.by_provider["openai"].inexecutable == 1
+    assert stats.by_provider["anthropic"].escalated == 1
+
+    # bp-demo:node-1 : vert, vert, rouge → pas une série entièrement verte.
+    # bp-demo:node-2 : vert, vert → entièrement verte. GAO-solo-1 : une seule
+    # observation, jamais une série.
+    assert stats.pass_k_observations == 2
+    assert stats.pass_k_fully_green == 1
+    assert stats.pass_k_rate == pytest.approx(0.5)
+
+
+@requires_rust_core
+def test_dispatch_outcome_stats_agrees_across_backends_on_the_enriched_fixture(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _read() -> dict:
+        ledger = TraceLedger(FIXTURES)
+        ledger._traces_path = FIXTURES / "10_large_multi_agent.jsonl"
+        return ledger.dispatch_outcome_stats().to_dict()
+
+    _with_backend("python", monkeypatch)
+    python_stats = _read()
+    _with_backend("rust", monkeypatch)
+    rust_stats = _read()
+    assert python_stats == rust_stats
+
+
+@pytest.mark.parametrize("backend", _backends_for_test())
+def test_pass_k_mixed_series_rate_is_the_share_of_fully_green_replays(backend: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    _with_backend(backend, monkeypatch)
+    records = [
+        # série A : trois exécutions, toutes résolues → pass^3 vert.
+        ((DISPATCH_OUTCOME_TAG, "replay:A", "resolved:true"), 0.0),
+        ((DISPATCH_OUTCOME_TAG, "replay:A", "resolved:true"), 0.0),
+        ((DISPATCH_OUTCOME_TAG, "replay:A", "resolved:true"), 0.0),
+        # série B : deux exécutions, une seule résolue → pas entièrement verte.
+        ((DISPATCH_OUTCOME_TAG, "replay:B", "resolved:true"), 0.0),
+        ((DISPATCH_OUTCOME_TAG, "replay:B", "resolved:false"), 0.0),
+        # une observation isolée : jamais une série (dénominateur du pass^k).
+        ((DISPATCH_OUTCOME_TAG, "replay:C", "resolved:true"), 0.0),
+    ]
+    stats = compute_dispatch_outcome_stats(records)
+    assert stats.pass_k_observations == 2
+    assert stats.pass_k_fully_green == 1
+    assert stats.pass_k_rate == pytest.approx(0.5)
+
+
+@pytest.mark.parametrize("backend", _backends_for_test())
+def test_dispatch_outcome_stats_without_any_dispatch_outcome_tag_is_all_zero(
+    backend: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _with_backend(backend, monkeypatch)
+    stats = compute_dispatch_outcome_stats([((AGENT_DISPATCH_TAG,), 1.0)])
+    assert stats.overall.total == 0
+    assert stats.overall.cost_per_resolved_task_usd is None
+    assert stats.pass_k_rate is None
+
+
+@pytest.mark.parametrize("backend", _backends_for_test())
+def test_dispatch_outcome_free_content_field_is_never_aggregated(
+    backend: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Même garantie que ``test_free_content_field_is_never_aggregated`` côté
+    dispatch.outcome : un champ de contenu libre écrit à la main n'a nulle
+    part où aller — seuls ``tags``/``token_usage.estimated_cost_usd`` sont lus."""
+    _with_backend(backend, monkeypatch)
+    ledger_dir = tmp_path / "ledger"
+    ledger_dir.mkdir()
+    handwritten = {
+        "id": "TRC-1", "run_id": "r1", "workflow_instance_id": "", "mission_id": "", "task_id": "GAO-1",
+        "recipe_id": "grimoire.dispatch", "outcome": "success", "started_at": "2026-01-01T00:00:00+00:00",
+        "agent": {"agent_id": "openai", "host_id": "", "model": ""},
+        "tags": [DISPATCH_OUTCOME_TAG, "class:V0", "resolved:true"],
+        "token_usage": {"estimated_cost_usd": 0.01},
+        "prompt": "contenu de la demande — ne doit jamais devenir un champ agrégé",
+    }
+    (ledger_dir / "traces.jsonl").write_text(json.dumps(handwritten) + "\n", encoding="utf-8")
+    ledger = TraceLedger(ledger_dir)
+    stats = ledger.dispatch_outcome_stats()
+    assert stats.overall.total == 1
+    assert stats.overall.total_cost_usd == pytest.approx(0.01)
 
 
 # ── Fuzz léger : jamais d'exception, sous aucun backend ─────────────────────

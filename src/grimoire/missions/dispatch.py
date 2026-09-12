@@ -65,7 +65,9 @@ import re
 import shlex
 import subprocess
 import time
+import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -945,6 +947,82 @@ def _dispatch_event_payload(
     return payload
 
 
+def _record_dispatch_outcome(
+    root: Path,
+    task: MissionTask,
+    report: DispatchReport,
+    *,
+    acceptance_declared: bool,
+    replay_key: str | None,
+) -> None:
+    """Journaliser dans le journal de traces le résumé d'une cascade de dispatch terminée.
+
+    Point 5 de l'audit de positionnement du 2026-09-12 (issue #442) : un
+    événement ``dispatch.outcome`` par cascade réellement tentée — jamais
+    pour un refus posé avant tout appel, ni pour un ``--dry-run``
+    (``report.attempts`` est alors vide et cette fonction ne fait rien).
+    Distinct des événements ``task.dispatched`` du Mission Ledger, un par
+    *tentative* individuelle (voir ``_dispatch_event_payload`` plus haut) :
+    celui-ci résume la cascade entière — classe, paliers tentés, coût total,
+    verdict d'acceptance, résolu ou non — pour que ``TraceLedger.
+    dispatch_outcome_stats`` et le contrôle ``dispatch.cost_slo`` du standard
+    n'aient jamais à rejouer toute la logique de cascade eux-mêmes.
+
+    *replay_key* identifie la série pour le pass^k : le node de blueprint
+    (``blueprint_id:node_id``) pour un dispatch de flow — un même node
+    rejoué sur des runs différents doit compter comme une seule série, ce
+    que son ``task_id`` seul ne garantit pas (voir
+    ``flows.dispatch_executor._task_id_for``). Sans *replay_key*, retombe sur
+    *task.id* : deux ``grimoire task dispatch`` sur la même tâche comptent
+    déjà comme une série rejouée.
+
+    Aucun contenu de prompt ni de sortie de commande n'entre dans les tags
+    ou le ``token_usage`` écrits ici — uniquement des étiquettes mécaniques.
+    Best-effort, comme ``hosts.decisions._record_agent_dispatch`` : un
+    journal indisponible ou illisible ne doit jamais faire échouer le
+    dispatch qu'il se contente d'observer.
+    """
+    if not report.attempts:
+        return
+    try:
+        from grimoire.core.standard_generation import TRACES_DIR
+        from grimoire.traces.ledger import DISPATCH_OUTCOME_TAG, TraceLedger
+        from grimoire.traces.schemas import TraceOutcome
+
+        tiers = dict.fromkeys(attempt.tier for attempt in report.attempts)  # ordonné, dédupliqué
+        total_cost = sum(attempt.cost_usd or 0.0 for attempt in report.attempts)
+        last = report.attempts[-1]
+        acceptance = (
+            "unrunnable" if report.unrunnable is not None else ("executed" if acceptance_declared else "judged")
+        )
+        resolved = report.succeeded
+        tags = [
+            DISPATCH_OUTCOME_TAG,
+            f"class:{report.verifiability}",
+            *(f"tier:{tier}" for tier in tiers),
+            f"acceptance:{acceptance}",
+            f"resolved:{'true' if resolved else 'false'}",
+            f"replay:{replay_key or task.id}",
+        ]
+        if last.provider:
+            tags.append(f"provider:{last.provider}")
+
+        TraceLedger(root / TRACES_DIR).record(
+            run_id=f"dispatch-{uuid.uuid4().hex[:12]}",
+            workflow_instance_id="",
+            mission_id="",
+            task_id=task.id,
+            recipe_id="grimoire.dispatch",
+            outcome=TraceOutcome.SUCCESS if resolved else TraceOutcome.FAILURE,
+            started_at=datetime.now(UTC).isoformat(),
+            agent_id=last.provider,
+            token_usage={"estimated_cost_usd": total_cost},
+            tags=tags,
+        )
+    except Exception:  # noqa: S110 — observabilité : jamais au prix du dispatch lui-même
+        pass
+
+
 def run_dispatch(
     service: TaskService,
     task_id: str,
@@ -964,6 +1042,7 @@ def run_dispatch(
     acceptance_declared: bool = False,
     verifiability_override: Verifiability | None = None,
     verifiability_warning: str | None = None,
+    replay_key: str | None = None,
 ) -> DispatchReport:
     """Cascade la tâche *task_id* à travers les paliers de fournisseurs.
 
@@ -1195,7 +1274,7 @@ def run_dispatch(
                 # rendre de verdict (dépendance absente, binaire introuvable,
                 # collecte pytest en échec) — c'est exactement ce que le rejeu
                 # du 2026-09-11 a payé pour rien (issue #428).
-                return DispatchReport(
+                unrunnable_report = DispatchReport(
                     task_id=task_id,
                     verifiability=verifiability.value,
                     dry_run=False,
@@ -1206,6 +1285,10 @@ def run_dispatch(
                     start_tier_reason=start_tier_reason,
                     unrunnable="; ".join(unrunnable_reasons),
                 )
+                _record_dispatch_outcome(
+                    root, task, unrunnable_report, acceptance_declared=acceptance_declared, replay_key=replay_key
+                )
+                return unrunnable_report
             tier_settled = True
             break  # appel réussi : ce palier a son verdict, vert ou rouge
 
@@ -1239,6 +1322,7 @@ def run_dispatch(
         start_tier=chosen_tier,
         start_tier_reason=start_tier_reason,
     )
+    _record_dispatch_outcome(root, task, report, acceptance_declared=acceptance_declared, replay_key=replay_key)
     if not report.succeeded:
         return report
     if verifiability is not Verifiability.V1:

@@ -295,6 +295,7 @@ CHECK_DIMENSIONS: dict[str, str] = {
     "cost.no_pricing": "provider_policy",
     "cost.no_slo": "provider_policy",
     "cost.pricing_incomplete": "provider_policy",
+    "dispatch.cost_slo": "provider_policy",
     "providers.capabilities_missing": "provider_policy",
     "providers.currency_invalid": "provider_policy",
     "providers.data_policy_missing": "provider_policy",

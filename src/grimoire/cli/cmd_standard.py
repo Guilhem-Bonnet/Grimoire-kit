@@ -927,7 +927,10 @@ def verify_profile(
     for path in result.invalid_yaml:
         console.print(f"  [red][x][/red] invalid YAML {path}")
     for check in result.checks:
-        color = "red" if check.severity == "error" else "yellow"
+        # "info" (ex. `dispatch.cost_slo` faute de données, issue #442) ne
+        # fait échouer ni compter comme warning — un cyan distinct évite de
+        # le lire à tort comme l'un ou l'autre.
+        color = "red" if check.severity == "error" else ("yellow" if check.severity == "warning" else "cyan")
         path_text = f" ({check.path})" if check.path else ""
         console.print(f"  [{color}]![/{color}] {check.id}{path_text}: {check.message}")
     for warning in result.warnings:

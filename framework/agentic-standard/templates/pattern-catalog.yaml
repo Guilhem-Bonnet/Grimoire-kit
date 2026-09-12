@@ -177,7 +177,7 @@ patterns:
     required_artifacts: ["llm-provider-registry.yaml"]
     rule_refs: ["provider.cost-budgeted"]
     hook_refs: []
-    check_refs: []
+    check_refs: ["dispatch.cost_slo"]
   - id: tool-blast-radius-limiter
     category: security
     maturity: starter

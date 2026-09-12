@@ -161,6 +161,41 @@ grimoire standard init . --profile orchestrated --providers github-copilot,anthr
 
 La détection ne lit pas les secrets. Elle ne remonte que des signaux non sensibles comme la présence d'un exécutable (`gh`, `codex`, `claude`, `gemini`, `ollama`) ou le fait qu'une variable d'environnement connue soit définie.
 
+### Coût par tâche résolue et pass^k (`dispatch.cost_slo`)
+
+Le pattern `provider-cost-slo` (production) gagne, depuis l'issue #442, un
+contrôle qui lit en continu ce que le kit journalise déjà à chaque cascade
+(`dispatch.outcome`, voir `grimoire dispatch stats` dans la
+[référence CLI](../cli-reference.md#comptabilité-du-dispatch--coût-par-tâche-résolue-et-passk)) —
+plus besoin d'une campagne d'évals manuelle pour savoir si le coût dérive ou
+si un node rejoué réussit systématiquement. `llm-provider-registry.yaml`
+déclare, en option, une section `dispatch_cost_slo` :
+
+```yaml
+dispatch_cost_slo:
+  max_cost_per_resolved_task_usd: 2.0   # défaut si absent
+  min_pass_k_rate: 0.8                  # défaut si absent
+  min_resolved_observations: 5          # défaut si absent — sous ce seuil, INFO plutôt qu'un jugement
+  min_pass_k_observations: 3            # défaut si absent — dénominateur indépendant du précédent
+  enforce: false                        # défaut si absent — true transforme le WARN en FAIL
+```
+
+Toute la section, et chacune de ses clés, est optionnelle : absente, le
+contrôle reste actif avec les valeurs par défaut ci-dessus plutôt que de se
+taire faute de réglage. Le check `dispatch.cost_slo` rend alors, par
+métrique (coût et pass^k jugés indépendamment, chacun avec son propre
+plancher de données) :
+
+- `INFO` s'il y a trop peu d'observations pour juger ;
+- `WARN` si le coût par tâche résolue dépasse `max_cost_per_resolved_task_usd`,
+  ou si le pass^k mesuré est sous `min_pass_k_rate` ;
+- `FAIL` à la place du `WARN` ci-dessus, uniquement si `enforce: true` — un
+  dépassement reste silencieux (`WARN`) par défaut, jamais bloquant sans
+  décision explicite du projet.
+
+Le cockpit n'affiche pas encore ces chiffres — seuls `grimoire dispatch
+stats` et `grimoire standard verify`/`gate` les exposent pour l'instant.
+
 ## Installation dans un projet cible
 
 ```bash

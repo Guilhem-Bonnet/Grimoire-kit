@@ -384,6 +384,12 @@ class DispatchExecutor:
             actor=self._actor,
             agent=self._agent,
             project_root=self._project_root,
+            # Clé de série pour le pass^k (issue #442) : le node de blueprint,
+            # pas `task_id` — `_task_id_for` l'encode avec `run_id`, qui change
+            # à chaque rejeu du même blueprint. Sans ceci, deux runs du même
+            # node compteraient comme deux séries à une seule observation
+            # chacune, jamais comme une série rejouée.
+            replay_key=f"{blueprint_id}:{node_id}",
         )
         self.node_outcomes[node_id] = _node_outcome_from_report(
             node_id,
