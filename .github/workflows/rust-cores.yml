@@ -2,8 +2,8 @@ name: Rust cores
 
 # Point d'entrée CI unique pour les cœurs Rust optionnels du kit
 # (rust/grimoire-policies-core/, rust/grimoire-schema-core/,
-# rust/grimoire-hosts-core/, rust/grimoire-flows-core/ et
-# rust/grimoire-dispatch-core/, issue #354).
+# rust/grimoire-hosts-core/, rust/grimoire-flows-core/,
+# rust/grimoire-dispatch-core/ et rust/grimoire-traces-core/, issue #354).
 #
 # Remplace rust-policies-core.yml et rust-schema-core.yml. Ces deux
 # workflows étaient filtrés par `paths:` : invisibles de toute PR hors de
@@ -15,12 +15,12 @@ name: Rust cores
 # Ici le déclenchement couvre TOUTE PR vers main et TOUT push sur main, sans
 # filtre `paths`. Un premier job `changes` calcule quel(s) crate(s) sont
 # concernés (dorny/paths-filter, sur les mêmes listes de chemins que les
-# anciens workflows) ; les dix jobs par crate (cargo + parity, un couple par
-# crate) ne s'exécutent que si leur périmètre est touché et sont sinon
+# anciens workflows) ; les douze jobs par crate (cargo + parity, un couple
+# par crate) ne s'exécutent que si leur périmètre est touché et sont sinon
 # rapportés `skipped` par GitHub — un skip satisfait un check requis, une
 # absence de rapport ne le satisfait jamais. `rust-gate` est le seul job à
 # déclarer comme check requis dans la protection de branche : il agrège les
-# dix jobs et échoue si l'un d'eux a échoué ou a été annulé, réussit sinon
+# douze jobs et échoue si l'un d'eux a échoué ou a été annulé, réussit sinon
 # (y compris quand tous ont été sautés).
 #
 # Ne touche à rien de ce que publish.yml construit ou publie : la wheel
@@ -53,6 +53,7 @@ jobs:
       hosts: ${{ steps.filter.outputs.hosts }}
       flows: ${{ steps.filter.outputs.flows }}
       dispatch: ${{ steps.filter.outputs.dispatch }}
+      traces: ${{ steps.filter.outputs.traces }}
     steps:
       - uses: actions/checkout@v7
 
@@ -110,6 +111,20 @@ jobs:
               - "tests/unit/test_flows_dispatch_executor.py"
               - "tests/unit/test_dispatch_rust_parity.py"
               - "tests/fixtures/dispatch_worker_outputs/**"
+              - "pyproject.toml"
+              - ".github/workflows/rust-cores.yml"
+            traces:
+              - "rust/grimoire-traces-core/**"
+              - "src/grimoire/traces/ledger.py"
+              - "src/grimoire/core/agent_freshness.py"
+              - "src/grimoire/proposals.py"
+              - "tests/unit/test_traces.py"
+              - "tests/unit/test_proposals.py"
+              - "tests/unit/test_workspace_proposals.py"
+              - "tests/unit/test_traces_rust_parity.py"
+              - "tests/e2e/test_workspace_proposals.py"
+              - "tests/e2e/test_workspace_agent_freshness.py"
+              - "tests/fixtures/traces_ledgers/**"
               - "pyproject.toml"
               - ".github/workflows/rust-cores.yml"
 
@@ -517,6 +532,96 @@ jobs:
         # regarde) : la suite complète doit rester verte avec lui présent.
         run: pytest tests/unit/ tests/test_agentic_standard.py -q --tb=short -x
 
+  rust-traces-cargo:
+    name: "rust-traces / cargo"
+    needs: changes
+    if: needs.changes.outputs.traces == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "rust/grimoire-traces-core -> target"
+
+      - name: Format check
+        run: cargo fmt --manifest-path rust/grimoire-traces-core/Cargo.toml --check
+
+      - name: Unit tests
+        # --no-default-features : la feature `extension-module` de PyO3 (par
+        # défaut, requise pour que l'extension soit chargeable par Python)
+        # empêche de lier le binaire de test — voir le commentaire en tête
+        # de rust/grimoire-traces-core/Cargo.toml. La logique testée ici
+        # (agrégations du journal, règle de fraîcheur, nommage mécanique,
+        # résolution du porteur, décision de synchronisation) ne touche à
+        # aucun type PyO3, aucun interpréteur Python n'est nécessaire pour
+        # ce job.
+        run: cargo test --no-default-features --manifest-path rust/grimoire-traces-core/Cargo.toml
+
+  rust-traces-parity:
+    name: "rust-traces / parity"
+    needs: changes
+    if: needs.changes.outputs.traces == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "rust/grimoire-traces-core -> target"
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install package + dev deps
+        run: pip install -e ".[dev]"
+
+      - name: Build and install the compiled core
+        # `maturin develop` exige un virtualenv actif ; le runner utilise le
+        # Python de l'image, sans venv. On construit donc la roue et on
+        # l'installe, ce qui donne le même résultat sans cette contrainte
+        # (piège déjà rencontré et documenté sur les jobs
+        # policies/schema/hosts/flows/dispatch).
+        run: |
+          pip install "maturin>=1.7,<2"
+          maturin build --release --manifest-path rust/grimoire-traces-core/Cargo.toml --out dist-rust
+          pip install --force-reinstall dist-rust/*.whl
+
+      - name: Verify the compiled core is importable
+        run: python -c "import grimoire_traces_core; print('grimoire_traces_core', grimoire_traces_core.__version__)"
+
+      - name: Traces/proposals tests — contract unmodified, both backends, parity
+        # tests/unit/test_traces.py, tests/unit/test_proposals.py et
+        # tests/unit/test_workspace_proposals.py sont le contrat : ils
+        # tournent tels quels ici (module compilé présent) et dans le job
+        # SDK normal (absent) — voir ci-sdk.yml.
+        # test_traces_rust_parity.py force chaque backend tour à tour
+        # (GRIMOIRE_TRACES_BACKEND), rejoue le corpus de dix journaux JSONL
+        # fixture et un fuzz léger, et vérifie les invariants de la doctrine
+        # (seuil jamais sous 2, refus sticky jusqu'au doublement, persona
+        # d'entrée jamais porteuse, match par mot entier) — y compris le
+        # défaut trouvé et corrigé dans cette PR (horodatage ISO sans
+        # décalage : `TypeError` non rattrapée à la soustraction, corrigée
+        # dans `grimoire.traces.ledger._parse_iso`).
+        run: |
+          pytest tests/unit/test_traces.py tests/unit/test_proposals.py \
+            tests/unit/test_workspace_proposals.py tests/unit/test_traces_rust_parity.py \
+            -q --tb=short
+
+      - name: Full SDK suite with the compiled core loaded
+        # Preuve que rien d'autre dans le kit ne dépend de l'absence du
+        # module compilé (import optionnel, aucun autre appelant ne le
+        # regarde) : la suite complète doit rester verte avec lui présent.
+        run: pytest tests/unit/ tests/test_agentic_standard.py -q --tb=short -x
+
   rust-gate:
     name: rust-gate
     if: always()
@@ -532,9 +637,11 @@ jobs:
       - rust-flows-parity
       - rust-dispatch-cargo
       - rust-dispatch-parity
+      - rust-traces-cargo
+      - rust-traces-parity
     runs-on: ubuntu-latest
     steps:
-      - name: Aggregate the ten Rust jobs
+      - name: Aggregate the twelve Rust jobs
         # Seul ce job est déclaré comme check requis dans la protection de
         # main. Un job sauté (crate hors périmètre de la PR) est un succès
         # pour ce gate ; seuls `failure` et `cancelled` le font échouer.
@@ -551,6 +658,8 @@ jobs:
             ["rust-flows / parity"]="${{ needs.rust-flows-parity.result }}"
             ["rust-dispatch / cargo"]="${{ needs.rust-dispatch-cargo.result }}"
             ["rust-dispatch / parity"]="${{ needs.rust-dispatch-parity.result }}"
+            ["rust-traces / cargo"]="${{ needs.rust-traces-cargo.result }}"
+            ["rust-traces / parity"]="${{ needs.rust-traces-parity.result }}"
           )
           failed=0
           for name in "${!results[@]}"; do
