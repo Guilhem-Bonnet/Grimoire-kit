@@ -47,6 +47,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from grimoire.hosts.surface import AgentSpec
     from grimoire.traces.ledger import AgentFreshness
 
 __all__ = [
@@ -791,27 +792,33 @@ def file_history(project_root: Path, raw_path: str | None) -> dict[str, Any]:
 # frontmatter ici plutôt qu'ajoutée à :class:`AgentSpec`.
 
 
-def _agent_layer(definition_ref: str) -> str:
-    """``overrides`` ou ``kit`` — le préfixe du chemin le dit sans ambiguïté."""
-    from grimoire.core import layout
+def _agent_layer(agent: AgentSpec) -> str:
+    """``overrides`` ou ``kit`` — depuis ``agent.override_ref`` (issue #427).
 
-    prefix = f"{layout.OVERRIDES_DIR}/"
-    return "overrides" if definition_ref.replace("\\", "/").startswith(prefix) else "kit"
-
-
-def _agent_clause(project_root: Path, definition_ref: str) -> dict[str, str]:
-    """Relit ``use_when``/``dont_use_when``/``tool_boundary`` sur le fichier agent.
-
-    Un champ absent rend une chaîne vide — un agent personnalisé sans clause
-    déclarée reste affichable, il n'a simplement rien à montrer là.
+    Ne lit plus le préfixe de ``definition_ref`` : un override partiel
+    (``extends: kit``) y pointe vers le fichier kit lui-même (celui qui porte
+    le corps — voir ``grimoire.hosts.collect.collect_agents``), donc seul
+    ``override_ref`` dit encore de manière fiable si le projet a personnalisé
+    cet agent.
     """
-    from grimoire.hosts.collect import parse_frontmatter
+    return "overrides" if agent.override_ref is not None else "kit"
 
-    try:
-        text = (project_root / definition_ref).read_text(encoding="utf-8")
-    except OSError:
-        return {"use_when": "", "dont_use_when": "", "tool_boundary": ""}
-    meta, _ = parse_frontmatter(text)
+
+def _agent_clause(project_root: Path, agent: AgentSpec) -> dict[str, str]:
+    """Relit ``use_when``/``dont_use_when``/``tool_boundary`` — vue effective.
+
+    Depuis l'issue #427, un override partiel ne porte que les champs qu'il
+    redéfinit ; relire son seul fichier donnerait une clause tronquée pour
+    tout champ hérité du kit. :func:`grimoire.hosts.collect.effective_agent_frontmatter`
+    rejoue la même fusion que ``collect_agents`` a déjà appliquée, sur le
+    frontmatter complet plutôt que sur les seuls champs que l'IR de host
+    consomme. Un champ absent rend une chaîne vide — un agent personnalisé
+    sans clause déclarée reste affichable, il n'a simplement rien à montrer
+    là.
+    """
+    from grimoire.hosts.collect import effective_agent_frontmatter
+
+    meta = effective_agent_frontmatter(project_root, agent)
     return {
         "use_when": str(meta.get("use_when") or ""),
         "dont_use_when": str(meta.get("dont_use_when") or ""),
@@ -881,8 +888,8 @@ def agents_view(project_root: Path) -> dict[str, Any]:
     records = [
         {
             **agent.to_dict(),
-            "layer": _agent_layer(agent.definition_ref),
-            **_agent_clause(root, agent.definition_ref),
+            "layer": _agent_layer(agent),
+            **_agent_clause(root, agent),
             "usage": usage.get(agent.name, default_usage),
             "freshness": _agent_freshness_entry(freshness_by_name.get(agent.name), judged=freshness.judged),
         }

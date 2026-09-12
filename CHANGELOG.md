@@ -8,6 +8,45 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 ## [Unreleased]
 
 - fix(yaml): `grimoire upgrade` round-trippait `project-context.yaml` via un chargeur `safe` (aucune métadonnée de commentaire) puis un dumper round-trip — tous les commentaires du fichier disparaissaient silencieusement à chaque migration v2→v3 (#430).
+- **feat(policies): politiques temporelles par session sur la médiation d'outils — budgets, approbation préalable, refroidissement (#439).**
+  Point 3 de l'audit de positionnement 2026-09-12 : `PolicyRule` gagne quatre
+  clés optionnelles et rétrocompatibles (`tool_pattern`, `require_approval`,
+  `per_session`, `cooldown_after`, voir `_grimoire/standard/policies.yaml`),
+  validées au chargement (`GrimoirePolicyError` nommée sur clé inconnue). L'état
+  de session (compteurs, approbations, horodatages — jamais de secret ni de
+  contenu d'outil) vit dans `_grimoire-output/.runs/session-<id>.json`, écrit
+  atomiquement, remis à zéro à `SessionStart` ; un fichier absent ou corrompu
+  redevient une session neuve. La décision pure (règle + état → verdict) est
+  portée à l'identique en Python (`grimoire.policies.temporal`) et en Rust
+  (`rust/grimoire-policies-core`, `evaluate_temporal`), testée en parité ; le
+  hook `PreToolUse` reste sous +5 ms de surcoût mesuré. `grimoire policies
+  status` affiche les compteurs et budgets restants de la session — le
+  cockpit n'est pas dans ce lot.
+- **feat(hosts): un override d'agent peut désormais rester partiel (`extends: kit`) et signale sa dérive au lieu de figer silencieusement une copie (#427).**
+  Migration réelle 3.38.0 → 3.44.2 : quatre overrides en copie intégrale
+  n'avaient plus reçu une seule mise à niveau de leur agent depuis des mois,
+  `doctor` étant 22/22. Trois changements : (1) tout override écrit par un
+  chemin qui comprend le kit (cockpit, `grimoire agent override convert`)
+  enregistre `kit_source_hash:` (empreinte tronquée du fichier kit au moment
+  de l'écriture) ; `doctor` et le cockpit comparent cette empreinte à
+  l'actuelle et signalent en WARN (jamais FAIL) une dérive, avec un résumé
+  (sections de frontmatter ajoutées/retirées, delta du corps, ou champs
+  figés pour un override partiel), et en INFO une empreinte inconnue
+  (override antérieur à cette issue). (2) `extends: kit` dans le frontmatter
+  d'un override ne redéfinit plus que les champs qu'il liste
+  (`model_affinity`, `context`, `skills`, `tools`, `use_when`,
+  `dont_use_when`, `max_turns`, `description`, `tool_boundary`) — le corps et
+  le reste du frontmatter viennent du fichier kit de même nom, fusionnés
+  dans `hosts/collect.py` (dicts Python, avant tout appel au port Rust
+  optionnel — parité inchangée sous `GRIMOIRE_HOSTS_BACKEND=rust`) ; un
+  `extends: kit` sans agent kit de même nom refuse au chargement, nommant
+  l'agent. Le cockpit (assigner un skill, éditer une clause) écrit désormais
+  un override partiel dès qu'un agent kit du même nom existe, une copie
+  intégrale sinon. (3) `grimoire up` liste, après avoir rafraîchi le palier
+  kit, les overrides à revoir — sans jamais les toucher — et
+  `grimoire agent override convert <nom> [--dry-run]` convertit une copie
+  intégrale en override partiel équivalent, refusant (lignes citées) quand
+  le corps de la copie a divergé du kit plutôt que de fusionner du texte.
 - **feat(mcp): migrer le pont MCP vers la révision de protocole 2026-07-28 (#436).**
   Le plancher `mcp>=1.10,<3` laissait un résolveur retenir un SDK qui plafonne
   à la révision 2025-11-25 (pas de `server/discover`, pas de mode sans état).

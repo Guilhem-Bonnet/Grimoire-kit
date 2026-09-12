@@ -291,6 +291,115 @@ def entry_agent_name(project_root: Path) -> str:
         return DEFAULT_ENTRY_AGENT
 
 
+#: Frontmatter keys a partial override (``extends: kit``) may redefine — the
+#: rest is inherited from the kit file of the same name, body included
+#: (issue #427). ``tool_boundary`` is not part of the issue's own list (it is
+#: prose the cockpit displays, never read structurally — see
+#: ``grimoire.tools.workspace_api``) but is included here for the same reason
+#: it is in ``workspace_routes._AGENT_STRING_FIELDS``: leaving it out would
+#: make the cockpit's own clause editor silently drop a field it has always
+#: been able to write.
+PARTIAL_OVERRIDE_FIELDS = frozenset(
+    {
+        "model_affinity",
+        "context",
+        "skills",
+        "tools",
+        "use_when",
+        "dont_use_when",
+        "max_turns",
+        "description",
+        "tool_boundary",
+    }
+)
+
+
+def _kit_counterpart(project_root: Path, override_path: Path) -> Path:
+    """Kit agent file *override_path* would extend, same file name, kit tier."""
+    return kit_dir_agents(project_root) / override_path.name
+
+
+def kit_dir_agents(project_root: Path) -> Path:
+    """``_grimoire/kit/agents/`` for *project_root* — named once for reuse."""
+    return layout.kit_dir(project_root) / layout.AGENTS_SUBDIR
+
+
+def _is_override_tier_path(project_root: Path, path: Path) -> bool:
+    """Whether *path* sits in the project's overrides tier (any subdir)."""
+    try:
+        path.resolve().relative_to(layout.overrides_dir(project_root).resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def resolve_extends_kit(project_root: Path, override_path: Path, override_meta: dict[str, Any]) -> tuple[dict[str, Any], str, Path]:
+    """Merge a ``extends: kit`` override onto its kit counterpart.
+
+    Returns ``(effective_meta, effective_body, kit_path)`` — *effective_meta*
+    is the kit file's own frontmatter with every key in
+    :data:`PARTIAL_OVERRIDE_FIELDS` that *override_meta* declares applied on
+    top; *effective_body* is always the kit file's body, unchanged (a partial
+    override never carries its own body — that is the point of it staying
+    thin across kit upgrades). Raises :class:`GrimoireAgentError` when no kit
+    agent of the same name exists: ``extends: kit`` promises a base to extend,
+    and a promise with nothing behind it is a build error, not a silent
+    fallback to an empty persona.
+    """
+    kit_path = _kit_counterpart(project_root, override_path)
+    if not kit_path.is_file():
+        try:
+            override_ref = override_path.relative_to(project_root).as_posix()
+        except ValueError:
+            override_ref = override_path.as_posix()
+        raise GrimoireAgentError(
+            f"L'override « {override_path.stem} » ({override_ref}) déclare "
+            f"`extends: kit` mais aucun agent kit de même nom n'existe sous "
+            f"{layout.KIT_DIR}/{layout.AGENTS_SUBDIR}/{override_path.name}."
+        )
+    kit_text = kit_path.read_text(encoding="utf-8")
+    kit_meta, kit_body = parse_frontmatter(kit_text)
+    effective_meta = dict(kit_meta)
+    for key in PARTIAL_OVERRIDE_FIELDS:
+        if key in override_meta:
+            effective_meta[key] = override_meta[key]
+    return effective_meta, kit_body, kit_path
+
+
+def effective_agent_frontmatter(project_root: Path, agent: AgentSpec) -> dict[str, Any]:
+    """Re-read *agent*'s frontmatter as :func:`collect_agents` effectively saw it.
+
+    For a plain (non-extending) agent this is just its own frontmatter. For a
+    partial override (``agent.override_kind == "partial"``) it is the merge
+    :func:`resolve_extends_kit` computes — the same rule, applied again on a
+    fresh read, for callers that only have the built :class:`AgentSpec` and
+    need a field it does not carry (``use_when``, ``dont_use_when``,
+    ``tool_boundary`` — see the module docstring of
+    :mod:`grimoire.tools.workspace_api`). Never raises: a file that vanished
+    between the original collection and this call yields ``{}``, the same
+    tolerance :func:`grimoire.tools.workspace_api._agent_clause` already had.
+    """
+    root = project_root.resolve()
+    if agent.override_kind == "partial" and agent.override_ref:
+        override_path = root / agent.override_ref
+        try:
+            override_text = override_path.read_text(encoding="utf-8")
+        except OSError:
+            return {}
+        override_meta, _ = parse_frontmatter(override_text)
+        try:
+            effective_meta, _body, _kit_path = resolve_extends_kit(root, override_path, override_meta)
+        except GrimoireAgentError:
+            return override_meta
+        return effective_meta
+    try:
+        text = (root / agent.definition_ref).read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    meta, _ = parse_frontmatter(text)
+    return meta
+
+
 def collect_agents(
     project_root: Path,
     *,
@@ -345,6 +454,27 @@ def collect_agents(
         name = _agent_name(path)
         if name is None:
             continue
+
+        # Override partiel (issue #427) : `extends: kit` ne redéfinit que les
+        # clés de `PARTIAL_OVERRIDE_FIELDS`, tout le reste — corps compris —
+        # vient du fichier kit de même nom. La fusion est un dict Python pur,
+        # faite avant tout appel aux fonctions ci-dessous qui savent déjà
+        # basculer sur `grimoire_hosts_core` : le port Rust n'a donc rien à
+        # changer, il continue de recevoir le (meta, body) déjà résolu.
+        override_ref: str | None = None
+        override_kind: str | None = None
+        body_ref = path
+        if _is_override_tier_path(project_root, path):
+            try:
+                override_ref = path.relative_to(project_root).as_posix()
+            except ValueError:
+                override_ref = path.as_posix()
+            if str(meta.get("extends", "")).strip().lower() == "kit":
+                meta, body, body_ref = resolve_extends_kit(project_root, path, meta)
+                override_kind = "partial"
+            else:
+                override_kind = "full"
+
         description = str(meta.get("description") or f"Grimoire agent {name}").strip()
         declared, rejected_verbs = _tool_verbs_with_rejects(meta.get("tools"))
         tools = declared or infer_tools(body, description)
@@ -358,9 +488,13 @@ def collect_agents(
             # POSIX separators: this path is written into a generated
             # instruction telling an agent which file to read, and a Windows
             # backslash there is both wrong in Markdown and unreadable.
-            definition_ref = path.relative_to(project_root).as_posix()
+            # `body_ref` is the kit file for a partial override (it is the
+            # one carrying the body a host must read in full — see the
+            # module docstring of `grimoire.hosts.emitters.claude_code`) and
+            # *path* everywhere else, unchanged from before this issue.
+            definition_ref = body_ref.relative_to(project_root).as_posix()
         except ValueError:
-            definition_ref = path.as_posix()
+            definition_ref = body_ref.as_posix()
         skills = _str_tuple(meta.get("skills"))
         unknown = [slug for slug in skills if slug not in known_skills]
         if unknown:
@@ -388,6 +522,8 @@ def collect_agents(
                 max_turns=_max_turns(meta.get("max_turns")),
                 skills=skills,
                 context=context,
+                override_ref=override_ref,
+                override_kind=override_kind,
             )
         )
     return tuple(specs)
@@ -629,13 +765,16 @@ def collect_mcp_servers(project_root: Path) -> tuple[McpServerSpec, ...]:
     return (McpServerSpec(name="grimoire", command="grimoire-mcp"),)
 
 
-def _is_override(definition_ref: str) -> bool:
+def _is_override(agent: AgentSpec) -> bool:
     """Un agent vit-il dans la couche de personnalisation du projet ?
 
-    ``definition_ref`` est le chemin du fichier relatif à la racine du projet
-    (voir :func:`collect_agents`) ; la couche est donc lisible dans son préfixe.
+    Lit ``agent.override_ref``, pas ``agent.definition_ref`` : depuis l'issue
+    #427, un override partiel (``extends: kit``) pointe son ``definition_ref``
+    vers le fichier kit (celui qui porte le corps — voir
+    :func:`collect_agents`), donc un sniff de préfixe sur ``definition_ref``
+    dirait à tort qu'il n'y a pas de personnalisation.
     """
-    return definition_ref.replace("\\", "/").startswith(f"{layout.OVERRIDES_DIR}/")
+    return agent.override_ref is not None
 
 
 def build_surface(
@@ -669,9 +808,7 @@ def build_surface(
     # le backend Rust est actif, compose sinon `duplicate_agent_fingerprints`
     # et le filtre `_is_override` ci-dessous, a l'identique du comportement
     # d'avant ce port.
-    strict, duplicates = _partition_duplicate_pairs(
-        agents, is_override=lambda agent: _is_override(agent.definition_ref)
-    )
+    strict, duplicates = _partition_duplicate_pairs(agents, is_override=_is_override)
     if strict:
         pairs = ", ".join(f"{a} == {b}" for a, b in strict)
         raise GrimoireAgentError(
