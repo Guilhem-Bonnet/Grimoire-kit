@@ -46,10 +46,14 @@ from grimoire.traces.schemas import (
 __all__ = [
     "AGENT_DISPATCH_TAG",
     "AGENT_MISS_TAG",
+    "DISPATCH_OUTCOME_TAG",
     "AgentFreshness",
+    "DispatchOutcomeGroupStats",
+    "DispatchOutcomeStats",
     "FreshnessReport",
     "TraceLedger",
     "compute_agent_freshness",
+    "compute_dispatch_outcome_stats",
     "rust_backend_available",
 ]
 
@@ -114,6 +118,17 @@ AGENT_MISS_TAG = "agent.miss"
 UNNAMED_SPECIALTY = "(non nommée)"
 _UNNAMED_SPECIALTY = UNNAMED_SPECIALTY
 
+#: Tag qui marque un enregistrement comme le résumé d'une cascade de dispatch
+#: entière — une entrée par tâche/node réellement dispatché, écrite une fois
+#: la cascade terminée (``missions.dispatch._record_dispatch_outcome``),
+#: jamais par tentative individuelle (ça, c'est le Mission Ledger — un
+#: événement ``task.dispatched`` par tentative, voir
+#: ``missions.dispatch_history``). Point 5 de l'audit de positionnement du
+#: 2026-09-12 (issue #442) : ce que les campagnes d'évals manuelles (#308)
+#: mesurent une fois, cet événement le rend continu et lisible par un gate —
+#: voir :meth:`TraceLedger.dispatch_outcome_stats`.
+DISPATCH_OUTCOME_TAG = "dispatch.outcome"
+
 _OTEL_SPAN_KIND_INTERNAL = "SPAN_KIND_INTERNAL"
 _OTEL_STATUS_OK = "STATUS_CODE_OK"
 _OTEL_STATUS_ERROR = "STATUS_CODE_ERROR"
@@ -167,6 +182,212 @@ class FreshnessReport:
     @property
     def too_recent_entries(self) -> tuple[AgentFreshness, ...]:
         return tuple(e for e in self.entries if e.too_recent)
+
+
+@dataclass(frozen=True, slots=True)
+class DispatchOutcomeGroupStats:
+    """Agrégats sur un sous-ensemble d'événements ``dispatch.outcome`` (issue #442).
+
+    ``cost_per_resolved_task_usd``/``escalation_rate``/``inexecutable_share``
+    sont ``None`` quand leur dénominateur est nul (aucun dispatch dans le
+    groupe, ou aucun résolu pour le coût) — jamais une division par zéro,
+    jamais un ``0.0`` qui se lirait à tort comme « SLO respecté » en
+    l'absence de toute donnée.
+    """
+
+    total: int
+    resolved: int
+    inexecutable: int
+    escalated: int
+    total_cost_usd: float
+
+    @property
+    def cost_per_resolved_task_usd(self) -> float | None:
+        return self.total_cost_usd / self.resolved if self.resolved else None
+
+    @property
+    def escalation_rate(self) -> float | None:
+        return self.escalated / self.total if self.total else None
+
+    @property
+    def inexecutable_share(self) -> float | None:
+        return self.inexecutable / self.total if self.total else None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "total": self.total,
+            "resolved": self.resolved,
+            "inexecutable": self.inexecutable,
+            "escalated": self.escalated,
+            "total_cost_usd": round(self.total_cost_usd, 6),
+            "cost_per_resolved_task_usd": self.cost_per_resolved_task_usd,
+            "escalation_rate": self.escalation_rate,
+            "inexecutable_share": self.inexecutable_share,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class DispatchOutcomeStats:
+    """Rapport complet de :meth:`TraceLedger.dispatch_outcome_stats` (issue #442).
+
+    ``by_class``/``by_provider`` sont deux ventilations indépendantes du même
+    ``overall`` (pas une matrice croisée) — exactement ce que l'audit de
+    positionnement demande : « par classe et par fournisseur ».
+
+    ``pass_k_observations`` compte les *séries rejouées* (un même
+    ``replay_key`` observé au moins deux fois dans le journal), pas les
+    enregistrements individuels : c'est le dénominateur que le contrôle
+    ``dispatch.cost_slo`` du standard lit pour juger si assez de données
+    existent avant d'en tirer un taux. ``pass_k_rate`` est ``None`` sans
+    aucune série rejouée.
+    """
+
+    overall: DispatchOutcomeGroupStats
+    by_class: dict[str, DispatchOutcomeGroupStats]
+    by_provider: dict[str, DispatchOutcomeGroupStats]
+    pass_k_observations: int
+    pass_k_fully_green: int
+
+    @property
+    def pass_k_rate(self) -> float | None:
+        return self.pass_k_fully_green / self.pass_k_observations if self.pass_k_observations else None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "overall": self.overall.to_dict(),
+            "by_class": {key: value.to_dict() for key, value in self.by_class.items()},
+            "by_provider": {key: value.to_dict() for key, value in self.by_provider.items()},
+            "pass_k_observations": self.pass_k_observations,
+            "pass_k_fully_green": self.pass_k_fully_green,
+            "pass_k_rate": self.pass_k_rate,
+        }
+
+
+def _last_tag_value(tags: Iterable[str], prefix: str) -> str:
+    """La valeur du dernier tag ``prefix``-préfixé de *tags*, ``""`` si aucun.
+
+    Même règle « le dernier gagne » qu'``agent_miss_counts`` pour
+    ``specialty:``/``category:`` — un journal édité à la main peut porter
+    plusieurs tags du même préfixe, le plus récemment ajouté prime.
+    """
+    value = ""
+    for tag in tags:
+        if tag.startswith(prefix):
+            value = tag[len(prefix) :]
+    return value
+
+
+def compute_dispatch_outcome_stats(
+    records: Iterable[tuple[tuple[str, ...], float]],
+) -> DispatchOutcomeStats:
+    """Agréger une séquence ``(tags, cost_usd)`` en coût par tâche résolue et pass^k.
+
+    Lit exclusivement les enregistrements tagués :data:`DISPATCH_OUTCOME_TAG`
+    — tout le reste du journal (choix d'agent, non-choix, gates de tâche)
+    est ignoré ici, comme :func:`compute_agent_freshness` ignore tout ce qui
+    n'est pas ``agent.dispatch``. Chaque enregistrement porte, en tags,
+    ``class:<verifiabilité>``, un ``tier:<palier>`` par palier tenté,
+    ``acceptance:<executed|unrunnable|judged>``, ``resolved:<true|false>``,
+    ``replay:<clé>`` et, s'il y en a un, ``provider:<id>`` — voir
+    ``missions.dispatch._record_dispatch_outcome`` pour l'écriture. Un tag
+    absent (journal écrit avant ce correctif, ou édité à la main) vaut
+    chaîne vide : l'enregistrement compte dans ``overall`` mais pas dans le
+    groupe ``by_class``/``by_provider`` correspondant.
+
+    pass^k : deux enregistrements ou plus partageant le même ``replay:``
+    forment une série rejouée ; elle compte comme « tout au vert » quand
+    *tous* ses enregistrements sont ``resolved``. ``pass_k_rate`` est le
+    ratio de telles séries — la fiabilité au sens strict (k exécutions,
+    toutes réussies), pas une moyenne de taux de réussite individuels.
+
+    Délègue à ``grimoire_traces_core.dispatch_outcome_stats`` (issue #442,
+    même crate que #354) quand le backend Rust est actif — voir
+    :func:`_use_rust_backend`. Le chemin Python ci-dessous est
+    l'implémentation de référence.
+    """
+    if _use_rust_backend():
+        assert _rust_core is not None  # guarded by _use_rust_backend
+        raw_overall, raw_by_class, raw_by_provider, pass_k_observations, pass_k_fully_green = (
+            _rust_core.dispatch_outcome_stats([(list(tags), cost_usd) for tags, cost_usd in records])
+        )
+        return DispatchOutcomeStats(
+            overall=_group_stats_from_tuple(raw_overall),
+            by_class={name: _group_stats_from_tuple(stats) for name, stats in raw_by_class},
+            by_provider={name: _group_stats_from_tuple(stats) for name, stats in raw_by_provider},
+            pass_k_observations=int(pass_k_observations),
+            pass_k_fully_green=int(pass_k_fully_green),
+        )
+
+    def _new_group() -> dict[str, Any]:
+        return {"total": 0, "resolved": 0, "inexecutable": 0, "escalated": 0, "total_cost_usd": 0.0}
+
+    def _accumulate(group: dict[str, Any], *, resolved: bool, inexecutable: bool, escalated: bool, cost_usd: float) -> None:
+        group["total"] += 1
+        group["total_cost_usd"] += cost_usd
+        if resolved:
+            group["resolved"] += 1
+        if inexecutable:
+            group["inexecutable"] += 1
+        if escalated:
+            group["escalated"] += 1
+
+    overall = _new_group()
+    by_class: dict[str, dict[str, Any]] = {}
+    by_provider: dict[str, dict[str, Any]] = {}
+    replay_totals: dict[str, int] = {}
+    replay_resolved: dict[str, int] = {}
+
+    for tags, cost_usd in records:
+        if DISPATCH_OUTCOME_TAG not in tags:
+            continue
+        class_ = _last_tag_value(tags, "class:")
+        tiers = {tag.removeprefix("tier:") for tag in tags if tag.startswith("tier:")}
+        acceptance = _last_tag_value(tags, "acceptance:")
+        resolved = _last_tag_value(tags, "resolved:") == "true"
+        provider = _last_tag_value(tags, "provider:")
+        replay_key = _last_tag_value(tags, "replay:")
+        escalated = len(tiers) > 1
+        inexecutable = acceptance == "unrunnable"
+
+        _accumulate(overall, resolved=resolved, inexecutable=inexecutable, escalated=escalated, cost_usd=cost_usd)
+        if class_:
+            _accumulate(
+                by_class.setdefault(class_, _new_group()),
+                resolved=resolved, inexecutable=inexecutable, escalated=escalated, cost_usd=cost_usd,
+            )
+        if provider:
+            _accumulate(
+                by_provider.setdefault(provider, _new_group()),
+                resolved=resolved, inexecutable=inexecutable, escalated=escalated, cost_usd=cost_usd,
+            )
+        if replay_key:
+            replay_totals[replay_key] = replay_totals.get(replay_key, 0) + 1
+            if resolved:
+                replay_resolved[replay_key] = replay_resolved.get(replay_key, 0) + 1
+
+    pass_k_observations = 0
+    pass_k_fully_green = 0
+    for key, total in replay_totals.items():
+        if total < 2:
+            continue
+        pass_k_observations += 1
+        if replay_resolved.get(key, 0) == total:
+            pass_k_fully_green += 1
+
+    return DispatchOutcomeStats(
+        overall=DispatchOutcomeGroupStats(**overall),
+        by_class={name: DispatchOutcomeGroupStats(**stats) for name, stats in by_class.items()},
+        by_provider={name: DispatchOutcomeGroupStats(**stats) for name, stats in by_provider.items()},
+        pass_k_observations=pass_k_observations,
+        pass_k_fully_green=pass_k_fully_green,
+    )
+
+
+def _group_stats_from_tuple(raw: tuple[int, int, int, int, float]) -> DispatchOutcomeGroupStats:
+    total, resolved, inexecutable, escalated, total_cost_usd = raw
+    return DispatchOutcomeGroupStats(
+        total=total, resolved=resolved, inexecutable=inexecutable, escalated=escalated, total_cost_usd=total_cost_usd
+    )
 
 
 def _parse_iso(value: str) -> datetime | None:
@@ -569,6 +790,27 @@ class TraceLedger:
             agent_ages=agent_ages,
             now=now,
         )
+
+    def dispatch_outcome_stats(self, *, since_iso: str | None = None) -> DispatchOutcomeStats:
+        """Coût par tâche résolue et pass^k sur les événements ``dispatch.outcome`` (issue #442).
+
+        Commodité qui assemble :func:`compute_dispatch_outcome_stats` depuis
+        ce journal, comme :meth:`agent_freshness_report` le fait pour la
+        fraîcheur — ``grimoire dispatch stats`` et le contrôle du standard
+        ``dispatch.cost_slo`` lisent tous deux cette même méthode plutôt que
+        de recalculer l'agrégation chacun de leur côté.
+
+        *since_iso*, quand fourni, ne garde que les enregistrements dont
+        ``started_at`` lui est supérieur ou égal (comparaison de chaîne, comme
+        partout ailleurs dans ce module — voir :meth:`oldest_started_at`) : le
+        filtrage temporel de ``--since`` se fait ici, avant tout choix de
+        backend, jamais dans :func:`compute_dispatch_outcome_stats` elle-même.
+        """
+        traces = self._load_all()
+        if since_iso:
+            traces = [t for t in traces if t.started_at >= since_iso]
+        records = [(trace.tags, trace.token_usage.estimated_cost_usd) for trace in traces]
+        return compute_dispatch_outcome_stats(records)
 
     def policy_block_rate(self, mission_id: str | None = None) -> float:
         """Fraction of tool calls that were blocked."""

@@ -66,9 +66,11 @@ from grimoire.core.standard_generation import (
     EVIDENCE_DIR,
     STANDARD_DIR,
     STANDARD_PROFILE_FILE,
+    TRACES_DIR,
     normalize_task_id,
 )
 from grimoire.providers.registry import SUPPORTED_CURRENCIES, SUPPORTED_MODEL_TIERS
+from grimoire.traces.ledger import TraceLedger
 
 
 def _verify_manifest(
@@ -328,6 +330,133 @@ def _verify_provider_registry(root: Path, profile: StandardProfile, result: Stan
                 "providers.routing_policy_weak",
                 "warning",
                 "Routing should require capability and data-policy matches.",
+                path=rel_path,
+            )
+
+
+#: Valeurs par défaut documentées de ``dispatch.cost_slo`` (issue #442, point
+#: 5 de l'audit de positionnement du 2026-09-12) quand `llm-provider-
+#: registry.yaml` ne déclare pas de clé ``dispatch_cost_slo``, ou en omet
+#: une : le contrôle reste actif sans configuration explicite plutôt que de
+#: se taire faute de réglage — un projet qui n'a jamais entendu parler de ce
+#: contrôle en bénéficie quand même, avec un seuil raisonnable.
+DEFAULT_MAX_COST_PER_RESOLVED_TASK_USD = 2.0
+DEFAULT_MIN_PASS_K_RATE = 0.8
+#: Nombre minimal de dispatchs résolus avant que le coût par tâche résolue ne
+#: soit jugé — en dessous, le signal est trop bruité pour un seuil fixe.
+DEFAULT_MIN_RESOLVED_OBSERVATIONS = 5
+#: Nombre minimal de séries pass^k (nodes rejoués au moins deux fois) avant
+#: que son taux ne soit jugé — dénominateur distinct de celui du coût : un
+#: projet peut avoir beaucoup de dispatchs résolus sans qu'aucun ne soit
+#: jamais rejoué.
+DEFAULT_MIN_PASS_K_OBSERVATIONS = 3
+
+
+def _dispatch_cost_slo_config(data: dict[str, Any]) -> dict[str, Any]:
+    """Résout la config ``dispatch_cost_slo`` déclarée, complétée par les défauts documentés."""
+
+    def _positive_number(value: Any, default: float) -> float:
+        return float(value) if isinstance(value, int | float) and not isinstance(value, bool) and value > 0 else default
+
+    def _positive_int(value: Any, default: int) -> int:
+        return int(value) if isinstance(value, int) and not isinstance(value, bool) and value > 0 else default
+
+    slo = data.get("dispatch_cost_slo")
+    slo = slo if isinstance(slo, dict) else {}
+    return {
+        "max_cost_per_resolved_task_usd": _positive_number(
+            slo.get("max_cost_per_resolved_task_usd"), DEFAULT_MAX_COST_PER_RESOLVED_TASK_USD
+        ),
+        "min_pass_k_rate": _positive_number(slo.get("min_pass_k_rate"), DEFAULT_MIN_PASS_K_RATE),
+        "min_resolved_observations": _positive_int(
+            slo.get("min_resolved_observations"), DEFAULT_MIN_RESOLVED_OBSERVATIONS
+        ),
+        "min_pass_k_observations": _positive_int(
+            slo.get("min_pass_k_observations"), DEFAULT_MIN_PASS_K_OBSERVATIONS
+        ),
+        "enforce": slo.get("enforce") is True,
+    }
+
+
+def _verify_dispatch_cost_slo(root: Path, result: StandardVerificationResult) -> None:
+    """``dispatch.cost_slo`` : coût par tâche résolue et pass^k, en continu (issue #442).
+
+    Point 5 de l'audit de positionnement du 2026-09-12 : le kit journalise
+    déjà chaque cascade (``dispatch.outcome``, voir
+    ``missions.dispatch._record_dispatch_outcome``) mais rien ne le lisait
+    depuis un gate avant ce contrôle — les campagnes d'évals manuelles (#308)
+    restaient le seul endroit où ce signal existait. Lit
+    ``TraceLedger.dispatch_outcome_stats`` (même agrégation que ``grimoire
+    dispatch stats``, jamais un second calcul) et compare au SLO déclaré
+    dans ``dispatch_cost_slo:`` de ``llm-provider-registry.yaml`` — l'artefact
+    du pattern ``provider-cost-slo`` — ou aux valeurs par défaut documentées
+    ci-dessus quand cette clé, ou l'une de ses sous-clés, est absente.
+
+    Skip entièrement si ``llm-provider-registry.yaml`` n'existe pas ou n'est
+    pas un mapping — même règle que tous les autres ``_verify_*`` de ce
+    module : sans artefact, rien à comparer.
+
+    Trois issues, jamais un ``error`` par défaut :
+
+    - ``info`` quand trop peu de données existent (moins de
+      ``min_resolved_observations`` dispatchs résolus pour le coût, moins de
+      ``min_pass_k_observations`` séries rejouées pour le pass^k) — chaque
+      métrique a son propre plancher de données, jugée indépendamment de
+      l'autre.
+    - ``warning`` quand le coût par tâche résolue dépasse le SLO, ou que le
+      pass^k mesuré est sous le seuil déclaré.
+    - ``error`` à la place du ``warning`` ci-dessus, uniquement quand le
+      projet déclare ``dispatch_cost_slo.enforce: true`` — un dépassement
+      silencieux par défaut, un gate dur seulement sur demande explicite.
+    """
+    rel_path = STANDARD_DIR / "llm-provider-registry.yaml"
+    data = _load_yaml_file(root, rel_path, result)
+    if not isinstance(data, dict):
+        return
+
+    config = _dispatch_cost_slo_config(data)
+    severity = "error" if config["enforce"] else "warning"
+    stats = TraceLedger(root / TRACES_DIR).dispatch_outcome_stats()
+
+    if stats.overall.resolved < config["min_resolved_observations"]:
+        _add_check(
+            result,
+            "dispatch.cost_slo",
+            "info",
+            f"Only {stats.overall.resolved} resolved dispatch(es) observed "
+            f"(< {config['min_resolved_observations']}) — cost per resolved task is not judged yet.",
+            path=rel_path,
+        )
+    else:
+        cost = stats.overall.cost_per_resolved_task_usd
+        max_cost = config["max_cost_per_resolved_task_usd"]
+        if cost is not None and cost > max_cost:
+            _add_check(
+                result,
+                "dispatch.cost_slo",
+                severity,
+                f"Cost per resolved task (${cost:.4f}) exceeds the declared SLO (${max_cost:.4f}).",
+                path=rel_path,
+            )
+
+    if stats.pass_k_observations < config["min_pass_k_observations"]:
+        _add_check(
+            result,
+            "dispatch.cost_slo",
+            "info",
+            f"Only {stats.pass_k_observations} replayed dispatch series observed "
+            f"(< {config['min_pass_k_observations']}) — pass^k is not judged yet.",
+            path=rel_path,
+        )
+    else:
+        rate = stats.pass_k_rate
+        min_rate = config["min_pass_k_rate"]
+        if rate is not None and rate < min_rate:
+            _add_check(
+                result,
+                "dispatch.cost_slo",
+                severity,
+                f"pass^k ({rate:.0%}) is below the declared reliability SLO ({min_rate:.0%}).",
                 path=rel_path,
             )
 
@@ -1265,6 +1394,7 @@ def run_verifiers(root: Path, profile: StandardProfile, task_id: str, result: St
     _verify_manifest(root, profile, task_id, result)
     _verify_mission_brief(root, profile, result)
     _verify_provider_registry(root, profile, result)
+    _verify_dispatch_cost_slo(root, result)
     _verify_knowledge_registry(root, profile, result)
     _verify_task_envelope(root, profile, task_id, result)
     _verify_evidence_pack(root, task_id, result)

@@ -610,6 +610,176 @@ pub fn oldest_started_at_core(started_ats: &[String]) -> Option<String> {
     started_ats.iter().filter(|s| !s.is_empty()).min().cloned()
 }
 
+// ── Comptabilite continue du dispatch : cout par tache resolue et pass^k
+//    (issue #442, point 5 de l'audit de positionnement du 2026-09-12) ───────
+
+const DISPATCH_OUTCOME_TAG: &str = "dispatch.outcome";
+
+/// Projection minimale d'un enregistrement `dispatch.outcome` deja decode —
+/// les seuls deux champs dont l'agregation ci-dessous a besoin. Construite
+/// cote Python a partir de `TraceLedger._load_all()`
+/// (`(list(trace.tags), trace.token_usage.estimated_cost_usd)`), jamais un
+/// contenu de prompt ou de sortie de commande : ce crate ne recoit que des
+/// etiquettes mecaniques (voir `missions.dispatch._record_dispatch_outcome`
+/// cote Python pour ce qu'elles portent).
+#[derive(Debug, Clone)]
+pub struct DispatchOutcomeProjection {
+    pub tags: Vec<String>,
+    pub cost_usd: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DispatchGroupStats {
+    pub total: i64,
+    pub resolved: i64,
+    pub inexecutable: i64,
+    pub escalated: i64,
+    pub total_cost_usd: f64,
+}
+
+impl DispatchGroupStats {
+    fn empty() -> Self {
+        Self {
+            total: 0,
+            resolved: 0,
+            inexecutable: 0,
+            escalated: 0,
+            total_cost_usd: 0.0,
+        }
+    }
+
+    fn accumulate(&mut self, resolved: bool, inexecutable: bool, escalated: bool, cost_usd: f64) {
+        self.total += 1;
+        self.total_cost_usd += cost_usd;
+        if resolved {
+            self.resolved += 1;
+        }
+        if inexecutable {
+            self.inexecutable += 1;
+        }
+        if escalated {
+            self.escalated += 1;
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DispatchOutcomeStatsCore {
+    pub overall: DispatchGroupStats,
+    pub by_class: Vec<(String, DispatchGroupStats)>,
+    pub by_provider: Vec<(String, DispatchGroupStats)>,
+    pub pass_k_observations: i64,
+    pub pass_k_fully_green: i64,
+}
+
+/// La valeur du dernier tag `prefix`-prefixe de `tags`, `""` si aucun — meme
+/// regle « le dernier gagne » que `agent_miss_counts_core` pour
+/// `specialty:`/`category:` : un journal edite a la main peut porter
+/// plusieurs tags du meme prefixe, le plus recemment ajoute prime.
+fn last_tag_value(tags: &[String], prefix: &str) -> String {
+    let mut value = String::new();
+    for tag in tags {
+        if let Some(rest) = tag.strip_prefix(prefix) {
+            value = rest.to_string();
+        }
+    }
+    value
+}
+
+/// Miroir de `compute_dispatch_outcome_stats` (cote Python,
+/// `grimoire.traces.ledger`). Filtre sur `DISPATCH_OUTCOME_TAG` ; `by_class`
+/// et `by_provider` sont deux ventilations independantes du meme `overall`
+/// (pas une matrice croisee), dans l'ordre de premiere apparition — meme
+/// convention que `agent_dispatch_counts_core`. pass^k : deux
+/// enregistrements ou plus partageant le meme tag `replay:` forment une
+/// serie rejouee, comptee « toute au vert » quand tous ses enregistrements
+/// sont `resolved:true`.
+pub fn dispatch_outcome_stats_core(
+    records: &[DispatchOutcomeProjection],
+) -> DispatchOutcomeStatsCore {
+    let mut overall = DispatchGroupStats::empty();
+    let mut class_order: Vec<String> = Vec::new();
+    let mut by_class: HashMap<String, DispatchGroupStats> = HashMap::new();
+    let mut provider_order: Vec<String> = Vec::new();
+    let mut by_provider: HashMap<String, DispatchGroupStats> = HashMap::new();
+    let mut replay_total: HashMap<String, i64> = HashMap::new();
+    let mut replay_resolved: HashMap<String, i64> = HashMap::new();
+
+    for record in records {
+        if !record.tags.iter().any(|t| t == DISPATCH_OUTCOME_TAG) {
+            continue;
+        }
+        let class_ = last_tag_value(&record.tags, "class:");
+        let mut tiers: Vec<&str> = record
+            .tags
+            .iter()
+            .filter_map(|t| t.strip_prefix("tier:"))
+            .collect();
+        tiers.sort_unstable();
+        tiers.dedup();
+        let acceptance = last_tag_value(&record.tags, "acceptance:");
+        let resolved = last_tag_value(&record.tags, "resolved:") == "true";
+        let provider = last_tag_value(&record.tags, "provider:");
+        let replay_key = last_tag_value(&record.tags, "replay:");
+        let escalated = tiers.len() > 1;
+        let inexecutable = acceptance == "unrunnable";
+
+        overall.accumulate(resolved, inexecutable, escalated, record.cost_usd);
+        if !class_.is_empty() {
+            let entry = by_class.entry(class_.clone()).or_insert_with(|| {
+                class_order.push(class_.clone());
+                DispatchGroupStats::empty()
+            });
+            entry.accumulate(resolved, inexecutable, escalated, record.cost_usd);
+        }
+        if !provider.is_empty() {
+            let entry = by_provider.entry(provider.clone()).or_insert_with(|| {
+                provider_order.push(provider.clone());
+                DispatchGroupStats::empty()
+            });
+            entry.accumulate(resolved, inexecutable, escalated, record.cost_usd);
+        }
+        if !replay_key.is_empty() {
+            *replay_total.entry(replay_key.clone()).or_insert(0) += 1;
+            if resolved {
+                *replay_resolved.entry(replay_key).or_insert(0) += 1;
+            }
+        }
+    }
+
+    let mut pass_k_observations: i64 = 0;
+    let mut pass_k_fully_green: i64 = 0;
+    for (key, total) in &replay_total {
+        if *total < 2 {
+            continue;
+        }
+        pass_k_observations += 1;
+        if replay_resolved.get(key).copied().unwrap_or(0) == *total {
+            pass_k_fully_green += 1;
+        }
+    }
+
+    DispatchOutcomeStatsCore {
+        overall,
+        by_class: class_order
+            .into_iter()
+            .map(|name| {
+                let stats = by_class.remove(&name).expect("just inserted");
+                (name, stats)
+            })
+            .collect(),
+        by_provider: provider_order
+            .into_iter()
+            .map(|name| {
+                let stats = by_provider.remove(&name).expect("just inserted");
+                (name, stats)
+            })
+            .collect(),
+        pass_k_observations,
+        pass_k_fully_green,
+    }
+}
+
 // ── Fraicheur (issue #396) ──────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq)]
@@ -997,9 +1167,10 @@ mod py_bridge {
     use super::{
         agent_dispatch_counts_core, agent_miss_counts_core, agent_slug_core,
         build_proposal_fields_core, category_carrier_core, clamp_threshold_core,
-        compute_agent_freshness_core, employment_clause_core, guess_tools_core, iso8601,
-        oldest_started_at_core, resolve_carrier_core, skill_slug_core, slugify_core,
-        sync_decision_core, CarrierCandidate, TraceProjection,
+        compute_agent_freshness_core, dispatch_outcome_stats_core, employment_clause_core,
+        guess_tools_core, iso8601, oldest_started_at_core, resolve_carrier_core, skill_slug_core,
+        slugify_core, sync_decision_core, CarrierCandidate, DispatchGroupStats,
+        DispatchOutcomeProjection, TraceProjection,
     };
     use pyo3::exceptions::PyValueError;
     use pyo3::prelude::*;
@@ -1225,10 +1396,64 @@ mod py_bridge {
         (action.as_str().to_string(), threshold, reopen_at)
     }
 
+    type GroupStatsTuple = (i64, i64, i64, i64, f64);
+
+    fn group_stats_to_tuple(stats: DispatchGroupStats) -> GroupStatsTuple {
+        (
+            stats.total,
+            stats.resolved,
+            stats.inexecutable,
+            stats.escalated,
+            stats.total_cost_usd,
+        )
+    }
+
+    /// Frontiere PyO3 pour `TraceLedger.dispatch_outcome_stats`
+    /// (`compute_dispatch_outcome_stats`, issue #442). `records` est
+    /// `[(tags, cost_usd), ...]` — la projection minimale construite par
+    /// `TraceLedger._load_all()` cote Python. Retourne `(overall, by_class,
+    /// by_provider, pass_k_observations, pass_k_fully_green)` ou chaque
+    /// groupe est `(total, resolved, inexecutable, escalated,
+    /// total_cost_usd)` et `by_class`/`by_provider` sont
+    /// `[(nom, groupe), ...]`.
+    #[pyfunction]
+    #[allow(clippy::type_complexity)]
+    fn dispatch_outcome_stats(
+        records: Vec<(Vec<String>, f64)>,
+    ) -> (
+        GroupStatsTuple,
+        Vec<(String, GroupStatsTuple)>,
+        Vec<(String, GroupStatsTuple)>,
+        i64,
+        i64,
+    ) {
+        let projections: Vec<DispatchOutcomeProjection> = records
+            .into_iter()
+            .map(|(tags, cost_usd)| DispatchOutcomeProjection { tags, cost_usd })
+            .collect();
+        let result = dispatch_outcome_stats_core(&projections);
+        (
+            group_stats_to_tuple(result.overall),
+            result
+                .by_class
+                .into_iter()
+                .map(|(name, stats)| (name, group_stats_to_tuple(stats)))
+                .collect(),
+            result
+                .by_provider
+                .into_iter()
+                .map(|(name, stats)| (name, group_stats_to_tuple(stats)))
+                .collect(),
+            result.pass_k_observations,
+            result.pass_k_fully_green,
+        )
+    }
+
     #[pymodule]
     fn grimoire_traces_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
         m.add_function(wrap_pyfunction!(agent_dispatch_counts, m)?)?;
         m.add_function(wrap_pyfunction!(agent_miss_counts, m)?)?;
+        m.add_function(wrap_pyfunction!(dispatch_outcome_stats, m)?)?;
         m.add_function(wrap_pyfunction!(oldest_started_at, m)?)?;
         m.add_function(wrap_pyfunction!(compute_agent_freshness, m)?)?;
         m.add_function(wrap_pyfunction!(slugify, m)?)?;
@@ -1827,6 +2052,203 @@ mod tests {
     fn sync_decision_unknown_status_falls_back_to_refresh_pending_never_panics() {
         let (action, _, _) = sync_decision_core(2, 5, Some("bogus"), 3, None);
         assert_eq!(action, SyncAction::RefreshPending);
+    }
+
+    // ── dispatch_outcome_stats_core (issue #442) ─────────────────────────
+
+    fn outcome(tags: &[&str], cost_usd: f64) -> DispatchOutcomeProjection {
+        DispatchOutcomeProjection {
+            tags: tags.iter().map(|s| s.to_string()).collect(),
+            cost_usd,
+        }
+    }
+
+    #[test]
+    fn dispatch_stats_ignores_records_without_the_outcome_tag() {
+        let records = [outcome(&["class:V0", "resolved:true"], 1.0)];
+        let stats = dispatch_outcome_stats_core(&records);
+        assert_eq!(stats.overall, DispatchGroupStats::empty());
+    }
+
+    #[test]
+    fn dispatch_stats_cost_per_resolved_task_sums_across_unresolved_attempts() {
+        let records = [
+            outcome(
+                &[
+                    DISPATCH_OUTCOME_TAG,
+                    "class:V0",
+                    "tier:cheap",
+                    "resolved:false",
+                    "acceptance:judged",
+                ],
+                0.01,
+            ),
+            outcome(
+                &[
+                    DISPATCH_OUTCOME_TAG,
+                    "class:V0",
+                    "tier:mid",
+                    "resolved:true",
+                    "acceptance:judged",
+                ],
+                0.02,
+            ),
+        ];
+        let stats = dispatch_outcome_stats_core(&records);
+        assert_eq!(stats.overall.total, 2);
+        assert_eq!(stats.overall.resolved, 1);
+        assert!((stats.overall.total_cost_usd - 0.03).abs() < 1e-9);
+    }
+
+    #[test]
+    fn dispatch_stats_group_with_zero_resolved_has_no_cost_signal() {
+        // La division par zero est laissee au cote Python (`cost_per_resolved_task_usd`
+        // property) — le coeur Rust ne rend que les compteurs bruts, jamais un
+        // ratio, justement pour ne jamais avoir a coder cette garde deux fois.
+        let records = [outcome(
+            &[DISPATCH_OUTCOME_TAG, "class:V0", "resolved:false"],
+            5.0,
+        )];
+        let stats = dispatch_outcome_stats_core(&records);
+        assert_eq!(stats.overall.resolved, 0);
+        assert_eq!(stats.overall.total_cost_usd, 5.0);
+    }
+
+    #[test]
+    fn dispatch_stats_escalation_counts_distinct_tiers_only() {
+        let single_tier = [outcome(
+            &[
+                DISPATCH_OUTCOME_TAG,
+                "tier:cheap",
+                "tier:cheap",
+                "resolved:true",
+            ],
+            0.0,
+        )];
+        assert_eq!(
+            dispatch_outcome_stats_core(&single_tier).overall.escalated,
+            0
+        );
+
+        let two_tiers = [outcome(
+            &[
+                DISPATCH_OUTCOME_TAG,
+                "tier:cheap",
+                "tier:mid",
+                "resolved:true",
+            ],
+            0.0,
+        )];
+        assert_eq!(dispatch_outcome_stats_core(&two_tiers).overall.escalated, 1);
+    }
+
+    #[test]
+    fn dispatch_stats_inexecutable_share_from_acceptance_tag() {
+        let records = [
+            outcome(
+                &[
+                    DISPATCH_OUTCOME_TAG,
+                    "acceptance:unrunnable",
+                    "resolved:false",
+                ],
+                0.0,
+            ),
+            outcome(
+                &[DISPATCH_OUTCOME_TAG, "acceptance:judged", "resolved:true"],
+                0.0,
+            ),
+        ];
+        let stats = dispatch_outcome_stats_core(&records);
+        assert_eq!(stats.overall.inexecutable, 1);
+        assert_eq!(stats.overall.total, 2);
+    }
+
+    #[test]
+    fn dispatch_stats_by_class_and_by_provider_are_independent_breakdowns() {
+        let records = [
+            outcome(
+                &[
+                    DISPATCH_OUTCOME_TAG,
+                    "class:V0",
+                    "provider:openai",
+                    "resolved:true",
+                ],
+                1.0,
+            ),
+            outcome(
+                &[
+                    DISPATCH_OUTCOME_TAG,
+                    "class:V1",
+                    "provider:openai",
+                    "resolved:false",
+                ],
+                2.0,
+            ),
+        ];
+        let stats = dispatch_outcome_stats_core(&records);
+        let by_class: HashMap<_, _> = stats.by_class.into_iter().collect();
+        let by_provider: HashMap<_, _> = stats.by_provider.into_iter().collect();
+        assert_eq!(by_class["V0"].resolved, 1);
+        assert_eq!(by_class["V1"].resolved, 0);
+        assert_eq!(by_provider["openai"].total, 2); // ventilation independante, pas une matrice croisee
+    }
+
+    #[test]
+    fn dispatch_stats_records_without_provider_are_absorbed_by_overall_only() {
+        let records = [outcome(&[DISPATCH_OUTCOME_TAG, "resolved:true"], 0.0)];
+        let stats = dispatch_outcome_stats_core(&records);
+        assert!(stats.by_provider.is_empty());
+        assert_eq!(stats.overall.total, 1);
+    }
+
+    #[test]
+    fn dispatch_stats_pass_k_requires_at_least_two_observations_of_the_same_replay_key() {
+        let records = [outcome(
+            &[DISPATCH_OUTCOME_TAG, "replay:node-a", "resolved:true"],
+            0.0,
+        )];
+        let stats = dispatch_outcome_stats_core(&records);
+        assert_eq!(stats.pass_k_observations, 0); // une seule observation n'est pas une serie
+        assert_eq!(stats.pass_k_fully_green, 0);
+    }
+
+    #[test]
+    fn dispatch_stats_pass_k_fully_green_requires_every_replay_resolved() {
+        let all_green = [
+            outcome(
+                &[DISPATCH_OUTCOME_TAG, "replay:node-a", "resolved:true"],
+                0.0,
+            ),
+            outcome(
+                &[DISPATCH_OUTCOME_TAG, "replay:node-a", "resolved:true"],
+                0.0,
+            ),
+        ];
+        let mixed = dispatch_outcome_stats_core(&[
+            outcome(
+                &[DISPATCH_OUTCOME_TAG, "replay:node-b", "resolved:true"],
+                0.0,
+            ),
+            outcome(
+                &[DISPATCH_OUTCOME_TAG, "replay:node-b", "resolved:false"],
+                0.0,
+            ),
+        ]);
+        let green = dispatch_outcome_stats_core(&all_green);
+        assert_eq!(green.pass_k_observations, 1);
+        assert_eq!(green.pass_k_fully_green, 1);
+        assert_eq!(mixed.pass_k_observations, 1);
+        assert_eq!(mixed.pass_k_fully_green, 0); // une seule tentative rouge suffit a casser la serie
+    }
+
+    #[test]
+    fn dispatch_stats_last_tag_wins_on_duplicate_prefixes() {
+        let records = [outcome(
+            &[DISPATCH_OUTCOME_TAG, "resolved:true", "resolved:false"],
+            0.0,
+        )];
+        let stats = dispatch_outcome_stats_core(&records);
+        assert_eq!(stats.overall.resolved, 0); // "resolved:false" est le dernier tag
     }
 
     // ── Fuzz leger : jamais de panique sur des enregistrements arbitraires ─
