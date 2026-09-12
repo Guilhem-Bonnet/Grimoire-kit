@@ -621,7 +621,10 @@ retrouvée) au ledger, liée au run et au node, avec pour critères
 d'acceptation ceux du node et pour preuve attendue son contrat de sortie ;
 elle est dispatchée en cascade (`run_dispatch`, #323) — l'ouvrier écrit sa
 sortie dans un fichier JSON que le kit vérifie contre les pins du node, avec
-la même fonction que `flow resume`.
+la même fonction que `flow resume`, **et** exécute l'acceptance structurée du
+node quand le blueprint en déclare une (voir « Acceptance structurée d'un
+node », ci-dessous, issue #428) : une enveloppe conforme ne suffit plus seule
+à fermer un node V0 dont l'acceptance déclare une commande.
 
 La chaîne suit la classe de vérifiabilité du node (#309) :
 
@@ -634,15 +637,117 @@ La chaîne suit la classe de vérifiabilité du node (#309) :
 
 `run --executor dispatch` enchaîne les nodes tant que la cascade reste
 verte, checkpointe après chacun, et s'arrête au premier node rouge (chaîne
-épuisée) ou V2, avec un rapport par node (fournisseur, tentatives, verdict,
-coût, escalades) plutôt qu'un contrat. `resume --executor dispatch` (sans
-`--result`) reprend de la même façon le node que le run avait laissé ouvert —
-utile après un crash comme après une suspension V2 corrigée autrement.
-`flow status` affiche, pour tout node dispatché, fournisseur, tentatives,
-verdict, relecture requise et incertitudes déclarées — lus depuis
-l'événement `task.dispatched` du Mission Ledger, valables même dans un
-process qui n'a pas fait le dispatch. `--max-tier` et `--timeout` bornent la
-cascade comme sur `grimoire task dispatch`.
+épuisée), acceptance inexécutable, ou V2, avec un rapport par node
+(fournisseur, tentatives, verdict, coût, escalades, statut d'acceptance)
+plutôt qu'un contrat. `resume --executor dispatch` (sans `--result`) reprend
+de la même façon le node que le run avait laissé ouvert — utile après un
+crash comme après une suspension V2 corrigée autrement. `flow status`
+affiche, pour tout node dispatché, fournisseur, tentatives, verdict,
+relecture requise, incertitudes déclarées et **statut d'acceptance**
+(`exécutée`/`inexécutable`/`jugée`) — lus depuis l'événement
+`task.dispatched` du Mission Ledger, valables même dans un process qui n'a
+pas fait le dispatch. `--max-tier` et `--timeout` bornent la cascade comme
+sur `grimoire task dispatch`.
+
+#### Acceptance structurée d'un node (issue #428)
+
+Un node V0 est « vérifiable mécaniquement » : par défaut, le vocabulaire de
+son `acceptance` textuel (« la suite de tests passe », …) sert uniquement à
+dériver sa classe de vérifiabilité (#309) — le gate de la cascade ne vérifie
+que la conformité de l'enveloppe JSON au contrat de sortie du node, jamais le
+texte lui-même. Sur un flow réel rejoué le 2026-09-11 (épic #307, lot 3),
+cela a laissé fermer vert un node dont la vraie suite `pytest` ne pouvait pas
+même être collectée (dépendance absente) : l'enveloppe était conforme, rien
+d'autre n'avait tourné.
+
+`node.acceptance` accepte désormais, en plus d'une chaîne libre
+(rétrocompatible, comportement inchangé), une entrée structurée que le gate
+exécute réellement après la réponse de l'ouvrier — dans le projet, en
+sous-processus, délai borné :
+
+```json
+{"run": "pytest -q tests/test_x.py", "expect_exit": 0, "cwd": ".", "timeout_s": 120, "expect_stdout_contains": "passed"}
+```
+
+Seul `run` est requis ; `expect_exit` (0 par défaut), `cwd` (`.` par défaut),
+`timeout_s` (120 par défaut) et `expect_stdout_contains` (aucun par défaut)
+sont optionnels. Deux formes d'evidence mécanique existent aussi, pour éviter
+d'écrire une commande à la main :
+
+- `{"path_exists": "dist/rapport.json"}` — un fichier doit exister.
+- `{"test": "tests/test_x.py::test_y"}` — un test nommé doit passer (traduit
+  en une invocation `pytest` du seul identifiant déclaré).
+
+`acceptance` peut mélanger texte libre et entrées structurées dans la même
+liste. Une forme structurée invalide (clé inconnue, plusieurs clés sur la
+même entrée, type incorrect) est un refus nommé **au chargement du
+blueprint** (`GrimoireRuntimeError`), jamais un gate qui échouerait ouvert
+plus tard — et le kit **n'infère jamais** de commande depuis la prose : sans
+entrée structurée, un node V0 garde le comportement historique (enveloppe
+seule), documenté ci-dessous comme limite connue.
+
+Le verdict d'un node dont l'acceptance est exécutée suit trois issues,
+jamais une quatrième :
+
+- **exécutée, verte** — toutes les commandes déclarées ont rendu le code de
+  sortie attendu (et la sous-chaîne attendue, si `expect_stdout_contains` est
+  posé). Le node ferme normalement.
+- **exécutée, rouge** — au moins une commande a rendu un code de sortie
+  inattendu, sans qu'aucun signal d'inexécutable (ci-dessous) n'ait été
+  détecté. Suit la cascade normale : réessai au fournisseur suivant du même
+  palier, puis escalade au palier suivant, comme un check d'enveloppe rouge.
+- **acceptance inexécutable** — refus nommé, distinct d'un échec, **jamais un
+  succès** : la commande n'a pas pu rendre de verdict exploitable (binaire
+  introuvable — code de sortie 127 ; `pytest` qui rend 5 « no tests
+  collected » ou 4 « usage error » ; une erreur d'import détectée dans la
+  sortie, quel que soit le code de sortie). La cascade s'arrête **net** sur
+  ce node — changer de fournisseur ou de palier ne répare pas un
+  environnement cassé — et `flow status` nomme le node en faute.
+
+#### La classe V0 exige une acceptance structurée
+
+Un node dont le texte seul suffirait à le classer V0 (#309 — « la suite de
+tests passe », par exemple) mais qui ne déclare **aucune** entrée structurée
+est **rétrogradé en V1** : la cascade démarre à `mid` (pas `cheap`), et un
+vert ne ferme jamais le node — il le marque **à relire**
+(`needs_verification`), exactement comme un vrai V1 déclaré. Sans cette
+règle, le texte mécanique seul aurait rouvert le fossé même que l'issue #428
+corrige : le gate n'aurait toujours que le check d'enveloppe à faire tourner
+pour ce node, et fermerait vert sur la seule foi de l'ouvrier — la
+rétrogradation, pas seulement le libellé du rapport, est ce qui l'empêche.
+
+Cette dérivation est appliquée **une seule fois**, au chargement du
+blueprint, et transmise à la fois au démarrage de la cascade (`run_dispatch`)
+et au rapport (`DispatchExecutor`) — `flow status` et `flow run` s'accordent
+donc sur la même classe pour le même node, jamais recalculée deux fois de
+façon divergente. Un avertissement nommé accompagne la rétrogradation, à la
+fois dans `flow status`/le rapport de dispatch et dans les logs :
+
+```text
+nœud n classé V0 sans acceptance exécutable : traité comme V1
+```
+
+Le kit **n'infère jamais** de commande depuis la prose pour éviter cet
+avertissement : la seule sortie est de déclarer une entrée structurée
+(`run`/`path_exists`/`test`) sur le node.
+
+Un node dont l'acceptance est V1 **déclarée** (vocabulaire de revue, « revue
+humaine avant fusion ») n'est pas concerné par cette règle — il n'a jamais
+prétendu être V0 — et garde le comportement actuel du kit, documenté ici sans
+être étendu : un vert V1 ferme la cascade en marquant le node à relire, sans
+qu'aucun juge automatisé n'intervienne. Faire arbitrer une classe V1 par un
+palier supérieur plutôt que par une revue humaine est hors périmètre de
+l'issue #428 (voir son texte : « ce que ce ticket refuse »), à traiter par un
+ticket séparé s'il devient nécessaire.
+
+Dans les deux cas (V1 déclaré, ou V0 rétrogradé), `flow status` rapporte le
+statut d'acceptance **« jugée »** : le mode conservateur qui ne prétend
+jamais à une exécution qui n'a pas eu lieu.
+
+La trace du node (visible dans `flow status --output json` et le rapport de
+`flow run --executor dispatch`) porte, pour chaque commande exécutée, le code
+de sortie et la sortie tronquée à 2 Ko (stdout puis stderr) — de quoi lire un
+message d'erreur `pytest` sans relancer la commande à la main.
 
 ---
 

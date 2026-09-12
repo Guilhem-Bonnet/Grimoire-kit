@@ -145,6 +145,39 @@
           "type": "array",
           "description": "Typed connection points. REQUIRED on every v1 node (an empty list is fine for an unconnected node): a missing `pins` key on all nodes downgrades the file to a Studio draft.",
           "items": { "$ref": "#/$defs/pin" }
+        },
+        "acceptance": {
+          "type": "array",
+          "description": "Acceptance criteria (issue #428). Each item is either a free-text string (drives `verifiability.classify` only — the gate never executes it) or a structured, executable entry: `{run, expect_exit?, cwd?, timeout_s?, expect_stdout_contains?}` (a command whose exit code is the verdict) or `{path_exists}` / `{test}` (mechanical evidence). `grimoire.flows.blueprint_loader` is the enforcing validator — an unknown or ambiguous structured shape is a named `GrimoireRuntimeError` at load time, not a schema-level rejection here (this file stays permissive by design: `additionalProperties: true`).",
+          "items": {
+            "anyOf": [
+              { "type": "string" },
+              {
+                "type": "object",
+                "required": ["run"],
+                "properties": {
+                  "run": { "type": "string", "description": "Shell command; its exit code is the verdict." },
+                  "expect_exit": { "type": "integer", "default": 0 },
+                  "cwd": { "type": "string", "default": "." },
+                  "timeout_s": { "type": "number", "exclusiveMinimum": 0, "default": 120 },
+                  "expect_stdout_contains": { "type": "string" }
+                },
+                "additionalProperties": true
+              },
+              {
+                "type": "object",
+                "required": ["path_exists"],
+                "properties": { "path_exists": { "type": "string" } },
+                "additionalProperties": true
+              },
+              {
+                "type": "object",
+                "required": ["test"],
+                "properties": { "test": { "type": "string", "description": "pytest node id, e.g. tests/test_x.py::test_y" } },
+                "additionalProperties": true
+              }
+            ]
+          }
         }
       },
       "additionalProperties": true,

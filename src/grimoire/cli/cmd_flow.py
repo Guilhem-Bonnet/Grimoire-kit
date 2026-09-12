@@ -44,6 +44,15 @@ flow_app = typer.Typer(
     no_args_is_help=False,
 )
 
+#: Libellé humain de l'``acceptance_status`` d'un node dispatché (issue #428) —
+#: ``None`` : événement écrit avant ce correctif, rien à afficher.
+_ACCEPTANCE_LABELS: dict[str | None, str] = {
+    "executed": "exécutée",
+    "unrunnable": "inexécutable",
+    "judged": "jugée",
+    None: "n/a",
+}
+
 # Le rendu humain part sur stderr : le JSON de stdout reste pipeable, comme le
 # reste de la CLI (cf. cmd_task.py).
 console = Console(stderr=True)
@@ -127,10 +136,13 @@ def _emit_status(ctx: typer.Context, view: FlowStatusView, project_root: Path) -
         console.print("[bold]dispatch (#311)[/bold] :")
         for row in history:
             relire = " [magenta]à relire[/magenta]" if row["needs_review"] else ""
+            acceptance = _ACCEPTANCE_LABELS.get(row.get("acceptance_status"), "n/a")
             console.print(
                 f"  - {row['node_id']} : {row['verdict']} par {row['provider']} ({row['tier']}), "
-                f"{row['attempts']} tentative(s), coût {row['cost_usd']}{relire}"
+                f"{row['attempts']} tentative(s), coût {row['cost_usd']}{relire} — acceptance {acceptance}"
             )
+            if row.get("verifiability_warning"):
+                console.print(f"      [yellow]![/yellow] {row['verifiability_warning']}")
             for u in row["uncertainties"]:
                 console.print(f"      [dim]incertitude : {u.get('where')} — {u.get('what')}[/dim]")
     if view.contract:
@@ -171,10 +183,13 @@ def _emit_dispatch_outcome(ctx: typer.Context, outcome: FlowDispatchOutcome) -> 
         return
     for node in outcome.nodes:
         relire = " [magenta]à relire[/magenta]" if node.needs_review else ""
+        acceptance = _ACCEPTANCE_LABELS.get(node.acceptance_status, "n/a")
         console.print(
             f"  {node.node_id} : {node.verdict} par {node.provider} — {node.attempts} tentative(s), "
-            f"{node.escalations} escalade(s), coût {node.cost_usd}{relire}"
+            f"{node.escalations} escalade(s), coût {node.cost_usd}{relire} — acceptance {acceptance}"
         )
+        if node.verifiability_warning:
+            console.print(f"    [yellow]![/yellow] {node.verifiability_warning}")
     console.print(
         f"[bold]coût total connu[/bold] : {outcome.total_cost_usd} — [bold]escalades[/bold] : {outcome.escalations}"
     )

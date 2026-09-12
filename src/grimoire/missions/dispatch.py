@@ -161,6 +161,49 @@ CHECK_TIMEOUT_S = 600.0
 #: propre format de sortie (CLI headless qui avale l'erreur HTTP).
 _RATE_LIMIT_MARKERS = ("429", "rate limit", "rate_limit", "overloaded", "quota")
 
+#: Détection d'une acceptance « inexécutable » (issue #428) — distincte d'un
+#: échec (le check a tourné et a rendu un verdict rouge) : ici, aucun verdict
+#: n'a pu être rendu du tout, quel que soit le fournisseur qui a répondu.
+#: Liste minimale demandée par l'issue, pas exhaustive : un shell qui ne
+#: trouve pas la commande rend 127 ; ``pytest`` rend 5 quand rien n'a été
+#: collecté et 4 sur une erreur d'usage ; une erreur d'import dans la sortie
+#: (dépendance manquante) est détectée indépendamment du code de sortie —
+#: c'est exactement ce qui a laissé passer n4 dans le rejeu du 2026-09-11
+#: (``ModuleNotFoundError`` sur ``pydantic``, jamais vu par le gate d'alors).
+#: Code de sortie POSIX standard (sh/bash/dash) quand le shell ne trouve pas
+#: la commande à exécuter — le seul signal fiable : le texte exact varie
+#: d'un shell à l'autre (« command not found » en bash, « not found » tout
+#: court en dash) et recouperait de vrais messages d'erreur applicatifs (une
+#: exception Python peut légitimement contenir « no such file or directory »
+#: sans que le binaire lui-même soit absent — trouvé en écrivant le test de
+#: garde de ce correctif : le check d'enveloppe existant, sur un fichier de
+#: résultat manquant, déclenchait un faux positif avec un motif texte trop
+#: large).
+_COMMAND_NOT_FOUND_EXIT_CODE = 127
+_PYTEST_UNRUNNABLE_EXIT_CODES: dict[int, str] = {
+    5: "pytest : aucun test collecté (code de sortie 5, « no tests collected »)",
+    4: "pytest : erreur d'usage (code de sortie 4, « usage error »)",
+}
+_IMPORT_ERROR_MARKERS = ("ModuleNotFoundError", "ImportError", "No module named")
+
+
+def _classify_unrunnable(cmd: str, exit_code: int | None, stdout: str, stderr: str) -> str | None:
+    """Diagnostic nommé si *cmd* n'a rendu aucun verdict exploitable — ``None`` sinon.
+
+    Appelé pour chaque ``--check`` exécuté (:func:`_run_checks`) : un diagnostic
+    non ``None`` fait basculer tout l'attempt en verdict ``"unrunnable"``,
+    jamais ``"green"`` ni un simple ``"red"`` — voir :func:`run_dispatch`.
+    """
+    if exit_code == _COMMAND_NOT_FOUND_EXIT_CODE:
+        return f"binaire introuvable pour la commande : {cmd!r}"
+    if "pytest" in cmd and exit_code in _PYTEST_UNRUNNABLE_EXIT_CODES:
+        assert exit_code is not None  # narrowed by the dict membership check above
+        return _PYTEST_UNRUNNABLE_EXIT_CODES[exit_code]
+    combined = f"{stdout}\n{stderr}"
+    if any(marker in combined for marker in _IMPORT_ERROR_MARKERS):
+        return "erreur d'import détectée dans la sortie : la collecte n'a pas pu s'exécuter"
+    return None
+
 #: Surfaces sensibles par défaut (issue #327) — un diff qui en touche une
 #: exige une relecture forte même si les checks mécaniques sont au vert.
 #: Chaque motif est un glob ``fnmatch`` appliqué au chemin relatif rendu par
@@ -548,13 +591,30 @@ def _extract_uncertainties(stdout: str) -> tuple[tuple[Uncertainty, ...], tuple[
 
 @dataclass(frozen=True, slots=True)
 class CheckResult:
-    """Le verdict d'une commande ``--check`` : verte ou non, rien d'autre à savoir."""
+    """Le verdict d'une commande ``--check``.
+
+    ``exit_code``/``output_excerpt`` (issue #428) : la sortie tronquée à 2 Ko
+    (stdout puis stderr) est ce que la trace du node porte pour qu'un vert ou
+    un rouge d'acceptance exécutée soit lisible sans relancer la commande.
+    ``unrunnable_reason`` distingue un check qui n'a rendu aucun verdict
+    exploitable (:func:`_classify_unrunnable`) d'un simple échec — ``ok`` est
+    ``False`` dans les deux cas, mais un rouge peut réessayer/escalader alors
+    qu'un « inexécutable » ne le peut pas : le diagnostic dit pourquoi.
+    """
 
     cmd: str
     ok: bool
+    exit_code: int | None = None
+    unrunnable_reason: str | None = None
+    output_excerpt: str = ""
 
     def to_dict(self) -> dict[str, Any]:
-        return {"cmd": self.cmd, "ok": self.ok}
+        data: dict[str, Any] = {"cmd": self.cmd, "ok": self.ok, "exit_code": self.exit_code}
+        if self.unrunnable_reason is not None:
+            data["unrunnable_reason"] = self.unrunnable_reason
+        if self.output_excerpt:
+            data["output_excerpt"] = self.output_excerpt
+        return data
 
 
 @dataclass(frozen=True, slots=True)
@@ -636,6 +696,13 @@ class DispatchReport:
     transition_refused: str | None = None
     start_tier: str | None = None
     start_tier_reason: str | None = None
+    #: Diagnostic « acceptance inexécutable » (issue #428) — posé quand un
+    #: check n'a rendu aucun verdict exploitable (voir ``_classify_unrunnable``)
+    #: et a arrêté la cascade sur-le-champ : escalader vers un fournisseur plus
+    #: cher ne répare pas un environnement cassé, seulement un travail médiocre.
+    #: Distinct de ``refusal`` (posé *avant* tout appel) : ici, un appel a bien
+    #: réussi, c'est le check qui n'a pas pu juger son résultat.
+    unrunnable: str | None = None
 
     @property
     def refusal_message(self) -> str | None:
@@ -712,6 +779,8 @@ class DispatchReport:
             data["transitioned_to"] = self.transitioned_to
         if self.transition_refused is not None:
             data["transition_refused"] = self.transition_refused
+        if self.unrunnable is not None:
+            data["unrunnable"] = self.unrunnable
         return data
 
 
@@ -750,27 +819,93 @@ def _run_provider_call(
     return completed.returncode, completed.stdout, completed.stderr, duration, kind
 
 
-def _run_checks(checks: tuple[str, ...], *, project_root: Path) -> tuple[CheckResult, ...]:
+#: Combien de la sortie (stdout puis stderr) survit dans ``CheckResult.output_excerpt``
+#: — assez pour lire un message d'erreur pytest, jamais assez pour gonfler le
+#: ledger d'une sortie verbeuse entière (issue #428, point 2 : « la sortie
+#: tronquée »).
+_CHECK_OUTPUT_EXCERPT_BYTES = 2048
+
+
+def _run_checks(
+    checks: tuple[str, ...],
+    *,
+    project_root: Path,
+    expect_exits: tuple[int, ...] = (),
+    expect_stdout_contains: tuple[str | None, ...] = (),
+    timeouts: tuple[float | None, ...] = (),
+) -> tuple[CheckResult, ...]:
     """Chaque ``--check`` en ``shell=True`` — c'est l'utilisateur qui l'a écrit.
 
     Toutes tournent, même après un premier échec : le rapport final doit
     montrer l'état complet, pas seulement la première commande rouge.
+
+    *expect_exits*/*expect_stdout_contains*/*timeouts* (issue #428) sont
+    alignés par position sur *checks* ; une entrée manquante ou ``None``
+    retombe sur le comportement historique (code de sortie 0, aucune
+    sous-chaîne exigée, :data:`CHECK_TIMEOUT_S`). Seul
+    ``flows.dispatch_executor`` les renseigne aujourd'hui, pour les
+    acceptances structurées d'un node — ``grimoire task dispatch --check``
+    n'en a pas besoin et continue de fonctionner à l'identique.
     """
     results: list[CheckResult] = []
-    for cmd in checks:
+    for i, cmd in enumerate(checks):
+        expect_exit = expect_exits[i] if i < len(expect_exits) else 0
+        needle = expect_stdout_contains[i] if i < len(expect_stdout_contains) else None
+        timeout = timeouts[i] if i < len(timeouts) and timeouts[i] is not None else CHECK_TIMEOUT_S
         try:
             # shell=True est délibéré : `cmd` est la commande de vérification que
-            # l'utilisateur a lui-même écrite via `--check`, pas une entrée non
-            # fiable — même contrat que `subprocess` ailleurs pour les checks de
-            # gate. Le rendu du fournisseur, lui, reste `shell=False` (voir
-            # `_run_provider_call`) car le prompt qui le traverse n'est pas écrit
-            # par l'utilisateur au clavier de cette commande.
-            completed = subprocess.run(cmd, cwd=project_root, shell=True, timeout=CHECK_TIMEOUT_S)  # noqa: S602
-            ok = completed.returncode == 0
-        except subprocess.TimeoutExpired:
+            # l'utilisateur a lui-même écrite (via `--check`, ou une acceptance
+            # structurée du blueprint), pas une entrée non fiable — même contrat
+            # que `subprocess` ailleurs pour les checks de gate. Le rendu du
+            # fournisseur, lui, reste `shell=False` (voir `_run_provider_call`)
+            # car le prompt qui le traverse n'est pas écrit par l'utilisateur au
+            # clavier de cette commande.
+            completed = subprocess.run(  # noqa: S602
+                cmd,
+                cwd=project_root,
+                shell=True,
+                capture_output=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout,
+            )
+            exit_code: int | None = completed.returncode
+            stdout, stderr = completed.stdout or "", completed.stderr or ""
+        except subprocess.TimeoutExpired as exc:
+            exit_code = None
+            stdout = exc.stdout if isinstance(exc.stdout, str) else ""
+            stderr = exc.stderr if isinstance(exc.stderr, str) else ""
+        unrunnable_reason = _classify_unrunnable(cmd, exit_code, stdout, stderr)
+        if unrunnable_reason is not None or exit_code is None:
             ok = False
-        results.append(CheckResult(cmd=cmd, ok=ok))
+        else:
+            ok = exit_code == expect_exit and (needle is None or needle in stdout)
+        excerpt = (stdout + (f"\n{stderr}" if stderr else ""))[:_CHECK_OUTPUT_EXCERPT_BYTES]
+        results.append(
+            CheckResult(cmd=cmd, ok=ok, exit_code=exit_code, unrunnable_reason=unrunnable_reason, output_excerpt=excerpt)
+        )
     return tuple(results)
+
+
+def _acceptance_status_for_verdict(verdict: str, *, acceptance_declared: bool) -> str | None:
+    """« exécutée » / « inexécutable » / « jugée » (issue #428, point 4) — ``None`` si l'appel a échoué.
+
+    Un appel qui n'a jamais répondu (``rate_limit``/``timeout``/``error``)
+    n'a rien à dire sur l'acceptance : le check n'a même pas tourné. Sinon,
+    ``"unrunnable"`` prime (le check a tourné sans rendre de verdict) ; à
+    défaut, ``"executed"`` si le node a déclaré une acceptance structurée
+    (elle a réellement tourné, verte ou rouge), ``"judged"`` sinon — un node
+    dont l'acceptance reste purement textuelle n'a ni exécution mécanique ni
+    juge réel : « jugée » est le mode conservateur qui refuse de prétendre à
+    une exécution qui n'a pas eu lieu (voir le docstring de
+    ``flows.dispatch_executor._node_outcome_from_report`` pour le même choix
+    côté rapport de flow).
+    """
+    if verdict in ("rate_limit", "timeout", "error"):
+        return None
+    if verdict == "unrunnable":
+        return "unrunnable"
+    return "executed" if acceptance_declared else "judged"
 
 
 def _dispatch_event_payload(
@@ -779,6 +914,9 @@ def _dispatch_event_payload(
     verifiability: Verifiability,
     start_tier: str,
     start_tier_reason: str,
+    *,
+    acceptance_declared: bool = False,
+    verifiability_warning: str | None = None,
 ) -> dict[str, Any]:
     """Le payload d'un événement ``task.dispatched`` — le type et la classe embarqués (lot 4, #312).
 
@@ -788,7 +926,11 @@ def _dispatch_event_payload(
     supposer que ses critères d'acceptation n'ont pas changé depuis. Un
     événement plus ancien, écrit avant ce lot, n'a pas ces clés —
     ``dispatch_history`` l'ignore sans échouer plutôt que d'inventer une
-    classe qui n'a jamais été observée.
+    classe qui n'a jamais été observée. ``acceptance_status`` (issue #428)
+    suit la même règle : absent sur un événement écrit avant ce correctif.
+    ``verifiability_warning`` (issue #428, suite) : posé par l'appelant qui a
+    déjà rétrogradé un V0 sans acceptance exécutable en V1 — ``run_dispatch``
+    ne le recalcule jamais lui-même, il ne fait que le journaliser tel quel.
     """
     payload = attempt.to_dict()
     payload["task_id"] = task.id
@@ -796,6 +938,10 @@ def _dispatch_event_payload(
     payload["verifiability"] = verifiability.value
     payload["start_tier"] = start_tier
     payload["start_tier_reason"] = start_tier_reason
+    payload["acceptance_status"] = _acceptance_status_for_verdict(
+        attempt.verdict, acceptance_declared=acceptance_declared
+    )
+    payload["verifiability_warning"] = verifiability_warning
     return payload
 
 
@@ -812,8 +958,33 @@ def run_dispatch(
     actor: str = "cli",
     agent: str | None = None,
     project_root: Path | None = None,
+    check_expect_exits: tuple[int, ...] = (),
+    check_expect_stdout_contains: tuple[str | None, ...] = (),
+    check_timeouts: tuple[float | None, ...] = (),
+    acceptance_declared: bool = False,
+    verifiability_override: Verifiability | None = None,
+    verifiability_warning: str | None = None,
 ) -> DispatchReport:
     """Cascade la tâche *task_id* à travers les paliers de fournisseurs.
+
+    *check_expect_exits*/*check_expect_stdout_contains*/*check_timeouts*
+    (issue #428) sont alignés par position sur *checks* et transmis tels
+    quels à :func:`_run_checks` — seul ``flows.dispatch_executor`` les
+    renseigne, pour les acceptances structurées d'un node.
+    *acceptance_declared* dit si au moins un de ces checks vérifie une
+    acceptance réellement exécutée (par opposition au seul contrôle
+    d'enveloppe) : il n'entre dans aucun calcul de verdict, seulement dans le
+    diagnostic ``acceptance_status`` de chaque tentative journalisée.
+
+    *verifiability_override* (issue #428, suite) court-circuite
+    :func:`~grimoire.missions.verifiability.classify` : seul
+    ``flows.dispatch_executor`` le renseigne, quand il a déjà rétrogradé un
+    node classé V0 sans acceptance structurée en V1 (un faux V0 est pire
+    qu'un faux V2 — même règle que ``verifiability.py``, appliquée ici avant
+    que le palier de départ ou la transition finale ne soient décidés, pas
+    seulement dans un rapport affiché après coup). *verifiability_warning*
+    accompagne l'override pour le journaliser tel quel dans l'événement
+    ``task.dispatched`` — ``run_dispatch`` ne le recalcule jamais.
 
     *agent* (issue #373) nomme l'agent dispatché : son ``context`` déclaré
     (frontmatter de son fichier, résolu par :func:`agent_declared_context`)
@@ -839,7 +1010,7 @@ def run_dispatch(
     fournit sait mieux que l'historique pour ce dispatch précis.
     """
     task = service.require(task_id)
-    verifiability = classify(task)
+    verifiability = verifiability_override if verifiability_override is not None else classify(task)
     declared_context = agent_declared_context(project_root, agent) if agent and project_root else ()
     prompt = build_prompt(task, agent_context=declared_context, project_root=project_root)
 
@@ -948,13 +1119,37 @@ def run_dispatch(
                     task_id,
                     "task",
                     actor,
-                    _dispatch_event_payload(attempt, task, verifiability, chosen_tier, start_tier_reason),
+                    _dispatch_event_payload(
+                        attempt,
+                        task,
+                        verifiability,
+                        chosen_tier,
+                        start_tier_reason,
+                        acceptance_declared=acceptance_declared,
+                        verifiability_warning=verifiability_warning,
+                    ),
                 )
                 continue  # fournisseur suivant, même palier
 
             record_success(root, provider.id)
-            check_results = _run_checks(checks, project_root=root)
-            green = all(c.ok for c in check_results)
+            check_results = _run_checks(
+                checks,
+                project_root=root,
+                expect_exits=check_expect_exits,
+                expect_stdout_contains=check_expect_stdout_contains,
+                timeouts=check_timeouts,
+            )
+            # Un check « inexécutable » (issue #428) prime sur tout le reste :
+            # aucun verdict n'a pu être rendu, donc ni vert ni même un rouge
+            # ordinaire — voir _classify_unrunnable pour ce qui déclenche ceci.
+            unrunnable_reasons = tuple(c.unrunnable_reason for c in check_results if c.unrunnable_reason)
+            if unrunnable_reasons:
+                verdict = "unrunnable"
+            elif all(c.ok for c in check_results):
+                verdict = "green"
+            else:
+                verdict = "red"
+            green = verdict == "green"
             # La relecture ne se pose qu'une fois le résultat accepté (#327) —
             # un check rouge n'a rien produit qu'on ait besoin de relire.
             review, review_files, review_note = _classify_review(root) if green else (None, (), None)
@@ -970,7 +1165,7 @@ def run_dispatch(
                 exit_code=code,
                 duration_s=duration,
                 checks=check_results,
-                verdict="green" if green else "red",
+                verdict=verdict,
                 cost_usd=_extract_cost_usd(stdout),
                 review=review,
                 review_files=review_files,
@@ -984,8 +1179,33 @@ def run_dispatch(
                 task_id,
                 "task",
                 actor,
-                _dispatch_event_payload(attempt, task, verifiability, chosen_tier, start_tier_reason),
+                _dispatch_event_payload(
+                    attempt,
+                    task,
+                    verifiability,
+                    chosen_tier,
+                    start_tier_reason,
+                    acceptance_declared=acceptance_declared,
+                    verifiability_warning=verifiability_warning,
+                ),
             )
+            if verdict == "unrunnable":
+                # Arrêt immédiat de la cascade entière : escalader vers un
+                # palier plus cher n'aide pas un environnement qui ne peut pas
+                # rendre de verdict (dépendance absente, binaire introuvable,
+                # collecte pytest en échec) — c'est exactement ce que le rejeu
+                # du 2026-09-11 a payé pour rien (issue #428).
+                return DispatchReport(
+                    task_id=task_id,
+                    verifiability=verifiability.value,
+                    dry_run=False,
+                    planned_chain=chain,
+                    prompt=prompt,
+                    attempts=tuple(attempts),
+                    start_tier=chosen_tier,
+                    start_tier_reason=start_tier_reason,
+                    unrunnable="; ".join(unrunnable_reasons),
+                )
             tier_settled = True
             break  # appel réussi : ce palier a son verdict, vert ou rouge
 

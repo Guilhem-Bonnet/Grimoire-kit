@@ -15,14 +15,22 @@ node ne compile rien, c'est l'hôte qui l'exécute.
 
 from __future__ import annotations
 
+import shlex
 from pathlib import Path
 from typing import Any
 
 from grimoire.core.exceptions import GrimoireRuntimeError
-from grimoire.flows.schemas import NodeContract, PinRef
+from grimoire.flows.schemas import AcceptanceEvidence, AcceptanceRun, NodeContract, PinRef
+from grimoire.missions.verifiability import Verifiability, classify_criteria
 from grimoire.tools.ext_manager import validate_blueprint_file
 
 __all__ = ["build_node_contracts", "load_blueprint", "topo_order"]
+
+#: Les seules clés qu'une entrée d'``acceptance`` structurée reconnaît (issue
+#: #428). Une entrée doit en porter exactement une : ni zéro (forme inconnue),
+#: ni deux ou plus (ambiguïté sur ce qu'il faut exécuter) — les deux sont un
+#: refus nommé au chargement, jamais une garde qui échouerait ouvert.
+_ACCEPTANCE_STRUCTURED_KEYS = ("run", "path_exists", "test")
 
 
 def load_blueprint(path: Path) -> dict[str, Any]:
@@ -99,27 +107,124 @@ def _tool_boundary(node: dict[str, Any]) -> tuple[str, ...]:
     return ()
 
 
-def _acceptance(node: dict[str, Any], outputs: tuple[PinRef, ...]) -> tuple[str, ...]:
+def _parse_acceptance_entry(
+    node_id: str, entry: Any
+) -> tuple[str, AcceptanceRun | None, AcceptanceEvidence | None]:
+    """Une entrée d'``acceptance`` : texte libre (inchangé), ou forme structurée (issue #428).
+
+    Rend ``(texte, run, evidence)`` — ``texte`` alimente toujours
+    ``NodeContract.acceptance`` (donc ``verifiability.classify``), qu'il
+    vienne de la prose de l'auteur ou soit dérivé d'une commande ; ``run``/
+    ``evidence`` (au plus un des deux) alimentent le gate qui l'exécute
+    réellement (``flows.dispatch_executor``).
+
+    Une forme structurée reconnaît exactement une clé parmi ``run``,
+    ``path_exists``, ``test`` — zéro ou plusieurs est un refus nommé au
+    chargement (:class:`GrimoireRuntimeError`), jamais une garde silencieuse :
+    « aucune inférence de commande à partir de la prose » est un refus
+    explicite de l'issue, une forme ambiguë ne doit pas se comporter comme si
+    elle en désignait une par accident.
+    """
+    if isinstance(entry, str):
+        text = entry.strip()
+        return (text, None, None) if text else ("", None, None)
+    if not isinstance(entry, dict):
+        raise GrimoireRuntimeError(
+            f"node={node_id} : acceptance de forme inconnue ({entry!r}) — attendu une chaîne ou un objet "
+            "{'run': ...} / {'path_exists': ...} / {'test': ...}"
+        )
+    present = [k for k in _ACCEPTANCE_STRUCTURED_KEYS if k in entry]
+    if len(present) != 1:
+        raise GrimoireRuntimeError(
+            f"node={node_id} : acceptance structurée invalide {entry!r} — attendu exactement une clé parmi "
+            f"{_ACCEPTANCE_STRUCTURED_KEYS}, trouvé {present or 'aucune'}"
+        )
+    key = present[0]
+    if key == "run":
+        raw = str(entry["run"]).strip()
+        if not raw:
+            raise GrimoireRuntimeError(f"node={node_id} : acceptance.run vide")
+        try:
+            argv = tuple(shlex.split(raw))
+        except ValueError as exc:
+            raise GrimoireRuntimeError(f"node={node_id} : acceptance.run illisible ({exc})") from exc
+        if not argv:
+            raise GrimoireRuntimeError(f"node={node_id} : acceptance.run vide après découpage")
+        expect_exit = entry.get("expect_exit", 0)
+        if not isinstance(expect_exit, int) or isinstance(expect_exit, bool):
+            raise GrimoireRuntimeError(f"node={node_id} : acceptance.expect_exit doit être un entier")
+        cwd = entry.get("cwd", ".")
+        if not isinstance(cwd, str) or not cwd.strip():
+            raise GrimoireRuntimeError(f"node={node_id} : acceptance.cwd doit être une chaîne non vide")
+        timeout_s = entry.get("timeout_s", 120.0)
+        if isinstance(timeout_s, bool) or not isinstance(timeout_s, (int, float)) or timeout_s <= 0:
+            raise GrimoireRuntimeError(f"node={node_id} : acceptance.timeout_s doit être un nombre positif")
+        expect_stdout_contains = entry.get("expect_stdout_contains")
+        if expect_stdout_contains is not None and not isinstance(expect_stdout_contains, str):
+            raise GrimoireRuntimeError(f"node={node_id} : acceptance.expect_stdout_contains doit être une chaîne")
+        run = AcceptanceRun(
+            argv=argv,
+            raw=raw,
+            expect_exit=expect_exit,
+            cwd=cwd,
+            timeout_s=float(timeout_s),
+            expect_stdout_contains=expect_stdout_contains,
+        )
+        text = f"la commande « {raw} » retourne le code de sortie {expect_exit} (acceptance exécutée)"
+        return text, run, None
+    if key == "path_exists":
+        value = str(entry["path_exists"]).strip()
+        if not value:
+            raise GrimoireRuntimeError(f"node={node_id} : acceptance.path_exists vide")
+        text = f"le fichier « {value} » existe (acceptance exécutée)"
+        return text, None, AcceptanceEvidence(kind="path_exists", value=value)
+    value = str(entry["test"]).strip()
+    if not value:
+        raise GrimoireRuntimeError(f"node={node_id} : acceptance.test vide")
+    text = f"le test « {value} » passe (suite de tests, acceptance exécutée)"
+    return text, None, AcceptanceEvidence(kind="test", value=value)
+
+
+def _acceptance(
+    node: dict[str, Any], outputs: tuple[PinRef, ...]
+) -> tuple[tuple[str, ...], tuple[AcceptanceRun, ...], tuple[AcceptanceEvidence, ...]]:
     """Critères d'acceptation : ``node.acceptance``, sinon les evals, sinon les pins.
 
     Trois sources, dans cet ordre de préférence :
 
-    - ``node.acceptance`` — texte libre écrit par l'auteur du blueprint.
-      C'est le seul des trois qu'une classe de vérifiabilité (#309) peut
-      vraiment lire : ``sortie conforme au contrat « c1 »`` ou
-      ``verdict attendu : ...`` ne nomment ni verdict mécanique reconnu ni
-      revue, et tombent donc toujours ambigus. Un node qui veut être
-      dispatchable par cascade (#311) doit décrire son critère avec ce
+    - ``node.acceptance`` — texte libre écrit par l'auteur du blueprint, ou
+      (issue #428) une forme structurée exécutable, ou un mélange des deux
+      dans la même liste. C'est la seule source qu'une classe de
+      vérifiabilité (#309) peut vraiment lire : ``sortie conforme au contrat
+      « c1 »`` ou ``verdict attendu : ...`` ne nomment ni verdict mécanique
+      reconnu ni revue, et tombent donc toujours ambigus. Un node qui veut
+      être dispatchable par cascade (#311) doit décrire son critère avec ce
       vocabulaire-là : ``la suite de tests passe`` (V0), ``revue humaine
-      avant fusion`` (V1).
+      avant fusion`` (V1) — ou, désormais, déclarer directement la commande
+      qui rend ce verdict.
     - ``config.evals`` — les cas ``assert`` (P1.2, rejoués par ``grimoire
       blueprint evals``), s'il n'y a pas d'``acceptance`` explicite.
     - À défaut des deux, un critère dérivé des pins de sortie : la
       conformité au contrat est le plancher, jamais rien.
+
+    Une forme structurée invalide (clé inconnue, plusieurs clés, type
+    incorrect) lève :class:`GrimoireRuntimeError` en nommant le node — un
+    schéma refusé au chargement, pas un gate qui échouerait ouvert plus tard.
     """
     explicit = node.get("acceptance")
     if isinstance(explicit, list) and explicit:
-        return tuple(str(c) for c in explicit if str(c).strip())
+        texts: list[str] = []
+        runs: list[AcceptanceRun] = []
+        evidence: list[AcceptanceEvidence] = []
+        for entry in explicit:
+            text, run, ev = _parse_acceptance_entry(node["id"], entry)
+            if text:
+                texts.append(text)
+            if run is not None:
+                runs.append(run)
+            if ev is not None:
+                evidence.append(ev)
+        return tuple(texts), tuple(runs), tuple(evidence)
     evals = (node.get("config") or {}).get("evals")
     criteria: list[str] = []
     if isinstance(evals, dict):
@@ -136,7 +241,28 @@ def _acceptance(node: dict[str, Any], outputs: tuple[PinRef, ...]) -> tuple[str,
                     criteria.append(f"verdict attendu : {assertion.get('expected')}")
     if not criteria:
         criteria = [f"sortie du pin « {p.pin_id} » conforme au contrat « {p.contract} »" for p in outputs]
-    return tuple(criteria)
+    return tuple(criteria), (), ()
+
+
+def _verifiability_warning(node_id: str, acceptance_texts: tuple[str, ...], *, has_structured: bool) -> str | None:
+    """« nœud V0 sans acceptance exécutable » — posé au chargement, jamais au gate (issue #428, suite).
+
+    Un nœud dont le texte seul classe V0 (#309) mais qui ne déclare aucune
+    commande exécutable est le fossé exact que le rejeu du 2026-09-11 a payé :
+    l'auteur du blueprint a écrit un vocabulaire mécanique (« la suite de
+    tests passe ») sans jamais donner au gate de quoi le vérifier — sans ce
+    garde-fou, ``flows.dispatch_executor`` n'aurait toujours que le check
+    d'enveloppe à faire tourner. La règle du kit (« un faux V0 est pire qu'un
+    faux V2 », ``verifiability.py``) s'applique à l'identique ici : ce nœud
+    est traité comme V1 par l'exécuteur de dispatch (jamais fermé sur la
+    seule foi de l'ouvrier), et ce message nommé en dit la raison plutôt que
+    de rétrograder en silence.
+    """
+    if has_structured:
+        return None
+    if classify_criteria(acceptance_texts) is not Verifiability.V0:
+        return None
+    return f"nœud {node_id} classé V0 sans acceptance exécutable : traité comme V1"
 
 
 def build_node_contracts(blueprint: dict[str, Any]) -> dict[str, NodeContract]:
@@ -146,6 +272,8 @@ def build_node_contracts(blueprint: dict[str, Any]) -> dict[str, NodeContract]:
         pins = node.get("pins", [])
         inputs = tuple(PinRef(p["id"], p["contract"]) for p in pins if p.get("direction") == "in")
         outputs = tuple(PinRef(p["id"], p["contract"]) for p in pins if p.get("direction") == "out")
+        acceptance_texts, acceptance_runs, acceptance_evidence = _acceptance(node, outputs)
+        has_structured = bool(acceptance_runs or acceptance_evidence)
         contracts[node["id"]] = NodeContract(
             node_id=node["id"],
             kind=node.get("kind", ""),
@@ -154,6 +282,9 @@ def build_node_contracts(blueprint: dict[str, Any]) -> dict[str, NodeContract]:
             inputs=inputs,
             outputs=outputs,
             tool_boundary=_tool_boundary(node),
-            acceptance=_acceptance(node, outputs),
+            acceptance=acceptance_texts,
+            acceptance_runs=acceptance_runs,
+            acceptance_evidence=acceptance_evidence,
+            verifiability_warning=_verifiability_warning(node["id"], acceptance_texts, has_structured=has_structured),
         )
     return contracts

@@ -713,6 +713,10 @@ _VERDICT_ICON: dict[str, str] = {
     "red": "[red]rouge[/red]",
     "rate_limit": "[yellow]limite/429[/yellow]",
     "timeout": "[yellow]timeout[/yellow]",
+    # « acceptance inexécutable » (issue #428) : un `--check` n'a rendu aucun
+    # verdict exploitable (binaire absent, pytest 5/4, erreur d'import) — la
+    # cascade s'est arrêtée net, jamais un vert.
+    "unrunnable": "[red]acceptance inexécutable[/red]",
 }
 
 
@@ -757,6 +761,8 @@ def _emit_dispatch(ctx: typer.Context, report: Any) -> None:
             console.print(f"[yellow]![/yellow] transition non appliquée : {report.transition_refused}")
         if report.review is not None:
             _print_review(report.review, [str(p) for p in report.review_files], report.review_note)
+    elif report.unrunnable is not None:
+        console.print(f"[red]✗[/red] {report.task_id} — acceptance inexécutable : {escape(report.unrunnable)}")
     else:
         console.print(
             f"[red]✗[/red] {report.task_id} — chaîne épuisée, {len(report.attempts)} tentative(s), aucun vert"

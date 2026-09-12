@@ -32,6 +32,16 @@ _V0 = "la suite de tests passe"
 _V1 = "revue humaine avant fusion"
 _V2 = "le code est propre"
 
+# Depuis l'issue #428 (suite), un V0 sans acceptance structurée est rétrogradé
+# en V1 (jamais fermé sur la seule foi de l'ouvrier) — voir
+# test_flows_verifiability_v0_requires_structured.py. Ces tests-ci couvrent la
+# mécanique de cascade (escalade, checkpoints, reprise), pas cette règle :
+# `{"run": "true"}` (toujours vert, sans effet de bord) garde les nodes "a" et
+# "b" authentiquement V0, comme avant ce correctif. Ajouté même au blueprint
+# du node V2 : un critère structuré supplémentaire ne fait pas redescendre un
+# critère par ailleurs ambigu (verifiability.classify — un seul ambigu suffit).
+_V0_STRUCTURED = {"run": "true"}
+
 
 def _blueprint(tmp_path: Path, *, b_acceptance: str = _V0, c_acceptance: str = _V1) -> Path:
     blueprint = {
@@ -44,7 +54,7 @@ def _blueprint(tmp_path: Path, *, b_acceptance: str = _V0, c_acceptance: str = _
                 "kind": "pattern",
                 "ref": "ORC-01",
                 "label": "A",
-                "acceptance": [_V0],
+                "acceptance": [_V0, _V0_STRUCTURED],
                 "pins": [{"id": "out", "direction": "out", "contract": "c1"}],
             },
             {
@@ -52,7 +62,7 @@ def _blueprint(tmp_path: Path, *, b_acceptance: str = _V0, c_acceptance: str = _
                 "kind": "pattern",
                 "ref": "QUA-04",
                 "label": "B",
-                "acceptance": [b_acceptance],
+                "acceptance": [b_acceptance, _V0_STRUCTURED],
                 "pins": [
                     {"id": "in", "direction": "in", "contract": "c1"},
                     {"id": "out", "direction": "out", "contract": "c2"},

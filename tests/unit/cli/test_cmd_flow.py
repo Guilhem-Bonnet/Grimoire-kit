@@ -188,14 +188,18 @@ def _write_dispatchable_blueprint(tmp_path: Path) -> Path:
                 "id": "a",
                 "kind": "pattern",
                 "ref": "ORC-01",
-                "acceptance": ["la suite de tests passe"],
+                # `{"run": "true"}` (issue #428, suite) : garde ce node
+                # authentiquement V0 (cheap, jamais needs_verification) — sans
+                # acceptance structurée, un V0 purement textuel est traité
+                # comme V1, ce que ce test-ci ne veut pas exercer.
+                "acceptance": ["la suite de tests passe", {"run": "true"}],
                 "pins": [{"id": "out", "direction": "out", "contract": "c1"}],
             },
             {
                 "id": "b",
                 "kind": "pattern",
                 "ref": "QUA-04",
-                "acceptance": ["la suite de tests passe"],
+                "acceptance": ["la suite de tests passe", {"run": "true"}],
                 "pins": [{"id": "in", "direction": "in", "contract": "c1"}],
             },
         ],

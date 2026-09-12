@@ -21,6 +21,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 __all__ = [
+    "AcceptanceEvidence",
+    "AcceptanceRun",
     "FlowRunMeta",
     "NodeContract",
     "PinRef",
@@ -39,11 +41,73 @@ class PinRef:
 
 
 @dataclass(frozen=True, slots=True)
+class AcceptanceRun:
+    """Une acceptance structurée déclarant une commande dont le code de sortie fait le verdict (issue #428).
+
+    Rétrocompatible avec l'acceptance textuelle : une entrée ``{"run": "..."}``
+    du blueprint (voir ``blueprint_loader._parse_acceptance_entry``) produit à
+    la fois ce contrôle exécutable et une chaîne d'acceptance équivalente,
+    pour que ``verifiability.classify`` continue de reconnaître un critère
+    mécanique sans jamais avoir à exécuter quoi que ce soit lui-même.
+    """
+
+    argv: tuple[str, ...]
+    raw: str
+    expect_exit: int = 0
+    cwd: str = "."
+    timeout_s: float = 120.0
+    expect_stdout_contains: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "argv": list(self.argv),
+            "raw": self.raw,
+            "expect_exit": self.expect_exit,
+            "cwd": self.cwd,
+            "timeout_s": self.timeout_s,
+            "expect_stdout_contains": self.expect_stdout_contains,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AcceptanceEvidence:
+    """Une preuve mécanique déclarée sans commande libre (issue #428).
+
+    ``kind`` vaut ``"path_exists"`` (un fichier doit exister, relatif à la
+    racine du projet) ou ``"test"`` (un test nommé doit passer — traduit par
+    le gate en une invocation ``pytest`` du seul identifiant déclaré).
+    """
+
+    kind: str
+    value: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {"kind": self.kind, "value": self.value}
+
+
+@dataclass(frozen=True, slots=True)
 class NodeContract:
     """Ce qu'un node offre à son exécuteur : entrées, sortie, outils, preuve.
 
     C'est l'inversion visée par #201 rendue concrète : au lieu du blueprint
     entier aplati en prompt, l'hôte reçoit ce contrat borné pour un seul node.
+
+    ``acceptance_runs``/``acceptance_evidence`` (issue #428) portent la forme
+    structurée et exécutable de l'acceptance, quand le blueprint la déclare —
+    ``acceptance`` (texte) reste la seule source que
+    ``grimoire.missions.verifiability.classify`` sait lire, et continue à
+    exister même pour un node purement structuré (voir
+    ``blueprint_loader._parse_acceptance_entry``, qui dérive toujours le
+    texte depuis la forme structurée).
+
+    ``verifiability_warning`` (issue #428, suite) : posé au chargement du
+    blueprint (``blueprint_loader.build_node_contracts``) quand le texte de
+    ``acceptance`` seul classerait ce node V0 mais qu'aucune commande
+    exécutable n'est déclarée — un faux V0 est pire qu'un vrai V1
+    (``verifiability.py``), donc un tel node est traité comme V1 par
+    ``flows.dispatch_executor`` (jamais fermé sur la seule foi de l'ouvrier),
+    et ce champ porte le message nommé qui explique pourquoi. ``None`` dans
+    tous les autres cas (V0 structuré, V1, V2).
     """
 
     node_id: str
@@ -54,6 +118,9 @@ class NodeContract:
     outputs: tuple[PinRef, ...]
     tool_boundary: tuple[str, ...]
     acceptance: tuple[str, ...]
+    acceptance_runs: tuple[AcceptanceRun, ...] = ()
+    acceptance_evidence: tuple[AcceptanceEvidence, ...] = ()
+    verifiability_warning: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -65,7 +132,15 @@ class NodeContract:
             "outputs": [p.to_dict() for p in self.outputs],
             "tool_boundary": list(self.tool_boundary),
             "acceptance": list(self.acceptance),
+            "acceptance_runs": [r.to_dict() for r in self.acceptance_runs],
+            "acceptance_evidence": [e.to_dict() for e in self.acceptance_evidence],
+            "verifiability_warning": self.verifiability_warning,
         }
+
+    @property
+    def has_structured_acceptance(self) -> bool:
+        """Vrai si le gate a de quoi exécuter réellement l'acceptance (issue #428)."""
+        return bool(self.acceptance_runs or self.acceptance_evidence)
 
     def to_text(self) -> str:
         """Rendu humain autonome : tout ce qu'un exécuteur doit lire, rien de plus."""
