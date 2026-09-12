@@ -232,6 +232,63 @@ def test_executer_l_inspecteur_ne_montre_pas_de_rappel_vide(
     assert "Rappel" not in inspector.locator(".ex-insp-block h4").all_inner_texts()
 
 
+def test_executer_le_board_change_quand_on_change_de_projet(
+    browser: Browser, served_cockpit_multi: tuple[str, str, str]
+) -> None:
+    """Issue #140, critère d'acceptation à la lettre : lire un autre projet
+    doit montrer un autre board — pas celui du dernier projet sélectionné, pas
+    un mélange des deux."""
+    served, slug_a, slug_b = served_cockpit_multi
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
+    page = context.new_page()
+    try:
+        page.goto(f"{served}/workspace/index.html?project={slug_a}", wait_until="domcontentloaded")
+        page.wait_for_selector("body[data-ready='1']", timeout=30_000)
+        _goto(page, "executer")
+        page.wait_for_selector(".ex-card, .empty")
+        board_a_text = page.locator("#canvas").inner_text()
+        assert "projet A" in board_a_text
+        assert "projet B" not in board_a_text
+
+        page.goto(f"{served}/workspace/index.html?project={slug_b}", wait_until="domcontentloaded")
+        page.wait_for_selector("body[data-ready='1']", timeout=30_000)
+        _goto(page, "executer")
+        page.wait_for_selector(".ex-card, .empty")
+        board_b_text = page.locator("#canvas").inner_text()
+        assert "projet B" in board_b_text
+        assert "projet A" not in board_b_text
+    finally:
+        context.close()
+
+
+def test_executer_review_sans_evidence_pack_est_refuse_et_nomme_l_artefact(
+    review_gate_workspace: Page, served_review_gate: tuple[str, str]
+) -> None:
+    """Issue #140, critère d'acceptation à la lettre : « déplacer une carte
+    vers review sans evidence pack est refusé dans l'UI avec le nom de
+    l'artefact manquant affiché ». La tâche de :func:`served_review_gate` est
+    déjà ``running`` (``in_progress`` côté board) ; personne n'a produit
+    d'evidence pack, donc ``in_progress -> review`` doit rester fermée."""
+    workspace = review_gate_workspace
+    _, task_id = served_review_gate
+    _goto(workspace, "executer")
+    workspace.wait_for_selector(".ex-card")
+
+    inspector = workspace.locator("#inspector-body")
+    workspace.locator(".ex-card").first.click()
+    inspector.get_by_text(task_id, exact=True).wait_for()
+
+    gate_row = inspector.locator(".ex-gate-row").filter(has_text="Revue")
+    gate_row.locator("button", has_text="Réaliser").click()
+
+    workspace.wait_for_selector(".ex-refusal")
+    refusal_text = workspace.locator(".ex-refusal").inner_text().lower()
+    assert "refusé" in refusal_text
+    assert "evidence" in refusal_text or "evidence_pack" in refusal_text
+    # La carte n'a pas bougé : la porte « Revue » reste celle à franchir.
+    assert inspector.locator(".ex-gate-row", has_text="Revue").count() == 1
+
+
 # ── Observer — état vide honnête, jamais un mur de zéros ni une erreur ─────
 
 

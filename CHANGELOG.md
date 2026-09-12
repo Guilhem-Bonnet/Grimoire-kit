@@ -7,6 +7,20 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **feat(cockpit): le board de l'espace Exécuter montre le corps réel d'une tâche (description, garde-fous, dépendances) et les commandes d'intention restent gated par la preuve en multi-projet (#140).**
+  L'inspecteur de tâche affichait déjà les critères d'acceptation et les
+  preuves attendues ; il gagne des blocs Description, Garde-fous et
+  Dépendances, tirés du `MissionTask` du ledger — ce que `task-board.yaml`
+  n'a jamais su porter (ADR-005). `kanban.html` reste la vitrine statique et
+  gagne un lien vers le board vivant. Aucune écriture nouvelle : les
+  commandes de transition, le gate de preuve et la restriction au projet de
+  lancement du cockpit existaient déjà ; ce lot les couvre par des tests
+  dédiés (unitaires sur la route `/api/workspace/tasks/<id>/<action>` —
+  succès, refus nommant l'artefact manquant, refus hors projet de lancement —
+  et navigateur sur le critère d'acceptation à la lettre : une carte visée
+  vers *review* sans evidence pack est refusée avec l'artefact nommé, et le
+  board change quand on change de projet).
+
 ## [3.44.2] - 2026-09-11
 
 - **fix(hosts): `collect_agents` résout ses propres skills quand `known_skills` n'est pas fourni — `SessionStart` et le porteur de proposition ne plantent plus sur un agent à skills attachés (#423).**
