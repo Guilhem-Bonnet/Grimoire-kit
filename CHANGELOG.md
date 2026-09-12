@@ -7,6 +7,32 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **feat(hosts): un override d'agent peut désormais rester partiel (`extends: kit`) et signale sa dérive au lieu de figer silencieusement une copie (#427).**
+  Migration réelle 3.38.0 → 3.44.2 : quatre overrides en copie intégrale
+  n'avaient plus reçu une seule mise à niveau de leur agent depuis des mois,
+  `doctor` étant 22/22. Trois changements : (1) tout override écrit par un
+  chemin qui comprend le kit (cockpit, `grimoire agent override convert`)
+  enregistre `kit_source_hash:` (empreinte tronquée du fichier kit au moment
+  de l'écriture) ; `doctor` et le cockpit comparent cette empreinte à
+  l'actuelle et signalent en WARN (jamais FAIL) une dérive, avec un résumé
+  (sections de frontmatter ajoutées/retirées, delta du corps, ou champs
+  figés pour un override partiel), et en INFO une empreinte inconnue
+  (override antérieur à cette issue). (2) `extends: kit` dans le frontmatter
+  d'un override ne redéfinit plus que les champs qu'il liste
+  (`model_affinity`, `context`, `skills`, `tools`, `use_when`,
+  `dont_use_when`, `max_turns`, `description`, `tool_boundary`) — le corps et
+  le reste du frontmatter viennent du fichier kit de même nom, fusionnés
+  dans `hosts/collect.py` (dicts Python, avant tout appel au port Rust
+  optionnel — parité inchangée sous `GRIMOIRE_HOSTS_BACKEND=rust`) ; un
+  `extends: kit` sans agent kit de même nom refuse au chargement, nommant
+  l'agent. Le cockpit (assigner un skill, éditer une clause) écrit désormais
+  un override partiel dès qu'un agent kit du même nom existe, une copie
+  intégrale sinon. (3) `grimoire up` liste, après avoir rafraîchi le palier
+  kit, les overrides à revoir — sans jamais les toucher — et
+  `grimoire agent override convert <nom> [--dry-run]` convertit une copie
+  intégrale en override partiel équivalent, refusant (lignes citées) quand
+  le corps de la copie a divergé du kit plutôt que de fusionner du texte.
+
 ## [3.45.0] - 2026-09-12
 
 - **fix(flows): le gate de `flow run --executor dispatch` exécute l'acceptance structurée d'un node, pas seulement l'enveloppe (#428).**
