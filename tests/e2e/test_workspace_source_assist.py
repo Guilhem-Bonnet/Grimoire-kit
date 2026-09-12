@@ -18,16 +18,49 @@ from __future__ import annotations
 import http.server
 import json
 import os
+import socket
 import subprocess
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 from playwright.sync_api import Browser, Page
 
-from tests.e2e.conftest import _alive, _free_port, _wait_ready
+# Dupliqués de `conftest.py` plutôt qu'importés : `from tests.e2e.conftest
+# import ...` résout en local (`python -m pytest` insère le cwd dans
+# `sys.path`) mais casse sous l'invocation nue de la CI (`pytest tests/e2e`,
+# sans `tests/__init__.py` à la racine — `ModuleNotFoundError: No module
+# named 'tests'`). Trois fonctions de quelques lignes chacune ; les dupliquer
+# coûte moins qu'un import fragile qui ne se voit qu'en CI.
+
+
+def _free_port() -> int:
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def _alive(pid: int) -> bool:
+    return Path(f"/proc/{pid}").exists() if sys.platform == "linux" else True
+
+
+def _wait_ready(port: int, deadline: float) -> None:
+    while time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(
+                f"http://127.0.0.1:{port}/api/status", timeout=2
+            ) as resp:
+                if resp.status == 200:
+                    return
+        except (urllib.error.URLError, ConnectionError, TimeoutError, OSError):
+            time.sleep(0.2)
+    raise TimeoutError(f"`grimoire serve` n'a pas répondu sur :{port}")
+
 
 #: Le modèle « présent » côté faux Ollama — cité tel quel dans project-context.yaml.
 _MODEL = "demo-coder:1b"
