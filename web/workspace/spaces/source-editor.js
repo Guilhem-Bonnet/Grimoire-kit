@@ -43,6 +43,9 @@ const LINE_HEIGHT = 20; // px — doit rester égal à la valeur de source.css
 const DIAGNOSTIC_DELAY = 300;
 const TRIGGER_CHARS = new Set(['{', '@', '/']);
 const HOVER_DELAY = 500; // ms — même délai que le reste de la vue de travail (spec §3.2)
+// Re-sonde de `GET /api/workspace/assist` pendant qu'un modèle local charge
+// (issue #450) — jamais en dehors d'un chargement en cours.
+const ASSIST_POLL_DELAY = 3000;
 const PAD_LEFT = 12; // var(--sp-3)
 const PAD_TOP = 8; // var(--sp-2)
 
@@ -500,10 +503,18 @@ export function build(ctx, entry, state, hooks) {
   //
   // `refreshAssistStatus` est la seule requête que ce module envoie sans
   // geste explicite de l'utilisateur — et c'est une lecture sans coût
-  // (jamais `/api/generate`) : elle décide seulement si le bouton
-  // « Suggérer » et le lien « Expliquer » d'un diagnostic doivent apparaître.
-  // Un fichier en lecture seule n'a pas d'assistance : insérer une
-  // suggestion n'aurait nulle part où aller.
+  // (jamais `/api/generate` avec un vrai prompt) : elle décide seulement si
+  // le bouton « Suggérer » et le lien « Expliquer » d'un diagnostic doivent
+  // apparaître. Un fichier en lecture seule n'a pas d'assistance : insérer
+  // une suggestion n'aurait nulle part où aller.
+  //
+  // Issue #450 : tant que le modèle local charge encore (`status.loading`),
+  // le bouton reste visible mais désactivé, avec l'infobulle « chargement du
+  // modèle », et cette fonction se re-sonde toutes les 3 s — jamais en
+  // dehors d'un chargement — jusqu'à ce qu'il devienne prêt (ou échoue pour
+  // de bon, auquel cas le bouton redevient caché comme avant cette issue).
+
+  let assistPollTimer = null;
 
   async function refreshAssistStatus() {
     if (!entry.editable) return;
@@ -514,10 +525,20 @@ export function build(ctx, entry, state, hooks) {
       return; // API locale indisponible : pas de bouton plutôt qu'une erreur visible.
     }
     if (destroyed) return;
+    const loading = Boolean(status && status.loading);
     assistReady = Boolean(status && status.enabled && status.available);
-    assistBtn.hidden = !assistReady;
-    assistStatusEl.hidden = !assistReady;
-    if (assistReady) assistStatusEl.textContent = `assistant local · ${status.model}`;
+    const show = Boolean(status && status.enabled && (status.available || loading));
+    assistBtn.hidden = !show;
+    assistStatusEl.hidden = !show;
+    assistBtn.disabled = loading;
+    assistBtn.title = loading ? 'chargement du modèle' : 'Suggestion par modèle local — Ctrl+Maj+Espace';
+    if (assistReady) {
+      assistStatusEl.textContent = `assistant local · ${status.model}`;
+    } else if (loading) {
+      assistStatusEl.textContent = `assistant local · ${status.model} (chargement du modèle)`;
+    }
+    clearTimeout(assistPollTimer);
+    if (loading) assistPollTimer = setTimeout(refreshAssistStatus, ASSIST_POLL_DELAY);
   }
 
   function insertAssistSuggestion(text) {
@@ -770,6 +791,7 @@ export function build(ctx, entry, state, hooks) {
     clearTimeout(debounceTimer);
     clearTimeout(completionDebounceTimer);
     clearTimeout(glossaryHoverTimer);
+    clearTimeout(assistPollTimer);
     glossary.closeAll();
     document.removeEventListener('mousedown', onDocumentClick);
     diagTip.remove();

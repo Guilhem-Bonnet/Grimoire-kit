@@ -27,14 +27,19 @@ Refus, dans l'ordre où ils sont vérifiés :
 4. Ollama indisponible, ou le modèle configuré absent de ``ollama list`` (même
    sonde que ``grimoire providers audit``, :mod:`grimoire.providers.audit`) —
    refus discret, jamais une exception : ``{"available": False, "reason": …}``.
-5. délai dépassé (10 s) ou erreur réseau pendant l'appel — même forme de refus
-   discret.
+5. modèle présent mais pas encore résident en mémoire (``GET /api/ps``,
+   issue #450) — refus discret immédiat « chargement du modèle », jamais le
+   délai de 10 s ci-dessous : le premier appel pendant qu'Ollama charge un
+   modèle de plusieurs Go ne doit pas ressembler à une panne.
+6. délai dépassé (10 s, modèle résident) ou erreur réseau pendant l'appel —
+   même forme de refus discret.
 """
 
 from __future__ import annotations
 
 import ipaddress
 import json
+import threading
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -54,7 +59,28 @@ INTENTS = ("complete-clause", "draft-body", "explain-diagnostic")
 
 #: Délai borné de l'appel à Ollama — un modèle qui ne répond pas en 10 s ne
 #: doit pas bloquer l'éditeur davantage qu'un dépôt distant injoignable.
+#: Ne s'applique qu'à un modèle déjà résident (:func:`_probe_running_models`) —
+#: un modèle en cours de chargement répond avant ce délai, discrètement
+#: (issue #450).
 ASSIST_TIMEOUT_S = 10.0
+
+#: Délai de la sonde ``GET /api/ps`` (résidence en mémoire) — même ordre de
+#: grandeur que la sonde ``/api/tags`` de :func:`probe_ollama_models`.
+_OLLAMA_PS_TIMEOUT_S = 3.0
+
+#: Délai large de la requête de préchauffage (``POST /api/generate`` avec
+#: ``prompt: ""``) : elle tourne en tâche de fond, jamais dans la réponse HTTP
+#: qu'attend l'éditeur (voir :func:`_trigger_warm_up`) — un modèle de
+#: plusieurs Go peut prendre plus de dix secondes à charger, ce délai ne fait
+#: que borner cette requête interne, pas ce que l'éditeur perçoit.
+_WARM_UP_TIMEOUT_S = 60.0
+
+#: Garde contre les préchauffages concurrents : l'interface sonde le statut
+#: toutes les 3 s pendant un chargement (spec issue #450) ; sans ce verrou,
+#: chaque sonde relancerait une nouvelle requête ``/api/generate`` de
+#: préchauffage plutôt que de laisser la première finir.
+_WARM_UP_LOCK = threading.Lock()
+_WARM_UP_INFLIGHT: set[tuple[str, str]] = set()
 
 #: Lignes de contexte gardées autour du curseur pour ``draft-body`` — assez
 #: pour que le modèle comprenne le paragraphe en cours, jamais tout le
@@ -103,16 +129,90 @@ def _is_local_url(url: str) -> bool:
         return False
 
 
-def _readiness(project_root: Path) -> tuple[str, str, dict[str, Any] | None]:
-    """``(model, base_url, refusal)`` — porte commune à la lecture et à l'écriture.
+def _probe_running_models(base_url: str) -> tuple[str, ...] | None:
+    """Modèles actuellement résidents en mémoire — ``GET /api/ps`` (issue #450).
+
+    Rend ``None`` quand l'endpoint ne peut pas être interrogé (version
+    d'Ollama trop ancienne pour connaître ``/api/ps``, ou panne réseau
+    transitoire alors que ``/api/tags`` vient pourtant de répondre) : plutôt
+    que de supposer un chargement qui ne finirait jamais, l'appelant traite
+    ``None`` comme « résidence inconnue » et se comporte comme avant cette
+    fonction (appel direct à ``/api/generate``, délai de
+    :data:`ASSIST_TIMEOUT_S`).
+    """
+    url = f"{base_url}/api/ps"
+    try:
+        request = urllib.request.Request(url, method="GET")  # noqa: S310 — URL locale, déjà vérifiée
+        with urllib.request.urlopen(request, timeout=_OLLAMA_PS_TIMEOUT_S) as response:  # noqa: S310
+            payload = json.loads(response.read().decode("utf-8"))
+    except (OSError, TimeoutError, urllib.error.URLError, urllib.error.HTTPError, ValueError):
+        return None
+    models = payload.get("models") if isinstance(payload, dict) else None
+    if not isinstance(models, list):
+        return None
+    return tuple(str(entry["name"]) for entry in models if isinstance(entry, dict) and entry.get("name"))
+
+
+def _warm_up_model(base_url: str, model: str) -> None:
+    """Charge *model* en mémoire sans générer de texte (tâche de fond, issue #450).
+
+    ``prompt: ""`` avec ``keep_alive: "30m"`` demande à Ollama de charger le
+    modèle sans produire de suggestion — la même route que
+    :func:`_call_ollama`, jamais une génération réelle. Tourne dans un thread
+    démon lancé par :func:`_trigger_warm_up` : ni :func:`assist_status` ni
+    :func:`assist_view` n'attendent sa fin, un modèle de plusieurs Go pouvant
+    prendre plus longtemps que ce que l'éditeur doit patienter pour une simple
+    lecture de statut. Toute panne est ignorée — Ollama continue de charger le
+    modèle pour son propre compte même si cette requête échoue ou expire ici.
+    """
+    try:
+        url = f"{base_url}/api/generate"
+        payload = json.dumps({"model": model, "prompt": "", "keep_alive": "30m", "stream": False}).encode("utf-8")
+        request = urllib.request.Request(  # noqa: S310 — URL locale (Ollama), jamais distante
+            url, data=payload, headers={"Content-Type": "application/json"}, method="POST"
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=_WARM_UP_TIMEOUT_S):  # noqa: S310
+                pass
+        except (OSError, TimeoutError, urllib.error.URLError, urllib.error.HTTPError, ValueError):
+            pass
+    finally:
+        with _WARM_UP_LOCK:
+            _WARM_UP_INFLIGHT.discard((base_url, model))
+
+
+def _trigger_warm_up(base_url: str, model: str) -> None:
+    """Démarre :func:`_warm_up_model` en tâche de fond, une seule fois à la fois.
+
+    Appelée par :func:`assist_status` dès qu'un modèle n'est pas résident —
+    c'est elle qui déclenche le chargement que l'issue #450 demande, jamais
+    une génération. ``_WARM_UP_INFLIGHT`` évite qu'un client qui sonde le
+    statut toutes les 3 s (spec, côté éditeur) ne relance une nouvelle requête
+    de préchauffage à chaque sonde tant que la précédente tourne encore.
+    """
+    key = (base_url, model)
+    with _WARM_UP_LOCK:
+        if key in _WARM_UP_INFLIGHT:
+            return
+        _WARM_UP_INFLIGHT.add(key)
+    threading.Thread(target=_warm_up_model, args=(base_url, model), daemon=True).start()
+
+
+def _readiness(project_root: Path) -> tuple[str, str, dict[str, Any] | None, bool]:
+    """``(model, base_url, refusal, resident)`` — porte commune à la lecture et à l'écriture.
 
     ``refusal`` est ``None`` quand un appel à Ollama peut être tenté ; sinon
     c'est déjà la charge utile complète à rendre (``enabled``, ``model``,
-    ``available: False``, ``reason``). Partagée par :func:`assist_status`
-    (lecture, jamais de coût — l'interface l'appelle pour savoir si le bouton
-    « Suggérer » doit même apparaître) et :func:`assist_view` (écriture, qui
-    appelle réellement le modèle une fois cette porte franchie) : la même
-    vérification d'opt-in et de présence Ollama, jamais deux.
+    ``available: False``, ``reason``). ``resident`` (issue #450) dit si le
+    modèle est déjà chargé en mémoire (``GET /api/ps``) quand ``refusal`` est
+    ``None`` — ``True`` par défaut quand la résidence ne peut pas être
+    déterminée (voir :func:`_probe_running_models`), pour ne jamais bloquer
+    un Ollama qui ne connaît pas cette route. Partagée par
+    :func:`assist_status` (lecture, jamais de coût — l'interface l'appelle
+    pour savoir si le bouton « Suggérer » doit même apparaître) et
+    :func:`assist_view` (écriture, qui appelle réellement le modèle une fois
+    cette porte franchie *et* le modèle résident) : la même vérification
+    d'opt-in et de présence Ollama, jamais deux.
     """
     root = project_root.resolve()
     assist_config = _source_assist_config(root)
@@ -123,7 +223,7 @@ def _readiness(project_root: Path) -> tuple[str, str, dict[str, Any] | None]:
             "model": "",
             "available": False,
             "reason": "assistance désactivée : définissez `source.assist.model` dans project-context.yaml",
-        }
+        }, False
 
     base_url = ollama_base_url()
     if not _is_local_url(base_url) and not assist_config.allow_lan:
@@ -135,34 +235,56 @@ def _readiness(project_root: Path) -> tuple[str, str, dict[str, Any] | None]:
                 "assistant local : l'URL Ollama n'est pas locale ; déclare "
                 "`source.assist.allow_lan: true` pour l'autoriser explicitement"
             ),
-        }
+        }, False
 
     models_seen, probe_note = probe_ollama_models(base_url)
     if not models_seen and probe_note:
-        return model, base_url, {"enabled": True, "model": model, "available": False, "reason": probe_note}
+        return model, base_url, {
+            "enabled": True, "model": model, "available": False, "reason": probe_note,
+        }, False
     if models_seen and model not in models_seen:
         return model, base_url, {
             "enabled": True,
             "model": model,
             "available": False,
             "reason": f"modèle {model!r} absent de `ollama list` — présents : {', '.join(models_seen)}",
-        }
-    return model, base_url, None
+        }, False
+
+    running = _probe_running_models(base_url)
+    resident = True if running is None else model in running
+    return model, base_url, None, resident
 
 
 def assist_status(project_root: Path) -> dict[str, Any]:
-    """Point d'entrée de ``GET /api/workspace/assist`` — jamais de coût.
+    """Point d'entrée de ``GET /api/workspace/assist`` — jamais de génération.
 
-    Ne fait ni opt-in ni sonde autre que celle déjà nécessaire pour savoir si
-    l'interface doit montrer le bouton « Suggérer » : pas d'appel à
-    ``/api/generate``. C'est la garde de la spec (« sinon l'interface ne
-    montre rien et ne tente rien ») — l'éditeur appelle cette lecture au
-    montage, jamais l'écriture, tant que rien n'a été cliqué.
+    Ne fait ni opt-in ni sonde autre que celles déjà nécessaires pour savoir
+    si l'interface doit montrer le bouton « Suggérer » : pas d'appel à
+    ``/api/generate`` avec un vrai prompt. C'est la garde de la spec
+    (« sinon l'interface ne montre rien et ne tente rien ») — l'éditeur
+    appelle cette lecture au montage puis, tant que le modèle charge, toutes
+    les 3 s (issue #450), jamais l'écriture tant que rien n'a été cliqué.
+
+    Quand le modèle configuré n'est pas encore résident en mémoire, cette
+    lecture déclenche elle-même son chargement en tâche de fond
+    (:func:`_trigger_warm_up`, ``prompt: ""`` — un chargement, jamais une
+    génération) et rend ``loading: True`` plutôt qu'un faux « n'a pas répondu
+    à temps » : le premier appel pendant qu'Ollama charge un modèle de
+    plusieurs Go doit se lire comme un chargement, pas comme une panne.
     """
-    model, _base_url, refusal = _readiness(project_root)
+    model, base_url, refusal, resident = _readiness(project_root)
     if refusal is not None:
         return refusal
-    return {"enabled": True, "model": model, "available": True, "reason": None}
+    if not resident:
+        _trigger_warm_up(base_url, model)
+        return {
+            "enabled": True,
+            "model": model,
+            "available": False,
+            "loading": True,
+            "reason": "chargement du modèle, réessayez dans quelques secondes",
+        }
+    return {"enabled": True, "model": model, "available": True, "loading": False, "reason": None}
 
 
 def _language_facts(project_root: Path) -> dict[str, tuple[str, ...]]:
@@ -328,9 +450,17 @@ def assist_view(project_root: Path, body: dict[str, Any]) -> dict[str, Any]:
     except (TypeError, ValueError):
         line = 0
 
-    model, base_url, refusal = _readiness(root)
+    model, base_url, refusal, resident = _readiness(root)
     if refusal is not None:
         return {"available": False, "reason": refusal["reason"]}
+    if not resident:
+        # Issue #450 : un modèle pas encore chargé répond ici, tout de suite,
+        # plutôt que de subir (et de faire subir à l'éditeur) le délai de
+        # `ASSIST_TIMEOUT_S` qui ne s'applique qu'à un modèle résident.
+        # Filet de sécurité si ce clic a devancé le premier
+        # `assist_status` — celui-ci a normalement déjà lancé le chargement.
+        _trigger_warm_up(base_url, model)
+        return {"available": False, "reason": f"le modèle local {model!r} charge encore, réessayez dans quelques secondes"}
 
     facts = _language_facts(root)
     diagnostic = body.get("diagnostic") if intent == "explain-diagnostic" else None
