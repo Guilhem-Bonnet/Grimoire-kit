@@ -464,9 +464,12 @@ def task_trace(
 ) -> None:
     """Timeline unifiée d'une tâche : transitions, outils refusés, gates rouges, checkpoints, preuves.
 
-    Lit le Mission Ledger, le TraceLedger des hooks, le RuntimeKernel et
-    l'EvidenceService, indexés par tâche et triés dans le temps. Une source
-    absente est dite absente ; rien n'est créé, rien n'est inventé.
+    Lit le Mission Ledger, le TraceLedger des hooks (outils, gates, dispatch
+    d'agent), le RuntimeKernel, l'EvidenceService et, s'il existe,
+    l'export OTel du TraceLedger (``grimoire task trace-export --format
+    otel _grimoire-output/traces/otel-export.jsonl``) — indexés par tâche et
+    triés dans le temps. Une source absente est dite absente ; rien n'est
+    créé, rien n'est inventé.
     """
     from grimoire.missions.trace import build_task_timeline
 

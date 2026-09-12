@@ -138,9 +138,11 @@ def test_la_timeline_montre_la_cause_de_chaque_echec(projet: Path) -> None:
     assert "suite pytest rouge sur test_trace" in resumes
     assert "tool.allow" in [e.kind for e in timeline.entries], "l'écriture autorisée figure, sans être une cause"
     assert any(e.kind == "checkpoint" and "reprise sûre" in e.summary for e in timeline.entries)
-    assert timeline.sources == {k: str(projet / v) for k, v in {
+    named_sources = {k: v for k, v in timeline.sources.items() if k != "otel"}
+    assert named_sources == {k: str(projet / v) for k, v in {
         "ledger": DEFAULT_LEDGER_RELPATH, "hooks": TRACES_DIR,
         "runtime": DEFAULT_KERNEL_RELPATH, "evidence": DEFAULT_EVIDENCE_RELPATH}.items()}
+    assert timeline.sources["otel"] is None, "aucun export OTel n'a été produit dans ce test"
     assert [e.at for e in timeline.entries] == sorted(e.at for e in timeline.entries)
 
 
@@ -169,7 +171,7 @@ def test_une_tache_saine_le_dit(projet: Path) -> None:
     _, tid = ouvre_et_reclame(projet)
     code, sortie = trace(projet, tid)
     assert code == 0 and "Aucune cause d'arrêt" in sortie
-    assert "sources absentes : hooks, runtime, evidence" in sortie
+    assert "sources absentes : hooks, runtime, evidence, otel" in sortie
 
 
 # ── honnêteté : rien d'inventé, rien de créé ─────────────────────────────────
@@ -208,3 +210,86 @@ def test_le_ledger_seul_suffit_a_dater_un_blocage(tmp_path: Path) -> None:
     ledger.transition_task(task.id, TaskState.BLOCKED, actor_id="claude", reason="dépendance absente")
     timeline = build_task_timeline(tmp_path, task.id)
     assert [c.summary for c in timeline.causes] == ["ready → blocked par claude — dépendance absente"]
+
+
+# ── dispatch d'agent : le trou de corrélation ne se limite pas à GrimoireEvent ──
+
+def test_un_dispatch_d_agent_n_est_plus_perdu_en_silence(projet: Path) -> None:
+    """`grimoire.entry-persona` (tag `agent.dispatch`, écrit par
+    `hosts.decisions._record_agent_dispatch`) n'est ni un gate, ni un appel
+    d'outil : avant ce correctif, aucune branche de `_trace_entries` ne le
+    reprenait et il existait au disque sans jamais apparaître dans la
+    timeline — le même trou de corrélation que l'issue documente pour
+    `GrimoireEvent`, juste sur un autre écrivain."""
+    from grimoire.hosts.decisions.record import _record_agent_dispatch
+
+    _, tid = ouvre_et_reclame(projet)
+    _record_agent_dispatch(projet, "grimoire-master", tid)
+
+    timeline = build_task_timeline(projet, tid)
+    dispatch = [e for e in timeline.entries if "agent.dispatch" in e.detail.get("tags", [])]
+    assert len(dispatch) == 1, "la trace de dispatch doit apparaître exactement une fois"
+    assert dispatch[0].source == "hooks"
+    assert "grimoire-master" in dispatch[0].summary
+
+
+# ── export OTel (#322) comme source de la timeline ──────────────────────────
+
+def test_l_export_otel_alimente_la_timeline_comme_source_a_part(projet: Path) -> None:
+    """L'export OTel du TraceLedger existe depuis #322 mais rien ne le lisait
+    (audit de positionnement 2026-09-12, point 2) : une fois écrit à
+    l'emplacement conventionnel, la timeline doit le nommer et en tirer des
+    entrées — sans dupliquer ce que `_trace_entries` liste déjà côté hooks."""
+    service, tid = ouvre_et_reclame(projet)
+    service.transition(tid, TaskState.RUNNING, "claude")
+    hook(projet, "Bash", {"command": "rm -rf src"})  # tool_call bloqué, sous tid
+
+    dest = projet / TRACES_DIR / "otel-export.jsonl"
+    count = TraceLedger(projet / TRACES_DIR).export_otel_jsonl(dest)
+    assert count > 0, "l'export doit produire au moins le span parent"
+
+    timeline = build_task_timeline(projet, tid)
+    assert timeline.sources["otel"] == str(dest)
+    otel_entries = [e for e in timeline.entries if e.source == "otel"]
+    assert otel_entries, "l'export existe et concerne cette tâche : il doit apparaître"
+    assert any(e.failure for e in otel_entries), "le span execute_tool du Bash bloqué reste marqué en échec"
+    assert any(e.kind == "otel.invoke_agent" for e in otel_entries)
+
+
+def test_l_export_otel_correle_par_identifiant_pas_par_texte(projet: Path) -> None:
+    """Deux traces du même export, deux tâches : chaque timeline ne doit lire
+    que ses propres spans — par `grimoire.task_id` sur le span parent puis par
+    `traceId` partagé avec ses enfants, jamais en cherchant l'identifiant de
+    la tâche dans un texte de span."""
+    from grimoire.traces.schemas import TraceOutcome
+
+    ledger = TraceLedger(projet / TRACES_DIR)
+    ledger.record(
+        run_id="run-a", workflow_instance_id="", mission_id="", task_id="GAO-a-001",
+        recipe_id="grimoire.some-work", outcome=TraceOutcome.FAILURE,
+        started_at="2026-01-01T00:00:00+00:00",
+        tool_calls=[{"tool": "Bash", "verdict": "block"}],
+    )
+    ledger.record(
+        run_id="run-b", workflow_instance_id="", mission_id="", task_id="GAO-b-002",
+        recipe_id="grimoire.some-work", outcome=TraceOutcome.SUCCESS,
+        started_at="2026-01-01T00:01:00+00:00",
+    )
+    dest = projet / TRACES_DIR / "otel-export.jsonl"
+    ledger.export_otel_jsonl(dest)
+
+    otel_a = [e for e in build_task_timeline(projet, "GAO-a-001").entries if e.source == "otel"]
+    assert len(otel_a) == 2, "un span parent et un span execute_tool pour GAO-a-001"
+    assert any(e.failure for e in otel_a)
+    assert all(e.detail["attributes"].get("grimoire.task_id") in ("GAO-a-001", None) for e in otel_a)
+
+    otel_b = [e for e in build_task_timeline(projet, "GAO-b-002").entries if e.source == "otel"]
+    assert len(otel_b) == 1, "un seul span parent, aucun tool_call, pour GAO-b-002"
+    assert not any(e.failure for e in otel_b)
+
+
+def test_sans_export_otel_la_source_est_nommee_absente(projet: Path) -> None:
+    _, tid = ouvre_et_reclame(projet)
+    timeline = build_task_timeline(projet, tid)
+    assert timeline.sources["otel"] is None
+    assert not (projet / TRACES_DIR / "otel-export.jsonl").exists(), "lire ne crée rien"

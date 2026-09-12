@@ -1,22 +1,31 @@
 """Timeline unifiée d'une tâche — ce qui lui est arrivé, toutes sources confondues.
 
-Le matériel de troubleshooting existait déjà, dispersé dans quatre journaux qui
+Le matériel de troubleshooting existait déjà, dispersé dans des journaux qui
 portent chacun le ``task_id`` : le Mission Ledger (transitions, incidents), le
-TraceLedger (ce que les hooks ont autorisé ou refusé, et les gates de tâche
-rouges), le RuntimeKernel (run events, checkpoints, ``abort_reason``) et
-l'EvidenceService (packs, verdicts). Rien ne les lisait ensemble : trouver
-pourquoi une tâche a échoué voulait dire ouvrir quatre fichiers JSONL.
+TraceLedger (ce que les hooks ont autorisé ou refusé, les gates de tâche
+rouges, les décisions de dispatch d'agent), le RuntimeKernel (run events,
+checkpoints, ``abort_reason``), l'EvidenceService (packs, verdicts) et,
+lorsqu'il existe, l'export OTel GenAI du TraceLedger (``grimoire task
+trace-export --format otel``, #322). Rien ne les lisait ensemble : trouver
+pourquoi une tâche a échoué voulait dire ouvrir plusieurs fichiers JSONL.
 
 Ce module les indexe par tâche et les trie dans le temps. Il **lit** ; il ne
 crée aucun dossier — un journal absent est une source absente, dite comme
 telle, jamais un dossier vide semé au passage. Il ne passe ni par la stack
 legacy ``observatory.py`` ni par une donnée de démonstration : une timeline
 vide est une timeline vide.
+
+La corrélation ne se fait jamais par heuristique textuelle : chaque source
+porte déjà ``task_id`` (ou, pour l'export OTel, l'attribut
+``grimoire.task_id`` sur le span parent, propagé aux spans enfants par leur
+``traceId`` partagé).
 """
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +37,7 @@ __all__ = [
     "DEFAULT_EVIDENCE_RELPATH",
     "DEFAULT_KERNEL_RELPATH",
     "DEFAULT_LEDGER_RELPATH",
+    "DEFAULT_OTEL_EXPORT_RELPATH",
     "TaskTimeline",
     "TimelineEntry",
     "build_task_timeline",
@@ -36,6 +46,11 @@ __all__ = [
 DEFAULT_LEDGER_RELPATH = Path("_grimoire-runtime-output/ledger")
 DEFAULT_KERNEL_RELPATH = Path("_grimoire-runtime-output/runtime")
 DEFAULT_EVIDENCE_RELPATH = Path("_grimoire-runtime-output/evidence")
+#: Emplacement conventionnel de l'export OTel du TraceLedger. ``grimoire task
+#: trace-export`` accepte n'importe quelle destination ; écrire ici la rend
+#: visible dans la timeline sans configuration supplémentaire. Un fichier
+#: absent est une source absente comme les autres — jamais une erreur.
+DEFAULT_OTEL_EXPORT_RELPATH = TRACES_DIR / "otel-export.jsonl"
 
 #: États du ledger qui sont, en eux-mêmes, une cause d'arrêt.
 _STOPPED_STATES = {TaskState.BLOCKED.value, TaskState.FAILED.value}
@@ -106,6 +121,7 @@ def build_task_timeline(
     kernel_root: Path = DEFAULT_KERNEL_RELPATH,
     traces_root: Path = TRACES_DIR,
     evidence_root: Path = DEFAULT_EVIDENCE_RELPATH,
+    otel_export_relpath: Path = DEFAULT_OTEL_EXPORT_RELPATH,
 ) -> TaskTimeline:
     """Assemble la timeline de *task_id* depuis les journaux présents sous *project_root*."""
     root = project_root.resolve()
@@ -142,6 +158,13 @@ def build_task_timeline(
         entries.extend(_evidence_entries(evidence_path, task_id))
     else:
         sources["evidence"] = None
+
+    otel_path = _abs(root, otel_export_relpath)
+    if otel_path.is_file():
+        sources["otel"] = str(otel_path)
+        entries.extend(_otel_entries(otel_path, task_id))
+    else:
+        sources["otel"] = None
 
     # Tri stable : à date égale, l'ordre d'écriture est conservé.
     entries.sort(key=lambda e: e.at)
@@ -188,6 +211,15 @@ def _ledger_entries(ledger: MissionLedger, task_id: str) -> list[TimelineEntry]:
 
 # ── TraceLedger : hooks et gates de tâche ───────────────────────────────────
 
+#: Étiquette lisible pour les tags de dispatch d'agent (issue #366/#389) —
+#: c'est le seul type d'écriture de :mod:`grimoire.hosts.decisions` qui ne
+#: porte ni un des deux recipe_id de gate ci-dessus, ni un appel d'outil.
+_DISPATCH_LABEL = {
+    "agent.dispatch": "agent choisi",
+    "agent.miss": "non-choix d'agent (aucun spécialiste trouvé)",
+}
+
+
 def _trace_entries(traces_path: Path, task_id: str) -> list[TimelineEntry]:
     from grimoire.traces.ledger import TraceLedger
     from grimoire.traces.schemas import TraceOutcome
@@ -195,6 +227,7 @@ def _trace_entries(traces_path: Path, task_id: str) -> list[TimelineEntry]:
     out: list[TimelineEntry] = []
     for trace in TraceLedger(traces_path).list_traces(task_id=task_id):
         failed = trace.outcome is TraceOutcome.FAILURE
+        before = len(out)
         if trace.recipe_id == TASK_GATE_RECIPE:
             manque = ", ".join(pv.verdict_id for pv in trace.policy_verdicts) or "preuve manquante"
             transition = next((t for t in trace.tags if t != "task.gate"), "")
@@ -218,6 +251,82 @@ def _trace_entries(traces_path: Path, task_id: str) -> list[TimelineEntry]:
                 f"{call.tool} {verbe} (args {call.args_hash})",
                 failure=blocked, detail={"trace_id": trace.id, "host": trace.host_id, "tool": call.tool},
             ))
+        if len(out) == before:
+            # Ni gate, ni appel d'outil : un dispatch d'agent (`agent.dispatch`,
+            # `agent.miss`) ou tout autre fait futur écrit au TraceLedger sous
+            # cette tâche. Sans ce repli, la trace existait au disque et
+            # disparaissait en silence de la timeline — le trou de corrélation
+            # que #139 cite pour `GrimoireEvent` existait tout autant ici.
+            label = next((v for k, v in _DISPATCH_LABEL.items() if k in trace.tags), trace.recipe_id or "hook")
+            agent = f" — {trace.agent_id}" if trace.agent_id else ""
+            out.append(TimelineEntry(
+                trace.started_at, "hooks", trace.recipe_id or "hooks.trace", f"{label}{agent}",
+                failure=failed, detail={"trace_id": trace.id, "tags": list(trace.tags), "agent_id": trace.agent_id},
+            ))
+    return out
+
+
+# ── Export OTel du TraceLedger (#322) ───────────────────────────────────────
+
+def _iso_from_ns(nanoseconds: int) -> str:
+    """Inverse de ``grimoire.traces.ledger._ns`` : nanosecondes → ISO 8601 UTC."""
+    if not nanoseconds:
+        return ""
+    return datetime.fromtimestamp(nanoseconds / 1_000_000_000, tz=UTC).isoformat()
+
+
+def _otel_entries(otel_path: Path, task_id: str) -> list[TimelineEntry]:
+    """Lit un export OTel GenAI (``grimoire task trace-export --format otel``)
+    et n'en retient que les spans qui concernent *task_id*.
+
+    Corrélation par identifiants, jamais par heuristique textuelle : l'attribut
+    ``grimoire.task_id`` porté par le span ``invoke_agent`` parent (voir
+    ``TraceLedger._to_otel_spans``), puis le ``traceId`` que ce parent partage
+    avec ses spans ``execute_tool`` enfants, qui eux ne portent pas le
+    ``task_id`` directement.
+    """
+    try:
+        raw_lines = otel_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+
+    spans: list[dict[str, Any]] = []
+    for line in raw_lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            span = json.loads(stripped)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(span, dict):
+            spans.append(span)
+
+    matched_trace_ids = {
+        span.get("traceId")
+        for span in spans
+        if (span.get("attributes") or {}).get("grimoire.task_id") == task_id
+    }
+
+    out: list[TimelineEntry] = []
+    for span in spans:
+        attrs = span.get("attributes") or {}
+        own_task_id = attrs.get("grimoire.task_id")
+        if own_task_id != task_id and span.get("traceId") not in matched_trace_ids:
+            continue
+        status_code = str((span.get("status") or {}).get("code", ""))
+        failed = status_code == "STATUS_CODE_ERROR"
+        operation = attrs.get("gen_ai.operation.name", "span")
+        name = span.get("name") or operation
+        tool = attrs.get("gen_ai.tool.name")
+        summary = f"span {name}" + (f" — outil {tool}" if tool else "")
+        if failed:
+            summary += " — erreur"
+        out.append(TimelineEntry(
+            _iso_from_ns(span.get("startTimeUnixNano") or 0), "otel", f"otel.{operation}", summary,
+            failure=failed,
+            detail={"traceId": span.get("traceId"), "spanId": span.get("spanId"), "attributes": attrs},
+        ))
     return out
 
 

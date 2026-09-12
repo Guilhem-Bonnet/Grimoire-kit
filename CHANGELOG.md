@@ -87,6 +87,33 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   (`framework/agentic-industry-reference.md`, section 10) mises à jour.
   Hors périmètre : transport HTTP/SSE, authentification, exposition réseau
   distante — le pont reste stdio, en local.
+- **feat(cockpit): timeline unifiée par tâche dans la vue de travail, l'export OTel de #322 devient une source lue plutôt qu'un mécanisme mort (#139).**
+  Audit de positionnement du 2026-09-12, point 2 : `TraceLedger.export_otel_jsonl`
+  produit des spans GenAI conformes depuis #322, mais rien ne les consommait —
+  `/api/otel` sert une pile d'événements différente (`blueprint_telemetry`,
+  `events.jsonl`), sans rapport avec le TraceLedger. `grimoire.missions.trace`
+  (déjà livré par #276) gagne une cinquième source, `otel` : si un export
+  existe à l'emplacement conventionnel (`<traces>/otel-export.jsonl`), ses
+  spans sont lus et corrélés par `grimoire.task_id` puis par `traceId`
+  partagé avec les spans enfants — jamais par heuristique textuelle. Deux
+  autres traces disparaissaient aussi en silence de la timeline avant ce
+  correctif : les dispatchs d'agent (`agent.dispatch`, `agent.miss`) et tout
+  futur fait du TraceLedger qui n'est ni un gate ni un appel d'outil — un
+  repli générique les reprend désormais sous la source `hooks`. Côté cockpit :
+  l'espace Exécuter (`web/workspace/spaces/executer.js`) ouvre la timeline
+  d'une tâche depuis sa carte (bouton « Voir la timeline »), la filtre par
+  source et par gravité, et détaille chaque ligne en accordéon ; l'espace
+  Observer (`observer.js`) y renvoie depuis un span qui porte
+  `grimoire.task_id`. Lecture seule (ADR-007) : aucune écriture, aucune
+  reconstruction d'événement absent — une tâche sans trace montre « aucun
+  événement » et nomme les sources lues. Tests : `tests/unit/missions/test_trace.py`
+  (corrélation par identifiants, dispatch non perdu, otel présent/absent),
+  `tests/unit/test_workspace_api.py`, `tests/e2e/test_workspace_lot4_spaces.py`
+  (dispatch et transition refusée visibles, filtre par source). Docs :
+  `docs/cli-reference.md`, `docs/serve-blueprints.md`,
+  `docs/audits/positionnement-2026-09-12.md` et
+  `framework/agentic-industry-reference.md` (section 10) mis à jour avec la
+  date de correction.
 
 ## [3.45.0] - 2026-09-12
 
