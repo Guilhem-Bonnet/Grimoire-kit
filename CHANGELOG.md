@@ -7,6 +7,19 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **fix(up): `identity` ne corrompt plus un scalaire commenté de `project-context.yaml` (#426).**
+  `cmd_setup._apply_project_context` réécrivait chaque ligne `user:` connue
+  avec une regex `.+` qui avalait tout le reste de la ligne — valeur *et*
+  commentaire inline — comme si c'était « la valeur », puis rewrappait ce
+  texte entier entre guillemets. `skill_level: "expert"  # beginner |
+  intermediate | expert` devenait `skill_level: ""expert"  # beginner |
+  intermediate | expert"` à chaque `grimoire up`, y compris quand la valeur
+  ne changeait pas — et cassait ensuite `grimoire doctor` (`GR002`, YAML
+  imparsable). Un nouveau `_split_scalar_and_comment` sépare correctement
+  le scalaire (quoté ou non) du commentaire qui le suit avant toute lecture
+  ou réécriture, et `_apply_project_context` recolle le commentaire original
+  après la nouvelle valeur au lieu de le jeter.
+
 - **feat(cockpit): le board de l'espace Exécuter montre le corps réel d'une tâche (description, garde-fous, dépendances) et les commandes d'intention restent gated par la preuve en multi-projet (#140).**
   L'inspecteur de tâche affichait déjà les critères d'acceptation et les
   preuves attendues ; il gagne des blocs Description, Garde-fous et

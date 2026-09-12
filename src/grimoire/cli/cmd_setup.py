@@ -54,11 +54,49 @@ class SetupResult:
 # ── YAML helpers (simple, no PyYAML dependency) ──────────────────────────────
 
 
+def _split_scalar_and_comment(tail: str) -> tuple[str, str]:
+    """Split the text after a YAML ``key:`` into ``(scalar, comment_suffix)``.
+
+    ``comment_suffix`` keeps its leading whitespace so that reassembling it
+    right after a (possibly new) scalar reproduces the line's trailing
+    comment untouched. A ``#`` inside a quoted scalar is literal, not a
+    comment marker — treating it as one is what corrupted ``skill_level:
+    "expert"  # ...`` into ``skill_level: ""expert"  # ..."`` (issue #426):
+    the old code captured ``"expert"  # comment`` whole as "the value" via
+    ``.+``, so it neither stripped the comment nor recognised the result as
+    quoted (its last character was the comment's, not a quote), then
+    re-wrapped that entire string in a fresh pair of quotes.
+    """
+    body = tail.rstrip("\n")
+    lstripped = body.lstrip(" \t")
+    if lstripped[:1] in ("'", '"'):
+        quote = lstripped[0]
+        i = 1
+        while i < len(lstripped):
+            ch = lstripped[i]
+            if quote == '"' and ch == "\\":
+                i += 2
+                continue
+            if ch == quote:
+                i += 1
+                break
+            i += 1
+        return lstripped[:i], lstripped[i:]
+    # Unquoted scalar: a '#' only starts a comment when it begins the tail
+    # or is preceded by whitespace — YAML's own rule.
+    match = re.search(r"(?:^|\s)#", lstripped)
+    if match is None:
+        value = lstripped.rstrip()
+        return value, lstripped[len(value):]
+    value = lstripped[: match.start()].rstrip()
+    return value, lstripped[len(value):]
+
+
 def _read_key(text: str, key: str) -> str | None:
     m = re.search(rf"^{re.escape(key)}:\s*(.+)$", text, re.MULTILINE)
     if not m:
         return None
-    val = m.group(1).strip()
+    val, _comment = _split_scalar_and_comment(m.group(1))
     if len(val) >= 2 and val[0] == val[-1] and val[0] in ('"', "'"):
         val = val[1:-1]
     return val
@@ -148,11 +186,19 @@ def _apply_project_context(path: Path, vals: UserValues) -> bool:
         start, end = span
         seen: set[str] = set()
         for i in range(start + 1, end):
-            stripped = lines[i].strip()
+            line = lines[i]
+            stripped = line.strip()
             for key in wanted:
                 if stripped.startswith(f"{key}:"):
-                    indent = lines[i][: len(lines[i]) - len(lines[i].lstrip())]
-                    lines[i] = f'{indent}{key}: "{wanted[key]}"'
+                    indent = line[: len(line) - len(line.lstrip())]
+                    # Preserve everything after the scalar (notably an
+                    # inline comment) instead of discarding it — see
+                    # ``_split_scalar_and_comment`` for why the previous
+                    # blind ``f'{key}: "{value}"'`` corrupted lines like
+                    # ``skill_level: "expert"  # ...`` (issue #426).
+                    _key_part, _sep, line_tail = line.partition(":")
+                    _old_value, comment = _split_scalar_and_comment(line_tail)
+                    lines[i] = f'{indent}{key}: "{wanted[key]}"{comment}'
                     seen.add(key)
         missing = [f'  {key}: "{value}"' for key, value in wanted.items() if key not in seen]
         tail = end
