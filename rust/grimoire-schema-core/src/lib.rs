@@ -265,6 +265,7 @@ const KNOWN_TOP_KEYS: &[&str] = &[
     "agents",
     "installed_archetypes",
     "proposals",
+    "source",
 ];
 const KNOWN_PROJECT_KEYS: &[&str] = &["name", "description", "type", "metaphor", "stack", "repos"];
 const KNOWN_USER_KEYS: &[&str] = &["name", "language", "document_language", "skill_level"];
@@ -303,6 +304,8 @@ const KNOWN_AGENTS_KEYS: &[&str] = &[
     "freshness_threshold_days",
 ];
 const KNOWN_PROPOSALS_KEYS: &[&str] = &["threshold"];
+const KNOWN_SOURCE_KEYS: &[&str] = &["assist"];
+const KNOWN_SOURCE_ASSIST_KEYS: &[&str] = &["model", "allow_lan"];
 
 // ── generate_schema ──────────────────────────────────────────────────────────
 
@@ -346,6 +349,7 @@ fn schema_core() -> Value {
                 ("memory", memory_schema()),
                 ("agents", agents_schema()),
                 ("proposals", proposals_schema()),
+                ("source", source_schema()),
                 (
                     "installed_archetypes",
                     obj(vec![
@@ -775,6 +779,67 @@ fn proposals_schema() -> Value {
     ])
 }
 
+fn source_schema() -> Value {
+    obj(vec![
+        ("type", s("object")),
+        (
+            "description",
+            s("Source workspace configuration (issue #280, voie 2)."),
+        ),
+        ("additionalProperties", Value::Bool(false)),
+        (
+            "properties",
+            obj(vec![(
+                "assist",
+                obj(vec![
+                    ("type", s("object")),
+                    (
+                        "description",
+                        s(
+                            "Local-model suggestion assist for the Source editor — opt-in, \
+                             disabled unless `model` is set.",
+                        ),
+                    ),
+                    ("additionalProperties", Value::Bool(false)),
+                    (
+                        "properties",
+                        obj(vec![
+                            (
+                                "model",
+                                obj(vec![
+                                    ("type", s("string")),
+                                    ("default", s("")),
+                                    (
+                                        "description",
+                                        s(
+                                            "Ollama model used for suggestions. Empty (default) disables \
+                                             the feature entirely.",
+                                        ),
+                                    ),
+                                ]),
+                            ),
+                            (
+                                "allow_lan",
+                                obj(vec![
+                                    ("type", s("boolean")),
+                                    ("default", Value::Bool(false)),
+                                    (
+                                        "description",
+                                        s(
+                                            "Second opt-in: allow a non-loopback Ollama URL. Refused unless \
+                                             explicitly set to true.",
+                                        ),
+                                    ),
+                                ]),
+                            ),
+                        ]),
+                    ),
+                ]),
+            )]),
+        ),
+    ])
+}
+
 // ── validate_config ──────────────────────────────────────────────────────────
 
 /// Une erreur de validation avant reconstruction cote Python. `suggestion`
@@ -1157,6 +1222,47 @@ fn validate_proposals(section: &Value, errors: &mut Vec<RawError>) {
     );
 }
 
+fn validate_source(section: &Value, errors: &mut Vec<RawError>) {
+    if !section.is_map() {
+        errors.push(err("source", "'source' must be a mapping."));
+        return;
+    }
+
+    if let Some(assist) = field(section, "assist") {
+        if !assist.is_map() {
+            errors.push(err("source.assist", "'source.assist' must be a mapping."));
+        } else {
+            if let Some(model) = field(assist, "model") {
+                if !matches!(model, Value::Str(_)) {
+                    errors.push(err(
+                        "source.assist.model",
+                        "'source.assist.model' must be a string.",
+                    ));
+                }
+            }
+
+            if let Some(allow_lan) = field(assist, "allow_lan") {
+                if !matches!(allow_lan, Value::Bool(_)) {
+                    errors.push(err(
+                        "source.assist.allow_lan",
+                        "'source.assist.allow_lan' must be a boolean.",
+                    ));
+                }
+            }
+
+            check_unknown_keys(
+                assist,
+                KNOWN_SOURCE_ASSIST_KEYS,
+                "source.assist",
+                "source.assist",
+                errors,
+            );
+        }
+    }
+
+    check_unknown_keys(section, KNOWN_SOURCE_KEYS, "source", "source", errors);
+}
+
 fn validate_installed_archetypes(section: &Value, errors: &mut Vec<RawError>) {
     match section {
         Value::List(items) => {
@@ -1222,6 +1328,9 @@ fn validate_core(data: &Value) -> Vec<RawError> {
     }
     if let Some(proposals) = data.get("proposals") {
         validate_proposals(proposals, &mut errors);
+    }
+    if let Some(source) = data.get("source") {
+        validate_source(source, &mut errors);
     }
 
     check_unknown_keys(data, KNOWN_TOP_KEYS, "", "top", &mut errors);
@@ -1517,6 +1626,53 @@ mod tests {
         ]);
         let errors = validate_core(&data);
         assert!(!errors.iter().any(|e| e.path == "proposals.threshold"));
+    }
+
+    #[test]
+    fn source_assist_model_and_allow_lan_accepted() {
+        let data = map(vec![
+            ("project", map(vec![("name", Value::Str("x".to_string()))])),
+            (
+                "source",
+                map(vec![(
+                    "assist",
+                    map(vec![
+                        ("model", Value::Str("qwen3-coder:30b".to_string())),
+                        ("allow_lan", Value::Bool(false)),
+                    ]),
+                )]),
+            ),
+        ]);
+        assert!(validate_core(&data).is_empty());
+    }
+
+    #[test]
+    fn source_assist_model_non_string_is_rejected() {
+        let data = map(vec![
+            ("project", map(vec![("name", Value::Str("x".to_string()))])),
+            (
+                "source",
+                map(vec![("assist", map(vec![("model", Value::Int(3))]))]),
+            ),
+        ]);
+        let errors = validate_core(&data);
+        assert!(errors.iter().any(|e| e.path == "source.assist.model"));
+    }
+
+    #[test]
+    fn source_assist_unknown_key_is_rejected() {
+        let data = map(vec![
+            ("project", map(vec![("name", Value::Str("x".to_string()))])),
+            (
+                "source",
+                map(vec![(
+                    "assist",
+                    map(vec![("modle", Value::Str("x".to_string()))]),
+                )]),
+            ),
+        ]);
+        let errors = validate_core(&data);
+        assert!(errors.iter().any(|e| e.path == "source.assist.modle"));
     }
 
     #[test]

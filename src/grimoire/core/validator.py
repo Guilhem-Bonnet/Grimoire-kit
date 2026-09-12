@@ -103,7 +103,7 @@ _KNOWN_ARCHETYPES = frozenset({
 
 # Known keys per section for unknown-key detection
 _KNOWN_TOP_KEYS = frozenset({
-    "project", "user", "memory", "agents", "installed_archetypes", "proposals",
+    "project", "user", "memory", "agents", "installed_archetypes", "proposals", "source",
 })
 
 _KNOWN_PROJECT_KEYS = frozenset({
@@ -132,6 +132,14 @@ _KNOWN_PROPOSALS_KEYS = frozenset({
     "threshold",
 })
 
+_KNOWN_SOURCE_KEYS = frozenset({
+    "assist",
+})
+
+_KNOWN_SOURCE_ASSIST_KEYS = frozenset({
+    "model", "allow_lan",
+})
+
 # Cle -> jeu de cles connues, indexe par le `keyset_id` que
 # `grimoire_schema_core.validate_config` renvoie pour chaque erreur "Unknown
 # key" (voir le docstring de module). "" ne devrait jamais etre utilise comme
@@ -145,6 +153,8 @@ _KEYSETS: dict[str, frozenset[str]] = {
     "memory": _KNOWN_MEMORY_KEYS,
     "agents": _KNOWN_AGENTS_KEYS,
     "proposals": _KNOWN_PROPOSALS_KEYS,
+    "source": _KNOWN_SOURCE_KEYS,
+    "source.assist": _KNOWN_SOURCE_ASSIST_KEYS,
 }
 
 
@@ -311,6 +321,9 @@ def _validate_config_python(
 
     if "proposals" in data:
         _validate_proposals(data["proposals"], errors)
+
+    if "source" in data:
+        _validate_source(data["source"], errors)
 
     # Unknown top-level keys
     _check_unknown_keys(data, _KNOWN_TOP_KEYS, "", errors)
@@ -546,3 +559,42 @@ def _validate_installed_archetypes(
                 path=f"installed_archetypes[{i}]",
                 message="Archetype identifier must be a string.",
             ))
+
+
+def _validate_source(section: Any, errors: list[ValidationError]) -> None:
+    """``source.assist`` — the Source editor's local-model suggestion opt-in
+    (issue #280, voie 2). Mirrors :class:`grimoire.core.config.SourceAssistConfig`:
+    ``model`` (string, empty disables the feature) and ``allow_lan`` (boolean,
+    second opt-in for a non-loopback Ollama URL)."""
+    if not isinstance(section, dict):
+        errors.append(ValidationError(
+            path="source",
+            message="'source' must be a mapping.",
+        ))
+        return
+
+    assist = section.get("assist")
+    if assist is not None:
+        if not isinstance(assist, dict):
+            errors.append(ValidationError(
+                path="source.assist",
+                message="'source.assist' must be a mapping.",
+            ))
+        else:
+            model = assist.get("model")
+            if model is not None and not isinstance(model, str):
+                errors.append(ValidationError(
+                    path="source.assist.model",
+                    message="'source.assist.model' must be a string.",
+                ))
+
+            allow_lan = assist.get("allow_lan")
+            if allow_lan is not None and not isinstance(allow_lan, bool):
+                errors.append(ValidationError(
+                    path="source.assist.allow_lan",
+                    message="'source.assist.allow_lan' must be a boolean.",
+                ))
+
+            _check_unknown_keys(assist, _KNOWN_SOURCE_ASSIST_KEYS, "source.assist", errors)
+
+    _check_unknown_keys(section, _KNOWN_SOURCE_KEYS, "source", errors)
