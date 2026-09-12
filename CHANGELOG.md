@@ -7,6 +7,19 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **fix(up): `identity` ne corrompt plus un scalaire commenté de `project-context.yaml` (#426).**
+  `cmd_setup._apply_project_context` réécrivait chaque ligne `user:` connue
+  avec une regex `.+` qui avalait tout le reste de la ligne — valeur *et*
+  commentaire inline — comme si c'était « la valeur », puis rewrappait ce
+  texte entier entre guillemets. `skill_level: "expert"  # beginner |
+  intermediate | expert` devenait `skill_level: ""expert"  # beginner |
+  intermediate | expert"` à chaque `grimoire up`, y compris quand la valeur
+  ne changeait pas — et cassait ensuite `grimoire doctor` (`GR002`, YAML
+  imparsable). Un nouveau `_split_scalar_and_comment` sépare correctement
+  le scalaire (quoté ou non) du commentaire qui le suit avant toute lecture
+  ou réécriture, et `_apply_project_context` recolle le commentaire original
+  après la nouvelle valeur au lieu de le jeter.
+
 ## [3.44.2] - 2026-09-11
 
 - **fix(hosts): `collect_agents` résout ses propres skills quand `known_skills` n'est pas fourni — `SessionStart` et le porteur de proposition ne plantent plus sur un agent à skills attachés (#423).**
