@@ -10,7 +10,9 @@ Ce que prouve ce module, au clavier et à la souris : sans opt-in ni Ollama,
 aucun bouton « Suggérer » n'apparaît (rien montré, rien tenté) ; avec les
 deux, le bouton ouvre un panneau d'aperçu dont « Insérer » place le texte
 dans l'éditeur au même chemin que la frappe clavier — diagnostics recalculés
-compris.
+compris ; et si le modèle n'est pas encore résident (issue #450), le bouton
+reste visible mais désactivé (infobulle « chargement du modèle ») jusqu'à ce
+qu'une sonde de statut ultérieure le trouve prêt.
 """
 
 from __future__ import annotations
@@ -72,12 +74,20 @@ _SUGGESTION = "Voir _grimoire/kit/ce-fichier-n-existe-pas.md pour la suite."
 
 
 class _FakeOllamaHandler(http.server.BaseHTTPRequestHandler):
+    #: Modèles résidents en mémoire, vus par `/api/ps` (issue #450) — résident
+    #: par défaut pour ne pas changer le comportement des deux tests déjà en
+    #: place ; le test dédié au chargement le vide puis le repeuple lui-même.
+    running: tuple[str, ...] = (_MODEL,)
+
     def do_GET(self) -> None:
-        if self.path != "/api/tags":
-            self.send_response(404)
-            self.end_headers()
+        if self.path == "/api/tags":
+            self._send(json.dumps({"models": [{"name": _MODEL}]}).encode("utf-8"))
             return
-        self._send(json.dumps({"models": [{"name": _MODEL}]}).encode("utf-8"))
+        if self.path == "/api/ps":
+            self._send(json.dumps({"models": [{"name": m} for m in type(self).running]}).encode("utf-8"))
+            return
+        self.send_response(404)
+        self.end_headers()
 
     def do_POST(self) -> None:
         if self.path != "/api/generate":
@@ -85,8 +95,17 @@ class _FakeOllamaHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             return
         length = int(self.headers.get("Content-Length", 0))
-        self.rfile.read(length)
+        raw = self.rfile.read(length)
         self._send(json.dumps({"response": _SUGGESTION}).encode("utf-8"))
+        try:
+            body = json.loads(raw)
+        except ValueError:
+            body = {}
+        if isinstance(body, dict) and body.get("prompt") == "":
+            # Requête de préchauffage (issue #450, prompt vide) : le
+            # "chargement" simulé se termine juste après elle, comme le vrai
+            # Ollama qui devient résident une fois le modèle en mémoire.
+            type(self).running = (_MODEL,)
 
     def _send(self, body: bytes) -> None:
         self.send_response(200)
@@ -219,3 +238,30 @@ def test_suggerer_affiche_l_apercu_et_inserer_recalcule_les_diagnostics(assist_p
     # (`test_workspace_source_language.py::test_un_diagnostic_apparait...`).
     assist_page.wait_for_selector(".sr-gutter-dot.bad", timeout=10_000)
     assert assist_page.locator(".sr-assist-panel[hidden]").count() == 1
+
+
+def test_bouton_desactive_pendant_le_chargement_puis_reactive(assist_page: Page) -> None:
+    """Issue #450 : premier statut « chargement », bouton visible mais désactivé.
+
+    Le faux serveur simule un modèle pas encore résident (``/api/ps`` vide) ;
+    le backend déclenche lui-même un préchauffage (``POST /api/generate`` à
+    prompt vide) que le faux serveur traite comme la fin du chargement, ce
+    qui fait passer le statut à « prêt » à la sonde suivante (toutes les 3 s
+    côté éditeur) — jamais un échec « n'a pas répondu à temps ».
+    """
+    _FakeOllamaHandler.running = ()
+    try:
+        _open_as_override(assist_page)
+
+        assist_page.wait_for_selector(".sr-assist-btn:not([hidden])", timeout=10_000)
+        btn = assist_page.locator(".sr-assist-btn")
+        assert btn.is_disabled()
+        assert btn.get_attribute("title") == "chargement du modèle"
+        assert "chargement" in assist_page.locator(".sr-assist-status").inner_text()
+
+        assist_page.wait_for_function(
+            "() => !document.querySelector('.sr-assist-btn').disabled", timeout=15_000
+        )
+        assert "demo-coder" in assist_page.locator(".sr-assist-status").inner_text()
+    finally:
+        _FakeOllamaHandler.running = (_MODEL,)

@@ -1488,6 +1488,14 @@ Si l'URL Ollama résolue (`OLLAMA_HOST`) ne pointe pas vers une adresse de
 bouclage, l'appel est refusé (nommé) sauf déclaration explicite de
 `source.assist.allow_lan: true`.
 
+Un modèle qui n'est pas encore chargé en mémoire (`GET /api/ps`) n'est pas
+une panne : `GET /api/workspace/assist` le déclenche lui-même en tâche de
+fond (un préchauffage sans génération) et répond « chargement du modèle,
+réessayez dans quelques secondes » — le bouton **Suggérer** reste visible
+mais désactivé, et l'éditeur re-sonde le statut toutes les 3 s jusqu'à ce
+qu'il devienne prêt. Le délai de 10 s ci-dessus ne s'applique qu'à un modèle
+déjà résident (issue #450).
+
 ### Projets de la machine
 
 Le bouton de projet, en haut de la barre latérale, ouvre le sélecteur. Trois

@@ -1,20 +1,24 @@
 """Suggestions par un petit modèle local, derrière l'IntelliSense (issue #280, voie 2).
 
 Un faux serveur HTTP local joue le rôle d'Ollama (``/api/tags``,
-``/api/generate``) — jamais le vrai binaire de la machine. Chaque refus décrit
-dans la spécification a son test : opt-in absent, Ollama injoignable, modèle
-absent de ``ollama list``, délai dépassé, et — le garde-fou central — un
-identifiant inventé par le modèle marqué « inconnu » plutôt que pris pour
-argent comptant.
+``/api/ps``, ``/api/generate``) — jamais le vrai binaire de la machine.
+Chaque refus décrit dans la spécification a son test : opt-in absent, Ollama
+injoignable, modèle absent de ``ollama list``, délai dépassé, et — le
+garde-fou central — un identifiant inventé par le modèle marqué « inconnu »
+plutôt que pris pour argent comptant. Section « chargement » (issue #450) :
+un modèle présent dans ``ollama list`` mais absent de ``ollama ps``
+(``/api/ps``) est un chargement en cours, jamais un dépassement de délai.
 """
 
 from __future__ import annotations
 
+import contextlib
 import http.server
 import json
 import threading
+import time
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 
@@ -39,34 +43,45 @@ def _write_project(root: Path, *, model: str = "", allow_lan: bool = False) -> N
 
 
 class _FakeOllama(http.server.BaseHTTPRequestHandler):
-    """``/api/tags`` et ``/api/generate`` — les deux seules routes Ollama sondées."""
+    """``/api/tags``, ``/api/ps`` et ``/api/generate`` — les routes Ollama sondées."""
 
     #: Réponse renvoyée par ``/api/generate`` — ajustée par chaque test.
     generate_response: str = "une suggestion sans surprise."
     #: Délai simulé (s) avant de répondre à ``/api/generate``.
     generate_delay: float = 0.0
-    #: Modèles vus par ``/api/tags``.
+    #: Modèles vus par ``/api/tags`` (``ollama list``).
     models: tuple[str, ...] = ("qwen3-coder:30b",)
+    #: Modèles résidents en mémoire, vus par ``/api/ps`` (issue #450) — résident
+    #: par défaut, pour ne pas changer le comportement des tests qui ne
+    #: portent pas sur le chargement.
+    running: tuple[str, ...] = ("qwen3-coder:30b",)
+    #: Corps JSON de chaque appel ``/api/generate`` reçu — inspecté par les
+    #: tests du préchauffage (``prompt: ""``, ``keep_alive: "30m"``).
+    generate_calls: ClassVar[list[dict[str, Any]]] = []
 
     def do_GET(self) -> None:
-        if self.path != "/api/tags":
-            self.send_response(404)
-            self.end_headers()
+        if self.path == "/api/tags":
+            body = json.dumps({"models": [{"name": m} for m in self.models]}).encode("utf-8")
+            self._send(200, body)
             return
-        body = json.dumps({"models": [{"name": m} for m in self.models]}).encode("utf-8")
-        self._send(200, body)
+        if self.path == "/api/ps":
+            body = json.dumps({"models": [{"name": m} for m in self.running]}).encode("utf-8")
+            self._send(200, body)
+            return
+        self.send_response(404)
+        self.end_headers()
 
     def do_POST(self) -> None:
         if self.path != "/api/generate":
             self.send_response(404)
             self.end_headers()
             return
-        import time
-
         if self.generate_delay:
             time.sleep(self.generate_delay)
         length = int(self.headers.get("Content-Length", 0))
-        self.rfile.read(length)  # consomme le corps — le prompt lui-même n'est pas vérifié ici
+        raw = self.rfile.read(length)
+        with contextlib.suppress(ValueError):
+            _FakeOllama.generate_calls.append(json.loads(raw))
         body = json.dumps({"response": self.generate_response}).encode("utf-8")
         self._send(200, body)
 
@@ -92,6 +107,8 @@ def fake_ollama() -> Any:
         _FakeOllama.generate_response = "une suggestion sans surprise."
         _FakeOllama.generate_delay = 0.0
         _FakeOllama.models = ("qwen3-coder:30b",)
+        _FakeOllama.running = ("qwen3-coder:30b",)
+        _FakeOllama.generate_calls = []
         server.shutdown()
         thread.join(timeout=2)
 
@@ -347,19 +364,129 @@ def test_status_pret_ne_contacte_jamais_generate(
     _write_project(tmp_path, model="qwen3-coder:30b")
     port = fake_ollama.server_address[1]
     monkeypatch.setenv("OLLAMA_HOST", f"http://127.0.0.1:{port}")
-    called = []
-    original = _FakeOllama.do_POST
-
-    def _tracked(self: _FakeOllama) -> None:
-        called.append(self.path)
-        original(self)
-
-    monkeypatch.setattr(_FakeOllama, "do_POST", _tracked)
 
     status = source_assist.assist_status(tmp_path)
 
-    assert status == {"enabled": True, "model": "qwen3-coder:30b", "available": True, "reason": None}
-    assert called == []  # `/api/generate` jamais appelé par une simple lecture de statut
+    assert status == {
+        "enabled": True,
+        "model": "qwen3-coder:30b",
+        "available": True,
+        "loading": False,
+        "reason": None,
+    }
+    assert _FakeOllama.generate_calls == []  # `/api/generate` jamais appelé par une simple lecture de statut
+
+
+# ── Chargement du modèle (issue #450) ───────────────────────────────────────
+#
+# Un modèle connu de `ollama list` (`/api/tags`) mais absent de `ollama ps`
+# (`/api/ps`) est en cours de chargement par Ollama : ni `assist_status` ni
+# `assist_view` ne doivent le confondre avec une panne ou un dépassement de
+# délai de 10 s.
+
+
+def test_status_modele_non_resident_indique_le_chargement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_ollama: http.server.HTTPServer
+) -> None:
+    _write_project(tmp_path, model="qwen3-coder:30b")
+    port = fake_ollama.server_address[1]
+    monkeypatch.setenv("OLLAMA_HOST", f"http://127.0.0.1:{port}")
+    _FakeOllama.running = ()  # présent dans `ollama list`, absent de `ollama ps`
+
+    status = source_assist.assist_status(tmp_path)
+
+    assert status["enabled"] is True
+    assert status["available"] is False
+    assert status["loading"] is True
+    assert "chargement" in status["reason"]
+    assert "n'a pas répondu" not in status["reason"]
+
+
+def test_status_non_resident_declenche_un_chargement_sans_generer_de_texte(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_ollama: http.server.HTTPServer
+) -> None:
+    """``assist_status`` déclenche le chargement lui-même — jamais une génération.
+
+    La requête de préchauffage tourne en tâche de fond (elle ne doit pas
+    ralentir la réponse HTTP) : ce test l'attend explicitement avant de
+    vérifier son contenu.
+    """
+    _write_project(tmp_path, model="qwen3-coder:30b")
+    port = fake_ollama.server_address[1]
+    monkeypatch.setenv("OLLAMA_HOST", f"http://127.0.0.1:{port}")
+    _FakeOllama.running = ()
+
+    source_assist.assist_status(tmp_path)
+
+    deadline = time.monotonic() + 2.0
+    while not _FakeOllama.generate_calls and time.monotonic() < deadline:
+        time.sleep(0.02)
+
+    assert len(_FakeOllama.generate_calls) == 1
+    assert _FakeOllama.generate_calls[0]["prompt"] == ""
+    assert _FakeOllama.generate_calls[0]["keep_alive"] == "30m"
+    assert _FakeOllama.generate_calls[0]["model"] == "qwen3-coder:30b"
+
+
+def test_assist_view_modele_non_resident_repond_immediatement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_ollama: http.server.HTTPServer
+) -> None:
+    """Le premier appel pendant un chargement répond tout de suite — jamais après 10 s.
+
+    ``generate_delay`` est réglé bien au-delà du délai normal : si le code
+    appelait quand même ``/api/generate`` pour produire une suggestion, ce
+    test le verrait dépasser sa borne de 2 s.
+    """
+    _write_project(tmp_path, model="qwen3-coder:30b")
+    port = fake_ollama.server_address[1]
+    monkeypatch.setenv("OLLAMA_HOST", f"http://127.0.0.1:{port}")
+    _FakeOllama.running = ()
+    _FakeOllama.generate_delay = 5.0
+
+    start = time.monotonic()
+    result = source_assist.assist_view(tmp_path, _body())
+    elapsed = time.monotonic() - start
+
+    assert elapsed < 2.0
+    assert result["available"] is False
+    assert "charge" in result["reason"]
+    assert "n'a pas répondu" not in result["reason"]
+
+
+def test_assist_view_modele_resident_repond_normalement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_ollama: http.server.HTTPServer
+) -> None:
+    """Un modèle déjà résident garde le chemin existant — aucune régression."""
+    _write_project(tmp_path, model="qwen3-coder:30b")
+    port = fake_ollama.server_address[1]
+    monkeypatch.setenv("OLLAMA_HOST", f"http://127.0.0.1:{port}")
+    _FakeOllama.generate_response = "suggestion normale, modèle déjà chargé."
+
+    result = source_assist.assist_view(tmp_path, _body())
+
+    assert result["available"] is True
+    assert result["suggestion"] == "suggestion normale, modèle déjà chargé."
+
+
+def test_api_ps_indisponible_ne_bloque_pas_un_ancien_ollama(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_ollama: http.server.HTTPServer
+) -> None:
+    """``/api/ps`` absent (Ollama trop ancien) : résidence inconnue traitée comme résidente.
+
+    Sans cette tolérance, un Ollama qui ne connaît pas ``/api/ps`` afficherait
+    « chargement » indéfiniment plutôt que de laisser l'appel réel décider.
+    """
+    _write_project(tmp_path, model="qwen3-coder:30b")
+    port = fake_ollama.server_address[1]
+    monkeypatch.setenv("OLLAMA_HOST", f"http://127.0.0.1:{port}")
+    monkeypatch.setattr(source_assist, "_probe_running_models", lambda _base_url: None)
+
+    status = source_assist.assist_status(tmp_path)
+    result = source_assist.assist_view(tmp_path, _body())
+
+    assert status["available"] is True
+    assert status["loading"] is False
+    assert result["available"] is True
 
 
 # ── Corps requis ─────────────────────────────────────────────────────────────
