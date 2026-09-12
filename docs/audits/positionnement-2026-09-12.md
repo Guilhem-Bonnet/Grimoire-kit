@@ -181,6 +181,6 @@ section 1 à ce jour.
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-Voir aussi : [`framework/agentic-industry-reference.md`](../../framework/agentic-industry-reference.md)
+Voir aussi : [`framework/agentic-industry-reference.md`](https://github.com/Guilhem-Bonnet/Grimoire-kit/blob/main/framework/agentic-industry-reference.md)
 (la référence mise à jour par cet audit), [`docs/artifact-doctrine.md`](../artifact-doctrine.md),
 [`docs/evals-protocol.md`](../evals-protocol.md).
