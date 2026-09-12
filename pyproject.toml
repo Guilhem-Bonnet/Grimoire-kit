@@ -208,6 +208,7 @@ ignore_missing_imports = true
 # third such core (issue #354): rust/grimoire-hosts-core/.
 # `grimoire_flows_core` is the fourth: rust/grimoire-flows-core/.
 # `grimoire_dispatch_core` is the fifth: rust/grimoire-dispatch-core/.
+# `grimoire_traces_core` is the sixth: rust/grimoire-traces-core/.
 [[tool.mypy.overrides]]
 module = [
     "grimoire_policies_core",
@@ -215,6 +216,7 @@ module = [
     "grimoire_hosts_core",
     "grimoire_flows_core",
     "grimoire_dispatch_core",
+    "grimoire_traces_core",
 ]
 ignore_missing_imports = true
 

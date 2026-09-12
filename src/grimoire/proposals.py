@@ -58,11 +58,14 @@ own stop criterion.
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, fields, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from grimoire.core.exceptions import GrimoireRuntimeError
 
 __all__ = [
     "Proposal",
@@ -70,8 +73,49 @@ __all__ = [
     "count_pending",
     "list_proposals",
     "reject_proposal",
+    "rust_backend_available",
     "sync_proposals",
 ]
+
+try:
+    import grimoire_traces_core as _rust_core
+except ImportError:  # pragma: no cover - exercised by the dedicated Rust CI job
+    _rust_core = None
+
+
+def rust_backend_available() -> bool:
+    """Whether the compiled ``grimoire_traces_core`` module is importable.
+
+    Purely informational (used by tests and diagnostics) — every call site
+    below decides its own backend fresh via :func:`_use_rust_backend`.
+    """
+    return _rust_core is not None
+
+
+def _use_rust_backend() -> bool:
+    """Resolve which backend this module's Rust-optional functions should use.
+
+    Own copy of the precedent set by ``grimoire.traces.ledger`` (issue
+    #354): each module backed by a Rust crate reads its own env var
+    independently. Reads ``GRIMOIRE_TRACES_BACKEND`` fresh every call so
+    tests can flip it with ``monkeypatch.setenv`` — the same variable as
+    ``grimoire.traces.ledger``, since both modules are the same crate.
+    """
+    override = os.environ.get("GRIMOIRE_TRACES_BACKEND", "auto").strip().lower()
+    if override == "python":
+        return False
+    if override == "rust":
+        if _rust_core is None:
+            raise GrimoireRuntimeError(
+                "GRIMOIRE_TRACES_BACKEND=rust demande le coeur Rust, mais "
+                "grimoire_traces_core est introuvable. Construire l'extension "
+                "localement (voir CONTRIBUTING.md, `maturin develop` dans "
+                "rust/grimoire-traces-core/) ou revenir a auto/python."
+            )
+        return True
+    if override not in ("auto", ""):
+        raise GrimoireRuntimeError(f"GRIMOIRE_TRACES_BACKEND invalide: {override!r} (attendu auto/python/rust)")
+    return _rust_core is not None
 
 #: Never 1 — the issue is explicit: repetition, not a single non-choice, is
 #: what earns a proposal.
@@ -157,7 +201,14 @@ class Proposal:
 
 
 def _slugify(text: str) -> str:
-    """Lowercase, ASCII-ish, hyphen-separated — safe as a filename and an id."""
+    """Lowercase, ASCII-ish, hyphen-separated — safe as a filename and an id.
+
+    Délègue à ``grimoire_traces_core.slugify`` (issue #354) quand le backend
+    Rust est actif — voir :func:`_use_rust_backend`.
+    """
+    if _use_rust_backend():
+        assert _rust_core is not None  # guarded by _use_rust_backend
+        return str(_rust_core.slugify(text))
     slug = re.sub(r"[^a-z0-9]+", "-", text.strip().lower()).strip("-")
     return slug or "specialite"
 
@@ -171,6 +222,11 @@ def _skill_slug(specialty: str) -> str:
 
 
 def _guess_tools(category: str, specialty: str) -> str:
+    """Délègue à ``grimoire_traces_core.guess_tools`` (issue #354) quand le
+    backend Rust est actif — voir :func:`_use_rust_backend`."""
+    if _use_rust_backend():
+        assert _rust_core is not None  # guarded by _use_rust_backend
+        return str(_rust_core.guess_tools(category, specialty))
     haystack = f"{category} {specialty}".lower()
     if any(hint in haystack for hint in _EXECUTION_HINTS):
         return "read, search, execute"
@@ -185,7 +241,14 @@ def _employment_clause(specialty: str, category: str, carrier: str) -> tuple[str
     name the entry persona even when the proposal attaches elsewhere or
     nowhere (see :func:`_resolve_carrier`). Naming the entry persona here
     would misdescribe the boundary this specialist is meant to relieve.
+
+    Délègue à ``grimoire_traces_core.employment_clause`` (issue #354) quand
+    le backend Rust est actif — voir :func:`_use_rust_backend`.
     """
+    if _use_rust_backend():
+        assert _rust_core is not None  # guarded by _use_rust_backend
+        use_when, dont_use_when = _rust_core.employment_clause(specialty, category, carrier)
+        return str(use_when), str(dont_use_when)
     if category:
         use_when = (
             f"Une demande classée « {category} » cherche une compétence "
@@ -243,6 +306,12 @@ def _category_carrier(project_root: Path, category: str, entry_name: str) -> str
     matches are as unusable as zero: attaching a skill to an ambiguous
     carrier is worse than proposing a fresh agent a human can place by
     hand, so anything but exactly one candidate returns ``""``.
+
+    Toute l'E/S (``collect_agents``, lecture de fichier, frontmatter) reste
+    ici — seul le jugement pur (mot entier, heuristique d'exécution,
+    exclusion de la persona, unicité du candidat) délègue à
+    ``grimoire_traces_core.category_carrier`` (issue #354) quand le backend
+    Rust est actif, voir :func:`_use_rust_backend`.
     """
     if not category:
         return ""
@@ -254,13 +323,8 @@ def _category_carrier(project_root: Path, category: str, entry_name: str) -> str
     except Exception:
         return ""
 
-    category_lower = category.lower()
-    category_word = re.compile(rf"\b{re.escape(category_lower)}\b")
-    is_execution_category = any(hint in category_lower for hint in _EXECUTION_HINTS)
-    candidates: list[str] = []
+    raw_candidates: list[tuple[str, str, bool]] = []
     for agent in agents:
-        if entry_name and agent.name == entry_name:
-            continue
         use_when = ""
         try:
             text = (project_root / agent.definition_ref).read_text(encoding="utf-8")
@@ -268,10 +332,24 @@ def _category_carrier(project_root: Path, category: str, entry_name: str) -> str
             use_when = str(meta.get("use_when") or "")
         except OSError:
             pass
+        raw_candidates.append((agent.name, use_when, ToolVerb.EXECUTE in agent.tools))
+
+    if _use_rust_backend():
+        assert _rust_core is not None  # guarded by _use_rust_backend
+        result = _rust_core.category_carrier(category, entry_name, raw_candidates)
+        return str(result) if result else ""
+
+    category_lower = category.lower()
+    category_word = re.compile(rf"\b{re.escape(category_lower)}\b")
+    is_execution_category = any(hint in category_lower for hint in _EXECUTION_HINTS)
+    candidates: list[str] = []
+    for name, use_when, has_execute in raw_candidates:
+        if entry_name and name == entry_name:
+            continue
         matches_use_when = bool(category_word.search(use_when.lower()))
-        matches_execute = is_execution_category and ToolVerb.EXECUTE in agent.tools
+        matches_execute = is_execution_category and has_execute
         if matches_use_when or matches_execute:
-            candidates.append(agent.name)
+            candidates.append(name)
 
     return candidates[0] if len(candidates) == 1 else ""
 
@@ -285,13 +363,29 @@ def _resolve_carrier(project_root: Path, *, category: str, fallback_agent: str) 
     attaches a skill — so a category-based search over the project's other
     declared agents (:func:`_category_carrier`) gets a second, independent
     chance before the déclencheur gives up and proposes a brand-new agent.
+
+    L'E/S (résolution de la persona d'entrée, recherche par catégorie) reste
+    ici ; seul l'arbitrage final délègue à
+    ``grimoire_traces_core.resolve_carrier`` (issue #354) quand le backend
+    Rust est actif, voir :func:`_use_rust_backend`.
     """
     entry_name = _entry_persona_name(project_root)
+    # Court-circuit conserve : la recherche par catégorie (I/O —
+    # `collect_agents` + lecture de chaque fichier d'agent) ne s'exécute que
+    # si le repli observé ne suffit pas a lui seul, sous les deux backends.
     if fallback_agent and fallback_agent != entry_name:
+        if _use_rust_backend():
+            assert _rust_core is not None  # guarded by _use_rust_backend
+            carrier, reason = _rust_core.resolve_carrier(fallback_agent, entry_name, None)
+            return str(carrier), str(reason)
         return fallback_agent, "repli observé"
-    carrier = _category_carrier(project_root, category, entry_name)
-    if carrier:
-        return carrier, f"porteur par catégorie : {carrier}"
+    category_candidate = _category_carrier(project_root, category, entry_name) or None
+    if _use_rust_backend():
+        assert _rust_core is not None  # guarded by _use_rust_backend
+        carrier, reason = _rust_core.resolve_carrier(fallback_agent, entry_name, category_candidate)
+        return str(carrier), str(reason)
+    if category_candidate:
+        return category_candidate, f"porteur par catégorie : {category_candidate}"
     return "", "persona d'entrée exclue, aucun porteur : agent"
 
 
@@ -313,9 +407,49 @@ def _build_proposal(
     decide the artifact type; *fallback_agent* is stored unchanged as the
     raw fact the ledger recorded, even when it differs from *carrier* (the
     entry-persona case).
+
+    Le gabarit mécanique complet (nom, rôle, ``use_when``/``dont_use_when``,
+    outils par défaut) délègue en un seul appel à
+    ``grimoire_traces_core.build_proposal_fields`` (issue #354) quand le
+    backend Rust est actif — voir :func:`_use_rust_backend`. ``count``,
+    ``category``, ``fallback_agent``, ``carrier_reason``,
+    ``first_seen``/``last_seen``/``created_at`` sont des faits observés ou
+    des horodatages, jamais du gabarit : ils restent assemblés ici, sous les
+    deux backends.
     """
-    use_when, dont_use_when = _employment_clause(specialty, category, carrier)
     now = datetime.now(UTC).isoformat()
+    if _use_rust_backend():
+        assert _rust_core is not None  # guarded by _use_rust_backend
+        (
+            slug,
+            artifact_type,
+            agent_role,
+            use_when,
+            dont_use_when,
+            tool_boundary,
+            tools,
+            target_agent,
+        ) = _rust_core.build_proposal_fields(specialty, category, carrier)
+        return Proposal(
+            slug=str(slug),
+            specialty=specialty,
+            artifact_type=str(artifact_type),
+            status="pending",
+            count=count,
+            category=category,
+            fallback_agent=fallback_agent,
+            carrier_reason=carrier_reason,
+            first_seen=first_seen or last_seen,
+            last_seen=last_seen,
+            created_at=now,
+            agent_role=str(agent_role),
+            use_when=str(use_when),
+            dont_use_when=str(dont_use_when),
+            tool_boundary=str(tool_boundary),
+            tools=str(tools),
+            target_agent=str(target_agent),
+        )
+    use_when, dont_use_when = _employment_clause(specialty, category, carrier)
     if carrier:
         # Attachable to an existing surface → the doctrine's skill branch.
         return Proposal(
@@ -401,7 +535,11 @@ def _save_proposal(path: Path, proposal: Proposal) -> None:
 
 
 def _configured_threshold(project_root: Path) -> int:
-    """``proposals.threshold`` from ``project-context.yaml`` — never below 2."""
+    """``proposals.threshold`` from ``project-context.yaml`` — never below 2.
+
+    Le clamp délègue à ``grimoire_traces_core.clamp_threshold`` (issue #354)
+    quand le backend Rust est actif — voir :func:`_use_rust_backend`.
+    """
     config_path = project_root.resolve() / "project-context.yaml"
     if not config_path.is_file():
         return DEFAULT_THRESHOLD
@@ -413,7 +551,50 @@ def _configured_threshold(project_root: Path) -> int:
         value = int(raw) if raw is not None else DEFAULT_THRESHOLD
     except Exception:
         return DEFAULT_THRESHOLD
+    if _use_rust_backend():
+        assert _rust_core is not None  # guarded by _use_rust_backend
+        return int(_rust_core.clamp_threshold(value))
     return max(_MIN_THRESHOLD, value)
+
+
+def _sync_decision(
+    threshold_raw: int,
+    observed_count: int,
+    existing: Proposal | None,
+) -> tuple[str, int, int | None]:
+    """The central branch decision of :func:`sync_proposals` (issue #395),
+    isolated from all file I/O so it can be handed to Rust as one call.
+
+    Returns ``(action, effective_threshold, reopen_at)`` — ``action`` is one
+    of ``skip``/``create``/``keep_accepted``/``refresh_pending``/
+    ``keep_rejected``/``reopen``. Délègue à
+    ``grimoire_traces_core.sync_decision`` quand le backend Rust est actif —
+    voir :func:`_use_rust_backend`. Le chemin Python ci-dessous est la
+    référence : il clampe le seuil lui-même plutôt que de faire confiance à
+    l'appelant, exactement comme le fait le cœur Rust.
+    """
+    existing_status = existing.status if existing is not None else None
+    existing_count = existing.count if existing is not None else 0
+    existing_rejected_at_count = existing.rejected_at_count if existing is not None else None
+    if _use_rust_backend():
+        assert _rust_core is not None  # guarded by _use_rust_backend
+        action, threshold, reopen_at = _rust_core.sync_decision(
+            threshold_raw, observed_count, existing_status, existing_count, existing_rejected_at_count
+        )
+        return str(action), int(threshold), (int(reopen_at) if reopen_at is not None else None)
+
+    threshold = max(_MIN_THRESHOLD, threshold_raw)
+    if existing_status is None:
+        return ("skip" if observed_count < threshold else "create"), threshold, None
+    if existing_status == "accepted":
+        return "keep_accepted", threshold, None
+    if existing_status == "rejected":
+        # `existing.rejected_at_count or effective_threshold` cote reference
+        # Python historique : `0` est aussi falsy que `None`.
+        base = existing_rejected_at_count or threshold
+        reopen_at = 2 * max(base, 1)
+        return ("keep_rejected" if observed_count < reopen_at else "reopen"), threshold, reopen_at
+    return "refresh_pending", threshold, None
 
 
 # ── The déclencheur ──────────────────────────────────────────────────────────
@@ -432,7 +613,12 @@ def sync_proposals(project_root: Path, *, threshold: int | None = None) -> list[
     from grimoire.traces.ledger import UNNAMED_SPECIALTY, TraceLedger
 
     root = project_root.resolve()
-    effective_threshold = max(_MIN_THRESHOLD, threshold if threshold is not None else _configured_threshold(root))
+    raw_threshold = threshold if threshold is not None else _configured_threshold(root)
+    effective_threshold = (
+        int(_rust_core.clamp_threshold(raw_threshold))
+        if _use_rust_backend() and _rust_core is not None
+        else max(_MIN_THRESHOLD, raw_threshold)
+    )
 
     try:
         misses = TraceLedger(root / TRACES_DIR).agent_miss_counts()
@@ -472,6 +658,15 @@ def sync_proposals(project_root: Path, *, threshold: int | None = None) -> list[
             if existing is not None:
                 path = skill_path
 
+        # `effective_threshold` is already clamped ; `_sync_decision`
+        # re-clampe (idempotent) — jamais un second seuil différent. Seul
+        # l'arbitrage accepted/rejected/pending (et le calcul de
+        # ``reopen_at``) est délégué ici : l'ordre des opérations et l'E/S
+        # autour restent inchangés, `existing is None` reste géré
+        # directement (son action est nécessairement "create" : le
+        # `count < effective_threshold` ci-dessus l'a déjà exclu sinon).
+        action, _, reopen_at = _sync_decision(effective_threshold, count, existing)
+
         if existing is None:
             carrier, carrier_reason = _resolve_carrier(root, category=category, fallback_agent=fallback_agent)
             path = skill_path if carrier else agent_path
@@ -484,17 +679,18 @@ def sync_proposals(project_root: Path, *, threshold: int | None = None) -> list[
             results.append(proposal)
             continue
 
-        if existing.status == "accepted":
+        if action == "keep_accepted":
             results.append(existing)
             continue
 
-        if existing.status == "rejected":
-            reopen_at = 2 * max(existing.rejected_at_count or effective_threshold, 1)
-            if count < reopen_at:
-                refreshed = replace(existing, count=count, last_seen=last_seen)
-                _save_proposal(path, refreshed)
-                results.append(refreshed)
-                continue
+        if action == "keep_rejected":
+            refreshed = replace(existing, count=count, last_seen=last_seen)
+            _save_proposal(path, refreshed)
+            results.append(refreshed)
+            continue
+
+        if action == "reopen":
+            assert reopen_at is not None  # "reopen" toujours accompagné de son seuil
             carrier, carrier_reason = _resolve_carrier(root, category=category, fallback_agent=fallback_agent)
             new_path = skill_path if carrier else agent_path
             reopened = _build_proposal(
@@ -511,7 +707,8 @@ def sync_proposals(project_root: Path, *, threshold: int | None = None) -> list[
             results.append(reopened)
             continue
 
-        # Still pending: refresh the observed facts, keep identity/status.
+        # Still pending (action == "refresh_pending"): refresh the observed
+        # facts, keep identity/status.
         refreshed = replace(
             existing,
             count=count,
