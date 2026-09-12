@@ -37,14 +37,20 @@ dependencies = [
 # fermée sur la 3 : une majeure non parue ne peut pas être déclarée compatible.
 # Lever la borne demande de porter le serveur sur l'API 2.x.
 #
-# Borne basse relevée à 1.10 : le serveur n'utilise plus seulement le décorateur
-# `tool()`, il déclare des `ToolAnnotations` (révision de protocole 2025-03-26)
-# et rend ses échecs francs en `CallToolResult` avec `structuredContent`
-# (révision 2025-06-18). Sous 1.10 ces deux surfaces n'existent pas ou pas
-# ensemble : `pip install grimoire-kit[mcp]` livrerait à nouveau un serveur qui
-# casse à l'import plutôt qu'à l'appel. La borne haute reste `<3`, pour la
-# raison ci-dessus.
-mcp = ["mcp>=1.10,<3"]
+# Borne basse relevée à 2.0 (issue #436, migration vers la révision de
+# protocole 2026-07-28) : `mcp` 1.x plafonne à la révision 2025-11-25
+# (`types.LATEST_PROTOCOL_VERSION == "2025-11-25"`, pas de
+# `server/discover`) — vérifié contre 1.30.0, la dernière 1.x publiée, pas
+# supposé. À partir de 2.0.0 (vérifié 2.0.0 à 2.2.0), le SDK sait déjà parler
+# 2026-07-28 : `server/discover` a un handler par défaut dans
+# `mcp.server.lowlevel.Server`, et le handshake `initialize` d'un hôte plus
+# ancien (2025-06-18, 2025-11-25) continue de fonctionner via
+# `serve_dual_era_loop` — aucune ligne du pont n'a dû changer pour ça. Sous
+# 2.0 le pont resterait fonctionnellement correct mais annoncerait une
+# révision que la spécification a déjà remplacée, et le jour du retrait de
+# Roots/Sampling (prévu à partir de 2027-07-28) découvrirait la dette d'un
+# coup. La borne haute reste `<3`, pour la raison ci-dessus.
+mcp = ["mcp>=2.0,<3"]
 # Les extras ci-dessous restent volontairement sans borne haute. Audit du
 # 2026-08-15, mené après la panne mcp : chacun n'est utilisé qu'à travers un
 # point d'entrée canonique de haut niveau, celui qui survit aux majeures.

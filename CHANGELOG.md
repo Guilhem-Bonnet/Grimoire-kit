@@ -32,6 +32,26 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `grimoire agent override convert <nom> [--dry-run]` convertit une copie
   intégrale en override partiel équivalent, refusant (lignes citées) quand
   le corps de la copie a divergé du kit plutôt que de fusionner du texte.
+- **feat(mcp): migrer le pont MCP vers la révision de protocole 2026-07-28 (#436).**
+  Le plancher `mcp>=1.10,<3` laissait un résolveur retenir un SDK qui plafonne
+  à la révision 2025-11-25 (pas de `server/discover`, pas de mode sans état).
+  Relevé à `mcp>=2.0,<3` : à partir de 2.0.0, le SDK négocie 2026-07-28 par
+  défaut (`server/discover`, auto-dérivé des outils/prompts/ressources
+  enregistrés) tout en servant encore, sur la même connexion, un hôte qui ne
+  connaît que le handshake `initialize` (2025-06-18, 2025-11-25) —
+  `serve_dual_era_loop` côté SDK. Aucune ligne du pont
+  (`src/grimoire/mcp/server.py`) n'a dû changer : il ne câblait déjà ni
+  Roots, ni Sampling, ni Logging (les trois fonctionnalités que 2026-07-28
+  déprécie, retrait possible à partir de 2027-07-28), et ne garde aucun état
+  entre deux appels d'outil en dehors des fichiers du projet ciblé. Nouveaux
+  tests (`tests/unit/mcp/test_protocol_revision.py`) qui pilotent un vrai
+  `ClientSession` sur des flux en mémoire : négociation 2026-07-28 par
+  `server/discover`, compatibilité `initialize` à 2025-06-18 et 2025-11-25,
+  et absence d'état partagé entre deux connexions successives. Documentation
+  (`docs/mcp-integration.md`) et carte de correspondance
+  (`framework/agentic-industry-reference.md`, section 10) mises à jour.
+  Hors périmètre : transport HTTP/SSE, authentification, exposition réseau
+  distante — le pont reste stdio, en local.
 
 ## [3.45.0] - 2026-09-12
 

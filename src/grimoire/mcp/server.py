@@ -33,6 +33,20 @@ from grimoire.core.exceptions import GrimoireConfigError, GrimoireError
 # des deux côtés — constructeur `name`/`instructions`, décorateur `.tool()`,
 # `.run()` en stdio par défaut — donc un adaptateur suffit et évite d'enfermer
 # les utilisateurs sous la 2.0. Vérifié contre 2.0.0, pas supposé.
+#
+# Révision de protocole 2026-07-28 (issue #436) : `pyproject.toml` épingle
+# désormais `mcp>=2.0,<3` — seule la façade `MCPServer` (branche `try` juste
+# en dessous) est donc atteignable sous cette borne. La branche `FastMCP`
+# 1.x reste en place en défense, pour un environnement qui contournerait
+# l'extra déclaré (install directe d'un `mcp` plus ancien) ; elle ne parle
+# que jusqu'à la révision 2025-11-25 (pas de `server/discover`, pas de mode
+# sans état). `MCPServer` négocie 2026-07-28 sans code supplémentaire ici :
+# `server/discover` a un handler par défaut dans le serveur bas niveau, et le
+# handshake `initialize` d'un hôte 2025-06-18 ou 2025-11-25 continue de
+# fonctionner en parallèle (`serve_dual_era_loop`, vérifié contre mcp 2.0.0
+# à 2.2.0). Le pont n'a jamais câblé Roots, Sampling ni Logging — les trois
+# fonctionnalités que la révision 2026-07-28 déprécie (retrait possible à
+# partir de 2027-07-28) — donc rien à retirer de ce côté.
 _INSTRUCTIONS = (
     "Grimoire Kit — Composable AI agent platform. "
     "Use these tools to inspect and manage Grimoire projects."
