@@ -12,16 +12,23 @@ from __future__ import annotations
 
 from grimoire.core.standard_state import active_task_id, is_standard_enrolled
 from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
-from grimoire.hosts.decisions.tool_facts import classify_tool
+from grimoire.hosts.decisions.tool_facts import ToolFacts, classify_tool, policy_tool_detail
 from grimoire.policies.schemas import ActionKind
 
 
-def _record_temporal_approval(hook: HookInput) -> None:
+def _record_temporal_approval(hook: HookInput, facts: ToolFacts) -> None:
     """Best-effort, and a no-op cost (one ``Path.is_file()``) when the
     project declares no ``require_approval`` rule at all — same guard
     shape as :mod:`grimoire.hosts.decisions.tool_policy`'s own fast path.
     Never raises: a session state that fails to load or save degrades to
     "nothing recorded this call", not a broken ``PostToolUse``.
+
+    *facts* must come from the same :func:`classify_tool` call
+    :func:`decide_evidence_trace` already makes for its own ``FILE_WRITE``
+    check — recomputing it here would risk deriving a different
+    ``tool_detail`` (see :func:`grimoire.hosts.decisions.tool_facts.policy_tool_detail`)
+    than the one :mod:`.tool_policy` used at ``PreToolUse`` for the same
+    call, which would silently break approval matching.
     """
     if not hook.session_id:
         return
@@ -39,7 +46,12 @@ def _record_temporal_approval(hook: HookInput) -> None:
 
         now_iso = datetime.now(UTC).isoformat()
         state = load_session_state(hook.project_root, hook.session_id, now_iso=now_iso)
-        if record_post_tool_use_approval(custom_rules, state, tool_name=hook.tool_name or "unknown"):
+        if record_post_tool_use_approval(
+            custom_rules,
+            state,
+            tool_name=hook.tool_name or "unknown",
+            tool_detail=policy_tool_detail(facts),
+        ):
             save_session_state(hook.project_root, state, now_iso=now_iso)
     except Exception:
         return
@@ -47,10 +59,10 @@ def _record_temporal_approval(hook: HookInput) -> None:
 
 def decide_evidence_trace(hook: HookInput) -> Decision:
     """Post tool use: remind the agent that a write owes a line of proof."""
-    _record_temporal_approval(hook)
+    facts = classify_tool(hook.tool_name, hook.tool_input)
+    _record_temporal_approval(hook, facts)
     if not is_standard_enrolled(hook.project_root):
         return Decision()
-    facts = classify_tool(hook.tool_name, hook.tool_input)
     if facts.kind is not ActionKind.FILE_WRITE:
         return Decision()
     task_id = active_task_id(hook.project_root)

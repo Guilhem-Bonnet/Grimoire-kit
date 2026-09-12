@@ -34,7 +34,12 @@ from grimoire.policies.session_state import (
     save_session_state,
     session_state_path,
 )
-from grimoire.policies.temporal import evaluate_temporal, glob_match, record_post_tool_use_approval
+from grimoire.policies.temporal import (
+    evaluate_temporal,
+    glob_match,
+    record_post_tool_use_approval,
+    tool_pattern_matches,
+)
 
 # ── schemas: validation ──────────────────────────────────────────────────────
 
@@ -268,9 +273,59 @@ def test_record_post_tool_use_approval_is_idempotent_and_pattern_scoped() -> Non
     state = SessionState.new("s", datetime.now(UTC).isoformat())
     # A non-matching tool name records nothing.
     assert record_post_tool_use_approval(rules, state, tool_name="Write") is False
-    assert record_post_tool_use_approval(rules, state, tool_name="Bash(rm:*)") is True
+    # A matching tool name whose command detail does not start with the
+    # pattern's prefix ("rm") records nothing either.
+    assert record_post_tool_use_approval(rules, state, tool_name="Bash", tool_detail="git status") is False
+    assert record_post_tool_use_approval(rules, state, tool_name="Bash", tool_detail="rm -rf x") is True
     # Already approved: no further state change reported.
-    assert record_post_tool_use_approval(rules, state, tool_name="Bash(rm:*)") is False
+    assert record_post_tool_use_approval(rules, state, tool_name="Bash", tool_detail="rm -rf x") is False
+
+
+# ── tool_pattern_matches: the "tool key" fix ─────────────────────────────────
+#
+# Defect found in real use on Grimoire-Forge: `tool_pattern` used to be
+# compared to `tool_name` alone, so a documented pattern like
+# `Bash(git push:*)` was matched against the bare string `"Bash"` and could
+# never fire — `require_approval: true` answered `allow` on the very first
+# occurrence. These pin the fixed "tool key" convention from `docs/hosts.md`.
+
+
+def test_tool_pattern_matches_bash_command_prefix() -> None:
+    assert tool_pattern_matches("Bash(rm:*)", "Bash", "rm -rf x")
+    # A word-prefix, not a raw string prefix: "rmdir" is not "rm ".
+    assert not tool_pattern_matches("Bash(rm:*)", "Bash", "rmdir foo")
+    assert tool_pattern_matches("Bash(git push:*)", "Bash", "git push origin main")
+    assert not tool_pattern_matches("Bash(git push:*)", "Bash", "git pull")
+    # The exact prefix alone (no trailing arguments) still matches.
+    assert tool_pattern_matches("Bash(rm:*)", "Bash", "rm")
+
+
+def test_tool_pattern_matches_file_target_glob() -> None:
+    assert tool_pattern_matches(
+        "Write(_grimoire/standard/*)", "Write", "_grimoire/standard/policies.yaml"
+    )
+    assert not tool_pattern_matches("Write(_grimoire/standard/*)", "Write", "other/path.yaml")
+
+
+def test_tool_pattern_matches_star_is_unchanged() -> None:
+    assert tool_pattern_matches("*", "Bash", "")
+    assert tool_pattern_matches("*", "Bash", "rm -rf x")
+
+
+def test_tool_pattern_matches_bare_name_is_unchanged() -> None:
+    assert tool_pattern_matches("Bash", "Bash", "")
+    assert not tool_pattern_matches("Bash", "Write", "")
+
+
+def test_tool_pattern_matches_detail_less_mcp_call() -> None:
+    """An MCP tool with no established argument convention (`detail == ""`,
+    see `policy_tool_detail`) can only match the bare-name form or a
+    parenthesised pattern whose body is exactly ``"*"``."""
+    assert tool_pattern_matches("mcp__grimoire__write_file(*)", "mcp__grimoire__write_file", "")
+    assert not tool_pattern_matches(
+        "mcp__grimoire__write_file(secret)", "mcp__grimoire__write_file", ""
+    )
+    assert tool_pattern_matches("mcp__grimoire__write_file", "mcp__grimoire__write_file", "")
 
 
 def test_require_approval_asks_again_in_a_fresh_session() -> None:
@@ -429,6 +484,195 @@ rules:
     assert pre("sess-a") is Outcome.ALLOW
     # A fresh session carries no approval at all: it asks again too.
     assert pre("sess-b") is Outcome.ASK
+
+
+def test_git_push_command_prefix_end_to_end_asks_then_allows_after_post_tool_use(
+    governed_project: Path,
+) -> None:
+    """Reproduction of the defect found in real use on Grimoire-Forge: with
+    the bug, `tool_pattern: "Bash(git push:*)"` was compared to the bare
+    string `"Bash"` and never matched, so `require_approval: true` answered
+    `allow` on the very first `git push`. Both `docs/hosts.md` examples are
+    covered: `rm` and `git push`."""
+    _write_policies_yaml(
+        governed_project,
+        """
+rules:
+  - id: git-push-approval
+    description: "git push demande une confirmation, une fois par session"
+    action_kinds: []
+    mutation_classes: []
+    risk_profiles: []
+    verdict_on_match: warn
+    reason_template: "Push demandant une approbation explicite"
+    tool_pattern: "Bash(git push:*)"
+    require_approval: true
+""",
+    )
+    session_id = "sess-git-push"
+
+    def pre(command: str) -> Outcome:
+        return decide_tool_policy(
+            HookInput(
+                event=HookEvent.PRE_TOOL_USE,
+                project_root=governed_project,
+                tool_name="Bash",
+                tool_input={"command": command},
+                session_id=session_id,
+            )
+        ).outcome
+
+    def post(command: str) -> None:
+        from grimoire.hosts.decisions import run_decision
+
+        run_decision(
+            "grimoire.evidence-trace",
+            HookInput(
+                event=HookEvent.POST_TOOL_USE,
+                project_root=governed_project,
+                tool_name="Bash",
+                tool_input={"command": command},
+                session_id=session_id,
+            ),
+        )
+
+    # A command the pattern is not about is never asked for.
+    assert pre("git pull") is Outcome.ALLOW
+    # The documented pattern must actually fire: this is the regression this
+    # fix closes — it used to be `Outcome.ALLOW` here.
+    assert pre("git push origin main") is Outcome.ASK
+    # Retried without a PostToolUse in between: still asks (fail-open guard).
+    assert pre("git push origin main") is Outcome.ASK
+    post("git push origin main")
+    assert pre("git push origin main") is Outcome.ALLOW
+
+
+def test_rm_command_prefix_end_to_end_asks(tmp_path: Path) -> None:
+    """``Bash(rm:*)`` on ``rm -rf x`` from `docs/hosts.md`. Uses the
+    ``production`` (strict) profile so the base engine's own
+    destructive-mutation builtin also *warns* rather than *blocks* — a
+    ``rm -rf`` is flagged destructive independently of this fix (see
+    `tool_facts._DESTRUCTIVE_PATTERNS`), and blocking would mask whether the
+    temporal ``require_approval`` layer fired at all. Both stay `warn`, so
+    the observable outcome (`ask`) is unambiguous either way."""
+    setup_standard_profile(tmp_path, profile_id="production", task_id="bootstrap")
+    _write_policies_yaml(
+        tmp_path,
+        """
+rules:
+  - id: rm-approval
+    description: "rm demande une confirmation"
+    action_kinds: []
+    mutation_classes: []
+    risk_profiles: []
+    verdict_on_match: warn
+    reason_template: "Suppression demandant une approbation explicite"
+    tool_pattern: "Bash(rm:*)"
+    require_approval: true
+""",
+    )
+    decision = decide_tool_policy(
+        HookInput(
+            event=HookEvent.PRE_TOOL_USE,
+            project_root=tmp_path,
+            tool_name="Bash",
+            tool_input={"command": "rm -rf x"},
+            session_id="sess-rm",
+        )
+    )
+    assert decision.outcome is Outcome.ASK
+
+
+def test_write_target_glob_pattern_end_to_end_asks(governed_project: Path) -> None:
+    _write_policies_yaml(
+        governed_project,
+        """
+rules:
+  - id: standard-write-approval
+    description: "Toute ecriture sous _grimoire/standard demande une confirmation"
+    action_kinds: []
+    mutation_classes: []
+    risk_profiles: []
+    verdict_on_match: warn
+    reason_template: "Ecriture du standard demandant une approbation explicite"
+    tool_pattern: "Write(_grimoire/standard/*)"
+    require_approval: true
+""",
+    )
+    # A workspace-relative path, matching how `docs/hosts.md`'s
+    # `Write(_grimoire/standard/*)` example reads — an absolute path would
+    # never start with the literal prefix the pattern names.
+    matching = decide_tool_policy(
+        HookInput(
+            event=HookEvent.PRE_TOOL_USE,
+            project_root=governed_project,
+            tool_name="Write",
+            tool_input={"file_path": "_grimoire/standard/policies.yaml"},
+            session_id="sess-write",
+        )
+    )
+    assert matching.outcome is Outcome.ASK
+    not_matching = decide_tool_policy(
+        HookInput(
+            event=HookEvent.PRE_TOOL_USE,
+            project_root=governed_project,
+            tool_name="Write",
+            tool_input={"file_path": "other.txt"},
+            session_id="sess-write-2",
+        )
+    )
+    assert not_matching.outcome is Outcome.ALLOW
+
+
+def test_cooldown_with_command_prefix_pattern_end_to_end(governed_project: Path) -> None:
+    """Cooldown keyed on a ``Bash(rm:*)``-shaped pattern. Uses ``rm old-log.txt``
+    (no ``-r``/``-f`` flag) rather than the doc's ``rm -rf x`` so the base
+    engine's unrelated destructive-mutation builtin never fires here — this
+    test is only about the cooldown pattern matching the command prefix, not
+    about the destructive-command guard (covered separately)."""
+    _write_policies_yaml(
+        governed_project,
+        """
+rules:
+  - id: rm-cooldown
+    description: "rm limite a 2 par 10 minutes"
+    action_kinds: []
+    mutation_classes: []
+    risk_profiles: []
+    verdict_on_match: block
+    reason_template: "Refroidissement rm"
+    cooldown_after: {pattern: "Bash(rm:*)", count: 2, minutes: 10}
+""",
+    )
+    session_id = "sess-rm-cooldown"
+
+    def rm_call() -> Outcome:
+        return decide_tool_policy(
+            HookInput(
+                event=HookEvent.PRE_TOOL_USE,
+                project_root=governed_project,
+                tool_name="Bash",
+                tool_input={"command": "rm old-log.txt"},
+                session_id=session_id,
+            )
+        ).outcome
+
+    assert rm_call() is Outcome.ALLOW
+    assert rm_call() is Outcome.ALLOW
+    assert rm_call() is Outcome.DENY
+    # A command the pattern does not cover is never rate-limited by it.
+    assert (
+        decide_tool_policy(
+            HookInput(
+                event=HookEvent.PRE_TOOL_USE,
+                project_root=governed_project,
+                tool_name="Bash",
+                tool_input={"command": "ls -la"},
+                session_id=session_id,
+            )
+        ).outcome
+        is Outcome.ALLOW
+    )
 
 
 def test_a_purely_temporal_rule_never_blocks_the_first_call(governed_project: Path) -> None:

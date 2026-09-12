@@ -176,7 +176,7 @@ rules:
     risk_profiles: []
     verdict_on_match: warn
     reason_template: "Suppression demandant une approbation explicite"
-    tool_pattern: "Bash(rm:*)"       # glob, "*" seul joker — "*" = tous les outils
+    tool_pattern: "Bash(rm:*)"       # clé d'outil façon permissions Claude Code — voir plus bas
     require_approval: true            # ask à la 1re occurrence de la session, allow ensuite
     cooldown_after: {pattern: "Bash(rm:*)", count: 5, minutes: 10}
   - id: session-write-budget
@@ -189,13 +189,35 @@ rules:
     per_session: {max_writes: 50, max_tool_calls: 200, max_cost_usd: 2.0, max_duration_min: 60}
 ```
 
-**Règles.** Quatre clés nouvelles, toutes optionnelles : `tool_pattern`
-(motif appliqué au nom d'outil), `require_approval` (booléen), `per_session`
+**Règles.** Quatre clés nouvelles, toutes optionnelles : `tool_pattern`,
+`require_approval` (booléen), `per_session`
 (`max_tool_calls`/`max_writes`/`max_cost_usd`/`max_duration_min`, chacun
 optionnel) et `cooldown_after` (`pattern`/`count`/`minutes`). Une clé inconnue
 sous `PolicyRule`, `per_session` ou `cooldown_after` échoue au chargement avec
 une `GrimoirePolicyError` nommée (`GR-POL-002`) — jamais silencieusement
 ignorée.
+
+**Clé d'outil (`tool_pattern` / `cooldown_after.pattern`).** Corrigé le
+2026-09-12 (#449) : ces motifs n'étaient comparés qu'au nom nu de l'outil
+(`Bash`, `Write`…), donc un motif de la forme `Tool(...)` — celle utilisée
+dans les exemples ci-dessus et dans les permissions Claude Code — ne
+correspondait jamais. `Bash(git push:*)` était comparé à la seule chaîne
+`"Bash"` et ne matchait rien ; `require_approval: true` répondait `allow` dès
+le premier `git push`.
+
+Un motif sans parenthèses (`"*"`, `"Bash"`) reste comparé au seul nom
+d'outil — rétro-compatible avec toute règle écrite avant ce correctif. Un
+motif `Tool(corps)` compare `Tool` au nom d'outil, puis `corps` à un second
+terme, la *clé* de l'appel : la commande shell complète pour `Bash` (et tout
+outil qui exécute une commande), le chemin cible pour `Write`/`Edit`/`Read`,
+et le nom nu de l'outil (donc aucune clé additionnelle) pour un outil MCP
+tant qu'aucune convention d'arguments n'existe. Dans `corps`, un `:` suivi
+d'un `*` final (`rm:*`, `git push:*`) sépare le préfixe de commande du
+joker — exactement la convention des permissions Claude Code : `Bash(git
+push:*)` matche toute commande qui *commence par* `git push` (mot entier :
+`git pushx` ne compte pas), pas une commande contenant littéralement un
+`:`. Ailleurs, `corps` reste un glob simple (`*` seul joker) contre la clé,
+comme dans `Write(_grimoire/standard/*)`.
 
 **État de session.** Les compteurs vivent dans
 `_grimoire-output/.runs/session-<session_id>.json` (écriture atomique, comme

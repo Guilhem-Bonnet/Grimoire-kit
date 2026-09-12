@@ -257,6 +257,7 @@ def _evaluate_temporal_with_backend(
     state: SessionState,
     *,
     tool_name: str = "Bash",
+    tool_detail: str = "",
     is_write: bool = False,
     now: datetime | None = None,
 ) -> tuple[str, str, list[tuple[str, str, str]], dict[str, tuple[int, int, float, bool, list[str]]]]:
@@ -265,7 +266,9 @@ def _evaluate_temporal_with_backend(
     # backends' hit timestamps byte-identical — real time would make the
     # Python and Rust calls disagree by a few microseconds on every hit,
     # which is a clock artefact, not a parity bug.
-    decision = evaluate_temporal(rules, state, tool_name=tool_name, is_write=is_write, now=now)
+    decision = evaluate_temporal(
+        rules, state, tool_name=tool_name, tool_detail=tool_detail, is_write=is_write, now=now
+    )
     matched = [(m.rule_id, m.verdict.value, m.reason) for m in decision.matched_rules]
     counters = {
         rule_id: (rs.calls, rs.writes, rs.cost_usd, rs.approved, list(rs.hits))
@@ -324,6 +327,40 @@ def test_temporal_cooldown_agrees_across_backends(monkeypatch: pytest.MonkeyPatc
 
 
 @requires_rust_core
+def test_temporal_command_prefix_pattern_agrees_across_backends(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Parity pin for the tool-key fix: `Bash(git push:*)` must match a
+    `Bash` call whose command is `git push origin main`, and must not match
+    `git pull`, identically in both backends."""
+    rules = (
+        _temporal_rule(
+            verdict_on_match=VerdictKind.WARN, require_approval=True, tool_pattern="Bash(git push:*)"
+        ),
+    )
+    now = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+
+    for command, expected in (("git push origin main", "warn"), ("git pull", "allow")):
+        python_state = SessionState.new("s", now.isoformat())
+        rust_state = SessionState.new("s", now.isoformat())
+        py_result = _evaluate_temporal_with_backend(
+            "python", monkeypatch, rules, python_state, tool_name="Bash", tool_detail=command, now=now
+        )
+        rust_result = _evaluate_temporal_with_backend(
+            "rust", monkeypatch, rules, rust_state, tool_name="Bash", tool_detail=command, now=now
+        )
+        # Verdict/reason/matched-rules are the observable decision and must
+        # agree exactly. The counters dict is not compared for the
+        # non-matching case: `_evaluate_rust` eagerly builds a
+        # `session_state.rule_state` entry for every *temporal* rule before
+        # the Rust core even applies the pattern filter, while the Python
+        # loop only touches it for a rule that actually matched — a
+        # pre-existing, harmless difference in when the zeroed counters
+        # entry is created, unrelated to this fix (it never changes a
+        # verdict).
+        assert py_result[:3] == rust_result[:3], (command, py_result, rust_result)
+        assert py_result[0] == expected, command
+
+
+@requires_rust_core
 def test_record_post_tool_use_approval_agrees_across_backends(monkeypatch: pytest.MonkeyPatch) -> None:
     """The fail-open fix (review, 2026-09-12): ``PreToolUse`` never marks a
     rule approved by itself in either backend — only
@@ -335,11 +372,14 @@ def test_record_post_tool_use_approval_agrees_across_backends(monkeypatch: pytes
     rust_state = SessionState.new("s", now.isoformat())
 
     # First ask, both backends: neither marks the rule approved by itself.
+    # `tool_detail="rm -rf x"` is what makes `Bash(rm:*)` actually match —
+    # before the fix, this pattern was compared to the bare tool name alone
+    # and never matched at all.
     py_first = _evaluate_temporal_with_backend(
-        "python", monkeypatch, rules, python_state, tool_name="Bash(rm:*)", now=now
+        "python", monkeypatch, rules, python_state, tool_name="Bash", tool_detail="rm -rf x", now=now
     )
     rust_first = _evaluate_temporal_with_backend(
-        "rust", monkeypatch, rules, rust_state, tool_name="Bash(rm:*)", now=now
+        "rust", monkeypatch, rules, rust_state, tool_name="Bash", tool_detail="rm -rf x", now=now
     )
     assert py_first == rust_first
     assert py_first[0] == "warn"
@@ -354,17 +394,17 @@ def test_record_post_tool_use_approval_agrees_across_backends(monkeypatch: pytes
 
     # The matching PostToolUse marks it approved, in both backends alike.
     monkeypatch.setenv("GRIMOIRE_POLICIES_BACKEND", "python")
-    assert record_post_tool_use_approval(rules, python_state, tool_name="Bash(rm:*)") is True
+    assert record_post_tool_use_approval(rules, python_state, tool_name="Bash", tool_detail="rm -rf x") is True
     monkeypatch.setenv("GRIMOIRE_POLICIES_BACKEND", "rust")
-    assert record_post_tool_use_approval(rules, rust_state, tool_name="Bash(rm:*)") is True
+    assert record_post_tool_use_approval(rules, rust_state, tool_name="Bash", tool_detail="rm -rf x") is True
     assert python_state.rule_state("temporal-rule").approved is True
     assert rust_state.rule_state("temporal-rule").approved is True
 
     py_second = _evaluate_temporal_with_backend(
-        "python", monkeypatch, rules, python_state, tool_name="Bash(rm:*)", now=now
+        "python", monkeypatch, rules, python_state, tool_name="Bash", tool_detail="rm -rf x", now=now
     )
     rust_second = _evaluate_temporal_with_backend(
-        "rust", monkeypatch, rules, rust_state, tool_name="Bash(rm:*)", now=now
+        "rust", monkeypatch, rules, rust_state, tool_name="Bash", tool_detail="rm -rf x", now=now
     )
     assert py_second == rust_second
     assert py_second[0] == "allow"

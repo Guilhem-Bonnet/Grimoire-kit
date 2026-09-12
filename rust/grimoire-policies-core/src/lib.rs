@@ -287,6 +287,40 @@ fn glob_match(pattern: &str, text: &str) -> bool {
     cursor <= end
 }
 
+/// Miroir exact de `grimoire.policies.temporal.tool_pattern_matches` : voir
+/// sa docstring cote Python pour la convention complete (forme
+/// `Tool(body)`, suffixe `:*` pour un prefixe de commande "mot entier",
+/// retro-compatibilite avec les motifs sans parentheses). Corrige le defaut
+/// constate en usage reel sur Grimoire-Forge : `glob_match` seul comparait
+/// toujours le motif au seul `tool_name`, si bien qu'un motif documente
+/// comme `Bash(git push:*)` ne correspondait jamais.
+fn tool_pattern_matches(pattern: &str, tool_name: &str, detail: &str) -> bool {
+    if pattern == "*" {
+        return true;
+    }
+    let Some(open_paren) = pattern.find('(') else {
+        return glob_match(pattern, tool_name);
+    };
+    if !pattern.ends_with(')') {
+        return glob_match(pattern, tool_name);
+    }
+    let name_part = &pattern[..open_paren];
+    let body = &pattern[open_paren + 1..pattern.len() - 1];
+    if !glob_match(name_part, tool_name) {
+        return false;
+    }
+    if body == "*" {
+        return true;
+    }
+    if detail.is_empty() {
+        return false;
+    }
+    if let Some(prefix) = body.strip_suffix(":*") {
+        return detail == prefix || detail.starts_with(&format!("{prefix} "));
+    }
+    glob_match(body, detail)
+}
+
 /// Miroir de la partie temporelle de `grimoire.policies.schemas.PolicyRule` :
 /// `tool_pattern`, `require_approval`, `per_session` (aplati) et
 /// `cooldown_after` (aplati). Une regle sans aucune de ces contraintes
@@ -351,12 +385,13 @@ fn evaluate_one_temporal_rule(
     rule: &TemporalRule,
     state: &mut RuleState,
     tool_name: &str,
+    tool_detail: &str,
     is_write: bool,
     now_epoch_s: f64,
     session_started_epoch_s: f64,
 ) -> (VerdictKind, String, bool) {
     // 1) Refroidissement — le refus le plus immediat, en forme de rate-limit.
-    if rule.has_cooldown() && glob_match(&rule.cooldown_pattern, tool_name) {
+    if rule.has_cooldown() && tool_pattern_matches(&rule.cooldown_pattern, tool_name, tool_detail) {
         let hits = hits_in_window(&state.hits, now_epoch_s, rule.cooldown_minutes);
         if hits >= rule.cooldown_count {
             return (
@@ -440,6 +475,7 @@ fn evaluate_temporal_core(
     rules: &[TemporalRule],
     mut states: Vec<(String, RuleState)>,
     tool_name: &str,
+    tool_detail: &str,
     is_write: bool,
     now_epoch_s: f64,
     session_started_epoch_s: f64,
@@ -449,7 +485,7 @@ fn evaluate_temporal_core(
     let mut reason = String::new();
 
     for rule in rules {
-        if !glob_match(&rule.tool_pattern, tool_name) {
+        if !tool_pattern_matches(&rule.tool_pattern, tool_name, tool_detail) {
             continue;
         }
         let entry = states.iter_mut().find(|(id, _)| id == &rule.id).expect(
@@ -459,6 +495,7 @@ fn evaluate_temporal_core(
             rule,
             &mut entry.1,
             tool_name,
+            tool_detail,
             is_write,
             now_epoch_s,
             session_started_epoch_s,
@@ -496,10 +533,14 @@ fn evaluate_temporal_core(
 /// `require_approval` a `_mark_approved_rust`) : cette fonction ne fait donc
 /// que le filtre par motif. Ne mute aucun etat : cote Python, l'appelant
 /// marque `approved = true` pour chaque id retourne.
-fn matching_approval_rule_ids(rules: &[(String, String)], tool_name: &str) -> Vec<String> {
+fn matching_approval_rule_ids(
+    rules: &[(String, String)],
+    tool_name: &str,
+    detail: &str,
+) -> Vec<String> {
     rules
         .iter()
-        .filter(|(_, pattern)| glob_match(pattern, tool_name))
+        .filter(|(_, pattern)| tool_pattern_matches(pattern, tool_name, detail))
         .map(|(id, _)| id.clone())
         .collect()
 }
@@ -633,6 +674,7 @@ mod py_bridge {
         is_write: bool,
         now_epoch_s: f64,
         session_started_epoch_s: f64,
+        tool_detail: String,
     ) -> PyResult<PyTemporalResult> {
         let parsed_rules: Vec<TemporalRule> = rules
             .into_iter()
@@ -685,6 +727,7 @@ mod py_bridge {
             &parsed_rules,
             parsed_states,
             &tool_name,
+            &tool_detail,
             is_write,
             now_epoch_s,
             session_started_epoch_s,
@@ -723,8 +766,12 @@ mod py_bridge {
     /// depuis `record_post_tool_use_approval` (PostToolUse). Pas de types
     /// enum a parser ici : id et motif suffisent.
     #[pyfunction]
-    fn matching_approval_rule_ids(rules: Vec<(String, String)>, tool_name: String) -> Vec<String> {
-        super::matching_approval_rule_ids(&rules, &tool_name)
+    fn matching_approval_rule_ids(
+        rules: Vec<(String, String)>,
+        tool_name: String,
+        tool_detail: String,
+    ) -> Vec<String> {
+        super::matching_approval_rule_ids(&rules, &tool_name, &tool_detail)
     }
 
     #[pymodule]
@@ -1022,6 +1069,50 @@ mod temporal_tests {
         assert!(!glob_match("mcp__*__write*", "mcp__grimoire__read_file"));
     }
 
+    /// Reproduction directe du defaut constate en usage reel sur
+    /// Grimoire-Forge : avant la correction, `tool_pattern` n'etait jamais
+    /// compare qu'au seul `tool_name`, si bien qu'un motif documente comme
+    /// `Bash(git push:*)` ne pouvait jamais matcher `Bash`.
+    #[test]
+    fn tool_pattern_matches_bash_command_prefix() {
+        assert!(tool_pattern_matches(
+            "Bash(git push:*)",
+            "Bash",
+            "git push origin main"
+        ));
+        assert!(!tool_pattern_matches(
+            "Bash(git push:*)",
+            "Bash",
+            "git pull"
+        ));
+        assert!(tool_pattern_matches("Bash(rm:*)", "Bash", "rm -rf x"));
+        assert!(!tool_pattern_matches("Bash(rm:*)", "Bash", "rmdir foo"));
+        assert!(tool_pattern_matches(
+            "Write(_grimoire/standard/*)",
+            "Write",
+            "_grimoire/standard/policies.yaml"
+        ));
+        assert!(!tool_pattern_matches(
+            "Write(_grimoire/standard/*)",
+            "Write",
+            "other/path.yaml"
+        ));
+        assert!(tool_pattern_matches("*", "Bash", ""));
+        assert!(tool_pattern_matches("Bash", "Bash", ""));
+        // Un MCP sans convention d'arguments (detail vide) ne matche qu'un
+        // motif nu ou un motif entre parentheses dont le corps est "*".
+        assert!(tool_pattern_matches(
+            "mcp__grimoire__write_file(*)",
+            "mcp__grimoire__write_file",
+            ""
+        ));
+        assert!(!tool_pattern_matches(
+            "mcp__grimoire__write_file(secret)",
+            "mcp__grimoire__write_file",
+            ""
+        ));
+    }
+
     #[test]
     fn budget_allows_up_to_the_limit_then_blocks() {
         let rules = vec![budget_rule("writes-cap", Some(2), None)];
@@ -1029,14 +1120,14 @@ mod temporal_tests {
 
         // Deux ecritures autorisees : le compteur monte a 2.
         for _ in 0..2 {
-            let result = evaluate_temporal_core(&rules, states, "Write", true, 0.0, 0.0);
+            let result = evaluate_temporal_core(&rules, states, "Write", "", true, 0.0, 0.0);
             assert_eq!(result.verdict, VerdictKind::Allow);
             states = result.states;
         }
         assert_eq!(states[0].1.writes, 2);
 
         // La 3e est refusee, nommement, et le compteur ne bouge plus.
-        let result = evaluate_temporal_core(&rules, states, "Write", true, 0.0, 0.0);
+        let result = evaluate_temporal_core(&rules, states, "Write", "", true, 0.0, 0.0);
         assert_eq!(result.verdict, VerdictKind::Block);
         assert!(result.reason.contains("Budget de 2 écritures"));
         assert_eq!(result.states[0].1.writes, 2);
@@ -1052,11 +1143,12 @@ mod temporal_tests {
         let rules = vec![approval_rule("rm-approval", "Bash(rm:*)")];
         let states = vec![empty_state("rm-approval")];
 
-        let first = evaluate_temporal_core(&rules, states, "Bash(rm:*)", true, 0.0, 0.0);
+        let first = evaluate_temporal_core(&rules, states, "Bash", "rm -rf x", true, 0.0, 0.0);
         assert_eq!(first.verdict, VerdictKind::Warn);
         assert!(!first.states[0].1.approved);
 
-        let second = evaluate_temporal_core(&rules, first.states, "Bash(rm:*)", true, 0.0, 0.0);
+        let second =
+            evaluate_temporal_core(&rules, first.states, "Bash", "rm -rf x", true, 0.0, 0.0);
         assert_eq!(second.verdict, VerdictKind::Warn);
     }
 
@@ -1068,13 +1160,13 @@ mod temporal_tests {
         let rules = vec![approval_rule("rm-approval", "Bash(rm:*)")];
         let mut states = vec![empty_state("rm-approval")];
 
-        let asked = evaluate_temporal_core(&rules, states, "Bash(rm:*)", true, 0.0, 0.0);
+        let asked = evaluate_temporal_core(&rules, states, "Bash", "rm -rf x", true, 0.0, 0.0);
         assert_eq!(asked.verdict, VerdictKind::Warn);
         states = asked.states;
 
         let approval_rules: Vec<(String, String)> =
             vec![("rm-approval".to_string(), "Bash(rm:*)".to_string())];
-        let approved_ids = matching_approval_rule_ids(&approval_rules, "Bash(rm:*)");
+        let approved_ids = matching_approval_rule_ids(&approval_rules, "Bash", "rm -rf x");
         assert_eq!(approved_ids, vec!["rm-approval".to_string()]);
         for (id, state) in states.iter_mut() {
             if approved_ids.contains(id) {
@@ -1082,7 +1174,7 @@ mod temporal_tests {
             }
         }
 
-        let allowed = evaluate_temporal_core(&rules, states, "Bash(rm:*)", true, 0.0, 0.0);
+        let allowed = evaluate_temporal_core(&rules, states, "Bash", "rm -rf x", true, 0.0, 0.0);
         assert_eq!(allowed.verdict, VerdictKind::Allow);
     }
 
@@ -1093,11 +1185,11 @@ mod temporal_tests {
             ("other-approval".to_string(), "Write".to_string()),
         ];
         assert_eq!(
-            matching_approval_rule_ids(&rules, "Bash(rm:*)"),
+            matching_approval_rule_ids(&rules, "Bash", "rm -rf x"),
             vec!["rm-approval".to_string()]
         );
         assert_eq!(
-            matching_approval_rule_ids(&rules, "Read"),
+            matching_approval_rule_ids(&rules, "Read", ""),
             Vec::<String>::new()
         );
     }
@@ -1108,7 +1200,7 @@ mod temporal_tests {
         // un etat neuf (approved=false) redemande, meme pour la meme regle.
         let rules = vec![approval_rule("rm-approval", "*")];
         let states = vec![empty_state("rm-approval")];
-        let result = evaluate_temporal_core(&rules, states, "Bash", false, 0.0, 0.0);
+        let result = evaluate_temporal_core(&rules, states, "Bash", "", false, 0.0, 0.0);
         assert_eq!(result.verdict, VerdictKind::Warn);
     }
 
@@ -1118,12 +1210,12 @@ mod temporal_tests {
         let mut states = vec![empty_state("burst-guard")];
 
         for _ in 0..3 {
-            let result = evaluate_temporal_core(&rules, states, "Bash", false, 0.0, 0.0);
+            let result = evaluate_temporal_core(&rules, states, "Bash", "", false, 0.0, 0.0);
             assert_eq!(result.verdict, VerdictKind::Allow);
             states = result.states;
         }
         // Les 3 hits sont dans la fenetre (meme instant) : le 4e est bloque.
-        let result = evaluate_temporal_core(&rules, states, "Bash", false, 5.0, 0.0);
+        let result = evaluate_temporal_core(&rules, states, "Bash", "", false, 5.0, 0.0);
         assert_eq!(result.verdict, VerdictKind::Block);
         assert!(result.reason.contains("Refroidissement"));
     }
@@ -1133,11 +1225,11 @@ mod temporal_tests {
         let rules = vec![cooldown_rule("burst-guard", "*", 3, 10.0)];
         let mut states = vec![empty_state("burst-guard")];
         for _ in 0..3 {
-            let result = evaluate_temporal_core(&rules, states, "Bash", false, 0.0, 0.0);
+            let result = evaluate_temporal_core(&rules, states, "Bash", "", false, 0.0, 0.0);
             states = result.states;
         }
         // 700s later (> 10 min), the three hits have aged out of the window.
-        let result = evaluate_temporal_core(&rules, states, "Bash", false, 700.0, 0.0);
+        let result = evaluate_temporal_core(&rules, states, "Bash", "", false, 700.0, 0.0);
         assert_eq!(result.verdict, VerdictKind::Allow);
     }
 
@@ -1158,7 +1250,7 @@ mod temporal_tests {
         }];
         let states = vec![empty_state("short-session")];
         // 6 minutes (360s) after session start > 5 min budget.
-        let result = evaluate_temporal_core(&rules, states, "Bash", false, 360.0, 0.0);
+        let result = evaluate_temporal_core(&rules, states, "Bash", "", false, 360.0, 0.0);
         assert_eq!(result.verdict, VerdictKind::Block);
         assert!(result.reason.contains("Fenêtre"));
     }
@@ -1169,7 +1261,7 @@ mod temporal_tests {
         let mut r = rules;
         r[0].tool_pattern = "Write".to_string();
         let states = vec![empty_state("writes-cap")];
-        let result = evaluate_temporal_core(&r, states, "Bash", true, 0.0, 0.0);
+        let result = evaluate_temporal_core(&r, states, "Bash", "", true, 0.0, 0.0);
         assert_eq!(result.verdict, VerdictKind::Allow);
         assert_eq!(result.states[0].1.writes, 0);
     }
