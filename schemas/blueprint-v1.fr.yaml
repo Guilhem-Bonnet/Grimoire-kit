@@ -184,6 +184,17 @@
     vide étant valide pour un node non relié : l'absence de cette clé sur tous
     les nodes rétrograde le fichier en brouillon de Studio.
 
+/$defs/node/properties/acceptance:
+  texte: >-
+    Critères d'acceptation (issue #428). Chaque entrée est soit du texte libre
+    (n'alimente que la classe de vérifiabilité — le gate ne l'exécute jamais),
+    soit une forme structurée exécutable : `{run, expect_exit?, cwd?,
+    timeout_s?, expect_stdout_contains?}` (une commande dont le code de sortie
+    fait le verdict) ou `{path_exists}` / `{test}` (preuve mécanique). Validé
+    au chargement par `grimoire.flows.blueprint_loader` — une forme inconnue
+    ou ambiguë y est un refus nommé, pas une erreur de ce schéma (délibérément
+    permissif ici).
+
 /$defs/node/ref/pattern:
   titre: "`ref` quand `kind` vaut `pattern`"
   texte: >-

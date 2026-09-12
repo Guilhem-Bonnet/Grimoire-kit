@@ -46,6 +46,12 @@ from grimoire.missions.schemas import MissionTask, TaskState
 from grimoire.missions.service import TaskRefusedError, TaskService
 from grimoire.missions.verifiability import Verifiability, classify
 
+#: Une acceptance ``{"test": "..."}`` (issue #428) se traduit en une seule
+#: invocation ``pytest`` de l'identifiant déclaré — même interpréteur que
+#: celui qui fait tourner le kit, pour ne jamais dépendre d'un ``pytest`` du
+#: PATH qui ne serait pas celui du projet.
+_PYTEST_MODULE_INVOCATION = ("-m", "pytest")
+
 __all__ = [
     "DEFAULT_DISPATCH_ACTOR",
     "DISPATCH_RESULTS_RELPATH",
@@ -111,6 +117,48 @@ def _verify_command(python: str, blueprint_path: Path, node_id: str, result_path
     )
 
 
+def _acceptance_checks(
+    contract: NodeContract,
+) -> tuple[tuple[str, ...], tuple[int, ...], tuple[str | None, ...], tuple[float | None, ...]]:
+    """Les commandes de l'acceptance structurée d'un node — vides si aucune (issue #428).
+
+    Rend quatre tuples alignés par position, prêts pour les paramètres
+    ``check_expect_exits``/``check_expect_stdout_contains``/``check_timeouts``
+    de :func:`grimoire.missions.dispatch.run_dispatch`. C'est ici, jamais côté
+    ``run_dispatch``, que le fossé signalé par l'issue se referme : sans ces
+    commandes en plus du contrôle d'enveloppe (:func:`_verify_command`), le
+    gate ne vérifiait jamais que le texte de l'acceptance ; avec elles, une
+    enveloppe conforme ne suffit plus si la commande déclarée échoue.
+
+    ``AcceptanceRun.cwd`` (différent de ``"."``) est replié dans la commande
+    elle-même (``cd <cwd> && <commande>``) : ``_run_checks`` exécute tout en
+    ``shell=True`` dans la racine du projet, sans notion de cwd par check.
+    Une ``AcceptanceEvidence`` de genre ``"path_exists"`` devient un ``test -e``
+    POSIX ; de genre ``"test"``, une invocation ``pytest`` de l'identifiant
+    déclaré, avec le même interpréteur que celui qui exécute le kit.
+    """
+    cmds: list[str] = []
+    expect_exits: list[int] = []
+    expect_stdout: list[str | None] = []
+    timeouts: list[float | None] = []
+    for run in contract.acceptance_runs:
+        raw = run.raw if run.cwd in (".", "") else f"cd {shlex.quote(run.cwd)} && {run.raw}"
+        cmds.append(raw)
+        expect_exits.append(run.expect_exit)
+        expect_stdout.append(run.expect_stdout_contains)
+        timeouts.append(run.timeout_s)
+    for evidence in contract.acceptance_evidence:
+        if evidence.kind == "path_exists":
+            cmds.append(f"test -e {shlex.quote(evidence.value)}")
+        else:  # "test" — le seul autre genre que blueprint_loader produit
+            pytest_argv = (sys.executable, *_PYTEST_MODULE_INVOCATION, evidence.value)
+            cmds.append(" ".join(shlex.quote(part) for part in pytest_argv))
+        expect_exits.append(0)
+        expect_stdout.append(None)
+        timeouts.append(None)
+    return tuple(cmds), tuple(expect_exits), tuple(expect_stdout), tuple(timeouts)
+
+
 def _ensure_running(service: TaskService, task: MissionTask, *, actor: str) -> MissionTask:
     """Amène *task* jusqu'à ``running``, seul état d'où la cascade peut fermer un V1.
 
@@ -139,13 +187,16 @@ class NodeDispatchOutcome:
     node_id: str
     task_id: str
     verifiability: str
-    verdict: str  # "green" | "red" | "refused_v2" | "host_unavailable"
+    verdict: str  # "green" | "red" | "acceptance_unrunnable" | "refused_v2" | "host_unavailable"
     needs_review: bool
     provider: str | None
     attempts: int
     escalations: int
     cost_usd: float | None
     uncertainties: tuple[dict[str, Any], ...]
+    #: « executed » / « unrunnable » / « judged » (issue #428, point 4) —
+    #: voir ``_acceptance_status`` pour la règle exacte.
+    acceptance_status: str = "judged"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -159,6 +210,7 @@ class NodeDispatchOutcome:
             "escalations": self.escalations,
             "cost_usd": self.cost_usd,
             "uncertainties": [dict(u) for u in self.uncertainties],
+            "acceptance_status": self.acceptance_status,
         }
 
 
@@ -167,22 +219,49 @@ def _escalations(report: DispatchReport) -> int:
     return sum(1 for i in range(1, len(tiers)) if tiers[i] != tiers[i - 1])
 
 
+def _acceptance_status(report: DispatchReport, *, has_structured_acceptance: bool) -> str:
+    """« executed » / « unrunnable » / « judged » pour le node entier (issue #428).
+
+    ``report.unrunnable`` prime toujours. Sinon, un node dont le contrat
+    porte au moins une :class:`~grimoire.flows.schemas.AcceptanceRun` ou
+    :class:`~grimoire.flows.schemas.AcceptanceEvidence` a vu sa véritable
+    acceptance tourner (verte ou rouge) : « executed ». Un node purement
+    textuel — qu'il soit V0 sans commande déclarée ou V1 — n'a ni exécution
+    mécanique ni juge réel aujourd'hui : « judged » est le mode conservateur
+    qui ne prétend jamais à une exécution qui n'a pas eu lieu (voir le
+    docstring de ``missions.dispatch._acceptance_status_for_verdict`` pour la
+    même règle côté ledger). Documenté comme limite connue, pas une garde
+    silencieuse : un vert V1 continue de marquer le node à relire
+    (``needs_review``), inchangé par ce correctif.
+    """
+    if report.unrunnable is not None:
+        return "unrunnable"
+    return "executed" if has_structured_acceptance else "judged"
+
+
 def _node_outcome_from_report(
-    node_id: str, task_id: str, verifiability: Verifiability, report: DispatchReport
+    node_id: str,
+    task_id: str,
+    verifiability: Verifiability,
+    report: DispatchReport,
+    *,
+    has_structured_acceptance: bool,
 ) -> NodeDispatchOutcome:
     last = report.attempts[-1] if report.attempts else None
     known_costs = [a.cost_usd for a in report.attempts if a.cost_usd is not None]
+    verdict = "acceptance_unrunnable" if report.unrunnable is not None else ("green" if report.succeeded else "red")
     return NodeDispatchOutcome(
         node_id=node_id,
         task_id=task_id,
         verifiability=verifiability.value,
-        verdict="green" if report.succeeded else "red",
+        verdict=verdict,
         needs_review=report.succeeded and verifiability is Verifiability.V1,
         provider=last.provider if last else None,
         attempts=len(report.attempts),
         escalations=_escalations(report),
         cost_usd=sum(known_costs) if known_costs else None,
         uncertainties=tuple(u.to_dict() for u in report.uncertainties),
+        acceptance_status=_acceptance_status(report, has_structured_acceptance=has_structured_acceptance),
     )
 
 
@@ -265,18 +344,30 @@ class DispatchExecutor:
             self.last_result = result
             return result
 
-        checks = (_verify_command(sys.executable, self._blueprint_path, node_id, result_path),)
+        # Le check d'enveloppe (conformité du fichier de sortie au contrat de
+        # pins) ne suffit plus seul (issue #428) : l'acceptance structurée du
+        # node — si le blueprint en déclare une — s'ajoute ici, exécutée par
+        # le même gate, dans le même appel de cascade. Sans elle, un texte
+        # d'acceptance conforme n'engageait jamais aucune commande réelle.
+        acceptance_cmds, acceptance_expects, acceptance_stdout, acceptance_timeouts = _acceptance_checks(contract)
+        checks = (_verify_command(sys.executable, self._blueprint_path, node_id, result_path), *acceptance_cmds)
         report = run_dispatch(
             self._service,
             task_id,
             checks=checks,
+            check_expect_exits=(0, *acceptance_expects),
+            check_expect_stdout_contains=(None, *acceptance_stdout),
+            check_timeouts=(None, *acceptance_timeouts),
+            acceptance_declared=contract.has_structured_acceptance,
             max_tier=self._max_tier,
             call_timeout=self._call_timeout,
             actor=self._actor,
             agent=self._agent,
             project_root=self._project_root,
         )
-        self.node_outcomes[node_id] = _node_outcome_from_report(node_id, task_id, verifiability, report)
+        self.node_outcomes[node_id] = _node_outcome_from_report(
+            node_id, task_id, verifiability, report, has_structured_acceptance=contract.has_structured_acceptance
+        )
 
         if not report.succeeded:
             self.blocked_node = node_id
@@ -495,6 +586,10 @@ def node_dispatch_history(project_root: Path, run_id: str, node_ids: Sequence[st
                 "verdict": last.get("verdict"),
                 "cost_usd": last.get("cost_usd"),
                 "uncertainties": last.get("uncertainties", []),
+                # « executed »/« unrunnable »/« judged » (issue #428) — absent
+                # (``None``) sur un événement écrit avant ce correctif.
+                "acceptance_status": last.get("acceptance_status"),
+                "checks": last.get("checks", []),
             }
         )
     return rows

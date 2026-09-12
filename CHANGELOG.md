@@ -7,6 +7,29 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **fix(flows): le gate de `flow run --executor dispatch` exécute l'acceptance structurée d'un node, pas seulement l'enveloppe (#428).**
+  Rejeu réel du 2026-09-11 (épic #307, lot 3) : un nœud V0 déclaré vert alors
+  que sa vraie suite `pytest` ne pouvait pas être collectée (dépendance
+  absente) — le gate ne vérifiait que la conformité de l'enveloppe JSON de
+  l'ouvrier au contrat de sortie, jamais le texte de l'acceptance. `node.acceptance`
+  accepte désormais, en plus du texte libre (rétrocompatible), une forme
+  structurée exécutable (`{"run": "...", "expect_exit": 0, "cwd": ".",
+  "timeout_s": 120, "expect_stdout_contains": "..."}`) ou une evidence
+  mécanique (`{"path_exists": "..."}`, `{"test": "..."}`) — validée au
+  chargement du blueprint (`blueprint_loader.py`), refus nommé sur une forme
+  inconnue. Le gate (`missions/dispatch.py`) exécute ces commandes après la
+  réponse de l'ouvrier et rend trois verdicts, jamais un quatrième :
+  exécutée-verte (succès), exécutée-rouge (échec, suit la cascade normale :
+  réessai/escalade), ou **acceptance inexécutable** (refus nommé — binaire
+  absent, `pytest` 5/4, erreur d'import dans la sortie — qui arrête la
+  cascade net, jamais un succès). `flow status` et le rapport de dispatch
+  montrent par nœud le statut d'acceptance (exécutée/inexécutable/jugée) et
+  la sortie tronquée à 2 Ko. Un nœud purement textuel (V0 sans commande
+  déclarée, ou V1) garde le comportement actuel, documenté comme limite
+  connue plutôt qu'étendu. Aucun changement côté port Rust des flows
+  (`rust/grimoire-flows-core/`) : seule `NodeContract.outputs` (pins) y
+  traverse la frontière PyO3, inchangée par ce correctif.
+
 ## [3.44.2] - 2026-09-11
 
 - **fix(hosts): `collect_agents` résout ses propres skills quand `known_skills` n'est pas fourni — `SessionStart` et le porteur de proposition ne plantent plus sur un agent à skills attachés (#423).**
