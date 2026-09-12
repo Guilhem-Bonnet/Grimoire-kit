@@ -66,7 +66,7 @@ version canonique et sa légende de statuts.
 | Agent Skills (`skill-forge`) | agentskills.io, SkillsBench | Skills attachés par défaut depuis #377/#372 (moins de skills transversaux) ; validation `skills-ref` et eval par skill toujours absents | à combler |
 | Hooks Forge via gateway | Familles d'événements des hôtes | `PostToolUseFailure`/`SubagentStart` désormais exploités (#321, même jour, après la référence) ; `TaskCreated`/`TaskCompleted`/`InstructionsLoaded` absents | à combler |
 | Persona d'entrée SessionStart | Aucun hôte équivalent | Inchangé | en avance |
-| Pont MCP (`grimoire` serveur) | MCP 2026-07-28 | Code toujours calé sur 2025-03-26/2025-06-18 | à combler |
+| Pont MCP (`grimoire` serveur) | MCP 2026-07-28 | **Comblé pendant la revue de cette PR** (#436/#437, 2026-09-12) : plancher `mcp>=2.0,<3`, `server/discover` négocie 2026-07-28 par défaut | aligné |
 | Observabilité cockpit | OTel GenAI, Langfuse, Phoenix | Émission conforme livrée (`otel_conventions.py`, #322) ; `/api/otel` sans appelant, `observability.html` sur l'ancien chemin (#139) | à combler |
 | Sécurité, patterns destructifs | Beurer-Kellner, CaMeL | Aucun pattern Plan-Then-Execute trouvé | à combler |
 | Identité des agents | Entra Agent ID, SPIFFE | Hors périmètre assumé | à suivre |
@@ -109,7 +109,7 @@ Verdict : dix règles sur douze appliquées avec preuve directe, une appliquée 
 | Horizon long | Non instrumenté | Aucune mesure d'horizon long (type METR) trouvée sur les missions Grimoire |
 | Computer use | Hors périmètre, non documenté comme tel | Le kit ne pilote pas de navigateur/OS ; absence cohérente avec son domaine (dev tooling), mais pas actée en décision explicite comme le sont A2A ou la roue Rust |
 | Agent teams et multi-agent natif API | Aligné, en veille documentée | AMN/SHP répliquent le plafond d'échanges P2P des agent teams ; pas de client API multi-agent natif dans le kit — cohérent avec la décision « pas de client API dans le kit » |
-| MCP stateless et MRTR | En retard, documenté | Code calé sur 2025-03-26/2025-06-18 (annotations, `structuredContent`) contre la révision 2026-07-28 citée en cible ; écart connu, priorité 4 |
+| MCP stateless et MRTR | Comblé pendant la revue de cette PR | Migration vers 2026-07-28 livrée le 2026-09-12 (#436/#437) ; était en retard au moment de la rédaction initiale de cet audit |
 | Recursive Language Models | Absent, non entrepris | Aucune trace dans le kit |
 | Politique temporelle hors du code | En retard | Aucun compteur ni budget par session (tool-mediation-gate) ; écart connu, priorité 5 |
 | Identité d'agent de premier rang | Absent, décision explicite | « Hors périmètre tant que les agents restent locaux » — décision assumée, pas un oubli |
@@ -142,10 +142,12 @@ double par construction (leçon de l'audit du 2026-09-08).
    Fait : recherche de `budget`/`counter`/`session_limit` dans `grimoire/policies/` sans résultat au
    2026-09-12. Pas d'issue dédiée trouvée. Coût : moyen.
 
-4. **[Écart industrie] Pont MCP calé sur une révision antérieure à 2026-07-28.**
-   Fait : commentaires de `src/grimoire/mcp/server.py` citant 2025-03-26 et 2025-06-18 comme bornes
-   basses du SDK, inchangé au 2026-09-12. Pas d'issue dédiée trouvée. Coût : moyen (dépend du
-   calendrier de dépréciation de Roots/Sampling, 2027-07-28).
+4. **[Comblé pendant la revue de cette PR] Pont MCP migré vers la révision 2026-07-28.**
+   Fait constaté à la rédaction initiale (2026-09-12, matin) : commentaires de
+   `src/grimoire/mcp/server.py` citant 2025-03-26 et 2025-06-18 comme bornes basses du SDK. Fermé
+   dans la même journée par #436/#437 (`mcp>=2.0,<3`, `server/discover` négocie 2026-07-28 par
+   défaut) pendant que cette PR d'audit était en attente de fusion — conservé ici comme preuve que
+   la méthode (fait daté, jamais figé) tient même sur un cycle de quelques heures.
 
 5. **[Écart industrie] Coût par tâche résolue et pass^k non instrumentés en continu.**
    Fait : `pass_hat_k` existe (`grimoire.evals.schemas`, A3) mais seulement pour les campagnes
