@@ -19,6 +19,7 @@ exactement comme sur l'hôte mono-projet historique.
 from __future__ import annotations
 
 import json
+import re
 import sys
 import threading
 import urllib.error
@@ -489,3 +490,177 @@ def test_un_agent_inconnu_a_travers_le_cockpit_rend_un_404_explicable(agents_hom
 
     assert code == 404
     assert payload["error"]
+
+
+# ── 8. Tâches (#140) : la cible et le gate à travers le transport ──────────
+#
+# Les actions de tâche (``claim``/``move``/``block``/``close``) sont un chemin
+# paramétré de ``workspace_post`` (``/api/workspace/tasks/<id>/<action>``),
+# donc absent de :data:`POST_ROUTES` — les tests 2 ci-dessus ne les couvrent
+# jamais. C'est exactement la lacune que l'issue nomme : rien ne prouvait
+# jusqu'ici, au niveau transport, qu'un gate rouge nomme la preuve manquante
+# ni qu'un projet qui n'est pas celui de lancement reste refusé pour une
+# tâche comme il l'est déjà pour un override ou une commande.
+
+
+@pytest.fixture(scope="module")
+def tasks_home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[int, Path]]:
+    """Un cockpit qui lance en direct un projet gouverné, et sert en lecture
+    seule un second projet du registre.
+
+    Même principe que :func:`agents_home` : un projet dédié, pas les fixtures
+    de session ``real_project``/``second_project`` partagées par le reste de
+    la suite — écrire une transition dessus polluerait des tests qui lisent
+    leurs tâches par position. Rend la racine du projet de lancement plutôt
+    qu'un identifiant de tâche : chaque test mint la sienne (voir
+    :func:`_new_task`), pour rester indépendant de l'ordre d'exécution des
+    autres tests de cette section — une transition écrite par l'un ne doit
+    pas devenir la précondition silencieuse d'un autre.
+    """
+    import os
+    import subprocess
+
+    home_root = tmp_path_factory.mktemp("tasks-home") / "projet-tasks-home"
+    away_root = tmp_path_factory.mktemp("tasks-away") / "projet-tasks-away"
+    for root, name in ((home_root, "projet-tasks-home"), (away_root, "projet-tasks-away")):
+        root.mkdir(parents=True)
+        subprocess.run(["git", "init", "-q"], cwd=str(root), check=False, capture_output=True)
+        subprocess.run(
+            [sys.executable, "-m", "grimoire", "init", ".", "-y", "--name", name],
+            cwd=str(root), check=False, capture_output=True, timeout=180,
+        )
+        subprocess.run(
+            [sys.executable, "-m", "grimoire", "standard", "init", "--profile", "governed"],
+            cwd=str(root), check=False, capture_output=True, timeout=180,
+        )
+    if not (home_root / "_grimoire" / "kit").is_dir():
+        pytest.skip("`grimoire init` indisponible ici")
+
+    tmp_path = tmp_path_factory.mktemp("tasks-home-cockpit")
+    previous_env = os.environ.get("GRIMOIRE_COCKPIT_HOME")
+    previous_home_slug = cmd_cockpit._HOME_SLUG
+    os.environ["GRIMOIRE_COCKPIT_HOME"] = str(tmp_path / "cockpit")
+    cmd_cockpit._HOME_SLUG = "projet-tasks-home"
+    cmd_cockpit._API_CACHE.clear()
+    reg.register_project(home_root, "projet-tasks-home")
+    reg.register_project(away_root, "projet-tasks-away")
+    serve_dir = tmp_path / "serve"
+    serve_dir.mkdir(parents=True)
+    handler = partial(cmd_cockpit._CockpitHandler, directory=str(serve_dir))
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield httpd.server_address[1], home_root
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        cmd_cockpit._API_CACHE.clear()
+        cmd_cockpit._HOME_SLUG = previous_home_slug
+        if previous_env is None:
+            os.environ.pop("GRIMOIRE_COCKPIT_HOME", None)
+        else:
+            os.environ["GRIMOIRE_COCKPIT_HOME"] = previous_env
+
+
+def _new_task(home_root: Path, title: str) -> str:
+    """Ouvre une tâche fraîche (``proposed``, acceptance et owner déclarés)
+    dans le projet de lancement, et rend son identifiant.
+
+    ``grimoire task add`` imprime sur ``stderr`` (``cmd_task.console =
+    Console(stderr=True)``) : chercher l'identifiant sur ``stdout`` seul
+    échoue toujours et masquerait un vrai échec derrière un skip.
+    """
+    import subprocess
+
+    added = subprocess.run(
+        [
+            sys.executable, "-m", "grimoire", "task", "add", title,
+            "-a", "Le board affiche la tâche", "-a", "Le refus nomme la preuve",
+            "--owner", "winston",
+        ],
+        cwd=str(home_root), capture_output=True, text=True, check=False, timeout=180,
+    )
+    match = re.search(r"(GAO-[a-zA-Z0-9-]+)", added.stdout + added.stderr)
+    if not match:
+        pytest.skip(
+            f"`grimoire task add` n'a pas ouvert de tâche ici : "
+            f"{added.stdout[-400:]} {added.stderr[-400:]}"
+        )
+    return match.group(1)
+
+
+def test_une_transition_de_tache_reussie_ecrit_au_ledger_via_le_cockpit(
+    tasks_home: tuple[int, Path],
+) -> None:
+    """``proposed -> ready`` : acceptance et owner sont déjà déclarés à la
+    création, la porte est ouverte — la carte doit avancer."""
+    port, home_root = tasks_home
+    task_id = _new_task(home_root, "Faire avancer une porte ouverte")
+    code, payload = _post(
+        port, f"{PREFIX}tasks/{task_id}/move?project=projet-tasks-home", {"to": "ready"}
+    )
+
+    assert code == 200
+    assert payload.get("blocked") is not True
+    assert payload["status"] == "ready"
+    assert payload["transition"] == "proposed → ready"
+
+
+def test_une_transition_refusee_nomme_la_preuve_manquante_via_le_cockpit(
+    tasks_home: tuple[int, Path],
+) -> None:
+    """``ready -> claimed`` (réclamer) exige un context bundle et un
+    fournisseur activé au registre : un projet fraîchement initialisé n'a ni
+    l'un ni l'autre. La réponse reste un 200 — ce n'est pas une panne du
+    serveur, c'est LA réponse — avec l'artefact manquant nommé, jamais une
+    carte qui avance en silence ni une erreur muette. Passe d'abord par
+    ``proposed -> ready`` (porte ouverte) pour atteindre l'état où
+    ``claim`` est l'edge légal de la machine à états — la porte fermée est
+    celle d'après, pas celle-ci."""
+    port, home_root = tasks_home
+    task_id = _new_task(home_root, "Réclamer sans fournisseur activé")
+    ready_code, _ = _post(
+        port, f"{PREFIX}tasks/{task_id}/move?project=projet-tasks-home", {"to": "ready"}
+    )
+    assert ready_code == 200
+    code, payload = _post(port, f"{PREFIX}tasks/{task_id}/claim?project=projet-tasks-home", {})
+
+    assert code == 200
+    assert payload["blocked"] is True
+    assert payload["refusals"], "le refus doit nommer au moins un artefact manquant"
+    named = " ".join(r["evidence"] for r in payload["refusals"]).lower()
+    assert "context" in named or "provider" in named or "fournisseur" in named
+    assert all(r["remedy"] for r in payload["refusals"]), "chaque refus nomme aussi un remède"
+
+
+def test_une_transition_de_tache_est_refusee_hors_projet_de_lancement(
+    tasks_home: tuple[int, Path],
+) -> None:
+    """Le pilier #356 vu depuis les tâches : ``projet-tasks-away`` n'est qu'un
+    projet du registre que ce cockpit regarde, jamais celui qu'il sert en
+    direct — la carte ne doit pas bouger, gate rouge ou pas. Le corps cible
+    délibérément une tâche qui n'existe même pas dans ``projet-tasks-away`` :
+    le refus doit intervenir avant toute résolution de tâche, sur la seule
+    base du projet visé.
+    """
+    port, _home_root = tasks_home
+    code, payload = _post(
+        port, f"{PREFIX}tasks/GAO-quelconque-001/move?project=projet-tasks-away", {"to": "ready"}
+    )
+
+    assert code == 403
+    assert "lecture seule" in payload["error"].lower()
+
+
+def test_un_mouvement_de_tache_vers_un_etat_inconnu_est_un_400(
+    tasks_home: tuple[int, Path],
+) -> None:
+    port, home_root = tasks_home
+    task_id = _new_task(home_root, "Viser un état qui n'existe pas")
+    code, payload = _post(
+        port, f"{PREFIX}tasks/{task_id}/move?project=projet-tasks-home", {"to": "vaporisee"}
+    )
+
+    assert code == 400
+    assert "vaporisee" in payload["error"]

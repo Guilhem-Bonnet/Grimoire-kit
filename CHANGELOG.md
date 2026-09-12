@@ -20,6 +20,20 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   ou réécriture, et `_apply_project_context` recolle le commentaire original
   après la nouvelle valeur au lieu de le jeter.
 
+- **feat(cockpit): le board de l'espace Exécuter montre le corps réel d'une tâche (description, garde-fous, dépendances) et les commandes d'intention restent gated par la preuve en multi-projet (#140).**
+  L'inspecteur de tâche affichait déjà les critères d'acceptation et les
+  preuves attendues ; il gagne des blocs Description, Garde-fous et
+  Dépendances, tirés du `MissionTask` du ledger — ce que `task-board.yaml`
+  n'a jamais su porter (ADR-005). `kanban.html` reste la vitrine statique et
+  gagne un lien vers le board vivant. Aucune écriture nouvelle : les
+  commandes de transition, le gate de preuve et la restriction au projet de
+  lancement du cockpit existaient déjà ; ce lot les couvre par des tests
+  dédiés (unitaires sur la route `/api/workspace/tasks/<id>/<action>` —
+  succès, refus nommant l'artefact manquant, refus hors projet de lancement —
+  et navigateur sur le critère d'acceptation à la lettre : une carte visée
+  vers *review* sans evidence pack est refusée avec l'artefact nommé, et le
+  board change quand on change de projet).
+
 - feat(traces): sixième port Rust optionnel du cœur du système d'artefact émergent — les agrégations du journal de traces (`TraceLedger.agent_dispatch_counts`/`.agent_miss_counts`/`.oldest_started_at`), la règle de fraîcheur (`compute_agent_freshness`, issue #396) et le déclencheur de propositions d'artefact (`grimoire.proposals` : nommage mécanique, résolution du porteur issue #402, décision de synchronisation seuil/refus issue #395/#394/#389) (issue #354). `rust/grimoire-traces-core/`, bascule `GRIMOIRE_TRACES_BACKEND=python|rust|auto` (lue indépendamment par `grimoire.traces.ledger` et `grimoire.proposals`, qui ne s'importent pas l'un l'autre), jobs CI `rust-traces / cargo` et `rust-traces / parity` dans `.github/workflows/rust-cores.yml`, roue toujours `py3-none-any`. Défaut trouvé par l'oracle Rust et corrigé dans cette même PR : `grimoire.traces.ledger._parse_iso` attrapait `ValueError` mais pas la `TypeError` non rattrapée levée ensuite par `datetime.now(tz=UTC) - datetime.fromisoformat(...)` sur un horodatage ISO-8601 *naïf* (sans décalage) — un journal JSONL édité à la main peut en porter un, et `compute_agent_freshness` revendique explicitement ne jamais lever sur un journal arbitraire ; corrigé en traitant un horodatage naïf comme UTC des deux côtés (même correctif que `grimoire_traces_core`, qui n'a jamais eu ce trou). Invariants de la doctrine rendus impossibles à violer par construction (clampés/exclus dans la fonction de décision elle-même, jamais par un appelant qui pourrait l'oublier) : seuil de proposition jamais sous 2, aucune proposition au premier non-choix, une proposition refusée ne revient que si son compte a doublé depuis le refus, la persona d'entrée est exclue de la recherche de porteur avant même de lire son `use_when`, le match de catégorie se fait par mot entier (limite de mot Unicode) et non par sous-chaîne. Corpus fixture de dix journaux JSONL réalistes (`tests/fixtures/traces_ledgers/`) et fuzz léger (200 enregistrements aléatoires) prouvant qu'aucune des fonctions d'agrégation/fraîcheur ne lève jamais, sous aucun backend, et qu'un champ de contenu libre (`prompt`/`request`) écrit à la main n'est jamais agrégé.
 
 ## [3.44.2] - 2026-09-11

@@ -102,6 +102,38 @@ def test_une_tache_reelle_porte_sa_colonne_et_sa_prochaine_porte(
     assert detail["next_moves_require"], "une tâche a toujours au moins un pas suivant déclaré"
 
 
+def test_une_tache_porte_son_corps_reel_description_guardrails_dependances(
+    tmp_path: Path,
+) -> None:
+    """Issue #140 : la carte doit pouvoir montrer plus qu'un titre et un owner.
+
+    Le YAML du board n'a jamais porté ``description``, ``guardrails`` ni
+    ``dependencies`` — c'est tout l'objet d'ADR-005. Un projet jetable (pas
+    ``real_project``, pour ne pas polluer les tâches que d'autres tests de ce
+    fichier lisent par position) suffit : seule la fidélité de la lecture est
+    en jeu, pas le gate.
+    """
+    from grimoire.missions.schemas import DependencyKind, TaskDependency
+    from grimoire.missions.service import TaskService
+
+    service = TaskService(tmp_path)
+    mission = service.ledger.create_mission(title="Chantier", origin="test", created_by="test")
+    task = service.ledger.create_task(
+        mission.id,
+        "Porter un corps réel",
+        acceptance=("le corps est visible dans l'inspecteur",),
+        description="Ce que la tâche accomplit, en une phrase.",
+        guardrails=("ne jamais écrire le YAML à la main",),
+        dependencies=(TaskDependency(kind=DependencyKind.BLOCKS, target="GAO-autre-001"),),
+    )
+
+    detail = wa.task_view(tmp_path, task.id)
+
+    assert detail["description"] == "Ce que la tâche accomplit, en une phrase."
+    assert detail["guardrails"] == ["ne jamais écrire le YAML à la main"]
+    assert detail["dependencies"] == [{"kind": "blocks", "target": "GAO-autre-001"}]
+
+
 def test_une_tache_inconnue_est_un_404_pas_un_500(real_project: Path) -> None:
     """Le transport n'attrape que FileNotFoundError, PermissionError et ValueError."""
     from grimoire.tools.workspace_routes import workspace_get
