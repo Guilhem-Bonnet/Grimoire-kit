@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
 from grimoire.tools._common import (
     GrimoireTool,
@@ -13,6 +14,7 @@ from grimoire.tools._common import (
     estimate_tokens,
     find_project_root,
     load_yaml,
+    load_yaml_roundtrip,
     save_yaml,
 )
 
@@ -64,7 +66,7 @@ class TestLoadYaml:
 class TestSaveYaml:
     def test_roundtrip(self, tmp_path: Path) -> None:
         f = tmp_path / "out.yaml"
-        data = {"project": {"name": "test"}, "items": [1, 2, 3]}
+        data = CommentedMap({"project": {"name": "test"}, "items": [1, 2, 3]})
         save_yaml(data, f)
         loaded = load_yaml(f)
         assert loaded["project"]["name"] == "test"
@@ -72,9 +74,109 @@ class TestSaveYaml:
 
     def test_unicode(self, tmp_path: Path) -> None:
         f = tmp_path / "unicode.yaml"
-        save_yaml({"langue": "Français"}, f)
+        save_yaml(CommentedMap({"langue": "Français"}), f)
         text = f.read_text(encoding="utf-8")
         assert "Fran" in text
+
+    def test_brand_new_file_from_a_commented_map(self, tmp_path: Path) -> None:
+        """A freshly-built CommentedMap (no source file to round-trip) is
+        the documented way to generate a new file from scratch."""
+        f = tmp_path / "new.yaml"
+        data = CommentedMap({"project": {"name": "test"}})
+        save_yaml(data, f)
+        assert load_yaml(f) == {"project": {"name": "test"}}
+
+
+class TestSaveYamlRoundtripGuard:
+    """save_yaml() must refuse a plain dict/list on the ruamel backend: it
+    has no comment metadata to round-trip, so accepting it silently
+    reproduces the exact bug class of grimoire-kit#430 (grimoire upgrade
+    stripping every comment from project-context.yaml). See also
+    load_yaml()'s docstring, which tells callers to use
+    load_yaml_roundtrip() instead when a file will be rewritten."""
+
+    def test_refuses_a_plain_dict(self, tmp_path: Path) -> None:
+        with pytest.raises(TypeError, match="plain_dict_would_lose_comments"):
+            save_yaml({"key": "value"}, tmp_path / "out.yaml")
+
+    def test_refuses_a_plain_list(self, tmp_path: Path) -> None:
+        with pytest.raises(TypeError, match="plain_list_would_lose_comments"):
+            save_yaml(["a", "b"], tmp_path / "out.yaml")
+
+    def test_error_message_names_the_issue(self, tmp_path: Path) -> None:
+        with pytest.raises(TypeError, match="430"):
+            save_yaml({"key": "value"}, tmp_path / "out.yaml")
+
+    def test_accepts_a_commented_map(self, tmp_path: Path) -> None:
+        f = tmp_path / "out.yaml"
+        save_yaml(CommentedMap({"key": "value"}), f)
+        assert load_yaml(f) == {"key": "value"}
+
+    def test_accepts_a_commented_seq_as_top_level_value(self, tmp_path: Path) -> None:
+        f = tmp_path / "out.yaml"
+        top = CommentedMap({"items": CommentedSeq(["a", "b"])})
+        save_yaml(top, f)
+        assert load_yaml(f) == {"items": ["a", "b"]}
+
+    def test_a_scalar_or_none_is_not_refused(self, tmp_path: Path) -> None:
+        """The guard only targets dict/list — it must not get in the way of
+        callers writing e.g. a bare document."""
+        f = tmp_path / "out.yaml"
+        save_yaml(None, f)
+        assert load_yaml(f) is None
+
+
+class TestLoadYamlRoundtrip:
+    def test_preserves_comments_quotes_and_inline_collections(self, tmp_path: Path) -> None:
+        f = tmp_path / "rich.yaml"
+        f.write_text(
+            "# En-tête\n"
+            'project: "MonProjet"  # nom affiché\n'
+            "\n"
+            "# Langue\n"
+            'communication_language: "français"\n'
+            "tags: [alpha, beta, gamma]  # liste inline\n"
+            "notes: |\n"
+            "  Une note\n"
+            "  multi-lignes.\n",
+            encoding="utf-8",
+        )
+        data = load_yaml_roundtrip(f)
+        assert isinstance(data, CommentedMap)
+
+        out = tmp_path / "rewritten.yaml"
+        save_yaml(data, out)
+        text = out.read_text(encoding="utf-8")
+        assert "# En-tête" in text
+        assert "# nom affiché" in text
+        assert "# Langue" in text
+        assert '"MonProjet"' in text
+        assert '"français"' in text
+        assert "[alpha, beta, gamma]" in text
+        assert "# liste inline" in text
+        assert "notes: |" in text
+        # A pure load→save round-trip with no mutation is byte-identical.
+        assert text == f.read_text(encoding="utf-8")
+
+    def test_load_missing_raises(self, tmp_path: Path) -> None:
+        with pytest.raises(OSError):
+            load_yaml_roundtrip(tmp_path / "nope.yaml")
+
+    def test_requires_ruamel(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        import builtins
+
+        f = tmp_path / "test.yaml"
+        f.write_text("key: value\n")
+        real_import = builtins.__import__
+
+        def fake_import(name: str, *args: object, **kwargs: object) -> object:
+            if name == "ruamel.yaml" or name.startswith("ruamel."):
+                raise ImportError("simulated: no ruamel.yaml")
+            return real_import(name, *args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+        with pytest.raises(ImportError, match=r"requires ruamel\.yaml"):
+            load_yaml_roundtrip(f)
 
 
 # ── _get_yaml_loader fallback ─────────────────────────────────────────────────

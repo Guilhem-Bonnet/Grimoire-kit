@@ -339,6 +339,27 @@ class TestAddRemove:
         result = runner.invoke(app, ["add", "agent-x", str(tmp_path)])
         assert result.exit_code == 1
 
+    def test_add_agent_preserves_existing_comments(self, project: Path) -> None:
+        """`add` round-trips project-context.yaml through _load_yaml_rw() /
+        _save_yaml_rw() (ruamel round-trip mode) — unrelated comments in the
+        file must survive untouched (grimoire-kit#430 covered the sibling
+        _common.py load_yaml()/save_yaml() pair used by `grimoire upgrade`;
+        this confirms app.py's own round-trip helpers, listed in #431 as
+        already using ruamel round-trip mode, actually hold up)."""
+        config = project / "project-context.yaml"
+        text = config.read_text(encoding="utf-8")
+        assert "# Grimoire" in text or "#" in text  # sanity: init produced a commented file
+        before = text
+
+        result = runner.invoke(app, ["add", "my-agent", str(project)])
+        assert result.exit_code == 0
+
+        after = config.read_text(encoding="utf-8")
+        before_comment_lines = {line for line in before.splitlines() if line.strip().startswith("#")}
+        after_lines = set(after.splitlines())
+        missing = before_comment_lines - after_lines
+        assert not missing, f"comments dropped by `add`: {missing}"
+
     # ── remove ──
 
     def test_remove_agent(self, project: Path) -> None:
