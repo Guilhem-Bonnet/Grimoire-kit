@@ -850,6 +850,40 @@ def test_replay_key_explicite_regroupe_les_dispatchs_du_meme_node_de_flow(tmp_pa
     assert stats.pass_k_rate == 1.0
 
 
+def test_replay_key_distingue_deux_blueprints_a_suffixe_commun(tmp_path: Path) -> None:
+    """#446 : deux blueprint_id qui partagent leurs 16 derniers caractères
+
+    (``tasklib-hardening`` / ``xasklib-hardening``) obtenaient le même
+    wfi_id/run_id côté kernel avant le correctif — mais ``replay_key``
+    encode le ``blueprint_id`` complet, jamais tronqué
+    (``flows.dispatch_executor`` : ``replay_key=f"{blueprint_id}:{node_id}"``),
+    donc les deux séries pass^k restent distinctes ici indépendamment du
+    correctif du kernel : verrou de non-régression pour la couche dispatch."""
+    green_1 = _script(tmp_path, "green1.py", _WRITE_MARKER)
+    green_2 = _script(tmp_path, "green2.py", _WRITE_MARKER)
+    _write_registry(
+        tmp_path,
+        _provider_yaml("g1", "cheap", _invocation(green_1)),
+        _provider_yaml("g2", "cheap", _invocation(green_2)),
+    )
+    service = _service(tmp_path)
+    tid_1 = _task(service, acceptance=(V0_CRITERION,))
+    tid_2 = _task(service, acceptance=(V0_CRITERION,))
+
+    run_dispatch(
+        service, tid_1, checks=("test -f marker.txt",), provider_id="g1", replay_key="tasklib-hardening:node-a"
+    )
+    run_dispatch(
+        service, tid_2, checks=("test -f marker.txt",), provider_id="g2", replay_key="xasklib-hardening:node-a"
+    )
+
+    ledger = TraceLedger(tmp_path / TRACES_DIR)
+    stats = ledger.dispatch_outcome_stats()
+    # Deux séries à une seule observation chacune, jamais fusionnées : aucune
+    # n'atteint le seuil pass^k (>= 2 observations par série).
+    assert stats.pass_k_observations == 0
+
+
 def test_aucun_contenu_de_prompt_dans_l_evenement_dispatch_outcome(tmp_path: Path) -> None:
     """Le prompt (qui embarque le titre et les critères de la tâche) ne doit
     jamais fuiter dans les tags ni le token_usage écrits par la comptabilité

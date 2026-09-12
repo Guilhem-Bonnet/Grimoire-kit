@@ -38,6 +38,51 @@ def test_create_instance(kernel):
     assert wfi.recipe_id == "recipe.test"
 
 
+# --- #446 : wfi_id/run_id ne tronque plus silencieusement recipe_id --------
+
+
+def test_create_instance_does_not_truncate_recipe_id(kernel):
+    """Un recipe_id de 17 caractères tenait déjà dans l'ancienne coupe à 16,
+
+    perdant son premier caractère (``tasklib-hardening`` -> ``asklib-hardening``,
+    #446). Le slug garde désormais l'identifiant complet."""
+    ctx = _ctx()
+    wfi = kernel.create_instance(ctx, recipe_id="tasklib-hardening")
+    assert wfi.id == "WFI-tasklib-hardening-001"
+
+
+def test_create_instance_distinct_recipes_never_collide_on_wfi_id(tmp_path):
+    """Deux blueprints dont les 16 derniers caractères coïncidaient après la
+
+    coupe (#446) obtenaient exactement le même wfi_id sur un kernel neuf —
+    reproduit ici avec deux kernels indépendants (deux hôtes/dispatches
+    distincts), le cas le plus sévère : pas de compteur de séquence commun
+    pour même accidentellement les distinguer."""
+    ctx = _ctx()
+    kernel_a = RuntimeKernel(tmp_path / "runtime-a")
+    kernel_b = RuntimeKernel(tmp_path / "runtime-b")
+    wfi_a = kernel_a.create_instance(ctx, recipe_id="tasklib-hardening")
+    wfi_b = kernel_b.create_instance(ctx, recipe_id="xasklib-hardening")
+    assert wfi_a.id != wfi_b.id
+    assert wfi_a.id == "WFI-tasklib-hardening-001"
+    assert wfi_b.id == "WFI-xasklib-hardening-001"
+
+
+def test_create_instance_long_recipe_ids_disambiguated_by_hash(kernel):
+    """Au-delà de la borne de longueur, deux id qui ne diffèrent qu'après la
+
+    coupe restent distincts grâce à l'empreinte du recipe_id complet — pas
+    une simple troncature muette."""
+    ctx = _ctx()
+    long_a = "projet-" + "y" * 60 + "-variante-alpha"
+    long_b = "projet-" + "y" * 60 + "-variante-beta"
+    wfi_a = kernel.create_instance(ctx, recipe_id=long_a)
+    wfi_b = kernel.create_instance(ctx, recipe_id=long_b)
+    assert wfi_a.id != wfi_b.id
+    assert wfi_a.recipe_id == long_a
+    assert wfi_b.recipe_id == long_b
+
+
 def test_start_transitions_to_running(kernel):
     ctx = _ctx()
     wfi = kernel.create_instance(ctx, recipe_id="recipe.test")
