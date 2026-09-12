@@ -787,6 +787,35 @@ def _step_refresh(state: _UpState, target: Path, *, dry_run: bool, blocked: bool
         state.steps.append(StepResult("refresh", "done", "kit artifacts already up to date"))
 
 
+def _step_override_review(state: _UpState, target: Path, *, blocked: bool) -> None:
+    """List overrides to review after the kit refresh — never touch one (issue #427).
+
+    Runs right after :func:`_step_refresh`, once the kit tier is at the
+    version this run installs: comparing an override's recorded
+    ``kit_source_hash`` against a kit file `up` is about to overwrite would
+    compare against the *old* kit, reporting drift that this very run just
+    resolved for every override this project doesn't have. Deliberately the
+    same in ``--dry-run`` as for real: this step only ever reads and reports,
+    the three choices the issue names (keep, convert, remove) all stay the
+    operator's to make.
+    """
+    if blocked:
+        state.steps.append(StepResult("override_review", "skipped", "no project configuration"))
+        return
+    from grimoire.core.override_drift import project_override_drift
+
+    drifts = [d for d in project_override_drift(target) if d.status != "fresh"]
+    if not drifts:
+        state.steps.append(StepResult("override_review", "done", "no override needs review"))
+        return
+    names = ", ".join(d.name for d in drifts)
+    state.steps.append(StepResult(
+        "override_review", "planned",
+        f"{len(drifts)} override(s) to review : {names} — "
+        "keep, `grimoire agent override convert <name> [--dry-run]`, or remove",
+    ))
+
+
 def _step_structure(state: _UpState, target: Path, *, dry_run: bool) -> None:
     """Reconcile required directories (legacy ``up`` behavior, kept for compat)."""
     for rel in _RECONCILE_DIRS:
@@ -1109,6 +1138,10 @@ def up(
     # 2bis. Refresh the kit tier — this is how an existing project receives a
     # newer kit. Runs after init so a fresh project simply finds nothing to do.
     _step_refresh(state, target, dry_run=dry_run, blocked=blocked)
+
+    # 2ter. List agent overrides worth a look now that the kit tier is
+    # current — never applies anything (issue #427).
+    _step_override_review(state, target, blocked=blocked)
 
     # 3. Identity propagation (cmd_setup logic, non-interactive).
     _step_identity(state, target, user=user, dry_run=dry_run, blocked=blocked)

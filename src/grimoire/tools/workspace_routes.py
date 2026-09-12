@@ -433,14 +433,22 @@ def _str_list(raw: Any) -> tuple[str, ...]:
 def _apply_agent_updates(project_root: Path, name: str, updates: dict[str, Any]) -> Any:
     """Écrit *updates* dans l'override de l'agent *name*, valide, ou annule.
 
-    Crée l'override s'il n'existe pas encore (copie de l'étage kit) ; une
-    valeur ``None``, chaîne vide ou liste vide retire la clé plutôt que
-    d'écrire une déclaration vide. La validation est celle de
+    Crée l'override s'il n'existe pas encore — un override **partiel**
+    (``extends: kit``, issue #427) quand un agent kit de même nom existe déjà :
+    seuls les champs de *updates* y apparaissent, le corps et le reste du
+    frontmatter restent hérités du fichier kit, empreinte
+    (``kit_source_hash``) à l'appui pour que `doctor`/le cockpit signalent une
+    dérive future. Sans contrepartie kit (répertoire hérité), la seule
+    personnalisation possible reste une copie intégrale, comme avant cette
+    issue. Une valeur ``None``, chaîne vide ou liste vide retire la clé
+    plutôt que d'écrire une déclaration vide. La validation est celle de
     ``collect_agents`` — skill ou contexte introuvable lève
     ``GrimoireAgentError``, translatée en ``ValueError`` par
     :func:`workspace_post`, avec le message que ``collect`` produit déjà.
     """
+    from grimoire.core import layout
     from grimoire.core.exceptions import GrimoireAgentError
+    from grimoire.core.override_drift import compute_kit_source_hash
     from grimoire.hosts import collect
 
     root = project_root.resolve()
@@ -449,13 +457,37 @@ def _apply_agent_updates(project_root: Path, name: str, updates: dict[str, Any])
     pre_existing = override_path.is_file()
     if not pre_existing:
         override_path.parent.mkdir(parents=True, exist_ok=True)
-        override_path.write_bytes(source.read_bytes())
+        if layout.is_kit_owned(root, source):
+            skeleton = _dump_agent_frontmatter(
+                "", "",
+                {"extends": "kit", "kit_source_hash": compute_kit_source_hash(source)},
+                "",
+            )
+            override_path.write_text(skeleton, encoding="utf-8")
+        else:
+            override_path.write_bytes(source.read_bytes())
     original_text = override_path.read_text(encoding="utf-8")
 
     bom, comment, data, body = _load_agent_frontmatter(override_path)
+    is_partial = str(data.get("extends", "")).strip().lower() == "kit"
+    kit_meta: dict[str, Any] = {}
+    if is_partial:
+        # `source` est déjà le fichier kit pour un override partiel — voir
+        # `_agent_target` : son `definition_ref` pointe vers le kit depuis
+        # l'issue #427. Nécessaire pour distinguer, en cas d'effacement, « le
+        # kit ne déclare rien ici non plus » (retirer la clé, comme avant
+        # cette issue) de « le kit déclare une valeur, et il ne faut pas
+        # qu'elle refasse surface par simple absence » (garder la clé, vide
+        # explicitement).
+        from grimoire.hosts.collect import parse_frontmatter
+
+        kit_meta, _ = parse_frontmatter(source.read_text(encoding="utf-8"))
     for key, value in updates.items():
         if value in (None, "", []):
-            data.pop(key, None)
+            if is_partial and kit_meta.get(key) not in (None, "", []):
+                data[key] = [] if key in _AGENT_LIST_FIELDS else ""
+            else:
+                data.pop(key, None)
         else:
             data[key] = value
     override_path.write_text(_dump_agent_frontmatter(bom, comment, data, body), encoding="utf-8")
