@@ -2,6 +2,68 @@
 
 ## Dernière release
 
+### 3.45.0 — Le gate de dispatch exécute l'acceptance, board du cockpit, sixième port Rust
+
+- **fix(flows): le gate de `flow run --executor dispatch` exécute l'acceptance structurée d'un node, pas seulement l'enveloppe (#428).**
+  Rejeu réel du 2026-09-11 (épic #307, lot 3) : un nœud V0 déclaré vert alors
+  que sa vraie suite `pytest` ne pouvait pas être collectée (dépendance
+  absente) — le gate ne vérifiait que la conformité de l'enveloppe JSON de
+  l'ouvrier au contrat de sortie, jamais le texte de l'acceptance. `node.acceptance`
+  accepte désormais, en plus du texte libre (rétrocompatible), une forme
+  structurée exécutable (`{"run": "...", "expect_exit": 0, "cwd": ".",
+  "timeout_s": 120, "expect_stdout_contains": "..."}`) ou une evidence
+  mécanique (`{"path_exists": "..."}`, `{"test": "..."}`) — validée au
+  chargement du blueprint (`blueprint_loader.py`), refus nommé sur une forme
+  inconnue. Le gate (`missions/dispatch.py`) exécute ces commandes après la
+  réponse de l'ouvrier et rend trois verdicts, jamais un quatrième :
+  exécutée-verte (succès), exécutée-rouge (échec, suit la cascade normale :
+  réessai/escalade), ou **acceptance inexécutable** (refus nommé — binaire
+  absent, `pytest` 5/4, erreur d'import dans la sortie — qui arrête la
+  cascade net, jamais un succès). `flow status` et le rapport de dispatch
+  montrent par nœud le statut d'acceptance (exécutée/inexécutable/jugée) et
+  la sortie tronquée à 2 Ko. **La classe V0 exige une acceptance
+  structurée** : un nœud dont le texte seul le classerait V0 mais qui n'en
+  déclare aucune est rétrogradé en V1 (cascade démarrant à `mid`, jamais
+  fermé sur la seule enveloppe — marqué à relire), avec un avertissement
+  nommé posé au chargement du blueprint et transmis à la fois au démarrage
+  de la cascade et au rapport, pour que `flow run` et `flow status`
+  s'accordent sur la même classe. Un nœud V1 **déclaré** (vocabulaire de
+  revue) garde le comportement actuel du kit, documenté sans être étendu.
+  Aucun changement côté port Rust des flows (`rust/grimoire-flows-core/`) :
+  seule `NodeContract.outputs` (pins) y traverse la frontière PyO3, inchangée
+  par ce correctif.
+
+- **feat(cockpit): le board de l'espace Exécuter montre le corps réel d'une tâche (description, garde-fous, dépendances) et les commandes d'intention restent gated par la preuve en multi-projet (#140).**
+  L'inspecteur de tâche affichait déjà les critères d'acceptation et les
+  preuves attendues ; il gagne des blocs Description, Garde-fous et
+  Dépendances, tirés du `MissionTask` du ledger — ce que `task-board.yaml`
+  n'a jamais su porter (ADR-005). `kanban.html` reste la vitrine statique et
+  gagne un lien vers le board vivant. Aucune écriture nouvelle : les
+  commandes de transition, le gate de preuve et la restriction au projet de
+  lancement du cockpit existaient déjà ; ce lot les couvre par des tests
+  dédiés (unitaires sur la route `/api/workspace/tasks/<id>/<action>` —
+  succès, refus nommant l'artefact manquant, refus hors projet de lancement —
+  et navigateur sur le critère d'acceptation à la lettre : une carte visée
+  vers *review* sans evidence pack est refusée avec l'artefact nommé, et le
+  board change quand on change de projet).
+
+- feat(traces): sixième port Rust optionnel du cœur du système d'artefact émergent — les agrégations du journal de traces (`TraceLedger.agent_dispatch_counts`/`.agent_miss_counts`/`.oldest_started_at`), la règle de fraîcheur (`compute_agent_freshness`, issue #396) et le déclencheur de propositions d'artefact (`grimoire.proposals` : nommage mécanique, résolution du porteur issue #402, décision de synchronisation seuil/refus issue #395/#394/#389) (issue #354). `rust/grimoire-traces-core/`, bascule `GRIMOIRE_TRACES_BACKEND=python|rust|auto` (lue indépendamment par `grimoire.traces.ledger` et `grimoire.proposals`, qui ne s'importent pas l'un l'autre), jobs CI `rust-traces / cargo` et `rust-traces / parity` dans `.github/workflows/rust-cores.yml`, roue toujours `py3-none-any`. Défaut trouvé par l'oracle Rust et corrigé dans cette même PR : `grimoire.traces.ledger._parse_iso` attrapait `ValueError` mais pas la `TypeError` non rattrapée levée ensuite par `datetime.now(tz=UTC) - datetime.fromisoformat(...)` sur un horodatage ISO-8601 *naïf* (sans décalage) — un journal JSONL édité à la main peut en porter un, et `compute_agent_freshness` revendique explicitement ne jamais lever sur un journal arbitraire ; corrigé en traitant un horodatage naïf comme UTC des deux côtés (même correctif que `grimoire_traces_core`, qui n'a jamais eu ce trou). Invariants de la doctrine rendus impossibles à violer par construction (clampés/exclus dans la fonction de décision elle-même, jamais par un appelant qui pourrait l'oublier) : seuil de proposition jamais sous 2, aucune proposition au premier non-choix, une proposition refusée ne revient que si son compte a doublé depuis le refus, la persona d'entrée est exclue de la recherche de porteur avant même de lire son `use_when`, le match de catégorie se fait par mot entier (limite de mot Unicode) et non par sous-chaîne. Corpus fixture de dix journaux JSONL réalistes (`tests/fixtures/traces_ledgers/`) et fuzz léger (200 enregistrements aléatoires) prouvant qu'aucune des fonctions d'agrégation/fraîcheur ne lève jamais, sous aucun backend, et qu'un champ de contenu libre (`prompt`/`request`) écrit à la main n'est jamais agrégé.
+
+- **fix(up): `identity` ne corrompt plus un scalaire commenté de `project-context.yaml` (#426).**
+  `cmd_setup._apply_project_context` réécrivait chaque ligne `user:` connue
+  avec une regex `.+` qui avalait tout le reste de la ligne — valeur *et*
+  commentaire inline — comme si c'était « la valeur », puis rewrappait ce
+  texte entier entre guillemets. `skill_level: "expert"  # beginner |
+  intermediate | expert` devenait `skill_level: ""expert"  # beginner |
+  intermediate | expert"` à chaque `grimoire up`, y compris quand la valeur
+  ne changeait pas — et cassait ensuite `grimoire doctor` (`GR002`, YAML
+  imparsable). Un nouveau `_split_scalar_and_comment` sépare correctement
+  le scalaire (quoté ou non) du commentaire qui le suit avant toute lecture
+  ou réécriture, et `_apply_project_context` recolle le commentaire original
+  après la nouvelle valeur au lieu de le jeter.
+
+## Releases précédentes
+
 ### 3.44.2 — Correctif de régression : `SessionStart` sur un agent à skills attachés
 
 - **fix(hosts): `collect_agents` résout ses propres skills quand `known_skills` n'est pas fourni — `SessionStart` et le porteur de proposition ne plantent plus sur un agent à skills attachés (#423).**
@@ -15,8 +77,6 @@
   et sa persona d'entrée jamais injectée. `collect_agents` résout
   désormais lui-même l'inventaire via `collect_skills()` quand aucun n'est
   fourni, pour qu'aucun appelant ne puisse retomber dans ce trou.
-
-## Releases précédentes
 
 ### 3.44.1 — CLI et hook plus rapides au démarrage, flow status corrigé sur abandon
 
