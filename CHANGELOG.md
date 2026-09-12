@@ -9,6 +9,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 - **feat(dispatch): coût par tâche résolue et pass^k, comptabilité continue et contrôle dans les gates (#442).**
   Point 5 de l'audit de positionnement du 2026-09-12 : le kit dispatchait déjà des tâches en cascade sans jamais agréger en continu ce que ça coûte ni si ça marche de façon fiable — seules des campagnes d'évals manuelles (#308) répondaient à ces questions. `grimoire task dispatch`/`grimoire flow run --executor dispatch` écrivent maintenant un événement `dispatch.outcome` par cascade réellement tentée dans le journal de traces (classe, paliers tentés, coût total, verdict d'acceptance, résolu ou non — aucun contenu de prompt). Nouvelle commande `grimoire dispatch stats [--since 30d] [--json]`, sœur de `providers history` : coût par tâche résolue, taux d'escalade, part d'inexécutable (par classe et par fournisseur), et pass^k sur les nœuds rejoués (une série est « toute au vert » seulement si toutes ses exécutions ont résolu la tâche). Les agrégations pures vivent dans `rust/grimoire-traces-core/` (extension du sixième port), avec parité de test sous les deux backends. Le standard gagne le contrôle `dispatch.cost_slo` (pattern `provider-cost-slo`) : `INFO` faute de données, `WARN` en cas de dépassement (coût ou pass^k), `FAIL` uniquement si le projet déclare `dispatch_cost_slo.enforce: true` — jamais bloquant par défaut. Le cockpit n'est pas concerné par ce lot.
+- fix(yaml): `grimoire upgrade` round-trippait `project-context.yaml` via un chargeur `safe` (aucune métadonnée de commentaire) puis un dumper round-trip — tous les commentaires du fichier disparaissaient silencieusement à chaque migration v2→v3 (#430).
 - **feat(policies): politiques temporelles par session sur la médiation d'outils — budgets, approbation préalable, refroidissement (#439).**
   Point 3 de l'audit de positionnement 2026-09-12 : `PolicyRule` gagne quatre
   clés optionnelles et rétrocompatibles (`tool_pattern`, `require_approval`,
@@ -68,6 +69,33 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   (`framework/agentic-industry-reference.md`, section 10) mises à jour.
   Hors périmètre : transport HTTP/SSE, authentification, exposition réseau
   distante — le pont reste stdio, en local.
+- **feat(cockpit): timeline unifiée par tâche dans la vue de travail, l'export OTel de #322 devient une source lue plutôt qu'un mécanisme mort (#139).**
+  Audit de positionnement du 2026-09-12, point 2 : `TraceLedger.export_otel_jsonl`
+  produit des spans GenAI conformes depuis #322, mais rien ne les consommait —
+  `/api/otel` sert une pile d'événements différente (`blueprint_telemetry`,
+  `events.jsonl`), sans rapport avec le TraceLedger. `grimoire.missions.trace`
+  (déjà livré par #276) gagne une cinquième source, `otel` : si un export
+  existe à l'emplacement conventionnel (`<traces>/otel-export.jsonl`), ses
+  spans sont lus et corrélés par `grimoire.task_id` puis par `traceId`
+  partagé avec les spans enfants — jamais par heuristique textuelle. Deux
+  autres traces disparaissaient aussi en silence de la timeline avant ce
+  correctif : les dispatchs d'agent (`agent.dispatch`, `agent.miss`) et tout
+  futur fait du TraceLedger qui n'est ni un gate ni un appel d'outil — un
+  repli générique les reprend désormais sous la source `hooks`. Côté cockpit :
+  l'espace Exécuter (`web/workspace/spaces/executer.js`) ouvre la timeline
+  d'une tâche depuis sa carte (bouton « Voir la timeline »), la filtre par
+  source et par gravité, et détaille chaque ligne en accordéon ; l'espace
+  Observer (`observer.js`) y renvoie depuis un span qui porte
+  `grimoire.task_id`. Lecture seule (ADR-007) : aucune écriture, aucune
+  reconstruction d'événement absent — une tâche sans trace montre « aucun
+  événement » et nomme les sources lues. Tests : `tests/unit/missions/test_trace.py`
+  (corrélation par identifiants, dispatch non perdu, otel présent/absent),
+  `tests/unit/test_workspace_api.py`, `tests/e2e/test_workspace_lot4_spaces.py`
+  (dispatch et transition refusée visibles, filtre par source). Docs :
+  `docs/cli-reference.md`, `docs/serve-blueprints.md`,
+  `docs/audits/positionnement-2026-09-12.md` et
+  `framework/agentic-industry-reference.md` (section 10) mis à jour avec la
+  date de correction.
 
 ## [3.45.0] - 2026-09-12
 

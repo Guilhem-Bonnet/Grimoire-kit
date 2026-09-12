@@ -231,6 +231,105 @@ def review_gate_workspace(browser: Browser, served_review_gate: tuple[str, str])
 
 
 @pytest.fixture(scope="session")
+def served_timeline(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[str, str]]:
+    """Un projet dédié (#139) : une tâche avec un dispatch d'agent et une
+    transition refusée déjà journalisés au TraceLedger avant que le
+    navigateur n'ouvre quoi que ce soit — même mécanique que
+    :func:`served_review_gate`, pour que le harnais observe seulement, sans
+    dépendre de l'ordre des tests sur un projet partagé.
+    """
+    root = tmp_path_factory.mktemp("timeline") / "projet-timeline"
+    root.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q"], cwd=str(root), check=False, capture_output=True)
+    subprocess.run(
+        [sys.executable, "-m", "grimoire", "init", ".", "-y", "--name", "projet-timeline"],
+        cwd=str(root), check=False, capture_output=True, timeout=180,
+    )
+    if not (root / "_grimoire" / "kit").is_dir():
+        pytest.skip("`grimoire init` indisponible ici")
+    subprocess.run(
+        [sys.executable, "-m", "grimoire", "standard", "init", "--profile", "governed"],
+        cwd=str(root), check=False, capture_output=True, timeout=180,
+    )
+
+    added = subprocess.run(
+        [
+            sys.executable, "-m", "grimoire", "task", "add", "Tracer la timeline",
+            "-a", "un critère observable", "--owner", "winston",
+        ],
+        cwd=str(root), capture_output=True, text=True, check=False, timeout=180,
+    )
+    match = re.search(r"(GAO-[a-zA-Z0-9-]+)", added.stdout + added.stderr)
+    if not match:
+        pytest.skip(f"`grimoire task add` n'a pas ouvert de tâche ici : {added.stderr[-400:]}")
+    task_id = match.group(1)
+
+    subprocess.run(
+        [sys.executable, "-m", "grimoire", "task", "move", task_id, "--to", "ready"],
+        cwd=str(root), check=False, capture_output=True, timeout=180,
+    )
+    # Refus attendu du profil `governed` (pas de context bundle, aucun
+    # fournisseur activé au registre) : c'est la transition refusée que le
+    # test observe, la même mécanique que
+    # `test_executer_un_move_reussi_deplace_la_carte_puis_un_claim_est_refuse`.
+    subprocess.run(
+        [sys.executable, "-m", "grimoire", "task", "claim", task_id],
+        cwd=str(root), capture_output=True, text=True, check=False, timeout=180,
+    )
+    # Dispatch d'agent (#366/#389) : écrit par `hosts.decisions.activation` à
+    # l'activation d'une session, hors du chemin CLI d'une tâche — reproduit
+    # ici directement, comme le ferait un hook `SessionStart`.
+    subprocess.run(
+        [
+            sys.executable, "-c",
+            "import sys\n"
+            "from pathlib import Path\n"
+            "from grimoire.hosts.decisions.record import _record_agent_dispatch\n"
+            "_record_agent_dispatch(Path(sys.argv[1]), 'grimoire-master', sys.argv[2])\n",
+            str(root), task_id,
+        ],
+        cwd=str(root), capture_output=True, text=True, check=False, timeout=60,
+    )
+
+    port = _free_port()
+    env = dict(os.environ)
+    env["GRIMOIRE_COCKPIT_HOME"] = str(tmp_path_factory.mktemp("cockpit-home-timeline"))
+    env["NO_COLOR"] = "1"
+    process = subprocess.Popen(
+        [
+            sys.executable, "-m", "grimoire", "serve",
+            "--project-root", str(root), "--port", str(port), "--no-open",
+        ],
+        cwd=str(root), env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    try:
+        _wait_ready(port, time.monotonic() + 60)
+        yield f"http://127.0.0.1:{port}", task_id
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=10)
+        assert not _alive(process.pid), f"serveur survivant : pid {process.pid}"
+
+
+@pytest.fixture
+def timeline_workspace(browser: Browser, served_timeline: tuple[str, str]) -> Iterator[Page]:
+    """La coque, chargée sur le projet dédié de :func:`served_timeline`."""
+    served, _task_id = served_timeline
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
+    page = context.new_page()
+    page.goto(f"{served}/workspace/index.html", wait_until="domcontentloaded")
+    page.wait_for_selector("body[data-ready='1']", timeout=30_000)
+    try:
+        yield page
+    finally:
+        context.close()
+
+
+@pytest.fixture(scope="session")
 def served_cockpit(
     real_project: Path, tmp_path_factory: pytest.TempPathFactory
 ) -> Iterator[tuple[str, str]]:

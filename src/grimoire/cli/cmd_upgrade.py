@@ -14,9 +14,10 @@ from typing import Any
 
 import typer
 from rich.console import Console
+from ruamel.yaml.comments import CommentedMap
 
 from grimoire.cli._shared import _log_operation, _status_spinner
-from grimoire.tools._common import load_yaml, save_yaml
+from grimoire.tools._common import load_yaml, load_yaml_roundtrip, save_yaml
 
 console = Console(stderr=True)
 
@@ -153,6 +154,47 @@ def _generate_v3_section(v2_data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _merge_v3_section(existing: CommentedMap, v3_section: dict[str, Any]) -> None:
+    """Merge the generated v3 section into *existing*, preserving every
+    comment already in the file — only the migrated keys' values change.
+
+    Two situations need care beyond a plain ``dict.update``:
+
+    - the existing key already holds a mapping (e.g. a v2 ``agents:`` block
+      with its own inline comments): merge the new sub-keys into it *in
+      place* instead of replacing the whole node. A wholesale replace has
+      nothing to carry over — plain dicts have no comment metadata — so it
+      would silently drop every comment attached inside that node.
+    - the existing key holds a scalar being replaced by a mapping (e.g. v2
+      ``project: "name"  # display name``): the scalar's trailing comment
+      (its own end-of-line comment, plus every blank line/comment up to the
+      next key) is reattached to the last key of the new mapping instead of
+      being dropped. This also fixes ruamel's emitter otherwise printing
+      that comment *before* the new multi-line value instead of after it.
+
+    See grimoire-kit#430.
+    """
+    for key, new_value in v3_section.items():
+        old_value = existing.get(key)
+        if isinstance(old_value, CommentedMap) and isinstance(new_value, dict):
+            old_value.update(new_value)
+            continue
+
+        old_entry = existing.ca.items.pop(key, None)
+        if isinstance(new_value, dict) and old_entry is not None and old_entry[2] is not None:
+            new_value = CommentedMap(new_value)
+            sub_keys = list(new_value.keys())
+            if sub_keys:
+                new_value.ca.items[sub_keys[-1]] = [None, None, old_entry[2], None]
+                old_entry = None
+        existing[key] = new_value
+        if old_entry is not None:
+            # Nowhere safer to carry it over (new_value isn't a mapping, or
+            # the key had no comment to begin with): keep it on the key
+            # itself, exactly like the untouched dict.update() path did.
+            existing.ca.items[key] = old_entry
+
+
 def execute_upgrade(project_root: Path, plan: UpgradePlan,
                     dry_run: bool = False) -> list[str]:
     """Execute the upgrade plan. Returns list of completed action descriptions."""
@@ -171,11 +213,14 @@ def execute_upgrade(project_root: Path, plan: UpgradePlan,
             v3_section = _generate_v3_section(v2_data)
 
             if not dry_run:
-                # Merge v3 section into existing file
-                existing = load_yaml(pctx) if pctx.exists() else {}
-                if not isinstance(existing, dict):
-                    existing = {}
-                existing.update(v3_section)
+                # Round-trip load so save_yaml() preserves every existing
+                # comment, quote style and inline collection — only the
+                # migrated keys (grimoire/project/agents/memory) change
+                # (grimoire-kit#430).
+                existing = load_yaml_roundtrip(pctx) if pctx.exists() else CommentedMap()
+                if not isinstance(existing, CommentedMap):
+                    existing = CommentedMap()
+                _merge_v3_section(existing, v3_section)
                 save_yaml(existing, pctx)
             completed.append(action.description)
 

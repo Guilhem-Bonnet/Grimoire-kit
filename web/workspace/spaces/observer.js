@@ -15,6 +15,11 @@
 // seule série (la latence) vue à trois percentiles, pas trois catégories.
 //
 // API consommées : api.otel(), api.costModel(), api.eventsLog(), api.stigmergy().
+//
+// Drill-down timeline (#139) : quand un span porte `grimoire.task_id`,
+// l'inspecteur de span propose un bouton vers la timeline unifiée de cette
+// tâche dans l'espace Exécuter (`ctx.goto('executer', { task, view:
+// 'timeline' })`) — pure navigation, aucune lecture supplémentaire ici.
 
 const STYLE_ID = 'ob-styles';
 
@@ -272,6 +277,24 @@ function renderSpanInspector(ctx, span) {
   }
   if (span.status?.code === 'ERROR') {
     ctx.inspector.append(text('p', null, 'Erreur : ' + span.status.message));
+  }
+
+  // Drill-down (#139) : un span qui porte `grimoire.task_id` (export OTel du
+  // TraceLedger, #322) renvoie vers la timeline unifiée de cette tâche dans
+  // l'espace Exécuter — pas de reconstruction ici, juste la navigation vers
+  // la même lecture que fait déjà `api.taskTrace(id)`. Les spans de la pile
+  // events.jsonl (`grimoire.source` renseigné) n'ont aujourd'hui aucun moyen
+  // de porter cet identifiant : le bouton n'apparaît que quand la donnée
+  // existe réellement, jamais devinée.
+  const taskId = attr(span, 'grimoire.task_id');
+  if (taskId) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn';
+    btn.style.marginTop = '8px';
+    btn.textContent = `Voir la timeline de ${taskId}`;
+    btn.addEventListener('click', () => ctx.goto('executer', { task: taskId, view: 'timeline' }));
+    ctx.inspector.append(btn);
   }
 }
 

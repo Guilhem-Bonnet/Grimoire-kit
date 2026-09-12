@@ -149,8 +149,9 @@ def test_la_timeline_nomme_les_journaux_absents(project_with_task: tuple[Path, s
     timeline = wa.task_trace_view(root, task_id)
 
     assert timeline["task_id"] == task_id
-    assert set(timeline["sources"]) == {"ledger", "hooks", "runtime", "evidence"}
+    assert set(timeline["sources"]) == {"ledger", "hooks", "runtime", "evidence", "otel"}
     assert timeline["sources"]["ledger"], "le ledger existe : la source doit être nommée"
+    assert timeline["sources"]["otel"] is None, "aucun export OTel n'a été produit ici"
     assert timeline["entries"], "au moins la création de la tâche est datée"
 
 
