@@ -1,6 +1,6 @@
 {
  "schema": "grimoire-kit-file-hashes/v1",
- "generated_for": "3.45.0",
+ "generated_for": "3.46.0",
  "digests": {
   "002d1e68ce00769ee09d1e94f4af260b952837f7d1557080c2fd505216c23ac0": {
    "version": "3.11.2",
@@ -1265,6 +1265,14 @@
   "5fd2cbc36ee9042a000d8046819fc765e01ceac288087b26c3be4b9c30df6f0b": {
    "version": "3.24.0",
    "path": "archetypes/platform-engineering/agents/platform-architect.md"
+  },
+  "6050bce4a13ae354a04a63b368e173f612539aab2a1b918de37d84e459b3291d": {
+   "version": "3.46.0",
+   "path": "framework/agentic-industry-reference.md"
+  },
+  "607299dda9ae7b510bb36fc02f0bb8d114ecbe4f37b56c707c6dc8d0a6d9689d": {
+   "version": "3.46.0",
+   "path": "framework/agentic-standard/templates/pattern-catalog.yaml"
   },
   "609134a13d67a6d84a5a0d9f58784e7ab57b0e3945652ff90a165347160e1fcd": {
    "version": "3.42.0",

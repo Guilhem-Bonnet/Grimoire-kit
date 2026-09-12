@@ -7,31 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
-- **feat(cockpit): suggestions de contenu par un petit modèle local (Ollama), toujours derrière l'IntelliSense déterministe de l'espace Source, jamais à sa place (#280).**
-  Voie 2 de #280, derrière la voie 1 (IntelliSense déterministe, PR #303) :
-  `project-context.yaml: source.assist.model` (vide par défaut, opt-in) plus
-  la même sonde qu'`grimoire providers audit` (`GET /api/tags`) décident si
-  le bouton **Suggérer** de l'éditeur Source apparaît — sinon l'interface ne
-  montre rien et ne tente rien. `GET /api/workspace/assist` (sans coût) rend
-  ce statut ; `POST /api/workspace/assist` (`src/grimoire/tools/source_assist.py`,
-  projet d'accueil seulement) appelle réellement le modèle en local
-  (`http://127.0.0.1:11434`, délai borné à 10 s), avec les identifiants du
-  paquet de langage (agents, skills, workflows, patterns) injectés dans le
-  prompt, et vérifie après coup tout identifiant cité par la réponse contre
-  ce même paquet — marqué « inconnu » plutôt que corrigé à la place de
-  l'utilisateur. Panneau d'aperçu dans l'éditeur (`Ctrl+Maj+Espace`, ou le
-  bouton) avec **Insérer**/**Ignorer** ; l'insertion passe par le même
-  chemin que la frappe clavier, la colorisation et les diagnostics se
-  recalculent dessus. Aucun fournisseur distant, aucune clé, aucune écriture
-  de fichier par la route. Garde de relecture : une URL Ollama résolue
-  (`OLLAMA_HOST`) hors bouclage (`127.0.0.1`, `::1`, `localhost`) est
-  refusée par défaut — `source.assist.allow_lan: true` l'autorise
-  explicitement.
+## [3.46.0] - 2026-09-12
 
-- fix(flows): `grimoire.runtime.kernel.create_instance` tronquait silencieusement `recipe_id`/`blueprint_id` aux 16 derniers caractères pour construire `wfi_id`/`run_id` (`WFI-...`) — deux blueprints partageant ce suffixe (par ex. `tasklib-hardening` perdait déjà son premier caractère) pouvaient obtenir le même `run_id` sur des kernels indépendants. L'identifiant complet est gardé tant qu'il tient dans une borne large (64 caractères) ; au-delà, il est raccourci et désambiguïsé par une empreinte de 8 hex de `sha256(recipe_id)` plutôt qu'une simple coupe. Les runs déjà persistés sous l'ancien format restent lisibles par `flow status`/`flow list` (#446).
-- **feat(dispatch): coût par tâche résolue et pass^k, comptabilité continue et contrôle dans les gates (#442).**
-  Point 5 de l'audit de positionnement du 2026-09-12 : le kit dispatchait déjà des tâches en cascade sans jamais agréger en continu ce que ça coûte ni si ça marche de façon fiable — seules des campagnes d'évals manuelles (#308) répondaient à ces questions. `grimoire task dispatch`/`grimoire flow run --executor dispatch` écrivent maintenant un événement `dispatch.outcome` par cascade réellement tentée dans le journal de traces (classe, paliers tentés, coût total, verdict d'acceptance, résolu ou non — aucun contenu de prompt). Nouvelle commande `grimoire dispatch stats [--since 30d] [--json]`, sœur de `providers history` : coût par tâche résolue, taux d'escalade, part d'inexécutable (par classe et par fournisseur), et pass^k sur les nœuds rejoués (une série est « toute au vert » seulement si toutes ses exécutions ont résolu la tâche). Les agrégations pures vivent dans `rust/grimoire-traces-core/` (extension du sixième port), avec parité de test sous les deux backends. Le standard gagne le contrôle `dispatch.cost_slo` (pattern `provider-cost-slo`) : `INFO` faute de données, `WARN` en cas de dépassement (coût ou pass^k), `FAIL` uniquement si le projet déclare `dispatch_cost_slo.enforce: true` — jamais bloquant par défaut. Le cockpit n'est pas concerné par ce lot.
-- fix(yaml): `grimoire upgrade` round-trippait `project-context.yaml` via un chargeur `safe` (aucune métadonnée de commentaire) puis un dumper round-trip — tous les commentaires du fichier disparaissaient silencieusement à chaque migration v2→v3 (#430).
 - **feat(policies): politiques temporelles par session sur la médiation d'outils — budgets, approbation préalable, refroidissement (#439).**
   Point 3 de l'audit de positionnement 2026-09-12 : `PolicyRule` gagne quatre
   clés optionnelles et rétrocompatibles (`tool_pattern`, `require_approval`,
@@ -46,6 +23,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   hook `PreToolUse` reste sous +5 ms de surcoût mesuré. `grimoire policies
   status` affiche les compteurs et budgets restants de la session — le
   cockpit n'est pas dans ce lot.
+
 - **feat(hosts): un override d'agent peut désormais rester partiel (`extends: kit`) et signale sa dérive au lieu de figer silencieusement une copie (#427).**
   Migration réelle 3.38.0 → 3.44.2 : quatre overrides en copie intégrale
   n'avaient plus reçu une seule mise à niveau de leur agent depuis des mois,
@@ -71,26 +49,10 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `grimoire agent override convert <nom> [--dry-run]` convertit une copie
   intégrale en override partiel équivalent, refusant (lignes citées) quand
   le corps de la copie a divergé du kit plutôt que de fusionner du texte.
-- **feat(mcp): migrer le pont MCP vers la révision de protocole 2026-07-28 (#436).**
-  Le plancher `mcp>=1.10,<3` laissait un résolveur retenir un SDK qui plafonne
-  à la révision 2025-11-25 (pas de `server/discover`, pas de mode sans état).
-  Relevé à `mcp>=2.0,<3` : à partir de 2.0.0, le SDK négocie 2026-07-28 par
-  défaut (`server/discover`, auto-dérivé des outils/prompts/ressources
-  enregistrés) tout en servant encore, sur la même connexion, un hôte qui ne
-  connaît que le handshake `initialize` (2025-06-18, 2025-11-25) —
-  `serve_dual_era_loop` côté SDK. Aucune ligne du pont
-  (`src/grimoire/mcp/server.py`) n'a dû changer : il ne câblait déjà ni
-  Roots, ni Sampling, ni Logging (les trois fonctionnalités que 2026-07-28
-  déprécie, retrait possible à partir de 2027-07-28), et ne garde aucun état
-  entre deux appels d'outil en dehors des fichiers du projet ciblé. Nouveaux
-  tests (`tests/unit/mcp/test_protocol_revision.py`) qui pilotent un vrai
-  `ClientSession` sur des flux en mémoire : négociation 2026-07-28 par
-  `server/discover`, compatibilité `initialize` à 2025-06-18 et 2025-11-25,
-  et absence d'état partagé entre deux connexions successives. Documentation
-  (`docs/mcp-integration.md`) et carte de correspondance
-  (`framework/agentic-industry-reference.md`, section 10) mises à jour.
-  Hors périmètre : transport HTTP/SSE, authentification, exposition réseau
-  distante — le pont reste stdio, en local.
+
+- **feat(dispatch): coût par tâche résolue et pass^k, comptabilité continue et contrôle dans les gates (#442).**
+  Point 5 de l'audit de positionnement du 2026-09-12 : le kit dispatchait déjà des tâches en cascade sans jamais agréger en continu ce que ça coûte ni si ça marche de façon fiable — seules des campagnes d'évals manuelles (#308) répondaient à ces questions. `grimoire task dispatch`/`grimoire flow run --executor dispatch` écrivent maintenant un événement `dispatch.outcome` par cascade réellement tentée dans le journal de traces (classe, paliers tentés, coût total, verdict d'acceptance, résolu ou non — aucun contenu de prompt). Nouvelle commande `grimoire dispatch stats [--since 30d] [--json]`, sœur de `providers history` : coût par tâche résolue, taux d'escalade, part d'inexécutable (par classe et par fournisseur), et pass^k sur les nœuds rejoués (une série est « toute au vert » seulement si toutes ses exécutions ont résolu la tâche). Les agrégations pures vivent dans `rust/grimoire-traces-core/` (extension du sixième port), avec parité de test sous les deux backends. Le standard gagne le contrôle `dispatch.cost_slo` (pattern `provider-cost-slo`) : `INFO` faute de données, `WARN` en cas de dépassement (coût ou pass^k), `FAIL` uniquement si le projet déclare `dispatch_cost_slo.enforce: true` — jamais bloquant par défaut. Le cockpit n'est pas concerné par ce lot.
+
 - **feat(cockpit): timeline unifiée par tâche dans la vue de travail, l'export OTel de #322 devient une source lue plutôt qu'un mécanisme mort (#139).**
   Audit de positionnement du 2026-09-12, point 2 : `TraceLedger.export_otel_jsonl`
   produit des spans GenAI conformes depuis #322, mais rien ne les consommait —
@@ -118,6 +80,52 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `docs/audits/positionnement-2026-09-12.md` et
   `framework/agentic-industry-reference.md` (section 10) mis à jour avec la
   date de correction.
+
+- **feat(cockpit): suggestions de contenu par un petit modèle local (Ollama), toujours derrière l'IntelliSense déterministe de l'espace Source, jamais à sa place (#280).**
+  Voie 2 de #280, derrière la voie 1 (IntelliSense déterministe, PR #303) :
+  `project-context.yaml: source.assist.model` (vide par défaut, opt-in) plus
+  la même sonde qu'`grimoire providers audit` (`GET /api/tags`) décident si
+  le bouton **Suggérer** de l'éditeur Source apparaît — sinon l'interface ne
+  montre rien et ne tente rien. `GET /api/workspace/assist` (sans coût) rend
+  ce statut ; `POST /api/workspace/assist` (`src/grimoire/tools/source_assist.py`,
+  projet d'accueil seulement) appelle réellement le modèle en local
+  (`http://127.0.0.1:11434`, délai borné à 10 s), avec les identifiants du
+  paquet de langage (agents, skills, workflows, patterns) injectés dans le
+  prompt, et vérifie après coup tout identifiant cité par la réponse contre
+  ce même paquet — marqué « inconnu » plutôt que corrigé à la place de
+  l'utilisateur. Panneau d'aperçu dans l'éditeur (`Ctrl+Maj+Espace`, ou le
+  bouton) avec **Insérer**/**Ignorer** ; l'insertion passe par le même
+  chemin que la frappe clavier, la colorisation et les diagnostics se
+  recalculent dessus. Aucun fournisseur distant, aucune clé, aucune écriture
+  de fichier par la route. Garde de relecture : une URL Ollama résolue
+  (`OLLAMA_HOST`) hors bouclage (`127.0.0.1`, `::1`, `localhost`) est
+  refusée par défaut — `source.assist.allow_lan: true` l'autorise
+  explicitement.
+
+- **feat(mcp): migrer le pont MCP vers la révision de protocole 2026-07-28 (#436).**
+  Le plancher `mcp>=1.10,<3` laissait un résolveur retenir un SDK qui plafonne
+  à la révision 2025-11-25 (pas de `server/discover`, pas de mode sans état).
+  Relevé à `mcp>=2.0,<3` : à partir de 2.0.0, le SDK négocie 2026-07-28 par
+  défaut (`server/discover`, auto-dérivé des outils/prompts/ressources
+  enregistrés) tout en servant encore, sur la même connexion, un hôte qui ne
+  connaît que le handshake `initialize` (2025-06-18, 2025-11-25) —
+  `serve_dual_era_loop` côté SDK. Aucune ligne du pont
+  (`src/grimoire/mcp/server.py`) n'a dû changer : il ne câblait déjà ni
+  Roots, ni Sampling, ni Logging (les trois fonctionnalités que 2026-07-28
+  déprécie, retrait possible à partir de 2027-07-28), et ne garde aucun état
+  entre deux appels d'outil en dehors des fichiers du projet ciblé. Nouveaux
+  tests (`tests/unit/mcp/test_protocol_revision.py`) qui pilotent un vrai
+  `ClientSession` sur des flux en mémoire : négociation 2026-07-28 par
+  `server/discover`, compatibilité `initialize` à 2025-06-18 et 2025-11-25,
+  et absence d'état partagé entre deux connexions successives. Documentation
+  (`docs/mcp-integration.md`) et carte de correspondance
+  (`framework/agentic-industry-reference.md`, section 10) mises à jour.
+  Hors périmètre : transport HTTP/SSE, authentification, exposition réseau
+  distante — le pont reste stdio, en local.
+
+- fix(yaml): `grimoire upgrade` round-trippait `project-context.yaml` via un chargeur `safe` (aucune métadonnée de commentaire) puis un dumper round-trip — tous les commentaires du fichier disparaissaient silencieusement à chaque migration v2→v3 (#430).
+
+- fix(flows): `grimoire.runtime.kernel.create_instance` tronquait silencieusement `recipe_id`/`blueprint_id` aux 16 derniers caractères pour construire `wfi_id`/`run_id` (`WFI-...`) — deux blueprints partageant ce suffixe (par ex. `tasklib-hardening` perdait déjà son premier caractère) pouvaient obtenir le même `run_id` sur des kernels indépendants. L'identifiant complet est gardé tant qu'il tient dans une borne large (64 caractères) ; au-delà, il est raccourci et désambiguïsé par une empreinte de 8 hex de `sha256(recipe_id)` plutôt qu'une simple coupe. Les runs déjà persistés sous l'ancien format restent lisibles par `flow status`/`flow list` (#446).
 
 ## [3.45.0] - 2026-09-12
 
