@@ -289,6 +289,57 @@ def test_executer_review_sans_evidence_pack_est_refuse_et_nomme_l_artefact(
     assert inspector.locator(".ex-gate-row", has_text="Revue").count() == 1
 
 
+def test_executer_timeline_montre_dispatch_et_refus_et_se_filtre_par_source(
+    timeline_workspace: Page, served_timeline: tuple[str, str]
+) -> None:
+    """Issue #139 : ouvrir la timeline d'une tâche qui a un dispatch d'agent et
+    une transition refusée montre les deux lignes, et un filtre par source ne
+    garde que celle demandée. Les deux faits viennent du disque (préparés par
+    :func:`served_timeline` en CLI), rien n'est simulé côté navigateur."""
+    workspace = timeline_workspace
+    _, task_id = served_timeline
+    _goto(workspace, "executer")
+    workspace.wait_for_selector(".ex-card")
+
+    inspector = workspace.locator("#inspector-body")
+    workspace.locator(".ex-card").first.click()
+    inspector.get_by_text(task_id, exact=True).wait_for()
+
+    # Drill-down depuis la carte (#139) : le bouton de l'inspecteur, pas
+    # l'onglet Timeline du docbar.
+    inspector.locator("button", has_text="Voir la timeline").click()
+    workspace.wait_for_selector(".ex-tl-entry")
+
+    entries = workspace.locator(".ex-tl-entry")
+    all_text = entries.all_inner_texts()
+    assert any("gate" in t for t in all_text), f"aucune ligne « gate » (transition refusée) : {all_text}"
+    assert any("hooks" in t and "grimoire-master" in t for t in all_text), (
+        f"aucune ligne de dispatch d'agent : {all_text}"
+    )
+    total = entries.count()
+
+    # Filtre par source : ne garder que les lignes de la gate.
+    source_select = workspace.locator(".ex-tl-filters select").first
+    source_select.select_option("gate")
+    workspace.wait_for_function(
+        "() => document.querySelectorAll('.ex-tl-entry').length > 0 && "
+        "[...document.querySelectorAll('.ex-tl-entry')].every(e => e.textContent.includes('gate'))"
+    )
+    filtered = workspace.locator(".ex-tl-entry")
+    assert filtered.count() < total, "le filtre doit réduire la liste sur ce projet"
+    assert all("gate" in t for t in filtered.all_inner_texts())
+
+    # Filtre par gravité : « causes seulement » ne garde que des lignes en échec.
+    source_select.select_option("tous")
+    gravite_select = workspace.locator(".ex-tl-filters select").nth(1)
+    gravite_select.select_option("causes")
+    workspace.wait_for_selector(".ex-tl-entry.fail")
+    causes_only = workspace.locator(".ex-tl-entry")
+    classes = [causes_only.nth(i).get_attribute("class") or "" for i in range(causes_only.count())]
+    assert classes, "au moins une cause (la transition refusée) doit rester"
+    assert all("fail" in cls for cls in classes)
+
+
 # ── Observer — état vide honnête, jamais un mur de zéros ni une erreur ─────
 
 

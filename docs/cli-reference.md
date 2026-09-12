@@ -389,16 +389,26 @@ silence. Voir `src/grimoire/runtime/kernel.py` et `schemas.py`
 
 ### Pourquoi une tâche s'est arrêtée
 
-`grimoire task trace <id>` lit quatre journaux qui portent chacun le `task_id`
+`grimoire task trace <id>` lit les journaux qui portent chacun le `task_id`
 — le Mission Ledger (transitions, incidents), le TraceLedger des hooks (outils
 autorisés ou **refusés par la policy**, clôtures refusées, **gates de
-transition rouges**), le RuntimeKernel (run events, checkpoints, **abort/refus
-et leur raison**) et l'EvidenceService (packs, verdicts) — et les trie dans le temps.
-Les entrées qui expliquent un arrêt sont marquées et reprises dans une section
-« Cause(s) d'arrêt » ; `--causes` n'affiche qu'elles ; `--output json` rend la
-timeline complète avec ses sources. Une source absente est nommée comme telle ;
-rien n'est créé, rien n'est inventé. `bootstrap` se trace aussi — c'est là que
-les hooks écrivent tant qu'aucune tâche n'est réclamée.
+transition rouges**, **dispatch d'agent** ou non-choix), le RuntimeKernel (run
+events, checkpoints, **abort/refus et leur raison**), l'EvidenceService
+(packs, verdicts) et, s'il existe, l'export OTel du TraceLedger (`grimoire
+task trace-export --format otel`, #322) — et les trie dans le temps. Cette
+dernière source lit un fichier déjà écrit par `trace-export` (emplacement
+conventionnel : `<traces>/otel-export.jsonl`) ; elle ne relance jamais l'export
+elle-même. Les entrées qui expliquent un arrêt sont marquées et reprises dans
+une section « Cause(s) d'arrêt » ; `--causes` n'affiche qu'elles ; `--output
+json` rend la timeline complète avec ses sources. Une source absente est
+nommée comme telle ; rien n'est créé, rien n'est inventé. `bootstrap` se trace
+aussi — c'est là que les hooks écrivent tant qu'aucune tâche n'est réclamée.
+
+Le cockpit et l'atelier affichent la même timeline dans l'espace **Exécuter**
+de la vue de travail (onglet Timeline, drill-down depuis une carte du board),
+et l'espace **Observer** y renvoie depuis un span OTel qui porte un
+`grimoire.task_id` — voir [la page du cockpit](serve-blueprints.md), section
+« Le board (espace Exécuter) ».
 
 ```text
 GAO-livrer-la-ti-001 — Livrer la timeline  (running)

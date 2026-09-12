@@ -24,8 +24,10 @@ est sourcée par un fichier, une commande ou une issue — pas une opinion.
    gagnent rien (#354, 2026-09-11), et la cascade de dispatch coûte 56,4 % du coût opus par nœud
    réel contre 21,5 % projeté au lot 0 (#307) — l'écart venait d'un gate qui fermait vert sur la
    forme, pas sur l'acceptance, corrigé par #428 dans la même fenêtre.
-5. L'export OTel GenAI existe et est conforme au schéma (#322) ; rien ne le consomme côté cockpit —
-   c'est un cas net de mécanisme livré mais non branché, pas un manque de mécanisme.
+5. L'export OTel GenAI existe et est conforme au schéma (#322) ; rien ne le consommait côté cockpit —
+   **comblé le 2026-09-12** par la PR qui ferme #139 : la timeline unifiée par tâche lit désormais
+   le TraceLedger (hooks, dispatch d'agent, gates) et, s'il existe, l'export OTel lui-même comme
+   source à part, dans le cockpit (espaces Exécuter et Observer) comme en CLI.
 6. Le plus grave des sept points n'est pas un écart face à l'industrie mais une promesse du kit non
    tenue par le code : un override d'agent en copie intégrale ne reçoit plus jamais les mises à
    niveau du kit, sans le moindre signal (#427, ouverte).
@@ -56,7 +58,7 @@ version canonique et sa légende de statuts.
 | PCE (`productive-conflict-engine.md`) | Multi-agent debate | Inchangé | à cadrer |
 | AMN/SHP | Agent teams, Swarm Strands | Inchangé | aligné |
 | ARG (`agent-relationship-graph.md`) | Graphe d'orchestration OpenAI/ADK | Inchangé | aligné |
-| ELSS (`event-log-shared-state.md`) | Checkpointers LangGraph, task ledger Magentic | Export OTel livré (#322) côté ledger ; non consommé côté cockpit (#139 ouverte) | à combler |
+| ELSS (`event-log-shared-state.md`) | Checkpointers LangGraph, task ledger Magentic | Export OTel livré (#322) côté ledger ; consommé côté cockpit depuis le 2026-09-12 par la timeline unifiée par tâche (#139) | aligné |
 | CC (`cc-reference.md`) | « Give Claude a check it can run » | Renforcé par #428 : le gate exécute l'acceptance structurée, pas l'enveloppe | aligné |
 | Standard agentique (`evidence-gated-fsm`, gates de preuve) | Trace grading OpenAI, HAL | #428 en est la preuve la plus récente | en avance |
 | `tool-mediation-gate`, hooks shadow/canary/enforced | Policy Cedar/Dogwood | Aucun compteur ni budget par session trouvé dans `grimoire/policies/` | à combler |
@@ -67,7 +69,7 @@ version canonique et sa légende de statuts.
 | Hooks Forge via gateway | Familles d'événements des hôtes | `PostToolUseFailure`/`SubagentStart` désormais exploités (#321, même jour, après la référence) ; `TaskCreated`/`TaskCompleted`/`InstructionsLoaded` absents | à combler |
 | Persona d'entrée SessionStart | Aucun hôte équivalent | Inchangé | en avance |
 | Pont MCP (`grimoire` serveur) | MCP 2026-07-28 | **Comblé pendant la revue de cette PR** (#436/#437, 2026-09-12) : plancher `mcp>=2.0,<3`, `server/discover` négocie 2026-07-28 par défaut | aligné |
-| Observabilité cockpit | OTel GenAI, Langfuse, Phoenix | Émission conforme livrée (`otel_conventions.py`, #322) ; `/api/otel` sans appelant, `observability.html` sur l'ancien chemin (#139) | à combler |
+| Observabilité cockpit | OTel GenAI, Langfuse, Phoenix | Émission conforme livrée (`otel_conventions.py`, #322) ; **comblé le 2026-09-12** (#139) : timeline unifiée par tâche dans le cockpit (espaces Exécuter, Observer) et en CLI, l'export OTel y figure comme source à part | aligné |
 | Sécurité, patterns destructifs | Beurer-Kellner, CaMeL | Aucun pattern Plan-Then-Execute trouvé | à combler |
 | Identité des agents | Entra Agent ID, SPIFFE | Hors périmètre assumé | à suivre |
 | **Nouveau** — système émergent non-choix→proposition (`grimoire.proposals`) | Skills auto-écrits, ACE | Seuil mécanique + acceptation humaine obligatoire, sans LLM ; pattern distinct, pas retrouvé publié | en avance |
@@ -131,12 +133,18 @@ double par construction (leçon de l'audit du 2026-09-08).
    signale pas leur péremption. Issue #427 (ouverte). Coût : moyen (signal `doctor`/cockpit par
    empreinte, puis override partiel `extends: kit`).
 
-2. **[Promesse non tenue] L'export OTel GenAI livré (#322) n'est consommé par aucune page du
-   cockpit.** Fait : `otel_conventions.py` et `TraceLedger.export_otel_jsonl` produisent des spans
-   `invoke_agent`/`execute_tool` conformes au semconv ; `/api/otel` existe dans `forge_routes.py`
-   et n'a aucun appelant dans `web/`, qui reste sur `framework/tools/observatory.py`. Issue #139
-   (ouverte, portée exacte : timeline unifiée par tâche, `task_id` sur `GrimoireEvent`). Coût : lot
-   (câblage `task_id` sur les événements de hooks, puis la page).
+2. **[Comblé le 2026-09-12] L'export OTel GenAI livré (#322) n'était consommé par aucune page du
+   cockpit.** Fait à la rédaction initiale : `otel_conventions.py` et
+   `TraceLedger.export_otel_jsonl` produisaient des spans `invoke_agent`/`execute_tool` conformes
+   au semconv ; `/api/otel` existait dans `forge_routes.py` sans appelant dans `web/`, qui restait
+   sur `framework/tools/observatory.py`. Fermé par la PR qui clôt #139 : `grimoire.missions.trace`
+   indexe désormais le Mission Ledger, le TraceLedger (outils, gates, dispatch d'agent — le trou de
+   corrélation ne touchait pas que `GrimoireEvent`, `agent.dispatch`/`agent.miss` disparaissaient
+   aussi en silence), le RuntimeKernel, l'EvidenceService et, s'il existe, l'export OTel lui-même
+   (source « otel », corrélée par `grimoire.task_id` et `traceId`, jamais par heuristique
+   textuelle). Le cockpit l'affiche dans l'espace Exécuter (drill-down depuis une carte, filtrable
+   par source et gravité) et depuis l'espace Observer (un span qui porte `grimoire.task_id` renvoie
+   vers la timeline) ; `grimoire task trace <id>` en CLI depuis #276.
 
 3. **[Écart industrie] Aucune politique temporelle par session sur le tool-mediation-gate.**
    Fait : recherche de `budget`/`counter`/`session_limit` dans `grimoire/policies/` sans résultat au
