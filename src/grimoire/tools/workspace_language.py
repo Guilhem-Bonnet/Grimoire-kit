@@ -35,6 +35,8 @@ __all__ = [
     "TOKEN_KINDS",
     "WORKFLOW_FRONTMATTER_KEYS",
     "language_view",
+    "pattern_catalogue_ids",
+    "tokenize",
 ]
 
 # ── Ce qu'un token peut être — chacun a sa classe CSS côté éditeur ──────────
@@ -560,6 +562,16 @@ def _pattern_catalogue_ids() -> frozenset[str] | None:
     except (OSError, json.JSONDecodeError):
         return None
     return frozenset(str(p.get("id")) for p in raw.get("patterns", []) if p.get("id"))
+
+
+def pattern_catalogue_ids() -> frozenset[str] | None:
+    """Wrapper public de :func:`_pattern_catalogue_ids` (issue #280, voie 2).
+
+    ``source_assist`` vérifie les identifiants de pattern qu'un modèle local
+    cite dans une suggestion avec le même catalogue que le diagnostic
+    ``unknown-pattern`` ci-dessous — jamais une seconde lecture du fichier.
+    """
+    return _pattern_catalogue_ids()
 
 
 def _workflow_slugs(project_root: Path) -> frozenset[str]:

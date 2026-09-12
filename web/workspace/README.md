@@ -33,7 +33,8 @@ pytest tests/unit/test_workspace_api.py \
        tests/unit/test_workspace_routes.py \
        tests/unit/test_workspace_tokens.py \
        tests/unit/test_workspace_glossary.py \
-       tests/unit/test_workspace_language.py
+       tests/unit/test_workspace_language.py \
+       tests/unit/test_source_assist.py
 
 # Harnais navigateur (facultatif — se skippe proprement sans Playwright)
 pip install playwright && playwright install chromium
@@ -61,7 +62,7 @@ démonstration dans cette suite, et il ne doit jamais y en avoir.
 | `spaces/observer.js` | Runtime : KPI, coût, latence, spans, traces | lot 4 |
 | `spaces/memoire.js` | Store et graphe d'abord, couches ensuite | lot 4 |
 | `spaces/source.js` | Fichiers par étage, éditeur, diff, override, provenance | lot 5 |
-| `spaces/source-editor.js` | IntelliSense de l'éditeur Source (issue 280) : colorisation par recouvrement, gouttière de diagnostics, complétion, infobulle du glossaire au survol | lot 5 |
+| `spaces/source-editor.js` | IntelliSense de l'éditeur Source (issue 280) : colorisation par recouvrement, gouttière de diagnostics, complétion, infobulle du glossaire au survol ; suggestions par modèle local derrière (issue 280, voie 2) : barre « Suggérer », panneau d'aperçu, lien « Expliquer » sur un diagnostic | lot 5 |
 
 ## Le contrat d'un espace
 
@@ -136,6 +137,7 @@ l'atelier mono-projet, parce que le cockpit se déclare `readOnly`.
 | `GET /api/workspace/doctor` | `{ok, code, timed_out, command, lines[], stderr}` |
 | `GET /api/workspace/language?path=&text=&line=&col=` | IntelliSense de Source (issue 280) : `{path, tokens[], diagnostics[], completions[]?}` — `tokens[]` : `{line, start, end, kind, glossaryId?}` ; `diagnostics[]` : `{line, start, end, severity, family, message}` ; `completions[]` (seulement si `line`/`col` fournis) : `{label, kind, insertText, detail}`. `text` porte le brouillon en cours d'édition — omis, la lecture vient du disque comme `file` |
 | `GET /api/workspace/agents` | `{agents[], skills[], entry_point}` — `agents[]` : `{name, description, definition_ref, tools[], tools_origin, affinity, entry_point, max_turns, skills[], context[], layer, use_when, dont_use_when, tool_boundary, usage: {choices, last_chosen_at}}` ; `skills[]` : le catalogue disponible pour l'assignation (#374) |
+| `GET /api/workspace/assist` | Suggestions par modèle local (issue 280, voie 2), lecture sans coût — jamais d'appel au modèle : `{enabled, model, available, reason}`. `enabled: false` = opt-in absent (`source.assist.model` vide) ; `available: false` avec `enabled: true` = Ollama indisponible ou modèle absent de `ollama list` |
 
 ### Écritures — atelier seulement (404 sur le cockpit)
 
@@ -150,6 +152,7 @@ l'atelier mono-projet, parce que le cockpit se déclare `readOnly`.
 | `POST /api/workspace/command` | `{argv[]}` | `{ok, command, argv, code, stdout, stderr, output, timed_out, duration_ms}` |
 | `POST /api/workspace/agents/<nom>/skill` | `{skill, action: "assign"\|"remove"}` | `{agents[], skills[], entry_point}` (la vue rafraîchie) — écrit toujours dans `overrides`, jamais dans le kit ; skill inconnu refusé avec le message que `collect_agents` produit déjà (#374) |
 | `POST /api/workspace/agents/<nom>/fields` | Un sous-ensemble de `{use_when, dont_use_when, tool_boundary, tools[], context[]}` | idem — `tools` validé contre les verbes connus, `context` contre l'existence sur disque |
+| `POST /api/workspace/assist` | `{path, text, position: {line, col}, intent: "complete-clause"\|"draft-body"\|"explain-diagnostic", diagnostic?}` | `{available, model?, intent?, suggestion?, unknown?[], reason?}` — `available: false` est une réponse normale (opt-in absent, Ollama indisponible, délai dépassé à 10 s), jamais une exception ; `unknown[]` : `{text, kind, line, start, end}`, les identifiants cités par le modèle mais absents du paquet de langage. N'écrit jamais de fichier — l'insertion reste un geste de l'éditeur |
 
 Un gate de preuve rouge **n'est pas une erreur** : il revient en 200 avec
 `blocked: true` et la preuve manquante nommée. L'interface l'affiche ; elle ne

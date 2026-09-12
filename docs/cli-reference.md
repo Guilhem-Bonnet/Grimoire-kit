@@ -1452,9 +1452,41 @@ le survol d'un identifiant lié à une entrée du glossaire ouvre la même bulle
 épinglable que le reste de la vue de travail. Tout vient de
 `GET /api/workspace/language` (`src/grimoire/tools/workspace_language.py`),
 servi en lecture seule sur les deux hôtes — voir le tableau des routes dans
-`web/workspace/README.md`. La piste d'un petit modèle local (Ollama) pour des
-suggestions de contenu resterait derrière cette IntelliSense déterministe,
-jamais à sa place.
+`web/workspace/README.md`.
+
+#### Source : suggestions par modèle local (issue 280, voie 2)
+
+Derrière cette IntelliSense déterministe, jamais à sa place : un petit
+modèle local (Ollama) peut proposer du *texte* — compléter une clause
+d'emploi (`use_when`/`dont_use_when`), rédiger le corps d'un agent ou d'une
+étape de workflow, expliquer un diagnostic — mais ne fait jamais autorité sur
+les identifiants, les chemins ou les diagnostics, qui restent ceux de
+`workspace_language.py`. Deux conditions cumulatives, sinon l'interface ne
+montre rien et ne tente rien :
+
+1. le doctor voit Ollama sur le poste (même sonde que
+   `grimoire providers audit` — `GET /api/tags`, sans dépenser de quota) ;
+2. `project-context.yaml` déclare `source.assist.model: "<modèle>"` — vide
+   par défaut. Le modèle se choisit parmi ceux réellement présents
+   (`ollama list`) ; `qwen3-coder:30b`, ou le plus petit modèle codeur
+   trouvé, est un défaut raisonnable.
+
+`GET /api/workspace/assist` (sans coût, jamais d'appel au modèle) dit si le
+bouton **Suggérer** de l'éditeur doit apparaître ; `POST /api/workspace/assist`
+(chemin, texte, position, intention) l'appelle réellement, avec un délai
+borné à 10 s. La réponse porte la suggestion brute du modèle *et* la liste
+de ce qu'elle cite sans figurer dans le paquet de langage (agent, workflow,
+pattern ou chemin) — jamais corrigée à la place de l'utilisateur, seulement
+marquée « inconnu ». Le panneau d'aperçu (`Ctrl+Maj+Espace`, ou le bouton
+**Suggérer**) affiche cette suggestion à côté de l'éditeur ; **Insérer** la
+place au curseur par le même chemin que la frappe clavier (colorisation et
+diagnostics se recalculent dessus), **Ignorer** referme le panneau sans rien
+écrire. Aucun envoi automatique à la frappe, aucun fournisseur distant,
+aucune clé, aucune donnée hors de la machine — le module
+`src/grimoire/tools/source_assist.py` ne contacte jamais qu'Ollama en local.
+Si l'URL Ollama résolue (`OLLAMA_HOST`) ne pointe pas vers une adresse de
+bouclage, l'appel est refusé (nommé) sauf déclaration explicite de
+`source.assist.allow_lan: true`.
 
 ### Projets de la machine
 

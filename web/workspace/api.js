@@ -150,6 +150,16 @@ export const api = {
     if (pos) { params.line = String(pos.line); params.col = String(pos.col); }
     return get(WS + 'language', params);
   },
+  // Suggestions par un petit modèle local (#280, voie 2) — jamais à la place
+  // de `language()` ci-dessus, toujours derrière : `assistStatus()` est une
+  // lecture sans coût (l'éditeur l'appelle au montage pour savoir si le
+  // bouton « Suggérer » doit même apparaître) ; `assist()` appelle
+  // réellement le modèle et rend `{available, model?, suggestion?, unknown?,
+  // reason?}` — `available: false` est une réponse normale (opt-in absent,
+  // Ollama indisponible, délai dépassé), jamais une exception.
+  assistStatus: () => get(WS + 'assist'),
+  assist: (path, { text, position, intent, diagnostic } = {}) =>
+    post(WS + 'assist', { path, text, position, intent, diagnostic }),
   // Concevoir (lot 3) : les containers enrichis (genre, agents, équipe,
   // dernière modification) que `/api/blueprints` seul ne porte pas.
   blueprintContainers: () => get(WS + 'blueprints'),

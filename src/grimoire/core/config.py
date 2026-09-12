@@ -28,6 +28,8 @@ __all__ = [
     "MemoryConfig",
     "ProjectConfig",
     "RepoConfig",
+    "SourceAssistConfig",
+    "SourceConfig",
     "UserConfig",
 ]
 
@@ -235,10 +237,49 @@ class AgentsConfig:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class SourceAssistConfig:
+    """The ``source.assist:`` section — issue #280, voie 2.
+
+    Opt-in déclaré, désactivé par défaut : ``model`` vide veut dire
+    « aucune suggestion par modèle local », quelle que soit la présence
+    d'Ollama sur le poste. Rien ne doit s'activer par simple détection —
+    seule une déclaration explicite dans ``project-context.yaml`` engage la
+    route ``POST /api/workspace/assist``.
+
+    ``allow_lan`` (faux par défaut) est un second opt-in, distinct du premier :
+    la doctrine de cette piste est « aucune donnée hors de la machine » — une
+    URL Ollama qui ne pointe pas vers une adresse de bouclage
+    (``127.0.0.1``, ``::1``, ``localhost``) est refusée tant que ce champ ne
+    l'autorise pas explicitement (:func:`grimoire.tools.source_assist._readiness`).
+    """
+
+    model: str = ""
+    allow_lan: bool = False
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> SourceAssistConfig:
+        return cls(
+            model=str(data.get("model", "")).strip(),
+            allow_lan=data.get("allow_lan") is True,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class SourceConfig:
+    """The ``source:`` section — configuration de l'espace Source."""
+
+    assist: SourceAssistConfig = field(default_factory=SourceAssistConfig)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> SourceConfig:
+        return cls(assist=SourceAssistConfig.from_dict(data.get("assist") or {}))
+
+
 # ── Root Config ───────────────────────────────────────────────────────────────
 
 _KNOWN_TOP_KEYS = frozenset({
-    "project", "user", "memory", "agents", "installed_archetypes",
+    "project", "user", "memory", "agents", "installed_archetypes", "source",
 })
 
 
@@ -254,6 +295,7 @@ class GrimoireConfig:
     user: UserConfig = field(default_factory=UserConfig)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     agents: AgentsConfig = field(default_factory=AgentsConfig)
+    source: SourceConfig = field(default_factory=SourceConfig)
     installed_archetypes: tuple[str, ...] = ()
     extra: dict[str, Any] = field(default_factory=dict)
 
@@ -312,6 +354,7 @@ class GrimoireConfig:
             user=UserConfig.from_dict(data.get("user") or {}),
             memory=MemoryConfig.from_dict(data.get("memory") or {}),
             agents=AgentsConfig.from_dict(data.get("agents") or {}),
+            source=SourceConfig.from_dict(data.get("source") or {}),
             installed_archetypes=tuple(str(a) for a in raw_archetypes),
             extra=extra,
         )

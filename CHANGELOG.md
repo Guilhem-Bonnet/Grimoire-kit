@@ -7,6 +7,27 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **feat(cockpit): suggestions de contenu par un petit modèle local (Ollama), toujours derrière l'IntelliSense déterministe de l'espace Source, jamais à sa place (#280).**
+  Voie 2 de #280, derrière la voie 1 (IntelliSense déterministe, PR #303) :
+  `project-context.yaml: source.assist.model` (vide par défaut, opt-in) plus
+  la même sonde qu'`grimoire providers audit` (`GET /api/tags`) décident si
+  le bouton **Suggérer** de l'éditeur Source apparaît — sinon l'interface ne
+  montre rien et ne tente rien. `GET /api/workspace/assist` (sans coût) rend
+  ce statut ; `POST /api/workspace/assist` (`src/grimoire/tools/source_assist.py`,
+  projet d'accueil seulement) appelle réellement le modèle en local
+  (`http://127.0.0.1:11434`, délai borné à 10 s), avec les identifiants du
+  paquet de langage (agents, skills, workflows, patterns) injectés dans le
+  prompt, et vérifie après coup tout identifiant cité par la réponse contre
+  ce même paquet — marqué « inconnu » plutôt que corrigé à la place de
+  l'utilisateur. Panneau d'aperçu dans l'éditeur (`Ctrl+Maj+Espace`, ou le
+  bouton) avec **Insérer**/**Ignorer** ; l'insertion passe par le même
+  chemin que la frappe clavier, la colorisation et les diagnostics se
+  recalculent dessus. Aucun fournisseur distant, aucune clé, aucune écriture
+  de fichier par la route. Garde de relecture : une URL Ollama résolue
+  (`OLLAMA_HOST`) hors bouclage (`127.0.0.1`, `::1`, `localhost`) est
+  refusée par défaut — `source.assist.allow_lan: true` l'autorise
+  explicitement.
+
 - fix(flows): `grimoire.runtime.kernel.create_instance` tronquait silencieusement `recipe_id`/`blueprint_id` aux 16 derniers caractères pour construire `wfi_id`/`run_id` (`WFI-...`) — deux blueprints partageant ce suffixe (par ex. `tasklib-hardening` perdait déjà son premier caractère) pouvaient obtenir le même `run_id` sur des kernels indépendants. L'identifiant complet est gardé tant qu'il tient dans une borne large (64 caractères) ; au-delà, il est raccourci et désambiguïsé par une empreinte de 8 hex de `sha256(recipe_id)` plutôt qu'une simple coupe. Les runs déjà persistés sous l'ancien format restent lisibles par `flow status`/`flow list` (#446).
 - **feat(dispatch): coût par tâche résolue et pass^k, comptabilité continue et contrôle dans les gates (#442).**
   Point 5 de l'audit de positionnement du 2026-09-12 : le kit dispatchait déjà des tâches en cascade sans jamais agréger en continu ce que ça coûte ni si ça marche de façon fiable — seules des campagnes d'évals manuelles (#308) répondaient à ces questions. `grimoire task dispatch`/`grimoire flow run --executor dispatch` écrivent maintenant un événement `dispatch.outcome` par cascade réellement tentée dans le journal de traces (classe, paliers tentés, coût total, verdict d'acceptance, résolu ou non — aucun contenu de prompt). Nouvelle commande `grimoire dispatch stats [--since 30d] [--json]`, sœur de `providers history` : coût par tâche résolue, taux d'escalade, part d'inexécutable (par classe et par fournisseur), et pass^k sur les nœuds rejoués (une série est « toute au vert » seulement si toutes ses exécutions ont résolu la tâche). Les agrégations pures vivent dans `rust/grimoire-traces-core/` (extension du sixième port), avec parité de test sous les deux backends. Le standard gagne le contrôle `dispatch.cost_slo` (pattern `provider-cost-slo`) : `INFO` faute de données, `WARN` en cas de dépassement (coût ou pass^k), `FAIL` uniquement si le projet déclare `dispatch_cost_slo.enforce: true` — jamais bloquant par défaut. Le cockpit n'est pas concerné par ce lot.
