@@ -245,12 +245,254 @@ fn evaluate_core(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Politiques temporelles (issue #429, point 3 de l'audit de positionnement
+// 2026-09-12) : budgets par session, approbation prealable, refroidissement.
+//
+// Miroir de `grimoire.policies.temporal` (Python) : meme boucle sur les
+// regles temporelles, meme ordre de priorite par regle (refroidissement >
+// budget > approbation prealable > allow), memes compteurs incrementes. Pas
+// de dependance a une bibliotheque de dates : chaque horodatage traverse la
+// frontiere PyO3 comme un flottant "secondes depuis epoch" — la conversion
+// ISO<->epoch reste cote Python (`temporal.py`), qui l'a deja pour
+// `datetime.fromisoformat`/`isoformat`.
+// ---------------------------------------------------------------------------
+
+/// Correspondance de motif : `*` est le seul joker, miroir exact de
+/// `grimoire.policies.temporal.glob_match`. Sensible a la casse.
+fn glob_match(pattern: &str, text: &str) -> bool {
+    if pattern == "*" || pattern == text {
+        return true;
+    }
+    if !pattern.contains('*') {
+        return false;
+    }
+    let parts: Vec<&str> = pattern.split('*').collect();
+    let first = parts[0];
+    let last = parts[parts.len() - 1];
+    if !text.starts_with(first) || !text.ends_with(last) {
+        return false;
+    }
+    let mut cursor = first.len();
+    let end = text.len() - last.len();
+    for part in &parts[1..parts.len() - 1] {
+        if part.is_empty() {
+            continue;
+        }
+        match text.get(cursor..end).and_then(|hay| hay.find(part)) {
+            Some(idx) => cursor += idx + part.len(),
+            None => return false,
+        }
+    }
+    cursor <= end
+}
+
+/// Miroir de la partie temporelle de `grimoire.policies.schemas.PolicyRule` :
+/// `tool_pattern`, `require_approval`, `per_session` (aplati) et
+/// `cooldown_after` (aplati). Une regle sans aucune de ces contraintes
+/// n'entre jamais dans cette liste — filtree cote Python par
+/// `PolicyRule.is_temporal` avant l'appel PyO3.
+struct TemporalRule {
+    id: String,
+    tool_pattern: String,
+    require_approval: bool,
+    max_tool_calls: Option<i64>,
+    max_writes: Option<i64>,
+    max_cost_usd: Option<f64>,
+    max_duration_min: Option<f64>,
+    cooldown_pattern: String,
+    cooldown_count: i64,
+    cooldown_minutes: f64,
+    estimated_cost_usd: f64,
+}
+
+impl TemporalRule {
+    fn has_cooldown(&self) -> bool {
+        self.cooldown_count > 0
+    }
+}
+
+/// Miroir de `grimoire.policies.session_state.RuleState` — les compteurs
+/// d'une seule regle pour la session courante.
+#[derive(Clone)]
+struct RuleState {
+    calls: i64,
+    writes: i64,
+    cost_usd: f64,
+    approved: bool,
+    hits: Vec<f64>,
+}
+
+struct TemporalMatch {
+    rule_id: String,
+    verdict: VerdictKind,
+    reason: String,
+}
+
+struct TemporalResult {
+    verdict: VerdictKind,
+    reason: String,
+    matched: Vec<TemporalMatch>,
+    states: Vec<(String, RuleState)>,
+}
+
+/// Nombre de `hits` dans la fenetre `[now - minutes*60, now]`.
+fn hits_in_window(hits: &[f64], now_epoch_s: f64, minutes: f64) -> i64 {
+    let threshold = now_epoch_s - minutes * 60.0;
+    hits.iter().filter(|&&h| h >= threshold).count() as i64
+}
+
+/// Une seule regle temporelle contre ses propres compteurs. Miroir exact de
+/// `grimoire.policies.temporal._evaluate_one_rule` : meme ordre de priorite,
+/// memes conditions de refus, memes compteurs mutes uniquement quand l'appel
+/// n'est pas refuse par un budget ou n'est pas deja en refroidissement actif.
+/// Retourne `(verdict, raison, faut_il_enregistrer_un_hit)`.
+fn evaluate_one_temporal_rule(
+    rule: &TemporalRule,
+    state: &mut RuleState,
+    tool_name: &str,
+    is_write: bool,
+    now_epoch_s: f64,
+    session_started_epoch_s: f64,
+) -> (VerdictKind, String, bool) {
+    // 1) Refroidissement — le refus le plus immediat, en forme de rate-limit.
+    if rule.has_cooldown() && glob_match(&rule.cooldown_pattern, tool_name) {
+        let hits = hits_in_window(&state.hits, now_epoch_s, rule.cooldown_minutes);
+        if hits >= rule.cooldown_count {
+            return (
+                VerdictKind::Block,
+                format!(
+                    "Refroidissement actif pour '{}' ({} appels en {} min) — réessaie plus tard",
+                    rule.cooldown_pattern, rule.cooldown_count, rule.cooldown_minutes
+                ),
+                true,
+            );
+        }
+    }
+
+    // 2) Budgets par session — le plafond deja atteint, pas celui sur le point de l'etre.
+    if let Some(max_calls) = rule.max_tool_calls {
+        if state.calls >= max_calls {
+            return (
+                VerdictKind::Block,
+                format!("Budget de {max_calls} appels d'outil atteint pour cette session"),
+                false,
+            );
+        }
+    }
+    if is_write {
+        if let Some(max_writes) = rule.max_writes {
+            if state.writes >= max_writes {
+                return (
+                    VerdictKind::Block,
+                    format!("Budget de {max_writes} écritures atteint pour cette session"),
+                    false,
+                );
+            }
+        }
+    }
+    if let Some(max_cost) = rule.max_cost_usd {
+        if state.cost_usd >= max_cost {
+            return (
+                VerdictKind::Block,
+                format!("Budget de {max_cost} $ atteint pour cette session"),
+                false,
+            );
+        }
+    }
+    if let Some(max_duration) = rule.max_duration_min {
+        let elapsed_min = ((now_epoch_s - session_started_epoch_s).max(0.0)) / 60.0;
+        if elapsed_min >= max_duration {
+            return (
+                VerdictKind::Block,
+                format!("Fenêtre de {max_duration} min dépassée pour cette session"),
+                false,
+            );
+        }
+    }
+
+    // 3) Approbation prealable — premiere occurrence dans la session seulement.
+    let mut verdict = VerdictKind::Allow;
+    let mut reason = String::new();
+    if rule.require_approval && !state.approved {
+        verdict = VerdictKind::Warn;
+        reason = format!(
+            "Approbation requise pour '{tool_name}' — première occurrence dans cette session"
+        );
+        state.approved = true;
+    }
+
+    state.calls += 1;
+    if is_write {
+        state.writes += 1;
+    }
+    state.cost_usd += rule.estimated_cost_usd;
+    (verdict, reason, true)
+}
+
+/// Coeur pur de l'evaluation temporelle — aucun type PyO3, testable
+/// directement par `cargo test`. Miroir exact de
+/// `grimoire.policies.temporal._evaluate_python`.
+fn evaluate_temporal_core(
+    rules: &[TemporalRule],
+    mut states: Vec<(String, RuleState)>,
+    tool_name: &str,
+    is_write: bool,
+    now_epoch_s: f64,
+    session_started_epoch_s: f64,
+) -> TemporalResult {
+    let mut matched = Vec::new();
+    let mut effective = VerdictKind::Allow;
+    let mut reason = String::new();
+
+    for rule in rules {
+        if !glob_match(&rule.tool_pattern, tool_name) {
+            continue;
+        }
+        let entry = states.iter_mut().find(|(id, _)| id == &rule.id).expect(
+            "every temporal rule has a matching state entry (see py_bridge::evaluate_temporal)",
+        );
+        let (verdict, rule_reason, record_hit) = evaluate_one_temporal_rule(
+            rule,
+            &mut entry.1,
+            tool_name,
+            is_write,
+            now_epoch_s,
+            session_started_epoch_s,
+        );
+        if record_hit {
+            entry.1.hits.push(now_epoch_s);
+        }
+        if verdict != VerdictKind::Allow || !rule_reason.is_empty() {
+            matched.push(TemporalMatch {
+                rule_id: rule.id.clone(),
+                verdict,
+                reason: rule_reason.clone(),
+            });
+        }
+        if verdict.severity() > effective.severity() {
+            effective = verdict;
+            reason = rule_reason;
+        }
+    }
+
+    TemporalResult {
+        verdict: effective,
+        reason,
+        matched,
+        states,
+    }
+}
+
 // Tout ce qui suit touche a PyO3 et n'existe que sous la feature
 // `extension-module` (cf. Cargo.toml) : `evaluate_core` ci-dessus, seule
 // logique couverte par `cargo test --no-default-features`, n'en depend pas.
 #[cfg(feature = "extension-module")]
 mod py_bridge {
-    use super::{evaluate_core, ActionKind, MutationClass, PolicyMode, Rule, VerdictKind};
+    use super::{
+        evaluate_core, evaluate_temporal_core, ActionKind, MutationClass, PolicyMode, Rule,
+        RuleState, TemporalRule, VerdictKind,
+    };
     use pyo3::exceptions::PyValueError;
     use pyo3::prelude::*;
 
@@ -333,9 +575,133 @@ mod py_bridge {
         ))
     }
 
+    type PyTemporalRuleTuple = (
+        String,      // id
+        String,      // tool_pattern
+        bool,        // require_approval
+        Option<i64>, // per_session.max_tool_calls
+        Option<i64>, // per_session.max_writes
+        Option<f64>, // per_session.max_cost_usd
+        Option<f64>, // per_session.max_duration_min
+        String,      // cooldown_after.pattern ("" if unset)
+        i64,         // cooldown_after.count (0 if unset)
+        f64,         // cooldown_after.minutes (0.0 if unset)
+        f64,         // estimated_cost_usd
+    );
+    type PyRuleStateTuple = (String, i64, i64, f64, bool, Vec<f64>);
+    type PyTemporalMatchedTuple = (String, String, String);
+    type PyTemporalDelta = (String, i64, i64, f64, bool, Vec<f64>);
+    type PyTemporalResult = (
+        String,
+        String,
+        Vec<PyTemporalMatchedTuple>,
+        Vec<PyTemporalDelta>,
+    );
+
+    /// Frontiere PyO3 de la partie temporelle (issue #429, point 3) —
+    /// contrepartie de `evaluate` ci-dessus pour
+    /// `grimoire.policies.temporal.evaluate_temporal`. Chaque horodatage
+    /// (``now_epoch_s``, ``session_started_epoch_s``, les ``hits`` dans
+    /// chaque tuple d'etat) est deja en secondes-epoch : voir le commentaire
+    /// en tete de la section "Politiques temporelles" plus haut dans ce
+    /// fichier pour pourquoi aucune conversion ISO n'a lieu ici.
+    #[pyfunction]
+    fn evaluate_temporal(
+        rules: Vec<PyTemporalRuleTuple>,
+        states: Vec<PyRuleStateTuple>,
+        tool_name: String,
+        is_write: bool,
+        now_epoch_s: f64,
+        session_started_epoch_s: f64,
+    ) -> PyResult<PyTemporalResult> {
+        let parsed_rules: Vec<TemporalRule> = rules
+            .into_iter()
+            .map(
+                |(
+                    id,
+                    tool_pattern,
+                    require_approval,
+                    max_tool_calls,
+                    max_writes,
+                    max_cost_usd,
+                    max_duration_min,
+                    cooldown_pattern,
+                    cooldown_count,
+                    cooldown_minutes,
+                    estimated_cost_usd,
+                )| TemporalRule {
+                    id,
+                    tool_pattern,
+                    require_approval,
+                    max_tool_calls,
+                    max_writes,
+                    max_cost_usd,
+                    max_duration_min,
+                    cooldown_pattern,
+                    cooldown_count,
+                    cooldown_minutes,
+                    estimated_cost_usd,
+                },
+            )
+            .collect();
+
+        let parsed_states: Vec<(String, RuleState)> = states
+            .into_iter()
+            .map(|(id, calls, writes, cost_usd, approved, hits)| {
+                (
+                    id,
+                    RuleState {
+                        calls,
+                        writes,
+                        cost_usd,
+                        approved,
+                        hits,
+                    },
+                )
+            })
+            .collect();
+
+        let result = evaluate_temporal_core(
+            &parsed_rules,
+            parsed_states,
+            &tool_name,
+            is_write,
+            now_epoch_s,
+            session_started_epoch_s,
+        );
+
+        let matched: Vec<PyTemporalMatchedTuple> = result
+            .matched
+            .into_iter()
+            .map(|m| (m.rule_id, m.verdict.as_str().to_string(), m.reason))
+            .collect();
+        let deltas: Vec<PyTemporalDelta> = result
+            .states
+            .into_iter()
+            .map(|(id, state)| {
+                (
+                    id,
+                    state.calls,
+                    state.writes,
+                    state.cost_usd,
+                    state.approved,
+                    state.hits,
+                )
+            })
+            .collect();
+
+        Ok((
+            result.verdict.as_str().to_string(),
+            result.reason,
+            matched,
+            deltas,
+        ))
+    }
+
     #[pymodule]
     fn grimoire_policies_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
         m.add_function(wrap_pyfunction!(evaluate, m)?)?;
+        m.add_function(wrap_pyfunction!(evaluate_temporal, m)?)?;
         m.add("__version__", env!("CARGO_PKG_VERSION"))?;
         Ok(())
     }
@@ -549,5 +915,185 @@ mod tests {
         assert!(MutationClass::parse("not_a_real_class").is_err());
         assert!(VerdictKind::parse("not_a_real_verdict").is_err());
         assert!(PolicyMode::parse("not_a_real_mode").is_err());
+    }
+}
+
+#[cfg(test)]
+mod temporal_tests {
+    use super::*;
+
+    fn budget_rule(id: &str, max_writes: Option<i64>, max_tool_calls: Option<i64>) -> TemporalRule {
+        TemporalRule {
+            id: id.to_string(),
+            tool_pattern: "*".to_string(),
+            require_approval: false,
+            max_tool_calls,
+            max_writes,
+            max_cost_usd: None,
+            max_duration_min: None,
+            cooldown_pattern: String::new(),
+            cooldown_count: 0,
+            cooldown_minutes: 0.0,
+            estimated_cost_usd: 0.0,
+        }
+    }
+
+    fn approval_rule(id: &str, pattern: &str) -> TemporalRule {
+        TemporalRule {
+            id: id.to_string(),
+            tool_pattern: pattern.to_string(),
+            require_approval: true,
+            max_tool_calls: None,
+            max_writes: None,
+            max_cost_usd: None,
+            max_duration_min: None,
+            cooldown_pattern: String::new(),
+            cooldown_count: 0,
+            cooldown_minutes: 0.0,
+            estimated_cost_usd: 0.0,
+        }
+    }
+
+    fn cooldown_rule(id: &str, pattern: &str, count: i64, minutes: f64) -> TemporalRule {
+        TemporalRule {
+            id: id.to_string(),
+            tool_pattern: pattern.to_string(),
+            require_approval: false,
+            max_tool_calls: None,
+            max_writes: None,
+            max_cost_usd: None,
+            max_duration_min: None,
+            cooldown_pattern: pattern.to_string(),
+            cooldown_count: count,
+            cooldown_minutes: minutes,
+            estimated_cost_usd: 0.0,
+        }
+    }
+
+    fn empty_state(id: &str) -> (String, RuleState) {
+        (
+            id.to_string(),
+            RuleState {
+                calls: 0,
+                writes: 0,
+                cost_usd: 0.0,
+                approved: false,
+                hits: Vec::new(),
+            },
+        )
+    }
+
+    #[test]
+    fn glob_match_star_only() {
+        assert!(glob_match("*", "anything"));
+        assert!(glob_match("Bash", "Bash"));
+        assert!(!glob_match("Bash", "bash"));
+        assert!(glob_match("mcp__*__write*", "mcp__grimoire__write_file"));
+        assert!(!glob_match("mcp__*__write*", "mcp__grimoire__read_file"));
+    }
+
+    #[test]
+    fn budget_allows_up_to_the_limit_then_blocks() {
+        let rules = vec![budget_rule("writes-cap", Some(2), None)];
+        let mut states = vec![empty_state("writes-cap")];
+
+        // Deux ecritures autorisees : le compteur monte a 2.
+        for _ in 0..2 {
+            let result = evaluate_temporal_core(&rules, states, "Write", true, 0.0, 0.0);
+            assert_eq!(result.verdict, VerdictKind::Allow);
+            states = result.states;
+        }
+        assert_eq!(states[0].1.writes, 2);
+
+        // La 3e est refusee, nommement, et le compteur ne bouge plus.
+        let result = evaluate_temporal_core(&rules, states, "Write", true, 0.0, 0.0);
+        assert_eq!(result.verdict, VerdictKind::Block);
+        assert!(result.reason.contains("Budget de 2 écritures"));
+        assert_eq!(result.states[0].1.writes, 2);
+    }
+
+    #[test]
+    fn require_approval_asks_once_then_allows() {
+        let rules = vec![approval_rule("rm-approval", "Bash(rm:*)")];
+        let states = vec![empty_state("rm-approval")];
+
+        let first = evaluate_temporal_core(&rules, states, "Bash(rm:*)", true, 0.0, 0.0);
+        assert_eq!(first.verdict, VerdictKind::Warn);
+        assert!(first.states[0].1.approved);
+
+        let second = evaluate_temporal_core(&rules, first.states, "Bash(rm:*)", true, 0.0, 0.0);
+        assert_eq!(second.verdict, VerdictKind::Allow);
+    }
+
+    #[test]
+    fn fresh_session_asks_again() {
+        // Miroir du test Python `test_require_approval_asks_again_in_a_new_session` :
+        // un etat neuf (approved=false) redemande, meme pour la meme regle.
+        let rules = vec![approval_rule("rm-approval", "*")];
+        let states = vec![empty_state("rm-approval")];
+        let result = evaluate_temporal_core(&rules, states, "Bash", false, 0.0, 0.0);
+        assert_eq!(result.verdict, VerdictKind::Warn);
+    }
+
+    #[test]
+    fn cooldown_blocks_after_count_hits_in_window() {
+        let rules = vec![cooldown_rule("burst-guard", "*", 3, 10.0)];
+        let mut states = vec![empty_state("burst-guard")];
+
+        for _ in 0..3 {
+            let result = evaluate_temporal_core(&rules, states, "Bash", false, 0.0, 0.0);
+            assert_eq!(result.verdict, VerdictKind::Allow);
+            states = result.states;
+        }
+        // Les 3 hits sont dans la fenetre (meme instant) : le 4e est bloque.
+        let result = evaluate_temporal_core(&rules, states, "Bash", false, 5.0, 0.0);
+        assert_eq!(result.verdict, VerdictKind::Block);
+        assert!(result.reason.contains("Refroidissement"));
+    }
+
+    #[test]
+    fn cooldown_clears_once_hits_age_out_of_the_window() {
+        let rules = vec![cooldown_rule("burst-guard", "*", 3, 10.0)];
+        let mut states = vec![empty_state("burst-guard")];
+        for _ in 0..3 {
+            let result = evaluate_temporal_core(&rules, states, "Bash", false, 0.0, 0.0);
+            states = result.states;
+        }
+        // 700s later (> 10 min), the three hits have aged out of the window.
+        let result = evaluate_temporal_core(&rules, states, "Bash", false, 700.0, 0.0);
+        assert_eq!(result.verdict, VerdictKind::Allow);
+    }
+
+    #[test]
+    fn max_duration_blocks_past_the_session_window() {
+        let rules = vec![TemporalRule {
+            id: "short-session".to_string(),
+            tool_pattern: "*".to_string(),
+            require_approval: false,
+            max_tool_calls: None,
+            max_writes: None,
+            max_cost_usd: None,
+            max_duration_min: Some(5.0),
+            cooldown_pattern: String::new(),
+            cooldown_count: 0,
+            cooldown_minutes: 0.0,
+            estimated_cost_usd: 0.0,
+        }];
+        let states = vec![empty_state("short-session")];
+        // 6 minutes (360s) after session start > 5 min budget.
+        let result = evaluate_temporal_core(&rules, states, "Bash", false, 360.0, 0.0);
+        assert_eq!(result.verdict, VerdictKind::Block);
+        assert!(result.reason.contains("Fenêtre"));
+    }
+
+    #[test]
+    fn non_matching_tool_pattern_is_untouched() {
+        let rules = vec![budget_rule("writes-cap", Some(1), None)];
+        let mut r = rules;
+        r[0].tool_pattern = "Write".to_string();
+        let states = vec![empty_state("writes-cap")];
+        let result = evaluate_temporal_core(&r, states, "Bash", true, 0.0, 0.0);
+        assert_eq!(result.verdict, VerdictKind::Allow);
+        assert_eq!(result.states[0].1.writes, 0);
     }
 }

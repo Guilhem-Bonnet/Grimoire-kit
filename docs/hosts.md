@@ -158,6 +158,70 @@ puis classé en famille neutre.
 | Lecture d'un fichier de secrets (`.env`, clés privées, `credentials.json`…) | refus à tous les profils |
 | Appel en lecture seule | autorisé sans traitement |
 
+### Politiques temporelles
+
+Point 3 de l'audit de positionnement 2026-09-12
+(`docs/audits/positionnement-2026-09-12.md`) : les règles ci-dessus jugent
+une requête isolée, sans notion de session. `_grimoire/standard/policies.yaml`
+ajoute des règles *temporelles*, portées par les mêmes champs
+`PolicyRule` (voir `src/grimoire/policies/schemas.py`) — rétro-compatibles :
+un projet qui ne crée pas ce fichier n'est pas affecté.
+
+```yaml
+rules:
+  - id: rm-requires-approval
+    description: "rm/rf demande une confirmation, une fois par session"
+    action_kinds: []
+    mutation_classes: []
+    risk_profiles: []
+    verdict_on_match: warn
+    reason_template: "Suppression demandant une approbation explicite"
+    tool_pattern: "Bash(rm:*)"       # glob, "*" seul joker — "*" = tous les outils
+    require_approval: true            # ask à la 1re occurrence de la session, allow ensuite
+    cooldown_after: {pattern: "Bash(rm:*)", count: 5, minutes: 10}
+  - id: session-write-budget
+    description: "Pas plus de 50 écritures par session"
+    action_kinds: []
+    mutation_classes: []
+    risk_profiles: []
+    verdict_on_match: block
+    reason_template: "Budget d'écritures de session dépassé"
+    per_session: {max_writes: 50, max_tool_calls: 200, max_cost_usd: 2.0, max_duration_min: 60}
+```
+
+**Règles.** Quatre clés nouvelles, toutes optionnelles : `tool_pattern`
+(motif appliqué au nom d'outil), `require_approval` (booléen), `per_session`
+(`max_tool_calls`/`max_writes`/`max_cost_usd`/`max_duration_min`, chacun
+optionnel) et `cooldown_after` (`pattern`/`count`/`minutes`). Une clé inconnue
+sous `PolicyRule`, `per_session` ou `cooldown_after` échoue au chargement avec
+une `GrimoirePolicyError` nommée (`GR-POL-002`) — jamais silencieusement
+ignorée.
+
+**État de session.** Les compteurs vivent dans
+`_grimoire-output/.runs/session-<session_id>.json` (écriture atomique, comme
+le cache d'état de standard #422), un fichier par session, jamais de secret ni
+de contenu d'outil — seulement des compteurs et des horodatages. `SessionStart`
+le réinitialise ; un fichier absent, tronqué ou d'une version de schéma
+inconnue redevient une session neuve, jamais une erreur.
+
+**Décision et hôtes.** Un budget atteint (au *N+1*ᵉ appel, pas avant) ou un
+refroidissement actif rendent `block` (`deny` côté hôte). Une première
+occurrence d'une règle `require_approval` rend `warn`, traduit en
+`permissionDecision: "ask"` sur un hôte qui sait demander (Claude Code) ou en
+refus motivé sinon (`docs/hosts-reference` de la Forge documente cette
+distinction par hôte). Le calcul lui-même (règle + état de session → verdict)
+est porté à l'identique en Python
+(`src/grimoire/policies/temporal.py`) et en Rust
+(`rust/grimoire-policies-core/src/lib.rs`, fonction
+`evaluate_one_temporal_rule`) — le Rust est l'oracle, testé en parité
+(`tests/unit/test_policies_rust_parity.py`) ; la persistance de l'état reste
+Python dans les deux cas.
+
+**Visibilité.** `grimoire policies status [--session-id ...] [--json]`
+affiche les compteurs et budgets restants de la session courante (ou la plus
+récente si aucune n'est précisée). Le cockpit n'a pas de vue équivalente pour
+l'instant.
+
 ## Coût des hooks
 
 Un hook s'exécute une fois par appel d'outil : son coût est une propriété de

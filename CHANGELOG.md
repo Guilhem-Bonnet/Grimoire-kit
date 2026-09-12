@@ -7,6 +7,21 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **feat(policies): politiques temporelles par session sur la médiation d'outils — budgets, approbation préalable, refroidissement (#439).**
+  Point 3 de l'audit de positionnement 2026-09-12 : `PolicyRule` gagne quatre
+  clés optionnelles et rétrocompatibles (`tool_pattern`, `require_approval`,
+  `per_session`, `cooldown_after`, voir `_grimoire/standard/policies.yaml`),
+  validées au chargement (`GrimoirePolicyError` nommée sur clé inconnue). L'état
+  de session (compteurs, approbations, horodatages — jamais de secret ni de
+  contenu d'outil) vit dans `_grimoire-output/.runs/session-<id>.json`, écrit
+  atomiquement, remis à zéro à `SessionStart` ; un fichier absent ou corrompu
+  redevient une session neuve. La décision pure (règle + état → verdict) est
+  portée à l'identique en Python (`grimoire.policies.temporal`) et en Rust
+  (`rust/grimoire-policies-core`, `evaluate_temporal`), testée en parité ; le
+  hook `PreToolUse` reste sous +5 ms de surcoût mesuré. `grimoire policies
+  status` affiche les compteurs et budgets restants de la session — le
+  cockpit n'est pas dans ce lot.
+
 ## [3.45.0] - 2026-09-12
 
 - **fix(flows): le gate de `flow run --executor dispatch` exécute l'acceptance structurée d'un node, pas seulement l'enveloppe (#428).**
