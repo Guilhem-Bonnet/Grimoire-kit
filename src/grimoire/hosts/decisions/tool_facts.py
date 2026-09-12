@@ -139,6 +139,30 @@ class ToolFacts:
         return "read"
 
 
+def policy_tool_detail(facts: ToolFacts) -> str:
+    """The detail a policy pattern matches beyond the bare tool name.
+
+    ``docs/hosts.md`` documents ``tool_pattern`` values shaped like Claude
+    Code's own permission syntax — ``Bash(rm:*)``, ``Bash(git push:*)``,
+    ``Write(_grimoire/standard/*)`` — where the parenthesised body is
+    matched against *this* string, not against ``tool_name`` (see
+    :func:`grimoire.policies.temporal.tool_pattern_matches`, the actual
+    comparison). Reuses the exact fields :func:`classify_tool` already
+    derives for the destructive-command and secret-target checks above,
+    rather than re-deriving a command or target path here: the full shell
+    command line when there is one (a ``Bash``-shaped call), else the first
+    target file (a ``Write``/``Edit``/``Read``-shaped call), else ``""`` —
+    an MCP tool call with no established argument convention yet can only
+    match the bare-name form or a parenthesised pattern whose body is
+    exactly ``"*"``.
+    """
+    if facts.command:
+        return facts.command
+    if facts.targets:
+        return facts.targets[0]
+    return ""
+
+
 def _first_str(data: dict[str, Any], *keys: str) -> str:
     for key in keys:
         value = data.get(key)

@@ -79,6 +79,61 @@ def glob_match(pattern: str, text: str) -> bool:
     return cursor <= end
 
 
+def tool_pattern_matches(pattern: str, tool_name: str, detail: str = "") -> bool:
+    """Match a ``tool_pattern``/``cooldown_after.pattern`` against a pending call.
+
+    Fixes the defect found in real use on Grimoire-Forge: every temporal
+    pattern used to be compared to *only* ``tool_name`` via :func:`glob_match`
+    — so a documented pattern like ``Bash(git push:*)`` was compared against
+    the bare string ``"Bash"`` and could never match. ``require_approval:
+    true`` on that pattern therefore answered ``allow`` on the very first
+    occurrence: the announced guard did not exist.
+
+    ``docs/hosts.md`` documents patterns in Claude Code's own permission
+    shape: ``Bash(rm:*)``, ``Bash(git push:*)``, ``Write(_grimoire/standard/*)``.
+    This function is the "tool key" this shape needs:
+
+    - A pattern with no ``(...)`` — ``"*"``, ``"Bash"`` — is the pre-existing
+      bare form and is still compared to *tool_name* alone via
+      :func:`glob_match`: every rule declared before this fix keeps behaving
+      exactly as before.
+    - A parenthesised pattern is ``Tool(body)``. The ``Tool`` part is matched
+      against *tool_name* (:func:`glob_match`, so ``*`` still works there
+      too); ``body`` is then matched against *detail* — the full command
+      line for a shell-shaped call, the target file for a file-shaped one
+      (see :func:`grimoire.hosts.decisions.tool_facts.policy_tool_detail`).
+      Within ``body``, a trailing ``:*`` — the same convention Claude Code's
+      own permission syntax uses — means "starts with this command prefix,
+      as a whole word": ``Bash(git push:*)`` matches ``git push origin
+      main`` but not ``git pushx`` or ``git pull``. The ``:`` is a separator
+      in the pattern, never a literal character *detail* must contain.
+      Anywhere else, ``body`` is a plain :func:`glob_match` pattern against
+      *detail* (e.g. ``Write(_grimoire/standard/*)``), and ``body == "*"``
+      matches regardless of *detail* (including an empty one).
+    - A call with no *detail* at all (``""`` — an MCP tool with no
+      established argument convention yet, see ``policy_tool_detail``) can
+      only match the bare-name form or a parenthesised pattern whose body is
+      exactly ``"*"``.
+    """
+    if pattern == "*":
+        return True
+    open_paren = pattern.find("(")
+    if open_paren == -1 or not pattern.endswith(")"):
+        return glob_match(pattern, tool_name)
+    name_part = pattern[:open_paren]
+    body = pattern[open_paren + 1 : -1]
+    if not glob_match(name_part, tool_name):
+        return False
+    if body == "*":
+        return True
+    if not detail:
+        return False
+    if body.endswith(":*"):
+        prefix = body[:-2]
+        return detail == prefix or detail.startswith(prefix + " ")
+    return glob_match(body, detail)
+
+
 @dataclass(frozen=True, slots=True)
 class TemporalDecision:
     """What :func:`evaluate_temporal` hands back to ``tool_policy.py``."""
@@ -121,6 +176,7 @@ def _evaluate_one_rule(
     rule_state: RuleState,
     *,
     tool_name: str,
+    tool_detail: str,
     is_write: bool,
     now: datetime,
     session_started_at: str,
@@ -136,7 +192,7 @@ def _evaluate_one_rule(
     """
     # 1) Cooldown — the most immediate, rate-limit-shaped refusal.
     cooldown = rule.cooldown_after
-    if cooldown is not None and glob_match(cooldown.pattern, tool_name):
+    if cooldown is not None and tool_pattern_matches(cooldown.pattern, tool_name, tool_detail):
         hits = _hits_in_window(rule_state.hits, now, cooldown.minutes)
         if hits >= cooldown.count:
             return (
@@ -205,6 +261,7 @@ def _evaluate_python(
     state: SessionState,
     *,
     tool_name: str,
+    tool_detail: str,
     is_write: bool,
     now: datetime,
 ) -> tuple[VerdictKind, str, tuple[MatchedRule, ...]]:
@@ -213,13 +270,14 @@ def _evaluate_python(
     reason = ""
     now_iso = now.isoformat()
     for rule in rules:
-        if not rule.is_temporal or not glob_match(rule.tool_pattern, tool_name):
+        if not rule.is_temporal or not tool_pattern_matches(rule.tool_pattern, tool_name, tool_detail):
             continue
         rule_state = state.rule_state(rule.id)
         verdict, rule_reason, record_hit = _evaluate_one_rule(
             rule,
             rule_state,
             tool_name=tool_name,
+            tool_detail=tool_detail,
             is_write=is_write,
             now=now,
             session_started_at=state.started_at,
@@ -239,6 +297,7 @@ def _evaluate_rust(
     state: SessionState,
     *,
     tool_name: str,
+    tool_detail: str,
     is_write: bool,
     now: datetime,
 ) -> tuple[VerdictKind, str, tuple[MatchedRule, ...]]:
@@ -283,6 +342,7 @@ def _evaluate_rust(
         is_write,
         now.timestamp(),
         _iso_to_epoch(state.started_at, now),
+        tool_detail,
     )
     for rule_id, calls, writes, cost_usd, approved, hits_epoch in deltas:
         rs = state.rule_state(rule_id)
@@ -313,10 +373,18 @@ def evaluate_temporal(
     state: SessionState,
     *,
     tool_name: str,
+    tool_detail: str = "",
     is_write: bool,
     now: datetime | None = None,
 ) -> TemporalDecision:
     """Evaluate every temporal rule in *rules* against *state* for one call.
+
+    *tool_detail* is the command line or target file :func:`tool_pattern_matches`
+    needs to resolve a parenthesised pattern like ``Bash(git push:*)`` — see
+    :func:`grimoire.hosts.decisions.tool_facts.policy_tool_detail`. Left at
+    ``""``, only bare-name patterns (``"*"``, ``"Bash"``) and a parenthesised
+    pattern whose body is exactly ``"*"`` can match — never a false match, at
+    worst a temporal rule that stays silent instead of misfiring.
 
     Mutates and returns *state*; the caller (:mod:`grimoire.hosts.decisions.tool_policy`)
     is responsible for persisting it with
@@ -326,24 +394,30 @@ def evaluate_temporal(
     """
     now = now or datetime.now(UTC)
     if _use_rust_backend():
-        verdict, reason, matched = _evaluate_rust(rules, state, tool_name=tool_name, is_write=is_write, now=now)
+        verdict, reason, matched = _evaluate_rust(
+            rules, state, tool_name=tool_name, tool_detail=tool_detail, is_write=is_write, now=now
+        )
     else:
-        verdict, reason, matched = _evaluate_python(rules, state, tool_name=tool_name, is_write=is_write, now=now)
+        verdict, reason, matched = _evaluate_python(
+            rules, state, tool_name=tool_name, tool_detail=tool_detail, is_write=is_write, now=now
+        )
     return TemporalDecision(verdict=verdict, reason=reason, matched_rules=matched, state=state)
 
 
-def _mark_approved_python(rules: Sequence[PolicyRule], tool_name: str) -> list[str]:
-    return [rule.id for rule in rules if glob_match(rule.tool_pattern, tool_name)]
+def _mark_approved_python(rules: Sequence[PolicyRule], tool_name: str, tool_detail: str) -> list[str]:
+    return [rule.id for rule in rules if tool_pattern_matches(rule.tool_pattern, tool_name, tool_detail)]
 
 
-def _mark_approved_rust(rules: Sequence[PolicyRule], tool_name: str) -> list[str]:
+def _mark_approved_rust(rules: Sequence[PolicyRule], tool_name: str, tool_detail: str) -> list[str]:
     _rust_core = rust_core_module()
     assert _rust_core is not None
     rule_tuples = [(rule.id, rule.tool_pattern) for rule in rules]
-    return list(_rust_core.matching_approval_rule_ids(rule_tuples, tool_name))
+    return list(_rust_core.matching_approval_rule_ids(rule_tuples, tool_name, tool_detail))
 
 
-def record_post_tool_use_approval(rules: Sequence[PolicyRule], state: SessionState, *, tool_name: str) -> bool:
+def record_post_tool_use_approval(
+    rules: Sequence[PolicyRule], state: SessionState, *, tool_name: str, tool_detail: str = ""
+) -> bool:
     """Mark every ``require_approval`` rule matching *tool_name* as approved.
 
     The counterpart to the fix in :func:`_evaluate_one_rule`'s docstring:
@@ -362,8 +436,10 @@ def record_post_tool_use_approval(rules: Sequence[PolicyRule], state: SessionSta
     approval_rules = tuple(rule for rule in rules if rule.require_approval)
     if not approval_rules:
         return False
-    rule_ids = _mark_approved_rust(approval_rules, tool_name) if _use_rust_backend() else _mark_approved_python(
-        approval_rules, tool_name
+    rule_ids = (
+        _mark_approved_rust(approval_rules, tool_name, tool_detail)
+        if _use_rust_backend()
+        else _mark_approved_python(approval_rules, tool_name, tool_detail)
     )
     changed = False
     for rule_id in rule_ids:

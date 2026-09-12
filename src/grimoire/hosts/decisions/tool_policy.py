@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 
 from grimoire.core.standard_state import active_profile_id, active_task_id
 from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
-from grimoire.hosts.decisions.tool_facts import ToolFacts, classify_tool
+from grimoire.hosts.decisions.tool_facts import ToolFacts, classify_tool, policy_tool_detail
 from grimoire.policies.engine import _SEVERITY, PolicyEngine
 from grimoire.policies.rules_config import load_custom_rules
 from grimoire.policies.schemas import (
@@ -116,6 +116,7 @@ def _evaluate_temporal_layer(
         temporal_rules,
         state,
         tool_name=hook.tool_name or "unknown",
+        tool_detail=policy_tool_detail(facts),
         is_write=facts.mutation is not MutationClass.READ_ONLY,
         now=now,
     )
