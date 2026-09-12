@@ -53,7 +53,7 @@ devient pertinent.
 | Pattern | Profil min | Intention | Artefact | Checks clés |
 |---|---|---|---|---|
 | `llm-cost-registry` | production | Track LLM cost per model/provider and report session reliability SLOs (CrashRate / UnhealthyRate). | `cost-registry.yaml` | `cost.no_pricing`, `cost.no_slo` |
-| `provider-cost-slo` | production | Budget provider cost and declare SLOs so production routing reports overruns and latency breaches. | `llm-provider-registry.yaml` | — |
+| `provider-cost-slo` | production | Budget provider cost and declare SLOs so production routing reports overruns and latency breaches. | `llm-provider-registry.yaml` | `dispatch.cost_slo` |
 | `provider-routing-contract` | controlled | Route provider calls through declared capability and data-policy constraints. | `llm-provider-registry.yaml` | `providers.default_unknown`, `providers.routing_policy_weak` |
 
 ## Security

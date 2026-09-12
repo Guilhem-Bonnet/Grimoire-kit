@@ -9,15 +9,18 @@ fournisseurs factices »).
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
 from textwrap import dedent
 
+from grimoire.core.standard_generation import TRACES_DIR
 from grimoire.missions.dispatch import run_dispatch
 from grimoire.missions.schemas import TaskState
 from grimoire.missions.service import TaskService
 from grimoire.providers.state import load_state
+from grimoire.traces.ledger import DISPATCH_OUTCOME_TAG, TraceLedger
 
 STANDARD = Path("_grimoire/standard")
 REGISTRY = STANDARD / "llm-provider-registry.yaml"
@@ -705,3 +708,162 @@ def test_start_tier_explicite_ne_descend_jamais_sous_le_plancher_de_la_classe(tm
     assert report.start_tier == "mid"
     assert "relevé" in (report.start_tier_reason or "")
     assert [a.provider for a in report.attempts] == ["mid-green"]
+
+
+# ── dispatch.outcome : comptabilité continue (issue #442, audit du 2026-09-12) ──
+
+
+def _dispatch_outcomes(tmp_path: Path) -> list:
+    return TraceLedger(tmp_path / TRACES_DIR).list_traces()
+
+
+def _only_dispatch_outcome(tmp_path: Path):
+    outcomes = [t for t in _dispatch_outcomes(tmp_path) if DISPATCH_OUTCOME_TAG in t.tags]
+    assert len(outcomes) == 1, outcomes
+    return outcomes[0]
+
+
+def test_cascade_verte_ecrit_un_dispatch_outcome_resolu(tmp_path: Path) -> None:
+    green = _script(tmp_path, "green.py", _WRITE_MARKER)
+    _write_registry(tmp_path, _provider_yaml("cheap-green", "cheap", _invocation(green)))
+    service = _service(tmp_path)
+    tid = _task(service, acceptance=(V0_CRITERION,))
+
+    report = run_dispatch(service, tid, checks=("test -f marker.txt",))
+    assert report.succeeded
+
+    trace = _only_dispatch_outcome(tmp_path)
+    assert trace.task_id == tid
+    assert trace.outcome.value == "success"
+    assert "resolved:true" in trace.tags
+    assert "class:V0" in trace.tags
+    assert "tier:cheap" in trace.tags
+    assert "acceptance:judged" in trace.tags  # aucune acceptance structurée déclarée par ce test
+    assert f"replay:{tid}" in trace.tags  # repli sur task_id : pas de --replay-key ici
+    assert "provider:cheap-green" in trace.tags
+    assert trace.agent_id == "cheap-green"
+
+
+def test_chaine_epuisee_ecrit_un_dispatch_outcome_non_resolu(tmp_path: Path) -> None:
+    always_red = _script(tmp_path, "always_red.py", _SILENT_OK)
+    _write_registry(tmp_path, _provider_yaml("seul", "cheap", _invocation(always_red)))
+    service = _service(tmp_path)
+    tid = _task(service, acceptance=(V0_CRITERION,))
+
+    report = run_dispatch(service, tid, checks=("test -f marker.txt",), max_tier="cheap")
+    assert not report.succeeded
+
+    trace = _only_dispatch_outcome(tmp_path)
+    assert trace.outcome.value == "failure"
+    assert "resolved:false" in trace.tags
+
+
+def test_cout_total_est_la_somme_de_toutes_les_tentatives(tmp_path: Path) -> None:
+    cheap_red_payant = _script(
+        tmp_path,
+        "cheap_red_payant.py",
+        """\
+        import json
+        print(json.dumps({"total_cost_usd": 0.01}))
+        """,
+    )
+    mid_green_payant = _script(
+        tmp_path,
+        "mid_green_payant.py",
+        """\
+        import json
+        from pathlib import Path
+        Path("marker.txt").write_text("done", encoding="utf-8")
+        print(json.dumps({"total_cost_usd": 0.02}))
+        """,
+    )
+    _write_registry(
+        tmp_path,
+        _provider_yaml("cheap-red", "cheap", _invocation(cheap_red_payant)),
+        _provider_yaml("mid-green", "mid", _invocation(mid_green_payant)),
+    )
+    service = _service(tmp_path)
+    tid = _task(service, acceptance=(V0_CRITERION,))
+
+    run_dispatch(service, tid, checks=("test -f marker.txt",))
+
+    trace = _only_dispatch_outcome(tmp_path)
+    assert trace.token_usage.estimated_cost_usd == 0.03  # 0.01 (rouge) + 0.02 (vert), pas seulement la tentative gagnante
+    # aussi tenté cheap puis mid : deux paliers distincts, donc escalade
+    assert "tier:cheap" in trace.tags
+    assert "tier:mid" in trace.tags
+
+
+def test_acceptance_structuree_declaree_devient_executed(tmp_path: Path) -> None:
+    green = _script(tmp_path, "green.py", _WRITE_MARKER)
+    _write_registry(tmp_path, _provider_yaml("cheap-green", "cheap", _invocation(green)))
+    service = _service(tmp_path)
+    tid = _task(service, acceptance=(V0_CRITERION,))
+
+    run_dispatch(service, tid, checks=("test -f marker.txt",), acceptance_declared=True)
+
+    trace = _only_dispatch_outcome(tmp_path)
+    assert "acceptance:executed" in trace.tags
+
+
+def test_refus_avant_tout_appel_n_ecrit_aucun_dispatch_outcome(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    tid = _task(service, acceptance=(V2_CRITERION,))
+
+    run_dispatch(service, tid, checks=("true",))
+
+    assert _dispatch_outcomes(tmp_path) == []
+
+
+def test_dry_run_n_ecrit_aucun_dispatch_outcome(tmp_path: Path) -> None:
+    _write_registry(tmp_path, _provider_yaml("jamais-appele", "cheap", "false {prompt} {model}"))
+    service = _service(tmp_path)
+    tid = _task(service, acceptance=(V0_CRITERION,))
+
+    run_dispatch(service, tid, checks=("true",), dry_run=True)
+
+    assert _dispatch_outcomes(tmp_path) == []
+
+
+def test_replay_key_explicite_regroupe_les_dispatchs_du_meme_node_de_flow(tmp_path: Path) -> None:
+    """``flows.dispatch_executor`` passe ``replay_key=f"{blueprint_id}:{node_id}"`` —
+    deux dispatchs de tâches différentes (deux runs) doivent former une seule
+    série pass^k quand ils partagent ce même replay_key."""
+    green_1 = _script(tmp_path, "green1.py", _WRITE_MARKER)
+    green_2 = _script(tmp_path, "green2.py", _WRITE_MARKER)
+    _write_registry(
+        tmp_path,
+        _provider_yaml("g1", "cheap", _invocation(green_1)),
+        _provider_yaml("g2", "cheap", _invocation(green_2)),
+    )
+    service = _service(tmp_path)
+    tid_1 = _task(service, acceptance=(V0_CRITERION,))
+    tid_2 = _task(service, acceptance=(V0_CRITERION,))
+
+    run_dispatch(service, tid_1, checks=("test -f marker.txt",), provider_id="g1", replay_key="bp:node-a")
+    run_dispatch(service, tid_2, checks=("test -f marker.txt",), provider_id="g2", replay_key="bp:node-a")
+
+    ledger = TraceLedger(tmp_path / TRACES_DIR)
+    stats = ledger.dispatch_outcome_stats()
+    assert stats.pass_k_observations == 1
+    assert stats.pass_k_fully_green == 1
+    assert stats.pass_k_rate == 1.0
+
+
+def test_aucun_contenu_de_prompt_dans_l_evenement_dispatch_outcome(tmp_path: Path) -> None:
+    """Le prompt (qui embarque le titre et les critères de la tâche) ne doit
+    jamais fuiter dans les tags ni le token_usage écrits par la comptabilité
+    continue — seulement des étiquettes mécaniques."""
+    unique_marker = "TITRE-SECRET-NE-DOIT-JAMAIS-APPARAITRE"
+    green = _script(tmp_path, "green.py", _WRITE_MARKER)
+    _write_registry(tmp_path, _provider_yaml("cheap-green", "cheap", _invocation(green)))
+    service = _service(tmp_path)
+    ledger = service.ledger
+    mission = ledger.create_mission("Démo dispatch", origin="test")
+    task = ledger.create_task(mission.id, unique_marker, acceptance=(V0_CRITERION,), owner="amelia")
+
+    run_dispatch(service, task.id, checks=("test -f marker.txt",))
+
+    trace = _only_dispatch_outcome(tmp_path)
+    dumped = json.dumps(trace.to_dict())
+    assert unique_marker not in dumped
