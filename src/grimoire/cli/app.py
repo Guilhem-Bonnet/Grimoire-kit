@@ -321,6 +321,10 @@ def init(
 
 _doctor_path_arg = typer.Argument(Path(), help="Project root to diagnose.")
 _doctor_fix_opt = typer.Option(False, "--fix", help="Auto-fix recoverable issues (missing directories, agent wrappers, .mcp.json).")
+_doctor_output_opt = typer.Option(
+    "", "--output", "-o",
+    help="Output format: text or json (overrides global --output for this command).",
+)
 
 
 @app.command(rich_help_panel="Project")
@@ -328,6 +332,7 @@ def doctor(
     ctx: typer.Context,
     path: Path = _doctor_path_arg,
     fix: bool = _doctor_fix_opt,
+    output: str = _doctor_output_opt,
 ) -> None:
     """Diagnose a Grimoire project — check config, structure, health.
 
@@ -338,7 +343,7 @@ def doctor(
     """
     target = path.resolve()
     results: list[dict[str, Any]] = []
-    fmt = _get_fmt(ctx)
+    fmt = output or _get_fmt(ctx)
 
     def _record(name: str, *, passed: bool, detail: str = "") -> None:
         results.append({"name": name, "passed": passed, "detail": detail})
