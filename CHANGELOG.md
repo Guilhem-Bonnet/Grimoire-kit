@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.44.2] - 2026-09-11
+
 - **fix(hosts): `collect_agents` résout ses propres skills quand `known_skills` n'est pas fourni — `SessionStart` et le porteur de proposition ne plantent plus sur un agent à skills attachés (#423).**
   `entry_persona_context` et `_category_carrier` (déclencheur de propositions)
   appelaient `collect_agents(project_root)` sans lui passer l'inventaire des
