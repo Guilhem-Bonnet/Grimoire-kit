@@ -704,16 +704,45 @@ jamais une quatrième :
   ce node — changer de fournisseur ou de palier ne répare pas un
   environnement cassé — et `flow status` nomme le node en faute.
 
-Un node dont l'acceptance reste purement textuelle (aucune entrée
-structurée) — qu'il soit classé V0 sans commande déclarée, ou V1 — est
-rapporté **« jugée »** dans `flow status` : c'est le mode conservateur qui ne
-prétend jamais à une exécution qui n'a pas eu lieu. Pour un node V1, c'est le
-comportement actuel du kit, documenté ici sans être étendu : un vert V1 ferme
-la cascade en marquant le node **à relire** (`needs_verification`), sans
-qu'aucun juge automatisé n'intervienne — faire arbitrer une classe V1 par un
+#### La classe V0 exige une acceptance structurée
+
+Un node dont le texte seul suffirait à le classer V0 (#309 — « la suite de
+tests passe », par exemple) mais qui ne déclare **aucune** entrée structurée
+est **rétrogradé en V1** : la cascade démarre à `mid` (pas `cheap`), et un
+vert ne ferme jamais le node — il le marque **à relire**
+(`needs_verification`), exactement comme un vrai V1 déclaré. Sans cette
+règle, le texte mécanique seul aurait rouvert le fossé même que l'issue #428
+corrige : le gate n'aurait toujours que le check d'enveloppe à faire tourner
+pour ce node, et fermerait vert sur la seule foi de l'ouvrier — la
+rétrogradation, pas seulement le libellé du rapport, est ce qui l'empêche.
+
+Cette dérivation est appliquée **une seule fois**, au chargement du
+blueprint, et transmise à la fois au démarrage de la cascade (`run_dispatch`)
+et au rapport (`DispatchExecutor`) — `flow status` et `flow run` s'accordent
+donc sur la même classe pour le même node, jamais recalculée deux fois de
+façon divergente. Un avertissement nommé accompagne la rétrogradation, à la
+fois dans `flow status`/le rapport de dispatch et dans les logs :
+
+```text
+nœud n classé V0 sans acceptance exécutable : traité comme V1
+```
+
+Le kit **n'infère jamais** de commande depuis la prose pour éviter cet
+avertissement : la seule sortie est de déclarer une entrée structurée
+(`run`/`path_exists`/`test`) sur le node.
+
+Un node dont l'acceptance est V1 **déclarée** (vocabulaire de revue, « revue
+humaine avant fusion ») n'est pas concerné par cette règle — il n'a jamais
+prétendu être V0 — et garde le comportement actuel du kit, documenté ici sans
+être étendu : un vert V1 ferme la cascade en marquant le node à relire, sans
+qu'aucun juge automatisé n'intervienne. Faire arbitrer une classe V1 par un
 palier supérieur plutôt que par une revue humaine est hors périmètre de
 l'issue #428 (voir son texte : « ce que ce ticket refuse »), à traiter par un
 ticket séparé s'il devient nécessaire.
+
+Dans les deux cas (V1 déclaré, ou V0 rétrogradé), `flow status` rapporte le
+statut d'acceptance **« jugée »** : le mode conservateur qui ne prétend
+jamais à une exécution qui n'a pas eu lieu.
 
 La trace du node (visible dans `flow status --output json` et le rapport de
 `flow run --executor dispatch`) porte, pour chaque commande exécutée, le code

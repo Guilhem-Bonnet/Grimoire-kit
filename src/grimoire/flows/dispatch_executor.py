@@ -197,6 +197,9 @@ class NodeDispatchOutcome:
     #: « executed » / « unrunnable » / « judged » (issue #428, point 4) —
     #: voir ``_acceptance_status`` pour la règle exacte.
     acceptance_status: str = "judged"
+    #: Posé quand un V0 sans acceptance structurée a été rétrogradé en V1
+    #: (issue #428, suite) — ``None`` sinon (V0 structuré, V1 déclaré, V2).
+    verifiability_warning: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -211,6 +214,7 @@ class NodeDispatchOutcome:
             "cost_usd": self.cost_usd,
             "uncertainties": [dict(u) for u in self.uncertainties],
             "acceptance_status": self.acceptance_status,
+            "verifiability_warning": self.verifiability_warning,
         }
 
 
@@ -246,6 +250,7 @@ def _node_outcome_from_report(
     report: DispatchReport,
     *,
     has_structured_acceptance: bool,
+    verifiability_warning: str | None = None,
 ) -> NodeDispatchOutcome:
     last = report.attempts[-1] if report.attempts else None
     known_costs = [a.cost_usd for a in report.attempts if a.cost_usd is not None]
@@ -262,6 +267,7 @@ def _node_outcome_from_report(
         cost_usd=sum(known_costs) if known_costs else None,
         uncertainties=tuple(u.to_dict() for u in report.uncertainties),
         acceptance_status=_acceptance_status(report, has_structured_acceptance=has_structured_acceptance),
+        verifiability_warning=verifiability_warning,
     )
 
 
@@ -318,6 +324,18 @@ class DispatchExecutor:
             mission_id=mission_id, task_id=task_id, contract=contract, result_path=result_path
         )
         verifiability = classify(task)
+        # Un V0 sans acceptance exécutable est le fossé exact de l'issue #428 :
+        # le texte seul aurait suffi à fermer le node sur la foi de l'ouvrier.
+        # `contract.verifiability_warning` (posé au chargement du blueprint,
+        # `blueprint_loader._verifiability_warning`) porte exactement ce
+        # diagnostic quand et seulement quand ce cas se présente — la même
+        # règle qu'ailleurs (« un faux V0 est pire qu'un faux V2 ») rétrograde
+        # ce node en V1 : jamais fermé sur la seule enveloppe, toujours à
+        # relire. Appliqué ici, avant `run_dispatch`, pour que le palier de
+        # départ et la transition finale du ledger le voient aussi — pas
+        # seulement le libellé affiché après coup.
+        if verifiability is Verifiability.V0 and contract.verifiability_warning is not None:
+            verifiability = Verifiability.V1
 
         if verifiability is Verifiability.V2:
             self.host_node = node_id
@@ -359,6 +377,8 @@ class DispatchExecutor:
             check_expect_stdout_contains=(None, *acceptance_stdout),
             check_timeouts=(None, *acceptance_timeouts),
             acceptance_declared=contract.has_structured_acceptance,
+            verifiability_override=verifiability,
+            verifiability_warning=contract.verifiability_warning,
             max_tier=self._max_tier,
             call_timeout=self._call_timeout,
             actor=self._actor,
@@ -366,7 +386,12 @@ class DispatchExecutor:
             project_root=self._project_root,
         )
         self.node_outcomes[node_id] = _node_outcome_from_report(
-            node_id, task_id, verifiability, report, has_structured_acceptance=contract.has_structured_acceptance
+            node_id,
+            task_id,
+            verifiability,
+            report,
+            has_structured_acceptance=contract.has_structured_acceptance,
+            verifiability_warning=contract.verifiability_warning,
         )
 
         if not report.succeeded:
@@ -590,6 +615,7 @@ def node_dispatch_history(project_root: Path, run_id: str, node_ids: Sequence[st
                 # (``None``) sur un événement écrit avant ce correctif.
                 "acceptance_status": last.get("acceptance_status"),
                 "checks": last.get("checks", []),
+                "verifiability_warning": last.get("verifiability_warning"),
             }
         )
     return rows

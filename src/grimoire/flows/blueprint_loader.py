@@ -21,6 +21,7 @@ from typing import Any
 
 from grimoire.core.exceptions import GrimoireRuntimeError
 from grimoire.flows.schemas import AcceptanceEvidence, AcceptanceRun, NodeContract, PinRef
+from grimoire.missions.verifiability import Verifiability, classify_criteria
 from grimoire.tools.ext_manager import validate_blueprint_file
 
 __all__ = ["build_node_contracts", "load_blueprint", "topo_order"]
@@ -243,6 +244,27 @@ def _acceptance(
     return tuple(criteria), (), ()
 
 
+def _verifiability_warning(node_id: str, acceptance_texts: tuple[str, ...], *, has_structured: bool) -> str | None:
+    """« nœud V0 sans acceptance exécutable » — posé au chargement, jamais au gate (issue #428, suite).
+
+    Un nœud dont le texte seul classe V0 (#309) mais qui ne déclare aucune
+    commande exécutable est le fossé exact que le rejeu du 2026-09-11 a payé :
+    l'auteur du blueprint a écrit un vocabulaire mécanique (« la suite de
+    tests passe ») sans jamais donner au gate de quoi le vérifier — sans ce
+    garde-fou, ``flows.dispatch_executor`` n'aurait toujours que le check
+    d'enveloppe à faire tourner. La règle du kit (« un faux V0 est pire qu'un
+    faux V2 », ``verifiability.py``) s'applique à l'identique ici : ce nœud
+    est traité comme V1 par l'exécuteur de dispatch (jamais fermé sur la
+    seule foi de l'ouvrier), et ce message nommé en dit la raison plutôt que
+    de rétrograder en silence.
+    """
+    if has_structured:
+        return None
+    if classify_criteria(acceptance_texts) is not Verifiability.V0:
+        return None
+    return f"nœud {node_id} classé V0 sans acceptance exécutable : traité comme V1"
+
+
 def build_node_contracts(blueprint: dict[str, Any]) -> dict[str, NodeContract]:
     """Un :class:`NodeContract` par node du blueprint, indexé par id."""
     contracts: dict[str, NodeContract] = {}
@@ -251,6 +273,7 @@ def build_node_contracts(blueprint: dict[str, Any]) -> dict[str, NodeContract]:
         inputs = tuple(PinRef(p["id"], p["contract"]) for p in pins if p.get("direction") == "in")
         outputs = tuple(PinRef(p["id"], p["contract"]) for p in pins if p.get("direction") == "out")
         acceptance_texts, acceptance_runs, acceptance_evidence = _acceptance(node, outputs)
+        has_structured = bool(acceptance_runs or acceptance_evidence)
         contracts[node["id"]] = NodeContract(
             node_id=node["id"],
             kind=node.get("kind", ""),
@@ -262,5 +285,6 @@ def build_node_contracts(blueprint: dict[str, Any]) -> dict[str, NodeContract]:
             acceptance=acceptance_texts,
             acceptance_runs=acceptance_runs,
             acceptance_evidence=acceptance_evidence,
+            verifiability_warning=_verifiability_warning(node["id"], acceptance_texts, has_structured=has_structured),
         )
     return contracts

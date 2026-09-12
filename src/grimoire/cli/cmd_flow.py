@@ -141,6 +141,8 @@ def _emit_status(ctx: typer.Context, view: FlowStatusView, project_root: Path) -
                 f"  - {row['node_id']} : {row['verdict']} par {row['provider']} ({row['tier']}), "
                 f"{row['attempts']} tentative(s), coût {row['cost_usd']}{relire} — acceptance {acceptance}"
             )
+            if row.get("verifiability_warning"):
+                console.print(f"      [yellow]![/yellow] {row['verifiability_warning']}")
             for u in row["uncertainties"]:
                 console.print(f"      [dim]incertitude : {u.get('where')} — {u.get('what')}[/dim]")
     if view.contract:
@@ -186,6 +188,8 @@ def _emit_dispatch_outcome(ctx: typer.Context, outcome: FlowDispatchOutcome) -> 
             f"  {node.node_id} : {node.verdict} par {node.provider} — {node.attempts} tentative(s), "
             f"{node.escalations} escalade(s), coût {node.cost_usd}{relire} — acceptance {acceptance}"
         )
+        if node.verifiability_warning:
+            console.print(f"    [yellow]![/yellow] {node.verifiability_warning}")
     console.print(
         f"[bold]coût total connu[/bold] : {outcome.total_cost_usd} — [bold]escalades[/bold] : {outcome.escalations}"
     )

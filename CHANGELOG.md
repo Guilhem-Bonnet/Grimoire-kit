@@ -24,11 +24,17 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   absent, `pytest` 5/4, erreur d'import dans la sortie — qui arrête la
   cascade net, jamais un succès). `flow status` et le rapport de dispatch
   montrent par nœud le statut d'acceptance (exécutée/inexécutable/jugée) et
-  la sortie tronquée à 2 Ko. Un nœud purement textuel (V0 sans commande
-  déclarée, ou V1) garde le comportement actuel, documenté comme limite
-  connue plutôt qu'étendu. Aucun changement côté port Rust des flows
-  (`rust/grimoire-flows-core/`) : seule `NodeContract.outputs` (pins) y
-  traverse la frontière PyO3, inchangée par ce correctif.
+  la sortie tronquée à 2 Ko. **La classe V0 exige une acceptance
+  structurée** : un nœud dont le texte seul le classerait V0 mais qui n'en
+  déclare aucune est rétrogradé en V1 (cascade démarrant à `mid`, jamais
+  fermé sur la seule enveloppe — marqué à relire), avec un avertissement
+  nommé posé au chargement du blueprint et transmis à la fois au démarrage
+  de la cascade et au rapport, pour que `flow run` et `flow status`
+  s'accordent sur la même classe. Un nœud V1 **déclaré** (vocabulaire de
+  revue) garde le comportement actuel du kit, documenté sans être étendu.
+  Aucun changement côté port Rust des flows (`rust/grimoire-flows-core/`) :
+  seule `NodeContract.outputs` (pins) y traverse la frontière PyO3, inchangée
+  par ce correctif.
 
 - feat(traces): sixième port Rust optionnel du cœur du système d'artefact émergent — les agrégations du journal de traces (`TraceLedger.agent_dispatch_counts`/`.agent_miss_counts`/`.oldest_started_at`), la règle de fraîcheur (`compute_agent_freshness`, issue #396) et le déclencheur de propositions d'artefact (`grimoire.proposals` : nommage mécanique, résolution du porteur issue #402, décision de synchronisation seuil/refus issue #395/#394/#389) (issue #354). `rust/grimoire-traces-core/`, bascule `GRIMOIRE_TRACES_BACKEND=python|rust|auto` (lue indépendamment par `grimoire.traces.ledger` et `grimoire.proposals`, qui ne s'importent pas l'un l'autre), jobs CI `rust-traces / cargo` et `rust-traces / parity` dans `.github/workflows/rust-cores.yml`, roue toujours `py3-none-any`. Défaut trouvé par l'oracle Rust et corrigé dans cette même PR : `grimoire.traces.ledger._parse_iso` attrapait `ValueError` mais pas la `TypeError` non rattrapée levée ensuite par `datetime.now(tz=UTC) - datetime.fromisoformat(...)` sur un horodatage ISO-8601 *naïf* (sans décalage) — un journal JSONL édité à la main peut en porter un, et `compute_agent_freshness` revendique explicitement ne jamais lever sur un journal arbitraire ; corrigé en traitant un horodatage naïf comme UTC des deux côtés (même correctif que `grimoire_traces_core`, qui n'a jamais eu ce trou). Invariants de la doctrine rendus impossibles à violer par construction (clampés/exclus dans la fonction de décision elle-même, jamais par un appelant qui pourrait l'oublier) : seuil de proposition jamais sous 2, aucune proposition au premier non-choix, une proposition refusée ne revient que si son compte a doublé depuis le refus, la persona d'entrée est exclue de la recherche de porteur avant même de lire son `use_when`, le match de catégorie se fait par mot entier (limite de mot Unicode) et non par sous-chaîne. Corpus fixture de dix journaux JSONL réalistes (`tests/fixtures/traces_ledgers/`) et fuzz léger (200 enregistrements aléatoires) prouvant qu'aucune des fonctions d'agrégation/fraîcheur ne lève jamais, sous aucun backend, et qu'un champ de contenu libre (`prompt`/`request`) écrit à la main n'est jamais agrégé.
 

@@ -32,6 +32,7 @@ cette montée reste un motif nommé plutôt qu'un ``if`` de plus quelque part.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum, StrEnum
 from typing import TYPE_CHECKING, Any
@@ -45,6 +46,7 @@ __all__ = [
     "Verifiability",
     "as_dict",
     "classify",
+    "classify_criteria",
     "explain",
 ]
 
@@ -202,24 +204,36 @@ def _criteres(task: MissionTask) -> tuple[str, ...]:
     return tuple(getattr(task, "acceptance", ()) or ()) + tuple(getattr(task, "expected_evidence", ()) or ())
 
 
-def classify(task: MissionTask) -> Verifiability:
-    """Dérive la classe — jamais déclarée, toujours recalculée depuis le texte.
+def classify_criteria(criteria: Sequence[str]) -> Verifiability:
+    """Dérive la classe depuis du texte nu — le cœur de :func:`classify`, sans ``MissionTask``.
 
-    Précédence : un seul critère ambigu suffit à faire V2, même si tous les
-    autres sont mécaniques ou revus — c'est la garantie qu'un faux V0 est
-    impossible par construction. Un juge ne fait V1 que si rien n'est
-    tombé en V2. L'absence totale de critère est elle-même un V2 : une
-    tâche muette sur ses critères n'est vérifiable par rien.
+    Extrait pour l'issue #428 : le format de blueprint (``flows.blueprint_loader``)
+    a besoin de la même dérivation *avant* qu'un ``MissionTask`` existe (au
+    chargement du fichier, pas au dispatch), pour détecter un nœud classé V0
+    dont le seul texte d'acceptance ne peut jamais être exécuté. Précédence :
+    un seul critère ambigu suffit à faire V2, même si tous les autres sont
+    mécaniques ou revus — c'est la garantie qu'un faux V0 est impossible par
+    construction. Un juge ne fait V1 que si rien n'est tombé en V2. L'absence
+    totale de critère est elle-même un V2 : rien de muet sur ses critères
+    n'est vérifiable par rien.
     """
-    criteres = _criteres(task)
-    if not criteres:
+    verdicts = [_classer_critere(c) for c in criteria]
+    if not verdicts:
         return Verifiability.V2
-    verdicts = [_classer_critere(c) for c in criteres]
     if any(v.categorie is _Categorie.AMBIGU for v in verdicts):
         return Verifiability.V2
     if any(v.categorie is _Categorie.JUGE for v in verdicts):
         return Verifiability.V1
     return Verifiability.V0
+
+
+def classify(task: MissionTask) -> Verifiability:
+    """Dérive la classe — jamais déclarée, toujours recalculée depuis le texte.
+
+    Simple appel à :func:`classify_criteria` sur les critères du ``MissionTask``
+    (``acceptance`` + ``expected_evidence``) — voir son docstring pour la règle.
+    """
+    return classify_criteria(_criteres(task))
 
 
 def explain(task: MissionTask) -> list[tuple[str, str | None]]:

@@ -916,6 +916,7 @@ def _dispatch_event_payload(
     start_tier_reason: str,
     *,
     acceptance_declared: bool = False,
+    verifiability_warning: str | None = None,
 ) -> dict[str, Any]:
     """Le payload d'un événement ``task.dispatched`` — le type et la classe embarqués (lot 4, #312).
 
@@ -927,6 +928,9 @@ def _dispatch_event_payload(
     ``dispatch_history`` l'ignore sans échouer plutôt que d'inventer une
     classe qui n'a jamais été observée. ``acceptance_status`` (issue #428)
     suit la même règle : absent sur un événement écrit avant ce correctif.
+    ``verifiability_warning`` (issue #428, suite) : posé par l'appelant qui a
+    déjà rétrogradé un V0 sans acceptance exécutable en V1 — ``run_dispatch``
+    ne le recalcule jamais lui-même, il ne fait que le journaliser tel quel.
     """
     payload = attempt.to_dict()
     payload["task_id"] = task.id
@@ -937,6 +941,7 @@ def _dispatch_event_payload(
     payload["acceptance_status"] = _acceptance_status_for_verdict(
         attempt.verdict, acceptance_declared=acceptance_declared
     )
+    payload["verifiability_warning"] = verifiability_warning
     return payload
 
 
@@ -957,6 +962,8 @@ def run_dispatch(
     check_expect_stdout_contains: tuple[str | None, ...] = (),
     check_timeouts: tuple[float | None, ...] = (),
     acceptance_declared: bool = False,
+    verifiability_override: Verifiability | None = None,
+    verifiability_warning: str | None = None,
 ) -> DispatchReport:
     """Cascade la tâche *task_id* à travers les paliers de fournisseurs.
 
@@ -968,6 +975,16 @@ def run_dispatch(
     acceptance réellement exécutée (par opposition au seul contrôle
     d'enveloppe) : il n'entre dans aucun calcul de verdict, seulement dans le
     diagnostic ``acceptance_status`` de chaque tentative journalisée.
+
+    *verifiability_override* (issue #428, suite) court-circuite
+    :func:`~grimoire.missions.verifiability.classify` : seul
+    ``flows.dispatch_executor`` le renseigne, quand il a déjà rétrogradé un
+    node classé V0 sans acceptance structurée en V1 (un faux V0 est pire
+    qu'un faux V2 — même règle que ``verifiability.py``, appliquée ici avant
+    que le palier de départ ou la transition finale ne soient décidés, pas
+    seulement dans un rapport affiché après coup). *verifiability_warning*
+    accompagne l'override pour le journaliser tel quel dans l'événement
+    ``task.dispatched`` — ``run_dispatch`` ne le recalcule jamais.
 
     *agent* (issue #373) nomme l'agent dispatché : son ``context`` déclaré
     (frontmatter de son fichier, résolu par :func:`agent_declared_context`)
@@ -993,7 +1010,7 @@ def run_dispatch(
     fournit sait mieux que l'historique pour ce dispatch précis.
     """
     task = service.require(task_id)
-    verifiability = classify(task)
+    verifiability = verifiability_override if verifiability_override is not None else classify(task)
     declared_context = agent_declared_context(project_root, agent) if agent and project_root else ()
     prompt = build_prompt(task, agent_context=declared_context, project_root=project_root)
 
@@ -1109,6 +1126,7 @@ def run_dispatch(
                         chosen_tier,
                         start_tier_reason,
                         acceptance_declared=acceptance_declared,
+                        verifiability_warning=verifiability_warning,
                     ),
                 )
                 continue  # fournisseur suivant, même palier
@@ -1162,7 +1180,13 @@ def run_dispatch(
                 "task",
                 actor,
                 _dispatch_event_payload(
-                    attempt, task, verifiability, chosen_tier, start_tier_reason, acceptance_declared=acceptance_declared
+                    attempt,
+                    task,
+                    verifiability,
+                    chosen_tier,
+                    start_tier_reason,
+                    acceptance_declared=acceptance_declared,
+                    verifiability_warning=verifiability_warning,
                 ),
             )
             if verdict == "unrunnable":

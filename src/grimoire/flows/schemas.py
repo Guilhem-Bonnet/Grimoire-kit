@@ -99,6 +99,15 @@ class NodeContract:
     exister même pour un node purement structuré (voir
     ``blueprint_loader._parse_acceptance_entry``, qui dérive toujours le
     texte depuis la forme structurée).
+
+    ``verifiability_warning`` (issue #428, suite) : posé au chargement du
+    blueprint (``blueprint_loader.build_node_contracts``) quand le texte de
+    ``acceptance`` seul classerait ce node V0 mais qu'aucune commande
+    exécutable n'est déclarée — un faux V0 est pire qu'un vrai V1
+    (``verifiability.py``), donc un tel node est traité comme V1 par
+    ``flows.dispatch_executor`` (jamais fermé sur la seule foi de l'ouvrier),
+    et ce champ porte le message nommé qui explique pourquoi. ``None`` dans
+    tous les autres cas (V0 structuré, V1, V2).
     """
 
     node_id: str
@@ -111,6 +120,7 @@ class NodeContract:
     acceptance: tuple[str, ...]
     acceptance_runs: tuple[AcceptanceRun, ...] = ()
     acceptance_evidence: tuple[AcceptanceEvidence, ...] = ()
+    verifiability_warning: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -124,6 +134,7 @@ class NodeContract:
             "acceptance": list(self.acceptance),
             "acceptance_runs": [r.to_dict() for r in self.acceptance_runs],
             "acceptance_evidence": [e.to_dict() for e in self.acceptance_evidence],
+            "verifiability_warning": self.verifiability_warning,
         }
 
     @property
