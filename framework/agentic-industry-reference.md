@@ -611,7 +611,7 @@ Grimoire n'a pas encore, ou pas au même niveau).
 | Agent Skills du kit (`.github/skills`, `skill-forge` avec gate qualité) | agentskills.io, `skills-ref validate`, SkillsBench | Aligné sur le format ; ajouter la validation `skills-ref` et un eval par skill (evals.json) | à combler |
 | Hooks Forge via gateway (SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, PreCompact, Subagent*, Stop) | Familles d'événements Claude Code, Codex, Gemini, Copilot, Kiro | Aligné ; les hôtes exposent désormais `TaskCreated`, `TaskCompleted`, `InstructionsLoaded`, `PostToolUseFailure` que la Forge n'exploite pas | à combler |
 | Persona d'entrée injectée par SessionStart | Aucun hôte ne sait démarrer dans un agent (constat 2026-08-29) | Pratique propre à Grimoire | en avance |
-| Pont MCP du kit (`grimoire` serveur MCP) | MCP 2026-07-28 stateless, MRTR, `server/discover`, headers `Mcp-Method` | Le kit cible une révision antérieure ; planifier la migration avant le retrait de Roots et Sampling (2027-07-28) | à combler |
+| Pont MCP du kit (`grimoire` serveur MCP) | MCP 2026-07-28 stateless, MRTR, `server/discover`, headers `Mcp-Method` | Migré (issue #436) : plancher `mcp>=2.0,<3`, `server/discover` négocie 2026-07-28 par défaut, `initialize` d'un hôte 2025-06-18/2025-11-25 toujours servi sur la même connexion, aucun état entre appels hors fichiers du projet — vérifié par test. Roots/Sampling/Logging jamais câblés, rien à retirer. Transport HTTP/SSE et OTel `_meta` restent hors périmètre | aligné |
 | Observabilité cockpit, `observability-policy.yaml` | OTel GenAI spans et métriques, Langfuse, Phoenix | Émettre les spans `invoke_agent` et `execute_tool` au format semconv pour brancher n'importe quel backend | à combler |
 | Sécurité : garde des surfaces de contrôle, patterns destructifs | Six patterns Beurer-Kellner, CaMeL, sandbox à deux phases | Ajouter un pattern Plan-Then-Execute explicite pour les tâches qui lisent du contenu externe ; documenter l'isolation d'exécution | à combler |
 | Identité des agents | Entra Agent ID, SPIFFE, ID-JAG | Grimoire n'a pas d'identité par agent ; hors périmètre tant que les agents restent locaux | à suivre |
@@ -622,8 +622,9 @@ Grimoire-kit (jamais comme chantiers d'atelier) :
 1. Projection OTel GenAI des événements ELSS et du cockpit.
 2. Coût par tâche résolue et pass^k dans les gates de preuve.
 3. Validation externe des écritures mémoire.
-4. Migration du pont MCP vers la révision 2026-07-28.
-5. Politiques temporelles par session sur le tool-mediation-gate.
+4. Politiques temporelles par session sur le tool-mediation-gate.
+
+(Migration du pont MCP vers la révision 2026-07-28 : comblée, issue #436.)
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 

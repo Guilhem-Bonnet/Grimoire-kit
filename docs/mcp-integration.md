@@ -132,33 +132,49 @@ ordinaire.
 
 ## Révision de protocole
 
+Migré en 2026-09 (issue #436) : le kit épingle désormais `mcp>=2.0,<3`, la
+première branche du SDK qui sait parler la révision courante.
+
 | Révision | Rôle ici |
 |---|---|
-| **2025-11-25** | Révision servie par le SDK Python `mcp` 1.x que le kit épingle (`mcp>=1.10,<3`). C'est ce que voit un client aujourd'hui. |
-| **2026-07-28** | Révision courante de la spécification. Le kit ne la sert pas encore. |
+| **2026-07-28** | Révision négociée par défaut. Un client moderne qui sonde `server/discover` la reçoit directement — c'est le SDK (`mcp.server.lowlevel.Server`, monté par `MCPServer`) qui répond, aucune ligne du pont ne s'en occupe. |
+| **2025-06-18** / **2025-11-25** | Toujours servies, sur la même connexion, pour un hôte qui n'a pas encore de client `server/discover` : le SDK sert les deux ères en parallèle (`serve_dual_era_loop`) et négocie exactement la révision que le handshake `initialize` propose. |
+| **mcp 1.x** | N'est plus une cible : plafonne à 2025-11-25 côté SDK (pas de `server/discover`, pas de mode sans état) et sort de la plage `mcp>=2.0,<3`. |
 
-Ce que la révision 2026-07-28 change, et ce que la migration coûtera :
+Ce que la migration a changé, et ce qu'elle n'a pas eu besoin de changer :
 
-- **Protocole sans état** : plus d'`initialize`, plus de session. `server/discover`
-  devient obligatoire, la version et les capacités voyagent dans `_meta` à chaque
-  requête. Le serveur du kit est aujourd'hui monté par la façade du SDK
-  (`FastMCP` / `MCPServer`) : la migration se fera par montée du SDK, pas par
-  réécriture — à condition que la façade suive.
-- **MRTR** remplace toute requête initiée par le serveur : un outil qui a besoin
-  d'un complément renvoie `resultType: "input_required"`, le client ré-émet avec
-  `inputResponses`. Les vingt-deux outils du kit sont synchrones et sans
+- **Protocole sans état** : le pont ne gardait déjà aucun état entre deux
+  appels d'outil en dehors des fichiers du projet — chaque outil relit
+  `project-context.yaml` (ou l'équivalent) à chaque appel. Vérifié par un test
+  qui appelle `grimoire_status` sur deux projets différents à travers deux
+  connexions indépendantes et compare les réponses
+  (`tests/unit/mcp/test_protocol_revision.py`).
+- **`server/discover`** : géré par défaut dans le SDK à partir de `mcp` 2.0.0 —
+  auto-dérivé des gestionnaires enregistrés (outils, prompts, ressources).
+  Rien à écrire côté pont.
+- **Compatibilité avec un hôte 2025-06-18** : testée explicitement (le SDK
+  négocie exactement la version que le handshake propose, sans monter la mise
+  de son côté).
+- **MRTR** remplace toute requête initiée par le serveur : un outil qui a
+  besoin d'un complément renvoie `resultType: "input_required"`, le client
+  ré-émet avec `inputResponses`. Les outils du kit sont synchrones et sans
   élicitation : rien à porter.
-- **`resultType` obligatoire** sur les résultats, `ttlMs` et `cacheScope`
-  obligatoires sur les listes. À produire par la façade.
-- **Dépréciés, retrait possible dès le 2027-07-28** : Roots, Sampling, Logging,
-  Dynamic Client Registration, HTTP+SSE. Le kit n'utilise aucun des cinq — ni
-  Sampling (contrairement à ce qu'annonçait encore une feuille de route interne),
-  ni Roots. Il expose des outils, des prompts et des ressources, tous conservés.
-- **Propagation OpenTelemetry dans `_meta`** : point d'accroche pour relier les
-  traces du kit à celles du client, pas encore câblé.
+- **`ttlMs` et `cacheScope`** sur les listes (`tools/list`, `prompts/list`,
+  `resources/list`) : remplis par défaut par le SDK (`ttl_ms=0`,
+  `scope="private"`) quand le pont ne les fixe pas explicitement — un client
+  ne met donc jamais en cache une liste que le pont n'a pas explicitement
+  déclarée réutilisable.
+- **Dépréciés, retrait possible à partir du 2027-07-28** : Roots, Sampling,
+  Logging, Dynamic Client Registration, HTTP+SSE. Le pont n'a jamais câblé
+  aucun des cinq (transport stdio uniquement, pas de callback
+  `sampling`/`roots`/`logging` sur la session) : rien à retirer.
+- **Propagation OpenTelemetry dans `_meta`** : le SDK émet un span serveur par
+  message par défaut (`OpenTelemetryMiddleware`), sans configuration côté
+  pont ; le relier à un exporteur applicatif reste hors périmètre de cette
+  migration.
 
-Coût estimé de la migration : montée de borne SDK et vérification des vingt-deux
-annotations plus des sorties `isError`, sans changement de la surface d'outils.
+Hors périmètre, explicitement : transport HTTP/SSE, authentification,
+exposition réseau distante. Le pont reste stdio, en local, un seul projet.
 
 ## Annotations et erreurs
 
