@@ -121,9 +121,26 @@ regarder un autre projet du registre depuis le cockpit reste une lecture
 seule, refusée en `403` côté serveur si on tente d'agir dessus — pas
 seulement grisée côté client.
 
-Le drill-down vers la timeline complète d'une tâche (Mission Ledger,
-TraceLedger, runtime) est un onglet séparé du même espace, décrit par
-[l'ADR de la vue de travail](adr-006-vue-de-travail.md).
+**Timeline par tâche (#139)** — le drill-down vers la timeline complète d'une
+tâche est un onglet séparé du même espace (« Voir la timeline » depuis
+l'inspecteur d'une carte, ou onglet « Timeline » du docbar), décrit par
+[l'ADR de la vue de travail](adr-006-vue-de-travail.md). Elle assemble, triés
+dans le temps, tout ce que `grimoire task trace <id>` lit déjà côté CLI
+(Mission Ledger, TraceLedger des hooks — outils, gates rouges, dispatch
+d'agent —, RuntimeKernel, EvidenceService) et, s'il en existe un, l'export
+OTel du TraceLedger (`grimoire task trace-export`, #322) : c'est la même
+donnée, projetée en spans GenAI, affichée comme une source à part (« otel »)
+plutôt qu'ignorée. Chaque ligne est filtrable par source et par gravité, et
+s'ouvre pour montrer son détail brut (identifiants de trace, tags, span) dans
+le panneau d'inspection — jamais le contenu d'un prompt. L'espace **Observer**
+ouvre la même timeline depuis un span OTel qui porte `grimoire.task_id` (panneau
+« Spans lents » ou « Traces par agent »). Comme le reste de la vue de travail,
+c'est une lecture : aucune de ces deux entrées ne crée ni ne modifie quoi que
+ce soit (ADR-007).
+
+Une tâche sans aucun événement montre « aucun événement », jamais un board
+imaginé : la timeline nomme les sources qu'elle a lues et celles qui
+manquent, comme `grimoire task trace` le fait déjà en CLI.
 
 ## L'éditeur de blueprints
 

@@ -14,6 +14,13 @@
 // api.taskRecall(id), api.taskAction(id, 'claim'|'move'|'block'|'close', body).
 // Le refus d'un gate revient en 200 avec `blocked: true` et la preuve
 // manquante nommée — c'est une réponse à afficher, pas une erreur à avaler.
+//
+// Timeline (#139) : `api.taskTrace(id)` porte maintenant jusqu'à cinq sources
+// (ledger, hooks, gate, runtime, evidence, otel) triées dans le temps —
+// filtrables par source et par gravité, chaque ligne s'ouvrant en accordéon
+// sur son détail brut. Drill-down depuis l'inspecteur d'une carte (« Voir la
+// timeline ») ou depuis `ctx.params = { task, view: 'timeline' }` qu'un
+// `goto('executer', …)` externe (Observer) peut poser.
 
 const STYLE_ID = 'ex-styles';
 
@@ -69,9 +76,15 @@ function injectStyles() {
     .ex-list tbody tr { cursor: pointer; }
     .ex-list tbody tr:hover { background: var(--e2); }
     .ex-timeline { display: flex; flex-direction: column; gap: 6px; padding: var(--sp-2) 0; }
-    .ex-tl-entry { display: flex; gap: var(--sp-3); padding: 6px var(--sp-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); }
+    .ex-tl-filters { display: flex; gap: var(--sp-2); align-items: center; padding-bottom: var(--sp-2); }
+    .ex-tl-filters select { font-size: var(--t-min); }
+    .ex-tl-count { font-size: var(--t-min); color: var(--ink3); margin-left: auto; }
+    .ex-tl-entry { display: flex; flex-direction: column; gap: 4px; padding: 6px var(--sp-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); cursor: pointer; }
+    .ex-tl-entry:hover { background: var(--e2); }
     .ex-tl-entry.fail { border-color: var(--bad); }
+    .ex-tl-row { display: flex; gap: var(--sp-3); align-items: flex-start; }
     .ex-tl-at { font-family: var(--mono); font-size: var(--t-min); color: var(--ink3); width: 150px; flex: none; }
+    .ex-tl-detail { margin: 0; padding: var(--sp-2) var(--sp-3); border-top: 1px solid var(--line); background: var(--e2); font-family: var(--mono); font-size: var(--t-min); white-space: pre-wrap; word-break: break-word; }
     .ex-insp-block { margin-bottom: var(--sp-4); }
     .ex-insp-block h4 { font-size: var(--t-min); color: var(--ink3); margin: 0 0 6px; font-weight: 500; }
     .ex-insp-block ul { margin: 0; padding-left: 18px; font-size: var(--t-s); }
@@ -206,37 +219,117 @@ function renderList(root, ctx, tasks, onSelect) {
   root.append(wrap);
 }
 
+// État des filtres de la Timeline — vit au niveau du module : changer de
+// tâche ou revenir sur la vue garde le dernier filtre choisi, comme les
+// autres réglages d'affichage de cet espace (vue, sélection).
+const timelineFilter = { source: 'tous', gravite: 'tous' };
+
 function timelineEntryNode(entry) {
   const node = document.createElement('div');
   node.className = 'ex-tl-entry' + (entry.failure ? ' fail' : '');
-  node.append(text('div', 'ex-tl-at mono', entry.at || '—'));
+  const head = document.createElement('div');
+  head.className = 'ex-tl-row';
+  head.append(text('div', 'ex-tl-at mono', entry.at || '—'));
   const body = document.createElement('div');
   body.append(row(dot(entry.failure ? 'bad' : 'ok'), text('span', null, entry.summary || entry.kind)));
   body.append(text('div', 'lbl', `${entry.source} · ${entry.kind}`));
-  node.append(body);
+  head.append(body);
+  node.append(head);
+
+  // Le détail brut (identifiants de trace, tags, span OTel…) s'ouvre en
+  // accordéon sous la ligne : le panneau d'inspecteur de cet espace reste
+  // occupé par la tâche sélectionnée (transitions, preuves, porte suivante),
+  // quelle que soit la vue active — ouvrir le détail d'une ligne ne doit pas
+  // le lui retirer. Jamais le contenu d'un prompt : `entry.detail` ne porte
+  // que des identifiants, des tags et des résumés déjà affichés ailleurs.
+  let expanded = false;
+  node.addEventListener('click', () => {
+    expanded = !expanded;
+    const already = node.querySelector('.ex-tl-detail');
+    if (already) { already.remove(); if (!expanded) return; }
+    if (!expanded) return;
+    const hasDetail = entry.detail && Object.keys(entry.detail).length;
+    const pre = document.createElement('pre');
+    pre.className = 'ex-tl-detail';
+    pre.textContent = hasDetail ? JSON.stringify(entry.detail, null, 2) : 'Aucun détail supplémentaire.';
+    node.append(pre);
+  });
   return node;
+}
+
+function timelineFilterBar(sources, onChange) {
+  const bar = document.createElement('div');
+  bar.className = 'ex-tl-filters';
+
+  const sourceSelect = document.createElement('select');
+  sourceSelect.className = 'input';
+  for (const value of ['tous', ...sources]) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = value === 'tous' ? 'Toutes les sources' : value;
+    if (value === timelineFilter.source) option.selected = true;
+    sourceSelect.append(option);
+  }
+  sourceSelect.addEventListener('change', () => { timelineFilter.source = sourceSelect.value; onChange(); });
+
+  const graviteSelect = document.createElement('select');
+  graviteSelect.className = 'input';
+  for (const [value, label] of [['tous', 'Toutes les gravités'], ['causes', 'Causes seulement']]) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    if (value === timelineFilter.gravite) option.selected = true;
+    graviteSelect.append(option);
+  }
+  graviteSelect.addEventListener('change', () => { timelineFilter.gravite = graviteSelect.value; onChange(); });
+
+  bar.append(sourceSelect, graviteSelect);
+  return bar;
 }
 
 async function renderTimeline(root, ctx, task) {
   const trace = await ctx.api.taskTrace(task.id).catch(() => null);
   const wrap = document.createElement('div');
   wrap.className = 'ex-timeline';
-  if (!trace || !trace.entries || !trace.entries.length) {
+  const allEntries = trace?.entries || [];
+  if (!trace || !allEntries.length) {
+    const sourcesLues = trace ? Object.entries(trace.sources || {}) : [];
+    const lues = sourcesLues.filter(([, path]) => path).map(([name]) => name);
+    const absentes = sourcesLues.filter(([, path]) => !path).map(([name]) => name);
     wrap.append(ctx.empty(
       'Timeline',
-      "Aucun journal ne mentionne cette tâche : ni le Mission Ledger, ni le TraceLedger, ni le runtime.",
+      lues.length || absentes.length
+        ? `Aucun événement pour cette tâche. Sources lues : ${lues.join(', ') || 'aucune'}` +
+          (absentes.length ? ` — absentes : ${absentes.join(', ')}.` : '.')
+        : "Aucun journal ne mentionne cette tâche : ni le Mission Ledger, ni le TraceLedger, ni le runtime.",
       `grimoire task trace ${task.id}`,
     ));
   } else {
-    for (const entry of trace.entries) wrap.append(timelineEntryNode(entry));
+    const sources = [...new Set(allEntries.map((e) => e.source))].sort();
+    const list = document.createElement('div');
+    const draw = () => {
+      list.replaceChildren();
+      const filtered = allEntries.filter((e) => (
+        (timelineFilter.source === 'tous' || e.source === timelineFilter.source) &&
+        (timelineFilter.gravite === 'tous' || e.failure)
+      ));
+      for (const entry of filtered) list.append(timelineEntryNode(entry));
+      if (!filtered.length) list.append(text('p', 'lbl', 'Aucun événement pour ce filtre.'));
+      count.textContent = `${filtered.length}/${allEntries.length}`;
+    };
+    const bar = timelineFilterBar(sources, draw);
+    const count = text('span', 'ex-tl-count', '');
+    bar.append(count);
+    wrap.append(bar, list);
+    draw();
   }
   root.append(wrap);
-  ctx.dock.log('traces', ...(trace?.entries || []).map((e) => `${e.at} · ${e.source} · ${e.summary}`));
+  ctx.dock.log('traces', ...allEntries.map((e) => `${e.at} · ${e.source} · ${e.summary}`));
 }
 
 // ── Inspecteur ────────────────────────────────────────────────────────────
 
-async function renderInspector(ctx, taskId, onWritten) {
+async function renderInspector(ctx, taskId, onWritten, onTimeline) {
   ctx.inspector.replaceChildren();
   const [detail, trace, recall] = await Promise.all([
     ctx.api.task(taskId).catch(() => null),
@@ -250,6 +343,18 @@ async function renderInspector(ctx, taskId, onWritten) {
 
   ctx.inspector.append(text('h3', null, detail.title || detail.id));
   ctx.inspector.append(text('div', 'lbl mono', detail.id));
+
+  // Drill-down (#139) : depuis la carte d'une tâche, ouvrir sa timeline sans
+  // passer par l'onglet Timeline du docbar — le nombre d'événements déjà lus
+  // rend le geste visible même quand l'utilisateur ne sait pas que la vue
+  // existe.
+  const timelineBtn = document.createElement('button');
+  timelineBtn.type = 'button';
+  timelineBtn.className = 'btn';
+  const eventCount = (trace?.entries || []).length;
+  timelineBtn.textContent = eventCount ? `Voir la timeline (${eventCount})` : 'Voir la timeline';
+  timelineBtn.addEventListener('click', () => onTimeline(taskId));
+  ctx.inspector.append(timelineBtn);
 
   // Corps réel de la tâche (#140) : de quoi elle parle, avant les critères et
   // les preuves — un board qui ne montre qu'un titre et un owner ne dit rien
@@ -404,8 +509,11 @@ export async function mount(root, ctx) {
   wrap.className = 'ex-wrap';
   root.append(wrap);
 
-  let view = 'board4';
-  let selected = null;
+  // `ctx.params` porte ce qu'un `goto('executer', { task, view })` a demandé —
+  // Observer s'en sert pour ouvrir directement la timeline d'une tâche depuis
+  // un span OTel qui en porte l'identifiant (#139).
+  let view = ctx.params.view === 'timeline' ? 'timeline' : 'board4';
+  let selected = ctx.params.task || null;
   const board = await ctx.api.tasks();
 
   if (!board.ledger) {
@@ -456,7 +564,8 @@ export async function mount(root, ctx) {
     }
 
     if (selected && tasks.some((t) => t.id === selected)) {
-      await renderInspector(ctx, selected, draw);
+      const onTimeline = (id) => { selected = id; setView('timeline'); };
+      await renderInspector(ctx, selected, draw, onTimeline);
       ctx.dock.echo(`grimoire task show ${selected}`);
     } else {
       ctx.inspector.replaceChildren(text('p', 'lbl', 'Sélectionnez une tâche pour voir sa porte suivante.'));
