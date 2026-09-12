@@ -2,6 +2,14 @@
 
 ## Dernière release
 
+### 3.46.1 — Trois correctifs trouvés en activant 3.46.0 sur un projet réel
+
+- fix(policies): `tool_pattern` des politiques temporelles n'était comparé qu'au nom nu de l'outil, si bien qu'un motif documenté comme `Bash(git push:*)` ou `Bash(rm:*)` ne matchait jamais — `require_approval: true` répondait `allow` dès le premier appel. Introduit une clé d'outil façon permissions Claude Code (`Bash(<commande complète>)`, `<Tool>(<file_path>)`) contre laquelle le motif parenthésé est désormais comparé, rétro-compatible avec les motifs nus (`"*"`, `"Bash"`) (#449).
+- fix(core): déclarer `source.assist` (`model`, `allow_lan`) dans le schéma et le validateur, Python et Rust, pour que `grimoire check .` accepte l'exemple documenté de l'assistant Source au lieu de refuser `source` comme clé inconnue (#451).
+- fix(cockpit): l'assistant Source distingue le chargement du modèle local d'un dépassement de délai — `GET /api/workspace/assist` sonde `/api/ps`, déclenche lui-même le chargement (`keep_alive`, sans générer) et répond « chargement du modèle » ; le bouton **Suggérer** reste visible mais désactivé et se re-sonde toutes les 3 s au lieu d'échouer au premier clic (#450).
+
+## Releases précédentes
+
 ### 3.46.0 — Politiques temporelles et overrides partiels, coût et pass^k dans les gates, timeline et assistant cockpit, pont MCP à jour
 
 - **feat(policies): politiques temporelles par session sur la médiation d'outils — budgets, approbation préalable, refroidissement (#439).**
@@ -121,8 +129,6 @@
 - fix(yaml): `grimoire upgrade` round-trippait `project-context.yaml` via un chargeur `safe` (aucune métadonnée de commentaire) puis un dumper round-trip — tous les commentaires du fichier disparaissaient silencieusement à chaque migration v2→v3 (#430).
 
 - fix(flows): `grimoire.runtime.kernel.create_instance` tronquait silencieusement `recipe_id`/`blueprint_id` aux 16 derniers caractères pour construire `wfi_id`/`run_id` (`WFI-...`) — deux blueprints partageant ce suffixe (par ex. `tasklib-hardening` perdait déjà son premier caractère) pouvaient obtenir le même `run_id` sur des kernels indépendants. L'identifiant complet est gardé tant qu'il tient dans une borne large (64 caractères) ; au-delà, il est raccourci et désambiguïsé par une empreinte de 8 hex de `sha256(recipe_id)` plutôt qu'une simple coupe. Les runs déjà persistés sous l'ancien format restent lisibles par `flow status`/`flow list` (#446).
-
-## Releases précédentes
 
 ### 3.45.0 — Le gate de dispatch exécute l'acceptance, board du cockpit, sixième port Rust
 
