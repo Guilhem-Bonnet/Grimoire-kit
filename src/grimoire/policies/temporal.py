@@ -176,13 +176,19 @@ def _evaluate_one_rule(
                     False,
                 )
 
-    # 3) Prior approval — first occurrence in the session only.
+    # 3) Prior approval — asks until a PostToolUse for this pattern in this
+    # session proves the call actually ran (see `record_post_tool_use_approval`
+    # below). This function never marks a rule approved itself: PreToolUse
+    # fires whether the host grants, refuses or has not yet answered the
+    # prompt, so setting `approved` here on the mere *asking* would let a
+    # refused prompt's retry fall through as `allow` — a guard that fails
+    # open. Fixed 2026-09-12 after review of the first version of this file,
+    # which did exactly that; see `test_a_refused_approval_keeps_asking`.
     verdict = VerdictKind.ALLOW
     reason = ""
     if rule.require_approval and not rule_state.approved:
         verdict = VerdictKind.WARN
-        reason = f"Approbation requise pour {tool_name!r} — première occurrence dans cette session"
-        rule_state.approved = True
+        reason = f"Approbation requise pour {tool_name!r} — en attente de confirmation"
 
     # Record the attempt: every non-cooldown-refused call, whether it
     # allows, asks, or is refused by a budget — a budget refusal still
@@ -324,3 +330,45 @@ def evaluate_temporal(
     else:
         verdict, reason, matched = _evaluate_python(rules, state, tool_name=tool_name, is_write=is_write, now=now)
     return TemporalDecision(verdict=verdict, reason=reason, matched_rules=matched, state=state)
+
+
+def _mark_approved_python(rules: Sequence[PolicyRule], tool_name: str) -> list[str]:
+    return [rule.id for rule in rules if glob_match(rule.tool_pattern, tool_name)]
+
+
+def _mark_approved_rust(rules: Sequence[PolicyRule], tool_name: str) -> list[str]:
+    _rust_core = rust_core_module()
+    assert _rust_core is not None
+    rule_tuples = [(rule.id, rule.tool_pattern) for rule in rules]
+    return list(_rust_core.matching_approval_rule_ids(rule_tuples, tool_name))
+
+
+def record_post_tool_use_approval(rules: Sequence[PolicyRule], state: SessionState, *, tool_name: str) -> bool:
+    """Mark every ``require_approval`` rule matching *tool_name* as approved.
+
+    The counterpart to the fix in :func:`_evaluate_one_rule`'s docstring:
+    ``PostToolUse`` is the one event a host emits only when the tool actually
+    ran — which for a ``require_approval`` rule means the human (or the
+    host's own policy) said yes to the ``ask`` that ``PreToolUse`` raised.
+    Called from :mod:`grimoire.hosts.decisions.evidence_trace` (the existing
+    ``PostToolUse`` decision) once per real execution, never from the
+    ``PreToolUse`` path.
+
+    Mutates *state* in place and returns whether anything changed — the
+    caller (the decision) only needs to persist the state when it did.
+    Idempotent: marking an already-approved rule again is a no-op, and a
+    non-matching or non-``require_approval`` rule is never touched.
+    """
+    approval_rules = tuple(rule for rule in rules if rule.require_approval)
+    if not approval_rules:
+        return False
+    rule_ids = _mark_approved_rust(approval_rules, tool_name) if _use_rust_backend() else _mark_approved_python(
+        approval_rules, tool_name
+    )
+    changed = False
+    for rule_id in rule_ids:
+        rule_state = state.rule_state(rule_id)
+        if not rule_state.approved:
+            rule_state.approved = True
+            changed = True
+    return changed

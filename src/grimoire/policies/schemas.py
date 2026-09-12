@@ -240,10 +240,17 @@ class PolicyRule:
     - ``tool_pattern``: glob (``*`` only) against the tool name a temporal
       check applies to; ``"*"`` (the default) means "every tool", i.e. a
       session-global budget rather than a per-tool one.
-    - ``require_approval``: the first time this rule matches in a session,
-      the verdict is ``warn`` (mapped to the host's ``ask`` outcome by
-      ``tool_policy.py``) instead of ``allow``; every later match in the same
-      session allows silently. A fresh session (see
+    - ``require_approval``: every match is ``warn`` (mapped to the host's
+      ``ask`` outcome by ``tool_policy.py``) until a ``PostToolUse`` for a
+      matching tool is actually recorded in the session — proof the host
+      granted a prior ``ask`` and the call ran — at which point later matches
+      in the same session allow silently
+      (:func:`grimoire.policies.temporal.record_post_tool_use_approval`,
+      wired from ``PostToolUse`` in
+      :mod:`grimoire.hosts.decisions.evidence_trace`). Marking a rule
+      approved at the moment it merely *asks* would let a refused prompt's
+      retry fall through as ``allow`` — a guard that fails open — so nothing
+      in the ``PreToolUse`` path ever sets this itself. A fresh session (see
       :mod:`grimoire.policies.session_state`) asks again.
     - ``per_session``: a :class:`SessionBudget` this rule enforces.
     - ``cooldown_after``: a :class:`CooldownRule` this rule enforces.

@@ -34,7 +34,7 @@ from grimoire.policies.session_state import (
     save_session_state,
     session_state_path,
 )
-from grimoire.policies.temporal import evaluate_temporal, glob_match
+from grimoire.policies.temporal import evaluate_temporal, glob_match, record_post_tool_use_approval
 
 # ── schemas: validation ──────────────────────────────────────────────────────
 
@@ -233,13 +233,44 @@ def test_budget_allows_up_to_the_limit_then_blocks_named() -> None:
     assert "2 écritures" in third.reason
 
 
-def test_require_approval_asks_once_then_allows_same_session() -> None:
+def test_require_approval_keeps_asking_without_a_recorded_post_tool_use() -> None:
+    """Regression for the fail-open bug fixed after review (2026-09-12):
+    ``evaluate_temporal`` (the ``PreToolUse`` path) must never mark a rule
+    approved by itself — only :func:`record_post_tool_use_approval` may,
+    and only from ``PostToolUse``, the event a host emits solely when the
+    tool actually ran. Without that call in between, a second ``PreToolUse``
+    for the same pattern asks again, exactly like the first."""
     rules = (_approval_rule(),)
     state = SessionState.new("s", datetime.now(UTC).isoformat())
     first = evaluate_temporal(rules, state, tool_name="Bash", is_write=False)
     assert first.verdict is VerdictKind.WARN
+    assert first.state.rule_state("approval").approved is False
     second = evaluate_temporal(rules, first.state, tool_name="Bash", is_write=False)
-    assert second.verdict is VerdictKind.ALLOW
+    assert second.verdict is VerdictKind.WARN
+
+
+def test_require_approval_allows_once_post_tool_use_recorded_it() -> None:
+    rules = (_approval_rule(),)
+    state = SessionState.new("s", datetime.now(UTC).isoformat())
+    asked = evaluate_temporal(rules, state, tool_name="Bash", is_write=False)
+    assert asked.verdict is VerdictKind.WARN
+
+    changed = record_post_tool_use_approval(rules, asked.state, tool_name="Bash")
+    assert changed is True
+    assert asked.state.rule_state("approval").approved is True
+
+    allowed = evaluate_temporal(rules, asked.state, tool_name="Bash", is_write=False)
+    assert allowed.verdict is VerdictKind.ALLOW
+
+
+def test_record_post_tool_use_approval_is_idempotent_and_pattern_scoped() -> None:
+    rules = (_approval_rule(pattern="Bash(rm:*)"),)
+    state = SessionState.new("s", datetime.now(UTC).isoformat())
+    # A non-matching tool name records nothing.
+    assert record_post_tool_use_approval(rules, state, tool_name="Write") is False
+    assert record_post_tool_use_approval(rules, state, tool_name="Bash(rm:*)") is True
+    # Already approved: no further state change reported.
+    assert record_post_tool_use_approval(rules, state, tool_name="Bash(rm:*)") is False
 
 
 def test_require_approval_asks_again_in_a_fresh_session() -> None:
@@ -342,7 +373,7 @@ rules:
     assert "2 écritures" in third.reason
 
 
-def test_require_approval_end_to_end_asks_once_per_session(governed_project: Path) -> None:
+def test_require_approval_end_to_end_requires_a_post_tool_use_to_stop_asking(governed_project: Path) -> None:
     _write_policies_yaml(
         governed_project,
         """
@@ -359,7 +390,7 @@ rules:
 """,
     )
 
-    def call(session_id: str) -> Outcome:
+    def pre(session_id: str) -> Outcome:
         return decide_tool_policy(
             HookInput(
                 event=HookEvent.PRE_TOOL_USE,
@@ -370,9 +401,34 @@ rules:
             )
         ).outcome
 
-    assert call("sess-a") is Outcome.ASK
-    assert call("sess-a") is Outcome.ALLOW
-    assert call("sess-b") is Outcome.ASK  # fresh session asks again
+    def post(session_id: str) -> None:
+        from grimoire.hosts.decisions import run_decision
+
+        run_decision(
+            "grimoire.evidence-trace",
+            HookInput(
+                event=HookEvent.POST_TOOL_USE,
+                project_root=governed_project,
+                tool_name="Bash",
+                tool_input={},
+                session_id=session_id,
+            ),
+        )
+
+    # First attempt: no PostToolUse has ever fired for this pattern in this
+    # session, so it asks.
+    assert pre("sess-a") is Outcome.ASK
+    # Without a recorded PostToolUse (e.g. the human declined, or the agent
+    # is only now retrying), a second PreToolUse must ask again — this is
+    # the fail-open bug fixed after review: the old version marked the rule
+    # approved the moment it merely asked.
+    assert pre("sess-a") is Outcome.ASK
+    # PostToolUse only fires because the tool actually ran — proof a prior
+    # ask was granted — and that is what may mark the pattern approved.
+    post("sess-a")
+    assert pre("sess-a") is Outcome.ALLOW
+    # A fresh session carries no approval at all: it asks again too.
+    assert pre("sess-b") is Outcome.ASK
 
 
 def test_a_purely_temporal_rule_never_blocks_the_first_call(governed_project: Path) -> None:

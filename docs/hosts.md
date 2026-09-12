@@ -205,8 +205,8 @@ le réinitialise ; un fichier absent, tronqué ou d'une version de schéma
 inconnue redevient une session neuve, jamais une erreur.
 
 **Décision et hôtes.** Un budget atteint (au *N+1*ᵉ appel, pas avant) ou un
-refroidissement actif rendent `block` (`deny` côté hôte). Une première
-occurrence d'une règle `require_approval` rend `warn`, traduit en
+refroidissement actif rendent `block` (`deny` côté hôte). Une règle
+`require_approval` non encore approuvée rend `warn`, traduit en
 `permissionDecision: "ask"` sur un hôte qui sait demander (Claude Code) ou en
 refus motivé sinon (`docs/hosts-reference` de la Forge documente cette
 distinction par hôte). Le calcul lui-même (règle + état de session → verdict)
@@ -216,6 +216,20 @@ est porté à l'identique en Python
 `evaluate_one_temporal_rule`) — le Rust est l'oracle, testé en parité
 (`tests/unit/test_policies_rust_parity.py`) ; la persistance de l'état reste
 Python dans les deux cas.
+
+`require_approval` ne se marque **jamais** approuvée depuis `PreToolUse` :
+demander (`ask`) n'est pas une preuve que l'humain a dit oui, donc rien dans
+le chemin de décision de `PreToolUse` ne met `approved` à `true` — une
+tentative refusée puis rejouée redemande, exactement comme la première fois.
+Seul `PostToolUse` — l'événement qu'un hôte n'émet que si l'outil a
+réellement tourné, donc que le `ask` précédent a été accordé — enregistre
+l'approbation, via `record_post_tool_use_approval`
+(`grimoire.policies.temporal`), appelée depuis la décision `PostToolUse`
+existante (`grimoire.hosts.decisions.evidence_trace`). Un appel suivant sur
+le même motif, dans la même session, passe alors en `allow` silencieux ; une
+session neuve redemande. Sans cette étape, un garde `require_approval`
+échouait ouvert (la version initiale de ce chantier faisait cette erreur,
+corrigée en revue le 2026-09-12).
 
 **Visibilité.** `grimoire policies status [--session-id ...] [--json]`
 affiche les compteurs et budgets restants de la session courante (ou la plus

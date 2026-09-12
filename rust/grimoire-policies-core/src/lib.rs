@@ -411,15 +411,18 @@ fn evaluate_one_temporal_rule(
         }
     }
 
-    // 3) Approbation prealable — premiere occurrence dans la session seulement.
+    // 3) Approbation prealable — demande tant qu'un PostToolUse pour ce motif
+    // n'a pas ete enregistre dans la session (voir `matching_approval_rule_ids`
+    // plus bas, appelee cote Python uniquement depuis PostToolUse). Marquer
+    // `approved` ici, au moment ou l'appel ne fait que *demander*, laisserait
+    // une re-tentative apres refus retomber en `allow` — un garde qui echoue
+    // ouvert. Corrige le 2026-09-12 apres revue de la premiere version de ce
+    // fichier, qui faisait exactement ca.
     let mut verdict = VerdictKind::Allow;
     let mut reason = String::new();
     if rule.require_approval && !state.approved {
         verdict = VerdictKind::Warn;
-        reason = format!(
-            "Approbation requise pour '{tool_name}' — première occurrence dans cette session"
-        );
-        state.approved = true;
+        reason = format!("Approbation requise pour '{tool_name}' — en attente de confirmation");
     }
 
     state.calls += 1;
@@ -482,6 +485,23 @@ fn evaluate_temporal_core(
         matched,
         states,
     }
+}
+
+/// Les identifiants de regles dont `tool_pattern` correspond a `tool_name` —
+/// la moitie "quelles regles" de `record_post_tool_use_approval` cote Python
+/// (`temporal.py`), appelee uniquement depuis `PostToolUse`
+/// (`grimoire.hosts.decisions.evidence_trace`). L'appelant a deja filtre sur
+/// `require_approval` avant de construire `rules` (miroir de
+/// `record_post_tool_use_approval`, qui ne passe que les regles
+/// `require_approval` a `_mark_approved_rust`) : cette fonction ne fait donc
+/// que le filtre par motif. Ne mute aucun etat : cote Python, l'appelant
+/// marque `approved = true` pour chaque id retourne.
+fn matching_approval_rule_ids(rules: &[(String, String)], tool_name: &str) -> Vec<String> {
+    rules
+        .iter()
+        .filter(|(_, pattern)| glob_match(pattern, tool_name))
+        .map(|(id, _)| id.clone())
+        .collect()
 }
 
 // Tout ce qui suit touche a PyO3 et n'existe que sous la feature
@@ -698,10 +718,20 @@ mod py_bridge {
         ))
     }
 
+    /// Frontiere PyO3 de `matching_approval_rule_ids` — appelee depuis
+    /// `temporal.py::_mark_approved_rust`, elle-meme appelee uniquement
+    /// depuis `record_post_tool_use_approval` (PostToolUse). Pas de types
+    /// enum a parser ici : id et motif suffisent.
+    #[pyfunction]
+    fn matching_approval_rule_ids(rules: Vec<(String, String)>, tool_name: String) -> Vec<String> {
+        super::matching_approval_rule_ids(&rules, &tool_name)
+    }
+
     #[pymodule]
     fn grimoire_policies_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
         m.add_function(wrap_pyfunction!(evaluate, m)?)?;
         m.add_function(wrap_pyfunction!(evaluate_temporal, m)?)?;
+        m.add_function(wrap_pyfunction!(matching_approval_rule_ids, m)?)?;
         m.add("__version__", env!("CARGO_PKG_VERSION"))?;
         Ok(())
     }
@@ -1013,16 +1043,63 @@ mod temporal_tests {
     }
 
     #[test]
-    fn require_approval_asks_once_then_allows() {
+    fn require_approval_keeps_asking_without_a_recorded_post_tool_use() {
+        // Regression pour le bug fail-open corrige le 2026-09-12 :
+        // evaluate_temporal_core ne marque plus jamais `approved` lui-meme,
+        // donc une regle require_approval redemande a chaque appel tant que
+        // rien n'a mis `approved` a `true` entre deux appels (ce que seul
+        // `matching_approval_rule_ids`, cote PostToolUse, est cense faire).
         let rules = vec![approval_rule("rm-approval", "Bash(rm:*)")];
         let states = vec![empty_state("rm-approval")];
 
         let first = evaluate_temporal_core(&rules, states, "Bash(rm:*)", true, 0.0, 0.0);
         assert_eq!(first.verdict, VerdictKind::Warn);
-        assert!(first.states[0].1.approved);
+        assert!(!first.states[0].1.approved);
 
         let second = evaluate_temporal_core(&rules, first.states, "Bash(rm:*)", true, 0.0, 0.0);
-        assert_eq!(second.verdict, VerdictKind::Allow);
+        assert_eq!(second.verdict, VerdictKind::Warn);
+    }
+
+    #[test]
+    fn require_approval_allows_once_post_tool_use_recorded_it() {
+        // Le seul chemin qui marque `approved` : `matching_approval_rule_ids`
+        // (le cote pur de `record_post_tool_use_approval`), appele depuis
+        // PostToolUse une fois l'appel reellement execute.
+        let rules = vec![approval_rule("rm-approval", "Bash(rm:*)")];
+        let mut states = vec![empty_state("rm-approval")];
+
+        let asked = evaluate_temporal_core(&rules, states, "Bash(rm:*)", true, 0.0, 0.0);
+        assert_eq!(asked.verdict, VerdictKind::Warn);
+        states = asked.states;
+
+        let approval_rules: Vec<(String, String)> =
+            vec![("rm-approval".to_string(), "Bash(rm:*)".to_string())];
+        let approved_ids = matching_approval_rule_ids(&approval_rules, "Bash(rm:*)");
+        assert_eq!(approved_ids, vec!["rm-approval".to_string()]);
+        for (id, state) in states.iter_mut() {
+            if approved_ids.contains(id) {
+                state.approved = true;
+            }
+        }
+
+        let allowed = evaluate_temporal_core(&rules, states, "Bash(rm:*)", true, 0.0, 0.0);
+        assert_eq!(allowed.verdict, VerdictKind::Allow);
+    }
+
+    #[test]
+    fn matching_approval_rule_ids_filters_by_pattern() {
+        let rules = vec![
+            ("rm-approval".to_string(), "Bash(rm:*)".to_string()),
+            ("other-approval".to_string(), "Write".to_string()),
+        ];
+        assert_eq!(
+            matching_approval_rule_ids(&rules, "Bash(rm:*)"),
+            vec!["rm-approval".to_string()]
+        );
+        assert_eq!(
+            matching_approval_rule_ids(&rules, "Read"),
+            Vec::<String>::new()
+        );
     }
 
     #[test]
