@@ -116,7 +116,9 @@ def test_a_fallback_agent_observed_proposes_an_attachable_skill(project: Path) -
 # ── Porteur — la persona d'entrée n'est jamais porteuse (issue #402) ────────
 
 
-def _write_agent(project: Path, name: str, *, use_when: str = "", tools: str = "") -> None:
+def _write_agent(
+    project: Path, name: str, *, use_when: str = "", tools: str = "", skills: tuple[str, ...] = ()
+) -> None:
     """A declared agent file with an optional employment clause and tools —
     enough for :func:`grimoire.proposals._category_carrier` to see it."""
     dest = project / "_grimoire" / "overrides" / "agents" / f"{name}.md"
@@ -126,10 +128,22 @@ def _write_agent(project: Path, name: str, *, use_when: str = "", tools: str = "
         lines.append(f'use_when: "{use_when}"')
     if tools:
         lines.append(f'tools: "{tools}"')
+    if skills:
+        rendered = ", ".join(f"'{s}'" for s in skills)
+        lines.append(f"skills: [{rendered}]")
     lines.append("---")
     lines.append("")
     lines.append("Corps.")
     dest.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _write_skill(project: Path, slug: str) -> None:
+    """A minimal project-tier skill definition, so its slug resolves for
+    :func:`grimoire.hosts.collect.collect_skills` (mirrors the scaffolder's
+    archetype-shipped skills, issue #375)."""
+    dest = project / "_grimoire" / "overrides" / "skills" / f"{slug}.md"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(f"---\nname: {slug}\ndescription: Skill de test {slug}\n---\nCorps.\n", encoding="utf-8")
 
 
 def test_a_fallback_that_is_the_entry_persona_with_no_carrier_proposes_an_agent(project: Path) -> None:
@@ -151,6 +165,28 @@ def test_a_fallback_that_is_the_entry_persona_with_one_carrier_proposes_a_skill(
     assert proposal.artifact_type == "skill"
     assert proposal.target_agent == "infra-ops"
     assert proposal.fallback_agent == "concierge"
+    assert proposal.carrier_reason == "porteur par catégorie : infra-ops"
+
+
+def test_carrier_resolution_survives_a_candidate_with_attached_skills(project: Path) -> None:
+    """Régression #423 : le porteur par catégorie ne doit plus se taire
+
+    dès qu'un agent du projet déclare des skills. ``_category_carrier``
+    appelle ``collect_agents`` sans lui passer d'inventaire — avant le
+    correctif, ``known_skills`` non fourni retombait sur un ensemble vide,
+    donc *tout* agent avec un ``skills:`` attaché (même un candidat sans
+    rapport avec la catégorie observée) faisait échouer la collecte, que
+    ``_category_carrier`` avale en silence (``except Exception: return ""``)
+    — perdant le porteur et proposant un agent neuf au lieu d'un skill
+    attaché à ``infra-ops``.
+    """
+    _write_skill(project, "some-attached-skill")
+    _write_agent(project, "infra-ops", use_when="Une demande infra ou d'exploitation.", skills=("some-attached-skill",))
+    _miss(project, specialty="ansible-homelab", category="infra", fallback="concierge")
+    _miss(project, specialty="ansible-homelab", category="infra", fallback="concierge")
+    proposal = list_proposals(project)[0]
+    assert proposal.artifact_type == "skill"
+    assert proposal.target_agent == "infra-ops"
     assert proposal.carrier_reason == "porteur par catégorie : infra-ops"
 
 
