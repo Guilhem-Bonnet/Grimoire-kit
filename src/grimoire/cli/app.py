@@ -1024,6 +1024,7 @@ LazyTyperGroup.configure(
         "features": LazyGroupSpec("grimoire.cli.cmd_features", "features_app", rich_help_panel="Project"),
         "host": LazyGroupSpec("grimoire.cli.cmd_host", "host_app", rich_help_panel="Project"),
         "providers": LazyGroupSpec("grimoire.cli.cmd_providers", "providers_app", rich_help_panel="Project"),
+        "policies": LazyGroupSpec("grimoire.cli.cmd_policies", "policies_app", rich_help_panel="Project"),
         "proposals": LazyGroupSpec("grimoire.cli.cmd_proposals", "proposals_app", rich_help_panel="Agents"),
         "agent": LazyGroupSpec("grimoire.cli.cmd_agent", "agent_app", rich_help_panel="Agents"),
         "web": LazyGroupSpec("grimoire.cli.cmd_web", "web_app", rich_help_panel="Data"),
