@@ -22,6 +22,7 @@ Trois règles d'hygiène, apprises à la dure :
 from __future__ import annotations
 
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -110,6 +111,125 @@ def served(real_project: Path, tmp_path_factory: pytest.TempPathFactory) -> Iter
         assert not _alive(process.pid), f"serveur survivant : pid {process.pid}"
 
 
+#: Gates minimales pour amener une tâche jusqu'à la porte « review » sans
+#: dépendre du template `governed` du standard (qui exige un context bundle et
+#: un fournisseur activé dès `ready -> in_progress` — voir `served_cockpit`) :
+#: seule la porte qui nous intéresse est déclarée, les autres passent libres.
+#: Même forme que `tests/unit/cli/test_cmd_task_write.py::GATES`.
+_REVIEW_GATE_YAML = """\
+$schema: "grimoire-agentic-standard-evidence-gates/v1"
+transitions:
+  - id: proposed_to_ready
+    from: proposed
+    to: ready
+    required_evidence: ["acceptance_criteria", "owner_or_agent_role"]
+  - id: in_progress_to_review
+    from: in_progress
+    to: review
+    required_evidence: ["evidence_pack"]
+  - id: review_to_accepted
+    from: review
+    to: accepted
+    required_evidence: ["review_gate"]
+profile_strictness:
+  governed: hard_fail
+"""
+
+
+@pytest.fixture(scope="session")
+def served_review_gate(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[str, str]]:
+    """`grimoire serve` sur un projet dédié, une tâche déjà amenée en
+    ``running`` (``in_progress`` côté board) — la porte suivante, ``review``,
+    exige un evidence pack qu'aucune commande n'a produit ici.
+
+    Un projet à part, pas ``real_project`` : les gates du template `governed`
+    y bloquent déjà `ready -> in_progress` faute de context bundle et de
+    fournisseur (voir le commentaire de
+    `test_executer_un_move_reussi_deplace_la_carte_puis_un_claim_est_refuse`),
+    donc aucune tâche n'y atteint jamais `running`. Le critère d'acceptation
+    de #140 nomme `review` précisément : ce harnais amène la tâche jusqu'à
+    cette porte par CLI (même mécanique que `TaskService`, aucun raccourci qui
+    contournerait le gate), pour que seul le dernier geste — cliquer
+    « Réaliser » vers Revue — soit observé dans le navigateur.
+    """
+    root = tmp_path_factory.mktemp("review-gate") / "projet-review-gate"
+    root.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q"], cwd=str(root), check=False, capture_output=True)
+    subprocess.run(
+        [sys.executable, "-m", "grimoire", "init", ".", "-y", "--name", "projet-review-gate"],
+        cwd=str(root), check=False, capture_output=True, timeout=180,
+    )
+    if not (root / "_grimoire" / "kit").is_dir():
+        pytest.skip("`grimoire init` indisponible ici")
+    subprocess.run(
+        [sys.executable, "-m", "grimoire", "standard", "init", "--profile", "governed"],
+        cwd=str(root), check=False, capture_output=True, timeout=180,
+    )
+    gates_path = root / "_grimoire" / "standard" / "evidence-gates.yaml"
+    gates_path.parent.mkdir(parents=True, exist_ok=True)
+    gates_path.write_text(_REVIEW_GATE_YAML, encoding="utf-8")
+
+    added = subprocess.run(
+        [
+            sys.executable, "-m", "grimoire", "task", "add", "Faire une revue sans preuve",
+            "-a", "un critère observable", "--owner", "winston",
+        ],
+        cwd=str(root), capture_output=True, text=True, check=False, timeout=180,
+    )
+    match = re.search(r"(GAO-[a-zA-Z0-9-]+)", added.stdout + added.stderr)
+    if not match:
+        pytest.skip(f"`grimoire task add` n'a pas ouvert de tâche ici : {added.stderr[-400:]}")
+    task_id = match.group(1)
+    for step in (
+        ["task", "move", task_id, "--to", "ready"],
+        ["task", "claim", task_id],
+        ["task", "move", task_id, "--to", "running"],
+    ):
+        outcome = subprocess.run(
+            [sys.executable, "-m", "grimoire", *step],
+            cwd=str(root), capture_output=True, text=True, check=False, timeout=180,
+        )
+        if outcome.returncode != 0:
+            pytest.skip(f"préparation de la tâche interrompue à {step} : {outcome.stderr[-400:]}")
+
+    port = _free_port()
+    env = dict(os.environ)
+    env["GRIMOIRE_COCKPIT_HOME"] = str(tmp_path_factory.mktemp("cockpit-home-review"))
+    env["NO_COLOR"] = "1"
+    process = subprocess.Popen(
+        [
+            sys.executable, "-m", "grimoire", "serve",
+            "--project-root", str(root), "--port", str(port), "--no-open",
+        ],
+        cwd=str(root), env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    try:
+        _wait_ready(port, time.monotonic() + 60)
+        yield f"http://127.0.0.1:{port}", task_id
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=10)
+        assert not _alive(process.pid), f"serveur survivant : pid {process.pid}"
+
+
+@pytest.fixture
+def review_gate_workspace(browser: Browser, served_review_gate: tuple[str, str]) -> Iterator[Page]:
+    """La coque, chargée sur le projet dédié de :func:`served_review_gate`."""
+    served, _task_id = served_review_gate
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
+    page = context.new_page()
+    page.goto(f"{served}/workspace/index.html", wait_until="domcontentloaded")
+    page.wait_for_selector("body[data-ready='1']", timeout=30_000)
+    try:
+        yield page
+    finally:
+        context.close()
+
+
 @pytest.fixture(scope="session")
 def served_cockpit(
     real_project: Path, tmp_path_factory: pytest.TempPathFactory
@@ -177,6 +297,93 @@ def served_cockpit(
     try:
         _wait_ready(port, time.monotonic() + 60)
         yield f"http://127.0.0.1:{port}", slug
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=10)
+        assert not _alive(process.pid), f"cockpit survivant : pid {process.pid}"
+
+
+@pytest.fixture(scope="session")
+def served_cockpit_multi(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Iterator[tuple[str, str, str]]:
+    """Un cockpit qui sert DEUX projets réels, chacun sa tâche reconnaissable.
+
+    Issue #140, critère d'acceptation : « le board change quand on change de
+    projet ». `served_cockpit` ne prouve qu'une route répond 200 pour le
+    projet demandé (lot 4) ; aucun harnais n'avait encore deux boards
+    distincts à comparer.
+
+    Deux projets **dédiés** — pas ``real_project``/``second_project`` : ces
+    fixtures de session sont partagées avec `project_with_task` (ailleurs
+    dans ce lot), qui prend la première tâche du ledger par position. Y
+    ajouter une tâche ici déciderait silencieusement laquelle est « la
+    première » pour tous les autres tests de la suite qui la lisent par
+    contenu (« Vérifier la vue de travail »).
+    """
+    import json
+
+    projects: dict[Path, str] = {
+        tmp_path_factory.mktemp("board-switch-a") / "projet-board-a": "Tâche du projet A — visible seulement ici (#140)",
+        tmp_path_factory.mktemp("board-switch-b") / "projet-board-b": "Tâche du projet B — visible seulement ici (#140)",
+    }
+    for root, title in projects.items():
+        root.mkdir(parents=True)
+        subprocess.run(["git", "init", "-q"], cwd=str(root), check=False, capture_output=True)
+        subprocess.run(
+            [sys.executable, "-m", "grimoire", "init", ".", "-y", "--name", root.name],
+            cwd=str(root), check=False, capture_output=True, timeout=180,
+        )
+        if not (root / "_grimoire" / "kit").is_dir():
+            pytest.skip("`grimoire init` indisponible ici")
+        subprocess.run(
+            [
+                sys.executable, "-m", "grimoire", "task", "add", title,
+                "-a", "distincte du board de l'autre projet", "--owner", "winston",
+            ],
+            cwd=str(root), capture_output=True, text=True, check=False, timeout=180,
+        )
+
+    project_a, project_b = projects.keys()
+    port = _free_port()
+    cockpit_home = tmp_path_factory.mktemp("cockpit-home-multi")
+    env = dict(os.environ)
+    env["GRIMOIRE_COCKPIT_HOME"] = str(cockpit_home)
+    # Comme `served_cockpit` : le cwd de ce harnais est le dépôt du kit
+    # lui-même, un projet Grimoire qu'on ne veut pas voir adopté à la place
+    # des deux projets qu'on enrôle explicitement ci-dessous.
+    env["GRIMOIRE_NO_COCKPIT"] = "1"
+    env["NO_COLOR"] = "1"
+    for root in (project_a, project_b):
+        subprocess.run(
+            [sys.executable, "-m", "grimoire", "cockpit", "add", str(root)],
+            env=env, capture_output=True, text=True, check=False, timeout=60,
+        )
+    registry_path = cockpit_home / "registry.json"
+    if not registry_path.is_file():
+        pytest.skip("`grimoire cockpit add` n'a pas peuplé le registre")
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    slug_a = next((str(e.get("slug", "")) for e in registry if e.get("path") == str(project_a)), "")
+    slug_b = next((str(e.get("slug", "")) for e in registry if e.get("path") == str(project_b)), "")
+    if not slug_a or not slug_b:
+        pytest.skip("slugs introuvables au registre du cockpit après `add`")
+
+    process = subprocess.Popen(
+        [
+            sys.executable, "-m", "grimoire", "cockpit", "serve",
+            "--port", str(port), "--no-open", "--no-refresh",
+        ],
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        _wait_ready(port, time.monotonic() + 60)
+        yield f"http://127.0.0.1:{port}", slug_a, slug_b
     finally:
         process.terminate()
         try:

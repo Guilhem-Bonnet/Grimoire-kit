@@ -87,6 +87,44 @@ lancé aucun agent a un observatoire vide, et le dit — afficher des traces
 inventées horodatées à l'instant serait pire. La chip **données** du tableau de
 bord montre l'état de la couche ; un clic la régénère.
 
+## Le board (espace Exécuter)
+
+`kanban.html` reste servi comme vitrine statique (lecture du JSON plat du
+projet primaire, sans écriture), mais le board vivant est dans l'espace
+**Exécuter** de la vue de travail : `workspace/index.html#executer`, sur
+`grimoire serve` comme sur `grimoire cockpit serve`. Il lit les tâches
+réelles du Mission Ledger (ADR-005) plutôt qu'un `task-board.yaml` écrit à la
+main, et change de contenu avec le projet sélectionné — sur le cockpit,
+`?project=<slug>` cible un autre board à chaque lecture, jamais « le dernier
+projet regardé ».
+
+**Lecture** — chaque carte porte son corps réel : description, critères
+d'acceptation, garde-fous, preuves attendues, dépendances (et les blocages
+qu'elles impliquent). Rien de tout cela n'existait dans `task-board.yaml`,
+qui ne connaît qu'un titre, un owner et des références de fichiers ; c'est le
+`MissionTask` du ledger qui les porte, et l'inspecteur les affiche tel quel.
+
+**Commandes d'intention, jamais de mutation libre** — une carte ne s'édite
+pas par glisser-déposer. Le bouton « Réaliser » de l'inspecteur propose une
+transition (réclamer, avancer, bloquer, clôturer) au même service que la CLI
+(`grimoire task …`, voir [référence CLI](cli-reference.md)) : la machine à
+états puis le gate de preuve s'appliquent avant toute écriture. Un gate rouge
+répond `200` avec `blocked: true` et nomme l'artefact manquant et son remède
+— ce n'est pas une panne du serveur, c'est la réponse ; la carte ne bouge
+pas. Exactement le principe qu'ADR-007 pose pour toute webview du kit : *la
+webview n'est jamais une autorité causale*.
+
+**Restriction d'écriture** — comme le reste de la vue de travail, ces
+commandes ne s'exécutent que pour le projet que l'hôte sert en direct
+(`grimoire serve`, ou le projet de lancement de `grimoire cockpit serve`) ;
+regarder un autre projet du registre depuis le cockpit reste une lecture
+seule, refusée en `403` côté serveur si on tente d'agir dessus — pas
+seulement grisée côté client.
+
+Le drill-down vers la timeline complète d'une tâche (Mission Ledger,
+TraceLedger, runtime) est un onglet séparé du même espace, décrit par
+[l'ADR de la vue de travail](adr-006-vue-de-travail.md).
+
 ## L'éditeur de blueprints
 
 Un blueprint (`_grimoire/blueprints/*.blueprint.json`) décrit un flow

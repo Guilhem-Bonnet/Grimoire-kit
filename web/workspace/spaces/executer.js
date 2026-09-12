@@ -36,6 +36,11 @@ const BOARD_TO_STATE = {
   proposed: 'proposed', ready: 'ready', in_progress: 'running', blocked: 'blocked',
   review: 'needs_verification', accepted: 'closed', released: 'closed', archived: 'cancelled',
 };
+// Nature d'une dépendance (grimoire.missions.schemas.DependencyKind), en clair.
+const DEP_LABEL = {
+  blocks: 'bloque', relates: 'lié à', parent_child: 'parent / enfant',
+  discovered_from: 'découverte depuis', supersedes: 'remplace',
+};
 
 function injectStyles() {
   if (document.getElementById(STYLE_ID)) return;
@@ -246,6 +251,17 @@ async function renderInspector(ctx, taskId, onWritten) {
   ctx.inspector.append(text('h3', null, detail.title || detail.id));
   ctx.inspector.append(text('div', 'lbl mono', detail.id));
 
+  // Corps réel de la tâche (#140) : de quoi elle parle, avant les critères et
+  // les preuves — un board qui ne montre qu'un titre et un owner ne dit rien
+  // à lire pour comprendre la tâche.
+  if (detail.description) {
+    const descBlock = document.createElement('div');
+    descBlock.className = 'ex-insp-block';
+    descBlock.append(text('h4', null, 'Description'));
+    descBlock.append(text('p', null, detail.description));
+    ctx.inspector.append(descBlock);
+  }
+
   // Rappel (#141) : avec parcimonie — le bloc n'existe pas quand il n'a rien
   // à dire, plutôt que d'afficher « rien en mémoire » à chaque tâche neuve.
   if (recall && recall.has_content) {
@@ -267,6 +283,35 @@ async function renderInspector(ctx, taskId, onWritten) {
   if (!(detail.acceptance || []).length) acceptance.append(text('p', 'lbl', 'aucun critère déclaré'));
   else acceptance.append(ul);
   ctx.inspector.append(acceptance);
+
+  if ((detail.guardrails || []).length) {
+    const guardrailsBlock = document.createElement('div');
+    guardrailsBlock.className = 'ex-insp-block';
+    guardrailsBlock.append(text('h4', null, 'Garde-fous'));
+    const gUl = document.createElement('ul');
+    for (const item of detail.guardrails) gUl.append(text('li', null, item));
+    guardrailsBlock.append(gUl);
+    ctx.inspector.append(guardrailsBlock);
+  }
+
+  // Dépendances (#140) : ce que le ledger sait au-delà des blockers dérivés
+  // du board — une tâche `blocks` une autre est le cas qui compte le plus,
+  // affiché en premier, mais les autres natures (relates, parent_child…)
+  // ne sont pas tues.
+  if ((detail.dependencies || []).length) {
+    const depsBlock = document.createElement('div');
+    depsBlock.className = 'ex-insp-block';
+    depsBlock.append(text('h4', null, 'Dépendances'));
+    const dUl = document.createElement('ul');
+    const deps = [...detail.dependencies].sort((a, b) => (a.kind === 'blocks' ? -1 : b.kind === 'blocks' ? 1 : 0));
+    for (const dep of deps) {
+      const label = DEP_LABEL[dep.kind] || dep.kind;
+      const li = text('li', dep.kind === 'blocks' ? 'ex-refusal' : null, `${label} ${dep.target}`);
+      dUl.append(li);
+    }
+    depsBlock.append(dUl);
+    ctx.inspector.append(depsBlock);
+  }
 
   const hasEvidencePack = (trace?.entries || []).some((e) => e.kind === 'evidence.pack');
   const evidenceBlock = document.createElement('div');
