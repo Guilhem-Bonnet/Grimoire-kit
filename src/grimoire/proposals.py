@@ -316,7 +316,7 @@ def _category_carrier(project_root: Path, category: str, entry_name: str) -> str
     if not category:
         return ""
     try:
-        from grimoire.hosts.collect import collect_agents, parse_frontmatter
+        from grimoire.hosts.collect import collect_agents, effective_agent_frontmatter
         from grimoire.hosts.surface import ToolVerb
 
         agents = collect_agents(project_root)
@@ -325,13 +325,13 @@ def _category_carrier(project_root: Path, category: str, entry_name: str) -> str
 
     raw_candidates: list[tuple[str, str, bool]] = []
     for agent in agents:
-        use_when = ""
-        try:
-            text = (project_root / agent.definition_ref).read_text(encoding="utf-8")
-            meta, _ = parse_frontmatter(text)
-            use_when = str(meta.get("use_when") or "")
-        except OSError:
-            pass
+        # `effective_agent_frontmatter`, pas une relecture directe de
+        # `agent.definition_ref` : depuis l'issue #427, un override partiel
+        # (`extends: kit`) ne redéfinit `use_when` que s'il le veut, et
+        # `definition_ref` pointe alors vers le fichier kit — une relecture
+        # brute y trouverait le `use_when` du kit, jamais celui, différent,
+        # que l'override a choisi.
+        use_when = str(effective_agent_frontmatter(project_root, agent).get("use_when") or "")
         raw_candidates.append((agent.name, use_when, ToolVerb.EXECUTE in agent.tools))
 
     if _use_rust_backend():

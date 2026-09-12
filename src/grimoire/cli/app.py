@@ -439,6 +439,29 @@ def doctor(
         for check_name, check_passed, check_detail in integrity_checks(target):
             _record(check_name, passed=check_passed, detail=check_detail)
 
+    # 4quinquies. Override drift (issue #427) — un override est une copie ou
+    # une extension du kit, jamais une garantie qu'il en reçoit encore les
+    # mises à jour. Jamais FAIL : une dette de personnalisation, pas une
+    # panne. Une entrée par override nommant l'agent et la section changée,
+    # pas un agrégat — c'est ce que le critère d'arrêt de l'issue demande.
+    with _timed_phase("override_drift"):
+        from grimoire.core.override_drift import describe_drift, project_override_drift
+
+        for drift in project_override_drift(target):
+            if drift.status == "fresh":
+                continue  # à jour : rien à signaler, pas de bruit sur chaque `doctor`
+            level, detail = describe_drift(drift)
+            drift_entry: dict[str, Any] = {
+                "name": f"override_drift_{drift.name}",
+                "passed": True,
+                "detail": detail,
+                "level": level,
+            }
+            results.append(drift_entry)
+            if fmt != "json":
+                tag = "[yellow]WARN[/yellow]" if level == "warn" else "[dim]○[/dim]"
+                console.print(f"  {tag}  {detail}")
+
     # 5. Config semantic validation
     if cfg:
         warnings = cfg.validate()
@@ -1002,6 +1025,7 @@ LazyTyperGroup.configure(
         "host": LazyGroupSpec("grimoire.cli.cmd_host", "host_app", rich_help_panel="Project"),
         "providers": LazyGroupSpec("grimoire.cli.cmd_providers", "providers_app", rich_help_panel="Project"),
         "proposals": LazyGroupSpec("grimoire.cli.cmd_proposals", "proposals_app", rich_help_panel="Agents"),
+        "agent": LazyGroupSpec("grimoire.cli.cmd_agent", "agent_app", rich_help_panel="Agents"),
         "web": LazyGroupSpec("grimoire.cli.cmd_web", "web_app", rich_help_panel="Data"),
     },
     commands={
@@ -1022,7 +1046,7 @@ LazyTyperGroup.configure(
         "repair",
         "memory", "hooks", "cadrage", "debugger", "dbg", "registry", "workflows",
         "wf", "standard", "ext", "blueprint", "flow", "cockpit", "task",
-        "stigmergy", "features", "host", "providers", "proposals", "web",
+        "stigmergy", "features", "host", "providers", "proposals", "agent", "web",
         "config", "completion", "self", "plugins",
     ],
 )

@@ -169,6 +169,21 @@ class AgentSpec:
     :mod:`grimoire.tools.context_router`, not proof that a session actually
     loads it — the router plans context adaptively and this field only says
     what the agent claims to need."""
+    override_ref: str | None = None
+    """Project-relative path of the project's own customisation of this
+    agent, when one exists — ``None`` for an agent the kit ships unmodified.
+    Distinct from :attr:`definition_ref` since issue #427: a partial override
+    (``extends: kit``) points ``definition_ref`` at the kit file (the one
+    carrying the body a host reads in full), so ``override_ref`` is the only
+    place left saying "the project customised this agent" — what
+    :func:`grimoire.hosts.collect._is_override` and the cockpit's ``layer``
+    badge (:mod:`grimoire.tools.workspace_api`) now read instead of sniffing
+    ``definition_ref``'s prefix."""
+    override_kind: str | None = None
+    """``"full"`` (a complete copy shadowing the kit file), ``"partial"``
+    (``extends: kit``, only the fields it declares), or ``None`` (no
+    override). Set together with :attr:`override_ref` by
+    :func:`grimoire.hosts.collect.collect_agents`."""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -182,6 +197,8 @@ class AgentSpec:
             "max_turns": self.max_turns,
             "skills": list(self.skills),
             "context": list(self.context),
+            "override_ref": self.override_ref,
+            "override_kind": self.override_kind,
         }
 
     def fingerprint(self) -> tuple[str, ...]:

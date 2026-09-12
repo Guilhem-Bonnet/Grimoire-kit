@@ -260,6 +260,17 @@ def test_assigner_un_skill_cree_un_override_que_collect_voit(agents_project: Pat
         a for a in reread["agents"] if a["name"] == "security-auditor"
     )["skills"]
 
+    # Issue #427 : le cockpit écrit un override PARTIEL, pas une copie
+    # intégrale, dès qu'un agent kit du même nom existe — sinon les futures
+    # mises à niveau de cet agent n'atteignent plus jamais le projet.
+    text = override.read_text(encoding="utf-8")
+    assert "extends: kit" in text
+    assert "kit_source_hash:" in text
+    assert agent["override_ref"] == "_grimoire/overrides/agents/security-auditor.md"
+    assert agent["override_kind"] == "partial"
+    # Le corps et la clause non redéfinie restent ceux du kit, pas vides.
+    assert agent["dont_use_when"], "hérité du kit malgré l'override partiel"
+
 
 def test_retirer_un_skill_fait_disparaitre_la_declaration(agents_project: Path) -> None:
     # security-auditor : mutations en séquence avec le test précédent, seul

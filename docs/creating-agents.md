@@ -252,6 +252,79 @@ Cette clause est lue par l'orchestrateur au moment du routage.
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
+## <img src="../assets/icons/team.svg" width="28" height="28" alt=""> Personnaliser un agent du kit (override)
+
+Un fichier sous `_grimoire/overrides/agents/<nom>.md` prime sur son homologue
+`_grimoire/kit/agents/<nom>.md` — c'est la seule façon sanctionnée de
+personnaliser un agent livré par le kit sans le forker en entier. Deux formes
+existent (issue #427) : la copie intégrale et l'override **partiel**.
+
+### Copie intégrale
+
+Un fichier qui reprend tout le contenu du fichier kit, avec une ou deux
+lignes changées. Fonctionne, mais **masque totalement** les mises à niveau
+futures de cet agent : quand le kit refait cet agent (nouveaux `skills:`,
+`use_when` reformulé, corps réécrit), la copie ne bouge pas — rien ne
+l'indique tant que personne ne compare les deux fichiers à la main.
+
+### Override partiel (`extends: kit`)
+
+```yaml
+---
+extends: kit
+model_affinity:
+  reasoning: high
+---
+```
+
+Un override partiel ne redéfinit que les champs de frontmatter qu'il liste
+explicitement, parmi : `model_affinity`, `context`, `skills`, `tools`,
+`use_when`, `dont_use_when`, `max_turns`, `description`, `tool_boundary`.
+Tout le reste — le corps de l'agent compris — est lu depuis le fichier kit de
+même nom à chaque `grimoire host sync` / `grimoire doctor` / `grimoire up`.
+Assigner un skill ou modifier une clause d'emploi depuis le cockpit produit
+désormais un override partiel de ce type dès qu'un agent kit du même nom
+existe ; une copie intégrale ne reste automatique que pour un agent sans
+contrepartie kit (répertoire hérité, ou identité forkée volontairement).
+
+Une valeur explicitement vidée (`skills: []`, `use_when: ""`, un skill
+retiré) reste vide même si le kit, lui, déclare une valeur pour ce champ —
+une clé absente du tout, en revanche, suit le kit. `extends: kit` sans agent
+kit de même nom refuse au chargement, nommant l'agent : rien ne retombe
+silencieusement sur une persona vide.
+
+### Dérive : quand le kit a changé sous une copie intégrale
+
+Chaque override écrit par le kit (cockpit, `grimoire agent override
+convert`) enregistre `kit_source_hash:` — une empreinte du fichier kit au
+moment de l'écriture. `grimoire doctor` et le cockpit comparent cette
+empreinte à celle du fichier kit actuel :
+
+- **absente** (override antérieur à cette issue) → INFO « empreinte
+  inconnue, revoir à la main » ;
+- **différente** → WARN nommant l'agent, avec un résumé (sections de
+  frontmatter ajoutées/retirées côté kit, delta de lignes du corps pour une
+  copie intégrale ; champs figés pour un override partiel). Jamais FAIL : une
+  dérive d'override est une dette à revoir, pas une panne.
+
+`grimoire up` liste, après avoir rafraîchi le palier kit, les overrides à
+revoir — sans jamais les toucher. Trois choix, à faire à la main :
+
+```bash
+# Voir ce que donnerait la conversion sans rien écrire
+grimoire agent override convert <nom> --dry-run
+
+# Convertir réellement une copie intégrale en override partiel équivalent
+grimoire agent override convert <nom>
+```
+
+`convert` refuse — en nommant les lignes qui diffèrent — quand le corps de
+la copie a été modifié par rapport au kit : convertir fusionnerait alors du
+texte, ce que cette commande ne fait jamais. Le troisième choix, retirer
+l'override, se fait en supprimant le fichier `_grimoire/overrides/agents/<nom>.md`.
+
+<img src="../assets/divider.svg" width="100%" alt="">
+
 ## <img src="../assets/icons/lightbulb.svg" width="28" height="28" alt=""> Bonnes pratiques
 
 ### Scope strict
