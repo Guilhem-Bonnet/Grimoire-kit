@@ -28,6 +28,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   refusée par défaut — `source.assist.allow_lan: true` l'autorise
   explicitement.
 
+- fix(yaml): `grimoire upgrade` round-trippait `project-context.yaml` via un chargeur `safe` (aucune métadonnée de commentaire) puis un dumper round-trip — tous les commentaires du fichier disparaissaient silencieusement à chaque migration v2→v3 (#430).
 - **feat(policies): politiques temporelles par session sur la médiation d'outils — budgets, approbation préalable, refroidissement (#439).**
   Point 3 de l'audit de positionnement 2026-09-12 : `PolicyRule` gagne quatre
   clés optionnelles et rétrocompatibles (`tool_pattern`, `require_approval`,
