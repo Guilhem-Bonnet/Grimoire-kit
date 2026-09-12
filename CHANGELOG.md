@@ -9,7 +9,20 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 - **feat(dispatch): coût par tâche résolue et pass^k, comptabilité continue et contrôle dans les gates (#442).**
   Point 5 de l'audit de positionnement du 2026-09-12 : le kit dispatchait déjà des tâches en cascade sans jamais agréger en continu ce que ça coûte ni si ça marche de façon fiable — seules des campagnes d'évals manuelles (#308) répondaient à ces questions. `grimoire task dispatch`/`grimoire flow run --executor dispatch` écrivent maintenant un événement `dispatch.outcome` par cascade réellement tentée dans le journal de traces (classe, paliers tentés, coût total, verdict d'acceptance, résolu ou non — aucun contenu de prompt). Nouvelle commande `grimoire dispatch stats [--since 30d] [--json]`, sœur de `providers history` : coût par tâche résolue, taux d'escalade, part d'inexécutable (par classe et par fournisseur), et pass^k sur les nœuds rejoués (une série est « toute au vert » seulement si toutes ses exécutions ont résolu la tâche). Les agrégations pures vivent dans `rust/grimoire-traces-core/` (extension du sixième port), avec parité de test sous les deux backends. Le standard gagne le contrôle `dispatch.cost_slo` (pattern `provider-cost-slo`) : `INFO` faute de données, `WARN` en cas de dépassement (coût ou pass^k), `FAIL` uniquement si le projet déclare `dispatch_cost_slo.enforce: true` — jamais bloquant par défaut. Le cockpit n'est pas concerné par ce lot.
-
+- **feat(policies): politiques temporelles par session sur la médiation d'outils — budgets, approbation préalable, refroidissement (#439).**
+  Point 3 de l'audit de positionnement 2026-09-12 : `PolicyRule` gagne quatre
+  clés optionnelles et rétrocompatibles (`tool_pattern`, `require_approval`,
+  `per_session`, `cooldown_after`, voir `_grimoire/standard/policies.yaml`),
+  validées au chargement (`GrimoirePolicyError` nommée sur clé inconnue). L'état
+  de session (compteurs, approbations, horodatages — jamais de secret ni de
+  contenu d'outil) vit dans `_grimoire-output/.runs/session-<id>.json`, écrit
+  atomiquement, remis à zéro à `SessionStart` ; un fichier absent ou corrompu
+  redevient une session neuve. La décision pure (règle + état → verdict) est
+  portée à l'identique en Python (`grimoire.policies.temporal`) et en Rust
+  (`rust/grimoire-policies-core`, `evaluate_temporal`), testée en parité ; le
+  hook `PreToolUse` reste sous +5 ms de surcoût mesuré. `grimoire policies
+  status` affiche les compteurs et budgets restants de la session — le
+  cockpit n'est pas dans ce lot.
 - **feat(hosts): un override d'agent peut désormais rester partiel (`extends: kit`) et signale sa dérive au lieu de figer silencieusement une copie (#427).**
   Migration réelle 3.38.0 → 3.44.2 : quatre overrides en copie intégrale
   n'avaient plus reçu une seule mise à niveau de leur agent depuis des mois,

@@ -140,6 +140,28 @@ def _proposals_status_line(project_root: Path) -> str:
         return ""
 
 
+def _reset_temporal_session(hook: HookInput) -> None:
+    """Drop the previous temporal-policy session state, if any (issue #429, point 3).
+
+    A ``SessionStart`` is the one event guaranteed to fire before the first
+    ``PreToolUse`` of a new session (and a host is expected to hand out a
+    fresh ``session_id`` per session — see
+    ``grimoire.policies.session_state.reset_session_state``'s own docstring
+    for the one case that cannot paper over a reused id). Best-effort by
+    construction: a failed reset never blocks a session start, and a hook
+    with no ``session_id`` (a host that never sends one) has nothing to key
+    a file on, so it is a silent no-op rather than a fabricated identifier.
+    """
+    if not hook.session_id:
+        return
+    try:
+        from grimoire.policies.session_state import reset_session_state
+
+        reset_session_state(hook.project_root, hook.session_id)
+    except Exception:
+        return
+
+
 def decide_activation(hook: HookInput) -> Decision:
     """Session start: hand the agent its persona, its claim's recall, then the directive.
 
@@ -156,7 +178,13 @@ def decide_activation(hook: HookInput) -> Decision:
     The proposals line (issue #395) sits right next to it — same register,
     operational rather than protocol — and is silent just as often (no
     proposal ever crossed the repetition threshold).
+
+    It also resets the temporal-policy session state (issue #429, point 3):
+    a new session starts with empty budgets, no cooldown history and no
+    rule marked "already approved" — that is the whole point of scoping
+    those to a session rather than to the project.
     """
+    _reset_temporal_session(hook)
     task_id = active_task_id(hook.project_root)
     directive = activation_context_text(hook.project_root, task_id=task_id)
     persona, entry_name = entry_persona_context(hook.project_root)

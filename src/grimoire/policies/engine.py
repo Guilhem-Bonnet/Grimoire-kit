@@ -30,7 +30,7 @@ from __future__ import annotations
 import os
 import uuid
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from grimoire.core.exceptions import GrimoirePolicyError
 from grimoire.policies.schemas import (
@@ -111,6 +111,22 @@ def rust_backend_available() -> bool:
     itself decides its backend on every call via :func:`_use_rust_backend`.
     """
     return _rust_core is not None
+
+
+def rust_core_module() -> Any | None:
+    """The compiled ``grimoire_policies_core`` module, or ``None``.
+
+    The sanctioned way for another module in this package (namely
+    :mod:`grimoire.policies.temporal`) to reach the compiled core's other
+    entry points (``evaluate_temporal``) without importing the private
+    ``_rust_core`` name directly — a plain ``from ... import _rust_core``
+    (or ``module._rust_core`` attribute access) trips ``mypy --strict``'s
+    implicit-reexport check, since leading-underscore names are never
+    implicitly re-exported. Callers still guard with :func:`_use_rust_backend`
+    (or :func:`rust_backend_available`) before relying on a non-``None``
+    result — this function itself does not raise.
+    """
+    return _rust_core
 
 
 def _use_rust_backend() -> bool:

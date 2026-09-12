@@ -13,11 +13,13 @@ import os
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from grimoire.core.standard_state import active_profile_id, active_task_id
 from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
 from grimoire.hosts.decisions.tool_facts import ToolFacts, classify_tool
-from grimoire.policies.engine import PolicyEngine
+from grimoire.policies.engine import _SEVERITY, PolicyEngine
+from grimoire.policies.rules_config import load_custom_rules
 from grimoire.policies.schemas import (
     MutationClass,
     PolicyAction,
@@ -26,6 +28,9 @@ from grimoire.policies.schemas import (
     PolicyRule,
     VerdictKind,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 #: Standard profile -> policy risk profile. The standard grades *how much
 #: evidence* a project owes; the policy engine grades *how much freedom* it
@@ -53,9 +58,11 @@ _DESTRUCTIVE_AT_STRICT = PolicyRule(
 )
 
 
-def _engine() -> PolicyEngine:
+def _engine(custom_rules: Sequence[PolicyRule] = ()) -> PolicyEngine:
     engine = PolicyEngine()
     engine.register_rule(_DESTRUCTIVE_AT_STRICT)
+    for rule in custom_rules:
+        engine.register_rule(rule)
     return engine
 
 
@@ -80,39 +87,112 @@ def _policy_request(hook: HookInput, facts: ToolFacts, task_id: str, risk: str) 
     )
 
 
+def _evaluate_temporal_layer(
+    hook: HookInput,
+    custom_rules: tuple[PolicyRule, ...],
+    facts: ToolFacts,
+) -> tuple[VerdictKind, str, list[str]]:
+    """Point 3 (issue #429): budgets, prior approval, cooldowns — session-scoped.
+
+    Returns ``(verdict, reason, matched_rule_ids)`` — ``verdict`` is
+    ``VerdictKind.ALLOW`` with an empty reason when no temporal rule is
+    declared, no rule matches this call, or the host sent no
+    ``session_id`` (there is nothing to key a session's state on; see
+    :mod:`grimoire.policies.session_state`). Never raises: a corrupted or
+    unwritable session-state file degrades to "new session", exactly like
+    :func:`grimoire.policies.session_state.load_session_state` documents.
+    """
+    temporal_rules = tuple(rule for rule in custom_rules if rule.is_temporal)
+    if not temporal_rules or not hook.session_id:
+        return VerdictKind.ALLOW, "", []
+
+    from grimoire.policies.session_state import load_session_state, save_session_state
+    from grimoire.policies.temporal import evaluate_temporal
+
+    now = datetime.now(UTC)
+    now_iso = now.isoformat()
+    state = load_session_state(hook.project_root, hook.session_id, now_iso=now_iso)
+    decision = evaluate_temporal(
+        temporal_rules,
+        state,
+        tool_name=hook.tool_name or "unknown",
+        is_write=facts.mutation is not MutationClass.READ_ONLY,
+        now=now,
+    )
+    save_session_state(hook.project_root, decision.state, now_iso=now_iso)
+    return decision.verdict, decision.reason, [rule.rule_id for rule in decision.matched_rules]
+
+
 def decide_tool_policy(hook: HookInput) -> Decision:
     """Pre tool use: run the pending call through the policy engine.
 
     This is the call site the engine never had: before it, ``PolicyEngine``
     was a library that only its own tests invoked.
+
+    Two layers, evaluated in the same call and escalated together
+    (block > ask > allow, see :data:`grimoire.policies.engine._SEVERITY`):
+    the request-only base engine (unchanged since before issue #429), and
+    the session-scoped temporal layer added by it
+    (:func:`_evaluate_temporal_layer`) — budgets, prior approval, cooldowns,
+    declared in ``_grimoire/standard/policies.yaml`` (see
+    :mod:`grimoire.policies.rules_config`). A project that declares no
+    temporal rule pays one ``Path.is_file()`` check more than before and
+    behaves exactly as it did before this change.
     """
     facts = classify_tool(hook.tool_name, hook.tool_input)
-    if facts.mutation is MutationClass.READ_ONLY and not facts.secret_target:
+    custom_rules = load_custom_rules(hook.project_root)
+    # A temporal rule (require_approval/per_session/cooldown_after) commonly
+    # leaves action_kinds/mutation_classes/risk_profiles empty — it has no
+    # opinion on those dimensions, only on the session. Registered as-is into
+    # the base engine, ``PolicyRule.matches`` would read those three empty
+    # tuples the way it always has ("no constraint" on every dimension) and
+    # match — and therefore enforce ``verdict_on_match`` — on *every* request,
+    # independently of any session state. The base engine only ever sees the
+    # non-temporal rules; temporal ones are the temporal layer's alone.
+    base_rules = tuple(rule for rule in custom_rules if not rule.is_temporal)
+    has_temporal_rules = any(rule.is_temporal for rule in custom_rules)
+    read_only = facts.mutation is MutationClass.READ_ONLY and not facts.secret_target
+    if read_only and not has_temporal_rules:
         return Decision()
 
     task_id = active_task_id(hook.project_root)
     risk = _risk_profile(hook.project_root)
-    verdict = _engine().evaluate(_policy_request(hook, facts, task_id, risk))
+    base_verdict = (
+        _engine(base_rules).evaluate(_policy_request(hook, facts, task_id, risk))
+        if not read_only
+        else None
+    )
+    temporal_verdict, temporal_reason, temporal_rule_ids = _evaluate_temporal_layer(hook, custom_rules, facts)
+
+    verdict_kind = base_verdict.verdict if base_verdict is not None else VerdictKind.ALLOW
+    reason = base_verdict.reason if base_verdict is not None else ""
+    matched_rule_ids = [rule.rule_id for rule in base_verdict.matched_rules] if base_verdict is not None else []
+    if _SEVERITY[temporal_verdict] > _SEVERITY[verdict_kind]:
+        verdict_kind = temporal_verdict
+        reason = temporal_reason
+    matched_rule_ids.extend(temporal_rule_ids)
+
     detail = {
         "tool": hook.tool_name,
         "family": facts.family,
         "mutation": facts.mutation.value,
         "risk_profile": risk,
-        "rules": [rule.rule_id for rule in verdict.matched_rules],
+        "rules": matched_rule_ids,
     }
 
-    if verdict.verdict is VerdictKind.BLOCK:
+    if verdict_kind is VerdictKind.BLOCK:
         what = facts.destructive_reason or facts.secret_target or facts.kind.value
-        reason = (
+        motif = reason or "règle de sécurité du standard"
+        reason_text = (
             f"[Grimoire policy] {hook.tool_name or 'action'} refusé — {what}. "
-            f"Motif : {verdict.reason or 'règle de sécurité du standard'} (profil de risque {risk}). "
+            f"Motif : {motif} (profil de risque {risk}). "
             "Demande une autorisation explicite ou passe par une commande réversible."
         )
-        return Decision(outcome=Outcome.DENY, reason=reason, detail=detail)
-    if verdict.verdict is VerdictKind.WARN:
+        return Decision(outcome=Outcome.DENY, reason=reason_text, detail=detail)
+    if verdict_kind is VerdictKind.WARN:
         return Decision(
             outcome=Outcome.ASK,
-            reason=f"[Grimoire policy] {verdict.reason or 'action sensible'} (profil {risk}).",
+            reason=f"[Grimoire policy] {reason or 'action sensible'} (profil {risk}).",
             detail=detail,
         )
     return Decision(detail=detail)
