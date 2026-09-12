@@ -2,6 +2,22 @@
 
 ## Dernière release
 
+### 3.44.2 — Correctif de régression : `SessionStart` sur un agent à skills attachés
+
+- **fix(hosts): `collect_agents` résout ses propres skills quand `known_skills` n'est pas fourni — `SessionStart` et le porteur de proposition ne plantent plus sur un agent à skills attachés (#423).**
+  `entry_persona_context` (le hook `SessionStart`) et `_category_carrier`
+  (le porteur par catégorie du déclencheur de propositions) appelaient
+  `collect_agents(project_root)` sans lui passer l'inventaire des skills du
+  projet ; l'ensemble retombait alors sur un ensemble vide, ce qui faisait
+  échouer fail-closed *tout* agent déclarant un `skills:` en frontmatter —
+  la forme par défaut des archétypes depuis #377/#387. Tout projet avec un
+  agent à skills attachés voyait son `SessionStart` répondre « en erreur »
+  et sa persona d'entrée jamais injectée. `collect_agents` résout
+  désormais lui-même l'inventaire via `collect_skills()` quand aucun n'est
+  fourni, pour qu'aucun appelant ne puisse retomber dans ce trou.
+
+## Releases précédentes
+
 ### 3.44.1 — CLI et hook plus rapides au démarrage, flow status corrigé sur abandon
 
 - **fix(flows): un abandon (ou un refus MAST) avant tout progrès n'affiche plus tous les nodes comme complétés dans `grimoire flow status` (#417).**
@@ -24,8 +40,6 @@
   `PreToolUse`, assumé — le profil restant tient à trois postes
   incompressibles (dataclasses/inspect, `standard_state`/`ruamel.yaml`,
   moteur de politique) ; suivi en issue #419.
-
-## Releases précédentes
 
 ### 3.44.0 — Trois cœurs Rust optionnels de plus : hosts, flows, dispatch
 
