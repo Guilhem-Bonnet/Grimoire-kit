@@ -27,11 +27,13 @@ project:
 source:
   assist:
     model: "{model}"
+    allow_lan: {allow_lan}
 """
 
 
-def _write_project(root: Path, *, model: str = "") -> None:
-    (root / "project-context.yaml").write_text(_PROJECT_CONTEXT.format(model=model), encoding="utf-8")
+def _write_project(root: Path, *, model: str = "", allow_lan: bool = False) -> None:
+    text = _PROJECT_CONTEXT.format(model=model, allow_lan="true" if allow_lan else "false")
+    (root / "project-context.yaml").write_text(text, encoding="utf-8")
     (root / "_grimoire" / "overrides" / "agents").mkdir(parents=True, exist_ok=True)
     (root / "_grimoire" / "overrides" / "agents" / "demo.md").write_text("---\nname: demo\n---\n", encoding="utf-8")
 
@@ -149,6 +151,46 @@ def test_intention_inconnue_refusee(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="intention inconnue"):
         source_assist.assist_view(tmp_path, _body(intent="invente"))
+
+
+# ── URL non locale — doctrine « aucune donnée hors de la machine » ─────────
+
+
+def test_url_ollama_non_locale_sans_allow_lan_est_un_refus_nomme(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_project(tmp_path, model="qwen3-coder:30b", allow_lan=False)
+    # TEST-NET-1 (RFC 5737) : jamais routable, jamais loopback — et jamais
+    # contactée puisque le garde doit refuser avant toute tentative réseau.
+    monkeypatch.setenv("OLLAMA_HOST", "http://192.0.2.10:11434")
+
+    result = source_assist.assist_view(tmp_path, _body())
+
+    assert result["available"] is False
+    assert "n'est pas locale" in result["reason"]
+    assert "source.assist.allow_lan" in result["reason"]
+
+
+def test_url_ollama_non_locale_avec_allow_lan_appelle_ollama(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_ollama: http.server.HTTPServer
+) -> None:
+    """``allow_lan: true`` lève le garde — l'appel atteint bien Ollama ensuite.
+
+    Le faux serveur écoute sur une adresse de bouclage réelle (aucun réseau
+    d'essai n'a de machine distante à disposition en CI) ; ``_is_local_url``
+    est neutralisé pour ce test précis afin de simuler une URL réellement
+    non locale sans dépendre d'une topologie réseau — c'est la même fonction
+    que le test ci-dessus exerce en conditions réelles.
+    """
+    _write_project(tmp_path, model="qwen3-coder:30b", allow_lan=True)
+    port = fake_ollama.server_address[1]
+    monkeypatch.setenv("OLLAMA_HOST", f"http://127.0.0.1:{port}")
+    monkeypatch.setattr(source_assist, "_is_local_url", lambda _url: False)
+
+    result = source_assist.assist_view(tmp_path, _body())
+
+    assert result["available"] is True
+    assert result["model"] == "qwen3-coder:30b"
 
 
 # ── Ollama absent ou injoignable ────────────────────────────────────────────

@@ -23,7 +23,10 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   bouton) avec **Insérer**/**Ignorer** ; l'insertion passe par le même
   chemin que la frappe clavier, la colorisation et les diagnostics se
   recalculent dessus. Aucun fournisseur distant, aucune clé, aucune écriture
-  de fichier par la route.
+  de fichier par la route. Garde de relecture : une URL Ollama résolue
+  (`OLLAMA_HOST`) hors bouclage (`127.0.0.1`, `::1`, `localhost`) est
+  refusée par défaut — `source.assist.allow_lan: true` l'autorise
+  explicitement.
 
 - **feat(policies): politiques temporelles par session sur la médiation d'outils — budgets, approbation préalable, refroidissement (#439).**
   Point 3 de l'audit de positionnement 2026-09-12 : `PolicyRule` gagne quatre

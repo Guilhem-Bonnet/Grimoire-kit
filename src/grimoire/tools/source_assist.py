@@ -18,28 +18,31 @@ Refus, dans l'ordre où ils sont vérifiés :
    la présence d'Ollama sur le poste.
 2. chemin hors des étages de Source, ou intention inconnue — :class:`ValueError`/
    ``WorkspacePathError``, traduits en 400/403 par :mod:`workspace_routes`.
-3. Ollama indisponible, ou le modèle configuré absent de ``ollama list`` (même
+3. l'URL Ollama résolue (``OLLAMA_HOST``, par défaut ``http://127.0.0.1:11434``)
+   ne pointe pas vers une adresse de bouclage — refus discret nommé, sauf
+   opt-in supplémentaire ``source.assist.allow_lan: true`` (:func:`_is_local_url`).
+   La doctrine de cette piste est « aucune donnée hors de la machine » ; sans
+   ce garde, ``OLLAMA_HOST`` pointé vers une instance partagée du réseau
+   ferait fuir le fichier édité sans que rien ne le dise.
+4. Ollama indisponible, ou le modèle configuré absent de ``ollama list`` (même
    sonde que ``grimoire providers audit``, :mod:`grimoire.providers.audit`) —
    refus discret, jamais une exception : ``{"available": False, "reason": …}``.
-4. délai dépassé (10 s) ou erreur réseau pendant l'appel — même forme de refus
+5. délai dépassé (10 s) ou erreur réseau pendant l'appel — même forme de refus
    discret.
-
-Aucun appel à un fournisseur distant n'est possible depuis ce module : la
-seule URL jamais contactée est celle d'Ollama en local
-(:func:`grimoire.providers.audit.ollama_base_url`, par défaut
-``http://127.0.0.1:11434``).
 """
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from grimoire.core import integrity
-from grimoire.core.config import GrimoireConfig
+from grimoire.core.config import GrimoireConfig, SourceAssistConfig
 from grimoire.core.exceptions import GrimoireConfigError
 from grimoire.providers.audit import ollama_base_url, probe_ollama_models
 from grimoire.tools import workspace_api, workspace_language
@@ -60,18 +63,44 @@ ASSIST_TIMEOUT_S = 10.0
 _CONTEXT_LINES = 12
 
 
-def assist_enabled_model(project_root: Path) -> str:
-    """Le modèle configuré par ``source.assist.model``, ou ``""`` si absent.
+def _source_assist_config(project_root: Path) -> SourceAssistConfig:
+    """La section ``source.assist:`` telle que déclarée, ou ses défauts.
 
     Lit ``project-context.yaml`` avec la même tolérance que
     :func:`workspace_api.agents_view` : un projet sans config lisible n'a pas
-    l'assistance active, ce n'est pas une erreur de transport.
+    l'assistance active, ce n'est pas une erreur de transport. Un seul point
+    de lecture pour :func:`assist_enabled_model` et le garde de bouclage de
+    :func:`_readiness` — jamais deux analyses du même fichier par requête.
     """
     try:
         cfg = GrimoireConfig.from_yaml(project_root / "project-context.yaml")
     except GrimoireConfigError:
-        return ""
-    return cfg.source.assist.model
+        return SourceAssistConfig()
+    return cfg.source.assist
+
+
+def assist_enabled_model(project_root: Path) -> str:
+    """Le modèle configuré par ``source.assist.model``, ou ``""`` si absent."""
+    return _source_assist_config(project_root).model
+
+
+def _is_local_url(url: str) -> bool:
+    """Vrai si *url* pointe vers une adresse de bouclage (``127.0.0.1``,
+    ``::1``) ou ``localhost`` — jamais une machine du réseau.
+
+    La doctrine de cette piste (issue #280, voie 2) est « aucune donnée hors
+    de la machine » : ``OLLAMA_HOST`` reste une variable d'environnement
+    ordinaire, qu'un poste peut pointer vers une instance Ollama partagée sur
+    le réseau sans que ce module en soit informé autrement. Ce garde referme
+    ce trou plutôt que de faire confiance à l'URL résolue.
+    """
+    host = urlsplit(url).hostname or ""
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 def _readiness(project_root: Path) -> tuple[str, str, dict[str, Any] | None]:
@@ -86,7 +115,8 @@ def _readiness(project_root: Path) -> tuple[str, str, dict[str, Any] | None]:
     vérification d'opt-in et de présence Ollama, jamais deux.
     """
     root = project_root.resolve()
-    model = assist_enabled_model(root)
+    assist_config = _source_assist_config(root)
+    model = assist_config.model
     if not model:
         return "", "", {
             "enabled": False,
@@ -96,6 +126,17 @@ def _readiness(project_root: Path) -> tuple[str, str, dict[str, Any] | None]:
         }
 
     base_url = ollama_base_url()
+    if not _is_local_url(base_url) and not assist_config.allow_lan:
+        return "", "", {
+            "enabled": True,
+            "model": model,
+            "available": False,
+            "reason": (
+                "assistant local : l'URL Ollama n'est pas locale ; déclare "
+                "`source.assist.allow_lan: true` pour l'autoriser explicitement"
+            ),
+        }
+
     models_seen, probe_note = probe_ollama_models(base_url)
     if not models_seen and probe_note:
         return model, base_url, {"enabled": True, "model": model, "available": False, "reason": probe_note}

@@ -246,13 +246,23 @@ class SourceAssistConfig:
     d'Ollama sur le poste. Rien ne doit s'activer par simple détection —
     seule une déclaration explicite dans ``project-context.yaml`` engage la
     route ``POST /api/workspace/assist``.
+
+    ``allow_lan`` (faux par défaut) est un second opt-in, distinct du premier :
+    la doctrine de cette piste est « aucune donnée hors de la machine » — une
+    URL Ollama qui ne pointe pas vers une adresse de bouclage
+    (``127.0.0.1``, ``::1``, ``localhost``) est refusée tant que ce champ ne
+    l'autorise pas explicitement (:func:`grimoire.tools.source_assist._readiness`).
     """
 
     model: str = ""
+    allow_lan: bool = False
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SourceAssistConfig:
-        return cls(model=str(data.get("model", "")).strip())
+        return cls(
+            model=str(data.get("model", "")).strip(),
+            allow_lan=data.get("allow_lan") is True,
+        )
 
 
 @dataclass(frozen=True, slots=True)

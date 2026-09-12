@@ -1428,6 +1428,9 @@ diagnostics se recalculent dessus), **Ignorer** referme le panneau sans rien
 écrire. Aucun envoi automatique à la frappe, aucun fournisseur distant,
 aucune clé, aucune donnée hors de la machine — le module
 `src/grimoire/tools/source_assist.py` ne contacte jamais qu'Ollama en local.
+Si l'URL Ollama résolue (`OLLAMA_HOST`) ne pointe pas vers une adresse de
+bouclage, l'appel est refusé (nommé) sauf déclaration explicite de
+`source.assist.allow_lan: true`.
 
 ### Projets de la machine
 
