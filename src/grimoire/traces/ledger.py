@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import uuid
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
@@ -15,6 +16,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from grimoire.core.exceptions import GrimoireRuntimeError
 from grimoire.traces.otel_conventions import (
     ATTR_AGENT_NAME,
     ATTR_CONVERSATION_ID,
@@ -48,7 +50,48 @@ __all__ = [
     "FreshnessReport",
     "TraceLedger",
     "compute_agent_freshness",
+    "rust_backend_available",
 ]
+
+try:
+    import grimoire_traces_core as _rust_core
+except ImportError:  # pragma: no cover - exercised by the dedicated Rust CI job
+    _rust_core = None
+
+
+def rust_backend_available() -> bool:
+    """Whether the compiled ``grimoire_traces_core`` module is importable.
+
+    Purely informational (used by tests and diagnostics) — every call site
+    below decides its own backend fresh via :func:`_use_rust_backend`.
+    """
+    return _rust_core is not None
+
+
+def _use_rust_backend() -> bool:
+    """Resolve which backend this module's Rust-optional functions should use.
+
+    Own copy of the precedent set by ``grimoire.flows.engine``/
+    ``grimoire.missions.dispatch`` (issue #354): each module backed by a
+    Rust crate reads its own env var independently. Reads
+    ``GRIMOIRE_TRACES_BACKEND`` fresh every call so tests can flip it with
+    ``monkeypatch.setenv``.
+    """
+    override = os.environ.get("GRIMOIRE_TRACES_BACKEND", "auto").strip().lower()
+    if override == "python":
+        return False
+    if override == "rust":
+        if _rust_core is None:
+            raise GrimoireRuntimeError(
+                "GRIMOIRE_TRACES_BACKEND=rust demande le coeur Rust, mais "
+                "grimoire_traces_core est introuvable. Construire l'extension "
+                "localement (voir CONTRIBUTING.md, `maturin develop` dans "
+                "rust/grimoire-traces-core/) ou revenir a auto/python."
+            )
+        return True
+    if override not in ("auto", ""):
+        raise GrimoireRuntimeError(f"GRIMOIRE_TRACES_BACKEND invalide: {override!r} (attendu auto/python/rust)")
+    return _rust_core is not None
 
 #: Tag qui marque un enregistrement comme « un agent a été choisi » plutôt
 #: qu'un gate de tâche ou un appel modèle — le seul filtre dont
@@ -127,8 +170,26 @@ class FreshnessReport:
 
 
 def _parse_iso(value: str) -> datetime | None:
+    """Parse an ISO-8601 timestamp, treating a naive one as UTC.
+
+    Defect fixed by the Rust port (issue #354): this used to return a naive
+    ``datetime`` unchanged when *value* carried no offset. Every caller here
+    subtracts the result from an *aware* ``datetime.now(tz=UTC)`` —
+    Python raises an uncaught ``TypeError`` ("can't subtract offset-naive
+    and offset-aware datetimes") on that combination, which broke this
+    module's own contract ("never an exception on an arbitrary journal", see
+    :func:`compute_agent_freshness`). A journal is an ordinary JSONL file a
+    contributor or external tool can hand-edit; a naive timestamp is a
+    realistic malformed input, not a can't-happen case. Attaching UTC here
+    matches what :func:`_now_iso` already does for everything the kit writes
+    itself, and matches ``grimoire_traces_core``'s Rust parser (see its
+    module docstring), which never had this hole.
+    """
     with contextlib.suppress(ValueError):
-        return datetime.fromisoformat(value)
+        parsed = datetime.fromisoformat(value)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=UTC)
+        return parsed
     return None
 
 
@@ -168,8 +229,38 @@ def compute_agent_freshness(
     Un agent est périmé quand sa dernière date de choix remonte à
     *threshold_days* jours ou plus (borne incluse, comme « depuis N jours »),
     ou qu'il n'a jamais été choisi — et qu'il n'est pas lui-même trop récent.
+
+    Délègue à ``grimoire_traces_core.compute_agent_freshness`` (issue #354)
+    quand le backend Rust est actif — voir :func:`_use_rust_backend`. Le
+    chemin Python ci-dessous est l'implémentation de référence et tourne
+    quand le module compilé est absent.
     """
     now = now or datetime.now(tz=UTC)
+    names = list(agent_names)
+    ages = dict(agent_ages or {})
+
+    if _use_rust_backend():
+        assert _rust_core is not None  # guarded by _use_rust_backend
+        dispatch_last_seen = {name: str(stats.get("last_seen") or "") for name, stats in dispatch_counts.items()}
+        rust_judged, rust_span_days, raw_entries = _rust_core.compute_agent_freshness(
+            names,
+            dispatch_last_seen,
+            threshold_days,
+            oldest_started_at,
+            ages,
+            now.isoformat(),
+        )
+        entries = tuple(
+            AgentFreshness(name=name, last_seen=last_seen, days_since=days_since, stale=stale, too_recent=too_recent)
+            for name, last_seen, days_since, stale, too_recent in raw_entries
+        )
+        return FreshnessReport(
+            threshold_days=threshold_days,
+            judged=bool(rust_judged),
+            journal_span_days=rust_span_days,
+            entries=entries,
+        )
+
     journal_span_days: int | None = None
     if oldest_started_at:
         oldest = _parse_iso(oldest_started_at)
@@ -177,10 +268,9 @@ def compute_agent_freshness(
             journal_span_days = (now - oldest).days
 
     judged = journal_span_days is not None and journal_span_days >= threshold_days
-    ages = agent_ages or {}
 
-    entries: list[AgentFreshness] = []
-    for name in sorted(set(agent_names)):
+    entries_py: list[AgentFreshness] = []
+    for name in sorted(set(names)):
         stats = dispatch_counts.get(name)
         last_seen = str(stats["last_seen"]) if stats and stats.get("last_seen") else None
         days_since: int | None = None
@@ -195,7 +285,7 @@ def compute_agent_freshness(
             and not too_recent
             and (last_seen is None or (days_since is not None and days_since >= threshold_days))
         )
-        entries.append(
+        entries_py.append(
             AgentFreshness(
                 name=name,
                 last_seen=last_seen,
@@ -209,7 +299,7 @@ def compute_agent_freshness(
         threshold_days=threshold_days,
         judged=judged,
         journal_span_days=journal_span_days,
-        entries=tuple(entries),
+        entries=tuple(entries_py),
     )
 
 
@@ -362,9 +452,20 @@ class TraceLedger:
         (``started_at``) de la plus récente — exactement ce que l'issue #365
         pose comme critère d'arrêt (« combien de fois, et quand pour la
         dernière fois »).
+
+        Délègue à ``grimoire_traces_core.agent_dispatch_counts`` (issue
+        #354) quand le backend Rust est actif — voir :func:`_use_rust_backend`.
         """
+        traces = self._load_all()
+        if _use_rust_backend():
+            assert _rust_core is not None  # guarded by _use_rust_backend
+            records = [(t.agent_id, t.started_at, list(t.tags)) for t in traces]
+            return {
+                name: {"count": count, "last_seen": last_seen}
+                for name, count, last_seen in _rust_core.agent_dispatch_counts(records)
+            }
         counts: dict[str, dict[str, Any]] = {}
-        for trace in self._load_all():
+        for trace in traces:
             if AGENT_DISPATCH_TAG not in trace.tags or not trace.agent_id:
                 continue
             entry = counts.setdefault(trace.agent_id, {"count": 0, "last_seen": ""})
@@ -390,9 +491,20 @@ class TraceLedger:
         entre skill et agent sans jamais relire les traces lui-même. Ces deux
         champs s'ajoutent à la forme qu'``agent_dispatch_counts`` partage
         déjà — ils ne la remplacent pas.
+
+        Délègue à ``grimoire_traces_core.agent_miss_counts`` (issue #354)
+        quand le backend Rust est actif — voir :func:`_use_rust_backend`.
         """
+        traces = self._load_all()
+        if _use_rust_backend():
+            assert _rust_core is not None  # guarded by _use_rust_backend
+            records = [(t.agent_id, t.started_at, list(t.tags)) for t in traces]
+            return {
+                specialty: {"count": count, "last_seen": last_seen, "category": category, "fallback_agent": fallback}
+                for specialty, count, last_seen, category, fallback in _rust_core.agent_miss_counts(records)
+            }
         counts: dict[str, dict[str, Any]] = {}
-        for trace in self._load_all():
+        for trace in traces:
             if AGENT_MISS_TAG not in trace.tags:
                 continue
             specialty = _UNNAMED_SPECIALTY
@@ -420,8 +532,16 @@ class TraceLedger:
         agent choisi depuis N jours » d'« aucune donnée sur N jours »
         (issue #396). ``None`` quand le journal est vide ou absent, jamais
         une erreur.
+
+        Délègue à ``grimoire_traces_core.oldest_started_at`` (issue #354)
+        quand le backend Rust est actif — voir :func:`_use_rust_backend`.
         """
-        starts = [t.started_at for t in self._load_all() if t.started_at]
+        traces = self._load_all()
+        if _use_rust_backend():
+            assert _rust_core is not None  # guarded by _use_rust_backend
+            result = _rust_core.oldest_started_at([t.started_at for t in traces])
+            return str(result) if result is not None else None
+        starts = [t.started_at for t in traces if t.started_at]
         return min(starts) if starts else None
 
     def agent_freshness_report(

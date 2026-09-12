@@ -134,7 +134,7 @@ crates :
   `Private :: Do Not Upload` pour qu'un `maturin publish` accidentel soit
   refusé.
 
-Cinq crates existent à ce jour :
+Six crates existent à ce jour :
 
 | Crate | Module Python | Variable de bascule | Jobs CI |
 |---|---|---|---|
@@ -143,11 +143,12 @@ Cinq crates existent à ce jour :
 | `rust/grimoire-hosts-core/` | `grimoire.hosts.collect` (frontmatter, inférence d'outils) + `grimoire.hosts.surface` (empreinte de faisceau, garde de distinction) | `GRIMOIRE_HOSTS_BACKEND` | `.github/workflows/rust-cores.yml` (`rust-hosts / cargo`, `rust-hosts / parity`) |
 | `rust/grimoire-flows-core/` | `grimoire.flows.engine` (`check_output_against_contract`, node courant, `resume()`/`status()`) + `grimoire.runtime.kernel` (table de transitions, précondition de `advance_step`) | `GRIMOIRE_FLOWS_BACKEND` | `.github/workflows/rust-cores.yml` (`rust-flows / cargo`, `rust-flows / parity`) |
 | `rust/grimoire-dispatch-core/` | `grimoire.missions.dispatch` (chaîne de paliers, rendu d'invocation, analyse de sortie d'ouvrier, classification de revue, verdict de cascade) + `grimoire.providers.routing` (ordre et refroidissement des fournisseurs) | `GRIMOIRE_DISPATCH_BACKEND` | `.github/workflows/rust-cores.yml` (`rust-dispatch / cargo`, `rust-dispatch / parity`) |
+| `rust/grimoire-traces-core/` | `grimoire.traces.ledger` (agrégations du journal, `compute_agent_freshness`) + `grimoire.proposals` (nommage mécanique, résolution du porteur, décision de synchronisation d'une proposition) | `GRIMOIRE_TRACES_BACKEND` | `.github/workflows/rust-cores.yml` (`rust-traces / cargo`, `rust-traces / parity`) |
 
-Les cinq crates partagent le même workflow CI : `changes` détecte quel(s)
+Les six crates partagent le même workflow CI : `changes` détecte quel(s)
 crate(s) une PR ou un push touche et saute les jobs hors périmètre, et
 `rust-gate` — le check requis par la protection de `main` — agrège les
-dix jobs pour rendre `cargo fmt` et `cargo test` opposables sur toute PR,
+douze jobs pour rendre `cargo fmt` et `cargo test` opposables sur toute PR,
 pas seulement celles qui modifient `rust/`.
 
 ### Construire une extension localement
@@ -210,10 +211,20 @@ cd -
 pytest tests/unit/missions/test_dispatch.py tests/unit/test_providers.py tests/unit/test_dispatch_rust_parity.py
 ```
 
-Dans les cinq cas, les tests du module Python (`test_policies.py`,
+Pour `grimoire-traces-core` :
+
+```bash
+cd rust/grimoire-traces-core
+maturin develop --release
+cd -
+
+pytest tests/unit/test_traces.py tests/unit/test_proposals.py tests/unit/test_traces_rust_parity.py
+```
+
+Dans les six cas, les tests du module Python (`test_policies.py`,
 `test_schema.py`/`test_validator.py`, `test_hosts.py`,
-`test_flows_engine.py`/`test_runtime.py`,
-`test_dispatch.py`/`test_providers.py`) sont le contrat : ils tournent
+`test_flows_engine.py`/`test_runtime.py`, `test_dispatch.py`/`test_providers.py`,
+`test_traces.py`/`test_proposals.py`) sont le contrat : ils tournent
 sans modification que le module compilé soit présent ou non, et servent de
 golden test aux deux implémentations. Le fichier `*_rust_parity.py` compare
 explicitement les deux backends sur les mêmes entrées (variable
@@ -225,7 +236,7 @@ Pour du travail directement sur un crate (`cargo` seul, aucun interprète
 Python requis) :
 
 ```bash
-cd rust/grimoire-schema-core   # ou rust/grimoire-policies-core, rust/grimoire-hosts-core, rust/grimoire-flows-core, rust/grimoire-dispatch-core
+cd rust/grimoire-schema-core   # ou rust/grimoire-policies-core, rust/grimoire-hosts-core, rust/grimoire-flows-core, rust/grimoire-dispatch-core, rust/grimoire-traces-core
 cargo test --no-default-features   # logique pure, aucun interprète Python requis
 cargo fmt
 ```
