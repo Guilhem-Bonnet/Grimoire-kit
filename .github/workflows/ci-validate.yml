@@ -179,7 +179,7 @@ jobs:
     # rien apprendre. Celui-ci a tenu quarante minutes sur une invite
     # interactive de `grimoire-init.sh`, quand ubuntu finissait en secondes :
     # mieux vaut un échec net et rapide.
-    timeout-minutes: 30  # TEMP #231: mesure durees Windows, cf commentaire diagnostic
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -207,17 +207,6 @@ jobs:
       # dégradé et déclarerait vert un contrôle qui n'a pas eu lieu.
       - name: Install test deps
         run: pip install -e . pytest pyyaml jsonschema
-
-      # DIAGNOSTIC TEMPORAIRE (#231) -- a retirer avant fusion. Isole les
-      # tests de test_init_commands.py avec sortie verbeuse et durees, pour
-      # savoir si Windows echoue net ou est seulement lent (la suite complete
-      # a ete annulee a 15 min sans montrer le moindre F).
-      - name: "[TEMP #231] Diagnostic test_init_commands"
-        shell: bash
-        continue-on-error: true
-        run: |
-          python -m pytest tests/test_init_commands.py -v --tb=long --durations=0 \
-            2>&1 | tee init-commands-diag.txt
 
       - name: Run framework tests
         shell: bash

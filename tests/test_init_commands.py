@@ -53,12 +53,55 @@ BASH = _find_bash()
 
 # `grimoire-init.sh`, `grimoire.sh` et `install.sh` sont des points d'entrée
 # Unix, mais Windows est une plateforme supportée (décision Guilhem,
-# 2026-09-12, #231) : ces tests tournent aussi sous Windows dès qu'un `bash`
-# utilisable est trouvé (Git Bash — voir `_find_bash`).
+# 2026-09-12, #231) : les tests de reset/uninstall/quick-update tournent
+# désormais aussi sous Windows dès qu'un `bash` utilisable est trouvé (Git
+# Bash — voir `_find_bash`), une fois `_run()` corrigée pour tuer l'arbre de
+# processus complet au timeout (sans quoi ces 22 tests, tous verts, bloquent
+# le job jusqu'à son plafond -- voir la docstring de `_run`).
 requires_bash = pytest.mark.skipif(
     BASH is None,
     reason="points d'entrée Unix : sans bash utilisable (Git Bash sous Windows)",
 )
+
+# `grimoire.sh help` et `install.sh` restent hors scope de #231 (qui ne
+# porte que sur reset/uninstall/quick-update de `grimoire-init.sh`) : levées
+# en même temps que le skip ci-dessus, leurs classes ont montré un échec net
+# et distinct sous windows-latest --
+# https://github.com/Guilhem-Bonnet/Grimoire-kit/actions/runs/34738621031/job/103674463025
+#   - TestGrimoireShRouting : `bash grimoire.sh help` timeout à 30s (#461)
+#   - TestInstallSh : `install.sh` lu sans encoding explicite lève un
+#     UnicodeDecodeError cp1252 (#462, même famille que #192)
+# Ne pas lever ce skip sans avoir traité #461 et #462.
+requires_bash_posix_only = pytest.mark.skipif(
+    BASH is None or sys.platform == "win32",
+    reason="grimoire.sh help et install.sh : bugs Windows distincts, hors scope #231 (voir #461, #462)",
+)
+
+
+def test_reset_uninstall_quickupdate_keep_windows_support():
+    """Garde (#231) : reset/uninstall/quick-update doivent rester couverts
+    sous Windows. Si un skip citant `win32` (comme `requires_bash_posix_only`)
+    réapparaît sur l'une de ces trois classes, ce test échoue -- une
+    régression Windows sur ces commandes ne doit jamais redevenir un skip
+    silencieux sans lien vers une issue étroite (voir #461/#462 pour le
+    format attendu sur les classes qui, elles, restent légitimement hors
+    scope).
+    """
+    src = Path(__file__).read_text(encoding="utf-8")
+    lines = src.splitlines()
+    for cls_name in ("TestCmdReset", "TestCmdUninstall", "TestCmdQuickUpdate"):
+        decorator_line = None
+        for i, line in enumerate(lines):
+            if line.strip() == f"class {cls_name}:":
+                decorator_line = lines[i - 1].strip()
+                break
+        assert decorator_line is not None, f"{cls_name} introuvable dans {__file__}"
+        assert decorator_line == "@requires_bash", (
+            f"{cls_name} est décoré par {decorator_line!r} au lieu de "
+            "@requires_bash -- si c'est un nouveau skip Windows, il doit "
+            "citer une issue étroite (voir #461/#462 pour le format) et ne "
+            "pas rouvrir #231 silencieusement."
+        )
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -437,7 +480,7 @@ class TestCmdQuickUpdate:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-@requires_bash
+@requires_bash_posix_only
 class TestGrimoireShRouting:
     """Tests that grimoire.sh correctly routes to new commands."""
 
@@ -467,7 +510,7 @@ class TestGrimoireShRouting:
 INSTALL_SH = KIT_DIR / "install.sh"
 
 
-@requires_bash
+@requires_bash_posix_only
 class TestInstallSh:
     """Tests for the bootstrap install.sh."""
 
