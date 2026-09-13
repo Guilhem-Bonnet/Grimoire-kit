@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- fix(cli): sous Windows, `grimoire-init.sh reset`/`uninstall`/`quick-update` restaient non prouvés -- les seize (puis vingt-deux) tests correspondants etaient satures depuis #256 sans jamais avoir tourne verts. La vraie cause n'etait pas les commandes elles-memes (elles repondent en <1s une fois invoquees) mais le harnais de test : `subprocess.run(..., timeout=30)` tue bien le `bash` direct a l'expiration, puis redraine les tubes sans timeout -- si un petit-fils Windows (`cp.exe`, `mkdir.exe`...) tenait encore le tube stdout/stderr ouvert, ce second appel bloquait indefiniment le job jusqu'a son plafond. `_run()` tue desormais l'arbre de processus complet (`taskkill /T /F`) avant de redrainer. Les vingt-deux tests des trois commandes tournent et passent sous `windows-latest` (matrice restauree, job bloquant conserve) ; `grimoire.sh help` et `install.sh` restent hors scope avec leurs propres bugs Windows distincts (#461, #462) (#231).
+
 ## [3.46.1] - 2026-09-12
 
 - feat(cli): `grimoire init` et `grimoire up` enrôlaient chaque projet dans le registre cockpit réel (`~/.grimoire/cockpit/registry.json`), même les jetables (`/tmp`, un scratchpad, une recette) — seule la variable d'environnement non documentée `GRIMOIRE_NO_COCKPIT` pouvait l'éviter, et rien ne la mentionnait à côté des options des deux commandes. Ajoute `--no-cockpit` à `init` et à `up` (même effet que la variable, documentée au même endroit dans `--help`) (#305).
