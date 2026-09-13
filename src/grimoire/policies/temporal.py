@@ -134,6 +134,54 @@ def tool_pattern_matches(pattern: str, tool_name: str, detail: str = "") -> bool
     return glob_match(body, detail)
 
 
+#: Defect 2 of the 2026-09-12 session-budget incident (issue #463): a
+#: ``per_session`` rule in ``block`` used to have no way back — once its
+#: ceiling was reached it refused *every* matching tool, including the edit
+#: that would raise the ceiling and the reads needed to even see the
+#: problem. Scoped to ``per_session`` only, deliberately not
+#: ``cooldown_after``: a cooldown is a bounded-duration refusal (it clears
+#: itself after ``minutes``), never a standing block only an edit could
+#: lift. A write whose target is one of these two files is always let
+#: through: they are exactly the files a human or agent needs to touch to
+#: lift the block (see ``docs/hosts.md``, "Garde-fou de conception").
+#: Matched against ``tool_detail`` with :func:`glob_match` (a "contains"
+#: check via its own ``*`` handling), not the whole pattern language of
+#: :func:`tool_pattern_matches` — these are file targets, never tool names.
+_REPAIR_EXEMPT_DETAIL_PATTERNS: tuple[str, ...] = (
+    "*_grimoire/standard/policies.yaml*",
+    "*_grimoire-output/.runs/session-*.json*",
+)
+
+#: Exact wording mirrored byte-for-byte in
+#: ``rust/grimoire-policies-core/src/lib.rs`` — the Rust parity tests
+#: (``tests/unit/test_policies_rust_parity.py``) compare this string, not
+#: just the verdict.
+REPAIR_EXEMPTION_REASON = "Exemption de réparation : lecture seule ou fichier de politique/état de session"
+
+#: Appended to every budget-block reason so the refusal itself names its own
+#: way out — defect 4 of the same incident: a session stuck on its own
+#: budget had no hint that ``grimoire policies reset-session`` or editing
+#: ``per_session`` in the rules file existed.
+_BUDGET_REMEDY_SUFFIX = (
+    " ; `grimoire policies reset-session` ou relever `per_session` dans `_grimoire/standard/policies.yaml`"
+)
+
+
+def _is_repair_exempt(is_write: bool, tool_detail: str) -> bool:
+    """Whether this call must always be let through a ``block``-ing ``per_session`` budget.
+
+    True for any non-mutating call (``Read``/``Glob``/``Grep``, or — once
+    defect 1's fix in :mod:`grimoire.hosts.decisions.tool_facts` classifies
+    it correctly — a read-only ``Bash`` call like ``cat``/``grep``/``git
+    status``) and for a mutating call that targets the policy rule file or
+    the session-state file itself. Never for anything else: the exemption is
+    named and narrow, not a general escape hatch for a stuck session.
+    """
+    if not is_write:
+        return True
+    return any(glob_match(pattern, tool_detail) for pattern in _REPAIR_EXEMPT_DETAIL_PATTERNS)
+
+
 @dataclass(frozen=True, slots=True)
 class TemporalDecision:
     """What :func:`evaluate_temporal` hands back to ``tool_policy.py``."""
@@ -190,7 +238,11 @@ def _evaluate_one_rule(
     every branch except an already-active cooldown, so the window reflects
     calls that were actually attempted while it was cooling down too.
     """
-    # 1) Cooldown — the most immediate, rate-limit-shaped refusal.
+    # 1) Cooldown — the most immediate, rate-limit-shaped refusal. No repair
+    # exemption here: the incident and defect 2 (issue #463) are about
+    # `per_session`, not `cooldown_after` — a cooldown is a bounded-duration
+    # refusal (`minutes`), never a standing block only a `policies.yaml` edit
+    # could lift.
     cooldown = rule.cooldown_after
     if cooldown is not None and tool_pattern_matches(cooldown.pattern, tool_name, tool_detail):
         hits = _hits_in_window(rule_state.hits, now, cooldown.minutes)
@@ -203,32 +255,44 @@ def _evaluate_one_rule(
             )
 
     # 2) Per-session budgets — the ceiling already reached, not the one about to be.
+    # Defect 2 (issue #463): none of the four checks below ever refuses a call
+    # `_is_repair_exempt` clears first — see that function's docstring.
     budget = rule.per_session
     if budget is not None:
         if budget.max_tool_calls is not None and rule_state.calls >= budget.max_tool_calls:
+            if _is_repair_exempt(is_write, tool_detail):
+                return VerdictKind.ALLOW, REPAIR_EXEMPTION_REASON, False
             return (
                 VerdictKind.BLOCK,
-                f"Budget de {budget.max_tool_calls} appels d'outil atteint pour cette session",
+                f"Budget de {budget.max_tool_calls} appels d'outil atteint pour cette session"
+                f"{_BUDGET_REMEDY_SUFFIX}",
                 False,
             )
         if is_write and budget.max_writes is not None and rule_state.writes >= budget.max_writes:
+            if _is_repair_exempt(is_write, tool_detail):
+                return VerdictKind.ALLOW, REPAIR_EXEMPTION_REASON, False
             return (
                 VerdictKind.BLOCK,
-                f"Budget de {budget.max_writes} écritures atteint pour cette session",
+                f"Budget de {budget.max_writes} écritures atteint pour cette session{_BUDGET_REMEDY_SUFFIX}",
                 False,
             )
         if budget.max_cost_usd is not None and rule_state.cost_usd >= budget.max_cost_usd:
+            if _is_repair_exempt(is_write, tool_detail):
+                return VerdictKind.ALLOW, REPAIR_EXEMPTION_REASON, False
             return (
                 VerdictKind.BLOCK,
-                f"Budget de {budget.max_cost_usd:g} $ atteint pour cette session",
+                f"Budget de {budget.max_cost_usd:g} $ atteint pour cette session{_BUDGET_REMEDY_SUFFIX}",
                 False,
             )
         if budget.max_duration_min is not None:
             elapsed = _duration_minutes(session_started_at, now)
             if elapsed >= budget.max_duration_min:
+                if _is_repair_exempt(is_write, tool_detail):
+                    return VerdictKind.ALLOW, REPAIR_EXEMPTION_REASON, False
                 return (
                     VerdictKind.BLOCK,
-                    f"Fenêtre de {budget.max_duration_min:g} min dépassée pour cette session",
+                    f"Fenêtre de {budget.max_duration_min:g} min dépassée pour cette session"
+                    f"{_BUDGET_REMEDY_SUFFIX}",
                     False,
                 )
 

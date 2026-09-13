@@ -321,6 +321,38 @@ fn tool_pattern_matches(pattern: &str, tool_name: &str, detail: &str) -> bool {
     glob_match(body, detail)
 }
 
+/// Defaut 2 de l'incident de budget de session du 2026-09-12 (issue #463) :
+/// une regle `per_session`/`cooldown_after` en `block` n'atteint jamais un
+/// appel non-mutant (Read/Glob/Grep, ou un `Bash` classe lecture seule cote
+/// Python — voir `grimoire.hosts.decisions.tool_facts.is_read_only_command`)
+/// ni une ecriture qui cible le fichier de regles ou l'etat de session
+/// lui-meme : ce sont les deux seuls fichiers qui permettent de lever le
+/// blocage. Miroir exact de `grimoire.policies.temporal._is_repair_exempt` —
+/// meme motifs, meme comportement "contains" via `glob_match`.
+const REPAIR_EXEMPT_DETAIL_PATTERNS: [&str; 2] = [
+    "*_grimoire/standard/policies.yaml*",
+    "*_grimoire-output/.runs/session-*.json*",
+];
+
+/// Mot pour mot la meme chaine que `grimoire.policies.temporal.REPAIR_EXEMPTION_REASON`
+/// — les tests de parite comparent la chaine, pas seulement le verdict.
+const REPAIR_EXEMPTION_REASON: &str =
+    "Exemption de réparation : lecture seule ou fichier de politique/état de session";
+
+/// Ajoute au motif de refus d'un budget la commande qui le leve — meme
+/// chaine que `grimoire.policies.temporal._BUDGET_REMEDY_SUFFIX`.
+const BUDGET_REMEDY_SUFFIX: &str =
+    " ; `grimoire policies reset-session` ou relever `per_session` dans `_grimoire/standard/policies.yaml`";
+
+fn is_repair_exempt(is_write: bool, tool_detail: &str) -> bool {
+    if !is_write {
+        return true;
+    }
+    REPAIR_EXEMPT_DETAIL_PATTERNS
+        .iter()
+        .any(|pattern| glob_match(pattern, tool_detail))
+}
+
 /// Miroir de la partie temporelle de `grimoire.policies.schemas.PolicyRule` :
 /// `tool_pattern`, `require_approval`, `per_session` (aplati) et
 /// `cooldown_after` (aplati). Une regle sans aucune de ces contraintes
@@ -391,6 +423,10 @@ fn evaluate_one_temporal_rule(
     session_started_epoch_s: f64,
 ) -> (VerdictKind, String, bool) {
     // 1) Refroidissement — le refus le plus immediat, en forme de rate-limit.
+    // Pas d'exemption de reparation ici : l'incident et le defaut 2 (issue
+    // #463) portent sur `per_session`, pas sur `cooldown_after` — un
+    // refroidissement reste un refus a duree bornee (`minutes`), jamais un
+    // blocage permanent que seule une edition de `policies.yaml` leverait.
     if rule.has_cooldown() && tool_pattern_matches(&rule.cooldown_pattern, tool_name, tool_detail) {
         let hits = hits_in_window(&state.hits, now_epoch_s, rule.cooldown_minutes);
         if hits >= rule.cooldown_count {
@@ -406,11 +442,20 @@ fn evaluate_one_temporal_rule(
     }
 
     // 2) Budgets par session — le plafond deja atteint, pas celui sur le point de l'etre.
+    // Defaut 2 (issue #463) : aucun des quatre refus ci-dessous ne
+    // s'applique a un appel que `is_repair_exempt` blanchit d'abord.
     if let Some(max_calls) = rule.max_tool_calls {
         if state.calls >= max_calls {
+            if is_repair_exempt(is_write, tool_detail) {
+                return (
+                    VerdictKind::Allow,
+                    REPAIR_EXEMPTION_REASON.to_string(),
+                    false,
+                );
+            }
             return (
                 VerdictKind::Block,
-                format!("Budget de {max_calls} appels d'outil atteint pour cette session"),
+                format!("Budget de {max_calls} appels d'outil atteint pour cette session{BUDGET_REMEDY_SUFFIX}"),
                 false,
             );
         }
@@ -418,9 +463,16 @@ fn evaluate_one_temporal_rule(
     if is_write {
         if let Some(max_writes) = rule.max_writes {
             if state.writes >= max_writes {
+                if is_repair_exempt(is_write, tool_detail) {
+                    return (
+                        VerdictKind::Allow,
+                        REPAIR_EXEMPTION_REASON.to_string(),
+                        false,
+                    );
+                }
                 return (
                     VerdictKind::Block,
-                    format!("Budget de {max_writes} écritures atteint pour cette session"),
+                    format!("Budget de {max_writes} écritures atteint pour cette session{BUDGET_REMEDY_SUFFIX}"),
                     false,
                 );
             }
@@ -428,9 +480,16 @@ fn evaluate_one_temporal_rule(
     }
     if let Some(max_cost) = rule.max_cost_usd {
         if state.cost_usd >= max_cost {
+            if is_repair_exempt(is_write, tool_detail) {
+                return (
+                    VerdictKind::Allow,
+                    REPAIR_EXEMPTION_REASON.to_string(),
+                    false,
+                );
+            }
             return (
                 VerdictKind::Block,
-                format!("Budget de {max_cost} $ atteint pour cette session"),
+                format!("Budget de {max_cost} $ atteint pour cette session{BUDGET_REMEDY_SUFFIX}"),
                 false,
             );
         }
@@ -438,9 +497,16 @@ fn evaluate_one_temporal_rule(
     if let Some(max_duration) = rule.max_duration_min {
         let elapsed_min = ((now_epoch_s - session_started_epoch_s).max(0.0)) / 60.0;
         if elapsed_min >= max_duration {
+            if is_repair_exempt(is_write, tool_detail) {
+                return (
+                    VerdictKind::Allow,
+                    REPAIR_EXEMPTION_REASON.to_string(),
+                    false,
+                );
+            }
             return (
                 VerdictKind::Block,
-                format!("Fenêtre de {max_duration} min dépassée pour cette session"),
+                format!("Fenêtre de {max_duration} min dépassée pour cette session{BUDGET_REMEDY_SUFFIX}"),
                 false,
             );
         }
@@ -1249,8 +1315,12 @@ mod temporal_tests {
             estimated_cost_usd: 0.0,
         }];
         let states = vec![empty_state("short-session")];
-        // 6 minutes (360s) after session start > 5 min budget.
-        let result = evaluate_temporal_core(&rules, states, "Bash", "", false, 360.0, 0.0);
+        // 6 minutes (360s) after session start > 5 min budget. `is_write =
+        // true` (a real mutation): defect 2 (issue #463) exempts a
+        // non-mutating call from every `per_session` dimension, this one
+        // included — see `read_only_call_is_never_blocked_...` below for
+        // that side of the behaviour.
+        let result = evaluate_temporal_core(&rules, states, "Write", "", true, 360.0, 0.0);
         assert_eq!(result.verdict, VerdictKind::Block);
         assert!(result.reason.contains("Fenêtre"));
     }
@@ -1264,5 +1334,81 @@ mod temporal_tests {
         let result = evaluate_temporal_core(&r, states, "Bash", "", true, 0.0, 0.0);
         assert_eq!(result.verdict, VerdictKind::Allow);
         assert_eq!(result.states[0].1.writes, 0);
+    }
+
+    // ── Defaut 2 : exemption de reparation (incident du 2026-09-12, issue #463) ──
+
+    #[test]
+    fn read_only_call_is_never_blocked_by_an_exhausted_call_budget() {
+        // The real incident (issue #463): `max_tool_calls` counts every call,
+        // reads included, and has no `is_write` gate — so once its ceiling
+        // is reached, a plain `Read` must still be exempt rather than
+        // joining the refusal it did in production.
+        let rules = vec![budget_rule("calls-cap", None, Some(1))];
+        let mut states = vec![empty_state("calls-cap")];
+        let first = evaluate_temporal_core(&rules, states, "Read", "", false, 0.0, 0.0);
+        assert_eq!(first.verdict, VerdictKind::Allow);
+        states = first.states; // calls == 1, ceiling reached
+        let second = evaluate_temporal_core(&rules, states, "Read", "", false, 0.0, 0.0);
+        assert_eq!(second.verdict, VerdictKind::Allow);
+        // The top-level `reason` only surfaces for a verdict whose severity
+        // exceeds `Allow`'s (see `evaluate_temporal_core`) — the exemption's
+        // own reason lives in `matched`, exactly like Python's
+        // `TemporalDecision.matched_rules` (an allowed call can still carry
+        // a non-empty per-rule reason).
+        assert_eq!(second.matched.len(), 1);
+        assert_eq!(
+            second.matched[0].reason,
+            REPAIR_EXEMPTION_REASON.to_string()
+        );
+    }
+
+    #[test]
+    fn edit_of_the_policy_rules_file_is_exempt_even_at_the_write_budget() {
+        let rules = vec![budget_rule("writes-cap", Some(1), None)];
+        let mut states = vec![empty_state("writes-cap")];
+        let first = evaluate_temporal_core(
+            &rules,
+            states,
+            "Write",
+            "_grimoire/standard/policies.yaml",
+            true,
+            0.0,
+            0.0,
+        );
+        assert_eq!(first.verdict, VerdictKind::Allow);
+        states = first.states;
+        // The budget is now exhausted (1/1) — a normal write is refused...
+        let blocked =
+            evaluate_temporal_core(&rules, states.clone(), "Write", "other.txt", true, 0.0, 0.0);
+        assert_eq!(blocked.verdict, VerdictKind::Block);
+        assert!(blocked.reason.contains("grimoire policies reset-session"));
+        // ...but editing the rules file itself is always let through.
+        let repair = evaluate_temporal_core(
+            &rules,
+            states,
+            "Edit",
+            "_grimoire/standard/policies.yaml",
+            true,
+            0.0,
+            0.0,
+        );
+        assert_eq!(repair.verdict, VerdictKind::Allow);
+        assert_eq!(repair.matched.len(), 1);
+        assert_eq!(
+            repair.matched[0].reason,
+            REPAIR_EXEMPTION_REASON.to_string()
+        );
+    }
+
+    #[test]
+    fn unrelated_write_is_not_exempt() {
+        assert!(!is_repair_exempt(true, "some/other/file.txt"));
+        assert!(is_repair_exempt(true, "_grimoire/standard/policies.yaml"));
+        assert!(is_repair_exempt(
+            true,
+            "_grimoire-output/.runs/session-abc123.json"
+        ));
+        assert!(is_repair_exempt(false, ""));
     }
 }
