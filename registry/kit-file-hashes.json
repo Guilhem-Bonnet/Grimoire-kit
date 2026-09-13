@@ -1,6 +1,6 @@
 {
  "schema": "grimoire-kit-file-hashes/v1",
- "generated_for": "3.47.0",
+ "generated_for": "3.48.0",
  "digests": {
   "002d1e68ce00769ee09d1e94f4af260b952837f7d1557080c2fd505216c23ac0": {
    "version": "3.11.2",
@@ -442,6 +442,10 @@
    "version": "3.36.0",
    "path": "framework/tools/llm-router.py"
   },
+  "21eda3591fc0811057a22108cc79cb1d7e7ab4c620dfecac4f9630a9922c48ad": {
+   "version": "3.48.0",
+   "path": "framework/tools/memory-sync.py"
+  },
   "2211ea3bd8e00b70fa39db7206b04fc1734c5c751a7478fee922b0a86cabbd84": {
    "version": "3.32.0",
    "path": "archetypes/meta/agents/art-director.md"
@@ -537,6 +541,10 @@
   "27354d4f5aefb6c17d95f069e35540b3d9f32c4af4146d09d9f01ab5e22c1519": {
    "version": "3.21.1",
    "path": "framework/tools/rosetta.py"
+  },
+  "27463f6f3c18d559d10be7c9ca23f039408baace919a66a2e75ff5739fbd510c": {
+   "version": "3.48.0",
+   "path": "framework/tools/rag-indexer.py"
   },
   "279932c5eebac62368c2460c8649c6ffc6c7ca6388ea0105685e007413c5df86": {
    "version": "3.36.0",
@@ -1370,6 +1378,10 @@
    "version": "3.5.0",
    "path": "framework/agentic-standard/templates/observability-policy.yaml"
   },
+  "666a61ab90069e44c8b6ea6a8478cd55c1fb0326c3039403eb81dbe59b7936c5": {
+   "version": "3.48.0",
+   "path": "framework/tools/rag-retriever.py"
+  },
   "6675695defd1d0c00a2ed6f6aaf28e25f68e6c42f86ed530472e112ae7fef2f0": {
    "version": "3.21.1",
    "path": "framework/tools/immune-system.py"
@@ -1821,6 +1833,10 @@
   "84ac0ae59052f264e57b5c7e1bdfc0d752b531a0ec4c6ea4a1dd46ad46c34d12": {
    "version": "3.42.0",
    "path": "archetypes/stack/skills/stack-python.md"
+  },
+  "851a6dcaffc0258b245dee122d91077c8b77175bd779ad8db55d2633d8409b85": {
+   "version": "3.48.0",
+   "path": "framework/tools/stigmergy_hooks/scripts/stigmergy_hook.py"
   },
   "8526c4a3316db2385ed616bc12770bf481115fb304c91061647f7748c3ffd9bc": {
    "version": "3.4.2",
@@ -2342,6 +2358,10 @@
    "version": "3.12.0",
    "path": "archetypes/stack/agents/go-expert.dna.yaml"
   },
+  "a7a2cbae89c11b0f5dd78260742d3cb057c9fd6857731953baef97d3233ec42f": {
+   "version": "3.48.0",
+   "path": "framework/tools/stigmergy.py"
+  },
   "a7beb2367eb7c25620ee0518a858dfeb9b64ae85dd1e81c09251525358ac5068": {
    "version": "3.21.1",
    "path": "framework/tools/early-warning.py"
@@ -2453,6 +2473,10 @@
   "af3d871aa6b8dd0de086c835cd896854143b3556069400bf3da34dcb67004883": {
    "version": "3.34.0",
    "path": "framework/agentic-standard/templates/rule-packs.yaml"
+  },
+  "af91845a685002d61ca849bda086175e3e3e22c63b8ec1b818a0b523b6c17434": {
+   "version": "3.48.0",
+   "path": "framework/tools/context-summarizer.py"
   },
   "afa4fbcb1c17a16a50aaeb2459c2c414a5763c25386b781ddec4c699bbc03593": {
    "version": "3.42.0",
@@ -3481,6 +3505,10 @@
   "f05c40af20b9f5a4b573c5ad51b4c6f08caa41b5a516541aa1745495453ca124": {
    "version": "3.4.2",
    "path": "framework/tools/quantum-branch.py"
+  },
+  "f089a1bd69f338c6a9193f5c0d429b7f68a48de3e67fd77638e8945228a9ff18": {
+   "version": "3.48.0",
+   "path": "framework/tools/tool-registry.py"
   },
   "f0b87ec73514e53b459effb6f9541b00f1a76ee189e3bc443b5921e4eab6ac26": {
    "version": "3.36.0",
