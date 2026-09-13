@@ -448,6 +448,44 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
                 return
             self._send_json(200, result)
             return
+        if path == "/api/projects/create":
+            # « Nouveau projet » depuis le portefeuille (issue #172, volet
+            # création) : contrairement à `/api/setup` ci-dessus, la cible
+            # n'est PAS forcément le projet de lancement (`_HOME_SLUG`) — le
+            # chemin choisi est explicite dans le corps de la requête, comme
+            # `/api/projects/add`. Ce n'est pas pour autant une écriture
+            # libre : le chemin doit tomber sous une racine permise
+            # (`resolve_within_allowed`, même garde que `add`/`scan`), et un
+            # dossier qui EST DÉJÀ un projet est refusé — cette route donne
+            # naissance à un projet, elle n'en mute jamais un existant que
+            # l'utilisateur ne fait que regarder.
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                body = json.loads(self.rfile.read(length) or b"{}") if length else {}
+            except (ValueError, json.JSONDecodeError):
+                self._send_json(400, {"ok": False, "error": "bad json"})
+                return
+            try:
+                target = resolve_within_allowed(str(body.get("path", "")))
+            except PermissionError as exc:
+                self._send_json(403, {"ok": False, "error": str(exc)})
+                return
+            if looks_grimoire(target):
+                self._send_json(
+                    409,
+                    {"ok": False, "error": f"un projet existe déjà à {target} — ouvrez-le plutôt"},
+                )
+                return
+            try:
+                result = _project_api(target).setup_plan(body)
+            except ValueError as exc:
+                self._send_json(400, {"ok": False, "error": str(exc)})
+                return
+            except (OSError, PermissionError) as exc:
+                self._send_json(403, {"ok": False, "error": str(exc)})
+                return
+            self._send_json(200, {**result, "slug": slug_for_path(target), "path": str(target)})
+            return
         if path.startswith(WORKSPACE_PREFIX):
             # Écritures de la vue de travail (réclamer/réaliser une tâche,
             # écrire un fichier, créer un override, lancer une commande) :
