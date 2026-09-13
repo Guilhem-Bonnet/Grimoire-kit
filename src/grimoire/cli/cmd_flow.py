@@ -35,6 +35,7 @@ from grimoire.flows.dispatch_executor import (
 )
 from grimoire.flows.engine import FlowEngine
 from grimoire.flows.executor import InteractiveNodeExecutor
+from grimoire.flows.extract import extract_blueprint
 from grimoire.flows.schemas import FlowStatusView, ResumeOutcome
 from grimoire.missions.dispatch import DEFAULT_CALL_TIMEOUT_S
 from grimoire.providers.registry import SUPPORTED_MODEL_TIERS
@@ -403,3 +404,58 @@ def flow_abort(
         _fail(ctx, exc)
         return
     _emit_instance(ctx, wfi, "abandonné")
+
+
+@flow_app.command("extract")
+def flow_extract(
+    ctx: typer.Context,
+    run_id: Annotated[str, typer.Argument(help="Identifiant du run (WFI-...) à extraire.")],
+    out: Annotated[
+        Path | None, typer.Option("--out", help="Fichier de sortie. Omis : <blueprint-id>-extract.blueprint.json.")
+    ] = None,
+    project_root: _PROJECT_ROOT = Path(),
+) -> None:
+    """Extrait un blueprint brouillon de la séquence réellement exécutée par *run_id* (issue #210).
+
+    Un run incomplet ou abandonné s'extrait aussi : les nodes non atteints
+    gardent leur acceptance d'origine, marqués ``not_reached``. Rien de ce
+    qui n'a pas été observé n'est inventé — voir ``grimoire.flows.extract``.
+    """
+    root = project_root.resolve()
+    engine = _engine(root)
+    try:
+        draft, trace = extract_blueprint(engine, run_id, root)
+    except GrimoireRuntimeError as exc:
+        _fail(ctx, exc)
+        return
+
+    out_path = out or root / f"{draft['id']}.blueprint.json"
+    out_path.write_text(json.dumps(draft, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    if _fmt(ctx) == "json":
+        typer.echo(
+            json.dumps(
+                {
+                    "out": str(out_path),
+                    "blueprint_id": draft["id"],
+                    "nodes": [
+                        {
+                            "node_id": n.node_id,
+                            "status": n.status,
+                            "verifiability": n.verifiability,
+                            "needs_inferred": list(n.needs_inferred),
+                        }
+                        for n in trace
+                    ],
+                },
+                indent=2,
+                ensure_ascii=False,
+            )
+        )
+        return
+
+    console.print(f"[green]OK[/green] brouillon écrit : {out_path}")
+    for n in trace:
+        extra = f" — besoins inférés : {', '.join(n.needs_inferred)}" if n.needs_inferred else ""
+        verif = f" [{n.verifiability}]" if n.verifiability else ""
+        console.print(f"  {n.node_id}{verif} : {n.status}{extra}")

@@ -686,11 +686,36 @@ seconde sortie, il ne retire rien.
 | `grimoire flow status <run-id>` | État du run : node courant, nodes faits, dernier refus, contrat courant |
 | `grimoire flow resume <run-id> --result <fichier>` | Vérifier la sortie du node courant contre son contrat ; avance ou suspend |
 | `grimoire flow abort <run-id> [--reason]` | Abandonner un run — terminal, jamais repris |
+| `grimoire flow extract <run-id> [--out <fichier>]` | Extraire un blueprint brouillon de la séquence réellement exécutée par ce run |
 
 Un checkpoint par node : un run interrompu reprend exactement au node
 courant, jamais du début. Une sortie non conforme au contrat de sortie du
 node **suspend** le run en nommant le node et la pin fautifs, avec un code de
 sortie non nul — jamais un échec muet.
+
+#### `flow extract` — un flow s'extrait d'un run, il ne se dessine pas (#210)
+
+Créer un flow devient éditer quelque chose qui a déjà fonctionné plutôt que
+partir d'un canevas vide. `grimoire flow extract <run-id>` joint les
+métadonnées du run (ordre topologique, blueprint source) au Mission Ledger
+(commande réellement exécutée par node, via `--executor dispatch`) pour
+produire un blueprint brouillon dans le même format `.blueprint.json` — texte
+d'abord, lisible et diffable, que le Studio peut ensuite éditer.
+
+Par node, trois choses observées, jamais devinées : l'acceptance déclarée
+d'un node **complété** par la cascade est remplacée par la commande
+réellement exécutée (`{"run": "..."}`), réinférée en `{"run_need": "..."}`
+quand elle correspond caractère pour caractère à un besoin résolu pour ce
+projet (issue #205) ; un node **jamais dispatché** (classe V2, ou exécuté par
+un hôte interactif sans passer par la cascade) garde son acceptance d'origine
+verbatim ; un node **jamais atteint** (run incomplet ou abandonné) est marqué
+`not_reached`, sans qu'aucune commande n'y soit inventée. Chaque node du
+brouillon porte un objet `"extraction"` (`status`, et `note` sur un refus)
+qui dit lequel de ces trois cas s'est produit.
+
+Le brouillon extrait est rejouable : `flow run`/`resume` le chargent comme
+n'importe quel blueprint, et reproduisent la même séquence de nodes que le
+run source sur le même projet.
 
 #### `--executor dispatch` — la cascade par classe de vérifiabilité (#311)
 
