@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- feat(cockpit): le wizard de setup (espace Piloter) exécute réellement le projet au lieu d'écrire une commande à copier-coller — `POST /api/setup` appelle `grimoire up` en direct (`cmd_up.run_up_pipeline`, jamais un sous-processus), needs transmis (B3 rebranché sur B2, `GET /api/needs`), refus fail-closed avant toute écriture (archétype/backend/need inconnu, chemin non inscriptible), rapport d'exécution persistant (`_grimoire/setup-run.json`, doctor compris) affiché dans la fiche projet. `_select_cwd_project` honore désormais un `--project-root` explicite même sur un dossier vierge (sans quoi aucune écriture n'était jamais possible sur le cas que l'issue décrit) ; le mode « copier-coller la commande » reste un repli explicite (#171).
+
 ## [3.46.1] - 2026-09-12
 
 - feat(cli): `grimoire init` et `grimoire up` enrôlaient chaque projet dans le registre cockpit réel (`~/.grimoire/cockpit/registry.json`), même les jetables (`/tmp`, un scratchpad, une recette) — seule la variable d'environnement non documentée `GRIMOIRE_NO_COCKPIT` pouvait l'éviter, et rien ne la mentionnait à côté des options des deux commandes. Ajoute `--no-cockpit` à `init` et à `up` (même effet que la variable, documentée au même endroit dans `--help`) (#305).

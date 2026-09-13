@@ -252,8 +252,13 @@ class TestExtensionsAndPlan:
         assert view["installed"] == {}
 
     def test_setup_plan_installs_and_writes_plan(self, project_root: Path, kit_with_extension: Path) -> None:
+        # planOnly=True : le repli « copier-coller » (build_setup_plan), pas
+        # l'exécution réelle (issue #171, testée séparément dans
+        # test_project_setup.py::TestExecuteSetupPlan).
         api = ForgeAPI(project_root, kit_with_extension, ui_dir=None)
-        plan = api.setup_plan({"name": "p", "user": "u", "archetype": "minimal", "extensions": ["demo-ext"]})
+        plan = api.setup_plan(
+            {"name": "p", "user": "u", "archetype": "minimal", "extensions": ["demo-ext"], "planOnly": True}
+        )
         assert plan["extensionsInstalled"] == ["demo-ext v0.1.0"]
         assert plan["extensionErrors"] == []
         # B2 : le plan compile vers le parcours moderne, plus jamais le legacy.
@@ -266,7 +271,7 @@ class TestExtensionsAndPlan:
 
     def test_setup_plan_reports_extension_errors(self, project_root: Path, kit_root: Path) -> None:
         api = ForgeAPI(project_root, kit_root, ui_dir=None)
-        plan = api.setup_plan({"extensions": ["ghost"]})
+        plan = api.setup_plan({"extensions": ["ghost"], "planOnly": True})
         assert plan["extensionsInstalled"] == []
         assert len(plan["extensionErrors"]) == 1
 
@@ -1026,31 +1031,31 @@ class TestMemoryLinkAndModernSetup:
         assert st["resolvedBackend"] == "local"
 
     def test_setup_plan_includes_backend_and_modern_command(self, api: ForgeAPI) -> None:
-        plan = api.setup_plan({"name": "p", "user": "u", "archetype": "minimal", "backend": "lexical"})
+        plan = api.setup_plan({"name": "p", "user": "u", "archetype": "minimal", "backend": "lexical", "planOnly": True})
         assert plan["backend"] == "lexical"
         assert "--backend lexical" in plan["initCommand"]
         assert plan["initCommand"].startswith("grimoire up ")
 
     def test_setup_plan_rejects_unknown_backend(self, api: ForgeAPI) -> None:
         with pytest.raises(ValueError, match="backend mémoire inconnu"):
-            api.setup_plan({"name": "p", "backend": "postgres"})
+            api.setup_plan({"name": "p", "backend": "postgres", "planOnly": True})
 
 
 class TestSetupPlanRobustness:
     """Payloads clients hostiles sur build_setup_plan (cas non pris en charge)."""
 
     def test_needs_null_does_not_crash(self, api: ForgeAPI) -> None:
-        plan = api.setup_plan({"name": "p", "backend": "auto", "needs": None})
+        plan = api.setup_plan({"name": "p", "backend": "auto", "needs": None, "planOnly": True})
         assert plan["needs"] == []
 
     def test_extensions_string_is_not_iterated_char_by_char(self, api: ForgeAPI) -> None:
         # "demo" ne doit PAS déclencher l'installation de d/e/m/o.
-        plan = api.setup_plan({"name": "p", "backend": "auto", "extensions": "demo"})
+        plan = api.setup_plan({"name": "p", "backend": "auto", "extensions": "demo", "planOnly": True})
         assert plan["extensionsInstalled"] == []
         assert plan["extensionErrors"] == []
 
     def test_none_name_and_user_are_coerced(self, api: ForgeAPI) -> None:
-        plan = api.setup_plan({"name": None, "user": None, "backend": "auto"})
+        plan = api.setup_plan({"name": None, "user": None, "backend": "auto", "planOnly": True})
         assert plan["name"] == "" and plan["user"] == ""
         assert '--name "None"' not in plan["initCommand"]
         assert '--name ""' in plan["initCommand"]
