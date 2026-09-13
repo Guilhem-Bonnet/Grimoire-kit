@@ -105,7 +105,7 @@ _VALID_HOST_ALIASES = frozenset({"claude", "copilot", "codex", "cursor", "gemini
 
 # Known keys per section for unknown-key detection
 _KNOWN_TOP_KEYS = frozenset({
-    "project", "user", "memory", "agents", "hosts", "installed_archetypes", "proposals", "source",
+    "project", "user", "memory", "agents", "hosts", "needs", "installed_archetypes", "proposals", "source",
 })
 
 _KNOWN_PROJECT_KEYS = frozenset({
@@ -134,6 +134,14 @@ _KNOWN_HOSTS_KEYS = frozenset({
     "enabled",
 })
 
+_VALID_EXECUTION_NEED_IDS = frozenset({
+    "test-runner", "lint", "typecheck", "build", "migration-tool", "format",
+})
+
+_KNOWN_NEEDS_KEYS = frozenset({
+    "commands",
+})
+
 _KNOWN_PROPOSALS_KEYS = frozenset({
     "threshold",
 })
@@ -159,6 +167,7 @@ _KEYSETS: dict[str, frozenset[str]] = {
     "memory": _KNOWN_MEMORY_KEYS,
     "agents": _KNOWN_AGENTS_KEYS,
     "hosts": _KNOWN_HOSTS_KEYS,
+    "needs": _KNOWN_NEEDS_KEYS,
     "proposals": _KNOWN_PROPOSALS_KEYS,
     "source": _KNOWN_SOURCE_KEYS,
     "source.assist": _KNOWN_SOURCE_ASSIST_KEYS,
@@ -325,6 +334,9 @@ def _validate_config_python(
 
     if "hosts" in data:
         _validate_hosts(data["hosts"], errors)
+
+    if "needs" in data:
+        _validate_needs(data["needs"], errors)
 
     if "installed_archetypes" in data:
         _validate_installed_archetypes(data["installed_archetypes"], errors)
@@ -567,6 +579,42 @@ def _validate_hosts(section: Any, errors: list[ValidationError]) -> None:
                     seen.add(host_id)
 
     _check_unknown_keys(section, _KNOWN_HOSTS_KEYS, "hosts", errors)
+
+
+def _validate_needs(section: Any, errors: list[ValidationError]) -> None:
+    """``needs.commands`` — issue #205, lot 2. Lie un besoin d'exécution du
+    catalogue (``test-runner``, ``lint``...) à la commande réelle du projet ;
+    absent, le besoin retombe sur la détection par marqueurs (voir
+    :mod:`grimoire.core.execution_needs`)."""
+    if not isinstance(section, dict):
+        errors.append(ValidationError(
+            path="needs",
+            message="'needs' must be a mapping.",
+        ))
+        return
+
+    commands = section.get("commands")
+    if commands is not None:
+        if not isinstance(commands, dict):
+            errors.append(ValidationError(
+                path="needs.commands",
+                message="'needs.commands' must be a mapping of need id to command.",
+            ))
+        else:
+            for need_id, command in commands.items():
+                if need_id not in _VALID_EXECUTION_NEED_IDS:
+                    errors.append(ValidationError(
+                        path=f"needs.commands.{need_id}",
+                        message=f"Unknown need id '{need_id}'.",
+                        suggestion=f"Valid needs: {', '.join(sorted(_VALID_EXECUTION_NEED_IDS))}",
+                    ))
+                elif not isinstance(command, str) or not command.strip():
+                    errors.append(ValidationError(
+                        path=f"needs.commands.{need_id}",
+                        message=f"'needs.commands.{need_id}' must be a non-empty string.",
+                    ))
+
+    _check_unknown_keys(section, _KNOWN_NEEDS_KEYS, "needs", errors)
 
 
 def _validate_proposals(section: Any, errors: list[ValidationError]) -> None:

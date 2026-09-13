@@ -163,12 +163,18 @@ class FlowEngine:
         flows_root: Path,
         actor_id: str = "cli",
         host_id: str = "local",
+        project_root: Path = Path(),
     ) -> None:
         self._kernel = RuntimeKernel(kernel_root)
         self._flows_root = flows_root
         self._flows_root.mkdir(parents=True, exist_ok=True)
         self._actor_id = actor_id
         self._host_id = host_id
+        #: Racine du projet exécuté (issue #205) — nécessaire pour résoudre une
+        #: acceptance ``run_need`` au chargement du blueprint. Défaut au
+        #: répertoire courant : sans effet sur un blueprint qui n'en déclare
+        #: aucune, ce qui couvre tout le corpus antérieur à cette issue.
+        self._project_root = project_root
 
     # ── Persistance des métadonnées de run ──────────────────────────────────
 
@@ -309,7 +315,7 @@ class FlowEngine:
         order = topo_order(blueprint)
         if not order:
             raise GrimoireRuntimeError(f"{blueprint_path} : aucun node à exécuter")
-        contracts = build_node_contracts(blueprint)
+        contracts = build_node_contracts(blueprint, self._project_root)
         blueprint_id = blueprint["id"]
 
         ctx = ExecutionContext(
@@ -350,7 +356,7 @@ class FlowEngine:
             raise GrimoireRuntimeError(f"run {run_id} est {wfi.status.value}, rien à reprendre")
 
         order = list(meta.order)
-        contracts = build_node_contracts(load_blueprint(Path(meta.blueprint_path)))
+        contracts = build_node_contracts(load_blueprint(Path(meta.blueprint_path)), self._project_root)
         current_id = self._current_node(wfi, order)
         if current_id is None or current_id not in contracts:
             raise GrimoireRuntimeError(f"run {run_id} : aucun node courant résoluble (status={wfi.status.value})")
@@ -455,7 +461,7 @@ class FlowEngine:
 
         contract = None
         if include_contract and current_id is not None:
-            contract = build_node_contracts(load_blueprint(Path(meta.blueprint_path))).get(current_id)
+            contract = build_node_contracts(load_blueprint(Path(meta.blueprint_path)), self._project_root).get(current_id)
         return FlowStatusView(
             run_id=wfi.id,
             blueprint_id=meta.blueprint_id,

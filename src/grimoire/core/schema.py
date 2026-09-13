@@ -50,6 +50,7 @@ _KNOWN_ARCHETYPES = sorted([
     "infra-ops", "meta", "stack", "features", "platform-engineering",
 ])
 _VALID_HOST_ALIASES = sorted(["claude", "copilot", "codex", "cursor", "gemini"])
+_VALID_EXECUTION_NEED_IDS = sorted(["test-runner", "lint", "typecheck", "build", "migration-tool", "format"])
 
 
 def rust_backend_available() -> bool:
@@ -110,6 +111,7 @@ def _generate_schema_python() -> dict[str, Any]:
             "memory": _memory_schema(),
             "agents": _agents_schema(),
             "hosts": _hosts_schema(),
+            "needs": _needs_schema(),
             "proposals": _proposals_schema(),
             "source": _source_schema(),
             "installed_archetypes": {
@@ -345,6 +347,27 @@ def _hosts_schema() -> dict[str, Any]:
                 "items": {"type": "string", "enum": _VALID_HOST_ALIASES},
                 "uniqueItems": True,
                 "description": "Subset of known hosts this project emits files for.",
+            },
+        },
+    }
+
+
+def _needs_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "description": (
+            "Declares execution needs (issue #205): a flow node's structured "
+            "acceptance can reference a need id (`run_need`) instead of a "
+            "hardcoded command. Absent key: the need falls back to project-marker "
+            "detection (see `grimoire.core.execution_needs`), or stays unresolved."
+        ),
+        "additionalProperties": False,
+        "properties": {
+            "commands": {
+                "type": "object",
+                "description": "Need id -> the project's real command for it.",
+                "additionalProperties": False,
+                "properties": {need_id: {"type": "string", "minLength": 1} for need_id in _VALID_EXECUTION_NEED_IDS},
             },
         },
     }

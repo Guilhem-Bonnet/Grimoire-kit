@@ -148,7 +148,7 @@
         },
         "acceptance": {
           "type": "array",
-          "description": "Acceptance criteria (issue #428). Each item is either a free-text string (drives `verifiability.classify` only — the gate never executes it) or a structured, executable entry: `{run, expect_exit?, cwd?, timeout_s?, expect_stdout_contains?}` (a command whose exit code is the verdict) or `{path_exists}` / `{test}` (mechanical evidence). `grimoire.flows.blueprint_loader` is the enforcing validator — an unknown or ambiguous structured shape is a named `GrimoireRuntimeError` at load time, not a schema-level rejection here (this file stays permissive by design: `additionalProperties: true`).",
+          "description": "Acceptance criteria (issue #428). Each item is either a free-text string (drives `verifiability.classify` only — the gate never executes it) or a structured, executable entry: `{run, expect_exit?, cwd?, timeout_s?, expect_stdout_contains?}` (a command whose exit code is the verdict), `{run_need, args?, expect_exit?, cwd?, timeout_s?, expect_stdout_contains?}` (issue #205 — a need id from the execution-needs catalogue, resolved to the project's real command at load time instead of a hardcoded command), or `{path_exists}` / `{test}` (mechanical evidence). `grimoire.flows.blueprint_loader` is the enforcing validator — an unknown or ambiguous structured shape, or a `run_need` that cannot be resolved for this project, is a named `GrimoireRuntimeError` at load time, not a schema-level rejection here (this file stays permissive by design: `additionalProperties: true`).",
           "items": {
             "anyOf": [
               { "type": "string" },
@@ -157,6 +157,19 @@
                 "required": ["run"],
                 "properties": {
                   "run": { "type": "string", "description": "Shell command; its exit code is the verdict." },
+                  "expect_exit": { "type": "integer", "default": 0 },
+                  "cwd": { "type": "string", "default": "." },
+                  "timeout_s": { "type": "number", "exclusiveMinimum": 0, "default": 120 },
+                  "expect_stdout_contains": { "type": "string" }
+                },
+                "additionalProperties": true
+              },
+              {
+                "type": "object",
+                "required": ["run_need"],
+                "properties": {
+                  "run_need": { "type": "string", "description": "Execution need id (e.g. `test-runner`), resolved to the project's real command — see `grimoire.core.execution_needs`." },
+                  "args": { "type": "string", "description": "Extra arguments appended to the resolved command." },
                   "expect_exit": { "type": "integer", "default": 0 },
                   "cwd": { "type": "string", "default": "." },
                   "timeout_s": { "type": "number", "exclusiveMinimum": 0, "default": 120 },

@@ -54,6 +54,17 @@ class TestGenerateSchema:
         assert enabled["items"]["enum"] == ["claude", "codex", "copilot", "cursor", "gemini"]
         assert enabled["uniqueItems"] is True
 
+    def test_has_needs_property(self) -> None:
+        schema = generate_schema()
+        assert "needs" in schema["properties"]
+
+    def test_needs_commands_declares_every_execution_need_id(self) -> None:
+        schema = generate_schema()
+        properties = schema["properties"]["needs"]["properties"]["commands"]["properties"]
+        assert set(properties) == {"test-runner", "lint", "typecheck", "build", "migration-tool", "format"}
+        for prop in properties.values():
+            assert prop["type"] == "string"
+
     def test_has_proposals_property(self) -> None:
         schema = generate_schema()
         assert "proposals" in schema["properties"]

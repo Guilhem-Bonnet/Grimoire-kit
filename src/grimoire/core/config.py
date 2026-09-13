@@ -27,6 +27,7 @@ __all__ = [
     "GrimoireConfig",
     "HostsConfig",
     "MemoryConfig",
+    "NeedsConfig",
     "ProjectConfig",
     "RepoConfig",
     "SourceAssistConfig",
@@ -317,10 +318,59 @@ class HostsConfig:
         return cls(enabled=values)
 
 
+_VALID_EXECUTION_NEED_IDS = frozenset({
+    "test-runner", "lint", "typecheck", "build", "migration-tool", "format",
+})
+
+
+@dataclass(frozen=True, slots=True)
+class NeedsConfig:
+    """The ``needs:`` section (issue #205, lot 2) : besoins d'exécution déclarés.
+
+    ``commands`` lie un besoin du catalogue (``test-runner``, ``lint``...) à
+    la commande réelle du projet — la source qui l'emporte toujours sur la
+    détection par marqueurs de :mod:`grimoire.core.execution_needs`. Vide par
+    défaut : rien n'est déclaré, tout retombe sur la détection ou reste non
+    résolu. Sans lien avec le ``needs`` de gouvernance de
+    ``framework/agentic-standard/needs-catalog.yaml`` (profils/patterns à
+    installer) — même mot, deux concepts distincts, l'un exécute une
+    commande, l'autre installe une gouvernance.
+    """
+
+    commands: dict[str, str] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> NeedsConfig:
+        raw = data.get("commands")
+        if raw is None:
+            return cls(commands={})
+        if not isinstance(raw, dict):
+            raise GrimoireConfigError(
+                "'needs.commands' must be a mapping of need id to command",
+                error_code=CONFIG_PARSE_ERROR.code,
+            )
+        unknown = sorted(set(raw) - _VALID_EXECUTION_NEED_IDS)
+        if unknown:
+            raise GrimoireConfigError(
+                f"Unknown need id(s) in 'needs.commands': {unknown}, "
+                f"expected a subset of {sorted(_VALID_EXECUTION_NEED_IDS)}",
+                error_code=CONFIG_PARSE_ERROR.code,
+            )
+        commands: dict[str, str] = {}
+        for need_id, command in raw.items():
+            if not isinstance(command, str) or not command.strip():
+                raise GrimoireConfigError(
+                    f"'needs.commands.{need_id}' must be a non-empty string",
+                    error_code=CONFIG_PARSE_ERROR.code,
+                )
+            commands[str(need_id)] = command
+        return cls(commands=commands)
+
+
 # ── Root Config ───────────────────────────────────────────────────────────────
 
 _KNOWN_TOP_KEYS = frozenset({
-    "project", "user", "memory", "agents", "hosts", "installed_archetypes", "source",
+    "project", "user", "memory", "agents", "hosts", "needs", "installed_archetypes", "source",
 })
 
 
@@ -337,6 +387,7 @@ class GrimoireConfig:
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     agents: AgentsConfig = field(default_factory=AgentsConfig)
     hosts: HostsConfig = field(default_factory=HostsConfig)
+    needs: NeedsConfig = field(default_factory=NeedsConfig)
     source: SourceConfig = field(default_factory=SourceConfig)
     installed_archetypes: tuple[str, ...] = ()
     extra: dict[str, Any] = field(default_factory=dict)
@@ -397,6 +448,7 @@ class GrimoireConfig:
             memory=MemoryConfig.from_dict(data.get("memory") or {}),
             agents=AgentsConfig.from_dict(data.get("agents") or {}),
             hosts=HostsConfig.from_dict(data.get("hosts") or {}),
+            needs=NeedsConfig.from_dict(data.get("needs") or {}),
             source=SourceConfig.from_dict(data.get("source") or {}),
             installed_archetypes=tuple(str(a) for a in raw_archetypes),
             extra=extra,
