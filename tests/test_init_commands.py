@@ -63,18 +63,22 @@ requires_bash = pytest.mark.skipif(
     reason="points d'entrée Unix : sans bash utilisable (Git Bash sous Windows)",
 )
 
-# `grimoire.sh help` et `install.sh` restent hors scope de #231 (qui ne
-# porte que sur reset/uninstall/quick-update de `grimoire-init.sh`) : levées
-# en même temps que le skip ci-dessus, leurs classes ont montré un échec net
-# et distinct sous windows-latest --
+# `install.sh` reste hors scope de #231 (qui ne porte que sur
+# reset/uninstall/quick-update de `grimoire-init.sh`) : levée en même temps
+# que le skip ci-dessus, sa classe a montré un échec net et distinct sous
+# windows-latest --
 # https://github.com/Guilhem-Bonnet/Grimoire-kit/actions/runs/34738621031/job/103674463025
-#   - TestGrimoireShRouting : `bash grimoire.sh help` timeout à 30s (#461)
 #   - TestInstallSh : `install.sh` lu sans encoding explicite lève un
 #     UnicodeDecodeError cp1252 (#462, même famille que #192)
-# Ne pas lever ce skip sans avoir traité #461 et #462.
+# Ne pas lever ce skip sans avoir traité #462.
+#
+# `TestGrimoireShRouting` (`grimoire.sh help` timeout à 30s, #461) a été
+# corrigée et repasse par `@requires_bash` : `find_project_root()` dans
+# `grimoire.sh` bouclait indéfiniment quand `dirname` cessait de progresser
+# avant d'atteindre "/" (observé sous Git Bash Windows).
 requires_bash_posix_only = pytest.mark.skipif(
     BASH is None or sys.platform == "win32",
-    reason="grimoire.sh help et install.sh : bugs Windows distincts, hors scope #231 (voir #461, #462)",
+    reason="install.sh : bug Windows distinct, hors scope #231 (voir #462)",
 )
 
 
@@ -480,7 +484,7 @@ class TestCmdQuickUpdate:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-@requires_bash_posix_only
+@requires_bash
 class TestGrimoireShRouting:
     """Tests that grimoire.sh correctly routes to new commands."""
 
