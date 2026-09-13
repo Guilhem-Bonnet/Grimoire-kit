@@ -441,12 +441,12 @@ class ChunkingStrategy:
         return chunks
 
     @classmethod
-    def chunk_file(cls, filepath: Path, project_root: Path, max_tokens: int = DEFAULT_MAX_CHUNK_TOKENS) -> list[Chunk]:
+    def chunk_file(cls, filepath: Path, project_root: Path, max_tokens: int = DEFAULT_MAX_CHUNK_TOKENS, errors: list[str] | None = None) -> list[Chunk]:
         """Auto-détecte le type et chunk le fichier."""
         try:
             content = filepath.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            return []
+        except (OSError, UnicodeDecodeError) as exc:
+            errors is not None and errors.append(f"{filepath.relative_to(project_root).as_posix()}: {exc}"); return []
 
         relative = filepath.relative_to(project_root).as_posix()
         suffix = filepath.suffix.lower()
@@ -743,7 +743,7 @@ class RAGIndexer:
                     continue
 
                 chunks = ChunkingStrategy.chunk_file(
-                    filepath, self.project_root, self.max_chunk_tokens,
+                    filepath, self.project_root, self.max_chunk_tokens, report.errors,
                 )
 
                 if chunks:

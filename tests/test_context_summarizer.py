@@ -417,6 +417,20 @@ This is a recent decision that should be kept.
         # compression_ratio is defined: may be positive (good) or negative (summary larger)
         self.assertIsInstance(report.compression_ratio, float)
 
+    def test_un_fichier_illisible_est_nomme_dans_le_rapport(self):
+        """#264 : un fichier mémoire illisible ne doit pas disparaître en silence."""
+        learnings = self.tmpdir / "_grimoire" / "_memory" / "agent-learnings"
+        learnings.mkdir(parents=True)
+        (learnings / "dev.md").write_bytes(
+            "## 2026-08-01 Leçon\n\n".encode() + b"caf\xe9 " * 10
+        )
+        cs = self.mod.ContextSummarizer(self.tmpdir, age_threshold_days=0)
+        report = cs.summarize(dry_run=True)
+        self.assertTrue(
+            any("dev.md" in e for e in report.errors),
+            f"dev.md illisible absent de report.errors: {report.errors!r}",
+        )
+
     def test_status_no_digests(self):
         cs = self.mod.ContextSummarizer(self.tmpdir)
         digests = cs.status()

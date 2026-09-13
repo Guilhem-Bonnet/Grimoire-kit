@@ -259,12 +259,12 @@ class MemoryParser:
         return entries
 
     @classmethod
-    def parse_file(cls, filepath: Path, project_root: Path) -> list[MemoryEntry]:
+    def parse_file(cls, filepath: Path, project_root: Path, errors: list[str] | None = None) -> list[MemoryEntry]:
         """Auto-détecte le type et parse le fichier."""
         try:
             content = filepath.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            return []
+        except (OSError, UnicodeDecodeError) as exc:
+            errors is not None and errors.append(f"{filepath.relative_to(project_root).as_posix()}: {exc}"); return []
 
         relative = filepath.relative_to(project_root).as_posix()
         filename = filepath.name
@@ -435,7 +435,7 @@ class MemorySyncer:
                 continue
 
             # Parser le fichier en entrées
-            entries = MemoryParser.parse_file(filepath, self.project_root)
+            entries = MemoryParser.parse_file(filepath, self.project_root, report.errors)
             if not entries:
                 report.entries_skipped += 1
                 continue
