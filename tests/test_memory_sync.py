@@ -526,6 +526,24 @@ class TestMemorySyncer(unittest.TestCase):
         # Should have errors since indexer can't connect
         # Or entries_processed/skipped depending on state
 
+    def test_push_reports_unreadable_file(self):
+        """#264 : un fichier mémoire illisible ne doit pas disparaître en silence."""
+        from types import SimpleNamespace
+        learnings_dir = self.memory_dir / "agent-learnings"
+        learnings_dir.mkdir()
+        (learnings_dir / "dev.md").write_bytes(b"caf\xe9 " * 10)
+        syncer = self.mod.MemorySyncer(project_root=self.tmpdir)
+        syncer._indexer = SimpleNamespace(
+            _ensure_collection=lambda *a, **k: None,
+            _upsert_chunks=lambda *a, **k: 0,
+        )
+        syncer._rag_mod = SimpleNamespace(Chunk=lambda **kw: SimpleNamespace(**kw))
+        report = syncer.push()
+        self.assertTrue(
+            any("dev.md" in e for e in report.errors),
+            f"dev.md illisible absent de report.errors: {report.errors!r}",
+        )
+
     def test_hook_delegates_to_push(self):
         syncer = self.mod.MemorySyncer(project_root=self.tmpdir)
         report = syncer.hook(agent_id="dev")

@@ -22,6 +22,8 @@ import importlib
 import importlib.util
 import json
 import shutil
+import contextlib
+import io
 import subprocess
 import sys
 import tempfile
@@ -408,6 +410,15 @@ class TestFileBasedFallback(unittest.TestCase):
     def test_fallback_respects_max_chunks(self):
         result = self.mod.file_based_fallback(self.tmpdir, "system", max_chunks=1)
         self.assertLessEqual(len(result.chunks), 1)
+
+    def test_unreadable_file_is_named_on_stderr(self):
+        """#264 : un fichier illisible ne doit pas disparaître en silence."""
+        (self.tmpdir / "_grimoire" / "_memory" / "corrupt.md").write_bytes(b"caf\xe9 " * 10)
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            result = self.mod.file_based_fallback(self.tmpdir, "Qdrant vector database")
+        self.assertIsInstance(result, self.mod.RetrievalResult)
+        self.assertIn("corrupt.md", stderr.getvalue())
 
     def test_fallback_empty_query(self):
         result = self.mod.file_based_fallback(self.tmpdir, "")

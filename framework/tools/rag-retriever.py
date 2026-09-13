@@ -568,8 +568,8 @@ def file_based_fallback(
         for md_file in search_dir.rglob("*.md"):
             try:
                 content = md_file.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError):
-                continue
+            except (OSError, UnicodeDecodeError) as exc:
+                print(f"[rag-retriever] fichier illisible ignoré: {md_file}: {exc}", file=sys.stderr); continue
 
             # Split par sections
             sections = re.split(r"^(#{1,3}\s+.+)$", content, flags=re.MULTILINE)

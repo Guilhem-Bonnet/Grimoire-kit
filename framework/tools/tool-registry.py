@@ -229,8 +229,8 @@ class ToolDiscoverer:
         """Inspecte un outil Python par analyse AST du module."""
         try:
             source = filepath.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            return None
+        except (OSError, UnicodeDecodeError) as exc:
+            print(f"[tool-registry] outil illisible ignoré: {filepath.relative_to(self.project_root).as_posix()}: {exc}", file=sys.stderr); return None
 
         name = filepath.stem
         description = ""
@@ -337,8 +337,8 @@ class ToolDiscoverer:
         """Inspecte un outil shell."""
         try:
             content = filepath.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            return None
+        except (OSError, UnicodeDecodeError) as exc:
+            print(f"[tool-registry] outil illisible ignoré: {filepath.relative_to(self.project_root).as_posix()}: {exc}", file=sys.stderr); return None
 
         name = filepath.stem
         description = ""
@@ -363,8 +363,8 @@ class ToolDiscoverer:
         """Inspecte un document Markdown comme 'tool' documentaire."""
         try:
             content = filepath.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            return None
+        except (OSError, UnicodeDecodeError) as exc:
+            print(f"[tool-registry] outil illisible ignoré: {filepath.relative_to(self.project_root).as_posix()}: {exc}", file=sys.stderr); return None
 
         name = filepath.stem
         description = ""

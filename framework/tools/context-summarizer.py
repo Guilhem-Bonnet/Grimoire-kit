@@ -217,12 +217,12 @@ class SectionParser:
         return re.findall(r"#(\w[\w-]*)", text)
 
     @classmethod
-    def parse_file(cls, filepath: Path, project_root: Path) -> list[Section]:
+    def parse_file(cls, filepath: Path, project_root: Path, errors: list[str] | None = None) -> list[Section]:
         """Parse un fichier mémoire en sections."""
         try:
             content = filepath.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            return []
+        except (OSError, UnicodeDecodeError) as exc:
+            errors is not None and errors.append(f"{filepath.relative_to(project_root).as_posix()}: {exc}"); return []
         relative = filepath.relative_to(project_root).as_posix()
         sections: list[Section] = []
         # Split par H2 (## heading)
@@ -428,7 +428,7 @@ class ContextSummarizer:
 
         for filepath in files:
             file_type = self._detect_file_type(filepath.name)
-            sections = SectionParser.parse_file(filepath, self.project_root)
+            sections = SectionParser.parse_file(filepath, self.project_root, report.errors)
 
             if not sections:
                 continue

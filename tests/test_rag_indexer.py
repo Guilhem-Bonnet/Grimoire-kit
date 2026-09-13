@@ -316,6 +316,18 @@ class TestChunkFile(unittest.TestCase):
         chunks = self.strategy.chunk_file(f, self.tmpdir)
         self.assertEqual(chunks, [])
 
+    def test_chunk_file_unreadable_file_named_in_errors(self):
+        """#264 : un fichier illisible ne doit pas disparaître en silence."""
+        f = self.tmpdir / "corrupt.md"
+        f.write_bytes(b"caf\xe9 " * 10)
+        errors: list[str] = []
+        chunks = self.strategy.chunk_file(f, self.tmpdir, errors=errors)
+        self.assertEqual(chunks, [])
+        self.assertTrue(
+            any("corrupt.md" in e for e in errors),
+            f"corrupt.md illisible absent de errors: {errors!r}",
+        )
+
     def test_source_file_relative(self):
         sub = self.tmpdir / "docs"
         sub.mkdir()

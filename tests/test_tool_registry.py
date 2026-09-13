@@ -10,8 +10,10 @@ Fonctions testées :
   - main()
 """
 
+import contextlib
 import importlib
 import importlib.util
+import io
 import json
 import shutil
 import subprocess
@@ -251,6 +253,34 @@ if __name__ == "__main__":
         d = self.mod.ToolDiscoverer(self.tmpdir)
         tools = d.discover_all()
         self.assertIn("rag", tools[0].tags)
+
+    def test_unreadable_python_tool_is_named_on_stderr(self):
+        """#264 : un outil Python illisible ne doit pas disparaître en silence."""
+        (self.tools_dir / "corrupt.py").write_bytes(b"caf\xe9 " * 10)
+        d = self.mod.ToolDiscoverer(self.tmpdir)
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            tools = d.discover_all()
+        self.assertEqual(tools, [])
+        self.assertIn("corrupt.py", stderr.getvalue())
+
+    def test_unreadable_shell_tool_is_named_on_stderr(self):
+        (self.tools_dir / "corrupt.sh").write_bytes(b"caf\xe9 " * 10)
+        d = self.mod.ToolDiscoverer(self.tmpdir)
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            tools = d.discover_all()
+        self.assertEqual(tools, [])
+        self.assertIn("corrupt.sh", stderr.getvalue())
+
+    def test_unreadable_markdown_tool_is_named_on_stderr(self):
+        (self.tools_dir / "corrupt.md").write_bytes(b"caf\xe9 " * 10)
+        d = self.mod.ToolDiscoverer(self.tmpdir)
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            tools = d.discover_all()
+        self.assertEqual(tools, [])
+        self.assertIn("corrupt.md", stderr.getvalue())
 
 
 # ── ToolRegistry ───────────────────────────────────────────────────────────
