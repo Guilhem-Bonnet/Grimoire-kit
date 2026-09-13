@@ -238,6 +238,13 @@ export const api = {
   // progression après un rechargement de page. `project` cible un AUTRE
   // projet que celui déjà résolu — même convention que `health()`.
   setupRun: (project) => get('/api/setup/run', project ? { project } : undefined),
+
+  // « Nouveau projet » depuis le portefeuille (#172) : `path` est explicite
+  // dans le corps, comme `updateProject` — la porte n'est donc pas la garde
+  // générale `readOnly` (regarder un projet en lecture seule n'empêche pas
+  // d'en créer un autre), mais la validation propre de la route côté
+  // serveur (chemin permis, pas déjà un projet, plan exécutable).
+  createProject: (payload) => postOpen('/api/projects/create', payload),
 };
 
 export default api;

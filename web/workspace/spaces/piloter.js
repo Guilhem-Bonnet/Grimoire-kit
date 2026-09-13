@@ -203,9 +203,48 @@ async function loadFleet(ctx) {
   });
 }
 
+// ── « Nouveau projet » (#172) : bouton + section repliable, Flotte ─────────
+//
+// Toujours visible, y compris sur un registre vide — c'est justement là que
+// le geste manque le plus. `onCreated` ferme la section et bascule sur le
+// projet créé, par le même chemin que cliquer une ligne du tableau (aucune
+// route dédiée à réinventer, et le sélecteur de projets — ce même tableau —
+// le montrera dès qu'on y revient, sans redémarrer le cockpit).
+function renderNewProjectSection(ctx, onCreated) {
+  const section = document.createElement('div');
+  section.className = 'pl-section';
+  const toggleBtn = document.createElement('button');
+  toggleBtn.type = 'button';
+  toggleBtn.className = 'btn pri';
+  toggleBtn.textContent = '+ Nouveau projet';
+  section.append(toggleBtn);
+
+  let open = false;
+  let formHost = null;
+  toggleBtn.addEventListener('click', () => {
+    open = !open;
+    if (!open) {
+      if (formHost) { formHost.remove(); formHost = null; }
+      return;
+    }
+    formHost = document.createElement('div');
+    formHost.className = 'pl-card';
+    formHost.style.marginTop = 'var(--sp-3)';
+    formHost.append(text('p', 'lbl', 'Chargement…'));
+    section.append(formHost);
+    renderCreateProjectForm(ctx, (slug) => {
+      open = false;
+      if (formHost) { formHost.remove(); formHost = null; }
+      onCreated(slug);
+    }).then((node) => { if (formHost) formHost.replaceWith(node); formHost = node; });
+  });
+  return section;
+}
+
 function renderFleet(root, ctx, rows, onSelect) {
   const wrap = document.createElement('div');
   wrap.className = 'pl-wrap';
+  wrap.append(renderNewProjectSection(ctx, onSelect));
 
   // Le cockpit ne scanne jamais le disque (#341) : un registre vide rend une
   // flotte vide, pas une panne. Un tableau muet à zéro lignes se lisait comme
@@ -756,10 +795,13 @@ function renderRunReport(run) {
   return wrap;
 }
 
-async function renderSetupWizard(ctx, options) {
-  const wrap = document.createElement('div');
-  wrap.append(text('p', 'lbl', "Ce projet n'est pas initialisé — l'exécuter écrit réellement le projet."));
-
+// Champs partagés par les deux formulaires de setup — celui qui initialise le
+// projet déjà servi (`renderSetupWizard`) et celui qui en crée un nouveau
+// depuis le portefeuille (`renderCreateProjectForm`, #172). Un seul endroit
+// qui sait construire les sélecteurs archétype/backend/needs et lire leur
+// valeur : les deux formulaires ne diffèrent que par leur cible (le projet
+// servi, ou un chemin choisi) et leur appel API final.
+async function buildSetupFields(ctx, wrap) {
   const [archetypes, backendsPayload, needsPayload] = await Promise.all([
     ctx.api.archetypesCatalogue().catch(() => []),
     ctx.api.backendsCatalogue().catch(() => ({ backends: [] })),
@@ -827,6 +869,25 @@ async function renderSetupWizard(ctx, options) {
     fieldRow('needs (standard agentique)', needsWrap),
   );
 
+  return {
+    summary: () => `--archetype ${archSelect.value} --backend ${backendSelect.value}`,
+    payload: (extra) => ({
+      name: nameInput.value.trim(),
+      user: userInput.value.trim(),
+      archetype: archSelect.value,
+      backend: backendSelect.value,
+      needs: Object.keys(needChecks).filter((id) => needChecks[id].checked),
+      ...extra,
+    }),
+  };
+}
+
+async function renderSetupWizard(ctx, options) {
+  const wrap = document.createElement('div');
+  wrap.append(text('p', 'lbl', "Ce projet n'est pas initialisé — l'exécuter écrit réellement le projet."));
+
+  const fields = await buildSetupFields(ctx, wrap);
+
   const runBtn = document.createElement('button');
   runBtn.type = 'button';
   runBtn.className = 'btn pri';
@@ -840,23 +901,14 @@ async function renderSetupWizard(ctx, options) {
   fallbackBtn.className = 'btn';
   fallbackBtn.textContent = 'ou : obtenir la commande à copier-coller';
 
-  const buildPayload = (planOnly) => ({
-    name: nameInput.value.trim(),
-    user: userInput.value.trim(),
-    archetype: archSelect.value,
-    backend: backendSelect.value,
-    needs: Object.keys(needChecks).filter((id) => needChecks[id].checked),
-    planOnly,
-  });
-
   runBtn.addEventListener('click', async () => {
     runBtn.disabled = true;
     runBtn.textContent = 'Initialisation…';
     preview.hidden = false;
     preview.replaceChildren(text('p', 'lbl', 'grimoire up — en cours…'));
-    ctx.dock.echo(`grimoire up . --archetype ${archSelect.value} --backend ${backendSelect.value}`);
+    ctx.dock.echo(`grimoire up . ${fields.summary()}`);
     try {
-      await ctx.api.setupPlan(buildPayload(false));
+      await ctx.api.setupPlan(fields.payload({ planOnly: false }));
       // Le rapport (doctor compris) est désormais un bloc persistant de la
       // fiche — lu depuis `_grimoire/setup-run.json`, pas ce `preview` que le
       // refresh qui suit va de toute façon effacer avec le reste de la fiche.
@@ -873,7 +925,7 @@ async function renderSetupWizard(ctx, options) {
   fallbackBtn.addEventListener('click', async () => {
     fallbackBtn.disabled = true;
     try {
-      const plan = await ctx.api.setupPlan(buildPayload(true));
+      const plan = await ctx.api.setupPlan(fields.payload({ planOnly: true }));
       preview.hidden = false;
       preview.replaceChildren(text('p', 'lbl', 'Plan écrit dans _grimoire/setup-plan.json — terminez :'));
       const code = document.createElement('code');
@@ -889,6 +941,55 @@ async function renderSetupWizard(ctx, options) {
   });
 
   wrap.append(runBtn, fallbackBtn, preview);
+  return wrap;
+}
+
+// ── Nouveau projet depuis le portefeuille (#172, volet création) ───────────
+//
+// Même formulaire que `renderSetupWizard`, plus un chemin explicite : la
+// cible n'est pas le projet servi mais un dossier choisi, qui ne doit pas
+// déjà être un projet (`POST /api/projects/create`, refusé sinon par le
+// serveur — voir cmd_cockpit.py). À la réussite, le registre a déjà le
+// nouveau projet (grimoire up l'enrôle comme tout `up`/`init` normal) :
+// `onCreated(slug)` referme la modale et rafraîchit la Flotte sans recharger
+// la page.
+async function renderCreateProjectForm(ctx, onCreated) {
+  const wrap = document.createElement('div');
+  wrap.append(text('p', 'lbl', 'Un chemin qui n’est pas déjà un projet Grimoire. Le dossier est créé si besoin.'));
+
+  const pathInput = document.createElement('input');
+  pathInput.type = 'text';
+  pathInput.placeholder = '/chemin/absolu/du/nouveau-projet';
+  wrap.append(fieldRow('chemin', pathInput));
+
+  const fields = await buildSetupFields(ctx, wrap);
+
+  const createBtn = document.createElement('button');
+  createBtn.type = 'button';
+  createBtn.className = 'btn pri';
+  createBtn.textContent = 'Créer le projet';
+
+  const preview = document.createElement('div');
+  preview.hidden = true;
+
+  createBtn.addEventListener('click', async () => {
+    const path = pathInput.value.trim();
+    if (!path) { pathInput.focus(); return; }
+    createBtn.disabled = true;
+    createBtn.textContent = 'Création…';
+    preview.hidden = false;
+    preview.replaceChildren(text('p', 'lbl', 'grimoire up ' + path + ' ' + fields.summary() + ' — en cours…'));
+    try {
+      const result = await ctx.api.createProject(fields.payload({ path }));
+      onCreated(result.slug);
+    } catch (error) {
+      preview.replaceChildren(text('div', 'lbl', 'refusé : ' + error.message));
+      createBtn.disabled = false;
+      createBtn.textContent = 'Créer le projet';
+    }
+  });
+
+  wrap.append(createBtn, preview);
   return wrap;
 }
 
