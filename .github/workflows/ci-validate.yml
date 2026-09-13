@@ -179,7 +179,7 @@ jobs:
     # rien apprendre. Celui-ci a tenu quarante minutes sur une invite
     # interactive de `grimoire-init.sh`, quand ubuntu finissait en secondes :
     # mieux vaut un échec net et rapide.
-    timeout-minutes: 15
+    timeout-minutes: 30  # TEMP #231: mesure durees Windows, cf commentaire diagnostic
     strategy:
       fail-fast: false
       matrix:
