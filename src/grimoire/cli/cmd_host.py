@@ -22,7 +22,8 @@ from grimoire.bridges.host import HostBridge
 from grimoire.bridges.schemas import HostId
 from grimoire.hosts.capabilities import all_profiles, gaps_for, profile_for, resolve_host
 from grimoire.hosts.collect import build_surface, collect_commands, entry_agent_name
-from grimoire.hosts.emitters import apply_plan, emitter_for, supported_hosts
+from grimoire.hosts.detection import alias_for_host, enabled_host_ids
+from grimoire.hosts.emitters import apply_plan, emitter_for, owned_managed_paths, supported_hosts
 from grimoire.hosts.runtime import parse_event, run_hook
 from grimoire.hosts.surface import Enforcement
 
@@ -33,6 +34,14 @@ _PROJECT_ROOT_OPTION = typer.Option(Path.cwd(), "--project-root", help="Racine d
 _HOST_OPTION = typer.Option("auto", "--host", help="claude | copilot | codex | cursor | gemini | all | auto.")
 _DRY_RUN_OPTION = typer.Option(False, "--dry-run", help="Montrer sans écrire.")
 _FORCE_OPTION = typer.Option(False, "--force", help="Écraser un fichier non généré occupant un chemin géré.")
+_FORCE_HOST_OPTION = typer.Option(
+    False, "--force-host", help="Synchroniser un hôte non activé (ignore `hosts.enabled`)."
+)
+_PRUNE_DISABLED_OPTION = typer.Option(
+    False,
+    "--prune-disabled",
+    help="Supprimer les fichiers gérés des hôtes désactivés (opt-in, jamais par défaut).",
+)
 _HOOK_HOST_OPTION = typer.Option(..., "--host", help="Hôte appelant.")
 _HOOK_EVENT_OPTION = typer.Option(..., "--event", help="Événement de cycle de vie.")
 _HOOK_ROOT_OPTION = typer.Option(None, "--project-root", help="Racine du projet.")
@@ -86,10 +95,18 @@ def _detected_host() -> HostId:
     return HostBridge().detect().host_id
 
 
-def _resolve_targets(host: str) -> list[HostId]:
+def _resolve_targets(host: str, project_root: Path) -> list[HostId]:
+    """Hôtes ciblés par *host*.
+
+    ``"all"`` se filtre sur ``hosts.enabled`` (issue #177) — jamais la
+    totalité des hôtes connus par défaut. ``"auto"`` reste la détection de
+    l'hôte CLI courant (le processus qui appelle), une notion distincte de la
+    déclaration projet, volontairement non filtrée.
+    """
     key = host.strip().lower()
     if key == "all":
-        return list(supported_hosts())
+        enabled = enabled_host_ids(project_root)
+        return [h for h in supported_hosts() if h in enabled]
     if key == "auto":
         detected = _detected_host()
         if emitter_for(detected) is None:
@@ -163,19 +180,59 @@ def host_sync(
     host: str = _HOST_OPTION,
     dry_run: bool = _DRY_RUN_OPTION,
     force: bool = _FORCE_OPTION,
+    force_host: bool = _FORCE_HOST_OPTION,
+    prune_disabled: bool = _PRUNE_DISABLED_OPTION,
 ) -> None:
-    """Générer les surfaces d'un hôte (ou de tous) depuis le projet."""
+    """Générer les surfaces d'un hôte (ou de tous) depuis le projet.
+
+    Un ``--host`` explicite non activé (``hosts.enabled`` dans
+    ``project-context.yaml``) est un refus nommé, sauf ``--force-host``
+    (issue #177) : un hôte désactivé n'est jamais synchronisé sans le dire.
+    """
+    key = host.strip().lower()
+    if key not in ("all", "auto"):
+        resolved = resolve_host(key)
+        known = resolved is not None and resolved in supported_hosts()
+        refused = known and resolved not in enabled_host_ids(project_root) and not force_host
+        if refused:
+            assert resolved is not None  # narrowed by `known` above
+            alias = alias_for_host(resolved)
+            console.print(
+                f"[red]Hôte {alias} non activé[/red] — ajoute-le à `hosts.enabled` dans "
+                "project-context.yaml, ou relance avec --force-host."
+            )
+            raise typer.Exit(code=1)
+
     surface = build_surface(project_root)
     results = []
-    for host_id in _resolve_targets(host):
+    for host_id in _resolve_targets(host, project_root):
         emitter = emitter_for(host_id)
         if emitter is None:  # pragma: no cover - filtered by _resolve_targets
             continue
         plan = emitter.plan(surface, project_root)
         results.append(apply_plan(plan, project_root, dry_run=dry_run, force=force))
 
+    pruned: list[str] = []
+    if prune_disabled:
+        enabled = enabled_host_ids(project_root)
+        for host_id in supported_hosts():
+            if host_id in enabled:
+                continue
+            emitter = emitter_for(host_id)
+            if emitter is None:  # pragma: no cover - registry is complete
+                continue
+            plan = emitter.plan(surface, project_root)
+            for path in owned_managed_paths(plan, project_root):
+                label = path.resolve().relative_to(project_root.resolve()).as_posix()
+                if not dry_run:
+                    path.unlink()
+                pruned.append(label)
+
     if _get_fmt(ctx) == "json":
-        typer.echo(json.dumps([r.to_dict() for r in results], indent=2, ensure_ascii=False))
+        payload: dict[str, Any] = {"hosts": [r.to_dict() for r in results]}
+        if prune_disabled:
+            payload["pruned"] = pruned
+        typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
         raise typer.Exit(0 if all(r.ok for r in results) else 1)
 
     action = "Écrirait" if dry_run else "Écrit"
@@ -188,6 +245,11 @@ def host_sync(
             console.print(f"    [yellow][!][/yellow] {label} — fichier non généré, préservé (utilisez --force)")
         for degradation in result.degradations:
             console.print(f"    [dim]dégradé[/dim] {degradation.surface} — repli : {degradation.fallback}")
+    if prune_disabled:
+        prune_action = "Retirerait" if dry_run else "Retiré"
+        console.print(f"[bold]Hôtes désactivés[/bold] — {prune_action} {len(pruned)} fichier(s) orphelin(s)")
+        for label in pruned:
+            console.print(f"    [yellow][-][/yellow] {label}")
     raise typer.Exit(0 if all(r.ok for r in results) else 1)
 
 
@@ -200,7 +262,7 @@ def host_status(
     """Comparer ce que le projet déclare à ce que l'hôte exécute vraiment."""
     surface = build_surface(project_root)
     payload: list[_HostStatus] = []
-    for host_id in _resolve_targets(host):
+    for host_id in _resolve_targets(host, project_root):
         emitter = emitter_for(host_id)
         if emitter is None:  # pragma: no cover
             continue
@@ -224,8 +286,37 @@ def host_status(
             )
         )
 
+    # Orphelins d'un hôte désactivé (issue #177) — seulement pertinent quand on
+    # regarde tous les hôtes ; un `--host <x>` explicite garde la forme JSON
+    # historique (liste nue), pour ne rien casser côté consommateurs existants.
+    orphans: list[dict[str, Any]] = []
+    if host.strip().lower() == "all":
+        enabled = enabled_host_ids(project_root)
+        for host_id in supported_hosts():
+            if host_id in enabled:
+                continue
+            emitter = emitter_for(host_id)
+            if emitter is None:  # pragma: no cover - registry is complete
+                continue
+            plan = emitter.plan(surface, project_root)
+            files = [
+                p.resolve().relative_to(project_root.resolve()).as_posix()
+                for p in owned_managed_paths(plan, project_root)
+            ]
+            if files:
+                orphans.append({"host": host_id.value, "display_name": profile_for(host_id).display_name, "files": files})
+
     if _get_fmt(ctx) == "json":
-        typer.echo(json.dumps([item.to_dict() for item in payload], indent=2, ensure_ascii=False))
+        if host.strip().lower() == "all":
+            typer.echo(
+                json.dumps(
+                    {"hosts": [item.to_dict() for item in payload], "orphans": orphans},
+                    indent=2,
+                    ensure_ascii=False,
+                )
+            )
+        else:
+            typer.echo(json.dumps([item.to_dict() for item in payload], indent=2, ensure_ascii=False))
         raise typer.Exit(0 if all(item.in_sync for item in payload) else 1)
 
     for note in surface.notes:
@@ -258,6 +349,12 @@ def host_status(
             )
         else:
             console.print("  [dim]aucune persona d'entrée (agents.entry vide)[/dim]")
+    for orphan in orphans:
+        console.print(
+            f"[dim]{orphan['display_name']} désactivé[/dim] — {len(orphan['files'])} fichier(s) orphelin(s) : "
+            + ", ".join(orphan["files"])
+            + " — `grimoire host sync --prune-disabled` pour les retirer"
+        )
     raise typer.Exit(0 if all(item.in_sync for item in payload) else 1)
 
 

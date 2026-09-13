@@ -461,6 +461,42 @@ def _verify_dispatch_cost_slo(root: Path, result: StandardVerificationResult) ->
             )
 
 
+def _verify_cadrage(root: Path, result: StandardVerificationResult) -> None:
+    """Cadrage produit (B4, issue #173) — gate de complétude visible du standard.
+
+    Skip entièrement si ``_grimoire/cadrage/`` n'existe pas : rien à
+    vérifier sur un projet qui n'a jamais posé le cadrage (``grimoire
+    cadrage init`` ou le need ``project-discovery``, voir ``cmd_up.py::
+    _step_cadrage``) — même règle que tous les autres ``_verify_*`` sans
+    artefact.
+
+    Sévérité : ``info`` (phases amont incomplètes) / ``warning`` (phases
+    gate — exigences, cahier des charges) par défaut ; escaladées à
+    ``warning``/``error`` quand le need ``project-discovery`` a été
+    explicitement choisi (``install-manifest.yaml``). C'est cette demande
+    explicite qui rend le cadrage exigeant, pas le palier du profil — un
+    projet qui a lui-même demandé à cadrer avant de construire ne doit pas
+    pouvoir ignorer silencieusement son propre gate.
+    """
+    from grimoire.core.cadrage import CADRAGE_DIR
+    from grimoire.core.cadrage import check as cadrage_check
+    from grimoire.core.standard_profile_manifest import read_install_manifest_needs
+
+    if not (root / CADRAGE_DIR).is_dir():
+        return
+    errors, warnings = cadrage_check(root)
+    if not errors and not warnings:
+        return
+    manifest_path = root / STANDARD_DIR / "install-manifest.yaml"
+    required = "project-discovery" in read_install_manifest_needs(manifest_path)
+    gate_severity = "error" if required else "warning"
+    advisory_severity = "warning" if required else "info"
+    for message in errors:
+        _add_check(result, "cadrage.gate_incomplete", gate_severity, message, path=CADRAGE_DIR)
+    for message in warnings:
+        _add_check(result, "cadrage.phase_incomplete", advisory_severity, message, path=CADRAGE_DIR)
+
+
 def _verify_knowledge_registry(root: Path, profile: StandardProfile, result: StandardVerificationResult) -> None:
     rel_path = STANDARD_DIR / "knowledge-source-registry.yaml"
     data = _load_yaml_file(root, rel_path, result)
@@ -1395,6 +1431,7 @@ def run_verifiers(root: Path, profile: StandardProfile, task_id: str, result: St
     _verify_mission_brief(root, profile, result)
     _verify_provider_registry(root, profile, result)
     _verify_dispatch_cost_slo(root, result)
+    _verify_cadrage(root, result)
     _verify_knowledge_registry(root, profile, result)
     _verify_task_envelope(root, profile, task_id, result)
     _verify_evidence_pack(root, task_id, result)

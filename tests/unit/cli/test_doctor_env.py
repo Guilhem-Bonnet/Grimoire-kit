@@ -553,6 +553,14 @@ class TestDoctorFix:
         (agents / "helper.md").write_text(
             "---\ndescription: Test helper agent\n---\n# helper\n", encoding="utf-8",
         )
+        # Issue #177 : `init_project` n'a pas de clé `hosts:` (config écrite à
+        # la main, pas via `grimoire init`) — la détection filesystem, sans
+        # `.github/agents/` préexistant, retomberait sur `claude` seul et ce
+        # test de régénération de wrapper Copilot (issue #33) n'aurait plus
+        # rien à régénérer. Copilot est déclaré explicitement ici.
+        config_path = init_project / "project-context.yaml"
+        content = config_path.read_text(encoding="utf-8")
+        config_path.write_text(content + '\nhosts:\n  enabled: ["claude", "copilot"]\n', encoding="utf-8")
         return init_project
 
     def _env_ok(self):

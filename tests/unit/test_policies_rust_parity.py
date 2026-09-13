@@ -408,3 +408,70 @@ def test_record_post_tool_use_approval_agrees_across_backends(monkeypatch: pytes
     )
     assert py_second == rust_second
     assert py_second[0] == "allow"
+
+
+@requires_rust_core
+def test_temporal_repair_exemption_agrees_across_backends(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Defect 2 of the 2026-09-12 session-budget incident (issue #463): once a
+    `max_writes` budget is exhausted, a write that targets the rules file
+    itself must be let through, identically, in both backends — exact
+    verdict, exact reason (the exemption text), exact counters."""
+    rules = (_temporal_rule(per_session=SessionBudget(max_writes=1)),)
+    now = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+    python_state = SessionState.new("s", now.isoformat())
+    rust_state = SessionState.new("s", now.isoformat())
+
+    # Exhaust the budget with an ordinary write, in both backends.
+    py_first = _evaluate_temporal_with_backend(
+        "python", monkeypatch, rules, python_state, tool_name="Write", tool_detail="f.txt", is_write=True, now=now
+    )
+    rust_first = _evaluate_temporal_with_backend(
+        "rust", monkeypatch, rules, rust_state, tool_name="Write", tool_detail="f.txt", is_write=True, now=now
+    )
+    assert py_first == rust_first
+    assert py_first[0] == "allow"
+
+    # A normal write is refused, in both backends, with the same remedy text.
+    py_blocked = _evaluate_temporal_with_backend(
+        "python", monkeypatch, rules, python_state, tool_name="Write", tool_detail="g.txt", is_write=True, now=now
+    )
+    rust_blocked = _evaluate_temporal_with_backend(
+        "rust", monkeypatch, rules, rust_state, tool_name="Write", tool_detail="g.txt", is_write=True, now=now
+    )
+    assert py_blocked == rust_blocked
+    assert py_blocked[0] == "block"
+    assert "grimoire policies reset-session" in py_blocked[1]
+
+    # Editing the rules file itself is exempt, in both backends, same reason.
+    py_repair = _evaluate_temporal_with_backend(
+        "python",
+        monkeypatch,
+        rules,
+        python_state,
+        tool_name="Edit",
+        tool_detail="_grimoire/standard/policies.yaml",
+        is_write=True,
+        now=now,
+    )
+    rust_repair = _evaluate_temporal_with_backend(
+        "rust",
+        monkeypatch,
+        rules,
+        rust_state,
+        tool_name="Edit",
+        tool_detail="_grimoire/standard/policies.yaml",
+        is_write=True,
+        now=now,
+    )
+    assert py_repair == rust_repair
+    assert py_repair[0] == "allow"
+
+    # A plain read is always exempt too, regardless of the write budget.
+    py_read = _evaluate_temporal_with_backend(
+        "python", monkeypatch, rules, python_state, tool_name="Read", tool_detail="", is_write=False, now=now
+    )
+    rust_read = _evaluate_temporal_with_backend(
+        "rust", monkeypatch, rules, rust_state, tool_name="Read", tool_detail="", is_write=False, now=now
+    )
+    assert py_read == rust_read
+    assert py_read[0] == "allow"

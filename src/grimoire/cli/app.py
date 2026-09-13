@@ -417,13 +417,20 @@ def doctor(
                 fixed.append(label)
                 _record(f"fix_{label}", passed=True, detail=f"{label} regenerated (--fix)")
 
-    # 4ter. Agent discoverability (issue #33) — deployed agents need VS Code wrappers
+    # 4ter. Agent discoverability (issue #33) — deployed agents need VS Code wrappers.
+    # Issue #177 : ce check ne vaut que si Copilot est un hôte activé — un
+    # projet qui ne l'a ni déclaré ni détecté n'a légitimement aucun wrapper
+    # à montrer, ce n'est pas une panne.
     with _timed_phase("agents_discoverable"):
+        from grimoire.bridges.schemas import HostId
+        from grimoire.hosts.detection import enabled_host_ids
+
+        copilot_enabled = cfg is not None and HostId.GITHUB_COPILOT in enabled_host_ids(target, cfg)
         agent_files = [
             f for f in layout.layered_files(target, layout.AGENTS_SUBDIR).values()
             if not f.name.endswith(".tpl.md")
         ]
-        if agent_files:
+        if agent_files and copilot_enabled:
             wrappers_dir = target / ".github" / "agents"
             wrappers = list(wrappers_dir.glob("*.agent.md")) if wrappers_dir.is_dir() else []
             if wrappers:
@@ -475,11 +482,99 @@ def doctor(
                 tag = "[yellow]WARN[/yellow]" if level == "warn" else "[dim]○[/dim]"
                 console.print(f"  {tag}  {detail}")
 
+    # 4sexies. Design guard (defect 5 of the 2026-09-12 session-budget
+    # incident, issue #463) — a `per_session` rule with no `tool_pattern`
+    # (so `"*"`, every tool) and `verdict_on_match: block` can end up
+    # refusing every tool in the session, hard-coded repair exemptions
+    # aside (see `grimoire.policies.temporal`). Never FAIL: a project may
+    # want exactly this and accept the risk — but `doctor` names the shape
+    # instead of leaving it silent, which is what let the real incident
+    # reach production undetected.
+    with _timed_phase("policy_budget_guard"):
+        from grimoire.core.exceptions import GrimoirePolicyError
+        from grimoire.policies.rules_config import load_custom_rules
+        from grimoire.policies.schemas import VerdictKind as _VerdictKind
+
+        try:
+            budget_rules = [r for r in load_custom_rules(target) if r.per_session is not None]
+        except GrimoirePolicyError as exc:
+            guard_entry: dict[str, Any] = {
+                "name": "policy_budget_guard",
+                "passed": False,
+                "detail": f"_grimoire/standard/policies.yaml invalide : {exc}",
+            }
+            results.append(guard_entry)
+            if fmt != "json":
+                console.print(f"  [red]FAIL[/red]  {guard_entry['detail']}")
+        else:
+            blocking_global = [
+                r.id for r in budget_rules if r.tool_pattern == "*" and r.verdict_on_match is _VerdictKind.BLOCK
+            ]
+            if blocking_global:
+                detail = (
+                    f"budget global bloquant ({', '.join(blocking_global)}) : une règle `per_session` sans "
+                    "`tool_pattern` en `verdict_on_match: block` refuse tout outil de la session une fois "
+                    "le plafond atteint — préférez un `tool_pattern` ciblé ou `verdict_on_match: warn` "
+                    "(voir docs/hosts.md)"
+                )
+                guard_entry = {
+                    "name": "policy_budget_guard",
+                    "passed": True,
+                    "detail": detail,
+                    "level": "warn",
+                }
+                results.append(guard_entry)
+                if fmt != "json":
+                    console.print(f"  [yellow]WARN[/yellow]  {detail}")
+            elif budget_rules:
+                _record(
+                    "policy_budget_guard",
+                    passed=True,
+                    detail="Aucun budget de session globalement bloquant.",
+                )
+
     # 5. Config semantic validation
     if cfg:
         warnings = cfg.validate()
         for w in warnings:
             _record("semantic", passed=False, detail=w)
+
+    # 5bis. Hosts declared vs emitted (issue #177) — jamais FAIL : une dette de
+    # déclaration, pas une panne. INFO pour les fichiers orphelins d'un hôte
+    # désactivé (`hosts.enabled`), WARN si un hôte activé n'a rien émis du tout.
+    if cfg:
+        with _timed_phase("hosts_enabled"):
+            from grimoire.hosts.collect import build_surface
+            from grimoire.hosts.detection import alias_for_host, enabled_host_ids
+            from grimoire.hosts.emitters import emitter_for, owned_managed_paths, supported_hosts
+
+            host_surface = build_surface(target)
+            enabled = enabled_host_ids(target, cfg)
+            for host_id in supported_hosts():
+                emitter = emitter_for(host_id)
+                if emitter is None:  # pragma: no cover - registry is complete
+                    continue
+                plan = emitter.plan(host_surface, target)
+                owned = owned_managed_paths(plan, target)
+                alias = alias_for_host(host_id)
+                if host_id in enabled:
+                    if not owned:
+                        detail = (
+                            f"Hôte {alias} activé (`hosts.enabled`) mais aucun fichier émis — "
+                            "lancez `grimoire host sync`"
+                        )
+                        results.append({"name": f"host_missing_{alias}", "passed": True, "detail": detail, "level": "warn"})
+                        if fmt != "json":
+                            console.print(f"  [yellow]WARN[/yellow]  {detail}")
+                elif owned:
+                    rels = [p.resolve().relative_to(target.resolve()).as_posix() for p in owned]
+                    detail = (
+                        f"Hôte {alias} désactivé mais {len(rels)} fichier(s) orphelin(s) : "
+                        f"{', '.join(rels)} — `grimoire host sync --prune-disabled` pour les retirer"
+                    )
+                    results.append({"name": f"host_orphan_{alias}", "passed": True, "detail": detail, "level": "info"})
+                    if fmt != "json":
+                        console.print(f"  [dim]○[/dim]  {detail}")
 
     # 6. Optional dependencies
     with _timed_phase("dependency_scan"):

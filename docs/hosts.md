@@ -60,6 +60,52 @@ comme **dégradation**, avec son repli, et remonté par `grimoire host status` :
   règle dans le fichier d'entrée, et n'est opposable qu'en CI. Le catalogue le
   dit explicitement plutôt que de laisser croire à une protection.
 
+## Hôtes activés
+
+`grimoire host sync` émettait, par défaut, la surface des cinq hôtes connus —
+une équipe qui n'utilise que Claude Code recevait quand même le catalogue
+Gemini, les règles Cursor, etc. (issue #177). Une alternative « canal plugin »
+pour Claude Code a été envisagée puis écartée par décision (2026-09-12) : la
+solution retenue est purement déclarative, sans mécanisme d'installation
+séparé.
+
+`project-context.yaml` porte la déclaration :
+
+```yaml
+hosts:
+  enabled: [claude, copilot]   # sous-ensemble de : claude, copilot, codex, cursor, gemini
+```
+
+**Absence de la clé** : le comportement bascule en détection — un hôte est
+émis s'il a déjà des fichiers dans le dépôt (`.claude/` → claude,
+`.github/copilot-instructions.md` ou `.github/agents/` → copilot, `GEMINI.md`
+→ gemini, `.cursor/` → cursor, `AGENTS.md` **et** `.codex` → codex), et
+`claude` seul si rien n'est détecté. Un projet existant qui n'a jamais connu
+cette clé garde donc exactement les fichiers qu'il a déjà — rien ne se
+supprime au premier `grimoire up` qui suit une mise à jour du kit.
+`grimoire init` écrit la clé avec le résultat de cette détection, pour que le
+comportement soit explicite dès le premier jour : un répertoire vierge
+n'obtient que `claude` et son pont `CLAUDE.md`.
+
+**Émission** : `grimoire host sync` (et donc `grimoire up`) n'écrit que les
+hôtes activés.
+
+- `--host all` (le défaut) se filtre sur `hosts.enabled`.
+- `--host <x>` sur un hôte connu mais non activé est un refus nommé :
+  *« Hôte gemini non activé — ajoute-le à `hosts.enabled`… »* — sauf
+  `--force-host`, qui synchronise quand même sans toucher à la déclaration.
+- Les fichiers déjà émis pour un hôte qu'on vient de désactiver ne sont
+  **jamais** supprimés automatiquement : ce sont des « orphelins d'un hôte
+  désactivé », listés par `grimoire host status --host all` (JSON : clé
+  `orphans`). `grimoire host sync --prune-disabled` les retire — opt-in
+  explicite, jamais par défaut. Les fusions JSON (`.claude/settings.json`,
+  `.mcp.json`) ne sont jamais retirées : elles portent aussi la configuration
+  propre du projet.
+
+`grimoire doctor` complète ce tableau sans jamais faire échouer le diagnostic :
+INFO pour les fichiers orphelins d'un hôte désactivé, WARN si un hôte activé
+n'a encore rien émis (généralement : `grimoire host sync` n'a pas tourné).
+
 ## Persona d'entrée
 
 Chaque projet désigne une persona d'entrée — `concierge` par défaut — celle qui
@@ -180,22 +226,31 @@ rules:
     require_approval: true            # ask à la 1re occurrence de la session, allow ensuite
     cooldown_after: {pattern: "Bash(rm:*)", count: 5, minutes: 10}
   - id: session-write-budget
-    description: "Pas plus de 50 écritures par session"
+    description: "Pas plus de 50 écritures par session, alerte au-delà"
     action_kinds: []
     mutation_classes: []
     risk_profiles: []
-    verdict_on_match: block
+    verdict_on_match: warn   # jamais "block" sans tool_pattern — voir le garde-fou plus bas
     reason_template: "Budget d'écritures de session dépassé"
     per_session: {max_writes: 50, max_tool_calls: 200, max_cost_usd: 2.0, max_duration_min: 60}
 ```
 
 **Règles.** Quatre clés nouvelles, toutes optionnelles : `tool_pattern`,
 `require_approval` (booléen), `per_session`
-(`max_tool_calls`/`max_writes`/`max_cost_usd`/`max_duration_min`, chacun
-optionnel) et `cooldown_after` (`pattern`/`count`/`minutes`). Une clé inconnue
-sous `PolicyRule`, `per_session` ou `cooldown_after` échoue au chargement avec
-une `GrimoirePolicyError` nommée (`GR-POL-002`) — jamais silencieusement
-ignorée.
+(`max_tool_calls`/`max_writes`/`max_cost_usd`/`max_duration_min`/`subagents`,
+chacun optionnel) et `cooldown_after` (`pattern`/`count`/`minutes`). Une clé
+inconnue sous `PolicyRule`, `per_session` ou `cooldown_after` échoue au
+chargement avec une `GrimoirePolicyError` nommée (`GR-POL-002`) — jamais
+silencieusement ignorée.
+
+**Comptage (`max_tool_calls` vs `max_writes`).** Corrigé le 2026-09-12
+(#463) : `max_writes` ne compte que les appels réellement mutants —
+`Write`/`Edit`/`NotebookEdit`, et un `Bash` dont la commande n'est pas
+reconnue comme lecture seule (`grimoire.hosts.decisions.tool_facts.is_read_only_command` :
+`cat`, `grep`, `find`, `git status`, `gh pr view`… reconnus, tout le reste
+resté conservateur — classé mutation par défaut). `max_tool_calls`, lui,
+compte tout, lectures comprises : c'est sa raison d'être, un budget de
+volume total d'appels plutôt que de mutation.
 
 **Clé d'outil (`tool_pattern` / `cooldown_after.pattern`).** Corrigé le
 2026-09-12 (#449) : ces motifs n'étaient comparés qu'au nom nu de l'outil
@@ -239,6 +294,35 @@ est porté à l'identique en Python
 (`tests/unit/test_policies_rust_parity.py`) ; la persistance de l'état reste
 Python dans les deux cas.
 
+**Exemption de réparation.** Ajoutée le 2026-09-12 (#463) après un incident
+réel : une règle `per_session` en `block` n'atteint jamais
+`Read`/`Glob`/`Grep` (ni un `Bash` classé lecture seule), ni une écriture qui
+cible `_grimoire/standard/policies.yaml` ou
+`_grimoire-output/.runs/session-*.json` — les deux seuls fichiers qui
+permettent de lever le blocage. L'exemption est codée en dur (pas une clé de
+configuration désactivable), mirée à l'identique en Rust, et ne compte pas
+dans les compteurs de la règle qu'elle contourne. Sans elle, un budget global
+en `block` pouvait refuser jusqu'à l'édition du fichier qui le portait.
+
+**Sous-agents.** Le payload de hook de Claude Code envoie le même
+`session_id` pour un appel d'outil fait par un sous-agent (son outil `Task`)
+que pour un appel de la session parente, et ne documente aucun champ
+(`agent_id`, `parent_session_id`…) pour les distinguer. Tout sous-agent
+lancé depuis une session **partage donc le budget de sa session parente** —
+`per_session.subagents` le nomme explicitement : `"shared"` (défaut, seule
+valeur supportée) assume ce partage ; `"separate"` échoue au chargement
+(`GrimoirePolicyError`, `GR-POL-003`) plutôt que de laisser croire à une
+isolation qui n'existe pas dans les hôtes actuels.
+
+**Garde-fou de conception.** `grimoire doctor` signale (`WARN`,
+`policy_budget_guard`) toute règle `per_session` sans `tool_pattern` (donc
+`"*"`, tous les outils) déclarée en `verdict_on_match: block` : une fois son
+plafond atteint, une telle règle refuse tout le reste de la session, exemption
+de réparation mise à part. Ce n'est jamais un `FAIL` — un projet peut
+l'assumer — mais ce n'est plus silencieux. L'exemple ci-dessus utilise
+délibérément `warn` plutôt que `block` ; un budget en `block` doit cibler un
+`tool_pattern` précis (`Bash(rm:*)`, `Write`…), jamais `*`.
+
 `require_approval` ne se marque **jamais** approuvée depuis `PreToolUse` :
 demander (`ask`) n'est pas une preuve que l'humain a dit oui, donc rien dans
 le chemin de décision de `PreToolUse` ne met `approved` à `true` — une
@@ -253,10 +337,20 @@ session neuve redemande. Sans cette étape, un garde `require_approval`
 échouait ouvert (la version initiale de ce chantier faisait cette erreur,
 corrigée en revue le 2026-09-12).
 
-**Visibilité.** `grimoire policies status [--session-id ...] [--json]`
-affiche les compteurs et budgets restants de la session courante (ou la plus
-récente si aucune n'est précisée). Le cockpit n'a pas de vue équivalente pour
-l'instant.
+**Visibilité et remise à zéro.** `grimoire policies status [--session-id ...]
+[--json]` affiche les compteurs et budgets restants de la session courante
+(ou la plus récente si aucune n'est précisée), et signale désormais
+(`ATTENTION`) tout budget à moins de 10 % de son plafond restant — avant le
+refus, pas seulement au moment du refus. `grimoire policies reset-session
+[--session-id ...] [--json]` supprime l'état d'une session (la courante par
+défaut), avec confirmation nommant le fichier supprimé ; un fichier d'état
+absent, tronqué ou d'une version de schéma inconnue redevenant une session
+neuve (voir plus haut), c'est suffisant pour lever un blocage sans attendre
+une session neuve. Le message de refus d'un budget nomme systématiquement
+cette commande et le fichier de règles :
+`"... ; grimoire policies reset-session ou relever per_session dans
+_grimoire/standard/policies.yaml"`. Le cockpit n'a pas de vue équivalente
+pour l'instant.
 
 ## Coût des hooks
 

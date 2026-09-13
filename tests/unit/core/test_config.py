@@ -10,6 +10,7 @@ import pytest
 from grimoire.core.config import (
     AgentsConfig,
     GrimoireConfig,
+    HostsConfig,
     MemoryConfig,
     ProjectConfig,
     RepoConfig,
@@ -172,6 +173,33 @@ class TestAgentsConfig:
             assert AgentsConfig.from_dict({"freshness_threshold_days": bad}).freshness_threshold_days == 90
 
 
+class TestHostsConfig:
+    """Issue #177 (petite version) : `hosts.enabled`, absent = ``None``."""
+
+    def test_absent_key_is_none(self) -> None:
+        assert HostsConfig.from_dict({}).enabled is None
+
+    def test_explicit_null_is_none(self) -> None:
+        assert HostsConfig.from_dict({"enabled": None}).enabled is None
+
+    def test_valid_subset(self) -> None:
+        hc = HostsConfig.from_dict({"enabled": ["claude", "copilot"]})
+        assert hc.enabled == ("claude", "copilot")
+
+    def test_explicit_empty_list_is_preserved_not_none(self) -> None:
+        """Une liste vide déclarée est « n'émettre aucun hôte », jamais confondue avec l'absence de clé."""
+        hc = HostsConfig.from_dict({"enabled": []})
+        assert hc.enabled == ()
+
+    def test_unknown_alias_raises(self) -> None:
+        with pytest.raises(GrimoireConfigError, match="Unknown host id"):
+            HostsConfig.from_dict({"enabled": ["claude", "notahost"]})
+
+    def test_non_list_raises(self) -> None:
+        with pytest.raises(GrimoireConfigError, match="list"):
+            HostsConfig.from_dict({"enabled": "claude"})
+
+
 # ── GrimoireConfig — from_dict ───────────────────────────────────────────────────
 
 class TestGrimoireConfigFromDict:
@@ -181,8 +209,13 @@ class TestGrimoireConfigFromDict:
         assert cfg.user.skill_level == "intermediate"
         assert cfg.memory.backend == "auto"
         assert cfg.agents.archetype == "minimal"
+        assert cfg.hosts.enabled is None
         assert cfg.installed_archetypes == ()
         assert cfg.extra == {}
+
+    def test_hosts_enabled(self) -> None:
+        cfg = GrimoireConfig.from_dict({**_minimal_dict(), "hosts": {"enabled": ["claude"]}})
+        assert cfg.hosts.enabled == ("claude",)
 
     def test_full(self) -> None:
         cfg = GrimoireConfig.from_dict({

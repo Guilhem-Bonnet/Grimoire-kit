@@ -253,6 +253,51 @@ class TestSourceSection:
         assert validate_config(data) == []
 
 
+class TestHostsSection:
+    """`hosts.enabled` — issue #177 (petite version)."""
+
+    def test_valid_subset_is_accepted(self) -> None:
+        data = {**_minimal(), "hosts": {"enabled": ["claude", "copilot"]}}
+        assert validate_config(data) == []
+
+    def test_absent_hosts_is_accepted(self) -> None:
+        assert validate_config(_minimal()) == []
+
+    def test_hosts_not_dict(self) -> None:
+        data = {**_minimal(), "hosts": "nope"}
+        errs = validate_config(data)
+        assert any(e.path == "hosts" for e in errs)
+
+    def test_enabled_not_list(self) -> None:
+        data = {**_minimal(), "hosts": {"enabled": "claude"}}
+        errs = validate_config(data)
+        assert any(e.path == "hosts.enabled" for e in errs)
+
+    def test_unknown_host_alias_is_rejected_with_suggestion(self) -> None:
+        data = {**_minimal(), "hosts": {"enabled": ["notahost"]}}
+        errs = validate_config(data)
+        e = next(e for e in errs if e.path == "hosts.enabled[0]")
+        assert "notahost" in e.message
+        assert e.suggestion.startswith("Valid hosts:")
+
+    def test_non_string_item_is_rejected(self) -> None:
+        data = {**_minimal(), "hosts": {"enabled": [3]}}
+        errs = validate_config(data)
+        assert any(e.path == "hosts.enabled[0]" for e in errs)
+
+    def test_duplicate_host_is_rejected(self) -> None:
+        data = {**_minimal(), "hosts": {"enabled": ["claude", "claude"]}}
+        errs = validate_config(data)
+        assert any("Duplicate" in e.message for e in errs)
+
+    def test_unknown_hosts_key_is_rejected(self) -> None:
+        data = {**_minimal(), "hosts": {"enable": ["claude"]}}
+        errs = validate_config(data)
+        unknown_errs = [e for e in errs if "enable" in e.message]
+        assert len(unknown_errs) == 1
+        assert "enabled" in unknown_errs[0].suggestion
+
+
 class TestValidationErrorStr:
     def test_without_suggestion(self) -> None:
         e = ValidationError(path="p", message="msg")

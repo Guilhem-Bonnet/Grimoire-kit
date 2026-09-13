@@ -351,8 +351,21 @@ class TestTemplateVariableSubstitution:
             assert "{{project_name}}" not in template.content
             assert "{{language}}" not in template.content
 
-    def test_assistant_bridges_point_to_canonical(self, scaffolder):
-        """Portable per-assistant entrypoints reference the canonical instructions."""
+    def test_assistant_bridges_point_to_canonical(self, scaffolder, temp_project):
+        """Portable per-assistant entrypoints reference the canonical instructions.
+
+        Issue #177 : chaque pont n'est planifié que pour un hôte détecté
+        (``hosts.enabled`` absent -> détection filesystem). On marque ici les
+        quatre hôtes comme déjà présents pour vérifier le mécanisme complet,
+        indépendamment du filtrage — un projet réellement vierge n'obtient,
+        lui, que ``CLAUDE.md`` (voir ``test_fresh_project_only_bridges_claude``).
+        """
+        (temp_project / ".claude").mkdir()
+        (temp_project / "AGENTS.md").touch()
+        (temp_project / ".codex").mkdir()
+        (temp_project / "GEMINI.md").touch()
+        (temp_project / ".cursor").mkdir()
+
         plan = ScaffoldPlan()
         scaffolder._plan_assistant_bridges(plan)
 
@@ -362,6 +375,15 @@ class TestTemplateVariableSubstitution:
             assert ".github/copilot-instructions.md" in template.content
         agents = next(t for t in plan.templates if t.label == "AGENTS.md")
         assert "test-project" in agents.content
+
+    def test_fresh_project_only_bridges_claude(self, scaffolder):
+        """Issue #177 (critère d'arrêt) : un répertoire vierge ne reçoit que
+        le pont Claude — pas de GEMINI.md/AGENTS.md/.cursorrules non demandés."""
+        plan = ScaffoldPlan()
+        scaffolder._plan_assistant_bridges(plan)
+
+        labels = {t.label for t in plan.templates}
+        assert labels == {"CLAUDE.md"}
 
     def test_mcp_config_registers_grimoire_server(self, scaffolder):
         """A portable .mcp.json registers the grimoire MCP server (OS-neutral)."""

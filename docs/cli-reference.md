@@ -810,13 +810,21 @@ message d'erreur `pytest` sans relancer la commande à la main.
 ## Cadrage produit
 
 Cinq phases posées sous `_grimoire/cadrage/` : brief, brainstorm, compréhension,
-exigences, cahier des charges.
+exigences, cahier des charges. Le need `--needs project-discovery` (`grimoire
+up`/`grimoire standard init`) scaffolde ce dossier par appel de code direct
+(`cmd_up.py::_step_cadrage`), pas par une suggestion textuelle. Détail complet,
+sévérités et intégration au gate : [docs/cadrage.md](cadrage.md).
 
 | Commande | Description |
 | --- | --- |
 | `grimoire cadrage init` | Poser les cinq phases du cadrage |
 | `grimoire cadrage status` | Progression, phase par phase |
 | `grimoire cadrage check` | Gate de complétude : exigences et cahier des charges doivent être renseignés |
+
+Le même gate est aussi visible dans `grimoire standard verify`/`gate`/`score`/
+`audit` : `error` sur les phases exigences/cahier-des-charges quand le need
+`project-discovery` a été choisi, `warning`/`info` sinon (avis, jamais
+bloquant).
 
 ---
 
