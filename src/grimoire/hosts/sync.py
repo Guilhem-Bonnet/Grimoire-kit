@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from grimoire.hosts import collect
+from grimoire.hosts.detection import enabled_host_ids
 from grimoire.hosts.emitters import apply_plan, emitter_for, supported_hosts
 
 __all__ = ["HostSyncOutcome", "sync_host_surfaces"]
@@ -52,7 +53,13 @@ def sync_host_surfaces(project_root: Path) -> HostSyncOutcome:
     out: list[str] = []
     try:
         surface = collect.build_surface(project_root)
+        # Issue #177 (petite version) : n'émettre que les hôtes déclarés dans
+        # `hosts.enabled`, ou détectés depuis le dépôt quand la clé est
+        # absente — jamais la totalité des hôtes connus par défaut.
+        enabled = enabled_host_ids(project_root)
         for host_id in supported_hosts():
+            if host_id not in enabled:
+                continue
             emitter = emitter_for(host_id)
             if emitter is None:  # pragma: no cover - registry is complete
                 continue
