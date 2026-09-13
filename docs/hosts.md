@@ -60,6 +60,52 @@ comme **dégradation**, avec son repli, et remonté par `grimoire host status` :
   règle dans le fichier d'entrée, et n'est opposable qu'en CI. Le catalogue le
   dit explicitement plutôt que de laisser croire à une protection.
 
+## Hôtes activés
+
+`grimoire host sync` émettait, par défaut, la surface des cinq hôtes connus —
+une équipe qui n'utilise que Claude Code recevait quand même le catalogue
+Gemini, les règles Cursor, etc. (issue #177). Une alternative « canal plugin »
+pour Claude Code a été envisagée puis écartée par décision (2026-09-12) : la
+solution retenue est purement déclarative, sans mécanisme d'installation
+séparé.
+
+`project-context.yaml` porte la déclaration :
+
+```yaml
+hosts:
+  enabled: [claude, copilot]   # sous-ensemble de : claude, copilot, codex, cursor, gemini
+```
+
+**Absence de la clé** : le comportement bascule en détection — un hôte est
+émis s'il a déjà des fichiers dans le dépôt (`.claude/` → claude,
+`.github/copilot-instructions.md` ou `.github/agents/` → copilot, `GEMINI.md`
+→ gemini, `.cursor/` → cursor, `AGENTS.md` **et** `.codex` → codex), et
+`claude` seul si rien n'est détecté. Un projet existant qui n'a jamais connu
+cette clé garde donc exactement les fichiers qu'il a déjà — rien ne se
+supprime au premier `grimoire up` qui suit une mise à jour du kit.
+`grimoire init` écrit la clé avec le résultat de cette détection, pour que le
+comportement soit explicite dès le premier jour : un répertoire vierge
+n'obtient que `claude` et son pont `CLAUDE.md`.
+
+**Émission** : `grimoire host sync` (et donc `grimoire up`) n'écrit que les
+hôtes activés.
+
+- `--host all` (le défaut) se filtre sur `hosts.enabled`.
+- `--host <x>` sur un hôte connu mais non activé est un refus nommé :
+  *« Hôte gemini non activé — ajoute-le à `hosts.enabled`… »* — sauf
+  `--force-host`, qui synchronise quand même sans toucher à la déclaration.
+- Les fichiers déjà émis pour un hôte qu'on vient de désactiver ne sont
+  **jamais** supprimés automatiquement : ce sont des « orphelins d'un hôte
+  désactivé », listés par `grimoire host status --host all` (JSON : clé
+  `orphans`). `grimoire host sync --prune-disabled` les retire — opt-in
+  explicite, jamais par défaut. Les fusions JSON (`.claude/settings.json`,
+  `.mcp.json`) ne sont jamais retirées : elles portent aussi la configuration
+  propre du projet.
+
+`grimoire doctor` complète ce tableau sans jamais faire échouer le diagnostic :
+INFO pour les fichiers orphelins d'un hôte désactivé, WARN si un hôte activé
+n'a encore rien émis (généralement : `grimoire host sync` n'a pas tourné).
+
 ## Persona d'entrée
 
 Chaque projet désigne une persona d'entrée — `concierge` par défaut — celle qui

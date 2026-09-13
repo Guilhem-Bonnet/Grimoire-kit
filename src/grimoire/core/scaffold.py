@@ -26,6 +26,7 @@ from grimoire.core import layout
 from grimoire.core.archetype_resolver import ResolvedArchetype
 from grimoire.core.scanner import ScanResult
 from grimoire.data import framework_path
+from grimoire.hosts.detection import detect_enabled_hosts
 from grimoire.memory import profiles as memory_profiles
 from grimoire.tools.untrusted import UNTRUSTED_OUTPUT_ENTRYPOINTS
 from grimoire.workflows import registry as workflow_registry
@@ -249,6 +250,9 @@ $memory_layers
 agents:
   archetype: "$archetype"
   custom_agents: []
+
+hosts:
+  enabled: [$hosts_enabled_list]
 
 installed_archetypes: [$archetype_list]
 """
@@ -612,6 +616,8 @@ class ProjectScaffolder:
         memory_extra = profile.connection_block(self._backend)
         memory_layers = profile.layers_block()
 
+        hosts_enabled_list = ", ".join(f'"{h}"' for h in detect_enabled_hosts(self._target))
+
         return {
             "project_name": self._project_name,
             "user_name": self._user_name,
@@ -621,6 +627,7 @@ class ProjectScaffolder:
             "stack_list": stack_list,
             "archetype": ", ".join(archetypes),
             "archetype_list": archetype_list,
+            "hosts_enabled_list": hosts_enabled_list,
             "backend": self._backend,
             "memory_extra": memory_extra,
             "memory_layers": memory_layers,
@@ -1248,10 +1255,31 @@ class ProjectScaffolder:
             tier=TIER_SEED,
         ))
 
+    #: Which bridge file belongs to which host alias (issue #177) — ``None``
+    #: for a bridge that has no ``hosts.enabled`` counterpart (there is none
+    #: today: every bridge below maps to exactly one alias).
+    _BRIDGE_HOST_ALIAS: ClassVar[dict[str, str]] = {
+        "CLAUDE.md": "claude",
+        "AGENTS.md": "codex",
+        "GEMINI.md": "gemini",
+        ".cursorrules": "cursor",
+    }
+
     def _plan_assistant_bridges(self, p: ScaffoldPlan) -> None:
         """Emit portable per-assistant entrypoints pointing at the canonical
         ``.github/copilot-instructions.md`` so a Grimoire project works across
-        Copilot, Claude Code, Codex, Gemini CLI and Cursor without drift."""
+        Copilot, Claude Code, Codex, Gemini CLI and Cursor without drift.
+
+        Issue #177 (petite version) : seuls les hôtes détectés/déclarés
+        reçoivent leur pointeur — une équipe qui n'utilise que Claude Code ne
+        doit pas voir apparaître ``GEMINI.md``/``AGENTS.md``/``.cursorrules``
+        au premier ``grimoire init``. La détection tourne sur le répertoire
+        cible avant toute écriture (phase « plan », jamais « execute »), donc
+        elle voit l'état du dépôt tel qu'il était avant ce scaffold — ce que
+        ``hosts.enabled`` reçoit dans ``project-context.yaml`` (voir
+        ``_tpl_vars``) est exactement le même calcul.
+        """
+        enabled_hosts = set(detect_enabled_hosts(self._target))
         v = self._tpl_vars()
         name = v["project_name"]
         canonical = ".github/copilot-instructions.md"
@@ -1290,6 +1318,9 @@ class ProjectScaffolder:
         # activation. Overwriting them destroys that, so a new bridge format
         # reaches existing projects through migration, not through an update.
         for filename, content in bridges.items():
+            alias = self._BRIDGE_HOST_ALIAS.get(filename)
+            if alias is not None and alias not in enabled_hosts:
+                continue
             p.templates.append(TemplateRender(
                 dst=self._target / filename,
                 content=content,

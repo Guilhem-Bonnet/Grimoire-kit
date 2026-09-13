@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- feat(hosts): déclarer les hôtes activés (`hosts.enabled` dans `project-context.yaml`, schéma/validateur/Rust en parité), détection filesystem par défaut quand la clé est absente (`claude` seul si rien n'est détecté), `grimoire init` écrit la clé avec le résultat de la détection. `grimoire host sync`/`up` n'émettent plus que les hôtes activés ; un `--host <x>` désactivé est un refus nommé sauf `--force-host` ; `grimoire host status --host all` liste les fichiers orphelins d'un hôte désactivé, `grimoire host sync --prune-disabled` les retire (opt-in). `grimoire doctor` ajoute INFO (orphelins) et WARN (hôte activé sans fichier émis). Alternative « canal plugin » Claude Code écartée par décision (#177).
+
 ## [3.46.1] - 2026-09-12
 
 - feat(cli): `grimoire init` et `grimoire up` enrôlaient chaque projet dans le registre cockpit réel (`~/.grimoire/cockpit/registry.json`), même les jetables (`/tmp`, un scratchpad, une recette) — seule la variable d'environnement non documentée `GRIMOIRE_NO_COCKPIT` pouvait l'éviter, et rien ne la mentionnait à côté des options des deux commandes. Ajoute `--no-cockpit` à `init` et à `up` (même effet que la variable, documentée au même endroit dans `--help`) (#305).
