@@ -43,6 +43,17 @@ class TestGenerateSchema:
         assert field["default"] == 90
         assert field["minimum"] == 1
 
+    def test_has_hosts_property(self) -> None:
+        schema = generate_schema()
+        assert "hosts" in schema["properties"]
+
+    def test_hosts_enabled_enum(self) -> None:
+        schema = generate_schema()
+        enabled = schema["properties"]["hosts"]["properties"]["enabled"]
+        assert enabled["type"] == "array"
+        assert enabled["items"]["enum"] == ["claude", "codex", "copilot", "cursor", "gemini"]
+        assert enabled["uniqueItems"] is True
+
     def test_has_proposals_property(self) -> None:
         schema = generate_schema()
         assert "proposals" in schema["properties"]
