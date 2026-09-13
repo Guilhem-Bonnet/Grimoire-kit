@@ -1287,7 +1287,7 @@ def run_up_pipeline(
     )
 
     # 4ter. Cadrage — scaffold when `project-discovery` was chosen (#173).
-    _step_cadrage(state, target, needs=_split_csv(needs), dry_run=dry_run, blocked=blocked)
+    _step_cadrage(state, target, needs=needs, dry_run=dry_run, blocked=blocked)
 
     # 4bis. Host surface sync — downstream of both the kit refresh and the
     # standard step, so `.claude/`, `.cursor/`, `.codex/` and `.gemini/`
