@@ -510,6 +510,27 @@ class TestDoctorEnvIntegration:
         assert qdrant["passed"] is True
         assert qdrant["remedy"]
 
+    def test_doctor_local_output_flag_matches_documented_invocation(
+        self, runner, cli_app, init_project: Path
+    ) -> None:
+        """Issue #293: ``grimoire doctor -o json .`` (option after the subcommand,
+        as shown in ``doctor --help``) must work — not just the global
+        ``grimoire -o json doctor .`` form — and must expose the same checks as
+        the global-flag invocation (same contract as other ``--json`` commands)."""
+        with (
+            patch("grimoire.cli.cmd_up.shutil.which", return_value=None),
+            patch("grimoire.cli.cmd_up.socket.create_connection", side_effect=OSError("down")),
+        ):
+            local_result = runner.invoke(cli_app, ["doctor", str(init_project), "-o", "json"])
+            global_result = runner.invoke(cli_app, ["-o", "json", "doctor", str(init_project)])
+        assert local_result.exit_code == 0
+        assert global_result.exit_code == 0
+        local_data = json.loads(local_result.output)
+        global_data = json.loads(global_result.output)
+        assert {c["name"] for c in local_data["checks"]} == {c["name"] for c in global_data["checks"]}
+        assert local_data["passed"] == global_data["passed"]
+        assert local_data["failed"] == global_data["failed"]
+
     def test_doctor_fails_on_broken_mcp_json(self, runner, cli_app, init_project: Path) -> None:
         (init_project / ".mcp.json").write_text(
             json.dumps({"mcpServers": {"broken": {"command": "no-such-binary-xyz", "args": []}}}),

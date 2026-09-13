@@ -889,6 +889,29 @@ def _print_needs_suggestions(target: Path) -> None:
     )
 
 
+#: Archetypes whose DNA cites artifacts that only a profile above `starter`
+#: writes (issue #295): `agentic-standard`'s hard acceptance criteria for
+#: `llm-provider-registry.yaml` and `compliance-declaration.md` need at least
+#: the `controlled` tier. Defaulting a project that already declares this
+#: archetype to the `provider-neutral` need (-> `controlled`) instead of the
+#: bare `starter` fallback closes that gap without imposing the much larger
+#: `orchestrated` tier (task board, memory policy, decision graph…) that only
+#: `knowledge-source-registry.yaml` would otherwise require.
+_ARCHETYPE_DEFAULT_NEEDS: dict[str, tuple[str, ...]] = {
+    "agentic-standard": ("provider-neutral",),
+}
+
+
+def _default_needs_for_archetypes(declared_archetypes: tuple[str, ...]) -> list[str]:
+    """Needs implied by already-declared archetypes, when none were chosen yet."""
+    defaults: list[str] = []
+    for archetype_id in declared_archetypes:
+        for need_id in _ARCHETYPE_DEFAULT_NEEDS.get(archetype_id, ()):
+            if need_id not in defaults:
+                defaults.append(need_id)
+    return defaults
+
+
 def _step_standard(
     state: _UpState,
     target: Path,
@@ -899,6 +922,7 @@ def _step_standard(
     dry_run: bool,
     blocked: bool,
     quiet: bool = False,
+    declared_archetypes: tuple[str, ...] = (),
 ) -> None:
     """Initialise the governed agentic standard (cmd_standard logic, defaults)."""
     if no_standard:
@@ -937,6 +961,13 @@ def _step_standard(
             # (written below, once, on first install); read it back instead
             # of forgetting it on every subsequent `up`.
             effective_needs = list(read_install_manifest_needs(manifest_path))
+        if not effective_needs and not explicit_needs:
+            # #295 — an archetype already declared in `project-context.yaml`
+            # (e.g. `agentic-standard`) can cite artifacts the bare `starter`
+            # profile never writes. Resolve the needs it implies instead of
+            # leaving `doctor` in a permanent FAIL nothing in `up`'s own
+            # output explains how to clear.
+            effective_needs = _default_needs_for_archetypes(declared_archetypes)
 
         plan = None
         if effective_needs:
@@ -1149,11 +1180,15 @@ def up(
     # 4. Agentic standard bootstrap.
     cfg = _load_config_quiet(target)
     project_name = (cfg.project.name if cfg else "") or name or target.name
+    declared_archetypes = tuple(cfg.installed_archetypes) if cfg and cfg.installed_archetypes else (
+        (cfg.agents.archetype,) if cfg and cfg.agents.archetype else ()
+    )
     _step_standard(
         state, target,
         no_standard=no_standard, needs=_split_csv(needs),
         project_name=project_name, dry_run=dry_run, blocked=blocked,
         quiet=fmt != "text",
+        declared_archetypes=declared_archetypes,
     )
 
     # 5. Short doctor summary.

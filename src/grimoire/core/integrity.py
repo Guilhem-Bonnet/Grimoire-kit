@@ -44,6 +44,14 @@ WRITTEN_ON_FIRST_USE = frozenset({
     "_grimoire/overrides/documentation-standards.md",
     # A destination the migration creates when it runs, not an input to read.
     "_grimoire/_memory/migration/weaviate-neo4j",
+    # The `agentic-standard` archetype's own trait says it plainly: an
+    # external source is declared here "avant usage récurrent" (before
+    # *recurring* use) — a project that has not indexed anything yet has
+    # nothing to declare. Every reader tolerates its absence already
+    # (`_read_yaml_mapping` returns `{}`), and it is only ever written by a
+    # standard tier at or above `orchestrated` (issue #295) — never a promise
+    # `starter`/`controlled` projects with the archetype declared can honor.
+    "_grimoire/standard/knowledge-source-registry.yaml",
 })
 
 #: Anchored on the left: ``grimoire-kit/_grimoire/kit/x`` names a path inside
