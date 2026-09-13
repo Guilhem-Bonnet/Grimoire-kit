@@ -66,8 +66,10 @@ def load_board(root: Path) -> dict[str, Any]:
                 data.setdefault("total_emitted", 0)
                 data.setdefault("total_evaporated", 0)
                 return data
-        except (json.JSONDecodeError, OSError):
-            pass
+        except (json.JSONDecodeError, OSError) as exc:
+            try: path.replace(path.with_name(f"{path.name}.corrupt-{datetime.now(UTC).strftime('%Y%m%dT%H%M%S%f')}"))
+            except OSError: pass
+            print(f"[stigmergy_hook] board corrompu ({exc}) mis de côté: {path.name}", file=sys.stderr)
     return {"version": "1.0.0", "half_life_hours": DEFAULT_HALF_LIFE_HOURS,
             "pheromones": [], "total_emitted": 0, "total_evaporated": 0}
 
@@ -75,7 +77,6 @@ def load_board(root: Path) -> dict[str, Any]:
 def save_board(root: Path, board: dict[str, Any]) -> None:
     """Écriture atomique (temp + replace) : jamais de board corrompu."""
     import os
-
     path = _board_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
@@ -236,7 +237,6 @@ def log_event(root: Path, action: str, **fields: Any) -> None:
         existing.append(line)
         if len(existing) > EVENTS_MAX_LINES:
             import os
-
             existing = existing[-EVENTS_MAX_LINES:]
             tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
             tmp.write_text("\n".join(existing) + "\n", encoding="utf-8")

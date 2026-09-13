@@ -129,6 +129,25 @@ class TestParity:
         assert hook.compute_intensity(ph, 72.0, NOW) == pytest.approx(0.5, abs=1e-9)
 
 
+class TestBoardCorruption:
+    def test_corrupt_board_is_not_overwritten(self, hook: ModuleType, tmp_path: Path) -> None:
+        """#265 : un board corrompu ne doit jamais être écrasé par un board vide."""
+        board = hook.load_board(tmp_path)
+        hook.emit(board, "ALERT", "a.py", "premier signal", "t", 0.7)
+        hook.save_board(tmp_path, board)
+        path = hook._board_path(tmp_path)
+        corrompu = path.read_text(encoding="utf-8")[:20]
+        path.write_text(corrompu, encoding="utf-8")
+
+        board2 = hook.load_board(tmp_path)
+        hook.emit(board2, "ALERT", "b.py", "second signal", "t", 0.7)
+        hook.save_board(tmp_path, board2)
+
+        survivors = list(path.parent.glob(path.name + ".corrupt-*"))
+        assert survivors, "le board corrompu n'a pas été mis de côté"
+        assert survivors[0].read_text(encoding="utf-8") == corrompu
+
+
 class _FakeStdin:
     def __init__(self, data: str) -> None:
         self._data = data

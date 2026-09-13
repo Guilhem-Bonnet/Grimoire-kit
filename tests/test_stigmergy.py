@@ -187,6 +187,17 @@ class TestPersistence(unittest.TestCase):
         b = self.st.load_board(self.root)
         self.assertEqual(b.pheromones, [])
 
+    def test_un_board_corrompu_n_est_pas_ecrase(self):
+        """#265 : un board corrompu ne doit jamais être écrasé par un board vide."""
+        self.st.deposit_pheromone(self.root, "ALERT", "a.py", "premier signal", "t")
+        path = self.root / "_grimoire-output" / "pheromone-board.json"
+        corrompu = path.read_text(encoding="utf-8")[:40]
+        path.write_text(corrompu, encoding="utf-8")
+        self.st.deposit_pheromone(self.root, "ALERT", "b.py", "second signal", "t")
+        survivants = list(path.parent.glob(path.name + ".corrupt-*"))
+        self.assertTrue(survivants, "le board corrompu n'a pas été mis de côté")
+        self.assertEqual(survivants[0].read_text(encoding="utf-8"), corrompu)
+
     def test_save_creates_directory(self):
         root = self.tmpdir / "new-project"
         b = self.st.PheromoneBoard()

@@ -235,7 +235,10 @@ def load_board(project_root: Path) -> PheromoneBoard:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         return PheromoneBoard.from_dict(data)
-    except (json.JSONDecodeError, OSError):
+    except (json.JSONDecodeError, OSError) as exc:
+        try: path.replace(path.with_name(f"{path.name}.corrupt-{datetime.now(UTC).strftime('%Y%m%dT%H%M%S%f')}"))
+        except OSError: pass
+        print(f"[stigmergy] pheromone board corrompu ({exc}) mis de côté: {path.name}", file=sys.stderr)
         return PheromoneBoard()
 
 
@@ -243,14 +246,12 @@ def save_board(project_root: Path, board: PheromoneBoard) -> None:
     """Sauvegarde le pheromone board."""
     path = _board_path(project_root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(board.to_dict(), indent=2, ensure_ascii=False),
-                    encoding="utf-8")
+    path.write_text(json.dumps(board.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 # ── ID Generation ─────────────────────────────────────────────────────────────
 
-def _generate_id(ptype: str, location: str, text: str,
-                 timestamp: str) -> str:
+def _generate_id(ptype: str, location: str, text: str, timestamp: str) -> str:
     """Génère un ID court de phéromone."""
     raw = f"{ptype}:{location}:{text}:{timestamp}"
     h = hashlib.sha256(raw.encode()).hexdigest()[:8]
@@ -259,9 +260,7 @@ def _generate_id(ptype: str, location: str, text: str,
 
 # ── Évaporation ───────────────────────────────────────────────────────────────
 
-def compute_current_intensity(pheromone: Pheromone,
-                               half_life_hours: float,
-                               now: datetime | None = None) -> float:
+def compute_current_intensity(pheromone: Pheromone, half_life_hours: float, now: datetime | None = None) -> float:
     """Calcule l'intensité actuelle après évaporation."""
     if now is None:
         now = datetime.now(tz=UTC)
