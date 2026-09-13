@@ -240,11 +240,24 @@ class DispatchOutcomeStats:
     ``dispatch.cost_slo`` du standard lit pour juger si assez de données
     existent avant d'en tirer un taux. ``pass_k_rate`` est ``None`` sans
     aucune série rejouée.
+
+    ``by_flow`` (issue #208, lot 5 réduit) : troisième ventilation, par
+    identifiant de flow — le préfixe ``blueprint_id`` du tag ``replay:`` d'un
+    node de flow (``flows.dispatch_executor`` le pose comme
+    ``replay:<blueprint_id>:<node_id>``). Un dispatch hors flow ne porte
+    jamais de ``:`` dans sa clé de rejeu (repli sur l'id de tâche) et n'entre
+    donc jamais dans ce regroupement. Toujours calculé en Python, y compris
+    quand le backend Rust est actif pour ``overall``/``by_class``/
+    ``by_provider``/pass^k (voir :func:`_by_flow_groups`) : une dimension de
+    plus sur les mêmes enregistrements, pas une fonction assez chaude pour
+    justifier un sixième port Rust — les deux backends la calculent à
+    l'identique, donc sans jamais diverger entre eux.
     """
 
     overall: DispatchOutcomeGroupStats
     by_class: dict[str, DispatchOutcomeGroupStats]
     by_provider: dict[str, DispatchOutcomeGroupStats]
+    by_flow: dict[str, DispatchOutcomeGroupStats]
     pass_k_observations: int
     pass_k_fully_green: int
 
@@ -257,6 +270,7 @@ class DispatchOutcomeStats:
             "overall": self.overall.to_dict(),
             "by_class": {key: value.to_dict() for key, value in self.by_class.items()},
             "by_provider": {key: value.to_dict() for key, value in self.by_provider.items()},
+            "by_flow": {key: value.to_dict() for key, value in self.by_flow.items()},
             "pass_k_observations": self.pass_k_observations,
             "pass_k_fully_green": self.pass_k_fully_green,
             "pass_k_rate": self.pass_k_rate,
@@ -275,6 +289,35 @@ def _last_tag_value(tags: Iterable[str], prefix: str) -> str:
         if tag.startswith(prefix):
             value = tag[len(prefix) :]
     return value
+
+
+def _by_flow_groups(records: list[tuple[tuple[str, ...], float]]) -> dict[str, DispatchOutcomeGroupStats]:
+    """Ventilation par flow (issue #208) : voir le docstring de ``DispatchOutcomeStats.by_flow``."""
+
+    def _new_group() -> dict[str, Any]:
+        return {"total": 0, "resolved": 0, "inexecutable": 0, "escalated": 0, "total_cost_usd": 0.0}
+
+    groups: dict[str, dict[str, Any]] = {}
+    for tags, cost_usd in records:
+        if DISPATCH_OUTCOME_TAG not in tags:
+            continue
+        replay_key = _last_tag_value(tags, "replay:")
+        blueprint_id, sep, node_id = replay_key.partition(":")
+        if not sep or not blueprint_id or not node_id:
+            continue
+        tiers = {tag.removeprefix("tier:") for tag in tags if tag.startswith("tier:")}
+        acceptance = _last_tag_value(tags, "acceptance:")
+        resolved = _last_tag_value(tags, "resolved:") == "true"
+        group = groups.setdefault(blueprint_id, _new_group())
+        group["total"] += 1
+        group["total_cost_usd"] += cost_usd
+        if resolved:
+            group["resolved"] += 1
+        if acceptance == "unrunnable":
+            group["inexecutable"] += 1
+        if len(tiers) > 1:
+            group["escalated"] += 1
+    return {name: DispatchOutcomeGroupStats(**stats) for name, stats in groups.items()}
 
 
 def compute_dispatch_outcome_stats(
@@ -305,6 +348,9 @@ def compute_dispatch_outcome_stats(
     :func:`_use_rust_backend`. Le chemin Python ci-dessous est
     l'implémentation de référence.
     """
+    records = list(records)  # itéré deux fois ci-dessous (backend + _by_flow_groups) — jamais un générateur épuisé
+    by_flow = _by_flow_groups(records)
+
     if _use_rust_backend():
         assert _rust_core is not None  # guarded by _use_rust_backend
         raw_overall, raw_by_class, raw_by_provider, pass_k_observations, pass_k_fully_green = (
@@ -314,6 +360,7 @@ def compute_dispatch_outcome_stats(
             overall=_group_stats_from_tuple(raw_overall),
             by_class={name: _group_stats_from_tuple(stats) for name, stats in raw_by_class},
             by_provider={name: _group_stats_from_tuple(stats) for name, stats in raw_by_provider},
+            by_flow=by_flow,
             pass_k_observations=int(pass_k_observations),
             pass_k_fully_green=int(pass_k_fully_green),
         )
@@ -378,6 +425,7 @@ def compute_dispatch_outcome_stats(
         overall=DispatchOutcomeGroupStats(**overall),
         by_class={name: DispatchOutcomeGroupStats(**stats) for name, stats in by_class.items()},
         by_provider={name: DispatchOutcomeGroupStats(**stats) for name, stats in by_provider.items()},
+        by_flow=by_flow,
         pass_k_observations=pass_k_observations,
         pass_k_fully_green=pass_k_fully_green,
     )

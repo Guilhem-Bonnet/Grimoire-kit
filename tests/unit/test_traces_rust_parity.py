@@ -367,6 +367,14 @@ def test_dispatch_outcome_stats_on_the_enriched_fixture_matches_hand_computed_va
     assert stats.by_provider["openai"].inexecutable == 1
     assert stats.by_provider["anthropic"].escalated == 1
 
+    # by_flow (issue #208) : bp-demo:node-1 (3) + bp-demo:node-2 (2) — GAO-solo-1
+    # ne porte pas de ":" dans sa clé de rejeu, jamais un flow.
+    assert set(stats.by_flow) == {"bp-demo"}
+    assert stats.by_flow["bp-demo"].total == 5
+    assert stats.by_flow["bp-demo"].resolved == 4
+    assert stats.by_flow["bp-demo"].escalated == 1
+    assert stats.by_flow["bp-demo"].inexecutable == 0
+
     # bp-demo:node-1 : vert, vert, rouge → pas une série entièrement verte.
     # bp-demo:node-2 : vert, vert → entièrement verte. GAO-solo-1 : une seule
     # observation, jamais une série.
