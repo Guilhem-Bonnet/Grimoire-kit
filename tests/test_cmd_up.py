@@ -465,8 +465,17 @@ class TestUpNoCockpit:
         registered = json.loads(simulated_real_home.read_text(encoding="utf-8"))
         assert any(p.get("path") == str(target) for p in registered)
 
-    def test_up_no_cockpit_documented_in_help(self, runner, cli_app) -> None:
-        result = runner.invoke(cli_app, ["up", "--help"])
-        assert result.exit_code == 0
-        assert "--no-cockpit" in result.output
-        assert "GRIMOIRE_NO_COCKPIT" in result.output
+    def test_up_no_cockpit_documented_in_help(self, cli_app) -> None:
+        """Same lesson as `TestUpAlias.test_up_help_shows_new_flags`: check the
+        declared option and the raw docstring, not the Rich-rendered
+        `--help` text — a long option name can wrap or hyphenate under a
+        narrow terminal width, which is what turned this test red on
+        windows-latest CI."""
+        from typer.main import get_command
+
+        group = get_command(cli_app)
+        up = group.get_command(None, "up")
+        assert up is not None
+        declared = {opt for param in up.params for opt in getattr(param, "opts", [])}
+        assert "--no-cockpit" in declared
+        assert "GRIMOIRE_NO_COCKPIT" in (up.help or "")

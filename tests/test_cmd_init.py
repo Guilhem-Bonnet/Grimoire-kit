@@ -359,8 +359,20 @@ class TestInitNoCockpit:
         registered = json.loads(simulated_real_home.read_text(encoding="utf-8"))
         assert any(p.get("path") == str(target) for p in registered)
 
-    def test_init_no_cockpit_documented_in_help(self, runner, app) -> None:
-        result = runner.invoke(app, ["init", "--help"])
-        assert result.exit_code == 0
-        assert "--no-cockpit" in result.output
-        assert "GRIMOIRE_NO_COCKPIT" in result.output
+    def test_init_no_cockpit_documented_in_help(self, app) -> None:
+        """The option exists on the command, and the env var is documented
+        alongside it — checked on the declared parameters and the raw
+        docstring rather than the Rich-rendered `--help` text: under a
+        narrow terminal width, Rich can wrap or hyphenate a long option name
+        across a line break, making a substring search on the rendered
+        output test the runner's terminal width instead of the contract
+        (see `TestUpAlias.test_up_help_shows_new_flags` in test_cmd_up.py for
+        the same lesson, and CI turning this test red on windows-latest)."""
+        from typer.main import get_command
+
+        group = get_command(app)
+        init_cmd = group.get_command(None, "init")
+        assert init_cmd is not None
+        declared = {opt for param in init_cmd.params for opt in getattr(param, "opts", [])}
+        assert "--no-cockpit" in declared
+        assert "GRIMOIRE_NO_COCKPIT" in (init_cmd.help or "")
