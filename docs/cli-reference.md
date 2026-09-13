@@ -533,6 +533,32 @@ moment. Le rapport (`start_tier`, `start_tier_reason`) et l'événement
 `task.dispatched` disent tous deux quel palier a été retenu et pourquoi ;
 `--start-tier cheap|mid|strong` l'impose sans consulter l'historique.
 
+#### Le pilote : combien dépenser par node (issue #209)
+
+Une fonction de décision — jamais une couche — appelée avant chaque node
+dispatché par `flow run --executor dispatch` : le graphe dit *quoi*, le
+pilote dit *combien*. Une politique de projet optionnelle,
+`_grimoire/standard/pilot.yaml`, la paramètre ; absente, le comportement est
+exactement celui décrit ci-dessus (palier de départ ajusté par
+l'historique, aucun plafond).
+
+```yaml
+start_tier:
+  V0: mid          # ne peut jamais descendre sous le plancher de la classe
+max_escalations: 1  # 0 = aucune escalade permise, absent = pas de plafond posé ici
+max_cost_usd_per_node: 0.50
+```
+
+`max_cost_usd_per_node` s'applique dans `missions.dispatch.run_dispatch`
+lui-même (`max_cost_usd`) : entre deux paliers, jamais au milieu d'une
+tentative ni après un vert déjà acquis — seule l'escalade vers un palier
+*plus cher* est abandonnée. Le rapport porte alors `cost_capped` (un message
+nommé) plutôt qu'une chaîne simplement épuisée ; côté `flow status`, le node
+apparaît avec le verdict `cost_capped`. Un `pilot.yaml` malformé refuse
+nommément le chargement plutôt que de retomber en silence sur « aucun
+plafond » — contrairement à `orchestration-policy.yaml`, un plafond de coût
+est un mécanisme de sécurité.
+
 #### Classe de relisibilité
 
 Un dispatch qui finit au vert classe aussi le diff qu'il a produit

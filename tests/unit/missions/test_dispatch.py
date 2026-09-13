@@ -901,3 +901,89 @@ def test_aucun_contenu_de_prompt_dans_l_evenement_dispatch_outcome(tmp_path: Pat
     trace = _only_dispatch_outcome(tmp_path)
     dumped = json.dumps(trace.to_dict())
     assert unique_marker not in dumped
+
+
+# ── ``max_cost_usd`` : le pilote arrête l'escalade, refus nommé (issue #209) ─
+
+
+def test_max_cost_usd_arrete_l_escalade_avant_le_palier_suivant(tmp_path: Path) -> None:
+    """``cheap`` coûte 0.5 et rate son check (rouge) ; sans plafond, ``mid``
+    prendrait le relais et réussirait. Avec ``max_cost_usd=0.4`` (déjà
+    dépassé par le seul palier ``cheap``), la cascade s'arrête net : jamais
+    d'appel à ``mid``, un refus nommé plutôt qu'une chaîne épuisée muette."""
+    cheap = _script(
+        tmp_path,
+        "cheap.py",
+        """\
+        import json
+        from pathlib import Path
+        Path("marker.txt").write_text("wrong", encoding="utf-8")
+        print(json.dumps({"total_cost_usd": 0.5}))
+        """,
+    )
+    mid = _script(tmp_path, "mid.py", _WRITE_MARKER)
+    _write_registry(
+        tmp_path,
+        _provider_yaml("cheap-writer", "cheap", _invocation(cheap)),
+        _provider_yaml("mid-writer", "mid", _invocation(mid)),
+    )
+    service = _service(tmp_path)
+    tid = _task(service, acceptance=(V0_CRITERION,))
+
+    report = run_dispatch(service, tid, checks=("grep -q done marker.txt",), max_cost_usd=0.4)
+
+    assert len(report.attempts) == 1
+    assert report.attempts[0].provider == "cheap-writer"
+    assert report.succeeded is False
+    assert report.cost_capped is not None
+    assert "0.4" in report.cost_capped
+
+
+def test_max_cost_usd_ne_retracte_pas_un_vert_deja_acquis(tmp_path: Path) -> None:
+    """Un palier vert qui dépasse le plafond après coup reste un succès : le
+    plafond n'abandonne que l'escalade vers un palier *plus cher*, jamais un
+    résultat déjà obtenu."""
+    payant_vert = _script(
+        tmp_path,
+        "payant_vert.py",
+        """\
+        import json
+        from pathlib import Path
+        Path("marker.txt").write_text("done", encoding="utf-8")
+        print(json.dumps({"total_cost_usd": 5.0}))
+        """,
+    )
+    _write_registry(tmp_path, _provider_yaml("cheap-writer", "cheap", _invocation(payant_vert)))
+    service = _service(tmp_path)
+    tid = _task(service, acceptance=(V0_CRITERION,))
+
+    report = run_dispatch(service, tid, checks=("test -f marker.txt",), max_cost_usd=0.01)
+
+    assert report.succeeded is True
+    assert report.cost_capped is None
+
+
+def test_max_cost_usd_absent_ne_change_rien(tmp_path: Path) -> None:
+    """Sans plafond (défaut), le comportement est inchangé : la cascade escalade normalement."""
+    cheap = _script(
+        tmp_path,
+        "cheap.py",
+        """\
+        from pathlib import Path
+        Path("marker.txt").write_text("wrong", encoding="utf-8")
+        """,
+    )
+    mid = _script(tmp_path, "mid.py", _WRITE_MARKER)
+    _write_registry(
+        tmp_path,
+        _provider_yaml("cheap-writer", "cheap", _invocation(cheap)),
+        _provider_yaml("mid-writer", "mid", _invocation(mid)),
+    )
+    service = _service(tmp_path)
+    tid = _task(service, acceptance=(V0_CRITERION,))
+
+    report = run_dispatch(service, tid, checks=("grep -q done marker.txt",))
+
+    assert report.succeeded is True
+    assert report.cost_capped is None
+    assert len(report.attempts) == 2

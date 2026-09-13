@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import Any
 
 from grimoire.core.exceptions import GrimoireMissionError, GrimoireRuntimeError
+from grimoire.flows import pilot
 from grimoire.flows.blueprint_loader import build_node_contracts, load_blueprint
 from grimoire.flows.engine import FlowEngine, check_output_against_contract
 from grimoire.flows.schemas import NodeContract, NodeExecutionResult, ResumeOutcome
@@ -187,7 +188,7 @@ class NodeDispatchOutcome:
     node_id: str
     task_id: str
     verifiability: str
-    verdict: str  # "green" | "red" | "acceptance_unrunnable" | "refused_v2" | "host_unavailable"
+    verdict: str  # "green" | "red" | "acceptance_unrunnable" | "cost_capped" | "refused_v2" | "host_unavailable"
     needs_review: bool
     provider: str | None
     attempts: int
@@ -254,7 +255,15 @@ def _node_outcome_from_report(
 ) -> NodeDispatchOutcome:
     last = report.attempts[-1] if report.attempts else None
     known_costs = [a.cost_usd for a in report.attempts if a.cost_usd is not None]
-    verdict = "acceptance_unrunnable" if report.unrunnable is not None else ("green" if report.succeeded else "red")
+    if report.unrunnable is not None:
+        verdict = "acceptance_unrunnable"
+    elif report.cost_capped is not None:
+        # Le pilote (issue #209) a arrêté l'escalade : distinct d'un "red"
+        # ordinaire — la cascade n'a pas épuisé la chaîne, elle a renoncé
+        # au palier suivant que le plafond de coût interdisait.
+        verdict = "cost_capped"
+    else:
+        verdict = "green" if report.succeeded else "red"
     return NodeDispatchOutcome(
         node_id=node_id,
         task_id=task_id,
@@ -303,6 +312,9 @@ class DispatchExecutor:
         #: chaque node, rien de plus. ``None`` : comportement inchangé
         #: (aucun contexte d'agent ajouté).
         self._agent = agent
+        #: Politique du pilote (issue #209) — chargée une fois pour tout le
+        #: run, comme le reste de la configuration de cette instance.
+        self._pilot_policy = pilot.load_pilot_policy(project_root)
         self.last_result: NodeExecutionResult | None = None
         self.node_outcomes: dict[str, NodeDispatchOutcome] = {}
         self.host_node: str | None = None
@@ -369,6 +381,13 @@ class DispatchExecutor:
         # d'acceptance conforme n'engageait jamais aucune commande réelle.
         acceptance_cmds, acceptance_expects, acceptance_stdout, acceptance_timeouts = _acceptance_checks(contract)
         checks = (_verify_command(sys.executable, self._blueprint_path, node_id, result_path), *acceptance_cmds)
+        # Le pilote (issue #209) décide du palier de départ et du plafond de
+        # coût avant cet appel — jamais après. `self._max_tier` (le
+        # `--max-tier` explicite de la CLI) reste prioritaire sur le plafond
+        # d'escalade de la politique : un opérateur qui le donne pour CE run
+        # sait mieux que la politique par défaut du projet.
+        pilot_decision = pilot.decide(verifiability, policy=self._pilot_policy)
+        effective_max_tier = self._max_tier if self._max_tier is not None else pilot_decision.max_tier
         report = run_dispatch(
             self._service,
             task_id,
@@ -379,7 +398,9 @@ class DispatchExecutor:
             acceptance_declared=contract.has_structured_acceptance,
             verifiability_override=verifiability,
             verifiability_warning=contract.verifiability_warning,
-            max_tier=self._max_tier,
+            start_tier=pilot_decision.start_tier,
+            max_tier=effective_max_tier,
+            max_cost_usd=pilot_decision.max_cost_usd,
             call_timeout=self._call_timeout,
             actor=self._actor,
             agent=self._agent,

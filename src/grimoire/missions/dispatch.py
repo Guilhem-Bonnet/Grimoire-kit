@@ -705,6 +705,14 @@ class DispatchReport:
     #: Distinct de ``refusal`` (posé *avant* tout appel) : ici, un appel a bien
     #: réussi, c'est le check qui n'a pas pu juger son résultat.
     unrunnable: str | None = None
+    #: Message nommé quand le pilote (``flows.pilot``, issue #209) a arrêté la
+    #: cascade avant le palier suivant : le coût déjà dépensé sur ce node a
+    #: atteint ou dépassé ``max_cost_usd``. Même mécanique que ``unrunnable``
+    #: (posé après au moins une tentative, jamais avant) — distinct d'un
+    #: succès : un palier qui a réussi juste avant de dépasser le plafond
+    #: reste un succès, la cascade s'arrête d'escalader, jamais de rétracter
+    #: un vert déjà acquis.
+    cost_capped: str | None = None
 
     @property
     def refusal_message(self) -> str | None:
@@ -783,6 +791,8 @@ class DispatchReport:
             data["transition_refused"] = self.transition_refused
         if self.unrunnable is not None:
             data["unrunnable"] = self.unrunnable
+        if self.cost_capped is not None:
+            data["cost_capped"] = self.cost_capped
         return data
 
 
@@ -1043,6 +1053,7 @@ def run_dispatch(
     verifiability_override: Verifiability | None = None,
     verifiability_warning: str | None = None,
     replay_key: str | None = None,
+    max_cost_usd: float | None = None,
 ) -> DispatchReport:
     """Cascade la tâche *task_id* à travers les paliers de fournisseurs.
 
@@ -1079,6 +1090,13 @@ def run_dispatch(
     (429, timeout) fait passer au fournisseur suivant du même palier. Chaque
     tentative — y compris un échec d'appel — laisse un événement
     ``task.dispatched`` au ledger.
+
+    *max_cost_usd* (issue #209, pilote) : plafond de dépense pour ce node,
+    posé par :func:`grimoire.flows.pilot.decide`. Vérifié entre deux paliers,
+    jamais au milieu d'une tentative en cours ni après un vert : un palier qui
+    vient de réussir reste un succès même s'il dépasse le plafond après coup
+    — seule l'escalade vers un palier *plus cher* est abandonnée. ``None`` :
+    comportement inchangé, aucun plafond.
 
     Le palier de départ vient, par défaut, de l'historique des dispatchs
     passés pour ce couple (type de tâche, classe) — :mod:`dispatch_history`,
@@ -1164,7 +1182,8 @@ def run_dispatch(
     root = service.project_root
     attempts: list[DispatchAttempt] = []
     attempt_no = 0
-    for tier in chain:
+    capped_before_next_tier = False
+    for tier_idx, tier in enumerate(chain):
         # Un fournisseur sans `invocation` déclarée n'est jamais candidat ici :
         # `candidates()` sert aussi `providers status`, où un fournisseur sans
         # commande d'appel reste une information utile à afficher — seule la
@@ -1294,7 +1313,36 @@ def run_dispatch(
 
         if tier_settled and attempts[-1].verdict == "green":
             break  # succès : la cascade s'arrête ici
-        # rouge, ou palier épuisé sans appel réussi : palier suivant
+        # rouge, ou palier épuisé sans appel réussi : palier suivant, sauf
+        # plafond de coût déjà atteint (issue #209) — abandonner l'escalade
+        # plutôt que d'essayer un palier plus cher que ce qui reste permis.
+        # Sans effet sur le dernier palier de la chaîne : rien n'y aurait été
+        # abandonné, le rapport reste une chaîne épuisée ordinaire.
+        has_next_tier = tier_idx < len(chain) - 1
+        if max_cost_usd is not None and attempts and has_next_tier:
+            spent_so_far = sum(a.cost_usd or 0.0 for a in attempts)
+            if spent_so_far >= max_cost_usd:
+                capped_before_next_tier = True
+                break
+
+    if capped_before_next_tier:
+        capped_report = DispatchReport(
+            task_id=task_id,
+            verifiability=verifiability.value,
+            dry_run=False,
+            planned_chain=chain,
+            prompt=prompt,
+            attempts=tuple(attempts),
+            start_tier=chosen_tier,
+            start_tier_reason=start_tier_reason,
+            cost_capped=(
+                f"plafond de {max_cost_usd:.4f} USD atteint après "
+                f"{sum(a.cost_usd or 0.0 for a in attempts):.4f} USD sur {len(attempts)} tentative(s) — "
+                "escalade abandonnée avant le palier suivant"
+            ),
+        )
+        _record_dispatch_outcome(root, task, capped_report, acceptance_declared=acceptance_declared, replay_key=replay_key)
+        return capped_report
 
     if not attempts:
         # Aucun fournisseur candidat sur toute la chaîne : la cascade n'a
