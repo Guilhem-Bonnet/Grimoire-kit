@@ -219,6 +219,25 @@ export const api = {
   // cible est le projet déjà servi par l'atelier.
   updateProject: (project, confirm = false) =>
     postOpen('/api/projects/update', { project: project || undefined, confirm }),
+
+  // ── Wizard de setup — le wizard exécute (#171) ─────────────────────────────
+  // Catalogues lus par le wizard avant de le montrer : archétypes (déjà
+  // servis pour atelier.html), backends mémoire connus, needs du catalogue +
+  // suggestions pour CE projet (pont B2/B3, `needs_suggest.py`).
+  archetypesCatalogue: () => get('/api/archetypes'),
+  backendsCatalogue: () => get('/api/backends'),
+  needsCatalogue: () => get('/api/needs'),
+  // Exécute réellement le plan (même mécanique que `grimoire up`, jamais un
+  // sous-processus — voir project_setup.execute_setup_plan). Refusé côté
+  // serveur, fail-closed, avant toute écriture si le plan ne peut pas
+  // s'exécuter. `planOnly: true` garde l'ancien repli — écrire
+  // `_grimoire/setup-plan.json` et rendre la commande à copier-coller, sans
+  // rien exécuter — pour qui préfère lancer `grimoire up` lui-même.
+  setupPlan: (payload) => post('/api/setup', payload || {}),
+  // Dernier journal d'exécution (`_grimoire/setup-run.json`), pour relire la
+  // progression après un rechargement de page. `project` cible un AUTRE
+  // projet que celui déjà résolu — même convention que `health()`.
+  setupRun: (project) => get('/api/setup/run', project ? { project } : undefined),
 };
 
 export default api;
