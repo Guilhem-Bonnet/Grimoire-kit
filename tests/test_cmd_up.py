@@ -321,3 +321,55 @@ class TestUpPreservesStandardProfile:
         steps = {s["step"]: s for s in data["steps"]}
         assert steps["standard"]["status"] != "done"
         assert "governed" in steps["standard"]["detail"] or "orchestrated" in steps["standard"]["detail"]
+
+
+class TestUpAgenticStandardArchetype:
+    """#295 — `up` sur un projet qui déclare déjà l'archétype `agentic-standard`
+    ne doit pas laisser `doctor` en FAIL permanent (profil `starter` ne couvre
+    pas les acceptance criteria hard de la DNA de cet archétype)."""
+
+    def test_up_then_doctor_is_green_with_agentic_standard_archetype(
+        self, runner, cli_app, tmp_path: Path,
+    ) -> None:
+        target = tmp_path / "proj"
+        init_result = runner.invoke(
+            cli_app,
+            ["init", str(target), "-y", "--backend", "local", "-a", "agentic-standard"],
+        )
+        assert init_result.exit_code == 0, init_result.output
+
+        up_result = runner.invoke(cli_app, ["up", str(target), "--backend", "local"])
+        assert up_result.exit_code == 0, up_result.output
+        assert "profile 'starter'" not in up_result.output
+
+        doctor_result = runner.invoke(cli_app, ["doctor", str(target)])
+        assert doctor_result.exit_code == 0, doctor_result.output
+        assert "FAIL" not in doctor_result.output
+
+    def test_up_resolves_provider_neutral_need_for_declared_archetype(
+        self, runner, cli_app, tmp_path: Path,
+    ) -> None:
+        """The default needs implied by `agentic-standard` must write the
+        artifacts its own DNA cites as hard requirements."""
+        target = tmp_path / "proj"
+        init_result = runner.invoke(
+            cli_app,
+            ["init", str(target), "-y", "--backend", "local", "-a", "agentic-standard"],
+        )
+        assert init_result.exit_code == 0, init_result.output
+
+        result = runner.invoke(cli_app, ["up", str(target), "--backend", "local"])
+        assert result.exit_code == 0, result.output
+        assert (target / "_grimoire" / "standard" / "llm-provider-registry.yaml").is_file()
+        assert (target / "_grimoire" / "standard" / "compliance-declaration.md").is_file()
+
+    def test_up_without_agentic_standard_still_defaults_to_starter(
+        self, runner, cli_app, tmp_path: Path,
+    ) -> None:
+        """Unrelated archetypes must not be pulled into a bigger default profile."""
+        target = tmp_path / "proj"
+        result = runner.invoke(
+            cli_app, ["up", str(target), "--backend", "local", "-a", "web-app"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "profile 'starter'" in result.output
