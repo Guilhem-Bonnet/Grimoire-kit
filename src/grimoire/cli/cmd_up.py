@@ -816,6 +816,55 @@ def _step_override_review(state: _UpState, target: Path, *, blocked: bool) -> No
     ))
 
 
+def _step_host_sync(state: _UpState, target: Path, *, dry_run: bool, blocked: bool) -> None:
+    """Synchronise every supported host surface after the kit tier refresh.
+
+    ``refresh`` regenerates ``_grimoire/kit/`` and the agents it contains;
+    the per-host surfaces (``.claude/``, ``.cursor/``, ``.codex/``,
+    ``.gemini/`` — agents, skills, commands, hooks re-rendered per host by
+    ``grimoire.hosts.emitters``) are a downstream projection of it, built by
+    a separate code path (``grimoire host sync``). Without this step, `up`
+    reported ``refresh: done`` while a `host sync --dry-run` run right after
+    still found dozens of files to write (issue #296) — nothing in `up`'s own
+    output said the host surfaces were not part of what it had just done.
+
+    Never ``--force``: a file the project edited by hand is left alone here,
+    exactly as ``grimoire host sync`` behaves by default.
+    """
+    if blocked:
+        state.steps.append(StepResult("host_sync", "skipped", "no project configuration"))
+        return
+    if dry_run:
+        state.steps.append(StepResult("host_sync", "planned", "would sync host surfaces (.claude/, .cursor/, .codex/, .gemini/)"))
+        return
+    try:
+        from grimoire.hosts.collect import build_surface
+        from grimoire.hosts.emitters import apply_plan, emitter_for, supported_hosts
+
+        surface = build_surface(target)
+        results = []
+        for host_id in supported_hosts():
+            emitter = emitter_for(host_id)
+            if emitter is None:  # pragma: no cover - supported_hosts() only lists emitted hosts
+                continue
+            plan = emitter.plan(surface, target)
+            results.append(apply_plan(plan, target, dry_run=False, force=False))
+    except (OSError, GrimoireError) as exc:
+        state.steps.append(StepResult("host_sync", "failed", f"host sync error: {exc}"))
+        return
+
+    written = sum(len(r.written) for r in results)
+    unchanged = sum(len(r.unchanged) for r in results)
+    if written:
+        state.steps.append(StepResult(
+            "host_sync", "done",
+            f"{written} host artifact(s) written, {unchanged} unchanged, across {len(results)} host(s)",
+        ))
+        state.actions.append(f"Synced {written} host artifact(s)")
+    else:
+        state.steps.append(StepResult("host_sync", "done", f"{len(results)} host(s) already in sync"))
+
+
 def _step_structure(state: _UpState, target: Path, *, dry_run: bool) -> None:
     """Reconcile required directories (legacy ``up`` behavior, kept for compat)."""
     for rel in _RECONCILE_DIRS:
@@ -1190,6 +1239,12 @@ def up(
         quiet=fmt != "text",
         declared_archetypes=declared_archetypes,
     )
+
+    # 4bis. Host surface sync — downstream of both the kit refresh and the
+    # standard step, so `.claude/`, `.cursor/`, `.codex/` and `.gemini/`
+    # reflect what this run just wrote (agents, skills, hooks) rather than
+    # what the previous kit version produced (issue #296).
+    _step_host_sync(state, target, dry_run=dry_run, blocked=blocked)
 
     # 5. Short doctor summary.
     checks = _step_doctor_summary(state, target, dry_run=dry_run, blocked=blocked)
