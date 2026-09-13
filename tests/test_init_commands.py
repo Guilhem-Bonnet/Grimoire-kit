@@ -52,28 +52,12 @@ def _find_bash() -> str | None:
 BASH = _find_bash()
 
 # `grimoire-init.sh`, `grimoire.sh` et `install.sh` sont des points d'entrée
-# Unix. Ces tests ne s'exécutent pas sous Windows, et c'est un choix explicite
-# plutôt qu'un oubli.
-#
-# Le job `framework-tests` existe pour les 108 outils Python de
-# `framework/tools/` — l'issue #33 avait montré un `import fcntl` fatal
-# découvert par un utilisateur et non par la CI. Faire tourner en plus des
-# installeurs bash sous Git Bash n'a jamais été son objet, et le dépôt prévoit
-# la résorption de ces scripts vers le CLI Python (`planning/resorption-bash.md`).
-#
-# Mesuré : sous Windows, chacune des 26 invocations atteint le timeout de 30 s,
-# soit treize minutes pour un job qui n'apprend rien — et le job mourait avant
-# que pytest n'imprime la moindre trace. Le coût est réel, l'information nulle.
-#
-# Lever ce skip demande de traiter d'abord la portabilité des scripts eux-mêmes
-# (chemins Windows, outils Unix supposés présents), qui est le chantier de
-# résorption, pas celui de la CI.
+# Unix, mais Windows est une plateforme supportée (décision Guilhem,
+# 2026-09-12, #231) : ces tests tournent aussi sous Windows dès qu'un `bash`
+# utilisable est trouvé (Git Bash — voir `_find_bash`).
 requires_bash = pytest.mark.skipif(
-    BASH is None or sys.platform == "win32",
-    reason=(
-        "points d'entrée Unix : sans bash utilisable, ou sous Windows où leur "
-        "portabilité n'est pas assurée (voir planning/resorption-bash.md)"
-    ),
+    BASH is None,
+    reason="points d'entrée Unix : sans bash utilisable (Git Bash sous Windows)",
 )
 
 
