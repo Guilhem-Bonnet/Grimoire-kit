@@ -417,13 +417,20 @@ def doctor(
                 fixed.append(label)
                 _record(f"fix_{label}", passed=True, detail=f"{label} regenerated (--fix)")
 
-    # 4ter. Agent discoverability (issue #33) — deployed agents need VS Code wrappers
+    # 4ter. Agent discoverability (issue #33) — deployed agents need VS Code wrappers.
+    # Issue #177 : ce check ne vaut que si Copilot est un hôte activé — un
+    # projet qui ne l'a ni déclaré ni détecté n'a légitimement aucun wrapper
+    # à montrer, ce n'est pas une panne.
     with _timed_phase("agents_discoverable"):
+        from grimoire.bridges.schemas import HostId
+        from grimoire.hosts.detection import enabled_host_ids
+
+        copilot_enabled = cfg is not None and HostId.GITHUB_COPILOT in enabled_host_ids(target, cfg)
         agent_files = [
             f for f in layout.layered_files(target, layout.AGENTS_SUBDIR).values()
             if not f.name.endswith(".tpl.md")
         ]
-        if agent_files:
+        if agent_files and copilot_enabled:
             wrappers_dir = target / ".github" / "agents"
             wrappers = list(wrappers_dir.glob("*.agent.md")) if wrappers_dir.is_dir() else []
             if wrappers:
@@ -531,6 +538,43 @@ def doctor(
         warnings = cfg.validate()
         for w in warnings:
             _record("semantic", passed=False, detail=w)
+
+    # 5bis. Hosts declared vs emitted (issue #177) — jamais FAIL : une dette de
+    # déclaration, pas une panne. INFO pour les fichiers orphelins d'un hôte
+    # désactivé (`hosts.enabled`), WARN si un hôte activé n'a rien émis du tout.
+    if cfg:
+        with _timed_phase("hosts_enabled"):
+            from grimoire.hosts.collect import build_surface
+            from grimoire.hosts.detection import alias_for_host, enabled_host_ids
+            from grimoire.hosts.emitters import emitter_for, owned_managed_paths, supported_hosts
+
+            host_surface = build_surface(target)
+            enabled = enabled_host_ids(target, cfg)
+            for host_id in supported_hosts():
+                emitter = emitter_for(host_id)
+                if emitter is None:  # pragma: no cover - registry is complete
+                    continue
+                plan = emitter.plan(host_surface, target)
+                owned = owned_managed_paths(plan, target)
+                alias = alias_for_host(host_id)
+                if host_id in enabled:
+                    if not owned:
+                        detail = (
+                            f"Hôte {alias} activé (`hosts.enabled`) mais aucun fichier émis — "
+                            "lancez `grimoire host sync`"
+                        )
+                        results.append({"name": f"host_missing_{alias}", "passed": True, "detail": detail, "level": "warn"})
+                        if fmt != "json":
+                            console.print(f"  [yellow]WARN[/yellow]  {detail}")
+                elif owned:
+                    rels = [p.resolve().relative_to(target.resolve()).as_posix() for p in owned]
+                    detail = (
+                        f"Hôte {alias} désactivé mais {len(rels)} fichier(s) orphelin(s) : "
+                        f"{', '.join(rels)} — `grimoire host sync --prune-disabled` pour les retirer"
+                    )
+                    results.append({"name": f"host_orphan_{alias}", "passed": True, "detail": detail, "level": "info"})
+                    if fmt != "json":
+                        console.print(f"  [dim]○[/dim]  {detail}")
 
     # 6. Optional dependencies
     with _timed_phase("dependency_scan"):

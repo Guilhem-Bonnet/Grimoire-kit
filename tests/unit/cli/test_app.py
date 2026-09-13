@@ -241,21 +241,47 @@ class TestDoctor:
         assert result.exit_code == 1
         assert "FAIL" in result.output
 
-    def test_doctor_agents_discoverable_pass(self, healthy_project: Path) -> None:
-        # init scaffolds agents AND their .github/agents wrappers — check green.
-        result = runner.invoke(app, ["doctor", str(healthy_project)])
+    @pytest.fixture()
+    def healthy_project_with_copilot(self, healthy_project: Path) -> Path:
+        """`healthy_project` with Copilot explicitly enabled and synced.
+
+        Issue #177 disabled Copilot by default (`hosts.enabled: ["claude"]`
+        on a fresh `init`) — `agents_discoverable` (issue #33) only protects
+        a project that actually declares Copilot as a host.
+        """
+        config_path = healthy_project / "project-context.yaml"
+        content = config_path.read_text(encoding="utf-8")
+        content = content.replace('hosts:\n  enabled: ["claude"]\n', 'hosts:\n  enabled: ["claude", "copilot"]\n')
+        config_path.write_text(content, encoding="utf-8")
+        sync = runner.invoke(app, ["host", "sync", "--host", "copilot", "--project-root", str(healthy_project)])
+        assert sync.exit_code == 0, sync.output
+        return healthy_project
+
+    def test_doctor_agents_discoverable_pass(self, healthy_project_with_copilot: Path) -> None:
+        # Copilot enabled and synced -> its .github/agents wrappers exist — check green.
+        result = runner.invoke(app, ["doctor", str(healthy_project_with_copilot)])
         assert result.exit_code == 0
         assert "agent wrapper" in result.output
 
-    def test_doctor_agents_discoverable_fail(self, healthy_project: Path) -> None:
+    def test_doctor_agents_discoverable_fail(self, healthy_project_with_copilot: Path) -> None:
         # Agents deployed but wrappers wiped (issue #33 §2 symptom on Windows):
         # doctor must fail instead of reporting a healthy project.
         import shutil
 
-        shutil.rmtree(healthy_project / ".github" / "agents")
-        result = runner.invoke(app, ["doctor", str(healthy_project)])
+        shutil.rmtree(healthy_project_with_copilot / ".github" / "agents")
+        result = runner.invoke(app, ["doctor", str(healthy_project_with_copilot)])
         assert result.exit_code == 1
         assert "cannot discover" in result.output
+
+    def test_doctor_agents_discoverable_is_silent_when_copilot_is_not_enabled(
+        self, healthy_project: Path
+    ) -> None:
+        """Issue #177 : Copilot désactivé (défaut d'un `init` Claude-only) ne
+        doit jamais faire échouer ce check — l'absence de wrapper est
+        attendue, pas une panne."""
+        result = runner.invoke(app, ["doctor", str(healthy_project)])
+        assert result.exit_code == 0
+        assert "cannot discover" not in result.output
 
     def test_doctor_shows_project_name(self, healthy_project: Path) -> None:
         result = runner.invoke(app, ["doctor", str(healthy_project)])

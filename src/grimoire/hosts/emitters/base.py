@@ -149,6 +149,25 @@ def _kit_owns(path: Path, emitted: EmittedFile) -> bool:
     return any(marker in head for marker in emitted.owned_if_contains)
 
 
+def owned_managed_paths(plan: EmitPlan, project_root: Path) -> list[Path]:
+    """Fichiers de *plan* qui existent sur disque ET que le kit reconnaît comme siens.
+
+    Utilisé par ``grimoire host status``/``sync --prune-disabled`` (issue
+    #177) pour repérer les fichiers orphelins d'un hôte désactivé. Ne couvre
+    que ``plan.files`` (fichiers entiers marqués ou reconnus par contenu) —
+    jamais ``plan.merges`` (JSON fusionné, ex. ``settings.json``), qui porte
+    aussi la configuration propre du projet et n'est jamais supprimé
+    automatiquement.
+    """
+    root = project_root.resolve()
+    owned: list[Path] = []
+    for emitted in plan.files:
+        dest = root / emitted.relpath
+        if dest.is_file() and _kit_owns(dest, emitted):
+            owned.append(dest)
+    return owned
+
+
 def apply_plan(plan: EmitPlan, project_root: Path, *, dry_run: bool = False, force: bool = False) -> EmitResult:
     """Write *plan* into *project_root*, leaving hand-written files alone."""
     result = EmitResult(host_id=plan.host_id, degradations=list(plan.degradations), dry_run=dry_run)
