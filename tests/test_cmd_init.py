@@ -302,3 +302,77 @@ class TestParseArchetypeSelection:
         with patch("grimoire.cli.cmd_init._guided_discovery", return_value=["web-app"]):
             result = _parse_archetype_selection("0")
         assert result == ["web-app"]
+
+
+class TestInitNoCockpit:
+    """#305 — `init` enrôlait chaque projet dans le registre cockpit réel, même
+    les jetables, sans option pour l'éviter (seule la variable d'environnement
+    non documentée `GRIMOIRE_NO_COCKPIT` le pouvait)."""
+
+    @pytest.fixture
+    def runner(self):
+        from typer.testing import CliRunner
+        return CliRunner()
+
+    @pytest.fixture
+    def app(self):
+        from grimoire.cli.app import app
+        return app
+
+    @pytest.fixture
+    def simulated_real_home(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        """A stand-in for a real `$HOME` with a pre-existing, empty cockpit
+        registry — `GRIMOIRE_COCKPIT_HOME` is what `registry_home()` reads
+        first (see `tools/project_registry.py`), so pointing it here is
+        exactly what a real, already-used machine looks like before this
+        project gets created."""
+        cockpit_home = tmp_path / "simulated-home" / ".grimoire" / "cockpit"
+        cockpit_home.mkdir(parents=True)
+        registry = cockpit_home / "registry.json"
+        registry.write_text("[]", encoding="utf-8")
+        monkeypatch.setenv("GRIMOIRE_COCKPIT_HOME", str(cockpit_home))
+        monkeypatch.delenv("GRIMOIRE_NO_COCKPIT", raising=False)
+        return registry
+
+    def test_init_no_cockpit_leaves_the_registry_untouched(
+        self, runner, app, tmp_path: Path, simulated_real_home: Path,
+    ) -> None:
+        target = tmp_path / "throwaway"
+        before = simulated_real_home.read_bytes()
+
+        result = runner.invoke(app, ["-y", "init", str(target), "--no-cockpit"])
+
+        assert result.exit_code == 0, result.output
+        assert simulated_real_home.read_bytes() == before
+        assert "Cockpit local" not in result.output
+
+    def test_init_without_the_flag_still_enrols(
+        self, runner, app, tmp_path: Path, simulated_real_home: Path,
+    ) -> None:
+        """Control: the flag is what changes the outcome, not the fixture."""
+        target = tmp_path / "real-project"
+
+        result = runner.invoke(app, ["-y", "init", str(target)])
+
+        assert result.exit_code == 0, result.output
+        import json
+        registered = json.loads(simulated_real_home.read_text(encoding="utf-8"))
+        assert any(p.get("path") == str(target) for p in registered)
+
+    def test_init_no_cockpit_documented_in_help(self, app) -> None:
+        """The option exists on the command, and the env var is documented
+        alongside it — checked on the declared parameters and the raw
+        docstring rather than the Rich-rendered `--help` text: under a
+        narrow terminal width, Rich can wrap or hyphenate a long option name
+        across a line break, making a substring search on the rendered
+        output test the runner's terminal width instead of the contract
+        (see `TestUpAlias.test_up_help_shows_new_flags` in test_cmd_up.py for
+        the same lesson, and CI turning this test red on windows-latest)."""
+        from typer.main import get_command
+
+        group = get_command(app)
+        init_cmd = group.get_command(None, "init")
+        assert init_cmd is not None
+        declared = {opt for param in init_cmd.params for opt in getattr(param, "opts", [])}
+        assert "--no-cockpit" in declared
+        assert "GRIMOIRE_NO_COCKPIT" in (init_cmd.help or "")

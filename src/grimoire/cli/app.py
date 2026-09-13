@@ -282,11 +282,17 @@ def init(
     dry_run: bool = typer.Option(False, "--dry-run", help="Show plan without writing."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Express mode: skip the wizard, auto-detect everything."),
     memory_profile: str = typer.Option("", "--memory-profile", "-m", help="Memory composition (lexical, standard, graphe, complet). Inferred when omitted."),
+    no_cockpit: bool = typer.Option(False, "--no-cockpit", help="Do not enrol this project in the local cockpit registry (~/.grimoire/cockpit/registry.json). Same effect as the GRIMOIRE_NO_COCKPIT env var."),
 ) -> None:
     """Initialise a Grimoire project — detect stack, deploy agents, scaffold.
 
     Without flags, launches an interactive wizard. Use [cyan]--yes[/cyan] for
     express mode (auto-detect everything, no questions asked).
+
+    Enrols the project in the local cockpit registry unless [cyan]--no-cockpit[/cyan]
+    is passed or the [cyan]GRIMOIRE_NO_COCKPIT[/cyan] env var is set — useful for a
+    throwaway project (scratch, `/tmp`, a recipe) that should not show up in
+    [cyan]grimoire cockpit[/cyan] (issue #305).
 
     [dim]Examples:[/dim]
       [cyan]grimoire init .[/cyan]                               Interactive wizard
@@ -294,6 +300,7 @@ def init(
       [cyan]grimoire init . -a infra-ops -b weaviate-server[/cyan]  Explicit archetype & backend
       [cyan]grimoire init . -a web-app,infra-ops[/cyan]         Multiple archetypes
       [cyan]grimoire init --dry-run[/cyan]                       Show plan without writing
+      [cyan]grimoire init . -y --no-cockpit[/cyan]               Express, skip cockpit enrolment
     """
     from grimoire.cli.cmd_init import run_init, validate_init_flags
 
@@ -314,6 +321,7 @@ def init(
         force=force,
         dry_run=dry_run,
         memory_profile=memory_profile,
+        no_cockpit=no_cockpit,
     )
 
 

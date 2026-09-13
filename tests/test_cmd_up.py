@@ -420,3 +420,62 @@ class TestUpHostSync:
         steps = {s["step"]: s for s in data["steps"]}
         assert steps["host_sync"]["status"] == "done"
         assert "already in sync" in steps["host_sync"]["detail"]
+
+
+class TestUpNoCockpit:
+    """#305 — `up` enrôle aussi via son étape `init` ; `--no-cockpit` doit
+    couvrir ce chemin exactement comme `grimoire init --no-cockpit`."""
+
+    @pytest.fixture
+    def simulated_real_home(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        cockpit_home = tmp_path / "simulated-home" / ".grimoire" / "cockpit"
+        cockpit_home.mkdir(parents=True)
+        registry = cockpit_home / "registry.json"
+        registry.write_text("[]", encoding="utf-8")
+        # This file's autouse fixture forces GRIMOIRE_NO_COCKPIT=1 for every
+        # test — undo it here so the flag under test is what actually decides
+        # the outcome, not the ambient isolation.
+        monkeypatch.delenv("GRIMOIRE_NO_COCKPIT", raising=False)
+        monkeypatch.setenv("GRIMOIRE_COCKPIT_HOME", str(cockpit_home))
+        return registry
+
+    def test_up_no_cockpit_leaves_the_registry_untouched(
+        self, runner, cli_app, tmp_path: Path, simulated_real_home: Path,
+    ) -> None:
+        target = tmp_path / "throwaway"
+        before = simulated_real_home.read_bytes()
+
+        result = runner.invoke(
+            cli_app, ["up", str(target), "--backend", "local", "--no-cockpit"],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert simulated_real_home.read_bytes() == before
+
+    def test_up_without_the_flag_still_enrols(
+        self, runner, cli_app, tmp_path: Path, simulated_real_home: Path,
+    ) -> None:
+        """Control: the flag is what changes the outcome, not the fixture."""
+        target = tmp_path / "real-project"
+
+        result = runner.invoke(cli_app, ["up", str(target), "--backend", "local"])
+
+        assert result.exit_code == 0, result.output
+        import json
+        registered = json.loads(simulated_real_home.read_text(encoding="utf-8"))
+        assert any(p.get("path") == str(target) for p in registered)
+
+    def test_up_no_cockpit_documented_in_help(self, cli_app) -> None:
+        """Same lesson as `TestUpAlias.test_up_help_shows_new_flags`: check the
+        declared option and the raw docstring, not the Rich-rendered
+        `--help` text — a long option name can wrap or hyphenate under a
+        narrow terminal width, which is what turned this test red on
+        windows-latest CI."""
+        from typer.main import get_command
+
+        group = get_command(cli_app)
+        up = group.get_command(None, "up")
+        assert up is not None
+        declared = {opt for param in up.params for opt in getattr(param, "opts", [])}
+        assert "--no-cockpit" in declared
+        assert "GRIMOIRE_NO_COCKPIT" in (up.help or "")

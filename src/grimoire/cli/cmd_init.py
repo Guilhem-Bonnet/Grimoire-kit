@@ -749,13 +749,16 @@ def _display_json(
 # ── Main entry point ─────────────────────────────────────────────────────────
 
 
-def _maybe_register_cockpit(target: Path, project_name: str, fmt: str) -> None:
+def _maybe_register_cockpit(target: Path, project_name: str, fmt: str, *, no_cockpit: bool = False) -> None:
     """Auto-enrol the freshly scaffolded project in the local cockpit registry.
 
     Best-effort and non-fatal: a registry write failure never breaks ``init``.
-    Opt out with ``GRIMOIRE_NO_COCKPIT``.
+    Opt out with ``--no-cockpit`` (``init``/``up``) or the ``GRIMOIRE_NO_COCKPIT``
+    env var — the flag is the explicit, discoverable form the env var never
+    had (issue #305): a throwaway project (scratch, ``/tmp``, a recipe) had no
+    way to skip enrolment short of remembering an undocumented variable.
     """
-    if os.environ.get("GRIMOIRE_NO_COCKPIT"):
+    if no_cockpit or os.environ.get("GRIMOIRE_NO_COCKPIT"):
         return
     try:
         from grimoire.tools.project_registry import register_project
@@ -815,6 +818,7 @@ def run_init(
     dry_run: bool = False,
     qdrant_docker: bool = False,
     memory_profile: str = "",
+    no_cockpit: bool = False,
 ) -> None:
     """Execute the enhanced init flow: scan → resolve → wizard → scaffold → report."""
     target = target.resolve()
@@ -980,6 +984,6 @@ def run_init(
             qdrant_docker_message=qdrant_docker_message,
         )
 
-    _maybe_register_cockpit(target, project_name, fmt)
+    _maybe_register_cockpit(target, project_name, fmt, no_cockpit=no_cockpit)
 
 
