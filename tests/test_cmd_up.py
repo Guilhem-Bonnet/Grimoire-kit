@@ -361,6 +361,54 @@ class TestUpAgenticStandardArchetype:
         result = runner.invoke(cli_app, ["up", str(target), "--backend", "local"])
         assert result.exit_code == 0, result.output
         assert (target / "_grimoire" / "standard" / "llm-provider-registry.yaml").is_file()
+
+
+class TestUpScaffoldsCadrage:
+    """#173 — le need et la commande se parlent par code : `--needs
+    project-discovery` doit réellement poser `_grimoire/cadrage/`, pas
+    seulement l'écrire dans une phrase de suggestion."""
+
+    def test_needs_project_discovery_scaffolds_cadrage(
+        self, runner, cli_app, tmp_path: Path,
+    ) -> None:
+        target = tmp_path / "proj"
+        result = runner.invoke(
+            cli_app, ["up", str(target), "--backend", "local", "--needs", "project-discovery"],
+        )
+        assert result.exit_code == 0, result.output
+        cadrage_dir = target / "_grimoire" / "cadrage"
+        assert cadrage_dir.is_dir()
+        assert (cadrage_dir / "04-exigences.md").is_file()
+        assert (cadrage_dir / "05-cahier-des-charges.md").is_file()
+        assert "cadrage" in result.output
+
+    def test_an_unrelated_need_does_not_scaffold_cadrage(
+        self, runner, cli_app, tmp_path: Path,
+    ) -> None:
+        target = tmp_path / "proj"
+        result = runner.invoke(
+            cli_app, ["up", str(target), "--backend", "local", "--needs", "solo-prototyping"],
+        )
+        assert result.exit_code == 0, result.output
+        assert not (target / "_grimoire" / "cadrage").exists()
+
+    def test_second_up_does_not_rewrite_an_edited_phase(
+        self, runner, cli_app, tmp_path: Path,
+    ) -> None:
+        """Idempotent : un `up` répété (même sans `--needs`, re-résolu depuis
+        le manifeste — #344) ne doit jamais écraser une phase déjà éditée."""
+        target = tmp_path / "proj"
+        first = runner.invoke(
+            cli_app, ["up", str(target), "--backend", "local", "--needs", "project-discovery"],
+        )
+        assert first.exit_code == 0, first.output
+        brief = target / "_grimoire" / "cadrage" / "01-brief.md"
+        brief.write_text(brief.read_text(encoding="utf-8") + "\nédité à la main.\n", encoding="utf-8")
+        edited = brief.read_text(encoding="utf-8")
+
+        second = runner.invoke(cli_app, ["up", str(target), "--backend", "local"])
+        assert second.exit_code == 0, second.output
+        assert brief.read_text(encoding="utf-8") == edited
         assert (target / "_grimoire" / "standard" / "compliance-declaration.md").is_file()
 
     def test_up_without_agentic_standard_still_defaults_to_starter(

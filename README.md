@@ -129,6 +129,11 @@ Reference: [governed controls (36 patterns)](docs/standard/controles-gouvernes.m
 [standard integration](docs/standard/integration.md) ·
 [install by needs](docs/standard/install-by-needs.md)
 
+The `project-discovery` need scaffolds a guided five-phase product cadrage
+(`_grimoire/cadrage/`: brief → brainstorm → understanding → requirements →
+spec) and turns its completeness into a `standard verify` gate. Details:
+[docs/cadrage.md](docs/cadrage.md).
+
 ## Architecture
 
 Three layers, one wheel (`pip install grimoire-kit`):
@@ -194,6 +199,7 @@ query *and enforce* the governed standard directly.
 [Concepts](docs/concepts.md) ·
 [SDK guide](docs/sdk-guide.md) ·
 [CLI reference](docs/cli-reference.md) ·
+[Cadrage](docs/cadrage.md) ·
 [MCP integration](docs/mcp-integration.md) ·
 [FAQ](docs/faq.md) — full docs (French) on the
 [documentation site](https://guilhem-bonnet.github.io/Grimoire-kit/).
