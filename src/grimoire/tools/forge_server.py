@@ -109,7 +109,13 @@ from grimoire.tools.project_registry import (
     set_selected_slug,
     slug_for_path,
 )
-from grimoire.tools.project_setup import archetypes_catalogue, build_setup_plan
+from grimoire.tools.project_setup import (
+    archetypes_catalogue,
+    build_setup_plan,
+    execute_setup_plan,
+    needs_catalogue,
+    read_setup_run,
+)
 from grimoire.tools.project_update import update_project
 from grimoire.tools.serve_data import DataLayer
 from grimoire.tools.serve_data import resolve as resolve_data
@@ -284,10 +290,28 @@ class ForgeAPI:
     def archetypes(self) -> list[dict[str, Any]]:
         return archetypes_catalogue(self.kit_root)
 
+    def needs_view(self) -> dict[str, Any]:
+        """Catalogue des needs + suggestions pour le projet servi (issue #171)."""
+        return needs_catalogue(self.project_root)
+
     def setup_plan(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return build_setup_plan(
+        """Exécute le plan de setup (issue #171), sauf repli explicite.
+
+        ``payload["planOnly"]: true`` garde l'ancien comportement — écrire
+        ``_grimoire/setup-plan.json`` et laisser la commande à copier-coller,
+        sans rien exécuter. Par défaut, le wizard exécute réellement.
+        """
+        if payload.get("planOnly"):
+            return build_setup_plan(
+                self.project_root, payload, install=self.extension_add
+            )
+        return execute_setup_plan(
             self.project_root, payload, install=self.extension_add
         )
+
+    def setup_run(self) -> dict[str, Any]:
+        """Dernier journal d'exécution du wizard, pour le polling côté UI."""
+        return read_setup_run(self.project_root)
 
     def memory_link_view(self) -> dict[str, Any]:
         """Lien projet ↔ BDD mémoire (B1) : backend configuré, santé, volume."""

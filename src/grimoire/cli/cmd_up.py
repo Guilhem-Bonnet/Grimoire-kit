@@ -1163,53 +1163,61 @@ _up_dry_run_opt = typer.Option(False, "--dry-run", help="Show the plan without a
 _up_no_cockpit_opt = typer.Option(False, "--no-cockpit", help="Do not enrol this project in the local cockpit registry (~/.grimoire/cockpit/registry.json). Same effect as the GRIMOIRE_NO_COCKPIT env var.")
 
 
-def up(
-    ctx: typer.Context,
-    path: Path = _up_path_arg,
-    interactive: bool = _up_interactive_opt,
-    name: str = _up_name_opt,
-    user: str = _up_user_opt,
-    archetype: list[str] | None = _up_archetype_opt,
-    backend: str = _up_backend_opt,
-    no_standard: bool = _up_no_standard_opt,
-    needs: list[str] | None = _up_needs_opt,
-    dry_run: bool = _up_dry_run_opt,
-    no_cockpit: bool = _up_no_cockpit_opt,
-) -> None:
-    """Bring a project fully up in one command — init, identity, standard, doctor.
+def validate_up_inputs(archetypes: list[str], backend: str) -> None:
+    """Fail-closed guard shared by the CLI and the web wizard (issue #171).
 
-    Express mode by default (equivalent to [cyan]grimoire init -y[/cyan]); each
-    step is idempotent and reports 'skipped' when already in place.
-
-    When the ``init`` step actually runs (no ``project-context.yaml`` yet),
-    the project is enrolled in the local cockpit registry unless
-    [cyan]--no-cockpit[/cyan] is passed or the [cyan]GRIMOIRE_NO_COCKPIT[/cyan] env var is
-    set (issue #305).
-
-    [dim]Examples:[/dim]
-      [cyan]grimoire up[/cyan]                         Full bring-up of the current directory
-      [cyan]grimoire up . --interactive[/cyan]         Run the init wizard first
-      [cyan]grimoire up . -a web-app -b local[/cyan]   Explicit archetype and backend
-      [cyan]grimoire up . --needs collab-review[/cyan] Standard init from a need profile
-      [cyan]grimoire up . --no-standard[/cyan]         Skip the agentic standard step
-      [cyan]grimoire up . --no-cockpit[/cyan]          Skip cockpit enrolment (throwaway project)
+    Raises ``ValueError`` naming the exact cause before anything is written —
+    the wizard's ``POST /api/setup`` runs this same check before it calls
+    :func:`run_up_pipeline`.
     """
     from grimoire.cli.cmd_init import KNOWN_ARCHETYPES, KNOWN_BACKENDS
 
-    target = path.resolve()
-    fmt = (ctx.obj or {}).get("output", "text")
-
-    archetypes = _split_csv(archetype)
     invalid = [a for a in archetypes if a not in KNOWN_ARCHETYPES]
     if invalid:
-        console.print(f"[red]Unknown archetype(s):[/red] {', '.join(invalid)}")
-        console.print(f"Available: {', '.join(sorted(KNOWN_ARCHETYPES))}")
-        raise typer.Exit(1)
+        msg = (
+            f"archetype(s) inconnu(s) : {', '.join(invalid)} "
+            f"(disponibles : {', '.join(sorted(KNOWN_ARCHETYPES))})"
+        )
+        raise ValueError(msg)
     if backend not in KNOWN_BACKENDS:
-        console.print(f"[red]Unknown backend:[/red] {backend}")
-        console.print(f"Available: {', '.join(sorted(KNOWN_BACKENDS))}")
-        raise typer.Exit(1)
+        msg = (
+            f"backend inconnu : {backend} "
+            f"(disponibles : {', '.join(sorted(KNOWN_BACKENDS))})"
+        )
+        raise ValueError(msg)
 
+
+def run_up_pipeline(
+    ctx: typer.Context,
+    target: Path,
+    *,
+    name: str = "",
+    user: str = "",
+    archetypes: list[str] | None = None,
+    backend: str = "auto",
+    interactive: bool = False,
+    no_standard: bool = False,
+    needs: list[str] | None = None,
+    dry_run: bool = False,
+    no_cockpit: bool = False,
+    quiet: bool = False,
+) -> tuple[_UpState, list[EnvCheck], str]:
+    """Steps 1-5 of ``grimoire up`` — init, structure, refresh, identity,
+    standard, host sync, doctor — with no CLI rendering.
+
+    Extracted from :func:`up` for issue #171: the web wizard's
+    ``POST /api/setup`` calls this function directly (same functions, same
+    idempotency, same host sync) — never a subprocess wrapping ``grimoire
+    up``. ``ctx`` only needs a ``.obj`` mapping (``_step_init``/``run_init``
+    read nothing else from it), so a ``types.SimpleNamespace(obj={...})``
+    works as well as a real ``typer.Context``.
+
+    Assumes ``archetypes``/``backend`` were already validated with
+    :func:`validate_up_inputs` — this function starts writing on step 1, it
+    does not refuse anything itself.
+    """
+    archetypes = archetypes or []
+    needs = needs or []
     state = _UpState()
     target.mkdir(parents=True, exist_ok=True)
 
@@ -1245,9 +1253,9 @@ def up(
     )
     _step_standard(
         state, target,
-        no_standard=no_standard, needs=_split_csv(needs),
+        no_standard=no_standard, needs=needs,
         project_name=project_name, dry_run=dry_run, blocked=blocked,
-        quiet=fmt != "text",
+        quiet=quiet,
         declared_archetypes=declared_archetypes,
     )
 
@@ -1259,6 +1267,56 @@ def up(
 
     # 5. Short doctor summary.
     checks = _step_doctor_summary(state, target, dry_run=dry_run, blocked=blocked)
+    return state, checks, project_name
+
+
+def up(
+    ctx: typer.Context,
+    path: Path = _up_path_arg,
+    interactive: bool = _up_interactive_opt,
+    name: str = _up_name_opt,
+    user: str = _up_user_opt,
+    archetype: list[str] | None = _up_archetype_opt,
+    backend: str = _up_backend_opt,
+    no_standard: bool = _up_no_standard_opt,
+    needs: list[str] | None = _up_needs_opt,
+    dry_run: bool = _up_dry_run_opt,
+    no_cockpit: bool = _up_no_cockpit_opt,
+) -> None:
+    """Bring a project fully up in one command — init, identity, standard, doctor.
+
+    Express mode by default (equivalent to [cyan]grimoire init -y[/cyan]); each
+    step is idempotent and reports 'skipped' when already in place.
+
+    When the ``init`` step actually runs (no ``project-context.yaml`` yet),
+    the project is enrolled in the local cockpit registry unless
+    [cyan]--no-cockpit[/cyan] is passed or the [cyan]GRIMOIRE_NO_COCKPIT[/cyan] env var is
+    set (issue #305).
+
+    [dim]Examples:[/dim]
+      [cyan]grimoire up[/cyan]                         Full bring-up of the current directory
+      [cyan]grimoire up . --interactive[/cyan]         Run the init wizard first
+      [cyan]grimoire up . -a web-app -b local[/cyan]   Explicit archetype and backend
+      [cyan]grimoire up . --needs collab-review[/cyan] Standard init from a need profile
+      [cyan]grimoire up . --no-standard[/cyan]         Skip the agentic standard step
+      [cyan]grimoire up . --no-cockpit[/cyan]          Skip cockpit enrolment (throwaway project)
+    """
+    target = path.resolve()
+    fmt = (ctx.obj or {}).get("output", "text")
+
+    archetypes = _split_csv(archetype)
+    try:
+        validate_up_inputs(archetypes, backend)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    state, checks, project_name = run_up_pipeline(
+        ctx, target,
+        name=name, user=user, archetypes=archetypes, backend=backend,
+        interactive=interactive, no_standard=no_standard, needs=_split_csv(needs),
+        dry_run=dry_run, no_cockpit=no_cockpit, quiet=fmt != "text",
+    )
 
     # Legacy status info (kept for JSON consumers of the previous `up`).
     agents_count = 0
