@@ -638,6 +638,7 @@ def _step_init(
     backend: str,
     interactive: bool,
     dry_run: bool,
+    no_cockpit: bool = False,
 ) -> bool:
     """Run (or skip) express init. Returns True when a config is available after the step."""
     from grimoire.cli.cmd_init import run_init
@@ -667,6 +668,7 @@ def _step_init(
             backend=backend,
             force=False,
             dry_run=False,
+            no_cockpit=no_cockpit,
         )
     except typer.Abort:
         state.steps.append(StepResult("init", "failed", "init cancelled by user"))
@@ -1158,6 +1160,7 @@ _up_backend_opt = typer.Option("auto", "--backend", "-b", help="Memory backend (
 _up_no_standard_opt = typer.Option(False, "--no-standard", help="Skip the agentic standard initialization.")
 _up_needs_opt = typer.Option(None, "--needs", help="Need id(s) for standard init (repeatable or comma-separated).")
 _up_dry_run_opt = typer.Option(False, "--dry-run", help="Show the plan without applying.")
+_up_no_cockpit_opt = typer.Option(False, "--no-cockpit", help="Do not enrol this project in the local cockpit registry (~/.grimoire/cockpit/registry.json). Same effect as the GRIMOIRE_NO_COCKPIT env var.")
 
 
 def up(
@@ -1171,11 +1174,17 @@ def up(
     no_standard: bool = _up_no_standard_opt,
     needs: list[str] | None = _up_needs_opt,
     dry_run: bool = _up_dry_run_opt,
+    no_cockpit: bool = _up_no_cockpit_opt,
 ) -> None:
     """Bring a project fully up in one command — init, identity, standard, doctor.
 
     Express mode by default (equivalent to [cyan]grimoire init -y[/cyan]); each
     step is idempotent and reports 'skipped' when already in place.
+
+    When the ``init`` step actually runs (no ``project-context.yaml`` yet),
+    the project is enrolled in the local cockpit registry unless
+    [cyan]--no-cockpit[/cyan] is passed or the [cyan]GRIMOIRE_NO_COCKPIT[/cyan] env var is
+    set (issue #305).
 
     [dim]Examples:[/dim]
       [cyan]grimoire up[/cyan]                         Full bring-up of the current directory
@@ -1183,6 +1192,7 @@ def up(
       [cyan]grimoire up . -a web-app -b local[/cyan]   Explicit archetype and backend
       [cyan]grimoire up . --needs collab-review[/cyan] Standard init from a need profile
       [cyan]grimoire up . --no-standard[/cyan]         Skip the agentic standard step
+      [cyan]grimoire up . --no-cockpit[/cyan]          Skip cockpit enrolment (throwaway project)
     """
     from grimoire.cli.cmd_init import KNOWN_ARCHETYPES, KNOWN_BACKENDS
 
@@ -1208,6 +1218,7 @@ def up(
         ctx, state, target,
         name=name, archetypes=archetypes, backend=backend,
         interactive=interactive, dry_run=dry_run,
+        no_cockpit=no_cockpit,
     )
     blocked = not has_config
 

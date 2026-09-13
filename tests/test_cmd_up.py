@@ -420,3 +420,53 @@ class TestUpHostSync:
         steps = {s["step"]: s for s in data["steps"]}
         assert steps["host_sync"]["status"] == "done"
         assert "already in sync" in steps["host_sync"]["detail"]
+
+
+class TestUpNoCockpit:
+    """#305 — `up` enrôle aussi via son étape `init` ; `--no-cockpit` doit
+    couvrir ce chemin exactement comme `grimoire init --no-cockpit`."""
+
+    @pytest.fixture
+    def simulated_real_home(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        cockpit_home = tmp_path / "simulated-home" / ".grimoire" / "cockpit"
+        cockpit_home.mkdir(parents=True)
+        registry = cockpit_home / "registry.json"
+        registry.write_text("[]", encoding="utf-8")
+        # This file's autouse fixture forces GRIMOIRE_NO_COCKPIT=1 for every
+        # test — undo it here so the flag under test is what actually decides
+        # the outcome, not the ambient isolation.
+        monkeypatch.delenv("GRIMOIRE_NO_COCKPIT", raising=False)
+        monkeypatch.setenv("GRIMOIRE_COCKPIT_HOME", str(cockpit_home))
+        return registry
+
+    def test_up_no_cockpit_leaves_the_registry_untouched(
+        self, runner, cli_app, tmp_path: Path, simulated_real_home: Path,
+    ) -> None:
+        target = tmp_path / "throwaway"
+        before = simulated_real_home.read_bytes()
+
+        result = runner.invoke(
+            cli_app, ["up", str(target), "--backend", "local", "--no-cockpit"],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert simulated_real_home.read_bytes() == before
+
+    def test_up_without_the_flag_still_enrols(
+        self, runner, cli_app, tmp_path: Path, simulated_real_home: Path,
+    ) -> None:
+        """Control: the flag is what changes the outcome, not the fixture."""
+        target = tmp_path / "real-project"
+
+        result = runner.invoke(cli_app, ["up", str(target), "--backend", "local"])
+
+        assert result.exit_code == 0, result.output
+        import json
+        registered = json.loads(simulated_real_home.read_text(encoding="utf-8"))
+        assert any(p.get("path") == str(target) for p in registered)
+
+    def test_up_no_cockpit_documented_in_help(self, runner, cli_app) -> None:
+        result = runner.invoke(cli_app, ["up", "--help"])
+        assert result.exit_code == 0
+        assert "--no-cockpit" in result.output
+        assert "GRIMOIRE_NO_COCKPIT" in result.output
