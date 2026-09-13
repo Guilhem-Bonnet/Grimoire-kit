@@ -74,25 +74,51 @@ def _run(args: list[str], cwd: str | Path, *, env: dict | None = None) -> subpro
     Windows le descripteur hérité ne se ferme pas, et le job s'est trouvé bloqué
     plus de quarante minutes là où ubuntu finissait en secondes.
 
-    Le `timeout` ne suffit pas à rattraper ce cas : il tue bien `bash`, mais
-    `communicate()` continue d'attendre la fermeture du tube tant qu'un
-    petit-fils le tient.
+    `subprocess.run(..., timeout=)` ne suffit pas à rattraper ce cas sous
+    Windows : à l'expiration, il tue bien le process `bash` direct, mais
+    rappelle ensuite `communicate()` **sans timeout** pour drainer les tubes.
+    Si un petit-fils de `bash` (`cp.exe`, `mkdir.exe`, un sous-shell...) est
+    encore vivant et tient l'extrémité écriture du tube stdout/stderr héritée,
+    ce second `communicate()` attend indéfiniment sa fermeture — jusqu'au
+    plafond du job CI (#231 : 22 tests verts en pointillés, puis un silence
+    de 15 à 30 minutes selon le budget, jusqu'à l'annulation du job). `kill()`
+    ne tue que le processus direct, jamais ses descendants sous Windows.
+    On tue donc l'arbre complet via `taskkill /T /F` avant de redrainer.
     """
     run_env = {**os.environ, **(env or {})}
     # Décodage explicite : sous Windows, `text=True` seul décode en cp1252, et
     # un script qui parle français casse le décodage avant qu'on lise quoi que
     # ce soit. `replace` garde la sortie lisible, jamais vide.
-    return subprocess.run(
+    proc = subprocess.Popen(
         args,
         cwd=str(cwd),
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
         encoding="utf-8",
         errors="replace",
-        timeout=30,
         env=run_env,
         stdin=subprocess.DEVNULL,
     )
+    try:
+        stdout, stderr = proc.communicate(timeout=30)
+    except subprocess.TimeoutExpired:
+        if sys.platform == "win32":
+            # `proc.kill()` seul laisse vivre les petits-fils Windows qui
+            # tiennent le tube ouvert (voir docstring). `/T` tue l'arbre.
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                capture_output=True,
+                text=True,
+            )
+        else:
+            proc.kill()
+        # L'arbre est mort, les tubes se ferment : ce second communicate()
+        # ne doit plus jamais attendre indéfiniment. Un garde-fou court reste
+        # nécessaire si le kill lui-même échoue à joindre un descendant.
+        stdout, stderr = proc.communicate(timeout=10)
+        raise
+    return subprocess.CompletedProcess(args, proc.returncode, stdout, stderr)
 
 
 def _explain(result: subprocess.CompletedProcess) -> str:
