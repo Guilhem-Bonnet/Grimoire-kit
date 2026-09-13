@@ -106,6 +106,7 @@ nav:
           - Guardrails runtime agentiques: grimoire-game-runtime-guardrails.md
       - Atelier local & blueprints: serve-blueprints.md
       - Guides:
+          - Cadrage produit: cadrage.md
           - Extensions & marketplace: extensions-marketplace.md
           - SDK Python: sdk-guide.md
           - Créer un agent: creating-agents.md

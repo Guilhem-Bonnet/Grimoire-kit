@@ -1087,6 +1087,33 @@ def _step_standard(
         state.steps.append(StepResult("standard", "failed", f"standard init error: {exc}"))
 
 
+def _step_cadrage(state: _UpState, target: Path, *, needs: list[str], dry_run: bool, blocked: bool) -> None:
+    """Scaffold ``_grimoire/cadrage/`` when the ``project-discovery`` need was
+    chosen (issue #173).
+
+    The need and the command now talk through code — a direct call to
+    :func:`grimoire.core.cadrage.scaffold` — not through the sentence
+    ``needs_suggest.py`` used to print as its only link to the CLI.
+    Idempotent: ``scaffold()`` never rewrites a phase file that already
+    exists, so a later ``up`` with the same need re-selected (or read back
+    from ``install-manifest.yaml``) changes nothing here.
+    """
+    if blocked or "project-discovery" not in needs:
+        state.steps.append(StepResult("cadrage", "skipped", "need 'project-discovery' not selected"))
+        return
+    if dry_run:
+        state.steps.append(StepResult("cadrage", "planned", "scaffold _grimoire/cadrage/ (5 phases)"))
+        return
+    from grimoire.core.cadrage import scaffold as cadrage_scaffold
+
+    written = cadrage_scaffold(target, project_name=target.name)
+    if written:
+        state.steps.append(StepResult("cadrage", "done", f"{len(written)} phase file(s) written"))
+        state.actions.append("Scaffolded cadrage (_grimoire/cadrage/)")
+    else:
+        state.steps.append(StepResult("cadrage", "skipped", "already scaffolded"))
+
+
 def _step_doctor_summary(state: _UpState, target: Path, *, dry_run: bool, blocked: bool) -> list[EnvCheck]:
     """Short doctor summary reusing the shared environment checks."""
     if dry_run or blocked:
@@ -1258,6 +1285,9 @@ def run_up_pipeline(
         quiet=quiet,
         declared_archetypes=declared_archetypes,
     )
+
+    # 4ter. Cadrage — scaffold when `project-discovery` was chosen (#173).
+    _step_cadrage(state, target, needs=needs, dry_run=dry_run, blocked=blocked)
 
     # 4bis. Host surface sync — downstream of both the kit refresh and the
     # standard step, so `.claude/`, `.cursor/`, `.codex/` and `.gemini/`
