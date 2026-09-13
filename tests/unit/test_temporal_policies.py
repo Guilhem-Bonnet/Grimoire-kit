@@ -24,6 +24,7 @@ from grimoire.core.agentic_standard import setup_standard_profile
 from grimoire.core.exceptions import GrimoirePolicyError
 from grimoire.hosts.decisions._shared import HookInput, Outcome
 from grimoire.hosts.decisions.activation import decide_activation
+from grimoire.hosts.decisions.tool_facts import is_read_only_command
 from grimoire.hosts.decisions.tool_policy import decide_tool_policy
 from grimoire.hosts.events import HookEvent
 from grimoire.policies.schemas import CooldownRule, PolicyRule, SessionBudget, VerdictKind
@@ -35,6 +36,7 @@ from grimoire.policies.session_state import (
     session_state_path,
 )
 from grimoire.policies.temporal import (
+    REPAIR_EXEMPTION_REASON,
     evaluate_temporal,
     glob_match,
     record_post_tool_use_approval,
@@ -771,3 +773,191 @@ def test_no_policies_yaml_is_unaffected_and_stays_fast(governed_project: Path) -
     )
     assert decision.outcome is Outcome.ALLOW
     assert decision.detail == {}
+
+
+# ── Defect 1 (issue #463): reads must not count as writes ────────────────────
+#
+# Real incident on Grimoire-Forge: a `per_session` rule with no `tool_pattern`
+# ended up refusing every tool in the session, including read-only `Bash`
+# calls (`cat`, `grep`, `find`, `git status`...) that `classify_tool` used to
+# treat as a mutation the instant they carried a command string at all.
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cat file.txt",
+        "grep -rn foo src/",
+        "find . -name '*.py'",
+        "git status",
+        "gh pr view 42",
+        "ls -la",
+        "git status && echo done",
+    ],
+)
+def test_is_read_only_command_recognises_common_reads(command: str) -> None:
+    assert is_read_only_command(command)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "rm -rf build",
+        "git commit -m 'x'",
+        "git push origin main",
+        "cat file.txt >> out.txt",
+        "cat file.txt | tee out.txt",
+        "sed -i s/a/b/ file.txt",
+        "git branch -d old",
+        "",
+    ],
+)
+def test_is_read_only_command_stays_conservative_on_writes(command: str) -> None:
+    assert not is_read_only_command(command)
+
+
+def test_write_budget_of_one_survives_ten_bash_reads_then_blocks_a_write(
+    governed_project: Path,
+) -> None:
+    """The exact acceptance shape of defect 1: ten reads must never touch a
+    ``max_writes: 1`` budget; the first real write still hits it."""
+    _write_policies_yaml(
+        governed_project,
+        """
+rules:
+  - id: writes-budget
+    description: "budget"
+    action_kinds: []
+    mutation_classes: []
+    risk_profiles: []
+    verdict_on_match: block
+    reason_template: "budget depasse"
+    per_session: {max_writes: 1}
+""",
+    )
+    session_id = "sess-reads-dont-count"
+
+    def bash_read(command: str) -> Outcome:
+        return decide_tool_policy(
+            HookInput(
+                event=HookEvent.PRE_TOOL_USE,
+                project_root=governed_project,
+                tool_name="Bash",
+                tool_input={"command": command},
+                session_id=session_id,
+            )
+        ).outcome
+
+    reads = ["cat a.txt", "grep -rn x .", "find . -name '*.py'", "git status", "ls"] * 2
+    assert len(reads) == 10
+    for command in reads:
+        assert bash_read(command) is Outcome.ALLOW
+
+    first_write = decide_tool_policy(
+        HookInput(
+            event=HookEvent.PRE_TOOL_USE,
+            project_root=governed_project,
+            tool_name="Write",
+            tool_input={"file_path": str(governed_project / "f.txt")},
+            session_id=session_id,
+        )
+    )
+    assert first_write.outcome is Outcome.ALLOW
+
+    second_write = decide_tool_policy(
+        HookInput(
+            event=HookEvent.PRE_TOOL_USE,
+            project_root=governed_project,
+            tool_name="Write",
+            tool_input={"file_path": str(governed_project / "g.txt")},
+            session_id=session_id,
+        )
+    )
+    assert second_write.outcome is Outcome.DENY
+    assert "écritures" in second_write.reason
+
+
+# ── Defect 2 (issue #463): repair exemption ───────────────────────────────────
+
+
+def test_read_only_call_is_exempt_once_a_call_budget_is_exhausted() -> None:
+    rules = (_budget_rule(max_tool_calls=1),)
+    state = SessionState.new("s", datetime.now(UTC).isoformat())
+    first = evaluate_temporal(rules, state, tool_name="Read", is_write=False)
+    assert first.verdict is VerdictKind.ALLOW
+    second = evaluate_temporal(rules, first.state, tool_name="Read", is_write=False)
+    assert second.verdict is VerdictKind.ALLOW
+    assert any(m.reason == REPAIR_EXEMPTION_REASON for m in second.matched_rules)
+
+
+def test_edit_of_policies_yaml_is_exempt_once_the_write_budget_is_reached(
+    governed_project: Path,
+) -> None:
+    _write_policies_yaml(
+        governed_project,
+        """
+rules:
+  - id: writes-budget
+    description: "budget"
+    action_kinds: []
+    mutation_classes: []
+    risk_profiles: []
+    verdict_on_match: block
+    reason_template: "budget depasse"
+    per_session: {max_writes: 1}
+""",
+    )
+    session_id = "sess-repair"
+    policies_path = governed_project / "_grimoire" / "standard" / "policies.yaml"
+
+    first_write = decide_tool_policy(
+        HookInput(
+            event=HookEvent.PRE_TOOL_USE,
+            project_root=governed_project,
+            tool_name="Write",
+            tool_input={"file_path": str(governed_project / "f.txt")},
+            session_id=session_id,
+        )
+    )
+    assert first_write.outcome is Outcome.ALLOW
+
+    blocked = decide_tool_policy(
+        HookInput(
+            event=HookEvent.PRE_TOOL_USE,
+            project_root=governed_project,
+            tool_name="Write",
+            tool_input={"file_path": str(governed_project / "other.txt")},
+            session_id=session_id,
+        )
+    )
+    assert blocked.outcome is Outcome.DENY
+    assert "grimoire policies reset-session" in blocked.reason
+
+    repair = decide_tool_policy(
+        HookInput(
+            event=HookEvent.PRE_TOOL_USE,
+            project_root=governed_project,
+            tool_name="Edit",
+            tool_input={"file_path": str(policies_path)},
+            session_id=session_id,
+        )
+    )
+    assert repair.outcome is Outcome.ALLOW
+
+
+# ── Defect 3 (issue #463): sub-agents share the parent session's budget ──────
+
+
+def test_session_budget_subagents_defaults_to_shared() -> None:
+    assert SessionBudget.from_dict({"max_writes": 5}).subagents == "shared"
+    assert SessionBudget.from_dict({"max_writes": 5, "subagents": "shared"}).subagents == "shared"
+
+
+def test_session_budget_subagents_separate_is_refused_by_name() -> None:
+    with pytest.raises(GrimoirePolicyError, match="GR-POL-003"):
+        SessionBudget.from_dict({"max_writes": 5, "subagents": "separate"})
+
+
+def test_session_budget_subagents_unknown_value_is_refused() -> None:
+    with pytest.raises(GrimoirePolicyError, match="GR-POL-002"):
+        SessionBudget.from_dict({"max_writes": 5, "subagents": "isolated"})

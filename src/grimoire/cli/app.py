@@ -482,6 +482,57 @@ def doctor(
                 tag = "[yellow]WARN[/yellow]" if level == "warn" else "[dim]○[/dim]"
                 console.print(f"  {tag}  {detail}")
 
+    # 4sexies. Design guard (defect 5 of the 2026-09-12 session-budget
+    # incident, issue #463) — a `per_session` rule with no `tool_pattern`
+    # (so `"*"`, every tool) and `verdict_on_match: block` can end up
+    # refusing every tool in the session, hard-coded repair exemptions
+    # aside (see `grimoire.policies.temporal`). Never FAIL: a project may
+    # want exactly this and accept the risk — but `doctor` names the shape
+    # instead of leaving it silent, which is what let the real incident
+    # reach production undetected.
+    with _timed_phase("policy_budget_guard"):
+        from grimoire.core.exceptions import GrimoirePolicyError
+        from grimoire.policies.rules_config import load_custom_rules
+        from grimoire.policies.schemas import VerdictKind as _VerdictKind
+
+        try:
+            budget_rules = [r for r in load_custom_rules(target) if r.per_session is not None]
+        except GrimoirePolicyError as exc:
+            guard_entry: dict[str, Any] = {
+                "name": "policy_budget_guard",
+                "passed": False,
+                "detail": f"_grimoire/standard/policies.yaml invalide : {exc}",
+            }
+            results.append(guard_entry)
+            if fmt != "json":
+                console.print(f"  [red]FAIL[/red]  {guard_entry['detail']}")
+        else:
+            blocking_global = [
+                r.id for r in budget_rules if r.tool_pattern == "*" and r.verdict_on_match is _VerdictKind.BLOCK
+            ]
+            if blocking_global:
+                detail = (
+                    f"budget global bloquant ({', '.join(blocking_global)}) : une règle `per_session` sans "
+                    "`tool_pattern` en `verdict_on_match: block` refuse tout outil de la session une fois "
+                    "le plafond atteint — préférez un `tool_pattern` ciblé ou `verdict_on_match: warn` "
+                    "(voir docs/hosts.md)"
+                )
+                guard_entry = {
+                    "name": "policy_budget_guard",
+                    "passed": True,
+                    "detail": detail,
+                    "level": "warn",
+                }
+                results.append(guard_entry)
+                if fmt != "json":
+                    console.print(f"  [yellow]WARN[/yellow]  {detail}")
+            elif budget_rules:
+                _record(
+                    "policy_budget_guard",
+                    passed=True,
+                    detail="Aucun budget de session globalement bloquant.",
+                )
+
     # 5. Config semantic validation
     if cfg:
         warnings = cfg.validate()
