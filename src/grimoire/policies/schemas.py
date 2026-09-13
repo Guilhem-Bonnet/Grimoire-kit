@@ -128,12 +128,29 @@ class SessionBudget:
     ``mutation_classes`` / ``risk_profiles`` (empty/``None`` = unconstrained).
     Limits are ceilings the session must stay *under*: the (N+1)th call past
     a limit of N is the one that gets refused, not the Nth.
+
+    ``subagents`` (defect 3 of the 2026-09-12 session-budget incident, issue
+    #463): Claude Code's own hook payload — the only host this kit's hooks
+    currently target that runs sub-agents at all — sends the *same*
+    ``session_id`` for a tool call made by a sub-agent (via its ``Task``
+    tool) as for one made by the top-level session, and carries no
+    documented ``agent_id``/``parent_session_id`` field to tell them apart.
+    A per-session budget therefore cannot be scoped to "this session, not
+    its sub-agents" today: every sub-agent a session launches shares its
+    parent's counters, whether that is wanted or not. ``"shared"`` (the
+    default, and the only supported value) names that fact instead of
+    hiding it; ``"separate"`` — which would need an isolation this kit
+    cannot deliver — is refused by name at load time
+    (:data:`grimoire.core.exceptions.GrimoirePolicyError`, ``GR-POL-003``),
+    so a rule author cannot believe they configured an isolation that does
+    not exist.
     """
 
     max_tool_calls: int | None = None
     max_writes: int | None = None
     max_cost_usd: float | None = None
     max_duration_min: float | None = None
+    subagents: str = "shared"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -141,18 +158,36 @@ class SessionBudget:
             "max_writes": self.max_writes,
             "max_cost_usd": self.max_cost_usd,
             "max_duration_min": self.max_duration_min,
+            "subagents": self.subagents,
         }
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> SessionBudget:
         _reject_unknown_keys(
-            d, {"max_tool_calls", "max_writes", "max_cost_usd", "max_duration_min"}, context="per_session"
+            d,
+            {"max_tool_calls", "max_writes", "max_cost_usd", "max_duration_min", "subagents"},
+            context="per_session",
         )
+        subagents = str(d.get("subagents", "shared"))
+        if subagents not in ("shared", "separate"):
+            raise GrimoirePolicyError(
+                f"per_session.subagents: valeur inconnue {subagents!r} (attendu : 'shared' ou 'separate')",
+                error_code="GR-POL-002",
+            )
+        if subagents == "separate":
+            raise GrimoirePolicyError(
+                "per_session.subagents: 'separate' n'est pas supporté — le payload de hook de Claude Code "
+                "ne distingue pas un appel de sous-agent de celui de la session parente (même session_id, "
+                "aucun agent_id/parent_session_id documenté), donc aucune isolation n'est possible "
+                "aujourd'hui ; retire la clé ou utilise 'shared' (comportement actuel, déjà par défaut)",
+                error_code="GR-POL-003",
+            )
         return cls(
             max_tool_calls=d.get("max_tool_calls"),
             max_writes=d.get("max_writes"),
             max_cost_usd=d.get("max_cost_usd"),
             max_duration_min=d.get("max_duration_min"),
+            subagents=subagents,
         )
 
 

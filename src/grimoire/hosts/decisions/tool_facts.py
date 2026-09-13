@@ -56,6 +56,97 @@ _DESTRUCTIVE_PATTERNS: tuple[tuple[str, str], ...] = (
     (r"\bdocker\s+system\s+prune\b.*-a", "full docker prune"),
 )
 
+#: Leading verbs whose blast radius never survives the session — the read
+#: half of the destructive/mutation split above. Matched against the first
+#: *word* of a command (or of one ``&&``/``;``/``|`` segment of it), after
+#: stripping ``VAR=value`` assignments and a leading ``sudo``/``command``/
+#: ``time``/``nice``/``ionice``/``env`` — never against the whole line, and
+#: never enough on its own: :func:`is_read_only_command` also refuses any
+#: output redirection (``>``, ``>>``, ``| tee``), which is what tells
+#: ``cat file`` from ``cat >> file`` apart. Deliberately narrow: an
+#: unrecognised verb stays classified as a mutation (the pre-existing,
+#: safe default), never the reverse.
+_READ_ONLY_LEADING_COMMANDS = frozenset(
+    {
+        "cat", "head", "tail", "less", "more", "grep", "egrep", "fgrep", "rg", "ag",
+        "find", "ls", "wc", "diff", "file", "stat", "pwd", "whoami", "printenv",
+        "which", "type", "date", "ps", "df", "du", "tree", "od", "hexdump", "xxd",
+        "sha256sum", "sha1sum", "md5sum", "echo", "printf", "true", "false",
+        "basename", "dirname", "readlink", "realpath", "nproc", "uptime", "id", "uname",
+    }
+)
+
+#: ``git`` subcommands kept out of this list on purpose because they have a
+#: common mutating form (``git branch -d``, ``git remote add``, ``git tag
+#: v1``, ``git config user.name ...``): treating them as always read-only
+#: would be the exact defect this classifier exists to fix, just moved one
+#: layer down. Only genuinely read-only-in-every-form subcommands qualify.
+_READ_ONLY_GIT_SUBCOMMANDS = frozenset(
+    {"status", "diff", "log", "show", "blame", "ls-files", "rev-parse", "describe", "shortlog"}
+)
+
+#: ``gh <resource> <verb> ...`` — the verb (second or third word) decides,
+#: independently of the resource (``pr``, ``issue``, ``repo``, ``run``…):
+#: ``gh pr view``, ``gh issue list``, ``gh run view`` never mutate.
+_READ_ONLY_GH_VERBS = frozenset({"view", "list", "status", "diff", "show"})
+
+_ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+_LEADING_NEUTRAL_WORDS = frozenset({"sudo", "command", "time", "nice", "ionice", "env"})
+#: Output redirection or a ``tee`` in the pipeline: the one shell-level
+#: signal that turns an otherwise read-only pipeline into a write, checked
+#: against the quote-stripped surface so a literal ``>`` inside a commit
+#: message or a grep pattern is never mistaken for one.
+_WRITE_REDIRECTION_RE = re.compile(r">>?(?!=)|\btee\b")
+
+
+def _is_read_only_segment(segment: str) -> bool:
+    words = segment.split()
+    idx = 0
+    while idx < len(words) and (_ENV_ASSIGNMENT_RE.match(words[idx]) or words[idx] in _LEADING_NEUTRAL_WORDS):
+        idx += 1
+    if idx >= len(words):
+        return True  # nothing left but assignments/neutral words: nothing to mutate
+    verb = words[idx]
+    if verb == "git":
+        sub = words[idx + 1] if idx + 1 < len(words) else ""
+        return sub in _READ_ONLY_GIT_SUBCOMMANDS
+    if verb == "gh":
+        tail = words[idx + 1 : idx + 3]
+        return any(word in _READ_ONLY_GH_VERBS for word in tail)
+    return verb in _READ_ONLY_LEADING_COMMANDS
+
+
+def is_read_only_command(command: str) -> bool:
+    """Whether *command* — a Bash-shaped call's full command line — only reads.
+
+    Defect 1 of the 2026-09-12 session-budget incident (issue #463): every
+    Bash call used to be classified :attr:`MutationClass.MUTATION_CONTROLLED`
+    the instant it carried a command string at all, so ``cat``, ``grep``,
+    ``find`` or ``git status`` counted as a write for
+    ``per_session.max_writes`` exactly like ``rm`` or ``git commit`` would —
+    a session doing nothing but reading could exhaust a write budget meant
+    to bound actual mutation.
+
+    Conservative by construction, in every direction: an unrecognised
+    leading verb, an ambiguous ``git``/``gh`` subcommand, any output
+    redirection or ``tee`` anywhere in the line, or an unparseable segment
+    all fall back to "not read-only" — the pre-existing (safe) behaviour.
+    Only a command every one of whose ``&&``/``;``/``|``/``||`` segments is a
+    *known* read verb, with no redirection anywhere in the line, is
+    read-only. Quoted text is stripped first (:func:`command_surface`), the
+    same pass the destructive-pattern check above already relies on, so a
+    literal ``>`` or ``rm`` inside a commit message never flips the verdict.
+    """
+    if not command.strip():
+        return False
+    surface = command_surface(command)
+    if _WRITE_REDIRECTION_RE.search(surface):
+        return False
+    segments = [seg.strip() for seg in re.split(r"&&|\|\||;|\|", surface)]
+    segments = [seg for seg in segments if seg]
+    return bool(segments) and all(_is_read_only_segment(seg) for seg in segments)
+
+
 #: Where a quoted string stops being data and becomes a command again: whatever
 #: is handed to these is executed, so it stays under inspection.
 _EVAL_INTRODUCER = re.compile(
@@ -236,7 +327,7 @@ def classify_tool(tool_name: str, tool_input: dict[str, Any] | None = None) -> T
 
     if destructive_reason:
         mutation = MutationClass.DESTRUCTIVE
-    elif is_write or (is_execute and command):
+    elif is_write or (is_execute and command and not is_read_only_command(command)):
         mutation = MutationClass.MUTATION_CONTROLLED
     else:
         mutation = MutationClass.READ_ONLY

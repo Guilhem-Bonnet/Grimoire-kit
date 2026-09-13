@@ -35,7 +35,7 @@ Example::
         action_kinds: []
         mutation_classes: []
         risk_profiles: []
-        verdict_on_match: block
+        verdict_on_match: warn   # jamais "block" sans tool_pattern — voir docs/hosts.md
         reason_template: "Budget d'écritures de session dépassé"
         per_session: {max_writes: 50}
 """
