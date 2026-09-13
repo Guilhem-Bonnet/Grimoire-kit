@@ -24,8 +24,10 @@ from typing import Annotated, Any
 
 import typer
 from rich.console import Console
+from rich.table import Table
 
 from grimoire.core.exceptions import GrimoireRuntimeError
+from grimoire.core.standard_generation import TRACES_DIR
 from grimoire.flows.blueprint_loader import hardcoded_command_warnings, load_blueprint
 from grimoire.flows.dispatch_executor import (
     FlowDispatchOutcome,
@@ -39,7 +41,8 @@ from grimoire.flows.extract import extract_blueprint
 from grimoire.flows.schemas import FlowStatusView, ResumeOutcome
 from grimoire.missions.dispatch import DEFAULT_CALL_TIMEOUT_S
 from grimoire.providers.registry import SUPPORTED_MODEL_TIERS
-from grimoire.runtime.schemas import WorkflowInstance
+from grimoire.runtime.schemas import WorkflowInstance, WorkflowStatus
+from grimoire.traces.ledger import DispatchOutcomeGroupStats, TraceLedger
 
 flow_app = typer.Typer(
     help="Conduire un blueprint node par node : le kernel avance, l'hôte exécute.",
@@ -459,3 +462,86 @@ def flow_extract(
         extra = f" — besoins inférés : {', '.join(n.needs_inferred)}" if n.needs_inferred else ""
         verif = f" [{n.verifiability}]" if n.verifiability else ""
         console.print(f"  {n.node_id}{verif} : {n.status}{extra}")
+
+
+_TERMINAL_OK_STATUSES = (WorkflowStatus.COMPLETED.value, WorkflowStatus.VERIFIED.value)
+
+
+@flow_app.command("list")
+def flow_list(
+    ctx: typer.Context,
+    project_root: _PROJECT_ROOT = Path(),
+    require_measure: Annotated[
+        str | None,
+        typer.Option(
+            "--require-measure",
+            help="Refuse (sortie 1) si ce blueprint id n'a aucune mesure de dispatch.",
+        ),
+    ] = None,
+) -> None:
+    """Le registre local des flows : runs connus, groupés par blueprint, avec leur mesure de dispatch (issue #208).
+
+    Pas un registre publié (#206, verrouillé jusqu'à triple rejeu réel d'un
+    flow extrait par ``flow extract``) : une lecture locale des runs déjà
+    enregistrés (``flow run``) jointe à ``grimoire dispatch stats`` (#442) —
+    même source (``TraceLedger.dispatch_outcome_stats().by_flow``), jamais un
+    second calcul. Un flow qui n'a jamais dispatché aucun node par la cascade
+    reste listé (runs locaux connus), seulement étiqueté **non mesuré** —
+    jamais recommandé implicitement par son absence de ligne.
+    """
+    root = project_root.resolve()
+    engine = _engine(root)
+    views = engine.list_runs()
+    by_blueprint: dict[str, list[FlowStatusView]] = {}
+    for view in views:
+        by_blueprint.setdefault(view.blueprint_id, []).append(view)
+
+    by_flow: dict[str, DispatchOutcomeGroupStats] = {}
+    traces_path = root / TRACES_DIR
+    if (traces_path / "traces.jsonl").is_file():
+        by_flow = TraceLedger(traces_path).dispatch_outcome_stats().by_flow
+
+    if require_measure is not None and require_measure not in by_flow:
+        console.print(
+            f"[red]refusé[/red] : « {require_measure} » n'a aucune mesure de dispatch "
+            "(voir `grimoire dispatch stats` — un run purement interactif ne mesure rien)"
+        )
+        raise typer.Exit(1)
+
+    if _fmt(ctx) == "json":
+        typer.echo(
+            json.dumps(
+                {
+                    blueprint_id: {
+                        "runs": len(local_runs),
+                        "runs_terminated": sum(1 for v in local_runs if v.status in _TERMINAL_OK_STATUSES),
+                        "last_run_id": max(v.run_id for v in local_runs),
+                        "measure": by_flow[blueprint_id].to_dict() if blueprint_id in by_flow else None,
+                    }
+                    for blueprint_id, local_runs in by_blueprint.items()
+                },
+                indent=2,
+                ensure_ascii=False,
+            )
+        )
+        return
+
+    if not by_blueprint:
+        console.print("[dim]Aucun run connu (`grimoire flow run`).[/dim]")
+        return
+
+    table = Table(title="Registre local des flows")
+    for column in ("Flow", "Runs", "Dernier run", "Nœuds résolus", "Coût/tâche résolue", "Escalade", "Mesure"):
+        table.add_column(column)
+    for blueprint_id, local_runs in sorted(by_blueprint.items()):
+        measure = by_flow.get(blueprint_id)
+        table.add_row(
+            blueprint_id,
+            str(len(local_runs)),
+            max(v.run_id for v in local_runs),
+            "—" if measure is None else f"{measure.resolved}/{measure.total}",
+            "—" if measure is None or measure.cost_per_resolved_task_usd is None else f"${measure.cost_per_resolved_task_usd:.4f}",
+            "—" if measure is None or measure.escalation_rate is None else f"{measure.escalation_rate:.0%}",
+            "[dim]non mesuré[/dim]" if measure is None else "mesuré",
+        )
+    console.print(table)

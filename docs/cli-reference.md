@@ -287,7 +287,7 @@ réussit-elle systématiquement ?
 
 | Commande | Description |
 | --- | --- |
-| `grimoire dispatch stats [--since 30d] [--json]` | Coût par tâche résolue, taux d'escalade, part d'inexécutable — pour l'ensemble, par classe de vérifiabilité et par fournisseur — et pass^k sur les nœuds rejoués |
+| `grimoire dispatch stats [--since 30d] [--json]` | Coût par tâche résolue, taux d'escalade, part d'inexécutable — pour l'ensemble, par classe de vérifiabilité, par fournisseur et par flow — et pass^k sur les nœuds rejoués |
 
 **Coût par tâche résolue** : le coût total de toutes les tentatives (vertes
 et rouges confondues, un check rouge a quand même coûté un appel) divisé
@@ -687,6 +687,7 @@ seconde sortie, il ne retire rien.
 | `grimoire flow resume <run-id> --result <fichier>` | Vérifier la sortie du node courant contre son contrat ; avance ou suspend |
 | `grimoire flow abort <run-id> [--reason]` | Abandonner un run — terminal, jamais repris |
 | `grimoire flow extract <run-id> [--out <fichier>]` | Extraire un blueprint brouillon de la séquence réellement exécutée par ce run |
+| `grimoire flow list [--require-measure <blueprint-id>]` | Le registre local des flows : runs connus par blueprint, avec leur mesure de dispatch |
 
 Un checkpoint par node : un run interrompu reprend exactement au node
 courant, jamais du début. Une sortie non conforme au contrat de sortie du

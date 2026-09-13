@@ -87,6 +87,11 @@ def dispatch_stats(
     tentative et par couple type de tâche/classe). pass^k : un même node de
     blueprint (ou une même tâche, hors flow) rejoué plusieurs fois compte
     comme une série ; le taux est la part de séries entièrement vertes.
+
+    Ventilé par classe de vérifiabilité, par fournisseur, et (issue #208,
+    lot 5 réduit) par flow — l'identifiant de blueprint d'où vient un node
+    dispatché via ``flow run --executor dispatch``, jamais un dispatch hors
+    flow.
     """
     root = project_root.resolve()
     as_json = json_output or _get_fmt(ctx) == "json"
@@ -137,6 +142,8 @@ def dispatch_stats(
         _row(f"classe {class_name}", group)
     for provider_name, group in stats.by_provider.items():
         _row(f"fournisseur {provider_name}", group)
+    for blueprint_id, group in stats.by_flow.items():
+        _row(f"flow {blueprint_id}", group)
     console.print(table)
 
     if stats.pass_k_observations == 0:

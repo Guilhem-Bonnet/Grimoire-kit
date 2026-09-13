@@ -260,3 +260,49 @@ def test_flow_run_executor_dispatch_unknown_name_fails(tmp_path: Path) -> None:
     )
     assert result.exit_code == 1
     assert "bogus" in json.loads(result.output)["error"]
+
+
+# ── ``flow list`` : le registre local, jamais un second calcul (issue #208) ──
+
+
+def test_flow_list_json_reports_unmeasured_run(tmp_path: Path) -> None:
+    bp = _write_blueprint(tmp_path)
+    runner.invoke(app, ["--output", "json", "flow", "run", str(bp), "--project-root", str(tmp_path)])
+
+    result = runner.invoke(app, ["--output", "json", "flow", "list", "--project-root", str(tmp_path)])
+    assert result.exit_code == 0, result.output
+    registry = json.loads(result.output)
+    assert registry["cli-flow"]["runs"] == 1
+    assert registry["cli-flow"]["measure"] is None
+
+
+def test_flow_list_require_measure_refuses_unmeasured_flow(tmp_path: Path) -> None:
+    bp = _write_blueprint(tmp_path)
+    runner.invoke(app, ["--output", "json", "flow", "run", str(bp), "--project-root", str(tmp_path)])
+
+    result = runner.invoke(
+        app, ["flow", "list", "--project-root", str(tmp_path), "--require-measure", "cli-flow"]
+    )
+    assert result.exit_code == 1
+
+
+def test_flow_list_reports_measure_from_dispatch_and_require_measure_passes(tmp_path: Path) -> None:
+    _write_dispatch_registry(tmp_path)
+    bp = _write_dispatchable_blueprint(tmp_path)
+    result = runner.invoke(
+        app, ["--output", "json", "flow", "run", str(bp), "--executor", "dispatch", "--project-root", str(tmp_path)]
+    )
+    assert result.exit_code == 0, result.output
+
+    listed = runner.invoke(app, ["--output", "json", "flow", "list", "--project-root", str(tmp_path)])
+    assert listed.exit_code == 0, listed.output
+    registry = json.loads(listed.output)
+    entry = registry["cli-flow-dispatch"]
+    assert entry["runs"] == 1
+    assert entry["measure"]["resolved"] == 2  # nodes a et b, tous deux verts
+    assert entry["measure"]["total"] == 2
+
+    required = runner.invoke(
+        app, ["flow", "list", "--project-root", str(tmp_path), "--require-measure", "cli-flow-dispatch"]
+    )
+    assert required.exit_code == 0, required.output
