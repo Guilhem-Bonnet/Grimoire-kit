@@ -420,6 +420,34 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             except (PermissionError, OSError) as exc:
                 self._send_json(403, {"ok": False, "error": str(exc)})
             return
+        if path in ("/api/setup", "/api/setup/plan"):
+            # Le wizard exécute (issue #171) : `grimoire serve` n'est plus
+            # qu'un alias déprécié de cette commande (#351), donc c'est ICI —
+            # pas dans `forge_http.py` — que passe toute requête réelle du
+            # navigateur. Même garde que la vue de travail juste en dessous :
+            # seul le projet de lancement direct (`_HOME_SLUG`) accepte cette
+            # écriture, regarder un AUTRE projet du registre reste en lecture
+            # seule.
+            if not self._is_home_request():
+                self._send_json(403, {"ok": False, "error": "hôte en lecture seule"})
+                return
+            proot = _resolve_project_path(self._query_slug() or None)
+            if proot is None or not proot.is_dir():
+                self._send_json(404, {"ok": False, "error": "projet inconnu"})
+                return
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                body = json.loads(self.rfile.read(length) or b"{}") if length else {}
+            except (ValueError, json.JSONDecodeError):
+                self._send_json(400, {"ok": False, "error": "bad json"})
+                return
+            try:
+                result = _project_api(proot).setup_plan(body)
+            except ValueError as exc:
+                self._send_json(400, {"ok": False, "error": str(exc)})
+                return
+            self._send_json(200, result)
+            return
         if path.startswith(WORKSPACE_PREFIX):
             # Écritures de la vue de travail (réclamer/réaliser une tâche,
             # écrire un fichier, créer un override, lancer une commande) :
@@ -723,7 +751,13 @@ def _select_cwd_project(root: Path | None = None) -> str | None:
     if os.environ.get("GRIMOIRE_NO_COCKPIT"):
         return None
     cwd = (root or Path.cwd()).resolve()
-    if not looks_grimoire(cwd):
+    # `looks_grimoire` ne garde que la détection SILENCIEUSE du dossier
+    # courant : sans `root` explicite, on ne devine jamais qu'un dossier
+    # quelconque est un projet. Un `--project-root <dir>` explicite (issue
+    # #171 : le wizard doit pouvoir initialiser un dossier vierge) est un
+    # geste non ambigu — le même que `grimoire init <dir>` sur un dossier qui
+    # n'est pas encore un projet — et n'a pas besoin de ce garde-fou.
+    if root is None and not looks_grimoire(cwd):
         return None
     slug = slug_for_path(cwd)
     message = None

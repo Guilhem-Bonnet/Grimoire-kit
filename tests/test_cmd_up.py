@@ -113,14 +113,18 @@ class TestUpExpress:
         assert "fix-loop" in (target / "project-context.yaml").read_text(encoding="utf-8")
 
     def test_unknown_archetype_rejected(self, runner, cli_app, tmp_path: Path) -> None:
+        # Message partagé avec le wizard web (issue #171) : validate_up_inputs()
+        # est la même fonction des deux côtés, voir test_project_setup.py.
         result = runner.invoke(cli_app, ["up", str(tmp_path), "-a", "not-an-archetype"])
         assert result.exit_code == 1
-        assert "Unknown archetype" in result.output
+        assert "archetype(s) inconnu(s)" in result.output
+        assert "not-an-archetype" in result.output
 
     def test_unknown_backend_rejected(self, runner, cli_app, tmp_path: Path) -> None:
         result = runner.invoke(cli_app, ["up", str(tmp_path), "--backend", "bogus"])
         assert result.exit_code == 1
-        assert "Unknown backend" in result.output
+        assert "backend inconnu" in result.output
+        assert "bogus" in result.output
 
 
 class TestUpIdempotent:
