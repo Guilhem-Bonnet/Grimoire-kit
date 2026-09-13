@@ -98,6 +98,11 @@ _WELL_FORMED_CASES: tuple[dict, ...] = (
     {"project": {"name": "x"}, "proposals": {"threshold": 3}},
     {"project": {"name": "x"}, "proposals": {"threshold": 1}},
     {"project": {"name": "x"}, "source": {"assist": {"model": "qwen3-coder:30b", "allow_lan": False}}},
+    {"project": {"name": "x"}, "hosts": {"enabled": ["claude", "copilot"]}},
+    {"project": {"name": "x"}, "hosts": {"enabled": ["notahost"]}},
+    {"project": {"name": "x"}, "hosts": {"enabled": ["claude", "claude"]}},
+    {"project": {"name": "x"}, "hosts": {"enabled": [3]}},
+    {"project": {"name": "x"}, "hosts": "nope"},
     {"project": {"name": "x"}, "zzzzz_garbage": 42},
     {
         "project": {
@@ -133,6 +138,17 @@ def test_unknown_key_suggestion_agrees_across_backends(monkeypatch: pytest.Monke
     rust_errors = _validate_with_backend("rust", monkeypatch, data)
     assert _as_tuples(python_errors) == _as_tuples(rust_errors)
     assert any("user" in e.suggestion for e in rust_errors if "uesr" in e.message)
+
+
+@requires_rust_core
+def test_hosts_unknown_key_suggestion_agrees_across_backends(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Same round trip as `test_unknown_key_suggestion_agrees_across_backends`,
+    for the `hosts` keyset added by issue #177."""
+    data = {"project": {"name": "x"}, "hosts": {"enable": ["claude"]}}
+    python_errors = _validate_with_backend("python", monkeypatch, data)
+    rust_errors = _validate_with_backend("rust", monkeypatch, data)
+    assert _as_tuples(python_errors) == _as_tuples(rust_errors)
+    assert any("enabled" in e.suggestion for e in rust_errors if "enable" in e.message)
 
 
 # ── validate_config: previously-diverging malformed input — now strict parity ──

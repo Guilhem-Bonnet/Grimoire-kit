@@ -11,6 +11,7 @@ from grimoire.hosts.emitters.base import (
     Emitter,
     JsonMerge,
     apply_plan,
+    owned_managed_paths,
 )
 from grimoire.hosts.emitters.claude_code import ClaudeCodeEmitter
 from grimoire.hosts.emitters.copilot import CopilotEmitter
@@ -46,5 +47,6 @@ __all__ = [
     "JsonMerge",
     "apply_plan",
     "emitter_for",
+    "owned_managed_paths",
     "supported_hosts",
 ]

@@ -101,9 +101,11 @@ _KNOWN_ARCHETYPES = frozenset({
     "infra-ops", "meta", "stack", "features", "platform-engineering",
 })
 
+_VALID_HOST_ALIASES = frozenset({"claude", "copilot", "codex", "cursor", "gemini"})
+
 # Known keys per section for unknown-key detection
 _KNOWN_TOP_KEYS = frozenset({
-    "project", "user", "memory", "agents", "installed_archetypes", "proposals", "source",
+    "project", "user", "memory", "agents", "hosts", "installed_archetypes", "proposals", "source",
 })
 
 _KNOWN_PROJECT_KEYS = frozenset({
@@ -126,6 +128,10 @@ _KNOWN_MEMORY_KEYS = frozenset({
 
 _KNOWN_AGENTS_KEYS = frozenset({
     "archetype", "custom_agents", "entry", "freshness_threshold_days",
+})
+
+_KNOWN_HOSTS_KEYS = frozenset({
+    "enabled",
 })
 
 _KNOWN_PROPOSALS_KEYS = frozenset({
@@ -152,6 +158,7 @@ _KEYSETS: dict[str, frozenset[str]] = {
     "user": _KNOWN_USER_KEYS,
     "memory": _KNOWN_MEMORY_KEYS,
     "agents": _KNOWN_AGENTS_KEYS,
+    "hosts": _KNOWN_HOSTS_KEYS,
     "proposals": _KNOWN_PROPOSALS_KEYS,
     "source": _KNOWN_SOURCE_KEYS,
     "source.assist": _KNOWN_SOURCE_ASSIST_KEYS,
@@ -315,6 +322,9 @@ def _validate_config_python(
 
     if "agents" in data:
         _validate_agents(data["agents"], errors)
+
+    if "hosts" in data:
+        _validate_hosts(data["hosts"], errors)
 
     if "installed_archetypes" in data:
         _validate_installed_archetypes(data["installed_archetypes"], errors)
@@ -512,6 +522,51 @@ def _validate_agents(section: Any, errors: list[ValidationError]) -> None:
         ))
 
     _check_unknown_keys(section, _KNOWN_AGENTS_KEYS, "agents", errors)
+
+
+def _validate_hosts(section: Any, errors: list[ValidationError]) -> None:
+    """``hosts.enabled`` — issue #177 (petite version). A declared subset of
+    known hosts; absent key means "detect from the repo" (see
+    :mod:`grimoire.hosts.detection`)."""
+    if not isinstance(section, dict):
+        errors.append(ValidationError(
+            path="hosts",
+            message="'hosts' must be a mapping.",
+        ))
+        return
+
+    enabled = section.get("enabled")
+    if enabled is not None:
+        if not isinstance(enabled, list):
+            errors.append(ValidationError(
+                path="hosts.enabled",
+                message="'hosts.enabled' must be a list of host ids.",
+            ))
+        else:
+            seen: set[str] = set()
+            for i, host_id in enumerate(enabled):
+                if not isinstance(host_id, str):
+                    errors.append(ValidationError(
+                        path=f"hosts.enabled[{i}]",
+                        message="Host id must be a string.",
+                    ))
+                    continue
+                if host_id not in _VALID_HOST_ALIASES:
+                    errors.append(ValidationError(
+                        path=f"hosts.enabled[{i}]",
+                        message=f"Unknown host id '{host_id}'.",
+                        suggestion=f"Valid hosts: {', '.join(sorted(_VALID_HOST_ALIASES))}",
+                    ))
+                elif host_id in seen:
+                    errors.append(ValidationError(
+                        path=f"hosts.enabled[{i}]",
+                        message=f"Duplicate host id '{host_id}'.",
+                        suggestion="Remove the duplicate entry.",
+                    ))
+                else:
+                    seen.add(host_id)
+
+    _check_unknown_keys(section, _KNOWN_HOSTS_KEYS, "hosts", errors)
 
 
 def _validate_proposals(section: Any, errors: list[ValidationError]) -> None:

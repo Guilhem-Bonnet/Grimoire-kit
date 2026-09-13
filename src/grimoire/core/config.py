@@ -25,6 +25,7 @@ from grimoire.core.exceptions import GrimoireConfigError
 __all__ = [
     "AgentsConfig",
     "GrimoireConfig",
+    "HostsConfig",
     "MemoryConfig",
     "ProjectConfig",
     "RepoConfig",
@@ -276,10 +277,50 @@ class SourceConfig:
         return cls(assist=SourceAssistConfig.from_dict(data.get("assist") or {}))
 
 
+_VALID_HOST_ALIASES = frozenset({"claude", "copilot", "codex", "cursor", "gemini"})
+
+
+@dataclass(frozen=True, slots=True)
+class HostsConfig:
+    """The ``hosts:`` section — issue #177 (petite version): which hosts
+    ``grimoire host sync`` (and ``up``) are allowed to write to.
+
+    ``enabled`` is ``None`` when the key is absent from the file: callers
+    fall back to filesystem detection (:mod:`grimoire.hosts.detection`) so an
+    existing project keeps exactly the files it already has. An explicit
+    empty list is a deliberate "emit nothing" and is never conflated with
+    "undeclared" — the plugin-channel alternative from issue #177 was
+    dropped by decision (2026-09-12); this declarative subset is the whole
+    feature.
+    """
+
+    enabled: tuple[str, ...] | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> HostsConfig:
+        if "enabled" not in data or data.get("enabled") is None:
+            return cls(enabled=None)
+        raw = data["enabled"]
+        if not isinstance(raw, list):
+            raise GrimoireConfigError(
+                "'hosts.enabled' must be a list of host ids",
+                error_code=CONFIG_PARSE_ERROR.code,
+            )
+        values = tuple(str(h) for h in raw)
+        unknown = sorted(set(values) - _VALID_HOST_ALIASES)
+        if unknown:
+            raise GrimoireConfigError(
+                f"Unknown host id(s) in 'hosts.enabled': {unknown}, "
+                f"expected a subset of {sorted(_VALID_HOST_ALIASES)}",
+                error_code=CONFIG_PARSE_ERROR.code,
+            )
+        return cls(enabled=values)
+
+
 # ── Root Config ───────────────────────────────────────────────────────────────
 
 _KNOWN_TOP_KEYS = frozenset({
-    "project", "user", "memory", "agents", "installed_archetypes", "source",
+    "project", "user", "memory", "agents", "hosts", "installed_archetypes", "source",
 })
 
 
@@ -295,6 +336,7 @@ class GrimoireConfig:
     user: UserConfig = field(default_factory=UserConfig)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     agents: AgentsConfig = field(default_factory=AgentsConfig)
+    hosts: HostsConfig = field(default_factory=HostsConfig)
     source: SourceConfig = field(default_factory=SourceConfig)
     installed_archetypes: tuple[str, ...] = ()
     extra: dict[str, Any] = field(default_factory=dict)
@@ -354,6 +396,7 @@ class GrimoireConfig:
             user=UserConfig.from_dict(data.get("user") or {}),
             memory=MemoryConfig.from_dict(data.get("memory") or {}),
             agents=AgentsConfig.from_dict(data.get("agents") or {}),
+            hosts=HostsConfig.from_dict(data.get("hosts") or {}),
             source=SourceConfig.from_dict(data.get("source") or {}),
             installed_archetypes=tuple(str(a) for a in raw_archetypes),
             extra=extra,
