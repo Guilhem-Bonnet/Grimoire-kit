@@ -264,12 +264,22 @@ const KNOWN_TOP_KEYS: &[&str] = &[
     "memory",
     "agents",
     "hosts",
+    "needs",
     "installed_archetypes",
     "proposals",
     "source",
 ];
 const VALID_HOST_ALIASES: &[&str] = &["claude", "copilot", "codex", "cursor", "gemini"];
 const KNOWN_HOSTS_KEYS: &[&str] = &["enabled"];
+const VALID_EXECUTION_NEED_IDS: &[&str] = &[
+    "test-runner",
+    "lint",
+    "typecheck",
+    "build",
+    "migration-tool",
+    "format",
+];
+const KNOWN_NEEDS_KEYS: &[&str] = &["commands"];
 const KNOWN_PROJECT_KEYS: &[&str] = &["name", "description", "type", "metaphor", "stack", "repos"];
 const KNOWN_USER_KEYS: &[&str] = &["name", "language", "document_language", "skill_level"];
 const KNOWN_MEMORY_KEYS: &[&str] = &[
@@ -352,6 +362,7 @@ fn schema_core() -> Value {
                 ("memory", memory_schema()),
                 ("agents", agents_schema()),
                 ("hosts", hosts_schema()),
+                ("needs", needs_schema()),
                 ("proposals", proposals_schema()),
                 ("source", source_schema()),
                 (
@@ -778,6 +789,48 @@ fn hosts_schema() -> Value {
                     (
                         "description",
                         s("Subset of known hosts this project emits files for."),
+                    ),
+                ]),
+            )]),
+        ),
+    ])
+}
+
+fn needs_schema() -> Value {
+    obj(vec![
+        ("type", s("object")),
+        (
+            "description",
+            s(
+                "Declares execution needs (issue #205): a flow node's structured \
+                 acceptance can reference a need id (`run_need`) instead of a \
+                 hardcoded command. Absent key: the need falls back to project-marker \
+                 detection (see `grimoire.core.execution_needs`), or stays unresolved.",
+            ),
+        ),
+        ("additionalProperties", Value::Bool(false)),
+        (
+            "properties",
+            obj(vec![(
+                "commands",
+                obj(vec![
+                    ("type", s("object")),
+                    (
+                        "description",
+                        s("Need id -> the project's real command for it."),
+                    ),
+                    ("additionalProperties", Value::Bool(false)),
+                    (
+                        "properties",
+                        obj(VALID_EXECUTION_NEED_IDS
+                            .iter()
+                            .map(|need_id| {
+                                (
+                                    *need_id,
+                                    obj(vec![("type", s("string")), ("minLength", Value::Int(1))]),
+                                )
+                            })
+                            .collect()),
                     ),
                 ]),
             )]),
@@ -1282,6 +1335,43 @@ fn validate_hosts(section: &Value, errors: &mut Vec<RawError>) {
     check_unknown_keys(section, KNOWN_HOSTS_KEYS, "hosts", "hosts", errors);
 }
 
+fn validate_needs(section: &Value, errors: &mut Vec<RawError>) {
+    if !section.is_map() {
+        errors.push(err("needs", "'needs' must be a mapping."));
+        return;
+    }
+
+    if let Some(commands) = field(section, "commands") {
+        match commands {
+            Value::Map(entries) => {
+                for (need_id, command) in entries {
+                    if !VALID_EXECUTION_NEED_IDS.contains(&need_id.as_str()) {
+                        errors.push(err_sugg(
+                            format!("needs.commands.{need_id}"),
+                            format!("Unknown need id '{need_id}'."),
+                            format!("Valid needs: {}", sorted_join(VALID_EXECUTION_NEED_IDS)),
+                        ));
+                    } else {
+                        let valid = matches!(command, Value::Str(s) if !s.trim().is_empty());
+                        if !valid {
+                            errors.push(err(
+                                format!("needs.commands.{need_id}"),
+                                format!("'needs.commands.{need_id}' must be a non-empty string."),
+                            ));
+                        }
+                    }
+                }
+            }
+            _ => errors.push(err(
+                "needs.commands",
+                "'needs.commands' must be a mapping of need id to command.",
+            )),
+        }
+    }
+
+    check_unknown_keys(section, KNOWN_NEEDS_KEYS, "needs", "needs", errors);
+}
+
 fn validate_proposals(section: &Value, errors: &mut Vec<RawError>) {
     if !section.is_map() {
         errors.push(err("proposals", "'proposals' must be a mapping."));
@@ -1411,6 +1501,9 @@ fn validate_core(data: &Value) -> Vec<RawError> {
     }
     if let Some(hosts) = data.get("hosts") {
         validate_hosts(hosts, &mut errors);
+    }
+    if let Some(needs) = data.get("needs") {
+        validate_needs(needs, &mut errors);
     }
     if let Some(installed) = data.get("installed_archetypes") {
         validate_installed_archetypes(installed, &mut errors);
@@ -1833,6 +1926,96 @@ mod tests {
             .find(|e| e.unknown_key == "enable")
             .expect("unknown key error");
         assert_eq!(e.keyset_id, "hosts");
+    }
+
+    #[test]
+    fn schema_declares_needs_commands() {
+        // Mirroir de test_schema.py (issue #205).
+        let needs = needs_schema();
+        let commands = needs
+            .get("properties")
+            .unwrap()
+            .get("commands")
+            .expect("commands");
+        assert_eq!(
+            commands.get("type"),
+            Some(&Value::Str("object".to_string()))
+        );
+        let properties = commands.get("properties").expect("properties");
+        for need_id in VALID_EXECUTION_NEED_IDS.iter().copied() {
+            assert!(
+                properties.get(need_id).is_some(),
+                "missing need id {need_id}"
+            );
+        }
+    }
+
+    #[test]
+    fn needs_commands_valid_ids_has_no_error() {
+        let data = map(vec![
+            ("project", map(vec![("name", Value::Str("x".to_string()))])),
+            (
+                "needs",
+                map(vec![(
+                    "commands",
+                    map(vec![("test-runner", Value::Str("pytest -q".to_string()))]),
+                )]),
+            ),
+        ]);
+        assert!(validate_core(&data).is_empty());
+    }
+
+    #[test]
+    fn needs_commands_unknown_id_is_rejected_with_suggestion() {
+        let data = map(vec![
+            ("project", map(vec![("name", Value::Str("x".to_string()))])),
+            (
+                "needs",
+                map(vec![(
+                    "commands",
+                    map(vec![("not-a-need", Value::Str("echo hi".to_string()))]),
+                )]),
+            ),
+        ]);
+        let errors = validate_core(&data);
+        let e = errors
+            .iter()
+            .find(|e| e.path == "needs.commands.not-a-need")
+            .expect("needs.commands.not-a-need error");
+        assert!(e.message.contains("not-a-need"));
+        assert!(e.suggestion.starts_with("Valid needs:"));
+    }
+
+    #[test]
+    fn needs_commands_empty_string_value_is_rejected() {
+        let data = map(vec![
+            ("project", map(vec![("name", Value::Str("x".to_string()))])),
+            (
+                "needs",
+                map(vec![(
+                    "commands",
+                    map(vec![("lint", Value::Str("  ".to_string()))]),
+                )]),
+            ),
+        ]);
+        let errors = validate_core(&data);
+        assert!(errors
+            .iter()
+            .any(|e| e.path == "needs.commands.lint" && e.message.contains("non-empty")));
+    }
+
+    #[test]
+    fn needs_unknown_key_is_rejected() {
+        let data = map(vec![
+            ("project", map(vec![("name", Value::Str("x".to_string()))])),
+            ("needs", map(vec![("command", map(vec![]))])),
+        ]);
+        let errors = validate_core(&data);
+        let e = errors
+            .iter()
+            .find(|e| e.unknown_key == "command")
+            .expect("unknown key error");
+        assert_eq!(e.keyset_id, "needs");
     }
 
     #[test]

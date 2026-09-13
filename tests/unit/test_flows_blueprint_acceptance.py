@@ -12,12 +12,13 @@ pour la cascade complète.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
 
 from grimoire.core.exceptions import GrimoireRuntimeError
-from grimoire.flows.blueprint_loader import build_node_contracts
+from grimoire.flows.blueprint_loader import build_node_contracts, hardcoded_command_warnings
 from grimoire.missions.schemas import MissionTask, RiskProfile, TaskState, TaskType
 from grimoire.missions.verifiability import Verifiability, classify
 
@@ -164,3 +165,94 @@ def test_acceptance_timeout_negatif_est_refuse() -> None:
 def test_acceptance_forme_ni_chaine_ni_dict_est_refusee() -> None:
     with pytest.raises(GrimoireRuntimeError):
         build_node_contracts(_blueprint([42]))
+
+
+# ── ``run_need`` : un besoin, pas une commande (issue #205, lot 2) ──────────
+
+
+def test_run_need_declare_resout_depuis_project_context(tmp_path: Path) -> None:
+    (tmp_path / "project-context.yaml").write_text(
+        "project:\n  name: x\nneeds:\n  commands:\n    test-runner: tox -e py312\n",
+        encoding="utf-8",
+    )
+    contracts = build_node_contracts(_blueprint([{"run_need": "test-runner"}]), tmp_path)
+    run = contracts["n"].acceptance_runs[0]
+    assert run.raw == "tox -e py312"
+    assert "résolu declared" in contracts["n"].acceptance[0]
+
+
+def test_run_need_detecte_via_marqueur_pyproject(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text("[project]\nname = 'x'\n", encoding="utf-8")
+    contracts = build_node_contracts(_blueprint([{"run_need": "test-runner"}]), tmp_path)
+    run = contracts["n"].acceptance_runs[0]
+    assert run.raw == "pytest -q"
+    assert "résolu detected" in contracts["n"].acceptance[0]
+
+
+def test_run_need_declare_l_emporte_sur_le_marqueur_detecte(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text("[project]\nname = 'x'\n", encoding="utf-8")
+    (tmp_path / "project-context.yaml").write_text(
+        "project:\n  name: x\nneeds:\n  commands:\n    test-runner: tox -e py312\n",
+        encoding="utf-8",
+    )
+    contracts = build_node_contracts(_blueprint([{"run_need": "test-runner"}]), tmp_path)
+    run = contracts["n"].acceptance_runs[0]
+    assert run.raw == "tox -e py312"
+
+
+def test_run_need_non_resolvable_refuse_le_chargement_en_nommant_le_besoin(tmp_path: Path) -> None:
+    with pytest.raises(GrimoireRuntimeError, match="migration-tool"):
+        build_node_contracts(_blueprint([{"run_need": "migration-tool"}]), tmp_path)
+
+
+def test_run_need_id_inconnu_du_catalogue_refuse_en_le_nommant(tmp_path: Path) -> None:
+    with pytest.raises(GrimoireRuntimeError, match="inconnu du catalogue"):
+        build_node_contracts(_blueprint([{"run_need": "not-a-need"}]), tmp_path)
+
+
+def test_run_need_avec_args_les_ajoute_a_la_commande_resolue(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text("[project]\nname = 'x'\n", encoding="utf-8")
+    contracts = build_node_contracts(
+        _blueprint([{"run_need": "test-runner", "args": "tests/test_x.py"}]), tmp_path
+    )
+    run = contracts["n"].acceptance_runs[0]
+    assert run.raw == "pytest -q tests/test_x.py"
+
+
+def test_run_need_et_run_ensemble_est_une_forme_ambigue_refusee(tmp_path: Path) -> None:
+    with pytest.raises(GrimoireRuntimeError):
+        build_node_contracts(_blueprint([{"run": "true", "run_need": "test-runner"}]), tmp_path)
+
+
+def test_run_need_vide_est_refuse(tmp_path: Path) -> None:
+    with pytest.raises(GrimoireRuntimeError):
+        build_node_contracts(_blueprint([{"run_need": "   "}]), tmp_path)
+
+
+def test_run_need_produit_un_texte_mecanique_v0(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text("[project]\nname = 'x'\n", encoding="utf-8")
+    contracts = build_node_contracts(_blueprint([{"run_need": "test-runner"}]), tmp_path)
+    n = contracts["n"]
+    assert n.has_structured_acceptance is True
+    assert classify(_task_for(n.acceptance)) is Verifiability.V0
+
+
+# ── Rétrocompatibilité : avertissement, jamais un refus (issue #205) ────────
+
+
+def test_hardcoded_command_matching_a_resolved_need_is_a_warning_not_a_refusal(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text("[project]\nname = 'x'\n", encoding="utf-8")
+    blueprint = _blueprint([{"run": "pytest -q"}])
+    # Le chargement réussit toujours — aucune altération du contrat.
+    contracts = build_node_contracts(blueprint, tmp_path)
+    assert contracts["n"].acceptance_runs[0].raw == "pytest -q"
+    warnings = hardcoded_command_warnings(blueprint, tmp_path)
+    assert len(warnings) == 1
+    assert "test-runner" in warnings[0]
+    assert "n" in warnings[0]
+
+
+def test_hardcoded_command_not_matching_any_need_has_no_warning(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text("[project]\nname = 'x'\n", encoding="utf-8")
+    blueprint = _blueprint([{"run": "tox -e py312"}])
+    assert hardcoded_command_warnings(blueprint, tmp_path) == ()

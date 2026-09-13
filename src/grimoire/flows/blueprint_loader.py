@@ -20,17 +20,19 @@ from pathlib import Path
 from typing import Any
 
 from grimoire.core.exceptions import GrimoireRuntimeError
+from grimoire.core.execution_needs import EXECUTION_NEED_IDS, KNOWN_MARKERS, resolve_execution_needs, resolve_need
 from grimoire.flows.schemas import AcceptanceEvidence, AcceptanceRun, NodeContract, PinRef
 from grimoire.missions.verifiability import Verifiability, classify_criteria
 from grimoire.tools.ext_manager import validate_blueprint_file
 
-__all__ = ["build_node_contracts", "load_blueprint", "topo_order"]
+__all__ = ["build_node_contracts", "hardcoded_command_warnings", "load_blueprint", "topo_order"]
 
 #: Les seules clés qu'une entrée d'``acceptance`` structurée reconnaît (issue
-#: #428). Une entrée doit en porter exactement une : ni zéro (forme inconnue),
-#: ni deux ou plus (ambiguïté sur ce qu'il faut exécuter) — les deux sont un
-#: refus nommé au chargement, jamais une garde qui échouerait ouvert.
-_ACCEPTANCE_STRUCTURED_KEYS = ("run", "path_exists", "test")
+#: #428, #205 pour ``run_need``). Une entrée doit en porter exactement une :
+#: ni zéro (forme inconnue), ni deux ou plus (ambiguïté sur ce qu'il faut
+#: exécuter) — les deux sont un refus nommé au chargement, jamais une garde
+#: qui échouerait ouvert.
+_ACCEPTANCE_STRUCTURED_KEYS = ("run", "run_need", "path_exists", "test")
 
 
 def load_blueprint(path: Path) -> dict[str, Any]:
@@ -107,10 +109,50 @@ def _tool_boundary(node: dict[str, Any]) -> tuple[str, ...]:
     return ()
 
 
+def _parse_run_like_entry(
+    node_id: str, entry: dict[str, Any], *, raw: str, source_desc: str
+) -> AcceptanceRun:
+    """Les options communes à ``run`` et ``run_need`` (issue #205), une fois *raw* connu.
+
+    Factorisé pour que les deux clés structurées produisent le même
+    :class:`AcceptanceRun` — le gate (``flows.dispatch_executor``) ne voit
+    ensuite jamais la différence entre une commande écrite en dur et une
+    commande résolue depuis un besoin.
+    """
+    if not raw:
+        raise GrimoireRuntimeError(f"node={node_id} : {source_desc} vide")
+    try:
+        argv = tuple(shlex.split(raw))
+    except ValueError as exc:
+        raise GrimoireRuntimeError(f"node={node_id} : {source_desc} illisible ({exc})") from exc
+    if not argv:
+        raise GrimoireRuntimeError(f"node={node_id} : {source_desc} vide après découpage")
+    expect_exit = entry.get("expect_exit", 0)
+    if not isinstance(expect_exit, int) or isinstance(expect_exit, bool):
+        raise GrimoireRuntimeError(f"node={node_id} : acceptance.expect_exit doit être un entier")
+    cwd = entry.get("cwd", ".")
+    if not isinstance(cwd, str) or not cwd.strip():
+        raise GrimoireRuntimeError(f"node={node_id} : acceptance.cwd doit être une chaîne non vide")
+    timeout_s = entry.get("timeout_s", 120.0)
+    if isinstance(timeout_s, bool) or not isinstance(timeout_s, (int, float)) or timeout_s <= 0:
+        raise GrimoireRuntimeError(f"node={node_id} : acceptance.timeout_s doit être un nombre positif")
+    expect_stdout_contains = entry.get("expect_stdout_contains")
+    if expect_stdout_contains is not None and not isinstance(expect_stdout_contains, str):
+        raise GrimoireRuntimeError(f"node={node_id} : acceptance.expect_stdout_contains doit être une chaîne")
+    return AcceptanceRun(
+        argv=argv,
+        raw=raw,
+        expect_exit=expect_exit,
+        cwd=cwd,
+        timeout_s=float(timeout_s),
+        expect_stdout_contains=expect_stdout_contains,
+    )
+
+
 def _parse_acceptance_entry(
-    node_id: str, entry: Any
+    node_id: str, entry: Any, project_root: Path
 ) -> tuple[str, AcceptanceRun | None, AcceptanceEvidence | None]:
-    """Une entrée d'``acceptance`` : texte libre (inchangé), ou forme structurée (issue #428).
+    """Une entrée d'``acceptance`` : texte libre (inchangé), ou forme structurée (issue #428/#205).
 
     Rend ``(texte, run, evidence)`` — ``texte`` alimente toujours
     ``NodeContract.acceptance`` (donc ``verifiability.classify``), qu'il
@@ -119,11 +161,19 @@ def _parse_acceptance_entry(
     réellement (``flows.dispatch_executor``).
 
     Une forme structurée reconnaît exactement une clé parmi ``run``,
-    ``path_exists``, ``test`` — zéro ou plusieurs est un refus nommé au
-    chargement (:class:`GrimoireRuntimeError`), jamais une garde silencieuse :
-    « aucune inférence de commande à partir de la prose » est un refus
-    explicite de l'issue, une forme ambiguë ne doit pas se comporter comme si
-    elle en désignait une par accident.
+    ``run_need``, ``path_exists``, ``test`` — zéro ou plusieurs est un refus
+    nommé au chargement (:class:`GrimoireRuntimeError`), jamais une garde
+    silencieuse : « aucune inférence de commande à partir de la prose » est un
+    refus explicite de l'issue, une forme ambiguë ne doit pas se comporter
+    comme si elle en désignait une par accident.
+
+    ``run_need`` (issue #205) déclare un besoin du catalogue
+    (:data:`grimoire.core.execution_needs.EXECUTION_NEED_IDS`) plutôt qu'une
+    commande — résolu ici, à l'unique endroit qui connaît à la fois le
+    blueprint et le projet qui l'exécute. Un besoin non résolvable refuse le
+    chargement du blueprint entier en le nommant, **avant** que le premier
+    node soit présenté à l'hôte : jamais une installation qui échouerait au
+    troisième node.
     """
     if isinstance(entry, str):
         text = entry.strip()
@@ -131,7 +181,7 @@ def _parse_acceptance_entry(
     if not isinstance(entry, dict):
         raise GrimoireRuntimeError(
             f"node={node_id} : acceptance de forme inconnue ({entry!r}) — attendu une chaîne ou un objet "
-            "{'run': ...} / {'path_exists': ...} / {'test': ...}"
+            "{'run': ...} / {'run_need': ...} / {'path_exists': ...} / {'test': ...}"
         )
     present = [k for k in _ACCEPTANCE_STRUCTURED_KEYS if k in entry]
     if len(present) != 1:
@@ -142,35 +192,38 @@ def _parse_acceptance_entry(
     key = present[0]
     if key == "run":
         raw = str(entry["run"]).strip()
-        if not raw:
-            raise GrimoireRuntimeError(f"node={node_id} : acceptance.run vide")
-        try:
-            argv = tuple(shlex.split(raw))
-        except ValueError as exc:
-            raise GrimoireRuntimeError(f"node={node_id} : acceptance.run illisible ({exc})") from exc
-        if not argv:
-            raise GrimoireRuntimeError(f"node={node_id} : acceptance.run vide après découpage")
+        run = _parse_run_like_entry(node_id, entry, raw=raw, source_desc="acceptance.run")
         expect_exit = entry.get("expect_exit", 0)
-        if not isinstance(expect_exit, int) or isinstance(expect_exit, bool):
-            raise GrimoireRuntimeError(f"node={node_id} : acceptance.expect_exit doit être un entier")
-        cwd = entry.get("cwd", ".")
-        if not isinstance(cwd, str) or not cwd.strip():
-            raise GrimoireRuntimeError(f"node={node_id} : acceptance.cwd doit être une chaîne non vide")
-        timeout_s = entry.get("timeout_s", 120.0)
-        if isinstance(timeout_s, bool) or not isinstance(timeout_s, (int, float)) or timeout_s <= 0:
-            raise GrimoireRuntimeError(f"node={node_id} : acceptance.timeout_s doit être un nombre positif")
-        expect_stdout_contains = entry.get("expect_stdout_contains")
-        if expect_stdout_contains is not None and not isinstance(expect_stdout_contains, str):
-            raise GrimoireRuntimeError(f"node={node_id} : acceptance.expect_stdout_contains doit être une chaîne")
-        run = AcceptanceRun(
-            argv=argv,
-            raw=raw,
-            expect_exit=expect_exit,
-            cwd=cwd,
-            timeout_s=float(timeout_s),
-            expect_stdout_contains=expect_stdout_contains,
-        )
         text = f"la commande « {raw} » retourne le code de sortie {expect_exit} (acceptance exécutée)"
+        return text, run, None
+    if key == "run_need":
+        need_id = str(entry["run_need"]).strip()
+        if not need_id:
+            raise GrimoireRuntimeError(f"node={node_id} : acceptance.run_need vide")
+        resolved = resolve_need(need_id, project_root)
+        if not resolved.resolved:
+            if need_id not in EXECUTION_NEED_IDS:
+                raise GrimoireRuntimeError(
+                    f"node={node_id} : besoin « {need_id} » inconnu du catalogue "
+                    f"(connus : {', '.join(EXECUTION_NEED_IDS)})"
+                )
+            raise GrimoireRuntimeError(
+                f"node={node_id} : besoin « {need_id} » non résolvable pour ce projet — "
+                f"déclarez needs.commands.{need_id} dans project-context.yaml, ou installez un marqueur reconnu "
+                f"({', '.join(KNOWN_MARKERS)})"
+            )
+        args = entry.get("args")
+        if args is not None and not isinstance(args, str):
+            raise GrimoireRuntimeError(f"node={node_id} : acceptance.args doit être une chaîne")
+        command = resolved.command
+        assert command is not None  # resolved.resolved garantit command non None
+        raw = command if not args else f"{command} {args}"
+        run = _parse_run_like_entry(node_id, entry, raw=raw, source_desc="acceptance.run_need")
+        expect_exit = entry.get("expect_exit", 0)
+        text = (
+            f"le besoin « {need_id} » (résolu {resolved.source} : « {raw} ») "
+            f"retourne le code de sortie {expect_exit} (acceptance exécutée)"
+        )
         return text, run, None
     if key == "path_exists":
         value = str(entry["path_exists"]).strip()
@@ -186,7 +239,7 @@ def _parse_acceptance_entry(
 
 
 def _acceptance(
-    node: dict[str, Any], outputs: tuple[PinRef, ...]
+    node: dict[str, Any], outputs: tuple[PinRef, ...], project_root: Path
 ) -> tuple[tuple[str, ...], tuple[AcceptanceRun, ...], tuple[AcceptanceEvidence, ...]]:
     """Critères d'acceptation : ``node.acceptance``, sinon les evals, sinon les pins.
 
@@ -217,7 +270,7 @@ def _acceptance(
         runs: list[AcceptanceRun] = []
         evidence: list[AcceptanceEvidence] = []
         for entry in explicit:
-            text, run, ev = _parse_acceptance_entry(node["id"], entry)
+            text, run, ev = _parse_acceptance_entry(node["id"], entry, project_root)
             if text:
                 texts.append(text)
             if run is not None:
@@ -265,14 +318,20 @@ def _verifiability_warning(node_id: str, acceptance_texts: tuple[str, ...], *, h
     return f"nœud {node_id} classé V0 sans acceptance exécutable : traité comme V1"
 
 
-def build_node_contracts(blueprint: dict[str, Any]) -> dict[str, NodeContract]:
-    """Un :class:`NodeContract` par node du blueprint, indexé par id."""
+def build_node_contracts(blueprint: dict[str, Any], project_root: Path = Path()) -> dict[str, NodeContract]:
+    """Un :class:`NodeContract` par node du blueprint, indexé par id.
+
+    ``project_root`` (issue #205) : nécessaire pour résoudre une acceptance
+    ``run_need`` — ignoré par tout le reste, d'où son défaut à ``Path(".")``
+    (le répertoire courant, jamais consulté par les blueprints qui n'ont pas
+    de ``run_need``, ce qui couvre tout le corpus antérieur à cette issue).
+    """
     contracts: dict[str, NodeContract] = {}
     for node in blueprint["nodes"]:
         pins = node.get("pins", [])
         inputs = tuple(PinRef(p["id"], p["contract"]) for p in pins if p.get("direction") == "in")
         outputs = tuple(PinRef(p["id"], p["contract"]) for p in pins if p.get("direction") == "out")
-        acceptance_texts, acceptance_runs, acceptance_evidence = _acceptance(node, outputs)
+        acceptance_texts, acceptance_runs, acceptance_evidence = _acceptance(node, outputs, project_root)
         has_structured = bool(acceptance_runs or acceptance_evidence)
         contracts[node["id"]] = NodeContract(
             node_id=node["id"],
@@ -288,3 +347,30 @@ def build_node_contracts(blueprint: dict[str, Any]) -> dict[str, NodeContract]:
             verifiability_warning=_verifiability_warning(node["id"], acceptance_texts, has_structured=has_structured),
         )
     return contracts
+
+
+def hardcoded_command_warnings(blueprint: dict[str, Any], project_root: Path) -> tuple[str, ...]:
+    """Nodes dont l'``acceptance.run`` en dur pourrait devenir un ``run_need`` (issue #205).
+
+    Rétrocompatibilité explicite : un blueprint à commandes en dur reste
+    valide (aucun refus ici, jamais), mais s'il déclare mot pour mot la
+    commande que le catalogue de besoins résout *pour ce projet*, l'auteur
+    gagne à le savoir — un avertissement, jamais un chargement altéré. Appelé
+    par la CLI (``grimoire flow run``), jamais par :func:`build_node_contracts`
+    lui-même : cette fonction n'influence aucun :class:`NodeContract`.
+    """
+    resolved = resolve_execution_needs(project_root)
+    command_to_need = {r.command: need_id for need_id, r in resolved.items() if r.command}
+    warnings: list[str] = []
+    for node in blueprint.get("nodes", []):
+        for entry in node.get("acceptance") or []:
+            if not (isinstance(entry, dict) and "run" in entry):
+                continue
+            raw = str(entry["run"]).strip()
+            need_id = command_to_need.get(raw)
+            if need_id is not None:
+                warnings.append(
+                    f"node {node.get('id')} : commande « {raw} » en dur correspond au besoin « {need_id} » "
+                    f"résolu pour ce projet — envisager acceptance: [{{'run_need': '{need_id}'}}]"
+                )
+    return tuple(warnings)

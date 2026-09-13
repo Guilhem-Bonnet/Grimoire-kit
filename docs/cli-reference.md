@@ -316,6 +316,30 @@ Le contrôle du standard `dispatch.cost_slo` (voir
 mêmes agrégats — cette commande en est la vue humaine, jamais un second
 calcul.
 
+## Besoins d'exécution : un flow déclare, le projet résout
+
+Un node de flow ne référence pas `pytest` ni `npm test` en dur : son
+acceptance peut déclarer un besoin (`{"run_need": "test-runner"}`) plutôt
+qu'une commande (issue #205). `grimoire flow run`/`resume` résolvent ce
+besoin à la commande réelle du projet au chargement du blueprint — en deux
+temps, jamais un troisième : une déclaration explicite
+(`needs.commands` dans `project-context.yaml`) l'emporte toujours sur la
+détection par marqueur de projet (`pyproject.toml`, `package.json`,
+`Cargo.toml`, `go.mod`). Un besoin qui ne se résout ni par l'un ni par
+l'autre refuse le chargement du blueprint en le nommant, avant que le
+premier node soit présenté à l'hôte — jamais une installation qui
+échouerait au troisième node.
+
+| Commande | Description |
+| --- | --- |
+| `grimoire needs resolve [--project-root .] [--json]` | Le verdict de résolution de chaque besoin du catalogue pour ce projet, et sa source (`declared`, `detected`, `unresolved`) |
+
+Rétrocompatible : un blueprint à commandes en dur (`{"run": "pytest -q"}`)
+reste valide sans aucun changement. `grimoire flow run` affiche un
+avertissement (jamais un refus) quand une commande en dur correspond mot
+pour mot à un besoin résolu pour ce projet — une invitation à migrer vers
+`run_need`, pas une obligation.
+
 ## Web
 
 Le groupe `grimoire web` est le chemin par lequel un agent atteint le web. Il

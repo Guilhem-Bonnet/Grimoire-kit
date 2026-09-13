@@ -298,6 +298,46 @@ class TestHostsSection:
         assert "enabled" in unknown_errs[0].suggestion
 
 
+class TestNeedsSection:
+    """`needs.commands` — issue #205, lot 2 (moteur de flows)."""
+
+    def test_valid_commands_is_accepted(self) -> None:
+        data = {**_minimal(), "needs": {"commands": {"test-runner": "pytest -q"}}}
+        assert validate_config(data) == []
+
+    def test_absent_needs_is_accepted(self) -> None:
+        assert validate_config(_minimal()) == []
+
+    def test_needs_not_dict(self) -> None:
+        data = {**_minimal(), "needs": "nope"}
+        errs = validate_config(data)
+        assert any(e.path == "needs" for e in errs)
+
+    def test_commands_not_dict(self) -> None:
+        data = {**_minimal(), "needs": {"commands": "pytest -q"}}
+        errs = validate_config(data)
+        assert any(e.path == "needs.commands" for e in errs)
+
+    def test_unknown_need_id_is_rejected_with_suggestion(self) -> None:
+        data = {**_minimal(), "needs": {"commands": {"not-a-need": "echo hi"}}}
+        errs = validate_config(data)
+        e = next(e for e in errs if e.path == "needs.commands.not-a-need")
+        assert "not-a-need" in e.message
+        assert e.suggestion.startswith("Valid needs:")
+
+    def test_empty_command_is_rejected(self) -> None:
+        data = {**_minimal(), "needs": {"commands": {"lint": "   "}}}
+        errs = validate_config(data)
+        assert any(e.path == "needs.commands.lint" for e in errs)
+
+    def test_unknown_needs_key_is_rejected(self) -> None:
+        data = {**_minimal(), "needs": {"command": {"test-runner": "pytest -q"}}}
+        errs = validate_config(data)
+        unknown_errs = [e for e in errs if "command" in e.message]
+        assert len(unknown_errs) == 1
+        assert "commands" in unknown_errs[0].suggestion
+
+
 class TestValidationErrorStr:
     def test_without_suggestion(self) -> None:
         e = ValidationError(path="p", message="msg")

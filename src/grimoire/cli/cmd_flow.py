@@ -26,6 +26,7 @@ import typer
 from rich.console import Console
 
 from grimoire.core.exceptions import GrimoireRuntimeError
+from grimoire.flows.blueprint_loader import hardcoded_command_warnings, load_blueprint
 from grimoire.flows.dispatch_executor import (
     FlowDispatchOutcome,
     node_dispatch_history,
@@ -94,7 +95,7 @@ def _fmt(ctx: typer.Context) -> str:
 
 def _engine(project_root: Path) -> FlowEngine:
     root = project_root.resolve()
-    return FlowEngine(kernel_root=root / _KERNEL_RELPATH, flows_root=root / _FLOWS_RELPATH)
+    return FlowEngine(kernel_root=root / _KERNEL_RELPATH, flows_root=root / _FLOWS_RELPATH, project_root=root)
 
 
 def _executor(ctx: typer.Context) -> InteractiveNodeExecutor:
@@ -255,6 +256,14 @@ def flow_run(
 
     _check_executor_name(ctx, executor)
     _check_max_tier(ctx, max_tier)
+
+    try:
+        loaded = load_blueprint(blueprint)
+    except GrimoireRuntimeError:
+        loaded = None  # blueprint invalide : engine.run()/run_with_dispatch lèvera le vrai refus juste après
+    if loaded is not None:
+        for warning in hardcoded_command_warnings(loaded, project_root.resolve()):
+            console.print(f"[yellow]avertissement[/yellow] {warning}")
 
     if executor == "dispatch":
         try:
