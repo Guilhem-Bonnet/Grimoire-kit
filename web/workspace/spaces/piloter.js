@@ -18,6 +18,12 @@
 // api.agents(project?), api.agentSkill(name, skill, action),
 // api.agentFields(name, fields).
 //
+// Wizard de setup (#171) : api.archetypesCatalogue(), api.backendsCatalogue(),
+// api.needsCatalogue(), api.setupPlan(payload) — exécute réellement (même
+// mécanique que `grimoire up`) sauf `payload.planOnly`, qui garde le repli
+// « copier-coller la commande ». Refusé côté serveur (readOnly) hors projet
+// d'accueil, comme le reste des écritures de cette fiche.
+//
 // Agents (#374) : section de la fiche projet, pas un septième espace. La
 // gestion d'agents est une facette du même objet que « kit, hôtes, standard,
 // actions » — un réglage du projet, pas un artefact qu'on façonne (ça, c'est
@@ -329,14 +335,18 @@ function renderFleet(root, ctx, rows, onSelect) {
 // ── Niveau Projet (fiche) ────────────────────────────────────────────────────
 
 async function loadSheet(ctx, slug) {
-  const [health, memory, doctor, agents, proposals] = await Promise.all([
+  const [health, memory, doctor, agents, proposals, setupRun] = await Promise.all([
     ctx.api.health(slug).catch(() => null),
     ctx.api.memoryStatus(slug).catch(() => null),
     ctx.api.doctor(slug).catch(() => null),
     ctx.api.agents(slug).catch(() => null),
     ctx.api.proposals(slug).catch(() => null),
+    // Dernière exécution du wizard (#171) : lue depuis le journal persistant
+    // (`_grimoire/setup-run.json`), donc encore là après ce refresh — pas
+    // seulement le temps d'un toast.
+    ctx.api.setupRun(slug).catch(() => null),
   ]);
-  return { health, memory, doctor, agents, proposals };
+  return { health, memory, doctor, agents, proposals, setupRun };
 }
 
 // ── Propositions d'artefact (#395) : à la répétition d'un non-choix ────────
@@ -701,6 +711,187 @@ function renderAgentInspector(ctx, agentsPayload, agent, callbacks) {
   return block;
 }
 
+// ── Wizard de setup — le wizard exécute (#171) ──────────────────────────────
+//
+// Remplace le repli « copier-coller la commande » sur le projet d'accueil
+// (écritures actives, `!ctx.host.readOnly`) : exécution réelle par la même
+// mécanique que `grimoire up` (`project_setup.execute_setup_plan`, jamais un
+// sous-processus), needs pré-cochés depuis `needs_suggest.py` (B3 rebranché
+// sur B2), état final vérifiable (doctor). Le mode copier-coller reste un
+// repli explicite, toujours accessible en dessous. Naviguer vers un AUTRE
+// projet du registre (cockpit, lecture seule) garde l'ancien message : la
+// Console ne lance jamais `grimoire init` à distance sur ce cas-là.
+
+function stepStatusWord(status) {
+  return { done: 'fait', skipped: 'sans effet', failed: 'échec', planned: 'prévu' }[status] || status;
+}
+
+function renderRunReport(run) {
+  const wrap = document.createElement('div');
+  wrap.className = 'pl-preview';
+  wrap.append(row(
+    dot(run.ok ? 'ok' : 'bad'),
+    text('span', null, run.ok ? 'Projet initialisé.' : 'Initialisation en échec.'),
+    text('span', 'lbl', run.doctorOk ? 'doctor conforme ✓' : 'doctor à revoir'),
+  ));
+  const list = document.createElement('div');
+  list.className = 'pl-watch';
+  list.style.marginTop = '8px';
+  for (const step of run.steps || []) {
+    const line = document.createElement('div');
+    line.className = 'pl-watch-row';
+    line.append(
+      dot(step.status === 'failed' ? 'bad' : (step.status === 'done' ? 'ok' : '')),
+      row(
+        text('span', 'pl-watch-name', step.step),
+        text('span', 'pl-watch-reason lbl', `${stepStatusWord(step.status)} — ${step.detail}`),
+      ),
+    );
+    list.append(line);
+  }
+  wrap.append(list);
+  if ((run.extensionErrors || []).length) {
+    wrap.append(text('div', 'lbl', 'Extensions en échec : ' + run.extensionErrors.join(' · ')));
+  }
+  return wrap;
+}
+
+async function renderSetupWizard(ctx, options) {
+  const wrap = document.createElement('div');
+  wrap.append(text('p', 'lbl', "Ce projet n'est pas initialisé — l'exécuter écrit réellement le projet."));
+
+  const [archetypes, backendsPayload, needsPayload] = await Promise.all([
+    ctx.api.archetypesCatalogue().catch(() => []),
+    ctx.api.backendsCatalogue().catch(() => ({ backends: [] })),
+    ctx.api.needsCatalogue().catch(() => ({ needs: [], suggested: [] })),
+  ]);
+
+  const nameInput = document.createElement('input');
+  nameInput.type = 'text';
+  nameInput.placeholder = ctx.host.project || 'nom du projet';
+  const userInput = document.createElement('input');
+  userInput.type = 'text';
+  userInput.placeholder = 'votre nom (artefacts)';
+
+  const archSelect = document.createElement('select');
+  for (const a of (archetypes || [])) {
+    const opt = document.createElement('option');
+    opt.value = a.id;
+    opt.textContent = a.name || a.id;
+    archSelect.append(opt);
+  }
+  if (!archSelect.options.length) {
+    const opt = document.createElement('option');
+    opt.value = 'minimal';
+    opt.textContent = 'minimal';
+    archSelect.append(opt);
+  }
+
+  const backendSelect = document.createElement('select');
+  const autoOpt = document.createElement('option');
+  autoOpt.value = 'auto';
+  autoOpt.textContent = 'auto (recommandé)';
+  backendSelect.append(autoOpt);
+  for (const b of (backendsPayload.backends || [])) {
+    if (b.id === 'auto') continue;
+    const opt = document.createElement('option');
+    opt.value = b.id;
+    opt.textContent = b.label || b.id;
+    backendSelect.append(opt);
+  }
+
+  const suggestedIds = new Set((needsPayload.suggested || []).map((s) => s.id));
+  const needsWrap = document.createElement('div');
+  needsWrap.className = 'pl-tool-opts';
+  const needChecks = {};
+  for (const n of (needsPayload.needs || [])) {
+    const label = document.createElement('label');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = suggestedIds.has(n.id);
+    if (n.rationale) label.title = n.rationale;
+    needChecks[n.id] = cb;
+    label.append(cb, document.createTextNode(n.label || n.id));
+    needsWrap.append(label);
+  }
+  if ((needsPayload.suggested || []).length) {
+    const hint = needsPayload.suggested.map((s) => s.reason).join(' · ');
+    wrap.append(text('p', 'lbl', 'Suggéré pour ce projet : ' + hint));
+  }
+
+  wrap.append(
+    fieldRow('nom', nameInput),
+    fieldRow('votre nom', userInput),
+    fieldRow('archétype', archSelect),
+    fieldRow('mémoire / BDD', backendSelect),
+    fieldRow('needs (standard agentique)', needsWrap),
+  );
+
+  const runBtn = document.createElement('button');
+  runBtn.type = 'button';
+  runBtn.className = 'btn pri';
+  runBtn.textContent = 'Initialiser le projet';
+
+  const preview = document.createElement('div');
+  preview.hidden = true;
+
+  const fallbackBtn = document.createElement('button');
+  fallbackBtn.type = 'button';
+  fallbackBtn.className = 'btn';
+  fallbackBtn.textContent = 'ou : obtenir la commande à copier-coller';
+
+  const buildPayload = (planOnly) => ({
+    name: nameInput.value.trim(),
+    user: userInput.value.trim(),
+    archetype: archSelect.value,
+    backend: backendSelect.value,
+    needs: Object.keys(needChecks).filter((id) => needChecks[id].checked),
+    planOnly,
+  });
+
+  runBtn.addEventListener('click', async () => {
+    runBtn.disabled = true;
+    runBtn.textContent = 'Initialisation…';
+    preview.hidden = false;
+    preview.replaceChildren(text('p', 'lbl', 'grimoire up — en cours…'));
+    ctx.dock.echo(`grimoire up . --archetype ${archSelect.value} --backend ${backendSelect.value}`);
+    try {
+      await ctx.api.setupPlan(buildPayload(false));
+      // Le rapport (doctor compris) est désormais un bloc persistant de la
+      // fiche — lu depuis `_grimoire/setup-run.json`, pas ce `preview` que le
+      // refresh qui suit va de toute façon effacer avec le reste de la fiche.
+      options.refresh();
+      return;
+    } catch (error) {
+      preview.replaceChildren(text('div', 'lbl', 'refusé : ' + error.message));
+    } finally {
+      runBtn.disabled = false;
+      runBtn.textContent = 'Initialiser le projet';
+    }
+  });
+
+  fallbackBtn.addEventListener('click', async () => {
+    fallbackBtn.disabled = true;
+    try {
+      const plan = await ctx.api.setupPlan(buildPayload(true));
+      preview.hidden = false;
+      preview.replaceChildren(text('p', 'lbl', 'Plan écrit dans _grimoire/setup-plan.json — terminez :'));
+      const code = document.createElement('code');
+      code.className = 'mono';
+      code.textContent = plan.initCommand;
+      preview.append(code);
+    } catch (error) {
+      preview.hidden = false;
+      preview.replaceChildren(text('div', 'lbl', 'refusé : ' + error.message));
+    } finally {
+      fallbackBtn.disabled = false;
+    }
+  });
+
+  wrap.append(runBtn, fallbackBtn, preview);
+  return wrap;
+}
+
 function renderSheet(root, ctx, slug, name, sheet, options) {
   const wrap = document.createElement('div');
   wrap.className = 'pl-sheet';
@@ -744,18 +935,42 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
   memBlock.append(row(dot(memory?.state === 'ok' ? 'ok' : (memory?.state === 'unavailable' ? 'warn' : '')), text('span', null, memory?.configuredBackend ? `${memory.configuredBackend} · ${fmtInt(memory.entries)} entrée(s)` : 'non initialisée')));
   ctx.inspector.append(memBlock);
 
+  // ── Dernière exécution du wizard (#171) ─────────────────────────────────
+  //
+  // Lue depuis le journal persistant (`_grimoire/setup-run.json`), pas
+  // seulement le temps d'un toast : `options.refresh()` recharge la fiche
+  // après une exécution, et ce bloc doit encore montrer le rapport (doctor
+  // compris) une fois la fiche redessinée.
+  if (sheet.setupRun && sheet.setupRun.available) {
+    const runBlock = document.createElement('div');
+    runBlock.className = 'pl-insp-block';
+    runBlock.append(text('h4', null, 'Dernière initialisation (wizard)'));
+    runBlock.append(renderRunReport(sheet.setupRun));
+    ctx.inspector.append(runBlock);
+  }
+
   const actionsBlock = document.createElement('div');
   actionsBlock.className = 'pl-insp-block pl-actions';
   actionsBlock.append(text('h4', null, 'Actions'));
 
   if (!health?.kit?.scaffolded) {
-    const initRow = document.createElement('div');
-    initRow.append(text('p', 'lbl', "Ce projet n'est pas initialisé. La Console ne lance jamais `grimoire init` à distance :"));
-    const code = document.createElement('code');
-    code.className = 'mono';
-    code.textContent = `grimoire init ${slug ? '(dans le dossier du projet)' : '.'}`;
-    initRow.append(code);
-    actionsBlock.append(initRow);
+    if (ctx.host.readOnly) {
+      // Naviguer vers un AUTRE projet du registre depuis le cockpit reste en
+      // lecture seule : la Console ne lance jamais `grimoire init` à distance
+      // sur un projet qu'on ne fait que regarder (#356).
+      const initRow = document.createElement('div');
+      initRow.append(text('p', 'lbl', "Ce projet n'est pas initialisé. La Console ne lance jamais `grimoire init` à distance :"));
+      const code = document.createElement('code');
+      code.className = 'mono';
+      code.textContent = `grimoire init ${slug ? '(dans le dossier du projet)' : '.'}`;
+      initRow.append(code);
+      actionsBlock.append(initRow);
+    } else {
+      const wizardHost = document.createElement('div');
+      wizardHost.append(text('p', 'lbl', 'Chargement du wizard…'));
+      actionsBlock.append(wizardHost);
+      renderSetupWizard(ctx, options).then((node) => wizardHost.replaceWith(node));
+    }
   }
 
   const updateBtn = document.createElement('button');
