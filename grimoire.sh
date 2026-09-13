@@ -33,13 +33,13 @@ NC='\033[0m'
 
 # ─── Détection racine ────────────────────────────────────────────────────────
 find_project_root() {
-    local dir="$PWD"
-    while [[ "$dir" != "/" ]]; do
+    local dir="$PWD" prev=""  # garde anti-boucle-infinie si dirname cesse de progresser avant "/" (Git Bash Windows, #461)
+    while [[ "$dir" != "/" && "$dir" != "$prev" && -n "$dir" ]]; do
         if [[ -f "$dir/project-context.yaml" ]]; then
             echo "$dir"
             return 0
         fi
-        dir="$(dirname "$dir")"
+        prev="$dir"; dir="$(dirname "$dir")"
     done
     echo "$PWD"
 }
