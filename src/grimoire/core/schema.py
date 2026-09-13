@@ -49,6 +49,7 @@ _KNOWN_ARCHETYPES = sorted([
     "minimal", "web-app", "creative-studio", "fix-loop",
     "infra-ops", "meta", "stack", "features", "platform-engineering",
 ])
+_VALID_HOST_ALIASES = sorted(["claude", "copilot", "codex", "cursor", "gemini"])
 
 
 def rust_backend_available() -> bool:
@@ -108,6 +109,7 @@ def _generate_schema_python() -> dict[str, Any]:
             "user": _user_schema(),
             "memory": _memory_schema(),
             "agents": _agents_schema(),
+            "hosts": _hosts_schema(),
             "proposals": _proposals_schema(),
             "source": _source_schema(),
             "installed_archetypes": {
@@ -323,6 +325,26 @@ def _agents_schema() -> dict[str, Any]:
                     "cockpit flag a delivered or overridden agent as stale. Signal only — never "
                     "automatic removal or deprecation."
                 ),
+            },
+        },
+    }
+
+
+def _hosts_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "description": (
+            "Declares which hosts `grimoire host sync` may write to (issue #177). "
+            "Absent key: detected from files already present in the repo, "
+            "defaulting to ['claude'] when none are found."
+        ),
+        "additionalProperties": False,
+        "properties": {
+            "enabled": {
+                "type": "array",
+                "items": {"type": "string", "enum": _VALID_HOST_ALIASES},
+                "uniqueItems": True,
+                "description": "Subset of known hosts this project emits files for.",
             },
         },
     }

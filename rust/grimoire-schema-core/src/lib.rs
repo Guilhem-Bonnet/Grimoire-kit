@@ -263,10 +263,13 @@ const KNOWN_TOP_KEYS: &[&str] = &[
     "user",
     "memory",
     "agents",
+    "hosts",
     "installed_archetypes",
     "proposals",
     "source",
 ];
+const VALID_HOST_ALIASES: &[&str] = &["claude", "copilot", "codex", "cursor", "gemini"];
+const KNOWN_HOSTS_KEYS: &[&str] = &["enabled"];
 const KNOWN_PROJECT_KEYS: &[&str] = &["name", "description", "type", "metaphor", "stack", "repos"];
 const KNOWN_USER_KEYS: &[&str] = &["name", "language", "document_language", "skill_level"];
 const KNOWN_MEMORY_KEYS: &[&str] = &[
@@ -348,6 +351,7 @@ fn schema_core() -> Value {
                 ("user", user_schema()),
                 ("memory", memory_schema()),
                 ("agents", agents_schema()),
+                ("hosts", hosts_schema()),
                 ("proposals", proposals_schema()),
                 ("source", source_schema()),
                 (
@@ -741,6 +745,42 @@ fn agents_schema() -> Value {
                     ]),
                 ),
             ]),
+        ),
+    ])
+}
+
+fn hosts_schema() -> Value {
+    obj(vec![
+        ("type", s("object")),
+        (
+            "description",
+            s(
+                "Declares which hosts `grimoire host sync` may write to (issue #177). \
+                 Absent key: detected from files already present in the repo, \
+                 defaulting to ['claude'] when none are found.",
+            ),
+        ),
+        ("additionalProperties", Value::Bool(false)),
+        (
+            "properties",
+            obj(vec![(
+                "enabled",
+                obj(vec![
+                    ("type", s("array")),
+                    (
+                        "items",
+                        obj(vec![
+                            ("type", s("string")),
+                            ("enum", value_str_sorted(VALID_HOST_ALIASES)),
+                        ]),
+                    ),
+                    ("uniqueItems", Value::Bool(true)),
+                    (
+                        "description",
+                        s("Subset of known hosts this project emits files for."),
+                    ),
+                ]),
+            )]),
         ),
     ])
 }
@@ -1196,6 +1236,52 @@ fn validate_agents(section: &Value, errors: &mut Vec<RawError>) {
     check_unknown_keys(section, KNOWN_AGENTS_KEYS, "agents", "agents", errors);
 }
 
+fn validate_hosts(section: &Value, errors: &mut Vec<RawError>) {
+    if !section.is_map() {
+        errors.push(err("hosts", "'hosts' must be a mapping."));
+        return;
+    }
+
+    if let Some(enabled) = field(section, "enabled") {
+        match enabled {
+            Value::List(items) => {
+                let mut seen: Vec<&str> = Vec::new();
+                for (i, item) in items.iter().enumerate() {
+                    match item {
+                        Value::Str(s) => {
+                            if !VALID_HOST_ALIASES.contains(&s.as_str()) {
+                                errors.push(err_sugg(
+                                    format!("hosts.enabled[{i}]"),
+                                    format!("Unknown host id '{s}'."),
+                                    format!("Valid hosts: {}", sorted_join(VALID_HOST_ALIASES)),
+                                ));
+                            } else if seen.contains(&s.as_str()) {
+                                errors.push(err_sugg(
+                                    format!("hosts.enabled[{i}]"),
+                                    format!("Duplicate host id '{s}'."),
+                                    "Remove the duplicate entry.",
+                                ));
+                            } else {
+                                seen.push(s.as_str());
+                            }
+                        }
+                        _ => errors.push(err(
+                            format!("hosts.enabled[{i}]"),
+                            "Host id must be a string.",
+                        )),
+                    }
+                }
+            }
+            _ => errors.push(err(
+                "hosts.enabled",
+                "'hosts.enabled' must be a list of host ids.",
+            )),
+        }
+    }
+
+    check_unknown_keys(section, KNOWN_HOSTS_KEYS, "hosts", "hosts", errors);
+}
+
 fn validate_proposals(section: &Value, errors: &mut Vec<RawError>) {
     if !section.is_map() {
         errors.push(err("proposals", "'proposals' must be a mapping."));
@@ -1322,6 +1408,9 @@ fn validate_core(data: &Value) -> Vec<RawError> {
     }
     if let Some(agents) = data.get("agents") {
         validate_agents(agents, &mut errors);
+    }
+    if let Some(hosts) = data.get("hosts") {
+        validate_hosts(hosts, &mut errors);
     }
     if let Some(installed) = data.get("installed_archetypes") {
         validate_installed_archetypes(installed, &mut errors);
@@ -1673,6 +1762,77 @@ mod tests {
         ]);
         let errors = validate_core(&data);
         assert!(errors.iter().any(|e| e.path == "source.assist.modle"));
+    }
+
+    #[test]
+    fn schema_declares_hosts_enabled() {
+        // Mirroir de test_schema.py (issue #177).
+        let hosts = hosts_schema();
+        let enabled = hosts
+            .get("properties")
+            .unwrap()
+            .get("enabled")
+            .expect("enabled");
+        assert_eq!(enabled.get("type"), Some(&Value::Str("array".to_string())));
+        let items = enabled.get("items").expect("items");
+        assert_eq!(
+            items.get("enum"),
+            Some(&list_str(&sorted_copy(VALID_HOST_ALIASES)))
+        );
+    }
+
+    #[test]
+    fn hosts_enabled_valid_subset_has_no_error() {
+        let data = map(vec![
+            ("project", map(vec![("name", Value::Str("x".to_string()))])),
+            (
+                "hosts",
+                map(vec![("enabled", list_str(&["claude", "copilot"]))]),
+            ),
+        ]);
+        assert!(validate_core(&data).is_empty());
+    }
+
+    #[test]
+    fn hosts_enabled_unknown_alias_is_rejected_with_suggestion() {
+        let data = map(vec![
+            ("project", map(vec![("name", Value::Str("x".to_string()))])),
+            ("hosts", map(vec![("enabled", list_str(&["notahost"]))])),
+        ]);
+        let errors = validate_core(&data);
+        let e = errors
+            .iter()
+            .find(|e| e.path == "hosts.enabled[0]")
+            .expect("hosts.enabled[0] error");
+        assert!(e.message.contains("notahost"));
+        assert!(e.suggestion.starts_with("Valid hosts:"));
+    }
+
+    #[test]
+    fn hosts_enabled_duplicate_is_rejected() {
+        let data = map(vec![
+            ("project", map(vec![("name", Value::Str("x".to_string()))])),
+            (
+                "hosts",
+                map(vec![("enabled", list_str(&["claude", "claude"]))]),
+            ),
+        ]);
+        let errors = validate_core(&data);
+        assert!(errors.iter().any(|e| e.message.contains("Duplicate")));
+    }
+
+    #[test]
+    fn hosts_unknown_key_is_rejected() {
+        let data = map(vec![
+            ("project", map(vec![("name", Value::Str("x".to_string()))])),
+            ("hosts", map(vec![("enable", list_str(&["claude"]))])),
+        ]);
+        let errors = validate_core(&data);
+        let e = errors
+            .iter()
+            .find(|e| e.unknown_key == "enable")
+            .expect("unknown key error");
+        assert_eq!(e.keyset_id, "hosts");
     }
 
     #[test]
