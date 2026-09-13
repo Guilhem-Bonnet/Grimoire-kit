@@ -638,6 +638,7 @@ def _step_init(
     backend: str,
     interactive: bool,
     dry_run: bool,
+    no_cockpit: bool = False,
 ) -> bool:
     """Run (or skip) express init. Returns True when a config is available after the step."""
     from grimoire.cli.cmd_init import run_init
@@ -667,6 +668,7 @@ def _step_init(
             backend=backend,
             force=False,
             dry_run=False,
+            no_cockpit=no_cockpit,
         )
     except typer.Abort:
         state.steps.append(StepResult("init", "failed", "init cancelled by user"))
@@ -814,6 +816,55 @@ def _step_override_review(state: _UpState, target: Path, *, blocked: bool) -> No
         f"{len(drifts)} override(s) to review : {names} — "
         "keep, `grimoire agent override convert <name> [--dry-run]`, or remove",
     ))
+
+
+def _step_host_sync(state: _UpState, target: Path, *, dry_run: bool, blocked: bool) -> None:
+    """Synchronise every supported host surface after the kit tier refresh.
+
+    ``refresh`` regenerates ``_grimoire/kit/`` and the agents it contains;
+    the per-host surfaces (``.claude/``, ``.cursor/``, ``.codex/``,
+    ``.gemini/`` — agents, skills, commands, hooks re-rendered per host by
+    ``grimoire.hosts.emitters``) are a downstream projection of it, built by
+    a separate code path (``grimoire host sync``). Without this step, `up`
+    reported ``refresh: done`` while a `host sync --dry-run` run right after
+    still found dozens of files to write (issue #296) — nothing in `up`'s own
+    output said the host surfaces were not part of what it had just done.
+
+    Never ``--force``: a file the project edited by hand is left alone here,
+    exactly as ``grimoire host sync`` behaves by default.
+    """
+    if blocked:
+        state.steps.append(StepResult("host_sync", "skipped", "no project configuration"))
+        return
+    if dry_run:
+        state.steps.append(StepResult("host_sync", "planned", "would sync host surfaces (.claude/, .cursor/, .codex/, .gemini/)"))
+        return
+    try:
+        from grimoire.hosts.collect import build_surface
+        from grimoire.hosts.emitters import apply_plan, emitter_for, supported_hosts
+
+        surface = build_surface(target)
+        results = []
+        for host_id in supported_hosts():
+            emitter = emitter_for(host_id)
+            if emitter is None:  # pragma: no cover - supported_hosts() only lists emitted hosts
+                continue
+            plan = emitter.plan(surface, target)
+            results.append(apply_plan(plan, target, dry_run=False, force=False))
+    except (OSError, GrimoireError) as exc:
+        state.steps.append(StepResult("host_sync", "failed", f"host sync error: {exc}"))
+        return
+
+    written = sum(len(r.written) for r in results)
+    unchanged = sum(len(r.unchanged) for r in results)
+    if written:
+        state.steps.append(StepResult(
+            "host_sync", "done",
+            f"{written} host artifact(s) written, {unchanged} unchanged, across {len(results)} host(s)",
+        ))
+        state.actions.append(f"Synced {written} host artifact(s)")
+    else:
+        state.steps.append(StepResult("host_sync", "done", f"{len(results)} host(s) already in sync"))
 
 
 def _step_structure(state: _UpState, target: Path, *, dry_run: bool) -> None:
@@ -1109,6 +1160,7 @@ _up_backend_opt = typer.Option("auto", "--backend", "-b", help="Memory backend (
 _up_no_standard_opt = typer.Option(False, "--no-standard", help="Skip the agentic standard initialization.")
 _up_needs_opt = typer.Option(None, "--needs", help="Need id(s) for standard init (repeatable or comma-separated).")
 _up_dry_run_opt = typer.Option(False, "--dry-run", help="Show the plan without applying.")
+_up_no_cockpit_opt = typer.Option(False, "--no-cockpit", help="Do not enrol this project in the local cockpit registry (~/.grimoire/cockpit/registry.json). Same effect as the GRIMOIRE_NO_COCKPIT env var.")
 
 
 def up(
@@ -1122,11 +1174,17 @@ def up(
     no_standard: bool = _up_no_standard_opt,
     needs: list[str] | None = _up_needs_opt,
     dry_run: bool = _up_dry_run_opt,
+    no_cockpit: bool = _up_no_cockpit_opt,
 ) -> None:
     """Bring a project fully up in one command — init, identity, standard, doctor.
 
     Express mode by default (equivalent to [cyan]grimoire init -y[/cyan]); each
     step is idempotent and reports 'skipped' when already in place.
+
+    When the ``init`` step actually runs (no ``project-context.yaml`` yet),
+    the project is enrolled in the local cockpit registry unless
+    [cyan]--no-cockpit[/cyan] is passed or the [cyan]GRIMOIRE_NO_COCKPIT[/cyan] env var is
+    set (issue #305).
 
     [dim]Examples:[/dim]
       [cyan]grimoire up[/cyan]                         Full bring-up of the current directory
@@ -1134,6 +1192,7 @@ def up(
       [cyan]grimoire up . -a web-app -b local[/cyan]   Explicit archetype and backend
       [cyan]grimoire up . --needs collab-review[/cyan] Standard init from a need profile
       [cyan]grimoire up . --no-standard[/cyan]         Skip the agentic standard step
+      [cyan]grimoire up . --no-cockpit[/cyan]          Skip cockpit enrolment (throwaway project)
     """
     from grimoire.cli.cmd_init import KNOWN_ARCHETYPES, KNOWN_BACKENDS
 
@@ -1159,6 +1218,7 @@ def up(
         ctx, state, target,
         name=name, archetypes=archetypes, backend=backend,
         interactive=interactive, dry_run=dry_run,
+        no_cockpit=no_cockpit,
     )
     blocked = not has_config
 
@@ -1190,6 +1250,12 @@ def up(
         quiet=fmt != "text",
         declared_archetypes=declared_archetypes,
     )
+
+    # 4bis. Host surface sync — downstream of both the kit refresh and the
+    # standard step, so `.claude/`, `.cursor/`, `.codex/` and `.gemini/`
+    # reflect what this run just wrote (agents, skills, hooks) rather than
+    # what the previous kit version produced (issue #296).
+    _step_host_sync(state, target, dry_run=dry_run, blocked=blocked)
 
     # 5. Short doctor summary.
     checks = _step_doctor_summary(state, target, dry_run=dry_run, blocked=blocked)
