@@ -55,9 +55,10 @@ def _last_json_line(output: str) -> dict[str, Any]:
 
 
 def test_a_dry_run_reports_the_backup_path(fresh_project: Path) -> None:
-    """Le nœud `backup` tourne même sous `--dry-run` — son dossier doit
-    atteindre la réponse JSON, pas rester enterré dans le `detail` que la
-    boucle jette après l'avoir soumis au contrat."""
+    """Le nœud `backup` tourne même sous `--dry-run` — son tarball doit
+    atteindre la réponse JSON de succès, pas rester enterré dans
+    `node_outputs` (même clé/même forme que le chemin de refus d'`apply`,
+    issue #510)."""
     from grimoire.cli.app import app
 
     result = CliRunner().invoke(
@@ -67,11 +68,12 @@ def test_a_dry_run_reports_the_backup_path(fresh_project: Path) -> None:
     payload = _last_json_line(result.output)
     assert payload["ok"] is True
     backup_path = payload.get("backup_path")
-    assert backup_path, "le nœud backup a tourné sous --dry-run, son dossier doit être rapporté"
-    backup_dir = Path(backup_path)
-    assert backup_dir.is_dir()
-    assert backup_dir.parent.name == "_archive"
-    assert any(backup_dir.glob("grimoire-state*.tar.gz")), "le tarball doit être dans ce dossier"
+    assert backup_path, "le nœud backup a tourné sous --dry-run, son tarball doit être rapporté"
+    tarball = Path(backup_path)
+    assert tarball.is_file()
+    assert "-pre-" in tarball.parent.name
+    assert tarball.parent.parent.name == "_archive"
+    assert tarball.name.startswith("grimoire-state")
 
 
 def test_a_node_failure_reports_done_and_the_failed_node(

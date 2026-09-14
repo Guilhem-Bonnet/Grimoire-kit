@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextlib
 import difflib
 import json
+import logging
 import os
 import shutil
 import socket
@@ -33,6 +34,8 @@ from grimoire.core.scaffold import ProjectScaffolder, ScaffoldPlan, ScaffoldResu
 from grimoire.core.scanner import ScanResult, StackScanner
 from grimoire.hosts.sync import sync_host_surfaces
 from grimoire.memory import profiles as memory_profiles
+
+logger = logging.getLogger(__name__)
 
 console = Console(stderr=True)
 
@@ -757,8 +760,23 @@ def _maybe_register_cockpit(target: Path, project_name: str, fmt: str, *, no_coc
     env var — the flag is the explicit, discoverable form the env var never
     had (issue #305): a throwaway project (scratch, ``/tmp``, a recipe) had no
     way to skip enrolment short of remembering an undocumented variable.
+
+    Also refuses silently for a target under the OS temp directory: real
+    machine registries have been found polluted with entries pointing at
+    vanished ``tempfile.mkdtemp()`` directories — a manual smoke test or an
+    escaped test isolation, never a project anyone meant to keep (#492, and
+    seven more such entries found 2026-09-14). This guard is scoped to this
+    *implicit* side effect of ``init``/``up`` only — explicit commands
+    (``grimoire cockpit add``/``create``, ``grimoire serve --project-root``)
+    are unaffected, since there the caller's intent is unambiguous.
     """
+    from grimoire.tools.project_registry import is_scratch_path
+
     if no_cockpit or os.environ.get("GRIMOIRE_NO_COCKPIT"):
+        logger.debug("cockpit auto-enrolment skipped for %s: GRIMOIRE_NO_COCKPIT/--no-cockpit", target)
+        return
+    if is_scratch_path(target):
+        logger.debug("cockpit auto-enrolment skipped for %s: scratch path under the OS temp dir", target)
         return
     try:
         from grimoire.tools.project_registry import register_project

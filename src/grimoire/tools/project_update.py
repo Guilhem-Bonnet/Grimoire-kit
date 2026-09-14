@@ -196,11 +196,23 @@ def _run_upgrade_flow(root: Path, *, dry_run: bool) -> dict[str, Any]:
         "runId": payload.get("run_id"),
         "done": done,
         "stoppedAt": stopped_at,
+        # Issue #510 (point 3) : quand `apply` refuse après que `up` a déjà
+        # tourné, le projet est réellement mis à niveau, juste bloqué —
+        # `state` le dit explicitement plutôt que de laisser `done: []` sans
+        # explication.
+        "state": payload.get("state"),
         # Statut par nœud (issue #506) — calculé que le run ait réussi ou
-        # échoué : `_fail_run` (cmd_upgrade_flow.py) porte `done`/`failed_node`
-        # même sur un refus, pour qu'une UI montre où ça s'est arrêté plutôt
-        # que juste un message d'erreur.
-        "nodes": _node_statuses(done, stopped_at, payload.get("failed_node")),
+        # échoué. `failed_node` vient soit de `_fail_run` (tout nœud sauf
+        # `apply`, cmd_upgrade_flow.py), soit — pour `apply` — du couple
+        # `state`/`stopped_at` qu'écrit le bloc dédié introduit par #510 :
+        # cette route-là ne pose jamais `failed_node`, seulement
+        # `stopped_at: "apply"` avec `ok: false`.
+        "nodes": _node_statuses(
+            done,
+            stopped_at,
+            payload.get("failed_node")
+            or (_stopped_at_node(stopped_at) if not ok and stopped_at != "destructive" else None),
+        ),
         "backupPath": payload.get("backup_path"),
         "repairsProposed": payload.get("repairs_proposed") or 0,
         # Le compte rendu brut tient en quelques lignes ; on borne quand
@@ -213,6 +225,11 @@ def _run_upgrade_flow(root: Path, *, dry_run: bool) -> dict[str, Any]:
         if not dry_run:
             report["report"] = _read_report(root, "report.md")
             report["proposals"] = _pending_proposals(root)
+    elif not dry_run and payload.get("state") == "upgraded-but-failed":
+        # `apply` a écrit `report.md` avant de refuser (issue #510, point 3) —
+        # jamais omis au prétexte que le flow, dans son ensemble, a échoué.
+        report["report"] = _read_report(root, "report.md")
+        report["proposals"] = _pending_proposals(root)
     return report
 
 

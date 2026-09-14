@@ -257,6 +257,43 @@ def test_a_failing_command_surfaces_the_flows_own_error(
     assert report["error"] == "node apply : doctor a échoué"
 
 
+def test_a_failed_apply_surfaces_done_state_and_backup_path(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #510 (point 3) : quand `apply` refuse après que `up` a déjà tourné,
+    l'état réel est « mis à niveau, flow en échec » — jamais `done: []`/
+    `stoppedAt: null` sans explication."""
+    from grimoire.tools.project_upgrade import run_output_dir
+
+    report_text = "Mis à niveau, flow en échec sur agents_referenced.\n\n(...)\n"
+    run_output_dir(project).joinpath("report.md").write_text(report_text, encoding="utf-8")
+    backup_path = str(project / "_archive" / "2026-09-14-pre-3.50.2" / "grimoire-state.tar.gz")
+
+    class _Fail:
+        returncode = 1
+        stdout = json.dumps({
+            "ok": False, "run_id": "r3",
+            "done": ["backup", "preview", "orphans"],
+            "stopped_at": "apply",
+            "state": "upgraded-but-failed",
+            "failing_checks": ["agents_referenced"],
+            "backup_path": backup_path,
+            "repairs_proposed": 0,
+            "error": "apply refusé : doctor=[...] hook=hook rejoué sans erreur",
+        })
+        stderr = ""
+
+    monkeypatch.setattr(project_update.subprocess, "run", lambda *a, **k: _Fail())
+    report = project_update.update_project(project, dry_run=False)
+    assert report["ok"] is False
+    assert report["done"] == ["backup", "preview", "orphans"]
+    assert report["stoppedAt"] == "apply"
+    assert report["state"] == "upgraded-but-failed"
+    assert report["backupPath"] == backup_path
+    assert report["report"] == report_text
+    assert report["error"] == "apply refusé : doctor=[...] hook=hook rejoué sans erreur"
+
+
 def test_a_timeout_is_reported(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     def _boom(*_a: object, **_k: object) -> None:
         raise project_update.subprocess.TimeoutExpired(cmd="grimoire up", timeout=1)

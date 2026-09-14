@@ -271,6 +271,78 @@ def test_apply_upgrade_still_fails_on_a_regression_not_in_the_baseline(
     assert result.repairs_proposed == 0
 
 
+def _seed_ghost_managed_projection(root: Path, name: str = "ghost") -> None:
+    """A managed host projection with no source in any tier (issue #510, point 1's
+    real repro on the Forge: a `.claude/agents/x.md` carrying `grimoire:managed`
+    survived an earlier archiving pass while its kit-tier source did not) — trips
+    the `agents_referenced` doctor check, never `paths_resolve`."""
+    claude_agents = root / ".claude" / "agents"
+    claude_agents.mkdir(parents=True, exist_ok=True)
+    (claude_agents / f"{name}.md").write_text(
+        f'<!-- grimoire:managed -->\n---\nname: "{name}"\n---\n\nFantôme sans source.\n',
+        encoding="utf-8",
+    )
+
+
+def test_apply_upgrade_softens_a_preexisting_non_paths_resolve_failure_into_a_repair_proposal(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    """Issue #510, point 1 : sur la Forge, `apply` a refusé sur un FAIL `agents_referenced`
+    préexistant (une projection hôte managée sans source dans aucune tier), alors que la
+    ligne de base de `preview` ne couvrait jusque-là que `paths_resolve`. Étendue à tout
+    contrôle doctor : un FAIL déjà présent en préview devient une proposition `repair`
+    nommant le contrôle, jamais une raison de refuser `apply`."""
+    from grimoire.proposals import list_proposals
+    from grimoire.tools.project_upgrade import apply_upgrade, preview_upgrade
+
+    root = tmp_path_factory.mktemp("upgrade-repair-doctor") / "projet"
+    root.mkdir(parents=True)
+    created = _grimoire(["init", ".", "-y", "--name", "upgrade-repair-doctor"], root)
+    if not (root / "_grimoire" / "kit").is_dir():
+        pytest.skip(f"`grimoire init` indisponible ici : {created.stderr[-400:]}")
+
+    _seed_ghost_managed_projection(root)
+
+    preview = preview_upgrade(root)
+    assert any(sig.startswith("agents_referenced:") for sig in preview.other_doctor_failures), (
+        preview.other_doctor_failures
+    )
+
+    result = apply_upgrade(root)
+    assert result.ok, (result.doctor_failures, result.hook.detail)
+    assert result.repairs_proposed >= 1
+    assert not result.failing_checks
+
+    repairs = [p for p in list_proposals(root) if p.artifact_type == "repair" and p.category == "doctor-preexisting"]
+    assert repairs
+    assert any("agents_referenced" in r.specialty for r in repairs)
+
+
+def test_apply_upgrade_still_fails_on_a_new_non_paths_resolve_doctor_regression(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    """The softening only ever covers a doctor failure the `preview` baseline already saw —
+    one introduced strictly after `preview` still fails `apply`, exactly as before this fix,
+    and never produces a `repair` proposal on its own initiative."""
+    from grimoire.tools.project_upgrade import apply_upgrade, preview_upgrade
+
+    root = tmp_path_factory.mktemp("upgrade-doctor-regression") / "projet"
+    root.mkdir(parents=True)
+    created = _grimoire(["init", ".", "-y", "--name", "upgrade-doctor-regression"], root)
+    if not (root / "_grimoire" / "kit").is_dir():
+        pytest.skip(f"`grimoire init` indisponible ici : {created.stderr[-400:]}")
+
+    preview_upgrade(root)  # clean baseline — no ghost projection yet
+
+    _seed_ghost_managed_projection(root)
+
+    result = apply_upgrade(root)
+    assert not result.ok
+    assert "agents_referenced" in result.failing_checks
+    assert any("ghost" in f for f in result.doctor_failures)
+    assert result.repairs_proposed == 0
+
+
 def test_repair_proposal_names_and_applies_an_evident_substitution(tmp_path_factory: pytest.TempPathFactory) -> None:
     """`_grimoire/_config/archetype.dna.yaml` is exactly the shape a real project hit
     (issue #502): a pre-boundary legacy root (`layout.LEGACY_KIT_ROOTS`) whose file now
