@@ -542,9 +542,18 @@
     return body;
   }
 
+  function proposalsNote(slug, proposals) {
+    if (!proposals || !proposals.length) return '';
+    const href = `workspace/index.html?project=${encodeURIComponent(slug)}#piloter`;
+    return `<p style="font-size:0.78rem;color:var(--data-amber,#fbbf24);margin:12px 0 0">
+      ${proposals.length} proposition${proposals.length > 1 ? 's' : ''} en attente — le flow ne les
+      applique jamais lui-même. <a href="${href}" style="color:inherit;text-decoration:underline">
+      Voir dans Piloter →</a></p>`;
+  }
+
   async function openUpdate(slug, name) {
     updateModal(`<h2 style="margin:0 0 6px">Mettre à jour ${esc(name)}</h2>
-      <p style="font-size:0.78rem;color:var(--ink-soft,#aab);margin:0">Aperçu en cours — <code>grimoire up --dry-run</code>…</p>`);
+      <p style="font-size:0.78rem;color:var(--ink-soft,#aab);margin:0">Aperçu en cours — <code>grimoire upgrade-flow run --dry-run</code>…</p>`);
     let preview;
     try {
       preview = await callUpdate(slug, false);
@@ -558,9 +567,9 @@
     const ov = updateModal(`
       <h2 style="margin:0 0 6px">Mettre à jour ${esc(name)}</h2>
       <p style="font-size:0.78rem;color:var(--ink-soft,#aab);margin:0">
-        Aperçu de <code>grimoire up</code>. Rien n'a été écrit. La commande est idempotente :
-        elle rapporte « skipped » pour ce qui est déjà en place.</p>
-      ${updateOutput(preview.output)}
+        Aperçu du flow de mise à jour (sauvegarde + <code>up</code>/<code>host sync --dry-run</code>).
+        Rien du projet n'est modifié — seule une sauvegarde additive est écrite sous <code>_archive/</code>.</p>
+      ${updateOutput(preview.preview || preview.output)}
       <div style="display:flex;gap:8px;margin-top:18px;justify-content:flex-end">
         <button id="pf-up-close" class="pf-tag">ANNULER</button>
         <button id="pf-up-go" class="pf-tag warn">APPLIQUER À ${esc(name).toUpperCase()}</button>
@@ -568,13 +577,14 @@
     ov.querySelector('#pf-up-close').addEventListener('click', closeUpdate);
     ov.querySelector('#pf-up-go').addEventListener('click', async () => {
       updateModal(`<h2 style="margin:0 0 6px">Mise à jour de ${esc(name)}</h2>
-        <p style="font-size:0.78rem;color:var(--ink-soft,#aab);margin:0">En cours…</p>`);
+        <p style="font-size:0.78rem;color:var(--ink-soft,#aab);margin:0">En cours — le flow s'arrête toujours au checkpoint final, jamais décidé à votre place…</p>`);
       try {
         const done = await callUpdate(slug, true);
         updateModal(`<h2 style="margin:0 0 6px">${done.ok ? 'Projet aligné' : 'Mise à jour refusée'}</h2>
           <p style="font-size:0.78rem;color:${done.ok ? 'var(--data-green,#34d399)' : 'var(--data-red,#f87171)'};margin:0">
             ${esc(done.ok ? name + ' est aligné sur le kit installé.' : (done.error || 'échec'))}</p>
-          ${updateOutput(done.output)}
+          ${updateOutput(done.report || done.output)}
+          ${proposalsNote(slug, done.proposals)}
           <div style="margin-top:16px;display:flex;justify-content:flex-end">
             <button id="pf-up-close" class="pf-tag">FERMER ET RECHARGER</button>
           </div>`);

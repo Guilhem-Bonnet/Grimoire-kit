@@ -1082,18 +1082,19 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
   preview.className = 'pl-preview';
   preview.hidden = true;
   updateBtn.addEventListener('click', async () => {
-    ctx.dock.echo(`grimoire up${slug ? ' # ' + slug : ''}`);
+    ctx.dock.echo(`grimoire upgrade-flow run --dry-run${slug ? ' # ' + slug : ''}`);
     try {
       const report = await ctx.api.updateProject(slug, false);
       preview.hidden = false;
       preview.replaceChildren();
-      preview.append(text('div', null, report.ok ? 'Aperçu réussi (--dry-run).' : (report.error || 'Aperçu en échec.')));
-      if (report.output) {
+      preview.append(text('div', null, report.ok ? "Aperçu réussi (sauvegarde + preview, rien d'autre écrit)." : (report.error || 'Aperçu en échec.')));
+      const previewText = report.preview || report.output;
+      if (previewText) {
         const pre = document.createElement('pre');
         pre.className = 'mono lbl';
         pre.style.whiteSpace = 'pre-wrap';
         pre.style.margin = '6px 0 0';
-        pre.textContent = report.output.slice(0, 2000);
+        pre.textContent = previewText.slice(0, 2000);
         preview.append(pre);
       }
       const confirmBtn = document.createElement('button');
@@ -1102,9 +1103,12 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
       confirmBtn.textContent = 'Confirmer la mise à jour';
       confirmBtn.style.marginTop = '8px';
       confirmBtn.addEventListener('click', async () => {
-        ctx.dock.echo(`grimoire up --yes${slug ? ' # ' + slug : ''}`);
+        ctx.dock.echo(`grimoire upgrade-flow run --executor interactive${slug ? ' # ' + slug : ''}`);
         const result = await ctx.api.updateProject(slug, true);
-        preview.append(text('div', 'lbl', result.ok ? 'Mis à jour.' : 'Échec de la mise à jour.'));
+        preview.append(text('div', 'lbl', result.ok ? "Mis à jour — le flow s'est arrêté au checkpoint final, jamais décidé à votre place." : 'Échec de la mise à jour.'));
+        if (result.ok && result.proposals && result.proposals.length) {
+          preview.append(text('div', 'lbl', `${result.proposals.length} proposition(s) en attente — voir la section Propositions ci-dessous.`));
+        }
         options.refresh();
       });
       preview.append(confirmBtn);

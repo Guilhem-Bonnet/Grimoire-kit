@@ -125,11 +125,32 @@ grimoire upgrade-flow check <backup|preview|orphans|apply|overrides|memory|needs
 `grimoire flow extract <run-id>` reproduit un run — complet ou arrêté au checkpoint — en blueprint
 brouillon, comme pour n'importe quel autre flow.
 
+## Depuis le cockpit
+
+`POST /api/projects/update` (`src/grimoire/tools/project_update.py`, câblé dans `cmd_cockpit.py` et
+`forge_server.py` — deux hôtes, une route) appelle `grimoire upgrade-flow run` plutôt que `up` seul,
+en sous-processus comme avant (jamais un import direct, pour qu'un refus n'y remonte pas comme une
+exception non attrapée). Même contrat qu'en CLI :
+
+- **aperçu par défaut** (`confirm` absent ou `false`) — `--dry-run`, s'arrête après `preview`. La
+  réponse porte `report["preview"]`, le contenu exact de `_grimoire-output/upgrade/<date>/preview.md`,
+  jamais un résumé reformulé ; l'espace Piloter l'affiche tel quel sous le bouton « Mettre à jour —
+  aperçu » (spec §4), qui garde son nom malgré le changement de commande sous-jacente.
+- **`confirm: true`** — le flow complet sous `--executor interactive` (mécanique, jamais un
+  fournisseur), arrêté au checkpoint `destructive` comme en CLI. La réponse porte `report["report"]`
+  (le `report.md` final) et `report["proposals"]` (les propositions encore `pending`, slug/type/
+  spécialité — jamais leur contenu détaillé, que `GET /api/workspace/proposals` rend déjà).
+- **projet non enregistré ou chemin hors registre** : refusé (`404`), comme toute autre cible du
+  cockpit résolue par slug (`_resolve_project_path`) — jamais un repli silencieux sur le projet servi.
+
+Les propositions qu'un run complet écrit apparaissent dans la section « Propositions » de Piloter dès
+que la fiche projet se redessine (`options.refresh()`, déjà déclenché après confirmation) — le même
+mécanisme de lecture/acceptation que le déclencheur de non-choix (#395), jamais une seconde vue. La
+timeline par tâche (#443) suit le run comme n'importe quel autre flow : rien de spécifique à câbler,
+`upgrade-flow run` passe par le même moteur que `grimoire flow run`.
+
 ## Portée non couverte par cette livraison
 
-- Le cockpit (`POST /api/projects/update`) appelle encore `up` seul — le brancher sur ce flow est la
-  PR suivante (issue #490, deuxième volet) : aperçu par défaut, confirmation pour appliquer, timeline
-  par tâche, propositions visibles dans Piloter.
 - `grimoire flow list --require-measure project-upgrade` ne trouve une mesure qu'après au moins un run
   en `--executor dispatch` (les mesures viennent du `TraceLedger`, jamais d'un run purement
   interactif). La suite de tests de cette PR couvre le blueprint et le chemin mécanique
