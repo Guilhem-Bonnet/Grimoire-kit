@@ -36,7 +36,7 @@ from grimoire.cli import cmd_cockpit
 from grimoire.data import web_path
 from grimoire.tools import project_registry as reg
 from grimoire.tools.forge_server import ForgeAPI, make_handler
-from grimoire.tools.workspace_routes import GET_ROUTES, POST_ROUTES, PREFIX
+from grimoire.tools.workspace_routes import GET_ROUTES, POST_ROUTES, PREFIX, is_proposal_decision
 
 # Les lectures sans paramètre obligatoire : celles qu'on peut interroger telles
 # quelles sur les deux hôtes. `file`, `file/diff`, `file/usage` et
@@ -707,3 +707,23 @@ def test_un_mouvement_de_tache_vers_un_etat_inconnu_est_un_400(
 
     assert code == 400
     assert "vaporisee" in payload["error"]
+
+
+# ── 3. Dérogation nommée pour décider une proposition (#490) ────────────────
+
+
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [
+        (f"{PREFIX}proposals/repair-x/accept", True),
+        (f"{PREFIX}proposals/repair-x/reject", True),
+        (f"{PREFIX}proposals/some-slug-with-dashes/accept", True),
+        (f"{PREFIX}proposals", False),  # la lecture, pas une décision
+        (f"{PREFIX}proposals/repair-x", False),  # pas d'action
+        (f"{PREFIX}proposals/repair-x/refresh", False),  # action inconnue, non dérogée
+        (f"{PREFIX}file/write", False),
+        (f"{PREFIX}proposals/repair-x/accept/extra", False),  # segment de trop
+    ],
+)
+def test_is_proposal_decision_ne_reconnait_que_accept_et_reject(path: str, expected: bool) -> None:
+    assert is_proposal_decision(path) is expected
