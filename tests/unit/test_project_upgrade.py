@@ -483,6 +483,72 @@ def test_archive_orphans_moves_never_deletes(upgrade_project: Path) -> None:
     assert not find_orphans(upgrade_project).orphans
 
 
+def test_find_orphans_detects_a_ghost_managed_projection_with_no_source_anywhere(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    """Issue #510, point 2 : sur la Forge, `.claude/agents/x.md` et `.github/agents/x.agent.md`
+    portaient encore `grimoire:managed` après qu'une passe d'archivage antérieure (buguée) a
+    retiré leur source de toutes les tiers (kit/overrides/custom, manifeste). Ni `host sync`
+    (qui ne revisite que ce que son plan actuel résout — un nom sans source n'y apparaît
+    jamais) ni le reste de `find_orphans` (parti de `layout.installed_agents`, donc aveugle à
+    un nom sans aucun fichier installé) ne les voyaient. `grimoire doctor` les signalait
+    (`agents_referenced`), mais rien ne les retirait."""
+    from grimoire.core.integrity import missing_referenced_agents
+    from grimoire.tools.project_upgrade import archive_orphans, find_orphans
+
+    root = tmp_path_factory.mktemp("upgrade-ghost-projection") / "projet"
+    root.mkdir(parents=True)
+    created = _grimoire(["init", ".", "-y", "--name", "upgrade-ghost-projection"], root)
+    if not (root / "_grimoire" / "kit").is_dir():
+        pytest.skip(f"`grimoire init` indisponible ici : {created.stderr[-400:]}")
+
+    claude_agents = root / ".claude" / "agents"
+    claude_agents.mkdir(parents=True, exist_ok=True)
+    (claude_agents / "ghost.md").write_text(
+        '<!-- grimoire:managed -->\n---\nname: "ghost"\n---\n\nFantôme sans source.\n', encoding="utf-8"
+    )
+    github_agents = root / ".github" / "agents"
+    github_agents.mkdir(parents=True, exist_ok=True)
+    (github_agents / "ghost.agent.md").write_text(
+        '<!-- grimoire:managed -->\n---\nname: "ghost"\n---\n\nFantôme sans source.\n', encoding="utf-8"
+    )
+
+    assert "ghost" in missing_referenced_agents(root), "the planted ghost must trip `agents_referenced` first"
+
+    report = find_orphans(root)
+    assert "ghost" in report.names
+    ghost = next(o for o in report.orphans if o.name == "ghost")
+    assert len(ghost.paths) == 2
+
+    moved = archive_orphans(root, report)
+    assert moved
+    assert not (claude_agents / "ghost.md").exists()
+    assert not (github_agents / "ghost.agent.md").exists()
+
+    assert "ghost" not in missing_referenced_agents(root), "archiving the ghost must clear `agents_referenced`"
+    assert not find_orphans(root).orphans
+
+
+def test_find_orphans_never_touches_an_unmanaged_host_file(tmp_path_factory: pytest.TempPathFactory) -> None:
+    """A host file with no `grimoire:managed` marker is the project's own, whatever its name
+    or shape — never a candidate, ghost-shaped or not."""
+    from grimoire.tools.project_upgrade import find_orphans
+
+    root = tmp_path_factory.mktemp("upgrade-unmanaged-host-file") / "projet"
+    root.mkdir(parents=True)
+    created = _grimoire(["init", ".", "-y", "--name", "upgrade-unmanaged-host-file"], root)
+    if not (root / "_grimoire" / "kit").is_dir():
+        pytest.skip(f"`grimoire init` indisponible ici : {created.stderr[-400:]}")
+
+    claude_agents = root / ".claude" / "agents"
+    claude_agents.mkdir(parents=True, exist_ok=True)
+    (claude_agents / "hand-written.md").write_text(
+        "# Agent écrit à la main, jamais géré par le kit\n", encoding="utf-8"
+    )
+
+    assert "hand-written" not in find_orphans(root).names
+
+
 # ── overrides (V1 proposals) ─────────────────────────────────────────────────
 
 
@@ -513,6 +579,89 @@ def test_accept_override_migration_refuses_when_review_needed(upgrade_project: P
     result = accept_proposal(upgrade_project, f"override-migration-{drifted_name}")
     assert result["ok"] is False
     assert "revue" in result["error"].lower()
+
+
+def test_propose_override_migrations_proposes_a_fresh_full_override_too(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    """Issue #510, point 6 : un override plein (sans `extends:`) dont le kit livre toujours la
+    même base (`status == "fresh"`) était sauté purement et simplement, sur la théorie que
+    « fresh » voulait dire « rien à faire » — alors que le corps d'un override plein est une
+    copie littérale du kit au moment de la prise : si le kit n'a pas bougé depuis, c'est
+    justement la forme la plus simple à convertir. Un homelab réel avait sept overrides de
+    cette forme, chacun ne portant qu'un `context:`, et n'en a jamais vu proposer un seul."""
+    from grimoire.core.override_drift import compute_kit_source_hash
+    from grimoire.proposals import list_proposals
+    from grimoire.tools.project_upgrade import propose_override_migrations
+
+    root = tmp_path_factory.mktemp("upgrade-fresh-full-override") / "projet"
+    root.mkdir(parents=True)
+    created = _grimoire(["init", ".", "-y", "--name", "upgrade-fresh-full-override"], root)
+    if not (root / "_grimoire" / "kit").is_dir():
+        pytest.skip(f"`grimoire init` indisponible ici : {created.stderr[-400:]}")
+
+    (root / "_grimoire" / "_memory" / "notes-homelab.md").write_text(
+        "# Notes homelab\n", encoding="utf-8"
+    )
+    kit_agents = root / "_grimoire" / "kit" / "agents"
+    target = sorted(kit_agents.glob("*.md"))[0]
+    kit_hash = compute_kit_source_hash(target)
+    kit_text = target.read_text(encoding="utf-8")
+    overrides_dir = root / "_grimoire" / "overrides" / "agents"
+    overrides_dir.mkdir(parents=True, exist_ok=True)
+    # A full copy of the kit file (untouched body — a genuinely convertible
+    # override) plus the two frontmatter keys a real `context:` customisation
+    # would add: `kit_source_hash` matching the kit file *today* (drift
+    # status "fresh") and a `context:` entry naming a fiche that exists.
+    override_text = kit_text.replace(
+        "---\n",
+        f'---\nkit_source_hash: "{kit_hash}"\ncontext: ["_grimoire/_memory/notes-homelab.md"]\n',
+        1,
+    )
+    (overrides_dir / target.name).write_text(override_text, encoding="utf-8")
+
+    proposals = propose_override_migrations(root)
+    matching = [p for p in proposals if p.target_agent == target.stem]
+    assert matching, (
+        f"expected an override-migration proposal for {target.stem!r} — "
+        f"none produced: {[p.target_agent for p in proposals]}"
+    )
+    assert "conversion sûre" in matching[0].carrier_reason
+
+    listed = list_proposals(root)
+    assert matching[0].slug in {p.slug for p in listed}
+
+
+def test_propose_override_migrations_skips_an_already_partial_override(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    """A partial override (`extends: kit`) is already the converted shape — never proposed
+    again, whatever its drift status."""
+    from grimoire.core.override_drift import KIT_SOURCE_HASH_KEY, compute_kit_source_hash
+    from grimoire.tools.project_upgrade import propose_override_migrations
+
+    root = tmp_path_factory.mktemp("upgrade-partial-override") / "projet"
+    root.mkdir(parents=True)
+    created = _grimoire(["init", ".", "-y", "--name", "upgrade-partial-override"], root)
+    if not (root / "_grimoire" / "kit").is_dir():
+        pytest.skip(f"`grimoire init` indisponible ici : {created.stderr[-400:]}")
+
+    (root / "_grimoire" / "_memory" / "notes-homelab.md").write_text(
+        "# Notes homelab\n", encoding="utf-8"
+    )
+    kit_agents = root / "_grimoire" / "kit" / "agents"
+    target = sorted(kit_agents.glob("*.md"))[0]
+    kit_hash = compute_kit_source_hash(target)
+    overrides_dir = root / "_grimoire" / "overrides" / "agents"
+    overrides_dir.mkdir(parents=True, exist_ok=True)
+    (overrides_dir / target.name).write_text(
+        f'---\nextends: kit\n{KIT_SOURCE_HASH_KEY}: "{kit_hash}"\n'
+        'context: ["_grimoire/_memory/notes-homelab.md"]\n---\n',
+        encoding="utf-8",
+    )
+
+    proposals = propose_override_migrations(root)
+    assert not any(p.target_agent == target.stem for p in proposals)
 
 
 # ── memory (V1 proposals) ─────────────────────────────────────────────────────
