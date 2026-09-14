@@ -75,10 +75,12 @@ def _seed_drifted_override(root: Path) -> str:
 
 
 def _seed_unlinked_fiche(root: Path) -> str:
+    """Returns the project-root-relative path — the form `artifact_ref` carries and
+    a real agent's `context:` entry uses (e.g. `_grimoire/_memory/notes-securite.md`)."""
     learnings = root / "_grimoire" / "_memory" / "agent-learnings"
     learnings.mkdir(parents=True, exist_ok=True)
     (learnings / "monitoring.md").write_text("# Monitoring\n\nSurveiller les métriques clés.\n", encoding="utf-8")
-    return "agent-learnings/monitoring.md"
+    return "_grimoire/_memory/agent-learnings/monitoring.md"
 
 
 # ── backup ────────────────────────────────────────────────────────────────────
@@ -207,7 +209,106 @@ def test_propose_memory_links_skips_a_referenced_fiche(upgrade_project: Path) ->
 
     first_pass = propose_memory_links(upgrade_project)
     fiche_slugs = {p.artifact_ref for p in first_pass}
-    assert "agent-learnings/monitoring.md" in fiche_slugs  # seeded by an earlier test in this module
+    # seeded by an earlier test in this module
+    assert "_grimoire/_memory/agent-learnings/monitoring.md" in fiche_slugs
+
+
+def test_accept_memory_link_creates_partial_override_when_carrier_has_none(upgrade_project: Path) -> None:
+    """Accepting a memory-link for a kit agent with no override yet writes a partial one."""
+    from grimoire.core.override_drift import KIT_SOURCE_HASH_KEY, NO_KIT_SOURCE
+    from grimoire.hosts.collect import parse_frontmatter
+    from grimoire.proposals import accept_proposal, create_manual_proposal
+
+    override_path = upgrade_project / "_grimoire" / "overrides" / "agents" / "security-auditor.md"
+    assert not override_path.is_file(), "must start with no override to prove the creation path"
+
+    proposal = create_manual_proposal(
+        upgrade_project,
+        slug="memory-link-test-securite",
+        specialty="fiche mémoire non raccordée : agent-learnings/monitoring.md",
+        artifact_type="memory-link",
+        target_agent="security-auditor",
+        carrier_reason="porteur par mot entier : security-auditor",
+        artifact_ref="_grimoire/_memory/agent-learnings/monitoring.md",
+        category="memory-unlinked",
+    )
+
+    result = accept_proposal(upgrade_project, proposal.slug)
+    assert result["ok"] is True, result
+    assert override_path.is_file()
+
+    data, _body = parse_frontmatter(override_path.read_text(encoding="utf-8"))
+    assert data.get("extends") == "kit"
+    assert data.get(KIT_SOURCE_HASH_KEY) not in (None, "", NO_KIT_SOURCE)
+    # The kit agent's own declared context survives — only the fiche is added,
+    # never replacing what security-auditor already carried.
+    context = list(data.get("context") or [])
+    assert "_grimoire/_memory/agent-learnings/monitoring.md" in context
+    assert "_grimoire/_memory/shared-context.md" in context
+
+
+def test_accept_memory_link_appends_to_an_existing_override_context(upgrade_project: Path) -> None:
+    """A carrier that already has an override (partial or full) keeps what it had and gains the fiche."""
+    from grimoire.core.override_drift import compute_kit_source_hash
+    from grimoire.hosts.collect import parse_frontmatter
+    from grimoire.proposals import accept_proposal, create_manual_proposal
+
+    preexisting = upgrade_project / "_grimoire" / "_memory" / "agent-learnings" / "preexisting.md"
+    preexisting.parent.mkdir(parents=True, exist_ok=True)
+    preexisting.write_text("# Préexistant\n", encoding="utf-8")
+
+    kit_path = upgrade_project / "_grimoire" / "kit" / "agents" / "agent-optimizer.md"
+    override_path = upgrade_project / "_grimoire" / "overrides" / "agents" / "agent-optimizer.md"
+    override_path.parent.mkdir(parents=True, exist_ok=True)
+    override_path.write_text(
+        "---\n"
+        "extends: kit\n"
+        f"kit_source_hash: {compute_kit_source_hash(kit_path)}\n"
+        "context:\n"
+        "  - _grimoire/_memory/agent-learnings/preexisting.md\n"
+        "---\n",
+        encoding="utf-8",
+    )
+
+    proposal = create_manual_proposal(
+        upgrade_project,
+        slug="memory-link-test-optimizer",
+        specialty="fiche mémoire non raccordée : agent-learnings/monitoring.md",
+        artifact_type="memory-link",
+        target_agent="agent-optimizer",
+        carrier_reason="porteur par mot entier : agent-optimizer",
+        artifact_ref="_grimoire/_memory/agent-learnings/monitoring.md",
+        category="memory-unlinked",
+    )
+
+    result = accept_proposal(upgrade_project, proposal.slug)
+    assert result["ok"] is True, result
+
+    data, _body = parse_frontmatter(override_path.read_text(encoding="utf-8"))
+    assert list(data.get("context") or []) == [
+        "_grimoire/_memory/agent-learnings/preexisting.md",
+        "_grimoire/_memory/agent-learnings/monitoring.md",
+    ]
+
+
+def test_accept_memory_link_refuses_only_for_lack_of_carrier(upgrade_project: Path) -> None:
+    """The one legitimate refusal left: no plausible carrier at all — never "pas d'override"."""
+    from grimoire.proposals import accept_proposal, create_manual_proposal
+
+    proposal = create_manual_proposal(
+        upgrade_project,
+        slug="memory-link-test-orpheline",
+        specialty="fiche mémoire non raccordée : agent-learnings/orpheline.md",
+        artifact_type="memory-link",
+        target_agent="",
+        carrier_reason="aucun porteur plausible : à placer à la main",
+        artifact_ref="agent-learnings/orpheline.md",
+        category="memory-unlinked",
+    )
+
+    result = accept_proposal(upgrade_project, proposal.slug)
+    assert result["ok"] is False
+    assert "override" not in result["error"].lower()
 
 
 # ── needs / hosts ─────────────────────────────────────────────────────────────
@@ -233,6 +334,62 @@ def test_propose_needs_hosts_covers_unresolved_and_undeclared(upgrade_project: P
         assert slugs <= listed
     finally:
         config_path.write_text(original, encoding="utf-8")
+
+
+def test_accept_needs_hosts_declares_enabled_hosts_and_preserves_comments(upgrade_project: Path) -> None:
+    """Accepting `hosts-declare-enabled` writes `hosts.enabled`, round-tripped — no comment lost."""
+    import re
+
+    from grimoire.hosts.detection import detect_enabled_hosts
+    from grimoire.proposals import accept_proposal
+    from grimoire.tools._common import load_yaml_roundtrip
+    from grimoire.tools.project_upgrade import propose_needs_hosts
+
+    config_path = upgrade_project / "project-context.yaml"
+    original = config_path.read_text(encoding="utf-8")
+    stripped = re.sub(r"(?m)^hosts:\n(?:[ \t].*\n)*", "", original)
+    config_path.write_text(stripped, encoding="utf-8")
+    try:
+        propose_needs_hosts(upgrade_project)
+        result = accept_proposal(upgrade_project, "hosts-declare-enabled")
+        assert result["ok"] is True, result
+
+        data = load_yaml_roundtrip(config_path)
+        assert sorted(data["hosts"]["enabled"]) == sorted(detect_enabled_hosts(upgrade_project))
+
+        # grimoire-kit#430's actual guarantee: every comment survives the
+        # round-trip untouched (block-style/indent width is a dumper choice
+        # `load_yaml_roundtrip`/`save_yaml` never promised to mirror byte for
+        # byte — only comments and quoting are).
+        new_text = config_path.read_text(encoding="utf-8")
+        for line in stripped.splitlines():
+            if line.strip().startswith("#"):
+                assert line in new_text, f"comment lost by the round-trip write: {line!r}"
+
+        check = _grimoire(["-o", "json", "check", "."], upgrade_project)
+        payload = json.loads(check.stdout or "{}")
+        assert payload.get("all_ok") is True, check.stdout + check.stderr
+    finally:
+        config_path.write_text(original, encoding="utf-8")
+
+
+def test_accept_needs_hosts_refuses_to_invent_a_command(upgrade_project: Path) -> None:
+    """`needs-declare-commands` never gets a mechanical write — no default command exists to use."""
+    from grimoire.proposals import accept_proposal, create_manual_proposal
+
+    proposal = create_manual_proposal(
+        upgrade_project,
+        slug="needs-declare-commands",
+        specialty="besoins d'exécution non résolus",
+        artifact_type="needs-hosts",
+        carrier_reason="déclarer needs.commands pour : migration-tool",
+        artifact_ref="migration-tool",
+        category="needs-unresolved",
+    )
+
+    result = accept_proposal(upgrade_project, proposal.slug)
+    assert result["ok"] is False
+    assert "à la main" in result["error"]
 
 
 # ── verify ────────────────────────────────────────────────────────────────────

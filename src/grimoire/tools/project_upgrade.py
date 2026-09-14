@@ -580,7 +580,12 @@ def propose_memory_links(target: Path) -> list[Any]:
                 artifact_type="memory-link",
                 target_agent=carrier,
                 carrier_reason=carrier_reason,
-                artifact_ref=mem_rel,
+                # Project-root-relative, like every real agent's `context:` entry
+                # (e.g. `_grimoire/_memory/notes-securite.md`) — `mem_rel` above is
+                # only for the human-readable slug/specialty, never for the value
+                # `accept_proposal` writes into an agent's frontmatter, which
+                # `collect_agents` validates against `project_root / c`.
+                artifact_ref=full_rel,
                 category="memory-unlinked",
             )
         )

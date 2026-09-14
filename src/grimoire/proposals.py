@@ -848,6 +848,7 @@ def accept_proposal(project_root: Path, slug: str) -> dict[str, Any]:
         "skill": _accept_skill,
         "override-migration": _accept_override_migration,
         "memory-link": _accept_memory_link,
+        "needs-hosts": _accept_needs_hosts,
     }
     accept_fn = accept_by_type.get(proposal.artifact_type, _accept_agent)
 
@@ -965,44 +966,94 @@ def _accept_memory_link(project_root: Path, proposal: Proposal) -> dict[str, Any
     Refuses when no plausible carrier was found (``target_agent`` empty) —
     the déclencheur's own conclusion for that case is "à placer à la main",
     and writing to a resolved-by-guess agent instead would contradict the
-    proposal it is accepting. Refuses too when the carrier has no override
-    file yet: this function edits frontmatter in place, it does not create
-    one from the kit tier (`grimoire agent override convert` is the door for
-    that, same as the override-migration path above).
+    proposal it is accepting. Never refuses for the carrier lacking an
+    override, though: when the carrier is a kit agent with no override yet,
+    this writes one — a **partial** override (``extends: kit``,
+    ``kit_source_hash``, issue #427) carrying only the ``context:`` field,
+    the same skeleton :func:`grimoire.tools.workspace_routes.
+    _apply_agent_updates` already writes for the cockpit's own agent-field
+    editor. A carrier with an existing override (partial or full) simply
+    gets the fiche appended to whatever ``context:`` it already resolves to.
     """
-    from grimoire.core import layout
-    from grimoire.hosts.collect import parse_frontmatter
+    from grimoire.hosts.collect import collect_agents, effective_agent_frontmatter
+    from grimoire.tools.workspace_routes import _agent_override_path, _agent_target, _apply_agent_updates
 
     if not proposal.target_agent:
         raise RuntimeError("aucun porteur plausible pour cette fiche — à raccorder à la main")
     if not proposal.artifact_ref:
         raise RuntimeError("proposition sans fiche à raccorder (artifact_ref vide)")
 
-    override_path = layout.overrides_dir(project_root) / layout.AGENTS_SUBDIR / f"{proposal.target_agent}.md"
-    if not override_path.is_file():
-        raise RuntimeError(
-            f"{proposal.target_agent} n'a pas encore d'override — créez-en un "
-            f"(`grimoire agent override convert {proposal.target_agent}`) avant de raccorder une fiche"
-        )
+    root = project_root.resolve()
+    try:
+        agents = list(collect_agents(root))
+    except Exception as exc:
+        raise RuntimeError(f"agents du projet illisibles : {exc}") from exc
+    agent = next((a for a in agents if a.name == proposal.target_agent), None)
+    if agent is None:
+        raise RuntimeError(f"agent porteur introuvable : {proposal.target_agent}")
 
-    text = override_path.read_text(encoding="utf-8")
-    data, body = parse_frontmatter(text)
-    context = [str(c) for c in data.get("context") or []]
-    if proposal.artifact_ref in context:
+    current = [str(c) for c in effective_agent_frontmatter(root, agent).get("context") or []]
+    override_path = _agent_override_path(root, _agent_target(root, proposal.target_agent))
+    if proposal.artifact_ref in current:
         return {"status": "already-linked", "artifact_type": "memory-link", "path": str(override_path)}
-    context.append(proposal.artifact_ref)
-    data["context"] = context
 
-    import io
+    _apply_agent_updates(root, proposal.target_agent, {"context": [*current, proposal.artifact_ref]})
+    return {
+        "status": "linked",
+        "artifact_type": "memory-link",
+        "path": str(override_path),
+        "attached_to": proposal.target_agent,
+    }
 
-    from ruamel.yaml import YAML
 
-    yaml = YAML()
-    yaml.default_flow_style = False
-    buf = io.StringIO()
-    yaml.dump(data, buf)
-    override_path.write_text(f"---\n{buf.getvalue()}---\n{body}", encoding="utf-8")
-    return {"status": "linked", "artifact_type": "memory-link", "path": str(override_path), "attached_to": proposal.target_agent}
+#: The two slugs :func:`grimoire.tools.project_upgrade.propose_needs_hosts` ever writes.
+_NEEDS_HOSTS_ENABLED_SLUG = "hosts-declare-enabled"
+_NEEDS_HOSTS_COMMANDS_SLUG = "needs-declare-commands"
+
+
+def _accept_needs_hosts(project_root: Path, proposal: Proposal) -> dict[str, Any]:
+    """Apply a ``"needs-hosts"`` proposal (issue #490): declare ``hosts.enabled``; never invent a command.
+
+    ``hosts-declare-enabled`` has a real, mechanical value to write — the
+    disk detection :func:`grimoire.hosts.detection.detect_enabled_hosts`
+    already ran when the proposal was created, and *this* is a project's own
+    declaration that agrees with what is already sitting on disk, not a
+    guess. Written via :func:`grimoire.tools._common.load_yaml_roundtrip` /
+    :func:`grimoire.tools._common.save_yaml` (grimoire-kit#430) so every
+    comment in ``project-context.yaml`` survives untouched.
+
+    ``needs-declare-commands`` has no such value: an *unresolved* need is
+    unresolved precisely because neither a declaration nor a marker-based
+    detection named a command for it
+    (:mod:`grimoire.core.execution_needs` — "jamais une commande inventée à
+    partir du seul id du besoin"). Accepting it can only ever refuse, naming
+    the ids a human must fill in by hand; that refusal is not the "pas
+    d'override" refusal this issue forbids for ``memory-link``, it is the
+    kit's own doctrine against fabricating a command.
+    """
+    from grimoire.tools._common import load_yaml_roundtrip, save_yaml
+
+    root = project_root.resolve()
+    config_path = root / "project-context.yaml"
+
+    if proposal.slug == _NEEDS_HOSTS_COMMANDS_SLUG:
+        raise RuntimeError(
+            "aucune commande ne peut être déduite mécaniquement pour ces besoins — "
+            f"déclarez `needs.commands` à la main dans project-context.yaml pour : "
+            f"{proposal.artifact_ref or '(voir la proposition)'}"
+        )
+    if proposal.slug != _NEEDS_HOSTS_ENABLED_SLUG:
+        raise RuntimeError(f"type de proposition « needs-hosts » inconnu : {proposal.slug}")
+
+    detected = [host for host in proposal.artifact_ref.split(",") if host]
+    data = load_yaml_roundtrip(config_path) if config_path.is_file() else {}
+    hosts = data.get("hosts")
+    if not isinstance(hosts, dict):
+        hosts = {}
+        data["hosts"] = hosts
+    hosts["enabled"] = detected
+    save_yaml(data, config_path)
+    return {"status": "declared", "artifact_type": "needs-hosts", "path": str(config_path)}
 
 
 def reject_proposal(project_root: Path, slug: str) -> dict[str, Any]:

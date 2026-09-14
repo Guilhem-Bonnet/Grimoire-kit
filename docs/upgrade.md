@@ -69,12 +69,16 @@ aussi.
   « revue nécessaire » refuse toujours l'acceptation : fusionner du texte divergent n'est pas ce que
   cette commande fait, et faire semblant serait pire que de ne rien faire.
 - `memory-link` — accepter ajoute le chemin de la fiche au `context:` de l'override du porteur proposé.
-  Refuse si aucun porteur n'a été trouvé (« à placer à la main »), ou si le porteur n'a pas encore
-  d'override à éditer.
-- `needs-hosts` — ces propositions décrivent une déclaration à faire dans `project-context.yaml`
-  (`needs.commands`, `hosts.enabled`) ; les accepter aujourd'hui ne fait qu'acter la décision (aucune
-  écriture de configuration automatique n'est câblée pour ce type — la déclarer reste, sciemment, un
-  geste manuel dans `project-context.yaml`).
+  Refuse si aucun porteur n'a été trouvé (« à placer à la main ») ; jamais faute d'override existant —
+  si le porteur est un agent du kit sans override, accepter en crée un **partiel**
+  (`extends: kit`, `kit_source_hash`, issue #427) qui ne porte que le champ `context:`.
+- `needs-hosts` — `hosts-declare-enabled` a une valeur mécanique réelle (la détection sur disque déjà
+  faite à la proposition) : accepter l'écrit dans `hosts.enabled` de `project-context.yaml`, par
+  round-trip (`grimoire.tools._common.load_yaml_roundtrip`/`save_yaml`, grimoire-kit#430 : les
+  commentaires du fichier survivent). `needs-declare-commands` reste, sciemment, un refus : un besoin
+  *non résolu* l'est précisément parce qu'aucune commande n'a été déclarée ni détectée — en inventer
+  une contredirait la doctrine de `grimoire.core.execution_needs` (« jamais une commande inventée à
+  partir du seul id du besoin ») ; la déclarer reste un geste manuel dans `project-context.yaml`.
 
 ## Ce qui est refusé, et pourquoi
 
