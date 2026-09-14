@@ -62,6 +62,53 @@ def _seed_orphan(root: Path) -> str:
     return "retired-specialist"
 
 
+def _seed_feature_agent(root: Path) -> str:
+    """Install the real ``vector-memory`` feature agent in the kit tier.
+
+    The shape ``grimoire init --backend qdrant-local``/``ollama`` actually
+    produces (:class:`~grimoire.core.archetype_resolver.ArchetypeResolver`)
+    — a *real* bundled file, not a hand-faked one, so this proves
+    ``find_orphans`` against the same source ``fresh_kit_agent_roster``
+    reads, never against this test's own fixture.
+    """
+    from grimoire.archetypes import bundled_path as archetypes_path
+
+    src = archetypes_path() / "features" / "vector-memory" / "vectus.md"
+    assert src.is_file(), "the kit must still bundle its own vector-memory feature agent"
+    dst = root / "_grimoire" / "kit" / "agents" / "vectus.md"
+    dst.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    return "vectus"
+
+
+def _seed_declared_custom_agent(root: Path, name: str = "fix-loop-orchestrator") -> str:
+    """A kit-tier agent the fresh roster would not (re)write, but the project explicitly
+    keeps via ``agents.custom_agents`` — the exact shape the 2026-09-11 migration report
+    described for ``fix-loop-orchestrator``."""
+    kit_agents = root / "_grimoire" / "kit" / "agents"
+    real_agents = sorted(p for p in kit_agents.glob("*.md") if p.stem not in {"retired-specialist", "vectus"})
+    template = real_agents[0].read_text(encoding="utf-8")
+    body = template.replace(real_agents[0].stem, name, 1)
+    if "name:" not in body:
+        body = body.replace("---\n", f'---\nname: "{name}"\n', 1)
+    (kit_agents / f"{name}.md").write_text(body, encoding="utf-8")
+
+    config_path = root / "project-context.yaml"
+    original = config_path.read_text(encoding="utf-8")
+    assert "custom_agents: []" in original, "expected a still-empty `agents.custom_agents` to declare into"
+    config_path.write_text(original.replace("custom_agents: []", f'custom_agents: ["{name}"]'), encoding="utf-8")
+    return name
+
+
+def _seed_override_only_agent(root: Path, name: str = "custom-standalone") -> str:
+    """A fully project-authored agent living only in the overrides tier, no kit base at all."""
+    overrides_agents = root / "_grimoire" / "overrides" / "agents"
+    overrides_agents.mkdir(parents=True, exist_ok=True)
+    (overrides_agents / f"{name}.md").write_text(
+        f'---\nname: "{name}"\n---\n\nAgent maison, sans base kit.\n', encoding="utf-8"
+    )
+    return name
+
+
 def _seed_drifted_override(root: Path) -> str:
     """A full-copy override whose body no longer matches the kit's — 'revue nécessaire'."""
     kit_agents = root / "_grimoire" / "kit" / "agents"
@@ -107,6 +154,36 @@ def test_backup_project_is_idempotent(upgrade_project: Path) -> None:
     assert first.tarball_entries == second.tarball_entries
 
 
+def test_backup_project_never_overwrites_a_changed_snapshot(tmp_path: Path) -> None:
+    """A second same-day, same-version `backup` whose tracked files actually changed since
+    the first — a dry-run then a real run, with something touched in between — gets its own
+    suffixed tarball/manifest. The canonical (first) snapshot is never overwritten."""
+    from grimoire.tools.project_upgrade import backup_project
+
+    root = tmp_path / "projet"
+    root.mkdir()
+    (root / "project-context.yaml").write_text("project:\n  name: x\n", encoding="utf-8")
+    (root / "_grimoire").mkdir()
+    (root / "_grimoire" / "a.txt").write_text("one", encoding="utf-8")
+
+    first = backup_project(root)
+    first_tarball_bytes = first.tarball.read_bytes()
+
+    (root / "_grimoire" / "b.txt").write_text("two", encoding="utf-8")
+    second = backup_project(root)
+
+    assert second.tarball != first.tarball
+    assert second.tarball.name == "grimoire-state-2.tar.gz"
+    assert second.manifest != first.manifest
+    # The first snapshot's bytes are untouched — never silently replaced.
+    assert first.tarball.read_bytes() == first_tarball_bytes
+
+    # A third call with unchanged content since the second reuses the second
+    # snapshot's own path rather than the (now stale) canonical one.
+    third = backup_project(root)
+    assert third.tarball == second.tarball
+
+
 # ── orphans ───────────────────────────────────────────────────────────────────
 
 
@@ -129,6 +206,27 @@ def test_find_orphans_ignores_the_live_roster(upgrade_project: Path) -> None:
     roster = fresh_kit_agent_roster(upgrade_project)
     report = find_orphans(upgrade_project)
     assert not (set(report.names) & roster)
+
+
+def test_find_orphans_keeps_feature_declared_and_override_agents(upgrade_project: Path) -> None:
+    """Real 2026-09-11 migration shape: a feature agent (`vectus`), an agent kept via
+    `agents.custom_agents` (`fix-loop-orchestrator`), and a fully custom override — none of
+    these three are orphans, even though none is in the fresh kit roster either."""
+    from grimoire.tools.project_upgrade import find_orphans
+
+    feature_name = _seed_feature_agent(upgrade_project)
+    declared_name = _seed_declared_custom_agent(upgrade_project)
+    override_name = _seed_override_only_agent(upgrade_project)
+
+    report = find_orphans(upgrade_project)
+
+    assert feature_name not in report.names
+    assert declared_name not in report.names
+    assert override_name not in report.names
+    # The orphan seeded by `test_find_orphans_detects_stale_kit_agent` above is
+    # still correctly flagged — this fix narrows false positives, it does not
+    # blind the node to real ones.
+    assert "retired-specialist" in report.names
 
 
 def test_archive_orphans_moves_never_deletes(upgrade_project: Path) -> None:
