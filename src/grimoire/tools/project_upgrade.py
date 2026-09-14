@@ -458,32 +458,36 @@ def find_orphans(target: Path) -> OrphanReport:
     ``refresh_kit_tier``/``grimoire up`` never prunes ``_grimoire/kit/
     agents/`` — it only (re)writes what the configured archetype(s) still
     produce. An orphan is a name :func:`~grimoire.core.layout.
-    installed_agents` finds on disk that ALL three of the following are
-    true for:
+    installed_agents` finds on disk that ALL of the following are true for:
 
+    - its installed file lives in the kit tier itself
+      (:func:`~grimoire.core.layout.kit_dir`) — this is the one and only
+      pile this node ever archives from. Anything living in a tier the
+      *project* owns — the overrides tier
+      (:func:`~grimoire.core.layout.overrides_dir`), the legacy custom tier
+      (``_grimoire/_config/custom/agents/``, still read by
+      :func:`~grimoire.core.layout.agent_dirs` for an unmigrated project),
+      or any other legacy agent directory — is never a candidate, full stop,
+      *regardless* of whether the project also declares it under ``agents.
+      custom_agents``. A second rejeu réel (three projects, 2026-09-14)
+      found live agents in the legacy custom tier that were *not* declared
+      there either, archived anyway because the old check only asked
+      "declared, or override tier?" instead of "kit tier at all?";
     - :func:`~grimoire.cli.cmd_up.fresh_kit_agent_roster` — the same
       resolver ``up`` uses — would not (re)write it today for this
       project's configuration (base + archetype(s) + features);
     - the project does not declare it explicitly under ``agents.
-      custom_agents`` in ``project-context.yaml``;
-    - its installed file does not live in the overrides tier
-      (:func:`~grimoire.core.layout.overrides_dir`) — an override with no
-      live kit base left to extend is the project's own liberty, never
-      something this node archives on its own initiative. (An override the
-      kit still ships a base for is drift, not an orphan either way — the
-      ``overrides`` node handles that, and such a name is already excluded
-      above because it *is* in the fresh roster.) Legacy-tier leftovers
-      (``_grimoire/agents/``, ``_grimoire/_config/agents/`` — a retired
-      pre-tier layout) are not overrides and stay in scope: they are exactly
-      the "a prior kit version left this behind" case this node exists for.
+      custom_agents`` in ``project-context.yaml`` — for a kit-tier file,
+      this is the project's own way of saying "keep this one anyway", the
+      exact shape a real migration (Terraform-HouseServer, 2026-09-11)
+      described for ``fix-loop-orchestrator``.
 
-    A real migration (Terraform-HouseServer, 2026-09-11) found this node
-    archiving two agents a project still used — ``fix-loop-orchestrator``
-    (declared via ``custom_agents``) and ``vectus`` (a ``vector-memory``
-    feature agent the roster resolver did not yet infer, see
-    :func:`~grimoire.cli.cmd_up._infer_resolved``) — leaving the project
-    broken until repaired by hand. In doubt, this function keeps the agent
-    installed rather than archiving it; it never guesses.
+    That same 2026-09-11 migration also found this node archiving
+    ``vectus``, a ``vector-memory`` feature agent the roster resolver did
+    not yet infer (see :func:`~grimoire.cli.cmd_up._infer_resolved`) —
+    leaving the project broken until repaired by hand. In doubt, this
+    function keeps the agent installed rather than archiving it; it never
+    guesses.
 
     Managed per-host projections (``.claude/agents/<name>.md``, ``.github/
     agents/<name>.agent.md``, …) for a genuine orphan are still reported
@@ -503,10 +507,12 @@ def find_orphans(target: Path) -> OrphanReport:
         if name in roster or name in declared:
             continue
         _, primary_path = installed[name]
-        if primary_path.is_relative_to(layout.overrides_dir(target)):
-            # Override tier, with no live kit base left to extend — the
-            # project's own file. Never ours to archive; `overrides` drift
-            # handling is the only node that touches these.
+        if not primary_path.is_relative_to(layout.kit_dir(target)):
+            # Lives in a tier the project owns — overrides, the legacy
+            # custom tier, or any other legacy agent directory. Never ours
+            # to archive, whether or not it is declared under
+            # `agents.custom_agents`: only the kit tier ever produces
+            # orphans, by construction.
             continue
         paths: list[Path] = [primary_path]
         for tree in _HOST_AGENT_DIRS:

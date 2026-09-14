@@ -267,6 +267,68 @@ class TestDoctorReportsThem:
         assert "quick-flow-solo-dev" in result.output
 
 
+class TestManifestAndHostReferences:
+    """Issue #490 (second rejeu réel) : le manifeste ou une projection hôte peut
+    continuer à nommer un agent après que son fichier source a disparu — ni
+    ``dead_path_references`` (qui ne lit que des chemins ``_grimoire/...`` cités en
+    texte) ni ``roster_incoherences`` (qui ne lit que les cartes de routage
+    ``<agent tag="...">``) ne le voient. Un projet réel est passé à 25/25 alors que
+    13 agents référencés par le manifeste avaient disparu."""
+
+    def test_a_sound_install_has_no_missing_reference(self, tmp_path: Path) -> None:
+        from grimoire.core.integrity import missing_referenced_agents, referenced_agent_names
+
+        _install(tmp_path)
+        assert referenced_agent_names(tmp_path), "a real install must produce a non-empty manifest"
+        assert missing_referenced_agents(tmp_path) == []
+
+    def test_a_stale_manifest_entry_is_reported(self, tmp_path: Path) -> None:
+        from grimoire.core.integrity import missing_referenced_agents
+
+        _install(tmp_path)
+        manifest = tmp_path / "_grimoire" / "kit" / "agent-manifest.csv"
+        with manifest.open("a", encoding="utf-8") as fh:
+            fh.write("phantom-agent,phantom-agent.md,ops,Agent disparu,\n")
+
+        assert "phantom-agent" in missing_referenced_agents(tmp_path)
+
+    def test_a_managed_host_projection_without_a_source_is_reported(self, tmp_path: Path) -> None:
+        from grimoire.core.integrity import missing_referenced_agents
+
+        _install(tmp_path)
+        ghost = tmp_path / ".claude" / "agents" / "phantom-persona.md"
+        ghost.parent.mkdir(parents=True, exist_ok=True)
+        ghost.write_text("<!-- grimoire:managed -->\nGhost.\n", encoding="utf-8")
+
+        assert "phantom-persona" in missing_referenced_agents(tmp_path)
+
+    def test_an_unmanaged_stray_file_is_not_reported(self, tmp_path: Path) -> None:
+        """A file without the kit's marker is the project's own — never ours to judge."""
+        from grimoire.core.integrity import missing_referenced_agents
+
+        _install(tmp_path)
+        stray = tmp_path / ".claude" / "agents" / "hand-written.md"
+        stray.parent.mkdir(parents=True, exist_ok=True)
+        stray.write_text("Not managed by the kit.\n", encoding="utf-8")
+
+        assert "hand-written" not in missing_referenced_agents(tmp_path)
+
+    def test_doctor_fails_on_a_stale_manifest_entry(self, tmp_path: Path) -> None:
+        _install(tmp_path)
+        manifest = tmp_path / "_grimoire" / "kit" / "agent-manifest.csv"
+        with manifest.open("a", encoding="utf-8") as fh:
+            fh.write("phantom-agent,phantom-agent.md,ops,Agent disparu,\n")
+
+        result = CliRunner().invoke(app, ["doctor", str(tmp_path)])
+        assert "référencé(s) mais absent(s)" in result.output
+        assert "phantom-agent" in result.output
+
+    def test_doctor_passes_when_references_are_sound(self, tmp_path: Path) -> None:
+        _install(tmp_path)
+        result = CliRunner().invoke(app, ["doctor", str(tmp_path)])
+        assert "tous les agents référencés" in result.output
+
+
 class TestScope:
     def test_a_project_without_a_kit_tier_is_left_alone(self, tmp_path: Path) -> None:
         """A hand-made or pre-boundary tree shipped nothing to hold to a promise."""

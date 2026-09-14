@@ -109,6 +109,21 @@ def _seed_override_only_agent(root: Path, name: str = "custom-standalone") -> st
     return name
 
 
+def _seed_legacy_custom_agent(root: Path, name: str = "homelab-runner") -> str:
+    """A project-owned agent living in the legacy custom tier (``_grimoire/_config/custom/
+    agents/``), never migrated to ``overrides/`` and never declared under
+    ``agents.custom_agents`` — the exact shape of the three real projects (issue #490's
+    second real rejeu) that lost 1, 3 and 13 live agents this way: the file is neither in
+    the fresh roster nor in ``custom_agents`` nor under ``overrides/``, yet it is entirely
+    the project's own."""
+    legacy_agents = root / "_grimoire" / "_config" / "custom" / "agents"
+    legacy_agents.mkdir(parents=True, exist_ok=True)
+    (legacy_agents / f"{name}.md").write_text(
+        f'---\nname: "{name}"\n---\n\nAgent maison, jamais migré vers overrides.\n', encoding="utf-8"
+    )
+    return name
+
+
 def _seed_drifted_override(root: Path) -> str:
     """A full-copy override whose body no longer matches the kit's — 'revue nécessaire'."""
     kit_agents = root / "_grimoire" / "kit" / "agents"
@@ -226,6 +241,27 @@ def test_find_orphans_keeps_feature_declared_and_override_agents(upgrade_project
     # The orphan seeded by `test_find_orphans_detects_stale_kit_agent` above is
     # still correctly flagged — this fix narrows false positives, it does not
     # blind the node to real ones.
+    assert "retired-specialist" in report.names
+
+
+def test_find_orphans_keeps_legacy_custom_tier_agent(upgrade_project: Path) -> None:
+    """Issue #490 (second rejeu réel) : un agent vivant dans la tier custom héritée
+    (`_grimoire/_config/custom/agents/`), ni dans le roster frais, ni déclaré sous
+    `agents.custom_agents`, ni migré vers `overrides/`, n'est JAMAIS un orphelin — seule
+    la tier kit (`_grimoire/kit/agents/`) fournit des candidats orphelins."""
+    from grimoire.tools.project_upgrade import find_orphans
+
+    legacy_name = _seed_legacy_custom_agent(upgrade_project)
+
+    report = find_orphans(upgrade_project)
+
+    assert legacy_name not in report.names, (
+        f"{legacy_name!r} vit dans une tier possédée par le projet (custom legacy), "
+        "il ne doit jamais être archivé comme orphelin"
+    )
+    # The orphan seeded by `test_find_orphans_detects_stale_kit_agent` above is
+    # still correctly flagged — this fix narrows false positives on
+    # project-owned tiers, it does not blind the node to real kit-tier orphans.
     assert "retired-specialist" in report.names
 
 
