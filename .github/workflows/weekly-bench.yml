@@ -18,9 +18,9 @@ on:
         type: string
 
 permissions:
-  contents: write      # Pour commit le rapport
+  contents: write      # Pour pousser la branche du rapport
   issues: write        # Pour créer une issue si dégradation critique
-  pull-requests: read
+  pull-requests: write # Pour ouvrir/fusionner la PR du rapport (main est protégée)
 
 concurrency:
   group: weekly-bench
@@ -102,15 +102,56 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           cat _grimoire-output/bench-reports/latest.md >> $GITHUB_STEP_SUMMARY
 
-      # ── Commit le rapport dans le repo ────────────────────────────────────
-      - name: Commit bench report
+      # ── Publier le rapport via une PR (main est protégée) ─────────────────
+      # main exige 14 checks obligatoires depuis le 2026-09-04 (GH006 sur tout
+      # push direct). On pousse donc sur une branche dédiée et on ouvre une PR,
+      # fusion automatique armée pour qu'elle atterrisse dès que la CI est
+      # verte, sans intervention.
+      #
+      # Limite connue de GitHub : un push/une PR créés avec le GITHUB_TOKEN du
+      # workflow ne déclenchent pas les workflows sur `pull_request` (garde
+      # anti-récursion). Les 14 checks requis ne démarrent donc pas seuls sur
+      # cette PR : elle reste ouverte, fusion armée, jusqu'à ce qu'un geste
+      # humain (nouveau commit, "Update branch", rerun manuel des checks) les
+      # déclenche. Lever cette limite proprement demande un PAT dédié en
+      # secret de dépôt — non ajouté ici, à décider séparément.
+      - name: Ouvrir la PR du rapport bench
+        id: report_pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
+          DATE="${{ steps.bench.outputs.report_date }}"
+          BRANCH="bench/report-${DATE}"
+
           git config user.name "Grimoire Bench Bot"
           git config user.email "grimoire-bench-bot@github-actions"
+
           git add _grimoire-output/bench-reports/
-          git diff --staged --quiet && echo "No changes" && exit 0
-          git commit -m "chore(bench): rapport hebdomadaire ${{ steps.bench.outputs.report_date }}"
-          git push
+          if git diff --staged --quiet; then
+            echo "Aucun changement à publier"
+            exit 0
+          fi
+
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            echo "Branche $BRANCH déjà présente sur origin (rerun du jour) — on ne recrée pas la PR."
+            exit 0
+          fi
+
+          git checkout -b "$BRANCH"
+          git commit -m "chore(bench): rapport hebdomadaire ${DATE}"
+          git push origin "$BRANCH"
+
+          PR_URL=$(gh pr create \
+            --title "chore(bench): rapport hebdomadaire ${DATE}" \
+            --body "Rapport de benchmark hebdomadaire généré automatiquement (\`_grimoire-output/bench-reports/${DATE}.md\`)." \
+            --base main \
+            --head "$BRANCH")
+          echo "pr_url=$PR_URL" >> "$GITHUB_OUTPUT"
+          echo "PR ouverte : $PR_URL"
+
+          gh pr merge --auto --squash "$PR_URL" || \
+            echo "::warning::fusion automatique non armée sur $PR_URL — à fusionner ou relancer la CI manuellement"
 
       # ── Alerte si trop de failures ────────────────────────────────────────
       - name: Alert on high failures
