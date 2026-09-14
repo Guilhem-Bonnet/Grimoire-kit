@@ -199,6 +199,131 @@ def test_backup_project_never_overwrites_a_changed_snapshot(tmp_path: Path) -> N
     assert third.tarball == second.tarball
 
 
+# ── apply / preexisting doctor baseline ──────────────────────────────────────
+
+
+def test_apply_upgrade_softens_a_preexisting_dead_reference_into_a_repair_proposal(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    """Issue #502 (second rejeu réel, troisième défaut) : trois projets réels ont vu
+    `apply` refuser sur des références périmées présentes AVANT la mise à niveau
+    (`_memory/decisions-log.md`, `.github/copilot-instructions.md`, `.claude/skills/
+    */SKILL.md`) — le projet restait « mis à niveau mais flow en échec », sans
+    proposition. Un FAIL `paths_resolve` déjà présent dans la ligne de base de
+    `preview` ne doit plus faire échouer `apply` : il devient une proposition
+    `repair`."""
+    from grimoire.proposals import list_proposals
+    from grimoire.tools.project_upgrade import apply_upgrade, preview_upgrade
+
+    root = tmp_path_factory.mktemp("upgrade-repair") / "projet"
+    root.mkdir(parents=True)
+    created = _grimoire(["init", ".", "-y", "--name", "upgrade-repair"], root)
+    if not (root / "_grimoire" / "kit").is_dir():
+        pytest.skip(f"`grimoire init` indisponible ici : {created.stderr[-400:]}")
+
+    decisions_log = root / "_grimoire" / "_memory" / "decisions-log.md"
+    decisions_log.write_text(
+        decisions_log.read_text(encoding="utf-8") + "\nVoir `_grimoire/core/config.yaml` pour l'historique.\n",
+        encoding="utf-8",
+    )
+
+    preview = preview_upgrade(root)
+    assert any("_grimoire/core/config.yaml" in ref for ref in preview.doctor_baseline), preview.doctor_baseline
+
+    result = apply_upgrade(root)
+    assert result.ok, (result.doctor_failures, result.hook.detail)
+    assert result.repairs_proposed == 1
+    assert len(result.preexisting_failures) == 1
+
+    repairs = [p for p in list_proposals(root) if p.artifact_type == "repair"]
+    assert len(repairs) == 1
+    assert "_grimoire/core/config.yaml" in repairs[0].artifact_ref
+    # No evident v3 replacement for this made-up legacy root — named honestly,
+    # never a fabricated substitution.
+    assert "pas de remplacement évident" in repairs[0].carrier_reason
+
+
+def test_apply_upgrade_still_fails_on_a_regression_not_in_the_baseline(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    """The softening is scoped to dead references the baseline already saw — a doctor
+    FAIL introduced between `preview` and `apply` (here: a routing regression, the
+    same shape as an agent retiré) still fails `apply`, exactly as before this fix."""
+    from grimoire.tools.project_upgrade import apply_upgrade, preview_upgrade
+
+    root = tmp_path_factory.mktemp("upgrade-regression") / "projet"
+    root.mkdir(parents=True)
+    created = _grimoire(["init", ".", "-y", "--name", "upgrade-regression"], root)
+    if not (root / "_grimoire" / "kit").is_dir():
+        pytest.skip(f"`grimoire init` indisponible ici : {created.stderr[-400:]}")
+
+    preview_upgrade(root)
+
+    # Introduced strictly after `preview` — never in its baseline. `up` (which
+    # `apply` runs) only regenerates the kit tier; an override it never touches.
+    ghost = root / "_grimoire" / "overrides" / "agents" / "ghost-marker.md"
+    ghost.parent.mkdir(parents=True, exist_ok=True)
+    ghost.write_text('<agent tag="ghost-after-preview" name="Fantome" role="regression"/>\n', encoding="utf-8")
+
+    result = apply_upgrade(root)
+    assert not result.ok
+    assert any("ghost-after-preview" in f for f in result.doctor_failures)
+    assert result.repairs_proposed == 0
+
+
+def test_repair_proposal_names_and_applies_an_evident_substitution(tmp_path_factory: pytest.TempPathFactory) -> None:
+    """`_grimoire/_config/archetype.dna.yaml` is exactly the shape a real project hit
+    (issue #502): a pre-boundary legacy root (`layout.LEGACY_KIT_ROOTS`) whose file now
+    lives, byte-for-byte relative path, under the kit tier — an evident substitution,
+    unlike the made-up `_grimoire/core/config.yaml` in the test above."""
+    from grimoire.proposals import accept_proposal
+    from grimoire.tools.project_upgrade import _dead_reference_strings, propose_repairs
+
+    root = tmp_path_factory.mktemp("upgrade-repair-dna") / "projet"
+    root.mkdir(parents=True)
+    created = _grimoire(["init", ".", "-y", "--name", "upgrade-repair-dna"], root)
+    if not (root / "_grimoire" / "kit" / "archetype.dna.yaml").is_file():
+        pytest.skip(f"`grimoire init` indisponible ici : {created.stderr[-400:]}")
+
+    decisions_log = root / "_grimoire" / "_memory" / "decisions-log.md"
+    decisions_log.write_text(
+        decisions_log.read_text(encoding="utf-8") + "\nVoir `_grimoire/_config/archetype.dna.yaml` pour les traits.\n",
+        encoding="utf-8",
+    )
+
+    refs = [r for r in _dead_reference_strings(root) if "_config/archetype.dna.yaml" in r]
+    assert refs, "expected the planted reference to be dead"
+
+    proposals = propose_repairs(root, refs)
+    assert len(proposals) == 1
+    assert "substitution évidente" in proposals[0].carrier_reason
+    assert "_grimoire/kit/archetype.dna.yaml" in proposals[0].carrier_reason
+
+    result = accept_proposal(root, proposals[0].slug)
+    assert result["ok"] is True, result
+
+    text = decisions_log.read_text(encoding="utf-8")
+    assert "_grimoire/kit/archetype.dna.yaml" in text
+    assert "_grimoire/_config/archetype.dna.yaml" not in text
+
+
+def test_accept_repair_refuses_without_an_evident_substitution(upgrade_project: Path) -> None:
+    """`accept_proposal` never guesses a fix `propose_repairs` did not itself name."""
+    from grimoire.proposals import accept_proposal, create_manual_proposal
+
+    proposal = create_manual_proposal(
+        upgrade_project,
+        slug="repair-no-evident-substitution",
+        specialty="référence périmée : test",
+        artifact_type="repair",
+        carrier_reason="pas de remplacement évident pour _grimoire/core/config.yaml — revue humaine",
+        artifact_ref="_grimoire/_memory/decisions-log.md:1 → _grimoire/core/config.yaml",
+    )
+    result = accept_proposal(upgrade_project, proposal.slug)
+    assert result["ok"] is False
+    assert "revue humaine" in result["error"] or "substitution" in result["error"]
+
+
 # ── orphans ───────────────────────────────────────────────────────────────────
 
 
@@ -574,6 +699,62 @@ def test_probe_hook_reports_ok_on_a_healthy_project(upgrade_project: Path) -> No
 
     result = probe_hook(upgrade_project)
     assert result.ok, result.detail
+
+
+def test_hook_reports_failure_is_not_fooled_by_the_word_in_a_memory_recall() -> None:
+    """Issue #502 (second rejeu réel) : TTS-Voice, un rappel de tâche mémoire nommant
+    une erreur passée dans son texte, hook parfaitement sain. `probe_hook` cherchait
+    "erreur"/"error" n'importe où dans le rendu JSON — un faux positif systématique
+    pour tout projet dont la mémoire mentionne le mot."""
+    from grimoire.tools.project_upgrade import _hook_reports_failure
+
+    payload = {
+        "hookSpecificOutput": {
+            "hookEventName": "SessionStart",
+            "additionalContext": (
+                "[Grimoire — rappel de tâche]\n"
+                "Dernière décision : une erreur de configuration avait été corrigée "
+                "la semaine dernière, ne pas la réintroduire.\n"
+                "[Grimoire — directive]\nSuis le standard agentique."
+            ),
+        }
+    }
+    assert _hook_reports_failure(payload) is False
+
+
+def test_hook_reports_failure_catches_the_runtime_marker() -> None:
+    """Le marqueur exact que `hosts/decisions/__init__.py::_failed_decision` émet
+    quand une décision plante — au début d'un bloc, jamais une sous-chaîne libre."""
+    from grimoire.tools.project_upgrade import _hook_reports_failure
+
+    payload = {
+        "hookSpecificOutput": {
+            "hookEventName": "SessionStart",
+            "additionalContext": "[Grimoire] hook session_start en erreur, session non bloquée : ValueError: boom",
+        }
+    }
+    assert _hook_reports_failure(payload) is True
+
+
+def test_hook_reports_failure_catches_a_top_level_error_key() -> None:
+    from grimoire.tools.project_upgrade import _hook_reports_failure
+
+    assert _hook_reports_failure({"error": "hook non exécutable"}) is True
+
+
+def test_hook_reports_failure_ignores_the_marker_mid_sentence() -> None:
+    """La forme exacte compte : une phrase qui *parle* du marqueur sans l'émettre
+    en tête de bloc n'est pas un déclencheur — jamais une recherche libre."""
+    from grimoire.tools.project_upgrade import _hook_reports_failure
+
+    payload = {
+        "hookSpecificOutput": {
+            "additionalContext": "Note : le message \"[Grimoire] hook x en erreur\" apparaît dans la doc.",
+        }
+    }
+    # Le marqueur doit être en début de ligne — ici il suit "Note : le message \"",
+    # donc pas au début d'un bloc.
+    assert _hook_reports_failure(payload) is False
 
 
 # ── blueprint structure ───────────────────────────────────────────────────────

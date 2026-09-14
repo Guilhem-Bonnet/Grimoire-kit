@@ -849,6 +849,7 @@ def accept_proposal(project_root: Path, slug: str) -> dict[str, Any]:
         "override-migration": _accept_override_migration,
         "memory-link": _accept_memory_link,
         "needs-hosts": _accept_needs_hosts,
+        "repair": _accept_repair,
     }
     accept_fn = accept_by_type.get(proposal.artifact_type, _accept_agent)
 
@@ -1003,6 +1004,67 @@ def _accept_memory_link(project_root: Path, proposal: Proposal) -> dict[str, Any
         "artifact_type": "memory-link",
         "path": str(override_path),
         "attached_to": proposal.target_agent,
+    }
+
+
+#: ``carrier_reason`` prefix :func:`grimoire.tools.project_upgrade.
+#: propose_repairs` writes when :func:`~grimoire.tools.project_upgrade.
+#: _suggest_repair_substitution` found an evident v3 replacement — the only
+#: shape :func:`_accept_repair` ever applies.
+_REPAIR_SUBSTITUTION_RE = re.compile(r"^substitution évidente : (?P<old>.+) -> (?P<new>.+)$")
+
+
+def _accept_repair(project_root: Path, proposal: Proposal) -> dict[str, Any]:
+    """Apply a ``"repair"`` proposal (issue #502): substitute a stale path reference.
+
+    Only ever the exact substitution :func:`grimoire.tools.project_upgrade.
+    propose_repairs` itself named in ``carrier_reason`` — never a guess made
+    here. A proposal with no evident substitution (``carrier_reason`` says so
+    plainly) refuses: there is nothing safe to write, the fix is a human's to
+    make. Rewrites only the cited line of the cited file, and only that one
+    occurrence of the dead target on it — never every occurrence in the file,
+    which could touch text the citing line has nothing to do with.
+    """
+    if not proposal.artifact_ref:
+        raise RuntimeError("proposition sans référence à corriger (artifact_ref vide)")
+    match = _REPAIR_SUBSTITUTION_RE.match(proposal.carrier_reason)
+    if match is None:
+        raise RuntimeError(
+            f"aucune substitution évidente pour cette référence — revue humaine requise "
+            f"({proposal.carrier_reason or 'motif absent'})"
+        )
+    old, new = match.group("old"), match.group("new")
+
+    source, _, rest = proposal.artifact_ref.partition(":")
+    line_str, sep, _target_shown = rest.partition(" → ")
+    if not sep:
+        raise RuntimeError(f"référence illisible : {proposal.artifact_ref!r}")
+    try:
+        line_no = int(line_str)
+    except ValueError as exc:
+        raise RuntimeError(f"numéro de ligne illisible : {line_str!r}") from exc
+
+    root = project_root.resolve()
+    path = root / source
+    if not path.is_file():
+        raise RuntimeError(f"fichier citant introuvable : {source}")
+
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    if not (1 <= line_no <= len(lines)):
+        raise RuntimeError(f"ligne {line_no} hors bornes dans {source} ({len(lines)} ligne(s))")
+    target_line = lines[line_no - 1]
+    if old not in target_line:
+        raise RuntimeError(f"{old!r} introuvable à la ligne {line_no} de {source} — le fichier a changé depuis")
+    lines[line_no - 1] = target_line.replace(old, new, 1)
+    path.write_text("".join(lines), encoding="utf-8")
+
+    return {
+        "status": "repaired",
+        "artifact_type": "repair",
+        "path": str(path),
+        "line": line_no,
+        "old": old,
+        "new": new,
     }
 
 
