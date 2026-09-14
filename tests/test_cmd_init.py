@@ -359,6 +359,32 @@ class TestInitNoCockpit:
         registered = json.loads(simulated_real_home.read_text(encoding="utf-8"))
         assert any(p.get("path") == str(target) for p in registered)
 
+    def test_init_under_the_temp_root_is_never_auto_enrolled(
+        self, runner, app, simulated_real_home: Path,
+    ) -> None:
+        """Régression #492 / 2026-09-14 : un `init` jeté à même la racine
+        temporaire (le motif exact des entrées `probe` et `x`/`x-2`…`x-7`
+        trouvées au registre réel) ne doit jamais s'auto-enrôler, même sans
+        `--no-cockpit` ni `GRIMOIRE_NO_COCKPIT` — contrairement à
+        `test_init_without_the_flag_still_enrols`, qui prouve que l'enrôlement
+        marche toujours pour un projet ordinaire."""
+        import shutil
+        import tempfile
+
+        before = simulated_real_home.read_bytes()
+        # `mkdtemp()` direct, comme le smoke test manuel qui a produit
+        # l'incident — pas `tmp_path` (isolé, plusieurs niveaux plus bas).
+        scratch_root = Path(tempfile.mkdtemp())
+        target = scratch_root / "x"
+        try:
+            result = runner.invoke(app, ["-y", "init", str(target)])
+
+            assert result.exit_code == 0, result.output
+            assert simulated_real_home.read_bytes() == before
+            assert "Cockpit local" not in result.output
+        finally:
+            shutil.rmtree(scratch_root, ignore_errors=True)
+
     def test_init_no_cockpit_documented_in_help(self, app) -> None:
         """The option exists on the command, and the env var is documented
         alongside it — checked on the declared parameters and the raw

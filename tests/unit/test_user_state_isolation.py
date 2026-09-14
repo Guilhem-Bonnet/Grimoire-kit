@@ -84,6 +84,47 @@ class TestCockpitRegistry:
         assert any(entry["path"] == str(project.resolve()) for entry in isolated)
 
 
+class TestScratchPathGuard:
+    """`is_scratch_path` — le garde qui empêche `init`/`up` d'enrôler
+    automatiquement un dossier jeté à même la racine temporaire du système.
+
+    Régression (#492, puis sept entrées `x`/`x-2`…`x-7` trouvées le
+    2026-09-14) : le registre réel de la machine contenait des chemins
+    `/tmp/tmpXXXXXXXX/…` disparus, issus d'un `grimoire init` manuel (smoke
+    test, session d'un agent) jamais destiné à durer.
+    """
+
+    @pytest.mark.parametrize(
+        "raw",
+        ["/tmp/tmp17ux703o/projet", "/tmp/tmpd_9_ifjk/p", "/tmp/probe"],
+    )
+    def test_a_directory_dropped_straight_under_the_temp_root_is_scratch(
+        self, raw: str, tmp_path_factory: pytest.TempPathFactory,
+    ) -> None:
+        # Recrée la forme exacte (mkdtemp direct, 1 ou 2 niveaux sous /tmp) sans
+        # dépendre de ce que vaut /tmp sur la machine qui lance la suite.
+        import tempfile
+
+        tmp_root = Path(tempfile.gettempdir()).resolve()
+        candidate = tmp_root / Path(raw).relative_to("/tmp")
+        candidate.mkdir(parents=True, exist_ok=True)
+        assert project_registry.is_scratch_path(candidate) is True
+
+    def test_pytest_own_tmp_path_is_never_mistaken_for_scratch(self, tmp_path: Path) -> None:
+        """Le `tmp_path` isolé de pytest vit toujours ≥3 niveaux sous la racine
+        temporaire (`pytest-of-<user>/pytest-<n>/<test>0/…`) — jamais confondu
+        avec un scratch manuel, sous peine de casser l'enrôlement de tout
+        projet de test légitime."""
+        project = tmp_path / "un-vrai-projet-de-test"
+        project.mkdir()
+        assert project_registry.is_scratch_path(project) is False
+
+    def test_the_temp_root_itself_is_scratch(self) -> None:
+        import tempfile
+
+        assert project_registry.is_scratch_path(Path(tempfile.gettempdir())) is True
+
+
 class TestSharedMemory:
     def test_promoting_never_touches_the_real_shared_store(self, real_home: Path) -> None:
         """La mémoire transverse écrit dans le store isolé, jamais dans le vrai.
