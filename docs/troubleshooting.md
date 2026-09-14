@@ -290,6 +290,8 @@ bash grimoire-init.sh bench --report
 
 `bench` analyse les fichiers dans `_grimoire-output/bench-sessions/`. Si ce dossier est vide, le rapport affichera "Données insuffisantes" — c'est normal pour une installation fraîche.
 
+Le rapport hebdomadaire publié automatiquement par la CI (workflow « Grimoire Weekly Benchmark ») ne vit pas sur `main` : il est poussé chaque semaine sur la branche dédiée [`bench-reports`](https://github.com/Guilhem-Bonnet/Grimoire-kit/tree/bench-reports/_grimoire-output/bench-reports), jamais fusionnée.
+
 <img src="../assets/divider.svg" width="100%" alt="">
 
 ## <img src="../assets/icons/cognition.svg" width="28" height="28" alt=""> 14. Rate limit Copilot — « exhausted this model's rate limit »
