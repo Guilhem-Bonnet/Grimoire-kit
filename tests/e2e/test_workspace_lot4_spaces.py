@@ -289,7 +289,13 @@ def test_ouvrir_ce_projet_reste_sur_l_ecran_projet_sans_recharger(
 
         page.evaluate("() => { window.__e2eMarker = 'still-here'; }")
         open_button.click()
-        page.wait_for_timeout(500)
+
+        # La fiche se redessine de façon asynchrone (`loadSheet` refait un
+        # aller-retour réseau) : attendre le bouton plutôt qu'un délai fixe,
+        # sous peine de flake en CI où ce montage prend plus de temps qu'en
+        # local.
+        update_button = page.locator("button", has_text="Mettre à jour")
+        update_button.wait_for(state="visible", timeout=15_000)
 
         assert page.evaluate("() => window.__e2eMarker") == "still-here", (
             "un rechargement complet du document a eu lieu — le marqueur JS ne survit pas à ça"
@@ -297,7 +303,6 @@ def test_ouvrir_ce_projet_reste_sur_l_ecran_projet_sans_recharger(
         assert page.locator('#zoom-seg button[data-value="projet"]').get_attribute("aria-pressed") == "true", (
             "le zoom doit rester sur Projet, pas retomber sur Flotte"
         )
-        assert page.locator("button", has_text="Mettre à jour").is_visible()
     finally:
         context.close()
 
