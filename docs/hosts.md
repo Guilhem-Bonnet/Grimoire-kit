@@ -303,6 +303,23 @@ permettent de lever le blocage. L'exemption est codée en dur (pas une clé de
 configuration désactivable), mirée à l'identique en Rust, et ne compte pas
 dans les compteurs de la règle qu'elle contourne. Sans elle, un budget global
 en `block` pouvait refuser jusqu'à l'édition du fichier qui le portait.
+S'applique aux quatre dimensions de `per_session` alike
+(`max_tool_calls`/`max_writes`/`max_cost_usd`/`max_duration_min`) : c'est le
+même appel qui les protège toutes.
+
+Rechute constatée le 2026-09-14 sur Grimoire-Forge (#481) : l'exemption
+couvrait déjà tout appel non mutant et l'édition des deux fichiers ci-dessus,
+mais pas **la commande de remise à zéro elle-même**. `grimoire policies
+reset-session` est un appel `Bash` dont le premier mot (`grimoire`) n'est
+reconnu ni lecture seule (`is_read_only_command`) ni comme ciblant l'un des
+deux fichiers exemptés — sa ligne de commande, pas un chemin. Résultat :
+une session dont la durée avait dépassé `max_duration_min` refusait la
+commande que son propre message de refus recommandait. Corrigé en
+reconnaissant l'invocation de `grimoire policies` (peu importe le
+sous-verbe — `status` ou `reset-session`), dans ses trois formes documentées
+(`grimoire policies …`, `<venv>/bin/grimoire policies …`, `python -m
+grimoire policies …`), sans élargir l'exemption à toute commande qui se
+contente de la *nommer* (`echo grimoire policies …` reste refusé).
 
 **Sous-agents.** Le payload de hook de Claude Code envoie le même
 `session_id` pour un appel d'outil fait par un sous-agent (son outil `Task`)
@@ -322,6 +339,21 @@ de réparation mise à part. Ce n'est jamais un `FAIL` — un projet peut
 l'assumer — mais ce n'est plus silencieux. L'exemple ci-dessus utilise
 délibérément `warn` plutôt que `block` ; un budget en `block` doit cibler un
 `tool_pattern` précis (`Bash(rm:*)`, `Write`…), jamais `*`.
+
+**`max_duration_min` mesure depuis `SessionStart`, pas depuis le dernier
+appel.** Le compteur part de `started_at` (l'horodatage de la première
+initialisation de l'état de session, voir "État de session" ci-dessus) et ne
+se réinitialise jamais tout seul — ni sur une pause, ni sur une nuit, ni sur
+un week-end. Une session Claude Code peut rester ouverte plusieurs jours
+(reprise d'une tâche en pause, session longue laissée en arrière-plan) : une
+fenêtre qui paraît généreuse en heures de travail réelles (24h, `1440`) est
+en pratique dépassée par la seule durée écoulée, pas par l'activité. Depuis
+le 2026-09-14 (#481), `grimoire doctor` signale (`WARN`,
+`policy_budget_duration_guard`, au même endroit que `policy_budget_guard`
+ci-dessus) toute règle `per_session` sans `tool_pattern` en
+`verdict_on_match: block` dont `max_duration_min` est inférieur à `2880`
+(48h) — le seuil en-deçà duquel une session multi-jours franchit la fenêtre
+sans qu'aucune vraie dérive ne se soit produite.
 
 `require_approval` ne se marque **jamais** approuvée depuis `PreToolUse` :
 demander (`ask`) n'est pas une preuve que l'humain a dit oui, donc rien dans
@@ -349,8 +381,10 @@ neuve (voir plus haut), c'est suffisant pour lever un blocage sans attendre
 une session neuve. Le message de refus d'un budget nomme systématiquement
 cette commande et le fichier de règles :
 `"... ; grimoire policies reset-session ou relever per_session dans
-_grimoire/standard/policies.yaml"`. Le cockpit n'a pas de vue équivalente
-pour l'instant.
+_grimoire/standard/policies.yaml"`. Cette recommandation est elle-même
+couverte par l'exemption de réparation ("Exemption de réparation"
+ci-dessus) : un refus ne nomme jamais une commande qu'il refuserait
+lui-même. Le cockpit n'a pas de vue équivalente pour l'instant.
 
 ## Coût des hooks
 

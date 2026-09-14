@@ -34,6 +34,7 @@ both backends — only the decision crosses into Rust.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -167,19 +168,71 @@ _BUDGET_REMEDY_SUFFIX = (
 )
 
 
+def _looks_like_grimoire_policies_command(tool_detail: str) -> bool:
+    """Whether *tool_detail* is a ``Bash`` invocation of ``grimoire policies ...``.
+
+    Relapse of the 2026-09-12 session-budget incident, found 2026-09-14 on
+    Grimoire-Forge (issue #481): ``grimoire policies reset-session`` — the
+    very command every budget-block reason recommends
+    (:data:`_BUDGET_REMEDY_SUFFIX`) — is itself a ``Bash`` call whose first
+    word (``grimoire``) is not one of :data:`~grimoire.hosts.decisions.tool_facts._READ_ONLY_LEADING_COMMANDS`,
+    so :func:`~grimoire.hosts.decisions.tool_facts.is_read_only_command`
+    classifies it as a mutation, and its command line never matches
+    :data:`_REPAIR_EXEMPT_DETAIL_PATTERNS` (those are file-path globs, not
+    command lines). A refusal that recommends an action the same refusal
+    then refuses is a broken remedy, not a narrower one — this closes that
+    gap without widening the exemption to every ``Bash`` call: only the
+    invocation shape of ``grimoire policies`` itself.
+
+    Recognises every shape seen in practice by looking only at the *first*
+    word of each shell segment (split on ``&&``/``||``/``;``/``|``, the same
+    boundary :func:`~grimoire.hosts.decisions.tool_facts.is_read_only_command`
+    uses) — never a bare substring search: ``echo grimoire policies`` must
+    stay refused, since it never invokes the command, only names it. The
+    recognised first-word shapes are the bare command (``grimoire policies
+    reset-session``), through a virtualenv's ``bin/`` (``/path/.venv/bin/grimoire
+    policies status``), and via the module runner (``python -m grimoire
+    policies reset-session``, ``python3 -m grimoire policies status``). The
+    subcommand itself is never checked — ``status`` and ``reset-session``
+    are the only two documented (``docs/hosts.md``, "Visibilité et remise à
+    zéro"), and both are either read-only or self-limiting to the session's
+    own state file, never a route to anything this exemption should guard
+    against.
+    """
+    for segment in re.split(r"&&|\|\||;|\|", tool_detail):
+        tokens = segment.split()
+        if not tokens:
+            continue
+        basename = tokens[0].rsplit("/", 1)[-1]
+        if basename == "grimoire" and tokens[1:2] == ["policies"]:
+            return True
+        if basename in ("python", "python3") and tokens[1:4] == ["-m", "grimoire", "policies"]:
+            return True
+    return False
+
+
 def _is_repair_exempt(is_write: bool, tool_detail: str) -> bool:
     """Whether this call must always be let through a ``block``-ing ``per_session`` budget.
 
     True for any non-mutating call (``Read``/``Glob``/``Grep``, or — once
     defect 1's fix in :mod:`grimoire.hosts.decisions.tool_facts` classifies
     it correctly — a read-only ``Bash`` call like ``cat``/``grep``/``git
-    status``) and for a mutating call that targets the policy rule file or
-    the session-state file itself. Never for anything else: the exemption is
-    named and narrow, not a general escape hatch for a stuck session.
+    status``), for a mutating call that targets the policy rule file or the
+    session-state file itself, and — since the 2026-09-14 relapse (issue
+    #481) — for any invocation of ``grimoire policies`` (``status``,
+    ``reset-session``) regardless of how it is classified, since that
+    command is the documented way out of exactly this block. Applies to
+    every ``per_session`` dimension alike (``max_tool_calls``,
+    ``max_writes``, ``max_cost_usd``, ``max_duration_min``) — this function
+    is the single gate every one of them calls before refusing. Never for
+    anything else: the exemption is named and narrow, not a general escape
+    hatch for a stuck session.
     """
     if not is_write:
         return True
-    return any(glob_match(pattern, tool_detail) for pattern in _REPAIR_EXEMPT_DETAIL_PATTERNS)
+    if any(glob_match(pattern, tool_detail) for pattern in _REPAIR_EXEMPT_DETAIL_PATTERNS):
+        return True
+    return _looks_like_grimoire_policies_command(tool_detail)
 
 
 @dataclass(frozen=True, slots=True)

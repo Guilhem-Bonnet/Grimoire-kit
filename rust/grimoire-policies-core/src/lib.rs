@@ -344,13 +344,77 @@ const REPAIR_EXEMPTION_REASON: &str =
 const BUDGET_REMEDY_SUFFIX: &str =
     " ; `grimoire policies reset-session` ou relever `per_session` dans `_grimoire/standard/policies.yaml`";
 
+/// Rechute du 2026-09-14 (issue #481), constatee sur Grimoire-Forge : miroir
+/// exact de `grimoire.policies.temporal._looks_like_grimoire_policies_command`
+/// — voir sa docstring pour le defaut corrige. `grimoire policies
+/// reset-session`, la commande que `BUDGET_REMEDY_SUFFIX` recommande
+/// elle-meme, est un appel `Bash` dont le premier mot (`grimoire`) n'est
+/// jamais reconnu lecture seule et dont la ligne de commande ne correspond a
+/// aucun motif de `REPAIR_EXEMPT_DETAIL_PATTERNS` (des globs de chemin, pas
+/// des lignes de commande) : sans ce cas, le remede recommande par le refus
+/// etait lui-meme refuse.
+///
+/// Decoupe une ligne de commande shell aux memes frontieres que
+/// `grimoire.hosts.decisions.tool_facts.is_read_only_command` et que la
+/// fonction Python miroir : `&&`, `||`, `;`, `|`. Pas de dependance
+/// `regex` dans ce crate (voir `glob_match` ci-dessus, deja ecrit a la
+/// main) : `&&`/`||` sont retires d'abord, en deux passes, puisqu'ils
+/// contiennent chacun un caractere `|` ou `&` qui serait sinon coupe au
+/// milieu.
+fn split_shell_segments(command: &str) -> Vec<&str> {
+    let mut segments: Vec<&str> = vec![command];
+    for sep in ["&&", "||"] {
+        segments = segments.into_iter().flat_map(|s| s.split(sep)).collect();
+    }
+    segments
+        .into_iter()
+        .flat_map(|s| s.split(|c: char| c == ';' || c == '|'))
+        .collect()
+}
+
+/// Reconnait trois formes en n'inspectant que le *premier* mot de chaque
+/// segment (voir `split_shell_segments`) — jamais une recherche de
+/// sous-chaine : `echo grimoire policies` reste refuse, car il ne fait
+/// qu'en nommer le texte, jamais l'invoquer. La commande nue (`grimoire
+/// policies reset-session`), via le `bin/` d'un virtualenv
+/// (`/chemin/.venv/bin/grimoire policies status`), et via le lanceur de
+/// module (`python -m grimoire policies reset-session`, `python3 -m
+/// grimoire policies status`). Le sous-nom n'est jamais verifie : seuls
+/// `status` et `reset-session` sont documentes (`docs/hosts.md`), et les
+/// deux sont soit lecture seule, soit limites au seul fichier d'etat de la
+/// session.
+fn looks_like_grimoire_policies_command(tool_detail: &str) -> bool {
+    for segment in split_shell_segments(tool_detail) {
+        let tokens: Vec<&str> = segment.split_whitespace().collect();
+        if tokens.is_empty() {
+            continue;
+        }
+        let basename = tokens[0].rsplit('/').next().unwrap_or(tokens[0]);
+        if basename == "grimoire" && tokens.get(1) == Some(&"policies") {
+            return true;
+        }
+        if (basename == "python" || basename == "python3")
+            && tokens.get(1) == Some(&"-m")
+            && tokens.get(2) == Some(&"grimoire")
+            && tokens.get(3) == Some(&"policies")
+        {
+            return true;
+        }
+    }
+    false
+}
+
 fn is_repair_exempt(is_write: bool, tool_detail: &str) -> bool {
     if !is_write {
         return true;
     }
-    REPAIR_EXEMPT_DETAIL_PATTERNS
+    if REPAIR_EXEMPT_DETAIL_PATTERNS
         .iter()
         .any(|pattern| glob_match(pattern, tool_detail))
+    {
+        return true;
+    }
+    looks_like_grimoire_policies_command(tool_detail)
 }
 
 /// Miroir de la partie temporelle de `grimoire.policies.schemas.PolicyRule` :
@@ -1410,5 +1474,32 @@ mod temporal_tests {
             "_grimoire-output/.runs/session-abc123.json"
         ));
         assert!(is_repair_exempt(false, ""));
+    }
+
+    /// Rechute #481 : `grimoire policies reset-session`, dans chacune de ses
+    /// trois formes documentees, est exempte quelle que soit sa
+    /// classification en ecriture — c'est le remede que le refus recommande
+    /// lui-meme (`BUDGET_REMEDY_SUFFIX`).
+    #[test]
+    fn grimoire_policies_command_is_exempt_in_every_invocation_shape() {
+        assert!(is_repair_exempt(true, "grimoire policies reset-session"));
+        assert!(is_repair_exempt(true, "grimoire policies status"));
+        assert!(is_repair_exempt(
+            true,
+            "/home/u/.venv/bin/grimoire policies reset-session"
+        ));
+        assert!(is_repair_exempt(
+            true,
+            "python -m grimoire policies reset-session"
+        ));
+        assert!(is_repair_exempt(
+            true,
+            "python3 -m grimoire policies status"
+        ));
+        // An unrelated command mentioning "grimoire" as data, or a bare
+        // "grimoire" without "policies", stays refused — the exemption is
+        // the invocation shape, not the substring.
+        assert!(!is_repair_exempt(true, "echo grimoire policies"));
+        assert!(!is_repair_exempt(true, "grimoire standard verify"));
     }
 }

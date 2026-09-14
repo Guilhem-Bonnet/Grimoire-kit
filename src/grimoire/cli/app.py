@@ -533,6 +533,43 @@ def doctor(
                     detail="Aucun budget de session globalement bloquant.",
                 )
 
+            # Relapse of the 2026-09-12 incident, found 2026-09-14 on
+            # Grimoire-Forge (issue #481): `max_duration_min` measures the
+            # duration since `SessionStart`, not "time actually spent
+            # working" — a Claude Code session left open for a few days
+            # (weekends, a paused task) crosses even a generous-looking
+            # window long before any real runaway. 2880 min (48h) is the
+            # threshold below which that is a live risk for a `block`
+            # verdict with no `tool_pattern` to narrow its blast radius; the
+            # repair exemption (`grimoire.policies.temporal._is_repair_exempt`)
+            # limits the damage but a project should still see this named,
+            # exactly like `blocking_global` above.
+            short_duration_global = [
+                r.id
+                for r in budget_rules
+                if r.tool_pattern == "*"
+                and r.verdict_on_match is _VerdictKind.BLOCK
+                and r.per_session is not None
+                and r.per_session.max_duration_min is not None
+                and r.per_session.max_duration_min < 2880
+            ]
+            if short_duration_global:
+                duration_detail = (
+                    f"fenêtre de durée courte ({', '.join(short_duration_global)}) : `max_duration_min` "
+                    "< 2880 (48h) sans `tool_pattern`, en `verdict_on_match: block` — une session Claude "
+                    "Code laissée ouverte plusieurs jours dépasse cette fenêtre bien avant toute vraie "
+                    "dérive (voir docs/hosts.md)"
+                )
+                duration_entry: dict[str, Any] = {
+                    "name": "policy_budget_duration_guard",
+                    "passed": True,
+                    "detail": duration_detail,
+                    "level": "warn",
+                }
+                results.append(duration_entry)
+                if fmt != "json":
+                    console.print(f"  [yellow]WARN[/yellow]  {duration_detail}")
+
     # 5. Config semantic validation
     if cfg:
         warnings = cfg.validate()
