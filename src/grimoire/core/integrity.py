@@ -273,6 +273,78 @@ def installed_agent_tags(project_root: Path) -> set[str]:
     return set(layout.installed_agents(project_root))
 
 
+#: Per-host agent directories a managed projection can live under, mirroring
+#: ``tools.project_upgrade._HOST_AGENT_DIRS`` — not imported from there to
+#: avoid a doctor → upgrade-flow import for what is otherwise a leaf reader.
+_HOST_AGENT_DIRS: tuple[tuple[str, str], ...] = (
+    (".claude/agents", ".md"),
+    (".cursor/agents", ".md"),
+    (".codex/agents", ".md"),
+    (".gemini/agents", ".md"),
+    (".github/agents", ".agent.md"),
+)
+
+
+def referenced_agent_names(project_root: Path) -> set[str]:
+    """Agent names the project's own records claim to have installed.
+
+    Two sources, neither of them "who is installed" (that is
+    :func:`installed_agent_tags`) — both are *claims*, made when the agent
+    was last written, that can go stale the moment its source file moves or
+    is deleted without either record being updated:
+
+    - ``_grimoire/kit/agent-manifest.csv``, written by the scaffolder on
+      every ``up``/``init``;
+    - any managed per-host projection (``.claude/agents/<name>.md``,
+      ``.github/agents/<name>.agent.md``, …) still carrying the kit's
+      ``grimoire:managed`` marker.
+
+    A second real upgrade-flow rejeu (three projects, 2026-09-14) found
+    ``grimoire doctor`` reporting 25/25 on a project whose manifest still
+    named 13 agents an earlier, buggy orphan-archiving pass had just moved
+    out from under it — nothing here compared the manifest or the host
+    projections against what was actually left on disk.
+    """
+    names: set[str] = set()
+
+    manifest = project_root / layout.KIT_DIR / "agent-manifest.csv"
+    if manifest.is_file():
+        try:
+            lines = manifest.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            lines = []
+        for line in lines[1:]:  # skip the "name,file,category,description,icon" header
+            if not line.strip():
+                continue
+            name = line.split(",", 1)[0].strip()
+            if name:
+                names.add(name)
+
+    for tree, suffix in _HOST_AGENT_DIRS:
+        directory = project_root / tree
+        if not directory.is_dir():
+            continue
+        for path in directory.glob(f"*{suffix}"):
+            if not path.is_file() or not _is_managed(path):
+                continue
+            names.add(path.name[: -len(suffix)])
+
+    return names
+
+
+def missing_referenced_agents(project_root: Path) -> list[str]:
+    """Names :func:`referenced_agent_names` claims are installed, but are not.
+
+    Deliberately does not require ``has_kit_tier`` on its own — callers that
+    care about scope (:func:`integrity_checks`) already gate on it — so it
+    stays a plain, composable fact about the two record sources vs. disk.
+    """
+    referenced = referenced_agent_names(project_root)
+    if not referenced:
+        return []
+    return sorted(referenced - installed_agent_tags(project_root))
+
+
 def roster_incoherences(project_root: Path) -> RosterReport:
     """Compare every routing map in the project against the installed roster."""
     report = RosterReport()
@@ -332,5 +404,19 @@ def integrity_checks(project_root: Path) -> list[tuple[str, bool, str]]:
         records.append((
             "roster_coherent", True,
             f"carte de routage cohérente avec le manifeste ({roster.maps_found} carte(s))",
+        ))
+
+    missing = missing_referenced_agents(project_root)
+    if missing:
+        shown = ", ".join(missing[:5])
+        more = f" (+{len(missing) - 5})" if len(missing) > 5 else ""
+        records.append((
+            "agents_referenced", False,
+            f"{len(missing)} agent(s) référencé(s) mais absent(s) (manifeste ou projection hôte) : {shown}{more}",
+        ))
+    elif referenced_agent_names(project_root):
+        records.append((
+            "agents_referenced", True,
+            "tous les agents référencés (manifeste, projections hôte) sont installés",
         ))
     return records

@@ -1137,6 +1137,14 @@ class ProjectScaffolder:
         for fc in p.copies:
             if not _is_agent_markdown(fc.dst):
                 continue
+            # The blank `custom-agent.md` template ships with an unrendered
+            # `name: "{{agent_tag}}"` — not yet an agent (see `layout.
+            # agent_identity`'s docstring). Listing it anyway made the
+            # manifest name an install that never existed, and a doctor
+            # check comparing the manifest against disk (issue #490, second
+            # rejeu réel) flagged every single project for it.
+            if self._agent_identity(fc.src) is None:
+                continue
             name = fc.dst.stem
             category = fc.label.split("/")[0] if fc.label and "/" in fc.label else "—"
             desc = self._extract_agent_description(fc.src).replace(",", ";").replace("'", "''")
