@@ -174,6 +174,12 @@ export const api = {
   // qui fondent chaque proposition (spécialité, catégorie, agent de repli,
   // compte). Écritures via `proposalAction`, jamais silencieuses.
   proposals: (project) => get(WS + 'proposals', project ? { project } : undefined),
+  // Agrégation mémoire multi-projets (#172, dernier volet de « du générateur
+  // statique au portefeuille actif ») : `projects` vaut 'all', une liste
+  // 'slug1,slug2', ou est omis pour « ce projet » seul — jamais toute la
+  // flotte par défaut. Lecture seule, aucune fusion de stores.
+  memoryOverview: (projects) => get(WS + 'memory/overview', projects ? { projects } : undefined),
+  memorySearch: (q, projects) => get(WS + 'memory/search', projects ? { q, projects } : { q }),
 
   // ── Blueprints : éditeur de graphe (édition — atelier seulement) ───────────
   // Lecture, validation et simulation sont disponibles sur les deux hôtes

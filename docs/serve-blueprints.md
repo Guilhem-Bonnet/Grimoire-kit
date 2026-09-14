@@ -87,6 +87,24 @@ lancé aucun agent a un observatoire vide, et le dit — afficher des traces
 inventées horodatées à l'instant serait pire. La chip **données** du tableau de
 bord montre l'état de la couche ; un clic la régénère.
 
+### Mémoire multi-projets
+
+`memory_link_status()` reste mono-projet ; l'espace Mémoire de la vue de
+travail ajoute un onglet **Flotte** qui agrège côté serveur, sans écriture ni
+fusion de stores (issue #172, dernier volet de « du générateur statique au
+portefeuille actif ») :
+
+- le zoom du docbar bascule entre « Ce projet » et « Tous les projets » —
+  sans `projects=`, la réponse ne porte que le projet déjà servi ;
+- le tableau agrégé montre, par projet du registre, backend configuré et
+  résolu, nombre d'entrées, dernière écriture et état de l'index lexical
+  (primaire, compagnon d'une fusion hybride, ou absent) ; un projet illisible
+  apparaît avec sa raison, jamais comme un store vide ;
+- la recherche croisée interroge la même chaîne que `grimoire memory search`
+  pour chaque projet sélectionné et fusionne uniquement la LISTE des
+  résultats, étiquetés par leur projet d'origine — jamais leur contenu ;
+  cliquer un résultat l'ouvre dans le panneau d'inspection.
+
 ## Le board (espace Exécuter)
 
 `kanban.html` reste servi comme vitrine statique (lecture du JSON plat du
@@ -194,6 +212,8 @@ bindings du blueprint.
 | `GET /api/data/status` · `POST /api/data/refresh` | État et régénération de la couche de données du projet servi |
 | `GET /api/health` | Alignement kit, flows composés, exécutions en vol et activité réelle du projet |
 | `POST /api/projects/update` | `grimoire up` sur le projet — aperçu par défaut, écriture sur `confirm: true` |
+| `GET /api/workspace/memory/overview?projects=all\|<slugs>` | Agrégation mémoire multi-projets (#172) : backend, entrées, dernière écriture, index lexical, par projet du registre |
+| `GET /api/workspace/memory/search?q=…&projects=…` | Recherche croisée en lecture seule — même moteur que `grimoire memory search`, résultats étiquetés par projet, jamais fusionnés |
 
 Le bloc `behavior` de `GET /api/stigmergy` porte les métriques de promotion
 beta→stable et la thèse qu'elles testent (QUA-13, mesure-sans-hypothèse) :
