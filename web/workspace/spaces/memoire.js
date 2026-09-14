@@ -16,7 +16,15 @@
 // accès direct qui casserait sur l'absence (le `graph_stats` de l'observatoire
 // hérité).
 //
-// API consommées : api.memoryStatus().
+// Onglet Flotte (#172, dernier volet de « du générateur statique au
+// portefeuille actif ») : l'agrégation mémoire multi-projets que
+// `memory_link_status()` ne porte pas (mono-projet). Le sélecteur Zoom du
+// docbar (déjà utilisé par Piloter et Concevoir) porte « Ce projet / Tous les
+// projets » ; le tableau et la recherche croisée sont propres à cet onglet et
+// ne s'affichent que là.
+//
+// API consommées : api.memoryStatus(), api.memoryOverview(projects),
+// api.memorySearch(q, projects).
 
 const STYLE_ID = 'me-styles';
 
@@ -39,6 +47,14 @@ function injectStyles() {
     .me-table th { text-align: left; font-size: var(--t-min); color: var(--ink3); font-weight: 500; padding: 8px; border-bottom: 1px solid var(--line); }
     .me-table td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
     .me-arch p { max-width: 640px; color: var(--ink2); }
+    .me-search { display: flex; gap: var(--sp-2); max-width: 480px; }
+    .me-search input { flex: 1; }
+    .me-results { display: flex; flex-direction: column; gap: var(--sp-2); }
+    .me-result { border: 1px solid var(--line); border-radius: var(--r); padding: var(--sp-2) var(--sp-3); background: var(--e1); cursor: pointer; }
+    .me-result:hover, .me-result:focus-visible { background: var(--e2); outline: none; }
+    .me-result .me-result-head { justify-content: space-between; margin-bottom: 4px; }
+    .me-result .me-result-text { color: var(--ink2); font-size: var(--t-s); }
+    .me-summary { color: var(--ink3); font-size: var(--t-min); }
   `;
   document.head.append(style);
 }
@@ -184,18 +200,172 @@ function renderArchitecture(wrap, ctx, memory) {
   }
 }
 
+// ── Flotte : agrégation mémoire multi-projets (#172) ────────────────────────
+//
+// « Ce projet / Tous les projets » vit sur le sélecteur Zoom du docbar — le
+// même widget que Piloter (Flotte/Projet) et Concevoir (Projet/Workflow/
+// Nœud) — pour ne pas ajouter un second contrôle de portée dans la page.
+// `mount()` le pilote : construit ici, il ne s'affiche que pendant que
+// l'onglet Flotte est actif.
+
+function fleetOverviewTable(ctx, data) {
+  const wrap = document.createElement('div');
+  if (!data || !data.projects.length) {
+    wrap.append(ctx.empty(
+      'Flotte',
+      "Aucun projet lisible pour cette portée — le registre de la machine "
+      + "(`grimoire cockpit list`) est peut-être vide, ou aucun projet "
+      + "sélectionné ne s'y trouve.",
+      'grimoire cockpit list',
+    ));
+    return wrap;
+  }
+  const table = document.createElement('table');
+  table.className = 'me-table';
+  const thead = document.createElement('thead');
+  const headRow = document.createElement('tr');
+  for (const label of ['Projet', 'Backend configuré', 'Backend résolu', 'Entrées', 'Dernière écriture', 'Index lexical', 'État']) {
+    headRow.append(text('th', null, label));
+  }
+  thead.append(headRow);
+  table.append(thead);
+  const tbody = document.createElement('tbody');
+  for (const p of data.projects) {
+    const tr = document.createElement('tr');
+    tr.append(text('td', null, p.name || p.slug));
+    tr.append(text('td', 'lbl', p.configuredBackend || '—'));
+    tr.append(text('td', 'lbl', p.resolvedBackend || '—'));
+    tr.append(text('td', 'mono', p.entries == null ? '—' : String(p.entries)));
+    tr.append(text('td', 'lbl mono', p.lastWrite || '—'));
+    tr.append(text('td', 'lbl', p.lexicalIndex || '—'));
+    const stateCell = document.createElement('td');
+    if (p.reason) {
+      stateCell.append(row(dot('bad'), text('span', 'lbl', p.reason)));
+    } else {
+      stateCell.append(row(dot(STATE_DOT[p.state] || ''), text('span', null, STATE_WORD[p.state] || p.state)));
+    }
+    tr.append(stateCell);
+    tbody.append(tr);
+  }
+  table.append(tbody);
+  wrap.append(table);
+  wrap.append(text('p', 'me-summary',
+    `${data.summary.readable}/${data.summary.count} projet(s) lisible(s) — ${data.summary.totalEntries} entrée(s) au total.`));
+  return wrap;
+}
+
+function fleetSearchResults(ctx, data) {
+  const wrap = document.createElement('div');
+  wrap.className = 'me-results';
+  if (!data) {
+    wrap.append(text('p', 'lbl', 'Recherche indisponible.'));
+    return wrap;
+  }
+  if (!data.query) {
+    wrap.append(text('p', 'lbl', 'Saisissez un terme puis « Rechercher ».'));
+    return wrap;
+  }
+  if (!data.results.length) {
+    wrap.append(text('p', 'lbl', `Aucun résultat pour « ${data.query} ».`));
+  }
+  for (const entry of data.results) {
+    const item = document.createElement('div');
+    item.className = 'me-result';
+    item.tabIndex = 0;
+    item.setAttribute('role', 'button');
+    const head = row(
+      text('span', 'chip', entry.projectName || entry.projectSlug),
+      text('span', 'lbl mono', `score ${Number(entry.score || 0).toFixed(3)}`),
+    );
+    head.className += ' me-result-head';
+    item.append(head, text('div', 'me-result-text', (entry.text || '').slice(0, 220)));
+    const openInspector = () => {
+      ctx.inspector.replaceChildren(
+        text('h3', null, entry.projectName || entry.projectSlug),
+        text('div', 'lbl mono', entry.id),
+        text('p', null, entry.text || ''),
+        text('div', 'lbl', `score : ${Number(entry.score || 0).toFixed(3)} — tags : ${(entry.tags || []).join(', ') || '—'}`),
+      );
+    };
+    item.addEventListener('click', openInspector);
+    item.addEventListener('keydown', (evt) => { if (evt.key === 'Enter' || evt.key === ' ') { evt.preventDefault(); openInspector(); } });
+    wrap.append(item);
+  }
+  const failed = data.projects.filter((p) => p.reason);
+  if (failed.length) {
+    wrap.append(text('p', 'lbl', 'Projets non interrogés : ' + failed.map((p) => `${p.name} (${p.reason})`).join(', ')));
+  }
+  return wrap;
+}
+
+function renderFleet(wrap, ctx, state) {
+  const h3 = text('h3', null, 'Flotte — mémoire multi-projets');
+  h3.dataset.term = 'cockpit';
+  wrap.append(h3);
+  wrap.append(text('p', 'lbl',
+    "Lecture seule, par projet du registre de la machine — jamais de fusion "
+    + "des stores : chaque ligne, chaque résultat porte son propre projet."));
+
+  const tableHost = document.createElement('div');
+  wrap.append(tableHost);
+
+  const searchWrap = document.createElement('div');
+  searchWrap.className = 'me-search';
+  const input = document.createElement('input');
+  input.className = 'input';
+  input.type = 'search';
+  input.placeholder = 'Rechercher dans la mémoire…';
+  const searchBtn = text('button', 'btn', 'Rechercher');
+  searchBtn.type = 'button';
+  searchWrap.append(input, searchBtn);
+  wrap.append(searchWrap);
+
+  const resultsHost = document.createElement('div');
+  wrap.append(resultsHost);
+
+  const projectsParam = () => (state.scope === 'all' ? 'all' : undefined);
+
+  const loadOverview = async () => {
+    tableHost.replaceChildren(text('p', 'lbl', 'Chargement…'));
+    const data = await ctx.api.memoryOverview(projectsParam()).catch(() => null);
+    tableHost.replaceChildren(fleetOverviewTable(ctx, data));
+  };
+
+  const runSearch = async () => {
+    const q = input.value.trim();
+    if (!q) {
+      resultsHost.replaceChildren(fleetSearchResults(ctx, { query: '', results: [], projects: [] }));
+      return;
+    }
+    resultsHost.replaceChildren(text('p', 'lbl', 'Recherche…'));
+    const data = await ctx.api.memorySearch(q, projectsParam()).catch(() => null);
+    resultsHost.replaceChildren(fleetSearchResults(ctx, data));
+  };
+
+  searchBtn.addEventListener('click', runSearch);
+  input.addEventListener('keydown', (evt) => { if (evt.key === 'Enter') runSearch(); });
+
+  loadOverview();
+  resultsHost.replaceChildren(fleetSearchResults(ctx, { query: '', results: [], projects: [] }));
+
+  // Le zoom du docbar pilote `state.scope` ; `draw()` (mount) rappelle
+  // `renderFleet` à chaque bascule, donc `loadOverview` ci-dessus reflète
+  // déjà la portée courante à chaque montage.
+}
+
 export async function mount(root, ctx) {
   injectStyles();
   ctx.docbar.setBreadcrumb([ctx.host.project || 'projet', 'Mémoire']);
 
   const memory = await ctx.api.memoryStatus().catch(() => null);
 
-  if (!memory || memory.state === 'uninitialized') {
+  if (!memory) {
     ctx.docbar.setViews([], null);
+    ctx.docbar.setZoom([], null, () => {});
     root.append(ctx.empty(
       'Mémoire',
-      "Ce projet n'a pas de mémoire configurée — ni `project-context.yaml`, ni backend "
-      + 'résolu. Elle se peuplera dès qu\'une session y écrira, après `grimoire init`.',
+      "L'API mémoire du projet est injoignable — vérifiez l'hôte local "
+      + '(`grimoire serve` / `grimoire cockpit serve`).',
       'grimoire memory status',
     ));
     ctx.dock.echo('grimoire memory status');
@@ -203,7 +373,13 @@ export async function mount(root, ctx) {
     return;
   }
 
-  let view = 'store';
+  // Sans mémoire propre, ce projet ne montre ni Store, ni Graphe, ni Couches
+  // — mais la Flotte reste utile : c'est peut-être exactement le projet
+  // qu'on veut voir « en échec » depuis un AUTRE projet déjà initialisé.
+  const hasOwnMemory = memory.state !== 'uninitialized';
+  let view = hasOwnMemory ? 'store' : 'flotte';
+  const fleetState = { scope: 'this' };
+
   const draw = () => {
     root.replaceChildren();
     const wrap = document.createElement('div');
@@ -212,20 +388,40 @@ export async function mount(root, ctx) {
     else if (view === 'graphe') renderGraph(wrap, ctx, memory);
     else if (view === 'couches') renderLayers(wrap, ctx, memory);
     else if (view === 'architecture') renderArchitecture(wrap, ctx, memory);
+    else if (view === 'flotte') renderFleet(wrap, ctx, fleetState);
     root.append(wrap);
+
+    if (view === 'flotte') {
+      ctx.docbar.setZoom(
+        [{ id: 'this', label: 'Ce projet' }, { id: 'all', label: 'Tous les projets' }],
+        fleetState.scope,
+        (id) => { fleetState.scope = id; draw(); },
+      );
+    } else {
+      ctx.docbar.setZoom([], null, () => {});
+    }
   };
 
-  ctx.docbar.setViews(
-    [{ id: 'store', label: 'Store' }, { id: 'graphe', label: 'Graphe' },
-     { id: 'couches', label: 'Couches' }, { id: 'architecture', label: 'Architecture' }],
-    view,
-    (id) => { view = id; draw(); },
-  );
+  const views = hasOwnMemory
+    ? [{ id: 'store', label: 'Store' }, { id: 'graphe', label: 'Graphe' },
+       { id: 'couches', label: 'Couches' }, { id: 'architecture', label: 'Architecture' },
+       { id: 'flotte', label: 'Flotte' }]
+    : [{ id: 'flotte', label: 'Flotte' }];
+
+  ctx.docbar.setViews(views, view, (id) => { view = id; draw(); });
 
   draw();
-  // Aucune route ne sert le détail d'une entrée individuelle du store — seul
-  // son statut agrégé (`/api/memory/status`) existe côté vue de travail. Le
-  // dire honnêtement plutôt que fabriquer une liste d'entrées inspectables.
-  ctx.inspector.replaceChildren(text('p', 'lbl', "L'inspecteur d'entrée individuelle n'a pas encore de route côté API — seul le statut agrégé du store est servi ici."));
+  if (hasOwnMemory) {
+    // Aucune route ne sert le détail d'une entrée individuelle du store — seul
+    // son statut agrégé (`/api/memory/status`) existe côté vue de travail. Le
+    // dire honnêtement plutôt que fabriquer une liste d'entrées inspectables.
+    // L'onglet Flotte, lui, ouvre un vrai résultat de recherche dans ce même
+    // panneau (voir `fleetSearchResults`).
+    ctx.inspector.replaceChildren(text('p', 'lbl',
+      "L'inspecteur d'entrée individuelle n'a pas de route dédiée côté store — "
+      + "cliquez un résultat de l'onglet Flotte pour inspecter une entrée réelle."));
+  } else {
+    ctx.inspector.replaceChildren(text('p', 'lbl', 'Aucune entrée à inspecter — cliquez un résultat de recherche dans l’onglet Flotte.'));
+  }
   ctx.dock.echo('grimoire memory status');
 }

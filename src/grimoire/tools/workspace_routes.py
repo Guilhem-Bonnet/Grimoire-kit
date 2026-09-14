@@ -31,7 +31,13 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from grimoire.tools import source_assist, workspace_api, workspace_exec, workspace_language
+from grimoire.tools import (
+    source_assist,
+    workspace_api,
+    workspace_exec,
+    workspace_language,
+    workspace_memory,
+)
 
 __all__ = [
     "GET_ROUTES",
@@ -131,6 +137,27 @@ def _doctor(project_root: Path, _query: _Query) -> Any:
     return workspace_exec.doctor_view(project_root)
 
 
+def _memory_overview(project_root: Path, query: _Query) -> Any:
+    """``GET /api/workspace/memory/overview`` — agrégation multi-projets (#172).
+
+    ``projects=all`` agrège tout le registre de la machine, ``slug1,slug2``
+    un sous-ensemble ; omis, la réponse ne porte que le projet déjà servi —
+    jamais toute la flotte par défaut.
+    """
+    return workspace_memory.memory_overview(project_root, _one(query, "projects"))
+
+
+def _memory_search(project_root: Path, query: _Query) -> Any:
+    """``GET /api/workspace/memory/search`` — recherche croisée en lecture
+    seule (#172), même chaîne que ``grimoire memory search`` par projet
+    sélectionné, jamais de fusion des stores."""
+    limit_raw = _one(query, "limit")
+    limit = int(limit_raw) if limit_raw else 10
+    return workspace_memory.memory_search(
+        project_root, _one(query, "q"), _one(query, "projects"), limit=limit
+    )
+
+
 def _assist_status(project_root: Path, _query: _Query) -> Any:
     """``GET /api/workspace/assist`` — l'opt-in et la disponibilité, sans coût.
 
@@ -180,6 +207,8 @@ GET_ROUTES: dict[str, _GetHandler] = {
     f"{PREFIX}blueprints": _blueprints,
     f"{PREFIX}agents": _agents,
     f"{PREFIX}proposals": _proposals,
+    f"{PREFIX}memory/overview": _memory_overview,
+    f"{PREFIX}memory/search": _memory_search,
 }
 
 
