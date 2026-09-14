@@ -17,9 +17,15 @@ TOOLS = ROOT / "framework" / "tools"
 #: qui permette encore de prouver qu'un test n'a pas touché l'état réel.
 REAL_HOME = Path.home()
 
-#: Chemin du registre cockpit réel — celui de la machine qui lance la suite,
+#: Chemins de l'état cockpit réel — celui de la machine qui lance la suite,
 #: jamais celui, isolé, que ``GRIMOIRE_COCKPIT_HOME`` fait pointer ailleurs.
+#: Les deux fichiers que ``tools/project_registry.py`` écrit : le registre des
+#: projets et l'état du cockpit (projet actif, préférences d'affichage) — une
+#: fuite peut toucher l'un sans l'autre, d'où les deux empreintes (#492 et les
+#: entrées ``x``/``x-2``…``x-7`` trouvées le 2026-09-14 n'affectaient que le
+#: registre, mais rien ne garantit qu'une fuite future épargne l'état).
 _REAL_COCKPIT_REGISTRY = REAL_HOME / ".grimoire" / "cockpit" / "registry.json"
+_REAL_COCKPIT_STATE = REAL_HOME / ".grimoire" / "cockpit" / "cockpit.json"
 
 #: Variables qui décident où le kit écrit son état hors projet. Elles sont
 #: toutes détournées, mais aucune n'est le vrai garde-fou : ``HOME`` l'est.
@@ -278,22 +284,26 @@ def project_with_blueprint(real_project: Path) -> Iterator[tuple[Path, str]]:
 # réellement en CI — sous-processus `grimoire` compris — plutôt qu'un seul
 # appel isolé. Une empreinte prise avant le premier test et comparée après le
 # dernier est le seul moyen de le garantir sans relire chaque test un par un.
-def _cockpit_registry_fingerprint() -> tuple[bytes, float] | None:
+def _file_fingerprint(path: Path) -> tuple[bytes, float] | None:
     """``None`` si le fichier n'existe pas — un stat suffit, pas besoin d'ouvrir."""
     try:
-        stat = _REAL_COCKPIT_REGISTRY.stat()
+        stat = path.stat()
     except OSError:
         return None
-    return (_REAL_COCKPIT_REGISTRY.read_bytes(), stat.st_mtime)
+    return (path.read_bytes(), stat.st_mtime)
 
 
-_registry_fingerprint_at_start: tuple[bytes, float] | None = None
+def _cockpit_state_fingerprint() -> tuple[tuple[bytes, float] | None, tuple[bytes, float] | None]:
+    return (_file_fingerprint(_REAL_COCKPIT_REGISTRY), _file_fingerprint(_REAL_COCKPIT_STATE))
+
+
+_registry_fingerprint_at_start: tuple[tuple[bytes, float] | None, tuple[bytes, float] | None] | None = None
 
 
 def pytest_sessionstart(session: pytest.Session) -> None:
     """Empreinte prise à l'ouverture de session, avant la moindre collecte de test."""
     global _registry_fingerprint_at_start
-    _registry_fingerprint_at_start = _cockpit_registry_fingerprint()
+    _registry_fingerprint_at_start = _cockpit_state_fingerprint()
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
@@ -304,14 +314,22 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     figés. On force donc ``session.exitstatus`` explicitement : c'est ce que
     la CI regarde, pas la sortie texte.
     """
-    after = _cockpit_registry_fingerprint()
+    after = _cockpit_state_fingerprint()
     if after != _registry_fingerprint_at_start:
         session.exitstatus = 1
+        changed = [
+            str(path)
+            for path, before, now in (
+                (_REAL_COCKPIT_REGISTRY, _registry_fingerprint_at_start[0] if _registry_fingerprint_at_start else None, after[0]),
+                (_REAL_COCKPIT_STATE, _registry_fingerprint_at_start[1] if _registry_fingerprint_at_start else None, after[1]),
+            )
+            if before != now
+        ]
         terminal = session.config.pluginmanager.get_plugin("terminalreporter")
         message = (
-            "GARDE #339 : le registre cockpit réel de la machine "
-            f"({_REAL_COCKPIT_REGISTRY}) a changé pendant la suite — "
-            "un test écrit hors de l'isolation GRIMOIRE_COCKPIT_HOME/HOME."
+            "GARDE #339 : l'état cockpit réel de la machine a changé pendant la "
+            f"suite ({', '.join(changed)}) — un test écrit hors de l'isolation "
+            "GRIMOIRE_COCKPIT_HOME/HOME."
         )
         if terminal is not None:
             terminal.write_line(message, red=True, bold=True)
