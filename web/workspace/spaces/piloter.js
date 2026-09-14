@@ -391,13 +391,59 @@ async function loadSheet(ctx, slug) {
 // ── Propositions d'artefact (#395) : à la répétition d'un non-choix ────────
 //
 // Toujours dans la fiche projet, section agents (#382) : une proposition
-// n'est rien d'autre qu'une décision différée sur un agent (ou un skill) qui
-// n'existe pas encore. Deux actions, jamais plus : accepter écrit l'artefact
-// réel dans `overrides` et re-fetch `agents()` pour que la table au-dessus
-// le montre aussitôt ; refuser ne fait que marquer la proposition. Aucune
-// des deux n'est disponible en lecture seule (cockpit hors projet d'accueil).
+// n'est rien d'autre qu'une décision différée sur un agent, un skill, ou une
+// réparation (`repair`, #502 — une référence morte que la mise à jour a
+// trouvée mais n'a pas touchée d'elle-même). Décider — accepter ou refuser —
+// fonctionne pour n'importe quel projet du registre depuis le cockpit
+// (#490) : c'est la même porte que le bouton « Mettre à jour » juste
+// au-dessus, jamais la garde `readOnly` générale de la vue de travail.
+// Accepter écrit l'artefact réel (ou applique la substitution `repair`
+// évidente) et re-fetch `agents()` pour que la table au-dessus le montre
+// aussitôt ; refuser ne fait que marquer la proposition.
+
+//: Préfixe que `_accept_repair` (grimoire/proposals.py) reconnaît seul comme
+//: une substitution qu'il peut appliquer sans intervention humaine — même
+//: motif que côté serveur, dupliqué ici pour décider quels boutons montrer
+//: sans faire d'aller-retour réseau.
+const REPAIR_SUBSTITUTION_RE = /^substitution évidente\s*:/;
+
+function repairHasEvidentSubstitution(p) {
+  return REPAIR_SUBSTITUTION_RE.test(p.carrier_reason || '');
+}
+
+// `artifact_ref` porte "<chemin>:<ligne> → <cible morte>" (même forme que
+// `_dead_reference_strings`, core/integrity.py) — jamais autre chose pour un
+// type `repair`. `indexOf` plutôt que `split(':')` : un chemin Windows aurait
+// pu porter un deuxième ':' (lecteur), même si le kit ne cible que POSIX ici.
+function parseArtifactRef(ref) {
+  const raw = String(ref || '');
+  const colon = raw.indexOf(':');
+  if (colon < 0) return null;
+  const rest = raw.slice(colon + 1);
+  const arrow = rest.indexOf(' → ');
+  if (arrow < 0) return null;
+  const line = parseInt(rest.slice(0, arrow), 10);
+  const file = raw.slice(0, colon);
+  if (!file || Number.isNaN(line)) return null;
+  return { file, line };
+}
+
+function proposalTypeLabel(p) {
+  if (p.artifact_type === 'skill') return 'skill';
+  if (p.artifact_type === 'repair') return 'réparation';
+  return 'agent';
+}
 
 function proposalFacts(p) {
+  if (p.artifact_type === 'repair') {
+    // Ni compte de non-choix ni agent de repli pour une réparation — c'est
+    // un défaut de fichier, pas un manque de spécialiste. `carrier_reason`
+    // porte déjà toute l'explication (substitution trouvée, ou son absence).
+    const bits = [];
+    if (p.category) bits.push(`catégorie « ${p.category} »`);
+    if (p.carrier_reason) bits.push(p.carrier_reason);
+    return bits.join(' · ');
+  }
   const bits = [`${fmtInt(p.count)} non-choix`];
   if (p.category) bits.push(`catégorie « ${p.category} »`);
   if (p.artifact_type === 'skill' && p.target_agent) bits.push(`à attacher à ${p.target_agent}`);
@@ -409,7 +455,12 @@ function proposalFacts(p) {
   return bits.join(' · ');
 }
 
-function renderProposalsSection(ctx, proposalsPayload, onChanged) {
+// `slug` cible le projet dont cette fiche parle — jamais celui, ambiant, que
+// le cockpit sert par défaut : c'est ce que `ctx.api.proposalAction` envoie
+// désormais explicitement (#490), pour que décider une proposition sur un
+// projet de la Flotte ne touche jamais un autre projet par erreur de query
+// string ambiante.
+function renderProposalsSection(ctx, proposalsPayload, onChanged, slug) {
   const section = document.createElement('div');
   section.className = 'pl-section';
   section.append(text('h3', null, 'Propositions'));
@@ -424,7 +475,6 @@ function renderProposalsSection(ctx, proposalsPayload, onChanged) {
     return section;
   }
 
-  const readOnly = ctx.host.readOnly;
   const list = document.createElement('div');
   list.className = 'pl-watch';
   for (const proposal of pending) {
@@ -435,40 +485,60 @@ function renderProposalsSection(ctx, proposalsPayload, onChanged) {
     head.className = 'pl-prop-head';
     head.append(
       dot('warn'),
-      text('span', 'pl-watch-name', `${proposal.specialty} (${proposal.artifact_type === 'skill' ? 'skill' : 'agent'})`),
+      text('span', 'pl-watch-name', `${proposal.specialty} (${proposalTypeLabel(proposal)})`),
       text('span', 'lbl', proposalFacts(proposal)),
     );
     line.append(head);
-    line.append(text('div', 'pl-prop-facts', proposal.use_when));
+    if (proposal.use_when) line.append(text('div', 'pl-prop-facts', proposal.use_when));
 
     const actions = document.createElement('div');
     actions.className = 'pl-prop-actions';
 
-    const acceptBtn = document.createElement('button');
-    acceptBtn.type = 'button';
-    acceptBtn.className = 'btn pri';
-    acceptBtn.textContent = readOnly ? 'Écriture désactivée (cockpit)' : 'Accepter';
-    acceptBtn.disabled = readOnly;
-    acceptBtn.addEventListener('click', async () => {
-      ctx.dock.echo(`grimoire proposals accept ${proposal.slug}`);
-      const result = await ctx.api.proposalAction(proposal.slug, 'accept').catch((error) => ({ ok: false, error: error.message }));
-      if (!result.ok) { ctx.dock.echo(`refusé : ${result.error}`); return; }
-      onChanged();
-    });
+    const isRepair = proposal.artifact_type === 'repair';
+    const canApply = !isRepair || repairHasEvidentSubstitution(proposal);
+
+    // Une réparation sans substitution évidente n'offre jamais « Accepter » :
+    // `_accept_repair` la refuserait de toute façon (« revue humaine
+    // requise ») — mieux vaut ne pas montrer un bouton qui échoue toujours.
+    if (canApply) {
+      const acceptBtn = document.createElement('button');
+      acceptBtn.type = 'button';
+      acceptBtn.className = 'btn pri';
+      acceptBtn.textContent = 'Accepter';
+      acceptBtn.addEventListener('click', async () => {
+        ctx.dock.echo(`grimoire proposals accept ${proposal.slug}`);
+        const result = await ctx.api.proposalAction(proposal.slug, 'accept', slug).catch((error) => ({ ok: false, error: error.message }));
+        if (!result.ok) { ctx.dock.echo(`refusé : ${result.error}`); return; }
+        onChanged();
+      });
+      actions.append(acceptBtn);
+    }
 
     const rejectBtn = document.createElement('button');
     rejectBtn.type = 'button';
     rejectBtn.className = 'btn';
     rejectBtn.textContent = 'Refuser';
-    rejectBtn.disabled = readOnly;
     rejectBtn.addEventListener('click', async () => {
       ctx.dock.echo(`grimoire proposals reject ${proposal.slug}`);
-      const result = await ctx.api.proposalAction(proposal.slug, 'reject').catch((error) => ({ ok: false, error: error.message }));
+      const result = await ctx.api.proposalAction(proposal.slug, 'reject', slug).catch((error) => ({ ok: false, error: error.message }));
       if (!result.ok) { ctx.dock.echo(`refusé : ${result.error}`); return; }
       onChanged();
     });
+    actions.append(rejectBtn);
 
-    actions.append(acceptBtn, rejectBtn);
+    if (isRepair) {
+      const ref = parseArtifactRef(proposal.artifact_ref);
+      if (ref) {
+        const openBtn = document.createElement('button');
+        openBtn.type = 'button';
+        openBtn.className = 'btn';
+        openBtn.textContent = 'Ouvrir le fichier';
+        openBtn.title = `${ref.file}:${ref.line}`;
+        openBtn.addEventListener('click', () => ctx.goto('source', { file: ref.file, line: ref.line }));
+        actions.append(openBtn);
+      }
+    }
+
     line.append(actions);
     list.append(line);
   }
@@ -1186,7 +1256,7 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
     ]);
     proposalsPayload = freshProposals;
     agentsPayload = freshAgents;
-    const freshProposalsSection = renderProposalsSection(ctx, proposalsPayload, refreshProposals);
+    const freshProposalsSection = renderProposalsSection(ctx, proposalsPayload, refreshProposals, slug);
     proposalsSection.replaceWith(freshProposalsSection);
     proposalsSection = freshProposalsSection;
     const freshAgentsSection = renderAgentsTable(ctx, agentsPayload, selectedAgent, selectAgent);
@@ -1194,7 +1264,7 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
     agentsSection = freshAgentsSection;
   };
 
-  proposalsSection = renderProposalsSection(ctx, proposalsPayload, refreshProposals);
+  proposalsSection = renderProposalsSection(ctx, proposalsPayload, refreshProposals, slug);
   wrap.append(proposalsSection);
 }
 

@@ -42,7 +42,21 @@ export { ApiError };
 
 function withProject(path) {
   if (!host.project) return path;
-  return path + (path.includes('?') ? '&' : '?') + 'project=' + encodeURIComponent(host.project);
+  // N'ajoute `project` que s'il est absent : un appel qui cible déjà un AUTRE
+  // projet explicitement (`agents(project)`, `proposals(project)`, la Flotte
+  // qui interroge chaque projet du registre l'un après l'autre) portait déjà
+  // son propre `?project=` dans `path` — l'ajouter en plus ne le remplaçait
+  // pas, il s'AJOUTAIT en deuxième valeur du même paramètre
+  // (`?project=terraform&project=grimoire-forge`, la valeur ambiante de
+  // `host.project` gagnant côté serveur selon le parseur). Ce doublon a fait
+  // lire à la garde d'écriture le mauvais projet lors du premier test réel du
+  // cockpit. `URLSearchParams` déduplique en ne posant `project` que quand il
+  // manque, jamais en écrasant le choix explicite de l'appelant.
+  const [base, query = ''] = path.split('?');
+  const params = new URLSearchParams(query);
+  if (params.has('project')) return path;
+  params.set('project', host.project);
+  return `${base}?${params.toString()}`;
 }
 
 async function request(path, options = {}) {
@@ -212,11 +226,22 @@ export const api = {
     post(WS + 'agents/' + encodeURIComponent(name) + '/skill', { skill, action }),
   agentFields: (name, fields) =>
     post(WS + 'agents/' + encodeURIComponent(name) + '/fields', fields),
-  // Accepter écrit l'artefact réel (agent ou skill attaché) ; refuser ne fait
-  // que marquer la proposition (#395). Jamais d'option automatique — chaque
-  // appel est le geste explicite que l'issue exige.
-  proposalAction: (slug, action) =>
-    post(WS + 'proposals/' + encodeURIComponent(slug) + '/' + action, {}),
+  // Accepter écrit l'artefact réel (agent, skill attaché, ou substitution
+  // `repair` évidente) ; refuser ne fait que marquer la proposition (#395).
+  // Jamais d'option automatique — chaque appel est le geste explicite que
+  // l'issue exige. Décider une proposition ouvre la même porte que
+  // `updateProject` ci-dessous, pour n'importe quel projet du registre
+  // (#490) : `postOpen` contourne donc le même verrou `readOnly` général, et
+  // `project` est explicite dans la requête plutôt que confié à l'état
+  // ambiant `host.project` — la fiche qui rend ce bouton connaît déjà le
+  // projet qu'elle affiche, c'est le sien qu'il faut décider, jamais celui
+  // que le cockpit sert par défaut.
+  proposalAction: (slug, action, project) =>
+    postOpen(
+      WS + 'proposals/' + encodeURIComponent(slug) + '/' + action +
+        (project ? '?' + new URLSearchParams({ project }).toString() : ''),
+      {},
+    ),
   blueprintPut: (id, blueprint) => put('/api/blueprints/' + encodeURIComponent(id), blueprint),
 
   // Aligner un projet sur le kit installé — `grimoire upgrade-flow run`

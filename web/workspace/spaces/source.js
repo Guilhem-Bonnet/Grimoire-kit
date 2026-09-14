@@ -90,9 +90,11 @@ export async function mount(root, ctx) {
   // `ctx.params.file` plutôt que dans le hash (README, « aucun module
   // d'espace n'écrit dans le DOM de l'autre » — et le hash n'est pas fait
   // pour porter un chemin arbitraire). Sans ce relais, la palette listait
-  // les fichiers mais n'en ouvrait jamais un.
+  // les fichiers mais n'en ouvrait jamais un. `ctx.params.line` (1-indexée)
+  // vient de Piloter → Propositions → « Ouvrir le fichier » pour une
+  // réparation (#490) : la ligne citée dans `artifact_ref`.
   if (ctx.params && ctx.params.file) {
-    await openFile(ctx, root, ctx.params.file);
+    await openFile(ctx, root, ctx.params.file, ctx.params.line);
   }
 }
 
@@ -197,7 +199,7 @@ function renderExplorer(ctx, root) {
 
 // ── Ouvrir un fichier ────────────────────────────────────────────────────
 
-async function openFile(ctx, root, path) {
+async function openFile(ctx, root, path, line) {
   if (state.dirty && !confirm('Des modifications non enregistrées seront perdues. Continuer ?')) {
     return;
   }
@@ -221,6 +223,23 @@ async function openFile(ctx, root, path) {
     state.currentEntry.editable ? 'éditable' : 'lecture seule',
     state.currentEntry.editable ? 'ok' : 'warn',
   );
+  if (line) jumpToLine(root, line);
+}
+
+// Place le curseur sur *line* (1-indexée) et fait défiler l'éditeur pour
+// qu'elle soit visible — la seule chose que « Ouvrir le fichier » (Piloter →
+// Propositions, réparation #490) demande : ni coloration ni sélection
+// multi-ligne, juste amener l'humain au bon endroit du fichier cité.
+function jumpToLine(root, line) {
+  const textarea = root.querySelector('.sr-textarea');
+  if (!textarea || !Number.isFinite(line) || line < 1) return;
+  const lines = textarea.value.split('\n');
+  const target = Math.min(line, lines.length) - 1;
+  const offset = lines.slice(0, target).reduce((sum, l) => sum + l.length + 1, 0);
+  textarea.focus();
+  textarea.setSelectionRange(offset, offset + (lines[target] || '').length);
+  const lineHeight = parseFloat(getComputedStyle(textarea).lineHeight) || 18;
+  textarea.scrollTop = Math.max(0, (target - 5) * lineHeight);
 }
 
 // ── Canevas : Source / Diff / Rendu ─────────────────────────────────────────
