@@ -796,6 +796,102 @@ lit, en plus, `version`/`kitMin`/`kitMax` au niveau du blueprint (tous
 optionnels — `version` retombe sur `0.0.0`) et l'union des `run_need`
 déclarés par le flow et par tous ses sous-flows composite.
 
+#### Les sept genres de node (lot 4, issue #207)
+
+`composite` (ci-dessus) est le cas dégénéré : un sous-flow, une tentative,
+aucune agrégation. Sept genres de plus généralisent le même mécanisme —
+lancer un ou plusieurs sous-flows enfants — avec chacun sa propre politique
+d'agrégation. Aucun n'est exprimable dans un document de consignes statique ;
+tous deviennent directs dès que le moteur tient l'état. Chacun n'existe que
+sous `--executor dispatch` (`grimoire.flows.dispatch_executor`, méthodes
+`_execute_<genre>`) ; sous `interactive`, le contrat affiche le genre et sa
+`ref` comme frontière d'outils, l'hôte orchestre lui-même.
+
+Paramétrage refusé nommément **au chargement du blueprint**
+(`grimoire.flows.blueprint_loader._validate_genre_config`) — jamais un
+`TypeError`/`KeyError` anonyme à l'exécution :
+
+| Genre | `ref` | `config.<genre>` requis |
+| --- | --- | --- |
+| `fanout` | sous-flow modèle | — (voir ci-dessous) |
+| `verify-panel` | sous-flow vérificateur | `k` (entier ≥ 2), `angles` (liste de `k` chaînes) |
+| `loop-until-dry` | sous-flow | `maxRounds` (entier ≥ 1) |
+| `judge` | sous-flow candidat | `n` (entier ≥ 2), `angles` (liste de `n` chaînes) |
+| `checkpoint` | ignorée (chaîne vide par convention) | — |
+| `budget` | ignorée — voir `config.budget.passes` | `maxCostUsd` (nombre > 0), `passes` (liste non vide de refs) |
+| `replay-diff` | sous-flow | — |
+
+**`fanout`** — un node produit N éléments, N sous-flows instanciés, les
+résultats sont recollés. Deux temps : le node est d'abord dispatché
+normalement (comme un node ordinaire), sa sortie doit porter, en plus de ses
+pins déclarées, une clé `fanout_items` (liste non vide) ; le moteur instancie
+alors un sous-flow (`ref`) par élément. N est borné par
+`pilot.max_fanout_n` (`_grimoire/standard/pilot.yaml`) — **absent**, le
+fan-out est refusé : jamais une politique manquante ne vaut un plafond
+infini implicite. Vert seulement si les N enfants finissent tous verts ;
+recoller un résultat partiel comme s'il était le tout serait l'invention que
+l'issue refuse.
+
+**`verify-panel`** — k vérificateurs indépendants (`config.verifyPanel.k`),
+chacun sous un angle distinct (`.angles`, instruit de chercher à réfuter,
+jamais de confirmer par défaut), majorité requise. Coût = k tentatives,
+**toujours** — jamais une cascade qui s'arrête au premier consensus
+apparent : un plafond de coût qui empêche de compléter les k tentatives
+referme le node en `cost_capped`, jamais sur un vote partiel (« jamais un
+vert sur 1/k »).
+
+**`loop-until-dry`** — relance jusqu'à `config.loopUntilDry.maxRounds` tours
+sans nouveauté. Chaque tour doit porter une clé `novelty_key` (chaîne) dans
+sa sortie ; la déduplication porte contre **tout le vu** depuis le premier
+tour (un ensemble cumulatif), jamais seulement contre le dernier tour
+retenu. `maxRounds` est une borne dure, distincte d'un séchage réel
+(`loop_until_dry_stop_reason` : `"dry"` / `"max_rounds"` / `"cost_capped"`).
+
+**`judge`** — N tentatives sous angles imposés (`config.judge.n`/`.angles`),
+puis le node lui-même est dispatché une seconde fois comme juge (V1 —
+« un humain choisit »), avec le résumé des N tentatives dans son contexte de
+tâche ; sa sortie doit porter `judge_winner` (index 0..N-1). La trace des N
+tentatives survit dans leurs propres runs (Mission Ledger de chaque enfant),
+jamais seulement dans un champ éphémère du node.
+
+**`checkpoint`** — approuver, refuser, amender. Toujours une décision
+d'hôte forcée, **jamais auto-décidée par la cascade** (même sous
+`--executor dispatch`, ce genre pend systématiquement, comme un node V2).
+La reprise (`flow resume --result`, forme interactive, quel que soit
+l'exécuteur qui a conduit le reste du run) doit porter
+`checkpoint_decision` (`approve`/`reject`/`amend`) ; `reject` bloque le run
+en nommant le motif (`checkpoint_reason`) dans l'événement de refus du
+kernel — « le motif dans le graphe de décision » — une reprise ultérieure
+rouvre exactement ce même node. Limite documentée : `amend` avance
+identiquement à `approve` au niveau du moteur, son motif n'est pas persisté
+séparément dans ce lot (le kernel n'a pas de canal pour un motif de succès).
+
+**`budget`** — plafond de coût déclaré (`config.budget.maxCostUsd`),
+abandon des passes optionnelles avant dépassement. `passes` est une liste
+de refs de sous-flows ; la première est obligatoire (son échec fait échouer
+le node) ; chacune des suivantes n'est lancée que si le coût cumulé reste
+sous le plafond — sinon abandonnée, jamais tentée, sans faire échouer le
+node. Distinct de `pilot.max_cost_usd_per_node` : ce plafond-ci est déclaré
+par le blueprint, propre à ce node.
+
+**`replay-diff`** — rejoue le même flow (`ref`) sur la même entrée (deux
+runs enfants, sans variation d'un à l'autre) et compare les traces.
+`replay_diverged` (booléen, dans la sortie) dit si les deux traces
+(statut + nodes complétés) divergent — une divergence est un signal,
+jamais un défaut : le verdict reste vert tant que les deux relectures
+finissent, qu'elles divergent ou non.
+
+**Coût et pilote, pour les sept genres** : `pilot.max_cost_usd_per_node`
+s'applique au **total** de chaque genre, jamais à une seule tentative —
+vérifié avant chaque nouveau sous-flow lancé, jamais après un enfant déjà
+vert (même garantie que pour `composite`). **Extraction** : `flow extract`
+ne les aplatit jamais — `kind`, `ref` et `config.<genre>` survivent
+verbatim dans le brouillon, exactement comme `composite`. **Rust** : aucun
+changement — les sept genres sont de l'orchestration Python (E/S, lancement
+de runs enfants), hors périmètre des fonctions pures déjà portées par
+`grimoire-flows-core` ; la grille de transitions et les contrats de node
+n'ont pas changé.
+
 #### `--executor dispatch` — la cascade par classe de vérifiabilité (#311)
 
 `run` et `resume` acceptent `--executor dispatch` (défaut : `interactive`,

@@ -27,7 +27,9 @@ from grimoire.missions.verifiability import Verifiability, classify_criteria
 from grimoire.tools.ext_manager import validate_blueprint_file
 
 __all__ = [
+    "GENRE_KINDS",
     "MAX_COMPOSITE_DEPTH",
+    "SINGLE_REF_GENRE_KINDS",
     "build_node_contracts",
     "hardcoded_command_warnings",
     "load_blueprint",
@@ -52,6 +54,20 @@ _BLUEPRINT_ID_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 #: Dossier du registre local des flows (même convention que ``flow list``,
 #: ``flow extract`` — voir ``registry/blueprints/*.json`` au dépôt).
 _REGISTRY_BLUEPRINTS_RELPATH = Path("registry/blueprints")
+
+#: Les sept genres de node de l'issue #207, dont ``ref`` désigne un unique
+#: sous-flow résolu exactement comme un node ``composite`` (issue #206) — un
+#: genre de plus n'est jamais qu'une politique d'agrégation différente sur le
+#: même mécanisme « ce node lance un sous-flow ». ``composite`` lui-même y
+#: figure : c'est le cas dégénéré (une seule tentative, aucune agrégation).
+SINGLE_REF_GENRE_KINDS = frozenset(
+    {"composite", "fanout", "verify-panel", "loop-until-dry", "judge", "replay-diff"}
+)
+
+#: Tous les genres de node de l'issue #207, ``budget`` (dont les refs vivent
+#: dans ``config.budget.passes``, une liste, jamais dans ``ref``) et
+#: ``checkpoint`` (aucune ref — une décision d'hôte, pas un sous-flow) inclus.
+GENRE_KINDS = SINGLE_REF_GENRE_KINDS | {"budget", "checkpoint"}
 
 #: Les seules clés qu'une entrée d'``acceptance`` structurée reconnaît (issue
 #: #428, #205 pour ``run_need``). Une entrée doit en porter exactement une :
@@ -131,16 +147,103 @@ def resolve_composite_ref(ref: str, *, project_root: Path, blueprint_dir: Path) 
     return registry_path
 
 
+def _genre_refs(node: dict[str, Any]) -> list[str]:
+    """Les ``ref`` qu'un node de genre (issue #207) doit résoudre au chargement."""
+    kind = node.get("kind")
+    if kind in SINGLE_REF_GENRE_KINDS:
+        return [str(node.get("ref", ""))]
+    if kind == "budget":
+        passes = ((node.get("config") or {}).get("budget") or {}).get("passes")
+        return [str(p) for p in passes] if isinstance(passes, list) else []
+    return []  # "checkpoint" : aucune ref, une décision d'hôte, pas un sous-flow.
+
+
+def _require_positive_int(value: Any, *, minimum: int) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= minimum
+
+
+def _require_angle_list(value: Any, *, length: int) -> bool:
+    return isinstance(value, list) and len(value) == length and all(isinstance(a, str) and a.strip() for a in value)
+
+
+def _validate_genre_config(node: dict[str, Any]) -> None:
+    """Refuse nommément un genre (issue #207) mal paramétré, au chargement.
+
+    Chaque genre a exactement les clés qu'il déclare dans le tableau de
+    l'issue — une clé manquante ou d'un mauvais type est un refus nommé ici,
+    jamais une garde qui échouerait ouvert à l'exécution avec un
+    ``TypeError``/``KeyError`` anonyme trois appels plus loin.
+    """
+    node_id = node.get("id")
+    kind = node.get("kind")
+    config = node.get("config") or {}
+
+    if kind == "verify-panel":
+        vp = config.get("verifyPanel") or {}
+        k = vp.get("k")
+        if not _require_positive_int(k, minimum=2):
+            raise GrimoireRuntimeError(
+                f"node={node_id} : config.verifyPanel.k doit être un entier >= 2 "
+                "(un panel à un seul vérificateur ne peut pas rendre de majorité, issue #207)"
+            )
+        assert isinstance(k, int)  # garanti par _require_positive_int ci-dessus
+        if not _require_angle_list(vp.get("angles"), length=k):
+            raise GrimoireRuntimeError(
+                f"node={node_id} : config.verifyPanel.angles doit être une liste de {k} chaînes non vides "
+                "— un angle distinct par vérificateur, jamais moins que k"
+            )
+    elif kind == "loop-until-dry":
+        lud = config.get("loopUntilDry") or {}
+        if not _require_positive_int(lud.get("maxRounds"), minimum=1):
+            raise GrimoireRuntimeError(
+                f"node={node_id} : config.loopUntilDry.maxRounds doit être un entier >= 1 — "
+                "une borne dure, jamais une relance sans plafond"
+            )
+    elif kind == "judge":
+        j = config.get("judge") or {}
+        n = j.get("n")
+        if not _require_positive_int(n, minimum=2):
+            raise GrimoireRuntimeError(
+                f"node={node_id} : config.judge.n doit être un entier >= 2 "
+                "(un juge n'a rien à départager sur une seule tentative)"
+            )
+        assert isinstance(n, int)  # garanti par _require_positive_int ci-dessus
+        if not _require_angle_list(j.get("angles"), length=n):
+            raise GrimoireRuntimeError(
+                f"node={node_id} : config.judge.angles doit être une liste de {n} chaînes non vides "
+                "— un angle imposé par tentative"
+            )
+    elif kind == "budget":
+        b = config.get("budget") or {}
+        max_cost = b.get("maxCostUsd")
+        if not isinstance(max_cost, (int, float)) or isinstance(max_cost, bool) or max_cost <= 0:
+            raise GrimoireRuntimeError(
+                f"node={node_id} : config.budget.maxCostUsd doit être un nombre strictement positif"
+            )
+        passes = b.get("passes")
+        if not isinstance(passes, list) or not passes or not all(isinstance(p, str) and p.strip() for p in passes):
+            raise GrimoireRuntimeError(
+                f"node={node_id} : config.budget.passes doit être une liste non vide de refs "
+                "(chacune résolue comme la ref d'un node composite)"
+            )
+    # "fanout" : aucune clé de config obligatoire — le plafond du nombre
+    # d'éléments (pilot.max_fanout_n) est une politique de projet, vérifiée à
+    # l'exécution (flows/dispatch_executor.py, DispatchExecutor._execute_fanout),
+    # pas une forme du blueprint.
+    # "checkpoint"/"replay-diff"/"composite" : pas de config dédiée requise.
+
+
 def validate_flow_composition(
     blueprint: dict[str, Any], *, project_root: Path, blueprint_path: Path, _chain: tuple[Path, ...] = ()
 ) -> None:
-    """Valide récursivement les nodes ``kind: "composite"`` d'un blueprint (issue #206).
+    """Valide récursivement les nodes de genre (composite, issue #206 ; les sept, issue #207).
 
     Appelée par :func:`load_blueprint` juste après la validation structurelle
-    — jamais indépendamment par un appelant externe. Trois refus possibles,
-    tous nommés, tous au chargement :
+    — jamais indépendamment par un appelant externe. Refus possibles, tous
+    nommés, tous au chargement :
 
-    - la référence ne se résout à aucun fichier (:func:`resolve_composite_ref`) ;
+    - un genre mal paramétré (:func:`_validate_genre_config`) ;
+    - une référence qui ne se résout à aucun fichier (:func:`resolve_composite_ref`) ;
     - le fichier résolu est déjà un ancêtre de celui-ci dans la chaîne de
       composition en cours — un cycle ;
     - la profondeur de composition dépasse :data:`MAX_COMPOSITE_DEPTH`.
@@ -161,11 +264,13 @@ def validate_flow_composition(
             f"profondeur de composition dépassée (max {MAX_COMPOSITE_DEPTH}, issue #206) : {chain_desc}"
         )
     for node in blueprint.get("nodes", []):
-        if node.get("kind") != "composite":
+        kind = node.get("kind")
+        if kind not in GENRE_KINDS:
             continue
-        ref = str(node.get("ref", ""))
-        sub_path = resolve_composite_ref(ref, project_root=project_root, blueprint_dir=blueprint_path.parent)
-        load_blueprint(sub_path, project_root, new_chain)
+        _validate_genre_config(node)
+        for ref in _genre_refs(node):
+            sub_path = resolve_composite_ref(ref, project_root=project_root, blueprint_dir=blueprint_path.parent)
+            load_blueprint(sub_path, project_root, new_chain)
 
 
 def topo_order(blueprint: dict[str, Any]) -> list[str]:
@@ -210,12 +315,43 @@ def _tool_boundary(node: dict[str, Any]) -> tuple[str, ...]:
     """
     if node.get("kind") == "extension-node":
         return (node.get("ref", ""),)
-    if node.get("kind") == "composite":
+    kind = node.get("kind")
+    if kind == "composite":
         # Issue #206 : la frontière d'un node composite EST le sous-flow —
         # même convention qu'``extension-node``, pour que ``to_text()``
         # renseigne un hôte interactif (qui n'auto-lance rien, voir
         # ``flows.dispatch_executor``) sur la commande à lancer lui-même.
         return (f"composite:{node.get('ref', '')}",)
+    if kind in ("fanout", "verify-panel", "loop-until-dry", "judge", "checkpoint", "budget", "replay-diff"):
+        # Issue #207 : même principe que "composite" ci-dessus, un descriptif
+        # par genre pour qu'un hôte interactif sache ce qu'il doit orchestrer
+        # lui-même (aucun de ces genres n'est auto-lancé hors dispatch — voir
+        # ``flows.dispatch_executor``).
+        config = (node.get("config") or {}).get(
+            {
+                "fanout": "fanout",
+                "verify-panel": "verifyPanel",
+                "loop-until-dry": "loopUntilDry",
+                "judge": "judge",
+                "checkpoint": "checkpoint",
+                "budget": "budget",
+                "replay-diff": "replayDiff",
+            }[kind],
+            {},
+        ) or {}
+        if kind == "verify-panel":
+            return (f"verify-panel(k={config.get('k')}):{node.get('ref', '')}",)
+        if kind == "loop-until-dry":
+            return (f"loop-until-dry(max_rounds={config.get('maxRounds')}):{node.get('ref', '')}",)
+        if kind == "judge":
+            return (f"judge(n={config.get('n')}):{node.get('ref', '')}",)
+        if kind == "checkpoint":
+            return ("checkpoint(approve/reject/amend)",)
+        if kind == "budget":
+            passes = config.get("passes") or []
+            return (f"budget(max_cost_usd={config.get('maxCostUsd')}, passes={len(passes)})",)
+        # "fanout" / "replay-diff" : juste la ref, rien d'autre à borner ici.
+        return (f"{kind}:{node.get('ref', '')}",)
     gate = (node.get("config") or {}).get("gate")
     if isinstance(gate, dict):
         mode = gate.get("mode", "?")
