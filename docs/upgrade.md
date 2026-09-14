@@ -31,6 +31,18 @@ avaient besoin de deux commandes, pas d'une seule surchargée.
    migration réelle du 2026-09-11 (Terraform-HouseServer, 3.38.0 → 3.44.2) a montré que `up`/`host sync`
    refusent (garde de distinction : deux agents au même faisceau) tant qu'un orphelin partage encore le
    faisceau d'un agent courant.
+
+   Depuis l'issue #510 (point 2), ce nœud couvre aussi une seconde forme d'orphelin, indépendante de la
+   première : une projection hôte managée (`.claude/agents/<nom>.md`, `.github/agents/<nom>.agent.md`,
+   …) **sans aucune source installée dans aucune tier** — kit, overrides, ni la tier custom héritée. Ce
+   cas échappe à la boucle principale (partie de `layout.installed_agents`, donc aveugle à un nom sans
+   fichier installé) et à `host sync` (qui ne revisite que ce que son plan actuel résout — un nom sans
+   source n'y apparaît jamais) : c'est exactement la forme trouvée sur la Forge, deux projections
+   `grimoire:managed` survivantes d'un gabarit retiré du manifeste par une passe d'archivage antérieure,
+   que `grimoire doctor` signalait (`agents_referenced`) sans que rien ne les retire. Choisi ici plutôt
+   que dans `host sync` : ce nœud possède déjà le mécanisme d'archivage (jamais de suppression) et tourne
+   déjà avant `apply`, donc avant que `doctor` ne juge le projet mis à niveau. Un fichier hôte sans le
+   marqueur `grimoire:managed` n'est **jamais** un candidat, quel que soit son nom.
 4. **apply** (V0) — `grimoire up` (refresh du tier kit + host sync). Acceptance : `doctor -o json` sans
    FAIL **et** le hook `SessionStart` rejoué sans échec structuré (clé `error` de premier niveau, ou le
    marqueur exact `[Grimoire] hook <id> en erreur` en tête d'un bloc rendu — jamais une recherche libre
@@ -56,11 +68,22 @@ avaient besoin de deux commandes, pas d'une seule surchargée.
    `verify` (le seul autre nœud qui en écrit un) ne tourne jamais après un `apply` refusé. `grimoire.
    tools.project_update.update_project()` (l'atelier/le cockpit) porte les mêmes champs (`state`,
    `backupPath`) et relit ce rapport dès qu'il existe.
-5. **overrides** (V1, proposition) — pour chaque override en dérive (`grimoire.core.override_drift.
-   project_override_drift`), un essai `agent override convert --dry-run` : corps identique au kit →
-   proposition « conversion sûre » ; corps divergent → proposition « revue nécessaire », diff joint.
-   Écrit via `grimoire.proposals` (`artifact_type: "override-migration"`) — **jamais** d'override
-   réécrit ici. Visible dans `grimoire proposals list` et le cockpit comme toute autre proposition.
+5. **overrides** (V1, proposition) — pour chaque override **plein** (`grimoire.core.override_drift.
+   project_override_drift`, `override_kind != "partial"`), un essai `agent override convert --dry-run` :
+   corps identique au kit → proposition « conversion sûre » ; corps divergent → proposition « revue
+   nécessaire », diff joint. Un override **partiel** (`extends: kit`) est déjà la forme convertie —
+   jamais proposé, quel que soit son statut de dérive. Écrit via `grimoire.proposals`
+   (`artifact_type: "override-migration"`) — **jamais** d'override réécrit ici. Visible dans `grimoire
+   proposals list` et le cockpit comme toute autre proposition.
+
+   Issue #510 (point 6) : la convertibilité (le corps de l'override correspond-il encore à celui du
+   kit ?) et le statut de dérive (`status`, le kit a-t-il bougé depuis la prise ?) répondent à deux
+   questions différentes — les confondre sautait tout override `"fresh"`, y compris un override plein
+   dont le corps est resté une copie exacte du kit (le cas le plus simple à convertir, puisque « fresh »
+   veut justement dire que le kit n'a pas bougé depuis). Un homelab réel avait sept overrides pleins de
+   cette forme, chacun ne portant qu'un `context:`, et n'a jamais reçu de proposition pour aucun d'eux.
+   Chaque override plein reçoit désormais un essai de conversion quel que soit son statut de dérive ;
+   seul le type (plein vs partiel) décide s'il y a quelque chose à proposer.
 6. **memory** (V1, proposition) — fiches `_grimoire/_memory/agent-learnings/*.md`,
    `decisions-log.md`, `failure-museum.md`, `network-topology.md` qu'aucun `context:` d'agent ne
    référence : proposition de raccordement au porteur dont le `use_when` couvre le sujet (mots entiers,

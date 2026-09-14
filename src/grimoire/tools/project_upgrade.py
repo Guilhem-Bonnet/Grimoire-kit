@@ -761,6 +761,20 @@ class OrphanReport:
 #: the kit/overrides tiers ``layout.installed_agents`` already covers.
 _HOST_AGENT_DIRS: tuple[str, ...] = (".claude/agents", ".cursor/agents", ".codex/agents", ".gemini/agents")
 
+#: Same directories, paired with the file suffix a managed projection uses
+#: there — ``.github/agents`` alone uses ``.agent.md`` rather than ``.md``
+#: (see the ``github_candidate`` branch in :func:`find_orphans`). Shared by
+#: :func:`_ghost_managed_projections`, which — unlike :func:`find_orphans`'s
+#: main loop — has no ``primary_path`` to start from and must scan every
+#: host tree itself.
+_HOST_AGENT_DIRS_WITH_SUFFIX: tuple[tuple[str, str], ...] = (
+    (".claude/agents", ".md"),
+    (".cursor/agents", ".md"),
+    (".codex/agents", ".md"),
+    (".gemini/agents", ".md"),
+    (".github/agents", ".agent.md"),
+)
+
 
 def _carries_managed_marker(path: Path) -> bool:
     from grimoire.hosts.emitters.base import MANAGED_MARKER
@@ -770,6 +784,43 @@ def _carries_managed_marker(path: Path) -> bool:
     except OSError:
         return False
     return MANAGED_MARKER in head
+
+
+def _ghost_managed_projections(target: Path, *, known_names: set[str]) -> dict[str, list[Path]]:
+    """Managed host projections whose name has no source left in *any* tier at all (issue #510, point 2).
+
+    A real Forge incident: ``.claude/agents/x.md`` and ``.github/agents/
+    x.agent.md`` both still carried ``grimoire:managed`` after an earlier
+    (buggy) orphan-archiving pass had removed the gabarit `custom-agent`
+    they projected from every tier — kit, overrides, custom, the
+    ``agent-manifest.csv`` that names it. Neither `host sync` (which only
+    ever writes what :func:`~grimoire.hosts.collect.build_surface`'s current
+    agent list resolves — a vanished source simply never appears in its
+    plan, so the ghost file is never revisited) nor the rest of
+    :func:`find_orphans` (which starts from :func:`~grimoire.core.layout.
+    installed_agents`, itself built from the very tiers the source is
+    missing from) ever look at a projection with no installed counterpart.
+    `grimoire doctor`'s ``agents_referenced`` check flags exactly this
+    shape — a host-managed marker with nothing behind it — but never
+    removes anything itself.
+
+    *known_names* is every name :func:`~grimoire.core.layout.
+    installed_agents` finds — a name in there has a real source somewhere
+    and is never a ghost, whatever this scan finds under a host tree.
+    """
+    ghosts: dict[str, list[Path]] = {}
+    for tree, suffix in _HOST_AGENT_DIRS_WITH_SUFFIX:
+        directory = target / tree
+        if not directory.is_dir():
+            continue
+        for path in sorted(directory.glob(f"*{suffix}")):
+            if not path.is_file():
+                continue
+            name = path.name[: -len(suffix)]
+            if name in known_names or not _carries_managed_marker(path):
+                continue
+            ghosts.setdefault(name, []).append(path)
+    return ghosts
 
 
 def find_orphans(target: Path) -> OrphanReport:
@@ -813,6 +864,12 @@ def find_orphans(target: Path) -> OrphanReport:
     agents/<name>.agent.md``, …) for a genuine orphan are still reported
     alongside its kit/override file, so :func:`archive_orphans` moves the
     whole set together.
+
+    A second, independent shape (issue #510, point 2): a managed host
+    projection whose name has **no** installed source left in any tier at
+    all — see :func:`_ghost_managed_projections`. Reported here too, with no
+    kit/override path of its own (only the host projection(s)), so it goes
+    through the same never-delete archive as any other orphan.
     """
     from grimoire.cli.cmd_up import _load_config_quiet, fresh_kit_agent_roster
     from grimoire.core import layout
@@ -843,6 +900,11 @@ def find_orphans(target: Path) -> OrphanReport:
         if github_candidate.is_file() and _carries_managed_marker(github_candidate):
             paths.append(github_candidate)
         report.orphans.append(OrphanAgent(name=name, paths=tuple(paths)))
+
+    for name, ghost_paths in sorted(_ghost_managed_projections(target, known_names=set(installed)).items()):
+        if name in roster or name in declared:
+            continue
+        report.orphans.append(OrphanAgent(name=name, paths=tuple(ghost_paths)))
     return report
 
 
@@ -979,20 +1041,35 @@ def propose_doctor_repairs(target: Path, stale_failures: Iterable[str]) -> list[
 
 
 def propose_override_migrations(target: Path) -> list[Any]:
-    """One ``"override-migration"`` proposal per override in drift (issue #490).
+    """One ``"override-migration"`` proposal per convertible **full** override (issues #490, #510 point 6).
 
-    ``project_override_drift`` already tells "fresh" (nothing to do) from
-    everything else. For everything else, a dry-run ``convert_override``
-    decides the wording: it refuses (naming the diverging lines) exactly
-    when the override's body has genuinely drifted from the kit's — that
-    refusal *is* "revue nécessaire, diff joint" here, never re-derived.
+    Convertibility is a question for `convert_override`'s own dry run — has
+    the override's body already stopped matching the kit's? — never for
+    `project_override_drift`'s ``status`` (has the *kit file* moved since
+    the override was taken?). Those two questions used to be conflated: a
+    full override the kit has not changed since (``status == "fresh"``) was
+    skipped outright, on the theory that "fresh" meant "nothing to do" — but
+    a full override's body is a literal copy of the kit's at write time, so
+    "the kit hasn't moved" is exactly the shape most likely to still be a
+    byte-for-byte copy today, i.e. the easiest one to convert. A real
+    homelab project had seven such overrides, each carrying only a
+    ``context:`` customisation, and never received a single proposal for
+    any of them.
+
+    A **partial** override (``extends: kit``) is skipped unconditionally,
+    whatever its drift status: it is already the converted shape, nothing
+    to propose. Every full override, by contrast, gets a dry-run
+    ``convert_override`` regardless of ``status`` — it refuses (naming the
+    diverging lines) exactly when the body has genuinely drifted from the
+    kit's, and that refusal *is* "revue nécessaire, diff joint" here, never
+    re-derived.
     """
     from grimoire.core.override_drift import OverrideConversionRefusedError, convert_override, project_override_drift
     from grimoire.proposals import create_manual_proposal
 
     proposals = []
     for drift in project_override_drift(target):
-        if drift.status == "fresh":
+        if drift.override_kind == "partial":
             continue
         try:
             convert_override(target, drift.name, dry_run=True)
