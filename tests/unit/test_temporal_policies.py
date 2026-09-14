@@ -15,7 +15,7 @@ change adds:
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -961,3 +961,160 @@ def test_session_budget_subagents_separate_is_refused_by_name() -> None:
 def test_session_budget_subagents_unknown_value_is_refused() -> None:
     with pytest.raises(GrimoirePolicyError, match="GR-POL-002"):
         SessionBudget.from_dict({"max_writes": 5, "subagents": "isolated"})
+
+
+# ── Relapse (issue #481, 2026-09-14): duration budget locked out reads and ───
+# ── the remedy command it names ───────────────────────────────────────────────
+#
+# Real incident on Grimoire-Forge: a `per_session.max_duration_min: 1440`
+# rule in `block`, once the session outlived its window, refused *every*
+# matching tool — including a read-only `Bash` call (`git status`) already
+# covered by `_is_repair_exempt`'s `not is_write` branch, and, unlike that
+# one, `grimoire policies reset-session` itself: an unrecognised leading
+# verb (`grimoire`) makes `is_read_only_command` classify it as a mutation,
+# and its command line never matches the file-glob repair patterns — so the
+# very remedy `_BUDGET_REMEDY_SUFFIX` names was itself refused.
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "grimoire policies reset-session",
+        "grimoire policies status",
+        "/home/u/.venv/bin/grimoire policies reset-session",
+        "python -m grimoire policies reset-session",
+        "python3 -m grimoire policies status",
+    ],
+)
+def test_grimoire_policies_invocation_is_exempt_in_every_documented_shape(command: str) -> None:
+    rules = (_budget_rule(max_writes=0),)
+    state = SessionState.new("s", datetime.now(UTC).isoformat())
+    decision = evaluate_temporal(rules, state, tool_name="Bash", tool_detail=command, is_write=True)
+    assert decision.verdict is VerdictKind.ALLOW
+    assert any(m.reason == REPAIR_EXEMPTION_REASON for m in decision.matched_rules)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo grimoire policies reset-session",
+        "grimoire standard verify",
+        "rm -rf grimoire policies",
+    ],
+)
+def test_grimoire_policies_lookalikes_stay_refused(command: str) -> None:
+    """Naming the command, or invoking an unrelated `grimoire` subcommand,
+    must not borrow the exemption — only the actual invocation shape does."""
+    rules = (_budget_rule(max_writes=0),)
+    state = SessionState.new("s", datetime.now(UTC).isoformat())
+    decision = evaluate_temporal(rules, state, tool_name="Bash", tool_detail=command, is_write=True)
+    assert decision.verdict is VerdictKind.BLOCK
+
+
+@pytest.mark.parametrize(
+    "budget_kwargs",
+    [
+        {"max_tool_calls": 1},
+        {"max_writes": 1},
+        {"max_cost_usd": 0.5},
+        {"max_duration_min": 1},
+    ],
+)
+def test_grimoire_policies_command_is_exempt_across_every_budget_dimension(
+    budget_kwargs: dict[str, float | int],
+) -> None:
+    """The repair exemption is one gate every `per_session` dimension calls
+    before refusing (see `_is_repair_exempt`) — proven here dimension by
+    dimension, not just for `max_writes` (already covered by defect 2's own
+    tests above)."""
+    rule = PolicyRule(
+        id="budget",
+        description="",
+        action_kinds=(),
+        mutation_classes=(),
+        risk_profiles=(),
+        verdict_on_match=VerdictKind.BLOCK,
+        reason_template="budget",
+        per_session=SessionBudget(**budget_kwargs),
+        estimated_cost_usd=1.0,
+    )
+    now = datetime.now(UTC)
+    is_duration = "max_duration_min" in budget_kwargs
+    started = now - timedelta(hours=25) if is_duration else now
+    state = SessionState.new("s", started.isoformat())
+    if not is_duration:
+        # Exhaust the counter/cost dimension with one ordinary write first —
+        # `max_duration_min` needs no such step: it is already past its
+        # window from the moment the session started.
+        exhausted = evaluate_temporal((rule,), state, tool_name="Bash", tool_detail="echo x", is_write=True, now=now)
+        state = exhausted.state
+    decision = evaluate_temporal(
+        (rule,), state, tool_name="Bash", tool_detail="grimoire policies reset-session", is_write=True, now=now
+    )
+    assert decision.verdict is VerdictKind.ALLOW
+    assert any(m.reason == REPAIR_EXEMPTION_REASON for m in decision.matched_rules)
+
+
+def _write_session_state(project_root: Path, session_id: str, *, started_at: str) -> None:
+    save_session_state(project_root, SessionState.new(session_id, started_at), now_iso=started_at)
+
+
+def test_duration_budget_end_to_end_exempts_reads_and_the_reset_command_it_recommends(
+    governed_project: Path,
+) -> None:
+    """The exact reproduction from issue #481: a session 25h old against a
+    `max_duration_min: 1440` `block` budget must still allow a read-only
+    `Bash` call and `grimoire policies reset-session` — and an unrelated
+    write it does still refuse must name a command that is, in the same
+    breath, actually allowed."""
+    _write_policies_yaml(
+        governed_project,
+        """
+rules:
+  - id: session-duration-budget
+    description: "budget de duree"
+    action_kinds: []
+    mutation_classes: []
+    risk_profiles: []
+    verdict_on_match: block
+    reason_template: "fenetre depassee"
+    per_session: {max_duration_min: 1440}
+""",
+    )
+    session_id = "sess-25h-old"
+    started_at = (datetime.now(UTC) - timedelta(hours=25)).isoformat()
+    _write_session_state(governed_project, session_id, started_at=started_at)
+
+    def bash(command: str) -> Outcome:
+        return decide_tool_policy(
+            HookInput(
+                event=HookEvent.PRE_TOOL_USE,
+                project_root=governed_project,
+                tool_name="Bash",
+                tool_input={"command": command},
+                session_id=session_id,
+            )
+        ).outcome
+
+    assert bash("git status") is Outcome.ALLOW
+    for reset_command in (
+        "grimoire policies reset-session",
+        "grimoire policies status",
+        "python -m grimoire policies reset-session",
+    ):
+        assert bash(reset_command) is Outcome.ALLOW, reset_command
+
+    other_write = decide_tool_policy(
+        HookInput(
+            event=HookEvent.PRE_TOOL_USE,
+            project_root=governed_project,
+            tool_name="Write",
+            tool_input={"file_path": str(governed_project / "f.txt")},
+            session_id=session_id,
+        )
+    )
+    assert other_write.outcome is Outcome.DENY
+    # The refusal's own recommendation, replayed verbatim, must not itself
+    # be refused — a refusal never points to a dead end.
+    assert "grimoire policies reset-session" in other_write.reason
+    assert bash("grimoire policies reset-session") is Outcome.ALLOW

@@ -234,3 +234,68 @@ rules:
     assert guard["level"] == "warn"
     assert guard["passed"] is True
     assert "global-block" in guard["detail"]
+
+
+# ── Relapse (issue #481, 2026-09-14): `max_duration_min` measured from ───────
+# ── `SessionStart`, not from "time actually working" ─────────────────────────
+
+
+def test_doctor_warns_on_a_short_global_duration_budget(tmp_path: Path) -> None:
+    """A `max_duration_min` under 2880 (48h) with no `tool_pattern`, in
+    `block`, is a live risk for any host whose session can span days (a
+    Claude Code session left open over a weekend) — the incident that
+    motivated issue #481. `doctor` names it, distinctly from the general
+    `policy_budget_guard` WARN above."""
+    runner.invoke(app, ["init", str(tmp_path)])
+    _write_policies_yaml(
+        tmp_path,
+        """
+rules:
+  - id: session-duration-budget
+    description: "budget de duree globale"
+    action_kinds: []
+    mutation_classes: []
+    risk_profiles: []
+    verdict_on_match: block
+    reason_template: "fenetre depassee"
+    per_session: {max_duration_min: 1440}
+""",
+    )
+    result = runner.invoke(app, ["doctor", "-o", "json", str(tmp_path)])
+    payload = json.loads(result.output)
+    guard = next(c for c in payload["checks"] if c["name"] == "policy_budget_duration_guard")
+    assert guard["level"] == "warn"
+    assert guard["passed"] is True
+    assert "session-duration-budget" in guard["detail"]
+    assert "max_duration_min" in guard["detail"]
+
+
+def test_doctor_does_not_warn_on_a_generous_or_scoped_duration_budget(tmp_path: Path) -> None:
+    runner.invoke(app, ["init", str(tmp_path)])
+    _write_policies_yaml(
+        tmp_path,
+        """
+rules:
+  - id: generous-duration
+    description: "fenetre large"
+    action_kinds: []
+    mutation_classes: []
+    risk_profiles: []
+    verdict_on_match: block
+    reason_template: "fenetre depassee"
+    per_session: {max_duration_min: 2880}
+  - id: scoped-duration
+    description: "fenetre ciblee"
+    action_kinds: []
+    mutation_classes: []
+    risk_profiles: []
+    verdict_on_match: block
+    reason_template: "fenetre depassee"
+    tool_pattern: "Bash(rm:*)"
+    per_session: {max_duration_min: 60}
+""",
+    )
+    result = runner.invoke(app, ["doctor", "-o", "json", str(tmp_path)])
+    payload = json.loads(result.output)
+    names = [c["name"] for c in payload["checks"]]
+    assert "policy_budget_duration_guard" not in names
