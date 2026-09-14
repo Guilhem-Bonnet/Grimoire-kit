@@ -1173,6 +1173,7 @@ LazyTyperGroup.configure(
         "needs": LazyGroupSpec("grimoire.cli.cmd_needs", "needs_app", rich_help_panel="Project"),
         "policies": LazyGroupSpec("grimoire.cli.cmd_policies", "policies_app", rich_help_panel="Project"),
         "proposals": LazyGroupSpec("grimoire.cli.cmd_proposals", "proposals_app", rich_help_panel="Agents"),
+        "upgrade-flow": LazyGroupSpec("grimoire.cli.cmd_upgrade_flow", "upgrade_flow_app", rich_help_panel="Project"),
         "agent": LazyGroupSpec("grimoire.cli.cmd_agent", "agent_app", rich_help_panel="Agents"),
         "web": LazyGroupSpec("grimoire.cli.cmd_web", "web_app", rich_help_panel="Data"),
     },
@@ -1194,7 +1195,7 @@ LazyTyperGroup.configure(
         "repair",
         "memory", "hooks", "cadrage", "debugger", "dbg", "registry", "workflows",
         "wf", "standard", "ext", "blueprint", "flow", "cockpit", "task",
-        "stigmergy", "features", "host", "providers", "dispatch", "needs", "proposals", "agent", "web",
+        "stigmergy", "features", "host", "providers", "dispatch", "needs", "proposals", "upgrade-flow", "agent", "web",
         "config", "completion", "self", "plugins",
     ],
 )

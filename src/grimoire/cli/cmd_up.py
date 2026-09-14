@@ -757,6 +757,47 @@ def refresh_kit_tier(target: Path) -> Any:
     return scaffolder.execute(scaffolder.plan())
 
 
+def fresh_kit_agent_roster(target: Path) -> set[str]:
+    """Agent file stems the installed kit version would deliver for *target*, without writing anything.
+
+    Read-only sibling of :func:`refresh_kit_tier` (issue #490): builds the
+    same :class:`~grimoire.core.scaffold.ProjectScaffolder` plan and inspects
+    it instead of executing it. The plan already answers "what does this kit
+    version, at this project's declared archetype composition, deliver" —
+    exactly what ``grimoire upgrade-flow orphans`` diffs against the agent
+    files actually on disk to find the ones a prior kit version left behind
+    (``refresh_kit_tier`` never prunes; it only writes what still applies).
+    """
+    from grimoire.core.scaffold import ProjectScaffolder
+
+    target = target.resolve()
+    cfg = _load_config_quiet(target)
+    config_path = target / "project-context.yaml"
+    try:
+        vals = cmd_setup.load_user_values(config_path)
+    except OSError:
+        vals = cmd_setup.UserValues()
+    scaffolder = ProjectScaffolder(
+        target,
+        project_name=vals.project_name or (cfg.project.name if cfg else "") or target.name,
+        user_name=vals.user_name or (cfg.user.name if cfg else ""),
+        language=vals.communication_language or (cfg.user.language if cfg else ""),
+        skill_level=vals.user_skill_level or (cfg.user.skill_level if cfg else ""),
+        scan=None,
+        resolved=_infer_resolved(target, cfg),
+        backend=(cfg.memory.backend if cfg else "") or "local",
+    )
+    plan = scaffolder.plan()
+    roster: set[str] = set()
+    for copy in plan.copies:
+        if copy.dst.suffix == ".md" and copy.dst.parent.name == "agents":
+            roster.add(copy.dst.stem)
+    for tpl in plan.templates:
+        if tpl.dst.suffix == ".md" and tpl.dst.parent.name == "agents":
+            roster.add(tpl.dst.stem)
+    return roster
+
+
 def _step_refresh(state: _UpState, target: Path, *, dry_run: bool, blocked: bool) -> None:
     """Regenerate the kit tier at the installed kit version.
 

@@ -1,0 +1,261 @@
+{
+  "blueprintVersion": 1,
+  "id": "project-upgrade",
+  "name": "Project upgrade",
+  "description": "Mettre à jour un projet Grimoire est un flow, pas un `up` nu (issue #490) : sauvegarde -> aperçu -> orphelins -> application -> deux nœuds de jugement qui ne font que proposer (overrides en dérive, mémoire non raccordée) -> besoins/hôtes non déclarés -> vérification -> point de passage humain forcé pour tout ce qui retirerait quelque chose. `orphans` avant `apply`, jamais l'inverse : la migration réelle du 2026-09-11 a montré que `grimoire up`/`host sync` refusent (garde de distinction) tant qu'un agent orphelin partage encore le faisceau d'un agent courant — les orphelins doivent être archivés avant que `up` tourne, pas après. Chaque nœud V0 porte une acceptance structurée exécutée par `grimoire upgrade-flow check <node>` ; les nœuds V1 (overrides, memory, needs-hosts) écrivent des propositions via le mécanisme `proposals` existant et n'appliquent jamais rien eux-mêmes.",
+  "catalogRef": {
+    "version": "1.0.0"
+  },
+  "nodes": [
+    {
+      "id": "backup",
+      "kind": "pattern",
+      "ref": "RUN-14",
+      "label": "Sauvegarde",
+      "description": "Tarball de _grimoire/, .claude/, .github/{agents,prompts,instructions}, GEMINI.md, AGENTS.md, CLAUDE.md, .mcp.json, project-context.yaml sous _archive/<date>-pre-<version>/, plus manifeste SHA-256 de _grimoire/_memory/. Exécute `grimoire upgrade-flow backup --project-root .`.",
+      "pins": [
+        {
+          "id": "out",
+          "direction": "out",
+          "contract": "upgrade-backed-up"
+        }
+      ],
+      "acceptance": [
+        "le tarball se liste et le manifeste mémoire existe",
+        {
+          "run": "python -m grimoire upgrade-flow check backup --project-root .",
+          "expect_exit": 0,
+          "timeout_s": 60
+        }
+      ]
+    },
+    {
+      "id": "preview",
+      "kind": "pattern",
+      "ref": "GOV-02",
+      "label": "Aperçu",
+      "description": "`up --dry-run` + `host sync --dry-run`, diff écrit dans _grimoire-output/upgrade/<date>/preview.md. Exécute `grimoire upgrade-flow preview --project-root .`.",
+      "pins": [
+        {
+          "id": "in",
+          "direction": "in",
+          "contract": "upgrade-backed-up"
+        },
+        {
+          "id": "out",
+          "direction": "out",
+          "contract": "upgrade-previewed"
+        }
+      ],
+      "acceptance": [
+        "l'aperçu de mise à niveau est écrit",
+        {
+          "path_exists": "_grimoire-output/upgrade"
+        },
+        {
+          "run": "python -m grimoire upgrade-flow check preview --project-root .",
+          "expect_exit": 0,
+          "timeout_s": 60
+        }
+      ]
+    },
+    {
+      "id": "orphans",
+      "kind": "pattern",
+      "ref": "KNO-01",
+      "label": "Orphelins",
+      "description": "Agents/wrappers gérés (`grimoire:managed`) que la roue courante ne livre plus : déplacés vers _archive/<date>-pre-<version>/orphans/, jamais supprimés. Doit tourner avant `apply` : sinon `up`/`host sync` refusent (garde de distinction, un orphelin partage le faisceau d'un agent courant). Exécute `grimoire upgrade-flow orphans --project-root . --apply`.",
+      "pins": [
+        {
+          "id": "in",
+          "direction": "in",
+          "contract": "upgrade-previewed"
+        },
+        {
+          "id": "out",
+          "direction": "out",
+          "contract": "upgrade-orphans-archived"
+        }
+      ],
+      "acceptance": [
+        "aucun orphelin restant, `check` vert",
+        {
+          "run": "python -m grimoire upgrade-flow check orphans --project-root .",
+          "expect_exit": 0,
+          "timeout_s": 120
+        }
+      ]
+    },
+    {
+      "id": "apply",
+      "kind": "pattern",
+      "ref": "RUN-13",
+      "label": "Application",
+      "description": "`grimoire up` (refresh du tier kit + host sync). Acceptance : `doctor -o json` sans FAIL ET hook SessionStart rejoué sans mention d'erreur (régression #423). Exécute `grimoire upgrade-flow apply --project-root .`.",
+      "pins": [
+        {
+          "id": "in",
+          "direction": "in",
+          "contract": "upgrade-orphans-archived"
+        },
+        {
+          "id": "out",
+          "direction": "out",
+          "contract": "upgrade-applied"
+        }
+      ],
+      "acceptance": [
+        "up appliqué, doctor vert, hook SessionStart sans erreur",
+        {
+          "run": "python -m grimoire upgrade-flow check apply --project-root .",
+          "expect_exit": 0,
+          "timeout_s": 180
+        }
+      ]
+    },
+    {
+      "id": "overrides",
+      "role": "Gate",
+      "kind": "pattern",
+      "ref": "QUA-15",
+      "label": "Overrides en dérive (proposition)",
+      "description": "V1 — pour chaque override en dérive, `agent override convert --dry-run` : corps identique au kit -> proposition « convertir en partiel » ; corps divergent -> proposition « revoir, diff joint ». Écrit via `proposals` (`artifact_type: override-migration`), jamais d'écriture d'override elle-même. Exécute `grimoire upgrade-flow propose overrides --project-root .`.",
+      "pins": [
+        {
+          "id": "in",
+          "direction": "in",
+          "contract": "upgrade-applied"
+        },
+        {
+          "id": "out",
+          "direction": "out",
+          "contract": "upgrade-overrides-proposed"
+        }
+      ],
+      "acceptance": [
+        "une proposition `override-migration` existe pour chaque override en dérive, visible dans `proposals list`",
+        {
+          "run": "python -m grimoire upgrade-flow check overrides --project-root .",
+          "expect_exit": 0,
+          "timeout_s": 60
+        }
+      ]
+    },
+    {
+      "id": "memory",
+      "role": "Gate",
+      "kind": "pattern",
+      "ref": "KNO-04",
+      "label": "Mémoire non raccordée (proposition)",
+      "description": "V1 — fiches agent-learnings/*.md, decisions-log.md, failure-museum.md, network-topology.md non référencées par aucun `context:` -> proposition de raccordement au porteur dont le `use_when` couvre le sujet (correspondance par mots entiers) ; sans porteur plausible -> proposition « à placer à la main ». Jamais d'écriture de `context:` ici. Exécute `grimoire upgrade-flow propose memory --project-root .`.",
+      "pins": [
+        {
+          "id": "in",
+          "direction": "in",
+          "contract": "upgrade-overrides-proposed"
+        },
+        {
+          "id": "out",
+          "direction": "out",
+          "contract": "upgrade-memory-proposed"
+        }
+      ],
+      "acceptance": [
+        "une proposition `memory-link` existe pour chaque fiche non raccordée, visible dans `proposals list`",
+        {
+          "run": "python -m grimoire upgrade-flow check memory --project-root .",
+          "expect_exit": 0,
+          "timeout_s": 60
+        }
+      ]
+    },
+    {
+      "id": "needs-hosts",
+      "kind": "pattern",
+      "ref": "RUN-08",
+      "label": "Besoins et hôtes",
+      "description": "V0 (résolution) + V1 (proposition) : `needs resolve` — besoins `unresolved` -> proposition de déclaration `needs.commands` ; `hosts.enabled` absent -> proposition de déclaration égale à la détection sur disque. Exécute `grimoire upgrade-flow propose needs-hosts --project-root .`.",
+      "pins": [
+        {
+          "id": "in",
+          "direction": "in",
+          "contract": "upgrade-memory-proposed"
+        },
+        {
+          "id": "out",
+          "direction": "out",
+          "contract": "upgrade-needs-hosts-proposed"
+        }
+      ],
+      "acceptance": [
+        "besoins résolus, propositions écrites pour tout besoin non résolu ou hosts.enabled non déclaré",
+        {
+          "run": "python -m grimoire upgrade-flow check needs-hosts --project-root .",
+          "expect_exit": 0,
+          "timeout_s": 60
+        }
+      ]
+    },
+    {
+      "id": "verify",
+      "kind": "pattern",
+      "ref": "QUA-04",
+      "label": "Vérification",
+      "description": "Manifeste SHA-256 recomparé (seul `_grimoire/_memory/config.yaml` peut différer, réindexation lexicale à part) ; `standard verify` ; `registry dispatches` ; rapport final _grimoire-output/upgrade/<date>/report.md. Exécute `grimoire upgrade-flow verify --project-root .`.",
+      "pins": [
+        {
+          "id": "in",
+          "direction": "in",
+          "contract": "upgrade-needs-hosts-proposed"
+        },
+        {
+          "id": "out",
+          "direction": "out",
+          "contract": "upgrade-verified"
+        }
+      ],
+      "acceptance": [
+        "le rapport final existe, aucun écart mémoire inattendu",
+        {
+          "path_exists": "_grimoire-output/upgrade"
+        },
+        {
+          "run": "python -m grimoire upgrade-flow check verify --project-root .",
+          "expect_exit": 0,
+          "timeout_s": 60
+        }
+      ]
+    },
+    {
+      "id": "destructive",
+      "role": "Gate",
+      "kind": "checkpoint",
+      "ref": "",
+      "label": "Retrait — toujours un refus tracé",
+      "description": "V2 — checkpoint forcé (jamais auto-décidé par la cascade, `--executor dispatch` s'arrête toujours ici en `waiting_host`) : tout retrait réel de mémoire ou d'override (au-delà d'un déplacement vers _archive/) doit remonter à l'humain nommément. Ce nœud n'exécute rien lui-même — sa seule présence dans le blueprint est le refus tracé que l'issue #490 demande.",
+      "pins": [
+        {
+          "id": "in",
+          "direction": "in",
+          "contract": "upgrade-verified"
+        },
+        {
+          "id": "out",
+          "direction": "out",
+          "contract": "upgrade-complete"
+        }
+      ]
+    }
+  ],
+  "edges": [
+    { "from": "backup.out", "to": "preview.in", "contract": "upgrade-backed-up" },
+    { "from": "preview.out", "to": "orphans.in", "contract": "upgrade-previewed" },
+    { "from": "orphans.out", "to": "apply.in", "contract": "upgrade-orphans-archived" },
+    { "from": "apply.out", "to": "overrides.in", "contract": "upgrade-applied" },
+    { "from": "overrides.out", "to": "memory.in", "contract": "upgrade-overrides-proposed" },
+    { "from": "memory.out", "to": "needs-hosts.in", "contract": "upgrade-memory-proposed" },
+    { "from": "needs-hosts.out", "to": "verify.in", "contract": "upgrade-needs-hosts-proposed" },
+    { "from": "verify.out", "to": "destructive.in", "contract": "upgrade-verified" }
+  ],
+  "extensions": []
+}

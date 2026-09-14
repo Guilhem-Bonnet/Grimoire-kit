@@ -150,6 +150,7 @@ packages = ["src/grimoire"]
 "web" = "grimoire/data/web"
 "version.txt" = "grimoire/version.txt"
 "registry/kit-file-hashes.json" = "grimoire/data/kit-file-hashes.json"
+"registry/blueprints/project-upgrade.blueprint.json" = "grimoire/data/registry/blueprints/project-upgrade.blueprint.json"
 "scripts/gen-site-data.py" = "grimoire/data/site-scripts/gen-site-data.py"
 
 [tool.hatch.build.targets.sdist]
@@ -161,6 +162,7 @@ include = [
     "web/",
     "version.txt",
     "registry/kit-file-hashes.json",
+    "registry/blueprints/project-upgrade.blueprint.json",
     "scripts/gen-site-data.py",
     "LICENSE",
     "README.md",

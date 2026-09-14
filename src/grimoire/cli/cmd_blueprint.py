@@ -31,7 +31,17 @@ blueprint_app = typer.Typer(
 PATTERN_REF_RE = re.compile(r"^[A-Z]{3}-\d{2}$")
 EXTENSION_REF_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*/[A-Za-z0-9][A-Za-z0-9_-]*$")
 IDENTIFIER_RE = re.compile(r"^[^.\s]+$")
-NODE_KINDS = ("pattern", "artifact", "extension-node", "composite", "composite-inline", "agent-spec")
+#: Kept in sync with the schema's node ``kind`` enum (``schemas/blueprint-v1
+#: .schema.json``) — the six pre-#207 kinds plus the seven genres #207/#488
+#: added to the flow engine (:mod:`grimoire.flows.genres`). This structural
+#: layer had drifted behind the schema until issue #490's own blueprint
+#: (a ``checkpoint`` node) tripped it: the schema layer accepted the file,
+#: this one refused it as an "unknown kind" the schema itself never agreed
+#: with.
+NODE_KINDS = (
+    "pattern", "artifact", "extension-node", "composite", "composite-inline", "agent-spec",
+    "fanout", "verify-panel", "loop-until-dry", "judge", "checkpoint", "budget", "replay-diff",
+)
 TEMPLATES = ("minimal", "pipeline")
 
 _FILE_ARGUMENT = typer.Argument(..., help="Path to a .blueprint.json file.")

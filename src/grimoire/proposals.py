@@ -71,6 +71,7 @@ __all__ = [
     "Proposal",
     "accept_proposal",
     "count_pending",
+    "create_manual_proposal",
     "list_proposals",
     "reject_proposal",
     "rust_backend_available",
@@ -165,6 +166,12 @@ class Proposal:
     accepted_path: str = ""
     rejected_at: str = ""
     rejected_at_count: int | None = None
+    artifact_ref: str = ""
+    """Generic payload for an ``artifact_type`` that names neither an agent
+    nor a skill (issue #490) — a memory fiche's path for ``"memory-link"``,
+    the comma-separated list of need ids or host aliases for
+    ``"needs-hosts"``. Unused (``""``) for ``"agent"``/``"skill"``, whose own
+    dedicated fields already carry everything :func:`accept_proposal` needs."""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -189,6 +196,7 @@ class Proposal:
             "accepted_path": self.accepted_path,
             "rejected_at": self.rejected_at,
             "rejected_at_count": self.rejected_at_count,
+            "artifact_ref": self.artifact_ref,
         }
 
     @classmethod
@@ -534,6 +542,59 @@ def _save_proposal(path: Path, proposal: Proposal) -> None:
         yaml.dump(proposal.to_dict(), fh)
 
 
+def create_manual_proposal(
+    project_root: Path,
+    *,
+    slug: str,
+    specialty: str,
+    artifact_type: str,
+    category: str = "",
+    target_agent: str = "",
+    carrier_reason: str = "",
+    artifact_ref: str = "",
+) -> Proposal:
+    """Write (or refresh) a proposal outside the miss-count trigger (issue #490).
+
+    :func:`sync_proposals` only ever *derives* proposals from
+    :meth:`TraceLedger.agent_miss_counts` — but its own trailing loop
+    ("proposals the current ledger no longer surfaces stay visible") reads
+    every ``*.yaml`` file under ``_grimoire-output/proposals/`` regardless of
+    where it came from, so a proposal written here is picked up by
+    ``proposals list``/the cockpit exactly like a déclencheur one, no changes
+    needed there. This is the door the ``project-upgrade`` flow's judgment
+    nodes (overrides in drift, unlinked memory fiches, undeclared
+    needs/hosts) use — never :func:`accept_proposal` at write time, and never
+    once from these nodes themselves: they propose, the human decides.
+
+    A pending proposal at *slug* is refreshed in place (count/carrier reason
+    updated, identity kept); an already-decided one (``accepted``/
+    ``rejected``) is left untouched — a fresh run of the flow does not
+    resurrect a choice the human already made for the exact same slug.
+    """
+    root = project_root.resolve()
+    path = _proposal_path(root, slug)
+    existing = _load_proposal(path)
+    now = datetime.now(UTC).isoformat()
+    if existing is not None and existing.status != "pending":
+        return existing
+    proposal = Proposal(
+        slug=slug,
+        specialty=specialty,
+        artifact_type=artifact_type,
+        status="pending",
+        count=(existing.count if existing else 0) + 1,
+        category=category,
+        carrier_reason=carrier_reason,
+        target_agent=target_agent,
+        artifact_ref=artifact_ref,
+        first_seen=existing.first_seen if existing else now,
+        last_seen=now,
+        created_at=existing.created_at if existing else now,
+    )
+    _save_proposal(path, proposal)
+    return proposal
+
+
 def _configured_threshold(project_root: Path) -> int:
     """``proposals.threshold`` from ``project-context.yaml`` — never below 2.
 
@@ -783,8 +844,16 @@ def accept_proposal(project_root: Path, slug: str) -> dict[str, Any]:
     if proposal.status == "accepted":
         return {"ok": False, "error": "proposition déjà acceptée", "path": proposal.accepted_path}
 
+    accept_by_type = {
+        "skill": _accept_skill,
+        "override-migration": _accept_override_migration,
+        "memory-link": _accept_memory_link,
+        "needs-hosts": _accept_needs_hosts,
+    }
+    accept_fn = accept_by_type.get(proposal.artifact_type, _accept_agent)
+
     try:
-        result = _accept_skill(root, proposal) if proposal.artifact_type == "skill" else _accept_agent(root, proposal)
+        result = accept_fn(root, proposal)
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 
@@ -864,6 +933,127 @@ def _accept_skill(project_root: Path, proposal: Proposal) -> dict[str, Any]:
         raise RuntimeError(f"skill créé puis annulé : impossible de l'attacher à {proposal.target_agent} ({exc})") from exc
 
     return {"status": "created", "artifact_type": "skill", "path": str(dest), "attached_to": proposal.target_agent}
+
+
+def _accept_override_migration(project_root: Path, proposal: Proposal) -> dict[str, Any]:
+    """Apply an ``"override-migration"`` proposal (issue #490): convert, or refuse.
+
+    Only the "conversion sûre" case (the override's body is a byte-identical
+    copy of the kit's — :func:`grimoire.core.override_drift.convert_override`
+    would not refuse it) is ever written here. A "revue nécessaire" proposal
+    names a real divergence a human must read; accepting it would either
+    silently keep the stale copy or need this function to merge text, which
+    :func:`convert_override` itself refuses to do. Both stay manual — the
+    doctrine this flow node exists to serve.
+    """
+    from grimoire.core.override_drift import OverrideConversionRefusedError, convert_override
+
+    if not proposal.carrier_reason.startswith("conversion sûre"):
+        raise RuntimeError(
+            f"revue humaine requise avant conversion — {proposal.carrier_reason or 'diff non résumé'} "
+            f"(voir `grimoire agent override convert {proposal.target_agent} --dry-run`)"
+        )
+    try:
+        result = convert_override(project_root, proposal.target_agent, dry_run=False)
+    except (FileNotFoundError, OverrideConversionRefusedError) as exc:
+        raise RuntimeError(str(exc)) from exc
+    return {"status": "converted", "artifact_type": "override-migration", "path": result.override_ref}
+
+
+def _accept_memory_link(project_root: Path, proposal: Proposal) -> dict[str, Any]:
+    """Apply a ``"memory-link"`` proposal (issue #490): add the fiche to the carrier's ``context:``.
+
+    Refuses when no plausible carrier was found (``target_agent`` empty) —
+    the déclencheur's own conclusion for that case is "à placer à la main",
+    and writing to a resolved-by-guess agent instead would contradict the
+    proposal it is accepting. Never refuses for the carrier lacking an
+    override, though: when the carrier is a kit agent with no override yet,
+    this writes one — a **partial** override (``extends: kit``,
+    ``kit_source_hash``, issue #427) carrying only the ``context:`` field,
+    the same skeleton :func:`grimoire.tools.workspace_routes.
+    _apply_agent_updates` already writes for the cockpit's own agent-field
+    editor. A carrier with an existing override (partial or full) simply
+    gets the fiche appended to whatever ``context:`` it already resolves to.
+    """
+    from grimoire.hosts.collect import collect_agents, effective_agent_frontmatter
+    from grimoire.tools.workspace_routes import _agent_override_path, _agent_target, _apply_agent_updates
+
+    if not proposal.target_agent:
+        raise RuntimeError("aucun porteur plausible pour cette fiche — à raccorder à la main")
+    if not proposal.artifact_ref:
+        raise RuntimeError("proposition sans fiche à raccorder (artifact_ref vide)")
+
+    root = project_root.resolve()
+    try:
+        agents = list(collect_agents(root))
+    except Exception as exc:
+        raise RuntimeError(f"agents du projet illisibles : {exc}") from exc
+    agent = next((a for a in agents if a.name == proposal.target_agent), None)
+    if agent is None:
+        raise RuntimeError(f"agent porteur introuvable : {proposal.target_agent}")
+
+    current = [str(c) for c in effective_agent_frontmatter(root, agent).get("context") or []]
+    override_path = _agent_override_path(root, _agent_target(root, proposal.target_agent))
+    if proposal.artifact_ref in current:
+        return {"status": "already-linked", "artifact_type": "memory-link", "path": str(override_path)}
+
+    _apply_agent_updates(root, proposal.target_agent, {"context": [*current, proposal.artifact_ref]})
+    return {
+        "status": "linked",
+        "artifact_type": "memory-link",
+        "path": str(override_path),
+        "attached_to": proposal.target_agent,
+    }
+
+
+#: The two slugs :func:`grimoire.tools.project_upgrade.propose_needs_hosts` ever writes.
+_NEEDS_HOSTS_ENABLED_SLUG = "hosts-declare-enabled"
+_NEEDS_HOSTS_COMMANDS_SLUG = "needs-declare-commands"
+
+
+def _accept_needs_hosts(project_root: Path, proposal: Proposal) -> dict[str, Any]:
+    """Apply a ``"needs-hosts"`` proposal (issue #490): declare ``hosts.enabled``; never invent a command.
+
+    ``hosts-declare-enabled`` has a real, mechanical value to write — the
+    disk detection :func:`grimoire.hosts.detection.detect_enabled_hosts`
+    already ran when the proposal was created, and *this* is a project's own
+    declaration that agrees with what is already sitting on disk, not a
+    guess. Written via :func:`grimoire.tools._common.load_yaml_roundtrip` /
+    :func:`grimoire.tools._common.save_yaml` (grimoire-kit#430) so every
+    comment in ``project-context.yaml`` survives untouched.
+
+    ``needs-declare-commands`` has no such value: an *unresolved* need is
+    unresolved precisely because neither a declaration nor a marker-based
+    detection named a command for it
+    (:mod:`grimoire.core.execution_needs` — "jamais une commande inventée à
+    partir du seul id du besoin"). Accepting it can only ever refuse, naming
+    the ids a human must fill in by hand; that refusal is not the "pas
+    d'override" refusal this issue forbids for ``memory-link``, it is the
+    kit's own doctrine against fabricating a command.
+    """
+    from grimoire.tools._common import load_yaml_roundtrip, save_yaml
+
+    root = project_root.resolve()
+    config_path = root / "project-context.yaml"
+
+    if proposal.slug == _NEEDS_HOSTS_COMMANDS_SLUG:
+        raise RuntimeError(
+            "aucune commande ne peut être déduite mécaniquement pour ces besoins — "
+            f"déclarez `needs.commands` à la main dans project-context.yaml pour : "
+            f"{proposal.artifact_ref or '(voir la proposition)'}"
+        )
+    if proposal.slug != _NEEDS_HOSTS_ENABLED_SLUG:
+        raise RuntimeError(f"type de proposition « needs-hosts » inconnu : {proposal.slug}")
+
+    detected = [host for host in proposal.artifact_ref.split(",") if host]
+    data = load_yaml_roundtrip(config_path) if config_path.is_file() else {}
+    hosts = data.get("hosts")
+    if not isinstance(hosts, dict):
+        hosts = {}
+        data["hosts"] = hosts
+    hosts["enabled"] = detected
+    save_yaml(data, config_path)
+    return {"status": "declared", "artifact_type": "needs-hosts", "path": str(config_path)}
 
 
 def reject_proposal(project_root: Path, slug: str) -> dict[str, Any]:
