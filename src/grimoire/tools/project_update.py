@@ -128,6 +128,12 @@ def _run_upgrade_flow(root: Path, *, dry_run: bool) -> dict[str, Any]:
         "runId": payload.get("run_id"),
         "done": payload.get("done") or [],
         "stoppedAt": payload.get("stopped_at"),
+        # Issue #510 (point 3) : quand `apply` refuse après que `up` a déjà
+        # tourné, le projet est réellement mis à niveau, juste bloqué —
+        # `state`/`backupPath` le disent explicitement plutôt que de laisser
+        # `done: []` sans explication.
+        "state": payload.get("state"),
+        "backupPath": payload.get("backup_path"),
         # Le compte rendu brut tient en quelques lignes ; on borne quand
         # même, une UI n'a pas à recevoir un journal entier.
         "output": output.strip()[-8000:],
@@ -138,6 +144,11 @@ def _run_upgrade_flow(root: Path, *, dry_run: bool) -> dict[str, Any]:
         if not dry_run:
             report["report"] = _read_report(root, "report.md")
             report["proposals"] = _pending_proposals(root)
+    elif not dry_run and payload.get("state") == "upgraded-but-failed":
+        # `apply` a écrit `report.md` avant de refuser (issue #510, point 3) —
+        # jamais omis au prétexte que le flow, dans son ensemble, a échoué.
+        report["report"] = _read_report(root, "report.md")
+        report["proposals"] = _pending_proposals(root)
     return report
 
 
