@@ -42,7 +42,23 @@ from grimoire.core.exceptions import GrimoireRuntimeError
 console = Console(stderr=True)
 
 upgrade_flow_app = typer.Typer(
-    help="Mettre à jour un projet comme un flow : sauvegarde, aperçu, application, orphelins, propositions, vérification.",
+    help=(
+        "Mettre à jour un projet comme un flow, pas un `up` nu : sauvegarde, aperçu, "
+        "orphelins, application, propositions, vérification.\n\n"
+        "Ordre des 9 nœuds (`run` les exécute dans cet ordre, jamais un autre) : "
+        "backup -> preview -> orphans -> apply -> overrides -> memory -> needs-hosts "
+        "-> verify -> destructive.\n\n"
+        "Trois catégories :\n"
+        "V0 (mécanique, appliqué directement) : backup, preview, orphans, apply, verify.\n"
+        "V1 (jugement, ne fait jamais qu'écrire une proposition — jamais l'artefact) : "
+        "overrides, memory, needs-hosts.\n"
+        "V2 (checkpoint humain forcé) : destructive — `run` s'y arrête toujours, non "
+        "décidé ; personne ne soumet de décision à la place d'un humain.\n\n"
+        "Sauvegarde : tarball + manifeste mémoire sous "
+        "`_archive/<date>-pre-<version>/` à la racine du projet (jamais écrasés — un "
+        "second `backup` le même jour dont le contenu a changé prend un suffixe "
+        "`-2`, `-3`, …)."
+    ),
     no_args_is_help=False,
 )
 
@@ -384,9 +400,34 @@ def upgrade_flow_run(
 ) -> None:
     """Lance le blueprint `project-upgrade` — mécanique par défaut, jamais d'écriture au-delà de ce que chaque nœud documente.
 
-    S'arrête toujours, non décidé, au nœud `destructive` (checkpoint forcé) :
-    cette commande ne soumet jamais de `checkpoint_decision` à la place d'un
-    humain. `--dry-run` s'arrête plus tôt, juste après `preview`.
+    Neuf nœuds, toujours dans cet ordre (jamais un autre — orphans avant
+    apply, jamais l'inverse, cf. la migration du 2026-09-11) :
+
+    \b
+    1. backup       (V0) tarball + manifeste mémoire, sous
+                     `_archive/<date>-pre-<version>/` à la racine du projet
+                     (jamais écrasés — suffixe `-2`, `-3`, … si le contenu a
+                     changé depuis une snapshot déjà prise aujourd'hui).
+    2. preview      (V0) `up --dry-run` + `host sync --dry-run`.
+    3. orphans      (V0) archive les agents/wrappers qu'un kit antérieur a
+                     laissés — jamais un agent encore livré, déclaré ou
+                     surchargé par le projet.
+    4. apply        (V0) `grimoire up` réel, puis `doctor` et le hook rejoué
+                     comme acceptance.
+    5. overrides    (V1) propose les migrations d'overrides en dérive —
+                     n'écrit jamais l'override lui-même.
+    6. memory       (V1) propose de raccorder les fiches mémoire orphelines.
+    7. needs-hosts  (V1) propose de déclarer besoins/hôtes non résolus.
+    8. verify       (V0) recompare le manifeste mémoire pris par `backup`.
+    9. destructive  (V2) checkpoint humain forcé — tout ce qui retirerait
+                     quelque chose s'arrête ici, non décidé.
+
+    V0 = mécanique, appliqué directement par cette commande. V1 = jugement,
+    ne fait jamais qu'écrire une proposition (`grimoire proposals accept`
+    est la seule porte vers l'artefact). V2 = jamais soumis ici : `run`
+    s'arrête toujours au nœud `destructive`, non décidé — cette commande ne
+    soumet jamais de `checkpoint_decision` à la place d'un humain.
+    `--dry-run` s'arrête plus tôt encore, juste après `preview`.
     """
     from grimoire.flows.engine import FlowEngine
     from grimoire.flows.executor import InteractiveNodeExecutor

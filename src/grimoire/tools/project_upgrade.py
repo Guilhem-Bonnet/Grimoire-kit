@@ -173,34 +173,108 @@ def write_memory_manifest(target: Path, dest: Path) -> int:
     return len(memory_files)
 
 
+def _backup_digest(target: Path) -> str:
+    """Content-only SHA-256 over every real file under :data:`BACKUP_PATHS`.
+
+    Immune to the gzip stream's own embedded timestamp, which makes two
+    ``tarfile.open(..., "w:gz")`` writes of byte-identical *input* produce
+    different tarball *bytes* — comparing the tarballs themselves could never
+    tell "nothing changed" from "something changed" the way this can.
+    """
+    entries: dict[str, str] = {}
+    for rel in BACKUP_PATHS:
+        base = target / rel
+        if not base.exists():
+            continue
+        files = [base] if base.is_file() else (p for p in base.rglob("*") if p.is_file())
+        for f in files:
+            arcname = f"{rel}/{f.relative_to(base).as_posix()}" if base.is_dir() else rel
+            entries[arcname] = _sha256(f)
+
+    # Sorted by name — matching `_tarball_digest`'s own `sorted(..., key=name)`
+    # over the tarball's members, not `BACKUP_PATHS`' declaration order,
+    # is what lets the two ever agree on the same input.
+    digest = hashlib.sha256()
+    for arcname in sorted(entries):
+        digest.update(arcname.encode("utf-8"))
+        digest.update(entries[arcname].encode("ascii"))
+    return digest.hexdigest()
+
+
+def _tarball_digest(tarball: Path) -> str | None:
+    """Recompute :func:`_backup_digest`'s digest from an existing tarball's own members.
+
+    ``None`` on any read failure (missing, truncated, unreadable) — treated
+    as "does not match", which routes the caller to write a fresh archive
+    rather than trust a corrupt one.
+    """
+    try:
+        with tarfile.open(tarball, "r:gz") as tar:
+            digest = hashlib.sha256()
+            for member in sorted((m for m in tar.getmembers() if m.isfile()), key=lambda m: m.name):
+                extracted = tar.extractfile(member)
+                if extracted is None:
+                    return None
+                digest.update(member.name.encode("utf-8"))
+                digest.update(hashlib.sha256(extracted.read()).hexdigest().encode("ascii"))
+            return digest.hexdigest()
+    except (OSError, tarfile.TarError):
+        return None
+
+
 def backup_project(target: Path) -> BackupResult:
     """Tarball + memory manifest under ``_archive/<date>-pre-<version>/`` — the node's whole job.
 
-    Never overwrites an existing archive for the same day+version: a second
-    ``backup`` run on the same day is a no-op read of what the first one
-    already wrote, not a silent replacement of it.
+    A second ``backup`` run on the same day, at the same kit version, whose
+    tracked files (:data:`BACKUP_PATHS`) have not changed since an earlier
+    one is a no-op read of that earlier snapshot — the common case (the
+    blueprint's own acceptance re-checking a node's output). One where that
+    content genuinely changed since every existing snapshot of the day — a
+    dry run, then a real run some time later with something touched in
+    between — gets its own ``grimoire-state-2.tar.gz``/
+    ``memory-manifest-sha256-2.txt`` (``-3``, …) instead: no existing
+    snapshot, canonical or suffixed, is ever overwritten. A real migration
+    found the previous, unconditional "tarball exists → skip" guard silently
+    reusing a stale first snapshot here (issue #490 follow-up) —
+    ``verify_upgrade``'s fixed-path lookup only stays correct if the
+    canonical (unsuffixed) manifest keeps meaning "the true first
+    pre-upgrade snapshot of the day", which reusing *any* existing tarball
+    regardless of content did not guarantee.
     """
     root = archive_root(target)
     root.mkdir(parents=True, exist_ok=True)
-    tarball = root / "grimoire-state.tar.gz"
-    manifest = root / "memory-manifest-sha256.txt"
+    digest = _backup_digest(target)
 
-    entries = 0
-    if not tarball.is_file():
-        with tarfile.open(tarball, "w:gz") as tar:
-            for rel in BACKUP_PATHS:
-                path = target / rel
-                if not path.exists():
-                    continue
-                tar.add(path, arcname=rel)
-                entries += 1
-    else:
-        with tarfile.open(tarball, "r:gz") as tar:
-            entries = len(tar.getnames())
+    suffix, n = "", 2
+    while True:
+        candidate = root / f"grimoire-state{suffix}.tar.gz"
+        if not candidate.is_file():
+            break
+        if _tarball_digest(candidate) == digest:
+            manifest = root / f"memory-manifest-sha256{suffix}.txt"
+            with tarfile.open(candidate, "r:gz") as tar:
+                entries = len(tar.getnames())
+            memory_files = (
+                len([ln for ln in manifest.read_text(encoding="utf-8").splitlines() if ln.strip()])
+                if manifest.is_file()
+                else write_memory_manifest(target, manifest)
+            )
+            return BackupResult(tarball=candidate, manifest=manifest, tarball_entries=entries, memory_files=memory_files)
+        suffix = f"-{n}"
+        n += 1
 
-    memory_files = write_memory_manifest(target, manifest) if not manifest.is_file() else len(
-        [ln for ln in manifest.read_text(encoding="utf-8").splitlines() if ln.strip()]
-    )
+    tarball = root / f"grimoire-state{suffix}.tar.gz"
+    manifest = root / f"memory-manifest-sha256{suffix}.txt"
+
+    with tarfile.open(tarball, "w:gz") as tar:
+        for rel in BACKUP_PATHS:
+            path = target / rel
+            if not path.exists():
+                continue
+            tar.add(path, arcname=rel)
+    with tarfile.open(tarball, "r:gz") as check:
+        entries = len(check.getnames())
+    memory_files = write_memory_manifest(target, manifest)
     return BackupResult(tarball=tarball, manifest=manifest, tarball_entries=entries, memory_files=memory_files)
 
 
@@ -384,25 +458,56 @@ def find_orphans(target: Path) -> OrphanReport:
     ``refresh_kit_tier``/``grimoire up`` never prunes ``_grimoire/kit/
     agents/`` — it only (re)writes what the configured archetype(s) still
     produce. An orphan is a name :func:`~grimoire.core.layout.
-    installed_agents` finds on disk that :func:`~grimoire.cli.cmd_up.
-    fresh_kit_agent_roster` would not (re)write today — its kit-tier file,
-    its override (if the override has no live kit base to extend), and any
-    managed per-host projection (``.claude/agents/<name>.md``, ``.github/
-    agents/<name>.agent.md``, …) for the same name. An override the kit
-    still ships a base for is drift, not an orphan — the ``overrides`` node
-    handles that separately.
+    installed_agents` finds on disk that ALL three of the following are
+    true for:
+
+    - :func:`~grimoire.cli.cmd_up.fresh_kit_agent_roster` — the same
+      resolver ``up`` uses — would not (re)write it today for this
+      project's configuration (base + archetype(s) + features);
+    - the project does not declare it explicitly under ``agents.
+      custom_agents`` in ``project-context.yaml``;
+    - its installed file does not live in the overrides tier
+      (:func:`~grimoire.core.layout.overrides_dir`) — an override with no
+      live kit base left to extend is the project's own liberty, never
+      something this node archives on its own initiative. (An override the
+      kit still ships a base for is drift, not an orphan either way — the
+      ``overrides`` node handles that, and such a name is already excluded
+      above because it *is* in the fresh roster.) Legacy-tier leftovers
+      (``_grimoire/agents/``, ``_grimoire/_config/agents/`` — a retired
+      pre-tier layout) are not overrides and stay in scope: they are exactly
+      the "a prior kit version left this behind" case this node exists for.
+
+    A real migration (Terraform-HouseServer, 2026-09-11) found this node
+    archiving two agents a project still used — ``fix-loop-orchestrator``
+    (declared via ``custom_agents``) and ``vectus`` (a ``vector-memory``
+    feature agent the roster resolver did not yet infer, see
+    :func:`~grimoire.cli.cmd_up._infer_resolved``) — leaving the project
+    broken until repaired by hand. In doubt, this function keeps the agent
+    installed rather than archiving it; it never guesses.
+
+    Managed per-host projections (``.claude/agents/<name>.md``, ``.github/
+    agents/<name>.agent.md``, …) for a genuine orphan are still reported
+    alongside its kit/override file, so :func:`archive_orphans` moves the
+    whole set together.
     """
-    from grimoire.cli.cmd_up import fresh_kit_agent_roster
+    from grimoire.cli.cmd_up import _load_config_quiet, fresh_kit_agent_roster
     from grimoire.core import layout
 
     roster = fresh_kit_agent_roster(target)
     installed = layout.installed_agents(target)
+    cfg = _load_config_quiet(target)
+    declared = set(cfg.agents.custom_agents) if cfg is not None else set()
 
     report = OrphanReport()
     for name in sorted(installed):
-        if name in roster:
+        if name in roster or name in declared:
             continue
         _, primary_path = installed[name]
+        if primary_path.is_relative_to(layout.overrides_dir(target)):
+            # Override tier, with no live kit base left to extend — the
+            # project's own file. Never ours to archive; `overrides` drift
+            # handling is the only node that touches these.
+            continue
         paths: list[Path] = [primary_path]
         for tree in _HOST_AGENT_DIRS:
             candidate = target / tree / f"{name}.md"

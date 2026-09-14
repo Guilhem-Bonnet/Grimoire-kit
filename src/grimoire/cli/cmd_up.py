@@ -698,6 +698,14 @@ def _infer_resolved(target: Path, cfg: GrimoireConfig | None) -> Any:
     does not record them. Missing that inference would quietly leave a
     project's stack agents behind at their install version — the exact freeze
     this refresh exists to end.
+
+    Feature agents (``vectus`` for the ``vector-memory`` feature, and any
+    other agent living under ``archetypes/features/<feature>/``) used to be
+    hard-coded to ``()`` here despite the docstring's promise above — a
+    project with a feature installed had that agent silently frozen on every
+    refresh, and reported as an orphan by
+    :func:`grimoire.tools.project_upgrade.find_orphans` since no fresh roster
+    ever named it (issue #490 follow-up).
     """
     from grimoire.archetypes import bundled_path as archetypes_path
     from grimoire.core.archetype_resolver import ResolvedArchetype
@@ -712,10 +720,19 @@ def _infer_resolved(target: Path, cfg: GrimoireConfig | None) -> Any:
             return ()
         return tuple(sorted(md.stem for md in d.glob("*.md") if md.stem in installed))
 
+    def _available_features() -> tuple[str, ...]:
+        features_dir = archetypes_path() / "features"
+        if not features_dir.is_dir():
+            return ()
+        found: set[str] = set()
+        for feature_dir in sorted(p for p in features_dir.iterdir() if p.is_dir()):
+            found.update(md.stem for md in feature_dir.glob("*.md") if md.stem in installed)
+        return tuple(sorted(found))
+
     return ResolvedArchetype(
         archetype=primary,
         stack_agents=_available("stack"),
-        feature_agents=(),
+        feature_agents=_available_features(),
         reason="refresh",
         archetypes=declared or (primary,),
     )
