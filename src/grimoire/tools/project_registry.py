@@ -13,13 +13,17 @@ Il porte aussi la découverte : ``crawl_projects`` (scan borné d'une racine) et
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from grimoire.core.scanner import _is_excluded_dir
+
+logger = logging.getLogger(__name__)
 
 # Marqueurs qui font d'un dossier un projet : un dépôt, ou une trace Grimoire.
 GRIMOIRE_MARKERS = (".git", "project-context.yaml", "_grimoire", ".github/copilot-instructions.md")
@@ -175,6 +179,36 @@ def looks_grimoire(p: Path) -> bool:
 def is_grimoire_managed(p: Path) -> bool:
     """Vrai si le projet est *initialisé* Grimoire (pas seulement un dépôt git)."""
     return (p / "project-context.yaml").exists() or (p / "_grimoire").exists()
+
+
+def is_scratch_path(path: Path) -> bool:
+    """Vrai si ``path`` est un dossier jeté à même la racine temporaire du système.
+
+    Cible précisément la forme ``<tmp>/<nom>`` ou ``<tmp>/tmpXXXXXXXX/<nom>``
+    — exactement ce que produit un ``mkdir``/``tempfile.mkdtemp()`` manuel
+    (smoke test, session d'un agent), et ce qui a été trouvé au registre réel
+    de la machine (#492 : une entrée ``probe`` ; 2026-09-14 : sept entrées
+    ``x``/``x-2``…``x-7`` sous ``/tmp/tmpXXXXXXXX/…``). Ce garde coupe
+    l'enrôlement *automatique* (``_maybe_register_cockpit``, déclenché par
+    ``init``/``up``) pour ces chemins, sans toucher aux actions explicites
+    (``cockpit add``/``create``, ``grimoire serve --project-root``).
+
+    Volontairement **peu profond** (un ou deux niveaux sous la racine
+    temporaire, pas plus) : le ``tmp_path`` isolé de pytest vit toujours au
+    moins trois niveaux sous cette racine
+    (``<tmp>/pytest-of-<user>/pytest-<n>/<test>0/…``), donc jamais confondu
+    avec un scratch manuel — un test qui enregistre un projet réel sous
+    ``tmp_path`` continue de fonctionner sans changement.
+    """
+    try:
+        resolved = path.expanduser().resolve()
+    except OSError:
+        return False
+    tmp_root = Path(tempfile.gettempdir()).resolve()
+    if resolved == tmp_root:
+        return True
+    relative = resolved.relative_to(tmp_root) if tmp_root in resolved.parents else None
+    return relative is not None and len(relative.parts) <= 2
 
 
 def register_project(path: Path, name: str | None = None) -> str | None:
