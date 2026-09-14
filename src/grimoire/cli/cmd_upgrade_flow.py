@@ -78,6 +78,39 @@ def _fail(ctx: typer.Context, message: str, *, json_flag: bool = False) -> None:
     raise typer.Exit(1)
 
 
+def _fail_run(
+    ctx: typer.Context,
+    message: str,
+    *,
+    json_flag: bool,
+    run_id: str,
+    done: list[str],
+    failed_node: str,
+) -> None:
+    """Même contrat que :func:`_fail`, mais pour un échec DANS la boucle de
+    `run` (issue #506, PR B) : un nœud qui lève ou qu'`engine.resume` refuse
+    perdait jusqu'ici tout ce que la boucle savait déjà — `done` et le nœud
+    fautif ne survivaient pas à `_fail`, qui ne prend qu'un message. Un
+    consommateur JSON (le cockpit) n'a alors aucun moyen de distinguer
+    « rien n'a tourné » de « huit nœuds sur neuf ont réussi » : il ne voit
+    qu'un texte d'erreur, jamais où s'arrêter dans le déroulé.
+    """
+    if _fmt(ctx, json_flag=json_flag) == "json":
+        typer.echo(json.dumps(
+            {
+                "ok": False,
+                "error": message,
+                "run_id": run_id,
+                "done": list(done),
+                "failed_node": failed_node,
+            },
+            ensure_ascii=False,
+        ))
+    else:
+        console.print(f"[red]refusé[/red] : {message}")
+    raise typer.Exit(1)
+
+
 # ── utility subcommands — also what the blueprint's own acceptances call ────
 
 
@@ -489,6 +522,7 @@ def upgrade_flow_run(
     done: list[str] = []
     stopped_at: str | None = None
     repairs_proposed = 0
+    backup_path: str | None = None
     while True:
         node_id = contract.node_id
         if node_id not in handlers:
@@ -500,14 +534,26 @@ def upgrade_flow_run(
         try:
             detail = handlers[node_id](root)
         except GrimoireRuntimeError as exc:
-            _fail(ctx, f"node {node_id} : {exc}", json_flag=json_flag)
+            _fail_run(ctx, f"node {node_id} : {exc}", json_flag=json_flag, run_id=run_id, done=done, failed_node=node_id)
             return
         if node_id == "apply":
             repairs_proposed = int(detail.get("repairs_proposed") or 0)
+        if node_id == "backup":
+            # `_backup(root)` rend `BackupResult.to_dict()` (tarball, manifest,
+            # entrées) — jusqu'ici jeté après avoir servi de `detail` au
+            # contrat. Le dossier qui contient le tarball ET le manifeste est
+            # ce qu'une UI a besoin d'afficher (issue #506, PR B) : l'humain
+            # veut savoir OÙ est la sauvegarde, pas relire le nom du tarball.
+            tarball = detail.get("tarball")
+            if tarball:
+                backup_path = str(Path(tarball).parent)
         output = _submit_envelope(contract, detail)
         outcome = engine.resume(run_id, output=output, executor=_silent_executor())
         if not outcome.ok:
-            _fail(ctx, f"node {node_id} refusé : {list(outcome.faults)}", json_flag=json_flag)
+            _fail_run(
+                ctx, f"node {node_id} refusé : {list(outcome.faults)}",
+                json_flag=json_flag, run_id=run_id, done=done, failed_node=node_id,
+            )
             return
         done.append(node_id)
         if outcome.finished:
@@ -518,7 +564,10 @@ def upgrade_flow_run(
 
     if _fmt(ctx, json_flag=json_flag) == "json":
         typer.echo(json.dumps(
-            {"ok": True, "run_id": run_id, "done": done, "stopped_at": stopped_at, "repairs_proposed": repairs_proposed},
+            {
+                "ok": True, "run_id": run_id, "done": done, "stopped_at": stopped_at,
+                "repairs_proposed": repairs_proposed, "backup_path": backup_path,
+            },
             ensure_ascii=False,
         ))
         return

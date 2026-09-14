@@ -135,6 +135,19 @@ def _proposals(project_root: Path, _query: _Query) -> Any:
     return workspace_api.proposals_view(project_root)
 
 
+def _flow_runs(project_root: Path, query: _Query) -> Any:
+    """``GET /api/workspace/flows/runs`` — les runs de flow connus (#506).
+
+    Distinct du TraceLedger (dispatch/agent-miss) qu'Observer lit par
+    ailleurs : un ``grimoire upgrade-flow run`` n'y écrit jamais de span, et
+    Observer affichait « TraceLedger vide » même juste après un run réel.
+    ``blueprint`` filtre (ex. ``project-upgrade``) ; omis, tous les flows.
+    """
+    from grimoire.tools.flow_runs import list_flow_runs
+
+    return {"runs": list_flow_runs(project_root, blueprint_id=_one(query, "blueprint"))}
+
+
 def _file_usage(project_root: Path, query: _Query) -> Any:
     return workspace_api.file_usage(project_root, _one(query, "path"))
 
@@ -221,6 +234,7 @@ GET_ROUTES: dict[str, _GetHandler] = {
     f"{PREFIX}blueprints": _blueprints,
     f"{PREFIX}agents": _agents,
     f"{PREFIX}proposals": _proposals,
+    f"{PREFIX}flows/runs": _flow_runs,
     f"{PREFIX}memory/overview": _memory_overview,
     f"{PREFIX}memory/search": _memory_search,
 }

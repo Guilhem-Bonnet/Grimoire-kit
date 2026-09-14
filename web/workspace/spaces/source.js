@@ -24,6 +24,7 @@
 // source-editor.js, jamais ici.
 
 import * as sourceEditor from './source-editor.js';
+import { renderMarkdown } from '../markdown.js';
 
 const CSS_HREF = new URL('./source.css', import.meta.url).href;
 
@@ -422,59 +423,6 @@ function loadRendered(body, entry) {
   div.className = 'sr-rendered';
   div.innerHTML = renderMarkdown(state.draft || '');
   body.replaceChildren(div);
-}
-
-// ── Rendu Markdown minimal, sans dépendance (ADR-006 D2) ────────────────────
-//
-// Volontairement limité : titres, gras, italique, code inline, blocs de code,
-// listes, liens, paragraphes. Pas de tableaux ni de citations imbriquées —
-// l'espace Source n'est pas un moteur Markdown, c'est une prévisualisation.
-
-function escapeHtml(text) {
-  return text.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-}
-
-function renderMarkdown(source) {
-  const lines = escapeHtml(source).split('\n');
-  const html = [];
-  let inCode = false;
-  let listOpen = false;
-  for (const raw of lines) {
-    if (raw.startsWith('```')) {
-      html.push(inCode ? '</pre>' : '<pre>');
-      inCode = !inCode;
-      continue;
-    }
-    if (inCode) { html.push(raw + '\n'); continue; }
-    let line = raw;
-    const heading = /^(#{1,3})\s+(.*)$/.exec(line);
-    if (heading) {
-      if (listOpen) { html.push('</ul>'); listOpen = false; }
-      const level = heading[1].length;
-      html.push(`<h${level}>${inline(heading[2])}</h${level}>`);
-      continue;
-    }
-    const item = /^[-*]\s+(.*)$/.exec(line);
-    if (item) {
-      if (!listOpen) { html.push('<ul>'); listOpen = true; }
-      html.push(`<li>${inline(item[1])}</li>`);
-      continue;
-    }
-    if (listOpen) { html.push('</ul>'); listOpen = false; }
-    if (!line.trim()) { html.push(''); continue; }
-    html.push(`<p>${inline(line)}</p>`);
-  }
-  if (listOpen) html.push('</ul>');
-  if (inCode) html.push('</pre>');
-  return html.join('\n');
-}
-
-function inline(text) {
-  return text
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*([^*]+)\*/g, '<em>$1</em>')
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" rel="noopener">$1</a>');
 }
 
 // ── Enregistrer / créer un override ─────────────────────────────────────────
