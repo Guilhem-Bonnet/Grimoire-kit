@@ -354,10 +354,11 @@ def _node_handlers() -> dict[str, Any]:
         return preview_upgrade(root).to_dict()
 
     def _apply(root: Path) -> dict[str, Any]:
-        result = apply_upgrade(root)
-        if not result.ok:
-            raise GrimoireRuntimeError(f"apply refusé : doctor={list(result.doctor_failures)} hook={result.hook.detail}")
-        return result.to_dict()
+        # Never raises on refusal (issue #510, point 3): the caller
+        # (`upgrade_flow_run`'s main loop) special-cases this one node's
+        # failure to report `done`/`backup_path`/`state` instead of
+        # discarding them the way `GrimoireRuntimeError` used to.
+        return apply_upgrade(root).to_dict()
 
     def _orphans(root: Path) -> dict[str, Any]:
         report = find_orphans(root)
@@ -489,6 +490,7 @@ def upgrade_flow_run(
     done: list[str] = []
     stopped_at: str | None = None
     repairs_proposed = 0
+    node_outputs: dict[str, dict[str, Any]] = {}
     while True:
         node_id = contract.node_id
         if node_id not in handlers:
@@ -504,6 +506,44 @@ def upgrade_flow_run(
             return
         if node_id == "apply":
             repairs_proposed = int(detail.get("repairs_proposed") or 0)
+            if not detail.get("ok", True):
+                # issue #510, point 3 — `apply` refusing after `up` already
+                # ran leaves the project genuinely upgraded, just stuck: the
+                # report and the JSON payload both say so explicitly, rather
+                # than discarding `done`/the backup path the way raising
+                # `GrimoireRuntimeError` (and `_fail`) used to.
+                from grimoire.tools.project_upgrade import write_apply_failure_report
+
+                backup_path = (node_outputs.get("backup") or {}).get("tarball")
+                report_path = write_apply_failure_report(root, detail, backup_path=backup_path)
+                error = (
+                    f"apply refusé : doctor={detail.get('doctor_failures')} "
+                    f"hook={(detail.get('hook') or {}).get('detail')}"
+                )
+                if _fmt(ctx, json_flag=json_flag) == "json":
+                    typer.echo(json.dumps(
+                        {
+                            "ok": False,
+                            "run_id": run_id,
+                            "done": done,
+                            "stopped_at": "apply",
+                            "state": "upgraded-but-failed",
+                            "failing_checks": detail.get("failing_checks") or [],
+                            "backup_path": backup_path,
+                            "repairs_proposed": repairs_proposed,
+                            "report_path": str(report_path),
+                            "error": error,
+                        },
+                        ensure_ascii=False,
+                    ))
+                else:
+                    control = ", ".join(detail.get("failing_checks") or []) or "apply"
+                    console.print(
+                        f"[red]anomalie[/red] mis à niveau, flow en échec sur {control} — "
+                        f"terminé avant : {', '.join(done) or 'rien'} (rapport : {report_path})"
+                    )
+                raise typer.Exit(1)
+        node_outputs[node_id] = detail
         output = _submit_envelope(contract, detail)
         outcome = engine.resume(run_id, output=output, executor=_silent_executor())
         if not outcome.ok:

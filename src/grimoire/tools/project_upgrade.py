@@ -42,6 +42,7 @@ from grimoire.core.exceptions import GrimoireRuntimeError
 __all__ = [
     "ApplyResult",
     "BackupResult",
+    "DoctorBaseline",
     "OrphanAgent",
     "OrphanReport",
     "PreviewResult",
@@ -54,11 +55,13 @@ __all__ = [
     "find_orphans",
     "preview_upgrade",
     "probe_hook",
+    "propose_doctor_repairs",
     "propose_memory_links",
     "propose_needs_hosts",
     "propose_override_migrations",
     "propose_repairs",
     "verify_upgrade",
+    "write_apply_failure_report",
 ]
 
 _BLUEPRINT_RELPATH = Path("registry") / "blueprints" / "project-upgrade.blueprint.json"
@@ -284,6 +287,23 @@ def backup_project(target: Path) -> BackupResult:
 
 
 @dataclass(slots=True)
+class DoctorBaseline:
+    """What :func:`preview_upgrade` saw failing before `apply` touches anything.
+
+    Two shapes, deliberately not one: ``dead_references`` keeps its own
+    granular, per-line identity (:func:`_dead_reference_strings`) — already
+    what tells a stale reference that merely moved a line from a brand new
+    one. Every *other* failing ``grimoire doctor`` check is coarser: one
+    ``"<name>: <detail>"`` signature per check (issue #510, point 1 — `apply`
+    refused on the Forge over a preexisting ``agents_referenced`` FAIL,
+    because the baseline #502 introduced only ever covered ``paths_resolve``,
+    the one check that first rejeu réel had reproduced)."""
+
+    dead_references: tuple[str, ...] = ()
+    other_failures: tuple[str, ...] = ()
+
+
+@dataclass(slots=True)
 class PreviewResult:
     report_path: Path
     up_ok: bool
@@ -294,6 +314,11 @@ class PreviewResult:
     :func:`_dead_reference_strings`. Persisted alongside the preview report
     so `apply`, a separate process invocation, can read it back and only
     fail on a reference `up` itself introduced."""
+    other_doctor_failures: tuple[str, ...] = ()
+    """Every other failing ``grimoire doctor`` check, as ``"<name>: <detail>"``
+    signatures (issue #510, point 1) — the baseline `apply` softens against
+    for every check but ``paths_resolve``, which keeps its own granular
+    ``doctor_baseline`` above."""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -301,6 +326,7 @@ class PreviewResult:
             "up_ok": self.up_ok,
             "host_sync_ok": self.host_sync_ok,
             "doctor_baseline": list(self.doctor_baseline),
+            "other_doctor_failures": list(self.other_doctor_failures),
         }
 
 
@@ -335,39 +361,84 @@ def _dead_reference_strings(target: Path) -> tuple[str, ...]:
     return tuple(str(ref) for ref in dead_path_references(target))
 
 
-def _read_doctor_baseline(target: Path) -> tuple[str, ...]:
-    """Read back :func:`preview_upgrade`'s baseline, or ``()`` if there is none.
+def _other_doctor_failure_signatures(checks: list[Any]) -> tuple[str, ...]:
+    """Every FAILing check in a ``grimoire -o json doctor`` payload, as ``"<name>: <detail>"``.
+
+    ``paths_resolve`` is deliberately excluded: it keeps its own granular,
+    per-reference identity (:func:`_dead_reference_strings`) rather than this
+    coarser one-signature-per-check form. Shared by :func:`preview_upgrade`
+    (which spawns its own ``doctor`` to build the baseline) and
+    :func:`apply_upgrade` (which already has a payload from its own
+    acceptance run) so neither drifts from the other's notion of "which
+    check, which wording" (issue #510, point 1).
+    """
+    if not isinstance(checks, list):
+        return ()
+    signatures: list[str] = []
+    for check in checks:
+        if not isinstance(check, dict) or check.get("passed", True):
+            continue
+        if check.get("name") == "paths_resolve":
+            continue
+        signatures.append(f"{check.get('name')}: {check.get('detail') or ''}")
+    return tuple(signatures)
+
+
+def _doctor_checks(target: Path) -> list[Any] | None:
+    """Run ``grimoire -o json doctor`` and return its ``checks`` list, or ``None`` if unreadable."""
+    proc = _run_grimoire(["-o", "json", "doctor", str(target)], cwd=target)
+    try:
+        payload = json.loads(proc.stdout or "{}")
+    except json.JSONDecodeError:
+        return None
+    checks = payload.get("checks") if isinstance(payload, dict) else None
+    return checks if isinstance(checks, list) else None
+
+
+def _read_doctor_baseline(target: Path) -> DoctorBaseline:
+    """Read back :func:`preview_upgrade`'s baseline, or an empty one if there is none.
 
     No baseline (``apply`` run without a prior ``preview``, or an older run
-    output already cleaned up) means no softening: every dead reference
+    output already cleaned up) means no softening: every doctor failure
     `apply` finds is treated as new, the strict pre-#502 behaviour — this
-    node never invents a baseline it did not itself see written.
+    node never invents a baseline it did not itself see written. Reading an
+    older preview.md that only ever wrote ``dead_references`` (pre-#510)
+    still works: ``other_failures`` simply comes back empty, the same "no
+    softening" default.
     """
     path = _doctor_baseline_path(target)
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return ()
-    refs = data.get("dead_references") if isinstance(data, dict) else None
-    if not isinstance(refs, list):
-        return ()
-    return tuple(str(r) for r in refs)
+        return DoctorBaseline()
+    if not isinstance(data, dict):
+        return DoctorBaseline()
+    refs = data.get("dead_references")
+    other = data.get("other_failures")
+    return DoctorBaseline(
+        dead_references=tuple(str(r) for r in refs) if isinstance(refs, list) else (),
+        other_failures=tuple(str(r) for r in other) if isinstance(other, list) else (),
+    )
 
 
 def preview_upgrade(target: Path) -> PreviewResult:
     """``up --dry-run`` + ``host sync --dry-run``, diffed into ``_grimoire-output/upgrade/<date>/preview.md``.
 
-    Also captures the dead-reference baseline (issue #502, third defect):
-    three real projects had `apply` refuse over ``_grimoire/...`` references
-    that were already stale *before* the upgrade — leftovers in
-    ``_memory/decisions-log.md``, ``.github/copilot-instructions.md``,
-    ``.claude/skills/*/SKILL.md`` — leaving the project "mis à niveau mais
-    flow en échec" with no path forward. The baseline lets `apply` tell that
-    apart from a reference the upgrade itself just broke.
+    Also captures the doctor baseline (issue #502, third defect; widened to
+    every check by issue #510, point 1): three real projects had `apply`
+    refuse over ``_grimoire/...`` references that were already stale *before*
+    the upgrade — leftovers in ``_memory/decisions-log.md``, ``.github/
+    copilot-instructions.md``, ``.claude/skills/*/SKILL.md`` — and the Forge
+    itself later hit the same "mis à niveau mais flow en échec" dead end over
+    a preexisting ``agents_referenced`` FAIL that baseline never covered. The
+    baseline now spans every ``grimoire doctor`` check, so `apply` can tell
+    any preexisting defect apart from a regression the upgrade itself just
+    introduced.
     """
     up_proc = _run_grimoire(["up", str(target), "--dry-run"], cwd=target)
     host_proc = _run_grimoire(["host", "sync", "--project-root", str(target), "--dry-run"], cwd=target)
     baseline = _dead_reference_strings(target)
+    other_failures = _other_doctor_failure_signatures(_doctor_checks(target) or [])
 
     report = run_output_dir(target) / "preview.md"
     report.write_text(
@@ -380,7 +451,10 @@ def preview_upgrade(target: Path) -> PreviewResult:
         encoding="utf-8",
     )
     _doctor_baseline_path(target).write_text(
-        json.dumps({"dead_references": list(baseline)}, ensure_ascii=False, indent=2),
+        json.dumps(
+            {"dead_references": list(baseline), "other_failures": list(other_failures)},
+            ensure_ascii=False, indent=2,
+        ),
         encoding="utf-8",
     )
     return PreviewResult(
@@ -388,6 +462,7 @@ def preview_upgrade(target: Path) -> PreviewResult:
         up_ok=up_proc.returncode == 0,
         host_sync_ok=host_proc.returncode == 0,
         doctor_baseline=baseline,
+        other_doctor_failures=other_failures,
     )
 
 
@@ -506,9 +581,18 @@ class ApplyResult:
     doctor_failures: tuple[str, ...]
     hook: ProbeResult
     preexisting_failures: tuple[str, ...] = ()
-    """Dead references already in the ``preview`` baseline (issue #502) —
-    never a reason `ok` is False on their own; see :func:`propose_repairs`."""
+    """Doctor failures already in the ``preview`` baseline — dead references
+    (issue #502) and, since issue #510 (point 1), any other check's
+    ``"<name>: <detail>"`` signature. Never a reason `ok` is False on their
+    own; see :func:`propose_repairs`/:func:`propose_doctor_repairs`."""
     repairs_proposed: int = 0
+    failing_checks: tuple[str, ...] = ()
+    """Names of the checks that actually caused ``ok`` to be ``False`` —
+    ``"up"`` (the upgrade itself failed), ``"hook"`` (the replayed hook
+    reported a failure), ``"paths_resolve"``, or any other doctor check name
+    with a genuine regression not in the ``preview`` baseline (issue #510,
+    point 3 — the report a refused ``apply`` produces names the control at
+    fault, never a bare "refused")."""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -518,6 +602,7 @@ class ApplyResult:
             "hook": self.hook.to_dict(),
             "preexisting_failures": list(self.preexisting_failures),
             "repairs_proposed": self.repairs_proposed,
+            "failing_checks": list(self.failing_checks),
         }
 
 
@@ -531,9 +616,17 @@ def apply_upgrade(target: Path, *, host: str = "claude") -> ApplyResult:
     were stale before the upgrade ever touched them, leaving the project
     upgraded but the flow stuck with no path forward. A pre-existing dead
     reference instead becomes a ``"repair"`` proposal
-    (:func:`propose_repairs`) — a real defect, just never this node's to
-    fix silently, and never automatically. Every other doctor check keeps
-    failing this node exactly as before; only ``paths_resolve`` is softened.
+    (:func:`propose_repairs`) — a real defect, just never this node's to fix
+    silently, and never automatically.
+
+    Issue #510 (point 1) widened that same softening to every other doctor
+    check: on the Forge, `apply` refused over a preexisting
+    ``agents_referenced`` FAIL (a managed host projection with no source
+    left in any tier) that had nothing to do with the upgrade just run. Any
+    check already failing in the ``preview`` baseline
+    (:func:`_other_doctor_failure_signatures`) becomes a ``"repair"``
+    proposal too (:func:`propose_doctor_repairs`); only a check that started
+    failing *since* preview — a genuine regression — still fails this node.
     """
     up_proc = _run_grimoire(["up", str(target)], cwd=target)
     if up_proc.returncode != 0:
@@ -542,26 +635,33 @@ def apply_upgrade(target: Path, *, host: str = "claude") -> ApplyResult:
             up_ok=False,
             doctor_failures=(f"up a échoué : {up_proc.stderr.strip() or up_proc.stdout.strip()}",),
             hook=ProbeResult(ok=False, detail="non exécuté : up a échoué"),
+            failing_checks=("up",),
         )
 
-    doctor_proc = _run_grimoire(["-o", "json", "doctor", str(target)], cwd=target)
-    try:
-        payload = json.loads(doctor_proc.stdout or "{}")
-        checks = payload.get("checks", [])
-    except json.JSONDecodeError:
-        checks = None
+    checks = _doctor_checks(target)
 
     failures: list[str] = []
+    failing_checks: list[str] = []
     preexisting: tuple[str, ...] = ()
+    stale_refs: tuple[str, ...] = ()
+    stale_other: tuple[str, ...] = ()
     if checks is None:
         failures.append("doctor : sortie JSON illisible")
+        failing_checks.append("doctor")
     else:
-        baseline = set(_read_doctor_baseline(target))
+        baseline = _read_doctor_baseline(target)
+        dead_baseline = set(baseline.dead_references)
         current_refs = _dead_reference_strings(target)
-        new_refs = [r for r in current_refs if r not in baseline]
-        stale_refs = tuple(r for r in current_refs if r in baseline)
+        new_refs = [r for r in current_refs if r not in dead_baseline]
+        stale_refs = tuple(r for r in current_refs if r in dead_baseline)
+
+        other_baseline = set(baseline.other_failures)
+        current_other = _other_doctor_failure_signatures(checks)
+        new_other = [s for s in current_other if s not in other_baseline]
+        stale_other = tuple(s for s in current_other if s in other_baseline)
+
         for check in checks:
-            if check.get("passed", True):
+            if not isinstance(check, dict) or check.get("passed", True):
                 continue
             name = check.get("name")
             if name == "paths_resolve":
@@ -569,15 +669,22 @@ def apply_upgrade(target: Path, *, host: str = "claude") -> ApplyResult:
                     shown = ", ".join(new_refs[:3])
                     more = f" (+{len(new_refs) - 3})" if len(new_refs) > 3 else ""
                     failures.append(f"{len(new_refs)} chemin(s) du kit cité(s) mais absent(s), nouveau(x) : {shown}{more}")
+                    failing_checks.append(name)
                 continue
-            failures.append(str(check.get("detail") or name))
-        preexisting = stale_refs
+            signature = f"{name}: {check.get('detail') or ''}"
+            if signature in new_other:
+                failures.append(str(check.get("detail") or name))
+                failing_checks.append(str(name))
+        preexisting = stale_refs + stale_other
 
     repairs_proposed = 0
     if preexisting:
-        repairs_proposed = len(propose_repairs(target, preexisting))
+        repairs_proposed = len(propose_repairs(target, stale_refs))
+        repairs_proposed += len(propose_doctor_repairs(target, stale_other))
 
     hook = probe_hook(target, host=host)
+    if not hook.ok:
+        failing_checks.append("hook")
     return ApplyResult(
         ok=not failures and hook.ok,
         up_ok=True,
@@ -585,7 +692,45 @@ def apply_upgrade(target: Path, *, host: str = "claude") -> ApplyResult:
         hook=hook,
         preexisting_failures=preexisting,
         repairs_proposed=repairs_proposed,
+        failing_checks=tuple(failing_checks),
     )
+
+
+def write_apply_failure_report(
+    target: Path, apply_detail: dict[str, Any], *, backup_path: str | None,
+) -> Path:
+    """Persist ``_grimoire-output/upgrade/<date>/report.md`` when the ``apply`` node refuses (issue #510, point 3).
+
+    Before this, a refused ``apply`` left the flow "mis à niveau mais en
+    échec" with no report at all — ``verify`` is the only node that ever
+    wrote ``report.md``, and it never runs once ``apply`` has refused. The
+    file's very first line is the exact wording a host UI shows verbatim:
+    "Mis à niveau, flow en échec sur <contrôle>" — never a bare "refused",
+    which used to leave a project's real state (`up` had already run)
+    unreported.
+
+    Takes a plain ``dict`` (:meth:`ApplyResult.to_dict`'s shape) rather than
+    an :class:`ApplyResult` — the caller (``cli.cmd_upgrade_flow``) already
+    has the node's output in that shape, from the same envelope it submits
+    to the flow engine, and this avoids a second, divergent reconstruction.
+    """
+    failing = apply_detail.get("failing_checks") or []
+    control = ", ".join(str(f) for f in failing) or "apply"
+    hook_detail = ""
+    hook = apply_detail.get("hook")
+    if isinstance(hook, dict):
+        hook_detail = str(hook.get("detail") or "")
+    report = run_output_dir(target) / "report.md"
+    report.write_text(
+        f"Mis à niveau, flow en échec sur {control}.\n\n"
+        f"Généré le {datetime.now(UTC).isoformat()} par `grimoire upgrade-flow`.\n\n"
+        f"- up exécuté : {'oui' if apply_detail.get('up_ok') else 'non'}\n"
+        f"- défauts : {', '.join(str(f) for f in apply_detail.get('doctor_failures') or []) or 'aucun'}\n"
+        f"- hook : {hook_detail or 'non exécuté'}\n"
+        f"- sauvegarde : {backup_path or 'indisponible'}\n",
+        encoding="utf-8",
+    )
+    return report
 
 
 # ── orphans ───────────────────────────────────────────────────────────────────
@@ -794,6 +939,37 @@ def propose_repairs(target: Path, stale_refs: Iterable[str]) -> list[Any]:
                 carrier_reason=carrier_reason,
                 artifact_ref=ref,
                 category="dead-reference",
+            )
+        )
+    return proposals
+
+
+def propose_doctor_repairs(target: Path, stale_failures: Iterable[str]) -> list[Any]:
+    """One ``"repair"`` proposal per pre-existing ``grimoire doctor`` check failure (issue #510, point 1).
+
+    *stale_failures* are :func:`_other_doctor_failure_signatures`-shaped
+    (``"<name>: <detail>"``) signatures :func:`apply_upgrade` found in the
+    ``preview`` baseline too — real defects, present before the upgrade
+    touched anything, that this flow never fixes on its own initiative.
+    Unlike :func:`propose_repairs` (dead ``_grimoire/...`` references, which
+    can name an evident substitution), a doctor check failure is always left
+    to a human: naming the control and its detail is the whole proposal.
+    """
+    from grimoire.proposals import create_manual_proposal
+
+    proposals = []
+    for signature in stale_failures:
+        name, _, detail = signature.partition(": ")
+        slug_hint = re.sub(r"[^a-z0-9]+", "-", signature.lower()).strip("-")[:80]
+        proposals.append(
+            create_manual_proposal(
+                target,
+                slug=f"repair-doctor-{name}-{slug_hint}",
+                specialty=f"contrôle doctor préexistant : {name}",
+                artifact_type="repair",
+                carrier_reason=f"{detail or name} — revue humaine",
+                artifact_ref=signature,
+                category="doctor-preexisting",
             )
         )
     return proposals

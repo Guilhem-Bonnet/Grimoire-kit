@@ -18,9 +18,12 @@ avaient besoin de deux commandes, pas d'une seule surchargée.
    `_archive/<date>-pre-<version>/`, plus un manifeste SHA-256 de `_grimoire/_memory/`. Idempotent : un
    second passage le même jour ne réécrit rien.
 2. **preview** (V0) — `up --dry-run` + `host sync --dry-run`, diff écrit dans
-   `_grimoire-output/upgrade/<date>/preview.md`. Enregistre aussi une **ligne de base** des références
-   `_grimoire/...` déjà mortes (`_grimoire-output/upgrade/<date>/doctor-baseline.json`, issue #502) —
-   c'est elle qui distingue, au nœud `apply`, un défaut préexistant d'une vraie régression.
+   `_grimoire-output/upgrade/<date>/preview.md`. Enregistre aussi une **ligne de base** de *tous* les
+   contrôles `grimoire doctor` (`_grimoire-output/upgrade/<date>/doctor-baseline.json`) : les références
+   `_grimoire/...` déjà mortes (`dead_references`, granularité par ligne, issue #502) et, depuis l'issue
+   #510 (point 1), toute autre FAIL déjà présente (`other_failures`, une signature `"<contrôle> :
+   <détail>"` par check — ex. `agents_referenced`). C'est cette ligne de base qui distingue, au nœud
+   `apply`, un défaut préexistant d'une vraie régression, quel que soit le contrôle en cause.
 3. **orphans** (V0) — agents/wrappers portant le marqueur `grimoire:managed` que le kit installé ne
    livre plus (comparaison entre ce qui est sur disque et le plan du scaffolder pour l'archétype
    configuré — `grimoire.cli.cmd_up.fresh_kit_agent_roster`, qui ne write rien). Déplacés vers
@@ -32,13 +35,27 @@ avaient besoin de deux commandes, pas d'une seule surchargée.
    FAIL **et** le hook `SessionStart` rejoué sans échec structuré (clé `error` de premier niveau, ou le
    marqueur exact `[Grimoire] hook <id> en erreur` en tête d'un bloc rendu — jamais une recherche libre
    du mot « erreur », qui faisait échouer `apply` sur un simple rappel de mémoire le mentionnant, issue
-   #502). Une référence `_grimoire/...` morte (check `paths_resolve`) ne fait échouer ce nœud que si elle
-   est **absente de la ligne de base** que `preview` a enregistrée — une référence déjà périmée avant la
-   mise à niveau devient une **proposition `repair`** (`grimoire.proposals`, `artifact_type: "repair"`)
-   au lieu de bloquer le flow : fichier:ligne cités, substitution vers la tier kit proposée quand elle
-   est évidente (même relative path qu'un ancien tier `_grimoire/_config(/custom)`), sinon revue humaine
-   nommée. `grimoire upgrade-flow apply`/`run` rapportent alors clairement « mis à niveau, N défaut(s)
-   préexistant(s) en proposition » plutôt qu'un simple échec.
+   #502). Une référence `_grimoire/...` morte (check `paths_resolve`) ou tout autre contrôle doctor FAIL
+   (issue #510, point 1) ne fait échouer ce nœud que s'il est **absent de la ligne de base** que
+   `preview` a enregistrée — un défaut déjà présent avant la mise à niveau devient une **proposition
+   `repair`** (`grimoire.proposals`, `artifact_type: "repair"`) au lieu de bloquer le flow :
+   `paths_resolve` nomme fichier:ligne et propose une substitution vers la tier kit quand elle est
+   évidente (`propose_repairs`) ; tout autre contrôle nomme le contrôle et son détail, toujours en
+   revue humaine (`propose_doctor_repairs`, `category: "doctor-preexisting"`). `grimoire upgrade-flow
+   apply`/`run` rapportent alors clairement « mis à niveau, N défaut(s) préexistant(s) en proposition »
+   plutôt qu'un simple échec.
+
+   Quand `apply` refuse malgré tout (une vraie régression, absente de la ligne de base), le flow a déjà
+   modifié le projet — `up` a tourné — et le dit explicitement plutôt que de laisser croire que rien n'a
+   bougé (issue #510, point 3) : `grimoire upgrade-flow run --json` rend `"ok": false`, `"done"` (les
+   nœuds réellement exécutés, `backup`/`preview`/`orphans` compris), `"stopped_at": "apply"`,
+   `"state": "upgraded-but-failed"`, `"failing_checks"` (le ou les contrôles en cause — `"up"`, `"hook"`
+   ou un nom de contrôle doctor), et `"backup_path"` (le tarball du nœud `backup`, pour restaurer si
+   besoin). Un `_grimoire-output/upgrade/<date>/report.md` est écrit avant le refus, sa première ligne
+   étant toujours « Mis à niveau, flow en échec sur `<contrôle>`. » — jamais un fichier absent parce que
+   `verify` (le seul autre nœud qui en écrit un) ne tourne jamais après un `apply` refusé. `grimoire.
+   tools.project_update.update_project()` (l'atelier/le cockpit) porte les mêmes champs (`state`,
+   `backupPath`) et relit ce rapport dès qu'il existe.
 5. **overrides** (V1, proposition) — pour chaque override en dérive (`grimoire.core.override_drift.
    project_override_drift`), un essai `agent override convert --dry-run` : corps identique au kit →
    proposition « conversion sûre » ; corps divergent → proposition « revue nécessaire », diff joint.
