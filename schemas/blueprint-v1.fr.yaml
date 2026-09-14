@@ -182,6 +182,36 @@
     `composite-inline` : un groupe de Studio aplati, informatif. `agent-spec` :
     une esquisse d'agent ou de déclencheur venue du Studio, informative.
 
+    Depuis l'issue #207, sept genres de plus — la différenciation qu'un
+    document de consignes statique ne peut pas exprimer, qu'un moteur qui
+    tient l'état rend directe : `fanout` (`ref` = sous-flow modèle, une
+    instance par élément de la liste `fanout_items` que le dispatch du node
+    lui-même produit, bornée par `pilot.max_fanout_n`) ; `verify-panel`
+    (`ref` = sous-flow vérificateur, `config.verifyPanel.k`/`.angles` — k
+    vérificateurs indépendants, majorité requise, coût = k tentatives
+    toujours) ; `loop-until-dry` (`ref` = sous-flow,
+    `config.loopUntilDry.maxRounds` — relancé jusqu'à ce qu'un tour produise
+    une `novelty_key` déjà vue, dédupliquée contre tout le vu, pas seulement
+    le dernier retenu) ; `judge` (`ref` = sous-flow candidat,
+    `config.judge.n`/`.angles` — N tentatives sous angles imposés, puis le
+    node lui-même redispatché comme juge, qui désigne un `judge_winner` ; la
+    trace des N tentatives survit dans leurs propres runs) ; `checkpoint`
+    (pas de `ref` utile, une chaîne vide par convention — toujours une
+    décision d'hôte forcée, `checkpoint_decision`
+    `approve`/`reject`/`amend` dans la sortie de reprise, jamais auto-décidée
+    par la cascade) ; `budget` (pas de `ref` unique —
+    `config.budget.maxCostUsd`/`.passes`, une liste de refs de sous-flows ;
+    la première obligatoire, les suivantes lancées seulement tant que le
+    coût cumulé reste sous le plafond, abandonnées plutôt que tentées
+    au-delà) ; `replay-diff` (`ref` = sous-flow, rejoué deux fois sur la même
+    entrée, `replay_diverged` dit si les deux traces divergent — une
+    divergence est une donnée, jamais un échec). Sémantique complète, refus
+    et comptabilité de coût : `docs/cli-reference.md` ; validation au
+    chargement et exécution : `grimoire.flows.blueprint_loader` et
+    `grimoire.flows.genres` (les sept fonctions `_execute_<genre>`, module
+    compagnon de `grimoire.flows.dispatch_executor`), pas ce schéma
+    (délibérément permissif ici, comme `config.gate`/`config.evals`).
+
 /$defs/node/properties/role:
   texte: >-
     Classe sémantique du node, orthogonale à `kind` : `kind` dit *d'où il

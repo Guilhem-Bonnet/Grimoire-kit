@@ -37,7 +37,7 @@ from grimoire.flows.schemas import FlowRunMeta, FlowStatusView, NodeContract, Re
 from grimoire.runtime.kernel import RuntimeKernel
 from grimoire.runtime.schemas import ExecutionContext, RunEventType, WorkflowInstance, WorkflowStatus
 
-__all__ = ["FlowEngine", "check_output_against_contract", "rust_backend_available"]
+__all__ = ["FlowEngine", "check_output_against_contract", "checkpoint_decision_faults", "rust_backend_available"]
 
 try:
     import grimoire_flows_core as _rust_core
@@ -151,6 +151,38 @@ def check_output_against_contract(contract: NodeContract, output: dict[str, Any]
                 f"node={contract.node_id} pin={pin.pin_id} : contrat produit {produced!r} != attendu {pin.contract!r}"
             )
     return faults
+
+
+_CHECKPOINT_DECISIONS = ("approve", "reject", "amend")
+
+
+def checkpoint_decision_faults(output: dict[str, Any]) -> list[str]:
+    """Valide la décision d'un node ``kind: "checkpoint"`` (issue #207) — Python-only, jamais côté Rust.
+
+    En plus de ses pins (vérifiées par :func:`check_output_against_contract`,
+    inchangée), la sortie d'un checkpoint doit porter ``checkpoint_decision``
+    parmi ``"approve"``/``"reject"``/``"amend"`` — absente ou invalide, un
+    refus nommé, jamais une décision devinée. ``"reject"`` est lui-même un
+    défaut (le motif, ``checkpoint_reason``, finit dans l'événement
+    ``STEP_FAILED`` du kernel via le même mécanisme que tout autre défaut —
+    « le motif dans le graphe de décision » que l'issue demande) : la reprise
+    suivante rouvre exactement ce même node, jamais le suivant.
+
+    Limite documentée, pas une garde silencieuse : ``"amend"`` avance
+    exactement comme ``"approve"`` au niveau du moteur — son motif n'est pas
+    persisté séparément dans cette version (le kernel n'a pas de canal pour
+    un motif de succès, seulement pour un motif d'échec). Un futur lot peut
+    ajouter ce canal ; ce correctif-ci ne l'invente pas.
+    """
+    decision = output.get("checkpoint_decision")
+    if decision not in _CHECKPOINT_DECISIONS:
+        return [
+            f"checkpoint : 'checkpoint_decision' doit être l'un de {_CHECKPOINT_DECISIONS} (reçu {decision!r})"
+        ]
+    if decision == "reject":
+        reason = output.get("checkpoint_reason") or "(aucun motif fourni)"
+        return [f"checkpoint rejeté : {reason}"]
+    return []
 
 
 class FlowEngine:
@@ -406,6 +438,13 @@ class FlowEngine:
 
         contract = contracts[current_id]
         faults = check_output_against_contract(contract, output)
+        if contract.kind == "checkpoint":
+            # Issue #207 : la décision d'hôte ("approve"/"reject"/"amend")
+            # n'est pas une pin — jamais franchie côté Rust
+            # (`check_output_against_contract` ci-dessus n'en sait toujours
+            # rien) — vérifiée ici, Python-only, au même endroit que le
+            # reste de la précondition de resume().
+            faults = [*faults, *checkpoint_decision_faults(output)]
         if faults:
             wfi = self._kernel.fail_step(wfi.id, ctx, step_id=current_id, reason="; ".join(faults))
             return ResumeOutcome(ok=False, finished=False, node_id=current_id, faults=tuple(faults), contract=contract)

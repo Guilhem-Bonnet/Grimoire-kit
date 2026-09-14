@@ -58,15 +58,24 @@ class PilotPolicy:
     #: pas de limite posée par le pilote (celle de ``--max-tier``, si donnée
     #: à l'appel, s'applique quand même).
     max_escalations: int | None = None
-    #: Plafond de coût par node, en USD. ``None`` : pas de plafond.
+    #: Plafond de coût par node, en USD. ``None`` : pas de plafond. S'applique
+    #: aussi au *total* d'un genre de node (issue #207 : composite, fanout,
+    #: verify-panel, loop-until-dry, judge, budget, replay-diff) — jamais à
+    #: une seule tentative dans ce cas, voir ``flows.dispatch_executor``.
     max_cost_usd_per_node: float | None = None
+    #: Nombre maximal d'éléments qu'un node ``kind: "fanout"`` (issue #207)
+    #: peut instancier en sous-flows. ``None`` : le genre ``fanout`` refuse de
+    #: s'exécuter — un fan-out sans plafond de projet déclaré n'est jamais
+    #: silencieusement illimité (même doctrine que ``max_cost_usd_per_node`` :
+    #: un plafond de sécurité absent n'est jamais un plafond infini implicite).
+    max_fanout_n: int | None = None
 
 
 _DEFAULT_POLICY = PilotPolicy()
 
 
 def _validate_and_build(data: dict[str, Any]) -> PilotPolicy:
-    known_keys = {"start_tier", "max_escalations", "max_cost_usd_per_node"}
+    known_keys = {"start_tier", "max_escalations", "max_cost_usd_per_node", "max_fanout_n"}
     unknown = sorted(set(data) - known_keys)
     if unknown:
         raise GrimoireRuntimeError(
@@ -101,10 +110,17 @@ def _validate_and_build(data: dict[str, Any]) -> PilotPolicy:
     ):
         raise GrimoireRuntimeError("pilot.yaml : 'max_cost_usd_per_node' doit être un nombre strictement positif")
 
+    max_fanout_n = data.get("max_fanout_n")
+    if max_fanout_n is not None and (
+        isinstance(max_fanout_n, bool) or not isinstance(max_fanout_n, int) or max_fanout_n < 1
+    ):
+        raise GrimoireRuntimeError("pilot.yaml : 'max_fanout_n' doit être un entier strictement positif")
+
     return PilotPolicy(
         start_tier=start_tier,
         max_escalations=max_escalations,
         max_cost_usd_per_node=float(max_cost) if max_cost is not None else None,
+        max_fanout_n=max_fanout_n,
     )
 
 
