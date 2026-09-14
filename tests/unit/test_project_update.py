@@ -50,17 +50,98 @@ def _post(port: int, path: str, payload: dict[str, Any]) -> tuple[int, dict[str,
 # ── La commande ──────────────────────────────────────────────────────────────
 
 
-def test_a_dry_run_writes_nothing(project: Path) -> None:
-    before = {p.name for p in project.iterdir()}
+#: Ce que le nœud `backup` (mécanique, tourne même sous `--dry-run` — issue
+#: #490) et le rapport `preview.md` peuvent seuls faire apparaître : jamais
+#: une réécriture d'un fichier déjà là, seulement des dossiers additifs.
+_UPGRADE_FLOW_OUTPUT_DIRS = frozenset({"_archive", "_grimoire-output", "_grimoire-runtime-output"})
+
+
+def test_a_dry_run_only_adds_archive_and_report_dirs(project: Path) -> None:
+    """L'aperçu est le flow `upgrade-flow --dry-run` (#490), pas `up --dry-run` seul :
+
+    son premier nœud (`backup`, mécanique) écrit un tarball + un manifeste
+    sous `_archive/`, et `preview` un rapport sous `_grimoire-output/` —
+    tous deux additifs, jamais une réécriture d'un fichier déjà présent. Rien
+    de ce qu'un projet avait avant l'aperçu ne doit changer.
+    """
+    before = {p.name: p.read_bytes() for p in project.rglob("*") if p.is_file()}
     report = project_update.update_project(project, dry_run=True)
     assert report["dryRun"] is True
     assert report["output"], "l'aperçu doit rendre un compte rendu lisible"
-    assert {p.name for p in project.iterdir()} == before
+
+    after_names = {p.name for p in project.iterdir()}
+    assert after_names - {".git"} <= _UPGRADE_FLOW_OUTPUT_DIRS
+    for name, content in before.items():
+        found = next((p for p in project.rglob("*") if p.is_file() and p.name == name), None)
+        assert found is not None and found.read_bytes() == content, f"{name} a été modifié par un aperçu"
 
 
 def test_a_missing_path_is_refused(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
         project_update.update_project(tmp_path / "nulle-part")
+
+
+def test_a_dry_run_surfaces_the_preview_report(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """La réponse porte le texte du rapport, jamais un résumé reformulé (#490)."""
+    from grimoire.tools.project_upgrade import run_output_dir
+
+    preview_text = "# Aperçu\n\nRien n'a été écrit.\n"
+    run_output_dir(project).joinpath("preview.md").write_text(preview_text, encoding="utf-8")
+
+    class _Ok:
+        returncode = 0
+        stdout = json.dumps({"ok": True, "run_id": "r1", "done": ["backup", "preview"], "stopped_at": "orphans"})
+        stderr = ""
+
+    monkeypatch.setattr(project_update.subprocess, "run", lambda *a, **k: _Ok())
+    report = project_update.update_project(project, dry_run=True)
+    assert report["ok"] is True
+    assert report["preview"] == preview_text
+    assert report["runId"] == "r1"
+    assert report["done"] == ["backup", "preview"]
+    assert "report" not in report, "un aperçu n'a pas de rapport final — seul un flow complet en écrit un"
+    assert "proposals" not in report
+
+
+def test_a_confirmed_run_surfaces_the_final_report_and_pending_proposals(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Après confirmation, la réponse porte le rapport final et les propositions en attente."""
+    from grimoire.proposals import create_manual_proposal
+    from grimoire.tools.project_upgrade import run_output_dir
+
+    report_text = "# Rapport de mise à niveau\n\nVerdict : OK\n"
+    run_output_dir(project).joinpath("report.md").write_text(report_text, encoding="utf-8")
+    pending = create_manual_proposal(
+        project, slug="hosts-declare-enabled", specialty="hosts.enabled non déclaré",
+        artifact_type="needs-hosts", carrier_reason="déclarer hosts.enabled: [claude]",
+    )
+    accepted = create_manual_proposal(
+        project, slug="memory-link-deja-traitee", specialty="fiche déjà traitée",
+        artifact_type="memory-link", target_agent="concierge",
+    )
+    from grimoire.proposals import reject_proposal
+
+    reject_proposal(project, accepted.slug)
+
+    class _Ok:
+        returncode = 0
+        stdout = json.dumps({
+            "ok": True, "run_id": "r2",
+            "done": ["backup", "preview", "orphans", "apply", "overrides", "memory", "needs-hosts", "verify"],
+            "stopped_at": "destructive",
+        })
+        stderr = ""
+
+    monkeypatch.setattr(project_update.subprocess, "run", lambda *a, **k: _Ok())
+    report = project_update.update_project(project, dry_run=False)
+    assert report["ok"] is True
+    assert report["report"] == report_text
+    assert report["stoppedAt"] == "destructive"
+    slugs = {p["slug"] for p in report["proposals"]}
+    assert slugs == {pending.slug}, "seule la proposition encore pending doit apparaître"
 
 
 def test_a_failing_command_is_reported_not_raised(
@@ -79,6 +160,22 @@ def test_a_failing_command_is_reported_not_raised(
     assert report["ok"] is False
     assert report["error"]
     assert "refus net" in report["output"]
+
+
+def test_a_failing_command_surfaces_the_flows_own_error(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Quand `--json` a rendu un refus nommé, la réponse le porte — jamais le générique."""
+
+    class _Fail:
+        returncode = 1
+        stdout = json.dumps({"ok": False, "error": "node apply : doctor a échoué"})
+        stderr = ""
+
+    monkeypatch.setattr(project_update.subprocess, "run", lambda *a, **k: _Fail())
+    report = project_update.update_project(project, dry_run=False)
+    assert report["ok"] is False
+    assert report["error"] == "node apply : doctor a échoué"
 
 
 def test_a_timeout_is_reported(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:

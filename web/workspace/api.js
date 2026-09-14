@@ -219,10 +219,15 @@ export const api = {
     post(WS + 'proposals/' + encodeURIComponent(slug) + '/' + action, {}),
   blueprintPut: (id, blueprint) => put('/api/blueprints/' + encodeURIComponent(id), blueprint),
 
-  // Aligner un projet sur le kit installé (`grimoire up`). Disponible sur les
-  // deux hôtes : `confirm: false` (par défaut) rend un aperçu, `confirm: true`
-  // écrit réellement. `project` est le slug ciblé (portefeuille) ; omis, la
-  // cible est le projet déjà servi par l'atelier.
+  // Aligner un projet sur le kit installé — `grimoire upgrade-flow run`
+  // (#490), pas `up` seul : sauvegarde, aperçu, orphelins, application,
+  // propositions (overrides/mémoire/besoins), vérification. Disponible sur
+  // les deux hôtes : `confirm: false` (par défaut) s'arrête après l'aperçu
+  // (`report.preview`, jamais réécrit) ; `confirm: true` lance le flow
+  // complet, mécanique, arrêté au checkpoint final (`report.report`,
+  // `report.proposals` — jamais décidé à la place de qui que ce soit).
+  // `project` est le slug ciblé (portefeuille) ; omis, la cible est le
+  // projet déjà servi par l'atelier.
   updateProject: (project, confirm = false) =>
     postOpen('/api/projects/update', { project: project || undefined, confirm }),
 

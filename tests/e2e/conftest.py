@@ -508,6 +508,98 @@ def cockpit_workspace(browser: Browser, served_cockpit: tuple[str, str]) -> Iter
 
 
 @pytest.fixture(scope="session")
+def served_cockpit_upgrade(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Iterator[tuple[str, str, Path]]:
+    """Un cockpit dédié, sur un projet jetable prêt à produire une proposition (#490).
+
+    Dédié plutôt que ``served_cockpit``/``real_project`` (partagés par toute
+    la session) : le flow complet que ce lot branche sur le bouton (``apply``
+    = un vrai ``grimoire up``, ``verify`` qui recompare le manifeste mémoire)
+    écrit dans le projet servi. Mutualiser ce coût avec les tests qui lisent
+    ``real_project`` en continu aurait fait retomber son état sous leurs
+    pieds — même piège que le clone kit partagé, à l'échelle d'un projet e2e.
+
+    La fiche mémoire non raccordée, semée avant l'enrôlement, donne au nœud
+    ``memory`` du flow quelque chose de concret à proposer : sans elle, un
+    projet fraîchement scaffoldé n'a la plupart du temps ni override en
+    dérive, ni besoin non résolu, ni fiche non raccordée — et le test ne
+    prouverait rien sur « les propositions apparaissent dans Piloter ».
+    """
+    root = tmp_path_factory.mktemp("cockpit-upgrade") / "projet"
+    root.mkdir(parents=True)
+    created = subprocess.run(
+        [sys.executable, "-m", "grimoire", "init", ".", "-y", "--name", "cockpit-upgrade"],
+        cwd=str(root), capture_output=True, text=True, check=False, timeout=180,
+    )
+    if not (root / "_grimoire" / "kit").is_dir():
+        pytest.skip(f"`grimoire init` indisponible ici : {created.stderr[-400:]}")
+
+    learnings = root / "_grimoire" / "_memory" / "agent-learnings"
+    learnings.mkdir(parents=True, exist_ok=True)
+    (learnings / "monitoring.md").write_text(
+        "# Monitoring\n\nSurveiller les métriques clés.\n", encoding="utf-8"
+    )
+
+    port = _free_port()
+    cockpit_home = tmp_path_factory.mktemp("cockpit-upgrade-home")
+    env = dict(os.environ)
+    env["GRIMOIRE_COCKPIT_HOME"] = str(cockpit_home)
+    env["GRIMOIRE_NO_COCKPIT"] = "1"
+    env["NO_COLOR"] = "1"
+    added = subprocess.run(
+        [sys.executable, "-m", "grimoire", "cockpit", "add", str(root)],
+        env=env, capture_output=True, text=True, check=False, timeout=60,
+    )
+    registry_path = cockpit_home / "registry.json"
+    if not registry_path.is_file():
+        pytest.skip(f"`grimoire cockpit add` n'a pas peuplé le registre : {added.stderr[-400:]}")
+    import json
+
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    slug = next((str(e.get("slug", "")) for e in registry if e.get("path") == str(root)), "")
+    if not slug:
+        pytest.skip("slug introuvable au registre du cockpit après `add`")
+
+    process = subprocess.Popen(
+        [
+            sys.executable, "-m", "grimoire", "cockpit", "serve",
+            "--port", str(port), "--no-open", "--no-refresh",
+        ],
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        _wait_ready(port, time.monotonic() + 60)
+        yield f"http://127.0.0.1:{port}", slug, root
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=10)
+        assert not _alive(process.pid), f"cockpit survivant : pid {process.pid}"
+
+
+@pytest.fixture
+def cockpit_upgrade_workspace(
+    browser: Browser, served_cockpit_upgrade: tuple[str, str, Path]
+) -> Iterator[Page]:
+    """La coque, chargée sur le cockpit dédié et ciblée sur le projet jetable."""
+    served, slug, _root = served_cockpit_upgrade
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
+    page = context.new_page()
+    page.goto(f"{served}/workspace/index.html?project={slug}", wait_until="domcontentloaded")
+    page.wait_for_selector("body[data-ready='1']", timeout=30_000)
+    try:
+        yield page
+    finally:
+        context.close()
+
+
+@pytest.fixture(scope="session")
 def browser() -> Iterator[Browser]:
     """Chromium, cherché là où il est réellement installé.
 
