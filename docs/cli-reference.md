@@ -803,8 +803,10 @@ aucune agrégation. Sept genres de plus généralisent le même mécanisme —
 lancer un ou plusieurs sous-flows enfants — avec chacun sa propre politique
 d'agrégation. Aucun n'est exprimable dans un document de consignes statique ;
 tous deviennent directs dès que le moteur tient l'état. Chacun n'existe que
-sous `--executor dispatch` (`grimoire.flows.dispatch_executor`, méthodes
-`_execute_<genre>`) ; sous `interactive`, le contrat affiche le genre et sa
+sous `--executor dispatch` (`grimoire.flows.genres`, fonctions
+`_execute_<genre>` — module compagnon de `grimoire.flows.dispatch_executor`,
+extrait de lui pour rester sous le seuil du cliquet de lignes) ; sous
+`interactive`, le contrat affiche le genre et sa
 `ref` comme frontière d'outils, l'hôte orchestre lui-même.
 
 Paramétrage refusé nommément **au chargement du blueprint**

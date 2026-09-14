@@ -208,9 +208,9 @@
     divergence est une donnée, jamais un échec). Sémantique complète, refus
     et comptabilité de coût : `docs/cli-reference.md` ; validation au
     chargement et exécution : `grimoire.flows.blueprint_loader` et
-    `grimoire.flows.dispatch_executor` (les sept méthodes
-    `_execute_<genre>`), pas ce schéma (délibérément permissif ici, comme
-    `config.gate`/`config.evals`).
+    `grimoire.flows.genres` (les sept fonctions `_execute_<genre>`, module
+    compagnon de `grimoire.flows.dispatch_executor`), pas ce schéma
+    (délibérément permissif ici, comme `config.gate`/`config.evals`).
 
 /$defs/node/properties/role:
   texte: >-
