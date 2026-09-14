@@ -30,6 +30,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from importlib.resources import files
@@ -56,6 +57,7 @@ __all__ = [
     "propose_memory_links",
     "propose_needs_hosts",
     "propose_override_migrations",
+    "propose_repairs",
     "verify_upgrade",
 ]
 
@@ -286,9 +288,20 @@ class PreviewResult:
     report_path: Path
     up_ok: bool
     host_sync_ok: bool
+    doctor_baseline: tuple[str, ...] = ()
+    """Dead ``_grimoire/...`` references already present *before* `apply`
+    touches anything (issue #502, third defect) — see
+    :func:`_dead_reference_strings`. Persisted alongside the preview report
+    so `apply`, a separate process invocation, can read it back and only
+    fail on a reference `up` itself introduced."""
 
     def to_dict(self) -> dict[str, Any]:
-        return {"report_path": str(self.report_path), "up_ok": self.up_ok, "host_sync_ok": self.host_sync_ok}
+        return {
+            "report_path": str(self.report_path),
+            "up_ok": self.up_ok,
+            "host_sync_ok": self.host_sync_ok,
+            "doctor_baseline": list(self.doctor_baseline),
+        }
 
 
 def _run_grimoire(args: list[str], *, cwd: Path, timeout: float = 180.0) -> subprocess.CompletedProcess[str]:
@@ -302,10 +315,59 @@ def _run_grimoire(args: list[str], *, cwd: Path, timeout: float = 180.0) -> subp
     )
 
 
+def _doctor_baseline_path(target: Path) -> Path:
+    """Where :func:`preview_upgrade` persists its dead-reference baseline."""
+    return run_output_dir(target) / "doctor-baseline.json"
+
+
+def _dead_reference_strings(target: Path) -> tuple[str, ...]:
+    """Every dead ``_grimoire/...`` reference in *target*, as ``DeadReference.__str__``.
+
+    That string form (``"<source>:<line> → <target>"``) is also the exact
+    line the ``paths_resolve`` doctor check shows, and the identity a
+    reference is compared by between the ``preview`` baseline and `apply`'s
+    fresh read — a reference is the same one iff both the citing line and the
+    dead target match; a project that moves the same broken mention to a
+    different line counts as a new one, never silently carried over.
+    """
+    from grimoire.core.integrity import dead_path_references
+
+    return tuple(str(ref) for ref in dead_path_references(target))
+
+
+def _read_doctor_baseline(target: Path) -> tuple[str, ...]:
+    """Read back :func:`preview_upgrade`'s baseline, or ``()`` if there is none.
+
+    No baseline (``apply`` run without a prior ``preview``, or an older run
+    output already cleaned up) means no softening: every dead reference
+    `apply` finds is treated as new, the strict pre-#502 behaviour — this
+    node never invents a baseline it did not itself see written.
+    """
+    path = _doctor_baseline_path(target)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ()
+    refs = data.get("dead_references") if isinstance(data, dict) else None
+    if not isinstance(refs, list):
+        return ()
+    return tuple(str(r) for r in refs)
+
+
 def preview_upgrade(target: Path) -> PreviewResult:
-    """``up --dry-run`` + ``host sync --dry-run``, diffed into ``_grimoire-output/upgrade/<date>/preview.md``."""
+    """``up --dry-run`` + ``host sync --dry-run``, diffed into ``_grimoire-output/upgrade/<date>/preview.md``.
+
+    Also captures the dead-reference baseline (issue #502, third defect):
+    three real projects had `apply` refuse over ``_grimoire/...`` references
+    that were already stale *before* the upgrade — leftovers in
+    ``_memory/decisions-log.md``, ``.github/copilot-instructions.md``,
+    ``.claude/skills/*/SKILL.md`` — leaving the project "mis à niveau mais
+    flow en échec" with no path forward. The baseline lets `apply` tell that
+    apart from a reference the upgrade itself just broke.
+    """
     up_proc = _run_grimoire(["up", str(target), "--dry-run"], cwd=target)
     host_proc = _run_grimoire(["host", "sync", "--project-root", str(target), "--dry-run"], cwd=target)
+    baseline = _dead_reference_strings(target)
 
     report = run_output_dir(target) / "preview.md"
     report.write_text(
@@ -317,7 +379,16 @@ def preview_upgrade(target: Path) -> PreviewResult:
         f"```\n{host_proc.stdout}{host_proc.stderr}\n```\n",
         encoding="utf-8",
     )
-    return PreviewResult(report_path=report, up_ok=up_proc.returncode == 0, host_sync_ok=host_proc.returncode == 0)
+    _doctor_baseline_path(target).write_text(
+        json.dumps({"dead_references": list(baseline)}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return PreviewResult(
+        report_path=report,
+        up_ok=up_proc.returncode == 0,
+        host_sync_ok=host_proc.returncode == 0,
+        doctor_baseline=baseline,
+    )
 
 
 # ── probe-hook ────────────────────────────────────────────────────────────────
@@ -333,15 +404,70 @@ class ProbeResult:
         return {"ok": self.ok, "detail": self.detail, "payload": self.payload}
 
 
+#: The exact marker :func:`grimoire.hosts.decisions._failed_decision` writes
+#: when a decision function crashes (``hosts/decisions/__init__.py``) — the
+#: *only* string this probe treats as a genuine hook failure. Anchored at the
+#: start of a line (``re.MULTILINE``) because ``additionalContext`` is a
+#: newline-joined stack of independent blocks (persona, task recall,
+#: standing directive, providers/proposals status —
+#: ``decisions/activation.py::decide_activation``): a crashed decision
+#: replaces the whole context with just this one block, it is never appended
+#: mid-sentence to another block's prose.
+_HOOK_FAILURE_MARKER = re.compile(r"(?m)^\[Grimoire\] hook \S+ en erreur\b")
+
+
+def _hook_rendered_text_blocks(payload: dict[str, Any]) -> list[str]:
+    """Every string field :func:`grimoire.hosts.runtime.render` may have set.
+
+    Never the whole payload serialised to text — a project's memory recall
+    can legitimately contain the word "erreur" (issue #502, second rejeu
+    réel: TTS-Voice, a task recall naming a past error, hook perfectly
+    healthy) and a free-text search over the full JSON dump treated that as
+    a hook failure. Only these fields ever carry rendered prose for a human
+    or an agent to read; a JSON key or value nested anywhere else is never
+    scanned.
+    """
+    blocks: list[str] = []
+    specific = payload.get("hookSpecificOutput")
+    if isinstance(specific, dict):
+        for key in ("additionalContext", "permissionDecisionReason"):
+            value = specific.get(key)
+            if isinstance(value, str):
+                blocks.append(value)
+    for key in ("systemMessage", "reason"):
+        value = payload.get(key)
+        if isinstance(value, str):
+            blocks.append(value)
+    return blocks
+
+
+def _hook_reports_failure(payload: dict[str, Any]) -> bool:
+    """Structured-only verdict on whether *payload* names a real hook failure.
+
+    Exactly two signals, both structural — never a free substring search
+    over rendered prose:
+
+    - a top-level ``error`` key (a hook that could not even render a normal
+      decision payload sets this itself, see the crash paths of
+      :mod:`grimoire.hosts.runtime`);
+    - :data:`_HOOK_FAILURE_MARKER` at the start of a line in one of
+      :func:`_hook_rendered_text_blocks` — the runtime's own, one and only
+      way of saying a decision crashed.
+    """
+    if "error" in payload:
+        return True
+    return any(_HOOK_FAILURE_MARKER.search(block) for block in _hook_rendered_text_blocks(payload))
+
+
 def probe_hook(target: Path, *, host: str = "claude", event: str = "SessionStart") -> ProbeResult:
     """Replay the lifecycle hook and flag anything that looks like the #423 regression.
 
     The hook (``grimoire.hosts.runtime.main``) always exits 0 by design — the
     verdict lives in the JSON payload, not the process exit code — so this
-    probe reads the payload itself for an ``error`` key or the substring
-    "erreur"/"error" anywhere in its rendered text, the same signature the
-    2026-09-11 migration report used to catch a session-start turn that ran
-    but silently carried an error.
+    probe reads the payload itself (:func:`_hook_reports_failure`) for a
+    structured failure signal — never a free substring search over its
+    rendered text, which flagged a project's own memory recall as a hook
+    failure the moment it happened to contain the word "erreur" (issue #502).
     """
     try:
         proc = subprocess.run(
@@ -363,9 +489,9 @@ def probe_hook(target: Path, *, host: str = "claude", event: str = "SessionStart
     if not isinstance(payload, dict):
         return ProbeResult(ok=False, detail=f"sortie du hook inattendue : {payload!r}")
 
-    rendered = json.dumps(payload, ensure_ascii=False).lower()
-    has_error = "error" in payload or "erreur" in rendered or "\"error\"" in rendered
+    has_error = _hook_reports_failure(payload)
     ok = proc.returncode == 0 and not has_error
+    rendered = json.dumps(payload, ensure_ascii=False)
     detail = "hook rejoué sans erreur" if ok else f"hook en erreur : {rendered[:400]}"
     return ProbeResult(ok=ok, detail=detail, payload=payload)
 
@@ -379,6 +505,10 @@ class ApplyResult:
     up_ok: bool
     doctor_failures: tuple[str, ...]
     hook: ProbeResult
+    preexisting_failures: tuple[str, ...] = ()
+    """Dead references already in the ``preview`` baseline (issue #502) —
+    never a reason `ok` is False on their own; see :func:`propose_repairs`."""
+    repairs_proposed: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -386,11 +516,25 @@ class ApplyResult:
             "up_ok": self.up_ok,
             "doctor_failures": list(self.doctor_failures),
             "hook": self.hook.to_dict(),
+            "preexisting_failures": list(self.preexisting_failures),
+            "repairs_proposed": self.repairs_proposed,
         }
 
 
 def apply_upgrade(target: Path, *, host: str = "claude") -> ApplyResult:
-    """``up`` (kit refresh + host sync), then the two mechanical checks the flow's acceptance runs against."""
+    """``up`` (kit refresh + host sync), then the two mechanical checks the flow's acceptance runs against.
+
+    A dead ``_grimoire/...`` reference (the ``paths_resolve`` doctor check)
+    only fails this node when it is a *regression* — absent from the
+    ``preview`` baseline (:func:`_read_doctor_baseline`, issue #502, third
+    defect). Three real projects had `apply` refuse over references that
+    were stale before the upgrade ever touched them, leaving the project
+    upgraded but the flow stuck with no path forward. A pre-existing dead
+    reference instead becomes a ``"repair"`` proposal
+    (:func:`propose_repairs`) — a real defect, just never this node's to
+    fix silently, and never automatically. Every other doctor check keeps
+    failing this node exactly as before; only ``paths_resolve`` is softened.
+    """
     up_proc = _run_grimoire(["up", str(target)], cwd=target)
     if up_proc.returncode != 0:
         return ApplyResult(
@@ -403,14 +547,45 @@ def apply_upgrade(target: Path, *, host: str = "claude") -> ApplyResult:
     doctor_proc = _run_grimoire(["-o", "json", "doctor", str(target)], cwd=target)
     try:
         payload = json.loads(doctor_proc.stdout or "{}")
-        failures = tuple(
-            str(check.get("detail") or check.get("name")) for check in payload.get("checks", []) if not check.get("passed", True)
-        )
+        checks = payload.get("checks", [])
     except json.JSONDecodeError:
-        failures = ("doctor : sortie JSON illisible",)
+        checks = None
+
+    failures: list[str] = []
+    preexisting: tuple[str, ...] = ()
+    if checks is None:
+        failures.append("doctor : sortie JSON illisible")
+    else:
+        baseline = set(_read_doctor_baseline(target))
+        current_refs = _dead_reference_strings(target)
+        new_refs = [r for r in current_refs if r not in baseline]
+        stale_refs = tuple(r for r in current_refs if r in baseline)
+        for check in checks:
+            if check.get("passed", True):
+                continue
+            name = check.get("name")
+            if name == "paths_resolve":
+                if new_refs:
+                    shown = ", ".join(new_refs[:3])
+                    more = f" (+{len(new_refs) - 3})" if len(new_refs) > 3 else ""
+                    failures.append(f"{len(new_refs)} chemin(s) du kit cité(s) mais absent(s), nouveau(x) : {shown}{more}")
+                continue
+            failures.append(str(check.get("detail") or name))
+        preexisting = stale_refs
+
+    repairs_proposed = 0
+    if preexisting:
+        repairs_proposed = len(propose_repairs(target, preexisting))
 
     hook = probe_hook(target, host=host)
-    return ApplyResult(ok=not failures and hook.ok, up_ok=True, doctor_failures=failures, hook=hook)
+    return ApplyResult(
+        ok=not failures and hook.ok,
+        up_ok=True,
+        doctor_failures=tuple(failures),
+        hook=hook,
+        preexisting_failures=preexisting,
+        repairs_proposed=repairs_proposed,
+    )
 
 
 # ── orphans ───────────────────────────────────────────────────────────────────
@@ -555,6 +730,73 @@ def archive_orphans(target: Path, report: OrphanReport) -> list[str]:
             encoding="utf-8",
         )
     return moved
+
+
+# ── repair (V1 proposals) ────────────────────────────────────────────────────
+
+
+def _suggest_repair_substitution(target: Path, dead_target: str) -> str:
+    """An evident v3 replacement for a stale ``_grimoire/...`` reference, or ``""``.
+
+    Never a guess: strips a known legacy root
+    (:data:`~grimoire.core.layout.LEGACY_KIT_ROOTS` — the very prefixes
+    ``grimoire migrate`` already treats as pre-boundary, see
+    ``cli/cmd_migrate.py``) from *dead_target* and checks whether the same
+    relative path exists in the kit tier today. A reference this cannot
+    resolve this way (e.g. an even older, unrecognised root) gets no
+    suggested substitution — :func:`propose_repairs` still proposes the
+    repair, just without a carrier reason claiming a fix that is not there.
+    """
+    from grimoire.core import layout
+
+    for legacy_root in layout.LEGACY_KIT_ROOTS:
+        prefix = f"{legacy_root}/"
+        if not dead_target.startswith(prefix):
+            continue
+        relative = dead_target[len(prefix):]
+        if (layout.kit_dir(target) / relative).exists():
+            return f"{layout.KIT_DIR}/{relative}"
+    return ""
+
+
+def propose_repairs(target: Path, stale_refs: Iterable[str]) -> list[Any]:
+    """One ``"repair"`` proposal per pre-existing dead path reference (issue #502).
+
+    *stale_refs* are :func:`_dead_reference_strings`-shaped
+    (``"<source>:<line> → <target>"``) references :func:`apply_upgrade`
+    found in the ``preview`` baseline too — real defects, present before the
+    upgrade touched anything, that this flow never fixes on its own
+    initiative. Names an evident v3 substitution
+    (:func:`_suggest_repair_substitution`) when one exists; otherwise says so
+    plainly and leaves the fix to a human. :func:`grimoire.proposals.
+    accept_proposal` is the only door that ever edits the citing file, and
+    only when a substitution was actually named.
+    """
+    from grimoire.proposals import create_manual_proposal
+
+    proposals = []
+    for ref in stale_refs:
+        source, _, rest = ref.partition(":")
+        line, _, dead_target = rest.partition(" → ")
+        substitution = _suggest_repair_substitution(target, dead_target)
+        carrier_reason = (
+            f"substitution évidente : {dead_target} -> {substitution}"
+            if substitution
+            else f"pas de remplacement évident pour {dead_target} — revue humaine"
+        )
+        slug_hint = re.sub(r"[^a-z0-9]+", "-", f"{source}-{line}-{dead_target}".lower()).strip("-")
+        proposals.append(
+            create_manual_proposal(
+                target,
+                slug=f"repair-{slug_hint}",
+                specialty=f"référence périmée : {source}:{line} → {dead_target}",
+                artifact_type="repair",
+                carrier_reason=carrier_reason,
+                artifact_ref=ref,
+                category="dead-reference",
+            )
+        )
+    return proposals
 
 
 # ── overrides (V1 proposals) ─────────────────────────────────────────────────

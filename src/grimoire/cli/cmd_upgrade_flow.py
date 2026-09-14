@@ -115,7 +115,13 @@ def upgrade_flow_apply(ctx: typer.Context, project_root: _PROJECT_ROOT = Path(),
     if _fmt(ctx, json_flag=json_flag) == "json":
         typer.echo(json.dumps({"ok": result.ok, **result.to_dict()}, ensure_ascii=False))
     elif result.ok:
-        console.print("[green]OK[/green] up appliqué, doctor vert, hook sans erreur")
+        if result.repairs_proposed:
+            console.print(
+                f"[green]OK[/green] mis à niveau, {result.repairs_proposed} défaut(s) préexistant(s) en proposition "
+                "(`grimoire proposals list`)"
+            )
+        else:
+            console.print("[green]OK[/green] up appliqué, doctor vert, hook sans erreur")
     else:
         console.print(f"[red]anomalie[/red] doctor={list(result.doctor_failures)} hook={result.hook.detail}")
     if not result.ok:
@@ -482,6 +488,7 @@ def upgrade_flow_run(
     run_id = wfi.id
     done: list[str] = []
     stopped_at: str | None = None
+    repairs_proposed = 0
     while True:
         node_id = contract.node_id
         if node_id not in handlers:
@@ -495,6 +502,8 @@ def upgrade_flow_run(
         except GrimoireRuntimeError as exc:
             _fail(ctx, f"node {node_id} : {exc}", json_flag=json_flag)
             return
+        if node_id == "apply":
+            repairs_proposed = int(detail.get("repairs_proposed") or 0)
         output = _submit_envelope(contract, detail)
         outcome = engine.resume(run_id, output=output, executor=_silent_executor())
         if not outcome.ok:
@@ -508,8 +517,17 @@ def upgrade_flow_run(
         contract = outcome.contract
 
     if _fmt(ctx, json_flag=json_flag) == "json":
-        typer.echo(json.dumps({"ok": True, "run_id": run_id, "done": done, "stopped_at": stopped_at}, ensure_ascii=False))
+        typer.echo(json.dumps(
+            {"ok": True, "run_id": run_id, "done": done, "stopped_at": stopped_at, "repairs_proposed": repairs_proposed},
+            ensure_ascii=False,
+        ))
         return
-    console.print(f"[bold]{run_id}[/bold] — terminé : {', '.join(done)}")
+    if repairs_proposed:
+        console.print(
+            f"[bold]{run_id}[/bold] — mis à niveau, {repairs_proposed} défaut(s) préexistant(s) en proposition "
+            f"(`grimoire proposals list`) — terminé : {', '.join(done)}"
+        )
+    else:
+        console.print(f"[bold]{run_id}[/bold] — terminé : {', '.join(done)}")
     if stopped_at:
         console.print(f"[yellow]en attente[/yellow] au nœud « {stopped_at} » — décision humaine requise")
