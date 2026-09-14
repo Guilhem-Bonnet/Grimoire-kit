@@ -19,6 +19,19 @@ jamais pour un autre projet du registre qu'on ne fait que regarder (#351/#356).
 Lui donner de quoi réclamer une tâche ou créer un override dans un dépôt qu'il
 ne sert pas serait une régression de gouvernance, pas une commodité.
 
+Une exception nommée à cette règle (issue #490) : décider une proposition
+(``proposals/<slug>/accept|reject``, voir :func:`is_proposal_decision`). La
+doctrine du déclencheur (:mod:`grimoire.proposals`) est « proposée puis
+validée, jamais automatique » — le cockpit est précisément l'endroit où
+l'humain qui pilote une flotte valide, y compris pour un projet qu'il ne fait
+que regarder via le registre. C'est la même porte que
+``POST /api/projects/update`` (le bouton « Mettre à jour ») ouvre déjà pour
+n'importe quel projet du registre : une décision explicite sur un artefact
+proposé n'est pas une mutation plus dangereuse qu'un ``grimoire up`` distant.
+Le reste de :data:`POST_ROUTES` — écrire un fichier, réclamer une tâche,
+créer un override — reste strictement ``_HOME_SLUG`` : la dérogation est
+nommée, jamais générale.
+
 Ajouter une lecture : une entrée dans :data:`GET_ROUTES`. Ajouter une écriture :
 une entrée dans :data:`POST_ROUTES`. Les deux tables sont énumérées par les
 tests, donc une route ajoutée sans test de cible se voit.
@@ -44,6 +57,7 @@ __all__ = [
     "POST_ROUTES",
     "PREFIX",
     "WORKSPACE_UNHANDLED",
+    "is_proposal_decision",
     "workspace_get",
     "workspace_post",
 ]
@@ -646,6 +660,23 @@ def _proposal_route(path: str) -> tuple[str, str] | None:
     if not slug or not action or "/" in action:
         return None
     return slug, action
+
+
+def is_proposal_decision(path: str) -> bool:
+    """Vrai pour ``proposals/<slug>/accept`` ou ``…/reject`` — jamais autre chose.
+
+    Le seul point d'entrée que ``cmd_cockpit.py`` interroge pour ouvrir, pour
+    cette écriture précise, la même porte que ``POST /api/projects/update``
+    plutôt que la garde ``_HOME_SLUG`` générale (issue #490, voir le docstring
+    du module). Volontairement étroit : un chemin qui ressemble à une
+    proposition sans être exactement un ``accept``/``reject`` (une future
+    action, une faute de frappe côté client) reste soumis à la garde par
+    défaut plutôt que de s'y dérober par accident.
+    """
+    if not path.startswith(f"{PREFIX}proposals/"):
+        return False
+    parsed = _proposal_route(path)
+    return parsed is not None and parsed[1] in ("accept", "reject")
 
 
 def _proposal_accept(project_root: Path, slug: str, _body: dict[str, Any]) -> Any:

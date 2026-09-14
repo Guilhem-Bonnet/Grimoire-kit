@@ -494,8 +494,22 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             # même trouvaille que `--project-root` (d5047fc6), pour la même
             # raison : fusionner deux commandes ne devait pas couper une
             # capacité (#356). Restreint à `_HOME_SLUG` : le projet qu'on ne
-            # fait que regarder via le registre reste en lecture seule.
-            if not self._is_home_request():
+            # fait que regarder via le registre reste en lecture seule —
+            # SAUF décider une proposition (`is_proposal_decision`, #490) :
+            # cette écriture-là ouvre la même porte que
+            # `POST /api/projects/update` juste au-dessus, parce que valider
+            # ou refuser un artefact déjà proposé est le geste que le cockpit
+            # existe pour rendre possible sur toute la flotte, pas seulement
+            # sur le projet de lancement. La dérogation est nommée : le reste
+            # de `WORKSPACE_PREFIX` (écrire un fichier, réclamer une tâche…)
+            # reste `_HOME_SLUG` seulement.
+            from grimoire.tools.workspace_routes import (
+                WORKSPACE_UNHANDLED,
+                is_proposal_decision,
+                workspace_post,
+            )
+
+            if not is_proposal_decision(path) and not self._is_home_request():
                 self._send_json(403, {"ok": False, "error": "hôte en lecture seule"})
                 return
             proot = _resolve_project_path(self._query_slug() or None)
@@ -508,7 +522,6 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             except (ValueError, json.JSONDecodeError):
                 self._send_json(400, {"ok": False, "error": "bad json"})
                 return
-            from grimoire.tools.workspace_routes import WORKSPACE_UNHANDLED, workspace_post
 
             # Même traduction que l'atelier (``forge_http.py::do_POST``) : sans
             # elle, un refus métier (skill inconnu, agent introuvable, chemin
