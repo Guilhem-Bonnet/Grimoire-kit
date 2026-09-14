@@ -475,3 +475,104 @@ def test_temporal_repair_exemption_agrees_across_backends(monkeypatch: pytest.Mo
     )
     assert py_read == rust_read
     assert py_read[0] == "allow"
+
+
+@requires_rust_core
+@pytest.mark.parametrize(
+    "command",
+    [
+        "grimoire policies reset-session",
+        "grimoire policies status",
+        "/home/u/.venv/bin/grimoire policies reset-session",
+        "python -m grimoire policies reset-session",
+    ],
+)
+def test_temporal_grimoire_policies_command_exemption_agrees_across_backends(
+    monkeypatch: pytest.MonkeyPatch, command: str
+) -> None:
+    """Relapse of the 2026-09-12 incident (issue #481, 2026-09-14):
+    `grimoire policies reset-session` — the command every budget-block
+    reason recommends — must be exempt identically in both backends, in
+    every documented invocation shape, even though `is_write=True` (an
+    unrecognised leading verb, classified as a mutation)."""
+    rules = (_temporal_rule(per_session=SessionBudget(max_writes=0)),)
+    now = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+    python_state = SessionState.new("s", now.isoformat())
+    rust_state = SessionState.new("s", now.isoformat())
+
+    py_result = _evaluate_temporal_with_backend(
+        "python", monkeypatch, rules, python_state, tool_name="Bash", tool_detail=command, is_write=True, now=now
+    )
+    rust_result = _evaluate_temporal_with_backend(
+        "rust", monkeypatch, rules, rust_state, tool_name="Bash", tool_detail=command, is_write=True, now=now
+    )
+    assert py_result == rust_result
+    assert py_result[0] == "allow"
+
+
+@requires_rust_core
+def test_temporal_grimoire_policies_lookalike_stays_refused_across_backends(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Naming the command (`echo grimoire policies ...`) must not borrow the
+    exemption, identically in both backends — the exemption is the
+    invocation shape, not a substring match."""
+    rules = (_temporal_rule(per_session=SessionBudget(max_writes=0)),)
+    now = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+    python_state = SessionState.new("s", now.isoformat())
+    rust_state = SessionState.new("s", now.isoformat())
+
+    py_result = _evaluate_temporal_with_backend(
+        "python",
+        monkeypatch,
+        rules,
+        python_state,
+        tool_name="Bash",
+        tool_detail="echo grimoire policies reset-session",
+        is_write=True,
+        now=now,
+    )
+    rust_result = _evaluate_temporal_with_backend(
+        "rust",
+        monkeypatch,
+        rules,
+        rust_state,
+        tool_name="Bash",
+        tool_detail="echo grimoire policies reset-session",
+        is_write=True,
+        now=now,
+    )
+    assert py_result == rust_result
+    assert py_result[0] == "block"
+
+
+@requires_rust_core
+def test_temporal_duration_budget_exemption_agrees_across_backends(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The exact reproduction from issue #481: a `max_duration_min` budget
+    already past its window must exempt a read-only call and the
+    `grimoire policies reset-session` remedy identically in both backends."""
+    rules = (_temporal_rule(per_session=SessionBudget(max_duration_min=1)),)
+    now = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+    started = datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC)  # 12h before `now`, well past a 1-minute window
+    python_state = SessionState.new("s", started.isoformat())
+    rust_state = SessionState.new("s", started.isoformat())
+
+    for tool_name, detail, is_write in (
+        ("Bash", "git status", False),
+        ("Bash", "grimoire policies reset-session", True),
+    ):
+        py_result = _evaluate_temporal_with_backend(
+            "python",
+            monkeypatch,
+            rules,
+            python_state,
+            tool_name=tool_name,
+            tool_detail=detail,
+            is_write=is_write,
+            now=now,
+        )
+        rust_result = _evaluate_temporal_with_backend(
+            "rust", monkeypatch, rules, rust_state, tool_name=tool_name, tool_detail=detail, is_write=is_write, now=now
+        )
+        assert py_result == rust_result, detail
+        assert py_result[0] == "allow", detail
