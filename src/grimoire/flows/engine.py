@@ -165,6 +165,11 @@ class FlowEngine:
         host_id: str = "local",
         project_root: Path = Path(),
     ) -> None:
+        #: Conservé à côté de ``self._kernel`` (qui n'expose pas sa racine) —
+        #: uniquement pour :meth:`child_engine` (issue #206), qui doit pouvoir
+        #: reconstruire un engine partageant le même kernel/répertoire de
+        #: flows qu'un node ``kind: "composite"`` lance un sous-run.
+        self._kernel_root = kernel_root
         self._kernel = RuntimeKernel(kernel_root)
         self._flows_root = flows_root
         self._flows_root.mkdir(parents=True, exist_ok=True)
@@ -175,6 +180,25 @@ class FlowEngine:
         #: répertoire courant : sans effet sur un blueprint qui n'en déclare
         #: aucune, ce qui couvre tout le corpus antérieur à cette issue.
         self._project_root = project_root
+
+    def child_engine(self) -> FlowEngine:
+        """Un nouvel engine, même kernel/flows_root/projet (issue #206).
+
+        Un node ``kind: "composite"`` (voir ``flows.dispatch_executor``)
+        lance son sous-flow comme un run à part entière — un ``run_id``
+        distinct, ses propres checkpoints — mais visible par le même
+        ``RuntimeKernel`` et le même registre de métadonnées de run que le
+        parent : ``grimoire flow run`` (sans argument) et ``grimoire flow
+        status`` sur l'id de l'enfant fonctionnent sans configuration
+        supplémentaire, exactement comme sur un run racine.
+        """
+        return FlowEngine(
+            kernel_root=self._kernel_root,
+            flows_root=self._flows_root,
+            actor_id=self._actor_id,
+            host_id=self._host_id,
+            project_root=self._project_root,
+        )
 
     # ── Persistance des métadonnées de run ──────────────────────────────────
 
@@ -309,9 +333,17 @@ class FlowEngine:
         executor: NodeExecutor | None = None,
         mission_id: str = "",
         task_id: str = "",
+        parent_run_id: str | None = None,
+        parent_node_id: str | None = None,
     ) -> tuple[WorkflowInstance, NodeContract]:
-        """Démarre un run : premier node ouvert, son contrat présenté."""
-        blueprint = load_blueprint(blueprint_path)
+        """Démarre un run : premier node ouvert, son contrat présenté.
+
+        ``parent_run_id``/``parent_node_id`` (issue #206) : posés par
+        ``flows.dispatch_executor`` quand ce run est le sous-flow d'un node
+        ``kind: "composite"`` — ``None``/``None`` pour tout run racine, les
+        deux sont toujours posés ou absents ensemble.
+        """
+        blueprint = load_blueprint(blueprint_path, self._project_root)
         order = topo_order(blueprint)
         if not order:
             raise GrimoireRuntimeError(f"{blueprint_path} : aucun node à exécuter")
@@ -339,6 +371,8 @@ class FlowEngine:
                 blueprint_path=str(blueprint_path),
                 order=tuple(order),
                 created_at=_now_iso(),
+                parent_run_id=parent_run_id,
+                parent_node_id=parent_node_id,
             )
         )
 
@@ -356,7 +390,9 @@ class FlowEngine:
             raise GrimoireRuntimeError(f"run {run_id} est {wfi.status.value}, rien à reprendre")
 
         order = list(meta.order)
-        contracts = build_node_contracts(load_blueprint(Path(meta.blueprint_path)), self._project_root)
+        contracts = build_node_contracts(
+            load_blueprint(Path(meta.blueprint_path), self._project_root), self._project_root
+        )
         current_id = self._current_node(wfi, order)
         if current_id is None or current_id not in contracts:
             raise GrimoireRuntimeError(f"run {run_id} : aucun node courant résoluble (status={wfi.status.value})")
@@ -461,7 +497,9 @@ class FlowEngine:
 
         contract = None
         if include_contract and current_id is not None:
-            contract = build_node_contracts(load_blueprint(Path(meta.blueprint_path)), self._project_root).get(current_id)
+            contract = build_node_contracts(
+                load_blueprint(Path(meta.blueprint_path), self._project_root), self._project_root
+            ).get(current_id)
         return FlowStatusView(
             run_id=wfi.id,
             blueprint_id=meta.blueprint_id,
@@ -471,6 +509,7 @@ class FlowEngine:
             pending_nodes=tuple(pending_list),
             last_refusal=self._last_refusal(wfi),
             contract=contract,
+            parent_run_id=meta.parent_run_id,
         )
 
     def list_runs(self) -> list[FlowStatusView]:

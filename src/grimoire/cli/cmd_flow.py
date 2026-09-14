@@ -38,6 +38,7 @@ from grimoire.flows.dispatch_executor import (
 from grimoire.flows.engine import FlowEngine
 from grimoire.flows.executor import InteractiveNodeExecutor
 from grimoire.flows.extract import extract_blueprint
+from grimoire.flows.registry import describe_flow
 from grimoire.flows.schemas import FlowStatusView, ResumeOutcome
 from grimoire.missions.dispatch import DEFAULT_CALL_TIMEOUT_S
 from grimoire.providers.registry import SUPPORTED_MODEL_TIERS
@@ -55,6 +56,9 @@ _ACCEPTANCE_LABELS: dict[str | None, str] = {
     "executed": "exécutée",
     "unrunnable": "inexécutable",
     "judged": "jugée",
+    # Issue #206 : un node composite n'a exécuté aucune commande lui-même —
+    # son "acceptance" est la complétion du sous-flow qu'il a lancé.
+    "composite": "sous-flow",
     None: "n/a",
 }
 
@@ -129,6 +133,8 @@ def _emit_status(ctx: typer.Context, view: FlowStatusView, project_root: Path) -
         typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
         return
     console.print(f"[bold]{view.run_id}[/bold] — {view.blueprint_id} — [cyan]{view.status}[/cyan]")
+    if view.parent_run_id:
+        console.print(f"  [dim]sous-flow de {view.parent_run_id}[/dim]")
     console.print(f"  fait      : {', '.join(view.completed_nodes) or '(aucun)'}")
     console.print(f"  courant   : {view.current_node or '(aucun)'}")
     console.print(f"  restant   : {', '.join(view.pending_nodes) or '(aucun)'}")
@@ -255,14 +261,15 @@ def flow_run(
             console.print("[dim]Aucun run.[/dim]")
             return
         for view in views:
-            console.print(f"  {view.run_id}  [{view.status}]  {view.blueprint_id}  courant={view.current_node}")
+            parent = f"  parent={view.parent_run_id}" if view.parent_run_id else ""
+            console.print(f"  {view.run_id}  [{view.status}]  {view.blueprint_id}  courant={view.current_node}{parent}")
         return
 
     _check_executor_name(ctx, executor)
     _check_max_tier(ctx, max_tier)
 
     try:
-        loaded = load_blueprint(blueprint)
+        loaded = load_blueprint(blueprint, project_root.resolve())
     except GrimoireRuntimeError:
         loaded = None  # blueprint invalide : engine.run()/run_with_dispatch lèvera le vrai refus juste après
     if loaded is not None:
@@ -467,6 +474,24 @@ def flow_extract(
 _TERMINAL_OK_STATUSES = (WorkflowStatus.COMPLETED.value, WorkflowStatus.VERIFIED.value)
 
 
+def _registry_info_for(engine: FlowEngine, root: Path, local_runs: list[FlowStatusView]) -> dict[str, Any] | None:
+    """Le registre (issue #206) du blueprint du run le plus récent, ou ``None`` s'il ne se charge plus.
+
+    Dérivé du fichier ``.blueprint.json`` du dernier run connu localement —
+    ``flow list`` n'a pas d'autre notion de « le » blueprint d'un id que
+    « celui que le dernier run a réellement chargé ». Un fichier déplacé ou
+    cassé depuis ce run ne fait pas échouer toute la commande : cette seule
+    ligne du registre retombe sur ``None`` (affiché comme tel), pas un
+    ``flow list`` entier en défaut.
+    """
+    latest_run_id = max(v.run_id for v in local_runs)
+    try:
+        meta = engine.run_meta(latest_run_id)
+        return describe_flow(Path(meta.blueprint_path), root).to_dict()
+    except GrimoireRuntimeError:
+        return None
+
+
 @flow_app.command("list")
 def flow_list(
     ctx: typer.Context,
@@ -517,6 +542,7 @@ def flow_list(
                         "runs_terminated": sum(1 for v in local_runs if v.status in _TERMINAL_OK_STATUSES),
                         "last_run_id": max(v.run_id for v in local_runs),
                         "measure": by_flow[blueprint_id].to_dict() if blueprint_id in by_flow else None,
+                        "registry": _registry_info_for(engine, root, local_runs),
                     }
                     for blueprint_id, local_runs in by_blueprint.items()
                 },
@@ -531,12 +557,34 @@ def flow_list(
         return
 
     table = Table(title="Registre local des flows")
-    for column in ("Flow", "Runs", "Dernier run", "Nœuds résolus", "Coût/tâche résolue", "Escalade", "Mesure"):
+    for column in (
+        "Flow",
+        "Version",
+        "Compat kit",
+        "Besoins requis",
+        "Intégrité",
+        "Runs",
+        "Dernier run",
+        "Nœuds résolus",
+        "Coût/tâche résolue",
+        "Escalade",
+        "Mesure",
+    ):
         table.add_column(column)
     for blueprint_id, local_runs in sorted(by_blueprint.items()):
         measure = by_flow.get(blueprint_id)
+        registry = _registry_info_for(engine, root, local_runs)
+        compat = (
+            "—"
+            if registry is None or (registry["kit_min"] is None and registry["kit_max"] is None)
+            else f"{registry['kit_min'] or '*'}–{registry['kit_max'] or '*'}"
+        )
         table.add_row(
             blueprint_id,
+            "—" if registry is None else registry["version"],
+            compat,
+            "—" if registry is None or not registry["required_needs"] else ", ".join(registry["required_needs"]),
+            "—" if registry is None else registry["integrity_sha256"][:15] + "…",
             str(len(local_runs)),
             max(v.run_id for v in local_runs),
             "—" if measure is None else f"{measure.resolved}/{measure.total}",

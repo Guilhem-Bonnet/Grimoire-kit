@@ -39,7 +39,7 @@ from typing import Any
 
 from grimoire.core.exceptions import GrimoireMissionError, GrimoireRuntimeError
 from grimoire.flows import pilot
-from grimoire.flows.blueprint_loader import build_node_contracts, load_blueprint
+from grimoire.flows.blueprint_loader import build_node_contracts, load_blueprint, resolve_composite_ref
 from grimoire.flows.engine import FlowEngine, check_output_against_contract
 from grimoire.flows.schemas import NodeContract, NodeExecutionResult, ResumeOutcome
 from grimoire.missions.dispatch import DEFAULT_CALL_TIMEOUT_S, DispatchReport, run_dispatch
@@ -188,7 +188,11 @@ class NodeDispatchOutcome:
     node_id: str
     task_id: str
     verifiability: str
-    verdict: str  # "green" | "red" | "acceptance_unrunnable" | "cost_capped" | "refused_v2" | "host_unavailable"
+    # "green" | "red" | "acceptance_unrunnable" | "cost_capped" | "refused_v2" |
+    # "host_unavailable" — un node "composite" (issue #206) n'ajoute aucune
+    # nouvelle valeur : "green"/"red"/"cost_capped" portent le même sens pour
+    # le sous-flow entier que pour un dispatch simple.
+    verdict: str
     needs_review: bool
     provider: str | None
     attempts: int
@@ -196,11 +200,18 @@ class NodeDispatchOutcome:
     cost_usd: float | None
     uncertainties: tuple[dict[str, Any], ...]
     #: « executed » / « unrunnable » / « judged » (issue #428, point 4) —
-    #: voir ``_acceptance_status`` pour la règle exacte.
+    #: voir ``_acceptance_status`` pour la règle exacte. « composite »
+    #: (issue #206) : ce node n'a exécuté aucune commande lui-même, son
+    #: acceptance EST la complétion du sous-flow qu'il a lancé.
     acceptance_status: str = "judged"
     #: Posé quand un V0 sans acceptance structurée a été rétrogradé en V1
     #: (issue #428, suite) — ``None`` sinon (V0 structuré, V1 déclaré, V2).
     verifiability_warning: str | None = None
+    #: Le ``run_id`` du sous-flow lancé par ce node (issue #206) — ``None``
+    #: pour un node qui n'est pas ``kind: "composite"``. Sa propre preuve
+    #: (par node) vit dans le Mission Ledger de CE run, pas dans celui du
+    #: parent : ``grimoire flow status <child_run_id>`` la montre.
+    child_run_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -216,6 +227,7 @@ class NodeDispatchOutcome:
             "uncertainties": [dict(u) for u in self.uncertainties],
             "acceptance_status": self.acceptance_status,
             "verifiability_warning": self.verifiability_warning,
+            "child_run_id": self.child_run_id,
         }
 
 
@@ -299,6 +311,7 @@ class DispatchExecutor:
         call_timeout: float = DEFAULT_CALL_TIMEOUT_S,
         actor: str = DEFAULT_DISPATCH_ACTOR,
         agent: str | None = None,
+        engine: FlowEngine | None = None,
     ) -> None:
         self._project_root = project_root
         self._blueprint_path = blueprint_path
@@ -306,6 +319,12 @@ class DispatchExecutor:
         self._max_tier = max_tier
         self._call_timeout = call_timeout
         self._actor = actor
+        #: L'engine parent (issue #206) — nécessaire pour lancer le sous-flow
+        #: d'un node ``kind: "composite"`` (:meth:`FlowEngine.child_engine`).
+        #: ``None`` : comportement inchangé pour tout run sans node composite ;
+        #: un node composite rencontré sans engine est un refus interne nommé
+        #: (voir :meth:`_execute_composite`), jamais un crash.
+        self._engine = engine
         #: Agent (issue #373) au nom duquel tous les nodes de ce run sont
         #: dispatchés — le run entier a un seul exécuteur, donc une seule
         #: identité d'agent ; son ``context`` déclaré s'ajoute au contrat de
@@ -323,6 +342,14 @@ class DispatchExecutor:
         self.blocked_report: DispatchReport | None = None
 
     def execute(self, contract: NodeContract, *, context_pack: dict[str, Any]) -> NodeExecutionResult:
+        # Issue #206 : un node composite ne passe jamais par la cascade — son
+        # "acceptance" est la complétion d'un sous-flow entier, pas le verdict
+        # d'une commande. Branché avant toute création de tâche : ce node n'a
+        # pas de tâche de dispatch à lui (voir le docstring de
+        # `_execute_composite`), la distinction doit être faite au tout début.
+        if contract.kind == "composite":
+            return self._execute_composite(contract, context_pack=context_pack)
+
         node_id = contract.node_id
         run_id = str(context_pack.get("run_id") or "no-run")
         blueprint_id = str(context_pack.get("blueprint_id") or "flow")
@@ -435,6 +462,151 @@ class DispatchExecutor:
             except (OSError, json.JSONDecodeError):
                 output = {"pins": {}}
         result = NodeExecutionResult(pending=False, output=output, extra={"dispatch_report": report.to_dict()})
+        self.last_result = result
+        return result
+
+    def _execute_composite(self, contract: NodeContract, *, context_pack: dict[str, Any]) -> NodeExecutionResult:
+        """Lance le sous-flow d'un node ``kind: "composite"`` comme son propre run (issue #206).
+
+        Pas de tâche de dispatch pour CE node : sa preuve est le run enfant
+        entier (son propre Mission Ledger, sa propre entrée dans
+        ``TraceLedger.dispatch_outcome_stats().by_flow`` sous l'id du
+        sous-blueprint — voir #473, aucun code neuf requis pour que ``flow
+        list --require-measure`` couvre un sous-flow, il est mesuré comme
+        n'importe quel flow dispatché). Trois issues, jamais une quatrième :
+
+        - **terminé** — le sous-flow a fini vert : ``pending=False`` avec une
+          sortie dérivée des pins déclarées par CE node (le moteur ne fait
+          circuler aucune donnée réelle entre pins, seulement leur contrat —
+          voir ``check_output_against_contract`` — donc une sortie qui nomme
+          juste le run enfant et son contrat suffit).
+        - **bloqué** — un node du sous-flow a échoué (rouge, ou sortie
+          incorrecte) : ``pending=False, output=None``, comme un dispatch
+          simple qui épuise sa cascade.
+        - **suspendu à l'hôte** — un node V2 (ou non préparable) du sous-flow
+          revient à l'hôte : ``pending=True``, exactement le protocole qu'un
+          node V2 de premier niveau utilise déjà — le run enfant reste
+          suspendu, reprenable directement via
+          ``grimoire flow resume <child_run_id> --executor dispatch``.
+
+        Le plafond de coût du pilote (issue #209) s'applique ici au **total**
+        du sous-flow, pas à une seule tentative : vérifié entre chaque node
+        de l'enfant (:func:`_drive_composite_child`), jamais après un node
+        déjà vert (même garantie que ``run_dispatch`` pour un node simple).
+        """
+        node_id = contract.node_id
+        run_id = str(context_pack.get("run_id") or "no-run")
+        blueprint_id = str(context_pack.get("blueprint_id") or "flow")
+
+        if self._engine is None:
+            raise GrimoireRuntimeError(
+                f"node={node_id} : nœud composite exécuté sans engine parent (usage interne invalide, "
+                "DispatchExecutor doit être construit avec engine=...)"
+            )
+        try:
+            sub_path = resolve_composite_ref(
+                contract.ref, project_root=self._project_root, blueprint_dir=self._blueprint_path.parent
+            )
+        except GrimoireRuntimeError as exc:
+            # Ne devrait pas arriver : déjà validé au chargement du blueprint
+            # parent (`blueprint_loader.validate_flow_composition`). Refus
+            # défensif nommé plutôt qu'une exception qui remonterait crue.
+            raise GrimoireRuntimeError(f"node={node_id} : {exc}") from exc
+
+        child_engine = self._engine.child_engine()
+        child_executor = DispatchExecutor(
+            project_root=self._project_root,
+            blueprint_path=sub_path,
+            max_tier=self._max_tier,
+            call_timeout=self._call_timeout,
+            actor=self._actor,
+            agent=self._agent,
+            engine=child_engine,
+        )
+        # Le contrat du premier node de l'enfant n'est jamais réutilisé ici :
+        # `_drive_composite_child` pilote sur `executor.last_result`/
+        # `ResumeOutcome`, jamais sur un `NodeContract` porté d'un tour à
+        # l'autre (contrairement à `_drive`, qui doit le présenter à l'hôte).
+        wfi, _ = child_engine.run(
+            sub_path,
+            executor=child_executor,
+            mission_id=f"MIS-flow-{blueprint_id}-{node_id}",
+            task_id=f"FLOW-{run_id}-{node_id}",
+            parent_run_id=run_id,
+            parent_node_id=node_id,
+        )
+        child_run_id = wfi.id
+        first_result = child_executor.last_result or NodeExecutionResult(pending=True)
+        status, faults, total_cost, host_reason = _drive_composite_child(
+            child_engine,
+            child_run_id,
+            child_executor,
+            first_result,
+            max_cost_usd=self._pilot_policy.max_cost_usd_per_node,
+        )
+        attempts = len(child_executor.node_outcomes)
+        escalations = sum(o.escalations for o in child_executor.node_outcomes.values())
+
+        if status == "waiting_host":
+            self.host_node = node_id
+            self.host_reason = f"sous-flow {child_run_id} (node {node_id}) suspendu : {host_reason or child_executor.host_reason or 'nœud du sous-flow en attente de l’hôte'}"
+            self.node_outcomes[node_id] = NodeDispatchOutcome(
+                node_id=node_id,
+                task_id=f"FLOW-{run_id}-{node_id}",
+                verifiability="composite",
+                verdict="waiting_host",
+                needs_review=False,
+                provider=None,
+                attempts=attempts,
+                escalations=escalations,
+                cost_usd=total_cost,
+                uncertainties=(),
+                acceptance_status="composite",
+                child_run_id=child_run_id,
+            )
+            result = NodeExecutionResult(
+                pending=True, extra={"dispatch_refused": "composite_waiting_host", "node_id": node_id, "child_run_id": child_run_id}
+            )
+            self.last_result = result
+            return result
+
+        verdict = {"finished": "green", "blocked": "red", "cost_capped": "cost_capped"}[status]
+        self.node_outcomes[node_id] = NodeDispatchOutcome(
+            node_id=node_id,
+            task_id=f"FLOW-{run_id}-{node_id}",
+            verifiability="composite",
+            verdict=verdict,
+            needs_review=False,
+            provider=None,
+            attempts=attempts,
+            escalations=escalations,
+            cost_usd=total_cost,
+            uncertainties=(),
+            acceptance_status="composite",
+            child_run_id=child_run_id,
+        )
+        if verdict != "green":
+            self.blocked_node = node_id
+            result = NodeExecutionResult(
+                pending=False,
+                output=None,
+                extra={
+                    "composite_child_run_id": child_run_id,
+                    "composite_status": status,
+                    "composite_faults": list(faults),
+                },
+            )
+            self.last_result = result
+            return result
+
+        output = {
+            "pins": {
+                pin.pin_id: {"contract": pin.contract, "child_run_id": child_run_id} for pin in contract.outputs
+            }
+        }
+        result = NodeExecutionResult(
+            pending=False, output=output, extra={"composite_child_run_id": child_run_id, "composite_status": status}
+        )
         self.last_result = result
         return result
 
@@ -556,6 +728,53 @@ def _drive(
         result = executor.last_result or NodeExecutionResult(pending=True)
 
 
+def _total_cost(executor: DispatchExecutor) -> float | None:
+    known = [o.cost_usd for o in executor.node_outcomes.values() if o.cost_usd is not None]
+    return sum(known) if known else None
+
+
+def _drive_composite_child(
+    engine: FlowEngine,
+    run_id: str,
+    executor: DispatchExecutor,
+    result: NodeExecutionResult,
+    *,
+    max_cost_usd: float | None,
+) -> tuple[str, tuple[str, ...], float | None, str | None]:
+    """Enchaîne les nodes du sous-flow d'un node composite (issue #206) — variante coût-plafonné de :func:`_drive`.
+
+    Même boucle que :func:`_drive`, avec une différence : le plafond de coût
+    du pilote (issue #209) est vérifié à chaque tour, **avant** de faire
+    avancer l'enfant d'un node de plus — jamais après un node déjà vert
+    (même garantie que ``run_dispatch`` applique à un dispatch simple). Un
+    dépassement abandonne le run enfant (``FlowEngine.abort``, motif nommé)
+    plutôt que de le laisser suspendu à mi-chemin sans qu'aucun futur
+    ``resume`` ne le débloque.
+
+    Rend ``(status, faults, total_cost, host_reason)`` où ``status`` vaut
+    ``"finished"``, ``"blocked"``, ``"waiting_host"`` ou ``"cost_capped"``.
+    """
+    while True:
+        if result.pending:
+            return "waiting_host", (), _total_cost(executor), executor.host_reason
+        if result.output is None:
+            return "blocked", (), _total_cost(executor), None
+        total = _total_cost(executor)
+        if max_cost_usd is not None and total is not None and total > max_cost_usd:
+            engine.abort(
+                run_id,
+                reason=f"plafond du pilote dépassé pour le sous-flow ({total} USD > {max_cost_usd} USD, issue #206/#209)",
+            )
+            return "cost_capped", (), total, None
+        outcome: ResumeOutcome = engine.resume(run_id, output=result.output, executor=executor)
+        if not outcome.ok:
+            return "blocked", outcome.faults, _total_cost(executor), None
+        if outcome.finished:
+            return "finished", (), _total_cost(executor), None
+        assert outcome.contract is not None  # non fini : le moteur a rouvert le node suivant
+        result = executor.last_result or NodeExecutionResult(pending=True)
+
+
 def run_with_dispatch(
     engine: FlowEngine,
     blueprint_path: Path,
@@ -568,7 +787,11 @@ def run_with_dispatch(
 ) -> FlowDispatchOutcome:
     """``flow run <blueprint> --executor dispatch`` : démarre puis enchaîne."""
     executor = DispatchExecutor(
-        project_root=project_root, blueprint_path=blueprint_path, max_tier=max_tier, call_timeout=call_timeout
+        project_root=project_root,
+        blueprint_path=blueprint_path,
+        max_tier=max_tier,
+        call_timeout=call_timeout,
+        engine=engine,
     )
     wfi, contract = engine.run(blueprint_path, executor=executor, mission_id=mission_id, task_id=task_id)
     result = executor.last_result or NodeExecutionResult(pending=True)
@@ -598,6 +821,7 @@ def resume_with_dispatch(
         blueprint_path=Path(meta.blueprint_path),
         max_tier=max_tier,
         call_timeout=call_timeout,
+        engine=engine,
     )
     result = executor.execute(
         status.contract, context_pack={"run_id": run_id, "blueprint_id": meta.blueprint_id, "mission_id": ""}
