@@ -180,9 +180,22 @@ def _grimoire(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
 
 
 def _init_real_project(root: Path, name: str) -> None:
+    """``--backend local`` explicite : sans lui, ``init`` passe par
+    ``detect_memory_backend()`` (``cmd_init.py``), qui sonde de vrais ports
+    localhost (Weaviate :8080, Qdrant :6333, Ollama :11434) — pas quelque
+    chose que ``_isolate_user_state`` détourne, puisque ce n'est ni ``HOME``
+    ni une variable du kit, mais une socket réseau. Sur un poste où l'un de
+    ces services tourne réellement (mémoire de dogfooding d'un autre projet),
+    ``real_project`` se retrouve câblé sur ce backend live, et un rappel de
+    tâche neuve peut remonter des ``decisions``/``failures`` qui n'ont rien à
+    voir avec elle — ``has_content`` dit alors vrai sur un état de la
+    machine, pas sur ce que projette ce projet jetable. ``local`` (mémoire
+    fichier, aucune dépendance) rend le projet hermétique quel que soit ce
+    qui tourne sur la machine qui lance la suite (#493).
+    """
     root.mkdir(parents=True, exist_ok=True)
     subprocess.run(["git", "init", "-q"], cwd=str(root), check=False, capture_output=True)
-    created = _grimoire(["init", ".", "-y", "--name", name], root)
+    created = _grimoire(["init", ".", "-y", "--name", name, "--backend", "local"], root)
     if not (root / "_grimoire" / "kit").is_dir():
         pytest.skip(f"`grimoire init` indisponible ici : {created.stderr[-400:]}")
     _grimoire(["standard", "init", "--profile", "governed"], root)

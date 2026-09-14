@@ -167,6 +167,29 @@ def test_le_rappel_d_une_tache_neuve_est_honnetement_vide(
     assert rappel["has_content"] is False
 
 
+def test_le_projet_reel_n_a_pas_de_backend_memoire_sondable_sur_l_hote(
+    project_with_task: tuple[Path, str],
+) -> None:
+    """Garde de régression (#493) : sans ``--backend local`` explicite à
+    l'init, ``grimoire init`` sonde de vrais ports localhost (Weaviate,
+    Qdrant, Ollama) via ``detect_memory_backend()`` — pas quelque chose que
+    ``_isolate_user_state`` détourne, puisque ce n'est ni ``HOME`` ni une
+    variable d'environnement du kit. Sur un poste où l'un de ces services
+    tourne réellement, le test ci-dessus (rappel honnêtement vide) devient
+    dépendant de ce que ce service contient — jamais reproductible en CI.
+    """
+    import yaml
+
+    root, _task_id = project_with_task
+    config = yaml.safe_load((root / "project-context.yaml").read_text(encoding="utf-8"))
+
+    assert config["memory"]["backend"] == "local", (
+        "`real_project` doit rester hermétique : un backend réseau (weaviate-server, "
+        "qdrant-server, ollama…) rendrait le rappel dépendant de ce qui tourne sur la "
+        "machine qui lance la suite"
+    )
+
+
 def test_le_rappel_d_une_tache_inconnue_est_un_404_pas_un_500(real_project: Path) -> None:
     from grimoire.tools.workspace_routes import workspace_get
 
