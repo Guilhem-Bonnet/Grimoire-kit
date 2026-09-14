@@ -121,6 +121,12 @@ class NodeContract:
     acceptance_runs: tuple[AcceptanceRun, ...] = ()
     acceptance_evidence: tuple[AcceptanceEvidence, ...] = ()
     verifiability_warning: str | None = None
+    #: La ``ref`` brute du node (issue #206) — vide pour les kinds qui n'en
+    #: portent pas d'utile à l'exécuteur. Un ``DispatchExecutor`` qui reçoit un
+    #: node ``kind == "composite"`` en a besoin pour résoudre le sous-flow à
+    #: lancer (:func:`grimoire.flows.blueprint_loader.resolve_composite_ref`) ;
+    #: aucun autre champ de ce contrat ne porte cette information.
+    ref: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -135,6 +141,7 @@ class NodeContract:
             "acceptance_runs": [r.to_dict() for r in self.acceptance_runs],
             "acceptance_evidence": [e.to_dict() for e in self.acceptance_evidence],
             "verifiability_warning": self.verifiability_warning,
+            "ref": self.ref,
         }
 
     @property
@@ -177,6 +184,14 @@ class FlowRunMeta:
     order: tuple[str, ...]
     created_at: str
     schema_version: str = "grimoire.flow_run_meta.v1"
+    #: Lien vers le run parent (issue #206) — ``None`` pour un run racine,
+    #: renseigné une fois à la création pour un run lancé par un node
+    #: ``kind: "composite"``. Comme le reste de cette classe : écrit une
+    #: fois, jamais recalculé.
+    parent_run_id: str | None = None
+    #: L'id du node composite du run parent qui a lancé ce run — ``None`` ssi
+    #: ``parent_run_id`` l'est aussi (les deux sont posés ou absents ensemble).
+    parent_node_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -186,6 +201,8 @@ class FlowRunMeta:
             "blueprint_path": self.blueprint_path,
             "order": list(self.order),
             "created_at": self.created_at,
+            "parent_run_id": self.parent_run_id,
+            "parent_node_id": self.parent_node_id,
         }
 
     @classmethod
@@ -197,6 +214,8 @@ class FlowRunMeta:
             order=tuple(d.get("order", [])),
             created_at=d["created_at"],
             schema_version=d.get("schema_version", "grimoire.flow_run_meta.v1"),
+            parent_run_id=d.get("parent_run_id"),
+            parent_node_id=d.get("parent_node_id"),
         )
 
 
@@ -232,6 +251,11 @@ class FlowStatusView:
     pending_nodes: tuple[str, ...]
     last_refusal: dict[str, Any] | None
     contract: NodeContract | None = None
+    #: ``FlowRunMeta.parent_run_id`` (issue #206) — ``None`` pour un run
+    #: racine. Recopié ici pour que ``flow status``/``flow run`` (sans
+    #: argument, la liste des runs) puissent l'afficher sans redemander la
+    #: méta directement.
+    parent_run_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -243,6 +267,7 @@ class FlowStatusView:
             "pending_nodes": list(self.pending_nodes),
             "last_refusal": self.last_refusal,
             "contract": self.contract.to_dict() if self.contract else None,
+            "parent_run_id": self.parent_run_id,
         }
 
 

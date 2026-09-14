@@ -744,6 +744,58 @@ Le brouillon extrait est rejouable : `flow run`/`resume` le chargent comme
 n'importe quel blueprint, et reproduisent la même séquence de nodes que le
 run source sur le même projet.
 
+#### `kind: "composite"` — un flow est un node (lot 3, issue #206)
+
+Le schéma réservait déjà `kind: "composite"` pour un sous-flow (`ref` =
+`use-case:<id>` ou un chemin `.blueprint.json`), mais seul le compilateur
+Studio le validait — le moteur de flows ne l'exécutait pas. Depuis cette
+issue, un node composite expose des pins comme n'importe quel node, et son
+exécution (sous `--executor dispatch`) lance la `ref` comme un **run à part
+entière** : son propre `run_id`, ses propres checkpoints, son propre Mission
+Ledger — lié au parent par `FlowRunMeta.parent_run_id`/`parent_node_id`.
+
+`ref` reconnaît trois formes, jamais une quatrième inventée :
+
+- un chemin se terminant par `.blueprint.json`, résolu relativement au
+  blueprint qui le référence puis à la racine du projet ;
+- un id de flow nu, résolu contre le registre local
+  (`registry/blueprints/<id>.blueprint.json`) ;
+- `use-case:<id>` — réservé à l'expansion Studio/catalogue : le moteur de
+  flows **refuse** cette forme au chargement, il ne l'exécute pas.
+
+Trois refus, tous **au chargement du blueprint parent**, jamais quand le node
+composite serait présenté à un exécuteur :
+
+- référence introuvable (fichier absent, id absent du registre) ;
+- cycle de composition — un blueprint qui se référence lui-même, directement
+  ou via un intermédiaire ;
+- profondeur de composition supérieure à 3 (un flow racine qui référence un
+  sous-flow qui en référence un troisième est la limite).
+
+Le coût du sous-flow est remonté au node composite : `flow status` et le
+rapport de `--executor dispatch` montrent son `cost_usd` comme la somme des
+coûts de tous les nodes de l'enfant. Le plafond du pilote (issue #209,
+`max_cost_usd_per_node`) s'applique à ce **total**, vérifié entre chaque node
+de l'enfant — jamais après un node déjà vert : un dépassement abandonne le
+run enfant (`flow status <child-run-id>` le montre `aborted`) et ferme le
+node composite en `cost_capped`, comme un node simple dont la cascade aurait
+renoncé au palier suivant.
+
+Sous l'exécuteur `interactive` (par défaut), un node composite n'est **pas**
+auto-lancé — son contrat affiche `composite:<ref>` comme frontière d'outils,
+et l'hôte lance lui-même `grimoire flow run <ref>` avant de soumettre un
+résultat conforme aux pins déclarées, comme pour tout autre node interactif.
+
+`flow extract` (#210) ne l'aplatit jamais : le node composite reste
+`kind: "composite"` avec sa `ref` d'origine dans le brouillon, et son
+`extraction` porte le `child_run_id` du sous-flow qu'il a lancé quand il y en
+a un — le sous-flow s'extrait séparément, sur son propre `run_id`.
+
+`grimoire.flows.registry.describe_flow` (utilisé par `flow list`, ci-dessous)
+lit, en plus, `version`/`kitMin`/`kitMax` au niveau du blueprint (tous
+optionnels — `version` retombe sur `0.0.0`) et l'union des `run_need`
+déclarés par le flow et par tous ses sous-flows composite.
+
 #### `--executor dispatch` — la cascade par classe de vérifiabilité (#311)
 
 `run` et `resume` acceptent `--executor dispatch` (défaut : `interactive`,

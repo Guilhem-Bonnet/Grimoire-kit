@@ -15,6 +15,15 @@ remplacée par ce qui a réellement tourné — jamais par une inférence depuis
 la prose de l'auteur. Un node jamais dispatché (V2, jamais atteint, ou
 exécuté par un hôte interactif sans passer par la cascade) garde son
 acceptance d'origine verbatim, et son statut d'extraction le dit.
+
+Un node ``kind: "composite"`` (issue #206) n'est **jamais aplati** en les
+nodes de son sous-flow : il est recopié verbatim comme n'importe quel autre
+node (seuls ``acceptance``/``extraction`` sont éventuellement réécrits, et un
+composite n'a pas d'acceptance observée à réécrire — voir le garde
+``node.get("kind") == "composite"`` plus bas), avec son propre statut
+d'extraction et, s'il a lancé un run enfant, le ``run_id`` de celui-ci dans
+``extraction.child_run_id`` — le sous-flow s'extrait séparément, sur son
+propre id de run, avec sa propre commande ``grimoire flow extract``.
 """
 
 from __future__ import annotations
@@ -24,6 +33,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from grimoire.core.exceptions import GrimoireRuntimeError
 from grimoire.core.execution_needs import resolve_execution_needs
 from grimoire.flows.blueprint_loader import load_blueprint
 from grimoire.flows.dispatch_executor import node_dispatch_history
@@ -50,6 +60,27 @@ class ExtractedNode:
     observed_commands: tuple[str, ...]  # commandes réellement exécutées, vides si aucune
     needs_inferred: tuple[str, ...]  # sous-ensemble d'observed_commands reconnu comme besoin résolu
     note: str | None = None
+    #: Le ``run_id`` du sous-flow lancé par ce node (issue #206) — ``None``
+    #: pour un node qui n'est pas ``kind: "composite"``, ou pour un composite
+    #: ``not_reached``/``host_pending`` qui n'a jamais démarré de run enfant.
+    child_run_id: str | None = None
+
+
+def _child_run_id_for(engine: FlowEngine, run_id: str, node_id: str) -> str | None:
+    """Le run enfant lancé par ce node composite, s'il en existe un (issue #206).
+
+    Recherché par lien explicite (``FlowRunMeta.parent_run_id``/
+    ``parent_node_id``), jamais par convention de nommage — un composite
+    ``host_pending``/``not_reached`` n'a simplement jamais posé ce lien.
+    """
+    for candidate_id in engine.list_run_ids():
+        try:
+            candidate_meta = engine.run_meta(candidate_id)
+        except GrimoireRuntimeError:  # pragma: no cover - défensif, un id listé existe toujours
+            continue
+        if candidate_meta.parent_run_id == run_id and candidate_meta.parent_node_id == node_id:
+            return candidate_id
+    return None
 
 
 def _task_verifiability(project_root: Path, run_id: str, node_id: str) -> str | None:
@@ -113,7 +144,7 @@ def extract_blueprint(engine: FlowEngine, run_id: str, project_root: Path) -> tu
     run) puisse l'afficher sans redemander au Mission Ledger.
     """
     meta = engine.run_meta(run_id)
-    original = load_blueprint(Path(meta.blueprint_path))
+    original = load_blueprint(Path(meta.blueprint_path), project_root)
     status = engine.status(run_id, include_contract=False)
     nodes_by_id = {node["id"]: node for node in original["nodes"]}
     completed = set(status.completed_nodes)
@@ -155,7 +186,12 @@ def extract_blueprint(engine: FlowEngine, run_id: str, project_root: Path) -> tu
             # Aucun check observé hors enveloppe (ex. node purement interactif
             # dispatché mais sans acceptance structurée) : l'acceptance
             # d'origine survit telle quelle, jamais remplacée par du vide.
-        node["extraction"] = {"status": node_status, **({"note": note} if note else {})}
+        child_run_id = _child_run_id_for(engine, run_id, node_id) if node.get("kind") == "composite" else None
+        node["extraction"] = {
+            "status": node_status,
+            **({"note": note} if note else {}),
+            **({"child_run_id": child_run_id} if child_run_id else {}),
+        }
         draft_nodes.append(node)
         extraction_trace.append(
             ExtractedNode(
@@ -165,6 +201,7 @@ def extract_blueprint(engine: FlowEngine, run_id: str, project_root: Path) -> tu
                 observed_commands=observed_commands,
                 needs_inferred=needs_inferred,
                 note=note,
+                child_run_id=child_run_id,
             )
         )
 

@@ -34,6 +34,18 @@
       },
       "additionalProperties": true
     },
+    "version": {
+      "type": "string",
+      "description": "This flow's own version (issue #206 registry), independent of `catalogRef.version` and of `blueprintVersion` (the file format). Optional; `grimoire flow list` displays it and defaults to `0.0.0` when absent. Author-set, never derived from git or the file's mtime."
+    },
+    "kitMin": {
+      "type": "string",
+      "description": "Optional lower bound (inclusive) of the grimoire-kit version this flow is known to run under (issue #206 registry). Purely informational today — `grimoire flow list` displays it, nothing refuses a run outside the range yet."
+    },
+    "kitMax": {
+      "type": "string",
+      "description": "Optional upper bound (inclusive) of the grimoire-kit version this flow is known to run under (issue #206 registry). Same status as `kitMin`: displayed by `grimoire flow list`, not yet enforced at run time."
+    },
     "nodes": {
       "type": "array",
       "minItems": 1,
@@ -123,7 +135,7 @@
         },
         "kind": {
           "enum": ["pattern", "artifact", "extension-node", "composite", "composite-inline", "agent-spec"],
-          "description": "Node kind. `pattern`: catalogue pattern (ref = pattern id). `artifact`: governed project file (ref = project-relative path, must exist at validation time). `extension-node`: node provided by an extension (ref = `<extId>/<nodeId>`, the extension must be installed to compile). `composite`: sub-flow (ref = `use-case:<id>` or a `.blueprint.json` path). `composite-inline`: flattened Studio group (informational). `agent-spec`: agent/trigger sketch from the Studio (informational)."
+          "description": "Node kind. `pattern`: catalogue pattern (ref = pattern id). `artifact`: governed project file (ref = project-relative path, must exist at validation time). `extension-node`: node provided by an extension (ref = `<extId>/<nodeId>`, the extension must be installed to compile). `composite`: sub-flow (ref = `use-case:<id>` for a Studio/catalogue expansion, a bare flow id resolved against the local registry, or a `.blueprint.json` path) — since issue #206, `grimoire.flows` (the runtime engine) executes a `.blueprint.json`/registry-id composite as a real nested run (its own run id, its own cost, rolled up to the parent); a `use-case:` ref stays Studio/compile-time only and is refused at flow-engine load time. `composite-inline`: flattened Studio group (informational). `agent-spec`: agent/trigger sketch from the Studio (informational)."
         },
         "role": {
           "enum": ["Unit", "Route", "Scatter", "Gather", "Gate", "Boundary", "Reference"],
@@ -222,8 +234,8 @@
           "then": {
             "properties": {
               "ref": {
-                "pattern": "^(use-case:[a-z0-9]+(-[a-z0-9]+)*|.+\\.blueprint\\.json)$",
-                "description": "Either `use-case:<catalogue-use-case-id>` or a project-relative path to a sub-blueprint ending in `.blueprint.json`."
+                "pattern": "^(use-case:[a-z0-9]+(-[a-z0-9]+)*|[a-z0-9]+(-[a-z0-9]+)*|.+\\.blueprint\\.json)$",
+                "description": "One of: `use-case:<catalogue-use-case-id>` (Studio/compile-time expansion only — `grimoire.flows` refuses this shape at load time, issue #206); a bare flow id resolved against the local registry (`registry/blueprints/<id>.blueprint.json`); or a project-relative path to a sub-blueprint ending in `.blueprint.json`. The flow engine loads the referenced blueprint recursively (composition depth bounded to 3, a cycle back to an ancestor is a named refusal at load time)."
               }
             }
           }

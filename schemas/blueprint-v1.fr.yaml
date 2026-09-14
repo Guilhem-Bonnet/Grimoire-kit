@@ -56,6 +56,26 @@
     Version du catalogue (`1.0.0`). Correspond au `catalogVersion` de l'export
     de catalogue.
 
+/properties/version:
+  texte: >-
+    La version propre de ce flow (registre de l'issue #206), indépendante de
+    `catalogRef.version` (le catalogue) et de `blueprintVersion` (le format de
+    fichier). Facultative ; `grimoire flow list` l'affiche et retombe sur
+    `0.0.0` en son absence. Déclarée par l'auteur, jamais dérivée de git ni de
+    la date de modification du fichier.
+
+/properties/kitMin:
+  texte: >-
+    Borne basse (incluse) optionnelle de la version de grimoire-kit sous
+    laquelle ce flow est connu pour fonctionner (registre de l'issue #206).
+    Purement informatif à ce stade — affiché par `grimoire flow list`, rien ne
+    refuse encore un run hors plage.
+
+/properties/kitMax:
+  texte: >-
+    Borne haute (incluse) optionnelle, même statut que `kitMin` : affichée par
+    `grimoire flow list`, pas encore appliquée à l'exécution.
+
 /properties/nodes:
   texte: >-
     Les nodes du flow. Au moins un. **Chaque node doit porter une clé `pins`**,
@@ -152,10 +172,15 @@
     `artifact` : un fichier gouverné du projet (`ref` = chemin relatif, qui doit
     exister au moment de la validation). `extension-node` : un node fourni par
     une extension (`ref` = `<extId>/<nodeId>`, l'extension doit être installée
-    pour compiler). `composite` : un sous-flow (`ref` = `use-case:<id>` ou un
-    chemin `.blueprint.json`). `composite-inline` : un groupe de Studio aplati,
-    informatif. `agent-spec` : une esquisse d'agent ou de déclencheur venue du
-    Studio, informative.
+    pour compiler). `composite` : un sous-flow (`ref` = `use-case:<id>` pour une
+    expansion Studio/catalogue, un id de flow résolu par le registre local, ou
+    un chemin `.blueprint.json`) — depuis l'issue #206, le moteur de flows
+    (`grimoire.flows`) exécute un composite `.blueprint.json`/id-registre comme
+    un vrai run imbriqué (son propre run id, son propre coût, remonté au
+    parent) ; une `ref` en `use-case:` reste réservée au Studio/à la
+    compilation et est refusée au chargement par le moteur de flows.
+    `composite-inline` : un groupe de Studio aplati, informatif. `agent-spec` :
+    une esquisse d'agent ou de déclencheur venue du Studio, informative.
 
 /$defs/node/properties/role:
   texte: >-
@@ -212,8 +237,13 @@
 /$defs/node/ref/composite:
   titre: "`ref` quand `kind` vaut `composite`"
   texte: >-
-    Soit `use-case:<id d'un cas d'usage du catalogue>`, soit un chemin relatif
-    au projet vers un sous-blueprint, terminé par `.blueprint.json`.
+    Trois formes : `use-case:<id d'un cas d'usage du catalogue>` (expansion
+    Studio/compilation seulement — le moteur de flows la refuse nommément au
+    chargement, issue #206) ; un id de flow nu, résolu contre le registre
+    local (`registry/blueprints/<id>.blueprint.json`) ; ou un chemin relatif
+    au projet vers un sous-blueprint, terminé par `.blueprint.json`. Le
+    moteur charge la référence récursivement — profondeur de composition
+    bornée à 3, un cycle vers un ancêtre est un refus nommé au chargement.
 
 /$defs/pin:
   titre: Pin

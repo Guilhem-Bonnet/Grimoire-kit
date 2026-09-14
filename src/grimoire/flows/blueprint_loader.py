@@ -15,6 +15,7 @@ node ne compile rien, c'est l'hôte qui l'exécute.
 
 from __future__ import annotations
 
+import re
 import shlex
 from pathlib import Path
 from typing import Any
@@ -25,7 +26,32 @@ from grimoire.flows.schemas import AcceptanceEvidence, AcceptanceRun, NodeContra
 from grimoire.missions.verifiability import Verifiability, classify_criteria
 from grimoire.tools.ext_manager import validate_blueprint_file
 
-__all__ = ["build_node_contracts", "hardcoded_command_warnings", "load_blueprint", "topo_order"]
+__all__ = [
+    "MAX_COMPOSITE_DEPTH",
+    "build_node_contracts",
+    "hardcoded_command_warnings",
+    "load_blueprint",
+    "resolve_composite_ref",
+    "topo_order",
+    "validate_flow_composition",
+]
+
+#: Profondeur maximale d'imbrication d'un node ``composite`` (issue #206) : un
+#: flow racine (profondeur 1) qui référence un sous-flow (2) qui en référence
+#: un troisième (3) est la limite — un quatrième niveau est un refus nommé au
+#: chargement, jamais un débordement de pile silencieux sur un blueprint
+#: pathologique.
+MAX_COMPOSITE_DEPTH = 3
+
+#: Même motif que l'``id`` d'un blueprint (``$defs/identifier`` du schéma) —
+#: distingue un id de registre nu (``web-pipeline``) d'un chemin de fichier
+#: dans :func:`resolve_composite_ref`, sans avoir à retenter une résolution
+#: fichier d'abord.
+_BLUEPRINT_ID_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+
+#: Dossier du registre local des flows (même convention que ``flow list``,
+#: ``flow extract`` — voir ``registry/blueprints/*.json`` au dépôt).
+_REGISTRY_BLUEPRINTS_RELPATH = Path("registry/blueprints")
 
 #: Les seules clés qu'une entrée d'``acceptance`` structurée reconnaît (issue
 #: #428, #205 pour ``run_need``). Une entrée doit en porter exactement une :
@@ -35,12 +61,20 @@ __all__ = ["build_node_contracts", "hardcoded_command_warnings", "load_blueprint
 _ACCEPTANCE_STRUCTURED_KEYS = ("run", "run_need", "path_exists", "test")
 
 
-def load_blueprint(path: Path) -> dict[str, Any]:
+def load_blueprint(path: Path, project_root: Path = Path(), _chain: tuple[Path, ...] = ()) -> dict[str, Any]:
     """Charge et valide structurellement un ``.blueprint.json``.
 
     Lève :class:`GrimoireRuntimeError` (pas ``ExtensionError`` du sous-module
     ``tools`` : côté flows, une erreur de blueprint est une erreur de moteur,
     pas une erreur d'extension) en nommant chaque défaut trouvé.
+
+    ``project_root``/``_chain`` (issue #206) : après la validation
+    structurelle, tout node ``kind: "composite"`` est résolu et rechargé
+    récursivement par :func:`validate_flow_composition` — une référence
+    introuvable ou un cycle est donc un refus **au chargement**, jamais au
+    moment où le node composite serait présenté à un exécuteur. ``_chain`` ne
+    doit jamais être passé par un appelant hors de ce module : c'est l'état
+    interne de la récursion (les chemins déjà résolus depuis la racine).
     """
     from grimoire.tools.ext_manager import ExtensionError
 
@@ -50,7 +84,88 @@ def load_blueprint(path: Path) -> dict[str, Any]:
         raise GrimoireRuntimeError(str(exc)) from exc
     if errors:
         raise GrimoireRuntimeError(f"{path} : blueprint invalide — " + "; ".join(errors))
+    validate_flow_composition(blueprint, project_root=project_root, blueprint_path=path, _chain=_chain)
     return blueprint
+
+
+def resolve_composite_ref(ref: str, *, project_root: Path, blueprint_dir: Path) -> Path:
+    """Résout la ``ref`` d'un node ``kind: "composite"`` en chemin de fichier (issue #206).
+
+    Trois formes reconnues, jamais une quatrième inventée :
+
+    - ``use-case:<id>`` — expansion Studio/catalogue, hors périmètre du
+      moteur de flows : refus nommé, cette forme ne désigne aucun fichier
+      exécutable par ``FlowEngine``.
+    - un chemin se terminant par ``.blueprint.json`` — résolu d'abord tel
+      quel (absolu ou relatif au répertoire courant), sinon relatif au
+      dossier du blueprint qui le référence, sinon relatif à
+      ``project_root`` ; le premier qui existe gagne.
+    - un id nu (motif d'id de blueprint) — résolu contre le registre local,
+      ``<project_root>/registry/blueprints/<id>.blueprint.json``.
+
+    Une référence introuvable, ou d'une forme qui n'est aucune des trois
+    ci-dessus, est un :class:`GrimoireRuntimeError` nommé — jamais un chemin
+    deviné.
+    """
+    if ref.startswith("use-case:"):
+        raise GrimoireRuntimeError(
+            f"ref composite {ref!r} : une expansion 'use-case:' est réservée au Studio/à la compilation, "
+            "le moteur de flows ne l'exécute pas — utiliser un chemin .blueprint.json ou un id de registre"
+        )
+    if ref.endswith(".blueprint.json"):
+        candidates = (Path(ref), blueprint_dir / ref, project_root / ref)
+        for candidate in candidates:
+            if candidate.is_file():
+                return candidate
+        raise GrimoireRuntimeError(
+            f"sous-blueprint introuvable pour ref {ref!r} (essayé : {', '.join(str(c) for c in candidates)})"
+        )
+    if not _BLUEPRINT_ID_RE.match(ref):
+        raise GrimoireRuntimeError(
+            f"ref composite {ref!r} invalide — attendu use-case:<id>, un id de blueprint "
+            "(minuscules/chiffres/traits d'union), ou un chemin .blueprint.json"
+        )
+    registry_path = project_root / _REGISTRY_BLUEPRINTS_RELPATH / f"{ref}.blueprint.json"
+    if not registry_path.is_file():
+        raise GrimoireRuntimeError(f"flow {ref!r} introuvable au registre local ({registry_path})")
+    return registry_path
+
+
+def validate_flow_composition(
+    blueprint: dict[str, Any], *, project_root: Path, blueprint_path: Path, _chain: tuple[Path, ...] = ()
+) -> None:
+    """Valide récursivement les nodes ``kind: "composite"`` d'un blueprint (issue #206).
+
+    Appelée par :func:`load_blueprint` juste après la validation structurelle
+    — jamais indépendamment par un appelant externe. Trois refus possibles,
+    tous nommés, tous au chargement :
+
+    - la référence ne se résout à aucun fichier (:func:`resolve_composite_ref`) ;
+    - le fichier résolu est déjà un ancêtre de celui-ci dans la chaîne de
+      composition en cours — un cycle ;
+    - la profondeur de composition dépasse :data:`MAX_COMPOSITE_DEPTH`.
+
+    Un sous-blueprint valide est rechargé (donc revalidé structurellement,
+    et sa propre composition explorée) via :func:`load_blueprint` lui-même —
+    la récursion couvre n'importe quelle profondeur de nesting sans qu'aucune
+    fonction n'ait à connaître le graphe complet à l'avance.
+    """
+    resolved_self = blueprint_path.resolve()
+    if resolved_self in _chain:
+        chain_desc = " -> ".join(str(p) for p in (*_chain, resolved_self))
+        raise GrimoireRuntimeError(f"cycle de composition détecté (issue #206) : {chain_desc}")
+    new_chain = (*_chain, resolved_self)
+    if len(new_chain) > MAX_COMPOSITE_DEPTH:
+        chain_desc = " -> ".join(str(p) for p in new_chain)
+        raise GrimoireRuntimeError(
+            f"profondeur de composition dépassée (max {MAX_COMPOSITE_DEPTH}, issue #206) : {chain_desc}"
+        )
+    for node in blueprint.get("nodes", []):
+        if node.get("kind") != "composite":
+            continue
+        ref = str(node.get("ref", ""))
+        sub_path = resolve_composite_ref(ref, project_root=project_root, blueprint_dir=blueprint_path.parent)
+        load_blueprint(sub_path, project_root, new_chain)
 
 
 def topo_order(blueprint: dict[str, Any]) -> list[str]:
@@ -95,6 +210,12 @@ def _tool_boundary(node: dict[str, Any]) -> tuple[str, ...]:
     """
     if node.get("kind") == "extension-node":
         return (node.get("ref", ""),)
+    if node.get("kind") == "composite":
+        # Issue #206 : la frontière d'un node composite EST le sous-flow —
+        # même convention qu'``extension-node``, pour que ``to_text()``
+        # renseigne un hôte interactif (qui n'auto-lance rien, voir
+        # ``flows.dispatch_executor``) sur la commande à lancer lui-même.
+        return (f"composite:{node.get('ref', '')}",)
     gate = (node.get("config") or {}).get("gate")
     if isinstance(gate, dict):
         mode = gate.get("mode", "?")
@@ -345,6 +466,7 @@ def build_node_contracts(blueprint: dict[str, Any], project_root: Path = Path())
             acceptance_runs=acceptance_runs,
             acceptance_evidence=acceptance_evidence,
             verifiability_warning=_verifiability_warning(node["id"], acceptance_texts, has_structured=has_structured),
+            ref=str(node.get("ref", "")),
         )
     return contracts
 
