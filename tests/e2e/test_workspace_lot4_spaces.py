@@ -261,6 +261,52 @@ def test_executer_le_board_change_quand_on_change_de_projet(
         context.close()
 
 
+def test_ouvrir_ce_projet_reste_sur_l_ecran_projet_sans_recharger(
+    browser: Browser, served_cockpit_multi: tuple[str, str, str]
+) -> None:
+    """Issue #506 : « Ouvrir ce projet », depuis la fiche d'un projet atteint
+    par un clic dans la Flotte, rechargeait toute la page
+    (`location.search = ...`). Le `?project=` qui en résultait retombait sur
+    la vue Flotte par défaut (`projectFromUrl`, #351) — il fallait recliquer
+    « Projet » à la main pour revoir l'écran qu'on venait de demander. Ce
+    bouton doit désormais rester sur l'écran Projet, sans recharger le
+    navigateur (même `document`, prouvé par un marqueur posé avant le clic)."""
+    served, slug_a, slug_b = served_cockpit_multi
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
+    page = context.new_page()
+    try:
+        page.goto(f"{served}/workspace/index.html?project={slug_a}", wait_until="domcontentloaded")
+        page.wait_for_selector("body[data-ready='1']", timeout=30_000)
+        _goto(page, "piloter")
+
+        # Défaut : Flotte, puisque `?project=` vient de l'URL (#351) — le clic
+        # sur la ligne du projet B ouvre sa fiche sans recharger (mécanisme
+        # déjà correct, `onSelect` dans `renderFleet`).
+        page.wait_for_selector(".pl-table tbody tr")
+        page.locator(".pl-table tbody tr", has_text=slug_b).first.click()
+        open_button = page.locator("button", has_text="Ouvrir ce projet")
+        open_button.wait_for(state="visible", timeout=15_000)
+
+        page.evaluate("() => { window.__e2eMarker = 'still-here'; }")
+        open_button.click()
+
+        # La fiche se redessine de façon asynchrone (`loadSheet` refait un
+        # aller-retour réseau) : attendre le bouton plutôt qu'un délai fixe,
+        # sous peine de flake en CI où ce montage prend plus de temps qu'en
+        # local.
+        update_button = page.locator("button", has_text="Mettre à jour")
+        update_button.wait_for(state="visible", timeout=15_000)
+
+        assert page.evaluate("() => window.__e2eMarker") == "still-here", (
+            "un rechargement complet du document a eu lieu — le marqueur JS ne survit pas à ça"
+        )
+        assert page.locator('#zoom-seg button[data-value="projet"]').get_attribute("aria-pressed") == "true", (
+            "le zoom doit rester sur Projet, pas retomber sur Flotte"
+        )
+    finally:
+        context.close()
+
+
 def test_executer_review_sans_evidence_pack_est_refuse_et_nomme_l_artefact(
     review_gate_workspace: Page, served_review_gate: tuple[str, str]
 ) -> None:

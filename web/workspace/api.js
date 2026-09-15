@@ -141,6 +141,10 @@ export const api = {
   stigmergy: () => get('/api/stigmergy'),
   eventsLog: () => get('/api/events/log'),
   otel: () => get('/api/otel'),
+  // Runs de flow (#506) — distinct du TraceLedger qu'`otel()` lit : un
+  // `grimoire upgrade-flow run` n'y écrit jamais de span. `blueprint` filtre
+  // (ex. `project-upgrade`) ; omis, tous les flows du projet.
+  flowRuns: (blueprint) => get(WS + 'flows/runs', blueprint ? { blueprint } : undefined),
 
   // ── Vue de travail ────────────────────────────────────────────────────────
   glossary: () => get(WS + 'glossary'),

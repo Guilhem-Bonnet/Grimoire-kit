@@ -52,6 +52,8 @@ function injectStyles() {
     .ob-table tbody tr { cursor: pointer; }
     .ob-table tbody tr:hover { background: var(--e2); }
     .ob-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
+    .ob-runs { margin-top: var(--sp-4); padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); }
+    .ob-runs h4 { font-size: var(--t-min); text-transform: none; color: var(--ink3); margin: 0 0 6px; font-weight: 500; }
   `;
   document.head.append(style);
 }
@@ -307,12 +309,18 @@ export async function mount(root, ctx) {
     'runtime',
   );
 
-  const [otel, costModel] = await Promise.all([
+  const [otel, costModel, flowRuns] = await Promise.all([
     ctx.api.otel().catch(() => ({ spans: [] })),
     ctx.api.costModel().catch(() => null),
+    // Distinct du TraceLedger qu'`otel()` lit (#506) : un `grimoire
+    // upgrade-flow run` n'y écrit jamais de span, et cet espace disait
+    // « TraceLedger vide » même juste après un run réel — vrai du ledger,
+    // trompeur pour qui vient de lancer une mise à jour depuis Piloter.
+    ctx.api.flowRuns().catch(() => ({ runs: [] })),
   ]);
   const spans = Array.isArray(otel?.spans) ? otel.spans : [];
   const modelRates = costModel?.modelRates || null;
+  const runs = Array.isArray(flowRuns?.runs) ? flowRuns.runs : [];
 
   if (ctx.signal.aborted) return;
 
@@ -325,6 +333,29 @@ export async function mount(root, ctx) {
       + 'ouvrez cet espace à nouveau.',
       'grimoire task trace <id>',
     ));
+    if (runs.length) {
+      // Le TraceLedger est bien vide, mais ce n'est pas la même chose que
+      // « rien n'a tourné » : au moins un flow (souvent `project-upgrade`,
+      // lancé depuis Piloter → Mettre à jour) a un run enregistré.
+      const runsBlock = document.createElement('div');
+      runsBlock.className = 'ob-runs';
+      runsBlock.append(text('h4', null, 'Runs de flow (hors TraceLedger)'));
+      for (const run of runs.slice(0, 10)) {
+        const line = document.createElement('div');
+        line.className = 'row';
+        line.style.justifyContent = 'space-between';
+        line.append(
+          text('span', 'mono', run.runId),
+          text('span', 'lbl', `${run.blueprintId || '?'} · ${run.createdAt || 'date inconnue'}`),
+        );
+        runsBlock.append(line);
+      }
+      root.append(runsBlock);
+      ctx.inspector.replaceChildren(text('p', 'lbl', `${runs.length} run(s) de flow enregistré(s), aucun span OTel.`));
+      ctx.dock.log('traces', `TraceLedger vide, mais ${runs.length} run(s) de flow enregistré(s) (ex. project-upgrade).`);
+      ctx.dock.echo('grimoire upgrade-flow status');
+      return;
+    }
     ctx.inspector.replaceChildren(text('p', 'lbl', 'Aucun span à inspecter.'));
     ctx.dock.log('traces', 'Aucune trace dans le TraceLedger de ce projet.');
     ctx.dock.echo('grimoire task trace');

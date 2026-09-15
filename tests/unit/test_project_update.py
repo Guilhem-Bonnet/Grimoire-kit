@@ -144,6 +144,85 @@ def test_a_confirmed_run_surfaces_the_final_report_and_pending_proposals(
     assert slugs == {pending.slug}, "seule la proposition encore pending doit apparaître"
 
 
+def test_a_confirmed_run_surfaces_the_backup_path_and_node_statuses(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #506, PR B : la réponse porte désormais `backupPath`
+    (jusqu'ici jeté après avoir servi de `detail` au contrat) et un statut
+    par nœud — `fait` pour le mécanique, `proposition` pour le jugement
+    (V1), `checkpoint en attente` pour `destructive`."""
+    class _Ok:
+        returncode = 0
+        stdout = json.dumps({
+            "ok": True, "run_id": "r3",
+            "done": ["backup", "preview", "orphans", "apply", "overrides", "memory", "needs-hosts", "verify"],
+            "stopped_at": "destructive",
+            "backup_path": "/tmp/projet/_archive/2026-09-14-pre-3.50.2",
+            "repairs_proposed": 2,
+        })
+        stderr = ""
+
+    monkeypatch.setattr(project_update.subprocess, "run", lambda *a, **k: _Ok())
+    report = project_update.update_project(project, dry_run=False)
+    assert report["backupPath"] == "/tmp/projet/_archive/2026-09-14-pre-3.50.2"
+    assert report["repairsProposed"] == 2
+    by_id = {n["id"]: n["status"] for n in report["nodes"]}
+    assert by_id["backup"] == "fait"
+    assert by_id["apply"] == "fait"
+    assert by_id["overrides"] == "proposition"
+    assert by_id["memory"] == "proposition"
+    assert by_id["needs-hosts"] == "proposition"
+    assert by_id["verify"] == "fait"
+    assert by_id["destructive"] == "checkpoint en attente"
+
+
+def test_a_dry_run_marks_unstarted_nodes_as_skipped_not_an_error(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Un aperçu s'arrête après `preview`, avant même de lancer `orphans` —
+    ni une erreur ni un checkpoint, juste jamais atteint."""
+    class _Ok:
+        returncode = 0
+        stdout = json.dumps({
+            "ok": True, "run_id": "r4", "done": ["backup", "preview"],
+            "stopped_at": "orphans (--dry-run : arrêté après preview)",
+        })
+        stderr = ""
+
+    monkeypatch.setattr(project_update.subprocess, "run", lambda *a, **k: _Ok())
+    report = project_update.update_project(project, dry_run=True)
+    by_id = {n["id"]: n["status"] for n in report["nodes"]}
+    assert by_id["backup"] == "fait"
+    assert by_id["preview"] == "fait"
+    assert by_id["orphans"] == "sauté"
+    assert by_id["destructive"] == "sauté"
+
+
+def test_a_node_failure_marks_it_as_erreur_and_the_rest_as_skipped(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`_fail_run` (cmd_upgrade_flow.py) porte désormais `done`/`failed_node`
+    même sur un refus — cette réponse doit se lire comme un déroulé, pas
+    seulement comme un message d'erreur."""
+    class _Fail:
+        returncode = 1
+        stdout = json.dumps({
+            "ok": False, "error": "node apply refusé : ['doctor a échoué']",
+            "run_id": "r5", "done": ["backup", "preview", "orphans"], "failed_node": "apply",
+        })
+        stderr = ""
+
+    monkeypatch.setattr(project_update.subprocess, "run", lambda *a, **k: _Fail())
+    report = project_update.update_project(project, dry_run=False)
+    assert report["ok"] is False
+    by_id = {n["id"]: n["status"] for n in report["nodes"]}
+    assert by_id["backup"] == "fait"
+    assert by_id["orphans"] == "fait"
+    assert by_id["apply"] == "erreur"
+    assert by_id["overrides"] == "sauté"
+    assert by_id["destructive"] == "sauté"
+
+
 def test_a_failing_command_is_reported_not_raised(
     project: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

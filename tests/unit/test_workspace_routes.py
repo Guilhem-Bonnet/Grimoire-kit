@@ -36,7 +36,13 @@ from grimoire.cli import cmd_cockpit
 from grimoire.data import web_path
 from grimoire.tools import project_registry as reg
 from grimoire.tools.forge_server import ForgeAPI, make_handler
-from grimoire.tools.workspace_routes import GET_ROUTES, POST_ROUTES, PREFIX, is_proposal_decision
+from grimoire.tools.workspace_routes import (
+    GET_ROUTES,
+    POST_ROUTES,
+    PREFIX,
+    is_proposal_decision,
+    workspace_get,
+)
 
 # Les lectures sans paramètre obligatoire : celles qu'on peut interroger telles
 # quelles sur les deux hôtes. `file`, `file/diff`, `file/usage` et
@@ -727,3 +733,25 @@ def test_un_mouvement_de_tache_vers_un_etat_inconnu_est_un_400(
 )
 def test_is_proposal_decision_ne_reconnait_que_accept_et_reject(path: str, expected: bool) -> None:
     assert is_proposal_decision(path) is expected
+
+
+# ── 4. Runs de flow, distincts du TraceLedger (#506) ────────────────────────
+
+
+def test_flow_runs_route_lists_a_run_by_blueprint(tmp_path: Path) -> None:
+    """Le même contrat que le module dédié, vu depuis la route — un
+    `grimoire upgrade-flow run` réel écrit un fichier que cette route doit
+    retrouver, Observer n'a plus à croire le TraceLedger vide à tort."""
+    import json
+
+    flows_dir = tmp_path / "_grimoire-runtime-output" / "flows"
+    flows_dir.mkdir(parents=True, exist_ok=True)
+    (flows_dir / "run-1.json").write_text(
+        json.dumps({"run_id": "run-1", "blueprint_id": "project-upgrade", "created_at": "2026-09-14T10:00:00+00:00"}),
+        encoding="utf-8",
+    )
+    payload = workspace_get(tmp_path, f"{PREFIX}flows/runs", {})
+    assert payload["runs"][0]["runId"] == "run-1"
+
+    filtered = workspace_get(tmp_path, f"{PREFIX}flows/runs", {"blueprint": ["autre-flow"]})
+    assert filtered["runs"] == []

@@ -30,6 +30,8 @@
 // Concevoir) ni une trace d'exécution (Observer). Écritures désactivées
 // (`ctx.host.readOnly`) hors projet d'accueil, comme le reste de la fiche.
 
+import { renderMarkdown, truncateMarkdown } from '../markdown.js';
+
 const STYLE_ID = 'pl-styles';
 
 function injectStyles() {
@@ -69,6 +71,15 @@ function injectStyles() {
     .pl-insp-row { display: flex; justify-content: space-between; gap: var(--sp-2); padding: 4px 0; font-size: var(--t-s); }
     .pl-actions { display: flex; flex-direction: column; gap: 6px; margin-top: var(--sp-2); }
     .pl-preview { margin-top: 8px; padding: 8px; border: 1px dashed var(--line); border-radius: var(--r); font-size: var(--t-min); color: var(--ink2); }
+    .pl-nodes { margin: 8px 0; }
+    /* Un bloc de code garde sa largeur propre et défile horizontalement —
+       jamais pre-wrap, qui casse l'alignement d'une sortie CLI/Rich à
+       chaque redimensionnement. */
+    .pl-markdown { font-size: var(--t-s); }
+    .pl-markdown h1, .pl-markdown h2, .pl-markdown h3 { font-size: var(--t-m); font-weight: 500; margin: 10px 0 4px; color: var(--ink); }
+    .pl-markdown p { margin: 4px 0; }
+    .pl-markdown pre { font-family: var(--mono); font-size: var(--t-min); background: var(--e2); border-radius: var(--r); padding: 8px; overflow-x: auto; white-space: pre; margin: 4px 0; }
+    .pl-markdown code { font-family: var(--mono); }
     .pl-badge { display: inline-block; padding: 1px 6px; border-radius: 999px; font-size: var(--t-min); border: 1px solid var(--line); color: var(--ink2); }
     .pl-badge.overrides { color: var(--ink); border-color: var(--acc); }
     /* --warn n'est jamais utilisé comme couleur de texte ailleurs dans la
@@ -1063,6 +1074,73 @@ async function renderCreateProjectForm(ctx, onCreated) {
   return wrap;
 }
 
+// ── Déroulé du flow de mise à jour, nœud par nœud (issue #506) ─────────────
+//
+// `report.nodes`/`result.nodes` (project_update.py::_node_statuses) porte un
+// statut par nœud du blueprint `project-upgrade`, dans l'ordre fixe — jamais
+// déduit du texte libre `output`. Les libellés ici sont d'affichage
+// seulement ; l'identité (`node.id`) reste celle du blueprint.
+
+const NODE_LABELS = {
+  backup: 'Sauvegarde', preview: 'Aperçu', orphans: 'Orphelins', apply: 'Application',
+  overrides: 'Overrides', memory: 'Mémoire', 'needs-hosts': 'Besoins / hôtes',
+  verify: 'Vérification', destructive: 'Destructif (checkpoint)',
+};
+
+const NODE_STATUS_WORD = {
+  fait: 'fait',
+  proposition: 'proposition écrite — à décider dans Propositions',
+  sauté: 'jamais atteint',
+  erreur: 'en erreur',
+  'checkpoint en attente': 'arrêté ici, jamais décidé à votre place',
+};
+
+const NODE_STATUS_DOT = {
+  fait: 'ok', proposition: 'acc', sauté: '', erreur: 'bad', 'checkpoint en attente': 'warn',
+};
+
+function renderNodeList(nodes) {
+  const list = document.createElement('div');
+  list.className = 'pl-watch pl-nodes';
+  for (const node of nodes) {
+    const nodeRow = document.createElement('div');
+    nodeRow.className = 'pl-watch-row';
+    nodeRow.append(
+      dot(NODE_STATUS_DOT[node.status] ?? ''),
+      row(
+        text('span', 'pl-watch-name', NODE_LABELS[node.id] || node.id),
+        text('span', 'lbl', NODE_STATUS_WORD[node.status] || node.status),
+      ),
+    );
+    list.append(nodeRow);
+  }
+  return list;
+}
+
+//: Un rapport CLI/Rich complet peut dépasser largement cette taille ; le
+//: cockpit n'a pas besoin du journal entier pour montrer ce qui a tourné, et
+//: une UI qui charge tout gèlerait sur un gros projet. `truncateMarkdown`
+//: coupe sur une frontière de ligne et referme un bloc de code resté ouvert.
+const PREVIEW_MARKDOWN_LIMIT = 4000;
+
+// Rend `preview.md`/`report.md` (ou, à défaut, la sortie brute) en Markdown
+// structuré — titres et blocs de code, jamais un `<pre>` unique où les
+// caractères de mise en forme de la commande sous-jacente s'affichent tels
+// quels. `preview-wrap` cassait l'alignement d'un bloc de code multi-lignes
+// à chaque redimensionnement ; un bloc de code garde son défilement
+// horizontal propre (voir `.pl-markdown pre` dans les styles du module).
+function appendPreviewMarkdown(container, previewText) {
+  if (!previewText) return;
+  const { text: shown, truncated } = truncateMarkdown(previewText, PREVIEW_MARKDOWN_LIMIT);
+  const rendered = document.createElement('div');
+  rendered.className = 'pl-markdown';
+  rendered.innerHTML = renderMarkdown(shown);
+  container.append(rendered);
+  if (truncated) {
+    container.append(text('div', 'lbl', 'Aperçu tronqué — le rapport complet reste sur disque sous `_grimoire-output/upgrade/<date>/`.'));
+  }
+}
+
 function renderSheet(root, ctx, slug, name, sheet, options) {
   const wrap = document.createElement('div');
   wrap.className = 'pl-sheet';
@@ -1070,12 +1148,13 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
 
   wrap.append(text('h2', null, name || slug || ctx.host.project || 'Projet servi'));
 
-  wrap.append(kpiCard([
+  const kpi = kpiCard([
     { value: health?.kit?.scaffolded ? kitStatus(health.kit).word : 'absent', label: 'kit' },
     { value: ciWord(health?.ci_status), label: 'CI' },
     { value: fmtInt(health?.commits_total), label: 'commits' },
     { value: fmtInt((health?.flows || []).length), label: 'flows' },
-  ]));
+  ]);
+  wrap.append(kpi);
 
   root.append(wrap);
 
@@ -1086,9 +1165,30 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
   kitBlock.className = 'pl-insp-block';
   kitBlock.append(text('h4', null, 'Kit'));
   const kit = kitStatus(health?.kit);
-  kitBlock.append(row(dot(kit.dot), text('span', null, kit.word)));
+  const kitRow = row(dot(kit.dot), text('span', null, kit.word));
+  kitBlock.append(kitRow);
   if (health?.kit?.aligned) kitBlock.append(text('div', 'lbl', `aligné sur ${health.kit.aligned}, installé ${health.kit.installed}`));
+  // Le badge « en retard (N) » nommait N sans jamais dire lesquels
+  // (`kit.behindFiles`, déjà rendu par le serveur, jusqu'ici jamais lu ici).
+  let behindBlock = null;
+  const behindFiles = health?.kit?.behindFiles || [];
+  if (behindFiles.length) {
+    behindBlock = text('div', 'lbl', `En retard : ${behindFiles.join(', ')}`);
+    kitBlock.append(behindBlock);
+  }
   ctx.inspector.append(kitBlock);
+
+  // Après un run confirmé arrêté au checkpoint `destructive` (le seul point
+  // d'arrêt d'un flow complet, #490), le badge doit dire ce qui vient de se
+  // passer plutôt que garder le même libellé qu'avant toute action — la
+  // prochaine vraie lecture de santé (rechargement, `options.refresh()`
+  // ailleurs) reprendra le mot habituel de `kitStatus`.
+  function markKitCheckpointPending() {
+    kitRow.replaceChildren(dot('warn'), text('span', null, 'mis à niveau, checkpoint destructif en attente'));
+    const kitCell = kpi.querySelector('.pl-kpi-item .pl-kpi-val');
+    if (kitCell) kitCell.textContent = 'checkpoint en attente';
+    if (behindBlock) { behindBlock.remove(); behindBlock = null; }
+  }
 
   const standardBlock = document.createElement('div');
   standardBlock.className = 'pl-insp-block';
@@ -1153,20 +1253,20 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
   preview.hidden = true;
   updateBtn.addEventListener('click', async () => {
     ctx.dock.echo(`grimoire upgrade-flow run --dry-run${slug ? ' # ' + slug : ''}`);
+    // État « en cours » (issue #506) : le flow peut prendre jusqu'à une
+    // minute (backup + `up --dry-run` + `host sync --dry-run`) — sans ceci,
+    // l'écran passait de « cliqué » à « terminé » sans rien entre.
+    updateBtn.disabled = true;
+    updateBtn.textContent = 'Aperçu en cours…';
+    preview.hidden = false;
+    preview.replaceChildren(row(dot('acc'), text('span', 'lbl', "Aperçu en cours — jusqu'à une minute…")));
     try {
       const report = await ctx.api.updateProject(slug, false);
-      preview.hidden = false;
       preview.replaceChildren();
       preview.append(text('div', null, report.ok ? "Aperçu réussi (sauvegarde + preview, rien d'autre écrit)." : (report.error || 'Aperçu en échec.')));
-      const previewText = report.preview || report.output;
-      if (previewText) {
-        const pre = document.createElement('pre');
-        pre.className = 'mono lbl';
-        pre.style.whiteSpace = 'pre-wrap';
-        pre.style.margin = '6px 0 0';
-        pre.textContent = previewText.slice(0, 2000);
-        preview.append(pre);
-      }
+      if (report.nodes) preview.append(renderNodeList(report.nodes));
+      if (report.backupPath) preview.append(text('div', 'lbl', `Sauvegarde : ${report.backupPath}`));
+      appendPreviewMarkdown(preview, report.preview || report.output);
       const confirmBtn = document.createElement('button');
       confirmBtn.type = 'button';
       confirmBtn.className = 'btn pri';
@@ -1174,17 +1274,39 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
       confirmBtn.style.marginTop = '8px';
       confirmBtn.addEventListener('click', async () => {
         ctx.dock.echo(`grimoire upgrade-flow run --executor interactive${slug ? ' # ' + slug : ''}`);
-        const result = await ctx.api.updateProject(slug, true);
-        preview.append(text('div', 'lbl', result.ok ? "Mis à jour — le flow s'est arrêté au checkpoint final, jamais décidé à votre place." : 'Échec de la mise à jour.'));
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = 'Mise à jour en cours…';
+        const progress = row(dot('acc'), text('span', 'lbl', "Mise à jour en cours — jusqu'à une minute, ne fermez pas cet onglet."));
+        preview.append(progress);
+        const result = await ctx.api.updateProject(slug, true).catch((error) => ({ ok: false, error: error.message }));
+        progress.remove();
+        preview.append(text('div', 'lbl', result.ok
+          ? "Mis à jour — le flow s'est arrêté au checkpoint final, jamais décidé à votre place."
+          : ('Échec de la mise à jour' + (result.error ? ` : ${result.error}` : '.'))));
+        if (result.nodes) preview.append(renderNodeList(result.nodes));
+        if (result.backupPath) preview.append(text('div', 'lbl', `Sauvegarde : ${result.backupPath}`));
         if (result.ok && result.proposals && result.proposals.length) {
           preview.append(text('div', 'lbl', `${result.proposals.length} proposition(s) en attente — voir la section Propositions ci-dessous.`));
         }
-        options.refresh();
+        confirmBtn.remove();
+        if (result.ok) {
+          markKitCheckpointPending();
+          // Jamais `options.refresh()` ici : il redessine toute la fiche et
+          // effacerait ce déroulé à l'instant même où on vient de le montrer
+          // (constat terrain, issue #506 — « l'Inspecteur revient
+          // silencieusement à l'état initial »). Seules les propositions (et
+          // la table d'agents qu'elles peuvent alimenter) ont besoin d'une
+          // lecture fraîche ; `refreshProposals` — définie plus bas dans
+          // cette même fiche — s'en charge sans toucher au reste du DOM.
+          refreshProposals();
+        }
       });
       preview.append(confirmBtn);
     } catch (error) {
-      preview.hidden = false;
       preview.replaceChildren(text('div', 'lbl', 'refusé : ' + error.message));
+    } finally {
+      updateBtn.disabled = false;
+      updateBtn.textContent = 'Mettre à jour — aperçu';
     }
   });
   actionsBlock.append(updateBtn, preview);
@@ -1194,7 +1316,15 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
     openBtn.type = 'button';
     openBtn.className = 'btn';
     openBtn.textContent = 'Ouvrir ce projet';
-    openBtn.addEventListener('click', () => { location.search = '?project=' + encodeURIComponent(slug); });
+    // Naviguer via `ctx.goto` (une seule page, un seul montage de Piloter),
+    // jamais `location.search = ...` (issue #506) : ce dernier rechargeait
+    // le navigateur en entier, et le `?project=` qui en résultait retombait
+    // sur la vue Flotte par défaut (`projectFromUrl`, voir le docstring de
+    // `mount` plus bas) — le clic n'ouvrait jamais l'écran Projet qu'il
+    // promettait, il fallait recliquer « Projet » à la main. `ctx.params.
+    // openProject`, lu par `mount`, sélectionne directement ce projet au
+    // niveau Projet, sans reconstruire toute la coque.
+    openBtn.addEventListener('click', () => ctx.goto('piloter', { openProject: slug }));
     actionsBlock.append(openBtn);
   }
 
@@ -1280,6 +1410,17 @@ export async function mount(root, ctx) {
   const directLaunch = ctx.host.project && !ctx.host.projectFromUrl;
   let level = cockpit && !directLaunch ? 'flotte' : 'projet';
   let selected = ctx.host.project || null;
+
+  // `ctx.goto('piloter', { openProject: slug })` (bouton « Ouvrir ce
+  // projet », issue #506) : une navigation EXPLICITE vers la fiche d'un
+  // projet précis prime sur la Flotte par défaut, y compris pour un hôte non
+  // home — c'est tout le sens du clic, contrairement à `?project=` dans
+  // l'URL au chargement (`directLaunch` ci-dessus), qui reste une
+  // navigation de flotte par défaut (#351).
+  if (ctx.params && ctx.params.openProject) {
+    selected = ctx.params.openProject;
+    level = 'projet';
+  }
 
   const zoomLevels = cockpit
     ? [{ id: 'flotte', label: 'Flotte' }, { id: 'projet', label: 'Projet' }]

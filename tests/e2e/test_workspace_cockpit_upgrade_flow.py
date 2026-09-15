@@ -60,11 +60,13 @@ def test_confirmer_depuis_piloter_fait_apparaitre_une_proposition(
     confirm_button.wait_for(state="visible", timeout=15_000)
     confirm_button.click()
 
-    # Assertion sur l'état stable — jamais sur le message transitoire que
-    # `options.refresh()` remplace dès que la fiche se redessine avec les
-    # données fraîches : c'est cette fiche redessinée, pas le message, qui
-    # doit finir par montrer la proposition (issue #490 : la fiche mémoire
-    # non raccordée semée par la fixture).
+    # Le déroulé nœud par nœud doit apparaître ET rester affiché — issue #506 :
+    # le constat terrain (« l'Inspecteur revient silencieusement à l'état
+    # initial ») venait de `options.refresh()`, appelé juste après avoir
+    # montré le résultat, qui redessinait toute la fiche et l'effaçait. Le
+    # correctif retire cet appel du chemin de confirmation ; ce test vérifie
+    # maintenant l'état stable ET le message transitoire, plutôt que
+    # d'esquiver ce dernier comme avant.
     workspace.wait_for_function(
         "() => document.body.innerText.includes('monitoring')",
         timeout=90_000,
@@ -73,4 +75,34 @@ def test_confirmer_depuis_piloter_fait_apparaitre_une_proposition(
     section.wait_for(state="visible", timeout=15_000)
     assert "monitoring" in section.inner_text(), (
         "la fiche mémoire non raccordée doit apparaître comme proposition dans Piloter"
+    )
+
+    preview_text = preview.inner_text()
+    assert "s'est arrêté au checkpoint final" in preview_text, (
+        "le message de confirmation doit rester affiché, pas disparaître au refresh des propositions"
+    )
+    for node_label in ("Sauvegarde", "Aperçu", "Application", "Destructif"):
+        assert node_label in preview_text, f"le déroulé nœud par nœud doit nommer « {node_label} »"
+    assert "checkpoint destructif en attente" in workspace.locator("body").inner_text(), (
+        "le badge Kit doit passer à un état explicite après un run arrêté au checkpoint"
+    )
+
+
+def test_observer_montre_le_run_de_flow_meme_traceledger_vide(
+    cockpit_upgrade_workspace: Page, served_cockpit_upgrade: tuple[str, str, Path]
+) -> None:
+    """Issue #506 : Observer disait « TraceLedger vide » même juste après un
+    run réel de `project-upgrade` — vrai du TraceLedger (dispatch/agent-miss),
+    trompeur pour qui vient de confirmer une mise à jour depuis Piloter. Ce
+    test s'appuie sur le run déjà confirmé par le test précédent dans ce même
+    fichier (fixture de session partagée) : sans lui, aucun run n'existerait
+    encore et ce test ne prouverait rien.
+    """
+    workspace = cockpit_upgrade_workspace
+    _goto(workspace, "observer")
+    workspace.wait_for_selector(".ob-runs", timeout=15_000)
+    runs_text = workspace.locator(".ob-runs").inner_text()
+    assert "project-upgrade" in runs_text, (
+        "un run de project-upgrade existe (test précédent) : Observer doit le nommer, "
+        "pas seulement dire le TraceLedger vide"
     )
