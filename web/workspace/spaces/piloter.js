@@ -168,6 +168,33 @@ function kitStatus(kit) {
   return { word: 'à jour', dot: 'ok' };
 }
 
+// ── Trois versions du kit, quand elles diffèrent (issue #510 point 4c) ─────
+//
+// `kit.aligned` (contenu du projet) et `kit.installed` (CLI qui vient de
+// répondre, ici le serveur cockpit) ne disent rien de l'outil qui gouverne
+// vraiment le projet au quotidien — un pipx séparé peut être plus vieux sans
+// qu'aucun des deux autres chiffres ne le montre. `kit.projectTool` (server
+// side : `.venv/bin/grimoire` ou `project-context.yaml` `tool:`) porte cette
+// troisième version, ou `null` quand le projet ne déclare rien de vérifiable.
+function projectToolLine(kit) {
+  if (!kit || !kit.aligned) return null;
+  const known = [kit.aligned, kit.installed, kit.projectTool].filter(Boolean);
+  const distinct = new Set(known);
+  // Deux déclencheurs, l'un suffit : `aligned` et `installed` divergent déjà
+  // (le cas générique — un projet pas encore aligné sur le serveur cockpit),
+  // ou l'outil déclaré par le projet ajoute une 3e valeur distincte (le cas
+  // réel de l'issue : cockpit et projet d'accord sur le kit, pipx en retard
+  // sans que rien d'autre ne le montre). Sans l'un des deux, rien à ajouter —
+  // afficher « inconnu » sur chaque projet sans `.venv` dédié serait du bruit.
+  const alreadyDivergent = Boolean(kit.installed) && kit.aligned !== kit.installed;
+  const toolAddsDivergence = Boolean(kit.projectTool) && distinct.size > 1;
+  if (!alreadyDivergent && !toolAddsDivergence) return null;
+  const toolWord = kit.projectTool
+    ? kit.projectTool
+    : 'inconnu, vérifiez `grimoire --version` dans le projet';
+  return `outil du projet : ${toolWord}`;
+}
+
 // ── Signaux « à traiter » ────────────────────────────────────────────────────
 
 function watchReasons(entry, health) {
@@ -1175,6 +1202,8 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
   const kitRow = row(dot(kit.dot), text('span', null, kit.word));
   kitBlock.append(kitRow);
   if (health?.kit?.aligned) kitBlock.append(text('div', 'lbl', `aligné sur ${health.kit.aligned}, installé ${health.kit.installed}`));
+  const toolLine = projectToolLine(health?.kit);
+  if (toolLine) kitBlock.append(text('div', 'lbl', toolLine));
   // Le badge « en retard (N) » nommait N sans jamais dire lesquels
   // (`kit.behindFiles`, déjà rendu par le serveur, jusqu'ici jamais lu ici).
   let behindBlock = null;

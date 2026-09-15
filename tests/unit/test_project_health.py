@@ -447,3 +447,133 @@ def test_project_health_carries_the_corrected_field_names(project: Path) -> None
     assert health["ci_status"] == "unknown"
     assert "ci" not in health, "le nom fautif ne doit même pas traîner à côté du bon"
     assert "commits" not in health
+
+
+# ── Outil du projet (issue #510 point 4) ────────────────────────────────────
+#
+# Un projet peut être piloté au quotidien par un binaire (pipx, venv séparé)
+# distinct du process qui répond ici (le serveur cockpit, un autre venv).
+# Deviner via `$PATH` désignerait ce dernier — les deux seules sources fiables
+# sont un `.venv/bin/grimoire` à la racine ou un `tool:` explicite déclaré par
+# le projet lui-même.
+
+
+def test_declared_project_tool_is_none_without_any_signal(project: Path) -> None:
+    assert ph._declared_project_tool(project) is None
+    assert ph.project_tool_version(project) == {"version": None, "source": None}
+
+
+def test_declared_project_tool_prefers_dot_venv(project: Path) -> None:
+    venv_bin = project / ".venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    binary = venv_bin / "grimoire"
+    binary.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    assert ph._declared_project_tool(project) == binary
+
+
+def test_declared_project_tool_reads_config_tool_field(project: Path) -> None:
+    (project / "bin").mkdir()
+    binary = project / "bin" / "mygrimoire"
+    binary.write_text("#!/bin/sh\n", encoding="utf-8")
+    (project / "project-context.yaml").write_text(
+        'project:\n  name: "probe"\ntool: "./bin/mygrimoire"\n', encoding="utf-8",
+    )
+
+    assert ph._declared_project_tool(project) == binary
+
+
+def test_declared_project_tool_ignores_a_tool_field_pointing_nowhere(project: Path) -> None:
+    (project / "project-context.yaml").write_text(
+        'project:\n  name: "probe"\ntool: "./bin/does-not-exist"\n', encoding="utf-8",
+    )
+
+    assert ph._declared_project_tool(project) is None
+
+
+def test_project_tool_version_runs_the_declared_binary(project: Path) -> None:
+    venv_bin = project / ".venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    binary = venv_bin / "grimoire"
+    binary.write_text('#!/bin/sh\necho "grimoire-kit 9.9.9"\n', encoding="utf-8")
+    binary.chmod(0o755)
+
+    result = ph.project_tool_version(project)
+
+    assert result["version"] == "9.9.9"
+    assert result["source"] == str(binary)
+
+
+def test_project_tool_version_is_unknown_when_the_binary_fails(project: Path) -> None:
+    venv_bin = project / ".venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    binary = venv_bin / "grimoire"
+    binary.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+    binary.chmod(0o755)
+
+    result = ph.project_tool_version(project)
+
+    assert result["version"] is None
+    assert result["source"] == str(binary)
+
+
+def test_kit_alignment_carries_the_declared_project_tool(project: Path) -> None:
+    venv_bin = project / ".venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    binary = venv_bin / "grimoire"
+    binary.write_text('#!/bin/sh\necho "grimoire-kit 1.2.3"\n', encoding="utf-8")
+    binary.chmod(0o755)
+
+    kit = ph.kit_alignment(project)
+
+    assert kit["projectTool"] == "1.2.3"
+
+
+# ── Écart outil qui exécute doctor vs kit aligné (issue #510 point 4b) ──────
+
+
+def test_tool_version_gap_is_none_without_a_known_alignment(project: Path) -> None:
+    """Rien à comparer sur un projet pas encore scaffoldé : pas de faux WARN."""
+    assert ph.tool_version_gap(project) is None
+
+
+def test_tool_version_gap_flags_an_older_running_tool(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    kit_dir = project / "_grimoire" / "kit"
+    kit_dir.mkdir(parents=True)
+    (kit_dir / "outil.py").write_text("contenu\n", encoding="utf-8")
+
+    ph._newest_version_by_path.cache_clear()
+    monkeypatch.setattr(ph, "_installed_kit_version", lambda: "3.50.1")
+    monkeypatch.setattr(ph, "load_catalog", lambda: {
+        "d": {"version": "3.50.2", "path": "framework/outil.py"},
+    })
+    monkeypatch.setattr(
+        ph, "shipped_by_kit", lambda _p: {"version": "3.50.2", "path": "framework/outil.py"}
+    )
+
+    gap = ph.tool_version_gap(project)
+
+    assert gap == {"installed": "3.50.1", "aligned": "3.50.2", "outdated": True}
+
+
+def test_tool_version_gap_is_not_outdated_on_equality(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    kit_dir = project / "_grimoire" / "kit"
+    kit_dir.mkdir(parents=True)
+    (kit_dir / "outil.py").write_text("contenu\n", encoding="utf-8")
+
+    ph._newest_version_by_path.cache_clear()
+    monkeypatch.setattr(ph, "_installed_kit_version", lambda: "3.50.2")
+    monkeypatch.setattr(ph, "load_catalog", lambda: {
+        "d": {"version": "3.50.2", "path": "framework/outil.py"},
+    })
+    monkeypatch.setattr(
+        ph, "shipped_by_kit", lambda _p: {"version": "3.50.2", "path": "framework/outil.py"}
+    )
+
+    gap = ph.tool_version_gap(project)
+
+    assert gap == {"installed": "3.50.2", "aligned": "3.50.2", "outdated": False}
