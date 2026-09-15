@@ -1,6 +1,6 @@
 {
  "schema": "grimoire-kit-file-hashes/v1",
- "generated_for": "3.51.1",
+ "generated_for": "3.52.0",
  "digests": {
   "002d1e68ce00769ee09d1e94f4af260b952837f7d1557080c2fd505216c23ac0": {
    "version": "3.11.2",
@@ -361,6 +361,10 @@
   "1a3c35ce23b6aaee398ea392f6294f6b56a91efda1b1a464485829f82e92fd42": {
    "version": "3.11.2",
    "path": "framework/memory/backends/backend_qdrant_server.py"
+  },
+  "1aca0bd0b1e9bc7e4bd4869c2b128e2661793c53c33d57cbba8f6e719fe2b1f2": {
+   "version": "3.52.0",
+   "path": "archetypes/meta/skills/upgrade-review.md"
   },
   "1af44876bef01ce59fa4c25feaa3e12476db5d6a740c3b16aa24d5f6a6f4c5fe": {
    "version": "3.4.2",
@@ -1217,6 +1221,10 @@
   "5ad929b1f9337775ece13ce68c606f53f0941e7341bc759f942b6c164892dc4f": {
    "version": "3.35.0",
    "path": "framework/memory/contradiction-log.tpl.md"
+  },
+  "5bb56d6f48b00390ef8b72218be9cc7290c3e2421b3c93fe818e6e5d8451f7e8": {
+   "version": "3.52.0",
+   "path": "archetypes/meta/agents/concierge.md"
   },
   "5bb88d3074de5e19310da12ba3524c367253bcc8826740311106f740134013c9": {
    "version": "3.4.2",
@@ -3609,6 +3617,10 @@
   "f68c7595b8c55e3345be53224c36113f2deab5ff285f6929f61884eb6adf7844": {
    "version": "3.32.0",
    "path": "archetypes/web-app/agents/frontend-specialist.md"
+  },
+  "f71895e137f258036535e4df733eddc028fd17d0e4a5755bd3bea1aa1eaedd99": {
+   "version": "3.52.0",
+   "path": "framework/copilot/prompts/grimoire-upgrade-review.prompt.md"
   },
   "f777f6d44a18e808ed7ba07255fc378372cb09050447eed52bb10c2607f5bc93": {
    "version": "3.4.4",
