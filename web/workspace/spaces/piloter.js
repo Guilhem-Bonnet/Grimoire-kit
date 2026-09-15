@@ -130,6 +130,17 @@ function dot(cls) {
   return span;
 }
 
+// Pastille pleine (seconde marche) : remplace le point + mot pour kit/CI/
+// doctor/mémoire (Inspecteur et Flotte), le type de proposition et le nœud
+// du déroulé — `.chip.pill.<cls>` (shell.css) porte un fond saturé et
+// `--onfill` comme texte ; un `cls` vide garde l'apparence neutre de `.chip`.
+function pill(cls, word) {
+  const span = document.createElement('span');
+  span.className = 'chip pill' + (cls ? ' ' + cls : '');
+  span.textContent = word;
+  return span;
+}
+
 function row(...children) {
   const div = document.createElement('div');
   div.className = 'row';
@@ -405,14 +416,14 @@ function renderFleet(root, ctx, rows, onSelect, onRefresh) {
     tr.append(nameCell);
 
     const kitCell = document.createElement('td');
-    if (!r.entry.managed) kitCell.append(row(dot('warn'), text('span', null, 'non initialisé')));
-    else if (!r.health) kitCell.append(row(dot(), text('span', null, 'indisponible')));
-    else kitCell.append(row(dot(r.health.kit.upToDate ? 'ok' : 'warn'), text('span', null, r.health.kit.aligned || 'inconnue')));
+    if (!r.entry.managed) kitCell.append(pill('warn', 'non initialisé'));
+    else if (!r.health) kitCell.append(pill('', 'indisponible'));
+    else kitCell.append(pill(r.health.kit.upToDate ? 'ok' : 'warn', r.health.kit.aligned || 'inconnue'));
     tr.append(kitCell);
 
     const ciCell = document.createElement('td');
     const status = r.health?.ci_status;
-    ciCell.append(row(dot(ciDotClass(status)), text('span', null, ciWord(status))));
+    ciCell.append(pill(ciDotClass(status), ciWord(status)));
     tr.append(ciCell);
 
     tr.append(text('td', 'mono', fmtInt(r.health?.commits_total)));
@@ -422,9 +433,9 @@ function renderFleet(root, ctx, rows, onSelect, onRefresh) {
     tr.append(afCell);
 
     const memCell = document.createElement('td');
-    if (r.memory && r.memory.state === 'ok') memCell.append(row(dot('ok'), text('span', null, `${fmtInt(r.memory.entries)} entrée(s)`)));
-    else if (r.memory && r.memory.state === 'unavailable') memCell.append(row(dot('warn'), text('span', null, 'indisponible')));
-    else memCell.append(row(dot(), text('span', null, 'non initialisée')));
+    if (r.memory && r.memory.state === 'ok') memCell.append(pill('ok', `${fmtInt(r.memory.entries)} entrée(s)`));
+    else if (r.memory && r.memory.state === 'unavailable') memCell.append(pill('warn', 'indisponible'));
+    else memCell.append(pill('', 'non initialisée'));
     tr.append(memCell);
 
     tr.append(text('td', 'mono', fmtInt((r.health?.flows || []).length)));
@@ -442,8 +453,8 @@ function renderFleet(root, ctx, rows, onSelect, onRefresh) {
     card.className = 'pl-card';
     card.addEventListener('click', () => onSelect(r.entry.slug));
     card.append(text('div', null, r.entry.name || r.entry.slug));
-    card.append(row(dot(r.health?.kit?.upToDate ? 'ok' : 'warn'), text('span', 'lbl', r.health?.kit?.aligned || (r.entry.managed ? 'inconnue' : 'non initialisé'))));
-    card.append(row(dot(ciDotClass(r.health?.ci_status)), text('span', 'lbl', 'CI ' + ciWord(r.health?.ci_status))));
+    card.append(pill(r.health?.kit?.upToDate ? 'ok' : 'warn', r.health?.kit?.aligned || (r.entry.managed ? 'inconnue' : 'non initialisé')));
+    card.append(pill(ciDotClass(r.health?.ci_status), 'CI ' + ciWord(r.health?.ci_status)));
     card.append(text('div', 'pl-card-row lbl', `${fmtInt(r.health?.commits_total)} commits · ${fmtInt((r.health?.flows || []).length)} flow(s)`));
     cards.append(card);
   }
@@ -596,8 +607,8 @@ function renderProposalsSection(ctx, proposalsPayload, onChanged, slug) {
     const head = document.createElement('div');
     head.className = 'pl-prop-head';
     head.append(
-      dot(proposalTypeDot(proposal)),
-      text('span', 'pl-watch-name', `${proposal.specialty} (${proposalTypeLabel(proposal)})`),
+      pill(proposalTypeDot(proposal), proposalTypeLabel(proposal)),
+      text('span', 'pl-watch-name', proposal.specialty),
       text('span', 'lbl', proposalFacts(proposal)),
     );
     line.append(head);
@@ -1207,11 +1218,8 @@ function renderNodeList(nodes) {
     const nodeRow = document.createElement('div');
     nodeRow.className = 'pl-watch-row';
     nodeRow.append(
-      dot(NODE_STATUS_DOT[node.status] ?? ''),
-      row(
-        text('span', 'pl-watch-name', NODE_LABELS[node.id] || node.id),
-        text('span', 'lbl', NODE_STATUS_WORD[node.status] || node.status),
-      ),
+      text('span', 'pl-watch-name', NODE_LABELS[node.id] || node.id),
+      pill(NODE_STATUS_DOT[node.status] ?? '', NODE_STATUS_WORD[node.status] || node.status),
     );
     list.append(nodeRow);
   }
@@ -1266,7 +1274,7 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
   kitBlock.className = 'pl-insp-block';
   kitBlock.append(text('h4', null, 'Kit'));
   const kit = kitStatus(health?.kit);
-  const kitRow = row(dot(kit.dot), text('span', null, kit.word));
+  const kitRow = pill(kit.dot, kit.word);
   kitBlock.append(kitRow);
   if (health?.kit?.aligned) kitBlock.append(text('div', 'lbl', `aligné sur ${health.kit.aligned}, installé ${health.kit.installed}`));
   const toolLine = projectToolLine(health?.kit);
@@ -1293,9 +1301,9 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
   // (voir `checkpointPendingRunId` plus bas, depuis `GET /api/workspace/
   // flows/runs`, #513), pas seulement juste après un clic « Confirmer ».
   function markKitCheckpointPending(runId) {
-    const label = text('span', null, 'mis à niveau, checkpoint destructif en attente');
-    if (runId) label.title = `grimoire flow status ${runId}`;
-    kitRow.replaceChildren(dot('warn'), label);
+    kitRow.className = 'chip pill warn';
+    kitRow.textContent = 'mis à niveau, checkpoint destructif en attente';
+    if (runId) kitRow.title = `grimoire flow status ${runId}`;
     const kitCell = kpi.querySelector('.pl-kpi-item .pl-kpi-val');
     if (kitCell) kitCell.textContent = 'checkpoint en attente';
     if (behindBlock) { behindBlock.remove(); behindBlock = null; }
@@ -1319,7 +1327,7 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
   standardBlock.className = 'pl-insp-block';
   standardBlock.append(text('h4', null, 'Standard'));
   if (sheet.doctor) {
-    standardBlock.append(row(dot(sheet.doctor.ok ? 'ok' : 'bad'), text('span', null, sheet.doctor.ok ? 'doctor conforme' : 'doctor en écart')));
+    standardBlock.append(pill(sheet.doctor.ok ? 'ok' : 'bad', sheet.doctor.ok ? 'doctor conforme' : 'doctor en écart'));
   } else {
     standardBlock.append(text('div', 'lbl', 'diagnostic indisponible'));
   }
@@ -1328,7 +1336,7 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
   const memBlock = document.createElement('div');
   memBlock.className = 'pl-insp-block';
   memBlock.append(text('h4', null, 'Mémoire'));
-  memBlock.append(row(dot(memory?.state === 'ok' ? 'ok' : (memory?.state === 'unavailable' ? 'warn' : '')), text('span', null, memory?.configuredBackend ? `${memory.configuredBackend} · ${fmtInt(memory.entries)} entrée(s)` : 'non initialisée')));
+  memBlock.append(pill(memory?.state === 'ok' ? 'ok' : (memory?.state === 'unavailable' ? 'warn' : ''), memory?.configuredBackend ? `${memory.configuredBackend} · ${fmtInt(memory.entries)} entrée(s)` : 'non initialisée'));
   ctx.inspector.append(memBlock);
 
   // ── Dernière exécution du wizard (#171) ─────────────────────────────────
