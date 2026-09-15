@@ -65,15 +65,24 @@ comment la coder : c'est l'objet de l'ADR d'architecture qui l'accompagne.
 > clavier gagne un liseré élargi (3 px, `:focus-within`, aucun état posé côté
 > JS). Harnais de contraste inchangé (texte AA 4,5:1, surfaces 1,25:1 min).
 
+> **Troisième retouche (clair seulement)** — malgré des rapports de surface
+> déjà conformes, `--bg` clair mesurait L* 94,7 : encore perçu comme gris sur
+> les captures des deux passes précédentes. `--bg` clair remonte à L* 96,5
+> (luminance 0,912, même teinte chaude) ; `--e1`/`--bar`/`--e3` recomposés
+> par le pas le plus court qui tienne 1,25:1 à chaque paire adjacente — pas
+> un report proportionnel, pour rester clair plutôt que retomber dans le
+> gris. `--e2` reste l'unique blanc pur. Le sombre et les pastilles des deux
+> passes précédentes ne sont pas touchés.
+
 ### 2.1 Surfaces (rôle unique chacune)
 
 | Token | Rôle | Sombre | Clair |
 |---|---|---|---|
-| `--bg` | toile : la plus profonde en sombre (teinte froide), franchement claire en clair, grille de points `--line` au pas de 22 px | `#070A10` | `#F1F0EB` |
-| `--e1` | panneaux : explorateur, inspecteur, rails | `#252C34` | `#D1D1CE` |
-| `--bar` | barres : application, en-têtes de panneaux, onglets du dock, état | `#333C46` | `#B5B5B2` |
+| `--bg` | toile : la plus profonde en sombre (teinte froide), franchement blanche en clair (L* 96,5), grille de points `--line` au pas de 22 px | `#070A10` | `#F6F5F0` |
+| `--e1` | panneaux : explorateur, inspecteur, rails | `#252C34` | `#DBDBD8` |
+| `--bar` | barres : application, en-têtes de panneaux, onglets du dock, état | `#333C46` | `#C3C3C0` |
 | `--e2` | posé : nœuds, cartes, champs, bulles (seul blanc pur en clair, petites surfaces, ombre `0 2px 8px rgba(0,0,0,.18)`) | `#465260` | `#FFFFFF` |
-| `--e3` | survol, sélection de segment | `#54616F` | `#D7D8D3` |
+| `--e3` | survol, sélection de segment | `#54616F` | `#E4E5E0` |
 | `--term` | terminal et journaux du dock, toujours sombre | `#0E1013` | `#1B1F25` |
 | `--termink` | encre du terminal | `#C9CED6` | `#D6DAE0` |
 | `--line` | la seule ligne | `rgba(255,255,255,.11)` | `rgba(23,25,28,.13)` |

@@ -216,22 +216,24 @@
  */
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
-    /* Première passe (#525) : --bg/--e1/--bar/--e2/--e3 écartés à ~1,30.
-       Seconde passe, plus franche : --bg remonte près du blanc chaud
-       (« fond franchement clair », pas juste moins terne) ; --e1 et --bar
-       redescendent en dessous — panneaux et barres légèrement en retrait du
-       canevas — pendant que --e2 (blanc pur, inchangé, spec §2.1) reste la
-       surface la plus haute. --bar/--e2 atteint 2,06:1 : les cartes posées
-       « sautent » nettement au blanc. --e3 reste au niveau de la première
-       passe (1,43:1 sur --e2) : la surface la plus sombre que touchent
-       --ink2/--ink3 est maintenant --bar (0,461 de luminance), plus
-       exigeante qu'avant — les deux encres sont resserrées en conséquence
-       (voir :root). */
-    --bg: #f1f0eb;
-    --e1: #d1d1ce;
-    --bar: #b5b5b2;
+    /* Première et seconde passes (#525, #530) : --bg est monté par étapes
+       mais restait mesuré à L* 94,7 — encore perçu comme gris sur les
+       captures, malgré des rapports de surface conformes. Troisième passe,
+       clair seulement (le sombre n'est pas touché) : --bg remonte à L* 96,5
+       (luminance 0,912), franchement blanc chaud plutôt que gris clair.
+       --e1/--bar/--e3 recomposés en conséquence — pas de simple report
+       proportionnel, le pas le plus court qui tienne 1,25:1 à chaque paire,
+       pour rester clair plutôt que retomber dans le gris (--e1 L* 87,3,
+       --bar L* 78,7, --e3 L* 90,7 ; --bar/--e2 atteint 1,77:1). --e2 reste
+       l'unique blanc pur (spec §2.1). --ink2/--ink3 inchangées : la surface
+       la plus sombre qu'elles touchent (--bar) est maintenant plus claire
+       qu'avant, donc plus de marge, pas moins — 6,7:1 et 5,4:1 mesurés,
+       contre les 4,7:1/4,7:1 de la passe précédente. */
+    --bg: #f6f5f0;
+    --e1: #dbdbd8;
+    --bar: #c3c3c0;
     --e2: #ffffff;
-    --e3: #d7d8d3;
+    --e3: #e4e5e0;
     --term: #1b1f25;
     --termink: #d6dae0;
     --line: rgba(23, 25, 28, 0.13);
@@ -268,11 +270,11 @@
 }
 
 :root[data-theme="light"] {
-  --bg: #f1f0eb;
-  --e1: #d1d1ce;
-  --bar: #b5b5b2;
+  --bg: #f6f5f0;
+  --e1: #dbdbd8;
+  --bar: #c3c3c0;
   --e2: #ffffff;
-  --e3: #d7d8d3;
+  --e3: #e4e5e0;
   --term: #1b1f25;
   --termink: #d6dae0;
   --line: rgba(23, 25, 28, 0.13);
