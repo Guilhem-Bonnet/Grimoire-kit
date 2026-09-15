@@ -226,6 +226,13 @@ mécanisme de lecture/acceptation que le déclencheur de non-choix (#395), jamai
 timeline par tâche (#443) suit le run comme n'importe quel autre flow : rien de spécifique à câbler,
 `upgrade-flow run` passe par le même moteur que `grimoire flow run`.
 
+À côté de « Mettre à jour », le bouton **« Revoir dans l'IDE »** (issue #520, lot 2) n'est présent
+dans la page que s'il y a une proposition en attente ou un checkpoint destructif en attente — jamais
+un bouton toujours là. Il ne fait rien lui-même : il prépare et met à disposition (presse-papiers,
+repli affiché) le texte que `/grimoire-upgrade-review` attend (le prompt mission pack du lot 1), et
+montre `grimoire upgrade-flow review` pour un hôte sans slash command. Aucun lien d'ouverture d'IDE :
+ce dépôt ne déclare aucun mécanisme de ce type.
+
 ## Portée non couverte par cette livraison
 
 - `grimoire flow list --require-measure project-upgrade` ne trouve une mesure qu'après au moins un run
