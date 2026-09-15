@@ -108,6 +108,40 @@ def _node_statuses(
         statuses.append({"id": node, "status": status})
     return statuses
 
+def _derive_state(
+    *, ok: bool, dry_run: bool, stopped_at_raw: str | None, raw_state: str | None
+) -> str:
+    """L'état du run, pour l'UI (restes #506/#510, validation finale #511) —
+
+    jamais du texte libre : toujours dérivé des mêmes champs structurés que
+    `nodes`/`stoppedAt` (`done`, `stopped_at`, et `state` quand le flow le
+    pose lui-même). Avant ce correctif, `state` restait `null` sur tout run
+    qui n'était pas le refus d'`apply` — y compris un run complet 9/9 arrêté,
+    non décidé, au checkpoint `destructive`.
+
+    - ``upgraded-but-failed`` — posé explicitement par `cmd_upgrade_flow.py`
+      quand `apply` refuse après avoir déjà écrit (issue #510, point 3) :
+      jamais recalculé ici, seulement relayé ;
+    - ``failed`` — un nœud antérieur a levé ou a été refusé (`_fail_run`),
+      sans que le flow n'ait posé de `state` explicite ;
+    - ``preview-only`` — un aperçu (`--dry-run`) qui a réussi ;
+    - ``upgraded-checkpoint-pending`` — le flow s'est arrêté, non décidé, au
+      nœud `destructive` ;
+    - ``completed`` — le flow est allé à son terme (`stopped_at` vide :
+      le checkpoint avait déjà été décidé par ailleurs, `engine.resume`
+      reprend un run existant jusqu'au bout).
+    """
+    if raw_state:
+        return raw_state
+    if not ok:
+        return "failed"
+    if dry_run:
+        return "preview-only"
+    if _stopped_at_node(stopped_at_raw) == "destructive":
+        return "upgraded-checkpoint-pending"
+    return "completed"
+
+
 #: Un verrou par projet. Le serveur est multi-thread et le bouton est
 #: cliquable : deux ``grimoire up`` concurrents écriraient les mêmes fichiers
 #: en même temps. La commande est idempotente, pas réentrante.
@@ -196,11 +230,15 @@ def _run_upgrade_flow(root: Path, *, dry_run: bool) -> dict[str, Any]:
         "runId": payload.get("run_id"),
         "done": done,
         "stoppedAt": stopped_at,
-        # Issue #510 (point 3) : quand `apply` refuse après que `up` a déjà
-        # tourné, le projet est réellement mis à niveau, juste bloqué —
-        # `state` le dit explicitement plutôt que de laisser `done: []` sans
-        # explication.
-        "state": payload.get("state"),
+        # Issue #510 (point 3) puis restes #511 : quand `apply` refuse après
+        # que `up` a déjà tourné, le projet est réellement mis à niveau,
+        # juste bloqué — `state` le dit explicitement plutôt que de laisser
+        # `done: []` sans explication. `_derive_state` couvre désormais TOUS
+        # les cas (aperçu, checkpoint en attente, échec antérieur, flow allé
+        # à son terme), jamais seulement celui qu'`apply` pose lui-même.
+        "state": _derive_state(
+            ok=ok, dry_run=dry_run, stopped_at_raw=stopped_at, raw_state=payload.get("state")
+        ),
         # Statut par nœud (issue #506) — calculé que le run ait réussi ou
         # échoué. `failed_node` vient soit de `_fail_run` (tout nœud sauf
         # `apply`, cmd_upgrade_flow.py), soit — pour `apply` — du couple

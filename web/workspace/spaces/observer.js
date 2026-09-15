@@ -353,7 +353,11 @@ export async function mount(root, ctx) {
       root.append(runsBlock);
       ctx.inspector.replaceChildren(text('p', 'lbl', `${runs.length} run(s) de flow enregistré(s), aucun span OTel.`));
       ctx.dock.log('traces', `TraceLedger vide, mais ${runs.length} run(s) de flow enregistré(s) (ex. project-upgrade).`);
-      ctx.dock.echo('grimoire upgrade-flow status');
+      // `grimoire upgrade-flow status` n'existe pas (`grimoire upgrade-flow
+      // --help` n'a pas de sous-commande `status`, restes #510/#513) —
+      // `grimoire flow status <run_id>` (cmd_flow.py) est la vraie commande,
+      // citée avec l'id du run le plus récent plutôt qu'un exemple muet.
+      ctx.dock.echo(`grimoire flow status ${runs[0].runId}`);
       return;
     }
     ctx.inspector.replaceChildren(text('p', 'lbl', 'Aucun span à inspecter.'));

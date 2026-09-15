@@ -101,6 +101,7 @@ def test_a_dry_run_surfaces_the_preview_report(
     assert report["preview"] == preview_text
     assert report["runId"] == "r1"
     assert report["done"] == ["backup", "preview"]
+    assert report["state"] == "preview-only"
     assert "report" not in report, "un aperçu n'a pas de rapport final — seul un flow complet en écrit un"
     assert "proposals" not in report
 
@@ -140,6 +141,7 @@ def test_a_confirmed_run_surfaces_the_final_report_and_pending_proposals(
     assert report["ok"] is True
     assert report["report"] == report_text
     assert report["stoppedAt"] == "destructive"
+    assert report["state"] == "upgraded-checkpoint-pending"
     slugs = {p["slug"] for p in report["proposals"]}
     assert slugs == {pending.slug}, "seule la proposition encore pending doit apparaître"
 
@@ -215,6 +217,7 @@ def test_a_node_failure_marks_it_as_erreur_and_the_rest_as_skipped(
     monkeypatch.setattr(project_update.subprocess, "run", lambda *a, **k: _Fail())
     report = project_update.update_project(project, dry_run=False)
     assert report["ok"] is False
+    assert report["state"] == "failed"
     by_id = {n["id"]: n["status"] for n in report["nodes"]}
     assert by_id["backup"] == "fait"
     assert by_id["orphans"] == "fait"
@@ -239,6 +242,7 @@ def test_a_failing_command_is_reported_not_raised(
     assert report["ok"] is False
     assert report["error"]
     assert "refus net" in report["output"]
+    assert report["state"] == "failed", "un échec sans `state` explicite du flow reste `failed`, jamais `null`"
 
 
 def test_a_failing_command_surfaces_the_flows_own_error(
@@ -292,6 +296,35 @@ def test_a_failed_apply_surfaces_done_state_and_backup_path(
     assert report["backupPath"] == backup_path
     assert report["report"] == report_text
     assert report["error"] == "apply refusé : doctor=[...] hook=hook rejoué sans erreur"
+
+
+def test_a_finished_run_state_is_completed(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Restes #506/#510 (validation finale de la boucle de mise à jour, #511) :
+
+    un run qui va à son terme — le checkpoint `destructive` avait déjà été
+    décidé par ailleurs, `engine.resume` a repris le run existant jusqu'au
+    bout (`stopped_at` vide, pas de `state` posé par le flow lui-même) —
+    doit se lire `completed`, jamais `null`."""
+
+    class _Ok:
+        returncode = 0
+        stdout = json.dumps({
+            "ok": True, "run_id": "r6",
+            "done": [
+                "backup", "preview", "orphans", "apply", "overrides",
+                "memory", "needs-hosts", "verify", "destructive",
+            ],
+            "stopped_at": None,
+        })
+        stderr = ""
+
+    monkeypatch.setattr(project_update.subprocess, "run", lambda *a, **k: _Ok())
+    report = project_update.update_project(project, dry_run=False)
+    assert report["ok"] is True
+    assert report["stoppedAt"] is None
+    assert report["state"] == "completed"
 
 
 def test_a_timeout_is_reported(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
