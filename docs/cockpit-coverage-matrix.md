@@ -40,14 +40,14 @@ n'existent pas dans le cockpit (case vide légitime, pas un oubli).
 | Section | Lignes | Couvertes | % |
 |---|---:|---:|---:|
 | Coque (shell.js) | 32 | 26 | 81% |
-| Piloter | 35 | 19 | 54% |
-| Concevoir | 21 | 11 | 52% |
+| Piloter | 34 | 29 | 85% |
+| Concevoir | 21 | 12 | 57% |
 | Executer | 16 | 10 | 62% |
 | Observer | 10 | 7 | 70% |
 | Mémoire | 9 | 4 | 44% |
 | Source | 17 | 15 | 88% |
-| Routes API | 24 | 15 | 62% |
-| **TOTAL** | **164** | **107** | **65%** |
+| Routes API | 24 | 16 | 67% |
+| **TOTAL** | **163** | **119** | **73%** |
 <!-- END:cockpit-coverage-summary -->
 
 *(régénéré par `python scripts/cockpit-coverage.py` — recopier sa sortie ici après toute modification des tables ci-dessous ; la CI de PR 1 le vérifie via `--check`.)*
@@ -104,6 +104,11 @@ n'existent pas dans le cockpit (case vide légitime, pas un oubli).
 
 ### Espace : Piloter
 
+Note (lot A) : « garde d'écriture 403 » pour le bouton « Mettre à jour » n'apparaît pas ci-dessous —
+vérifié sur le code, `POST /api/projects/update` n'est délibérément **pas** gardée par
+`_is_home_request()` (portée flotte assumée, cf. section Routes API) : il n'y a pas de 403 à tester
+pour ce contrôle précis.
+
 | Contrôle | Sélecteur | Handler | Route | État | Test(s) | Couvert |
 |---|---|---|---|---|---|---|
 | Zoom Flotte/Projet | `#zoom-seg button` | `setZoom` | — | bascule visuelle (aria-pressed) | `test_piloter_zoom_seg_bascule_correctement` | oui |
@@ -111,22 +116,21 @@ n'existent pas dans le cockpit (case vide légitime, pas un oubli).
 | Ligne projet (Flotte) | `tr`/`.card` | `onSelect(slug)` | — | ouvre le niveau Projet | `test_piloter_cockpit_flotte_montre_un_tableau_avec_inconnue` | oui |
 | Bouton « Ouvrir ce projet » | `.btn` texte « Ouvrir ce projet » | `ctx.goto('piloter', {openProject})` | — | affiché seulement si cockpit + slug ≠ projet servi | — | non |
 | Mettre à jour — aperçu | `.btn` texte « Mettre à jour — aperçu » | `updateProject(slug, false)` | `POST /api/projects/update` `{confirm:false}` | en cours → succès (preview.md rendu) | `test_mettre_a_jour_depuis_piloter_ne_repond_pas_404_sur_un_projet_selectionne` | oui |
-| Mettre à jour — aperçu | idem | idem | idem | échec (erreur affichée, bouton réactivé) | — | non |
-| Mettre à jour — aperçu | idem | idem | idem | projet hors registre → 404 | — | non |
-| Mettre à jour — aperçu | idem | idem | idem | hôte étranger (garde d'écriture, cf. route) | — | non |
+| Mettre à jour — aperçu | idem | idem | idem | échec (erreur affichée, bouton réactivé) | `test_apercu_en_echec_affiche_l_erreur_et_reactive_le_bouton` | oui |
+| Mettre à jour — aperçu | idem | idem | idem | projet hors registre → 404 | `test_the_cockpit_refuses_an_unknown_project` (route directe, `tests/unit/test_project_update.py`) | oui |
 | Confirmer la mise à jour | `.btn.pri` « Confirmer » | `updateProject(slug, true)` | `POST /api/projects/update` `{confirm:true}` | succès, `state=completed`/`upgraded-checkpoint-pending`, badge checkpoint posé | `test_confirmer_depuis_piloter_fait_apparaitre_une_proposition`, `test_the_checkpoint_badge_survives_a_fleet_then_project_navigation` | oui |
-| Confirmer la mise à jour | idem | idem | idem | échec `upgraded-but-failed` : `report.md`+`proposals` renvoyés par la route mais **jamais lus par le handler `if (result.ok)`** → pas de rafraîchissement des Propositions à l'écran | — | non |
+| Confirmer la mise à jour | idem | idem | idem | échec `upgraded-but-failed` : `report.md`+`proposals` renvoyés par la route mais jamais lus par le handler `if (result.ok)` → pas de rafraîchissement des Propositions à l'écran | `test_confirmer_upgraded_but_failed_devrait_rafraichir_les_propositions` (**xfail strict — bug #538**) | non |
 | Revoir dans l'IDE | `.btn` texte « Revoir dans l'IDE » | copie presse-papiers du prompt `/grimoire-upgrade-review` | aucune écriture | absent sans travail en attente | `test_the_review_button_is_absent_with_nothing_pending` | oui |
 | Revoir dans l'IDE | idem | idem | aucune | présent avec proposition en attente | `test_the_review_button_appears_with_a_pending_proposal` | oui |
 | Revoir dans l'IDE | idem | idem | aucune | présent avec checkpoint en attente, nomme le run | `test_the_review_button_appears_with_a_pending_checkpoint_and_names_the_run` | oui |
-| Revoir dans l'IDE | idem | idem | aucune | presse-papiers indisponible → texte affiché à copier à la main | — | non |
+| Revoir dans l'IDE | idem | idem | aucune | presse-papiers indisponible → texte affiché à copier à la main | `test_the_review_button_falls_back_to_manual_copy_when_the_clipboard_is_unavailable` | oui |
 | Accepter une proposition | `.btn` « Accepter » | `acceptBtn.click` | `POST /api/workspace/proposals/<slug>/accept` | type `agent` (déclencheur) | `test_lister_accepter_et_refuser_une_proposition` | oui |
-| Accepter une proposition | idem | idem | idem | type `skill` | — | non |
-| Accepter une proposition | idem | idem | idem | type `repair`, avec substitution évidente | — | non |
-| Accepter une proposition | idem | idem | idem | type `repair`, sans substitution évidente (refus nommé) | — | non |
-| Accepter une proposition | idem | idem | idem | type `override-migration` | — | non |
-| Accepter une proposition | idem | idem | idem | type `memory-link` | — | non |
-| Accepter une proposition | idem | idem | idem | type `needs-hosts` | — | non |
+| Accepter une proposition | idem | idem | idem | type `skill` | `test_accepter_une_proposition_type_skill_cree_le_fichier_et_l_attache` | oui |
+| Accepter une proposition | idem | idem | idem | type `repair`, avec substitution évidente | `test_accepter_une_proposition_repair_avec_substitution_corrige_le_fichier` | oui |
+| Accepter une proposition | idem | idem | idem | type `repair`, sans substitution évidente : bouton absent (jamais un refus muet), Refuser reste utilisable | `test_une_proposition_repair_sans_substitution_n_offre_pas_accepter` | oui |
+| Accepter une proposition | idem | idem | idem | type `override-migration` (refus « revue nécessaire ») | `test_accepter_une_proposition_override_migration_refusee_journalise_le_motif` | oui |
+| Accepter une proposition | idem | idem | idem | type `memory-link` (refus sans porteur) | `test_accepter_une_proposition_memory_link_refusee_sans_porteur` | oui |
+| Accepter une proposition | idem | idem | idem | type `needs-hosts` | `test_accepter_une_proposition_type_needs_hosts_declare_les_hotes_actives` | oui |
 | Accepter une proposition | idem | idem | idem | sur un projet non-home de la Flotte (dérogation #490) | `test_accept_works_on_a_non_home_project_even_when_another_is_home` (HTTP direct, pas via clic UI) | non |
 | Refuser une proposition | `.btn` « Refuser » | `rejectBtn.click` | `POST /api/workspace/proposals/<slug>/reject` | disparaît de la liste « en attente » | `test_lister_accepter_et_refuser_une_proposition` | oui |
 | Ouvrir la référence (proposition `repair`) | `.btn` (bloc repair) | `ctx.goto('source', {file, line})` | — | ouvre le fichier citant à la ligne | — | non |
@@ -138,7 +142,7 @@ n'existent pas dans le cockpit (case vide légitime, pas un oubli).
 | Retirer un skill | `.chip` bouton retrait | `remove.click` | idem `{action:"remove"}` | override disparaît | `test_retirer_le_skill_fait_disparaitre_le_chip_et_la_declaration` | oui |
 | Créer un projet | `.btn` « Créer » (Flotte) | `createBtn.click` | `POST /api/projects/create` | succès, apparaît dans la liste | `test_creating_a_project_from_the_fleet_makes_it_appear` | oui |
 | Créer un projet | idem | idem | idem | chemin déjà existant → 409 refusé | `test_creating_a_project_on_an_existing_path_is_refused` | oui |
-| Créer un projet | idem | idem | idem | archétype inconnu / chemin hors racines → 400/403 | — | non |
+| Créer un projet | idem | idem | idem | archétype inconnu / chemin hors racines → 400/403 | `test_refuses_an_unknown_archetype_before_writing`, `test_refuses_a_path_outside_allowed_roots` (route directe, `tests/unit/cli/test_cmd_cockpit_create_project.py` — correction : marqué à tort « non » dans la première version de cette matrice) | oui |
 | Wizard — lancer une étape | `.btn` « Lancer » (wizard) | `runBtn.click` | `POST /api/setup` | succès bout en bout | `test_wizard_initializes_a_blank_project_end_to_end` | oui |
 | Wizard — repli (fallback) | `.btn` (fallback) | `fallbackBtn.click` | `POST /api/setup` | chemin d'erreur / archétype de repli | — | non |
 
@@ -163,7 +167,7 @@ n'existent pas dans le cockpit (case vide légitime, pas un oubli).
 | Nœud du graphe (clavier `Enter`) | idem | idem | — | équivalent clavier | — | non |
 | Onglet nœud (4 onglets) | `.tab` inspecteur nœud | change `_cvTab` | — | contenu change par onglet | `test_les_quatre_onglets_du_noeud_changent_le_contenu_affiche` | oui |
 | Aucun texte sous le plancher sombre | — | — | — | contraste/tailles du graphe | `test_aucun_texte_du_graphe_sous_le_plancher_dark` | oui |
-| Rail « Preuves » depuis Concevoir | `.rail-btn[data-panel=evidence]` | — | — | **aucun handler enregistré (bug #534)** | — | non |
+| Rail « Preuves » depuis Concevoir | `.rail-btn[data-panel=evidence]` | `togglePanel('evidence')` (corrigé par #534/PR #539, `evidence` tenu par la coque) | `GET /api/workspace/evidence` | ouvre le panneau Preuves comme dans les cinq autres espaces | `test_le_raccourci_3_ouvre_les_preuves_depuis_l_espace_par_defaut` (couvre le comportement générique, pas un test dédié à Concevoir) | oui |
 | Zoom Flotte/Projet/Workflow/Nœud | `#zoom-seg button` | `setZoom` | — | 3-4 niveaux selon hôte | — | non |
 | Trois vues au niveau Projet | `#view-seg` | — | — | présence des 3 vues | `test_les_trois_vues_sont_proposees_au_niveau_projet` | oui |
 | Blueprint réel s'ouvre | — | `mount` | `GET /api/workspace/blueprints` | rend un blueprint réel, jamais démo | `test_concevoir_s_ouvre_sur_le_blueprint_reel_du_projet` | oui |
@@ -266,5 +270,5 @@ n'existent pas dans le cockpit (case vide légitime, pas un oubli).
 | GET /api/workspace/flows/runs | workspace_routes.py (nouvelle route, issue #506) | 200 | filtrée par `blueprint` | `test_observer_montre_le_run_de_flow_meme_traceledger_vide` | oui |
 | GET /api/workspace/evidence | workspace_routes.py (nouvelle route, issue #534) | 200 | `enrolled:false` sans standard, sinon tâches + gates + pack par tâche du board | `test_le_standard_enrole_liste_ses_taches_avec_gates_et_pack`, `test_un_projet_sans_standard_le_dit_au_lieu_de_rendre_un_board_vide` | oui |
 | GET /api/workspace/agents | workspace_routes.py | 200/500 (`collect_agents` en erreur → 500 réel) | `freshness` par agent | `test_lire_les_agents_a_travers_le_cockpit` | oui |
-| POST /api/workspace/proposals/<slug>/accept | workspace_routes.py → proposals.py | 200 toujours (jamais d'exception) | 6 `artifact_type` distincts (agent/skill/override-migration/memory-link/needs-hosts/repair) | agent : `test_lister_accepter_et_refuser_une_proposition` ; les 5 autres : `tests/unit/test_project_upgrade.py` (moteur, pas la route HTTP) | non |
+| POST /api/workspace/proposals/<slug>/accept | workspace_routes.py → proposals.py | 200 toujours (jamais d'exception) | 6 `artifact_type` distincts (agent/skill/override-migration/memory-link/needs-hosts/repair) | les 6, via un vrai clic Piloter : `tests/e2e/test_workspace_proposals.py` (agent), `tests/e2e/test_workspace_proposals_types.py` (les 5 autres) | oui |
 | POST /api/workspace/proposals/<slug>/reject | workspace_routes.py → proposals.py | 200 toujours | déjà acceptée → `ok:false` sans erreur HTTP | `test_reject_marks_without_writing_an_artifact` | oui |

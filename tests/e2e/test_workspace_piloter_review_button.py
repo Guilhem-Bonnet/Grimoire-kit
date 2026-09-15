@@ -296,3 +296,36 @@ def test_the_review_button_appears_with_a_pending_checkpoint_and_names_the_run(
         assert page.locator("code", has_text="grimoire upgrade-flow review").count() >= 1
     finally:
         context.close()
+
+
+def test_the_review_button_falls_back_to_manual_copy_when_the_clipboard_is_unavailable(
+    browser: Browser, served_pending_proposal_project: tuple[str, str],
+) -> None:
+    """`reviewBtn` (``piloter.js``) catche l'échec de `navigator.clipboard.
+    writeText` (permission refusée, contexte non sécurisé, API absente) et
+    affiche le texte à copier à la main plutôt que de rester silencieux —
+    seul le scénario « copié » (permission accordée) était couvert jusqu'ici.
+    Un contexte SANS permission clipboard-write, plus une redéfinition de
+    `navigator.clipboard.writeText` en promesse rejetée, rend ce refus
+    déterministe (le seul refus de permission ne l'est pas de façon fiable
+    en Chromium headless)."""
+    served, _slug = served_pending_proposal_project
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
+    page = context.new_page()
+    page.add_init_script(
+        "Object.defineProperty(navigator, 'clipboard', { value: "
+        "{ writeText: () => Promise.reject(new Error('denied')) }, configurable: true });"
+    )
+    try:
+        _open_project(page, served, "projet-review-proposal")
+        btn = page.locator("button", has_text="Revoir dans l'IDE")
+        btn.wait_for(timeout=15_000)
+        btn.click()
+
+        page.wait_for_selector("text=Presse-papiers indisponible")
+        assert page.locator("text=Copié dans le presse-papiers").count() == 0
+        preview_code = page.locator(".pl-review-preview code").first
+        assert preview_code.inner_text().startswith("/grimoire-upgrade-review")
+        assert "override-migration-agent-x" in preview_code.inner_text()
+    finally:
+        context.close()
