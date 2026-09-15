@@ -351,6 +351,92 @@ def upgrade_flow_check(
         raise typer.Exit(1)
 
 
+# ── review — read-only context for a human deciding what `run` left pending ──
+
+
+@upgrade_flow_app.command("review")
+def upgrade_flow_review(
+    ctx: typer.Context,
+    project_root: _PROJECT_ROOT = Path(),
+    json_flag: _JSON_OPTION = False,
+) -> None:
+    """Contexte prêt à coller pour décider ce qu'un `run` a laissé en attente (issues #490/#506/#510).
+
+    Lecture seule : n'accepte, ne refuse, ni ne lance jamais rien elle-même —
+    rassemble ce qu'un humain (ou le skill `upgrade-review`) doit lire avant
+    de décider : écart d'outil (`grimoire.tools.project_health.tool_version_gap`,
+    issue #515), dernier run `project-upgrade`
+    (`grimoire.tools.flow_runs.list_flow_runs` — le même mécanisme que le badge
+    « checkpoint destructif en attente » du cockpit, jamais réimporté) et
+    propositions en attente (`grimoire.proposals.list_proposals`, lecture pure
+    du disque : `sync=False`, jamais un déclenchement de ledger ici).
+
+    Refuse de tourner si l'outil CLI qui l'exécute est plus ancien que le kit
+    aligné du projet : un outil en retard peut ne pas connaître les mêmes
+    catégories de proposition que celles déjà écrites par un kit plus récent,
+    et une décision prise avec le mauvais vocabulaire vaut moins que pas de
+    décision. Jamais de décision soumise ici, sur `--json` ou pas :
+    `grimoire proposals accept|reject <slug>` et
+    `grimoire flow resume <run_id> --result <fichier.json>` restent les deux
+    seules portes.
+    """
+    from grimoire.proposals import list_proposals
+    from grimoire.tools.flow_runs import list_flow_runs
+    from grimoire.tools.project_health import tool_version_gap
+
+    root = project_root.resolve()
+    gap = tool_version_gap(root)
+    if gap is not None and gap["outdated"]:
+        _fail(
+            ctx,
+            f"outil grimoire {gap['installed']} plus ancien que le kit du projet {gap['aligned']} : "
+            "`pipx upgrade grimoire-kit` / `pip install -U grimoire-kit` avant de revoir les décisions "
+            "— un outil en retard peut ignorer des catégories de proposition qu'un kit plus récent écrit déjà.",
+            json_flag=json_flag,
+        )
+        return
+
+    runs = list_flow_runs(root, blueprint_id="project-upgrade", limit=1)
+    last_run = runs[0] if runs else None
+    checkpoint_pending = bool(last_run and last_run.get("currentNode") == "destructive")
+    proposals = [p.to_dict() for p in list_proposals(root, sync=False) if p.status == "pending"]
+
+    payload: dict[str, Any] = {
+        "ok": True,
+        "tool_version": gap,
+        "last_run": last_run,
+        "checkpoint_pending": checkpoint_pending,
+        "pending_proposals": proposals,
+    }
+    if _fmt(ctx, json_flag=json_flag) == "json":
+        typer.echo(json.dumps(payload, ensure_ascii=False))
+        return
+
+    console.print("[bold]Revue de mise à jour — contexte[/bold]")
+    if gap is not None:
+        console.print(f"Outil : grimoire {gap['installed']} — kit aligné {gap['aligned']} (à jour)")
+    if last_run is None:
+        console.print("Aucun run `project-upgrade` connu.")
+    else:
+        console.print(
+            f"Dernier run `project-upgrade` : {last_run['runId']} — statut {last_run.get('status')}, "
+            f"nœud courant {last_run.get('currentNode')}"
+        )
+        if checkpoint_pending:
+            console.print(
+                "[yellow]checkpoint destructif en attente[/yellow] — décider avec "
+                f"`grimoire flow resume {last_run['runId']} --result <fichier.json>` "
+                "(`{\"pins\": {\"out\": {\"contract\": \"upgrade-complete\"}}, "
+                "\"checkpoint_decision\": \"approve\"|\"reject\", \"checkpoint_reason\": \"...\"}`)"
+            )
+    if not proposals:
+        console.print("Aucune proposition en attente (`grimoire proposals list`).")
+    else:
+        console.print(f"{len(proposals)} proposition(s) en attente (`grimoire proposals accept|reject <slug>`) :")
+        for p in proposals:
+            console.print(f"  - {p['slug']} — {p['artifact_type']}/{p['category']} : {p['specialty']}")
+
+
 # ── run — drives the real flow engine ────────────────────────────────────────
 
 

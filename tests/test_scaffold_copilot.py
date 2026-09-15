@@ -110,17 +110,21 @@ class TestPlanCopilotPrompts:
     def test_plan_copilot_prompts_skips_the_replaced_ones(self, scaffolder):
         """Un projet neuf ne reçoit que les prompts qui apportent quelque chose.
 
-        Quatre des sept redisaient une commande du SDK — `status`, `doctor`,
+        Quatre des huit redisaient une commande du SDK — `status`, `doctor`,
         `doctor --fix`, `check`. Ils restent livrés et installables à la
         demande, mais les déployer d'office remplissait `.github/prompts` de
-        doublons.
+        doublons. `grimoire-upgrade-review` (issue #520) n'en redit aucune —
+        c'est un mission pack nouveau, pas une commande existante reformulée
+        — il reste donc livré par défaut.
         """
         plan = ScaffoldPlan()
         scaffolder._plan_copilot_prompts(plan)
 
         stems = {c.dst.stem.removesuffix(".prompt") for c in plan.copies if ".github/prompts" in c.dst.as_posix()}
 
-        assert stems == {"grimoire-changelog", "grimoire-dream", "grimoire-session-bootstrap"}
+        assert stems == {
+            "grimoire-changelog", "grimoire-dream", "grimoire-session-bootstrap", "grimoire-upgrade-review",
+        }
 
     def test_plan_copilot_prompts_destination(self, scaffolder):
         """Verify all prompts go to .github/prompts/."""
@@ -255,9 +259,9 @@ class TestAddToFrameworkPath:
         prompts_dir = scaffolder._framework / "copilot" / "prompts"
         assert prompts_dir.is_dir()
         
-        # Should have 7 prompts
+        # Should have 8 prompts (issue #520 : + grimoire-upgrade-review)
         prompts = list(prompts_dir.glob("*.prompt.md"))
-        assert len(prompts) == 7
+        assert len(prompts) == 8
 
     def test_copilot_instructions_exist(self, scaffolder):
         """Verify copilot instructions are available."""
@@ -289,8 +293,8 @@ class TestFullScaffoldPlan:
             c for c in plan.copies 
             if ".github/prompts" in c.dst.as_posix()
         ]
-        # Trois : ceux qu'une commande du SDK ne remplace pas.
-        assert len(prompts) == 3
+        # Quatre : ceux qu'une commande du SDK ne remplace pas (issue #520 : + grimoire-upgrade-review).
+        assert len(prompts) == 4
 
         # Should have instructions
         instructions = [

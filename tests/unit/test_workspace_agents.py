@@ -71,7 +71,7 @@ def test_la_vue_expose_la_clause_d_emploi_et_la_couche(agents_project: Path) -> 
     assert concierge["use_when"], "le kit déclare use_when pour chaque agent livré"
     assert concierge["dont_use_when"]
     assert concierge["tool_boundary"]
-    assert concierge["skills"] == ["grimoire-agent-dispatch"]
+    assert concierge["skills"] == ["grimoire-agent-dispatch", "upgrade-review"]
     assert concierge["usage"] == {"choices": 0, "last_chosen_at": None}
     assert payload["entry_point"] == "concierge"
 
