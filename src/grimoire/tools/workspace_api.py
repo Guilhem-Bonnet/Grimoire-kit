@@ -864,13 +864,33 @@ def agents_view(project_root: Path) -> dict[str, Any]:
     (distinct de ``usage``, qui compte tout sous-agent tracé — voir
     :func:`_agent_usage`), pour que le badge du cockpit et le contrôle doctor
     disent toujours la même chose.
+
+    Mis en cache (:mod:`grimoire.tools.view_cache`), keyé sur la signature de
+    mtimes des dossiers agents/skills/overrides, de la config projet et du
+    dossier de traces — mesuré à 1,58s pour un projet réel avant ce cache
+    (glob + parsing + résolution de skills à chaque appel, sans qu'aucun de
+    ces fichiers n'ait bougé entre deux lectures rapprochées du cockpit).
     """
+    from grimoire.core import layout
+    from grimoire.core.standard_generation import TRACES_DIR
+    from grimoire.tools import view_cache
+
+    root = project_root.resolve()
+    signature = view_cache.path_signature([
+        *layout.agent_dirs(root),
+        *layout.skill_dirs(root),
+        root / TRACES_DIR,
+        root / "project-context.yaml",
+    ])
+    return view_cache.cached(f"agents_view:{root}", signature, lambda: _agents_view_uncached(root))
+
+
+def _agents_view_uncached(root: Path) -> dict[str, Any]:
     from grimoire.core.agent_freshness import project_agent_freshness
     from grimoire.core.config import GrimoireConfig
     from grimoire.core.exceptions import GrimoireConfigError
     from grimoire.hosts import collect
 
-    root = project_root.resolve()
     skills = collect.collect_skills(root)
     known_skills = frozenset(s.slug for s in skills)
     agents = collect.collect_agents(root, known_skills=known_skills)
@@ -925,8 +945,21 @@ def proposals_view(project_root: Path) -> dict[str, Any]:
     accept/refuse actions, so every read here re-runs the déclencheur rather
     than trusting a possibly stale file. A ledger that cannot be read yields
     an empty list, never an error — same contract as the rest of this view.
-    """
-    from grimoire.proposals import list_proposals
 
-    proposals = list_proposals(project_root.resolve())
-    return {"proposals": [p.to_dict() for p in proposals]}
+    Mis en cache (:mod:`grimoire.tools.view_cache`), keyé sur la signature de
+    mtimes du dossier de propositions — mesuré à 0,46s pour un projet réel
+    avant ce cache. Le déclencheur peut écrire une nouvelle proposition dans
+    ce même dossier ; cette écriture change la signature et invalide donc
+    naturellement le cache au prochain appel.
+    """
+    from grimoire.core.standard_generation import PROPOSALS_DIR
+    from grimoire.proposals import list_proposals
+    from grimoire.tools import view_cache
+
+    root = project_root.resolve()
+    signature = view_cache.path_signature([root / PROPOSALS_DIR])
+    return view_cache.cached(
+        f"proposals_view:{root}",
+        signature,
+        lambda: {"proposals": [p.to_dict() for p in list_proposals(root)]},
+    )

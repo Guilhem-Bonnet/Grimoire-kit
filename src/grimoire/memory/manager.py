@@ -52,6 +52,17 @@ _BACKEND_MEMPALACE = "mempalace"
 _BACKEND_OLLAMA = "ollama"
 _BACKEND_AUTO = "auto"
 
+#: Délai maximal accordé à chacune des sondes réseau de
+#: :meth:`MemoryManager.health_check` (backend vectoriel, Redis, Neo4j). Voir
+#: la docstring de cette méthode pour la justification du chiffre.
+DEFAULT_PROBE_TIMEOUT_SECONDS = 0.3
+
+#: Délai maximal accordé à la CONSTRUCTION du graphe Neo4j (``ensure_schema``,
+#: plusieurs ``CREATE CONSTRAINT`` — plus qu'un ping). Plus généreux que
+#: :data:`DEFAULT_PROBE_TIMEOUT_SECONDS` : un serveur joignable mais qui
+#: démarre encore doit avoir le temps de répondre à ce DDL ponctuel.
+DEFAULT_GRAPH_INIT_TIMEOUT_SECONDS = 3.0
+
 # Vector backends that benefit from a lexical companion index. Declared in
 # grimoire.memory.profiles so the setup and the runtime agree on which
 # compositions can actually fuse two rankings.
@@ -247,6 +258,40 @@ def _create_memory_graph(config: GrimoireConfig) -> tuple[Any | None, str]:
         return None, f"Neo4j graph sync unavailable: {exc}"
 
 
+def _create_memory_graph_bounded(
+    config: GrimoireConfig, *, timeout: float = DEFAULT_GRAPH_INIT_TIMEOUT_SECONDS
+) -> tuple[Any | None, str]:
+    """Bound :func:`_create_memory_graph` — its constructor is not a probe.
+
+    ``Neo4jMemoryGraph.__init__`` calls ``ensure_schema()`` eagerly: a real
+    Cypher round-trip. Against an unreachable server, the driver's own
+    transaction-retry policy backs off for up to ~30s (several retries with
+    growing delays) *before this constructor even returns* — a delay that
+    :meth:`MemoryManager.health_check`'s own timeout cannot help with, since
+    it runs after construction. Every ``from_config`` call pays this risk
+    (not just the explicit ``probe=True`` health check), so it gets the same
+    bounded-thread treatment: past *timeout*, the caller gives up and reports
+    the graph as unavailable, while the construction keeps running
+    unobserved in the background and is discarded when it eventually
+    returns (or errors).
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    from concurrent.futures import TimeoutError as FutureTimeoutError
+
+    pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="grimoire-memory-graph-init")
+    try:
+        future = pool.submit(_create_memory_graph, config)
+        try:
+            return future.result(timeout=timeout)
+        except FutureTimeoutError:
+            return None, (
+                f"Neo4j graph sync unavailable: construction timed out after {timeout}s "
+                "(server unreachable or too slow to answer)"
+            )
+    finally:
+        pool.shutdown(wait=False)
+
+
 def _create_hot_memory(config: GrimoireConfig) -> tuple[RedisHotMemory | None, str]:
     """Create optional hot-memory adapter without making it a durable dependency."""
     mem = config.memory
@@ -282,6 +327,7 @@ class MemoryManager:
         hot_memory_issue: str = "",
         lexical_companion: MemoryBackend | None = None,
         write_policy: MemoryWritePolicy | None = None,
+        project_root: Path | None = None,
     ) -> None:
         self._backend = backend
         self._project_name = project_name
@@ -292,6 +338,11 @@ class MemoryManager:
         self._hot_memory = hot_memory
         self._hot_memory_issue = hot_memory_issue
         self._lexical_companion = lexical_companion
+        # Racine du projet, pour invalider le cache de statut mémoire
+        # (grimoire.memory.health_cache) sur toute écriture. ``None`` pour un
+        # manager construit via ``from_backend`` (pas de notion de projet) —
+        # l'invalidation devient alors un no-op, jamais une erreur.
+        self._project_root = project_root
         # Défaut sûr : redaction requise, refus du contenu qui se donne pour
         # une consigne. Un manager construit sans politique n'est pas un
         # manager sans frontière.
@@ -321,7 +372,7 @@ class MemoryManager:
         mem = config.memory
         backend_id = mem.backend if mem.backend != _BACKEND_AUTO else _resolve_auto(config)
         sidecar = MemorySidecar(root / "_grimoire" / "_memory" / "palace_sidecar.sqlite3")
-        memory_graph, graph_sync_issue = _create_memory_graph(config)
+        memory_graph, graph_sync_issue = _create_memory_graph_bounded(config)
         hot_memory, hot_memory_issue = _create_hot_memory(config)
         return cls(
             backend,
@@ -334,6 +385,7 @@ class MemoryManager:
             hot_memory_issue=hot_memory_issue,
             lexical_companion=_create_lexical_companion(config, backend_id, root),
             write_policy=MemoryWritePolicy.from_project(root),
+            project_root=root,
         )
 
     @classmethod
@@ -637,37 +689,92 @@ class MemoryManager:
     def count(self) -> int:
         return self._backend.count()
 
-    def health_check(self) -> BackendStatus:
-        status = self._backend.health_check()
-        detail = dict(status.detail)
-        if self._hot_memory is not None:
-            hot_status = self._hot_memory.health_check()
-            detail["hot_memory"] = hot_status.to_dict()
-        elif self._hot_memory_issue:
-            detail["hot_memory"] = HotMemoryStatus(
-                backend="redis",
-                enabled=True,
-                healthy=False,
-                detail={"reason": self._hot_memory_issue},
-            ).to_dict()
-        if self._sidecar is not None:
-            detail.update({
-                "palace_sidecar": str(self._sidecar.db_path),
-                **self._sidecar.facts_stats(),
-                **self._sidecar.diary_stats(),
-            })
-        if self._memory_graph is not None:
+    def health_check(self, *, timeout: float = DEFAULT_PROBE_TIMEOUT_SECONDS) -> BackendStatus:
+        """Sonde backend + Redis + Neo4j en parallèle, chacune bornée à *timeout*.
+
+        Les trois sondes sont des appels réseau indépendants ; les enchaîner
+        séquentiellement fait payer à l'appelant la somme de leurs délais —
+        mesuré à 0,88s cumulés quand les trois services sont éteints ou
+        absents (cas courant en développement local). Un
+        :class:`~concurrent.futures.ThreadPoolExecutor` les lance de front, et
+        ``future.result(timeout=)`` borne l'attente de chacune : un service
+        injoignable ne fait jamais attendre l'appelant plus que *timeout*,
+        même si son client réseau n'a pas lui-même de délai court. Le thread
+        qui sonde encore continue en arrière-plan et se termine seul — il ne
+        retient jamais le retour de cette méthode.
+        """
+        from concurrent.futures import ThreadPoolExecutor
+        from concurrent.futures import TimeoutError as FutureTimeoutError
+
+        pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="grimoire-memory-probe")
+        try:
+            backend_future = pool.submit(self._backend.health_check)
+            hot_future = (
+                pool.submit(self._hot_memory.health_check) if self._hot_memory is not None else None
+            )
+            graph_future = (
+                pool.submit(self._memory_graph.health_check) if self._memory_graph is not None else None
+            )
+
             try:
-                graph_status = self._memory_graph.health_check()
-                detail["neo4j_graph_sync"] = "ready" if graph_status.healthy else "error"
-                detail["neo4j_graph_sync_detail"] = graph_status.detail
-            except Exception as exc:
-                self._record_graph_sync_issue("health_check", exc)
-                detail["neo4j_graph_sync"] = "error"
+                status = backend_future.result(timeout=timeout)
+            except FutureTimeoutError:
+                status = BackendStatus(
+                    backend=self._project_name,
+                    healthy=False,
+                    entries=0,
+                    detail={"reason": f"sonde backend expirée après {timeout}s"},
+                )
+            detail = dict(status.detail)
+
+            if hot_future is not None:
+                try:
+                    hot_status = hot_future.result(timeout=timeout)
+                    detail["hot_memory"] = hot_status.to_dict()
+                except FutureTimeoutError:
+                    detail["hot_memory"] = HotMemoryStatus(
+                        backend="redis",
+                        enabled=True,
+                        healthy=False,
+                        detail={"reason": f"sonde redis expirée après {timeout}s"},
+                    ).to_dict()
+            elif self._hot_memory_issue:
+                detail["hot_memory"] = HotMemoryStatus(
+                    backend="redis",
+                    enabled=True,
+                    healthy=False,
+                    detail={"reason": self._hot_memory_issue},
+                ).to_dict()
+
+            if self._sidecar is not None:
+                detail.update({
+                    "palace_sidecar": str(self._sidecar.db_path),
+                    **self._sidecar.facts_stats(),
+                    **self._sidecar.diary_stats(),
+                })
+
+            if graph_future is not None:
+                try:
+                    graph_status = graph_future.result(timeout=timeout)
+                    detail["neo4j_graph_sync"] = "ready" if graph_status.healthy else "error"
+                    detail["neo4j_graph_sync_detail"] = graph_status.detail
+                except FutureTimeoutError as exc:
+                    self._record_graph_sync_issue("health_check", exc)
+                    detail["neo4j_graph_sync"] = "error"
+                    detail["neo4j_graph_sync_detail"] = {"reason": f"sonde Neo4j expirée après {timeout}s"}
+                except Exception as exc:
+                    self._record_graph_sync_issue("health_check", exc)
+                    detail["neo4j_graph_sync"] = "error"
+                    detail["neo4j_graph_sync_detail"] = {"reason": self._graph_sync_issue}
+            elif self._graph_sync_issue:
+                detail["neo4j_graph_sync"] = "disabled"
                 detail["neo4j_graph_sync_detail"] = {"reason": self._graph_sync_issue}
-        elif self._graph_sync_issue:
-            detail["neo4j_graph_sync"] = "disabled"
-            detail["neo4j_graph_sync_detail"] = {"reason": self._graph_sync_issue}
+        finally:
+            # wait=False : un thread de sonde encore bloqué (ex. connect() sans
+            # timeout côté client) ne doit jamais retenir le retour de cette
+            # méthode — il se termine seul, hors du chemin de la réponse.
+            pool.shutdown(wait=False)
+
         return BackendStatus(
             backend=status.backend,
             healthy=status.healthy,
@@ -850,7 +957,22 @@ class MemoryManager:
 
     # ── Optional Neo4j runtime graph projection ───────────────────────
 
+    def _invalidate_health_cache(self) -> None:
+        """Toute écriture rend le dernier statut sondé obsolète.
+
+        ``health_cache`` ne sonde jamais lui-même (voir sa docstring) — sans
+        cet appel, un cockpit qui vient d'écrire verrait le volume d'entrées
+        d'avant l'écriture jusqu'à expiration du TTL. ``project_root`` est
+        ``None`` pour un manager construit via ``from_backend`` (pas de projet
+        connu) : l'invalidation devient alors un no-op.
+        """
+        if self._project_root is not None:
+            from grimoire.memory import health_cache
+
+            health_cache.invalidate(self._project_root)
+
     def _sync_memory(self, entry: MemoryEntry) -> None:
+        self._invalidate_health_cache()
         self._mirror_to_companion(entry)
         if self._memory_graph is None:
             return
@@ -874,6 +996,7 @@ class MemoryManager:
             self._sync_memory(entry)
 
     def _sync_delete_memory(self, entry_id: str) -> None:
+        self._invalidate_health_cache()
         if self._lexical_companion is not None:
             with contextlib.suppress(Exception):
                 self._lexical_companion.delete(entry_id)
@@ -885,6 +1008,7 @@ class MemoryManager:
             self._record_graph_sync_issue("delete", exc)
 
     def _sync_fact(self, fact: KnowledgeFact) -> None:
+        self._invalidate_health_cache()
         if self._memory_graph is None:
             return
         try:
@@ -893,6 +1017,7 @@ class MemoryManager:
             self._record_graph_sync_issue("fact", exc)
 
     def _sync_invalidate_fact(self, subject: str, predicate: str, object_: str, *, ended: str) -> None:
+        self._invalidate_health_cache()
         if self._memory_graph is None:
             return
         try:
@@ -901,6 +1026,7 @@ class MemoryManager:
             self._record_graph_sync_issue("fact_invalidation", exc)
 
     def _sync_diary(self, record: DiaryRecord) -> None:
+        self._invalidate_health_cache()
         if self._memory_graph is None:
             return
         try:

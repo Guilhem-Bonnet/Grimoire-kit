@@ -127,3 +127,32 @@ def test_memory_architecture_marks_redis_hot_layer_ready() -> None:
     assert short_term.state == "ready"
     assert short_term.implemented is True
     assert short_term.evidence["namespace"] == "forge:test"
+
+
+class _FakeRedisLikeConnectionError(Exception):
+    """Mime `redis.exceptions.ConnectionError` : NE dérive PAS du builtin
+    `ConnectionError`, exactement comme la vraie exception de redis-py
+    (vérifié : `redis.exceptions.ConnectionError.__mro__` ne contient que
+    `RedisError`, `Exception` — jamais le `ConnectionError` du langage)."""
+
+
+class _UnreachableRedis:
+    def ping(self) -> bool:
+        raise _FakeRedisLikeConnectionError("Error 101 connecting to host:6379. Network is unreachable.")
+
+
+def test_health_check_reports_unhealthy_instead_of_raising_on_redis_specific_error() -> None:
+    """Un Redis injoignable renvoie `healthy: False` — il ne casse jamais la route.
+
+    Avant ce correctif, `health_check()` ne rattrapait que le `ConnectionError`
+    du langage ; celui de redis-py (`redis.exceptions.ConnectionError`) n'en
+    dérive pas et remontait tel quel, transformant une sonde de statut en une
+    erreur 500 sur `/api/memory/status` dès que Redis est réellement injoignable.
+    """
+    hot = RedisHotMemory("redis://unreachable:6379/0", client=_UnreachableRedis())
+
+    status = hot.health_check()
+
+    assert status.healthy is False
+    assert status.enabled is True
+    assert "Network is unreachable" in status.detail["reason"]

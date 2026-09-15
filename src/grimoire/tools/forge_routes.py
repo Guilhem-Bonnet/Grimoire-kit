@@ -83,8 +83,8 @@ class ReadableForgeAPI(Protocol):
     def primitives_view(self) -> dict[str, Any]:
         """Primitives déclarées."""
 
-    def memory_link_view(self) -> dict[str, Any]:
-        """Lien projet ↔ backend mémoire."""
+    def memory_link_view(self, *, probe: bool = False) -> dict[str, Any]:
+        """Lien projet ↔ backend mémoire. ``probe`` force une sonde fraîche."""
 
     def health_view(self) -> dict[str, Any]:
         """Alignement kit, flows et activité réelle du projet."""
@@ -126,9 +126,20 @@ def api_get(api: ReadableForgeAPI, path: str, query: dict[str, list[str]]) -> An
     if path == "/api/backends":
         return backend_catalogue()
     if path == "/api/memory/status":
-        return api.memory_link_view()
+        probe = query.get("probe", ["0"])[0] not in ("", "0", "false")
+        return api.memory_link_view(probe=probe)
     if path == "/api/health":
         return api.health_view()
+    if path == "/api/fleet":
+        # Registre global (toute la machine), pas le projet servi — sensé
+        # pour les deux hôtes qui partagent cette table (même lecture qu'ils
+        # appellent ou non depuis leur UI) : l'atelier mono-projet peut aussi
+        # bien la lire, il ne fait que voir le reste du portefeuille. Seule
+        # la vue Flotte du cockpit (``web/workspace/spaces/piloter.js``)
+        # l'appelle en pratique aujourd'hui.
+        from grimoire.tools.project_health import fleet_status
+
+        return fleet_status()
     # La vue de travail (web/workspace/) ajoute sa surface sous un préfixe à
     # elle : une seule délégation ici, et les deux hôtes la servent — c'est ce
     # qui rend vraie la clause « la même coque, deux cibles » de la spec.

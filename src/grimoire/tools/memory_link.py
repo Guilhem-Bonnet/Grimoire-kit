@@ -10,6 +10,7 @@ serveur vectoriel est éteint ou qu'un projet n'est pas initialisé.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -111,20 +112,8 @@ def _store_graph_parity(manager: Any, entries: int) -> dict[str, Any]:
     }
 
 
-def memory_link_status(project_root: Path) -> dict[str, Any]:
-    """Statut du lien projet ↔ BDD mémoire, best-effort.
-
-    États : ``uninitialized`` (pas de config projet), ``unavailable``
-    (backend configuré mais injoignable/non installé), ``ok``.
-
-    Porte aussi le contrat de couches du Memory OS (``layers``) et la dérive
-    store ↔ graphe (``parity``), pour que le cockpit affiche l'état réel des
-    sept couches au lieu de le déduire d'heuristiques de fichiers.
-    """
-    from grimoire.core.config import GrimoireConfig
-    from grimoire.core.exceptions import GrimoireConfigError, GrimoireMemoryError
-
-    status: dict[str, Any] = {
+def _empty_status(project_root: Path) -> dict[str, Any]:
+    return {
         "schemaVersion": MEMORY_LINK_SCHEMA_VERSION,
         "projectRoot": str(project_root),
         "state": "uninitialized",
@@ -136,17 +125,25 @@ def memory_link_status(project_root: Path) -> dict[str, Any]:
         "detail": {},
         "layers": [],
         "parity": {},
+        # Contrat de fraîcheur (issue de perf du cockpit) : un projet non
+        # initialisé ou en erreur de config n'a jamais été sondé — ces trois
+        # champs restent au même contrat que la branche sondée, pour qu'un
+        # appelant n'ait jamais à distinguer « absent » de « jamais sondé ».
+        "probedAt": None,
+        "probed": False,
+        "stale": True,
     }
-    # Lecture stricte au root servi (pas de remontée d'arborescence : un projet
-    # non initialisé ne doit pas hériter de la config d'un parent).
-    config_path = project_root / "project-context.yaml"
-    if not config_path.is_file():
-        return status
-    try:
-        cfg = GrimoireConfig.from_yaml(config_path)
-    except (GrimoireConfigError, OSError) as exc:
-        status["error"] = str(exc)
-        return status
+
+
+def _probe_memory_link_status(project_root: Path, cfg: Any) -> dict[str, Any]:
+    """La sonde complète — coûteuse, réseau compris. Réservée à ``probe=True``.
+
+    C'était tout le corps de :func:`memory_link_status` avant l'issue de perf
+    du cockpit (mesuré 0,88s : trois sondes réseau séquentielles, zéro cache).
+    """
+    from grimoire.core.exceptions import GrimoireMemoryError
+
+    status = _empty_status(project_root)
     status["configuredBackend"] = cfg.memory.backend
     health = None
     try:
@@ -176,4 +173,64 @@ def memory_link_status(project_root: Path) -> dict[str, Any]:
         status["layerProfile"] = architecture.profile
     except (ImportError, OSError, ValueError) as exc:
         status["error"] = status["error"] or str(exc)
+    return status
+
+
+def memory_link_status(project_root: Path, *, probe: bool = False) -> dict[str, Any]:
+    """Statut du lien projet ↔ BDD mémoire, best-effort.
+
+    États : ``uninitialized`` (pas de config projet), ``unavailable``
+    (backend configuré mais injoignable/non installé), ``ok``.
+
+    Porte aussi le contrat de couches du Memory OS (``layers``) et la dérive
+    store ↔ graphe (``parity``), pour que le cockpit affiche l'état réel des
+    sept couches au lieu de le déduire d'heuristiques de fichiers.
+
+    Mode par défaut (``probe=False``, « rapide ») : ne touche JAMAIS le
+    réseau. Il rend le dernier statut sondé s'il y en a un
+    (:mod:`grimoire.memory.health_cache`), avec ``probedAt`` (horodatage ISO
+    de la dernière sonde réelle, ``None`` si jamais sondée) et ``stale``
+    (``True`` passé le TTL du cache, ou si rien n'a jamais été sondé) — jamais
+    une donnée périmée présentée comme fraîche. Sans cache, il rend la config
+    connue seule (``configuredBackend``), sans sonder. ``probe=True`` force
+    une sonde fraîche (coûteuse : réseau, jusqu'à trois services) et
+    rafraîchit le cache pour les lectures rapides suivantes.
+    """
+    from grimoire.core.config import GrimoireConfig
+    from grimoire.core.exceptions import GrimoireConfigError
+    from grimoire.memory import health_cache
+
+    # Lecture stricte au root servi (pas de remontée d'arborescence : un projet
+    # non initialisé ne doit pas hériter de la config d'un parent).
+    config_path = project_root / "project-context.yaml"
+    if not config_path.is_file():
+        return _empty_status(project_root)
+    try:
+        cfg = GrimoireConfig.from_yaml(config_path)
+    except (GrimoireConfigError, OSError) as exc:
+        status = _empty_status(project_root)
+        status["error"] = str(exc)
+        return status
+
+    if not probe:
+        cached = health_cache.get(project_root)
+        if cached is None:
+            # Jamais sondé : la config connue seule, sans jamais toucher le
+            # réseau — les défauts probed=False/stale=True/probedAt=None
+            # viennent de _empty_status().
+            status = _empty_status(project_root)
+            status["configuredBackend"] = cfg.memory.backend
+            return status
+        status = dict(cached.status)
+        status["probedAt"] = datetime.fromtimestamp(cached.probed_at, tz=UTC).isoformat()
+        status["probed"] = True
+        status["stale"] = not cached.is_fresh()
+        return status
+
+    status = _probe_memory_link_status(project_root, cfg)
+    health_cache.set_status(project_root, status)
+    status = dict(status)
+    status["probedAt"] = datetime.now(tz=UTC).isoformat()
+    status["probed"] = True
+    status["stale"] = False
     return status

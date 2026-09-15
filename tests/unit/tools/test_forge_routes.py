@@ -58,7 +58,7 @@ class _StubAPI:
     def primitives_view(self) -> dict[str, Any]:
         return self._mark("primitives_view")
 
-    def memory_link_view(self) -> dict[str, Any]:
+    def memory_link_view(self, *, probe: bool = False) -> dict[str, Any]:
         return self._mark("memory_link_view")
 
 
