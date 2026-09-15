@@ -176,6 +176,68 @@ def test_aucune_encre_rendue_sous_45(workspace: Page, theme: str) -> None:
     )
 
 
+#: Rapport de luminance minimal entre deux surfaces voisines (revue 2026-09 :
+#: « teintes trop proches »). Les cinq niveaux mesuraient 1,06 à 1,17 avant
+#: cette revue — perceptiblement une seule teinte plate malgré cinq tokens
+#: déclarés. La cible visée par tokens.css est ~1,30 ; le plancher du test
+#: garde une marge sous cette cible plutôt que de figer la valeur exacte.
+MIN_SURFACE_RATIO = 1.25
+
+#: Les quatre paires déclarées dans l'ordre de tokens.css — pas toutes les
+#: combinaisons : ce sont les voisins qui se touchent réellement à l'écran
+#: (panneau sur toile, barre sur panneau, carte sur barre, survol sur carte).
+SURFACE_PAIRS = (("--bg", "--e1"), ("--e1", "--bar"), ("--bar", "--e2"), ("--e2", "--e3"))
+
+_SURFACE_JS = """
+(names) => {
+  const style = getComputedStyle(document.documentElement);
+  const parse = (value) => {
+    const v = value.trim();
+    if (v.startsWith('#')) {
+      const hex = v.length === 4
+        ? v.slice(1).split('').map((c) => c + c).join('')
+        : v.slice(1);
+      const n = hex.match(/.{2}/g).map((h) => parseInt(h, 16));
+      return [n[0] / 255, n[1] / 255, n[2] / 255];
+    }
+    const n = v.match(/[\\d.]+/g).map(Number);
+    return [n[0] / 255, n[1] / 255, n[2] / 255];
+  };
+  const lum = ([r, g, b]) => {
+    const f = (c) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
+    return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+  };
+  const out = {};
+  for (const name of names) out[name] = lum(parse(style.getPropertyValue(name)));
+  return out;
+}
+"""
+
+
+@pytest.mark.parametrize("theme", ["dark", "light"])
+def test_les_surfaces_voisines_s_ecartent_assez_pour_se_distinguer(workspace: Page, theme: str) -> None:
+    """« Ça manque de couleur, de façon intelligente, ça paraît terne » (Guilhem, 2026-09).
+
+    Mesuré sur les valeurs de token réellement appliquées au document (pas sur
+    la feuille de styles) — c'est ce que `--bg`/`--e1`/`--bar`/`--e2`/`--e3`
+    valent une fois `data-theme` posé, dans les deux sens de résolution
+    (`:root` et le média `prefers-color-scheme`). Avant la revue 2026-09, ce
+    test échouait sur les quatre paires et dans les deux thèmes.
+    """
+    _apply(workspace, theme=theme)
+    names = sorted({n for pair in SURFACE_PAIRS for n in pair})
+    lums = workspace.evaluate(_SURFACE_JS, names)
+
+    offenders = []
+    for a, b in SURFACE_PAIRS:
+        lighter, darker = max(lums[a], lums[b]), min(lums[a], lums[b])
+        ratio = (lighter + 0.05) / (darker + 0.05)
+        if ratio < MIN_SURFACE_RATIO:
+            offenders.append(f"{a} ({lums[a]:.4f}) / {b} ({lums[b]:.4f}) → {ratio:.3f}:1")
+
+    assert not offenders, "surfaces trop proches :\n  " + "\n  ".join(offenders)
+
+
 @pytest.mark.parametrize("density", ["decouverte", "concentration"])
 @pytest.mark.parametrize("theme", ["dark", "light"])
 def test_les_six_espaces_s_ouvrent_dans_les_deux_themes_et_les_deux_densites(

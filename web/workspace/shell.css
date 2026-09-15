@@ -119,6 +119,18 @@ select {
 .dot.acc {
   background: var(--acc);
 }
+/* Séries de données réutilisées comme vocabulaire de badge (revue 2026-09) :
+   genre de blueprint, type de proposition — toujours point + mot, jamais la
+   couleur seule (même règle que .dot.ok/.warn/.bad). */
+.dot.s1 {
+  background: var(--s1);
+}
+.dot.s2 {
+  background: var(--s2);
+}
+.dot.s3 {
+  background: var(--s3);
+}
 
 .btn {
   height: var(--h-ctl);
@@ -145,6 +157,30 @@ select {
   font-weight: 500;
 }
 
+/* ── Identité d'espace ────────────────────────────────────────────────────
+ * `shell.js::goto()` pose `body[data-active-space]` à chaque changement d'espace ;
+ * --id-current en tire la teinte du token --id-<espace> correspondant
+ * (tokens.css). Un repère de navigation, jamais un état : filet fin sous
+ * l'onglet actif, liseré de l'en-tête de panneau — jamais un aplat. */
+body[data-active-space="piloter"] {
+  --id-current: var(--id-piloter);
+}
+body[data-active-space="concevoir"] {
+  --id-current: var(--id-concevoir);
+}
+body[data-active-space="executer"] {
+  --id-current: var(--id-executer);
+}
+body[data-active-space="observer"] {
+  --id-current: var(--id-observer);
+}
+body[data-active-space="memoire"] {
+  --id-current: var(--id-memoire);
+}
+body[data-active-space="source"] {
+  --id-current: var(--id-source);
+}
+
 .tab {
   height: 100%;
   display: flex;
@@ -165,7 +201,7 @@ select {
 .tab[aria-selected="true"],
 .tab.on {
   color: var(--ink);
-  border-bottom-color: var(--acc);
+  border-bottom-color: var(--id-current, var(--acc));
   font-weight: 500;
 }
 
@@ -426,6 +462,12 @@ select {
   border-bottom: 1px solid var(--line);
   background: var(--bar);
   flex: none;
+}
+
+/* Liseré de l'identité d'espace, en écho du filet d'onglet (voir plus haut) :
+   sans --id-current (avant le premier `goto()`), le filet ne se voit pas. */
+body[data-active-space] .panel-head {
+  border-top: 2px solid var(--id-current, transparent);
 }
 
 .panel-body {

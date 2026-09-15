@@ -57,36 +57,53 @@
 }
 
 :root {
-  /* ── Surfaces ─────────────────────────────────────────────────────────── */
+  /* ── Surfaces ─────────────────────────────────────────────────────────── *
+   * Revue 2026-09 (feedback Guilhem : « ça manque de couleur, de façon
+   * intelligente, ça paraît terne/sombre ») : les cinq niveaux mesuraient
+   * 1,06 à 1,17 de rapport de luminance entre voisins — sous le seuil de
+   * lisibilité d'une superposition (1,25), donc perçus comme une seule
+   * teinte plate quel que soit le nombre de niveaux déclarés. Chaque paire
+   * adjacente (--bg/--e1, --e1/--bar, --bar/--e2, --e2/--e3) est reportée à
+   * ~1,30 ici. Conséquence en cascade : --e1 et --bar montent assez pour que
+   * --ink3 n'y tienne plus 4,5:1 (voir plus bas) — l'encre secondaire est
+   * donc éclaircie en retour, pas seulement les fonds. */
   --bg: #0a0c0f;
-  --e1: #161a1f;
-  --bar: #1c2127;
-  --e2: #232930;
-  --e3: #2d343c;
+  --e1: #21272e;
+  --bar: #313a44;
+  --e2: #404b58;
+  --e3: #505c6a;
   --term: #0e1013;
   --termink: #c9ced6;
   --line: rgba(255, 255, 255, 0.11);
 
   /* ── Encre ────────────────────────────────────────────────────────────── */
-  /* --ink3 est le cas limite du contraste. La spec §2.2 le contraint sur --e1
-     et annonce 4,8 et 4,6 mesurés ; le calcul dit 4,69 en sombre (conforme) et
-     3,78 en clair avec la valeur #767c85 qu'elle donne — donc sous le seuil
-     qu'elle pose elle-même. La valeur claire est corrigée au plus près
-     4,55:1). Le harnais Playwright, qui mesure sur le DOM et non sur le token,
-     a ensuite trouvé la vraie limite : --ink3 est aussi rendu sur --bar (barre
-     d'état, écho du dock), où il tombait à 4,35 en sombre et 4,19 en clair.
-     Les deux valeurs sont donc corrigées au plus près pour tenir sur --e1 ET
-     sur --bar : #818891 (4,88 / 4,52) et #656a72 (4,90 / 4,51). L'écart avec
-     l'encre secondaire reste franc, la hiérarchie est préservée.
-     Reste hors contrainte, faute d'usage : --ink3 sur --e2 et --e3, où le
-     texte porte --ink2 ou --ink. */
+  /* --ink2 et --ink3 recalculées pour l'écart de surfaces ci-dessus (revue
+     2026-09) : --ink2 est la couleur des chips (fond --e2) et des infobulles
+     épinglables (fond --e3, shell.css .tip) — c'est cette dernière qui
+     borne : il faut 4,5:1 sur --e3, la plus claire des quatre surfaces
+     posées. --ink3 ne porte plus de texte que sur --e1 et --bar (le survol
+     de nœud et d'amorce, qui l'utilisait sur --e3, passe à --ink2 —
+     concevoir.js, .cv-node .kind / .cv-prim .d) : --bar, désormais la plus
+     claire des deux, est la contrainte. Les deux valeurs d'origine
+     (#a8aeb7, #818891) restent la base de teinte, seule la clarté change :
+     --ink2 4,79:1 sur --e3 (était 4,5:1 sur --e1 dans la version d'avant
+     revue), --ink3 4,74:1 sur --bar (était 4,88:1 sur --e1). L'écart entre
+     les deux ink reste net (rapport 1,71). */
   --ink: #f2f3f5;
-  --ink2: #a8aeb7;
-  --ink3: #818891;
+  --ink2: #d1d9e4;
+  --ink3: #9ea7b2;
 
-  /* ── Accent d'interaction : c'est l'encre ─────────────────────────────── */
-  --acc: #f2f3f5;
-  --accsoft: rgba(255, 255, 255, 0.08);
+  /* ── Accent d'interaction ──────────────────────────────────────────────── *
+   * Avant la revue 2026-09, --acc valait --ink : aucune teinte propre pour
+   * le survol, le focus, l'onglet actif ou la ligne sélectionnée — l'unique
+   * cause nommée du rendu « terne » (l'orange --pri reste réservé à l'action
+   * primaire, une par écran). --acc porte maintenant la même teinte que
+   * --s1 (bleu froid, distincte de --pri et des trois séries), déclarée à
+   * part pour rester libre de --s1 si les séries de données évoluent.
+   * --accsoft (fond de sélection) reprend cette teinte au lieu d'un simple
+   * voile neutre. */
+  --acc: #4c9be8;
+  --accsoft: rgba(76, 155, 232, 0.16);
 
   /* ── Marque et action primaire — une par écran ────────────────────────── */
   /* En clair, la spec donne --pri #d9481a avec du blanc dessus : mesuré, c'est
@@ -103,10 +120,25 @@
   --warn: #e2b33c;
   --bad: #e5645a;
 
-  /* ── Séries de données : jamais réutilisées pour un état ──────────────── */
+  /* ── Séries de données : jamais réutilisées pour un état ──────────────── *
+   * Depuis la revue 2026-09, aussi le vocabulaire des badges sémantiques
+   * (genre de blueprint, type de proposition — .dot.s1/.s2/.s3 dans
+   * shell.css) : toujours doublées d'un mot, jamais la couleur seule. */
   --s1: #4c9be8;
   --s2: #b07ce8;
   --s3: #d99a2b;
+
+  /* ── Identité d'espace : filet sous l'onglet actif, liseré de panneau ──── *
+   * Six teintes désaturées, une par espace de la barre du haut (revue
+   * 2026-09) — jamais un aplat, jamais sur du texte : un repère de
+   * navigation, jamais un état. shell.js pose `body[data-space]`, shell.css
+   * en tire --id-current pour le filet d'onglet et le liseré de panel-head. */
+  --id-piloter: #6f8fae;
+  --id-concevoir: #5ba39a;
+  --id-executer: #b58a5a;
+  --id-observer: #9080b0;
+  --id-memoire: #b5789a;
+  --id-source: #7ea172;
 
   /* ── Colorisation de l'éditeur Source (#280) ──────────────────────────── *
    * Tokens de syntaxe ajoutés par l'IntelliSense déterministe — aucun n'est
@@ -182,9 +214,16 @@
  */
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
-    --bg: #e5e6e2;
-    --e1: #f3f3f0;
-    --bar: #eaeae6;
+    /* Revue 2026-09 (même redressement qu'en sombre, voir :root) : --bg et
+       --bar mesuraient un rapport de 1,06 et --e1/--bar 1,08 — écartés à
+       ~1,28 ici. --e2 reste le seul blanc pur (spec §2.1) et --e3 tenait déjà
+       1,33 sur --e2, donc inchangé. --ink3 est resserré en retour (0,657 →
+       0,566 lum) : la surface la plus sombre qu'il touche encore descend à
+       0,683 (--bg) et exige ce resserrement pour tenir 4,5:1 ; --ink2 avait
+       déjà de la marge (5,3:1 sur --bg) et ne bouge pas. */
+    --bg: #d7d8d4;
+    --e1: #f2f2ef;
+    --bar: #d9d9d5;
     --e2: #ffffff;
     --e3: #dfe0db;
     --term: #1b1f25;
@@ -192,9 +231,10 @@
     --line: rgba(23, 25, 28, 0.13);
     --ink: #17191c;
     --ink2: #4e545c;
-    --ink3: #656a72;
-    --acc: #17191c;
-    --accsoft: rgba(23, 25, 28, 0.07);
+    --ink3: #565a61;
+    /* --acc : même teinte que --s1, voir le commentaire de :root. */
+    --acc: #1f6fbf;
+    --accsoft: rgba(31, 111, 191, 0.12);
     --pri: #d24619;
     --onpri: #ffffff;
     --ok: #1f8a55;
@@ -203,21 +243,27 @@
     --s1: #1f6fbf;
     --s2: #6b48c4;
     --s3: #9a6a08;
-    --syn-key: #1f5fa8;
+    --id-piloter: #4d6f90;
+    --id-concevoir: #3c8177;
+    --id-executer: #93693c;
+    --id-observer: #705f92;
+    --id-memoire: #93597a;
+    --id-source: #5c7f52;
+    --syn-key: #1d599d;
     --syn-string: #0f6b38;
     --syn-tag: #7a3ea3;
     --syn-placeholder: #8f4c08;
-    --syn-path: #106b66;
-    --syn-ident: #785c08;
-    --syn-comment: #5b6169;
+    --syn-path: #0f635e;
+    --syn-ident: #6e5507;
+    --syn-comment: #535960;
     --t-min: 12px;
   }
 }
 
 :root[data-theme="light"] {
-  --bg: #e5e6e2;
-  --e1: #f3f3f0;
-  --bar: #eaeae6;
+  --bg: #d7d8d4;
+  --e1: #f2f2ef;
+  --bar: #d9d9d5;
   --e2: #ffffff;
   --e3: #dfe0db;
   --term: #1b1f25;
@@ -225,9 +271,9 @@
   --line: rgba(23, 25, 28, 0.13);
   --ink: #17191c;
   --ink2: #4e545c;
-  --ink3: #656a72;
-  --acc: #17191c;
-  --accsoft: rgba(23, 25, 28, 0.07);
+  --ink3: #565a61;
+  --acc: #1f6fbf;
+  --accsoft: rgba(31, 111, 191, 0.12);
   --pri: #d24619;
   --onpri: #ffffff;
   --ok: #1f8a55;
@@ -236,12 +282,18 @@
   --s1: #1f6fbf;
   --s2: #6b48c4;
   --s3: #9a6a08;
-  --syn-key: #1f5fa8;
+  --id-piloter: #4d6f90;
+  --id-concevoir: #3c8177;
+  --id-executer: #93693c;
+  --id-observer: #705f92;
+  --id-memoire: #93597a;
+  --id-source: #5c7f52;
+  --syn-key: #1d599d;
   --syn-string: #0f6b38;
   --syn-tag: #7a3ea3;
   --syn-placeholder: #8f4c08;
-  --syn-path: #106b66;
-  --syn-ident: #785c08;
-  --syn-comment: #5b6169;
+  --syn-path: #0f635e;
+  --syn-ident: #6e5507;
+  --syn-comment: #535960;
   --t-min: 12px;
 }
