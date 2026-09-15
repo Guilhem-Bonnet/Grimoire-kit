@@ -640,6 +640,48 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             "mutation": is_mutation,
         })
 
+    def do_PUT(self) -> None:  # http.server contract
+        """``PUT /api/blueprints/<id>`` — enregistrer un blueprint (issue #535).
+
+        Absente jusqu'ici : ``_CockpitHandler`` ne définissait aucun ``do_PUT``,
+        donc ``http.server`` répondait 501 (méthode non gérée) avant même
+        d'atteindre une garde — y compris sur l'atelier (``grimoire serve``,
+        ``readOnly: false``), qui délègue à ce même handler depuis #351. Le
+        bouton « Enregistrer » de Concevoir (``ctx.api.blueprintPut``) restait
+        donc sans effet réel sur le seul serveur qui tourne aujourd'hui, quel
+        que soit le câblage côté client. Même garde que ``/api/setup``
+        ci-dessus : seul le projet de lancement direct (``_HOME_SLUG``)
+        accepte l'écriture — un projet du registre qu'on ne fait que regarder
+        via le cockpit reste en lecture seule, comme le reste de la vue de
+        travail (#356).
+        """
+        path = urlparse(self.path).path
+        if not self._local_only():
+            return
+        if not path.startswith("/api/blueprints/"):
+            self._send_json(404, {"ok": False, "error": "route inconnue"})
+            return
+        if not self._is_home_request():
+            self._send_json(403, {"ok": False, "error": "hôte en lecture seule"})
+            return
+        proot = _resolve_project_path(self._query_slug() or None)
+        if proot is None or not proot.is_dir():
+            self._send_json(404, {"ok": False, "error": "projet inconnu"})
+            return
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length) or b"{}") if length else {}
+        except (ValueError, json.JSONDecodeError):
+            self._send_json(400, {"ok": False, "error": "bad json"})
+            return
+        bp_id = path.rsplit("/", 1)[1]
+        try:
+            result = _project_api(proot).blueprint_put(bp_id, body)
+        except ValueError as exc:
+            self._send_json(400, {"ok": False, "error": str(exc)})
+            return
+        self._send_json(200, result)
+
 
 # ── Commands ──────────────────────────────────────────────────────────────────
 

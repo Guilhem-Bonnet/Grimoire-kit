@@ -97,6 +97,45 @@ class TestForgeAPI:
         with pytest.raises(ValueError, match="invalide"):
             api.blueprint_get("../evil")
 
+    # ── Écriture (issue #535) ────────────────────────────────────────────
+    #
+    # Avant correctif : un corps structurellement invalide levait une
+    # `AttributeError` non rattrapée par `do_PUT` (`except (ValueError,
+    # json.JSONDecodeError)`) — un 500 au lieu d'un refus explicite.
+
+    @pytest.mark.parametrize(
+        "bad_body",
+        [
+            None,
+            [],
+            "not-a-dict",
+            {"nodes": "not-a-list", "edges": []},
+            {"nodes": [{"id": "a"}, "not-a-dict"], "edges": []},
+            {"nodes": [], "edges": "not-a-list"},
+        ],
+    )
+    def test_blueprint_put_refuses_a_structurally_invalid_body(
+        self, api: ForgeAPI, bad_body: object
+    ) -> None:
+        with pytest.raises(ValueError, match="invalide"):
+            api.blueprint_put("badtest", bad_body)  # type: ignore[arg-type]
+
+    def test_blueprint_put_accepts_an_incomplete_draft_node(self, api: ForgeAPI) -> None:
+        """Concevoir enregistre un nœud tout juste ajouté (`ref` vide, « à
+        compléter dans Propriétés ») — la garde structurelle ne doit jamais
+        refuser ce brouillon légitime, seulement les corps qui ne sont pas
+        des listes d'objets."""
+        draft = {
+            "nodes": [
+                {"id": "pattern-1", "kind": "pattern", "ref": "", "role": "Unit",
+                 "label": "Nouveau nœud (pattern)", "description": "", "pins": []},
+            ],
+            "edges": [],
+        }
+        result = api.blueprint_put("draft", draft)
+        assert result["saved"] == "draft"
+        assert api.blueprint_get("draft")["nodes"] == draft["nodes"]
+
 
 def make_node(node_id: str, ref: str, out_contract: str = "task-envelope") -> dict:
     return {
@@ -214,6 +253,23 @@ class TestHTTP:
         with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
             assert json.loads(resp.read())["saved"] == "http-demo"
         assert self._get(base_url + "/api/blueprints/http-demo")["id"] == "http-demo"
+
+    def test_blueprint_put_refuses_a_structurally_invalid_body_with_400(
+        self, base_url: str
+    ) -> None:
+        """Issue #535 : avant correctif, `nodes` non-liste levait une
+        `AttributeError` que `do_PUT` ne rattrape pas — un 500, pas un refus
+        explicite. `blueprint_put` garde désormais la forme avant d'écrire."""
+        payload = json.dumps({"nodes": "not-a-list", "edges": []}).encode()
+        req = urllib.request.Request(  # noqa: S310 - serveur de test local
+            base_url + "/api/blueprints/http-bad",
+            data=payload,
+            method="PUT",
+            headers={"Content-Type": "application/json"},
+        )
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            urllib.request.urlopen(req, timeout=5)  # noqa: S310
+        assert exc.value.code == 400
 
     def test_static_without_ui_returns_hint(self, base_url: str) -> None:
         assert self._get(base_url + "/")["grimoire"] == "serve"

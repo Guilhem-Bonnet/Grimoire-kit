@@ -422,6 +422,22 @@ class ForgeAPI:
         return diff_against_ref(self.project_root, self._blueprint_path(bp_id), ref)
 
     def blueprint_put(self, bp_id: str, blueprint: dict[str, Any]) -> dict[str, Any]:
+        """Écrit *blueprint* tel quel — le lint (`blueprint_lint`) est
+        informatif, jamais bloquant : Concevoir enregistre des brouillons
+        incomplets à dessein (un nœud tout juste ajouté a un ``ref`` vide,
+        « à compléter dans Propriétés », issue #535) ; une validation stricte
+        contre le schéma v1 (``ref`` typé, pins déclarées…) refuserait
+        exactement ce cas d'usage. Cette garde reste structurelle : un corps
+        qui n'est pas un objet JSON, ou dont ``nodes``/``edges`` ne sont pas
+        des listes d'objets, plantait avant (``AttributeError`` non rattrapée
+        par le transport → 500) au lieu d'un 400 explicite.
+        """
+        if not isinstance(blueprint, dict):
+            raise ValueError("blueprint invalide : un objet JSON est attendu")
+        for key in ("nodes", "edges"):
+            value = blueprint.get(key, [])
+            if not isinstance(value, list) or not all(isinstance(item, dict) for item in value):
+                raise ValueError(f"blueprint invalide : {key!r} doit être une liste d'objets")
         lint = self.blueprint_lint(blueprint)
         path = self._blueprint_path(bp_id)
         path.parent.mkdir(parents=True, exist_ok=True)

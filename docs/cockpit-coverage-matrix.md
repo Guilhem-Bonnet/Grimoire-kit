@@ -41,13 +41,13 @@ n'existent pas dans le cockpit (case vide légitime, pas un oubli).
 |---|---:|---:|---:|
 | Coque (shell.js) | 32 | 26 | 81% |
 | Piloter | 35 | 19 | 54% |
-| Concevoir | 21 | 11 | 52% |
+| Concevoir | 23 | 14 | 61% |
 | Executer | 16 | 10 | 62% |
 | Observer | 10 | 7 | 70% |
 | Mémoire | 9 | 4 | 44% |
 | Source | 17 | 15 | 88% |
-| Routes API | 24 | 15 | 62% |
-| **TOTAL** | **164** | **107** | **65%** |
+| Routes API | 25 | 16 | 64% |
+| **TOTAL** | **167** | **111** | **66%** |
 <!-- END:cockpit-coverage-summary -->
 
 *(régénéré par `python scripts/cockpit-coverage.py` — recopier sa sortie ici après toute modification des tables ci-dessous ; la CI de PR 1 le vérifie via `--check`.)*
@@ -63,7 +63,12 @@ n'existent pas dans le cockpit (case vide légitime, pas un oubli).
 - **#535** — dans Concevoir, `addNode()` (`concevoir.js:625`) n'écrit que `state.blueprint` en
   mémoire puis journalise « nœud ajouté » dans le dock : aucun appel d'écriture
   (`blueprintPut` n'existe même pas côté client, commentaire `concevoir.js:284`). Le nœud disparaît
-  au rechargement malgré le message de succès affiché.
+  au rechargement malgré le message de succès affiché. **Corrigé par #535** : indicateur « modifié,
+  non enregistré » dans la barre d'outils, bouton « Enregistrer » qui appelle `blueprintPut`
+  (`PUT /api/blueprints/<id>`, déjà servi côté serveur — jamais d'écriture automatique), confirmation
+  avant de rouvrir un blueprint modifié (même mécanisme que Source). `blueprint_put` gagne au passage
+  une garde structurelle : un corps invalide (`nodes` non-liste…) levait une `AttributeError` non
+  rattrapée (500) au lieu d'un refus explicite (400).
 
 ### Espace : Coque (shell.js)
 
@@ -157,13 +162,15 @@ n'existent pas dans le cockpit (case vide légitime, pas un oubli).
 | Simuler (bouton) | `.btn` « Simuler » | `runSimulate` | `POST /api/blueprints/<id>/simulate` | résultat simulation | — | non |
 | Compiler (bouton) | `.btn` « Compiler » | `runCompile` | `POST /api/blueprints/<id>/compile` (atelier seul) | artefact nommé / refus si cockpit | — | non |
 | Bibliothèque (rail 2 / bouton toolbar) | `.rail-btn`/`btnLib` | ouvre/ferme `state.paletteOpen` | `GET /api/primitives` | 7 primitives listées | `test_la_bibliotheque_de_noeuds_liste_les_sept_primitives`, `test_le_raccourci_2_du_rail_ouvre_la_bibliotheque_de_noeuds` | oui |
-| Primitive de la Bibliothèque (clic) | `.cv-prim` | `addNode(name)` | **aucune écriture (bug #535)** | nœud ajouté en mémoire, jamais persisté | — | non |
+| Primitive de la Bibliothèque (clic) | `.cv-prim` | `addNode(name)` | `PUT /api/blueprints/<id>` via le bouton « Enregistrer » (corrigé par #535 — n'écrit plus automatiquement) | nœud ajouté au brouillon, indicateur « modifié », persiste après « Enregistrer » + rechargement | `test_ajouter_un_noeud_affiche_modifie_non_enregistre`, `test_enregistrer_apres_ajout_de_noeud_persiste_apres_rechargement` | oui |
+| Enregistrer (bouton toolbar, nouveau — #535) | `.cv-toolbar button` « Enregistrer » | `saveBlueprint()` | `PUT /api/blueprints/<id>` | désactivé sans modification, écrit et retire l'indicateur « modifié » | `test_enregistrer_apres_ajout_de_noeud_persiste_apres_rechargement` | oui |
+| Changer de blueprint avec modifications non enregistrées (nouveau — #535) | `.cv-card` double-clic | `zoomToWorkflow(id)` | — | confirmation avant d'écraser le brouillon (même mécanisme que Source) | `test_changer_de_blueprint_avec_des_modifications_non_enregistrees_demande_confirmation` | oui |
 | Nœud du graphe (clic) | `.node`/box | `selectedNodeId = id` | — | sélection + 4 onglets inspecteur | `test_le_niveau_noeud_montre_un_inspecteur_a_quatre_onglets` | oui |
 | Nœud du graphe (double-clic) | idem | `zoomToNode(id)` | — | zoom niveau Nœud | — | non |
 | Nœud du graphe (clavier `Enter`) | idem | idem | — | équivalent clavier | — | non |
 | Onglet nœud (4 onglets) | `.tab` inspecteur nœud | change `_cvTab` | — | contenu change par onglet | `test_les_quatre_onglets_du_noeud_changent_le_contenu_affiche` | oui |
 | Aucun texte sous le plancher sombre | — | — | — | contraste/tailles du graphe | `test_aucun_texte_du_graphe_sous_le_plancher_dark` | oui |
-| Rail « Preuves » depuis Concevoir | `.rail-btn[data-panel=evidence]` | — | — | **aucun handler enregistré (bug #534)** | — | non |
+| Rail « Preuves » depuis Concevoir | `.rail-btn[data-panel=evidence]` | `togglePanel('evidence')`, tenu par la coque (corrigé par #534 : plus un contrôle propre à Concevoir, voir section Coque) | `GET /api/workspace/evidence` | identique quel que soit l'espace actif | — (couvert depuis Piloter, section Coque ; pas retesté par espace) | non |
 | Zoom Flotte/Projet/Workflow/Nœud | `#zoom-seg button` | `setZoom` | — | 3-4 niveaux selon hôte | — | non |
 | Trois vues au niveau Projet | `#view-seg` | — | — | présence des 3 vues | `test_les_trois_vues_sont_proposees_au_niveau_projet` | oui |
 | Blueprint réel s'ouvre | — | `mount` | `GET /api/workspace/blueprints` | rend un blueprint réel, jamais démo | `test_concevoir_s_ouvre_sur_le_blueprint_reel_du_projet` | oui |
@@ -255,6 +262,7 @@ n'existent pas dans le cockpit (case vide légitime, pas un oubli).
 | POST /api/workspace/* (garde) | cmd_cockpit.py:494 | 403 hors home, **sauf** `proposals/<slug>/{accept,reject}` (issue #490, `is_proposal_decision`) | — | `test_the_write_guard_refuses_a_foreign_host_exactly_like_update`, `test_other_workspace_writes_stay_home_only` | oui |
 | POST /api/blueprints/<id>/validate / simulate | cmd_cockpit.py:534 | 200/400/404 ; `ValueError` d'id malformé non catché ici | erreurs/avertissements dans un 200 | `test_valider_ecrit_le_verdict_dans_le_dock_problemes` | oui |
 | POST /api/blueprints/<id>/compile | forge (atelier only) | — | — | — | non |
+| PUT /api/blueprints/<id> (nouveau — #535, atelier only) | forge_http.py `do_PUT`, `forge_server.py::blueprint_put` | 200 (même corps incomplet — brouillon) ; 400 sur corps structurellement invalide (avant #535 : `AttributeError` non rattrapée → 500) | brouillon `ref` vide accepté, lint informatif jamais bloquant | `test_blueprint_put_then_get`, `test_blueprint_put_refuses_a_structurally_invalid_body_with_400`, `test_blueprint_put_accepts_an_incomplete_draft_node` | oui |
 | POST /api/memory | cmd_cockpit.py:569 | 200/400/403/504 | mutation sans confirm → 403 | — | non |
 | GET catch-all /api/* | cmd_cockpit.py:302 | 404 | — | `tests/unit/test_workspace_routes.py::test_une_route_inconnue_sous_le_prefixe_reste_un_404` | oui |
 | GET /api/status, /api/setup, /api/archetypes, /api/needs, /api/setup/run, /api/extensions, /api/blueprints, /api/events/log, /api/stigmergy, /api/features, /api/cost-model, /api/otel, /api/primitives, /api/backends, /api/memory/status, /api/health | forge_routes.py (inchangé depuis 3.49.0, vérifié par diff) | 200 quasi toujours (repli interne documenté par module) | vides/partiels documentés par route (voir `forge_server.py`) | `tests/unit/test_workspace_api.py` (couverture large, non ligne-à-ligne ici) | oui |
