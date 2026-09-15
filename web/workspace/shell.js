@@ -57,7 +57,7 @@ const DOCK_TABS = [
   { id: 'problemes', label: 'Problèmes', term: 'probleme' },
 ];
 
-const PANELS = { explorer: 'panel-explorer', inspector: 'panel-inspector' };
+const PANELS = { explorer: 'panel-explorer', inspector: 'panel-inspector', evidence: 'panel-evidence' };
 
 const $ = (id) => document.getElementById(id);
 const root = document.documentElement;
@@ -126,6 +126,13 @@ function panelState(id) {
   return el ? el.dataset.state : 'collapsed';
 }
 
+// Contenu propre à un panneau, chargé quand il s'ouvre (peek ou pinned) —
+// jamais quand il se referme. Un seul point d'accroche pour toute la coque :
+// `setPanel` est appelé depuis quatre chemins différents (clic, survol,
+// ⌘/Ctrl-clic, restauration par espace) et le panneau des Preuves (#534) doit
+// se rafraîchir depuis chacun sans dupliquer la condition dans les quatre.
+const PANEL_ON_OPEN = {};
+
 function setPanel(id, state) {
   const el = $(PANELS[id]);
   if (!el) return;
@@ -135,6 +142,7 @@ function setPanel(id, state) {
   const button = document.querySelector(`.rail-btn[data-panel="${id}"]`);
   if (button) button.setAttribute('aria-pressed', String(state !== 'collapsed'));
   writeState({ [panelKey('panel', id)]: state });
+  if (state !== 'collapsed') PANEL_ON_OPEN[id]?.();
 }
 
 function togglePanel(id) {
@@ -169,9 +177,105 @@ function restorePanelsForSpace() {
   const fallback = defaultPanelState();
   setPanel('explorer', saved[panelKey('panel', 'explorer')] || fallback);
   setPanel('inspector', saved[panelKey('panel', 'inspector')] || fallback);
+  // Preuves (#534) : jamais ouvert par défaut (ce n'est pas un des « deux
+  // panneaux utiles » que la densité Découverte réépingle) — seulement s'il
+  // a été explicitement ouvert dans cet espace, pour ce projet, auparavant.
+  setPanel('evidence', saved[panelKey('panel', 'evidence')] || 'collapsed');
   setDock(saved[panelKey('panel', 'dock')] || 'pinned');
   restoreWidth('explorer');
   restoreWidth('inspector');
+  restoreWidth('evidence');
+}
+
+// ── Panneau « Preuves » (rail « 3 », touche 3) ──────────────────────────────
+//
+// Possédé par la coque, pas par un espace (contrairement à « 2 »/bibliothèque,
+// propre à Concevoir) : le rail promettait « Preuves » sur les six espaces,
+// mais aucun ne l'enregistrait — bouton et raccourci restaient sans effet
+// (#534). Liste les tâches du standard gouverné (`_grimoire/standard/
+// task-board.yaml`), l'état de leurs gates et le chemin de leur pack ;
+// jamais une relecture parallèle des fichiers, seulement
+// `GET /api/workspace/evidence`, qui rejoue les mêmes fonctions que
+// `grimoire standard verify`/`grimoire_standard_gate`.
+let evidenceRequest = 0;
+
+async function loadEvidencePanel() {
+  const body = $('evidence-body');
+  const requestId = ++evidenceRequest;
+  body.replaceChildren(mk('p', { class: 'ev-msg' }, 'Chargement…'));
+  let payload;
+  try {
+    payload = await api.evidence();
+  } catch (error) {
+    if (requestId !== evidenceRequest) return;
+    body.replaceChildren(empty('Preuves indisponibles', error.message, 'grimoire standard doctor'));
+    return;
+  }
+  if (requestId !== evidenceRequest) return;
+  renderEvidencePanel(body, payload);
+}
+
+function renderEvidencePanel(body, payload) {
+  body.replaceChildren();
+  if (!payload.enrolled) {
+    body.append(empty(
+      'Preuves',
+      "Ce projet n'a pas encore de standard agentique : aucune tâche, aucune enveloppe, aucun gate à montrer.",
+      'grimoire standard init',
+    ));
+    return;
+  }
+  if (!payload.tasks || !payload.tasks.length) {
+    body.append(empty(
+      'Preuves',
+      'Le standard est initialisé mais le board ne porte encore aucune tâche.',
+      'grimoire standard init',
+    ));
+    return;
+  }
+  for (const task of payload.tasks) {
+    const cls = task.gates.ok ? 'ok' : (task.gates.missing.length ? 'bad' : 'warn');
+    const text = task.gates.ok
+      ? 'validé'
+      : (task.gates.missing.length ? `${task.gates.missing.length} manquant(s)` : 'avertissement');
+    const row = mk(
+      'button',
+      { type: 'button', class: 'ev-row' },
+      mk('span', { class: `dot ${cls}` }),
+      mk('span', { class: 'ev-id mono', text: task.task_id }),
+      mk('span', { class: 'ev-title', text: task.title || task.status || '' }),
+      mk('span', { class: 'grow' }),
+      mk('span', { class: `chip pill ${cls}`, text }),
+    );
+    row.title = task.pack_exists
+      ? task.pack_path
+      : `${task.pack_path} (pas encore écrit)`;
+    row.addEventListener('click', () => goto('source', { file: task.pack_path }));
+    body.append(row);
+  }
+}
+
+PANEL_ON_OPEN.evidence = loadEvidencePanel;
+
+/** Petit constructeur DOM local — shell.js n'importe rien de `spaces/*.js`
+ * (README : aucun espace ne touche le DOM d'un autre, et ça vaut à l'envers).
+ * Nommé `mk` (pas `el`) : plusieurs fonctions du fichier ont déjà une
+ * variable locale `el` pour l'élément d'un panneau — même nom, même fichier,
+ * aurait masqué l'une des deux à chaque lecture.
+ * `mk(tag, attrs, ...children)` : `attrs.text` pose `textContent`, le reste
+ * pose des attributs ; `null`/`undefined` parmi les enfants est ignoré. */
+function mk(tag, attrs, ...children) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(attrs || {})) {
+    if (key === 'text') node.textContent = value;
+    else if (key === 'class') node.className = value;
+    else node.setAttribute(key, value);
+  }
+  for (const child of children) {
+    if (child == null) continue;
+    node.append(child);
+  }
+  return node;
 }
 
 function buildRail() {

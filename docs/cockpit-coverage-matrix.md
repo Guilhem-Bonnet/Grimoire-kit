@@ -39,15 +39,15 @@ n'existent pas dans le cockpit (case vide légitime, pas un oubli).
 <!-- BEGIN:cockpit-coverage-summary -->
 | Section | Lignes | Couvertes | % |
 |---|---:|---:|---:|
-| Coque (shell.js) | 32 | 25 | 78% |
+| Coque (shell.js) | 32 | 26 | 81% |
 | Piloter | 35 | 19 | 54% |
 | Concevoir | 21 | 11 | 52% |
 | Executer | 16 | 10 | 62% |
 | Observer | 10 | 7 | 70% |
 | Mémoire | 9 | 4 | 44% |
 | Source | 17 | 15 | 88% |
-| Routes API | 23 | 14 | 61% |
-| **TOTAL** | **163** | **105** | **64%** |
+| Routes API | 24 | 15 | 62% |
+| **TOTAL** | **164** | **107** | **65%** |
 <!-- END:cockpit-coverage-summary -->
 
 *(régénéré par `python scripts/cockpit-coverage.py` — recopier sa sortie ici après toute modification des tables ci-dessous ; la CI de PR 1 le vérifie via `--check`.)*
@@ -57,7 +57,9 @@ n'existent pas dans le cockpit (case vide légitime, pas un oubli).
 - **#534** — le bouton de rail « Preuves » (touche `3`, `triggerRailAction('evidence')`,
   `shell.js:454`) n'est enregistré par aucun espace (`ctx.rail.on('evidence', …)` : zéro occurrence
   sous `web/workspace/spaces/*.js`, seul `library` l'est, dans `concevoir.js:295`). Clic ou touche
-  `3` : aucun effet, aucune erreur.
+  `3` : aucun effet, aucune erreur. **Corrigé par PR #539** : `evidence` rejoint `PANELS` (tenu par
+  la coque, comme Explorateur/Inspecteur, jamais par un espace), nouveau panneau alimenté par
+  `GET /api/workspace/evidence`.
 - **#535** — dans Concevoir, `addNode()` (`concevoir.js:625`) n'écrit que `state.blueprint` en
   mémoire puis journalise « nœud ajouté » dans le dock : aucun appel d'écriture
   (`blueprintPut` n'existe même pas côté client, commentaire `concevoir.js:284`). Le nœud disparaît
@@ -78,7 +80,7 @@ n'existent pas dans le cockpit (case vide légitime, pas un oubli).
 | Poignée de redimension | `.panel-resize` | drag largeur panneau | aucune | largeur augmente | `test_la_poignee_redimensionne_le_panneau_epingle` | oui |
 | Raccourci panneau `1`/`4` | `document keydown` | `togglePanel(id)` | aucune | bascule explorer/inspector | `test_les_raccourcis_de_panneau_basculent` | oui |
 | Raccourci panneau `2` (bibliothèque) | `document keydown` | `triggerRailAction('library')` | aucune | délégué à Concevoir seul | `test_le_raccourci_2_du_rail_ouvre_la_bibliotheque_de_noeuds` | oui |
-| Raccourci panneau `3` (preuves) | `document keydown` | `triggerRailAction('evidence')` | aucune | **aucun effet — bug #534** | — | non |
+| Raccourci panneau `3` (preuves) | `document keydown` | `togglePanel('evidence')` (`evidence` a rejoint `PANELS`, corrigé par #534/PR #539) | `GET /api/workspace/evidence` | ouvre le panneau Preuves, tenu par la coque comme Explorateur/Inspecteur | `test_le_raccourci_3_ouvre_les_preuves_depuis_l_espace_par_defaut` | oui |
 | Raccourci panneau `5` (dock) | `document keydown` | bascule `#dock` pinned/collapsed | aucune | bascule | — | non |
 | Raccourci backtick `` ` `` | `document keydown` | `selectDockTab('console')` + pin | aucune | ouvre le dock sur Console | — | non |
 | Mode concentration `⇧⌘F` | `document keydown` | `toggleFocus()` | aucune | replie tout, toile plein écran | `test_le_mode_concentration_replie_tout` | oui |
@@ -262,6 +264,7 @@ n'existent pas dans le cockpit (case vide légitime, pas un oubli).
 | GET /api/workspace/tasks | workspace_routes.py | 200 (collapse 500 si erreur) | `ledger:false`, filtré par mission/statut | `test_un_projet_sans_ledger_le_dit_au_lieu_de_rendre_un_board_vide` | oui |
 | GET /api/workspace/tasks/<id> | workspace_routes.py | 200/500 (id malformé, tâche inconnue) | `next_moves_require` | `test_une_tache_inconnue_est_un_404_pas_un_500` (nom du test contredit le code actuel — à vérifier en priorité, cf. Lot B) | non |
 | GET /api/workspace/flows/runs | workspace_routes.py (nouvelle route, issue #506) | 200 | filtrée par `blueprint` | `test_observer_montre_le_run_de_flow_meme_traceledger_vide` | oui |
+| GET /api/workspace/evidence | workspace_routes.py (nouvelle route, issue #534) | 200 | `enrolled:false` sans standard, sinon tâches + gates + pack par tâche du board | `test_le_standard_enrole_liste_ses_taches_avec_gates_et_pack`, `test_un_projet_sans_standard_le_dit_au_lieu_de_rendre_un_board_vide` | oui |
 | GET /api/workspace/agents | workspace_routes.py | 200/500 (`collect_agents` en erreur → 500 réel) | `freshness` par agent | `test_lire_les_agents_a_travers_le_cockpit` | oui |
 | POST /api/workspace/proposals/<slug>/accept | workspace_routes.py → proposals.py | 200 toujours (jamais d'exception) | 6 `artifact_type` distincts (agent/skill/override-migration/memory-link/needs-hosts/repair) | agent : `test_lister_accepter_et_refuser_une_proposition` ; les 5 autres : `tests/unit/test_project_upgrade.py` (moteur, pas la route HTTP) | non |
 | POST /api/workspace/proposals/<slug>/reject | workspace_routes.py → proposals.py | 200 toujours | déjà acceptée → `ok:false` sans erreur HTTP | `test_reject_marks_without_writing_an_artifact` | oui |

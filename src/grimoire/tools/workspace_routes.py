@@ -174,6 +174,16 @@ def _memory_overview(project_root: Path, query: _Query) -> Any:
     return workspace_memory.memory_overview(project_root, _one(query, "projects"))
 
 
+def _evidence(project_root: Path, _query: _Query) -> Any:
+    """``GET /api/workspace/evidence`` — le panneau « Preuves » du rail (#534).
+
+    Lecture pure du board du standard (``check_evidence_gates`` par tâche) :
+    jamais d'écriture, jamais une relecture parallèle des artefacts que le
+    standard sait déjà lire lui-même.
+    """
+    return workspace_api.evidence_view(project_root)
+
+
 def _memory_search(project_root: Path, query: _Query) -> Any:
     """``GET /api/workspace/memory/search`` — recherche croisée en lecture
     seule (#172), même chaîne que ``grimoire memory search`` par projet
@@ -234,6 +244,7 @@ GET_ROUTES: dict[str, _GetHandler] = {
     f"{PREFIX}blueprints": _blueprints,
     f"{PREFIX}agents": _agents,
     f"{PREFIX}proposals": _proposals,
+    f"{PREFIX}evidence": _evidence,
     f"{PREFIX}flows/runs": _flow_runs,
     f"{PREFIX}memory/overview": _memory_overview,
     f"{PREFIX}memory/search": _memory_search,

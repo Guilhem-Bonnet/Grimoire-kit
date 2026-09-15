@@ -1576,6 +1576,23 @@ def check_evidence_gates(
     return StandardGateResult(ok=ok, task_id=normalized_task_id, profile=profile.id, state=state or None, missing=tuple(missing), checks=tuple(checks))
 
 
+def list_board_tasks(project_root: Path) -> list[dict[str, Any]]:
+    """Every task on ``task-board.yaml``, verbatim.
+
+    :func:`check_evidence_gates` and :func:`task_from_board` both answer for
+    one task at a time — the natural shape for a hook or a CLI flag. A
+    surface that shows every task at once (the workspace's Preuves panel,
+    issue #534) needs the raw list instead; this is that one extra read, kept
+    here rather than reimplemented by each caller against the same YAML.
+    """
+    root = project_root.resolve()
+    board = _read_yaml_mapping(root, STANDARD_DIR / "task-board.yaml")
+    tasks = board.get("tasks", [])
+    if not isinstance(tasks, list):
+        return []
+    return [task for task in tasks if isinstance(task, dict)]
+
+
 def audit_runtime_events(project_root: Path) -> dict[str, Any]:
     """Audit the standard runtime event journal."""
     root = project_root.resolve()

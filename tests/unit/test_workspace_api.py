@@ -197,14 +197,67 @@ def test_le_rappel_d_une_tache_inconnue_est_un_404_pas_un_500(real_project: Path
         workspace_get(real_project, "/api/workspace/tasks/GAO-inexistante-999/recall", {})
 
 
+# ── Preuves (#534) ───────────────────────────────────────────────────────────
+#
+# Le panneau « Preuves » du rail (touche 3) n'avait aucun espace pour
+# l'enregistrer : le bouton et le raccourci ne faisaient rien. `evidence_view`
+# est la lecture qui l'alimente — jamais une relecture parallèle des fichiers
+# du standard, la même que `check_evidence_gates` (`grimoire standard verify`).
+
+
+def test_un_projet_sans_standard_le_dit_au_lieu_de_rendre_un_board_vide(
+    tmp_path: Path,
+) -> None:
+    """Sans `grimoire standard init`, le panneau doit nommer la commande, pas
+    rendre une liste vide qui ressemblerait à une panne."""
+    payload = wa.evidence_view(tmp_path)
+
+    assert payload["enrolled"] is False
+    assert payload["tasks"] == []
+    assert "standard init" in payload["note"]
+
+
+def test_le_standard_enrole_liste_ses_taches_avec_gates_et_pack(
+    governed_project: Path,
+) -> None:
+    """`governed_project` est enrôlé `governed` : la tâche `bootstrap` du
+    board généré par `standard init` doit apparaître, gates inclus."""
+    payload = wa.evidence_view(governed_project)
+
+    assert payload["enrolled"] is True
+    assert payload["profile"] == "governed"
+    task = next(t for t in payload["tasks"] if t["task_id"] == "bootstrap")
+    assert task["status"] == "proposed"
+    assert task["gates"]["ok"] is True, "aucun gate n'est dû à l'état 'proposed'"
+    assert task["gates"]["missing"] == []
+    assert task["pack_path"] == "_grimoire-output/evidence/bootstrap/evidence-pack.md"
+    assert task["pack_exists"] is True, "`standard init` écrit déjà le gabarit du pack"
+
+
+def test_le_pack_d_une_tache_s_ouvre_par_la_meme_vue_source_que_le_reste(
+    governed_project: Path,
+) -> None:
+    """« Clic sur une tâche → ouvre le pack dans Source » (#534) : le pack
+    doit appartenir à un étage de la vue Source, comme tout fichier qu'elle
+    sait ouvrir — sinon `file_view` le refuse (403) plutôt que l'afficher."""
+    payload = wa.evidence_view(governed_project)
+    pack_path = payload["tasks"][0]["pack_path"]
+
+    view = wa.file_view(governed_project, pack_path)
+
+    assert view["tier"] == "evidence"
+    assert view["editable"] is False, "un pack de preuve ne s'édite pas depuis Source"
+    assert view["text"], "le gabarit écrit par `standard init` se lit"
+
+
 # ── Fichiers par étage ──────────────────────────────────────────────────────
 
 
-def test_les_trois_etages_sont_toujours_rendus_meme_vides(real_project: Path) -> None:
+def test_les_quatre_etages_sont_toujours_rendus_meme_vides(real_project: Path) -> None:
     """« Ce projet n'a pas d'override » est une information, pas une section absente."""
     tree = wa.files_view(real_project)
 
-    assert [t["id"] for t in tree["tiers"]] == ["overrides", "kit", "projections"]
+    assert [t["id"] for t in tree["tiers"]] == ["overrides", "kit", "projections", "evidence"]
     kit = next(t for t in tree["tiers"] if t["id"] == "kit")
     assert kit["exists"] and kit["count"] > 0
     assert kit["editable"] is False, "éditer l'étage kit serait perdu à la mise à jour"

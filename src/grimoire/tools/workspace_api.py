@@ -108,6 +108,19 @@ TIERS: tuple[dict[str, Any], ...] = (
         "roots": (".claude", ".github"),
         "editable": False,
     },
+    {
+        # Ajouté pour #534 : le panneau « Preuves » du rail ouvre le pack
+        # d'une tâche dans Source (« ouvre le pack dans Source à la bonne
+        # ligne ») — sans cet étage, ``file_view`` refuse tout chemin sous
+        # ``_grimoire-output/evidence`` (``tier_of`` rend ``None``) et le
+        # clic échouerait avec la même erreur que le bouton mort qu'il corrige.
+        "id": "evidence",
+        "term": "evidence-pack",
+        "label": "Preuves",
+        "note": "généré par tâche, jamais écrit à la main",
+        "roots": ("_grimoire-output/evidence",),
+        "editable": False,
+    },
 )
 
 _TIER_BY_ID = {tier["id"]: tier for tier in TIERS}
@@ -255,6 +268,58 @@ def tasks_view(project_root: Path, *, mission: str | None = None, status: str | 
     payload["tasks"] = [_task_json(t) for t in tasks]
     payload["count"] = len(tasks)
     return payload
+
+
+def evidence_view(project_root: Path) -> dict[str, Any]:
+    """Les tâches du standard gouverné, leur enveloppe, leurs gates et leur pack.
+
+    Distinct de :func:`tasks_view` : celle-ci lit le Mission Ledger (des
+    tâches de travail) ; ceci lit ``_grimoire/standard/task-board.yaml`` (le
+    board de conformité du standard agentique) — la même donnée que
+    ``grimoire standard verify``/``grimoire_standard_gate``, jamais une
+    relecture parallèle des fichiers. Sert le panneau « Preuves » du rail
+    (issue #534) : ``enrolled: false`` quand le projet n'a pas encore
+    `grimoire standard init`, sinon une entrée par tâche du board avec l'état
+    de ses gates (:func:`grimoire.core.agentic_standard.check_evidence_gates`)
+    et le chemin de son pack de preuve.
+    """
+    from grimoire.core.agentic_standard import check_evidence_gates, list_board_tasks
+    from grimoire.core.standard_generation import EVIDENCE_DIR, normalize_task_id
+    from grimoire.core.standard_state import active_profile_id, is_standard_enrolled
+
+    root = project_root.resolve()
+    if not is_standard_enrolled(root):
+        return {
+            "enrolled": False,
+            "tasks": [],
+            "note": "aucun standard — `grimoire standard init` en génère un",
+        }
+    profile = active_profile_id(root, write_cache=False)
+    tasks: list[dict[str, Any]] = []
+    for task in list_board_tasks(root):
+        task_id = str(task.get("task_id") or "").strip()
+        if not task_id:
+            continue
+        status = task.get("status")
+        gate = check_evidence_gates(root, task_id=task_id, target_state=status)
+        pack_ref = task.get("evidence_pack_ref")
+        pack_path = Path(pack_ref) if pack_ref else EVIDENCE_DIR / normalize_task_id(task_id) / "evidence-pack.md"
+        tasks.append({
+            "task_id": task_id,
+            "title": task.get("title"),
+            "status": status,
+            "gates": {
+                "ok": gate.ok,
+                "missing": list(gate.missing),
+                "checks": [
+                    {"id": c.id, "severity": c.severity, "message": c.message}
+                    for c in gate.checks
+                ],
+            },
+            "pack_path": str(pack_path),
+            "pack_exists": (root / pack_path).is_file(),
+        })
+    return {"enrolled": True, "profile": profile, "tasks": tasks, "count": len(tasks)}
 
 
 def task_view(project_root: Path, task_id: str) -> dict[str, Any]:

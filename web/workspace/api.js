@@ -165,6 +165,11 @@ export const api = {
   fileUsage: (path) => get(WS + 'file/usage', { path }),
   fileHistory: (path) => get(WS + 'file/history', { path }),
   commands: () => get(WS + 'commands'),
+  // Panneau « Preuves » du rail (#534) : les tâches du standard gouverné,
+  // l'état de leurs gates et le chemin de leur pack — jamais construit ici
+  // depuis les fichiers, toujours la même lecture que `grimoire standard
+  // verify`, côté serveur.
+  evidence: () => get(WS + 'evidence'),
   doctor: (project) => get(WS + 'doctor', project ? { project } : undefined),
   // IntelliSense de l'éditeur Source (#280) : tokens + diagnostics toujours,
   // complétions seulement si `pos` est fourni. `text` porte le brouillon en
