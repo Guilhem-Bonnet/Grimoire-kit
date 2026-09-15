@@ -48,6 +48,14 @@ const DEP_LABEL = {
   blocks: 'bloque', relates: 'lié à', parent_child: 'parent / enfant',
   discovered_from: 'découverte depuis', supersedes: 'remplace',
 };
+// `risk_profile` (grimoire.missions.schemas.RiskProfile) rendait en texte nu
+// dans le méta de carte (revue 2026-09) — aucune couleur alors que c'est une
+// vraie échelle de sévérité (grimoire.missions.board._PRIORITY_BY_RISK :
+// light → low, standard → medium, le reste → high). Point + mot, comme tout
+// le reste des états — jamais la couleur seule.
+const RISK_DOT = {
+  light: 'ok', standard: 'warn', strict: 'bad', security_critical: 'bad', release: 'bad',
+};
 
 function injectStyles() {
   if (document.getElementById(STYLE_ID)) return;
@@ -66,7 +74,7 @@ function injectStyles() {
     .ex-card:hover { background: var(--e2); }
     .ex-card[aria-current="true"] { outline: 2px solid var(--acc); outline-offset: -2px; }
     .ex-card-title { font-size: var(--t-s); font-weight: 500; color: var(--ink); }
-    .ex-card-meta { font-size: var(--t-s); color: var(--ink2); }
+    .ex-card-meta { font-size: var(--t-s); color: var(--ink2); display: flex; align-items: center; gap: 6px; }
     .ex-card-chips { display: flex; flex-wrap: wrap; gap: 4px; }
     .ex-card-next { font-size: var(--t-s); color: var(--ink2); display: flex; justify-content: space-between; align-items: center; gap: 6px; border-top: 1px solid var(--line); padding-top: 6px; }
     .ex-list-wrap { overflow: auto; border: 1px solid var(--line); border-radius: var(--r); }
@@ -124,7 +132,10 @@ function taskCard(task, onSelect) {
   card.addEventListener('keydown', (e) => { if (e.key === 'Enter') onSelect(task.id); });
 
   card.append(text('div', 'ex-card-title', task.title || task.id));
-  card.append(text('div', 'ex-card-meta lbl', [task.owner || 'sans owner', task.type, task.risk_profile].filter(Boolean).join(' · ')));
+  const meta = text('div', 'ex-card-meta lbl', '');
+  if (task.risk_profile) meta.append(dot(RISK_DOT[task.risk_profile] || ''));
+  meta.append(text('span', null, [task.owner || 'sans owner', task.type, task.risk_profile].filter(Boolean).join(' · ')));
+  card.append(meta);
 
   const chips = document.createElement('div');
   chips.className = 'ex-card-chips';

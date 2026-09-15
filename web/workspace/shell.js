@@ -486,6 +486,13 @@ async function goto(id, params) {
   railActions = {};
   restorePanelsForSpace();
   location.hash = '#' + space.id;
+  // Identité d'espace (revue 2026-09) : shell.css en tire --id-current pour
+  // le filet sous l'onglet actif et le liseré des en-têtes de panneau.
+  // `data-active-space`, jamais `data-space` : ce dernier est réservé aux
+  // boutons d'onglet (le sélecteur générique `[data-space]` juste en dessous
+  // les recense pour poser `aria-selected` — poser aussi `data-space` sur
+  // `<body>` le ferait matcher par ce même sélecteur).
+  document.body.dataset.activeSpace = space.id;
   for (const button of document.querySelectorAll('[data-space]')) {
     button.setAttribute('aria-selected', String(button.dataset.space === space.id));
   }

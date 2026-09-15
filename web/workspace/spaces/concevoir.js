@@ -48,6 +48,11 @@ const VIEWS = [
   { id: 'liste', label: 'Liste' },
 ];
 const GENRE_LABEL = { blueprint: 'Blueprint', studio: 'Studio' };
+// Badge de genre (revue 2026-09) : le genre ne portait qu'un mot en texte
+// brut — deux valeurs, deux couleurs de la même famille « série » que le
+// dot de validation (dot+word, jamais la couleur seule). `.dot.sX` vient de
+// shell.css.
+const GENRE_DOT = { blueprint: 's1', studio: 's2' };
 const RANK_COL = 230;
 const RANK_ROW = 118;
 
@@ -90,7 +95,10 @@ function injectStyles() {
     }
     .cv-node:hover { background: var(--e3); }
     .cv-node[aria-selected="true"] { outline: 2px solid var(--acc); outline-offset: 1px; }
-    .cv-node .kind { font-size: var(--t-min); text-transform: uppercase; letter-spacing: .04em; color: var(--ink3); }
+    /* --ink2, pas --ink3 (revue 2026-09) : ce texte se pose aussi sur --e3 au
+       survol (.cv-node:hover juste au-dessus), la surface la plus claire des
+       quatre — seul --ink2 y tient 4,5:1 (voir tokens.css). */
+    .cv-node .kind { font-size: var(--t-min); text-transform: uppercase; letter-spacing: .04em; color: var(--ink2); }
     .cv-node .label { font-size: var(--t-s); color: var(--ink); margin-top: 2px; }
     .cv-node .ref { font-family: var(--mono); font-size: var(--t-min); color: var(--ink2); margin-top: 2px; }
     .cv-node.dim { opacity: .45; }
@@ -107,7 +115,8 @@ function injectStyles() {
       padding: 7px 9px; cursor: pointer; }
     .cv-prim:hover { background: var(--e3); }
     .cv-prim .n { font-size: var(--t-s); color: var(--ink); }
-    .cv-prim .d { font-size: var(--t-min); color: var(--ink3); margin-top: 2px; }
+    /* --ink2, même raison que .cv-node .kind ci-dessus : posé sur --e3 au survol. */
+    .cv-prim .d { font-size: var(--t-min); color: var(--ink2); margin-top: 2px; }
     .cv-noeud { padding: var(--sp-4); display: flex; flex-direction: column; align-items: center; }
     .cv-noeud .cv-graph { width: 100%; min-height: 260px; }
     .cv-tabs { display: flex; border-bottom: 1px solid var(--line); margin-bottom: var(--sp-3); }
@@ -145,6 +154,12 @@ function el(tag, props, ...children) {
 
 function dotWord(level, word) {
   return el('span', { class: 'chip' }, el('span', { class: 'dot' + (level ? ' ' + level : '') }), word);
+}
+
+// Badge de genre — même forme que `dotWord`, sur le vocabulaire des séries
+// plutôt que des états (voir `GENRE_DOT`).
+function genreBadge(genre) {
+  return dotWord(GENRE_DOT[genre] || '', GENRE_LABEL[genre] || genre);
 }
 
 function term(id, label) {
@@ -417,7 +432,7 @@ export async function mount(root, ctx) {
       return;
     }
     const kv = el('dl', { class: 'cv-kv' },
-      el('dt', {}, 'Genre'), el('dd', { text: GENRE_LABEL[container.genre] || container.genre }),
+      el('dt', {}, 'Genre'), el('dd', {}, genreBadge(container.genre)),
       el('dt', {}, term('noeud', 'Nœuds')), el('dd', { text: String(container.nodes) }),
       el('dt', {}, 'Connexions'), el('dd', { text: String(container.edges) }),
       el('dt', {}, term('equipe', 'Équipe')), el('dd', { text: container.team || '—' }),
@@ -483,7 +498,7 @@ export async function mount(root, ctx) {
       'button', { type: 'button', class: 'cv-card', 'data-container-id': container.id, 'aria-selected': String(container.id === state.selectedId) },
       el('h3', { text: container.name }),
       el('div', { class: 'row' }, dotWord(container.validated ? 'ok' : 'warn', container.validated ? 'validé' : 'à valider')),
-      el('span', { class: 'lbl' }, `${GENRE_LABEL[container.genre] || container.genre} · ${container.nodes} nœud(s)`),
+      el('div', { class: 'row' }, genreBadge(container.genre), el('span', { class: 'lbl' }, `${container.nodes} nœud(s)`)),
     );
     card.addEventListener('click', () => selectContainer(container.id));
     card.addEventListener('dblclick', () => zoomToWorkflow(container.id));
@@ -507,7 +522,7 @@ export async function mount(root, ctx) {
       const cards = el('div', { class: 'cv-cards' });
       for (const container of items) cards.append(makeCard(container));
       board.append(el('div', { class: 'cv-board-col' },
-        el('h3', { text: `${GENRE_LABEL[genre] || genre} · ${items.length}` }),
+        el('h3', {}, genreBadge(genre), ` · ${items.length}`),
         cards,
       ));
     }
@@ -526,7 +541,7 @@ export async function mount(root, ctx) {
       const row = el(
         'tr', { 'data-container-id': container.id, 'aria-selected': String(container.id === state.selectedId), tabindex: '0' },
         el('td', { text: container.name }),
-        el('td', { text: GENRE_LABEL[container.genre] || container.genre }),
+        el('td', {}, genreBadge(container.genre)),
         el('td', { text: container.agents.length ? container.agents.join(', ') : '—' }),
         el('td', { text: container.team || '—' }),
         el('td', {}, dotWord(container.validated ? 'ok' : 'warn', container.validated ? 'validé' : 'à valider')),

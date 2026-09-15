@@ -516,10 +516,34 @@ function parseArtifactRef(ref) {
   return { file, line };
 }
 
+// `artifact_type` (grimoire.proposals) porte six valeurs — avant la revue
+// 2026-09, seules trois avaient un libellé et toutes partageaient le même
+// point orange (`dot('warn')`), sans distinction visuelle. `PROPOSAL_TYPE_DOT`
+// répare ça sur le vocabulaire des séries et des états déjà en place —
+// jamais la couleur seule, toujours doublée du libellé ci-dessous.
+const PROPOSAL_TYPE_LABEL = {
+  skill: 'skill',
+  repair: 'réparation',
+  agent: 'agent',
+  'memory-link': 'lien mémoire',
+  'override-migration': 'migration override',
+  'needs-hosts': 'besoins / hôtes',
+};
+const PROPOSAL_TYPE_DOT = {
+  skill: 's2',
+  repair: 'warn',
+  agent: 's1',
+  'memory-link': 'ok',
+  'override-migration': 'bad',
+  'needs-hosts': 's3',
+};
+
 function proposalTypeLabel(p) {
-  if (p.artifact_type === 'skill') return 'skill';
-  if (p.artifact_type === 'repair') return 'réparation';
-  return 'agent';
+  return PROPOSAL_TYPE_LABEL[p.artifact_type] || p.artifact_type || 'agent';
+}
+
+function proposalTypeDot(p) {
+  return PROPOSAL_TYPE_DOT[p.artifact_type] || '';
 }
 
 function proposalFacts(p) {
@@ -572,7 +596,7 @@ function renderProposalsSection(ctx, proposalsPayload, onChanged, slug) {
     const head = document.createElement('div');
     head.className = 'pl-prop-head';
     head.append(
-      dot('warn'),
+      dot(proposalTypeDot(proposal)),
       text('span', 'pl-watch-name', `${proposal.specialty} (${proposalTypeLabel(proposal)})`),
       text('span', 'lbl', proposalFacts(proposal)),
     );
