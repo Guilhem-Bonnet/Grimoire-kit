@@ -225,15 +225,44 @@ function kpiCard(items) {
 }
 
 // ── Niveau Flotte (cockpit) ──────────────────────────────────────────────────
+//
+// Cache mémoire de la Flotte (issue #510 point 5) — chaque affichage relançait
+// `health()` + `memoryStatus()` pour TOUS les projets du registre (34 requêtes
+// pour 17 projets, 20 pour 10, constaté en pilotant neuf projets réels l'un
+// après l'autre depuis le cockpit). Le seul point d'entrée qui fait ce
+// balayage reste `loadFleet` — sélectionner un projet (`onSelect` plus bas)
+// ou revenir sur sa fiche ne touche jamais cette fonction, une seule lecture
+// ciblée (`loadSheet`) suffit. Un cache par slug, 60 s, absorbe les
+// affichages répétés de la Flotte dans une même session (zoom Flotte/Projet
+// va-et-vient) sans jamais mentir plus d'une minute ; `force` (bouton
+// « Rafraîchir la flotte ») et l'invalidation ciblée après une mise à jour
+// (`invalidateFleetCache`, appelé depuis `renderSheet`) restent les deux
+// seules façons de le contourner.
+const FLEET_CACHE_TTL_MS = 60_000;
+const fleetCache = new Map(); // slug -> { at, health, memory }
 
-async function loadFleet(ctx) {
+function invalidateFleetCache(slug) {
+  if (slug) fleetCache.delete(slug);
+  else fleetCache.clear();
+}
+
+async function loadFleet(ctx, { force = false } = {}) {
   const registry = await ctx.api.projects();
   const entries = registry.projects || [];
+  const now = Date.now();
   const settled = await Promise.allSettled(
-    entries.map((entry) => Promise.all([
-      ctx.api.health(entry.slug).catch(() => null),
-      ctx.api.memoryStatus(entry.slug).catch(() => null),
-    ])),
+    entries.map(async (entry) => {
+      const cached = !force ? fleetCache.get(entry.slug) : null;
+      if (cached && now - cached.at < FLEET_CACHE_TTL_MS) {
+        return [cached.health, cached.memory];
+      }
+      const [health, memory] = await Promise.all([
+        ctx.api.health(entry.slug).catch(() => null),
+        ctx.api.memoryStatus(entry.slug).catch(() => null),
+      ]);
+      fleetCache.set(entry.slug, { at: now, health, memory });
+      return [health, memory];
+    }),
   );
   return entries.map((entry, index) => {
     const [health, memory] = settled[index].status === 'fulfilled' ? settled[index].value : [null, null];
@@ -279,10 +308,24 @@ function renderNewProjectSection(ctx, onCreated) {
   return section;
 }
 
-function renderFleet(root, ctx, rows, onSelect) {
+function renderFleet(root, ctx, rows, onSelect, onRefresh) {
   const wrap = document.createElement('div');
   wrap.className = 'pl-wrap';
   wrap.append(renderNewProjectSection(ctx, onSelect));
+
+  if (onRefresh) {
+    const refreshBtn = document.createElement('button');
+    refreshBtn.type = 'button';
+    refreshBtn.className = 'btn';
+    refreshBtn.textContent = 'Rafraîchir la flotte';
+    refreshBtn.title = "Relit health() et memoryStatus() pour chaque projet, sans attendre le cache (60 s).";
+    refreshBtn.addEventListener('click', () => {
+      refreshBtn.disabled = true;
+      refreshBtn.textContent = 'Rafraîchissement…';
+      onRefresh();
+    });
+    wrap.append(refreshBtn);
+  }
 
   // Le cockpit ne scanne jamais le disque (#341) : un registre vide rend une
   // flotte vide, pas une panne. Un tableau muet à zéro lignes se lisait comme
@@ -1349,6 +1392,10 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
         confirmBtn.remove();
         if (result.ok) {
           markKitCheckpointPending(result.runId);
+          // Le prochain retour sur la Flotte servirait sinon la ligne mise
+          // en cache d'avant la mise à jour jusqu'à 60 s (issue #510 point
+          // 5) — ce projet précis doit se relire, pas toute la flotte.
+          invalidateFleetCache(slug || ctx.host.project);
           // Jamais `options.refresh()` ici : il redessine toute la fiche et
           // effacerait ce déroulé à l'instant même où on vient de le montrer
           // (constat terrain, issue #506 — « l'Inspecteur revient
@@ -1484,16 +1531,23 @@ export async function mount(root, ctx) {
     ? [{ id: 'flotte', label: 'Flotte' }, { id: 'projet', label: 'Projet' }]
     : [{ id: 'projet', label: 'Projet' }];
 
-  const draw = async () => {
+  const draw = async ({ forceFleet = false } = {}) => {
     root.replaceChildren();
     ctx.docbar.setBreadcrumb([ctx.host.project || 'flotte', 'Piloter', level === 'flotte' ? 'Flotte' : 'Projet']);
     ctx.docbar.setZoom(zoomLevels, level, (id) => { level = id; draw(); });
 
     if (level === 'flotte') {
       ctx.inspector.replaceChildren(document.createElement('div'));
-      const rows = await loadFleet(ctx);
+      // `forceFleet` ne vient que du bouton « Rafraîchir la flotte » — un
+      // simple retour sur ce niveau (zoom, sélection d'un autre projet puis
+      // retour) sert le cache de `loadFleet` (issue #510 point 5).
+      const rows = await loadFleet(ctx, { force: forceFleet });
       if (ctx.signal.aborted) return;
-      renderFleet(root, ctx, rows, (slug) => { selected = slug; level = 'projet'; draw(); });
+      renderFleet(
+        root, ctx, rows,
+        (slug) => { selected = slug; level = 'projet'; draw(); },
+        () => draw({ forceFleet: true }),
+      );
       ctx.dock.echo('grimoire status');
     } else {
       const name = cockpit
