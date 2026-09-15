@@ -262,6 +262,7 @@ def test_fleet_endpoint_aggregates_health_and_memory_for_every_registered_projec
     assert status == 200
     projects = body["projects"]
     assert {p["slug"] for p in projects} == {"alpha", "beta"}
+    assert {p["name"] for p in projects} == {"Alpha", "Beta"}
     for entry in projects:
         assert "health" in entry
         assert "memory" in entry
@@ -270,3 +271,11 @@ def test_fleet_endpoint_aggregates_health_and_memory_for_every_registered_projec
         # sondés (voir memory_link._empty_status).
         assert entry["memory"]["probed"] is False
         assert entry["memory"]["stale"] is True
+        # `name` + `managed` (PR perf front #541) : la Flotte du cockpit
+        # (`piloter.js::renderFleet`/`watchReasons`) les lit sur `r.entry` et
+        # n'a plus d'autre appel pour les chercher que `/api/fleet` lui-même
+        # depuis que `loadFleet` ne fait plus qu'UN appel réseau. Ni Alpha
+        # ni Beta n'ont de `_grimoire/` ni de `project-context.yaml` (juste
+        # un `.git`, voir `_project()` ci-dessus) : simples dépôts git, pas
+        # initialisés Grimoire.
+        assert entry["managed"] is False

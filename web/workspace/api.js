@@ -134,7 +134,19 @@ export const api = {
   // celui d'avant : la santé du projet déjà ciblé par l'hôte.
   health: (project) => get('/api/health', project ? { project } : undefined),
   projects: () => get('/api/projects'),
-  memoryStatus: (project) => get('/api/memory/status', project ? { project } : undefined),
+  // `probe: true` force une sonde réseau fraîche (coûteuse) — jamais le mode
+  // par défaut. Sans lui, le serveur sert le dernier statut caché
+  // (`probedAt`/`stale` explicites, voir `memory_link.py::memory_link_status`).
+  // La Flotte et le premier rendu d'une fiche projet ne passent jamais
+  // `probe` ; seul un geste explicite (bouton « Sonder la mémoire ») le fait.
+  memoryStatus: (project, { probe } = {}) => {
+    const params = { ...(project ? { project } : {}), ...(probe ? { probe: '1' } : {}) };
+    return get('/api/memory/status', Object.keys(params).length ? params : undefined);
+  },
+  // Flotte du cockpit (#541, remplace le balayage 2×N que `loadFleet`
+  // faisait ici même par projet — voir `project_health.py::fleet_status`) :
+  // santé + mémoire (mode rapide) de TOUT le registre en une seule réponse.
+  fleet: () => get('/api/fleet'),
   blueprints: () => get('/api/blueprints'),
   primitives: () => get('/api/primitives'),
   features: () => get('/api/features'),

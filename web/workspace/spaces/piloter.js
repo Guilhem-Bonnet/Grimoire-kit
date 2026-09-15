@@ -237,48 +237,45 @@ function kpiCard(items) {
 
 // ── Niveau Flotte (cockpit) ──────────────────────────────────────────────────
 //
-// Cache mémoire de la Flotte (issue #510 point 5) — chaque affichage relançait
-// `health()` + `memoryStatus()` pour TOUS les projets du registre (34 requêtes
-// pour 17 projets, 20 pour 10, constaté en pilotant neuf projets réels l'un
-// après l'autre depuis le cockpit). Le seul point d'entrée qui fait ce
-// balayage reste `loadFleet` — sélectionner un projet (`onSelect` plus bas)
-// ou revenir sur sa fiche ne touche jamais cette fonction, une seule lecture
-// ciblée (`loadSheet`) suffit. Un cache par slug, 60 s, absorbe les
-// affichages répétés de la Flotte dans une même session (zoom Flotte/Projet
-// va-et-vient) sans jamais mentir plus d'une minute ; `force` (bouton
-// « Rafraîchir la flotte ») et l'invalidation ciblée après une mise à jour
-// (`invalidateFleetCache`, appelé depuis `renderSheet`) restent les deux
-// seules façons de le contourner.
+// Un seul appel `GET /api/fleet` (#541, backend #542) — chaque affichage
+// relançait avant ça `projects()` PUIS `health()` + `memoryStatus()` pour
+// TOUS les projets du registre (34 requêtes pour 17 projets, 20 pour 10,
+// constaté en pilotant neuf projets réels l'un après l'autre depuis le
+// cockpit — issue #510 point 5). Le serveur (`project_health.py::
+// fleet_status`) calcule désormais ces N entrées en parallèle (threads) et
+// les rend en une seule réponse, `name` compris (sinon la Flotte perdrait
+// l'affichage du nom humain — voir `_fleet_entry`). Le cache 60 s subsiste
+// pour absorber les allers-retours Flotte/Projet dans la même session ;
+// `force` (bouton « Rafraîchir la flotte ») et `invalidateFleetCache()`
+// (appelé depuis `renderSheet` après une mise à jour) restent les deux
+// seules façons de le court-circuiter — il ne porte plus qu'un seul blob
+// (toute la flotte), pas une entrée par slug, puisqu'un seul appel réseau
+// les ramène toutes ensemble de toute façon.
 const FLEET_CACHE_TTL_MS = 60_000;
-const fleetCache = new Map(); // slug -> { at, health, memory }
+let fleetCache = null; // { at, rows }
 
-function invalidateFleetCache(slug) {
-  if (slug) fleetCache.delete(slug);
-  else fleetCache.clear();
+function invalidateFleetCache() {
+  fleetCache = null;
 }
 
 async function loadFleet(ctx, { force = false } = {}) {
-  const registry = await ctx.api.projects();
-  const entries = registry.projects || [];
   const now = Date.now();
-  const settled = await Promise.allSettled(
-    entries.map(async (entry) => {
-      const cached = !force ? fleetCache.get(entry.slug) : null;
-      if (cached && now - cached.at < FLEET_CACHE_TTL_MS) {
-        return [cached.health, cached.memory];
-      }
-      const [health, memory] = await Promise.all([
-        ctx.api.health(entry.slug).catch(() => null),
-        ctx.api.memoryStatus(entry.slug).catch(() => null),
-      ]);
-      fleetCache.set(entry.slug, { at: now, health, memory });
-      return [health, memory];
-    }),
-  );
-  return entries.map((entry, index) => {
-    const [health, memory] = settled[index].status === 'fulfilled' ? settled[index].value : [null, null];
-    return { entry, health, memory };
-  });
+  if (!force && fleetCache && now - fleetCache.at < FLEET_CACHE_TTL_MS) {
+    return fleetCache.rows;
+  }
+  const payload = await ctx.api.fleet();
+  // `_fleet_entry` (best-effort côté serveur) rend `{ error }` plutôt que
+  // `null` pour un projet cassé — jamais le contrat qu'attendaient
+  // `renderFleet`/`watchReasons` (ex. `health.kit`, `memory.state`), qui
+  // lisaient jusqu'ici toujours soit un payload complet, soit `null` (`ctx.
+  // api.health(slug).catch(() => null)`). On aligne ici sur ce contrat.
+  const rows = (payload.projects || []).map((p) => ({
+    entry: { slug: p.slug, path: p.path, name: p.name, managed: p.managed },
+    health: p.health && !p.health.error ? p.health : null,
+    memory: p.memory && !p.memory.error ? p.memory : null,
+  }));
+  fleetCache = { at: now, rows };
+  return rows;
 }
 
 // ── « Nouveau projet » (#172) : bouton + section repliable, Flotte ─────────
@@ -1336,7 +1333,33 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
   const memBlock = document.createElement('div');
   memBlock.className = 'pl-insp-block';
   memBlock.append(text('h4', null, 'Mémoire'));
-  memBlock.append(pill(memory?.state === 'ok' ? 'ok' : (memory?.state === 'unavailable' ? 'warn' : ''), memory?.configuredBackend ? `${memory.configuredBackend} · ${fmtInt(memory.entries)} entrée(s)` : 'non initialisée'));
+  let memoryPayload = memory;
+  let memPill = pill(memoryPayload?.state === 'ok' ? 'ok' : (memoryPayload?.state === 'unavailable' ? 'warn' : ''), memoryPayload?.configuredBackend ? `${memoryPayload.configuredBackend} · ${fmtInt(memoryPayload.entries)} entrée(s)` : 'non initialisée');
+  memBlock.append(memPill);
+  // Premier rendu toujours en mode rapide (jamais de sonde réseau — c'est le
+  // même appel que la Flotte, `ctx.api.memoryStatus` sans `probe`). Une
+  // sonde fraîche reste un geste explicite (#541 point 5), jamais un
+  // `setInterval` : ce bouton est la seule façon de forcer `probe=1`, et il
+  // ne redessine que ce bloc, jamais toute la fiche.
+  const probeBtn = document.createElement('button');
+  probeBtn.type = 'button';
+  probeBtn.className = 'btn';
+  probeBtn.textContent = 'Sonder la mémoire';
+  probeBtn.title = 'Force une sonde réseau fraîche (probe=1) — coûteuse, jamais automatique.';
+  probeBtn.addEventListener('click', async () => {
+    probeBtn.disabled = true;
+    probeBtn.textContent = 'Sonde en cours…';
+    try {
+      memoryPayload = await ctx.api.memoryStatus(slug, { probe: true });
+      const fresh = pill(memoryPayload?.state === 'ok' ? 'ok' : (memoryPayload?.state === 'unavailable' ? 'warn' : ''), memoryPayload?.configuredBackend ? `${memoryPayload.configuredBackend} · ${fmtInt(memoryPayload.entries)} entrée(s)` : 'non initialisée');
+      memPill.replaceWith(fresh);
+      memPill = fresh;
+    } finally {
+      probeBtn.disabled = false;
+      probeBtn.textContent = 'Sonder la mémoire';
+    }
+  });
+  memBlock.append(probeBtn);
   ctx.inspector.append(memBlock);
 
   // ── Dernière exécution du wizard (#171) ─────────────────────────────────
@@ -1430,10 +1453,13 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
           // refléter tout de suite, sans attendre un rechargement complet
           // de la fiche.
           checkpointPendingRunId = result.runId;
-          // Le prochain retour sur la Flotte servirait sinon la ligne mise
+          // Le prochain retour sur la Flotte servirait sinon le blob mis
           // en cache d'avant la mise à jour jusqu'à 60 s (issue #510 point
-          // 5) — ce projet précis doit se relire, pas toute la flotte.
-          invalidateFleetCache(slug || ctx.host.project);
+          // 5). Le cache ne porte plus qu'un seul appel `/api/fleet` pour
+          // tout le registre (#541) : on l'invalide en entier, ce qui reste
+          // moins cher qu'avant (un seul appel réseau au prochain retour,
+          // pas 2×N).
+          invalidateFleetCache();
           // Jamais `options.refresh()` ici : il redessine toute la fiche et
           // effacerait ce déroulé à l'instant même où on vient de le montrer
           // (constat terrain, issue #506 — « l'Inspecteur revient
@@ -1649,10 +1675,31 @@ export async function mount(root, ctx) {
     ? [{ id: 'flotte', label: 'Flotte' }, { id: 'projet', label: 'Projet' }]
     : [{ id: 'projet', label: 'Projet' }];
 
-  const draw = async ({ forceFleet = false } = {}) => {
-    root.replaceChildren();
+  // Un seul tour réseau en vol à la fois (#541 point 4) : un double-clic sur
+  // « Rafraîchir », ou une action qui appelle `options.refresh()` pendant
+  // qu'un tour précédent tourne encore, rejoint la MÊME promesse plutôt que
+  // de relancer un second lot d'appels en concurrence. Une fois ce tour
+  // résolu, l'appel suivant en relance un frais — ça ne dédoublonne jamais
+  // deux rafraîchissements légitimes mais séquentiels, seulement un vrai
+  // chevauchement.
+  let inFlight = null;
+
+  const drawOnce = async ({ forceFleet = false } = {}) => {
     ctx.docbar.setBreadcrumb([ctx.host.project || 'flotte', 'Piloter', level === 'flotte' ? 'Flotte' : 'Projet']);
     ctx.docbar.setZoom(zoomLevels, level, (id) => { level = id; draw(); });
+
+    // Coquille immédiate (#541 point 3) : jamais d'écran vide le temps que
+    // les appels réseau reviennent — un état « chargement… » se peint tout
+    // de suite, avec le titre déjà connu côté projet (slug/host.status),
+    // puis remplacé par le rendu réel une fois les données résolues.
+    const shell = document.createElement('div');
+    shell.className = 'pl-wrap';
+    if (level === 'projet') {
+      const knownTitle = cockpit ? selected : ctx.host.status?.slug;
+      if (knownTitle) shell.append(text('h2', null, knownTitle));
+    }
+    shell.append(text('p', 'lbl', 'Chargement…'));
+    root.replaceChildren(shell);
 
     if (level === 'flotte') {
       ctx.inspector.replaceChildren(document.createElement('div'));
@@ -1661,6 +1708,7 @@ export async function mount(root, ctx) {
       // retour) sert le cache de `loadFleet` (issue #510 point 5).
       const rows = await loadFleet(ctx, { force: forceFleet });
       if (ctx.signal.aborted) return;
+      root.replaceChildren(); // retire la coquille « Chargement… » avant le vrai rendu
       renderFleet(
         root, ctx, rows,
         (slug) => { selected = slug; level = 'projet'; draw(); },
@@ -1668,14 +1716,26 @@ export async function mount(root, ctx) {
       );
       ctx.dock.echo('grimoire status');
     } else {
-      const name = cockpit
-        ? (await ctx.api.projects()).projects.find((p) => p.slug === selected)?.name
-        : ctx.host.status?.slug;
-      const sheet = await loadSheet(ctx, selected);
+      // Restes #541 point 2 : `projects()` (nom du projet, cockpit
+      // uniquement) tournait ici en SÉRIE avant `loadSheet()` — deux tours
+      // réseau l'un après l'autre plutôt qu'un seul. Les deux partent
+      // maintenant en même temps ; `loadSheet` porte déjà son propre
+      // `Promise.all` sur ses six appels.
+      const namePromise = cockpit
+        ? ctx.api.projects().then((r) => r.projects.find((p) => p.slug === selected)?.name).catch(() => null)
+        : Promise.resolve(ctx.host.status?.slug || null);
+      const [name, sheet] = await Promise.all([namePromise, loadSheet(ctx, selected)]);
       if (ctx.signal.aborted) return;
+      root.replaceChildren(); // retire la coquille « Chargement… » avant le vrai rendu
       renderSheet(root, ctx, selected, name, sheet, { refresh: draw });
       ctx.dock.echo('grimoire doctor');
     }
+  };
+
+  const draw = (opts) => {
+    if (inFlight) return inFlight;
+    inFlight = drawOnce(opts).finally(() => { inFlight = null; });
+    return inFlight;
   };
 
   await draw();
