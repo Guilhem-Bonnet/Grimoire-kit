@@ -316,6 +316,47 @@ def test_le_survol_du_contenu_n_ouvre_jamais_un_panneau(workspace: Page) -> None
     assert workspace.evaluate(f"() => {api}.panelState('inspector')") == "collapsed"
 
 
+# ── Panneau « Preuves » (issue 534) ─────────────────────────────────────────
+
+
+def test_le_raccourci_3_ouvre_les_preuves_depuis_l_espace_par_defaut(workspace: Page) -> None:
+    """Reste connu de l'intégration des cinq lots (comparer
+    ``test_le_raccourci_2_du_rail_ouvre_la_bibliotheque_de_noeuds`` dans
+    ``test_workspace_concevoir.py``) : le rail annonce « 3 » pour les Preuves
+    (``shell.js``, ``RAIL``), mais aucun espace ne l'enregistrait — ni le clic
+    sur l'icône, ni le raccourci clavier ne faisaient quoi que ce soit, sur
+    aucun des six espaces (issue 534). Possédé par la coque elle-même,
+    contrairement à « 2 »/bibliothèque qui reste propre à Concevoir : le
+    panneau doit répondre depuis Piloter, l'espace par défaut, sans qu'aucun
+    espace ne s'en charge.
+    """
+    api = "window.GrimoireWorkspace"
+    assert workspace.evaluate(f"() => {api}.space") == "piloter"
+    workspace.evaluate(f"() => {api}.setPanel('evidence', 'collapsed')")
+
+    workspace.locator("body").press("3")
+
+    assert workspace.evaluate(f"() => {api}.panelState('evidence')") == "pinned"
+    workspace.wait_for_selector("#evidence-body .ev-row, #evidence-body .empty")
+    assert workspace.locator("#evidence-body").inner_text().strip(), (
+        "le panneau doit au moins nommer l'état vide, jamais rester blanc"
+    )
+
+
+def test_le_clic_sur_une_tache_de_preuves_ouvre_le_pack_dans_source(workspace: Page) -> None:
+    """« Clic sur une tâche → ouvre le pack dans Source » (issue 534) :
+    ``real_project`` est enrôlé ``governed``, donc le board porte au moins la
+    tâche `bootstrap` que `standard init` sème."""
+    api = "window.GrimoireWorkspace"
+    workspace.evaluate(f"() => {api}.setPanel('evidence', 'pinned')")
+    row = workspace.locator("#evidence-body .ev-row").first
+    row.wait_for(timeout=10_000)
+
+    row.click()
+
+    workspace.wait_for_function(f"() => {api}.space === 'source'")
+
+
 def test_le_cadenas_epingle_dans_la_grille(workspace: Page) -> None:
     """« Cadenas … épingle dans la grille, le contenu se redimensionne »."""
     api = "window.GrimoireWorkspace"

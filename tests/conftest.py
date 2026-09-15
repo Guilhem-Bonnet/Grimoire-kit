@@ -223,6 +223,22 @@ def second_project(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return root
 
 
+@pytest.fixture(scope="session")
+def governed_project(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Un projet `governed` dont le board n'est JAMAIS muté par un autre test.
+
+    `real_project` sert de socle à `project_with_task` (`grimoire task add`),
+    qui réécrit `_grimoire/standard/task-board.yaml` et fait disparaître la
+    tâche `bootstrap` du gabarit — un test du panneau Preuves (#534) qui
+    lirait `real_project` verrait selon l'ordre de collecte tantôt
+    `bootstrap`, tantôt la tâche du Mission Ledger, sans pack encore écrit
+    pour celle-ci. Ce projet-ci reste tel que `standard init` l'a laissé.
+    """
+    root = tmp_path_factory.mktemp("workspace-c") / "projet-c"
+    _init_real_project(root, "projet-c")
+    return root
+
+
 @pytest.fixture
 def project_with_task(real_project: Path) -> Iterator[tuple[Path, str]]:
     """Le projet réel, avec une tâche ouverte au Mission Ledger.

@@ -598,3 +598,55 @@ def project_health(project_root: Path) -> dict[str, Any]:
         # donnée qu'il rend est toujours celle du projet servi.
         "demo": False,
     }
+
+
+def _fleet_entry(entry: dict[str, str]) -> dict[str, Any]:
+    """``health`` + ``memory`` (mode rapide, jamais de réseau) pour un projet
+    du registre. Best-effort : un projet disparu ou cassé rend une erreur
+    dans son entrée plutôt que de faire échouer toute la flotte."""
+    from grimoire.tools.memory_link import memory_link_status
+
+    slug = entry.get("slug", "")
+    raw_path = entry.get("path", "")
+    result: dict[str, Any] = {"slug": slug, "path": raw_path}
+    root = Path(raw_path) if raw_path else None
+    if root is None or not root.is_dir():
+        error = {"error": "projet introuvable"}
+        result["health"] = error
+        result["memory"] = error
+        return result
+    try:
+        result["health"] = project_health(root)
+    except Exception as exc:  # une entrée cassée ne casse jamais la flotte
+        result["health"] = {"error": str(exc)}
+    try:
+        # probe=False : mode rapide, jamais de sonde réseau — c'est tout le
+        # point de cette route agrégée (issue de perf du cockpit, Piloter).
+        result["memory"] = memory_link_status(root, probe=False)
+    except Exception as exc:
+        result["memory"] = {"error": str(exc)}
+    return result
+
+
+def fleet_status() -> dict[str, Any]:
+    """``GET /api/fleet`` — santé + mémoire de tous les projets du registre,
+    en une seule réponse.
+
+    Remplace, côté serveur, les ``2×N`` appels HTTP que le cockpit
+    (``web/workspace/spaces/piloter.js::loadFleet``) faisait un par un et par
+    projet : chacun payait individuellement le coût, déjà non caché, de
+    ``health()``/``memory/status()``. Calculer les N entrées en parallèle
+    (threads) borne le temps total au plus lent des projets plutôt qu'à leur
+    somme — et ``memory_link_status`` y est appelé en mode rapide (jamais de
+    sonde réseau), donc son propre coût y est déjà nul ou quasi nul.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    from grimoire.tools.project_registry import load_registry
+
+    registry = load_registry()
+    if not registry:
+        return {"projects": []}
+    with ThreadPoolExecutor(max_workers=min(8, len(registry))) as pool:
+        projects = list(pool.map(_fleet_entry, registry))
+    return {"projects": projects}

@@ -108,6 +108,19 @@ TIERS: tuple[dict[str, Any], ...] = (
         "roots": (".claude", ".github"),
         "editable": False,
     },
+    {
+        # Ajouté pour #534 : le panneau « Preuves » du rail ouvre le pack
+        # d'une tâche dans Source (« ouvre le pack dans Source à la bonne
+        # ligne ») — sans cet étage, ``file_view`` refuse tout chemin sous
+        # ``_grimoire-output/evidence`` (``tier_of`` rend ``None``) et le
+        # clic échouerait avec la même erreur que le bouton mort qu'il corrige.
+        "id": "evidence",
+        "term": "evidence-pack",
+        "label": "Preuves",
+        "note": "généré par tâche, jamais écrit à la main",
+        "roots": ("_grimoire-output/evidence",),
+        "editable": False,
+    },
 )
 
 _TIER_BY_ID = {tier["id"]: tier for tier in TIERS}
@@ -255,6 +268,58 @@ def tasks_view(project_root: Path, *, mission: str | None = None, status: str | 
     payload["tasks"] = [_task_json(t) for t in tasks]
     payload["count"] = len(tasks)
     return payload
+
+
+def evidence_view(project_root: Path) -> dict[str, Any]:
+    """Les tâches du standard gouverné, leur enveloppe, leurs gates et leur pack.
+
+    Distinct de :func:`tasks_view` : celle-ci lit le Mission Ledger (des
+    tâches de travail) ; ceci lit ``_grimoire/standard/task-board.yaml`` (le
+    board de conformité du standard agentique) — la même donnée que
+    ``grimoire standard verify``/``grimoire_standard_gate``, jamais une
+    relecture parallèle des fichiers. Sert le panneau « Preuves » du rail
+    (issue #534) : ``enrolled: false`` quand le projet n'a pas encore
+    `grimoire standard init`, sinon une entrée par tâche du board avec l'état
+    de ses gates (:func:`grimoire.core.agentic_standard.check_evidence_gates`)
+    et le chemin de son pack de preuve.
+    """
+    from grimoire.core.agentic_standard import check_evidence_gates, list_board_tasks
+    from grimoire.core.standard_generation import EVIDENCE_DIR, normalize_task_id
+    from grimoire.core.standard_state import active_profile_id, is_standard_enrolled
+
+    root = project_root.resolve()
+    if not is_standard_enrolled(root):
+        return {
+            "enrolled": False,
+            "tasks": [],
+            "note": "aucun standard — `grimoire standard init` en génère un",
+        }
+    profile = active_profile_id(root, write_cache=False)
+    tasks: list[dict[str, Any]] = []
+    for task in list_board_tasks(root):
+        task_id = str(task.get("task_id") or "").strip()
+        if not task_id:
+            continue
+        status = task.get("status")
+        gate = check_evidence_gates(root, task_id=task_id, target_state=status)
+        pack_ref = task.get("evidence_pack_ref")
+        pack_path = Path(pack_ref) if pack_ref else EVIDENCE_DIR / normalize_task_id(task_id) / "evidence-pack.md"
+        tasks.append({
+            "task_id": task_id,
+            "title": task.get("title"),
+            "status": status,
+            "gates": {
+                "ok": gate.ok,
+                "missing": list(gate.missing),
+                "checks": [
+                    {"id": c.id, "severity": c.severity, "message": c.message}
+                    for c in gate.checks
+                ],
+            },
+            "pack_path": str(pack_path),
+            "pack_exists": (root / pack_path).is_file(),
+        })
+    return {"enrolled": True, "profile": profile, "tasks": tasks, "count": len(tasks)}
 
 
 def task_view(project_root: Path, task_id: str) -> dict[str, Any]:
@@ -864,13 +929,33 @@ def agents_view(project_root: Path) -> dict[str, Any]:
     (distinct de ``usage``, qui compte tout sous-agent tracé — voir
     :func:`_agent_usage`), pour que le badge du cockpit et le contrôle doctor
     disent toujours la même chose.
+
+    Mis en cache (:mod:`grimoire.tools.view_cache`), keyé sur la signature de
+    mtimes des dossiers agents/skills/overrides, de la config projet et du
+    dossier de traces — mesuré à 1,58s pour un projet réel avant ce cache
+    (glob + parsing + résolution de skills à chaque appel, sans qu'aucun de
+    ces fichiers n'ait bougé entre deux lectures rapprochées du cockpit).
     """
+    from grimoire.core import layout
+    from grimoire.core.standard_generation import TRACES_DIR
+    from grimoire.tools import view_cache
+
+    root = project_root.resolve()
+    signature = view_cache.path_signature([
+        *layout.agent_dirs(root),
+        *layout.skill_dirs(root),
+        root / TRACES_DIR,
+        root / "project-context.yaml",
+    ])
+    return view_cache.cached(f"agents_view:{root}", signature, lambda: _agents_view_uncached(root))
+
+
+def _agents_view_uncached(root: Path) -> dict[str, Any]:
     from grimoire.core.agent_freshness import project_agent_freshness
     from grimoire.core.config import GrimoireConfig
     from grimoire.core.exceptions import GrimoireConfigError
     from grimoire.hosts import collect
 
-    root = project_root.resolve()
     skills = collect.collect_skills(root)
     known_skills = frozenset(s.slug for s in skills)
     agents = collect.collect_agents(root, known_skills=known_skills)
@@ -925,8 +1010,21 @@ def proposals_view(project_root: Path) -> dict[str, Any]:
     accept/refuse actions, so every read here re-runs the déclencheur rather
     than trusting a possibly stale file. A ledger that cannot be read yields
     an empty list, never an error — same contract as the rest of this view.
-    """
-    from grimoire.proposals import list_proposals
 
-    proposals = list_proposals(project_root.resolve())
-    return {"proposals": [p.to_dict() for p in proposals]}
+    Mis en cache (:mod:`grimoire.tools.view_cache`), keyé sur la signature de
+    mtimes du dossier de propositions — mesuré à 0,46s pour un projet réel
+    avant ce cache. Le déclencheur peut écrire une nouvelle proposition dans
+    ce même dossier ; cette écriture change la signature et invalide donc
+    naturellement le cache au prochain appel.
+    """
+    from grimoire.core.standard_generation import PROPOSALS_DIR
+    from grimoire.proposals import list_proposals
+    from grimoire.tools import view_cache
+
+    root = project_root.resolve()
+    signature = view_cache.path_signature([root / PROPOSALS_DIR])
+    return view_cache.cached(
+        f"proposals_view:{root}",
+        signature,
+        lambda: {"proposals": [p.to_dict() for p in list_proposals(root)]},
+    )

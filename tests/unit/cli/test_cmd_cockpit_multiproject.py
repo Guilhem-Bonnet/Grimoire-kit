@@ -248,3 +248,25 @@ def test_select_rejects_malformed_json(duo_server: Any) -> None:
     except urllib.error.HTTPError as exc:
         assert exc.code == 400
 
+
+
+def test_fleet_endpoint_aggregates_health_and_memory_for_every_registered_project(
+    duo_server: Any,
+) -> None:
+    """``/api/fleet`` remplace les ``2×N`` appels que la carte Flotte du
+    cockpit (``web/workspace/spaces/piloter.js::loadFleet``) faisait un par
+    un et par projet — une seule réponse, une entrée par projet du registre.
+    """
+    port, _alpha, _beta = duo_server
+    status, body = _get_api(port, "/api/fleet")
+    assert status == 200
+    projects = body["projects"]
+    assert {p["slug"] for p in projects} == {"alpha", "beta"}
+    for entry in projects:
+        assert "health" in entry
+        assert "memory" in entry
+        # Mode rapide : jamais de sonde réseau depuis cette route agrégée —
+        # les deux projets n'ont pas de ``project-context.yaml``, donc jamais
+        # sondés (voir memory_link._empty_status).
+        assert entry["memory"]["probed"] is False
+        assert entry["memory"]["stale"] is True
