@@ -10,6 +10,7 @@ tool_boundary: "Lecture du manifeste d'agents et dispatch — n'exécute lui-mê
 tools: "read, search"
 skills:
   - grimoire-agent-dispatch
+  - upgrade-review
 model_affinity:
   reasoning: high
   context_window: large
