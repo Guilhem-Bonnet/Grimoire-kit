@@ -479,3 +479,208 @@ class TestCreateBackendBranches:
         _create_backend(cfg)
         call_kwargs = mock_qdrant_mod.QdrantBackend.call_args
         assert call_kwargs.kwargs.get("embedding_model") == "all-MiniLM-L6-v2"
+
+
+# ── Cache de statut mémoire (health_cache) ─────────────────────────────────
+
+class TestHealthCacheInvalidation:
+    """Toute écriture invalide le cache de statut mémoire — sans quoi le
+    cockpit verrait un volume d'entrées obsolète jusqu'à expiration du TTL
+    après une écriture qu'il vient de faire lui-même (issue de perf du
+    cockpit, espace Piloter)."""
+
+    def test_store_invalidates_cached_status(self, mock_backend: MagicMock, tmp_path: Path) -> None:
+        from grimoire.memory import health_cache
+
+        mgr = MemoryManager(mock_backend, project_root=tmp_path)
+        health_cache.set_status(tmp_path, {"entries": 0})
+        assert health_cache.get(tmp_path) is not None
+
+        mgr.store("nouvelle mémoire")
+
+        assert health_cache.get(tmp_path) is None
+
+    def test_delete_invalidates_cached_status(self, mock_backend: MagicMock, tmp_path: Path) -> None:
+        from grimoire.memory import health_cache
+
+        mgr = MemoryManager(mock_backend, project_root=tmp_path)
+        health_cache.set_status(tmp_path, {"entries": 1})
+
+        mgr.delete("m-1")
+
+        assert health_cache.get(tmp_path) is None
+
+    def test_store_many_invalidates_cached_status(self, mock_backend: MagicMock, tmp_path: Path) -> None:
+        from grimoire.memory import health_cache
+
+        mgr = MemoryManager(mock_backend, project_root=tmp_path)
+        health_cache.set_status(tmp_path, {"entries": 0})
+
+        mgr.store_many([{"text": "a"}, {"text": "b"}])
+
+        assert health_cache.get(tmp_path) is None
+
+    def test_manager_without_project_root_is_a_noop(self, mock_backend: MagicMock) -> None:
+        """``from_backend`` ne connaît aucun projet : l'invalidation ne lève pas."""
+        mgr = MemoryManager.from_backend(mock_backend)
+        mgr.store("hello")  # ne doit pas lever faute de project_root
+
+
+class TestHealthCheckParallelTimeout:
+    """Les trois sondes réseau (backend, Redis, Neo4j) tournent de front,
+    chacune bornée à *timeout* — un service injoignable ne doit jamais faire
+    attendre l'appelant plus que ce délai. Avant cette parallélisation,
+    trois sondes séquentielles sans timeout mesuraient 0,88s cumulés sur un
+    projet dont les services distants sont éteints."""
+
+    def test_unreachable_hot_memory_does_not_block_past_timeout(
+        self, mock_backend: MagicMock
+    ) -> None:
+        import threading
+        import time
+
+        # `pool.shutdown(wait=False)` (voir health_check) laisse ce thread de
+        # sonde continuer après le timeout — un `Event` qu'on libère nous-mêmes
+        # en fin de test le réveille tout de suite au lieu de le laisser
+        # dormir plusieurs secondes dans la suite (source de flakiness
+        # potentielle sur les tests qui suivent).
+        never_set = threading.Event()
+        hot = MagicMock()
+        hot.health_check.side_effect = lambda: never_set.wait(5)  # jamais atteint sous 0,05s
+
+        mgr = MemoryManager(mock_backend, hot_memory=hot)
+        try:
+            started = time.perf_counter()
+            status = mgr.health_check(timeout=0.05)
+            elapsed = time.perf_counter() - started
+
+            assert elapsed < 0.5
+            assert status.healthy is True  # le backend, lui, répond tout de suite
+            assert status.detail["hot_memory"]["healthy"] is False
+            assert "expirée" in status.detail["hot_memory"]["detail"]["reason"]
+        finally:
+            never_set.set()
+
+    def test_unreachable_backend_does_not_block_past_timeout(self) -> None:
+        import threading
+        import time
+
+        from grimoire.memory.backends.base import MemoryBackend
+
+        never_set = threading.Event()
+        slow_backend = MagicMock(spec=MemoryBackend)
+        slow_backend.health_check.side_effect = lambda: never_set.wait(5)
+
+        mgr = MemoryManager(slow_backend)
+        try:
+            started = time.perf_counter()
+            status = mgr.health_check(timeout=0.05)
+            elapsed = time.perf_counter() - started
+
+            assert elapsed < 0.5
+            assert status.healthy is False
+            assert "expirée" in status.detail["reason"]
+        finally:
+            never_set.set()
+
+    def test_all_three_probes_run_concurrently_not_sequentially(
+        self, mock_backend: MagicMock
+    ) -> None:
+        """Trois sondes à 0,2s chacune : séquentiel ferait ~0,6s, parallèle ~0,2s."""
+        import time
+
+        def _slow(seconds: float, result: object) -> object:
+            def _call() -> object:
+                time.sleep(seconds)
+                return result
+
+            return _call
+
+        mock_backend.health_check.side_effect = _slow(
+            0.2, BackendStatus(backend="mock", healthy=True, entries=1)
+        )
+        hot = MagicMock()
+        hot.health_check.side_effect = _slow(0.2, MagicMock(to_dict=lambda: {"healthy": True}))
+        graph = MagicMock()
+        graph.health_check.side_effect = _slow(0.2, MagicMock(healthy=True, detail={}))
+
+        mgr = MemoryManager(mock_backend, hot_memory=hot, memory_graph=graph)
+
+        started = time.perf_counter()
+        mgr.health_check(timeout=1.0)
+        elapsed = time.perf_counter() - started
+
+        assert elapsed < 0.4  # trois sondes de 0,2s en parallèle, pas 0,6s en série
+
+
+class TestMemoryGraphConstructionTimeout:
+    """``Neo4jMemoryGraph.__init__`` appelle ``ensure_schema()`` (un vrai
+    aller-retour Cypher) — pas une sonde. Contre un serveur injoignable, le
+    driver retente lui-même avec un backoff qui peut durer ~30s, AVANT même
+    que le constructeur ne rende la main : le timeout de ``health_check()``
+    ne protège pas contre ça, puisqu'il ne s'exécute qu'après construction.
+    Trouvé en profilant `MemoryManager.from_config()` sur un projet jetable
+    avec un Neo4j réellement injoignable (issue de perf du cockpit) : sans
+    ce correctif, la toute première lecture de `/api/memory/status?probe=1`
+    (ou tout appel à `from_config`) peut bloquer des dizaines de secondes.
+    """
+
+    def _config_wanting_neo4j(self, monkeypatch: pytest.MonkeyPatch) -> GrimoireConfig:
+        monkeypatch.setenv("GRIMOIRE_TEST_NEO4J_PASSWORD", "secret")
+        return GrimoireConfig.from_dict({
+            "project": {"name": "test-project"},
+            "memory": {
+                "backend": "local",
+                "memory_graph": "neo4j",
+                "neo4j_uri": "bolt://unreachable:7687",
+                "neo4j_password_env": "GRIMOIRE_TEST_NEO4J_PASSWORD",
+            },
+        })
+
+    def test_slow_construction_does_not_block_past_timeout(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import threading
+        import time
+
+        from grimoire.memory import manager as manager_module
+
+        never_set = threading.Event()
+
+        class _SlowNeo4jMemoryGraph:
+            def __init__(self, **_kwargs: object) -> None:
+                never_set.wait(5)  # jamais atteint sous le timeout de test
+
+        monkeypatch.setattr(
+            "grimoire.memory.neo4j_graph.Neo4jMemoryGraph", _SlowNeo4jMemoryGraph
+        )
+        cfg = self._config_wanting_neo4j(monkeypatch)
+        try:
+            started = time.perf_counter()
+            graph, issue = manager_module._create_memory_graph_bounded(cfg, timeout=0.05)
+            elapsed = time.perf_counter() - started
+
+            assert elapsed < 0.5
+            assert graph is None
+            assert "timed out" in issue
+        finally:
+            never_set.set()
+
+    def test_fast_construction_still_succeeds(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from grimoire.memory import manager as manager_module
+
+        created = object()
+
+        class _FastNeo4jMemoryGraph:
+            def __new__(cls, **_kwargs: object) -> object:
+                return created
+
+        monkeypatch.setattr(
+            "grimoire.memory.neo4j_graph.Neo4jMemoryGraph", _FastNeo4jMemoryGraph
+        )
+        cfg = self._config_wanting_neo4j(monkeypatch)
+
+        graph, issue = manager_module._create_memory_graph_bounded(cfg, timeout=1.0)
+
+        assert graph is created
+        assert issue == ""

@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+
 from grimoire.tools import memory_link as ml
 
 
@@ -35,12 +37,17 @@ class TestMemoryLinkStatus:
             "project:\n  name: demo\nmemory:\n  backend: local\n",
             encoding="utf-8",
         )
-        status = ml.memory_link_status(tmp_path)
+        # probe=True : on veut ici la sonde fraîche, pas le mode rapide par
+        # défaut (voir TestFastMode plus bas pour ce dernier).
+        status = ml.memory_link_status(tmp_path, probe=True)
         assert status["configuredBackend"] == "local"
         assert status["state"] == "ok"
         assert status["available"] is True
         assert status["resolvedBackend"] == "local"
         assert isinstance(status["entries"], int)
+        assert status["probed"] is True
+        assert status["stale"] is False
+        assert status["probedAt"] is not None
 
     def test_no_tree_walk_to_parent_config(self, tmp_path: Path) -> None:
         # Un parent initialisé ne doit PAS contaminer un sous-dossier vierge.
@@ -68,7 +75,7 @@ class TestLayerContract:
         (tmp_path / "project-context.yaml").write_text(
             "project:\n  name: demo\nmemory:\n  backend: local\n", encoding="utf-8"
         )
-        status = ml.memory_link_status(tmp_path)
+        status = ml.memory_link_status(tmp_path, probe=True)
         assert len(status["layers"]) == 7
         assert {layer["id"] for layer in status["layers"]} == {
             "short_term", "semantic_memory", "semantic_knowledge",
@@ -84,7 +91,7 @@ class TestLayerContract:
             "  mempalace_path: /nonexistent/palace\n",
             encoding="utf-8",
         )
-        status = ml.memory_link_status(tmp_path)
+        status = ml.memory_link_status(tmp_path, probe=True)
         assert len(status["layers"]) == 7
 
     def test_uninitialized_project_has_empty_contract(self, tmp_path: Path) -> None:
@@ -124,3 +131,104 @@ class TestStoreGraphParity:
         manager = MagicMock()
         manager.memory_graph.stats.side_effect = RuntimeError("connection refused")
         assert "connection refused" in ml._store_graph_parity(manager, 42)["error"]
+
+
+class TestFastMode:
+    """Mode rapide (``probe=False``, le défaut) : jamais de réseau.
+
+    Avant le cache — issue de perf du cockpit — chaque lecture de
+    ``/api/memory/status`` relançait ``MemoryManager.health_check()`` (trois
+    sondes réseau), mesuré à 0,88s cumulés sur un projet réel dont les
+    services distants sont éteints. Le mode rapide ne sonde jamais ; seul
+    ``probe=True`` le fait, et remplit le cache pour les lectures suivantes.
+    """
+
+    @staticmethod
+    def _init(tmp_path: Path) -> None:
+        (tmp_path / "project-context.yaml").write_text(
+            "project:\n  name: demo\nmemory:\n  backend: local\n",
+            encoding="utf-8",
+        )
+
+    def test_fast_mode_never_probes_when_nothing_cached(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._init(tmp_path)
+
+        def _boom(*_a: object, **_k: object) -> None:
+            raise AssertionError("le mode rapide ne doit jamais sonder")
+
+        monkeypatch.setattr(ml, "_probe_memory_link_status", _boom)
+        status = ml.memory_link_status(tmp_path)  # probe=False, défaut
+        assert status["configuredBackend"] == "local"
+        assert status["probed"] is False
+        assert status["stale"] is True
+        assert status["probedAt"] is None
+
+    def test_probe_true_populates_cache_for_subsequent_fast_reads(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._init(tmp_path)
+        calls = {"n": 0}
+        real_probe = ml._probe_memory_link_status
+
+        def _counting_probe(root: Path, cfg: object) -> dict[str, object]:
+            calls["n"] += 1
+            return real_probe(root, cfg)
+
+        monkeypatch.setattr(ml, "_probe_memory_link_status", _counting_probe)
+
+        probed = ml.memory_link_status(tmp_path, probe=True)
+        assert calls["n"] == 1
+        assert probed["probed"] is True
+        assert probed["stale"] is False
+
+        # Deux lectures rapides à la suite : aucune ne resonde le réseau.
+        fast_1 = ml.memory_link_status(tmp_path)
+        fast_2 = ml.memory_link_status(tmp_path)
+        assert calls["n"] == 1
+        for fast in (fast_1, fast_2):
+            assert fast["probed"] is True
+            assert fast["stale"] is False
+            assert fast["resolvedBackend"] == probed["resolvedBackend"]
+            assert fast["entries"] == probed["entries"]
+
+    def test_stale_flag_set_once_ttl_elapsed_without_reprobing(
+        self, tmp_path: Path
+    ) -> None:
+        from grimoire.memory import health_cache
+
+        self._init(tmp_path)
+        probed = ml.memory_link_status(tmp_path, probe=True)
+        assert probed["stale"] is False
+
+        # Recule artificiellement l'horodatage de la sonde, au-delà du TTL —
+        # sans dormir dans un test et sans resonder le réseau.
+        entry = health_cache.get(tmp_path)
+        assert entry is not None
+        backdated = health_cache.CacheEntry(
+            status=entry.status,
+            probed_at=entry.probed_at - health_cache.PROBE_TTL_SECONDS - 1,
+        )
+        with health_cache._lock:
+            health_cache._cache[str(tmp_path.resolve())] = backdated
+
+        stale = ml.memory_link_status(tmp_path)  # toujours probe=False
+        assert stale["probed"] is True
+        assert stale["stale"] is True
+
+    def test_invalidation_clears_cached_status(self, tmp_path: Path) -> None:
+        from grimoire.memory import health_cache
+
+        self._init(tmp_path)
+        ml.memory_link_status(tmp_path, probe=True)
+        assert health_cache.get(tmp_path) is not None
+
+        health_cache.invalidate(tmp_path)
+        assert health_cache.get(tmp_path) is None
+
+        # Plus rien en cache : le mode rapide redevient « jamais sondé »,
+        # jamais une valeur potentiellement obsolète.
+        status = ml.memory_link_status(tmp_path)
+        assert status["probed"] is False
+        assert status["stale"] is True

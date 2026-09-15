@@ -55,7 +55,15 @@ class RedisHotMemory:
     def health_check(self) -> HotMemoryStatus:
         try:
             pong = self._client.ping()
-        except (ConnectionError, TimeoutError, OSError) as exc:
+        except Exception as exc:
+            # redis-py raises its own `redis.exceptions.ConnectionError` /
+            # `TimeoutError`, which do NOT subclass the builtins of the same
+            # name (verified: `redis.exceptions.ConnectionError.__mro__` is
+            # `RedisError, Exception` — no relation to the builtin). Catching
+            # only the builtins here let a genuinely unreachable Redis raise
+            # straight through `health_check()`, crashing the whole
+            # ``/api/memory/status`` route instead of reporting `healthy:
+            # False` — the opposite of what a status probe promises.
             return HotMemoryStatus(
                 backend="redis",
                 enabled=True,

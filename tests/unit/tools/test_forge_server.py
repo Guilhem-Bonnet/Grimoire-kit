@@ -1082,9 +1082,24 @@ class TestMemoryLinkAndModernSetup:
             "project:\n  name: demo\nmemory:\n  backend: local\n",
             encoding="utf-8",
         )
-        st = self._get(f"{base_url}/api/memory/status")
+        # ?probe=1 : mode par défaut désormais rapide (issue de perf du
+        # cockpit) — jamais de sonde réseau sans ce paramètre explicite.
+        st = self._get(f"{base_url}/api/memory/status?probe=1")
         assert st["state"] == "ok"
         assert st["resolvedBackend"] == "local"
+        assert st["probed"] is True
+
+    def test_api_memory_status_fast_mode_never_probes_without_prior_cache(
+        self, base_url: str, project_root: Path
+    ) -> None:
+        (project_root / "project-context.yaml").write_text(
+            "project:\n  name: demo\nmemory:\n  backend: local\n",
+            encoding="utf-8",
+        )
+        st = self._get(f"{base_url}/api/memory/status")  # pas de ?probe=1
+        assert st["configuredBackend"] == "local"
+        assert st["probed"] is False
+        assert st["stale"] is True
 
     def test_setup_plan_includes_backend_and_modern_command(self, api: ForgeAPI) -> None:
         plan = api.setup_plan({"name": "p", "user": "u", "archetype": "minimal", "backend": "lexical", "planOnly": True})
