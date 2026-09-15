@@ -313,9 +313,14 @@ class ForgeAPI:
         """Dernier journal d'exécution du wizard, pour le polling côté UI."""
         return read_setup_run(self.project_root)
 
-    def memory_link_view(self) -> dict[str, Any]:
-        """Lien projet ↔ BDD mémoire (B1) : backend configuré, santé, volume."""
-        return memory_link_status(self.project_root)
+    def memory_link_view(self, *, probe: bool = False) -> dict[str, Any]:
+        """Lien projet ↔ BDD mémoire (B1) : backend configuré, santé, volume.
+
+        ``probe=False`` (défaut) : jamais de réseau, dernier statut caché
+        (voir :func:`grimoire.tools.memory_link.memory_link_status`).
+        ``probe=True`` (``?probe=1``) : sonde fraîche, rafraîchit le cache.
+        """
+        return memory_link_status(self.project_root, probe=probe)
 
     def health_view(self) -> dict[str, Any]:
         """Alignement kit, flows et activité réelle — vue du portefeuille."""

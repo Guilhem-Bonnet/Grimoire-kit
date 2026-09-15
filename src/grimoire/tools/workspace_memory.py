@@ -136,7 +136,11 @@ def _project_row(entry: dict[str, str]) -> dict[str, Any]:
         row["reason"] = reason
         return row
     try:
-        status = memory_link_status(project_root)
+        # probe=True : cette vue est une action explicite et peu fréquente
+        # (pas le pouls Piloter, sondé en continu) — l'utilisateur qui ouvre
+        # l'aperçu mémoire veut le compte d'entrées réel, pas un état caché
+        # potentiellement vide faute de sonde antérieure.
+        status = memory_link_status(project_root, probe=True)
     except Exception as exc:
         # `memory_link_status` est déjà best-effort et ne devrait jamais
         # lever — mais une route d'agrégation qui casserait sur UN projet
