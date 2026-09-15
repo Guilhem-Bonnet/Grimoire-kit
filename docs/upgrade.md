@@ -175,6 +175,33 @@ grimoire upgrade-flow check <backup|preview|orphans|apply|overrides|memory|needs
 `grimoire flow extract <run-id>` reproduit un run — complet ou arrêté au checkpoint — en blueprint
 brouillon, comme pour n'importe quel autre flow.
 
+## Revoir les décisions
+
+Un `run` qui s'arrête (checkpoint `destructive` ou propositions V1 en attente) laisse un projet dans
+un état à décider, pas cassé. Trois façons de revoir ce contexte sans le reconstituer à la main
+(issues #490/#506/#510) :
+
+- **Le skill `upgrade-review`** (archétype `meta`, attaché au concierge) : lit, explique et
+  recommande une ligne par proposition, pose les questions par lot, n'applique qu'une réponse
+  explicite via `grimoire proposals accept|reject`/`grimoire flow resume`.
+- **Le prompt `/grimoire-upgrade-review`** (projeté par `grimoire host sync` — commande Claude Code,
+  prompt Copilot) : le même protocole, invocable depuis un hôte avec support des commandes/prompts.
+- **`grimoire upgrade-flow review [--json]`** (lecture seule) : le contexte brut de l'étape 1 en un
+  bloc prêt à coller, pour un hôte sans slash command. Refuse de tourner si l'outil `grimoire` est
+  plus ancien que le kit aligné du projet (contrôle `doctor` `tool_version`, issue #515).
+
+```bash
+grimoire upgrade-flow review --project-root . --json
+```
+
+Rend `tool_version` (l'écart outil/kit, ou `null`), `last_run` (id, statut, nœud courant du dernier
+run `project-upgrade` — `grimoire.tools.flow_runs.list_flow_runs`), `checkpoint_pending` (booléen) et
+`pending_proposals` (le même contenu que `grimoire proposals list -o json`, filtré sur `status ==
+"pending"`). Aucune de ces trois portes n'écrit ni ne décide à la place de l'humain — la décision
+reste `grimoire proposals accept|reject <slug>` et `grimoire flow resume <run-id> --result
+<fichier.json>` (`{"pins": {"out": {"contract": "upgrade-complete"}}, "checkpoint_decision":
+"approve"|"reject"}`).
+
 ## Depuis le cockpit
 
 `POST /api/projects/update` (`src/grimoire/tools/project_update.py`, câblé dans `cmd_cockpit.py` et
