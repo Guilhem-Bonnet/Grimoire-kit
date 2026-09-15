@@ -608,7 +608,25 @@ def _fleet_entry(entry: dict[str, str]) -> dict[str, Any]:
 
     slug = entry.get("slug", "")
     raw_path = entry.get("path", "")
-    result: dict[str, Any] = {"slug": slug, "path": raw_path}
+    # `name` + `managed` (complément mineur, PR perf front #541) : le
+    # registre porte déjà un nom d'affichage humain par entrée
+    # (`project_registry.load_registry`) et `is_grimoire_managed` sait déjà
+    # dire si un projet est initialisé Grimoire ou seulement un dépôt git
+    # nu — cette route n'exposait ni l'un ni l'autre. La Flotte du cockpit
+    # (`piloter.js::renderFleet`/`watchReasons`) les lit sur `r.entry`
+    # (`entry.name || entry.slug`, `entry.managed`) et n'a plus d'autre appel
+    # pour aller les chercher depuis que `loadFleet` ne fait plus qu'UN appel
+    # à `/api/fleet`. Défaut sur `slug` si le registre ne portait pas de nom
+    # (entrée ancienne format).
+    from grimoire.tools.project_registry import is_grimoire_managed
+
+    managed = is_grimoire_managed(Path(raw_path)) if raw_path else False
+    result: dict[str, Any] = {
+        "slug": slug,
+        "path": raw_path,
+        "name": entry.get("name", slug),
+        "managed": managed,
+    }
     root = Path(raw_path) if raw_path else None
     if root is None or not root.is_dir():
         error = {"error": "projet introuvable"}
