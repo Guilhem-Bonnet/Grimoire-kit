@@ -70,7 +70,7 @@ function injectStyles() {
     .pl-insp-block h4 { font-size: var(--t-min); text-transform: none; color: var(--ink3); margin: 0 0 6px; font-weight: 500; }
     .pl-insp-row { display: flex; justify-content: space-between; gap: var(--sp-2); padding: 4px 0; font-size: var(--t-s); }
     .pl-actions { display: flex; flex-direction: column; gap: 6px; margin-top: var(--sp-2); }
-    .pl-preview { margin-top: 8px; padding: 8px; border: 1px dashed var(--line); border-radius: var(--r); font-size: var(--t-min); color: var(--ink2); }
+    .pl-preview, .pl-review-preview { margin-top: 8px; padding: 8px; border: 1px dashed var(--line); border-radius: var(--r); font-size: var(--t-min); color: var(--ink2); }
     .pl-nodes { margin: 8px 0; }
     /* Un bloc de code garde sa largeur propre et défile horizontalement —
        jamais pre-wrap, qui casse l'alignement d'une sortie CLI/Rich à
@@ -1308,7 +1308,7 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
   // rechargement de la fiche.
   const upgradeRuns = Array.isArray(sheet.upgradeRuns?.runs) ? sheet.upgradeRuns.runs : [];
   const latestUpgradeRun = upgradeRuns[0] || null;
-  const checkpointPendingRunId = (
+  let checkpointPendingRunId = (
     latestUpgradeRun
     && latestUpgradeRun.status === 'checkpointed'
     && latestUpgradeRun.currentNode === 'destructive'
@@ -1416,6 +1416,12 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
         confirmBtn.remove();
         if (result.ok) {
           markKitCheckpointPending(result.runId);
+          // Un run complet s'arrête toujours, non décidé, au checkpoint
+          // `destructive` (jamais un autre point d'arrêt pour un run mené à
+          // son terme) — le bouton « Revoir dans l'IDE » doit donc le
+          // refléter tout de suite, sans attendre un rechargement complet
+          // de la fiche.
+          checkpointPendingRunId = result.runId;
           // Le prochain retour sur la Flotte servirait sinon la ligne mise
           // en cache d'avant la mise à jour jusqu'à 60 s (issue #510 point
           // 5) — ce projet précis doit se relire, pas toute la flotte.
@@ -1439,6 +1445,85 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
     }
   });
   actionsBlock.append(updateBtn, preview);
+
+  // ── Revoir dans l'IDE (issue #520, lot 2) ───────────────────────────────
+  //
+  // `grimoire upgrade-flow run` s'arrête volontairement, non décidé, au
+  // checkpoint `destructive` ou sur une proposition V1 — rien depuis le
+  // cockpit n'aidait jusqu'ici à ouvrir la revue de ces décisions ailleurs
+  // que par la CLI à la main. Ce bouton n'écrit jamais rien lui-même : il
+  // ne fait que préparer le texte que `/grimoire-upgrade-review` (le
+  // prompt mission pack, issue #520 lot 1) attend, et le mettre à
+  // disposition — presse-papiers si possible, affiché sinon. Aucun lien
+  // d'ouverture d'IDE : rien dans ce projet ne déclare d'éditeur ouvrable
+  // (aucun schéma `vscode://`, aucun champ de config) — inventer ce lien
+  // promettrait une action que le cockpit ne peut pas tenir.
+  //
+  // Présent dans la page seulement s'il y a un travail réel à revoir —
+  // jamais un bouton greyé sans objet, ni un bouton toujours là qui
+  // inviterait à « revoir » un projet sans rien en attente.
+  function pendingProposalSlugs(payload) {
+    return (payload?.proposals || []).filter((p) => p.status === 'pending').map((p) => p.slug);
+  }
+
+  const reviewBtn = document.createElement('button');
+  reviewBtn.type = 'button';
+  reviewBtn.className = 'btn';
+  reviewBtn.textContent = "Revoir dans l'IDE";
+  const reviewPreview = document.createElement('div');
+  // Classe distincte de `.pl-preview` (même style, `injectStyles` ci-dessus) :
+  // le bouton « Mettre à jour » a déjà son propre `.pl-preview` dans le même
+  // bloc d'actions — un sélecteur `.pl-preview` unique doit continuer à n'en
+  // trouver qu'un (tests e2e existants, `test_workspace_cockpit_upgrade_
+  // flow.py`).
+  reviewPreview.className = 'pl-review-preview';
+  reviewPreview.hidden = true;
+
+  let pendingSlugs = [];
+  function updateReviewButton(payload) {
+    pendingSlugs = pendingProposalSlugs(payload);
+    const hasWork = pendingSlugs.length > 0 || Boolean(checkpointPendingRunId);
+    if (hasWork) {
+      if (!reviewBtn.isConnected) actionsBlock.append(reviewBtn, reviewPreview);
+    } else {
+      reviewBtn.remove();
+      reviewPreview.remove();
+      reviewPreview.hidden = true;
+    }
+  }
+  updateReviewButton(sheet.proposals);
+
+  reviewBtn.addEventListener('click', async () => {
+    const runId = checkpointPendingRunId || latestUpgradeRun?.runId || '';
+    const toPaste = ['/grimoire-upgrade-review', runId, ...pendingSlugs].filter(Boolean).join(' ');
+    const reviewCmd = `grimoire upgrade-flow review${slug ? ' # ' + slug : ''}`;
+    ctx.dock.echo(reviewCmd);
+
+    let copied = false;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(toPaste);
+        copied = true;
+      }
+    } catch (_error) {
+      copied = false;
+    }
+
+    reviewPreview.hidden = false;
+    reviewPreview.replaceChildren();
+    reviewPreview.append(text('div', null, copied
+      ? 'Copié dans le presse-papiers :'
+      : 'Presse-papiers indisponible — copiez ce texte à la main :'));
+    const pasteCode = document.createElement('code');
+    pasteCode.className = 'mono';
+    pasteCode.textContent = toPaste;
+    reviewPreview.append(pasteCode);
+    reviewPreview.append(text('div', 'lbl', "Aucun IDE ouvrable déclaré pour ce projet — collez ce texte dans l'hôte de votre choix, ou lancez directement dans le projet :"));
+    const cliCode = document.createElement('code');
+    cliCode.className = 'mono';
+    cliCode.textContent = 'grimoire upgrade-flow review';
+    reviewPreview.append(cliCode);
+  });
 
   if (ctx.host.kind === 'cockpit' && slug && slug !== ctx.host.project) {
     const openBtn = document.createElement('button');
@@ -1515,6 +1600,7 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
     ]);
     proposalsPayload = freshProposals;
     agentsPayload = freshAgents;
+    updateReviewButton(proposalsPayload);
     const freshProposalsSection = renderProposalsSection(ctx, proposalsPayload, refreshProposals, slug);
     proposalsSection.replaceWith(freshProposalsSection);
     proposalsSection = freshProposalsSection;

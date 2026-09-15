@@ -387,6 +387,10 @@ const docbar = {
   },
 };
 
+// `item.disabled` (+ `item.disabledReason` optionnel, en `title`) rend le
+// bouton visible mais inactif — un espace vide (pas encore de Mission
+// Ledger, pas encore de blueprint) garde ainsi ses vues affichées plutôt que
+// de les faire disparaître par early-return.
 function segment(el, items, active, onPick) {
   el.replaceChildren();
   el.hidden = !items.length;
@@ -396,7 +400,12 @@ function segment(el, items, active, onPick) {
     button.textContent = item.label || item;
     button.dataset.value = item.id || item;
     button.setAttribute('aria-pressed', String((item.id || item) === active));
-    button.addEventListener('click', () => onPick && onPick(button.dataset.value));
+    if (item.disabled) {
+      button.disabled = true;
+      if (item.disabledReason) button.title = item.disabledReason;
+    } else {
+      button.addEventListener('click', () => onPick && onPick(button.dataset.value));
+    }
     el.append(button);
   }
 }
@@ -523,6 +532,15 @@ async function goto(id, params) {
 
 let paletteItems = [];
 let paletteIndex = 0;
+// Ouverte depuis le raccourci ⌘K, la palette n'a pas de section prioritaire ;
+// ouverte depuis le chip projet (#project-chip), « Projets » doit apparaître
+// en premier — voir `openPalette()`.
+let paletteSectionFirst = null;
+
+// Ordre par défaut des sections titrées ; ne pas fusionner en une liste
+// plate (30+ entrées sans repère) comme avant.
+const PALETTE_SECTION_ORDER = ['Espaces', 'Commandes', 'Projets', 'Tâches', 'Workflows', 'Fichiers'];
+const PALETTE_SECTION_CAP = 12;
 
 // Chaque source alimente la palette indépendamment : une route absente ou en
 // erreur (projet sans ledger, sans blueprint…) ne doit jamais vider les
@@ -533,7 +551,7 @@ function settle(result, fallback) {
 
 async function buildPalette() {
   const spaces = SPACES.map((s) => ({
-    label: s.label, hint: 'Espace', command: `grimoire serve # ${s.id}`,
+    section: 'Espaces', label: s.label, hint: 'Espace', command: `grimoire serve # ${s.id}`,
     run: () => goto(s.id),
   }));
 
@@ -541,7 +559,7 @@ async function buildPalette() {
     await Promise.allSettled([api.commands(), api.projects(), api.blueprints(), api.tasks(), api.files()]);
 
   const commands = (settle(commandsResult, {}).commands || []).map((c) => ({
-    label: c.command, hint: c.summary, command: c.command,
+    section: 'Commandes', label: c.command, hint: c.summary, command: c.command,
     run: () => runCommand(c.key.split(' ')),
   }));
 
@@ -550,13 +568,13 @@ async function buildPalette() {
   // cockpit) »).
   const projects = host.kind === 'cockpit'
     ? (settle(projectsResult, {}).projects || []).map((p) => ({
-        label: p.name || p.slug, hint: 'Projet', command: `grimoire cockpit serve # ${p.slug}`,
+        section: 'Projets', label: p.name || p.slug, hint: 'Projet', command: `grimoire cockpit serve # ${p.slug}`,
         run: () => { location.search = '?project=' + encodeURIComponent(p.slug); },
       }))
     : [];
 
   const workflows = (settle(blueprintsResult, [])).map((b) => ({
-    label: b.name || b.id, hint: 'Workflow', command: `grimoire blueprint validate # ${b.id}`,
+    section: 'Workflows', label: b.name || b.id, hint: 'Workflow', command: `grimoire blueprint validate # ${b.id}`,
     run: () => goto('concevoir'),
   }));
 
@@ -564,13 +582,13 @@ async function buildPalette() {
   // (workspace_exec.ALLOWED) — sélectionner l'entrée l'exécute réellement,
   // au lieu de naviguer vers un espace encore vide (lot 4).
   const tasks = (settle(tasksResult, {}).tasks || []).map((t) => ({
-    label: t.title || t.id, hint: 'Tâche', command: `grimoire task show ${t.id}`,
+    section: 'Tâches', label: t.title || t.id, hint: 'Tâche', command: `grimoire task show ${t.id}`,
     run: () => runCommand(['task', 'show', t.id]),
   }));
 
   const files = (settle(filesResult, {}).tiers || []).flatMap((tier) =>
     (tier.files || []).map((f) => ({
-      label: f.path, hint: `Fichier · ${tier.label || tier.id}`, command: `grimoire # source ${f.path}`,
+      section: 'Fichiers', label: f.path, hint: `Fichier · ${tier.label || tier.id}`, command: `grimoire # source ${f.path}`,
       // `goto('source', { file })` : sans le second argument, `shell.js`
       // écrasait `location.hash` avant que `source.js` n'ait vu le chemin —
       // la palette listait les fichiers mais n'en ouvrait jamais un seul.
@@ -581,7 +599,10 @@ async function buildPalette() {
   paletteItems = [...spaces, ...commands, ...projects, ...workflows, ...tasks, ...files];
 }
 
-function openPalette() {
+// `sectionFirst` : section à placer en tête (ex. « Projets » quand on ouvre
+// depuis le chip projet, #project-chip). `null` garde l'ordre par défaut.
+function openPalette(sectionFirst = null) {
+  paletteSectionFirst = sectionFirst;
   $('palette').hidden = false;
   $('palette-input').value = '';
   $('palette-input').focus();
@@ -590,32 +611,64 @@ function openPalette() {
 
 function closePalette() {
   $('palette').hidden = true;
+  paletteSectionFirst = null;
 }
 
+function paletteSectionOrder() {
+  if (!paletteSectionFirst) return PALETTE_SECTION_ORDER;
+  return [paletteSectionFirst, ...PALETTE_SECTION_ORDER.filter((s) => s !== paletteSectionFirst)];
+}
+
+// La palette était une liste plate de 30+ entrées sans repère (spaces,
+// commandes, projets, workflows, tâches, fichiers concaténés) : on la
+// regroupe désormais par section titrée, plafonnée par section pour qu'une
+// section bavarde (Commandes) n'évince pas les autres (Projets, Tâches…).
 function renderPalette(query) {
   const needle = query.trim().toLowerCase();
   const list = $('palette-list');
   list.replaceChildren();
-  const matches = paletteItems
-    .filter((item) => !needle || (item.label + ' ' + item.hint).toLowerCase().includes(needle))
-    .slice(0, 40);
+
+  const bySection = new Map();
+  for (const item of paletteItems) {
+    if (needle && !(item.label + ' ' + item.hint).toLowerCase().includes(needle)) continue;
+    if (!bySection.has(item.section)) bySection.set(item.section, []);
+    bySection.get(item.section).push(item);
+  }
+
+  const matches = [];
   paletteIndex = 0;
-  matches.forEach((item, index) => {
-    const li = document.createElement('li');
-    li.role = 'option';
-    li.setAttribute('aria-selected', String(index === 0));
-    li.append(Object.assign(document.createElement('span'), { textContent: item.label }));
-    li.append(Object.assign(document.createElement('span'), { className: 'lbl', textContent: item.hint }));
-    li.append(Object.assign(document.createElement('span'), { className: 'cmd', textContent: item.command }));
-    li.addEventListener('click', () => { closePalette(); item.run(); });
-    list.append(li);
-  });
+  for (const section of paletteSectionOrder()) {
+    const items = (bySection.get(section) || []).slice(0, PALETTE_SECTION_CAP);
+    if (!items.length) continue;
+
+    const header = document.createElement('li');
+    header.role = 'presentation';
+    header.className = 'palette-section';
+    header.textContent = section;
+    list.append(header);
+
+    for (const item of items) {
+      const index = matches.length;
+      const li = document.createElement('li');
+      li.role = 'option';
+      li.setAttribute('aria-selected', String(index === 0));
+      li.append(Object.assign(document.createElement('span'), { textContent: item.label }));
+      li.append(Object.assign(document.createElement('span'), { className: 'lbl', textContent: item.hint }));
+      li.append(Object.assign(document.createElement('span'), { className: 'cmd', textContent: item.command }));
+      li.addEventListener('click', () => { closePalette(); item.run(); });
+      list.append(li);
+      matches.push(item);
+    }
+  }
   list._matches = matches;
 }
 
 function movePalette(delta) {
   const list = $('palette-list');
-  const options = [...list.children];
+  // Les en-têtes de section (`role="presentation"`) ne sont pas des options :
+  // seuls les `li[role="option"]` comptent pour la navigation clavier, dans
+  // le même ordre que `list._matches`.
+  const options = [...list.querySelectorAll('li[role="option"]')];
   if (!options.length) return;
   paletteIndex = (paletteIndex + delta + options.length) % options.length;
   options.forEach((li, i) => li.setAttribute('aria-selected', String(i === paletteIndex)));
@@ -685,7 +738,13 @@ async function main() {
   bindShortcuts();
   $('st-theme').addEventListener('click', toggleTheme);
   $('st-density').addEventListener('click', toggleDensity);
-  $('palette-open').addEventListener('click', openPalette);
+  $('palette-open').addEventListener('click', () => openPalette());
+  // Le chip projet ressemblait à un sélecteur mais n'avait aucun
+  // gestionnaire : un clic n'y faisait rien. Il ouvre la palette directement
+  // sur la section Projets — le changement de projet reste un
+  // `location.search = ?project=` (rechargement complet, voir `buildPalette`
+  // ci-dessus), inchangé.
+  $('project-chip').addEventListener('click', () => openPalette('Projets'));
   $('palette').addEventListener('pointerdown', (e) => { if (e.target.id === 'palette') closePalette(); });
   $('palette-input').addEventListener('input', (e) => renderPalette(e.target.value));
 

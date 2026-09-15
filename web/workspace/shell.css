@@ -97,6 +97,25 @@ select {
   font-size: var(--t-min);
   background: var(--e2);
   color: var(--ink2);
+  cursor: pointer;
+}
+
+.chip:hover {
+  background: var(--e3);
+  color: var(--ink);
+}
+
+/* Chip cliquable (ex. #project-chip) : chevron dessiné en CSS, jamais un
+   glyphe/emoji, pour signaler qu'il ouvre quelque chose (la palette). */
+.chip-pick .chevron {
+  width: 0;
+  height: 0;
+  flex: none;
+  margin-left: 2px;
+  border-left: 3px solid transparent;
+  border-right: 3px solid transparent;
+  border-top: 4px solid currentColor;
+  opacity: 0.6;
 }
 
 .dot {
@@ -228,6 +247,15 @@ body[data-active-space="source"] {
 .seg > button[aria-pressed="true"] {
   background: var(--e3);
   color: var(--ink);
+}
+
+/* Espace vide (pas encore de Mission Ledger / blueprint) : les vues restent
+   visibles, désactivées, plutôt que disparaître — l'utilisateur voit ce que
+   l'espace offrira dès qu'il aura des données. */
+.seg > button:disabled {
+  color: var(--ink3);
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .kbd {
@@ -680,6 +708,24 @@ body[data-active-space] .panel-head {
   font-family: var(--mono);
   font-size: var(--t-min);
   color: var(--ink3);
+}
+
+/* En-tête de section (Projets, Espaces, Commandes, Tâches, Workflows,
+   Fichiers) : jamais sélectionnable, jamais cliquable — juste un repère
+   visuel dans une liste qui dépassait 30 entrées à plat. */
+#palette-list li.palette-section {
+  height: auto;
+  padding: 10px 10px 4px;
+  cursor: default;
+  font-size: var(--t-min);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink3);
+}
+
+#palette-list li.palette-section:first-child {
+  padding-top: 4px;
 }
 
 /* ── Infobulles épinglables ────────────────────────────────────────────────*/

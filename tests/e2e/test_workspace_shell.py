@@ -449,9 +449,13 @@ def test_choisir_un_fichier_dans_la_palette_l_ouvre_dans_source(workspace: Page)
     workspace.locator("body").press("ControlOrMeta+k")
     workspace.wait_for_selector("#palette:not([hidden])")
     workspace.locator("#palette-input").fill("_grimoire/kit/agents")
-    workspace.wait_for_function("() => document.querySelectorAll('#palette-list li').length > 0")
+    workspace.wait_for_function("() => document.querySelectorAll('#palette-list li[role=\"option\"]').length > 0")
 
-    chosen_path = workspace.locator("#palette-list li").first.locator("span").first.inner_text()
+    # `#palette-list li` premier enfant peut être un en-tête de section
+    # (« Fichiers », `role="presentation"`, sans `<span>`) depuis que la
+    # palette est groupée par section — seul `li[role="option"]` porte une
+    # vraie entrée.
+    chosen_path = workspace.locator('#palette-list li[role="option"]').first.locator("span").first.inner_text()
     workspace.locator("body").press("Enter")
 
     workspace.wait_for_function("() => window.GrimoireWorkspace.space === 'source'")

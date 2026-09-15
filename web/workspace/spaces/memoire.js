@@ -380,8 +380,21 @@ export async function mount(root, ctx) {
   let view = hasOwnMemory ? 'store' : 'flotte';
   const fleetState = { scope: 'this' };
 
+  const views = hasOwnMemory
+    ? [{ id: 'store', label: 'Store' }, { id: 'graphe', label: 'Graphe' },
+       { id: 'couches', label: 'Couches' }, { id: 'architecture', label: 'Architecture' },
+       { id: 'flotte', label: 'Flotte' }]
+    : [{ id: 'flotte', label: 'Flotte' }];
+  const setView = (id) => { view = id; draw(); };
+
   const draw = () => {
     root.replaceChildren();
+    // `setViews` doit être rappelé À CHAQUE `draw()` (comme `executer.js` et
+    // `concevoir.js`), sinon le shell ne remet jamais `aria-pressed` à jour
+    // sur les boutons existants : un clic sur « Couches » changeait bien le
+    // contenu mais laissait « Store » visuellement actif — régression
+    // constatée à la revue du 2026-09-14.
+    ctx.docbar.setViews(views, view, setView);
     const wrap = document.createElement('div');
     wrap.className = 'me-wrap';
     if (view === 'store') renderStore(wrap, ctx, memory);
@@ -401,14 +414,6 @@ export async function mount(root, ctx) {
       ctx.docbar.setZoom([], null, () => {});
     }
   };
-
-  const views = hasOwnMemory
-    ? [{ id: 'store', label: 'Store' }, { id: 'graphe', label: 'Graphe' },
-       { id: 'couches', label: 'Couches' }, { id: 'architecture', label: 'Architecture' },
-       { id: 'flotte', label: 'Flotte' }]
-    : [{ id: 'flotte', label: 'Flotte' }];
-
-  ctx.docbar.setViews(views, view, (id) => { view = id; draw(); });
 
   draw();
   if (hasOwnMemory) {
