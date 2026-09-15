@@ -105,8 +105,18 @@
   flex: none;
 }
 
+.sr-assist-help {
+  color: var(--ink3);
+}
+
 .sr-assist-status {
-  margin-right: auto;
+  color: var(--ink2);
+}
+
+/* Le bouton reste collé au bord droit de la barre ; l'aide fixe et le
+   statut courant se lisent à gauche, sans survol. */
+.sr-assist-btn {
+  margin-left: auto;
 }
 
 .sr-assist-panel {

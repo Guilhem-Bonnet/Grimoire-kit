@@ -436,7 +436,16 @@ export async function mount(root, ctx) {
   }
 
   function renderProjet() {
-    ctx.docbar.setViews(VIEWS, state.view, setView);
+    // Sans blueprint, changer de vue n'a rien à afficher de plus que l'état
+    // vide ci-dessous : les boutons restent visibles (jamais absents) mais
+    // désactivés, plutôt que de laisser croire qu'ils font quelque chose.
+    ctx.docbar.setViews(
+      state.containers.length
+        ? VIEWS
+        : VIEWS.map((v) => ({ ...v, disabled: true, disabledReason: "Aucun blueprint : rien à afficher." })),
+      state.view,
+      setView,
+    );
     const aggregate = state.containers.length
       ? `${state.containers.length} blueprint(s)`
       : '';

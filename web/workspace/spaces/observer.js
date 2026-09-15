@@ -300,30 +300,7 @@ function renderSpanInspector(ctx, span) {
   }
 }
 
-export async function mount(root, ctx) {
-  injectStyles();
-  ctx.docbar.setBreadcrumb([ctx.host.project || 'projet', 'Observer']);
-  ctx.docbar.setViews(
-    [{ id: 'runtime', label: 'Runtime' }, { id: 'activite', label: 'Activité' },
-     { id: 'rtk', label: 'RTK' }, { id: 'bench', label: 'Bench' }],
-    'runtime',
-  );
-
-  const [otel, costModel, flowRuns] = await Promise.all([
-    ctx.api.otel().catch(() => ({ spans: [] })),
-    ctx.api.costModel().catch(() => null),
-    // Distinct du TraceLedger qu'`otel()` lit (#506) : un `grimoire
-    // upgrade-flow run` n'y écrit jamais de span, et cet espace disait
-    // « TraceLedger vide » même juste après un run réel — vrai du ledger,
-    // trompeur pour qui vient de lancer une mise à jour depuis Piloter.
-    ctx.api.flowRuns().catch(() => ({ runs: [] })),
-  ]);
-  const spans = Array.isArray(otel?.spans) ? otel.spans : [];
-  const modelRates = costModel?.modelRates || null;
-  const runs = Array.isArray(flowRuns?.runs) ? flowRuns.runs : [];
-
-  if (ctx.signal.aborted) return;
-
+function renderRuntime(root, ctx, { spans, modelRates, runs }) {
   if (!spans.length) {
     root.append(ctx.empty(
       'Observer',
@@ -398,4 +375,115 @@ export async function mount(root, ctx) {
   renderSpanInspector(ctx, null);
   ctx.dock.log('traces', ...spans.slice(-50).map((s) => `${s.startTime || '—'} · ${s.name}`));
   ctx.dock.echo('grimoire task trace');
+}
+
+// Activité : seul onglet secondaire avec une route serveur (`api.eventsLog()`
+// → /api/events/log, moteur `blueprint_telemetry.read_events`) — un flux par
+// fichier `events.jsonl` sous _grimoire-runtime-output/. Contenu réel, même
+// minimal : le compte par flux et les dernières lignes brutes, jamais un
+// onglet muet.
+function renderActivite(root, ctx, { events }) {
+  const streams = Object.entries(events || {}).filter(([, entries]) => Array.isArray(entries) && entries.length);
+  if (!streams.length) {
+    root.append(ctx.empty(
+      'Observer — Activité',
+      "Aucun flux d'événements : ni hook-runtime/events.jsonl ni task-flow/events.jsonl "
+      + "n'ont encore de ligne pour ce projet.",
+      'grimoire task trace',
+    ));
+    ctx.inspector.replaceChildren(text('p', 'lbl', 'Aucun flux à inspecter.'));
+    return;
+  }
+  const wrap = document.createElement('div');
+  wrap.className = 'ob-wrap';
+  for (const [name, entries] of streams) {
+    const panel = document.createElement('div');
+    panel.className = 'ob-panel';
+    panel.append(text('h3', null, `${name} · ${entries.length} évènement(s)`));
+    const list = document.createElement('div');
+    list.className = 'ob-activite-list';
+    for (const entry of entries.slice(-20).reverse()) {
+      const line = text('p', 'mono', JSON.stringify(entry).slice(0, 200));
+      line.style.margin = '2px 0';
+      list.append(line);
+    }
+    panel.append(list);
+    wrap.append(panel);
+  }
+  root.append(wrap);
+  ctx.inspector.replaceChildren(text('p', 'lbl', `${streams.length} flux d'événements chargé(s).`));
+  ctx.dock.log('traces', ...streams.map(([name, entries]) => `${name} : ${entries.length} évènement(s)`));
+}
+
+// RTK et Bench : aucune route serveur ne les alimente aujourd'hui (grep sur
+// forge_routes.py) — RTK vit uniquement côté CLI (`rtk gain`), et il n'existe
+// pas de bench exporté par ce serveur. Plutôt qu'un onglet qui ne réagit à
+// rien, l'un et l'autre le disent explicitement et pointent la vraie
+// commande CLI qui, elle, existe.
+function renderUnavailable(root, ctx, title, sentence, command) {
+  root.append(ctx.empty(title, sentence, command));
+  ctx.inspector.replaceChildren(text('p', 'lbl', 'Rien à inspecter : aucune donnée serveur pour cet onglet.'));
+}
+
+export async function mount(root, ctx) {
+  injectStyles();
+  ctx.docbar.setBreadcrumb([ctx.host.project || 'projet', 'Observer']);
+
+  let view = 'runtime';
+
+  const [otel, costModel, flowRuns, events] = await Promise.all([
+    ctx.api.otel().catch(() => ({ spans: [] })),
+    ctx.api.costModel().catch(() => null),
+    // Distinct du TraceLedger qu'`otel()` lit (#506) : un `grimoire
+    // upgrade-flow run` n'y écrit jamais de span, et cet espace disait
+    // « TraceLedger vide » même juste après un run réel — vrai du ledger,
+    // trompeur pour qui vient de lancer une mise à jour depuis Piloter.
+    ctx.api.flowRuns().catch(() => ({ runs: [] })),
+    ctx.api.eventsLog().catch(() => ({})),
+  ]);
+  const spans = Array.isArray(otel?.spans) ? otel.spans : [];
+  const modelRates = costModel?.modelRates || null;
+  const runs = Array.isArray(flowRuns?.runs) ? flowRuns.runs : [];
+
+  if (ctx.signal.aborted) return;
+
+  const setView = (id) => { view = id; draw(); };
+
+  function draw() {
+    root.replaceChildren();
+    // Le callback (3e argument) doit être repassé À CHAQUE rendu, sinon le
+    // premier clic met bien `aria-pressed` à jour (le shell recrée les
+    // boutons) mais plus aucun clic suivant n'appelle `onPick` : régression
+    // constatée sur cet espace, cf. revue du 2026-09-14.
+    ctx.docbar.setViews(
+      [{ id: 'runtime', label: 'Runtime' }, { id: 'activite', label: 'Activité' },
+       { id: 'rtk', label: 'RTK' }, { id: 'bench', label: 'Bench' }],
+      view,
+      setView,
+    );
+    if (view === 'activite') {
+      renderActivite(root, ctx, { events });
+      return;
+    }
+    if (view === 'rtk') {
+      renderUnavailable(
+        root, ctx, 'Observer — RTK',
+        "RTK (rust token killer) n'expose aujourd'hui aucune route serveur : ses économies "
+        + "ne vivent que côté CLI, dans son propre journal.",
+        'rtk gain --history',
+      );
+      return;
+    }
+    if (view === 'bench') {
+      renderUnavailable(
+        root, ctx, 'Observer — Bench',
+        "Aucun résultat de benchmark n'est exposé par ce serveur pour l'instant.",
+        'grimoire blueprint evals --record',
+      );
+      return;
+    }
+    renderRuntime(root, ctx, { spans, modelRates, runs });
+  }
+
+  draw();
 }
