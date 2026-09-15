@@ -14,6 +14,10 @@ et aucun de ces mécanismes ne serait exerçable.
 
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
+import uuid
 from pathlib import Path
 
 import pytest
@@ -29,6 +33,32 @@ def concevoir(workspace: Page, project_with_blueprint: tuple[Path, str]) -> tupl
     workspace.evaluate("() => window.GrimoireWorkspace.goto('concevoir')")
     workspace.wait_for_function("() => window.GrimoireWorkspace.space === 'concevoir'")
     workspace.wait_for_selector(".cv-card", timeout=15_000)
+    return workspace, bp_id
+
+
+@pytest.fixture
+def concevoir_scratch_blueprint(workspace: Page, real_project: Path) -> tuple[Page, str]:
+    """Un blueprint jetable, dédié à l'écriture (issue #535).
+
+    Jamais `workspace-demo` (`project_with_blueprint`) : ce fichier n'est créé
+    qu'une fois pour toute la session e2e (`real_project` est session-scoped)
+    et tous les autres tests de ce module comptent sur ses nœuds d'origine —
+    un ajout de nœud réellement enregistré le polluerait pour le reste de la
+    session. Un id unique par test garde l'écriture isolée.
+    """
+    bp_id = f"save-test-{uuid.uuid4().hex[:8]}"
+    target = real_project / "_grimoire" / "blueprints" / f"{bp_id}.blueprint.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    result = subprocess.run(
+        [sys.executable, "-m", "grimoire", "blueprint", "new", bp_id,
+         "--out", str(target), "--template", "pipeline"],
+        cwd=str(real_project), capture_output=True, text=True, check=False, timeout=60,
+    )
+    if not target.is_file():
+        pytest.skip(f"`grimoire blueprint new` n'a pas produit de fichier ici : {result.stderr[-400:]}")
+    workspace.evaluate("() => window.GrimoireWorkspace.goto('concevoir')")
+    workspace.wait_for_function("() => window.GrimoireWorkspace.space === 'concevoir'")
+    workspace.wait_for_selector(f'.cv-card[data-container-id="{bp_id}"]', timeout=15_000)
     return workspace, bp_id
 
 
@@ -191,3 +221,111 @@ def test_aucun_texte_du_graphe_sous_le_plancher_sombre(concevoir: tuple[Page, st
     )
     assert sizes, "aucun texte mesuré dans le graphe"
     assert min(sizes) >= 13.0, f"un texte du graphe rend sous le plancher sombre : {min(sizes)}px"
+
+
+# ── Ajouter un nœud depuis la Bibliothèque persiste (issue #535) ───────────
+#
+# Avant correctif : `addNode` ne mutait que `state.blueprint` en mémoire —
+# aucun appel d'écriture, le nœud disparaissait au rechargement malgré le
+# message de succès affiché dans le dock. Reproduit ici avec un blueprint
+# jetable (`concevoir_scratch_blueprint`), jamais `workspace-demo`.
+
+
+def test_ajouter_un_noeud_affiche_modifie_non_enregistre(
+    concevoir_scratch_blueprint: tuple[Page, str],
+) -> None:
+    """Le message ne doit plus jamais affirmer un succès qui n'existe pas sur
+    disque tant que « Enregistrer » n'a pas été cliqué."""
+    page, bp_id = concevoir_scratch_blueprint
+    page.locator(f'.cv-card[data-container-id="{bp_id}"]').dblclick()
+    page.wait_for_selector(".cv-node", timeout=15_000)
+    before = page.locator(".cv-node").count()
+
+    page.locator("body").press("2")
+    page.wait_for_selector(".cv-prim", timeout=10_000)
+    page.locator(".cv-prim").first.click()
+
+    page.wait_for_function(
+        "() => [...document.querySelectorAll('.cv-toolbar button')]"
+        ".some((b) => b.textContent.includes('modifié'))"
+    )
+    assert page.locator(".cv-node").count() == before + 1
+    save_btn = page.locator(".cv-toolbar button", has_text="Enregistrer")
+    assert save_btn.is_enabled(), "le bouton doit s'activer dès qu'il y a quelque chose à enregistrer"
+
+
+def test_enregistrer_apres_ajout_de_noeud_persiste_apres_rechargement(
+    concevoir_scratch_blueprint: tuple[Page, str], real_project: Path
+) -> None:
+    """Rouge avant le correctif : le nœud disparaissait au rechargement.
+
+    Vert après : « Enregistrer » écrit réellement `blueprintPut`
+    (`PUT /api/blueprints/<id>`, déjà servi côté serveur), et le nœud
+    survit à un rechargement complet de la page.
+    """
+    page, bp_id = concevoir_scratch_blueprint
+    page.locator(f'.cv-card[data-container-id="{bp_id}"]').dblclick()
+    page.wait_for_selector(".cv-node", timeout=15_000)
+    before = page.locator(".cv-node").count()
+
+    page.locator("body").press("2")
+    page.wait_for_selector(".cv-prim", timeout=10_000)
+    page.locator(".cv-prim").first.click()
+    page.wait_for_function(
+        "() => [...document.querySelectorAll('.cv-toolbar button')]"
+        ".some((b) => b.textContent.includes('modifié'))"
+    )
+
+    page.locator(".cv-toolbar button", has_text="Enregistrer").click()
+    page.wait_for_function(
+        "() => ![...document.querySelectorAll('.cv-toolbar button')]"
+        ".some((b) => b.textContent.includes('modifié'))"
+    )
+
+    target = real_project / "_grimoire" / "blueprints" / f"{bp_id}.blueprint.json"
+    saved = json.loads(target.read_text(encoding="utf-8"))
+    assert len(saved["nodes"]) == before + 1, "le nœud doit être écrit sur disque, pas seulement en mémoire"
+
+    page.reload(wait_until="domcontentloaded")
+    page.wait_for_selector("body[data-ready='1']", timeout=30_000)
+    page.evaluate("() => window.GrimoireWorkspace.goto('concevoir')")
+    page.wait_for_function("() => window.GrimoireWorkspace.space === 'concevoir'")
+    page.wait_for_selector(f'.cv-card[data-container-id="{bp_id}"]', timeout=15_000)
+    page.locator(f'.cv-card[data-container-id="{bp_id}"]').dblclick()
+    page.wait_for_selector(".cv-node", timeout=15_000)
+
+    assert page.locator(".cv-node").count() == before + 1, "le nœud doit survivre au rechargement"
+
+
+def test_changer_de_blueprint_avec_des_modifications_non_enregistrees_demande_confirmation(
+    concevoir_scratch_blueprint: tuple[Page, str],
+) -> None:
+    """Même mécanisme que Source (`source.js::openFile`) : quitter un
+    blueprint modifié sans l'avoir enregistré doit demander confirmation,
+    puisque rouvrir importe quoi (même ce même blueprint) relit le disque et
+    écraserait le brouillon en mémoire."""
+    page, bp_id = concevoir_scratch_blueprint
+    page.locator(f'.cv-card[data-container-id="{bp_id}"]').dblclick()
+    page.wait_for_selector(".cv-node", timeout=15_000)
+
+    page.locator("body").press("2")
+    page.wait_for_selector(".cv-prim", timeout=10_000)
+    page.locator(".cv-prim").first.click()
+    page.wait_for_function(
+        "() => [...document.querySelectorAll('.cv-toolbar button')]"
+        ".some((b) => b.textContent.includes('modifié'))"
+    )
+
+    dialog_messages: list[str] = []
+    page.on("dialog", lambda dialog: (dialog_messages.append(dialog.message), dialog.dismiss()))
+    # Revenir au niveau Projet ne relit rien (`setZoom` seul) : aucune
+    # confirmation attendue ici. C'est rouvrir un blueprint — même celui-ci —
+    # qui relirait le disque et écraserait le brouillon.
+    page.locator("#zoom-seg button", has_text="Projet").click()
+    page.locator(f'.cv-card[data-container-id="{bp_id}"]').dblclick()
+    page.wait_for_timeout(300)
+
+    assert dialog_messages, "rouvrir un blueprint modifié doit demander confirmation avant d'écraser le brouillon"
+    # `dismiss()` = Annuler : `zoomToWorkflow` doit s'être arrêté avant son
+    # propre `setZoom('workflow')` — le zoom reste sur Projet, pas Workflow.
+    assert page.locator("#zoom-seg button[aria-pressed='true']").inner_text().strip() == "Projet"
