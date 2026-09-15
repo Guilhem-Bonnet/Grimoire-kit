@@ -68,7 +68,6 @@ def test_apercu_en_echec_affiche_l_erreur_et_reactive_le_bouton(workspace: Page)
     assert update_button.inner_text() == "Mettre à jour — aperçu"
 
 
-@pytest.mark.xfail(strict=True, reason="#538 : Piloter ne rafraîchit jamais les propositions sur upgraded-but-failed")
 def test_confirmer_upgraded_but_failed_devrait_rafraichir_les_propositions(workspace: Page) -> None:
     aperçu_payload = {
         "ok": True, "dryRun": True, "path": "/dev/null", "code": 0,

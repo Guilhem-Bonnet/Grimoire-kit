@@ -1418,7 +1418,18 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
           : ('Échec de la mise à jour' + (result.error ? ` : ${result.error}` : '.'))));
         if (result.nodes) preview.append(renderNodeList(result.nodes));
         if (result.backupPath) preview.append(text('div', 'lbl', `Sauvegarde : ${result.backupPath}`));
-        if (result.ok && result.proposals && result.proposals.length) {
+        // `proposals` est joint par le backend dès que le run les connaît —
+        // `completed`, `upgraded-checkpoint-pending` ET `upgraded-but-failed`
+        // (`project_update.py::_run_upgrade_flow`) — jamais seulement sur
+        // succès. Garder cette condition sur `result.ok` (issue #538) faisait
+        // disparaître la section Propositions ET son rafraîchissement dès
+        // qu'`apply` refusait après écriture, alors que des propositions
+        // pouvaient déjà être en attente (ou tout juste écrites par ce run
+        // avant l'échec) : `state: "upgraded-but-failed"` implique toujours
+        // `ok: false` (`_derive_state`), les deux blocs ci-dessous restaient
+        // donc systématiquement morts sur cet état précis.
+        const hasProposals = Array.isArray(result.proposals);
+        if (hasProposals && result.proposals.length) {
           preview.append(text('div', 'lbl', `${result.proposals.length} proposition(s) en attente — voir la section Propositions ci-dessous.`));
         }
         confirmBtn.remove();
@@ -1428,8 +1439,12 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
           // `destructive` (jamais un autre point d'arrêt pour un run mené à
           // son terme) — le bouton « Revoir dans l'IDE » doit donc le
           // refléter tout de suite, sans attendre un rechargement complet
-          // de la fiche.
+          // de la fiche. N'a de sens que sur un run qui a réellement atteint
+          // ce checkpoint : jamais sur `upgraded-but-failed`, dont le nœud en
+          // échec (`apply`) précède `destructive` dans le déroulé.
           checkpointPendingRunId = result.runId;
+        }
+        if (result.ok || hasProposals) {
           // Le prochain retour sur la Flotte servirait sinon la ligne mise
           // en cache d'avant la mise à jour jusqu'à 60 s (issue #510 point
           // 5) — ce projet précis doit se relire, pas toute la flotte.
