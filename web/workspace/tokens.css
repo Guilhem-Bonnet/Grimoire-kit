@@ -216,27 +216,33 @@
  */
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
-    /* Première et seconde passes (#525, #530) : --bg est monté par étapes
-       mais restait mesuré à L* 94,7 — encore perçu comme gris sur les
-       captures, malgré des rapports de surface conformes. Troisième passe,
-       clair seulement (le sombre n'est pas touché) : --bg remonte à L* 96,5
-       (luminance 0,912), franchement blanc chaud plutôt que gris clair.
-       --e1/--bar/--e3 recomposés en conséquence — pas de simple report
-       proportionnel, le pas le plus court qui tienne 1,25:1 à chaque paire,
-       pour rester clair plutôt que retomber dans le gris (--e1 L* 87,3,
-       --bar L* 78,7, --e3 L* 90,7 ; --bar/--e2 atteint 1,77:1). --e2 reste
-       l'unique blanc pur (spec §2.1). --ink2/--ink3 inchangées : la surface
-       la plus sombre qu'elles touchent (--bar) est maintenant plus claire
-       qu'avant, donc plus de marge, pas moins — 6,7:1 et 5,4:1 mesurés,
-       contre les 4,7:1/4,7:1 de la passe précédente. */
-    --bg: #f6f5f0;
-    --e1: #dbdbd8;
-    --bar: #c3c3c0;
+    /* Passes #525/#530/#531 : --bg est monté trois fois (jusqu'à L* 96,5)
+       sans que le gris perçu ne bouge — parce que ce n'est pas --bg qui
+       porte le gris à l'écran. --e1 (`.pl-kpi`, `.pl-watch-row`, `.pl-table`
+       — les cartes de contenu) et --bar (`.pl-table th` — les en-têtes)
+       restaient à L* 87 et 79 : c'est là que l'œil lit « gris », puisque
+       --bg ne se voit qu'aux marges (`#canvas`). Quatrième passe, clair
+       seulement : la pile est inversée comme un thème clair sobre — les
+       cartes (--e1, --e2) deviennent blanches ou quasi (L* 99 et 100), le
+       fond de page (--bg, le « ground » derrière les cartes) et les barres/
+       en-têtes (--bar, --e3) deviennent un gris clair proche (L* 90),
+       chacun ≥1,25:1 de son voisin déclaré. --bar ne peut pas atteindre la
+       bande visée (L* 93-95) sans descendre sous 1,25:1 face à --e1 (quasi
+       blanc, contrainte algébrique : le plafond de --bar égale --bg dès
+       que --e1 est au minimum qui tient 1,25:1 depuis --bg) — équivalent à
+       --bg plutôt qu'à mi-chemin, documenté plutôt que forcé. --line monte
+       de .13 à .16 : les bordures de carte doivent se voir sans le secours
+       d'un fond gris derrière. --ink2/--ink3 inchangées, marge inchangée ou
+       meilleure (surface la plus sombre qu'elles touchent : --bar à L* 90,
+       plus clair qu'avant → plus de marge, jamais moins). */
+    --bg: #e3e2de;
+    --e1: #fcfcf9;
+    --bar: #e2e2de;
     --e2: #ffffff;
     --e3: #e4e5e0;
     --term: #1b1f25;
     --termink: #d6dae0;
-    --line: rgba(23, 25, 28, 0.13);
+    --line: rgba(23, 25, 28, 0.16);
     --ink: #17191c;
     --ink2: #34383e;
     --ink3: #42454b;
@@ -270,14 +276,14 @@
 }
 
 :root[data-theme="light"] {
-  --bg: #f6f5f0;
-  --e1: #dbdbd8;
-  --bar: #c3c3c0;
+  --bg: #e3e2de;
+  --e1: #fcfcf9;
+  --bar: #e2e2de;
   --e2: #ffffff;
   --e3: #e4e5e0;
   --term: #1b1f25;
   --termink: #d6dae0;
-  --line: rgba(23, 25, 28, 0.13);
+  --line: rgba(23, 25, 28, 0.16);
   --ink: #17191c;
   --ink2: #34383e;
   --ink3: #42454b;

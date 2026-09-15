@@ -74,18 +74,31 @@ comment la coder : c'est l'objet de l'ADR d'architecture qui l'accompagne.
 > gris. `--e2` reste l'unique blanc pur. Le sombre et les pastilles des deux
 > passes précédentes ne sont pas touchés.
 
+> **Quatrième retouche (clair seulement)** — remonter `--bg` trois fois
+> n'avait rien changé à l'écran : `--bg` ne se voit qu'aux marges
+> (`#canvas`), le gris perçu venait de `--e1` (cartes de contenu — KPI,
+> propositions, tableau, L* 87) et `--bar` (en-têtes de tableau, L* 79). La
+> pile est inversée comme un thème clair sobre : `--e1`/`--e2` (cartes)
+> blancs ou quasi (L* 99/100), `--bg`/`--bar`/`--e3` (fond de page et
+> barres) un gris clair proche (L* 90), chacun ≥1,25:1 de son voisin
+> déclaré. `--bar` ne peut pas atteindre la bande initialement visée
+> (L* 93-95) sans redescendre sous 1,25:1 face à `--e1` quasi blanc —
+> contrainte algébrique documentée dans `tokens.css`. `--line` clair monte
+> de .13 à .16 : les bordures de carte doivent se voir sans le secours d'un
+> fond gris derrière.
+
 ### 2.1 Surfaces (rôle unique chacune)
 
 | Token | Rôle | Sombre | Clair |
 |---|---|---|---|
-| `--bg` | toile : la plus profonde en sombre (teinte froide), franchement blanche en clair (L* 96,5), grille de points `--line` au pas de 22 px | `#070A10` | `#F6F5F0` |
-| `--e1` | panneaux : explorateur, inspecteur, rails | `#252C34` | `#DBDBD8` |
-| `--bar` | barres : application, en-têtes de panneaux, onglets du dock, état | `#333C46` | `#C3C3C0` |
+| `--bg` | toile : la plus profonde en sombre (teinte froide), gris clair (ground derrière les cartes) en clair, grille de points `--line` au pas de 22 px | `#070A10` | `#E3E2DE` |
+| `--e1` | panneaux : explorateur, inspecteur, rails (blanc ou quasi en clair — L* 99) | `#252C34` | `#FCFCF9` |
+| `--bar` | barres : application, en-têtes de panneaux, onglets du dock, état | `#333C46` | `#E2E2DE` |
 | `--e2` | posé : nœuds, cartes, champs, bulles (seul blanc pur en clair, petites surfaces, ombre `0 2px 8px rgba(0,0,0,.18)`) | `#465260` | `#FFFFFF` |
 | `--e3` | survol, sélection de segment | `#54616F` | `#E4E5E0` |
 | `--term` | terminal et journaux du dock, toujours sombre | `#0E1013` | `#1B1F25` |
 | `--termink` | encre du terminal | `#C9CED6` | `#D6DAE0` |
-| `--line` | la seule ligne | `rgba(255,255,255,.11)` | `rgba(23,25,28,.13)` |
+| `--line` | la seule ligne | `rgba(255,255,255,.11)` | `rgba(23,25,28,.16)` |
 
 ### 2.2 Encre, accent, états, séries
 
