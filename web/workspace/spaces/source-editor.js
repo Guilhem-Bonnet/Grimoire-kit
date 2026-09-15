@@ -203,17 +203,26 @@ function showDiagTip(tip, anchor, diagnostics, onExplain) {
 function createAssistBar() {
   const bar = document.createElement('div');
   bar.className = 'sr-assist-bar';
-  const status = document.createElement('span');
-  status.className = 'sr-assist-status lbl';
-  status.hidden = true;
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'btn sr-assist-btn';
   btn.textContent = 'Suggérer';
   btn.title = 'Suggestion par modèle local — Ctrl+Maj+Espace';
   btn.hidden = true;
-  bar.append(status, btn);
-  return { bar, status, btn };
+  // Aide permanente, lisible sans survoler le bouton : avant cette issue,
+  // seul le `title` (au survol) expliquait ce que fait « Suggérer » — et les
+  // états « chargement du modèle » / « indisponible » n'étaient, eux, pas
+  // lisibles du tout (le bouton entier disparaissait). `help` porte le texte
+  // fixe ; `status` porte l'état courant (modèle, chargement, indisponible).
+  const help = document.createElement('span');
+  help.className = 'sr-assist-help lbl';
+  help.textContent = 'Suggestion par un modèle local (source.assist.model), jamais insérée sans votre clic.';
+  help.hidden = true;
+  const status = document.createElement('span');
+  status.className = 'sr-assist-status lbl';
+  status.hidden = true;
+  bar.append(help, status, btn);
+  return { bar, status, btn, help };
 }
 
 function createAssistPanel() {
@@ -435,7 +444,7 @@ export function build(ctx, entry, state, hooks) {
   // dans source.css.
   const wrap = document.createElement('div');
   wrap.className = 'sr-assist-wrap';
-  const { bar: assistBar, status: assistStatusEl, btn: assistBtn } = createAssistBar();
+  const { bar: assistBar, status: assistStatusEl, btn: assistBtn, help: assistHelpEl } = createAssistBar();
   const assistPanel = createAssistPanel();
   wrap.append(assistBar, code, assistPanel);
 
@@ -527,15 +536,28 @@ export function build(ctx, entry, state, hooks) {
     if (destroyed) return;
     const loading = Boolean(status && status.loading);
     assistReady = Boolean(status && status.enabled && status.available);
-    const show = Boolean(status && status.enabled && (status.available || loading));
+    // Opt-in absent (`status.enabled === false`) : rien ne s'affiche, comme
+    // avant (doctrine « l'interface ne montre rien et ne tente rien »).
+    // Opt-in présent mais modèle non disponible (Ollama injoignable, modèle
+    // absent de `ollama list`…) : avant cette issue, `show` restait `false`
+    // dans ce cas — le bouton ET son statut disparaissaient entièrement,
+    // sans le moindre indice, même au survol. Il s'affiche désormais
+    // désactivé, avec la vraie raison rendue par le serveur (`status.reason`).
+    const show = Boolean(status && status.enabled);
     assistBtn.hidden = !show;
+    assistHelpEl.hidden = !show;
     assistStatusEl.hidden = !show;
-    assistBtn.disabled = loading;
-    assistBtn.title = loading ? 'chargement du modèle' : 'Suggestion par modèle local — Ctrl+Maj+Espace';
-    if (assistReady) {
-      assistStatusEl.textContent = `assistant local · ${status.model}`;
-    } else if (loading) {
+    assistBtn.disabled = loading || !assistReady;
+    if (loading) {
+      assistBtn.title = 'chargement du modèle';
       assistStatusEl.textContent = `assistant local · ${status.model} (chargement du modèle)`;
+    } else if (assistReady) {
+      assistBtn.title = 'Suggestion par modèle local — Ctrl+Maj+Espace';
+      assistStatusEl.textContent = `assistant local · ${status.model}`;
+    } else if (show) {
+      const reason = (status && status.reason) || 'raison inconnue';
+      assistBtn.title = reason;
+      assistStatusEl.textContent = `assistant local indisponible : ${reason}`;
     }
     clearTimeout(assistPollTimer);
     if (loading) assistPollTimer = setTimeout(refreshAssistStatus, ASSIST_POLL_DELAY);

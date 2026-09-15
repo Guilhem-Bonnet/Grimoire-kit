@@ -516,9 +516,34 @@ export async function mount(root, ctx) {
   let selected = ctx.params.task || null;
   const board = await ctx.api.tasks();
 
+  const VIEW_LABELS = [
+    { id: 'board4', label: 'Board 4' },
+    { id: 'board8', label: 'Board 8' },
+    { id: 'liste', label: 'Liste' },
+    { id: 'timeline', label: 'Timeline' },
+  ];
+
   if (!board.ledger) {
     ctx.docbar.setBreadcrumb([ctx.host.project || 'projet', 'Exécuter']);
-    wrap.append(ctx.empty('Exécuter', board.note || "Ce projet n'a pas encore de Mission Ledger.", 'grimoire task add'));
+    // Avant cette issue, un early-return ici évitait tout appel à
+    // `setViews` : les boutons de vue disparaissaient purement et
+    // simplement plutôt que rester visibles (désactivés) — l'utilisateur ne
+    // pouvait pas deviner ce que l'espace propose une fois un Mission Ledger
+    // ouvert. On les rend désormais, désactivés, avec la raison en `title`.
+    ctx.docbar.setViews(
+      VIEW_LABELS.map((v) => ({
+        ...v,
+        disabled: true,
+        disabledReason: "Aucun Mission Ledger : ouvrez-en un d'abord.",
+      })),
+      null,
+      () => {},
+    );
+    wrap.append(ctx.empty(
+      'Exécuter',
+      board.note || "Ce projet n'a pas encore de Mission Ledger.",
+      'grimoire task add "<titre>" --acceptance "<critère>"',
+    ));
     ctx.dock.echo('grimoire task add');
     return;
   }
@@ -530,16 +555,7 @@ export async function mount(root, ctx) {
     const fresh = await ctx.api.tasks();
     const tasks = fresh.tasks || [];
     ctx.docbar.setBreadcrumb([ctx.host.project || 'projet', 'Exécuter']);
-    ctx.docbar.setViews(
-      [
-        { id: 'board4', label: 'Board 4' },
-        { id: 'board8', label: 'Board 8' },
-        { id: 'liste', label: 'Liste' },
-        { id: 'timeline', label: 'Timeline' },
-      ],
-      view,
-      setView,
-    );
+    ctx.docbar.setViews(VIEW_LABELS, view, setView);
     if (ctx.signal.aborted) return;
 
     const onSelect = async (id) => {

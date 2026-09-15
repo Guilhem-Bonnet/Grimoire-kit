@@ -111,6 +111,77 @@ def served(real_project: Path, tmp_path_factory: pytest.TempPathFactory) -> Iter
         assert not _alive(process.pid), f"serveur survivant : pid {process.pid}"
 
 
+@pytest.fixture(scope="session")
+def served_empty(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
+    """Un projet fraîchement scaffoldé, jamais touché après `grimoire init` :
+    ni Mission Ledger (aucun `task add`), ni blueprint (aucun `blueprint
+    new`) — les deux états vides que Concevoir et Exécuter doivent savoir
+    montrer utilement (commande réelle affichée, boutons de vue rendus mais
+    désactivés plutôt qu'absents).
+
+    Un projet DÉDIÉ, pas `real_project` : ce dernier est une fixture de
+    portée session partagée par toute la suite e2e, et plusieurs fixtures
+    ailleurs (`project_with_task`, `project_with_blueprint`,
+    `served_cockpit`) lui ajoutent une tâche ou un blueprint dès qu'elles
+    sont sollicitées — l'ordre de collecte des tests déciderait alors
+    silencieusement si `real_project` est encore vide au moment de ce test.
+    """
+    root = tmp_path_factory.mktemp("workspace-empty") / "projet-vide"
+    root.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q"], cwd=str(root), check=False, capture_output=True)
+    created = subprocess.run(
+        [sys.executable, "-m", "grimoire", "init", ".", "-y", "--name", "projet-vide"],
+        cwd=str(root), capture_output=True, text=True, check=False, timeout=180,
+    )
+    if not (root / "_grimoire" / "kit").is_dir():
+        pytest.skip(f"`grimoire init` indisponible ici : {created.stderr[-400:]}")
+    subprocess.run(
+        [sys.executable, "-m", "grimoire", "standard", "init", "--profile", "governed"],
+        cwd=str(root), check=False, capture_output=True, timeout=180,
+    )
+
+    port = _free_port()
+    env = dict(os.environ)
+    env["GRIMOIRE_COCKPIT_HOME"] = str(tmp_path_factory.mktemp("cockpit-home-empty"))
+    env["NO_COLOR"] = "1"
+    process = subprocess.Popen(
+        [
+            sys.executable, "-m", "grimoire", "serve",
+            "--project-root", str(root),
+            "--port", str(port),
+            "--no-open",
+        ],
+        cwd=str(root),
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        _wait_ready(port, time.monotonic() + 60)
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=10)
+        assert not _alive(process.pid), f"serveur survivant : pid {process.pid}"
+
+
+@pytest.fixture
+def empty_workspace(browser: Browser, served_empty: str) -> Iterator[Page]:
+    """La coque, chargée et prête, sur le projet vide de :func:`served_empty`."""
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
+    page = context.new_page()
+    page.goto(f"{served_empty}/workspace/index.html", wait_until="domcontentloaded")
+    page.wait_for_selector("body[data-ready='1']", timeout=30_000)
+    try:
+        yield page
+    finally:
+        context.close()
+
+
 #: Gates minimales pour amener une tâche jusqu'à la porte « review » sans
 #: dépendre du template `governed` du standard (qui exige un context bundle et
 #: un fournisseur activé dès `ready -> in_progress` — voir `served_cockpit`) :
