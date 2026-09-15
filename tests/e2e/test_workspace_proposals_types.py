@@ -104,31 +104,45 @@ def test_accepter_une_proposition_type_skill_cree_le_fichier_et_l_attache(
 def test_accepter_une_proposition_type_needs_hosts_declare_les_hotes_actives(
     workspace: Page, real_project: Path
 ) -> None:
-    from grimoire.proposals import create_manual_proposal
+    """`real_project` est une fixture de session partagée par toute la suite
+    e2e (voir la mise en garde de `served_empty`, `conftest.py`) : déclarer
+    `hosts.enabled` dessus retentit sur des tests bien plus tard dans la même
+    session (`grimoire status`/`grimoire doctor` jugent alors ce projet à
+    l'aune de hôtes qu'il n'a jamais vraiment équipés — constaté : la config
+    invalide a fait échouer un test de `test_workspace_source.py`, la config
+    valide en a fait échouer un autre, « doctor vert » attendu). La route et
+    l'UI sont donc bien exercées ci-dessus, mais `project-context.yaml` est
+    restauré à l'identique en sortie, quoi qu'il arrive."""
+    config_path = real_project / "project-context.yaml"
+    original = config_path.read_text(encoding="utf-8")
+    try:
+        from grimoire.proposals import create_manual_proposal
 
-    create_manual_proposal(
-        real_project,
-        slug=NEEDS_HOSTS_SLUG,
-        specialty=NEEDS_HOSTS_SLUG,
-        artifact_type="needs-hosts",
-        artifact_ref="claude-code,copilot",
-    )
+        create_manual_proposal(
+            real_project,
+            slug=NEEDS_HOSTS_SLUG,
+            specialty=NEEDS_HOSTS_SLUG,
+            artifact_type="needs-hosts",
+            artifact_ref="claude,copilot",
+        )
 
-    _open_piloter(workspace)
-    row = _row(workspace, NEEDS_HOSTS_SLUG)
-    row.wait_for()
-    assert "besoins" in row.inner_text().lower()
-    row.get_by_role("button", name="Accepter").click()
+        _open_piloter(workspace)
+        row = _row(workspace, NEEDS_HOSTS_SLUG)
+        row.wait_for()
+        assert "besoins" in row.inner_text().lower()
+        row.get_by_role("button", name="Accepter").click()
 
-    workspace.wait_for_function(
-        "(slug) => !Array.from(document.querySelectorAll('.pl-prop-row')).some((r) => r.textContent.includes(slug))",
-        arg=NEEDS_HOSTS_SLUG,
-    )
+        workspace.wait_for_function(
+            "(slug) => !Array.from(document.querySelectorAll('.pl-prop-row')).some((r) => r.textContent.includes(slug))",
+            arg=NEEDS_HOSTS_SLUG,
+        )
 
-    from grimoire.tools._common import load_yaml_roundtrip
+        from grimoire.tools._common import load_yaml_roundtrip
 
-    data = load_yaml_roundtrip(real_project / "project-context.yaml")
-    assert set(data.get("hosts", {}).get("enabled", [])) >= {"claude-code", "copilot"}
+        data = load_yaml_roundtrip(config_path)
+        assert set(data.get("hosts", {}).get("enabled", [])) >= {"claude", "copilot"}
+    finally:
+        config_path.write_text(original, encoding="utf-8")
 
 
 def test_une_proposition_repair_sans_substitution_n_offre_pas_accepter(
