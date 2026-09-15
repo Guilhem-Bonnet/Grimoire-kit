@@ -122,8 +122,11 @@ def test_piloter_kit_aligne_distinct_de_installe_ne_dit_pas_a_jour(browser: Brow
             "« à jour » à côté de deux versions différentes est la contradiction de #288"
         )
         assert "aligné" in kit_block_text.lower()
-        dot = kit_block.locator(".dot").first
-        assert "warn" not in (dot.get_attribute("class") or ""), "upToDate=true doit rester un point vert"
+        # Seconde marche du thème (#525 suite) : le point + mot du badge Kit
+        # est devenu une pastille pleine (`.chip.pill`, piloter.js::pill()) —
+        # même assertion sur la même information, un sélecteur différent.
+        badge = kit_block.locator(".chip.pill").first
+        assert "warn" not in (badge.get_attribute("class") or ""), "upToDate=true doit rester une pastille verte"
     finally:
         context.close()
 

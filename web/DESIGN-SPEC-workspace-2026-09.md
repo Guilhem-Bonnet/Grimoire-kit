@@ -47,15 +47,33 @@ comment la coder : c'est l'objet de l'ADR d'architecture qui l'accompagne.
 > Les valeurs ci-dessous restent indicatives — `tokens.css` est la seule
 > source de vérité pour la couleur exacte.
 
+> **Seconde marche (même revue, suite)** — Guilhem, sur la première marche
+> ci-dessus : « accepté tel quel, puis une seconde marche plus franche ».
+> Quatre changements : (1) les écarts de surface repassent de ~1,30 à
+> 1,26-1,42 selon la paire, avec un vrai palier entre panneaux (`--e1`) et
+> cartes (`--e2`) — `--bg` sombre reçoit une teinte froide, `--bg` clair
+> remonte franchement près du blanc chaud (« fond franchement clair », pas
+> juste moins terne) ; coût documenté : l'écart `--ink`/`--ink2` (sombre) se
+> resserre de 1,32 à 1,21. (2) `--acc` se voit sur CHAQUE élément actif —
+> onglet, vue, ligne sélectionnée, bouton par défaut (fond plein, texte
+> `--onfill`), champ focus — pas seulement une bordure fine. (3) Les statuts
+> kit/CI/doctor/mémoire (Inspecteur, Flotte), le type de proposition et le
+> nœud du déroulé passent du point + mot à la pastille pleine (fond saturé +
+> `--onfill`) ; genre de blueprint et `risk_profile` restent en point + mot
+> (hors périmètre demandé). (4) Le filet d'onglet et le liseré de panneau
+> deviennent un bandeau plein (2 px → 4 px), et le panneau qui a le focus
+> clavier gagne un liseré élargi (3 px, `:focus-within`, aucun état posé côté
+> JS). Harnais de contraste inchangé (texte AA 4,5:1, surfaces 1,25:1 min).
+
 ### 2.1 Surfaces (rôle unique chacune)
 
 | Token | Rôle | Sombre | Clair |
 |---|---|---|---|
-| `--bg` | toile : la plus profonde en sombre, gris moyen en clair, grille de points `--line` au pas de 22 px | `#0A0C0F` | `#D7D8D4` |
-| `--e1` | panneaux : explorateur, inspecteur, rails | `#21272E` | `#F2F2EF` |
-| `--bar` | barres : application, en-têtes de panneaux, onglets du dock, état | `#313A44` | `#D9D9D5` |
-| `--e2` | posé : nœuds, cartes, champs, bulles (seul blanc pur en clair, petites surfaces, ombre `0 2px 8px rgba(0,0,0,.18)`) | `#404B58` | `#FFFFFF` |
-| `--e3` | survol, sélection de segment | `#505C6A` | `#DFE0DB` |
+| `--bg` | toile : la plus profonde en sombre (teinte froide), franchement claire en clair, grille de points `--line` au pas de 22 px | `#070A10` | `#F1F0EB` |
+| `--e1` | panneaux : explorateur, inspecteur, rails | `#252C34` | `#D1D1CE` |
+| `--bar` | barres : application, en-têtes de panneaux, onglets du dock, état | `#333C46` | `#B5B5B2` |
+| `--e2` | posé : nœuds, cartes, champs, bulles (seul blanc pur en clair, petites surfaces, ombre `0 2px 8px rgba(0,0,0,.18)`) | `#465260` | `#FFFFFF` |
+| `--e3` | survol, sélection de segment | `#54616F` | `#D7D8D3` |
 | `--term` | terminal et journaux du dock, toujours sombre | `#0E1013` | `#1B1F25` |
 | `--termink` | encre du terminal | `#C9CED6` | `#D6DAE0` |
 | `--line` | la seule ligne | `rgba(255,255,255,.11)` | `rgba(23,25,28,.13)` |
@@ -65,16 +83,17 @@ comment la coder : c'est l'objet de l'ADR d'architecture qui l'accompagne.
 | Token | Sombre | Clair | Contrainte |
 |---|---|---|---|
 | `--ink` | `#F2F3F5` | `#17191C` | |
-| `--ink2` | `#D1D9E4` | `#4E545C` | ≥ 4,5:1 sur `--e1`, `--bar`, `--e2` et `--e3` (posé sur `--e3` : chips, infobulles) |
-| `--ink3` | `#9EA7B2` | `#565A61` | ≥ 4,5:1 sur `--e1` et `--bar` |
-| `--acc` (interaction : onglet actif, liseré de sélection, focus, ligne sélectionnée) | `#4C9BE8` | `#1F6FBF` | teinte de la série 1 — distincte de l'encre et de `--pri` |
-| `--accsoft` (fond de sélection) | `rgba(76,155,232,.16)` | `rgba(31,111,191,.12)` | même teinte que `--acc` |
+| `--ink2` | `#D7DFEA` | `#34383E` | ≥ 4,5:1 sur `--e1`, `--bar`, `--e2` et `--e3` (posé sur `--e3` : chips, infobulles) |
+| `--ink3` | `#A0AAB5` | `#42454B` | ≥ 4,5:1 sur `--e1` et `--bar` |
+| `--acc` (interaction : onglet, vue, ligne sélectionnée, bouton par défaut, focus — chaque élément actif) | `#4C9BE8` | `#1F6FBF` | teinte de la série 1 — distincte de l'encre et de `--pri` |
+| `--accsoft` (fond de sélection légère) | `rgba(76,155,232,.16)` | `rgba(31,111,191,.12)` | même teinte que `--acc` |
+| `--onfill` (texte sur un remplissage saturé — accent ou badge d'état plein) | `#0E1013` | `#FFFFFF` | ≥ 4,5:1 sur chacune des six couleurs d'état/série (min 5,72:1) et sur `--acc` |
 | `--pri` (action primaire, une par écran) et marque | `#FF6B3D` | `#D9481A` | texte dessus `#0E1013` / `#FFFFFF` |
-| `--ok` | `#3DBE7A` | `#1F8A55` | état = point + mot, jamais la couleur seule |
+| `--ok` | `#3DBE7A` | `#1D814F` | pastille pleine (kit/CI/doctor/mémoire, type de proposition, nœud du déroulé) ou point + mot ; jamais la couleur seule |
 | `--warn` | `#E2B33C` | `#9C6D0C` | |
 | `--bad` | `#E5645A` | `#B83A36` | |
-| séries 1, 2, 3 (aussi vocabulaire des badges — genre de blueprint, type de proposition) | `#4C9BE8` `#B07CE8` `#D99A2B` | `#1F6FBF` `#6B48C4` `#9A6A08` | jamais réutilisées pour un état ; toujours point + mot |
-| identité d'espace — 6 teintes désaturées (Piloter, Concevoir, Exécuter, Observer, Mémoire, Source) | voir `tokens.css` (`--id-*`) | id. | filet d'onglet et liseré de panneau seulement, jamais un aplat, jamais sur du texte |
+| séries 1, 2, 3 (aussi vocabulaire des badges — genre de blueprint, type de proposition) | `#4C9BE8` `#B07CE8` `#D99A2B` | `#1F6FBF` `#6B48C4` `#9A6A08` | jamais réutilisées pour un état ; toujours pastille pleine ou point + mot |
+| identité d'espace — 6 teintes désaturées (Piloter, Concevoir, Exécuter, Observer, Mémoire, Source) | voir `tokens.css` (`--id-*`) | id. | bandeau plein d'onglet et de panneau (4 px), jamais sur du texte |
 
 Règle : aucune couleur codée en dur hors de `forge-tokens.css`. Un test
 l'interdit.

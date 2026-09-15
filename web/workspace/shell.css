@@ -151,6 +151,49 @@ select {
   background: var(--s3);
 }
 
+/* ── Pastilles pleines (seconde marche) ────────────────────────────────────
+ * Remplace le point + mot par un aplat coloré + texte, pour les statuts qui
+ * s'y prêtent (kit/CI/doctor/mémoire — Inspecteur et Flotte ; type de
+ * proposition ; nœud du déroulé — voir piloter.js::pill()). --onfill est
+ * choisi par thème pour tenir ≥4,5:1 sur chacune des six couleurs pleines
+ * (tokens.css). Neutre (pas de couleur d'état) : `.chip.pill` sans
+ * modificateur garde l'apparence de `.chip` telle quelle. */
+.chip.pill.ok {
+  background: var(--ok);
+  color: var(--onfill);
+  border-color: transparent;
+}
+.chip.pill.warn {
+  background: var(--warn);
+  color: var(--onfill);
+  border-color: transparent;
+}
+.chip.pill.bad {
+  background: var(--bad);
+  color: var(--onfill);
+  border-color: transparent;
+}
+.chip.pill.s1 {
+  background: var(--s1);
+  color: var(--onfill);
+  border-color: transparent;
+}
+.chip.pill.s2 {
+  background: var(--s2);
+  color: var(--onfill);
+  border-color: transparent;
+}
+.chip.pill.s3 {
+  background: var(--s3);
+  color: var(--onfill);
+  border-color: transparent;
+}
+.chip.pill.acc {
+  background: var(--acc);
+  color: var(--onfill);
+  border-color: transparent;
+}
+
 .btn {
   height: var(--h-ctl);
   display: inline-flex;
@@ -174,6 +217,16 @@ select {
   border-color: var(--pri);
   color: var(--onpri);
   font-weight: 500;
+}
+
+/* Bouton « par défaut » actif (bascule, pas --pri, la couleur de marque) —
+ * seconde marche : l'accent doit se voir sur chaque élément actif, y
+ * compris un bouton simple, pas seulement --pri. */
+.btn[aria-pressed="true"],
+.btn.on {
+  background: var(--acc);
+  border-color: var(--acc);
+  color: var(--onfill);
 }
 
 /* ── Identité d'espace ────────────────────────────────────────────────────
@@ -220,6 +273,8 @@ body[data-active-space="source"] {
 .tab[aria-selected="true"],
 .tab.on {
   color: var(--ink);
+  background: var(--accsoft);
+  border-bottom-width: 3px;
   border-bottom-color: var(--id-current, var(--acc));
   font-weight: 500;
 }
@@ -245,8 +300,8 @@ body[data-active-space="source"] {
 }
 
 .seg > button[aria-pressed="true"] {
-  background: var(--e3);
-  color: var(--ink);
+  background: var(--acc);
+  color: var(--onfill);
 }
 
 /* Espace vide (pas encore de Mission Ledger / blueprint) : les vues restent
@@ -283,6 +338,12 @@ body[data-active-space="source"] {
   width: 100%;
 }
 
+/* Champ focus (seconde marche) : l'accent doit se voir, pas seulement
+   l'anneau `:focus-visible` déjà posé plus haut sur `*`. */
+.input:focus-within {
+  border-color: var(--acc);
+}
+
 .field {
   display: flex;
   flex-direction: column;
@@ -309,6 +370,8 @@ body[data-active-space="source"] {
 .tree > [aria-current="true"] {
   background: var(--accsoft);
   color: var(--ink);
+  border-left: 3px solid var(--acc);
+  padding-left: calc(var(--sp-2) - 3px);
 }
 
 /* Le seul bloc d'état vide : il dit d'où viendra la donnée. */
@@ -481,6 +544,17 @@ body[data-active-space="source"] {
   border-left: 1px solid var(--line);
 }
 
+/* Panneau actif (seconde marche) : liseré plus large, à la place du 1px
+   discret, sur le panneau qui contient réellement le focus clavier — pas
+   besoin d'un état posé par shell.js, `:focus-within` suffit. */
+.panel-left:focus-within {
+  border-right: 3px solid var(--id-current, var(--acc));
+}
+
+.panel-right:focus-within {
+  border-left: 3px solid var(--id-current, var(--acc));
+}
+
 .panel-head {
   height: var(--h-doc);
   display: flex;
@@ -492,10 +566,11 @@ body[data-active-space="source"] {
   flex: none;
 }
 
-/* Liseré de l'identité d'espace, en écho du filet d'onglet (voir plus haut) :
-   sans --id-current (avant le premier `goto()`), le filet ne se voit pas. */
+/* Bandeau plein de l'identité d'espace, en écho du filet d'onglet (voir plus
+   haut) — élargi en seconde marche (2px → 4px, un vrai bandeau plutôt qu'un
+   liseré) : sans --id-current (avant le premier `goto()`), rien ne se voit. */
 body[data-active-space] .panel-head {
-  border-top: 2px solid var(--id-current, transparent);
+  border-top: 4px solid var(--id-current, transparent);
 }
 
 .panel-body {

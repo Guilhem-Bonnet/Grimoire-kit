@@ -58,52 +58,49 @@
 
 :root {
   /* ── Surfaces ─────────────────────────────────────────────────────────── *
-   * Revue 2026-09 (feedback Guilhem : « ça manque de couleur, de façon
-   * intelligente, ça paraît terne/sombre ») : les cinq niveaux mesuraient
-   * 1,06 à 1,17 de rapport de luminance entre voisins — sous le seuil de
-   * lisibilité d'une superposition (1,25), donc perçus comme une seule
-   * teinte plate quel que soit le nombre de niveaux déclarés. Chaque paire
-   * adjacente (--bg/--e1, --e1/--bar, --bar/--e2, --e2/--e3) est reportée à
-   * ~1,30 ici. Conséquence en cascade : --e1 et --bar montent assez pour que
-   * --ink3 n'y tienne plus 4,5:1 (voir plus bas) — l'encre secondaire est
-   * donc éclaircie en retour, pas seulement les fonds. */
-  --bg: #0a0c0f;
-  --e1: #21272e;
-  --bar: #313a44;
-  --e2: #404b58;
-  --e3: #505c6a;
+   * Première passe (#525) : les cinq niveaux, mesurés à 1,06-1,17 de rapport
+   * de luminance entre voisins, sont rouverts à ~1,30. Seconde passe, plus
+   * franche (« la couleur porte une information, mais le fond restait
+   * terne ») : --bg garde la même profondeur mais une teinte légèrement
+   * froide plutôt que neutre (bascule R/B, luminance inchangée) ; --e1 et
+   * --e2 remontent nettement plus que --bar et --e3 (1,40 contre 1,26) pour
+   * que les cartes (--e2) se détachent visiblement des panneaux (--e1) —
+   * pas un cran de plus, un vrai palier. Coût mesuré : l'écart --ink/--ink2
+   * se resserre de 1,32 à 1,21 (--ink2 doit suivre --e3, devenu plus clair)
+   * — toujours net à l'œil, documenté plutôt que caché. */
+  --bg: #070a10;
+  --e1: #252c34;
+  --bar: #333c46;
+  --e2: #465260;
+  --e3: #54616f;
   --term: #0e1013;
   --termink: #c9ced6;
   --line: rgba(255, 255, 255, 0.11);
 
   /* ── Encre ────────────────────────────────────────────────────────────── */
-  /* --ink2 et --ink3 recalculées pour l'écart de surfaces ci-dessus (revue
-     2026-09) : --ink2 est la couleur des chips (fond --e2) et des infobulles
-     épinglables (fond --e3, shell.css .tip) — c'est cette dernière qui
-     borne : il faut 4,5:1 sur --e3, la plus claire des quatre surfaces
-     posées. --ink3 ne porte plus de texte que sur --e1 et --bar (le survol
-     de nœud et d'amorce, qui l'utilisait sur --e3, passe à --ink2 —
-     concevoir.js, .cv-node .kind / .cv-prim .d) : --bar, désormais la plus
-     claire des deux, est la contrainte. Les deux valeurs d'origine
-     (#a8aeb7, #818891) restent la base de teinte, seule la clarté change :
-     --ink2 4,79:1 sur --e3 (était 4,5:1 sur --e1 dans la version d'avant
-     revue), --ink3 4,74:1 sur --bar (était 4,88:1 sur --e1). L'écart entre
-     les deux ink reste net (rapport 1,71). */
+  /* --ink2 reste la couleur des chips (fond --e2) et des infobulles
+     épinglables (fond --e3) : la seconde passe remonte les deux, donc
+     --ink2 suit — 4,71:1 sur --e3 (la plus exigeante). --ink3 ne porte du
+     texte que sur --e1 et --bar : 4,75:1 sur --bar. Écart --ink2/--ink3 :
+     1,75 (net) ; écart --ink/--ink2 : 1,21 (resserré — voir le commentaire
+     de --bg plus haut, c'est le compromis explicite de cette passe). */
   --ink: #f2f3f5;
-  --ink2: #d1d9e4;
-  --ink3: #9ea7b2;
+  --ink2: #d7dfea;
+  --ink3: #a0aab5;
 
   /* ── Accent d'interaction ──────────────────────────────────────────────── *
-   * Avant la revue 2026-09, --acc valait --ink : aucune teinte propre pour
-   * le survol, le focus, l'onglet actif ou la ligne sélectionnée — l'unique
-   * cause nommée du rendu « terne » (l'orange --pri reste réservé à l'action
-   * primaire, une par écran). --acc porte maintenant la même teinte que
-   * --s1 (bleu froid, distincte de --pri et des trois séries), déclarée à
-   * part pour rester libre de --s1 si les séries de données évoluent.
-   * --accsoft (fond de sélection) reprend cette teinte au lieu d'un simple
-   * voile neutre. */
+   * Première passe (#525) : --acc reçoit la teinte de --s1 (bleu froid),
+   * remplaçant --ink (aucune teinte propre — la cause principale du rendu
+   * terne). Seconde passe : l'accent doit se voir sur CHAQUE élément actif,
+   * pas seulement une bordure fine — onglet ET vue ET ligne sélectionnée ET
+   * bouton par défaut (fond plein, texte --onfill) ET champ focus
+   * (shell.css). --accsoft (fond de sélection légère) et --onfill (texte
+   * lisible sur un remplissage saturé — accent, ou tout badge d'état plein,
+   * voir --ok/--warn/--bad/--s1/--s2/--s3 plus bas) restent distincts : l'un
+   * pour une teinte discrète, l'autre pour un aplat franc. */
   --acc: #4c9be8;
   --accsoft: rgba(76, 155, 232, 0.16);
+  --onfill: #0e1013;
 
   /* ── Marque et action primaire — une par écran ────────────────────────── */
   /* En clair, la spec donne --pri #d9481a avec du blanc dessus : mesuré, c'est
@@ -115,7 +112,12 @@
   --pri: #ff6b3d;
   --onpri: #0e1013;
 
-  /* ── États : toujours point + mot, jamais la couleur seule ────────────── */
+  /* ── États : toujours point + mot, jamais la couleur seule ────────────── *
+   * Seconde passe : aussi la couleur de fond des pastilles pleines (kit, CI,
+   * doctor, mémoire — Inspecteur et Flotte ; type de proposition ; nœud du
+   * déroulé), avec --onfill comme texte. Mesuré : --onfill tient 5,7 à 9,8:1
+   * sur chacune des six couleurs (--ok/--warn/--bad/--s1/--s2/--s3) en fond
+   * plein — la marge la plus juste est --bad (5,72:1). */
   --ok: #3dbe7a;
   --warn: #e2b33c;
   --bad: #e5645a;
@@ -214,30 +216,35 @@
  */
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
-    /* Revue 2026-09 (même redressement qu'en sombre, voir :root) : --bg et
-       --bar mesuraient un rapport de 1,06 et --e1/--bar 1,08 — écartés à
-       ~1,28 ici. --e2 reste le seul blanc pur (spec §2.1) et --e3 tenait déjà
-       1,33 sur --e2, donc inchangé. --ink3 est resserré en retour (0,657 →
-       0,566 lum) : la surface la plus sombre qu'il touche encore descend à
-       0,683 (--bg) et exige ce resserrement pour tenir 4,5:1 ; --ink2 avait
-       déjà de la marge (5,3:1 sur --bg) et ne bouge pas. */
-    --bg: #d7d8d4;
-    --e1: #f2f2ef;
-    --bar: #d9d9d5;
+    /* Première passe (#525) : --bg/--e1/--bar/--e2/--e3 écartés à ~1,30.
+       Seconde passe, plus franche : --bg remonte près du blanc chaud
+       (« fond franchement clair », pas juste moins terne) ; --e1 et --bar
+       redescendent en dessous — panneaux et barres légèrement en retrait du
+       canevas — pendant que --e2 (blanc pur, inchangé, spec §2.1) reste la
+       surface la plus haute. --bar/--e2 atteint 2,06:1 : les cartes posées
+       « sautent » nettement au blanc. --e3 reste au niveau de la première
+       passe (1,43:1 sur --e2) : la surface la plus sombre que touchent
+       --ink2/--ink3 est maintenant --bar (0,461 de luminance), plus
+       exigeante qu'avant — les deux encres sont resserrées en conséquence
+       (voir :root). */
+    --bg: #f1f0eb;
+    --e1: #d1d1ce;
+    --bar: #b5b5b2;
     --e2: #ffffff;
-    --e3: #dfe0db;
+    --e3: #d7d8d3;
     --term: #1b1f25;
     --termink: #d6dae0;
     --line: rgba(23, 25, 28, 0.13);
     --ink: #17191c;
-    --ink2: #4e545c;
-    --ink3: #565a61;
+    --ink2: #34383e;
+    --ink3: #42454b;
     /* --acc : même teinte que --s1, voir le commentaire de :root. */
     --acc: #1f6fbf;
     --accsoft: rgba(31, 111, 191, 0.12);
+    --onfill: #ffffff;
     --pri: #d24619;
     --onpri: #ffffff;
-    --ok: #1f8a55;
+    --ok: #1d814f;
     --warn: #9c6d0c;
     --bad: #b83a36;
     --s1: #1f6fbf;
@@ -261,22 +268,23 @@
 }
 
 :root[data-theme="light"] {
-  --bg: #d7d8d4;
-  --e1: #f2f2ef;
-  --bar: #d9d9d5;
+  --bg: #f1f0eb;
+  --e1: #d1d1ce;
+  --bar: #b5b5b2;
   --e2: #ffffff;
-  --e3: #dfe0db;
+  --e3: #d7d8d3;
   --term: #1b1f25;
   --termink: #d6dae0;
   --line: rgba(23, 25, 28, 0.13);
   --ink: #17191c;
-  --ink2: #4e545c;
-  --ink3: #565a61;
+  --ink2: #34383e;
+  --ink3: #42454b;
   --acc: #1f6fbf;
   --accsoft: rgba(31, 111, 191, 0.12);
+  --onfill: #ffffff;
   --pri: #d24619;
   --onpri: #ffffff;
-  --ok: #1f8a55;
+  --ok: #1d814f;
   --warn: #9c6d0c;
   --bad: #b83a36;
   --s1: #1f6fbf;
