@@ -39,7 +39,7 @@ n'existent pas dans le cockpit (case vide légitime, pas un oubli).
 <!-- BEGIN:cockpit-coverage-summary -->
 | Section | Lignes | Couvertes | % |
 |---|---:|---:|---:|
-| Coque (shell.js) | 32 | 26 | 81% |
+| Coque (shell.js) | 32 | 31 | 97% |
 | Piloter | 34 | 29 | 85% |
 | Concevoir | 21 | 12 | 57% |
 | Executer | 16 | 10 | 62% |
@@ -47,7 +47,7 @@ n'existent pas dans le cockpit (case vide légitime, pas un oubli).
 | Mémoire | 9 | 4 | 44% |
 | Source | 17 | 15 | 88% |
 | Routes API | 24 | 16 | 67% |
-| **TOTAL** | **163** | **119** | **73%** |
+| **TOTAL** | **163** | **124** | **76%** |
 <!-- END:cockpit-coverage-summary -->
 
 *(régénéré par `python scripts/cockpit-coverage.py` — recopier sa sortie ici après toute modification des tables ci-dessous ; la CI de PR 1 le vérifie via `--check`.)*
@@ -65,13 +65,24 @@ n'existent pas dans le cockpit (case vide légitime, pas un oubli).
   (`blueprintPut` n'existe même pas côté client, commentaire `concevoir.js:284`). Le nœud disparaît
   au rechargement malgré le message de succès affiché.
 
+## Constat (lot B, pas un bug) : la palette ne se reconstruit qu'au chargement
+
+`buildPalette()` (`shell.js:886`) n'est appelée qu'une fois, dans `main()` — jamais depuis
+`openPalette()`. Une tâche ou un blueprint créé après le chargement de la page (le cas courant sur un
+poste réel : on ouvre le cockpit, puis on travaille) n'apparaît dans les sections « Tâches »/
+« Workflows » de la palette qu'après un rechargement complet. Découvert en écrivant les tests
+d'exécution de ces deux sections (`tests/e2e/test_workspace_shell_palette_actions.py`), qui doivent
+recharger explicitement après avoir écrit la donnée pour la voir. Comportement cohérent avec le reste
+de la palette (« Projets », « Fichiers » ont la même limite), donc pas traité comme une régression —
+mais à garder en tête si Guilhem constate un jour « la palette ne voit pas ma tâche toute fraîche ».
+
 ### Espace : Coque (shell.js)
 
 | Contrôle | Sélecteur | Handler | Route | État | Test(s) | Couvert |
 |---|---|---|---|---|---|---|
 | Onglet d'espace | `#spaces .tab` | `goto(space.id)` | aucune | sélection change de canvas | `test_chaque_espace_s_ouvre_sur_un_projet_reel` | oui |
 | Onglet d'espace | `#spaces .tab` | idem | aucune | exactement 6, pas 1 de plus | `test_la_coque_annonce_les_six_espaces_et_pas_un_de_plus` | oui |
-| Raccourci `⌘1`–`⌘6` | `document keydown` | `goto(SPACES[n-1].id)` | aucune | sélectionne l'espace n | — | non |
+| Raccourci `⌘1`–`⌘6` | `document keydown` | `goto(SPACES[n-1].id)` | aucune | sélectionne l'espace n | `test_le_raccourci_meta_chiffre_change_d_espace` (paramétré sur les 6) | oui |
 | Bouton de rail (clic) | `.rail-btn[data-panel]` | ouvre en surimpression (`peek`) | aucune | peek, sans redimensionner la grille | `test_le_clic_sur_le_rail_ouvre_en_surimpression` | oui |
 | Survol de rail (450 ms) | `.rail-btn` `pointerenter` | ouvre en `peek` après délai | aucune | rien avant 450 ms, peek après | `test_le_survol_du_rail_450ms_entrouvre` | oui |
 | Survol du contenu | `#canvas` `pointerenter`(indirect) | n'ouvre jamais de panneau | aucune | jamais d'ouverture | `test_le_survol_du_contenu_n_ouvre_jamais_un_panneau` | oui |
@@ -82,7 +93,7 @@ n'existent pas dans le cockpit (case vide légitime, pas un oubli).
 | Raccourci panneau `2` (bibliothèque) | `document keydown` | `triggerRailAction('library')` | aucune | délégué à Concevoir seul | `test_le_raccourci_2_du_rail_ouvre_la_bibliotheque_de_noeuds` | oui |
 | Raccourci panneau `3` (preuves) | `document keydown` | `togglePanel('evidence')` (`evidence` a rejoint `PANELS`, corrigé par #534/PR #539) | `GET /api/workspace/evidence` | ouvre le panneau Preuves, tenu par la coque comme Explorateur/Inspecteur | `test_le_raccourci_3_ouvre_les_preuves_depuis_l_espace_par_defaut` | oui |
 | Raccourci panneau `5` (dock) | `document keydown` | bascule `#dock` pinned/collapsed | aucune | bascule | — | non |
-| Raccourci backtick `` ` `` | `document keydown` | `selectDockTab('console')` + pin | aucune | ouvre le dock sur Console | — | non |
+| Raccourci backtick `` ` `` | `document keydown` | `selectDockTab('console')` + pin | aucune | ouvre le dock sur Console | `test_le_raccourci_accent_grave_ouvre_la_console_du_dock` | oui |
 | Mode concentration `⇧⌘F` | `document keydown` | `toggleFocus()` | aucune | replie tout, toile plein écran | `test_le_mode_concentration_replie_tout` | oui |
 | Palette : ouverture `⌘K` | `document keydown` | `openPalette()` | `GET /api/workspace/commands` `+projects+blueprints+tasks+files` | ouverte, sections visibles | `test_la_palette_s_ouvre_au_clavier_et_montre_les_commandes` | oui |
 | Palette : navigation clavier | `#palette-list li` | `ArrowUp`/`ArrowDown`/`Escape` | aucune | sélection se déplace, ferme sur Échap | `test_la_palette_se_navigue_au_clavier` | oui |
@@ -90,9 +101,9 @@ n'existent pas dans le cockpit (case vide légitime, pas un oubli).
 | Palette section Espaces | `#palette-list li` | `goto(space)` | aucune | change d'espace | `test_la_palette_execute_l_entree_selectionnee_a_l_entree` | oui |
 | Palette section Commandes | `#palette-list li` | `runCommand(key)` | `POST /api/workspace/command` | libellé `grimoire …` | `test_la_palette_s_ouvre_au_clavier_et_montre_les_commandes` | oui |
 | Palette section Projets (liste) | `#palette-list li` | — | `GET /api/projects` | en tête quand ouverte depuis le chip | `test_le_chip_projet_ouvre_la_palette_sur_la_section_projets` | oui |
-| Palette section Projets (sélection) | `#palette-list li` | `location.search = '?project=' + slug` | rechargement complet | change de projet servi | — | non |
-| Palette section Tâches (sélection) | `#palette-list li` | `runCommand(['task','show',id])` | `POST /api/workspace/command` | exécute `task show` | — | non |
-| Palette section Workflows (sélection) | `#palette-list li` | `goto('concevoir')` | aucune | va sur Concevoir | — | non |
+| Palette section Projets (sélection) | `#palette-list li` | `location.search = '?project=' + slug` | rechargement complet | change de projet servi | `test_choisir_un_projet_dans_la_palette_recharge_sur_ce_projet` | oui |
+| Palette section Tâches (sélection) | `#palette-list li` | `runCommand(['task','show',id])` | `POST /api/workspace/command` | exécute `task show` | `test_choisir_une_tache_dans_la_palette_execute_task_show` | oui |
+| Palette section Workflows (sélection) | `#palette-list li` | `goto('concevoir')` | aucune | va sur Concevoir | `test_choisir_un_workflow_dans_la_palette_va_sur_concevoir` | oui |
 | Palette section Fichiers | `#palette-list li` | `goto('source', {file})` | `GET /api/workspace/files` | ouvre le fichier dans Source | `test_la_palette_atteint_les_fichiers_de_source`, `test_choisir_un_fichier_dans_la_palette_l_ouvre_dans_source` | oui |
 | Chip projet | `#project-chip` | `openPalette('Projets')` | aucune | ouvre palette, section Projets en tête | `test_le_chip_projet_ouvre_la_palette_sur_la_section_projets` | oui |
 | Chip projet — indice visuel | `#project-chip` | curseur/chevron/survol | aucune | curseur pointer, chevron, fond change au survol | `test_le_chip_projet_a_un_indice_visuel_de_clic` | oui |
