@@ -92,6 +92,21 @@
       <div class="panel-resize" data-resize="inspector" role="separator" aria-orientation="vertical" aria-label="Redimensionner l'inspecteur" tabindex="-1"></div>
     </aside>
 
+    <!-- Panneau droit : preuves (#534) — possédé par la coque, jamais par un
+         espace, pour rester utilisable depuis n'importe lequel des six. -->
+    <aside class="panel panel-right" id="panel-evidence" data-state="collapsed" aria-label="Preuves">
+      <div class="panel-head">
+        <span style="font-weight:500">Preuves</span>
+        <span class="grow"></span>
+        <span class="kbd">3</span>
+        <button class="pin" type="button" aria-pressed="false" aria-label="Épingler les preuves" data-pin="evidence">
+          <svg class="ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" style="width:14px;height:14px"><rect x="5" y="9" width="10" height="8" rx="1.5"/><path d="M7 9V6.5a3 3 0 0 1 6 0V9"/></svg>
+        </button>
+      </div>
+      <div class="panel-body" id="evidence-body"></div>
+      <div class="panel-resize" data-resize="evidence" role="separator" aria-orientation="vertical" aria-label="Redimensionner les preuves" tabindex="-1"></div>
+    </aside>
+
   </div>
 
   <!-- Barre d'état -->

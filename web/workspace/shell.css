@@ -374,6 +374,44 @@ body[data-active-space="source"] {
   padding-left: calc(var(--sp-2) - 3px);
 }
 
+/* Panneau Preuves (issue 534) : une ligne par tâche du standard, possédée
+   par la coque elle-même — pas de feuille scopée par espace pour ces règles. */
+.ev-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border: 0;
+  border-radius: var(--r);
+  background: none;
+  color: var(--ink2);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ev-row:hover,
+.ev-row:focus-visible {
+  background: var(--accsoft);
+  color: var(--ink);
+}
+
+.ev-id {
+  flex: none;
+}
+
+.ev-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink3);
+}
+
+.ev-msg {
+  padding: var(--sp-2);
+  color: var(--ink3);
+}
+
 /* Le seul bloc d'état vide : il dit d'où viendra la donnée. */
 .empty {
   margin: var(--sp-6) auto;
