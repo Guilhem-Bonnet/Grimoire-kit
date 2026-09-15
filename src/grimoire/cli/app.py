@@ -459,6 +459,43 @@ def doctor(
         for check_name, check_passed, check_detail in integrity_checks(target):
             _record(check_name, passed=check_passed, detail=check_detail)
 
+    # 4quater-bis. Outil vs kit du projet (issue #510 point 4) — un projet
+    # peut être piloté au quotidien par un binaire (pipx, venv séparé) plus
+    # vieux que le kit qui l'a réellement mis à niveau en dernier, sans
+    # qu'aucun signal existant ne le dise : ni `doctor` (jusqu'ici) ni la
+    # fiche projet du cockpit, dont le badge compare la version alignée du
+    # projet à celle de son propre serveur — jamais à l'outil qui gouverne
+    # vraiment le projet. Jamais FAIL : un écart d'outil n'empêche rien tant
+    # qu'on ne relance pas `up` avec.
+    with _timed_phase("tool_version"):
+        from grimoire.tools.project_health import tool_version_gap
+
+        gap = tool_version_gap(target)
+        if gap is not None:
+            if gap["outdated"]:
+                tool_detail = (
+                    f"outil grimoire {gap['installed']} plus ancien que le kit du projet "
+                    f"{gap['aligned']} : `pipx upgrade grimoire-kit` / `pip install -U grimoire-kit`"
+                )
+                tool_entry: dict[str, Any] = {
+                    "name": "tool_version",
+                    "passed": True,
+                    "detail": tool_detail,
+                    "level": "warn",
+                }
+                results.append(tool_entry)
+                if fmt != "json":
+                    console.print(f"  [yellow]WARN[/yellow]  {tool_detail}")
+            else:
+                _record(
+                    "tool_version",
+                    passed=True,
+                    detail=(
+                        f"outil grimoire {gap['installed']} à jour vis-à-vis du kit du projet "
+                        f"({gap['aligned']})"
+                    ),
+                )
+
     # 4quinquies. Override drift (issue #427) — un override est une copie ou
     # une extension du kit, jamais une garantie qu'il en reçoit encore les
     # mises à jour. Jamais FAIL : une dette de personnalisation, pas une

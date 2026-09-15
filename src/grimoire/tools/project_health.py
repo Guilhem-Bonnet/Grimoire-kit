@@ -95,6 +95,87 @@ def _installed_kit_version() -> str:
     return str(__version__)
 
 
+#: Chemins relatifs où un environnement Python propre du projet range son
+#: binaire ``grimoire`` — le seul indice qu'on prend sans jamais deviner à
+#: partir de ``$PATH``, qui désignerait le process servant le cockpit plutôt
+#: que « l'outil du projet » (issue #510 point 4c).
+_PROJECT_TOOL_CANDIDATES = (
+    Path(".venv") / "bin" / "grimoire",
+    Path(".venv") / "Scripts" / "grimoire.exe",
+)
+
+#: Un `.venv` cassé ou un binaire qui bloque ne doit jamais faire attendre une
+#: route de statut — même logique que ``_GIT_TIMEOUT_S`` plus bas.
+_TOOL_VERSION_TIMEOUT_S = 2.0
+
+
+def _declared_project_tool(project_root: Path) -> Path | None:
+    """Le binaire ``grimoire`` que CE projet déclare comme le sien, s'il y en a un.
+
+    Deux sources, dans l'ordre : un ``.venv/bin/grimoire`` à la racine (un
+    environnement propre du projet), sinon un champ ``tool:`` explicite au
+    premier niveau de ``project-context.yaml`` (chemin vers le binaire,
+    absolu ou relatif à la racine du projet). Rien d'autre — deviner via
+    ``$PATH`` ou ``sys.executable`` désignerait le process qui répond ici, pas
+    l'outil qui gouverne réellement le projet au quotidien.
+    """
+    for rel in _PROJECT_TOOL_CANDIDATES:
+        candidate = project_root / rel
+        if candidate.is_file():
+            return candidate
+
+    config_path = project_root / "project-context.yaml"
+    if not config_path.is_file():
+        return None
+    try:
+        data = _yaml.load(config_path.read_text(encoding="utf-8")) or {}
+    except (OSError, YAMLError):
+        return None
+    tool = data.get("tool") if isinstance(data, dict) else None
+    if not isinstance(tool, str) or not tool.strip():
+        return None
+    candidate = Path(tool.strip())
+    if not candidate.is_absolute():
+        candidate = project_root / candidate
+    return candidate if candidate.is_file() else None
+
+
+def project_tool_version(project_root: Path) -> dict[str, Any]:
+    """Version de l'outil que CE projet déclare gouverner ses opérations.
+
+    Distinct de :func:`_installed_kit_version` : celle-ci répond pour le
+    process qui exécute ce code — souvent le serveur cockpit, dans un venv
+    différent de celui qui pilote le projet au jour le jour. Un projet géré
+    par un pipx séparé peut être en retard sans qu'aucun des deux autres
+    chiffres ne le montre (issue #510 point 4). Ne lève jamais : un binaire
+    absent, cassé ou muet rend simplement ``version: None`` — « inconnu » côté
+    interface, jamais une panne de la route de statut.
+    """
+    binary = _declared_project_tool(project_root)
+    if binary is None:
+        return {"version": None, "source": None}
+
+    try:
+        proc = subprocess.run(
+            [str(binary), "--version"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=_TOOL_VERSION_TIMEOUT_S,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return {"version": None, "source": str(binary)}
+    if proc.returncode != 0:
+        return {"version": None, "source": str(binary)}
+
+    # `grimoire --version` imprime p.ex. « grimoire-kit 3.50.2 » : on ne garde
+    # que le dernier jeton qui ressemble à un numéro de version.
+    tokens = proc.stdout.strip().split()
+    version = next((t for t in reversed(tokens) if t and t[0].isdigit()), None)
+    return {"version": version, "source": str(binary)}
+
+
 def _version_key(version: str) -> tuple[int, ...]:
     """Ordre de version tolérant : ce qui n'est pas numérique passe en dernier."""
     parts: list[int] = []
@@ -164,6 +245,7 @@ def kit_alignment(project_root: Path) -> dict[str, Any]:
                 behind.append(str(path.relative_to(project_root)))
 
     aligned = max(versions, key=_version_key) if versions else None
+    tool = project_tool_version(project_root)
     return {
         "installed": installed,
         "aligned": aligned,
@@ -176,6 +258,34 @@ def kit_alignment(project_root: Path) -> dict[str, Any]:
         # « 0 fichier en retard » comme si c'était un diagnostic.
         "catalogAvailable": catalog_available,
         "scaffolded": kit_dir.is_dir(),
+        # L'outil que CE projet déclare comme le sien (`.venv/bin/grimoire`
+        # ou `tool:`), distinct du process qui répond ici — `None` quand le
+        # projet ne déclare rien ou que la version n'a pas pu être lue
+        # (issue #510 point 4c).
+        "projectTool": tool["version"],
+    }
+
+
+def tool_version_gap(project_root: Path) -> dict[str, Any] | None:
+    """Le CLI qui exécute ce code est-il en retard sur le kit aligné du projet ?
+
+    Distinct de ``projectTool`` (l'outil que le projet *déclare*) : cette
+    comparaison porte sur l'outil qui répond maintenant, quel qu'il soit — le
+    cas réel de l'issue #510 point 4 est un pipx 3.50.1 lancé à la main sur un
+    projet mis à niveau entretemps par un cockpit 3.50.2, sans qu'aucun check
+    existant ne le dise. ``None`` quand le projet n'a pas de version alignée
+    connue (pas encore scaffolded, ou catalogue indisponible) : rien à
+    comparer, pas un écart annoncé contre du vide.
+    """
+    alignment = kit_alignment(project_root)
+    aligned = alignment["aligned"]
+    if not aligned:
+        return None
+    installed = str(alignment["installed"])
+    return {
+        "installed": installed,
+        "aligned": str(aligned),
+        "outdated": _version_key(installed) < _version_key(aligned),
     }
 
 
