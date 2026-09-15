@@ -275,16 +275,23 @@ export async function mount(root, ctx) {
     simulate: null,
     paletteOpen: false,
     selectedNodeId: null,
+    // Modifié, non enregistré (issue #535) : posé par toute mutation locale
+    // de `state.blueprint` (aujourd'hui seule `addNode` en fait une), remis
+    // à `false` par `loadBlueprint` (chargement frais) et par `saveBlueprint`
+    // (écriture réussie) — jamais par un minuteur, jamais automatiquement.
+    dirty: false,
   };
 
   const zoomLevels = ctx.host.kind === 'cockpit' ? ZOOM_LEVELS_COCKPIT : ZOOM_LEVELS_ATELIER;
   // Lecture, validation et simulation du graphe marchent désormais sur les
   // deux hôtes : `cockpit serve` est le seul serveur restant (#351) et sait
   // depuis #356 servir `/api/blueprints/<id>` (+ validate/simulate) pour le
-  // projet déjà sélectionné — seules l'écriture (`blueprintPut`, absente
-  // d'ici) et `/compile` restent atelier-only, derrière `readOnly` côté
-  // client. Cette constante reste nommée `graphAvailable` (elle garde ses six
-  // points d'appel) mais n'a plus de condition réelle à trancher.
+  // projet déjà sélectionné. `blueprintPut` (écriture, issue #535) et
+  // `/compile` restent atelier-only, derrière `readOnly` côté client
+  // (`api.js`, `put()`) : la garde d'écriture générale de la vue de travail,
+  // pas une condition propre à ce module. Cette constante reste nommée
+  // `graphAvailable` (elle garde ses six points d'appel) mais n'a plus de
+  // condition réelle à trancher.
   const graphAvailable = true;
 
   // Rail « 2 » (bibliothèque) : la coque ne sait pas ce qu'est une palette de
@@ -327,6 +334,7 @@ export async function mount(root, ctx) {
     state.lint = null;
     state.simulate = null;
     state.selectedNodeId = null;
+    state.dirty = false;
     if (!graphAvailable) return;
     const blueprint = await ctx.api.blueprintGet(id);
     if (aborted()) return;
@@ -365,6 +373,13 @@ export async function mount(root, ctx) {
   }
 
   async function zoomToWorkflow(id) {
+    // Confirmation avant de quitter avec des modifications non enregistrées
+    // (issue #535, même mécanisme que Source : `source.js::openFile`) —
+    // `loadBlueprint` ci-dessous relit le disque et écraserait silencieusement
+    // tout nœud ajouté localement, y compris en rouvrant CE MÊME blueprint.
+    if (state.dirty && !confirm('Des modifications non enregistrées seront perdues. Continuer ?')) {
+      return;
+    }
     state.selectedId = id;
     if (!graphAvailable) {
       setZoom('workflow');
@@ -632,8 +647,36 @@ export async function mount(root, ctx) {
       id: candidate, kind: 'pattern', ref: '', role: primitiveRole,
       label: `Nouveau nœud (${primitiveRole})`, description: '', pins: [],
     }];
-    ctx.dock.log('problemes', `nœud ajouté : ${candidate} (${primitiveRole}) — référence à compléter dans Propriétés.`);
+    // Issue #535 : cette mutation ne touche que `state.blueprint`, en mémoire
+    // — le message le dit honnêtement (« brouillon », pas « ajouté ») tant
+    // que `saveBlueprint()` n'a pas réellement écrit sur disque.
+    state.dirty = true;
+    ctx.dock.log(
+      'problemes',
+      `nœud ajouté au brouillon : ${candidate} (${primitiveRole}) — référence à compléter dans ` +
+        `Propriétés, puis « Enregistrer » pour écrire sur disque (non enregistré tant que non cliqué).`,
+    );
     render();
+  }
+
+  // ── Enregistrer ──────────────────────────────────────────────────────────
+  //
+  // Jamais automatique (issue #535) : `blueprintPut` (PUT /api/blueprints/<id>,
+  // déjà servi par le serveur — `forge_server.py::blueprint_put`, `forge_http.py
+  // ::do_PUT`) écrit tel quel, refusé côté client par `readOnly` sur le cockpit
+  // comme `blueprintCompile`. Même mécanique de bouton que Source
+  // (`source.js::saveCurrent`) : libellé et disponibilité suivent `state.dirty`.
+  async function saveBlueprint() {
+    if (!state.blueprint || !state.dirty) return;
+    try {
+      const saved = await ctx.api.blueprintPut(state.selectedId, state.blueprint);
+      state.dirty = false;
+      ctx.dock.log('problemes', `$ enregistré · ${state.selectedId}`, ...(saved.errors || []).map((m) => `erreur : ${m}`));
+      ctx.dock.echo(`PUT /api/blueprints/${state.selectedId}`);
+      render();
+    } catch (error) {
+      ctx.dock.log('problemes', `enregistrement refusé : ${error.message}`);
+    }
   }
 
   function renderWorkflow() {
@@ -661,8 +704,21 @@ export async function mount(root, ctx) {
     const graph = el('div', { class: 'cv-graph' });
 
     const toolbar = el('div', { class: 'cv-toolbar' },
-      el('strong', { style: 'margin-right:auto' }, bp.name || bp.id),
+      el('strong', {}, bp.name || bp.id),
     );
+    // Indicateur « modifié, non enregistré » (issue #535, même mécanique que
+    // Source : cf. `.sr-docrow` de `source.js`) — visible dans la barre,
+    // jamais un simple libellé de bouton qu'on peut manquer.
+    if (state.dirty) {
+      toolbar.append(dotWord('warn', 'modifié — non enregistré'));
+    }
+    toolbar.append(el('span', { style: 'margin-right:auto' }));
+    const btnSave = el('button', {
+      type: 'button', class: 'btn pri',
+      text: state.dirty ? 'Enregistrer (modifié)' : 'Enregistrer',
+    });
+    btnSave.disabled = !state.dirty;
+    btnSave.addEventListener('click', saveBlueprint);
     const btnValidate = el('button', { type: 'button', class: 'btn', text: 'Valider' });
     const btnSimulate = el('button', { type: 'button', class: 'btn', text: 'Simuler' });
     const btnCompile = el('button', { type: 'button', class: 'btn pri', text: 'Compiler' });
@@ -671,7 +727,7 @@ export async function mount(root, ctx) {
     btnCompile.addEventListener('click', runCompile);
     const btnLib = el('button', { type: 'button', class: 'btn', 'data-term': 'pattern', text: 'Bibliothèque' });
     btnLib.addEventListener('click', () => { state.paletteOpen = !state.paletteOpen; render(); });
-    toolbar.append(btnLib, btnValidate, btnSimulate, btnCompile);
+    toolbar.append(btnLib, btnSave, btnValidate, btnSimulate, btnCompile);
     graph.append(toolbar);
 
     graph.append(renderEdgesSvg(bp.nodes || [], bp.edges || [], pos));
