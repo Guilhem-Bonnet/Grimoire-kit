@@ -493,6 +493,81 @@ def served_cockpit_multi(
         assert not _alive(process.pid), f"cockpit survivant : pid {process.pid}"
 
 
+@pytest.fixture(scope="session")
+def served_cockpit_triple(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Iterator[tuple[str, str, str, str]]:
+    """Un cockpit qui sert TROIS projets réels — issue #510 point 5.
+
+    Le fan-out de la Flotte (``GET /api/health`` + ``GET /api/memory/status``
+    par projet du registre) ne se voit qu'à partir de plusieurs projets ; ni
+    ``served_cockpit`` (un seul) ni ``served_cockpit_multi`` (deux, dédiée au
+    board #140) n'en portent trois. Pas de tâche créée ici : ce harnais ne
+    regarde que le comptage de requêtes réseau, jamais le contenu d'un board.
+    """
+    import json
+
+    roots = [
+        tmp_path_factory.mktemp(f"fleet-fanout-{letter}") / f"projet-flotte-{letter}"
+        for letter in ("a", "b", "c")
+    ]
+    for root in roots:
+        root.mkdir(parents=True)
+        subprocess.run(["git", "init", "-q"], cwd=str(root), check=False, capture_output=True)
+        subprocess.run(
+            [sys.executable, "-m", "grimoire", "init", ".", "-y", "--name", root.name, "--backend", "local"],
+            cwd=str(root), check=False, capture_output=True, timeout=180,
+        )
+        if not (root / "_grimoire" / "kit").is_dir():
+            pytest.skip("`grimoire init` indisponible ici")
+
+    port = _free_port()
+    cockpit_home = tmp_path_factory.mktemp("cockpit-home-triple")
+    env = dict(os.environ)
+    env["GRIMOIRE_COCKPIT_HOME"] = str(cockpit_home)
+    # Comme `served_cockpit`/`served_cockpit_multi` : le cwd de ce harnais est
+    # le dépôt du kit lui-même, un projet Grimoire qu'on ne veut pas voir
+    # adopté à la place des trois projets enrôlés explicitement ci-dessous.
+    env["GRIMOIRE_NO_COCKPIT"] = "1"
+    env["NO_COLOR"] = "1"
+    for root in roots:
+        subprocess.run(
+            [sys.executable, "-m", "grimoire", "cockpit", "add", str(root)],
+            env=env, capture_output=True, text=True, check=False, timeout=60,
+        )
+    registry_path = cockpit_home / "registry.json"
+    if not registry_path.is_file():
+        pytest.skip("`grimoire cockpit add` n'a pas peuplé le registre")
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    slugs = [
+        next((str(e.get("slug", "")) for e in registry if e.get("path") == str(root)), "")
+        for root in roots
+    ]
+    if not all(slugs):
+        pytest.skip("slugs introuvables au registre du cockpit après `add`")
+
+    process = subprocess.Popen(
+        [
+            sys.executable, "-m", "grimoire", "cockpit", "serve",
+            "--port", str(port), "--no-open", "--no-refresh",
+        ],
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        _wait_ready(port, time.monotonic() + 60)
+        yield (f"http://127.0.0.1:{port}", *slugs)
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=10)
+        assert not _alive(process.pid), f"cockpit survivant : pid {process.pid}"
+
+
 @pytest.fixture
 def cockpit_workspace(browser: Browser, served_cockpit: tuple[str, str]) -> Iterator[Page]:
     """La coque, chargée sur le cockpit et ciblée sur le projet enrôlé."""
