@@ -1171,6 +1171,11 @@ async function renderCreateProjectForm(ctx, onCreated) {
     preview.replaceChildren(text('p', 'lbl', 'grimoire up ' + path + ' ' + fields.summary() + ' — en cours…'));
     try {
       const result = await ctx.api.createProject(fields.payload({ path }));
+      // Le cache 60 s de la Flotte (#541) a été rempli — sans navigation
+      // encore — par l'ouverture initiale de cet espace : sans invalidation
+      // ici, revenir sur Flotte juste après création montre un tableau
+      // périmé, sans la ligne du projet qu'on vient de créer.
+      invalidateFleetCache();
       onCreated(result.slug);
     } catch (error) {
       preview.replaceChildren(text('div', 'lbl', 'refusé : ' + error.message));
@@ -1697,7 +1702,37 @@ export async function mount(root, ctx) {
   // résolu, l'appel suivant en relance un frais — ça ne dédoublonne jamais
   // deux rafraîchissements légitimes mais séquentiels, seulement un vrai
   // chevauchement.
+  //
+  // Piège trouvé par le harnais générique de segments (#541 côté zoom) :
+  // un simple `return inFlight` ici avale silencieusement un clic de zoom
+  // survenu pendant que le tour précédent tourne encore — `level` change
+  // bien (muté par le callback avant l'appel à `draw()`), mais aucun rendu
+  // ne le reflète tant que ce tour précédent n'a pas déjà consommé
+  // l'ancienne valeur. `queued` mémorise qu'un rendu frais reste dû ; à la
+  // fin du tour en cours, on ne l'enchaîne QUE si la cible a vraiment changé
+  // (`stateKey()` avant/après) — un double « Rafraîchir la flotte » pendant
+  // le même tour (`test_refresh_de_la_flotte_ne_double_jamais_les_appels_en_
+  // vol`) ne doit toujours produire qu'UN seul appel `/api/fleet`, jamais
+  // un second relancé après coup pour une cible identique.
   let inFlight = null;
+  let queued = false;
+  let queuedOpts;
+
+  const stateKey = () => level + '|' + (level === 'projet' ? selected : '');
+
+  const runDraw = (opts) => {
+    const startedKey = stateKey();
+    inFlight = drawOnce(opts).finally(() => {
+      inFlight = null;
+      if (queued) {
+        queued = false;
+        const next = queuedOpts;
+        queuedOpts = undefined;
+        if (stateKey() !== startedKey) runDraw(next);
+      }
+    });
+    return inFlight;
+  };
 
   const drawOnce = async ({ forceFleet = false } = {}) => {
     ctx.docbar.setBreadcrumb([ctx.host.project || 'flotte', 'Piloter', level === 'flotte' ? 'Flotte' : 'Projet']);
@@ -1748,9 +1783,12 @@ export async function mount(root, ctx) {
   };
 
   const draw = (opts) => {
-    if (inFlight) return inFlight;
-    inFlight = drawOnce(opts).finally(() => { inFlight = null; });
-    return inFlight;
+    if (inFlight) {
+      queued = true;
+      queuedOpts = opts;
+      return inFlight;
+    }
+    return runDraw(opts);
   };
 
   await draw();
