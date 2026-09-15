@@ -10,6 +10,15 @@ entièrement distinct du TraceLedger). Ce module lit ces métadonnées
 directement — jamais via :class:`~grimoire.flows.engine.FlowEngine`, qui
 ouvre aussi un ``RuntimeKernel`` et crée des répertoires : une lecture
 d'affichage n'a besoin ni de l'un ni de l'autre.
+
+Issue #510/#513 (restes) : le badge Piloter « checkpoint destructif en
+attente » ne doit pas être un état purement client (perdu à la première
+navigation Flotte → Projet), mais dériver du run réel. `FlowRunMeta` seule
+ne porte que le *quoi* (blueprint, ordre) — jamais le *où en est-il*, qui
+vit côté ``RuntimeKernel``. :func:`list_flow_runs` pose donc `status` et
+`currentNode` sur chaque run qu'elle rend, en n'interrogeant le moteur que
+pour ceux déjà retenus après tri/troncature — jamais pour la liste entière,
+qui resterait le cas dégénéré que le docstring ci-dessus met en garde.
 """
 
 from __future__ import annotations
@@ -23,9 +32,45 @@ from typing import Any
 #: éviter de charger le moteur entier juste pour une lecture.
 _FLOWS_RELPATH = Path("_grimoire-runtime-output") / "flows"
 
+#: Même chemin que ``FlowEngine(kernel_root=...)`` reçoit ailleurs
+#: (``cmd_flow.py``, ``cmd_upgrade_flow.py``) — la seule source du statut
+#: live (`status`/`currentNode`) qu'une métadonnée de run ne porte pas.
+_KERNEL_RELPATH = Path("_grimoire-runtime-output") / "runtime"
+
 
 def _flows_dir(project_root: Path) -> Path:
     return project_root / _FLOWS_RELPATH
+
+
+def _attach_live_status(project_root: Path, runs: list[dict[str, Any]]) -> None:
+    """Pose `status`/`currentNode` sur chaque run déjà retenu, depuis le kernel.
+
+    Un run dont le kernel n'a plus trace (nettoyage externe), ou dont la
+    métadonnée est incomplète (fixture de test qui n'écrit que `run_id`/
+    `blueprint_id`/`created_at` — le contrat minimal que le reste de ce
+    module tolère déjà), garde les deux champs à ``None`` — jamais une
+    exception qui casserait toute la liste pour un seul run illisible.
+    `Exception` largement plutôt que `GrimoireRuntimeError` seul : une
+    métadonnée sans `blueprint_path` lève un `KeyError` bien avant que le
+    moteur n'ait la moindre chance de refuser proprement.
+    """
+    if not runs:
+        return
+    from grimoire.flows.engine import FlowEngine
+
+    engine = FlowEngine(
+        kernel_root=project_root / _KERNEL_RELPATH,
+        flows_root=_flows_dir(project_root),
+        project_root=project_root,
+    )
+    for run in runs:
+        try:
+            view = engine.status(str(run["runId"]), include_contract=False)
+            status, current_node = view.status, view.current_node
+        except Exception:  # lecture annexe : ne doit jamais masquer la liste des runs
+            status, current_node = None, None
+        run["status"] = status
+        run["currentNode"] = current_node
 
 
 def list_flow_runs(
@@ -38,6 +83,12 @@ def list_flow_runs(
     en cours d'écriture au moment précis de la lecture ne doit pas casser
     l'affichage des autres. ``blueprint_id`` filtre (ex. ``"project-upgrade"``) ;
     omis, tous les runs de flow du projet.
+
+    Chaque run rendu porte aussi `status` (``WorkflowStatus.value`` — ex.
+    ``"checkpointed"``) et `currentNode` (le node courant, ou ``None``),
+    lus depuis le kernel (issue #510/#513) : c'est ce qu'un badge « checkpoint
+    en attente » a besoin de savoir pour survivre à une navigation, plutôt
+    que de rester un état client perdu au premier rendu suivant.
     """
     directory = _flows_dir(project_root)
     if not directory.is_dir():
@@ -59,4 +110,6 @@ def list_flow_runs(
             "createdAt": data.get("created_at"),
         })
     runs.sort(key=lambda r: str(r.get("createdAt") or ""), reverse=True)
-    return runs[:limit]
+    sliced = runs[:limit]
+    _attach_live_status(project_root, sliced)
+    return sliced

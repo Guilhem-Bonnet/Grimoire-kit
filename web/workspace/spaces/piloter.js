@@ -455,7 +455,7 @@ function renderFleet(root, ctx, rows, onSelect, onRefresh) {
 // ── Niveau Projet (fiche) ────────────────────────────────────────────────────
 
 async function loadSheet(ctx, slug) {
-  const [health, memory, doctor, agents, proposals, setupRun] = await Promise.all([
+  const [health, memory, doctor, agents, proposals, setupRun, upgradeRuns] = await Promise.all([
     ctx.api.health(slug).catch(() => null),
     ctx.api.memoryStatus(slug).catch(() => null),
     ctx.api.doctor(slug).catch(() => null),
@@ -465,8 +465,15 @@ async function loadSheet(ctx, slug) {
     // (`_grimoire/setup-run.json`), donc encore là après ce refresh — pas
     // seulement le temps d'un toast.
     ctx.api.setupRun(slug).catch(() => null),
+    // Restes #510/#513 : le dernier run `project-upgrade` de CE projet,
+    // avec son statut live — d'où dérive le badge « checkpoint destructif
+    // en attente », jamais d'un état client posé après un clic (voir
+    // `checkpointPendingRunId`, `renderSheet`). `slug` explicite (jamais
+    // `host.project` implicite) : cette fiche peut être celle d'un AUTRE
+    // projet que celui déjà résolu par l'hôte (navigation Flotte → Projet).
+    ctx.api.flowRuns('project-upgrade', slug).catch(() => null),
   ]);
-  return { health, memory, doctor, agents, proposals, setupRun };
+  return { health, memory, doctor, agents, proposals, setupRun, upgradeRuns };
 }
 
 // ── Propositions d'artefact (#395) : à la répétition d'un non-choix ────────
@@ -1252,15 +1259,37 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
 
   // Après un run confirmé arrêté au checkpoint `destructive` (le seul point
   // d'arrêt d'un flow complet, #490), le badge doit dire ce qui vient de se
-  // passer plutôt que garder le même libellé qu'avant toute action — la
-  // prochaine vraie lecture de santé (rechargement, `options.refresh()`
-  // ailleurs) reprendra le mot habituel de `kitStatus`.
-  function markKitCheckpointPending() {
-    kitRow.replaceChildren(dot('warn'), text('span', null, 'mis à niveau, checkpoint destructif en attente'));
+  // passer plutôt que garder le même libellé qu'avant toute action.
+  //
+  // Restes #510/#513 (validation finale de la boucle de mise à jour) :
+  // jusqu'ici purement client, ce badge ne survivait pas à une navigation
+  // Flotte → Projet — un rechargement de la fiche perdait l'information
+  // que le run précédent avait tourné jusqu'au bout sans qu'on décide du
+  // checkpoint. Il dérive donc maintenant aussi du backend, à CHAQUE rendu
+  // (voir `checkpointPendingRunId` plus bas, depuis `GET /api/workspace/
+  // flows/runs`, #513), pas seulement juste après un clic « Confirmer ».
+  function markKitCheckpointPending(runId) {
+    const label = text('span', null, 'mis à niveau, checkpoint destructif en attente');
+    if (runId) label.title = `grimoire flow status ${runId}`;
+    kitRow.replaceChildren(dot('warn'), label);
     const kitCell = kpi.querySelector('.pl-kpi-item .pl-kpi-val');
     if (kitCell) kitCell.textContent = 'checkpoint en attente';
     if (behindBlock) { behindBlock.remove(); behindBlock = null; }
   }
+
+  // Le dernier run `project-upgrade` de CE projet (route `flows/runs`,
+  // #513) : `status`/`currentNode` viennent du kernel réel (issue
+  // #510/#513, `flow_runs.list_flow_runs`), jamais d'un état client posé
+  // après un clic — c'est ce qui permet au badge de survivre à un
+  // rechargement de la fiche.
+  const upgradeRuns = Array.isArray(sheet.upgradeRuns?.runs) ? sheet.upgradeRuns.runs : [];
+  const latestUpgradeRun = upgradeRuns[0] || null;
+  const checkpointPendingRunId = (
+    latestUpgradeRun
+    && latestUpgradeRun.status === 'checkpointed'
+    && latestUpgradeRun.currentNode === 'destructive'
+  ) ? latestUpgradeRun.runId : null;
+  if (checkpointPendingRunId) markKitCheckpointPending(checkpointPendingRunId);
 
   const standardBlock = document.createElement('div');
   standardBlock.className = 'pl-insp-block';
@@ -1362,7 +1391,7 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
         }
         confirmBtn.remove();
         if (result.ok) {
-          markKitCheckpointPending();
+          markKitCheckpointPending(result.runId);
           // Le prochain retour sur la Flotte servirait sinon la ligne mise
           // en cache d'avant la mise à jour jusqu'à 60 s (issue #510 point
           // 5) — ce projet précis doit se relire, pas toute la flotte.

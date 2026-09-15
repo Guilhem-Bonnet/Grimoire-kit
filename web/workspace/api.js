@@ -143,8 +143,15 @@ export const api = {
   otel: () => get('/api/otel'),
   // Runs de flow (#506) — distinct du TraceLedger qu'`otel()` lit : un
   // `grimoire upgrade-flow run` n'y écrit jamais de span. `blueprint` filtre
-  // (ex. `project-upgrade`) ; omis, tous les flows du projet.
-  flowRuns: (blueprint) => get(WS + 'flows/runs', blueprint ? { blueprint } : undefined),
+  // (ex. `project-upgrade`) ; omis, tous les flows du projet. `project`
+  // cible un AUTRE projet que celui déjà résolu par l'hôte (restes #510/
+  // #513) — nécessaire à la fiche Piloter d'un projet consulté depuis la
+  // Flotte, où `host.project` (que `withProject` ajouterait sinon) reste
+  // celui de la navigation d'origine, pas celui de la fiche affichée.
+  flowRuns: (blueprint, project) => {
+    const params = { ...(blueprint ? { blueprint } : {}), ...(project ? { project } : {}) };
+    return get(WS + 'flows/runs', Object.keys(params).length ? params : undefined);
+  },
 
   // ── Vue de travail ────────────────────────────────────────────────────────
   glossary: () => get(WS + 'glossary'),
