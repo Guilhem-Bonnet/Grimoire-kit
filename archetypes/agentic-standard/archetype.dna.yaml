@@ -2,7 +2,7 @@ $schema: "grimoire-archetype-dna/v1"
 
 id: agentic-standard
 name: "Agentic Standard"
-version: "0.1.0"
+version: "0.1.1"
 description: "Pont installable entre un corpus normatif agentique externe et les artefacts consommables Grimoire Kit."
 icon: "seal"
 author: "grimoire-kit"
@@ -44,7 +44,7 @@ constraints:
   - id: knowledge-not-memory
     description: "La base de connaissance indexée ne doit pas être mélangée à la mémoire agentique."
     enforcement: hard
-    checked_by: memory-keeper
+    checked_by: agent-optimizer
   - id: registered-provider-only
     description: "Les providers LLM doivent être déclarés avant usage."
     enforcement: hard
@@ -95,7 +95,7 @@ acceptance_criteria:
     enforcement: hard
     context: "Knowledge Base Indexer — pas une mémoire."
     triggers_on: ["_grimoire/standard/knowledge-source-registry.yaml"]
-    checked_by: memory-keeper
+    checked_by: agent-optimizer
   - id: providers-declared
     description: "Les providers LLM utilisables sont explicitement déclarés."
     enforcement: hard
@@ -104,15 +104,9 @@ acceptance_criteria:
     checked_by: agent-optimizer
 
 agents:
-  - path: "../../archetypes/meta/agents/project-navigator.md"
-    required: true
-    description: "Atlas — cartographie du projet et des artefacts standard-aware"
   - path: "../../archetypes/meta/agents/agent-optimizer.md"
     required: true
     description: "Sentinel — vérification des evidence gates et guardrails"
-  - path: "../../archetypes/meta/agents/memory-keeper.md"
-    required: true
-    description: "Mnemo — séparation mémoire / connaissance indexée"
 
 workflows: []
 shared_context_template: "../../archetypes/agentic-standard/shared-context.tpl.md"
@@ -129,6 +123,10 @@ auto_detect:
   exclusive: false
 
 changelog:
+  - version: "0.1.1"
+    date: "2026-09-16"
+    changes:
+      - "Fix #550 : retrait des références mortes project-navigator et memory-keeper (agents retirés du paquet par #387/f636633c, savoir-faire porté depuis par les skills meta-project-navigation et meta-memory-quality attachés à agent-optimizer) ; checked_by: memory-keeper réaligné sur agent-optimizer."
   - version: "0.1.0"
     date: "2026-05-10"
     changes:
