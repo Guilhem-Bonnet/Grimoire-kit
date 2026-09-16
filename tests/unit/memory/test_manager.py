@@ -684,3 +684,51 @@ class TestMemoryGraphConstructionTimeout:
 
         assert graph is created
         assert issue == ""
+
+
+# ── #527 — Redis hot memory namespaced per project ────────────────────────────
+
+
+class TestRedisNamespace:
+    """A shared Redis instance (real case: a Forge project found itself on the
+    same `redis://localhost:6379/0` as an unrelated project's container) must
+    never let two unconfigured projects collide on the same key prefix."""
+
+    def test_uses_the_configured_collection_prefix(self) -> None:
+        from grimoire.memory.manager import _redis_namespace
+
+        cfg = _make_config("weaviate-server", collection_prefix="grimoire_forge")
+
+        assert _redis_namespace(cfg) == "grimoire_forge"
+
+    def test_falls_back_to_the_project_slug_when_prefix_is_the_shared_default(self) -> None:
+        from grimoire.memory.manager import _redis_namespace
+
+        cfg = GrimoireConfig.from_dict({
+            "project": {"name": "Other Project"},
+            "memory": {"backend": "weaviate-server"},
+        })
+        assert cfg.memory.collection_prefix == "grimoire"  # sanity: the shared default is in play
+
+        namespace = _redis_namespace(cfg)
+
+        assert namespace == "other_project"
+        assert namespace != "grimoire"
+
+    def test_create_hot_memory_never_uses_the_generic_namespace(self) -> None:
+        from grimoire.memory.manager import _create_hot_memory
+
+        cfg = GrimoireConfig.from_dict({
+            "project": {"name": "Other Project"},
+            "memory": {
+                "backend": "weaviate-server",
+                "short_term_backend": "redis",
+                "redis_url": "redis://localhost:6379/0",
+            },
+        })
+
+        hot, issue = _create_hot_memory(cfg)
+
+        assert issue == ""
+        assert hot is not None
+        assert hot.namespace == "other_project"

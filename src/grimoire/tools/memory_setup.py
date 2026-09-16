@@ -27,6 +27,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from grimoire.memory import profiles as memory_profiles
+
 MEMORY_SETUP_SCHEMA_VERSION = "grimoire-memory-setup/v1"
 
 #: Budget de sonde — identique à ``cmd_up`` : jamais bloquant.
@@ -64,7 +66,11 @@ _START_COMMANDS = {
     "ollama": "ollama serve",
 }
 
-PROFILES: tuple[str, ...] = ("lexical", "vector", "full")
+#: Canonical composition ids — the same vocabulary as :mod:`grimoire.memory.profiles`
+#: and the ``layer_profile`` schema field: lexical | standard | graphe | complet.
+#: The earlier ``lexical | vector | full`` names some scripts still pass are
+#: resolved through :data:`grimoire.memory.profiles.ALIASES` (#527).
+PROFILES: tuple[str, ...] = memory_profiles.PROFILE_ORDER
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,6 +110,9 @@ class MemoryPlan:
     changes: list[dict[str, Any]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     next_steps: list[str] = field(default_factory=list)
+    #: Informational call-outs that are not warnings — e.g. the Redis key
+    #: namespace a shared instance will use (#527).
+    notes: list[str] = field(default_factory=list)
 
     @property
     def has_changes(self) -> bool:
@@ -119,6 +128,7 @@ class MemoryPlan:
             "changes": list(self.changes),
             "warnings": list(self.warnings),
             "nextSteps": list(self.next_steps),
+            "notes": list(self.notes),
             "hasChanges": self.has_changes,
         }
 
@@ -178,7 +188,7 @@ def _camel(text: str) -> str:
 def build_memory_plan(
     project_root: Path,
     *,
-    profile: str = "full",
+    profile: str = "complet",
     services: dict[str, ServiceProbe] | None = None,
 ) -> MemoryPlan:
     """Calcule le bloc ``memory:`` cible pour *profile*, borné au réellement disponible.
@@ -187,15 +197,21 @@ def build_memory_plan(
     delta. Un service déclaré par le profil mais injoignable descend en
     avertissement au lieu d'être écrit — une config qui ment coûte plus cher
     qu'une config incomplète.
+
+    *profile* accepte le vocabulaire canonique (``lexical | standard | graphe |
+    complet``, celui du schéma et de :mod:`grimoire.memory.profiles`) ainsi que
+    les anciens noms ``vector``/``full`` par alias (#527) : les deux résolvent
+    au même plan, et ``plan.profile`` rapporte toujours le nom canonique.
     """
     from grimoire.core.config import GrimoireConfig
     from grimoire.core.exceptions import GrimoireConfigError
 
-    if profile not in PROFILES:
+    if not memory_profiles.is_known(profile):
         raise ValueError(f"Unknown memory profile '{profile}', expected one of: {list(PROFILES)}")
+    canonical = memory_profiles.resolve(profile).id
 
     probes = services if services is not None else probe_services()
-    plan = MemoryPlan(profile=profile, project_root=project_root, services=probes)
+    plan = MemoryPlan(profile=canonical, project_root=project_root, services=probes)
 
     config_path = project_root / "project-context.yaml"
     if not config_path.is_file():
@@ -213,11 +229,36 @@ def build_memory_plan(
     if not prefix or prefix == "grimoire":
         prefix = _slug(project_name)
 
-    target = _target_config(profile, probes, prefix=prefix, project_name=project_name, plan=plan)
+    target = _target_config(canonical, probes, prefix=prefix, project_name=project_name, plan=plan)
     plan.config = target
     plan.changes = _diff_config(cfg.memory, target, _raw_memory_block(config_path))
-    plan.next_steps = _next_steps(profile, probes, plan)
+    plan.next_steps = _next_steps(canonical, probes, plan)
     return plan
+
+
+def _finalize_layers(target: dict[str, Any]) -> None:
+    """Pose ``layer_profile``/``retrieval_mode``/``vector_database`` d'après ce que
+    *target* sert réellement, pas d'après le profil demandé (#527).
+
+    Un profil ``complet`` qui retombe sur `lexical` faute de service vectoriel
+    ne doit jamais écrire ``layer_profile: complet`` : la composition promise
+    et la composition écrite doivent toujours coïncider, sinon le cockpit et
+    ``memory status`` lisent une couche qui n'existe pas.
+    """
+    backend = target.get("backend", "lexical")
+    if backend == "lexical":
+        target["vector_database"] = False
+        target["retrieval_mode"] = "lexical"
+        target["layer_profile"] = "lexical"
+        return
+    target["vector_database"] = True
+    target["retrieval_mode"] = "hybrid"
+    if target.get("short_term_backend") == "redis" and target.get("knowledge_graph") == "neo4j":
+        target["layer_profile"] = "complet"
+    elif target.get("knowledge_graph") == "neo4j":
+        target["layer_profile"] = "graphe"
+    else:
+        target["layer_profile"] = "standard"
 
 
 def _target_config(
@@ -228,16 +269,20 @@ def _target_config(
     project_name: str,
     plan: MemoryPlan,
 ) -> dict[str, Any]:
-    """Bloc ``memory:`` visé, réduit à ce que la machine peut réellement servir."""
+    """Bloc ``memory:`` visé, réduit à ce que la machine peut réellement servir.
+
+    *profile* est déjà le nom canonique (``lexical | standard | graphe |
+    complet``) : la résolution d'alias se fait une seule fois, dans
+    :func:`build_memory_plan`.
+    """
     target: dict[str, Any] = {"collection_prefix": prefix}
 
     if profile == "lexical":
         target["backend"] = "lexical"
-        target["vector_database"] = False
-        target["retrieval_mode"] = "lexical"
+        _finalize_layers(target)
         return target
 
-    # ── Couche vectorielle ──
+    # ── Couche vectorielle (standard, graphe, complet) ──
     weaviate, qdrant = probes["weaviate"], probes["qdrant"]
     if weaviate.usable:
         target["backend"] = "weaviate-server"
@@ -256,10 +301,11 @@ def _target_config(
         _warn_unusable(plan, weaviate)
         _warn_unusable(plan, qdrant)
 
-    if profile == "vector":
+    if profile == "standard":
+        _finalize_layers(target)
         return target
 
-    # ── Couches graphe (profil full) ──
+    # ── Couches graphe (graphe, complet) ──
     neo4j = probes["neo4j"]
     if neo4j.usable:
         target["neo4j_uri"] = neo4j.url
@@ -277,15 +323,24 @@ def _target_config(
         )
         _warn_unusable(plan, neo4j)
 
-    # ── Couche chaude (profil full) ──
+    if profile == "graphe":
+        _finalize_layers(target)
+        return target
+
+    # ── Couche chaude (complet uniquement) ──
     redis = probes["redis"]
     if redis.usable:
         target["short_term_backend"] = "redis"
         target["redis_url"] = redis.url
+        plan.notes.append(
+            f"Redis : espace de noms « {prefix} » (préfixe de clé par projet — "
+            "isole ce projet des autres sur la même instance, cf. #527)."
+        )
     else:
         plan.warnings.append("Redis indisponible — mémoire chaude laissée sur `sqlite`.")
         _warn_unusable(plan, redis)
 
+    _finalize_layers(target)
     return target
 
 
@@ -388,6 +443,14 @@ def apply_memory_plan(plan: MemoryPlan) -> list[str]:
 
     written = []
     for change in plan.changes:
+        if change["key"] == "backend" and not change.get("absent") and change["old"]:
+            # Laisse une trace du backend qu'on quitte : `memory migrate run`
+            # la lit quand `--source` n'est pas fourni (#527). Sans elle, un
+            # backend lexical remplacé par un backend vectoriel ne laisse
+            # aucune trace de ce qu'il fallait migrer.
+            from grimoire.memory.migration import write_previous_backend_breadcrumb
+
+            write_previous_backend_breadcrumb(plan.project_root, str(change["old"]))
         data["memory"][change["key"]] = change["new"]
         written.append(str(change["key"]))
 

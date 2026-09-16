@@ -210,8 +210,15 @@ PROFILES: dict[str, MemoryProfile] = {
 }
 
 #: Profile ids written by earlier versions, mapped to their current profile.
-#: A project on the old id keeps working and keeps its layers.
-ALIASES: dict[str, str] = {"weaviate-neo4j": "graphe"}
+#: A project on the old id keeps working and keeps its layers. ``vector`` and
+#: ``full`` are the vocabulary ``grimoire memory up --profile`` shipped before
+#: it spoke the same names as this module and the schema (#527) — kept so
+#: existing scripts and habits never break.
+ALIASES: dict[str, str] = {
+    "weaviate-neo4j": "graphe",
+    "vector": "standard",
+    "full": "complet",
+}
 
 #: Order used by every listing surface — cheapest composition first.
 PROFILE_ORDER: tuple[str, ...] = ("lexical", "standard", "graphe", "complet")
