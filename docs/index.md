@@ -72,3 +72,4 @@ grimoire-kit/
 | [MCP](mcp-integration.md) | Intégration Model Context Protocol |
 | [Troubleshooting](troubleshooting.md) | Résolution de problèmes |
 | [Plan produit 2026-Q4](plan-2026-q4.md) | Cible, métriques mesurées, phases, matrice de parité, registre des risques |
+| [Banc à trois bras](bench-three-arms.md) | Protocole Claude Code nu / + ecc / + grimoire-kit, rejouable (issue #551) |
