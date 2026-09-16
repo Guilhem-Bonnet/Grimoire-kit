@@ -27,6 +27,7 @@ __all__ = [
     "build_task_code_reference_projection",
     "build_task_vector_entries",
     "graph_projection_verify",
+    "prune_orphan_memories",
     "sync_code_graph_projection",
     "sync_code_vector_projection",
     "sync_docs_projection",
@@ -115,6 +116,34 @@ def sync_memory_projection(
         except Exception:  # une entrée fautive ne doit pas arrêter le rattrapage
             failed += 1
     return {"projected": projected, "failed": failed}
+
+
+def prune_orphan_memories(
+    memory_graph: Neo4jMemoryGraph,
+    entries: Iterable[MemoryEntry],
+    *,
+    collection: str,
+    apply: bool = False,
+) -> dict[str, Any]:
+    """Find, and optionally delete, ``GrimoireMemory`` nodes the store no longer has.
+
+    ``sync_memory_projection`` is additive only — it never removes a node the
+    store dropped — so a project that ran an earlier setup under a different
+    collection accumulates nodes forever (real case: store=75, graph=3782).
+    Dry-run by default (#527): ``apply=False`` only reports what *would* be
+    deleted, bounded to *collection* and the legacy generic collection name
+    (see :func:`Neo4jMemoryGraph.find_orphan_memory_nodes`).
+    """
+    known_ids = frozenset(str(entry.id) for entry in entries)
+    orphans = memory_graph.find_orphan_memory_nodes(known_ids=known_ids, collection=collection)
+    purged = memory_graph.purge_memory_nodes([o["id"] for o in orphans]) if apply and orphans else 0
+    return {
+        "collection": collection,
+        "candidates": len(orphans),
+        "ids": [o["id"] for o in orphans],
+        "applied": apply,
+        "purged": purged,
+    }
 
 
 def sync_task_memory_projection(
