@@ -136,6 +136,91 @@ class TestOnlyEnableWhatAnswers:
         assert not {"neo4j_uri", "weaviate_url", "redis_url", "qdrant_url"} & set(plan.config)
 
 
+# ── #527 — un seul vocabulaire, layer_profile/retrieval_mode cohérents ───────
+
+
+class TestCanonicalVocabularyAndLayerFields:
+    """CLI (lexical|vector|full) et schéma (lexical|standard|graphe|complet)
+    parlaient deux langues différentes ; `up` n'écrivait ni `layer_profile` ni
+    un `retrieval_mode` fidèle à ce qui tournait réellement (#527)."""
+
+    @pytest.mark.parametrize(
+        ("legacy", "canonical"), [("vector", "standard"), ("full", "complet")],
+    )
+    def test_legacy_names_resolve_to_the_canonical_profile(
+        self, tmp_path: Path, legacy: str, canonical: str,
+    ) -> None:
+        _write_config(tmp_path)
+        legacy_plan = build_memory_plan(tmp_path, profile=legacy, services=_all())
+        canonical_plan = build_memory_plan(tmp_path, profile=canonical, services=_all())
+
+        assert legacy_plan.profile == canonical
+        assert legacy_plan.config == canonical_plan.config
+
+    def test_lexical_profile_writes_matching_layer_fields(self, tmp_path: Path) -> None:
+        _write_config(tmp_path)
+        plan = build_memory_plan(tmp_path, profile="lexical", services=_none())
+        assert plan.config["layer_profile"] == "lexical"
+        assert plan.config["retrieval_mode"] == "lexical"
+        assert plan.config["vector_database"] is False
+
+    def test_standard_profile_writes_matching_layer_fields(self, tmp_path: Path) -> None:
+        _write_config(tmp_path)
+        plan = build_memory_plan(tmp_path, profile="standard", services=_all())
+        assert plan.config["layer_profile"] == "standard"
+        assert plan.config["retrieval_mode"] == "hybrid"
+        assert plan.config["vector_database"] is True
+
+    def test_graphe_profile_writes_matching_layer_fields(self, tmp_path: Path) -> None:
+        _write_config(tmp_path)
+        plan = build_memory_plan(
+            tmp_path, profile="graphe", services=_all(redis=_probe("redis", reachable=False)),
+        )
+        assert plan.config["layer_profile"] == "graphe"
+        assert plan.config["retrieval_mode"] == "hybrid"
+
+    def test_complet_profile_writes_matching_layer_fields(self, tmp_path: Path) -> None:
+        _write_config(tmp_path)
+        plan = build_memory_plan(tmp_path, profile="complet", services=_all())
+        assert plan.config["layer_profile"] == "complet"
+        assert plan.config["retrieval_mode"] == "hybrid"
+
+    def test_requested_profile_never_outruns_what_is_actually_served(self, tmp_path: Path) -> None:
+        """`complet` sans aucun service qui répond ne doit jamais écrire
+        `layer_profile: complet` — la composition écrite doit toujours être
+        celle réellement servie, jamais celle demandée (#527)."""
+        _write_config(tmp_path)
+        plan = build_memory_plan(tmp_path, profile="complet", services=_none())
+        assert plan.config["backend"] == "lexical"
+        assert plan.config["layer_profile"] == "lexical"
+        assert plan.config["retrieval_mode"] == "lexical"
+
+    def test_complet_without_neo4j_downgrades_layer_profile_to_standard(self, tmp_path: Path) -> None:
+        _write_config(tmp_path)
+        plan = build_memory_plan(
+            tmp_path, profile="complet", services=_all(neo4j=_probe("neo4j", reachable=False)),
+        )
+        assert plan.config["backend"] == "weaviate-server"
+        assert plan.config["layer_profile"] == "standard"
+
+    def test_complet_without_redis_downgrades_layer_profile_to_graphe(self, tmp_path: Path) -> None:
+        _write_config(tmp_path)
+        plan = build_memory_plan(
+            tmp_path, profile="complet", services=_all(redis=_probe("redis", reachable=False)),
+        )
+        assert plan.config["layer_profile"] == "graphe"
+
+    def test_complet_with_redis_notes_the_project_namespace(self, tmp_path: Path) -> None:
+        _write_config(tmp_path, '  backend: "auto"\n  collection_prefix: "mon_super_projet"\n')
+        plan = build_memory_plan(tmp_path, profile="complet", services=_all())
+        assert any("mon_super_projet" in note for note in plan.notes)
+
+    def test_lexical_never_notes_a_redis_namespace(self, tmp_path: Path) -> None:
+        _write_config(tmp_path)
+        plan = build_memory_plan(tmp_path, profile="lexical", services=_none())
+        assert plan.notes == []
+
+
 # ── Diff contre le fichier, pas contre les valeurs par défaut ─────────────────
 
 

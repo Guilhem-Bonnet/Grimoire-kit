@@ -10,12 +10,20 @@ from __future__ import annotations
 import json
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 from urllib import error, parse, request
 
 from grimoire.memory.backends.base import MemoryEntry
+
+#: Breadcrumb left by ``memory up --apply`` whenever it changes
+#: ``memory.backend`` — read by ``memory migrate run`` to find the backend a
+#: project came *from* when no ``--source`` is given (#527). One line of state
+#: outliving a single command, so it lives beside the other migration
+#: artifacts rather than in the CLI module.
+PREVIOUS_BACKEND_BREADCRUMB = Path("_grimoire/_memory/migration/previous-backend.json")
 
 _DEFAULT_TARGET_VECTOR = "weaviate-server"
 _DEFAULT_TARGET_GRAPH = "neo4j"
@@ -85,6 +93,99 @@ def record_from_memory_entry(entry: MemoryEntry) -> MigrationRecord:
 def records_from_memory_entries(entries: list[MemoryEntry]) -> list[MigrationRecord]:
     """Create migration records from backend-neutral entries."""
     return [record_from_memory_entry(entry) for entry in entries]
+
+
+def entries_for_import(entries: list[MemoryEntry]) -> list[dict[str, Any]]:
+    """Backend-neutral entries turned into the payload :meth:`MemoryManager.store_many` accepts.
+
+    Never carries a vector: the point of routing a migration through the
+    manager API (rather than a Qdrant/Weaviate bundle) is that the *target*
+    backend computes its own embedding on write, which is exactly what a
+    lexical -> vector migration needs (#527) — the source never had a vector
+    to preserve.
+    """
+    return [
+        {"text": entry.text, "user_id": entry.user_id, "tags": list(entry.tags), "metadata": dict(entry.metadata)}
+        for entry in entries
+    ]
+
+
+@dataclass(frozen=True, slots=True)
+class BackendMigrationResult:
+    """Outcome of moving every entry from one Memory OS backend to another."""
+
+    source_backend: str
+    target_backend: str
+    entries: int
+    imported: int
+    dry_run: bool
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "sourceBackend": self.source_backend,
+            "targetBackend": self.target_backend,
+            "entries": self.entries,
+            "imported": self.imported,
+            "dryRun": self.dry_run,
+        }
+
+
+def migrate_backend_to_backend(
+    source_entries: list[MemoryEntry],
+    *,
+    source_backend: str,
+    target_backend: str,
+    store_many: Callable[[list[dict[str, Any]]], list[Any]] | None,
+    dry_run: bool = False,
+) -> BackendMigrationResult:
+    """Copy *source_entries* into whatever backend *store_many* writes to.
+
+    Replaces the manual ``memory export`` + ``memory import`` two-step (#527):
+    both sides are the public manager API, so this works for any backend pair
+    a :class:`~grimoire.memory.manager.MemoryManager` can construct — lexical
+    included, since it has no vector to preserve and none is required here.
+    ``store_many`` is ``None`` in dry-run mode: nothing is called, only counted.
+    """
+    imported = 0
+    if not dry_run and source_entries:
+        if store_many is None:
+            raise ValueError("store_many is required unless dry_run=True")
+        imported = len(store_many(entries_for_import(source_entries)))
+    return BackendMigrationResult(
+        source_backend=source_backend,
+        target_backend=target_backend,
+        entries=len(source_entries),
+        imported=imported,
+        dry_run=dry_run,
+    )
+
+
+def write_previous_backend_breadcrumb(project_root: Path, previous_backend: str) -> Path:
+    """Record the backend a project just moved away from.
+
+    Best-effort: a project that cannot write this file (read-only checkout,
+    permissions) still gets its backend swapped by ``memory up --apply`` —
+    losing the breadcrumb only means a later ``memory migrate run`` needs an
+    explicit ``--source``, never a broken ``memory up``.
+    """
+    path = project_root / PREVIOUS_BACKEND_BREADCRUMB
+    payload = {"previous_backend": previous_backend, "recorded_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    except OSError:
+        pass
+    return path
+
+
+def read_previous_backend_breadcrumb(project_root: Path) -> str:
+    """The backend :func:`write_previous_backend_breadcrumb` last recorded, or ``""``."""
+    path = project_root / PREVIOUS_BACKEND_BREADCRUMB
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    return str(data.get("previous_backend", "")) if isinstance(data, dict) else ""
 
 
 def records_from_qdrant_backend(backend: Any) -> list[MigrationRecord]:

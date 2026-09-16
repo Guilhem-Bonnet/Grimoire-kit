@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 from grimoire.codegraph.schemas import CodeEdge, EdgeKind
 from grimoire.evidence.schemas import EvidenceItem, EvidenceKind, EvidenceProfile
 from grimoire.evidence.service import EvidenceService
+from grimoire.memory.backends.base import MemoryEntry
 from grimoire.memory.backends.local import LocalMemoryBackend
 from grimoire.memory.manager import MemoryManager
 from grimoire.memory.projections import (
@@ -17,6 +18,7 @@ from grimoire.memory.projections import (
     build_task_code_reference_projection,
     build_task_vector_entries,
     graph_projection_verify,
+    prune_orphan_memories,
     sync_code_graph_projection,
     sync_code_vector_projection,
     sync_task_memory_projection,
@@ -315,3 +317,58 @@ def test_sync_docs_projection_is_idempotent(tmp_path: Path) -> None:
     results = manager.search("modifiée")
     assert len(results) == 1
     assert results[0].id == "docs:docs/page.md"
+
+
+# ── #527 — prune orphan GrimoireMemory nodes ──────────────────────────────────
+
+
+class _FakeMemoryGraph:
+    """Duck-typed stand-in for Neo4jMemoryGraph — no driver, no network."""
+
+    def __init__(self, orphans: list[dict[str, str]]) -> None:
+        self._orphans = orphans
+        self.purge_calls: list[list[str]] = []
+
+    def find_orphan_memory_nodes(self, *, known_ids: frozenset[str], collection: str) -> list[dict[str, str]]:
+        return list(self._orphans)
+
+    def purge_memory_nodes(self, ids: list[str]) -> int:
+        self.purge_calls.append(list(ids))
+        return len(ids)
+
+
+def _entry(entry_id: str) -> MemoryEntry:
+    return MemoryEntry(id=entry_id, text="x", user_id="guilhem", tags=(), metadata={})
+
+
+class TestPruneOrphanMemories:
+    def test_dry_run_reports_candidates_without_deleting(self) -> None:
+        graph = _FakeMemoryGraph([{"id": "orphan-1", "collection": "GrimoireMemory"}])
+
+        result = prune_orphan_memories(graph, [_entry("kept-1")], collection="ProjectMemory", apply=False)
+
+        assert result == {
+            "collection": "ProjectMemory",
+            "candidates": 1,
+            "ids": ["orphan-1"],
+            "applied": False,
+            "purged": 0,
+        }
+        assert graph.purge_calls == []
+
+    def test_apply_deletes_exactly_the_reported_candidates(self) -> None:
+        graph = _FakeMemoryGraph([{"id": "orphan-1", "collection": "GrimoireMemory"}, {"id": "orphan-2", "collection": "GrimoireMemory"}])
+
+        result = prune_orphan_memories(graph, [], collection="ProjectMemory", apply=True)
+
+        assert result["purged"] == 2
+        assert graph.purge_calls == [["orphan-1", "orphan-2"]]
+
+    def test_no_candidates_never_calls_purge(self) -> None:
+        graph = _FakeMemoryGraph([])
+
+        result = prune_orphan_memories(graph, [_entry("kept-1")], collection="ProjectMemory", apply=True)
+
+        assert result["candidates"] == 0
+        assert result["purged"] == 0
+        assert graph.purge_calls == []

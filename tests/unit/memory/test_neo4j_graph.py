@@ -345,3 +345,91 @@ def test_replace_code_reference_edges(
     assert _find_call(driver, "MERGE (p)-[r:COVERS_CODE").kwargs["refs"][0]["evidence_pack_id"] == (
         "EVD-GAO-target-001-001"
     )
+
+
+# ── #527 — orphan GrimoireMemory nodes, bounded purge ─────────────────────────
+
+
+class _OrphanQueryDriver:
+    """Just enough of the driver surface for orphan find/purge — no schema, no counts."""
+
+    def __init__(self, orphans: list[dict[str, str]] | None = None) -> None:
+        self._orphans = orphans or []
+        self.calls: list[_FakeCall] = []
+
+    def execute_query(self, statement: str, **kwargs: Any) -> tuple[list[dict[str, Any]], None, None]:
+        self.calls.append(_FakeCall(statement=statement, kwargs=kwargs))
+        if "NOT m.id IN $known_ids" in statement:
+            return (list(self._orphans), None, None)
+        return ([], None, None)
+
+
+def _bare_graph(driver: Any) -> Any:
+    """A Neo4jMemoryGraph wired straight to *driver*, skipping __init__'s schema DDL."""
+    from grimoire.memory.neo4j_graph import Neo4jMemoryGraph
+
+    graph = object.__new__(Neo4jMemoryGraph)
+    graph._driver = driver  # type: ignore[attr-defined]
+    graph._database = "neo4j"  # type: ignore[attr-defined]
+    return graph
+
+
+class TestFindOrphanMemoryNodes:
+    def test_returns_nodes_the_query_reports(self) -> None:
+        driver = _OrphanQueryDriver([{"id": "orphan-1", "collection": "GrimoireMemory"}])
+        graph = _bare_graph(driver)
+
+        orphans = graph.find_orphan_memory_nodes(known_ids=frozenset({"kept-1"}), collection="ProjectMemory")
+
+        assert orphans == [{"id": "orphan-1", "collection": "GrimoireMemory"}]
+        call = _find_call(driver, "NOT m.id IN $known_ids")
+        assert call.kwargs["known_ids"] == ["kept-1"]
+
+    def test_scope_is_the_project_collection_plus_the_legacy_generic_one(self) -> None:
+        driver = _OrphanQueryDriver()
+        graph = _bare_graph(driver)
+
+        graph.find_orphan_memory_nodes(known_ids=frozenset(), collection="ProjectMemory")
+
+        call = _find_call(driver, "NOT m.id IN $known_ids")
+        assert set(call.kwargs["collections"]) == {"ProjectMemory", "GrimoireMemory"}
+
+    def test_scope_does_not_duplicate_when_project_collection_is_the_legacy_one(self) -> None:
+        driver = _OrphanQueryDriver()
+        graph = _bare_graph(driver)
+
+        graph.find_orphan_memory_nodes(known_ids=frozenset(), collection="GrimoireMemory")
+
+        call = _find_call(driver, "NOT m.id IN $known_ids")
+        assert call.kwargs["collections"] == ["GrimoireMemory"]
+
+    def test_never_scans_the_whole_database_unscoped(self) -> None:
+        """A purge must never be able to reach a different project's collection."""
+        driver = _OrphanQueryDriver()
+        graph = _bare_graph(driver)
+
+        graph.find_orphan_memory_nodes(known_ids=frozenset(), collection="ProjectMemory")
+
+        call = _find_call(driver, "NOT m.id IN $known_ids")
+        assert "AnotherProjectMemory" not in call.kwargs["collections"]
+        assert "WHERE m.weaviate_collection IN $collections" in call.statement
+
+
+class TestPurgeMemoryNodes:
+    def test_deletes_the_given_ids_and_reports_the_count(self) -> None:
+        driver = _OrphanQueryDriver()
+        graph = _bare_graph(driver)
+
+        purged = graph.purge_memory_nodes(["a", "b", "c"])
+
+        assert purged == 3
+        call = driver.calls[0]
+        assert "DETACH DELETE" in call.statement
+        assert call.kwargs["ids"] == ["a", "b", "c"]
+
+    def test_empty_list_is_a_no_op_and_issues_no_query(self) -> None:
+        driver = _OrphanQueryDriver()
+        graph = _bare_graph(driver)
+
+        assert graph.purge_memory_nodes([]) == 0
+        assert driver.calls == []

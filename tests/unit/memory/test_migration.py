@@ -11,15 +11,19 @@ from grimoire.memory.backends.base import MemoryEntry
 from grimoire.memory.migration import (
     _metadata_json_is_projection,
     build_neo4j_cypher,
+    entries_for_import,
     import_neo4j_cypher,
     import_weaviate_bundle,
     load_migration_records,
     load_weaviate_objects,
+    migrate_backend_to_backend,
+    read_previous_backend_breadcrumb,
     records_from_memory_entries,
     to_weaviate_object,
     verify_migration_bundle,
     weaviate_uuid,
     write_migration_bundle,
+    write_previous_backend_breadcrumb,
 )
 
 
@@ -307,3 +311,94 @@ def test_import_neo4j_cypher_dry_run(tmp_path: Path) -> None:
 
     assert stats["statements"] == 2
     assert stats["executed"] == 0
+
+
+# ── #527 — lexical -> vector migration without a manual export/import ────────
+
+
+def _entry(entry_id: str, text: str) -> MemoryEntry:
+    return MemoryEntry(id=entry_id, text=text, user_id="guilhem", tags=(), metadata={})
+
+
+class TestEntriesForImport:
+    def test_never_carries_a_vector(self) -> None:
+        payload = entries_for_import([_entry("mem-1", "hello")])
+
+        assert payload == [{"text": "hello", "user_id": "guilhem", "tags": [], "metadata": {}}]
+        assert "vector" not in payload[0]
+
+
+class TestMigrateBackendToBackend:
+    def test_dry_run_counts_without_calling_store_many(self) -> None:
+        entries = [_entry("mem-1", "a"), _entry("mem-2", "b")]
+
+        result = migrate_backend_to_backend(
+            entries, source_backend="lexical", target_backend="weaviate-server", store_many=None, dry_run=True,
+        )
+
+        assert result.entries == 2
+        assert result.imported == 0
+        assert result.dry_run is True
+
+    def test_apply_writes_every_entry_through_store_many(self) -> None:
+        entries = [_entry("mem-1", "a"), _entry("mem-2", "b")]
+        written: list[list[dict]] = []
+
+        def fake_store_many(payload: list[dict]) -> list[str]:
+            written.append(payload)
+            return ["written"] * len(payload)
+
+        result = migrate_backend_to_backend(
+            entries, source_backend="lexical", target_backend="weaviate-server",
+            store_many=fake_store_many, dry_run=False,
+        )
+
+        assert result.imported == 2
+        assert written == [[
+            {"text": "a", "user_id": "guilhem", "tags": [], "metadata": {}},
+            {"text": "b", "user_id": "guilhem", "tags": [], "metadata": {}},
+        ]]
+
+    def test_apply_without_store_many_is_a_programming_error(self) -> None:
+        with pytest.raises(ValueError, match="store_many"):
+            migrate_backend_to_backend(
+                [_entry("mem-1", "a")], source_backend="lexical", target_backend="weaviate-server",
+                store_many=None, dry_run=False,
+            )
+
+    def test_empty_source_never_calls_store_many(self) -> None:
+        calls = []
+        result = migrate_backend_to_backend(
+            [], source_backend="lexical", target_backend="weaviate-server",
+            store_many=lambda payload: calls.append(payload) or [],
+            dry_run=False,
+        )
+
+        assert result.entries == 0
+        assert result.imported == 0
+        assert calls == []
+
+
+class TestPreviousBackendBreadcrumb:
+    def test_round_trip(self, tmp_path: Path) -> None:
+        write_previous_backend_breadcrumb(tmp_path, "lexical")
+
+        assert read_previous_backend_breadcrumb(tmp_path) == "lexical"
+
+    def test_missing_breadcrumb_reads_as_empty(self, tmp_path: Path) -> None:
+        assert read_previous_backend_breadcrumb(tmp_path) == ""
+
+    def test_corrupt_breadcrumb_reads_as_empty_not_a_crash(self, tmp_path: Path) -> None:
+        path = tmp_path / "_grimoire" / "_memory" / "migration" / "previous-backend.json"
+        path.parent.mkdir(parents=True)
+        path.write_text("not json", encoding="utf-8")
+
+        assert read_previous_backend_breadcrumb(tmp_path) == ""
+
+    def test_write_is_best_effort_on_an_unwritable_root(self, tmp_path: Path) -> None:
+        readonly_root = tmp_path / "readonly"
+        readonly_root.mkdir(mode=0o500)
+        try:
+            write_previous_backend_breadcrumb(readonly_root, "lexical")  # must not raise
+        finally:
+            readonly_root.chmod(0o700)
