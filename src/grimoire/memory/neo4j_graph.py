@@ -46,6 +46,13 @@ _COUNTABLE_RELATIONSHIPS = frozenset({
 })
 _BATCH_SIZE = 1000
 
+#: Collection name written before per-project Weaviate collections existed
+#: (the hardcoded default in ``grimoire.memory.profiles.BACKEND_CONNECTION``).
+#: Orphan ``GrimoireMemory`` nodes from that era carry this value even though
+#: the project has since moved to its own prefixed collection — a purge scoped
+#: to "this project's collection" treats them as in-scope too (#527).
+LEGACY_GENERIC_COLLECTION = "GrimoireMemory"
+
 
 def _batches[T](items: list[T], size: int = _BATCH_SIZE) -> list[list[T]]:
     return [items[index:index + size] for index in range(0, len(items), size)]
@@ -703,6 +710,44 @@ class Neo4jMemoryGraph:
             "vectorized_edges": self._relationship_count("VECTORIZED_AS"),
             "memory_links": self._relationship_count("MEMORY_FOR"),
         }
+
+    def find_orphan_memory_nodes(
+        self, *, known_ids: frozenset[str], collection: str,
+    ) -> list[dict[str, str]]:
+        """``GrimoireMemory`` nodes with no matching entry in the durable store.
+
+        Scoped to *collection* and :data:`LEGACY_GENERIC_COLLECTION` — a fixed,
+        small allowlist — rather than every ``GrimoireMemory`` node in the
+        database: a Neo4j instance can be shared across projects, and an
+        unscoped purge would delete another project's memories (#527).
+        """
+        collections = sorted({collection, LEGACY_GENERIC_COLLECTION} - {""})
+        records, _, _ = self._driver.execute_query(
+            """
+            MATCH (m:GrimoireMemory)
+            WHERE m.weaviate_collection IN $collections AND NOT m.id IN $known_ids
+            RETURN m.id AS id, m.weaviate_collection AS collection
+            """,
+            collections=collections,
+            known_ids=list(known_ids),
+            database_=self._database,
+        )
+        return [{"id": str(record["id"]), "collection": str(record["collection"])} for record in records]
+
+    def purge_memory_nodes(self, ids: list[str]) -> int:
+        """``DETACH DELETE`` the given ``GrimoireMemory`` nodes by id.
+
+        Returns the number of ids submitted — a MERGE-free delete has nothing
+        left to disagree with the caller's count, unlike a scan-based verdict.
+        """
+        if not ids:
+            return 0
+        for batch in _batches(ids):
+            self._execute(
+                "UNWIND $ids AS mid MATCH (m:GrimoireMemory {id: mid}) DETACH DELETE m",
+                {"ids": batch},
+            )
+        return len(ids)
 
     def health_check(self) -> Neo4jGraphStatus:
         """Verify connectivity and return graph projection stats."""

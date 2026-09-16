@@ -28,6 +28,7 @@ from grimoire.cli.cmd_memory import (
     memory_app,
 )
 from grimoire.core.exceptions import GrimoireMemoryError
+from grimoire.memory import profiles as memory_profiles
 from grimoire.memory.architecture import build_memory_architecture_status
 from grimoire.memory.backends.base import BackendStatus
 from grimoire.memory.manager import MemoryManager
@@ -38,7 +39,12 @@ __all__ = ["memory_app"]
 # ── grimoire memory up ────────────────────────────────────────────────────────
 
 _up_profile_opt = typer.Option(
-    "full", "--profile", help="Cible : lexical (zéro dépendance), vector, ou full (vecteurs + graphe + chaud).",
+    "complet",
+    "--profile",
+    help=(
+        "Composition cible : lexical | standard | graphe | complet "
+        "(alias conservés : vector→standard, full→complet)."
+    ),
 )
 _up_apply_opt = typer.Option(False, "--apply", help="Écrire le bloc memory: dans project-context.yaml.")
 
@@ -58,14 +64,18 @@ def memory_up(
     N'active que les services qui répondent : écrire ``memory_graph: neo4j``
     alors que Neo4j est éteint produirait une config qui échoue en silence.
 
+    Écrit toujours ``layer_profile`` et ``retrieval_mode`` cohérents avec ce
+    qui est réellement servi (#527) — jamais avec le profil demandé si la
+    machine ne peut pas le tenir.
+
     [dim]Examples:[/dim]
-      [cyan]grimoire memory up[/cyan]                  Plan seul, rien n'est écrit
-      [cyan]grimoire memory up --apply[/cyan]          Écrit le bloc memory:
-      [cyan]grimoire memory up --profile vector[/cyan] Vecteurs sans graphe
+      [cyan]grimoire memory up[/cyan]                    Plan seul, rien n'est écrit
+      [cyan]grimoire memory up --apply[/cyan]            Écrit le bloc memory:
+      [cyan]grimoire memory up --profile standard[/cyan] Vecteurs sans graphe
     """
     from grimoire.tools.memory_setup import PROFILES, apply_memory_plan, build_memory_plan
 
-    if profile not in PROFILES:
+    if not memory_profiles.is_known(profile):
         console.print(f"[red]Profil inconnu :[/red] {profile} — attendu : {', '.join(PROFILES)}")
         raise typer.Exit(1)
 
@@ -117,6 +127,11 @@ def memory_up(
         for warning in plan.warnings:
             console.print(f"  {escape(warning)}")
 
+    if plan.notes:
+        console.print("\n[bold]À savoir[/bold]")
+        for note in plan.notes:
+            console.print(f"  {escape(note)}")
+
     if plan.next_steps:
         console.print("\n[bold]Étapes suivantes[/bold]")
         for step in plan.next_steps:
@@ -153,6 +168,48 @@ def memory_graph_sync_memories(ctx: typer.Context) -> None:
     console.print(f"[green]Souvenirs projetés[/green] : {stats['projected']}")
     if stats["failed"]:
         console.print(f"  [red]échecs[/red] : {stats['failed']}")
+
+
+# ── grimoire memory graph purge-orphans ───────────────────────────────────────
+
+_purge_orphans_apply_opt = typer.Option(
+    False, "--apply", help="Supprimer les nœuds orphelins. Sans ce drapeau : aperçu seul (dry-run).",
+)
+
+
+@graph_app.command("purge-orphans")
+def memory_graph_purge_orphans(ctx: typer.Context, apply: bool = _purge_orphans_apply_opt) -> None:
+    """Retirer les nœuds ``GrimoireMemory`` sans entrée correspondante dans le store.
+
+    ``sync-memories`` n'est qu'additif : un souvenir supprimé du store, ou un
+    essai antérieur qui a écrit sous une autre collection, laisse des nœuds
+    orphelins pour toujours (cas réel : store=75, graph=3782, #527). Borné à
+    la collection du projet (et à l'ancienne collection générique
+    ``GrimoireMemory`` d'avant les profils) pour ne jamais toucher un autre
+    projet qui partagerait la même instance Neo4j.
+
+    Dry-run par défaut : relancer avec [cyan]--apply[/cyan] pour supprimer.
+    """
+    from grimoire.memory.projections import prune_orphan_memories
+
+    mgr, cfg, _ = _load_manager_context()
+    collection = cfg.memory.weaviate_collection or cfg.memory.collection_prefix
+    graph = _load_neo4j_graph(cfg)
+    try:
+        result = prune_orphan_memories(graph, mgr.get_all(), collection=collection, apply=apply)
+    finally:
+        graph.close()
+
+    if _get_fmt(ctx) == "json":
+        typer.echo(json.dumps(result, indent=2))
+        return
+
+    verb = "Supprimés" if apply else "Candidats (dry-run)"
+    console.print(f"[bold]{verb}[/bold] : {result['candidates']} nœud(s) hors collection {result['collection']!r}")
+    if apply:
+        console.print(f"  [green]purgés[/green] : {result['purged']}")
+    elif result["candidates"]:
+        console.print("  Relancez avec [cyan]--apply[/cyan] pour supprimer.")
 
 
 # ── grimoire memory status ────────────────────────────────────────────────────
