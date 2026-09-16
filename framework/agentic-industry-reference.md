@@ -26,7 +26,12 @@
 > #443), configuration YAML (PR #438). Restent ouverts et repris au plan :
 > validation externe des écritures mémoire, `skills-ref validate` + éval par
 > skill, hooks `TaskCreated`/`TaskCompleted`/`InstructionsLoaded`, volume de
-> skills/agents, largeur d'hôtes (phases 3 à 5 du plan).
+> skills/agents, largeur d'hôtes (phases 3 à 5 du plan). Lots 1.2 et 1.3 de la
+> phase 1 livrés le 2026-09-16 : verdict chevaucher/envelopper/ignorer par
+> capacité Anthropic dans
+> [`docs/veille/anthropic-direction-2026-09.md`](../docs/veille/anthropic-direction-2026-09.md)
+> et instruction adopter/adapter/écarter des idées à récolter dans
+> [`docs/veille/idees-a-recolter-2026-09.md`](../docs/veille/idees-a-recolter-2026-09.md).
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
