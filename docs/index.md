@@ -72,3 +72,5 @@ grimoire-kit/
 | [MCP](mcp-integration.md) | Intégration Model Context Protocol |
 | [Troubleshooting](troubleshooting.md) | Résolution de problèmes |
 | [Plan produit 2026-Q4](plan-2026-q4.md) | Cible, métriques mesurées, phases, matrice de parité, registre des risques |
+| [Direction d'Anthropic — chevaucher/envelopper/ignorer](veille/anthropic-direction-2026-09.md) | Verdict par capacité Anthropic récente, lot du plan qui l'absorbe |
+| [Idées à récolter — instruction et verdict](veille/idees-a-recolter-2026-09.md) | Adopter/adapter/écarter par idée concurrente, fichier source et licence |
