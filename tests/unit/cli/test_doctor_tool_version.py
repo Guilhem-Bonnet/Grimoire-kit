@@ -47,8 +47,12 @@ class TestDoctorToolVersion:
     def test_warns_when_the_running_tool_is_older_than_the_project_kit(
         self, runner: CliRunner, real_project: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        aligned = project_health.kit_alignment(real_project)["aligned"]
-        assert aligned, "le projet réel doit avoir une version alignée à comparer"
+        # Issue #519 : la référence est désormais `upVersion` (le marqueur
+        # écrit par le `grimoire init` réel de cette fixture), pas `aligned`
+        # (le catalogue de digests, qui date un contenu à sa première
+        # introduction plutôt qu'au dernier passage réel de l'outil).
+        aligned = project_health.kit_alignment(real_project)["upVersion"]
+        assert aligned, "le projet réel doit avoir une version de dernier `up` à comparer"
         monkeypatch.setattr(project_health, "_installed_kit_version", lambda: "0.0.1")
 
         p_which, p_run, p_sock = _env_ok()
@@ -67,11 +71,11 @@ class TestDoctorToolVersion:
     def test_ok_when_the_running_tool_matches_the_project_kit(
         self, runner: CliRunner, real_project: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        aligned = project_health.kit_alignment(real_project)["aligned"]
-        assert aligned, "le projet réel doit avoir une version alignée à comparer"
-        # `aligned` (digest le plus récent reconnu) et l'outil qui a lancé
+        aligned = project_health.kit_alignment(real_project)["upVersion"]
+        assert aligned, "le projet réel doit avoir une version de dernier `up` à comparer"
+        # `upVersion` (marqueur du dernier `up` réel) et l'outil qui a lancé
         # cette suite peuvent légitimement différer (dev non publié) : on fixe
-        # l'outil sur `aligned` pour isoler le cas « à jour » sans dépendre de
+        # l'outil dessus pour isoler le cas « à jour » sans dépendre de
         # l'état de release de la machine qui exécute les tests.
         monkeypatch.setattr(project_health, "_installed_kit_version", lambda: aligned)
 
