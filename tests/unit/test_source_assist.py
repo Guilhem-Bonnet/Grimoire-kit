@@ -96,6 +96,29 @@ class _FakeOllama(http.server.BaseHTTPRequestHandler):
         return
 
 
+def _drain_warm_up(timeout: float = 6.0) -> None:
+    """Attend qu'aucun préchauffage (:func:`source_assist._trigger_warm_up`)
+    ne reste en vol avant de réinitialiser l'état partagé de ``_FakeOllama``
+    ni d'arrêter le serveur.
+
+    Régression #529 : ``_trigger_warm_up`` démarre un thread démon que ni
+    ``assist_status`` ni le test appelant ne joignent — un test qui déclenche
+    un chargement (``running = ()``) puis rend la main avant que ce thread
+    n'ait fini laissait le thread écrire dans ``_FakeOllama.generate_calls``
+    (classvar partagée entre tous les tests) pendant le test SUIVANT, une
+    fois la liste réinitialisée par CETTE fixture : la course produisait
+    tantôt 1 tantôt 2 entrées vues par le test suivant (``assert 2 == 1``
+    observé en CI, jamais localement). ``_WARM_UP_INFLIGHT`` (retiré dans le
+    ``finally`` de ``_warm_up_model`` une fois l'appel terminé, avec ou sans
+    succès) est le seul signal disponible sans changer le code de
+    production : l'attendre vide ici garantit que le thread a fini d'écrire
+    avant que le prochain test ne parte d'un état propre.
+    """
+    deadline = time.monotonic() + timeout
+    while source_assist._WARM_UP_INFLIGHT and time.monotonic() < deadline:
+        time.sleep(0.02)
+
+
 @pytest.fixture
 def fake_ollama() -> Any:
     server = http.server.HTTPServer(("127.0.0.1", 0), _FakeOllama)
@@ -104,6 +127,7 @@ def fake_ollama() -> Any:
     try:
         yield server
     finally:
+        _drain_warm_up()
         _FakeOllama.generate_response = "une suggestion sans surprise."
         _FakeOllama.generate_delay = 0.0
         _FakeOllama.models = ("qwen3-coder:30b",)
