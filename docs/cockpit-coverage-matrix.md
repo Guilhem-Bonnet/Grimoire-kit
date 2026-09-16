@@ -34,6 +34,12 @@ test qui rend la page. Glisser-déposer et menu contextuel : recherche `draggabl
 `contextmenu` sur tout `web/workspace/` → aucune occurrence, ces deux catégories de contrôle
 n'existent pas dans le cockpit (case vide légitime, pas un oubli).
 
+Revue #546 : `grimoire blueprint evals` (`cmd_blueprint.py::blueprint_evals`) est une commande CLI
+qui rejoue les évals déclarées d'un blueprint contre un enregistrement d'exécution — vérifié dans
+`forge_http.py` et `cmd_cockpit.py` qu'elle n'a jamais été exposée comme route HTTP, ni sur
+l'atelier ni sur le cockpit. Ce n'est pas une ligne manquante de la table « Routes API » ci-dessous
+(qui ne recense que des routes réellement câblées ou attendues) : rien à câbler, rien à compter.
+
 ## Résumé
 
 <!-- BEGIN:cockpit-coverage-summary -->
@@ -41,13 +47,13 @@ n'existent pas dans le cockpit (case vide légitime, pas un oubli).
 |---|---:|---:|---:|
 | Coque (shell.js) | 32 | 31 | 97% |
 | Piloter | 34 | 29 | 85% |
-| Concevoir | 23 | 15 | 65% |
+| Concevoir | 23 | 16 | 70% |
 | Executer | 16 | 10 | 62% |
 | Observer | 10 | 7 | 70% |
 | Mémoire | 9 | 4 | 44% |
 | Source | 17 | 15 | 88% |
-| Routes API | 25 | 17 | 68% |
-| **TOTAL** | **166** | **128** | **77%** |
+| Routes API | 25 | 18 | 72% |
+| **TOTAL** | **166** | **130** | **78%** |
 <!-- END:cockpit-coverage-summary -->
 
 *(régénéré par `python scripts/cockpit-coverage.py` — recopier sa sortie ici après toute modification des tables ci-dessous ; la CI de PR 1 le vérifie via `--check`.)*
@@ -175,7 +181,7 @@ pour ce contrôle précis.
 | Ouvrir le workflow (bouton) | `.btn` « Ouvrir » | `zoomToWorkflow(id)` | idem | équivalent bouton du double-clic | — | non |
 | Valider (bouton) | `.btn` « Valider » | `runValidate` | `POST /api/blueprints/<id>/validate` | verdict écrit dans le dock Problèmes | `test_valider_ecrit_le_verdict_dans_le_dock_problemes` | oui |
 | Simuler (bouton) | `.btn` « Simuler » | `runSimulate` | `POST /api/blueprints/<id>/simulate` | résultat simulation | — | non |
-| Compiler (bouton) | `.btn` « Compiler » | `runCompile` | `POST /api/blueprints/<id>/compile` (atelier seul) | artefact nommé / refus si cockpit | — | non |
+| Compiler (bouton) | `.btn` « Compiler » | `runCompile` | `POST /api/blueprints/<id>/compile` | artefact nommé, câblée sur le cockpit depuis #546 (manquait — même défaut que `PUT` avant #543) | `tests/unit/cli/test_cmd_cockpit_blueprint_writes.py` | oui |
 | Bibliothèque (rail 2 / bouton toolbar) | `.rail-btn`/`btnLib` | ouvre/ferme `state.paletteOpen` | `GET /api/primitives` | 7 primitives listées | `test_la_bibliotheque_de_noeuds_liste_les_sept_primitives`, `test_le_raccourci_2_du_rail_ouvre_la_bibliotheque_de_noeuds` | oui |
 | Primitive de la Bibliothèque (clic) | `.cv-prim` | `addNode(name)` | `PUT /api/blueprints/<id>` via le bouton « Enregistrer » (corrigé par #535 — n'écrit plus automatiquement) | nœud ajouté au brouillon, indicateur « modifié », persiste après « Enregistrer » + rechargement | `test_ajouter_un_noeud_affiche_modifie_non_enregistre`, `test_enregistrer_apres_ajout_de_noeud_persiste_apres_rechargement` | oui |
 | Enregistrer (bouton toolbar, nouveau — #535) | `.cv-toolbar button` « Enregistrer » | `saveBlueprint()` | `PUT /api/blueprints/<id>` | désactivé sans modification, écrit et retire l'indicateur « modifié » | `test_enregistrer_apres_ajout_de_noeud_persiste_apres_rechargement` | oui |
@@ -275,9 +281,9 @@ pour ce contrôle précis.
 | POST /api/setup / setup/plan | cmd_cockpit.py:423 | 200/400/403/404 | extensions partiellement échouées (200) | `test_wizard_initializes_a_blank_project_end_to_end` | oui |
 | POST /api/projects/create | cmd_cockpit.py:451 | 200/400/403/409 | — | `test_creating_a_project_from_the_fleet_makes_it_appear`, `test_creating_a_project_on_an_existing_path_is_refused` | oui |
 | POST /api/workspace/* (garde) | cmd_cockpit.py:494 | 403 hors home, **sauf** `proposals/<slug>/{accept,reject}` (issue #490, `is_proposal_decision`) | — | `test_the_write_guard_refuses_a_foreign_host_exactly_like_update`, `test_other_workspace_writes_stay_home_only` | oui |
-| POST /api/blueprints/<id>/validate / simulate | cmd_cockpit.py:534 | 200/400/404 ; `ValueError` d'id malformé non catché ici | erreurs/avertissements dans un 200 | `test_valider_ecrit_le_verdict_dans_le_dock_problemes` | oui |
-| POST /api/blueprints/<id>/compile | forge (atelier only) | — | — | — | non |
-| PUT /api/blueprints/<id> (nouveau — #535, atelier only) | forge_http.py `do_PUT`, `forge_server.py::blueprint_put` | 200 (même corps incomplet — brouillon) ; 400 sur corps structurellement invalide (avant #535 : `AttributeError` non rattrapée → 500) | brouillon `ref` vide accepté, lint informatif jamais bloquant | `test_blueprint_put_then_get`, `test_blueprint_put_refuses_a_structurally_invalid_body_with_400`, `test_blueprint_put_accepts_an_incomplete_draft_node` | oui |
+| POST /api/blueprints/<id>/validate / simulate | cmd_cockpit.py:534 | 200/400/404 ; `ValueError` d'id malformé non catché ici ; SANS garde `_HOME_SLUG` (calcul pur, jamais d'écriture), vérifié avec un vrai handler sur un projet foreign (#546) | erreurs/avertissements dans un 200 | `test_valider_ecrit_le_verdict_dans_le_dock_problemes`, `tests/unit/cli/test_cmd_cockpit_blueprint_writes.py` (#546) | oui |
+| POST /api/blueprints/<id>/compile | cmd_cockpit.py (câblée par #546 — manquait, 404 « route inconnue » avant même une garde, même défaut que `PUT` avant #543) | 200 (artefact + section `compiled` persistée) ; 400 blueprint bloqué ; 403 hors home ; 404 blueprint inconnu | artefact `.prompt.md` sur disque | `tests/unit/cli/test_cmd_cockpit_blueprint_writes.py` (#546) | oui |
+| PUT /api/blueprints/<id> (#535/#543) | cmd_cockpit.py `do_PUT`, `forge_server.py::blueprint_put` (câblée sur le cockpit ET l'atelier depuis #543 — l'étiquette « atelier only » d'une version antérieure de cette matrice était déjà périmée) | 200 (même corps incomplet — brouillon) ; 400 sur corps structurellement invalide (avant #535 : `AttributeError` non rattrapée → 500) ; 403 hors home | brouillon `ref` vide accepté, lint informatif jamais bloquant | `test_blueprint_put_then_get`, `test_blueprint_put_refuses_a_structurally_invalid_body_with_400`, `test_blueprint_put_accepts_an_incomplete_draft_node`, `tests/unit/cli/test_cmd_cockpit_blueprint_put.py` | oui |
 | POST /api/memory | cmd_cockpit.py:569 | 200/400/403/504 | mutation sans confirm → 403 | — | non |
 | GET catch-all /api/* | cmd_cockpit.py:302 | 404 | — | `tests/unit/test_workspace_routes.py::test_une_route_inconnue_sous_le_prefixe_reste_un_404` | oui |
 | GET /api/status, /api/setup, /api/archetypes, /api/needs, /api/setup/run, /api/extensions, /api/blueprints, /api/events/log, /api/stigmergy, /api/features, /api/cost-model, /api/otel, /api/primitives, /api/backends, /api/memory/status, /api/health | forge_routes.py (inchangé depuis 3.49.0, vérifié par diff) | 200 quasi toujours (repli interne documenté par module) | vides/partiels documentés par route (voir `forge_server.py`) | `tests/unit/test_workspace_api.py` (couverture large, non ligne-à-ligne ici) | oui |
