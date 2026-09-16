@@ -16,6 +16,18 @@
 > l'industrie a prouvé, et on en déduit où Grimoire est aligné, en avance, ou en retard
 > (section 10).
 
+> **Révision 2026-09-16** : recentrage sur le segment cible du plan produit —
+> couches agentiques pour développeurs sur un hôte (Claude Code, Copilot,
+> Cursor, Codex, Gemini), pas l'ensemble de l'écosystème agentique. Voir la
+> matrice de parité du [plan 2026-Q4](../docs/plan-2026-q4.md#5-matrice-de-parité)
+> pour le détail point par point. Cinq écarts notés lors de la révision
+> précédente sont comblés depuis : coût/pass^k continu (PR kit #444), politiques
+> temporelles (PR #440), MCP révision 2026-07-28 (PR #437), traces OTel (PR
+> #443), configuration YAML (PR #438). Restent ouverts et repris au plan :
+> validation externe des écritures mémoire, `skills-ref validate` + éval par
+> skill, hooks `TaskCreated`/`TaskCompleted`/`InstructionsLoaded`, volume de
+> skills/agents, largeur d'hôtes (phases 3 à 5 du plan).
+
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
 ## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> 0. Comment lire et utiliser ce fichier

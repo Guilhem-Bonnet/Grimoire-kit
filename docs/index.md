@@ -71,3 +71,4 @@ grimoire-kit/
 | [Archétypes](archetype-guide.md) | Templates de projets |
 | [MCP](mcp-integration.md) | Intégration Model Context Protocol |
 | [Troubleshooting](troubleshooting.md) | Résolution de problèmes |
+| [Plan produit 2026-Q4](plan-2026-q4.md) | Cible, métriques mesurées, phases, matrice de parité, registre des risques |
