@@ -544,13 +544,52 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             else:
                 self._send_json(200, result)
             return
+        if path.startswith("/api/blueprints/") and path.endswith("/compile"):
+            # Écriture réelle (issue #546, même défaut que #535/#543 avant
+            # correctif) : `_CockpitHandler` n'avait ICI AUCUNE branche pour
+            # `/compile` — `do_POST` retombait sur le 404 générique de fin de
+            # méthode avant même d'atteindre une garde, comme `PUT` avant
+            # #543. `blueprint_compile` écrit un artefact `.prompt.md` et
+            # persiste la section `compiled` dans le blueprint d'origine
+            # (voir sa docstring) : ce n'est pas un calcul comme
+            # `/validate`/`/simulate` juste en dessous. Même garde que
+            # `/api/setup` et `PUT` : seul le projet de lancement direct
+            # (`_HOME_SLUG`) accepte cette écriture.
+            if not self._is_home_request():
+                self._send_json(403, {"ok": False, "error": "hôte en lecture seule"})
+                return
+            proot = _resolve_project_path(self._query_slug() or None)
+            if proot is None or not proot.is_dir():
+                self._send_json(404, {"ok": False, "error": "projet inconnu"})
+                return
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                body = json.loads(self.rfile.read(length) or b"{}") if length else {}
+            except (ValueError, json.JSONDecodeError):
+                self._send_json(400, {"ok": False, "error": "bad json"})
+                return
+            api = _project_api(proot)
+            bp_id = path.split("/")[3]
+            try:
+                blueprint = body or api.blueprint_get(bp_id)
+            except FileNotFoundError:
+                self._send_json(404, {"ok": False, "error": "blueprint introuvable"})
+                return
+            try:
+                self._send_json(200, api.blueprint_compile(blueprint))
+            except ValueError as exc:
+                self._send_json(400, {"ok": False, "error": str(exc)})
+            return
         if path.startswith("/api/blueprints/") and path.endswith(("/validate", "/simulate")):
             # Calcul, pas écriture : `blueprint_lint`/`blueprint_simulate` ne
             # touchent jamais le disque (voir leurs docstrings — la simulation
-            # « ne produit aucun effet »). `/compile` et `PUT` restent absents
-            # d'ici ; ce sont eux, pas ceux-ci, que `readOnly` doit bloquer
-            # côté client (#356 — Concevoir doit pouvoir valider/simuler le
-            # projet déjà sélectionné sur le cockpit, comme sur l'atelier).
+            # « ne produit aucun effet »). Contrairement à `/compile` et `PUT`
+            # ci-dessus, aucune garde `_HOME_SLUG` ici — Concevoir doit
+            # pouvoir valider/simuler le projet déjà sélectionné sur le
+            # cockpit, comme sur l'atelier (#356), y compris un projet du
+            # registre qu'on ne fait que regarder. Vérifié par un test sur un
+            # vrai handler (`test_cmd_cockpit_blueprint_writes.py`, #546),
+            # pas seulement supposé sur la base de ce commentaire.
             proot = _resolve_project_path(self._query_slug() or None)
             if proot is None or not proot.is_dir():
                 self._send_json(404, {"ok": False, "error": "projet inconnu"})
