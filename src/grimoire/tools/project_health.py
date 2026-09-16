@@ -210,6 +210,27 @@ def _newest_version_by_path() -> dict[str, str]:
     return newest
 
 
+def _last_up_version(project_root: Path) -> str | None:
+    """Version de l'outil qui a écrit ce ``_grimoire/kit/`` en dernier (issue #519).
+
+    Lit le marqueur que :func:`grimoire.core.scaffold.ProjectScaffolder`
+    régénère à chaque ``grimoire init``/``up`` (voir sa docstring) —
+    contrairement au catalogue de digests, dont chaque entrée date la
+    *première* publication d'un contenu, jamais le dernier passage réel de
+    l'outil sur ce projet. ``None`` sur un projet jamais mis à niveau depuis
+    l'introduction de ce marqueur, ou dont le marqueur est absent/vide : pas
+    une panne, juste rien à rapporter.
+    """
+    marker = layout.kit_up_version_marker(project_root)
+    if not marker.is_file():
+        return None
+    try:
+        text = marker.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return text or None
+
+
 def kit_alignment(project_root: Path) -> dict[str, Any]:
     """Le contenu de ce projet est-il la dernière révision que le kit connaît ?
 
@@ -263,6 +284,15 @@ def kit_alignment(project_root: Path) -> dict[str, Any]:
         # projet ne déclare rien ou que la version n'a pas pu être lue
         # (issue #510 point 4c).
         "projectTool": tool["version"],
+        # Version de l'outil qui a écrit ce `_grimoire/kit/` en dernier
+        # (issue #519) — `None` sur un projet jamais mis à niveau depuis
+        # l'introduction de ce marqueur. C'est la référence à afficher comme
+        # « kit courant » : `aligned` ci-dessus nomme la version où un
+        # contenu encore présent a été introduit pour la *première* fois, ce
+        # qui se lit comme « en retard » alors que le projet est à jour (un
+        # projet en 3.51.1 dont l'essentiel n'a pas changé depuis 3.46.0
+        # affichait « aligné sur 3.46.0 » pour un contenu pourtant courant).
+        "upVersion": _last_up_version(project_root),
     }
 
 
@@ -278,7 +308,15 @@ def tool_version_gap(project_root: Path) -> dict[str, Any] | None:
     comparer, pas un écart annoncé contre du vide.
     """
     alignment = kit_alignment(project_root)
-    aligned = alignment["aligned"]
+    # Le marqueur du dernier `up` (`upVersion`, issue #519) est la référence
+    # dès qu'il existe : contrairement à `aligned` (catalogue), il nomme la
+    # version de l'outil qui a réellement tourné ici en dernier, pas celle où
+    # un contenu encore présent a été introduit pour la première fois — une
+    # comparaison à `aligned` disait « à jour » pour un outil intermédiaire
+    # entre les deux, alors qu'il était bien en retard sur le vrai dernier
+    # `up`. Repli sur `aligned` seul sur un projet jamais remis à niveau
+    # depuis l'introduction de ce marqueur : rien à faire régresser.
+    aligned = alignment["upVersion"] or alignment["aligned"]
     if not aligned:
         return None
     installed = str(alignment["installed"])

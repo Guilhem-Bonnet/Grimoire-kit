@@ -1278,7 +1278,23 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
   const kit = kitStatus(health?.kit);
   const kitRow = pill(kit.dot, kit.word);
   kitBlock.append(kitRow);
-  if (health?.kit?.aligned) kitBlock.append(text('div', 'lbl', `aligné sur ${health.kit.aligned}, installé ${health.kit.installed}`));
+  // Issue #519 : `health.kit.aligned` nomme la version où un contenu encore
+  // présent a été introduit pour la PREMIÈRE fois au catalogue, pas le
+  // dernier passage réel de l'outil — un projet à jour en 3.51.1 dont
+  // l'essentiel n'avait pas changé depuis 3.46.0 affichait ici « aligné sur
+  // 3.46.0, installé 3.51.1 », lu comme un retard. Quand `upToDate` est vrai
+  // ET que le serveur connaît la version qui a fait le dernier `up`
+  // (`upVersion`, marqueur écrit par `grimoire up`/`init`), c'est ELLE la
+  // référence à afficher ; `aligned` redevient un détail secondaire, réservé
+  // au cas où il diffère (contenu inchangé depuis plus longtemps).
+  if (health?.kit?.upToDate && health?.kit?.upVersion) {
+    kitBlock.append(text('div', 'lbl', `à jour (kit ${health.kit.upVersion})`));
+    if (health.kit.aligned && health.kit.aligned !== health.kit.upVersion) {
+      kitBlock.append(text('div', 'lbl', `contenu inchangé depuis ${health.kit.aligned}`));
+    }
+  } else if (health?.kit?.aligned) {
+    kitBlock.append(text('div', 'lbl', `aligné sur ${health.kit.aligned}, installé ${health.kit.installed}`));
+  }
   const toolLine = projectToolLine(health?.kit);
   if (toolLine) kitBlock.append(text('div', 'lbl', toolLine));
   // Le badge « en retard (N) » nommait N sans jamais dire lesquels

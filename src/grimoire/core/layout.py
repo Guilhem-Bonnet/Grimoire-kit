@@ -61,6 +61,23 @@ LEGACY_AGENT_DIRS: tuple[str, ...] = (
 )
 
 
+#: Marker written by every ``grimoire init``/``up`` (the kit tier is
+#: "regenerated in full on every update", see the module docstring above) —
+#: the version of the *tool* that last ran the scaffolder, not a content
+#: revision. Distinct from the catalog-derived value that
+#: ``project_health.kit_alignment()`` used to call ``aligned``: that one
+#: names the version a still-unchanged file was first *introduced* under,
+#: which reads as "in date since" rather than "current" (issue #519 — a
+#: project current in 3.51.1 displayed "aligné sur 3.46.0" because most of
+#: its files hadn't changed since that release).
+KIT_UP_VERSION_MARKER = f"{KIT_DIR}/.up-version"
+
+
+def kit_up_version_marker(project_root: Path) -> Path:
+    """Absolute path of the last-``up`` tool version marker for *project_root*."""
+    return project_root / KIT_UP_VERSION_MARKER
+
+
 def kit_dir(project_root: Path) -> Path:
     """Absolute path of the kit tier for *project_root*."""
     return project_root / KIT_DIR

@@ -517,6 +517,26 @@ def test_project_tool_version_is_unknown_when_the_binary_fails(project: Path) ->
     assert result["source"] == str(binary)
 
 
+def test_kit_alignment_up_version_is_none_without_a_marker(project: Path) -> None:
+    """Un projet jamais remis à niveau depuis l'introduction du marqueur
+    (issue #519) n'a rien à rapporter — pas une panne."""
+    kit = ph.kit_alignment(project)
+    assert kit["upVersion"] is None
+
+
+def test_kit_alignment_up_version_reads_the_marker_written_by_up(project: Path) -> None:
+    """Le marqueur régénéré par `ProjectScaffolder` à chaque `init`/`up`
+    (`_grimoire/kit/.up-version`) est la source de vérité de `upVersion` —
+    jamais une seconde estimation."""
+    kit_dir = project / "_grimoire" / "kit"
+    kit_dir.mkdir(parents=True, exist_ok=True)
+    (kit_dir / ".up-version").write_text("3.51.1\n", encoding="utf-8")
+
+    kit = ph.kit_alignment(project)
+
+    assert kit["upVersion"] == "3.51.1"
+
+
 def test_kit_alignment_carries_the_declared_project_tool(project: Path) -> None:
     venv_bin = project / ".venv" / "bin"
     venv_bin.mkdir(parents=True)
@@ -540,6 +560,56 @@ def test_tool_version_gap_is_none_without_a_known_alignment(project: Path) -> No
 def test_tool_version_gap_flags_an_older_running_tool(
     project: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    kit_dir = project / "_grimoire" / "kit"
+    kit_dir.mkdir(parents=True)
+    (kit_dir / "outil.py").write_text("contenu\n", encoding="utf-8")
+
+    ph._newest_version_by_path.cache_clear()
+    monkeypatch.setattr(ph, "_installed_kit_version", lambda: "3.50.1")
+    monkeypatch.setattr(ph, "load_catalog", lambda: {
+        "d": {"version": "3.50.2", "path": "framework/outil.py"},
+    })
+    monkeypatch.setattr(
+        ph, "shipped_by_kit", lambda _p: {"version": "3.50.2", "path": "framework/outil.py"}
+    )
+
+    gap = ph.tool_version_gap(project)
+
+    assert gap == {"installed": "3.50.1", "aligned": "3.50.2", "outdated": True}
+
+
+def test_tool_version_gap_uses_the_up_marker_not_the_catalog_first_seen_version(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Régression #519 : un outil dont la version est ENTRE la version où un
+    contenu a été introduit au catalogue (`aligned`, ici 3.46.0) et la
+    version qui a réellement fait le dernier `up` (`upVersion`, marqueur,
+    ici 3.51.0) est bien en retard — comparer à `aligned` seul (le
+    comportement d'avant ce correctif) le disait à tort « à jour »."""
+    kit_dir = project / "_grimoire" / "kit"
+    kit_dir.mkdir(parents=True)
+    (kit_dir / "outil.py").write_text("contenu\n", encoding="utf-8")
+    (kit_dir / ".up-version").write_text("3.51.0\n", encoding="utf-8")
+
+    ph._newest_version_by_path.cache_clear()
+    monkeypatch.setattr(ph, "_installed_kit_version", lambda: "3.48.0")
+    monkeypatch.setattr(ph, "load_catalog", lambda: {
+        "d": {"version": "3.46.0", "path": "framework/outil.py"},
+    })
+    monkeypatch.setattr(
+        ph, "shipped_by_kit", lambda _p: {"version": "3.46.0", "path": "framework/outil.py"}
+    )
+
+    gap = ph.tool_version_gap(project)
+
+    assert gap == {"installed": "3.48.0", "aligned": "3.51.0", "outdated": True}
+
+
+def test_tool_version_gap_falls_back_to_aligned_without_a_marker(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Un projet jamais mis à niveau depuis l'introduction du marqueur garde
+    l'ancien comportement — rien ne doit régresser vers `None`."""
     kit_dir = project / "_grimoire" / "kit"
     kit_dir.mkdir(parents=True)
     (kit_dir / "outil.py").write_text("contenu\n", encoding="utf-8")
