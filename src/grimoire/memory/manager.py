@@ -292,6 +292,23 @@ def _create_memory_graph_bounded(
         pool.shutdown(wait=False)
 
 
+def _redis_namespace(config: GrimoireConfig) -> str:
+    """Per-project Redis key prefix, never the shared ``grimoire`` default.
+
+    A Redis instance is routinely shared across projects on the same machine
+    (see #527 — a Forge instance found itself sharing ``redis://localhost:
+    6379/0`` with an unrelated project's container). ``collection_prefix`` is
+    already the per-project slug ``memory up`` writes; the only gap was a
+    project that never went through it and kept the dataclass default, which
+    would collide with any other project in the same situation.
+    """
+    prefix = config.memory.collection_prefix
+    if prefix and prefix != "grimoire":
+        return prefix
+    slug = "".join(char if char.isalnum() else "_" for char in (config.project.name or "grimoire").lower()).strip("_")
+    return slug or "grimoire"
+
+
 def _create_hot_memory(config: GrimoireConfig) -> tuple[RedisHotMemory | None, str]:
     """Create optional hot-memory adapter without making it a durable dependency."""
     mem = config.memory
@@ -302,7 +319,7 @@ def _create_hot_memory(config: GrimoireConfig) -> tuple[RedisHotMemory | None, s
     try:
         return RedisHotMemory(
             mem.redis_url,
-            namespace=mem.collection_prefix,
+            namespace=_redis_namespace(config),
         ), ""
     except (RuntimeError, ValueError) as exc:
         return None, f"Redis hot memory unavailable: {exc}"
