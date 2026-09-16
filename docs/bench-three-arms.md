@@ -80,11 +80,49 @@ publier tel quel, pas une raison d'inventer un événement).
 Isoler entièrement `HOME` casse l'authentification de Claude Code (« Not
 logged in · Please run /login » — aucune clé API n'est configurée en variable
 d'environnement sur ce poste, l'auth vit dans `~/.claude/.credentials.json`,
-liée à OAuth). Le harnais copie ce seul fichier (`shutil.copyfile`, jamais lu
-ni affiché) dans chaque `HOME` isolé avant le premier appel, avec
-`chmod 600`. C'est la même clé physique que celle déjà configurée sur le
-poste ; elle n'est ni régénérée ni journalisée. Voir
-`provision_isolated_home()`.
+liée à OAuth). C'est la même clé physique que celle déjà configurée sur le
+poste ; elle n'est ni régénérée ni journalisée (`shutil.copyfile`, jamais lu
+ni affiché par ce script).
+
+**Le fichier n'est jamais laissé à demeure dans un `HOME` isolé.** Les `HOME`
+créés par `ensure_isolated_home()` (un par bras, partagés entre les runs de
+ce bras pour réutiliser le cache du plugin ecc et le registre du kit) ne
+portent aucun identifiant au repos — avant le premier run, entre deux runs,
+après la campagne. Les identifiants ne sont copiés que pour la durée d'un
+seul appel `claude -p`, via le gestionnaire de contexte
+`credentials_provisioned(home)` :
+
+```python
+with credentials_provisioned(home) as creds:
+    outcome = run_claude_headless(run_dir, prompt, home=home, ...)
+# à la sortie du bloc — succès, exception, ou timeout intercepté par
+# run_claude_headless — le fichier a déjà été supprimé.
+```
+
+La suppression vit dans le `finally` du gestionnaire de contexte : elle
+s'exécute que le run se termine normalement, lève une exception, ou soit tué
+pour timeout/boucle (`run_claude_headless` ne lève pas dans ces deux derniers
+cas, mais le `finally` ne dépend pas de ce choix — une exception plus tard
+dans `_run_one` déclencherait le même nettoyage). Preuve par test :
+`test_credentials_provisioned_copies_then_removes_on_success` et
+`test_credentials_provisioned_removes_even_on_exception`
+(`tests/unit/test_bench_three_arms.py`).
+
+Les commandes de setup qui n'appellent pas `claude -p` (`claude plugin
+marketplace add`/`install` pour le bras `ecc`, `grimoire init`/`host sync`
+pour le bras `kit`) ne reçoivent jamais d'identifiant — elles n'en ont pas
+besoin (vérifié en réel : ces commandes réussissent sans aucun fichier de
+credentials dans le `HOME` isolé).
+
+**Garde de fin de campagne.** `find_leftover_credentials(workspace)` balaie
+tous les `HOME` isolés à la recherche d'un `.credentials.json` oublié (bug de
+nettoyage, process tué avant que le `finally` n'ait pu s'exécuter — signal
+possible si l'orchestrateur du système d'exploitation envoie un `SIGKILL`
+plutôt qu'un `SIGTERM`). `--pilot` et `--full` l'appellent après le dernier
+run : la campagne n'échoue pas là-dessus, mais toute trouvaille est effacée
+immédiatement et signalée bruyamment sur stderr (`[ALERTE SÉCURITÉ]`) — elle
+ne doit jamais apparaître dans une campagne saine. Preuve par test :
+`test_find_leftover_credentials_detects_and_is_clean_after_normal_use`.
 
 ## 4. Jeu de tâches
 

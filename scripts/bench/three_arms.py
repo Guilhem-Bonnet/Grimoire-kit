@@ -21,6 +21,7 @@ censé être consommé par un vrai projet.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import dataclasses
 import json
 import os
@@ -34,7 +35,7 @@ import tarfile
 import time
 import urllib.request
 from collections import defaultdict
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -494,21 +495,57 @@ def ensure_go_toolchain(workspace: Path) -> Path | None:
     return go_bin if go_bin.is_file() else None
 
 
-def provision_isolated_home(home: Path, *, real_home: Path | None = None) -> None:
-    """Copie les identifiants Claude Code dans un HOME isolé, sans jamais les afficher.
+CREDENTIALS_REL_PATH = Path(".claude") / ".credentials.json"
+
+
+def ensure_isolated_home(home: Path) -> None:
+    """Crée le squelette d'un HOME isolé, jamais d'identifiant à demeure.
+
+    Les identifiants ne sont copiés que pour la durée d'un appel ``claude -p``
+    (voir ``credentials_provisioned``) — un ``HOME`` isolé au repos (avant le
+    premier run, entre deux runs, après la campagne) ne doit jamais en
+    porter.
+    """
+    home.mkdir(parents=True, exist_ok=True)
+    (home / ".claude").mkdir(parents=True, exist_ok=True)
+
+
+@contextlib.contextmanager
+def credentials_provisioned(home: Path, *, real_home: Path | None = None) -> Iterator[Path | None]:
+    """Copie les identifiants Claude Code dans ``home`` pour la durée du bloc.
 
     ``ne lis ni n'affiche jamais une clé`` — on se contente de ``copyfile``,
-    le contenu ne transite jamais par du texte que ce script émet.
+    le contenu ne transite jamais par du texte que ce script émet. Le fichier
+    copié est supprimé dans un ``finally`` : succès, erreur ou timeout du run
+    qu'il aura couvert ne changent rien, il ne doit jamais survivre au bloc.
     """
     real_home = real_home or Path.home()
-    home.mkdir(parents=True, exist_ok=True)
-    src_creds = real_home / ".claude" / ".credentials.json"
-    if src_creds.is_file():
-        dest_dir = home / ".claude"
-        dest_dir.mkdir(parents=True, exist_ok=True)
-        dest_creds = dest_dir / ".credentials.json"
-        shutil.copyfile(src_creds, dest_creds)
-        dest_creds.chmod(0o600)
+    src_creds = real_home / CREDENTIALS_REL_PATH
+    dest_creds = home / CREDENTIALS_REL_PATH
+    copied = False
+    try:
+        if src_creds.is_file():
+            dest_creds.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(src_creds, dest_creds)
+            dest_creds.chmod(0o600)
+            copied = True
+        yield dest_creds if copied else None
+    finally:
+        if copied:
+            dest_creds.unlink(missing_ok=True)
+
+
+def find_leftover_credentials(root: Path) -> list[Path]:
+    """Identifiants oubliés sous ``root`` — doit être vide en fin de campagne.
+
+    Balaie tous les ``HOME`` isolés (``root/homes/*``) à la recherche d'un
+    ``.claude/.credentials.json`` qui aurait survécu à un run (bug de
+    nettoyage, process tué avant le ``finally``, etc.).
+    """
+    homes_dir = root / "homes"
+    if not homes_dir.is_dir():
+        return []
+    return sorted(homes_dir.glob(f"*/{CREDENTIALS_REL_PATH.as_posix()}"))
 
 
 def setup_arm_nu(task_dir: Path) -> dict[str, Any]:
@@ -910,7 +947,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     homes = {arm: workspace / "homes" / arm for arm in ARMS}
     for home in homes.values():
-        provision_isolated_home(home)
+        ensure_isolated_home(home)
 
     go_bin = ensure_go_toolchain(workspace) if any(t.language == "go" for t in tasks) else None
 
@@ -979,6 +1016,20 @@ def main(argv: Sequence[str] | None = None) -> int:
                 file=sys.stderr,
             )
 
+    leftovers = find_leftover_credentials(workspace)
+    if leftovers:
+        print(
+            f"[ALERTE SÉCURITÉ] {len(leftovers)} identifiant(s) Claude Code oublié(s) sous des HOME isolés "
+            f"(le nettoyage `finally` n'a pas tourné, probablement un process tué avant terme) : "
+            + ", ".join(str(p) for p in leftovers),
+            file=sys.stderr,
+        )
+        for p in leftovers:
+            p.unlink(missing_ok=True)
+        print(f"[ALERTE SÉCURITÉ] {len(leftovers)} identifiant(s) supprimé(s) rétroactivement.", file=sys.stderr)
+    else:
+        print("[sécurité] aucun identifiant oublié sous un HOME isolé — vérifié en fin de campagne.")
+
     return 0
 
 
@@ -1036,7 +1087,16 @@ def _run_one(
         setup_arm_kit(run_dir, kit_home=homes["kit"])
 
     home = homes[arm]
-    outcome = run_claude_headless(run_dir, build_prompt(task), home=home, timeout_s=run_timeout_s)
+    # Les identifiants ne vivent dans `home` que le temps de cet appel : le
+    # `finally` de `credentials_provisioned` les efface, que le run réussisse,
+    # échoue, ou soit tué pour timeout/boucle — jamais laissés à demeure.
+    with credentials_provisioned(home) as creds:
+        if creds is None:
+            raise RuntimeError(
+                f"aucun identifiant Claude Code trouvé sous {Path.home()}/.claude — "
+                "authentifie-toi (`claude /login`) avant de lancer une campagne réelle."
+            )
+        outcome = run_claude_headless(run_dir, build_prompt(task), home=home, timeout_s=run_timeout_s)
 
     if outcome.terminated_reason in ("timeout", "loop"):
         success = False

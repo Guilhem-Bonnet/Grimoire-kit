@@ -161,6 +161,81 @@ def test_run_hidden_tests_green_and_red(synthetic_bench_root: Path, tmp_path: Pa
     assert output  # un message d'échec est bien remonté
 
 
+# ── Identifiants : jamais laissés à demeure dans un HOME isolé ──────────────
+
+
+@pytest.fixture
+def fake_real_home(tmp_path: Path) -> Path:
+    """Un faux ``HOME`` réel avec un faux fichier d'identifiants (pas une vraie clé)."""
+    real_home = tmp_path / "real-home"
+    (real_home / ".claude").mkdir(parents=True)
+    (real_home / ".claude" / ".credentials.json").write_text('{"fake": "not-a-real-token"}', encoding="utf-8")
+    return real_home
+
+
+def test_ensure_isolated_home_never_copies_credentials(fake_real_home: Path, tmp_path: Path) -> None:
+    home = tmp_path / "isolated-home"
+    ta.ensure_isolated_home(home)
+    assert not (home / ta.CREDENTIALS_REL_PATH).exists()
+
+
+def test_credentials_provisioned_copies_then_removes_on_success(fake_real_home: Path, tmp_path: Path) -> None:
+    home = tmp_path / "isolated-home"
+    ta.ensure_isolated_home(home)
+    creds_path = home / ta.CREDENTIALS_REL_PATH
+
+    with ta.credentials_provisioned(home, real_home=fake_real_home) as provided:
+        assert provided == creds_path
+        assert creds_path.is_file()  # présent PENDANT le bloc
+
+    assert not creds_path.exists()  # absent après, même en sortie normale
+
+
+def test_credentials_provisioned_removes_even_on_exception(fake_real_home: Path, tmp_path: Path) -> None:
+    home = tmp_path / "isolated-home"
+    ta.ensure_isolated_home(home)
+    creds_path = home / ta.CREDENTIALS_REL_PATH
+
+    with pytest.raises(RuntimeError), ta.credentials_provisioned(home, real_home=fake_real_home):
+        assert creds_path.is_file()
+        raise RuntimeError("run tué en cours (timeout/erreur simulés)")
+
+    assert not creds_path.exists()  # le `finally` a tourné malgré l'exception
+
+
+def test_credentials_provisioned_yields_none_without_source_credentials(tmp_path: Path) -> None:
+    home = tmp_path / "isolated-home"
+    ta.ensure_isolated_home(home)
+    empty_real_home = tmp_path / "real-home-without-creds"
+    empty_real_home.mkdir()
+
+    with ta.credentials_provisioned(home, real_home=empty_real_home) as provided:
+        assert provided is None
+    assert not (home / ta.CREDENTIALS_REL_PATH).exists()
+
+
+def test_find_leftover_credentials_detects_and_is_clean_after_normal_use(fake_real_home: Path, tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    homes_dir = workspace / "homes"
+    for arm in ta.ARMS:
+        ta.ensure_isolated_home(homes_dir / arm)
+
+    # rien à signaler tant qu'aucun run n'a eu lieu
+    assert ta.find_leftover_credentials(workspace) == []
+
+    # simule un nettoyage qui n'aurait pas tourné (process tué avant le finally)
+    leaked = homes_dir / "kit" / ta.CREDENTIALS_REL_PATH
+    leaked.parent.mkdir(parents=True, exist_ok=True)
+    leaked.write_text('{"fake": "leaked"}', encoding="utf-8")
+    assert ta.find_leftover_credentials(workspace) == [leaked]
+
+    # un run normal (via le context manager) ne laisse rien derrière lui
+    leaked.unlink()
+    with ta.credentials_provisioned(homes_dir / "kit", real_home=fake_real_home):
+        pass
+    assert ta.find_leftover_credentials(workspace) == []
+
+
 # ── 4. pass^k et intervalle de confiance ────────────────────────────────────
 
 
