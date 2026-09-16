@@ -2,8 +2,8 @@ $schema: "grimoire-archetype-dna/v1"
 
 id: minimal
 name: "Minimal"
-version: "1.0.0"
-description: "Archétype de base universel — meta-agents (Atlas, Sentinel, Mnemo) + agent template vierge"
+version: "1.0.1"
+description: "Archétype de base universel — meta-agent Sentinel (agent-optimizer, avec les skills attachés meta-memory-quality et meta-project-navigation) + agent template vierge"
 icon: "microscope"
 author: "grimoire-kit"
 tags: [base, universal, starter, meta]
@@ -40,7 +40,7 @@ constraints:
   - id: memory-sync
     description: "Agent-learnings mis à jour en fin de session"
     enforcement: soft
-    checked_by: memory-keeper
+    checked_by: agent-optimizer
 
 values:
   - name: documentation-first
@@ -79,7 +79,7 @@ acceptance_criteria:
     enforcement: soft
     context: "Trait failure-museum — capitaliser les décisions"
     triggers_on: ["**/*"]
-    checked_by: memory-keeper
+    checked_by: agent-optimizer
   - id: no-raw-secrets-committed
     description: "Aucun secret en clair dans les fichiers committés"
     enforcement: hard
@@ -88,15 +88,9 @@ acceptance_criteria:
     checked_by: agent-optimizer
 
 agents:
-  - path: "../../archetypes/meta/agents/project-navigator.md"
-    required: true
-    description: "Atlas — cartographe du projet, registre services"
   - path: "../../archetypes/meta/agents/agent-optimizer.md"
     required: true
     description: "Sentinel — audit qualité agents, self-improvement loop"
-  - path: "../../archetypes/meta/agents/memory-keeper.md"
-    required: true
-    description: "Mnemo — gestion mémoire, contradictions, consolidation"
   - path: "../../archetypes/minimal/agents/custom-agent.tpl.md"
     required: false
     description: "Template vierge pour créer un agent personnalisé"
@@ -116,6 +110,10 @@ auto_detect:
   exclusive: false
 
 changelog:
+  - version: "1.0.1"
+    date: "2026-09-16"
+    changes:
+      - "Fix #550 : retrait des références mortes project-navigator et memory-keeper (agents retirés du paquet par #387/f636633c, savoir-faire porté depuis par les skills meta-project-navigation et meta-memory-quality attachés à agent-optimizer) ; checked_by: memory-keeper réaligné sur agent-optimizer."
   - version: "1.0.0"
     date: "2026-02-27"
     changes:

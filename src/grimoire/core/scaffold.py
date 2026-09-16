@@ -1178,6 +1178,19 @@ class ProjectScaffolder:
             label="tool-manifest.csv",
         ))
 
+        # Last-`up` tool version marker (issue #519) — regenerated on every
+        # `init`/`up` like the rest of the kit tier, TIER_KIT default (never
+        # `TIER_SEED`: a marker that stopped updating on the second `up`
+        # would be worse than no marker). `project_health.kit_alignment()`
+        # reads it back as the authoritative "current kit" number — distinct
+        # from the catalog-derived `aligned`, which names a past content
+        # revision, not the tool that last actually ran here.
+        p.templates.append(TemplateRender(
+            dst=layout.kit_up_version_marker(self._target),
+            content=f"{_grimoire_version}\n",
+            label="_grimoire/kit/.up-version",
+        ))
+
         # Session branch metadata
         p.templates.append(TemplateRender(
             dst=self._target / "_grimoire-output" / ".runs" / "main" / "branch.json",

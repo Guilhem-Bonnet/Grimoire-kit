@@ -55,39 +55,27 @@ def test_piloter_zoom_flotte_projet_est_disponible_sur_le_cockpit(cockpit_worksp
     assert {zoom.nth(i).inner_text() for i in range(2)} == {"Flotte", "Projet"}
 
 
-def test_piloter_kit_reel_aligne_dit_aligne_pas_a_jour(workspace: Page) -> None:
-    """Le projet réel de la fixture est scaffoldé par le kit qui tourne, et
-    d'ordinaire la plupart de ses fichiers n'ont pas changé depuis une révision
-    antérieure du catalogue : `aligned` (une révision passée du contenu) et
-    `installed` (le CLI qui répond) divergent alors légitimement — exactement
-    le cas que #288 signalait, obtenu ici sans rien mocker. Le badge ne doit
-    jamais dire « à jour » à côté de deux nombres différents.
-
-    Sur une release qui retouche l'essentiel du contenu scaffoldé (catalogue
-    régénéré à la même version que le CLI qui vient de tourner `grimoire
-    init`), les deux nombres coïncident légitimement : rien à distinguer ici,
-    et affirmer la non-régression #288 sur un couple de versions égal serait
-    un test qui ne teste rien. Le contrat reste couvert sans condition par
-    `test_piloter_kit_aligne_distinct_de_installe_ne_dit_pas_a_jour`, qui pin
-    un couple divergent plutôt que de dépendre du hasard du contenu livré."""
+def test_piloter_kit_reel_a_jour_dit_a_jour_avec_le_kit_du_dernier_up(workspace: Page) -> None:
+    """Régression #519 : le projet réel de la fixture vient d'être scaffoldé
+    par le kit qui tourne — `grimoire init` écrit désormais le marqueur
+    `_grimoire/kit/.up-version`, donc le serveur connaît `upVersion` (égal à
+    `installed`, le même process). Avant #519, la plupart des fichiers
+    n'ayant pas changé depuis une révision antérieure du catalogue,
+    `aligned` (première introduction d'un contenu encore présent) restait
+    souvent une version plus ancienne, et le badge affichait « aligné sur Y,
+    installé X » — lu comme un retard alors que le projet est réellement à
+    jour, obtenu ici sans rien mocker. Le badge doit désormais dire « à jour
+    (kit X) » avec une seule version faisant autorité."""
     _goto(workspace, "piloter")
     workspace.wait_for_selector(".pl-sheet")
     kit_block_text = workspace.locator(".pl-insp-block").first.inner_text()
 
-    assert "aligné sur" in kit_block_text and "installé" in kit_block_text
-    match = re.search(r"aligné sur (\d+(?:\.\d+)*), installé (\d+(?:\.\d+)*)", kit_block_text)
+    match = re.search(r"à jour \(kit (\d+(?:\.\d+)*)\)", kit_block_text)
     assert match, f"format de bloc kit inattendu : {kit_block_text!r}"
-    aligned_version, installed_version = match.groups()
-    if aligned_version == installed_version:
-        pytest.skip(
-            "cette release a régénéré le catalogue pour la quasi-totalité du "
-            f"contenu scaffoldé : aligné et installé coïncident ({aligned_version}) "
-            "sans qu'aucun mock ne le force — rien à distinguer naturellement ici."
-        )
-    assert "à jour" not in kit_block_text, (
-        "« à jour » à côté de deux versions différentes est la contradiction de #288"
+    assert "aligné sur" not in kit_block_text, (
+        "« aligné sur X, installé Y » est le libellé trompeur de #519 — "
+        "« à jour (kit X) » doit le remplacer dès que le serveur connaît upVersion"
     )
-    assert "aligné" in kit_block_text.lower()
 
 
 def test_piloter_kit_aligne_distinct_de_installe_ne_dit_pas_a_jour(browser: Browser, served: str) -> None:
@@ -97,6 +85,13 @@ def test_piloter_kit_aligne_distinct_de_installe_ne_dit_pas_a_jour(browser: Brow
     n'a de révision plus récente au catalogue, cf.
     `project_health.kit_alignment`) : seule la réponse `/api/health` est
     fabriquée, tout le reste (ledger, activité, CI) vient du vrai serveur.
+
+    `upVersion` (issue #519) est explicitement forcé à `None` : le vrai
+    serveur le connaît désormais (le projet de la fixture vient d'être
+    scaffoldé), ce qui déclencherait la nouvelle branche « à jour (kit X) »
+    plutôt que celle-ci. Ce test cible délibérément le repli — un projet qui
+    n'a encore jamais tourné avec ce marqueur — qui reste le contrat #288
+    inchangé : ne jamais dire « à jour » à côté de deux nombres différents.
     """
     context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
     page = context.new_page()
@@ -104,7 +99,7 @@ def test_piloter_kit_aligne_distinct_de_installe_ne_dit_pas_a_jour(browser: Brow
     def _divergent_kit(route) -> None:
         response = route.fetch()
         payload = response.json()
-        payload["kit"] = {**payload["kit"], "scaffolded": True, "upToDate": True, "behind": 0, "aligned": "3.36.0", "installed": "3.38.0"}
+        payload["kit"] = {**payload["kit"], "scaffolded": True, "upToDate": True, "behind": 0, "aligned": "3.36.0", "installed": "3.38.0", "upVersion": None}
         route.fulfill(response=response, body=json.dumps(payload))
 
     page.route("**/api/health*", _divergent_kit)
@@ -134,14 +129,17 @@ def test_piloter_kit_aligne_distinct_de_installe_ne_dit_pas_a_jour(browser: Brow
 def test_piloter_kit_exactement_synchronise_dit_a_jour(browser: Browser, served: str) -> None:
     """Miroir du test précédent : quand `aligned == installed`, le mot honnête
     redevient « à jour » (#288 ne demande pas de bannir le mot, seulement de
-    ne plus l'employer à côté de deux versions différentes)."""
+    ne plus l'employer à côté de deux versions différentes).
+
+    `upVersion` forcé à `None` pour la même raison que le test précédent —
+    cible délibérément le repli sans marqueur connu (issue #519)."""
     context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
     page = context.new_page()
 
     def _synced_kit(route) -> None:
         response = route.fetch()
         payload = response.json()
-        payload["kit"] = {**payload["kit"], "scaffolded": True, "upToDate": True, "behind": 0, "aligned": "3.39.0", "installed": "3.39.0"}
+        payload["kit"] = {**payload["kit"], "scaffolded": True, "upToDate": True, "behind": 0, "aligned": "3.39.0", "installed": "3.39.0", "upVersion": None}
         route.fulfill(response=response, body=json.dumps(payload))
 
     page.route("**/api/health*", _synced_kit)

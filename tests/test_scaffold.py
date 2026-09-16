@@ -203,6 +203,41 @@ class TestProjectScaffolder:
         content = manifest.read_text()
         assert "name,file,category,description,icon" in content
 
+    def test_plan_includes_up_version_marker(self, tmp_path: Path) -> None:
+        """Régression #519 : sans ce marqueur, rien ne dit quel outil a fait
+        le dernier `up` — `kit_alignment()` retombait sur le catalogue de
+        digests, qui date un contenu à sa première introduction, pas au
+        dernier passage réel de l'outil."""
+        s = _scaffolder(tmp_path)
+        plan = s.plan()
+        tpl_labels = [t.label for t in plan.templates]
+        assert "_grimoire/kit/.up-version" in tpl_labels
+
+    def test_execute_writes_up_version_marker_with_the_running_kit_version(self, tmp_path: Path) -> None:
+        from grimoire.__version__ import __version__
+
+        s = _scaffolder(tmp_path)
+        s.execute(s.plan())
+        marker = tmp_path / "_grimoire" / "kit" / ".up-version"
+        assert marker.is_file()
+        assert marker.read_text(encoding="utf-8").strip() == __version__
+
+    def test_up_version_marker_is_kit_tier_not_seed(self, tmp_path: Path) -> None:
+        """Le marqueur doit être réécrit à CHAQUE `up`, jamais figé au premier
+        (contrairement à `project-context.yaml`, tier seed) — sinon un projet
+        qui a tourné une fois avec ce correctif garderait pour toujours la
+        version du premier `up`, exactement le piège que ce correctif répare."""
+        s = _scaffolder(tmp_path)
+        s.execute(s.plan())
+        marker = tmp_path / "_grimoire" / "kit" / ".up-version"
+        marker.write_text("0.0.1\n", encoding="utf-8")
+
+        s.execute(s.plan())
+
+        from grimoire.__version__ import __version__
+
+        assert marker.read_text(encoding="utf-8").strip() == __version__
+
     def test_le_manifeste_doutils_envoie_les_agents_vers_lentree_enveloppee(self, tmp_path: Path) -> None:
         """Le navigateur ne doit pas être proposé nu à un agent.
 

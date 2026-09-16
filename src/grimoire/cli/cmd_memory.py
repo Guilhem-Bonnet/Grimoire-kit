@@ -395,11 +395,22 @@ def memory_migrate_plan(
     target_graph: str = _migration_target_graph_opt,
 ) -> None:
     """Show the non-destructive migration plan for Memory OS data."""
-    cfg, _ = _load_config_context()
+    from grimoire.memory.migration import read_previous_backend_breadcrumb
+
+    cfg, root = _load_config_context()
     fmt = _get_fmt(ctx)
     bundle = cfg.memory.migration_bundle_path or "_grimoire/_memory/migration/weaviate-neo4j"
+    # ``migration_source_backend`` is explicit config; failing that, the
+    # breadcrumb `memory up --apply` leaves behind names the backend this
+    # project actually came *from*. Falling back straight to the *current*
+    # backend here was the #527 bug: a plan should never claim to migrate a
+    # backend into itself.
+    detected_previous = read_previous_backend_breadcrumb(root)
+    source_backend = cfg.memory.migration_source_backend or detected_previous or cfg.memory.backend
+    source_known = bool(cfg.memory.migration_source_backend or detected_previous)
     plan = {
-        "source_backend": cfg.memory.migration_source_backend or cfg.memory.backend,
+        "source_backend": source_backend,
+        "source_known": source_known,
         "configured_backend": cfg.memory.backend,
         "target_vector_backend": target_vector,
         "target_graph_backend": target_graph,
@@ -420,12 +431,93 @@ def memory_migrate_plan(
         return
 
     console.print("[bold]Memory migration plan[/bold]")
-    console.print(f"  Source backend : {plan['source_backend']}")
+    source_note = "" if source_known else " [dim](inconnu — c'est le backend courant, pas forcément l'ancien)[/dim]"
+    console.print(f"  Source backend : {plan['source_backend']}{source_note}")
     console.print("  Entries        : unknown until export-bundle")
     console.print(f"  Target vector  : {target_vector}")
     console.print(f"  Target graph   : {target_graph}")
     console.print(f"  Bundle path    : {bundle}")
     console.print("  Cutover gate   : export, verify, import, parity, switch")
+
+
+_migrate_run_source_opt = typer.Option(
+    "",
+    "--source",
+    help="Backend d'origine (ex: lexical). Détecté depuis la sauvegarde de `memory up --apply` si omis.",
+)
+_migrate_run_apply_opt = typer.Option(
+    False, "--apply", help="Écrire dans le backend courant. Sans ce drapeau : aperçu seul.",
+)
+
+
+@migrate_app.command("run")
+def memory_migrate_run(
+    ctx: typer.Context,
+    source: str = _migrate_run_source_opt,
+    apply: bool = _migrate_run_apply_opt,
+) -> None:
+    """Migrer les souvenirs d'un ancien backend vers le backend courant — sans bundle ni fichier.
+
+    Couvre le cas laissé sans commande par #527 : passer d'un backend lexical
+    (BM25, pas de vecteur) à un backend vectoriel. ``migrate export-bundle`` /
+    ``import-weaviate`` ne savent lire qu'un Qdrant ; ici la source est
+    n'importe quel backend Memory OS, lu via l'API publique du manager
+    (``get_all``) puis réécrit dans le backend courant, qui recalcule ses
+    propres embeddings. Remplace le couple manuel `memory export` + `memory
+    import`.
+
+    La source est ``--source``, sinon ``memory.migration_source_backend``,
+    sinon la sauvegarde laissée par le dernier `memory up --apply` qui a
+    changé de backend.
+    """
+    from dataclasses import replace as _dc_replace
+
+    from grimoire.memory.migration import migrate_backend_to_backend, read_previous_backend_breadcrumb
+
+    cfg, root = _load_config_context()
+    target_backend = cfg.memory.backend
+    source_backend = source or cfg.memory.migration_source_backend or read_previous_backend_breadcrumb(root)
+    if not source_backend:
+        console.print(
+            "[red]Backend source inconnu.[/red] Passez --source, ou relancez juste après "
+            "`grimoire memory up --apply` (qui laisse la trace du backend précédent)."
+        )
+        raise typer.Exit(2)
+    if source_backend == target_backend:
+        console.print(f"[yellow]Source et cible identiques ({target_backend}) — rien à migrer.[/yellow]")
+        return
+
+    try:
+        source_cfg = _dc_replace(cfg, memory=_dc_replace(cfg.memory, backend=source_backend))
+        source_mgr = MemoryManager.from_config(source_cfg, project_root=root)
+    except GrimoireMemoryError as exc:
+        console.print(f"[red]Backend source indisponible ({source_backend}):[/red] {exc}")
+        raise typer.Exit(1) from None
+    entries = source_mgr.get_all()
+
+    target_mgr = None
+    if apply:
+        target_mgr, _, _ = _load_manager_context()
+
+    result = migrate_backend_to_backend(
+        entries,
+        source_backend=source_backend,
+        target_backend=target_backend,
+        store_many=target_mgr.store_many if target_mgr is not None else None,
+        dry_run=not apply,
+    )
+
+    if _get_fmt(ctx) == "json":
+        typer.echo(json.dumps(result.to_dict(), indent=2))
+        return
+
+    verb = "Migrés" if apply else "À migrer (aperçu)"
+    console.print(f"[bold]{source_backend} → {target_backend}[/bold]")
+    console.print(f"  {verb} : {result.entries} souvenir(s)")
+    if apply:
+        console.print(f"  [green]écrits[/green] : {result.imported}")
+    else:
+        console.print("  Relancez avec [cyan]--apply[/cyan] pour écrire.")
 
 
 @migrate_app.command("export-bundle")
