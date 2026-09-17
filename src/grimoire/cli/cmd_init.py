@@ -96,6 +96,7 @@ _ARCHETYPE_KEYS = list(_ARCHETYPE_INFO.keys())
 
 _QDRANT_DEFAULT_URL = "http://localhost:6333"
 _WEAVIATE_DEFAULT_URL = "http://localhost:8080"
+_OLLAMA_DEFAULT_URL = "http://localhost:11434"
 _QDRANT_COMPOSE_FILE = "docker-compose.memory.yml"
 
 # ── Lite profile (issue Grimoire-kit#552, phase 2 lot 2.6) ─────────────────────
@@ -152,6 +153,19 @@ def _is_weaviate_reachable(weaviate_url: str = _WEAVIATE_DEFAULT_URL) -> bool:
     return any(_http_ok(f"{base}{endpoint}") for endpoint in ("/v1/.well-known/ready", "/v1/meta"))
 
 
+def _is_ollama_reachable(ollama_url: str = _OLLAMA_DEFAULT_URL) -> bool:
+    """Probe a local Ollama's HTTP API.
+
+    Named and shaped like :func:`_is_weaviate_reachable` /
+    :func:`_is_qdrant_reachable` on purpose: the CI Windows job stalled ~9
+    minutes on every ``-y init`` call that left this probe unmocked,
+    precisely because it used to be an inline ``_http_ok(...)`` call with
+    nothing to patch it by — a test could stub the other two services but
+    not this one (see ``tests/test_cmd_init.py::_stub_unreachable_memory_services``).
+    """
+    return _http_ok(f"{ollama_url.rstrip('/')}/api/tags")
+
+
 def detect_memory_backend() -> str:
     """Probe localhost for a Memory OS service running on this machine.
 
@@ -167,8 +181,7 @@ def detect_memory_backend() -> str:
     if _is_qdrant_reachable():
         return "qdrant-local"
 
-    # Ollama
-    if _http_ok("http://localhost:11434/api/tags"):
+    if _is_ollama_reachable():
         return "ollama"
 
     return "local"
@@ -180,7 +193,7 @@ def detect_memory_backend() -> str:
 _DETECTED_SERVICE_LABELS: dict[str, str] = {
     "weaviate-server": f"Weaviate sur {_WEAVIATE_DEFAULT_URL}",
     "qdrant-local": f"Qdrant sur {_QDRANT_DEFAULT_URL}",
-    "ollama": "Ollama sur http://localhost:11434",
+    "ollama": f"Ollama sur {_OLLAMA_DEFAULT_URL}",
 }
 
 
