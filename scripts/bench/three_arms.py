@@ -51,7 +51,13 @@ LANGUAGES: tuple[str, ...] = ("python", "javascript", "go", "rust")
 PER_LANGUAGE = 5
 DEFAULT_SEED = 551  # issue Grimoire-kit#551
 K_REPLAY = 3
-ARMS: tuple[str, ...] = ("nu", "ecc", "kit")
+#: ``kit-gov`` (lot F, issue #582) : le bras ``kit``, plus un projet réellement
+#: enrôlé au standard (``grimoire standard init`` + une tâche de board posée
+#: en ``in_progress``). Le rejeu du lot E (docs/bench/rejeu-lot-e-2026-09-17.md
+#: §3) a mesuré que le bras ``kit`` seul ne fait jamais passer
+#: ``_is_governed()`` (lot A) à ``True`` : le lot B (``gate run-tests``) reste
+#: structurellement invisible sur ce banc sans ce quatrième bras.
+ARMS: tuple[str, ...] = ("nu", "ecc", "kit", "kit-gov")
 
 DEFAULT_RUN_TIMEOUT_S = 15 * 60  # garde-fou par run (§ « Arrêt et garde-fous »)
 DEFAULT_TEST_TIMEOUT_S = 180
@@ -658,6 +664,118 @@ def setup_arm_ecc(task_dir: Path, *, ecc_repo: Path, ecc_home: Path, timeout: in
     }
 
 
+#: Board synthétique pour le bras ``kit-gov`` : une seule tâche, posée
+#: directement en ``in_progress``, à l'id de la tâche du banc (barres
+#: obliques remplacées par des doubles underscores — voir
+#: :func:`_governed_task_id`). ``grimoire task migrate-standard`` (ADR-007)
+#: l'importe ensuite dans le Mission Ledger en préservant cet id exact et en
+#: marchant la machine à états jusqu'à ``RUNNING`` (``_walk_to_state``,
+#: `src/grimoire/missions/task_unification.py`) — sans passer par
+#: ``TaskService.transition``, donc sans jamais buter sur un gate de preuve :
+#: c'est un projet qu'on simule comme réellement enrôlé, pas une tâche qu'on
+#: fait mentir sur son état d'avancement.
+_SYNTHETIC_BOARD_TEMPLATE = """$schema: grimoire-agentic-standard-task-board/v1
+metadata:
+  project: grimoire-bench-kit-gov
+  generated_by: scripts/bench/three_arms.py (bras kit-gov, issue #582 lot F)
+  purpose: Board synthétique posé avant `grimoire task migrate-standard`.
+states:
+- proposed
+- ready
+- in_progress
+- blocked
+- review
+- accepted
+- released
+- archived
+tasks:
+- task_id: {task_id}
+  title: "Bench task: {task_id}"
+  status: in_progress
+  priority: medium
+  owner: bench
+  acceptance_criteria:
+  - tests cachés verts
+"""
+
+
+def _governed_task_id(task_id: str) -> str:
+    """``task_id`` du banc (``"<langue>/<slug>"``), rendu valide pour Grimoire.
+
+    ``core/standard_generation.py::TASK_ID_PATTERN`` refuse ``/`` — un board
+    ``in_progress`` avec un id invalide ferait lever ``normalize_task_id``
+    dans ``resolve_active_task`` et casserait le hook ``SessionStart`` de
+    CHAQUE run kit-gov. Même convention que le harnais utilise déjà pour les
+    chemins de dépôt de tâche (``task_id.replace("/", "__")``, voir
+    ``_run_one``) : un seul système de remplacement, pas deux.
+    """
+    return task_id.replace("/", "__")
+
+
+def setup_arm_kit_gov(task_dir: Path, *, kit_home: Path, task_id: str, timeout: int = 180) -> dict[str, Any]:
+    """Bras ``kit-gov`` : le bras ``kit``, PLUS un projet réellement enrôlé au standard.
+
+    ``setup_arm_kit()`` ne lance jamais ``grimoire standard init`` : le rejeu
+    du lot E (docs/bench/rejeu-lot-e-2026-09-17.md §3) a constaté que
+    ``_is_governed()`` (lot A, ``src/grimoire/hosts/decisions/activation.py``)
+    renvoie donc toujours ``False`` sur le bras ``kit`` — le lot B (``gate
+    run-tests``) n'est jamais exercé sur ce banc, quel que soit le nombre de
+    rejeux. Ce bras ferme cette lacune de méthode, sans toucher au bras
+    ``kit`` existant (comparaison directe préservée) :
+
+    1. Le provisionnement du bras ``kit`` (``grimoire init`` + ``host sync``).
+    2. ``grimoire standard init .`` — profil par défaut (``starter``, celui
+       qu'un développeur seul obtient sans option ; ``--profile``/``--needs``
+       non fournis).
+    3. Une tâche de board à l'id de la tâche du banc, posée directement en
+       ``in_progress`` (:data:`_SYNTHETIC_BOARD_TEMPLATE`), puis importée
+       dans le Mission Ledger par ``grimoire task migrate-standard`` (ADR-007,
+       Grimoire-kit#587/#588) — seule voie CLI qui préserve un id exact
+       plutôt que d'en dériver un du titre (``grimoire task add`` n'expose
+       aucune option ``--task-id``).
+
+    Vérifié en isolation (dépôt jetable sous ``_scratch/``, non versionné) :
+    après ces trois étapes, ``grimoire standard activation-context`` rend la
+    directive complète avec ``gate run-tests --task-id <id>``,
+    ``_is_governed()`` vaut ``True`` et ``active_task_id()`` résout bien cet
+    id — jamais ``bootstrap``.
+    """
+    governed_id = _governed_task_id(task_id)
+    kit_result = setup_arm_kit(task_dir, kit_home=kit_home, timeout=timeout)
+    env = {**os.environ, "HOME": str(kit_home), "GRIMOIRE_NO_COCKPIT": "1"}
+
+    standard_init = _run(
+        ["grimoire", "standard", "init", "."],
+        cwd=task_dir,
+        env=env,
+        timeout=timeout,
+    )
+
+    board_path = task_dir / "_grimoire" / "standard" / "task-board.yaml"
+    board_path.parent.mkdir(parents=True, exist_ok=True)
+    board_path.write_text(_SYNTHETIC_BOARD_TEMPLATE.format(task_id=governed_id), encoding="utf-8")
+
+    migrate = _run(
+        ["grimoire", "task", "migrate-standard", "."],
+        cwd=task_dir,
+        env=env,
+        timeout=timeout,
+    )
+
+    return {
+        "arm": "kit-gov",
+        "added": kit_result.get("added", []),
+        "init_rc": kit_result.get("init_rc"),
+        "sync_rc": kit_result.get("sync_rc"),
+        "standard_init_rc": standard_init.returncode,
+        "standard_init_profile": "starter",
+        "migrate_rc": migrate.returncode,
+        "governed_task_id": governed_id,
+        "standard_init_stdout": standard_init.stdout[-2000:],
+        "migrate_stdout": migrate.stdout[-2000:],
+    }
+
+
 def setup_arm_kit(task_dir: Path, *, kit_home: Path, timeout: int = 180) -> dict[str, Any]:
     """``grimoire init --backend local --no-cockpit`` + ``host sync --host claude``."""
     env = {**os.environ, "HOME": str(kit_home), "GRIMOIRE_NO_COCKPIT": "1"}
@@ -948,17 +1066,24 @@ def build_report(
             }
         by_task_arm[task_id] = row
 
-    kit_runs = [
-        {
-            "task_id": r.task_id,
-            "run_index": r.run_index,
-            "num_turns": r.num_turns,
-            "total_cost_usd": r.total_cost_usd,
-            "wall_seconds": r.wall_seconds,
-            "test_run_evidence": r.kit_test_run_evidence,
-        }
-        for r in sorted(by_arm.get("kit", []), key=lambda r: (r.task_id, r.run_index))
-    ]
+    def _governed_run_rows(arm: str) -> list[dict[str, Any]]:
+        return [
+            {
+                "task_id": r.task_id,
+                "run_index": r.run_index,
+                "num_turns": r.num_turns,
+                "total_cost_usd": r.total_cost_usd,
+                "wall_seconds": r.wall_seconds,
+                "test_run_evidence": r.kit_test_run_evidence,
+            }
+            for r in sorted(by_arm.get(arm, []), key=lambda r: (r.task_id, r.run_index))
+        ]
+
+    kit_runs = _governed_run_rows("kit")
+    # ``kit-gov`` (lot F, #582) : même détail par run que ``kit``, clé
+    # séparée pour ne jamais changer la forme de ``kit_runs`` que
+    # ``render_report_markdown``/les tests existants relisent déjà.
+    kit_gov_runs = _governed_run_rows("kit-gov")
 
     return {
         "generated_at": datetime.now(tz=UTC).isoformat(),
@@ -971,6 +1096,7 @@ def build_report(
         "per_arm": per_arm,
         "by_task": by_task_arm,
         "kit_runs": kit_runs,
+        "kit_gov_runs": kit_gov_runs,
         "carried_over_notes": carried_over_notes,
     }
 
@@ -1027,8 +1153,8 @@ def render_report_markdown(report: dict[str, Any]) -> str:
 
     lines.append("## Par tâche")
     lines.append("")
-    lines.append("| Tâche | Langue | nu | ecc | kit |")
-    lines.append("|---|---|---|---|---|")
+    lines.append("| Tâche | Langue | " + " | ".join(ARMS) + " |")
+    lines.append("|---|---|" + "---|" * len(ARMS))
     for task_id, row in sorted(report["by_task"].items()):
         cells = []
         for arm in ARMS:
@@ -1037,15 +1163,16 @@ def render_report_markdown(report: dict[str, Any]) -> str:
         lines.append(f"| {task_id} | {row.get('language', '?')} | " + " | ".join(cells) + " |")
     lines.append("")
 
-    kit_runs = report.get("kit_runs") or []
-    if kit_runs:
-        lines.append("## Détail par run — bras kit")
+    def _render_governed_detail(title: str, rows: list[dict[str, Any]]) -> None:
+        if not rows:
+            return
+        lines.append(f"## Détail par run — bras {title}")
         lines.append("")
         lines.append(
             "| Tâche | Run | Tours | Coût | Temps (s) | `test-run.json` (lot B) |"
         )
         lines.append("|---|---|---|---|---|---|")
-        for row in kit_runs:
+        for row in rows:
             evidence = row.get("test_run_evidence")
             evidence_cell = "oui" if evidence else ("non" if evidence is False else "?")
             lines.append(
@@ -1053,6 +1180,12 @@ def render_report_markdown(report: dict[str, Any]) -> str:
                 f"${row['total_cost_usd']:.3f} | {row['wall_seconds']:.0f} | {evidence_cell} |"
             )
         lines.append("")
+
+    _render_governed_detail("kit", report.get("kit_runs") or [])
+    # ``kit-gov`` (lot F, #582) : seul bras où ce tableau devrait, une fois le
+    # lot B réellement exercé, montrer une colonne « lot B » majoritairement
+    # à « oui ».
+    _render_governed_detail("kit-gov", report.get("kit_gov_runs") or [])
 
     return "\n".join(lines) + "\n"
 
@@ -1315,6 +1448,8 @@ def _do_dry_run(tasks: Sequence[TaskMeta], *, workspace: Path, ecc_repo: Path, h
                 setup_arm_ecc(task_dir, ecc_repo=ecc_repo, ecc_home=homes["ecc"])
             elif arm == "kit":
                 setup_arm_kit(task_dir, kit_home=homes["kit"])
+            elif arm == "kit-gov":
+                setup_arm_kit_gov(task_dir, kit_home=homes["kit-gov"], task_id=task.task_id)
             print(f"[dry-run] préparé {task.task_id} / {arm} -> {task_dir}")
     print(f"[dry-run] {len(tasks)} tâches x {len(ARMS)} bras préparées sous {tasks_root}")
     return 0
@@ -1339,6 +1474,8 @@ def _run_one(
         setup_arm_ecc(run_dir, ecc_repo=ecc_repo, ecc_home=homes["ecc"])
     elif arm == "kit":
         setup_arm_kit(run_dir, kit_home=homes["kit"])
+    elif arm == "kit-gov":
+        setup_arm_kit_gov(run_dir, kit_home=homes["kit-gov"], task_id=task.task_id)
 
     home = homes[arm]
     # Les identifiants ne vivent dans `home` que le temps de cet appel : le
@@ -1365,7 +1502,7 @@ def _run_one(
 
     dispatch_stats = None
     kit_test_run_evidence = None
-    if arm == "kit":
+    if arm in ("kit", "kit-gov"):
         dispatch_stats = _collect_dispatch_stats(run_dir, home)
         kit_test_run_evidence = has_test_run_evidence(run_dir)
 
