@@ -407,12 +407,25 @@ def _task_action(project_root: Path, task_id: str, action: str, body: dict[str, 
     return move.to_dict()
 
 
+def _task_migrate_standard(project_root: Path, _body: dict[str, Any]) -> Any:
+    """Bouton « Migrer les tâches » de l'espace Exécuter (ADR-007, issue #559).
+
+    Même moteur que ``grimoire task migrate-standard`` (`missions.task_unification`,
+    lot 4.1 1/3) : idempotent, réversible par instantané horodaté — jamais
+    exposé ici, la restauration reste un geste CLI délibéré.
+    """
+    from grimoire.missions.task_unification import migrate_standard_tasks
+
+    return migrate_standard_tasks(project_root).to_dict()
+
+
 #: Écritures à chemin fixe. Les actions de tâche sont paramétrées, cf. plus bas.
 POST_ROUTES: dict[str, _PostHandler] = {
     f"{PREFIX}file/override": _create_override,
     f"{PREFIX}file/write": _write_file,
     f"{PREFIX}command": _command,
     f"{PREFIX}assist": _assist,
+    f"{PREFIX}tasks/migrate-standard": _task_migrate_standard,
 }
 
 #: Les verbes qu'une tâche accepte depuis l'interface.

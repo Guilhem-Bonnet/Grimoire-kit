@@ -43,6 +43,10 @@ const BOARD_TO_STATE = {
   proposed: 'proposed', ready: 'ready', in_progress: 'running', blocked: 'blocked',
   review: 'needs_verification', accepted: 'closed', released: 'closed', archived: 'cancelled',
 };
+// `finition` (grimoire.missions.schemas.MissionTask, lot 4.3, issue #561), en
+// clair — lecture seule ici, aucune valeur pour "" (le champ n'est envoyé par
+// `to_dict()` que quand il est posé).
+const FINITION_LABEL = { maquette: 'Maquette', peaufine: 'Peaufinée' };
 // Nature d'une dépendance (grimoire.missions.schemas.DependencyKind), en clair.
 const DEP_LABEL = {
   blocks: 'bloque', relates: 'lié à', parent_child: 'parent / enfant',
@@ -355,6 +359,15 @@ async function renderInspector(ctx, taskId, onWritten, onTimeline) {
   ctx.inspector.append(text('h3', null, detail.title || detail.id));
   ctx.inspector.append(text('div', 'lbl mono', detail.id));
 
+  // Finition (lot 4.3, issue #561) : lecture seule ici — le champ existe déjà
+  // au ledger et à la projection board (ADR-007 point 6) mais aucune
+  // interface ne l'édite encore, ce lot-ci compris. Absent (`""`) tant que
+  // personne ne l'a posé : pas de ligne « Finition » plutôt qu'une valeur
+  // vide qui laisserait croire à un état déclaré.
+  if (detail.finition) {
+    ctx.inspector.append(text('div', 'lbl', `Finition : ${FINITION_LABEL[detail.finition] || detail.finition}`));
+  }
+
   // Drill-down (#139) : depuis la carte d'une tâche, ouvrir sa timeline sans
   // passer par l'onglet Timeline du docbar — le nombre d'événements déjà lus
   // rend le geste visible même quand l'utilisateur ne sait pas que la vue
@@ -555,6 +568,38 @@ export async function mount(root, ctx) {
       board.note || "Ce projet n'a pas encore de Mission Ledger.",
       'grimoire task add "<titre>" --acceptance "<critère>"',
     ));
+    // ADR-007 (issue #559) : un board du standard scaffoldé avant le lot 4.1,
+    // ou jamais migré, n'a pas encore de Mission Ledger — mais SES tâches
+    // existent déjà dans `task-board.yaml`. Plutôt que le seul rappel de
+    // `grimoire task add` (qui ouvrirait une tâche neuve, pas celles déjà
+    // déclarées), l'action de migration est proposée quand le serveur la dit
+    // disponible (`tasks_view`/`workspace_api.py`).
+    if (board.migration_available) {
+      const migrateBtn = document.createElement('button');
+      migrateBtn.type = 'button';
+      migrateBtn.className = 'btn pri';
+      migrateBtn.textContent = 'Migrer les tâches';
+      migrateBtn.disabled = ctx.host.readOnly;
+      if (ctx.host.readOnly) {
+        migrateBtn.title = "le cockpit est en lecture seule : ouvrez l'atelier de ce projet pour agir";
+      }
+      const feedback = text('p', 'lbl', '');
+      migrateBtn.addEventListener('click', async () => {
+        ctx.dock.echo('grimoire task migrate-standard .');
+        migrateBtn.disabled = true;
+        try {
+          const report = await ctx.api.migrateStandardTasks();
+          if (ctx.signal.aborted) return;
+          feedback.textContent = `${report.tasks_imported} tâche(s) migrée(s) vers le Mission Ledger.`;
+          root.replaceChildren();
+          await mount(root, ctx);
+        } catch (error) {
+          migrateBtn.disabled = false;
+          feedback.textContent = `échec : ${error.message}`;
+        }
+      });
+      wrap.append(migrateBtn, feedback);
+    }
     ctx.dock.echo('grimoire task add');
     return;
   }

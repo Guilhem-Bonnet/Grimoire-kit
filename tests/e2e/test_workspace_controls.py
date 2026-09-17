@@ -285,6 +285,34 @@ def test_executer_etat_vide_montre_la_commande_et_desactive_les_vues(empty_works
         assert buttons.nth(i).get_attribute("aria-pressed") == "false"
 
 
+def test_executer_etat_non_migre_propose_le_bouton_migrer_les_taches(empty_workspace: Page) -> None:
+    """ADR-007 (issue #559, lot 4.1 3/3) : un projet enrôlé au standard mais
+    jamais migré vers le Mission Ledger propose l'action au lieu du seul
+    rappel `grimoire task add` — et le clic ouvre réellement le ledger.
+
+    Mute la fixture partagée `empty_workspace` (idempotent : rejouer la
+    migration ne change plus rien ensuite), même patron que les tests
+    d'acceptation de proposition de ce module qui écrivent aussi dans ce
+    projet une fois pour de bon.
+    """
+    page = empty_workspace
+    _goto(page, "executer")
+    page.wait_for_selector(".empty")
+
+    migrate_btn = page.locator("button", has_text="Migrer les tâches")
+    assert migrate_btn.count() == 1
+    assert migrate_btn.is_enabled()
+
+    migrate_btn.click()
+    page.wait_for_selector(".ex-card", timeout=10_000)
+
+    assert page.locator(".empty").count() == 0
+    # La tâche `bootstrap` scaffoldée par `standard init --profile governed`
+    # (ADR-007 point 1) est désormais visible : la migration n'a rien inventé,
+    # elle a ouvert le ledger sur ce que le board déclarait déjà.
+    page.locator(".ex-card", has_text="Bootstrap agentic standard runtime").wait_for()
+
+
 def test_concevoir_etat_vide_montre_la_commande_et_desactive_les_vues(empty_workspace: Page) -> None:
     page = empty_workspace
     _goto(page, "concevoir")

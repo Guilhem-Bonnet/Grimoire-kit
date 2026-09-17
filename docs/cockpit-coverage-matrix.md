@@ -48,12 +48,12 @@ l'atelier ni sur le cockpit. Ce n'est pas une ligne manquante de la table « Rou
 | Coque (shell.js) | 32 | 31 | 97% |
 | Piloter | 34 | 29 | 85% |
 | Concevoir | 23 | 16 | 70% |
-| Executer | 16 | 10 | 62% |
+| Executer | 18 | 12 | 67% |
 | Observer | 10 | 7 | 70% |
 | Mémoire | 9 | 4 | 44% |
 | Source | 17 | 15 | 88% |
-| Routes API | 25 | 18 | 72% |
-| **TOTAL** | **166** | **130** | **78%** |
+| Routes API | 26 | 19 | 73% |
+| **TOTAL** | **169** | **133** | **79%** |
 <!-- END:cockpit-coverage-summary -->
 
 *(régénéré par `python scripts/cockpit-coverage.py` — recopier sa sortie ici après toute modification des tables ci-dessous ; la CI de PR 1 le vérifie via `--check`.)*
@@ -216,6 +216,8 @@ pour ce contrôle précis.
 | Review sans evidence pack | — | affichage refus | `GET /api/workspace/tasks/<id>` | nomme l'artefact manquant | `test_executer_review_sans_evidence_pack_est_refuse_et_nomme_l_artefact` | oui |
 | Chips `expected_evidence` | `.chip` | affichage seul | — | tronqué à 3/4 selon le contexte | — | non |
 | Colonnes de gate (bandeau) | `.ex-col-gate` | affichage seul | — | nomme les preuves requises par colonne | — | non |
+| Migrer les tâches (ADR-007, #559) | `button` « Migrer les tâches » (état vide) | `migrateStandardTasks()` | `POST /api/workspace/tasks/migrate-standard` | board sans ledger enrôlé → bouton visible, migration réelle, board recharge | `test_executer_etat_non_migre_propose_le_bouton_migrer_les_taches` | oui |
+| Finition (lecture seule, lot 4.3, #561) | `.ex-insp-block` (inspecteur) | affichage seul | `GET /api/workspace/tasks/<id>` | absente tant que non posée, sinon libellé (Maquette/Peaufinée) | `test_task_view_expose_le_champ_finition_en_lecture_seule` (unitaire, pas d'e2e : aucun chemin d'écriture avant le lot 4.3) | oui |
 
 ### Espace : Observer
 
@@ -297,3 +299,4 @@ pour ce contrôle précis.
 | GET /api/workspace/agents | workspace_routes.py | 200/500 (`collect_agents` en erreur → 500 réel) | `freshness` par agent | `test_lire_les_agents_a_travers_le_cockpit` | oui |
 | POST /api/workspace/proposals/<slug>/accept | workspace_routes.py → proposals.py | 200 toujours (jamais d'exception) | 6 `artifact_type` distincts (agent/skill/override-migration/memory-link/needs-hosts/repair) | les 6, via un vrai clic Piloter : `tests/e2e/test_workspace_proposals.py` (agent), `tests/e2e/test_workspace_proposals_types.py` (les 5 autres) | oui |
 | POST /api/workspace/proposals/<slug>/reject | workspace_routes.py → proposals.py | 200 toujours | déjà acceptée → `ok:false` sans erreur HTTP | `test_reject_marks_without_writing_an_artifact` | oui |
+| POST /api/workspace/tasks/migrate-standard (ADR-007, #559) | workspace_routes.py → missions/task_unification.py | 200 (rapport `migrate_standard_tasks`) ; 403 hors home (même garde `_HOME_SLUG` que le reste de `POST_ROUTES`, prouvée par les deux tests paramétrés de la section 2) | idempotent (0 importée si déjà migré) | `test_post_migrate_standard_importe_le_board_non_migre_sur_le_projet_de_lancement`, `test_executer_etat_non_migre_propose_le_bouton_migrer_les_taches` | oui |

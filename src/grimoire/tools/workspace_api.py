@@ -250,6 +250,14 @@ def tasks_view(project_root: Path, *, mission: str | None = None, status: str | 
     ``ledger: false`` n'est pas une erreur : un projet peut n'avoir jamais
     ouvert de tâche. La vue le dit et nomme la commande qui en ouvre une, au
     lieu de rendre un board vide qui ressemblerait à une panne.
+
+    ADR-007 (issue #559) distingue un second cas dans ce même ``ledger:
+    false`` : un projet enrôlé au standard dont le board n'a jamais été migré
+    vers le Mission Ledger (scaffoldé par un kit antérieur au lot 4.1, ou
+    migration jamais lancée). ``migration_available: true`` le signale, pour
+    que l'espace Exécuter propose l'action au lieu du seul rappel de
+    `grimoire task add` — voir ``POST /api/workspace/tasks/migrate-standard``
+    (``workspace_routes.py``).
     """
     from grimoire.missions.board import BOARD_LIFECYCLE
     from grimoire.missions.schemas import TaskState
@@ -263,7 +271,17 @@ def tasks_view(project_root: Path, *, mission: str | None = None, status: str | 
         "count": 0,
     }
     if not service.has_ledger:
-        payload["note"] = "aucun Mission Ledger — `grimoire task add` en ouvre un"
+        from grimoire.missions.task_unification import tasks_unification_status
+
+        tu_status = tasks_unification_status(project_root)
+        if tu_status["enrolled"] and tu_status["board_exists"]:
+            payload["note"] = (
+                "le board du standard n'a pas encore de Mission Ledger — "
+                "migrez les tâches déjà déclarées, ou ouvrez-en une nouvelle avec `grimoire task add`"
+            )
+            payload["migration_available"] = True
+        else:
+            payload["note"] = "aucun Mission Ledger — `grimoire task add` en ouvre un"
         return payload
     tasks = service.list_tasks(mission or None, status or None)
     payload["tasks"] = [_task_json(t) for t in tasks]
