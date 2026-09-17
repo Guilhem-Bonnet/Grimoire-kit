@@ -899,7 +899,8 @@ def test_gate_check_strict_exits_2_for_every_profile(tmp_path: Path, profile_id:
         (
             ["standard", "gate", "check"],
             "grimoire.standard-gate-check/v1",
-            {"schema", "ok", "task_id", "profile", "state", "missing", "checks", "strict"},
+            # ``test_run`` : issue #582 lot G1 (`gate check --strict` exécute les tests).
+            {"schema", "ok", "task_id", "profile", "state", "missing", "checks", "strict", "test_run"},
         ),
     ],
 )
@@ -1135,8 +1136,12 @@ def test_cli_gate_run_tests_reports_no_known_command(tmp_path: Path) -> None:
 
 _UNRESOLVABLE_EMISSIONS = frozenset({
     "gate.compliance_score_missing",
+    "gate.context_bundle_missing",
     "gate.decision_trace_missing",
     "gate.evidence_pack_missing",
+    "gate.memory_policy_missing",
+    "gate.task_board_missing",
+    "gate.task_envelope_missing",
 })
 
 
@@ -1331,3 +1336,160 @@ def test_registry_has_no_stale_entry() -> None:
 
     stale = sorted(set(CHECK_DIMENSIONS) - _emitted_check_ids())
     assert stale == [], f"entrées de registre sans check correspondant : {stale}"
+
+
+# ── Gate auto-suffisant (issue #582 lot G1) ──────────────────────────────────
+
+
+def _claimed_ledger_task(root: Path) -> str:
+    """Une tâche réclamée (``in_progress`` sur le board) — le chemin réel de `grimoire task add` + `claim`."""
+    from grimoire.missions.schemas import TaskState
+    from grimoire.missions.service import TaskService
+
+    service = TaskService(root)
+    mission = service.ledger.create_mission(title="Travaux", origin="test")
+    task = service.ledger.create_task(mission.id, "Ajouter somme", acceptance=("les tests passent",))
+    service.ledger.transition_task(task.id, TaskState.READY, actor_id="a")
+    service.ledger.claim_task(task.id, "a", "local")
+    service.project_board()
+    return task.id
+
+
+def test_every_missing_gate_artifact_names_its_path_and_a_copyable_remedy(tmp_path: Path) -> None:
+    """Rouge-avant : `Required gate artifact is missing: context_bundle.` — ni chemin ni remède.
+
+    Sur 21/21 runs du banc kit-gov (analyse-tours-kit-gov-2026-09-17), l'agent
+    a ouvert le source installé du kit pour deviner où créer le fichier. Chaque
+    message nomme désormais le chemin attendu et une commande shell copiable.
+    """
+    setup_standard_profile(tmp_path, profile_id="governed", provider_ids=("github-copilot",))
+    (tmp_path / "_grimoire-output/evidence/bootstrap/task-envelope.md").unlink()
+    (tmp_path / "_grimoire-output/evidence/bootstrap/evidence-pack.md").unlink()
+    (tmp_path / "_grimoire/standard/memory-policy.yaml").unlink()
+
+    result = check_evidence_gates(tmp_path, task_id="bootstrap", target_state="released")
+
+    missing = {check.id: check for check in result.checks if check.id.endswith("_missing")}
+    expected = {"task_envelope", "context_bundle", "memory_policy", "evidence_pack", "decision_trace", "compliance_score"}
+    assert {key.removeprefix("gate.").removesuffix("_missing") for key in missing} == expected
+    for check in missing.values():
+        assert check.path is not None and str(check.path) in check.message, check.message
+        assert "remède : grimoire " in check.message, check.message
+        assert str(tmp_path) in check.message, "le remède cite la racine en absolu, copiable de n'importe où"
+    scaffold = f"grimoire standard task scaffold {tmp_path} --task-id bootstrap"
+    assert missing["gate.context_bundle_missing"].message.endswith(scaffold)
+    assert missing["gate.memory_policy_missing"].message.endswith(f"grimoire standard init {tmp_path} --profile governed")
+    assert missing["gate.compliance_score_missing"].message.endswith(f"grimoire standard score {tmp_path} --task-id bootstrap")
+
+
+def test_cli_gate_check_text_output_carries_path_and_remedy(tmp_path: Path) -> None:
+    """Le rendu texte est celui que l'agent lit : il ne doit plus dire `missing context_bundle` nu."""
+    setup_standard_profile(tmp_path, profile_id="starter")
+    task_id = _claimed_ledger_task(tmp_path)
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["standard", "gate", "check", str(tmp_path), "--task-id", task_id, "--strict", "--no-run"])
+
+    assert result.exit_code == 2
+    assert f"_grimoire-output/context/{task_id}/context-bundle.yaml" in result.output
+    assert "grimoire standard task scaffold" in result.output
+    assert "missing context_bundle\n" not in result.output
+
+
+def test_cli_verify_text_output_names_a_remedy_for_each_missing_path(tmp_path: Path) -> None:
+    setup_standard_profile(tmp_path, profile_id="starter")
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["standard", "verify", str(tmp_path), "--task-id", "T-neuve"])
+
+    assert result.exit_code == 1
+    assert "missing _grimoire-output/evidence/T-neuve/task-envelope.md" in result.output
+    assert "grimoire standard task scaffold" in result.output
+
+
+def test_cli_gate_check_strict_runs_the_tests_itself_and_reuses_a_fresh_run(tmp_path: Path) -> None:
+    """Lot G1 (d) : `gate check --strict` ferme la boucle que le lot B avait ouverte en deux commandes."""
+    from grimoire.core.standard_task_scaffold import scaffold_task_artifacts
+
+    setup_standard_profile(tmp_path, profile_id="starter")
+    (tmp_path / "project-context.yaml").write_text(
+        'project:\n  name: demo\nneeds:\n  commands:\n    test-runner: "true"\n', encoding="utf-8"
+    )
+    task_id = _claimed_ledger_task(tmp_path)
+    scaffold_task_artifacts(tmp_path, task_id=task_id)
+    runner = CliRunner()
+    argv = ["-o", "json", "standard", "gate", "check", str(tmp_path), "--task-id", task_id, "--strict"]
+
+    first = json.loads(runner.invoke(app, argv).output)
+    second = json.loads(runner.invoke(app, argv).output)
+
+    assert first["ok"] is True and first["test_run"]["ran"] is True and first["test_run"]["ok"] is True
+    recorded = json.loads((tmp_path / f"_grimoire-output/evidence/{task_id}/test-run.json").read_text(encoding="utf-8"))
+    assert recorded["command"] == "true" and recorded["ok"] is True
+    assert second["test_run"] == {
+        "ran": False, "reason": "fresh_run", "command": "true", "ok": None, "exit_code": None, "path": None,
+    }
+
+
+def test_cli_gate_check_strict_fails_only_on_a_red_fresh_run(tmp_path: Path) -> None:
+    """Rouge = motif de fond : tests rouges → erreur ; run rouge périmé → plus une erreur."""
+    from grimoire.core.standard_task_scaffold import scaffold_task_artifacts
+
+    setup_standard_profile(tmp_path, profile_id="starter")
+    (tmp_path / "project-context.yaml").write_text(
+        'project:\n  name: demo\nneeds:\n  commands:\n    test-runner: "false"\n', encoding="utf-8"
+    )
+    task_id = _claimed_ledger_task(tmp_path)
+    scaffold_task_artifacts(tmp_path, task_id=task_id)
+    runner = CliRunner()
+    base = ["-o", "json", "standard", "gate", "check", str(tmp_path), "--task-id", task_id, "--strict"]
+
+    red = runner.invoke(app, base)
+    payload = json.loads(red.output)
+    assert red.exit_code == 2 and payload["test_run"]["ran"] is True and payload["test_run"]["ok"] is False
+    assert [c["id"] for c in payload["checks"] if c["severity"] == "error"] == ["acceptance.test_run_failed"]
+
+    no_run = json.loads(runner.invoke(app, [*base, "--no-run"]).output)
+    assert no_run["ok"] is False and no_run["test_run"] is None, "un run rouge frais reste une erreur sans relance"
+
+    (tmp_path / "fix.py").write_text("x = 1\n", encoding="utf-8")
+    stale = json.loads(runner.invoke(app, [*base, "--no-run"]).output)
+    assert stale["ok"] is True, "un run rouge périmé n'est plus un verdict sur l'arbre courant"
+
+
+def test_cli_gate_check_no_run_never_executes_anything(tmp_path: Path) -> None:
+    from grimoire.core.standard_task_scaffold import scaffold_task_artifacts
+
+    setup_standard_profile(tmp_path, profile_id="starter")
+    (tmp_path / "project-context.yaml").write_text(
+        'project:\n  name: demo\nneeds:\n  commands:\n    test-runner: "false"\n', encoding="utf-8"
+    )
+    task_id = _claimed_ledger_task(tmp_path)
+    scaffold_task_artifacts(tmp_path, task_id=task_id)
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["-o", "json", "standard", "gate", "check", str(tmp_path), "--task-id", task_id, "--strict", "--no-run"])
+
+    assert json.loads(result.output)["ok"] is True
+    assert not (tmp_path / f"_grimoire-output/evidence/{task_id}/test-run.json").exists()
+
+
+def test_gate_check_strict_owes_no_run_before_the_task_starts(tmp_path: Path) -> None:
+    """Une tâche `proposed` n'a rien à tester : `--strict` n'exécute pas la commande de test."""
+    from grimoire.missions.service import TaskService
+
+    setup_standard_profile(tmp_path, profile_id="starter")
+    (tmp_path / "project-context.yaml").write_text(
+        'project:\n  name: demo\nneeds:\n  commands:\n    test-runner: "false"\n', encoding="utf-8"
+    )
+    service = TaskService(tmp_path)
+    mission = service.ledger.create_mission(title="Travaux", origin="test")
+    task = service.ledger.create_task(mission.id, "Proposée", acceptance=("x",))
+    service.project_board()
+    runner = CliRunner()
+
+    result = json.loads(runner.invoke(app, ["-o", "json", "standard", "gate", "check", str(tmp_path), "--task-id", task.id, "--strict"]).output)
+
+    assert result["ok"] is True and result["test_run"] == {
+        "ran": False, "reason": "state_owes_no_run", "command": "", "ok": None, "exit_code": None, "path": None,
+    }

@@ -39,9 +39,11 @@ HOOK_COMMAND = "grimoire standard activation-context"
 _DIRECTIVE_TEMPLATE = """[Grimoire Standard — activation]
 Ce projet est gouverné par le standard agentique Grimoire. Ces étapes font
 partie de la tâche demandée :
-1. AVANT toute modification de code : remplis
+1. AVANT toute modification de code : complète
    `_grimoire-output/evidence/{task_id}/task-envelope.md` — objectif,
-   périmètre outillé (tool boundary) concret, critères de sortie.
+   périmètre outillé (tool boundary) concret, critères de sortie. Le
+   squelette existe déjà (hook SessionStart) ; sinon
+   `grimoire standard task scaffold --task-id {task_id}` le crée.
 2. PENDANT le travail : consigne chaque preuve (commande exécutée, test
    vert, diff clé) comme ligne concrète de l'inventaire dans
    `_grimoire-output/evidence/{task_id}/evidence-pack.md`, et remplace le

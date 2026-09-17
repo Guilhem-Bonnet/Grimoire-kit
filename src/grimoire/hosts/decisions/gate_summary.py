@@ -21,9 +21,14 @@ def _gate_summary(project_root: Path, task_id: str) -> tuple[bool, str, dict[str
 
     result = check_evidence_gates(project_root, task_id=task_id)
     missing = list(result.missing)
-    lines = [f"  - {item}" for item in missing[:6]]
-    if len(missing) > 6:
-        lines.append(f"  - … {len(missing) - 6} autre(s)")
+    # Issue #582 lot G1 : le message de chaque check manquant porte déjà le
+    # chemin attendu et le remède (`gate_remedy.missing_artifact_message`) ;
+    # le résumé le relaie tel quel plutôt que la clé nue qui envoyait l'agent
+    # lire le source du kit pour deviner où créer le fichier.
+    errors = [check.message for check in result.checks if check.is_error]
+    lines = [f"  - {item}" for item in errors[:6]]
+    if len(errors) > 6:
+        lines.append(f"  - … {len(errors) - 6} autre(s)")
     summary = "\n".join(lines)
     detail = {
         "task_id": result.task_id,

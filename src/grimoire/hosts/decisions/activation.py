@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from grimoire.core.claude_activation import activation_context_text
 from grimoire.core.standard_state import active_task_id
@@ -218,6 +219,28 @@ def _is_governed(project_root: Path) -> bool:
     return not _looks_like_a_playground(project_root)
 
 
+def _scaffold_active_task(project_root: Path, task_id: str) -> dict[str, Any]:
+    """Issue #582 lot G1 : les artefacts que le gate réclamera existent dès la première commande.
+
+    Idempotent (:func:`grimoire.core.standard_task_scaffold.scaffold_task_artifacts`
+    ne réécrit jamais un fichier présent) et silencieux : rien n'est ajouté au
+    contexte de session, seul ``detail`` dit ce qui a été créé. Quand tout
+    existe déjà — le cas de chaque session après la première — le coût se
+    limite à six ``stat`` (voir ``missing_task_artifacts``), mesuré par
+    ``test_session_start_scaffold_noop_stays_under_budget``. Best-effort comme
+    le reste de ce contexte : une tâche inconnue du ledger (``bootstrap`` de
+    repli sur un board qui ne le déclare pas) ou un disque en lecture seule
+    dégradent en « rien scaffoldé », jamais en session cassée.
+    """
+    try:
+        from grimoire.core.standard_task_scaffold import scaffold_task_artifacts
+
+        result = scaffold_task_artifacts(project_root, task_id=task_id)
+    except Exception as exc:
+        return {"scaffolded": [], "scaffold_skipped": type(exc).__name__}
+    return {"scaffolded": [str(path) for path in result.written]}
+
+
 def decide_activation(hook: HookInput) -> Decision:
     """Session start: hand the agent its persona, its claim's recall, then the directive.
 
@@ -249,6 +272,7 @@ def decide_activation(hook: HookInput) -> Decision:
     _reset_temporal_session(hook)
     task_id = active_task_id(hook.project_root)
     governed = _is_governed(hook.project_root)
+    scaffold_detail = _scaffold_active_task(hook.project_root, task_id) if governed else {}
     directive = (
         activation_context_text(hook.project_root, task_id=task_id)
         if governed
@@ -271,5 +295,6 @@ def decide_activation(hook: HookInput) -> Decision:
             "entry_agent": entry_name,
             "recall_injected": bool(recall),
             "governed": governed,
+            **scaffold_detail,
         },
     )
