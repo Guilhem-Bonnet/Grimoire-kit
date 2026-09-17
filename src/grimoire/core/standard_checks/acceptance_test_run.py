@@ -98,13 +98,15 @@ def record_acceptance_test_run(project_root: Path, *, task_id: str = "bootstrap"
     from grimoire.core.standard_checks.tree_fingerprint import compute_tree_fingerprint
     from grimoire.missions.dispatch import _run_checks
 
-    # Calculée AVANT d'exécuter la commande : ce run atteste l'arbre tel qu'il
-    # était à l'instant du lancement, pas après (une suite de tests écrit
-    # elle-même des artefacts non suivis — `.pytest_cache`, `.coverage` — qui
-    # auraient périmé le run dès sa propre écriture si l'empreinte était
-    # prise après coup).
-    tree_fingerprint = compute_tree_fingerprint(root)
+    # Calculée APRÈS avoir exécuté la commande (revue de la PR #585, point 1) :
+    # l'état de référence d'un run est celui qu'il laisse derrière lui, pas
+    # celui d'avant. Les caches d'outillage qu'une commande de test régénère
+    # (`.pytest_cache`, `__pycache__`, `.coverage`…) sont de toute façon
+    # exclus de l'empreinte (`tree_fingerprint._EXCLUDED_DIRS`) — sans quoi,
+    # sur un projet sans `.gitignore` adapté, le run se serait périmé dès son
+    # propre enregistrement.
     (check,) = _run_checks((need.command,), project_root=root)
+    tree_fingerprint = compute_tree_fingerprint(root)
     result_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "task_id": normalized_task_id,

@@ -10,13 +10,23 @@ seule fois, pour l'écrivain (au moment du run) et le lecteur (à la
 vérification) — jamais deux implémentations qui pourraient diverger.
 
 Dans un dépôt git : sha256 de ``git rev-parse HEAD`` + ``git status
---porcelain=v1 -z`` + ``git diff HEAD``, ``_grimoire-output/`` exclu des deux
-dernières commandes (ce dossier est écrit PAR le mécanisme qu'on mesure —
-l'inclure invaliderait chaque run par lui-même dès l'écriture de
-``test-run.json``). Hors dépôt git (ou si git échoue) : sha256 de la liste
-triée ``(chemin, taille, mtime_ns)`` de tout fichier sous la racine,
-``_grimoire-output/``, ``.venv``, ``node_modules``, ``target``, ``.git``
-exclus.
+--porcelain=v1 -z`` + ``git diff HEAD`` + ``(chemin, taille, mtime_ns)`` de
+chaque fichier derrière une entrée non suivie (``??``) du status — un fichier
+non suivi n'est représenté par git que par son chemin ; sans ce complément,
+retoucher son contenu après le run ne changerait jamais l'empreinte, alors
+que c'est le cas courant d'un agent qui crée un fichier puis le retouche
+(revue de la PR #585, point 2). Hors dépôt git (ou si git échoue) : sha256
+de la liste triée ``(chemin, taille, mtime_ns)`` de tout fichier sous la
+racine.
+
+``_grimoire-output/`` et les caches d'outillage non déterministes
+(``.pytest_cache``, ``__pycache__``, ``.ruff_cache``, ``.mypy_cache``,
+``.hypothesis``, ``.coverage``) sont exclus des deux modes — le premier
+parce que le mécanisme mesuré y écrit lui-même (auto-invalidation), les
+seconds parce qu'une commande de test les régénère à chaque run, avec un
+contenu qui change sans que le code change (revue de la PR #585, point 1) :
+sur un projet sans ``.gitignore`` adapté, les compter aurait périmé le run
+dès son propre enregistrement.
 """
 
 from __future__ import annotations
@@ -29,13 +39,39 @@ __all__ = ["compute_tree_fingerprint"]
 
 #: Dossiers jamais comptés dans l'empreinte, quel que soit le mode de calcul —
 #: `_grimoire-output` parce que le mécanisme lui-même y écrit (auto-
-#: invalidation), les autres parce qu'ils ne sont pas des sources (dépendances
+#: invalidation) ; les caches d'outillage parce qu'une commande de test les
+#: régénère à chaque run sans que le code change (revue de la PR #585, point
+#: 1) ; les autres parce qu'ils ne sont pas des sources (dépendances
 #: installées, artefacts de build, métadonnées VCS).
-_EXCLUDED_DIRS = frozenset({"_grimoire-output", ".venv", "node_modules", "target", ".git"})
+_EXCLUDED_DIRS = frozenset({
+    "_grimoire-output",
+    ".venv",
+    "node_modules",
+    "target",
+    ".git",
+    ".pytest_cache",
+    "__pycache__",
+    ".ruff_cache",
+    ".mypy_cache",
+    ".hypothesis",
+    ".coverage",
+})
 
-#: Magie de pathspec git : un seul répertoire exclu de la commande elle-même,
-#: jamais un filtrage a posteriori de sa sortie.
-_EXCLUDE_PATHSPEC = ":(exclude)_grimoire-output/**"
+#: Magie de pathspec git : chaque nom exclu de la commande elle-même, jamais
+#: un filtrage a posteriori de la sortie. La magie ``glob`` est nécessaire —
+#: sans elle, ``**`` n'a pas le sens « n'importe quelle profondeur » que ce
+#: module lui donne (vérifié empiriquement : ``:(exclude)**/<nom>/**`` seul,
+#: sans ``glob``, ne filtre qu'une occurrence à la racine). Les deux formes
+#: sont nécessaires ensemble : ``**/<nom>/**`` filtre un dossier (l'entrée
+#: elle-même, neuve et non suivie, ou son contenu énuméré individuellement
+#: sous un répertoire déjà suivi) mais jamais un fichier plat du même nom
+#: (``.coverage``) ; ``**/<nom>`` (sans le ``/**`` final) filtre ce fichier
+#: plat mais jamais le contenu d'un dossier.
+_EXCLUDE_PATHSPECS: tuple[str, ...] = tuple(
+    spec
+    for name in _EXCLUDED_DIRS
+    for spec in (f":(exclude,glob)**/{name}", f":(exclude,glob)**/{name}/**")
+)
 
 #: Court : une empreinte doit être quasi instantanée, jamais un budget de
 #: temps notable dans un `gate check` par ailleurs volontairement sûr.
@@ -65,18 +101,52 @@ def _run_git(root: Path, *args: str) -> str | None:
     return completed.stdout
 
 
+def _untracked_paths(status: str) -> list[str]:
+    """Les chemins des entrées ``??`` d'un ``git status --porcelain=v1 -z``."""
+    return [entry[3:] for entry in status.split("\0") if entry.startswith("?? ")]
+
+
+def _stat_entries(root: Path, rel_path: str) -> list[str]:
+    """``(chemin, taille, mtime_ns)`` pour *rel_path* — un fichier, ou récursivement un dossier.
+
+    Les caches d'outillage restent exclus même s'ils apparaissent à
+    l'intérieur d'un dossier par ailleurs neuf et non suivi (ex. un dossier
+    de sortie de test qui contiendrait aussi un ``__pycache__``) — même
+    filtre que le mode filesystem, pour ne jamais diverger.
+    """
+    target = root / rel_path
+    candidates = sorted(target.rglob("*")) if target.is_dir() else [target]
+    entries: list[str] = []
+    for path in candidates:
+        if not path.is_file():
+            continue
+        rel = path.relative_to(root)
+        if any(part in _EXCLUDED_DIRS for part in rel.parts):
+            continue
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        entries.append(f"{rel.as_posix()}\t{stat.st_size}\t{stat.st_mtime_ns}")
+    return entries
+
+
 def _git_fingerprint(root: Path) -> str | None:
     head = _run_git(root, "rev-parse", "HEAD")
     if head is None:
         return None
-    status = _run_git(root, "status", "--porcelain=v1", "-z", "--", ".", _EXCLUDE_PATHSPEC)
-    diff = _run_git(root, "diff", "HEAD", "--", ".", _EXCLUDE_PATHSPEC)
+    status = _run_git(root, "status", "--porcelain=v1", "-z", "--", ".", *_EXCLUDE_PATHSPECS)
+    diff = _run_git(root, "diff", "HEAD", "--", ".", *_EXCLUDE_PATHSPECS)
     if status is None or diff is None:
         return None
+    untracked_entries: list[str] = []
+    for rel_path in _untracked_paths(status):
+        untracked_entries.extend(_stat_entries(root, rel_path))
     digest = hashlib.sha256()
     digest.update(head.encode("utf-8"))
     digest.update(status.encode("utf-8"))
     digest.update(diff.encode("utf-8"))
+    digest.update("\n".join(sorted(untracked_entries)).encode("utf-8"))
     return digest.hexdigest()
 
 
@@ -107,6 +177,15 @@ def compute_tree_fingerprint(root: Path) -> str:
     par exemple) — cette fonction ne lève jamais, un dépôt git cassé ou
     incomplet retombe sur l'empreinte filesystem plutôt que de bloquer
     l'appelant.
+
+    Appelée par ``record_acceptance_test_run`` **après** l'exécution de la
+    commande de test (revue de la PR #585, point 1) : l'état de référence
+    d'un run est celui qu'il a laissé derrière lui, pas celui d'avant — les
+    caches d'outillage qu'une commande de test régénère (voir
+    ``_EXCLUDED_DIRS``) sont de toute façon exclus, donc ce choix ne les
+    concerne plus, mais il reste le bon modèle pour tout ce qu'une commande
+    de test pourrait légitimement écrire sous les sources (fichiers générés
+    commités par la suite, par exemple).
     """
     if _is_git_repo(root):
         fingerprint = _git_fingerprint(root)

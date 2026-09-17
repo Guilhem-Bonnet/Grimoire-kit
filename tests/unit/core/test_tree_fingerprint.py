@@ -113,3 +113,77 @@ def test_git_fingerprint_falls_back_without_a_commit(tmp_path: Path) -> None:
     (tmp_path / "app.py").write_text("print('v1')\n", encoding="utf-8")
     fingerprint = compute_tree_fingerprint(tmp_path)
     assert fingerprint
+
+
+# ── Revue de la PR #585 : caches non déterministes, fichier non suivi retouché ──
+
+
+def test_git_fingerprint_ignores_pytest_cache(tmp_path: Path) -> None:
+    """Point 1 : un cache non suivi qu'une commande de test régénère ne doit jamais périmer un run."""
+    _git_repo(tmp_path)
+    (tmp_path / "app.py").write_text("print('v1')\n", encoding="utf-8")
+    _commit(tmp_path, "init")
+    before = compute_tree_fingerprint(tmp_path)
+    cache_dir = tmp_path / ".pytest_cache" / "v" / "cache"
+    cache_dir.mkdir(parents=True)
+    (cache_dir / "lastfailed").write_text("{}\n", encoding="utf-8")
+    after = compute_tree_fingerprint(tmp_path)
+    assert before == after
+
+
+def test_git_fingerprint_ignores_pytest_cache_nested_under_a_tracked_dir(tmp_path: Path) -> None:
+    """Même garde quand le cache apparaît sous un dossier déjà suivi (git l'énumère alors lui-même)."""
+    _git_repo(tmp_path)
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "mod.py").write_text("print('v1')\n", encoding="utf-8")
+    _commit(tmp_path, "init")
+    before = compute_tree_fingerprint(tmp_path)
+    cache_dir = tmp_path / "src" / "__pycache__"
+    cache_dir.mkdir()
+    (cache_dir / "mod.pyc").write_bytes(b"bytecode")
+    after = compute_tree_fingerprint(tmp_path)
+    assert before == after
+
+
+def test_fs_fallback_ignores_pytest_cache(tmp_path: Path) -> None:
+    """Même garde hors dépôt git (repli filesystem)."""
+    (tmp_path / "app.py").write_text("print('v1')\n", encoding="utf-8")
+    before = compute_tree_fingerprint(tmp_path)
+    cache_dir = tmp_path / ".pytest_cache"
+    cache_dir.mkdir()
+    (cache_dir / "lastfailed").write_text("{}\n", encoding="utf-8")
+    after = compute_tree_fingerprint(tmp_path)
+    assert before == after
+
+
+def test_git_fingerprint_changes_when_an_untracked_file_is_edited(tmp_path: Path) -> None:
+    """Point 2 : un fichier non suivi n'est représenté par git que par son chemin (`?? chemin`).
+
+    Sans le complément (chemin, taille, mtime_ns) par fichier non suivi, le
+    retoucher après le run ne changeait jamais l'empreinte — le cas courant
+    d'un agent qui crée un fichier puis le retouche.
+    """
+    _git_repo(tmp_path)
+    (tmp_path / "app.py").write_text("print('v1')\n", encoding="utf-8")
+    _commit(tmp_path, "init")
+    (tmp_path / "new_file.py").write_text("print('new')\n", encoding="utf-8")
+    before = compute_tree_fingerprint(tmp_path)
+    # Taille différente, jamais seulement le contenu : indépendant de la
+    # résolution de la mtime du système de fichiers qui exécute ce test.
+    (tmp_path / "new_file.py").write_text("print('new')\nprint('edited')\n", encoding="utf-8")
+    after = compute_tree_fingerprint(tmp_path)
+    assert before != after
+
+
+def test_git_fingerprint_changes_when_a_file_under_an_untracked_dir_is_edited(tmp_path: Path) -> None:
+    """Même garde quand le fichier non suivi retouché vit sous un dossier lui-même non suivi."""
+    _git_repo(tmp_path)
+    (tmp_path / "app.py").write_text("print('v1')\n", encoding="utf-8")
+    _commit(tmp_path, "init")
+    new_dir = tmp_path / "new_dir"
+    new_dir.mkdir()
+    (new_dir / "generated.py").write_text("print('new')\n", encoding="utf-8")
+    before = compute_tree_fingerprint(tmp_path)
+    (new_dir / "generated.py").write_text("print('new')\nprint('edited')\n", encoding="utf-8")
+    after = compute_tree_fingerprint(tmp_path)
+    assert before != after

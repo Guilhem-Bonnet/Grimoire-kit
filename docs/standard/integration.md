@@ -457,17 +457,26 @@ duplique pas d'exécuteur, réutilise `_run_checks`
   diverge de celle recalculée à la vérification → `acceptance.test_run_stale`.
 
 Un run vert n'est pas une preuve permanente : `record_acceptance_test_run`
-calcule une empreinte de l'arbre de travail juste avant d'exécuter la
+calcule une empreinte de l'arbre de travail juste après avoir exécuté la
 commande (`grimoire.core.standard_checks.tree_fingerprint.
-compute_tree_fingerprint`) et l'enregistre dans `test-run.json`
-(`tree_fingerprint`). Dans un dépôt git : sha256 de `git rev-parse HEAD` +
-`git status --porcelain=v1 -z` + `git diff HEAD`, `_grimoire-output/` exclu
-des deux dernières commandes (ce dossier est écrit par le mécanisme lui-même
-— l'inclure invaliderait chaque run dès son écriture). Hors dépôt git : sha256
-de la liste triée `(chemin, taille, mtime_ns)` de tout fichier hors
-`_grimoire-output/`, `.venv/`, `node_modules/`, `target/`, `.git/`. Une
-empreinte absente (ancien format, fichier altéré à la main) compte comme
-périmée — garde fermée, jamais l'inverse.
+compute_tree_fingerprint`) — après, pas avant : l'état de référence d'un run
+est celui que les tests laissent derrière eux — et l'enregistre dans
+`test-run.json` (`tree_fingerprint`). Dans un dépôt git : sha256 de
+`git rev-parse HEAD` + `git status --porcelain=v1 -z` + `git diff HEAD` +
+`(chemin, taille, mtime_ns)` de chaque fichier derrière une entrée non suivie
+(`??`) du status (un fichier non suivi n'est représenté par git que par son
+chemin ; sans ce complément, le retoucher après le run ne changerait jamais
+l'empreinte). Hors dépôt git (ou si git échoue) : sha256 de la liste triée
+`(chemin, taille, mtime_ns)` de tout fichier hors les mêmes exclusions.
+Exclus des deux modes : `_grimoire-output/` (ce dossier est écrit par le
+mécanisme lui-même — l'inclure invaliderait chaque run dès son écriture),
+`.venv/`, `node_modules/`, `target/`, `.git/`, et les caches d'outillage non
+déterministes qu'une commande de test régénère à chaque run sans que le code
+change (`.pytest_cache/`, `__pycache__/`, `.ruff_cache/`, `.mypy_cache/`,
+`.hypothesis/`, `.coverage`) — sans quoi, sur un projet sans `.gitignore`
+adapté, un run se périmerait dès son propre enregistrement. Une empreinte
+absente (ancien format, fichier altéré à la main) compte comme périmée —
+garde fermée, jamais l'inverse.
 
 **Transition WARN → FAIL.** Cette release (celle qui introduit ce mécanisme)
 répond aux trois cas ci-dessus par un avertissement, quel que soit le profil —
