@@ -111,8 +111,8 @@ class ScaffoldResult:
             "task_id": self.task_id,
             "profile": self.profile,
             "dry_run": self.dry_run,
-            "written": [str(path) for path in self.written],
-            "skipped": [str(path) for path in self.skipped],
+            "written": [path.as_posix() for path in self.written],
+            "skipped": [path.as_posix() for path in self.skipped],
         }
 
 
@@ -235,7 +235,7 @@ def scaffold_task_artifacts(
         event_type="task.scaffolded",
         task_id=normalized_task_id,
         profile=profile.id,
-        details={"written": [str(path) for path in written], "source": facts.source},
+        details={"written": [path.as_posix() for path in written], "source": facts.source},
     )
     return ScaffoldResult(
         task_id=normalized_task_id,

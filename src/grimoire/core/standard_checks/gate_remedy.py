@@ -137,7 +137,7 @@ def missing_artifact_message(key: str, *, root: Path, task_id: str, profile_id: 
     """Le message complet d'un artefact de gate manquant : clé, chemin attendu, remède."""
     relpath = gate_artifact_relpath(key, task_id)
     remedy = remedy_command(key, root=root, task_id=task_id, profile_id=profile_id)
-    return f"Artefact de gate manquant : {key} — attendu à {relpath} ; remède : {remedy}"
+    return f"Artefact de gate manquant : {key} — attendu à {relpath.as_posix()} ; remède : {remedy}"
 
 
 def _shell_quote(value: str) -> str:

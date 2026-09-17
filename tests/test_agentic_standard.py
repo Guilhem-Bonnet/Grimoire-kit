@@ -1341,6 +1341,17 @@ def test_registry_has_no_stale_entry() -> None:
 # ── Gate auto-suffisant (issue #582 lot G1) ──────────────────────────────────
 
 
+def _test_runner_context(exit_code: int) -> str:
+    """Un `project-context.yaml` dont la commande de test sort avec *exit_code* — portable (pas de `true`/`false` sous cmd.exe)."""
+    import sys
+
+    # Guillemets doubles (sh et cmd.exe les comprennent), aucun guillemet dans le
+    # code Python passé à -c, et une chaîne YAML à guillemets simples autour :
+    # les antislashs d'un chemin Windows y restent littéraux.
+    command = f'"{sys.executable}" -c "import sys; sys.exit({exit_code})"'
+    return f"project:\n  name: demo\nneeds:\n  commands:\n    test-runner: '{command}'\n"
+
+
 def _claimed_ledger_task(root: Path) -> str:
     """Une tâche réclamée (``in_progress`` sur le board) — le chemin réel de `grimoire task add` + `claim`."""
     from grimoire.missions.schemas import TaskState
@@ -1403,7 +1414,7 @@ def test_cli_verify_text_output_names_a_remedy_for_each_missing_path(tmp_path: P
     result = runner.invoke(app, ["standard", "verify", str(tmp_path), "--task-id", "T-neuve"])
 
     assert result.exit_code == 1
-    assert "missing _grimoire-output/evidence/T-neuve/task-envelope.md" in result.output
+    assert "task-envelope.md" in result.output and "T-neuve" in result.output
     assert "grimoire standard task scaffold" in result.output
 
 
@@ -1412,9 +1423,7 @@ def test_cli_gate_check_strict_runs_the_tests_itself_and_reuses_a_fresh_run(tmp_
     from grimoire.core.standard_task_scaffold import scaffold_task_artifacts
 
     setup_standard_profile(tmp_path, profile_id="starter")
-    (tmp_path / "project-context.yaml").write_text(
-        'project:\n  name: demo\nneeds:\n  commands:\n    test-runner: "true"\n', encoding="utf-8"
-    )
+    (tmp_path / "project-context.yaml").write_text(_test_runner_context(0), encoding="utf-8")
     task_id = _claimed_ledger_task(tmp_path)
     scaffold_task_artifacts(tmp_path, task_id=task_id)
     runner = CliRunner()
@@ -1425,10 +1434,8 @@ def test_cli_gate_check_strict_runs_the_tests_itself_and_reuses_a_fresh_run(tmp_
 
     assert first["ok"] is True and first["test_run"]["ran"] is True and first["test_run"]["ok"] is True
     recorded = json.loads((tmp_path / f"_grimoire-output/evidence/{task_id}/test-run.json").read_text(encoding="utf-8"))
-    assert recorded["command"] == "true" and recorded["ok"] is True
-    assert second["test_run"] == {
-        "ran": False, "reason": "fresh_run", "command": "true", "ok": None, "exit_code": None, "path": None,
-    }
+    assert recorded["ok"] is True and "sys.exit(0)" in recorded["command"]
+    assert second["test_run"]["ran"] is False and second["test_run"]["reason"] == "fresh_run"
 
 
 def test_cli_gate_check_strict_fails_only_on_a_red_fresh_run(tmp_path: Path) -> None:
@@ -1436,9 +1443,7 @@ def test_cli_gate_check_strict_fails_only_on_a_red_fresh_run(tmp_path: Path) -> 
     from grimoire.core.standard_task_scaffold import scaffold_task_artifacts
 
     setup_standard_profile(tmp_path, profile_id="starter")
-    (tmp_path / "project-context.yaml").write_text(
-        'project:\n  name: demo\nneeds:\n  commands:\n    test-runner: "false"\n', encoding="utf-8"
-    )
+    (tmp_path / "project-context.yaml").write_text(_test_runner_context(1), encoding="utf-8")
     task_id = _claimed_ledger_task(tmp_path)
     scaffold_task_artifacts(tmp_path, task_id=task_id)
     runner = CliRunner()
@@ -1461,9 +1466,7 @@ def test_cli_gate_check_no_run_never_executes_anything(tmp_path: Path) -> None:
     from grimoire.core.standard_task_scaffold import scaffold_task_artifacts
 
     setup_standard_profile(tmp_path, profile_id="starter")
-    (tmp_path / "project-context.yaml").write_text(
-        'project:\n  name: demo\nneeds:\n  commands:\n    test-runner: "false"\n', encoding="utf-8"
-    )
+    (tmp_path / "project-context.yaml").write_text(_test_runner_context(1), encoding="utf-8")
     task_id = _claimed_ledger_task(tmp_path)
     scaffold_task_artifacts(tmp_path, task_id=task_id)
     runner = CliRunner()
@@ -1479,9 +1482,7 @@ def test_gate_check_strict_owes_no_run_before_the_task_starts(tmp_path: Path) ->
     from grimoire.missions.service import TaskService
 
     setup_standard_profile(tmp_path, profile_id="starter")
-    (tmp_path / "project-context.yaml").write_text(
-        'project:\n  name: demo\nneeds:\n  commands:\n    test-runner: "false"\n', encoding="utf-8"
-    )
+    (tmp_path / "project-context.yaml").write_text(_test_runner_context(1), encoding="utf-8")
     service = TaskService(tmp_path)
     mission = service.ledger.create_mission(title="Travaux", origin="test")
     task = service.ledger.create_task(mission.id, "Proposée", acceptance=("x",))

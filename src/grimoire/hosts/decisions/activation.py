@@ -238,7 +238,7 @@ def _scaffold_active_task(project_root: Path, task_id: str) -> dict[str, Any]:
         result = scaffold_task_artifacts(project_root, task_id=task_id)
     except Exception as exc:
         return {"scaffolded": [], "scaffold_skipped": type(exc).__name__}
-    return {"scaffolded": [str(path) for path in result.written]}
+    return {"scaffolded": [path.as_posix() for path in result.written]}
 
 
 def decide_activation(hook: HookInput) -> Decision:

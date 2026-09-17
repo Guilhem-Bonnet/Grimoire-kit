@@ -127,7 +127,7 @@ def test_scaffold_is_idempotent_and_never_rewrites_a_file(starter: Path) -> None
 
     again = scaffold_task_artifacts(starter, task_id=task_id)
 
-    assert [str(p) for p in again.written] == [f"_grimoire-output/context/{task_id}/context-bundle.yaml"]
+    assert [p.as_posix() for p in again.written] == [f"_grimoire-output/context/{task_id}/context-bundle.yaml"]
     assert envelope.read_text(encoding="utf-8") == "rempli par l'agent\n"
     third = scaffold_task_artifacts(starter, task_id=task_id)
     assert third.written == () and len(third.skipped) == 6
