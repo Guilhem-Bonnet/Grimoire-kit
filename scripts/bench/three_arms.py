@@ -128,6 +128,17 @@ class RunRecord:
     # #551/#552 lot A : ``results.jsonl`` perdait la répartition par modèle
     # que le diagnostic du surcoût kit avait besoin de relire.
     model_usage: dict[str, Any] | None = None
+    # Horodatage d'écriture (lot E, #582) : seul moyen de dater un bras
+    # "repris" tel quel par ``--resume --arms`` plutôt que rejoué. Absent des
+    # lignes écrites par les campagnes antérieures à ce lot — ``None`` alors,
+    # jamais reconstruit a posteriori (voir ``carried_over_label``).
+    recorded_at: str | None = None
+    # Uniquement pour le bras ``kit`` (lot E, #582) : ``True``/``False`` selon
+    # qu'un ``_grimoire-output/evidence/<task>/test-run.json`` existe dans le
+    # dépôt de tâche à la fin du run (preuve que ``gate run-tests`` a tourné,
+    # lot B) ; ``None`` pour les bras ``nu``/``ecc`` où la question ne se pose
+    # pas, et pour les lignes écrites avant ce lot.
+    kit_test_run_evidence: bool | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
@@ -370,6 +381,55 @@ def parse_result_event(stream_json_lines: Iterable[str]) -> dict[str, Any] | Non
         if event.get("type") == "result":
             result = event
     return result
+
+
+def parse_arms(value: str | None) -> tuple[str, ...]:
+    """Parse ``--arms`` en un sous-ensemble de :data:`ARMS`.
+
+    ``None`` ou une chaîne vide/blanche replient sur les trois bras (repli
+    documenté par ``--arms``, testé par ``test_parse_arms_*``). L'ordre de
+    retour est toujours l'ordre canonique de ``ARMS``, quel que soit l'ordre
+    donné en entrée (``"kit,nu"`` et ``"nu,kit"`` donnent le même résultat) —
+    c'est cet ordre qui pilote ensuite le filtrage de ``select_run_order``.
+    """
+    if value is None or not value.strip():
+        return ARMS
+    requested = [part.strip() for part in value.split(",") if part.strip()]
+    if not requested:
+        return ARMS
+    unknown = sorted(set(requested) - set(ARMS))
+    if unknown:
+        raise ValueError(f"bras inconnu(s) : {', '.join(unknown)} (attendus : {', '.join(ARMS)})")
+    selected = tuple(arm for arm in ARMS if arm in requested)
+    return selected
+
+
+def has_test_run_evidence(task_dir: Path) -> bool:
+    """``True`` si un ``_grimoire-output/evidence/<task>/test-run.json`` existe.
+
+    Preuve, côté banc, que ``grimoire standard gate run-tests`` a bien tourné
+    dans la session (lot B, #582/#585) — peu importe le ``--task-id`` choisi
+    par l'agent, d'où le ``glob`` plutôt qu'un chemin figé.
+    """
+    evidence_root = task_dir / "_grimoire-output" / "evidence"
+    if not evidence_root.is_dir():
+        return False
+    return any(evidence_root.glob("*/test-run.json"))
+
+
+def carried_over_label(records: Sequence[RunRecord], arm: str) -> str:
+    """Date (``AAAA-MM-JJ``) du run le plus ancien connu pour *arm*.
+
+    Utilisé pour la mention « bras repris de la campagne du <date> » quand
+    ``--arms`` restreint le rejeu et qu'un bras n'est présent que via des
+    lignes ``results.jsonl`` reprises telles quelles (``--resume``). Les
+    lignes écrites avant le lot E n'ont pas de ``recorded_at`` : le repli est
+    alors explicite plutôt qu'une date inventée.
+    """
+    dates = sorted(record.recorded_at[:10] for record in records if record.arm == arm and record.recorded_at)
+    if dates:
+        return dates[0]
+    return "date inconnue (données antérieures au suivi recorded_at)"
 
 
 def select_run_order(arms: Sequence[str], *, task_id: str, seed: int) -> list[str]:
@@ -823,11 +883,27 @@ def build_report(
     total_tasks: int,
     expected_cost: dict[str, Any] | None,
     seed: int,
+    rerun_arms: Sequence[str] | None = None,
+    label: str | None = None,
 ) -> dict[str, Any]:
-    """Construit la structure de rapport (utilisée pour le .md et le .json)."""
+    """Construit la structure de rapport (utilisée pour le .md et le .json).
+
+    ``rerun_arms`` (lot E, #582) : les bras effectivement rejoués par CETTE
+    exécution (``--arms``). ``None`` signifie « pas de restriction connue »
+    (mode par défaut, ou ``--report-only`` sans ``--arms``) : aucun bras
+    n'est alors marqué comme repris. Un bras présent dans ``records`` mais
+    absent de ``rerun_arms`` est un bras repris tel quel via ``--resume``,
+    signalé dans le rapport par :func:`carried_over_label`.
+    """
     by_arm: dict[str, list[RunRecord]] = defaultdict(list)
     for record in records:
         by_arm[record.arm].append(record)
+
+    carried_over_notes: dict[str, str] = {}
+    if rerun_arms is not None:
+        for arm in ARMS:
+            if arm not in rerun_arms and by_arm.get(arm):
+                carried_over_notes[arm] = carried_over_label(records, arm)
 
     per_arm: dict[str, Any] = {}
     for arm in ARMS:
@@ -872,15 +948,30 @@ def build_report(
             }
         by_task_arm[task_id] = row
 
+    kit_runs = [
+        {
+            "task_id": r.task_id,
+            "run_index": r.run_index,
+            "num_turns": r.num_turns,
+            "total_cost_usd": r.total_cost_usd,
+            "wall_seconds": r.wall_seconds,
+            "test_run_evidence": r.kit_test_run_evidence,
+        }
+        for r in sorted(by_arm.get("kit", []), key=lambda r: (r.task_id, r.run_index))
+    ]
+
     return {
         "generated_at": datetime.now(tz=UTC).isoformat(),
         "seed": seed,
+        "label": label,
         "total_tasks": total_tasks,
         "tasks_run": len(task_ids),
         "k": K_REPLAY,
         "expected_cost": expected_cost,
         "per_arm": per_arm,
         "by_task": by_task_arm,
+        "kit_runs": kit_runs,
+        "carried_over_notes": carried_over_notes,
     }
 
 
@@ -896,6 +987,17 @@ def render_report_markdown(report: dict[str, Any]) -> str:
         f"Paquet ecc : [{ECC_REPO_URL}]({ECC_REPO_URL}) (MIT).",
         "",
     ]
+
+    if report.get("label"):
+        lines.append(f"Étiquette : **{report['label']}**.")
+        lines.append("")
+
+    carried_over_notes = report.get("carried_over_notes") or {}
+    for arm in ARMS:
+        if arm in carried_over_notes:
+            lines.append(f"> Bras `{arm}` repris de la campagne du {carried_over_notes[arm]} (non rejoué dans cette exécution).")
+    if carried_over_notes:
+        lines.append("")
 
     expected = report.get("expected_cost")
     if expected:
@@ -935,12 +1037,45 @@ def render_report_markdown(report: dict[str, Any]) -> str:
         lines.append(f"| {task_id} | {row.get('language', '?')} | " + " | ".join(cells) + " |")
     lines.append("")
 
+    kit_runs = report.get("kit_runs") or []
+    if kit_runs:
+        lines.append("## Détail par run — bras kit")
+        lines.append("")
+        lines.append(
+            "| Tâche | Run | Tours | Coût | Temps (s) | `test-run.json` (lot B) |"
+        )
+        lines.append("|---|---|---|---|---|---|")
+        for row in kit_runs:
+            evidence = row.get("test_run_evidence")
+            evidence_cell = "oui" if evidence else ("non" if evidence is False else "?")
+            lines.append(
+                f"| {row['task_id']} | {row['run_index']} | {row['num_turns']} | "
+                f"${row['total_cost_usd']:.3f} | {row['wall_seconds']:.0f} | {evidence_cell} |"
+            )
+        lines.append("")
+
     return "\n".join(lines) + "\n"
 
 
-def write_report(records: Sequence[RunRecord], out_dir: Path, *, total_tasks: int, expected_cost: dict[str, Any] | None, seed: int) -> None:
+def write_report(
+    records: Sequence[RunRecord],
+    out_dir: Path,
+    *,
+    total_tasks: int,
+    expected_cost: dict[str, Any] | None,
+    seed: int,
+    rerun_arms: Sequence[str] | None = None,
+    label: str | None = None,
+) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
-    report = build_report(records, total_tasks=total_tasks, expected_cost=expected_cost, seed=seed)
+    report = build_report(
+        records,
+        total_tasks=total_tasks,
+        expected_cost=expected_cost,
+        seed=seed,
+        rerun_arms=rerun_arms,
+        label=label,
+    )
     (out_dir / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     (out_dir / "report.md").write_text(render_report_markdown(report), encoding="utf-8")
 
@@ -978,11 +1113,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--run-timeout-s", type=int, default=DEFAULT_RUN_TIMEOUT_S)
     parser.add_argument("--resume", action="store_true", help="ne rejoue pas les (tâche, bras, run) déjà dans results.jsonl")
     parser.add_argument("--report-dir", type=Path, default=None, help="dossier de sortie du rapport (défaut : <workspace>/reports/<date>)")
+    parser.add_argument(
+        "--arms",
+        type=str,
+        default=None,
+        help="sous-ensemble de bras à rejouer, ex. 'kit' ou 'nu,ecc,kit' (défaut : les trois) ; "
+        "combiné à --resume, les lignes results.jsonl des autres bras restent comptées dans le rapport",
+    )
+    parser.add_argument("--label", type=str, default=None, help="étiquette libre reprise dans report.md")
     args = parser.parse_args(argv)
+
+    try:
+        selected_arms = parse_arms(args.arms)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     if args.report_only:
         workspace = args.workspace or _default_workspace()
-        return _do_report_only(workspace, seed=args.seed, report_dir=args.report_dir)
+        return _do_report_only(workspace, seed=args.seed, report_dir=args.report_dir, arms=args.arms, label=args.label)
 
     workspace = args.workspace or _default_workspace()
     workspace.mkdir(parents=True, exist_ok=True)
@@ -1033,7 +1181,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         for task in selected:
             if disk_exhausted:
                 break
-            order = select_run_order(ARMS, task_id=task.task_id, seed=args.seed)
+            order = [arm for arm in select_run_order(ARMS, task_id=task.task_id, seed=args.seed) if arm in selected_arms]
             for arm in order:
                 if disk_exhausted:
                     break
@@ -1054,7 +1202,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                     results_f.write(json.dumps(record.to_dict()) + "\n")
                     results_f.flush()
 
-            if not disk_exhausted and args.full:
+            # Le critère d'arrêt statistique compare les IC de succès de
+            # ``kit`` à ceux de ``nu``/``ecc`` sur les tâches DÉJÀ rejouées
+            # dans CETTE exécution. Avec ``--arms`` restreint + ``--resume``,
+            # ``records`` contient aussi les lignes reprises telles quelles
+            # des bras non rejoués ici (ex. nu/ecc au complet) : leur
+            # ``task_id`` compterait à tort dans ``tasks_done`` et
+            # déclencherait un arrêt immédiat (« les 20 tâches ont été
+            # rejouées ») dès la première tâche kit. Le critère ne s'applique
+            # donc qu'à une campagne qui rejoue bien les trois bras.
+            if not disk_exhausted and args.full and selected_arms == ARMS:
                 stop, reason = should_stop_early(records, total_tasks=len(tasks), seed=args.seed)
                 print(f"[stop-check] {reason}")
                 if stop:
@@ -1073,7 +1230,15 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.full or disk_exhausted:
         report_dir = args.report_dir or (workspace / "reports" / datetime.now(tz=UTC).strftime("%Y-%m-%d"))
-        write_report(records, report_dir, total_tasks=len(tasks), expected_cost=expected_cost, seed=args.seed)
+        write_report(
+            records,
+            report_dir,
+            total_tasks=len(tasks),
+            expected_cost=expected_cost,
+            seed=args.seed,
+            rerun_arms=selected_arms,
+            label=args.label,
+        )
         if disk_exhausted:
             print(f"[report] rapport PARTIEL (arrêt disque) écrit sous {report_dir}")
         else:
@@ -1103,7 +1268,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
-def _do_report_only(workspace: Path, *, seed: int, report_dir: Path | None) -> int:
+def _do_report_only(
+    workspace: Path,
+    *,
+    seed: int,
+    report_dir: Path | None,
+    arms: str | None = None,
+    label: str | None = None,
+) -> int:
     state_dir = workspace / "state"
     results_path = state_dir / "results.jsonl"
     if not results_path.is_file():
@@ -1115,7 +1287,19 @@ def _do_report_only(workspace: Path, *, seed: int, report_dir: Path | None) -> i
     expected_cost_path = state_dir / "expected_cost.json"
     expected_cost = json.loads(expected_cost_path.read_text(encoding="utf-8")) if expected_cost_path.is_file() else None
     out_dir = report_dir or (workspace / "reports" / datetime.now(tz=UTC).strftime("%Y-%m-%d"))
-    write_report(records, out_dir, total_tasks=total_tasks, expected_cost=expected_cost, seed=seed)
+    # ``--report-only`` ne rejoue rien : ``--arms`` sert ici uniquement à
+    # annoter le rapport (quels bras la campagne dont ``results.jsonl`` est
+    # issu a réellement rejoués), pas à filtrer quoi que ce soit.
+    rerun_arms = parse_arms(arms) if arms else None
+    write_report(
+        records,
+        out_dir,
+        total_tasks=total_tasks,
+        expected_cost=expected_cost,
+        seed=seed,
+        rerun_arms=rerun_arms,
+        label=label,
+    )
     print(f"[report] écrit sous {out_dir}")
     return 0
 
@@ -1180,8 +1364,10 @@ def _run_one(
     cleanup_build_artifacts(run_dir)
 
     dispatch_stats = None
+    kit_test_run_evidence = None
     if arm == "kit":
         dispatch_stats = _collect_dispatch_stats(run_dir, home)
+        kit_test_run_evidence = has_test_run_evidence(run_dir)
 
     return RunRecord(
         task_id=task.task_id,
@@ -1192,6 +1378,8 @@ def _run_one(
         total_cost_usd=outcome.total_cost_usd,
         input_tokens=outcome.input_tokens,
         output_tokens=outcome.output_tokens,
+        recorded_at=datetime.now(tz=UTC).isoformat(),
+        kit_test_run_evidence=kit_test_run_evidence,
         cache_read_input_tokens=outcome.cache_read_input_tokens,
         cache_creation_input_tokens=outcome.cache_creation_input_tokens,
         model_usage=outcome.model_usage or None,
