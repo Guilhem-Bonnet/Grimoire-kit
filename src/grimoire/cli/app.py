@@ -19,6 +19,7 @@ from rich.console import Console
 from rich.table import Table
 
 from grimoire.__version__ import __version__
+from grimoire.cli._condensed_help import _RootHelpGroup
 from grimoire.cli._lazy import LazyCommandSpec, LazyGroupSpec, LazyTyperGroup
 from grimoire.cli._shared import _AUDIT_FILENAME, _log_operation, _status_spinner
 from grimoire.core import layout
@@ -88,88 +89,6 @@ def _suggest_command() -> None:
         console.print("[dim]Run 'grimoire --help' for all commands.[/dim]")
         raise SystemExit(2)
 
-
-# ── First-hour surface (issue Grimoire-kit#552, métrique 2) ────────────────────
-# `grimoire --help` listed 49 top-level names — nobody memorises that for a
-# first session. These five cover the loop a new user actually needs (scaffold,
-# one-shot setup, health check, the governed unit of work, the dashboard);
-# everything else is one `--all` away, never renamed or removed. Order here is
-# the order rendered in the condensed panel.
-_FIRST_HOUR_COMMANDS: tuple[tuple[str, str], ...] = (
-    ("init", "Créer ou enrôler un projet — détection de stack, agents déployés."),
-    ("up", "Tout enchaîner en une commande — init, identité, standard, doctor."),
-    ("doctor", "Diagnostiquer la santé du projet — config, structure, agents."),
-    ("flow", "Lancer et suivre un flow gouverné — le reçu de preuve d'une tâche."),
-    ("cockpit", "Ouvrir le tableau de bord — projets, activité, mises à jour."),
-)
-
-
-def _render_condensed_help(group: LazyTyperGroup, ctx: Any) -> None:
-    """Print the first-hour ``--help`` — five commands, the rest one flag away.
-
-    Deliberately avoids ``super().format_help()``: the full panel view walks
-    every lazy group/command to read its short help, which imports all of
-    them (see ``_lazy.py``) — the exact cost ``--help`` should not pay by
-    default. This path never imports a single ``cmd_*`` module.
-    """
-    from rich.console import Console
-    from rich.padding import Padding
-    from rich.table import Table
-
-    out = Console()
-    out.print(Padding(group.get_usage(ctx), (1, 1, 0, 1)), style="bold")
-    if group.help:
-        out.print(Padding(group.help, (0, 1, 1, 1)))
-
-    table = Table(show_header=False, box=None, padding=(0, 1, 0, 0))
-    table.add_column(style="bold cyan", no_wrap=True)
-    table.add_column()
-    for name, blurb in _FIRST_HOUR_COMMANDS:
-        table.add_row(name, blurb)
-    out.print(Padding("[bold]Commandes pour commencer[/bold]", (0, 1)))
-    out.print(Padding(table, (0, 1, 1, 3)))
-
-    total = len(group.list_commands(ctx))
-    hidden = total - len(_FIRST_HOUR_COMMANDS)
-    out.print(
-        Padding(
-            f"[dim]Autres commandes ({hidden})[/dim] — mémoire, standard, dispatch, "
-            "hôtes, propositions, blueprints, tâches, outils…\n"
-            "  [bold]grimoire --help --all[/bold]     Tout afficher "
-            f"({total} commandes)\n"
-            "  [bold]grimoire COMMAND --help[/bold]   Aide d'une commande précise",
-            (0, 1, 1, 1),
-        )
-    )
-
-
-class _RootHelpGroup(LazyTyperGroup):
-    """Root command group — condensed ``--help`` unless ``--all`` was passed.
-
-    Only the root ``app`` uses this class; every lazy sub-app (``flow``,
-    ``memory``...) keeps Typer's normal ``TyperGroup``, so ``grimoire flow
-    --help`` is untouched.
-
-    Whether ``--all`` was requested is decided from the raw argument list in
-    :meth:`parse_args`, not from ``ctx.params`` in :meth:`format_help`: click
-    resolves eager options in the order they were *typed*, and ``--help``'s
-    own eager callback (which triggers ``format_help``) can run before
-    ``--all``'s if the user wrote ``--help --all`` rather than ``--all
-    --help``. Reading the argument list directly is order-independent, and
-    the flag is stashed on ``ctx`` (fresh per invocation) rather than on
-    ``self`` (the module-level ``app`` singleton, reused across every
-    ``CliRunner`` call in the test suite).
-    """
-
-    def parse_args(self, ctx: Any, args: list[str]) -> list[str]:
-        ctx._condensed_help_show_all = "--all" in args
-        return super().parse_args(ctx, args)
-
-    def format_help(self, ctx: Any, formatter: Any) -> None:
-        if getattr(ctx, "_condensed_help_show_all", False):
-            super().format_help(ctx, formatter)
-            return
-        _render_condensed_help(self, ctx)
 
 
 app = typer.Typer(

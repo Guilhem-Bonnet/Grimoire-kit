@@ -12,7 +12,8 @@ from __future__ import annotations
 
 from typer.testing import CliRunner
 
-from grimoire.cli.app import _FIRST_HOUR_COMMANDS, app
+from grimoire.cli._condensed_help import _FIRST_HOUR_COMMANDS
+from grimoire.cli.app import app
 
 runner = CliRunner()
 
