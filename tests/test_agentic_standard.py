@@ -1076,6 +1076,60 @@ def test_cli_gate_exits_nonzero_on_an_unknown_task(tmp_path: Path) -> None:
     assert json.loads(result.output)["ok"] is False
 
 
+def test_gate_check_surfaces_an_unproven_passed_criterion_without_failing(tmp_path: Path) -> None:
+    """Issue #582 lot B : `gate check`, pas seulement `verify`, voit le même signal.
+
+    Le hook SessionStart mandate `gate check --strict`, jamais `verify` ; un
+    agent qui ne lance jamais `verify` de lui-même ne voyait donc jusqu'à ce
+    lot aucun des constats d'acceptance. Transition douce : le nouveau
+    constat est un avertissement, `result.ok` reste vrai.
+    """
+    setup_standard_profile(tmp_path, profile_id="governed", provider_ids=("github-copilot",))
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "demo"\n', encoding="utf-8")
+    build_context_bundle(tmp_path)
+    build_decision_trace(tmp_path)
+    record = tmp_path / "_grimoire-output/evidence/bootstrap/acceptance-record.md"
+    record.write_text(
+        record.read_text(encoding="utf-8").replace(
+            "| AC-001 |  |  | à vérifier |", "| AC-001 | Les tests passent | pytest -q | passé |"
+        ),
+        encoding="utf-8",
+    )
+
+    result = check_evidence_gates(tmp_path, task_id="bootstrap", target_state="accepted")
+
+    assert any(check.id == "acceptance.passed_without_test_run" for check in result.checks)
+    assert result.ok, result.checks
+
+
+def test_cli_gate_run_tests_records_a_real_run(tmp_path: Path) -> None:
+    runner = CliRunner()
+    runner.invoke(app, ["standard", "init", str(tmp_path), "--profile", "starter"])
+    (tmp_path / "project-context.yaml").write_text(
+        'project:\n  name: demo\nneeds:\n  commands:\n    test-runner: "true"\n', encoding="utf-8"
+    )
+
+    result = runner.invoke(app, ["-o", "json", "standard", "gate", "run-tests", str(tmp_path)])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["ok"] is True
+    assert payload["command"] == "true"
+    assert (tmp_path / "_grimoire-output/evidence/bootstrap/test-run.json").is_file()
+
+
+def test_cli_gate_run_tests_reports_no_known_command(tmp_path: Path) -> None:
+    runner = CliRunner()
+    runner.invoke(app, ["standard", "init", str(tmp_path), "--profile", "starter"])
+
+    result = runner.invoke(app, ["-o", "json", "standard", "gate", "run-tests", str(tmp_path)])
+
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["ok"] is False
+    assert payload["command"] == ""
+
+
 # ── P0.3 : chaque check émis déclare sa dimension ────────────────────────────
 
 

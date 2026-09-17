@@ -7,9 +7,11 @@ StandardVerificationResult via _add_check. Les identifiants qu'elles
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
+from grimoire.core.execution_needs import resolve_need
 from grimoire.core.standard_checks.base import (
     StandardProfile,
     StandardVerificationResult,
@@ -920,6 +922,104 @@ def _cells(line: str) -> list[str]:
     return [cell.strip() for cell in line.strip().strip("|").split("|")]
 
 
+def acceptance_test_run_relpath(task_id: str) -> Path:
+    """Où :func:`grimoire.core.agentic_standard.record_acceptance_test_run` écrit son verdict.
+
+    Chemin partagé entre l'écrivain (exécution réelle, issue #582 lot B) et le
+    lecteur ci-dessous (:func:`_load_recorded_test_run`) : un seul endroit qui
+    connaisse la convention de nommage, jamais deux qui pourraient diverger.
+    """
+    return EVIDENCE_DIR / task_id / "test-run.json"
+
+
+def _load_recorded_test_run(root: Path, task_id: str) -> dict[str, Any] | None:
+    """Le dernier run de test réellement exécuté et enregistré pour *task_id* (issue #582 lot B).
+
+    Écrit uniquement par ``record_acceptance_test_run`` (jamais par un agent à
+    la main) : un fichier absent ou JSON malformé compte comme « aucun run » —
+    un garde qui échoue ouvert ici accepterait une preuve forgée en texte
+    libre, exactement ce que ce lot corrige.
+    """
+    path = root / acceptance_test_run_relpath(task_id)
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _verify_acceptance_test_execution(
+    root: Path, task_id: str, passed_ids: list[str], result: StandardVerificationResult, rel_path: Path
+) -> None:
+    """AG-QUA-003, suite (issue #582 lot B) : un critère « passé » doit correspondre à un run réel.
+
+    Avant ce lot, une ligne ``| AC-001 | … | passé |`` suffisait, texte libre
+    jamais confronté à l'exécution (voir
+    ``docs/bench/diagnostic-surcout-kit-2026-09-17.md`` §2) — le mécanisme
+    d'acceptance exécutée existe déjà ailleurs dans le kit
+    (:class:`grimoire.flows.schemas.AcceptanceEvidence`, issue #428), réutilisé
+    ici via :func:`grimoire.core.agentic_standard.record_acceptance_test_run`
+    plutôt que dupliqué.
+
+    Transition douce, documentée dans ``docs/standard/integration.md``
+    (section « Acceptance reliée à une exécution réelle »)
+    et le CHANGELOG : cette release répond en avertissement (``"warning"``),
+    quel que soit le profil ; une prochaine release promouvra ce même
+    identifiant en erreur pour les profils gouvernés. Un projet sans commande
+    de test connue (``resolve_need("test-runner", …)`` non résolu) reste
+    déclaratif comme avant ce lot — ``acceptance.no_test_command_detected``
+    le signale sans rien bloquer de plus qu'avant.
+
+    Un run vert n'est pas non plus une preuve permanente : un agent peut
+    lancer ``gate run-tests`` tôt puis modifier le code sans jamais
+    relancer les tests, et un run périmé validerait alors du code jamais
+    exercé — exactement le trou que ``tree_fingerprint`` (:mod:`grimoire.
+    core.standard_checks.tree_fingerprint`) ferme. L'empreinte est
+    recalculée ici et comparée à celle enregistrée par le run ; une absence
+    d'empreinte (ancien format, ou fichier altéré à la main) compte comme
+    périmée — garde fermée, jamais l'inverse.
+    """
+    test_need = resolve_need("test-runner", root)
+    if not test_need.resolved or test_need.command is None:
+        _add_check(
+            result,
+            "acceptance.no_test_command_detected",
+            "warning",
+            "Acceptance restée déclarative : aucune commande de test connue pour ce projet "
+            "(déclarez needs.commands.test-runner dans project-context.yaml, ou installez un "
+            "marqueur reconnu : pyproject.toml, package.json, Cargo.toml, go.mod).",
+            path=rel_path,
+        )
+        return
+    run = _load_recorded_test_run(root, task_id)
+    if run is not None and run.get("ok") is True:
+        from grimoire.core.standard_checks.tree_fingerprint import compute_tree_fingerprint
+
+        stored_fingerprint = run.get("tree_fingerprint")
+        if stored_fingerprint and stored_fingerprint == compute_tree_fingerprint(root):
+            return
+        _add_check(
+            result,
+            "acceptance.test_run_stale",
+            "warning",
+            "run antérieur aux dernières modifications, relancez `gate run-tests`",
+            path=rel_path,
+        )
+        return
+    ids = ", ".join(passed_ids)
+    _add_check(
+        result,
+        "acceptance.passed_without_test_run",
+        "warning",
+        f"{ids} marqué(s) « passé » sans run de test réel enregistré pour cette tâche "
+        f"(commande connue : {test_need.command!r}). Exécutez "
+        f"`grimoire standard gate run-tests --task-id {task_id}` avant de conclure.",
+        path=rel_path,
+    )
+
+
 def _verify_acceptance_record(
     root: Path, profile: StandardProfile, task_id: str, result: StandardVerificationResult
 ) -> None:
@@ -934,6 +1034,7 @@ def _verify_acceptance_record(
     if not rows:
         _add_check(result, "acceptance.empty", "warning", "Acceptance record still holds only the template criterion.", path=rel_path)
     failed = False
+    passed_ids: list[str] = []
     for line in rows:
         cells = _cells(line)
         if len(cells) < 4:
@@ -945,7 +1046,11 @@ def _verify_acceptance_record(
                 result, "acceptance.passed_without_evidence", "error",
                 f"{criterion_id} is marked passé with no proof.", path=rel_path,
             )
+        if status == "passé":
+            passed_ids.append(criterion_id)
         failed = failed or status == "échoué"
+    if passed_ids:
+        _verify_acceptance_test_execution(root, task_id, passed_ids, result, rel_path)
     decisions = [
         _cells(line) for line in text.splitlines()
         if line.startswith("| ") and _cells(line)[0] in {"accepté", "refusé", "ajustement demandé", "en attente"}

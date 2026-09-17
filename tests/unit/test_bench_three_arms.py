@@ -600,8 +600,17 @@ def test_main_full_stops_cleanly_and_writes_a_partial_report_on_low_disk(
 
     written: dict[str, Any] = {}
 
-    def _fake_write_report(records: Any, out_dir: Path, *, total_tasks: int, expected_cost: Any, seed: int) -> None:
-        del total_tasks, expected_cost, seed
+    def _fake_write_report(
+        records: Any,
+        out_dir: Path,
+        *,
+        total_tasks: int,
+        expected_cost: Any,
+        seed: int,
+        rerun_arms: Any = None,
+        label: Any = None,
+    ) -> None:
+        del total_tasks, expected_cost, seed, rerun_arms, label
         written["records"] = list(records)
         written["out_dir"] = out_dir
 
@@ -612,3 +621,194 @@ def test_main_full_stops_cleanly_and_writes_a_partial_report_on_low_disk(
     assert rc == 0
     assert written, "un rapport (même vide) doit être écrit à l'arrêt disque"
     assert written["records"] == []
+
+
+# ── 9. ``--arms`` (lot E, #582) : filtre et repli ──────────────────────────
+
+
+def test_parse_arms_default_is_all_three_arms() -> None:
+    assert ta.parse_arms(None) == ta.ARMS
+
+
+def test_parse_arms_empty_or_blank_string_falls_back_to_all_three() -> None:
+    assert ta.parse_arms("") == ta.ARMS
+    assert ta.parse_arms("   ") == ta.ARMS
+
+
+def test_parse_arms_single_arm() -> None:
+    assert ta.parse_arms("kit") == ("kit",)
+
+
+def test_parse_arms_is_order_independent_and_canonical() -> None:
+    assert ta.parse_arms("kit,nu") == ta.parse_arms("nu,kit") == ("nu", "kit")
+
+
+def test_parse_arms_tolerates_whitespace_and_duplicates() -> None:
+    assert ta.parse_arms(" nu , nu ,kit ") == ("nu", "kit")
+
+
+def test_parse_arms_rejects_unknown_arm() -> None:
+    with pytest.raises(ValueError, match="bras inconnu"):
+        ta.parse_arms("kit,rust")
+
+
+def test_main_rejects_unknown_arm_via_argparse_error(tmp_path: Path) -> None:
+    with pytest.raises(SystemExit):
+        ta.main(["--dry-run", "--workspace", str(tmp_path), "--arms", "kit,rust"])
+
+
+# ── 10. Preuve d'exécution des tests réels du bras kit (lot B/E, #582) ─────
+
+
+def test_has_test_run_evidence_true_when_test_run_json_present(tmp_path: Path) -> None:
+    evidence_dir = tmp_path / "_grimoire-output" / "evidence" / "bootstrap"
+    evidence_dir.mkdir(parents=True)
+    (evidence_dir / "test-run.json").write_text("{}", encoding="utf-8")
+    assert ta.has_test_run_evidence(tmp_path) is True
+
+
+def test_has_test_run_evidence_false_when_evidence_dir_absent(tmp_path: Path) -> None:
+    assert ta.has_test_run_evidence(tmp_path) is False
+
+
+def test_has_test_run_evidence_false_when_dir_present_but_no_test_run_json(tmp_path: Path) -> None:
+    (tmp_path / "_grimoire-output" / "evidence" / "bootstrap").mkdir(parents=True)
+    assert ta.has_test_run_evidence(tmp_path) is False
+
+
+def test_has_test_run_evidence_finds_it_under_any_task_id(tmp_path: Path) -> None:
+    # L'agent choisit son propre ``--task-id`` (défaut "bootstrap", ou autre) :
+    # la détection ne doit pas dépendre d'un identifiant figé.
+    evidence_dir = tmp_path / "_grimoire-output" / "evidence" / "une-tache-quelconque"
+    evidence_dir.mkdir(parents=True)
+    (evidence_dir / "test-run.json").write_text("{}", encoding="utf-8")
+    assert ta.has_test_run_evidence(tmp_path) is True
+
+
+# ── 11. Repli « bras repris » du rapport (lot E, #582) ──────────────────────
+
+
+def test_carried_over_label_uses_earliest_recorded_at() -> None:
+    records = [
+        ta.RunRecord("python/a", "python", "nu", 0, True, 0.1, 10, 10, 1, 5.0, "completed", recorded_at="2026-09-17T06:00:00+00:00"),
+        ta.RunRecord("python/b", "python", "nu", 0, True, 0.1, 10, 10, 1, 5.0, "completed", recorded_at="2026-09-16T06:00:00+00:00"),
+    ]
+    assert ta.carried_over_label(records, "nu") == "2026-09-16"
+
+
+def test_carried_over_label_falls_back_when_recorded_at_is_missing() -> None:
+    records = [ta.RunRecord("python/a", "python", "nu", 0, True, 0.1, 10, 10, 1, 5.0, "completed")]
+    assert "date inconnue" in ta.carried_over_label(records, "nu")
+
+
+def test_build_report_notes_arms_not_rerun_this_execution() -> None:
+    records = [
+        ta.RunRecord("python/a", "python", "nu", 0, True, 0.1, 10, 10, 1, 5.0, "completed", recorded_at="2026-09-17T06:00:00+00:00"),
+        ta.RunRecord("python/a", "python", "kit", 0, True, 0.1, 10, 10, 1, 5.0, "completed", recorded_at="2026-09-18T06:00:00+00:00"),
+    ]
+    report = ta.build_report(records, total_tasks=1, expected_cost=None, seed=0, rerun_arms=("kit",), label="lot E")
+    assert report["label"] == "lot E"
+    assert report["carried_over_notes"] == {"nu": "2026-09-17"}
+    rendered = ta.render_report_markdown(report)
+    assert "repris de la campagne du 2026-09-17" in rendered
+    assert "lot E" in rendered
+
+
+def test_build_report_has_no_carried_over_notes_when_rerun_arms_is_none() -> None:
+    records = [ta.RunRecord("python/a", "python", "nu", 0, True, 0.1, 10, 10, 1, 5.0, "completed")]
+    report = ta.build_report(records, total_tasks=1, expected_cost=None, seed=0)
+    assert report["carried_over_notes"] == {}
+
+
+def test_build_report_kit_runs_detail_includes_turns_cost_time_and_evidence() -> None:
+    records = [
+        ta.RunRecord(
+            "go/palindrome-products",
+            "go",
+            "kit",
+            0,
+            True,
+            0.42,
+            10,
+            10,
+            7,
+            123.0,
+            "completed",
+            kit_test_run_evidence=True,
+        ),
+    ]
+    report = ta.build_report(records, total_tasks=1, expected_cost=None, seed=0, rerun_arms=("kit",))
+    assert report["kit_runs"] == [
+        {
+            "task_id": "go/palindrome-products",
+            "run_index": 0,
+            "num_turns": 7,
+            "total_cost_usd": 0.42,
+            "wall_seconds": 123.0,
+            "test_run_evidence": True,
+        }
+    ]
+    rendered = ta.render_report_markdown(report)
+    assert "Détail par run — bras kit" in rendered
+    assert "go/palindrome-products" in rendered
+
+
+def test_main_full_only_replays_the_selected_arms(
+    synthetic_bench_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``--arms kit`` ne doit jamais appeler ``_run_one`` pour nu/ecc, et les
+    lignes déjà présentes dans ``results.jsonl`` pour ces bras doivent quand
+    même être comptées dans le rapport final (compatibilité ``--resume``)."""
+    workspace = tmp_path / "workspace"
+    state_dir = workspace / "state"
+    state_dir.mkdir(parents=True)
+
+    monkeypatch.setattr(ta, "ensure_polyglot_benchmark", lambda ws: synthetic_bench_root)
+    monkeypatch.setattr(ta, "ensure_ecc_repo", lambda ws: (tmp_path / "ecc-repo", "deadbeef"))
+    monkeypatch.setattr(ta, "ensure_go_toolchain", lambda ws: None)
+    monkeypatch.setattr(ta, "ensure_isolated_home", lambda home: None)
+
+    catalog = ta.discover_catalog(synthetic_bench_root)
+    tasks = ta.sample_tasks(catalog, seed=551)
+    (state_dir / "selection.json").write_text(
+        json.dumps({"seed": 551, "ecc_commit": "deadbeef", "tasks": [t.to_dict() for t in tasks]}),
+        encoding="utf-8",
+    )
+
+    carried_over_lines = []
+    for task in tasks:
+        for arm in ("nu", "ecc"):
+            for run_index in range(ta.K_REPLAY):
+                record = ta.RunRecord(
+                    task.task_id, task.language, arm, run_index, True, 0.1, 10, 10, 2, 5.0, "completed",
+                    recorded_at="2026-09-17T06:00:00+00:00",
+                )
+                carried_over_lines.append(json.dumps(record.to_dict()))
+    (state_dir / "results.jsonl").write_text("\n".join(carried_over_lines) + "\n", encoding="utf-8")
+
+    called_arms: list[str] = []
+
+    def _fake_run_one(task: Any, arm: str, run_index: int, **kwargs: Any) -> Any:
+        del kwargs
+        called_arms.append(arm)
+        return ta.RunRecord(task.task_id, task.language, arm, run_index, True, 0.05, 5, 5, 1, 2.0, "completed")
+
+    monkeypatch.setattr(ta, "_run_one", _fake_run_one)
+
+    written: dict[str, Any] = {}
+
+    def _fake_write_report(records: Any, out_dir: Path, **kwargs: Any) -> None:
+        written["records"] = list(records)
+        written["kwargs"] = kwargs
+
+    monkeypatch.setattr(ta, "write_report", _fake_write_report)
+
+    rc = ta.main(["--full", "--resume", "--arms", "kit", "--label", "lot E", "--workspace", str(workspace)])
+
+    assert rc == 0
+    assert called_arms and set(called_arms) == {"kit"}
+    # Les 20*3 lignes nu/ecc reprises + les nouvelles lignes kit doivent
+    # toutes se retrouver dans le rapport final.
+    assert len(written["records"]) == len(carried_over_lines) + len(called_arms)
+    assert written["kwargs"]["rerun_arms"] == ("kit",)
+    assert written["kwargs"]["label"] == "lot E"

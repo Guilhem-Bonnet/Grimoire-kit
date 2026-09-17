@@ -50,6 +50,7 @@ from grimoire.core.standard_checks.base import (
     _yaml as _yaml,
 )
 from grimoire.core.standard_checks.controls import (
+    _verify_acceptance_record,
     _verify_k8s_agent_manifest,
     _verify_score_and_exceptions,
 )
@@ -1572,6 +1573,15 @@ def check_evidence_gates(
         for key in ("evidence_pack", "decision_trace"):
             if not (root / required_paths[key]).is_file():
                 missing.append(key)
+        # Issue #582 lot B : le même signal que `standard verify` — une ligne
+        # « passé » sans run de test réel enregistré — doit aussi apparaître
+        # ici, sur le chemin que le hook SessionStart mandate réellement
+        # (`gate check --strict`), pas seulement sur `verify` qu'un agent peut
+        # ne jamais appeler. Réutilise `_verify_acceptance_record` telle
+        # quelle plutôt que de dupliquer sa lecture de l'acceptance record.
+        acceptance_result = StandardVerificationResult(profile=profile.id, project_root=root)
+        _verify_acceptance_record(root, profile, normalized_task_id, acceptance_result)
+        checks.extend(acceptance_result.checks)
     if state == "released" and not (root / required_paths["compliance_score"]).is_file():
         missing.append("compliance_score")
     for key in missing:

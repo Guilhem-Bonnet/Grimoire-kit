@@ -31,6 +31,11 @@ ACTIVATION_CONTEXT_RELPATH = Path(".claude") / "activation-context.md"
 SETTINGS_RELPATH = Path(".claude") / "settings.json"
 HOOK_COMMAND = "grimoire standard activation-context"
 
+#: Étape 3 mentionne ``gate run-tests`` avant ``gate check`` depuis l'issue
+#: #582 lot B (revue de la PR #585) : sans ce run, un critère « passé »
+#: reste une déclaration de texte libre que ``gate check``/``verify``
+#: signalent désormais en avertissement (``acceptance.passed_without_test_run``) —
+#: ajouté en une ligne, sans allonger le reste de la directive.
 _DIRECTIVE_TEMPLATE = """[Grimoire Standard — activation]
 Ce projet est gouverné par le standard agentique Grimoire. Ces étapes font
 partie de la tâche demandée :
@@ -42,6 +47,7 @@ partie de la tâche demandée :
    `_grimoire-output/evidence/{task_id}/evidence-pack.md`, et remplace le
    résumé placeholder.
 3. AVANT de conclure : exécute
+   `grimoire standard gate run-tests --task-id {task_id}` puis
    `grimoire standard gate check --task-id {task_id} --strict` puis
    `grimoire standard verify .` et corrige tout échec.
 Une clôture sans gates verts est une tâche non terminée.
