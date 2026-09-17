@@ -26,7 +26,16 @@ jobs:
       - uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
-          queries: security-and-quality
+          # `security-and-quality` (avant 2026-09-16) ajoute ~250 requêtes de
+          # style/qualité (imports inutilisés, except vide, retours mixtes…)
+          # déjà couvertes par le gate ruff/mypy de la CI — elles noyaient les
+          # ~150 alertes de sécurité réelles sous le bruit, au point que plus
+          # personne ne lisait le check CodeQL (épic #552). `security-extended`
+          # garde toutes les requêtes de sécurité (py/path-injection,
+          # py/log-injection, py/tarslip, py/command-line-injection…) sans la
+          # partie qualité. Justification et inventaire complet du narrowing :
+          # docs/security/code-scanning-triage-2026-09.md.
+          queries: security-extended
 
       - uses: github/codeql-action/autobuild@v4
 
