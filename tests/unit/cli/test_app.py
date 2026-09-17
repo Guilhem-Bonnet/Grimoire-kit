@@ -323,7 +323,8 @@ class TestStatus:
         assert result.exit_code == 1
 
     def test_status_in_help(self) -> None:
-        result = runner.invoke(app, ["--help"])
+        # "status" lives behind --all since #552 (condensed first-hour --help).
+        result = runner.invoke(app, ["--help", "--all"])
         assert "status" in result.output
 
     def test_status_shows_version(self, project: Path) -> None:
@@ -417,7 +418,8 @@ class TestAddRemove:
         assert "temp" not in content_after_rm
 
     def test_add_in_help(self) -> None:
-        result = runner.invoke(app, ["--help"])
+        # "add"/"remove" live behind --all since #552 (condensed first-hour --help).
+        result = runner.invoke(app, ["--help", "--all"])
         assert "add" in result.output
         assert "remove" in result.output
 
@@ -449,7 +451,8 @@ class TestValidate:
         assert result.exit_code == 1
 
     def test_in_help(self) -> None:
-        result = runner.invoke(app, ["--help"])
+        # "validate" lives behind --all since #552 (condensed first-hour --help).
+        result = runner.invoke(app, ["--help", "--all"])
         assert "validate" in result.output
 
 
@@ -1506,7 +1509,8 @@ class TestCommandAliases:
             sys.argv = original
 
     def test_help_shows_aliases(self) -> None:
-        result = runner.invoke(app, ["--help"])
+        # The aliases footer lives in the full (--all) epilog since #552.
+        result = runner.invoke(app, ["--help", "--all"])
         assert "Aliases" in result.output or "aliases" in result.output.lower()
 
 
@@ -1859,7 +1863,8 @@ class TestEpilog:
     """Tests that the app epilog is displayed."""
 
     def test_help_shows_examples(self) -> None:
-        result = runner.invoke(app, ["--help"])
+        # The examples epilog lives in the full (--all) view since #552.
+        result = runner.invoke(app, ["--help", "--all"])
         assert result.exit_code == 0
         assert "grimoire init" in result.output or "Examples" in result.output
 
@@ -1970,29 +1975,32 @@ class TestUpgradeJson:
 class TestHelpPanels:
     """Tests that commands are organised into rich help panels."""
 
+    # The panelled listing lives behind --all since #552 (condensed first-hour
+    # --help by default) — these panels are unchanged, just no longer the default.
+
     def test_help_shows_project_panel(self) -> None:
-        result = runner.invoke(app, ["--help"])
+        result = runner.invoke(app, ["--help", "--all"])
         assert result.exit_code == 0
         assert "Project" in result.output
 
     def test_help_shows_validation_panel(self) -> None:
-        result = runner.invoke(app, ["--help"])
+        result = runner.invoke(app, ["--help", "--all"])
         assert "Validation" in result.output
 
     def test_help_shows_agents_panel(self) -> None:
-        result = runner.invoke(app, ["--help"])
+        result = runner.invoke(app, ["--help", "--all"])
         assert "Agents" in result.output
 
     def test_help_shows_configuration_panel(self) -> None:
-        result = runner.invoke(app, ["--help"])
+        result = runner.invoke(app, ["--help", "--all"])
         assert "Configuration" in result.output
 
     def test_help_shows_utilities_panel(self) -> None:
-        result = runner.invoke(app, ["--help"])
+        result = runner.invoke(app, ["--help", "--all"])
         assert "Utilities" in result.output
 
     def test_help_shows_info_panel(self) -> None:
-        result = runner.invoke(app, ["--help"])
+        result = runner.invoke(app, ["--help", "--all"])
         assert "Info" in result.output
 
 

@@ -80,6 +80,46 @@ def test_version_flag_does_not_leak_heavy_submodules() -> None:
     assert leaked_names == [], f"grimoire --version leaked: {leaked_names}"
 
 
+def test_help_flag_does_not_leak_heavy_submodules() -> None:
+    """`grimoire --help` (condensed, issue Grimoire-kit#552) must not import
+    any lazy sub-command module — that was the whole point of no longer
+    walking all 49+ commands to render their short help by default.
+    """
+    script = (
+        "import sys\n"
+        "sys.argv = ['grimoire', '--help']\n"
+        "from grimoire.cli.app import cli\n"
+        "try:\n"
+        "    cli()\n"
+        "except SystemExit:\n"
+        "    pass\n"
+        f"{_LEAK_PROBE}"
+    )
+    result = _run_script(script)
+    leaked_names = [m for m in _last_line(result.stdout).split(",") if m]
+    assert leaked_names == [], f"grimoire --help leaked: {leaked_names}"
+
+
+def test_help_all_flag_does_leak_heavy_submodules() -> None:
+    """Sanity check for the guard above: `--help --all` still walks every
+    command (unchanged full listing), so it *does* import them — proving the
+    condensed default above isn't just an accident of a broken registry.
+    """
+    script = (
+        "import sys\n"
+        "sys.argv = ['grimoire', '--help', '--all']\n"
+        "from grimoire.cli.app import cli\n"
+        "try:\n"
+        "    cli()\n"
+        "except SystemExit:\n"
+        "    pass\n"
+        f"{_LEAK_PROBE}"
+    )
+    result = _run_script(script)
+    leaked_names = [m for m in _last_line(result.stdout).split(",") if m]
+    assert leaked_names, "grimoire --help --all should still build every lazy command"
+
+
 def test_lazy_submodule_is_imported_on_first_use() -> None:
     """Sanity check for the guard itself: `grimoire flow --help` *does* import cmd_flow.
 
