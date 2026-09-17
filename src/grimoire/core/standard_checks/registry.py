@@ -85,6 +85,7 @@ CHECK_DIMENSIONS: dict[str, str] = {
     "acceptance.passed_without_evidence": "evidence_gates",
     "acceptance.passed_without_test_run": "evidence_gates",
     "acceptance.row_invalid": "evidence_gates",
+    "acceptance.test_run_stale": "evidence_gates",
     "incidents.containment_action_unknown": "evidence_gates",
     "incidents.containment_escalation_missing": "evidence_gates",
     "incidents.containment_missing": "evidence_gates",

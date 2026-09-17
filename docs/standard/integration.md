@@ -452,16 +452,31 @@ duplique pas d'exécuteur, réutilise `_run_checks`
 - une ligne `passé` sans run enregistré et vert, sur un projet à commande de
   test connue → `acceptance.passed_without_test_run` ;
 - un projet sans commande de test détectable → comportement inchangé
-  (déclaratif), signalé par `acceptance.no_test_command_detected`.
+  (déclaratif), signalé par `acceptance.no_test_command_detected` ;
+- un run enregistré et vert, mais dont l'empreinte de l'arbre de travail
+  diverge de celle recalculée à la vérification → `acceptance.test_run_stale`.
+
+Un run vert n'est pas une preuve permanente : `record_acceptance_test_run`
+calcule une empreinte de l'arbre de travail juste avant d'exécuter la
+commande (`grimoire.core.standard_checks.tree_fingerprint.
+compute_tree_fingerprint`) et l'enregistre dans `test-run.json`
+(`tree_fingerprint`). Dans un dépôt git : sha256 de `git rev-parse HEAD` +
+`git status --porcelain=v1 -z` + `git diff HEAD`, `_grimoire-output/` exclu
+des deux dernières commandes (ce dossier est écrit par le mécanisme lui-même
+— l'inclure invaliderait chaque run dès son écriture). Hors dépôt git : sha256
+de la liste triée `(chemin, taille, mtime_ns)` de tout fichier hors
+`_grimoire-output/`, `.venv/`, `node_modules/`, `target/`, `.git/`. Une
+empreinte absente (ancien format, fichier altéré à la main) compte comme
+périmée — garde fermée, jamais l'inverse.
 
 **Transition WARN → FAIL.** Cette release (celle qui introduit ce mécanisme)
-répond aux deux cas ci-dessus par un avertissement, quel que soit le profil —
+répond aux trois cas ci-dessus par un avertissement, quel que soit le profil —
 aucun projet gouverné existant ne se retrouve bloqué du jour au lendemain par
 un mécanisme qu'il ne connaissait pas encore. Une prochaine release
-promouvra `acceptance.passed_without_test_run` en erreur bloquante pour les
-profils `governed`/`production`, le temps que les projets déjà gouvernés
-adoptent `gate run-tests` (ou une intégration CI équivalente) dans leur
-boucle de clôture de tâche.
+promouvra `acceptance.passed_without_test_run` (et `acceptance.test_run_stale`)
+en erreur bloquante pour les profils `governed`/`production`, le temps que
+les projets déjà gouvernés adoptent `gate run-tests` (ou une intégration CI
+équivalente) dans leur boucle de clôture de tâche.
 
 ## Ce qui est maintenant prêt
 

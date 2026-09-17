@@ -138,6 +138,55 @@ def test_recording_a_real_red_test_run_keeps_the_warning(tmp_path: Path) -> None
     assert "acceptance.passed_without_test_run" in _ids(verify_standard_profile(tmp_path), "acceptance.", "warning")
 
 
+def test_modifying_a_source_file_after_a_green_run_makes_it_stale(tmp_path: Path) -> None:
+    """Issue #582 lot B, suite (revue de la PR #585) : un run vert n'est pas lié au code.
+
+    Rouge avant l'empreinte : un agent pouvait lancer `gate run-tests` tôt,
+    puis modifier le code sans jamais relancer les tests, et `verify` restait
+    vert indéfiniment sur du code jamais exercé par ce run.
+    """
+    setup_standard_profile(tmp_path, profile_id="starter", project_name="Demo")
+    (tmp_path / "project-context.yaml").write_text(
+        'project:\n  name: demo\nneeds:\n  commands:\n    test-runner: "true"\n', encoding="utf-8"
+    )
+    (tmp_path / "app.py").write_text("print('v1')\n", encoding="utf-8")
+    record = tmp_path / "_grimoire-output/evidence/bootstrap/acceptance-record.md"
+    _replace(record, "| AC-001 |  |  | à vérifier |", "| AC-001 | Les tests passent | true | passé |")
+
+    outcome = record_acceptance_test_run(tmp_path)
+    assert outcome.ok is True
+    assert "acceptance.test_run_stale" not in _ids(verify_standard_profile(tmp_path), "acceptance.")
+
+    # Le code change après le run : le gate doit désormais le dire. Taille
+    # différente (pas seulement le contenu) pour ne jamais dépendre de la
+    # résolution de la mtime du système de fichiers qui exécute ce test.
+    (tmp_path / "app.py").write_text("print('v1')\nprint('v2')\n", encoding="utf-8")
+
+    result = verify_standard_profile(tmp_path)
+    assert "acceptance.test_run_stale" in _ids(result, "acceptance.", "warning")
+    assert "acceptance.passed_without_test_run" not in _ids(result, "acceptance.")
+    assert result.ok  # transition douce : avertissement, pas encore un blocage
+
+
+def test_modifying_only_grimoire_output_does_not_make_a_run_stale(tmp_path: Path) -> None:
+    """Le mécanisme écrit lui-même sous `_grimoire-output/` : il ne doit jamais s'auto-invalider."""
+    setup_standard_profile(tmp_path, profile_id="starter", project_name="Demo")
+    (tmp_path / "project-context.yaml").write_text(
+        'project:\n  name: demo\nneeds:\n  commands:\n    test-runner: "true"\n', encoding="utf-8"
+    )
+    record = tmp_path / "_grimoire-output/evidence/bootstrap/acceptance-record.md"
+    _replace(record, "| AC-001 |  |  | à vérifier |", "| AC-001 | Les tests passent | true | passé |")
+
+    outcome = record_acceptance_test_run(tmp_path)
+    assert outcome.ok is True
+
+    evidence_pack = tmp_path / "_grimoire-output/evidence/bootstrap/evidence-pack.md"
+    evidence_pack.write_text(evidence_pack.read_text(encoding="utf-8") + "\nnote ajoutée après le run\n", encoding="utf-8")
+
+    result = verify_standard_profile(tmp_path)
+    assert "acceptance.test_run_stale" not in _ids(result, "acceptance.")
+
+
 def test_accepting_without_a_validator_is_an_error(tmp_path: Path) -> None:
     setup_standard_profile(tmp_path, profile_id="starter", project_name="Demo")
     record = tmp_path / "_grimoire-output/evidence/bootstrap/acceptance-record.md"

@@ -971,6 +971,15 @@ def _verify_acceptance_test_execution(
     de test connue (``resolve_need("test-runner", …)`` non résolu) reste
     déclaratif comme avant ce lot — ``acceptance.no_test_command_detected``
     le signale sans rien bloquer de plus qu'avant.
+
+    Un run vert n'est pas non plus une preuve permanente : un agent peut
+    lancer ``gate run-tests`` tôt puis modifier le code sans jamais
+    relancer les tests, et un run périmé validerait alors du code jamais
+    exercé — exactement le trou que ``tree_fingerprint`` (:mod:`grimoire.
+    core.standard_checks.tree_fingerprint`) ferme. L'empreinte est
+    recalculée ici et comparée à celle enregistrée par le run ; une absence
+    d'empreinte (ancien format, ou fichier altéré à la main) compte comme
+    périmée — garde fermée, jamais l'inverse.
     """
     test_need = resolve_need("test-runner", root)
     if not test_need.resolved or test_need.command is None:
@@ -986,6 +995,18 @@ def _verify_acceptance_test_execution(
         return
     run = _load_recorded_test_run(root, task_id)
     if run is not None and run.get("ok") is True:
+        from grimoire.core.standard_checks.tree_fingerprint import compute_tree_fingerprint
+
+        stored_fingerprint = run.get("tree_fingerprint")
+        if stored_fingerprint and stored_fingerprint == compute_tree_fingerprint(root):
+            return
+        _add_check(
+            result,
+            "acceptance.test_run_stale",
+            "warning",
+            "run antérieur aux dernières modifications, relancez `gate run-tests`",
+            path=rel_path,
+        )
         return
     ids = ", ".join(passed_ids)
     _add_check(

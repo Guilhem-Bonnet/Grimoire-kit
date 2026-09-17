@@ -95,8 +95,15 @@ def record_acceptance_test_run(project_root: Path, *, task_id: str = "bootstrap"
     # que `cli.cmd_task` pour ce même symbole) ; `agentic_standard` est
     # importé ici pour éviter tout risque de cycle au chargement du module.
     from grimoire.core.agentic_standard import _append_runtime_event, _selected_profile
+    from grimoire.core.standard_checks.tree_fingerprint import compute_tree_fingerprint
     from grimoire.missions.dispatch import _run_checks
 
+    # Calculée AVANT d'exécuter la commande : ce run atteste l'arbre tel qu'il
+    # était à l'instant du lancement, pas après (une suite de tests écrit
+    # elle-même des artefacts non suivis — `.pytest_cache`, `.coverage` — qui
+    # auraient périmé le run dès sa propre écriture si l'empreinte était
+    # prise après coup).
+    tree_fingerprint = compute_tree_fingerprint(root)
     (check,) = _run_checks((need.command,), project_root=root)
     result_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -106,6 +113,7 @@ def record_acceptance_test_run(project_root: Path, *, task_id: str = "bootstrap"
         "exit_code": check.exit_code,
         "output_excerpt": check.output_excerpt,
         "recorded_at": datetime.now(UTC).isoformat(),
+        "tree_fingerprint": tree_fingerprint,
     }
     result_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     profile = _selected_profile(root, None)
