@@ -19,6 +19,7 @@ from rich.console import Console
 from rich.table import Table
 
 from grimoire.__version__ import __version__
+from grimoire.cli._condensed_help import _RootHelpGroup
 from grimoire.cli._lazy import LazyCommandSpec, LazyGroupSpec, LazyTyperGroup
 from grimoire.cli._shared import _AUDIT_FILENAME, _log_operation, _status_spinner
 from grimoire.core import layout
@@ -88,9 +89,11 @@ def _suggest_command() -> None:
         console.print("[dim]Run 'grimoire --help' for all commands.[/dim]")
         raise SystemExit(2)
 
+
+
 app = typer.Typer(
     name="grimoire",
-    cls=LazyTyperGroup,
+    cls=_RootHelpGroup,
     help="Grimoire Kit — Composable AI agent platform.",
     no_args_is_help=True,
     rich_markup_mode="rich",
@@ -149,6 +152,10 @@ def main(
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompts."),
     profile: bool = typer.Option(False, "--profile", help="Show per-phase timing breakdown."),
     debug: bool = typer.Option(False, "--debug", "-D", help="Enable debug mode (full tracebacks on error)."),
+    show_all: bool = typer.Option(
+        False, "--all", is_eager=True,
+        help="With --help: show every command instead of the first-hour five.",
+    ),
 ) -> None:
     """Grimoire Kit — Composable AI agent platform."""
     ctx.ensure_object(dict)
@@ -170,6 +177,7 @@ def main(
 
     ctx.obj["output"] = output
     ctx.obj["quiet"] = quiet
+    ctx.obj["show_all_help"] = show_all
     ctx.obj["show_time"] = show_time
     ctx.obj["profile"] = profile
     ctx.obj["debug"] = debug

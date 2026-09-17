@@ -4,6 +4,25 @@
 
 > Ce guide vous accompagne de l'installation à votre premier projet Grimoire.
 
+## Les 5 commandes de la première heure
+
+Grimoire Kit expose plus de cinquante commandes (`grimoire --help --all`) —
+mais la première heure n'en demande que cinq :
+
+| Commande | À quoi elle sert |
+|----------|------------------|
+| `grimoire init` | Créer ou enrôler un projet — détection de stack, agents déployés |
+| `grimoire up` | Tout enchaîner en une commande — init, identité, standard, doctor |
+| `grimoire doctor` | Diagnostiquer la santé du projet — config, structure, agents |
+| `grimoire flow run` | Lancer et suivre un flow gouverné — le reçu de preuve d'une tâche |
+| `grimoire cockpit` | Ouvrir le tableau de bord — projets, activité, mises à jour |
+
+`grimoire --help` les affiche par défaut ; `grimoire --help --all` (ou
+`grimoire COMMAND --help`) donne accès à tout le reste — mémoire, standard,
+dispatch, hôtes, propositions, blueprints, tâches, outils… — sans qu'aucune
+commande ne soit renommée ni retirée. Référence complète :
+[`docs/cli-reference.md`](cli-reference.md).
+
 ## Prérequis
 
 - **Python 3.12+**
@@ -82,6 +101,17 @@ grimoire cockpit scan ~/dev --yes      # enrôle tous les projets Grimoire déte
 
 Les dépôts git non initialisés sont listés avec la suggestion `grimoire up <path>`.
 
+### Lancer un premier flow gouverné
+
+`grimoire flow run` conduit un blueprint node par node et consigne un reçu
+de preuve à chaque étape :
+
+```bash
+grimoire flow run                                    # liste les runs connus
+grimoire flow run mon-pipeline.blueprint.json         # démarre un run
+grimoire flow status <run-id>                         # où en est-il
+```
+
 ## Structure générée
 
 ```
@@ -103,28 +133,11 @@ mon-projet/
     └── copilot-instructions.md   # Instructions VS Code Copilot
 ```
 
-## Commandes CLI
+## Aller au-delà des 5 commandes
 
-| Commande | Description |
-|----------|-------------|
-| `grimoire up [path]` | Parcours complet : init + setup + standard + doctor (idempotent) |
-| `grimoire init <path>` | Initialiser un projet (scaffold seul) |
-| `grimoire setup` | Synchroniser la config utilisateur |
-| `grimoire setup --check` | Auditer la synchronisation (CI-friendly) |
-| `grimoire doctor [--fix]` | Vérifier la santé du projet et de l'environnement ; `--fix` régénère wrappers et `.mcp.json` manquants |
-| `grimoire cockpit scan <racine>` | Détecter et enrôler les projets existants |
-| `grimoire blueprint <cmd>` | Blueprints : `new`, `validate`, `compile` |
-| `grimoire status` | Afficher l'état du projet |
-| `grimoire add <agent>` | Ajouter un agent |
-| `grimoire remove <agent>` | Retirer un agent |
-| `grimoire validate` | Valider `project-context.yaml` |
-| `grimoire check` | Lint + validate + doctor en une passe |
-| `grimoire standard <cmd>` | Standard agentique gouverné (`needs`, `init`, `verify`, `audit`, `score`, `gate`) |
-| `grimoire merge <source>` | Fusionner des fichiers Grimoire |
-| `grimoire merge --undo` | Annuler le dernier merge |
-| `grimoire upgrade` | Migrer un projet v2 → v3 |
-| `grimoire registry list` | Lister les agents disponibles |
-| `grimoire registry search <q>` | Chercher un agent |
+Un aperçu de ce qui vit derrière `grimoire --help --all` — `setup`, `status`,
+`validate`, `check`, `standard`, `merge`, `upgrade`, `registry`… — plus le
+détail des options de chacune : [`docs/cli-reference.md`](cli-reference.md).
 
 ## Configurer votre identité
 
