@@ -25,7 +25,6 @@ _V0_RUN = {"run": "true"}
 _V1 = "revue humaine avant fusion"
 _V2 = "le code est propre"
 
-_NODE_RE = r"Tâche \S+-(\w+) :"
 _RESULT_RE = r"Écris ta sortie dans le fichier (\S+)"
 _PIN_RE = r"^  - (\S+) : (\S+)$"
 

@@ -375,3 +375,28 @@ def test_build_report_and_markdown_smoke() -> None:
     md = ta.render_report_markdown(report)
     assert "Par bras" in md
     assert "python/a" in md
+
+
+def test_extract_go_archive_rejects_a_path_traversal_member(tmp_path: Path) -> None:
+    """Régression CodeQL py/tarslip : ``tarfile.extractall`` sans ``filter``
+    fait confiance aveuglément aux membres de l'archive. Même une archive
+    « officielle » pinnée peut, en cas de compromission de la source ou de
+    MITM, contenir un membre ``../`` — le filtre ``data`` doit le refuser
+    plutôt que de l'écrire hors de la destination."""
+    import tarfile
+
+    archive = tmp_path / "evil.tar.gz"
+    escapee = tmp_path / "evil-payload.txt"
+    with tarfile.open(archive, "w:gz") as tar:
+        info = tarfile.TarInfo(name="../evil-payload.txt")
+        payload = b"pwned"
+        info.size = len(payload)
+        import io
+
+        tar.addfile(info, io.BytesIO(payload))
+
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    with pytest.raises(tarfile.FilterError):
+        ta._extract_go_archive(archive, dest)
+    assert not escapee.exists()
