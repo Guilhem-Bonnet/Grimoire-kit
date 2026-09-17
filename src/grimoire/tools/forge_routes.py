@@ -86,8 +86,8 @@ class ReadableForgeAPI(Protocol):
     def memory_link_view(self, *, probe: bool = False) -> dict[str, Any]:
         """Lien projet ↔ backend mémoire. ``probe`` force une sonde fraîche."""
 
-    def health_view(self) -> dict[str, Any]:
-        """Alignement kit, flows et activité réelle du projet."""
+    def health_view(self, *, probe: bool = False) -> dict[str, Any]:
+        """Alignement kit, flows et activité réelle du projet. ``probe`` force un recalcul frais."""
 
 
 def api_get(api: ReadableForgeAPI, path: str, query: dict[str, list[str]]) -> Any:
@@ -129,7 +129,8 @@ def api_get(api: ReadableForgeAPI, path: str, query: dict[str, list[str]]) -> An
         probe = query.get("probe", ["0"])[0] not in ("", "0", "false")
         return api.memory_link_view(probe=probe)
     if path == "/api/health":
-        return api.health_view()
+        probe = query.get("probe", ["0"])[0] not in ("", "0", "false")
+        return api.health_view(probe=probe)
     if path == "/api/fleet":
         # Registre global (toute la machine), pas le projet servi — sensé
         # pour les deux hôtes qui partagent cette table (même lecture qu'ils

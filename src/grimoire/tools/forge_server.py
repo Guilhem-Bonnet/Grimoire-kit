@@ -322,9 +322,27 @@ class ForgeAPI:
         """
         return memory_link_status(self.project_root, probe=probe)
 
-    def health_view(self) -> dict[str, Any]:
-        """Alignement kit, flows et activité réelle — vue du portefeuille."""
-        return project_health(self.project_root)
+    def health_view(self, *, probe: bool = False) -> dict[str, Any]:
+        """Alignement kit, flows et activité réelle — vue du portefeuille.
+
+        Mis en cache (:mod:`grimoire.tools.view_cache`), keyé sur la
+        signature de mtimes de ``_grimoire/kit`` — mesuré à ~120ms par appel
+        avant ce cache (:func:`grimoire.tools.project_health.kit_alignment`
+        recalcule un digest sha256 par fichier shipé à chaque lecture, sans
+        qu'aucun n'ait changé entre deux clics rapprochés du cockpit ; c'est
+        l'essentiel du coût de cette vue — ``flows``/``activity`` restent
+        marginaux en comparaison). ``probe=True`` (``?probe=1``) force un
+        recalcul frais, même contrat que :meth:`memory_link_view`.
+        """
+        from grimoire.core import layout
+        from grimoire.tools import view_cache
+
+        root = self.project_root.resolve()
+        key = f"health_view:{root}"
+        if probe:
+            view_cache.invalidate(key)
+        signature = view_cache.path_signature([layout.kit_dir(root)])
+        return view_cache.cached(key, signature, lambda: project_health(root))
 
     def project_update(
         self, *, dry_run: bool = True, slug: str = "", path: str = ""

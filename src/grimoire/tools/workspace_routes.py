@@ -135,6 +135,10 @@ def _proposals(project_root: Path, _query: _Query) -> Any:
     return workspace_api.proposals_view(project_root)
 
 
+def _sheet(project_root: Path, _query: _Query) -> Any:
+    return workspace_api.sheet_view(project_root)
+
+
 def _flow_runs(project_root: Path, query: _Query) -> Any:
     """``GET /api/workspace/flows/runs`` — les runs de flow connus (#506).
 
@@ -160,8 +164,9 @@ def _commands(_project_root: Path, _query: _Query) -> Any:
     return {"commands": workspace_exec.catalogue(), "count": len(workspace_exec.ALLOWED)}
 
 
-def _doctor(project_root: Path, _query: _Query) -> Any:
-    return workspace_exec.doctor_view(project_root)
+def _doctor(project_root: Path, query: _Query) -> Any:
+    probe = _one(query, "probe") not in (None, "", "0", "false")
+    return workspace_exec.doctor_view(project_root, probe=probe)
 
 
 def _memory_overview(project_root: Path, query: _Query) -> Any:
@@ -244,6 +249,7 @@ GET_ROUTES: dict[str, _GetHandler] = {
     f"{PREFIX}blueprints": _blueprints,
     f"{PREFIX}agents": _agents,
     f"{PREFIX}proposals": _proposals,
+    f"{PREFIX}sheet": _sheet,
     f"{PREFIX}evidence": _evidence,
     f"{PREFIX}flows/runs": _flow_runs,
     f"{PREFIX}memory/overview": _memory_overview,
