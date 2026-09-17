@@ -149,7 +149,21 @@ def test_default_directive_matches_preregistered_mechanism() -> None:
     for anchor in (
         "task-envelope.md",
         "evidence-pack.md",
+        "grimoire standard gate run-tests --task-id bootstrap",
         "grimoire standard gate check --task-id bootstrap --strict",
         "grimoire standard verify .",
     ):
         assert anchor in directive
+
+
+def test_gate_run_tests_precedes_gate_check_in_the_directive() -> None:
+    """Issue #582 lot B (revue de la PR #585) : un critère « passé » sans run réel
+
+    est désormais signalé par ``gate check``/``verify`` eux-mêmes — la directive
+    doit donc mandater ``gate run-tests`` avant, pas seulement le mentionner
+    quelque part dans le texte.
+    """
+    directive = default_activation_directive()
+    assert directive.index("gate run-tests --task-id bootstrap") < directive.index(
+        "gate check --task-id bootstrap --strict"
+    )
