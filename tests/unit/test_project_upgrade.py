@@ -10,9 +10,11 @@ memory fiches are then grafted onto that real project, the same shape the
 
 from __future__ import annotations
 
+import io
 import json
 import subprocess
 import sys
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -1066,6 +1068,65 @@ def test_upgrade_flow_run_end_to_end(tmp_path_factory: pytest.TempPathFactory) -
     # never a duplicate tarball, never a second identical proposal file.
     proc2 = _grimoire(["upgrade-flow", "run", "--project-root", ".", "--json"], root)
     assert proc2.returncode == 0, proc2.stderr
+
+
+def test_upgrade_flow_run_verifies_against_a_suffixed_manifest_when_backup_is_pushed_to_dash_2(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    """Real repro, 2026-09-17 (homelab, kit 3.55.0), via the cockpit's
+    `POST /api/projects/update`: `_archive/<date>-pre-<version>/` already
+    held a hand-made `grimoire-state.tar.gz` (made before the flow ever
+    ran) when the `backup` node fired. `backup_project`'s never-overwrite
+    rule (see its docstring) then wrote `grimoire-state-2.tar.gz` and
+    `memory-manifest-sha256-2.txt` instead of the canonical, unsuffixed
+    names — exactly as documented.
+
+    `verify`, though, hardcoded the *unsuffixed* `memory-manifest-sha256.txt`
+    — a file `backup` never wrote this run — and refused with `manifeste
+    introuvable [...] le nœud backup a-t-il tourné ?` even though `backup`
+    (and `apply`) had both just succeeded. The whole run was left `failed`
+    with `apply` genuinely applied. This asserts the fixed-path guess never
+    resurfaces: `verify` must read the manifest `backup` actually wrote,
+    suffix included, and the run must reach the `destructive` checkpoint
+    like any other successful run."""
+    root = tmp_path_factory.mktemp("upgrade-suffixed") / "projet"
+    root.mkdir(parents=True)
+    created = _grimoire(["init", ".", "-y", "--name", "upgrade-suffixed"], root)
+    if not (root / "_grimoire" / "kit").is_dir():
+        pytest.skip(f"`grimoire init` indisponible ici : {created.stderr[-400:]}")
+
+    from grimoire.tools.project_upgrade import archive_root
+
+    # A hand-made snapshot, already sitting in today's archive dir, whose
+    # content can never match `backup`'s own digest of the live project —
+    # this is what pushes `backup`'s real output to the `-2` suffix.
+    archive = archive_root(root)
+    archive.mkdir(parents=True)
+    with tarfile.open(archive / "grimoire-state.tar.gz", "w:gz") as tar:
+        info = tarfile.TarInfo(name="hand-made.txt")
+        payload = b"snapshot faite a la main, avant le flow"
+        info.size = len(payload)
+        tar.addfile(info, io.BytesIO(payload))
+
+    proc = _grimoire(["upgrade-flow", "run", "--project-root", ".", "--json"], root)
+    assert proc.returncode == 0, proc.stderr
+    payload_json = json.loads(proc.stdout)
+    assert payload_json["ok"] is True, payload_json
+    assert payload_json["done"] == [
+        "backup", "preview", "orphans", "apply", "overrides", "memory", "needs-hosts", "verify",
+    ]
+    assert payload_json["stopped_at"] == "destructive"
+
+    # `backup`'s real output landed on the suffixed pair, the hand-made
+    # tarball untouched.
+    assert (archive / "grimoire-state.tar.gz").is_file()
+    assert (archive / "grimoire-state-2.tar.gz").is_file()
+    assert (archive / "memory-manifest-sha256-2.txt").is_file()
+    assert not (archive / "memory-manifest-sha256.txt").exists()
+
+    # The run's own `backup_path` is the real (suffixed) tarball `backup`
+    # wrote this run — never the hand-made one it never touched.
+    assert payload_json["backup_path"] == str(archive / "grimoire-state-2.tar.gz")
 
 
 def test_upgrade_flow_run_dry_run_stops_after_preview(tmp_path_factory: pytest.TempPathFactory) -> None:
