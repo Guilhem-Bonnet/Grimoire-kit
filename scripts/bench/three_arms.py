@@ -58,6 +58,7 @@ DEFAULT_TEST_TIMEOUT_S = 180
 DEFAULT_LOOP_REPEAT_THRESHOLD = 4  # même commande répétée N fois de suite
 DEFAULT_POLL_INTERVAL_S = 2.0
 MIN_TASKS_BEFORE_STOP_CHECK = 4  # pas de verdict avant un minimum de données
+DISK_GUARD_MIN_FREE_GB = 5.0  # sous ce seuil, arrêt propre plutôt qu'un run qui crashe
 
 # ── Modèles de données ───────────────────────────────────────────────────────
 
@@ -92,6 +93,8 @@ class RunOutcome:
     total_cost_usd: float = 0.0
     input_tokens: int = 0
     output_tokens: int = 0
+    cache_read_input_tokens: int = 0
+    cache_creation_input_tokens: int = 0
     num_turns: int = 0
     wall_seconds: float = 0.0
     terminated_reason: str = "completed"  # completed|timeout|loop|error
@@ -119,6 +122,12 @@ class RunRecord:
     wall_seconds: float
     terminated_reason: str
     dispatch_stats: dict[str, Any] | None = None
+    cache_read_input_tokens: int = 0
+    cache_creation_input_tokens: int = 0
+    # ``RunOutcome.model_usage`` était rempli mais jamais recopié ici avant
+    # #551/#552 lot A : ``results.jsonl`` perdait la répartition par modèle
+    # que le diagnostic du surcoût kit avait besoin de relire.
+    model_usage: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
@@ -703,6 +712,8 @@ def run_claude_headless(
         usage = result.get("usage") or {}
         outcome.input_tokens = int(usage.get("input_tokens") or 0)
         outcome.output_tokens = int(usage.get("output_tokens") or 0)
+        outcome.cache_read_input_tokens = int(usage.get("cache_read_input_tokens") or 0)
+        outcome.cache_creation_input_tokens = int(usage.get("cache_creation_input_tokens") or 0)
         outcome.num_turns = int(result.get("num_turns") or 0)
         outcome.model_usage = result.get("modelUsage") or {}
         if outcome.terminated_reason == "completed" and result.get("is_error"):
@@ -765,6 +776,38 @@ def run_hidden_tests(
         return (False, "timeout des tests")
     success = detect_success(result.returncode)
     return (success, (result.stdout[-2000:] + result.stderr[-2000:]))
+
+
+_BUILD_ARTIFACT_DIRS = ("target", "node_modules")
+
+
+def cleanup_build_artifacts(task_dir: Path) -> None:
+    """Delete Rust/Go ``target/`` and JS ``node_modules/`` left under *task_dir*.
+
+    Called after every single run, not just at the end of a campaign: over
+    20 tâches x 3 bras x k rejeux, the build artifacts of a Rust or JS
+    exercise add up fast enough to exhaust the workspace's disk mid-campaign
+    — exactly the failure :func:`disk_guard_ok` exists to catch before it
+    happens. Best-effort by construction: a tree partially torn down by a
+    killed subprocess must never turn a benign cleanup into a crashed run.
+    """
+    for dirname in _BUILD_ARTIFACT_DIRS:
+        for candidate in task_dir.rglob(dirname):
+            if candidate.is_dir():
+                shutil.rmtree(candidate, ignore_errors=True)
+
+
+def disk_guard_ok(workspace: Path, *, min_free_gb: float = DISK_GUARD_MIN_FREE_GB) -> bool:
+    """True while *workspace* still has enough free disk to launch another run.
+
+    Checked before every run in the main campaign loop (issue Grimoire-kit#551
+    #552, harnais lot A) — a campaign that fills the disk mid-run used to
+    crash a ``claude -p`` subprocess partway through instead of stopping
+    cleanly with whatever it had already measured.
+    """
+    usage = shutil.disk_usage(workspace)
+    free_gb = usage.free / (1024**3)
+    return free_gb >= min_free_gb
 
 
 # ── Rapport ──────────────────────────────────────────────────────────────
@@ -985,20 +1028,33 @@ def main(argv: Sequence[str] | None = None) -> int:
             d = json.loads(line)
             records.append(RunRecord(**d))
 
+    disk_exhausted = False
     with open(results_path, "a", encoding="utf-8") as results_f:
         for task in selected:
+            if disk_exhausted:
+                break
             order = select_run_order(ARMS, task_id=task.task_id, seed=args.seed)
             for arm in order:
+                if disk_exhausted:
+                    break
                 for run_index in range(k):
                     key = (task.task_id, arm, run_index)
                     if key in already_done:
                         continue
+                    if not disk_guard_ok(workspace):
+                        disk_exhausted = True
+                        print(
+                            f"[ALERTE DISQUE] moins de {DISK_GUARD_MIN_FREE_GB:.0f} Go libres sous "
+                            f"{workspace} — arrêt propre de la campagne, aucun nouveau run lancé.",
+                            file=sys.stderr,
+                        )
+                        break
                     record = _run_one(task, arm, run_index, workspace=workspace, ecc_repo=ecc_repo, homes=homes, go_bin=go_bin, run_timeout_s=args.run_timeout_s)
                     records.append(record)
                     results_f.write(json.dumps(record.to_dict()) + "\n")
                     results_f.flush()
 
-            if args.full:
+            if not disk_exhausted and args.full:
                 stop, reason = should_stop_early(records, total_tasks=len(tasks), seed=args.seed)
                 print(f"[stop-check] {reason}")
                 if stop:
@@ -1015,10 +1071,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif expected_cost_path.is_file():
         expected_cost = json.loads(expected_cost_path.read_text(encoding="utf-8"))
 
-    if args.full:
+    if args.full or disk_exhausted:
         report_dir = args.report_dir or (workspace / "reports" / datetime.now(tz=UTC).strftime("%Y-%m-%d"))
         write_report(records, report_dir, total_tasks=len(tasks), expected_cost=expected_cost, seed=args.seed)
-        print(f"[report] écrit sous {report_dir}")
+        if disk_exhausted:
+            print(f"[report] rapport PARTIEL (arrêt disque) écrit sous {report_dir}")
+        else:
+            print(f"[report] écrit sous {report_dir}")
         actual_total = sum(r.total_cost_usd for r in records)
         if expected_cost and should_alert_cost_overrun(expected_cost.get("total_expected_usd", 0.0), actual_total):
             print(
@@ -1114,6 +1173,12 @@ def _run_one(
     else:
         success, _ = run_hidden_tests(task, run_dir, hidden_dir, go_bin=go_bin)
 
+    # Après CHAQUE run, pas seulement en fin de campagne : voir
+    # ``cleanup_build_artifacts`` — un `target/`(Rust) ou `node_modules/`(JS)
+    # par run non nettoyé est ce qui remplit le disque en plein milieu d'une
+    # campagne de 180 runs.
+    cleanup_build_artifacts(run_dir)
+
     dispatch_stats = None
     if arm == "kit":
         dispatch_stats = _collect_dispatch_stats(run_dir, home)
@@ -1127,6 +1192,9 @@ def _run_one(
         total_cost_usd=outcome.total_cost_usd,
         input_tokens=outcome.input_tokens,
         output_tokens=outcome.output_tokens,
+        cache_read_input_tokens=outcome.cache_read_input_tokens,
+        cache_creation_input_tokens=outcome.cache_creation_input_tokens,
+        model_usage=outcome.model_usage or None,
         num_turns=outcome.num_turns,
         wall_seconds=outcome.wall_seconds,
         terminated_reason=outcome.terminated_reason,

@@ -162,6 +162,54 @@ def _reset_temporal_session(hook: HookInput) -> None:
         return
 
 
+_SHORT_ACTIVATION_CONTEXT = """[Grimoire — projet non gouverné]
+Ce projet n'a pas adopté le standard agentique Grimoire (`_grimoire/standard/`
+absent, incomplet, ou dépôt sans CI/tests) : `grimoire standard init` l'active
+si besoin ; aucune enveloppe ni pack de preuve n'est exigé ici.
+"""
+
+
+def _is_governed(project_root: Path) -> bool:
+    """Whether *project_root* has actually adopted the standard, not merely brushed it.
+
+    The 2026-09-17 three-arm bench (diagnostic-surcout-kit-2026-09-17.md)
+    measured what the campaign before it only implied: the full activation
+    directive — task envelope, evidence pack, ``gate check --strict`` then
+    ``verify .`` — was going out on *every* session, including ones on a
+    project that never ran ``grimoire standard init``. ``verify`` then fails
+    on artifacts nobody was ever told to create, and the session spends its
+    turns chasing a compliance surface that does not exist. The 40/40
+    campaign this directive was validated against always ran it on a
+    governed project; nothing ever measured it against an unenrolled one,
+    so nothing caught this until the bench did.
+
+    "Adopted" means a real board or profile under ``STANDARD_DIR``, not just
+    the directory: a project can carry a stray ``_grimoire/standard/`` (a
+    half-finished init, a copied template) with nothing in it to act on. A
+    task board is the strongest signal there is — a team that has one is
+    working the standard, CI markers or not — so it settles the question by
+    itself. A recorded profile with no board is weaker: it can be the one
+    file ``grimoire standard init`` writes before a run is cancelled, or a
+    template copied in wholesale. For that weaker signal only, the same
+    playground heuristic ``grimoire init`` uses to suggest ``--lite`` (no CI
+    marker, no non-empty test directory) breaks the tie: a minimal standard
+    directory dropped into an exploration repo is not a team that adopted
+    the protocol.
+    """
+    from grimoire.cli.cmd_init import _looks_like_a_playground
+    from grimoire.core.agentic_standard import _read_manifest_profile
+    from grimoire.core.standard_generation import STANDARD_DIR
+
+    standard_dir = project_root / STANDARD_DIR
+    if not standard_dir.is_dir():
+        return False
+    if (standard_dir / "task-board.yaml").is_file():
+        return True
+    if _read_manifest_profile(project_root) is None:
+        return False
+    return not _looks_like_a_playground(project_root)
+
+
 def decide_activation(hook: HookInput) -> Decision:
     """Session start: hand the agent its persona, its claim's recall, then the directive.
 
@@ -183,10 +231,21 @@ def decide_activation(hook: HookInput) -> Decision:
     a new session starts with empty budgets, no cooldown history and no
     rule marked "already approved" — that is the whole point of scoping
     those to a session rather than to the project.
+
+    Since the 2026-09-17 bench diagnostic (Grimoire-kit#551 #552), the full
+    directive is built only for a project :func:`_is_governed` recognises —
+    an unenrolled project gets the two-line notice instead. This is the
+    single change the diagnostic asked for: everything else about this
+    function's shape (order, best-effort lines, session reset) is unchanged.
     """
     _reset_temporal_session(hook)
     task_id = active_task_id(hook.project_root)
-    directive = activation_context_text(hook.project_root, task_id=task_id)
+    governed = _is_governed(hook.project_root)
+    directive = (
+        activation_context_text(hook.project_root, task_id=task_id)
+        if governed
+        else _SHORT_ACTIVATION_CONTEXT
+    )
     persona, entry_name = entry_persona_context(hook.project_root)
     if entry_name:
         _record_agent_dispatch(hook.project_root, entry_name, task_id)
@@ -199,5 +258,10 @@ def decide_activation(hook: HookInput) -> Decision:
     return Decision(
         outcome=Outcome.ALLOW,
         context=context,
-        detail={"task_id": task_id, "entry_agent": entry_name, "recall_injected": bool(recall)},
+        detail={
+            "task_id": task_id,
+            "entry_agent": entry_name,
+            "recall_injected": bool(recall),
+            "governed": governed,
+        },
     )

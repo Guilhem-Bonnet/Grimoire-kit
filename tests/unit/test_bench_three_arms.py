@@ -1,19 +1,23 @@
 """Tests du harnais du banc à trois bras (Grimoire-kit#551), sans LLM.
 
-Ces tests verrouillent les cinq mécanismes qui doivent rester corrects sans
-jamais appeler ``claude -p`` : tirage reproductible, préparation d'un dépôt de
-tâche (tests cachés), détection de succès sur tests verts/rouges, calcul de
-pass^k et de son intervalle de confiance, et détection d'un agent qui « tourne
-en rond ». Aucun réseau, aucune clé API.
+Ces tests verrouillent les mécanismes qui doivent rester corrects sans jamais
+appeler ``claude -p`` : tirage reproductible, préparation d'un dépôt de tâche
+(tests cachés), détection de succès sur tests verts/rouges, calcul de pass^k
+et de son intervalle de confiance, détection d'un agent qui « tourne en
+rond », et — lot A du plan de correction du surcoût (#551/#552) — la garde
+disque et le report des tokens de cache dans ``results.jsonl``. Aucun
+réseau, aucune clé API.
 """
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
 import json
 import sys
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -400,3 +404,211 @@ def test_extract_go_archive_rejects_a_path_traversal_member(tmp_path: Path) -> N
     with pytest.raises(tarfile.FilterError):
         ta._extract_go_archive(archive, dest)
     assert not escapee.exists()
+
+
+# ── Lot A (#551/#552) : garde disque, nettoyage, tokens de cache ───────────
+
+
+class _FakePopen:
+    """Remplace ``subprocess.Popen`` pour ``run_claude_headless`` : écrit un
+    flux ``stream-json`` déterministe dans le fichier de log au lieu de
+    lancer réellement ``claude -p``, puis se déclare terminé au premier
+    ``poll()``."""
+
+    def __init__(self, cmd: list[str], *, cwd: Path, env: dict[str, str], stdout: Any, stderr: Any) -> None:
+        del cmd, cwd, env, stderr
+        lines = [
+            json.dumps({"type": "system", "subtype": "init"}),
+            json.dumps(
+                {
+                    "type": "result",
+                    "total_cost_usd": 0.07,
+                    "num_turns": 3,
+                    "is_error": False,
+                    "usage": {
+                        "input_tokens": 120,
+                        "output_tokens": 80,
+                        "cache_read_input_tokens": 900,
+                        "cache_creation_input_tokens": 200,
+                    },
+                    "modelUsage": {"claude-sonnet-5": {"cost_usd": 0.07}},
+                }
+            ),
+        ]
+        stdout.write(("\n".join(lines) + "\n").encode("utf-8"))
+        stdout.flush()
+        self._polled = False
+
+    def poll(self) -> int | None:
+        return 0
+
+    def wait(self, timeout: float | None = None) -> int:
+        del timeout
+        return 0
+
+    def terminate(self) -> None:
+        pass
+
+    def kill(self) -> None:
+        pass
+
+
+def test_run_claude_headless_extracts_cache_tokens_and_model_usage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Le flux ``result`` porte des tokens de cache et une répartition par
+    modèle que le harnais ignorait avant #551/#552 lot A — la mesure de coût
+    du banc à trois bras était donc incomplète sans que rien ne le signale."""
+    task_dir = tmp_path / "run0"
+    task_dir.mkdir()
+    monkeypatch.setattr(ta.subprocess, "Popen", _FakePopen)
+
+    outcome = ta.run_claude_headless(task_dir, "peu importe le prompt", home=tmp_path, timeout_s=5, poll_interval=0.0)
+
+    assert outcome.cache_read_input_tokens == 900
+    assert outcome.cache_creation_input_tokens == 200
+    assert outcome.model_usage == {"claude-sonnet-5": {"cost_usd": 0.07}}
+    assert outcome.terminated_reason == "completed"
+
+
+def test_run_claude_headless_defaults_cache_tokens_to_zero_when_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Un flux plus ancien sans ces clés ne doit jamais faire planter l'extraction."""
+
+    class _FakePopenNoCache(_FakePopen):
+        def __init__(self, cmd: list[str], *, cwd: Path, env: dict[str, str], stdout: Any, stderr: Any) -> None:
+            del cmd, cwd, env, stderr
+            line = json.dumps({"type": "result", "total_cost_usd": 0.01, "num_turns": 1, "usage": {"input_tokens": 5, "output_tokens": 5}})
+            stdout.write((line + "\n").encode("utf-8"))
+            stdout.flush()
+
+    task_dir = tmp_path / "run0"
+    task_dir.mkdir()
+    monkeypatch.setattr(ta.subprocess, "Popen", _FakePopenNoCache)
+
+    outcome = ta.run_claude_headless(task_dir, "peu importe", home=tmp_path, timeout_s=5, poll_interval=0.0)
+
+    assert outcome.cache_read_input_tokens == 0
+    assert outcome.cache_creation_input_tokens == 0
+
+
+def test_run_one_carries_cache_tokens_and_model_usage_into_the_record(
+    synthetic_bench_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """L'oubli documenté par le diagnostic : ``RunOutcome.model_usage`` était
+    rempli mais jamais recopié dans le ``RunRecord`` que ``results.jsonl``
+    persiste. Ce test construit un ``_run_one`` avec de faux collaborateurs
+    (aucun appel réseau ni ``claude -p``) et vérifie le trajet complet."""
+    task = ta.discover_catalog(synthetic_bench_root)[0]
+    workspace = tmp_path / "workspace"
+    homes = {arm: workspace / "homes" / arm for arm in ta.ARMS}
+    for home in homes.values():
+        ta.ensure_isolated_home(home)
+
+    fake_outcome = ta.RunOutcome(
+        success=None,
+        total_cost_usd=0.07,
+        input_tokens=120,
+        output_tokens=80,
+        cache_read_input_tokens=900,
+        cache_creation_input_tokens=200,
+        num_turns=3,
+        wall_seconds=12.0,
+        terminated_reason="completed",
+        model_usage={"claude-sonnet-5": {"cost_usd": 0.07}},
+    )
+
+    @contextlib.contextmanager
+    def fake_credentials(home: Path, real_home: Path | None = None):
+        del home, real_home
+        yield "fake-token"
+
+    monkeypatch.setattr(ta, "credentials_provisioned", fake_credentials)
+    monkeypatch.setattr(ta, "run_claude_headless", lambda *a, **k: fake_outcome)
+    monkeypatch.setattr(ta, "run_hidden_tests", lambda *a, **k: (True, ""))
+    cleaned: list[Path] = []
+    monkeypatch.setattr(ta, "cleanup_build_artifacts", cleaned.append)
+
+    record = ta._run_one(
+        task,
+        "nu",
+        0,
+        workspace=workspace,
+        ecc_repo=tmp_path / "ecc-repo-unused",
+        homes=homes,
+        go_bin=None,
+        run_timeout_s=5,
+    )
+
+    assert record.cache_read_input_tokens == 900
+    assert record.cache_creation_input_tokens == 200
+    assert record.model_usage == {"claude-sonnet-5": {"cost_usd": 0.07}}
+    assert cleaned, "le nettoyage des artefacts de build doit tourner après chaque run"
+
+
+def test_cleanup_build_artifacts_removes_target_and_node_modules(tmp_path: Path) -> None:
+    task_dir = tmp_path / "run"
+    (task_dir / "target" / "debug").mkdir(parents=True)
+    (task_dir / "target" / "debug" / "binary").write_text("bin", encoding="utf-8")
+    (task_dir / "node_modules" / "some-pkg").mkdir(parents=True)
+    (task_dir / "node_modules" / "some-pkg" / "index.js").write_text("//", encoding="utf-8")
+    (task_dir / "src").mkdir(parents=True)
+    (task_dir / "src" / "keep.py").write_text("kept\n", encoding="utf-8")
+
+    ta.cleanup_build_artifacts(task_dir)
+
+    assert not (task_dir / "target").exists()
+    assert not (task_dir / "node_modules").exists()
+    assert (task_dir / "src" / "keep.py").is_file()
+
+
+def test_cleanup_build_artifacts_is_a_silent_no_op_without_any(tmp_path: Path) -> None:
+    task_dir = tmp_path / "run"
+    (task_dir / "src").mkdir(parents=True)
+    ta.cleanup_build_artifacts(task_dir)  # ne doit pas lever
+    assert (task_dir / "src").is_dir()
+
+
+def test_disk_guard_ok_reports_false_under_the_threshold(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ta.shutil, "disk_usage", lambda path: SimpleNamespace(total=0, used=0, free=4 * (1024**3)))
+    assert ta.disk_guard_ok(tmp_path) is False
+
+
+def test_disk_guard_ok_reports_true_above_the_threshold(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ta.shutil, "disk_usage", lambda path: SimpleNamespace(total=0, used=0, free=10 * (1024**3)))
+    assert ta.disk_guard_ok(tmp_path) is True
+
+
+def test_main_full_stops_cleanly_and_writes_a_partial_report_on_low_disk(
+    synthetic_bench_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Le coeur de la garde disque : jamais un crash en plein run, un rapport
+    partiel avec ce qui a déjà tourné — ici zéro run, le disque étant déjà
+    sous le seuil avant même le premier appel à ``claude -p``."""
+    workspace = tmp_path / "workspace"
+
+    monkeypatch.setattr(ta, "ensure_polyglot_benchmark", lambda ws: synthetic_bench_root)
+    monkeypatch.setattr(ta, "ensure_ecc_repo", lambda ws: (tmp_path / "ecc-repo", "deadbeef"))
+    monkeypatch.setattr(ta, "ensure_go_toolchain", lambda ws: None)
+    monkeypatch.setattr(ta, "disk_guard_ok", lambda workspace, min_free_gb=ta.DISK_GUARD_MIN_FREE_GB: False)
+
+    def _fail_if_called(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("un run a été lancé malgré le disque sous le seuil")
+
+    monkeypatch.setattr(ta, "_run_one", _fail_if_called)
+
+    written: dict[str, Any] = {}
+
+    def _fake_write_report(records: Any, out_dir: Path, *, total_tasks: int, expected_cost: Any, seed: int) -> None:
+        del total_tasks, expected_cost, seed
+        written["records"] = list(records)
+        written["out_dir"] = out_dir
+
+    monkeypatch.setattr(ta, "write_report", _fake_write_report)
+
+    rc = ta.main(["--full", "--workspace", str(workspace)])
+
+    assert rc == 0
+    assert written, "un rapport (même vide) doit être écrit à l'arrêt disque"
+    assert written["records"] == []

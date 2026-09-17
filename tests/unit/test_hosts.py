@@ -98,6 +98,20 @@ def _write_skill(root: Path, slug: str) -> None:
     )
 
 
+def _write_minimal_task_board(root: Path) -> None:
+    """Drop the one file ``_is_governed`` treats as a strong signal, nothing else.
+
+    Deliberately lighter than :func:`setup_standard_profile`: that call also
+    scaffolds a provider registry, which would add a "Fournisseurs :" line
+    to the session context and break an equality check against the bare
+    directive. A task board on its own is exactly the minimal fixture the
+    diagnostic's non-regression case calls for (#551/#552).
+    """
+    board_dir = root / "_grimoire" / "standard"
+    board_dir.mkdir(parents=True, exist_ok=True)
+    (board_dir / "task-board.yaml").write_text("tasks: []\n", encoding="utf-8")
+
+
 @pytest.fixture
 def project(tmp_path: Path) -> Path:
     _write_agent(tmp_path, "concierge", "Tu tries et tu routes. Tu exécutes des diagnostics.")
@@ -1159,22 +1173,50 @@ def test_the_entry_persona_reaches_the_session_start_context(project: Path) -> N
     assert "scribe" not in context, "seule la persona d'entrée est injectée"
 
 
-def test_the_validated_directive_survives_the_persona(project: Path) -> None:
-    """La persona s'ajoute au standard, elle ne le remplace pas.
+def test_the_validated_directive_survives_the_persona(governed: Path) -> None:
+    """La persona s'ajoute au standard, elle ne le remplace pas — sur un projet gouverné.
 
     Le mécanisme d'activation a été mesuré 40/40 contre 0/40. L'écraser pour
     faire de la place à une persona échangerait un effet prouvé contre un
-    effet supposé.
+    effet supposé. Depuis le diagnostic du 2026-09-17 (Grimoire-kit#551
+    #552), cette garantie ne vaut plus que pour un projet réellement
+    gouverné (fixture ``governed``) — un projet nu reçoit désormais l'avis
+    court, voir ``test_an_ungoverned_project_gets_the_short_notice_instead``.
     """
-    context = _session_start(project)
+    context = _session_start(governed)
     assert "[Grimoire Standard — activation]" in context
     assert context.index("[Grimoire — persona d'entrée]") < context.index("[Grimoire Standard — activation]")
 
 
 def test_a_project_without_an_entry_persona_keeps_the_bare_directive(tmp_path: Path) -> None:
+    """Sur un projet gouverné sans persona d'entrée, la directive complète reste seule."""
+    _write_minimal_task_board(tmp_path)
     _write_agent(tmp_path, "scribe", "Tu rédiges la documentation.")
     assert entry_persona_context(tmp_path) == ("", "")
     assert _session_start(tmp_path) == activation_context_text(tmp_path, task_id="bootstrap")
+
+
+def test_an_ungoverned_project_gets_the_short_notice_instead(tmp_path: Path) -> None:
+    """Le coeur du correctif #551/#552 : pas de standard adopté, pas de directive complète.
+
+    Reproduit le cas du diagnostic — un dépôt qui n'a jamais vu
+    ``grimoire standard init`` (donc pas de ``_grimoire/standard/`` du tout)
+    ne doit plus recevoir le mandat enveloppe/pack de preuve/gate/verify : il
+    n'a jamais eu de commande pour créer ces artefacts, et ``verify`` y
+    échouerait immédiatement sur 7 artefacts que personne n'a demandé de
+    produire (diagnostic-surcout-kit-2026-09-17.md, §1.2).
+    """
+    _write_agent(tmp_path, "scribe", "Tu rédiges la documentation.")
+    context = _session_start(tmp_path)
+    assert "[Grimoire Standard — activation]" not in context
+    assert "task-envelope.md" not in context
+    assert "gate check --task-id" not in context
+    assert "[Grimoire — projet non gouverné]" in context
+    # Le court-circuit doit rester court : très inférieur à la directive complète.
+    short_len = len(context)
+    governed_len = len(activation_context_text(tmp_path, task_id="bootstrap"))
+    assert short_len < 400
+    assert short_len < governed_len / 2
 
 
 def test_the_hook_names_the_persona_it_injected(project: Path) -> None:
@@ -1249,13 +1291,17 @@ def test_le_rappel_de_tache_n_est_jamais_injecte_sans_claim(
     ).detail["recall_injected"] is False
 
 
-def test_le_rappel_de_tache_arrive_au_claim_entre_la_persona_et_la_directive(project: Path) -> None:
+def test_le_rappel_de_tache_arrive_au_claim_entre_la_persona_et_la_directive(governed: Path) -> None:
     """Le critère de l'issue #141, vu depuis le hook : une jumelle qui a échoué
-    remonte au claim, dans l'ordre prescrit — persona, rappel, directive."""
+    remonte au claim, dans l'ordre prescrit — persona, rappel, directive.
+
+    Sur un projet gouverné (fixture ``governed``) : c'est la seule configuration
+    où la directive complète — et donc son rang dans l'ordre — existe encore.
+    """
     from grimoire.missions.schemas import TaskState
     from grimoire.missions.service import TaskService
 
-    service = TaskService(project)
+    service = TaskService(governed)
     mission = service.ledger.create_mission(title="Travaux", origin="test")
     passee = service.ledger.create_task(mission.id, "Configurer le webhook amont", acceptance=("x",))
     service.ledger.transition_task(passee.id, TaskState.READY, actor_id="a")
@@ -1272,7 +1318,7 @@ def test_le_rappel_de_tache_arrive_au_claim_entre_la_persona_et_la_directive(pro
     service.ledger.transition_task(jumelle.id, TaskState.READY, actor_id="b")
     service.ledger.claim_task(jumelle.id, "b", "host-b")
 
-    context = _session_start(project)
+    context = _session_start(governed)
 
     assert "certificat expiré" in context
     assert (
@@ -1305,7 +1351,12 @@ def test_the_project_designates_its_entry_persona(project: Path) -> None:
 
 
 def test_an_empty_entry_means_no_entry_persona(project: Path) -> None:
-    """Vide n'est pas absent : c'est la déclaration « je porte déjà mon point d'entrée »."""
+    """Vide n'est pas absent : c'est la déclaration « je porte déjà mon point d'entrée ».
+
+    Sur un projet gouverné (board minimal) : sinon l'absence de persona et
+    l'absence de standard adopté se confondraient dans le contexte produit.
+    """
+    _write_minimal_task_board(project)
     _configure_entry(project, "")
     assert build_surface(project).entry_agent() is None
     assert entry_persona_context(project) == ("", "")
