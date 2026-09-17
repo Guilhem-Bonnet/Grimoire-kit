@@ -244,6 +244,14 @@ def served_review_gate(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tup
         [sys.executable, "-m", "grimoire", "standard", "init", "--profile", "governed"],
         cwd=str(root), check=False, capture_output=True, timeout=180,
     )
+    # ADR-007 (issue #559, lot 4.1) : `standard init` ouvre désormais un
+    # Mission Ledger dès l'init (la tâche `bootstrap`) — retiré ici pour que
+    # ce projet dédié ne porte QUE la tâche que ce harnais crée juste après.
+    # `test_executer_review_sans_evidence_pack_est_refuse_et_nomme_l_artefact`
+    # clique `.ex-card` par POSITION (`.first`), pas par texte : une seconde
+    # carte "bootstrap" (colonne "proposée", donc triée avant "en cours")
+    # serait cliquée à sa place.
+    shutil.rmtree(root / "_grimoire-runtime-output" / "ledger", ignore_errors=True)
     gates_path = root / "_grimoire" / "standard" / "evidence-gates.yaml"
     gates_path.parent.mkdir(parents=True, exist_ok=True)
     gates_path.write_text(_REVIEW_GATE_YAML, encoding="utf-8")
@@ -330,6 +338,12 @@ def served_timeline(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[
         [sys.executable, "-m", "grimoire", "standard", "init", "--profile", "governed"],
         cwd=str(root), check=False, capture_output=True, timeout=180,
     )
+    # ADR-007 (issue #559, lot 4.1) : `standard init` ouvre désormais un
+    # Mission Ledger dès l'init (la tâche `bootstrap`) — retiré ici pour que
+    # ce projet dédié ne porte QUE la tâche que ce harnais crée juste après.
+    # `test_executer_timeline_montre_dispatch_et_refus_et_se_filtre_par_source`
+    # clique `.ex-card` par POSITION (`.first`), pas par texte.
+    shutil.rmtree(root / "_grimoire-runtime-output" / "ledger", ignore_errors=True)
 
     added = subprocess.run(
         [
