@@ -16,11 +16,8 @@ import pytest
 from typer.testing import CliRunner
 
 from grimoire.cli.app import app
-from grimoire.core.agentic_standard import (
-    record_acceptance_test_run,
-    setup_standard_profile,
-    verify_standard_profile,
-)
+from grimoire.core.agentic_standard import setup_standard_profile, verify_standard_profile
+from grimoire.core.standard_checks.acceptance_test_run import record_acceptance_test_run
 from grimoire.core.standard_traceability import matrix_for, with_verdicts
 
 PROFILES = ("starter", "controlled", "orchestrated", "governed", "production")

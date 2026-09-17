@@ -33,7 +33,6 @@ from grimoire.core.agentic_standard import (
     load_capability_map,
     load_needs_catalog,
     propose_remediation_actions,
-    record_acceptance_test_run,
     resolve_install_plan,
     setup_standard_profile,
     show_standard_pattern,
@@ -46,6 +45,7 @@ from grimoire.core.claude_activation import (
     activation_context_text,
     install_claude_activation,
 )
+from grimoire.core.standard_checks.acceptance_test_run import record_acceptance_test_run
 from grimoire.hosts.sync import HostSyncOutcome, sync_host_surfaces
 
 standard_app = typer.Typer(
