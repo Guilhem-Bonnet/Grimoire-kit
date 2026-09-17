@@ -170,10 +170,11 @@ class TestInit:
     # ── Backend option ──
 
     def test_init_default_backend(self, tmp_path: Path) -> None:
+        """Issue #496 : sans --backend explicite, jamais d'attachement silencieux
+        à un service détecté sur la machine — toujours `lexical`, isolé."""
         runner.invoke(app, ["init", str(tmp_path)])
         content = (tmp_path / "project-context.yaml").read_text()
-        # "auto" is resolved to a concrete backend at init time
-        assert any(f'backend: "{b}"' in content for b in ("local", "qdrant-local", "qdrant-server", "weaviate-server", "mempalace", "ollama"))
+        assert 'backend: "lexical"' in content
 
     def test_init_local_backend(self, tmp_path: Path) -> None:
         result = runner.invoke(app, ["init", str(tmp_path), "--backend", "local"])
@@ -311,8 +312,8 @@ class TestStatus:
 
     def test_status_shows_memory(self, project: Path) -> None:
         result = runner.invoke(app, ["status", str(project)])
-        # backend "auto" is resolved at init time; check for a valid backend
-        assert any(b in result.output for b in ("local", "qdrant-local", "qdrant-server", "weaviate-server", "mempalace", "ollama"))
+        # backend "auto" resolves to the isolated `lexical` default (#496)
+        assert "lexical" in result.output
 
     def test_status_shows_structure(self, project: Path) -> None:
         result = runner.invoke(app, ["status", str(project)])
@@ -1738,7 +1739,8 @@ class TestInitJson:
         assert data["ok"] is True
         assert data["project"] == "j-proj"
         assert data["archetype"] == "minimal"
-        assert data["backend"] in ("local", "qdrant-local", "qdrant-server", "weaviate-server", "mempalace", "ollama")
+        # backend "auto" resolves to the isolated `lexical` default (#496)
+        assert data["backend"] == "lexical"
         assert "dirs_created" in data
 
     def test_init_json_already_exists(self, tmp_path: Path) -> None:

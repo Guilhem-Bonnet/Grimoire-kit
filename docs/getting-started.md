@@ -96,6 +96,36 @@ grimoire cockpit add .
 grimoire standard init .
 ```
 
+### Mémoire par défaut : isolée, jamais partagée à votre insu
+
+Sans `--backend` explicite (le cas par défaut, y compris avec `-y`), un nouveau
+projet reçoit toujours une mémoire `lexical` — fichier local, aucune dépendance,
+aucun réseau. Un service mémoire tournant déjà sur la machine (Weaviate, Qdrant,
+Ollama) n'est **jamais** attaché automatiquement, même si `init` l'a détecté ;
+le rapport se contente de le signaler :
+
+```text
+Memory: lexical
+         ! détecté : Weaviate sur http://localhost:8080 — activez-le avec
+         `grimoire memory up --profile standard --apply`
+```
+
+Pour utiliser explicitement un backend partagé (Qdrant, Weaviate), passez
+`--backend` : la collection est alors nommée d'après le projet (son slug), pas
+un nom générique partagé par tous les projets de la machine.
+
+```bash
+grimoire init . --backend weaviate-server
+```
+
+Si cette collection existe déjà et contient des données, `init` refuse de s'y
+attacher tant que vous ne le demandez pas explicitement avec
+`--memory-collection` :
+
+```bash
+grimoire init . --backend weaviate-server --memory-collection nom-existant
+```
+
 ### Étape par étape (ce que `up` enchaîne)
 
 ```bash

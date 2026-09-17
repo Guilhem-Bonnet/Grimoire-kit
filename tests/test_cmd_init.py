@@ -70,6 +70,102 @@ class TestDetectMemoryBackend:
         assert result == "local"
 
 
+class TestMemoryServiceSuggestion:
+    """Issue #496 — `detect_memory_backend()` no longer decides anything; it
+    only feeds a suggestion line, never applied silently."""
+
+    def test_no_suggestion_when_nothing_detected(self) -> None:
+        from grimoire.cli.cmd_init import memory_service_suggestion
+
+        assert memory_service_suggestion("local") is None
+
+    def test_suggests_the_activation_command_for_a_detected_service(self) -> None:
+        from grimoire.cli.cmd_init import memory_service_suggestion
+
+        suggestion = memory_service_suggestion("weaviate-server")
+        assert suggestion is not None
+        assert "Weaviate" in suggestion
+        assert "grimoire memory up --profile standard --apply" in suggestion
+
+
+class TestCollectionHasContent:
+    """Issue #496 (b) — probing an existing collection must never block on a
+    probe failure, only on confirmed content."""
+
+    def test_unreachable_backend_reads_as_empty(self) -> None:
+        from grimoire.cli.cmd_init import collection_has_content
+
+        with patch("grimoire.cli.cmd_init.urllib.request.urlopen", side_effect=OSError("no server")):
+            assert collection_has_content("weaviate-server", "some-project") is False
+
+    def test_weaviate_collection_with_objects_is_not_empty(self) -> None:
+        from grimoire.cli.cmd_init import collection_has_content
+
+        with patch(
+            "grimoire.cli.cmd_init._http_get_json",
+            return_value={"objects": [{"id": "1"}]},
+        ):
+            assert collection_has_content("weaviate-server", "shared") is True
+
+    def test_qdrant_collection_with_points_is_not_empty(self) -> None:
+        from grimoire.cli.cmd_init import collection_has_content
+
+        with patch(
+            "grimoire.cli.cmd_init._http_get_json",
+            return_value={"result": {"points_count": 42}},
+        ):
+            assert collection_has_content("qdrant-server", "shared") is True
+
+    def test_local_and_lexical_never_probe(self) -> None:
+        from grimoire.cli.cmd_init import collection_has_content
+
+        assert collection_has_content("local", "anything") is False
+        assert collection_has_content("lexical", "anything") is False
+
+
+class TestChooseMemoryProfileDetectedService:
+    """Issue #496 — the wizard may offer a detected service, but only through
+    an explicit question; declining it must never leave the project attached."""
+
+    def test_declining_the_detected_service_keeps_the_project_isolated(self) -> None:
+        from grimoire.cli.cmd_init import _choose_memory_profile
+
+        with (
+            patch("grimoire.cli.cmd_init.Confirm.ask", return_value=False),
+            patch("grimoire.cli.cmd_init.Prompt.ask", return_value="2"),
+        ):
+            _profile_id, backend, _offline, _qdrant_docker = _choose_memory_profile(
+                "lexical", offer_qdrant_docker=False, detected_service="weaviate-server",
+            )
+        assert backend == "lexical"
+
+    def test_accepting_the_detected_service_uses_it(self) -> None:
+        from grimoire.cli.cmd_init import _choose_memory_profile
+
+        with (
+            patch("grimoire.cli.cmd_init.Confirm.ask", return_value=True),
+            patch("grimoire.cli.cmd_init.Prompt.ask", return_value="2"),
+        ):
+            _profile_id, backend, _offline, _qdrant_docker = _choose_memory_profile(
+                "lexical", offer_qdrant_docker=False, detected_service="weaviate-server",
+            )
+        assert backend == "weaviate-server"
+
+    def test_an_already_explicit_backend_is_never_asked_about(self) -> None:
+        """`detected_service == backend` means the caller already claimed it
+        explicitly (e.g. `--backend weaviate-server`) — no question needed."""
+        from grimoire.cli.cmd_init import _choose_memory_profile
+
+        with (
+            patch("grimoire.cli.cmd_init.Confirm.ask") as mock_confirm,
+            patch("grimoire.cli.cmd_init.Prompt.ask", return_value="2"),
+        ):
+            _choose_memory_profile(
+                "weaviate-server", offer_qdrant_docker=False, detected_service="weaviate-server",
+            )
+        mock_confirm.assert_not_called()
+
+
 class TestGitUserName:
     def test_returns_name_on_success(self) -> None:
         with patch("grimoire.cli.cmd_init.subprocess.run") as mock_run:
@@ -280,6 +376,153 @@ class TestInitCLI:
         target = tmp_path / "multi-dry"
         result = runner.invoke(app, ["-y", "init", str(target), "--dry-run", "--archetype", "infra-ops,fix-loop"])
         assert result.exit_code == 0
+
+
+class TestInitNeverSilentlyAttaches:
+    """Issue #496 — a real service found on the host (Weaviate on :8080 in
+    the reported incident) must never get wired into a fresh project just
+    because `-y`/`auto` (the default) ran on a machine that happens to run
+    one."""
+
+    @pytest.fixture
+    def runner(self):
+        from typer.testing import CliRunner
+        return CliRunner()
+
+    @pytest.fixture
+    def app(self):
+        from grimoire.cli.app import app
+        return app
+
+    def test_auto_backend_falls_back_to_lexical_despite_a_detected_service(
+        self, runner, app, tmp_path: Path,
+    ) -> None:
+        target = tmp_path / "throwaway"
+        with patch("grimoire.cli.cmd_init._is_weaviate_reachable", return_value=True):
+            result = runner.invoke(app, ["-y", "init", str(target)])
+        assert result.exit_code == 0, result.output
+        content = (target / "project-context.yaml").read_text(encoding="utf-8")
+        assert 'backend: "lexical"' in content
+        assert "weaviate" not in content.lower()
+
+    def test_report_suggests_the_detected_service_without_attaching(
+        self, runner, app, tmp_path: Path,
+    ) -> None:
+        target = tmp_path / "throwaway2"
+        with patch("grimoire.cli.cmd_init._is_weaviate_reachable", return_value=True):
+            result = runner.invoke(app, ["-y", "init", str(target)])
+        assert result.exit_code == 0, result.output
+        assert "grimoire memory up --profile standard --apply" in result.output
+
+    def test_json_report_carries_the_suggestion_not_the_attachment(
+        self, runner, app, tmp_path: Path,
+    ) -> None:
+        import json
+
+        target = tmp_path / "throwaway3"
+        with (
+            patch("grimoire.cli.cmd_init._is_weaviate_reachable", return_value=False),
+            patch("grimoire.cli.cmd_init._is_qdrant_reachable", return_value=True),
+        ):
+            result = runner.invoke(app, ["-y", "-o", "json", "init", str(target)])
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert data["backend"] == "lexical"
+        assert data["memory_detected"] == "qdrant-local"
+        assert "grimoire memory up" in data["memory_suggestion"]
+
+    def test_explicit_backend_is_still_honored_over_detection(
+        self, runner, app, tmp_path: Path,
+    ) -> None:
+        """A caller who names a backend outright still gets it — detection
+        only ever fills in for an *unset* choice."""
+        target = tmp_path / "explicit"
+        with patch("grimoire.cli.cmd_init.collection_has_content", return_value=False):
+            result = runner.invoke(app, ["-y", "init", str(target), "--backend", "local"])
+        assert result.exit_code == 0, result.output
+        content = (target / "project-context.yaml").read_text(encoding="utf-8")
+        assert 'backend: "local"' in content
+
+
+class TestInitMemoryCollectionNaming:
+    """Issue #496 (b) — a shared backend gets a per-project collection name;
+    attaching to a pre-existing, non-empty one needs an explicit flag."""
+
+    @pytest.fixture
+    def runner(self):
+        from typer.testing import CliRunner
+        return CliRunner()
+
+    @pytest.fixture
+    def app(self):
+        from grimoire.cli.app import app
+        return app
+
+    def test_backend_weaviate_server_names_the_collection_after_the_project_slug(
+        self, runner, app, tmp_path: Path,
+    ) -> None:
+        target = tmp_path / "My Cool Project"
+        with patch("grimoire.cli.cmd_init.collection_has_content", return_value=False):
+            result = runner.invoke(app, ["-y", "init", str(target), "--backend", "weaviate-server"])
+        assert result.exit_code == 0, result.output
+        content = (target / "project-context.yaml").read_text(encoding="utf-8")
+        assert 'collection_prefix: "my-cool-project"' in content
+        # Never the fixed name every project used to share (issue #493/#496).
+        assert "GrimoireMemory" not in content
+
+    def test_memory_collection_flag_overrides_the_slug(
+        self, runner, app, tmp_path: Path,
+    ) -> None:
+        target = tmp_path / "proj"
+        with patch("grimoire.cli.cmd_init.collection_has_content", return_value=False):
+            result = runner.invoke(
+                app,
+                ["-y", "init", str(target), "--backend", "weaviate-server", "--memory-collection", "team-shared"],
+            )
+        assert result.exit_code == 0, result.output
+        content = (target / "project-context.yaml").read_text(encoding="utf-8")
+        assert 'collection_prefix: "team-shared"' in content
+
+    def test_refuses_to_attach_to_a_nonempty_collection_without_the_flag(
+        self, runner, app, tmp_path: Path,
+    ) -> None:
+        target = tmp_path / "proj2"
+        with patch("grimoire.cli.cmd_init.collection_has_content", return_value=True):
+            result = runner.invoke(app, ["-y", "init", str(target), "--backend", "weaviate-server"])
+        assert result.exit_code == 1
+        assert "--memory-collection" in result.output
+        assert not (target / "project-context.yaml").exists()
+
+    def test_explicit_memory_collection_allows_attaching_to_a_nonempty_one(
+        self, runner, app, tmp_path: Path,
+    ) -> None:
+        target = tmp_path / "proj3"
+        with patch("grimoire.cli.cmd_init.collection_has_content", return_value=True):
+            result = runner.invoke(
+                app,
+                ["-y", "init", str(target), "--backend", "weaviate-server", "--memory-collection", "existing"],
+            )
+        assert result.exit_code == 0, result.output
+        content = (target / "project-context.yaml").read_text(encoding="utf-8")
+        assert 'collection_prefix: "existing"' in content
+
+    def test_qdrant_server_also_gets_a_per_project_collection(
+        self, runner, app, tmp_path: Path,
+    ) -> None:
+        target = tmp_path / "qproj"
+        with patch("grimoire.cli.cmd_init.collection_has_content", return_value=False):
+            result = runner.invoke(app, ["-y", "init", str(target), "--backend", "qdrant-server"])
+        assert result.exit_code == 0, result.output
+        content = (target / "project-context.yaml").read_text(encoding="utf-8")
+        assert 'collection_prefix: "qproj"' in content
+
+    def test_local_backend_is_unaffected(self, runner, app, tmp_path: Path) -> None:
+        """No shared collection to namespace for a file-local backend."""
+        target = tmp_path / "localproj"
+        result = runner.invoke(app, ["-y", "init", str(target), "--backend", "local"])
+        assert result.exit_code == 0, result.output
+        content = (target / "project-context.yaml").read_text(encoding="utf-8")
+        assert "collection_prefix" not in content
 
 
 class TestParseArchetypeSelection:

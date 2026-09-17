@@ -99,9 +99,21 @@ python framework/memory/mem0-bridge.py seed --no-vector
 
 ## Mise en place et diagnostic
 
-`grimoire init` détecte un backend vectoriel et écrit `memory.backend`, mais il
-s'arrête là : les clés de graphe et de mémoire chaude restent commentées dans
-le template. `grimoire memory up` comble cet écart.
+Sans `--backend` explicite, `grimoire init` n'attache jamais un projet neuf à
+un service détecté sur la machine (Weaviate, Qdrant, Ollama) : il écrit
+`memory.backend: lexical` et se contente de *suggérer* le service trouvé dans
+son rapport, avec la commande pour l'activer (issue #496 — un service de
+dogfooding tournant sur l'hôte câblait silencieusement chaque nouveau projet
+dessus, avec une collection partagée). Sur un backend partagé choisi
+explicitement (`--backend weaviate-server`, `qdrant-local`, `qdrant-server`),
+la collection est nommée d'après le projet (`collection_prefix`, dérivé de son
+slug) plutôt qu'un nom générique partagé ; s'attacher à une collection déjà
+peuplée exige `--memory-collection <nom>` explicite.
+
+Dans tous les cas, `grimoire init` s'arrête aux couches de base : les clés de
+graphe et de mémoire chaude restent commentées dans le template. `grimoire
+memory up` comble cet écart, en calculant `layer_profile`/`retrieval_mode`
+d'après ce que la machine sert réellement.
 
 ```bash
 grimoire memory up                    # plan, rien n'est écrit

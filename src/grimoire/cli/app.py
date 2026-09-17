@@ -286,13 +286,31 @@ def init(
     name: str = typer.Option("", help="Project name (default: directory name)."),
     force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing config."),
     archetype: str = typer.Option("", "--archetype", "-a", help="Agent archetype(s), comma-separated (auto-detected if omitted)."),
-    backend: str = typer.Option("auto", "--backend", "-b", help="Memory backend (auto, local, lexical, tantivy-local, qdrant-local, qdrant-server, weaviate-server, mempalace, ollama)."),
+    backend: str = typer.Option(
+        "auto", "--backend", "-b",
+        help=(
+            "Memory backend (auto, local, lexical, tantivy-local, qdrant-local, "
+            "qdrant-server, weaviate-server, mempalace, ollama). 'auto' never attaches "
+            "silently to a service detected on this machine — it falls back to "
+            "'lexical' and only suggests the detected service in the report "
+            "(issue #496)."
+        ),
+    ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show plan without writing."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Express mode: skip the wizard, auto-detect everything."),
     memory_profile: str = typer.Option("", "--memory-profile", "-m", help="Memory composition (lexical, standard, graphe, complet). Inferred when omitted."),
     no_cockpit: bool = typer.Option(False, "--no-cockpit", help="Do not enrol this project in the local cockpit registry (~/.grimoire/cockpit/registry.json). Same effect as the GRIMOIRE_NO_COCKPIT env var."),
     lite: bool = typer.Option(False, "--lite", help="Profil léger : mémoire lexicale (aucun service), pas de cockpit, standard non activé — pour un dépôt sans CI ni tests."),
     profile: str = typer.Option("", "--profile", help="Profil d'init nommé. Seule valeur reconnue aujourd'hui : 'lite' (équivalent à --lite)."),
+    memory_collection: str = typer.Option(
+        "", "--memory-collection",
+        help=(
+            "Nom explicite de la collection mémoire, pour un backend partagé "
+            "(qdrant-local, qdrant-server, weaviate-server). Sans cette option, la "
+            "collection est nommée d'après le projet (slug) ; l'attachement à une "
+            "collection existante et non vide exige ce drapeau."
+        ),
+    ),
 ) -> None:
     """Initialise a Grimoire project — detect stack, deploy agents, scaffold.
 
@@ -309,14 +327,22 @@ def init(
     archetype by default — a fast, service-free setup for a throwaway or
     exploratory repo (no CI, no tests).
 
+    Without an explicit [cyan]--backend[/cyan], a project always gets an isolated
+    [cyan]lexical[/cyan] memory — a service found on this machine (Weaviate, Qdrant,
+    Ollama) is only suggested, never attached to silently (issue #496). On a
+    shared backend chosen explicitly, the collection is named after the
+    project; attaching to one that already holds data requires
+    [cyan]--memory-collection[/cyan].
+
     [dim]Examples:[/dim]
       [cyan]grimoire init .[/cyan]                               Interactive wizard
-      [cyan]grimoire init . -y[/cyan]                            Express (auto-detect all)
+      [cyan]grimoire init . -y[/cyan]                            Express (auto-detect all) — isolated, lexical memory
       [cyan]grimoire init . -a infra-ops -b weaviate-server[/cyan]  Explicit archetype & backend
       [cyan]grimoire init . -a web-app,infra-ops[/cyan]         Multiple archetypes
       [cyan]grimoire init --dry-run[/cyan]                       Show plan without writing
       [cyan]grimoire init . -y --no-cockpit[/cyan]               Express, skip cockpit enrolment
       [cyan]grimoire init . --lite[/cyan]                        Profil léger (lexical, sans cockpit)
+      [cyan]grimoire init . -b weaviate-server --memory-collection team-x[/cyan]  Attach to an existing shared collection
     """
     from grimoire.cli.cmd_init import run_init, validate_init_flags
 
@@ -346,6 +372,7 @@ def init(
         memory_profile=memory_profile,
         no_cockpit=no_cockpit,
         lite=lite,
+        memory_collection=memory_collection,
     )
 
 
