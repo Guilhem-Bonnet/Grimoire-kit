@@ -553,6 +553,34 @@ l'ancien comportement : aucune exécution, évaluation de ce qui est enregistré
 Le hook `Stop` n'exécute jamais de tests : il évalue via
 `check_evidence_gates`, qui lit le run enregistré sans le relancer.
 
+## Les preuves viennent des hooks, pas de la recopie
+
+Le lot G2 de l'issue #582 ferme le poste suivant du même banc : l'agent
+recopiait systématiquement dans `evidence-pack.md`, à la main, ce que le hook
+`PostToolUse` venait de lui rappeler à l'écran (« Écriture enregistrée… »).
+
+**Le hook `PostToolUse` consigne, il ne se contente plus de rappeler.** Pour
+un projet enrôlé, chaque commande Bash exécutée (tronquée, code de sortie
+s'il est connu), chaque cible d'un outil d'écriture ou d'édition, chaque run
+de test reconnu (motif de commande — `pytest`, `npm test`, `cargo test`,
+`go test`, `ctest`, `mvn … test`, `gradlew? test`) est ajouté en une ligne
+JSON à `_grimoire-output/evidence/<task_id>/evidence-log.jsonl`. Best-effort
+et mesuré sous 30 ms (0,31 ms en médiane sur 30 appels) : ce hook tourne à
+chaque outil de chaque tour, il ne doit jamais coûter ce qu'un
+`resolve_need("test-runner", …)` — qui relit `project-context.yaml` et teste
+plusieurs marqueurs sur disque — coûterait à cette fréquence.
+
+**`gate check` projette ce journal dans le pack de preuve.** Une section
+`## Inventaire observé`, délimitée par des marqueurs, est régénérée sous la
+section manuelle « Evidence inventory » (qui reste éditable) à chaque appel
+de `gate check` — jamais par `verify` ni par l'outil MCP `grimoire_standard_audit`,
+tous deux annoncés lecture seule (`readOnlyHint`) et qui ne font que lire le
+journal (`has_observed_inventory`) sans y toucher. Un journal absent ou dont
+aucune ligne ne parse en JSON valide se lit comme « rien observé » — jamais
+comme une preuve fabriquée. Dès qu'au moins une action a été observée, le
+check `evidence.inventory_placeholder` cesse de signaler un inventaire vide,
+même si la section manuelle est restée à l'état de gabarit.
+
 ## Ce qui est maintenant prêt
 
 Le kit possède une première structure pour transformer le standard en flow actionnable sans polluer le corpus normatif :

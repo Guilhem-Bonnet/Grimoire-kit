@@ -66,6 +66,7 @@ from grimoire.core.standard_checks.registry import (
     dimension_for,
 )
 from grimoire.core.standard_checks.verifiers import (
+    _verify_evidence_pack,
     _verify_memory_policy,
     run_verifiers,
 )
@@ -1580,6 +1581,21 @@ def check_evidence_gates(
         for key in ("evidence_pack", "decision_trace"):
             if not (root / required_paths[key]).is_file():
                 missing.append(key)
+        # Issue #582 lot G2 : `gate check` (jamais `verify`/`audit`, tous deux
+        # `readOnlyHint` côté MCP — voir `_verify_evidence_pack`) projette le
+        # journal observé par les hooks dans la section « Inventaire observé »
+        # avant d'évaluer le même vérificateur que `standard verify`.
+        try:
+            from grimoire.core.standard_checks.evidence_journal import (
+                regenerate_observed_inventory_section,
+            )
+
+            regenerate_observed_inventory_section(root, normalized_task_id)
+        except Exception:  # noqa: S110 — projection best-effort, jamais au prix du gate lui-même
+            pass
+        evidence_pack_result = StandardVerificationResult(profile=profile.id, project_root=root)
+        _verify_evidence_pack(root, normalized_task_id, evidence_pack_result)
+        checks.extend(evidence_pack_result.checks)
         # Issue #582 lot B : le même signal que `standard verify` — une ligne
         # « passé » sans run de test réel enregistré — doit aussi apparaître
         # ici, sur le chemin que le hook SessionStart mandate réellement
