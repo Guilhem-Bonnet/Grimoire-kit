@@ -80,6 +80,116 @@ def test_un_projet_sans_ledger_le_dit_au_lieu_de_rendre_un_board_vide(tmp_path: 
     assert payload["tasks"] == []
     assert "task add" in payload["note"]
     assert len(payload["columns"]) == 8, "les huit colonnes sont annoncées même sans tâche"
+    assert "migration_available" not in payload, "rien à migrer sur un projet qui n'a même pas de board"
+
+
+# ── ADR-007 (issue #559, lot 4.1 3/3) : Exécuter et Preuves lisent le ledger ──
+
+
+def _write_unmigrated_board(root: Path) -> None:
+    """Un board du standard déjà déclaré, jamais migré vers le Mission Ledger —
+    le cas qu'ADR-007 nomme (kit antérieur au lot 4.1, ou migration jamais
+    lancée)."""
+    from grimoire.core.standard_generation import STANDARD_DIR
+
+    board_path = root / STANDARD_DIR / "task-board.yaml"
+    board_path.parent.mkdir(parents=True, exist_ok=True)
+    board_path.write_text(
+        "tasks:\n"
+        "  - task_id: legacy-1\n"
+        "    title: Tâche héritée\n"
+        "    status: proposed\n"
+        "    acceptance_criteria: ['ok']\n",
+        encoding="utf-8",
+    )
+
+
+def test_un_projet_enrole_non_migre_propose_l_action_plutot_que_le_seul_rappel(tmp_path: Path) -> None:
+    """Un board sans ledger a déjà des tâches déclarées — `grimoire task add`
+    en ouvrirait une nouvelle, pas celles qui existent déjà. Le cockpit doit
+    donc distinguer ce cas du projet qui n'a jamais eu de board du tout."""
+    _write_unmigrated_board(tmp_path)
+
+    payload = wa.tasks_view(tmp_path)
+
+    assert payload["ledger"] is False
+    assert payload["migration_available"] is True
+    assert "migre" in payload["note"].lower() or "migration" in payload["note"].lower()
+
+
+def test_apres_migration_le_message_aucun_ledger_disparait(tmp_path: Path) -> None:
+    """Le message « aucun Mission Ledger » ne doit plus apparaître pour un
+    projet enrôlé une fois migré."""
+    from grimoire.missions.task_unification import migrate_standard_tasks
+
+    _write_unmigrated_board(tmp_path)
+    migrate_standard_tasks(tmp_path)
+
+    payload = wa.tasks_view(tmp_path)
+
+    assert payload["ledger"] is True
+    assert "note" not in payload
+    assert "migration_available" not in payload
+    assert {t["id"] for t in payload["tasks"]} == {"legacy-1"}
+
+
+def test_tasks_view_et_task_list_lisent_le_meme_ledger_apres_un_init_frais(tmp_path: Path) -> None:
+    """ADR-007 point 5 : `tasks_view` (Exécuter/Preuves du cockpit) et
+    `grimoire task list` (même moteur que `TaskService.list_tasks`) lisent
+    déjà la bonne source — un test le vérifie explicitement plutôt que de le
+    supposer, pour un projet fraîchement `standard init` (point 1 : le ledger
+    est ouvert dès l'init, pas seulement après une migration)."""
+    from grimoire.core.agentic_standard import setup_standard_profile
+    from grimoire.missions.service import TaskService
+
+    setup_standard_profile(tmp_path, profile_id="governed", project_name="demo")
+
+    view_ids = {t["id"] for t in wa.tasks_view(tmp_path)["tasks"]}
+    cli_ids = {t.id for t in TaskService(tmp_path).list_tasks()}
+
+    assert view_ids == cli_ids == {"bootstrap"}
+
+
+def test_tasks_view_et_task_list_lisent_le_meme_ledger_apres_migration(tmp_path: Path) -> None:
+    """Même preuve que ci-dessus, pour un projet migré (point 3) plutôt que
+    fraîchement initialisé (point 1) — les deux chemins d'alimentation du
+    ledger doivent rendre les deux surfaces cohérentes entre elles."""
+    from grimoire.missions.service import TaskService
+    from grimoire.missions.task_unification import migrate_standard_tasks
+
+    _write_unmigrated_board(tmp_path)
+    migrate_standard_tasks(tmp_path)
+
+    view_ids = {t["id"] for t in wa.tasks_view(tmp_path)["tasks"]}
+    cli_ids = {t.id for t in TaskService(tmp_path).list_tasks()}
+
+    assert view_ids == cli_ids == {"legacy-1"}
+
+
+def test_task_view_expose_le_champ_finition_en_lecture_seule(
+    real_project: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR-007 point 6 / lot 4.3 (issue #561) : `finition` est un terrain
+    préparé, pas encore exploité — aucune commande ne l'écrit aujourd'hui.
+    Ce lot (4.1, 3/3) ne fait que l'afficher en lecture seule dans la fiche
+    tâche du cockpit ; ce test prouve que `task_view` ne l'avale pas en
+    chemin, en le posant directement sur la tâche que le service rend
+    (`MissionTask.to_dict()` l'inclut déjà, prouvé par
+    `tests/unit/missions/test_task_unification.py`)."""
+    from dataclasses import replace
+
+    from grimoire.missions.service import TaskService
+
+    original_require = TaskService.require
+
+    def _with_finition(self: TaskService, task_id: str):
+        return replace(original_require(self, task_id), finition="maquette")
+
+    monkeypatch.setattr(TaskService, "require", _with_finition)
+
+    detail = wa.task_view(real_project, "bootstrap")
+
+    assert detail["finition"] == "maquette"
 
 
 def test_une_tache_reelle_porte_sa_colonne_et_sa_prochaine_porte(

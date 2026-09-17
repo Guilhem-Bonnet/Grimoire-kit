@@ -715,6 +715,36 @@ def test_un_mouvement_de_tache_vers_un_etat_inconnu_est_un_400(
     assert "vaporisee" in payload["error"]
 
 
+def test_post_migrate_standard_importe_le_board_non_migre_sur_le_projet_de_lancement(
+    tasks_home: tuple[int, Path],
+) -> None:
+    """Bouton « Migrer les tâches » de l'espace Exécuter (ADR-007, issue #559) :
+    même moteur que ``grimoire task migrate-standard``, exposé en écriture
+    seulement sur le projet de lancement direct — la garde elle-même est déjà
+    prouvée pour CETTE route par les deux tests paramétrés sur
+    :data:`POST_ROUTES` en tête de fichier (section 2).
+
+    Placé en dernier de cette section : retire le ledger du projet de
+    lancement pour simuler le board non migré qu'ADR-007 nomme (kit antérieur
+    au lot 4.1) — les tests précédents de cette fixture ``module`` n'en
+    dépendent plus, chacun mintant sa propre tâche fraîche et n'assumant
+    jamais un total cumulé.
+    """
+    import shutil
+
+    from grimoire.missions.service import TaskService
+
+    port, home_root = tasks_home
+    shutil.rmtree(home_root / "_grimoire-runtime-output" / "ledger", ignore_errors=True)
+    assert not TaskService(home_root).has_ledger
+
+    code, payload = _post(port, f"{PREFIX}tasks/migrate-standard?project=projet-tasks-home", {})
+
+    assert code == 200
+    assert payload["tasks_imported"] >= 1
+    assert TaskService(home_root).has_ledger
+
+
 # ── 3. Dérogation nommée pour décider une proposition (#490) ────────────────
 
 

@@ -120,11 +120,11 @@ def served_empty(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     montrer utilement (commande réelle affichée, boutons de vue rendus mais
     désactivés plutôt qu'absents).
 
-    ADR-007 (issue #559, lot 4.1) : `standard init` ouvre désormais un
-    Mission Ledger dès l'init (la tâche `bootstrap`) — retiré ci-dessous pour
-    que cette fixture continue de représenter l'état qu'elle documente
-    (aucun ledger), qui est aussi, depuis ADR-007, celui d'un projet enrôlé
-    jamais migré.
+    Depuis ADR-007 (issue #559, lot 4.1), `standard init` ouvre un Mission
+    Ledger dès l'init : le ledger fraîchement créé est retiré ci-dessous pour
+    que ce projet reste "sans ledger" comme documenté — ce qui en fait aussi,
+    sans rien y ajouter, le projet "enrôlé mais jamais migré" qu'utilise le
+    test du bouton « Migrer les tâches ».
 
     Un projet DÉDIÉ, pas `real_project` : ce dernier est une fixture de
     portée session partagée par toute la suite e2e, et plusieurs fixtures
@@ -146,6 +146,13 @@ def served_empty(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
         [sys.executable, "-m", "grimoire", "standard", "init", "--profile", "governed"],
         cwd=str(root), check=False, capture_output=True, timeout=180,
     )
+    # ADR-007 (issue #559, lot 4.1) : `standard init` ouvre désormais un
+    # Mission Ledger dès l'init (la tâche `bootstrap`) — retiré ici pour que
+    # cette fixture continue de représenter l'état qu'elle documente (aucun
+    # ledger). C'est, depuis ADR-007, exactement l'état d'un projet enrôlé
+    # jamais migré : `test_workspace_controls.py` s'appuie dessus pour l'état
+    # vide d'Exécuter, `test_workspace_controls.py` (lot 4.1, 3/3) pour le
+    # bouton « Migrer les tâches ».
     shutil.rmtree(root / "_grimoire-runtime-output" / "ledger", ignore_errors=True)
 
     port = _free_port()
