@@ -28,6 +28,7 @@ from grimoire.hosts.decisions import (
     decide_activation,
     decide_context_capsule,
     decide_evidence_gate,
+    decide_evidence_trace,
     decide_subagent_gate,
     decide_tool_policy,
     entry_persona_context,
@@ -882,6 +883,82 @@ def test_read_only_calls_are_not_slowed_down(governed: Path) -> None:
     )
     assert decision.outcome is Outcome.ALLOW
     assert decision.detail == {}
+
+
+def test_post_tool_use_logs_bash_test_run_and_file_write_events(governed: Path) -> None:
+    """Issue #582 lot G2 : le hook consigne, l'agent n'a plus à recopier."""
+    from grimoire.core.standard_checks.evidence_journal import read_evidence_log
+
+    decide_evidence_trace(
+        HookInput(
+            event=HookEvent.POST_TOOL_USE,
+            project_root=governed,
+            tool_name="Bash",
+            tool_input={"command": "git status"},
+            tool_response={"exit_code": 0},
+        )
+    )
+    decide_evidence_trace(
+        HookInput(
+            event=HookEvent.POST_TOOL_USE,
+            project_root=governed,
+            tool_name="Bash",
+            tool_input={"command": "pytest -q"},
+            tool_response={"exit_code": 1},
+        )
+    )
+    decide_evidence_trace(
+        HookInput(
+            event=HookEvent.POST_TOOL_USE,
+            project_root=governed,
+            tool_name="Write",
+            tool_input={"file_path": "src/foo.py"},
+        )
+    )
+    entries = read_evidence_log(governed, "bootstrap")
+    assert [e["type"] for e in entries] == ["bash", "test_run", "file_write"]
+    assert entries[0]["command"] == "git status" and entries[0]["exit_code"] == 0
+    assert entries[1]["command"] == "pytest -q" and entries[1]["exit_code"] == 1
+    assert entries[2]["path"] == "src/foo.py"
+
+
+def test_post_tool_use_journal_write_stays_under_the_30ms_budget(governed: Path) -> None:
+    """Issue #582 lot G2 : le hook tourne à chaque outil, le budget est serré.
+
+    Seuil large (30 ms) contre une mesure d'un ordre de grandeur inférieur :
+    ce qui est borné est une régression de nature (un appel réseau, un
+    ``resolve_need`` qui relit ``project-context.yaml`` — voir le choix
+    documenté dans ``evidence_journal``, pas un ``resolve_need`` par appel),
+    pas le jitter de la machine. Le chiffre mesuré est rapporté dans la PR.
+    """
+    import statistics
+    import time
+
+    samples = []
+    for i in range(30):
+        started = time.perf_counter()
+        decide_evidence_trace(
+            HookInput(
+                event=HookEvent.POST_TOOL_USE,
+                project_root=governed,
+                tool_name="Bash",
+                tool_input={"command": f"pytest -q --run={i}"},
+                tool_response={"exit_code": 0},
+            )
+        )
+        samples.append(time.perf_counter() - started)
+    assert statistics.median(samples) < 0.03, f"médiane {statistics.median(samples) * 1000:.2f} ms"
+
+
+def test_post_tool_use_never_logs_on_an_unenrolled_project(project: Path) -> None:
+    from grimoire.core.standard_checks.evidence_journal import read_evidence_log
+
+    decide_evidence_trace(
+        HookInput(
+            event=HookEvent.POST_TOOL_USE, project_root=project, tool_name="Bash", tool_input={"command": "pytest -q"}
+        )
+    )
+    assert read_evidence_log(project, "bootstrap") == []
 
 
 def _set_task_in_progress(root: Path) -> None:
