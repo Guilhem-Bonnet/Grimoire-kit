@@ -1384,7 +1384,7 @@ def test_every_missing_gate_artifact_names_its_path_and_a_copyable_remedy(tmp_pa
     expected = {"task_envelope", "context_bundle", "memory_policy", "evidence_pack", "decision_trace", "compliance_score"}
     assert {key.removeprefix("gate.").removesuffix("_missing") for key in missing} == expected
     for check in missing.values():
-        assert check.path is not None and str(check.path) in check.message, check.message
+        assert check.path is not None and check.path.as_posix() in check.message, check.message
         assert "remède : grimoire " in check.message, check.message
         assert str(tmp_path) in check.message, "le remède cite la racine en absolu, copiable de n'importe où"
     scaffold = f"grimoire standard task scaffold {tmp_path} --task-id bootstrap"

@@ -19,6 +19,7 @@ module, et ce module ne doit jamais remonter vers lui.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from grimoire.core.standard_generation import (
@@ -141,7 +142,15 @@ def missing_artifact_message(key: str, *, root: Path, task_id: str, profile_id: 
 
 
 def _shell_quote(value: str) -> str:
-    """Guillemets simples POSIX seulement si nécessaire — un chemin sans espace reste lisible."""
+    """Guillemets seulement si nécessaire — un chemin sans espace reste lisible tel quel.
+
+    Sous Windows (``os.name == "nt"``), le shell qui recopiera la commande est
+    cmd.exe ou PowerShell : les guillemets simples POSIX n'y sont pas des
+    guillemets, et l'antislash d'un chemin n'y est pas un échappement — on
+    entoure de guillemets doubles, et seulement s'il y a un blanc.
+    """
+    if os.name == "nt":
+        return f'"{value}"' if any(ch.isspace() for ch in value) else value
     if value and all(ch.isalnum() or ch in "/._-+:@%" for ch in value):
         return value
     return "'" + value.replace("'", "'\"'\"'") + "'"
