@@ -23,10 +23,12 @@ from grimoire.core.standard_checks.evidence_journal import (
     append_evidence_event,
     build_bash_event,
     build_file_write_event,
+    evidence_log_relpath,
     has_observed_inventory,
     read_evidence_log,
     regenerate_observed_inventory_section,
 )
+from grimoire.core.standard_generation import EVIDENCE_DIR, RUNS_DIR, ensure_grimoire_gitignore
 from grimoire.core.standard_task_scaffold import scaffold_task_artifacts
 from grimoire.missions.schemas import TaskState
 from grimoire.missions.service import TaskService
@@ -50,6 +52,17 @@ def governed(tmp_path: Path) -> Path:
     return tmp_path
 
 
+def test_evidence_log_lives_under_runs_dir_not_evidence_dir() -> None:
+    """Le journal grossit à chaque outil : sous ``.runs`` (ignoré), pas sous
+    ``EVIDENCE_DIR`` (versionné) — sinon il polluerait ``git status`` et les
+    commits de tout projet gouverné (correction demandée en relecture de PR).
+    """
+    rel = evidence_log_relpath("T-1")
+    assert rel == RUNS_DIR / "evidence" / "T-1" / "evidence-log.jsonl"
+    assert not str(rel).startswith(str(EVIDENCE_DIR))
+    assert ".runs" in rel.parts
+
+
 # ── Garde fermée : journal absent ou malformé ────────────────────────────────
 
 
@@ -59,7 +72,7 @@ def test_absent_journal_reads_as_nothing_observed(governed: Path) -> None:
 
 
 def test_malformed_lines_are_skipped_a_totally_corrupt_file_reads_as_nothing(governed: Path) -> None:
-    log_path = governed / "_grimoire-output/evidence/T-1/evidence-log.jsonl"
+    log_path = governed / evidence_log_relpath("T-1")
     log_path.parent.mkdir(parents=True)
     log_path.write_text("ceci n'est pas du JSON\n{ encore cassé\n", encoding="utf-8")
     assert read_evidence_log(governed, "T-1") == []
@@ -67,7 +80,7 @@ def test_malformed_lines_are_skipped_a_totally_corrupt_file_reads_as_nothing(gov
 
 
 def test_one_corrupt_line_does_not_lose_its_valid_neighbours(governed: Path) -> None:
-    log_path = governed / "_grimoire-output/evidence/T-1/evidence-log.jsonl"
+    log_path = governed / evidence_log_relpath("T-1")
     log_path.parent.mkdir(parents=True)
     log_path.write_text(
         '{"type": "bash", "command": "pytest -q"}\n'
@@ -170,3 +183,53 @@ def test_the_remedy_message_names_the_task_id_and_the_gate_command(governed: Pat
     red = check_evidence_gates(governed, task_id=task_id, target_state="review")
     (check,) = [c for c in red.checks if c.id == "evidence.inventory_placeholder"]
     assert f"--task-id {task_id}" in check.message
+
+
+# ── .gitignore : RUNS_DIR doit être ignoré quel que soit le chemin d'entrée ──
+
+
+def test_ensure_grimoire_gitignore_creates_the_file_when_absent(tmp_path: Path) -> None:
+    written = ensure_grimoire_gitignore(tmp_path)
+    assert written == tmp_path / ".gitignore"
+    content = written.read_text(encoding="utf-8")
+    assert "# --- Grimoire Kit ---" in content
+    assert "_grimoire-output/.runs/" in content
+
+
+def test_ensure_grimoire_gitignore_appends_without_erasing_existing_content(tmp_path: Path) -> None:
+    gi = tmp_path / ".gitignore"
+    gi.write_text("node_modules/\n.env\n", encoding="utf-8")
+
+    ensure_grimoire_gitignore(tmp_path)
+
+    content = gi.read_text(encoding="utf-8")
+    assert "node_modules/" in content
+    assert ".env" in content
+    assert "_grimoire-output/.runs/" in content
+
+
+def test_ensure_grimoire_gitignore_is_idempotent(tmp_path: Path) -> None:
+    ensure_grimoire_gitignore(tmp_path)
+    first = (tmp_path / ".gitignore").read_text(encoding="utf-8")
+
+    second_write = ensure_grimoire_gitignore(tmp_path)
+
+    assert second_write is None, "la marque est déjà présente : rien à écrire une deuxième fois"
+    assert (tmp_path / ".gitignore").read_text(encoding="utf-8") == first
+
+
+def test_setup_standard_profile_alone_still_ignores_runs_dir(tmp_path: Path) -> None:
+    """Correctif de relecture (PR #598) : `grimoire standard init` seul (sans
+    `grimoire init`) n'écrivait jamais la ligne .gitignore — un vrai trou,
+    puisque c'est justement ce chemin d'entrée que le journal du lot G2 (sous
+    `.runs`, ignoré par convention) doit pouvoir emprunter sans polluer
+    `git status`.
+    """
+    setup_standard_profile(tmp_path, profile_id="governed")
+    content = (tmp_path / ".gitignore").read_text(encoding="utf-8")
+    assert "_grimoire-output/.runs/" in content
+
+
+def test_setup_standard_profile_dry_run_writes_no_gitignore(tmp_path: Path) -> None:
+    setup_standard_profile(tmp_path, profile_id="governed", dry_run=True)
+    assert not (tmp_path / ".gitignore").is_file()

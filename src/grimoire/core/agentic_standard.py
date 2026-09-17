@@ -838,6 +838,12 @@ def setup_standard_profile(
         # que cette commande vient d'écrire ; avec, c'est immédiat.
         invalidate_cache(root)
 
+    if not dry_run:
+        # Issue #582 lot G2 : `grimoire init` planifie déjà cette section ;
+        # un projet qui n'a jamais fait tourner que `standard init` ne
+        # l'avait pas, et RUNS_DIR (journal de preuve par tour) en a besoin.
+        gen.ensure_grimoire_gitignore(root)
+
     return result
 
 
