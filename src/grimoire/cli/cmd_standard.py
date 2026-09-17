@@ -45,6 +45,7 @@ from grimoire.core.claude_activation import (
     activation_context_text,
     install_claude_activation,
 )
+from grimoire.core.standard_checks.acceptance_test_run import record_acceptance_test_run
 from grimoire.hosts.sync import HostSyncOutcome, sync_host_surfaces
 
 standard_app = typer.Typer(
@@ -1133,6 +1134,35 @@ def gate_check(
     for missing in result.missing:
         console.print(f"  [red][x][/red] missing {missing}")
     raise typer.Exit(exit_code)
+
+
+@gate_app.command("run-tests")
+def gate_run_tests(
+    ctx: typer.Context,
+    project_root: Path = typer.Argument(Path(), help="Target project root."),  # noqa: B008
+    task_id: str = typer.Option("bootstrap", "--task-id", help="Task id this run's evidence is recorded under."),
+) -> None:
+    """Execute the project's known test command and record a real acceptance run (issue #582 lot B).
+
+    Sans cette commande (ou une intégration équivalente), une ligne
+    `acceptance-record.md` marquée « passé » reste une déclaration de texte
+    libre : `standard verify`/`gate check` la signalent désormais en
+    avertissement quand le projet a une commande de test connue
+    (``needs.commands.test-runner``, ou un marqueur pyproject.toml/
+    package.json/Cargo.toml/go.mod). Cette commande ferme la boucle : elle
+    exécute cette commande de test et enregistre le verdict (code de sortie,
+    sortie tronquée) à l'endroit que ces deux vérificateurs relisent.
+    """
+    result = record_acceptance_test_run(project_root, task_id=task_id)
+    if _get_fmt(ctx) == "json":
+        typer.echo(json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
+        raise typer.Exit(0 if result.ok else 1)
+    if not result.command:
+        console.print(f"[yellow]WARN[/yellow] no known test command for {project_root}")
+        raise typer.Exit(1)
+    status = "[green]OK[/green]" if result.ok else "[red]FAIL[/red]"
+    console.print(f"{status} {result.command!r} (exit {result.exit_code}) recorded at {result.path}")
+    raise typer.Exit(0 if result.ok else 1)
 
 
 @events_app.command("audit")

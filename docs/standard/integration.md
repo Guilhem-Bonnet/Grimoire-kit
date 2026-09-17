@@ -396,6 +396,7 @@ grimoire standard hooks verify .
 grimoire standard hooks simulate . --phase pre_context_build --task-id bootstrap
 grimoire standard gate check . --task-id bootstrap --target-state review
 grimoire standard gate check . --task-id bootstrap --target-state released --profile governed --strict
+grimoire standard gate run-tests . --task-id bootstrap
 grimoire standard knowledge index . --task-id bootstrap
 grimoire standard knowledge graph . --task-id bootstrap
 grimoire standard knowledge verify . --task-id bootstrap
@@ -424,7 +425,67 @@ Les sorties opérationnelles restent dans `_grimoire-output/` :
 - `events/applied-fixes.jsonl` : audit trail des remédiations sûres appliquées ;
 - `standard/{task-id}/compliance-score.yaml` : score profil-aware avec dimensions pondérées.
 
-Les commandes sont volontairement sûres : la simulation de hooks n'exécute aucune action externe, la remediation reste en dry-run par défaut et les chemins générés sont contraints au project root.
+Les commandes sont volontairement sûres : la simulation de hooks n'exécute aucune action externe, la remediation reste en dry-run par défaut et les chemins générés sont contraints au project root. Seule exception, délibérée : `grimoire standard gate run-tests` exécute réellement la commande de test connue du projet (voir « Acceptance reliée à une exécution réelle » ci-dessous) — c'est tout son objet, remplacer une déclaration de texte libre par un run vérifiable.
+
+## Acceptance reliée à une exécution réelle
+
+Une ligne `acceptance-record.md` marquée `passé` n'est plus, à elle seule, une
+déclaration suffisante quand le projet a une commande de test connue (issue
+#582 lot B, `docs/bench/diagnostic-surcout-kit-2026-09-17.md` §2). La commande
+vient de `grimoire.core.execution_needs.resolve_need("test-runner", …)` :
+déclarée explicitement (`needs.commands.test-runner` dans
+`project-context.yaml`) ou détectée par marqueur (`pyproject.toml`,
+`package.json`, `Cargo.toml`, `go.mod`).
+
+```bash
+grimoire standard gate run-tests . --task-id bootstrap
+```
+
+exécute cette commande et enregistre le verdict (code de sortie, sortie
+tronquée à 2 Ko) dans `_grimoire-output/evidence/<task-id>/test-run.json` — ne
+duplique pas d'exécuteur, réutilise `_run_checks`
+(`grimoire.missions.dispatch`), le même primitif que
+`flows.dispatch_executor` utilise déjà pour une `AcceptanceEvidence(kind="test")`
+(issue #428). `standard verify` et `gate check` (pour les états `review`,
+`accepted`, `released`) lisent ce fichier :
+
+- une ligne `passé` sans run enregistré et vert, sur un projet à commande de
+  test connue → `acceptance.passed_without_test_run` ;
+- un projet sans commande de test détectable → comportement inchangé
+  (déclaratif), signalé par `acceptance.no_test_command_detected` ;
+- un run enregistré et vert, mais dont l'empreinte de l'arbre de travail
+  diverge de celle recalculée à la vérification → `acceptance.test_run_stale`.
+
+Un run vert n'est pas une preuve permanente : `record_acceptance_test_run`
+calcule une empreinte de l'arbre de travail juste après avoir exécuté la
+commande (`grimoire.core.standard_checks.tree_fingerprint.
+compute_tree_fingerprint`) — après, pas avant : l'état de référence d'un run
+est celui que les tests laissent derrière eux — et l'enregistre dans
+`test-run.json` (`tree_fingerprint`). Dans un dépôt git : sha256 de
+`git rev-parse HEAD` + `git status --porcelain=v1 -z` + `git diff HEAD` +
+`(chemin, taille, mtime_ns)` de chaque fichier derrière une entrée non suivie
+(`??`) du status (un fichier non suivi n'est représenté par git que par son
+chemin ; sans ce complément, le retoucher après le run ne changerait jamais
+l'empreinte). Hors dépôt git (ou si git échoue) : sha256 de la liste triée
+`(chemin, taille, mtime_ns)` de tout fichier hors les mêmes exclusions.
+Exclus des deux modes : `_grimoire-output/` (ce dossier est écrit par le
+mécanisme lui-même — l'inclure invaliderait chaque run dès son écriture),
+`.venv/`, `node_modules/`, `target/`, `.git/`, et les caches d'outillage non
+déterministes qu'une commande de test régénère à chaque run sans que le code
+change (`.pytest_cache/`, `__pycache__/`, `.ruff_cache/`, `.mypy_cache/`,
+`.hypothesis/`, `.coverage`) — sans quoi, sur un projet sans `.gitignore`
+adapté, un run se périmerait dès son propre enregistrement. Une empreinte
+absente (ancien format, fichier altéré à la main) compte comme périmée —
+garde fermée, jamais l'inverse.
+
+**Transition WARN → FAIL.** Cette release (celle qui introduit ce mécanisme)
+répond aux trois cas ci-dessus par un avertissement, quel que soit le profil —
+aucun projet gouverné existant ne se retrouve bloqué du jour au lendemain par
+un mécanisme qu'il ne connaissait pas encore. Une prochaine release
+promouvra `acceptance.passed_without_test_run` (et `acceptance.test_run_stale`)
+en erreur bloquante pour les profils `governed`/`production`, le temps que
+les projets déjà gouvernés adoptent `gate run-tests` (ou une intégration CI
+équivalente) dans leur boucle de clôture de tâche.
 
 ## Ce qui est maintenant prêt
 

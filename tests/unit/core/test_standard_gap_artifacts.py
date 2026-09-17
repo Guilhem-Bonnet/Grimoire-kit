@@ -10,6 +10,7 @@ sans prévention, une délégation ouverte.
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,7 @@ from typer.testing import CliRunner
 
 from grimoire.cli.app import app
 from grimoire.core.agentic_standard import setup_standard_profile, verify_standard_profile
+from grimoire.core.standard_checks.acceptance_test_run import record_acceptance_test_run
 from grimoire.core.standard_traceability import matrix_for, with_verdicts
 
 PROFILES = ("starter", "controlled", "orchestrated", "governed", "production")
@@ -35,6 +37,16 @@ def _replace(path: Path, old: str, new: str) -> None:
     text = path.read_text(encoding="utf-8")
     assert old in text, old
     path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+
+def _git_repo_with_a_commit(root: Path) -> None:
+    """Un dépôt git jetable avec un commit initial — jamais le dépôt ambiant."""
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    subprocess.run(["git", "-C", str(root), "config", "user.email", "test@example.com"], check=True)
+    subprocess.run(["git", "-C", str(root), "config", "user.name", "Test"], check=True)
+    (root / "app.py").write_text("print('v1')\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(root), "commit", "-q", "-m", "init"], check=True)
 
 
 @pytest.mark.parametrize("profile", PROFILES)
@@ -70,6 +82,177 @@ def test_a_criterion_passed_without_proof_is_an_error(tmp_path: Path) -> None:
     _replace(record, "| AC-001 |  |  | à vérifier |", "| AC-001 | Les tests passent |  | passé |")
     result = verify_standard_profile(tmp_path)
     assert "acceptance.passed_without_evidence" in _ids(result, "acceptance.", "error")
+
+
+def test_a_criterion_passed_without_a_real_test_run_is_a_warning_when_a_command_is_known(tmp_path: Path) -> None:
+    """Issue #582 lot B : une ligne « passé » ne peut plus rester du texte libre sans le dire.
+
+    Avant ce lot, cette même déclaration ne produisait aucun constat : le
+    diagnostic de surcoût (`docs/bench/diagnostic-surcout-kit-2026-09-17.md`
+    §2) montre qu'un agent peut écrire « passé » sans avoir rien exécuté et
+    obtenir un `verify` vert. Ce test est rouge avant le correctif (l'id
+    ci-dessous n'existe pas encore) et vert après.
+    """
+    setup_standard_profile(tmp_path, profile_id="starter", project_name="Demo")
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "demo"\n', encoding="utf-8")
+    record = tmp_path / "_grimoire-output/evidence/bootstrap/acceptance-record.md"
+    _replace(record, "| AC-001 |  |  | à vérifier |", "| AC-001 | Les tests passent | pytest -q | passé |")
+
+    result = verify_standard_profile(tmp_path)
+
+    assert "acceptance.passed_without_test_run" in _ids(result, "acceptance.", "warning")
+    # Transition douce (documentée dans le CHANGELOG) : un avertissement cette
+    # release, pas encore un blocage.
+    assert result.ok
+
+
+def test_a_criterion_passed_without_a_known_test_command_stays_declarative(tmp_path: Path) -> None:
+    """Aucune commande de test détectable : comportement inchangé, mais signalé (issue #582 lot B)."""
+    setup_standard_profile(tmp_path, profile_id="starter", project_name="Demo")
+    record = tmp_path / "_grimoire-output/evidence/bootstrap/acceptance-record.md"
+    _replace(record, "| AC-001 |  |  | à vérifier |", "| AC-001 | Les tests passent | pytest -q | passé |")
+
+    result = verify_standard_profile(tmp_path)
+
+    assert "acceptance.no_test_command_detected" in _ids(result, "acceptance.", "warning")
+    assert "acceptance.passed_without_test_run" not in _ids(result, "acceptance.")
+    assert result.ok
+
+
+def test_recording_a_real_green_test_run_clears_the_warning(tmp_path: Path) -> None:
+    setup_standard_profile(tmp_path, profile_id="starter", project_name="Demo")
+    (tmp_path / "project-context.yaml").write_text(
+        'project:\n  name: demo\nneeds:\n  commands:\n    test-runner: "true"\n', encoding="utf-8"
+    )
+    record = tmp_path / "_grimoire-output/evidence/bootstrap/acceptance-record.md"
+    _replace(record, "| AC-001 |  |  | à vérifier |", "| AC-001 | Les tests passent | true | passé |")
+    assert "acceptance.passed_without_test_run" in _ids(verify_standard_profile(tmp_path), "acceptance.", "warning")
+
+    outcome = record_acceptance_test_run(tmp_path)
+
+    assert outcome.ok is True
+    assert outcome.path.is_file()
+    assert "acceptance.passed_without_test_run" not in _ids(verify_standard_profile(tmp_path), "acceptance.")
+
+
+def test_recording_a_real_red_test_run_keeps_the_warning(tmp_path: Path) -> None:
+    setup_standard_profile(tmp_path, profile_id="starter", project_name="Demo")
+    (tmp_path / "project-context.yaml").write_text(
+        'project:\n  name: demo\nneeds:\n  commands:\n    test-runner: "false"\n', encoding="utf-8"
+    )
+    record = tmp_path / "_grimoire-output/evidence/bootstrap/acceptance-record.md"
+    _replace(record, "| AC-001 |  |  | à vérifier |", "| AC-001 | Les tests passent | false | passé |")
+
+    outcome = record_acceptance_test_run(tmp_path)
+
+    assert outcome.ok is False
+    assert "acceptance.passed_without_test_run" in _ids(verify_standard_profile(tmp_path), "acceptance.", "warning")
+
+
+def test_modifying_a_source_file_after_a_green_run_makes_it_stale(tmp_path: Path) -> None:
+    """Issue #582 lot B, suite (revue de la PR #585) : un run vert n'est pas lié au code.
+
+    Rouge avant l'empreinte : un agent pouvait lancer `gate run-tests` tôt,
+    puis modifier le code sans jamais relancer les tests, et `verify` restait
+    vert indéfiniment sur du code jamais exercé par ce run.
+    """
+    setup_standard_profile(tmp_path, profile_id="starter", project_name="Demo")
+    (tmp_path / "project-context.yaml").write_text(
+        'project:\n  name: demo\nneeds:\n  commands:\n    test-runner: "true"\n', encoding="utf-8"
+    )
+    (tmp_path / "app.py").write_text("print('v1')\n", encoding="utf-8")
+    record = tmp_path / "_grimoire-output/evidence/bootstrap/acceptance-record.md"
+    _replace(record, "| AC-001 |  |  | à vérifier |", "| AC-001 | Les tests passent | true | passé |")
+
+    outcome = record_acceptance_test_run(tmp_path)
+    assert outcome.ok is True
+    assert "acceptance.test_run_stale" not in _ids(verify_standard_profile(tmp_path), "acceptance.")
+
+    # Le code change après le run : le gate doit désormais le dire. Taille
+    # différente (pas seulement le contenu) pour ne jamais dépendre de la
+    # résolution de la mtime du système de fichiers qui exécute ce test.
+    (tmp_path / "app.py").write_text("print('v1')\nprint('v2')\n", encoding="utf-8")
+
+    result = verify_standard_profile(tmp_path)
+    assert "acceptance.test_run_stale" in _ids(result, "acceptance.", "warning")
+    assert "acceptance.passed_without_test_run" not in _ids(result, "acceptance.")
+    assert result.ok  # transition douce : avertissement, pas encore un blocage
+
+
+def test_modifying_only_grimoire_output_does_not_make_a_run_stale(tmp_path: Path) -> None:
+    """Le mécanisme écrit lui-même sous `_grimoire-output/` : il ne doit jamais s'auto-invalider."""
+    setup_standard_profile(tmp_path, profile_id="starter", project_name="Demo")
+    (tmp_path / "project-context.yaml").write_text(
+        'project:\n  name: demo\nneeds:\n  commands:\n    test-runner: "true"\n', encoding="utf-8"
+    )
+    record = tmp_path / "_grimoire-output/evidence/bootstrap/acceptance-record.md"
+    _replace(record, "| AC-001 |  |  | à vérifier |", "| AC-001 | Les tests passent | true | passé |")
+
+    outcome = record_acceptance_test_run(tmp_path)
+    assert outcome.ok is True
+
+    evidence_pack = tmp_path / "_grimoire-output/evidence/bootstrap/evidence-pack.md"
+    evidence_pack.write_text(evidence_pack.read_text(encoding="utf-8") + "\nnote ajoutée après le run\n", encoding="utf-8")
+
+    result = verify_standard_profile(tmp_path)
+    assert "acceptance.test_run_stale" not in _ids(result, "acceptance.")
+
+
+def test_a_cache_created_by_the_test_run_itself_does_not_make_it_stale(tmp_path: Path) -> None:
+    """Revue de la PR #585, point 1 : un cache non suivi créé PAR le run ne doit pas le périmer.
+
+    Rouge avant : l'empreinte était calculée avant le run et les caches
+    d'outillage n'étaient pas exclus — sur un projet git sans `.gitignore`
+    adapté, `.pytest_cache/` (ou tout équivalent) créé par la commande de
+    test elle-même apparaissait comme une modification de l'arbre dès la
+    vérification suivante, périmant le run qui venait tout juste d'être
+    enregistré.
+    """
+    _git_repo_with_a_commit(tmp_path)
+    setup_standard_profile(tmp_path, profile_id="starter", project_name="Demo")
+    (tmp_path / "project-context.yaml").write_text(
+        'project:\n  name: demo\nneeds:\n  commands:\n'
+        '    test-runner: "mkdir -p .pytest_cache && echo x > .pytest_cache/x"\n',
+        encoding="utf-8",
+    )
+    record = tmp_path / "_grimoire-output/evidence/bootstrap/acceptance-record.md"
+    _replace(record, "| AC-001 |  |  | à vérifier |", "| AC-001 | Les tests passent | true | passé |")
+
+    outcome = record_acceptance_test_run(tmp_path)
+    assert outcome.ok is True
+    assert (tmp_path / ".pytest_cache" / "x").is_file()  # le cache non ignoré existe bien
+
+    result = verify_standard_profile(tmp_path)
+    assert "acceptance.test_run_stale" not in _ids(result, "acceptance.")
+
+
+def test_editing_an_untracked_file_created_before_the_run_makes_it_stale(tmp_path: Path) -> None:
+    """Revue de la PR #585, point 2 : un fichier non suivi n'est représenté que par son chemin.
+
+    Rouge avant : `git status --porcelain` ne montre qu'`?? nouveau.py` pour
+    un fichier non suivi, jamais son contenu — le retoucher après le run ne
+    changeait donc jamais l'empreinte, alors que c'est le cas courant d'un
+    agent qui crée un fichier puis le retouche.
+    """
+    _git_repo_with_a_commit(tmp_path)
+    setup_standard_profile(tmp_path, profile_id="starter", project_name="Demo")
+    (tmp_path / "project-context.yaml").write_text(
+        'project:\n  name: demo\nneeds:\n  commands:\n    test-runner: "true"\n', encoding="utf-8"
+    )
+    (tmp_path / "nouveau.py").write_text("print('v1')\n", encoding="utf-8")
+    record = tmp_path / "_grimoire-output/evidence/bootstrap/acceptance-record.md"
+    _replace(record, "| AC-001 |  |  | à vérifier |", "| AC-001 | Les tests passent | true | passé |")
+
+    outcome = record_acceptance_test_run(tmp_path)
+    assert outcome.ok is True
+    assert "acceptance.test_run_stale" not in _ids(verify_standard_profile(tmp_path), "acceptance.")
+
+    # Taille différente, jamais seulement le contenu : indépendant de la
+    # résolution de la mtime du système de fichiers qui exécute ce test.
+    (tmp_path / "nouveau.py").write_text("print('v1')\nprint('v2')\n", encoding="utf-8")
+
+    result = verify_standard_profile(tmp_path)
+    assert "acceptance.test_run_stale" in _ids(result, "acceptance.", "warning")
 
 
 def test_accepting_without_a_validator_is_an_error(tmp_path: Path) -> None:
