@@ -1,0 +1,457 @@
+{
+  "generated_at": "2026-09-17T05:25:51.127524+00:00",
+  "seed": 551,
+  "total_tasks": 20,
+  "tasks_run": 20,
+  "k": 3,
+  "expected_cost": {
+    "per_arm": {
+      "nu": {
+        "pilot_runs": 2,
+        "avg_cost_usd": 0.28493999999999997,
+        "planned_runs": 60,
+        "expected_cost_usd": 17.0964
+      },
+      "ecc": {
+        "pilot_runs": 2,
+        "avg_cost_usd": 0.64544025,
+        "planned_runs": 60,
+        "expected_cost_usd": 38.726415
+      },
+      "kit": {
+        "pilot_runs": 2,
+        "avg_cost_usd": 1.42277875,
+        "planned_runs": 60,
+        "expected_cost_usd": 85.366725
+      }
+    },
+    "total_expected_usd": 141.18954000000002
+  },
+  "per_arm": {
+    "nu": {
+      "n_runs": 60,
+      "n_tasks": 20,
+      "success_rate": 0.9166666666666666,
+      "success_rate_ci95": [
+        0.85,
+        0.9833333333333333
+      ],
+      "pass_hat_k_rate": 0.9,
+      "pass_hat_k_ci95": [
+        0.75,
+        1.0
+      ],
+      "median_wall_seconds": 64.01114782450168,
+      "median_cost_usd_resolved": 0.39866550000000006,
+      "total_cost_usd": 27.0375555,
+      "median_num_turns": 6.0,
+      "terminated_reasons": {
+        "completed": 60
+      }
+    },
+    "ecc": {
+      "n_runs": 60,
+      "n_tasks": 20,
+      "success_rate": 0.9333333333333333,
+      "success_rate_ci95": [
+        0.8666666666666667,
+        0.9833333333333333
+      ],
+      "pass_hat_k_rate": 0.9,
+      "pass_hat_k_ci95": [
+        0.75,
+        1.0
+      ],
+      "median_wall_seconds": 61.01296143250511,
+      "median_cost_usd_resolved": 0.62906525,
+      "total_cost_usd": 45.303807,
+      "median_num_turns": 7.0,
+      "terminated_reasons": {
+        "completed": 60
+      }
+    },
+    "kit": {
+      "n_runs": 60,
+      "n_tasks": 20,
+      "success_rate": 0.9,
+      "success_rate_ci95": [
+        0.8166666666666667,
+        0.9666666666666667
+      ],
+      "pass_hat_k_rate": 0.85,
+      "pass_hat_k_ci95": [
+        0.7,
+        1.0
+      ],
+      "median_wall_seconds": 189.02131553450454,
+      "median_cost_usd_resolved": 1.247401,
+      "total_cost_usd": 79.5111005,
+      "median_num_turns": 19.0,
+      "terminated_reasons": {
+        "completed": 60
+      }
+    }
+  },
+  "by_task": {
+    "go/bottle-song": {
+      "language": "go",
+      "nu": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      },
+      "ecc": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      },
+      "kit": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      }
+    },
+    "go/error-handling": {
+      "language": "go",
+      "nu": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      },
+      "ecc": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      },
+      "kit": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      }
+    },
+    "go/palindrome-products": {
+      "language": "go",
+      "nu": {
+        "runs": 3,
+        "successes": 0,
+        "pass_hat_k": 0
+      },
+      "ecc": {
+        "runs": 3,
+        "successes": 2,
+        "pass_hat_k": 0
+      },
+      "kit": {
+        "runs": 3,
+        "successes": 1,
+        "pass_hat_k": 0
+      }
+    },
+    "go/pov": {
+      "language": "go",
+      "nu": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      },
+      "ecc": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      },
+      "kit": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      }
+    },
+    "go/simple-linked-list": {
+      "language": "go",
+      "nu": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      },
+      "ecc": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      },
+      "kit": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      }
+    },
+    "javascript/affine-cipher": {
+      "language": "javascript",
+      "nu": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      },
+      "ecc": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      },
+      "kit": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      }
+    },
+    "javascript/go-counting": {
+      "language": "javascript",
+      "nu": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      },
+      "ecc": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      },
+      "kit": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      }
+    },
+    "javascript/list-ops": {
+      "language": "javascript",
+      "nu": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      },
+      "ecc": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      },
+      "kit": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      }
+    },
+    "javascript/queen-attack": {
+      "language": "javascript",
+      "nu": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      },
+      "ecc": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      },
+      "kit": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      }
+    },
+    "javascript/transpose": {
+      "language": "javascript",
+      "nu": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      },
+      "ecc": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      },
+      "kit": {
+        "runs": 3,
+        "successes": 2,
+        "pass_hat_k": 0
+      }
+    },
+    "python/bowling": {
+      "language": "python",
+      "nu": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      },
+      "ecc": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      },
+      "kit": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      }
+    },
+    "python/list-ops": {
+      "language": "python",
+      "nu": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      },
+      "ecc": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      },
+      "kit": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      }
+    },
+    "python/proverb": {
+      "language": "python",
+      "nu": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      },
+      "ecc": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      },
+      "kit": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      }
+    },
+    "python/react": {
+      "language": "python",
+      "nu": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      },
+      "ecc": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      },
+      "kit": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      }
+    },
+    "python/zipper": {
+      "language": "python",
+      "nu": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      },
+      "ecc": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      },
+      "kit": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      }
+    },
+    "rust/forth": {
+      "language": "rust",
+      "nu": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      },
+      "ecc": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      },
+      "kit": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      }
+    },
+    "rust/poker": {
+      "language": "rust",
+      "nu": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      },
+      "ecc": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      },
+      "kit": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      }
+    },
+    "rust/react": {
+      "language": "rust",
+      "nu": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      },
+      "ecc": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      },
+      "kit": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      }
+    },
+    "rust/scale-generator": {
+      "language": "rust",
+      "nu": {
+        "runs": 3,
+        "successes": 1,
+        "pass_hat_k": 0
+      },
+      "ecc": {
+        "runs": 3,
+        "successes": 0,
+        "pass_hat_k": 0
+      },
+      "kit": {
+        "runs": 3,
+        "successes": 0,
+        "pass_hat_k": 0
+      }
+    },
+    "rust/two-bucket": {
+      "language": "rust",
+      "nu": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      },
+      "ecc": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      },
+      "kit": {
+        "runs": 3,
+        "successes": 3,
+        "pass_hat_k": 1
+      }
+    }
+  }
+}
