@@ -98,6 +98,34 @@ _QDRANT_DEFAULT_URL = "http://localhost:6333"
 _WEAVIATE_DEFAULT_URL = "http://localhost:8080"
 _QDRANT_COMPOSE_FILE = "docker-compose.memory.yml"
 
+# ── Lite profile (issue Grimoire-kit#552, phase 2 lot 2.6) ─────────────────────
+
+_CI_MARKERS = (
+    ".github/workflows",
+    ".gitlab-ci.yml",
+    ".circleci/config.yml",
+    "azure-pipelines.yml",
+    ".travis.yml",
+    "Jenkinsfile",
+)
+_TEST_DIR_MARKERS = ("tests", "test", "spec", "__tests__")
+
+
+def _looks_like_a_playground(target: Path) -> bool:
+    """True when *target* has neither a CI config nor a test suite.
+
+    A light, top-level-only heuristic — no recursive scan — used solely to
+    surface the ``--lite`` suggestion in the wizard. It never changes what
+    gets written; a false negative just means the suggestion isn't shown.
+    """
+    if any((target / marker).exists() for marker in _CI_MARKERS):
+        return False
+    for name in _TEST_DIR_MARKERS:
+        candidate = target / name
+        if candidate.is_dir() and any(candidate.iterdir()):
+            return False
+    return True
+
 
 # ── Memory backend detection ─────────────────────────────────────────────────
 
@@ -228,6 +256,7 @@ def _choose_memory_profile(
     backend: str,
     *,
     offer_qdrant_docker: bool,
+    suggest_lite: bool = False,
 ) -> tuple[str, str, bool, bool]:
     """Ask for a memory *composition*, not a backend.
 
@@ -239,6 +268,11 @@ def _choose_memory_profile(
     Only compositions this machine can actually serve are offered — an
     unreachable one is shown with the reason and cannot be selected, because a
     profile that cannot be filled is worse than a smaller one that can.
+
+    ``suggest_lite`` (issue Grimoire-kit#552, lot 2.6) shifts the
+    recommendation from ``memory_profiles.DEFAULT_PROFILE`` to ``lexical`` —
+    for a repo that looks like a playground (``--lite``, or no CI/tests
+    detected) a service-free composition is a better first default.
     """
     has_egress = True
     if offer_qdrant_docker:
@@ -256,6 +290,13 @@ def _choose_memory_profile(
     console.print()
     console.print("  [bold]La mémoire est une composition de couches, pas un backend.[/bold]")
     console.print()
+    recommended_id = "lexical" if suggest_lite else memory_profiles.DEFAULT_PROFILE
+    if suggest_lite:
+        console.print(
+            "  [dim]Aucune CI, aucun test détecté — un profil léger (lexical, sans "
+            "service) convient probablement à ce dépôt.[/dim]"
+        )
+        console.print()
     choices: list[str] = []
     default_choice = "1"
     for idx, profile in enumerate(memory_profiles.ordered(), 1):
@@ -267,7 +308,7 @@ def _choose_memory_profile(
             console.print(f"       [dim]indisponible ici — manque : {reason}[/dim]")
             continue
         choices.append(key)
-        if profile.id == memory_profiles.DEFAULT_PROFILE:
+        if profile.id == recommended_id:
             default_choice = key
             console.print(f"    [bold]{key}[/bold]) {profile.label:<10} {profile.summary} [cyan]← recommandé[/cyan]")
         else:
@@ -308,6 +349,7 @@ def _run_wizard(
     backend: str,
     *,
     offer_qdrant_docker: bool = False,
+    lite: bool = False,
 ) -> dict[str, Any]:
     """Interactive wizard — multi-select archetypes, returns config dict."""
     console.print()
@@ -366,8 +408,9 @@ def _run_wizard(
     # ── Step 3/5 · Memory composition ─────────────────────────────────
     console.print()
     console.print("  [dim]\\[###--] 3/5 · Mémoire[/dim]")
+    suggest_lite = lite or _looks_like_a_playground(target)
     profile_id, backend, offline, qdrant_docker = _choose_memory_profile(
-        backend, offer_qdrant_docker=offer_qdrant_docker,
+        backend, offer_qdrant_docker=offer_qdrant_docker, suggest_lite=suggest_lite,
     )
 
     # ── Step 4/5 · Archetypes (multi-select) ──────────────────────────
@@ -561,6 +604,7 @@ def _display_report(
     *,
     qdrant_docker_started: bool = False,
     qdrant_docker_message: str = "",
+    lite: bool = False,
 ) -> None:
     """Display a rich post-install report."""
     console.print()
@@ -616,6 +660,22 @@ def _display_report(
     # Summary counts
     console.print(f"  [dim]{len(result.created_dirs)} dirs · {len(result.copied_files)} files · {len(result.rendered_files)} configs[/dim]")
     console.print()
+
+    if lite:
+        console.print(Panel(
+            "[bold]Profil léger[/bold] — pensé pour un dépôt sans CI ni tests.\n\n"
+            "  Laissé de côté :\n"
+            "    - mémoire lexicale seule (aucun service vectoriel)\n"
+            "    - pas d'enregistrement au cockpit local\n"
+            "    - standard agentique gouverné non activé\n\n"
+            "  Pour l'activer plus tard :\n"
+            "    [cyan]grimoire memory up --profile standard --apply[/cyan]\n"
+            "    [cyan]grimoire cockpit add .[/cyan]\n"
+            "    [cyan]grimoire standard init .[/cyan]",
+            title="[bold]Profil lite[/bold]",
+            border_style="cyan",
+        ))
+        console.print()
 
     # Next steps
     console.print(Panel(
@@ -721,6 +781,7 @@ def _display_json(
     project_name: str,
     *,
     qdrant_docker: dict[str, Any] | None = None,
+    lite: bool = False,
 ) -> None:
     """Output JSON result for scripting."""
     data: dict[str, Any] = {
@@ -742,6 +803,18 @@ def _display_json(
     }
     if qdrant_docker is not None:
         data["qdrant_docker"] = qdrant_docker
+    if lite:
+        data["profile"] = "lite"
+        data["skipped"] = {
+            "memory_backend": "lexical (no service)",
+            "cockpit": False,
+            "standard": False,
+        }
+        data["activate_later"] = {
+            "memory": "grimoire memory up --profile standard --apply",
+            "cockpit": "grimoire cockpit add .",
+            "standard": "grimoire standard init .",
+        }
     for label in result.copied_files:
         if "/" in label:
             cat = label.split("/")[0]
@@ -841,11 +914,25 @@ def run_init(
     qdrant_docker: bool = False,
     memory_profile: str = "",
     no_cockpit: bool = False,
+    lite: bool = False,
 ) -> None:
     """Execute the enhanced init flow: scan → resolve → wizard → scaffold → report."""
     target = target.resolve()
     fmt = (ctx.obj or {}).get("output", "text")
     yes = (ctx.obj or {}).get("yes", False)
+
+    # ── Lite profile (issue Grimoire-kit#552, lot 2.6) ──────────────────────
+    # A named preset, not a new mechanism: every knob it sets already exists
+    # as its own flag. Applied before backend/memory-profile resolution below
+    # so the rest of the function sees them as if the caller had passed them
+    # explicitly — an interactive wizard can still override them (no --yes
+    # implied), same as any other init flag today.
+    if lite:
+        backend = "lexical"
+        memory_profile = memory_profile or "lexical"
+        no_cockpit = True
+        if not archetype:
+            archetype = "minimal"
 
     if memory_profile and not memory_profiles.is_known(memory_profile):
         if fmt == "json":
@@ -913,6 +1000,7 @@ def run_init(
             resolved,
             backend,
             offer_qdrant_docker=offer_qdrant_docker,
+            lite=lite,
         )
         project_name = wizard_result["project_name"]
         user_name = wizard_result["user_name"]
@@ -993,7 +1081,7 @@ def run_init(
                 "started": qdrant_docker_started,
                 "message": qdrant_docker_message,
             }
-        _display_json(target, result, resolved, scan, backend, project_name, qdrant_docker=docker_status)
+        _display_json(target, result, resolved, scan, backend, project_name, qdrant_docker=docker_status, lite=lite)
     else:
         _display_report(
             target,
@@ -1004,6 +1092,7 @@ def run_init(
             project_name,
             qdrant_docker_started=qdrant_docker_started,
             qdrant_docker_message=qdrant_docker_message,
+            lite=lite,
         )
 
     _maybe_register_cockpit(target, project_name, fmt, no_cockpit=no_cockpit)
