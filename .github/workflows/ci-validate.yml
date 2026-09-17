@@ -221,7 +221,7 @@ jobs:
           # d'encodage en cache le suivant, et un `-x` transforme la remise en
           # état en une boucle d'un échec par cycle de CI. Une exécution doit
           # rendre la liste complète de ce qu'il reste à traiter.
-          python -m pytest tests/test_*.py -q --tb=short --maxfail=20 \
+          python -m pytest tests/test_*.py -q --tb=short --maxfail=20 --durations=25 \
             --ignore=tests/test_background_tasks.py \
             2>&1 | tee framework-test-output.txt || rc=$?
           {

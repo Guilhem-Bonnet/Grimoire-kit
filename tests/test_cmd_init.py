@@ -11,6 +11,30 @@ import pytest
 from grimoire.cli.cmd_init import _git_user_name, _maybe_register_cockpit, detect_memory_backend
 
 
+def _stub_unreachable_memory_services(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force every memory-backend probe to read as "nothing running here".
+
+    ``-y init`` without an explicit ``--backend`` calls the real
+    ``detect_memory_backend()`` (issue #496) — three unmocked HTTP/TCP
+    round-trips to localhost (Weaviate :8080, Qdrant :6333, Ollama :11434).
+    On ``ubuntu-latest`` a closed loopback port refuses instantly; on
+    ``windows-latest`` it doesn't, and each of the ~20 plain ``-y init``
+    calls in this file paid the probe's up-to-2s-per-endpoint timeout in
+    full — measured at ~24s per test in CI, the cause of the Windows
+    job's ~9-minute stall in the tools-tests suite.
+
+    Every test that actually exercises detection (``TestDetectMemoryBackend``
+    and friends) already patches these functions itself, at a more specific
+    level, inside its own ``with`` block — that still wins over this
+    default. This only covers the tests that don't care what
+    ``detect_memory_backend()`` returns and never meant to touch the
+    network at all.
+    """
+    monkeypatch.setattr("grimoire.cli.cmd_init._is_weaviate_reachable", lambda *a, **k: False)
+    monkeypatch.setattr("grimoire.cli.cmd_init._is_qdrant_reachable", lambda *a, **k: False)
+    monkeypatch.setattr("grimoire.cli.cmd_init._is_ollama_reachable", lambda *a, **k: False)
+
+
 class TestMaybeRegisterCockpitLogging:
     """Régression CodeQL py/log-injection : `target` (un nom de dossier choisi
     par l'appelant) était interpolé avec `%s` dans `logger.debug`. Un dossier
@@ -189,6 +213,10 @@ class TestGitUserName:
 
 class TestInitCLI:
     """CLI integration tests using typer CliRunner."""
+
+    @pytest.fixture(autouse=True)
+    def _no_real_memory_probe(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _stub_unreachable_memory_services(monkeypatch)
 
     @pytest.fixture
     def runner(self):
@@ -586,6 +614,10 @@ class TestInitNoCockpit:
     """#305 — `init` enrôlait chaque projet dans le registre cockpit réel, même
     les jetables, sans option pour l'éviter (seule la variable d'environnement
     non documentée `GRIMOIRE_NO_COCKPIT` le pouvait)."""
+
+    @pytest.fixture(autouse=True)
+    def _no_real_memory_probe(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _stub_unreachable_memory_services(monkeypatch)
 
     @pytest.fixture
     def runner(self):
