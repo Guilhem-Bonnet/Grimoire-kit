@@ -1,50 +1,32 @@
-"""Perf du cockpit — fiche Piloter et Flotte (issue #541, suite du backend #542).
+"""Perf du cockpit — fiche Piloter et Flotte (issue #541 → #542 → #548).
 
 PR #542 a livré côté serveur ``GET /api/fleet``
 (``grimoire.tools.project_health.fleet_status``) : santé + mémoire (mode
 rapide, jamais de réseau) de TOUT le registre en une seule réponse, calculées
-en parallèle côté serveur. Ce module (front) est la moitié qui restait :
+en parallèle côté serveur. PR #547 (front, chantier antérieur et distinct de
+celui-ci) avait ensuite paralléisé les HUIT appels que ``loadSheet()``
+faisait encore un par un pour une fiche projet (``health``, ``memoryStatus``,
+``doctor``, ``agents``, ``proposals``, ``setupRun``,
+``flowRuns('project-upgrade', ...)`` + ``projects()`` pour le nom du projet),
+sans en réduire le nombre — huit appels partaient toujours, seulement en
+parallèle plutôt qu'en série.
 
-1. ``loadFleet`` (``web/workspace/spaces/piloter.js``) appelait encore
-   ``projects()`` PUIS ``health()``/``memoryStatus()`` par projet — un
-   balayage 2×N que ``/api/fleet`` rend inutile. Remplacé par un unique
-   appel ``ctx.api.fleet()``.
-2. ``mount()``/``draw()`` appelait ``ctx.api.projects()`` (nom du projet,
-   cockpit) en SÉRIE avant ``loadSheet()`` — deux tours réseau l'un après
-   l'autre au lieu d'un seul. Les deux partent maintenant en même temps
-   (``Promise.all``).
-3. ``draw()`` peignait un écran vide jusqu'à la résolution complète des
-   appels — une coquille « chargement… » s'affiche maintenant tout de suite.
-4. Un refresh déclenché pendant qu'un tour précédent est encore en vol
-   rejoint désormais la même promesse (``inFlight``) plutôt que d'en relancer
-   un second en concurrence.
+Issue #548 referme ce chantier : ``GET /api/workspace/sheet``
+(``workspace_api.sheet_view``) agrège désormais ces sept sous-vues côté
+serveur (même principe que ``fleet_status`` : un ``ThreadPoolExecutor`` par
+sous-vue plutôt que par projet), plus le nom du projet (résolu depuis le
+registre, ``_sheet_project_name`` — remplace le huitième appel
+``projects()``). ``doctor`` en est volontairement absent : mesuré comme le
+vrai coût des sept (~350ms contre ~120ms pour ``health``, le reste quasi nul
+une fois passé par le cache de ``view_cache``) — l'onglet Problèmes
+(``ctx.api.doctor()``) le rend séparément, à la demande. Le premier rendu de
+la fiche Piloter ne déclenche donc plus qu'UN SEUL appel réseau, jamais huit.
 
-Ce test mesure — il ne suppose jamais — le nombre d'appels réseau, leur
-parallélisme réel (débuts de requêtes quasi simultanés, pas espacés du temps
-de réponse d'un appel précédent) et le temps jusqu'à interactivité, sur un
-registre de projets jetables (jamais un vrai projet).
-
-Budget de la fiche Piloter : ``loadSheet`` porte SEPT appels
-(``health``, ``memoryStatus``, ``doctor``, ``agents``, ``proposals``,
-``setupRun``, ``flowRuns('project-upgrade', ...)`` — ce dernier ajouté par
-l'issue #513, un chantier antérieur et distinct de celui-ci) + UN appel
-``projects()`` (nom du projet, cockpit uniquement) désormais parallèle : HUIT
-appels au total pour une fiche cockpit, jamais SIX — ce nombre n'est pas dans
-le périmètre de cette PR (réduire ``loadSheet`` lui-même serait un chantier
-séparé). Ce qui compte ici, et que ce test vérifie, c'est qu'aucun de ces
-huit appels n'attend la fin d'un autre pour démarrer.
-
-Seuil d'interactivité de la fiche : mesuré sur ce harnais (projets jetables,
-``grimoire init`` réel, chromium headless), le plancher est ~810 ms AVANT
-comme APRÈS ce correctif — dominé par la réponse la plus lente des huit
-endpoints (``doctor``/``health`` font de l'IO disque réelle), jamais par
-l'ordonnancement front. Le vrai gain mesuré ici est l'étalement des DÉPARTS
-de requêtes : ~12 ms avant (le petit aller-retour série de ``projects()``),
-~1 ms après (huit départs quasi simultanés) — voir le tableau de la PR. Le
-seuil ``SHEET_MAX_INTERACTIVE_MS`` est donc fixé avec une marge réaliste
-au-dessus du plancher mesuré, pas au 700 ms visé initialement par l'issue
-(inatteignable ici sans toucher le temps de réponse du backend, hors
-périmètre de cette PR front-only).
+Ce test mesure — il ne suppose jamais — le nombre d'appels réseau au premier
+rendu et le temps jusqu'à interactivité, sur un registre de projets jetables
+(jamais un vrai projet). Seuil d'interactivité : 400 ms (critère d'arrêt de
+l'issue), largement tenu ici puisque la seule route qui restait proche de ce
+budget (``doctor``) n'est plus dans le chemin critique.
 """
 
 from __future__ import annotations
@@ -53,9 +35,7 @@ import time
 
 from playwright.sync_api import Browser, Page
 
-SHEET_MAX_CALLS = 8
-SHEET_MAX_SPREAD_MS = 300
-SHEET_MAX_INTERACTIVE_MS = 1500
+SHEET_MAX_INTERACTIVE_MS = 400
 FLEET_MAX_INTERACTIVE_MS = 900
 
 
@@ -69,12 +49,12 @@ def _instrument_api(page: Page) -> list[tuple[str, float]]:
     return seen
 
 
-def test_fiche_piloter_appels_paralleles_et_interactive_sous_700ms(
+def test_fiche_piloter_un_seul_appel_sheet_et_interactive_sous_400ms(
     browser: Browser, served_cockpit_triple: tuple[str, str, str, str]
 ) -> None:
-    """Ouvrir la fiche d'un projet depuis la Flotte : au plus HUIT appels
-    API (budget documenté en tête de module), tous lancés à quasi le même
-    instant (jamais un enchaînement), fiche interactive en moins de 700 ms."""
+    """Ouvrir la fiche d'un projet depuis la Flotte : UN SEUL appel réseau
+    (``GET /api/workspace/sheet``) — pas les huit routes d'avant #548 —
+    fiche interactive en moins de 400 ms (issue #548)."""
     served, slug_a, slug_b, _slug_c = served_cockpit_triple
     context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
     page = context.new_page()
@@ -92,25 +72,22 @@ def test_fiche_piloter_appels_paralleles_et_interactive_sous_700ms(
         elapsed_ms = (time.monotonic() - start) * 1000
 
         urls = [u for u, _ in seen]
-        assert len(urls) <= SHEET_MAX_CALLS, (
-            f"fiche Piloter : {len(urls)} appel(s) API, attendu <= {SHEET_MAX_CALLS} — {urls}"
+        old_routes = ("/api/health", "/api/memory/status", "/api/workspace/doctor",
+                      "/api/workspace/agents", "/api/workspace/proposals", "/api/setup/run",
+                      "/api/workspace/flows/runs", "/api/projects")
+        old_calls = [u for u in urls if any(route in u for route in old_routes)]
+        sheet_calls = [u for u in urls if "/api/workspace/sheet" in u]
+
+        assert not old_calls, (
+            f"une des sept anciennes routes (+ `projects()`) est repartie au premier rendu — {old_calls}"
         )
+        assert len(sheet_calls) == 1, (
+            f"attendu exactement un appel à /api/workspace/sheet au premier rendu — {urls}"
+        )
+        assert len(urls) == 1, f"un seul appel réseau attendu au premier rendu — {urls}"
         assert elapsed_ms < SHEET_MAX_INTERACTIVE_MS, (
             f"fiche Piloter interactive en {elapsed_ms:.0f} ms, attendu < {SHEET_MAX_INTERACTIVE_MS} ms"
         )
-
-        # Parallélisme réel : un enchaînement séquentiel espace chaque départ
-        # de requête du temps de réponse de la précédente (dizaines à
-        # centaines de ms d'IO disque réelle pour health()/doctor()/etc. sur
-        # ce harnais) ; un vrai `Promise.all` les démarre à quasi le même
-        # instant. On borne l'étalement total, pas chaque paire.
-        if len(seen) >= 2:
-            starts = sorted(t for _, t in seen)
-            spread_ms = (starts[-1] - starts[0]) * 1000
-            assert spread_ms < SHEET_MAX_SPREAD_MS, (
-                f"appels non parallèles : étalement de {spread_ms:.0f} ms entre le premier et le "
-                f"dernier départ de requête (attendu < {SHEET_MAX_SPREAD_MS} ms) — {seen}"
-            )
 
         # La coquille « chargement… » (#541 point 3) doit être retirée une
         # fois le vrai rendu posé — jamais empilée dessous (root.append sans

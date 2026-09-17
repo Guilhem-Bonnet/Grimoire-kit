@@ -746,7 +746,13 @@ def sync_proposals(project_root: Path, *, threshold: int | None = None) -> list[
 
         if action == "keep_rejected":
             refreshed = replace(existing, count=count, last_seen=last_seen)
-            _save_proposal(path, refreshed)
+            # Idempotence (issue #548) : un appel qui n'observe rien de
+            # nouveau ne doit pas réécrire le fichier — sinon la mtime du
+            # dossier bouge à chaque lecture, ce qui invalide en boucle le
+            # cache de `proposals_view` (`view_cache`, keyé sur cette même
+            # mtime) et le rend inopérant en pratique.
+            if refreshed != existing:
+                _save_proposal(path, refreshed)
             results.append(refreshed)
             continue
 
@@ -777,7 +783,10 @@ def sync_proposals(project_root: Path, *, threshold: int | None = None) -> list[
             category=category or existing.category,
             fallback_agent=fallback_agent or existing.fallback_agent,
         )
-        _save_proposal(path, refreshed)
+        # Idempotence (issue #548) — voir le commentaire jumeau sous
+        # "keep_rejected" ci-dessus : même raison, même garde.
+        if refreshed != existing:
+            _save_proposal(path, refreshed)
         results.append(refreshed)
 
     # Proposals the current ledger no longer surfaces (rotated, pruned) stay

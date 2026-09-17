@@ -11,10 +11,12 @@ dans une même session, mais le fan-out lui-même — un appel par projet à
 chaque cache froid — restait entier. PR #542 (backend) puis celle-ci
 (front) le remplacent par un unique ``GET /api/fleet``
 (``grimoire.tools.project_health.fleet_status``) qui calcule les N entrées
-en parallèle côté serveur. Sélectionner un projet (cliquer une ligne)
-continue de n'utiliser que ``loadSheet`` (``GET /api/health?project=<slug>``
-une seule fois pour ce projet précis) — cette fonction ne touche jamais la
-Flotte.
+en parallèle côté serveur. Sélectionner un projet (cliquer une ligne) continue de n'utiliser que
+``loadSheet`` — un seul appel pour ce projet précis, ``GET
+/api/health?project=<slug>`` jusqu'à l'issue #548, ``GET
+/api/workspace/sheet?project=<slug>`` depuis (l'agrégation qui remplace les
+sept appels que ``loadSheet`` faisait un par un pour une fiche projet) —
+cette fonction ne touche jamais la Flotte.
 """
 
 from __future__ import annotations
@@ -22,10 +24,10 @@ from __future__ import annotations
 from playwright.sync_api import Browser, Page
 
 
-def _health_requests(page: Page) -> list[str]:
-    """Écoute et rend la liste live des requêtes `/api/health` observées."""
+def _sheet_requests(page: Page) -> list[str]:
+    """Écoute et rend la liste live des requêtes `/api/workspace/sheet` observées."""
     seen: list[str] = []
-    page.on("request", lambda req: seen.append(req.url) if "/api/health" in req.url else None)
+    page.on("request", lambda req: seen.append(req.url) if "/api/workspace/sheet" in req.url else None)
     return seen
 
 
@@ -40,7 +42,7 @@ def test_le_changement_de_projet_n_interroge_que_le_projet_cible(
     browser: Browser, served_cockpit_triple: tuple[str, str, str, str]
 ) -> None:
     """Critère d'acceptation de l'issue, à la lettre : un registre de 3 projets
-    jetables, un changement de projet -> 1 requête `/api/health`, pas 3."""
+    jetables, un changement de projet -> 1 requête `/api/workspace/sheet`, pas 3."""
     served, slug_a, slug_b, _slug_c = served_cockpit_triple
     context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
     page = context.new_page()
@@ -58,12 +60,12 @@ def test_le_changement_de_projet_n_interroge_que_le_projet_cible(
 
         # Le changement de projet lui-même : cliquer la ligne d'un AUTRE
         # projet ouvre sa fiche. Le compteur n'écoute qu'à partir d'ici.
-        seen = _health_requests(page)
+        seen = _sheet_requests(page)
         page.locator(".pl-table tbody tr", has_text=slug_b).first.click()
         page.wait_for_selector("button:has-text('Mettre à jour')")
 
-        assert seen == [f"{served}/api/health?project={slug_b}"], (
-            f"changement de projet : {len(seen)} requête(s) /api/health, attendu 1 (pas 3) — {seen}"
+        assert seen == [f"{served}/api/workspace/sheet?project={slug_b}"], (
+            f"changement de projet : {len(seen)} requête(s) /api/workspace/sheet, attendu 1 (pas 3) — {seen}"
         )
     finally:
         context.close()

@@ -216,6 +216,13 @@ export const api = {
   // qui fondent chaque proposition (spécialité, catégorie, agent de repli,
   // compte). Écritures via `proposalAction`, jamais silencieuses.
   proposals: (project) => get(WS + 'proposals', project ? { project } : undefined),
+  // Fiche Piloter agrégée (#548, remplace les sept appels — huit avec le nom
+  // du projet — que `piloter.js::loadSheet` faisait un par un) : santé
+  // (mode caché, jamais `doctor` complet — mesuré comme le vrai coût),
+  // mémoire (mode rapide), agents, propositions, dernier run du wizard,
+  // dernier run de flow `project-upgrade`, nom du projet. `project` cible un
+  // AUTRE projet que celui déjà résolu — même convention que `health()`.
+  sheet: (project) => get(WS + 'sheet', project ? { project } : undefined),
   // Agrégation mémoire multi-projets (#172, dernier volet de « du générateur
   // statique au portefeuille actif ») : `projects` vaut 'all', une liste
   // 'slug1,slug2', ou est omis pour « ce projet » seul — jamais toute la

@@ -263,14 +263,47 @@ def run_command(
     }
 
 
-def doctor_view(project_root: Path, *, timeout: float = DEFAULT_TIMEOUT) -> dict[str, Any]:
+def doctor_view(
+    project_root: Path, *, timeout: float = DEFAULT_TIMEOUT, probe: bool = False
+) -> dict[str, Any]:
     """L'onglet Problèmes du dock : ce que ``grimoire doctor`` trouve.
+
+    Mis en cache (:mod:`grimoire.tools.view_cache`), keyé sur la signature de
+    mtimes de la surface que ``doctor`` inspecte (config, agents/skills,
+    kit, overrides, wrappers VS Code, policies du standard) — mesuré à
+    ~350ms par appel avant ce cache, la route la plus chère des sept que la
+    fiche Piloter faisait partir (issue #548) : ``doctor`` relance un
+    processus ``grimoire`` complet (démarrage de l'arbre Typer compris) à
+    chaque appel, même quand rien n'a bougé dans le projet. ``probe=True``
+    (``?probe=1``) force un recalcul frais, même contrat que
+    ``memory_link_view``.
 
     Le diagnostic n'est pas importable aujourd'hui — il vit dans la couche CLI
     — donc il est appelé comme la Console appelle tout le reste, par la même
-    liste blanche. Le jour où il est extrait en module, seule cette fonction
-    change.
+    liste blanche. Le jour où il est extrait en module, seule
+    :func:`_doctor_view_uncached` change.
     """
+    from grimoire.core import layout
+    from grimoire.core.standard_generation import STANDARD_DIR
+    from grimoire.tools import view_cache
+
+    root = project_root.resolve()
+    key = f"doctor_view:{root}"
+    if probe:
+        view_cache.invalidate(key)
+    signature = view_cache.path_signature([
+        root / "project-context.yaml",
+        *layout.agent_dirs(root),
+        *layout.skill_dirs(root),
+        layout.kit_dir(root),
+        layout.overrides_dir(root),
+        root / ".github" / "agents",
+        root / STANDARD_DIR,
+    ])
+    return view_cache.cached(key, signature, lambda: _doctor_view_uncached(root, timeout=timeout))
+
+
+def _doctor_view_uncached(project_root: Path, *, timeout: float) -> dict[str, Any]:
     result = run_command(project_root, ["doctor"], timeout=timeout)
     lines = [line for line in result["output"].splitlines() if line.strip()]
     return {

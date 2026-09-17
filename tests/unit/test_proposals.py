@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from grimoire.core.standard_generation import TRACES_DIR
+from grimoire.core.standard_generation import PROPOSALS_DIR, TRACES_DIR
 from grimoire.hosts.decisions import record_agent_miss
 from grimoire.proposals import (
     accept_proposal,
@@ -326,6 +326,51 @@ def test_a_third_miss_right_after_a_reject_does_not_resurrect_it(project: Path) 
     assert len(proposals) == 1
     assert proposals[0].status == "rejected"
     assert count_pending(project) == 0
+
+
+def _proposal_mtimes(project: Path) -> dict[str, int]:
+    proposals_dir = project / PROPOSALS_DIR
+    if not proposals_dir.is_dir():
+        return {}
+    return {p.name: p.stat().st_mtime_ns for p in proposals_dir.glob("*.yaml")}
+
+
+def test_a_second_sync_with_nothing_new_does_not_touch_proposal_files(project: Path) -> None:
+    """Issue #548 — ``sync_proposals`` réécrivait chaque fichier de
+    proposition en attente ou rejetée à CHAQUE appel, même quand rien
+    n'avait changé (branches ``refresh_pending`` et ``keep_rejected``). Cette
+    écriture systématique bouge la mtime du dossier de propositions, or
+    c'est exactement ce que surveille la signature de ``proposals_view``
+    (:mod:`grimoire.tools.view_cache`) : le cache s'auto-invalide à chaque
+    lecture et ne peut jamais faire hit — mesuré en conditions réelles à
+    0,46s puis 0,52s puis 0,49s, jamais caché. Une seconde synchronisation
+    sans nouveau non-choix entre les deux doit laisser les fichiers
+    identiques, mtime comprise.
+    """
+    _miss(project, specialty="terraform")
+    _miss(project, specialty="terraform")
+    sync_proposals(project)  # première synchronisation — crée le fichier pending
+    before = _proposal_mtimes(project)
+    assert before  # le fichier a bien été créé
+
+    sync_proposals(project)  # rien de nouveau dans le journal entre les deux appels
+    after = _proposal_mtimes(project)
+    assert after == before
+
+
+def test_a_second_sync_of_a_rejected_proposal_with_nothing_new_does_not_touch_it(project: Path) -> None:
+    """Même garde que ci-dessus, branche ``keep_rejected``."""
+    _miss(project, specialty="terraform")
+    _miss(project, specialty="terraform")
+    proposal = list_proposals(project)[0]
+    reject_proposal(project, proposal.slug)
+
+    before = _proposal_mtimes(project)
+    assert before
+
+    sync_proposals(project)  # aucun non-choix supplémentaire depuis le refus
+    after = _proposal_mtimes(project)
+    assert after == before
 
 
 def test_doubling_the_count_since_the_reject_brings_it_back(project: Path) -> None:
