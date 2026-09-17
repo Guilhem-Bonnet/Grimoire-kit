@@ -209,6 +209,150 @@ def test_no_evidence_ref_is_lost_across_migration(tmp_path: Path) -> None:
     assert entry["evidence_pack_ref"] == _BOOTSTRAP_TASK["evidence_pack_ref"]
 
 
+# ── Priorité, rôles, remediation_ref, champs inconnus (défaut réel Forge) ────
+#
+# Constat du 2026-09-17 sur la Forge (kit 3.55.0) : `migrate_standard_tasks`
+# reprojetait `task-board.yaml` en écrasant `priority`/`agent_roles` par des
+# défauts (medium/[implementation]) dès que la tâche n'était pas « blocked »,
+# perdait `remediation_ref` hors de cet état, et jetait silencieusement tout
+# champ de board que `MissionTask` ne modélisait pas (ex. `labels`).
+
+_LOSSY_TASK: dict[str, object] = {
+    "task_id": "lossy-check",
+    "title": "Vérifier le round-trip du board",
+    "status": "accepted",
+    "priority": "high",
+    "owner": "grimoire-maintainers",
+    "agent_roles": ["orchestrator", "reviewer"],
+    "acceptance_criteria": ["Le board reprojeté porte les mêmes valeurs que le board scaffoldé."],
+    "blockers": [],
+    "context_bundle_ref": "_grimoire-output/context/lossy-check/context-bundle.yaml",
+    "decision_trace_ref": "_grimoire-output/decisions/lossy-check/decision-trace.yaml",
+    "evidence_pack_ref": "_grimoire-output/evidence/lossy-check/evidence-pack.md",
+    "remediation_ref": "_grimoire/standard/remediation-plan.yaml",
+    "labels": ["x"],
+}
+
+
+def test_priority_roles_remediation_ref_and_unknown_fields_survive_migration(tmp_path: Path) -> None:
+    """Reproduction exacte du défaut Forge : rien n'est écrasé par un défaut."""
+    _write_scaffolded_board(tmp_path, [dict(_LOSSY_TASK)])
+    report = migrate_standard_tasks(tmp_path)
+    assert report.tasks_imported == 1
+
+    board = _read_board(tmp_path / STANDARD_DIR / "task-board.yaml")
+    tasks = board["tasks"]
+    assert isinstance(tasks, list)
+    entry = next(t for t in tasks if t["task_id"] == "lossy-check")
+
+    for key, value in _LOSSY_TASK.items():
+        assert entry.get(key) == value, key
+
+    # Le seul écart admis avec l'entrée d'origine : le bloc de vérifiabilité
+    # ajouté par la projection — voulu, documenté, pas une perte.
+    assert "verifiability" in entry
+
+    task = _ledger(tmp_path).get_task("lossy-check")
+    assert task is not None
+    assert task.priority == "high"
+    assert list(task.agent_roles) == ["orchestrator", "reviewer"]
+    assert task.remediation_ref == "_grimoire/standard/remediation-plan.yaml"
+    assert task.extra == {"labels": ["x"]}
+
+
+def test_task_list_shows_the_original_status_after_migration(tmp_path: Path) -> None:
+    """Critère (1) : `grimoire task list` doit montrer l'état d'origine de la
+    tâche (« accepted » -> ledger CLOSED), pas une régression à PROPOSED.
+    """
+    from grimoire.cli.app import app
+
+    typer_testing = pytest.importorskip("typer.testing")
+    _write_scaffolded_board(tmp_path, [dict(_LOSSY_TASK)])
+    migrate_standard_tasks(tmp_path)
+
+    runner = typer_testing.CliRunner()
+    result = runner.invoke(
+        app,
+        ["task", "list", "--project-root", str(tmp_path), "--ledger-root", str(tmp_path / LEDGER_RELPATH)],
+    )
+    assert result.exit_code == 0, result.output
+    assert "closed" in result.output
+    assert "accepted" in result.output
+
+
+# ── Réparation d'un projet déjà migré à perte (issue Forge du 2026-09-17) ───
+
+
+def _old_lossy_import_one_task(ledger: MissionLedger, entry: dict[str, object]) -> None:
+    """Copie figée du comportement *avant* correctif — pour prouver la réparation.
+
+    Cette fonction ne doit plus jamais tourner en dehors d'un test : elle
+    reproduit fidèlement l'ancien `_import_one_task`, qui ignorait
+    `priority`/`agent_roles`/`remediation_ref` et jetait tout champ de board
+    inconnu du schéma.
+    """
+    from grimoire.missions import task_unification as tu
+    from grimoire.missions.board import task_state_of as _task_state_of
+
+    task_id = str(entry["task_id"])
+    acceptance = tuple(entry.get("acceptance_criteria") or ["Migré depuis task-board.yaml — critère à préciser"])
+    task = ledger.create_task(
+        TASK_UNIFICATION_MISSION_ID,
+        str(entry.get("title") or task_id),
+        acceptance=acceptance,
+        owner=str(entry.get("owner") or ""),
+        description=str(entry.get("description") or ""),
+        guardrails=tuple(entry.get("guardrails") or ()),
+        expected_evidence=tuple(entry.get("expected_evidence") or ()),
+        task_id=task_id,
+    )
+    try:
+        target = _task_state_of(str(entry.get("status", "proposed")))
+    except ValueError:
+        return
+    tu._walk_to_state(ledger, task.id, target)
+
+
+def test_repair_sequence_restore_then_remigrate_matches_original_board(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """La séquence de réparation d'un projet déjà migré à perte (ex. la Forge) :
+
+    1. un projet migré par l'ancien comportement a perdu priorité/rôles/refs ;
+    2. `grimoire task migrate-standard --restore <stamp>` ramène le board et le
+       ledger à leur état d'avant migration (l'instantané n'est jamais lossy) ;
+    3. remigrer avec le correctif applique produit un board identique à
+       l'original (à `verifiability` près).
+    """
+    import grimoire.missions.task_unification as tu
+
+    board_path = _write_scaffolded_board(tmp_path, [dict(_LOSSY_TASK)])
+    original_board = board_path.read_bytes()
+
+    # 1. Migration avec l'ancien comportement (simulé) — reproduit le défaut.
+    monkeypatch.setattr(tu, "_import_one_task", _old_lossy_import_one_task)
+    lossy_report = tu.migrate_standard_tasks(tmp_path)
+    assert lossy_report.tasks_imported == 1
+    lossy_entry = next(t for t in _read_board(board_path)["tasks"] if t["task_id"] == "lossy-check")
+    assert lossy_entry["priority"] != _LOSSY_TASK["priority"]
+    assert lossy_entry.get("remediation_ref") is None
+    assert "labels" not in lossy_entry
+
+    # 2. Réparation : restaurer l'instantané pris avant cette migration lossy.
+    monkeypatch.undo()
+    restored = restore_task_unification(tmp_path, lossy_report.stamp)
+    assert restored
+    assert board_path.read_bytes() == original_board
+    assert not (tmp_path / LEDGER_RELPATH / "events.jsonl").is_file()
+
+    # 3. Remigrer avec le correctif : plus aucune perte.
+    fixed_report = migrate_standard_tasks(tmp_path)
+    assert fixed_report.tasks_imported == 1
+    fixed_entry = next(t for t in _read_board(board_path)["tasks"] if t["task_id"] == "lossy-check")
+    for key, value in _LOSSY_TASK.items():
+        assert fixed_entry.get(key) == value, key
+
+
 # ── Cas limites ─────────────────────────────────────────────────────────────
 
 

@@ -246,6 +246,28 @@ class MissionTask:
     expected_evidence: tuple[str, ...] = ()
     #: Terrain du lot 4.3 (issue #561) : aucune interface ne le lit encore.
     finition: str = ""
+    #: Priorité déclarée côté board (ADR-007, issue #580/#587) — ``""`` =
+    #: dérivée de ``risk_profile`` par ``board.py``, jamais fixée ici. Sans ce
+    #: champ, `task_unification.py` n'avait nulle part où ranger la priorité
+    #: d'un board scaffolded ; la migration retombait donc toujours sur le
+    #: défaut dérivé du `risk_profile` par défaut (medium), quelle que soit la
+    #: priorité réelle saisie à la main.
+    priority: str = ""
+    #: Rôles agent déclarés côté board (ADR-007) — ``()`` = dérivé de `type`
+    #: par ``board.py`` (une seule valeur). Un board peut lister plusieurs
+    #: rôles (« orchestrator », « reviewer », ...) qu'aucun `TaskType` unique
+    #: ne représente ; ce champ les porte tels quels.
+    agent_roles: tuple[str, ...] = ()
+    #: Référence de remédiation explicite (ADR-007) — ``board.py`` n'en déduit
+    #: une par défaut que pour une carte à l'état « blocked ». Une tâche
+    #: migrée dans un autre état (ex. « accepted ») qui en portait une
+    #: explicitement la perdait silencieusement sans ce champ.
+    remediation_ref: str = ""
+    #: Champs de board que ce schéma ne modélise pas encore (ADR-007) —
+    #: reportés tels quels d'une projection à l'autre. Seul filet qui empêche
+    #: `migrate_standard_tasks` de jeter silencieusement une clé inconnue
+    #: (ex. ``labels``) au lieu de simplement ne pas encore savoir l'exploiter.
+    extra: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.finition not in _FINITION_VALUES:
@@ -275,6 +297,14 @@ class MissionTask:
             d["claim"] = self.claim.to_dict()
         if self.finition:
             d["finition"] = self.finition
+        if self.priority:
+            d["priority"] = self.priority
+        if self.agent_roles:
+            d["agent_roles"] = list(self.agent_roles)
+        if self.remediation_ref:
+            d["remediation_ref"] = self.remediation_ref
+        if self.extra:
+            d["extra"] = dict(self.extra)
         return d
 
     @classmethod
@@ -298,6 +328,10 @@ class MissionTask:
             guardrails=tuple(d.get("guardrails", [])),
             expected_evidence=tuple(d.get("expected_evidence", [])),
             finition=d.get("finition", ""),
+            priority=d.get("priority", ""),
+            agent_roles=tuple(d.get("agent_roles", [])),
+            remediation_ref=d.get("remediation_ref", ""),
+            extra=dict(d.get("extra", {})),
         )
 
 
