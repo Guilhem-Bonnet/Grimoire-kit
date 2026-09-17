@@ -246,20 +246,28 @@ def project_with_task(real_project: Path) -> Iterator[tuple[Path, str]]:
     La tâche est créée par le CLI, donc elle passe par le ledger et le board
     comme n'importe quelle autre — c'est la seule façon d'obtenir un identifiant
     que ``task trace`` sait retrouver.
+
+    Idempotence par titre, pas par ``has_ledger`` (ADR-007, issue #559) :
+    depuis que ``standard init`` ouvre un ledger dès l'init (tâche
+    ``bootstrap``), ``has_ledger`` est vrai avant même que ce fixture ne
+    tourne — ``grimoire task add`` ci-dessous ne se serait alors plus jamais
+    exécuté, et les tests qui attendent la carte « Vérifier la vue de
+    travail » l'auraient attendue indéfiniment.
     """
+    title = "Vérifier la vue de travail"
     from grimoire.missions.service import TaskService
 
-    if not TaskService(real_project).has_ledger:
+    if not any(t.title == title for t in TaskService(real_project).list_tasks()):
         _grimoire(
             [
-                "task", "add", "Vérifier la vue de travail",
+                "task", "add", title,
                 "-a", "Les six espaces s'ouvrent",
                 "-a", "Aucune couleur hors tokens",
                 "--owner", "winston",
             ],
             real_project,
         )
-    tasks = TaskService(real_project).list_tasks()
+    tasks = [t for t in TaskService(real_project).list_tasks() if t.title == title]
     if not tasks:
         pytest.skip("`grimoire task add` n'a pas ouvert de tâche dans cet environnement")
     yield real_project, tasks[0].id

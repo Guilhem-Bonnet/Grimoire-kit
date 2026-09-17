@@ -428,11 +428,16 @@ def served_cockpit(
     """
     from grimoire.missions.service import TaskService
 
-    if not TaskService(real_project).has_ledger:
+    cockpit_title = "Vérifier la vue de travail (cockpit)"
+    # Idempotence par titre, pas par `has_ledger` (ADR-007, issue #559) :
+    # `standard init` ouvre désormais un ledger dès l'init (tâche
+    # `bootstrap`), donc `has_ledger` est vrai avant même que ce fixture ne
+    # tourne — la commande ci-dessous ne se serait alors plus jamais exécutée.
+    if not any(t.title == cockpit_title for t in TaskService(real_project).list_tasks()):
         subprocess.run(
             [
                 sys.executable, "-m", "grimoire", "task", "add",
-                "Vérifier la vue de travail (cockpit)",
+                cockpit_title,
                 "-a", "Les six espaces s'ouvrent", "-a", "Aucune couleur hors tokens",
                 "--owner", "winston",
             ],
