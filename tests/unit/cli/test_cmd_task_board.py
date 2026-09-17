@@ -81,25 +81,40 @@ def test_export_then_verify_is_green_on_a_real_ledger(runner: CliRunner, tmp_pat
 
 
 def test_export_replaces_the_hand_written_board(runner: CliRunner, tmp_path: Path) -> None:
-    """La projection écrase : le YAML est une sortie, pas une source."""
+    """La projection écrase : le YAML est une sortie, pas une source.
+
+    ADR-007 : `standard init` ouvre désormais le ledger dès l'init, donc le
+    board qui en sort n'est plus « écrit à la main » — on simule ici le cas
+    que ce test vérifie (une édition manuelle qui prédate ou contourne le
+    ledger), plutôt que de dépendre du gabarit statique que l'init ne copie
+    plus.
+    """
     root = _standard_project(runner, tmp_path)
     board_path = root / "_grimoire" / "standard" / "task-board.yaml"
-    before = board_path.read_text(encoding="utf-8")
-    assert "bootstrap" in before  # le gabarit du standard
+    board_path.write_text("hand_written_marker: true\ntasks: []\n", encoding="utf-8")
 
     _seed_ledger(root)
     runner.invoke(app, ["task", "board", "export", str(root)])
 
     after = board_path.read_text(encoding="utf-8")
-    assert "bootstrap" not in after
+    assert "hand_written_marker" not in after
     assert "source: mission-ledger" in after
 
 
 def test_export_without_a_ledger_refuses_rather_than_wiping(runner: CliRunner, tmp_path: Path) -> None:
-    """Sans ledger, écrire un board vide effacerait le travail déclaré."""
+    """Sans ledger, écrire un board vide effacerait le travail déclaré.
+
+    ADR-007 : `standard init` ouvre désormais un ledger (avec la tâche
+    `bootstrap`) dès l'init — le cas « sans ledger » que ce test vérifie est
+    donc simulé explicitement en le retirant, plutôt que d'être l'état
+    naturel d'un projet fraîchement initialisé.
+    """
+    import shutil
+
     root = _standard_project(runner, tmp_path)
     board_path = root / "_grimoire" / "standard" / "task-board.yaml"
     before = board_path.read_text(encoding="utf-8")
+    shutil.rmtree(root / "_grimoire-runtime-output" / "ledger")
 
     result = runner.invoke(app, ["task", "board", "export", str(root)])
     assert result.exit_code == 1
@@ -124,8 +139,10 @@ def test_json_output_reports_what_was_written(runner: CliRunner, tmp_path: Path)
     result = runner.invoke(app, ["--output", "json", "task", "board", "export", str(root)])
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
-    assert payload["tasks"] == 3
-    assert payload["by_status"] == {"ready": 1, "blocked": 1, "accepted": 1}
+    # 3 tâches semées par `_seed_ledger` + la tâche `bootstrap` que `standard
+    # init` ouvre désormais dans le même ledger (ADR-007 point 1).
+    assert payload["tasks"] == 4
+    assert payload["by_status"] == {"proposed": 1, "ready": 1, "blocked": 1, "accepted": 1}
 
 
 def test_output_option_leaves_the_standard_board_alone(runner: CliRunner, tmp_path: Path) -> None:

@@ -783,7 +783,17 @@ def setup_standard_profile(
             continue
         if not dry_run:
             dst.parent.mkdir(parents=True, exist_ok=True)
-            dst.write_text(content, encoding="utf-8")
+            if artifact.artifact_type == "task_board":
+                # ADR-007 point 1 (extrait dans task_board_ledger.py, ratchet
+                # de taille) : le contenu du template statique n'est plus ce
+                # qui est écrit sur disque une fois `decide()` d'accord pour
+                # écrire — seule sa comparaison de version reste inchangée
+                # (mêmes règles force/refresh/keep que les autres artefacts).
+                from grimoire.core.task_board_ledger import ensure_task_board_via_ledger
+
+                ensure_task_board_via_ledger(root, dst, project_name=name)
+            else:
+                dst.write_text(content, encoding="utf-8")
             generated[key] = gen.digest(dst)
         result.written.append(artifact.destination)
 

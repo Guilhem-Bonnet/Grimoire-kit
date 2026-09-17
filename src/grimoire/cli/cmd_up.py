@@ -1344,6 +1344,14 @@ def run_up_pipeline(
         declared_archetypes=declared_archetypes,
     )
 
+    # 4quater. Task unification (ADR-007, issue #559, cmd_up_task_unification.py —
+    # ratchet de taille) — migrate a board scaffolded without a Mission Ledger,
+    # independently of `--no-standard`: the project may already be enrolled from
+    # an earlier `standard init` this run does not repeat.
+    from grimoire.cli.cmd_up_task_unification import step_task_unification
+
+    step_task_unification(state, target, dry_run=dry_run, blocked=blocked)
+
     # 4ter. Cadrage — scaffold when `project-discovery` was chosen (#173).
     _step_cadrage(state, target, needs=needs, dry_run=dry_run, blocked=blocked)
 

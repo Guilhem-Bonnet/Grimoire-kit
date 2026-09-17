@@ -658,6 +658,10 @@ def doctor(
                 if fmt != "json":
                     console.print(f"  [yellow]WARN[/yellow]  {duration_detail}")
 
+    with _timed_phase("task_unification"):  # 4septies. Board/ledger divergence (ADR-007, #559).
+        from grimoire.core.task_unification_doctor import apply_task_unification_check
+        apply_task_unification_check(target, results, fmt=fmt, console=console)
+
     # 5. Config semantic validation
     if cfg:
         warnings = cfg.validate()

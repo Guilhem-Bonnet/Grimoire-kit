@@ -885,10 +885,26 @@ def test_read_only_calls_are_not_slowed_down(governed: Path) -> None:
 
 
 def _set_task_in_progress(root: Path) -> None:
-    board = root / "_grimoire/standard/task-board.yaml"
-    board.write_text(
-        board.read_text(encoding="utf-8").replace('status: "proposed"', 'status: "in_progress"'), encoding="utf-8"
-    )
+    """Flip the ``bootstrap`` card to ``in_progress`` on disk.
+
+    A literal ``status: "proposed"`` string replace matched only the old
+    static template's quoting style. ADR-007's ledger-backed board goes
+    through ``ruamel.yaml`` (unquoted plain scalars), so this edits the
+    parsed structure instead of depending on either serializer's formatting.
+    """
+    import io
+
+    from ruamel.yaml import YAML
+
+    board_path = root / "_grimoire/standard/task-board.yaml"
+    yaml = YAML()
+    data = yaml.load(board_path.read_text(encoding="utf-8"))
+    for task in data.get("tasks", []):
+        if task.get("task_id") == "bootstrap":
+            task["status"] = "in_progress"
+    stream = io.StringIO()
+    yaml.dump(data, stream)
+    board_path.write_text(stream.getvalue(), encoding="utf-8")
 
 
 def test_red_gates_block_a_governed_closure(governed: Path) -> None:

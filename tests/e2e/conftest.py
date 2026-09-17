@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -119,6 +120,12 @@ def served_empty(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     montrer utilement (commande réelle affichée, boutons de vue rendus mais
     désactivés plutôt qu'absents).
 
+    ADR-007 (issue #559, lot 4.1) : `standard init` ouvre désormais un
+    Mission Ledger dès l'init (la tâche `bootstrap`) — retiré ci-dessous pour
+    que cette fixture continue de représenter l'état qu'elle documente
+    (aucun ledger), qui est aussi, depuis ADR-007, celui d'un projet enrôlé
+    jamais migré.
+
     Un projet DÉDIÉ, pas `real_project` : ce dernier est une fixture de
     portée session partagée par toute la suite e2e, et plusieurs fixtures
     ailleurs (`project_with_task`, `project_with_blueprint`,
@@ -139,6 +146,7 @@ def served_empty(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
         [sys.executable, "-m", "grimoire", "standard", "init", "--profile", "governed"],
         cwd=str(root), check=False, capture_output=True, timeout=180,
     )
+    shutil.rmtree(root / "_grimoire-runtime-output" / "ledger", ignore_errors=True)
 
     port = _free_port()
     env = dict(os.environ)
@@ -236,6 +244,14 @@ def served_review_gate(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tup
         [sys.executable, "-m", "grimoire", "standard", "init", "--profile", "governed"],
         cwd=str(root), check=False, capture_output=True, timeout=180,
     )
+    # ADR-007 (issue #559, lot 4.1) : `standard init` ouvre désormais un
+    # Mission Ledger dès l'init (la tâche `bootstrap`) — retiré ici pour que
+    # ce projet dédié ne porte QUE la tâche que ce harnais crée juste après.
+    # `test_executer_review_sans_evidence_pack_est_refuse_et_nomme_l_artefact`
+    # clique `.ex-card` par POSITION (`.first`), pas par texte : une seconde
+    # carte "bootstrap" (colonne "proposée", donc triée avant "en cours")
+    # serait cliquée à sa place.
+    shutil.rmtree(root / "_grimoire-runtime-output" / "ledger", ignore_errors=True)
     gates_path = root / "_grimoire" / "standard" / "evidence-gates.yaml"
     gates_path.parent.mkdir(parents=True, exist_ok=True)
     gates_path.write_text(_REVIEW_GATE_YAML, encoding="utf-8")
@@ -322,6 +338,12 @@ def served_timeline(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[
         [sys.executable, "-m", "grimoire", "standard", "init", "--profile", "governed"],
         cwd=str(root), check=False, capture_output=True, timeout=180,
     )
+    # ADR-007 (issue #559, lot 4.1) : `standard init` ouvre désormais un
+    # Mission Ledger dès l'init (la tâche `bootstrap`) — retiré ici pour que
+    # ce projet dédié ne porte QUE la tâche que ce harnais crée juste après.
+    # `test_executer_timeline_montre_dispatch_et_refus_et_se_filtre_par_source`
+    # clique `.ex-card` par POSITION (`.first`), pas par texte.
+    shutil.rmtree(root / "_grimoire-runtime-output" / "ledger", ignore_errors=True)
 
     added = subprocess.run(
         [
@@ -420,11 +442,24 @@ def served_cockpit(
     """
     from grimoire.missions.service import TaskService
 
-    if not TaskService(real_project).has_ledger:
+    # Titre délibérément distinct de celui de `project_with_task` ("Vérifier
+    # la vue de travail") — même préfixe, même 12 premiers caractères que
+    # `ledger.create_task` utilise pour dériver le slug de l'identifiant
+    # (`GAO-{slug}-{seq}`), les deux fixtures partagent `real_project` et se
+    # seraient vu attribuer une séquence commune : `.filter(has_text=...)`
+    # d'un test matche par sous-chaîne, donc les DEUX cartes auraient répondu
+    # au même filtre, la sélection `.first` tombant sur celle des deux dont
+    # l'identifiant ne correspondait pas à ce que la fixture attendait.
+    cockpit_title = "Tâche du cockpit pour Piloter"
+    # Idempotence par titre, pas par `has_ledger` (ADR-007, issue #559) :
+    # `standard init` ouvre désormais un ledger dès l'init (tâche
+    # `bootstrap`), donc `has_ledger` est vrai avant même que ce fixture ne
+    # tourne — la commande ci-dessous ne se serait alors plus jamais exécutée.
+    if not any(t.title == cockpit_title for t in TaskService(real_project).list_tasks()):
         subprocess.run(
             [
                 sys.executable, "-m", "grimoire", "task", "add",
-                "Vérifier la vue de travail (cockpit)",
+                cockpit_title,
                 "-a", "Les six espaces s'ouvrent", "-a", "Aucune couleur hors tokens",
                 "--owner", "winston",
             ],

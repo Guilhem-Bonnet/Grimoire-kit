@@ -184,8 +184,17 @@ def test_une_tache_inconnue_partout_est_refusee(projet: Path) -> None:
 
 def test_bootstrap_se_trace_par_les_hooks_meme_sans_ledger(tmp_path: Path) -> None:
     """Les hooks écrivent sous `bootstrap` tant qu'aucune tâche n'est réclamée :
-    ce journal doit rester lisible, sans exiger une carte au ledger."""
+    ce journal doit rester lisible, sans exiger une carte au ledger.
+
+    ADR-007 : `standard init` ouvre désormais un ledger (avec la tâche
+    `bootstrap`) dès l'init — le cas « sans ledger » que ce test vérifie (un
+    board scaffoldé avant ADR-007, ou dont le ledger a été retiré) est donc
+    simulé explicitement plutôt que d'être l'état naturel d'un init frais.
+    """
+    import shutil
+
     setup_standard_profile(tmp_path, profile_id="governed", task_id="bootstrap")
+    shutil.rmtree(tmp_path / DEFAULT_LEDGER_RELPATH)
     hook(tmp_path, "Bash", {"command": "rm -rf src"})
     timeline = build_task_timeline(tmp_path, "bootstrap")
     assert timeline.task is None and not timeline.is_empty
