@@ -579,10 +579,11 @@ export async function mount(root, ctx) {
       migrateBtn.type = 'button';
       migrateBtn.className = 'btn pri';
       migrateBtn.textContent = 'Migrer les tâches';
-      migrateBtn.disabled = ctx.host.readOnly;
-      if (ctx.host.readOnly) {
-        migrateBtn.title = "le cockpit est en lecture seule : ouvrez l'atelier de ce projet pour agir";
-      }
+      // Jamais désactivé par `ctx.host.readOnly` (issue #560) : migrer un
+      // board vers le Mission Ledger s'applique à tout projet du registre,
+      // comme mettre à jour ou décider une proposition — même précédent que
+      // les boutons Accepter/Refuser de Piloter (`ctx.api.proposalAction`),
+      // qui ne se désactivent pas non plus sur ce verrou général.
       const feedback = text('p', 'lbl', '');
       migrateBtn.addEventListener('click', async () => {
         ctx.dock.echo('grimoire task migrate-standard .');

@@ -41,7 +41,20 @@ from grimoire.tools.workspace_routes import (
     POST_ROUTES,
     PREFIX,
     is_proposal_decision,
+    is_registry_scoped_write,
     workspace_get,
+)
+
+#: Routes de :data:`POST_ROUTES` qui suivent la même dérogation nommée que
+#: les décisions de proposition (:func:`is_proposal_decision`) plutôt que la
+#: garde ``_HOME_SLUG`` générale — voir :func:`is_registry_scoped_write`
+#: (issue #559 suite, #560). Contrairement aux décisions de proposition
+#: (chemin dynamique ``proposals/<slug>/accept|reject``, jamais une entrée
+#: fixe de la table), celle-ci EST une entrée de :data:`POST_ROUTES` : les
+#: deux tests paramétrés sur cette table doivent l'exclure explicitement pour
+#: ne pas prouver le contraire de ce que #560 vient d'ouvrir.
+_REGISTRY_SCOPED_POST_ROUTES = frozenset(
+    route for route in POST_ROUTES if is_registry_scoped_write(route)
 )
 
 # Les lectures sans paramètre obligatoire : celles qu'on peut interroger telles
@@ -203,7 +216,7 @@ def test_un_projet_inconnu_est_refuse_par_le_cockpit(cockpit: int) -> None:
 # ── 2. Les écritures n'existent que sur le projet de lancement ──────────────
 
 
-@pytest.mark.parametrize("route", sorted(POST_ROUTES))
+@pytest.mark.parametrize("route", sorted(set(POST_ROUTES) - _REGISTRY_SCOPED_POST_ROUTES))
 def test_le_cockpit_refuse_les_ecritures_sur_un_projet_qu_il_ne_lance_pas(
     route: str, cockpit: int
 ) -> None:
@@ -215,13 +228,17 @@ def test_le_cockpit_refuse_les_ecritures_sur_un_projet_qu_il_ne_lance_pas(
     l'un ou l'autre resterait une régression de gouvernance — la route
     EXISTE désormais des deux côtés (#356), le refus est donc un 403, plus
     précis que le 404 d'avant sa fusion dans `cockpit serve` (#351).
+
+    Exclut `_REGISTRY_SCOPED_POST_ROUTES` (`tasks/migrate-standard`, #560) :
+    cette route-là suit délibérément la porte inverse, prouvée par la section
+    3bis plus bas.
     """
     code, _ = _post(cockpit, f"{route}?project=projet-a", {"path": "x", "argv": ["version"]})
 
     assert code == 403
 
 
-@pytest.mark.parametrize("route", sorted(POST_ROUTES))
+@pytest.mark.parametrize("route", sorted(set(POST_ROUTES) - _REGISTRY_SCOPED_POST_ROUTES))
 def test_le_cockpit_refuse_toujours_l_autre_projet_meme_avec_un_lancement_direct(
     route: str, cockpit_home: int
 ) -> None:
@@ -231,6 +248,9 @@ def test_le_cockpit_refuse_toujours_l_autre_projet_meme_avec_un_lancement_direct
     pas le cockpit généralement inscriptible. Un clic malheureux sur une autre
     carte du registre ne doit jamais écrire là où l'utilisateur ne fait que
     regarder.
+
+    Exclut `_REGISTRY_SCOPED_POST_ROUTES` pour la même raison que le test
+    ci-dessus.
     """
     code, _ = _post(cockpit_home, f"{route}?project=projet-b", {"path": "x", "argv": ["version"]})
 
@@ -719,10 +739,12 @@ def test_post_migrate_standard_importe_le_board_non_migre_sur_le_projet_de_lance
     tasks_home: tuple[int, Path],
 ) -> None:
     """Bouton « Migrer les tâches » de l'espace Exécuter (ADR-007, issue #559) :
-    même moteur que ``grimoire task migrate-standard``, exposé en écriture
-    seulement sur le projet de lancement direct — la garde elle-même est déjà
-    prouvée pour CETTE route par les deux tests paramétrés sur
-    :data:`POST_ROUTES` en tête de fichier (section 2).
+    même moteur que ``grimoire task migrate-standard``. Depuis #560, cette
+    route suit la dérogation nommée ``is_registry_scoped_write`` plutôt que la
+    garde ``_HOME_SLUG`` générale — prouvée pour CETTE route par la section
+    3bis plus bas, pas par les deux tests paramétrés sur :data:`POST_ROUTES`
+    (qui l'excluent désormais explicitement). Ce test-ci prouve seulement le
+    moteur de migration lui-même, sur le projet de lancement.
 
     Placé en dernier de cette section : retire le ledger du projet de
     lancement pour simuler le board non migré qu'ADR-007 nomme (kit antérieur
@@ -743,6 +765,91 @@ def test_post_migrate_standard_importe_le_board_non_migre_sur_le_projet_de_lance
     assert code == 200
     assert payload["tasks_imported"] >= 1
     assert TaskService(home_root).has_ledger
+
+
+# ── 3bis. Dérogation nommée pour migrer les tâches d'un projet du registre ──
+# (#559 suite, #560) : même précédent que #490 (proposals) et que
+# `POST /api/projects/update` — un projet du registre qu'on ne fait que
+# regarder reste néanmoins migrable, parce que c'est un geste explicite et
+# ponctuel, pas une écriture continue comme réclamer une tâche.
+
+
+def test_post_migrate_standard_fonctionne_sur_un_projet_du_registre_hors_lancement(
+    tasks_home: tuple[int, Path],
+) -> None:
+    """`projet-tasks-away` n'est que regardé par ce cockpit (`_HOME_SLUG` vaut
+    `projet-tasks-home`) — la garde générale le refuserait en 403 pour
+    n'importe quelle autre écriture (voir la section 2 ci-dessus). Migrer ses
+    tâches doit malgré tout réussir et écrire réellement son ledger : la même
+    dérogation que `POST /api/projects/update` accepte déjà pour ce projet.
+
+    Retire d'abord son ledger (même patron que le test du projet de lancement
+    ci-dessus) pour que la migration ait effectivement quelque chose à
+    importer — sans ça, `standard init` (lot 4.1) l'a déjà ouvert et
+    `tasks_imported == 0` ne prouverait rien de plus qu'un 200 muet.
+    """
+    import shutil
+
+    from grimoire.missions.service import TaskService
+
+    port, _home_root = tasks_home
+    # Le chemin réel du projet « away », pas dérivé de celui de `home_root` :
+    # les deux racines viennent de deux `tmp_path_factory.mktemp` distincts
+    # (fixture `tasks_home`), rien ne les met sous un ancêtre commun prévisible.
+    away_path = Path(
+        next(p["path"] for p in reg.load_registry() if p.get("slug") == "projet-tasks-away")
+    )
+    shutil.rmtree(away_path / "_grimoire-runtime-output" / "ledger", ignore_errors=True)
+    away_service = TaskService(away_path)
+    assert not away_service.has_ledger
+
+    code, payload = _post(port, f"{PREFIX}tasks/migrate-standard?project=projet-tasks-away", {})
+
+    assert code == 200
+    assert payload["tasks_imported"] >= 1
+    assert away_service.has_ledger
+
+
+def test_post_migrate_standard_sur_un_slug_inconnu_est_un_404(cockpit: int) -> None:
+    """Même résolution que `POST /api/projects/update` : un slug absent du
+    registre est un 404 explicite, jamais une écriture au hasard sur le
+    premier projet venu."""
+    code, payload = _post(cockpit, f"{PREFIX}tasks/migrate-standard?project=projet-fantome", {})
+
+    assert code == 404
+    assert "inconnu" in payload["error"].lower()
+
+
+def test_post_migrate_standard_sur_un_slug_malforme_reste_refuse(cockpit: int) -> None:
+    """Un slug qui ne peut correspondre à aucune entrée du registre (forme
+    invalide au sens de `SLUG_RE`, `forge_server.py`) ne trouve jamais de
+    correspondance dans `_resolve_project_path` : le refus reste un 404
+    (« projet inconnu »), jamais une exception non attrapée ni une écriture
+    sur le mauvais projet — 400 aurait été acceptable aussi, mais un slug mal
+    formé n'a jamais de raison de se résoudre vers un projet réel."""
+    code, payload = _post(
+        cockpit, f"{PREFIX}tasks/migrate-standard?project=Not_a-Valid--Slug!", {}
+    )
+
+    assert code in (400, 404)
+    assert payload.get("error")
+
+
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [
+        (f"{PREFIX}tasks/migrate-standard", True),
+        (f"{PREFIX}tasks/migrate-standard/extra", False),  # segment de trop
+        (f"{PREFIX}tasks/migrate-standard-other", False),  # préfixe seulement
+        (f"{PREFIX}tasks", False),
+        (f"{PREFIX}file/write", False),
+        (f"{PREFIX}proposals/repair-x/accept", False),  # l'autre dérogation, pas celle-ci
+    ],
+)
+def test_is_registry_scoped_write_ne_reconnait_que_migrate_standard(
+    path: str, expected: bool
+) -> None:
+    assert is_registry_scoped_write(path) is expected
 
 
 # ── 3. Dérogation nommée pour décider une proposition (#490) ────────────────

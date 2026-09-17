@@ -28,8 +28,19 @@ que regarder via le registre. C'est la même porte que
 ``POST /api/projects/update`` (le bouton « Mettre à jour ») ouvre déjà pour
 n'importe quel projet du registre : une décision explicite sur un artefact
 proposé n'est pas une mutation plus dangereuse qu'un ``grimoire up`` distant.
+
+Deuxième exception nommée, même précédent (issue #559 suite, #560) : migrer
+les tâches d'un board du standard vers le Mission Ledger
+(``tasks/migrate-standard``, voir :func:`is_registry_scoped_write`). Le
+cockpit pilote une flotte — jongler entre plusieurs projets déjà enrôlés — et
+cette migration est le même genre de geste explicite et ponctuel que mettre à
+jour ou décider une proposition, jamais une écriture continue comme réclamer
+une tâche. Elle suit donc la même route de résolution que
+``POST /api/projects/update`` (le registre, jamais un chemin libre fourni par
+le client) plutôt que la garde ``_HOME_SLUG``.
+
 Le reste de :data:`POST_ROUTES` — écrire un fichier, réclamer une tâche,
-créer un override — reste strictement ``_HOME_SLUG`` : la dérogation est
+créer un override — reste strictement ``_HOME_SLUG`` : chaque dérogation est
 nommée, jamais générale.
 
 Ajouter une lecture : une entrée dans :data:`GET_ROUTES`. Ajouter une écriture :
@@ -58,6 +69,7 @@ __all__ = [
     "PREFIX",
     "WORKSPACE_UNHANDLED",
     "is_proposal_decision",
+    "is_registry_scoped_write",
     "workspace_get",
     "workspace_post",
 ]
@@ -412,7 +424,10 @@ def _task_migrate_standard(project_root: Path, _body: dict[str, Any]) -> Any:
 
     Même moteur que ``grimoire task migrate-standard`` (`missions.task_unification`,
     lot 4.1 1/3) : idempotent, réversible par instantané horodaté — jamais
-    exposé ici, la restauration reste un geste CLI délibéré.
+    exposé ici, la restauration reste un geste CLI délibéré. ``project_root``
+    est déjà résolu par l'appelant (le registre, via :func:`is_registry_scoped_write`
+    côté cockpit — issue #559 suite, #560) : n'importe quel projet du
+    registre, pas seulement celui de lancement direct.
     """
     from grimoire.missions.task_unification import migrate_standard_tasks
 
@@ -721,6 +736,21 @@ def is_proposal_decision(path: str) -> bool:
         return False
     parsed = _proposal_route(path)
     return parsed is not None and parsed[1] in ("accept", "reject")
+
+
+def is_registry_scoped_write(path: str) -> bool:
+    """Vrai pour ``tasks/migrate-standard`` — dérogation nommée à ``_HOME_SLUG``.
+
+    Même famille que :func:`is_proposal_decision` (issue #490) : le point
+    d'entrée que ``cmd_cockpit.py`` interroge pour ouvrir, pour cette écriture
+    précise, la même porte que ``POST /api/projects/update`` plutôt que la
+    garde ``_HOME_SLUG`` générale (issue #559 suite, #560, voir le docstring
+    du module). Migrer un board du standard vers le Mission Ledger est un
+    geste explicite et ponctuel sur un projet du registre qu'on pilote depuis
+    la flotte, pas une mutation continue comme réclamer une tâche ou écrire un
+    fichier — ceux-là restent soumis à la garde générale.
+    """
+    return path == f"{PREFIX}tasks/migrate-standard"
 
 
 def _proposal_accept(project_root: Path, slug: str, _body: dict[str, Any]) -> Any:

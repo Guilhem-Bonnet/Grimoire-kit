@@ -495,21 +495,27 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             # raison : fusionner deux commandes ne devait pas couper une
             # capacité (#356). Restreint à `_HOME_SLUG` : le projet qu'on ne
             # fait que regarder via le registre reste en lecture seule —
-            # SAUF décider une proposition (`is_proposal_decision`, #490) :
-            # cette écriture-là ouvre la même porte que
+            # SAUF décider une proposition (`is_proposal_decision`, #490) ou
+            # migrer les tâches d'un board vers le Mission Ledger
+            # (`is_registry_scoped_write`, #559 suite/#560) : ces deux
+            # écritures-là ouvrent la même porte que
             # `POST /api/projects/update` juste au-dessus, parce que valider
-            # ou refuser un artefact déjà proposé est le geste que le cockpit
-            # existe pour rendre possible sur toute la flotte, pas seulement
-            # sur le projet de lancement. La dérogation est nommée : le reste
-            # de `WORKSPACE_PREFIX` (écrire un fichier, réclamer une tâche…)
-            # reste `_HOME_SLUG` seulement.
+            # ou refuser un artefact déjà proposé, ou migrer les tâches d'un
+            # projet qu'on pilote depuis la flotte, sont les gestes explicites
+            # et ponctuels que le cockpit existe pour rendre possible sur
+            # toute la flotte, pas seulement sur le projet de lancement.
+            # Chaque dérogation est nommée : le reste de `WORKSPACE_PREFIX`
+            # (écrire un fichier, réclamer une tâche…) reste `_HOME_SLUG`
+            # seulement.
             from grimoire.tools.workspace_routes import (
                 WORKSPACE_UNHANDLED,
                 is_proposal_decision,
+                is_registry_scoped_write,
                 workspace_post,
             )
 
-            if not is_proposal_decision(path) and not self._is_home_request():
+            registry_scoped = is_proposal_decision(path) or is_registry_scoped_write(path)
+            if not registry_scoped and not self._is_home_request():
                 self._send_json(403, {"ok": False, "error": "hôte en lecture seule"})
                 return
             proot = _resolve_project_path(self._query_slug() or None)

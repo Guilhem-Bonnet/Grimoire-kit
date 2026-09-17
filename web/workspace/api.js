@@ -251,11 +251,18 @@ export const api = {
   // ── Écritures : atelier seulement, refusées côté cockpit ──────────────────
   taskAction: (id, action, body) =>
     post(WS + 'tasks/' + encodeURIComponent(id) + '/' + action, body),
-  // Bouton « Migrer les tâches » de l'espace Exécuter (ADR-007, issue #559) :
-  // importe dans le Mission Ledger les tâches d'un board du standard scaffoldé
-  // avant le lot 4.1, ou jamais migré — `tasks_view()` ne l'expose (`board.
-  // migration_available`) que quand c'est effectivement le cas.
-  migrateStandardTasks: () => post(WS + 'tasks/migrate-standard', {}),
+  // Bouton « Migrer les tâches » de l'espace Exécuter (ADR-007, issue #559,
+  // #560) : importe dans le Mission Ledger les tâches d'un board du standard
+  // scaffoldé avant le lot 4.1, ou jamais migré — `tasks_view()` ne l'expose
+  // (`board.migration_available`) que quand c'est effectivement le cas.
+  // `postOpen`, pas `post` : cette écriture ouvre la même porte que
+  // `updateProject`/`proposalAction` pour n'importe quel projet du registre
+  // (`is_registry_scoped_write` côté serveur), pas seulement celui de
+  // lancement direct — le verrou `readOnly` général la refuserait par erreur.
+  // Aucun `project` explicite dans la requête : `withProject` (ci-dessus)
+  // ajoute déjà le slug du projet affiché tant qu'aucun n'est présent dans le
+  // chemin, sans jamais le dupliquer (piège #507).
+  migrateStandardTasks: () => postOpen(WS + 'tasks/migrate-standard', {}),
   createOverride: (path) => post(WS + 'file/override', { path }),
   writeFile: (path, text) => post(WS + 'file/write', { path, text }),
   run: (argv) => post(WS + 'command', { argv }),
