@@ -25,6 +25,19 @@ def entry_persona_context(project_root: Path) -> tuple[str, str]:
     full tool surface and can still dispatch sub-agents. It is the one thing
     every host with a ``session_start`` hook makes possible.
 
+    Issue #582 lot C (three-arm bench diagnostic, §1.2.1): this used to
+    mandate reading ``entry.definition_ref`` *in full* before responding, on
+    every session — measured at ~2 800 tokens for the shipped ``concierge``
+    persona, whose documented role ("triage an ambiguous human request") has
+    nothing to act on in a batch session that already received its whole task
+    in one shot. ``HookInput`` carries no reliable interactive/batch signal
+    today (no TTY flag, no ``claude -p`` marker survives into the hook's own
+    subprocess) to keep the full mandate for one case and not the other, so
+    the summary below applies uniformly, documented here rather than guessed
+    at per session. It still names the persona, its role and its tool
+    boundary — enough to act in character — and asks for the full file only
+    when the request truly needs triage.
+
     Returns ``(text, name)``; both empty when the project designates no entry.
     """
     from grimoire.hosts.collect import collect_agents
@@ -38,17 +51,12 @@ def entry_persona_context(project_root: Path) -> tuple[str, str]:
     if entry is None:
         return "", ""
     tools = ", ".join(v.value for v in entry.tools)
-    text = f"""[Grimoire — persona d'entrée]
-Aucun hôte ne sait ouvrir une session à l'intérieur d'un agent. Cette session
-adopte donc la persona d'entrée du projet dans sa boucle principale, sans
-sous-agent : **{entry.name}** — {entry.description}
-
-1. Lis `{entry.definition_ref}` en entier avant de répondre : ce fichier porte
-   la persona, ses règles et son protocole d'activation. Applique-les.
-2. Tiens sa frontière d'outils pour ce que tu fais toi-même : {tools}.
-3. Tu restes la boucle principale : dispatcher un sous-agent reste un choix que
-   tu justifies, jamais un passage obligé.
-"""
+    text = (
+        f"[Grimoire — persona d'entrée] **{entry.name}** — {entry.description} "
+        f"Frontière d'outils : {tools}. Lis `{entry.definition_ref}` en entier "
+        "seulement si la demande est ambiguë ou s'il faut trier entre plusieurs "
+        "pistes ; sinon, ce résumé suffit pour rester dans son rôle.\n"
+    )
     return text, entry.name
 
 
