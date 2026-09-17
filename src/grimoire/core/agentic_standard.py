@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from grimoire.core import standard_generation as gen
+from grimoire.core.execution_needs import resolve_need
 from grimoire.core.standard_checks.base import (
     BOARD_STATES as BOARD_STATES,
 )
@@ -50,8 +51,10 @@ from grimoire.core.standard_checks.base import (
     _yaml as _yaml,
 )
 from grimoire.core.standard_checks.controls import (
+    _verify_acceptance_record,
     _verify_k8s_agent_manifest,
     _verify_score_and_exceptions,
+    acceptance_test_run_relpath,
 )
 from grimoire.core.standard_checks.registry import (
     DEFAULT_SCORE_DIMENSIONS as DEFAULT_SCORE_DIMENSIONS,
@@ -190,6 +193,35 @@ class StandardGateResult:
     state: str | None
     missing: tuple[str, ...]
     checks: tuple[StandardCheck, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class AcceptanceTestRunResult:
+    """Le verdict d'un run de test réel enregistré pour une tâche (issue #582 lot B).
+
+    ``command`` vaut ``""`` quand aucune commande de test n'est connue pour le
+    projet (``ok`` est alors ``False``, sans avoir rien exécuté) — l'appelant
+    (CLI ``grimoire standard gate run-tests``) décide comment le signaler ;
+    ``_verify_acceptance_record`` sait déjà distinguer ce cas de « exécuté et
+    rouge » via ``acceptance.no_test_command_detected``.
+    """
+
+    task_id: str
+    command: str
+    ok: bool
+    exit_code: int | None
+    output_excerpt: str
+    path: Path
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "task_id": self.task_id,
+            "command": self.command,
+            "ok": self.ok,
+            "exit_code": self.exit_code,
+            "output_excerpt": self.output_excerpt,
+            "path": str(self.path),
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -1509,6 +1541,75 @@ def simulate_standard_hooks(
     return StandardRuntimeArtifact(path=written, data=data)
 
 
+def record_acceptance_test_run(project_root: Path, *, task_id: str = "bootstrap") -> AcceptanceTestRunResult:
+    """Exécute la commande de test connue du projet et enregistre le verdict (issue #582 lot B).
+
+    Point d'entrée de ``grimoire standard gate run-tests``. Ne duplique pas
+    d'exécuteur : ``_run_checks`` (:mod:`grimoire.missions.dispatch`) est le
+    même primitif que ``flows.dispatch_executor`` utilise déjà pour une
+    ``AcceptanceEvidence(kind="test")`` (issue #428) — seul le point d'appel
+    change ici, le chemin déclaratif (``standard verify``/``gate check``) qui
+    n'exécutait jusqu'à ce lot jamais rien lui-même (voir
+    ``docs/bench/diagnostic-surcout-kit-2026-09-17.md`` §2).
+
+    La commande à exécuter vient de :func:`grimoire.core.execution_needs.resolve_need`
+    (``needs.commands.test-runner`` déclaré dans ``project-context.yaml``, ou
+    détection par marqueur : ``pyproject.toml``, ``package.json``,
+    ``Cargo.toml``, ``go.mod``) — jamais inventée ici. Sans commande connue,
+    rend un résultat ``ok=False``/``command=""`` sans rien exécuter ni écrire
+    de fichier : l'appelant (CLI, ou un futur exécuteur) décide comment le
+    signaler, et ``_verify_acceptance_record`` distingue déjà ce cas
+    (``acceptance.no_test_command_detected``) d'un run réellement rouge.
+    """
+    root = project_root.resolve()
+    normalized_task_id = normalize_task_id(task_id)
+    result_path = root / acceptance_test_run_relpath(normalized_task_id)
+    need = resolve_need("test-runner", root)
+    if not need.resolved or need.command is None:
+        return AcceptanceTestRunResult(
+            task_id=normalized_task_id,
+            command="",
+            ok=False,
+            exit_code=None,
+            output_excerpt="Aucune commande de test connue pour ce projet.",
+            path=result_path,
+        )
+    # Importé ici, pas au sommet du module : `grimoire.missions.dispatch`
+    # entraîne `providers.audit` (`urllib.request`/`ssl`, ~60 ms mesurés au
+    # profilage), un coût que chaque `standard verify`/`gate check` paierait
+    # au chargement si l'import restait au niveau module — même convention
+    # que `cli.cmd_task` pour ce même symbole.
+    from grimoire.missions.dispatch import _run_checks
+
+    (check,) = _run_checks((need.command,), project_root=root)
+    result_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "task_id": normalized_task_id,
+        "command": need.command,
+        "ok": check.ok,
+        "exit_code": check.exit_code,
+        "output_excerpt": check.output_excerpt,
+        "recorded_at": datetime.now(UTC).isoformat(),
+    }
+    result_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    profile = _selected_profile(root, None)
+    _append_runtime_event(
+        root,
+        event_type="acceptance.test_run",
+        task_id=normalized_task_id,
+        profile=profile.id,
+        details={"ok": check.ok, "command": need.command, "exit_code": check.exit_code},
+    )
+    return AcceptanceTestRunResult(
+        task_id=normalized_task_id,
+        command=need.command,
+        ok=check.ok,
+        exit_code=check.exit_code,
+        output_excerpt=check.output_excerpt,
+        path=result_path,
+    )
+
+
 def check_evidence_gates(
     project_root: Path,
     *,
@@ -1562,6 +1663,15 @@ def check_evidence_gates(
         for key in ("evidence_pack", "decision_trace"):
             if not (root / required_paths[key]).is_file():
                 missing.append(key)
+        # Issue #582 lot B : le même signal que `standard verify` — une ligne
+        # « passé » sans run de test réel enregistré — doit aussi apparaître
+        # ici, sur le chemin que le hook SessionStart mandate réellement
+        # (`gate check --strict`), pas seulement sur `verify` qu'un agent peut
+        # ne jamais appeler. Réutilise `_verify_acceptance_record` telle
+        # quelle plutôt que de dupliquer sa lecture de l'acceptance record.
+        acceptance_result = StandardVerificationResult(profile=profile.id, project_root=root)
+        _verify_acceptance_record(root, profile, normalized_task_id, acceptance_result)
+        checks.extend(acceptance_result.checks)
     if state == "released" and not (root / required_paths["compliance_score"]).is_file():
         missing.append("compliance_score")
     for key in missing:

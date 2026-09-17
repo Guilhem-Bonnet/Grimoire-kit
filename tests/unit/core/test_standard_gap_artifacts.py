@@ -16,7 +16,11 @@ import pytest
 from typer.testing import CliRunner
 
 from grimoire.cli.app import app
-from grimoire.core.agentic_standard import setup_standard_profile, verify_standard_profile
+from grimoire.core.agentic_standard import (
+    record_acceptance_test_run,
+    setup_standard_profile,
+    verify_standard_profile,
+)
 from grimoire.core.standard_traceability import matrix_for, with_verdicts
 
 PROFILES = ("starter", "controlled", "orchestrated", "governed", "production")
@@ -70,6 +74,71 @@ def test_a_criterion_passed_without_proof_is_an_error(tmp_path: Path) -> None:
     _replace(record, "| AC-001 |  |  | à vérifier |", "| AC-001 | Les tests passent |  | passé |")
     result = verify_standard_profile(tmp_path)
     assert "acceptance.passed_without_evidence" in _ids(result, "acceptance.", "error")
+
+
+def test_a_criterion_passed_without_a_real_test_run_is_a_warning_when_a_command_is_known(tmp_path: Path) -> None:
+    """Issue #582 lot B : une ligne « passé » ne peut plus rester du texte libre sans le dire.
+
+    Avant ce lot, cette même déclaration ne produisait aucun constat : le
+    diagnostic de surcoût (`docs/bench/diagnostic-surcout-kit-2026-09-17.md`
+    §2) montre qu'un agent peut écrire « passé » sans avoir rien exécuté et
+    obtenir un `verify` vert. Ce test est rouge avant le correctif (l'id
+    ci-dessous n'existe pas encore) et vert après.
+    """
+    setup_standard_profile(tmp_path, profile_id="starter", project_name="Demo")
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "demo"\n', encoding="utf-8")
+    record = tmp_path / "_grimoire-output/evidence/bootstrap/acceptance-record.md"
+    _replace(record, "| AC-001 |  |  | à vérifier |", "| AC-001 | Les tests passent | pytest -q | passé |")
+
+    result = verify_standard_profile(tmp_path)
+
+    assert "acceptance.passed_without_test_run" in _ids(result, "acceptance.", "warning")
+    # Transition douce (documentée dans le CHANGELOG) : un avertissement cette
+    # release, pas encore un blocage.
+    assert result.ok
+
+
+def test_a_criterion_passed_without_a_known_test_command_stays_declarative(tmp_path: Path) -> None:
+    """Aucune commande de test détectable : comportement inchangé, mais signalé (issue #582 lot B)."""
+    setup_standard_profile(tmp_path, profile_id="starter", project_name="Demo")
+    record = tmp_path / "_grimoire-output/evidence/bootstrap/acceptance-record.md"
+    _replace(record, "| AC-001 |  |  | à vérifier |", "| AC-001 | Les tests passent | pytest -q | passé |")
+
+    result = verify_standard_profile(tmp_path)
+
+    assert "acceptance.no_test_command_detected" in _ids(result, "acceptance.", "warning")
+    assert "acceptance.passed_without_test_run" not in _ids(result, "acceptance.")
+    assert result.ok
+
+
+def test_recording_a_real_green_test_run_clears_the_warning(tmp_path: Path) -> None:
+    setup_standard_profile(tmp_path, profile_id="starter", project_name="Demo")
+    (tmp_path / "project-context.yaml").write_text(
+        'project:\n  name: demo\nneeds:\n  commands:\n    test-runner: "true"\n', encoding="utf-8"
+    )
+    record = tmp_path / "_grimoire-output/evidence/bootstrap/acceptance-record.md"
+    _replace(record, "| AC-001 |  |  | à vérifier |", "| AC-001 | Les tests passent | true | passé |")
+    assert "acceptance.passed_without_test_run" in _ids(verify_standard_profile(tmp_path), "acceptance.", "warning")
+
+    outcome = record_acceptance_test_run(tmp_path)
+
+    assert outcome.ok is True
+    assert outcome.path.is_file()
+    assert "acceptance.passed_without_test_run" not in _ids(verify_standard_profile(tmp_path), "acceptance.")
+
+
+def test_recording_a_real_red_test_run_keeps_the_warning(tmp_path: Path) -> None:
+    setup_standard_profile(tmp_path, profile_id="starter", project_name="Demo")
+    (tmp_path / "project-context.yaml").write_text(
+        'project:\n  name: demo\nneeds:\n  commands:\n    test-runner: "false"\n', encoding="utf-8"
+    )
+    record = tmp_path / "_grimoire-output/evidence/bootstrap/acceptance-record.md"
+    _replace(record, "| AC-001 |  |  | à vérifier |", "| AC-001 | Les tests passent | false | passé |")
+
+    outcome = record_acceptance_test_run(tmp_path)
+
+    assert outcome.ok is False
+    assert "acceptance.passed_without_test_run" in _ids(verify_standard_profile(tmp_path), "acceptance.", "warning")
 
 
 def test_accepting_without_a_validator_is_an_error(tmp_path: Path) -> None:
