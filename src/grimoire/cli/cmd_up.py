@@ -1145,6 +1145,61 @@ def _step_standard(
         state.steps.append(StepResult("standard", "failed", f"standard init error: {exc}"))
 
 
+def _step_task_unification(state: _UpState, target: Path, *, dry_run: bool, blocked: bool) -> None:
+    """ADR-007 point 3 — migre en meilleur effort un board scaffoldé sans ledger.
+
+    `standard init` ouvre désormais le Mission Ledger dès l'init (point 1),
+    mais un projet enrôlé par une version antérieure du kit — ou dont le board
+    a été écrit à la main — peut porter un ``task-board.yaml`` sans jamais
+    avoir ouvert de ledger (issue #521). Ce pas rejoue exactement
+    ``grimoire task migrate-standard`` : idempotent (rien à réimporter une
+    fois migré) et réversible (instantané horodaté). Jamais bloquant : un
+    import qui échoue laisse `doctor` nommer la divergence et son remède,
+    plutôt que de faire échouer `up` sur un projet qu'il vient par ailleurs de
+    remettre en état.
+    """
+    if blocked:
+        state.steps.append(StepResult("task_unification", "skipped", "blocked: no project configuration"))
+        return
+
+    from grimoire.core.standard_state import is_standard_enrolled
+    from grimoire.missions.task_unification import migrate_standard_tasks, tasks_unification_status
+
+    if not is_standard_enrolled(target):
+        state.steps.append(StepResult("task_unification", "skipped", "project not enrolled in the standard"))
+        return
+
+    status = tasks_unification_status(target)
+    if not status["diverged"]:
+        state.steps.append(StepResult("task_unification", "done", "Mission Ledger already covers the board"))
+        return
+
+    if dry_run:
+        missing = len(status["missing_in_ledger"])
+        state.steps.append(StepResult(
+            "task_unification", "planned",
+            f"migrate-standard would import {missing} task(s) missing from the Mission Ledger",
+        ))
+        return
+
+    try:
+        report = migrate_standard_tasks(target)
+    except (GrimoireError, OSError) as exc:
+        state.steps.append(StepResult("task_unification", "failed", f"migrate-standard error: {exc}"))
+        return
+
+    if report.tasks_imported:
+        state.steps.append(StepResult(
+            "task_unification", "changed",
+            f"{report.tasks_imported} task(s) migrated from task-board.yaml to the Mission Ledger "
+            f"(snapshot {report.snapshot_path} — restore with "
+            f"`grimoire task migrate-standard --restore {report.stamp}`)",
+        ))
+        state.actions.append(f"Migrated {report.tasks_imported} task(s) from task-board.yaml to the Mission Ledger")
+    else:
+        state.steps.append(StepResult("task_unification", "done", "Mission Ledger already covers the board"))
+
+
 def _step_cadrage(state: _UpState, target: Path, *, needs: list[str], dry_run: bool, blocked: bool) -> None:
     """Scaffold ``_grimoire/cadrage/`` when the ``project-discovery`` need was
     chosen (issue #173).
@@ -1343,6 +1398,11 @@ def run_up_pipeline(
         quiet=quiet,
         declared_archetypes=declared_archetypes,
     )
+
+    # 4quater. Task unification (ADR-007, issue #559) — migrate a board scaffolded
+    # without a Mission Ledger, independently of `--no-standard`: the project may
+    # already be enrolled from an earlier `standard init` this run does not repeat.
+    _step_task_unification(state, target, dry_run=dry_run, blocked=blocked)
 
     # 4ter. Cadrage — scaffold when `project-discovery` was chosen (#173).
     _step_cadrage(state, target, needs=needs, dry_run=dry_run, blocked=blocked)

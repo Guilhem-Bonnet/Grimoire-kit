@@ -531,3 +531,76 @@ class TestUpNoCockpit:
         declared = {opt for param in up.params for opt in getattr(param, "opts", [])}
         assert "--no-cockpit" in declared
         assert "GRIMOIRE_NO_COCKPIT" in (up.help or "")
+
+
+class TestUpTaskUnification:
+    """ADR-007 point 3 — `grimoire up` migre en meilleur effort un board
+    scaffoldé sans Mission Ledger (issue #559, constat #521)."""
+
+    def _write_legacy_project(self, target: Path) -> None:
+        """Un projet enrôlé comme une version antérieure du kit l'aurait laissé :
+        board du standard présent, jamais de Mission Ledger ouvert."""
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "project-context.yaml").write_text(
+            'project:\n  name: "legacy"\nmemory:\n  backend: "local"\nagents:\n  archetype: "minimal"\n',
+            encoding="utf-8",
+        )
+        board_dir = target / "_grimoire" / "standard"
+        board_dir.mkdir(parents=True, exist_ok=True)
+        (board_dir / "task-board.yaml").write_text(
+            "$schema: grimoire-agentic-standard-task-board/v1\n"
+            "metadata:\n  project: legacy\n"
+            "states: [proposed, ready, in_progress, blocked, review, accepted, released, archived]\n"
+            "transitions: {}\n"
+            "tasks:\n"
+            "  - task_id: legacy-1\n"
+            "    title: Legacy task\n"
+            "    status: proposed\n"
+            "    acceptance_criteria: ['done']\n",
+            encoding="utf-8",
+        )
+
+    def test_up_migrates_a_board_without_a_ledger(self, runner, cli_app, tmp_path: Path) -> None:
+        from grimoire.missions.ledger import MissionLedger
+        from grimoire.missions.service import DEFAULT_LEDGER_RELPATH
+
+        target = tmp_path / "legacy-project"
+        self._write_legacy_project(target)
+
+        # Rouge avant le correctif : aucun ledger tant que rien ne l'ouvre (#521).
+        assert not (target / DEFAULT_LEDGER_RELPATH / "events.jsonl").is_file()
+
+        result = runner.invoke(cli_app, ["up", str(target), "--no-standard"])
+        assert result.exit_code == 0, result.output
+        assert "task_unification" in result.output
+
+        ledger = MissionLedger(target / DEFAULT_LEDGER_RELPATH)
+        migrated = ledger.get_task("legacy-1")
+        assert migrated is not None
+        assert migrated.title == "Legacy task"
+
+    def test_up_migration_is_idempotent(self, runner, cli_app, tmp_path: Path) -> None:
+        from grimoire.missions.ledger import MissionLedger
+        from grimoire.missions.service import DEFAULT_LEDGER_RELPATH
+
+        target = tmp_path / "legacy-project"
+        self._write_legacy_project(target)
+
+        first = runner.invoke(cli_app, ["up", str(target), "--no-standard"])
+        assert first.exit_code == 0, first.output
+
+        second = runner.invoke(cli_app, ["up", str(target), "--no-standard"])
+        assert second.exit_code == 0, second.output
+
+        ledger = MissionLedger(target / DEFAULT_LEDGER_RELPATH)
+        matching = [t for t in ledger.list_tasks() if t.id == "legacy-1"]
+        assert len(matching) == 1
+
+    def test_up_reports_nothing_to_migrate_for_a_fresh_project(self, runner, cli_app, tmp_path: Path) -> None:
+        """Un projet fraîchement initialisé via `up` a déjà un ledger (point 1) —
+        `task_unification` ne doit rien trouver à migrer."""
+        target = tmp_path / "fresh-project"
+        result = runner.invoke(cli_app, ["up", str(target), "--backend", "local"])
+        assert result.exit_code == 0, result.output
+        assert "task_unification" in result.output
+        assert "failed" not in result.output.lower()
