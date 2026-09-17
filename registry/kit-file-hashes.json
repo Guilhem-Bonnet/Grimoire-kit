@@ -1,6 +1,6 @@
 {
  "schema": "grimoire-kit-file-hashes/v1",
- "generated_for": "3.53.0",
+ "generated_for": "3.54.0",
  "digests": {
   "002d1e68ce00769ee09d1e94f4af260b952837f7d1557080c2fd505216c23ac0": {
    "version": "3.11.2",
@@ -433,6 +433,10 @@
   "1e40cc50bd86708c53fda70eb30f36d1c07b68e04b9ed5da1b03304e3b423ede": {
    "version": "3.4.2",
    "path": "framework/tools/agent-debugger.py"
+  },
+  "1ea17c0e679b146979fcdb1917aca3089f0bb418c60daf530221ec99245cfabc": {
+   "version": "3.54.0",
+   "path": "archetypes/minimal/archetype.dna.yaml"
   },
   "1ee3f1a883c5e0059aefa3ddf592321501a9cbb6cf937f0552ceba1041eaaa0a": {
    "version": "3.4.2",
@@ -1810,6 +1814,10 @@
    "version": "3.6.0",
    "path": "framework/agentic-standard/templates/pattern-catalog.yaml"
   },
+  "837caa925f07bd3cb8520bb3657122787958dac30b710de3d88d5e4131698941": {
+   "version": "3.54.0",
+   "path": "framework/agentic-industry-reference.md"
+  },
   "838c9bba712df68bfa5088d9ec26c1ffa74060ee6d74545c38d39f6a0b175edd": {
    "version": "3.32.0",
    "path": "framework/tools/agent-forge.py"
@@ -2021,6 +2029,10 @@
   "903d722980a676c15542bf5fc4f584e6914bb8b76f623cf00250d8c7fc569c22": {
    "version": "3.12.0",
    "path": "archetypes/stack/agents/terraform-expert.dna.yaml"
+  },
+  "9044a848aa54dfd42c563aef6b101e35d72e4aaf6176ca265bc3c8284e14e36b": {
+   "version": "3.54.0",
+   "path": "archetypes/agentic-standard/archetype.dna.yaml"
   },
   "904c2df3bc2a6891ff87c881d5fb2b36b980ef80cbbf4de02b83bd7559a15cb6": {
    "version": "3.4.2",
