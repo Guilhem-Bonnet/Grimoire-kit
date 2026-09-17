@@ -93,6 +93,26 @@ class TestForgeAPI:
         assert any("edge to inconnu" in e for e in errors)
         assert any("artefact absent" in e for e in errors)
 
+    def test_artifact_ref_escaping_project_root_is_never_reported_as_present(
+        self, api: ForgeAPI
+    ) -> None:
+        """Régression CodeQL py/path-injection : `n["ref"]` vient du corps d'une
+        requête HTTP cockpit (`blueprint_validate`/`lint`, ouvertes en lecture
+        sur toute la flotte, sans garde `_HOME_SLUG`). Avant confinement,
+        `(self.project_root / ref).exists()` servait d'oracle d'existence de
+        fichier arbitraire sur la machine — un `ref` qui s'échappe du projet
+        mais désigne un fichier réel (``/etc/passwd`` existe toujours sur
+        Linux) se disait « présent », révélant l'information hors du
+        périmètre du projet."""
+        blueprint = {
+            "nodes": [
+                {"id": "a", "kind": "artifact", "ref": "../../../../../../etc/passwd", "label": "X", "pins": []}
+            ],
+            "edges": [],
+        }
+        errors = api.blueprint_validate(blueprint)
+        assert any("artefact absent du projet" in e for e in errors)
+
     def test_blueprint_bad_id_rejected(self, api: ForgeAPI) -> None:
         with pytest.raises(ValueError, match="invalide"):
             api.blueprint_get("../evil")
@@ -404,6 +424,21 @@ class TestComposites:
         errors = api.blueprint_validate(bp)
         assert any("sous-blueprint absent" in e for e in errors)
 
+    def test_sub_blueprint_ref_escaping_project_root_is_never_reported_as_present(
+        self, api: ForgeAPI, project_root: Path, kit_root: Path
+    ) -> None:
+        """Même régression que pour les artefacts : un `ref` composite qui
+        s'échappe du projet — ici vers un fichier `.blueprint.json` réel posé
+        dans `kit_root`, dossier voisin de `project_root` sous le même
+        `tmp_path` — ne doit jamais se dire « présent »."""
+        assert kit_root.parent == project_root.parent
+        leaked = kit_root / "leaked.blueprint.json"
+        leaked.write_text("{}", encoding="utf-8")
+        escaping_ref = f"../{kit_root.name}/leaked.blueprint.json"
+        bp = {"nodes": [self.composite(escaping_ref)], "edges": []}
+        errors = api.blueprint_validate(bp)
+        assert any("sous-blueprint absent" in e for e in errors)
+
     def test_use_case_patterns_feed_lint(self, api_with_catalogue: ForgeAPI) -> None:
         bp = {
             "nodes": [
@@ -516,6 +551,28 @@ class TestCompile:
 
         digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
         assert compiled["hash"] == f"sha256:{digest}"
+
+    def test_compile_rejects_path_traversal_id(
+        self, api_with_catalogue: ForgeAPI, project_root: Path
+    ) -> None:
+        """Régression CodeQL py/path-injection : `blueprint["id"]` vient d'une
+        requête HTTP et servait à construire `artifact_rel` (le `.prompt.md`
+        du mission pack) *avant* tout passage par `_blueprint_path`, qui est
+        la seule fonction du module à valider un id de blueprint. Un id
+        contenant `../` écrivait alors hors de `.github/prompts/`."""
+        bp = {
+            "blueprintVersion": 1,
+            "id": "../../evil",
+            "name": "Flow méchant",
+            "catalogRef": {"version": "1.0.0"},
+            "nodes": [make_node("a", "ORC-01"), make_node("b", "QUA-04")],
+            "edges": [{"from": "a.out", "to": "b.in", "contract": "task-envelope"}],
+        }
+        with pytest.raises(ValueError, match="invalide"):
+            api_with_catalogue.blueprint_compile(bp)
+        # Rien n'a été écrit nulle part, ni sous le projet ni au-dessus.
+        assert not (project_root / ".github" / "prompts").exists()
+        assert not (project_root.parent / "evil.blueprint.prompt.md").exists()
 
     def test_blocked_blueprint_refuses_compilation(self, api: ForgeAPI) -> None:
         bp = {

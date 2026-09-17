@@ -2,12 +2,47 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from grimoire.cli.cmd_init import _git_user_name, detect_memory_backend
+from grimoire.cli.cmd_init import _git_user_name, _maybe_register_cockpit, detect_memory_backend
+
+
+class TestMaybeRegisterCockpitLogging:
+    """Régression CodeQL py/log-injection : `target` (un nom de dossier choisi
+    par l'appelant) était interpolé avec `%s` dans `logger.debug`. Un dossier
+    dont le nom contient un retour à la ligne pouvait alors forger une fausse
+    entrée de log. `%r` (repr) échappe `\\n`/`\\r` au lieu de les émettre."""
+
+    def test_no_cockpit_flag_does_not_leak_a_raw_newline(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        target = tmp_path / "projet\nFAUX-LOG : accès accordé"
+        with caplog.at_level(logging.DEBUG, logger="grimoire.cli.cmd_init"):
+            _maybe_register_cockpit(target, "demo", "python", no_cockpit=True)
+        assert len(caplog.records) == 1
+        rendered = caplog.records[0].getMessage()
+        assert "\n" not in rendered
+        assert "FAUX-LOG" in rendered  # toujours visible, juste échappé
+
+    def test_scratch_path_does_not_leak_a_raw_newline(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import tempfile
+
+        monkeypatch.delenv("GRIMOIRE_NO_COCKPIT", raising=False)
+        scratch_root = Path(tempfile.gettempdir()) / "projet\nFAUX-LOG : accès accordé"
+        with caplog.at_level(logging.DEBUG, logger="grimoire.cli.cmd_init"):
+            _maybe_register_cockpit(scratch_root, "demo", "python")
+        assert len(caplog.records) == 1
+        rendered = caplog.records[0].getMessage()
+        assert "\n" not in rendered
 
 
 class TestDetectMemoryBackend:

@@ -696,8 +696,15 @@ class ForgeAPI:
 
         # Gate universel (P2.1) : forme des politiques (dont R-G4, schéma
         # résolu contre le projet) + frontière de confiance R-G1/R-G2.
+        #
+        # `rel` vient du blueprint (corps d'une requête HTTP cockpit) : sans le
+        # `is_relative_to`, un `rel` du genre `../../etc/passwd` transformait ce
+        # contrôle en oracle d'existence de fichier arbitraire sur la machine
+        # (CodeQL py/path-injection) — un `../` ne « résout » désormais jamais,
+        # même quand le fichier visé existe réellement hors du projet.
         def _schema_resolves(rel: str) -> bool:
-            return (self.project_root / rel).is_file()
+            candidate = (self.project_root / rel).resolve()
+            return candidate.is_relative_to(self.project_root) and candidate.is_file()
 
         for n in nodes:
             errors.extend(gate_shape_errors(n, resolve_schema=_schema_resolves))
@@ -752,8 +759,11 @@ class ForgeAPI:
                         )
         for n in nodes:
             if n.get("kind") == "artifact":
-                target = self.project_root / str(n.get("ref", ""))
-                if not target.exists():
+                # `.resolve()` + `is_relative_to` (CodeQL py/path-injection) :
+                # même raison que `_schema_resolves`, un `ref` avec `../` ne
+                # doit jamais devenir un oracle d'existence hors du projet.
+                target = (self.project_root / str(n.get("ref", ""))).resolve()
+                if not (target.is_relative_to(self.project_root) and target.exists()):
                     errors.append(f"artefact absent du projet : {n.get('ref')}")
             elif n.get("kind") == "composite":
                 ref = str(n.get("ref", ""))
@@ -763,7 +773,10 @@ class ForgeAPI:
                         if ref.removeprefix("use-case:") not in known_uc:
                             errors.append(f"use-case inconnu du catalogue : {ref}")
                 elif ref.endswith(".blueprint.json"):
-                    if not (self.project_root / ref).is_file():
+                    sub_blueprint = (self.project_root / ref).resolve()
+                    if not (
+                        sub_blueprint.is_relative_to(self.project_root) and sub_blueprint.is_file()
+                    ):
                         errors.append(f"sous-blueprint absent du projet : {ref}")
                 else:
                     errors.append(
@@ -1214,6 +1227,13 @@ class ForgeAPI:
             raise ValueError(f"compilation refusée, blueprint bloqué : {rendered}")
 
         bp_id = str(blueprint.get("id", "blueprint"))
+        if not SLUG_RE.match(bp_id):
+            # Même garde que `_blueprint_path` (issue CodeQL py/path-injection) :
+            # `bp_id` sert plus bas à construire `artifact_rel`, un chemin sous
+            # `project_root`, *avant* le premier appel à `_blueprint_path` qui
+            # l'aurait validé. Sans ce contrôle ici, un id contenant `../`
+            # écrirait le mission pack hors de `.github/prompts/`.
+            raise ValueError(f"id de blueprint invalide : {bp_id}")
         name = blueprint.get("name", bp_id)
         now = datetime.now(UTC).isoformat()
         catalog_version = blueprint.get("catalogRef", {}).get("version", "inconnue")
