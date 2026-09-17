@@ -380,7 +380,9 @@ Le groupe `grimoire standard` pilote le standard agentique (profils, patterns go
 | `grimoire standard verify` | Vérifier les artefacts (fail-closed) |
 | `grimoire standard audit` | Rapport de conformité + gaps restants |
 | `grimoire standard score` | Calculer et persister un score de conformité |
-| `grimoire standard gate check` | Gate CI : échoue si une preuve obligatoire manque |
+| `grimoire standard gate check [--strict] [--no-run]` | Gate CI : échoue si une preuve obligatoire manque ; chaque manque nomme son chemin et un remède copiable. `--strict` exécute lui-même `gate run-tests` si la tâche doit une preuve d'exécution et qu'aucun run vert et frais n'existe ; `--no-run` restaure l'ancien comportement |
+| `grimoire standard gate run-tests` | Exécuter la commande de test connue et enregistrer le verdict (`test-run.json`) |
+| `grimoire standard task scaffold [--task-id X] [--dry-run]` | Créer, s'ils manquent seulement, les artefacts par tâche que les gates exigent (enveloppe, pack de preuve, registre d'affirmations, dossier d'acceptance, context bundle, decision trace), pré-remplis depuis le Mission Ledger ; idempotent ; le hook SessionStart le fait déjà pour la tâche active |
 | `grimoire standard fix [--apply]` | Planifier / appliquer des correctifs sûrs |
 | `grimoire standard doctor` | Vérifier la disponibilité des extras technologiques |
 | `grimoire standard pattern` | Lister / inspecter les patterns |
@@ -388,7 +390,7 @@ Le groupe `grimoire standard` pilote le standard agentique (profils, patterns go
 | `grimoire standard traceability [projet]` | Matrice exigences / contrôles / preuves de la norme ; avec un projet, le verdict de `verify` par artefact |
 | `grimoire standard upstream` | Le standard amont a-t-il avancé depuis la révision épinglée (sortie 0/2/3) |
 
-Sous-groupes (chacun avec `--help`) : `board`, `memory`, `context`, `decision`, `rules`, `hooks`, `gate`, `events`, `pattern`, `knowledge`.
+Sous-groupes (chacun avec `--help`) : `board`, `memory`, `context`, `decision`, `rules`, `hooks`, `gate`, `events`, `pattern`, `knowledge`, `task`.
 
 ---
 

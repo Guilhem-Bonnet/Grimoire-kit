@@ -86,6 +86,7 @@ CHECK_DIMENSIONS: dict[str, str] = {
     "acceptance.passed_without_test_run": "evidence_gates",
     "acceptance.row_invalid": "evidence_gates",
     "acceptance.test_run_stale": "evidence_gates",
+    "acceptance.test_run_failed": "evidence_gates",
     "incidents.containment_action_unknown": "evidence_gates",
     "incidents.containment_escalation_missing": "evidence_gates",
     "incidents.containment_missing": "evidence_gates",
@@ -109,8 +110,12 @@ CHECK_DIMENSIONS: dict[str, str] = {
     "evidence.pending_gate": "evidence_gates",
     "evidence.summary_placeholder": "evidence_gates",
     "gate.compliance_score_missing": "evidence_gates",
+    "gate.context_bundle_missing": "evidence_gates",
     "gate.decision_trace_missing": "evidence_gates",
     "gate.evidence_pack_missing": "evidence_gates",
+    "gate.memory_policy_missing": "evidence_gates",
+    "gate.task_board_missing": "evidence_gates",
+    "gate.task_envelope_missing": "evidence_gates",
     # Émis par l'évaluateur de gates, pas par le vérificateur de board : la tâche
     # absente empêche d'évaluer les gates, elle ne décrit pas un board mal formé.
     # Aucun `board.*` ne couvre ce cas, donc pas de double compte.

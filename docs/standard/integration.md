@@ -396,7 +396,10 @@ grimoire standard hooks verify .
 grimoire standard hooks simulate . --phase pre_context_build --task-id bootstrap
 grimoire standard gate check . --task-id bootstrap --target-state review
 grimoire standard gate check . --task-id bootstrap --target-state released --profile governed --strict
+grimoire standard gate check . --task-id bootstrap --strict --no-run
 grimoire standard gate run-tests . --task-id bootstrap
+grimoire standard task scaffold . --task-id bootstrap
+grimoire standard task scaffold . --task-id bootstrap --dry-run
 grimoire standard knowledge index . --task-id bootstrap
 grimoire standard knowledge graph . --task-id bootstrap
 grimoire standard knowledge verify . --task-id bootstrap
@@ -486,6 +489,69 @@ promouvra `acceptance.passed_without_test_run` (et `acceptance.test_run_stale`)
 en erreur bloquante pour les profils `governed`/`production`, le temps que
 les projets déjà gouvernés adoptent `gate run-tests` (ou une intégration CI
 équivalente) dans leur boucle de clôture de tâche.
+
+## Gate auto-suffisant : chemin, remède, scaffold, tests intégrés
+
+Le banc à trois bras du 2026-09-17 (`docs/bench/diagnostic-surcout-kit-2026-09-17.md`)
+a mesuré 31 tours médians pour le bras gouverné contre 6 pour Claude nu, à
+succès égal. L'analyse tour par tour de 21 runs a isolé le plus gros poste :
+une médiane de 11 tours par run (jusqu'à 22) passés à lire le source installé
+du kit après un `FAIL missing context_bundle` qui ne disait ni où créer le
+fichier ni quoi faire — 21 runs sur 21 ont ouvert `site-packages/grimoire/`.
+Le lot G1 de l'issue #582 ferme ce trou en quatre pièces.
+
+**Chaque manque nomme son chemin et son remède.** Un check
+`gate.<clé>_missing` de `check_evidence_gates` (donc de `gate check`, du hook
+`Stop` et de l'outil MCP) porte désormais le chemin attendu et une commande
+shell copiable, la racine citée en absolu :
+
+```text
+gate.context_bundle_missing (_grimoire-output/context/T-1/context-bundle.yaml):
+  Artefact de gate manquant : context_bundle — attendu à
+  _grimoire-output/context/T-1/context-bundle.yaml ; remède :
+  grimoire standard task scaffold /chemin/du/projet --task-id T-1
+```
+
+La table clé → chemin → remède vit en un seul endroit,
+`grimoire.core.standard_checks.gate_remedy` : les artefacts par tâche
+(`task_envelope`, `evidence_pack`, `claim_ledger`, `acceptance_record`,
+`context_bundle`, `decision_trace`) se scaffoldent ; `compliance_score` se
+calcule (`standard score`) ; `task_board` et `memory_policy` appartiennent au
+profil (`standard init`, ou `task board export` quand un ledger existe). Le
+rendu texte de `gate check` affiche tous les checks (plus seulement la clé nue
+des manques), et `verify` fait suivre chaque chemin manquant de son remède.
+
+**`grimoire standard task scaffold`** crée, s'ils manquent seulement, tous les
+artefacts par tâche que le profil actif exige, et ne réécrit jamais un fichier
+présent. Chaque squelette est pré-rempli avec ce que le kit sait déjà :
+identifiant et titre, critères d'acceptation (une ligne `AC-00n … à vérifier`
+par critère, lus dans le Mission Ledger — ADR-007 — ou à défaut sur le
+board), profil, état courant, niveau de risque, `HEAD` git, commande de test
+résolue par `resolve_need("test-runner", …)`, date du jour. Le résumé
+placeholder du pack de preuve (`- Outcome:` vide) est remplacé par un résumé
+généré (titre + critères). Un squelette frais passe `gate check` — y compris
+vers `review` — sans autre motif de refus qu'un motif de fond (tests rouges,
+critère déclaré passé sans preuve). Une tâche inconnue du ledger et du board
+est refusée (`grimoire task add` d'abord) : pas de dossier orphelin. `--dry-run`
+rend le plan sans rien écrire, ni fichier ni événement de journal.
+
+**Le hook `SessionStart` scaffolde la tâche active** d'un projet reconnu
+gouverné (`_is_governed`, lot A), silencieusement et de façon idempotente :
+les artefacts existent avant la première commande de l'agent. Quand tout
+existe déjà — chaque session après la première — le coût se limite à six
+`stat` (mesuré 0,18 ms en médiane, borné à 100 ms par
+`test_session_start_scaffold_noop_stays_under_budget`) ; aucun YAML n'est lu,
+le ledger n'est pas ouvert.
+
+**`gate check --strict` exécute lui-même `gate run-tests`** quand la tâche
+doit une preuve d'exécution (`in_progress`, `review`, `accepted`, `released`),
+qu'une commande de test est connue et qu'aucun run vert et frais n'est
+enregistré (même empreinte d'arbre que `test-run.json`), puis évalue comme
+avant. Un run rouge frais est une erreur `acceptance.test_run_failed` ; un run
+rouge périmé ne l'est plus (le code a pu changer). `--no-run` restaure
+l'ancien comportement : aucune exécution, évaluation de ce qui est enregistré.
+Le hook `Stop` n'exécute jamais de tests : il évalue via
+`check_evidence_gates`, qui lit le run enregistré sans le relancer.
 
 ## Ce qui est maintenant prêt
 

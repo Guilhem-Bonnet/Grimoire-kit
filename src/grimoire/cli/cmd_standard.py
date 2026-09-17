@@ -9,6 +9,7 @@ from typing import Any
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from grimoire.core.agentic_standard import (
@@ -46,6 +47,9 @@ from grimoire.core.claude_activation import (
     install_claude_activation,
 )
 from grimoire.core.standard_checks.acceptance_test_run import record_acceptance_test_run
+from grimoire.core.standard_checks.gate_remedy import remedy_for_relpath
+from grimoire.core.standard_checks.gate_test_run import board_state_of_task, ensure_fresh_test_run
+from grimoire.core.standard_task_scaffold import scaffold_task_artifacts
 from grimoire.hosts.sync import HostSyncOutcome, sync_host_surfaces
 
 standard_app = typer.Typer(
@@ -62,6 +66,7 @@ hooks_app = typer.Typer(help="Verify and simulate hooks.", no_args_is_help=True,
 gate_app = typer.Typer(help="Check evidence gates.", no_args_is_help=True, rich_markup_mode="rich")
 events_app = typer.Typer(help="Audit the standard runtime journal.", no_args_is_help=True, rich_markup_mode="rich")
 pattern_app = typer.Typer(help="List and inspect standard patterns.", no_args_is_help=True, rich_markup_mode="rich")
+task_app = typer.Typer(help="Scaffold the per-task artifacts the evidence gates require.", no_args_is_help=True, rich_markup_mode="rich")
 knowledge_app = typer.Typer(help="Build and verify standard knowledge indexes.", no_args_is_help=True, rich_markup_mode="rich")
 
 standard_app.add_typer(board_app, name="board")
@@ -74,6 +79,7 @@ standard_app.add_typer(gate_app, name="gate")
 standard_app.add_typer(events_app, name="events")
 standard_app.add_typer(pattern_app, name="pattern")
 standard_app.add_typer(knowledge_app, name="knowledge")
+standard_app.add_typer(task_app, name="task")
 # Human-readable Rich output goes to stderr so JSON emitted with typer.echo remains pipeable on stdout.
 console = Console(stderr=True)
 
@@ -924,7 +930,11 @@ def verify_profile(
     for path in result.present:
         console.print(f"  [green][OK][/green] {path}")
     for path in result.missing:
+        # Issue #582 lot G1 : le chemin seul ne dit pas quoi faire ; la
+        # commande qui produit l'artefact suit, copiable telle quelle.
+        remedy = remedy_for_relpath(path, root=result.project_root, task_id=task_id, profile_id=result.profile)
         console.print(f"  [red][x][/red] missing {path}")
+        console.print(f"      remède : [green]{escape(remedy)}[/green]", soft_wrap=True)
     for path in result.invalid_yaml:
         console.print(f"  [red][x][/red] invalid YAML {path}")
     for check in result.checks:
@@ -1103,8 +1113,22 @@ def gate_check(
     target_state: str | None = typer.Option(None, "--target-state", help="Optional target lifecycle state."),
     profile: str | None = typer.Option(None, "--profile", "-p", help="Expected profile. Defaults to generated manifest."),
     strict: bool = typer.Option(False, "--strict", help="Use exit code 2 when gates fail, whatever the profile."),
+    no_run: bool = typer.Option(
+        False, "--no-run",
+        help="With --strict: never execute the project's test command yourself (pre-lot-G1 behaviour).",
+    ),
 ) -> None:
-    """Check standard evidence gates for a task."""
+    """Check standard evidence gates for a task.
+
+    Avec ``--strict`` (issue #582 lot G1), exécute d'abord ``gate run-tests``
+    si la tâche doit une preuve d'exécution, qu'une commande de test est
+    connue et qu'aucun run vert et frais n'est enregistré — puis évalue comme
+    avant. ``--no-run`` restaure l'ancien comportement (aucune exécution).
+    """
+    test_run = None
+    if strict and not no_run:
+        state = board_state_of_task(project_root, task_id, target_state=target_state)
+        test_run = ensure_fresh_test_run(project_root, task_id=task_id, state=state)
     result = check_evidence_gates(project_root, task_id=task_id, target_state=target_state, profile_id=profile)
     payload = {
         "schema": "grimoire.standard-gate-check/v1",
@@ -1123,6 +1147,7 @@ def gate_check(
             for check in result.checks
         ],
         "strict": strict,
+        "test_run": test_run.to_dict() if test_run is not None else None,
     }
     strict_failure = strict and not result.ok
     exit_code = 2 if strict_failure else 0 if result.ok else 1
@@ -1130,10 +1155,62 @@ def gate_check(
         typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
         raise typer.Exit(exit_code)
     status = "[green]OK[/green]" if result.ok else "[red]FAIL[/red]"
-    console.print(f"{status} evidence gates for task {result.task_id}")
-    for missing in result.missing:
-        console.print(f"  [red][x][/red] missing {missing}")
+    console.print(f"{status} evidence gates for task {result.task_id} (state: {result.state or 'none'})")
+    if test_run is not None and test_run.ran:
+        verdict = "[green]vert[/green]" if test_run.ok else "[red]rouge[/red]"
+        console.print(
+            f"  tests exécutés : {test_run.command!r} -> {verdict} (exit {test_run.exit_code}), "
+            f"enregistré dans {test_run.path}",
+            soft_wrap=True,
+        )
+    # Issue #582 lot G1 : chaque check est rendu (chemin + message + remède),
+    # plus seulement la clé nue des artefacts manquants — c'est ce rendu que
+    # l'agent lit, et il doit suffire sans ouvrir le source du kit.
+    for check in result.checks:
+        color = "red" if check.severity == "error" else ("yellow" if check.severity == "warning" else "cyan")
+        marker = escape("[x]") if check.severity == "error" else "!"
+        path_text = f" ({check.path})" if check.path else ""
+        # soft_wrap : la commande de remède doit rester sur une ligne, copiable.
+        console.print(f"  [{color}]{marker}[/{color}] {check.id}{path_text}: {escape(check.message)}", soft_wrap=True)
     raise typer.Exit(exit_code)
+
+
+@task_app.command("scaffold")
+def task_scaffold(
+    ctx: typer.Context,
+    project_root: Path = typer.Argument(Path(), help="Target project root."),  # noqa: B008
+    task_id: str = typer.Option("", "--task-id", help="Task id (default: the session's active task)."),
+    profile: str | None = typer.Option(None, "--profile", "-p", help="Expected profile. Defaults to generated manifest."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Print what would be created; write nothing."),
+) -> None:
+    """Create, only if missing, every per-task artifact the evidence gates require (issue #582 lot G1).
+
+    Idempotent : un fichier présent n'est jamais réécrit. Chaque squelette
+    est pré-rempli avec ce que le kit sait déjà (titre et critères lus dans
+    le Mission Ledger, profil, HEAD git, commande de test détectée, date).
+    Le hook SessionStart l'exécute déjà pour la tâche active d'un projet
+    gouverné ; cette commande est le même geste, à la demande.
+    """
+    from grimoire.core.standard_state import active_task_id
+
+    resolved = task_id or active_task_id(project_root)
+    try:
+        result = scaffold_task_artifacts(project_root, task_id=resolved, profile_id=profile, dry_run=dry_run)
+    except ValueError as exc:
+        if _get_fmt(ctx) == "json":
+            typer.echo(json.dumps({"ok": False, "task_id": resolved, "error": str(exc)}, indent=2, ensure_ascii=False))
+        else:
+            console.print(f"[red]FAIL[/red] {exc}")
+        raise typer.Exit(1) from exc
+    if _get_fmt(ctx) == "json":
+        typer.echo(json.dumps({"ok": True, **result.to_dict()}, indent=2, ensure_ascii=False))
+        return
+    action = "Would create" if dry_run else "Created"
+    console.print(f"[green]OK[/green] task {result.task_id} (profile {result.profile}): {action} {len(result.written)} artifact(s)")
+    for path in result.written:
+        console.print(f"  [green][+][/green] {path}")
+    for path in result.skipped:
+        console.print(f"  [dim][=][/dim] {path} (already present)")
 
 
 @gate_app.command("run-tests")
