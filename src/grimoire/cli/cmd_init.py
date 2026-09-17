@@ -153,7 +153,14 @@ def _is_weaviate_reachable(weaviate_url: str = _WEAVIATE_DEFAULT_URL) -> bool:
 
 
 def detect_memory_backend() -> str:
-    """Probe localhost for Memory OS services and return the best local backend."""
+    """Probe localhost for a Memory OS service running on this machine.
+
+    Purely informational (issue Grimoire-kit#496) — it no longer decides
+    ``init``'s backend. A project without an explicit ``--backend`` always
+    falls back to ``lexical``; what this function finds is only *suggested*
+    in the report / offered as an explicit question in the interactive
+    wizard, never attached to silently.
+    """
     if _is_weaviate_reachable():
         return "weaviate-server"
 
@@ -165,6 +172,87 @@ def detect_memory_backend() -> str:
         return "ollama"
 
     return "local"
+
+
+#: Human-readable label for a service `detect_memory_backend()` can return,
+#: used to build the suggestion line in the report and the wizard's explicit
+#: question — never to decide anything on its own.
+_DETECTED_SERVICE_LABELS: dict[str, str] = {
+    "weaviate-server": f"Weaviate sur {_WEAVIATE_DEFAULT_URL}",
+    "qdrant-local": f"Qdrant sur {_QDRANT_DEFAULT_URL}",
+    "ollama": "Ollama sur http://localhost:11434",
+}
+
+
+def memory_service_suggestion(detected: str) -> str | None:
+    """A one-line suggestion for a detected-but-unattached memory service.
+
+    Returns ``None`` when nothing was detected (``detected == "local"``).
+    """
+    label = _DETECTED_SERVICE_LABELS.get(detected)
+    if label is None:
+        return None
+    return (
+        f"détecté : {label} — activez-le avec "
+        "`grimoire memory up --profile standard --apply`"
+    )
+
+
+def _http_get_json(url: str, *, timeout: float = 2.0) -> dict[str, Any] | None:
+    """GET *url* and parse it as JSON, or ``None`` on any failure.
+
+    A probe failure (service down, unexpected payload…) must never look like
+    a confirmed empty collection — callers treat ``None`` the same as "cannot
+    tell", not as "safe to attach".
+    """
+    try:
+        req = urllib.request.Request(url, method="GET")  # noqa: S310
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+            if not (200 <= int(resp.status) < 300):
+                return None
+            payload = json.loads(resp.read().decode("utf-8"))
+    except (OSError, TimeoutError, urllib.error.URLError, urllib.error.HTTPError, ValueError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _weaviate_collection_has_content(collection: str, *, weaviate_url: str = _WEAVIATE_DEFAULT_URL) -> bool:
+    """Whether *collection* already exists on Weaviate and holds objects."""
+    from grimoire.memory.backends.weaviate import normalize_weaviate_collection
+
+    name = normalize_weaviate_collection(collection)
+    base = weaviate_url.rstrip("/")
+    data = _http_get_json(f"{base}/v1/objects?class={name}&limit=1")
+    if not data:
+        return False
+    return bool(data.get("objects"))
+
+
+def _qdrant_collection_has_content(collection: str, *, qdrant_url: str = _QDRANT_DEFAULT_URL) -> bool:
+    """Whether *collection* already exists on Qdrant and holds points."""
+    base = qdrant_url.rstrip("/")
+    data = _http_get_json(f"{base}/collections/{collection}")
+    if not data:
+        return False
+    result = data.get("result")
+    if not isinstance(result, dict):
+        return False
+    return bool(result.get("points_count") or 0)
+
+
+def collection_has_content(backend: str, collection: str) -> bool:
+    """Best-effort, non-fatal probe: does *collection* already hold data?
+
+    Anything unreachable or ambiguous reads as "empty" — a probe failure must
+    never block ``init``; only a *confirmed* non-empty collection does
+    (issue Grimoire-kit#496), and only for the backends that actually name a
+    shared collection (Weaviate, Qdrant).
+    """
+    if backend == "weaviate-server":
+        return _weaviate_collection_has_content(collection)
+    if backend in ("qdrant-local", "qdrant-server"):
+        return _qdrant_collection_has_content(collection)
+    return False
 
 
 def _is_docker_available() -> bool:
@@ -257,6 +345,7 @@ def _choose_memory_profile(
     *,
     offer_qdrant_docker: bool,
     suggest_lite: bool = False,
+    detected_service: str = "local",
 ) -> tuple[str, str, bool, bool]:
     """Ask for a memory *composition*, not a backend.
 
@@ -273,7 +362,29 @@ def _choose_memory_profile(
     recommendation from ``memory_profiles.DEFAULT_PROFILE`` to ``lexical`` —
     for a repo that looks like a playground (``--lite``, or no CI/tests
     detected) a service-free composition is a better first default.
+
+    ``detected_service`` (issue Grimoire-kit#496) is what
+    :func:`detect_memory_backend` found on this machine — never applied on
+    its own. When it differs from *backend* (meaning nothing explicit already
+    claimed it), this asks a direct yes/no question before letting the
+    ``standard`` composition resolve onto it; declining leaves the project on
+    *backend* (``lexical`` by default), fully isolated.
     """
+    if detected_service not in ("local", backend):
+        hint = _DETECTED_SERVICE_LABELS.get(detected_service, detected_service)
+        console.print(f"  [dim]Service mémoire détecté sur cette machine : {hint}.[/dim]")
+        use_detected = Confirm.ask(
+            "  [bold]L'utiliser pour la composition mémoire de ce projet ?[/bold]",
+            default=False,
+        )
+        if use_detected:
+            backend = detected_service
+        else:
+            console.print(
+                "  [dim]→ ce projet restera isolé ; `grimoire memory up` pourra "
+                "l'y attacher explicitement plus tard.[/dim]"
+            )
+
     has_egress = True
     if offer_qdrant_docker:
         console.print("  [dim]Aucun service vectoriel sur localhost.[/dim]")
@@ -350,6 +461,7 @@ def _run_wizard(
     *,
     offer_qdrant_docker: bool = False,
     lite: bool = False,
+    detected_service: str = "local",
 ) -> dict[str, Any]:
     """Interactive wizard — multi-select archetypes, returns config dict."""
     console.print()
@@ -410,7 +522,10 @@ def _run_wizard(
     console.print("  [dim]\\[###--] 3/5 · Mémoire[/dim]")
     suggest_lite = lite or _looks_like_a_playground(target)
     profile_id, backend, offline, qdrant_docker = _choose_memory_profile(
-        backend, offer_qdrant_docker=offer_qdrant_docker, suggest_lite=suggest_lite,
+        backend,
+        offer_qdrant_docker=offer_qdrant_docker,
+        suggest_lite=suggest_lite,
+        detected_service=detected_service,
     )
 
     # ── Step 4/5 · Archetypes (multi-select) ──────────────────────────
@@ -605,6 +720,7 @@ def _display_report(
     qdrant_docker_started: bool = False,
     qdrant_docker_message: str = "",
     lite: bool = False,
+    detected_service: str = "local",
 ) -> None:
     """Display a rich post-install report."""
     console.print()
@@ -640,6 +756,10 @@ def _display_report(
     if qdrant_docker_message:
         status = "[green]OK[/green]" if qdrant_docker_started else "[yellow]WARN[/yellow]"
         console.print(f"           {status} [dim]{qdrant_docker_message}[/dim]")
+    if detected_service != backend:
+        suggestion = memory_service_suggestion(detected_service)
+        if suggestion:
+            console.print(f"           [yellow]![/yellow] [dim]{suggestion}[/dim]")
     console.print()
 
     # Agents deployed (categorized)
@@ -782,6 +902,8 @@ def _display_json(
     *,
     qdrant_docker: dict[str, Any] | None = None,
     lite: bool = False,
+    detected_service: str = "local",
+    collection: str = "",
 ) -> None:
     """Output JSON result for scripting."""
     data: dict[str, Any] = {
@@ -803,6 +925,13 @@ def _display_json(
     }
     if qdrant_docker is not None:
         data["qdrant_docker"] = qdrant_docker
+    if collection:
+        data["memory_collection"] = collection
+    if detected_service != backend:
+        suggestion = memory_service_suggestion(detected_service)
+        if suggestion:
+            data["memory_detected"] = detected_service
+            data["memory_suggestion"] = suggestion
     if lite:
         data["profile"] = "lite"
         data["skipped"] = {
@@ -915,6 +1044,7 @@ def run_init(
     memory_profile: str = "",
     no_cockpit: bool = False,
     lite: bool = False,
+    memory_collection: str = "",
 ) -> None:
     """Execute the enhanced init flow: scan → resolve → wizard → scaffold → report."""
     target = target.resolve()
@@ -960,10 +1090,21 @@ def run_init(
     # Phase 2: Resolve backend
     requested_backend = backend
     qdrant_docker_requested = qdrant_docker
+    # Detection is purely informational from here on (issue Grimoire-kit#496):
+    # it used to decide the backend outright, silently attaching a fresh
+    # project to whatever memory service happened to already be running on
+    # the host — a shared collection, another project's memory. It is now
+    # only *suggested* in the report, or offered as an explicit question in
+    # the interactive wizard (`_choose_memory_profile`) — never applied by
+    # `-y` or any other non-interactive call. Only probed when the backend is
+    # actually left undecided — an explicit `--backend` needs no network
+    # round-trip to be honored.
+    detected_service = "local"
     if qdrant_docker_requested:
         backend = "qdrant-server"
     elif backend == "auto":
-        backend = detect_memory_backend()
+        detected_service = detect_memory_backend()
+        backend = "lexical"
     # A composition that pins its own services decides the backend: asking for
     # `graphe` and landing on the detected qdrant would produce a config whose
     # graph layers point at a store that is not there.
@@ -991,7 +1132,7 @@ def run_init(
 
     is_interactive = sys.stdin.isatty() and not yes and fmt != "json"
 
-    offer_qdrant_docker = requested_backend == "auto" and backend == "local"
+    offer_qdrant_docker = requested_backend == "auto" and detected_service == "local"
 
     if is_interactive and not dry_run:
         wizard_result = _run_wizard(
@@ -1001,6 +1142,7 @@ def run_init(
             backend,
             offer_qdrant_docker=offer_qdrant_docker,
             lite=lite,
+            detected_service=detected_service,
         )
         project_name = wizard_result["project_name"]
         user_name = wizard_result["user_name"]
@@ -1021,6 +1163,30 @@ def run_init(
             )
         backend = new_backend
 
+    # Phase 4.5: Name the collection by project (issue Grimoire-kit#496) — a
+    # shared backend used to get the fixed config default (or a hardcoded
+    # `GrimoireMemory`), so every project on the same machine landed on the
+    # very same collection. Only applies to backends that actually name one;
+    # `local`/`lexical` already live under this project's own directory.
+    collection_prefix = ""
+    explicit_collection = memory_collection.strip()
+    if backend in memory_profiles.VECTOR_BACKENDS:
+        from grimoire.memory.taxonomy import slugify
+
+        collection_prefix = explicit_collection or slugify(project_name, default="grimoire")
+        if not explicit_collection and collection_has_content(backend, collection_prefix):
+            message = (
+                f"La collection « {collection_prefix} » existe déjà sur {backend} et n'est pas "
+                "vide. Relancez avec --memory-collection <nom> pour vous y attacher "
+                "explicitement — sans cette option, `grimoire init` n'attache jamais un "
+                "projet neuf à une collection déjà peuplée."
+            )
+            if fmt == "json":
+                typer.echo(json.dumps({"ok": False, "error": message}, indent=2))
+            else:
+                console.print(f"[red]{message}[/red]")
+            raise typer.Exit(1)
+
     # Phase 5: Plan
     scaffolder = ProjectScaffolder(
         target,
@@ -1034,6 +1200,7 @@ def run_init(
         offline=offline,
         force=force,
         profile=memory_profile,
+        collection_prefix=collection_prefix,
     )
     plan = scaffolder.plan()
 
@@ -1052,6 +1219,7 @@ def run_init(
                 "stack_agents": list(resolved.stack_agents),
                 "feature_agents": list(resolved.feature_agents),
                 "qdrant_docker": qdrant_docker_requested,
+                "memory_collection": collection_prefix,
             }, indent=2))
         else:
             _display_dry_run(plan, target, project_name, resolved.archetype, resolved)
@@ -1081,7 +1249,18 @@ def run_init(
                 "started": qdrant_docker_started,
                 "message": qdrant_docker_message,
             }
-        _display_json(target, result, resolved, scan, backend, project_name, qdrant_docker=docker_status, lite=lite)
+        _display_json(
+            target,
+            result,
+            resolved,
+            scan,
+            backend,
+            project_name,
+            qdrant_docker=docker_status,
+            lite=lite,
+            detected_service=detected_service,
+            collection=collection_prefix,
+        )
     else:
         _display_report(
             target,
@@ -1093,6 +1272,7 @@ def run_init(
             qdrant_docker_started=qdrant_docker_started,
             qdrant_docker_message=qdrant_docker_message,
             lite=lite,
+            detected_service=detected_service,
         )
 
     _maybe_register_cockpit(target, project_name, fmt, no_cockpit=no_cockpit)

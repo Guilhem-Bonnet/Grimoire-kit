@@ -22,16 +22,23 @@ grimoire init [PATH] [OPTIONS]
 |--------|-------------|--------|
 | `--name TEXT` | Nom du projet | Nom du répertoire |
 | `--archetype, -a` | Archétype d'agents | `minimal` |
-| `--backend, -b` | Backend mémoire (`auto`, `local`, `qdrant-local`, `qdrant-server`, `weaviate-server`, `mempalace`, `ollama`) | `auto` |
+| `--backend, -b` | Backend mémoire (`auto`, `local`, `lexical`, `qdrant-local`, `qdrant-server`, `weaviate-server`, `mempalace`, `ollama`) | `auto` |
 | `--memory-profile, -m` | Composition mémoire : `lexical`, `standard`, `graphe`, `complet` | déduite |
+| `--memory-collection TEXT` | Nom explicite de la collection, pour un backend partagé | déduit du nom du projet |
 | `--force, -f` | Écraser la config existante | `false` |
 | `--dry-run` | Afficher le plan sans écrire | `false` |
 | `--output, -o` | Format de sortie : `text` ou `json` | `text` |
 
 La mémoire se choisit comme une composition, pas comme un backend : le profil
 fixe les sept couches du Memory OS d'un coup (mémoire courte, sémantique,
-sidecar structuré, graphes, mémoire chaude, visualisation). Sans l'option, le
-profil est déduit du store détecté et de l'accès réseau. Voir
+sidecar structuré, graphes, mémoire chaude, visualisation).
+
+`--backend auto` (le défaut, y compris avec `-y`) n'attache **jamais**
+silencieusement le projet à un service mémoire trouvé sur la machine : il
+résout toujours vers `lexical`, isolé, et se contente de signaler dans le
+rapport ce qui a été détecté (issue #496). Sur un backend partagé choisi
+explicitement, la collection est nommée d'après le projet (son slug) ; pour
+s'attacher à une collection déjà peuplée, `--memory-collection` est requis. Voir
 [Système de mémoire](memory-system.md).
 
 | Profil | Composition |

@@ -431,6 +431,7 @@ class ProjectScaffolder:
         offline: bool = False,
         force: bool = False,
         profile: str = "",
+        collection_prefix: str = "",
     ) -> None:
         self._offline = offline
         self._profile = profile
@@ -442,6 +443,12 @@ class ProjectScaffolder:
         self._scan = scan
         self._resolved = resolved
         self._backend = backend
+        # Per-project collection name (issue Grimoire-kit#496) — set only when
+        # the caller explicitly chose a shared/networked backend (Weaviate,
+        # Qdrant server or local daemon). Empty means "leave the config
+        # default", which is safe for `local`/`lexical` since those already
+        # live under this project's own `_grimoire/_memory/` directory.
+        self._collection_prefix = collection_prefix
         # ``force`` is the deliberate "overwrite my files too" gesture behind
         # ``grimoire init --force``; without it the seed tier is inviolable.
         self._force = force
@@ -614,6 +621,12 @@ class ProjectScaffolder:
         )
         profile = profile.for_backend(self._backend)
         memory_extra = profile.connection_block(self._backend)
+        if self._collection_prefix:
+            # Emitted first so a shared backend's collection is a per-project
+            # name from the very first write, never the config-wide default
+            # `collection_prefix: "grimoire"` every project would otherwise
+            # share (issue Grimoire-kit#496).
+            memory_extra = f'\n  collection_prefix: "{self._collection_prefix}"' + memory_extra
         memory_layers = profile.layers_block()
 
         hosts_enabled_list = ", ".join(f'"{h}"' for h in detect_enabled_hosts(self._target))

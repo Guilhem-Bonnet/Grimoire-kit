@@ -141,13 +141,20 @@ def _scalar(value: object) -> str:
 #: Settings a backend needs to be reachable at all. A property of the store,
 #: not of the composition: a `standard` project that lands on a detected
 #: Weaviate needs its URL just as much as a `graphe` one does.
+#:
+#: ``weaviate_collection`` used to be hardcoded here to a fixed
+#: ``"GrimoireMemory"`` — every project on this composition landed on the
+#: *same* Weaviate class, sharing memory across projects (issue #496). The
+#: collection name is now a per-project concern set by the caller (``grimoire
+#: init`` names it after the project slug via ``collection_prefix``, which
+#: :class:`~grimoire.memory.backends.weaviate.WeaviateBackend` normalizes into
+#: a class name when ``weaviate_collection`` itself is left blank).
 BACKEND_CONNECTION: dict[str, tuple[tuple[str, str], ...]] = {
     "ollama": (("ollama_url", "http://localhost:11434"),),
     "qdrant-server": (("qdrant_url", "http://localhost:6333"),),
     "weaviate-server": (
         ("qdrant_url", "http://localhost:6333"),
         ("weaviate_url", "http://localhost:8080"),
-        ("weaviate_collection", "GrimoireMemory"),
     ),
 }
 
