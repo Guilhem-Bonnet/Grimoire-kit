@@ -564,11 +564,16 @@ un projet enrôlé, chaque commande Bash exécutée (tronquée, code de sortie
 s'il est connu), chaque cible d'un outil d'écriture ou d'édition, chaque run
 de test reconnu (motif de commande — `pytest`, `npm test`, `cargo test`,
 `go test`, `ctest`, `mvn … test`, `gradlew? test`) est ajouté en une ligne
-JSON à `_grimoire-output/evidence/<task_id>/evidence-log.jsonl`. Best-effort
-et mesuré sous 30 ms (0,31 ms en médiane sur 30 appels) : ce hook tourne à
-chaque outil de chaque tour, il ne doit jamais coûter ce qu'un
-`resolve_need("test-runner", …)` — qui relit `project-context.yaml` et teste
-plusieurs marqueurs sur disque — coûterait à cette fréquence.
+JSON à `_grimoire-output/.runs/evidence/<task_id>/evidence-log.jsonl` — sous
+`.runs`, jamais sous `EVIDENCE_DIR` : un fichier append-only qui grossit à
+chaque appel d'outil polluerait `git status` et l'historique de tout projet
+gouverné, contrairement à `evidence-pack.md` (la preuve versionnée). `.runs`
+est ignoré par convention (`ensure_grimoire_gitignore`, posé aussi bien par
+`grimoire init` que par `grimoire standard init` seul). Best-effort et mesuré
+sous 30 ms (0,31 ms en médiane sur 30 appels) : ce hook tourne à chaque outil
+de chaque tour, il ne doit jamais coûter ce qu'un `resolve_need("test-runner",
+…)` — qui relit `project-context.yaml` et teste plusieurs marqueurs sur
+disque — coûterait à cette fréquence.
 
 **`gate check` projette ce journal dans le pack de preuve.** Une section
 `## Inventaire observé`, délimitée par des marqueurs, est régénérée sous la

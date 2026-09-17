@@ -53,7 +53,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from grimoire.core.standard_generation import EVIDENCE_DIR, normalize_task_id
+from grimoire.core.standard_generation import EVIDENCE_DIR, RUNS_DIR, normalize_task_id
 
 __all__ = [
     "EVIDENCE_LOG_FILENAME",
@@ -64,7 +64,7 @@ __all__ = [
     "regenerate_observed_inventory_section",
 ]
 
-#: Nom du fichier journal, un par tâche, sous ``EVIDENCE_DIR / <task_id>/``.
+#: Nom du fichier journal, un par tâche, sous ``RUNS_DIR / "evidence" / <task_id>/``.
 EVIDENCE_LOG_FILENAME = "evidence-log.jsonl"
 
 #: Longueur maximale d'une commande consignée ; au-delà, tronquée avec un
@@ -90,8 +90,16 @@ _MANUAL_HEADING = "## Evidence inventory"
 
 
 def evidence_log_relpath(task_id: str) -> Path:
-    """Chemin, relatif à la racine du projet, du journal de *task_id*."""
-    return EVIDENCE_DIR / normalize_task_id(task_id) / EVIDENCE_LOG_FILENAME
+    """Chemin, relatif à la racine du projet, du journal de *task_id*.
+
+    Sous ``RUNS_DIR`` (``_grimoire-output/.runs/``), pas sous ``EVIDENCE_DIR``
+    : un fichier append-only qui grossit à chaque appel d'outil n'est pas un
+    artefact de preuve versionné (celui-là reste ``evidence-pack.md``, dans
+    ``EVIDENCE_DIR``) — il polluerait ``git status`` et l'historique de tout
+    projet gouverné. ``RUNS_DIR`` est déjà ignoré par convention (voir
+    :func:`grimoire.core.standard_generation.ensure_grimoire_gitignore`).
+    """
+    return RUNS_DIR / "evidence" / normalize_task_id(task_id) / EVIDENCE_LOG_FILENAME
 
 
 def _truncate_command(command: str) -> str:
