@@ -877,3 +877,63 @@ def task_dispatch(
         project_root=project_root,
     )
     _emit_dispatch(ctx, report)
+
+
+# ── Migration depuis un board scaffoldé sans ledger (ADR-007, lot 4.1) ────────
+# Additive : aucune commande existante n'est renommée ni supprimée. Ne touche
+# ni `grimoire standard init` ni `grimoire up` — ce lot ne fait qu'exposer le
+# moteur de migration ; les brancher au point d'entrée est le lot suivant.
+
+
+@task_app.command("migrate-standard")
+def task_migrate_standard(
+    ctx: typer.Context,
+    path: Annotated[Path, typer.Argument(help="Racine du projet à migrer.")] = Path(),
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Compter sans rien écrire.")] = False,
+    restore: Annotated[str, typer.Option("--restore", help="Restaurer un instantané par son horodatage.")] = "",
+    ledger_root: Annotated[
+        Path | None, typer.Option("--ledger-root", help="Racine du Mission Ledger (défaut : celle du projet).")
+    ] = None,
+) -> None:
+    """Importe dans le Mission Ledger les tâches d'un board scaffoldé sans lui.
+
+    ADR-007 : `grimoire standard init` peut scaffolder `task-board.yaml` sans
+    jamais ouvrir de ledger. Cette commande ferme l'écart pour un projet déjà
+    dans cet état — idempotente (rejouer ne change rien) et réversible
+    (`--restore`, même patron que `grimoire migrate`).
+    """
+    from grimoire.missions.task_unification import migrate_standard_tasks, restore_task_unification
+
+    root = path.resolve()
+
+    if restore:
+        try:
+            restored = restore_task_unification(root, restore)
+        except FileNotFoundError as exc:
+            console.print(f"[red]✗[/red] {exc}")
+            raise typer.Exit(1) from exc
+        if _fmt(ctx) == "json":
+            typer.echo(json.dumps({"restored": restored}, indent=2, ensure_ascii=False))
+            return
+        if not restored:
+            console.print("[dim]Rien à restaurer pour cet horodatage.[/dim]")
+            return
+        console.print(f"[green]OK[/green] {len(restored)} chemin(s) restauré(s) :")
+        for item in restored:
+            console.print(f"  - {item}")
+        return
+
+    report = migrate_standard_tasks(root, ledger_root=ledger_root, dry_run=dry_run)
+    if _fmt(ctx) == "json":
+        typer.echo(json.dumps(report.to_dict(), indent=2, ensure_ascii=False))
+        return
+    if report.tasks_read == 0:
+        console.print("[dim]Aucun task-board.yaml à migrer.[/dim]")
+        return
+    prefix = "[dim](dry-run)[/dim] " if dry_run else ""
+    console.print(
+        f"{prefix}[green]OK[/green] {report.tasks_read} tâche(s) lue(s), "
+        f"{report.tasks_imported} importée(s), {report.tasks_skipped} déjà présente(s)."
+    )
+    if not dry_run and report.snapshot_path:
+        console.print(f"[dim]Instantané : {report.snapshot_path} (restaurer avec --restore {report.stamp})[/dim]")
