@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -119,6 +120,12 @@ def served_empty(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     montrer utilement (commande réelle affichée, boutons de vue rendus mais
     désactivés plutôt qu'absents).
 
+    ADR-007 (issue #559, lot 4.1) : `standard init` ouvre désormais un
+    Mission Ledger dès l'init (la tâche `bootstrap`) — retiré ci-dessous pour
+    que cette fixture continue de représenter l'état qu'elle documente
+    (aucun ledger), qui est aussi, depuis ADR-007, celui d'un projet enrôlé
+    jamais migré.
+
     Un projet DÉDIÉ, pas `real_project` : ce dernier est une fixture de
     portée session partagée par toute la suite e2e, et plusieurs fixtures
     ailleurs (`project_with_task`, `project_with_blueprint`,
@@ -139,6 +146,7 @@ def served_empty(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
         [sys.executable, "-m", "grimoire", "standard", "init", "--profile", "governed"],
         cwd=str(root), check=False, capture_output=True, timeout=180,
     )
+    shutil.rmtree(root / "_grimoire-runtime-output" / "ledger", ignore_errors=True)
 
     port = _free_port()
     env = dict(os.environ)

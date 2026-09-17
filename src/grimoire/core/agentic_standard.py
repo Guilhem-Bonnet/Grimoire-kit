@@ -790,7 +790,7 @@ def setup_standard_profile(
                 # (mêmes règles force/refresh/keep que les autres artefacts).
                 from grimoire.core.task_board_ledger import ensure_task_board_via_ledger
 
-                ensure_task_board_via_ledger(root, project_name=name)
+                ensure_task_board_via_ledger(root, dst, project_name=name)
             else:
                 dst.write_text(content, encoding="utf-8")
             generated[key] = gen.digest(dst)

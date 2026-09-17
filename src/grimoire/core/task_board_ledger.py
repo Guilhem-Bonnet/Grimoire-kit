@@ -30,7 +30,7 @@ _ACCEPTANCE = ("Standard artifacts are generated and verified.",)
 _OWNER = "project-maintainer"
 
 
-def ensure_task_board_via_ledger(root: Path, *, project_name: str) -> None:
+def ensure_task_board_via_ledger(root: Path, dest: Path, *, project_name: str) -> None:
     """Ouvre le Mission Ledger pour la tâche bootstrap et projette le board (ADR-007).
 
     Remplace la copie du template YAML statique : ``standard init`` écrit
@@ -40,8 +40,13 @@ def ensure_task_board_via_ledger(root: Path, *, project_name: str) -> None:
     ``TaskService.project_board()`` pour chaque transition. Idempotent :
     rejouer sur un projet déjà initialisé ne recrée ni mission ni tâche —
     seule la projection est réécrite.
+
+    *dest* est le chemin de destination déjà résolu et confiné par
+    l'appelante (``setup_standard_profile``, via ``_ensure_inside_root``) —
+    cette fonction ne le recalcule pas elle-même à partir de *root* seul, ce
+    qui donnait à l'analyse statique un second chemin d'écriture non passé
+    par ce garde-fou (CodeQL ``py/path-injection`` sur la PR #587).
     """
-    from grimoire.core.standard_generation import STANDARD_DIR
     from grimoire.core.standard_state import invalidate_cache
     from grimoire.missions.board import build_board, write_board
     from grimoire.missions.ledger import MissionLedger
@@ -66,6 +71,5 @@ def ensure_task_board_via_ledger(root: Path, *, project_name: str) -> None:
             owner=_OWNER,
             task_id=_TASK_ID,
         )
-    dest = root / STANDARD_DIR / "task-board.yaml"
     write_board(dest, build_board(ledger, project=project_name))
     invalidate_cache(root)
