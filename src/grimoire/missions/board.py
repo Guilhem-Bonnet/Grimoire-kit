@@ -146,6 +146,8 @@ def _task_entry(task: MissionTask) -> dict[str, Any]:
         entry["expected_evidence"] = list(task.expected_evidence)
     if task.surface:
         entry["surface"] = task.surface
+    if task.finition:
+        entry["finition"] = task.finition
     if status == "blocked":
         entry["remediation_ref"] = "_grimoire/standard/remediation-plan.yaml"
     return entry

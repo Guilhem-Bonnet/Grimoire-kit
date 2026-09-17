@@ -22,6 +22,11 @@ _log = logging.getLogger(__name__)
 #: agent mort bloque un fichier indéfiniment.
 DEFAULT_CLAIM_TTL_SECONDS = 4 * 60 * 60
 
+#: Valeurs machine acceptées pour ``MissionTask.finition`` (lot 4.3, issue #561).
+#: ``""`` = non déclaré. Sans accent : c'est une valeur machine, pas de la
+#: prose — l'accent reste dans l'ADR et le CHANGELOG.
+_FINITION_VALUES = frozenset({"", "maquette", "peaufine"})
+
 
 class MissionState(StrEnum):
     DRAFT = "draft"
@@ -239,6 +244,14 @@ class MissionTask:
     dependencies: tuple[TaskDependency, ...] = ()
     guardrails: tuple[str, ...] = ()
     expected_evidence: tuple[str, ...] = ()
+    #: Terrain du lot 4.3 (issue #561) : aucune interface ne le lit encore.
+    finition: str = ""
+
+    def __post_init__(self) -> None:
+        if self.finition not in _FINITION_VALUES:
+            accepted = ", ".join(repr(v) for v in sorted(_FINITION_VALUES))
+            msg = f"finition invalide : {self.finition!r}. Valeurs acceptées : {accepted}."
+            raise ValueError(msg)
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -260,6 +273,8 @@ class MissionTask:
         }
         if self.claim is not None:
             d["claim"] = self.claim.to_dict()
+        if self.finition:
+            d["finition"] = self.finition
         return d
 
     @classmethod
@@ -282,6 +297,7 @@ class MissionTask:
             dependencies=tuple(TaskDependency.from_dict(dep) for dep in d.get("dependencies", [])),
             guardrails=tuple(d.get("guardrails", [])),
             expected_evidence=tuple(d.get("expected_evidence", [])),
+            finition=d.get("finition", ""),
         )
 
 
