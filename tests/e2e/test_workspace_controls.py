@@ -306,7 +306,11 @@ def test_executer_etat_non_migre_propose_le_bouton_migrer_les_taches(empty_works
     migrate_btn.click()
     page.wait_for_selector(".ex-card", timeout=10_000)
 
-    assert page.locator(".empty").count() == 0
+    # Scopé à l'espace Exécuter : `.empty` est une classe générique du shell
+    # (`ctx.empty()`), pas exclusive à cet espace — d'autres panneaux du
+    # rail (Preuves, Mémoire…) peuvent légitimement montrer leur propre état
+    # vide en même temps sans que ce test ait à s'en soucier.
+    assert page.locator(".ex-wrap .empty").count() == 0
     # La tâche `bootstrap` scaffoldée par `standard init --profile governed`
     # (ADR-007 point 1) est désormais visible : la migration n'a rien inventé,
     # elle a ouvert le ledger sur ce que le board déclarait déjà.
