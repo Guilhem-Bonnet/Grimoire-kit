@@ -773,10 +773,14 @@ def _maybe_register_cockpit(target: Path, project_name: str, fmt: str, *, no_coc
     from grimoire.tools.project_registry import is_scratch_path
 
     if no_cockpit or os.environ.get("GRIMOIRE_NO_COCKPIT"):
-        logger.debug("cockpit auto-enrolment skipped for %s: GRIMOIRE_NO_COCKPIT/--no-cockpit", target)
+        # `%r` plutôt que `%s` (issue CodeQL py/log-injection) : `target` est un
+        # nom de dossier choisi par l'appelant, et son affichage brut permettrait
+        # d'y glisser un retour à la ligne pour forger une fausse entrée de log.
+        # `repr()` échappe `\n`/`\r` au lieu de les émettre tels quels.
+        logger.debug("cockpit auto-enrolment skipped for %r: GRIMOIRE_NO_COCKPIT/--no-cockpit", target)
         return
     if is_scratch_path(target):
-        logger.debug("cockpit auto-enrolment skipped for %s: scratch path under the OS temp dir", target)
+        logger.debug("cockpit auto-enrolment skipped for %r: scratch path under the OS temp dir", target)
         return
     try:
         from grimoire.tools.project_registry import register_project

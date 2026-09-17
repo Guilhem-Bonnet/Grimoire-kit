@@ -475,6 +475,18 @@ def ensure_ecc_repo(workspace: Path) -> tuple[Path, str]:
     return dest, commit
 
 
+def _extract_go_archive(archive: Path, dest: Path) -> None:
+    """Dézippe *archive* sous *dest* — factorisé pour rester testable sans réseau.
+
+    `filter="data"` (issue CodeQL py/tarslip) : même une archive officielle
+    pinnée peut, en cas de compromission de la source ou de MITM, contenir un
+    membre `../`/absolu ; le filtre refuse ces entrées au lieu de leur faire
+    confiance implicitement.
+    """
+    with tarfile.open(archive) as tar:
+        tar.extractall(dest, filter="data")
+
+
 def ensure_go_toolchain(workspace: Path) -> Path | None:
     """Go portable, téléchargé une fois dans le workspace — jamais sudo/système."""
     existing = shutil.which("go")
@@ -489,8 +501,7 @@ def ensure_go_toolchain(workspace: Path) -> Path | None:
     go_dir.mkdir(parents=True, exist_ok=True)
     archive = go_dir / "go.tar.gz"
     urllib.request.urlretrieve(GO_TOOLCHAIN_URL, archive)  # noqa: S310 - URL fixe, pinnée
-    with tarfile.open(archive) as tar:
-        tar.extractall(go_dir)  # noqa: S202 - archive officielle, contenu de confiance
+    _extract_go_archive(archive, go_dir)
     archive.unlink(missing_ok=True)
     return go_bin if go_bin.is_file() else None
 

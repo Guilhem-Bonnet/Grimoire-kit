@@ -38,7 +38,6 @@ PILOT_POLICY = STANDARD / "pilot.yaml"
 #    suites de tests dispatch) : le script lit son propre prompt pour savoir
 #    quel node il sert et où écrire sa sortie, et annonce un coût fixe.
 
-_NODE_RE = r"Tâche \S+-(\w+) :"
 _RESULT_RE = r"Écris ta sortie dans le fichier (\S+)"
 _PIN_RE = r"^  - (\S+) : (\S+)$"
 
