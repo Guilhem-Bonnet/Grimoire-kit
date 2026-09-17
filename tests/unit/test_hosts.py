@@ -1173,6 +1173,28 @@ def test_the_entry_persona_reaches_the_session_start_context(project: Path) -> N
     assert "scribe" not in context, "seule la persona d'entrée est injectée"
 
 
+def test_the_entry_persona_is_a_one_line_summary_not_a_full_read_mandate(project: Path) -> None:
+    """Issue #582 lot C : plus de mandat de lecture intégrale sur chaque session.
+
+    Le diagnostic du surcoût kit (banc à trois bras, 2026-09-17, §1.2.1) a
+    mesuré ce mandat à ~2 800 tokens pour `concierge.md` (11 Ko), imposé sur
+    *toute* session — y compris une session batch (`claude -p`) qui a déjà
+    reçu sa tâche en entier et n'a personne à trier. `HookInput` ne porte
+    aujourd'hui aucun signal interactif/batch fiable (pas de TTY, rien qui
+    survive dans le sous-processus du hook) : le résumé s'applique donc
+    partout, documenté dans `entry_persona_context`.
+    """
+    text, name = entry_persona_context(project)
+    assert name == "concierge"
+    assert "en entier avant de répondre" not in text
+    assert "en entier" in text and "ambiguë" in text, "le renvoi conditionnel au fichier complet doit rester"
+    assert "concierge" in text
+    assert "_grimoire/_config/custom/agents/concierge.md" in text
+    # Le résumé doit rester très inférieur au mandat de lecture intégrale
+    # qu'il remplace (~2 800 tokens, mesurés par le diagnostic).
+    assert len(text) < 500, len(text)
+
+
 def test_the_validated_directive_survives_the_persona(governed: Path) -> None:
     """La persona s'ajoute au standard, elle ne le remplace pas — sur un projet gouverné.
 
