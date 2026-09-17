@@ -306,11 +306,14 @@ def test_executer_etat_non_migre_propose_le_bouton_migrer_les_taches(empty_works
     migrate_btn.click()
     page.wait_for_selector(".ex-card", timeout=10_000)
 
-    # Scopé à l'espace Exécuter : `.empty` est une classe générique du shell
-    # (`ctx.empty()`), pas exclusive à cet espace — d'autres panneaux du
-    # rail (Preuves, Mémoire…) peuvent légitimement montrer leur propre état
-    # vide en même temps sans que ce test ait à s'en soucier.
-    assert page.locator(".ex-wrap .empty").count() == 0
+    # `.empty` n'est pas propre à l'état "aucun Mission Ledger" : chaque
+    # colonne de board sans carte porte aussi `.ex-col-body.empty`
+    # (colonnes vides en pointillé, revue §4.3) — avec une seule tâche
+    # migrée, Board 4 en a mécaniquement plusieurs (todo rempli, les trois
+    # autres groupes vides). Seul l'état vide de haut niveau (`ctx.empty()`)
+    # porte un `<h2>` ; c'est lui, et lui seul, qui doit avoir disparu.
+    assert page.locator(".ex-wrap .empty h2").count() == 0
+    assert page.locator("button", has_text="Migrer les tâches").count() == 0
     # La tâche `bootstrap` scaffoldée par `standard init --profile governed`
     # (ADR-007 point 1) est désormais visible : la migration n'a rien inventé,
     # elle a ouvert le ledger sur ce que le board déclarait déjà.
