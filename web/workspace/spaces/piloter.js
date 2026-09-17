@@ -13,10 +13,13 @@
 // une couleur inventée ; ce module n'ouvre aucun jeu de données de
 // démonstration — `demo` reste toujours `false` ici.
 //
-// API consommées : api.projects(), api.health(project?), api.memoryStatus
-// (project?), api.doctor(project?), api.updateProject(project, confirm),
-// api.agents(project?), api.agentSkill(name, skill, action),
-// api.agentFields(name, fields).
+// API consommées : api.sheet(project?) — remplace, depuis #548, les sept
+// appels (api.health, api.memoryStatus, api.doctor, api.agents,
+// api.proposals, api.setupRun, api.flowRuns) plus api.projects() pour le nom
+// du projet, que le premier rendu de la fiche faisait un par un — puis
+// api.updateProject(project, confirm), api.agentSkill(name, skill, action),
+// api.agentFields(name, fields), api.doctor(project?) (onglet Problèmes,
+// à la demande — jamais au premier rendu, voir `loadSheet` plus bas).
 //
 // Wizard de setup (#171) : api.archetypesCatalogue(), api.backendsCatalogue(),
 // api.needsCatalogue(), api.setupPlan(payload) — exécute réellement (même
@@ -463,25 +466,25 @@ function renderFleet(root, ctx, rows, onSelect, onRefresh) {
 // ── Niveau Projet (fiche) ────────────────────────────────────────────────────
 
 async function loadSheet(ctx, slug) {
-  const [health, memory, doctor, agents, proposals, setupRun, upgradeRuns] = await Promise.all([
-    ctx.api.health(slug).catch(() => null),
-    ctx.api.memoryStatus(slug).catch(() => null),
-    ctx.api.doctor(slug).catch(() => null),
-    ctx.api.agents(slug).catch(() => null),
-    ctx.api.proposals(slug).catch(() => null),
-    // Dernière exécution du wizard (#171) : lue depuis le journal persistant
-    // (`_grimoire/setup-run.json`), donc encore là après ce refresh — pas
-    // seulement le temps d'un toast.
-    ctx.api.setupRun(slug).catch(() => null),
-    // Restes #510/#513 : le dernier run `project-upgrade` de CE projet,
-    // avec son statut live — d'où dérive le badge « checkpoint destructif
-    // en attente », jamais d'un état client posé après un clic (voir
-    // `checkpointPendingRunId`, `renderSheet`). `slug` explicite (jamais
-    // `host.project` implicite) : cette fiche peut être celle d'un AUTRE
-    // projet que celui déjà résolu par l'hôte (navigation Flotte → Projet).
-    ctx.api.flowRuns('project-upgrade', slug).catch(() => null),
-  ]);
-  return { health, memory, doctor, agents, proposals, setupRun, upgradeRuns };
+  // #548 : un seul aller-retour (`GET /api/workspace/sheet`) là où sept
+  // appels partaient un par un — health, memoryStatus, doctor, agents,
+  // proposals, setupRun, flowRuns('project-upgrade') — chacun payant
+  // individuellement un tour réseau, même une fois servi par le cache
+  // serveur de #542. Les sept sous-vues sont désormais calculées en
+  // parallèle côté serveur (`workspace_api.sheet_view`, même principe que
+  // `fleet_status`) ; `doctor` en est volontairement absent (mesuré comme
+  // le vrai coût des sept, ~350ms contre ~120ms pour `health` une fois
+  // décaché) — l'onglet Problèmes (`ctx.api.doctor`) le rend séparément, à
+  // la demande, jamais au premier rendu. `slug` explicite (jamais
+  // `host.project` implicite) : cette fiche peut être celle d'un AUTRE
+  // projet que celui déjà résolu par l'hôte (navigation Flotte → Projet).
+  const sheet = await ctx.api.sheet(slug).catch(() => null);
+  return (
+    sheet || {
+      health: null, memory: null, doctor: null, agents: null,
+      proposals: null, setupRun: null, upgradeRuns: null, name: null,
+    }
+  );
 }
 
 // ── Propositions d'artefact (#395) : à la répétition d'un non-choix ────────
@@ -1782,15 +1785,13 @@ export async function mount(root, ctx) {
       );
       ctx.dock.echo('grimoire status');
     } else {
-      // Restes #541 point 2 : `projects()` (nom du projet, cockpit
-      // uniquement) tournait ici en SÉRIE avant `loadSheet()` — deux tours
-      // réseau l'un après l'autre plutôt qu'un seul. Les deux partent
-      // maintenant en même temps ; `loadSheet` porte déjà son propre
-      // `Promise.all` sur ses six appels.
-      const namePromise = cockpit
-        ? ctx.api.projects().then((r) => r.projects.find((p) => p.slug === selected)?.name).catch(() => null)
-        : Promise.resolve(ctx.host.status?.slug || null);
-      const [name, sheet] = await Promise.all([namePromise, loadSheet(ctx, selected)]);
+      // #548 : `loadSheet()` porte désormais le nom du projet aussi (fiche
+      // `sheet.name`, résolue côté serveur depuis le registre) — plus de
+      // second tour réseau via `projects()` pour l'obtenir côté cockpit
+      // (restes #541 point 2, où les deux appels partaient déjà au moins en
+      // parallèle plutôt qu'en série ; ici il n'y en a plus qu'un).
+      const sheet = await loadSheet(ctx, selected);
+      const name = cockpit ? sheet.name || null : ctx.host.status?.slug || null;
       if (ctx.signal.aborted) return;
       root.replaceChildren(); // retire la coquille « Chargement… » avant le vrai rendu
       renderSheet(root, ctx, selected, name, sheet, { refresh: draw });

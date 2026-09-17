@@ -42,6 +42,7 @@ absente.
 from __future__ import annotations
 
 import difflib
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -1028,3 +1029,80 @@ def proposals_view(project_root: Path) -> dict[str, Any]:
         signature,
         lambda: {"proposals": [p.to_dict() for p in list_proposals(root)]},
     )
+
+
+def _sheet_project_name(root: Path) -> str | None:
+    """Nom d'affichage du projet, depuis le registre du portefeuille (#548).
+
+    Évite un huitième appel réseau séparé (``api.projects()``) que la fiche
+    Piloter du cockpit faisait juste pour ce nom — voir
+    ``web/workspace/spaces/piloter.js`` avant ce correctif. ``None`` quand le
+    projet n'est pas (ou plus) enregistré : l'atelier mono-projet, qui n'a
+    pas besoin de cette valeur (il connaît déjà son propre slug via
+    ``/api/status``), ou un projet retiré du registre entre deux lectures.
+    """
+    from grimoire.tools.project_registry import load_registry
+
+    for entry in load_registry():
+        raw_path = str(entry.get("path", ""))
+        if not raw_path:
+            continue
+        try:
+            if Path(raw_path).resolve() == root:
+                return str(entry.get("name") or entry.get("slug") or "") or None
+        except OSError:
+            continue
+    return None
+
+
+def sheet_view(project_root: Path) -> dict[str, Any]:
+    """``GET /api/workspace/sheet`` — toute la fiche Piloter, en une réponse (issue #548).
+
+    Remplace, côté serveur, les sept appels que
+    ``web/workspace/spaces/piloter.js::loadSheet`` faisait un par un (plus un
+    huitième pour le nom du projet, voir :func:`_sheet_project_name`) :
+    chacun payait individuellement un aller-retour HTTP, même quand la vue
+    qu'il demandait était déjà servie par le cache de #542. Calculées en
+    parallèle (même principe que
+    :func:`grimoire.tools.project_health.fleet_status`, qui fait de même sur
+    N projets plutôt que N vues d'un seul) pour borner le temps total au plus
+    lent des sous-vues plutôt qu'à leur somme — et chaque sous-vue déjà
+    passée par son propre cache (:mod:`grimoire.tools.view_cache`) une fois
+    "chaude", ce total tombe à quasi rien.
+
+    ``doctor`` volontairement absent : mesuré (issue #548) à ~350ms par appel
+    contre ~120ms pour ``health`` et quasi rien pour le reste une fois
+    caché — la route la plus chère des sept, celle que ``loadSheet``
+    attendait pourtant sans jamais l'afficher avant le reste. L'inclure ici
+    referait de la fiche Piloter la vue la plus lente du cockpit pour un
+    badge que l'onglet Problèmes (``ctx.api.doctor()``, appelé à la demande)
+    rend déjà. best-effort partout : une sous-vue qui lève ne casse jamais
+    toute la fiche, elle porte son erreur dans son propre champ.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    from grimoire.tools.flow_runs import list_flow_runs
+    from grimoire.tools.memory_link import memory_link_status
+    from grimoire.tools.project_health import project_health
+    from grimoire.tools.project_setup import read_setup_run
+
+    root = project_root.resolve()
+
+    tasks: dict[str, Callable[[], Any]] = {
+        "health": lambda: project_health(root),
+        "memory": lambda: memory_link_status(root, probe=False),
+        "agents": lambda: agents_view(root),
+        "proposals": lambda: proposals_view(root),
+        "setupRun": lambda: read_setup_run(root),
+        "upgradeRuns": lambda: {"runs": list_flow_runs(root, blueprint_id="project-upgrade")},
+        "name": lambda: _sheet_project_name(root),
+    }
+    results: dict[str, Any] = {"doctor": None}
+    with ThreadPoolExecutor(max_workers=len(tasks)) as pool:
+        futures = {key: pool.submit(fn) for key, fn in tasks.items()}
+        for key, future in futures.items():
+            try:
+                results[key] = future.result()
+            except Exception as exc:  # une sous-vue cassée ne casse jamais la fiche
+                results[key] = {"error": str(exc)}
+    return results

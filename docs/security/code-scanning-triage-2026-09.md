@@ -141,7 +141,7 @@ requête sort de la suite ne se referme pas toute seule).
 | `py/undefined-export` | 11 | un seul fichier (`hosts/decisions/__init__.py`), `__all__` à vérifier au prochain audit qualité, pas un enjeu sécurité |
 | `py/unused-import` | 10 | couvert par `ruff` F401 |
 | `py/unused-local-variable` | 10 | couvert par `ruff` F841 |
-| `py/uninitialized-local-variable` | 8 | 100 % dans `tests/`, échantillon lu (`test_rag_retriever.py`) — pas de gel côté production |
+| `py/uninitialized-local-variable` | 8 | 100 % dans `tests/`, échantillon lu (`tests/test_rag_retriever.py`) — pas de gel côté production |
 | `py/cyclic-import` | 7 | import différé (`from ... import` en tête de fonction) dans le code de production concerné, motif déjà volontaire pour casser les cycles |
 | `py/side-effect-in-assert` | 7 | 100 % dans `tests/`, style d'assertion |
 | `py/unreachable-statement` | 6 | mélange tests/outillage, aucun dans le chemin de sécurité |

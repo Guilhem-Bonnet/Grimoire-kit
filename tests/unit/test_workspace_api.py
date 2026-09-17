@@ -545,3 +545,136 @@ def test_historique_lit_le_journal_git_du_fichier(tmp_path: Path) -> None:
     assert len(history["commits"]) == 2
     assert history["commits"][0]["subject"] == "complète la note"
     assert all(c["sha"] and c["date"] and c["author"] for c in history["commits"])
+
+
+# ── Fiche Piloter agrégée (#548) ─────────────────────────────────────────────
+
+
+def test_la_fiche_sheet_agrege_tout_ce_que_piloter_affiche(real_project: Path) -> None:
+    """Remplace les sept appels de ``loadSheet()`` (+ le nom du projet, huitième
+    évoqué par l'issue) par un seul aller-retour côté client."""
+    sheet = wa.sheet_view(real_project)
+
+    for key in ("health", "memory", "agents", "proposals", "setupRun", "upgradeRuns", "name", "doctor"):
+        assert key in sheet, f"{key} manquant de la fiche agrégée"
+    assert sheet["health"]["kit"]["scaffolded"] is True
+    assert "agents" in sheet["agents"]
+    assert "proposals" in sheet["proposals"]
+    assert "runs" in sheet["upgradeRuns"]
+    # `doctor` volontairement absent : mesuré (#548) comme le vrai coût
+    # (~350ms contre ~120ms pour `health`, le reste quasi nul une fois
+    # caché) — l'inclure referait de la fiche la vue la plus lente du
+    # cockpit pour un badge que l'onglet Problèmes rend déjà à la demande.
+    assert sheet["doctor"] is None
+
+
+def test_health_view_est_mis_en_cache_puis_invalide_par_une_ecriture_reelle(
+    real_project: Path,
+) -> None:
+    """Issue #548 — ``kit_alignment`` recalculait un digest sha256 par
+    fichier shipé à CHAQUE appel de ``/api/health``, mesuré ~120ms sur un
+    projet réel, jamais caché. Une relecture sans rien de nouveau doit
+    rendre le même résultat sans le recalculer ; une écriture réelle sous
+    ``_grimoire/kit`` doit, elle, se voir au prochain appel."""
+    from grimoire.data import web_path
+    from grimoire.tools import forge_server as fs
+    from grimoire.tools import view_cache
+
+    api = fs.ForgeAPI(real_project, Path(__file__).resolve().parents[2], web_path())
+    root = real_project.resolve()
+    view_cache.invalidate(f"health_view:{root}")
+
+    calls = {"n": 0}
+    original = fs.project_health
+
+    def _counting(p: Path) -> dict[str, object]:
+        calls["n"] += 1
+        return original(p)
+
+    fs.project_health = _counting  # type: ignore[assignment]
+    try:
+        first = api.health_view()
+        assert calls["n"] == 1
+
+        second = api.health_view()  # rien de nouveau — sert le cache
+        assert second == first
+        assert calls["n"] == 1
+
+        # `probe=True` force un recalcul frais même sans rien de nouveau.
+        api.health_view(probe=True)
+        assert calls["n"] == 2
+
+        # Une écriture réelle sous `_grimoire/kit` change la signature.
+        (root / "_grimoire" / "kit" / "_548-cache-marker.md").write_text("x", encoding="utf-8")
+        third = api.health_view()
+        assert calls["n"] == 3
+        assert third["kit"]["projectOwned"] == first["kit"]["projectOwned"] + 1
+    finally:
+        fs.project_health = original  # type: ignore[assignment]
+        view_cache.invalidate(f"health_view:{root}")
+
+
+def test_doctor_view_est_mis_en_cache_puis_invalide_par_une_ecriture_reelle(
+    real_project: Path,
+) -> None:
+    """Issue #548 — ``doctor_view`` relançait un processus ``grimoire doctor``
+    complet à CHAQUE appel (~350ms mesuré, le plus cher des sept appels de
+    la fiche Piloter), même quand rien n'avait bougé dans le projet."""
+    from grimoire.tools import view_cache
+
+    root = real_project.resolve()
+    view_cache.invalidate(f"doctor_view:{root}")
+
+    calls = {"n": 0}
+    original = we.run_command
+
+    def _counting(p: Path, argv: list[str], **kwargs: object) -> dict[str, object]:
+        calls["n"] += 1
+        return original(p, argv, **kwargs)  # type: ignore[arg-type]
+
+    we.run_command = _counting  # type: ignore[assignment]
+    try:
+        first = we.doctor_view(real_project)
+        assert calls["n"] == 1
+
+        second = we.doctor_view(real_project)  # rien de nouveau — sert le cache
+        assert second == first
+        assert calls["n"] == 1
+
+        we.doctor_view(real_project, probe=True)  # ?probe=1 force un recalcul
+        assert calls["n"] == 2
+
+        (real_project / "project-context.yaml").write_text(
+            (real_project / "project-context.yaml").read_text(encoding="utf-8") + "\n# marqueur #548\n",
+            encoding="utf-8",
+        )
+        we.doctor_view(real_project)
+        assert calls["n"] == 3
+    finally:
+        we.run_command = original  # type: ignore[assignment]
+        view_cache.invalidate(f"doctor_view:{root}")
+
+
+def test_proposals_view_n_est_pas_reinvalide_par_sa_propre_lecture(real_project: Path) -> None:
+    """Issue #548 — voir ``tests/unit/test_proposals.py`` pour le défaut
+    corrigé (``sync_proposals`` réécrivait chaque proposition en attente à
+    chaque appel). Au niveau de la vue : deux lectures consécutives sans
+    non-choix nouveau entre les deux rendent le même résultat ET ne
+    bougent aucune mtime sous le dossier de propositions — c'est cette
+    stabilité, pas seulement l'égalité du résultat, que le cache de
+    ``proposals_view`` dépend."""
+    from grimoire.core.standard_generation import PROPOSALS_DIR
+    from grimoire.hosts.decisions import record_agent_miss
+
+    record_agent_miss(real_project, category="infra", specialty="terraform-548", fallback_agent="")
+    record_agent_miss(real_project, category="infra", specialty="terraform-548", fallback_agent="")
+
+    first = wa.proposals_view(real_project)
+    proposals_dir = real_project.resolve() / PROPOSALS_DIR
+    mtimes_after_first = {p.name: p.stat().st_mtime_ns for p in proposals_dir.glob("*.yaml")}
+
+    second = wa.proposals_view(real_project)
+    mtimes_after_second = {p.name: p.stat().st_mtime_ns for p in proposals_dir.glob("*.yaml")}
+
+    assert second == first
+    assert mtimes_after_second == mtimes_after_first
