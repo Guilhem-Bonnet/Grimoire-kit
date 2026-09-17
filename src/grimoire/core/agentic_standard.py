@@ -735,63 +735,6 @@ def configure_provider_registry(
     return LLM_PROVIDER_REGISTRY_FILE
 
 
-# ADR-007 point 1 — la mission de rattachement pour la tâche bootstrap ouverte par
-# `standard init`, distincte de `task_unification.TASK_UNIFICATION_MISSION_ID`
-# (celle-ci sert la migration d'un board scaffoldé *sans* ledger ; celle-là ouvre
-# le ledger dès l'init, cas qui ne se recoupent jamais : un projet qui vient d'être
-# initialisé via ce chemin n'a par construction rien à migrer).
-_TASK_BOARD_MISSION_ID = "MIS-standard-bootstrap-001"
-_TASK_BOARD_MISSION_TITLE = "Standard bootstrap"
-_TASK_BOARD_ACTOR = "standard-init"
-# Le template statique qu'on remplace codait déjà "bootstrap" en dur dans le
-# board, quel que soit le `--task-id` de la commande (celui-ci ne pilote que les
-# chemins d'enveloppe des *autres* artefacts, jamais le contenu de task-board.yaml).
-# On préserve ce comportement pour rester équivalent au gate check existant.
-_TASK_BOARD_TASK_ID = "bootstrap"
-_TASK_BOARD_TASK_TITLE = "Bootstrap agentic standard runtime"
-_TASK_BOARD_ACCEPTANCE = ("Standard artifacts are generated and verified.",)
-_TASK_BOARD_OWNER = "project-maintainer"
-
-
-def _ensure_task_board_via_ledger(root: Path, *, project_name: str) -> None:
-    """Ouvre le Mission Ledger pour la tâche bootstrap et projette le board (ADR-007).
-
-    Remplace la copie du template YAML statique : ``standard init`` écrit
-    désormais la tâche ``bootstrap`` via ``ledger.create_mission`` +
-    ``ledger.create_task``, puis régénère ``task-board.yaml`` depuis le ledger
-    (``build_board``/``write_board``), exactement comme le fait déjà
-    ``TaskService.project_board()`` pour chaque transition. Idempotent :
-    rejouer sur un projet déjà initialisé ne recrée ni mission ni tâche —
-    seule la projection est réécrite.
-    """
-    from grimoire.missions.board import build_board, write_board
-    from grimoire.missions.ledger import MissionLedger
-    from grimoire.missions.schemas import MissionState
-    from grimoire.missions.service import DEFAULT_LEDGER_RELPATH
-
-    ledger = MissionLedger(root / DEFAULT_LEDGER_RELPATH)
-    if ledger.get_mission(_TASK_BOARD_MISSION_ID) is None:
-        mission = ledger.create_mission(
-            _TASK_BOARD_MISSION_TITLE,
-            origin="standard-init",
-            description="Tâche bootstrap ouverte par `grimoire standard init` (ADR-007).",
-            created_by=_TASK_BOARD_ACTOR,
-            mission_id=_TASK_BOARD_MISSION_ID,
-        )
-        ledger.transition_mission(mission.id, MissionState.OPEN, actor_id=_TASK_BOARD_ACTOR, reason="standard init")
-    if ledger.get_task(_TASK_BOARD_TASK_ID) is None:
-        ledger.create_task(
-            _TASK_BOARD_MISSION_ID,
-            _TASK_BOARD_TASK_TITLE,
-            acceptance=_TASK_BOARD_ACCEPTANCE,
-            owner=_TASK_BOARD_OWNER,
-            task_id=_TASK_BOARD_TASK_ID,
-        )
-    dest = root / STANDARD_DIR / "task-board.yaml"
-    write_board(dest, build_board(ledger, project=project_name))
-    invalidate_cache(root)
-
-
 def setup_standard_profile(
     project_root: Path,
     *,
@@ -840,11 +783,14 @@ def setup_standard_profile(
         if not dry_run:
             dst.parent.mkdir(parents=True, exist_ok=True)
             if artifact.artifact_type == "task_board":
-                # ADR-007 point 1 : le contenu du template statique n'est plus
-                # ce qui est écrit sur disque une fois `decide()` d'accord pour
+                # ADR-007 point 1 (extrait dans task_board_ledger.py, ratchet
+                # de taille) : le contenu du template statique n'est plus ce
+                # qui est écrit sur disque une fois `decide()` d'accord pour
                 # écrire — seule sa comparaison de version reste inchangée
                 # (mêmes règles force/refresh/keep que les autres artefacts).
-                _ensure_task_board_via_ledger(root, project_name=name)
+                from grimoire.core.task_board_ledger import ensure_task_board_via_ledger
+
+                ensure_task_board_via_ledger(root, project_name=name)
             else:
                 dst.write_text(content, encoding="utf-8")
             generated[key] = gen.digest(dst)

@@ -658,40 +658,9 @@ def doctor(
                 if fmt != "json":
                     console.print(f"  [yellow]WARN[/yellow]  {duration_detail}")
 
-    # 4septies. Board/ledger divergence (ADR-007, issue #559) — `grimoire standard
-    # init` now opens the Mission Ledger for a newly enrolled project, but a board
-    # scaffolded by an earlier kit version (or written by hand) can still lack a
-    # ledger entirely, or lack tasks the board already has. Never FAIL: this is
-    # the state a project sits in before `migrate-standard` runs, not a broken
-    # project — but it must be named, with the exact remedy, not left silent.
-    with _timed_phase("task_unification"):
-        from grimoire.missions.task_unification import tasks_unification_status
-
-        tu_status = tasks_unification_status(target)
-        if tu_status["enrolled"] and tu_status["diverged"]:
-            if not tu_status["ledger_exists"]:
-                tu_detail = (
-                    "board du standard sans Mission Ledger (ADR-007) — "
-                    "`grimoire task migrate-standard .` pour l'ouvrir"
-                )
-            else:
-                missing = len(tu_status["missing_in_ledger"])
-                tu_detail = (
-                    f"{missing} tâche(s) du board absente(s) du Mission Ledger (ADR-007) — "
-                    "`grimoire task migrate-standard .` pour les importer"
-                )
-            tu_entry: dict[str, Any] = {
-                "name": "task_unification",
-                "passed": True,
-                "detail": tu_detail,
-                "level": "warn",
-                "remedy": "grimoire task migrate-standard .",
-            }
-            results.append(tu_entry)
-            if fmt != "json":
-                console.print(f"  [yellow]WARN[/yellow]  {tu_detail}")
-        elif tu_status["enrolled"]:
-            _record("task_unification", passed=True, detail="Mission Ledger en phase avec le board du standard.")
+    with _timed_phase("task_unification"):  # 4septies. Board/ledger divergence (ADR-007, #559).
+        from grimoire.core.task_unification_doctor import apply_task_unification_check
+        apply_task_unification_check(target, results, fmt=fmt, console=console)
 
     # 5. Config semantic validation
     if cfg:
