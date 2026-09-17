@@ -428,7 +428,15 @@ def served_cockpit(
     """
     from grimoire.missions.service import TaskService
 
-    cockpit_title = "Vérifier la vue de travail (cockpit)"
+    # Titre délibérément distinct de celui de `project_with_task` ("Vérifier
+    # la vue de travail") — même préfixe, même 12 premiers caractères que
+    # `ledger.create_task` utilise pour dériver le slug de l'identifiant
+    # (`GAO-{slug}-{seq}`), les deux fixtures partagent `real_project` et se
+    # seraient vu attribuer une séquence commune : `.filter(has_text=...)`
+    # d'un test matche par sous-chaîne, donc les DEUX cartes auraient répondu
+    # au même filtre, la sélection `.first` tombant sur celle des deux dont
+    # l'identifiant ne correspondait pas à ce que la fixture attendait.
+    cockpit_title = "Tâche du cockpit pour Piloter"
     # Idempotence par titre, pas par `has_ledger` (ADR-007, issue #559) :
     # `standard init` ouvre désormais un ledger dès l'init (tâche
     # `bootstrap`), donc `has_ledger` est vrai avant même que ce fixture ne
