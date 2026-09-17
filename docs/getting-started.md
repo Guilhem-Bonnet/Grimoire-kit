@@ -80,6 +80,22 @@ grimoire up . --no-standard
 Archétypes disponibles : `minimal`, `web-app`, `infra-ops`, `platform-engineering`,
 `agentic-standard`, `creative-studio`, `fix-loop`.
 
+### Profil léger — dépôt jetable ou sans CI ni tests
+
+`grimoire init --lite` (alias : `--profile lite`) pose un projet minimal en
+une commande : mémoire lexicale (aucun service à lancer), pas d'enregistrement
+au cockpit local, archétype `minimal`. Le rapport d'`init` indique comment
+activer chaque brique plus tard :
+
+```bash
+grimoire init . --lite
+
+# Activer plus tard, une brique à la fois
+grimoire memory up --profile standard --apply
+grimoire cockpit add .
+grimoire standard init .
+```
+
 ### Étape par étape (ce que `up` enchaîne)
 
 ```bash

@@ -291,6 +291,8 @@ def init(
     yes: bool = typer.Option(False, "--yes", "-y", help="Express mode: skip the wizard, auto-detect everything."),
     memory_profile: str = typer.Option("", "--memory-profile", "-m", help="Memory composition (lexical, standard, graphe, complet). Inferred when omitted."),
     no_cockpit: bool = typer.Option(False, "--no-cockpit", help="Do not enrol this project in the local cockpit registry (~/.grimoire/cockpit/registry.json). Same effect as the GRIMOIRE_NO_COCKPIT env var."),
+    lite: bool = typer.Option(False, "--lite", help="Profil léger : mémoire lexicale (aucun service), pas de cockpit, standard non activé — pour un dépôt sans CI ni tests."),
+    profile: str = typer.Option("", "--profile", help="Profil d'init nommé. Seule valeur reconnue aujourd'hui : 'lite' (équivalent à --lite)."),
 ) -> None:
     """Initialise a Grimoire project — detect stack, deploy agents, scaffold.
 
@@ -302,6 +304,11 @@ def init(
     throwaway project (scratch, `/tmp`, a recipe) that should not show up in
     [cyan]grimoire cockpit[/cyan] (issue #305).
 
+    [cyan]--lite[/cyan] (alias: [cyan]--profile lite[/cyan]) sets memory backend to
+    lexical (no service), skips cockpit enrolment, and picks the [cyan]minimal[/cyan]
+    archetype by default — a fast, service-free setup for a throwaway or
+    exploratory repo (no CI, no tests).
+
     [dim]Examples:[/dim]
       [cyan]grimoire init .[/cyan]                               Interactive wizard
       [cyan]grimoire init . -y[/cyan]                            Express (auto-detect all)
@@ -309,10 +316,18 @@ def init(
       [cyan]grimoire init . -a web-app,infra-ops[/cyan]         Multiple archetypes
       [cyan]grimoire init --dry-run[/cyan]                       Show plan without writing
       [cyan]grimoire init . -y --no-cockpit[/cyan]               Express, skip cockpit enrolment
+      [cyan]grimoire init . --lite[/cyan]                        Profil léger (lexical, sans cockpit)
     """
     from grimoire.cli.cmd_init import run_init, validate_init_flags
 
     validate_init_flags(archetype, backend, memory_profile)
+
+    normalized_profile = profile.strip().lower()
+    if normalized_profile and normalized_profile != "lite":
+        console.print(f"[red]Unknown init profile:[/red] {profile}")
+        console.print("Available: lite")
+        raise typer.Exit(1)
+    lite = lite or normalized_profile == "lite"
 
     if yes:
         # The global --yes lives on the app callback (grimoire -y init …); this
@@ -330,6 +345,7 @@ def init(
         dry_run=dry_run,
         memory_profile=memory_profile,
         no_cockpit=no_cockpit,
+        lite=lite,
     )
 
 
