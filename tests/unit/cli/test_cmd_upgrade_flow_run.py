@@ -100,3 +100,34 @@ def test_a_node_failure_reports_done_and_the_failed_node(
     assert payload["failed_node"] == "apply"
     assert payload["done"] == ["backup", "preview", "orphans"]
     assert "doctor cassé exprès" in payload["error"]
+
+
+def test_a_node_failure_after_backup_still_reports_the_backup_path(
+    fresh_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`_fail_run` dropped `backup_path` entirely (issue upgrade#verify-suffixed-manifest) —
+    a cockpit consumer reading a failed run's report saw `backupPath: null`
+    even though `backup` had already succeeded and its tarball was sitting
+    right there in `node_outputs`. Only the special-cased `apply`-refusal
+    branch carried it; any *other* node failing after `backup` (including
+    `verify` itself, the real 2026-09-17 repro) lost it."""
+    import grimoire.tools.project_upgrade as project_upgrade
+    from grimoire.cli.app import app
+    from grimoire.core.exceptions import GrimoireRuntimeError
+
+    def _boom(_root: Path) -> Any:
+        raise GrimoireRuntimeError("preview cassé exprès (test)")
+
+    monkeypatch.setattr(project_upgrade, "preview_upgrade", _boom)
+
+    result = CliRunner().invoke(
+        app, ["upgrade-flow", "run", "--project-root", str(fresh_project), "--json"]
+    )
+    assert result.exit_code != 0
+    payload = _last_json_line(result.output)
+    assert payload["ok"] is False
+    assert payload["failed_node"] == "preview"
+    assert payload["done"] == ["backup"]
+    backup_path = payload.get("backup_path")
+    assert backup_path, "le nœud backup a réussi avant l'échec, son tarball doit être rapporté"
+    assert Path(backup_path).is_file()
