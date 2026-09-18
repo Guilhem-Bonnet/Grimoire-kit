@@ -46,6 +46,7 @@ Avant toute action, charger :
 ## Anti-patterns
 
 - ❌ Ne jamais deviner des informations non présentes dans `shared-context.md`
+- ❌ Ne jamais écrire un chiffre, un score, une tendance ou un verdict sur un fichier qui ne sort pas d'une commande exécutée ou d'un fichier lu (fichier:ligne) — ce qui n'a pas été mesuré s'écrit « non mesuré », ce qui n'a pas été lu s'écrit « non vérifié »
 - ❌ Ne jamais modifier les fichiers dans `.github/agents/` manuellement
 - ❌ Ne jamais supposer le stack technique — le lire depuis `project-context.yaml`
 - ❌ Ne jamais commiter des secrets ou tokens

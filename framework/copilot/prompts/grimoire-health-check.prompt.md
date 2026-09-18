@@ -6,7 +6,18 @@ agent: 'agent'
 tools: ['read', 'search', 'execute']
 ---
 
-Health check complet du projet Grimoire en 5 points :
+Health check complet du projet Grimoire en 5 points. Chaque ligne du rapport
+cite ce qui a été lu ou exécuté ; un point non regardé s'écrit « non vérifié »,
+jamais ✅ ni ❌.
+
+## 0. Mesure
+
+```bash
+grimoire -o json doctor {project-root}
+```
+
+Les clés `passed` et `failed` de cette sortie sont la seule source du bilan
+chiffré ci-dessous. Sans cette commande, pas de bilan chiffré.
 
 ## 1. Configuration
 
@@ -57,7 +68,7 @@ Présente un **rapport de santé** :
 ✅/⚠️/❌  Structure        ...
 ✅/⚠️/❌  Git              ...
 
-Score global : X/5
+Contrôles doctor : {passed} verts / {passed + failed} (copié de la sortie ci-dessus)
 
 Actions prioritaires :
 1. ...

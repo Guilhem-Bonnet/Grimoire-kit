@@ -18,7 +18,9 @@ from typing import Any
 
 from grimoire.bridges.schemas import HostId
 from grimoire.hosts.emitters.base import (
+    GROUNDING_RULE,
     OWNED_COMMAND_MARKERS,
+    UNCERTAINTIES_BLOCK_RULE,
     Degradation,
     EmitPlan,
     EmittedFile,
@@ -83,6 +85,32 @@ def _attached_skill_section(skill: SkillSpec) -> str:
 {skill.body}"""
 
 
+def _dispatch_policy_section() -> str:
+    """Ce que l'agent d'entrée exige des personas qu'il route.
+
+    Même politique que `.github/hooks/README.md`, portée dans le seul fichier
+    que l'agent d'entrée charge vraiment. Aucun nom de modèle : cet hôte ne
+    documente pas de sélection par palier (dégradation « model affinity »).
+    """
+    return f"""## Politique de dispatch
+
+Quand tu routes une tranche de travail vers une autre persona, sa classe de
+vérifiabilité dit la relecture que son résultat mérite avant d'être cru :
+
+- **V0** — {Verifiability.V0.explanation}
+- **V1** — {Verifiability.V1.explanation}
+- **V2** — {Verifiability.V2.explanation}
+
+Exige de chaque persona routée, en fin de réponse, un bloc
+```grimoire-uncertainties``` portant une liste JSON d'objets
+`{{"where": ..., "what": ..., "why": ...}}` — un par point qu'elle n'a pas pu
+vérifier. Une persona qui clôt sans ce bloc n'a pas rendu un résultat
+vérifiable, elle a rendu une opinion. Un chiffre ou un verdict qu'elle ne
+relie à aucune commande exécutée ni à aucun fichier:ligne se relit comme
+non vérifié, quel que soit son ton.
+"""
+
+
 def _agent_file(agent: AgentSpec, surface: ProjectSurface, owned_skills: tuple[SkillSpec, ...] = ()) -> EmittedFile:
     # Pas de `model` ici : le contrat documenté pour .github/agents/*.agent.md
     # (https://code.visualstudio.com/docs/copilot/customization/custom-agents)
@@ -112,8 +140,11 @@ Tu actives la persona Grimoire **{agent.name}** du projet {surface.project_name}
 2. {context_load_instruction(agent)}
 3. {role}
 4. Frontière d'outils : {", ".join(v.value for v in agent.tools)}. N'en sors pas.
-5. Rends un résultat vérifiable ; signale comme non vérifié ce que tu n'as pas vérifié.
+5. {GROUNDING_RULE}
 """
+    content = (
+        f"{content}\n{_dispatch_policy_section()}" if agent.entry_point else f"{content}6. {UNCERTAINTIES_BLOCK_RULE}\n"
+    )
     for skill in owned_skills:
         content = f"{content}\n{_attached_skill_section(skill)}"
     return EmittedFile(relpath=GH_DIR / "agents" / f"{agent.name}.agent.md", content=content)
