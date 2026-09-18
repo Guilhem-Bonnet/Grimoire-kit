@@ -1186,6 +1186,227 @@ def test_resolve_grimoire_bin_raises_when_not_found_anywhere(monkeypatch: pytest
         ta.resolve_grimoire_bin(None)
 
 
+# ── Mode d'authentification (lot J, #582) ───────────────────────────────────
+
+
+def test_resolve_auth_mode_picks_api_key_when_present_in_environment() -> None:
+    assert ta.resolve_auth_mode(None, env={"ANTHROPIC_API_KEY": "sk-ant-fake"}) == "api-key"
+
+
+def test_resolve_auth_mode_falls_back_to_oauth_copy_with_a_warning(capsys: pytest.CaptureFixture[str]) -> None:
+    assert ta.resolve_auth_mode(None, env={}) == "oauth-copy"
+    err = capsys.readouterr().err
+    assert "rotation" in err
+    assert "oauth-copy" in err
+
+
+def test_resolve_auth_mode_explicit_choice_overrides_the_environment() -> None:
+    # --auth oauth-copy explicite, même avec une clé API présente : le choix
+    # de l'opérateur n'est jamais silencieusement contredit.
+    assert ta.resolve_auth_mode("oauth-copy", env={"ANTHROPIC_API_KEY": "sk-ant-fake"}) == "oauth-copy"
+    assert ta.resolve_auth_mode("api-key", env={"ANTHROPIC_API_KEY": "sk-ant-fake"}) == "api-key"
+
+
+def test_resolve_auth_mode_raises_when_api_key_explicit_but_missing() -> None:
+    with pytest.raises(SystemExit, match="ANTHROPIC_API_KEY"):
+        ta.resolve_auth_mode("api-key", env={})
+
+
+def test_resolve_auth_mode_raises_on_unknown_mode() -> None:
+    with pytest.raises(SystemExit, match="inconnu"):
+        ta.resolve_auth_mode("bearer-token", env={})
+
+
+def test_run_claude_headless_adds_bare_flag_in_api_key_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Doc Claude Code (``code.claude.com/docs/en/headless.md``, « Start
+    faster with bare mode ») : ``--bare`` ignore explicitement le trousseau
+    OAuth et le système de keychain — c'est ce qui rend le mode ``api-key``
+    étanche à la copie d'identifiant."""
+    seen_cmds: list[list[str]] = []
+
+    class _RecordingFakePopen(_FakePopen):
+        def __init__(self, cmd: list[str], *, cwd: Path, env: dict[str, str], stdout: Any, stderr: Any) -> None:
+            seen_cmds.append(cmd)
+            super().__init__(cmd, cwd=cwd, env=env, stdout=stdout, stderr=stderr)
+
+    task_dir = tmp_path / "run0"
+    task_dir.mkdir()
+    monkeypatch.setattr(ta.subprocess, "Popen", _RecordingFakePopen)
+
+    ta.run_claude_headless(
+        task_dir, "peu importe", home=tmp_path, timeout_s=5, poll_interval=0.0, auth_mode="api-key"
+    )
+
+    assert "--bare" in seen_cmds[0]
+
+
+def test_run_claude_headless_omits_bare_flag_in_oauth_copy_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen_cmds: list[list[str]] = []
+
+    class _RecordingFakePopen(_FakePopen):
+        def __init__(self, cmd: list[str], *, cwd: Path, env: dict[str, str], stdout: Any, stderr: Any) -> None:
+            seen_cmds.append(cmd)
+            super().__init__(cmd, cwd=cwd, env=env, stdout=stdout, stderr=stderr)
+
+    task_dir = tmp_path / "run0"
+    task_dir.mkdir()
+    monkeypatch.setattr(ta.subprocess, "Popen", _RecordingFakePopen)
+
+    ta.run_claude_headless(task_dir, "peu importe", home=tmp_path, timeout_s=5, poll_interval=0.0)
+
+    assert "--bare" not in seen_cmds[0]
+
+
+def test_run_one_api_key_mode_never_calls_credentials_provisioned_nor_writes_any_credentials(
+    synthetic_bench_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Coeur du lot J : en mode ``api-key``, aucun identifiant OAuth n'est
+    jamais copié — la fonction qui le ferait ne doit même pas être appelée,
+    et aucun ``.credentials.json`` ne doit exister sous le `HOME` isolé du
+    run, à aucun moment."""
+    task = ta.discover_catalog(synthetic_bench_root)[0]
+    workspace = tmp_path / "workspace"
+    homes = {arm: workspace / "homes" / arm for arm in ta.ARMS}
+    for home in homes.values():
+        ta.ensure_isolated_home(home)
+
+    def boom(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("credentials_provisioned ne doit jamais être appelé en mode api-key")
+
+    monkeypatch.setattr(ta, "credentials_provisioned", boom)
+    seen_auth_modes: list[str | None] = []
+
+    def fake_run_claude_headless(*args: Any, **kwargs: Any) -> Any:
+        seen_auth_modes.append(kwargs.get("auth_mode"))
+        assert not (homes["nu"] / ta.CREDENTIALS_REL_PATH).exists()
+        return ta.RunOutcome(terminated_reason="completed")
+
+    monkeypatch.setattr(ta, "run_claude_headless", fake_run_claude_headless)
+    monkeypatch.setattr(ta, "run_hidden_tests", lambda *a, **k: (True, ""))
+    monkeypatch.setattr(ta, "cleanup_build_artifacts", lambda run_dir: None)
+
+    record = ta._run_one(
+        task,
+        "nu",
+        0,
+        workspace=workspace,
+        ecc_repo=tmp_path / "ecc-repo-unused",
+        homes=homes,
+        go_bin=None,
+        run_timeout_s=5,
+        grimoire_bin="grimoire",
+        auth_mode="api-key",
+    )
+
+    assert seen_auth_modes == ["api-key"]
+    assert record.auth_mode == "api-key"
+    assert not (homes["nu"] / ta.CREDENTIALS_REL_PATH).exists()
+
+
+def test_run_one_oauth_copy_mode_is_unchanged(
+    synthetic_bench_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Le mode par défaut (pas de ``auth_mode`` explicite) doit continuer à
+    passer par ``credentials_provisioned`` exactement comme avant ce lot."""
+    task = ta.discover_catalog(synthetic_bench_root)[0]
+    workspace = tmp_path / "workspace"
+    homes = {arm: workspace / "homes" / arm for arm in ta.ARMS}
+    for home in homes.values():
+        ta.ensure_isolated_home(home)
+
+    calls: list[Path] = []
+
+    @contextlib.contextmanager
+    def fake_credentials(home: Path, real_home: Path | None = None) -> Iterator[str]:
+        del real_home
+        calls.append(home)
+        yield "fake-token"
+
+    monkeypatch.setattr(ta, "credentials_provisioned", fake_credentials)
+    monkeypatch.setattr(ta, "run_claude_headless", lambda *a, **k: ta.RunOutcome(terminated_reason="completed"))
+    monkeypatch.setattr(ta, "run_hidden_tests", lambda *a, **k: (True, ""))
+    monkeypatch.setattr(ta, "cleanup_build_artifacts", lambda run_dir: None)
+
+    record = ta._run_one(
+        task,
+        "nu",
+        0,
+        workspace=workspace,
+        ecc_repo=tmp_path / "ecc-repo-unused",
+        homes=homes,
+        go_bin=None,
+        run_timeout_s=5,
+        grimoire_bin="grimoire",
+    )
+
+    assert calls == [homes["nu"]]
+    assert record.auth_mode == "oauth-copy"
+
+
+def test_find_leaked_api_keys_returns_empty_without_an_api_key(tmp_path: Path) -> None:
+    assert ta.find_leaked_api_keys(tmp_path, api_key=None) == []
+
+
+def test_find_leaked_api_keys_detects_key_in_isolated_home_and_in_run_log(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    homes_dir = workspace / "homes"
+    tasks_dir = workspace / "tasks"
+
+    leaked_home_file = homes_dir / "kit" / ".claude" / "settings.local.json"
+    leaked_home_file.parent.mkdir(parents=True)
+    leaked_home_file.write_text('{"token": "sk-ant-super-secret"}', encoding="utf-8")
+
+    clean_home_file = homes_dir / "nu" / ".claude" / "settings.local.json"
+    clean_home_file.parent.mkdir(parents=True)
+    clean_home_file.write_text("{}", encoding="utf-8")
+
+    leaked_log = tasks_dir / "python__ex-0" / "kit" / "run0.stream.jsonl"
+    leaked_log.parent.mkdir(parents=True)
+    leaked_log.write_text('{"line": "sk-ant-super-secret"}\n', encoding="utf-8")
+
+    # un fichier de dépôt de tâche (pas un journal) contenant la clé ne doit
+    # jamais être scanné — hors périmètre (voir docstring).
+    (tasks_dir / "python__ex-0" / "kit" / "solution.py").write_text("sk-ant-super-secret\n", encoding="utf-8")
+
+    found = ta.find_leaked_api_keys(workspace, api_key="sk-ant-super-secret")
+
+    assert found == sorted([leaked_home_file, leaked_log])
+
+
+def test_find_leaked_api_keys_returns_empty_when_nothing_leaked(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    home = workspace / "homes" / "kit"
+    ta.ensure_isolated_home(home)
+    assert ta.find_leaked_api_keys(workspace, api_key="sk-ant-super-secret") == []
+
+
+def test_build_report_lists_the_auth_modes_actually_used() -> None:
+    records = [
+        ta.RunRecord(
+            task_id="python/ex-0",
+            language="python",
+            arm="nu",
+            run_index=0,
+            success=True,
+            total_cost_usd=0.01,
+            input_tokens=1,
+            output_tokens=1,
+            num_turns=1,
+            wall_seconds=1.0,
+            terminated_reason="completed",
+            auth_mode="api-key",
+        )
+    ]
+    report = ta.build_report(records, total_tasks=1, expected_cost=None, seed=1)
+    assert report["auth_modes"] == ["api-key"]
+    markdown = ta.render_report_markdown(report)
+    assert "api-key" in markdown
+
+
 def test_expected_activation_directive_template_reads_the_worktree_source(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1301,6 +1522,58 @@ def test_verify_grimoire_binary_matches_template_raises_when_version_fails(
     )
     with pytest.raises(RuntimeError, match="--version"):
         ta.verify_grimoire_binary_matches_template("grimoire", check_dir=tmp_path / "check")
+
+
+def test_verify_grimoire_binary_matches_template_is_replayable_on_the_same_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Lot J (#582) : deux appels consécutifs de la garde sur le même
+    workspace (ex. un ``--resume`` après un incident) ne doivent jamais se
+    marcher dessus.
+
+    Avant correction, le dépôt de vérification vivait à un chemin FIXE
+    (``check_dir`` lui-même) : au second appel, ``grimoire init`` retombait
+    sur un dépôt déjà initialisé et refusait (« Use --force to overwrite »),
+    simulé ici par ``initialized_dirs`` — un ``cwd`` déjà vu redonne un
+    ``returncode`` non nul. Rouge avant correction (le second appel lève),
+    vert après (chaque appel provisionne son propre dépôt jetable, supprimé
+    ensuite)."""
+    grimoire_bin = str(tmp_path / "venv" / "bin" / "grimoire")
+    expected_template = "[Grimoire Standard] gabarit attendu\n"
+    monkeypatch.setattr(ta, "_expected_activation_directive_template", lambda: expected_template)
+
+    initialized_dirs: set[Path] = set()
+
+    def fake_run(cmd: Any, *, cwd: Path | None = None, env: Any = None, timeout: int | None = None) -> Any:
+        if cmd[0] == grimoire_bin and cmd[1] == "--version":
+            return SimpleNamespace(returncode=0, stdout="grimoire 3.56.0", stderr="")
+        if cmd[:2] == ["git", "init"]:
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if cmd[0] == grimoire_bin and cmd[1] == "init":
+            resolved = Path(cwd).resolve()  # type: ignore[arg-type]
+            if resolved in initialized_dirs:
+                return SimpleNamespace(returncode=1, stdout="", stderr="Use --force to overwrite")
+            initialized_dirs.add(resolved)
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if cmd[0] == grimoire_bin and cmd[1:3] == ["host", "sync"]:
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if cmd[0] == grimoire_bin and cmd[1:3] == ["standard", "init"]:
+            (cwd / ".claude").mkdir(parents=True, exist_ok=True)
+            (cwd / ".claude" / "activation-context.md").write_text(expected_template, encoding="utf-8")
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        raise AssertionError(f"commande inattendue : {cmd}")
+
+    monkeypatch.setattr(ta, "_run", fake_run)
+    check_dir = tmp_path / "_grimoire_bin_check"
+
+    ta.verify_grimoire_binary_matches_template(grimoire_bin, check_dir=check_dir)
+    # Le second appel — ex. un `--resume` après un incident — ne doit PAS
+    # échouer.
+    ta.verify_grimoire_binary_matches_template(grimoire_bin, check_dir=check_dir)
+
+    # Chaque dépôt jetable est nettoyé après coup : rien ne s'accumule sous
+    # `check_dir` d'un appel à l'autre.
+    assert list(check_dir.iterdir()) == []
 
 
 def test_setup_arm_kit_invokes_the_resolved_absolute_binary_not_a_path_lookup(

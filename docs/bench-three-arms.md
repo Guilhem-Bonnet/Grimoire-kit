@@ -106,12 +106,54 @@ Vérifié en isolation (dépôt jetable, non versionné) avant le premier rejeu 
 
 ## 3. Authentification en environnement isolé
 
-Isoler entièrement `HOME` casse l'authentification de Claude Code (« Not
-logged in · Please run /login » — aucune clé API n'est configurée en variable
-d'environnement sur ce poste, l'auth vit dans `~/.claude/.credentials.json`,
-liée à OAuth). C'est la même clé physique que celle déjà configurée sur le
-poste ; elle n'est ni régénérée ni journalisée (`shutil.copyfile`, jamais lu
-ni affiché par ce script).
+Isoler entièrement `HOME` casse l'authentification de Claude Code par défaut
+(« Not logged in · Please run /login » — l'auth interactive vit dans
+`~/.claude/.credentials.json`, liée à OAuth). Deux modes, choisis par
+`--auth {oauth-copy,api-key}` (défaut : `api-key` si `ANTHROPIC_API_KEY` est
+présente dans l'environnement du lanceur, sinon `oauth-copy` avec un
+avertissement — voir `resolve_auth_mode()`) :
+
+| Mode | Ce qui est transmis à `claude -p` | Copie d'identifiant | Risque |
+|---|---|---|---|
+| `api-key` (préféré) | `--bare` + `ANTHROPIC_API_KEY` (héritée de l'environnement du lanceur par `run_environment()`) | Aucune | Aucun |
+| `oauth-copy` (repli) | Rien de spécial ; `~/.claude/.credentials.json` copié dans le `HOME` isolé du run | Temporaire, un fichier par run | Rotation de jeton partagée (voir §3.2) |
+
+### 3.1 Mode `api-key` (lot J, #582)
+
+Aucun identifiant n'est jamais copié. `run_claude_headless` ajoute `--bare` à
+la commande quand `auth_mode="api-key"` ; `_run_one` n'appelle alors JAMAIS
+`credentials_provisioned`. D'après la documentation Claude Code consultée le
+2026-09-18 :
+
+- `code.claude.com/docs/en/headless.md` (« Start faster with bare mode ») :
+  « In bare mode, Claude Code never reads OAuth credentials or the system
+  keychain. » — le mode conçu précisément pour ce cas d'usage.
+- `code.claude.com/docs/en/authentication.md` (ordre de précédence) :
+  `ANTHROPIC_API_KEY` prime sur les identifiants OAuth de toute façon — même
+  hors `--bare`, la variable l'emporterait.
+
+`ANTHROPIC_API_KEY` n'a besoin d'aucune transmission spéciale : `env`
+(construit une fois par `run_environment()`, voir §5) part de `os.environ`
+et la contient donc déjà si elle est exportée dans l'environnement du
+lanceur. Aucun fichier de config supplémentaire (`.claude.json` ou autre)
+n'est nécessaire — `--bare` est justement documenté comme la voie CI
+recommandée pour éviter tout onboarding interactif.
+
+**Garde de fin de campagne (mode `api-key`).** `find_leaked_api_keys(workspace,
+api_key=...)` balaie les `HOME` isolés (`root/homes/**`) et les journaux de
+run (`root/tasks/**/*.stream.jsonl`) à la recherche du littéral de la clé —
+jamais affichée, seuls les chemins concernés sont remontés. `--pilot` et
+`--full` l'appellent après le dernier run, uniquement en mode `api-key` : une
+trouvaille est signalée bruyamment sur stderr (`[ALERTE SÉCURITÉ]`), sans
+suppression automatique (la structure du fichier trouvé n'est pas connue).
+Ne doit jamais rien trouver dans une campagne saine. Preuve par test :
+`test_find_leaked_api_keys_detects_key_in_isolated_home_and_in_run_log`.
+
+### 3.2 Mode `oauth-copy` (repli, comportement historique)
+
+C'est la même clé physique que celle déjà configurée sur le poste ; elle
+n'est ni régénérée ni journalisée (`shutil.copyfile`, jamais lue ni affichée
+par ce script).
 
 **Le fichier n'est jamais laissé à demeure dans un `HOME` isolé.** Les `HOME`
 créés par `ensure_isolated_home()` (un par bras, partagés entre les runs de
@@ -143,15 +185,30 @@ pour le bras `kit`) ne reçoivent jamais d'identifiant — elles n'en ont pas
 besoin (vérifié en réel : ces commandes réussissent sans aucun fichier de
 credentials dans le `HOME` isolé).
 
+**Cause des déconnexions en rafale (lots E, F, H, J).** Les jetons OAuth de
+Claude Code sont rafraîchis par rotation. Copier le même jeton dans le `HOME`
+isolé de plusieurs runs (même séquentiels : le fichier réel du poste change
+dès qu'un run le rafraîchit) fait que le rafraîchissement déclenché par UNE
+copie invalide à la fois la session interactive de l'opérateur ET toute autre
+copie en cours d'utilisation — observé quatre fois en deux jours,
+systématiquement pendant une campagne (« OAuth session expired and could not
+be refreshed »), jusqu'à 30 runs perdus en une fois (lot J). Le mode
+`api-key` (§3.1) élimine ce risque par construction : préférez-le dès que
+`ANTHROPIC_API_KEY` est disponible.
+
 **Garde de fin de campagne.** `find_leftover_credentials(workspace)` balaie
 tous les `HOME` isolés à la recherche d'un `.credentials.json` oublié (bug de
 nettoyage, process tué avant que le `finally` n'ait pu s'exécuter — signal
 possible si l'orchestrateur du système d'exploitation envoie un `SIGKILL`
 plutôt qu'un `SIGTERM`). `--pilot` et `--full` l'appellent après le dernier
-run : la campagne n'échoue pas là-dessus, mais toute trouvaille est effacée
-immédiatement et signalée bruyamment sur stderr (`[ALERTE SÉCURITÉ]`) — elle
-ne doit jamais apparaître dans une campagne saine. Preuve par test :
+run, quel que soit le mode d'authentification : la campagne n'échoue pas
+là-dessus, mais toute trouvaille est effacée immédiatement et signalée
+bruyamment sur stderr (`[ALERTE SÉCURITÉ]`) — elle ne doit jamais apparaître
+dans une campagne saine. Preuve par test :
 `test_find_leftover_credentials_detects_and_is_clean_after_normal_use`.
+
+Le rapport (`report.md`, voir §10) nomme le ou les modes effectivement
+utilisés par la campagne (`report["auth_modes"]`, `RunRecord.auth_mode`).
 
 ## 4. Jeu de tâches
 
@@ -341,10 +398,17 @@ python scripts/bench/three_arms.py --full --workspace /chemin/scratch/bench-work
 
 # 4. Régénérer report.md/report.json depuis results.jsonl sans rien rejouer :
 python scripts/bench/three_arms.py --report-only --workspace /chemin/scratch/bench-workspace
+
+# Authentification (lot J, #582, voir §3) : --auth api-key explicite (recommandé,
+# aucune copie d'identifiant) ou --auth oauth-copy explicite (repli historique) ;
+# sans l'option, le mode est déduit de la présence d'ANTHROPIC_API_KEY.
+ANTHROPIC_API_KEY=sk-ant-... python scripts/bench/three_arms.py --pilot \
+    --workspace /chemin/scratch/bench-workspace --auth api-key
 ```
 
 Prérequis système pour `--pilot`/`--full` : `claude` (Claude Code CLI,
-authentifié — voir §3), `node`/`npm`, `cargo`/`rustc`, `git`. `go` est
+authentifié en mode `oauth-copy`, ou `ANTHROPIC_API_KEY` exportée pour le mode
+`api-key` — voir §3), `node`/`npm`, `cargo`/`rustc`, `git`. `go` est
 provisionné automatiquement sur Linux/amd64 s'il est absent du `PATH`.
 Depuis le lot I (#582), Rust/Node sont vérifiés par le code AVANT toute
 dépense (`ensure_system_toolchains_present`, §5) — un manquant arrête la
