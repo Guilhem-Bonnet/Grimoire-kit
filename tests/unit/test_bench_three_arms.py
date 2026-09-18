@@ -14,6 +14,7 @@ from __future__ import annotations
 import contextlib
 import importlib.util
 import json
+import os
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -539,6 +540,7 @@ def test_run_one_carries_cache_tokens_and_model_usage_into_the_record(
         homes=homes,
         go_bin=None,
         run_timeout_s=5,
+        grimoire_bin="grimoire",
     )
 
     assert record.cache_read_input_tokens == 900
@@ -592,6 +594,8 @@ def test_main_full_stops_cleanly_and_writes_a_partial_report_on_low_disk(
     monkeypatch.setattr(ta, "ensure_ecc_repo", lambda ws: (tmp_path / "ecc-repo", "deadbeef"))
     monkeypatch.setattr(ta, "ensure_go_toolchain", lambda ws: None)
     monkeypatch.setattr(ta, "disk_guard_ok", lambda workspace, min_free_gb=ta.DISK_GUARD_MIN_FREE_GB: False)
+    monkeypatch.setattr(ta, "resolve_grimoire_bin", lambda explicit: "grimoire")
+    monkeypatch.setattr(ta, "verify_grimoire_binary_matches_template", lambda *a, **k: None)
 
     def _fail_if_called(*args: Any, **kwargs: Any) -> None:
         raise AssertionError("un run a été lancé malgré le disque sous le seuil")
@@ -787,7 +791,7 @@ def test_setup_arm_kit_gov_runs_standard_init_then_migrates_a_synthetic_board(
     monkeypatch.setattr(
         ta,
         "setup_arm_kit",
-        lambda task_dir, *, kit_home, timeout=180, npm_cache_dir=None: {
+        lambda task_dir, *, kit_home, grimoire_bin, timeout=180, npm_cache_dir=None: {
             "arm": "kit",
             "added": ["x"],
             "init_rc": 0,
@@ -797,7 +801,9 @@ def test_setup_arm_kit_gov_runs_standard_init_then_migrates_a_synthetic_board(
 
     task_dir = tmp_path / "run"
     task_dir.mkdir()
-    result = ta.setup_arm_kit_gov(task_dir, kit_home=tmp_path / "home", task_id="go/palindrome-products")
+    result = ta.setup_arm_kit_gov(
+        task_dir, kit_home=tmp_path / "home", task_id="go/palindrome-products", grimoire_bin="grimoire"
+    )
 
     assert result["arm"] == "kit-gov"
     assert result["governed_task_id"] == "go__palindrome-products"
@@ -943,6 +949,7 @@ def test_run_one_records_test_deps_install_outcome_from_setup_result(
         homes=homes,
         go_bin=None,
         run_timeout_s=5,
+        grimoire_bin="grimoire",
     )
 
     assert record.test_deps_install_ok is False
@@ -985,10 +992,11 @@ def test_run_one_wires_kit_gov_setup_and_collects_governed_evidence(
         *,
         kit_home: Path,
         task_id: str,
+        grimoire_bin: str,
         timeout: int = 180,
         npm_cache_dir: Path | None = None,
     ) -> dict[str, Any]:
-        del kit_home, timeout, npm_cache_dir
+        del kit_home, timeout, npm_cache_dir, grimoire_bin
         setup_calls.append((task_dir, task_id))
         return {"arm": "kit-gov", "added": []}
 
@@ -1002,7 +1010,7 @@ def test_run_one_wires_kit_gov_setup_and_collects_governed_evidence(
     monkeypatch.setattr(ta, "run_claude_headless", lambda *a, **k: ta.RunOutcome(terminated_reason="completed"))
     monkeypatch.setattr(ta, "run_hidden_tests", lambda *a, **k: (True, ""))
     monkeypatch.setattr(ta, "cleanup_build_artifacts", lambda *_: None)
-    monkeypatch.setattr(ta, "_collect_dispatch_stats", lambda run_dir, home: {"overall": {"total": 0}})
+    monkeypatch.setattr(ta, "_collect_dispatch_stats", lambda run_dir, home, *, grimoire_bin: {"overall": {"total": 0}})
     monkeypatch.setattr(ta, "has_test_run_evidence", lambda run_dir: True)
 
     record = ta._run_one(
@@ -1014,6 +1022,7 @@ def test_run_one_wires_kit_gov_setup_and_collects_governed_evidence(
         homes=homes,
         go_bin=None,
         run_timeout_s=5,
+        grimoire_bin="grimoire",
     )
 
     assert setup_calls and setup_calls[0][1] == task.task_id
@@ -1071,6 +1080,8 @@ def test_main_full_only_replays_the_selected_arms(
     monkeypatch.setattr(ta, "ensure_ecc_repo", lambda ws: (tmp_path / "ecc-repo", "deadbeef"))
     monkeypatch.setattr(ta, "ensure_go_toolchain", lambda ws: None)
     monkeypatch.setattr(ta, "ensure_isolated_home", lambda home: None)
+    monkeypatch.setattr(ta, "resolve_grimoire_bin", lambda explicit: "grimoire")
+    monkeypatch.setattr(ta, "verify_grimoire_binary_matches_template", lambda *a, **k: None)
 
     catalog = ta.discover_catalog(synthetic_bench_root)
     tasks = ta.sample_tasks(catalog, seed=551)
@@ -1116,3 +1127,191 @@ def test_main_full_only_replays_the_selected_arms(
     assert len(written["records"]) == len(carried_over_lines) + len(called_arms)
     assert written["kwargs"]["rerun_arms"] == ("kit",)
     assert written["kwargs"]["label"] == "lot E"
+
+
+# ── 14. Binaire grimoire résolu en absolu (incident lot H, #582) ───────────
+#
+# Le 2026-09-18, un lancement avec `PATH=".venv/bin:$PATH"` (entrée
+# RELATIVE) a fait retomber chaque appel `grimoire` d'un sous-processus
+# (`cwd` = dépôt de tâche jetable) sur le `grimoire` suivant du PATH — celui
+# de la Forge, une version antérieure aux lots G — parce qu'une entrée PATH
+# relative se résout par rapport au `cwd` du sous-processus, jamais au
+# répertoire de lancement du harnais. 27 runs (44 $) ont rejoué l'ancien
+# gabarit de directive (847 caractères) au lieu du nouveau (396) sans le
+# moindre message d'erreur.
+
+
+def test_resolve_grimoire_bin_uses_explicit_absolute_path(tmp_path: Path) -> None:
+    fake_bin = tmp_path / "bin" / "grimoire"
+    fake_bin.parent.mkdir(parents=True)
+    fake_bin.write_text("#!/bin/sh\n", encoding="utf-8")
+    fake_bin.chmod(0o755)
+
+    assert ta.resolve_grimoire_bin(str(fake_bin)) == str(fake_bin.resolve())
+
+
+def test_resolve_grimoire_bin_rejects_a_relative_or_missing_explicit_path(tmp_path: Path) -> None:
+    with pytest.raises(SystemExit, match="introuvable"):
+        ta.resolve_grimoire_bin(str(tmp_path / "does-not-exist"))
+
+
+def test_resolve_grimoire_bin_falls_back_to_which_resolved_to_absolute(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_bin = tmp_path / "bin" / "grimoire"
+    fake_bin.parent.mkdir(parents=True)
+    fake_bin.write_text("#!/bin/sh\n", encoding="utf-8")
+    fake_bin.chmod(0o755)
+
+    monkeypatch.setattr(ta.shutil, "which", lambda name: str(fake_bin))
+    assert ta.resolve_grimoire_bin(None) == str(fake_bin.resolve())
+
+
+def test_resolve_grimoire_bin_raises_when_not_found_anywhere(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ta.shutil, "which", lambda name: None)
+    with pytest.raises(SystemExit, match="introuvable"):
+        ta.resolve_grimoire_bin(None)
+
+
+def test_expected_activation_directive_template_reads_the_worktree_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Lit `_DIRECTIVE_TEMPLATE` depuis le fichier source RÉEL de ce
+    worktree, sans jamais importer `grimoire` — reproduit la disposition
+    `<repo>/scripts/bench/three_arms.py` avec un `<repo>/src/grimoire/...`
+    synthétique pour ne pas dépendre du contenu réel, qui peut changer."""
+    repo_root = tmp_path / "repo"
+    script_path = repo_root / "scripts" / "bench" / "three_arms.py"
+    script_path.parent.mkdir(parents=True)
+    script_path.write_text("# placeholder\n", encoding="utf-8")
+    source_dir = repo_root / "src" / "grimoire" / "core"
+    source_dir.mkdir(parents=True)
+    (source_dir / "claude_activation.py").write_text(
+        'TASK_ID_PLACEHOLDER = "{task_id}"\n'
+        '_DIRECTIVE_TEMPLATE = """[Test] Tâche {task_id} — gabarit synthétique.\n"""\n',
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(ta, "__file__", str(script_path))
+    assert ta._expected_activation_directive_template() == "[Test] Tâche {task_id} — gabarit synthétique.\n"
+
+
+def test_expected_activation_directive_template_raises_when_source_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo_root = tmp_path / "repo"
+    script_path = repo_root / "scripts" / "bench" / "three_arms.py"
+    script_path.parent.mkdir(parents=True)
+    script_path.write_text("# placeholder\n", encoding="utf-8")
+
+    monkeypatch.setattr(ta, "__file__", str(script_path))
+    with pytest.raises(RuntimeError, match="introuvable"):
+        ta._expected_activation_directive_template()
+
+
+def test_verify_grimoire_binary_matches_template_passes_when_served_equals_expected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Cas sain : le binaire résolu sert exactement le gabarit attendu — pas
+    d'exception, aucun appel modèle n'est donc bloqué."""
+    grimoire_bin = str(tmp_path / "venv" / "bin" / "grimoire")
+    expected_template = "[Grimoire Standard] gabarit attendu\n"
+    monkeypatch.setattr(ta, "_expected_activation_directive_template", lambda: expected_template)
+
+    def fake_run(cmd: Any, *, cwd: Path | None = None, env: Any = None, timeout: int | None = None) -> Any:
+        if cmd[0] == grimoire_bin and cmd[1] == "--version":
+            return SimpleNamespace(returncode=0, stdout="grimoire 3.56.0", stderr="")
+        if cmd[:2] == ["git", "init"]:
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if cmd[0] == grimoire_bin and cmd[1] == "init":
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if cmd[0] == grimoire_bin and cmd[1:3] == ["host", "sync"]:
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if cmd[0] == grimoire_bin and cmd[1:3] == ["standard", "init"]:
+            # C'est `standard init`, pas `init`/`host sync`, qui écrit
+            # `.claude/activation-context.md` — vérifié en isolation.
+            (cwd / ".claude").mkdir(parents=True, exist_ok=True)
+            (cwd / ".claude" / "activation-context.md").write_text(expected_template, encoding="utf-8")
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        raise AssertionError(f"commande inattendue : {cmd}")
+
+    monkeypatch.setattr(ta, "_run", fake_run)
+    ta.verify_grimoire_binary_matches_template(grimoire_bin, check_dir=tmp_path / "check")
+
+
+def test_verify_grimoire_binary_matches_template_raises_on_mismatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Le cas de l'incident lot H : le binaire résolu sert un gabarit
+    différent (ancien kit, autre environnement) — refus avant tout appel
+    modèle, message actionnable.
+
+    Reproduit le défaut trouvé dans la première version de ce garde-fou :
+    ``_expected_activation_directive_template`` renvoie ici le gabarit du
+    CODE SOURCE de CE worktree (« ATTENDU »), totalement indépendant de ce
+    que le binaire lui-même croit servir — contrairement à une comparaison
+    contre le propre code du binaire, qui ne peut jamais détecter un
+    binaire cohérent avec lui-même mais installé ailleurs.
+    """
+    grimoire_bin = str(tmp_path / "venv" / "bin" / "grimoire")
+    monkeypatch.setattr(
+        ta, "_expected_activation_directive_template", lambda: "[Grimoire Standard] gabarit ATTENDU (396)\n"
+    )
+
+    def fake_run(cmd: Any, *, cwd: Path | None = None, env: Any = None, timeout: int | None = None) -> Any:
+        if cmd[0] == grimoire_bin and cmd[1] == "--version":
+            return SimpleNamespace(returncode=0, stdout="grimoire 3.55.0", stderr="")
+        if cmd[:2] == ["git", "init"]:
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if cmd[0] == grimoire_bin and cmd[1] == "init":
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if cmd[0] == grimoire_bin and cmd[1:3] == ["host", "sync"]:
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if cmd[0] == grimoire_bin and cmd[1:3] == ["standard", "init"]:
+            (cwd / ".claude").mkdir(parents=True, exist_ok=True)
+            (cwd / ".claude" / "activation-context.md").write_text(
+                "[Grimoire Standard — activation]\nAncien gabarit servi (847)\n", encoding="utf-8"
+            )
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        raise AssertionError(f"commande inattendue : {cmd}")
+
+    monkeypatch.setattr(ta, "_run", fake_run)
+    with pytest.raises(RuntimeError, match="GARDE-FOU LOT H"):
+        ta.verify_grimoire_binary_matches_template(grimoire_bin, check_dir=tmp_path / "check")
+
+
+def test_verify_grimoire_binary_matches_template_raises_when_version_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        ta, "_run", lambda *a, **k: SimpleNamespace(returncode=1, stdout="", stderr="command not found")
+    )
+    with pytest.raises(RuntimeError, match="--version"):
+        ta.verify_grimoire_binary_matches_template("grimoire", check_dir=tmp_path / "check")
+
+
+def test_setup_arm_kit_invokes_the_resolved_absolute_binary_not_a_path_lookup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Le coeur de l'incident lot H : `setup_arm_kit` doit invoquer
+    `grimoire_bin` tel quel (argv[0]), jamais la chaîne littérale
+    `"grimoire"` qu'une résolution PATH pourrait faire retomber sur un autre
+    environnement."""
+    grimoire_bin = str(tmp_path / "venv" / "bin" / "grimoire")
+    calls: list[list[str]] = []
+
+    def fake_run(cmd: Any, *, cwd: Path | None = None, env: Any = None, timeout: int | None = None) -> Any:
+        calls.append(list(cmd))
+        assert env is not None
+        # PATH absolu en tête, jamais une entrée relative.
+        assert env["PATH"].split(os.pathsep)[0] == str(Path(grimoire_bin).parent)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(ta, "_run", fake_run)
+    task_dir = tmp_path / "run"
+    task_dir.mkdir()
+    ta.setup_arm_kit(task_dir, kit_home=tmp_path / "home", grimoire_bin=grimoire_bin)
+
+    assert calls[0][0] == grimoire_bin
+    assert calls[1][0] == grimoire_bin
+    assert all(call[0] != "grimoire" for call in calls)

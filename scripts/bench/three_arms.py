@@ -27,6 +27,7 @@ import json
 import os
 import platform
 import random
+import re
 import shutil
 import statistics
 import subprocess
@@ -592,6 +593,151 @@ def ensure_go_toolchain(workspace: Path) -> Path | None:
     return go_bin if go_bin.is_file() else None
 
 
+def resolve_grimoire_bin(explicit: str | None) -> str:
+    """Chemin ABSOLU du binaire ``grimoire`` à invoquer PARTOUT dans le harnais.
+
+    Incident lot H (#582, 2026-09-18) : lancer le harnais avec un ``PATH``
+    RELATIF (``PATH=".venv/bin:$PATH"``) a fait retomber chaque appel
+    ``grimoire`` d'un sous-processus (``cwd`` = dépôt de tâche jetable) sur
+    le ``grimoire`` suivant du ``PATH`` — celui de la Forge, une version
+    antérieure aux lots G — parce qu'une entrée ``PATH`` relative se résout
+    par rapport au ``cwd`` du sous-processus, jamais au répertoire de
+    lancement du harnais. 27 runs (44 $) ont rejoué l'ancien gabarit de
+    directive sans qu'aucun message d'erreur ne le signale (voir
+    :func:`verify_grimoire_binary_matches_template`, ajoutée par ce lot pour
+    que ce silence devienne impossible).
+
+    Cette fonction ne renvoie jamais une entrée ``PATH`` : ``explicit`` (typiquement
+    ``--grimoire-bin``) est résolu en chemin absolu et doit exister ; à défaut,
+    ``shutil.which("grimoire")`` est résolu en absolu à son tour. Lève
+    ``SystemExit`` avec un message actionnable si aucun binaire n'est trouvable —
+    jamais un repli silencieux sur la chaîne littérale ``"grimoire"``.
+    """
+    if explicit:
+        resolved = Path(explicit).expanduser().resolve()
+        if not resolved.is_file():
+            raise SystemExit(f"--grimoire-bin {explicit!r} introuvable (résolu en {resolved}).")
+        return str(resolved)
+    found = shutil.which("grimoire")
+    if not found:
+        raise SystemExit(
+            "grimoire introuvable sur PATH — installe-le dans l'environnement du "
+            "harnais ou passe --grimoire-bin <chemin absolu>."
+        )
+    return str(Path(found).resolve())
+
+
+def _expected_activation_directive_template() -> str:
+    """Gabarit de directive attendu, lu depuis le CODE SOURCE de ce worktree.
+
+    Lecture de texte, jamais un ``import grimoire`` : ce module tourne
+    volontairement contre n'importe quelle version installée du kit (voir
+    le docstring de ce fichier) — importer ``grimoire.core.claude_activation``
+    depuis le processus qui exécute *ce script* comparerait le gabarit servi
+    à un package qui peut ne même pas être celui que ``--grimoire-bin``
+    désigne, ou pas être installé du tout dans l'environnement du harnais.
+
+    Extrait ``_DIRECTIVE_TEMPLATE`` de
+    ``src/grimoire/core/claude_activation.py`` — le fichier réellement
+    présent dans CE worktree, celui que ``--grimoire-bin`` est censé servir.
+    Une première version de ce garde-fou comparait au contraire le gabarit
+    servi au rendu de ``activation_directive_template()`` importé depuis
+    l'interpréteur SIBLING de *grimoire_bin* : un binaire installé ailleurs
+    (l'incident lot H) sert un gabarit *cohérent avec son propre code*, donc
+    cette comparaison ne pouvait jamais échouer — corrigé avant tout usage
+    réel (vérifié : contre le grimoire 3.55.0 de la Forge, cette première
+    version ne détectait rien).
+    """
+    repo_root = Path(__file__).resolve().parents[2]
+    source_path = repo_root / "src" / "grimoire" / "core" / "claude_activation.py"
+    if not source_path.is_file():
+        raise RuntimeError(
+            f"garde-fou lot H : {source_path} introuvable — ce script doit vivre sous "
+            "scripts/bench/ d'un worktree grimoire-kit complet pour que la vérification "
+            "du gabarit fonctionne."
+        )
+    source_text = source_path.read_text(encoding="utf-8")
+    match = re.search(r'_DIRECTIVE_TEMPLATE = """(.*?)"""\n', source_text, re.DOTALL)
+    if not match:
+        raise RuntimeError(
+            f"garde-fou lot H : `_DIRECTIVE_TEMPLATE` introuvable dans {source_path} — "
+            "le gabarit attendu ne peut pas être déterminé."
+        )
+    return match.group(1)
+
+
+def verify_grimoire_binary_matches_template(grimoire_bin: str, *, check_dir: Path) -> None:
+    """Garde-fou lot H (#582) : refuse toute dépense modèle si *grimoire_bin*
+    ne sert pas le gabarit de directive du CODE SOURCE de ce worktree.
+
+    Provisionne un dépôt jetable sous *check_dir* (``git init`` +
+    ``<grimoire_bin> init`` + ``host sync --host claude`` + ``standard init``
+    — c'est ``standard init`` qui écrit ``.claude/activation-context.md``,
+    vérifié en isolation : ``init``/``host sync`` seuls installent les
+    agents/commandes/hooks Claude Code mais jamais ce fichier — ``HOME``
+    isolé), lit le ``.claude/activation-context.md`` qui en résulte, et le
+    compare CARACTÈRE PAR CARACTÈRE à :func:`_expected_activation_directive_template`.
+
+    Appelée une seule fois, avant le tout premier appel ``claude -p`` d'une
+    campagne ``--pilot``/``--full`` (jamais pour ``--dry-run``/``--report-only``,
+    qui ne dépensent rien). Lève ``RuntimeError`` avec un message actionnable
+    au premier écart — 0 $ dépensé.
+    """
+    version = _run([grimoire_bin, "--version"], timeout=30)
+    if version.returncode != 0:
+        raise RuntimeError(
+            f"garde-fou lot H : `{grimoire_bin} --version` a échoué (code "
+            f"{version.returncode}) : {version.stdout}{version.stderr}"
+        )
+
+    expected_template = _expected_activation_directive_template()
+
+    check_dir.mkdir(parents=True, exist_ok=True)
+    fake_home = check_dir / "_fake_home"
+    (fake_home / ".claude").mkdir(parents=True, exist_ok=True)
+    env = {
+        **os.environ,
+        "HOME": str(fake_home),
+        "GRIMOIRE_NO_COCKPIT": "1",
+        "PATH": f"{Path(grimoire_bin).parent}{os.pathsep}{os.environ.get('PATH', '')}",
+    }
+    _run(["git", "init", "-q", "."], cwd=check_dir, timeout=30)
+    init = _run(
+        [grimoire_bin, "init", ".", "--backend", "local", "--no-cockpit"],
+        cwd=check_dir,
+        env=env,
+        timeout=120,
+    )
+    sync = _run([grimoire_bin, "host", "sync", "--host", "claude"], cwd=check_dir, env=env, timeout=120)
+    standard_init = _run([grimoire_bin, "standard", "init", "."], cwd=check_dir, env=env, timeout=120)
+    if init.returncode != 0 or sync.returncode != 0 or standard_init.returncode != 0:
+        raise RuntimeError(
+            "garde-fou lot H : impossible de provisionner le dépôt de vérification "
+            f"du gabarit ({grimoire_bin} init/host sync/standard init) : "
+            f"{init.stdout}{init.stderr}{sync.stdout}{sync.stderr}"
+            f"{standard_init.stdout}{standard_init.stderr}"
+        )
+
+    activation_path = check_dir / ".claude" / "activation-context.md"
+    if not activation_path.is_file():
+        raise RuntimeError(
+            f"garde-fou lot H : {activation_path} absent après provisionnement — "
+            "vérification du gabarit impossible."
+        )
+    served_template = activation_path.read_text(encoding="utf-8")
+
+    if served_template != expected_template:
+        raise RuntimeError(
+            "GARDE-FOU LOT H : le binaire grimoire résolu "
+            f"({grimoire_bin}) sert un gabarit de directive DIFFÉRENT du code de ce "
+            f"worktree — {len(served_template)} caractères servis contre "
+            f"{len(expected_template)} attendus. Cause probable : un PATH relatif ou "
+            "un `grimoire` d'un autre environnement (voir l'incident lot H, #582 : "
+            "27 runs / 44 $ rejoués sur l'ancien gabarit avant que ce garde-fou "
+            "n'existe). Arrêt avant tout appel modèle — 0 $ dépensé."
+        )
+
+
 CREDENTIALS_REL_PATH = Path(".claude") / ".credentials.json"
 
 
@@ -797,6 +943,7 @@ def setup_arm_kit_gov(
     *,
     kit_home: Path,
     task_id: str,
+    grimoire_bin: str,
     timeout: int = 180,
     npm_cache_dir: Path | None = None,
 ) -> dict[str, Any]:
@@ -828,11 +975,23 @@ def setup_arm_kit_gov(
     id — jamais ``bootstrap``.
     """
     governed_id = _governed_task_id(task_id)
-    kit_result = setup_arm_kit(task_dir, kit_home=kit_home, timeout=timeout, npm_cache_dir=npm_cache_dir)
-    env = {**os.environ, "HOME": str(kit_home), "GRIMOIRE_NO_COCKPIT": "1"}
+    kit_result = setup_arm_kit(
+        task_dir, kit_home=kit_home, grimoire_bin=grimoire_bin, timeout=timeout, npm_cache_dir=npm_cache_dir
+    )
+    env = {
+        **os.environ,
+        "HOME": str(kit_home),
+        "GRIMOIRE_NO_COCKPIT": "1",
+        # Lot H (#582) : PATH ABSOLU en tête, jamais une entrée relative — un
+        # sous-processus dont le `cwd` est un dépôt de tâche jetable résout
+        # une entrée PATH relative PAR RAPPORT À CE `cwd`, pas au répertoire
+        # de lancement du harnais (cause de l'incident du 2026-09-18, voir
+        # `resolve_grimoire_bin`).
+        "PATH": f"{Path(grimoire_bin).parent}{os.pathsep}{os.environ.get('PATH', '')}",
+    }
 
     standard_init = _run(
-        ["grimoire", "standard", "init", "."],
+        [grimoire_bin, "standard", "init", "."],
         cwd=task_dir,
         env=env,
         timeout=timeout,
@@ -843,7 +1002,7 @@ def setup_arm_kit_gov(
     board_path.write_text(_SYNTHETIC_BOARD_TEMPLATE.format(task_id=governed_id), encoding="utf-8")
 
     migrate = _run(
-        ["grimoire", "task", "migrate-standard", "."],
+        [grimoire_bin, "task", "migrate-standard", "."],
         cwd=task_dir,
         env=env,
         timeout=timeout,
@@ -870,21 +1029,28 @@ def setup_arm_kit(
     task_dir: Path,
     *,
     kit_home: Path,
+    grimoire_bin: str,
     timeout: int = 180,
     npm_cache_dir: Path | None = None,
 ) -> dict[str, Any]:
     """``grimoire init --backend local --no-cockpit`` + ``host sync --host claude``."""
-    env = {**os.environ, "HOME": str(kit_home), "GRIMOIRE_NO_COCKPIT": "1"}
+    env = {
+        **os.environ,
+        "HOME": str(kit_home),
+        "GRIMOIRE_NO_COCKPIT": "1",
+        # Lot H (#582) : PATH absolu en tête — voir `resolve_grimoire_bin`.
+        "PATH": f"{Path(grimoire_bin).parent}{os.pathsep}{os.environ.get('PATH', '')}",
+    }
     before = {p.relative_to(task_dir).as_posix() for p in task_dir.rglob("*") if p.is_file()}
 
     init = _run(
-        ["grimoire", "init", ".", "--backend", "local", "--no-cockpit"],
+        [grimoire_bin, "init", ".", "--backend", "local", "--no-cockpit"],
         cwd=task_dir,
         env=env,
         timeout=timeout,
     )
     sync = _run(
-        ["grimoire", "host", "sync", "--host", "claude"],
+        [grimoire_bin, "host", "sync", "--host", "claude"],
         cwd=task_dir,
         env=env,
         timeout=timeout,
@@ -1387,6 +1553,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         "combiné à --resume, les lignes results.jsonl des autres bras restent comptées dans le rapport",
     )
     parser.add_argument("--label", type=str, default=None, help="étiquette libre reprise dans report.md")
+    parser.add_argument(
+        "--grimoire-bin",
+        type=str,
+        default=None,
+        help="chemin ABSOLU du binaire grimoire à invoquer (défaut : shutil.which('grimoire'), "
+        "résolu en absolu) — jamais une entrée PATH relative (incident lot H, #582 : un "
+        "PATH=\".venv/bin:$PATH\" retombe, pour un sous-processus dont le cwd est un dépôt de "
+        "tâche jetable, sur le grimoire suivant du PATH)",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -1400,6 +1575,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     workspace = args.workspace or _default_workspace()
     workspace.mkdir(parents=True, exist_ok=True)
+
+    grimoire_bin = resolve_grimoire_bin(args.grimoire_bin)
 
     bench_root = ensure_polyglot_benchmark(workspace)
     ecc_repo, ecc_commit = ensure_ecc_repo(workspace)
@@ -1420,7 +1597,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     go_bin = ensure_go_toolchain(workspace) if any(t.language == "go" for t in tasks) else None
 
     if args.dry_run:
-        return _do_dry_run(tasks, workspace=workspace, ecc_repo=ecc_repo, homes=homes)
+        return _do_dry_run(tasks, workspace=workspace, ecc_repo=ecc_repo, homes=homes, grimoire_bin=grimoire_bin)
+
+    # Garde-fou lot H (#582) : avant tout appel `claude -p` (jamais pour
+    # --dry-run/--report-only, qui ne dépensent rien), vérifie que le binaire
+    # résolu sert le gabarit de directive de CE worktree. Incident du
+    # 2026-09-18 : un PATH relatif a fait tourner 27 runs (44 $) sur un
+    # `grimoire` installé ailleurs, servant l'ancien gabarit, sans le moindre
+    # message d'erreur — voir `verify_grimoire_binary_matches_template`.
+    try:
+        verify_grimoire_binary_matches_template(grimoire_bin, check_dir=workspace / "_grimoire_bin_check")
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
 
     results_path = state_dir / "results.jsonl"
     already_done: set[tuple[str, str, int]] = set()
@@ -1463,7 +1652,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                             file=sys.stderr,
                         )
                         break
-                    record = _run_one(task, arm, run_index, workspace=workspace, ecc_repo=ecc_repo, homes=homes, go_bin=go_bin, run_timeout_s=args.run_timeout_s)
+                    record = _run_one(
+                        task,
+                        arm,
+                        run_index,
+                        workspace=workspace,
+                        ecc_repo=ecc_repo,
+                        homes=homes,
+                        go_bin=go_bin,
+                        run_timeout_s=args.run_timeout_s,
+                        grimoire_bin=grimoire_bin,
+                    )
                     records.append(record)
                     results_f.write(json.dumps(record.to_dict()) + "\n")
                     results_f.flush()
@@ -1570,7 +1769,9 @@ def _do_report_only(
     return 0
 
 
-def _do_dry_run(tasks: Sequence[TaskMeta], *, workspace: Path, ecc_repo: Path, homes: dict[str, Path]) -> int:
+def _do_dry_run(
+    tasks: Sequence[TaskMeta], *, workspace: Path, ecc_repo: Path, homes: dict[str, Path], grimoire_bin: str
+) -> int:
     tasks_root = workspace / "tasks"
     npm_cache_dir = workspace / "npm-cache"
     for task in tasks:
@@ -1583,10 +1784,14 @@ def _do_dry_run(tasks: Sequence[TaskMeta], *, workspace: Path, ecc_repo: Path, h
             elif arm == "ecc":
                 setup_arm_ecc(task_dir, ecc_repo=ecc_repo, ecc_home=homes["ecc"], npm_cache_dir=npm_cache_dir)
             elif arm == "kit":
-                setup_arm_kit(task_dir, kit_home=homes["kit"], npm_cache_dir=npm_cache_dir)
+                setup_arm_kit(task_dir, kit_home=homes["kit"], grimoire_bin=grimoire_bin, npm_cache_dir=npm_cache_dir)
             elif arm == "kit-gov":
                 setup_arm_kit_gov(
-                    task_dir, kit_home=homes["kit-gov"], task_id=task.task_id, npm_cache_dir=npm_cache_dir
+                    task_dir,
+                    kit_home=homes["kit-gov"],
+                    task_id=task.task_id,
+                    grimoire_bin=grimoire_bin,
+                    npm_cache_dir=npm_cache_dir,
                 )
             print(f"[dry-run] préparé {task.task_id} / {arm} -> {task_dir}")
     print(f"[dry-run] {len(tasks)} tâches x {len(ARMS)} bras préparées sous {tasks_root}")
@@ -1603,6 +1808,7 @@ def _run_one(
     homes: dict[str, Path],
     go_bin: Path | None,
     run_timeout_s: int,
+    grimoire_bin: str,
 ) -> RunRecord:
     run_dir = workspace / "tasks" / task.task_id.replace("/", "__") / arm / f"run{run_index}"
     prepare_task_repo(task, run_dir)
@@ -1615,10 +1821,16 @@ def _run_one(
     elif arm == "ecc":
         setup_result = setup_arm_ecc(run_dir, ecc_repo=ecc_repo, ecc_home=homes["ecc"], npm_cache_dir=npm_cache_dir)
     elif arm == "kit":
-        setup_result = setup_arm_kit(run_dir, kit_home=homes["kit"], npm_cache_dir=npm_cache_dir)
+        setup_result = setup_arm_kit(
+            run_dir, kit_home=homes["kit"], grimoire_bin=grimoire_bin, npm_cache_dir=npm_cache_dir
+        )
     elif arm == "kit-gov":
         setup_result = setup_arm_kit_gov(
-            run_dir, kit_home=homes["kit-gov"], task_id=task.task_id, npm_cache_dir=npm_cache_dir
+            run_dir,
+            kit_home=homes["kit-gov"],
+            task_id=task.task_id,
+            grimoire_bin=grimoire_bin,
+            npm_cache_dir=npm_cache_dir,
         )
     else:
         setup_result = None
@@ -1655,7 +1867,7 @@ def _run_one(
     dispatch_stats = None
     kit_test_run_evidence = None
     if arm in ("kit", "kit-gov"):
-        dispatch_stats = _collect_dispatch_stats(run_dir, home)
+        dispatch_stats = _collect_dispatch_stats(run_dir, home, grimoire_bin=grimoire_bin)
         kit_test_run_evidence = has_test_run_evidence(run_dir)
 
     return RunRecord(
@@ -1680,9 +1892,14 @@ def _run_one(
     )
 
 
-def _collect_dispatch_stats(run_dir: Path, home: Path) -> dict[str, Any] | None:
-    env = {**os.environ, "HOME": str(home)}
-    result = _run(["grimoire", "dispatch", "stats", "--json"], cwd=run_dir, env=env, timeout=30)
+def _collect_dispatch_stats(run_dir: Path, home: Path, *, grimoire_bin: str) -> dict[str, Any] | None:
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        # Lot H (#582) : PATH absolu en tête — voir `resolve_grimoire_bin`.
+        "PATH": f"{Path(grimoire_bin).parent}{os.pathsep}{os.environ.get('PATH', '')}",
+    }
+    result = _run([grimoire_bin, "dispatch", "stats", "--json"], cwd=run_dir, env=env, timeout=30)
     if result.returncode != 0:
         return {"error": result.stderr[-500:]}
     try:
