@@ -174,6 +174,45 @@ def _is_known_directive_rendering(text: str) -> bool:
     return any(pattern.fullmatch(text) for pattern in _KNOWN_RENDERING_PATTERNS)
 
 
+#: Issue #582 lot I (dosage V0) : ajoutée à la directive quand la tâche
+#: active est classée V0 (:mod:`grimoire.missions.verifiability`) et que le
+#: profil n'est pas ``governed`` — voir :func:`_v0_notice`.
+V0_DIRECTIVE_NOTICE = "Tâche V0 : aucun artefact à lire ni à compléter, le gate suffit."
+
+
+def _v0_notice(project_root: Path, task_id: str) -> str:
+    """La phrase d'appoint pour une tâche V0 en profil non gouverné, ou ``""`` sinon (issue #582 lot I).
+
+    Une tâche V0 n'a, par construction, aucun critère qui exige un jugement
+    humain : les artefacts de gouvernance n'ont rien à y consigner que le
+    gate ne sache déjà constater lui-même (voir :func:`grimoire.core.
+    standard_task_scaffold.scaffold_task_artifacts` et :func:`grimoire.core.
+    standard_checks.gate_review_checks.review_state_content_checks`, qui
+    dosent la même classe côté artefacts). Le profil ``governed`` reste
+    inchangé : la classe choisit le dosage, pas le contournement d'un profil
+    qui a explicitement demandé la rigueur maximale. Silencieuse si la classe
+    n'est pas calculable (pas de board, pas de tâche sur le board) —
+    comportement inchangé, jamais un faux « rien à faire ».
+    """
+    from grimoire.core.agentic_standard import _selected_profile
+    from grimoire.core.standard_generation import STANDARD_DIR, normalize_task_id
+    from grimoire.core.standard_state import _load_mapping, task_from_board
+
+    if _selected_profile(project_root, None).id == "governed":
+        return ""
+    board = _load_mapping(project_root / STANDARD_DIR / "task-board.yaml")
+    verifiability = task_from_board(board, normalize_task_id(task_id)).get("verifiability")
+    klass = verifiability.get("class") if isinstance(verifiability, dict) else None
+    return V0_DIRECTIVE_NOTICE if klass == "V0" else ""
+
+
+def _append_notice(text: str, notice: str) -> str:
+    """Ajoute *notice* comme phrase de fin, avant le saut de ligne final s'il y en a un."""
+    if not notice:
+        return text
+    return f"{text[:-1]} {notice}\n" if text.endswith("\n") else f"{text} {notice}"
+
+
 def activation_context_text(project_root: Path, task_id: str = "bootstrap") -> str:
     """Project-level directive if present, built-in default otherwise — for *task_id*.
 
@@ -185,14 +224,19 @@ def activation_context_text(project_root: Path, task_id: str = "bootstrap") -> s
     old kit version, or naming the wrong task, was always the defect this
     fixes, not a customisation to preserve. A file a team actually edited is
     returned as written, placeholder filled if it kept one.
+
+    Issue #582 lot I : :func:`_v0_notice` may append one more sentence when
+    the resolved task is classed V0 outside the ``governed`` profile — the
+    396-character default is otherwise unchanged (a non-V0 task, or no board
+    at all, appends nothing).
     """
     context_path = project_root / ACTIVATION_CONTEXT_RELPATH
     if context_path.is_file():
         text = context_path.read_text(encoding="utf-8")
-        if _is_known_directive_rendering(text):
-            return default_activation_directive(task_id)
-        return text.replace(TASK_ID_PLACEHOLDER, task_id)
-    return default_activation_directive(task_id)
+        base = default_activation_directive(task_id) if _is_known_directive_rendering(text) else text.replace(TASK_ID_PLACEHOLDER, task_id)
+    else:
+        base = default_activation_directive(task_id)
+    return _append_notice(base, _v0_notice(project_root, task_id))
 
 
 def activation_context_needs_refresh(project_root: Path) -> bool:

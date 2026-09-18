@@ -21,6 +21,14 @@ gouverné n'a plus à appeler depuis ce lot :
   n'en vérifiait ni la présence ni le contenu avant ce lot — seul
   `standard verify` le faisait, un chemin qu'un agent qui suit la directive
   au pied de la lettre ne prend jamais.
+
+Issue #582 lot I (dosage V0) : une tâche classée V0 (:mod:`grimoire.missions.
+verifiability`) dont le profil n'est pas ``governed`` n'a, par construction,
+aucun jugement humain à consigner — le gate suffit. `_v0_non_governed` lit la
+classe déjà projetée sur le board (`missions.board`, jamais recalculée ici :
+une seule source de vérité) et éteint ``acceptance.decision_pending`` et
+``claims.empty`` pour ce seul cas, jamais pour V1/V2, jamais en profil
+gouverné.
 """
 
 from __future__ import annotations
@@ -32,10 +40,24 @@ from grimoire.core.standard_checks.base import (
     StandardProfile,
     StandardVerificationResult,
 )
+from grimoire.core.standard_checks.claim_ledger_verify import verify_claim_ledger as _verify_claim_ledger
 from grimoire.core.standard_checks.controls import _verify_acceptance_record
-from grimoire.core.standard_checks.verifiers import _verify_claim_ledger, _verify_evidence_pack
+from grimoire.core.standard_checks.verifiers import _verify_evidence_pack
 
 __all__ = ["review_state_content_checks"]
+
+
+def _v0_non_governed(root: Path, profile: StandardProfile, task_id: str) -> bool:
+    """True quand *task_id* est classé V0 et le profil n'est pas ``governed``."""
+    if profile.id == "governed":
+        return False
+    from grimoire.core.standard_generation import STANDARD_DIR
+    from grimoire.core.standard_state import _load_mapping, task_from_board
+
+    board = _load_mapping(root / STANDARD_DIR / "task-board.yaml")
+    verifiability = task_from_board(board, task_id).get("verifiability")
+    klass = verifiability.get("class") if isinstance(verifiability, dict) else None
+    return klass == "V0"
 
 
 def review_state_content_checks(root: Path, profile: StandardProfile, task_id: str) -> tuple[StandardCheck, ...]:
@@ -49,6 +71,7 @@ def review_state_content_checks(root: Path, profile: StandardProfile, task_id: s
     except Exception:  # noqa: S110 — projection best-effort, jamais au prix du gate lui-même
         pass
 
+    suppress_v0 = _v0_non_governed(root, profile, task_id)
     checks: list[StandardCheck] = []
 
     evidence_pack_result = StandardVerificationResult(profile=profile.id, project_root=root)
@@ -56,11 +79,11 @@ def review_state_content_checks(root: Path, profile: StandardProfile, task_id: s
     checks.extend(evidence_pack_result.checks)
 
     acceptance_result = StandardVerificationResult(profile=profile.id, project_root=root)
-    _verify_acceptance_record(root, profile, task_id, acceptance_result)
+    _verify_acceptance_record(root, profile, task_id, acceptance_result, suppress_v0=suppress_v0)
     checks.extend(acceptance_result.checks)
 
     claim_ledger_result = StandardVerificationResult(profile=profile.id, project_root=root)
-    _verify_claim_ledger(root, profile, task_id, claim_ledger_result)
+    _verify_claim_ledger(root, profile, task_id, claim_ledger_result, suppress_v0=suppress_v0)
     checks.extend(claim_ledger_result.checks)
 
     return tuple(checks)

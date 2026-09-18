@@ -82,6 +82,7 @@ CHECK_DIMENSIONS: dict[str, str] = {
     "acceptance.decision_pending": "evidence_gates",
     "acceptance.empty": "evidence_gates",
     "acceptance.no_test_command_detected": "evidence_gates",
+    "acceptance.no_tests_collected": "evidence_gates",
     "acceptance.passed_without_evidence": "evidence_gates",
     "acceptance.passed_without_test_run": "evidence_gates",
     "acceptance.row_invalid": "evidence_gates",

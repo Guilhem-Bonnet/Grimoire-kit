@@ -51,11 +51,11 @@ from grimoire.core.standard_checks.base import (
 )
 from grimoire.core.standard_checks.controls import (
     _verify_k8s_agent_manifest,
-    _verify_recorded_test_run_is_green,
     _verify_score_and_exceptions,
 )
 from grimoire.core.standard_checks.gate_remedy import missing_artifact_message
 from grimoire.core.standard_checks.gate_review_checks import review_state_content_checks
+from grimoire.core.standard_checks.gate_test_run import verify_recorded_test_run_is_green
 from grimoire.core.standard_checks.registry import (
     DEFAULT_SCORE_DIMENSIONS as DEFAULT_SCORE_DIMENSIONS,
 )
@@ -1574,7 +1574,7 @@ def check_evidence_gates(
             missing.append("context_bundle")
         # Issue #582 lot G1 : un run de test enregistré, frais et rouge ferme le gate.
         test_run_result = StandardVerificationResult(profile=profile.id, project_root=root)
-        _verify_recorded_test_run_is_green(root, normalized_task_id, test_run_result)
+        verify_recorded_test_run_is_green(root, normalized_task_id, test_run_result, state=state)
         checks.extend(test_run_result.checks)
     if profile.id in {"orchestrated", "governed", "production"} and state in {"in_progress", "review", "accepted", "released"}:
         if not (root / required_paths["memory_policy"]).is_file():

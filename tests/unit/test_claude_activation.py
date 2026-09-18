@@ -308,3 +308,73 @@ def test_activation_context_needs_refresh_is_false_for_the_current_rendering(tmp
 def test_activation_context_needs_refresh_is_false_for_a_genuine_edit(tmp_path: Path) -> None:
     _seed_pre_manifest_context(tmp_path, "Notre directive maison.\n")
     assert activation_context_needs_refresh(tmp_path) is False
+
+
+# ── Dosage V0 (issue #582 lot I) ──────────────────────────────────────────────
+#
+# Une tâche classée V0 (tous ses critères nomment un verdict mécanique, voir
+# `grimoire.missions.verifiability`) n'a rien qu'un jugement humain doive
+# trancher : le gate suffit. La directive du SessionStart le dit en toutes
+# lettres, mais seulement hors profil `governed` — celui-ci a explicitement
+# demandé la rigueur maximale, la classe ne doit pas la contourner.
+
+
+def _claimed_task(tmp_path: Path, *, acceptance: str, profile_id: str = "starter") -> str:
+    """Une tâche réclamée (board `in_progress`), classée par ses propres critères."""
+    from grimoire.core.agentic_standard import setup_standard_profile
+    from grimoire.missions.schemas import TaskState
+    from grimoire.missions.service import TaskService
+
+    setup_standard_profile(tmp_path, profile_id=profile_id)
+    service = TaskService(tmp_path)
+    mission = service.ledger.create_mission(title="Travaux", origin="test")
+    task = service.ledger.create_task(mission.id, "Une tâche", acceptance=(acceptance,))
+    service.ledger.transition_task(task.id, TaskState.READY, actor_id="a")
+    service.ledger.claim_task(task.id, "a", "local")
+    service.project_board()
+    return task.id
+
+
+def test_activation_context_appends_v0_notice_for_a_non_governed_v0_task(tmp_path: Path) -> None:
+    from grimoire.core.claude_activation import V0_DIRECTIVE_NOTICE
+
+    task_id = _claimed_task(tmp_path, acceptance="les tests passent")
+
+    directive = activation_context_text(tmp_path, task_id=task_id)
+
+    base = default_activation_directive(task_id)
+    assert directive == f"{base[:-1]} {V0_DIRECTIVE_NOTICE}\n"
+    assert V0_DIRECTIVE_NOTICE in directive
+
+
+def test_activation_context_stays_the_plain_396_char_directive_for_a_v1_task(tmp_path: Path) -> None:
+    """Rouge-avant : un critère qui nomme une revue humaine (V1) -> directive inchangée."""
+    task_id = _claimed_task(tmp_path, acceptance="revue par le PO")
+
+    directive = activation_context_text(tmp_path, task_id=task_id)
+
+    assert directive == default_activation_directive(task_id)
+
+
+def test_activation_context_stays_the_plain_directive_for_a_v2_task(tmp_path: Path) -> None:
+    """Un critère ambigu (V2) n'obtient jamais la phrase, même si d'autres critères sont mécaniques."""
+    task_id = _claimed_task(tmp_path, acceptance="le code est propre")
+
+    directive = activation_context_text(tmp_path, task_id=task_id)
+
+    assert directive == default_activation_directive(task_id)
+
+
+def test_activation_context_ignores_v0_when_profile_is_governed(tmp_path: Path) -> None:
+    """Le profil `governed` n'est jamais dosé : la classe ne contourne pas la rigueur explicitement demandée."""
+    task_id = _claimed_task(tmp_path, acceptance="les tests passent", profile_id="governed")
+
+    directive = activation_context_text(tmp_path, task_id=task_id)
+
+    assert directive == default_activation_directive(task_id)
+
+
+def test_activation_context_has_no_notice_without_a_board(tmp_path: Path) -> None:
+    """Aucun board du tout (`grimoire standard init` jamais lancé) : silencieux, jamais un faux « rien à faire »."""
+    directive = activation_context_text(tmp_path, task_id="bootstrap")
+    assert directive == default_activation_directive("bootstrap")
