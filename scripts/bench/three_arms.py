@@ -28,6 +28,7 @@ import os
 import platform
 import random
 import re
+import shlex
 import shutil
 import statistics
 import subprocess
@@ -108,6 +109,13 @@ class RunOutcome:
     model_usage: dict[str, Any] = field(default_factory=dict)
     tool_commands_seen: int = 0
     raw_result: dict[str, Any] | None = None
+    # Lot I (#582) : combien des commandes Bash vues dans ce run sont un
+    # symptôme de friction de découverte de toolchain (``which``, ``command
+    # -v``, ``find / -name``, ``rustup``, ``npm install`` lancés PAR L'AGENT
+    # lui-même) — voir :func:`count_toolchain_friction_bash_calls`. Calculé
+    # pour tous les bras (pas seulement ``kit-gov``) : c'est le rapport qui
+    # décide lequel exploiter.
+    toolchain_friction_bash_calls: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
@@ -157,6 +165,13 @@ class RunRecord:
     # `npm test`/`npx jest` en échec `exit 127` (« jest absent du bac à
     # sable »).
     test_deps_install_ok: bool | None = None
+    # Lot I (#582) : voir ``RunOutcome.toolchain_friction_bash_calls`` — copié
+    # tel quel dans le rapport persistant. ``0`` (jamais ``None``) pour les
+    # lignes écrites avant ce lot : un run sans transcription connue n'a pas
+    # plus de friction mesurée qu'un run qui n'en a montré aucune, les deux
+    # sont indiscernables a posteriori et ce champ ne prétend jamais le
+    # contraire.
+    toolchain_friction_bash_calls: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
@@ -385,6 +400,37 @@ def extract_bash_command(stream_json_line: str) -> str | None:
     return None
 
 
+#: Lot I (#582) : motifs de friction de découverte de toolchain, mesurés en
+#: détail sur 8 transcriptions par le rejeu du lot H
+#: (``docs/bench/rejeu-lot-h-2026-09-18.md`` §3) : ``command -v go``,
+#: ``which -a go``, un ``find / -name gofmt`` jusqu'à 6 niveaux, ``rustup
+#: toolchain list``/``rustup default stable``. Un poste qui n'existe QUE sur
+#: les runs gouvernés (``gate check --strict`` exécute réellement les tests,
+#: lot G1) et qui ne devrait plus apparaître une fois que
+#: :func:`run_environment` donne à l'agent la même toolchain que la
+#: vérification finale du harnais.
+_TOOLCHAIN_FRICTION_PATTERN = re.compile(
+    r"(?<![\w-])which\b"
+    r"|\bcommand\s+-v\b"
+    r"|\bfind\s+\S+.*-name\b"
+    r"|\brustup\b"
+    r"|\bnpm\s+install\b"
+)
+
+
+def is_toolchain_friction_command(command: str) -> bool:
+    """Vrai si *command* (une commande Bash lancée par l'agent) est un
+    symptôme de friction de découverte de toolchain — voir
+    :data:`_TOOLCHAIN_FRICTION_PATTERN`."""
+    return bool(_TOOLCHAIN_FRICTION_PATTERN.search(command))
+
+
+def count_toolchain_friction_bash_calls(commands: Sequence[str]) -> int:
+    """Combien de *commands* (issues de :func:`extract_bash_command`) relèvent
+    de la friction de découverte de toolchain (lot I, #582)."""
+    return sum(1 for command in commands if is_toolchain_friction_command(command))
+
+
 def parse_result_event(stream_json_lines: Iterable[str]) -> dict[str, Any] | None:
     """Retient le dernier événement ``type: result`` d'un flux stream-json."""
     result: dict[str, Any] | None = None
@@ -593,6 +639,157 @@ def ensure_go_toolchain(workspace: Path) -> Path | None:
     return go_bin if go_bin.is_file() else None
 
 
+#: Rust et Node ne sont JAMAIS provisionnés par ce harnais (contrairement à
+#: Go, voir :func:`ensure_go_toolchain`) : langue -> binaire système attendu
+#: sur ``PATH``. Un besoin qui n'a pas d'entrée ici (python) n'a pas de
+#: toolchain système à vérifier — l'interpréteur qui fait tourner ce script
+#: est déjà celui utilisé pour ``python -m pytest``.
+_SYSTEM_TOOLCHAIN_BINARIES: dict[str, str] = {
+    "rust": "cargo",
+    "javascript": "npm",
+}
+
+
+def ensure_system_toolchains_present(languages: Sequence[str]) -> None:
+    """Garde-fou lot I (#582) : Rust/Node doivent déjà être sur le ``PATH``
+    système AVANT toute dépense — même principe que
+    :func:`resolve_grimoire_bin`/``disk_guard_ok``, jamais un ``cargo
+    test``/``npm test`` qui échoue en pleine session ``claude -p`` payante
+    faute d'un message clair en amont.
+
+    Appelée pour les langues réellement présentes dans la sélection de
+    tâches — un rejeu qui ne porte pas de tâche Rust n'a pas à exiger
+    ``cargo``. Lève ``SystemExit`` (jamais une exception avalée) au premier
+    binaire manquant, avec la liste complète des manques, pas seulement le
+    premier trouvé.
+    """
+    missing = [
+        f"{binary} ({language})"
+        for language in languages
+        if (binary := _SYSTEM_TOOLCHAIN_BINARIES.get(language)) is not None and shutil.which(binary) is None
+    ]
+    if missing:
+        raise SystemExit(
+            "toolchain(s) système manquante(s) sur PATH avant toute dépense : "
+            + ", ".join(missing)
+            + " — installe-les (ex. rustup pour Rust, nvm/le gestionnaire de paquets du "
+            "système pour Node.js) avant de lancer une campagne réelle. 0 $ dépensé."
+        )
+
+
+#: Bras qui doivent voir le binaire ``grimoire`` résolu sur leur ``PATH`` —
+#: ``nu``/``ecc`` restent délibérément sans lui, pour ne jamais laisser un
+#: agent « nu » découvrir ``grimoire`` par accident (voir
+#: :func:`run_environment`).
+_GRIMOIRE_ARMS: frozenset[str] = frozenset({"kit", "kit-gov"})
+
+
+def run_environment(
+    task_dir: Path,
+    arm: str,
+    *,
+    home: Path,
+    grimoire_bin: str,
+    workspace: Path,
+    go_bin: Path | None = None,
+    npm_cache_dir: Path | None = None,
+    real_home: Path | None = None,
+    base_env: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """Environnement d'exécution UNIQUE pour (*task_dir*, *arm*) — lot I (#582).
+
+    Le rejeu du lot H (``docs/bench/rejeu-lot-h-2026-09-18.md`` §3,
+    2026-09-18) a mesuré que ``grimoire standard gate check --strict``
+    exécute la commande de test du projet DANS la session de l'agent (lot
+    G1), mais que le harnais ne provisionnait la toolchain Go
+    (:func:`ensure_go_toolchain`) que pour SA PROPRE vérification finale
+    (:func:`run_hidden_tests`) — deux environnements différents pour la même
+    commande de test, jamais transmis à l'agent : ``go`` absent du ``PATH``
+    de la session, jusqu'à 28 tours perdus à chercher le binaire
+    (``command -v go``, ``find / -name gofmt``). Cette fonction est
+    désormais le SEUL endroit qui calcule cet environnement — appelée une
+    fois par run dans ``_run_one``, le même ``dict`` est transmis à la fois
+    à :func:`run_claude_headless` (la session de l'agent, ses hooks, et donc
+    ``gate check --strict``) et à :func:`run_hidden_tests` (la vérification
+    finale du harnais) : jamais deux calculs qui pourraient diverger.
+
+    - **Go** : le binaire résolu par :func:`ensure_go_toolchain` (provisionné
+      sous le workspace, ou système) est mis EN TÊTE du ``PATH``, pour tous
+      les bras — un agent ``nu``/``ecc`` sur une tâche Go affronte la même
+      absence de toolchain qu'un agent gouverné, ce n'est pas spécifique à
+      ``kit-gov``. ``GOROOT`` n'est fixé que si le binaire est celui
+      provisionné par ce harnais (jamais pour un ``go`` système, dont la
+      disposition des répertoires n'est pas garantie) ; ``GOPATH``/``GOCACHE``
+      sont TOUJOURS redirigés sous le workspace, partagés entre bras et
+      tâches (cache de compilation réutilisé, jamais écrit sous le ``HOME``
+      réel de l'opérateur ni sous un ``HOME`` isolé éphémère).
+    - **Rust/Node** : jamais provisionnés (voir
+      :func:`ensure_system_toolchains_present`) — ``CARGO_HOME``/
+      ``RUSTUP_HOME`` sont explicitement repointés sur ceux de *real_home*
+      (``Path.home()`` par défaut) SI l'environnement de base ne les
+      redirige pas déjà lui-même : sans ça, le ``HOME`` isolé (``home``,
+      utilisé pour l'authentification Claude Code) ferait chercher à
+      ``cargo``/``rustup`` une toolchain sous un ``$HOME/.cargo`` qui
+      n'existe pas pour cet utilisateur isolé, quand bien même Rust est
+      installé sur le poste — cause probable des ``rustup toolchain
+      list``/``rustup default stable`` observés sur les runs gouvernés Rust
+      du rejeu lot H. ``CARGO_TARGET_DIR`` (le cache de compilation, pas le
+      registre) est lui TOUJOURS redirigé sous le workspace.
+    - **npm** : ``npm_config_cache`` sous *npm_cache_dir* si fourni — même
+      convention que :func:`install_test_dependencies`.
+    - **grimoire** : son répertoire n'est ajouté en tête de ``PATH`` (et
+      ``GRIMOIRE_NO_COCKPIT=1`` posé) que pour les bras de
+      :data:`_GRIMOIRE_ARMS` — ``nu``/``ecc`` ne doivent jamais découvrir
+      ``grimoire`` par un effet de bord de ce harnais.
+
+    *task_dir* n'influence pas encore le calcul (aucun besoin par-tâche
+    identifié à ce jour) ; il reste dans la signature pour que chaque appel
+    documente sans ambiguïté DE QUEL run l'environnement est construit — un
+    futur besoin par-tâche (ex. un ``.tool-versions`` local au dépôt) n'aurait
+    alors qu'un seul endroit à changer.
+    """
+    del task_dir  # voir docstring : réservé, pas encore utilisé par le calcul
+    base = dict(base_env) if base_env is not None else dict(os.environ)
+    real_home = real_home or Path.home()
+
+    env = dict(base)
+    env["HOME"] = str(home)
+
+    path_entries: list[str] = []
+    if go_bin is not None:
+        path_entries.append(str(go_bin.parent))
+    if arm in _GRIMOIRE_ARMS:
+        path_entries.append(str(Path(grimoire_bin).parent))
+        env["GRIMOIRE_NO_COCKPIT"] = "1"
+    path_entries.append(base.get("PATH", os.defpath))
+    env["PATH"] = os.pathsep.join(entry for entry in path_entries if entry)
+
+    if go_bin is not None:
+        go_tools_dir = (workspace / "tools" / "go").resolve()
+        try:
+            provisioned = go_bin.resolve().is_relative_to(go_tools_dir)
+        except OSError:
+            provisioned = False
+        if provisioned:
+            env["GOROOT"] = str(go_bin.parent.parent)
+        env["GOPATH"] = str(workspace / "tools" / "go-path")
+        env["GOCACHE"] = str(workspace / "tools" / "go-build-cache")
+
+    # ``setdefault`` sur ``env`` (déjà initialisé depuis ``base``) : si
+    # l'opérateur redirige déjà CARGO_HOME/RUSTUP_HOME (poste avec plusieurs
+    # toolchains Rust), sa redirection l'emporte — jamais un `HOME` isolé ne
+    # doit silencieusement l'écraser par un défaut qui n'existerait pas pour
+    # cet utilisateur isolé.
+    env.setdefault("CARGO_HOME", str(real_home / ".cargo"))
+    env.setdefault("RUSTUP_HOME", str(real_home / ".rustup"))
+    env["CARGO_TARGET_DIR"] = str(workspace / "tools" / "cargo-target")
+
+    if npm_cache_dir is not None:
+        env["npm_config_cache"] = str(npm_cache_dir)
+
+    return env
+
+
 def resolve_grimoire_bin(explicit: str | None) -> str:
     """Chemin ABSOLU du binaire ``grimoire`` à invoquer PARTOUT dans le harnais.
 
@@ -736,6 +933,154 @@ def verify_grimoire_binary_matches_template(grimoire_bin: str, *, check_dir: Pat
             "27 runs / 44 $ rejoués sur l'ancien gabarit avant que ce garde-fou "
             "n'existe). Arrêt avant tout appel modèle — 0 $ dépensé."
         )
+
+
+#: Motifs qui, dans la sortie d'une commande de test, trahissent une
+#: toolchain absente plutôt qu'un test qui échoue légitimement faute de
+#: solution — best-effort, en complément du signal fiable (exit 127 /
+#: ``FileNotFoundError``), jamais le seul critère.
+_TOOLCHAIN_NOT_FOUND_MARKERS: tuple[str, ...] = (
+    "command not found",
+    "not found",  # ex. `sh: 1: jest: not found`, `bash: cargo: not found`
+    "no such file or directory",
+)
+
+
+def _toolchain_failure_reason(returncode: int, stdout: str, stderr: str) -> str | None:
+    """``None`` si l'échec éventuel de la commande de test est un échec de
+    test légitime (aucune solution écrite) ; une raison actionnable sinon.
+
+    Le code de sortie de la commande de test N'EST PAS, à lui seul, un
+    signal de toolchain absente — un test qui échoue faute de solution est
+    le fonctionnement normal du banc (lot I, #582 : ``code de sortie non
+    pertinent``). Seuls comptent : l'exit 127 conventionnel (« commande
+    introuvable » pour un shell POSIX) et un motif explicite de
+    :data:`_TOOLCHAIN_NOT_FOUND_MARKERS` dans la sortie (ex. ``jest: not
+    found`` quand les dépendances JS n'ont pas pu être installées).
+    """
+    if returncode == 127:
+        combined = (stdout + stderr).strip()
+        return f"exit 127 (commande introuvable) — sortie : {combined[-300:]!r}"
+    combined_lower = f"{stdout}\n{stderr}".lower()
+    for marker in _TOOLCHAIN_NOT_FOUND_MARKERS:
+        if marker in combined_lower:
+            return f"motif « {marker} » détecté dans la sortie de la commande de test"
+    return None
+
+
+def verify_agent_toolchain_environment(
+    tasks: Sequence[TaskMeta],
+    *,
+    workspace: Path,
+    grimoire_bin: str,
+    go_bin: Path | None,
+    npm_cache_dir: Path,
+) -> dict[str, dict[str, Any]]:
+    """Garde-fou lot I (#582) : AVANT le premier appel ``claude -p`` d'une
+    campagne, pour CHAQUE langue présente dans *tasks*, prouve que la
+    commande de test résolue par ``grimoire needs resolve`` (celle-là même
+    que ``grimoire standard gate check --strict`` exécute dans la session de
+    l'agent, lot G1) s'exécute réellement dans :func:`run_environment` —
+    l'environnement transmis à l'agent, pas un environnement séparé propre
+    au harnais.
+
+    Le code de sortie de cette commande n'est PAS vérifié : les tests
+    peuvent légitimement échouer faute de solution écrite. Seule l'ABSENCE
+    d'un échec de toolchain (commande introuvable, exit 127, motif « ... not
+    found ») est exigée — voir :func:`_toolchain_failure_reason`. Lève
+    ``RuntimeError`` avec un message actionnable au premier échec de ce
+    type : 0 $ dépensé, exactement comme
+    :func:`verify_grimoire_binary_matches_template`.
+
+    Un dépôt de vérification est provisionné par langue (la première tâche
+    de cette langue dans *tasks*, tests cachés compris — jamais donnés à un
+    agent réel, uniquement à cette vérification interne du harnais) sous
+    ``workspace/_agent_toolchain_check/<langue>``, réutilisé s'il existe déjà
+    (pas de reconstruction à chaque ``--resume``).
+    """
+    first_task_by_language: dict[str, TaskMeta] = {}
+    for task in tasks:
+        first_task_by_language.setdefault(task.language, task)
+
+    report: dict[str, dict[str, Any]] = {}
+    for language, task in sorted(first_task_by_language.items()):
+        check_dir = workspace / "_agent_toolchain_check" / language
+        if not (check_dir / "TASK.md").is_file():
+            prepare_task_repo(task, check_dir, include_tests=True)
+
+        home = check_dir / "_home"
+        ensure_isolated_home(home)
+        env = run_environment(
+            check_dir,
+            "kit-gov",
+            home=home,
+            grimoire_bin=grimoire_bin,
+            workspace=workspace,
+            go_bin=go_bin,
+            npm_cache_dir=npm_cache_dir,
+        )
+
+        if language == "javascript":
+            install = install_test_dependencies(check_dir, npm_cache_dir=npm_cache_dir)
+            if install is not None and not install.get("ok", True):
+                raise RuntimeError(
+                    "GARDE-FOU LOT I : `npm install` a échoué dans le dépôt de vérification "
+                    f"toolchain javascript ({check_dir}) — la session de l'agent affronterait "
+                    f"le même échec sur toute tâche javascript : "
+                    f"{install.get('stderr') or install.get('error')}"
+                )
+
+        needs = _run(
+            [grimoire_bin, "needs", "resolve", "--project-root", ".", "--json"],
+            cwd=check_dir,
+            env=env,
+            timeout=60,
+        )
+        if needs.returncode != 0:
+            raise RuntimeError(
+                "GARDE-FOU LOT I : `grimoire needs resolve` a échoué dans le dépôt de "
+                f"vérification toolchain {language} ({check_dir}) : {needs.stdout}{needs.stderr}"
+            )
+        try:
+            resolved = json.loads(needs.stdout)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                f"GARDE-FOU LOT I : sortie non JSON de `grimoire needs resolve` ({check_dir}) : "
+                f"{needs.stdout[-500:]}"
+            ) from exc
+
+        command = (resolved.get("test-runner") or {}).get("command")
+        if not command:
+            report[language] = {
+                "command": None,
+                "returncode": None,
+                "ok": True,
+                "skipped": "test-runner non résolu pour cette tâche (voir docs/bench-three-arms.md §4)",
+            }
+            continue
+
+        argv = shlex.split(command)
+        try:
+            result = _run(argv, cwd=check_dir, env=env, timeout=DEFAULT_TEST_TIMEOUT_S)
+        except FileNotFoundError as exc:
+            raise RuntimeError(
+                f"GARDE-FOU LOT I : `{command}` introuvable dans l'environnement de l'agent "
+                f"pour {language} ({exc}) — la session de l'agent échouerait de la même façon "
+                "sur toute tâche de cette langue. Arrêt avant tout appel modèle — 0 $ dépensé."
+            ) from exc
+
+        failure = _toolchain_failure_reason(result.returncode, result.stdout, result.stderr)
+        if failure is not None:
+            raise RuntimeError(
+                f"GARDE-FOU LOT I : `{command}` a échoué en toolchain pour {language} "
+                f"({check_dir}) — {failure}. La session de l'agent échouerait de la même "
+                "façon (même environnement, voir `run_environment`). Arrêt avant tout appel "
+                f"modèle — 0 $ dépensé.\n{result.stdout[-1000:]}{result.stderr[-1000:]}"
+            )
+
+        report[language] = {"command": command, "returncode": result.returncode, "ok": True}
+
+    return report
 
 
 CREDENTIALS_REL_PATH = Path(".claude") / ".credentials.json"
@@ -1081,6 +1426,7 @@ def run_claude_headless(
     prompt: str,
     *,
     home: Path,
+    env: dict[str, str] | None = None,
     timeout_s: int = DEFAULT_RUN_TIMEOUT_S,
     repeat_threshold: int = DEFAULT_LOOP_REPEAT_THRESHOLD,
     poll_interval: float = DEFAULT_POLL_INTERVAL_S,
@@ -1091,9 +1437,16 @@ def run_claude_headless(
     Permissions limitées au dépôt de tâche via le cwd (``bypassPermissions``
     n'est acceptable ici que parce que chaque dépôt de tâche est jetable et
     isolé sous le workspace du banc — voir docs/bench-three-arms.md).
+
+    *env* (lot I, #582) : l'environnement complet de la session, construit
+    UNE SEULE FOIS par :func:`run_environment` et transmis tel quel — jamais
+    recalculé ici. ``None`` (défaut, préservé pour les appelants existants
+    qui ne fournissent que *home*) replie sur l'ancien comportement
+    (``os.environ`` + ``HOME`` isolé seul), sans la toolchain Go/Rust/npm
+    unifiée.
     """
     log_path = log_path or (task_dir.parent / f"{task_dir.name}.stream.jsonl")
-    env = {**os.environ, "HOME": str(home)}
+    effective_env = dict(env) if env is not None else {**os.environ, "HOME": str(home)}
     cmd = [
         "claude",
         "-p",
@@ -1112,7 +1465,7 @@ def run_claude_headless(
     seen_commands: list[str] = []
 
     with open(log_path, "wb") as logf:
-        proc = subprocess.Popen(cmd, cwd=task_dir, env=env, stdout=logf, stderr=subprocess.STDOUT)
+        proc = subprocess.Popen(cmd, cwd=task_dir, env=effective_env, stdout=logf, stderr=subprocess.STDOUT)
         last_pos = 0
         while True:
             returncode = proc.poll()
@@ -1145,6 +1498,7 @@ def run_claude_headless(
             time.sleep(poll_interval)
 
     outcome.wall_seconds = time.monotonic() - start
+    outcome.toolchain_friction_bash_calls = count_toolchain_friction_bash_calls(seen_commands)
 
     try:
         lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
@@ -1192,9 +1546,17 @@ def run_hidden_tests(
     hidden_dir: Path,
     *,
     go_bin: Path | None = None,
+    env: dict[str, str] | None = None,
     timeout_s: int = DEFAULT_TEST_TIMEOUT_S,
 ) -> tuple[bool, str]:
-    """Copie les tests cachés dans le dépôt de tâche puis les exécute."""
+    """Copie les tests cachés dans le dépôt de tâche puis les exécute.
+
+    *env* (lot I, #582) : le MÊME environnement que celui transmis à la
+    session de l'agent (voir :func:`run_environment`, calculé une seule fois
+    par ``_run_one``) — ``None`` (défaut) replie sur l'environnement du
+    processus harnais, pour les appelants existants (tests, ``--dry-run``)
+    qui n'en fournissent pas.
+    """
     for rel_str in task.test_files:
         src = hidden_dir / rel_str
         if not src.is_file():
@@ -1204,7 +1566,12 @@ def run_hidden_tests(
         shutil.copyfile(src, target)
 
     if task.language == "javascript":
-        install = _run(["npm", "install", "--no-audit", "--no-fund", "--loglevel=error"], cwd=task_dir, timeout=timeout_s)
+        install = _run(
+            ["npm", "install", "--no-audit", "--no-fund", "--loglevel=error"],
+            cwd=task_dir,
+            env=env,
+            timeout=timeout_s,
+        )
         if install.returncode != 0:
             return (False, f"npm install a échoué : {install.stdout[-1000:]}{install.stderr[-1000:]}")
         cmd = ["npx", "--no-install", "jest", "--silent"]
@@ -1216,7 +1583,7 @@ def run_hidden_tests(
         cmd = _TEST_COMMANDS[task.language]
 
     try:
-        result = _run(cmd, cwd=task_dir, timeout=timeout_s)
+        result = _run(cmd, cwd=task_dir, env=env, timeout=timeout_s)
     except subprocess.TimeoutExpired:
         return (False, "timeout des tests")
     success = detect_success(result.returncode)
@@ -1270,6 +1637,7 @@ def build_report(
     seed: int,
     rerun_arms: Sequence[str] | None = None,
     label: str | None = None,
+    toolchain_check: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Construit la structure de rapport (utilisée pour le .md et le .json).
 
@@ -1279,6 +1647,11 @@ def build_report(
     n'est alors marqué comme repris. Un bras présent dans ``records`` mais
     absent de ``rerun_arms`` est un bras repris tel quel via ``--resume``,
     signalé dans le rapport par :func:`carried_over_label`.
+
+    ``toolchain_check`` (lot I, #582) : le résultat de
+    :func:`verify_agent_toolchain_environment`, persisté par ``main()`` sous
+    ``state/toolchain_check.json`` — ``None`` pour un rapport reconstruit
+    sans ce fichier (campagnes antérieures à ce lot).
     """
     by_arm: dict[str, list[RunRecord]] = defaultdict(list)
     for record in records:
@@ -1322,6 +1695,14 @@ def build_report(
             # combien ont abouti — voir ``RunRecord.test_deps_install_ok``.
             "test_deps_install_attempted": sum(1 for r in arm_records if r.test_deps_install_ok is not None),
             "test_deps_install_ok": sum(1 for r in arm_records if r.test_deps_install_ok),
+            # Lot I (#582) : combien d'appels Bash de ce bras relèvent de la
+            # friction de découverte de toolchain — voir
+            # ``count_toolchain_friction_bash_calls``. L'indicateur qui décide
+            # si ``run_environment()`` a réellement retiré ce poste.
+            "toolchain_friction_bash_calls_total": sum(r.toolchain_friction_bash_calls for r in arm_records),
+            "toolchain_friction_bash_calls_median": _median(
+                [float(r.toolchain_friction_bash_calls) for r in arm_records]
+            ),
         }
 
     by_task_arm: dict[str, dict[str, Any]] = {}
@@ -1351,6 +1732,8 @@ def build_report(
                 # une installation de dépendances de test pour ce run précis,
                 # ``None`` sinon (tâche non-JS).
                 "test_deps_install_ok": r.test_deps_install_ok,
+                # Lot I (#582) : voir ``per_arm[...].toolchain_friction_bash_calls_total``.
+                "toolchain_friction_bash_calls": r.toolchain_friction_bash_calls,
             }
             for r in sorted(by_arm.get(arm, []), key=lambda r: (r.task_id, r.run_index))
         ]
@@ -1374,6 +1757,7 @@ def build_report(
         "kit_runs": kit_runs,
         "kit_gov_runs": kit_gov_runs,
         "carried_over_notes": carried_over_notes,
+        "agent_toolchain_check": toolchain_check,
     }
 
 
@@ -1445,17 +1829,20 @@ def render_report_markdown(report: dict[str, Any]) -> str:
         lines.append(f"## Détail par run — bras {title}")
         lines.append("")
         lines.append(
-            "| Tâche | Run | Tours | Coût | Temps (s) | `test-run.json` (lot B) | Dépendances JS installées (lot H) |"
+            "| Tâche | Run | Tours | Coût | Temps (s) | `test-run.json` (lot B) | "
+            "Dépendances JS installées (lot H) | Friction toolchain (lot I) |"
         )
-        lines.append("|---|---|---|---|---|---|---|")
+        lines.append("|---|---|---|---|---|---|---|---|")
         for row in rows:
             evidence = row.get("test_run_evidence")
             evidence_cell = "oui" if evidence else ("non" if evidence is False else "?")
             deps = row.get("test_deps_install_ok")
             deps_cell = "oui" if deps else ("non" if deps is False else "n/a")
+            friction = row.get("toolchain_friction_bash_calls", 0)
             lines.append(
                 f"| {row['task_id']} | {row['run_index']} | {row['num_turns']} | "
-                f"${row['total_cost_usd']:.3f} | {row['wall_seconds']:.0f} | {evidence_cell} | {deps_cell} |"
+                f"${row['total_cost_usd']:.3f} | {row['wall_seconds']:.0f} | {evidence_cell} | {deps_cell} | "
+                f"{friction} |"
             )
         lines.append("")
 
@@ -1464,6 +1851,45 @@ def render_report_markdown(report: dict[str, Any]) -> str:
     # lot B réellement exercé, montrer une colonne « lot B » majoritairement
     # à « oui ».
     _render_governed_detail("kit-gov", report.get("kit_gov_runs") or [])
+
+    kit_gov_stats = report["per_arm"].get("kit-gov")
+    if kit_gov_stats and report.get("kit_gov_runs"):
+        lines.append(
+            "Friction de découverte de toolchain (lot I, #582) — bras `kit-gov` : "
+            f"**{kit_gov_stats['toolchain_friction_bash_calls_total']}** appel(s) Bash "
+            "`which`/`command -v`/`find / -name`/`rustup`/`npm install` au total sur "
+            f"{kit_gov_stats['n_runs']} run(s), médiane "
+            f"{kit_gov_stats['toolchain_friction_bash_calls_median']:.1f} par run — voir "
+            "`count_toolchain_friction_bash_calls`. Indicateur destiné à mesurer l'effet de "
+            "`run_environment()` : il doit baisser une fois que l'agent reçoit la même "
+            "toolchain que la vérification finale du harnais."
+        )
+        lines.append("")
+
+    toolchain_check = report.get("agent_toolchain_check")
+    if toolchain_check:
+        lines.append("## Environnement de l'agent (lot I, #582)")
+        lines.append("")
+        lines.append(
+            "Vérifié avant le tout premier appel `claude -p` de cette campagne "
+            "(`verify_agent_toolchain_environment`) : pour chaque langue de la sélection, "
+            "la commande de test résolue par `grimoire needs resolve` a pu s'exécuter dans "
+            "le MÊME environnement (`run_environment()`) que celui transmis à la session de "
+            "l'agent — code de sortie non pertinent (un test peut légitimement échouer faute "
+            "de solution), seule l'absence d'un échec de toolchain (commande introuvable, "
+            "exit 127, motif « ... not found ») est exigée."
+        )
+        lines.append("")
+        lines.append("| Langue | Commande | Code de sortie | Résultat |")
+        lines.append("|---|---|---|---|")
+        for language in sorted(toolchain_check):
+            entry = toolchain_check[language]
+            command = entry.get("command") or "(non résolue)"
+            returncode = entry.get("returncode")
+            returncode_cell = str(returncode) if returncode is not None else "—"
+            result_cell = entry.get("skipped") or ("toolchain disponible" if entry.get("ok") else "ÉCHEC")
+            lines.append(f"| {language} | `{command}` | {returncode_cell} | {result_cell} |")
+        lines.append("")
 
     lines.append("## Dépendances de test installées avant l'agent (lot H, #582)")
     lines.append("")
@@ -1498,6 +1924,7 @@ def write_report(
     seed: int,
     rerun_arms: Sequence[str] | None = None,
     label: str | None = None,
+    toolchain_check: dict[str, Any] | None = None,
 ) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     report = build_report(
@@ -1507,6 +1934,7 @@ def write_report(
         seed=seed,
         rerun_arms=rerun_arms,
         label=label,
+        toolchain_check=toolchain_check,
     )
     (out_dir / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     (out_dir / "report.md").write_text(render_report_markdown(report), encoding="utf-8")
@@ -1611,6 +2039,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(str(exc), file=sys.stderr)
         return 1
 
+    # Garde-fous lot I (#582) : le rejeu du lot H (§3, 2026-09-18) a mesuré
+    # que la session de l'agent, dans les mêmes runs gouvernés, cherchait à
+    # la main une toolchain Go/Rust invisible pour elle (jusqu'à 28 tours) —
+    # deux problèmes distincts, vérifiés avant tout appel `claude -p` :
+    # (1) Rust/Node doivent être sur le PATH système (jamais provisionnés par
+    #     ce harnais, contrairement à Go) ;
+    # (2) la commande de test résolue par `grimoire needs resolve` doit
+    #     réellement s'exécuter dans `run_environment()` — l'environnement
+    #     transmis à l'agent, pas un environnement séparé propre au harnais.
+    npm_cache_dir = workspace / "npm-cache"
+    languages_present = sorted({t.language for t in tasks})
+    ensure_system_toolchains_present(languages_present)
+    try:
+        toolchain_check = verify_agent_toolchain_environment(
+            tasks, workspace=workspace, grimoire_bin=grimoire_bin, go_bin=go_bin, npm_cache_dir=npm_cache_dir
+        )
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    (state_dir / "toolchain_check.json").write_text(json.dumps(toolchain_check, indent=2), encoding="utf-8")
+
     results_path = state_dir / "results.jsonl"
     already_done: set[tuple[str, str, int]] = set()
     if args.resume and results_path.is_file():
@@ -1703,6 +2152,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             seed=args.seed,
             rerun_arms=selected_arms,
             label=args.label,
+            toolchain_check=toolchain_check,
         )
         if disk_exhausted:
             print(f"[report] rapport PARTIEL (arrêt disque) écrit sous {report_dir}")
@@ -1751,6 +2201,10 @@ def _do_report_only(
     total_tasks = len(json.loads(selection_path.read_text(encoding="utf-8"))["tasks"]) if selection_path.is_file() else len({r.task_id for r in records})
     expected_cost_path = state_dir / "expected_cost.json"
     expected_cost = json.loads(expected_cost_path.read_text(encoding="utf-8")) if expected_cost_path.is_file() else None
+    toolchain_check_path = state_dir / "toolchain_check.json"
+    toolchain_check = (
+        json.loads(toolchain_check_path.read_text(encoding="utf-8")) if toolchain_check_path.is_file() else None
+    )
     out_dir = report_dir or (workspace / "reports" / datetime.now(tz=UTC).strftime("%Y-%m-%d"))
     # ``--report-only`` ne rejoue rien : ``--arms`` sert ici uniquement à
     # annoter le rapport (quels bras la campagne dont ``results.jsonl`` est
@@ -1764,6 +2218,7 @@ def _do_report_only(
         seed=seed,
         rerun_arms=rerun_arms,
         label=label,
+        toolchain_check=toolchain_check,
     )
     print(f"[report] écrit sous {out_dir}")
     return 0
@@ -1842,6 +2297,20 @@ def _run_one(
             test_deps_install_ok = test_deps.get("ok")
 
     home = homes[arm]
+    # Lot I (#582) : UN SEUL calcul d'environnement pour ce run, transmis tel
+    # quel à la session de l'agent (``run_claude_headless``) ET à la
+    # vérification finale du harnais (``run_hidden_tests``) — jamais deux
+    # environnements qui pourraient diverger (voir ``run_environment``).
+    env = run_environment(
+        run_dir,
+        arm,
+        home=home,
+        grimoire_bin=grimoire_bin,
+        workspace=workspace,
+        go_bin=go_bin,
+        npm_cache_dir=npm_cache_dir,
+    )
+
     # Les identifiants ne vivent dans `home` que le temps de cet appel : le
     # `finally` de `credentials_provisioned` les efface, que le run réussisse,
     # échoue, ou soit tué pour timeout/boucle — jamais laissés à demeure.
@@ -1851,12 +2320,12 @@ def _run_one(
                 f"aucun identifiant Claude Code trouvé sous {Path.home()}/.claude — "
                 "authentifie-toi (`claude /login`) avant de lancer une campagne réelle."
             )
-        outcome = run_claude_headless(run_dir, build_prompt(task), home=home, timeout_s=run_timeout_s)
+        outcome = run_claude_headless(run_dir, build_prompt(task), home=home, env=env, timeout_s=run_timeout_s)
 
     if outcome.terminated_reason in ("timeout", "loop"):
         success = False
     else:
-        success, _ = run_hidden_tests(task, run_dir, hidden_dir, go_bin=go_bin)
+        success, _ = run_hidden_tests(task, run_dir, hidden_dir, go_bin=go_bin, env=env)
 
     # Après CHAQUE run, pas seulement en fin de campagne : voir
     # ``cleanup_build_artifacts`` — un `target/`(Rust) ou `node_modules/`(JS)
@@ -1889,6 +2358,7 @@ def _run_one(
         wall_seconds=outcome.wall_seconds,
         terminated_reason=outcome.terminated_reason,
         dispatch_stats=dispatch_stats,
+        toolchain_friction_bash_calls=outcome.toolchain_friction_bash_calls,
     )
 
 
