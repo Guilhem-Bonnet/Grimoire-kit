@@ -50,12 +50,12 @@ from grimoire.core.standard_checks.base import (
     _yaml as _yaml,
 )
 from grimoire.core.standard_checks.controls import (
-    _verify_acceptance_record,
     _verify_k8s_agent_manifest,
     _verify_recorded_test_run_is_green,
     _verify_score_and_exceptions,
 )
 from grimoire.core.standard_checks.gate_remedy import missing_artifact_message
+from grimoire.core.standard_checks.gate_review_checks import review_state_content_checks
 from grimoire.core.standard_checks.registry import (
     DEFAULT_SCORE_DIMENSIONS as DEFAULT_SCORE_DIMENSIONS,
 )
@@ -66,7 +66,6 @@ from grimoire.core.standard_checks.registry import (
     dimension_for,
 )
 from grimoire.core.standard_checks.verifiers import (
-    _verify_evidence_pack,
     _verify_memory_policy,
     run_verifiers,
 )
@@ -1561,6 +1560,7 @@ def check_evidence_gates(
         "memory_policy": STANDARD_DIR / "memory-policy.yaml",
         "task_envelope": EVIDENCE_DIR / normalized_task_id / "task-envelope.md",
         "evidence_pack": EVIDENCE_DIR / normalized_task_id / "evidence-pack.md",
+        "claim_ledger": EVIDENCE_DIR / normalized_task_id / "claim-ledger.md",
         "context_bundle": CONTEXT_DIR / normalized_task_id / "context-bundle.yaml",
         "decision_trace": DECISION_DIR / normalized_task_id / "decision-trace.yaml",
         "compliance_score": SCORE_DIR / normalized_task_id / "compliance-score.yaml",
@@ -1584,33 +1584,14 @@ def check_evidence_gates(
             _verify_memory_policy(root, profile, memory_result)
             checks.extend(memory_result.checks)
     if state in {"review", "accepted", "released"}:
-        for key in ("evidence_pack", "decision_trace"):
+        for key in ("evidence_pack", "claim_ledger", "decision_trace"):
             if not (root / required_paths[key]).is_file():
                 missing.append(key)
-        # Issue #582 lot G2 : `gate check` (jamais `verify`/`audit`, tous deux
-        # `readOnlyHint` côté MCP — voir `_verify_evidence_pack`) projette le
-        # journal observé par les hooks dans la section « Inventaire observé »
-        # avant d'évaluer le même vérificateur que `standard verify`.
-        try:
-            from grimoire.core.standard_checks.evidence_journal import (
-                regenerate_observed_inventory_section,
-            )
-
-            regenerate_observed_inventory_section(root, normalized_task_id)
-        except Exception:  # noqa: S110 — projection best-effort, jamais au prix du gate lui-même
-            pass
-        evidence_pack_result = StandardVerificationResult(profile=profile.id, project_root=root)
-        _verify_evidence_pack(root, normalized_task_id, evidence_pack_result)
-        checks.extend(evidence_pack_result.checks)
-        # Issue #582 lot B : le même signal que `standard verify` — une ligne
-        # « passé » sans run de test réel enregistré — doit aussi apparaître
-        # ici, sur le chemin que le hook SessionStart mandate réellement
-        # (`gate check --strict`), pas seulement sur `verify` qu'un agent peut
-        # ne jamais appeler. Réutilise `_verify_acceptance_record` telle
-        # quelle plutôt que de dupliquer sa lecture de l'acceptance record.
-        acceptance_result = StandardVerificationResult(profile=profile.id, project_root=root)
-        _verify_acceptance_record(root, profile, normalized_task_id, acceptance_result)
-        checks.extend(acceptance_result.checks)
+        # Issue #582 lots G2/G3 : voir standard_checks/gate_review_checks.py —
+        # projection de l'inventaire observé, puis les mêmes constats de
+        # contenu que `standard verify` (evidence_pack, acceptance_record,
+        # claim_ledger).
+        checks.extend(review_state_content_checks(root, profile, normalized_task_id))
     if state == "released" and not (root / required_paths["compliance_score"]).is_file():
         missing.append("compliance_score")
     for key in missing:

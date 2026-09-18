@@ -1103,6 +1103,59 @@ def test_gate_check_surfaces_an_unproven_passed_criterion_without_failing(tmp_pa
     assert result.ok, result.checks
 
 
+def test_gate_check_catches_an_unproved_claim_used_in_a_decision_like_verify_does(tmp_path: Path) -> None:
+    """Issue #582 lot G3 : `gate check` manquait le même signal que `verify` sur le claim-ledger.
+
+    `claim_ledger` est listé depuis le lot G1 dans
+    `standard_checks.gate_remedy.GATE_ARTIFACT_KEYS` et scaffoldé pour toute
+    tâche (`standard_task_scaffold.py`, requis par tous les profils dans
+    `framework/agentic-standard/profile-map.yaml`) — mais `check_evidence_gates`
+    ne vérifiait ni sa présence ni son contenu, contrairement à `evidence_pack`
+    et `acceptance_record` qu'il évalue au même moment. Une affirmation
+    critique marquée "utiliser" sans être "prouvée" (AG-QUA-002) passait donc
+    `gate check --strict` — le seul chemin que la directive de session
+    mandate — sans jamais être signalée, alors que `standard verify` la
+    signale depuis toujours. Rouge-avant : ce test échouait avant le lot G3
+    (aucun check `claims.*` dans `result.checks`).
+    """
+    setup_standard_profile(tmp_path, profile_id="governed", provider_ids=("github-copilot",))
+    build_context_bundle(tmp_path)
+    build_decision_trace(tmp_path)
+    ledger = tmp_path / "_grimoire-output/evidence/bootstrap/claim-ledger.md"
+    ledger.write_text(
+        ledger.read_text(encoding="utf-8")
+        + "| CL-002 | Le calcul est correct | fait |  | hypothèse | faible | utiliser |\n",
+        encoding="utf-8",
+    )
+
+    result = check_evidence_gates(tmp_path, task_id="bootstrap", target_state="accepted")
+
+    assert any(check.id == "claims.used_unproved" and check.is_error for check in result.checks), result.checks
+    assert not result.ok
+    # Même verdict que `verify` sur le même arbre : le chemin `gate check` ne
+    # doit plus être un aveuglément par rapport à `verify` sur ce contrôle.
+    verified = verify_standard_profile(tmp_path, task_id="bootstrap")
+    assert any(check.id == "claims.used_unproved" for check in verified.checks)
+
+
+def test_gate_check_reports_a_missing_claim_ledger_with_a_remedy(tmp_path: Path) -> None:
+    """Le claim-ledger est un artefact de gate comme les autres : absent, il doit
+
+    nommer son chemin et un remède, pas passer inaperçu.
+    """
+    setup_standard_profile(tmp_path, profile_id="governed", provider_ids=("github-copilot",))
+    build_context_bundle(tmp_path)
+    build_decision_trace(tmp_path)
+    (tmp_path / "_grimoire-output/evidence/bootstrap/claim-ledger.md").unlink()
+
+    result = check_evidence_gates(tmp_path, task_id="bootstrap", target_state="accepted")
+
+    (check,) = [c for c in result.checks if c.id == "gate.claim_ledger_missing"]
+    assert check.is_error
+    assert check.path is not None and check.path.as_posix() in check.message
+    assert "remède : grimoire " in check.message
+
+
 def test_cli_gate_run_tests_records_a_real_run(tmp_path: Path) -> None:
     runner = CliRunner()
     runner.invoke(app, ["standard", "init", str(tmp_path), "--profile", "starter"])
