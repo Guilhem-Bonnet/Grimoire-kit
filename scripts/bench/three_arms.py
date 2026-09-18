@@ -145,6 +145,17 @@ class RunRecord:
     # lot B) ; ``None`` pour les bras ``nu``/``ecc`` où la question ne se pose
     # pas, et pour les lignes écrites avant ce lot.
     kit_test_run_evidence: bool | None = None
+    # Lot H (#582) : ``True``/``False`` si un ``package.json`` a été détecté
+    # dans le dépôt de tâche et que ``npm install`` a été tenté par
+    # ``setup_arm_*`` (voir ``install_test_dependencies``), ``None`` si aucun
+    # manifeste JS n'a été trouvé (tâche non-JS) ou pour les lignes écrites
+    # avant ce lot. Tous les bras sont concernés, pas seulement `kit`/`kit-gov`
+    # — équité de méthode : avant ce lot, seule la vérification finale du
+    # harnais (``run_hidden_tests``) installait les dépendances JS, jamais la
+    # session de l'agent elle-même, qui recevait donc systématiquement un
+    # `npm test`/`npx jest` en échec `exit 127` (« jest absent du bac à
+    # sable »).
+    test_deps_install_ok: bool | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
@@ -634,12 +645,76 @@ def find_leftover_credentials(root: Path) -> list[Path]:
     return sorted(homes_dir.glob(f"*/{CREDENTIALS_REL_PATH.as_posix()}"))
 
 
-def setup_arm_nu(task_dir: Path) -> dict[str, Any]:
-    """Bras nu : rien à ajouter, le dépôt de tâche reste tel quel."""
-    return {"arm": "nu", "added": []}
+def install_test_dependencies(
+    task_dir: Path, *, npm_cache_dir: Path, timeout: int = 120
+) -> dict[str, Any] | None:
+    """Installe les dépendances de test JS de *task_dir* si un manifeste les demande.
+
+    Lot H (#582) : les lots E/F ont mesuré que l'agent, DANS sa propre
+    session, ne pouvait jamais faire aboutir un `npm test`/`npx jest` sur les
+    tâches JavaScript — `node_modules/` n'existait pas encore à ce moment-là,
+    seule la vérification finale du harnais (:func:`run_hidden_tests`,
+    exécutée APRÈS la fin du run) installait les dépendances. Résultat :
+    `exit 127` systématique côté agent (« jest absent du bac à sable »),
+    quel que soit le bras — un confondu de méthode, pas une différence entre
+    bras. Cette fonction est appelée par ``setup_arm_*`` de TOUS les bras
+    (nu compris), avant le lancement de l'agent, pour que la comparaison
+    porte sur la gouvernance, pas sur un outillage de test manquant.
+
+    Best-effort et jamais bloquant : un `npm install` qui échoue (réseau
+    coupé, registre indisponible, timeout) est journalisé dans le résultat
+    du setup de ce run et compté comme tel dans le rapport
+    (``RunRecord.test_deps_install_ok``), sans jamais lever d'exception — la
+    campagne continue avec un `node_modules` absent, comme avant ce lot.
+
+    Le cache npm est forcé sous *npm_cache_dir* (un sous-dossier du
+    workspace du banc, partagé entre bras et tâches pour éviter de
+    retélécharger jest/babel à chaque run), jamais dans le `HOME` réel de
+    l'opérateur ni dans l'un des `HOME` isolés par bras.
+
+    ``None`` si *task_dir* ne contient aucun ``package.json`` (rien à
+    installer, la tâche n'est pas JavaScript).
+    """
+    if not (task_dir / "package.json").is_file():
+        return None
+    npm_cache_dir.mkdir(parents=True, exist_ok=True)
+    env = {**os.environ, "npm_config_cache": str(npm_cache_dir)}
+    try:
+        result = _run(
+            ["npm", "install", "--no-audit", "--no-fund", "--loglevel=error"],
+            cwd=task_dir,
+            env=env,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        return {"attempted": True, "ok": False, "returncode": None, "error": "timeout npm install"}
+    return {
+        "attempted": True,
+        "ok": result.returncode == 0,
+        "returncode": result.returncode,
+        "stdout": result.stdout[-1000:],
+        "stderr": result.stderr[-1000:],
+    }
 
 
-def setup_arm_ecc(task_dir: Path, *, ecc_repo: Path, ecc_home: Path, timeout: int = 120) -> dict[str, Any]:
+def setup_arm_nu(task_dir: Path, *, npm_cache_dir: Path | None = None) -> dict[str, Any]:
+    """Bras nu : rien à ajouter, sauf les dépendances de test JS (équité, lot H, #582)."""
+    result: dict[str, Any] = {"arm": "nu", "added": []}
+    if npm_cache_dir is not None:
+        test_deps = install_test_dependencies(task_dir, npm_cache_dir=npm_cache_dir)
+        if test_deps is not None:
+            result["test_deps_install"] = test_deps
+    return result
+
+
+def setup_arm_ecc(
+    task_dir: Path,
+    *,
+    ecc_repo: Path,
+    ecc_home: Path,
+    timeout: int = 120,
+    npm_cache_dir: Path | None = None,
+) -> dict[str, Any]:
     """Installe le plugin ``ecc@ecc`` en scope projet (voir docs pour la preuve)."""
     env = {**os.environ, "HOME": str(ecc_home)}
     add = _run(
@@ -654,7 +729,7 @@ def setup_arm_ecc(task_dir: Path, *, ecc_repo: Path, ecc_home: Path, timeout: in
         env=env,
         timeout=timeout,
     )
-    return {
+    result = {
         "arm": "ecc",
         "added": [".claude/settings.local.json"],
         "marketplace_add_rc": add.returncode,
@@ -662,6 +737,11 @@ def setup_arm_ecc(task_dir: Path, *, ecc_repo: Path, ecc_home: Path, timeout: in
         "marketplace_add_stdout": add.stdout[-2000:],
         "plugin_install_stdout": install.stdout[-2000:],
     }
+    if npm_cache_dir is not None:
+        test_deps = install_test_dependencies(task_dir, npm_cache_dir=npm_cache_dir)
+        if test_deps is not None:
+            result["test_deps_install"] = test_deps
+    return result
 
 
 #: Board synthétique pour le bras ``kit-gov`` : une seule tâche, posée
@@ -712,7 +792,14 @@ def _governed_task_id(task_id: str) -> str:
     return task_id.replace("/", "__")
 
 
-def setup_arm_kit_gov(task_dir: Path, *, kit_home: Path, task_id: str, timeout: int = 180) -> dict[str, Any]:
+def setup_arm_kit_gov(
+    task_dir: Path,
+    *,
+    kit_home: Path,
+    task_id: str,
+    timeout: int = 180,
+    npm_cache_dir: Path | None = None,
+) -> dict[str, Any]:
     """Bras ``kit-gov`` : le bras ``kit``, PLUS un projet réellement enrôlé au standard.
 
     ``setup_arm_kit()`` ne lance jamais ``grimoire standard init`` : le rejeu
@@ -741,7 +828,7 @@ def setup_arm_kit_gov(task_dir: Path, *, kit_home: Path, task_id: str, timeout: 
     id — jamais ``bootstrap``.
     """
     governed_id = _governed_task_id(task_id)
-    kit_result = setup_arm_kit(task_dir, kit_home=kit_home, timeout=timeout)
+    kit_result = setup_arm_kit(task_dir, kit_home=kit_home, timeout=timeout, npm_cache_dir=npm_cache_dir)
     env = {**os.environ, "HOME": str(kit_home), "GRIMOIRE_NO_COCKPIT": "1"}
 
     standard_init = _run(
@@ -762,7 +849,7 @@ def setup_arm_kit_gov(task_dir: Path, *, kit_home: Path, task_id: str, timeout: 
         timeout=timeout,
     )
 
-    return {
+    result = {
         "arm": "kit-gov",
         "added": kit_result.get("added", []),
         "init_rc": kit_result.get("init_rc"),
@@ -774,9 +861,18 @@ def setup_arm_kit_gov(task_dir: Path, *, kit_home: Path, task_id: str, timeout: 
         "standard_init_stdout": standard_init.stdout[-2000:],
         "migrate_stdout": migrate.stdout[-2000:],
     }
+    if kit_result.get("test_deps_install") is not None:
+        result["test_deps_install"] = kit_result["test_deps_install"]
+    return result
 
 
-def setup_arm_kit(task_dir: Path, *, kit_home: Path, timeout: int = 180) -> dict[str, Any]:
+def setup_arm_kit(
+    task_dir: Path,
+    *,
+    kit_home: Path,
+    timeout: int = 180,
+    npm_cache_dir: Path | None = None,
+) -> dict[str, Any]:
     """``grimoire init --backend local --no-cockpit`` + ``host sync --host claude``."""
     env = {**os.environ, "HOME": str(kit_home), "GRIMOIRE_NO_COCKPIT": "1"}
     before = {p.relative_to(task_dir).as_posix() for p in task_dir.rglob("*") if p.is_file()}
@@ -796,7 +892,7 @@ def setup_arm_kit(task_dir: Path, *, kit_home: Path, timeout: int = 180) -> dict
 
     after = {p.relative_to(task_dir).as_posix() for p in task_dir.rglob("*") if p.is_file()}
     added = sorted(after - before)
-    return {
+    result = {
         "arm": "kit",
         "added": added,
         "init_rc": init.returncode,
@@ -804,6 +900,11 @@ def setup_arm_kit(task_dir: Path, *, kit_home: Path, timeout: int = 180) -> dict
         "init_stdout": init.stdout[-2000:],
         "sync_stdout": sync.stdout[-2000:],
     }
+    if npm_cache_dir is not None:
+        test_deps = install_test_dependencies(task_dir, npm_cache_dir=npm_cache_dir)
+        if test_deps is not None:
+            result["test_deps_install"] = test_deps
+    return result
 
 
 # ── Exécution de l'agent (LLM, non testée unitairement) ─────────────────────
@@ -1050,6 +1151,11 @@ def build_report(
                 reason: sum(1 for r in arm_records if r.terminated_reason == reason)
                 for reason in sorted({r.terminated_reason for r in arm_records})
             },
+            # Lot H (#582) : combien de runs de ce bras avaient un manifeste
+            # ``package.json`` (donc une tentative d'installation JS) et
+            # combien ont abouti — voir ``RunRecord.test_deps_install_ok``.
+            "test_deps_install_attempted": sum(1 for r in arm_records if r.test_deps_install_ok is not None),
+            "test_deps_install_ok": sum(1 for r in arm_records if r.test_deps_install_ok),
         }
 
     by_task_arm: dict[str, dict[str, Any]] = {}
@@ -1075,14 +1181,18 @@ def build_report(
                 "total_cost_usd": r.total_cost_usd,
                 "wall_seconds": r.wall_seconds,
                 "test_run_evidence": r.kit_test_run_evidence,
+                # Lot H (#582) : ``True``/``False`` si une tâche JS a demandé
+                # une installation de dépendances de test pour ce run précis,
+                # ``None`` sinon (tâche non-JS).
+                "test_deps_install_ok": r.test_deps_install_ok,
             }
             for r in sorted(by_arm.get(arm, []), key=lambda r: (r.task_id, r.run_index))
         ]
 
     kit_runs = _governed_run_rows("kit")
     # ``kit-gov`` (lot F, #582) : même détail par run que ``kit``, clé
-    # séparée pour ne jamais changer la forme de ``kit_runs`` que
-    # ``render_report_markdown``/les tests existants relisent déjà.
+    # séparée pour garder ``kit_runs``/``kit_gov_runs`` indépendants dans le
+    # rapport, même si leur forme évolue ensemble (lot H, #582).
     kit_gov_runs = _governed_run_rows("kit-gov")
 
     return {
@@ -1169,15 +1279,17 @@ def render_report_markdown(report: dict[str, Any]) -> str:
         lines.append(f"## Détail par run — bras {title}")
         lines.append("")
         lines.append(
-            "| Tâche | Run | Tours | Coût | Temps (s) | `test-run.json` (lot B) |"
+            "| Tâche | Run | Tours | Coût | Temps (s) | `test-run.json` (lot B) | Dépendances JS installées (lot H) |"
         )
-        lines.append("|---|---|---|---|---|---|")
+        lines.append("|---|---|---|---|---|---|---|")
         for row in rows:
             evidence = row.get("test_run_evidence")
             evidence_cell = "oui" if evidence else ("non" if evidence is False else "?")
+            deps = row.get("test_deps_install_ok")
+            deps_cell = "oui" if deps else ("non" if deps is False else "n/a")
             lines.append(
                 f"| {row['task_id']} | {row['run_index']} | {row['num_turns']} | "
-                f"${row['total_cost_usd']:.3f} | {row['wall_seconds']:.0f} | {evidence_cell} |"
+                f"${row['total_cost_usd']:.3f} | {row['wall_seconds']:.0f} | {evidence_cell} | {deps_cell} |"
             )
         lines.append("")
 
@@ -1186,6 +1298,27 @@ def render_report_markdown(report: dict[str, Any]) -> str:
     # lot B réellement exercé, montrer une colonne « lot B » majoritairement
     # à « oui ».
     _render_governed_detail("kit-gov", report.get("kit_gov_runs") or [])
+
+    lines.append("## Dépendances de test installées avant l'agent (lot H, #582)")
+    lines.append("")
+    lines.append(
+        "Manifestes `package.json` détectés dans le dépôt de tâche et "
+        "installation tentée (``npm install``) par `setup_arm_*`, AVANT le "
+        "lancement de l'agent — voir `install_test_dependencies`. Objectif : "
+        "que `npm test`/`npx jest` puisse aboutir dans la session de l'agent "
+        "elle-même, sur tous les bras également (avant ce lot, seule la "
+        "vérification finale du harnais installait ces dépendances, jamais "
+        "l'agent)."
+    )
+    lines.append("")
+    lines.append("| Bras | Manifestes détectés | Installations réussies |")
+    lines.append("|---|---|---|")
+    for arm in ARMS:
+        a = report["per_arm"].get(arm)
+        if not a:
+            continue
+        lines.append(f"| {arm} | {a['test_deps_install_attempted']} | {a['test_deps_install_ok']} |")
+    lines.append("")
 
     return "\n".join(lines) + "\n"
 
@@ -1439,17 +1572,22 @@ def _do_report_only(
 
 def _do_dry_run(tasks: Sequence[TaskMeta], *, workspace: Path, ecc_repo: Path, homes: dict[str, Path]) -> int:
     tasks_root = workspace / "tasks"
+    npm_cache_dir = workspace / "npm-cache"
     for task in tasks:
         for arm in ARMS:
             task_dir = tasks_root / task.task_id.replace("/", "__") / arm / "prep"
             prepare_task_repo(task, task_dir)
             hidden_tests_dir(task, tasks_root / task.task_id.replace("/", "__") / "hidden-tests")
-            if arm == "ecc":
-                setup_arm_ecc(task_dir, ecc_repo=ecc_repo, ecc_home=homes["ecc"])
+            if arm == "nu":
+                setup_arm_nu(task_dir, npm_cache_dir=npm_cache_dir)
+            elif arm == "ecc":
+                setup_arm_ecc(task_dir, ecc_repo=ecc_repo, ecc_home=homes["ecc"], npm_cache_dir=npm_cache_dir)
             elif arm == "kit":
-                setup_arm_kit(task_dir, kit_home=homes["kit"])
+                setup_arm_kit(task_dir, kit_home=homes["kit"], npm_cache_dir=npm_cache_dir)
             elif arm == "kit-gov":
-                setup_arm_kit_gov(task_dir, kit_home=homes["kit-gov"], task_id=task.task_id)
+                setup_arm_kit_gov(
+                    task_dir, kit_home=homes["kit-gov"], task_id=task.task_id, npm_cache_dir=npm_cache_dir
+                )
             print(f"[dry-run] préparé {task.task_id} / {arm} -> {task_dir}")
     print(f"[dry-run] {len(tasks)} tâches x {len(ARMS)} bras préparées sous {tasks_root}")
     return 0
@@ -1470,12 +1608,26 @@ def _run_one(
     prepare_task_repo(task, run_dir)
     hidden_dir = hidden_tests_dir(task, workspace / "tasks" / task.task_id.replace("/", "__") / "hidden-tests")
 
-    if arm == "ecc":
-        setup_arm_ecc(run_dir, ecc_repo=ecc_repo, ecc_home=homes["ecc"])
+    npm_cache_dir = workspace / "npm-cache"
+    setup_result: dict[str, Any] | None
+    if arm == "nu":
+        setup_result = setup_arm_nu(run_dir, npm_cache_dir=npm_cache_dir)
+    elif arm == "ecc":
+        setup_result = setup_arm_ecc(run_dir, ecc_repo=ecc_repo, ecc_home=homes["ecc"], npm_cache_dir=npm_cache_dir)
     elif arm == "kit":
-        setup_arm_kit(run_dir, kit_home=homes["kit"])
+        setup_result = setup_arm_kit(run_dir, kit_home=homes["kit"], npm_cache_dir=npm_cache_dir)
     elif arm == "kit-gov":
-        setup_arm_kit_gov(run_dir, kit_home=homes["kit-gov"], task_id=task.task_id)
+        setup_result = setup_arm_kit_gov(
+            run_dir, kit_home=homes["kit-gov"], task_id=task.task_id, npm_cache_dir=npm_cache_dir
+        )
+    else:
+        setup_result = None
+
+    test_deps_install_ok: bool | None = None
+    if setup_result is not None:
+        test_deps = setup_result.get("test_deps_install")
+        if test_deps is not None:
+            test_deps_install_ok = test_deps.get("ok")
 
     home = homes[arm]
     # Les identifiants ne vivent dans `home` que le temps de cet appel : le
@@ -1517,6 +1669,7 @@ def _run_one(
         output_tokens=outcome.output_tokens,
         recorded_at=datetime.now(tz=UTC).isoformat(),
         kit_test_run_evidence=kit_test_run_evidence,
+        test_deps_install_ok=test_deps_install_ok,
         cache_read_input_tokens=outcome.cache_read_input_tokens,
         cache_creation_input_tokens=outcome.cache_creation_input_tokens,
         model_usage=outcome.model_usage or None,
