@@ -735,6 +735,7 @@ def test_build_report_kit_runs_detail_includes_turns_cost_time_and_evidence() ->
             123.0,
             "completed",
             kit_test_run_evidence=True,
+            test_deps_install_ok=True,
         ),
     ]
     report = ta.build_report(records, total_tasks=1, expected_cost=None, seed=0, rerun_arms=("kit",))
@@ -746,6 +747,7 @@ def test_build_report_kit_runs_detail_includes_turns_cost_time_and_evidence() ->
             "total_cost_usd": 0.42,
             "wall_seconds": 123.0,
             "test_run_evidence": True,
+            "test_deps_install_ok": True,
         }
     ]
     rendered = ta.render_report_markdown(report)
@@ -785,7 +787,12 @@ def test_setup_arm_kit_gov_runs_standard_init_then_migrates_a_synthetic_board(
     monkeypatch.setattr(
         ta,
         "setup_arm_kit",
-        lambda task_dir, *, kit_home, timeout=180: {"arm": "kit", "added": ["x"], "init_rc": 0, "sync_rc": 0},
+        lambda task_dir, *, kit_home, timeout=180, npm_cache_dir=None: {
+            "arm": "kit",
+            "added": ["x"],
+            "init_rc": 0,
+            "sync_rc": 0,
+        },
     )
 
     task_dir = tmp_path / "run"
@@ -806,6 +813,158 @@ def test_setup_arm_kit_gov_runs_standard_init_then_migrates_a_synthetic_board(
     assert "status: in_progress" in board
 
 
+# ── 13. Dépendances de test installées avant l'agent (lot H, #582) ─────────
+#
+# Les lots E/F ont mesuré que l'agent, DANS sa propre session, ne pouvait
+# jamais faire aboutir `npm test`/`npx jest` sur une tâche JavaScript :
+# `node_modules/` n'existait pas encore à ce moment-là, seule la
+# vérification finale du harnais (après la fin du run) installait les
+# dépendances — `exit 127` systématique côté agent, sur tous les bras
+# également (un confondu de méthode, pas une différence entre bras).
+
+
+def test_install_test_dependencies_returns_none_without_package_json(tmp_path: Path) -> None:
+    task_dir = tmp_path / "run"
+    task_dir.mkdir()
+    assert ta.install_test_dependencies(task_dir, npm_cache_dir=tmp_path / "npm-cache") is None
+
+
+def test_install_test_dependencies_runs_npm_install_with_isolated_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    task_dir = tmp_path / "run"
+    task_dir.mkdir()
+    (task_dir / "package.json").write_text("{}\n", encoding="utf-8")
+    npm_cache_dir = tmp_path / "npm-cache"
+
+    calls: list[dict[str, Any]] = []
+
+    def fake_run(cmd: Any, *, cwd: Path | None = None, env: Any = None, timeout: int | None = None) -> Any:
+        calls.append({"cmd": list(cmd), "cwd": cwd, "env": env, "timeout": timeout})
+        return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(ta, "_run", fake_run)
+    result = ta.install_test_dependencies(task_dir, npm_cache_dir=npm_cache_dir, timeout=42)
+
+    assert result == {"attempted": True, "ok": True, "returncode": 0, "stdout": "ok", "stderr": ""}
+    assert calls[0]["cmd"][:2] == ["npm", "install"]
+    assert calls[0]["cwd"] == task_dir
+    # Cache npm forcé sous le workspace du banc — jamais le HOME réel de
+    # l'opérateur ni l'un des HOME isolés par bras.
+    assert calls[0]["env"]["npm_config_cache"] == str(npm_cache_dir)
+    assert calls[0]["timeout"] == 42
+    assert npm_cache_dir.is_dir()
+
+
+def test_install_test_dependencies_is_best_effort_on_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    task_dir = tmp_path / "run"
+    task_dir.mkdir()
+    (task_dir / "package.json").write_text("{}\n", encoding="utf-8")
+
+    monkeypatch.setattr(ta, "_run", lambda *a, **k: SimpleNamespace(returncode=1, stdout="", stderr="network down"))
+    result = ta.install_test_dependencies(task_dir, npm_cache_dir=tmp_path / "npm-cache")
+
+    assert result is not None
+    assert result["ok"] is False
+    assert result["returncode"] == 1
+
+
+def test_setup_arm_nu_installs_test_dependencies_when_requested(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Équité de méthode (lot H, #582) : le bras `nu` reçoit désormais la
+    même installation de dépendances JS que les bras gouvernés, quand on lui
+    fournit un `npm_cache_dir` — avant ce lot, `setup_arm_nu` n'était même
+    jamais appelée par le harnais (aucun branchement `if arm == "nu"` dans
+    `_run_one`/`_do_dry_run`)."""
+    task_dir = tmp_path / "run"
+    task_dir.mkdir()
+    (task_dir / "package.json").write_text("{}\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        ta,
+        "install_test_dependencies",
+        lambda task_dir, *, npm_cache_dir, timeout=120: {"attempted": True, "ok": True, "returncode": 0},
+    )
+    result = ta.setup_arm_nu(task_dir, npm_cache_dir=tmp_path / "npm-cache")
+
+    assert result == {
+        "arm": "nu",
+        "added": [],
+        "test_deps_install": {"attempted": True, "ok": True, "returncode": 0},
+    }
+
+
+def test_setup_arm_nu_skips_install_without_cache_dir(tmp_path: Path) -> None:
+    task_dir = tmp_path / "run"
+    task_dir.mkdir()
+    (task_dir / "package.json").write_text("{}\n", encoding="utf-8")
+
+    assert ta.setup_arm_nu(task_dir) == {"arm": "nu", "added": []}
+
+
+def test_run_one_records_test_deps_install_outcome_from_setup_result(
+    synthetic_bench_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    task = ta.discover_catalog(synthetic_bench_root)[0]
+    workspace = tmp_path / "workspace"
+    homes = {arm: workspace / "homes" / arm for arm in ta.ARMS}
+    for home in homes.values():
+        ta.ensure_isolated_home(home)
+
+    monkeypatch.setattr(
+        ta,
+        "setup_arm_nu",
+        lambda task_dir, *, npm_cache_dir=None: {
+            "arm": "nu",
+            "added": [],
+            "test_deps_install": {"attempted": True, "ok": False, "returncode": 1},
+        },
+    )
+
+    @contextlib.contextmanager
+    def fake_credentials(home: Path, real_home: Path | None = None):
+        del home, real_home
+        yield "fake-token"
+
+    monkeypatch.setattr(ta, "credentials_provisioned", fake_credentials)
+    monkeypatch.setattr(ta, "run_claude_headless", lambda *a, **k: ta.RunOutcome(terminated_reason="completed"))
+    monkeypatch.setattr(ta, "run_hidden_tests", lambda *a, **k: (True, ""))
+    monkeypatch.setattr(ta, "cleanup_build_artifacts", lambda *_: None)
+
+    record = ta._run_one(
+        task,
+        "nu",
+        0,
+        workspace=workspace,
+        ecc_repo=tmp_path / "ecc-repo-unused",
+        homes=homes,
+        go_bin=None,
+        run_timeout_s=5,
+    )
+
+    assert record.test_deps_install_ok is False
+
+
+def test_build_report_counts_test_deps_install_per_arm() -> None:
+    records = [
+        ta.RunRecord(
+            "javascript/a", "javascript", "nu", 0, True, 0.1, 10, 10, 1, 5.0, "completed", test_deps_install_ok=True
+        ),
+        ta.RunRecord(
+            "javascript/a", "javascript", "nu", 1, True, 0.1, 10, 10, 1, 5.0, "completed", test_deps_install_ok=False
+        ),
+        ta.RunRecord("python/b", "python", "nu", 0, True, 0.1, 10, 10, 1, 5.0, "completed"),
+    ]
+    report = ta.build_report(records, total_tasks=2, expected_cost=None, seed=0)
+    assert report["per_arm"]["nu"]["test_deps_install_attempted"] == 2
+    assert report["per_arm"]["nu"]["test_deps_install_ok"] == 1
+    rendered = ta.render_report_markdown(report)
+    assert "Dépendances de test installées avant l'agent" in rendered
+
+
 def test_run_one_wires_kit_gov_setup_and_collects_governed_evidence(
     synthetic_bench_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -821,8 +980,15 @@ def test_run_one_wires_kit_gov_setup_and_collects_governed_evidence(
 
     setup_calls: list[tuple[Path, str]] = []
 
-    def fake_setup_arm_kit_gov(task_dir: Path, *, kit_home: Path, task_id: str, timeout: int = 180) -> dict[str, Any]:
-        del kit_home, timeout
+    def fake_setup_arm_kit_gov(
+        task_dir: Path,
+        *,
+        kit_home: Path,
+        task_id: str,
+        timeout: int = 180,
+        npm_cache_dir: Path | None = None,
+    ) -> dict[str, Any]:
+        del kit_home, timeout, npm_cache_dir
         setup_calls.append((task_dir, task_id))
         return {"arm": "kit-gov", "added": []}
 
@@ -871,6 +1037,7 @@ def test_build_report_kit_gov_runs_detail_and_dynamic_per_task_header() -> None:
             100.0,
             "completed",
             kit_test_run_evidence=True,
+            test_deps_install_ok=None,
         ),
     ]
     report = ta.build_report(records, total_tasks=1, expected_cost=None, seed=0, rerun_arms=("kit-gov",))
@@ -882,6 +1049,7 @@ def test_build_report_kit_gov_runs_detail_and_dynamic_per_task_header() -> None:
             "total_cost_usd": 0.5,
             "wall_seconds": 100.0,
             "test_run_evidence": True,
+            "test_deps_install_ok": None,
         }
     ]
     rendered = ta.render_report_markdown(report)

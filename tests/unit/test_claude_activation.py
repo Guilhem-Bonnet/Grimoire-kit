@@ -11,13 +11,40 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from grimoire.core import standard_generation as gen
 from grimoire.core.claude_activation import (
     ACTIVATION_CONTEXT_RELPATH,
     HOOK_COMMAND,
     SETTINGS_RELPATH,
+    activation_context_needs_refresh,
     activation_context_text,
+    activation_directive_template,
     default_activation_directive,
     install_claude_activation,
+)
+
+#: Verbatim wording shipped between #585 (lot B) and #597 (lot G1) — 824
+#: characters, ``{task_id}`` placeholder literal, exactly as that era's
+#: ``install_claude_activation`` wrote it to disk. Frozen here independently
+#: of ``claude_activation._HISTORICAL_DIRECTIVE_TEMPLATES``: these tests must
+#: keep failing if that list ever loses the entry, not silently pass because
+#: both sides drifted together.
+_STALE_824_CHAR_TEMPLATE = (
+    "[Grimoire Standard — activation]\n"
+    "Ce projet est gouverné par le standard agentique Grimoire. Ces étapes font\n"
+    "partie de la tâche demandée :\n"
+    "1. AVANT toute modification de code : remplis\n"
+    "   `_grimoire-output/evidence/{task_id}/task-envelope.md` — objectif,\n"
+    "   périmètre outillé (tool boundary) concret, critères de sortie.\n"
+    "2. PENDANT le travail : consigne chaque preuve (commande exécutée, test\n"
+    "   vert, diff clé) comme ligne concrète de l'inventaire dans\n"
+    "   `_grimoire-output/evidence/{task_id}/evidence-pack.md`, et remplace le\n"
+    "   résumé placeholder.\n"
+    "3. AVANT de conclure : exécute\n"
+    "   `grimoire standard gate run-tests --task-id {task_id}` puis\n"
+    "   `grimoire standard gate check --task-id {task_id} --strict` puis\n"
+    "   `grimoire standard verify .` et corrige tout échec.\n"
+    "Une clôture sans gates verts est une tâche non terminée.\n"
 )
 
 
@@ -174,3 +201,110 @@ def test_directive_no_longer_mandates_run_tests_or_verify_separately() -> None:
 def test_governed_directive_stays_under_the_four_hundred_character_budget() -> None:
     directive = default_activation_directive("bootstrap")
     assert len(directive) <= 400, len(directive)
+
+
+# ── Ownership & refresh (issue #582, lot G4) ──────────────────────────────────
+#
+# `.claude/activation-context.md` is a kit-owned file: before this lot,
+# `install_claude_activation` only ever checked whether it existed, so a
+# project enrolled under an old kit version kept that wording forever — never
+# refreshed by `grimoire up`. It is now tracked the same way as the other
+# standard artifacts, through `standard_generation`'s generation manifest.
+
+
+def _seed_pre_manifest_context(tmp_path: Path, content: str) -> Path:
+    """A ``.claude/activation-context.md`` written by a past kit version,
+    predating the generation manifest entirely — the real shape of every
+    project enrolled before this fix."""
+    context_path = tmp_path / ACTIVATION_CONTEXT_RELPATH
+    context_path.parent.mkdir(parents=True, exist_ok=True)
+    context_path.write_text(content, encoding="utf-8")
+    return context_path
+
+
+def test_refresh_updates_a_stale_known_rendering_predating_the_manifest(tmp_path: Path) -> None:
+    assert len(_STALE_824_CHAR_TEMPLATE) == 824
+    context_path = _seed_pre_manifest_context(tmp_path, _STALE_824_CHAR_TEMPLATE)
+
+    result = install_claude_activation(tmp_path, refresh=True)
+
+    assert context_path.read_text(encoding="utf-8") == activation_directive_template()
+    assert ACTIVATION_CONTEXT_RELPATH in result.written
+    assert result.context_needs_review is False
+    # Adopted into the manifest: a second refresh is a no-op, not a rewrite.
+    manifest = gen.load_generation_manifest(tmp_path)
+    assert manifest[str(ACTIVATION_CONTEXT_RELPATH)] == gen.digest(context_path)
+
+
+def test_a_plain_call_without_refresh_leaves_a_stale_known_rendering_in_place(tmp_path: Path) -> None:
+    """Same contract as every other standard artifact: refreshing an
+    untouched-but-stale file only happens when the caller asks for it
+    (``grimoire up``'s ``refresh=already_initialized``) — a bare call (e.g. a
+    plain ``grimoire standard init`` rerun) never rewrites on its own."""
+    context_path = _seed_pre_manifest_context(tmp_path, _STALE_824_CHAR_TEMPLATE)
+
+    result = install_claude_activation(tmp_path)
+
+    assert context_path.read_text(encoding="utf-8") == _STALE_824_CHAR_TEMPLATE
+    assert ACTIVATION_CONTEXT_RELPATH not in result.written
+    assert result.context_needs_review is False
+    # Still adopted into the manifest — the recognition ran regardless, only
+    # the write is gated on `refresh`.
+    manifest = gen.load_generation_manifest(tmp_path)
+    assert str(ACTIVATION_CONTEXT_RELPATH) in manifest
+
+
+def test_refresh_leaves_a_genuinely_edited_context_alone_and_flags_it(tmp_path: Path) -> None:
+    custom = "Notre directive maison, jamais générée par le kit.\n"
+    context_path = _seed_pre_manifest_context(tmp_path, custom)
+
+    result = install_claude_activation(tmp_path, refresh=True)
+
+    assert context_path.read_text(encoding="utf-8") == custom
+    assert ACTIVATION_CONTEXT_RELPATH not in result.written
+    assert result.context_needs_review is True
+
+
+def test_force_overwrites_a_genuinely_edited_context(tmp_path: Path) -> None:
+    custom = "Notre directive maison, jamais générée par le kit.\n"
+    context_path = _seed_pre_manifest_context(tmp_path, custom)
+
+    result = install_claude_activation(tmp_path, force=True)
+
+    assert context_path.read_text(encoding="utf-8") == activation_directive_template()
+    assert ACTIVATION_CONTEXT_RELPATH in result.written
+    assert result.context_needs_review is False
+
+
+def test_a_current_rendering_is_adopted_without_being_rewritten(tmp_path: Path) -> None:
+    """Predates the manifest but already matches today's wording: nothing to
+    write, only the digest needs recording so it becomes refreshable later."""
+    context_path = _seed_pre_manifest_context(tmp_path, activation_directive_template())
+
+    result = install_claude_activation(tmp_path, refresh=True)
+
+    assert context_path.read_text(encoding="utf-8") == activation_directive_template()
+    assert ACTIVATION_CONTEXT_RELPATH not in result.written
+    manifest = gen.load_generation_manifest(tmp_path)
+    assert str(ACTIVATION_CONTEXT_RELPATH) in manifest
+
+
+def test_activation_context_needs_refresh_predicate_is_read_only(tmp_path: Path) -> None:
+    context_path = _seed_pre_manifest_context(tmp_path, _STALE_824_CHAR_TEMPLATE)
+
+    assert activation_context_needs_refresh(tmp_path) is True
+    # Purely a read: nothing written, nothing adopted into the manifest.
+    assert context_path.read_text(encoding="utf-8") == _STALE_824_CHAR_TEMPLATE
+    assert gen.load_generation_manifest(tmp_path) == {}
+
+    assert activation_context_needs_refresh(tmp_path / "no-such-project") is False
+
+
+def test_activation_context_needs_refresh_is_false_for_the_current_rendering(tmp_path: Path) -> None:
+    install_claude_activation(tmp_path)
+    assert activation_context_needs_refresh(tmp_path) is False
+
+
+def test_activation_context_needs_refresh_is_false_for_a_genuine_edit(tmp_path: Path) -> None:
+    _seed_pre_manifest_context(tmp_path, "Notre directive maison.\n")
+    assert activation_context_needs_refresh(tmp_path) is False

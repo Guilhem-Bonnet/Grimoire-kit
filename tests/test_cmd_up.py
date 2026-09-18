@@ -604,3 +604,102 @@ class TestUpTaskUnification:
         assert result.exit_code == 0, result.output
         assert "task_unification" in result.output
         assert "failed" not in result.output.lower()
+
+
+# ── Activation context ownership (issue #582, lot G4) ─────────────────────────
+#
+# `.claude/activation-context.md` is a kit-owned file, tracked the same way
+# as the other standard artifacts. Before this lot, `install_claude_activation`
+# only ever checked whether the file existed: a project enrolled under an
+# older kit version kept whatever wording was current on enrollment day
+# forever, and neither `grimoire up` nor `host sync` ever touched it.
+
+#: Verbatim wording shipped between #585 (lot B) and #597 (lot G1) — 824
+#: characters, `{task_id}` placeholder literal exactly as it was written to
+#: disk by that era's `install_claude_activation`. Frozen here independently
+#: of `claude_activation._HISTORICAL_DIRECTIVE_TEMPLATES`: this test must keep
+#: failing if that list ever loses the entry, not silently pass because both
+#: sides drifted together.
+_STALE_824_CHAR_ACTIVATION_CONTEXT = (
+    "[Grimoire Standard — activation]\n"
+    "Ce projet est gouverné par le standard agentique Grimoire. Ces étapes font\n"
+    "partie de la tâche demandée :\n"
+    "1. AVANT toute modification de code : remplis\n"
+    "   `_grimoire-output/evidence/{task_id}/task-envelope.md` — objectif,\n"
+    "   périmètre outillé (tool boundary) concret, critères de sortie.\n"
+    "2. PENDANT le travail : consigne chaque preuve (commande exécutée, test\n"
+    "   vert, diff clé) comme ligne concrète de l'inventaire dans\n"
+    "   `_grimoire-output/evidence/{task_id}/evidence-pack.md`, et remplace le\n"
+    "   résumé placeholder.\n"
+    "3. AVANT de conclure : exécute\n"
+    "   `grimoire standard gate run-tests --task-id {task_id}` puis\n"
+    "   `grimoire standard gate check --task-id {task_id} --strict` puis\n"
+    "   `grimoire standard verify .` et corrige tout échec.\n"
+    "Une clôture sans gates verts est une tâche non terminée.\n"
+)
+
+
+def _seed_legacy_claude_activation(target: Path, content: str) -> Path:
+    """Write *content* as an already-enrolled project's activation context,
+    with the SessionStart hook already registered — the shape a project
+    enrolled under a past kit version has, predating the generation
+    manifest entirely."""
+    claude_dir = target / ".claude"
+    claude_dir.mkdir(parents=True, exist_ok=True)
+    context_path = claude_dir / "activation-context.md"
+    context_path.write_text(content, encoding="utf-8")
+    (claude_dir / "settings.json").write_text(
+        json.dumps({
+            "hooks": {
+                "SessionStart": [
+                    {"hooks": [{"type": "command", "command": "grimoire standard activation-context"}]},
+                ],
+            },
+        }),
+        encoding="utf-8",
+    )
+    return context_path
+
+
+class TestUpActivationContextRefresh:
+    def test_up_refreshes_a_stale_but_untouched_activation_context(self, runner, cli_app, tmp_path: Path) -> None:
+        target = tmp_path / "proj"
+        first = runner.invoke(cli_app, ["up", str(target), "--backend", "local"])
+        assert first.exit_code == 0, first.output
+
+        assert len(_STALE_824_CHAR_ACTIVATION_CONTEXT) == 824
+        context_path = _seed_legacy_claude_activation(target, _STALE_824_CHAR_ACTIVATION_CONTEXT)
+
+        second = runner.invoke(cli_app, ["up", str(target), "--backend", "local"])
+        assert second.exit_code == 0, second.output
+        refreshed = context_path.read_text(encoding="utf-8")
+        assert len(refreshed) == 396, refreshed
+        assert "activation-context.md refreshed" in second.output
+
+    def test_up_leaves_a_hand_edited_activation_context_alone_and_flags_it(
+        self, runner, cli_app, tmp_path: Path,
+    ) -> None:
+        target = tmp_path / "proj"
+        first = runner.invoke(cli_app, ["up", str(target), "--backend", "local"])
+        assert first.exit_code == 0, first.output
+
+        custom = "Notre directive maison, jamais générée par le kit.\n"
+        context_path = _seed_legacy_claude_activation(target, custom)
+
+        second = runner.invoke(cli_app, ["up", str(target), "--backend", "local"])
+        assert second.exit_code == 0, second.output
+        assert context_path.read_text(encoding="utf-8") == custom
+        assert "à revoir" in second.output
+
+    def test_dry_run_reports_a_pending_refresh_without_writing(self, runner, cli_app, tmp_path: Path) -> None:
+        target = tmp_path / "proj"
+        first = runner.invoke(cli_app, ["up", str(target), "--backend", "local"])
+        assert first.exit_code == 0, first.output
+
+        context_path = _seed_legacy_claude_activation(target, _STALE_824_CHAR_ACTIVATION_CONTEXT)
+
+        result = runner.invoke(cli_app, ["up", str(target), "--dry-run"])
+        assert result.exit_code == 0, result.output
+        assert "activation-context.md" in result.output
+        # Read-only: the file on disk is untouched.
+        assert context_path.read_text(encoding="utf-8") == _STALE_824_CHAR_ACTIVATION_CONTEXT
