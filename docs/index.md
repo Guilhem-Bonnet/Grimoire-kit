@@ -75,5 +75,6 @@ grimoire-kit/
 | [Banc à trois bras](bench-three-arms.md) | Protocole Claude Code nu / + ecc / + grimoire-kit, rejouable (issue #551) |
 | [Diagnostic du surcoût kit (2026-09-17)](bench/diagnostic-surcout-kit-2026-09-17.md) | Attribution du surcoût mesuré sur le banc, preuve des gates verts déconnectés des tests, lots de cœur |
 | [Rejeu du banc après les lots A/B/C (2026-09-17)](bench/rejeu-lot-e-2026-09-17.md) | Verdict du lot E : surcoût de tours éliminé, coût encore au-dessus de 70 % du nu, lot B jamais exercé par le banc |
+| [Rejeu du bras `kit-gov` (2026-09-17)](bench/rejeu-lot-f-2026-09-17.md) | Verdict du lot F : la gouvernance non dosée coûte ×4,6 pour -7 points de succès sur un projet réellement enrôlé, lot B enfin mesurable |
 | [Direction d'Anthropic — chevaucher/envelopper/ignorer](veille/anthropic-direction-2026-09.md) | Verdict par capacité Anthropic récente, lot du plan qui l'absorbe |
 | [Idées à récolter — instruction et verdict](veille/idees-a-recolter-2026-09.md) | Adopter/adapter/écarter par idée concurrente, fichier source et licence |
