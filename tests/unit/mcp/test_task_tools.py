@@ -147,7 +147,7 @@ def board_status(projet: Path, task_id: str) -> str:
 def hook_nomme(projet: Path) -> str:
     """La tâche que le hook SessionStart injecte — via la directive, pas le détail."""
     decision = decide_activation(HookInput(event=HookEvent.SESSION_START, project_root=projet))
-    ligne = next(line for line in decision.context.splitlines() if "task-envelope.md" in line)
+    ligne = next(line for line in decision.context.splitlines() if "_grimoire-output/evidence/" in line)
     return ligne.split("evidence/")[1].split("/")[0]
 
 

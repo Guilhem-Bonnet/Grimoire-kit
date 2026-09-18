@@ -16,7 +16,7 @@ class TestActivationContext:
     def test_prints_builtin_directive(self, tmp_path: Path) -> None:
         result = runner.invoke(app, ["standard", "activation-context", str(tmp_path)])
         assert result.exit_code == 0
-        assert "[Grimoire Standard — activation]" in result.output
+        assert "[Grimoire Standard]" in result.output
         assert "gate check --task-id bootstrap --strict" in result.output
 
     def test_prefers_project_file(self, tmp_path: Path) -> None:

@@ -31,28 +31,21 @@ ACTIVATION_CONTEXT_RELPATH = Path(".claude") / "activation-context.md"
 SETTINGS_RELPATH = Path(".claude") / "settings.json"
 HOOK_COMMAND = "grimoire standard activation-context"
 
-#: Étape 3 mentionne ``gate run-tests`` avant ``gate check`` depuis l'issue
-#: #582 lot B (revue de la PR #585) : sans ce run, un critère « passé »
-#: reste une déclaration de texte libre que ``gate check``/``verify``
-#: signalent désormais en avertissement (``acceptance.passed_without_test_run``) —
-#: ajouté en une ligne, sans allonger le reste de la directive.
-_DIRECTIVE_TEMPLATE = """[Grimoire Standard — activation]
-Ce projet est gouverné par le standard agentique Grimoire. Ces étapes font
-partie de la tâche demandée :
-1. AVANT toute modification de code : complète
-   `_grimoire-output/evidence/{task_id}/task-envelope.md` — objectif,
-   périmètre outillé (tool boundary) concret, critères de sortie. Le
-   squelette existe déjà (hook SessionStart) ; sinon
-   `grimoire standard task scaffold --task-id {task_id}` le crée.
-2. PENDANT le travail : consigne chaque preuve (commande exécutée, test
-   vert, diff clé) comme ligne concrète de l'inventaire dans
-   `_grimoire-output/evidence/{task_id}/evidence-pack.md`, et remplace le
-   résumé placeholder.
-3. AVANT de conclure : exécute
-   `grimoire standard gate run-tests --task-id {task_id}` puis
-   `grimoire standard gate check --task-id {task_id} --strict` puis
-   `grimoire standard verify .` et corrige tout échec.
-Une clôture sans gates verts est une tâche non terminée.
+#: Issue #582 lot G3 : le banc à trois bras du 2026-09-17
+#: (``_scratch/bench-f/analyse-tours-kit-gov.md``, 21 runs) a mesuré que le
+#: rituel mandaté en trois étapes (enveloppe, pack, ``gate run-tests`` puis
+#: ``gate check --strict`` puis ``standard verify .``) coûtait une médiane de
+#: 31 tours par run contre 6 pour Claude nu — l'agent exécute à la main ce
+#: que le kit sait déjà faire lui-même : le lot G1 scaffolde les artefacts par
+#: tâche au ``SessionStart`` (``standard_task_scaffold.py``) et ``gate check
+#: --strict`` lance déjà ``gate run-tests`` pour son compte
+#: (``standard_checks/gate_test_run.py::ensure_fresh_test_run``) quand une
+#: commande de test est connue. La directive n'a donc plus qu'une seule
+#: commande à mandater ; ``gate check --strict`` reste la seule porte de
+#: sortie, ``verify`` n'apportant rien sur le chemin d'une tâche que ce gate
+#: ne couvre déjà (voir ``check_evidence_gates`` : task-envelope, pack de
+#: preuve, claim-ledger, acceptance-record, run de test).
+_DIRECTIVE_TEMPLATE = """[Grimoire Standard] La tâche {task_id} est gouvernée : ses artefacts sont déjà en place sous `_grimoire-output/evidence/{task_id}/` et tes actions sont journalisées. Fais le travail demandé. Avant de conclure, exécute `grimoire standard gate check --task-id {task_id} --strict` et corrige ce qu'il rapporte : il lance les tests, lit tes actions et nomme le fichier à compléter s'il en manque un.
 """
 
 

@@ -1361,8 +1361,8 @@ def test_the_validated_directive_survives_the_persona(governed: Path) -> None:
     court, voir ``test_an_ungoverned_project_gets_the_short_notice_instead``.
     """
     context = _session_start(governed)
-    assert "[Grimoire Standard — activation]" in context
-    assert context.index("[Grimoire — persona d'entrée]") < context.index("[Grimoire Standard — activation]")
+    assert "[Grimoire Standard]" in context
+    assert context.index("[Grimoire — persona d'entrée]") < context.index("[Grimoire Standard]")
 
 
 def test_a_project_without_an_entry_persona_keeps_the_bare_directive(tmp_path: Path) -> None:
@@ -1385,15 +1385,20 @@ def test_an_ungoverned_project_gets_the_short_notice_instead(tmp_path: Path) -> 
     """
     _write_agent(tmp_path, "scribe", "Tu rédiges la documentation.")
     context = _session_start(tmp_path)
-    assert "[Grimoire Standard — activation]" not in context
+    assert "[Grimoire Standard]" not in context
     assert "task-envelope.md" not in context
     assert "gate check --task-id" not in context
     assert "[Grimoire — projet non gouverné]" in context
-    # Le court-circuit doit rester court : très inférieur à la directive complète.
+    # Le court-circuit doit rester court : plus court que la directive
+    # gouvernée complète. Depuis le lot G3 (issue #582), cette dernière tient
+    # elle-même en moins de 400 caractères (un seul mandat, `gate check
+    # --strict` absorbe scaffold et tests) — l'écart n'est donc plus du
+    # simple au double, mais l'invariant reste : le court-circuit ne doit
+    # jamais dépasser la directive qu'il remplace.
     short_len = len(context)
     governed_len = len(activation_context_text(tmp_path, task_id="bootstrap"))
     assert short_len < 400
-    assert short_len < governed_len / 2
+    assert short_len < governed_len
 
 
 def test_the_hook_names_the_persona_it_injected(project: Path) -> None:
@@ -1501,7 +1506,7 @@ def test_le_rappel_de_tache_arrive_au_claim_entre_la_persona_et_la_directive(gov
     assert (
         context.index("[Grimoire — persona d'entrée]")
         < context.index("[Grimoire — rappel de tâche]")
-        < context.index("[Grimoire Standard — activation]")
+        < context.index("[Grimoire Standard]")
     )
 
 
