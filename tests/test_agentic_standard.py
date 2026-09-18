@@ -1216,7 +1216,12 @@ def _emitted_check_ids() -> set[str]:
 
     core = Path(__file__).resolve().parent.parent / "src" / "grimoire" / "core"
     modules = [core / "agentic_standard.py", core / "standard_checks" / "verifiers.py",
-               core / "standard_checks" / "controls.py"]
+               core / "standard_checks" / "controls.py",
+               # Issue #582 lot I : extraits de verifiers.py/controls.py (ratchet de taille) —
+               # sans ces trois modules, le registre certifierait moins que ce que le kit émet.
+               core / "standard_checks" / "gate_test_run.py",
+               core / "standard_checks" / "claim_ledger_verify.py",
+               core / "standard_checks" / "no_tests_collected.py"]
     trees = {path: ast.parse(path.read_text(encoding="utf-8")) for path in
              [*modules, core / "standard_checks" / "base.py"]}
 
@@ -1405,6 +1410,22 @@ def _test_runner_context(exit_code: int) -> str:
     return f"project:\n  name: demo\nneeds:\n  commands:\n    test-runner: '{command}'\n"
 
 
+def _no_tests_collected_context(root: Path, exit_code: int = 1) -> str:
+    """Une commande façon `npm test` -> jest : sort en *exit_code* après « No tests found » (issue #582 lot I).
+
+    Le message vit dans un fichier script (jamais inline dans le YAML/`-c`) :
+    aucun guillemet à faire cohabiter entre YAML, shell et Python — même
+    piège que celui documenté sur ``_test_runner_context``, mais un message
+    littéral ne peut pas s'écrire sans guillemet dans le code passé à ``-c``.
+    """
+    import sys
+
+    script = root / "_no_tests_collected.py"
+    script.write_text("import sys\nprint('No tests found, exiting with code 1')\nsys.exit(" + str(exit_code) + ")\n", encoding="utf-8")
+    command = f'"{sys.executable}" "{script}"'
+    return f"project:\n  name: demo\nneeds:\n  commands:\n    test-runner: '{command}'\n"
+
+
 def _claimed_ledger_task(root: Path) -> str:
     """Une tâche réclamée (``in_progress`` sur le board) — le chemin réel de `grimoire task add` + `claim`."""
     from grimoire.missions.schemas import TaskState
@@ -1547,3 +1568,238 @@ def test_gate_check_strict_owes_no_run_before_the_task_starts(tmp_path: Path) ->
     assert result["ok"] is True and result["test_run"] == {
         "ran": False, "reason": "state_owes_no_run", "command": "", "ok": None, "exit_code": None, "path": None,
     }
+
+
+# ── Dosage du gate : rien collecté ≠ rouge, pas de rejeu, V0 (issue #582 lot I) ──
+
+
+def test_cli_gate_check_strict_warns_instead_of_failing_when_nothing_collected(tmp_path: Path) -> None:
+    """I-1 rouge-avant : un `npm test` façon jest (« No tests found », exit 1) devenait `acceptance.test_run_failed`
+    (erreur, non corrigeable par le travail demandé — lot H, 0/15 runs JS). Devient un avertissement."""
+    from grimoire.core.standard_task_scaffold import scaffold_task_artifacts
+
+    setup_standard_profile(tmp_path, profile_id="starter")
+    (tmp_path / "project-context.yaml").write_text(_no_tests_collected_context(tmp_path), encoding="utf-8")
+    task_id = _claimed_ledger_task(tmp_path)
+    scaffold_task_artifacts(tmp_path, task_id=task_id)
+    runner = CliRunner()
+
+    result = json.loads(
+        runner.invoke(app, ["-o", "json", "standard", "gate", "check", str(tmp_path), "--task-id", task_id, "--strict"]).output
+    )
+
+    assert result["ok"] is True, "« rien collecté » n'est pas un rouge : pas d'erreur"
+    assert result["test_run"]["ran"] is True and result["test_run"]["ok"] is None
+    warnings = [c for c in result["checks"] if c["id"] == "acceptance.no_tests_collected"]
+    assert len(warnings) == 1 and warnings[0]["severity"] == "warning"
+    recorded = json.loads((tmp_path / f"_grimoire-output/evidence/{task_id}/test-run.json").read_text(encoding="utf-8"))
+    assert recorded["ok"] is None and recorded["collected"] == 0
+
+
+def test_cli_gate_check_strict_no_tests_collected_silenced_by_justification(tmp_path: Path) -> None:
+    """Une ligne `sans test : <raison>` dans `acceptance-record.md` éteint l'avertissement."""
+    from grimoire.core.standard_task_scaffold import scaffold_task_artifacts
+
+    setup_standard_profile(tmp_path, profile_id="starter")
+    (tmp_path / "project-context.yaml").write_text(_no_tests_collected_context(tmp_path), encoding="utf-8")
+    task_id = _claimed_ledger_task(tmp_path)
+    scaffold_task_artifacts(tmp_path, task_id=task_id)
+    record_path = tmp_path / f"_grimoire-output/evidence/{task_id}/acceptance-record.md"
+    record_path.write_text(
+        record_path.read_text(encoding="utf-8") + "\nsans test : tests caches par le harnais, juges par le validateur.\n",
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+
+    result = json.loads(
+        runner.invoke(app, ["-o", "json", "standard", "gate", "check", str(tmp_path), "--task-id", task_id, "--strict"]).output
+    )
+
+    assert result["ok"] is True
+    assert not [c for c in result["checks"] if c["id"] == "acceptance.no_tests_collected"]
+
+
+def test_cli_gate_check_strict_no_tests_collected_is_an_error_in_governed_review(tmp_path: Path) -> None:
+    """Matrice état x profil : profil strict + état review/accepted/released + pas de justification -> erreur."""
+    from grimoire.core.standard_task_scaffold import scaffold_task_artifacts
+
+    setup_standard_profile(tmp_path, profile_id="governed")
+    (tmp_path / "project-context.yaml").write_text(_no_tests_collected_context(tmp_path), encoding="utf-8")
+    task_id = _claimed_ledger_task(tmp_path)
+    scaffold_task_artifacts(tmp_path, task_id=task_id, profile_id="governed")
+    runner = CliRunner()
+    argv = [
+        "-o", "json", "standard", "gate", "check", str(tmp_path),
+        "--task-id", task_id, "--strict", "--target-state", "review",
+    ]
+
+    result = json.loads(runner.invoke(app, argv).output)
+
+    errors = [c for c in result["checks"] if c["id"] == "acceptance.no_tests_collected"]
+    assert len(errors) == 1 and errors[0]["severity"] == "error"
+    assert result["ok"] is False
+
+
+def test_cli_gate_check_strict_no_tests_collected_stays_a_warning_in_progress_even_when_governed(tmp_path: Path) -> None:
+    """Même profil strict : en cours de travail (`in_progress`), rien n'interdit encore d'écrire le test — avertissement."""
+    from grimoire.core.standard_task_scaffold import scaffold_task_artifacts
+
+    setup_standard_profile(tmp_path, profile_id="governed")
+    (tmp_path / "project-context.yaml").write_text(_no_tests_collected_context(tmp_path), encoding="utf-8")
+    task_id = _claimed_ledger_task(tmp_path)
+    scaffold_task_artifacts(tmp_path, task_id=task_id, profile_id="governed")
+    runner = CliRunner()
+    argv = ["-o", "json", "standard", "gate", "check", str(tmp_path), "--task-id", task_id, "--strict"]
+
+    result = json.loads(runner.invoke(app, argv).output)
+
+    warnings = [c for c in result["checks"] if c["id"] == "acceptance.no_tests_collected"]
+    assert len(warnings) == 1 and warnings[0]["severity"] == "warning"
+
+
+def test_cli_gate_check_strict_does_not_rerun_a_matching_red_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """I-2 rouge-avant : deux `gate check --strict` consécutifs sur un run rouge -> une seule exécution ; `--rerun` en force une seconde."""
+    import grimoire.core.standard_checks.acceptance_test_run as acceptance_test_run_module
+    from grimoire.core.standard_task_scaffold import scaffold_task_artifacts
+
+    setup_standard_profile(tmp_path, profile_id="starter")
+    (tmp_path / "project-context.yaml").write_text(_test_runner_context(1), encoding="utf-8")
+    task_id = _claimed_ledger_task(tmp_path)
+    scaffold_task_artifacts(tmp_path, task_id=task_id)
+
+    calls: list[int] = []
+    original = acceptance_test_run_module.record_acceptance_test_run
+
+    def _counting_record(*args: object, **kwargs: object) -> object:
+        calls.append(1)
+        return original(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(acceptance_test_run_module, "record_acceptance_test_run", _counting_record)
+    runner = CliRunner()
+    argv = ["-o", "json", "standard", "gate", "check", str(tmp_path), "--task-id", task_id, "--strict"]
+
+    first = json.loads(runner.invoke(app, argv).output)
+    second = json.loads(runner.invoke(app, argv).output)
+
+    assert first["test_run"]["ran"] is True and first["test_run"]["ok"] is False
+    assert second["test_run"] == {**first["test_run"], "ran": False, "reason": "fresh_run"}
+    assert len(calls) == 1, "run rouge identique : une seule exécution, pas deux"
+
+    rerun = json.loads(runner.invoke(app, [*argv, "--rerun"]).output)
+    assert rerun["test_run"]["ran"] is True
+    assert len(calls) == 2, "--rerun force malgré tout une nouvelle exécution"
+
+
+def test_cli_gate_check_strict_does_not_rerun_a_matching_nothing_collected_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Même garantie pour « rien collecté » (lot H : le cas JS, 3 appels `gate check` identiques sur 15/15 runs)."""
+    import grimoire.core.standard_checks.acceptance_test_run as acceptance_test_run_module
+    from grimoire.core.standard_task_scaffold import scaffold_task_artifacts
+
+    setup_standard_profile(tmp_path, profile_id="starter")
+    (tmp_path / "project-context.yaml").write_text(_no_tests_collected_context(tmp_path), encoding="utf-8")
+    task_id = _claimed_ledger_task(tmp_path)
+    scaffold_task_artifacts(tmp_path, task_id=task_id)
+
+    calls: list[int] = []
+    original = acceptance_test_run_module.record_acceptance_test_run
+
+    def _counting_record(*args: object, **kwargs: object) -> object:
+        calls.append(1)
+        return original(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(acceptance_test_run_module, "record_acceptance_test_run", _counting_record)
+    runner = CliRunner()
+    argv = ["-o", "json", "standard", "gate", "check", str(tmp_path), "--task-id", task_id, "--strict"]
+
+    runner.invoke(app, argv)
+    runner.invoke(app, argv)
+    runner.invoke(app, argv)
+
+    assert len(calls) == 1, "rien collecté, identique : une seule exécution sur trois appels"
+
+
+def test_cli_gate_check_v0_task_is_ok_with_no_content_warnings_at_review(tmp_path: Path) -> None:
+    """I-3 rouge-avant : une tâche V0 verte, en revue, portait `acceptance.decision_pending` et `claims.empty` ; plus après."""
+    from grimoire.core.standard_task_scaffold import scaffold_task_artifacts
+    from grimoire.missions.schemas import TaskState
+    from grimoire.missions.service import TaskService
+
+    setup_standard_profile(tmp_path, profile_id="starter")
+    (tmp_path / "project-context.yaml").write_text(_test_runner_context(0), encoding="utf-8")
+    service = TaskService(tmp_path)
+    mission = service.ledger.create_mission(title="Travaux", origin="test")
+    task = service.ledger.create_task(mission.id, "Ajouter une fonction", acceptance=("les tests passent",))
+    service.ledger.transition_task(task.id, TaskState.READY, actor_id="a")
+    service.ledger.claim_task(task.id, "a", "local")
+    service.project_board()
+    scaffold_task_artifacts(tmp_path, task_id=task.id)
+    runner = CliRunner()
+    argv = [
+        "-o", "json", "standard", "gate", "check", str(tmp_path),
+        "--task-id", task.id, "--strict", "--target-state", "review",
+    ]
+
+    result = json.loads(runner.invoke(app, argv).output)
+
+    assert result["ok"] is True
+    ids = {c["id"] for c in result["checks"]}
+    assert "acceptance.decision_pending" not in ids
+    assert "claims.empty" not in ids
+
+
+def test_cli_gate_check_v1_task_keeps_content_warnings_at_review(tmp_path: Path) -> None:
+    """La même mécanique, sur une tâche V1 (critère de revue humaine) : les avertissements restent."""
+    from grimoire.core.standard_task_scaffold import scaffold_task_artifacts
+    from grimoire.missions.schemas import TaskState
+    from grimoire.missions.service import TaskService
+
+    setup_standard_profile(tmp_path, profile_id="starter")
+    (tmp_path / "project-context.yaml").write_text(_test_runner_context(0), encoding="utf-8")
+    service = TaskService(tmp_path)
+    mission = service.ledger.create_mission(title="Travaux", origin="test")
+    task = service.ledger.create_task(mission.id, "Revoir le design", acceptance=("revue par le PO",))
+    service.ledger.transition_task(task.id, TaskState.READY, actor_id="a")
+    service.ledger.claim_task(task.id, "a", "local")
+    service.project_board()
+    scaffold_task_artifacts(tmp_path, task_id=task.id)
+    runner = CliRunner()
+    argv = [
+        "-o", "json", "standard", "gate", "check", str(tmp_path),
+        "--task-id", task.id, "--strict", "--target-state", "review",
+    ]
+
+    result = json.loads(runner.invoke(app, argv).output)
+
+    ids = {c["id"] for c in result["checks"]}
+    assert "acceptance.decision_pending" in ids
+    assert "claims.empty" in ids
+
+
+def test_cli_gate_check_v0_task_keeps_content_warnings_when_governed(tmp_path: Path) -> None:
+    """Le profil `governed` n'est jamais dosé, même pour une tâche V0."""
+    from grimoire.core.standard_task_scaffold import scaffold_task_artifacts
+    from grimoire.missions.schemas import TaskState
+    from grimoire.missions.service import TaskService
+
+    setup_standard_profile(tmp_path, profile_id="governed")
+    (tmp_path / "project-context.yaml").write_text(_test_runner_context(0), encoding="utf-8")
+    service = TaskService(tmp_path)
+    mission = service.ledger.create_mission(title="Travaux", origin="test")
+    task = service.ledger.create_task(mission.id, "Ajouter une fonction", acceptance=("les tests passent",))
+    service.ledger.transition_task(task.id, TaskState.READY, actor_id="a")
+    service.ledger.claim_task(task.id, "a", "local")
+    service.project_board()
+    scaffold_task_artifacts(tmp_path, task_id=task.id, profile_id="governed")
+    runner = CliRunner()
+    argv = [
+        "-o", "json", "standard", "gate", "check", str(tmp_path),
+        "--task-id", task.id, "--strict", "--target-state", "review", "--profile", "governed",
+    ]
+
+    result = json.loads(runner.invoke(app, argv).output)
+
+    ids = {c["id"] for c in result["checks"]}
+    assert "acceptance.decision_pending" in ids
+    assert "claims.empty" in ids

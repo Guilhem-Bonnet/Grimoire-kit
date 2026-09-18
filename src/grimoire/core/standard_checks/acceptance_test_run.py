@@ -21,6 +21,7 @@ from typing import Any
 
 from grimoire.core.execution_needs import resolve_need
 from grimoire.core.standard_checks.controls import acceptance_test_run_relpath
+from grimoire.core.standard_checks.no_tests_collected import classify_no_tests_collected
 from grimoire.core.standard_generation import normalize_task_id
 
 __all__ = ["AcceptanceTestRunResult", "record_acceptance_test_run"]
@@ -35,14 +36,22 @@ class AcceptanceTestRunResult:
     (CLI ``grimoire standard gate run-tests``) décide comment le signaler ;
     ``_verify_acceptance_record`` sait déjà distinguer ce cas de « exécuté et
     rouge » via ``acceptance.no_test_command_detected``.
+
+    ``ok`` vaut ``None`` — ni vert ni rouge — quand la commande a tourné mais
+    n'a collecté aucun test (:mod:`grimoire.core.standard_checks.
+    no_tests_collected`, issue #582 lot I) : ``collected`` porte alors ``0``.
+    Ce n'est jamais un échec du code, seulement l'absence d'une suite locale
+    à exécuter (tests cachés, projet neuf) — voir le module cité pour le
+    détail des runners reconnus.
     """
 
     task_id: str
     command: str
-    ok: bool
+    ok: bool | None
     exit_code: int | None
     output_excerpt: str
     path: Path
+    collected: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -52,6 +61,7 @@ class AcceptanceTestRunResult:
             "exit_code": self.exit_code,
             "output_excerpt": self.output_excerpt,
             "path": str(self.path),
+            "collected": self.collected,
         }
 
 
@@ -107,11 +117,21 @@ def record_acceptance_test_run(project_root: Path, *, task_id: str = "bootstrap"
     # propre enregistrement.
     (check,) = _run_checks((need.command,), project_root=root)
     tree_fingerprint = compute_tree_fingerprint(root)
+    # « Rien collecté » n'est ni vert ni rouge (issue #582 lot I, voir
+    # `no_tests_collected` pour pourquoi) : `check.ok` (toujours un bool, un
+    # code de sortie non nul y suffit) est corrigé en `None` avant écriture —
+    # jamais l'inverse, un vrai vert ou un vrai rouge reste tel quel.
+    nothing_collected = not check.ok and classify_no_tests_collected(
+        command=need.command, exit_code=check.exit_code, output_excerpt=check.output_excerpt
+    )
+    recorded_ok: bool | None = None if nothing_collected else check.ok
+    collected = 0 if nothing_collected else None
     result_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "task_id": normalized_task_id,
         "command": need.command,
-        "ok": check.ok,
+        "ok": recorded_ok,
+        "collected": collected,
         "exit_code": check.exit_code,
         "output_excerpt": check.output_excerpt,
         "recorded_at": datetime.now(UTC).isoformat(),
@@ -124,13 +144,14 @@ def record_acceptance_test_run(project_root: Path, *, task_id: str = "bootstrap"
         event_type="acceptance.test_run",
         task_id=normalized_task_id,
         profile=profile.id,
-        details={"ok": check.ok, "command": need.command, "exit_code": check.exit_code},
+        details={"ok": recorded_ok, "command": need.command, "exit_code": check.exit_code},
     )
     return AcceptanceTestRunResult(
         task_id=normalized_task_id,
         command=need.command,
-        ok=check.ok,
+        ok=recorded_ok,
         exit_code=check.exit_code,
         output_excerpt=check.output_excerpt,
         path=result_path,
+        collected=collected,
     )

@@ -1111,6 +1111,15 @@ def hooks_simulate(
     console.print(f"[green][OK][/green] hook simulation written to {artifact.path}")
 
 
+def _test_run_verdict_label(ok: bool | None) -> str:
+    """Rendu texte d'un verdict de run de test — vert/rouge/rien collecté (issue #582 lot I)."""
+    if ok is True:
+        return "[green]vert[/green]"
+    if ok is False:
+        return "[red]rouge[/red]"
+    return "[yellow]rien collecté[/yellow]"
+
+
 @gate_app.command("check")
 def gate_check(
     ctx: typer.Context,
@@ -1123,18 +1132,24 @@ def gate_check(
         False, "--no-run",
         help="With --strict: never execute the project's test command yourself (pre-lot-G1 behaviour).",
     ),
+    rerun: bool = typer.Option(
+        False, "--rerun",
+        help="With --strict: force a fresh test run even if a recorded one already matches the current tree.",
+    ),
 ) -> None:
     """Check standard evidence gates for a task.
 
     Avec ``--strict`` (issue #582 lot G1), exécute d'abord ``gate run-tests``
     si la tâche doit une preuve d'exécution, qu'une commande de test est
-    connue et qu'aucun run vert et frais n'est enregistré — puis évalue comme
-    avant. ``--no-run`` restaure l'ancien comportement (aucune exécution).
+    connue et qu'aucun run *frais* n'est enregistré — quel que soit son
+    verdict (vert, rouge, ou rien collecté ; issue #582 lot I) — puis évalue
+    comme avant. ``--no-run`` restaure le comportement pré-lot-G1 (aucune
+    exécution). ``--rerun`` force malgré tout une nouvelle exécution.
     """
     test_run = None
     if strict and not no_run:
         state = board_state_of_task(project_root, task_id, target_state=target_state)
-        test_run = ensure_fresh_test_run(project_root, task_id=task_id, state=state)
+        test_run = ensure_fresh_test_run(project_root, task_id=task_id, state=state, rerun=rerun)
     result = check_evidence_gates(project_root, task_id=task_id, target_state=target_state, profile_id=profile)
     payload = {
         "schema": "grimoire.standard-gate-check/v1",
@@ -1163,10 +1178,19 @@ def gate_check(
     status = "[green]OK[/green]" if result.ok else "[red]FAIL[/red]"
     console.print(f"{status} evidence gates for task {result.task_id} (state: {result.state or 'none'})")
     if test_run is not None and test_run.ran:
-        verdict = "[green]vert[/green]" if test_run.ok else "[red]rouge[/red]"
         console.print(
-            f"  tests exécutés : {test_run.command!r} -> {verdict} (exit {test_run.exit_code}), "
-            f"enregistré dans {test_run.path}",
+            f"  tests exécutés : {test_run.command!r} -> {_test_run_verdict_label(test_run.ok)} "
+            f"(exit {test_run.exit_code}), enregistré dans {test_run.path}",
+            soft_wrap=True,
+        )
+    elif test_run is not None and test_run.reason == "fresh_run":
+        # Issue #582 lot I : un run frais (vert, rouge ou rien collecté) n'est
+        # plus rejoué à chaque `gate check --strict` — voir
+        # `gate_test_run.ensure_fresh_test_run`. `--rerun` force malgré tout.
+        console.print(
+            f"  arbre inchangé depuis le dernier run ({test_run.command!r} -> "
+            f"{_test_run_verdict_label(test_run.ok)}, exit {test_run.exit_code}) : "
+            "relance forcée par `--rerun`.",
             soft_wrap=True,
         )
     # Issue #582 lot G1 : chaque check est rendu (chemin + message + remède),
@@ -1237,15 +1261,25 @@ def gate_run_tests(
     sortie tronquée) à l'endroit que ces deux vérificateurs relisent.
     """
     result = record_acceptance_test_run(project_root, task_id=task_id)
+    exit_code = 0 if result.ok else 1
     if _get_fmt(ctx) == "json":
         typer.echo(json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
-        raise typer.Exit(0 if result.ok else 1)
+        raise typer.Exit(exit_code)
     if not result.command:
         console.print(f"[yellow]WARN[/yellow] no known test command for {project_root}")
         raise typer.Exit(1)
+    if result.ok is None:
+        # Issue #582 lot I : « rien collecté » n'est pas un échec de code —
+        # voir `no_tests_collected`. Exit 1 conservé (ce n'est pas un vert),
+        # mais le message ne dit pas « FAIL » pour ce qui n'a rien à corriger.
+        console.print(
+            f"[yellow]WARN[/yellow] {result.command!r} (exit {result.exit_code}) n'a collecté aucun test, "
+            f"recorded at {result.path}",
+        )
+        raise typer.Exit(exit_code)
     status = "[green]OK[/green]" if result.ok else "[red]FAIL[/red]"
     console.print(f"{status} {result.command!r} (exit {result.exit_code}) recorded at {result.path}")
-    raise typer.Exit(0 if result.ok else 1)
+    raise typer.Exit(exit_code)
 
 
 @events_app.command("audit")

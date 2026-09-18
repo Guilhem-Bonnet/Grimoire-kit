@@ -30,6 +30,7 @@ from grimoire.core.standard_checks.base import (
     _require_keys,
     _text_file,
 )
+from grimoire.core.standard_checks.claim_ledger_verify import verify_claim_ledger as _verify_claim_ledger
 from grimoire.core.standard_checks.controls import (
     _verify_acceptance_record,
     _verify_blast_radius_policy,
@@ -710,45 +711,6 @@ def _verify_evidence_pack(root: Path, task_id: str, result: StandardVerification
             f"exécute une action (test, écriture) puis relance `grimoire standard gate check --task-id {task_id}`.",
             path=rel_path,
         )
-
-
-def _verify_claim_ledger(
-    root: Path, profile: StandardProfile, task_id: str, result: StandardVerificationResult
-) -> None:
-    """AG-QUA-002 : une affirmation critique sans preuve reste une hypothèse.
-
-    Un registre encore vierge est un avertissement : il attend d'être rempli.
-    Ce qui est une erreur, c'est une affirmation dite prouvée sans preuve, ou —
-    en profil governed et production — une affirmation utilisée alors qu'elle
-    n'est pas prouvée, et une synthèse laissée vide.
-    """
-    rel_path = EVIDENCE_DIR / task_id / "claim-ledger.md"
-    text = _text_file(root, rel_path)
-    if not text:
-        return
-    strict = profile.id in {"governed", "production"}
-    template_row = "| CL-001 |  | fait |  | hypothèse | faible | vérifier |"
-    rows = [line for line in text.splitlines() if line.startswith("| CL-") and line.strip() != template_row]
-    if not rows:
-        _add_check(result, "claims.empty", "warning", "Claim ledger still holds only the template row.", path=rel_path)
-    for line in rows:
-        cells = [c.strip() for c in line.strip().strip("|").split("|")]
-        if len(cells) < 7:
-            _add_check(result, "claims.row_invalid", "warning", f"Claim row is malformed: {line[:60]}", path=rel_path)
-            continue
-        claim_id, _claim, _kind, proof, status, _confidence, decision = cells[:7]
-        if status == "prouvé" and not proof:
-            _add_check(
-                result, "claims.proved_without_evidence", "error",
-                f"{claim_id} is marked prouvé with no source or evidence.", path=rel_path,
-            )
-        if decision == "utiliser" and status != "prouvé":
-            _add_check(
-                result, "claims.used_unproved", "error" if strict else "warning",
-                f"{claim_id} is used while its status is {status}.", path=rel_path,
-            )
-    if strict and rows and "| Affirmations bloquantes non prouvées |  |" in text:
-        _add_check(result, "claims.summary_placeholder", "error", "Claim ledger summary is still empty.", path=rel_path)
 
 
 def _verify_runtime_surface_registry(root: Path, profile: StandardProfile, result: StandardVerificationResult) -> None:

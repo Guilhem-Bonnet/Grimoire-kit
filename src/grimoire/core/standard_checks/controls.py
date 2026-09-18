@@ -1020,45 +1020,16 @@ def _verify_acceptance_test_execution(
     )
 
 
-def _verify_recorded_test_run_is_green(root: Path, task_id: str, result: StandardVerificationResult) -> None:
-    """Issue #582 lot G1 : un run de test enregistré, frais et rouge est un motif de fond.
-
-    ``gate check --strict`` exécute désormais lui-même ``gate run-tests``
-    (:mod:`grimoire.core.standard_checks.gate_test_run`) dès que la tâche doit
-    une preuve d'exécution ; le verdict de ce run doit alors fermer le gate,
-    sinon l'exécution intégrée ne serait qu'un fichier de plus. Seul un run
-    *frais* (même empreinte d'arbre) compte : un run rouge périmé peut avoir
-    été corrigé depuis, et c'est ``acceptance.test_run_stale`` qui le dit sur
-    le chemin de l'acceptance. Aucun run enregistré : rien ici — c'est
-    ``acceptance.passed_without_test_run`` qui porte ce cas.
-    """
-    run = _load_recorded_test_run(root, task_id)
-    if run is None or run.get("ok") is True:
-        return
-    stored_fingerprint = run.get("tree_fingerprint")
-    if not stored_fingerprint:
-        return
-    from grimoire.core.standard_checks.tree_fingerprint import compute_tree_fingerprint
-
-    if stored_fingerprint != compute_tree_fingerprint(root):
-        return
-    command = str(run.get("command") or "")
-    exit_code = run.get("exit_code")
-    _add_check(
-        result,
-        "acceptance.test_run_failed",
-        "error",
-        f"Le dernier run de test enregistré est rouge ({command!r}, code de sortie {exit_code}) "
-        f"sur l'arbre courant : corrigez les tests puis relancez "
-        f"`grimoire standard gate run-tests --task-id {task_id}` (ou `gate check --strict`, qui le relance).",
-        path=acceptance_test_run_relpath(task_id),
-    )
-
-
 def _verify_acceptance_record(
-    root: Path, profile: StandardProfile, task_id: str, result: StandardVerificationResult
+    root: Path, profile: StandardProfile, task_id: str, result: StandardVerificationResult, *, suppress_v0: bool = False
 ) -> None:
-    """AG-QUA-003 : le livrable est accepté ou refusé par celui qui le reçoit, sur des critères prouvés."""
+    """AG-QUA-003 : le livrable est accepté ou refusé par celui qui le reçoit, sur des critères prouvés.
+
+    ``suppress_v0`` (issue #582 lot I) éteint uniquement ``acceptance.decision_pending`` :
+    une tâche V0 en profil non gouverné n'a, par construction, rien qu'un
+    jugement humain doive trancher — voir :func:`grimoire.core.standard_checks.
+    gate_review_checks.review_state_content_checks`, seul appelant qui le passe.
+    """
     rel_path = EVIDENCE_DIR / task_id / "acceptance-record.md"
     text = _text_file(root, rel_path)
     if not text:
@@ -1093,7 +1064,8 @@ def _verify_acceptance_record(
     for cells in decisions:
         decision, validator, date = [*cells, "", "", ""][:3]
         if decision == "en attente":
-            _add_check(result, "acceptance.decision_pending", "warning", "No acceptance decision has been recorded yet.", path=rel_path)
+            if not suppress_v0:
+                _add_check(result, "acceptance.decision_pending", "warning", "No acceptance decision has been recorded yet.", path=rel_path)
         elif decision == "accepté":
             if not validator or not date:
                 _add_check(
