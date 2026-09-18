@@ -791,7 +791,7 @@ def init_profile(
     activation: ClaudeActivationResult | None = None
     surfaces: HostSyncOutcome | None = None
     if claude_hook and not dry_run:
-        activation = install_claude_activation(result.project_root, task_id=task_id)
+        activation = install_claude_activation(result.project_root, task_id=task_id, force=force)
         # Enrolment adds blocking gates; the host surfaces carry them. Running
         # after the activation install is deliberate: the emitters own
         # `.claude/settings.json` and replace the legacy hook entry with the
@@ -817,6 +817,7 @@ def init_profile(
                 "status": activation.status,
                 "written": _paths(activation.written),
                 "message": activation.message,
+                "context_needs_review": activation.context_needs_review,
             }
         if surfaces is not None:
             payload["host_surfaces"] = surfaces.to_dict()
@@ -843,6 +844,11 @@ def init_profile(
             console.print("  [dim]hook d'activation Claude Code déjà en place[/dim]")
         else:
             console.print(f"  [yellow][!][/yellow] {activation.message}")
+        if activation.context_needs_review:
+            console.print(
+                "  [yellow][!][/yellow] .claude/activation-context.md modifié à la main — "
+                "à revoir (--force pour écraser)"
+            )
         if surfaces is not None and not surfaces.ok:
             console.print(f"  [yellow][!][/yellow] {surfaces.warning}")
     elif claude_hook and dry_run:
