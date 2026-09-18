@@ -43,7 +43,7 @@ def test_install_on_pristine_project(tmp_path: Path) -> None:
     assert SETTINGS_RELPATH in result.written
     assert _session_start_commands(tmp_path) == [HOOK_COMMAND]
     directive = (tmp_path / ACTIVATION_CONTEXT_RELPATH).read_text(encoding="utf-8")
-    assert "[Grimoire Standard — activation]" in directive
+    assert "[Grimoire Standard]" in directive
     # Le fichier est un gabarit : la tâche est résolue à chaque session, pas
     # figée à l'installation — c'était le défaut de l'issue #138.
     assert "gate check --task-id {task_id} --strict" in directive
@@ -120,7 +120,7 @@ def test_custom_context_file_is_never_overwritten(tmp_path: Path) -> None:
 def test_directive_follows_the_session_task_not_the_install_one(tmp_path: Path) -> None:
     install_claude_activation(tmp_path, task_id="sprint-7")
     directive = activation_context_text(tmp_path, task_id="sprint-8")
-    assert "evidence/sprint-8/task-envelope.md" in directive
+    assert "evidence/sprint-8/" in directive
     assert "gate check --task-id sprint-8 --strict" in directive
     assert "sprint-7" not in directive
 
@@ -133,7 +133,7 @@ def test_a_legacy_default_file_with_a_literal_bootstrap_follows_the_task(tmp_pat
     context_path.parent.mkdir(parents=True)
     context_path.write_text(default_activation_directive("bootstrap"), encoding="utf-8")
     directive = activation_context_text(tmp_path, task_id="GAO-reel-001")
-    assert "evidence/GAO-reel-001/task-envelope.md" in directive
+    assert "evidence/GAO-reel-001/" in directive
     assert "bootstrap" not in directive
 
 
@@ -147,23 +147,30 @@ def test_a_tailored_file_is_returned_as_written(tmp_path: Path) -> None:
 def test_default_directive_matches_preregistered_mechanism() -> None:
     directive = default_activation_directive()
     for anchor in (
-        "task-envelope.md",
-        "evidence-pack.md",
-        "grimoire standard gate run-tests --task-id bootstrap",
+        "[Grimoire Standard]",
+        "gouvernée",
+        "_grimoire-output/evidence/bootstrap/",
         "grimoire standard gate check --task-id bootstrap --strict",
-        "grimoire standard verify .",
     ):
         assert anchor in directive
 
 
-def test_gate_run_tests_precedes_gate_check_in_the_directive() -> None:
-    """Issue #582 lot B (revue de la PR #585) : un critère « passé » sans run réel
+def test_directive_no_longer_mandates_run_tests_or_verify_separately() -> None:
+    """Issue #582 lot G3 : `gate check --strict` absorbe déjà scaffold (lot G1) et
 
-    est désormais signalé par ``gate check``/``verify`` eux-mêmes — la directive
-    doit donc mandater ``gate run-tests`` avant, pas seulement le mentionner
-    quelque part dans le texte.
+    l'exécution des tests (lot G1, ``ensure_fresh_test_run``) — la directive
+    n'a donc plus à mandater ``gate run-tests``/``standard verify`` en plus,
+    contrairement à ce que fixait ``test_gate_run_tests_precedes_gate_check_in_the_directive``
+    avant ce lot. Sur le banc à trois bras (21 runs kit-gov), ce double mandat
+    coûtait une médiane de 4 tours par run rien que pour `gate run-tests`,
+    y compris sur les 15/21 runs Python où aucune commande de test n'est
+    détectable (le gate est alors structurellement inatteignable).
     """
     directive = default_activation_directive()
-    assert directive.index("gate run-tests --task-id bootstrap") < directive.index(
-        "gate check --task-id bootstrap --strict"
-    )
+    assert "gate run-tests" not in directive
+    assert "standard verify" not in directive
+
+
+def test_governed_directive_stays_under_the_four_hundred_character_budget() -> None:
+    directive = default_activation_directive("bootstrap")
+    assert len(directive) <= 400, len(directive)

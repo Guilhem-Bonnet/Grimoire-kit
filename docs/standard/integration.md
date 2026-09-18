@@ -249,6 +249,13 @@ les artefacts seuls produisaient 0/40 d'engagement :
   est remplacé, à chaque session, par la tâche courante — le claim actif
   du Mission Ledger, ou `GRIMOIRE_TASK_ID`, ou `bootstrap` (ordre complet
   dans la [référence CLI](../cli-reference.md#quelle-tâche-la-session-porte)) ;
+  depuis l'issue #582 lot G3, elle tient en trois phrases (≤ 400 caractères) et
+  mandate une seule commande, `grimoire standard gate check --task-id
+  {task_id} --strict` : les artefacts par tâche sont déjà scaffoldés par le
+  hook (lot G1), et ce gate exécute lui-même la commande de test du projet
+  quand une en est connue (lot G1) — plus de mandat séparé pour écrire
+  l'enveloppe/le pack de preuve, lancer `gate run-tests`, ou rappeler `standard
+  verify .`, qui n'apportait rien de plus sur ce chemin ;
 - le hook exécute `grimoire-hook --host claude --event SessionStart`, qui
   rend la même directive que `grimoire standard activation-context`,
   portable et versionné avec le kit ;
