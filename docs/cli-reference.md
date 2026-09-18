@@ -25,6 +25,7 @@ grimoire init [PATH] [OPTIONS]
 | `--backend, -b` | Backend mémoire (`auto`, `local`, `lexical`, `qdrant-local`, `qdrant-server`, `weaviate-server`, `mempalace`, `ollama`) | `auto` |
 | `--memory-profile, -m` | Composition mémoire : `lexical`, `standard`, `graphe`, `complet` | déduite |
 | `--memory-collection TEXT` | Nom explicite de la collection, pour un backend partagé | déduit du nom du projet |
+| `--memory-stack` | `up` démarre (Docker) les services que le profil recommandé nécessite — consentement explicite, jamais implicite | (aucun) |
 | `--force, -f` | Écraser la config existante | `false` |
 | `--dry-run` | Afficher le plan sans écrire | `false` |
 | `--output, -o` | Format de sortie : `text` ou `json` | `text` |
@@ -34,12 +35,21 @@ fixe les sept couches du Memory OS d'un coup (mémoire courte, sémantique,
 sidecar structuré, graphes, mémoire chaude, visualisation).
 
 `--backend auto` (le défaut, y compris avec `-y`) n'attache **jamais**
-silencieusement le projet à un service mémoire trouvé sur la machine : il
-résout toujours vers `lexical`, isolé, et se contente de signaler dans le
-rapport ce qui a été détecté (issue #496). Sur un backend partagé choisi
-explicitement, la collection est nommée d'après le projet (son slug) ; pour
-s'attacher à une collection déjà peuplée, `--memory-collection` est requis. Voir
-[Système de mémoire](memory-system.md).
+silencieusement le projet à un service mémoire trouvé sur la machine
+(issue #496). L'étape Mémoire pose plutôt la composition la plus riche que
+cette machine peut servir *sans consentement à démarrer quoi que ce soit* :
+`standard` (Qdrant embarqué, aucun service) avec un moteur d'embedding local
+installé (fastembed/sentence-transformers), `lexical` sinon. `complet`
+(Weaviate + Neo4j + Redis) est nommé et sa commande d'activation affichée dès
+que Docker répond, mais seul `--memory-stack up` le démarre réellement. Sur un
+backend partagé choisi explicitement, la collection est nommée d'après le
+projet (son slug) ; pour s'attacher à une collection déjà peuplée,
+`--memory-collection` est requis. Voir [Système de mémoire](memory-system.md).
+
+`--lite`/`--profile lite` sont **dépréciés** : le profil léger n'existe plus
+(l'expérience installée est toujours complète, le cœur s'adapte à chaque
+tâche). Les deux drapeaux restent acceptés — un avertissement est affiché —
+et se comportent désormais exactement comme le défaut.
 
 | Profil | Composition |
 |--------|-------------|

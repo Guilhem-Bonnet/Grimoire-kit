@@ -171,15 +171,24 @@ def detect_memory_backend() -> str:
 
     Purely informational (issue Grimoire-kit#496) — it no longer decides
     ``init``'s backend. A project without an explicit ``--backend`` always
-    falls back to ``lexical``; what this function finds is only *suggested*
-    in the report / offered as an explicit question in the interactive
-    wizard, never attached to silently.
+    falls back to an isolated default; what this function finds is only
+    *suggested* in the report / offered as an explicit question in the
+    interactive wizard, never attached to silently.
+
+    Returns ``"qdrant-server"`` (not ``"qdrant-local"``) for a *reachable
+    Qdrant HTTP server* — the two used to share the same string despite
+    meaning opposite things: a server actually running on this machine
+    versus the embedded, file-only backend with nothing to reach at all.
+    Confirming this suggestion attaches to the real server (``qdrant_url``
+    included via :data:`grimoire.memory.profiles.BACKEND_CONNECTION`); the
+    old, colliding name would have silently created a second, unrelated
+    embedded store instead.
     """
     if _is_weaviate_reachable():
         return "weaviate-server"
 
     if _is_qdrant_reachable():
-        return "qdrant-local"
+        return "qdrant-server"
 
     if _is_ollama_reachable():
         return "ollama"
@@ -192,7 +201,7 @@ def detect_memory_backend() -> str:
 #: question — never to decide anything on its own.
 _DETECTED_SERVICE_LABELS: dict[str, str] = {
     "weaviate-server": f"Weaviate sur {_WEAVIATE_DEFAULT_URL}",
-    "qdrant-local": f"Qdrant sur {_QDRANT_DEFAULT_URL}",
+    "qdrant-server": f"Qdrant sur {_QDRANT_DEFAULT_URL}",
     "ollama": f"Ollama sur {_OLLAMA_DEFAULT_URL}",
 }
 
@@ -298,6 +307,41 @@ def machine_capabilities(*, has_egress: bool) -> frozenset[str]:
     return frozenset(tokens)
 
 
+def _recommend_memory_profile() -> tuple[str, str]:
+    """The richest composition this machine can serve, for the wizard's
+    Memory step (2026-09-18 onboarding decision) — ``complet`` when Docker's
+    daemon actually answers (not just the CLI on ``PATH``), ``standard`` with
+    a local embedding engine but no Docker, ``lexical`` as the explained
+    floor when neither fastembed/sentence-transformers nor a reachable Ollama
+    is available. Delegates to :mod:`grimoire.tools.memory_setup`, the same
+    module ``grimoire memory up`` itself uses, so the wizard's recommendation
+    and the explicit command it points to never drift apart.
+    """
+    from grimoire.tools.memory_setup import recommend_profile
+
+    return recommend_profile()
+
+
+def _recommend_express_memory_profile() -> tuple[str, str]:
+    """The richest *private, consent-free* composition for the express path.
+
+    Deliberately narrower than :func:`_recommend_memory_profile`: express
+    (``-y``, non-interactive) must never attach to a service it merely found
+    running (issue #496) and must never start a container without
+    ``--memory-stack up`` — so only ``standard`` (via the embedded,
+    file-local ``qdrant-local`` backend — no service, nothing shared) or
+    ``lexical`` are ever picked automatically here. ``complet`` stays a named
+    target the report points at, reachable through an explicit command.
+    """
+    from grimoire.tools.memory_setup import local_embedding_available
+
+    if local_embedding_available():
+        return "standard", (
+            "local vector embeddings (fastembed/sentence-transformers) available — no server needed"
+        )
+    return "lexical", "no local embedding capability (fastembed/sentence-transformers not installed, no Ollama reachable)"
+
+
 def _wait_for_qdrant(qdrant_url: str = _QDRANT_DEFAULT_URL) -> bool:
     """Wait briefly for a freshly started Qdrant service to answer."""
     for _ in range(10):
@@ -357,7 +401,8 @@ def _choose_memory_profile(
     backend: str,
     *,
     offer_qdrant_docker: bool,
-    suggest_lite: bool = False,
+    recommended_id: str = "",
+    recommended_reason: str = "",
     detected_service: str = "local",
 ) -> tuple[str, str, bool, bool]:
     """Ask for a memory *composition*, not a backend.
@@ -371,10 +416,13 @@ def _choose_memory_profile(
     unreachable one is shown with the reason and cannot be selected, because a
     profile that cannot be filled is worse than a smaller one that can.
 
-    ``suggest_lite`` (issue Grimoire-kit#552, lot 2.6) shifts the
-    recommendation from ``memory_profiles.DEFAULT_PROFILE`` to ``lexical`` —
-    for a repo that looks like a playground (``--lite``, or no CI/tests
-    detected) a service-free composition is a better first default.
+    ``recommended_id``/``recommended_reason`` (2026-09-18 onboarding decision,
+    replacing the ``--lite``-only ``suggest_lite`` heuristic of
+    Grimoire-kit#552) name the richest composition
+    :func:`grimoire.tools.memory_setup.recommend_profile` found this machine
+    can serve — ``complet`` with Docker available, ``standard`` with a local
+    embedding engine but no Docker, ``lexical`` as the explained floor.
+    Defaults to :data:`memory_profiles.DEFAULT_PROFILE` when left unset.
 
     ``detected_service`` (issue Grimoire-kit#496) is what
     :func:`detect_memory_backend` found on this machine — never applied on
@@ -414,12 +462,9 @@ def _choose_memory_profile(
     console.print()
     console.print("  [bold]La mémoire est une composition de couches, pas un backend.[/bold]")
     console.print()
-    recommended_id = "lexical" if suggest_lite else memory_profiles.DEFAULT_PROFILE
-    if suggest_lite:
-        console.print(
-            "  [dim]Aucune CI, aucun test détecté — un profil léger (lexical, sans "
-            "service) convient probablement à ce dépôt.[/dim]"
-        )
+    recommended_id = recommended_id or memory_profiles.DEFAULT_PROFILE
+    if recommended_reason:
+        console.print(f"  [dim]{recommended_reason}.[/dim]")
         console.print()
     choices: list[str] = []
     default_choice = "1"
@@ -473,7 +518,6 @@ def _run_wizard(
     backend: str,
     *,
     offer_qdrant_docker: bool = False,
-    lite: bool = False,
     detected_service: str = "local",
 ) -> dict[str, Any]:
     """Interactive wizard — multi-select archetypes, returns config dict."""
@@ -533,11 +577,12 @@ def _run_wizard(
     # ── Step 3/5 · Memory composition ─────────────────────────────────
     console.print()
     console.print("  [dim]\\[###--] 3/5 · Mémoire[/dim]")
-    suggest_lite = lite or _looks_like_a_playground(target)
+    recommended_id, recommended_reason = _recommend_memory_profile()
     profile_id, backend, offline, qdrant_docker = _choose_memory_profile(
         backend,
         offer_qdrant_docker=offer_qdrant_docker,
-        suggest_lite=suggest_lite,
+        recommended_id=recommended_id,
+        recommended_reason=recommended_reason,
         detected_service=detected_service,
     )
 
@@ -737,6 +782,51 @@ def _display_composition_preview(archetypes: list[str]) -> None:
 # ── Rich summary report ─────────────────────────────────────────────────────
 
 
+def _memory_step_summary(target: Path, *, applied_profile: str, reason: str) -> dict[str, Any]:
+    """Close the Memory step: a cheap, structural health check plus the
+    upgrade path — the equivalent of `grimoire memory up --profile X --apply`
+    already ran during scaffolding; this only reports on it.
+
+    Deliberately never loads an embedding model (that first-use cost belongs
+    to an explicit memory operation, e.g. `grimoire memory status`, not to
+    `init` — see the module docstring of :mod:`grimoire.memory.embedding`).
+    ``healthy`` only asserts the config landed on a profile this version
+    knows, never that a remote service actually answers right now.
+    """
+    from grimoire.core.config import GrimoireConfig
+    from grimoire.core.exceptions import GrimoireConfigError
+    from grimoire.tools.memory_setup import docker_daemon_reachable, local_embedding_available
+
+    served = applied_profile
+    backend = ""
+    with contextlib.suppress(GrimoireConfigError, OSError):
+        # A reporting step must never break `init`: any config-read failure
+        # here just falls back to what this call already knows it applied.
+        cfg = GrimoireConfig.from_yaml(target / "project-context.yaml")
+        served = cfg.memory.layer_profile or applied_profile
+        backend = cfg.memory.backend
+
+    if not local_embedding_available():
+        feasible = "lexical"
+    elif docker_daemon_reachable():
+        feasible = "complet"
+    else:
+        feasible = "standard"
+
+    order = memory_profiles.PROFILE_ORDER
+    served_rank = order.index(served) if served in order else 0
+    upgrade_to = feasible if order.index(feasible) > served_rank else ""
+
+    return {
+        "served": served,
+        "backend": backend,
+        "reason": reason,
+        "healthy": served in order,
+        "feasible": feasible,
+        "upgrade_to": upgrade_to,
+    }
+
+
 def _display_report(
     target: Path,
     result: ScaffoldResult,
@@ -747,9 +837,9 @@ def _display_report(
     *,
     qdrant_docker_started: bool = False,
     qdrant_docker_message: str = "",
-    lite: bool = False,
     detected_service: str = "local",
     no_cockpit: bool = False,
+    memory_summary: dict[str, Any] | None = None,
 ) -> None:
     """Display a rich post-install report."""
     console.print()
@@ -785,7 +875,7 @@ def _display_report(
     console.print(f"  [cyan]Memory:[/cyan] {backend}")
     _backend_tips = {
         "local": "Mémoire fichier locale — aucune dépendance requise",
-        "qdrant-local": "Qdrant détecté sur localhost:6333 — recherche sémantique activée",
+        "qdrant-local": "Qdrant embarqué (fichier local, aucun service) — recherche sémantique activée",
         "qdrant-server": "Qdrant distant configuré — vérifier avec grimoire doctor",
         "weaviate-server": "Weaviate + Neo4j configurés — vérifier avec grimoire memory status et memory migrate verify",
         "ollama": "Ollama détecté — embeddings locaux activés",
@@ -800,6 +890,16 @@ def _display_report(
         suggestion = memory_service_suggestion(detected_service)
         if suggestion:
             console.print(f"           [yellow]![/yellow] [dim]{suggestion}[/dim]")
+    if memory_summary and memory_summary.get("reason"):
+        console.print(f"           [dim]{memory_summary['reason']}.[/dim]")
+    upgrade_to = memory_summary.get("upgrade_to") if memory_summary else ""
+    if upgrade_to:
+        target_label = memory_profiles.resolve(upgrade_to).label
+        start_flag = " --start" if upgrade_to in ("graphe", "complet") else ""
+        console.print(
+            f"           [yellow]^[/yellow] [dim]This machine can serve {target_label}: "
+            f"grimoire memory up --profile {upgrade_to}{start_flag} --apply[/dim]"
+        )
     console.print()
 
     # Agents deployed (categorized)
@@ -821,22 +921,6 @@ def _display_report(
     console.print(f"  [dim]{len(result.created_dirs)} dirs · {len(result.copied_files)} files · {len(result.rendered_files)} configs[/dim]")
     console.print()
 
-    if lite:
-        console.print(Panel(
-            "[bold]Profil léger[/bold] — pensé pour un dépôt sans CI ni tests.\n\n"
-            "  Laissé de côté :\n"
-            "    - mémoire lexicale seule (aucun service vectoriel)\n"
-            "    - pas d'enregistrement au cockpit local\n"
-            "    - standard agentique gouverné non activé\n\n"
-            "  Pour l'activer plus tard :\n"
-            "    [cyan]grimoire memory up --profile standard --apply[/cyan]\n"
-            "    [cyan]grimoire cockpit add .[/cyan]\n"
-            "    [cyan]grimoire standard init .[/cyan]",
-            title="[bold]Profil lite[/bold]",
-            border_style="cyan",
-        ))
-        console.print()
-
     # Next steps — dynamic (onboarding audit 2026-09-18, constat #3): the old
     # panel was byte-identical across every stack/archetype/profile
     # combination. This names what was installed and why, then offers at
@@ -844,7 +928,11 @@ def _display_report(
     from grimoire.core.onboarding_panel import build_next_steps
 
     panel = build_next_steps(
-        target, resolved=resolved, backend=backend, no_cockpit=no_cockpit,
+        target,
+        resolved=resolved,
+        backend=backend,
+        no_cockpit=no_cockpit,
+        layer_profile=(memory_summary or {}).get("served", ""),
     )
     body_lines = [
         "[bold]Your project is alive![/bold]\n",
@@ -950,9 +1038,10 @@ def _display_json(
     project_name: str,
     *,
     qdrant_docker: dict[str, Any] | None = None,
-    lite: bool = False,
     detected_service: str = "local",
     collection: str = "",
+    memory_summary: dict[str, Any] | None = None,
+    memory_stack_messages: list[str] | None = None,
 ) -> None:
     """Output JSON result for scripting."""
     data: dict[str, Any] = {
@@ -981,18 +1070,10 @@ def _display_json(
         if suggestion:
             data["memory_detected"] = detected_service
             data["memory_suggestion"] = suggestion
-    if lite:
-        data["profile"] = "lite"
-        data["skipped"] = {
-            "memory_backend": "lexical (no service)",
-            "cockpit": False,
-            "standard": False,
-        }
-        data["activate_later"] = {
-            "memory": "grimoire memory up --profile standard --apply",
-            "cockpit": "grimoire cockpit add .",
-            "standard": "grimoire standard init .",
-        }
+    if memory_summary:
+        data["memory_profile"] = memory_summary
+    if memory_stack_messages:
+        data["memory_stack_started"] = memory_stack_messages
     for label in result.copied_files:
         if "/" in label:
             cat = label.split("/")[0]
@@ -1095,24 +1176,21 @@ def run_init(
     lite: bool = False,
     memory_collection: str = "",
     interactive: bool = False,
+    memory_stack: str = "",
 ) -> None:
-    """Execute the enhanced init flow: scan → resolve → wizard → scaffold → report."""
+    """Execute the enhanced init flow: scan → resolve → wizard → scaffold → report.
+
+    ``lite`` (``--lite``/``--profile lite``) is deprecated and kept only for
+    backward compatibility: the light profile no longer exists (the installed
+    experience is complete; the core adapts to each task), so it no longer
+    changes anything here — the caller (``grimoire init``) already printed
+    the deprecation notice. ``memory_stack == "up"`` is the explicit consent
+    to start (Docker) the memory profile's missing services — see the Memory
+    step below.
+    """
     target = target.resolve()
     fmt = (ctx.obj or {}).get("output", "text")
     yes = (ctx.obj or {}).get("yes", False)
-
-    # ── Lite profile (issue Grimoire-kit#552, lot 2.6) ──────────────────────
-    # A named preset, not a new mechanism: every knob it sets already exists
-    # as its own flag. Applied before backend/memory-profile resolution below
-    # so the rest of the function sees them as if the caller had passed them
-    # explicitly — an interactive wizard can still override them (no --yes
-    # implied), same as any other init flag today.
-    if lite:
-        backend = "lexical"
-        memory_profile = memory_profile or "lexical"
-        no_cockpit = True
-        if not archetype:
-            archetype = "minimal"
 
     if memory_profile and not memory_profiles.is_known(memory_profile):
         if fmt == "json":
@@ -1140,6 +1218,8 @@ def run_init(
     # Phase 2: Resolve backend
     requested_backend = backend
     qdrant_docker_requested = qdrant_docker
+    has_tty = sys.stdin.isatty()
+    is_interactive = (has_tty or interactive) and not yes and fmt != "json"
     # Detection is purely informational from here on (issue Grimoire-kit#496):
     # it used to decide the backend outright, silently attaching a fresh
     # project to whatever memory service happened to already be running on
@@ -1150,11 +1230,26 @@ def run_init(
     # actually left undecided — an explicit `--backend` needs no network
     # round-trip to be honored.
     detected_service = "local"
+    memory_default_reason = ""
     if qdrant_docker_requested:
         backend = "qdrant-server"
     elif backend == "auto":
         detected_service = detect_memory_backend()
         backend = "lexical"
+        # Onboarding decision 2026-09-18 (PR2): the express/non-interactive
+        # path no longer stops at `lexical` when it does not have to. It
+        # still never attaches to a service merely *found* running (#496)
+        # and never starts a container without explicit consent — so this
+        # only ever reaches `standard` (embedded `qdrant-local`, private,
+        # no service) or `lexical`, unless `--memory-stack up` explicitly
+        # asked for the richest Docker-backed target instead.
+        if not memory_profile and not is_interactive:
+            if memory_stack == "up":
+                memory_profile, memory_default_reason = _recommend_memory_profile()
+            else:
+                memory_profile, memory_default_reason = _recommend_express_memory_profile()
+            if memory_profile == "standard":
+                backend = "qdrant-local"
     # A composition that pins its own services decides the backend: asking for
     # `graphe` and landing on the detected qdrant would produce a config whose
     # graph layers point at a store that is not there.
@@ -1180,9 +1275,6 @@ def run_init(
     skill_level = "intermediate"
     offline = False
 
-    has_tty = sys.stdin.isatty()
-    is_interactive = (has_tty or interactive) and not yes and fmt != "json"
-
     offer_qdrant_docker = requested_backend == "auto" and detected_service == "local"
 
     # Onboarding audit 2026-09-18, constat #1: without a real TTY, bare
@@ -1203,7 +1295,6 @@ def run_init(
             resolved,
             backend,
             offer_qdrant_docker=offer_qdrant_docker,
-            lite=lite,
             detected_service=detected_service,
         )
         project_name = wizard_result["project_name"]
@@ -1302,6 +1393,22 @@ def run_init(
         else:
             qdrant_docker_started, qdrant_docker_message = _start_qdrant_docker(target)
 
+    # Phase 6.5: Memory step closes with the equivalent of `memory up --apply`
+    # plus a structural health check — never a full embedding-model load
+    # (that cost belongs to the first real memory use, not to `init`).
+    memory_stack_messages: list[str] = []
+    if memory_stack == "up":
+        from grimoire.tools.memory_setup import start_memory_stack
+
+        memory_stack_messages = start_memory_stack(memory_profile, target)
+        if fmt != "json":
+            for message in memory_stack_messages:
+                console.print(f"[dim]{message}[/dim]")
+
+    memory_summary = _memory_step_summary(
+        target, applied_profile=memory_profile or "lexical", reason=memory_default_reason,
+    )
+
     # Phase 7: Report
     if fmt == "json":
         docker_status = None
@@ -1319,9 +1426,10 @@ def run_init(
             backend,
             project_name,
             qdrant_docker=docker_status,
-            lite=lite,
             detected_service=detected_service,
             collection=collection_prefix,
+            memory_summary=memory_summary,
+            memory_stack_messages=memory_stack_messages,
         )
     else:
         _display_report(
@@ -1333,9 +1441,9 @@ def run_init(
             project_name,
             qdrant_docker_started=qdrant_docker_started,
             qdrant_docker_message=qdrant_docker_message,
-            lite=lite,
             detected_service=detected_service,
             no_cockpit=no_cockpit,
+            memory_summary=memory_summary,
         )
 
     _maybe_register_cockpit(target, project_name, fmt, no_cockpit=no_cockpit)

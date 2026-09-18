@@ -47,6 +47,15 @@ _up_profile_opt = typer.Option(
     ),
 )
 _up_apply_opt = typer.Option(False, "--apply", help="Écrire le bloc memory: dans project-context.yaml.")
+_up_start_opt = typer.Option(
+    False, "--start",
+    help=(
+        "Démarrer (Docker) les services que le profil cible nécessite et que "
+        "cette machine ne sert pas encore — jamais implicite, seulement sur "
+        "ce drapeau. Sans effet sur `lexical`/`standard` (aucun service à "
+        "démarrer, `standard` embarque Qdrant en local)."
+    ),
+)
 
 
 @memory_app.command("up")
@@ -54,6 +63,7 @@ def memory_up(
     ctx: typer.Context,
     profile: str = _up_profile_opt,
     apply: bool = _up_apply_opt,
+    start: bool = _up_start_opt,
 ) -> None:
     """Mettre en place la stack mémoire complète — plan par défaut, écriture avec --apply.
 
@@ -63,6 +73,9 @@ def memory_up(
 
     N'active que les services qui répondent : écrire ``memory_graph: neo4j``
     alors que Neo4j est éteint produirait une config qui échoue en silence.
+    ``--start`` lève cette limite pour ``graphe``/``complet`` en démarrant
+    d'abord (Docker Compose, gabarits du kit) ce qui manque — jamais sans ce
+    drapeau explicite.
 
     Écrit toujours ``layer_profile`` et ``retrieval_mode`` cohérents avec ce
     qui est réellement servi (#527) — jamais avec le profil demandé si la
@@ -72,21 +85,30 @@ def memory_up(
       [cyan]grimoire memory up[/cyan]                    Plan seul, rien n'est écrit
       [cyan]grimoire memory up --apply[/cyan]            Écrit le bloc memory:
       [cyan]grimoire memory up --profile standard[/cyan] Vecteurs sans graphe
+      [cyan]grimoire memory up --profile complet --start --apply[/cyan]  Démarre Weaviate+Neo4j+Redis puis écrit
     """
-    from grimoire.tools.memory_setup import PROFILES, apply_memory_plan, build_memory_plan
+    from grimoire.tools.memory_setup import PROFILES, apply_memory_plan, build_memory_plan, start_memory_stack
 
     if not memory_profiles.is_known(profile):
         console.print(f"[red]Profil inconnu :[/red] {profile} — attendu : {', '.join(PROFILES)}")
         raise typer.Exit(1)
 
+    fmt = _get_fmt(ctx)
+    started: list[str] = []
+    if start:
+        started = start_memory_stack(profile, Path.cwd())
+        if fmt != "json":
+            for message in started:
+                console.print(f"[dim]{message}[/dim]")
+
     plan = build_memory_plan(Path.cwd(), profile=profile)
     written = apply_memory_plan(plan) if apply else []
-    fmt = _get_fmt(ctx)
 
     if fmt == "json":
         payload = plan.to_dict()
         payload["applied"] = apply
         payload["written"] = written
+        payload["started"] = started
         typer.echo(json.dumps(payload, indent=2, default=str))
         return
 

@@ -75,13 +75,16 @@ class TestDetectMemoryBackend:
             result = detect_memory_backend()
         assert result == "local"
 
-    def test_returns_qdrant_local_when_qdrant_up(self) -> None:
+    def test_returns_qdrant_server_when_qdrant_up(self) -> None:
+        """A reachable Qdrant HTTP server, never the embedded `qdrant-local`
+        id — the two used to collide despite meaning opposite things
+        (2026-09-18 onboarding decision, PR2)."""
         with (
             patch("grimoire.cli.cmd_init._is_weaviate_reachable", return_value=False),
             patch("grimoire.cli.cmd_init._is_qdrant_reachable", return_value=True),
         ):
             result = detect_memory_backend()
-        assert result == "qdrant-local"
+        assert result == "qdrant-server"
 
     def test_returns_weaviate_when_weaviate_up(self) -> None:
         with patch("grimoire.cli.cmd_init._is_weaviate_reachable", return_value=True):
@@ -410,7 +413,15 @@ class TestInitNeverSilentlyAttaches:
     """Issue #496 — a real service found on the host (Weaviate on :8080 in
     the reported incident) must never get wired into a fresh project just
     because `-y`/`auto` (the default) ran on a machine that happens to run
-    one."""
+    one.
+
+    2026-09-18 onboarding decision (PR2): the express default itself moved
+    from a flat `lexical` to the richest *private, consent-free* composition
+    this machine can serve — `qdrant-local` (embedded, file-local, no
+    service) when a local embedding engine is installed. That is not an
+    attachment: nothing shared, nothing started, nothing detected-and-wired.
+    A service actually found running (Weaviate here) still stays suggestion-only.
+    """
 
     @pytest.fixture
     def runner(self):
@@ -422,7 +433,7 @@ class TestInitNeverSilentlyAttaches:
         from grimoire.cli.app import app
         return app
 
-    def test_auto_backend_falls_back_to_lexical_despite_a_detected_service(
+    def test_auto_backend_never_attaches_to_a_detected_service(
         self, runner, app, tmp_path: Path,
     ) -> None:
         target = tmp_path / "throwaway"
@@ -430,8 +441,10 @@ class TestInitNeverSilentlyAttaches:
             result = runner.invoke(app, ["-y", "init", str(target)])
         assert result.exit_code == 0, result.output
         content = (target / "project-context.yaml").read_text(encoding="utf-8")
-        assert 'backend: "lexical"' in content
-        assert "weaviate" not in content.lower()
+        # The private, embedded default — never the detected external server.
+        assert 'backend: "qdrant-local"' in content
+        assert "weaviate_url" not in content
+        assert "8080" not in content
 
     def test_report_suggests_the_detected_service_without_attaching(
         self, runner, app, tmp_path: Path,
@@ -455,9 +468,24 @@ class TestInitNeverSilentlyAttaches:
             result = runner.invoke(app, ["-y", "-o", "json", "init", str(target)])
         assert result.exit_code == 0, result.output
         data = json.loads(result.output)
-        assert data["backend"] == "lexical"
-        assert data["memory_detected"] == "qdrant-local"
+        assert data["backend"] == "qdrant-local"
+        assert data["memory_detected"] == "qdrant-server"
         assert "grimoire memory up" in data["memory_suggestion"]
+
+    def test_no_local_embedding_capacity_falls_back_to_lexical(
+        self, runner, app, tmp_path: Path,
+    ) -> None:
+        """Without fastembed/sentence-transformers, `qdrant-local` cannot
+        actually embed anything — the express default must stay `lexical`,
+        named as such, rather than write a store nothing can fill."""
+        target = tmp_path / "throwaway4"
+        with patch(
+            "grimoire.tools.memory_setup.local_embedding_available", return_value=False,
+        ):
+            result = runner.invoke(app, ["-y", "init", str(target)])
+        assert result.exit_code == 0, result.output
+        content = (target / "project-context.yaml").read_text(encoding="utf-8")
+        assert 'backend: "lexical"' in content
 
     def test_explicit_backend_is_still_honored_over_detection(
         self, runner, app, tmp_path: Path,

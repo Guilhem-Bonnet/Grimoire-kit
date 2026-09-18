@@ -66,6 +66,58 @@ class TestMemoryUpVocabulary:
         assert data["config"]["retrieval_mode"] == "lexical"
 
 
+# ── grimoire memory up --start (issue Grimoire-kit#616, PR2) ──────────────────
+
+
+class TestMemoryUpStart:
+    """``--start`` is the only path that may launch a container — and only on
+    this explicit flag. Real Docker is never invoked in this suite."""
+
+    def test_without_the_flag_the_stack_helper_is_never_called(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _write_config(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        with patch("grimoire.tools.memory_setup.start_memory_stack") as mock_start:
+            result = runner.invoke(app, ["-o", "json", "memory", "up", "--profile", "complet"])
+        assert result.exit_code == 0, result.output
+        mock_start.assert_not_called()
+
+    def test_the_flag_calls_the_stack_helper_before_planning(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _write_config(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        with patch(
+            "grimoire.tools.memory_setup.start_memory_stack",
+            return_value=["Weaviate : démarré"],
+        ) as mock_start:
+            result = runner.invoke(
+                app, ["-o", "json", "memory", "up", "--profile", "complet", "--start"],
+            )
+        assert result.exit_code == 0, result.output
+        mock_start.assert_called_once()
+        data = json.loads(result.output)
+        assert data["started"] == ["Weaviate : démarré"]
+
+    def test_start_is_a_no_op_for_standard_and_never_touches_docker(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _write_config(tmp_path)
+        monkeypatch.chdir(tmp_path)
+
+        def _fail_if_called(*a: object, **k: object) -> None:
+            raise AssertionError("docker must not be invoked for `standard`")
+
+        monkeypatch.setattr("grimoire.tools.memory_setup.subprocess.run", _fail_if_called)
+        result = runner.invoke(
+            app, ["-o", "json", "memory", "up", "--profile", "standard", "--start"],
+        )
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert data["started"] == []
+
+
 # ── grimoire memory graph purge-orphans ───────────────────────────────────────
 
 
