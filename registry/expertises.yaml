@@ -1,0 +1,264 @@
+$schema: "grimoire-expertise-catalog/v1"
+version: "1.0.0"
+
+# Catalogue d'expertises optionnelles (issue #616) : langages bas/haut
+# niveau, patterns d'ingénierie et fournisseurs cloud, à choisir par
+# l'utilisateur ou à recommander par détection — jamais attachées par
+# défaut. Chaque entrée référence un skill existant (les sept `stack-*`
+# ne sont pas dupliqués) et un agent porteur recommandé ; l'attachement
+# effectif se fait à la demande via `grimoire expertise add <id>`, qui
+# écrit un override projet (voir docs/expertises.md).
+#
+# `porteur` est l'agent visé par défaut ; `porteur_fallback`, quand
+# présent, est utilisé si `porteur` n'existe pas dans le projet (cas
+# cloud sur un projet sans infra-ops).
+#
+# `detect` déclare les signaux qu'un détecteur peut vérifier sans avis
+# humain :
+#   - `stack_scanner: <nom>` réutilise `grimoire.core.scanner.StackScanner`
+#     (mêmes marqueurs que la détection de pile à l'init) ;
+#   - `files` est une liste de marqueurs (fichiers, globs `*.ext`,
+#     répertoires suffixés `/`) vérifiés directement à la racine du projet ;
+#   - `terraform_providers` vérifie la présence d'un bloc
+#     `provider "<nom>"` dans les fichiers `*.tf` du projet.
+# Une entrée sans `detect` (les compétences d'ingénierie transversales)
+# n'est jamais recommandée automatiquement — seul un choix explicite
+# l'attache.
+
+languages:
+  - id: python
+    name: "Python"
+    summary: "Type hints, ruff, mypy, async, pytest — repris tel quel du socle stack."
+    skill: "archetypes/stack/skills/stack-python.md"
+    porteur: stack-engineer
+    detect:
+      stack_scanner: python
+
+  - id: typescript
+    name: "TypeScript & React"
+    summary: "Types stricts, hooks React, tests RTL — repris tel quel du socle stack."
+    skill: "archetypes/stack/skills/stack-typescript.md"
+    porteur: stack-engineer
+    detect:
+      stack_scanner: typescript
+
+  - id: go
+    name: "Go"
+    summary: "Architecture hexagonale, tests table-driven, erreurs wrappées — repris tel quel du socle stack."
+    skill: "archetypes/stack/skills/stack-go.md"
+    porteur: stack-engineer
+    detect:
+      stack_scanner: go
+
+  - id: rust
+    name: "Rust"
+    summary: "Ownership et lifetimes au compilateur, zéro `unsafe` sans justification, cargo clippy/fmt/test en boucle de vérification."
+    skill: "framework/expertises/skills/expertise-rust.md"
+    porteur: stack-engineer
+    detect:
+      stack_scanner: rust
+
+  - id: c
+    name: "C"
+    summary: "Gestion manuelle de la mémoire disciplinée, undefined behavior traqué aux sanitizers, Makefile/CMake reproductibles."
+    skill: "framework/expertises/skills/expertise-c.md"
+    porteur: stack-engineer
+    detect:
+      files: ["Makefile", "*.c", "*.h", "CMakeLists.txt"]
+
+  - id: cpp
+    name: "C++"
+    summary: "RAII systématique, smart pointers plutôt que `new`/`delete` nus, CMake, sanitizers et clang-tidy en gate."
+    skill: "framework/expertises/skills/expertise-cpp.md"
+    porteur: stack-engineer
+    detect:
+      files: ["*.cpp", "*.cc", "*.hpp", "*.hxx", "CMakeLists.txt", "conanfile.txt"]
+
+  - id: csharp
+    name: "C#"
+    summary: "Nullable reference types, async/await, xUnit, analyzers Roslyn — .NET moderne."
+    skill: "framework/expertises/skills/expertise-csharp.md"
+    porteur: stack-engineer
+    detect:
+      stack_scanner: csharp
+
+  - id: java
+    name: "Java"
+    summary: "Immutabilité par défaut, streams, tests JUnit5, build Maven/Gradle reproductible."
+    skill: "framework/expertises/skills/expertise-java.md"
+    porteur: stack-engineer
+    detect:
+      stack_scanner: java
+
+  - id: kotlin
+    name: "Kotlin"
+    summary: "Null-safety du langage, coroutines pour l'async, data classes plutôt que POJO."
+    skill: "framework/expertises/skills/expertise-kotlin.md"
+    porteur: stack-engineer
+    detect:
+      files: ["*.kt", "*.kts"]
+
+  - id: swift
+    name: "Swift"
+    summary: "Optionals explicites, value types par défaut, tests XCTest."
+    skill: "framework/expertises/skills/expertise-swift.md"
+    porteur: stack-engineer
+    detect:
+      files: ["Package.swift", "*.swift"]
+
+  - id: php
+    name: "PHP"
+    summary: "Typage strict (`declare(strict_types=1)`), PSR-12, PHPUnit."
+    skill: "framework/expertises/skills/expertise-php.md"
+    porteur: stack-engineer
+    detect:
+      files: ["composer.json", "*.php"]
+
+  - id: ruby
+    name: "Ruby"
+    summary: "Convention over configuration, RSpec, Rubocop."
+    skill: "framework/expertises/skills/expertise-ruby.md"
+    porteur: stack-engineer
+    detect:
+      stack_scanner: ruby
+
+  - id: scala
+    name: "Scala"
+    summary: "Immutabilité, pattern matching exhaustif, ScalaTest."
+    skill: "framework/expertises/skills/expertise-scala.md"
+    porteur: stack-engineer
+    detect:
+      files: ["build.sbt", "*.scala"]
+
+  - id: elixir
+    name: "Elixir"
+    summary: "Supervision OTP, pattern matching, ExUnit."
+    skill: "framework/expertises/skills/expertise-elixir.md"
+    porteur: stack-engineer
+    detect:
+      files: ["mix.exs", "*.ex"]
+
+engineering:
+  - id: design-patterns
+    name: "Design patterns"
+    summary: "Choisir et justifier un patron de conception plutôt que le citer — GoF, patterns d'intégration, anti-patterns nommés."
+    skill: "framework/expertises/skills/expertise-design-patterns.md"
+    porteur: stack-engineer
+    detect: null
+
+  - id: architecture-haut-niveau
+    name: "Architecture haut niveau"
+    summary: "DDD, architecture hexagonale, event-driven — structurer un système avant d'écrire du code."
+    skill: "framework/expertises/skills/expertise-architecture-haut-niveau.md"
+    porteur: stack-engineer
+    detect: null
+
+  - id: systemes-bas-niveau
+    name: "Systèmes bas niveau"
+    summary: "Mémoire, concurrence, FFI, budget de performance — raisonner sous l'abstraction du langage."
+    skill: "framework/expertises/skills/expertise-systemes-bas-niveau.md"
+    porteur: stack-engineer
+    detect: null
+
+  - id: testing-avancee
+    name: "Testing avancé"
+    summary: "Property-based testing, mutation testing, contract testing — au-delà du test unitaire naïf."
+    skill: "framework/expertises/skills/expertise-testing-avancee.md"
+    porteur: stack-engineer
+    detect: null
+
+  - id: securite-applicative
+    name: "Sécurité applicative"
+    summary: "OWASP Top 10, gestion des secrets, revue de dépendances."
+    skill: "framework/expertises/skills/expertise-securite-applicative.md"
+    porteur: stack-engineer
+    detect: null
+
+  - id: performance
+    name: "Performance"
+    summary: "Mesurer avant d'optimiser, profiling, budgets de latence."
+    skill: "framework/expertises/skills/expertise-performance.md"
+    porteur: stack-engineer
+    detect: null
+
+cloud:
+  - id: aws
+    name: "AWS"
+    summary: "IAM au moindre privilège, Terraform/CDK, coûts surveillés — Amazon Web Services."
+    skill: "framework/expertises/skills/expertise-aws.md"
+    porteur: ops-engineer
+    porteur_fallback: stack-engineer
+    detect:
+      files: [".aws/", "cdk.json", "buildspec.yml"]
+      terraform_providers: ["aws"]
+
+  - id: azure
+    name: "Azure"
+    summary: "RBAC Entra ID, Bicep/Terraform, Azure Pipelines — Microsoft Azure."
+    skill: "framework/expertises/skills/expertise-azure.md"
+    porteur: ops-engineer
+    porteur_fallback: stack-engineer
+    detect:
+      files: ["azure-pipelines.yml", "*.bicep"]
+      terraform_providers: ["azurerm"]
+
+  - id: gcp
+    name: "GCP"
+    summary: "IAM par rôles, Terraform, Cloud Build — Google Cloud Platform."
+    skill: "framework/expertises/skills/expertise-gcp.md"
+    porteur: ops-engineer
+    porteur_fallback: stack-engineer
+    detect:
+      files: ["cloudbuild.yaml", "app.yaml"]
+      terraform_providers: ["google"]
+
+  - id: ovh
+    name: "OVHcloud"
+    summary: "API OVH, Terraform provider ovh, Public Cloud."
+    skill: "framework/expertises/skills/expertise-ovh.md"
+    porteur: ops-engineer
+    porteur_fallback: stack-engineer
+    detect:
+      terraform_providers: ["ovh"]
+
+  - id: hetzner
+    name: "Hetzner Cloud"
+    summary: "Terraform provider hcloud, coût maîtrisé."
+    skill: "framework/expertises/skills/expertise-hetzner.md"
+    porteur: ops-engineer
+    porteur_fallback: stack-engineer
+    detect:
+      terraform_providers: ["hcloud"]
+
+  - id: cloudflare
+    name: "Cloudflare"
+    summary: "Workers, DNS, Terraform provider cloudflare."
+    skill: "framework/expertises/skills/expertise-cloudflare.md"
+    porteur: ops-engineer
+    porteur_fallback: stack-engineer
+    detect:
+      files: ["wrangler.toml"]
+      terraform_providers: ["cloudflare"]
+
+  - id: scaleway
+    name: "Scaleway"
+    summary: "Terraform provider scaleway, Instances/Kapsule."
+    skill: "framework/expertises/skills/expertise-scaleway.md"
+    porteur: ops-engineer
+    porteur_fallback: stack-engineer
+    detect:
+      terraform_providers: ["scaleway"]
+
+  - id: kubernetes-managed
+    name: "Kubernetes managé (EKS/AKS/GKE)"
+    summary: "Cycle de vie du cluster et des node pools, IAM d'accès natif — distinct de stack-k8s (manifestes/Helm)."
+    skill: "framework/expertises/skills/expertise-kubernetes-managed.md"
+    porteur: ops-engineer
+    porteur_fallback: stack-engineer
+    # Pas de détection fiable sans distinguer une ressource de cluster
+    # managé (`aws_eks_cluster`, `azurerm_kubernetes_cluster`,
+    # `google_container_cluster`) d'un simple provider aws/azurerm/google
+    # utilisé pour tout autre chose — un détecteur par nom de ressource
+    # Terraform reste à écrire (issue de suivi). En attendant : choix
+    # explicite via `grimoire expertise add kubernetes-managed`.
+    detect: null
