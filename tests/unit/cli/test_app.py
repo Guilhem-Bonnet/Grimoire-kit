@@ -146,12 +146,13 @@ class TestInit:
     # ── Archetype option ──
 
     def test_init_default_archetype(self, tmp_path: Path) -> None:
-        """Decision 2026-09-18 (Guilhem): an empty/undetected project never
-        gets `minimal` automatically — platform-engineering (the kit's most
-        general specialized archetype) is the applied best guess."""
+        """Decision 2026-09-18 (Guilhem, corrected same day): an empty/
+        undetected project never gets `minimal` automatically — `stack`
+        (Atlas, the kit's generalist for any stack without an asserted
+        domain) is applied, flagged as a best guess."""
         runner.invoke(app, ["init", str(tmp_path)])
         content = (tmp_path / "project-context.yaml").read_text()
-        assert 'archetype: "platform-engineering"' in content
+        assert 'archetype: "stack"' in content
 
     def test_init_web_app_archetype(self, tmp_path: Path) -> None:
         result = runner.invoke(app, ["init", str(tmp_path), "--archetype", "web-app"])
@@ -310,10 +311,11 @@ class TestStatus:
         assert "my-app" in result.output
 
     def test_status_shows_archetype(self, project: Path) -> None:
-        """Decision 2026-09-18: an empty project's auto-detected archetype is
-        platform-engineering, never minimal (see TestInit.test_init_default_archetype)."""
+        """Decision 2026-09-18 (corrected same day): an empty project's
+        auto-detected archetype is `stack`, never minimal (see
+        TestInit.test_init_default_archetype)."""
         result = runner.invoke(app, ["status", str(project)])
-        assert "platform-engineering" in result.output
+        assert "Archetype: stack" in result.output
 
     def test_status_shows_memory(self, project: Path) -> None:
         result = runner.invoke(app, ["status", str(project)])
@@ -1743,9 +1745,9 @@ class TestInitJson:
         data = json.loads(result.output)
         assert data["ok"] is True
         assert data["project"] == "j-proj"
-        # Decision 2026-09-18: an empty project's auto-detected archetype is
-        # platform-engineering, never minimal.
-        assert data["archetype"] == "platform-engineering"
+        # Decision 2026-09-18 (corrected same day): an empty project's
+        # auto-detected archetype is `stack`, never minimal.
+        assert data["archetype"] == "stack"
         # backend "auto" resolves to the isolated `lexical` default (#496)
         assert data["backend"] == "lexical"
         assert "dirs_created" in data

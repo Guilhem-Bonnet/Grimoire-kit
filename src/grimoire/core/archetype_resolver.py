@@ -97,6 +97,43 @@ class StackRecommendation:
     propose_discovery: bool
     #: "python" | "node" | "rust" | "go" | "" (mixed or unrecognized stacks)
     language: str = ""
+    # False for every non-empty stack: `stack` (Atlas, the generalist for "any
+    # stack without an asserted domain") is the *correct*, deliberate pick for
+    # a naked backend/library/CLI — not a guess to second-guess. True only for
+    # a truly empty repo (no signal at all) — see recommend_naked_stack().
+    is_best_guess: bool = False
+
+
+#: Stack name → the stack-skill id that attaches to Atlas (stack-engineer) for
+#: it — mirrors archetypes/stack/archetype.dna.yaml's `skills:` list. Not every
+#: scanner-detected stack has one yet (rust, java, ruby, csharp — no
+#: `stack-rust`/`stack-java`/... skill exists in the DNA today).
+_STACK_SKILL_FOR_STACK: dict[str, str] = {
+    "python": "stack-python",
+    "go": "stack-go",
+    "javascript": "stack-typescript",
+    "typescript": "stack-typescript",
+    "docker": "stack-docker",
+    "terraform": "stack-terraform",
+    "ansible": "stack-ansible",
+    "kubernetes": "stack-k8s",
+}
+
+
+def _stack_skills_for(detected: set[str]) -> list[str]:
+    """Stack skills *relevant to* `detected` — named in the recommendation reason.
+
+    KNOWN GAP (verified 2026-09-18, reported rather than silently claimed
+    fixed): the scaffolder (`ProjectScaffolder._plan_archetype_agents`) does
+    not filter `archetypes/stack/skills/*.md` by detected technology — it
+    installs Atlas (stack-engineer) with *all seven* stack skills together,
+    unconditionally, whenever `stack` is the resolved (or an incidentally
+    detected) archetype. This function names the skill(s) actually relevant
+    to what was detected for the reason text; it does not change what the
+    scaffolder writes. Filtering the scaffolder's skill set to match is a
+    separate, not-yet-implemented change.
+    """
+    return sorted({_STACK_SKILL_FOR_STACK[name] for name in detected if name in _STACK_SKILL_FOR_STACK})
 
 
 def _detect_test_evidence(root: Path) -> str:
@@ -132,41 +169,48 @@ def _package_json_test_runner(root: Path) -> str | None:
 
 
 def recommend_naked_stack(scan: ScanResult) -> StackRecommendation:
-    """Best-guess *specialized* archetype for a stack no rule matched confidently.
+    """Named archetype for a stack no rule matched confidently — never `minimal`.
 
-    Decision 2026-09-18 (Guilhem, product owner): ``resolve()`` never installs
-    ``minimal`` automatically — a naked/ambiguous stack still gets a named,
-    explained, specialized archetype; ``minimal`` is reachable only via an
-    explicit ``-a minimal`` override (demo/test escape hatch). Two archetypes
-    cover the fallback space: ``platform-engineering`` (backend/architecture,
-    the only one of the 7 with no language or frontend assumption in its DNA)
-    for anything without a confirmed frontend, and ``web-app`` for a Node/JS
-    project (the kit's only JS/TS-oriented archetype). ``propose_discovery``
-    stays ``True`` throughout: this is the automatic pick for the express
-    path, not a replacement for asking in a real TTY.
+    Decision 2026-09-18 (Guilhem, product owner), corrected the same day: the
+    honest default for "any stack without an asserted domain" (naked Python,
+    Node, Rust, Go, a library, a CLI...) is ``stack`` — the Atlas archetype
+    (``archetypes/stack/archetype.dna.yaml``), built exactly for this: one
+    generalist agent plus a skill per detected technology
+    (``stack-python``/``stack-go``/``stack-typescript``/...). It is *not* a
+    guess: ``is_best_guess`` stays ``False`` for every non-empty stack — only
+    a truly empty repo (no signal at all) is flagged as one, since there
+    ``stack`` is picked with nothing to base it on.
+
+    ``minimal`` is reachable only via an explicit ``-a minimal`` override
+    (demo/test escape hatch) — never through this function.
     """
     detected = {d.name for d in scan.stacks}
 
     if not detected:
         return StackRecommendation(
-            archetype="platform-engineering",
+            archetype="stack",
             reason=(
-                "No stack marker detected (empty repo, or README only) — "
-                "platform-engineering is the kit's most general specialized "
-                "archetype; pick a better fit via guided discovery."
+                "No stack marker detected (empty repo, or README only) — stack "
+                "(Atlas, the kit's generalist for any stack without an asserted "
+                "domain) is the honest default; pick a specific domain via "
+                "guided discovery."
             ),
             propose_discovery=True,
+            is_best_guess=True,
         )
+
+    skills = _stack_skills_for(detected)
+    skills_text = ", ".join(skills) if skills else "no dedicated stack skill yet"
 
     if "python" in detected:
         evidence = _detect_test_evidence(scan.root)
         note = f", {evidence}" if evidence else ""
         return StackRecommendation(
-            archetype="platform-engineering",
+            archetype="stack",
             reason=(
                 f"Python project detected (pyproject.toml/setup.py/requirements.txt{note}) "
-                "with no web framework (Django/FastAPI) or infra signal — "
-                "platform-engineering is the closest general-purpose backend archetype."
+                "with no asserted domain (web/infra/creative) — stack (Atlas) fits, "
+                f"with {skills_text} attached."
             ),
             propose_discovery=True,
             language="python",
@@ -176,42 +220,43 @@ def recommend_naked_stack(scan: ScanResult) -> StackRecommendation:
         runner = _package_json_test_runner(scan.root)
         note = f" ({runner})" if runner else ""
         return StackRecommendation(
-            archetype="web-app",
+            archetype="stack",
             reason=(
                 f"Node project detected (package.json{note}) with no confirmed frontend "
-                "framework (React/Vue) — web-app is the kit's only JS/TS-oriented archetype."
+                f"framework (React/Vue) — stack (Atlas) fits, with {skills_text} attached."
             ),
             propose_discovery=True,
             language="node",
         )
 
-    if "rust" in detected:
-        return StackRecommendation(
-            archetype="platform-engineering",
-            reason=(
-                "Rust project detected (Cargo.toml) — no archetype targets Rust "
-                "specifically; platform-engineering is the closest general-purpose one."
-            ),
-            propose_discovery=True,
-            language="rust",
-        )
-
     if "go" in detected:
         return StackRecommendation(
-            archetype="platform-engineering",
+            archetype="stack",
             reason=(
-                "Go project detected (go.mod) — no archetype targets Go specifically; "
-                "platform-engineering is the closest general-purpose one."
+                f"Go project detected (go.mod) with no asserted domain — stack (Atlas) "
+                f"fits, with {skills_text} attached."
             ),
             propose_discovery=True,
             language="go",
         )
 
+    if "rust" in detected:
+        return StackRecommendation(
+            archetype="stack",
+            reason=(
+                "Rust project detected (Cargo.toml) with no asserted domain — stack "
+                "(Atlas, the generalist) still applies, though no dedicated stack "
+                "skill exists yet for Rust."
+            ),
+            propose_discovery=True,
+            language="rust",
+        )
+
     return StackRecommendation(
-        archetype="platform-engineering",
+        archetype="stack",
         reason=(
-            f"Detected stacks ({', '.join(sorted(detected))}) match no specialized "
-            "archetype directly; platform-engineering is the closest general-purpose one."
+            f"Detected stack(s) ({', '.join(sorted(detected))}) with no asserted domain "
+            f"(web/infra/creative) — stack (Atlas) fits, with {skills_text} attached."
         ),
         propose_discovery=True,
     )
@@ -220,10 +265,12 @@ def recommend_naked_stack(scan: ScanResult) -> StackRecommendation:
 # ── Weak-signal suggestion ───────────────────────────────────────────────────
 #
 # Narrower than `recommend_naked_stack`: an "almost there" signal — a bundler
-# already in package.json, a bare Dockerfile, CI wired to real tests — that
-# points at one *specific* archetype, more confident than the generic
-# language-based fallback above. `resolve()` checks this first, before
-# `recommend_naked_stack`, when no `_ARCHETYPE_RULES` entry matched.
+# already in package.json, CI wired to real tests — that points at one
+# *specific* domain archetype, more confident than the generic `stack`
+# fallback below. `resolve()` checks this first, before `recommend_naked_
+# stack`, when no `_ARCHETYPE_RULES` entry matched. A bare Dockerfile alone is
+# *not* IaC (decision 2026-09-18, Guilhem: IaC means Terraform/K8s/Ansible/
+# Helm) — it falls through to `stack`, naming `stack-docker`.
 
 _CI_MARKERS: tuple[str, ...] = (
     ".github/workflows", ".gitlab-ci.yml", ".circleci/config.yml",
@@ -269,7 +316,7 @@ def weak_signal_suggestion(scan: ScanResult) -> tuple[str, str] | None:
     """A specific, named archetype hint from an almost-there signal, or ``None``.
 
     Checked in a fixed, most-specific-first order: a bundler already chosen
-    beats a bare Dockerfile, which beats the more generic CI+tests signal.
+    beats the more generic CI+tests signal.
     """
     detected = {d.name for d in scan.stacks}
 
@@ -277,9 +324,6 @@ def weak_signal_suggestion(scan: ScanResult) -> tuple[str, str] | None:
         bundler = _package_json_bundler(scan.root)
         if bundler:
             return ("web-app", f"frontend tooling detected ({bundler}) with no confirmed framework")
-
-    if "docker" in detected:
-        return ("infra-ops", "Dockerfile detected — ops/infra likely even without Terraform/K8s/Ansible")
 
     if _has_ci_and_tests(scan.root):
         return ("fix-loop", "CI + tests detected — a certified fix loop (TDD proofs) may fit")
@@ -332,17 +376,19 @@ class ArchetypeResolver:
             else:
                 # No rule matched — decision 2026-09-18 (Guilhem): never a
                 # silent (or automatic) `minimal`. Try the more confident
-                # weak-signal match first (bundler/Dockerfile/CI+tests),
-                # then the generic language-based fallback — both always
-                # named and explained, never `minimal`.
-                is_best_guess = True
+                # weak-signal match first (bundler/CI+tests — still a guess,
+                # narrower than the generic fallback), then `stack` (Atlas),
+                # the deliberate, correct pick for "no asserted domain" — not
+                # a guess, except for a truly empty repo (no signal at all).
                 weak = weak_signal_suggestion(scan)
                 if weak:
                     archetype, reason = weak
+                    is_best_guess = True
                 else:
                     hint = recommend_naked_stack(scan)
                     archetype = hint.archetype
                     reason = hint.reason
+                    is_best_guess = hint.is_best_guess
                 archetypes = (archetype,)
 
         # Stack agents — deduplicated

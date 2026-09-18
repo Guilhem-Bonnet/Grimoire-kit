@@ -699,15 +699,16 @@ def _guided_discovery(scan: ScanResult | None) -> list[str]:
     if q3:
         result.append("fix-loop")
 
-    # Decision 2026-09-18 (Guilhem): even a "no" to all three questions never
-    # ends in `minimal` — platform-engineering is the kit's most general
-    # specialized archetype, and the honest fallback here regardless of stack.
+    # Decision 2026-09-18 (Guilhem, corrected same day): even a "no" to all
+    # three questions never ends in `minimal` — no asserted domain (web,
+    # infra, fix-loop) means `stack` (Atlas, the kit's generalist for exactly
+    # this case), not `platform-engineering`.
     if not result:
         console.print(
-            "  [dim]No specialization selected — platform-engineering (the kit's most "
-            "general specialized archetype) covers this best.[/dim]"
+            "  [dim]No specialization selected — stack (Atlas, the kit's generalist "
+            "for a project with no asserted domain) covers this best.[/dim]"
         )
-        return ["platform-engineering"]
+        return ["stack"]
 
     names = ", ".join(result)
     console.print(f"\n  [bold]Recommended:[/bold] {names}")

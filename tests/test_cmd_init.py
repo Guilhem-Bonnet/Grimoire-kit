@@ -871,23 +871,31 @@ class TestExpressPathAppliesBestGuess:
         assert "Best guess" in result.output
         assert "grimoire up -a" in result.output
 
-    def test_naked_python_gets_platform_engineering_applied(self, runner, app, tmp_path: Path) -> None:
+    def test_naked_python_gets_stack_applied_not_a_guess(self, runner, app, tmp_path: Path) -> None:
+        """Decision 2026-09-18 (Guilhem, corrected same day): `stack` (Atlas)
+        is the deliberate pick for a naked backend language — not
+        `platform-engineering`, and not flagged as a 'best guess'."""
         target = tmp_path / "py-proj"
         target.mkdir()
         (target / "pyproject.toml").write_text("[project]\nname='x'\n", encoding="utf-8")
         result = runner.invoke(app, ["-y", "init", str(target), "--no-cockpit"])
         assert result.exit_code == 0, result.output
-        assert "Archetype: Platform Eng." in result.output
+        assert "Archetype: stack" in result.output
+        assert "stack-python" in result.output
         assert "Python" in result.output
         assert "minimal" not in result.output.lower()
+        assert "Best guess" not in result.output
 
-    def test_empty_repo_gets_platform_engineering_applied(self, runner, app, tmp_path: Path) -> None:
+    def test_empty_repo_gets_stack_applied_as_a_guess(self, runner, app, tmp_path: Path) -> None:
+        """The empty-repo case is the one exception: `stack` is still applied,
+        but flagged as a best guess (no signal at all to base it on)."""
         target = tmp_path / "empty-proj"
         target.mkdir()
         result = runner.invoke(app, ["-y", "init", str(target), "--no-cockpit"])
         assert result.exit_code == 0, result.output
-        assert "Archetype: Platform Eng." in result.output
+        assert "Archetype: stack" in result.output
         assert "minimal" not in result.output.lower()
+        assert "Best guess" in result.output
 
     def test_interactive_bare_enter_never_yields_minimal(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -964,10 +972,15 @@ class TestDynamicNextStepsPanel:
 
 
 class TestWizardNeverPreFillsABestGuess:
-    """Decision 2026-09-18 (Guilhem): a best-guess archetype (naked Python →
-    platform-engineering) is not a confident rule match — the wizard must
-    still ask via guided discovery, not silently pre-fill/confirm the guess
-    as if it were detected."""
+    """Decision 2026-09-18 (Guilhem, corrected same day): a naked Python
+    project now resolves to `stack` (Atlas) — a deliberate pick, not a
+    'best guess' (`is_best_guess` is False). But `stack` is not one of the
+    wizard's selectable specializations either (it's the kit's internal
+    generalist, not a numbered menu item) — so it is never pre-filled as
+    'detected' regardless, and the wizard still falls through to guided
+    discovery for it. A weak-signal pick (bundler → web-app) *is* in the
+    menu and *is* flagged `is_best_guess` — that's what actually exercises
+    the gate."""
 
     @staticmethod
     def _echo_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -976,7 +989,7 @@ class TestWizardNeverPreFillsABestGuess:
         monkeypatch.setattr(cmd_init.Prompt, "ask", staticmethod(lambda *a, **kw: kw.get("default", "")))
         monkeypatch.setattr(cmd_init.Confirm, "ask", staticmethod(lambda *a, **kw: kw.get("default", False)))
 
-    def test_naked_python_wizard_does_not_prefill_platform_engineering(
+    def test_naked_python_wizard_does_not_prefill_stack(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
     ) -> None:
         from grimoire.cli.cmd_init import _run_wizard
@@ -990,6 +1003,34 @@ class TestWizardNeverPreFillsABestGuess:
             root=tmp_path,
         )
         resolved = ArchetypeResolver().resolve(scan)
+        assert resolved.archetype == "stack"
+        assert resolved.is_best_guess is False
+        _run_wizard(tmp_path, scan, resolved, "lexical")
+        printed = capsys.readouterr().err
+        assert "← detected" not in printed
+
+    def test_weak_signal_pick_is_flagged_best_guess_and_not_prefilled(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """The actual is_best_guess gate, exercised on an archetype that IS
+        in the wizard's menu (web-app, via the bundler weak signal)."""
+        import json as _json
+
+        from grimoire.cli.cmd_init import _run_wizard
+        from grimoire.core.archetype_resolver import ArchetypeResolver
+        from grimoire.core.scanner import ScanResult, StackDetection
+
+        self._echo_defaults(monkeypatch)
+        (tmp_path / "package.json").write_text(
+            _json.dumps({"devDependencies": {"vite": "^5.0.0"}}), encoding="utf-8",
+        )
+        scan = ScanResult(
+            stacks=(StackDetection(name="javascript", confidence=0.9, evidence=("package.json",)),),
+            project_type="generic",
+            root=tmp_path,
+        )
+        resolved = ArchetypeResolver().resolve(scan)
+        assert resolved.archetype == "web-app"
         assert resolved.is_best_guess is True
         _run_wizard(tmp_path, scan, resolved, "lexical")
         printed = capsys.readouterr().err
