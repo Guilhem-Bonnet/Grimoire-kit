@@ -19,19 +19,21 @@ d'abord, puis temps, puis coût. Le critère d'arrêt du plan (§3 du plan
   contexte injecté, mémoire) avant toute parité.
 - Si réussite égale et coût ≤ 70 % de l'hôte nu : le plan continue.
 
-## 2. Les trois bras
+## 2. Les quatre bras
 
 | Bras | Configuration du dépôt de tâche | Isolation |
 |---|---|---|
 | `nu` | Rien. `git init` seul. | `HOME` isolé, jetable, sans identifiants ECC/kit. |
 | `ecc` | Plugin Claude Code `ecc@ecc` installé en **scope projet** (`.claude/settings.local.json`), depuis un clone local du dépôt ecc épinglé au commit utilisé. | `HOME` isolé partagé entre tous les runs `ecc` (cache du plugin, voir §4). |
 | `kit` | `grimoire init . --backend local --no-cockpit` puis `grimoire host sync --host claude` (grimoire-kit ≥ 3.53.0, installé depuis PyPI). | `HOME` isolé partagé (évite d'écrire dans `~/.grimoire`) ; l'état projet (`_grimoire/`) vit dans le dépôt de tâche lui-même. |
+| `kit-gov` | Le bras `kit`, PLUS `grimoire standard init` (profil `starter`, celui qu'un développeur seul obtient sans option) et une tâche de board — à l'id de la tâche du banc — posée en `in_progress` via `grimoire task migrate-standard` (ADR-007). | `HOME` isolé propre à ce bras (`workspace/homes/kit-gov`), jamais partagé avec `kit`. |
 
-Aucun bras ne force `--model` : les trois utilisent le modèle par défaut de
-Claude Code pour l'environnement d'exécution. C'est volontaire — le bras
-`kit` a le droit de cascader vers un modèle moins cher via ses propres hooks
-et son propre routage ; c'est précisément ce que la mesure de coût doit
-révéler, pas quelque chose à neutraliser en figeant un modèle unique.
+Aucun bras ne force `--model` : les quatre utilisent le modèle par défaut de
+Claude Code pour l'environnement d'exécution. C'est volontaire — les bras
+`kit`/`kit-gov` ont le droit de cascader vers un modèle moins cher via leurs
+propres hooks et leur propre routage ; c'est précisément ce que la mesure de
+coût doit révéler, pas quelque chose à neutraliser en figeant un modèle
+unique.
 
 ### Ce que le bras `ecc` ajoute exactement
 
@@ -69,11 +71,38 @@ du banc (`workspace/ecc/`), enregistrée dans `state/selection.json` sous
 Le harnais journalise la liste exacte des fichiers ajoutés (diff de
 l'arborescence avant/après ces deux commandes) dans le résultat de setup de
 chaque run `kit` — voir `setup_arm_kit()` dans `scripts/bench/three_arms.py`.
-`grimoire dispatch stats --json` est interrogé après chaque run `kit` et son
-résultat est conservé dans `RunRecord.dispatch_stats`, y compris quand il est
-vide (une tâche d'exercice résolue en une session headless ne passe pas
-nécessairement par `grimoire task dispatch` — c'est un résultat honnête à
+`grimoire dispatch stats --json` est interrogé après chaque run `kit`/`kit-gov`
+et son résultat est conservé dans `RunRecord.dispatch_stats`, y compris quand
+il est vide (une tâche d'exercice résolue en une session headless ne passe
+pas nécessairement par `grimoire task dispatch` — c'est un résultat honnête à
 publier tel quel, pas une raison d'inventer un événement).
+
+### Ce que le bras `kit-gov` ajoute exactement (lot F, issue #582)
+
+Le rejeu du lot E (`docs/bench/rejeu-lot-e-2026-09-17.md` §3) a mesuré que le
+bras `kit` ne fait jamais passer `_is_governed()` (lot A,
+`src/grimoire/hosts/decisions/activation.py`) à `True` : il n'installe
+jamais `_grimoire/standard/`. Le lot B (`gate run-tests`, la directive
+gouvernée) reste donc structurellement invisible sur le bras `kit`, quel que
+soit le nombre de rejeux — pas un défaut du lot B, un défaut de méthode du
+banc. `kit-gov` le corrige en simulant un projet réellement enrôlé, en plus
+de tout ce que fait `kit` :
+
+- `grimoire standard init .` — profil par défaut `starter` (celui qu'un
+  développeur seul obtient sans `--profile`/`--needs`).
+- Une tâche de board à l'id de la tâche du banc (barres obliques remplacées
+  par des doubles underscores : Grimoire refuse `/` dans un `task_id`),
+  posée directement en `in_progress`, puis importée dans le Mission Ledger
+  par `grimoire task migrate-standard` (ADR-007,
+  `docs/adr-007-unification-des-taches.md`, Grimoire-kit#587/#588) — seule
+  voie CLI qui préserve un id exact plutôt que d'en dériver un du titre
+  (`grimoire task add` n'expose aucune option `--task-id`).
+
+Vérifié en isolation (dépôt jetable, non versionné) avant le premier rejeu :
+`grimoire standard activation-context` rend alors la directive complète avec
+`gate run-tests --task-id <id>`, `_is_governed()` vaut `True` et
+`active_task_id()` résout bien cet id — jamais `bootstrap`. Voir
+`setup_arm_kit_gov()` dans `scripts/bench/three_arms.py`.
 
 ## 3. Authentification en environnement isolé
 

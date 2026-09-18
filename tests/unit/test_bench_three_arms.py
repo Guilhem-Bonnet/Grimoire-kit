@@ -753,6 +753,142 @@ def test_build_report_kit_runs_detail_includes_turns_cost_time_and_evidence() ->
     assert "go/palindrome-products" in rendered
 
 
+# ── 12. Bras ``kit-gov`` (lot F, #582) : projet réellement enrôlé ──────────
+
+
+def test_governed_task_id_replaces_slash_with_double_underscore() -> None:
+    # Grimoire refuse '/' dans un task_id (TASK_ID_PATTERN) : même convention
+    # que le harnais utilise déjà pour les chemins de dépôt de tâche.
+    assert ta._governed_task_id("go/palindrome-products") == "go__palindrome-products"
+    assert ta._governed_task_id("python/word-count") == "python__word-count"
+
+
+def test_setup_arm_kit_gov_runs_standard_init_then_migrates_a_synthetic_board(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Provisionnement simulé, sans réseau ni CLI Grimoire réelle.
+
+    Verrouille l'ordre (init du standard puis migration) et le contenu du
+    board synthétique écrit entre les deux : id gouverné exact, statut
+    ``in_progress`` — c'est ce qui fait passer ``_is_governed()`` à ``True``
+    et résout ``active_task_id()`` sur cet id plutôt que sur ``bootstrap``
+    (vérifié en isolation, voir la docstring de ``setup_arm_kit_gov``).
+    """
+    calls: list[list[str]] = []
+
+    def fake_run(cmd: Any, *, cwd: Path | None = None, env: Any = None, timeout: int | None = None) -> Any:
+        del cwd, env, timeout
+        calls.append(list(cmd))
+        return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(ta, "_run", fake_run)
+    monkeypatch.setattr(
+        ta,
+        "setup_arm_kit",
+        lambda task_dir, *, kit_home, timeout=180: {"arm": "kit", "added": ["x"], "init_rc": 0, "sync_rc": 0},
+    )
+
+    task_dir = tmp_path / "run"
+    task_dir.mkdir()
+    result = ta.setup_arm_kit_gov(task_dir, kit_home=tmp_path / "home", task_id="go/palindrome-products")
+
+    assert result["arm"] == "kit-gov"
+    assert result["governed_task_id"] == "go__palindrome-products"
+    assert result["standard_init_rc"] == 0
+    assert result["standard_init_profile"] == "starter"
+    assert result["migrate_rc"] == 0
+    assert result["added"] == ["x"]
+    assert calls[0][:3] == ["grimoire", "standard", "init"]
+    assert calls[1][:3] == ["grimoire", "task", "migrate-standard"]
+
+    board = (task_dir / "_grimoire" / "standard" / "task-board.yaml").read_text(encoding="utf-8")
+    assert "task_id: go__palindrome-products" in board
+    assert "status: in_progress" in board
+
+
+def test_run_one_wires_kit_gov_setup_and_collects_governed_evidence(
+    synthetic_bench_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``_run_one`` doit provisionner ``kit-gov`` avec le task_id du banc et
+    relire la preuve ``test-run.json``/les stats de dispatch, comme pour
+    ``kit`` — sans quoi le rapport n'aurait jamais de quoi remplir la
+    colonne « lot B » de ce bras."""
+    task = ta.discover_catalog(synthetic_bench_root)[0]
+    workspace = tmp_path / "workspace"
+    homes = {arm: workspace / "homes" / arm for arm in ta.ARMS}
+    for home in homes.values():
+        ta.ensure_isolated_home(home)
+
+    setup_calls: list[tuple[Path, str]] = []
+
+    def fake_setup_arm_kit_gov(task_dir: Path, *, kit_home: Path, task_id: str, timeout: int = 180) -> dict[str, Any]:
+        del kit_home, timeout
+        setup_calls.append((task_dir, task_id))
+        return {"arm": "kit-gov", "added": []}
+
+    @contextlib.contextmanager
+    def fake_credentials(home: Path, real_home: Path | None = None):
+        del home, real_home
+        yield "fake-token"
+
+    monkeypatch.setattr(ta, "setup_arm_kit_gov", fake_setup_arm_kit_gov)
+    monkeypatch.setattr(ta, "credentials_provisioned", fake_credentials)
+    monkeypatch.setattr(ta, "run_claude_headless", lambda *a, **k: ta.RunOutcome(terminated_reason="completed"))
+    monkeypatch.setattr(ta, "run_hidden_tests", lambda *a, **k: (True, ""))
+    monkeypatch.setattr(ta, "cleanup_build_artifacts", lambda *_: None)
+    monkeypatch.setattr(ta, "_collect_dispatch_stats", lambda run_dir, home: {"overall": {"total": 0}})
+    monkeypatch.setattr(ta, "has_test_run_evidence", lambda run_dir: True)
+
+    record = ta._run_one(
+        task,
+        "kit-gov",
+        0,
+        workspace=workspace,
+        ecc_repo=tmp_path / "ecc-repo-unused",
+        homes=homes,
+        go_bin=None,
+        run_timeout_s=5,
+    )
+
+    assert setup_calls and setup_calls[0][1] == task.task_id
+    assert record.arm == "kit-gov"
+    assert record.kit_test_run_evidence is True
+    assert record.dispatch_stats == {"overall": {"total": 0}}
+
+
+def test_build_report_kit_gov_runs_detail_and_dynamic_per_task_header() -> None:
+    records = [
+        ta.RunRecord(
+            "go/palindrome-products",
+            "go",
+            "kit-gov",
+            0,
+            True,
+            0.5,
+            10,
+            10,
+            5,
+            100.0,
+            "completed",
+            kit_test_run_evidence=True,
+        ),
+    ]
+    report = ta.build_report(records, total_tasks=1, expected_cost=None, seed=0, rerun_arms=("kit-gov",))
+    assert report["kit_gov_runs"] == [
+        {
+            "task_id": "go/palindrome-products",
+            "run_index": 0,
+            "num_turns": 5,
+            "total_cost_usd": 0.5,
+            "wall_seconds": 100.0,
+            "test_run_evidence": True,
+        }
+    ]
+    rendered = ta.render_report_markdown(report)
+    assert "Détail par run — bras kit-gov" in rendered
+    assert "| Tâche | Langue | nu | ecc | kit | kit-gov |" in rendered
+
+
 def test_main_full_only_replays_the_selected_arms(
     synthetic_bench_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
