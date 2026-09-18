@@ -76,5 +76,6 @@ grimoire-kit/
 | [Diagnostic du surcoût kit (2026-09-17)](bench/diagnostic-surcout-kit-2026-09-17.md) | Attribution du surcoût mesuré sur le banc, preuve des gates verts déconnectés des tests, lots de cœur |
 | [Rejeu du banc après les lots A/B/C (2026-09-17)](bench/rejeu-lot-e-2026-09-17.md) | Verdict du lot E : surcoût de tours éliminé, coût encore au-dessus de 70 % du nu, lot B jamais exercé par le banc |
 | [Rejeu du bras `kit-gov` (2026-09-17)](bench/rejeu-lot-f-2026-09-17.md) | Verdict du lot F : la gouvernance non dosée coûte ×4,6 pour -7 points de succès sur un projet réellement enrôlé, lot B enfin mesurable |
+| [Rejeu du bras `kit-gov` après les lots G1-G4 (2026-09-18)](bench/rejeu-lot-h-2026-09-18.md) | Verdict du lot H : surcoût de gouvernance réduit ÷2,4-2,5 et succès aligné sur `kit`, critère de sortie de phase toujours non atteint ; incident et correctif du binaire `grimoire` résolu en absolu |
 | [Direction d'Anthropic — chevaucher/envelopper/ignorer](veille/anthropic-direction-2026-09.md) | Verdict par capacité Anthropic récente, lot du plan qui l'absorbe |
 | [Idées à récolter — instruction et verdict](veille/idees-a-recolter-2026-09.md) | Adopter/adapter/écarter par idée concurrente, fichier source et licence |
