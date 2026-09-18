@@ -146,7 +146,7 @@ Produire un tableau récapitulatif + contraintes architecturales induites.
 1. LIRE architecture.md et les ADRs existants
 2. IDENTIFIER : single points of failure, couplages forts, dette technique architecturale
 3. VÉRIFIER la conformité aux traits DNA (contract-driven, observability-by-design, resilience-patterns)
-4. PRODUIRE un rapport avec : score /10, risques, recommandations priorisées
+4. PRODUIRE un rapport avec : un verdict OK/KO par trait DNA (fichier:ligne qui le prouve, « non vérifié » sinon), risques, recommandations priorisées
     </prompt>
   </prompts>
 </agent>

@@ -88,6 +88,31 @@ docs: update getting-started for v3
 
 Types : `feat`, `fix`, `docs`, `refactor`, `test`, `chore`
 
+## Pas de chiffre sans mesure — la pyramide de gardes
+
+Un agent Grimoire ne produit jamais un chiffre, un score, une tendance ou un
+verdict sur un fichier sans la commande exécutée ou le fichier lu qui le
+fonde ; ce qui n'est pas mesuré s'écrit « non mesuré » (issue #613). Trois
+gardes le tiennent, du plus rapide au plus coûteux :
+
+| Étage | Garde | Quand elle tourne | Ce qu'elle refuse |
+|---|---|---|---|
+| Statique | `scripts/check-emitted-prose.py` | pre-commit, `make lint`, `tests/unit/test_grounding_prose.py` en CI | un gabarit émis qui demande `X/10`, `confidence: 0.92`, `trust_score: 91`, une estimation chiffrée |
+| Émission | `tests/unit/test_hosts.py` (`*grounding*`) | `pytest tests/unit` | un hôte ou un ouvrier headless dont le texte émis ne porte pas `grimoire.core.grounding.GROUNDING_RULE` ni le bloc `grimoire-uncertainties` |
+| Comportement | `evals/grounding-probe.py` | à la main, modèle réel, avant une release qui touche les wrappers | une persona émise qui répond un pourcentage ou une note à une question dont toute réponse chiffrée est inventée |
+
+Règles d'écriture pour tout fichier sous `framework/` ou `archetypes/` :
+
+- un nombre dans un gabarit de sortie vient d'une commande nommée juste
+  avant (`grimoire -o json doctor`, `grimoire standard score`, un `df -h`) ou
+  d'un compte de lignes du tableau produit ; sinon le gabarit dit « non
+  mesuré » ;
+- un jugement qualitatif reste étiqueté comme tel (`OK/KO`, `S/M/L`,
+  `haute | moyenne | faible`) et cite ce qui le fonde ; jamais converti en
+  note, pourcentage ou moyenne pondérée ;
+- une exception justifiée va dans `scripts/emitted-prose-allowlist.txt`, une
+  ligne par cas, avec sa raison — le script refuse une entrée muette.
+
 ## Vérifier qu'une poussée est bien arrivée
 
 Après un `git push` sur une branche de PR, **la référence de branche est la

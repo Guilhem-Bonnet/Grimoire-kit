@@ -273,28 +273,6 @@ class Emitter:
 DEFAULT_CONTEXT_INSTRUCTION = "Lis `_grimoire/_memory/shared-context.md` s'il existe, pour l'état courant du projet."
 
 
-#: Règle de source, identique sur tous les hôtes (#613) : un utilisateur
-#: Copilot a vu ses personas produire des chiffres et des pronostics sur des
-#: fichiers jamais lus. Le wrapper disait seulement « signale comme non
-#: vérifié » ; il dit désormais ce qui compte comme vérifié.
-GROUNDING_RULE = (
-    "Rends un résultat vérifiable : tout chiffre, tout verdict et toute "
-    "affirmation sur un fichier cite la commande que tu as réellement exécutée "
-    "ou le chemin que tu as lu (fichier:ligne). Ce que tu n'as ni lu ni mesuré, "
-    "tu ne l'estimes pas et tu ne le notes pas : tu l'écris « non vérifié »."
-)
-
-#: Même bloc que `grimoire task dispatch` exige des ouvriers headless
-#: (`missions.dispatch._UNCERTAINTIES_INSTRUCTION`) — porté dans le fichier
-#: de chaque persona routée, pas seulement dans un README qu'elle ne lit pas.
-UNCERTAINTIES_BLOCK_RULE = (
-    "Termine ta réponse par un bloc ```grimoire-uncertainties``` : une liste "
-    'JSON d\'objets `{"where": ..., "what": ..., "why": ...}`, un par point '
-    "que tu n'as pas pu vérifier, `[]` si aucun — jamais de prose à la place, "
-    "jamais le bloc omis par excès de confiance."
-)
-
-
 def context_load_instruction(agent: AgentSpec) -> str:
     """L'étape « charge ton contexte » émise dans le fichier d'agent.
 

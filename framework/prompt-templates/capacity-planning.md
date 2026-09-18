@@ -33,7 +33,7 @@ RAISONNEMENT :
    extrapolées d'une valeur instantanée ; sans série : « projection non mesurée » :
    - À consommation constante, quand atteint-on 80% ?
    - {{#if growth_factor}}Facteur de croissance : {{growth_factor}}{{/if}}
-   - Services les plus gourmands (top 5)
+   - Services les plus gourmands (top 5, classés sur la métrique collectée à l'étape 1)
 
 5. RECOMMANDATIONS :
    {{#if rightsizing}}

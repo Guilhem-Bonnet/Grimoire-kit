@@ -17,10 +17,9 @@ from pathlib import Path
 from typing import Any
 
 from grimoire.bridges.schemas import HostId
+from grimoire.core.grounding import GROUNDING_RULE, UNCERTAINTIES_BLOCK_RULE
 from grimoire.hosts.emitters.base import (
-    GROUNDING_RULE,
     OWNED_COMMAND_MARKERS,
-    UNCERTAINTIES_BLOCK_RULE,
     Degradation,
     EmitPlan,
     EmittedFile,

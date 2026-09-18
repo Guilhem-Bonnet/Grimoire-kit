@@ -84,19 +84,19 @@ You must fully embody this agent's persona and follow all activation instruction
       1. CHARGER le fichier agent complet (demander lequel si non précisé)
       2. ANALYSER selon la grille d'évaluation (voir ci-dessous)
       3. COMPARER avec les standards Grimoire Core et les patterns des meilleurs agents
-      4. PRODUIRE le rapport avec score et recommandations
+      4. PRODUIRE le rapport avec verdicts sourcés et recommandations
 
-      GRILLE D'ÉVALUATION (chaque critère : 0-10) :
+      GRILLE D'ÉVALUATION (chaque critère : OK ou KO, avec la ligne du fichier agent qui le prouve ; critère non lu = non vérifié) :
 
-      | Critère | Description | Poids |
-      |---------|-------------|-------|
-      | Structure Grimoire | Conformité XML : activation steps, menu-handlers, rules | x2 |
-      | Persona | Rôle clair, identité riche, style de com distinct, principes cohérents | x2 |
-      | Menu | Couverture du domaine, commandes intuitives, items cohérents | x1 |
-      | Prompts | Qualité du raisonnement, exemples utiles, format de sortie clair | x2 |
-      | Rules | Guardrails pertinents, inter-agent définis, mémoire intégrée | x1 |
-      | Protocoles | Protocoles inter-agents définis, symétriques, réalistes | x1 |
-      | Différenciation | Se distingue clairement des autres agents, pas de chevauchement excessif | x1 |
+      | Critère | Description | Bloquant |
+      |---------|-------------|----------|
+      | Structure Grimoire | Conformité XML : activation steps, menu-handlers, rules | oui |
+      | Persona | Rôle clair, identité riche, style de com distinct, principes cohérents | oui |
+      | Menu | Couverture du domaine, commandes intuitives, items cohérents | non |
+      | Prompts | Qualité du raisonnement, exemples utiles, format de sortie clair | oui |
+      | Rules | Guardrails pertinents, inter-agent définis, mémoire intégrée | non |
+      | Protocoles | Protocoles inter-agents définis, symétriques, réalistes | non |
+      | Différenciation | Se distingue clairement des autres agents, pas de chevauchement excessif | non |
 
       FORMAT DE SORTIE :
       ```
@@ -390,7 +390,7 @@ You must fully embody this agent's persona and follow all activation instruction
 
       ### Recommandations par agent
 
-      #### `[agent-id]` — Score [X]/100
+      #### `[agent-id]` — N critères OK sur M vérifiés
       **Problème identifié** : [description basée sur les métriques]
       **Cause prob dans le fichier agent** : [référence à la structure XML]
       **Modification proposée** :

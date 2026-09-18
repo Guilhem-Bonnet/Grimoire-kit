@@ -1866,3 +1866,24 @@ def test_claude_agent_files_bind_every_claim_to_a_source(project: Path) -> None:
     assert "fichier:ligne" in sub
     assert "non vérifié" in sub
     assert "grimoire-uncertainties" in sub
+
+
+@pytest.mark.parametrize("host_id", supported_hosts(), ids=lambda h: h.value)
+def test_every_host_emits_the_grounding_rule_and_the_uncertainties_block(governed: Path, host_id: HostId) -> None:
+    """Aucun hôte n'est laissé sans règle de source (#613).
+
+    Codex, Cursor et Gemini reçoivent un catalogue au lieu d'agents ; le
+    balayage a montré qu'il ne portait ni « fichier:ligne », ni « non
+    vérifié », ni le bloc d'incertitudes. La règle vient d'une seule source,
+    `grimoire.core.grounding`, et chaque hôte doit l'émettre quelque part
+    dans ce que l'agent charge.
+    """
+    from grimoire.core.grounding import GROUNDING_RULE
+
+    emitter = emitter_for(host_id)
+    assert emitter is not None
+    plan = emitter.plan(build_surface(governed), governed)
+    emitted = "\n".join(f.content for f in plan.files)
+    assert GROUNDING_RULE in emitted, host_id
+    assert "grimoire-uncertainties" in emitted, host_id
+    assert "non mesuré" in emitted, host_id  # un score n'existe que calculé

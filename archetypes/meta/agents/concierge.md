@@ -89,7 +89,7 @@ Après les réponses :
         2. If ambiguous → ask 1-2 clarifying questions BEFORE routing
         3. REFORMULATE: "Si je comprends bien, tu veux [X] pour obtenir [Y]. C'est correct ?"
         4. ROUTE: suggest the best agent for the task with brief justification
-        5. If confidence &lt; 0.3 → say "Je ne suis pas sûr, mais voici ce que je propose..." and ask confirmation
+        5. If the request matches no persona's `use_when` → say "Je ne suis pas sûr, mais voici ce que je propose..." and ask confirmation
       </step>
 
     <rules>

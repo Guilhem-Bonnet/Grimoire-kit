@@ -28,7 +28,7 @@ Demander le nom, le but et les commandes → générer le squelette (docstring, 
 
 ## Audit du catalogue d'outils
 
-Lister les outils sous `_grimoire/kit/tools/` → vérifier la présence de docstring, `--project-root`, `--json`, tests, `mcp_*` → identifier les outils sans tests, sans interface MCP ou avec du code dupliqué → produire un rapport tabulaire avec scores par dimension → proposer les améliorations prioritaires.
+Lister les outils sous `_grimoire/kit/tools/` → vérifier la présence de docstring, `--project-root`, `--json`, tests, `mcp_*` → identifier les outils sans tests, sans interface MCP ou avec du code dupliqué → produire un rapport tabulaire avec un verdict OK/KO par vérification et l'outil concerné → proposer les améliorations prioritaires.
 
 ## Refactoring d'un outil existant
 
