@@ -16,6 +16,7 @@ import importlib.util
 import json
 import os
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
@@ -521,7 +522,7 @@ def test_run_one_carries_cache_tokens_and_model_usage_into_the_record(
     )
 
     @contextlib.contextmanager
-    def fake_credentials(home: Path, real_home: Path | None = None):
+    def fake_credentials(home: Path, real_home: Path | None = None) -> Iterator[str]:
         del home, real_home
         yield "fake-token"
 
@@ -596,6 +597,12 @@ def test_main_full_stops_cleanly_and_writes_a_partial_report_on_low_disk(
     monkeypatch.setattr(ta, "disk_guard_ok", lambda workspace, min_free_gb=ta.DISK_GUARD_MIN_FREE_GB: False)
     monkeypatch.setattr(ta, "resolve_grimoire_bin", lambda explicit: "grimoire")
     monkeypatch.setattr(ta, "verify_grimoire_binary_matches_template", lambda *a, **k: None)
+    # Lot I (#582) : ces deux garde-fous tourneraient pour de vrai sinon
+    # (``shutil.which`` réel, ``_run(["grimoire", "needs", "resolve", ...])``
+    # sur un binaire factice) — hors sujet pour ce test, qui vérifie la garde
+    # disque, pas la toolchain.
+    monkeypatch.setattr(ta, "ensure_system_toolchains_present", lambda languages: None)
+    monkeypatch.setattr(ta, "verify_agent_toolchain_environment", lambda *a, **k: {})
 
     def _fail_if_called(*args: Any, **kwargs: Any) -> None:
         raise AssertionError("un run a été lancé malgré le disque sous le seuil")
@@ -613,8 +620,9 @@ def test_main_full_stops_cleanly_and_writes_a_partial_report_on_low_disk(
         seed: int,
         rerun_arms: Any = None,
         label: Any = None,
+        toolchain_check: Any = None,
     ) -> None:
-        del total_tasks, expected_cost, seed, rerun_arms, label
+        del total_tasks, expected_cost, seed, rerun_arms, label, toolchain_check
         written["records"] = list(records)
         written["out_dir"] = out_dir
 
@@ -752,6 +760,7 @@ def test_build_report_kit_runs_detail_includes_turns_cost_time_and_evidence() ->
             "wall_seconds": 123.0,
             "test_run_evidence": True,
             "test_deps_install_ok": True,
+            "toolchain_friction_bash_calls": 0,
         }
     ]
     rendered = ta.render_report_markdown(report)
@@ -931,7 +940,7 @@ def test_run_one_records_test_deps_install_outcome_from_setup_result(
     )
 
     @contextlib.contextmanager
-    def fake_credentials(home: Path, real_home: Path | None = None):
+    def fake_credentials(home: Path, real_home: Path | None = None) -> Iterator[str]:
         del home, real_home
         yield "fake-token"
 
@@ -1001,7 +1010,7 @@ def test_run_one_wires_kit_gov_setup_and_collects_governed_evidence(
         return {"arm": "kit-gov", "added": []}
 
     @contextlib.contextmanager
-    def fake_credentials(home: Path, real_home: Path | None = None):
+    def fake_credentials(home: Path, real_home: Path | None = None) -> Iterator[str]:
         del home, real_home
         yield "fake-token"
 
@@ -1059,6 +1068,7 @@ def test_build_report_kit_gov_runs_detail_and_dynamic_per_task_header() -> None:
             "wall_seconds": 100.0,
             "test_run_evidence": True,
             "test_deps_install_ok": None,
+            "toolchain_friction_bash_calls": 0,
         }
     ]
     rendered = ta.render_report_markdown(report)
@@ -1082,6 +1092,9 @@ def test_main_full_only_replays_the_selected_arms(
     monkeypatch.setattr(ta, "ensure_isolated_home", lambda home: None)
     monkeypatch.setattr(ta, "resolve_grimoire_bin", lambda explicit: "grimoire")
     monkeypatch.setattr(ta, "verify_grimoire_binary_matches_template", lambda *a, **k: None)
+    # Lot I (#582) : voir la même note dans le test de la garde disque.
+    monkeypatch.setattr(ta, "ensure_system_toolchains_present", lambda languages: None)
+    monkeypatch.setattr(ta, "verify_agent_toolchain_environment", lambda *a, **k: {})
 
     catalog = ta.discover_catalog(synthetic_bench_root)
     tasks = ta.sample_tasks(catalog, seed=551)
@@ -1315,3 +1328,354 @@ def test_setup_arm_kit_invokes_the_resolved_absolute_binary_not_a_path_lookup(
     assert calls[0][0] == grimoire_bin
     assert calls[1][0] == grimoire_bin
     assert all(call[0] != "grimoire" for call in calls)
+
+
+# ── 15. Environnement unique agent/harnais (lot I, #582) ────────────────────
+#
+# Le rejeu du lot H (docs/bench/rejeu-lot-h-2026-09-18.md §3) a mesuré que
+# `grimoire standard gate check --strict` exécute la commande de test DANS la
+# session de l'agent, mais que le harnais ne provisionnait la toolchain Go
+# que pour SA PROPRE vérification finale : jusqu'à 28 tours perdus à
+# chercher le binaire `go`. Ces tests verrouillent que `run_environment()`
+# calcule un environnement partagé, jamais recalculé séparément, et que la
+# vérification de toolchain refuse de dépenser un $ si la commande de test
+# ne peut pas s'exécuter dans cet environnement.
+
+
+def test_run_environment_puts_go_bin_ahead_of_path_for_every_arm(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    go_bin = workspace / "tools" / "go" / "go" / "bin" / "go"
+    go_bin.parent.mkdir(parents=True)
+    go_bin.touch()
+    home = tmp_path / "home"
+
+    for arm in ta.ARMS:
+        env = ta.run_environment(
+            tmp_path / "task",
+            arm,
+            home=home,
+            grimoire_bin=str(tmp_path / "venv" / "bin" / "grimoire"),
+            workspace=workspace,
+            go_bin=go_bin,
+        )
+        assert env["PATH"].split(os.pathsep)[0] == str(go_bin.parent)
+        # Go est provisionné SOUS le workspace de ce harnais : GOROOT en
+        # découle directement, jamais un `go` système dont la disposition
+        # des répertoires n'est pas garantie.
+        assert env["GOROOT"] == str(go_bin.parent.parent)
+        assert env["GOPATH"] == str(workspace / "tools" / "go-path")
+        assert env["GOCACHE"] == str(workspace / "tools" / "go-build-cache")
+        assert env["HOME"] == str(home)
+
+
+def test_run_environment_only_exposes_grimoire_bin_to_governed_arms(tmp_path: Path) -> None:
+    """`nu`/`ecc` ne doivent jamais découvrir `grimoire` par un effet de bord
+    de ce harnais — seuls `kit`/`kit-gov` en ont besoin (`gate check`)."""
+    workspace = tmp_path / "workspace"
+    grimoire_dir = tmp_path / "venv" / "bin"
+    grimoire_bin = str(grimoire_dir / "grimoire")
+    home = tmp_path / "home"
+
+    for arm in ("nu", "ecc"):
+        env = ta.run_environment(tmp_path / "task", arm, home=home, grimoire_bin=grimoire_bin, workspace=workspace)
+        assert str(grimoire_dir) not in env["PATH"].split(os.pathsep)
+        assert "GRIMOIRE_NO_COCKPIT" not in env
+
+    for arm in ("kit", "kit-gov"):
+        env = ta.run_environment(tmp_path / "task", arm, home=home, grimoire_bin=grimoire_bin, workspace=workspace)
+        assert str(grimoire_dir) in env["PATH"].split(os.pathsep)
+        assert env["GRIMOIRE_NO_COCKPIT"] == "1"
+
+
+def test_run_environment_redirects_cargo_and_rust_homes_to_the_real_home_by_default(
+    tmp_path: Path,
+) -> None:
+    """Sans CARGO_HOME/RUSTUP_HOME déjà redirigés par l'opérateur, le `HOME`
+    isolé (utilisé pour l'authentification Claude Code) ferait chercher à
+    `cargo`/`rustup` une toolchain sous un `$HOME/.cargo` qui n'existe pas
+    pour cet utilisateur isolé — même si Rust est bien installé sur le
+    poste. Défaut : celui de *real_home*, jamais celui de `home`."""
+    workspace = tmp_path / "workspace"
+    real_home = tmp_path / "real-home"
+    home = tmp_path / "isolated-home"
+
+    env = ta.run_environment(
+        tmp_path / "task",
+        "kit-gov",
+        home=home,
+        grimoire_bin=str(tmp_path / "grimoire"),
+        workspace=workspace,
+        real_home=real_home,
+        base_env={"PATH": "/usr/bin"},
+    )
+
+    assert env["CARGO_HOME"] == str(real_home / ".cargo")
+    assert env["RUSTUP_HOME"] == str(real_home / ".rustup")
+    assert env["CARGO_TARGET_DIR"] == str(workspace / "tools" / "cargo-target")
+
+
+def test_run_environment_respects_an_already_redirected_cargo_home(tmp_path: Path) -> None:
+    """Un opérateur qui redirige déjà CARGO_HOME/RUSTUP_HOME (plusieurs
+    toolchains Rust sur le même poste) doit voir sa redirection respectée —
+    jamais écrasée silencieusement par le défaut de *real_home*."""
+    workspace = tmp_path / "workspace"
+    custom_cargo_home = tmp_path / "custom-cargo"
+
+    env = ta.run_environment(
+        tmp_path / "task",
+        "kit-gov",
+        home=tmp_path / "home",
+        grimoire_bin=str(tmp_path / "grimoire"),
+        workspace=workspace,
+        base_env={"PATH": "/usr/bin", "CARGO_HOME": str(custom_cargo_home)},
+    )
+
+    assert env["CARGO_HOME"] == str(custom_cargo_home)
+
+
+def test_run_environment_sets_npm_cache_when_provided(tmp_path: Path) -> None:
+    npm_cache_dir = tmp_path / "npm-cache"
+    env = ta.run_environment(
+        tmp_path / "task",
+        "nu",
+        home=tmp_path / "home",
+        grimoire_bin=str(tmp_path / "grimoire"),
+        workspace=tmp_path / "workspace",
+        npm_cache_dir=npm_cache_dir,
+    )
+    assert env["npm_config_cache"] == str(npm_cache_dir)
+
+
+def test_run_one_builds_the_environment_once_and_shares_it_with_both_calls(
+    synthetic_bench_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Le coeur du lot I : `_run_one` ne doit calculer `run_environment()`
+    qu'UNE fois, et transmettre le MÊME dict à `run_claude_headless` et
+    `run_hidden_tests` — jamais deux calculs qui pourraient diverger."""
+    task = ta.discover_catalog(synthetic_bench_root)[0]
+    workspace = tmp_path / "workspace"
+    homes = {arm: workspace / "homes" / arm for arm in ta.ARMS}
+    for home in homes.values():
+        ta.ensure_isolated_home(home)
+
+    seen_envs: list[dict[str, str]] = []
+
+    @contextlib.contextmanager
+    def fake_credentials(home: Path, real_home: Path | None = None) -> Iterator[str]:
+        del home, real_home
+        yield "fake-token"
+
+    def fake_run_claude_headless(task_dir: Path, prompt: str, *, home: Path, env: Any = None, **kwargs: Any) -> Any:
+        del task_dir, prompt, home, kwargs
+        seen_envs.append(env)
+        return ta.RunOutcome(terminated_reason="completed")
+
+    def fake_run_hidden_tests(
+        task: Any, task_dir: Path, hidden_dir: Path, *, go_bin: Any = None, env: Any = None
+    ) -> Any:
+        del task, task_dir, hidden_dir, go_bin
+        seen_envs.append(env)
+        return (True, "")
+
+    monkeypatch.setattr(ta, "credentials_provisioned", fake_credentials)
+    monkeypatch.setattr(ta, "run_claude_headless", fake_run_claude_headless)
+    monkeypatch.setattr(ta, "run_hidden_tests", fake_run_hidden_tests)
+    monkeypatch.setattr(ta, "cleanup_build_artifacts", lambda run_dir: None)
+
+    ta._run_one(
+        task,
+        "nu",
+        0,
+        workspace=workspace,
+        ecc_repo=tmp_path / "ecc-repo-unused",
+        homes=homes,
+        go_bin=None,
+        run_timeout_s=5,
+        grimoire_bin="grimoire",
+    )
+
+    assert len(seen_envs) == 2
+    assert seen_envs[0] is seen_envs[1]
+
+
+def test_is_toolchain_friction_command_matches_the_documented_patterns() -> None:
+    friction_examples = [
+        "command -v go",
+        "which -a go",
+        "find / -maxdepth 6 -name gofmt",
+        "rustup toolchain list",
+        "rustup default stable",
+        "npm install --save-dev jest",
+    ]
+    for command in friction_examples:
+        assert ta.is_toolchain_friction_command(command), command
+
+    non_friction_examples = [
+        "go test ./...",
+        "cargo test --quiet",
+        "npm test",
+        "python -m pytest -q",
+        "git status",
+    ]
+    for command in non_friction_examples:
+        assert not ta.is_toolchain_friction_command(command), command
+
+
+def test_count_toolchain_friction_bash_calls_counts_only_matching_commands() -> None:
+    commands = ["git status", "command -v cargo", "cargo build", "rustup show"]
+    assert ta.count_toolchain_friction_bash_calls(commands) == 2
+
+
+def test_run_claude_headless_records_toolchain_friction_from_the_transcript(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _bash_event(command: str) -> str:
+        content = [{"type": "tool_use", "name": "Bash", "input": {"command": command}}]
+        return json.dumps({"type": "assistant", "message": {"content": content}})
+
+    class _FakePopenWithFriction(_FakePopen):
+        def __init__(self, cmd: list[str], *, cwd: Path, env: dict[str, str], stdout: Any, stderr: Any) -> None:
+            del cmd, cwd, env, stderr
+            lines = [
+                _bash_event("command -v go"),
+                _bash_event("go test ./..."),
+                json.dumps({"type": "result", "total_cost_usd": 0.01, "num_turns": 2, "usage": {}}),
+            ]
+            stdout.write(("\n".join(lines) + "\n").encode("utf-8"))
+            stdout.flush()
+
+    task_dir = tmp_path / "run0"
+    task_dir.mkdir()
+    monkeypatch.setattr(ta.subprocess, "Popen", _FakePopenWithFriction)
+
+    outcome = ta.run_claude_headless(task_dir, "peu importe", home=tmp_path, timeout_s=5, poll_interval=0.0)
+
+    assert outcome.toolchain_friction_bash_calls == 1
+
+
+def test_ensure_system_toolchains_present_passes_when_binaries_are_on_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(ta.shutil, "which", lambda binary: f"/usr/bin/{binary}")
+    ta.ensure_system_toolchains_present(["rust", "javascript", "python", "go"])
+
+
+def test_ensure_system_toolchains_present_raises_before_any_spend_when_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(ta.shutil, "which", lambda binary: None)
+    with pytest.raises(SystemExit, match="cargo"):
+        ta.ensure_system_toolchains_present(["rust"])
+
+
+def test_toolchain_failure_reason_is_none_for_a_legitimate_test_failure() -> None:
+    """Un test qui échoue faute de solution (assertion classique) n'est PAS
+    une friction de toolchain — le code de sortie seul n'est jamais le
+    signal (lot I, #582 : « code de sortie non pertinent »)."""
+    assert ta._toolchain_failure_reason(1, "", "AssertionError: assert 1 == 42") is None
+
+
+def test_toolchain_failure_reason_flags_exit_127() -> None:
+    reason = ta._toolchain_failure_reason(127, "", "bash: go: command not found")
+    assert reason is not None
+    assert "127" in reason
+
+
+def test_toolchain_failure_reason_flags_a_not_found_marker_even_off_127() -> None:
+    reason = ta._toolchain_failure_reason(1, "", "sh: 1: jest: not found")
+    assert reason is not None
+
+
+def test_verify_agent_toolchain_environment_passes_when_the_command_runs(
+    synthetic_bench_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    catalog = ta.discover_catalog(synthetic_bench_root)
+    tasks = [next(t for t in catalog if t.language == "python")]
+    workspace = tmp_path / "workspace"
+
+    def fake_run(cmd: Any, *, cwd: Any = None, env: Any = None, timeout: Any = None) -> Any:
+        if cmd[1:3] == ["needs", "resolve"]:
+            return SimpleNamespace(
+                returncode=0, stdout=json.dumps({"test-runner": {"command": "python -m pytest -q"}}), stderr=""
+            )
+        # commande de test elle-même : échoue faute de solution, pas de toolchain.
+        return SimpleNamespace(returncode=1, stdout="", stderr="AssertionError")
+
+    monkeypatch.setattr(ta, "_run", fake_run)
+
+    report = ta.verify_agent_toolchain_environment(
+        tasks, workspace=workspace, grimoire_bin="grimoire", go_bin=None, npm_cache_dir=workspace / "npm-cache"
+    )
+
+    assert report["python"]["ok"] is True
+    assert report["python"]["command"] == "python -m pytest -q"
+
+
+def test_verify_agent_toolchain_environment_raises_before_any_spend_on_exit_127(
+    synthetic_bench_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Le coeur de la garde : une commande de test résolue mais introuvable
+    dans l'environnement de l'agent (toolchain absente) doit arrêter la
+    campagne avant le premier appel `claude -p` — jamais un run payant qui
+    découvre l'absence en pleine session."""
+    catalog = ta.discover_catalog(synthetic_bench_root)
+    tasks = [next(t for t in catalog if t.language == "go")]
+    workspace = tmp_path / "workspace"
+
+    def fake_run(cmd: Any, *, cwd: Any = None, env: Any = None, timeout: Any = None) -> Any:
+        if cmd[1:3] == ["needs", "resolve"]:
+            return SimpleNamespace(
+                returncode=0, stdout=json.dumps({"test-runner": {"command": "go test ./..."}}), stderr=""
+            )
+        return SimpleNamespace(returncode=127, stdout="", stderr="bash: go: command not found")
+
+    monkeypatch.setattr(ta, "_run", fake_run)
+
+    with pytest.raises(RuntimeError, match="GARDE-FOU LOT I"):
+        ta.verify_agent_toolchain_environment(
+            tasks, workspace=workspace, grimoire_bin="grimoire", go_bin=None, npm_cache_dir=workspace / "npm-cache"
+        )
+
+
+def test_verify_agent_toolchain_environment_skips_when_test_runner_is_unresolved(
+    synthetic_bench_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    catalog = ta.discover_catalog(synthetic_bench_root)
+    tasks = [next(t for t in catalog if t.language == "python")]
+    workspace = tmp_path / "workspace"
+
+    def fake_run(cmd: Any, *, cwd: Any = None, env: Any = None, timeout: Any = None) -> Any:
+        assert cmd[1:3] == ["needs", "resolve"]
+        return SimpleNamespace(returncode=0, stdout=json.dumps({"test-runner": {"command": None}}), stderr="")
+
+    monkeypatch.setattr(ta, "_run", fake_run)
+
+    report = ta.verify_agent_toolchain_environment(
+        tasks, workspace=workspace, grimoire_bin="grimoire", go_bin=None, npm_cache_dir=workspace / "npm-cache"
+    )
+
+    assert report["python"]["ok"] is True
+    assert report["python"]["command"] is None
+
+
+def test_verify_agent_toolchain_environment_raises_when_npm_install_fails(
+    synthetic_bench_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    catalog = ta.discover_catalog(synthetic_bench_root)
+    tasks = [next(t for t in catalog if t.language == "javascript")]
+    workspace = tmp_path / "workspace"
+
+    def fake_install_test_dependencies(task_dir: Path, *, npm_cache_dir: Path, timeout: int = 120) -> Any:
+        del task_dir, npm_cache_dir, timeout
+        return {"attempted": True, "ok": False, "returncode": 1, "stderr": "registre injoignable"}
+
+    def _fail_if_called(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("`grimoire needs resolve` ne doit jamais tourner après un npm install en échec")
+
+    monkeypatch.setattr(ta, "install_test_dependencies", fake_install_test_dependencies)
+    monkeypatch.setattr(ta, "_run", _fail_if_called)
+
+    with pytest.raises(RuntimeError, match="GARDE-FOU LOT I"):
+        ta.verify_agent_toolchain_environment(
+            tasks, workspace=workspace, grimoire_bin="grimoire", go_bin=None, npm_cache_dir=workspace / "npm-cache"
+        )

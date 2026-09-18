@@ -185,7 +185,89 @@ Commande d'exécution des tests cachés par langue :
 | Rust | `cargo test --quiet` | aucune dépendance externe (vérifié sur l'échantillon) |
 | Go | `go test ./...` | toolchain Go **provisionnée en local** si absente du `PATH` (`ensure_go_toolchain()` télécharge go1.23.4 linux/amd64 dans le workspace du banc — jamais dans le système ; sur une autre plateforme, installer Go manuellement et l'exposer via `PATH`) |
 
-## 5. Garde-fous par run
+## 5. Environnement partagé agent/harnais (lot I, #582)
+
+Le rejeu du lot H (`docs/bench/rejeu-lot-h-2026-09-18.md` §3) a mesuré que
+`grimoire standard gate check --strict` exécute la commande de test du
+projet DANS la session de l'agent (`claude -p`, `HOME` isolé, lot G1) —
+mais que le harnais ne provisionnait la toolchain Go (`ensure_go_toolchain`)
+que pour SA PROPRE vérification finale (`run_hidden_tests`) : deux
+environnements différents pour la même commande de test, jamais transmis à
+l'agent. Résultat : `go` absent du `PATH` de la session, jusqu'à 28 tours
+perdus à chercher le binaire (`command -v go`, `find / -name gofmt`) sur les
+pires runs Go, un risque analogue (non chiffré séparément) pour Rust
+(`rustup toolchain list`/`rustup default stable` observés sur `rust/react`).
+
+**Une seule fonction, `run_environment(task_dir, arm, *, home, grimoire_bin,
+workspace, go_bin=None, npm_cache_dir=None, real_home=None, base_env=None)`**
+calcule désormais cet environnement — appelée UNE fois par run dans
+`_run_one`, le même `dict` est transmis tel quel à `run_claude_headless`
+(paramètre `env`, la session de l'agent, ses hooks, et donc `gate check
+--strict`) et à `run_hidden_tests` (paramètre `env`, la vérification finale
+du harnais) : jamais deux calculs qui pourraient diverger.
+
+- **Go** : le binaire résolu par `ensure_go_toolchain()` est mis EN TÊTE du
+  `PATH`, pour LES QUATRE BRAS — un agent `nu`/`ecc` sur une tâche Go
+  affronte la même absence de toolchain qu'un agent gouverné, ce n'est pas
+  spécifique à `kit-gov`. `GOROOT` n'est fixé que si le binaire est celui
+  provisionné par ce harnais sous le workspace (jamais pour un `go` système,
+  dont la disposition des répertoires n'est pas garantie) ; `GOPATH`
+  (`tools/go-path`) et `GOCACHE` (`tools/go-build-cache`) sont TOUJOURS
+  redirigés sous le workspace, partagés entre bras et tâches — jamais écrits
+  sous le `HOME` réel de l'opérateur ni sous un `HOME` isolé éphémère.
+- **Rust/Node** : jamais provisionnés par ce harnais (contrairement à Go) —
+  `CARGO_HOME`/`RUSTUP_HOME` sont explicitement repointés sur ceux du `HOME`
+  réel de l'opérateur (`real_home`, `Path.home()` par défaut) SI
+  l'environnement de base ne les redirige pas déjà lui-même : sans ça, le
+  `HOME` isolé utilisé pour l'authentification Claude Code ferait chercher à
+  `cargo`/`rustup` une toolchain sous un `$HOME/.cargo` qui n'existe pas pour
+  cet utilisateur isolé, quand bien même Rust est installé sur le poste —
+  cause probable de la friction Rust observée au lot H. `CARGO_TARGET_DIR`
+  (le cache de compilation, pas le registre) est lui TOUJOURS redirigé sous
+  le workspace (`tools/cargo-target`).
+- **npm** : `npm_config_cache` sous `npm_cache_dir` si fourni — même
+  convention que `install_test_dependencies` (lot H).
+- **grimoire** : son répertoire n'est ajouté en tête de `PATH` (et
+  `GRIMOIRE_NO_COCKPIT=1` posé) que pour les bras `kit`/`kit-gov` —
+  `nu`/`ecc` ne doivent jamais découvrir `grimoire` par un effet de bord de
+  ce harnais.
+
+**Garde-fous avant toute dépense**, dans cet ordre, avant le tout premier
+appel `claude -p` d'une campagne `--pilot`/`--full` (jamais pour
+`--dry-run`/`--report-only`) — même emplacement que
+`verify_grimoire_binary_matches_template` (lot H) :
+
+1. `ensure_system_toolchains_present(languages)` : Rust (`cargo`) et Node
+   (`npm`) doivent déjà être sur le `PATH` système pour les langues
+   réellement présentes dans la sélection de tâches — `SystemExit` avec la
+   liste complète des manques sinon, jamais un `cargo test` qui échoue en
+   pleine session `claude -p` payante.
+2. `verify_agent_toolchain_environment(tasks, ...)` : pour CHAQUE langue de
+   la sélection, provisionne un dépôt de vérification jetable (tests cachés
+   compris — jamais donnés à un agent réel, uniquement à cette vérification
+   interne) sous `workspace/_agent_toolchain_check/<langue>`, résout la
+   commande de test via `grimoire needs resolve --project-root . --json`
+   (la même source que `gate check --strict`), et l'exécute dans
+   `run_environment()`. Le code de sortie n'est PAS vérifié — un test peut
+   légitimement échouer faute de solution écrite — seule l'ABSENCE d'un
+   échec de toolchain est exigée (commande introuvable/`FileNotFoundError`,
+   exit 127, motif `... not found` dans la sortie). Un écart lève
+   `RuntimeError` avant tout appel modèle, 0 $ dépensé ; le résultat est
+   persisté sous `state/toolchain_check.json` et publié dans le rapport
+   (section « Environnement de l'agent »).
+
+**Indicateur de friction de toolchain** : `count_toolchain_friction_bash_calls`
+compte, parmi les commandes Bash déjà extraites par `extract_bash_command()`
+(utilisées pour la détection de boucle), celles qui contiennent
+`which`/`command -v`/`find / -name`/`rustup`/`npm install` —
+`is_toolchain_friction_command()` pour le motif exact. Calculé pour chaque
+run (`RunOutcome.toolchain_friction_bash_calls`, recopié dans
+`RunRecord`), agrégé par bras dans le rapport (total et médiane) et détaillé
+par run dans les tableaux « Détail par run — bras kit/kit-gov » : l'indicateur
+qui doit baisser une fois `run_environment()` en place, en particulier sur le
+bras `kit-gov` (seul bras qui mandate l'exécution réelle des tests).
+
+## 6. Garde-fous par run
 
 - **Timeout** : `--run-timeout-s` (défaut 900 s = 15 min). Un run qui dépasse
   est terminé (`SIGTERM` puis `SIGKILL` après 10 s) et compte comme échec,
@@ -205,7 +287,7 @@ Commande d'exécution des tests cachés par langue :
   mode `--full` ; un dépassement déclenche une ligne d'alerte dans le rapport
   et sur stderr, sans jamais bloquer la campagne.
 
-## 6. Critère d'arrêt statistique
+## 7. Critère d'arrêt statistique
 
 Après chaque tâche complétée (les trois bras, k=3), `should_stop_early()`
 recalcule un intervalle de confiance bootstrap (2000 ré-échantillonnages) sur
@@ -214,13 +296,18 @@ de `kit` sont disjoints de **ceux de `nu` et de `ecc`**, avec un minimum de 4
 tâches jouées pour éviter un verdict sur trop peu de données ; sinon elle va
 au bout des 20 tâches.
 
-## 7. Mesures
+## 8. Mesures
 
 Par run : succès (tests cachés verts), coût réel (`total_cost_usd` renvoyé
 par `claude -p --output-format json`/`stream-json`, pas une reconstruction
 manuelle tokens × tarif — c'est la même source que la facturation réelle),
-tokens d'entrée/sortie, nombre de tours (`num_turns`), temps mur, et pour le
+tokens d'entrée/sortie, nombre de tours (`num_turns`), temps mur, friction de
+toolchain (`toolchain_friction_bash_calls`, lot I — voir §5), et pour le
 bras `kit` : `grimoire dispatch stats --json` du dépôt de tâche.
+
+Une fois par campagne, avant le premier run : l'environnement de l'agent par
+langue (`state/toolchain_check.json`, lot I — voir §5), publié dans le
+rapport sous « Environnement de l'agent ».
 
 Par tâche x bras : pass^k (k=3) au sens du kit
 (`pass_k_fully_green / pass_k_observations`, `src/grimoire/traces/ledger.py`)
@@ -232,7 +319,7 @@ tâches, taux de succès avec IC95% bootstrap, taux de pass^k avec IC95%, temps
 mur médian, coût médian par tâche résolue, coût total ; par tâche — succès
 par bras et pass^k.
 
-## 8. Reproduire le banc
+## 9. Reproduire le banc
 
 ```bash
 cd /chemin/vers/le/worktree/grimoire-kit
@@ -259,6 +346,10 @@ python scripts/bench/three_arms.py --report-only --workspace /chemin/scratch/ben
 Prérequis système pour `--pilot`/`--full` : `claude` (Claude Code CLI,
 authentifié — voir §3), `node`/`npm`, `cargo`/`rustc`, `git`. `go` est
 provisionné automatiquement sur Linux/amd64 s'il est absent du `PATH`.
+Depuis le lot I (#582), Rust/Node sont vérifiés par le code AVANT toute
+dépense (`ensure_system_toolchains_present`, §5) — un manquant arrête la
+campagne avec un message actionnable plutôt que de laisser échouer un run
+payant en pleine session.
 
 `--dry-run` et les tests unitaires (`tests/unit/test_bench_three_arms.py`) ne
 nécessitent ni réseau ni authentification : ils exercent le tirage, la
@@ -266,12 +357,13 @@ préparation de dépôt, la détection de succès (Python, via `pytest`
 directement), le calcul de pass^k/IC et la détection de boucle sur des
 fixtures synthétiques.
 
-## 9. Sorties et emplacement du rapport
+## 10. Sorties et emplacement du rapport
 
 `workspace/state/selection.json` (tâches tirées, commit ecc), `results.jsonl`
 (une ligne par run, append-only — permet `--resume` après interruption),
-`expected_cost.json` (estimation post-pilote), `reports/<date>/report.md` et
-`.json`.
+`expected_cost.json` (estimation post-pilote), `toolchain_check.json`
+(vérification de l'environnement de l'agent par langue, lot I, §5),
+`reports/<date>/report.md` et `.json`.
 
 Le rapport de la première campagne réelle est publié sur la branche
 `bench-reports` (non protégée, poussée directement — comme
