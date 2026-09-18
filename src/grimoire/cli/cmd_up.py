@@ -1045,7 +1045,12 @@ def _step_standard(
     explicit_needs = bool(needs)
     if dry_run:
         if already_initialized:
-            state.steps.append(StepResult("standard", "planned", "refresh untouched standard artifacts"))
+            detail = "refresh untouched standard artifacts"
+            from grimoire.core.claude_activation import activation_context_needs_refresh
+
+            if activation_context_needs_refresh(target):
+                detail += "; .claude/activation-context.md (stale) would be refreshed"
+            state.steps.append(StepResult("standard", "planned", detail))
         else:
             label = f"needs: {', '.join(needs)}" if needs else "profile: starter"
             state.steps.append(StepResult("standard", "planned", f"standard init ({label})"))
@@ -1126,6 +1131,29 @@ def _step_standard(
                 manifest_path.write_text(
                     _install_manifest_text(plan, project_name, "bootstrap"), encoding="utf-8",
                 )
+
+        activation_note = ""
+        from grimoire.core.claude_activation import ACTIVATION_CONTEXT_RELPATH
+
+        if (target / ACTIVATION_CONTEXT_RELPATH).is_file():
+            # Only refresh a project that already opted into the Claude Code
+            # hook (`grimoire standard init` writes this file) — `up` never
+            # enrolls a project into it on its own. Same refresh contract as
+            # the artifacts above: untouched (current or stale-but-known) gets
+            # the current wording, a real edit is left and flagged (issue
+            # #582, lot G4 — no existing project ever got a corrected
+            # directive from `up`/`host sync` before this).
+            from grimoire.core.claude_activation import install_claude_activation
+
+            activation = install_claude_activation(target, task_id="bootstrap", refresh=already_initialized)
+            if ACTIVATION_CONTEXT_RELPATH in activation.written:
+                activation_note = "; .claude/activation-context.md refreshed"
+            elif activation.context_needs_review:
+                activation_note = (
+                    "; .claude/activation-context.md modified by hand — à revoir "
+                    "(grimoire standard init --force to overwrite)"
+                )
+
         if downgrade:
             # Explicit `--needs` may legitimately shrink the profile — honor
             # it, but never call a scope reduction "done": that word is what
@@ -1133,12 +1161,12 @@ def _step_standard(
             state.steps.append(StepResult(
                 "standard", "changed",
                 f"profile '{existing_profile}' -> '{result.profile}' "
-                f"— {len(result.written)} artifact(s) written",
+                f"— {len(result.written)} artifact(s) written{activation_note}",
             ))
         else:
             state.steps.append(StepResult(
                 "standard", "done",
-                f"profile '{result.profile}' — {len(result.written)} artifact(s) written",
+                f"profile '{result.profile}' — {len(result.written)} artifact(s) written{activation_note}",
             ))
         state.actions.append(f"Initialized agentic standard (profile {result.profile})")
     except (GrimoireError, ValueError, KeyError, OSError) as exc:
