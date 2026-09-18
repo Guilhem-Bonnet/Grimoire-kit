@@ -40,12 +40,26 @@ _WEB_MARKERS = ("fetch", "websearch", "web_search", "browser", "navigate", "http
 #: Commands whose blast radius survives the session. Matched case-insensitively
 #: on the command string; each is a shape that destroys work rather than a
 #: specific tool.
+#:
+#: The force-push, hard-reset and discard-all entries anchor on ``(?=\s|$)``
+#: rather than ``\b``: a trailing ``\b`` only asserts a word/non-word
+#: transition, and ``-`` and ``.`` both count as non-word, so it treats a
+#: hyphen or dot glued onto the flag as if it ended the shell token. That let
+#: a branch name like ``docs/rejeu-lot-f-2026-09-17`` (containing ``-f-``)
+#: read as ``git push -f``, and would equally let ``git checkout -- .gitignore``
+#: read as discarding the whole tree. ``(?=\s|$)`` requires an actual token
+#: boundary — whitespace or end of string — instead.
 _DESTRUCTIVE_PATTERNS: tuple[tuple[str, str], ...] = (
     (r"\brm\s+(-[a-z]*[rf][a-z]*\s+)+", "recursive/forced delete"),
-    (r"\bgit\s+push\b.*(--force|-f)\b", "force push"),
-    (r"\bgit\s+reset\s+--hard\b", "hard reset"),
+    (
+        r"\bgit\s+push\b.*(?:^|\s)"
+        r"(--force|--force-with-lease(?:=\S+)?|--force-if-includes|-[a-z]*f[a-z]*)"
+        r"(?=\s|$)",
+        "force push",
+    ),
+    (r"\bgit\s+reset\s+--hard(?=\s|$)", "hard reset"),
     (r"\bgit\s+clean\s+-[a-z]*f", "forced clean"),
-    (r"\bgit\s+checkout\s+--\s+\.", "discard all working-tree changes"),
+    (r"\bgit\s+checkout\s+--\s+\.(?=\s|$)", "discard all working-tree changes"),
     (r"\bdd\s+if=", "raw device write"),
     (r"\bmkfs\b", "filesystem format"),
     (r"\bchmod\s+-R\s+777\b", "world-writable recursive chmod"),
