@@ -544,9 +544,72 @@ class TestProjectScaffolder:
 def test_la_detection_de_pile_livre_le_generaliste_avec_ses_skills(tmp_path: Path) -> None:
     """#375 : un agent de pile détecté sans l'archétype installé partait seul,
     et son frontmatter `skills:` désignait des fichiers absents du projet."""
-    s = _scaffolder(tmp_path, stack_agents=("stack-engineer",))
+    s = _scaffolder(tmp_path, stacks=("python", "go"), stack_agents=("stack-engineer",))
     plan = s.plan()
     labels = {fc.label for fc in plan.copies}
     assert "stack/stack-engineer" in labels
     assert "stack/skills/stack-python" in labels
     assert "stack/skills/stack-go" in labels
+
+
+def test_un_python_nu_n_attache_pas_les_six_autres_skills_de_pile(tmp_path: Path) -> None:
+    """#616 : les sept skills `stack-*` s'attachaient en bloc dès que
+    `stack-engineer` était livré, qu'ils servent ou non — un projet Python nu
+    payait stack-go, stack-typescript, stack-docker, stack-terraform,
+    stack-ansible et stack-k8s comme skills transversales (aucun agent ne les
+    référençait par leur slug), chargées à chaque tour de la session pour
+    rien. Seule la détection réelle du projet doit copier un skill par
+    défaut ; le reste reste disponible via `grimoire expertise add <id>`
+    (:mod:`grimoire.core.expertises`), jamais perdu."""
+    s = _scaffolder(tmp_path, stacks=("python",), stack_agents=("stack-engineer",))
+    plan = s.plan()
+    labels = {fc.label for fc in plan.copies}
+    assert "stack/stack-engineer" in labels
+    assert "stack/skills/stack-python" in labels
+    for undetected in ("go", "typescript", "docker", "terraform", "ansible", "k8s"):
+        assert f"stack/skills/stack-{undetected}" not in labels
+
+
+def test_stack_engineer_sans_aucune_pile_detectee_n_attache_aucun_skill(tmp_path: Path) -> None:
+    """Un projet totalement vide (aucun marqueur) ne reçoit aucun skill de
+    pile par défaut — pas même stack-python en repli arbitraire : la
+    doctrine des artefacts n'attache que ce qui est choisi ou détecté."""
+    s = _scaffolder(tmp_path, stack_agents=("stack-engineer",))
+    plan = s.plan()
+    labels = {fc.label for fc in plan.copies}
+    assert "stack/stack-engineer" in labels
+    assert not any(label.startswith("stack/skills/") for label in labels)
+
+
+def test_grimoire_up_ne_regresse_pas_la_selection_de_skills_de_pile(tmp_path: Path) -> None:
+    """`grimoire up` construit son scaffolder avec `scan=None` (cmd_up.py ne
+    re-détecte pas la pile à chaque rafraîchissement). Sans repli, recalculer
+    depuis une détection absente aurait lu « rien de détecté » et vidé le
+    `skills:` par défaut d'un projet déjà installé à chaque `up` — une
+    régression que le mécanisme de #616 introduirait sur le propre refresh
+    du kit s'il ne préservait pas ce que le fichier kit-tier déclare déjà."""
+    # 1. Premier `plan()`, avec une vraie détection (équivalent de `init`) :
+    #    installe stack-engineer avec `skills: ["stack-python"]`.
+    first = _scaffolder(tmp_path, stacks=("python",), stack_agents=("stack-engineer",))
+    plan = first.plan()
+    first.execute(plan)
+    kit_agent = tmp_path / "_grimoire" / "kit" / "agents" / "stack-engineer.md"
+    assert '"stack-python"' in kit_agent.read_text(encoding="utf-8")
+
+    # 2. Second `plan()`, sans détection (équivalent de `grimoire up`) :
+    #    la sélection déjà installée doit survivre, pas se réduire à [].
+    second = ProjectScaffolder(
+        tmp_path,
+        project_name="test-project",
+        user_name="Test User",
+        language="Français",
+        skill_level="intermediate",
+        scan=None,
+        resolved=_resolved(stack_agents=("stack-engineer",)),
+        backend="local",
+    )
+    refreshed_plan = second.plan()
+    labels = {fc.label for fc in refreshed_plan.copies}
+    assert "stack/skills/stack-python" in labels
+    second.execute(refreshed_plan)
+    assert '"stack-python"' in kit_agent.read_text(encoding="utf-8")

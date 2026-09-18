@@ -68,6 +68,7 @@ grimoire-kit/
 | [Guardrails runtime Grimoire Game](grimoire-game-runtime-guardrails.md) | Gouvernance des mutations, trust et compatibilité du runtime |
 | [SDK Guide](sdk-guide.md) | API Python complète |
 | [Créer un agent](creating-agents.md) | Guide pas-à-pas |
+| [Catalogue d'expertises](expertises.md) | Langages, ingénierie, cloud — attachés à la demande ou par détection (issue #616) |
 | [Archétypes](archetype-guide.md) | Templates de projets |
 | [MCP](mcp-integration.md) | Intégration Model Context Protocol |
 | [Troubleshooting](troubleshooting.md) | Résolution de problèmes |
