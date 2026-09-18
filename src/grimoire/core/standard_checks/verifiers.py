@@ -669,6 +669,16 @@ def _verify_task_envelope(
 
 
 def _verify_evidence_pack(root: Path, task_id: str, result: StandardVerificationResult) -> None:
+    # Issue #582 lot G2 : le journal observé par les hooks compte comme
+    # preuve d'inventaire (garde fermée : absent/illisible = rien observé,
+    # voir evidence_journal). Lecture seule à dessein — cette fonction sert
+    # aussi `grimoire_standard_verify`/`_audit` (MCP `readOnlyHint`) ; seule
+    # `check_evidence_gates` projette (écrit) la section « Inventaire
+    # observé ». Toujours un avertissement, jamais une erreur (transition
+    # douce, comme le reste de cette fonction).
+    from grimoire.core.standard_checks.evidence_journal import has_observed_inventory
+
+    observed = has_observed_inventory(root, task_id)
     rel_path = EVIDENCE_DIR / task_id / "evidence-pack.md"
     text = _text_file(root, rel_path)
     if not text:
@@ -685,12 +695,19 @@ def _verify_evidence_pack(root: Path, task_id: str, result: StandardVerification
             "Evidence pack summary is still placeholder-only.",
             path=rel_path,
         )
-    if "|  |  |  |  |" in text:
+    heading_at = text.find("## Evidence inventory")
+    if heading_at == -1:
+        manual_inventory = text
+    else:
+        section_end = text.find("\n## ", heading_at)
+        manual_inventory = text[heading_at : section_end if section_end != -1 else len(text)]
+    if not observed and "|  |  |  |  |" in manual_inventory:
         _add_check(
             result,
             "evidence.inventory_placeholder",
             "warning",
-            "Evidence inventory has no concrete evidence rows.",
+            "Evidence inventory has no concrete evidence rows (ni manuelles, ni observées par les hooks) : "
+            f"exécute une action (test, écriture) puis relance `grimoire standard gate check --task-id {task_id}`.",
             path=rel_path,
         )
 

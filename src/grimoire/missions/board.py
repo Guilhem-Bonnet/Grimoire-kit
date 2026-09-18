@@ -126,9 +126,14 @@ def _task_entry(task: MissionTask) -> dict[str, Any]:
         "task_id": task.id,
         "title": task.title,
         "status": status,
-        "priority": _PRIORITY_BY_RISK.get(task.risk_profile, "medium"),
+        # `task.priority` porte une priorité de board importée telle quelle
+        # (ADR-007) ; une tâche créée directement dans le ledger n'en a pas et
+        # retombe sur la dérivation historique depuis `risk_profile`.
+        "priority": task.priority or _PRIORITY_BY_RISK.get(task.risk_profile, "medium"),
         "owner": owner,
-        "agent_roles": [task.type.value],
+        # Même logique pour les rôles : des rôles de board importés priment sur
+        # la dérivation à une seule valeur depuis `type`.
+        "agent_roles": list(task.agent_roles) if task.agent_roles else [task.type.value],
         "acceptance_criteria": list(task.acceptance),
         "verifiability": verifiability_as_dict(task),
         "blockers": _blockers(task),
@@ -148,8 +153,16 @@ def _task_entry(task: MissionTask) -> dict[str, Any]:
         entry["surface"] = task.surface
     if task.finition:
         entry["finition"] = task.finition
-    if status == "blocked":
+    # Une référence de remédiation explicite (ADR-007) prime toujours ; à
+    # défaut, une carte bloquée en reçoit une par convention.
+    if task.remediation_ref:
+        entry["remediation_ref"] = task.remediation_ref
+    elif status == "blocked":
         entry["remediation_ref"] = "_grimoire/standard/remediation-plan.yaml"
+    # Ce que ce schéma ne modélise pas encore (ADR-007) : reporté tel quel,
+    # sans jamais écraser une clé déjà posée ci-dessus par la projection.
+    for key, value in task.extra.items():
+        entry.setdefault(key, value)
     return entry
 
 

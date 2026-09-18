@@ -86,6 +86,7 @@ def _fail_run(
     run_id: str,
     done: list[str],
     failed_node: str,
+    backup_path: str | None = None,
 ) -> None:
     """Même contrat que :func:`_fail`, mais pour un échec DANS la boucle de
     `run` (issue #506, PR B) : un nœud qui lève ou qu'`engine.resume` refuse
@@ -94,6 +95,13 @@ def _fail_run(
     consommateur JSON (le cockpit) n'a alors aucun moyen de distinguer
     « rien n'a tourné » de « huit nœuds sur neuf ont réussi » : il ne voit
     qu'un texte d'erreur, jamais où s'arrêter dans le déroulé.
+
+    *backup_path* : même défaut que sur le chemin de refus d'`apply` — le
+    tarball que `backup` a réellement écrit ce run, ou `None` s'il n'a pas
+    encore tourné. Avant ce paramètre, seul le refus spécial d'`apply`
+    portait `backup_path` dans sa réponse ; tout autre nœud en échec après
+    `backup` (`verify` compris — la panne réelle du 2026-09-17) rendait
+    `backupPath: null` côté cockpit alors que la sauvegarde avait réussi.
     """
     if _fmt(ctx, json_flag=json_flag) == "json":
         typer.echo(json.dumps(
@@ -103,6 +111,7 @@ def _fail_run(
                 "run_id": run_id,
                 "done": list(done),
                 "failed_node": failed_node,
+                "backup_path": backup_path,
             },
             ensure_ascii=False,
         ))
@@ -245,10 +254,10 @@ def upgrade_flow_propose(
 @upgrade_flow_app.command("verify")
 def upgrade_flow_verify(ctx: typer.Context, project_root: _PROJECT_ROOT = Path(), json_flag: _JSON_OPTION = False) -> None:
     """Recompare le manifeste mémoire pris par `backup` ; seuls les écarts attendus (config.yaml) sont tolérés."""
-    from grimoire.tools.project_upgrade import archive_root, verify_upgrade
+    from grimoire.tools.project_upgrade import latest_backup_manifest, verify_upgrade
 
     root = project_root.resolve()
-    manifest = archive_root(root) / "memory-manifest-sha256.txt"
+    manifest = latest_backup_manifest(root)
     try:
         result = verify_upgrade(root, manifest)
     except GrimoireRuntimeError as exc:
@@ -311,9 +320,9 @@ def _check_proposed(artifact_type: str) -> Any:
 
 
 def _check_verify(root: Path) -> tuple[bool, str]:
-    from grimoire.tools.project_upgrade import archive_root, verify_upgrade
+    from grimoire.tools.project_upgrade import latest_backup_manifest, verify_upgrade
 
-    manifest = archive_root(root) / "memory-manifest-sha256.txt"
+    manifest = latest_backup_manifest(root)
     try:
         result = verify_upgrade(root, manifest)
     except GrimoireRuntimeError as exc:
@@ -440,7 +449,7 @@ def upgrade_flow_review(
 # ── run — drives the real flow engine ────────────────────────────────────────
 
 
-def _node_handlers() -> dict[str, Any]:
+def _node_handlers(node_outputs: dict[str, dict[str, Any]]) -> dict[str, Any]:
     """One handler per node this command can execute itself under ``--executor interactive``.
 
     Every node except the ``destructive`` checkpoint, which is always left
@@ -452,13 +461,21 @@ def _node_handlers() -> dict[str, Any]:
     2026-09-11 migration report), apply, overrides, memory, needs-hosts,
     verify — comes from the blueprint's edges via ``topo_order``, never
     re-declared here.
+
+    *node_outputs* is the same dict :func:`upgrade_flow_run`'s loop fills in
+    as each node finishes — passed in here (rather than closed over from an
+    enclosing scope) so ``_verify`` can read the exact manifest path
+    ``backup`` produced *this run*, never a reconstructed guess (2026-09-17
+    repro, kit 3.55.0: a hand-made archive already sitting in today's
+    archive dir pushes ``backup``'s own manifest onto a ``-2`` suffix, and
+    a hardcoded canonical name then finds nothing at all).
     """
     from grimoire.tools.project_upgrade import (
         apply_upgrade,
         archive_orphans,
-        archive_root,
         backup_project,
         find_orphans,
+        latest_backup_manifest,
         preview_upgrade,
         propose_memory_links,
         propose_needs_hosts,
@@ -494,7 +511,13 @@ def _node_handlers() -> dict[str, Any]:
         return {"proposals": [p.slug for p in propose_needs_hosts(root)]}
 
     def _verify(root: Path) -> dict[str, Any]:
-        manifest = archive_root(root) / "memory-manifest-sha256.txt"
+        # The literal path `backup` (already run earlier in this same loop,
+        # per the fixed node order) reported — never recomputed. Falls back
+        # to disk discovery only if `backup`'s own detail is somehow absent
+        # (should not happen given the blueprint's fixed order, but a wrong
+        # guess here must never be worse than the pre-fix behaviour).
+        backup_manifest = (node_outputs.get("backup") or {}).get("manifest")
+        manifest = Path(backup_manifest) if backup_manifest else latest_backup_manifest(root)
         result = verify_upgrade(root, manifest)
         if not result.ok:
             raise GrimoireRuntimeError(f"verify refusé : {list(result.unexpected_diffs)} manquants={list(result.missing)}")
@@ -594,7 +617,11 @@ def upgrade_flow_run(
         flows_root=root / "_grimoire-runtime-output" / "flows",
         project_root=root,
     )
-    handlers = _node_handlers()
+    # Declared before `_node_handlers()` — `_verify`'s closure reads this
+    # same dict to find the manifest `backup` actually wrote this run,
+    # never a reconstructed path (2026-09-17 repro, kit 3.55.0).
+    node_outputs: dict[str, dict[str, Any]] = {}
+    handlers = _node_handlers(node_outputs)
 
     def _silent_executor() -> InteractiveNodeExecutor:
         return InteractiveNodeExecutor(json_output=False, stream=io.StringIO())
@@ -609,7 +636,6 @@ def upgrade_flow_run(
     done: list[str] = []
     stopped_at: str | None = None
     repairs_proposed = 0
-    node_outputs: dict[str, dict[str, Any]] = {}
     while True:
         node_id = contract.node_id
         if node_id not in handlers:
@@ -621,7 +647,10 @@ def upgrade_flow_run(
         try:
             detail = handlers[node_id](root)
         except GrimoireRuntimeError as exc:
-            _fail_run(ctx, f"node {node_id} : {exc}", json_flag=json_flag, run_id=run_id, done=done, failed_node=node_id)
+            _fail_run(
+                ctx, f"node {node_id} : {exc}", json_flag=json_flag, run_id=run_id, done=done, failed_node=node_id,
+                backup_path=(node_outputs.get("backup") or {}).get("tarball"),
+            )
             return
         if node_id == "apply":
             repairs_proposed = int(detail.get("repairs_proposed") or 0)
@@ -674,6 +703,7 @@ def upgrade_flow_run(
             _fail_run(
                 ctx, f"node {node_id} refusé : {list(outcome.faults)}",
                 json_flag=json_flag, run_id=run_id, done=done, failed_node=node_id,
+                backup_path=(node_outputs.get("backup") or {}).get("tarball"),
             )
             return
         done.append(node_id)

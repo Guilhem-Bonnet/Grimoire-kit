@@ -283,6 +283,10 @@ class MissionLedger:
         guardrails: tuple[str, ...] = (),
         dependencies: tuple[TaskDependency, ...] = (),
         task_id: str | None = None,
+        priority: str = "",
+        agent_roles: tuple[str, ...] = (),
+        remediation_ref: str = "",
+        extra: dict[str, Any] | None = None,
     ) -> MissionTask:
         self._load()
         if mission_id not in self._missions:
@@ -309,6 +313,10 @@ class MissionLedger:
             expected_evidence=expected_evidence,
             guardrails=guardrails,
             dependencies=dependencies,
+            priority=priority,
+            agent_roles=agent_roles,
+            remediation_ref=remediation_ref,
+            extra=extra or {},
         )
         self._append_event("task.created", task.id, "task", owner or "system", task.to_dict())
         return task

@@ -53,6 +53,7 @@ __all__ = [
     "backup_project",
     "bundled_blueprint_path",
     "find_orphans",
+    "latest_backup_manifest",
     "preview_upgrade",
     "probe_hook",
     "propose_doctor_repairs",
@@ -240,11 +241,17 @@ def backup_project(target: Path) -> BackupResult:
     ``memory-manifest-sha256-2.txt`` (``-3``, …) instead: no existing
     snapshot, canonical or suffixed, is ever overwritten. A real migration
     found the previous, unconditional "tarball exists → skip" guard silently
-    reusing a stale first snapshot here (issue #490 follow-up) —
-    ``verify_upgrade``'s fixed-path lookup only stays correct if the
-    canonical (unsuffixed) manifest keeps meaning "the true first
-    pre-upgrade snapshot of the day", which reusing *any* existing tarball
-    regardless of content did not guarantee.
+    reusing a stale first snapshot here (issue #490 follow-up).
+
+    A caller that needs *this* run's manifest back — ``verify``, in
+    particular — must not guess the canonical (unsuffixed) name: an
+    archive dir that already held unrelated content before this call ever
+    ran (a hand-made snapshot, or an earlier dry run whose tracked files
+    have since changed) pushes this call's own output onto a suffix
+    instead, and a fixed-path guess then finds nothing at all
+    (2026-09-17 repro, kit 3.55.0). Use :func:`latest_backup_manifest`, or
+    this call's own :attr:`BackupResult.manifest`, never a reconstructed
+    path.
     """
     root = archive_root(target)
     root.mkdir(parents=True, exist_ok=True)
@@ -281,6 +288,36 @@ def backup_project(target: Path) -> BackupResult:
         entries = len(check.getnames())
     memory_files = write_memory_manifest(target, manifest)
     return BackupResult(tarball=tarball, manifest=manifest, tarball_entries=entries, memory_files=memory_files)
+
+
+def latest_backup_manifest(target: Path, *, version: str | None = None, date: str | None = None) -> Path:
+    """The memory manifest ``backup`` most recently wrote to today's archive dir.
+
+    ``backup_project`` never overwrites an existing snapshot (see its own
+    docstring): an archive dir that, before ``backup`` even ran, already
+    held a ``grimoire-state.tar.gz`` whose content does not match the live
+    project — a hand-made snapshot, or an earlier dry run whose tracked
+    files have since changed — pushes ``backup``'s own tarball/manifest
+    onto a ``-2``, ``-3``, ... suffix instead of the canonical, unsuffixed
+    names. A caller that assumes the canonical name (as ``verify`` used to,
+    hardcoding ``memory-manifest-sha256.txt``) then finds nothing at all
+    and refuses with "manifeste introuvable [...] le nœud backup a-t-il
+    tourné ?" even though ``backup`` (and ``apply``) had both just
+    succeeded — the real 2026-09-17 repro, kit 3.55.0.
+
+    Picks the most recently *modified* ``memory-manifest-sha256*.txt`` in
+    the archive dir rather than guessing a fixed name: every file in that
+    directory comes from this same day's/version's ``backup`` runs, and
+    nothing else the blueprint executes between ``backup`` and ``verify``
+    writes to its top level — the freshest one is always the manifest
+    ``backup`` just wrote or reused this run, suffix included. Falls back
+    to the canonical (unsuffixed) path when the directory holds no manifest
+    at all, so :func:`verify_upgrade` still raises its own clear "backup
+    did not run" error rather than a different one raised here first.
+    """
+    root = archive_root(target, version=version, date=date)
+    candidates = sorted(root.glob("memory-manifest-sha256*.txt"), key=lambda p: p.stat().st_mtime)
+    return candidates[-1] if candidates else root / "memory-manifest-sha256.txt"
 
 
 # ── preview ───────────────────────────────────────────────────────────────────

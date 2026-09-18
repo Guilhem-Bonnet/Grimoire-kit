@@ -52,8 +52,10 @@ from grimoire.core.standard_checks.base import (
 from grimoire.core.standard_checks.controls import (
     _verify_acceptance_record,
     _verify_k8s_agent_manifest,
+    _verify_recorded_test_run_is_green,
     _verify_score_and_exceptions,
 )
+from grimoire.core.standard_checks.gate_remedy import missing_artifact_message
 from grimoire.core.standard_checks.registry import (
     DEFAULT_SCORE_DIMENSIONS as DEFAULT_SCORE_DIMENSIONS,
 )
@@ -64,6 +66,7 @@ from grimoire.core.standard_checks.registry import (
     dimension_for,
 )
 from grimoire.core.standard_checks.verifiers import (
+    _verify_evidence_pack,
     _verify_memory_policy,
     run_verifiers,
 )
@@ -835,6 +838,12 @@ def setup_standard_profile(
         # que cette commande vient d'écrire ; avec, c'est immédiat.
         invalidate_cache(root)
 
+    if not dry_run:
+        # Issue #582 lot G2 : `grimoire init` planifie déjà cette section ;
+        # un projet qui n'a jamais fait tourner que `standard init` ne
+        # l'avait pas, et RUNS_DIR (journal de preuve par tour) en a besoin.
+        gen.ensure_grimoire_gitignore(root)
+
     return result
 
 
@@ -1560,8 +1569,13 @@ def check_evidence_gates(
         for key in ("task_board", "task_envelope"):
             if not (root / required_paths[key]).is_file():
                 missing.append(key)
-    if state in {"in_progress", "review", "accepted", "released"} and not (root / required_paths["context_bundle"]).is_file():
-        missing.append("context_bundle")
+    if state in {"in_progress", "review", "accepted", "released"}:
+        if not (root / required_paths["context_bundle"]).is_file():
+            missing.append("context_bundle")
+        # Issue #582 lot G1 : un run de test enregistré, frais et rouge ferme le gate.
+        test_run_result = StandardVerificationResult(profile=profile.id, project_root=root)
+        _verify_recorded_test_run_is_green(root, normalized_task_id, test_run_result)
+        checks.extend(test_run_result.checks)
     if profile.id in {"orchestrated", "governed", "production"} and state in {"in_progress", "review", "accepted", "released"}:
         if not (root / required_paths["memory_policy"]).is_file():
             missing.append("memory_policy")
@@ -1573,6 +1587,21 @@ def check_evidence_gates(
         for key in ("evidence_pack", "decision_trace"):
             if not (root / required_paths[key]).is_file():
                 missing.append(key)
+        # Issue #582 lot G2 : `gate check` (jamais `verify`/`audit`, tous deux
+        # `readOnlyHint` côté MCP — voir `_verify_evidence_pack`) projette le
+        # journal observé par les hooks dans la section « Inventaire observé »
+        # avant d'évaluer le même vérificateur que `standard verify`.
+        try:
+            from grimoire.core.standard_checks.evidence_journal import (
+                regenerate_observed_inventory_section,
+            )
+
+            regenerate_observed_inventory_section(root, normalized_task_id)
+        except Exception:  # noqa: S110 — projection best-effort, jamais au prix du gate lui-même
+            pass
+        evidence_pack_result = StandardVerificationResult(profile=profile.id, project_root=root)
+        _verify_evidence_pack(root, normalized_task_id, evidence_pack_result)
+        checks.extend(evidence_pack_result.checks)
         # Issue #582 lot B : le même signal que `standard verify` — une ligne
         # « passé » sans run de test réel enregistré — doit aussi apparaître
         # ici, sur le chemin que le hook SessionStart mandate réellement
@@ -1585,10 +1614,12 @@ def check_evidence_gates(
     if state == "released" and not (root / required_paths["compliance_score"]).is_file():
         missing.append("compliance_score")
     for key in missing:
+        # Issue #582 lot G1 : chemin attendu et remède en une commande, dans le
+        # message lui-même — voir standard_checks/gate_remedy.py pour le pourquoi.
         checks.append(StandardCheck(
             id=f"gate.{key}_missing",
             severity="error",
-            message=f"Required gate artifact is missing: {key}.",
+            message=missing_artifact_message(key, root=root, task_id=normalized_task_id, profile_id=profile.id),
             path=required_paths.get(key),
         ))
     ok = not any(check.is_error for check in checks)

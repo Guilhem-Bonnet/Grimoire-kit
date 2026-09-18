@@ -192,9 +192,38 @@ def _walk_to_state(ledger: MissionLedger, task_id: str, target: TaskState) -> No
             return
 
 
+#: Clés de board déjà portées ailleurs (champ dédié de `MissionTask`, ou
+#: recalculées à chaque projection par `board.py` à partir du ledger — les y
+#: reporter telles quelles ne ferait que les désynchroniser du ledger qui les
+#: régénère). Tout ce qui n'est pas ici est une clé que ce schéma ne modélise
+#: pas encore : elle part dans `MissionTask.extra` plutôt que d'être jetée.
+_KNOWN_BOARD_KEYS = frozenset(
+    {
+        "task_id",
+        "title",
+        "status",
+        "acceptance_criteria",
+        "owner",
+        "description",
+        "guardrails",
+        "expected_evidence",
+        "priority",
+        "agent_roles",
+        "remediation_ref",
+        # Recalculées par `board.py::_task_entry` à chaque projection.
+        "context_bundle_ref",
+        "decision_trace_ref",
+        "evidence_pack_ref",
+        "verifiability",
+        "blockers",
+    }
+)
+
+
 def _import_one_task(ledger: MissionLedger, entry: dict[str, Any]) -> None:
     task_id = str(entry["task_id"])
     acceptance = tuple(entry.get("acceptance_criteria") or ["Migré depuis task-board.yaml — critère à préciser"])
+    extra = {k: v for k, v in entry.items() if k not in _KNOWN_BOARD_KEYS}
     task = ledger.create_task(
         TASK_UNIFICATION_MISSION_ID,
         str(entry.get("title") or task_id),
@@ -203,6 +232,10 @@ def _import_one_task(ledger: MissionLedger, entry: dict[str, Any]) -> None:
         description=str(entry.get("description") or ""),
         guardrails=tuple(entry.get("guardrails") or ()),
         expected_evidence=tuple(entry.get("expected_evidence") or ()),
+        priority=str(entry.get("priority") or ""),
+        agent_roles=tuple(str(role) for role in (entry.get("agent_roles") or ())),
+        remediation_ref=str(entry.get("remediation_ref") or ""),
+        extra=extra,
         task_id=task_id,
     )
     try:

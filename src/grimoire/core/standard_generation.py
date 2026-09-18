@@ -68,6 +68,11 @@ TRACES_DIR = Path("_grimoire-output/traces")
 #: (issue #395) — a project-owned record, never regenerated wholesale, so it
 #: lives beside the other run outputs rather than under the kit's own tiers.
 PROPOSALS_DIR = Path("_grimoire-output/proposals")
+#: Ephemeral runtime data — caches, session state, per-tool-call journals —
+#: never a record a reviewer needs in git history. Ignored by convention (see
+#: :func:`ensure_grimoire_gitignore`); a project-owned artifact never lives
+#: here, only the kit's own scratch state.
+RUNS_DIR = Path("_grimoire-output/.runs")
 
 #: A task id becomes a directory name in generated paths, so it is validated
 #: before it is ever joined. Kept here, with the paths it guards, so that
@@ -108,6 +113,46 @@ def _strip_stamps(text: str) -> str:
 def _same_rendered(existing: str, rendered: str) -> bool:
     """Compare a generated artifact with a fresh render, ignoring stamps."""
     return _strip_stamps(existing) == _strip_stamps(rendered)
+
+
+#: Shared with :meth:`grimoire.core.scaffold.ProjectScaffolder._plan_gitignore`
+#: (issue #582 lot G2) — one convention, so a project scaffolded by `grimoire
+#: init` and one that only ever ran `grimoire standard init` end up with the
+#: same `.gitignore`, not two independently-maintained texts that can drift.
+GITIGNORE_MARKER = "# --- Grimoire Kit ---"
+GITIGNORE_SECTION = (
+    f"{GITIGNORE_MARKER}\n"
+    "# Session runs — ephemeral runtime data\n"
+    f"{RUNS_DIR.as_posix()}/\n"
+    "# Memory archives — compressed old sessions\n"
+    "_grimoire/_memory/archives/\n"
+)
+
+
+def ensure_grimoire_gitignore(root: Path) -> Path | None:
+    """Add the kit's ``.gitignore`` section (notably :data:`RUNS_DIR`) if absent.
+
+    ``grimoire init``'s full scaffold has always planned this; a project that
+    only ever ran ``grimoire standard init`` (:func:`grimoire.core.agentic_standard.setup_standard_profile`)
+    never did — a gap that mattered only once something project-agnostic
+    started writing under ``RUNS_DIR`` on every tool call (the lot G2 evidence
+    journal). Returns the path written, or ``None`` when the marker is already
+    present or the file could not be written (best-effort, never raises: a
+    missing ``.gitignore`` line is a git-status annoyance, not a broken gate).
+    """
+    gitignore = root / ".gitignore"
+    try:
+        existing = gitignore.read_text(encoding="utf-8") if gitignore.is_file() else ""
+    except OSError:
+        return None
+    if GITIGNORE_MARKER in existing:
+        return None
+    content = existing.rstrip() + "\n\n" + GITIGNORE_SECTION if existing.strip() else GITIGNORE_SECTION
+    try:
+        gitignore.write_text(content, encoding="utf-8")
+    except OSError:
+        return None
+    return gitignore
 
 
 def _artifact_digest(path: Path) -> str:

@@ -28,6 +28,7 @@ from grimoire.hosts.decisions import (
     decide_activation,
     decide_context_capsule,
     decide_evidence_gate,
+    decide_evidence_trace,
     decide_subagent_gate,
     decide_tool_policy,
     entry_persona_context,
@@ -884,6 +885,82 @@ def test_read_only_calls_are_not_slowed_down(governed: Path) -> None:
     assert decision.detail == {}
 
 
+def test_post_tool_use_logs_bash_test_run_and_file_write_events(governed: Path) -> None:
+    """Issue #582 lot G2 : le hook consigne, l'agent n'a plus à recopier."""
+    from grimoire.core.standard_checks.evidence_journal import read_evidence_log
+
+    decide_evidence_trace(
+        HookInput(
+            event=HookEvent.POST_TOOL_USE,
+            project_root=governed,
+            tool_name="Bash",
+            tool_input={"command": "git status"},
+            tool_response={"exit_code": 0},
+        )
+    )
+    decide_evidence_trace(
+        HookInput(
+            event=HookEvent.POST_TOOL_USE,
+            project_root=governed,
+            tool_name="Bash",
+            tool_input={"command": "pytest -q"},
+            tool_response={"exit_code": 1},
+        )
+    )
+    decide_evidence_trace(
+        HookInput(
+            event=HookEvent.POST_TOOL_USE,
+            project_root=governed,
+            tool_name="Write",
+            tool_input={"file_path": "src/foo.py"},
+        )
+    )
+    entries = read_evidence_log(governed, "bootstrap")
+    assert [e["type"] for e in entries] == ["bash", "test_run", "file_write"]
+    assert entries[0]["command"] == "git status" and entries[0]["exit_code"] == 0
+    assert entries[1]["command"] == "pytest -q" and entries[1]["exit_code"] == 1
+    assert entries[2]["path"] == "src/foo.py"
+
+
+def test_post_tool_use_journal_write_stays_under_the_30ms_budget(governed: Path) -> None:
+    """Issue #582 lot G2 : le hook tourne à chaque outil, le budget est serré.
+
+    Seuil large (30 ms) contre une mesure d'un ordre de grandeur inférieur :
+    ce qui est borné est une régression de nature (un appel réseau, un
+    ``resolve_need`` qui relit ``project-context.yaml`` — voir le choix
+    documenté dans ``evidence_journal``, pas un ``resolve_need`` par appel),
+    pas le jitter de la machine. Le chiffre mesuré est rapporté dans la PR.
+    """
+    import statistics
+    import time
+
+    samples = []
+    for i in range(30):
+        started = time.perf_counter()
+        decide_evidence_trace(
+            HookInput(
+                event=HookEvent.POST_TOOL_USE,
+                project_root=governed,
+                tool_name="Bash",
+                tool_input={"command": f"pytest -q --run={i}"},
+                tool_response={"exit_code": 0},
+            )
+        )
+        samples.append(time.perf_counter() - started)
+    assert statistics.median(samples) < 0.03, f"médiane {statistics.median(samples) * 1000:.2f} ms"
+
+
+def test_post_tool_use_never_logs_on_an_unenrolled_project(project: Path) -> None:
+    from grimoire.core.standard_checks.evidence_journal import read_evidence_log
+
+    decide_evidence_trace(
+        HookInput(
+            event=HookEvent.POST_TOOL_USE, project_root=project, tool_name="Bash", tool_input={"command": "pytest -q"}
+        )
+    )
+    assert read_evidence_log(project, "bootstrap") == []
+
+
 def _set_task_in_progress(root: Path) -> None:
     """Flip the ``bootstrap`` card to ``in_progress`` on disk.
 
@@ -1616,3 +1693,71 @@ def test_deux_agents_distincts_ne_laissent_aucune_note(tmp_path: Path) -> None:
     )
 
     assert build_surface(tmp_path).notes == ()
+
+
+# ── SessionStart scaffolde la tâche active (issue #582 lot G1) ──────────────
+
+
+def _claimed_task(root: Path) -> str:
+    from grimoire.missions.schemas import TaskState
+    from grimoire.missions.service import TaskService
+
+    service = TaskService(root)
+    mission = service.ledger.create_mission(title="Travaux", origin="test")
+    task = service.ledger.create_task(mission.id, "Câbler le webhook", acceptance=("le webhook répond 200",))
+    service.ledger.transition_task(task.id, TaskState.READY, actor_id="a")
+    service.ledger.claim_task(task.id, "a", "local")
+    service.project_board()
+    return task.id
+
+
+def test_session_start_scaffolds_the_claimed_task_of_a_governed_project(governed: Path) -> None:
+    """Les artefacts que `gate check` réclamera existent avant la première commande de l'agent."""
+    task_id = _claimed_task(governed)
+
+    decision = decide_activation(HookInput(event=HookEvent.SESSION_START, project_root=governed))
+
+    assert decision.detail["task_id"] == task_id
+    assert decision.detail["scaffolded"] == [
+        f"_grimoire-output/evidence/{task_id}/task-envelope.md",
+        f"_grimoire-output/evidence/{task_id}/evidence-pack.md",
+        f"_grimoire-output/evidence/{task_id}/claim-ledger.md",
+        f"_grimoire-output/evidence/{task_id}/acceptance-record.md",
+        f"_grimoire-output/context/{task_id}/context-bundle.yaml",
+        f"_grimoire-output/decisions/{task_id}/decision-trace.yaml",
+    ]
+    assert "scaffold" not in decision.context.lower().replace("task scaffold", ""), "silencieux : rien dans le contexte"
+    again = decide_activation(HookInput(event=HookEvent.SESSION_START, project_root=governed))
+    assert again.detail["scaffolded"] == [], "idempotent : la deuxième session ne crée rien"
+
+
+def test_session_start_scaffolds_nothing_on_an_unenrolled_project(project: Path) -> None:
+    decision = decide_activation(HookInput(event=HookEvent.SESSION_START, project_root=project))
+
+    assert decision.detail["governed"] is False
+    assert "scaffolded" not in decision.detail
+    assert not (project / "_grimoire-output/evidence").exists()
+
+
+def test_session_start_scaffold_noop_stays_under_budget(governed: Path) -> None:
+    """Quand tout existe (chaque session après la première), le scaffold coûte six `stat`.
+
+    Seuil large (100 ms) contre une mesure de l'ordre de la milliseconde : il
+    borne une régression de nature (rouvrir le ledger, re-parser le profil),
+    pas un jitter de machine. Le chiffre mesuré est rapporté dans la PR.
+    """
+    import statistics
+    import time
+
+    from grimoire.hosts.decisions.activation import _scaffold_active_task
+
+    task_id = _claimed_task(governed)
+    assert _scaffold_active_task(governed, task_id)["scaffolded"]
+
+    samples = []
+    for _ in range(20):
+        started = time.perf_counter()
+        detail = _scaffold_active_task(governed, task_id)
+        samples.append(time.perf_counter() - started)
+        assert detail == {"scaffolded": []}
+    assert statistics.median(samples) < 0.1, f"médiane {statistics.median(samples) * 1000:.1f} ms"

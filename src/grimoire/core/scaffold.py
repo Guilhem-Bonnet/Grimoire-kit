@@ -25,6 +25,7 @@ from grimoire.archetypes import bundled_path as archetypes_path
 from grimoire.core import layout
 from grimoire.core.archetype_resolver import ResolvedArchetype
 from grimoire.core.scanner import ScanResult
+from grimoire.core.standard_generation import GITIGNORE_MARKER, GITIGNORE_SECTION
 from grimoire.data import framework_path
 from grimoire.hosts.detection import detect_enabled_hosts
 from grimoire.memory import profiles as memory_profiles
@@ -1382,24 +1383,22 @@ class ProjectScaffolder:
         ))
 
     def _plan_gitignore(self, p: ScaffoldPlan) -> None:
-        """Add grimoire-specific patterns to .gitignore."""
+        """Add grimoire-specific patterns to .gitignore.
+
+        Content and marker are shared with :func:`grimoire.core.standard_generation.ensure_grimoire_gitignore`
+        (issue #582 lot G2) — the other entry point (`grimoire standard init`
+        alone, without this full scaffold) that must produce the exact same
+        section, not an independently-maintained copy that can drift.
+        """
         gitignore = self._target / ".gitignore"
-        marker = "# --- Grimoire Kit ---"
-        section = (
-            f"{marker}\n"
-            "# Session runs — ephemeral runtime data\n"
-            "_grimoire-output/.runs/\n"
-            "# Memory archives — compressed old sessions\n"
-            "_grimoire/_memory/archives/\n"
-        )
 
         if gitignore.is_file():
             existing = gitignore.read_text(encoding="utf-8")
-            if marker in existing:
+            if GITIGNORE_MARKER in existing:
                 return  # Already has grimoire section
-            content = existing.rstrip() + "\n\n" + section
+            content = existing.rstrip() + "\n\n" + GITIGNORE_SECTION
         else:
-            content = section
+            content = GITIGNORE_SECTION
 
         p.templates.append(TemplateRender(
             dst=gitignore,
