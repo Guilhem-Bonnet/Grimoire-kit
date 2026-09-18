@@ -792,6 +792,68 @@ def test_tool_classification_reads_both_host_vocabularies() -> None:
     assert classify_tool("Read", {"file_path": "app/.env"}).secret_target
 
 
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        # Red: a branch name containing "-f-" is not the -f flag.
+        ("git push -u origin docs/rejeu-lot-f-2026-09-17", False),
+        ("git push origin feature-force", False),
+        ("git push -u origin branch", False),
+        # Green: the flag, in every shape it can take.
+        ("git push --force", True),
+        ("git push -f origin main", True),
+        ("git push origin main -f", True),
+        ("git push --force-with-lease", True),
+        ("git push --force-with-lease=origin/main", True),
+        ("git push --force-if-includes", True),
+        # Bundled short options: -f combined with another single-letter flag.
+        ("git push -uf origin branch", True),
+        ("git push -fu origin branch", True),
+    ],
+)
+def test_force_push_detection_matches_the_flag_not_a_branch_name(command: str, expected: bool) -> None:
+    """Regression for the 2026-09-17 false positive.
+
+    The old pattern's trailing word-boundary check after --force/-f treats a
+    hyphen as a token boundary, same as whitespace, so a branch name like
+    docs/rejeu-lot-f-2026-09-17 (containing -f-) read as a force push and the
+    PreToolUse guard refused a plain git push -u.
+    """
+    facts = classify_tool("Bash", {"command": command})
+    assert (facts.destructive_reason == "force push") is expected
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        ("git reset --hard", True),
+        ("git reset --hard HEAD~1", True),
+        ("git reset --soft HEAD~1", False),
+        # Red under the old boundary-after-flag anchor: a hyphen right after
+        # the flag reads as a token boundary just like whitespace does.
+        ("git reset --hard-2", False),
+    ],
+)
+def test_hard_reset_detection_requires_the_flag_to_stand_alone(command: str, expected: bool) -> None:
+    facts = classify_tool("Bash", {"command": command})
+    assert (facts.destructive_reason == "hard reset") is expected
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        ("git checkout -- .", True),
+        # Red: restoring a single dotfile is not discarding the whole tree,
+        # but the old pattern had no boundary after the literal dot at all.
+        ("git checkout -- .gitignore", False),
+        ("git checkout -- .editorconfig", False),
+    ],
+)
+def test_checkout_discard_all_requires_the_dot_to_stand_alone(command: str, expected: bool) -> None:
+    facts = classify_tool("Bash", {"command": command})
+    assert (facts.destructive_reason == "discard all working-tree changes") is expected
+
+
 def test_a_host_with_a_permission_table_does_not_pay_a_process_per_read() -> None:
     """`Read` in the matcher means a hook process on every file read (~307 ms).
 
