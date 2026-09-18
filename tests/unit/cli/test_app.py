@@ -146,9 +146,12 @@ class TestInit:
     # ── Archetype option ──
 
     def test_init_default_archetype(self, tmp_path: Path) -> None:
+        """Decision 2026-09-18 (Guilhem): an empty/undetected project never
+        gets `minimal` automatically — platform-engineering (the kit's most
+        general specialized archetype) is the applied best guess."""
         runner.invoke(app, ["init", str(tmp_path)])
         content = (tmp_path / "project-context.yaml").read_text()
-        assert 'archetype: "minimal"' in content
+        assert 'archetype: "platform-engineering"' in content
 
     def test_init_web_app_archetype(self, tmp_path: Path) -> None:
         result = runner.invoke(app, ["init", str(tmp_path), "--archetype", "web-app"])
@@ -307,8 +310,10 @@ class TestStatus:
         assert "my-app" in result.output
 
     def test_status_shows_archetype(self, project: Path) -> None:
+        """Decision 2026-09-18: an empty project's auto-detected archetype is
+        platform-engineering, never minimal (see TestInit.test_init_default_archetype)."""
         result = runner.invoke(app, ["status", str(project)])
-        assert "minimal" in result.output
+        assert "platform-engineering" in result.output
 
     def test_status_shows_memory(self, project: Path) -> None:
         result = runner.invoke(app, ["status", str(project)])
@@ -1738,7 +1743,9 @@ class TestInitJson:
         data = json.loads(result.output)
         assert data["ok"] is True
         assert data["project"] == "j-proj"
-        assert data["archetype"] == "minimal"
+        # Decision 2026-09-18: an empty project's auto-detected archetype is
+        # platform-engineering, never minimal.
+        assert data["archetype"] == "platform-engineering"
         # backend "auto" resolves to the isolated `lexical` default (#496)
         assert data["backend"] == "lexical"
         assert "dirs_created" in data
@@ -4040,3 +4047,46 @@ class TestR37EnvConflicts:
         assert result.exit_code == 0
         # Conflict warning should appear in text output
         assert "conflict" in result.output.lower() or "[!]" in result.output
+
+
+# ── Discover footer (onboarding audit 2026-09-18, level 1, row 4) ──────────────
+
+class TestDiscoverFooter:
+    """`grimoire doctor`/`status` name at least one unexploited capability
+    with its access command — silent once everything is already exploited."""
+
+    @pytest.fixture()
+    def fresh_project(self, tmp_path: Path) -> Path:
+        runner.invoke(app, ["-y", "init", str(tmp_path), "--no-cockpit"])
+        return tmp_path
+
+    def test_doctor_names_a_discovery_command_on_fresh_project(self, fresh_project: Path) -> None:
+        result = runner.invoke(app, ["doctor", str(fresh_project)])
+        assert result.exit_code == 0, result.output
+        assert "Découvrir" in result.output
+        assert "grimoire" in result.output.split("Découvrir")[1]
+
+    def test_status_names_a_discovery_command_on_fresh_project(self, fresh_project: Path) -> None:
+        result = runner.invoke(app, ["status", str(fresh_project)])
+        assert result.exit_code == 0, result.output
+        assert "Découvrir" in result.output
+
+    def test_doctor_footer_silent_when_everything_exploited(self, fresh_project: Path) -> None:
+        with patch(
+            "grimoire.core.project_capabilities.unexploited_hints",
+            return_value=[],
+        ):
+            result = runner.invoke(app, ["doctor", str(fresh_project)])
+        assert "Découvrir" not in result.output
+
+    def test_status_footer_silent_when_everything_exploited(self, fresh_project: Path) -> None:
+        with patch(
+            "grimoire.core.project_capabilities.unexploited_hints",
+            return_value=[],
+        ):
+            result = runner.invoke(app, ["status", str(fresh_project)])
+        assert "Découvrir" not in result.output
+
+    def test_doctor_json_has_no_footer_text(self, fresh_project: Path) -> None:
+        result = runner.invoke(app, ["doctor", "-o", "json", str(fresh_project)])
+        assert "Découvrir" not in result.output
