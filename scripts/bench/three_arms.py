@@ -34,6 +34,7 @@ import statistics
 import subprocess
 import sys
 import tarfile
+import tempfile
 import time
 import urllib.request
 from collections import defaultdict
@@ -172,6 +173,11 @@ class RunRecord:
     # sont indiscernables a posteriori et ce champ ne prétend jamais le
     # contraire.
     toolchain_friction_bash_calls: int = 0
+    # Lot J (#582) : mode d'authentification du lanceur pour CE run — voir
+    # ``resolve_auth_mode``/``AUTH_MODES``. ``None`` pour les lignes écrites
+    # avant ce lot (toutes en ``oauth-copy`` de fait, jamais reconstruit a
+    # posteriori — même convention que ``recorded_at``).
+    auth_mode: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
@@ -824,6 +830,69 @@ def resolve_grimoire_bin(explicit: str | None) -> str:
     return str(Path(found).resolve())
 
 
+#: Modes d'authentification Claude Code acceptés par ``--auth`` (lot J, #582).
+AUTH_MODES: tuple[str, ...] = ("oauth-copy", "api-key")
+
+
+def resolve_auth_mode(explicit: str | None, *, env: dict[str, str] | None = None) -> str:
+    """Résout le mode d'authentification du lanceur pour cette campagne (lot J, #582).
+
+    Incident répété (lots E, F, H, J — 4 fois en deux jours, 30 runs perdus
+    au lot J) : ``credentials_provisioned`` copiait les identifiants OAuth de
+    l'opérateur (``~/.claude/.credentials.json``) dans le ``HOME`` isolé de
+    CHAQUE run. Ces jetons sont rafraîchis par rotation ; quand une copie
+    rafraîchit son jeton, la session interactive de l'opérateur ET les
+    autres copies en cours deviennent invalides (« OAuth session expired and
+    could not be refreshed »). Deux modes, jamais un repli silencieux :
+
+    - ``"api-key"`` : aucune copie d'identifiant — ``ANTHROPIC_API_KEY`` est
+      transmise telle quelle à ``claude -p --bare`` (voir
+      :func:`run_claude_headless`). Documentation Claude Code
+      (``code.claude.com/docs/en/authentication.md`` et ``.../headless.md``,
+      consultées 2026-09-18) : ``ANTHROPIC_API_KEY`` prime sur les
+      identifiants OAuth dans l'ordre de précédence, et le mode ``--bare``
+      ignore explicitement le trousseau OAuth — jamais de rotation partagée
+      à craindre.
+    - ``"oauth-copy"`` : comportement historique (copie temporaire, voir
+      :func:`credentials_provisioned`), avec l'avertissement de rotation
+      affiché une fois par campagne.
+
+    *explicit* (``--auth``) est prioritaire. À défaut, ``"api-key"`` si
+    ``ANTHROPIC_API_KEY`` est présente dans *env* (``os.environ`` par
+    défaut), sinon ``"oauth-copy"`` — jamais l'inverse : une clé API présente
+    ne doit jamais être ignorée au profit d'une copie de jeton qui expose
+    l'opérateur au bug de rotation.
+
+    Lève ``SystemExit`` si ``--auth api-key`` est demandé explicitement sans
+    ``ANTHROPIC_API_KEY`` dans l'environnement — jamais un repli silencieux
+    vers ``oauth-copy`` quand l'opérateur a explicitement choisi l'autre mode.
+    """
+    env = env if env is not None else dict(os.environ)
+    if explicit is not None:
+        if explicit not in AUTH_MODES:
+            raise SystemExit(f"--auth {explicit!r} inconnu — attendu l'un de {AUTH_MODES}.")
+        if explicit == "api-key" and not env.get("ANTHROPIC_API_KEY"):
+            raise SystemExit(
+                "--auth api-key demandé mais ANTHROPIC_API_KEY est absente de l'environnement "
+                "du lanceur — exporte-la avant de relancer, ou choisis --auth oauth-copy."
+            )
+        return explicit
+
+    if env.get("ANTHROPIC_API_KEY"):
+        return "api-key"
+
+    print(
+        "[auth] ANTHROPIC_API_KEY absente de l'environnement : repli sur oauth-copy — "
+        "ATTENTION, les jetons OAuth de Claude Code sont rafraîchis par rotation ; une "
+        "copie qui rafraîchit son jeton peut invalider la session interactive de "
+        "l'opérateur ET les autres copies en cours (observé lots E, F, H, J — voir "
+        "docs/bench-three-arms.md §3). Exporte ANTHROPIC_API_KEY ou passe --auth api-key "
+        "pour l'éviter.",
+        file=sys.stderr,
+    )
+    return "oauth-copy"
+
+
 def _expected_activation_directive_template() -> str:
     """Gabarit de directive attendu, lu depuis le CODE SOURCE de ce worktree.
 
@@ -867,13 +936,24 @@ def verify_grimoire_binary_matches_template(grimoire_bin: str, *, check_dir: Pat
     """Garde-fou lot H (#582) : refuse toute dépense modèle si *grimoire_bin*
     ne sert pas le gabarit de directive du CODE SOURCE de ce worktree.
 
-    Provisionne un dépôt jetable sous *check_dir* (``git init`` +
+    Provisionne un dépôt JETABLE ET UNIQUE sous *check_dir* (``git init`` +
     ``<grimoire_bin> init`` + ``host sync --host claude`` + ``standard init``
     — c'est ``standard init`` qui écrit ``.claude/activation-context.md``,
     vérifié en isolation : ``init``/``host sync`` seuls installent les
     agents/commandes/hooks Claude Code mais jamais ce fichier — ``HOME``
     isolé), lit le ``.claude/activation-context.md`` qui en résulte, et le
     compare CARACTÈRE PAR CARACTÈRE à :func:`_expected_activation_directive_template`.
+
+    Lot J (#582) : *check_dir* n'est plus le dépôt lui-même mais son
+    RÉPERTOIRE PARENT — chaque appel provisionne un sous-répertoire jetable
+    distinct via :func:`tempfile.mkdtemp`, supprimé dans un ``finally`` que la
+    vérification réussisse, échoue, ou lève. Avant ce lot, *check_dir* était
+    le dépôt lui-même, à un chemin FIXE
+    (``workspace / "_grimoire_bin_check"``) : au second appel sur le même
+    workspace (ex. un ``--resume`` après un incident), ``grimoire init``
+    retombait sur un dépôt déjà initialisé et refusait (« Use --force to
+    overwrite »), faisant échouer la garde elle-même — jamais rejouable sans
+    intervention manuelle pour supprimer l'ancien dépôt.
 
     Appelée une seule fois, avant le tout premier appel ``claude -p`` d'une
     campagne ``--pilot``/``--full`` (jamais pour ``--dry-run``/``--report-only``,
@@ -890,49 +970,53 @@ def verify_grimoire_binary_matches_template(grimoire_bin: str, *, check_dir: Pat
     expected_template = _expected_activation_directive_template()
 
     check_dir.mkdir(parents=True, exist_ok=True)
-    fake_home = check_dir / "_fake_home"
-    (fake_home / ".claude").mkdir(parents=True, exist_ok=True)
-    env = {
-        **os.environ,
-        "HOME": str(fake_home),
-        "GRIMOIRE_NO_COCKPIT": "1",
-        "PATH": f"{Path(grimoire_bin).parent}{os.pathsep}{os.environ.get('PATH', '')}",
-    }
-    _run(["git", "init", "-q", "."], cwd=check_dir, timeout=30)
-    init = _run(
-        [grimoire_bin, "init", ".", "--backend", "local", "--no-cockpit"],
-        cwd=check_dir,
-        env=env,
-        timeout=120,
-    )
-    sync = _run([grimoire_bin, "host", "sync", "--host", "claude"], cwd=check_dir, env=env, timeout=120)
-    standard_init = _run([grimoire_bin, "standard", "init", "."], cwd=check_dir, env=env, timeout=120)
-    if init.returncode != 0 or sync.returncode != 0 or standard_init.returncode != 0:
-        raise RuntimeError(
-            "garde-fou lot H : impossible de provisionner le dépôt de vérification "
-            f"du gabarit ({grimoire_bin} init/host sync/standard init) : "
-            f"{init.stdout}{init.stderr}{sync.stdout}{sync.stderr}"
-            f"{standard_init.stdout}{standard_init.stderr}"
+    run_dir = Path(tempfile.mkdtemp(prefix="_grimoire_bin_check-", dir=check_dir))
+    try:
+        fake_home = run_dir / "_fake_home"
+        (fake_home / ".claude").mkdir(parents=True, exist_ok=True)
+        env = {
+            **os.environ,
+            "HOME": str(fake_home),
+            "GRIMOIRE_NO_COCKPIT": "1",
+            "PATH": f"{Path(grimoire_bin).parent}{os.pathsep}{os.environ.get('PATH', '')}",
+        }
+        _run(["git", "init", "-q", "."], cwd=run_dir, timeout=30)
+        init = _run(
+            [grimoire_bin, "init", ".", "--backend", "local", "--no-cockpit"],
+            cwd=run_dir,
+            env=env,
+            timeout=120,
         )
+        sync = _run([grimoire_bin, "host", "sync", "--host", "claude"], cwd=run_dir, env=env, timeout=120)
+        standard_init = _run([grimoire_bin, "standard", "init", "."], cwd=run_dir, env=env, timeout=120)
+        if init.returncode != 0 or sync.returncode != 0 or standard_init.returncode != 0:
+            raise RuntimeError(
+                "garde-fou lot H : impossible de provisionner le dépôt de vérification "
+                f"du gabarit ({grimoire_bin} init/host sync/standard init) : "
+                f"{init.stdout}{init.stderr}{sync.stdout}{sync.stderr}"
+                f"{standard_init.stdout}{standard_init.stderr}"
+            )
 
-    activation_path = check_dir / ".claude" / "activation-context.md"
-    if not activation_path.is_file():
-        raise RuntimeError(
-            f"garde-fou lot H : {activation_path} absent après provisionnement — "
-            "vérification du gabarit impossible."
-        )
-    served_template = activation_path.read_text(encoding="utf-8")
+        activation_path = run_dir / ".claude" / "activation-context.md"
+        if not activation_path.is_file():
+            raise RuntimeError(
+                f"garde-fou lot H : {activation_path} absent après provisionnement — "
+                "vérification du gabarit impossible."
+            )
+        served_template = activation_path.read_text(encoding="utf-8")
 
-    if served_template != expected_template:
-        raise RuntimeError(
-            "GARDE-FOU LOT H : le binaire grimoire résolu "
-            f"({grimoire_bin}) sert un gabarit de directive DIFFÉRENT du code de ce "
-            f"worktree — {len(served_template)} caractères servis contre "
-            f"{len(expected_template)} attendus. Cause probable : un PATH relatif ou "
-            "un `grimoire` d'un autre environnement (voir l'incident lot H, #582 : "
-            "27 runs / 44 $ rejoués sur l'ancien gabarit avant que ce garde-fou "
-            "n'existe). Arrêt avant tout appel modèle — 0 $ dépensé."
-        )
+        if served_template != expected_template:
+            raise RuntimeError(
+                "GARDE-FOU LOT H : le binaire grimoire résolu "
+                f"({grimoire_bin}) sert un gabarit de directive DIFFÉRENT du code de ce "
+                f"worktree — {len(served_template)} caractères servis contre "
+                f"{len(expected_template)} attendus. Cause probable : un PATH relatif ou "
+                "un `grimoire` d'un autre environnement (voir l'incident lot H, #582 : "
+                "27 runs / 44 $ rejoués sur l'ancien gabarit avant que ce garde-fou "
+                "n'existe). Arrêt avant tout appel modèle — 0 $ dépensé."
+            )
+    finally:
+        shutil.rmtree(run_dir, ignore_errors=True)
 
 
 #: Motifs qui, dans la sortie d'une commande de test, trahissent une
@@ -1134,6 +1218,45 @@ def find_leftover_credentials(root: Path) -> list[Path]:
     if not homes_dir.is_dir():
         return []
     return sorted(homes_dir.glob(f"*/{CREDENTIALS_REL_PATH.as_posix()}"))
+
+
+def find_leaked_api_keys(root: Path, *, api_key: str | None) -> list[Path]:
+    """Garde de fin de campagne, mode ``api-key`` (lot J, #582) : la clé
+    ``ANTHROPIC_API_KEY`` transmise à ``claude -p --bare`` ne doit jamais
+    avoir été ÉCRITE quelque part — ni dans un ``HOME`` isolé (``root/homes``:
+    un fichier de config quelconque qui la citerait en clair), ni dans un
+    journal de run (``root/tasks/**/*.stream.jsonl``, la transcription
+    ``stream-json`` de chaque session).
+
+    Recherche du littéral de la clé (jamais affichée ni journalisée par ce
+    script : seuls les CHEMINS des fichiers concernés sont retournés, jamais
+    leur contenu). ``[]`` si *api_key* est ``None`` (mode ``oauth-copy``, la
+    question ne se pose pas ici — voir :func:`find_leftover_credentials`) ou
+    si rien n'a été trouvé.
+
+    Balayage borné à ces deux emplacements (jamais tout ``root`` : les
+    dépôts de tâche eux-mêmes peuvent contenir des Go/Rust/JS build
+    artifacts volumineux, hors périmètre d'un secret du harnais).
+    """
+    if not api_key:
+        return []
+    needle = api_key.encode("utf-8")
+    candidates: list[Path] = []
+    homes_dir = root / "homes"
+    if homes_dir.is_dir():
+        candidates.extend(p for p in homes_dir.rglob("*") if p.is_file())
+    tasks_dir = root / "tasks"
+    if tasks_dir.is_dir():
+        candidates.extend(tasks_dir.rglob("*.stream.jsonl"))
+    hits: list[Path] = []
+    for path in candidates:
+        try:
+            content = path.read_bytes()
+        except OSError:
+            continue
+        if needle in content:
+            hits.append(path)
+    return sorted(hits)
 
 
 def install_test_dependencies(
@@ -1431,6 +1554,7 @@ def run_claude_headless(
     repeat_threshold: int = DEFAULT_LOOP_REPEAT_THRESHOLD,
     poll_interval: float = DEFAULT_POLL_INTERVAL_S,
     log_path: Path | None = None,
+    auth_mode: str = "oauth-copy",
 ) -> RunOutcome:
     """Lance ``claude -p`` en tête sans tête, avec garde-fou timeout + boucle.
 
@@ -1444,6 +1568,16 @@ def run_claude_headless(
     qui ne fournissent que *home*) replie sur l'ancien comportement
     (``os.environ`` + ``HOME`` isolé seul), sans la toolchain Go/Rust/npm
     unifiée.
+
+    *auth_mode* (lot J, #582) : ``"oauth-copy"`` (défaut, comportement
+    historique inchangé) ou ``"api-key"`` — voir :func:`resolve_auth_mode`.
+    En mode ``"api-key"``, ``--bare`` est ajouté à la commande : d'après la
+    documentation Claude Code (``code.claude.com/docs/en/headless.md``,
+    « Start faster with bare mode »), ce mode ignore explicitement les
+    identifiants OAuth et le trousseau système, et exige
+    ``ANTHROPIC_API_KEY`` (ou un ``apiKeyHelper``) — déjà présente dans
+    *env* puisque :func:`run_environment` part de ``os.environ``. Aucun
+    identifiant n'est donc jamais copié pour ce mode (voir ``_run_one``).
     """
     log_path = log_path or (task_dir.parent / f"{task_dir.name}.stream.jsonl")
     effective_env = dict(env) if env is not None else {**os.environ, "HOME": str(home)}
@@ -1459,6 +1593,8 @@ def run_claude_headless(
         "--setting-sources",
         "project,local",
     ]
+    if auth_mode == "api-key":
+        cmd.append("--bare")
 
     outcome = RunOutcome()
     start = time.monotonic()
@@ -1758,6 +1894,12 @@ def build_report(
         "kit_gov_runs": kit_gov_runs,
         "carried_over_notes": carried_over_notes,
         "agent_toolchain_check": toolchain_check,
+        # Lot J (#582) : mode(s) d'authentification effectivement utilisés
+        # par les runs de CE rapport — voir ``RunRecord.auth_mode``. Vide
+        # pour un rapport reconstruit depuis des lignes antérieures à ce lot
+        # (``auth_mode`` alors toujours ``None``), jamais reconstruit a
+        # posteriori.
+        "auth_modes": sorted({r.auth_mode for r in records if r.auth_mode}),
     }
 
 
@@ -1776,6 +1918,11 @@ def render_report_markdown(report: dict[str, Any]) -> str:
 
     if report.get("label"):
         lines.append(f"Étiquette : **{report['label']}**.")
+        lines.append("")
+
+    auth_modes = report.get("auth_modes") or []
+    if auth_modes:
+        lines.append(f"Authentification (lot J, #582) : **{', '.join(auth_modes)}** — voir docs/bench-three-arms.md §3.")
         lines.append("")
 
     carried_over_notes = report.get("carried_over_notes") or {}
@@ -1990,6 +2137,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         "PATH=\".venv/bin:$PATH\" retombe, pour un sous-processus dont le cwd est un dépôt de "
         "tâche jetable, sur le grimoire suivant du PATH)",
     )
+    parser.add_argument(
+        "--auth",
+        type=str,
+        choices=AUTH_MODES,
+        default=None,
+        help="mode d'authentification Claude Code (lot J, #582) : 'api-key' (aucune copie "
+        "d'identifiant, ANTHROPIC_API_KEY transmise à `claude -p --bare`) ou 'oauth-copy' "
+        "(comportement historique, copie temporaire des identifiants OAuth de l'opérateur — "
+        "voir docs/bench-three-arms.md §3 pour le risque de rotation partagée) ; défaut : "
+        "'api-key' si ANTHROPIC_API_KEY est présente dans l'environnement du lanceur, sinon "
+        "'oauth-copy' avec un avertissement",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -2026,6 +2185,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.dry_run:
         return _do_dry_run(tasks, workspace=workspace, ecc_repo=ecc_repo, homes=homes, grimoire_bin=grimoire_bin)
+
+    # Lot J (#582) : résolu avant tout appel `claude -p`, jamais recalculé
+    # par run — voir `resolve_auth_mode`. Lève `SystemExit` si `--auth
+    # api-key` est demandé explicitement sans `ANTHROPIC_API_KEY`.
+    auth_mode = resolve_auth_mode(args.auth)
+    print(f"[auth] mode : {auth_mode}")
 
     # Garde-fou lot H (#582) : avant tout appel `claude -p` (jamais pour
     # --dry-run/--report-only, qui ne dépensent rien), vérifie que le binaire
@@ -2111,6 +2276,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         go_bin=go_bin,
                         run_timeout_s=args.run_timeout_s,
                         grimoire_bin=grimoire_bin,
+                        auth_mode=auth_mode,
                     )
                     records.append(record)
                     results_f.write(json.dumps(record.to_dict()) + "\n")
@@ -2179,6 +2345,25 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"[ALERTE SÉCURITÉ] {len(leftovers)} identifiant(s) supprimé(s) rétroactivement.", file=sys.stderr)
     else:
         print("[sécurité] aucun identifiant oublié sous un HOME isolé — vérifié en fin de campagne.")
+
+    # Lot J (#582) : pendant du garde ci-dessus pour le mode `api-key` — la
+    # clé n'est jamais copiée, mais elle ne doit pas non plus avoir fuité
+    # dans un fichier de config d'un HOME isolé ou dans un journal de run.
+    # Best-effort, non bloquant (voir `find_leaked_api_keys`) : jamais de
+    # suppression automatique (on ignore la structure du fichier trouvé),
+    # seulement une alerte bruyante.
+    leaked_keys = find_leaked_api_keys(
+        workspace, api_key=os.environ.get("ANTHROPIC_API_KEY") if auth_mode == "api-key" else None
+    )
+    if leaked_keys:
+        print(
+            f"[ALERTE SÉCURITÉ] ANTHROPIC_API_KEY retrouvée en clair dans {len(leaked_keys)} fichier(s) "
+            "sous des HOME isolés ou des journaux de run — jamais attendu en mode api-key : "
+            + ", ".join(str(p) for p in leaked_keys),
+            file=sys.stderr,
+        )
+    elif auth_mode == "api-key":
+        print("[sécurité] aucune fuite d'ANTHROPIC_API_KEY détectée sous un HOME isolé ou un journal.")
 
     return 0
 
@@ -2264,6 +2449,7 @@ def _run_one(
     go_bin: Path | None,
     run_timeout_s: int,
     grimoire_bin: str,
+    auth_mode: str = "oauth-copy",
 ) -> RunRecord:
     run_dir = workspace / "tasks" / task.task_id.replace("/", "__") / arm / f"run{run_index}"
     prepare_task_repo(task, run_dir)
@@ -2311,16 +2497,31 @@ def _run_one(
         npm_cache_dir=npm_cache_dir,
     )
 
-    # Les identifiants ne vivent dans `home` que le temps de cet appel : le
-    # `finally` de `credentials_provisioned` les efface, que le run réussisse,
-    # échoue, ou soit tué pour timeout/boucle — jamais laissés à demeure.
-    with credentials_provisioned(home) as creds:
-        if creds is None:
-            raise RuntimeError(
-                f"aucun identifiant Claude Code trouvé sous {Path.home()}/.claude — "
-                "authentifie-toi (`claude /login`) avant de lancer une campagne réelle."
+    if auth_mode == "api-key":
+        # Lot J (#582) : AUCUNE copie d'identifiant — l'agent s'authentifie
+        # par `ANTHROPIC_API_KEY`, déjà présente dans `env` (héritée de
+        # `os.environ` par `run_environment`) et transmise telle quelle par
+        # `run_claude_headless` (`--bare`, voir sa docstring). C'est
+        # précisément ce qui élimine le bug de rotation OAuth partagée :
+        # rien n'est jamais écrit dans `home`.
+        outcome = run_claude_headless(
+            run_dir, build_prompt(task), home=home, env=env, timeout_s=run_timeout_s, auth_mode=auth_mode
+        )
+    else:
+        # Les identifiants ne vivent dans `home` que le temps de cet appel : le
+        # `finally` de `credentials_provisioned` les efface, que le run
+        # réussisse, échoue, ou soit tué pour timeout/boucle — jamais laissés
+        # à demeure.
+        with credentials_provisioned(home) as creds:
+            if creds is None:
+                raise RuntimeError(
+                    f"aucun identifiant Claude Code trouvé sous {Path.home()}/.claude — "
+                    "authentifie-toi (`claude /login`) avant de lancer une campagne réelle, "
+                    "ou passe --auth api-key avec ANTHROPIC_API_KEY exportée."
+                )
+            outcome = run_claude_headless(
+                run_dir, build_prompt(task), home=home, env=env, timeout_s=run_timeout_s, auth_mode=auth_mode
             )
-        outcome = run_claude_headless(run_dir, build_prompt(task), home=home, env=env, timeout_s=run_timeout_s)
 
     if outcome.terminated_reason in ("timeout", "loop"):
         success = False
@@ -2359,6 +2560,7 @@ def _run_one(
         terminated_reason=outcome.terminated_reason,
         dispatch_stats=dispatch_stats,
         toolchain_friction_bash_calls=outcome.toolchain_friction_bash_calls,
+        auth_mode=auth_mode,
     )
 
 
