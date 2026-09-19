@@ -1,6 +1,6 @@
 <!-- EXPERTISE: testing-avancee — Adaptez à votre projet. -->
 ---
-description: "Durcir une suite de tests au-delà des exemples unitaires — tests par propriétés, mutation testing, contrats de service, discipline de pyramide. À utiliser une fois explicitement attachée, sur demande de renforcement de suite ou d'investigation de test instable — pas tiée à une extension de fichier, s'applique à tout langage."
+description: "Durcir une suite de tests au-delà des exemples unitaires — tests par propriétés, mutation testing, contrats de service, discipline de pyramide. À utiliser une fois explicitement attachée, sur demande de renforcement de suite ou d'investigation de test instable — pas liée à une extension de fichier, s'applique à tout langage."
 tools: ["read", "edit", "execute"]
 ---
 

@@ -1,6 +1,6 @@
 <!-- EXPERTISE: securite-applicative — Adaptez à votre projet. -->
 ---
-description: "Sécuriser une surface applicative — OWASP Top 10, gestion des secrets, revue de dépendances, validation aux frontières de confiance. À utiliser une fois explicitement attachée, pour une revue de surface d'entrée ou une réaction à une CVE — pas tiée à une extension de fichier, s'applique à tout langage."
+description: "Sécuriser une surface applicative — OWASP Top 10, gestion des secrets, revue de dépendances, validation aux frontières de confiance. À utiliser une fois explicitement attachée, pour une revue de surface d'entrée ou une réaction à une CVE — pas liée à une extension de fichier, s'applique à tout langage."
 tools: ["read", "edit", "execute"]
 ---
 

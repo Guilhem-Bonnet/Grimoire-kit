@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Any
 
 from grimoire.core import layout
+from grimoire.core.agentic_standard import _ensure_inside_root
 from grimoire.core.exceptions import GrimoireAgentError, GrimoireRegistryError
 from grimoire.core.scanner import StackScanner
 
@@ -321,6 +322,26 @@ class DetachResult:
     was_attached: bool
 
 
+#: Forme de `forge_server.SLUG_RE`, dupliquée pour ne pas en dépendre — garde
+#: de forme sur un slug de skill lu depuis un frontmatter projet, avant toute
+#: construction de chemin (CodeQL py/path-injection 599/600, `scaffold.py`,
+#: `docs/security/code-scanning-triage-2026-09.md`).
+_SKILL_SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+
+
+def _safe_skill_source(skills_src: Path, slug: str) -> Path | None:
+    """Chemin du skill `slug` sous `skills_src`, ou `None` (forme invalide
+    ou hors racine, `_ensure_inside_root` #573)."""
+    if not _SKILL_SLUG_RE.match(slug):
+        return None
+    candidate = skills_src / f"{slug}.md"
+    try:
+        _ensure_inside_root(skills_src, candidate, label=f"Skill source {slug!r}")
+    except ValueError:
+        return None
+    return candidate
+
+
 def _skills_override_dir(project_root: Path) -> Path:
     return layout.overrides_dir(project_root) / layout.SKILLS_SUBDIR
 
@@ -442,11 +463,21 @@ def detach_expertise(project_root: Path, expertise: Expertise) -> DetachResult:
     agent_override_path = _agents_override_dir(root) / f"{porteur}.md"
 
     if not agent_override_path.is_file():
+        # L'override d'agent a pu disparaître autrement qu'en passant par ici
+        # (retiré à la main, `override drift` reconverti…) sans emporter le
+        # fichier de skill : orphelin, plus aucun agent ne le référence par
+        # son slug, exactement le skill transversal fantôme que #375 a
+        # corrigé si on le laisse sur disque. Le supprimer ne dépend donc pas
+        # de la présence de l'override porteur.
+        skill_removed = False
+        if skill_dst.is_file():
+            skill_dst.unlink()
+            skill_removed = True
         return DetachResult(
             expertise_id=expertise.id,
             slug=slug,
             porteur=porteur,
-            skill_removed=False,
+            skill_removed=skill_removed,
             agent_override_ref=agent_override_path.relative_to(root).as_posix(),
             was_attached=False,
         )

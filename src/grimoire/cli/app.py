@@ -1284,12 +1284,10 @@ LazyTyperGroup.configure(
     order=[
         "version", "init", "doctor", "status", "add", "remove", "agent-miss",
         "validate", "lint", "update", "up", "context-pack", "migrate", "upgrade",
-        "serve", "diff", "schema", "check", "merge", "setup", "env", "history",
-        "repair",
+        "serve", "diff", "schema", "check", "merge", "setup", "env", "history", "repair",
         "memory", "hooks", "cadrage", "debugger", "dbg", "registry", "workflows",
-        "wf", "standard", "ext", "blueprint", "flow", "cockpit", "task",
-        "stigmergy", "features", "host", "providers", "dispatch", "needs", "proposals", "upgrade-flow", "agent",
-        "expertise", "web",
+        "wf", "standard", "ext", "blueprint", "flow", "cockpit", "task", "stigmergy", "features",
+        "host", "providers", "dispatch", "needs", "proposals", "upgrade-flow", "agent", "expertise", "web",
         "config", "completion", "self", "plugins",
     ],
 )

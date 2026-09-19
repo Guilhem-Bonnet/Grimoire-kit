@@ -24,6 +24,7 @@ from grimoire.__version__ import __version__ as _grimoire_version
 from grimoire.archetypes import bundled_path as archetypes_path
 from grimoire.core import layout
 from grimoire.core.archetype_resolver import ResolvedArchetype
+from grimoire.core.expertises import _safe_skill_source
 from grimoire.core.scanner import ScanResult
 from grimoire.core.standard_generation import GITIGNORE_MARKER, GITIGNORE_SECTION
 from grimoire.data import framework_path
@@ -626,6 +627,8 @@ class ProjectScaffolder:
         from grimoire.hosts.collect import parse_frontmatter
 
         meta, _ = parse_frontmatter(existing.read_text(encoding="utf-8"))
+        # `_safe_skill_source` (tout consommateur de ce retour) revalide la forme et confine le
+        # chemin — cette valeur vient d'un frontmatter projet modifiable à la main (CodeQL 599/600).
         known_slugs = set(self._STACK_SKILL_BY_DETECTION.values())
         return tuple(str(s) for s in (meta.get("skills") or []) if str(s) in known_slugs)
 
@@ -878,7 +881,7 @@ class ProjectScaffolder:
             if skills_src.is_dir():
                 skills_dst = self._skills_dir()
                 skill_files = (
-                    tuple(skills_src / f"{slug}.md" for slug in self._detected_stack_skill_slugs())
+                    tuple(filter(None, (_safe_skill_source(skills_src, s) for s in self._detected_stack_skill_slugs())))
                     if arch == "stack"
                     else tuple(sorted(skills_src.glob("*.md")))
                 )
@@ -973,14 +976,14 @@ class ProjectScaffolder:
         if planned and skills_src.is_dir():
             skills_dst = self._skills_dir()
             for slug in self._detected_stack_skill_slugs():
-                md = skills_src / f"{slug}.md"
-                if not md.is_file():
+                skill_src = _safe_skill_source(skills_src, slug)
+                if skill_src is None or not skill_src.is_file():
                     continue
-                dst = skills_dst / _strip_tpl_suffix(md.name)
+                dst = skills_dst / _strip_tpl_suffix(skill_src.name)
                 if any(fc.dst == dst for fc in p.copies):
                     continue
                 p.copies.append(FileCopy(
-                    src=md,
+                    src=skill_src,
                     dst=dst,
                     label=f"stack/skills/{dst.stem}",
                 ))

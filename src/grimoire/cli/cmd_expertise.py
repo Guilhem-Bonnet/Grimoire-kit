@@ -25,7 +25,10 @@ if TYPE_CHECKING:
     from grimoire.core.expertises import Expertise
 
 expertise_app = typer.Typer(help="Catalogue d'expertises optionnelles : langages, ingénierie, cloud.")
-console = Console()
+# `stderr=True` : convention du dépôt pour tout ce qui supporte `-o json`
+# (`app.py`, `cmd_agent.py`, `cmd_init.py`…) — la sortie Rich décorative ne
+# doit jamais polluer un `grimoire -o json expertise ...` sur stdout.
+console = Console(stderr=True)
 
 _PROJECT_ROOT_OPTION = typer.Option(Path.cwd(), "--project-root", help="Racine du projet.", show_default=False)
 _DETECTED_OPTION = typer.Option(False, "--detected", help="N'afficher que les expertises recommandées par détection.")
@@ -132,7 +135,11 @@ def expertise_add(
     from grimoire.core.expertises import attach_expertise, load_catalog
 
     root = project_root.resolve()
-    catalog = load_catalog()
+    try:
+        catalog = load_catalog()
+    except GrimoireRegistryError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
     entries, unknown = _resolve_ids(catalog, ids)
     if unknown:
         console.print(f"[red]Id(s) inconnu(s) :[/red] {', '.join(unknown)} — voir `grimoire expertise list`.")
@@ -175,7 +182,11 @@ def expertise_remove(
     from grimoire.core.expertises import detach_expertise, load_catalog
 
     root = project_root.resolve()
-    catalog = load_catalog()
+    try:
+        catalog = load_catalog()
+    except GrimoireRegistryError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
     entries, unknown = _resolve_ids(catalog, ids)
     if unknown:
         console.print(f"[red]Id(s) inconnu(s) :[/red] {', '.join(unknown)} — voir `grimoire expertise list`.")

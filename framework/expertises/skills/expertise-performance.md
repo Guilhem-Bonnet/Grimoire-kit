@@ -1,6 +1,6 @@
 <!-- EXPERTISE: performance — Adaptez à votre projet. -->
 ---
-description: "Diagnostiquer et corriger la performance par la mesure, pas par l'intuition — profilage, budget de performance, invalidation de cache assumée. À utiliser une fois explicitement attachée, pour une régression ou une optimisation de chemin chaud — pas tiée à une extension de fichier, s'applique à tout langage."
+description: "Diagnostiquer et corriger la performance par la mesure, pas par l'intuition — profilage, budget de performance, invalidation de cache assumée. À utiliser une fois explicitement attachée, pour une régression ou une optimisation de chemin chaud — pas liée à une extension de fichier, s'applique à tout langage."
 tools: ["read", "edit", "execute"]
 ---
 

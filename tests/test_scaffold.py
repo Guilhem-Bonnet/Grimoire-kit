@@ -613,3 +613,48 @@ def test_grimoire_up_ne_regresse_pas_la_selection_de_skills_de_pile(tmp_path: Pa
     assert "stack/skills/stack-python" in labels
     second.execute(refreshed_plan)
     assert '"stack-python"' in kit_agent.read_text(encoding="utf-8")
+
+
+def test_un_slug_de_traversee_dans_le_frontmatter_installe_ne_sort_jamais_du_dossier_de_skills(
+    tmp_path: Path,
+) -> None:
+    """CodeQL py/path-injection, alertes 599/600 — `scaffold.py:624`/`:628`.
+
+    `_detected_stack_skill_slugs()` relit, sans re-détection (`scan=None`,
+    cas `grimoire up`), le `skills:` déjà installé dans le frontmatter YAML
+    de `stack-engineer.md` — un fichier projet, modifiable à la main. Un
+    slug de traversée de chemin injecté là (`../../../evil`) ne doit ni
+    planter le scaffolder ni faire sortir un `FileCopy` de
+    `archetypes/stack/skills/` : la garde de forme (`_SKILL_SLUG_RE`) et le
+    confinement (`_ensure_inside_root`, `_safe_skill_source`) l'écartent
+    avant toute opération filesystem.
+    """
+    first = _scaffolder(tmp_path, stacks=("python",), stack_agents=("stack-engineer",))
+    plan = first.plan()
+    first.execute(plan)
+    kit_agent = tmp_path / "_grimoire" / "kit" / "agents" / "stack-engineer.md"
+    tampered = kit_agent.read_text(encoding="utf-8").replace(
+        '["stack-python"]', '["stack-python", "../../../evil"]'
+    )
+    assert tampered != kit_agent.read_text(encoding="utf-8")
+    kit_agent.write_text(tampered, encoding="utf-8")
+
+    second = ProjectScaffolder(
+        tmp_path,
+        project_name="test-project",
+        user_name="Test User",
+        language="Français",
+        skill_level="intermediate",
+        scan=None,
+        resolved=_resolved(stack_agents=("stack-engineer",)),
+        backend="local",
+    )
+    detected = second._detected_stack_skill_slugs()
+    assert "../../../evil" not in detected
+
+    refreshed_plan = second.plan()
+    for fc in refreshed_plan.copies:
+        assert ".." not in fc.dst.relative_to(tmp_path).as_posix()
+    labels = {fc.label for fc in refreshed_plan.copies}
+    assert "stack/skills/stack-python" in labels
+    assert not any("evil" in label for label in labels)

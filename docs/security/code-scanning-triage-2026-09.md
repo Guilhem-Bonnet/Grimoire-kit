@@ -114,7 +114,7 @@ dépôt étant actif en continu) :
 | `src/grimoire/core/override_drift.py` | 6 | `kit_path`/`root` : chemins d'installation locaux |
 | `src/grimoire/tools/forge_server.py` | ~6 restantes | déjà validées par `_blueprint_path()`/`SLUG_RE` (ex. `blueprint_put`, `blueprint_get`, constructeur `ForgeAPI.__init__`) |
 | `src/grimoire/core/standard_generation.py` | 5 | même famille que `standard_state.py` |
-| `src/grimoire/core/scaffold.py` | 4 | `target` : dossier de destination `grimoire init` |
+| `src/grimoire/core/scaffold.py` | 6 (4 + 2 aux alertes 599/600, PR #618, addendum ci-dessous) | `target`/`self._target` : dossier de destination `grimoire init`, ou projet déjà enregistré sélectionné depuis le cockpit (`cmd_cockpit.py` → `_resolve_project_path`, jamais construit depuis l'entrée) |
 | `src/grimoire/core/scanner.py` | 4 | `root` : racine scannée, contrôles `.exists()`/`.glob()` en lecture seule |
 | `src/grimoire/cli/cmd_init.py` | 4 | `target` : dossier de destination `grimoire init` |
 | `src/grimoire/tools/project_registry.py` | 3 | confiné par `resolve_within_allowed()`/`allowed_roots()` (`scan_payload`, `browse`) ou lu depuis le registre local déjà écrit par `register_project` |
@@ -185,6 +185,58 @@ après fusion et scan de main de la PR #573) :
 - **0 alerte ouverte** sur le dépôt juste après l'exécution du script
   (vérifié par `gh api .../code-scanning/alerts?state=open` → `[]`). Le check
   CodeQL de cette même PR tourne en `security-extended` et doit rester vert.
+
+## Addendum — PR #618 (issue #616), alertes 599/600
+
+Deux nouvelles alertes `py/path-injection` ouvertes sur `src/grimoire/core/scaffold.py:624` et `:628`
+(`existing.is_file()` / `existing.read_text(...)` dans la nouvelle
+`_detected_stack_skill_slugs()`, issue #616). Avant de les classer, lecture
+du flux de données exact que rapporte l'API (`most_recent_instance.message`,
+pas seulement le nom de fichier) : la source que CodeQL cite est
+`src/grimoire/cli/cmd_cockpit.py:342` — le paramètre `self` de
+`_CockpitHandler.do_POST` (le handler `http.server`), pas un slug
+d'expertise. Le chemin réel : `do_POST` → `proot = _resolve_project_path(self._query_slug() or None)`
+→ `ProjectScaffolder(proot, ...)` (`project_update.py`) → `self._target` →
+`self._agents_dir()` → `existing = self._agents_dir() / "stack-engineer.md"`.
+
+`_resolve_project_path` (`cmd_cockpit.py:121`) ne construit jamais de chemin
+à partir du slug reçu : elle cherche une correspondance exacte dans
+`load_registry()` (le registre local, écrit uniquement par un `grimoire
+init`/`register_project` déjà exécuté sur cette machine) et renvoie le
+`Path` déjà enregistré, ou `None`. Un slug inconnu ou hostile (`"../etc"`)
+ne produit donc aucun chemin — il ne matche simplement rien. C'est
+exactement la classe (b) de la méthode de triage ci-dessus (paramètre venu
+de la configuration locale de l'opérateur, jamais construit depuis
+l'entrée), déjà celle qui couvre la ligne `scaffold.py` du tableau agrégé
+(4 alertes, `target` = dossier de destination `grimoire init`) — ces deux
+alertes en sont deux instances de plus, sur un nouvel appelant (`grimoire
+serve`/cockpit) plutôt que `grimoire init`/`up` en CLI direct.
+
+**Correctif appliqué quand même** (ce PR) : bien que ces deux alertes
+précises ne pointent pas sur un slug, `_detected_stack_skill_slugs()`
+construit par ailleurs un chemin (`skills_src / f"{slug}.md"`, aux lignes
+qui consomment son retour) à partir d'une valeur lue dans le frontmatter
+YAML d'un agent déjà installé (`meta.get("skills")`) — un fichier projet
+modifiable à la main, donc une entrée moins bien maîtrisée qu'un slug de
+détection interne. Durcissement réel, indépendant du verdict CodeQL sur
+599/600 : `_SKILL_SLUG_RE` (forme de `grimoire.tools.forge_server.SLUG_RE`,
+dupliquée pour ne pas tirer le serveur HTTP dans `grimoire init`/`up`) valide
+la forme du slug, `_safe_skill_source()` confine ensuite le chemin résolu
+sous `skills_src` via `_ensure_inside_root` (même helper qu'`agentic_standard`,
+#573) avant toute opération filesystem. Rouge-avant : sans cette garde,
+`skills_src / "../../../evil.md"` résout hors de `skills_src`
+(`tests/test_scaffold.py::test_un_slug_de_traversee_dans_le_frontmatter_installe_ne_sort_jamais_du_dossier_de_skills`,
+vérifié aussi directement en Python avant ce correctif — voir le commit).
+
+**Verdict** : même conclusion empirique que le paragraphe « Résultat »
+ci-dessus pour `blueprint_compile`/`blueprint_get`/`ForgeAPI.__init__` —
+`_ensure_inside_root` n'est pas un sanitizer que CodeQL reconnaît, et
+`self._target` reste un paramètre qu'aucun garde de forme ne peut
+« nettoyer » puisqu'il n'est jamais construit depuis une chaîne tachée en
+premier lieu. Ces deux alertes rejoignent le lot des faux positifs
+dismissés (classe (b), même ligne `scaffold.py` du tableau agrégé, portée
+de 4 à 6 alertes couvertes) plutôt que d'attendre une fermeture qui ne
+viendra pas. Dismiss via l'API, commentaire référençant ce paragraphe.
 
 ## Recommandation de suivi (hors périmètre de ce lot)
 
