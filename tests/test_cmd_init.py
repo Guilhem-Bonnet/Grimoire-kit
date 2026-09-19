@@ -695,6 +695,24 @@ class TestInitNoCockpit:
         finally:
             shutil.rmtree(scratch_root, ignore_errors=True)
 
+    def test_init_grimoire_no_cockpit_env_var_hides_the_report_suggestion(
+        self, runner, app, tmp_path: Path, simulated_real_home: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Found while replaying `init -y` for PR #617: `GRIMOIRE_NO_COCKPIT=1`
+        already kept the registry untouched (`_maybe_register_cockpit` checked
+        it), but `run_init()`'s own `no_cockpit` value — used to build the
+        'Next Steps' report via `build_next_steps()` — never read the env var,
+        only the `--no-cockpit` flag. The report kept suggesting
+        `grimoire cockpit` even though the opt-out was active for this run,
+        the same defect as the doctor/status footer (Copilot review, same PR)."""
+        monkeypatch.setenv("GRIMOIRE_NO_COCKPIT", "1")
+        target = tmp_path / "throwaway-env"
+
+        result = runner.invoke(app, ["-y", "init", str(target)])
+
+        assert result.exit_code == 0, result.output
+        assert "grimoire cockpit" not in result.output
+
     def test_init_no_cockpit_documented_in_help(self, app) -> None:
         """The option exists on the command, and the env var is documented
         alongside it — checked on the declared parameters and the raw
@@ -712,3 +730,345 @@ class TestInitNoCockpit:
         declared = {opt for param in init_cmd.params for opt in getattr(param, "opts", [])}
         assert "--no-cockpit" in declared
         assert "GRIMOIRE_NO_COCKPIT" in (init_cmd.help or "")
+
+
+class TestWizardArchetypeStepDefaultsToDiscovery:
+    """Onboarding audit 2026-09-18, constat #2: bare Enter at the archetype
+    step always installed 'minimal' via the numeric multi-select's 'none'
+    default. Guided discovery (option '0') existed and worked, but was never
+    the default — a user who only answers the 3 guided yes/no questions
+    (never a number) should land on a specialized archetype when the project
+    warrants one."""
+
+    @staticmethod
+    def _echo_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+        """Simulate a user who presses Enter on every prompt."""
+        from grimoire.cli import cmd_init
+
+        monkeypatch.setattr(cmd_init.Prompt, "ask", staticmethod(lambda *a, **kw: kw.get("default", "")))
+        monkeypatch.setattr(cmd_init.Confirm, "ask", staticmethod(lambda *a, **kw: kw.get("default", False)))
+
+    def test_python_naked_bare_enter_gets_specialized_via_guided_discovery(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from grimoire.cli.cmd_init import _run_wizard
+        from grimoire.core.archetype_resolver import ArchetypeResolver
+        from grimoire.core.scanner import ScanResult, StackDetection
+
+        self._echo_defaults(monkeypatch)
+        scan = ScanResult(
+            stacks=(StackDetection(name="python", confidence=0.9, evidence=("pyproject.toml",)),),
+            project_type="generic",
+            root=tmp_path,
+        )
+        resolved = ArchetypeResolver().resolve(scan)
+        result = _run_wizard(tmp_path, scan, resolved, "lexical")
+        assert result["archetype"] != "minimal"
+
+    def test_node_naked_bare_enter_gets_specialized_via_guided_discovery(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from grimoire.cli.cmd_init import _run_wizard
+        from grimoire.core.archetype_resolver import ArchetypeResolver
+        from grimoire.core.scanner import ScanResult, StackDetection
+
+        self._echo_defaults(monkeypatch)
+        scan = ScanResult(
+            stacks=(StackDetection(name="javascript", confidence=0.9, evidence=("package.json",)),),
+            project_type="generic",
+            root=tmp_path,
+        )
+        resolved = ArchetypeResolver().resolve(scan)
+        result = _run_wizard(tmp_path, scan, resolved, "lexical")
+        assert result["archetype"] != "minimal"
+
+    def test_numeric_list_still_reachable_when_auto_detected(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A rule-matched stack keeps its numeric auto-selection as the
+        default — guided discovery only replaces the *blank* default."""
+        from grimoire.cli.cmd_init import _run_wizard
+        from grimoire.core.archetype_resolver import ArchetypeResolver
+        from grimoire.core.scanner import ScanResult, StackDetection
+
+        self._echo_defaults(monkeypatch)
+        scan = ScanResult(
+            stacks=(StackDetection(name="react", confidence=0.9, evidence=("src/App.tsx",)),),
+            project_type="generic",
+            root=tmp_path,
+        )
+        resolved = ArchetypeResolver().resolve(scan)
+        result = _run_wizard(tmp_path, scan, resolved, "lexical")
+        assert result["archetype"] == "web-app"
+
+
+class TestNonTtyExpressNotice:
+    """Onboarding audit 2026-09-18, constat #1: `grimoire init` (no `-y`) under
+    a non-TTY stdin silently runs the express path — indistinguishable from
+    `-y` in its own output, with no sign a choice was ever taken away."""
+
+    @pytest.fixture(autouse=True)
+    def _no_real_memory_probe(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _stub_unreachable_memory_services(monkeypatch)
+
+    @pytest.fixture
+    def runner(self):
+        from typer.testing import CliRunner
+        return CliRunner()
+
+    @pytest.fixture
+    def app(self):
+        from grimoire.cli.app import app
+        return app
+
+    def test_bare_init_non_tty_names_express_mode(self, runner, app, tmp_path: Path) -> None:
+        target = tmp_path / "proj"
+        # CliRunner's stdin is never a real TTY — this is exactly the
+        # "script/agent/CI" case the audit reproduced with stdin=/dev/null.
+        result = runner.invoke(app, ["init", str(target)])
+        assert result.exit_code == 0, result.output
+        assert "--interactive" in result.output
+        assert "express" in result.output.lower()
+
+    def test_explicit_yes_does_not_print_the_notice(self, runner, app, tmp_path: Path) -> None:
+        target = tmp_path / "proj"
+        result = runner.invoke(app, ["-y", "init", str(target)])
+        assert result.exit_code == 0, result.output
+        assert "pas de terminal interactif" not in result.output
+
+    def test_dry_run_does_not_print_the_notice(self, runner, app, tmp_path: Path) -> None:
+        target = tmp_path / "proj"
+        result = runner.invoke(app, ["init", str(target), "--dry-run"])
+        assert result.exit_code == 0, result.output
+        assert "pas de terminal interactif" not in result.output
+
+    def test_init_interactive_flag_is_declared(self, app) -> None:
+        from typer.main import get_command
+
+        group = get_command(app)
+        init_cmd = group.get_command(None, "init")
+        assert init_cmd is not None
+        declared = {opt for param in init_cmd.params for opt in getattr(param, "opts", [])}
+        assert "--interactive" in declared
+        assert "-i" in declared
+
+
+class TestExpressPathAppliesBestGuess:
+    """Decision 2026-09-18 (Guilhem, product owner): on the express path
+    (`-y`/non-TTY), an ambiguous stack gets the best-guess *specialized*
+    archetype actually applied — never `minimal`, never silent about it
+    being a guess."""
+
+    @pytest.fixture(autouse=True)
+    def _no_real_memory_probe(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _stub_unreachable_memory_services(monkeypatch)
+
+    @pytest.fixture
+    def runner(self):
+        from typer.testing import CliRunner
+        return CliRunner()
+
+    @pytest.fixture
+    def app(self):
+        from grimoire.cli.app import app
+        return app
+
+    def test_node_with_vite_gets_web_app_applied(self, runner, app, tmp_path: Path) -> None:
+        import json as _json
+
+        target = tmp_path / "node-proj"
+        target.mkdir()
+        (target / "package.json").write_text(
+            _json.dumps({"devDependencies": {"vite": "^5.0.0"}}),
+            encoding="utf-8",
+        )
+        result = runner.invoke(app, ["-y", "init", str(target), "--no-cockpit"])
+        assert result.exit_code == 0, result.output
+        assert "Archetype: Web App" in result.output
+        assert "minimal" not in result.output.lower()
+        assert "Best guess" in result.output
+        assert "grimoire up -a" in result.output
+
+    def test_naked_python_gets_stack_applied_not_a_guess(self, runner, app, tmp_path: Path) -> None:
+        """Decision 2026-09-18 (Guilhem, corrected same day): `stack` (Atlas)
+        is the deliberate pick for a naked backend language — not
+        `platform-engineering`, and not flagged as a 'best guess'."""
+        target = tmp_path / "py-proj"
+        target.mkdir()
+        (target / "pyproject.toml").write_text("[project]\nname='x'\n", encoding="utf-8")
+        result = runner.invoke(app, ["-y", "init", str(target), "--no-cockpit"])
+        assert result.exit_code == 0, result.output
+        assert "Archetype: stack" in result.output
+        assert "stack-python" in result.output
+        assert "Python" in result.output
+        assert "minimal" not in result.output.lower()
+        assert "Best guess" not in result.output
+
+    def test_empty_repo_gets_stack_applied_as_a_guess(self, runner, app, tmp_path: Path) -> None:
+        """The empty-repo case is the one exception: `stack` is still applied,
+        but flagged as a best guess (no signal at all to base it on)."""
+        target = tmp_path / "empty-proj"
+        target.mkdir()
+        result = runner.invoke(app, ["-y", "init", str(target), "--no-cockpit"])
+        assert result.exit_code == 0, result.output
+        assert "Archetype: stack" in result.output
+        assert "minimal" not in result.output.lower()
+        assert "Best guess" in result.output
+
+    def test_interactive_bare_enter_never_yields_minimal(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The TTY/guided-discovery path (bare Enter through all 3 questions,
+        no stack signal at all) must also never land on minimal."""
+        from grimoire.cli.cmd_init import Confirm, Prompt, _run_wizard
+        from grimoire.core.archetype_resolver import ArchetypeResolver
+        from grimoire.core.scanner import ScanResult
+
+        monkeypatch.setattr(Prompt, "ask", staticmethod(lambda *a, **kw: kw.get("default", "")))
+        monkeypatch.setattr(Confirm, "ask", staticmethod(lambda *a, **kw: kw.get("default", False)))
+        scan = ScanResult(stacks=(), project_type="generic", root=tmp_path)
+        resolved = ArchetypeResolver().resolve(scan)
+        result = _run_wizard(tmp_path, scan, resolved, "lexical")
+        assert result["archetype"] != "minimal"
+
+
+class TestDynamicNextStepsPanel:
+    """Onboarding audit 2026-09-18, constat #3: the 'Next Steps' panel was
+    100% static across every stack/archetype/profile combination."""
+
+    @pytest.fixture(autouse=True)
+    def _no_real_memory_probe(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _stub_unreachable_memory_services(monkeypatch)
+
+    @pytest.fixture
+    def runner(self):
+        from typer.testing import CliRunner
+        return CliRunner()
+
+    @pytest.fixture
+    def app(self):
+        from grimoire.cli.app import app
+        return app
+
+    def test_naked_python_and_specialized_web_app_panels_differ(self, runner, app, tmp_path: Path) -> None:
+        py_target = tmp_path / "py-proj"
+        web_target = tmp_path / "web-proj"
+        py_target.mkdir()
+        web_target.mkdir()
+        (py_target / "pyproject.toml").write_text("[project]\nname='x'\n", encoding="utf-8")
+
+        py_result = runner.invoke(app, ["-y", "init", str(py_target), "--no-cockpit"])
+        web_result = runner.invoke(
+            app, ["-y", "init", str(web_target), "--archetype", "web-app", "--no-cockpit"]
+        )
+        assert py_result.exit_code == 0, py_result.output
+        assert web_result.exit_code == 0, web_result.output
+
+        def _panel_body(output: str) -> str:
+            idx = output.index("Next Steps")
+            return output[idx:]
+
+        assert _panel_body(py_result.output) != _panel_body(web_result.output)
+
+    def test_panel_never_shows_more_than_three_numbered_or_bulleted_actions(
+        self, runner, app, tmp_path: Path,
+    ) -> None:
+        target = tmp_path / "empty-proj"
+        target.mkdir()
+        result = runner.invoke(app, ["-y", "init", str(target), "--no-cockpit"])
+        assert result.exit_code == 0, result.output
+        idx = result.output.index("Next Steps")
+        panel = result.output[idx:]
+        # Each action line in the panel is rendered from NextStepsPanel.actions,
+        # one per line — count how many distinct action lines actually appear.
+        action_lines = [
+            line for line in panel.splitlines()
+            if line.strip().startswith(("Try", "Discover", "Open", "Agentic",
+                                          "Upgrade", "Run your first"))
+        ]
+        assert len(action_lines) <= 3
+
+
+class TestWizardNeverPreFillsABestGuess:
+    """Decision 2026-09-18 (Guilhem, corrected same day): a naked Python
+    project now resolves to `stack` (Atlas) — a deliberate pick, not a
+    'best guess' (`is_best_guess` is False). But `stack` is not one of the
+    wizard's selectable specializations either (it's the kit's internal
+    generalist, not a numbered menu item) — so it is never pre-filled as
+    'detected' regardless, and the wizard still falls through to guided
+    discovery for it. A weak-signal pick (bundler → web-app) *is* in the
+    menu and *is* flagged `is_best_guess` — that's what actually exercises
+    the gate."""
+
+    @staticmethod
+    def _echo_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+        from grimoire.cli import cmd_init
+
+        monkeypatch.setattr(cmd_init.Prompt, "ask", staticmethod(lambda *a, **kw: kw.get("default", "")))
+        monkeypatch.setattr(cmd_init.Confirm, "ask", staticmethod(lambda *a, **kw: kw.get("default", False)))
+
+    def test_naked_python_wizard_does_not_prefill_stack(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        from grimoire.cli.cmd_init import _run_wizard
+        from grimoire.core.archetype_resolver import ArchetypeResolver
+        from grimoire.core.scanner import ScanResult, StackDetection
+
+        self._echo_defaults(monkeypatch)
+        scan = ScanResult(
+            stacks=(StackDetection(name="python", confidence=0.9, evidence=("pyproject.toml",)),),
+            project_type="generic",
+            root=tmp_path,
+        )
+        resolved = ArchetypeResolver().resolve(scan)
+        assert resolved.archetype == "stack"
+        assert resolved.is_best_guess is False
+        _run_wizard(tmp_path, scan, resolved, "lexical")
+        printed = capsys.readouterr().err
+        assert "← detected" not in printed
+
+    def test_weak_signal_pick_is_flagged_best_guess_and_not_prefilled(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """The actual is_best_guess gate, exercised on an archetype that IS
+        in the wizard's menu (web-app, via the bundler weak signal)."""
+        import json as _json
+
+        from grimoire.cli.cmd_init import _run_wizard
+        from grimoire.core.archetype_resolver import ArchetypeResolver
+        from grimoire.core.scanner import ScanResult, StackDetection
+
+        self._echo_defaults(monkeypatch)
+        (tmp_path / "package.json").write_text(
+            _json.dumps({"devDependencies": {"vite": "^5.0.0"}}), encoding="utf-8",
+        )
+        scan = ScanResult(
+            stacks=(StackDetection(name="javascript", confidence=0.9, evidence=("package.json",)),),
+            project_type="generic",
+            root=tmp_path,
+        )
+        resolved = ArchetypeResolver().resolve(scan)
+        assert resolved.archetype == "web-app"
+        assert resolved.is_best_guess is True
+        _run_wizard(tmp_path, scan, resolved, "lexical")
+        printed = capsys.readouterr().err
+        assert "← detected" not in printed
+
+    def test_confident_rule_match_still_prefills(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        from grimoire.cli.cmd_init import _run_wizard
+        from grimoire.core.archetype_resolver import ArchetypeResolver
+        from grimoire.core.scanner import ScanResult, StackDetection
+
+        self._echo_defaults(monkeypatch)
+        scan = ScanResult(
+            stacks=(StackDetection(name="react", confidence=0.9, evidence=("src/App.tsx",)),),
+            project_type="generic",
+            root=tmp_path,
+        )
+        resolved = ArchetypeResolver().resolve(scan)
+        assert resolved.is_best_guess is False
+        _run_wizard(tmp_path, scan, resolved, "lexical")
+        printed = capsys.readouterr().err
+        assert "← detected" in printed
