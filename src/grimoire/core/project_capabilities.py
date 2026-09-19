@@ -18,9 +18,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from grimoire.core.standard_profile_manifest import read_profile
 from grimoire.tools.project_registry import slug_for_path
+
+if TYPE_CHECKING:
+    from grimoire.tools.memory_setup import ServiceProbe
 
 _STANDARD_PROFILE_MARKER = "_grimoire/standard/standard-profile.yaml"
 
@@ -33,7 +37,8 @@ _TEAM_SCALE_ARCHETYPES = frozenset({"agentic-standard", "infra-ops", "platform-e
 
 #: Memory backends this hint considers "not yet upgraded" — matches the
 #: default a fresh ``init``/``up`` always lands on (issue #496: never
-#: attached to a detected service silently).
+#: attached to a detected service silently). Used only as a fallback when a
+#: caller has no ``layer_profile`` to pass (see :func:`memory_upgrade_target`).
 _UNUPGRADED_BACKENDS = frozenset({"lexical", "local"})
 
 
@@ -65,18 +70,74 @@ def standard_profile(target: Path) -> str | None:
         return None
 
 
+def memory_upgrade_target(
+    layer_profile: str,
+    *,
+    probes: dict[str, ServiceProbe] | None = None,
+) -> str | None:
+    """The next memory profile tier above *layer_profile* this machine could
+    serve, or ``None`` when it is already there.
+
+    ``"the machine could serve"`` means: a local embedding engine
+    (fastembed/sentence-transformers, or a reachable Ollama) makes anything
+    above ``lexical`` possible at all, and a reachable Docker daemon makes
+    ``complet`` reachable on top of that — the same ladder
+    :func:`grimoire.tools.memory_setup.recommend_profile` climbs for
+    ``grimoire init``'s Memory step. Never asserts a specific service (e.g.
+    Weaviate) is running right now — that is what `grimoire memory status`
+    is for; this is a hint, not a diagnostic (module docstring).
+
+    ``probes``, when the caller already ran
+    :func:`grimoire.tools.memory_setup.probe_services` this command, is
+    forwarded to :func:`~grimoire.tools.memory_setup.local_embedding_available`
+    so this never triggers a second probe pass of the same services (#619
+    review). Left ``None`` — the ``doctor``/``status`` footer, which has no
+    probe set of its own — the embedding check falls back to an Ollama-only
+    probe, never the full service set.
+    """
+    from grimoire.memory import profiles as memory_profiles
+    from grimoire.tools.memory_setup import docker_daemon_reachable, local_embedding_available
+
+    if not local_embedding_available(probes):
+        feasible = "lexical"
+    elif docker_daemon_reachable():
+        feasible = "complet"
+    else:
+        feasible = "standard"
+
+    order = memory_profiles.PROFILE_ORDER
+    current = layer_profile if layer_profile in order else "lexical"
+    if order.index(feasible) > order.index(current):
+        return feasible
+    return None
+
+
 def unexploited_hints(
     target: Path,
     *,
     archetype: str,
     backend: str,
     no_cockpit: bool = False,
+    layer_profile: str = "",
+    memory_probes: dict[str, ServiceProbe] | None = None,
 ) -> list[CapabilityHint]:
     """Capabilities this project has not exploited yet, most relevant first.
 
     Empty when everything checked here is already in use — callers render
     nothing in that case (silent, per the 'découvrir' footer contract), never
     an empty panel section.
+
+    ``layer_profile`` (the config's ``memory.layer_profile``, when the caller
+    has it) drives the memory hint: it is compared against
+    :func:`memory_upgrade_target` instead of the older "is it still
+    lexical?" check, so a project already on ``standard`` still gets pointed
+    at ``complet`` once Docker becomes available. Left empty, this falls back
+    to the previous *backend*-only heuristic for callers that predate it.
+
+    ``memory_probes``, when the caller already ran
+    :func:`grimoire.tools.memory_setup.probe_services` this command, is
+    forwarded to :func:`memory_upgrade_target` so this never runs a second
+    probe pass (#619 review).
     """
     hints: list[CapabilityHint] = []
 
@@ -98,10 +159,12 @@ def unexploited_hints(
             "grimoire standard init --profile governed",
         ))
 
-    if backend in _UNUPGRADED_BACKENDS:
+    effective_profile = layer_profile or ("lexical" if backend in _UNUPGRADED_BACKENDS else "standard")
+    upgrade_to = memory_upgrade_target(effective_profile, probes=memory_probes)
+    if upgrade_to:
         hints.append(CapabilityHint(
-            "memory still lexical-only (no semantic search)",
-            "grimoire memory up --profile standard --apply",
+            f"memory profile '{effective_profile}' is below what this machine can serve ({upgrade_to})",
+            f"grimoire memory up --profile {upgrade_to} --apply",
         ))
 
     if not no_cockpit and not cockpit_registered(target):

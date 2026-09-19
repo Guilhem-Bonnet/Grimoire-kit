@@ -291,9 +291,10 @@ def init(
         help=(
             "Memory backend (auto, local, lexical, tantivy-local, qdrant-local, "
             "qdrant-server, weaviate-server, mempalace, ollama). 'auto' never attaches "
-            "silently to a service detected on this machine — it falls back to "
-            "'lexical' and only suggests the detected service in the report "
-            "(issue #496)."
+            "silently to a service detected on this machine (issue #496) — it applies "
+            "the richest private, consent-free composition this machine can serve "
+            "('qdrant-local' with a local embedding engine installed, 'lexical' "
+            "otherwise) and only suggests a detected external service in the report."
         ),
     ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show plan without writing."),
@@ -304,8 +305,14 @@ def init(
     ),
     memory_profile: str = typer.Option("", "--memory-profile", "-m", help="Memory composition (lexical, standard, graphe, complet). Inferred when omitted."),
     no_cockpit: bool = typer.Option(False, "--no-cockpit", help="Do not enrol this project in the local cockpit registry (~/.grimoire/cockpit/registry.json). Same effect as the GRIMOIRE_NO_COCKPIT env var."),
-    lite: bool = typer.Option(False, "--lite", help="Profil léger : mémoire lexicale (aucun service), pas de cockpit, standard non activé — pour un dépôt sans CI ni tests."),
-    profile: str = typer.Option("", "--profile", help="Profil d'init nommé. Seule valeur reconnue aujourd'hui : 'lite' (équivalent à --lite)."),
+    lite: bool = typer.Option(
+        False, "--lite",
+        help="Deprecated — the light profile no longer exists (the installed experience is complete; the core adapts to each task). Behaves exactly like the default.",
+    ),
+    profile: str = typer.Option(
+        "", "--profile",
+        help="Deprecated. 'lite' is accepted for backward compatibility and behaves like the default; no other value is recognized.",
+    ),
     memory_collection: str = typer.Option(
         "", "--memory-collection",
         help=(
@@ -313,6 +320,15 @@ def init(
             "(qdrant-local, qdrant-server, weaviate-server). Sans cette option, la "
             "collection est nommée d'après le projet (slug) ; l'attachement à une "
             "collection existante et non vide exige ce drapeau."
+        ),
+    ),
+    memory_stack: str = typer.Option(
+        "", "--memory-stack",
+        help=(
+            "'up' starts (Docker) the services the recommended/chosen memory "
+            "profile needs and this machine does not yet serve — explicit "
+            "consent only, never implied by -y/express. No other value is "
+            "recognized."
         ),
     ),
 ) -> None:
@@ -326,26 +342,28 @@ def init(
     throwaway project (scratch, `/tmp`, a recipe) that should not show up in
     [cyan]grimoire cockpit[/cyan] (issue #305).
 
-    [cyan]--lite[/cyan] (alias: [cyan]--profile lite[/cyan]) sets memory backend to
-    lexical (no service), skips cockpit enrolment, and picks the [cyan]minimal[/cyan]
-    archetype by default — a fast, service-free setup for a throwaway or
-    exploratory repo (no CI, no tests).
+    [cyan]--lite[/cyan]/[cyan]--profile lite[/cyan] are deprecated: the light profile no
+    longer exists — the installed experience is complete, the core adapts to
+    each task by class of work. Both flags are still accepted and now behave
+    exactly like the default (a deprecation notice is printed once).
 
-    Without an explicit [cyan]--backend[/cyan], a project always gets an isolated
-    [cyan]lexical[/cyan] memory — a service found on this machine (Weaviate, Qdrant,
-    Ollama) is only suggested, never attached to silently (issue #496). On a
-    shared backend chosen explicitly, the collection is named after the
-    project; attaching to one that already holds data requires
-    [cyan]--memory-collection[/cyan].
+    A Memory step picks the richest composition this machine can serve
+    without ever attaching to a service it merely found running (issue
+    #496): [cyan]standard[/cyan] (local vector embeddings, no server) when a local
+    embedding engine (fastembed/sentence-transformers) is installed,
+    [cyan]lexical[/cyan] otherwise. [cyan]complet[/cyan] (Weaviate + Neo4j + Redis) is named
+    and its activation command shown whenever Docker is available, but never
+    started without [cyan]--memory-stack up[/cyan] — starting containers without
+    consent has no place in an express run.
 
     [dim]Examples:[/dim]
       [cyan]grimoire init .[/cyan]                               Interactive wizard
-      [cyan]grimoire init . -y[/cyan]                            Express (auto-detect all) — isolated, lexical memory
+      [cyan]grimoire init . -y[/cyan]                            Express (auto-detect all) — private memory, no shared service
       [cyan]grimoire init . -a infra-ops -b weaviate-server[/cyan]  Explicit archetype & backend
       [cyan]grimoire init . -a web-app,infra-ops[/cyan]         Multiple archetypes
       [cyan]grimoire init --dry-run[/cyan]                       Show plan without writing
       [cyan]grimoire init . -y --no-cockpit[/cyan]               Express, skip cockpit enrolment
-      [cyan]grimoire init . --lite[/cyan]                        Profil léger (lexical, sans cockpit)
+      [cyan]grimoire init . -y --memory-stack up[/cyan]          Express, also starts the `complet` stack via Docker
       [cyan]grimoire init . -b weaviate-server --memory-collection team-x[/cyan]  Attach to an existing shared collection
     """
     from grimoire.cli.cmd_init import run_init, validate_init_flags
@@ -358,6 +376,18 @@ def init(
         console.print("Available: lite")
         raise typer.Exit(1)
     lite = lite or normalized_profile == "lite"
+
+    if memory_stack and memory_stack != "up":
+        console.print(f"[red]Unknown --memory-stack value:[/red] {memory_stack}")
+        console.print("Available: up")
+        raise typer.Exit(1)
+
+    if lite:
+        console.print(
+            "[yellow]--lite/--profile lite is deprecated:[/yellow] the light profile no "
+            "longer exists — the installed experience is complete, the core adapts to "
+            "each task. Behaving like the default."
+        )
 
     if yes:
         # The global --yes lives on the app callback (grimoire -y init …); this
@@ -378,6 +408,7 @@ def init(
         lite=lite,
         memory_collection=memory_collection,
         interactive=interactive,
+        memory_stack=memory_stack,
     )
 
 
@@ -631,6 +662,26 @@ def doctor(
                     if fmt != "json":
                         console.print(f"  [dim]○[/dim]  {detail}")
 
+    # 5ter. Memory stack configured but not started (2026-09-18 arbitrage on
+    # #619) — `grimoire init` can write a `complet`/`graphe` composition
+    # (backend pinned, connection settings written) without ever starting
+    # the containers it names, when no consent was given (bare non-TTY run,
+    # no `-y`, no `--memory-stack up`). Never FAIL: an unstarted stack is a
+    # gap to close, not a broken project.
+    if cfg:
+        with _timed_phase("memory_stack_check"):
+            from grimoire.tools.memory_setup import unreached_configured_services
+
+            missing = unreached_configured_services(cfg.memory)
+            if missing:
+                detail = (
+                    f"pile mémoire non démarrée ({', '.join(missing)}) : "
+                    f"grimoire memory up --profile {cfg.memory.layer_profile} --start --apply"
+                )
+                results.append({"name": "memory_stack_started", "passed": True, "detail": detail, "level": "warn"})
+                if fmt != "json":
+                    console.print(f"  [yellow]WARN[/yellow]  {detail}")
+
     # 6. Optional dependencies
     with _timed_phase("dependency_scan"):
         from importlib.metadata import PackageNotFoundError
@@ -731,10 +782,8 @@ def doctor(
 
             footer = discover_footer_line(
                 unexploited_hints(
-                    target,
-                    archetype=cfg.agents.archetype,
-                    backend=cfg.memory.backend,
-                    no_cockpit=bool(os.environ.get("GRIMOIRE_NO_COCKPIT")),
+                    target, archetype=cfg.agents.archetype, backend=cfg.memory.backend,
+                    layer_profile=cfg.memory.layer_profile, no_cockpit=bool(os.environ.get("GRIMOIRE_NO_COCKPIT")),
                 )
             )
             if footer:
@@ -830,10 +879,8 @@ def status(
 
     footer = discover_footer_line(
         unexploited_hints(
-            target,
-            archetype=cfg.agents.archetype,
-            backend=cfg.memory.backend,
-            no_cockpit=bool(os.environ.get("GRIMOIRE_NO_COCKPIT")),
+            target, archetype=cfg.agents.archetype, backend=cfg.memory.backend,
+            layer_profile=cfg.memory.layer_profile, no_cockpit=bool(os.environ.get("GRIMOIRE_NO_COCKPIT")),
         )
     )
     if footer:
