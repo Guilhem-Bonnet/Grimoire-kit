@@ -191,6 +191,24 @@ def docker_daemon_reachable(*, timeout: float = 2.0) -> bool:
     return result.returncode == 0
 
 
+def _ollama_usable(*, timeout: float = _SOCKET_TIMEOUT) -> bool:
+    """Whether a local Ollama both answers and has its python extra installed.
+
+    The single live check :func:`local_embedding_available` needs when it was
+    not handed a pre-computed probe set — a direct TCP probe of Ollama alone,
+    never the other four memory services :func:`probe_services` covers
+    (Weaviate/Qdrant/Neo4j/Redis). ``doctor``/``status`` (via
+    :func:`grimoire.core.project_capabilities.memory_upgrade_target`) call
+    :func:`local_embedding_available` with no probes on every run — a full
+    :func:`probe_services` there would add up to a few seconds of socket
+    timeouts to check a fact only Ollama's reachability can change (#619
+    review).
+    """
+    if not _module_installed(_EXTRA_MODULES["ollama"][1]):
+        return False
+    return _tcp_reachable(_DEFAULT_URLS["ollama"], _DEFAULT_PORTS["ollama"], timeout=timeout)
+
+
 def local_embedding_available(probes: dict[str, ServiceProbe] | None = None) -> bool:
     """Whether this machine can compute embeddings without any server.
 
@@ -201,12 +219,19 @@ def local_embedding_available(probes: dict[str, ServiceProbe] | None = None) -> 
     even the server-backed ones (Weaviate, Qdrant) embed client-side through
     :mod:`grimoire.memory.embedding`, so a docker daemon with nothing to embed
     with can still only serve ``lexical``.
+
+    ``probes`` lets a caller that already ran :func:`probe_services` this
+    command (e.g. :func:`recommend_profile`) reuse that result instead of
+    probing twice. Left ``None`` — the ``doctor``/``status`` path, which never
+    needs the other four services — this checks Ollama alone
+    (:func:`_ollama_usable`), never the full service set.
     """
     if _module_installed(("fastembed",)) or _module_installed(("sentence_transformers",)):
         return True
-    resolved = probes if probes is not None else probe_services()
-    ollama = resolved.get("ollama")
-    return bool(ollama and ollama.usable)
+    if probes is not None:
+        ollama = probes.get("ollama")
+        return bool(ollama and ollama.usable)
+    return _ollama_usable()
 
 
 def recommend_profile(
@@ -599,13 +624,34 @@ _REDIS_START_TIMEOUT_SECONDS = 30.0
 def _ensure_compose_file(project_root: Path) -> Path:
     """The project's Weaviate+Neo4j compose file, copied from the bundled
     template if `grimoire init` never wrote one — a project that started on
-    `lexical`/`qdrant-local` and only later reaches for `complet` has none."""
+    `lexical`/`qdrant-local` and only later reaches for `complet` has none.
+
+    Raises :class:`GrimoireRuntimeError` — a named refusal, never a raw
+    ``OSError`` — when the bundled template cannot be read (missing file,
+    permissions, a packaging path issue): this is reachable from `grimoire
+    init --memory-stack up` / `grimoire memory up --start`, which must report
+    a single explanatory line and exit 1, not crash on an unhandled traceback
+    (#619 review).
+    """
+    from grimoire.core.exceptions import GrimoireRuntimeError
+
     dest = project_root / _COMPOSE_TARGET_FILE
     if not dest.is_file():
         from grimoire.data import framework_path
 
-        src = framework_path() / "memory" / _COMPOSE_TARGET_TEMPLATE
-        dest.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+        template = framework_path() / "memory" / _COMPOSE_TARGET_TEMPLATE
+        try:
+            content = template.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise GrimoireRuntimeError(
+                f"gabarit de pile mémoire illisible ({template}) : {exc}"
+            ) from exc
+        try:
+            dest.write_text(content, encoding="utf-8")
+        except OSError as exc:
+            raise GrimoireRuntimeError(
+                f"impossible d'écrire {dest} : {exc}"
+            ) from exc
     return dest
 
 
@@ -633,6 +679,15 @@ def start_memory_stack(profile: str, project_root: Path) -> list[str]:
 
     Returns one human-readable status line per service this call touched;
     empty when the profile needs nothing started or Docker cannot be reached.
+
+    Raises :class:`GrimoireRuntimeError` (never a raw ``OSError``) when the
+    bundled compose template cannot be read or copied
+    (:func:`_ensure_compose_file`) — every other failure in this function
+    (Docker unreachable, ``docker compose`` erroring out) reports as a
+    returned status line instead, but a template the kit itself cannot read
+    is a packaging problem the caller must surface as a refusal, not silently
+    swallow into a message list. Callers (``grimoire init
+    --memory-stack up``, ``grimoire memory up --start``) catch it and exit 1.
     """
     canonical = memory_profiles.resolve(profile).id
     if canonical not in ("graphe", "complet"):

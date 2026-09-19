@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from grimoire.core.exceptions import GrimoireRuntimeError
 from grimoire.tools import memory_setup as ms
 from grimoire.tools.memory_setup import ServiceProbe, apply_memory_plan, build_memory_plan
 
@@ -513,6 +514,41 @@ class TestLocalEmbeddingAvailable:
         assert ms.local_embedding_available(_none()) is False
 
 
+class TestLocalEmbeddingAvailableProbeCost:
+    """#619 review: called with no ``probes`` (the ``doctor``/``status`` path,
+    via ``memory_upgrade_target``), this must check Ollama alone — never
+    ``probe_services()``'s full sweep of the other four memory services."""
+
+    def test_without_probes_never_calls_probe_services(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(ms, "_module_installed", lambda names: False)
+
+        def _boom(*a: object, **k: object) -> dict[str, ServiceProbe]:
+            raise AssertionError("local_embedding_available() probed every service")
+
+        monkeypatch.setattr(ms, "probe_services", _boom)
+        monkeypatch.setattr(ms, "_tcp_reachable", lambda *a, **k: False)
+
+        assert ms.local_embedding_available() is False
+
+    def test_without_probes_still_finds_a_usable_ollama(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(ms, "_module_installed", lambda names: names == ("ollama",))
+        monkeypatch.setattr(ms, "_tcp_reachable", lambda *a, **k: True)
+
+        def _boom(*a: object, **k: object) -> dict[str, ServiceProbe]:
+            raise AssertionError("local_embedding_available() probed every service")
+
+        monkeypatch.setattr(ms, "probe_services", _boom)
+
+        assert ms.local_embedding_available() is True
+
+    def test_without_probes_ollama_module_missing_reads_as_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Server reachable but the python `ollama` extra not installed: not
+        # usable, matching the pre-#619 `ServiceProbe.usable` semantics.
+        monkeypatch.setattr(ms, "_module_installed", lambda names: False)
+        monkeypatch.setattr(ms, "_tcp_reachable", lambda *a, **k: True)
+        assert ms.local_embedding_available() is False
+
+
 class TestRecommendProfile:
     def test_no_embedding_capacity_recommends_lexical_regardless_of_docker(
         self, monkeypatch: pytest.MonkeyPatch,
@@ -653,6 +689,21 @@ class TestStartMemoryStack:
         assert any("Neo4j" in m and "démarré" in m for m in messages)
         assert any("Redis" in m and "démarré" in m for m in messages)
         assert (tmp_path / "docker-compose.memory-target.yml").is_file()
+
+    def test_missing_compose_template_raises_a_named_refusal(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A missing/unreadable bundled compose template must not crash the
+        command on a raw OSError — `_ensure_compose_file` refuses by name
+        (#619 review), so `init --memory-stack up`/`memory up --start` can
+        catch it and exit 1 cleanly instead of an unhandled traceback."""
+        monkeypatch.setattr(ms, "docker_daemon_reachable", lambda: True)
+        down = _all(weaviate=_probe("weaviate", reachable=False), neo4j=_probe("neo4j", reachable=False))
+        monkeypatch.setattr(ms, "probe_services", lambda *a, **k: down)
+        monkeypatch.setattr("grimoire.data.framework_path", lambda: tmp_path / "does-not-exist")
+
+        with pytest.raises(GrimoireRuntimeError, match="illisible"):
+            ms.start_memory_stack("complet", tmp_path)
 
     def test_compose_failure_is_reported_not_raised(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,

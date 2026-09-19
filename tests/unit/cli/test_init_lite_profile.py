@@ -180,3 +180,36 @@ class TestMemoryStackFlag:
         result = runner.invoke(app, ["init", str(target), "--memory-stack", "up"])
 
         assert result.exit_code == 0, result.output
+
+    def test_explicit_backend_without_profile_derives_one_and_honors_up(
+        self, tmp_path: Path, monkeypatch,
+    ) -> None:
+        """#619 review: `-b weaviate-server --memory-stack up` without
+        `--memory-profile` used to leave `memory_profile` empty — the old
+        `elif memory_profile == "complet":` consent branch never matched, so
+        the explicit `--memory-stack up` consent was silently dropped, and
+        even if it had matched, `start_memory_stack("")` resolves to the
+        default `standard` profile and no-ops (never touches Docker). Both
+        must now hold: the profile is derived from the explicit backend, and
+        the helper is actually invoked with a profile that needs Docker —
+        never called with an empty string."""
+        from unittest.mock import patch
+
+        calls: list[str] = []
+
+        def _record(profile: str, _root: Path) -> list[str]:
+            calls.append(profile)
+            return []
+
+        monkeypatch.setattr("grimoire.tools.memory_setup.start_memory_stack", _record)
+        target = tmp_path / "proj"
+        with patch("grimoire.cli.cmd_init.collection_has_content", return_value=False):
+            result = runner.invoke(
+                app,
+                ["init", str(target), "--backend", "weaviate-server", "--memory-stack", "up"],
+            )
+
+        assert result.exit_code == 0, result.output
+        assert calls, "start_memory_stack was never called — --memory-stack up was ignored"
+        assert calls[0] in ("graphe", "complet")
+        assert calls[0] != ""

@@ -18,9 +18,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from grimoire.core.standard_profile_manifest import read_profile
 from grimoire.tools.project_registry import slug_for_path
+
+if TYPE_CHECKING:
+    from grimoire.tools.memory_setup import ServiceProbe
 
 _STANDARD_PROFILE_MARKER = "_grimoire/standard/standard-profile.yaml"
 
@@ -66,7 +70,11 @@ def standard_profile(target: Path) -> str | None:
         return None
 
 
-def memory_upgrade_target(layer_profile: str) -> str | None:
+def memory_upgrade_target(
+    layer_profile: str,
+    *,
+    probes: dict[str, ServiceProbe] | None = None,
+) -> str | None:
     """The next memory profile tier above *layer_profile* this machine could
     serve, or ``None`` when it is already there.
 
@@ -78,11 +86,19 @@ def memory_upgrade_target(layer_profile: str) -> str | None:
     ``grimoire init``'s Memory step. Never asserts a specific service (e.g.
     Weaviate) is running right now — that is what `grimoire memory status`
     is for; this is a hint, not a diagnostic (module docstring).
+
+    ``probes``, when the caller already ran
+    :func:`grimoire.tools.memory_setup.probe_services` this command, is
+    forwarded to :func:`~grimoire.tools.memory_setup.local_embedding_available`
+    so this never triggers a second probe pass of the same services (#619
+    review). Left ``None`` — the ``doctor``/``status`` footer, which has no
+    probe set of its own — the embedding check falls back to an Ollama-only
+    probe, never the full service set.
     """
     from grimoire.memory import profiles as memory_profiles
     from grimoire.tools.memory_setup import docker_daemon_reachable, local_embedding_available
 
-    if not local_embedding_available():
+    if not local_embedding_available(probes):
         feasible = "lexical"
     elif docker_daemon_reachable():
         feasible = "complet"
@@ -103,6 +119,7 @@ def unexploited_hints(
     backend: str,
     no_cockpit: bool = False,
     layer_profile: str = "",
+    memory_probes: dict[str, ServiceProbe] | None = None,
 ) -> list[CapabilityHint]:
     """Capabilities this project has not exploited yet, most relevant first.
 
@@ -116,6 +133,11 @@ def unexploited_hints(
     lexical?" check, so a project already on ``standard`` still gets pointed
     at ``complet`` once Docker becomes available. Left empty, this falls back
     to the previous *backend*-only heuristic for callers that predate it.
+
+    ``memory_probes``, when the caller already ran
+    :func:`grimoire.tools.memory_setup.probe_services` this command, is
+    forwarded to :func:`memory_upgrade_target` so this never runs a second
+    probe pass (#619 review).
     """
     hints: list[CapabilityHint] = []
 
@@ -138,7 +160,7 @@ def unexploited_hints(
         ))
 
     effective_profile = layer_profile or ("lexical" if backend in _UNUPGRADED_BACKENDS else "standard")
-    upgrade_to = memory_upgrade_target(effective_profile)
+    upgrade_to = memory_upgrade_target(effective_profile, probes=memory_probes)
     if upgrade_to:
         hints.append(CapabilityHint(
             f"memory profile '{effective_profile}' is below what this machine can serve ({upgrade_to})",

@@ -1275,6 +1275,12 @@ def run_init(
             memory_profile, memory_default_reason = _recommend_memory_profile()
             if memory_profile == "standard":
                 backend = "qdrant-local"
+    elif not memory_profile:
+        # #619 review: an explicit pinning `--backend` must not leave
+        # `memory_profile` empty, or `start_memory_stack()` below no-ops.
+        inferred = memory_profiles.infer(backend, offline=False)
+        if inferred.id != memory_profiles.DEFAULT_PROFILE:
+            memory_profile = "complet" if _is_redis_reachable() else inferred.id
     # A composition that pins its own services decides the backend: asking for
     # `graphe` and landing on the detected qdrant would produce a config whose
     # graph layers point at a store that is not there.
@@ -1342,17 +1348,9 @@ def run_init(
                 archetypes_override=new_archetypes,
             )
         backend = new_backend
-    elif memory_profile == "complet":
-        # Consent to *start* the missing services, for every non-interactive
-        # path (Guilhem's arbitrage on #619, 2026-09-18): `-y` is itself the
-        # explicit consent — the point of applying `complet` on this machine
-        # is that its potential gets exploited right away, not configured
-        # and left dormant — so Docker starts without asking anything.
-        # `--memory-stack up` remains an equivalent, explicit override for a
-        # bare non-TTY run that was not passed `-y` for other reasons. A
-        # plain non-interactive run *without* either never starts a
-        # container: `complet` still gets written (the report and `grimoire
-        # doctor` both name the exact command to start it).
+    elif memory_profile and memory_profiles.REQ_DOCKER in memory_profiles.resolve(memory_profile).requires:
+        # Consent to *start* (arbitrage #619), on `requires` rather than a
+        # hardcoded `"complet"` so a `graphe` derived above gets it too.
         start_memory_stack_consent = yes or memory_stack == "up"
 
     # Phase 4.5: Name the collection by project (issue Grimoire-kit#496) — a
@@ -1440,9 +1438,18 @@ def run_init(
     # rules) — `complet` can be written without ever reaching this branch.
     memory_stack_messages: list[str] = []
     if start_memory_stack_consent:
+        from grimoire.core.exceptions import GrimoireRuntimeError
         from grimoire.tools.memory_setup import start_memory_stack
 
-        memory_stack_messages = start_memory_stack(memory_profile, target)
+        try:
+            memory_stack_messages = start_memory_stack(memory_profile, target)
+        except GrimoireRuntimeError as exc:
+            # Named refusal, not a traceback, for given consent (#619 review).
+            if fmt == "json":
+                typer.echo(json.dumps({"ok": False, "error": str(exc)}, indent=2))
+            else:
+                console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
         if fmt != "json":
             for message in memory_stack_messages:
                 console.print(f"[dim]{message}[/dim]")

@@ -96,7 +96,19 @@ def memory_up(
     fmt = _get_fmt(ctx)
     started: list[str] = []
     if start:
-        started = start_memory_stack(profile, Path.cwd())
+        from grimoire.core.exceptions import GrimoireRuntimeError
+
+        try:
+            started = start_memory_stack(profile, Path.cwd())
+        except GrimoireRuntimeError as exc:
+            # Named refusal (unreadable bundled compose template, packaging
+            # issue) — never an unhandled traceback for consent the user
+            # explicitly gave via --start (#619 review).
+            if fmt == "json":
+                typer.echo(json.dumps({"ok": False, "error": str(exc)}, indent=2))
+            else:
+                console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
         if fmt != "json":
             for message in started:
                 console.print(f"[dim]{message}[/dim]")
