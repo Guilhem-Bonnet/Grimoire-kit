@@ -44,7 +44,21 @@ from grimoire.core.standard_checks.claim_ledger_verify import verify_claim_ledge
 from grimoire.core.standard_checks.controls import _verify_acceptance_record
 from grimoire.core.standard_checks.verifiers import _verify_evidence_pack
 
-__all__ = ["review_state_content_checks"]
+__all__ = ["in_progress_content_checks", "review_state_content_checks"]
+
+
+def in_progress_content_checks(root: Path, profile: StandardProfile, task_id: str) -> tuple[StandardCheck, ...]:
+    """Constats de contenu pendant ``in_progress`` (issue #614) : le claim-ledger, lignes seulement.
+
+    Une affirmation « utiliser » non prouvée pèse sur les décisions pendant le
+    travail, pas seulement à la revue ; avant ce lot elle passait
+    ``gate check --strict`` sans un mot jusqu'au passage en ``review``. Les
+    constats de clôture (registre vierge, synthèse vide) restent à la revue —
+    les lever ici bloquerait toute tâche gouvernée dès sa première minute.
+    """
+    result = StandardVerificationResult(profile=profile.id, project_root=root)
+    _verify_claim_ledger(root, profile, task_id, result, rows_only=True)
+    return tuple(result.checks)
 
 
 def _v0_non_governed(root: Path, profile: StandardProfile, task_id: str) -> bool:
