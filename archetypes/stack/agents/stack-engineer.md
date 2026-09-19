@@ -12,7 +12,7 @@ tools: "read, edit, execute"
 # demande via `grimoire expertise add <id>` sans jamais devenir transversal.
 # Remplacé par `ProjectScaffolder._archetype_render_vars` au scaffold — voir
 # `_detected_stack_skill_slugs` dans `src/grimoire/core/scaffold.py`.
-skills: {{stack_skills_yaml}}
+skills: "{{stack_skills_yaml}}"
 model_affinity:
   reasoning: high
   context_window: medium

@@ -61,6 +61,8 @@ def _render_placeholders(text: str, variables: dict[str, str]) -> str:
     """
     def _substitute(chunk: str) -> str:
         for key, value in variables.items():
+            if key == "stack_skills_yaml":  # a YAML list, not a string: drop its quotes too (#616)
+                chunk = chunk.replace('"{{' + key + '}}"', value)
             chunk = chunk.replace("{{" + key + "}}", value)
         return chunk
 
@@ -627,8 +629,7 @@ class ProjectScaffolder:
         from grimoire.hosts.collect import parse_frontmatter
 
         meta, _ = parse_frontmatter(existing.read_text(encoding="utf-8"))
-        # `_safe_skill_source` (tout consommateur de ce retour) revalide la forme et confine le
-        # chemin — cette valeur vient d'un frontmatter projet modifiable à la main (CodeQL 599/600).
+        # `_safe_skill_source` (tout consommateur) revalide forme + confine le chemin (CodeQL 599/600).
         known_slugs = set(self._STACK_SKILL_BY_DETECTION.values())
         return tuple(str(s) for s in (meta.get("skills") or []) if str(s) in known_slugs)
 

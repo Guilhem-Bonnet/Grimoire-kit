@@ -3006,6 +3006,10 @@
    "version": "3.42.0",
    "path": "archetypes/fix-loop/agents/fix-loop-orchestrator.tpl.md"
   },
+  "c4bf26db5dd756ff7faa504041fba3ff37cb3794920c956fa24d7f89376d7389": {
+   "version": "3.57.0",
+   "path": "archetypes/stack/agents/stack-engineer.md"
+  },
   "c4f72a41f19bcfe0c9ec4e85df14627c95827950fcef29664994b8e2bb143361": {
    "version": "3.4.2",
    "path": "framework/tools/background-tasks.py"
