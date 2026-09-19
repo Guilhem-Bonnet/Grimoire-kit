@@ -75,13 +75,16 @@ class TestDetectMemoryBackend:
             result = detect_memory_backend()
         assert result == "local"
 
-    def test_returns_qdrant_local_when_qdrant_up(self) -> None:
+    def test_returns_qdrant_server_when_qdrant_up(self) -> None:
+        """A reachable Qdrant HTTP server, never the embedded `qdrant-local`
+        id — the two used to collide despite meaning opposite things
+        (2026-09-18 onboarding decision, PR2)."""
         with (
             patch("grimoire.cli.cmd_init._is_weaviate_reachable", return_value=False),
             patch("grimoire.cli.cmd_init._is_qdrant_reachable", return_value=True),
         ):
             result = detect_memory_backend()
-        assert result == "qdrant-local"
+        assert result == "qdrant-server"
 
     def test_returns_weaviate_when_weaviate_up(self) -> None:
         with patch("grimoire.cli.cmd_init._is_weaviate_reachable", return_value=True):
@@ -158,7 +161,7 @@ class TestChooseMemoryProfileDetectedService:
             patch("grimoire.cli.cmd_init.Confirm.ask", return_value=False),
             patch("grimoire.cli.cmd_init.Prompt.ask", return_value="2"),
         ):
-            _profile_id, backend, _offline, _qdrant_docker = _choose_memory_profile(
+            _profile_id, backend, _offline, _qdrant_docker, _start_stack = _choose_memory_profile(
                 "lexical", offer_qdrant_docker=False, detected_service="weaviate-server",
             )
         assert backend == "lexical"
@@ -170,7 +173,7 @@ class TestChooseMemoryProfileDetectedService:
             patch("grimoire.cli.cmd_init.Confirm.ask", return_value=True),
             patch("grimoire.cli.cmd_init.Prompt.ask", return_value="2"),
         ):
-            _profile_id, backend, _offline, _qdrant_docker = _choose_memory_profile(
+            _profile_id, backend, _offline, _qdrant_docker, _start_stack = _choose_memory_profile(
                 "lexical", offer_qdrant_docker=False, detected_service="weaviate-server",
             )
         assert backend == "weaviate-server"
@@ -410,7 +413,15 @@ class TestInitNeverSilentlyAttaches:
     """Issue #496 — a real service found on the host (Weaviate on :8080 in
     the reported incident) must never get wired into a fresh project just
     because `-y`/`auto` (the default) ran on a machine that happens to run
-    one."""
+    one.
+
+    2026-09-18 onboarding decision (PR2): the express default itself moved
+    from a flat `lexical` to the richest *private, consent-free* composition
+    this machine can serve — `qdrant-local` (embedded, file-local, no
+    service) when a local embedding engine is installed. That is not an
+    attachment: nothing shared, nothing started, nothing detected-and-wired.
+    A service actually found running (Weaviate here) still stays suggestion-only.
+    """
 
     @pytest.fixture
     def runner(self):
@@ -422,7 +433,7 @@ class TestInitNeverSilentlyAttaches:
         from grimoire.cli.app import app
         return app
 
-    def test_auto_backend_falls_back_to_lexical_despite_a_detected_service(
+    def test_auto_backend_never_attaches_to_a_detected_service(
         self, runner, app, tmp_path: Path,
     ) -> None:
         target = tmp_path / "throwaway"
@@ -430,8 +441,10 @@ class TestInitNeverSilentlyAttaches:
             result = runner.invoke(app, ["-y", "init", str(target)])
         assert result.exit_code == 0, result.output
         content = (target / "project-context.yaml").read_text(encoding="utf-8")
-        assert 'backend: "lexical"' in content
-        assert "weaviate" not in content.lower()
+        # The private, embedded default — never the detected external server.
+        assert 'backend: "qdrant-local"' in content
+        assert "weaviate_url" not in content
+        assert "8080" not in content
 
     def test_report_suggests_the_detected_service_without_attaching(
         self, runner, app, tmp_path: Path,
@@ -455,9 +468,103 @@ class TestInitNeverSilentlyAttaches:
             result = runner.invoke(app, ["-y", "-o", "json", "init", str(target)])
         assert result.exit_code == 0, result.output
         data = json.loads(result.output)
-        assert data["backend"] == "lexical"
-        assert data["memory_detected"] == "qdrant-local"
+        assert data["backend"] == "qdrant-local"
+        assert data["memory_detected"] == "qdrant-server"
         assert "grimoire memory up" in data["memory_suggestion"]
+
+    def test_no_local_embedding_capacity_falls_back_to_lexical(
+        self, runner, app, tmp_path: Path,
+    ) -> None:
+        """Without fastembed/sentence-transformers, `qdrant-local` cannot
+        actually embed anything — the express default must stay `lexical`,
+        named as such, rather than write a store nothing can fill."""
+        target = tmp_path / "throwaway4"
+        with patch(
+            "grimoire.tools.memory_setup.local_embedding_available", return_value=False,
+        ):
+            result = runner.invoke(app, ["-y", "init", str(target)])
+        assert result.exit_code == 0, result.output
+        content = (target / "project-context.yaml").read_text(encoding="utf-8")
+        assert 'backend: "lexical"' in content
+
+    def test_minus_y_with_docker_available_starts_and_applies_complet(
+        self, runner, app, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """2026-09-18 arbitrage (Guilhem, #619) on top of PR2's own decision
+        above: with `-y`, Docker's daemon actually answering *is* the
+        explicit consent — before this test existed, `-y init` on a machine
+        with Docker available still capped out at `standard` (this class's
+        own `test_auto_backend_never_attaches_to_a_detected_service`, which
+        keeps testing the no-Docker case); now it reaches `complet` and
+        starts the missing services itself, without asking anything, because
+        `-y` already said yes to everything.
+        """
+        monkeypatch.setattr("grimoire.tools.memory_setup.docker_daemon_reachable", lambda: True)
+        started: list[list[str]] = []
+
+        class _Result:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        def _fake_run(cmd: list[str], **kwargs: object) -> _Result:
+            started.append(cmd)
+            return _Result()
+
+        monkeypatch.setattr("grimoire.tools.memory_setup.subprocess.run", _fake_run)
+        monkeypatch.setattr("grimoire.tools.memory_setup._wait_reachable", lambda *a, **k: True)
+        # This sandbox dogfoods its own Weaviate/Neo4j/Redis on their default
+        # ports — real TCP probes would find them "reachable" regardless of
+        # what this test starts. Stand in for "down until Docker starts them,
+        # up after" without touching real sockets. Gated on a *Docker* call
+        # specifically — `run_init` also shells out to plain `git` earlier
+        # (`_git_user_name`), which must not flip this early.
+        monkeypatch.setattr(
+            "grimoire.tools.memory_setup._tcp_reachable",
+            lambda *a, **k: any(cmd and cmd[0] == "docker" for cmd in started),
+        )
+
+        target = tmp_path / "docker-available"
+        result = runner.invoke(app, ["-y", "init", str(target)])
+
+        assert result.exit_code == 0, result.output
+        content = (target / "project-context.yaml").read_text(encoding="utf-8")
+        assert 'backend: "weaviate-server"' in content
+        assert 'layer_profile: "complet"' in content
+        # The stack actually started — no question asked (`-y` is consent).
+        assert any("compose" in c[1] for c in started if len(c) > 1)
+        assert "Weaviate : démarré" in result.output
+        assert "Neo4j : démarré" in result.output
+        assert "Redis : démarré" in result.output
+        assert "pile mémoire non démarrée" not in result.output
+
+    def test_bare_non_tty_with_docker_available_configures_but_never_starts(
+        self, runner, app, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The other half of the same arbitrage: without `-y` and without a
+        real terminal (a script, CI), Docker being available is *not*
+        consent — `complet` still gets written (its potential is named), but
+        nothing is started, and the report says so with the exact command."""
+        monkeypatch.setattr("grimoire.tools.memory_setup.docker_daemon_reachable", lambda: True)
+        # This sandbox dogfoods its own Weaviate/Neo4j/Redis on their default
+        # ports — force the "nothing reachable" reading a bare machine would
+        # give, independent of what those real services would otherwise say.
+        monkeypatch.setattr("grimoire.tools.memory_setup._tcp_reachable", lambda *a, **k: False)
+
+        def _fail_if_called(*a: object, **k: object) -> None:
+            raise AssertionError("must not start containers without consent")
+
+        monkeypatch.setattr("grimoire.tools.memory_setup.subprocess.run", _fail_if_called)
+
+        target = tmp_path / "docker-available-no-consent"
+        result = runner.invoke(app, ["init", str(target)])
+
+        assert result.exit_code == 0, result.output
+        content = (target / "project-context.yaml").read_text(encoding="utf-8")
+        assert 'backend: "weaviate-server"' in content
+        assert 'layer_profile: "complet"' in content
+        assert "pile mémoire non démarrée" in result.output
+        assert "grimoire memory up --profile complet --start --apply" in result.output
 
     def test_explicit_backend_is_still_honored_over_detection(
         self, runner, app, tmp_path: Path,

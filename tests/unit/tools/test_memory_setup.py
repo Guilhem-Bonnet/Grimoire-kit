@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
 
 from grimoire.tools import memory_setup as ms
 from grimoire.tools.memory_setup import ServiceProbe, apply_memory_plan, build_memory_plan
+
+#: Captured at import time, before the suite-wide autouse fixture in
+#: ``conftest.py`` (``_default_no_docker_daemon``) patches the module
+#: attribute to a fixed "no Docker" stub for every other test in the suite.
+#: ``TestDockerDaemonReachable`` below tests the real implementation.
+_REAL_DOCKER_DAEMON_REACHABLE = ms.docker_daemon_reachable
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -405,3 +412,261 @@ class TestProbeServices:
         assert _probe("neo4j").usable is True
         assert _probe("neo4j", reachable=False).usable is False
         assert _probe("neo4j", installed=False).usable is False
+
+
+# ── Repli local (issue Grimoire-kit#616, PR2 : "standard" sans docker) ────────
+
+
+class TestStandardFallsBackToEmbeddedQdrant:
+    """Sans serveur vectoriel joignable, `standard` ne doit plus retomber en
+    `lexical` quand la machine peut embarquer un Qdrant local — c'est le
+    profil "vecteurs locaux" de la décision du 2026-09-18."""
+
+    def test_no_server_but_local_embedding_uses_embedded_qdrant(self, tmp_path: Path) -> None:
+        _write_config(tmp_path)
+        services = _all(
+            weaviate=_probe("weaviate", reachable=False),
+            qdrant=_probe("qdrant", reachable=False),
+        )
+        plan = build_memory_plan(tmp_path, profile="standard", services=services)
+        assert plan.config["backend"] == "qdrant-local"
+        assert plan.config["layer_profile"] == "standard"
+        assert plan.config["retrieval_mode"] == "hybrid"
+        assert any("embarqué" in note for note in plan.notes)
+
+    def test_no_server_and_no_embedding_capacity_falls_back_to_lexical(self, tmp_path: Path) -> None:
+        _write_config(tmp_path)
+        services = _none()  # extra_installed False everywhere, including qdrant_client
+        plan = build_memory_plan(tmp_path, profile="standard", services=services)
+        assert plan.config["backend"] == "lexical"
+        assert any("aucune capacité d'embedding locale" in w for w in plan.warnings)
+
+    def test_qdrant_client_present_but_no_embedding_engine_falls_back_to_lexical(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(ms, "local_embedding_available", lambda *a, **k: False)
+        _write_config(tmp_path)
+        services = _all(
+            weaviate=_probe("weaviate", reachable=False),
+            qdrant=_probe("qdrant", reachable=False, installed=True),
+        )
+        plan = build_memory_plan(tmp_path, profile="standard", services=services)
+        assert plan.config["backend"] == "lexical"
+
+
+class TestDockerDaemonReachable:
+    @pytest.fixture(autouse=True)
+    def _use_real_implementation(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Overrides the suite-wide "no Docker" default (``conftest.py``) —
+        this class tests the real probe, not the deterministic stub every
+        other test relies on."""
+        monkeypatch.setattr(ms, "docker_daemon_reachable", _REAL_DOCKER_DAEMON_REACHABLE)
+
+    def test_no_docker_binary_reads_as_unreachable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(ms.shutil, "which", lambda name: None)
+        assert ms.docker_daemon_reachable() is False
+
+    def test_binary_present_but_daemon_down_reads_as_unreachable(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(ms.shutil, "which", lambda name: "/usr/bin/docker")
+
+        class _Result:
+            returncode = 1
+
+        monkeypatch.setattr(ms.subprocess, "run", lambda *a, **k: _Result())
+        assert ms.docker_daemon_reachable() is False
+
+    def test_binary_and_daemon_both_answer(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(ms.shutil, "which", lambda name: "/usr/bin/docker")
+
+        class _Result:
+            returncode = 0
+
+        monkeypatch.setattr(ms.subprocess, "run", lambda *a, **k: _Result())
+        assert ms.docker_daemon_reachable() is True
+
+    def test_a_timeout_reads_as_unreachable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(ms.shutil, "which", lambda name: "/usr/bin/docker")
+
+        def _raise(*a: object, **k: object) -> None:
+            raise subprocess.TimeoutExpired(cmd="docker", timeout=2.0)
+
+        monkeypatch.setattr(ms.subprocess, "run", _raise)
+        assert ms.docker_daemon_reachable() is False
+
+
+class TestLocalEmbeddingAvailable:
+    def test_fastembed_installed_is_sufficient(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(ms, "_module_installed", lambda names: "fastembed" in names)
+        assert ms.local_embedding_available() is True
+
+    def test_neither_engine_but_ollama_usable_is_sufficient(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(ms, "_module_installed", lambda names: False)
+        probes = _all(ollama=_probe("ollama"))
+        assert ms.local_embedding_available(probes) is True
+
+    def test_nothing_available_reads_as_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(ms, "_module_installed", lambda names: False)
+        assert ms.local_embedding_available(_none()) is False
+
+
+class TestRecommendProfile:
+    def test_no_embedding_capacity_recommends_lexical_regardless_of_docker(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(ms, "local_embedding_available", lambda *a, **k: False)
+        profile_id, reason = ms.recommend_profile(_none(), docker_ready=True)
+        assert profile_id == "lexical"
+        assert "no local embedding capability" in reason
+
+    def test_embedding_capacity_and_docker_recommends_complet(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(ms, "local_embedding_available", lambda *a, **k: True)
+        profile_id, reason = ms.recommend_profile(_all(), docker_ready=True)
+        assert profile_id == "complet"
+        assert "Docker" in reason
+
+    def test_embedding_capacity_without_docker_recommends_standard(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(ms, "local_embedding_available", lambda *a, **k: True)
+        profile_id, _reason = ms.recommend_profile(_all(), docker_ready=False)
+        assert profile_id == "standard"
+
+
+class TestUnreachedConfiguredServices:
+    """The gap `grimoire doctor` reports as 'pile mémoire non démarrée' —
+    a project scaffolded for `complet`/`graphe` before its containers were
+    ever started (2026-09-18 arbitrage: `-y` starts them, a bare non-TTY
+    script run does not, but the config is written either way)."""
+
+    def test_lexical_project_has_nothing_missing(self) -> None:
+        from grimoire.core.config import MemoryConfig
+
+        memory = MemoryConfig(backend="lexical")
+        assert ms.unreached_configured_services(memory) == []
+
+    def test_weaviate_backend_unreachable_is_reported(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from grimoire.core.config import MemoryConfig
+
+        monkeypatch.setattr(ms, "_tcp_reachable", lambda *a, **k: False)
+        memory = MemoryConfig(backend="weaviate-server", weaviate_url="http://localhost:8080")
+        assert "weaviate" in ms.unreached_configured_services(memory)
+
+    def test_weaviate_backend_reachable_is_not_reported(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from grimoire.core.config import MemoryConfig
+
+        monkeypatch.setattr(ms, "_tcp_reachable", lambda *a, **k: True)
+        memory = MemoryConfig(backend="weaviate-server", weaviate_url="http://localhost:8080")
+        assert ms.unreached_configured_services(memory) == []
+
+    def test_complet_reports_every_unreachable_layer(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from grimoire.core.config import MemoryConfig
+
+        monkeypatch.setattr(ms, "_tcp_reachable", lambda *a, **k: False)
+        memory = MemoryConfig(
+            backend="weaviate-server",
+            weaviate_url="http://localhost:8080",
+            knowledge_graph="neo4j",
+            neo4j_uri="bolt://localhost:7687",
+            short_term_backend="redis",
+            redis_url="redis://localhost:6379/0",
+        )
+        missing = ms.unreached_configured_services(memory)
+        assert set(missing) == {"weaviate", "neo4j", "redis"}
+
+    def test_embedded_qdrant_local_is_never_reported(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """`qdrant-local` names no server to reach at all — nothing to flag."""
+        from grimoire.core.config import MemoryConfig
+
+        monkeypatch.setattr(ms, "_tcp_reachable", lambda *a, **k: False)
+        memory = MemoryConfig(backend="qdrant-local")
+        assert ms.unreached_configured_services(memory) == []
+
+
+class TestStartMemoryStack:
+    """Docker is never actually invoked in this suite — every subprocess call
+    is stubbed, per the project's rule against starting real containers in
+    tests."""
+
+    def test_standard_needs_nothing_started(self, tmp_path: Path) -> None:
+        assert ms.start_memory_stack("standard", tmp_path) == []
+
+    def test_lexical_needs_nothing_started(self, tmp_path: Path) -> None:
+        assert ms.start_memory_stack("lexical", tmp_path) == []
+
+    def test_no_docker_daemon_returns_a_single_explanatory_message(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(ms, "docker_daemon_reachable", lambda: False)
+        messages = ms.start_memory_stack("complet", tmp_path)
+        assert len(messages) == 1
+        assert "injoignable" in messages[0]
+
+    def test_already_reachable_services_start_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(ms, "docker_daemon_reachable", lambda: True)
+        monkeypatch.setattr(ms, "probe_services", lambda *a, **k: _all())
+
+        def _fail_if_called(*a: object, **k: object) -> None:
+            raise AssertionError("docker compose must not run when already reachable")
+
+        monkeypatch.setattr(ms.subprocess, "run", _fail_if_called)
+        # `complet` still tries Redis unless it is also reachable — _all()
+        # makes every probe reachable, so nothing should be started at all.
+        assert ms.start_memory_stack("complet", tmp_path) == []
+
+    def test_compose_is_invoked_and_waited_for_when_services_are_down(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(ms, "docker_daemon_reachable", lambda: True)
+        down = _all(
+            weaviate=_probe("weaviate", reachable=False),
+            neo4j=_probe("neo4j", reachable=False),
+            redis=_probe("redis", reachable=False),
+        )
+        monkeypatch.setattr(ms, "probe_services", lambda *a, **k: down)
+        monkeypatch.setattr(ms, "_wait_reachable", lambda *a, **k: True)
+
+        calls: list[list[str]] = []
+
+        class _Result:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        def _fake_run(cmd: list[str], **kwargs: object) -> _Result:
+            calls.append(cmd)
+            return _Result()
+
+        monkeypatch.setattr(ms.subprocess, "run", _fake_run)
+
+        messages = ms.start_memory_stack("complet", tmp_path)
+
+        assert any("compose" in c[1] for c in calls if len(c) > 1)
+        assert any("Weaviate" in m and "démarré" in m for m in messages)
+        assert any("Neo4j" in m and "démarré" in m for m in messages)
+        assert any("Redis" in m and "démarré" in m for m in messages)
+        assert (tmp_path / "docker-compose.memory-target.yml").is_file()
+
+    def test_compose_failure_is_reported_not_raised(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(ms, "docker_daemon_reachable", lambda: True)
+        down = _all(weaviate=_probe("weaviate", reachable=False), neo4j=_probe("neo4j", reachable=False))
+        monkeypatch.setattr(ms, "probe_services", lambda *a, **k: down)
+
+        class _Result:
+            returncode = 1
+            stdout = ""
+            stderr = "compose plugin missing"
+
+        monkeypatch.setattr(ms.subprocess, "run", lambda *a, **k: _Result())
+
+        messages = ms.start_memory_stack("complet", tmp_path)
+        assert any("échoué" in m for m in messages)

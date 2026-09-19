@@ -80,34 +80,43 @@ grimoire up . --no-standard
 Archétypes disponibles : `minimal`, `web-app`, `infra-ops`, `platform-engineering`,
 `agentic-standard`, `creative-studio`, `fix-loop`.
 
-### Profil léger — dépôt jetable ou sans CI ni tests
+> **`--lite`/`--profile lite` sont dépréciés** (décision produit 2026-09-18) :
+> le profil léger n'existe plus — l'expérience installée est toujours
+> complète, le cœur s'adapte à chaque tâche par classe de travail. Les deux
+> drapeaux sont encore acceptés (avertissement affiché) mais se comportent
+> désormais exactement comme le défaut décrit ci-dessous.
 
-`grimoire init --lite` (alias : `--profile lite`) pose un projet minimal en
-une commande : mémoire lexicale (aucun service à lancer), pas d'enregistrement
-au cockpit local, archétype `minimal`. Le rapport d'`init` indique comment
-activer chaque brique plus tard :
+### Mémoire par défaut : le plus complet que la machine peut servir, jamais partagée à votre insu
 
-```bash
-grimoire init . --lite
+Sans `--backend`/`--memory-profile` explicite (le cas par défaut, y compris
+avec `-y`), l'étape Mémoire pose la composition la plus riche que cette
+machine peut servir **sans jamais s'attacher à un service qu'elle a
+seulement trouvé en marche** : `standard` (vecteurs Qdrant embarqués — aucun
+service, aucun Docker) quand un moteur d'embedding local
+(fastembed/sentence-transformers) est installé, `lexical` sinon (BM25, aucune
+dépendance). `complet` (Weaviate + Neo4j + Redis) est nommé et sa commande
+d'activation affichée dès que Docker répond, mais jamais démarré sans
+consentement explicite (`--memory-stack up`) — démarrer des conteneurs sans
+le demander n'a pas sa place dans un run express.
 
-# Activer plus tard, une brique à la fois
-grimoire memory up --profile standard --apply
-grimoire cockpit add .
-grimoire standard init .
-```
-
-### Mémoire par défaut : isolée, jamais partagée à votre insu
-
-Sans `--backend` explicite (le cas par défaut, y compris avec `-y`), un nouveau
-projet reçoit toujours une mémoire `lexical` — fichier local, aucune dépendance,
-aucun réseau. Un service mémoire tournant déjà sur la machine (Weaviate, Qdrant,
-Ollama) n'est **jamais** attaché automatiquement, même si `init` l'a détecté ;
-le rapport se contente de le signaler :
+Un service mémoire tournant déjà sur la machine (Weaviate, Qdrant, Ollama)
+n'est **jamais** attaché automatiquement, même si `init` l'a détecté ; le
+rapport se contente de le signaler :
 
 ```text
-Memory: lexical
+Memory: qdrant-local
+         Qdrant embarqué (fichier local, aucun service) — recherche sémantique activée
          ! détecté : Weaviate sur http://localhost:8080 — activez-le avec
          `grimoire memory up --profile standard --apply`
+         local vector embeddings (fastembed/sentence-transformers) available — no server needed.
+         ^ This machine can serve Complet: grimoire memory up --profile complet --start --apply
+```
+
+Pour démarrer la pile `complet` (Docker Compose, gabarits du kit) dès
+l'`init`, sans passer par une seconde commande :
+
+```bash
+grimoire init . -y --memory-stack up
 ```
 
 Pour utiliser explicitement un backend partagé (Qdrant, Weaviate), passez

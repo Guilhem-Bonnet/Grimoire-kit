@@ -20,14 +20,20 @@ mise en forme du fichier existant.
 
 from __future__ import annotations
 
+import shutil
 import socket
+import subprocess
+import time
 from dataclasses import dataclass, field
 from importlib.util import find_spec
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 from grimoire.memory import profiles as memory_profiles
+
+if TYPE_CHECKING:
+    from grimoire.core.config import MemoryConfig
 
 MEMORY_SETUP_SCHEMA_VERSION = "grimoire-memory-setup/v1"
 
@@ -158,6 +164,110 @@ def _module_installed(names: tuple[str, ...]) -> bool:
         except (ImportError, ValueError):
             continue
     return False
+
+
+def docker_daemon_reachable(*, timeout: float = 2.0) -> bool:
+    """Whether a Docker CLI exists *and* its daemon actually answers.
+
+    ``shutil.which("docker")`` alone (the check ``grimoire init``'s wizard has
+    used since #552) only proves the client binary is on ``PATH`` — a Docker
+    Desktop that quit, a rootless daemon that never started, or a CLI shim
+    left behind by an uninstall all pass it while unable to run anything.
+    ``docker info`` is the cheapest round-trip that actually talks to the
+    daemon; a machine without Docker at all must never pay its process-spawn
+    cost, hence the early return.
+    """
+    if shutil.which("docker") is None:
+        return False
+    try:
+        result = subprocess.run(
+            ["docker", "info", "--format", "{{.ServerVersion}}"],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
+
+
+def local_embedding_available(probes: dict[str, ServiceProbe] | None = None) -> bool:
+    """Whether this machine can compute embeddings without any server.
+
+    True when ``fastembed`` or ``sentence-transformers`` is importable — both
+    embed locally, no network round-trip once the model is cached — or when a
+    local Ollama already answers with its extra installed. This is the gate
+    every vector-backed profile (``standard``/``graphe``/``complet``) needs:
+    even the server-backed ones (Weaviate, Qdrant) embed client-side through
+    :mod:`grimoire.memory.embedding`, so a docker daemon with nothing to embed
+    with can still only serve ``lexical``.
+    """
+    if _module_installed(("fastembed",)) or _module_installed(("sentence_transformers",)):
+        return True
+    resolved = probes if probes is not None else probe_services()
+    ollama = resolved.get("ollama")
+    return bool(ollama and ollama.usable)
+
+
+def recommend_profile(
+    probes: dict[str, ServiceProbe] | None = None,
+    *,
+    docker_ready: bool | None = None,
+) -> tuple[str, str]:
+    """The richest memory profile this machine can serve, and why.
+
+    Order, per the 2026-09-18 onboarding decision: no local embedding
+    capability at all means every vector-backed profile would build a store
+    it can never fill — ``lexical`` is the honest floor, named as such rather
+    than left to look like an arbitrary default. With embedding capacity,
+    ``complet`` is offered whenever Docker can actually start the missing
+    services (:func:`start_memory_stack`); short of that, ``standard`` still
+    gets real semantic search through the embedded ``qdrant-local`` backend
+    (:func:`build_memory_plan`) — no server, no container, no consent needed.
+    """
+    resolved = probes if probes is not None else probe_services()
+    if not local_embedding_available(resolved):
+        return "lexical", "no local embedding capability (fastembed/sentence-transformers not installed, no Ollama reachable)"
+    ready = docker_daemon_reachable() if docker_ready is None else docker_ready
+    if ready:
+        return "complet", "Docker available — the most complete profile this machine can serve"
+    return "standard", "local vector embeddings (fastembed/sentence-transformers), no Docker or server needed"
+
+
+def unreached_configured_services(memory: MemoryConfig) -> list[str]:
+    """Services *memory* (a ``GrimoireConfig.memory`` section) declares that
+    do not actually answer right now.
+
+    A project can be scaffolded for ``complet``/``graphe`` (backend pinned to
+    ``weaviate-server``, ``knowledge_graph: neo4j``…) before its containers
+    were ever started — the express and interactive Memory steps in
+    ``grimoire init`` write that aspirational config without starting
+    anything unless consent was given (2026-09-18 arbitrage). This is the
+    gap ``grimoire doctor`` reports as *pile mémoire non démarrée*: never a
+    diagnostic on whether the config is well-formed, only on whether the
+    services it names are reachable this instant.
+
+    Returns service ids (``"weaviate"``, ``"qdrant"``, ``"neo4j"``,
+    ``"redis"``), empty when nothing configured is missing.
+    """
+    missing: list[str] = []
+    if memory.backend == "weaviate-server" and memory.weaviate_url and not _tcp_reachable(
+        memory.weaviate_url, _DEFAULT_PORTS["weaviate"],
+    ):
+        missing.append("weaviate")
+    elif memory.backend == "qdrant-server" and memory.qdrant_url and not _tcp_reachable(
+        memory.qdrant_url, _DEFAULT_PORTS["qdrant"],
+    ):
+        missing.append("qdrant")
+    if memory.knowledge_graph == "neo4j" and memory.neo4j_uri and not _tcp_reachable(
+        memory.neo4j_uri, _DEFAULT_PORTS["neo4j"],
+    ):
+        missing.append("neo4j")
+    if memory.short_term_backend == "redis" and memory.redis_url and not _tcp_reachable(
+        memory.redis_url, _DEFAULT_PORTS["redis"],
+    ):
+        missing.append("redis")
+    return missing
 
 
 def probe_services(urls: dict[str, str] | None = None) -> dict[str, ServiceProbe]:
@@ -293,10 +403,27 @@ def _target_config(
         target["backend"] = "qdrant-server"
         target["qdrant_url"] = qdrant.url
         target["embedding_model"] = "sentence-transformers/all-MiniLM-L6-v2"
+    elif qdrant.extra_installed and local_embedding_available(probes):
+        # No server reachable, but the client library and a local embedding
+        # engine both are: an embedded, file-local Qdrant (no service, no
+        # Docker, nothing shared with any other project) still gives this
+        # profile real semantic search instead of falling all the way back to
+        # `lexical` for want of a server nobody asked to run (onboarding
+        # audit 2026-09-18: "standard" was never reachable without one).
+        target["backend"] = "qdrant-local"
+        target["embedding_model"] = "sentence-transformers/all-MiniLM-L6-v2"
+        plan.notes.append(
+            "Aucun service vectoriel serveur — repli sur Qdrant embarqué "
+            "(fichier local, aucun service, aucun Docker requis)."
+        )
+        _warn_unusable(plan, weaviate)
+        _warn_unusable(plan, qdrant)
     else:
         target["backend"] = "lexical"
         plan.warnings.append(
-            "Aucun backend vectoriel utilisable — repli sur `lexical` (BM25, zéro dépendance)."
+            "Aucun backend vectoriel utilisable — repli sur `lexical` (BM25, zéro dépendance) : "
+            "aucune capacité d'embedding locale (fastembed/sentence-transformers) et aucun "
+            "service accessible."
         )
         _warn_unusable(plan, weaviate)
         _warn_unusable(plan, qdrant)
@@ -457,3 +584,106 @@ def apply_memory_plan(plan: MemoryPlan) -> list[str]:
     with config_path.open("w", encoding="utf-8") as fh:
         yaml.dump(data, fh)
     return written
+
+
+# ── Starting the stack (explicit consent only) ─────────────────────────────────
+
+_COMPOSE_TARGET_TEMPLATE = "docker-compose.memory-target.tpl.yml"
+_COMPOSE_TARGET_FILE = "docker-compose.memory-target.yml"
+_STACK_WAIT_ATTEMPTS = 20
+_STACK_WAIT_DELAY_SECONDS = 1.5
+_COMPOSE_UP_TIMEOUT_SECONDS = 120.0
+_REDIS_START_TIMEOUT_SECONDS = 30.0
+
+
+def _ensure_compose_file(project_root: Path) -> Path:
+    """The project's Weaviate+Neo4j compose file, copied from the bundled
+    template if `grimoire init` never wrote one — a project that started on
+    `lexical`/`qdrant-local` and only later reaches for `complet` has none."""
+    dest = project_root / _COMPOSE_TARGET_FILE
+    if not dest.is_file():
+        from grimoire.data import framework_path
+
+        src = framework_path() / "memory" / _COMPOSE_TARGET_TEMPLATE
+        dest.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    return dest
+
+
+def _wait_reachable(url: str, default_port: int, *, attempts: int = _STACK_WAIT_ATTEMPTS) -> bool:
+    """Poll *url* briefly for a freshly started service to answer."""
+    for _ in range(attempts):
+        if _tcp_reachable(url, default_port):
+            return True
+        time.sleep(_STACK_WAIT_DELAY_SECONDS)
+    return False
+
+
+def start_memory_stack(profile: str, project_root: Path) -> list[str]:
+    """Start, via Docker Compose, the services *profile* needs and this
+    machine does not yet serve.
+
+    Explicit consent only — the caller (``grimoire memory up --start``, or
+    ``grimoire init --memory-stack up``) is the consent; this function never
+    runs on its own and is never reached from a plain ``-y``/express call.
+
+    Scoped to ``graphe``/``complet`` — the only compositions that pin a
+    server (Weaviate + Neo4j, plus Redis for ``complet``). ``standard``
+    already gets real semantic search from the embedded ``qdrant-local``
+    backend (:func:`build_memory_plan`) with nothing to start.
+
+    Returns one human-readable status line per service this call touched;
+    empty when the profile needs nothing started or Docker cannot be reached.
+    """
+    canonical = memory_profiles.resolve(profile).id
+    if canonical not in ("graphe", "complet"):
+        return []
+    if not docker_daemon_reachable():
+        return ["Docker : démon injoignable — impossible de démarrer la pile mémoire."]
+
+    messages: list[str] = []
+    probes = probe_services()
+    weaviate, neo4j = probes["weaviate"], probes["neo4j"]
+    if not (weaviate.reachable and neo4j.reachable):
+        compose = _ensure_compose_file(project_root)
+        try:
+            result = subprocess.run(
+                ["docker", "compose", "-f", compose.name, "up", "-d"],
+                cwd=project_root,
+                capture_output=True,
+                text=True,
+                timeout=_COMPOSE_UP_TIMEOUT_SECONDS,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            messages.append(f"docker compose : {exc}")
+            return messages
+        if result.returncode != 0:
+            detail = result.stderr.strip() or result.stdout.strip() or "erreur inconnue"
+            messages.append(f"docker compose a échoué : {detail}")
+            return messages
+        messages.append(
+            "Weaviate : démarré" if _wait_reachable(weaviate.url, _DEFAULT_PORTS["weaviate"])
+            else "Weaviate : Docker Compose lancé, mais le service ne répond pas encore."
+        )
+        messages.append(
+            "Neo4j : démarré" if _wait_reachable(neo4j.url, _DEFAULT_PORTS["neo4j"])
+            else "Neo4j : Docker Compose lancé, mais le service ne répond pas encore."
+        )
+
+    if canonical == "complet":
+        redis = probes["redis"]
+        if not redis.reachable:
+            try:
+                subprocess.run(
+                    _START_COMMANDS["redis"].split(),
+                    capture_output=True,
+                    text=True,
+                    timeout=_REDIS_START_TIMEOUT_SECONDS,
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                messages.append(f"Redis : {exc}")
+            else:
+                messages.append(
+                    "Redis : démarré" if _wait_reachable(redis.url, _DEFAULT_PORTS["redis"])
+                    else "Redis : conteneur lancé, mais le service ne répond pas encore."
+                )
+    return messages

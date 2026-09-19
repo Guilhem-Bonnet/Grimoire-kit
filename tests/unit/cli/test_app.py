@@ -175,10 +175,32 @@ class TestInit:
 
     def test_init_default_backend(self, tmp_path: Path) -> None:
         """Issue #496 : sans --backend explicite, jamais d'attachement silencieux
-        à un service détecté sur la machine — toujours `lexical`, isolé."""
+        à un service détecté sur la machine — toujours privé, isolé.
+
+        2026-09-18 (PR2) : le défaut express est désormais `qdrant-local`
+        (embarqué, sans service) quand un moteur d'embedding local est
+        installé — jamais `weaviate`/`qdrant-server`, jamais un service
+        détecté sur la machine.
+        """
         runner.invoke(app, ["init", str(tmp_path)])
         content = (tmp_path / "project-context.yaml").read_text()
-        assert 'backend: "lexical"' in content
+        assert 'backend: "qdrant-local"' in content
+        assert "weaviate" not in content.lower()
+        assert "qdrant_url" not in content
+
+    def test_init_lite_flag_is_deprecated_and_behaves_like_the_default(self, tmp_path: Path) -> None:
+        """`--lite` no longer sets anything special — same output as no flag,
+        plus a deprecation notice (2026-09-18 onboarding decision, PR2)."""
+        plain = tmp_path / "plain"
+        lite = tmp_path / "lite"
+        runner.invoke(app, ["init", str(plain)])
+        result = runner.invoke(app, ["init", str(lite), "--lite"])
+        assert result.exit_code == 0, result.output
+        assert "deprecated" in result.output.lower()
+        plain_content = (plain / "project-context.yaml").read_text(encoding="utf-8")
+        lite_content = (lite / "project-context.yaml").read_text(encoding="utf-8")
+        assert ('backend: "qdrant-local"' in plain_content) == ('backend: "qdrant-local"' in lite_content)
+        assert ('backend: "lexical"' in plain_content) == ('backend: "lexical"' in lite_content)
 
     def test_init_local_backend(self, tmp_path: Path) -> None:
         result = runner.invoke(app, ["init", str(tmp_path), "--backend", "local"])
@@ -319,8 +341,12 @@ class TestStatus:
 
     def test_status_shows_memory(self, project: Path) -> None:
         result = runner.invoke(app, ["status", str(project)])
-        # backend "auto" resolves to the isolated `lexical` default (#496)
-        assert "lexical" in result.output
+        # backend "auto" resolves to a private, consent-free default (#496) —
+        # `qdrant-local` (embedded) with a local embedding engine installed,
+        # `lexical` otherwise; either way `status` names the real backend.
+        content = (project / "project-context.yaml").read_text(encoding="utf-8")
+        assert 'backend: "qdrant-local"' in content or 'backend: "lexical"' in content
+        assert ("qdrant-local" in result.output) or ("lexical" in result.output)
 
     def test_status_shows_structure(self, project: Path) -> None:
         result = runner.invoke(app, ["status", str(project)])
@@ -1748,8 +1774,11 @@ class TestInitJson:
         # Decision 2026-09-18 (corrected same day): an empty project's
         # auto-detected archetype is `stack`, never minimal.
         assert data["archetype"] == "stack"
-        # backend "auto" resolves to the isolated `lexical` default (#496)
-        assert data["backend"] == "lexical"
+        # backend "auto" resolves to a private, consent-free default (#496,
+        # PR2 2026-09-18): `qdrant-local` (embedded) with a local embedding
+        # engine installed.
+        assert data["backend"] == "qdrant-local"
+        assert data["memory_profile"]["served"] == "standard"
         assert "dirs_created" in data
 
     def test_init_json_already_exists(self, tmp_path: Path) -> None:

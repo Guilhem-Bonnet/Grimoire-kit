@@ -105,6 +105,33 @@ def _isolate_user_state(tmp_path_factory: pytest.TempPathFactory) -> Iterator[No
         yield
 
 
+@pytest.fixture(autouse=True)
+def _default_no_docker_daemon(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``grimoire init``'s express Memory step recommends ``complet`` whenever
+    Docker's daemon actually answers (2026-09-18 arbitrage on #619,
+    ``grimoire.tools.memory_setup.recommend_profile``) — a real risk on any
+    machine or CI runner that happens to have Docker running, and on this
+    very sandbox: a live Weaviate/Qdrant/Neo4j/Redis/Ollama already answer on
+    their default ports (dogfooding memory for other work in this shared
+    environment), same class of leak as issue #493's ``detect_memory_backend``
+    port probes.
+
+    Same fix, same shape as ``_isolate_user_state`` above: one autouse
+    default so every test that does not care about Docker gets the
+    deterministic "no Docker" a bare machine would see, instead of whatever
+    happens to be running on the host that launches the suite. A test that
+    *does* care about the Docker-available path patches this back itself
+    (its own ``monkeypatch.setattr`` on the same target simply overrides this
+    default for that test).
+
+    In-process only: the handful of fixtures that shell out to a real
+    ``grimoire`` subprocess (``real_project`` and friends) are unaffected —
+    they already pin ``--backend local`` explicitly for the same reason
+    (issue #493), since a monkeypatch here cannot reach into a child process.
+    """
+    monkeypatch.setattr("grimoire.tools.memory_setup.docker_daemon_reachable", lambda: False)
+
+
 @pytest.fixture(scope="session")
 def real_home() -> Path:
     """Le vrai ``$HOME``, pour les tests qui doivent prouver qu'on n'y touche pas."""
