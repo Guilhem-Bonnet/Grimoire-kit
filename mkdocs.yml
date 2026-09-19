@@ -111,6 +111,7 @@ nav:
           - SDK Python: sdk-guide.md
           - Créer un agent: creating-agents.md
           - "Doctrine : quand créer un artefact": artifact-doctrine.md
+          - Catalogue d'expertises: expertises.md
           - Archétypes: archetype-guide.md
           - Intégration MCP: mcp-integration.md
           - Observatory API: observatory-api.md

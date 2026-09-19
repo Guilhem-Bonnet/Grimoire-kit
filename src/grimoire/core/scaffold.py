@@ -24,6 +24,7 @@ from grimoire.__version__ import __version__ as _grimoire_version
 from grimoire.archetypes import bundled_path as archetypes_path
 from grimoire.core import layout
 from grimoire.core.archetype_resolver import ResolvedArchetype
+from grimoire.core.expertises import _safe_skill_source
 from grimoire.core.scanner import ScanResult
 from grimoire.core.standard_generation import GITIGNORE_MARKER, GITIGNORE_SECTION
 from grimoire.data import framework_path
@@ -60,6 +61,8 @@ def _render_placeholders(text: str, variables: dict[str, str]) -> str:
     """
     def _substitute(chunk: str) -> str:
         for key, value in variables.items():
+            if key == "stack_skills_yaml":  # a YAML list, not a string: drop its quotes too (#616)
+                chunk = chunk.replace('"{{' + key + '}}"', value)
             chunk = chunk.replace("{{" + key + "}}", value)
         return chunk
 
@@ -573,6 +576,63 @@ class ProjectScaffolder:
         "cicd": ("pipeline-architect", "deploy-orchestrator"),
     }
 
+    # `archetypes/stack/skills/stack-*.md` used to attach in block to
+    # `stack-engineer` regardless of what the project actually uses (issue
+    # #375's own defect, found while building the on-demand expertise
+    # catalogue of issue #616): a bare Python project selecting the `stack`
+    # archetype paid for six skills it never touches, transversal at project
+    # scope the moment they were not all referenced by name in the agent's
+    # `skills:` frontmatter. Keyed by `grimoire.core.scanner.StackScanner`'s
+    # own detection names (issue #616 reuses that scanner rather than
+    # inventing a second one) — `"kubernetes"` is the one name that does not
+    # match its skill slug (`stack-k8s`, not `stack-kubernetes`).
+    _STACK_SKILL_BY_DETECTION: ClassVar[dict[str, str]] = {
+        "python": "stack-python",
+        "go": "stack-go",
+        "typescript": "stack-typescript",
+        "docker": "stack-docker",
+        "terraform": "stack-terraform",
+        "ansible": "stack-ansible",
+        "kubernetes": "stack-k8s",
+    }
+
+    def _detected_stack_skill_slugs(self) -> tuple[str, ...]:
+        """Slugs of ``archetypes/stack/skills/stack-*.md`` this project's own
+        detection (``self._scan``) actually warrants attaching by default.
+
+        Anything not detected here is never lost — its body lives in the kit
+        package (not only in a project's own copy), so ``grimoire expertise
+        add <id>`` (:mod:`grimoire.core.expertises`) can attach it later, on
+        request, the same on-demand mechanism issue #616 gives every other
+        language, pattern and cloud provider. Order follows the mapping
+        above (deterministic, not scan order) so the rendered ``skills:``
+        list is stable across runs on the same project.
+
+        ``grimoire up`` builds its scaffolder with ``scan=None`` (it refreshes
+        the kit tier without re-detecting the stack — three call sites in
+        ``cmd_up.py``, none of them this issue's to change). Recomputing from
+        an absent scan would read as "nothing detected" and silently regress
+        an already-installed project's kit-tier default to an empty list on
+        every update. When there is no scan to detect from, this keeps
+        whatever the project's own kit-tier ``stack-engineer.md`` already
+        declares instead of recomputing — refresh never narrows a selection
+        it didn't itself re-derive.
+        """
+        if self._scan is not None:
+            detected = {d.name for d in self._scan.stacks}
+            return tuple(
+                slug for name, slug in self._STACK_SKILL_BY_DETECTION.items() if name in detected
+            )
+        existing = self._agents_dir() / "stack-engineer.md"
+        if not existing.is_file():
+            return ()
+        from grimoire.hosts.collect import parse_frontmatter
+
+        meta, _ = parse_frontmatter(existing.read_text(encoding="utf-8"))
+        # `_safe_skill_source` (tout consommateur) revalide forme + confine le chemin (CodeQL 599/600).
+        known_slugs = set(self._STACK_SKILL_BY_DETECTION.values())
+        return tuple(str(s) for s in (meta.get("skills") or []) if str(s) in known_slugs)
+
     def _archetype_render_vars(self, planned_agents: dict[str, str]) -> dict[str, str]:
         """Resolve the install-time placeholders for this project.
 
@@ -592,6 +652,7 @@ class ProjectScaffolder:
 
         stacks = [d.name for d in self._scan.stacks] if self._scan else []
         variables["tech_stack_list"] = ", ".join(stacks) if stacks else "stack non détectée"
+        variables["stack_skills_yaml"] = json.dumps(list(self._detected_stack_skill_slugs()))
         variables["user_name"] = self._user_name
         variables["project_name"] = self._project_name
         variables["init_date"] = date.today().isoformat()
@@ -808,10 +869,26 @@ class ProjectScaffolder:
             # as installable as the agents that reference them, and collected
             # from the same kit skills directory their `skills:` frontmatter
             # resolves against (grimoire.hosts.collect.collect_skills).
+            #
+            # `stack` is special-cased (issue #616): its seven skills used to
+            # copy in block regardless of what the project actually uses,
+            # which left the six not referenced by name in the agent's own
+            # `skills:` frontmatter transversal — loaded every turn of the
+            # session instead of costing nothing. Only the detected subset
+            # ships by default; the rest stays one `grimoire expertise add
+            # <id>` away (:mod:`grimoire.core.expertises`), its body read
+            # from the kit package rather than this project's own copy.
             skills_src = arch_dir / "skills"
             if skills_src.is_dir():
                 skills_dst = self._skills_dir()
-                for md in sorted(skills_src.glob("*.md")):
+                skill_files = (
+                    tuple(filter(None, (_safe_skill_source(skills_src, s) for s in self._detected_stack_skill_slugs())))
+                    if arch == "stack"
+                    else tuple(sorted(skills_src.glob("*.md")))
+                )
+                for md in skill_files:
+                    if not md.is_file():
+                        continue
                     dst = skills_dst / _strip_tpl_suffix(md.name)
                     if any(fc.dst == dst for fc in p.copies):
                         continue
@@ -892,15 +969,22 @@ class ProjectScaffolder:
                     label=f"stack/{agent_name}",
                 ))
                 planned = True
+        # Only the skills this project's own detection warrants (issue #616,
+        # see `_detected_stack_skill_slugs`) — not the whole directory: the
+        # ones it skips stay available on request via `grimoire expertise
+        # add <id>`, read from the kit package rather than this copy.
         skills_src = stack_dir / "skills"
         if planned and skills_src.is_dir():
             skills_dst = self._skills_dir()
-            for md in sorted(skills_src.glob("*.md")):
-                dst = skills_dst / _strip_tpl_suffix(md.name)
+            for slug in self._detected_stack_skill_slugs():
+                skill_src = _safe_skill_source(skills_src, slug)
+                if skill_src is None or not skill_src.is_file():
+                    continue
+                dst = skills_dst / _strip_tpl_suffix(skill_src.name)
                 if any(fc.dst == dst for fc in p.copies):
                     continue
                 p.copies.append(FileCopy(
-                    src=md,
+                    src=skill_src,
                     dst=dst,
                     label=f"stack/skills/{dst.stem}",
                 ))

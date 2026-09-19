@@ -6,7 +6,13 @@ use_when: "Écrire ou faire évoluer du code applicatif ou de l'infrastructure d
 dont_use_when: "Décision de produit, d'UX ou de priorisation — voir les agents de conception, pas d'exécution technique."
 tool_boundary: "Code applicatif et fichiers d'infrastructure du projet (.py, .go, .ts/.tsx, Dockerfile, docker-compose.yml, .tf, playbooks Ansible, manifestes K8s) selon le skill actif."
 tools: "read, edit, execute"
-skills: ["stack-python", "stack-go", "stack-typescript", "stack-docker", "stack-terraform", "stack-ansible", "stack-k8s"]
+# Détecté à l'installation (issue #616) — seul ce que le projet utilise
+# réellement s'attache par défaut ; le reste (une autre techno de la pile,
+# un langage, un patron d'ingénierie, un fournisseur cloud) s'ajoute à la
+# demande via `grimoire expertise add <id>` sans jamais devenir transversal.
+# Remplacé par `ProjectScaffolder._archetype_render_vars` au scaffold — voir
+# `_detected_stack_skill_slugs` dans `src/grimoire/core/scaffold.py`.
+skills: "{{stack_skills_yaml}}"
 model_affinity:
   reasoning: high
   context_window: medium
