@@ -22,7 +22,7 @@ Suppression de snapshots/backups, réduction de rétention, purge de données TS
 
 ## Audit de couverture backup
 
-Raisonnement : inventorier tous les services et données du projet → pour chacun, vérifier existence/fréquence/localisation/dernière exécution du backup → calculer le RPO effectif vs cible → identifier les trous → produire le rapport avec un score de résilience.
+Raisonnement : inventorier tous les services et données du projet → pour chacun, vérifier existence/fréquence/localisation/dernière exécution du backup → calculer le RPO effectif vs cible → identifier les trous → produire le rapport : par service, RPO effectif relevé contre la cible, trous nommés, « non vérifié » pour tout backup dont la dernière exécution n'a pas été lue.
 
 Format :
 
@@ -41,7 +41,7 @@ Identifier les PVC à protéger et leur criticité → vérifier les RecurringJo
 
 ## Plan de disaster recovery
 
-Inventorier les services avec leur criticité → documenter la procédure de restauration étape par étape par service → estimer le RTO vs cible → identifier les dépendances (ordre de restauration) → documenter dans un fichier structuré (service, criticité, RTO cible, données, source backup, procédure, dépendances, dernier test).
+Inventorier les services avec leur criticité → documenter la procédure de restauration étape par étape par service → relever le RTO du dernier test de restauration contre la cible (« non testé » sinon, jamais estimé) → identifier les dépendances (ordre de restauration) → documenter dans un fichier structuré (service, criticité, RTO cible, données, source backup, procédure, dépendances, dernier test).
 
 ## Rétention
 

@@ -270,10 +270,7 @@ class Emitter:
 
 #: Étape par défaut, envoyée aux agents qui ne déclarent rien — texte inchangé
 #: depuis avant #379, pour ne rien amputer d'un agent qui n'a rien demandé.
-DEFAULT_CONTEXT_INSTRUCTION = (
-    "Lis `_grimoire/_memory/shared-context.md` s'il existe, pour l'état "
-    "courant du projet."
-)
+DEFAULT_CONTEXT_INSTRUCTION = "Lis `_grimoire/_memory/shared-context.md` s'il existe, pour l'état courant du projet."
 
 
 def context_load_instruction(agent: AgentSpec) -> str:

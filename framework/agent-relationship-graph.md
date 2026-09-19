@@ -29,7 +29,7 @@
 │  │ dev/    ├─────────────────────────────────→│ qa/     │    │
 │  │ Amelia  │◄────────────────────────────────┤ Quinn   │    │
 │  │         │          validated(3)            │         │    │
-│  │ trust:87│                                  │ trust:91│    │
+│  │ cv:12/14│                                  │ cv:15/16│    │
 │  └────┬────┘                                  └────┬────┘    │
 │       │                                            │         │
 │       │ delegated(2)                               │         │
@@ -37,8 +37,8 @@
 │  ┌─────────┐         challenged(1)                 │         │
 │  │architect├───────────────────────────────────────┘         │
 │  │ Winston │                                                  │
-│  │ trust:94│         expertise_match: 0.92                   │
-│  └─────────┘         synergy_score: 0.88                     │
+│  │ cv:18/18│         capabilities_matched: 3/4               │
+│  └─────────┘         handoffs_accepted: 11/12                │
 │                                                               │
 │  Enrichi dynamiquement par :                                 │
 │  - ELSS events (BM-59)                                       │
@@ -69,16 +69,15 @@ agent_graph:
       # Compétences émergentes — découvertes via l'historique
       emergent_capabilities:
         - skill: "JWT auth patterns"
-          confidence: 0.92
-          evidence: ["US-042 impl (trust:91)", "US-038 impl (trust:88)"]
+          occurrences: 2
+          evidence: ["US-042 impl (CVTL 4/4)", "US-038 impl (CVTL 3/3)"]
         - skill: "PostgreSQL optimization"
-          confidence: 0.78
-          evidence: ["US-031 impl (trust:85)"]
+          occurrences: 1
+          evidence: ["US-031 impl (CVTL 3/3)"]
       
       # Métriques agrégées
       metrics:
         tasks_completed: 47
-        avg_trust_score: 87
         hup_red_count: 3        # fois où HUP ROUGE déclenché
         hup_red_resolved: 3     # dont résolus
         evasion_flags: 0        # flags anti-évitement
@@ -97,11 +96,10 @@ agent_graph:
       static_capabilities: ["test-automation", "api-testing", "e2e-testing", "coverage-analysis"]
       emergent_capabilities:
         - skill: "Security testing OWASP"
-          confidence: 0.85
+          occurrences: 2
           evidence: ["Security review sprint-5", "Pentest US-029"]
       metrics:
         tasks_completed: 38
-        avg_trust_score: 91
         hup_red_count: 1
         hup_red_resolved: 1
         evasion_flags: 0
@@ -119,7 +117,6 @@ agent_graph:
       emergent_capabilities: []
       metrics:
         tasks_completed: 22
-        avg_trust_score: 94
         hup_red_count: 0
         hup_red_resolved: 0
         evasion_flags: 0
@@ -138,53 +135,49 @@ agent_graph:
     - from: "dev"
       to: "qa"
       type: "collaboration"
-      strength: 0.92      # 0-1, basé sur la fréquence et le succès
       interactions: 23
-      avg_outcome_trust: 89
+      handoffs_accepted: 21
       last_interaction: "2026-03-05T14:33:00Z"
       notes: "Binôme le plus productif — QA toujours rapide sur les PRs d'Amelia"
     
     - from: "dev"
       to: "architect"
       type: "delegation"
-      strength: 0.85
       interactions: 12
-      avg_outcome_trust: 91
+      handoffs_accepted: 11
       last_interaction: "2026-03-04T10:15:00Z"
       notes: "Dev demande systématiquement validation arch — bonne dynamique"
     
     - from: "architect"
       to: "qa"
       type: "validation"
-      strength: 0.78
       interactions: 8
-      avg_outcome_trust: 93
+      handoffs_accepted: 8
       last_interaction: "2026-03-05T14:35:00Z"
     
     - from: "architect"
       to: "pm"
       type: "challenge"
-      strength: 0.65
       interactions: 5
-      avg_outcome_trust: 82
+      handoffs_accepted: 3
       notes: "Tension productive — Winston challenge souvent les priorités de John"
 
   # ── Synergies détectées ────────────────────────────────────
   synergies:
     - pair: ["dev", "qa"]
-      synergy_score: 0.92
+      handoffs_accepted: "21/23"
       pattern: "Implementation → Validation rapide"
-      evidence: "23 interactions, trust moyen 89"
+      evidence: "23 handoffs, 21 acceptés sans challenge (ELSS)"
     
     - pair: ["architect", "dev"]
-      synergy_score: 0.88
+      handoffs_accepted: "11/12"
       pattern: "Architecture → Implementation fidèle"
-      evidence: "12 interactions, trust moyen 91"
+      evidence: "12 handoffs, 11 acceptés sans challenge (ELSS)"
     
     - pair: ["pm", "analyst"]
-      synergy_score: 0.80
+      handoffs_accepted: "7/8"
       pattern: "Requirements → Market validation"
-      evidence: "8 interactions, trust moyen 85"
+      evidence: "8 handoffs, 7 acceptés sans challenge (ELSS)"
 
   # ── Anti-patterns détectés ─────────────────────────────────
   anti_patterns:
@@ -208,15 +201,15 @@ enrichment_rules:
   # Quand un agent complète une tâche
   on_event_task_completed:
     - update: "agents[{agent}].metrics.tasks_completed += 1"
-    - check: "Si CC PASS → maintenir trust, sinon → trust -= 2"
+    - update: "Si cc_result == PASS → relationships[{requester}→{agent}].handoffs_accepted += 1"
   
   # Quand une cross-validation CVTL est effectuée
-  on_event_trust_scored:
-    - update: "agents[{producer}].metrics.avg_trust_score recalculate"
+  on_event_cross_validated:
+    - update: "agents[{producer}].metrics.cross_validations_passed += 1 si verdict ∈ {approve, approve_with_notes}, sinon cross_validations_challenged += 1"
     - update: "agents[{validator}].metrics.cross_validations_passed += 1"
     - update: "relationships[{producer}→{validator}].interactions += 1"
-    - update: "relationships[{producer}→{validator}].avg_outcome_trust recalculate"
-    - detect: "Si trust_score > 90 sur 3+ interactions → synergy candidate"
+    - update: "relationships[{producer}→{validator}].handoffs_accepted += 1 si verdict ∈ {approve, approve_with_notes}"
+    - detect: "Si 3+ handoffs consécutifs acceptés sans challenge → synergy candidate"
   
   # Quand un huddle a lieu (SHP BM-56)
   on_event_huddle_completed:
@@ -250,19 +243,16 @@ Le SOG utilise le graphe pour améliorer le routage :
 routing_enhancement:
   # 1. Sélection d'agent optimisée
   agent_selection:
-    factors:
-      static_capability_match: 0.30    # capabilities de l'agent-manifest
-      emergent_capability_match: 0.25  # compétences émergentes du graphe
-      trust_score_history: 0.25        # fiabilité passée
-      synergy_with_context: 0.20       # synergie avec les autres agents impliqués
-    
-    formula: |
-      score = (static × 0.30) + (emergent × 0.25) + (trust × 0.25) + (synergy × 0.20)
-      select: agent with max(score) parmi les éligibles
-  
+    order:   # règles ordonnées, pas de pondération — le premier critère discriminant tranche
+      1_declared_role: "static_capabilities de l'agent-manifest couvrent la tâche"
+      2_emergent: "emergent_capabilities avec evidence sur le même domaine"
+      3_handoff_history: "relationships[{demandeur}→agent].handoffs_accepted le plus élevé"
+      4_availability: "agent idle avant agent busy (registry AMN)"
+    tie_break: "premier dans l'ordre de l'agent-manifest"
+
   # 2. Sélection de validateur CVTL
   validator_selection:
-    prefer: "Agent avec synergy_score élevée ET type='validation' dans relationships"
+    prefer: "Agent avec type='validation' dans relationships ET handoffs_accepted le plus élevé avec le producteur"
     avoid: "Agent avec anti_pattern détecté avec le producteur"
   
   # 3. Formation d'équipes (pour huddles et party mode)
@@ -323,10 +313,10 @@ L'utilisateur ou l'orchestrateur peut interroger le graphe :
 
 ```
 [timestamp] [orchestrator]   [ARG:bootstrap]   agents=8 | relationships=12 | source=static
-[timestamp] [orchestrator]   [ARG:enrich]      dev→qa strength: 0.88→0.92 | event=trust_scored
-[timestamp] [orchestrator]   [ARG:synergy]     new synergy detected: dev+qa (score: 0.92)
+[timestamp] [orchestrator]   [ARG:enrich]      dev→qa handoffs_accepted: 20→21 | event=cross_validated
+[timestamp] [orchestrator]   [ARG:synergy]     new synergy detected: dev+qa (handoffs_accepted: 21/23)
 [timestamp] [orchestrator]   [ARG:antipattern] tech-writer isolated | suggestion: include in reviews
-[timestamp] [orchestrator]   [ARG:route]       selected dev (score:0.87) over pm (score:0.62) for task
+[timestamp] [orchestrator]   [ARG:route]       selected dev over pm for task | rule=1_declared_role
 ```
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">

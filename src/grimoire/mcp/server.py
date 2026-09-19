@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast
 from grimoire.__version__ import __version__
 from grimoire.core.config import GrimoireConfig
 from grimoire.core.exceptions import GrimoireConfigError, GrimoireError
+from grimoire.core.grounding import GROUNDING_RULE_EN
 
 # Le SDK a renommé sa façade en 2.0 : `mcp.server.fastmcp.FastMCP` est devenu
 # `mcp.server.mcpserver.MCPServer`. La surface qu'on utilise ici est identique
@@ -49,7 +50,7 @@ from grimoire.core.exceptions import GrimoireConfigError, GrimoireError
 # partir de 2027-07-28) — donc rien à retirer de ce côté.
 _INSTRUCTIONS = (
     "Grimoire Kit — Composable AI agent platform. "
-    "Use these tools to inspect and manage Grimoire projects."
+    "Use these tools to inspect and manage Grimoire projects. " + GROUNDING_RULE_EN
 )
 
 if TYPE_CHECKING:

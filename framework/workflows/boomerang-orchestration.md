@@ -213,7 +213,7 @@ Décisions clés : {key_decisions}
 {files_changed}
 
 ## Temps Total
-{total_steps} steps | {estimated_tokens} tokens
+{total_steps} steps | {tokens} tokens (relevé de l'hôte, « non mesuré » sinon)
 ```
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">

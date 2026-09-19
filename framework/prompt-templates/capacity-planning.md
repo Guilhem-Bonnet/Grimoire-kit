@@ -20,6 +20,8 @@ RAISONNEMENT :
    {{#each resources}}
    | {{this.name}} | {{this.used}} | {{this.total}} | {{this.pct}} | {{this.trend}} |
    {{/each}}
+   La colonne Tendance n'est remplie que si une série temporelle a été
+   interrogée (requête et fenêtre citées) ; sinon « non mesuré ».
 
 3. SEUILS d'alerte :
    - 🟢 < 60% : OK
@@ -27,10 +29,11 @@ RAISONNEMENT :
    - 🔴 > 80% : Action requise
    - 🚨 > 90% : Critique — planifier upgrade immédiat
 
-4. PROJECTIONS :
+4. PROJECTIONS — uniquement à partir d'une série mesurée à l'étape 1, jamais
+   extrapolées d'une valeur instantanée ; sans série : « projection non mesurée » :
    - À consommation constante, quand atteint-on 80% ?
    - {{#if growth_factor}}Facteur de croissance : {{growth_factor}}{{/if}}
-   - Services les plus gourmands (top 5)
+   - Services les plus gourmands (top 5, classés sur la métrique collectée à l'étape 1)
 
 5. RECOMMANDATIONS :
    {{#if rightsizing}}
@@ -40,7 +43,7 @@ RAISONNEMENT :
    - Upgrades matériels nécessaires (RAM, disque)
    - Optimisations possibles (rétention, compression, archivage)
 
-Résumer : "{{resource_domain}} : X/Y utilisé (Z%), projection 80% dans N jours, actions: [...]".
+Résumer : "{{resource_domain}} : X/Y utilisé (Z%), projection 80% dans N jours (ou « non mesurée »), actions: [...]".
 ```
 
 ## Variables
@@ -51,7 +54,7 @@ Résumer : "{{resource_domain}} : X/Y utilisé (Z%), projection 80% dans N jours
 | `resource_domain` | Domaine de ressource | CPU, RAM, Stockage, IOPS |
 | `metric_queries` | Requêtes Prometheus/commandes | `node_memory_MemAvailable_bytes`, `df -h` |
 | `resources` | Liste de ressources à analyser | LXC containers, PVs, nodes |
-| `growth_factor` | Facteur de croissance estimé | 1.1x/mois pour les logs |
+| `growth_factor` | Facteur de croissance mesuré sur la série interrogée (absent sinon) | 1.1x/mois pour les logs |
 | `rightsizing` | Inclure analyse rightsizing (bool) | true/false |
 
 ## Prompts utilisant ce template
