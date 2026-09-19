@@ -1,0 +1,3 @@
+# Exceptions de scripts/check-emitted-prose.py — une par ligne : <chemin>:<règle>  # justification
+# Une exception sans justification est refusée par le script.
+framework/agent-mesh-network.md:estimate-placeholder  # `estimated_free_at` est un horodatage de disponibilité que l'agent déclare pour le registre mesh, pas une mesure présentée comme un fait

@@ -190,7 +190,7 @@ review:
     1_presentation: "Le producteur présente l'artefact + contexte"
     2_review: "Chaque revieweur examine et produit des findings"
     3_discussion: "Discussion sur les findings critiques"
-    4_verdict: "Verdict collectif avec trust score"
+    4_verdict: "Verdict collectif avec, par dimension, pass/fail/unverified et sa preuve"
   
   deliverable:
     type: "review_report"
@@ -204,7 +204,7 @@ review:
       - ⚠️ {concerns}
       - 🔴 {issues}
       
-      **Trust Score** : {composite}/100
+      **Validation** : {pass}/{verified} dimensions vérifiées · non vérifiées : {unverified}
       **Verdict** : {approve | approve_with_notes | challenge}
 ```
 
@@ -228,7 +228,7 @@ participant_selection:
     availability: "Agents en status online ou idle"
     
     # Recommandé
-    synergy: "Privilégier les paires avec synergy_score élevé (ARG)"
+    synergy: "Privilégier les paires avec le plus de handoffs acceptés sans challenge (ARG)"
     challenge_potential: "Inclure au moins 1 agent avec historique de 'challenge'"
     
     # Contraintes

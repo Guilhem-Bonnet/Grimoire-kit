@@ -1,6 +1,6 @@
 # Template: audit-report
 
-> Audit systématique avec rapport tabulaire et scoring.
+> Audit systématique avec rapport tabulaire : des constats sourcés et comptés, jamais notés.
 > Utilisé par 7 prompts (14%) chez Vault, Hawk, Phoenix, Sentinel.
 
 ## Structure
@@ -21,11 +21,11 @@ FORMAT DE SORTIE :
 |{{table_separators}}|
 ...
 
-{{#if scoring}}
-### Score global : X/10
-{{/if}}
+Chaque ligne cite la cible scannée (chemin, ressource, commande). Une cible
+non scannée n'entre dans aucun compteur : elle est listée « non vérifiée ».
 
-Résumer : "X conformes, Y avertissements, Z critiques".
+Résumer : "X conformes, Y avertissements, Z critiques, W non vérifiés" — les
+quatre nombres sont des comptes de lignes du tableau, pas une note.
 ```
 
 ## Variables
@@ -39,7 +39,6 @@ Résumer : "X conformes, Y avertissements, Z critiques".
 | `table_columns` | Colonnes du rapport | Item \| Statut \| Détail |
 | `auto_fix` | Correction auto ? (bool) | true/false |
 | `auto_fix_threshold` | Seuil de correction auto | critiques uniquement |
-| `scoring` | Inclure un score ? (bool) | true/false |
 
 ## Prompts utilisant ce template
 

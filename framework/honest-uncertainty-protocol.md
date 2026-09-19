@@ -143,10 +143,10 @@ uncertainty_report:
   # Options que je vois (si j'en ai)
   options:
     - option: "option A"
-      confidence: "30%"
+      basis: "ce qui fonde l'option — fichier lu, commande exécutée, doc citée ; jamais un pourcentage de confiance"
       risk: "risque associé"
     - option: "option B"
-      confidence: "45%"
+      basis: "..."
       risk: "risque associé"
 
   # Impact sur le livrable
@@ -204,7 +204,7 @@ evasion_detection:
       on_fail: "REJECT — Préciser le blocage exact"
 
     - name: "pattern_check"
-      rule: "Si agent a escaladé >2 fois en 5 tâches ET uniquement sur tâches estimées >30min"
+      rule: "Si agent a escaladé >2 fois en 5 tâches ET uniquement sur des tâches sans verdict mécanique (classe de vérifiabilité V1/V2), jamais sur une tâche V0 dont le gate suffit"
       on_fail: "FLAG — Pattern d'évitement potentiel, forcer tentative avec monitoring"
 
     - name: "partial_delivery_check"
@@ -297,7 +297,7 @@ uncertainty_report:
     - "Vérifié le .gitignore : pas exclu"
   options:
     - option: "Copier config.staging.yaml et adapter"
-      confidence: "40%"
+      basis: "config.staging.yaml lu : mêmes clés host/port/tls que config.dev.yaml"
       risk: "Les valeurs staging peuvent différer de prod (ports, TLS, secrets)"
   impact_assessment:
     blocking: true

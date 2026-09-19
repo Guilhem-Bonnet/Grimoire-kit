@@ -18,7 +18,7 @@ Ancien agent dédié (`memory-keeper`, faisceau `{read, edit}` distingué unique
 
 ## Audit mémoire
 
-Scanner `_grimoire/_memory/` (agent-learnings, decisions-log, shared-context, session-state, activity.jsonl) → mesurer fraîcheur, couverture et doublons → produire un rapport chiffré (nombre d'entrées, dates, scores), jamais une impression en prose.
+Scanner `_grimoire/_memory/` (agent-learnings, decisions-log, shared-context, session-state, activity.jsonl) → mesurer fraîcheur, couverture et doublons → produire un rapport chiffré (nombre d'entrées, dates, doublons comptés), jamais une impression en prose.
 
 ## Détection de contradictions
 

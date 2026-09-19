@@ -238,7 +238,7 @@ critical_path:
     # Assignation agents : meilleur agent pour le critical path
     agent_assignment: |
       Pour les tâches du critical path :
-      → Utiliser ARG pour sélectionner l'agent avec le meilleur trust_score
+      → Utiliser ARG pour sélectionner l'agent au rôle déclaré, puis au plus de handoffs acceptés
       → Même si un agent moins optimal est plus disponible
     
     # Alertes

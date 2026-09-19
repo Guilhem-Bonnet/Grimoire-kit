@@ -28,6 +28,7 @@ install: ## Install package in editable mode with dev deps
 .PHONY: lint
 lint: ## Run ruff linter
 	$(PYTHON) -m ruff check src/ tests/ framework/tools/ framework/memory/
+	$(PYTHON) scripts/check-emitted-prose.py
 
 .PHONY: lint-fix
 lint-fix: ## Run ruff linter with auto-fix

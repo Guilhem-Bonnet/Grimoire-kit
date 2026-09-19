@@ -148,7 +148,6 @@ metrics:
   pending: 5
   failed: 0
   completion_pct: 25
-  estimated_remaining_steps: 5
 
 # ── Agent trace (handoffs) ───────────────────────────────────────────────────
 handoffs:
