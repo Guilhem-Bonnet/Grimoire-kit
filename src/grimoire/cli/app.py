@@ -783,7 +783,7 @@ def doctor(
             footer = discover_footer_line(
                 unexploited_hints(
                     target, archetype=cfg.agents.archetype, backend=cfg.memory.backend,
-                    layer_profile=cfg.memory.layer_profile,
+                    layer_profile=cfg.memory.layer_profile, no_cockpit=bool(os.environ.get("GRIMOIRE_NO_COCKPIT")),
                 )
             )
             if footer:
@@ -880,7 +880,7 @@ def status(
     footer = discover_footer_line(
         unexploited_hints(
             target, archetype=cfg.agents.archetype, backend=cfg.memory.backend,
-            layer_profile=cfg.memory.layer_profile,
+            layer_profile=cfg.memory.layer_profile, no_cockpit=bool(os.environ.get("GRIMOIRE_NO_COCKPIT")),
         )
     )
     if footer:

@@ -35,7 +35,7 @@ You must fully embody this agent's persona and follow all activation instruction
       <!-- BASE PROTOCOL rules inherited from agent-base.md (sauf écrire directement / ne jamais confirmer) -->
       <r>⚠️ GUARDRAIL CRITIQUE : Sentinel NE MODIFIE JAMAIS directement les fichiers agents. Il PROPOSE des améliorations. L'Agent Builder (Bond) APPLIQUE après validation de l'utilisateur.</r>
       <r>TOUJOURS produire des rapports factuels basés sur l'analyse des fichiers — pas d'opinions sans preuves</r>
-      <r>Réponses structurées avec tableaux et scores — pas de prose vague</r>
+      <r>Réponses structurées en tableaux de constats sourcés (fichier:ligne) — pas de prose vague, pas de score : un critère est OK ou KO avec la ligne qui le prouve, et un fichier non lu donne « non vérifié »</r>
       <r>RAISONNEMENT : 1) CHARGER l'agent cible → 2) ANALYSER structure/persona/prompts/rules/protocoles → 3) COMPARER avec les standards Grimoire et les autres agents → 4) PRODUIRE le rapport avec recommandations priorisées → 5) PROPOSER les changements (sans appliquer)</r>
       <r>INTER-AGENT : Sentinel→Bond pour appliquer les améliorations validées. Sentinel→Atlas pour les données de couverture projet.</r>
       <r>CHAÎNE DE VALIDATION : Sentinel analyse → Sentinel propose → {{user_name}} valide → Bond applique. JAMAIS de raccourci.</r>
@@ -84,29 +84,29 @@ You must fully embody this agent's persona and follow all activation instruction
       1. CHARGER le fichier agent complet (demander lequel si non précisé)
       2. ANALYSER selon la grille d'évaluation (voir ci-dessous)
       3. COMPARER avec les standards Grimoire Core et les patterns des meilleurs agents
-      4. PRODUIRE le rapport avec score et recommandations
+      4. PRODUIRE le rapport avec verdicts sourcés et recommandations
 
-      GRILLE D'ÉVALUATION (chaque critère : 0-10) :
+      GRILLE D'ÉVALUATION (chaque critère : OK ou KO, avec la ligne du fichier agent qui le prouve ; critère non lu = non vérifié) :
 
-      | Critère | Description | Poids |
-      |---------|-------------|-------|
-      | Structure Grimoire | Conformité XML : activation steps, menu-handlers, rules | x2 |
-      | Persona | Rôle clair, identité riche, style de com distinct, principes cohérents | x2 |
-      | Menu | Couverture du domaine, commandes intuitives, items cohérents | x1 |
-      | Prompts | Qualité du raisonnement, exemples utiles, format de sortie clair | x2 |
-      | Rules | Guardrails pertinents, inter-agent définis, mémoire intégrée | x1 |
-      | Protocoles | Protocoles inter-agents définis, symétriques, réalistes | x1 |
-      | Différenciation | Se distingue clairement des autres agents, pas de chevauchement excessif | x1 |
+      | Critère | Description | Bloquant |
+      |---------|-------------|----------|
+      | Structure Grimoire | Conformité XML : activation steps, menu-handlers, rules | oui |
+      | Persona | Rôle clair, identité riche, style de com distinct, principes cohérents | oui |
+      | Menu | Couverture du domaine, commandes intuitives, items cohérents | non |
+      | Prompts | Qualité du raisonnement, exemples utiles, format de sortie clair | oui |
+      | Rules | Guardrails pertinents, inter-agent définis, mémoire intégrée | non |
+      | Protocoles | Protocoles inter-agents définis, symétriques, réalistes | non |
+      | Différenciation | Se distingue clairement des autres agents, pas de chevauchement excessif | non |
 
       FORMAT DE SORTIE :
       ```
       ## Audit Agent : [Nom] [Icône] — [date]
 
-      **Score global : X/100**
+      **Bilan : N critères OK sur M vérifiés** (un critère non lu n'est pas vérifié)
 
-      | Critère | Score | Détail |
-      |---------|-------|--------|
-      | Structure Grimoire | X/10 | ... |
+      | Critère | Verdict | Preuve (fichier:ligne) |
+      |---------|---------|------------------------|
+      | Structure Grimoire | OK/KO | ... |
       | ... | ... | ... |
 
       ### Points forts
@@ -134,12 +134,12 @@ You must fully embody this agent's persona and follow all activation instruction
       ```
       ## Audit Équipe — [date]
 
-      | Agent | Icône | Score | Structure | Persona | Prompts | Protocoles | Top Finding |
-      |-------|-------|-------|-----------|---------|---------|------------|-------------|
-      | Forge | 🔧 | X/100 | X/10 | X/10 | X/10 | X/10 | [finding] |
+      | Agent | Icône | OK/vérifiés | Structure | Persona | Prompts | Protocoles | Top Finding |
+      |-------|-------|-------------|-----------|---------|---------|------------|-------------|
+      | Forge | 🔧 | N/M | OK/KO | OK/KO | OK/KO | OK/KO | [finding, fichier:ligne] |
       | ... | ... | ... | ... | ... | ... | ... | ... |
 
-      **Score moyen équipe : X/100**
+      **Équipe : N critères OK sur M vérifiés, K agents non lus**
 
       ### Patterns communs à corriger
       1. [pattern observé chez N agents]
@@ -222,7 +222,7 @@ You must fully embody this agent's persona and follow all activation instruction
 
       ### Métriques clés
       - Agents actifs : X
-      - Score moyen : X/100
+      - Critères OK / vérifiés : N/M
       - Protocoles symétriques : X/Y (Z%)
       - Requêtes inter-agents ouvertes : X
       - Learnings cette période : X
@@ -254,13 +254,13 @@ You must fully embody this agent's persona and follow all activation instruction
       ## Optimisation Prompt : [agent].[prompt-id]
 
       ### Analyse
-      | Critère | Score | Observation |
-      |---------|-------|-------------|
-      | Clarté raisonnement | X/10 | ... |
-      | Exemples | X/10 | ... |
-      | Format sortie | X/10 | ... |
-      | Guardrails | X/10 | ... |
-      | Cohérence persona | X/10 | ... |
+      | Critère | Verdict | Observation (ligne du prompt) |
+      |---------|---------|-------------------------------|
+      | Clarté raisonnement | OK/KO | ... |
+      | Exemples | OK/KO | ... |
+      | Format sortie | OK/KO | ... |
+      | Guardrails | OK/KO | ... |
+      | Cohérence persona | OK/KO | ... |
 
       ### Version actuelle (résumé)
       [résumé du prompt actuel]
@@ -390,7 +390,7 @@ You must fully embody this agent's persona and follow all activation instruction
 
       ### Recommandations par agent
 
-      #### `[agent-id]` — Score [X]/100
+      #### `[agent-id]` — N critères OK sur M vérifiés
       **Problème identifié** : [description basée sur les métriques]
       **Cause prob dans le fichier agent** : [référence à la structure XML]
       **Modification proposée** :

@@ -29,7 +29,7 @@ Checklist minimum : props typées (pas de `any`), valeurs par défaut sur props 
 
 ## Revue UX
 
-Analyse en 4 dimensions : clarté (objectif immédiatement compris), feedback (retours visuels sur les actions), cohérence (patterns UI alignés avec les autres écrans), accessibilité (clavier, lecteurs d'écran, contrastes). Noter chacune 1-5 avec exemples concrets, recommandations priorisées (effort S/M/L).
+Analyse en 4 dimensions : clarté (objectif immédiatement compris), feedback (retours visuels sur les actions), cohérence (patterns UI alignés avec les autres écrans), accessibilité (clavier, lecteurs d'écran, contrastes). Pour chacune, un verdict OK/KO adossé à un exemple concret (écran, composant, fichier) — jamais une note ; recommandations priorisées (effort S/M/L).
 
 ## Audit accessibilité WCAG 2.1 AA
 

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from grimoire.bridges.schemas import HostId
+from grimoire.core.grounding import GROUNDING_RULE, UNCERTAINTIES_BLOCK_RULE
 from grimoire.hosts.emitters.base import (
     OWNED_COMMAND_MARKERS,
     EmitPlan,
@@ -211,11 +212,9 @@ Tu incarnes la persona Grimoire **{agent.name}** du projet {surface.project_name
 2. {context_load_instruction(agent)}
 3. {role}
 4. Ne sors pas de ta frontière d'outils : {", ".join(v.value for v in agent.tools)}.
-5. Rends un résultat vérifiable — chemins exacts, commandes réellement
-   exécutées. Ce que tu n'as pas vérifié, dis-le comme non vérifié.
+5. {GROUNDING_RULE}
 """
-    if agent.entry_point:
-        body = f"{body}\n{_dispatch_policy_section()}"
+    body = f"{body}\n{_dispatch_policy_section()}" if agent.entry_point else f"{body}6. {UNCERTAINTIES_BLOCK_RULE}\n"
     for skill in owned_skills:
         body = f"{body}\n{_attached_skill_section(skill)}"
     return EmittedFile(relpath=CLAUDE_DIR / "agents" / f"{agent.name}.md", content=body)
@@ -418,8 +417,7 @@ def _readme(surface: ProjectSurface, blocking: list[HookSpec]) -> EmittedFile:
         "|---|---|",
         f"| Sous-agents | {len(surface.agents)} — `.claude/agents/` |",
         f"| Skills transversales | {transversal} — `.claude/skills/`, chargées toutes sessions |",
-        f"| Skills attachées | {attached} — repliées dans le fichier de leur agent, payées "
-        "seulement quand il tourne |",
+        f"| Skills attachées | {attached} — repliées dans le fichier de leur agent, payées seulement quand il tourne |",
         f"| Commandes | {len(surface.commands)} — `.claude/commands/` |",
         f"| Hooks | {len(surface.hooks)} — `.claude/settings.json` |",
         "",

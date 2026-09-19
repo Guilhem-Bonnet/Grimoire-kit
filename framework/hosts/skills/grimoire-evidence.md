@@ -49,6 +49,17 @@ Chaque preuve est une ligne concrète dans
 Remplacer le résumé placeholder du pack au lieu de l'entourer de texte : le
 gate lit le pack, pas la conversation.
 
+## Ce que tu affirmes
+
+Toute affirmation qui pèse sur une décision ou une livraison — un chiffre, un
+verdict, « ce module fait X » — va dans
+`_grimoire-output/evidence/<task_id>/claim-ledger.md` avec sa source :
+chemin lu (fichier:ligne), commande et sortie, contrat ou doc officielle.
+Le gate refuse, dès l'état `review`, une ligne « prouvé » sans source et une
+ligne « utiliser » dont le statut n'est pas « prouvé ». Une affirmation sans
+source reste une hypothèse : elle se livre marquée « non vérifié », jamais
+chiffrée ni notée.
+
 ## Avant de conclure
 
 ```bash

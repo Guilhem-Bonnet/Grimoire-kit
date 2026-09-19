@@ -1217,6 +1217,11 @@ def run_init(
     fmt = (ctx.obj or {}).get("output", "text")
     yes = (ctx.obj or {}).get("yes", False)
 
+    # Same opt-out as `--no-cockpit`, resolved once so every downstream
+    # consumer (Next Steps panel, not just the registry write) agrees
+    # (#617 review). `lite` sets nothing here anymore (deprecated, inert).
+    no_cockpit = no_cockpit or bool(os.environ.get("GRIMOIRE_NO_COCKPIT"))
+
     if memory_profile and not memory_profiles.is_known(memory_profile):
         if fmt == "json":
             typer.echo(json.dumps({"ok": False, "error": f"unknown memory profile: {memory_profile}"}, indent=2))
@@ -1276,8 +1281,7 @@ def run_init(
             if memory_profile == "standard":
                 backend = "qdrant-local"
     elif not memory_profile:
-        # #619 review: an explicit pinning `--backend` must not leave
-        # `memory_profile` empty, or `start_memory_stack()` below no-ops.
+        # #619 review: a pinning `--backend` must not leave this empty (no-op below).
         inferred = memory_profiles.infer(backend, offline=False)
         if inferred.id != memory_profiles.DEFAULT_PROFILE:
             memory_profile = "complet" if _is_redis_reachable() else inferred.id
@@ -1349,8 +1353,7 @@ def run_init(
             )
         backend = new_backend
     elif memory_profile and memory_profiles.REQ_DOCKER in memory_profiles.resolve(memory_profile).requires:
-        # Consent to *start* (arbitrage #619), on `requires` rather than a
-        # hardcoded `"complet"` so a `graphe` derived above gets it too.
+        # Consent to *start* (arbitrage #619), via `requires` so a `graphe` derived above gets it too.
         start_memory_stack_consent = yes or memory_stack == "up"
 
     # Phase 4.5: Name the collection by project (issue Grimoire-kit#496) — a
@@ -1430,12 +1433,9 @@ def run_init(
         else:
             qdrant_docker_started, qdrant_docker_message = _start_qdrant_docker(target)
 
-    # Phase 6.5: Memory step closes with the equivalent of `memory up --apply`
-    # plus a structural health check — never a full embedding-model load
-    # (that cost belongs to the first real memory use, not to `init`).
-    # Containers only ever start on consent (`start_memory_stack_consent`,
-    # resolved above per the interactive/`-y`/`--memory-stack up`/bare-script
-    # rules) — `complet` can be written without ever reaching this branch.
+    # Phase 6.5: closes the Memory step like `memory up --apply`, plus a
+    # structural health check (no embedding-model load, that cost belongs to
+    # first real use). Containers start only on `start_memory_stack_consent`.
     memory_stack_messages: list[str] = []
     if start_memory_stack_consent:
         from grimoire.core.exceptions import GrimoireRuntimeError

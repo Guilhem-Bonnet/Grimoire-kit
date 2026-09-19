@@ -425,3 +425,60 @@ class TestNeverMinimalAutomatically:
         result = self.resolver.resolve(_scan("terraform"))
         assert result.archetype == "infra-ops"
         assert result.is_best_guess is False
+
+
+class TestNakedStackReasonCitesRealMarkers:
+    """Copilot review on PR #617: the naked-stack reason text named a fixed
+    marker list per language (e.g. "pyproject.toml/setup.py/requirements.txt"
+    for every Python project, "Dockerfile" for every Docker project), but the
+    scanner (`_FILE_MARKERS`, scanner.py) recognises each stack from several
+    alternative markers — the fixed text could claim a file that was never on
+    disk. The reason must instead name whichever marker(s) `StackDetection.
+    evidence` actually recorded for that scan."""
+
+    def test_python_reason_names_the_evidence_actually_matched(self) -> None:
+        from grimoire.core.archetype_resolver import recommend_naked_stack
+
+        scan = ScanResult(
+            stacks=(StackDetection(name="python", confidence=0.7, evidence=("poetry.lock", "Pipfile")),),
+            project_type="generic",
+            root=Path("/fake"),
+        )
+        hint = recommend_naked_stack(scan)
+        assert "poetry.lock" in hint.reason
+        assert "Pipfile" in hint.reason
+        assert "pyproject.toml" not in hint.reason
+        assert "setup.py" not in hint.reason
+
+    def test_node_reason_names_the_evidence_actually_matched(self) -> None:
+        from grimoire.core.archetype_resolver import recommend_naked_stack
+
+        scan = ScanResult(
+            stacks=(StackDetection(name="javascript", confidence=0.6, evidence=("yarn.lock",)),),
+            project_type="generic",
+            root=Path("/fake"),
+        )
+        hint = recommend_naked_stack(scan)
+        assert "yarn.lock" in hint.reason
+        assert "package.json" not in hint.reason
+
+    def test_docker_reason_names_the_evidence_actually_matched(self) -> None:
+        """Same defect as Python, reported for Docker: `weak_signal_suggestion`
+        used to say "Dockerfile detected" unconditionally (issue now moot,
+        that branch was removed — a bare Dockerfile is no longer a weak
+        signal); `recommend_naked_stack`'s own Docker-specific reason (the
+        code path a Docker-only project now actually takes) must cite real
+        evidence the same way."""
+        from grimoire.core.archetype_resolver import recommend_naked_stack
+
+        scan = ScanResult(
+            stacks=(
+                StackDetection(name="docker", confidence=0.8, evidence=("docker-compose.yml", ".dockerignore")),
+            ),
+            project_type="generic",
+            root=Path("/fake"),
+        )
+        hint = recommend_naked_stack(scan)
+        assert "docker-compose.yml" in hint.reason
+        assert ".dockerignore" in hint.reason
+        assert "Dockerfile" not in hint.reason

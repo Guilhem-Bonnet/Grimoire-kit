@@ -265,20 +265,20 @@ discovery_protocol:
     process:
       1: "Chercher dans registry.agents[].capabilities (static + emergent)"
       2: "Filtrer par status != offline"
-      3: "Enrichir avec ARG : trust_score, synergy_score avec le demandeur"
-      4: "Trier par : capability_match × 0.4 + trust × 0.3 + availability × 0.3"
+      3: "Enrichir avec ARG : handoffs_accepted avec le demandeur"
+      4: "Trier par règles ordonnées : capabilities_matched, puis handoffs_accepted avec le demandeur, puis status"
       5: "Retourner le top 3"
     
     result:
       - agent: "architect/Winston"
-        match_score: 0.92
+        capabilities_matched: "4/4"
         status: "idle"          # disponible immédiatement
-        trust: 94
+        handoffs_accepted: "8/8"   # avec le demandeur (ARG)
         route: "p2p direct"
       - agent: "dev/Amelia"
-        match_score: 0.78
+        capabilities_matched: "3/4"
         status: "busy (2/5)"
-        trust: 87
+        handoffs_accepted: "11/12"
         route: "p2p queued"     # réponse asynchrone probable
   
   # "Qui travaille sur le même sujet ?"
@@ -303,18 +303,18 @@ Quand plusieurs agents sont éligibles :
 
 ```yaml
 load_balancing:
-  strategy: "weighted-round-robin"  # pas de random — déterministe et traçable
-  
-  factors:
-    availability: 0.40     # (max_concurrent - current_tasks) / max_concurrent
-    expertise: 0.35        # ARG trust_score + capability_match
-    recency: 0.15          # dernier heartbeat → favorise les agents actifs
-    synergy: 0.10          # ARG synergy_score avec les autres agents du workflow
-  
+  strategy: "ordered-rules"  # pas de random ni de pondération — déterministe et traçable
+
+  order:   # le premier critère discriminant tranche
+    1_availability: "(max_concurrent - current_tasks) le plus élevé"
+    2_expertise: "capabilities_matched, puis cross_validations_passed (ARG)"
+    3_recency: "dernier heartbeat le plus récent → favorise les agents actifs"
+    4_synergy: "handoffs_accepted avec les autres agents du workflow (ARG)"
+
   rules:
     - "Ne jamais assigner à un agent en status=busy avec queue_depth > 0"
     - "Distribuer équitablement sur les sessions longues"
-    - "Si expertise >> availability → notifier SOG du compromis"
+    - "Si l'agent le plus disponible n'a pas la capability → notifier SOG du compromis"
 ```
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">

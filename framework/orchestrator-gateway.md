@@ -38,7 +38,7 @@
 │  └─────────────────────┼───────────────────────────────────┘    │
 │                         │                                        │
 │                         ▼                                        │
-│            Résultat cohérent + Trust Score                       │
+│            Résultat cohérent + Verdicts CVTL                     │
 └──────────────────────────────────────────────────────────────────┘
                           │
         ┌─────────────────┼──────────────────┐
@@ -188,7 +188,7 @@ routing_engine:
     1_expertise_match: "L'agent a les capabilities pour cette tâche"
     2_workload_balance: "Si plusieurs agents qualifiés, choisir le moins chargé"
     3_context_continuity: "Privilégier l'agent qui a déjà travaillé sur ce sujet"
-    4_trust_history: "Privilégier l'agent avec le meilleur historique de trust scores"
+    4_handoff_history: "Privilégier l'agent avec le plus de handoffs acceptés sur ce type de tâche (ARG)"
   
   # Modes de dispatch
   dispatch_modes:
@@ -213,7 +213,7 @@ result_aggregation:
   # Sources
   inputs:
     - agent_outputs: ["{résultats de chaque agent}"]
-    - trust_scores: ["{scores CVTL si cross-validation}"]
+    - validation_reports: ["{verdicts CVTL par dimension si cross-validation}"]
     - uncertainty_reports: ["{rapports HUP si escalades}"]
     - pending_questions: ["{questions QEC non résolues}"]
   
@@ -221,7 +221,7 @@ result_aggregation:
   aggregation_process:
     1_merge: "Combiner les outputs selon la stratégie de merge appropriée"
     2_deconflict: "Si contradictions entre agents → signaler à l'utilisateur"
-    3_annotate: "Ajouter les trust scores et hypothèses sur chaque section"
+    3_annotate: "Ajouter les verdicts CVTL (dimensions vérifiées / non vérifiées) et hypothèses sur chaque section"
     4_summarize: "Résumé exécutif en haut, détails en dessous"
     5_present_questions: "Si questions QEC en attente → les ajouter en fin"
   
@@ -234,8 +234,8 @@ result_aggregation:
     {contenu détaillé agrégé}
     
     ---
-    🛡️ Trust: {composite_score}/100 | Produit par {agents} | Validé par {validators}
-    {hypothèses et notes si YELLOW}
+    🛡️ Validation : {pass}/{verified} dimensions vérifiées | Produit par {agents} | Validé par {validators}
+    {dimensions non vérifiées, hypothèses et notes si YELLOW}
     
     {questions QEC si en attente}
 ```
@@ -345,7 +345,7 @@ Ce mécanisme permet à l'orchestrateur de maintenir la cohérence sur 50+ écha
 |-----------|------------------|
 | **HUP (BM-50)** | Les sub-agents utilisent HUP → escaladent vers SOG |
 | **QEC (BM-51)** | SOG héberge le Question Buffer → agrège et présente |
-| **CVTL (BM-52)** | SOG déclenche les cross-validations → agrège les trust scores |
+| **CVTL (BM-52)** | SOG déclenche les cross-validations → agrège les verdicts par dimension |
 | **Subagent (BM-19)** | SOG utilise l'orchestration subagent pour le dispatch parallèle — en VS Code Copilot : synchrone, isolation de contexte (voir § Runtime) |
 | **Boomerang (BM-11)** | SOG peut déclencher un boomerang pour les tâches multi-step |
 | **A2A (BM-32)** | SOG peut dispatcher vers des agents externes via A2A |
@@ -371,7 +371,7 @@ Ce mécanisme permet à l'orchestrateur de maintenir la cohérence sur 50+ écha
 L'utilisateur ne voit pas la mécanique interne :
 - Pas de "je dispatch à l'agent X"
 - Pas de logs internes visibles
-- Juste le résultat agrégé avec trust score
+- Juste le résultat agrégé avec ses verdicts de validation
 
 ### Mode Verbose
 
@@ -397,7 +397,7 @@ Le Party Mode (EPIC 5) est un mode spécial de SOG où :
 [timestamp] [SOG]            [CLARIFY:received]   answers={count} | shadows_remaining={count}
 [timestamp] [SOG]            [PROMPT:enriched]    for={agent_id} | context_nodes={count}
 [timestamp] [SOG]            [ROUTE:dispatched]   mode={single|parallel|sequential} | agents=[{list}]
-[timestamp] [SOG]            [AGGREGATE:merged]   sources={count} | trust_composite={score}
+[timestamp] [SOG]            [AGGREGATE:merged]   sources={count} | dimensions={pass}/{verified}
 [timestamp] [SOG]            [AGGREGATE:conflict] between={agent1}↔{agent2} | resolution={method}
 [timestamp] [SOG]            [SESSION:node-added] type={decision|fact|assumption} | content="{summary}"
 ```
@@ -441,7 +441,7 @@ Prompt enrichi pour Dev/Amelia :
 
 ─── AGGREGATE ───
   Dev output: code implémenté, CC PASS
-  Architect validation: trust_score 91/100, approved
+  Architect validation: 4/4 dimensions pass (ADR-042 lu, tests exécutés), approved
   Questions QEC: aucune
 
 ─── RÉSULTAT ───
@@ -451,7 +451,7 @@ Orchestrateur → Guilhem :
    Fichiers modifiés : src/auth/jwt.ts, src/middleware/auth.ts, tests/auth.spec.ts
    Tests : 12/12 PASS, coverage 96%
    
-   🛡️ Trust: 91/100 | Produit par 💻 Amelia | Validé par 🏗️ Winston"
+   🛡️ Validation : 4/4 dimensions vérifiées | Produit par 💻 Amelia | Validé par 🏗️ Winston"
 ```
 
 

@@ -491,6 +491,7 @@ Budget par session :
 - **Décider soi-même** en appliquant : best practice > convention projet > choix le plus réversible
 - **Documenter** le choix fait : dans le résumé, mentionner "Choix autonome : X (raison : Y)"
 - **Ne PAS bloquer** — jamais s'arrêter parce qu'on "devrait demander". Agir, informer, itérer.
+- **Questions seulement** — le budget porte sur les questions, jamais sur les faits : un chiffre, une tendance ou un verdict sans commande exécutée ni fichier lu se livre marqué « non vérifié », il ne devient pas un « choix autonome ».
 
 > Le budget se recharge à chaque nouvelle tâche majeure.
 
@@ -712,6 +713,7 @@ Types : `agent-learnings` | `decisions` | `shared-context` | `failures`
 - **LOW** → demander confirmation : "? Je ne suis pas sûr de X. Voulez-vous que je vérifie ?"
 
 > **Règle** : En mode `expert`, omettre le signal sauf si LOW. En mode `beginner`, toujours expliciter.
+> Un signal de confiance n'est pas une preuve : il ne remplace jamais la source (commande exécutée, fichier:ligne). Sans source, l'affirmation est « non vérifiée », quel que soit le signal.
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 

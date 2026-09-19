@@ -57,7 +57,7 @@ patterns: [ORC-01]
 | `first-wins` | Premier sous-agent à terminer décide, les autres valident ou overrident | Decisions rapides avec validation |
 | `vote` | Chaque agent vote pour la meilleure option — majorité gagne | Choix techniques controversés |
 | `structured` | Chaque output va dans une section prédéfinie du résultat final | Rapports multi-sections |
-| `cross-validate` | Un agent produit, un second valide avec Trust Score (BM-52 CVTL) | Outputs critiques, ADRs, décisions irréversibles |
+| `cross-validate` | Un agent produit, un second valide par dimension — verdict pass/fail/unverified avec preuve (BM-52 CVTL) | Outputs critiques, ADRs, décisions irréversibles |
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
@@ -152,15 +152,15 @@ spawn:
     task: "Implémenter le module auth JWT selon ADR-042. CC PASS obligatoire."
     output_key: implementation
   - agent: architect
-    task: "Valider l'implémentation {implementation}. Produire un cross_validation_report avec trust_score."
+    task: "Valider l'implémentation {implementation}. Produire un cross_validation_report avec un verdict et une preuve par dimension."
     output_key: validation
     depends_on: implementation
 merge:
   strategy: cross-validate         # NOUVELLE STRATÉGIE (BM-52)
   primary_agent: dev
   validator_agent: architect
-  trust_threshold: 70              # score minimum pour accepter
-  on_below_threshold: escalate_to_user
+  require: "no failed dimension"   # aucune dimension fail ; les unverified sont nommées dans les notes
+  on_failed_dimension: escalate_to_user
   save_to: "_grimoire-output/implementation-artifacts/auth-validated.md"
 ```
 

@@ -54,7 +54,7 @@ from grimoire.core.standard_checks.controls import (
     _verify_score_and_exceptions,
 )
 from grimoire.core.standard_checks.gate_remedy import missing_artifact_message
-from grimoire.core.standard_checks.gate_review_checks import review_state_content_checks
+from grimoire.core.standard_checks.gate_review_checks import in_progress_content_checks, review_state_content_checks
 from grimoire.core.standard_checks.gate_test_run import verify_recorded_test_run_is_green
 from grimoire.core.standard_checks.registry import (
     DEFAULT_SCORE_DIMENSIONS as DEFAULT_SCORE_DIMENSIONS,
@@ -1576,6 +1576,8 @@ def check_evidence_gates(
         test_run_result = StandardVerificationResult(profile=profile.id, project_root=root)
         verify_recorded_test_run_is_green(root, normalized_task_id, test_run_result, state=state)
         checks.extend(test_run_result.checks)
+    if state == "in_progress":  # Issue #614 : claim-ledger ligne à ligne, voir gate_review_checks.
+        checks.extend(in_progress_content_checks(root, profile, normalized_task_id))
     if profile.id in {"orchestrated", "governed", "production"} and state in {"in_progress", "review", "accepted", "released"}:
         if not (root / required_paths["memory_policy"]).is_file():
             missing.append("memory_policy")

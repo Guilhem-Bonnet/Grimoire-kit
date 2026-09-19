@@ -136,6 +136,28 @@ def _stack_skills_for(detected: set[str]) -> list[str]:
     return sorted({_STACK_SKILL_FOR_STACK[name] for name in detected if name in _STACK_SKILL_FOR_STACK})
 
 
+def _markers_for(scan: ScanResult, *stack_names: str) -> str:
+    """The marker file(s) `StackScanner` actually matched for `stack_names`.
+
+    Copilot review on PR #617: the naked-stack reasons named a fixed marker
+    list per language (e.g. "pyproject.toml/setup.py/requirements.txt" for
+    every Python project), but `_FILE_MARKERS` (scanner.py) recognises a
+    Python project from any of six markers — poetry.lock, Pipfile,
+    .python-version included — so the fixed text could name files that were
+    never on disk. `StackDetection.evidence` already records exactly which
+    globs matched; this derives the reason text from that instead of from a
+    hardcoded guess, deduplicated across every stack name given (a Node
+    project can match both "javascript" and "typescript" detections).
+    """
+    seen: list[str] = []
+    for detection in scan.stacks:
+        if detection.name in stack_names:
+            for marker in detection.evidence:
+                if marker not in seen:
+                    seen.append(marker)
+    return ", ".join(seen) if seen else "/".join(stack_names)
+
+
 def _detect_test_evidence(root: Path) -> str:
     """Best-effort mention of a test directory — never fatal on a fake/missing root."""
     try:
@@ -203,12 +225,13 @@ def recommend_naked_stack(scan: ScanResult) -> StackRecommendation:
     skills_text = ", ".join(skills) if skills else "no dedicated stack skill yet"
 
     if "python" in detected:
+        markers = _markers_for(scan, "python")
         evidence = _detect_test_evidence(scan.root)
         note = f", {evidence}" if evidence else ""
         return StackRecommendation(
             archetype="stack",
             reason=(
-                f"Python project detected (pyproject.toml/setup.py/requirements.txt{note}) "
+                f"Python project detected ({markers}{note}) "
                 "with no asserted domain (web/infra/creative) — stack (Atlas) fits, "
                 f"with {skills_text} attached."
             ),
@@ -217,12 +240,13 @@ def recommend_naked_stack(scan: ScanResult) -> StackRecommendation:
         )
 
     if "javascript" in detected or "typescript" in detected:
+        markers = _markers_for(scan, "javascript", "typescript")
         runner = _package_json_test_runner(scan.root)
         note = f" ({runner})" if runner else ""
         return StackRecommendation(
             archetype="stack",
             reason=(
-                f"Node project detected (package.json{note}) with no confirmed frontend "
+                f"Node project detected ({markers}{note}) with no confirmed frontend "
                 f"framework (React/Vue) — stack (Atlas) fits, with {skills_text} attached."
             ),
             propose_discovery=True,
@@ -230,10 +254,11 @@ def recommend_naked_stack(scan: ScanResult) -> StackRecommendation:
         )
 
     if "go" in detected:
+        markers = _markers_for(scan, "go")
         return StackRecommendation(
             archetype="stack",
             reason=(
-                f"Go project detected (go.mod) with no asserted domain — stack (Atlas) "
+                f"Go project detected ({markers}) with no asserted domain — stack (Atlas) "
                 f"fits, with {skills_text} attached."
             ),
             propose_discovery=True,
@@ -241,15 +266,27 @@ def recommend_naked_stack(scan: ScanResult) -> StackRecommendation:
         )
 
     if "rust" in detected:
+        markers = _markers_for(scan, "rust")
         return StackRecommendation(
             archetype="stack",
             reason=(
-                "Rust project detected (Cargo.toml) with no asserted domain — stack "
+                f"Rust project detected ({markers}) with no asserted domain — stack "
                 "(Atlas, the generalist) still applies, though no dedicated stack "
                 "skill exists yet for Rust."
             ),
             propose_discovery=True,
             language="rust",
+        )
+
+    if "docker" in detected:
+        markers = _markers_for(scan, "docker")
+        return StackRecommendation(
+            archetype="stack",
+            reason=(
+                f"Docker detected ({markers}) with no asserted domain (web/infra/creative) "
+                f"— stack (Atlas) fits, with {skills_text} attached."
+            ),
+            propose_discovery=True,
         )
 
     return StackRecommendation(
