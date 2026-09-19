@@ -400,7 +400,7 @@ project-context.yaml       # Config globale du projet
 3. **Context**: Charger `_grimoire/_memory/shared-context.md` au démarrage
 4. **Decisions**: Les décisions sont loguées dans `_grimoire/_memory/decisions-log.md`
 5. **Errors**: Les erreurs significatives sont documentées dans `_grimoire/_memory/failure-museum.md`
-6. **No hallucination**: Quand une information n'est pas dans shared-context.md, demander à l'utilisateur plutôt que deviner
+6. **No hallucination**: Quand une information n'est pas dans shared-context.md, demander à l'utilisateur plutôt que deviner ; un chiffre, un score ou un verdict sans commande exécutée ni fichier lu (fichier:ligne) s'écrit « non vérifié », jamais estimé
 
 ## CLI Reference
 

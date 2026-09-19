@@ -2,13 +2,13 @@
 
 # <img src="../docs/assets/icons/seal.svg" width="32" height="32" alt=""> Cross-Validation & Trust Layer (CVTL) — Vérification Croisée Multi-Agents
 
-> **BM-52** — Protocole de vérification croisée et scoring de confiance pour les outputs critiques.
+> **BM-52** — Protocole de vérification croisée et verdicts par dimension pour les outputs critiques.
 >
 > **Problème résolu** : Un seul agent peut avoir des biais, des angles morts, ou des erreurs
 > de raisonnement. La cross-validation soumet les outputs critiques à un regard indépendant.
 >
 > **Principe** : Les livrables critiques sont vérifiés par un second agent avant d'être
-> marqués comme fiables. Chaque output porte un score de confiance composite visible.
+> marqués comme fiables. Chaque output porte un rapport de verdicts par dimension, chacun avec sa preuve.
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
@@ -108,13 +108,22 @@ cross_validation_report:
   
   verdict: approve | approve_with_notes | challenge | reject
   
-  # Score de confiance composite
-  trust_score:
-    factual_accuracy: 0-100    # les faits sont-ils vérifiables ?
-    logical_coherence: 0-100   # le raisonnement tient-il ?
-    constraint_alignment: 0-100 # cohérent avec les contraintes projet ?
-    implementation_feasibility: 0-100  # réalisable techniquement ?
-    composite: 0-100           # moyenne pondérée
+  # Verdicts par dimension — jamais un chiffre, toujours une preuve
+  dimensions:
+    factual_accuracy:                  # les faits sont-ils vérifiables ?
+      verdict: pass | fail | unverified
+      evidence: "fichier lu, commande exécutée ou doc citée — vide si unverified"
+    logical_coherence:                 # le raisonnement tient-il ?
+      verdict: pass | fail | unverified
+      evidence: "..."
+    constraint_alignment:              # cohérent avec les contraintes projet ?
+      verdict: pass | fail | unverified
+      evidence: "..."
+    implementation_feasibility:        # réalisable techniquement ?
+      verdict: pass | fail | unverified
+      evidence: "..."
+  tally: "{pass} dimensions pass sur {verified} vérifiées"  # compte, jamais une moyenne pondérée
+  unverified: ["noms des dimensions restées unverified"]
   
   # Findings
   findings:
@@ -145,8 +154,8 @@ cross_validation_report:
 ```yaml
 resolution_rules:
   approve:
-    action: "Output marqué ✅ VALIDÉ + trust_score affiché"
-    trace: "[CVTL:approved] composite={score}"
+    action: "Output marqué ✅ VALIDÉ + verdicts par dimension affichés"
+    trace: "[CVTL:approved] dimensions={pass}/{verified}"
   
   approve_with_notes:
     action: "Output livré + notes de concerns ajoutées en annexe"
@@ -169,32 +178,33 @@ resolution_rules:
 ### Calcul
 
 ```
-composite = (factual_accuracy × 0.35) 
-          + (logical_coherence × 0.25) 
-          + (constraint_alignment × 0.25) 
-          + (implementation_feasibility × 0.15)
+tally    = "{pass} dimensions pass sur {verified} vérifiées"
+verified = dimensions dont le verdict est pass ou fail (les unverified sont nommées, pas comptées)
 ```
+
+Aucune pondération, aucune moyenne : une dimension sans preuve reste `unverified` et est
+nommée dans les notes. Aucun chiffre n'est produit que le validateur n'a pas compté.
 
 ### Affichage
 
-Chaque output validé affiche son trust score :
+Chaque output validé affiche ses verdicts par dimension :
 
 ```markdown
 ---
-🛡️ Trust Score: 87/100 — Validé par {validator_icon} {validator_name}
-   Exactitude: 92 · Cohérence: 85 · Alignement: 88 · Faisabilité: 78
-   Note: 1 hypothèse à vérifier (charge utilisateur)
+🛡️ Validation : 3/3 dimensions vérifiées — Validé par {validator_icon} {validator_name}
+   Exactitude: pass (package.json lu) · Cohérence: pass · Alignement: pass (ADR-042) · Faisabilité: unverified
+   Note: 1 dimension non vérifiée (Faisabilité) · 1 hypothèse à vérifier (charge utilisateur)
 ---
 ```
 
 ### Seuils
 
-| Score | Signification | Action |
-|-------|--------------|--------|
-| **90-100** | Haute confiance | Livrer directement |
-| **70-89** | Confiance solide | Livrer + notes visibles |
-| **50-69** | Confiance modérée | Review utilisateur recommandé |
-| **<50** | Confiance basse | Blocage → escalade utilisateur |
+| Verdicts | Signification | Action |
+|----------|--------------|--------|
+| Toutes les dimensions `pass` | Vérifié intégralement | Livrer directement |
+| Aucune `fail`, au moins une `unverified` | Vérifié partiellement | Livrer + notes nommant chaque dimension non vérifiée |
+| Une `fail` corrigeable par le producteur | Défaut constaté | Challenger → correction → re-validation |
+| Une `fail` sur un fait ou une contrainte projet | Défaut bloquant | Blocage → escalade utilisateur |
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
@@ -244,14 +254,14 @@ adversarial_review:
 ## Résumé
 - Outputs produits : {count}
 - Cross-validations effectuées : {cv_count}
-- Trust Score moyen : {avg_score}/100
+- Dimensions vérifiées : {pass_total}/{verified_total} pass · non vérifiées : {unverified_total}
 
 ## Détail par Output
-| Output | Producteur | Validateur | Trust Score | Verdict |
-|--------|-----------|-----------|-------------|---------|
-| ADR-042 | 🏗️ Winston | 💻 Amelia | 91/100 | ✅ Approuvé |
-| US-042 impl | 💻 Amelia | 🧪 Quinn | 85/100 | ✅ Avec notes |
-| Config prod | 💻 Amelia | 🏗️ Winston | 62/100 | ⚠️ Challengé |
+| Output | Producteur | Validateur | Validation | Verdict |
+|--------|-----------|-----------|------------|---------|
+| ADR-042 | 🏗️ Winston | 💻 Amelia | 4/4 pass | ✅ Approuvé |
+| US-042 impl | 💻 Amelia | 🧪 Quinn | 3/3 pass · 1 non vérifiée | ✅ Avec notes |
+| Config prod | 💻 Amelia | 🏗️ Winston | 3/4 pass · 1 fail | ⚠️ Challengé |
 
 ## Hypothèses Non Vérifiées
 1. Charge <10k users (source: ADR-042, impact: architecture scaling)
@@ -273,8 +283,8 @@ merge:
   strategy: "cross-validate"    # NOUVELLE STRATÉGIE
   primary_agent: "dev"          # agent qui produit
   validator_agent: "qa"         # agent qui valide
-  trust_threshold: 70           # score minimum pour accepter
-  on_below_threshold: "escalate_to_user"  # ou "retry" ou "challenge"
+  require: "no failed dimension"  # aucune dimension fail ; les unverified sont nommées dans les notes
+  on_failed_dimension: "escalate_to_user"  # ou "retry" ou "challenge"
   save_to: "_grimoire-output/implementation-artifacts/{output}-validated.md"
 ```
 
@@ -285,7 +295,7 @@ merge:
 ```
 [timestamp] [orchestrator]    [CVTL:requested]   producer=dev/Amelia | validator=qa/Quinn | type=code
 [timestamp] [qa/Quinn]        [CVTL:validating]  cv-id=cv-dev-001 | focus=testability+coverage
-[timestamp] [qa/Quinn]        [CVTL:verdict]     cv-id=cv-dev-001 | verdict=approve_with_notes | score=85
+[timestamp] [qa/Quinn]        [CVTL:verdict]     cv-id=cv-dev-001 | verdict=approve_with_notes | dimensions=3/3 | unverified=implementation_feasibility
 [timestamp] [orchestrator]    [CVTL:resolved]    cv-id=cv-dev-001 | action=deliver_with_notes
 [timestamp] [orchestrator]    [CVTL:adversarial] trigger=irréversible | devil=architect | defender=dev
 ```
@@ -296,8 +306,8 @@ merge:
 
 - Orchestrator Gateway : [framework/orchestrator-gateway.md](orchestrator-gateway.md) (BM-53) — déclenche les validations
 - Honest Uncertainty : [framework/honest-uncertainty-protocol.md](honest-uncertainty-protocol.md) (BM-50) — confiance des validateurs
-- Agent Relationship Graph : [framework/agent-relationship-graph.md](agent-relationship-graph.md) (BM-57) — trust scores alimentent le graphe
-- Selective Huddle : [framework/selective-huddle-protocol.md](selective-huddle-protocol.md) (BM-56) — huddle déclenché si trust < seuil
+- Agent Relationship Graph : [framework/agent-relationship-graph.md](agent-relationship-graph.md) (BM-57) — verdicts CVTL alimentent le graphe
+- Selective Huddle : [framework/selective-huddle-protocol.md](selective-huddle-protocol.md) (BM-56) — huddle déclenché sur dimension fail
 - Event Log : [framework/event-log-shared-state.md](event-log-shared-state.md) (BM-59) — événements CVTL persistés
 - Hybrid Parallelism : [framework/hybrid-parallelism-engine.md](hybrid-parallelism-engine.md) (BM-58) — mode cross-validate dans DAG
 

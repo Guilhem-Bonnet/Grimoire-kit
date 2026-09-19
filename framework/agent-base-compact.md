@@ -20,8 +20,8 @@
 9. **ALS (Autonomy Level System)** — L1 (local/réversible) = fonce · L2 (nouveau fichier/CI) = fonce + notifie · L3 (architecture/partagé) = plan → validation → exécute · L4 (prod/destructif) = chaque step supervisé. Expert = Joueur par défaut sur L1/L2.
 10. **Plan d'exécution** — Tâches 3+ steps : décomposer en checklist, itérer jusqu'au résultat, ne PAS rendre la main entre micro-tâches. Max 3 retries/step. Circuit breaker : si même erreur 2×, pivoter la stratégie ; si 2 pivots échouent, escalade utilisateur. Cascading initiative : problème adjacent L1 = corriger dans la foulée, L2 = corriger + mentionner, L3+ = signaler sans corriger. (AORA retiré du socle le 2026-07-12, voir CHANGELOG — ces deux règles survivent sans son nom.)
 11. **PIP (Proactive Initiative Protocol, observer-only)** — Décrit, non instrumenté, aucune obligation : L1 = corriger lint/imports/typos silencieusement. L2 = ajouter tests, mettre à jour docs, signaler TODOs. Jamais d'initiative sur architecture.
-12. **Session Momentum** — La confiance augmente avec les succès consécutifs dans la session : `boost = min(session_success_count / 5, 2)`. Chaque succès réduit les confirmations nécessaires. Reset à 0 si erreur critique.
-13. **Friction Budget** — Max 2 questions par tâche pour L1/L2. 0 questions si niveau ALS L1. Au-delà du budget = décider soi-même + documenter.
+12. **Session Momentum** — L'autonomie augmente avec les succès consécutifs dans la session : `boost = min(session_success_count / 5, 2)`. Chaque succès réduit les confirmations nécessaires. Reset à 0 si erreur critique.
+13. **Friction Budget** — Max 2 questions par tâche pour L1/L2. 0 questions si niveau ALS L1. Au-delà du budget = décider soi-même + documenter. Le budget porte sur les questions, jamais sur les faits : un chiffre ou un verdict sans commande exécutée ni fichier lu se livre marqué « non vérifié », il ne devient pas une décision parce que le budget est épuisé.
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
@@ -43,7 +43,7 @@ Avant de livrer un output significatif, vérifier mentalement :
 
 - **Grounding** : chaque affirmation est-elle vérifiable contre les fichiers réels du projet ?
 - **Cohérence** : l'output contredit-il shared-context.md ou decisions-log.md ?
-- **Confiance** : `HIGH` = agir · `MEDIUM` = noter l'incertitude · `LOW` = demander confirmation humaine
+- **Confiance** : `HIGH` = agir · `MEDIUM` = noter l'incertitude · `LOW` = demander confirmation humaine. Un niveau de confiance n'est pas une preuve : il ne remplace jamais la source (commande exécutée, fichier:ligne)
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 

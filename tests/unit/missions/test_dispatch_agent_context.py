@@ -79,9 +79,7 @@ def test_agent_sans_contexte_declare_ne_regresse_pas(tmp_path: Path) -> None:
     _write_agent_without_context(tmp_path, "sans-contexte")
     assert agent_declared_context(tmp_path, "sans-contexte") == ()
 
-    report = run_dispatch(
-        service, tid, checks=(), dry_run=True, agent="sans-contexte", project_root=tmp_path
-    )
+    report = run_dispatch(service, tid, checks=(), dry_run=True, agent="sans-contexte", project_root=tmp_path)
     assert report.prompt == prompt_sans_agent
     assert "Contexte déclaré de l'agent" not in report.prompt
 
@@ -94,9 +92,7 @@ def test_agent_inconnu_ne_regresse_pas(tmp_path: Path) -> None:
 
     prompt_sans_agent = build_prompt(task)
 
-    report = run_dispatch(
-        service, tid, checks=(), dry_run=True, agent="agent-qui-nexiste-pas", project_root=tmp_path
-    )
+    report = run_dispatch(service, tid, checks=(), dry_run=True, agent="agent-qui-nexiste-pas", project_root=tmp_path)
     assert report.prompt == prompt_sans_agent
 
 
@@ -129,9 +125,7 @@ def test_bundle_avec_contexte_declare_est_plus_petit_ou_egal_et_contient_les_che
     declared = agent_declared_context(tmp_path, "avec-contexte")
     assert declared == (context_rel,)
 
-    report_avec = run_dispatch(
-        service, tid_avec, checks=(), dry_run=True, agent="avec-contexte", project_root=tmp_path
-    )
+    report_avec = run_dispatch(service, tid_avec, checks=(), dry_run=True, agent="avec-contexte", project_root=tmp_path)
     report_sans = run_dispatch(
         service, tid_sans, checks=(), dry_run=True, agent="sans-contexte-mesure", project_root=tmp_path
     )
@@ -149,3 +143,14 @@ def test_bundle_avec_contexte_declare_est_plus_petit_ou_egal_et_contient_les_che
     # mêmes critères d'acceptation) : la seule différence est le contexte
     # déclaré, jamais du superflu qui n'a rien à voir avec la tâche ou l'agent.
     assert tokens_avec > tokens_sans
+
+
+def test_worker_prompt_carries_the_grounding_rule(tmp_path: Path) -> None:
+    """L'ouvrier headless recevait le bloc d'incertitudes mais pas la règle de source (#613)."""
+    from grimoire.core.grounding import GROUNDING_RULE
+
+    service = _service(tmp_path)
+    task = service.require(_task(service, owner="sans-contexte"))
+    prompt = build_prompt(task)
+    assert GROUNDING_RULE in prompt
+    assert "grimoire-uncertainties" in prompt

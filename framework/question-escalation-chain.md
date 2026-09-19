@@ -34,7 +34,7 @@ Sub-Agent (bloqué)
 │  ┌─ Phase 2: Auto-résolution ────┐ │
 │  │  Chercher dans le contexte     │ │
 │  │  Croiser avec l'historique QA  │ │
-│  │  Résoudre si confiance ≥ 80%   │ │
+│  │  Résoudre si source citable    │ │
 │  └────────────────────────────────┘ │
 │                                     │
 │  ┌─ Phase 3: Présentation ───────┐ │
@@ -167,15 +167,15 @@ auto_resolution_sources:
 POUR CHAQUE question dans le buffer :
   Chercher une réponse dans les sources (dans l'ordre)
   
-  SI réponse trouvée ET confiance ≥ 80% :
+  SI réponse trouvée dans une source citable (decisions-log, shared-context, fichier du projet) :
     → Marquer status = "auto_resolved"
     → Remplir resolution avec la réponse + source citée
     → Redistribuer immédiatement à l'agent
     → Logger dans Grimoire_TRACE : [HUP:auto-resolved]
   
-  SI réponse trouvée mais confiance < 80% :
+  SI réponse déduite sans source citable :
     → Garder dans le buffer
-    → Ajouter en note : "Réponse possible : {réponse} (confiance: {%})"
+    → Ajouter en note : "Réponse possible : {réponse} (source manquante : {ce qui la confirmerait})"
     → L'utilisateur verra la suggestion et pourra confirmer/infirmer
   
   SI aucune réponse trouvée :
@@ -275,7 +275,7 @@ entries:
 
 ```
 [timestamp] [orchestrator]  [QEC:received]       from=dev/Amelia | type=missing_data | priority=blocking
-[timestamp] [orchestrator]  [QEC:auto-resolved]  q-id=q-arch-001 | source=decisions-log.md | confidence=92%
+[timestamp] [orchestrator]  [QEC:auto-resolved]  q-id=q-arch-001 | source=decisions-log.md#L42
 [timestamp] [orchestrator]  [QEC:presented]      count=3 | blocking=1 | important=2
 [timestamp] [orchestrator]  [QEC:user-resolved]  q-id=q-dev-001 | answer_length=42chars
 [timestamp] [orchestrator]  [QEC:redistributed]  q-id=q-dev-001 | to=dev/Amelia

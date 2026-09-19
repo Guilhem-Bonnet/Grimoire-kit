@@ -17,6 +17,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from grimoire.bridges.schemas import HostId
+from grimoire.core.grounding import GROUNDING_RULE, UNCERTAINTIES_BLOCK_RULE
 from grimoire.hosts.capabilities import HostProfile, profile_for
 from grimoire.hosts.emitters.base import Degradation, EmitPlan, EmittedFile, Emitter, managed_header
 from grimoire.hosts.surface import Enforcement, ProjectSurface
@@ -63,6 +64,15 @@ def _catalog(surface: ProjectSurface, profile: HostProfile) -> str:
             "conversation courante au lieu de s'exécuter à part.",
             "",
         ]
+
+    lines += [
+        "## Règle de source",
+        "",
+        GROUNDING_RULE,
+        "",
+        UNCERTAINTIES_BLOCK_RULE.replace("Termine ta réponse", "Toute réponse d'analyse ou de revue se termine"),
+        "",
+    ]
 
     if surface.skills:
         lines += ["## Compétences", "", "| Compétence | Quand l'utiliser | Contenu |", "|---|---|---|"]

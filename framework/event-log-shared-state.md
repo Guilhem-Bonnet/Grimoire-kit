@@ -67,7 +67,7 @@
 | `task_completed` | Tâche terminée | Tout agent | `{task_id: "US-042", status: "success", cc_result: "PASS"}` |
 | `uncertainty_raised` | HUP ROUGE déclenché | Tout agent | `{gap_type: "missing_data", question: "..."}` |
 | `question_resolved` | QEC répondue | Orchestrateur | `{question_id: "q-001", answer: "..."}` |
-| `trust_scored` | CVTL validé | Validateur | `{artifact: "ADR-042", score: 87, verdict: "approve"}` |
+| `cross_validated` | CVTL validé | Validateur | `{artifact: "ADR-042", dimensions: "3/3", unverified: ["implementation_feasibility"], verdict: "approve_with_notes"}` |
 | `conflict_detected` | Contradiction trouvée | Tout agent | `{existing: "REST", proposed: "GraphQL", source: "ADR"}` |
 | `huddle_requested` | Huddle demandé (SHP) | Tout agent | `{topic: "perf concern", invited: ["dev","qa"]}` |
 | `huddle_completed` | Huddle terminé (SHP) | Orchestrateur | `{huddle_id: "h-003", verdict: "approved", duration: "4min"}` |
@@ -161,7 +161,7 @@ shared_state:
       choice: "JWT stateless"
       decided_by: "dev/Amelia"
       validated_by: "architect/Winston"
-      trust_score: 91
+      validation: "4/4 dimensions pass"
       timestamp: "2026-03-05T14:32:01Z"
   
   artifacts:
@@ -172,7 +172,7 @@ shared_state:
     - path: "docs/adr-042-auth.md"
       created_by: "architect/Winston"
       status: "validated"
-      trust_score: 91
+      validation: "4/4 dimensions pass"
   
   active_tasks:
     - id: "review-auth"
@@ -192,7 +192,7 @@ shared_state:
   metrics:
     events_total: 42
     decisions_count: 3
-    trust_score_avg: 87
+    dimensions_verified: "11/12"   # pass / vérifiées, toutes cross-validations confondues
     questions_resolved: 5
     questions_pending: 1
 ```
@@ -272,7 +272,7 @@ observe_protocol:
     filter_by_type: true  # chaque agent choisit les types d'événements qui l'intéressent
     examples:
       dev: ["decision", "artifact_created", "conflict_detected", "question_resolved"]
-      qa: ["task_completed", "artifact_created", "trust_scored"]
+      qa: ["task_completed", "artifact_created", "cross_validated"]
       architect: ["decision", "conflict_detected", "uncertainty_raised"]
   
   # Réaction automatique

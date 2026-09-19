@@ -75,6 +75,7 @@ from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
 from grimoire.core.exceptions import GrimoireMissionError
+from grimoire.core.grounding import GROUNDING_RULE
 from grimoire.core.standard_generation import STANDARD_DIR
 from grimoire.missions.dispatch_history import recommend_start_tier
 from grimoire.missions.schemas import TaskState
@@ -369,7 +370,7 @@ def build_prompt(
     lignes.append(
         "\nConsigne : réalise ce travail dans le dépôt courant. Ne modifie pas "
         "les commandes de vérification (`--check`) qui jugeront le résultat — "
-        "leur code de sortie est le seul verdict qui compte ici."
+        "leur code de sortie est le seul verdict qui compte ici. " + GROUNDING_RULE
     )
     prompt = "\n".join(lignes)
     return prompt + _UNCERTAINTIES_INSTRUCTION

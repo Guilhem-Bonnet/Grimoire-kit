@@ -402,9 +402,7 @@ def _inject_context_declaration(raw: str, context_path: str) -> str:
         ("securite-agent", "audit de sécurité"),
     ],
 )
-def test_declaring_context_measurably_shrinks_what_activation_loads(
-    tmp_path: Path, slug: str, role: str
-) -> None:
+def test_declaring_context_measurably_shrinks_what_activation_loads(tmp_path: Path, slug: str, role: str) -> None:
     """#379 — mesure avant/après sur trois agents synthétiques de nature
     différente, à la taille d'un agent réel, sans dépendre des fichiers livrés.
 
@@ -1210,7 +1208,9 @@ def test_a_crashing_policy_asks_instead_of_allowing(governed: Path, monkeypatch:
     assert "moteur de politique cassé" in copilot["hookSpecificOutput"]["additionalContext"]
 
 
-def test_a_crashing_non_tool_decision_keeps_the_session_and_says_so(governed: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_crashing_non_tool_decision_keeps_the_session_and_says_so(
+    governed: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setitem(DECISIONS, "grimoire.task-context", _crash)
     rendered, decision, _ = run_hook(
         {"hook_event_name": "UserPromptSubmit", "cwd": str(governed)}, host_id=HostId.CLAUDE_CODE_CLI
@@ -1448,9 +1448,7 @@ def test_session_start_does_not_error_when_the_entry_persona_has_attached_skills
 # ── Rappel de tâche au claim (#141) ─────────────────────────────────────────
 
 
-def test_le_rappel_de_tache_n_est_jamais_injecte_sans_claim(
-    project: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_le_rappel_de_tache_n_est_jamais_injecte_sans_claim(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Contrôle négatif : une tâche active mais jamais réclamée ne rappelle rien.
 
     ``GRIMOIRE_TASK_ID`` force la tâche active sans passer par un claim — c'est
@@ -1468,9 +1466,10 @@ def test_le_rappel_de_tache_n_est_jamais_injecte_sans_claim(
     context = _session_start(project)
 
     assert "rappel de tâche" not in context.lower()
-    assert decide_activation(
-        HookInput(event=HookEvent.SESSION_START, project_root=project)
-    ).detail["recall_injected"] is False
+    assert (
+        decide_activation(HookInput(event=HookEvent.SESSION_START, project_root=project)).detail["recall_injected"]
+        is False
+    )
 
 
 def test_le_rappel_de_tache_arrive_au_claim_entre_la_persona_et_la_directive(governed: Path) -> None:
@@ -1494,9 +1493,7 @@ def test_le_rappel_de_tache_arrive_au_claim_entre_la_persona_et_la_directive(gov
     )
     service.ledger.transition_task(passee.id, TaskState.READY, actor_id="a")
 
-    jumelle = service.ledger.create_task(
-        mission.id, "Configurer le webhook amont (reprise)", acceptance=("x",)
-    )
+    jumelle = service.ledger.create_task(mission.id, "Configurer le webhook amont (reprise)", acceptance=("x",))
     service.ledger.transition_task(jumelle.id, TaskState.READY, actor_id="b")
     service.ledger.claim_task(jumelle.id, "b", "host-b")
 
@@ -1512,7 +1509,7 @@ def test_le_rappel_de_tache_arrive_au_claim_entre_la_persona_et_la_directive(gov
 
 def _configure_entry(root: Path, entry: str | None) -> None:
     """Écrit un project-context.yaml minimal ; ``None`` omet la clé."""
-    lines = ['project:', '  name: "hosts-test"', '  type: "library"', 'agents:', '  archetype: "minimal"']
+    lines = ["project:", '  name: "hosts-test"', '  type: "library"', "agents:", '  archetype: "minimal"']
     if entry is not None:
         lines.append(f'  entry: "{entry}"')
     (root / "project-context.yaml").write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -1828,3 +1825,65 @@ def test_session_start_scaffold_noop_stays_under_budget(governed: Path) -> None:
         samples.append(time.perf_counter() - started)
         assert detail == {"scaffolded": []}
     assert statistics.median(samples) < 0.1, f"médiane {statistics.median(samples) * 1000:.1f} ms"
+
+
+# ── Ancrage des affirmations (#613) ──────────────────────────────────────────
+
+
+def test_copilot_agent_files_bind_every_claim_to_a_source(governed: Path) -> None:
+    """Chaque fichier d'agent Copilot porte la règle de source et le bloc d'incertitudes.
+
+    Avant : le wrapper disait « signale comme non vérifié ce que tu n'as pas
+    vérifié » et le bloc ```grimoire-uncertainties``` ne vivait que dans
+    `.github/hooks/README.md`, qu'aucun agent ne charge. Un utilisateur
+    Copilot a vu ses personas produire des chiffres et des pronostics sur des
+    fichiers jamais lus : rien dans leur contexte ne l'interdisait.
+    """
+    emitter = emitter_for(HostId.GITHUB_COPILOT)
+    assert emitter is not None
+    apply_plan(emitter.plan(build_surface(governed), governed), governed)
+
+    entry = (governed / ".github/agents/concierge.agent.md").read_text(encoding="utf-8")
+    sub = (governed / ".github/agents/scribe.agent.md").read_text(encoding="utf-8")
+
+    for wrapper in (entry, sub):
+        assert "fichier:ligne" in wrapper
+        assert "non vérifié" in wrapper
+        assert "grimoire-uncertainties" in wrapper
+    # L'entrée route : elle exige le bloc des personas qu'elle dispatche,
+    # sans jamais inventer un nom de modèle (dégradation « model affinity »).
+    assert "Politique de dispatch" in entry
+    assert "Politique de dispatch" not in sub
+    for invented_model in ("haiku", "sonnet", "opus", "gpt-", "gemini"):
+        assert invented_model not in entry.lower()
+
+
+def test_claude_agent_files_bind_every_claim_to_a_source(project: Path) -> None:
+    emitter = emitter_for(HostId.CLAUDE_CODE_CLI)
+    assert emitter is not None
+    apply_plan(emitter.plan(build_surface(project), project), project)
+    sub = (project / ".claude/agents/scribe.md").read_text(encoding="utf-8")
+    assert "fichier:ligne" in sub
+    assert "non vérifié" in sub
+    assert "grimoire-uncertainties" in sub
+
+
+@pytest.mark.parametrize("host_id", supported_hosts(), ids=lambda h: h.value)
+def test_every_host_emits_the_grounding_rule_and_the_uncertainties_block(governed: Path, host_id: HostId) -> None:
+    """Aucun hôte n'est laissé sans règle de source (#613).
+
+    Codex, Cursor et Gemini reçoivent un catalogue au lieu d'agents ; le
+    balayage a montré qu'il ne portait ni « fichier:ligne », ni « non
+    vérifié », ni le bloc d'incertitudes. La règle vient d'une seule source,
+    `grimoire.core.grounding`, et chaque hôte doit l'émettre quelque part
+    dans ce que l'agent charge.
+    """
+    from grimoire.core.grounding import GROUNDING_RULE
+
+    emitter = emitter_for(host_id)
+    assert emitter is not None
+    plan = emitter.plan(build_surface(governed), governed)
+    emitted = "\n".join(f.content for f in plan.files)
+    assert GROUNDING_RULE in emitted, host_id
+    assert "grimoire-uncertainties" in emitted, host_id
+    assert "non mesuré" in emitted, host_id  # un score n'existe que calculé

@@ -445,7 +445,7 @@ Avant exécution, détecter :
 Si détecté → **STOP. Afficher :**
 ```
 ⚠️ GUARDRAIL DESTRUCTIF — [description commande]
-Impact estimé : [ressources/services affectés]
+Impact : [ressources/services affectés, relevés dans dependency-graph.md]
 Environnement : [prod/dev]
 
 Confirmer l'exécution ? (oui/non)
@@ -887,7 +887,7 @@ Alimentation automatique `fix-loop-patterns.md` : si `iteration > 1`, copier `it
 **Règle OO — Déclenchement conditionnel :**
 - S1/S2 → `meta_review_enabled: true` par défaut
 - S3 → `meta_review_enabled: false` par défaut (skip automatique sauf demande explicite)
-- S1/S2 avec `iteration = 1` ET cycle estimé < 15 min → proposer optionnellement à {user_name} : *"Lancer l'analyse META-REVIEW ? (oui/non)"*
+- S1/S2 avec `iteration = 1` ET durée du cycle précédent < 15 min (lue dans le FER) → proposer optionnellement à {user_name} : *"Lancer l'analyse META-REVIEW ? (oui/non)"*
   Si {user_name} répond **non** → écrire `meta_review_enabled: declined` dans le FER avant suppression.
 
 *Annonce : `[META-REVIEW] — Auto-analyse du cycle de fix...`*

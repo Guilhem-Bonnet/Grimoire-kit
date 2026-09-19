@@ -40,3 +40,12 @@ repos:
       - id: yamllint
         args: [-d, "{extends: relaxed, rules: {line-length: {max: 150}}}"]
         files: \.(yml|yaml)$
+
+  - repo: local
+    hooks:
+      - id: emitted-prose-guard
+        name: prose émise sans chiffre à remplir de tête (#613)
+        entry: python3 scripts/check-emitted-prose.py
+        language: system
+        pass_filenames: false
+        files: ^(framework/|archetypes/|scripts/check-emitted-prose\.py|scripts/emitted-prose-allowlist\.txt|src/grimoire/core/scaffold\.py)
