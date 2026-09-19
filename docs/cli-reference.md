@@ -665,7 +665,8 @@ et projections : [Système de mémoire](memory-system.md).
 | Commande | Description |
 | --- | --- |
 | `grimoire memory status` | Santé du backend, nombre d'entrées, configuration |
-| `grimoire memory up` | Mettre en place la stack mémoire complète, plan par plan |
+| `grimoire memory up` | Mettre en place la stack mémoire complète ; `--start` démarre (Docker) les services manquants — consentement explicite |
+| `grimoire memory doctor` | Entretien minimal : santé des couches, pile démarrée ou non, dérive du graphe (nœuds orphelins), purge sur `--apply` |
 | `grimoire memory remember <texte>` | Écriture typée idempotente — même texte et même agent n'écrivent qu'une fois |
 | `grimoire memory recall <requête>` | Rechercher parmi les mémoires typées |
 | `grimoire memory search <requête>` | Recherche par mot-clé ou similarité sémantique — fusionne vectoriel et BM25 (RRF) dès que le projet possède les deux ; `--no-hybrid` force le backend seul |

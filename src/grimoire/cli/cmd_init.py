@@ -308,38 +308,23 @@ def machine_capabilities(*, has_egress: bool) -> frozenset[str]:
 
 
 def _recommend_memory_profile() -> tuple[str, str]:
-    """The richest composition this machine can serve, for the wizard's
-    Memory step (2026-09-18 onboarding decision) — ``complet`` when Docker's
-    daemon actually answers (not just the CLI on ``PATH``), ``standard`` with
-    a local embedding engine but no Docker, ``lexical`` as the explained
-    floor when neither fastembed/sentence-transformers nor a reachable Ollama
-    is available. Delegates to :mod:`grimoire.tools.memory_setup`, the same
-    module ``grimoire memory up`` itself uses, so the wizard's recommendation
-    and the explicit command it points to never drift apart.
+    """The richest composition this machine can serve, and why.
+
+    Used for both the wizard's Memory step and the express default
+    (2026-09-18 decision, revised same day by Guilhem's arbitrage on #619):
+    ``complet`` when Docker's daemon actually answers, ``standard`` with a
+    local embedding engine but no Docker, ``lexical`` otherwise. Never
+    *attaches to a detected service* (issue #496 intact): a ``complet``
+    recommendation always writes the kit's own fixed default connection and
+    a fresh, project-scoped collection, never a probed URL. Whether the
+    missing services also get *started* is a separate, caller-decided
+    consent question (see ``start_memory_stack``, ``run_init``) — this only
+    ever recommends. Delegates to :mod:`grimoire.tools.memory_setup`, the
+    same module ``grimoire memory up`` uses, so the two never drift apart.
     """
     from grimoire.tools.memory_setup import recommend_profile
 
     return recommend_profile()
-
-
-def _recommend_express_memory_profile() -> tuple[str, str]:
-    """The richest *private, consent-free* composition for the express path.
-
-    Deliberately narrower than :func:`_recommend_memory_profile`: express
-    (``-y``, non-interactive) must never attach to a service it merely found
-    running (issue #496) and must never start a container without
-    ``--memory-stack up`` — so only ``standard`` (via the embedded,
-    file-local ``qdrant-local`` backend — no service, nothing shared) or
-    ``lexical`` are ever picked automatically here. ``complet`` stays a named
-    target the report points at, reachable through an explicit command.
-    """
-    from grimoire.tools.memory_setup import local_embedding_available
-
-    if local_embedding_available():
-        return "standard", (
-            "local vector embeddings (fastembed/sentence-transformers) available — no server needed"
-        )
-    return "lexical", "no local embedding capability (fastembed/sentence-transformers not installed, no Ollama reachable)"
 
 
 def _wait_for_qdrant(qdrant_url: str = _QDRANT_DEFAULT_URL) -> bool:
@@ -404,13 +389,17 @@ def _choose_memory_profile(
     recommended_id: str = "",
     recommended_reason: str = "",
     detected_service: str = "local",
-) -> tuple[str, str, bool, bool]:
+) -> tuple[str, str, bool, bool, bool]:
     """Ask for a memory *composition*, not a backend.
 
     A project runs several memory layers at once; asking which single backend
     to use left the other six on their defaults forever.  Returns the chosen
-    profile id, the backend it runs on, the offline verdict, and whether to
-    start Qdrant in Docker.
+    profile id, the backend it runs on, the offline verdict, whether to start
+    Qdrant in Docker, and whether to start the full ``complet`` stack now
+    (Guilhem's arbitrage on #619, same day as the decision below: the
+    question defaults to *yes* — the point of recommending ``complet`` is
+    that its potential gets exploited right away, not configured and left
+    dormant).
 
     Only compositions this machine can actually serve are offered — an
     unreachable one is shown with the reason and cannot be selected, because a
@@ -508,7 +497,23 @@ def _choose_memory_profile(
         console.print("  [dim]→ BM25 seul : aucun modèle, aucun service, aucun réseau.[/dim]")
         console.print("  [dim]  Pour ajouter la couche sémantique plus tard : grimoire memory bundle install[/dim]")
 
-    return chosen.id, backend, offline, qdrant_docker
+    # `complet` is the one composition worth exploiting immediately rather
+    # than leaving configured-but-dormant: defaults to yes (arbitrage
+    # 2026-09-18, Guilhem on #619) — Enter starts Weaviate + Neo4j + Redis
+    # via the kit's own compose templates before the wizard even finishes.
+    start_stack = False
+    if chosen.id == "complet":
+        start_stack = Confirm.ask(
+            "  [bold]Démarrer la pile mémoire complète (Weaviate + Neo4j + Redis) maintenant ?[/bold]",
+            default=True,
+        )
+        if not start_stack:
+            console.print(
+                "  [dim]→ config écrite pour `complet` ; démarrez-la plus tard avec "
+                "`grimoire memory up --profile complet --start --apply`.[/dim]"
+            )
+
+    return chosen.id, backend, offline, qdrant_docker, start_stack
 
 
 def _run_wizard(
@@ -578,7 +583,7 @@ def _run_wizard(
     console.print()
     console.print("  [dim]\\[###--] 3/5 · Mémoire[/dim]")
     recommended_id, recommended_reason = _recommend_memory_profile()
-    profile_id, backend, offline, qdrant_docker = _choose_memory_profile(
+    profile_id, backend, offline, qdrant_docker, start_stack = _choose_memory_profile(
         backend,
         offer_qdrant_docker=offer_qdrant_docker,
         recommended_id=recommended_id,
@@ -672,6 +677,7 @@ def _run_wizard(
         "qdrant_docker": qdrant_docker,
         "offline": offline,
         "memory_profile": profile_id,
+        "start_memory_stack": start_stack,
     }
 
 
@@ -795,16 +801,25 @@ def _memory_step_summary(target: Path, *, applied_profile: str, reason: str) -> 
     """
     from grimoire.core.config import GrimoireConfig
     from grimoire.core.exceptions import GrimoireConfigError
-    from grimoire.tools.memory_setup import docker_daemon_reachable, local_embedding_available
+    from grimoire.tools.memory_setup import (
+        docker_daemon_reachable,
+        local_embedding_available,
+        unreached_configured_services,
+    )
 
     served = applied_profile
     backend = ""
+    not_started: list[str] = []
     with contextlib.suppress(GrimoireConfigError, OSError):
         # A reporting step must never break `init`: any config-read failure
         # here just falls back to what this call already knows it applied.
         cfg = GrimoireConfig.from_yaml(target / "project-context.yaml")
         served = cfg.memory.layer_profile or applied_profile
         backend = cfg.memory.backend
+        # A `complet`/`graphe` composition can be *configured* without ever
+        # being *started* (no consent given — arbitrage 2026-09-18 on #619):
+        # this is the gap `grimoire doctor` names "pile mémoire non démarrée".
+        not_started = unreached_configured_services(cfg.memory)
 
     if not local_embedding_available():
         feasible = "lexical"
@@ -821,6 +836,7 @@ def _memory_step_summary(target: Path, *, applied_profile: str, reason: str) -> 
         "served": served,
         "backend": backend,
         "reason": reason,
+        "not_started": not_started,
         "healthy": served in order,
         "feasible": feasible,
         "upgrade_to": upgrade_to,
@@ -892,14 +908,23 @@ def _display_report(
             console.print(f"           [yellow]![/yellow] [dim]{suggestion}[/dim]")
     if memory_summary and memory_summary.get("reason"):
         console.print(f"           [dim]{memory_summary['reason']}.[/dim]")
-    upgrade_to = memory_summary.get("upgrade_to") if memory_summary else ""
-    if upgrade_to:
-        target_label = memory_profiles.resolve(upgrade_to).label
-        start_flag = " --start" if upgrade_to in ("graphe", "complet") else ""
+    not_started = memory_summary.get("not_started") if memory_summary else None
+    if memory_summary and not_started:
+        # Configured (2026-09-18 arbitrage on #619) but not started — no
+        # consent was given (bare non-TTY run, no `-y`, no `--memory-stack up`).
         console.print(
-            f"           [yellow]^[/yellow] [dim]This machine can serve {target_label}: "
-            f"grimoire memory up --profile {upgrade_to}{start_flag} --apply[/dim]"
+            f"           [yellow]![/yellow] [dim]pile mémoire non démarrée ({', '.join(not_started)}) : "
+            f"grimoire memory up --profile {memory_summary['served']} --start --apply[/dim]"
         )
+    else:
+        upgrade_to = memory_summary.get("upgrade_to") if memory_summary else ""
+        if upgrade_to:
+            target_label = memory_profiles.resolve(upgrade_to).label
+            start_flag = " --start" if upgrade_to in ("graphe", "complet") else ""
+            console.print(
+                f"           [yellow]^[/yellow] [dim]This machine can serve {target_label}: "
+                f"grimoire memory up --profile {upgrade_to}{start_flag} --apply[/dim]"
+            )
     console.print()
 
     # Agents deployed (categorized)
@@ -1236,18 +1261,18 @@ def run_init(
     elif backend == "auto":
         detected_service = detect_memory_backend()
         backend = "lexical"
-        # Onboarding decision 2026-09-18 (PR2): the express/non-interactive
-        # path no longer stops at `lexical` when it does not have to. It
-        # still never attaches to a service merely *found* running (#496)
-        # and never starts a container without explicit consent — so this
-        # only ever reaches `standard` (embedded `qdrant-local`, private,
-        # no service) or `lexical`, unless `--memory-stack up` explicitly
-        # asked for the richest Docker-backed target instead.
+        # Onboarding decision 2026-09-18 (PR2, revised same day by Guilhem's
+        # arbitrage on #619): the express/non-interactive path applies the
+        # richest composition this machine can serve — `complet` included —
+        # never a service merely *found* running (#496 stays intact: the
+        # backend a `complet` recommendation writes is always the kit's own
+        # fixed default, a fresh project-scoped collection, never whatever
+        # `detect_memory_backend()` happened to find). Whether the missing
+        # services actually get *started* is a separate consent question,
+        # resolved below (``start_memory_stack_consent``) — this only ever
+        # decides which profile gets written.
         if not memory_profile and not is_interactive:
-            if memory_stack == "up":
-                memory_profile, memory_default_reason = _recommend_memory_profile()
-            else:
-                memory_profile, memory_default_reason = _recommend_express_memory_profile()
+            memory_profile, memory_default_reason = _recommend_memory_profile()
             if memory_profile == "standard":
                 backend = "qdrant-local"
     # A composition that pins its own services decides the backend: asking for
@@ -1288,6 +1313,7 @@ def run_init(
             "`grimoire init --interactive` to rerun with guidance.[/dim]"
         )
 
+    start_memory_stack_consent = False
     if is_interactive and not dry_run:
         wizard_result = _run_wizard(
             target,
@@ -1304,6 +1330,7 @@ def run_init(
         offline = bool(wizard_result.get("offline", False))
         memory_profile = str(wizard_result.get("memory_profile", memory_profile))
         qdrant_docker_requested = qdrant_docker_requested or bool(wizard_result.get("qdrant_docker", False))
+        start_memory_stack_consent = bool(wizard_result.get("start_memory_stack", False))
         # Re-resolve if user changed archetypes or backend
         new_archetypes = wizard_result.get("archetypes", [wizard_result.get("archetype", "minimal")])
         new_backend = wizard_result["backend"]
@@ -1315,6 +1342,18 @@ def run_init(
                 archetypes_override=new_archetypes,
             )
         backend = new_backend
+    elif memory_profile == "complet":
+        # Consent to *start* the missing services, for every non-interactive
+        # path (Guilhem's arbitrage on #619, 2026-09-18): `-y` is itself the
+        # explicit consent — the point of applying `complet` on this machine
+        # is that its potential gets exploited right away, not configured
+        # and left dormant — so Docker starts without asking anything.
+        # `--memory-stack up` remains an equivalent, explicit override for a
+        # bare non-TTY run that was not passed `-y` for other reasons. A
+        # plain non-interactive run *without* either never starts a
+        # container: `complet` still gets written (the report and `grimoire
+        # doctor` both name the exact command to start it).
+        start_memory_stack_consent = yes or memory_stack == "up"
 
     # Phase 4.5: Name the collection by project (issue Grimoire-kit#496) — a
     # shared backend used to get the fixed config default (or a hardcoded
@@ -1396,8 +1435,11 @@ def run_init(
     # Phase 6.5: Memory step closes with the equivalent of `memory up --apply`
     # plus a structural health check — never a full embedding-model load
     # (that cost belongs to the first real memory use, not to `init`).
+    # Containers only ever start on consent (`start_memory_stack_consent`,
+    # resolved above per the interactive/`-y`/`--memory-stack up`/bare-script
+    # rules) — `complet` can be written without ever reaching this branch.
     memory_stack_messages: list[str] = []
-    if memory_stack == "up":
+    if start_memory_stack_consent:
         from grimoire.tools.memory_setup import start_memory_stack
 
         memory_stack_messages = start_memory_stack(memory_profile, target)

@@ -27,10 +27,13 @@ import time
 from dataclasses import dataclass, field
 from importlib.util import find_spec
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 from grimoire.memory import profiles as memory_profiles
+
+if TYPE_CHECKING:
+    from grimoire.core.config import MemoryConfig
 
 MEMORY_SETUP_SCHEMA_VERSION = "grimoire-memory-setup/v1"
 
@@ -229,6 +232,42 @@ def recommend_profile(
     if ready:
         return "complet", "Docker available — the most complete profile this machine can serve"
     return "standard", "local vector embeddings (fastembed/sentence-transformers), no Docker or server needed"
+
+
+def unreached_configured_services(memory: MemoryConfig) -> list[str]:
+    """Services *memory* (a ``GrimoireConfig.memory`` section) declares that
+    do not actually answer right now.
+
+    A project can be scaffolded for ``complet``/``graphe`` (backend pinned to
+    ``weaviate-server``, ``knowledge_graph: neo4j``…) before its containers
+    were ever started — the express and interactive Memory steps in
+    ``grimoire init`` write that aspirational config without starting
+    anything unless consent was given (2026-09-18 arbitrage). This is the
+    gap ``grimoire doctor`` reports as *pile mémoire non démarrée*: never a
+    diagnostic on whether the config is well-formed, only on whether the
+    services it names are reachable this instant.
+
+    Returns service ids (``"weaviate"``, ``"qdrant"``, ``"neo4j"``,
+    ``"redis"``), empty when nothing configured is missing.
+    """
+    missing: list[str] = []
+    if memory.backend == "weaviate-server" and memory.weaviate_url and not _tcp_reachable(
+        memory.weaviate_url, _DEFAULT_PORTS["weaviate"],
+    ):
+        missing.append("weaviate")
+    elif memory.backend == "qdrant-server" and memory.qdrant_url and not _tcp_reachable(
+        memory.qdrant_url, _DEFAULT_PORTS["qdrant"],
+    ):
+        missing.append("qdrant")
+    if memory.knowledge_graph == "neo4j" and memory.neo4j_uri and not _tcp_reachable(
+        memory.neo4j_uri, _DEFAULT_PORTS["neo4j"],
+    ):
+        missing.append("neo4j")
+    if memory.short_term_backend == "redis" and memory.redis_url and not _tcp_reachable(
+        memory.redis_url, _DEFAULT_PORTS["redis"],
+    ):
+        missing.append("redis")
+    return missing
 
 
 def probe_services(urls: dict[str, str] | None = None) -> dict[str, ServiceProbe]:

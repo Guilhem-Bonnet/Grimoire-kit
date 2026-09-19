@@ -10,6 +10,12 @@ import pytest
 from grimoire.tools import memory_setup as ms
 from grimoire.tools.memory_setup import ServiceProbe, apply_memory_plan, build_memory_plan
 
+#: Captured at import time, before the suite-wide autouse fixture in
+#: ``conftest.py`` (``_default_no_docker_daemon``) patches the module
+#: attribute to a fixed "no Docker" stub for every other test in the suite.
+#: ``TestDockerDaemonReachable`` below tests the real implementation.
+_REAL_DOCKER_DAEMON_REACHABLE = ms.docker_daemon_reachable
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
@@ -449,6 +455,13 @@ class TestStandardFallsBackToEmbeddedQdrant:
 
 
 class TestDockerDaemonReachable:
+    @pytest.fixture(autouse=True)
+    def _use_real_implementation(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Overrides the suite-wide "no Docker" default (``conftest.py``) —
+        this class tests the real probe, not the deterministic stub every
+        other test relies on."""
+        monkeypatch.setattr(ms, "docker_daemon_reachable", _REAL_DOCKER_DAEMON_REACHABLE)
+
     def test_no_docker_binary_reads_as_unreachable(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(ms.shutil, "which", lambda name: None)
         assert ms.docker_daemon_reachable() is False
@@ -523,6 +536,56 @@ class TestRecommendProfile:
         monkeypatch.setattr(ms, "local_embedding_available", lambda *a, **k: True)
         profile_id, _reason = ms.recommend_profile(_all(), docker_ready=False)
         assert profile_id == "standard"
+
+
+class TestUnreachedConfiguredServices:
+    """The gap `grimoire doctor` reports as 'pile mémoire non démarrée' —
+    a project scaffolded for `complet`/`graphe` before its containers were
+    ever started (2026-09-18 arbitrage: `-y` starts them, a bare non-TTY
+    script run does not, but the config is written either way)."""
+
+    def test_lexical_project_has_nothing_missing(self) -> None:
+        from grimoire.core.config import MemoryConfig
+
+        memory = MemoryConfig(backend="lexical")
+        assert ms.unreached_configured_services(memory) == []
+
+    def test_weaviate_backend_unreachable_is_reported(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from grimoire.core.config import MemoryConfig
+
+        monkeypatch.setattr(ms, "_tcp_reachable", lambda *a, **k: False)
+        memory = MemoryConfig(backend="weaviate-server", weaviate_url="http://localhost:8080")
+        assert "weaviate" in ms.unreached_configured_services(memory)
+
+    def test_weaviate_backend_reachable_is_not_reported(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from grimoire.core.config import MemoryConfig
+
+        monkeypatch.setattr(ms, "_tcp_reachable", lambda *a, **k: True)
+        memory = MemoryConfig(backend="weaviate-server", weaviate_url="http://localhost:8080")
+        assert ms.unreached_configured_services(memory) == []
+
+    def test_complet_reports_every_unreachable_layer(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from grimoire.core.config import MemoryConfig
+
+        monkeypatch.setattr(ms, "_tcp_reachable", lambda *a, **k: False)
+        memory = MemoryConfig(
+            backend="weaviate-server",
+            weaviate_url="http://localhost:8080",
+            knowledge_graph="neo4j",
+            neo4j_uri="bolt://localhost:7687",
+            short_term_backend="redis",
+            redis_url="redis://localhost:6379/0",
+        )
+        missing = ms.unreached_configured_services(memory)
+        assert set(missing) == {"weaviate", "neo4j", "redis"}
+
+    def test_embedded_qdrant_local_is_never_reported(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """`qdrant-local` names no server to reach at all — nothing to flag."""
+        from grimoire.core.config import MemoryConfig
+
+        monkeypatch.setattr(ms, "_tcp_reachable", lambda *a, **k: False)
+        memory = MemoryConfig(backend="qdrant-local")
+        assert ms.unreached_configured_services(memory) == []
 
 
 class TestStartMemoryStack:

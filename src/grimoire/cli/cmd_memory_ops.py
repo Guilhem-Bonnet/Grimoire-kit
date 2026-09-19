@@ -358,3 +358,131 @@ def memory_status(ctx: typer.Context) -> None:
     console.print(tbl)
 
 
+# ── grimoire memory doctor ─────────────────────────────────────────────────────
+
+_doctor_apply_opt = typer.Option(
+    False, "--apply",
+    help="Purger les nœuds de graphe orphelins trouvés. Sans ce drapeau : aperçu seul (dry-run).",
+)
+
+
+@memory_app.command("doctor")
+def memory_doctor(ctx: typer.Context, apply: bool = _doctor_apply_opt) -> None:
+    """Entretien minimal de la pile mémoire — santé des couches, dérive du graphe, purge sur confirmation.
+
+    Trois choses, jamais plus, et jamais un ``FAIL`` : c'est un diagnostic,
+    pas une passerelle. (1) Santé des couches et pile démarrée ou non — un
+    projet peut être *configuré* pour ``complet``/``graphe`` (backend et
+    connexions écrits par ``grimoire init``) sans que les conteneurs aient
+    jamais tourné (arbitrage 2026-09-18 sur #619) : signalé ici comme ailleurs
+    (``grimoire doctor``), avec la commande de démarrage. (2) Dérive du
+    graphe : nœuds ``GrimoireMemory`` sans fiche source dans le store durable
+    — la même sonde que ``grimoire memory graph purge-orphans``, réutilisée
+    telle quelle. (3) Purge sur confirmation (``--apply`` — dry-run sinon,
+    identique au contrat de ``purge-orphans``) ; une sauvegarde
+    (``grimoire memory migrate export-bundle``) est recommandée avant, cette
+    commande ne la lance jamais elle-même.
+
+    [dim]Examples:[/dim]
+      [cyan]grimoire memory doctor[/cyan]         Aperçu — rien n'est modifié
+      [cyan]grimoire memory doctor --apply[/cyan]  Purge les orphelins trouvés
+    """
+    cfg, root = _load_config_context()
+    fmt = _get_fmt(ctx)
+
+    mgr: MemoryManager | None = None
+    backend_error = ""
+    try:
+        mgr = MemoryManager.from_config(cfg, project_root=root)
+    except GrimoireMemoryError as exc:
+        backend_error = str(exc)
+
+    health = (
+        mgr.health_check() if mgr is not None
+        else BackendStatus(backend=cfg.memory.backend, healthy=False, entries=0)
+    )
+    architecture = build_memory_architecture_status(cfg, project_root=root, backend_status=health)
+
+    from grimoire.tools.memory_setup import unreached_configured_services
+
+    not_started = unreached_configured_services(cfg.memory)
+
+    drift: dict[str, Any] | None = None
+    drift_error = ""
+    if cfg.memory.knowledge_graph == "neo4j" and cfg.memory.neo4j_uri:
+        try:
+            from grimoire.memory.projections import prune_orphan_memories
+
+            # Same loader `grimoire memory graph purge-orphans` uses — a
+            # missing URI/password raises `typer.Exit`, caught below like any
+            # other reason this probe cannot run right now.
+            graph = _load_neo4j_graph(cfg)
+        except Exception as exc:  # un diagnostic ne doit jamais planter sur son sujet
+            drift_error = str(exc) or "Neo4j indisponible"
+        else:
+            try:
+                entries = mgr.get_all() if mgr is not None else []
+                collection = cfg.memory.weaviate_collection or cfg.memory.collection_prefix
+                drift = prune_orphan_memories(graph, entries, collection=collection, apply=apply)
+            except Exception as exc:
+                drift_error = str(exc)
+            finally:
+                graph.close()
+
+    if fmt == "json":
+        typer.echo(json.dumps({
+            "backend": health.backend,
+            "healthy": health.healthy,
+            "backend_error": backend_error,
+            "not_started": not_started,
+            "architecture": architecture.to_dict(),
+            "graph_drift": drift,
+            "graph_drift_error": drift_error,
+            "applied": apply,
+        }, indent=2, default=str))
+        return
+
+    status_icon = r"[green]\[OK][/green]" if health.healthy else r"[red]\[XX][/red]"
+    console.print(f"{status_icon} Backend : [bold]{health.backend}[/bold] (profil {cfg.memory.layer_profile})")
+    if backend_error:
+        console.print(f"  [red]Indisponible :[/red] {backend_error}")
+
+    if not_started:
+        console.print(
+            f"  [yellow]Pile non démarrée[/yellow] : {', '.join(not_started)} — "
+            f"[cyan]grimoire memory up --profile {cfg.memory.layer_profile} --start --apply[/cyan]"
+        )
+
+    console.print("\n[bold]Couches[/bold]")
+    tbl = Table(show_header=True)
+    tbl.add_column("Layer")
+    tbl.add_column("State")
+    tbl.add_column("Backend")
+    for layer in architecture.layers:
+        state_style = {"ready": "green", "partial": "yellow", "planned": "cyan", "disabled": "dim"}.get(layer.state, "white")
+        tbl.add_row(layer.label, f"[{state_style}]{layer.state}[/{state_style}]", layer.backend)
+    console.print(tbl)
+
+    console.print("\n[bold]Dérive du graphe[/bold]")
+    if drift_error:
+        console.print(f"  [yellow]Non vérifiable :[/yellow] {drift_error}")
+    elif drift is None:
+        console.print("  [dim]Pas de graphe configuré (memory.knowledge_graph != neo4j).[/dim]")
+    else:
+        candidates = drift["candidates"]
+        if candidates == 0:
+            console.print("  [green]Aucun nœud orphelin.[/green]")
+        elif apply:
+            console.print(f"  [green]Purgés[/green] : {drift['purged']}/{candidates} nœud(s) sans fiche source.")
+        else:
+            console.print(
+                f"  [yellow]{candidates}[/yellow] nœud(s) sans fiche source dans le store durable "
+                f"(collection {drift['collection']!r})."
+            )
+            console.print(
+                "  Sauvegarde recommandée avant toute purge : "
+                "[cyan]grimoire memory migrate export-bundle[/cyan]"
+            )
+            console.print("  Relancez avec [cyan]--apply[/cyan] pour purger.")
+
+
