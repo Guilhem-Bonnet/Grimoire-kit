@@ -1138,6 +1138,70 @@ def test_gate_check_catches_an_unproved_claim_used_in_a_decision_like_verify_doe
     assert any(check.id == "claims.used_unproved" for check in verified.checks)
 
 
+def _ledger_with_unproved_used_claim(tmp_path: Path) -> Path:
+    ledger = tmp_path / "_grimoire-output/evidence/bootstrap/claim-ledger.md"
+    ledger.write_text(
+        ledger.read_text(encoding="utf-8")
+        + "| CL-002 | Le calcul est correct | fait |  | hypothèse | faible | utiliser |\n",
+        encoding="utf-8",
+    )
+    return ledger
+
+
+def test_gate_check_flags_an_unproved_claim_used_while_the_task_is_in_progress(tmp_path: Path) -> None:
+    """Issue #614 : une affirmation « utiliser » non prouvée pèse sur les décisions pendant
+
+    le travail, pas seulement à la revue. Avant ce lot, `_verify_claim_ledger`
+    n'était appelé qu'aux états review/accepted/released
+    (`gate_review_checks.review_state_content_checks`) : écrite pendant
+    `in_progress`, la ligne passait `gate check --strict` sans un mot jusqu'au
+    passage en revue. Rouge-avant : aucun check `claims.*` en `in_progress`.
+    """
+    setup_standard_profile(tmp_path, profile_id="governed", provider_ids=("github-copilot",))
+    build_context_bundle(tmp_path)
+    _ledger_with_unproved_used_claim(tmp_path)
+
+    result = check_evidence_gates(tmp_path, task_id="bootstrap", target_state="in_progress")
+
+    assert any(check.id == "claims.used_unproved" and check.is_error for check in result.checks), result.checks
+    assert not result.ok
+
+
+def test_gate_check_in_progress_does_not_demand_a_finished_ledger(tmp_path: Path) -> None:
+    """En cours de tâche, seules les contradictions ligne à ligne comptent.
+
+    Le registre encore vierge (`claims.empty`) et la synthèse non remplie
+    (`claims.summary_placeholder`) sont des constats de clôture : les lever
+    en `in_progress` bloquerait toute tâche gouvernée dès sa première minute.
+    """
+    setup_standard_profile(tmp_path, profile_id="governed", provider_ids=("github-copilot",))
+    build_context_bundle(tmp_path)
+    ledger = tmp_path / "_grimoire-output/evidence/bootstrap/claim-ledger.md"
+
+    vierge = check_evidence_gates(tmp_path, task_id="bootstrap", target_state="in_progress")
+    assert not any(check.id.startswith("claims.") for check in vierge.checks), vierge.checks
+
+    ledger.write_text(
+        ledger.read_text(encoding="utf-8")
+        + "| CL-002 | Le calcul est correct | fait | tests/test_calc.py::test_ok (vert) | prouvé | haute | utiliser |\n",
+        encoding="utf-8",
+    )
+    en_cours = check_evidence_gates(tmp_path, task_id="bootstrap", target_state="in_progress")
+    assert not any(check.id in {"claims.summary_placeholder", "claims.empty"} for check in en_cours.checks), en_cours.checks
+    assert not any(check.id.startswith("claims.") and check.is_error for check in en_cours.checks)
+
+
+def test_gate_check_in_progress_only_warns_on_a_non_strict_profile(tmp_path: Path) -> None:
+    setup_standard_profile(tmp_path, profile_id="starter")
+    build_context_bundle(tmp_path)
+    _ledger_with_unproved_used_claim(tmp_path)
+
+    result = check_evidence_gates(tmp_path, task_id="bootstrap", target_state="in_progress")
+
+    flagged = [check for check in result.checks if check.id == "claims.used_unproved"]
+    assert flagged and not any(check.is_error for check in flagged), result.checks
+
+
 def test_gate_check_reports_a_missing_claim_ledger_with_a_remedy(tmp_path: Path) -> None:
     """Le claim-ledger est un artefact de gate comme les autres : absent, il doit
 

@@ -20,7 +20,13 @@ __all__ = ["verify_claim_ledger"]
 
 
 def verify_claim_ledger(
-    root: Path, profile: StandardProfile, task_id: str, result: StandardVerificationResult, *, suppress_v0: bool = False
+    root: Path,
+    profile: StandardProfile,
+    task_id: str,
+    result: StandardVerificationResult,
+    *,
+    suppress_v0: bool = False,
+    rows_only: bool = False,
 ) -> None:
     """AG-QUA-002 : une affirmation critique sans preuve reste une hypothèse.
 
@@ -35,6 +41,12 @@ def verify_claim_ledger(
     standard_checks.gate_review_checks.review_state_content_checks`, seul
     appelant qui le passe. Une affirmation réellement écrite reste vérifiée
     comme avant, quel que soit ce drapeau.
+
+    ``rows_only`` (issue #614) : pendant ``in_progress``, seules les
+    contradictions ligne à ligne comptent — « prouvé » sans preuve, « utiliser »
+    sans « prouvé ». Le registre vierge (``claims.empty``) et la synthèse non
+    remplie (``claims.summary_placeholder``) sont des constats de clôture,
+    levés à partir de ``review`` seulement.
     """
     rel_path = EVIDENCE_DIR / task_id / "claim-ledger.md"
     text = _text_file(root, rel_path)
@@ -43,7 +55,7 @@ def verify_claim_ledger(
     strict = profile.id in {"governed", "production"}
     template_row = "| CL-001 |  | fait |  | hypothèse | faible | vérifier |"
     rows = [line for line in text.splitlines() if line.startswith("| CL-") and line.strip() != template_row]
-    if not rows and not suppress_v0:
+    if not rows and not suppress_v0 and not rows_only:
         _add_check(result, "claims.empty", "warning", "Claim ledger still holds only the template row.", path=rel_path)
     for line in rows:
         cells = [c.strip() for c in line.strip().strip("|").split("|")]
@@ -61,5 +73,5 @@ def verify_claim_ledger(
                 result, "claims.used_unproved", "error" if strict else "warning",
                 f"{claim_id} is used while its status is {status}.", path=rel_path,
             )
-    if strict and rows and "| Affirmations bloquantes non prouvées |  |" in text:
+    if strict and rows and not rows_only and "| Affirmations bloquantes non prouvées |  |" in text:
         _add_check(result, "claims.summary_placeholder", "error", "Claim ledger summary is still empty.", path=rel_path)
