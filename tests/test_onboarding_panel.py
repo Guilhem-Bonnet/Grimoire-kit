@@ -42,7 +42,7 @@ class TestBuildNextSteps:
     def _panel(self, tmp_path: Path, *stacks: str, backend: str = "lexical", no_cockpit: bool = False):
         scan = _scan(*stacks, root=tmp_path)
         resolved = _resolve(scan)
-        with patch("grimoire.core.onboarding_panel.cockpit_registered", return_value=False):
+        with patch("grimoire.core.project_capabilities.cockpit_registered", return_value=False):
             return build_next_steps(
                 tmp_path,
                 resolved=resolved,
@@ -109,7 +109,7 @@ class TestBuildNextSteps:
         manifest = tmp_path / "_grimoire" / "standard" / "standard-profile.yaml"
         manifest.parent.mkdir(parents=True)
         manifest.write_text("profile: governed\n", encoding="utf-8")
-        with patch("grimoire.core.onboarding_panel.cockpit_registered", return_value=True):
+        with patch("grimoire.core.project_capabilities.cockpit_registered", return_value=True):
             panel = build_next_steps(
                 tmp_path,
                 resolved=resolved,
@@ -117,3 +117,37 @@ class TestBuildNextSteps:
                 no_cockpit=False,
             )
         assert panel.unexploited_line is None
+
+
+class TestCockpitProbeIsNotDuplicated:
+    """Copilot review on PR #617: `build_next_steps()` used to call
+    `cockpit_registered()` a second time after `unexploited_hints()` already
+    performed that same best-effort registry probe internally — duplicate
+    I/O, and a risk of disagreeing with the hints it had just computed.
+
+    `cockpit_registered()` always calls `slug_for_path()` internally
+    regardless of which imported name reaches it, so patching that lower
+    probe (rather than `cockpit_registered` itself) counts every real
+    invocation even across the two different name bindings the old,
+    duplicated-call code used."""
+
+    def test_cockpit_probe_hits_the_registry_at_most_once_per_call(self, tmp_path: Path) -> None:
+        scan = _scan("python", root=tmp_path)
+        resolved = _resolve(scan)
+        with patch(
+            "grimoire.core.project_capabilities.slug_for_path",
+            return_value=None,
+        ) as mock_slug:
+            build_next_steps(tmp_path, resolved=resolved, backend="lexical", no_cockpit=False)
+        assert mock_slug.call_count == 1
+
+    def test_no_cockpit_true_skips_the_probe_entirely(self, tmp_path: Path) -> None:
+        scan = _scan("python", root=tmp_path)
+        resolved = _resolve(scan)
+        with patch(
+            "grimoire.core.project_capabilities.slug_for_path",
+            return_value=None,
+        ) as mock_slug:
+            panel = build_next_steps(tmp_path, resolved=resolved, backend="lexical", no_cockpit=True)
+        assert mock_slug.call_count == 0
+        assert "cockpit" not in (panel.unexploited_line or "")

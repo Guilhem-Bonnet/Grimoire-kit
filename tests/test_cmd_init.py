@@ -695,6 +695,24 @@ class TestInitNoCockpit:
         finally:
             shutil.rmtree(scratch_root, ignore_errors=True)
 
+    def test_init_grimoire_no_cockpit_env_var_hides_the_report_suggestion(
+        self, runner, app, tmp_path: Path, simulated_real_home: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Found while replaying `init -y` for PR #617: `GRIMOIRE_NO_COCKPIT=1`
+        already kept the registry untouched (`_maybe_register_cockpit` checked
+        it), but `run_init()`'s own `no_cockpit` value — used to build the
+        'Next Steps' report via `build_next_steps()` — never read the env var,
+        only the `--no-cockpit` flag. The report kept suggesting
+        `grimoire cockpit` even though the opt-out was active for this run,
+        the same defect as the doctor/status footer (Copilot review, same PR)."""
+        monkeypatch.setenv("GRIMOIRE_NO_COCKPIT", "1")
+        target = tmp_path / "throwaway-env"
+
+        result = runner.invoke(app, ["-y", "init", str(target)])
+
+        assert result.exit_code == 0, result.output
+        assert "grimoire cockpit" not in result.output
+
     def test_init_no_cockpit_documented_in_help(self, app) -> None:
         """The option exists on the command, and the env var is documented
         alongside it — checked on the declared parameters and the raw

@@ -1101,6 +1101,17 @@ def run_init(
     fmt = (ctx.obj or {}).get("output", "text")
     yes = (ctx.obj or {}).get("yes", False)
 
+    # Same opt-out as `--no-cockpit` (documented as such on both `init` and
+    # `up`, and already honoured by `_maybe_register_cockpit` below) —
+    # resolved once, here, so every consumer downstream (the dynamic Next
+    # Steps panel via `_display_report`/`build_next_steps`, not just the
+    # actual registry write) agrees with it. Found via the real rejeu for
+    # PR #617: `GRIMOIRE_NO_COCKPIT=1 grimoire init -y` still printed "Open
+    # the multi-project cockpit: `grimoire cockpit`" in its own report even
+    # though the env var was set — the flag reached the registry write but
+    # never reached the report.
+    no_cockpit = no_cockpit or bool(os.environ.get("GRIMOIRE_NO_COCKPIT"))
+
     # ── Lite profile (issue Grimoire-kit#552, lot 2.6) ──────────────────────
     # A named preset, not a new mechanism: every knob it sets already exists
     # as its own flag. Applied before backend/memory-profile resolution below

@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from grimoire.core.archetype_resolver import ResolvedArchetype
-from grimoire.core.project_capabilities import cockpit_registered, unexploited_hints
+from grimoire.core.project_capabilities import unexploited_hints
 
 _MAX_ACTIONS = 3
 
@@ -96,8 +96,16 @@ def build_next_steps(
 
     actions = tuple(dict.fromkeys(candidates))[:_MAX_ACTIONS]
 
+    # Copilot review on PR #617: this used to call `cockpit_registered(target)`
+    # a second time here, after `unexploited_hints()` above already performed
+    # that same best-effort registry probe — duplicate I/O that could also
+    # disagree with the hints it just computed (e.g. the registry changing,
+    # or one call failing, between the two reads). "grimoire cockpit" is
+    # exploited/absent from the hint list under exactly the same condition
+    # (`not no_cockpit and not cockpit_registered(target)`), so deriving from
+    # the already-computed `hint_by_command` reuses that one probe instead.
     exploited_categories = {
-        "cockpit": cockpit_registered(target) or no_cockpit,
+        "cockpit": no_cockpit or "grimoire cockpit" not in hint_by_command,
         "standard": not any(h.command.startswith("grimoire standard") for h in hints),
         "memory": backend not in ("lexical", "local"),
     }

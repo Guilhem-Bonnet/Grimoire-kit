@@ -730,7 +730,12 @@ def doctor(
             from grimoire.core.project_capabilities import discover_footer_line, unexploited_hints
 
             footer = discover_footer_line(
-                unexploited_hints(target, archetype=cfg.agents.archetype, backend=cfg.memory.backend)
+                unexploited_hints(
+                    target,
+                    archetype=cfg.agents.archetype,
+                    backend=cfg.memory.backend,
+                    no_cockpit=bool(os.environ.get("GRIMOIRE_NO_COCKPIT")),
+                )
             )
             if footer:
                 console.print(f"[dim]{footer}[/dim]")
@@ -824,7 +829,12 @@ def status(
     from grimoire.core.project_capabilities import discover_footer_line, unexploited_hints
 
     footer = discover_footer_line(
-        unexploited_hints(target, archetype=cfg.agents.archetype, backend=cfg.memory.backend)
+        unexploited_hints(
+            target,
+            archetype=cfg.agents.archetype,
+            backend=cfg.memory.backend,
+            no_cockpit=bool(os.environ.get("GRIMOIRE_NO_COCKPIT")),
+        )
     )
     if footer:
         console.print(f"\n[dim]{footer}[/dim]")

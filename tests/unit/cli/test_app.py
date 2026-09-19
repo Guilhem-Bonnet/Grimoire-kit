@@ -4092,3 +4092,22 @@ class TestDiscoverFooter:
     def test_doctor_json_has_no_footer_text(self, fresh_project: Path) -> None:
         result = runner.invoke(app, ["doctor", "-o", "json", str(fresh_project)])
         assert "Découvrir" not in result.output
+
+    def test_doctor_never_suggests_cockpit_when_env_opts_out(self, fresh_project: Path) -> None:
+        """Copilot review on PR #617: the footer must honour GRIMOIRE_NO_COCKPIT
+        like ``--no-cockpit`` — never suggest ``grimoire cockpit`` when the
+        opt-out is active for this invocation, even on an unregistered project
+        (which would otherwise always earn the cockpit hint)."""
+        result = runner.invoke(
+            app, ["doctor", str(fresh_project)], env={"GRIMOIRE_NO_COCKPIT": "1"}
+        )
+        assert result.exit_code == 0, result.output
+        assert "grimoire cockpit" not in result.output
+
+    def test_status_never_suggests_cockpit_when_env_opts_out(self, fresh_project: Path) -> None:
+        """Same as above for `grimoire status` (Copilot review on PR #617)."""
+        result = runner.invoke(
+            app, ["status", str(fresh_project)], env={"GRIMOIRE_NO_COCKPIT": "1"}
+        )
+        assert result.exit_code == 0, result.output
+        assert "grimoire cockpit" not in result.output
