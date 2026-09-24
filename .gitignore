@@ -90,3 +90,10 @@ evals/runs/
 # suivi pour des builds reproductibles.
 rust/*/target/
 
+
+# design-sync (Claude Design) — sorties régénérées et état machine
+.ds-sync/
+ds-bundle/
+.design-sync/.cache/
+.design-sync/learnings/
+.design-sync/node_modules
