@@ -1887,3 +1887,35 @@ def test_every_host_emits_the_grounding_rule_and_the_uncertainties_block(governe
     assert GROUNDING_RULE in emitted, host_id
     assert "grimoire-uncertainties" in emitted, host_id
     assert "non mesuré" in emitted, host_id  # un score n'existe que calculé
+
+
+# ── Délégation Copilot (#622) ────────────────────────────────────────────────
+
+
+def test_copilot_entry_agent_can_delegate_to_every_routed_persona(governed: Path) -> None:
+    """Sur VS Code, un agent ne délègue que s'il a l'outil `agent` et une liste `agents:` (#622).
+
+    Des utilisateurs Copilot ont vu un concierge « sans droits » qui ne passait
+    pas la main : déclaré `read, search`, il ne pouvait ni agir ni invoquer une
+    autre persona, et le wrapper lui disait « tranche toi-même ». Le point
+    d'entrée reçoit désormais l'outil `agent`, la liste des personas routées
+    ; une persona routée ne reçoit rien de tout ça.
+    """
+    emitter = emitter_for(HostId.GITHUB_COPILOT)
+    assert emitter is not None
+    apply_plan(emitter.plan(build_surface(governed), governed), governed)
+
+    entry = (governed / ".github/agents/concierge.agent.md").read_text(encoding="utf-8")
+    sub = (governed / ".github/agents/scribe.agent.md").read_text(encoding="utf-8")
+
+    tools_line = next(line for line in entry.splitlines() if line.startswith("tools:"))
+    assert "'agent'" in tools_line, tools_line
+    assert "agents: [" in entry and "'scribe'" in entry.split("agents: [", 1)[1].split("]", 1)[0]
+    # Le corps dit comment déléguer, et interdit le « je n'ai pas les droits ».
+    assert "outil `agent`" in entry
+    assert "tranche toi-même" not in entry
+    assert "plus la délégation" in entry
+    # Une persona routée reste invocable comme sous-agent, sans être elle-même un routeur.
+    assert "agents:" not in sub
+    assert "plus la délégation" not in sub
+    assert "tools: ['read', 'search', 'edit']" in sub

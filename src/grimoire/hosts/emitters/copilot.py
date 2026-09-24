@@ -118,15 +118,30 @@ def _agent_file(agent: AgentSpec, surface: ProjectSurface, owned_skills: tuple[S
     # `inherit` côté Claude Code. Inventer un nom de modèle serait mentir sur
     # ce que l'hôte sait faire ; la lacune est déclarée en toutes lettres dans
     # la dégradation « model affinity » du plan plutôt que d'être tue.
-    header = Emitter.frontmatter(
-        {
-            "description": agent.description,
-            "tools": list(map_verbs(agent.tools, _TOOL_TABLE)),
-            "user-invocable": agent.entry_point,
-        }
-    )
+    fields: dict[str, Any] = {
+        "description": agent.description,
+        "tools": list(map_verbs(agent.tools, _TOOL_TABLE)),
+        "user-invocable": agent.entry_point,
+    }
+    routed = [other.name for other in surface.agents if not other.entry_point and other.name != agent.name]
+    if agent.entry_point and routed:
+        # Issue #622 : sur VS Code, un agent ne délègue que s'il a l'outil
+        # `agent` et une liste `agents:`. Sans les deux, un concierge déclaré
+        # `read, search` ne peut ni agir ni passer la main — c'est ce que des
+        # utilisateurs ont vu. Pas de `handoffs:` : un bouton par persona
+        # (vingt-cinq sur un projet courant) après chaque réponse n'aide pas ;
+        # la délégation passe par l'outil, le menu d'agents reste là pour la main.
+        fields["tools"] = [*fields["tools"], "agent"]
+        fields["agents"] = routed
+    header = Emitter.frontmatter(fields)
+    boundary = ", ".join(v.value for v in agent.tools)
+    if agent.entry_point and routed:
+        boundary = f"{boundary}, plus la délégation par l'outil `agent` aux personas listées dans `agents`"
     role = (
-        "Point d'entrée : quand la demande ne désigne pas clairement un rôle, tranche toi-même."
+        "Point d'entrée : tu ne fais pas le travail toi-même. Dès que la demande exige d'écrire, "
+        "d'exécuter ou un rôle précis, tu délègues à la persona adaptée avec l'outil `agent` "
+        "(brief : contexte, objectif, contraintes) et tu rends son résultat. Tu ne réponds jamais "
+        "« je n'ai pas les droits » : tu routes, le spécialiste agit."
         if agent.entry_point
         else "Agent routé en interne : tu traites une tranche de travail, tu ne clos pas la tâche globale."
     )
@@ -138,7 +153,7 @@ Tu actives la persona Grimoire **{agent.name}** du projet {surface.project_name}
 1. Lis `{agent.definition_ref}` en entier — persona, règles, protocole d'activation.
 2. {context_load_instruction(agent)}
 3. {role}
-4. Frontière d'outils : {", ".join(v.value for v in agent.tools)}. N'en sors pas.
+4. Frontière d'outils : {boundary}. N'en sors pas.
 5. {GROUNDING_RULE}
 """
     content = (
