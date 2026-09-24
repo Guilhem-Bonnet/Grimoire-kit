@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.58.0] - 2026-09-24
+
 - fix(standard): `gate check` contrôle le claim-ledger ligne à ligne dès `in_progress` (issue #614). Avant : `_verify_claim_ledger` (AG-QUA-002) n'était appelé que par `review_state_content_checks`, donc aux états `review`/`accepted`/`released` ; une ligne « utiliser » non prouvée écrite pendant le travail passait `gate check --strict` — le seul chemin que la directive de session mandate — sans un mot jusqu'au passage en revue, alors que c'est pendant le travail que l'affirmation pèse sur les décisions. Constaté en corrigeant #613 (personas qui inventent des chiffres) : la seule défense mécanique contre une affirmation sans source arrivait trop tard.
   - `standard_checks/gate_review_checks.py::in_progress_content_checks`, appelé par `check_evidence_gates` à l'état `in_progress` (deux lignes dans `agentic_standard.py`, sous le plafond du ratchet : 1898 ≤ 1916). `claim_ledger_verify.verify_claim_ledger(rows_only=True)` ne lève que les contradictions ligne à ligne — `claims.proved_without_evidence` (erreur), `claims.used_unproved` (erreur en `governed`/`production`, avertissement ailleurs) — jamais `claims.empty` ni `claims.summary_placeholder`, constats de clôture qui bloqueraient toute tâche gouvernée dès sa première minute.
   - Rouge-avant / vert-après : `tests/test_agentic_standard.py::test_gate_check_flags_an_unproved_claim_used_while_the_task_is_in_progress` ; gardes : `::test_gate_check_in_progress_does_not_demand_a_finished_ledger`, `::test_gate_check_in_progress_only_warns_on_a_non_strict_profile`.
