@@ -1,0 +1,8 @@
+{
+  "projectId": "c8eb1f92-65c5-4a9d-b5ab-bcc58e611e1e",
+  "shape": "package",
+  "pkg": "grimoire-cockpit",
+  "globalName": "GrimoireCockpit",
+  "cssEntry": "web/workspace/tokens.css",
+  "readmeHeader": ".design-sync/conventions.md"
+}

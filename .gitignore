@@ -90,3 +90,15 @@ evals/runs/
 # suivi pour des builds reproductibles.
 rust/*/target/
 
+# --- Grimoire Kit ---
+# Session runs — ephemeral runtime data
+_grimoire-output/.runs/
+# Memory archives — compressed old sessions
+_grimoire/_memory/archives/
+
+# design-sync (Claude Design) — sorties régénérées et état machine
+.ds-sync/
+ds-bundle/
+.design-sync/.cache/
+.design-sync/learnings/
+.design-sync/node_modules
