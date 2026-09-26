@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.59.0] - 2026-09-26
+
 - fix(hosts): sur Copilot, le point d'entrée agit ET délègue ; verbe `web` émis sous son vrai nom (issue #622, second retour). Après #624, un utilisateur rapportait encore un concierge « avec de gros soucis de droits, capable de rien » : en `read, search` + `agent`, il ne fait que router, ce qui dépend d'un VS Code qui sait lancer des sous-agents et d'un modèle qui appelle l'outil. Décision de Guilhem (2026-09-25) : l'agent d'entrée reçoit l'union des outils des personas qu'il route (`read, search, edit, execute` sur un projet courant) plus `agent` — il délègue quand un rôle précis existe, sinon il fait le travail lui-même ; c'est le modèle de l'orchestrateur écrit à la main dans la Forge (tous les outils + `agent/runSubagent`). Les personas routées gardent leur frontière propre.
   - `hosts/emitters/copilot.py` : union ordonnée (outils propres, puis ceux des personas routées, puis `agent`), frontière d'outils qui le dit, rôle « tu agis, ou le spécialiste agit ». Vérifié contre la référence VS Code « tools reference » : `read`, `search`, `edit`, `execute`, `agent` sont bien des tool sets ; `fetch` n'en est pas un — le set s'appelle `web` (`web/fetch`) et un nom inconnu est ignoré en silence, donc toute persona déclarant `web` perdait le web sans message. Corrigé dans `_TOOL_TABLE`.
   - Persona `concierge` : fait lui-même ce qui ne relève d'aucun rôle quand l'hôte lui donne les outils.

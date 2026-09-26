@@ -1,6 +1,6 @@
 {
  "schema": "grimoire-kit-file-hashes/v1",
- "generated_for": "3.58.0",
+ "generated_for": "3.59.0",
  "digests": {
   "002d1e68ce00769ee09d1e94f4af260b952837f7d1557080c2fd505216c23ac0": {
    "version": "3.11.2",
@@ -3141,6 +3141,10 @@
   "d0d375ca96a99f2e496ab59823c3c7a8e7936e090ca4b6cb3ce7afff2e3bcdb2": {
    "version": "3.4.2",
    "path": "archetypes/creative-studio/agents/illustration-expert.md"
+  },
+  "d16e3e46b6d0aab874071939b3c2bd127cbe90ce464071d8e4458ba72f4e5e28": {
+   "version": "3.59.0",
+   "path": "archetypes/meta/agents/concierge.md"
   },
   "d18ebf2bd69194a2e4d6f4aeca2e55e69921f38c9ffca09d2f5e2f5c5fcf654a": {
    "version": "3.16.0",
