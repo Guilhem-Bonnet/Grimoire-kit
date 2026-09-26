@@ -1919,3 +1919,47 @@ def test_copilot_entry_agent_can_delegate_to_every_routed_persona(governed: Path
     assert "agents:" not in sub
     assert "plus la délégation" not in sub
     assert "tools: ['read', 'search', 'edit']" in sub
+
+
+# ── Le point d'entrée Copilot agit ET délègue (#622, second retour) ─────────
+
+
+def test_copilot_entry_agent_acts_with_the_union_of_routed_tools(governed: Path) -> None:
+    """Second retour utilisateur : « de gros soucis de droits, capable de rien ».
+
+    Un concierge en `read, search` qui ne fait que router dépend d'un VS Code
+    qui sait lancer des sous-agents et d'un modèle qui appelle l'outil. Décision
+    de Guilhem (2026-09-25) : sur Copilot, le point d'entrée reçoit l'union des
+    outils des personas qu'il route, plus `agent` — il délègue quand un rôle
+    précis existe, sinon il fait le travail lui-même. Le modèle de son
+    orchestrateur écrit à la main dans la Forge.
+    """
+    emitter = emitter_for(HostId.GITHUB_COPILOT)
+    assert emitter is not None
+    apply_plan(emitter.plan(build_surface(governed), governed), governed)
+    entry = (governed / ".github/agents/concierge.agent.md").read_text(encoding="utf-8")
+    sub = (governed / ".github/agents/scribe.agent.md").read_text(encoding="utf-8")
+
+    tools_line = next(line for line in entry.splitlines() if line.startswith("tools:"))
+    for tool in ("'read'", "'search'", "'edit'", "'execute'", "'agent'"):
+        assert tool in tools_line, tools_line
+    assert "tu fais le travail toi-même" in entry
+    assert "tu ne fais pas le travail toi-même" not in entry
+    # La persona routée garde sa frontière propre : rien d'hérité de l'entrée.
+    assert "tools: ['read', 'search', 'edit']" in sub
+
+
+def test_copilot_maps_the_web_verb_to_the_vs_code_web_tool_set(project: Path) -> None:
+    """`fetch` n'est pas un nom d'outil VS Code : le tool set s'appelle `web` (docs « tools reference »).
+
+    Un nom inconnu est ignoré en silence, donc une persona déclarant `web`
+    perdait l'accès au web sans qu'aucun message ne le dise.
+    """
+    _write_agent(project, "veilleur", "Tu consultes des sources en ligne.", tools="'read', 'web'")
+    emitter = emitter_for(HostId.GITHUB_COPILOT)
+    assert emitter is not None
+    apply_plan(emitter.plan(build_surface(project), project), project)
+    wrapper = (project / ".github/agents/veilleur.agent.md").read_text(encoding="utf-8")
+    tools_line = next(line for line in wrapper.splitlines() if line.startswith("tools:"))
+    assert "'web'" in tools_line, tools_line
+    assert "fetch" not in tools_line, tools_line

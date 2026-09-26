@@ -48,7 +48,7 @@ _TOOL_TABLE: dict[ToolVerb, tuple[str, ...]] = {
     ToolVerb.SEARCH: ("search",),
     ToolVerb.EDIT: ("edit",),
     ToolVerb.EXECUTE: ("execute",),
-    ToolVerb.WEB: ("fetch",),
+    ToolVerb.WEB: ("web",),  # le tool set VS Code s'appelle `web` (`web/fetch`) ; `fetch` seul est ignoré en silence
 }
 
 _WIRE_NAMES: dict[HookEvent, str] = {
@@ -123,25 +123,30 @@ def _agent_file(agent: AgentSpec, surface: ProjectSurface, owned_skills: tuple[S
         "tools": list(map_verbs(agent.tools, _TOOL_TABLE)),
         "user-invocable": agent.entry_point,
     }
-    routed = [other.name for other in surface.agents if not other.entry_point and other.name != agent.name]
-    if agent.entry_point and routed:
-        # Issue #622 : sur VS Code, un agent ne délègue que s'il a l'outil
-        # `agent` et une liste `agents:`. Sans les deux, un concierge déclaré
-        # `read, search` ne peut ni agir ni passer la main — c'est ce que des
-        # utilisateurs ont vu. Pas de `handoffs:` : un bouton par persona
-        # (vingt-cinq sur un projet courant) après chaque réponse n'aide pas ;
-        # la délégation passe par l'outil, le menu d'agents reste là pour la main.
-        fields["tools"] = [*fields["tools"], "agent"]
-        fields["agents"] = routed
-    header = Emitter.frontmatter(fields)
+    routed = [other for other in surface.agents if not other.entry_point and other.name != agent.name]
     boundary = ", ".join(v.value for v in agent.tools)
     if agent.entry_point and routed:
-        boundary = f"{boundary}, plus la délégation par l'outil `agent` aux personas listées dans `agents`"
+        # Issue #622, deux retours utilisateurs (« pas assez de droits »,
+        # « capable de rien ») : un point d'entrée déclaré `read, search` qui ne
+        # fait que router dépend d'un VS Code qui sait lancer des sous-agents et
+        # d'un modèle qui appelle l'outil. Décision (2026-09-25) : il reçoit
+        # l'union des outils des personas qu'il route, plus `agent` — il
+        # délègue quand un rôle précis existe, sinon il agit lui-même. Sur VS
+        # Code, déléguer exige l'outil `agent` ET une liste `agents:`. Pas de
+        # `handoffs:` : un bouton par persona après chaque réponse n'aide pas.
+        union: list[str] = list(fields["tools"])
+        for other in routed:
+            union.extend(t for t in map_verbs(other.tools, _TOOL_TABLE) if t not in union)
+        fields["tools"] = [*union, "agent"]
+        fields["agents"] = [other.name for other in routed]
+        verbs = ", ".join(dict.fromkeys(v.value for other in (agent, *routed) for v in other.tools))
+        boundary = f"{verbs} (l'union de tes personas), plus la délégation par l'outil `agent` aux personas listées dans `agents`"
+    header = Emitter.frontmatter(fields)
     role = (
-        "Point d'entrée : tu ne fais pas le travail toi-même. Dès que la demande exige d'écrire, "
-        "d'exécuter ou un rôle précis, tu délègues à la persona adaptée avec l'outil `agent` "
-        "(brief : contexte, objectif, contraintes) et tu rends son résultat. Tu ne réponds jamais "
-        "« je n'ai pas les droits » : tu routes, le spécialiste agit."
+        "Point d'entrée : quand la demande relève d'un rôle précis, tu délègues à cette persona avec "
+        "l'outil `agent` (brief : contexte, objectif, contraintes) et tu rends son résultat ; sinon "
+        "tu fais le travail toi-même avec tes outils. Tu ne réponds jamais « je n'ai pas les droits » : "
+        "tu agis, ou le spécialiste agit."
         if agent.entry_point
         else "Agent routé en interne : tu traites une tranche de travail, tu ne clos pas la tâche globale."
     )
