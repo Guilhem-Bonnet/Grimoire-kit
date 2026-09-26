@@ -171,7 +171,7 @@ POUR CHAQUE question dans le buffer :
     → Marquer status = "auto_resolved"
     → Remplir resolution avec la réponse + source citée
     → Redistribuer immédiatement à l'agent
-    → Logger dans Grimoire_TRACE : [HUP:auto-resolved]
+    → Logger dans Grimoire_TRACE : [QEC:auto-resolved]
   
   SI réponse déduite sans source citable :
     → Garder dans le buffer
@@ -226,7 +226,7 @@ La présentation est déclenchée quand :
 - **Bloquantes toujours en premier**
 - **Grouper par thème** quand possible (ex: 3 questions sur la config → un seul bloc)
 - **Proposer des options** quand l'agent en a identifié → l'utilisateur peut juste dire "option A"
-- **Permettre le skip** pour les non-bloquantes → l'agent utilise son meilleur jugement (JAUNE)
+- **Permettre le skip** pour les non-bloquantes → l'agent utilise son meilleur jugement (incertitude déclarée)
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
@@ -294,7 +294,7 @@ entries:
     - agent: dev
       task: "Implémenter US-042..."
       output_key: implementation
-      # HUP + QEC actifs automatiquement
+      # Incertitudes déclarées + QEC actifs automatiquement
   
   # Nouveau : gestion des escalations
   on_escalation:

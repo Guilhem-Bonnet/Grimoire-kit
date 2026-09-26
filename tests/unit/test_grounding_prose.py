@@ -70,9 +70,11 @@ def test_guard_catches_each_rule_on_a_synthetic_line() -> None:
         ("trust_score: 91", "numeric-trust-score"),
         ("confidence: 0.92", "invented-confidence"),
         ("#### `[agent-id]` — Score [X]/100", "placeholder-score"),
+        ("confidence_level: GREEN | YELLOW | RED", "confidence-scale"),
+        ("Si dépendance HUP ROUGE → escalader", "confidence-scale"),
     ):
         assert GUARD.RULES[expected].search(line), (line, expected)
         seen.add(expected)
     assert seen == set(GUARD.RULES), "chaque règle a un cas synthétique"
-    for benign in ("Effort [S/M/L]", 'confidence: "haute|moyenne|faible"', "confidence_level: GREEN | YELLOW | RED", "burn-rate 14.4x/1h", "confidence_boost: 80"):
+    for benign in ("Effort [S/M/L]", 'confidence: "haute|moyenne|faible"', "burn-rate 14.4x/1h", "confidence_boost: 80", "HUP (BM-50)"):
         assert not any(p.search(benign) for p in GUARD.RULES.values()), benign

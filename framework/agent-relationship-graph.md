@@ -78,8 +78,8 @@ agent_graph:
       # Métriques agrégées
       metrics:
         tasks_completed: 47
-        hup_red_count: 3        # fois où HUP ROUGE déclenché
-        hup_red_resolved: 3     # dont résolus
+        blocking_gaps_count: 3     # points bloquants déclarés
+        blocking_gaps_resolved: 3  # dont résolus
         evasion_flags: 0        # flags anti-évitement
         cross_validations_passed: 12
         cross_validations_challenged: 2
@@ -100,8 +100,8 @@ agent_graph:
           evidence: ["Security review sprint-5", "Pentest US-029"]
       metrics:
         tasks_completed: 38
-        hup_red_count: 1
-        hup_red_resolved: 1
+        blocking_gaps_count: 1
+        blocking_gaps_resolved: 1
         evasion_flags: 0
         cross_validations_passed: 15
         cross_validations_challenged: 1
@@ -117,8 +117,8 @@ agent_graph:
       emergent_capabilities: []
       metrics:
         tasks_completed: 22
-        hup_red_count: 0
-        hup_red_resolved: 0
+        blocking_gaps_count: 0
+        blocking_gaps_resolved: 0
         evasion_flags: 0
         cross_validations_passed: 18
         cross_validations_challenged: 0
@@ -221,10 +221,10 @@ enrichment_rules:
     - update: "relationships[{agents}].type adjust toward 'challenge'"
     - flag: "Si >3 conflits en 10 interactions → anti_pattern candidate"
   
-  # Quand HUP ROUGE est déclenché
+  # Quand un point bloquant est déclaré (Uncertainty Report, blocking: true)
   on_event_uncertainty_raised:
-    - update: "agents[{agent}].metrics.hup_red_count += 1"
-    - check: "Si resolution rapide → hup_red_resolved += 1"
+    - update: "agents[{agent}].metrics.blocking_gaps_count += 1"
+    - check: "Si resolution rapide → blocking_gaps_resolved += 1"
     - check: "Si pattern d'évitement détecté → evasion_flags += 1"
   
   # Quand un agent est appelé par un autre (A2A)

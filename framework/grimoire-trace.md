@@ -62,9 +62,8 @@ Localisé à la racine du projet Grimoire : `_grimoire-output/Grimoire_TRACE.md`
 | `RULE:triggered` | Règle DNA ou `.agent-rules` activée | Context Router |
 | `WARN` | Alerte non-bloquante | Tout agent |
 | `ERROR` | Erreur bloquante | Tout agent |
-| `HUP:preflight` | Vérification pré-réponse de confiance | HUP (BM-50) |
-| `HUP:postflight` | Validation post-réponse anti-hallucination | HUP (BM-50) |
-| `HUP:escalation` | Escalade incertitude ROUGE | HUP (BM-50) |
+| `UNC:declared` | Incertitudes déclarées (bloc `grimoire-uncertainties` non vide) | HUP (BM-50) |
+| `UNC:blocking` | Point bloquant déclaré (Uncertainty Report, `blocking: true`) | HUP (BM-50) |
 | `QEC:received` | Question reçue d'un sub-agent | QEC (BM-51) |
 | `QEC:auto-resolved` | Question auto-résolue par contexte | QEC (BM-51) |
 | `QEC:presented` | Lot de questions présenté à l'utilisateur | QEC (BM-51) |

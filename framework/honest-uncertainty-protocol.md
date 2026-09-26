@@ -1,320 +1,96 @@
 <p align="right"><a href="../README.md">README</a> · <a href="../docs">Docs</a></p>
 
-# <img src="../docs/assets/icons/shield-pulse.svg" width="32" height="32" alt=""> Honest Uncertainty Protocol (HUP) — Anti-Hallucination par Design
+# <img src="../docs/assets/icons/shield-pulse.svg" width="32" height="32" alt=""> Honest Uncertainty Protocol (HUP) — Incertitude déclarée
 
-> **BM-50** — Protocole de méta-cognition artificielle pour les agents Grimoire.
+> **BM-50** — Ce qu'un agent Grimoire fait de ce qu'il ne sait pas.
 >
-> **Problème résolu** : Un LLM ne sait pas ce qu'il ne sait pas. Sans garde-fous explicites,
-> il génère des réponses plausibles mais fausses (hallucinations) plutôt que d'admettre son incertitude.
->
-> **Principe** : Chaque agent DOIT évaluer sa confiance AVANT et APRÈS chaque output significatif.
-> L'incertitude honnête est valorisée. L'hallucination confiante est le pire scénario.
+> **Révision du 2026-09-26** : l'échelle de confiance auto-déclarée (VERT / JAUNE / ROUGE,
+> `confidence_level`, pre-flight et post-flight « ma confiance est… ») est retirée. Aucun code
+> ne la calculait, et la sonde d'ancrage (`evals/reports/2026-09-18-grounding-probe/`) a
+> mesuré qu'elle n'empêchait rien : un agent écrivait « non mesuré » puis donnait une note.
+> Ce qui reste est ce qu'un programme lit : le bloc d'incertitudes et l'Uncertainty Report.
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
+## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Règle
 
-## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Règle Fondamentale
-
-> **Un agent qui dit "je ne sais pas" avec précision est INFINIMENT plus utile
-> qu'un agent qui hallucine avec confiance.**
+Tout chiffre, tout verdict et toute affirmation sur un fichier cite la commande réellement
+exécutée ou le chemin lu (fichier:ligne). Ce qui n'a été ni lu ni mesuré s'écrit
+« non vérifié » ; un score, une note ou une probabilité n'existe que si une commande l'a
+calculée. Un agent qui dit précisément ce qui lui manque est plus utile qu'un agent qui
+comble le vide.
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/cognition.svg" width="28" height="28" alt=""> Seuils de Confiance — Circuit Breaker Cognitif
+## <img src="../docs/assets/icons/cognition.svg" width="28" height="28" alt=""> Le bloc d'incertitudes
 
-Chaque agent évalue sa confiance sur une échelle à 3 niveaux avant de produire un output :
+Chaque réponse d'une persona routée ou d'un ouvrier headless se termine par :
 
-| Niveau | Seuil | Indicateur | Action |
-|--------|-------|------------|--------|
-| **VERT** | Confiance haute | Toutes les infos disponibles, raisonnement vérifiable, output testable | Exécution directe — résultat livré |
-| **JAUNE** | Confiance moyenne | Infos partielles, hypothèses raisonnables, output probable mais incertain | Exécution avec flag `**Attention** INCERTAIN` + justification explicite des hypothèses |
-| **ROUGE** | Confiance basse | Infos manquantes critiques, raisonnement spéculatif, output non vérifiable | **STOP** — Formulation structurée de l'incertitude → escalade via QEC |
-
-### Règle du Circuit Breaker
-
-```
-SI confiance == ROUGE :
-  NE PAS tenter de réponse
-  NE PAS inventer de données
-  NE PAS deviner
-  → Formuler un Uncertainty Report (voir ci-dessous)
-  → Escalader via Question Escalation Chain
+```grimoire-uncertainties
+[{"where": "fichier ou zone concernée", "what": "ce dont je doute", "why": "pourquoi"}]
 ```
 
-<img src="../docs/assets/divider.svg" width="100%" alt="">
-
-## <img src="../docs/assets/icons/seal.svg" width="28" height="28" alt=""> Pre-flight Check — Avant Exécution
-
-Avant chaque tâche significative, l'agent effectue mentalement ce check :
-
-```yaml
-preflight_check:
-  # 1. Ai-je les infos nécessaires ?
-  information_complete:
-    required: [liste des infos attendues]
-    available: [liste des infos en possession]
-    missing: [liste des infos manquantes]
-    verdict: complete | partial | insufficient
-
-  # 2. Mes hypothèses sont-elles explicites ?
-  assumptions:
-    stated: [hypothèses que je fais]
-    verifiable: true | false  # puis-je les vérifier dans le projet ?
-
-  # 3. Mon output sera-t-il vérifiable ?
-  output_verifiable:
-    testable: true | false    # CC-verify peut le valider ?
-    reviewable: true | false  # un humain peut le juger rapidement ?
-
-  # Verdict global
-  confidence_level: GREEN | YELLOW | RED
-```
-
-### Règles Pre-flight
-
-- **Information insuffisante** → ROUGE automatique
-- **Hypothèses non vérifiables** → JAUNE minimum
-- **Output non vérifiable + hypothèses** → ROUGE automatique
-- **Tout est disponible et testable** → VERT
+Liste JSON, `[]` si aucune incertitude — jamais de prose à la place, jamais le bloc omis
+par excès de confiance. `grimoire task dispatch` le parse (`missions.dispatch._extract_uncertainties`)
+et le compte ; l'orchestrateur le relit avant de croire un résultat. Deux états seulement :
+**aucune incertitude déclarée** (bloc vide) et **incertitudes déclarées** (bloc non vide).
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/seal.svg" width="28" height="28" alt=""> Post-flight Validation — Après Exécution
+## <img src="../docs/assets/icons/seal.svg" width="28" height="28" alt=""> L'Uncertainty Report — point bloquant
 
-Après avoir produit un output significatif, l'agent effectue un self-check :
-
-```yaml
-postflight_check:
-  # 1. Cohérence
-  coherence:
-    matches_constraints: true | false   # respecte les contraintes données ?
-    matches_existing_decisions: true | false  # cohérent avec shared-context/decisions-log ?
-    contradictions_found: []  # liste si oui
-
-  # 2. Grounding — Ancrage dans les faits
-  grounding:
-    facts_invented: []        # ai-je inventé des faits ? (noms, chiffres, URLs, versions)
-    facts_verified: []        # faits vérifiés contre des fichiers/docs réels
-    sources_cited: []         # d'où viennent mes affirmations ?
-
-  # 3. Confiance Post
-  confidence_post:
-    level: GREEN | YELLOW | RED
-    justification: "..."      # pourquoi ce niveau ?
-
-  # Si post-flight dégrade le niveau → corriger ou escalader
-```
-
-### Règles Post-flight
-
-- **Fait inventé détecté** → Retirer immédiatement de l'output + escalader si impact
-- **Contradiction avec decisions-log** → Activer le Contradiction Resolution Protocol (agent-base.md)
-- **Confiance dégradée** → Ajouter le flag `**Attention** INCERTAIN` + justification
-
-<img src="../docs/assets/divider.svg" width="100%" alt="">
-
-## <img src="../docs/assets/icons/cognition.svg" width="28" height="28" alt=""> Uncertainty Report — Format Structuré
-
-Quand un agent est en ROUGE, il produit un rapport structuré (jamais une tentative de réponse) :
+Quand une information manquante empêche de livrer, l'agent ne tente pas de réponse : il produit
+un rapport structuré et escalade via la Question Escalation Chain.
 
 ```yaml
 uncertainty_report:
   agent: "{agent_id}/{agent_name}"
   task: "description de la tâche assignée"
-  timestamp: "{iso_datetime}"
-
-  # Ce que j'ai compris
   understood:
-    - "point 1 que je comprends clairement"
-    - "point 2 que je comprends clairement"
-
-  # Ce qui me manque (le coeur du problème)
+    - "ce que je comprends clairement"
   blocking_gaps:
-    - gap: "description précise de l'info manquante"
+    - gap: "l'information manquante, précisément"
       type: knowledge_gap | ambiguity | complexity | missing_data
-      impact: "ce que je ne peux pas faire sans cette info"
-      suggested_question: "question formulée pour l'orchestrateur ou l'utilisateur"
-
-  # Ce que j'ai tenté (preuve d'effort)
+      impact: "ce que je ne peux pas faire sans"
+      suggested_question: "la question, formulée pour l'orchestrateur ou l'utilisateur"
   effort_spent:
     - "tentative 1 : approche X → échoué parce que Y"
-    - "tentative 2 : approche Z → résultat partiel mais insuffisant"
-
-  # Options que je vois (si j'en ai)
   options:
     - option: "option A"
-      basis: "ce qui fonde l'option — fichier lu, commande exécutée, doc citée ; jamais un pourcentage de confiance"
+      basis: "ce qui la fonde — fichier lu, commande exécutée, doc citée ; jamais un pourcentage"
       risk: "risque associé"
-    - option: "option B"
-      basis: "..."
-      risk: "risque associé"
-
-  # Impact sur le livrable
   impact_assessment:
-    blocking: true | false           # est-ce que ça bloque toute la tâche ?
-    partial_delivery_possible: true | false  # puis-je livrer une partie ?
+    blocking: true | false
+    partial_delivery_possible: true | false
     estimated_unblock: "ce qu'il faut pour débloquer"
 ```
-
-### Types d'Incertitude
 
 | Type | Signification | Exemple |
 |------|--------------|---------|
 | `knowledge_gap` | L'agent n'a pas l'expertise ou l'info | "Je ne connais pas le format attendu par l'API externe" |
 | `ambiguity` | La demande est ambiguë ou contradictoire | "La story dit REST mais l'ADR dit GraphQL" |
-| `complexity` | La tâche est trop complexe pour une seule passe | "L'optimisation nécessite un benchmark que je ne peux pas exécuter" |
-| `missing_data` | Des données/fichiers nécessaires manquent | "Le fichier `config.prod.yaml` n'existe pas dans le repo" |
+| `complexity` | La tâche exige plus d'une passe | "L'optimisation nécessite un benchmark que je ne peux pas exécuter" |
+| `missing_data` | Un fichier ou une donnée manque | "`config.prod.yaml` n'existe pas dans le repo" |
+
+Un rapport dont `impact_assessment.blocking` vaut `true` est un **point bloquant déclaré** :
+c'est lui qui déclenche l'escalade (QEC), le huddle ou la cross-validation dans les autres
+protocoles — jamais une couleur de confiance.
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/shield-pulse.svg" width="28" height="28" alt=""> Anti-Évitement — Le "Je Ne Sais Pas" N'est Pas une Échappatoire
+## <img src="../docs/assets/icons/shield-pulse.svg" width="28" height="28" alt=""> Anti-évitement
 
-> **Règle critique** : Le droit à l'incertitude ne peut JAMAIS servir d'excuse pour éviter une tâche gourmande.
+Le droit à l'incertitude ne dispense jamais d'une tâche gourmande :
 
-### Obligations avant le droit au "je ne sais pas"
-
-1. **Effort documenté obligatoire** — L'agent DOIT prouver qu'il a tenté :
- - Au moins 1 approche de raisonnement
- - Identification du point précis de blocage
- - Différenciation entre "je ne PEUX pas" et "je ne SAIS pas"
-
-2. **Spécificité obligatoire** — Interdit de dire :
- - &#x2717; "Je ne suis pas sûr" (trop vague)
- - &#x2717; "C'est compliqué" (pas un blocage)
- - &#x2717; "Je préfère ne pas deviner" (évitement)
- - &#x2713; "Il me manque X pour faire Y, j'ai tenté Z mais ça échoue parce que W"
-
-3. **Anti-pattern de fuite** — L'orchestrateur surveille :
- - Agent qui escalade systématiquement sur les tâches longues mais jamais sur les courtes → **flag suspect**
- - Agent qui produit des uncertainty reports sans `effort_spent` rempli → **rejet + forcer tentative**
- - Agent qui escalade >3 fois sans résolution sur la même tâche → **changement d'agent**
-
-### Détection de l'Évitement
-
-```yaml
-evasion_detection:
-  trigger: uncertainty_report submitted
-  checks:
-    - name: "effort_check"
-      rule: "effort_spent MUST contain >= 1 entry"
-      on_fail: "REJECT — Tentative obligatoire avant escalade"
-
-    - name: "specificity_check"  
-      rule: "blocking_gaps[].gap MUST be specific (>10 words, reference concrete)"
-      on_fail: "REJECT — Préciser le blocage exact"
-
-    - name: "pattern_check"
-      rule: "Si agent a escaladé >2 fois en 5 tâches ET uniquement sur des tâches sans verdict mécanique (classe de vérifiabilité V1/V2), jamais sur une tâche V0 dont le gate suffit"
-      on_fail: "FLAG — Pattern d'évitement potentiel, forcer tentative avec monitoring"
-
-    - name: "partial_delivery_check"
-      rule: "Si partial_delivery_possible == true, livrer la partie disponible AVANT d'escalader"
-      on_fail: "REJECT — Livrer le partiel d'abord"
-```
+1. `effort_spent` contient au moins une tentative réelle — un rapport sans effort est rejeté et la tentative exigée.
+2. Le manque est nommé : « il me manque X pour faire Y, j'ai tenté Z, ça échoue parce que W ». « Je ne suis pas sûr », « c'est compliqué », « je préfère ne pas deviner » ne sont pas des rapports.
+3. Un agent qui escalade plus de trois fois sans résolution sur la même tâche est remplacé.
+4. Un agent qui déclare des points bloquants uniquement sur des tâches sans verdict mécanique (classe V1/V2, jamais V0 où le gate suffit) est signalé à l'orchestrateur.
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/team.svg" width="28" height="28" alt=""> Intégration dans Agent-Base
+## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration
 
-Le HUP s'ajoute comme règle **P0 non-négociable** dans `agent-base.md` :
-
-```markdown
-## 🛡️ HUP — Honest Uncertainty Protocol (Règle Absolue)
-
-> **LE DEUXIÈME PRINCIPE FONDATEUR** : Un agent qui hallucine est plus dangereux qu'un agent qui dit "je ne sais pas".
-
-**Avant chaque output significatif :**
-1. Pre-flight check : infos complètes ? hypothèses explicites ? output vérifiable ?
-2. Évaluer confiance : 🟢 VERT (exécuter) · 🟡 JAUNE (exécuter + flag) · 🔴 ROUGE (STOP + escalade)
-3. Post-flight check : faits inventés ? cohérence ? sources ?
-
-**En cas de 🔴 ROUGE :**
-- NE PAS tenter de réponse
-- Formuler un Uncertainty Report structuré (voir HUP protocol)
-- Escalader via Question Escalation Chain
-- Fournir preuve d'effort (tentatives documentées)
-
-> Détails complets : voir `framework/honest-uncertainty-protocol.md` (charger à la demande).
-```
-
-<img src="../docs/assets/divider.svg" width="100%" alt="">
-
-## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration Grimoire Trace
-
-Chaque événement HUP est loggé :
-
-```
-[timestamp] [agent/Name] [HUP:preflight]    confidence: GREEN | task: "description"
-[timestamp] [agent/Name] [HUP:postflight]   confidence: YELLOW | flags: ["hypothèse non vérifiée sur X"]
-[timestamp] [agent/Name] [HUP:escalate]     confidence: RED | type: knowledge_gap | question: "..."
-[timestamp] [agent/Name] [HUP:evasion-flag] pattern detected: 3/5 escalations on large tasks
-```
-
-<img src="../docs/assets/divider.svg" width="100%" alt="">
-
-## <img src="../docs/assets/icons/rocket.svg" width="28" height="28" alt=""> Exemples
-
-### Exemple 1 — Agent Dev, confiance VERTE
-```
-Pre-flight: infos complètes ✅, pas d'hypothèses ✅, output testable (CC) ✅
-→ Confidence: GREEN
-→ Action: Implémenter, CC PASS, livrer
-Post-flight: pas de faits inventés ✅, cohérent avec ADR ✅
-→ Confiance maintenue GREEN
-```
-
-### Exemple 2 — Agent Architect, confiance JAUNE
-```
-Pre-flight: infos partielles (pas de benchmark perf), hypothèse sur la charge utilisateur
-→ Confidence: YELLOW
-→ Action: Proposer l'architecture + flag ⚠️
-Output: "Architecture proposée basée sur l'HYPOTHÈSE de <10k users simultanés.
-         ⚠️ INCERTAIN : Si la charge dépasse 10k, le pattern X devra être remplacé par Y.
-         Recommandation : valider l'hypothèse charge avant implémentation."
-Post-flight: aucun fait inventé, hypothèse clairement labélisée
-→ Confiance maintenue YELLOW — livré avec caveat
-```
-
-### Exemple 3 — Agent Dev, confiance ROUGE → escalade
-```
-Pre-flight: fichier config.prod.yaml référencé dans la story mais absent du repo
-→ Confidence: RED — missing_data
-→ Action: STOP + Uncertainty Report
-
-uncertainty_report:
-  agent: "dev/Amelia"
-  task: "Implémenter US-042 — configuration production"
-  understood:
-    - "La story demande de configurer le service auth pour production"
-    - "Le format attendu est YAML avec les clés host, port, tls"
-  blocking_gaps:
-    - gap: "Le fichier config.prod.yaml n'existe pas dans le repo"
-      type: missing_data
-      impact: "Impossible de configurer les valeurs production sans ce fichier"
-      suggested_question: "Faut-il créer config.prod.yaml ? Si oui, quelles valeurs pour host/port/tls ?"
-  effort_spent:
-    - "Cherché dans tout le repo : config.dev.yaml existe, config.staging.yaml existe, pas de config.prod.yaml"
-    - "Vérifié le .gitignore : pas exclu"
-  options:
-    - option: "Copier config.staging.yaml et adapter"
-      basis: "config.staging.yaml lu : mêmes clés host/port/tls que config.dev.yaml"
-      risk: "Les valeurs staging peuvent différer de prod (ports, TLS, secrets)"
-  impact_assessment:
-    blocking: true
-    partial_delivery_possible: false
-    estimated_unblock: "Fournir config.prod.yaml ou confirmer la copie de staging"
-```
-
-<img src="../docs/assets/divider.svg" width="100%" alt="">
-
-## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Références Croisées
-
-- Orchestrator Gateway : [framework/orchestrator-gateway.md](orchestrator-gateway.md) (BM-53) — supervision HUP
-- Question Escalation : [framework/question-escalation-chain.md](question-escalation-chain.md) (BM-51) — escalade des gaps bloquants
-- Cross-Validation : [framework/cross-validation-trust.md](cross-validation-trust.md) (BM-52) — validation croisée post-HUP
-- Agent Mesh Network : [framework/agent-mesh-network.md](agent-mesh-network.md) (BM-55) — propagation HUP via P2P
-- Event Log : [framework/event-log-shared-state.md](event-log-shared-state.md) (BM-59) — événements HUP persistés
-- Hybrid Parallelism : [framework/hybrid-parallelism-engine.md](hybrid-parallelism-engine.md) (BM-58) — HUP sur chaque tâche DAG
-
-
-*BM-50 Honest Uncertainty Protocol | framework/honest-uncertainty-protocol.md*
+- Question Escalation Chain (BM-51) : reçoit les Uncertainty Reports et en extrait les questions.
+- Cross-Validation Trust Layer (BM-52) : une réponse avec incertitudes déclarées est candidate à la relecture croisée ; un point bloquant déclaré l'impose.
+- Le socle (`agent-base.md`) porte la règle ; les wrappers émis par `grimoire host sync` exigent le bloc de chaque persona routée.

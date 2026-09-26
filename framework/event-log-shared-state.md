@@ -65,7 +65,7 @@
 | `artifact_created` | Fichier créé/modifié | dev, architect, tech-writer | `{path: "src/auth.ts", action: "created"}` |
 | `task_started` | Tâche démarrée | Tout agent | `{task_id: "US-042", description: "..."}` |
 | `task_completed` | Tâche terminée | Tout agent | `{task_id: "US-042", status: "success", cc_result: "PASS"}` |
-| `uncertainty_raised` | HUP ROUGE déclenché | Tout agent | `{gap_type: "missing_data", question: "..."}` |
+| `uncertainty_raised` | Point bloquant déclaré (Uncertainty Report, `blocking: true`) | Tout agent | `{gap_type: "missing_data", question: "..."}` |
 | `question_resolved` | QEC répondue | Orchestrateur | `{question_id: "q-001", answer: "..."}` |
 | `cross_validated` | CVTL validé | Validateur | `{artifact: "ADR-042", dimensions: "3/3", unverified: ["implementation_feasibility"], verdict: "approve_with_notes"}` |
 | `conflict_detected` | Contradiction trouvée | Tout agent | `{existing: "REST", proposed: "GraphQL", source: "ADR"}` |
@@ -223,7 +223,7 @@ emit_protocol:
       type: task_completed
       payload_required: [task_id, status]
     
-    - trigger: "HUP ROUGE déclenché"
+    - trigger: "Point bloquant déclaré"
       type: uncertainty_raised
       payload_required: [gap_type, question]
   

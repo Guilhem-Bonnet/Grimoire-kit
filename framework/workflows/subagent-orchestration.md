@@ -166,16 +166,16 @@ merge:
 
 > Référence complète : `../framework/cross-validation-trust.md` (BM-52)
 
-### Pattern 5 — Orchestration avec HUP + QEC (BM-50/51)
+### Pattern 5 — Orchestration avec incertitudes déclarées + QEC (BM-50/51)
 
 ```yaml
 # Contexte : tâche incertaine où les agents peuvent avoir besoin de clarifications
 type: orchestrate
 spawn:
   - agent: dev
-    task: "Implémenter la feature {description}. HUP actif : si confiance ROUGE, produire uncertainty_report au lieu d'halluciner."
+    task: "Implémenter la feature {description}. Bloc d'incertitudes exigé : sur un point bloquant, produire un Uncertainty Report au lieu d'halluciner."
     output_key: implementation
-    # HUP + QEC activés automatiquement sur chaque sub-agent
+    # Incertitudes déclarées + QEC activés automatiquement sur chaque sub-agent
 
 on_escalation:
   strategy: batch                  # batch | immediate
@@ -199,7 +199,7 @@ on_escalation:
 3. **L'orchestrateur ne modifie JAMAIS les fichiers pendant le spawn** — il attend les résultats
 4. **Si un sous-agent échoue**, l'orchestrateur le signale, n'annule pas les autres, et agrège ce qui a réussi
 5. **Le merge produit toujours un artefact persisté** — jamais un résultat éphémère
-6. **HUP actif sur chaque sub-agent** — confiance ROUGE = uncertainty_report, pas d'hallucination (BM-50)
+6. **Bloc d'incertitudes exigé sur chaque sub-agent** — point bloquant déclaré = Uncertainty Report, pas d'hallucination (BM-50)
 7. **Escalations QEC agrégées** — les questions des sub-agents sont collectées et présentées en lot (BM-51)
 8. **Dispatch via AMN** — les tâches sont dispatchées via le mesh (BM-55), avec discovery et load balancing
 9. **Assignation via ARG** — l'agent optimal est sélectionné par le graphe relationnel (BM-57)
