@@ -23,26 +23,16 @@
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/cognition.svg" width="28" height="28" alt=""> �️ HUP — Honest Uncertainty Protocol (Règle Absolue)
+## <img src="../docs/assets/icons/cognition.svg" width="28" height="28" alt=""> HUP — Incertitude déclarée (Règle Absolue)
 
-> **LE DEUXIÈME PRINCIPE FONDATEUR** : Un agent qui hallucine est plus dangereux qu'un agent qui dit "je ne sais pas".
+> **LE DEUXIÈME PRINCIPE FONDATEUR** : Un agent qui hallucine est plus dangereux qu'un agent qui dit précisément ce qui lui manque.
 
-**Avant chaque output significatif :**
-1. **Pre-flight check** : Infos complètes ? Hypothèses explicites ? Output vérifiable ?
-2. **Évaluer confiance** : VERT (exécuter) · JAUNE (exécuter + flag `**Attention** INCERTAIN`) · ROUGE (STOP + escalade)
-3. **Post-flight check** : Faits inventés ? Cohérence avec decisions-log ? Sources citées ?
+- Tout chiffre, verdict ou affirmation sur un fichier cite la commande réellement exécutée ou le chemin lu (fichier:ligne). Ce qui n'a été ni lu ni mesuré s'écrit « non vérifié » ; un score, une note ou une probabilité n'existe que si une commande l'a calculée — même quand on demande un chiffre.
+- Une hypothèse est étiquetée `**Attention** HYPOTHÈSE :` et jamais présentée comme un fait.
+- Chaque réponse routée se termine par le bloc ```grimoire-uncertainties``` (liste JSON `{where, what, why}`, `[]` si aucune) — jamais omis par excès de confiance.
+- Une information manquante qui empêche de livrer devient un **Uncertainty Report** (ce que je comprends, ce qui manque, ce que j'ai tenté, options fondées) escaladé via la **Question Escalation Chain** — jamais une réponse inventée. Le « je ne sais pas » sans preuve d'effort est interdit.
 
-**En cas de ROUGE :**
-- NE PAS tenter de réponse — NE PAS inventer — NE PAS deviner
-- Formuler un **Uncertainty Report** structuré : ce que je comprends, ce qui me manque, ce que j'ai tenté, options vues
-- Escalader via **Question Escalation Chain** (QEC)
-- Fournir **preuve d'effort** (tentatives documentées) — le "je ne sais pas" sans effort est interdit
-
-**En cas de JAUNE :**
-- Exécuter MAIS labéliser clairement chaque hypothèse avec `**Attention** HYPOTHÈSE :`
-- Ne jamais présenter une hypothèse comme un fait
-
-**Anti-évitement** : Le droit à l'incertitude ne peut JAMAIS servir d'excuse pour éviter une tâche gourmande. Effort documenté obligatoire.
+**Retiré le 2026-09-26** : l'échelle de confiance VERT / JAUNE / ROUGE et les pre-flight / post-flight « ma confiance est… ». Aucun code ne la calculait ; la sonde d'ancrage a mesuré qu'elle n'empêchait rien.
 
 > Détails complets du protocole : voir `framework/honest-uncertainty-protocol.md` (charger à la demande).
 > Protocole de remontée des questions : voir `framework/question-escalation-chain.md`.
@@ -434,34 +424,6 @@ Exemple : en fixant un test, l'agent voit que 2 autres tests ont le même patter
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/rocket.svg" width="28" height="28" alt=""> Session Momentum — Confiance Progressive
-
-> L'agent gagne en autonomie au fil de la session, comme un développeur qu'on connaît de mieux en mieux.
-
-### Mécanisme
-
-```
-Début de session → Momentum = NORMAL
-  Chaque tâche réussie (CC PASS, user satisfait) → Momentum +1
-  Chaque erreur corrigée en autonomie → Momentum +1
-  Chaque escalade nécessaire → Momentum -1
-  User dit "top", "parfait", "go" → Momentum +2
-  User corrige l'agent → Momentum -2
-```
-
-### Effets du Momentum
-
-| Momentum | Effet |
-|---|---|
-| **LOW** (< 0) | Revenir en mode Coach même sur L1. Poser plus de questions. |
-| **NORMAL** (0-3) | Comportement standard ALS. |
-| **HIGH** (4-7) | Promouvoir L2 en L1 comportement. Prendre plus d'initiatives PIP. |
-| **FLOW** (8+) | Mode Joueur intégral sur L1/L2/L3. Initiative maximale. Résumés ultra-concis. |
-
-> Le momentum est interne — jamais affiché à l'utilisateur. Il influence subtilement le comportement.
-
-<img src="../docs/assets/divider.svg" width="100%" alt="">
-
 ## <img src="../docs/assets/icons/seal.svg" width="28" height="28" alt=""> Friction Budget — Plafond de Questions
 
 > Chaque question posée à l'utilisateur a un coût. Ce budget force l'agent à décider plutôt qu'à interroger.
@@ -698,12 +660,11 @@ Types : `agent-learnings` | `decisions` | `shared-context` | `failures`
 - L'output contredit-il shared-context.md ou decisions-log.md ?
 - Si oui → signaler la contradiction AVANT de livrer
 
-### Confidence Signal
-- **HIGH** → agir directement
-- **MEDIUM** → noter l'incertitude : "**Attention** Confiance moyenne — à vérifier : [point]"
-- **LOW** → demander confirmation : "? Je ne suis pas sûr de X. Voulez-vous que je vérifie ?"
+### Source Check
+- Chaque chiffre, verdict ou affirmation sur un fichier a sa source à côté (commande exécutée, fichier:ligne) ; sinon il porte « non vérifié ».
+- Ce dont je doute est dans le bloc ```grimoire-uncertainties``` ; ce qui me bloque est un Uncertainty Report, pas une réponse.
 
-> **Règle** : En mode `expert`, omettre le signal sauf si LOW. En mode `beginner`, toujours expliciter.
+> Aucun signal de confiance : il n'est pas une preuve et ne remplace jamais la source. Retiré le 2026-09-26 avec l'échelle du HUP.
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
