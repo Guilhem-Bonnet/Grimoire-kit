@@ -175,3 +175,84 @@ jobs:
                     `---\n*Créée automatiquement par Grimoire Weekly Benchmark*`,
               labels: ['grimoire-bench-alert', 'agent-quality'],
             });
+
+  # ── Sonde d'ancrage (#613) ─────────────────────────────────────────────
+  # Sommet de la pyramide de gardes : une persona émise par le kit courant
+  # reçoit deux questions dont toute réponse chiffrée est inventée (module
+  # inexistant, API inexistante) ; le juge mécanique de evals/grounding-probe.py
+  # échoue le job dès qu'un pourcentage, une note ou une quantité apparaît sans
+  # source. La troisième question (note sur demande explicite) reste hors
+  # gate : mesurée à 3/3 fabriquée sur haiku (evals/reports/2026-09-18-grounding-probe/).
+  # Le job ne tourne que si ANTHROPIC_API_KEY est dans les secrets du dépôt —
+  # sans clé il est sauté, jamais vert par défaut.
+  grounding-probe:
+    name: "Sonde d'ancrage (haiku, 2 questions × 3)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Clé API présente ?
+        id: key
+        run: |
+          if [[ -z "${ANTHROPIC_API_KEY}" ]]; then
+            echo "::warning::ANTHROPIC_API_KEY absent des secrets — sonde d'ancrage sautée (pas un vert)."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Python
+        if: steps.key.outputs.present == 'true'
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Setup Node (CLI claude)
+        if: steps.key.outputs.present == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Installer le kit et le CLI claude
+        if: steps.key.outputs.present == 'true'
+        run: |
+          pip install -e .
+          npm install -g @anthropic-ai/claude-code
+          claude --version
+
+      - name: Construire le témoin et le wrapper émis par ce kit
+        if: steps.key.outputs.present == 'true'
+        run: python evals/grounding-probe-witness.py --out _grimoire-output/grounding-probe
+
+      - name: Sonder (bras after = wrapper du kit courant)
+        if: steps.key.outputs.present == 'true'
+        run: |
+          DATE=$(date +%Y-%m-%d)
+          python evals/grounding-probe.py run \
+            --project _grimoire-output/grounding-probe/projet \
+            --wrapper _grimoire-output/grounding-probe/wrapper-after.md \
+            --label after --reps 3 --model haiku \
+            --only coverage-trend capacity-projection \
+            --out "_grimoire-output/grounding-probe/runs/${DATE}"
+          echo "runs=_grimoire-output/grounding-probe/runs/${DATE}" >> "$GITHUB_ENV"
+
+      - name: Verdict (échec dès un chiffre inventé)
+        if: steps.key.outputs.present == 'true'
+        run: |
+          {
+            echo "## Sonde d'ancrage — $(date +%Y-%m-%d)"
+            echo
+            python evals/grounding-probe.py report "$runs"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          python evals/grounding-probe.py report "$runs" --fail-on-fabrication after >/dev/null
+
+      - name: Archiver les runs
+        if: steps.key.outputs.present == 'true' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: grounding-probe-runs
+          path: _grimoire-output/grounding-probe/runs/
+          if-no-files-found: ignore
