@@ -52,7 +52,7 @@ version canonique et sa légende de statuts.
 | Protocole ou mécanisme Grimoire | Équivalent industriel | Écart au 2026-09-12 | Statut |
 |---|---|---|---|
 | SOG (`orchestrator-gateway.md`) | Manager pattern OpenAI, Coordinator ADK | Inchangé | aligné |
-| HUP (`honest-uncertainty-protocol.md`) | Abstention à l'entraînement, MAST FM-2.2 | Inchangé | en avance |
+| HUP (`honest-uncertainty-protocol.md`) | Abstention à l'entraînement, MAST FM-2.2 | Inchangé (échelle retirée le 2026-09-26) | en avance |
 | QEC (`question-escalation-chain.md`) | Elicitation MCP, HITL OpenAI | Inchangé | en avance |
 | CVTL (`cross-validation-trust.md`) | Evaluator-optimizer, Agent-as-a-Judge | pass^k livré en campagne (`pass_hat_k`, A3, 2026-09-08), pas encore consommé ni branché sur CVTL ; coût par tâche mesuré une fois à la main (#307) | aligné |
 | PCE (`productive-conflict-engine.md`) | Multi-agent debate | Inchangé | à cadrer |

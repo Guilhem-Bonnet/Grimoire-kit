@@ -19,6 +19,9 @@ Règles, une ligne à la fois :
 - ``invented-confidence`` — ``confiance : 30%``, ``confidence: 0.92``,
   ``confiance ≥ 80%`` : une confiance chiffrée que rien ne mesure, qu'elle
   soit à produire ou comparée à un seuil.
+- ``confidence-scale`` — ``confidence_level: GREEN | YELLOW | RED``,
+  ``confiance : ROUGE``, ``HUP JAUNE`` : l'échelle de confiance auto-déclarée,
+  retirée du HUP et du socle le 2026-09-26 — aucun code ne la calcule.
 - ``numeric-trust-score`` — ``trust_score: 91``, ``synergy_score: 0.92``,
   ``Trust: {composite}/100``, ``91/100`` : un score de confiance
   inter-agents qu'aucune commande du kit ne calcule.
@@ -57,6 +60,11 @@ RULES: dict[str, re.Pattern[str]] = {
         r"(?i)\bconfi(?:ance|dence)(?:_level)?\s*[:=<>≥≤]+\s*[\"']?(?:\d+\s?%|0?\.\d|\{%\})"
     ),
     # `trust_score: 91`, `synergy_score: 0.92`, `Trust: {composite_score}/100`, `91/100`
+    # `confidence_level: GREEN | YELLOW | RED`, `confiance : ROUGE`, `HUP JAUNE`, `HIGH/MEDIUM/LOW → agir`
+    # — l'échelle de confiance auto-déclarée retirée le 2026-09-26 : aucun code ne la calcule
+    "confidence-scale": re.compile(
+        r"(?i)\bconfidence_level\s*:|\bconfi(?:ance|dence)\s*[:=]\s*(?:VERT|JAUNE|ROUGE|GREEN|YELLOW|RED|HIGH|MEDIUM|LOW)\b|\bHUP (?:ROUGE|JAUNE|VERT)\b|`(?:HIGH|MEDIUM|LOW)`\s*(?:=|→)"
+    ),
     "numeric-trust-score": re.compile(
         r"(?i)\b(?:trust|synergy|match|composite|avg_trust)_?score\s*[:=]\s*[\"']?\d|\{[a-z_]+\}\s*/\s*100|\b\d{1,3}\s?/\s?100\b"
     ),

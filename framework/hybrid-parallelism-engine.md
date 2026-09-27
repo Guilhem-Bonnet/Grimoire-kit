@@ -183,9 +183,9 @@ sequential_mode:
   
   scheduling:
     1: "Attendre que TOUTES les dépendances soient satisfaites"
-    2: "Vérifier le résultat de chaque dépendance : success ? HUP ROUGE ?"
+    2: "Vérifier le résultat de chaque dépendance : success ? point bloquant déclaré ?"
     3: "Si dépendance en échec → appliquer on_failure strategy"
-    4: "Si dépendance HUP ROUGE → escalader via QEC AVANT dispatch"
+    4: "Si dépendance en point bloquant déclaré → escalader via QEC AVANT dispatch"
     5: "Dispatcher quand tout est prêt"
 ```
 
@@ -244,8 +244,8 @@ critical_path:
     # Alertes
     alerts:
       - "Tâche du critical path en retard → alerte SOG"
-      - "Tâche du critical path en HUP JAUNE → cross-validation immédiate"
-      - "Tâche du critical path en HUP ROUGE → huddle d'urgence"
+      - "Tâche du critical path avec incertitudes déclarées → cross-validation immédiate"
+      - "Tâche du critical path avec point bloquant déclaré → huddle d'urgence"
 ```
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
@@ -286,7 +286,7 @@ failure_handling:
     retry_with:
       - "Contexte additionnel (résultats partiels des autres tâches)"
       - "Agent différent si le premier a échoué (ARG fallback agent)"
-      - "Huddle de clarification si HUP ROUGE persistant"
+      - "Huddle de clarification si point bloquant persistant"
 ```
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
@@ -365,10 +365,10 @@ Parallel workers: 1/5 active
 | **AMN (BM-55)** | Dispatch des tâches via le mesh + discovery |
 | **ARG (BM-57)** | Sélection optimale des agents par tâche |
 | **ELSS (BM-59)** | Monitoring temps réel + coordination |
-| **HUP (BM-50)** | Chaque tâche du DAG applique HUP |
+| **HUP (BM-50)** | Chaque tâche du DAG exige le bloc d'incertitudes |
 | **QEC (BM-51)** | Questions agrégées depuis toutes les tâches parallèles |
 | **CVTL (BM-52)** | `mode: cross-validate` déclenche la validation croisée |
-| **SHP (BM-56)** | Huddle déclenché automatiquement sur critical path JAUNE/ROUGE |
+| **SHP (BM-56)** | Huddle déclenché automatiquement sur critical path avec incertitudes déclarées ou point bloquant |
 | **SOG (BM-53)** | HPE est un module interne du SOG |
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">

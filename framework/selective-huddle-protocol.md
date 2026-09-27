@@ -74,12 +74,12 @@ auto_triggers:
     topic: "Résoudre le challenge sur {artifact}"
     urgency: high
   
-  # 2. HUP JAUNE sur sujet multi-domaine
-  hup_yellow_multi:
-    condition: "Agent en JAUNE ET le sujet touche >= 2 domaines (tech + business)"
+  # 2. Incertitudes déclarées sur sujet multi-domaine
+  uncertainties_multi:
+    condition: "Agent avec incertitudes déclarées ET le sujet touche >= 2 domaines (tech + business)"
     huddle_type: "quick-consult"
     participants: "ARG.find_expert(domain1) + ARG.find_expert(domain2)"
-    topic: "Consolider la confiance sur {task}"
+    topic: "Lever les incertitudes déclarées sur {task}"
     urgency: normal
   
   # 3. Contradiction détectée (ELSS conflict_detected)
@@ -265,7 +265,7 @@ lifecycle:
       - "Si divergence_score > 0.8 → SOG intervient pour recentrer"
       - "Si boucle circulaire détectée → SOG force la synthèse"
       - "Respecter le time-box : warning à 80%, force-close à 100%"
-    hup_active: true   # agents appliquent HUP pendant le huddle
+    uncertainties_required: true   # bloc d'incertitudes exigé pendant le huddle
   
   # Phase 3 — Clôture
   close:
