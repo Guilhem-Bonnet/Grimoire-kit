@@ -99,7 +99,7 @@ gardes le tiennent, du plus rapide au plus coûteux :
 |---|---|---|---|
 | Statique | `scripts/check-emitted-prose.py` | pre-commit, `make lint`, `tests/unit/test_grounding_prose.py` en CI | un gabarit émis qui demande `X/10`, `confidence: 0.92`, `trust_score: 91`, une estimation chiffrée |
 | Émission | `tests/unit/test_hosts.py` (`*grounding*`) | `pytest tests/unit` | un hôte ou un ouvrier headless dont le texte émis ne porte pas `grimoire.core.grounding.GROUNDING_RULE` ni le bloc `grimoire-uncertainties` |
-| Comportement | `evals/grounding-probe.py` | à la main, modèle réel, avant une release qui touche les wrappers | une persona émise qui répond un pourcentage ou une note à une question dont toute réponse chiffrée est inventée |
+| Comportement | `evals/grounding-probe.py` (témoin : `evals/grounding-probe-witness.py`) | chaque lundi dans `weekly-bench.yml` si `ANTHROPIC_API_KEY` est dans les secrets (sauté sinon, jamais vert par défaut), et à la main avant une release qui touche les wrappers | une persona émise qui répond un pourcentage ou une quantité à une question dont toute réponse chiffrée est inventée (deux questions en gate ; la note sur demande explicite reste hors gate, mesurée 3/3 fabriquée sur haiku) |
 
 Règles d'écriture pour tout fichier sous `framework/` ou `archetypes/` :
 
