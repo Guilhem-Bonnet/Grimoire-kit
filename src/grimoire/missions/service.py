@@ -38,6 +38,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "DEFAULT_LEDGER_RELPATH",
+    "TaskAdded",
     "TaskMove",
     "TaskRefusedError",
     "TaskService",
@@ -96,6 +97,29 @@ class TaskMove:
         if self.board_path is not None:
             data["board_path"] = str(self.board_path)
         return data
+
+
+@dataclass(frozen=True, slots=True)
+class TaskAdded:
+    """Ce qu'une ouverture de tâche a produit (issue #638, lot A) : la tâche,
+    la mission qui la porte — créée à l'occasion ou non — et le board reprojeté."""
+
+    task: MissionTask
+    mission_id: str
+    mission_created: bool
+    board_path: Path | None
+
+    def to_dict(self) -> dict[str, Any]:
+        data = self.task.to_dict()
+        data["board"] = board_status_of(self.task.status)
+        data["mission_created"] = self.mission_created
+        if self.board_path is not None:
+            data["board_path"] = str(self.board_path)
+        return data
+
+
+#: Titre de la mission ouverte d'office quand le ledger n'en a aucune.
+DEFAULT_MISSION_TITLE = "Travaux courants"
 
 
 class TaskService:
@@ -177,6 +201,58 @@ class TaskService:
 
     # ── Écriture ───────────────────────────────────────────────────────────
 
+    def add(
+        self,
+        title: str,
+        acceptance: tuple[str, ...],
+        *,
+        mission_id: str = "",
+        owner: str = "",
+        expected_evidence: tuple[str, ...] = (),
+        actor: str = "cli",
+        origin: str = "cli",
+        ready: bool = False,
+    ) -> TaskAdded:
+        """Ouvre une tâche — le geste que ``grimoire task add`` et ``task_add`` (MCP) partagent.
+
+        Sans *mission_id*, la première mission du ledger porte la tâche ; s'il
+        n'y en a aucune, une mission « Travaux courants » est ouverte. Le
+        critère d'acceptation reste exigé par le ledger lui-même, pas ici : un
+        critère blanc est retiré avant l'appel pour que ``("  ",)`` soit
+        refusé au même titre que ``()``. Avec *ready*, la tâche passe
+        ``proposed → ready`` par :meth:`transition`, donc par le gate
+        ``proposed_to_ready`` — en profil gouverné, il exige un ``owner``.
+        """
+        acceptance = tuple(item.strip() for item in acceptance if item and item.strip())
+        expected_evidence = tuple(item.strip() for item in expected_evidence if item and item.strip())
+        ledger = self.ledger
+        created_mission = False
+        if not mission_id:
+            missions = ledger.list_missions()
+            if missions:
+                mission_id = missions[0].id
+            else:
+                mission_id = ledger.create_mission(title=DEFAULT_MISSION_TITLE, origin=origin, created_by=actor).id
+                created_mission = True
+        task = ledger.create_task(
+            mission_id, title, acceptance=acceptance, owner=owner, expected_evidence=expected_evidence
+        )
+        if ready:
+            task = self.transition(task.id, TaskState.READY, actor).task
+        return TaskAdded(task=task, mission_id=mission_id, mission_created=created_mission, board_path=self.project_board())
+
+    def attach_session(self, task_id: str, session_id: str, *, session_host: str = "", actor: str = "hook") -> MissionTask:
+        """Rattache la session d'hôte courante au claim de *task_id* (issue #638).
+
+        Même règle que :meth:`MissionLedger.attach_session` — un événement de
+        plus, jamais une réécriture, jamais le vol d'un claim déjà rattaché à
+        une autre session — puis le board est reprojeté pour que le cockpit
+        voie la session sans attendre un autre geste.
+        """
+        task = self.ledger.attach_session(task_id, session_id, session_host=session_host, actor_id=actor)
+        self.project_board()
+        return task
+
     def claim(
         self, task_id: str, actor: str, host: str = "local", files: tuple[str, ...] = ()
     ) -> TaskMove:
@@ -231,7 +307,7 @@ class TaskService:
             overlap = requested & set(held.exclusive_files)
             if not overlap:
                 continue
-            fichier = sorted(overlap)[0]
+            fichier = min(overlap)
             refusal = GateRefusal(
                 evidence=fichier,
                 reason=f"réservé par {other.id} ({held.actor_id}) jusqu'à {held.expires_at or 'sans expiration'}",

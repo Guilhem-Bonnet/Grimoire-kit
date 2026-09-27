@@ -70,7 +70,9 @@ def _write(root: Path, path: str = "src/app.py") -> None:
         root,
         HookEvent.POST_TOOL_USE,
         _payload(
-            "PostToolUse", root, tool_name="Edit",
+            "PostToolUse",
+            root,
+            tool_name="Edit",
             tool_input={"file_path": str(root / path), "old_string": "a", "new_string": "b"},
             tool_response={"filePath": str(root / path), "success": True},
         ),
@@ -79,13 +81,20 @@ def _write(root: Path, path: str = "src/app.py") -> None:
 
 def _read_only(root: Path) -> None:
     _hook(
-        root, HookEvent.POST_TOOL_USE,
+        root,
+        HookEvent.POST_TOOL_USE,
         _payload("PostToolUse", root, tool_name="Read", tool_input={"file_path": str(root / "README.md")}),
     )
     _hook(
-        root, HookEvent.POST_TOOL_USE,
-        _payload("PostToolUse", root, tool_name="Bash", tool_input={"command": "git status"},
-                 tool_response={"stdout": "", "exit_code": 0}),
+        root,
+        HookEvent.POST_TOOL_USE,
+        _payload(
+            "PostToolUse",
+            root,
+            tool_name="Bash",
+            tool_input={"command": "git status"},
+            tool_response={"stdout": "", "exit_code": 0},
+        ),
     )
 
 
@@ -132,9 +141,15 @@ def test_stop_refuse_la_cloture_sous_bootstrap_apres_une_ecriture(governed: Path
 
 def test_stop_refuse_aussi_apres_un_bash_mutant(governed: Path) -> None:
     _hook(
-        governed, HookEvent.POST_TOOL_USE,
-        _payload("PostToolUse", governed, tool_name="Bash", tool_input={"command": "git commit -m x"},
-                 tool_response={"exit_code": 0}),
+        governed,
+        HookEvent.POST_TOOL_USE,
+        _payload(
+            "PostToolUse",
+            governed,
+            tool_name="Bash",
+            tool_input={"command": "git commit -m x"},
+            tool_response={"exit_code": 0},
+        ),
     )
     _, decision = _stop(governed)
     assert decision.outcome is Outcome.BLOCK
@@ -182,15 +197,24 @@ def _ouvre_et_reclame(root: Path, *, actor: str = "claude") -> str:
     return added.task.id
 
 
-def test_le_service_add_ouvre_la_mission_et_peut_rendre_la_tache_prete(governed: Path) -> None:
+def test_le_service_add_ouvre_la_mission_et_peut_rendre_la_tache_prete(governed: Path, tmp_path: Path) -> None:
+    # Projet enrôlé : `setup_standard_profile` a déjà ouvert une mission, la tâche s'y range.
     service = TaskService(governed)
     added = service.add("Une tache", ("un critere",), owner="amelia", actor="amelia", ready=True)
-    assert added.mission_created is True
+    assert added.mission_created is False
+    assert added.task.mission_id == service.ledger.list_missions()[0].id
     assert added.task.status.value == "ready"
     assert added.board_path is not None and added.board_path.is_file()
     again = service.add("Une autre", ("un critere",), actor="amelia")
     assert again.mission_created is False and again.task.mission_id == added.task.mission_id
     assert again.task.status.value == "proposed"
+    # Projet sans ledger : la mission « Travaux courants » est ouverte à l'occasion.
+    bare = tmp_path / "bare"
+    bare.mkdir()
+    first = TaskService(bare).add("Premiere", ("un critere",), actor="amelia")
+    assert first.mission_created is True
+    assert TaskService(bare).ledger.get_mission(first.mission_id).title == "Travaux courants"  # type: ignore[union-attr]
+    assert first.board_path is None, "pas de board sans _grimoire/standard/"
 
 
 def test_le_service_add_exige_un_critere_comme_le_ledger(governed: Path) -> None:
@@ -284,7 +308,9 @@ def test_une_tache_sans_claim_n_a_ni_session_ni_hote(governed: Path) -> None:
 # ── le test de fait : la commande grimoire-hook, stdin → stdout ──────────────
 
 
-def _grimoire_hook(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], root: Path, event: str, payload: dict[str, Any]) -> dict[str, Any]:
+def _grimoire_hook(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], root: Path, event: str, payload: dict[str, Any]
+) -> dict[str, Any]:
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(payload)))
     assert hook_main(["--host", "claude", "--event", event, "--project-root", str(root)]) == 0
     return dict(json.loads(capsys.readouterr().out))
@@ -294,21 +320,33 @@ def test_de_fait_rejoue_par_la_commande_grimoire_hook(
     governed: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     # (a) sans tâche, le contexte contient le remède
-    out = _grimoire_hook(monkeypatch, capsys, governed, "UserPromptSubmit", _payload("UserPromptSubmit", governed, prompt="go"))
+    out = _grimoire_hook(
+        monkeypatch, capsys, governed, "UserPromptSubmit", _payload("UserPromptSubmit", governed, prompt="go")
+    )
     assert REMEDE in out["hookSpecificOutput"]["additionalContext"]
 
     # (b) après une écriture journalisée, Stop est bloqué avec le remède
     _grimoire_hook(
-        monkeypatch, capsys, governed, "PostToolUse",
-        _payload("PostToolUse", governed, tool_name="Write",
-                 tool_input={"file_path": str(governed / "notes.md"), "content": "x"}, tool_response={}),
+        monkeypatch,
+        capsys,
+        governed,
+        "PostToolUse",
+        _payload(
+            "PostToolUse",
+            governed,
+            tool_name="Write",
+            tool_input={"file_path": str(governed / "notes.md"), "content": "x"},
+            tool_response={},
+        ),
     )
     out = _grimoire_hook(monkeypatch, capsys, governed, "Stop", _payload("Stop", governed, stop_hook_active=False))
     assert out["decision"] == "block" and REMEDE in out["reason"]
 
     # (c) après task_add + claim, la carte porte session_id, le journal task_id, Stop ne bloque plus pour ce motif
     tid = _ouvre_et_reclame(governed)
-    out = _grimoire_hook(monkeypatch, capsys, governed, "UserPromptSubmit", _payload("UserPromptSubmit", governed, prompt="suite"))
+    out = _grimoire_hook(
+        monkeypatch, capsys, governed, "UserPromptSubmit", _payload("UserPromptSubmit", governed, prompt="suite")
+    )
     assert f"Tâche courante : {tid}" in out["hookSpecificOutput"]["additionalContext"]
     from grimoire.tools.workspace_api import tasks_view
 
@@ -327,18 +365,32 @@ def test_task_add_mcp_passe_par_le_meme_service(governed: Path) -> None:
     pytest.importorskip("mcp", reason="extra optionnel grimoire-kit[mcp] non installé")
     from grimoire.mcp.server import task_add
 
-    created = json.loads(task_add(
-        title="Ouvrir une tache par MCP", acceptance=["un critere"], owner="claude",
-        expected_evidence=["pytest vert"], actor="claude", ready=True, project_path=str(governed),
-    ))
+    created = json.loads(
+        task_add(
+            title="Ouvrir une tache par MCP",
+            acceptance=["un critere"],
+            owner="claude",
+            expected_evidence=["pytest vert"],
+            actor="claude",
+            ready=True,
+            project_path=str(governed),
+        )
+    )
     assert created["status"] == "ready" and created["board"] == "ready"
-    assert created["mission_created"] is True
+    assert created["mission_created"] is False, "setup_standard_profile a déjà ouvert la mission"
+    assert created["mission_id"] == TaskService(governed).ledger.list_missions()[0].id
     assert created["expected_evidence"] == ["pytest vert"]
     assert TaskService(governed).require(created["id"]).owner == "claude"
 
-    refused = json.loads(task_add(title="Sans critere", acceptance=[], project_path=str(governed)))
+    def body(result: Any) -> dict[str, Any]:
+        # Un refus franc porte ``isError`` : un ``CallToolResult`` dont le contenu est le JSON.
+        if isinstance(result, str):
+            return dict(json.loads(result))
+        return dict(json.loads("".join(getattr(block, "text", "") for block in result.content)))
+
+    refused = body(task_add(title="Sans critere", acceptance=[], project_path=str(governed)))
     assert "acceptance" in refused["error"]
-    blank = json.loads(task_add(title="Critere blanc", acceptance=["  "], project_path=str(governed)))
+    blank = body(task_add(title="Critere blanc", acceptance=["  "], project_path=str(governed)))
     assert "acceptance" in blank["error"]
 
 
@@ -348,9 +400,26 @@ def test_le_cli_task_add_ready_et_le_mcp_rendent_la_meme_forme(governed: Path) -
     from grimoire.cli.app import app
 
     result = CliRunner().invoke(
-        app, ["-o", "json", "task", "add", "Par le CLI", "-a", "un critere", "--owner", "amelia", "--ready",
-              "--project-root", str(governed), "--ledger-root", str(governed / DEFAULT_LEDGER_RELPATH)],
+        app,
+        [
+            "-o",
+            "json",
+            "task",
+            "add",
+            "Par le CLI",
+            "-a",
+            "un critere",
+            "--owner",
+            "amelia",
+            "--ready",
+            "--project-root",
+            str(governed),
+            "--ledger-root",
+            str(governed / DEFAULT_LEDGER_RELPATH),
+        ],
     )
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
-    assert data["status"] == "ready" and data["mission_created"] is True
+    assert data["status"] == "ready" and data["board"] == "ready"
+    assert data["mission_created"] is False
+    assert set(data) >= {"id", "mission_id", "claim", "board", "mission_created", "board_path"} - {"claim"}

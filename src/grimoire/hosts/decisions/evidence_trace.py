@@ -18,7 +18,7 @@ from grimoire.core.standard_checks.evidence_journal import (
 from grimoire.core.standard_state import active_task_id, is_standard_enrolled
 from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
 from grimoire.hosts.decisions.tool_facts import ToolFacts, classify_tool, policy_tool_detail
-from grimoire.policies.schemas import ActionKind
+from grimoire.policies.schemas import ActionKind, MutationClass
 
 
 def _record_temporal_approval(hook: HookInput, facts: ToolFacts) -> None:
@@ -93,6 +93,29 @@ def _record_observed_actions(hook: HookInput, facts: ToolFacts, task_id: str) ->
         return
 
 
+def _record_session_mutation(hook: HookInput, facts: ToolFacts, task_id: str) -> None:
+    """Issue #638 lot A : la session compte ses écritures, jamais leur contenu.
+
+    C'est ce compteur que ``Stop`` lit pour refuser une clôture hors tâche
+    (``_no_task_closure``) sans jamais bloquer une session qui n'a fait que
+    lire : seule une classification autre que lecture seule — fichier écrit
+    ou édité, commande Bash mutante ou destructive — compte. Best-effort,
+    comme le journal de preuve juste au-dessus.
+    """
+    if facts.mutation is MutationClass.READ_ONLY or not hook.session_id:
+        return
+    try:
+        from datetime import UTC, datetime
+
+        from grimoire.policies.session_state import note_session_mutation
+
+        note_session_mutation(
+            hook.project_root, hook.session_id, task_id=task_id, now_iso=datetime.now(UTC).isoformat()
+        )
+    except Exception:
+        return
+
+
 def decide_evidence_trace(hook: HookInput) -> Decision:
     """Post tool use: remind the agent that a write owes a line of proof."""
     facts = classify_tool(hook.tool_name, hook.tool_input)
@@ -101,6 +124,7 @@ def decide_evidence_trace(hook: HookInput) -> Decision:
         return Decision()
     task_id = active_task_id(hook.project_root)
     _record_observed_actions(hook, facts, task_id)
+    _record_session_mutation(hook, facts, task_id)
     if facts.kind is not ActionKind.FILE_WRITE:
         return Decision()
     touched = ", ".join(facts.targets[:3]) or "le fichier modifié"

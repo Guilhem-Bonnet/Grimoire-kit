@@ -103,6 +103,8 @@ function injectStyles() {
     .ex-recall { margin: 0; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); font-family: var(--mono); font-size: var(--t-min); white-space: pre-wrap; word-break: break-word; }
     .ex-gate-row { display: flex; flex-direction: column; gap: 4px; padding: 8px; border: 1px solid var(--line); border-radius: var(--r); margin-bottom: 6px; }
     .ex-gate-req { font-size: var(--t-min); color: var(--ink3); }
+    .ex-session { font-family: var(--mono); font-size: var(--t-min); color: var(--ink2); display: flex; align-items: center; gap: 6px; }
+    .ex-session code { font-family: var(--mono); font-size: var(--t-min); padding: 1px 4px; border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); word-break: break-all; }
     .ex-refusal { color: var(--bad); font-size: var(--t-s); margin-top: 6px; }
   `;
   document.head.append(style);
@@ -121,6 +123,26 @@ function chip(label, present) {
   c.className = 'chip';
   c.append(dot(present ? 'ok' : ''), text('span', null, label));
   return c;
+}
+
+// Le nom court d'un hôte (grimoire.bridges.schemas.HostId) — jamais deviné :
+// une valeur inconnue s'affiche telle quelle.
+const HOST_LABEL = {
+  'host-claude-code-cli': 'Claude Code', 'host-github-copilot': 'Copilot',
+  'host-codex': 'Codex', 'host-cursor': 'Cursor', 'host-gemini-cli': 'Gemini CLI',
+};
+
+// Une ligne « session » : identifiant (tronqué sur la carte, entier dans
+// l'inspecteur) + hôte. `resume_command` n'existe que pour un hôte dont le
+// kit connaît la commande (`grimoire.missions.session_link.RESUME_COMMANDS`) ;
+// pour les autres, l'identifiant seul — rien n'est inventé côté vue.
+function sessionLine(task, { full = false } = {}) {
+  const line = document.createElement('div');
+  line.className = 'ex-session';
+  const id = full ? task.session_id : `${task.session_id.slice(0, 8)}…`;
+  line.append(text('span', 'lbl', 'session'), Object.assign(document.createElement('code'), { textContent: id, title: task.session_id }));
+  if (task.host) line.append(text('span', 'lbl', HOST_LABEL[task.host] || task.host));
+  return line;
 }
 
 function nextColumn(column) {
@@ -146,6 +168,11 @@ function taskCard(task, onSelect) {
   for (const evidence of (task.expected_evidence || []).slice(0, 4)) chips.append(chip(evidence, false));
   if (!(task.expected_evidence || []).length) chips.append(text('span', 'lbl', 'aucune preuve déclarée'));
   card.append(chips);
+
+  // Session qui porte la carte (issue #638, lot A) : `session_id` et `host`
+  // viennent du claim, posés par le hook UserPromptSubmit de la session —
+  // absents tant qu'aucune session d'hôte n'a travaillé sous ce claim.
+  if (task.session_id) card.append(sessionLine(task));
 
   const next = nextColumn(task.board);
   const nextRow = document.createElement('div');
@@ -209,7 +236,7 @@ function renderList(root, ctx, tasks, onSelect) {
   table.className = 'ex-list';
   const thead = document.createElement('thead');
   const headRow = document.createElement('tr');
-  for (const label of ['Tâche', 'État', 'Owner', 'Preuves', 'Prochaine porte']) headRow.append(text('th', null, label));
+  for (const label of ['Tâche', 'État', 'Owner', 'Session', 'Preuves', 'Prochaine porte']) headRow.append(text('th', null, label));
   thead.append(headRow);
   table.append(thead);
   const tbody = document.createElement('tbody');
@@ -221,6 +248,9 @@ function renderList(root, ctx, tasks, onSelect) {
     stateCell.append(row(dot(task.board === 'blocked' ? 'bad' : (task.board === 'accepted' || task.board === 'released' ? 'ok' : '')), text('span', null, COLUMN_LABEL[task.board] || task.board)));
     tr.append(stateCell);
     tr.append(text('td', null, task.owner || '—'));
+    const sessionCell = document.createElement('td');
+    if (task.session_id) sessionCell.append(sessionLine(task)); else sessionCell.append(text('span', 'lbl', '—'));
+    tr.append(sessionCell);
     const evCell = document.createElement('td');
     evCell.append(row(...(task.expected_evidence || []).slice(0, 3).map((e) => chip(e, false))));
     if (!(task.expected_evidence || []).length) evCell.append(text('span', 'lbl', '—'));
@@ -389,6 +419,32 @@ async function renderInspector(ctx, taskId, onWritten, onTimeline) {
     descBlock.append(text('h4', null, 'Description'));
     descBlock.append(text('p', null, detail.description));
     ctx.inspector.append(descBlock);
+  }
+
+  // Session (issue #638, lot A) : la session d'hôte qui porte le claim, et la
+  // commande qui la reprend quand l'hôte en a une — `resume_command` vient
+  // du serveur, cette vue ne compose jamais une commande elle-même. Le
+  // bouton la pose dans le dock, comme les commandes d'intention des portes.
+  if (detail.session_id) {
+    const sessionBlock = document.createElement('div');
+    sessionBlock.className = 'ex-insp-block';
+    sessionBlock.append(text('h4', null, 'Session'));
+    sessionBlock.append(sessionLine(detail, { full: true }));
+    if (detail.resume_command) {
+      const resumeRow = row();
+      resumeRow.append(Object.assign(document.createElement('code'), { textContent: detail.resume_command }));
+      const resumeBtn = document.createElement('button');
+      resumeBtn.type = 'button';
+      resumeBtn.className = 'btn';
+      resumeBtn.textContent = 'Reprendre';
+      resumeBtn.title = 'Copier la commande de reprise dans le dock';
+      resumeBtn.addEventListener('click', () => ctx.dock.echo(detail.resume_command));
+      resumeRow.append(resumeBtn);
+      sessionBlock.append(resumeRow);
+    } else {
+      sessionBlock.append(text('p', 'lbl', 'aucune commande de reprise connue pour cet hôte'));
+    }
+    ctx.inspector.append(sessionBlock);
   }
 
   // Rappel (#141) : avec parcimonie — le bloc n'existe pas quand il n'a rien

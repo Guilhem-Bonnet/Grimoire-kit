@@ -154,11 +154,11 @@ Les hooks générés dépendent de l'enrôlement du projet dans le standard agen
 |---|---|---|
 | `session_start` | directive de session | toujours |
 | `pre_tool_use` | politique d'outils (destructif, secrets) | toujours, **bloquant** |
-| `user_prompt_submit` | nomme la tâche courante | projet enrôlé |
-| `post_tool_use` | rappel de preuve après écriture | projet enrôlé |
+| `user_prompt_submit` | nomme la tâche courante, ou l'absence de tâche et son remède ; rattache la session au claim actif | projet enrôlé |
+| `post_tool_use` | rappel de preuve après écriture ; compte les écritures de la session | projet enrôlé |
 | `pre_compact` | capsule de gouvernance avant compaction | projet enrôlé |
 | `subagent_stop` | état des gates, sans bloquer | projet enrôlé |
-| `stop` | gates de preuve | projet enrôlé, **bloquant** |
+| `stop` | gates de preuve ; clôture hors tâche après une écriture | projet enrôlé, **bloquant** |
 
 Un projet non enrôlé ne reçoit aucun hook de gate : un gate inexistant ne peut
 pas être rouge, et bloquer sur son absence ferait du hook un piège.
@@ -190,6 +190,40 @@ Trois garde-fous encadrent ce refus :
 3. **Pas de panne fatale** — un `task-board.yaml` cassé ou une exception dans une
    décision sortent en « autorisé », avec l'erreur en contexte. Un hook qui
    plante ne doit pas rendre une session inutilisable.
+
+### Travailler hors tâche (issue #638)
+
+`bootstrap` est un repli, pas une tâche : quand rien ne désigne de tâche —
+ni `GRIMOIRE_TASK_ID`, ni claim actif du Mission Ledger, ni carte
+`in_progress` du board — le travail de la session n'apparaît nulle part dans
+le ledger. Depuis le lot A de l'issue #638 :
+
+- `session_start` (profils `governed` et `production`) et
+  `user_prompt_submit` (tout projet enrôlé) disent qu'aucune tâche n'est en
+  cours et donnent le remède copiable : `grimoire task add "<titre>" -a
+  "<critère>" --owner <nom> --ready`, `grimoire task context <id>`,
+  `grimoire task claim <id> --actor <nom>` — ou les outils MCP `task_add`,
+  `task_context`, `task_claim`, ou `GRIMOIRE_TASK_ID` ;
+- `post_tool_use` compte dans `session-<session_id>.json` (champ `mutations`)
+  chaque outil dont la classification n'est pas lecture seule — fichier
+  écrit ou édité, commande Bash mutante ou destructive ; jamais le contenu ;
+- `stop` refuse la clôture (`decision: block`, remède dans `reason`) quand ce
+  compteur est non nul **et** que la tâche résolue est encore `bootstrap`,
+  sur les profils `governed` et `production` ; les autres profils reçoivent
+  le même texte en `systemMessage`, sans blocage. Une session qui n'a fait
+  que lire ou répondre n'est jamais bloquée, pas plus qu'un hôte qui n'envoie
+  pas de `session_id` (aucun journal, compteur à zéro). `stop_hook_active`
+  laisse toujours passer le second `Stop`.
+
+Dès que la tâche résolue est un claim du ledger, `user_prompt_submit` (et
+`session_start`) rattachent la session à ce claim par un événement
+`task.session_attached` — `claim.session_id` et `claim.session_host`
+apparaissent au rejeu, l'historique n'est jamais réécrit, et un claim déjà
+rattaché à une autre session n'est pas volé. Le journal `session-<id>.json`
+porte alors `task_id`. Le cockpit (espace Exécuter) montre sur la carte la
+session et l'hôte, et dans l'inspecteur la commande de reprise quand l'hôte
+en a une (`claude --resume <session_id>` pour Claude Code ; identifiant seul
+pour les autres).
 
 ### Politique d'outils
 
@@ -279,7 +313,9 @@ comme dans `Write(_grimoire/standard/*)`.
 le cache d'état de standard #422), un fichier par session, jamais de secret ni
 de contenu d'outil — seulement des compteurs et des horodatages. `SessionStart`
 le réinitialise ; un fichier absent, tronqué ou d'une version de schéma
-inconnue redevient une session neuve, jamais une erreur.
+inconnue redevient une session neuve, jamais une erreur. Le même fichier porte
+`task_id` (la tâche du ledger que la session travaille) et `mutations` (le
+nombre d'écritures observées), voir « Travailler hors tâche » plus haut.
 
 **Décision et hôtes.** Un budget atteint (au *N+1*ᵉ appel, pas avant) ou un
 refroidissement actif rendent `block` (`deny` côté hôte). Une règle

@@ -238,9 +238,12 @@ def _service(project_root: Path) -> Any:
 
 def _task_json(task: Any) -> dict[str, Any]:
     from grimoire.missions.board import board_status_of
+    from grimoire.missions.session_link import session_fields
 
     data: dict[str, Any] = task.to_dict()
     data["board"] = board_status_of(task.status)
+    # Issue #638 lot A : la session qui porte la carte, et comment la reprendre.
+    data.update(session_fields(task))
     return data
 
 
