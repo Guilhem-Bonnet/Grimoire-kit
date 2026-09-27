@@ -162,7 +162,7 @@ prompt_enrichment:
     # Directives HUP
     hup_directives:
       - "Si tu es incertain sur un point, NE PAS inventer. Escalader via uncertainty_report."
-      - "Confiance ROUGE = STOP immédiat + question structurée."
+      - "Point bloquant déclaré = STOP immédiat + Uncertainty Report structuré."
       - "Preuve d'effort obligatoire avant toute escalade."
 ```
 
@@ -214,7 +214,7 @@ result_aggregation:
   inputs:
     - agent_outputs: ["{résultats de chaque agent}"]
     - validation_reports: ["{verdicts CVTL par dimension si cross-validation}"]
-    - uncertainty_reports: ["{rapports HUP si escalades}"]
+    - uncertainty_reports: ["{Uncertainty Reports si points bloquants déclarés}"]
     - pending_questions: ["{questions QEC non résolues}"]
   
   # Processus
@@ -343,7 +343,7 @@ Ce mécanisme permet à l'orchestrateur de maintenir la cohérence sur 50+ écha
 
 | Protocole | Relation avec SOG |
 |-----------|------------------|
-| **HUP (BM-50)** | Les sub-agents utilisent HUP → escaladent vers SOG |
+| **HUP (BM-50)** | Les sub-agents déclarent leurs incertitudes → les points bloquants escaladent vers SOG |
 | **QEC (BM-51)** | SOG héberge le Question Buffer → agrège et présente |
 | **CVTL (BM-52)** | SOG déclenche les cross-validations → agrège les verdicts par dimension |
 | **Subagent (BM-19)** | SOG utilise l'orchestration subagent pour le dispatch parallèle — en VS Code Copilot : synchrone, isolation de contexte (voir § Runtime) |
@@ -436,7 +436,7 @@ Prompt enrichi pour Dev/Amelia :
   hup_directives: ["Si incertain → uncertainty_report, pas d'invention"]
 
 ─── DISPATCH (parallel) ───
-  Dev/Amelia → Implémentation (HUP actif)
+  Dev/Amelia → Implémentation (bloc d'incertitudes exigé)
   Architect/Winston → Validation ADR-042 cohérence (CVTL)
 
 ─── AGGREGATE ───

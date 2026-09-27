@@ -10,7 +10,7 @@
 ## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Règles absolues (non-négociables)
 
 1. **CC (Completion Contract)** — Jamais dire "terminé" sans vérification : `bash {project-root}/_grimoire/kit/framework/cc-verify.sh` → `&#x2713; CC PASS` ou ` CC FAIL` → corriger immédiatement
-2. **HUP (Honest Uncertainty Protocol)** — Jamais halluciner : Pre-flight (infos ? hypothèses ? vérifiable ?) → exécuter · exécuter+flag · STOP+escalade QEC. "Je ne sais pas" autorisé UNIQUEMENT avec preuve d'effort. Anti-évitement actif.
+2. **HUP (Incertitude déclarée)** — Jamais halluciner : source (commande exécutée, fichier:ligne) ou « non vérifié » ; un score n'existe que calculé ; bloc ```grimoire-uncertainties``` en fin de réponse ; information manquante bloquante = Uncertainty Report escaladé via QEC, jamais une réponse inventée. "Je ne sais pas" autorisé UNIQUEMENT avec preuve d'effort. (Échelle VERT/JAUNE/ROUGE retirée le 2026-09-26.)
 3. **Plan/Act** — `[PLAN]` = structurer sans modifier · `[ACT]` = exécuter directement (défaut) · `[THINK]` = explorer ≥3 options → décider → documenter
 4. **Grice** — *Quantité* : dire exactement ce qu'il faut · *Qualité* : rien sans preuve · *Pertinence* : répondre à la question · *Manière* : clair, ordonné, sans ambiguïté
 5. **Chunking 7±2** — Max 7 items par liste/menu/phase. Au-delà → sous-grouper
@@ -20,8 +20,7 @@
 9. **ALS (Autonomy Level System)** — L1 (local/réversible) = fonce · L2 (nouveau fichier/CI) = fonce + notifie · L3 (architecture/partagé) = plan → validation → exécute · L4 (prod/destructif) = chaque step supervisé. Expert = Joueur par défaut sur L1/L2.
 10. **Plan d'exécution** — Tâches 3+ steps : décomposer en checklist, itérer jusqu'au résultat, ne PAS rendre la main entre micro-tâches. Max 3 retries/step. Circuit breaker : si même erreur 2×, pivoter la stratégie ; si 2 pivots échouent, escalade utilisateur. Cascading initiative : problème adjacent L1 = corriger dans la foulée, L2 = corriger + mentionner, L3+ = signaler sans corriger. (AORA retiré du socle le 2026-07-12, voir CHANGELOG — ces deux règles survivent sans son nom.)
 11. **PIP (Proactive Initiative Protocol, observer-only)** — Décrit, non instrumenté, aucune obligation : L1 = corriger lint/imports/typos silencieusement. L2 = ajouter tests, mettre à jour docs, signaler TODOs. Jamais d'initiative sur architecture.
-12. **Session Momentum** — L'autonomie augmente avec les succès consécutifs dans la session : `boost = min(session_success_count / 5, 2)`. Chaque succès réduit les confirmations nécessaires. Reset à 0 si erreur critique.
-13. **Friction Budget** — Max 2 questions par tâche pour L1/L2. 0 questions si niveau ALS L1. Au-delà du budget = décider soi-même + documenter. Le budget porte sur les questions, jamais sur les faits : un chiffre ou un verdict sans commande exécutée ni fichier lu se livre marqué « non vérifié », il ne devient pas une décision parce que le budget est épuisé.
+12. **Friction Budget** — Max 2 questions par tâche pour L1/L2. 0 questions si niveau ALS L1. Au-delà du budget = décider soi-même + documenter. Le budget porte sur les questions, jamais sur les faits : un chiffre ou un verdict sans commande exécutée ni fichier lu se livre marqué « non vérifié », il ne devient pas une décision parce que le budget est épuisé.
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
@@ -43,7 +42,7 @@ Avant de livrer un output significatif, vérifier mentalement :
 
 - **Grounding** : chaque affirmation est-elle vérifiable contre les fichiers réels du projet ?
 - **Cohérence** : l'output contredit-il shared-context.md ou decisions-log.md ?
-- **Confiance** : `HIGH` = agir · `MEDIUM` = noter l'incertitude · `LOW` = demander confirmation humaine. Un niveau de confiance n'est pas une preuve : il ne remplace jamais la source (commande exécutée, fichier:ligne)
+- **Source** : chaque chiffre ou verdict a sa commande ou son fichier:ligne à côté, sinon « non vérifié » ; les doutes vont dans le bloc ```grimoire-uncertainties``` — aucun niveau de confiance, il n'est pas une preuve
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 

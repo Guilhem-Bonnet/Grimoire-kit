@@ -19,7 +19,7 @@
 
 | Condition | Action |
 |-----------|--------|
-| Output flaggé JAUNE par HUP | Cross-validation recommandée |
+| Output avec incertitudes déclarées (bloc `grimoire-uncertainties` non vide) | Cross-validation recommandée |
 | Décision d'architecture (ADR) | Cross-validation obligatoire |
 | Changement de stack/technologie | Cross-validation obligatoire |
 | Story > 8 story points | Cross-validation recommandée |
