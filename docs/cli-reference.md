@@ -414,6 +414,10 @@ prochain export l'écrase.
 | `grimoire task move <id> --to <état>` | Déplacer une tâche, si la machine à états et le gate le permettent |
 | `grimoire task block <id> --reason "<motif>"` | Bloquer en disant pourquoi |
 | `grimoire task close <id>` | Fermer une tâche vérifiée (verdict accepté exigé) |
+| `grimoire task prioritize <id> --to low\|medium\|high\|critical [--reason "<motif>"]` | Changer la priorité (issue #638) — l'historique reste au ledger, le board se retrie |
+| `grimoire task comment <id> "<texte>" [--kind comment\|directive]` | Poser un commentaire ou une consigne ; la session qui tient la tâche la lit au prochain `UserPromptSubmit` |
+| `grimoire task cancel <id> --reason "<motif>" [--force]` | Annuler avec sa raison (obligatoire) ; tenue par une autre session, elle exige `--force` |
+| `grimoire task ack <id> <dir-…>` | Accuser réception d'une consigne de l'orchestrateur |
 | `grimoire task link <id> --depends-on <id>` | Déclarer une dépendance |
 | `grimoire task context <id>` | Produire le context bundle d'une tâche réelle |
 | `grimoire task trace <id> [--causes]` | Timeline unifiée d'une tâche : transitions, outils refusés, gates rouges, checkpoints, abort, preuves, incidents |
@@ -424,7 +428,7 @@ prochain export l'écrase.
 Sans ledger, la commande d'export refuse et sort en erreur plutôt que d'écrire un
 board vide — écraser le travail déclaré par du néant serait pire que ne rien faire.
 
-Chaque écriture (`add`, `claim`, `move`, `block`, `close`, `link`) franchit deux
+Chaque écriture (`add`, `claim`, `move`, `block`, `close`, `cancel`, `link`) franchit deux
 portes avant de toucher le ledger : la machine à états, puis le gate de preuve de
 `_grimoire/standard/evidence-gates.yaml`. Un refus nomme la preuve manquante et le
 remède ; rien n'est écrit. Après une écriture acceptée, le board du standard est

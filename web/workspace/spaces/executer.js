@@ -15,6 +15,12 @@
 // Le refus d'un gate revient en 200 avec `blocked: true` et la preuve
 // manquante nommée — c'est une réponse à afficher, pas une erreur à avaler.
 //
+// Pilotage humain (issue #638, lot B) : les mêmes `api.taskAction` avec
+// 'prioritize' | 'comment' | 'cancel' | 'ack' — jamais une écriture directe
+// depuis la webview (ADR-007), toujours `TaskService`. Sélecteur de priorité
+// et zone de consigne dans l'inspecteur, « Annuler » avec raison exigée, tri
+// par priorité dans chaque colonne, badge « consigne non lue » sur la carte.
+//
 // Timeline (#139) : `api.taskTrace(id)` porte maintenant jusqu'à cinq sources
 // (ledger, hooks, gate, runtime, evidence, otel) triées dans le temps —
 // filtrables par source et par gravité, chaque ligne s'ouvrant en accordéon
@@ -60,6 +66,18 @@ const DEP_LABEL = {
 const RISK_DOT = {
   light: 'ok', standard: 'warn', strict: 'bad', security_critical: 'bad', release: 'bad',
 };
+// Échelle de priorité (grimoire.missions.board.PRIORITIES), la plus pressante
+// en dernier ; `tasks_view()` la renvoie aussi (`priorities`) — la constante
+// locale n'est que le repli si le serveur ne la donne pas.
+const PRIORITIES = ['low', 'medium', 'high', 'critical'];
+const PRIORITY_LABEL = { low: 'Basse', medium: 'Moyenne', high: 'Haute', critical: 'Critique' };
+const PRIORITY_DOT = { low: '', medium: '', high: 'warn', critical: 'bad' };
+const priorityRank = (p) => PRIORITIES.indexOf(p);
+// Dans une colonne, la plus pressante d'abord ; à égalité, l'identifiant
+// garde un ordre stable (même règle que `build_board`).
+const byPriority = (a, b) =>
+  (priorityRank(b.effective_priority || 'medium') - priorityRank(a.effective_priority || 'medium')) ||
+  String(a.id).localeCompare(String(b.id));
 
 function injectStyles() {
   if (document.getElementById(STYLE_ID)) return;
@@ -104,6 +122,13 @@ function injectStyles() {
     .ex-gate-row { display: flex; flex-direction: column; gap: 4px; padding: 8px; border: 1px solid var(--line); border-radius: var(--r); margin-bottom: 6px; }
     .ex-gate-req { font-size: var(--t-min); color: var(--ink3); }
     .ex-refusal { color: var(--bad); font-size: var(--t-s); margin-top: 6px; }
+    .ex-badge { font-size: var(--t-min); border: 1px solid var(--acc); color: var(--acc); border-radius: var(--r); padding: 0 6px; }
+    .ex-directive { display: flex; flex-direction: column; gap: 2px; padding: 6px var(--sp-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); margin-bottom: 6px; font-size: var(--t-s); }
+    .ex-directive.unread { border-color: var(--acc); }
+    .ex-directive-meta { font-size: var(--t-min); color: var(--ink3); display: flex; gap: 6px; align-items: center; }
+    .ex-steer-form { display: flex; flex-direction: column; gap: 6px; }
+    .ex-steer-form textarea { min-height: 56px; font: inherit; font-size: var(--t-s); }
+    .ex-steer-row { display: flex; gap: 6px; align-items: center; }
   `;
   document.head.append(style);
 }
@@ -139,6 +164,18 @@ function taskCard(task, onSelect) {
   const meta = text('div', 'ex-card-meta lbl', '');
   if (task.risk_profile) meta.append(dot(RISK_DOT[task.risk_profile] || ''));
   meta.append(text('span', null, [task.owner || 'sans owner', task.type, task.risk_profile].filter(Boolean).join(' · ')));
+  // Priorité effective (issue #638) : point + mot, comme le risque — jamais la
+  // couleur seule ; et le badge « consigne non lue » tant qu'une consigne de
+  // l'orchestrateur n'a pas été livrée à la session.
+  const priority = task.effective_priority || 'medium';
+  meta.append(dot(PRIORITY_DOT[priority] || ''), text('span', null, PRIORITY_LABEL[priority] || priority));
+  if (task.directives_pending > 0) {
+    const badge = text('span', 'ex-badge', `consigne non lue (${task.directives_pending})`);
+    badge.dataset.role = 'directive-badge';
+    meta.append(badge);
+  } else if (task.directives_unacknowledged > 0) {
+    meta.append(text('span', 'ex-badge', `consigne non accusée (${task.directives_unacknowledged})`));
+  }
   card.append(meta);
 
   const chips = document.createElement('div');
@@ -172,7 +209,7 @@ function renderBoard(root, ctx, tasks, groups, onSelect) {
   for (const group of groups) {
     const col = document.createElement('div');
     col.className = 'ex-col';
-    const inColumn = group.cols.flatMap((c) => byColumn.get(c) || []);
+    const inColumn = group.cols.flatMap((c) => byColumn.get(c) || []).sort(byPriority);
 
     const head = document.createElement('div');
     head.className = 'ex-col-head';
@@ -209,17 +246,22 @@ function renderList(root, ctx, tasks, onSelect) {
   table.className = 'ex-list';
   const thead = document.createElement('thead');
   const headRow = document.createElement('tr');
-  for (const label of ['Tâche', 'État', 'Owner', 'Preuves', 'Prochaine porte']) headRow.append(text('th', null, label));
+  for (const label of ['Tâche', 'État', 'Priorité', 'Owner', 'Preuves', 'Prochaine porte']) headRow.append(text('th', null, label));
   thead.append(headRow);
   table.append(thead);
   const tbody = document.createElement('tbody');
-  for (const task of tasks) {
+  const ordered = [...tasks].sort((a, b) => (LIFECYCLE.indexOf(a.board) - LIFECYCLE.indexOf(b.board)) || byPriority(a, b));
+  for (const task of ordered) {
     const tr = document.createElement('tr');
     tr.addEventListener('click', () => onSelect(task.id));
     tr.append(text('td', null, task.title || task.id));
     const stateCell = document.createElement('td');
     stateCell.append(row(dot(task.board === 'blocked' ? 'bad' : (task.board === 'accepted' || task.board === 'released' ? 'ok' : '')), text('span', null, COLUMN_LABEL[task.board] || task.board)));
     tr.append(stateCell);
+    const prio = task.effective_priority || 'medium';
+    const prioCell = document.createElement('td');
+    prioCell.append(row(dot(PRIORITY_DOT[prio] || ''), text('span', null, PRIORITY_LABEL[prio] || prio)));
+    tr.append(prioCell);
     tr.append(text('td', null, task.owner || '—'));
     const evCell = document.createElement('td');
     evCell.append(row(...(task.expected_evidence || []).slice(0, 3).map((e) => chip(e, false))));
@@ -404,6 +446,8 @@ async function renderInspector(ctx, taskId, onWritten, onTimeline) {
     ctx.inspector.append(recallBlock);
   }
 
+  renderSteering(ctx, detail, onWritten);
+
   const acceptance = document.createElement('div');
   acceptance.className = 'ex-insp-block';
   acceptance.append(text('h4', null, "Critères d'acceptation"));
@@ -511,6 +555,140 @@ async function renderInspector(ctx, taskId, onWritten, onTimeline) {
   }
   gateBlock.append(feedback);
   ctx.inspector.append(gateBlock);
+}
+
+// ── Pilotage humain (issue #638, lot B) ───────────────────────────────────
+//
+// Trois blocs dans l'inspecteur : la priorité (sélecteur), les consignes
+// (journal + zone de saisie), l'annulation (raison exigée, `force` proposé
+// seulement quand le service a refusé pour un claim tenu ailleurs). Chaque
+// geste est un `api.taskAction` ; le refus revient en 200 `blocked: true`.
+
+function renderSteering(ctx, detail, onWritten) {
+  const readOnly = ctx.host.readOnly;
+  const feedback = document.createElement('div');
+  const send = async (action, body, command) => {
+    ctx.dock.echo(command);
+    feedback.replaceChildren();
+    try {
+      const result = await ctx.api.taskAction(detail.id, action, body);
+      if (result && result.blocked) {
+        const refusals = (result.refusals || []).map((r) => `${r.evidence} — ${r.reason} (${r.remedy})`);
+        feedback.append(text('div', 'ex-refusal', 'refusé : ' + refusals.join(' ; ')));
+        return result;
+      }
+      feedback.append(text('div', 'lbl', result.change || result.transition || 'fait'));
+      onWritten();
+      return result;
+    } catch (error) {
+      feedback.replaceChildren(text('div', 'ex-refusal', 'échec : ' + error.message));
+      return null;
+    }
+  };
+
+  // Priorité.
+  const prioBlock = document.createElement('div');
+  prioBlock.className = 'ex-insp-block';
+  prioBlock.append(text('h4', null, 'Priorité'));
+  const select = document.createElement('select');
+  select.className = 'input';
+  select.dataset.role = 'priority';
+  select.disabled = readOnly;
+  const current = detail.effective_priority || 'medium';
+  for (const value of PRIORITIES) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = PRIORITY_LABEL[value] || value;
+    if (value === current) option.selected = true;
+    select.append(option);
+  }
+  select.addEventListener('change', () => {
+    send('prioritize', { to: select.value }, `grimoire task prioritize ${detail.id} --to ${select.value}`);
+  });
+  prioBlock.append(row(select, text('span', 'lbl', detail.priority ? 'déclarée' : 'dérivée du profil de risque')));
+  ctx.inspector.append(prioBlock);
+
+  // Consignes.
+  const dirBlock = document.createElement('div');
+  dirBlock.className = 'ex-insp-block';
+  dirBlock.append(text('h4', null, "Consignes de l'orchestrateur"));
+  const directives = detail.directives || [];
+  if (!directives.length) dirBlock.append(text('p', 'lbl', 'aucune consigne posée'));
+  for (const d of directives) {
+    const node = document.createElement('div');
+    node.className = 'ex-directive' + (d.delivered_at ? '' : ' unread');
+    node.dataset.role = 'directive';
+    const status = d.acknowledged_at ? 'accusée' : (d.delivered_at ? 'livrée' : 'non lue');
+    node.append(text('div', null, d.text));
+    node.append(text('div', 'ex-directive-meta', `${d.kind} · ${d.author} · ${(d.created_at || '').slice(0, 16)} · ${status}`));
+    dirBlock.append(node);
+  }
+  if (!readOnly) {
+    const form = document.createElement('div');
+    form.className = 'ex-steer-form';
+    const area = document.createElement('textarea');
+    area.className = 'input';
+    area.placeholder = 'Commentaire ou consigne pour la session qui tient cette tâche';
+    area.dataset.role = 'directive-text';
+    const kind = document.createElement('select');
+    kind.className = 'input';
+    for (const [value, label] of [['comment', 'Commentaire'], ['directive', 'Consigne']]) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = label;
+      kind.append(option);
+    }
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn';
+    btn.textContent = 'Poser';
+    btn.dataset.role = 'directive-submit';
+    btn.addEventListener('click', async () => {
+      const value = area.value.trim();
+      if (!value) { feedback.replaceChildren(text('div', 'ex-refusal', 'une consigne vide n\'a rien à dire')); return; }
+      const result = await send('comment', { text: value, kind: kind.value }, `grimoire task comment ${detail.id} "${value}" --kind ${kind.value}`);
+      if (result && !result.blocked) area.value = '';
+    });
+    form.append(area, row(kind, btn));
+    dirBlock.append(form);
+  }
+  ctx.inspector.append(dirBlock);
+
+  // Annulation — sauf colonne terminale.
+  if (detail.board !== 'archived' && detail.board !== 'accepted' && detail.board !== 'released') {
+    const cancelBlock = document.createElement('div');
+    cancelBlock.className = 'ex-insp-block';
+    cancelBlock.append(text('h4', null, 'Annuler'));
+    const reason = document.createElement('input');
+    reason.className = 'input';
+    reason.placeholder = "raison de l'annulation (obligatoire)";
+    reason.dataset.role = 'cancel-reason';
+    const force = document.createElement('input');
+    force.type = 'checkbox';
+    force.dataset.role = 'cancel-force';
+    const forceLabel = document.createElement('label');
+    forceLabel.className = 'lbl';
+    forceLabel.append(force, text('span', null, " forcer même si une session la tient"));
+    forceLabel.hidden = true;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn';
+    btn.textContent = readOnly ? 'Écriture désactivée (cockpit)' : 'Annuler la tâche';
+    btn.dataset.role = 'cancel-submit';
+    btn.disabled = true;
+    reason.addEventListener('input', () => { btn.disabled = readOnly || !reason.value.trim(); });
+    btn.addEventListener('click', async () => {
+      const body = { reason: reason.value.trim() };
+      if (force.checked) body.force = true;
+      const result = await send('cancel', body, `grimoire task cancel ${detail.id} --reason "${body.reason}"${force.checked ? ' --force' : ''}`);
+      // Le refus « claim » (tenue par une autre session) ouvre l'option de
+      // forcer — jamais avant : forcer n'est pas le geste par défaut.
+      if (result && result.blocked && (result.refusals || []).some((r) => r.evidence === 'claim')) forceLabel.hidden = false;
+    });
+    cancelBlock.append(reason, forceLabel, btn);
+    ctx.inspector.append(cancelBlock);
+  }
+  ctx.inspector.append(feedback);
 }
 
 function actionFor(target, task, reason) {

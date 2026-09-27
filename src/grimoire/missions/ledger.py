@@ -36,6 +36,7 @@ from grimoire.missions.schemas import (
     RiskProfile,
     TaskClaim,
     TaskDependency,
+    TaskDirective,
     TaskState,
     TaskType,
 )
@@ -62,6 +63,16 @@ _TASK_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
     TaskState.CLOSED: frozenset(),
     TaskState.CANCELLED: frozenset(),
 }
+
+
+#: Événements du pilotage humain (issue #638, lot B) rejoués par
+#: :meth:`MissionLedger._replay_steering`.
+_STEERING_EVENTS = frozenset({
+    "task.prioritized",
+    "task.directive_added",
+    "task.directive_delivered",
+    "task.directive_acknowledged",
+})
 
 
 def _slug(title: str, limit: int) -> str:
@@ -152,7 +163,39 @@ class MissionLedger:
                     if "claim" in payload:
                         update["claim"] = payload["claim"]
                     self._tasks[tid] = MissionTask.from_dict({**old_task.to_dict(), **update})
+            elif evt_type in _STEERING_EVENTS:
+                self._replay_steering(evt_type, payload)
             self._events.append(LedgerEvent.from_dict(raw))
+
+    def _replay_steering(self, evt_type: str, payload: dict[str, Any]) -> None:
+        """Pilotage humain (issue #638) : priorité et journal de consignes.
+
+        Chaque événement ne touche qu'un champ dérivé de la tâche ; le texte
+        d'une consigne n'est jamais réécrit — livraison et accusé de réception
+        s'ajoutent comme horodatages sur l'entrée existante.
+        """
+        tid = payload.get("task_id", "")
+        task = self._tasks.get(tid)
+        if task is None:
+            return
+        data = task.to_dict()
+        if evt_type == "task.prioritized":
+            data["priority"] = payload.get("to_priority", "")
+        elif evt_type == "task.directive_added":
+            data["directives"] = [*data.get("directives", []), dict(payload.get("directive", {}))]
+        elif evt_type == "task.directive_delivered":
+            ids, at = set(payload.get("directive_ids", [])), str(payload.get("delivered_at", ""))
+            data["directives"] = [
+                {**d, "delivered_at": d.get("delivered_at") or at} if d.get("id") in ids else d
+                for d in data.get("directives", [])
+            ]
+        elif evt_type == "task.directive_acknowledged":
+            did, at = payload.get("directive_id"), str(payload.get("acknowledged_at", ""))
+            data["directives"] = [
+                {**d, "acknowledged_at": d.get("acknowledged_at") or at} if d.get("id") == did else d
+                for d in data.get("directives", [])
+            ]
+        self._tasks[tid] = MissionTask.from_dict(data)
 
     def _replay_incidents(self) -> None:
         if not self._incidents_path.exists():
@@ -329,6 +372,7 @@ class MissionLedger:
         actor_id: str = "system",
         reason: str = "",
         claim: TaskClaim | None = None,
+        extra_payload: dict[str, Any] | None = None,
     ) -> MissionTask:
         self._load()
         task = self._tasks.get(task_id)
@@ -348,6 +392,8 @@ class MissionLedger:
         }
         if claim is not None:
             payload["claim"] = claim.to_dict()
+        if extra_payload:
+            payload.update(extra_payload)
         self._append_event("task.transitioned", task_id, "task", actor_id, payload)
         self._load()
         return self._tasks[task_id]
@@ -356,6 +402,63 @@ class MissionLedger:
         """Convenience: READY → CLAIMED."""
         claim = TaskClaim.new(actor_id=actor_id, host_id=host_id, exclusive_files=exclusive_files)
         return self.transition_task(task_id, TaskState.CLAIMED, actor_id=actor_id, claim=claim)
+
+    # ── Pilotage humain (issue #638, lot B) ────────────────────────────────
+
+    def prioritize_task(self, task_id: str, priority: str, *, actor_id: str = "system", reason: str = "") -> MissionTask:
+        """Change la priorité déclarée — l'ancienne reste lisible dans l'événement."""
+        self._load()
+        task = self._tasks.get(task_id)
+        if task is None:
+            raise GrimoireMissionError(f"Task not found: {task_id}")
+        self._append_event(
+            "task.prioritized", task_id, "task", actor_id,
+            {"task_id": task_id, "from_priority": task.priority, "to_priority": priority, "reason": reason, "actor_id": actor_id},
+        )
+        self._load()
+        return self._tasks[task_id]
+
+    def add_directive(self, task_id: str, text: str, *, actor_id: str, kind: str = "comment") -> TaskDirective:
+        """Ajoute une consigne au journal de la tâche ; rend l'entrée créée."""
+        self._load()
+        if task_id not in self._tasks:
+            raise GrimoireMissionError(f"Task not found: {task_id}")
+        directive = TaskDirective(id=_new_id("dir"), author=actor_id, created_at=_now_iso(), text=text, kind=kind)
+        self._append_event(
+            "task.directive_added", task_id, "task", actor_id,
+            {"task_id": task_id, "directive": directive.to_dict()},
+        )
+        return directive
+
+    def mark_directives_delivered(self, task_id: str, directive_ids: tuple[str, ...], *, actor_id: str = "system") -> MissionTask:
+        """Horodate la livraison de *directive_ids* à une session — rien si la liste est vide."""
+        self._load()
+        task = self._tasks.get(task_id)
+        if task is None:
+            raise GrimoireMissionError(f"Task not found: {task_id}")
+        if not directive_ids:
+            return task
+        self._append_event(
+            "task.directive_delivered", task_id, "task", actor_id,
+            {"task_id": task_id, "directive_ids": list(directive_ids), "delivered_at": _now_iso()},
+        )
+        self._load()
+        return self._tasks[task_id]
+
+    def acknowledge_directive(self, task_id: str, directive_id: str, *, actor_id: str) -> MissionTask:
+        """Horodate l'accusé de réception d'une consigne connue de la tâche."""
+        self._load()
+        task = self._tasks.get(task_id)
+        if task is None:
+            raise GrimoireMissionError(f"Task not found: {task_id}")
+        if not any(d.id == directive_id for d in task.directives):
+            raise GrimoireMissionError(f"Consigne inconnue sur {task_id} : {directive_id}")
+        self._append_event(
+            "task.directive_acknowledged", task_id, "task", actor_id,
+            {"task_id": task_id, "directive_id": directive_id, "acknowledged_at": _now_iso(), "actor_id": actor_id},
+        )
+        self._load()
+        return self._tasks[task_id]
 
     def open_incident(
         self,

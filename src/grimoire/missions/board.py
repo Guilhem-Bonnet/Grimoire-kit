@@ -26,8 +26,11 @@ if TYPE_CHECKING:
 
 __all__ = [
     "BOARD_LIFECYCLE",
+    "PRIORITIES",
     "board_status_of",
     "build_board",
+    "priority_of",
+    "priority_rank",
     "task_state_of",
     "write_board",
 ]
@@ -86,6 +89,22 @@ _PRIORITY_BY_RISK: dict[RiskProfile, str] = {
     RiskProfile.RELEASE: "high",
 }
 
+#: L'échelle de priorité reconnue, de la moins pressante à la plus pressante
+#: (issue #638, lot B). Les trois valeurs que `_PRIORITY_BY_RISK` dérivait déjà,
+#: plus ``critical`` pour ce qu'un humain veut voir passer devant tout le reste.
+#: Une valeur hors de cette échelle est refusée par ``TaskService.prioritize``.
+PRIORITIES: tuple[str, ...] = ("low", "medium", "high", "critical")
+
+
+def priority_of(task: MissionTask) -> str:
+    """La priorité effective d'une tâche : déclarée, sinon dérivée du ``risk_profile``."""
+    return task.priority or _PRIORITY_BY_RISK.get(task.risk_profile, "medium")
+
+
+def priority_rank(priority: str) -> int:
+    """Rang de tri d'une priorité — plus grand = plus pressant ; inconnue = la plus basse."""
+    return PRIORITIES.index(priority) if priority in PRIORITIES else -1
+
 
 def board_status_of(state: TaskState) -> str:
     """Colonne du board pour un état du ledger."""
@@ -129,7 +148,7 @@ def _task_entry(task: MissionTask) -> dict[str, Any]:
         # `task.priority` porte une priorité de board importée telle quelle
         # (ADR-007) ; une tâche créée directement dans le ledger n'en a pas et
         # retombe sur la dérivation historique depuis `risk_profile`.
-        "priority": task.priority or _PRIORITY_BY_RISK.get(task.risk_profile, "medium"),
+        "priority": priority_of(task),
         "owner": owner,
         # Même logique pour les rôles : des rôles de board importés priment sur
         # la dérivation à une seule valeur depuis `type`.
@@ -153,6 +172,12 @@ def _task_entry(task: MissionTask) -> dict[str, Any]:
         entry["surface"] = task.surface
     if task.finition:
         entry["finition"] = task.finition
+    # Consignes de l'orchestrateur (issue #638) : le board ne porte que le
+    # compte de ce qui n'a pas encore été lu — le texte reste au ledger, que
+    # `task show` et l'espace Exécuter lisent directement.
+    if task.directives:
+        entry["directives_pending"] = len(task.pending_directives)
+        entry["directives_unacknowledged"] = len(task.unacknowledged_directives)
     # Une référence de remédiation explicite (ADR-007) prime toujours ; à
     # défaut, une carte bloquée en reçoit une par convention.
     if task.remediation_ref:
@@ -178,7 +203,12 @@ def build_board(
     le vérificateur du standard : cycle de vie normatif, clés requises sur chaque
     carte, motif de blocage sur toute carte bloquée.
     """
-    tasks = sorted(ledger.list_tasks(mission_id), key=lambda t: (BOARD_LIFECYCLE.index(board_status_of(t.status)), t.id))
+    # Dans chaque colonne, la plus pressante d'abord (issue #638) ; à priorité
+    # égale, l'identifiant garde l'ordre stable qu'un diff de board attend.
+    tasks = sorted(
+        ledger.list_tasks(mission_id),
+        key=lambda t: (BOARD_LIFECYCLE.index(board_status_of(t.status)), -priority_rank(priority_of(t)), t.id),
+    )
     return {
         "$schema": "grimoire-agentic-standard-task-board/v1",
         "metadata": {

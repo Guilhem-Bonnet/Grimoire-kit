@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from grimoire.missions.ledger import MissionLedger
-from grimoire.missions.schemas import IncidentStatus, MissionTask, TaskState
+from grimoire.missions.schemas import IncidentStatus, MissionTask, TaskDirective, TaskState
 
 if TYPE_CHECKING:
     from grimoire.memory.backends.base import MemoryEntry
@@ -116,6 +116,9 @@ class TaskRecall:
     memory_hits: tuple[MemoryHit, ...] = ()
     text: str = ""
     token_budget: int = DEFAULT_TOKEN_BUDGET
+    #: Consignes de l'orchestrateur humain (issue #638), livrées ou non : le
+    #: rappel les liste toutes — c'est ce que `task recall` et le cockpit montrent.
+    directives: tuple[TaskDirective, ...] = ()
 
     @property
     def is_empty(self) -> bool:
@@ -125,7 +128,7 @@ class TaskRecall:
     @property
     def has_content(self) -> bool:
         """Le rappel a quelque chose à dire — c'est le test de parcimonie de l'UI."""
-        return bool(self.own_history or self.siblings or self.memory_hits)
+        return bool(self.own_history or self.siblings or self.memory_hits or self.directives)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -134,6 +137,7 @@ class TaskRecall:
             "own_history": list(self.own_history),
             "siblings": [s.to_dict() for s in self.siblings],
             "memory_hits": [h.to_dict() for h in self.memory_hits],
+            "directives": [d.to_dict() for d in self.directives],
             "text": self.text,
             "token_budget": self.token_budget,
             "has_content": self.has_content,
@@ -277,19 +281,32 @@ def _trim_to_budget(text: str, token_budget: int) -> str:
     return trimmed + f"\n  … (rappel tronqué à ~{token_budget} tokens)"
 
 
+def directive_status(directive: TaskDirective) -> str:
+    """« accusée », « livrée » ou « non lue » — l'état d'une consigne, en un mot."""
+    if directive.is_acknowledged:
+        return "accusée"
+    return "livrée" if directive.is_delivered else "non lue"
+
+
 def _render_text(
     task_id: str,
     own_history: tuple[str, ...],
     siblings: tuple[SiblingRecall, ...],
     memory_hits: tuple[MemoryHit, ...],
     token_budget: int,
+    directives: tuple[TaskDirective, ...] = (),
 ) -> str:
-    if not own_history and not siblings and not memory_hits:
+    if not own_history and not siblings and not memory_hits and not directives:
         return (
             f"[Grimoire — rappel de tâche] {task_id} : rien en mémoire — "
             "première fois que ce sujet est travaillé."
         )
     lines = [f"[Grimoire — rappel de tâche] {task_id} :"]
+    if directives:
+        lines.append("Consignes de l'orchestrateur :")
+        lines.extend(
+            f"  - [{d.kind}, {directive_status(d)}] {d.author}, {d.created_at[:16]} : {d.text}" for d in directives
+        )
     if own_history:
         lines.append("Historique de cette tâche :")
         lines.extend(f"  - {h}" for h in own_history)
@@ -339,10 +356,10 @@ def build_task_recall(
         _sibling_recall(task, other, _sibling_causes(ledger, other)) for other in sibling_tasks
     )
     memory_hits = tuple(_memory_hits(memory_manager, task, siblings, limit=memory_limit))
-    text = _render_text(task_id, own_history, siblings, memory_hits, token_budget)
+    text = _render_text(task_id, own_history, siblings, memory_hits, token_budget, task.directives)
     return TaskRecall(
         task_id=task_id, task=task, own_history=own_history, siblings=siblings,
-        memory_hits=memory_hits, text=text, token_budget=token_budget,
+        memory_hits=memory_hits, text=text, token_budget=token_budget, directives=task.directives,
     )
 
 

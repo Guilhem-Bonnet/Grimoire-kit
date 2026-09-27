@@ -37,6 +37,14 @@ def decide_evidence_gate(hook: HookInput) -> Decision:
         return _unevaluable_gate(task_id, profile, exc)
 
     if ok:
+        if detail.get("state") == "archived":
+            # Issue #638 lot B : une tâche annulée depuis le cockpit (ou
+            # archivée) n'a plus de gate à réclamer — dit en clair plutôt
+            # qu'un vert muet qui ressemblerait à une preuve acceptée.
+            return Decision(
+                context=f"[Grimoire] Tâche {task_id} annulée ou archivée : aucun gate de preuve n'est réclamé.",
+                detail=detail,
+            )
         if detail.get("state") in _STATES_WITHOUT_EVIDENCE:
             # Green because nothing is owed yet, not because the work is proven.
             # Saying so is the difference between a guardrail and a placebo.

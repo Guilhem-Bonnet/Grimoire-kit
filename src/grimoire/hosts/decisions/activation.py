@@ -282,10 +282,11 @@ def decide_activation(hook: HookInput) -> Decision:
     if entry_name:
         _record_agent_dispatch(hook.project_root, entry_name, task_id)
     recall = _claimed_task_recall(hook.project_root, task_id)
+    steering, steering_detail = _steering(hook, task_id)
     providers_line = _providers_status_line(hook.project_root)
     proposals_line = _proposals_status_line(hook.project_root)
     context = "\n".join(
-        part for part in (persona, recall, directive, providers_line, proposals_line) if part
+        part for part in (persona, recall, steering, directive, providers_line, proposals_line) if part
     )
     return Decision(
         outcome=Outcome.ALLOW,
@@ -296,5 +297,21 @@ def decide_activation(hook: HookInput) -> Decision:
             "recall_injected": bool(recall),
             "governed": governed,
             **scaffold_detail,
+            **steering_detail,
         },
     )
+
+
+def _steering(hook: HookInput, task_id: str) -> tuple[str, dict[str, Any]]:
+    """Issue #638 lot B : consignes non livrées et annulation, dites dès l'ouverture.
+
+    Même helper que ``UserPromptSubmit`` (:mod:`.steering`) : une consigne
+    posée entre deux sessions est lue à la première occasion, pas au premier
+    prompt seulement. Best-effort, comme le rappel juste au-dessus.
+    """
+    try:
+        from grimoire.hosts.decisions.steering import steering_context
+
+        return steering_context(hook.project_root, task_id, hook.session_id)
+    except Exception:
+        return "", {}
