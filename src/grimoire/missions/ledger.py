@@ -161,7 +161,10 @@ class MissionLedger:
                 # événement de plus dans le journal, jamais une ligne réécrite ;
                 # sans claim au rejeu (tâche jamais réclamée, ou événement
                 # orphelin), il n'y a rien à compléter et rien n'est inventé.
-                tid = payload.get("task_id", "")
+                # La tâche ciblée est ``entity_id`` — la clé que tout événement
+                # du journal porte — et non une copie dans le payload qui
+                # pourrait manquer ou diverger (revue Copilot, PR #639).
+                tid = str(raw.get("entity_id") or payload.get("task_id") or "")
                 current = self._tasks.get(tid)
                 if current is not None and current.claim is not None:
                     claim = current.claim.with_session(

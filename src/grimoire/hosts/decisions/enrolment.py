@@ -58,7 +58,7 @@ def no_task_context(profile: str) -> str:
         "Ouvre-en une avant d'écrire :\n"
     )
     tail = (
-        "\nEn profil governed, une clôture après une écriture hors tâche est refusée au Stop."
+        f"\nEn profil {profile}, une clôture après une écriture hors tâche est refusée au Stop."
         if profile in BLOCKING_PROFILES
         else f"\nProfil {profile} : une écriture hors tâche est signalée au Stop, pas refusée."
     )
