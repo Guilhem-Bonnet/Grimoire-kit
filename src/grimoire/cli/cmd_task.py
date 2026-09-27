@@ -224,11 +224,38 @@ def task_list(
     ctx: typer.Context,
     mission: Annotated[str | None, typer.Option("--mission", help="Restreindre à une mission.")] = None,
     status: Annotated[str | None, typer.Option("--status", help="Restreindre à un état du ledger.")] = None,
+    all_projects: Annotated[
+        bool,
+        typer.Option(
+            "--all-projects",
+            help="Portefeuille : les tâches de tous les projets du registre cockpit, avec leur projet (#638).",
+        ),
+    ] = False,
+    project: Annotated[
+        str | None, typer.Option("--project", help="Avec --all-projects : ne garder qu'un projet (slug).")
+    ] = None,
+    live: Annotated[
+        bool, typer.Option("--live", help="Avec --all-projects : seules les tâches d'une session vivante.")
+    ] = False,
+    live_minutes: Annotated[
+        int, typer.Option("--live-minutes", help="Âge maximal du journal de session pour --live (minutes).")
+    ] = 30,
     project_root: _PROJECT_ROOT = Path(),
     ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
 ) -> None:
-    """Liste les tâches du ledger, avec leur colonne de board."""
+    """Liste les tâches du ledger, avec leur colonne de board.
+
+    ``--all-projects`` rend le portefeuille (issue #638, lot C) : la même
+    agrégation que ``GET /api/workspace/portfolio/tasks`` — chaque projet du
+    registre cockpit, son état ledger et sa colonne, sa priorité, son claim
+    et sa session ; un projet dont le ledger est absent ou illisible est
+    listé avec sa raison, jamais tu.
+    """
     from grimoire.missions.board import board_status_of
+
+    if all_projects:
+        _list_all_projects(ctx, project_root, status=status, project=project, live=live, live_minutes=live_minutes)
+        return
 
     tasks = _service(project_root, ledger_root).list_tasks(mission, status)
     if _fmt(ctx) == "json":
@@ -242,6 +269,60 @@ def task_list(
         # et fait disparaître l'état — la ligne restait muette sur l'essentiel.
         etat = escape(f"[{task.status.value} · {board_status_of(task.status)}]")
         console.print(f"  {task.id}  {etat}  {task.title}")
+
+
+def _list_all_projects(
+    ctx: typer.Context,
+    project_root: Path,
+    *,
+    status: str | None,
+    project: str | None,
+    live: bool,
+    live_minutes: int,
+) -> None:
+    """Le portefeuille : tableau lisible, ou la charge utile JSON telle quelle."""
+    from rich.table import Table
+
+    from grimoire.tools.workspace_portfolio import portfolio_tasks
+
+    view = portfolio_tasks(
+        project_root.resolve(), state=status, project=project, live=live, live_minutes=live_minutes
+    )
+    if _fmt(ctx) == "json":
+        typer.echo(json.dumps(view, indent=2, ensure_ascii=False))
+        return
+    table = Table(title="Portefeuille de tâches", show_lines=False)
+    for column in ("Projet", "Tâche", "État", "Board", "Priorité", "Session", "Mis à jour"):
+        table.add_column(column)
+    for card in view["tasks"]:
+        session = card.get("session") or {}
+        if session:
+            session_text = f"{'vivante' if session.get('live') else 'inactive'} · {session.get('id', '')}"
+        else:
+            session_text = "—"
+        unread = card.get("unread_directives") or 0
+        table.add_row(
+            escape(str(card["project"]["name"])),
+            escape(f"{card['id']}  {card.get('title', '')}") + (f"  ({unread} consigne(s) non lue(s))" if unread else ""),
+            escape(str(card.get("status", ""))),
+            escape(str(card.get("board", ""))),
+            escape(str(card.get("priority", "") or "—")),
+            escape(session_text),
+            escape(str(card.get("updated_at", ""))[:19]),
+        )
+    if view["tasks"]:
+        console.print(table)
+    else:
+        console.print("[dim]Aucune tâche dans le portefeuille pour ces filtres.[/dim]")
+    for row in view["projects"]:
+        if row["state"] != "ok":
+            console.print(f"[red]✗[/red] {escape(row['slug'])} — {escape(str(row['reason']))}")
+    summary = view["summary"]
+    console.print(
+        f"[dim]{summary['projects']} projet(s), {summary['readable']} lisible(s) · "
+        f"{summary['tasks']} tâche(s), {summary['live']} session(s) vivante(s) "
+        f"(< {view['live_minutes']} min)[/dim]"
+    )
 
 
 @task_app.command("show")

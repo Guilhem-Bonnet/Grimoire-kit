@@ -168,9 +168,22 @@ export const api = {
   // ── Vue de travail ────────────────────────────────────────────────────────
   glossary: () => get(WS + 'glossary'),
   tasks: (params) => get(WS + 'tasks', params),
-  task: (id) => get(WS + 'tasks/' + encodeURIComponent(id)),
-  taskTrace: (id) => get(WS + 'tasks/' + encodeURIComponent(id) + '/trace'),
-  taskRecall: (id) => get(WS + 'tasks/' + encodeURIComponent(id) + '/recall'),
+  // `project` cible un AUTRE projet que celui déjà résolu par l'hôte — même
+  // convention que `health()` : l'inspecteur du portefeuille (#638, lot C)
+  // lit la tâche d'un projet du registre qui n'est pas celui de la
+  // navigation. Sans argument, le comportement est celui d'avant.
+  task: (id, project) => get(WS + 'tasks/' + encodeURIComponent(id), project ? { project } : undefined),
+  taskTrace: (id, project) =>
+    get(WS + 'tasks/' + encodeURIComponent(id) + '/trace', project ? { project } : undefined),
+  taskRecall: (id, project) =>
+    get(WS + 'tasks/' + encodeURIComponent(id) + '/recall', project ? { project } : undefined),
+  // Portefeuille (#638, lot C) : toutes les tâches de tous les projets du
+  // registre cockpit, chacune avec son projet, son claim, sa session et sa
+  // priorité — agrégé côté serveur (`workspace_portfolio.py`), jamais une
+  // boucle par projet ici. Filtres : `state` (état ledger ou colonne board),
+  // `slug` (un projet — `project` est déjà le projet servi par l'hôte),
+  // `live` ('1' : sessions dont le journal a moins de `minutes` minutes).
+  portfolioTasks: (params) => get(WS + 'portfolio/tasks', params),
   files: (tier) => get(WS + 'files', tier ? { tier } : undefined),
   file: (path) => get(WS + 'file', { path }),
   fileDiff: (path) => get(WS + 'file/diff', { path }),
@@ -251,6 +264,19 @@ export const api = {
   // ── Écritures : atelier seulement, refusées côté cockpit ──────────────────
   taskAction: (id, action, body) =>
     post(WS + 'tasks/' + encodeURIComponent(id) + '/' + action, body),
+  // Action depuis le portefeuille (#638, lot C) : routée vers le projet
+  // propriétaire par `?project=<slug>` explicite dans le chemin (donc jamais
+  // doublé par `withProject`) et confirmée par `project` dans le corps —
+  // le serveur refuse si les deux ne désignent pas la même racine. `postOpen`,
+  // pas `post` : dérogation nommée (`is_registry_scoped_write`), ouverte à
+  // tout projet du registre comme `migrateStandardTasks`, gate de preuve
+  // compris côté `TaskService` du projet visé (ADR-007).
+  portfolioTaskAction: (id, action, body, project) =>
+    postOpen(
+      WS + 'portfolio/tasks/' + encodeURIComponent(id) + '/' + action +
+        '?project=' + encodeURIComponent(project),
+      { ...(body || {}), project },
+    ),
   // Bouton « Migrer les tâches » de l'espace Exécuter (ADR-007, issue #559,
   // #560) : importe dans le Mission Ledger les tâches d'un board du standard
   // scaffoldé avant le lot 4.1, ou jamais migré — `tasks_view()` ne l'expose
