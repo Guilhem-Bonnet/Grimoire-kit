@@ -1,4 +1,4 @@
-"""Le conseil de dispatch (vérifiabilité + modèle recommandé) — issue #642, lot B.
+"""Le conseil de dispatch (vérifiabilité + modèle recommandé) — #654.
 
 Une seule fonction, dans ``missions/`` (pas dans un hôte) : la classe vient de
 ``verifiability.classify``, jamais recalculée — même source que ``grimoire

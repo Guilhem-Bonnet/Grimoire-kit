@@ -95,7 +95,7 @@ class TaskMove:
         data = self.task.to_dict()
         data["transition"] = f"{self.previous.value} → {self.task.status.value}"
         data["board"] = board_status_of(self.task.status)
-        # Issue #642 lot B : `task_claim` (MCP et CLI) ne rendait ni la classe
+        # #654 : `task_claim` (MCP et CLI) ne rendait ni la classe
         # de vérifiabilité ni le modèle qu'elle recommande — l'agent qui
         # réclame devait relire `task show` à part, ou deviner. Même calcul
         # que `grimoire task dispatch` (`missions.dispatch.start_tier_for`

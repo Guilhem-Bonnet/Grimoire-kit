@@ -1,4 +1,4 @@
-"""Le conseil de dispatch d'une tâche — vérifiabilité et modèle recommandé (issue #642).
+"""Le conseil de dispatch d'une tâche — vérifiabilité et modèle recommandé (#654).
 
 Le mode interactif (Claude Code, Copilot — l'hôte tient la session, le défaut)
 n'appelle jamais ``grimoire task dispatch`` ni ``grimoire flow run --executor
@@ -43,7 +43,7 @@ __all__ = [
 ]
 
 #: Le modèle que chaque classe de vérifiabilité recommande pour un sous-agent
-#: dispatché en mode interactif (issue #642) — table opposable, à réutiliser
+#: dispatché en mode interactif (#654) — table opposable, à réutiliser
 #: plutôt qu'à recopier (voir le docstring du module).
 RECOMMENDED_MODEL_BY_CLASS: dict[Verifiability, str] = {
     Verifiability.V0: "haiku",

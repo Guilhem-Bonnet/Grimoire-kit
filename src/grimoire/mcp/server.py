@@ -608,7 +608,7 @@ def _task_json(task: Any) -> dict[str, Any]:
 
     data: dict[str, Any] = task.to_dict()
     data["board"] = board_status_of(task.status)
-    # Issue #642 lot B : la classe de vérifiabilité et le modèle qu'elle
+    # #654 : la classe de vérifiabilité et le modèle qu'elle
     # recommande, calculés une seule fois par `dispatch_advice` — jamais une
     # seconde classification propre à cette surface MCP.
     advice = dispatch_advice(task)
