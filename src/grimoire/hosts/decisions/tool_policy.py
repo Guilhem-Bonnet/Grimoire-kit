@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 
 from grimoire.core.standard_state import active_profile_id, active_task_id
 from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
-from grimoire.hosts.decisions.tool_facts import ToolFacts, classify_tool, policy_tool_detail
+from grimoire.hosts.decisions.tool_facts import ToolFacts, classify_tool, command_surface, policy_tool_detail
 from grimoire.policies.engine import _SEVERITY, PolicyEngine
 from grimoire.policies.rules_config import load_custom_rules
 from grimoire.policies.schemas import (
@@ -124,6 +124,40 @@ def _evaluate_temporal_layer(
     return decision.verdict, decision.reason, [rule.rule_id for rule in decision.matched_rules]
 
 
+def _untrusted_escalation(hook: HookInput, facts: ToolFacts) -> Decision | None:
+    """Point 2 (issue #645) : une commande vue nulle part sauf dans un contenu
+    non fiable devient une question, jamais un refus.
+
+    ``None`` means "nothing to say" — the caller only calls this where the
+    base engine and the temporal layer already agreed on ``allow``:
+    :mod:`.session_memory` never denies, and this function never downgrades
+    an existing ``ask``/``deny``/``block`` either, because the caller never
+    hands it the chance to (see :func:`decide_tool_policy`'s two call sites).
+    A missing or unwritable session-memory file degrades to "no match" like
+    every read in :mod:`.session_memory`, never to an error a ``PreToolUse``
+    call could fail on.
+    """
+    if not facts.command or not hook.session_id:
+        return None
+    surface = command_surface(facts.command).strip()
+    if not surface:
+        return None
+    from grimoire.hosts.decisions.session_memory import find_untrusted_match
+
+    match = find_untrusted_match(hook.project_root, hook.session_id, surface)
+    if match is None:
+        return None
+    return Decision(
+        outcome=Outcome.ASK,
+        reason=(
+            f"[Grimoire policy] Cette commande n'apparaît que dans un contenu non fiable "
+            f"({match.source}), jamais dans tes propres mots : « {match.excerpt} ». "
+            "Confirme avant de l'exécuter."
+        ),
+        detail={"tool": hook.tool_name, "family": facts.family, "untrusted_source": match.source},
+    )
+
+
 def decide_tool_policy(hook: HookInput) -> Decision:
     """Pre tool use: run the pending call through the policy engine.
 
@@ -154,7 +188,7 @@ def decide_tool_policy(hook: HookInput) -> Decision:
     has_temporal_rules = any(rule.is_temporal for rule in custom_rules)
     read_only = facts.mutation is MutationClass.READ_ONLY and not facts.secret_target
     if read_only and not has_temporal_rules:
-        return Decision()
+        return _untrusted_escalation(hook, facts) or Decision()
 
     task_id = active_task_id(hook.project_root)
     risk = _risk_profile(hook.project_root)
@@ -196,4 +230,4 @@ def decide_tool_policy(hook: HookInput) -> Decision:
             reason=f"[Grimoire policy] {reason or 'action sensible'} (profil {risk}).",
             detail=detail,
         )
-    return Decision(detail=detail)
+    return _untrusted_escalation(hook, facts) or Decision(detail=detail)
