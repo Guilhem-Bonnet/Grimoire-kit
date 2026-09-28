@@ -257,7 +257,12 @@ def task_list(
         return
 
     if project is not None or live or live_minutes != 30:
-        raise typer.BadParameter("--project/--live/--live-minutes exigent --all-projects.")
+        # `console.print` + `typer.Exit`, pas la levée nue : le rendu Rich
+        # d'un `typer.BadParameter` non attrapé varie selon la largeur de
+        # terminal détectée (panneau tronqué en CI, texte simple en local) —
+        # même convention que `cmd_dispatch._since_iso`.
+        console.print("[red]--project/--live/--live-minutes exigent --all-projects.[/red]")
+        raise typer.Exit(2)
 
     tasks = _service(project_root, ledger_root).list_tasks(mission, status)
     if _fmt(ctx) == "json":

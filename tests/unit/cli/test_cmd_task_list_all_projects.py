@@ -94,5 +94,8 @@ def test_filtres_portefeuille_sans_all_projects_echouent(
     qu'il a été appliqué."""
     res = runner.invoke(task_app, ["list", "--project-root", str(tmp_path / "a"), *argv])
 
-    assert res.exit_code != 0
-    assert "--all-projects" in res.output
+    # `res.exit_code == 2` (pas la présence de `--all-projects` dans `res.output`) :
+    # un `console.print` + `typer.Exit` attrapé, pas la levée nue d'un
+    # `typer.BadParameter` dont le rendu Rich (panneau tronqué) varie selon la
+    # largeur de terminal détectée en CI (revue Copilot #641, run CI ubuntu).
+    assert res.exit_code == 2
