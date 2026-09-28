@@ -127,19 +127,38 @@ def _max_turns_for(agent: AgentSpec) -> int:
 
 
 def _dispatch_policy_section() -> str:
-    """Section "Politique de dispatch" (issue #329) — quel modèle pour quelle tâche.
+    """Section "Politique de dispatch" (issue #329, révisée #638 lot A) — quel
+    modèle pour quelle tâche.
 
     Only the entry persona dispatches other personas as sub-agents (every
     other role "ne clos pas la tâche globale" — see the ``role`` branch
-    below), so only its file needs the rule. The three labels are quoted
-    from :class:`~grimoire.missions.verifiability.Verifiability`, not
-    paraphrased: the tier a sub-agent gets must never drift from what
-    ``grimoire task dispatch`` already computes for the same task from the
-    same source of truth.
+    below), so only its file needs the rule. But that file has two readers,
+    not one: the main loop reads it *in full*, in character, only when a
+    request is ambiguous enough to warrant it (see
+    ``grimoire.hosts.decisions.activation.entry_persona_context``) — there it
+    keeps the host's whole tool surface, including ``Agent``, and can act on
+    the rule below directly. The rarer path — Claude Code running this same
+    file as an isolated sub-agent — has no ``Agent`` tool at all: it cannot
+    dispatch, only *recommend* a model in its own final answer for whoever
+    dispatched it to act on. The wording covers both without two rules to
+    keep in sync: "choisis" reads as an instruction in the first case, a
+    recommendation in the second.
+
+    The three labels are quoted from
+    :class:`~grimoire.missions.verifiability.Verifiability`, not paraphrased:
+    the tier a sub-agent gets must never drift from what ``grimoire task
+    dispatch`` already computes for the same task from the same source of
+    truth. ``grimoire.hosts.decisions.activation._claude_dispatch_context``
+    imports this very function for the copy injected at every
+    ``SessionStart`` — the one the main loop actually sees on every session,
+    not only the 3 % where it reads this file — so the two can never drift
+    apart either.
     """
     return f"""## Politique de dispatch
 
-Avant de dispatcher un sous-agent, choisis son modèle selon la classe de
+Avant de dispatcher un sous-agent — ou, si cette persona tourne elle-même en
+sous-agent sans l'outil `Agent`, avant de recommander une persona dans ta
+réponse finale — choisis son modèle selon la classe de
 vérifiabilité de la tâche (celle que `grimoire task dispatch` calcule) :
 
 - **V0** — {Verifiability.V0.explanation} → `haiku`.
