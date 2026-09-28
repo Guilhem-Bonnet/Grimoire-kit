@@ -393,6 +393,14 @@ class MissionLedger:
         if claim is not None:
             payload["claim"] = claim.to_dict()
         if extra_payload:
+            # Les clés que le rejeu lit ne se laissent pas écraser : un
+            # `extra_payload` ne complète l'événement, il ne le redéfinit pas.
+            reserved = set(payload)
+            clashes = reserved & set(extra_payload)
+            if clashes:
+                raise GrimoireMissionError(
+                    f"extra_payload ne peut pas redéfinir {', '.join(sorted(clashes))} sur task.transitioned"
+                )
             payload.update(extra_payload)
         self._append_event("task.transitioned", task_id, "task", actor_id, payload)
         self._load()

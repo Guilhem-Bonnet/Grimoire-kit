@@ -428,7 +428,7 @@ prochain export l'écrase.
 Sans ledger, la commande d'export refuse et sort en erreur plutôt que d'écrire un
 board vide — écraser le travail déclaré par du néant serait pire que ne rien faire.
 
-Chaque écriture (`add`, `claim`, `move`, `block`, `close`, `cancel`, `link`) franchit deux
+Chaque transition d'état (`claim`, `move`, `block`, `close`, `cancel`) franchit deux
 portes avant de toucher le ledger : la machine à états, puis le gate de preuve de
 `_grimoire/standard/evidence-gates.yaml`. Un refus nomme la preuve manquante et le
 remède ; rien n'est écrit. Après une écriture acceptée, le board du standard est

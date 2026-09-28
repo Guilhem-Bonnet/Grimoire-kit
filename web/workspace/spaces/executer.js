@@ -654,8 +654,9 @@ function renderSteering(ctx, detail, onWritten) {
   }
   ctx.inspector.append(dirBlock);
 
-  // Annulation — sauf colonne terminale.
-  if (detail.board !== 'archived' && detail.board !== 'accepted' && detail.board !== 'released') {
+  // Annulation — sauf colonne terminale, et jamais proposée en lecture seule :
+  // le cockpit ne montre pas un formulaire qu'il ne laisserait pas partir.
+  if (!readOnly && detail.board !== 'archived' && detail.board !== 'accepted' && detail.board !== 'released') {
     const cancelBlock = document.createElement('div');
     cancelBlock.className = 'ex-insp-block';
     cancelBlock.append(text('h4', null, 'Annuler'));
@@ -673,10 +674,10 @@ function renderSteering(ctx, detail, onWritten) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'btn';
-    btn.textContent = readOnly ? 'Écriture désactivée (cockpit)' : 'Annuler la tâche';
+    btn.textContent = 'Annuler la tâche';
     btn.dataset.role = 'cancel-submit';
     btn.disabled = true;
-    reason.addEventListener('input', () => { btn.disabled = readOnly || !reason.value.trim(); });
+    reason.addEventListener('input', () => { btn.disabled = !reason.value.trim(); });
     btn.addEventListener('click', async () => {
       const body = { reason: reason.value.trim() };
       if (force.checked) body.force = true;
