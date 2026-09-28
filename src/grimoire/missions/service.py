@@ -26,11 +26,11 @@ from typing import TYPE_CHECKING, Any
 from grimoire.core.exceptions import GrimoireError, GrimoireMissionError
 from grimoire.core.standard_generation import STANDARD_DIR
 from grimoire.core.standard_state import invalidate_cache
-from grimoire.missions.board import board_status_of, build_board, write_board
+from grimoire.missions.board import PRIORITIES, board_status_of, build_board, priority_of, write_board
 from grimoire.missions.gates import GateRefusal, GateVerdict, check_transition
 from grimoire.missions.ledger import MissionLedger
 from grimoire.missions.recall import DEFAULT_TOKEN_BUDGET, TaskRecall, build_task_recall, consolidate_task_memory
-from grimoire.missions.schemas import MissionTask, TaskClaim, TaskState
+from grimoire.missions.schemas import DIRECTIVE_KINDS, MissionTask, TaskClaim, TaskDirective, TaskState
 
 if TYPE_CHECKING:
     from grimoire.core.agentic_standard import StandardRuntimeArtifact
@@ -40,6 +40,7 @@ __all__ = [
     "DEFAULT_LEDGER_RELPATH",
     "TaskAdded",
     "TaskMove",
+    "TaskNote",
     "TaskRefusedError",
     "TaskService",
 ]
@@ -92,8 +93,43 @@ class TaskMove:
         data = self.task.to_dict()
         data["transition"] = f"{self.previous.value} → {self.task.status.value}"
         data["board"] = board_status_of(self.task.status)
+        # Même champ que TaskNote.to_dict() (issue #638 lot B) : un consommateur
+        # qui rejoue cette réponse pour rafraîchir son propre affichage (le
+        # cockpit réécrit son bloc de pilotage humain en place plutôt que de
+        # refaire un aller-retour réseau après `cancel`/`claim`/`move`/`close`)
+        # doit voir la même forme qu'après `prioritize`/`comment` — sans lui,
+        # la priorité déclarée reste correcte mais la priorité *effective*
+        # retombe sur son repli (medium), masquant une priorité critique tant
+        # qu'aucun autre rafraîchissement complet n'est venu la corriger.
+        data["effective_priority"] = priority_of(self.task)
+        data["directives_pending"] = len(self.task.pending_directives)
+        data["directives_unacknowledged"] = len(self.task.unacknowledged_directives)
         if self.advisories:
             data["advisories"] = list(self.advisories)
+        if self.board_path is not None:
+            data["board_path"] = str(self.board_path)
+        return data
+
+
+@dataclass(frozen=True, slots=True)
+class TaskNote:
+    """Ce qu'une écriture de pilotage a produit (issue #638) : la tâche après
+    coup, le geste, la consigne créée s'il y en a une, et le board reprojeté."""
+
+    task: MissionTask
+    change: str
+    directive: TaskDirective | None
+    board_path: Path | None
+
+    def to_dict(self) -> dict[str, Any]:
+        data = self.task.to_dict()
+        data["change"] = self.change
+        data["board"] = board_status_of(self.task.status)
+        data["effective_priority"] = priority_of(self.task)
+        data["directives_pending"] = len(self.task.pending_directives)
+        data["directives_unacknowledged"] = len(self.task.unacknowledged_directives)
+        if self.directive is not None:
+            data["directive"] = self.directive.to_dict()
         if self.board_path is not None:
             data["board_path"] = str(self.board_path)
         return data
@@ -269,6 +305,7 @@ class TaskService:
         reason: str = "",
         *,
         claim: TaskClaim | None = None,
+        extra_payload: dict[str, Any] | None = None,
     ) -> TaskMove:
         """Déplace une tâche : machine à états, verrou de fichiers, gate, puis ledger, puis board.
 
@@ -283,9 +320,102 @@ class TaskService:
         if verdict.blocked:
             self._record_refusal(task, target, verdict, actor)
             raise TaskRefusedError(task_id, verdict)
-        moved = self.ledger.transition_task(task_id, target, actor_id=actor, reason=reason, claim=claim)
+        moved = self.ledger.transition_task(
+            task_id, target, actor_id=actor, reason=reason, claim=claim, extra_payload=extra_payload
+        )
         self._consolidate(moved, target, actor=actor, reason=reason)
         return TaskMove(task=moved, previous=task.status, verdict=verdict, board_path=self.project_board())
+
+    # ── Pilotage humain (issue #638, lot B) ────────────────────────────────
+    #
+    # L'orchestrateur humain agit depuis le cockpit, le CLI ou le MCP — les
+    # trois appellent ces quatre gestes, jamais le ledger directement (ADR-007).
+
+    def prioritize(self, task_id: str, priority: str, actor: str, reason: str = "") -> TaskNote:
+        """Change la priorité déclarée d'une tâche ; l'échelle est :data:`PRIORITIES`."""
+        if priority not in PRIORITIES:
+            raise ValueError(f"priorité inconnue : {priority!r} — parmi {', '.join(PRIORITIES)}")
+        self.require(task_id)
+        task = self.ledger.prioritize_task(task_id, priority, actor_id=actor, reason=reason)
+        return TaskNote(task=task, change=f"priority → {priority}", directive=None, board_path=self.project_board())
+
+    def comment(self, task_id: str, text: str, actor: str, kind: str = "comment") -> TaskNote:
+        """Pose un commentaire ou une consigne — livrée à la session au tour suivant."""
+        cleaned = text.strip()
+        if not cleaned:
+            raise ValueError("`text` requis : une consigne vide n'a rien à dire")
+        if kind not in DIRECTIVE_KINDS:
+            raise ValueError(f"kind inconnu : {kind!r} — parmi {', '.join(DIRECTIVE_KINDS)}")
+        self.require(task_id)
+        directive = self.ledger.add_directive(task_id, cleaned, actor_id=actor, kind=kind)
+        task = self.require(task_id)
+        return TaskNote(task=task, change=f"{kind} ajouté", directive=directive, board_path=self.project_board())
+
+    def acknowledge(self, task_id: str, directive_id: str, actor: str) -> TaskNote:
+        """L'agent dit avoir lu la consigne ; horodaté, jamais effacé."""
+        task = self.require(task_id)
+        if not any(d.id == directive_id for d in task.directives):
+            raise ValueError(f"consigne inconnue sur {task_id} : {directive_id!r}")
+        updated = self.ledger.acknowledge_directive(task_id, directive_id, actor_id=actor)
+        directive = next(d for d in updated.directives if d.id == directive_id)
+        return TaskNote(task=updated, change="ack", directive=directive, board_path=self.project_board())
+
+    def deliver_pending_directives(self, task_id: str, *, actor: str = "hook") -> tuple[TaskDirective, ...]:
+        """Ce que le hook injecte — les consignes non livrées, marquées livrées dans le même geste.
+
+        Rend un tuple vide sans rien écrire quand il n'y a rien à livrer :
+        appelé à chaque ``UserPromptSubmit``, il ne doit coûter qu'une lecture.
+        """
+        task = self.ledger.get_task(task_id)
+        if task is None:
+            return ()
+        pending = task.pending_directives
+        if not pending:
+            return ()
+        self.ledger.mark_directives_delivered(task_id, tuple(d.id for d in pending), actor_id=actor)
+        return pending
+
+    def cancel(self, task_id: str, reason: str, actor: str, *, force: bool = False) -> TaskMove:
+        """Annule une tâche : la raison est obligatoire, et une tâche qu'une autre
+        session tient (claim actif d'un autre acteur) exige *force* explicite.
+
+        Les deux refus sont des :class:`TaskRefusedError`, comme un gate rouge :
+        le CLI, le MCP et le cockpit les rendent déjà en nommant le remède.
+        """
+        task = self.require(task_id)
+        cleaned = reason.strip()
+        if not cleaned:
+            refusal = GateRefusal(
+                evidence="reason",
+                reason="annuler sans raison n'est pas permis — la carte doit dire pourquoi elle s'arrête",
+                remedy="donner une raison (--reason, champ `reason`)",
+            )
+            verdict = GateVerdict(transition_id="cancel", strictness="hard_fail", refusals=(refusal,))
+            self._record_refusal(task, TaskState.CANCELLED, verdict, actor)
+            raise TaskRefusedError(task_id, verdict)
+        held = task.claim
+        held_by_other = (
+            task.status in (TaskState.CLAIMED, TaskState.RUNNING)
+            and held is not None
+            and not held.is_expired()
+            and held.actor_id != actor
+        )
+        if held_by_other and not force:
+            assert held is not None
+            session = str(getattr(held, "session_id", "") or "")
+            who = f"{held.actor_id}" + (f" (session {session})" if session else "")
+            refusal = GateRefusal(
+                evidence="claim",
+                reason=f"tâche {task.status.value}, réclamée par {who} jusqu'à {held.expires_at or 'sans expiration'}",
+                remedy="laisser la session conclure, ou forcer explicitement (--force) avec la raison",
+            )
+            verdict = GateVerdict(transition_id="cancel", strictness="hard_fail", refusals=(refusal,))
+            self._record_refusal(task, TaskState.CANCELLED, verdict, actor)
+            raise TaskRefusedError(task_id, verdict)
+        return self.transition(
+            task_id, TaskState.CANCELLED, actor, cleaned,
+            extra_payload={"forced": bool(force and held_by_other), "cancelled_by": actor},
+        )
 
     def _check_exclusive_files(self, task: MissionTask, target: TaskState, claim: TaskClaim) -> None:
         """Refuse un claim dont un fichier exclusif est déjà réservé ailleurs.

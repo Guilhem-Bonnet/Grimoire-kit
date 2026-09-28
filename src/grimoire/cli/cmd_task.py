@@ -379,6 +379,16 @@ def task_show(
             console.print(f"  [yellow]![/yellow] {escape(str(warning))}")
     if task.owner or task.claim:
         console.print(f"  porté par : {task.owner or (task.claim.actor_id if task.claim else '—')}")
+    if task.directives:
+        from grimoire.missions.recall import directive_status
+
+        console.print("  consignes de l'orchestrateur :")
+        for directive in task.directives:
+            marque = escape(f"[{directive.kind}, {directive_status(directive)}]")
+            console.print(
+                f"    - {marque} {escape(directive.author)}, "
+                f"{directive.created_at[:16]} : {escape(directive.text)}  [dim]{directive.id}[/dim]"
+            )
     here = board_status_of(task.status)
     try:
         transitions = declared_transitions(project_root.resolve())
@@ -461,6 +471,91 @@ def task_close(
     from grimoire.missions.schemas import TaskState
 
     _transition(ctx, task_id, TaskState.CLOSED, project_root, ledger_root, actor)
+
+
+def _emit_note(ctx: typer.Context, note: Any) -> None:
+    if _fmt(ctx) == "json":
+        typer.echo(json.dumps(note.to_dict(), indent=2, ensure_ascii=False))
+        return
+    task = note.task
+    console.print(f"[green]OK[/green] {task.id} — {task.title} [dim]({note.change})[/dim]")
+    if note.directive is not None:
+        console.print(f"  [dim]consigne {note.directive.id}[/dim]")
+
+
+def _steer(ctx: typer.Context, project_root: Path, ledger_root: Path, task_id: str, geste: Any) -> None:
+    """Un geste de pilotage (issue #638) : même rendu des refus que les transitions."""
+    from grimoire.core.exceptions import GrimoireError
+    from grimoire.missions.service import TaskRefusedError
+
+    service = _service(project_root, ledger_root)
+    _require_task(service, task_id)
+    try:
+        result = geste(service)
+    except TaskRefusedError as refused:
+        _refuse(ctx, refused)
+    except (GrimoireError, ValueError) as exc:
+        console.print(f"[red]✗[/red] {exc}")
+        raise typer.Exit(1) from exc
+    if hasattr(result, "previous"):
+        _emit_move(ctx, result)
+    else:
+        _emit_note(ctx, result)
+
+
+@task_app.command("prioritize")
+def task_prioritize(
+    ctx: typer.Context,
+    task_id: Annotated[str, typer.Argument()],
+    to: Annotated[str, typer.Option("--to", help="Priorité visée : low, medium, high, critical.")],
+    reason: Annotated[str, typer.Option("--reason", help="Pourquoi.")] = "",
+    project_root: _PROJECT_ROOT = Path(),
+    ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
+    actor: _ACTOR = "cli",
+) -> None:
+    """Change la priorité d'une tâche (issue #638) — l'historique reste au ledger."""
+    _steer(ctx, project_root, ledger_root, task_id, lambda s: s.prioritize(task_id, to, actor, reason))
+
+
+@task_app.command("comment")
+def task_comment(
+    ctx: typer.Context,
+    task_id: Annotated[str, typer.Argument()],
+    text: Annotated[str, typer.Argument(help="Le commentaire ou la consigne.")],
+    kind: Annotated[str, typer.Option("--kind", help="`comment` (informe) ou `directive` (dirige).")] = "comment",
+    project_root: _PROJECT_ROOT = Path(),
+    ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
+    actor: _ACTOR = "cli",
+) -> None:
+    """Pose un commentaire ou une consigne sur la tâche ; la session la lit au tour suivant."""
+    _steer(ctx, project_root, ledger_root, task_id, lambda s: s.comment(task_id, text, actor, kind))
+
+
+@task_app.command("cancel")
+def task_cancel(
+    ctx: typer.Context,
+    task_id: Annotated[str, typer.Argument()],
+    reason: Annotated[str, typer.Option("--reason", help="Pourquoi la tâche s'arrête (obligatoire).")],
+    force: Annotated[bool, typer.Option("--force", help="Annuler même si une autre session la tient.")] = False,
+    project_root: _PROJECT_ROOT = Path(),
+    ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
+    actor: _ACTOR = "cli",
+) -> None:
+    """Annule une tâche avec sa raison ; tenue par une autre session, elle exige --force."""
+    _steer(ctx, project_root, ledger_root, task_id, lambda s: s.cancel(task_id, reason, actor, force=force))
+
+
+@task_app.command("ack")
+def task_ack(
+    ctx: typer.Context,
+    task_id: Annotated[str, typer.Argument()],
+    directive_id: Annotated[str, typer.Argument(help="Identifiant de la consigne (dir-…).")],
+    project_root: _PROJECT_ROOT = Path(),
+    ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
+    actor: _ACTOR = "cli",
+) -> None:
+    """Accuse réception d'une consigne de l'orchestrateur."""
+    _steer(ctx, project_root, ledger_root, task_id, lambda s: s.acknowledge(task_id, directive_id, actor))
 
 
 @task_app.command("link")

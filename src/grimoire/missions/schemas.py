@@ -27,6 +27,11 @@ DEFAULT_CLAIM_TTL_SECONDS = 4 * 60 * 60
 #: prose — l'accent reste dans l'ADR et le CHANGELOG.
 _FINITION_VALUES = frozenset({"", "maquette", "peaufine"})
 
+#: Natures d'une consigne posée sur une tâche (lot B, issue #638). ``comment``
+#: informe ; ``directive`` dirige — les deux sont livrées à la session au tour
+#: suivant, seule la distinction change la formulation du rappel.
+DIRECTIVE_KINDS: tuple[str, ...] = ("comment", "directive")
+
 
 class MissionState(StrEnum):
     DRAFT = "draft"
@@ -202,6 +207,62 @@ class TaskClaim:
 
 
 @dataclass(frozen=True, slots=True)
+class TaskDirective:
+    """Une consigne ou un commentaire posé par l'orchestrateur humain (issue #638).
+
+    Journal append-only : une consigne ne se modifie jamais, elle se livre
+    (``delivered_at`` — le hook l'a injectée dans la session) puis s'accuse
+    (``acknowledged_at`` — l'agent a dit l'avoir lue). Chaque étape est un
+    événement du ledger, jamais une réécriture de l'historique.
+    """
+
+    id: str
+    author: str
+    created_at: str
+    text: str
+    kind: str = "comment"
+    delivered_at: str = ""
+    acknowledged_at: str = ""
+
+    def __post_init__(self) -> None:
+        if self.kind not in DIRECTIVE_KINDS:
+            accepted = ", ".join(repr(v) for v in DIRECTIVE_KINDS)
+            msg = f"kind invalide : {self.kind!r}. Valeurs acceptées : {accepted}."
+            raise ValueError(msg)
+
+    @property
+    def is_delivered(self) -> bool:
+        return bool(self.delivered_at)
+
+    @property
+    def is_acknowledged(self) -> bool:
+        return bool(self.acknowledged_at)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "author": self.author,
+            "created_at": self.created_at,
+            "text": self.text,
+            "kind": self.kind,
+            "delivered_at": self.delivered_at,
+            "acknowledged_at": self.acknowledged_at,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> TaskDirective:
+        return cls(
+            id=d["id"],
+            author=d.get("author", ""),
+            created_at=d.get("created_at", ""),
+            text=d.get("text", ""),
+            kind=d.get("kind", "comment"),
+            delivered_at=d.get("delivered_at", ""),
+            acknowledged_at=d.get("acknowledged_at", ""),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class Mission:
     id: str
     title: str
@@ -295,6 +356,21 @@ class MissionTask:
     #: `migrate_standard_tasks` de jeter silencieusement une clé inconnue
     #: (ex. ``labels``) au lieu de simplement ne pas encore savoir l'exploiter.
     extra: dict[str, Any] = field(default_factory=dict)
+    #: Consignes et commentaires de l'orchestrateur humain (issue #638, lot B),
+    #: dans l'ordre d'ajout. Alimenté par ``task.directive_added`` et mis à jour
+    #: par ``task.directive_delivered`` / ``task.directive_acknowledged`` au
+    #: rejeu du ledger — jamais posé à la création.
+    directives: tuple[TaskDirective, ...] = ()
+
+    @property
+    def pending_directives(self) -> tuple[TaskDirective, ...]:
+        """Celles que la session n'a pas encore reçues."""
+        return tuple(d for d in self.directives if not d.is_delivered)
+
+    @property
+    def unacknowledged_directives(self) -> tuple[TaskDirective, ...]:
+        """Celles dont aucun agent n'a accusé réception — livrées ou non."""
+        return tuple(d for d in self.directives if not d.is_acknowledged)
 
     def __post_init__(self) -> None:
         if self.finition not in _FINITION_VALUES:
@@ -332,6 +408,8 @@ class MissionTask:
             d["remediation_ref"] = self.remediation_ref
         if self.extra:
             d["extra"] = dict(self.extra)
+        if self.directives:
+            d["directives"] = [directive.to_dict() for directive in self.directives]
         return d
 
     @classmethod
@@ -359,6 +437,7 @@ class MissionTask:
             agent_roles=tuple(d.get("agent_roles", [])),
             remediation_ref=d.get("remediation_ref", ""),
             extra=dict(d.get("extra", {})),
+            directives=tuple(TaskDirective.from_dict(item) for item in d.get("directives", [])),
         )
 
 

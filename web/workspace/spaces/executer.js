@@ -15,6 +15,12 @@
 // Le refus d'un gate revient en 200 avec `blocked: true` et la preuve
 // manquante nommée — c'est une réponse à afficher, pas une erreur à avaler.
 //
+// Pilotage humain (issue #638, lot B) : les mêmes `api.taskAction` avec
+// 'prioritize' | 'comment' | 'cancel' | 'ack' — jamais une écriture directe
+// depuis la webview (ADR-007), toujours `TaskService`. Sélecteur de priorité
+// et zone de consigne dans l'inspecteur, « Annuler » avec raison exigée, tri
+// par priorité dans chaque colonne, badge « consigne non lue » sur la carte.
+//
 // Timeline (#139) : `api.taskTrace(id)` porte maintenant jusqu'à cinq sources
 // (ledger, hooks, gate, runtime, evidence, otel) triées dans le temps —
 // filtrables par source et par gravité, chaque ligne s'ouvrant en accordéon
@@ -76,6 +82,18 @@ const DEP_LABEL = {
 const RISK_DOT = {
   light: 'ok', standard: 'warn', strict: 'bad', security_critical: 'bad', release: 'bad',
 };
+// Échelle de priorité (grimoire.missions.board.PRIORITIES), la plus pressante
+// en dernier ; `tasks_view()` la renvoie aussi (`priorities`) — la constante
+// locale n'est que le repli si le serveur ne la donne pas.
+const PRIORITIES = ['low', 'medium', 'high', 'critical'];
+const PRIORITY_LABEL = { low: 'Basse', medium: 'Moyenne', high: 'Haute', critical: 'Critique' };
+const PRIORITY_DOT = { low: '', medium: '', high: 'warn', critical: 'bad' };
+const priorityRank = (p) => PRIORITIES.indexOf(p);
+// Dans une colonne, la plus pressante d'abord ; à égalité, l'identifiant
+// garde un ordre stable (même règle que `build_board`).
+const byPriority = (a, b) =>
+  (priorityRank(b.effective_priority || 'medium') - priorityRank(a.effective_priority || 'medium')) ||
+  String(a.id).localeCompare(String(b.id));
 
 function injectStyles() {
   if (document.getElementById(STYLE_ID)) return;
@@ -130,6 +148,13 @@ function injectStyles() {
     .ex-card-project { font-size: var(--t-s); color: var(--ink2); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
     .ex-card-project .chip { font-size: var(--t-s); }
     .ex-session-cmd { margin: 6px 0 0; padding: 6px var(--sp-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--e2); font-family: var(--mono); font-size: var(--t-s); white-space: pre-wrap; word-break: break-all; }
+    .ex-badge { font-size: var(--t-min); border: 1px solid var(--acc); color: var(--acc); border-radius: var(--r); padding: 0 6px; }
+    .ex-directive { display: flex; flex-direction: column; gap: 2px; padding: 6px var(--sp-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); margin-bottom: 6px; font-size: var(--t-s); }
+    .ex-directive.unread { border-color: var(--acc); }
+    .ex-directive-meta { font-size: var(--t-min); color: var(--ink3); display: flex; gap: 6px; align-items: center; }
+    .ex-steer-form { display: flex; flex-direction: column; gap: 6px; }
+    .ex-steer-form textarea { min-height: 56px; font: inherit; font-size: var(--t-s); }
+    .ex-steer-row { display: flex; gap: 6px; align-items: center; }
   `;
   document.head.append(style);
 }
@@ -217,6 +242,18 @@ function taskCard(task, onSelect, portfolio = false) {
   const meta = text('div', 'ex-card-meta lbl', '');
   if (task.risk_profile) meta.append(dot(RISK_DOT[task.risk_profile] || ''));
   meta.append(text('span', null, [task.owner || 'sans owner', task.type, task.risk_profile].filter(Boolean).join(' · ')));
+  // Priorité effective (issue #638) : point + mot, comme le risque — jamais la
+  // couleur seule ; et le badge « consigne non lue » tant qu'une consigne de
+  // l'orchestrateur n'a pas été livrée à la session.
+  const priority = task.effective_priority || 'medium';
+  meta.append(dot(PRIORITY_DOT[priority] || ''), text('span', null, PRIORITY_LABEL[priority] || priority));
+  if (task.directives_pending > 0) {
+    const badge = text('span', 'ex-badge', `consigne non lue (${task.directives_pending})`);
+    badge.dataset.role = 'directive-badge';
+    meta.append(badge);
+  } else if (task.directives_unacknowledged > 0) {
+    meta.append(text('span', 'ex-badge', `consigne non accusée (${task.directives_unacknowledged})`));
+  }
   card.append(meta);
 
   const chips = document.createElement('div');
@@ -255,7 +292,7 @@ function renderBoard(root, ctx, tasks, groups, onSelect, portfolio = false) {
   for (const group of groups) {
     const col = document.createElement('div');
     col.className = 'ex-col';
-    const inColumn = group.cols.flatMap((c) => byColumn.get(c) || []);
+    const inColumn = group.cols.flatMap((c) => byColumn.get(c) || []).sort(byPriority);
 
     const head = document.createElement('div');
     head.className = 'ex-col-head';
@@ -294,12 +331,13 @@ function renderList(root, ctx, tasks, onSelect, portfolio = false) {
   const headRow = document.createElement('tr');
   const columns = portfolio
     ? ['Projet', 'Tâche', 'État', 'Session', 'Priorité', 'Owner', 'Prochaine porte']
-    : ['Tâche', 'État', 'Owner', 'Session', 'Preuves', 'Prochaine porte'];
+    : ['Tâche', 'État', 'Priorité', 'Owner', 'Session', 'Preuves', 'Prochaine porte'];
   for (const label of columns) headRow.append(text('th', null, label));
   thead.append(headRow);
   table.append(thead);
   const tbody = document.createElement('tbody');
-  for (const task of tasks) {
+  const ordered = [...tasks].sort((a, b) => (LIFECYCLE.indexOf(a.board) - LIFECYCLE.indexOf(b.board)) || byPriority(a, b));
+  for (const task of ordered) {
     const tr = document.createElement('tr');
     tr.dataset.project = task.project?.slug || '';
     tr.dataset.task = task.id;
@@ -321,6 +359,11 @@ function renderList(root, ctx, tasks, onSelect, portfolio = false) {
       const prioCell = document.createElement('td');
       if (task.priority) prioCell.append(row(dot(PORTFOLIO_PRIORITY_DOT[task.priority] || ''), text('span', null, task.priority)));
       else prioCell.append(text('span', 'lbl', '—'));
+      tr.append(prioCell);
+    } else {
+      const prio = task.effective_priority || 'medium';
+      const prioCell = document.createElement('td');
+      prioCell.append(row(dot(PRIORITY_DOT[prio] || ''), text('span', null, PRIORITY_LABEL[prio] || prio)));
       tr.append(prioCell);
     }
     tr.append(text('td', null, task.owner || '—'));
@@ -493,9 +536,16 @@ function sessionBlock(session) {
 // `task` porte l'id et, en portefeuille, `project.slug` (cible des lectures et
 // des actions) et `session` (bloc « Session »). `portfolio` choisit la porte
 // d'écriture : `portfolioTaskAction` (dérogation nommée, tout projet du
-// registre) plutôt que `taskAction` (projet de lancement seulement).
+// registre) plutôt que `taskAction` (projet de lancement seulement). Le
+// vidage attend la fin des trois lectures : reconstruire tout l'inspecteur en
+// un seul geste synchrone une fois les données prêtes, plutôt que de le
+// laisser vide pendant l'aller-retour réseau — utile pour un changement de
+// tâche sélectionnée ou la transition d'état (« Réaliser » ci-dessous). Le
+// pilotage humain (`renderSteering`, issue #638 lot B) ne passe plus par ce
+// chemin pour ses propres écritures : il réécrit son conteneur en place et ne
+// redéclenche qu'un rafraîchissement « board seul » (`draw({ skipInspector:
+// true })`), donc ne revient jamais vider ce panneau sous un geste qui suit.
 async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = false) {
-  ctx.inspector.replaceChildren();
   const taskId = task.id;
   const project = portfolio ? task.project?.slug : undefined;
   const [detail, trace, recall] = await Promise.all([
@@ -503,6 +553,7 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
     ctx.api.taskTrace(taskId, project).catch(() => null),
     ctx.api.taskRecall(taskId, project).catch(() => null),
   ]);
+  ctx.inspector.replaceChildren();
   if (!detail) {
     ctx.inspector.append(text('p', 'lbl', 'Tâche indisponible.'));
     return;
@@ -585,6 +636,8 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
     recallBlock.append(pre);
     ctx.inspector.append(recallBlock);
   }
+
+  renderSteering(ctx, detail, onWritten);
 
   const acceptance = document.createElement('div');
   acceptance.className = 'ex-insp-block';
@@ -700,6 +753,165 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
   }
   gateBlock.append(feedback);
   ctx.inspector.append(gateBlock);
+}
+
+// ── Pilotage humain (issue #638, lot B) ───────────────────────────────────
+//
+// Trois blocs dans l'inspecteur : la priorité (sélecteur), les consignes
+// (journal + zone de saisie), l'annulation (raison exigée, `force` proposé
+// seulement quand le service a refusé pour un claim tenu ailleurs). Chaque
+// geste est un `api.taskAction` ; le refus revient en 200 `blocked: true`.
+
+function renderSteering(ctx, detail, onWritten) {
+  // Conteneur dédié (issue #638, lot B, correctif de course résiduelle) :
+  // priorité, consignes et annulation vivent dans LEUR PROPRE bloc, que
+  // `send()` réécrit en place avec la réponse déjà en main plutôt que
+  // d'attendre le rafraîchissement externe de l'inspecteur (`onWritten`, qui
+  // refait un aller-retour réseau puis remplace tout l'inspecteur). Sans ce
+  // conteneur, un second geste (poser une consigne juste après avoir changé
+  // la priorité, ou annuler juste après une consigne) pouvait tomber dans la
+  // fenêtre où l'inspecteur venait d'être vidé pour ce second rendu externe :
+  // le clic ne trouvait plus de bouton où se poser, et rien n'était écrit
+  // côté serveur, sans erreur visible (`test_workspace_executer_steering.py`,
+  // course reproduite en CI sur `cancel` puis sur `comment`).
+  const container = document.createElement('div');
+  container.className = 'ex-steering-root';
+  renderSteeringInto(container, ctx, detail, onWritten);
+  ctx.inspector.append(container);
+}
+
+function renderSteeringInto(container, ctx, detail, onWritten) {
+  const readOnly = ctx.host.readOnly;
+  const feedback = document.createElement('div');
+  const send = async (action, body, command) => {
+    ctx.dock.echo(command);
+    feedback.replaceChildren();
+    try {
+      const result = await ctx.api.taskAction(detail.id, action, body);
+      if (result && result.blocked) {
+        const refusals = (result.refusals || []).map((r) => `${r.evidence} — ${r.reason} (${r.remedy})`);
+        feedback.append(text('div', 'ex-refusal', 'refusé : ' + refusals.join(' ; ')));
+        return result;
+      }
+      // Réécrit ce bloc en place avec `result` — la réponse porte déjà la
+      // tâche à jour (priorité, consignes, board) — au lieu d'attendre le
+      // rafraîchissement externe. Celui-ci reste déclenché (badges et tri du
+      // board), mais en mode « board seul » : il ne touche plus jamais ce
+      // conteneur, donc ne peut plus le vider sous un geste qui suit.
+      container.replaceChildren();
+      renderSteeringInto(container, ctx, result, onWritten);
+      onWritten({ skipInspector: true });
+      return result;
+    } catch (error) {
+      feedback.replaceChildren(text('div', 'ex-refusal', 'échec : ' + error.message));
+      return null;
+    }
+  };
+
+  // Priorité.
+  const prioBlock = document.createElement('div');
+  prioBlock.className = 'ex-insp-block';
+  prioBlock.append(text('h4', null, 'Priorité'));
+  const select = document.createElement('select');
+  select.className = 'input';
+  select.dataset.role = 'priority';
+  select.disabled = readOnly;
+  const current = detail.effective_priority || 'medium';
+  for (const value of PRIORITIES) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = PRIORITY_LABEL[value] || value;
+    if (value === current) option.selected = true;
+    select.append(option);
+  }
+  select.addEventListener('change', () => {
+    send('prioritize', { to: select.value }, `grimoire task prioritize ${detail.id} --to ${select.value}`);
+  });
+  prioBlock.append(row(select, text('span', 'lbl', detail.priority ? 'déclarée' : 'dérivée du profil de risque')));
+  container.append(prioBlock);
+
+  // Consignes.
+  const dirBlock = document.createElement('div');
+  dirBlock.className = 'ex-insp-block';
+  dirBlock.append(text('h4', null, "Consignes de l'orchestrateur"));
+  const directives = detail.directives || [];
+  if (!directives.length) dirBlock.append(text('p', 'lbl', 'aucune consigne posée'));
+  for (const d of directives) {
+    const node = document.createElement('div');
+    node.className = 'ex-directive' + (d.delivered_at ? '' : ' unread');
+    node.dataset.role = 'directive';
+    const status = d.acknowledged_at ? 'accusée' : (d.delivered_at ? 'livrée' : 'non lue');
+    node.append(text('div', null, d.text));
+    node.append(text('div', 'ex-directive-meta', `${d.kind} · ${d.author} · ${(d.created_at || '').slice(0, 16)} · ${status}`));
+    dirBlock.append(node);
+  }
+  if (!readOnly) {
+    const form = document.createElement('div');
+    form.className = 'ex-steer-form';
+    const area = document.createElement('textarea');
+    area.className = 'input';
+    area.placeholder = 'Commentaire ou consigne pour la session qui tient cette tâche';
+    area.dataset.role = 'directive-text';
+    const kind = document.createElement('select');
+    kind.className = 'input';
+    for (const [value, label] of [['comment', 'Commentaire'], ['directive', 'Consigne']]) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = label;
+      kind.append(option);
+    }
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn';
+    btn.textContent = 'Poser';
+    btn.dataset.role = 'directive-submit';
+    btn.addEventListener('click', async () => {
+      const value = area.value.trim();
+      if (!value) { feedback.replaceChildren(text('div', 'ex-refusal', 'une consigne vide n\'a rien à dire')); return; }
+      const result = await send('comment', { text: value, kind: kind.value }, `grimoire task comment ${detail.id} "${value}" --kind ${kind.value}`);
+      if (result && !result.blocked) area.value = '';
+    });
+    form.append(area, row(kind, btn));
+    dirBlock.append(form);
+  }
+  container.append(dirBlock);
+
+  // Annulation — sauf colonne terminale, et jamais proposée en lecture seule :
+  // le cockpit ne montre pas un formulaire qu'il ne laisserait pas partir.
+  if (!readOnly && detail.board !== 'archived' && detail.board !== 'accepted' && detail.board !== 'released') {
+    const cancelBlock = document.createElement('div');
+    cancelBlock.className = 'ex-insp-block';
+    cancelBlock.append(text('h4', null, 'Annuler'));
+    const reason = document.createElement('input');
+    reason.className = 'input';
+    reason.placeholder = "raison de l'annulation (obligatoire)";
+    reason.dataset.role = 'cancel-reason';
+    const force = document.createElement('input');
+    force.type = 'checkbox';
+    force.dataset.role = 'cancel-force';
+    const forceLabel = document.createElement('label');
+    forceLabel.className = 'lbl';
+    forceLabel.append(force, text('span', null, " forcer même si une session la tient"));
+    forceLabel.hidden = true;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn';
+    btn.textContent = 'Annuler la tâche';
+    btn.dataset.role = 'cancel-submit';
+    btn.disabled = true;
+    reason.addEventListener('input', () => { btn.disabled = !reason.value.trim(); });
+    btn.addEventListener('click', async () => {
+      const body = { reason: reason.value.trim() };
+      if (force.checked) body.force = true;
+      const result = await send('cancel', body, `grimoire task cancel ${detail.id} --reason "${body.reason}"${force.checked ? ' --force' : ''}`);
+      // Le refus « claim » (tenue par une autre session) ouvre l'option de
+      // forcer — jamais avant : forcer n'est pas le geste par défaut.
+      if (result && result.blocked && (result.refusals || []).some((r) => r.evidence === 'claim')) forceLabel.hidden = false;
+    });
+    cancelBlock.append(reason, forceLabel, btn);
+    container.append(cancelBlock);
+  }
+  container.append(feedback);
 }
 
 function actionFor(target, task, reason) {
@@ -889,7 +1101,7 @@ export async function mount(root, ctx) {
     ctx.dock.echo('grimoire task add');
   }
 
-  async function draw() {
+  async function draw(opts = {}) {
     wrap.replaceChildren();
     const portfolioMode = scope.mode === 'portfolio';
     if (!portfolioMode && !board.ledger) {
@@ -940,6 +1152,13 @@ export async function mount(root, ctx) {
         await renderTimeline(wrap, ctx, task);
       }
     }
+
+    // `{ skipInspector: true }` (issue #638, lot B) : le pilotage humain
+    // réécrit son propre bloc en place (`renderSteeringInto`) et ne déclenche
+    // ce rafraîchissement que pour le board (tri par priorité, badge
+    // consigne) — jamais pour reconstruire l'inspecteur par-dessus un
+    // panneau que l'utilisateur est peut-être déjà en train de réutiliser.
+    if (opts.skipInspector) return;
 
     const current = tasks.find(same);
     if (current) {

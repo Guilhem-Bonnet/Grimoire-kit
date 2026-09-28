@@ -25,11 +25,27 @@ def decide_task_context(hook: HookInput) -> Decision:
     active = resolve_active_task(hook.project_root)
     profile = active_profile_id(hook.project_root)
     detail = {"task_id": active.task_id, "profile": profile, "task_source": active.source}
+    # Issue #638 lot B : ce que l'orchestrateur humain a dit depuis le cockpit
+    # — consignes non livrées de la tâche active, annulation de celle que la
+    # session tenait. Importé à l'usage, et muet quand il n'y a rien. Appelé
+    # même quand plus aucune tâche n'est active (repli ``bootstrap``) : une
+    # annulation vide la tâche que la session tenait, `resolve_active_task`
+    # retombe alors sur le repli, mais l'annonce se fait par `session_id`
+    # (lu au ledger), pas par la tâche resolue ici — elle doit sortir dans
+    # les deux branches.
+    from grimoire.hosts.decisions.steering import steering_context
+
+    steering, steering_detail = steering_context(hook.project_root, active.task_id, hook.session_id)
     if active.source == "bootstrap":
-        return Decision(outcome=Outcome.ALLOW, context=no_task_context(profile), detail=detail)
+        context = no_task_context(profile)
+        if steering:
+            context = f"{context}\n{steering}"
+        return Decision(outcome=Outcome.ALLOW, context=context, detail={**detail, **steering_detail})
     link = link_session(hook, active)
     context = (
         f"[Grimoire] Tâche courante : {active.task_id} (profil {profile}). "
         f"Toute preuve va dans _grimoire-output/evidence/{active.task_id}/."
     )
-    return Decision(outcome=Outcome.ALLOW, context=context, detail={**detail, **link})
+    if steering:
+        context = f"{context}\n{steering}"
+    return Decision(outcome=Outcome.ALLOW, context=context, detail={**detail, **link, **steering_detail})

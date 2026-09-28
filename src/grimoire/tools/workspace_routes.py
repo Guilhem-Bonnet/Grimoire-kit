@@ -421,17 +421,20 @@ def _command(project_root: Path, body: dict[str, Any]) -> Any:
 
 
 def _task_action(project_root: Path, task_id: str, action: str, body: dict[str, Any]) -> Any:
-    """Réclame, déplace, bloque ou ferme une tâche — gate de preuve compris.
+    """Réclame, déplace, bloque, ferme — ou prioritise, commente, annule, accuse (issue #638).
 
     Le service est le même que celui du CLI et du serveur MCP : un gate
     contourné ici le serait partout, donc il n'y a qu'un endroit où il pourrait
-    l'être, et ce n'est pas celui-ci.
+    l'être, et ce n'est pas celui-ci. La webview n'écrit jamais elle-même
+    (ADR-007) : elle demande, le service décide, le ledger enregistre.
     """
     from grimoire.missions.schemas import TaskState
     from grimoire.missions.service import TaskService
 
     service = TaskService(project_root.resolve())
     actor = str(body.get("actor") or "workspace")
+    if action in _STEERING_ACTIONS:
+        return _task_steer(service, task_id, action, actor, body).to_dict()
     if action == "claim":
         move = service.claim(task_id, actor, str(body.get("host") or "workspace"))
     elif action == "close":
@@ -479,8 +482,27 @@ POST_ROUTES: dict[str, _PostHandler] = {
     f"{PREFIX}tasks/migrate-standard": _task_migrate_standard,
 }
 
+def _task_steer(service: Any, task_id: str, action: str, actor: str, body: dict[str, Any]) -> Any:
+    """Les gestes de l'orchestrateur humain (issue #638, lot B) — refus rendus par le service."""
+    if action == "prioritize":
+        return service.prioritize(task_id, str(body.get("to") or ""), actor, str(body.get("reason") or ""))
+    if action == "comment":
+        return service.comment(task_id, str(body.get("text") or ""), actor, str(body.get("kind") or "comment"))
+    if action == "cancel":
+        return service.cancel(task_id, str(body.get("reason") or ""), actor, force=body.get("force") is True)
+    directive_id = str(body.get("directive_id") or "")
+    if not directive_id:
+        raise ValueError("`directive_id` requis pour accuser réception")
+    return service.acknowledge(task_id, directive_id, actor)
+
+
+#: Les gestes de pilotage humain (issue #638) : jamais une transition d'état
+#: sauf `cancel`, qui passe par le même gate que `move --to cancelled` plus la
+#: raison obligatoire et le verrou de claim.
+_STEERING_ACTIONS = ("prioritize", "comment", "cancel", "ack")
+
 #: Les verbes qu'une tâche accepte depuis l'interface.
-TASK_ACTIONS = ("claim", "move", "block", "close")
+TASK_ACTIONS = ("claim", "move", "block", "close", *_STEERING_ACTIONS)
 
 
 # ── Agents (issue #374) ─────────────────────────────────────────────────────
