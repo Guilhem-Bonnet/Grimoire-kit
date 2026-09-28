@@ -20,6 +20,8 @@ import os
 import re
 import tempfile
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -98,6 +100,42 @@ def _now_iso() -> str:
 
 def _new_id(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:12]}"
+
+
+@contextmanager
+def _ledger_file_lock(target_path: Path) -> Iterator[None]:
+    """Verrou exclusif inter-process sur *target_path* (POSIX/Windows, best-effort).
+
+    ``_atomic_append`` lit le fichier entier, ajoute une ligne, puis renomme
+    un temporaire par-dessus : sans ce verrou, deux écrivains concurrents
+    (deux requêtes HTTP du cockpit servies par des threads séparés,
+    typiquement) peuvent tous deux lire le même contenu avant que l'un des
+    deux n'écrive — le second écrase alors l'événement du premier, silencieux
+    (« lost update »). Même pattern que ``tools/stigmergy._board_lock`` :
+    dégrade en no-op si ``fcntl`` est indisponible (Windows), jamais bloquant
+    au point de casser un ledger qui marchait sans lui.
+    """
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = target_path.with_name(f".{target_path.name}.lock")
+    fh = None
+    try:
+        fh = lock_path.open("w", encoding="utf-8")
+        try:
+            import fcntl
+
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        except (ImportError, OSError):
+            pass  # Windows ou FS sans flock : best-effort
+        yield
+    finally:
+        if fh is not None:
+            try:
+                import fcntl
+
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+            except (ImportError, OSError):
+                pass
+            fh.close()
 
 
 class MissionLedger:
@@ -256,18 +294,23 @@ class MissionLedger:
 
     def _atomic_append(self, path: Path, record: dict[str, Any]) -> None:
         line = json.dumps(record, ensure_ascii=False) + "\n"
-        fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".tmp-ledger-")
-        try:
-            # Copy existing content + append new line
-            existing = path.read_text(encoding="utf-8") if path.exists() else ""
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                fh.write(existing)
-                fh.write(line)
-            Path(tmp).replace(path)
-        except Exception:
-            with contextlib.suppress(OSError):
-                Path(tmp).unlink()
-            raise
+        # Verrouillé : lire « existing » puis renommer un temporaire par-dessus
+        # n'est atomique que pour un seul écrivain à la fois. Deux requêtes
+        # concurrentes (cockpit multi-thread) sans ce verrou perdaient
+        # silencieusement l'une des deux écritures (« lost update »).
+        with _ledger_file_lock(path):
+            fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".tmp-ledger-")
+            try:
+                # Copy existing content + append new line
+                existing = path.read_text(encoding="utf-8") if path.exists() else ""
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    fh.write(existing)
+                    fh.write(line)
+                Path(tmp).replace(path)
+            except Exception:
+                with contextlib.suppress(OSError):
+                    Path(tmp).unlink()
+                raise
 
     def _next_seq(self, prefix: str, id_map: dict[str, Any]) -> str:
         existing = [k for k in id_map if k.startswith(prefix)]
