@@ -58,6 +58,19 @@ def test_executer_priorite_consigne_et_annulation_depuis_l_inspecteur(workspace:
 
     events_path = real_project.resolve() / LEDGER_RELPATH / "events.jsonl"
     trace_path = events_path.parent.parent / "_debug_trace.log"
+    net_log: list[str] = []
+
+    def _on_response(resp: object) -> None:
+        url = resp.url  # type: ignore[attr-defined]
+        if "/api/workspace/tasks" not in url:
+            return
+        try:
+            body = resp.text()[:500]  # type: ignore[attr-defined]
+        except Exception as exc:
+            body = f"<unreadable: {exc!r}>"
+        net_log.append(f"{resp.request.method} {url} -> {resp.status} body={body}")  # type: ignore[attr-defined]
+
+    workspace.on("response", _on_response)
 
     def _dump_debug(task_id: str) -> None:
         """Diagnostic jetable (issue de la course résiduelle sur cette suite) :
@@ -77,6 +90,9 @@ def test_executer_priorite_consigne_et_annulation_depuis_l_inspecteur(workspace:
             print(f"[DBG] total_lines={len(lines)} total_bytes={len(raw)} lines mentioning {task_id}: {matching}")
             for i in matching:
                 print(f"[DBG] line {i}: {lines[i][:400]}")
+        print(f"[DBG] ---- network ({len(net_log)} responses to /api/workspace/tasks*) ----")
+        for entry in net_log:
+            print(f"[DBG-NET] {entry}")
 
     task_id = _tache(real_project)
     try:
