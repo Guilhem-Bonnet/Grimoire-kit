@@ -1419,6 +1419,7 @@ def registry_dispatches(ctx: typer.Context) -> None:
     ledger = TraceLedger(root / TRACES_DIR)
     counts = ledger.agent_dispatch_counts()
     misses = ledger.agent_miss_counts()
+    delegations = ledger.delegation_counts()
 
     cfg: GrimoireConfig | None = None
     try:
@@ -1450,7 +1451,12 @@ def registry_dispatches(ctx: typer.Context) -> None:
     if _get_fmt(ctx) == "json":
         typer.echo(
             json.dumps(
-                {"dispatches": counts, "misses": misses, "freshness": freshness_payload},
+                {
+                    "dispatches": counts,
+                    "misses": misses,
+                    "delegations": delegations,
+                    "freshness": freshness_payload,
+                },
                 indent=2,
                 ensure_ascii=False,
             )
@@ -1482,6 +1488,28 @@ def registry_dispatches(ctx: typer.Context) -> None:
             miss_tbl.add_row(specialty, str(stats["count"]), stats["last_seen"] or "—")
 
         console.print(miss_tbl)
+
+    if delegations:
+        # Issue GAO-c-mesurer-la-001 : la délégation observée (agent, modèle),
+        # dans le même rapport que les choix de persona d'entrée ci-dessus —
+        # même journal, même commande, pas un second endroit à consulter.
+        deleg_tbl = Table(title="Délégations vers un sous-agent observées")
+        deleg_tbl.add_column("Agent délégué", style="bold")
+        deleg_tbl.add_column("Occurrences", justify="right")
+        deleg_tbl.add_column("Avec modèle explicite", justify="right")
+        deleg_tbl.add_column("Dernier modèle")
+        deleg_tbl.add_column("Dernière délégation")
+
+        for agent_id, stats in sorted(delegations.items(), key=lambda kv: kv[1]["count"], reverse=True):
+            deleg_tbl.add_row(
+                agent_id,
+                str(stats["count"]),
+                f"{stats['with_model_count']}/{stats['count']}",
+                stats["last_model"] or "—",
+                stats["last_seen"] or "—",
+            )
+
+        console.print(deleg_tbl)
 
     console.print()
     if freshness is None:

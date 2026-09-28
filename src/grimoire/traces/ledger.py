@@ -46,6 +46,7 @@ from grimoire.traces.schemas import (
 __all__ = [
     "AGENT_DISPATCH_TAG",
     "AGENT_MISS_TAG",
+    "DELEGATION_TAG",
     "DISPATCH_OUTCOME_TAG",
     "AgentFreshness",
     "DispatchOutcomeGroupStats",
@@ -117,6 +118,16 @@ AGENT_MISS_TAG = "agent.miss"
 #: spécialité sans nom ne peut pas devenir un slug de fichier.
 UNNAMED_SPECIALTY = "(non nommée)"
 _UNNAMED_SPECIALTY = UNNAMED_SPECIALTY
+
+#: Tag qui marque un enregistrement comme « un sous-agent a été délégué » —
+#: l'appel de l'outil ``Task``/``Agent`` (Claude Code) ou ``agent``/
+#: ``runSubagent`` (Copilot) observé à ``PostToolUse``, distinct
+#: d'``AGENT_DISPATCH_TAG`` (le choix de la persona d'entrée, à
+#: ``SessionStart``) et de tout gate de tâche. Voir
+#: ``grimoire.hosts.decisions.evidence_trace._record_delegation`` pour le
+#: seul point d'écriture (issue GAO-c-mesurer-la-001) et
+#: :meth:`TraceLedger.delegation_counts` pour la lecture agrégée.
+DELEGATION_TAG = "agent.delegation"
 
 #: Tag qui marque un enregistrement comme le résumé d'une cascade de dispatch
 #: entière — une entrée par tâche/node réellement dispatché, écrite une fois
@@ -791,6 +802,41 @@ class TraceLedger:
                 entry["category"] = category
                 entry["fallback_agent"] = trace.agent_id or ""
                 entry["last_seen"] = trace.started_at
+        return counts
+
+    def delegation_counts(self) -> dict[str, dict[str, Any]]:
+        """Compter les délégations vers un sous-agent journalisées par ``hosts.decisions.evidence_trace``.
+
+        Filtre sur le tag :data:`DELEGATION_TAG` — le seul type d'écriture de
+        ce journal qui répond à « quel agent a été délégué, avec quel
+        modèle », distinct du choix de persona d'entrée
+        (:meth:`agent_dispatch_counts`) et des gates de tâche qui vivent dans
+        le même fichier. Retourne, par ``agent_id`` : le nombre
+        d'occurrences (``count``), le nombre d'entre elles où un modèle
+        explicite était présent (``with_model_count`` — la mesure « part
+        avec modèle explicite » demandée par l'issue GAO-c-mesurer-la-001),
+        le modèle de la plus récente délégation (``last_model``, chaîne vide
+        si elle n'en précisait pas) et son horodatage (``last_seen``).
+
+        Pas de backend Rust ici : le volume d'un journal de délégations n'a
+        jamais justifié un septième port (voir le docstring de
+        :attr:`DispatchOutcomeStats.by_flow` pour le même raisonnement
+        appliqué à une autre dimension), et la fonction reste une simple
+        agrégation en un seul passage.
+        """
+        counts: dict[str, dict[str, Any]] = {}
+        for trace in self._load_all():
+            if DELEGATION_TAG not in trace.tags or not trace.agent_id:
+                continue
+            entry = counts.setdefault(
+                trace.agent_id, {"count": 0, "with_model_count": 0, "last_model": "", "last_seen": ""}
+            )
+            entry["count"] += 1
+            if trace.model:
+                entry["with_model_count"] += 1
+            if trace.started_at >= entry["last_seen"]:
+                entry["last_seen"] = trace.started_at
+                entry["last_model"] = trace.model
         return counts
 
     def oldest_started_at(self) -> str | None:

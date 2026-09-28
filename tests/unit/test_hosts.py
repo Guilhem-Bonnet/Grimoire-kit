@@ -1021,6 +1021,176 @@ def test_post_tool_use_never_logs_on_an_unenrolled_project(project: Path) -> Non
     assert read_evidence_log(project, "bootstrap") == []
 
 
+def test_post_tool_use_logs_a_delegation_call_silently(governed: Path) -> None:
+    """GAO-c-mesurer-la-001 : mesurer la délégation sans jamais coûter un jeton.
+
+    ``Task`` est le nom historique de l'outil de délégation de Claude Code,
+    ``Agent`` son renommage récent — les deux doivent être reconnus. La
+    décision ne doit renvoyer aucun contexte (zéro coût pour le LLM) alors
+    même que l'appel est journalisé dans le TraceLedger existant.
+    """
+    from grimoire.core.standard_generation import TRACES_DIR
+    from grimoire.traces.ledger import DELEGATION_TAG, TraceLedger
+
+    for tool_name in ("Task", "Agent"):
+        decision = decide_evidence_trace(
+            HookInput(
+                event=HookEvent.POST_TOOL_USE,
+                project_root=governed,
+                tool_name=tool_name,
+                tool_input={
+                    "subagent_type": "general-purpose",
+                    "description": "Chercher où la délégation est journalisée",
+                    "model": "claude-sonnet-4-6",
+                },
+                session_id="sess-1",
+                host="claude",
+            )
+        )
+        assert decision == Decision()
+
+    ledger = TraceLedger(governed / TRACES_DIR)
+    delegations = [t for t in ledger.list_traces() if DELEGATION_TAG in t.tags]
+    assert len(delegations) == 2
+    assert {t.agent_id for t in delegations} == {"general-purpose"}
+    assert {t.model for t in delegations} == {"claude-sonnet-4-6"}
+    assert all(t.host_id == "claude" for t in delegations)
+
+
+def test_post_tool_use_logs_a_delegation_call_without_a_model(governed: Path) -> None:
+    """Un appel de délégation sans modèle explicite reste journalisé — pas d'erreur, modèle vide."""
+    from grimoire.core.standard_generation import TRACES_DIR
+    from grimoire.traces.ledger import DELEGATION_TAG, TraceLedger
+
+    decide_evidence_trace(
+        HookInput(
+            event=HookEvent.POST_TOOL_USE,
+            project_root=governed,
+            tool_name="Task",
+            tool_input={"subagent_type": "Explore", "description": "chercher un fichier"},
+        )
+    )
+    ledger = TraceLedger(governed / TRACES_DIR)
+    delegations = [t for t in ledger.list_traces() if DELEGATION_TAG in t.tags]
+    assert len(delegations) == 1
+    assert delegations[0].agent_id == "Explore"
+    assert delegations[0].model == ""
+
+
+def test_post_tool_use_does_not_log_a_non_delegating_tool_call(governed: Path) -> None:
+    from grimoire.core.standard_generation import TRACES_DIR
+    from grimoire.traces.ledger import DELEGATION_TAG, TraceLedger
+
+    decide_evidence_trace(
+        HookInput(
+            event=HookEvent.POST_TOOL_USE, project_root=governed, tool_name="Read", tool_input={"file_path": "README.md"}
+        )
+    )
+    ledger = TraceLedger(governed / TRACES_DIR)
+    assert not [t for t in ledger.list_traces() if DELEGATION_TAG in t.tags]
+
+
+def test_post_tool_use_never_logs_a_delegation_on_an_unenrolled_project(project: Path) -> None:
+    from grimoire.core.standard_generation import TRACES_DIR
+
+    decide_evidence_trace(
+        HookInput(
+            event=HookEvent.POST_TOOL_USE,
+            project_root=project,
+            tool_name="Task",
+            tool_input={"subagent_type": "general-purpose", "description": "x"},
+        )
+    )
+    assert not (project / TRACES_DIR / "traces.jsonl").exists()
+
+
+def test_a_delegation_write_failure_never_breaks_the_hook(governed: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Journalisation best-effort : une erreur d'écriture ne doit jamais faire échouer PostToolUse."""
+    from grimoire.traces.ledger import TraceLedger
+
+    def _boom(self: TraceLedger, **kwargs: object) -> None:
+        raise OSError("disque plein")
+
+    monkeypatch.setattr(TraceLedger, "record", _boom)
+    decision = decide_evidence_trace(
+        HookInput(
+            event=HookEvent.POST_TOOL_USE,
+            project_root=governed,
+            tool_name="Task",
+            tool_input={"subagent_type": "general-purpose", "description": "x"},
+        )
+    )
+    assert decision == Decision()
+
+
+def test_run_hook_records_a_claude_code_delegation_call_with_no_extra_context(governed: Path) -> None:
+    """End-to-end through the wire layer: normalise -> decide -> ledger -> render.
+
+    A realistic Claude Code ``PostToolUse`` payload for the ``Agent`` tool
+    call — ``subagent_type``/``description``/``model``/``prompt`` in
+    ``tool_input``, per Claude Code's documented delegation tool schema.
+    The rendered verdict must be empty: this is measurement, not governance,
+    and the calling session must not spend a single token reading it.
+    """
+    from grimoire.bridges.schemas import HostId
+    from grimoire.core.standard_generation import TRACES_DIR
+    from grimoire.traces.ledger import DELEGATION_TAG, TraceLedger
+
+    payload = {
+        "hook_event_name": "PostToolUse",
+        "session_id": "sess-cc-1",
+        "cwd": str(governed),
+        "tool_name": "Agent",
+        "tool_input": {
+            "subagent_type": "general-purpose",
+            "description": "Chercher où la délégation est journalisée",
+            "prompt": "Un très long prompt qui ne doit jamais être journalisé tel quel...",
+            "model": "claude-sonnet-4-6",
+        },
+        "tool_response": {"content": "..."},
+    }
+    rendered, decision, _hook = run_hook(payload, host_id=HostId.CLAUDE_CODE_CLI)
+    assert rendered == {}
+    assert decision.context == ""
+
+    ledger = TraceLedger(governed / TRACES_DIR)
+    delegations = [t for t in ledger.list_traces() if DELEGATION_TAG in t.tags]
+    assert len(delegations) == 1
+    assert delegations[0].agent_id == "general-purpose"
+    assert delegations[0].model == "claude-sonnet-4-6"
+    assert delegations[0].host_id == HostId.CLAUDE_CODE_CLI.value
+
+
+def test_run_hook_records_a_copilot_delegation_call_without_extra_context(governed: Path) -> None:
+    """Same path for a guessed Copilot payload shape.
+
+    Copilot's ``runSubagent``/``agent`` tool input has not been confirmed
+    against a live payload (see this PR's ``grimoire-uncertainties``); this
+    only proves the hook recognises the tool name, reads the fallback field
+    names it defines, and never raises or injects context either way.
+    """
+    from grimoire.bridges.schemas import HostId
+    from grimoire.core.standard_generation import TRACES_DIR
+    from grimoire.traces.ledger import DELEGATION_TAG, TraceLedger
+
+    payload = {
+        "hookEventName": "PostToolUse",
+        "sessionId": "sess-copilot-1",
+        "cwd": str(governed),
+        "toolName": "runSubagent",
+        "toolInput": {"agentType": "expert-playwright", "model": "gpt-5"},
+    }
+    rendered, decision, _hook = run_hook(payload, host_id=HostId.GITHUB_COPILOT)
+    assert rendered == {}
+    assert decision.context == ""
+
+    ledger = TraceLedger(governed / TRACES_DIR)
+    delegations = [t for t in ledger.list_traces() if DELEGATION_TAG in t.tags]
+    assert len(delegations) == 1
+    assert delegations[0].agent_id == "expert-playwright"
+    assert delegations[0].model == "gpt-5"
+
+
 def _set_task_in_progress(root: Path) -> None:
     """Flip the ``bootstrap`` card to ``in_progress`` on disk.
 
