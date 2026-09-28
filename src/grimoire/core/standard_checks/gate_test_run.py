@@ -54,6 +54,7 @@ __all__ = [
     "GateTestRunOutcome",
     "board_state_of_task",
     "ensure_fresh_test_run",
+    "resolve_gate_check_task_id",
     "verify_recorded_test_run_is_green",
 ]
 
@@ -105,6 +106,55 @@ def board_state_of_task(project_root: Path, task_id: str, *, target_state: str |
 
     board = _load_mapping(project_root.resolve() / STANDARD_DIR / "task-board.yaml")
     return str(task_from_board(board, normalize_task_id(task_id)).get("status") or "")
+
+
+def resolve_gate_check_task_id(project_root: Path, task_id: str) -> tuple[str, dict[str, Any] | None]:
+    """Tâche que ``gate check`` doit évaluer quand ``--task-id`` est omis (issue #642 lot K).
+
+    Délègue à :func:`grimoire.core.standard_state.resolve_active_task` — variable
+    d'environnement, puis réclamation active du Mission Ledger, puis carte
+    ``in_progress`` unique du board, puis ``bootstrap`` faute de tout signal.
+    Quand ce dernier repli retombe sur un ``bootstrap`` qu'un board réel ne
+    déclare pas, évaluer les gates reviendrait à juger une tâche fantôme
+    (``rust/poker run2`` du lot J du banc kit-gov : 22 tours perdus sur
+    exactement ce cas) — la fonction rend alors un check d'erreur au lieu
+    d'un identifiant, et l'appelant doit s'arrêter là plutôt qu'appeler
+    :func:`grimoire.core.agentic_standard.check_evidence_gates`.
+
+    Rend ``(task_id, None)`` quand *task_id* est fourni explicitement ou que
+    la résolution aboutit à une tâche réelle ; ``(task_id, check)`` sinon,
+    *check* ayant la forme d'une entrée ``checks`` de ``gate check``.
+    """
+    if task_id:
+        return task_id, None
+    from grimoire.core.standard_state import (
+        TASK_BOARD_RELPATH,
+        _load_mapping,
+        board_omits_task,
+        resolve_active_task,
+        task_from_board,
+    )
+
+    active = resolve_active_task(project_root)
+    resolved = active.task_id
+    if active.source != "bootstrap":
+        return resolved, None
+    board_path = project_root.resolve() / TASK_BOARD_RELPATH
+    board = _load_mapping(board_path)
+    if not board_omits_task(project_root, task_from_board(board, resolved)):
+        return resolved, None
+    message = (
+        f"Aucun --task-id fourni, aucune carte in_progress sur {board_path}, et "
+        f"{resolved!r} n'est pas une tâche du board : impossible d'évaluer les gates "
+        "d'une tâche fantôme. Déclare la tâche (`grimoire task add ...`) et réclame-la "
+        "(`grimoire task claim <task-id>`), ou passe `--task-id <task-id>` explicitement."
+    )
+    return resolved, {
+        "id": "gate.no_task_to_evaluate",
+        "severity": "error",
+        "message": message,
+        "path": str(board_path),
+    }
 
 
 def _recorded_run_matching_tree(root: Path, task_id: str) -> dict[str, Any] | None:
@@ -238,8 +288,9 @@ def verify_recorded_test_run_is_green(
             result,
             "acceptance.no_tests_collected",
             "error" if strict else "warning",
-            f"{command!r} n'a collecté aucun test (code de sortie {exit_code}) : écris un test couvrant les "
-            f"critères, ou justifie l'absence dans {record_path} (ligne « sans test : <raison> »).",
+            f"{command!r} n'a collecté aucun test (code de sortie {exit_code}). Ce n'est pas un échec de la "
+            f"tâche. Si la suite existe sous une autre commande, déclare-la dans `needs.commands.test-runner` "
+            f"(project-context.yaml).",
             path=path,
         )
         return
