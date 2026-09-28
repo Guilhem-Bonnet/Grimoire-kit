@@ -20,6 +20,8 @@ import os
 import re
 import tempfile
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -36,6 +38,7 @@ from grimoire.missions.schemas import (
     RiskProfile,
     TaskClaim,
     TaskDependency,
+    TaskDirective,
     TaskState,
     TaskType,
 )
@@ -64,6 +67,19 @@ _TASK_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
 }
 
 
+#: Événements du pilotage humain (issue #638, lot B) rejoués par
+#: :meth:`MissionLedger._replay_steering`.
+_STEERING_EVENTS = frozenset({
+    "task.prioritized",
+    "task.directive_added",
+    "task.directive_delivered",
+    "task.directive_acknowledged",
+})
+
+#: L'événement qui rattache une session d'hôte au claim d'une tâche (issue #638).
+SESSION_ATTACHED_EVENT = "task.session_attached"
+
+
 def _slug(title: str, limit: int) -> str:
     """Fragment d'identifiant sûr dans un chemin.
 
@@ -84,6 +100,42 @@ def _now_iso() -> str:
 
 def _new_id(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:12]}"
+
+
+@contextmanager
+def _ledger_file_lock(target_path: Path) -> Iterator[None]:
+    """Verrou exclusif inter-process sur *target_path* (POSIX/Windows, best-effort).
+
+    ``_atomic_append`` lit le fichier entier, ajoute une ligne, puis renomme
+    un temporaire par-dessus : sans ce verrou, deux écrivains concurrents
+    (deux requêtes HTTP du cockpit servies par des threads séparés,
+    typiquement) peuvent tous deux lire le même contenu avant que l'un des
+    deux n'écrive — le second écrase alors l'événement du premier, silencieux
+    (« lost update »). Même pattern que ``tools/stigmergy._board_lock`` :
+    dégrade en no-op si ``fcntl`` est indisponible (Windows), jamais bloquant
+    au point de casser un ledger qui marchait sans lui.
+    """
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = target_path.with_name(f".{target_path.name}.lock")
+    fh = None
+    try:
+        fh = lock_path.open("w", encoding="utf-8")
+        try:
+            import fcntl
+
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        except (ImportError, OSError):
+            pass  # Windows ou FS sans flock : best-effort
+        yield
+    finally:
+        if fh is not None:
+            try:
+                import fcntl
+
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+            except (ImportError, OSError):
+                pass
+            fh.close()
 
 
 class MissionLedger:
@@ -152,7 +204,54 @@ class MissionLedger:
                     if "claim" in payload:
                         update["claim"] = payload["claim"]
                     self._tasks[tid] = MissionTask.from_dict({**old_task.to_dict(), **update})
+            elif evt_type in _STEERING_EVENTS:
+                self._replay_steering(evt_type, payload)
+            elif evt_type == SESSION_ATTACHED_EVENT:
+                # Issue #638 lot A : le claim apprend sa session après coup. Un
+                # événement de plus dans le journal, jamais une ligne réécrite ;
+                # sans claim au rejeu (tâche jamais réclamée, ou événement
+                # orphelin), il n'y a rien à compléter et rien n'est inventé.
+                # La tâche ciblée est ``entity_id`` — la clé que tout événement
+                # du journal porte — et non une copie dans le payload qui
+                # pourrait manquer ou diverger (revue Copilot, PR #639).
+                tid = str(raw.get("entity_id") or payload.get("task_id") or "")
+                current = self._tasks.get(tid)
+                if current is not None and current.claim is not None:
+                    claim = current.claim.with_session(
+                        str(payload.get("session_id", "") or ""), str(payload.get("session_host", "") or "")
+                    )
+                    self._tasks[tid] = MissionTask.from_dict({**current.to_dict(), "claim": claim.to_dict()})
             self._events.append(LedgerEvent.from_dict(raw))
+
+    def _replay_steering(self, evt_type: str, payload: dict[str, Any]) -> None:
+        """Pilotage humain (issue #638) : priorité et journal de consignes.
+
+        Chaque événement ne touche qu'un champ dérivé de la tâche ; le texte
+        d'une consigne n'est jamais réécrit — livraison et accusé de réception
+        s'ajoutent comme horodatages sur l'entrée existante.
+        """
+        tid = payload.get("task_id", "")
+        task = self._tasks.get(tid)
+        if task is None:
+            return
+        data = task.to_dict()
+        if evt_type == "task.prioritized":
+            data["priority"] = payload.get("to_priority", "")
+        elif evt_type == "task.directive_added":
+            data["directives"] = [*data.get("directives", []), dict(payload.get("directive", {}))]
+        elif evt_type == "task.directive_delivered":
+            ids, at = set(payload.get("directive_ids", [])), str(payload.get("delivered_at", ""))
+            data["directives"] = [
+                {**d, "delivered_at": d.get("delivered_at") or at} if d.get("id") in ids else d
+                for d in data.get("directives", [])
+            ]
+        elif evt_type == "task.directive_acknowledged":
+            did, at = payload.get("directive_id"), str(payload.get("acknowledged_at", ""))
+            data["directives"] = [
+                {**d, "acknowledged_at": d.get("acknowledged_at") or at} if d.get("id") == did else d
+                for d in data.get("directives", [])
+            ]
+        self._tasks[tid] = MissionTask.from_dict(data)
 
     def _replay_incidents(self) -> None:
         if not self._incidents_path.exists():
@@ -195,18 +294,23 @@ class MissionLedger:
 
     def _atomic_append(self, path: Path, record: dict[str, Any]) -> None:
         line = json.dumps(record, ensure_ascii=False) + "\n"
-        fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".tmp-ledger-")
-        try:
-            # Copy existing content + append new line
-            existing = path.read_text(encoding="utf-8") if path.exists() else ""
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                fh.write(existing)
-                fh.write(line)
-            Path(tmp).replace(path)
-        except Exception:
-            with contextlib.suppress(OSError):
-                Path(tmp).unlink()
-            raise
+        # Verrouillé : lire « existing » puis renommer un temporaire par-dessus
+        # n'est atomique que pour un seul écrivain à la fois. Deux requêtes
+        # concurrentes (cockpit multi-thread) sans ce verrou perdaient
+        # silencieusement l'une des deux écritures (« lost update »).
+        with _ledger_file_lock(path):
+            fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".tmp-ledger-")
+            try:
+                # Copy existing content + append new line
+                existing = path.read_text(encoding="utf-8") if path.exists() else ""
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    fh.write(existing)
+                    fh.write(line)
+                Path(tmp).replace(path)
+            except Exception:
+                with contextlib.suppress(OSError):
+                    Path(tmp).unlink()
+                raise
 
     def _next_seq(self, prefix: str, id_map: dict[str, Any]) -> str:
         existing = [k for k in id_map if k.startswith(prefix)]
@@ -329,6 +433,7 @@ class MissionLedger:
         actor_id: str = "system",
         reason: str = "",
         claim: TaskClaim | None = None,
+        extra_payload: dict[str, Any] | None = None,
     ) -> MissionTask:
         self._load()
         task = self._tasks.get(task_id)
@@ -348,6 +453,16 @@ class MissionLedger:
         }
         if claim is not None:
             payload["claim"] = claim.to_dict()
+        if extra_payload:
+            # Les clés que le rejeu lit ne se laissent pas écraser : un
+            # `extra_payload` ne complète l'événement, il ne le redéfinit pas.
+            reserved = set(payload)
+            clashes = reserved & set(extra_payload)
+            if clashes:
+                raise GrimoireMissionError(
+                    f"extra_payload ne peut pas redéfinir {', '.join(sorted(clashes))} sur task.transitioned"
+                )
+            payload.update(extra_payload)
         self._append_event("task.transitioned", task_id, "task", actor_id, payload)
         self._load()
         return self._tasks[task_id]
@@ -356,6 +471,96 @@ class MissionLedger:
         """Convenience: READY → CLAIMED."""
         claim = TaskClaim.new(actor_id=actor_id, host_id=host_id, exclusive_files=exclusive_files)
         return self.transition_task(task_id, TaskState.CLAIMED, actor_id=actor_id, claim=claim)
+
+    # ── Pilotage humain (issue #638, lot B) ────────────────────────────────
+
+    def prioritize_task(self, task_id: str, priority: str, *, actor_id: str = "system", reason: str = "") -> MissionTask:
+        """Change la priorité déclarée — l'ancienne reste lisible dans l'événement."""
+        self._load()
+        task = self._tasks.get(task_id)
+        if task is None:
+            raise GrimoireMissionError(f"Task not found: {task_id}")
+        self._append_event(
+            "task.prioritized", task_id, "task", actor_id,
+            {"task_id": task_id, "from_priority": task.priority, "to_priority": priority, "reason": reason, "actor_id": actor_id},
+        )
+        self._load()
+        return self._tasks[task_id]
+
+    def add_directive(self, task_id: str, text: str, *, actor_id: str, kind: str = "comment") -> TaskDirective:
+        """Ajoute une consigne au journal de la tâche ; rend l'entrée créée."""
+        self._load()
+        if task_id not in self._tasks:
+            raise GrimoireMissionError(f"Task not found: {task_id}")
+        directive = TaskDirective(id=_new_id("dir"), author=actor_id, created_at=_now_iso(), text=text, kind=kind)
+        self._append_event(
+            "task.directive_added", task_id, "task", actor_id,
+            {"task_id": task_id, "directive": directive.to_dict()},
+        )
+        return directive
+
+    def mark_directives_delivered(self, task_id: str, directive_ids: tuple[str, ...], *, actor_id: str = "system") -> MissionTask:
+        """Horodate la livraison de *directive_ids* à une session — rien si la liste est vide."""
+        self._load()
+        task = self._tasks.get(task_id)
+        if task is None:
+            raise GrimoireMissionError(f"Task not found: {task_id}")
+        if not directive_ids:
+            return task
+        self._append_event(
+            "task.directive_delivered", task_id, "task", actor_id,
+            {"task_id": task_id, "directive_ids": list(directive_ids), "delivered_at": _now_iso()},
+        )
+        self._load()
+        return self._tasks[task_id]
+
+    def acknowledge_directive(self, task_id: str, directive_id: str, *, actor_id: str) -> MissionTask:
+        """Horodate l'accusé de réception d'une consigne connue de la tâche."""
+        self._load()
+        task = self._tasks.get(task_id)
+        if task is None:
+            raise GrimoireMissionError(f"Task not found: {task_id}")
+        if not any(d.id == directive_id for d in task.directives):
+            raise GrimoireMissionError(f"Consigne inconnue sur {task_id} : {directive_id}")
+        self._append_event(
+            "task.directive_acknowledged", task_id, "task", actor_id,
+            {"task_id": task_id, "directive_id": directive_id, "acknowledged_at": _now_iso(), "actor_id": actor_id},
+        )
+        self._load()
+        return self._tasks[task_id]
+
+    def attach_session(self, task_id: str, session_id: str, *, session_host: str = "", actor_id: str = "hook") -> MissionTask:
+        """Rattache *session_id* au claim de *task_id* — un événement, pas une réécriture.
+
+        Refuse (``GrimoireMissionError``) une tâche inconnue, une tâche sans
+        claim, ou un claim déjà rattaché à une *autre* session : une session
+        ne vole jamais le claim d'une autre. Idempotent quand la session est
+        déjà celle du claim : rien n'est ajouté au journal.
+        """
+        self._load()
+        task = self._tasks.get(task_id)
+        if task is None:
+            raise GrimoireMissionError(f"Task not found: {task_id}")
+        if task.claim is None:
+            raise GrimoireMissionError(f"Task {task_id} has no claim to attach a session to")
+        session_id = session_id.strip()
+        if not session_id:
+            raise GrimoireMissionError("A session id is required")
+        if task.claim.session_id == session_id:
+            return task
+        if task.claim.session_id:
+            raise GrimoireMissionError(
+                f"Task {task_id} is already attached to session {task.claim.session_id}"
+            )
+        self._append_event(
+            SESSION_ATTACHED_EVENT,
+            task_id,
+            "task",
+            actor_id,
+            {"task_id": task_id, "session_id": session_id, "session_host": session_host},
+        )
+        self._load()
+        return self._tasks[task_id]
 
     def open_incident(
         self,

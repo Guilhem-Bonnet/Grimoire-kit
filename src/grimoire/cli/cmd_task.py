@@ -166,7 +166,14 @@ def _emit_move(ctx: typer.Context, move: Any) -> None:
             console.print(f"  - {line}")
         console.print(f"[dim]Profil « {move.verdict.strictness} » : signalé, non bloquant.[/dim]")
     task = move.task
-    console.print(f"[green]OK[/green] {task.id} — {task.title} [dim]({move.previous.value} → {task.status.value})[/dim]")
+    move_dict = move.to_dict()
+    verifiabilite = move_dict.get("verifiability") or {}
+    modele = move_dict.get("recommended_model")
+    resume = f" [dim]· {verifiabilite.get('class', '?')} → {modele}[/dim]" if modele else ""
+    console.print(
+        f"[green]OK[/green] {task.id} — {task.title} "
+        f"[dim]({move.previous.value} → {task.status.value})[/dim]{resume}"
+    )
 
 
 def _emit_task(ctx: typer.Context, task: Any, note: str = "") -> None:
@@ -184,6 +191,7 @@ def task_add(
     mission: Annotated[str, typer.Option("--mission", help="Mission de rattachement.")] = "",
     owner: Annotated[str, typer.Option("--owner", help="Qui en répond.")] = "",
     evidence: Annotated[list[str] | None, typer.Option("--expect-evidence", help="Preuve attendue (répétable).")] = None,
+    ready: Annotated[bool, typer.Option("--ready", help="La rendre réclamable tout de suite (proposed → ready, gate compris).")] = False,
     project_root: _PROJECT_ROOT = Path(),
     ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
     actor: _ACTOR = "cli",
@@ -192,31 +200,29 @@ def task_add(
 
     Un critère d'acceptation au moins est exigé — c'est le ledger qui le
     réclame, pas cette commande : une tâche dont on ne sait pas dire quand
-    elle est finie ne peut pas être vérifiée, donc pas fermée.
+    elle est finie ne peut pas être vérifiée, donc pas fermée. Le même
+    service sert l'outil MCP ``task_add`` (issue #638).
     """
     from grimoire.core.exceptions import GrimoireError
+    from grimoire.missions.service import TaskRefusedError
 
     service = _service(project_root, ledger_root)
-    ledger = service.ledger
-    mission_id = mission
-    if not mission_id:
-        missions = ledger.list_missions()
-        if missions:
-            mission_id = missions[0].id
-        else:
-            created = ledger.create_mission(title="Travaux courants", origin="cli", created_by=actor)
-            mission_id = created.id
-            console.print(f"[dim]Mission créée : {mission_id} (aucune n'existait).[/dim]")
     try:
-        task = ledger.create_task(
-            mission_id, title, acceptance=tuple(acceptance), owner=owner,
-            expected_evidence=tuple(evidence or ()),
+        added = service.add(
+            title, tuple(acceptance), mission_id=mission, owner=owner,
+            expected_evidence=tuple(evidence or ()), actor=actor, ready=ready,
         )
+    except TaskRefusedError as refused:
+        _refuse(ctx, refused)
     except GrimoireError as exc:
         console.print(f"[red]✗[/red] {exc}")
         raise typer.Exit(1) from exc
-    service.project_board()
-    _emit_task(ctx, task, "proposed")
+    if _fmt(ctx) == "json":
+        typer.echo(json.dumps(added.to_dict(), indent=2, ensure_ascii=False))
+        return
+    if added.mission_created:
+        console.print(f"[dim]Mission créée : {added.mission_id} (aucune n'existait).[/dim]")
+    _emit_task(ctx, added.task, added.task.status.value)
 
 
 @task_app.command("list")
@@ -224,11 +230,46 @@ def task_list(
     ctx: typer.Context,
     mission: Annotated[str | None, typer.Option("--mission", help="Restreindre à une mission.")] = None,
     status: Annotated[str | None, typer.Option("--status", help="Restreindre à un état du ledger.")] = None,
+    all_projects: Annotated[
+        bool,
+        typer.Option(
+            "--all-projects",
+            help="Portefeuille : les tâches de tous les projets du registre cockpit, avec leur projet (#638).",
+        ),
+    ] = False,
+    project: Annotated[
+        str | None, typer.Option("--project", help="Avec --all-projects : ne garder qu'un projet (slug).")
+    ] = None,
+    live: Annotated[
+        bool, typer.Option("--live", help="Avec --all-projects : seules les tâches d'une session vivante.")
+    ] = False,
+    live_minutes: Annotated[
+        int, typer.Option("--live-minutes", help="Âge maximal du journal de session pour --live (minutes).")
+    ] = 30,
     project_root: _PROJECT_ROOT = Path(),
     ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
 ) -> None:
-    """Liste les tâches du ledger, avec leur colonne de board."""
+    """Liste les tâches du ledger, avec leur colonne de board.
+
+    ``--all-projects`` rend le portefeuille (issue #638, lot C) : la même
+    agrégation que ``GET /api/workspace/portfolio/tasks`` — chaque projet du
+    registre cockpit, son état ledger et sa colonne, sa priorité, son claim
+    et sa session ; un projet dont le ledger est absent ou illisible est
+    listé avec sa raison, jamais tu.
+    """
     from grimoire.missions.board import board_status_of
+
+    if all_projects:
+        _list_all_projects(ctx, project_root, status=status, project=project, live=live, live_minutes=live_minutes)
+        return
+
+    if project is not None or live or live_minutes != 30:
+        # `console.print` + `typer.Exit`, pas la levée nue : le rendu Rich
+        # d'un `typer.BadParameter` non attrapé varie selon la largeur de
+        # terminal détectée (panneau tronqué en CI, texte simple en local) —
+        # même convention que `cmd_dispatch._since_iso`.
+        console.print("[red]--project/--live/--live-minutes exigent --all-projects.[/red]")
+        raise typer.Exit(2)
 
     tasks = _service(project_root, ledger_root).list_tasks(mission, status)
     if _fmt(ctx) == "json":
@@ -242,6 +283,60 @@ def task_list(
         # et fait disparaître l'état — la ligne restait muette sur l'essentiel.
         etat = escape(f"[{task.status.value} · {board_status_of(task.status)}]")
         console.print(f"  {task.id}  {etat}  {task.title}")
+
+
+def _list_all_projects(
+    ctx: typer.Context,
+    project_root: Path,
+    *,
+    status: str | None,
+    project: str | None,
+    live: bool,
+    live_minutes: int,
+) -> None:
+    """Le portefeuille : tableau lisible, ou la charge utile JSON telle quelle."""
+    from rich.table import Table
+
+    from grimoire.tools.workspace_portfolio import portfolio_tasks
+
+    view = portfolio_tasks(
+        project_root.resolve(), state=status, project=project, live=live, live_minutes=live_minutes
+    )
+    if _fmt(ctx) == "json":
+        typer.echo(json.dumps(view, indent=2, ensure_ascii=False))
+        return
+    table = Table(title="Portefeuille de tâches", show_lines=False)
+    for column in ("Projet", "Tâche", "État", "Board", "Priorité", "Session", "Mis à jour"):
+        table.add_column(column)
+    for card in view["tasks"]:
+        session = card.get("session") or {}
+        if session:
+            session_text = f"{'vivante' if session.get('live') else 'inactive'} · {session.get('id', '')}"
+        else:
+            session_text = "—"
+        unread = card.get("unread_directives") or 0
+        table.add_row(
+            escape(str(card["project"]["name"])),
+            escape(f"{card['id']}  {card.get('title', '')}") + (f"  ({unread} consigne(s) non lue(s))" if unread else ""),
+            escape(str(card.get("status", ""))),
+            escape(str(card.get("board", ""))),
+            escape(str(card.get("priority", "") or "—")),
+            escape(session_text),
+            escape(str(card.get("updated_at", ""))[:19]),
+        )
+    if view["tasks"]:
+        console.print(table)
+    else:
+        console.print("[dim]Aucune tâche dans le portefeuille pour ces filtres.[/dim]")
+    for row in view["projects"]:
+        if row["state"] != "ok":
+            console.print(f"[red]✗[/red] {escape(row['slug'])} — {escape(str(row['reason']))}")
+    summary = view["summary"]
+    console.print(
+        f"[dim]{summary['projects']} projet(s), {summary['readable']} lisible(s) · "
+        f"{summary['tasks']} tâche(s), {summary['live']} session(s) vivante(s) "
+        f"(< {view['live_minutes']} min)[/dim]"
+    )
 
 
 @task_app.command("show")
@@ -258,17 +353,20 @@ def task_show(
     rapport de ``dispatch`` pour savoir si le vert précédent mérite un regard.
     """
     from grimoire.missions.board import board_status_of
+    from grimoire.missions.dispatch_advice import dispatch_advice
     from grimoire.missions.gates import GatesFileError, declared_transitions
-    from grimoire.missions.verifiability import as_dict as verifiability_as_dict
 
     service = _service(project_root, ledger_root)
     task = _require_task(service, task_id)
-    verifiabilite = verifiability_as_dict(task)
+    advice = dispatch_advice(task)
+    verifiabilite = advice["verifiability"]
+    modele_recommande = advice["recommended_model"]
     dispatch_events = [e for e in service.ledger.list_events(task_id) if e.event_type == "task.dispatched"]
     last_dispatch = dispatch_events[-1].payload if dispatch_events else None
     if _fmt(ctx) == "json":
         payload = task.to_dict()
         payload["verifiability"] = verifiabilite
+        payload["recommended_model"] = modele_recommande
         payload["last_dispatch"] = last_dispatch
         typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
         return
@@ -276,6 +374,7 @@ def task_show(
     console.print(f"  état    : {task.status.value} (board : {board_status_of(task.status)})")
     console.print(f"  accepte : {', '.join(task.acceptance) or '—'}")
     console.print(f"  vérifiabilité : {verifiabilite['class']} — {verifiabilite['explanation']}")
+    console.print(f"  modèle recommandé : {modele_recommande}")
     for entree in verifiabilite["criteria"]:
         motif = entree["pattern"] or "non reconnu"
         console.print(f"    [dim]- {escape(entree['criterion'])} → {motif}[/dim]")
@@ -291,6 +390,16 @@ def task_show(
             console.print(f"  [yellow]![/yellow] {escape(str(warning))}")
     if task.owner or task.claim:
         console.print(f"  porté par : {task.owner or (task.claim.actor_id if task.claim else '—')}")
+    if task.directives:
+        from grimoire.missions.recall import directive_status
+
+        console.print("  consignes de l'orchestrateur :")
+        for directive in task.directives:
+            marque = escape(f"[{directive.kind}, {directive_status(directive)}]")
+            console.print(
+                f"    - {marque} {escape(directive.author)}, "
+                f"{directive.created_at[:16]} : {escape(directive.text)}  [dim]{directive.id}[/dim]"
+            )
     here = board_status_of(task.status)
     try:
         transitions = declared_transitions(project_root.resolve())
@@ -373,6 +482,91 @@ def task_close(
     from grimoire.missions.schemas import TaskState
 
     _transition(ctx, task_id, TaskState.CLOSED, project_root, ledger_root, actor)
+
+
+def _emit_note(ctx: typer.Context, note: Any) -> None:
+    if _fmt(ctx) == "json":
+        typer.echo(json.dumps(note.to_dict(), indent=2, ensure_ascii=False))
+        return
+    task = note.task
+    console.print(f"[green]OK[/green] {task.id} — {task.title} [dim]({note.change})[/dim]")
+    if note.directive is not None:
+        console.print(f"  [dim]consigne {note.directive.id}[/dim]")
+
+
+def _steer(ctx: typer.Context, project_root: Path, ledger_root: Path, task_id: str, geste: Any) -> None:
+    """Un geste de pilotage (issue #638) : même rendu des refus que les transitions."""
+    from grimoire.core.exceptions import GrimoireError
+    from grimoire.missions.service import TaskRefusedError
+
+    service = _service(project_root, ledger_root)
+    _require_task(service, task_id)
+    try:
+        result = geste(service)
+    except TaskRefusedError as refused:
+        _refuse(ctx, refused)
+    except (GrimoireError, ValueError) as exc:
+        console.print(f"[red]✗[/red] {exc}")
+        raise typer.Exit(1) from exc
+    if hasattr(result, "previous"):
+        _emit_move(ctx, result)
+    else:
+        _emit_note(ctx, result)
+
+
+@task_app.command("prioritize")
+def task_prioritize(
+    ctx: typer.Context,
+    task_id: Annotated[str, typer.Argument()],
+    to: Annotated[str, typer.Option("--to", help="Priorité visée : low, medium, high, critical.")],
+    reason: Annotated[str, typer.Option("--reason", help="Pourquoi.")] = "",
+    project_root: _PROJECT_ROOT = Path(),
+    ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
+    actor: _ACTOR = "cli",
+) -> None:
+    """Change la priorité d'une tâche (issue #638) — l'historique reste au ledger."""
+    _steer(ctx, project_root, ledger_root, task_id, lambda s: s.prioritize(task_id, to, actor, reason))
+
+
+@task_app.command("comment")
+def task_comment(
+    ctx: typer.Context,
+    task_id: Annotated[str, typer.Argument()],
+    text: Annotated[str, typer.Argument(help="Le commentaire ou la consigne.")],
+    kind: Annotated[str, typer.Option("--kind", help="`comment` (informe) ou `directive` (dirige).")] = "comment",
+    project_root: _PROJECT_ROOT = Path(),
+    ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
+    actor: _ACTOR = "cli",
+) -> None:
+    """Pose un commentaire ou une consigne sur la tâche ; la session la lit au tour suivant."""
+    _steer(ctx, project_root, ledger_root, task_id, lambda s: s.comment(task_id, text, actor, kind))
+
+
+@task_app.command("cancel")
+def task_cancel(
+    ctx: typer.Context,
+    task_id: Annotated[str, typer.Argument()],
+    reason: Annotated[str, typer.Option("--reason", help="Pourquoi la tâche s'arrête (obligatoire).")],
+    force: Annotated[bool, typer.Option("--force", help="Annuler même si une autre session la tient.")] = False,
+    project_root: _PROJECT_ROOT = Path(),
+    ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
+    actor: _ACTOR = "cli",
+) -> None:
+    """Annule une tâche avec sa raison ; tenue par une autre session, elle exige --force."""
+    _steer(ctx, project_root, ledger_root, task_id, lambda s: s.cancel(task_id, reason, actor, force=force))
+
+
+@task_app.command("ack")
+def task_ack(
+    ctx: typer.Context,
+    task_id: Annotated[str, typer.Argument()],
+    directive_id: Annotated[str, typer.Argument(help="Identifiant de la consigne (dir-…).")],
+    project_root: _PROJECT_ROOT = Path(),
+    ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
+    actor: _ACTOR = "cli",
+) -> None:
+    """Accuse réception d'une consigne de l'orchestrateur."""
+    _steer(ctx, project_root, ledger_root, task_id, lambda s: s.acknowledge(task_id, directive_id, actor))
 
 
 @task_app.command("link")

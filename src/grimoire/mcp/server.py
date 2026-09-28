@@ -592,7 +592,7 @@ def grimoire_standard_gate(
 # donc le même gate de preuve : une transition que le CLI refuse, MCP la
 # refuse, et le refus nomme la preuve manquante et le remède.
 
-_TASK_ACTIONS = ("move", "block", "close")
+_TASK_ACTIONS = ("move", "block", "close", "prioritize", "comment", "cancel", "ack")
 
 
 def _task_service(project_path: str, ledger_root: str) -> Any:
@@ -602,12 +602,25 @@ def _task_service(project_path: str, ledger_root: str) -> Any:
 
 
 def _task_json(task: Any) -> dict[str, Any]:
-    from grimoire.missions.board import board_status_of
-    from grimoire.missions.verifiability import as_dict as verifiability_as_dict
+    from grimoire.missions.board import board_status_of, priority_of
+    from grimoire.missions.dispatch_advice import dispatch_advice
+    from grimoire.missions.session_link import session_fields
 
     data: dict[str, Any] = task.to_dict()
     data["board"] = board_status_of(task.status)
-    data["verifiability"] = verifiability_as_dict(task)
+    # #654 : la classe de vérifiabilité et le modèle qu'elle
+    # recommande, calculés une seule fois par `dispatch_advice` — jamais une
+    # seconde classification propre à cette surface MCP.
+    advice = dispatch_advice(task)
+    data["verifiability"] = advice["verifiability"]
+    data["recommended_model"] = advice["recommended_model"]
+    # Issue #638 lot B : la priorité effective (déclarée ou dérivée) et le
+    # compte des consignes non lues, pour qu'un agent voie ce que l'humain a
+    # posé sans relire tout le journal.
+    data["effective_priority"] = priority_of(task)
+    data["directives_pending"] = len(task.pending_directives)
+    data["directives_unacknowledged"] = len(task.unacknowledged_directives)
+    data.update(session_fields(task))
     return data
 
 
@@ -620,6 +633,52 @@ def _task_error(exc: Exception) -> str:
         # client que l'appel a échoué, alors qu'il a répondu.
         return json.dumps(exc.to_dict(), indent=2, ensure_ascii=False)
     return _tool_error({"error": str(exc)})
+
+
+@mcp.tool(annotations=_writes(destructive=False, idempotent=False))
+def task_add(
+    title: str,
+    acceptance: list[str],
+    owner: str = "",
+    mission: str = "",
+    expected_evidence: list[str] | None = None,
+    actor: str = "mcp-agent",
+    ready: bool = False,
+    project_path: str = ".",
+    ledger_root: str = "_grimoire-runtime-output/ledger",
+) -> str:
+    """Open a task in the Mission Ledger — the same service and validation as `grimoire task add`.
+
+    At least one non-blank acceptance criterion is required (the ledger refuses
+    otherwise, exactly as the CLI does). In a governed project, a session that
+    writes files without an active task is refused at Stop: open one here, then
+    `task_claim` it (issue #638).
+
+    Args:
+        title: What the task accomplishes.
+        acceptance: Acceptance criteria — at least one, none blank.
+        owner: Who answers for it. Required by the `proposed_to_ready` gate in governed profiles.
+        mission: Mission id. Empty string uses the ledger's first mission, or opens "Travaux courants".
+        expected_evidence: Evidence the task is expected to produce (optional).
+        actor: Who acts (default: "mcp-agent").
+        ready: Also move it `proposed → ready` so it can be claimed right away (through the gate).
+        project_path: Path to project root (default: current directory).
+        ledger_root: Mission Ledger directory, relative to the project root.
+    """
+    try:
+        added = _task_service(project_path, ledger_root).add(
+            title,
+            tuple(acceptance or ()),
+            mission_id=mission,
+            owner=owner,
+            expected_evidence=tuple(expected_evidence or ()),
+            actor=actor,
+            origin="mcp",
+            ready=ready,
+        )
+        return json.dumps(added.to_dict(), indent=2, ensure_ascii=False)
+    except (GrimoireError, OSError, ValueError) as exc:
+        return _task_error(exc)
 
 
 @mcp.tool(annotations=_reads())
@@ -705,22 +764,36 @@ def task_update(
     actor: str = "mcp-agent",
     project_path: str = ".",
     ledger_root: str = "_grimoire-runtime-output/ledger",
+    text: str = "",
+    kind: str = "comment",
+    directive_id: str = "",
+    force: bool = False,
 ) -> str:
-    """Move, block or close a task. Every transition passes the evidence gate: no proof, no move.
+    """Move, block, close, prioritize, comment on, cancel or acknowledge a task. Every transition passes the evidence gate: no proof, no move.
 
     Args:
         task_id: Ledger task id.
-        action: "move" (needs `to`), "block" (needs `reason`), or "close".
-        to: Target ledger state for "move" (ready, running, needs_verification, cancelled...).
-        reason: Why — required for "block", optional otherwise.
+        action: "move" (needs `to`), "block" (needs `reason`), "close", "prioritize" (needs `to`
+            = low|medium|high|critical), "comment" (needs `text`, optional `kind`), "cancel"
+            (needs `reason`; `force` to cancel a task another session holds), or "ack"
+            (needs `directive_id` — acknowledges a directive the orchestrator posted).
+        to: Target ledger state for "move", or the priority for "prioritize".
+        reason: Why — required for "block" and "cancel", optional otherwise.
         actor: Who acts (default: "mcp-agent").
         project_path: Path to project root (default: current directory).
         ledger_root: Mission Ledger directory, relative to the project root.
+        text: The comment or directive for "comment".
+        kind: "comment" (informs) or "directive" (steers) for "comment".
+        directive_id: The directive to acknowledge for "ack" (as listed by task_show / task_recall).
+        force: For "cancel": cancel even if another session holds the task.
     """
     from grimoire.missions.schemas import TaskState
 
     if action not in _TASK_ACTIONS:
         return _tool_error({"error": f"unknown action {action!r}", "actions": list(_TASK_ACTIONS)})
+    if action in ("prioritize", "comment", "cancel", "ack"):
+        return _task_steer(task_id, action, project_path, ledger_root, actor, to=to, reason=reason,
+                           text=text, kind=kind, directive_id=directive_id, force=force)
     if action == "move":
         try:
             target = TaskState(to)
@@ -735,6 +808,32 @@ def task_update(
     try:
         move = _task_service(project_path, ledger_root).transition(task_id, target, actor, reason)
         return json.dumps(move.to_dict(), indent=2, ensure_ascii=False)
+    except (GrimoireError, OSError, ValueError) as exc:
+        return _task_error(exc)
+
+
+def _task_steer(
+    task_id: str, action: str, project_path: str, ledger_root: str, actor: str, *,
+    to: str, reason: str, text: str, kind: str, directive_id: str, force: bool,
+) -> str:
+    """Les quatre gestes de pilotage humain (issue #638) — même service, mêmes refus."""
+    try:
+        service = _task_service(project_path, ledger_root)
+        if action == "prioritize":
+            result = service.prioritize(task_id, to, actor, reason)
+        elif action == "comment":
+            if not text.strip():
+                return _tool_error({"error": "comment requires a text"})
+            result = service.comment(task_id, text, actor, kind)
+        elif action == "cancel":
+            if not reason.strip():
+                return _tool_error({"error": "cancel requires a reason"})
+            result = service.cancel(task_id, reason, actor, force=force)
+        else:
+            if not directive_id.strip():
+                return _tool_error({"error": "ack requires a directive_id"})
+            result = service.acknowledge(task_id, directive_id, actor)
+        return json.dumps(result.to_dict(), indent=2, ensure_ascii=False)
     except (GrimoireError, OSError, ValueError) as exc:
         return _task_error(exc)
 

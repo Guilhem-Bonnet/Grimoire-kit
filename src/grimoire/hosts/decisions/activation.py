@@ -6,9 +6,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from grimoire.bridges.schemas import HostId
 from grimoire.core.claude_activation import activation_context_text
-from grimoire.core.standard_state import active_task_id
+from grimoire.core.standard_state import active_profile_id, resolve_active_task
 from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
+from grimoire.hosts.decisions.enrolment import BLOCKING_PROFILES, link_session, no_task_context
 from grimoire.hosts.decisions.record import _record_agent_dispatch
 
 
@@ -52,13 +54,52 @@ def entry_persona_context(project_root: Path) -> tuple[str, str]:
     if entry is None:
         return "", ""
     tools = ", ".join(v.value for v in entry.tools)
+    # #655 : la frontière ({tools}) ne borne que `entry.name` lancé en
+    # sous-agent ; la boucle principale garde tout l'outillage de l'hôte,
+    # dispatch (`Agent`) compris. La phrase ne doit pas se lire autrement.
     text = (
         f"[Grimoire — persona d'entrée] **{entry.name}** — {entry.description} "
-        f"Frontière d'outils : {tools}. Lis `{entry.definition_ref}` en entier "
-        "seulement si la demande est ambiguë ou s'il faut trier entre plusieurs "
-        "pistes ; sinon, ce résumé suffit pour rester dans son rôle.\n"
+        f"Tu gardes tous les outils de l'hôte, dont ceux de délégation ; la "
+        f"frontière ({tools}) ne vaut que si {entry.name} tourne en sous-agent, "
+        f"pas pour toi. Lis `{entry.definition_ref}` en entier seulement si la "
+        "demande est ambiguë ou s'il faut trier entre plusieurs pistes ; sinon, "
+        "ce résumé suffit pour rester dans son rôle.\n"
     )
     return text, entry.name
+
+
+def _claude_dispatch_context(project_root: Path) -> str:
+    """La "Politique de dispatch" + le répertoire routable, pour la boucle principale (#655).
+
+    ``.claude/agents/<entrée>.md`` porte déjà cette règle
+    (:func:`grimoire.hosts.emitters.claude_code._dispatch_policy_section`),
+    mais la boucle principale ne lit ce fichier en entier que si une demande
+    est assez ambiguë pour le justifier (voir :func:`entry_persona_context`
+    ci-dessus) — sur toute autre session, la règle n'atteint jamais la seule
+    chose qui appelle vraiment ``Agent``. La mesure du 2026-09-28 sur les
+    transcripts (98 sessions) : modèle explicite `sonnet` dans 92 % des
+    dispatchs, `haiku` presque jamais — la règle n'était pas lue. Elle va donc aussi
+    dans le contexte ``SessionStart``, importée plutôt que retapée : le
+    libellé V0/V1/V2 reste le travail d'une seule fonction.
+
+    Gardé pour ce seul hôte : ``subagent_type`` et les identifiants de
+    modèle Claude (`haiku`/`sonnet`/`opus`/`inherit`) ne veulent rien dire
+    pour un autre hôte, et :func:`decide_activation` tourne pour chacun
+    d'eux. Best-effort comme le reste de ce module : un inventaire d'agents
+    illisible dégrade en absence de ligne, jamais en hook cassé.
+    """
+    from grimoire.hosts.collect import collect_agents
+    from grimoire.hosts.emitters.claude_code import _dispatch_policy_section, _model_for
+
+    try:
+        agents = collect_agents(project_root)
+    except OSError:
+        return ""
+    routable = [agent for agent in agents if not agent.entry_point]
+    if not routable:
+        return ""
+    roster = "\n".join(f"- `{agent.name}` → {_model_for(agent)}" for agent in routable)
+    return f"{_dispatch_policy_section()}\nPersonas routables (`subagent_type` → modèle) :\n{roster}\n"
 
 
 def _claimed_task_recall(project_root: Path, task_id: str) -> str:
@@ -268,11 +309,32 @@ def decide_activation(hook: HookInput) -> Decision:
     an unenrolled project gets the two-line notice instead. This is the
     single change the diagnostic asked for: everything else about this
     function's shape (order, best-effort lines, session reset) is unchanged.
+
+    #655 adds one more, Claude-only, part:
+    :func:`_claude_dispatch_context` — the "Politique de dispatch" plus the
+    routable roster, gated on ``hook.host`` because this decision runs for
+    every host and the content (``subagent_type``, Claude's own model ids)
+    means nothing to any other one. It sits right after the persona: same
+    register (how the main loop should act), read before anything about the
+    current task.
     """
     _reset_temporal_session(hook)
-    task_id = active_task_id(hook.project_root)
+    active = resolve_active_task(hook.project_root)
+    task_id = active.task_id
     governed = _is_governed(hook.project_root)
     scaffold_detail = _scaffold_active_task(hook.project_root, task_id) if governed else {}
+    # Issue #638 lot A : sous un profil qui refuse la clôture hors tâche, la
+    # session apprend dès son premier souffle qu'aucune tâche n'est en cours
+    # et comment en ouvrir une ; sinon, le claim actif apprend sa session.
+    enrolment = ""
+    link: dict[str, Any] = {}
+    if governed:
+        if active.source == "bootstrap":
+            profile = active_profile_id(hook.project_root)
+            if profile in BLOCKING_PROFILES:
+                enrolment = no_task_context(profile)
+        else:
+            link = link_session(hook, active)
     directive = (
         activation_context_text(hook.project_root, task_id=task_id)
         if governed
@@ -281,20 +343,43 @@ def decide_activation(hook: HookInput) -> Decision:
     persona, entry_name = entry_persona_context(hook.project_root)
     if entry_name:
         _record_agent_dispatch(hook.project_root, entry_name, task_id)
+    dispatch_context = _claude_dispatch_context(hook.project_root) if hook.host == HostId.CLAUDE_CODE_CLI.value else ""
     recall = _claimed_task_recall(hook.project_root, task_id)
+    steering, steering_detail = _steering(hook, task_id)
     providers_line = _providers_status_line(hook.project_root)
     proposals_line = _proposals_status_line(hook.project_root)
     context = "\n".join(
-        part for part in (persona, recall, directive, providers_line, proposals_line) if part
+        part
+        for part in (persona, dispatch_context, recall, enrolment, steering, directive, providers_line, proposals_line)
+        if part
     )
     return Decision(
         outcome=Outcome.ALLOW,
         context=context,
         detail={
             "task_id": task_id,
+            "task_source": active.source,
             "entry_agent": entry_name,
             "recall_injected": bool(recall),
+            "dispatch_context_injected": bool(dispatch_context),
             "governed": governed,
             **scaffold_detail,
+            **link,
+            **steering_detail,
         },
     )
+
+
+def _steering(hook: HookInput, task_id: str) -> tuple[str, dict[str, Any]]:
+    """Issue #638 lot B : consignes non livrées et annulation, dites dès l'ouverture.
+
+    Même helper que ``UserPromptSubmit`` (:mod:`.steering`) : une consigne
+    posée entre deux sessions est lue à la première occasion, pas au premier
+    prompt seulement. Best-effort, comme le rappel juste au-dessus.
+    """
+    try:
+        from grimoire.hosts.decisions.steering import steering_context
+
+        return steering_context(hook.project_root, task_id, hook.session_id)
+    except Exception:
+        return "", {}

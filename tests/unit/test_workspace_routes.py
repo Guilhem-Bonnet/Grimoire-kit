@@ -892,3 +892,114 @@ def test_flow_runs_route_lists_a_run_by_blueprint(tmp_path: Path) -> None:
 
     filtered = workspace_get(tmp_path, f"{PREFIX}flows/runs", {"blueprint": ["autre-flow"]})
     assert filtered["runs"] == []
+
+
+# ── 3ter. Portefeuille : actions routées vers le projet propriétaire (#638) ──
+# Lot C : l'orchestrateur humain pilote depuis le cockpit les tâches de TOUS
+# les projets du registre. Une action du portefeuille est une dérogation
+# nommée de plus (`is_registry_scoped_write`), limitée au chemin
+# `portfolio/tasks/<id>/<action>` : le chemin historique `tasks/<id>/<action>`
+# reste `_HOME_SLUG` seulement, et un `project` du corps qui ne désigne pas la
+# racine résolue est refusé — jamais une écriture sur le mauvais dépôt.
+
+
+def _open_ready_task(root: Path, title: str) -> str:
+    from grimoire.missions.ledger import MissionLedger
+    from grimoire.missions.schemas import TaskState
+
+    ledger = MissionLedger(root / "_grimoire-runtime-output" / "ledger")
+    missions = ledger.list_missions()
+    mission_id = missions[0].id if missions else ledger.create_mission(
+        title="Travaux courants", origin="test", created_by="test"
+    ).id
+    task = ledger.create_task(mission_id, title, acceptance=("un critère observable",), owner="winston")
+    ledger.transition_task(task.id, TaskState.READY, actor_id="test")
+    return task.id
+
+
+def test_get_portfolio_liste_les_deux_projets_du_registre(cockpit: int) -> None:
+    code, payload = _get(cockpit, f"{PREFIX}portfolio/tasks?project=projet-a")
+
+    assert code == 200
+    assert {p["slug"] for p in payload["projects"]} == {"projet-a", "projet-b"}
+    assert all(t["project"]["slug"] in {"projet-a", "projet-b"} for t in payload["tasks"])
+
+
+def test_post_portfolio_block_ecrit_dans_le_ledger_du_projet_proprietaire_seulement(
+    cockpit_home: int, real_project: Path, second_project: Path
+) -> None:
+    """`cockpit_home` sert `projet-a` en direct ; `projet-b` n'est que regardé.
+    Bloquer depuis le portefeuille une tâche de `projet-b` doit écrire dans
+    SON ledger — et dans aucun autre."""
+    from grimoire.missions.service import TaskService
+
+    task_id = _open_ready_task(second_project, "Tâche à bloquer depuis le portefeuille")
+
+    code, payload = _post(
+        cockpit_home,
+        f"{PREFIX}portfolio/tasks/{task_id}/block?project=projet-b",
+        {"reason": "arbitrage humain", "project": "projet-b"},
+    )
+
+    assert code == 200, payload
+    assert payload.get("blocked") is not True, payload
+    assert TaskService(second_project).require(task_id).status.value == "blocked"
+    assert TaskService(real_project).ledger.get_task(task_id) is None
+
+
+def test_post_portfolio_avec_un_projet_du_corps_qui_ne_correspond_pas_est_refuse(
+    cockpit_home: int, second_project: Path
+) -> None:
+    """Fail-closed : `?project=` résout la racine, le `project` du corps doit
+    la confirmer — sinon un client qui se tromperait de slug écrirait ailleurs
+    que là où il croit."""
+    from grimoire.missions.service import TaskService
+
+    task_id = _open_ready_task(second_project, "Tâche protégée du portefeuille")
+
+    code, _ = _post(
+        cockpit_home,
+        f"{PREFIX}portfolio/tasks/{task_id}/block?project=projet-b",
+        {"reason": "x", "project": "projet-a"},
+    )
+
+    assert code == 403
+    assert TaskService(second_project).require(task_id).status.value == "ready"
+
+
+def test_le_chemin_historique_des_actions_reste_home_slug_seulement(
+    cockpit_home: int, second_project: Path
+) -> None:
+    task_id = _open_ready_task(second_project, "Tâche hors portefeuille")
+
+    code, _ = _post(cockpit_home, f"{PREFIX}tasks/{task_id}/block?project=projet-b", {"reason": "x"})
+
+    assert code == 403
+
+
+def test_post_portfolio_action_inconnue_n_est_pas_une_derogation(cockpit_home: int) -> None:
+    """Une action hors `TASK_ACTIONS` sous le préfixe du portefeuille ne
+    dérobe rien à la garde générale : 403 sur le projet seulement regardé,
+    404 (« route inconnue ») sur le projet de lancement."""
+    code_away, _ = _post(cockpit_home, f"{PREFIX}portfolio/tasks/GAO-x-001/teleport?project=projet-b", {})
+    code_home, _ = _post(cockpit_home, f"{PREFIX}portfolio/tasks/GAO-x-001/teleport?project=projet-a", {})
+
+    assert code_away == 403
+    assert code_home == 404
+
+
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [
+        (f"{PREFIX}portfolio/tasks/GAO-x-001/block", True),
+        (f"{PREFIX}portfolio/tasks/GAO-x-001/claim", True),
+        (f"{PREFIX}portfolio/tasks/GAO-x-001/move", True),
+        (f"{PREFIX}portfolio/tasks/GAO-x-001/close", True),
+        (f"{PREFIX}portfolio/tasks/GAO-x-001/teleport", False),  # action inconnue
+        (f"{PREFIX}portfolio/tasks/GAO-x-001", False),  # pas d'action
+        (f"{PREFIX}portfolio/tasks", False),  # la lecture
+        (f"{PREFIX}tasks/GAO-x-001/block", False),  # le chemin historique, garde générale
+    ],
+)
+def test_is_registry_scoped_write_reconnait_les_actions_du_portefeuille(path: str, expected: bool) -> None:
+    assert is_registry_scoped_write(path) is expected

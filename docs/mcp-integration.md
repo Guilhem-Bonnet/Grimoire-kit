@@ -77,6 +77,7 @@ Dans `claude_desktop_config.json` :
 | `grimoire_standard_verify` / `_audit` / `_score` / `_gate` | Le standard agentique : vérifier, auditer, scorer, opposer les gates | lecture ; `_score` persiste le score et `_gate` journalise le passage |
 | `grimoire_host_status` / `grimoire_skill` / `grimoire_command` | Les surfaces hôtes, pour un client sans émetteur | lecture |
 | `grimoire_providers_status` | Fournisseurs LLM activés, modèles par palier (cheap/mid/strong), refroidissement, dernier audit (`available`/`probed_at`/`models_seen`/`probe_note`, issue #330) et prochain choix — même donnée que `grimoire providers status` | lecture, monde ouvert |
+| `task_add` | Ouvrir une tâche (titre, critères d'acceptation ≥ 1, owner, mission, preuves attendues) — `ready=true` la rend réclamable tout de suite ; même service et même validation que `grimoire task add` (issue #638) | écriture |
 | `task_list_ready` | Les tâches qu'un agent peut réclamer maintenant | lecture |
 | `task_show` | Une tâche : état, acceptation, claim, et ce que chaque prochain pas exigera | lecture |
 | `task_claim` | Réclamer une tâche prête (`ready → claimed`) | écriture, destructif |
@@ -86,7 +87,7 @@ Dans `claude_desktop_config.json` :
 
 ### Les tâches : un outil, pas du texte dans un prompt
 
-Les six outils `task_*` appellent le même service que `grimoire task`
+Les sept outils `task_*` appellent le même service que `grimoire task`
 (`grimoire.missions.service.TaskService`), donc le même gate de preuve
 (`_grimoire/standard/evidence-gates.yaml`). Une transition que le CLI refuse,
 MCP la refuse pour la même raison, et le refus est structuré :
@@ -115,7 +116,10 @@ se voie attribuer que ses propres claims, poser `GRIMOIRE_ACTOR` à la valeur
 passée en `actor` à `task_claim` (règle complète dans la
 [référence CLI](cli-reference.md#quelle-tâche-la-session-porte)).
 
-Le parcours nominal d'un agent : `task_list_ready` → `task_context(task_id)`
+Le parcours nominal d'un agent : `task_add` (si le chantier n'a pas encore de
+tâche — en profil `governed`, le hook `Stop` refuse de conclure une session qui
+a écrit sans tâche, voir [hosts.md](hosts.md#travailler-hors-tâche-issue-638))
+→ `task_list_ready` → `task_context(task_id)`
 (produit le bundle que le gate exige) → `task_claim` → `task_update(move,
 running)` → travail et preuves → `task_update(move, needs_verification)` →
 `task_update(close)`.

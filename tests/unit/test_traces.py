@@ -223,6 +223,69 @@ class TestTraceLedger:
             },
         }
 
+    def test_delegation_counts_ignores_untagged_traces(self, tmp_path) -> None:
+        """Un choix de persona d'entrée ou un gate de tâche n'est pas une délégation (#657)."""
+        ledger = TraceLedger(tmp_path)
+        _make_trace(ledger, run_id="RUN-untagged")
+        assert ledger.delegation_counts() == {}
+
+    def test_delegation_counts_counts_by_agent_and_tracks_model_coverage(self, tmp_path) -> None:
+        """Symétrique de ``agent_dispatch_counts`` : compte par agent délégué, plus la part avec modèle explicite."""
+        from grimoire.traces.ledger import DELEGATION_TAG
+
+        ledger = TraceLedger(tmp_path)
+        ledger.record(
+            run_id="RUN-d1",
+            workflow_instance_id="",
+            mission_id="",
+            task_id="GAO-x",
+            recipe_id="grimoire.delegation",
+            outcome=TraceOutcome.SUCCESS,
+            started_at="2026-01-01T00:00:00+00:00",
+            agent_id="general-purpose",
+            model="claude-sonnet-4-6",
+            tags=[DELEGATION_TAG],
+        )
+        ledger.record(
+            run_id="RUN-d2",
+            workflow_instance_id="",
+            mission_id="",
+            task_id="GAO-x",
+            recipe_id="grimoire.delegation",
+            outcome=TraceOutcome.SUCCESS,
+            started_at="2026-01-02T00:00:00+00:00",
+            agent_id="general-purpose",
+            model="",
+            tags=[DELEGATION_TAG],
+        )
+        ledger.record(
+            run_id="RUN-d3",
+            workflow_instance_id="",
+            mission_id="",
+            task_id="GAO-x",
+            recipe_id="grimoire.delegation",
+            outcome=TraceOutcome.SUCCESS,
+            started_at="2026-01-03T00:00:00+00:00",
+            agent_id="Explore",
+            model="claude-haiku-4-6",
+            tags=[DELEGATION_TAG],
+        )
+        counts = ledger.delegation_counts()
+        assert counts == {
+            "general-purpose": {
+                "count": 2,
+                "with_model_count": 1,
+                "last_model": "",
+                "last_seen": "2026-01-02T00:00:00+00:00",
+            },
+            "Explore": {
+                "count": 1,
+                "with_model_count": 1,
+                "last_model": "claude-haiku-4-6",
+                "last_seen": "2026-01-03T00:00:00+00:00",
+            },
+        }
+
     def test_export_otel_jsonl(self, tmp_path) -> None:
         """One `invoke_agent` parent span, plus one `execute_tool` child per call."""
         ledger = TraceLedger(tmp_path)

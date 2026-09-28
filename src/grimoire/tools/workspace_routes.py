@@ -39,9 +39,21 @@ une tâche. Elle suit donc la même route de résolution que
 ``POST /api/projects/update`` (le registre, jamais un chemin libre fourni par
 le client) plutôt que la garde ``_HOME_SLUG``.
 
-Le reste de :data:`POST_ROUTES` — écrire un fichier, réclamer une tâche,
-créer un override — reste strictement ``_HOME_SLUG`` : chaque dérogation est
-nommée, jamais générale.
+Troisième exception nommée (issue #638, lot C) : agir sur une tâche depuis le
+**portefeuille** (``portfolio/tasks/<id>/<action>``, voir
+:func:`is_registry_scoped_write`). L'orchestrateur humain pilote depuis le
+cockpit les chantiers de tous les projets du registre — prioriser, bloquer,
+annuler une tâche d'un projet qu'il ne fait que regarder est précisément ce
+que le portefeuille existe pour permettre. L'action est routée vers le projet
+propriétaire (``?project=<slug>``, résolu par le registre comme
+``POST /api/projects/update``) et passe par le ``TaskService`` de CE projet,
+gate de preuve compris ; un ``project`` du corps qui ne confirme pas la
+racine résolue est refusé. Le chemin historique ``tasks/<id>/<action>`` reste
+``_HOME_SLUG`` seulement.
+
+Le reste de :data:`POST_ROUTES` — écrire un fichier, réclamer une tâche
+par le chemin historique, créer un override — reste strictement
+``_HOME_SLUG`` : chaque dérogation est nommée, jamais générale.
 
 Ajouter une lecture : une entrée dans :data:`GET_ROUTES`. Ajouter une écriture :
 une entrée dans :data:`POST_ROUTES`. Les deux tables sont énumérées par les
@@ -61,6 +73,7 @@ from grimoire.tools import (
     workspace_exec,
     workspace_language,
     workspace_memory,
+    workspace_portfolio,
 )
 
 __all__ = [
@@ -191,6 +204,28 @@ def _memory_overview(project_root: Path, query: _Query) -> Any:
     return workspace_memory.memory_overview(project_root, _one(query, "projects"))
 
 
+def _portfolio_tasks(project_root: Path, query: _Query) -> Any:
+    """``GET /api/workspace/portfolio/tasks`` — le board agrégé du registre (#638).
+
+    Toutes les tâches de tous les projets enregistrés au cockpit, chacune
+    avec son projet ; filtres ``state`` (état ledger ou colonne board),
+    ``slug`` (un projet — ``?project=`` étant déjà, sur le cockpit, le projet
+    servi par l'hôte, pas un filtre), ``live`` (session dont le journal a
+    moins de ``minutes`` minutes, défaut
+    :data:`workspace_portfolio.DEFAULT_LIVE_MINUTES`). Les chemins viennent du
+    registre, jamais de la requête.
+    """
+    live_raw = _one(query, "live")
+    minutes_raw = _one(query, "minutes")
+    return workspace_portfolio.portfolio_tasks(
+        project_root,
+        state=_one(query, "state") or None,
+        project=_one(query, "slug") or None,
+        live=live_raw not in (None, "", "0", "false"),
+        live_minutes=int(minutes_raw) if minutes_raw else workspace_portfolio.DEFAULT_LIVE_MINUTES,
+    )
+
+
 def _evidence(project_root: Path, _query: _Query) -> Any:
     """``GET /api/workspace/evidence`` — le panneau « Preuves » du rail (#534).
 
@@ -263,6 +298,7 @@ GET_ROUTES: dict[str, _GetHandler] = {
     f"{PREFIX}proposals": _proposals,
     f"{PREFIX}sheet": _sheet,
     f"{PREFIX}evidence": _evidence,
+    f"{PREFIX}portfolio/tasks": _portfolio_tasks,
     f"{PREFIX}flows/runs": _flow_runs,
     f"{PREFIX}memory/overview": _memory_overview,
     f"{PREFIX}memory/search": _memory_search,
@@ -385,17 +421,20 @@ def _command(project_root: Path, body: dict[str, Any]) -> Any:
 
 
 def _task_action(project_root: Path, task_id: str, action: str, body: dict[str, Any]) -> Any:
-    """Réclame, déplace, bloque ou ferme une tâche — gate de preuve compris.
+    """Réclame, déplace, bloque, ferme — ou prioritise, commente, annule, accuse (issue #638).
 
     Le service est le même que celui du CLI et du serveur MCP : un gate
     contourné ici le serait partout, donc il n'y a qu'un endroit où il pourrait
-    l'être, et ce n'est pas celui-ci.
+    l'être, et ce n'est pas celui-ci. La webview n'écrit jamais elle-même
+    (ADR-007) : elle demande, le service décide, le ledger enregistre.
     """
     from grimoire.missions.schemas import TaskState
     from grimoire.missions.service import TaskService
 
     service = TaskService(project_root.resolve())
     actor = str(body.get("actor") or "workspace")
+    if action in _STEERING_ACTIONS:
+        return _task_steer(service, task_id, action, actor, body).to_dict()
     if action == "claim":
         move = service.claim(task_id, actor, str(body.get("host") or "workspace"))
     elif action == "close":
@@ -443,8 +482,27 @@ POST_ROUTES: dict[str, _PostHandler] = {
     f"{PREFIX}tasks/migrate-standard": _task_migrate_standard,
 }
 
+def _task_steer(service: Any, task_id: str, action: str, actor: str, body: dict[str, Any]) -> Any:
+    """Les gestes de l'orchestrateur humain (issue #638, lot B) — refus rendus par le service."""
+    if action == "prioritize":
+        return service.prioritize(task_id, str(body.get("to") or ""), actor, str(body.get("reason") or ""))
+    if action == "comment":
+        return service.comment(task_id, str(body.get("text") or ""), actor, str(body.get("kind") or "comment"))
+    if action == "cancel":
+        return service.cancel(task_id, str(body.get("reason") or ""), actor, force=body.get("force") is True)
+    directive_id = str(body.get("directive_id") or "")
+    if not directive_id:
+        raise ValueError("`directive_id` requis pour accuser réception")
+    return service.acknowledge(task_id, directive_id, actor)
+
+
+#: Les gestes de pilotage humain (issue #638) : jamais une transition d'état
+#: sauf `cancel`, qui passe par le même gate que `move --to cancelled` plus la
+#: raison obligatoire et le verrou de claim.
+_STEERING_ACTIONS = ("prioritize", "comment", "cancel", "ack")
+
 #: Les verbes qu'une tâche accepte depuis l'interface.
-TASK_ACTIONS = ("claim", "move", "block", "close")
+TASK_ACTIONS = ("claim", "move", "block", "close", *_STEERING_ACTIONS)
 
 
 # ── Agents (issue #374) ─────────────────────────────────────────────────────
@@ -738,19 +796,52 @@ def is_proposal_decision(path: str) -> bool:
     return parsed is not None and parsed[1] in ("accept", "reject")
 
 
+def _portfolio_action_route(path: str) -> tuple[str, str] | None:
+    """``(task_id, action)`` depuis ``/api/workspace/portfolio/tasks/<id>/<action>``,
+    ou ``None`` — seules les actions de :data:`TASK_ACTIONS` sont reconnues."""
+    prefix = f"{PREFIX}portfolio/tasks/"
+    if not path.startswith(prefix):
+        return None
+    task_id, _, action = path[len(prefix) :].strip("/").partition("/")
+    if not task_id or "/" in task_id or action not in TASK_ACTIONS:
+        return None
+    return task_id, action
+
+
 def is_registry_scoped_write(path: str) -> bool:
-    """Vrai pour ``tasks/migrate-standard`` — dérogation nommée à ``_HOME_SLUG``.
+    """Vrai pour ``tasks/migrate-standard`` et pour une action du portefeuille
+    ``portfolio/tasks/<id>/<claim|move|block|close>`` — dérogations nommées à
+    ``_HOME_SLUG``.
 
     Même famille que :func:`is_proposal_decision` (issue #490) : le point
-    d'entrée que ``cmd_cockpit.py`` interroge pour ouvrir, pour cette écriture
-    précise, la même porte que ``POST /api/projects/update`` plutôt que la
+    d'entrée que ``cmd_cockpit.py`` interroge pour ouvrir, pour ces écritures
+    précises, la même porte que ``POST /api/projects/update`` plutôt que la
     garde ``_HOME_SLUG`` générale (issue #559 suite, #560, voir le docstring
     du module). Migrer un board du standard vers le Mission Ledger est un
     geste explicite et ponctuel sur un projet du registre qu'on pilote depuis
-    la flotte, pas une mutation continue comme réclamer une tâche ou écrire un
-    fichier — ceux-là restent soumis à la garde générale.
+    la flotte ; agir sur une carte depuis le portefeuille (issue #638, lot C)
+    est le geste même de l'orchestrateur humain sur sa flotte — le
+    ``TaskService`` du projet propriétaire garde la transition. Réclamer une
+    tâche ou écrire un fichier par les chemins historiques reste soumis à la
+    garde générale.
     """
-    return path == f"{PREFIX}tasks/migrate-standard"
+    return path == f"{PREFIX}tasks/migrate-standard" or _portfolio_action_route(path) is not None
+
+
+def _portfolio_task_action(project_root: Path, task_id: str, action: str, body: dict[str, Any]) -> Any:
+    """Une action du portefeuille : même moteur que :func:`_task_action`, sur
+    la racine que l'hôte a résolue depuis ``?project=`` — et que le ``project``
+    du corps, s'il est là, doit confirmer (fail-closed sur le dépôt visé)."""
+    from grimoire.tools.project_registry import slug_for_path
+
+    wanted = str(body.get("project") or "").strip()
+    if wanted:
+        actual = slug_for_path(project_root)
+        if actual != wanted:
+            raise PermissionError(
+                f"le portefeuille visait le projet {wanted!r}, l'hôte a résolu {actual or 'un projet hors registre'!r}"
+            )
+    return _task_action(project_root, task_id, action, body)
 
 
 def _proposal_accept(project_root: Path, slug: str, _body: dict[str, Any]) -> Any:
@@ -786,6 +877,9 @@ def workspace_post(project_root: Path, path: str, body: dict[str, Any]) -> Any:
             task_id, _, action = tail.partition("/")
             if task_id and action in TASK_ACTIONS:
                 return _task_action(project_root, task_id, action, body)
+        portfolio_action = _portfolio_action_route(path)
+        if portfolio_action is not None:
+            return _portfolio_task_action(project_root, *portfolio_action, body)
         if path.startswith(f"{PREFIX}agents/"):
             parsed = _agent_route(path)
             if parsed is not None:

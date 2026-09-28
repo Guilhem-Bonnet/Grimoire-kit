@@ -38,7 +38,7 @@ from grimoire.missions.ledger import MissionLedger
 from grimoire.missions.schemas import TaskState
 from grimoire.missions.service import DEFAULT_LEDGER_RELPATH
 
-TASK_TOOLS = {"task_list_ready", "task_show", "task_claim", "task_update", "task_context", "task_recall"}
+TASK_TOOLS = {"task_add", "task_list_ready", "task_show", "task_claim", "task_update", "task_context", "task_recall"}
 ACCEPTATION = "un client MCP liste, reclame et clot une tache reelle"
 EVIDENCE = Path("_grimoire-runtime-output/evidence")
 BOARD = Path("_grimoire/standard/task-board.yaml")
@@ -153,7 +153,7 @@ def hook_nomme(projet: Path) -> str:
 
 # ── la surface existe pour un client ─────────────────────────────────────────
 
-def test_un_client_voit_les_six_outils() -> None:
+def test_un_client_voit_les_sept_outils() -> None:
     async def scenario(session: ClientSession) -> set[str]:
         return {tool.name for tool in (await session.list_tools()).tools}
 
@@ -382,3 +382,34 @@ class TestGateRefusalIsNotAToolFailure:
         result = task_show("GAO-nulle-001", project_path=str(projet))
         assert "error" in _json(result)
         assert _is_error(result), "une tâche inconnue est une panne d'appel, elle doit porter isError"
+
+
+# ── pilotage humain (issue #638, lot B) : les mêmes gestes par MCP ───────────
+
+def test_task_update_prioritise_commente_accuse_et_annule_avec_raison(projet: Path) -> None:
+    tid = ouvre(projet)
+    task_context(task_id=tid, project_path=str(projet))  # le bundle que le gate du claim exige
+    assert _json(task_claim(tid, actor="claude", project_path=str(projet)))["status"] == "claimed"
+
+    prio = _json(task_update(tid, "prioritize", to="high", reason="bloque la release", project_path=str(projet)))
+    assert prio["priority"] == "high" and prio["change"] == "priority → high"
+    assert "urgent" in _json(task_update(tid, "prioritize", to="urgent", project_path=str(projet)))["error"]
+
+    assert "text" in _json(task_update(tid, "comment", project_path=str(projet)))["error"]
+    note = _json(task_update(tid, "comment", text="relis l'ADR-007", kind="directive", actor="guilhem", project_path=str(projet)))
+    directive_id = note["directive"]["id"]
+    montre = _json(task_show(tid, project_path=str(projet)))
+    assert montre["directives_pending"] == 1 and montre["effective_priority"] == "high"
+    rappel = _json(task_recall(tid, project_path=str(projet)))
+    assert [d["text"] for d in rappel["directives"]] == ["relis l'ADR-007"]
+
+    ack = _json(task_update(tid, "ack", directive_id=directive_id, actor="claude", project_path=str(projet)))
+    assert ack["directive"]["acknowledged_at"]
+    assert "directive_id" in _json(task_update(tid, "ack", project_path=str(projet)))["error"]
+
+    assert "reason" in _json(task_update(tid, "cancel", project_path=str(projet)))["error"]
+    refus = _json(task_update(tid, "cancel", reason="chantier abandonné", actor="guilhem", project_path=str(projet)))
+    assert refus["blocked"] is True and refus["refusals"][0]["evidence"] == "claim"
+    annule = _json(task_update(tid, "cancel", reason="chantier abandonné", actor="guilhem", force=True, project_path=str(projet)))
+    assert annule["transition"] == "claimed → cancelled"
+    assert board_status(projet, tid) == "archived"

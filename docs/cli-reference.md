@@ -407,13 +407,17 @@ prochain export l'écrase.
 | `grimoire task board export . --dry-run` | Afficher la projection sans écrire |
 | `grimoire task board export . --mission <id>` | N'exporter qu'une mission |
 | `grimoire task board export . -o <chemin>` | Écrire ailleurs que dans le board du standard |
-| `grimoire task add "<titre>" -a "<critère>" [--owner <qui>]` | Ouvrir une tâche (un critère d'acceptation au moins) |
+| `grimoire task add "<titre>" -a "<critère>" [--owner <qui>] [--ready]` | Ouvrir une tâche (un critère d'acceptation au moins) ; `--ready` la rend réclamable tout de suite, gate `proposed_to_ready` compris |
 | `grimoire task list [--status <état>] [--mission <id>]` | Lister les tâches et leur colonne de board |
 | `grimoire task show <id>` | Détailler une tâche et ce que chaque prochain pas exigera |
 | `grimoire task claim <id> [--actor <qui>] [--host <où>]` | Réclamer une tâche prête (`ready → claimed`) |
 | `grimoire task move <id> --to <état>` | Déplacer une tâche, si la machine à états et le gate le permettent |
 | `grimoire task block <id> --reason "<motif>"` | Bloquer en disant pourquoi |
 | `grimoire task close <id>` | Fermer une tâche vérifiée (verdict accepté exigé) |
+| `grimoire task prioritize <id> --to low\|medium\|high\|critical [--reason "<motif>"]` | Changer la priorité (issue #638) — l'historique reste au ledger, le board se retrie |
+| `grimoire task comment <id> "<texte>" [--kind comment\|directive]` | Poser un commentaire ou une consigne ; la session qui tient la tâche la lit au prochain `UserPromptSubmit` |
+| `grimoire task cancel <id> --reason "<motif>" [--force]` | Annuler avec sa raison (obligatoire) ; tenue par une autre session, elle exige `--force` |
+| `grimoire task ack <id> <dir-…>` | Accuser réception d'une consigne de l'orchestrateur |
 | `grimoire task link <id> --depends-on <id>` | Déclarer une dépendance |
 | `grimoire task context <id>` | Produire le context bundle d'une tâche réelle |
 | `grimoire task trace <id> [--causes]` | Timeline unifiée d'une tâche : transitions, outils refusés, gates rouges, checkpoints, abort, preuves, incidents |
@@ -424,16 +428,17 @@ prochain export l'écrase.
 Sans ledger, la commande d'export refuse et sort en erreur plutôt que d'écrire un
 board vide — écraser le travail déclaré par du néant serait pire que ne rien faire.
 
-Chaque écriture (`add`, `claim`, `move`, `block`, `close`, `link`) franchit deux
+Chaque transition d'état (`claim`, `move`, `block`, `close`, `cancel`) franchit deux
 portes avant de toucher le ledger : la machine à états, puis le gate de preuve de
 `_grimoire/standard/evidence-gates.yaml`. Un refus nomme la preuve manquante et le
 remède ; rien n'est écrit. Après une écriture acceptée, le board du standard est
 reprojeté depuis le ledger si le projet est enrôlé (`_grimoire/standard/` présent)
 — plus besoin de relancer `task board export` pour qu'un claim se voie.
 
-Les mêmes gestes sont exposés aux agents par le serveur MCP (`task_list_ready`,
-`task_show`, `task_claim`, `task_update`, `task_context`) : même service, même
-gate, même refus. Voir [Intégration MCP](mcp-integration.md).
+Les mêmes gestes sont exposés aux agents par le serveur MCP (`task_add`,
+`task_list_ready`, `task_show`, `task_claim`, `task_update`, `task_context`) :
+même service (`TaskService.add` pour l'ouverture), même gate, même refus. Voir
+[Intégration MCP](mcp-integration.md).
 
 ### Vérifiabilité d'une tâche
 
