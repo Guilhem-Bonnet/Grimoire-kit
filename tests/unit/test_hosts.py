@@ -1351,9 +1351,9 @@ def test_the_entry_persona_is_a_one_line_summary_not_a_full_read_mandate(project
 
 
 def test_claude_session_start_carries_the_dispatch_policy_and_roster(project: Path) -> None:
-    """Issue #638 lot A : la boucle principale Claude Code voit la politique de
-    dispatch et le répertoire routable à chaque session, pas seulement les
-    ~3 % où elle lit `concierge.md` en entier.
+    """#655 : la boucle principale Claude Code voit la politique de
+    dispatch et le répertoire routable à chaque session, pas seulement
+    quand elle lit `concierge.md` en entier.
 
     Avant le correctif, `decide_activation` ne portait ni la politique
     V0/V1/V2 ni aucun `subagent_type` : seul le fichier sous-agent de
@@ -1376,7 +1376,7 @@ def test_claude_session_start_carries_the_dispatch_policy_and_roster(project: Pa
 
 
 def test_non_claude_hosts_do_not_get_the_claude_dispatch_context(project: Path) -> None:
-    """Non-régression Copilot (#638 lot A) : `decide_activation` est partagé
+    """Non-régression Copilot (#655) : `decide_activation` est partagé
     entre hôtes ; la politique de dispatch et le répertoire `subagent_type`
     n'ont de sens que pour Claude Code et ne doivent apparaître ni pour
     Copilot ni pour un hôte inconnu."""
@@ -1393,7 +1393,7 @@ def test_non_claude_hosts_do_not_get_the_claude_dispatch_context(project: Path) 
 
 
 def test_the_entry_persona_tool_boundary_no_longer_reads_as_binding_the_main_loop(project: Path) -> None:
-    """Issue #638 lot A, point 2 : la frontière d'outils du résumé ne doit
+    """#655, point 2 : la frontière d'outils du résumé ne doit
     plus se lire comme si elle bornait la boucle principale elle-même —
     seul le sous-agent d'entrée, s'il tourne isolément, y est vraiment
     borné."""

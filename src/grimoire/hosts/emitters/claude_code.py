@@ -127,7 +127,7 @@ def _max_turns_for(agent: AgentSpec) -> int:
 
 
 def _dispatch_policy_section() -> str:
-    """Section "Politique de dispatch" (issue #329, révisée #638 lot A) — quel
+    """Section "Politique de dispatch" (issue #329, révisée #655) — quel
     modèle pour quelle tâche.
 
     Only the entry persona dispatches other personas as sub-agents (every
@@ -151,7 +151,7 @@ def _dispatch_policy_section() -> str:
     truth. ``grimoire.hosts.decisions.activation._claude_dispatch_context``
     imports this very function for the copy injected at every
     ``SessionStart`` — the one the main loop actually sees on every session,
-    not only the 3 % where it reads this file — so the two can never drift
+    not only when it reads this file in full — so the two can never drift
     apart either.
     """
     return f"""## Politique de dispatch
