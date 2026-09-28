@@ -73,9 +73,15 @@ _COMMAND_TRUNCATE_AT = 240
 
 #: Motif de commande de run de test reconnu (voir docstring du module) —
 #: distinct, volontairement, du besoin ``resolve_need("test-runner", ...)``.
+#: Issue #644 : ``vitest``/``jest``/``tsc``/``eslint``/``ruff`` rejoignent la
+#: liste — le gate « fini » (:mod:`grimoire.hosts.decisions.done_gate`) doit
+#: reconnaître un check JS/TS ou un lint comme un check au même titre qu'un
+#: run pytest, et c'est ce motif qui décide, ici comme là-bas, ce que le
+#: journal marque ``"test_run"`` plutôt que ``"bash"``.
 _TEST_COMMAND_PATTERN = re.compile(
     r"\bpytest\b|\bnpm\s+(?:run\s+)?test\b|\bcargo\s+test\b|\bgo\s+test\b|\bctest\b"
-    r"|\bmvn(?:\.cmd)?\s+(?:\S+\s+)*test\b|\bgradlew?\s+test\b",
+    r"|\bmvn(?:\.cmd)?\s+(?:\S+\s+)*test\b|\bgradlew?\s+test\b"
+    r"|\bvitest\b|\bjest\b|\btsc\b|\beslint\b|\bruff\b",
     re.IGNORECASE,
 )
 
