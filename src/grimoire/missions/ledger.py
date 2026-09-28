@@ -293,24 +293,39 @@ class MissionLedger:
         return evt
 
     def _atomic_append(self, path: Path, record: dict[str, Any]) -> None:
+        import threading as _thr
+        import time as _time
+
+        def _trace(msg: str) -> None:
+            with contextlib.suppress(Exception):
+                trace_path = path.parent.parent / "_debug_trace.log"
+                with trace_path.open("a", encoding="utf-8") as tf:
+                    tf.write(f"{_time.time():.4f} pid={os.getpid()} tid={_thr.get_ident()} {msg}\n")
+
         line = json.dumps(record, ensure_ascii=False) + "\n"
+        _trace(f"WANT_LOCK {path.name} type={record.get('event_type')} entity={record.get('entity_id')}")
         # Verrouillé : lire « existing » puis renommer un temporaire par-dessus
         # n'est atomique que pour un seul écrivain à la fois. Deux requêtes
         # concurrentes (cockpit multi-thread) sans ce verrou perdaient
         # silencieusement l'une des deux écritures (« lost update »).
         with _ledger_file_lock(path):
+            _trace(f"GOT_LOCK {path.name}")
             fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".tmp-ledger-")
             try:
                 # Copy existing content + append new line
                 existing = path.read_text(encoding="utf-8") if path.exists() else ""
+                _trace(f"READ_EXISTING {path.name} bytes={len(existing)} lines={existing.count(chr(10))}")
                 with os.fdopen(fd, "w", encoding="utf-8") as fh:
                     fh.write(existing)
                     fh.write(line)
                 Path(tmp).replace(path)
-            except Exception:
+                _trace(f"REPLACED {path.name} new_bytes={len(existing) + len(line)}")
+            except Exception as exc:
+                _trace(f"EXCEPTION {path.name} {exc!r}")
                 with contextlib.suppress(OSError):
                     Path(tmp).unlink()
                 raise
+            _trace(f"RELEASE_LOCK {path.name}")
 
     def _next_seq(self, prefix: str, id_map: dict[str, Any]) -> str:
         existing = [k for k in id_map if k.startswith(prefix)]

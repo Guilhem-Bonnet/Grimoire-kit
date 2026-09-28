@@ -91,6 +91,26 @@ def test_executer_priorite_consigne_et_annulation_depuis_l_inspecteur(workspace:
         arg=task_id,
     )
     task = TaskService(real_project).require(task_id)
+    if task.status.value != "cancelled":
+        import sys
+
+        from grimoire.core.standard_state import LEDGER_RELPATH
+
+        events_path = real_project.resolve() / LEDGER_RELPATH / "events.jsonl"
+        trace_path = events_path.parent.parent / "_debug_trace.log"
+        print(f"[DBG] events_path={events_path} exists={events_path.exists()}", file=sys.stderr)
+        if trace_path.exists():
+            print("[DBG] ---- _debug_trace.log ----", file=sys.stderr)
+            for ln in trace_path.read_text(encoding="utf-8").splitlines():
+                print(f"[DBG-TRACE] {ln}", file=sys.stderr)
+        else:
+            print(f"[DBG] no trace file at {trace_path}", file=sys.stderr)
+        raw = events_path.read_text(encoding="utf-8")
+        lines = raw.splitlines()
+        matching = [i for i, ln in enumerate(lines) if task_id in ln]
+        print(f"[DBG] total_lines={len(lines)} lines mentioning {task_id}: {matching}", file=sys.stderr)
+        for i in matching:
+            print(f"[DBG] line {i}: {lines[i][:400]}", file=sys.stderr)
     assert task.status.value == "cancelled"
     # Une tâche annulée n'offre plus le bloc « Annuler » — colonne terminale ;
     # `expect` attend le réaffichage de l'inspecteur qui suit l'écriture.
