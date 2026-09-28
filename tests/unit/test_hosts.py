@@ -1984,9 +1984,9 @@ def test_copilot_entry_agent_acts_with_the_union_of_routed_tools(governed: Path)
     Un concierge en `read, search` qui ne fait que router dépend d'un VS Code
     qui sait lancer des sous-agents et d'un modèle qui appelle l'outil. Décision
     de Guilhem (2026-09-25) : sur Copilot, le point d'entrée reçoit l'union des
-    outils des personas qu'il route, plus `agent` — il délègue quand un rôle
-    précis existe, sinon il fait le travail lui-même. Le modèle de son
-    orchestrateur écrit à la main dans la Forge.
+    outils des personas qu'il route, plus `agent` — sur une demande directe et
+    bornée il agit lui-même, sinon il délègue (GAO-d-le-concier-001). Le modèle
+    de son orchestrateur écrit à la main dans la Forge.
     """
     emitter = emitter_for(HostId.GITHUB_COPILOT)
     assert emitter is not None
@@ -2001,6 +2001,29 @@ def test_copilot_entry_agent_acts_with_the_union_of_routed_tools(governed: Path)
     assert "tu ne fais pas le travail toi-même" not in entry
     # La persona routée garde sa frontière propre : rien d'hérité de l'entrée.
     assert "tools: ['read', 'search', 'edit']" in sub
+
+
+def test_copilot_entry_agent_gates_self_execution_on_a_direct_bounded_request(governed: Path) -> None:
+    """GAO-d-le-concier-001 : l'auto-exécution n'est plus un repli sans condition.
+
+    Mesure sur 98 sessions Claude Code : le concierge ne délègue presque
+    jamais (3/98), faute d'un gate — « aucun spécialiste ne convient »
+    couvrait en pratique toute demande un peu ouverte. Le gate devient
+    « demande directe et bornée », au sens de la compétence attachée
+    `grimoire-agent-dispatch` (citée, pas dupliquée dans le wrapper).
+    """
+    emitter = emitter_for(HostId.GITHUB_COPILOT)
+    assert emitter is not None
+    apply_plan(emitter.plan(build_surface(governed), governed), governed)
+    entry = (governed / ".github/agents/concierge.agent.md").read_text(encoding="utf-8")
+
+    assert "directe et bornée" in entry
+    assert "grimoire-agent-dispatch" in entry
+    # L'ancien repli sans condition (« quand un rôle précis existe, sinon tu
+    # fais le travail toi-même ») a disparu.
+    assert "quand la demande relève d'un rôle précis" not in entry
+    # Le palier de vérifiabilité qui guide la délégation reste cité (#329).
+    assert "V0" in entry and "V1" in entry and "V2" in entry
 
 
 def test_copilot_maps_the_web_verb_to_the_vs_code_web_tool_set(project: Path) -> None:
