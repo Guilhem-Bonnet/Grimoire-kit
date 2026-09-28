@@ -603,12 +603,17 @@ def _task_service(project_path: str, ledger_root: str) -> Any:
 
 def _task_json(task: Any) -> dict[str, Any]:
     from grimoire.missions.board import board_status_of, priority_of
+    from grimoire.missions.dispatch_advice import dispatch_advice
     from grimoire.missions.session_link import session_fields
-    from grimoire.missions.verifiability import as_dict as verifiability_as_dict
 
     data: dict[str, Any] = task.to_dict()
     data["board"] = board_status_of(task.status)
-    data["verifiability"] = verifiability_as_dict(task)
+    # #654 : la classe de vérifiabilité et le modèle qu'elle
+    # recommande, calculés une seule fois par `dispatch_advice` — jamais une
+    # seconde classification propre à cette surface MCP.
+    advice = dispatch_advice(task)
+    data["verifiability"] = advice["verifiability"]
+    data["recommended_model"] = advice["recommended_model"]
     # Issue #638 lot B : la priorité effective (déclarée ou dérivée) et le
     # compte des consignes non lues, pour qu'un agent voie ce que l'humain a
     # posé sans relire tout le journal.

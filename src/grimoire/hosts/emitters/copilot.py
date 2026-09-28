@@ -130,10 +130,11 @@ def _agent_file(agent: AgentSpec, surface: ProjectSurface, owned_skills: tuple[S
         # « capable de rien ») : un point d'entrée déclaré `read, search` qui ne
         # fait que router dépend d'un VS Code qui sait lancer des sous-agents et
         # d'un modèle qui appelle l'outil. Décision (2026-09-25) : il reçoit
-        # l'union des outils des personas qu'il route, plus `agent` — il
-        # délègue quand un rôle précis existe, sinon il agit lui-même. Sur VS
-        # Code, déléguer exige l'outil `agent` ET une liste `agents:`. Pas de
-        # `handoffs:` : un bouton par persona après chaque réponse n'aide pas.
+        # l'union des outils des personas qu'il route, plus `agent` — sur une
+        # demande directe et bornée il agit lui-même, sinon il délègue
+        # (#656). Sur VS Code, déléguer exige l'outil `agent`
+        # ET une liste `agents:`. Pas de `handoffs:` : un bouton par persona
+        # après chaque réponse n'aide pas.
         union: list[str] = list(fields["tools"])
         for other in routed:
             union.extend(t for t in map_verbs(other.tools, _TOOL_TABLE) if t not in union)
@@ -143,10 +144,11 @@ def _agent_file(agent: AgentSpec, surface: ProjectSurface, owned_skills: tuple[S
         boundary = f"{verbs} (l'union de tes personas), plus la délégation par l'outil `agent` aux personas listées dans `agents`"
     header = Emitter.frontmatter(fields)
     role = (
-        "Point d'entrée : quand la demande relève d'un rôle précis, tu délègues à cette persona avec "
-        "l'outil `agent` (brief : contexte, objectif, contraintes) et tu rends son résultat ; sinon "
-        "tu fais le travail toi-même avec tes outils. Tu ne réponds jamais « je n'ai pas les droits » : "
-        "tu agis, ou le spécialiste agit."
+        "Point d'entrée : sur une demande directe et bornée (`grimoire-agent-dispatch` en juge), tu "
+        "fais le travail toi-même avec tes outils ; sinon tu délègues à la persona adaptée avec l'outil "
+        "`agent` (brief : contexte, objectif, contraintes) — recherche large ou mesure vers une persona "
+        "économique, conclusions seulement — et tu rends son résultat ; la vérification reste la "
+        "tienne. Tu ne réponds jamais « je n'ai pas les droits » : tu agis, ou le spécialiste agit."
         if agent.entry_point
         else "Agent routé en interne : tu traites une tranche de travail, tu ne clos pas la tâche globale."
     )

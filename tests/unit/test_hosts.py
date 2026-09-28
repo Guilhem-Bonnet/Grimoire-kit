@@ -1021,6 +1021,176 @@ def test_post_tool_use_never_logs_on_an_unenrolled_project(project: Path) -> Non
     assert read_evidence_log(project, "bootstrap") == []
 
 
+def test_post_tool_use_logs_a_delegation_call_silently(governed: Path) -> None:
+    """#657 : mesurer la délégation sans jamais coûter un jeton.
+
+    ``Task`` est le nom historique de l'outil de délégation de Claude Code,
+    ``Agent`` son renommage récent — les deux doivent être reconnus. La
+    décision ne doit renvoyer aucun contexte (zéro coût pour le LLM) alors
+    même que l'appel est journalisé dans le TraceLedger existant.
+    """
+    from grimoire.core.standard_generation import TRACES_DIR
+    from grimoire.traces.ledger import DELEGATION_TAG, TraceLedger
+
+    for tool_name in ("Task", "Agent"):
+        decision = decide_evidence_trace(
+            HookInput(
+                event=HookEvent.POST_TOOL_USE,
+                project_root=governed,
+                tool_name=tool_name,
+                tool_input={
+                    "subagent_type": "general-purpose",
+                    "description": "Chercher où la délégation est journalisée",
+                    "model": "claude-sonnet-4-6",
+                },
+                session_id="sess-1",
+                host="claude",
+            )
+        )
+        assert decision == Decision()
+
+    ledger = TraceLedger(governed / TRACES_DIR)
+    delegations = [t for t in ledger.list_traces() if DELEGATION_TAG in t.tags]
+    assert len(delegations) == 2
+    assert {t.agent_id for t in delegations} == {"general-purpose"}
+    assert {t.model for t in delegations} == {"claude-sonnet-4-6"}
+    assert all(t.host_id == "claude" for t in delegations)
+
+
+def test_post_tool_use_logs_a_delegation_call_without_a_model(governed: Path) -> None:
+    """Un appel de délégation sans modèle explicite reste journalisé — pas d'erreur, modèle vide."""
+    from grimoire.core.standard_generation import TRACES_DIR
+    from grimoire.traces.ledger import DELEGATION_TAG, TraceLedger
+
+    decide_evidence_trace(
+        HookInput(
+            event=HookEvent.POST_TOOL_USE,
+            project_root=governed,
+            tool_name="Task",
+            tool_input={"subagent_type": "Explore", "description": "chercher un fichier"},
+        )
+    )
+    ledger = TraceLedger(governed / TRACES_DIR)
+    delegations = [t for t in ledger.list_traces() if DELEGATION_TAG in t.tags]
+    assert len(delegations) == 1
+    assert delegations[0].agent_id == "Explore"
+    assert delegations[0].model == ""
+
+
+def test_post_tool_use_does_not_log_a_non_delegating_tool_call(governed: Path) -> None:
+    from grimoire.core.standard_generation import TRACES_DIR
+    from grimoire.traces.ledger import DELEGATION_TAG, TraceLedger
+
+    decide_evidence_trace(
+        HookInput(
+            event=HookEvent.POST_TOOL_USE, project_root=governed, tool_name="Read", tool_input={"file_path": "README.md"}
+        )
+    )
+    ledger = TraceLedger(governed / TRACES_DIR)
+    assert not [t for t in ledger.list_traces() if DELEGATION_TAG in t.tags]
+
+
+def test_post_tool_use_never_logs_a_delegation_on_an_unenrolled_project(project: Path) -> None:
+    from grimoire.core.standard_generation import TRACES_DIR
+
+    decide_evidence_trace(
+        HookInput(
+            event=HookEvent.POST_TOOL_USE,
+            project_root=project,
+            tool_name="Task",
+            tool_input={"subagent_type": "general-purpose", "description": "x"},
+        )
+    )
+    assert not (project / TRACES_DIR / "traces.jsonl").exists()
+
+
+def test_a_delegation_write_failure_never_breaks_the_hook(governed: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Journalisation best-effort : une erreur d'écriture ne doit jamais faire échouer PostToolUse."""
+    from grimoire.traces.ledger import TraceLedger
+
+    def _boom(self: TraceLedger, **kwargs: object) -> None:
+        raise OSError("disque plein")
+
+    monkeypatch.setattr(TraceLedger, "record", _boom)
+    decision = decide_evidence_trace(
+        HookInput(
+            event=HookEvent.POST_TOOL_USE,
+            project_root=governed,
+            tool_name="Task",
+            tool_input={"subagent_type": "general-purpose", "description": "x"},
+        )
+    )
+    assert decision == Decision()
+
+
+def test_run_hook_records_a_claude_code_delegation_call_with_no_extra_context(governed: Path) -> None:
+    """End-to-end through the wire layer: normalise -> decide -> ledger -> render.
+
+    A realistic Claude Code ``PostToolUse`` payload for the ``Agent`` tool
+    call — ``subagent_type``/``description``/``model``/``prompt`` in
+    ``tool_input``, per Claude Code's documented delegation tool schema.
+    The rendered verdict must be empty: this is measurement, not governance,
+    and the calling session must not spend a single token reading it.
+    """
+    from grimoire.bridges.schemas import HostId
+    from grimoire.core.standard_generation import TRACES_DIR
+    from grimoire.traces.ledger import DELEGATION_TAG, TraceLedger
+
+    payload = {
+        "hook_event_name": "PostToolUse",
+        "session_id": "sess-cc-1",
+        "cwd": str(governed),
+        "tool_name": "Agent",
+        "tool_input": {
+            "subagent_type": "general-purpose",
+            "description": "Chercher où la délégation est journalisée",
+            "prompt": "Un très long prompt qui ne doit jamais être journalisé tel quel...",
+            "model": "claude-sonnet-4-6",
+        },
+        "tool_response": {"content": "..."},
+    }
+    rendered, decision, _hook = run_hook(payload, host_id=HostId.CLAUDE_CODE_CLI)
+    assert rendered == {}
+    assert decision.context == ""
+
+    ledger = TraceLedger(governed / TRACES_DIR)
+    delegations = [t for t in ledger.list_traces() if DELEGATION_TAG in t.tags]
+    assert len(delegations) == 1
+    assert delegations[0].agent_id == "general-purpose"
+    assert delegations[0].model == "claude-sonnet-4-6"
+    assert delegations[0].host_id == HostId.CLAUDE_CODE_CLI.value
+
+
+def test_run_hook_records_a_copilot_delegation_call_without_extra_context(governed: Path) -> None:
+    """Same path for a guessed Copilot payload shape.
+
+    Copilot's ``runSubagent``/``agent`` tool input has not been confirmed
+    against a live payload (see this PR's ``grimoire-uncertainties``); this
+    only proves the hook recognises the tool name, reads the fallback field
+    names it defines, and never raises or injects context either way.
+    """
+    from grimoire.bridges.schemas import HostId
+    from grimoire.core.standard_generation import TRACES_DIR
+    from grimoire.traces.ledger import DELEGATION_TAG, TraceLedger
+
+    payload = {
+        "hookEventName": "PostToolUse",
+        "sessionId": "sess-copilot-1",
+        "cwd": str(governed),
+        "toolName": "runSubagent",
+        "toolInput": {"agentType": "expert-playwright", "model": "gpt-5"},
+    }
+    rendered, decision, _hook = run_hook(payload, host_id=HostId.GITHUB_COPILOT)
+    assert rendered == {}
+    assert decision.context == ""
+
+    ledger = TraceLedger(governed / TRACES_DIR)
+    delegations = [t for t in ledger.list_traces() if DELEGATION_TAG in t.tags]
+    assert len(delegations) == 1
+    assert delegations[0].agent_id == "expert-playwright"
+    assert delegations[0].model == "gpt-5"
+
+
 def _set_task_in_progress(root: Path) -> None:
     """Flip the ``bootstrap`` card to ``in_progress`` on disk.
 
@@ -1519,6 +1689,60 @@ def test_the_entry_persona_is_a_one_line_summary_not_a_full_read_mandate(project
     assert "_grimoire/_config/custom/agents/concierge.md" in text
     # Le résumé doit rester très inférieur au mandat de lecture intégrale
     # qu'il remplace (~2 800 tokens, mesurés par le diagnostic).
+    assert len(text) < 500, len(text)
+
+
+def test_claude_session_start_carries_the_dispatch_policy_and_roster(project: Path) -> None:
+    """#655 : la boucle principale Claude Code voit la politique de
+    dispatch et le répertoire routable à chaque session, pas seulement
+    quand elle lit `concierge.md` en entier.
+
+    Avant le correctif, `decide_activation` ne portait ni la politique
+    V0/V1/V2 ni aucun `subagent_type` : seul le fichier sous-agent de
+    l'entrée les documentait, et rien ne les lisait jamais depuis la boucle
+    principale.
+    """
+    _, decision, _ = run_hook(
+        {"hook_event_name": "SessionStart", "cwd": str(project)}, host_id=HostId.CLAUDE_CODE_CLI
+    )
+    context = decision.context
+    assert "Politique de dispatch" in context
+    assert "V0" in context and "haiku" in context
+    assert "V1" in context and "sonnet" in context
+    assert "V2" in context and "le modèle de la session" in context
+    # `scribe` (reasoning=low par défaut du fixture `project`) est routable ;
+    # `concierge` (l'entrée) ne doit pas s'y lister lui-même.
+    assert "`scribe` → `haiku`" in context or "`scribe` →" in context
+    assert "subagent_type" in context
+    assert decision.detail["dispatch_context_injected"] is True
+
+
+def test_non_claude_hosts_do_not_get_the_claude_dispatch_context(project: Path) -> None:
+    """Non-régression Copilot (#655) : `decide_activation` est partagé
+    entre hôtes ; la politique de dispatch et le répertoire `subagent_type`
+    n'ont de sens que pour Claude Code et ne doivent apparaître ni pour
+    Copilot ni pour un hôte inconnu."""
+    _, copilot_decision, _ = run_hook(
+        {"hook_event_name": "SessionStart", "cwd": str(project)}, host_id=HostId.GITHUB_COPILOT
+    )
+    assert "Politique de dispatch" not in copilot_decision.context
+    assert copilot_decision.detail["dispatch_context_injected"] is False
+
+    # Sans host_id du tout (appel direct, comme le fait le reste de la suite) :
+    # même comportement, jamais la section Claude.
+    bare_context = _session_start(project)
+    assert "Politique de dispatch" not in bare_context
+
+
+def test_the_entry_persona_tool_boundary_no_longer_reads_as_binding_the_main_loop(project: Path) -> None:
+    """#655, point 2 : la frontière d'outils du résumé ne doit
+    plus se lire comme si elle bornait la boucle principale elle-même —
+    seul le sous-agent d'entrée, s'il tourne isolément, y est vraiment
+    borné."""
+    text, _ = entry_persona_context(project)
+    assert "Tu gardes tous les outils de l'hôte" in text
+    assert "ne vaut que si concierge tourne en sous-agent" in text
+    # Toujours un résumé, pas un mandat de lecture intégrale.
     assert len(text) < 500, len(text)
 
 
@@ -2102,9 +2326,9 @@ def test_copilot_entry_agent_acts_with_the_union_of_routed_tools(governed: Path)
     Un concierge en `read, search` qui ne fait que router dépend d'un VS Code
     qui sait lancer des sous-agents et d'un modèle qui appelle l'outil. Décision
     de Guilhem (2026-09-25) : sur Copilot, le point d'entrée reçoit l'union des
-    outils des personas qu'il route, plus `agent` — il délègue quand un rôle
-    précis existe, sinon il fait le travail lui-même. Le modèle de son
-    orchestrateur écrit à la main dans la Forge.
+    outils des personas qu'il route, plus `agent` — sur une demande directe et
+    bornée il agit lui-même, sinon il délègue (GAO-d-le-concier-001). Le modèle
+    de son orchestrateur écrit à la main dans la Forge.
     """
     emitter = emitter_for(HostId.GITHUB_COPILOT)
     assert emitter is not None
@@ -2119,6 +2343,29 @@ def test_copilot_entry_agent_acts_with_the_union_of_routed_tools(governed: Path)
     assert "tu ne fais pas le travail toi-même" not in entry
     # La persona routée garde sa frontière propre : rien d'hérité de l'entrée.
     assert "tools: ['read', 'search', 'edit']" in sub
+
+
+def test_copilot_entry_agent_gates_self_execution_on_a_direct_bounded_request(governed: Path) -> None:
+    """GAO-d-le-concier-001 : l'auto-exécution n'est plus un repli sans condition.
+
+    Mesure sur 98 sessions Claude Code : le concierge ne délègue presque
+    jamais (3/98), faute d'un gate — « aucun spécialiste ne convient »
+    couvrait en pratique toute demande un peu ouverte. Le gate devient
+    « demande directe et bornée », au sens de la compétence attachée
+    `grimoire-agent-dispatch` (citée, pas dupliquée dans le wrapper).
+    """
+    emitter = emitter_for(HostId.GITHUB_COPILOT)
+    assert emitter is not None
+    apply_plan(emitter.plan(build_surface(governed), governed), governed)
+    entry = (governed / ".github/agents/concierge.agent.md").read_text(encoding="utf-8")
+
+    assert "directe et bornée" in entry
+    assert "grimoire-agent-dispatch" in entry
+    # L'ancien repli sans condition (« quand un rôle précis existe, sinon tu
+    # fais le travail toi-même ») a disparu.
+    assert "quand la demande relève d'un rôle précis" not in entry
+    # Le palier de vérifiabilité qui guide la délégation reste cité (#329).
+    assert "V0" in entry and "V1" in entry and "V2" in entry
 
 
 def test_copilot_maps_the_web_verb_to_the_vs_code_web_tool_set(project: Path) -> None:
