@@ -1022,7 +1022,7 @@ def test_post_tool_use_never_logs_on_an_unenrolled_project(project: Path) -> Non
 
 
 def test_post_tool_use_logs_a_delegation_call_silently(governed: Path) -> None:
-    """GAO-c-mesurer-la-001 : mesurer la délégation sans jamais coûter un jeton.
+    """#657 : mesurer la délégation sans jamais coûter un jeton.
 
     ``Task`` est le nom historique de l'outil de délégation de Claude Code,
     ``Agent`` son renommage récent — les deux doivent être reconnus. La

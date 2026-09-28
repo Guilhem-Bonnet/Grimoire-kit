@@ -694,7 +694,7 @@ def governance_hooks(*, governed: bool) -> tuple[HookSpec, ...]:
                 rationale=(
                     "Rappelle qu'une écriture doit laisser une ligne de preuve ; journalise aussi, "
                     "sans contexte ajouté, tout appel de délégation vers un sous-agent "
-                    "(issue GAO-c-mesurer-la-001)."
+                    "(#657)."
                 ),
             ),
             HookSpec(

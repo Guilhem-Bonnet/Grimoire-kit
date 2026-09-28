@@ -125,7 +125,7 @@ _UNNAMED_SPECIALTY = UNNAMED_SPECIALTY
 #: d'``AGENT_DISPATCH_TAG`` (le choix de la persona d'entrée, à
 #: ``SessionStart``) et de tout gate de tâche. Voir
 #: ``grimoire.hosts.decisions.evidence_trace._record_delegation`` pour le
-#: seul point d'écriture (issue GAO-c-mesurer-la-001) et
+#: seul point d'écriture (#657) et
 #: :meth:`TraceLedger.delegation_counts` pour la lecture agrégée.
 DELEGATION_TAG = "agent.delegation"
 
@@ -814,7 +814,7 @@ class TraceLedger:
         le même fichier. Retourne, par ``agent_id`` : le nombre
         d'occurrences (``count``), le nombre d'entre elles où un modèle
         explicite était présent (``with_model_count`` — la mesure « part
-        avec modèle explicite » demandée par l'issue GAO-c-mesurer-la-001),
+        avec modèle explicite » demandée par l'#657),
         le modèle de la plus récente délégation (``last_model``, chaîne vide
         si elle n'en précisait pas) et son horodatage (``last_seen``).
 

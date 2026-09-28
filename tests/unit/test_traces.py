@@ -224,7 +224,7 @@ class TestTraceLedger:
         }
 
     def test_delegation_counts_ignores_untagged_traces(self, tmp_path) -> None:
-        """Un choix de persona d'entrée ou un gate de tâche n'est pas une délégation (GAO-c-mesurer-la-001)."""
+        """Un choix de persona d'entrée ou un gate de tâche n'est pas une délégation (#657)."""
         ledger = TraceLedger(tmp_path)
         _make_trace(ledger, run_id="RUN-untagged")
         assert ledger.delegation_counts() == {}

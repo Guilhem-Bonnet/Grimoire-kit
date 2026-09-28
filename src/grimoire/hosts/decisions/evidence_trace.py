@@ -7,8 +7,7 @@ act of asking at ``PreToolUse`` — a host emits ``PostToolUse`` only when the
 tool actually ran, which is the only proof that a prior ``ask`` was granted.
 See that function's docstring for the fail-open bug this closes.
 
-Also the one place a sub-agent delegation call is measured (issue
-GAO-c-mesurer-la-001): :func:`_record_delegation`, reached when
+Also the one place a sub-agent delegation call is measured (#657): :func:`_record_delegation`, reached when
 :func:`_is_delegation_tool` recognises ``hook.tool_name`` (``Task``/``Agent``
 on Claude Code, ``agent``/``runSubagent`` on Copilot). Living in this module
 rather than its own decision keeps it on the one event every host already
@@ -142,7 +141,7 @@ def _first_str(tool_input: dict[str, object], keys: tuple[str, ...]) -> str:
 def _record_delegation(hook: HookInput, task_id: str) -> None:
     """Best-effort, silent line in the TraceLedger for one delegation call.
 
-    Issue GAO-c-mesurer-la-001: nothing in the kit measured whether a
+    Issue #657: nothing in the kit measured whether a
     delegation happened, to which agent, or with which model — the gate at
     ``PreToolUse`` only covers ``execute``/``write``/``secret``, and
     ``SubagentStop`` reports gate state, never the call that started the

@@ -55,7 +55,7 @@ _MATCHER_TABLE: dict[str, tuple[str, ...]] = {
     "network": ("WebFetch", "WebSearch"),
     # A sub-agent delegation call — neither a write nor an execute, so it
     # needs its own family or the PostToolUse matcher never fires for it
-    # (issue GAO-c-mesurer-la-001). "Agent" is the tool's current name,
+    # (#657). "Agent" is the tool's current name,
     # "Task" its older one — both still route to the same decision.
     "delegation": ("Task", "Agent"),
 }

@@ -725,7 +725,7 @@ class TestRegistryDispatches:
         assert payload["misses"]["terraform"]["count"] == 1
 
     def test_registry_dispatches_shows_delegations_with_model_coverage(self, tmp_path: Path) -> None:
-        """GAO-c-mesurer-la-001 : la délégation mesurée doit apparaître dans le même rapport."""
+        """#657 : la délégation mesurée doit apparaître dans le même rapport."""
         from grimoire.core.standard_generation import TRACES_DIR
         from grimoire.traces.ledger import DELEGATION_TAG, TraceLedger
         from grimoire.traces.schemas import TraceOutcome

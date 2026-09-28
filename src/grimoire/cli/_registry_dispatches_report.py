@@ -2,7 +2,7 @@
 
 ``app.py`` is grandfathered above the code-size ratchet's threshold
 (``scripts/check-code-ratchet.py``, R2): it may only shrink, never grow.
-Adding the delegation report (issue GAO-c-mesurer-la-001) to the existing
+Adding the delegation report (#657) to the existing
 choices/misses/freshness output would have appended lines there instead —
 this module holds the render logic so ``app.py`` keeps only the thin command
 function that gathers the data and calls :func:`render`.
@@ -74,7 +74,7 @@ def render(
         console.print(miss_tbl)
 
     if delegations:
-        # Issue GAO-c-mesurer-la-001 : la délégation observée (agent, modèle),
+        # Issue #657 : la délégation observée (agent, modèle),
         # dans le même rapport que les choix de persona d'entrée ci-dessus —
         # même journal, même commande, pas un second endroit à consulter.
         deleg_tbl = Table(title="Délégations vers un sous-agent observées")
