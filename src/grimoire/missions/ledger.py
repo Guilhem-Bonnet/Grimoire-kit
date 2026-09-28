@@ -74,6 +74,9 @@ _STEERING_EVENTS = frozenset({
     "task.directive_acknowledged",
 })
 
+#: L'événement qui rattache une session d'hôte au claim d'une tâche (issue #638).
+SESSION_ATTACHED_EVENT = "task.session_attached"
+
 
 def _slug(title: str, limit: int) -> str:
     """Fragment d'identifiant sûr dans un chemin.
@@ -165,6 +168,21 @@ class MissionLedger:
                     self._tasks[tid] = MissionTask.from_dict({**old_task.to_dict(), **update})
             elif evt_type in _STEERING_EVENTS:
                 self._replay_steering(evt_type, payload)
+            elif evt_type == SESSION_ATTACHED_EVENT:
+                # Issue #638 lot A : le claim apprend sa session après coup. Un
+                # événement de plus dans le journal, jamais une ligne réécrite ;
+                # sans claim au rejeu (tâche jamais réclamée, ou événement
+                # orphelin), il n'y a rien à compléter et rien n'est inventé.
+                # La tâche ciblée est ``entity_id`` — la clé que tout événement
+                # du journal porte — et non une copie dans le payload qui
+                # pourrait manquer ou diverger (revue Copilot, PR #639).
+                tid = str(raw.get("entity_id") or payload.get("task_id") or "")
+                current = self._tasks.get(tid)
+                if current is not None and current.claim is not None:
+                    claim = current.claim.with_session(
+                        str(payload.get("session_id", "") or ""), str(payload.get("session_host", "") or "")
+                    )
+                    self._tasks[tid] = MissionTask.from_dict({**current.to_dict(), "claim": claim.to_dict()})
             self._events.append(LedgerEvent.from_dict(raw))
 
     def _replay_steering(self, evt_type: str, payload: dict[str, Any]) -> None:
@@ -464,6 +482,39 @@ class MissionLedger:
         self._append_event(
             "task.directive_acknowledged", task_id, "task", actor_id,
             {"task_id": task_id, "directive_id": directive_id, "acknowledged_at": _now_iso(), "actor_id": actor_id},
+        )
+        self._load()
+        return self._tasks[task_id]
+
+    def attach_session(self, task_id: str, session_id: str, *, session_host: str = "", actor_id: str = "hook") -> MissionTask:
+        """Rattache *session_id* au claim de *task_id* — un événement, pas une réécriture.
+
+        Refuse (``GrimoireMissionError``) une tâche inconnue, une tâche sans
+        claim, ou un claim déjà rattaché à une *autre* session : une session
+        ne vole jamais le claim d'une autre. Idempotent quand la session est
+        déjà celle du claim : rien n'est ajouté au journal.
+        """
+        self._load()
+        task = self._tasks.get(task_id)
+        if task is None:
+            raise GrimoireMissionError(f"Task not found: {task_id}")
+        if task.claim is None:
+            raise GrimoireMissionError(f"Task {task_id} has no claim to attach a session to")
+        session_id = session_id.strip()
+        if not session_id:
+            raise GrimoireMissionError("A session id is required")
+        if task.claim.session_id == session_id:
+            return task
+        if task.claim.session_id:
+            raise GrimoireMissionError(
+                f"Task {task_id} is already attached to session {task.claim.session_id}"
+            )
+        self._append_event(
+            SESSION_ATTACHED_EVENT,
+            task_id,
+            "task",
+            actor_id,
+            {"task_id": task_id, "session_id": session_id, "session_host": session_host},
         )
         self._load()
         return self._tasks[task_id]

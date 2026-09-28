@@ -87,6 +87,15 @@ class SessionState:
     updated_at: str = ""
     rules: dict[str, RuleState] = field(default_factory=dict)
     schema_version: int = _SCHEMA_VERSION
+    #: La tâche du Mission Ledger que la session porte (issue #638, lot A) —
+    #: posée par le hook ``UserPromptSubmit`` dès que la tâche résolue n'est
+    #: plus ``bootstrap``. ``""`` = aucune tâche connue pour cette session.
+    task_id: str = ""
+    #: Nombre d'actions d'écriture observées par ``PostToolUse`` dans cette
+    #: session (fichier écrit ou édité, commande Bash non lecture seule) —
+    #: jamais leur contenu. C'est ce que ``Stop`` lit pour distinguer une
+    #: session qui a travaillé hors tâche d'une session qui n'a fait que lire.
+    mutations: int = 0
 
     def rule_state(self, rule_id: str) -> RuleState:
         return self.rules.setdefault(rule_id, RuleState())
@@ -98,6 +107,8 @@ class SessionState:
             "started_at": self.started_at,
             "updated_at": self.updated_at,
             "rules": {rule_id: state.to_dict() for rule_id, state in self.rules.items()},
+            "task_id": self.task_id,
+            "mutations": self.mutations,
         }
 
     @classmethod
@@ -108,11 +119,14 @@ class SessionState:
             for rule_id, state in rules_raw.items()
             if isinstance(state, dict)
         } if isinstance(rules_raw, dict) else {}
+        mutations = d.get("mutations", 0)
         return cls(
             session_id=session_id,
             started_at=str(d.get("started_at") or started_at),
             updated_at=str(d.get("updated_at", "")),
             rules=rules,
+            task_id=str(d.get("task_id", "") or ""),
+            mutations=int(mutations) if isinstance(mutations, int | float) and not isinstance(mutations, bool) else 0,
         )
 
     @classmethod
@@ -171,3 +185,43 @@ def reset_session_state(project_root: Path, session_id: str) -> None:
     path = session_state_path(project_root, session_id)
     with contextlib.suppress(OSError):
         path.unlink(missing_ok=True)
+
+
+def note_session_mutation(project_root: Path, session_id: str, *, task_id: str, now_iso: str) -> None:
+    """Compte une action d'écriture de plus pour *session_id* (issue #638, lot A).
+
+    Appelé par le hook ``PostToolUse`` pour chaque outil dont la classification
+    n'est pas lecture seule. Best-effort et sans contenu : un compteur et la
+    tâche courante, rien de l'argument d'outil. Un ``session_id`` vide (hôte
+    qui n'en envoie pas) ne journalise rien plutôt que de fabriquer un id.
+    """
+    if not session_id:
+        return
+    state = load_session_state(project_root, session_id, now_iso=now_iso)
+    state.mutations += 1
+    if task_id and task_id != "bootstrap":
+        state.task_id = task_id
+    save_session_state(project_root, state, now_iso=now_iso)
+
+
+def note_session_task(project_root: Path, session_id: str, task_id: str, *, now_iso: str) -> bool:
+    """Pose *task_id* sur le journal de *session_id* — ``True`` si le fichier a changé.
+
+    ``bootstrap`` n'est pas une tâche : il n'est jamais écrit, et un journal
+    qui portait déjà cette tâche n'est pas réécrit.
+    """
+    if not session_id or not task_id or task_id == "bootstrap":
+        return False
+    state = load_session_state(project_root, session_id, now_iso=now_iso)
+    if state.task_id == task_id:
+        return False
+    state.task_id = task_id
+    save_session_state(project_root, state, now_iso=now_iso)
+    return True
+
+
+def session_mutations(project_root: Path, session_id: str) -> int:
+    """Le nombre d'écritures observées dans *session_id* — ``0`` sans journal ou sans id."""
+    if not session_id:
+        return 0
+    return load_session_state(project_root, session_id, now_iso="").mutations

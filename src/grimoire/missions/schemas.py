@@ -115,6 +115,18 @@ class TaskClaim:
     exclusive_files: tuple[str, ...] = ()
     #: ISO 8601 UTC. Chaîne vide = jamais expiré (claims historiques, tests).
     expires_at: str = ""
+    #: La session d'hôte qui travaille sous ce claim (issue #638, lot A).
+    #: L'agent qui réclame ne connaît pas son ``session_id`` — seul le hook le
+    #: reçoit dans le payload d'hôte ; il le pose donc après coup, par un
+    #: événement ``task.session_attached``, jamais en réécrivant le claim.
+    #: ``""`` = aucune session rattachée (claim historique, ou pris hors hôte).
+    session_id: str = ""
+    #: L'identifiant d'hôte (:class:`grimoire.bridges.schemas.HostId`) de la
+    #: session rattachée — distinct de ``host_id``, que l'agent déclare
+    #: lui-même à la réclamation (« local », « mcp »…). C'est lui qui décide
+    #: si une commande de reprise existe (``claude --resume``), jamais une
+    #: valeur devinée.
+    session_host: str = ""
 
     @classmethod
     def new(
@@ -167,6 +179,8 @@ class TaskClaim:
             "host_id": self.host_id,
             "exclusive_files": list(self.exclusive_files),
             "expires_at": self.expires_at,
+            "session_id": self.session_id,
+            "session_host": self.session_host,
         }
 
     @classmethod
@@ -176,6 +190,19 @@ class TaskClaim:
             host_id=d["host_id"],
             exclusive_files=tuple(d.get("exclusive_files", [])),
             expires_at=d.get("expires_at", ""),
+            session_id=str(d.get("session_id", "") or ""),
+            session_host=str(d.get("session_host", "") or ""),
+        )
+
+    def with_session(self, session_id: str, session_host: str = "") -> TaskClaim:
+        """Le même claim, rattaché à *session_id* — une valeur, jamais une mutation."""
+        return TaskClaim(
+            actor_id=self.actor_id,
+            host_id=self.host_id,
+            exclusive_files=self.exclusive_files,
+            expires_at=self.expires_at,
+            session_id=session_id,
+            session_host=session_host,
         )
 
 

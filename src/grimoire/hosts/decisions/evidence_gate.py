@@ -2,17 +2,24 @@
 
 from __future__ import annotations
 
-from grimoire.core.standard_state import active_profile_id, active_task_id, is_standard_enrolled
+from grimoire.core.standard_state import active_profile_id, is_standard_enrolled, resolve_active_task
 from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
+from grimoire.hosts.decisions.enrolment import (
+    BLOCKING_PROFILES,
+    NO_ACTIVE_TASK,
+    no_task_stop_reason,
+    session_mutation_count,
+)
 from grimoire.hosts.decisions.gate_summary import _gate_summary
 
 #: Board states that owe no evidence artifact yet. A task parked here passes
 #: every gate by construction — see ``check_evidence_gates``.
 _STATES_WITHOUT_EVIDENCE = {"proposed", "", None}
 
-#: Profiles whose ``Stop`` hook refuses a closure — red gates and unevaluable
-#: gates alike. Kept in one place so the two paths cannot drift apart.
-_BLOCKING_PROFILES = frozenset({"governed", "production"})
+#: Profiles whose ``Stop`` hook refuses a closure — red gates, unevaluable
+#: gates and work outside any task alike. Defined once in
+#: :mod:`grimoire.hosts.decisions.enrolment` so the three paths cannot drift.
+_BLOCKING_PROFILES = BLOCKING_PROFILES
 
 
 def decide_evidence_gate(hook: HookInput) -> Decision:
@@ -29,8 +36,13 @@ def decide_evidence_gate(hook: HookInput) -> Decision:
     if not is_standard_enrolled(hook.project_root):
         return Decision(detail={"skipped": "project_not_enrolled"})
 
-    task_id = active_task_id(hook.project_root)
+    active = resolve_active_task(hook.project_root)
+    task_id = active.task_id
     profile = active_profile_id(hook.project_root)
+    if active.source == "bootstrap":
+        no_task = _no_task_closure(hook, profile)
+        if no_task is not None:
+            return no_task
     try:
         ok, summary, detail = _gate_summary(hook.project_root, task_id)
     except Exception as exc:
@@ -103,3 +115,27 @@ def _unevaluable_gate(task_id: str, profile: str, exc: Exception) -> Decision:
         context=f"[Grimoire] Gates de preuve non évaluables pour {task_id} (profil {profile}, non bloquant) : {cause}\n{remedy}",
         detail=detail,
     )
+
+
+def _no_task_closure(hook: HookInput, profile: str) -> Decision | None:
+    """Issue #638 lot A: a session that wrote without a task is not a finished task.
+
+    ``bootstrap`` is a fallback, not a task: nothing in the Mission Ledger
+    will ever show this work. The session journal (``session-<id>.json``,
+    written by ``PostToolUse``) says whether the session wrote anything at
+    all — a session that only read or answered owes nothing and is never
+    blocked, which is also what happens when the host sends no ``session_id``
+    (no journal, count ``0``). The profiles that block, block, with the
+    remedy in the reason; the others are told, in the one field a host shows
+    on ``Stop`` (``systemMessage``, see :func:`grimoire.hosts.runtime.render`).
+    ``stop_active`` is checked by the caller, so the second ``Stop`` always
+    goes through. Returns ``None`` when there is nothing to say.
+    """
+    mutations = session_mutation_count(hook)
+    if mutations <= 0:
+        return None
+    detail = {"task_id": "bootstrap", "profile": profile, "blocked_on": NO_ACTIVE_TASK, "mutations": mutations}
+    reason = no_task_stop_reason(profile, mutations)
+    if profile in _BLOCKING_PROFILES:
+        return Decision(outcome=Outcome.BLOCK, reason=reason, detail=detail)
+    return Decision(context=reason, detail=detail)
