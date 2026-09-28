@@ -212,7 +212,7 @@ jobs:
 
       - name: Setup Node (CLI claude)
         if: steps.key.outputs.present == 'true'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "20"
 
