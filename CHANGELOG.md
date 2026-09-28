@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- fix(hosts): la politique de dispatch (V0→`haiku`, V1→`sonnet`, V2→modèle de session) et le répertoire `subagent_type` → modèle atteignent désormais le contexte `SessionStart` de la boucle principale Claude Code, gatés sur cet hôte seul (`decide_activation` est partagé avec Copilot). Avant : la règle n'existait que dans `.claude/agents/<entrée>.md`, lu presque jamais par la boucle principale et sans effet quand il l'est (le concierge en sous-agent n'a pas l'outil `Agent`) — mesuré à 92 % de sous-agents dispatchés en `sonnet`, `haiku` presque jamais. La ligne « Frontière d'outils » du résumé de persona d'entrée ne se lit plus comme si elle bornait la boucle principale (#655).
+
 ## [3.60.0] - 2026-09-28
 
 - feat(cockpit): lot C — portefeuille de tâches multi-projets dans l'espace Exécuter, action routée vers le projet propriétaire, reprise de session (issue #638). Treize sessions ouvertes sur trois projets, chacune avec son ledger, et l'espace Exécuter n'en lisait qu'un : l'orchestrateur humain n'avait aucune vue d'ensemble. Le portefeuille agrège côté serveur tous les projets du registre cockpit, chaque carte avec son projet, son état ledger et sa colonne, sa priorité, son claim et sa session (vivante / inactive selon l'âge du journal `_grimoire-output/.runs/session-<id>.json`, N minutes paramétrable, 30 par défaut) ; un projet dont le ledger est absent ou illisible est listé avec sa raison, jamais tu. Les chemins viennent du registre, jamais de la requête.
