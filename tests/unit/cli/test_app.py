@@ -721,8 +721,52 @@ class TestRegistryDispatches:
             result = runner.invoke(app, ["-o", "json", "registry", "dispatches"])
         assert result.exit_code == 0
         payload = json.loads(result.output)
-        assert set(payload) == {"dispatches", "misses", "freshness"}
+        assert set(payload) == {"dispatches", "misses", "delegations", "freshness"}
         assert payload["misses"]["terraform"]["count"] == 1
+
+    def test_registry_dispatches_shows_delegations_with_model_coverage(self, tmp_path: Path) -> None:
+        """#657 : la délégation mesurée doit apparaître dans le même rapport."""
+        from grimoire.core.standard_generation import TRACES_DIR
+        from grimoire.traces.ledger import DELEGATION_TAG, TraceLedger
+        from grimoire.traces.schemas import TraceOutcome
+
+        ledger = TraceLedger(tmp_path / TRACES_DIR)
+        ledger.record(
+            run_id="sess-1",
+            workflow_instance_id="",
+            mission_id="",
+            task_id="GAO-x",
+            recipe_id="grimoire.delegation",
+            outcome=TraceOutcome.SUCCESS,
+            started_at="2026-01-01T00:00:00+00:00",
+            agent_id="general-purpose",
+            model="claude-sonnet-4-6",
+            tags=[DELEGATION_TAG],
+        )
+        ledger.record(
+            run_id="sess-2",
+            workflow_instance_id="",
+            mission_id="",
+            task_id="GAO-x",
+            recipe_id="grimoire.delegation",
+            outcome=TraceOutcome.SUCCESS,
+            started_at="2026-01-02T00:00:00+00:00",
+            agent_id="general-purpose",
+            model="",
+            tags=[DELEGATION_TAG],
+        )
+        with patch("grimoire.tools._common.find_project_root", return_value=tmp_path):
+            text_result = runner.invoke(app, ["registry", "dispatches"])
+            json_result = runner.invoke(app, ["-o", "json", "registry", "dispatches"])
+        assert text_result.exit_code == 0
+        assert "general-purpose" in text_result.output
+        payload = json.loads(json_result.output)
+        assert payload["delegations"]["general-purpose"] == {
+            "count": 2,
+            "with_model_count": 1,
+            "last_model": "",
+            "last_seen": "2026-01-02T00:00:00+00:00",
+        }
 
     def test_registry_dispatches_json_freshness_is_info_without_history(self, tmp_path: Path) -> None:
         """Issue #396 : sans agent connu ni historique, la fraîcheur n'est pas jugée."""

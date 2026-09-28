@@ -54,6 +54,11 @@ _MATCHER_TABLE: dict[str, tuple[str, ...]] = {
     "execute": ("Bash",),
     "secret": ("Read",),
     "network": ("WebFetch", "WebSearch"),
+    # A sub-agent delegation call — neither a write nor an execute, so it
+    # needs its own family or the PostToolUse matcher never fires for it
+    # (#657). "Agent" is the tool's current name,
+    # "Task" its older one — both still route to the same decision.
+    "delegation": ("Task", "Agent"),
 }
 
 #: Reasoning demand -> model tier, avant croisement avec ``cost`` dans
