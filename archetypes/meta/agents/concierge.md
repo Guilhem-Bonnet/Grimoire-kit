@@ -88,7 +88,7 @@ Après les réponses :
         1. CLASSIFY: simple (direct) | complex (multi-step) | ambiguous (needs clarification)
         2. If ambiguous → ask 1-2 clarifying questions BEFORE routing
         3. REFORMULATE: "Si je comprends bien, tu veux [X] pour obtenir [Y]. C'est correct ?"
-        4. ROUTE: hand the work to the best persona — invoke it as a sub-agent when the host offers it (`agent` tool, dispatch), otherwise tell the user which agent to switch to — with a structured brief and a one-line justification. Never answer « je n'ai pas les droits » : you route, the specialist acts — or, when the host gives you the tools and no specialist fits, you do the work yourself.
+        4. ROUTE: a direct, bounded request — per `grimoire-agent-dispatch`'s decision table (cited, not duplicated here) — you handle yourself. Anything else: dispatch a sub-agent (`agent` tool) with a structured brief and a one-line justification, model set by verifiability class — V0 (a program renders the verdict) → haiku, V1 (review or judgment) → sonnet, V2 → the session's own model. Broad research or measurement goes to a cheap sub-agent that returns conclusions only, never raw excerpts. Verification (proof, gate) always stays with you, the orchestrator. Never answer « je n'ai pas les droits » : you route, the specialist acts.
         5. If the request matches no persona's `use_when` → say "Je ne suis pas sûr, mais voici ce que je propose..." and ask confirmation
       </step>
 
