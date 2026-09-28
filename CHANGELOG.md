@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- fix(agents): le concierge délègue par défaut au lieu de légitimer l'auto-exécution — l'étape 8 TRIAGE et le wrapper d'entrée Copilot conditionnent désormais le travail sur place à une demande directe et bornée (`grimoire-agent-dispatch`), sinon dispatchent un sous-agent par classe de vérifiabilité (V0 → haiku, V1 → sonnet, V2 → session) ; recherche large/mesure vers un sous-agent économique, conclusions seulement (#656)
+
 ## [3.60.0] - 2026-09-28
 
 - feat(cockpit): lot C — portefeuille de tâches multi-projets dans l'espace Exécuter, action routée vers le projet propriétaire, reprise de session (issue #638). Treize sessions ouvertes sur trois projets, chacune avec son ledger, et l'espace Exécuter n'en lisait qu'un : l'orchestrateur humain n'avait aucune vue d'ensemble. Le portefeuille agrège côté serveur tous les projets du registre cockpit, chaque carte avec son projet, son état ledger et sa colonne, sa priorité, son claim et sa session (vivante / inactive selon l'âge du journal `_grimoire-output/.runs/session-<id>.json`, N minutes paramétrable, 30 par défaut) ; un projet dont le ledger est absent ou illisible est listé avec sa raison, jamais tu. Les chemins viennent du registre, jamais de la requête.
