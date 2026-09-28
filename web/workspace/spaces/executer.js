@@ -27,8 +27,24 @@
 // sur son détail brut. Drill-down depuis l'inspecteur d'une carte (« Voir la
 // timeline ») ou depuis `ctx.params = { task, view: 'timeline' }` qu'un
 // `goto('executer', …)` externe (Observer) peut poser.
+//
+// Portefeuille (#638, lot C) : la portée « Tous les projets » lit
+// `api.portfolioTasks()` — toutes les tâches de tous les projets du registre
+// cockpit, agrégées côté serveur — avec une puce projet par carte, la session
+// qui la porte (point + mot : vivante / inactive), sa priorité et ses
+// consignes non lues quand le champ existe. Les cartes se clé-ent par
+// (projet, id) : deux ledgers peuvent dériver le même identifiant d'un même
+// titre. Une action depuis le portefeuille passe par
+// `api.portfolioTaskAction(id, action, body, slug)` — le `TaskService` du
+// projet propriétaire, gate compris — et « Reprendre la session » ne fait
+// que copier `claude --resume <id>` (hôte Claude Code) ou afficher
+// l'identifiant : jamais d'exécution depuis la webview (ADR-007).
 
 const STYLE_ID = 'ex-styles';
+
+// Portée et filtres du portefeuille — au niveau du module, comme
+// `timelineFilter` : revenir sur l'espace garde le dernier réglage.
+const scope = { mode: 'project', state: '', slug: '', live: false };
 
 // Colonnes du standard, dans l'ordre normatif (grimoire.missions.board.BOARD_LIFECYCLE).
 const LIFECYCLE = ['proposed', 'ready', 'in_progress', 'blocked', 'review', 'accepted', 'released', 'archived'];
@@ -124,6 +140,14 @@ function injectStyles() {
     .ex-session { font-family: var(--mono); font-size: var(--t-min); color: var(--ink2); display: flex; align-items: center; gap: 6px; }
     .ex-session code { font-family: var(--mono); font-size: var(--t-min); padding: 1px 4px; border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); word-break: break-all; }
     .ex-refusal { color: var(--bad); font-size: var(--t-s); margin-top: 6px; }
+    .ex-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); font-size: var(--t-s); color: var(--ink2); }
+    .ex-toolbar label { display: inline-flex; align-items: center; gap: 6px; }
+    .ex-toolbar select, .ex-toolbar input[type="checkbox"] { font-size: var(--t-s); }
+    .ex-toolbar .ex-count { margin-left: auto; color: var(--ink3); font-size: var(--t-min); }
+    .ex-notice { display: flex; flex-direction: column; gap: 4px; padding: 6px var(--sp-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); font-size: var(--t-s); }
+    .ex-card-project { font-size: var(--t-s); color: var(--ink2); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .ex-card-project .chip { font-size: var(--t-s); }
+    .ex-session-cmd { margin: 6px 0 0; padding: 6px var(--sp-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--e2); font-family: var(--mono); font-size: var(--t-s); white-space: pre-wrap; word-break: break-all; }
     .ex-badge { font-size: var(--t-min); border: 1px solid var(--acc); color: var(--acc); border-radius: var(--r); padding: 0 6px; }
     .ex-directive { display: flex; flex-direction: column; gap: 2px; padding: 6px var(--sp-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); margin-bottom: 6px; font-size: var(--t-s); }
     .ex-directive.unread { border-color: var(--acc); }
@@ -175,14 +199,46 @@ function nextColumn(column) {
   return index >= 0 && index < LIFECYCLE.length - 1 ? LIFECYCLE[index + 1] : null;
 }
 
-function taskCard(task, onSelect) {
+// Priorité effective (lot B la calcule côté serveur : `effective_priority`) — point + mot.
+const PORTFOLIO_PRIORITY_LABEL = { low: 'priorité basse', medium: 'priorité moyenne', high: 'priorité haute', critical: 'priorité critique' };
+const PORTFOLIO_PRIORITY_DOT = { low: '', medium: '', high: 'warn', critical: 'bad' };
+
+// La ligne « portefeuille » d'une carte : projet, session (point + mot),
+// priorité, consignes non lues — chaque état est un point ET un mot, jamais
+// la couleur seule (revue 2026-09).
+function portfolioRow(task) {
+  const line = document.createElement('div');
+  line.className = 'ex-card-project';
+  const project = document.createElement('span');
+  project.className = 'chip';
+  project.append(dot('acc'), text('span', null, task.project?.name || task.project?.slug || 'projet'));
+  line.append(project);
+  const session = task.session;
+  if (session && session.id) {
+    line.append(row(dot(session.live ? 'ok' : ''), text('span', null, session.live ? 'session vivante' : 'session inactive')));
+  } else {
+    line.append(text('span', 'lbl', 'aucune session'));
+  }
+  if (task.priority) {
+    line.append(row(dot(PORTFOLIO_PRIORITY_DOT[task.priority] || ''), text('span', null, PORTFOLIO_PRIORITY_LABEL[task.priority] || `priorité ${task.priority}`)));
+  }
+  if (task.unread_directives) {
+    line.append(row(dot('warn'), text('span', null, `${task.unread_directives} consigne(s) non lue(s)`)));
+  }
+  return line;
+}
+
+function taskCard(task, onSelect, portfolio = false) {
   const card = document.createElement('div');
   card.className = 'ex-card';
   card.tabIndex = 0;
-  card.addEventListener('click', () => onSelect(task.id));
-  card.addEventListener('keydown', (e) => { if (e.key === 'Enter') onSelect(task.id); });
+  card.dataset.project = task.project?.slug || '';
+  card.dataset.task = task.id;
+  card.addEventListener('click', () => onSelect(task));
+  card.addEventListener('keydown', (e) => { if (e.key === 'Enter') onSelect(task); });
 
   card.append(text('div', 'ex-card-title', task.title || task.id));
+  if (portfolio) card.append(portfolioRow(task));
   const meta = text('div', 'ex-card-meta lbl', '');
   if (task.risk_profile) meta.append(dot(RISK_DOT[task.risk_profile] || ''));
   meta.append(text('span', null, [task.owner || 'sans owner', task.type, task.risk_profile].filter(Boolean).join(' · ')));
@@ -219,13 +275,13 @@ function taskCard(task, onSelect) {
   btn.type = 'button';
   btn.className = 'btn';
   btn.textContent = 'Voir la porte';
-  btn.addEventListener('click', (e) => { e.stopPropagation(); onSelect(task.id); });
+  btn.addEventListener('click', (e) => { e.stopPropagation(); onSelect(task); });
   nextRow.append(btn);
   card.append(nextRow);
   return card;
 }
 
-function renderBoard(root, ctx, tasks, groups, onSelect) {
+function renderBoard(root, ctx, tasks, groups, onSelect, portfolio = false) {
   const board = document.createElement('div');
   board.className = 'ex-board';
   const byColumn = new Map();
@@ -258,7 +314,7 @@ function renderBoard(root, ctx, tasks, groups, onSelect) {
     if (!inColumn.length) {
       body.append(text('span', null, 'vide'));
     } else {
-      for (const task of inColumn) body.append(taskCard(task, onSelect));
+      for (const task of inColumn) body.append(taskCard(task, onSelect, portfolio));
     }
     col.append(body);
     board.append(col);
@@ -266,37 +322,61 @@ function renderBoard(root, ctx, tasks, groups, onSelect) {
   root.append(board);
 }
 
-function renderList(root, ctx, tasks, onSelect) {
+function renderList(root, ctx, tasks, onSelect, portfolio = false) {
   const wrap = document.createElement('div');
   wrap.className = 'ex-list-wrap';
   const table = document.createElement('table');
   table.className = 'ex-list';
   const thead = document.createElement('thead');
   const headRow = document.createElement('tr');
-  for (const label of ['Tâche', 'État', 'Priorité', 'Owner', 'Session', 'Preuves', 'Prochaine porte']) headRow.append(text('th', null, label));
+  const columns = portfolio
+    ? ['Projet', 'Tâche', 'État', 'Session', 'Priorité', 'Owner', 'Prochaine porte']
+    : ['Tâche', 'État', 'Priorité', 'Owner', 'Session', 'Preuves', 'Prochaine porte'];
+  for (const label of columns) headRow.append(text('th', null, label));
   thead.append(headRow);
   table.append(thead);
   const tbody = document.createElement('tbody');
   const ordered = [...tasks].sort((a, b) => (LIFECYCLE.indexOf(a.board) - LIFECYCLE.indexOf(b.board)) || byPriority(a, b));
   for (const task of ordered) {
     const tr = document.createElement('tr');
-    tr.addEventListener('click', () => onSelect(task.id));
+    tr.dataset.project = task.project?.slug || '';
+    tr.dataset.task = task.id;
+    tr.addEventListener('click', () => onSelect(task));
+    if (portfolio) tr.append(text('td', null, task.project?.name || task.project?.slug || '—'));
     tr.append(text('td', null, task.title || task.id));
     const stateCell = document.createElement('td');
     stateCell.append(row(dot(task.board === 'blocked' ? 'bad' : (task.board === 'accepted' || task.board === 'released' ? 'ok' : '')), text('span', null, COLUMN_LABEL[task.board] || task.board)));
     tr.append(stateCell);
-    const prio = task.effective_priority || 'medium';
-    const prioCell = document.createElement('td');
-    prioCell.append(row(dot(PRIORITY_DOT[prio] || ''), text('span', null, PRIORITY_LABEL[prio] || prio)));
-    tr.append(prioCell);
+    if (portfolio) {
+      const sessionCell = document.createElement('td');
+      const session = task.session;
+      if (session && session.id) {
+        sessionCell.append(row(dot(session.live ? 'ok' : ''), text('span', null, session.live ? 'vivante' : 'inactive')));
+      } else {
+        sessionCell.append(text('span', 'lbl', '—'));
+      }
+      tr.append(sessionCell);
+      const prioCell = document.createElement('td');
+      if (task.priority) prioCell.append(row(dot(PORTFOLIO_PRIORITY_DOT[task.priority] || ''), text('span', null, task.priority)));
+      else prioCell.append(text('span', 'lbl', '—'));
+      tr.append(prioCell);
+    } else {
+      const prio = task.effective_priority || 'medium';
+      const prioCell = document.createElement('td');
+      prioCell.append(row(dot(PRIORITY_DOT[prio] || ''), text('span', null, PRIORITY_LABEL[prio] || prio)));
+      tr.append(prioCell);
+    }
     tr.append(text('td', null, task.owner || '—'));
-    const sessionCell = document.createElement('td');
-    if (task.session_id) sessionCell.append(sessionLine(task)); else sessionCell.append(text('span', 'lbl', '—'));
-    tr.append(sessionCell);
-    const evCell = document.createElement('td');
-    evCell.append(row(...(task.expected_evidence || []).slice(0, 3).map((e) => chip(e, false))));
-    if (!(task.expected_evidence || []).length) evCell.append(text('span', 'lbl', '—'));
-    tr.append(evCell);
+    if (!portfolio) {
+      const sessionCell = document.createElement('td');
+      if (task.session_id) sessionCell.append(sessionLine(task));
+      else sessionCell.append(text('span', 'lbl', '—'));
+      tr.append(sessionCell);
+      const evCell = document.createElement('td');
+      evCell.append(row(...(task.expected_evidence || []).slice(0, 3).map((e) => chip(e, false))));
+      if (!(task.expected_evidence || []).length) evCell.append(text('span', 'lbl', '—'));
+      tr.append(evCell);
+    }
     const next = nextColumn(task.board);
     tr.append(text('td', 'lbl', next ? `→ ${COLUMN_LABEL[next]}` : '—'));
     tbody.append(tr);
@@ -375,7 +455,7 @@ function timelineFilterBar(sources, onChange) {
 }
 
 async function renderTimeline(root, ctx, task) {
-  const trace = await ctx.api.taskTrace(task.id).catch(() => null);
+  const trace = await ctx.api.taskTrace(task.id, task.project?.slug).catch(() => null);
   const wrap = document.createElement('div');
   wrap.className = 'ex-timeline';
   const allEntries = trace?.entries || [];
@@ -416,20 +496,62 @@ async function renderTimeline(root, ctx, task) {
 
 // ── Inspecteur ────────────────────────────────────────────────────────────
 
-async function renderInspector(ctx, taskId, onWritten, onTimeline) {
-  // Le vidage attend la fin des trois lectures : reconstruire tout
-  // l'inspecteur en un seul geste synchrone une fois les données prêtes,
-  // plutôt que de le laisser vide pendant l'aller-retour réseau — utile pour
-  // un changement de tâche sélectionnée ou la transition d'état (« Réaliser »
-  // ci-dessous). Le pilotage humain (`renderSteering`, issue #638 lot B) ne
-  // passe plus par ce chemin pour ses propres écritures : il réécrit son
-  // conteneur en place et ne redéclenche qu'un rafraîchissement « board seul »
-  // (`draw({ skipInspector: true })`), donc ne revient jamais vider ce
-  // panneau sous un geste qui suit.
+// « Reprendre la session » (#638) : copie la commande sur l'hôte Claude Code,
+// affiche l'identifiant ailleurs — jamais d'exécution depuis la webview.
+function sessionBlock(session) {
+  const block = document.createElement('div');
+  block.className = 'ex-insp-block ex-session';
+  block.append(text('h4', null, 'Session'));
+  block.append(row(
+    dot(session.live ? 'ok' : ''),
+    text('span', null, `${session.live ? 'vivante' : 'inactive'} · ${session.id}` + (session.host ? ` · ${session.host}` : '')),
+  ));
+  if (session.updated_at) block.append(text('div', 'lbl', `dernier signe : ${session.updated_at}`));
+  const feedback = text('div', 'lbl', '');
+  if (session.resume_command) {
+    const cmd = document.createElement('pre');
+    cmd.className = 'ex-session-cmd';
+    cmd.textContent = session.resume_command;
+    block.append(cmd);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn';
+    btn.textContent = 'Reprendre la session (copier la commande)';
+    btn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(session.resume_command);
+        feedback.textContent = 'commande copiée — à coller dans un terminal';
+      } catch {
+        feedback.textContent = 'copie impossible ici : recopiez la commande ci-dessus';
+      }
+    });
+    block.append(btn);
+  } else {
+    block.append(text('p', 'lbl', "cet hôte n'a pas de commande de reprise connue : reprenez la session par son identifiant"));
+  }
+  block.append(feedback);
+  return block;
+}
+
+// `task` porte l'id et, en portefeuille, `project.slug` (cible des lectures et
+// des actions) et `session` (bloc « Session »). `portfolio` choisit la porte
+// d'écriture : `portfolioTaskAction` (dérogation nommée, tout projet du
+// registre) plutôt que `taskAction` (projet de lancement seulement). Le
+// vidage attend la fin des trois lectures : reconstruire tout l'inspecteur en
+// un seul geste synchrone une fois les données prêtes, plutôt que de le
+// laisser vide pendant l'aller-retour réseau — utile pour un changement de
+// tâche sélectionnée ou la transition d'état (« Réaliser » ci-dessous). Le
+// pilotage humain (`renderSteering`, issue #638 lot B) ne passe plus par ce
+// chemin pour ses propres écritures : il réécrit son conteneur en place et ne
+// redéclenche qu'un rafraîchissement « board seul » (`draw({ skipInspector:
+// true })`), donc ne revient jamais vider ce panneau sous un geste qui suit.
+async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = false) {
+  const taskId = task.id;
+  const project = portfolio ? task.project?.slug : undefined;
   const [detail, trace, recall] = await Promise.all([
-    ctx.api.task(taskId).catch(() => null),
-    ctx.api.taskTrace(taskId).catch(() => null),
-    ctx.api.taskRecall(taskId).catch(() => null),
+    ctx.api.task(taskId, project).catch(() => null),
+    ctx.api.taskTrace(taskId, project).catch(() => null),
+    ctx.api.taskRecall(taskId, project).catch(() => null),
   ]);
   ctx.inspector.replaceChildren();
   if (!detail) {
@@ -439,6 +561,10 @@ async function renderInspector(ctx, taskId, onWritten, onTimeline) {
 
   ctx.inspector.append(text('h3', null, detail.title || detail.id));
   ctx.inspector.append(text('div', 'lbl mono', detail.id));
+  if (portfolio) {
+    ctx.inspector.append(text('div', 'lbl', `Projet : ${task.project?.name || task.project?.slug || '—'}`));
+    if (task.session && task.session.id) ctx.inspector.append(sessionBlock(task.session));
+  }
 
   // Finition (lot 4.3, issue #561) : lecture seule ici — le champ existe déjà
   // au ledger et à la projection board (ADR-007 point 6) mais aucune
@@ -590,19 +716,26 @@ async function renderInspector(ctx, taskId, onWritten, onTimeline) {
       gateRow.append(reasonInput);
     }
 
+    // En portefeuille, le verrou `readOnly` général ne s'applique pas : l'action
+    // suit la dérogation nommée du serveur (`is_registry_scoped_write`), qui
+    // route vers le projet propriétaire — même précédent que « Migrer les
+    // tâches » (#560) et que les boutons Accepter/Refuser de Piloter.
+    const locked = !portfolio && ctx.host.readOnly;
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'btn pri';
-    btn.textContent = ctx.host.readOnly ? 'Écriture désactivée (cockpit)' : `Réaliser : → ${COLUMN_LABEL[target] || target}`;
-    btn.disabled = ctx.host.readOnly;
-    if (ctx.host.readOnly) {
-      gateRow.append(text('div', 'lbl', "le cockpit est en lecture seule : ouvrez l'atelier de ce projet pour agir"));
+    btn.textContent = locked ? 'Écriture désactivée (cockpit)' : `Réaliser : → ${COLUMN_LABEL[target] || target}`;
+    btn.disabled = locked;
+    if (locked) {
+      gateRow.append(text('div', 'lbl', "le cockpit est en lecture seule : ouvrez l'atelier de ce projet, ou la portée « Tous les projets »"));
     }
     btn.addEventListener('click', async () => {
       const [action, body, command] = actionFor(target, detail, reasonInput?.value || '');
-      ctx.dock.echo(command);
+      ctx.dock.echo(portfolio && project ? `${command}  # projet ${project}` : command);
       try {
-        const result = await ctx.api.taskAction(taskId, action, body);
+        const result = portfolio
+          ? await ctx.api.portfolioTaskAction(taskId, action, body, project)
+          : await ctx.api.taskAction(taskId, action, body);
         feedback.replaceChildren();
         if (result && result.blocked) {
           const refusals = (result.refusals || []).map((r) => `${r.evidence} — ${r.reason} (${r.remedy})`);
@@ -795,6 +928,94 @@ function actionFor(target, task, reason) {
   return ['move', { to: state }, `grimoire task move ${task.id} --to ${state}`];
 }
 
+// La barre de portée et de filtres du portefeuille (#638). Sur un hôte qui
+// n'est pas le cockpit, la portée « Tous les projets » reste visible mais
+// désactivée avec sa raison : l'atelier mono-projet ne résout pas `?project=`,
+// donc il ne saurait ni lire ni router vers un autre projet du registre.
+function scopeToolbar(ctx, portfolio, onChange) {
+  const bar = document.createElement('div');
+  bar.className = 'ex-toolbar';
+  const scopeLabel = document.createElement('label');
+  scopeLabel.append(text('span', null, 'Portée'));
+  const scopeSelect = document.createElement('select');
+  scopeSelect.className = 'input';
+  scopeSelect.dataset.role = 'scope';
+  for (const [value, label] of [['project', 'Ce projet'], ['portfolio', 'Tous les projets']]) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    if (value === scope.mode) option.selected = true;
+    if (value === 'portfolio' && ctx.host.kind !== 'cockpit') {
+      option.disabled = true;
+      option.title = 'portefeuille : cockpit seulement (grimoire cockpit serve)';
+    }
+    scopeSelect.append(option);
+  }
+  scopeSelect.addEventListener('change', () => { scope.mode = scopeSelect.value; onChange(); });
+  scopeLabel.append(scopeSelect);
+  bar.append(scopeLabel);
+
+  if (scope.mode === 'portfolio' && portfolio) {
+    const stateLabel = document.createElement('label');
+    stateLabel.append(text('span', null, 'État'));
+    const stateSelect = document.createElement('select');
+    stateSelect.className = 'input';
+    stateSelect.dataset.role = 'state';
+    const stateOptions = [['', 'Tous les états'], ...LIFECYCLE.map((c) => [c, COLUMN_LABEL[c]])];
+    for (const [value, label] of stateOptions) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = label;
+      if (value === scope.state) option.selected = true;
+      stateSelect.append(option);
+    }
+    stateSelect.addEventListener('change', () => { scope.state = stateSelect.value; onChange(); });
+    stateLabel.append(stateSelect);
+
+    const projectLabel = document.createElement('label');
+    projectLabel.append(text('span', null, 'Projet'));
+    const projectSelect = document.createElement('select');
+    projectSelect.className = 'input';
+    projectSelect.dataset.role = 'project';
+    const projectOptions = [['', 'Tous les projets'], ...(portfolio.projects || []).map((p) => [p.slug, p.name || p.slug])];
+    for (const [value, label] of projectOptions) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = label;
+      if (value === scope.slug) option.selected = true;
+      projectSelect.append(option);
+    }
+    projectSelect.addEventListener('change', () => { scope.slug = projectSelect.value; onChange(); });
+    projectLabel.append(projectSelect);
+
+    const liveLabel = document.createElement('label');
+    const liveBox = document.createElement('input');
+    liveBox.type = 'checkbox';
+    liveBox.dataset.role = 'live';
+    liveBox.checked = scope.live;
+    liveBox.addEventListener('change', () => { scope.live = liveBox.checked; onChange(); });
+    liveLabel.append(liveBox, text('span', null, `Sessions vivantes (< ${portfolio.live_minutes} min)`));
+
+    const summary = portfolio.summary || {};
+    const count = text('span', 'ex-count', `${portfolio.count} / ${summary.tasks ?? 0} tâche(s) · ${summary.live ?? 0} session(s) vivante(s) · ${summary.readable ?? 0}/${summary.projects ?? 0} projet(s) lisible(s)`);
+    bar.append(stateLabel, projectLabel, liveLabel, count);
+  }
+  return bar;
+}
+
+// Les projets du registre que le portefeuille n'a pas pu lire — nommés avec
+// leur raison, jamais tus (leçon #264, même règle que l'aperçu mémoire).
+function unreadableNotice(portfolio) {
+  const failed = (portfolio.projects || []).filter((p) => p.state !== 'ok');
+  if (!failed.length) return null;
+  const notice = document.createElement('div');
+  notice.className = 'ex-notice';
+  for (const p of failed) {
+    notice.append(row(dot(p.state === 'no_ledger' ? 'warn' : 'bad'), text('span', null, `${p.name || p.slug} (${p.slug}) — ${p.reason || p.state}`)));
+  }
+  return notice;
+}
+
 export async function mount(root, ctx) {
   injectStyles();
   const wrap = document.createElement('div');
@@ -803,9 +1024,13 @@ export async function mount(root, ctx) {
 
   // `ctx.params` porte ce qu'un `goto('executer', { task, view })` a demandé —
   // Observer s'en sert pour ouvrir directement la timeline d'une tâche depuis
-  // un span OTel qui en porte l'identifiant (#139).
+  // un span OTel qui en porte l'identifiant (#139). `scope: 'portfolio'`
+  // ouvre directement le portefeuille (#638).
   let view = ctx.params.view === 'timeline' ? 'timeline' : 'board4';
-  let selected = ctx.params.task || null;
+  // Sélection par (projet, id) : en portée projet, `project` reste vide.
+  let selected = ctx.params.task ? { id: ctx.params.task, project: '' } : null;
+  if (ctx.params.scope === 'portfolio' && ctx.host.kind === 'cockpit') scope.mode = 'portfolio';
+  if (ctx.host.kind !== 'cockpit') scope.mode = 'project';
   const board = await ctx.api.tasks();
 
   const VIEW_LABELS = [
@@ -815,7 +1040,10 @@ export async function mount(root, ctx) {
     { id: 'timeline', label: 'Timeline' },
   ];
 
-  if (!board.ledger) {
+  const setView = (id) => { view = id; draw(); };
+  const redraw = () => { selected = null; draw(); };
+
+  function renderNoLedger() {
     ctx.docbar.setBreadcrumb([ctx.host.project || 'projet', 'Exécuter']);
     // Avant cette issue, un early-return ici évitait tout appel à
     // `setViews` : les boutons de vue disparaissaient purement et
@@ -831,6 +1059,7 @@ export async function mount(root, ctx) {
       null,
       () => {},
     );
+    wrap.append(scopeToolbar(ctx, null, redraw));
     wrap.append(ctx.empty(
       'Exécuter',
       board.note || "Ce projet n'a pas encore de Mission Ledger.",
@@ -870,36 +1099,56 @@ export async function mount(root, ctx) {
       wrap.append(migrateBtn, feedback);
     }
     ctx.dock.echo('grimoire task add');
-    return;
   }
-
-  const setView = (id) => { view = id; draw(); };
 
   async function draw(opts = {}) {
     wrap.replaceChildren();
-    const fresh = await ctx.api.tasks();
-    const tasks = fresh.tasks || [];
-    ctx.docbar.setBreadcrumb([ctx.host.project || 'projet', 'Exécuter']);
+    const portfolioMode = scope.mode === 'portfolio';
+    if (!portfolioMode && !board.ledger) {
+      renderNoLedger();
+      return;
+    }
+    let tasks = [];
+    let portfolio = null;
+    if (portfolioMode) {
+      const params = {};
+      if (scope.state) params.state = scope.state;
+      if (scope.slug) params.slug = scope.slug;
+      if (scope.live) params.live = '1';
+      portfolio = await ctx.api.portfolioTasks(Object.keys(params).length ? params : undefined);
+      tasks = portfolio.tasks || [];
+    } else {
+      const fresh = await ctx.api.tasks();
+      tasks = fresh.tasks || [];
+    }
+    ctx.docbar.setBreadcrumb([portfolioMode ? 'Tous les projets' : (ctx.host.project || 'projet'), 'Exécuter']);
     ctx.docbar.setViews(VIEW_LABELS, view, setView);
     if (ctx.signal.aborted) return;
 
-    const onSelect = async (id) => {
-      selected = id;
+    wrap.append(scopeToolbar(ctx, portfolio, redraw));
+    if (portfolio) {
+      const notice = unreadableNotice(portfolio);
+      if (notice) wrap.append(notice);
+    }
+
+    const same = (t) => selected && t.id === selected.id && (!portfolioMode || (t.project?.slug || '') === selected.project);
+    const onSelect = async (task) => {
+      selected = { id: task.id, project: task.project?.slug || '' };
       draw();
     };
 
     if (view === 'board4') {
-      renderBoard(wrap, ctx, tasks, GROUPS4, onSelect);
+      renderBoard(wrap, ctx, tasks, GROUPS4, onSelect, portfolioMode);
     } else if (view === 'board8') {
-      renderBoard(wrap, ctx, tasks, LIFECYCLE.map((id) => ({ id, label: COLUMN_LABEL[id], cols: [id] })), onSelect);
+      renderBoard(wrap, ctx, tasks, LIFECYCLE.map((id) => ({ id, label: COLUMN_LABEL[id], cols: [id] })), onSelect, portfolioMode);
     } else if (view === 'liste') {
-      renderList(wrap, ctx, tasks, onSelect);
+      renderList(wrap, ctx, tasks, onSelect, portfolioMode);
     } else if (view === 'timeline') {
-      const task = tasks.find((t) => t.id === selected) || tasks[0];
+      const task = tasks.find(same) || tasks[0];
       if (!task) {
         wrap.append(ctx.empty('Timeline', 'Aucune tâche à tracer.', 'grimoire task list'));
       } else {
-        selected = task.id;
+        selected = { id: task.id, project: task.project?.slug || '' };
         await renderTimeline(wrap, ctx, task);
       }
     }
@@ -911,13 +1160,14 @@ export async function mount(root, ctx) {
     // panneau que l'utilisateur est peut-être déjà en train de réutiliser.
     if (opts.skipInspector) return;
 
-    if (selected && tasks.some((t) => t.id === selected)) {
-      const onTimeline = (id) => { selected = id; setView('timeline'); };
-      await renderInspector(ctx, selected, draw, onTimeline);
-      ctx.dock.echo(`grimoire task show ${selected}`);
+    const current = tasks.find(same);
+    if (current) {
+      const onTimeline = (id) => { selected = { id, project: current.project?.slug || '' }; setView('timeline'); };
+      await renderInspector(ctx, current, draw, onTimeline, portfolioMode);
+      ctx.dock.echo(`grimoire task show ${current.id}`);
     } else {
       ctx.inspector.replaceChildren(text('p', 'lbl', 'Sélectionnez une tâche pour voir sa porte suivante.'));
-      ctx.dock.echo('grimoire task board');
+      ctx.dock.echo(portfolioMode ? 'grimoire task list --all-projects' : 'grimoire task board');
     }
   }
 
