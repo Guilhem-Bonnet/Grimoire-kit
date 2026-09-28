@@ -1419,6 +1419,7 @@ def registry_dispatches(ctx: typer.Context) -> None:
     ledger = TraceLedger(root / TRACES_DIR)
     counts = ledger.agent_dispatch_counts()
     misses = ledger.agent_miss_counts()
+    delegations = ledger.delegation_counts()
 
     cfg: GrimoireConfig | None = None
     try:
@@ -1447,68 +1448,17 @@ def registry_dispatches(ctx: typer.Context) -> None:
             "too_recent": [e.name for e in freshness.too_recent_entries],
         }
 
-    if _get_fmt(ctx) == "json":
-        typer.echo(
-            json.dumps(
-                {"dispatches": counts, "misses": misses, "freshness": freshness_payload},
-                indent=2,
-                ensure_ascii=False,
-            )
-        )
-        return
+    from grimoire.cli._registry_dispatches_report import render as _render_dispatches_report
 
-    if not counts:
-        console.print("[yellow]Aucun choix d'agent enregistré.[/yellow]")
-    else:
-        tbl = Table(title="Choix d'agent observés")
-        tbl.add_column("Agent", style="bold")
-        tbl.add_column("Occurrences", justify="right")
-        tbl.add_column("Dernier choix")
-
-        for agent_id, stats in sorted(counts.items(), key=lambda kv: kv[1]["count"], reverse=True):
-            tbl.add_row(agent_id, str(stats["count"]), stats["last_seen"] or "—")
-
-        console.print(tbl)
-
-    if not misses:
-        console.print("[yellow]Aucun non-choix enregistré.[/yellow]")
-    else:
-        miss_tbl = Table(title="Non-choix observés — spécialité manquante")
-        miss_tbl.add_column("Spécialité", style="bold")
-        miss_tbl.add_column("Occurrences", justify="right")
-        miss_tbl.add_column("Dernier non-choix")
-
-        for specialty, stats in sorted(misses.items(), key=lambda kv: kv[1]["count"], reverse=True):
-            miss_tbl.add_row(specialty, str(stats["count"]), stats["last_seen"] or "—")
-
-        console.print(miss_tbl)
-
-    console.print()
-    if freshness is None:
-        console.print("[dim]Fraîcheur des agents : non évaluée (liste des agents indisponible).[/dim]")
-    elif not freshness.judged:
-        span = freshness.journal_span_days
-        if span is None:
-            console.print(f"[dim]Fraîcheur des agents : aucun historique — non évaluée (seuil {freshness.threshold_days} j).[/dim]")
-        else:
-            console.print(
-                f"[dim]Fraîcheur des agents : journal de {span} j, insuffisant pour le seuil de "
-                f"{freshness.threshold_days} j — non évaluée.[/dim]"
-            )
-    elif not freshness.stale_entries:
-        console.print(f"[green]Fraîcheur des agents : aucun agent sans invocation depuis {freshness.threshold_days} j.[/green]")
-    else:
-        never = [e.name for e in freshness.stale_entries if e.last_seen is None]
-        if never:
-            console.print(f"[yellow]Agents jamais choisis (seuil {freshness.threshold_days} j) : {', '.join(never)}[/yellow]")
-        stale_seen = [e for e in freshness.stale_entries if e.last_seen is not None]
-        if stale_seen:
-            parts = ", ".join(f"{e.name} (il y a {e.days_since} j)" for e in stale_seen)
-            console.print(f"[yellow]Agents sans invocation récente (seuil {freshness.threshold_days} j) : {parts}[/yellow]")
-
-    if freshness is not None and freshness.too_recent_entries:
-        names = ", ".join(e.name for e in freshness.too_recent_entries)
-        console.print(f"[dim]Agents trop récents pour juger (seuil {freshness.threshold_days} j) : {names}[/dim]")
+    _render_dispatches_report(
+        console,
+        fmt=_get_fmt(ctx),
+        counts=counts,
+        misses=misses,
+        delegations=delegations,
+        freshness=freshness,
+        freshness_payload=freshness_payload,
+    )
 
 
 # ── grimoire diff ─────────────────────────────────────────────────────────────────
