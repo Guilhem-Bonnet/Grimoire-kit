@@ -271,12 +271,16 @@ export const api = {
   // pas `post` : dérogation nommée (`is_registry_scoped_write`), ouverte à
   // tout projet du registre comme `migrateStandardTasks`, gate de preuve
   // compris côté `TaskService` du projet visé (ADR-007).
-  portfolioTaskAction: (id, action, body, project) =>
-    postOpen(
+  portfolioTaskAction: (id, action, body, project) => {
+    if (!project) {
+      return Promise.reject(new Error('portfolioTaskAction: project manquant'));
+    }
+    return postOpen(
       WS + 'portfolio/tasks/' + encodeURIComponent(id) + '/' + action +
         '?project=' + encodeURIComponent(project),
       { ...(body || {}), project },
-    ),
+    );
+  },
   // Bouton « Migrer les tâches » de l'espace Exécuter (ADR-007, issue #559,
   // #560) : importe dans le Mission Ledger les tâches d'un board du standard
   // scaffoldé avant le lot 4.1, ou jamais migré — `tasks_view()` ne l'expose

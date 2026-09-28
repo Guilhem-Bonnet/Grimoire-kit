@@ -257,6 +257,9 @@ def task_list(
         _list_all_projects(ctx, project_root, status=status, project=project, live=live, live_minutes=live_minutes)
         return
 
+    if project is not None or live or live_minutes != 30:
+        raise typer.BadParameter("--project/--live/--live-minutes exigent --all-projects.")
+
     tasks = _service(project_root, ledger_root).list_tasks(mission, status)
     if _fmt(ctx) == "json":
         typer.echo(json.dumps([t.to_dict() for t in tasks], indent=2, ensure_ascii=False))

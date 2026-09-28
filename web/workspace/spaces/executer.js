@@ -152,8 +152,6 @@ function nextColumn(column) {
   return index >= 0 && index < LIFECYCLE.length - 1 ? LIFECYCLE[index + 1] : null;
 }
 
-// Clé d'une carte : (projet, id) — jamais l'id seul (voir l'en-tête).
-const cardKey = (task) => `${task.project?.slug || ''}::${task.id}`;
 // Priorité effective (lot B la calcule côté serveur : `effective_priority`) — point + mot.
 const PORTFOLIO_PRIORITY_LABEL = { low: 'priorité basse', medium: 'priorité moyenne', high: 'priorité haute', critical: 'priorité critique' };
 const PORTFOLIO_PRIORITY_DOT = { low: '', medium: '', high: 'warn', critical: 'bad' };

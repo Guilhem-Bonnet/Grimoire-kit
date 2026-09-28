@@ -176,16 +176,24 @@ def _session_for(
     live_minutes: int,
 ) -> dict[str, Any] | None:
     """La session qui travaille sur la carte : le ``session_id`` du claim (lot
-    A) d'abord, sinon le journal le plus récent qui nomme la tâche."""
+    A) d'abord, sinon le journal le plus récent (par horodatage, pas par ordre
+    lexicographique) qui nomme la tâche. Le repli ne joue que si le claim ne
+    désigne aucune session — un claim dont le journal est absent ne se voit
+    jamais prêter le journal d'une autre session (elle mélangerait un
+    ``session_id`` avec un ``updated_at``/``journal`` qui ne lui appartient
+    pas, faussant ``live`` et l'affichage)."""
     raw_claim = card.get("claim")
     claim: dict[str, Any] = raw_claim if isinstance(raw_claim, dict) else {}
     session_id = str(claim.get("session_id") or "")
     journal = sessions.get(session_id) if session_id else None
-    if journal is None:
+    if not session_id:
         candidates = [j for j in sessions.values() if j["task_id"] and j["task_id"] == card.get("id")]
         if candidates:
-            journal = max(candidates, key=lambda j: j["updated_at"])
-            session_id = session_id or journal["session_id"]
+            journal = max(
+                candidates,
+                key=lambda j: _parse_iso(j["updated_at"]) or datetime.min.replace(tzinfo=UTC),
+            )
+            session_id = journal["session_id"]
     if not session_id:
         return None
     updated_at = journal["updated_at"] if journal else None

@@ -83,3 +83,16 @@ def test_sans_all_projects_le_comportement_historique_est_intact(registre: dict[
 
     assert res.exit_code == 0, res.output
     assert [t["id"] for t in json.loads(res.stdout)] == [registre["a"]]
+
+
+@pytest.mark.parametrize("argv", [["--project", "alpha"], ["--live"], ["--live-minutes", "5"]])
+def test_filtres_portefeuille_sans_all_projects_echouent(
+    registre: dict[str, str], tmp_path: Path, argv: list[str]
+) -> None:
+    """`--project`/`--live`/`--live-minutes` sans `--all-projects` : le filtre serait
+    silencieusement ignoré (revue Copilot #641) — on échoue au lieu de laisser croire
+    qu'il a été appliqué."""
+    res = runner.invoke(task_app, ["list", "--project-root", str(tmp_path / "a"), *argv])
+
+    assert res.exit_code != 0
+    assert "--all-projects" in res.output

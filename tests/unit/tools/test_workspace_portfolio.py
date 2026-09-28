@@ -202,6 +202,58 @@ class TestPortfolioTasks:
         assert {k.value: v for k, v in board._PRIORITY_BY_RISK.items()} == wp.PRIORITY_BY_RISK
 
 
+class TestSessionFor:
+    """Revue Copilot #641 : `_session_for` ne doit jamais mélanger le
+    `session_id` d'un claim avec le journal (`updated_at`/`host`) d'une
+    AUTRE session, et compare les journaux par horodatage réel, pas par
+    ordre lexicographique de chaîne."""
+
+    def test_un_claim_dont_le_journal_manque_n_herite_pas_du_journal_d_une_autre_session(self) -> None:
+        now = datetime.now(UTC)
+        sessions = {
+            "sess-autre": {
+                "session_id": "sess-autre",
+                "updated_at": (now - timedelta(minutes=1)).isoformat(),
+                "task_id": "GAO-x-001",
+                "host": "host-github-copilot",
+                "journal": "_grimoire-output/.runs/session-sess-autre.json",
+            }
+        }
+        card = {"id": "GAO-x-001", "claim": {"session_id": "sess-manquante", "host_id": "host-claude-code-cli"}}
+
+        session = wp._session_for(card, sessions, now=now, live_minutes=30)
+
+        assert session["id"] == "sess-manquante"
+        assert session["journal"] is None
+        assert session["live"] is False, "aucun journal pour cette session : pas d'updated_at à comparer"
+        assert session["host"] == "host-claude-code-cli", "l'hôte du claim, jamais celui de sess-autre"
+
+    def test_le_journal_le_plus_recent_est_choisi_par_horodatage_pas_par_ordre_de_chaine(self) -> None:
+        sessions = {
+            # 08:00 UTC (10:00 à +02:00) : plus grand lexicographiquement...
+            "sess-tot": {
+                "session_id": "sess-tot",
+                "updated_at": "2026-09-28T10:00:00+02:00",
+                "task_id": "GAO-x-002",
+                "host": "host-a",
+                "journal": "a",
+            },
+            # ... que 09:00 UTC, pourtant postérieur.
+            "sess-tard": {
+                "session_id": "sess-tard",
+                "updated_at": "2026-09-28T09:00:00+00:00",
+                "task_id": "GAO-x-002",
+                "host": "host-b",
+                "journal": "b",
+            },
+        }
+        card = {"id": "GAO-x-002", "claim": {}}
+
+        session = wp._session_for(card, sessions, now=datetime(2026, 9, 28, 9, 30, tzinfo=UTC), live_minutes=600)
+
+        assert session["id"] == "sess-tard"
+
+
 class TestResolveRegistryRoot:
     def test_un_slug_du_registre_rend_sa_racine(self, fleet: dict[str, object]) -> None:
         assert wp.resolve_registry_root("projet-a") == Path(str(fleet["a"])).resolve()
