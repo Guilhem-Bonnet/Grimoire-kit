@@ -90,9 +90,19 @@ class TaskMove:
         return tuple(str(r) for r in self.verdict.refusals)
 
     def to_dict(self) -> dict[str, Any]:
+        from grimoire.missions.dispatch_advice import dispatch_advice
+
         data = self.task.to_dict()
         data["transition"] = f"{self.previous.value} → {self.task.status.value}"
         data["board"] = board_status_of(self.task.status)
+        # #654 : `task_claim` (MCP et CLI) ne rendait ni la classe
+        # de vérifiabilité ni le modèle qu'elle recommande — l'agent qui
+        # réclame devait relire `task show` à part, ou deviner. Même calcul
+        # que `grimoire task dispatch` (`missions.dispatch.start_tier_for`
+        # part de la même classe), jamais une seconde classification.
+        advice = dispatch_advice(self.task)
+        data["verifiability"] = advice["verifiability"]
+        data["recommended_model"] = advice["recommended_model"]
         # Même champ que TaskNote.to_dict() (issue #638 lot B) : un consommateur
         # qui rejoue cette réponse pour rafraîchir son propre affichage (le
         # cockpit réécrit son bloc de pilotage humain en place plutôt que de

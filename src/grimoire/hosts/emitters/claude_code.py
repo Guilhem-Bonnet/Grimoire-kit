@@ -33,6 +33,7 @@ from grimoire.hosts.surface import (
     SkillSpec,
     ToolVerb,
 )
+from grimoire.missions.dispatch_advice import RECOMMENDED_MODEL_BY_CLASS
 from grimoire.missions.verifiability import Verifiability
 
 HOST_ALIAS = "claude"
@@ -126,6 +127,12 @@ def _max_turns_for(agent: AgentSpec) -> int:
     return agent.max_turns if agent.max_turns is not None else _DEFAULT_MAX_TURNS
 
 
+def _model_label(verifiability: Verifiability) -> str:
+    """Le modèle d'une classe, lu dans ``RECOMMENDED_MODEL_BY_CLASS`` (#654) — une seule table dans le kit."""
+    model = RECOMMENDED_MODEL_BY_CLASS[verifiability]
+    return "le modèle de la session (le tien)" if model == "session" else f"`{model}`"
+
+
 def _dispatch_policy_section() -> str:
     """Section "Politique de dispatch" (issue #329, révisée #655) — quel
     modèle pour quelle tâche.
@@ -161,9 +168,12 @@ sous-agent sans l'outil `Agent`, avant de recommander une persona dans ta
 réponse finale — choisis son modèle selon la classe de
 vérifiabilité de la tâche (celle que `grimoire task dispatch` calcule) :
 
-- **V0** — {Verifiability.V0.explanation} → `haiku`.
-- **V1** — {Verifiability.V1.explanation} → `sonnet`.
-- **V2** — {Verifiability.V2.explanation} → le modèle de la session (le tien).
+- **V0** — {Verifiability.V0.explanation} → {_model_label(Verifiability.V0)}.
+- **V1** — {Verifiability.V1.explanation} → {_model_label(Verifiability.V1)}.
+- **V2** — {Verifiability.V2.explanation} → {_model_label(Verifiability.V2)}.
+
+Sur une tâche réclamée, `task_claim` et `task_context` rendent déjà cette classe
+et `recommended_model` : suis-les plutôt que de reclasser.
 
 Exige de chaque sous-agent, en fin de réponse, un bloc ```grimoire-uncertainties```
 portant une liste JSON d'objets `{{"where": ..., "what": ..., "why": ...}}` —
