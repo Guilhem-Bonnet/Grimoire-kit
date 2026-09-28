@@ -207,10 +207,29 @@ def _record_session_mutation(hook: HookInput, facts: ToolFacts, task_id: str) ->
         return
 
 
+def _record_untrusted_content(hook: HookInput, facts: ToolFacts) -> None:
+    """Issue #645 lot 5.2 : mémorise un extrait de sortie d'outil externe.
+
+    Avant toute question d'enrôlement, comme :func:`_record_temporal_approval`
+    juste au-dessus : la mémoire que :mod:`.tool_policy` consulte doit exister
+    même sur un projet qui n'a pas adopté le standard — ``decide_tool_policy``
+    lui-même ne conditionne jamais son verdict à l'enrôlement. Best-effort,
+    déjà garanti par :func:`grimoire.hosts.decisions.session_memory.record_tool_output`
+    lui-même ; le ``try`` ici couvre l'import.
+    """
+    try:
+        from grimoire.hosts.decisions.session_memory import record_tool_output
+
+        record_tool_output(hook, facts)
+    except Exception:
+        return
+
+
 def decide_evidence_trace(hook: HookInput) -> Decision:
     """Post tool use: remind the agent that a write owes a line of proof."""
     facts = classify_tool(hook.tool_name, hook.tool_input)
     _record_temporal_approval(hook, facts)
+    _record_untrusted_content(hook, facts)
     if not is_standard_enrolled(hook.project_root):
         return Decision()
     task_id = active_task_id(hook.project_root)

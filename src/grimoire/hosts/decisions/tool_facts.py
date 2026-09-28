@@ -99,6 +99,14 @@ _READ_ONLY_GIT_SUBCOMMANDS = frozenset(
     {"status", "diff", "log", "show", "blame", "ls-files", "rev-parse", "describe", "shortlog"}
 )
 
+#: ``find`` primaries that act instead of just reporting (issue #643): a bare
+#: ``find`` only prints, but any of these delete, run an arbitrary command, or
+#: prompt before doing so, so ``find`` in ``_READ_ONLY_LEADING_COMMANDS`` is
+#: only correct once a segment is checked for these too.
+_FIND_MUTATING_PRIMARIES = frozenset(
+    {"-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls"}
+)
+
 #: ``gh <resource> <verb> ...`` — the verb (second or third word) decides,
 #: independently of the resource (``pr``, ``issue``, ``repo``, ``run``…):
 #: ``gh pr view``, ``gh issue list``, ``gh run view`` never mutate.
@@ -127,6 +135,8 @@ def _is_read_only_segment(segment: str) -> bool:
     if verb == "gh":
         tail = words[idx + 1 : idx + 3]
         return any(word in _READ_ONLY_GH_VERBS for word in tail)
+    if verb == "find":
+        return not any(word in _FIND_MUTATING_PRIMARIES for word in words[idx + 1 :])
     return verb in _READ_ONLY_LEADING_COMMANDS
 
 
@@ -181,12 +191,17 @@ def _strip_heredoc_bodies(command: str) -> str:
 
     A heredoc body is data the command writes to a file. The shell never runs
     it, so nothing inside it can be a destructive action.
+
+    Issue #643: the body starts *after the opening line ends*, not right after
+    ``<<TAG``. A redirection can follow ``<<TAG`` on that same line (``cat
+    <<EOF > file``), and matching from ``<<TAG`` swallowed it along with the
+    body it precedes — turning a classified write into a false read-only.
     """
     out = command
     for match in _HEREDOC_OPEN_RE.finditer(command):
         tag = re.escape(match.group(2))
         body = re.compile(
-            rf"({re.escape(match.group(0))}).*?^[ \t]*{tag}[ \t]*$",
+            rf"({re.escape(match.group(0))}[^\n]*\n).*?^[ \t]*{tag}[ \t]*$",
             re.DOTALL | re.MULTILINE,
         )
         out = body.sub(r"\1", out, count=1)

@@ -19,7 +19,17 @@ def decide_task_context(hook: HookInput) -> Decision:
     the active task, this is also where the claim learns the session that
     carries it (:func:`link_session`) — the agent that claimed never knew its
     own ``session_id``; only the host payload does.
+
+    Issue #645 lot 5.2 : c'est aussi ici, avant toute question d'enrôlement,
+    que la mémoire de session bornée apprend le tour humain — les seuls mots
+    qui vaudront autorisation pour :mod:`.tool_policy` (voir
+    :mod:`.session_memory`). Un projet non enrôlé garde la même protection
+    que :func:`.tool_policy.decide_tool_policy` lui-même, qui ne conditionne
+    jamais son propre verdict à l'enrôlement.
     """
+    from grimoire.hosts.decisions.session_memory import record_user_message
+
+    record_user_message(hook)
     if not is_standard_enrolled(hook.project_root):
         return Decision()
     active = resolve_active_task(hook.project_root)
