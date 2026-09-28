@@ -237,11 +237,18 @@ def _service(project_root: Path) -> Any:
 
 
 def _task_json(task: Any) -> dict[str, Any]:
-    from grimoire.missions.board import board_status_of
+    from grimoire.missions.board import board_status_of, priority_of
     from grimoire.missions.session_link import session_fields
 
     data: dict[str, Any] = task.to_dict()
     data["board"] = board_status_of(task.status)
+    # Issue #638 lot B : la priorité effective (déclarée, sinon dérivée du
+    # `risk_profile` comme le board) et le compte des consignes non lues —
+    # ce que le sélecteur de priorité et le badge « consigne non lue » de
+    # l'espace Exécuter affichent.
+    data["effective_priority"] = priority_of(task)
+    data["directives_pending"] = len(task.pending_directives)
+    data["directives_unacknowledged"] = len(task.unacknowledged_directives)
     # Issue #638 lot A : la session qui porte la carte, et comment la reprendre.
     data.update(session_fields(task))
     return data
@@ -262,13 +269,14 @@ def tasks_view(project_root: Path, *, mission: str | None = None, status: str | 
     `grimoire task add` — voir ``POST /api/workspace/tasks/migrate-standard``
     (``workspace_routes.py``).
     """
-    from grimoire.missions.board import BOARD_LIFECYCLE
+    from grimoire.missions.board import BOARD_LIFECYCLE, PRIORITIES
     from grimoire.missions.schemas import TaskState
 
     service = _service(project_root)
     payload: dict[str, Any] = {
         "columns": list(BOARD_LIFECYCLE),
         "states": [s.value for s in TaskState],
+        "priorities": list(PRIORITIES),
         "ledger": bool(service.has_ledger),
         "tasks": [],
         "count": 0,
