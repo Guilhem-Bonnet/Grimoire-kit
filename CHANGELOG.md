@@ -7,6 +7,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- feat(missions): la classe de vérifiabilité et le modèle recommandé au claim et au contexte (#654). En mode interactif (Claude Code, Copilot — le défaut), l'hôte exécute directement, sans jamais passer par `grimoire task dispatch` ; la seule correspondance V0/V1/V2 → haiku/sonnet/session vivait en prose dans la persona d'entrée (`hosts.emitters.claude_code`), à charge du modèle de session de la relire et de l'appliquer lui-même, et `task_claim` ne rendait même pas la classe de la tâche qu'il réclame.
+  - `src/grimoire/missions/dispatch_advice.py` (nouveau) : `dispatch_advice(task)` calcule `verifiability` (même format que `verifiability.as_dict`) et `recommended_model`, depuis `verifiability.classify` — la même source que `missions.dispatch.start_tier_for` (`grimoire task dispatch`), jamais une seconde classification. Table opposable `RECOMMENDED_MODEL_BY_CLASS` (V0→haiku, V1→sonnet, V2→session) exposée pour qu'un lot ultérieur y fasse pointer la prose de la persona d'entrée plutôt que de la recopier.
+  - `task_claim` (MCP et CLI, via `TaskMove.to_dict()`) et `task_show`/`task_context` (MCP, via `_task_json`) rendent désormais les deux champs ; `grimoire task show --json`/texte pareillement ; `grimoire task claim/move/block/close` ajoutent une ligne compacte `· <classe> → <modèle>` en sortie texte.
+  - Une tâche sans critère exploitable (aucun critère, ou critère ambigu) reste V2 → `session`, sans exception (`classify_criteria`, déjà existant).
+  - Non retenu : `grimoire task context` en CLI (bundle du standard hérité, dérivé du board YAML brut, pas d'un `MissionTask` — coupler `core.agentic_standard` à `missions` pour ce seul champ aurait dépassé la portée du lot).
+  - Rouge-avant / vert-après : `tests/unit/missions/test_dispatch_advice.py`.
+
 ## [3.60.0] - 2026-09-28
 
 - feat(cockpit): lot C — portefeuille de tâches multi-projets dans l'espace Exécuter, action routée vers le projet propriétaire, reprise de session (issue #638). Treize sessions ouvertes sur trois projets, chacune avec son ledger, et l'espace Exécuter n'en lisait qu'un : l'orchestrateur humain n'avait aucune vue d'ensemble. Le portefeuille agrège côté serveur tous les projets du registre cockpit, chaque carte avec son projet, son état ledger et sa colonne, sa priorité, son claim et sa session (vivante / inactive selon l'âge du journal `_grimoire-output/.runs/session-<id>.json`, N minutes paramétrable, 30 par défaut) ; un projet dont le ledger est absent ou illisible est listé avec sa raison, jamais tu. Les chemins viennent du registre, jamais de la requête.
