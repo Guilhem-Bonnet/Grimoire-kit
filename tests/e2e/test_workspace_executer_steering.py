@@ -103,13 +103,17 @@ def test_executer_priorite_consigne_et_annulation_depuis_l_inspecteur(workspace:
         inspector.get_by_text(task_id, exact=True).wait_for()
 
         # Priorité : le sélecteur montre la valeur effective, la changer écrit au ledger.
+        # `expect_response` attend la vraie réponse HTTP de la route `prioritize` —
+        # jamais un `wait_for_function` sur un prédicat `fetch(...).then(...)` : ce
+        # dernier ne s'exécute pas dans un contexte que Playwright ré-évalue tant
+        # que la promesse n'est pas résolue, il l'observe une seule fois et la
+        # traite comme déjà vraie (la promesse elle-même est « truthy ») — aucune
+        # synchronisation réelle, juste une course gagnée la plupart du temps.
         select = inspector.locator("select[data-role='priority']")
         assert select.input_value() == "medium"
-        select.select_option("critical")
-        workspace.wait_for_function(
-            "(id) => fetch('/api/workspace/tasks/' + id).then(r => r.json()).then(t => t.priority === 'critical')",
-            arg=task_id,
-        )
+        with workspace.expect_response(lambda r: "/prioritize" in r.url) as prioritize_info:
+            select.select_option("critical")
+        assert prioritize_info.value.ok
         assert TaskService(real_project).require(task_id).priority == "critical"
 
         # Consigne : posée depuis la zone, elle apparaît « non lue » et la carte porte le badge.
@@ -122,15 +126,18 @@ def test_executer_priorite_consigne_et_annulation_depuis_l_inspecteur(workspace:
         assert [d.text for d in TaskService(real_project).require(task_id).directives] == ["lis d'abord le test de fait"]
 
         # Annuler : inerte sans raison, refusé par le serveur jamais contourné.
+        # Même correctif que pour la priorité : on attend la réponse HTTP réelle
+        # de `POST .../cancel`, pas un `wait_for_function` sur une promesse qui
+        # n'est jamais vraiment attendue (cause de la course #GAO-e-e2e-instab-001 :
+        # sans cette synchronisation, la lecture directe de `TaskService` juste
+        # après pouvait devancer l'écriture serveur, encore en vol).
         cancel = inspector.locator("button[data-role='cancel-submit']")
         assert cancel.is_disabled()
         inspector.locator("input[data-role='cancel-reason']").fill("doublon d'une autre carte")
         assert cancel.is_enabled()
-        cancel.click()
-        workspace.wait_for_function(
-            "(id) => fetch('/api/workspace/tasks/' + id).then(r => r.json()).then(t => t.status === 'cancelled')",
-            arg=task_id,
-        )
+        with workspace.expect_response(lambda r: "/cancel" in r.url) as cancel_info:
+            cancel.click()
+        assert cancel_info.value.ok
         task = TaskService(real_project).require(task_id)
         assert task.status.value == "cancelled"
         # Une tâche annulée n'offre plus le bloc « Annuler » — colonne terminale ;
