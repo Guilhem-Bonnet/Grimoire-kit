@@ -33,6 +33,7 @@ from grimoire.hosts.surface import (
     SkillSpec,
     ToolVerb,
 )
+from grimoire.missions.dispatch_advice import RECOMMENDED_MODEL_BY_CLASS
 from grimoire.missions.verifiability import Verifiability
 
 HOST_ALIAS = "claude"
@@ -126,25 +127,53 @@ def _max_turns_for(agent: AgentSpec) -> int:
     return agent.max_turns if agent.max_turns is not None else _DEFAULT_MAX_TURNS
 
 
+def _model_label(verifiability: Verifiability) -> str:
+    """Le modèle d'une classe, lu dans ``RECOMMENDED_MODEL_BY_CLASS`` (#654) — une seule table dans le kit."""
+    model = RECOMMENDED_MODEL_BY_CLASS[verifiability]
+    return "le modèle de la session (le tien)" if model == "session" else f"`{model}`"
+
+
 def _dispatch_policy_section() -> str:
-    """Section "Politique de dispatch" (issue #329) — quel modèle pour quelle tâche.
+    """Section "Politique de dispatch" (issue #329, révisée #655) — quel
+    modèle pour quelle tâche.
 
     Only the entry persona dispatches other personas as sub-agents (every
     other role "ne clos pas la tâche globale" — see the ``role`` branch
-    below), so only its file needs the rule. The three labels are quoted
-    from :class:`~grimoire.missions.verifiability.Verifiability`, not
-    paraphrased: the tier a sub-agent gets must never drift from what
-    ``grimoire task dispatch`` already computes for the same task from the
-    same source of truth.
+    below), so only its file needs the rule. But that file has two readers,
+    not one: the main loop reads it *in full*, in character, only when a
+    request is ambiguous enough to warrant it (see
+    ``grimoire.hosts.decisions.activation.entry_persona_context``) — there it
+    keeps the host's whole tool surface, including ``Agent``, and can act on
+    the rule below directly. The rarer path — Claude Code running this same
+    file as an isolated sub-agent — has no ``Agent`` tool at all: it cannot
+    dispatch, only *recommend* a model in its own final answer for whoever
+    dispatched it to act on. The wording covers both without two rules to
+    keep in sync: "choisis" reads as an instruction in the first case, a
+    recommendation in the second.
+
+    The three labels are quoted from
+    :class:`~grimoire.missions.verifiability.Verifiability`, not paraphrased:
+    the tier a sub-agent gets must never drift from what ``grimoire task
+    dispatch`` already computes for the same task from the same source of
+    truth. ``grimoire.hosts.decisions.activation._claude_dispatch_context``
+    imports this very function for the copy injected at every
+    ``SessionStart`` — the one the main loop actually sees on every session,
+    not only when it reads this file in full — so the two can never drift
+    apart either.
     """
     return f"""## Politique de dispatch
 
-Avant de dispatcher un sous-agent, choisis son modèle selon la classe de
+Avant de dispatcher un sous-agent — ou, si cette persona tourne elle-même en
+sous-agent sans l'outil `Agent`, avant de recommander une persona dans ta
+réponse finale — choisis son modèle selon la classe de
 vérifiabilité de la tâche (celle que `grimoire task dispatch` calcule) :
 
-- **V0** — {Verifiability.V0.explanation} → `haiku`.
-- **V1** — {Verifiability.V1.explanation} → `sonnet`.
-- **V2** — {Verifiability.V2.explanation} → le modèle de la session (le tien).
+- **V0** — {Verifiability.V0.explanation} → {_model_label(Verifiability.V0)}.
+- **V1** — {Verifiability.V1.explanation} → {_model_label(Verifiability.V1)}.
+- **V2** — {Verifiability.V2.explanation} → {_model_label(Verifiability.V2)}.
+
+Sur une tâche réclamée, `task_claim` et `task_context` rendent déjà cette classe
+et `recommended_model` : suis-les plutôt que de reclasser.
 
 Exige de chaque sous-agent, en fin de réponse, un bloc ```grimoire-uncertainties```
 portant une liste JSON d'objets `{{"where": ..., "what": ..., "why": ...}}` —

@@ -13,6 +13,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   - Une tâche sans critère exploitable (aucun critère, ou critère ambigu) reste V2 → `session`, sans exception (`classify_criteria`, déjà existant).
   - Non retenu : `grimoire task context` en CLI (bundle du standard hérité, dérivé du board YAML brut, pas d'un `MissionTask` — coupler `core.agentic_standard` à `missions` pour ce seul champ aurait dépassé la portée du lot).
   - Rouge-avant / vert-après : `tests/unit/missions/test_dispatch_advice.py`.
+- fix(hosts): la politique de dispatch (V0→`haiku`, V1→`sonnet`, V2→modèle de session) et le répertoire `subagent_type` → modèle atteignent désormais le contexte `SessionStart` de la boucle principale Claude Code, gatés sur cet hôte seul (`decide_activation` est partagé avec Copilot). Avant : la règle n'existait que dans `.claude/agents/<entrée>.md`, lu presque jamais par la boucle principale et sans effet quand il l'est (le concierge en sous-agent n'a pas l'outil `Agent`) — mesuré à 92 % de sous-agents dispatchés en `sonnet`, `haiku` presque jamais. La ligne « Frontière d'outils » du résumé de persona d'entrée ne se lit plus comme si elle bornait la boucle principale (#655).
 
 ## [3.60.0] - 2026-09-28
 
