@@ -116,6 +116,7 @@ def normalize_input(
     *,
     event: HookEvent | None = None,
     project_root: Path | None = None,
+    host_id: HostId | None = None,
 ) -> HookInput:
     """Flatten a host payload into the neutral :class:`HookInput`."""
     wire_event = _pick(payload, "hook_event_name", "hookEventName", "event", default="")
@@ -131,6 +132,7 @@ def normalize_input(
         agent_name=str(_pick(payload, "agent_name", "agentName", "subagent", default="") or ""),
         session_id=str(_pick(payload, "session_id", "sessionId", default="") or ""),
         stop_active=stop_active,
+        host=host_id.value if host_id is not None and host_id is not HostId.UNKNOWN else "",
         raw=dict(payload),
     )
 
@@ -318,7 +320,7 @@ def run_hook(
     decision_id: str | None = None,
 ) -> tuple[dict[str, Any], Decision, HookInput]:
     """Full path: normalise, decide, persist side effects, render."""
-    hook = normalize_input(payload, event=event, project_root=project_root)
+    hook = normalize_input(payload, event=event, project_root=project_root, host_id=host_id)
     resolved_decision = decision_id or DEFAULT_DECISION_BY_EVENT.get(hook.event, "")
     started_at = _now_iso()
     started = time.perf_counter()

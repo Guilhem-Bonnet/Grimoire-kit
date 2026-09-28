@@ -184,6 +184,7 @@ def task_add(
     mission: Annotated[str, typer.Option("--mission", help="Mission de rattachement.")] = "",
     owner: Annotated[str, typer.Option("--owner", help="Qui en répond.")] = "",
     evidence: Annotated[list[str] | None, typer.Option("--expect-evidence", help="Preuve attendue (répétable).")] = None,
+    ready: Annotated[bool, typer.Option("--ready", help="La rendre réclamable tout de suite (proposed → ready, gate compris).")] = False,
     project_root: _PROJECT_ROOT = Path(),
     ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
     actor: _ACTOR = "cli",
@@ -192,31 +193,29 @@ def task_add(
 
     Un critère d'acceptation au moins est exigé — c'est le ledger qui le
     réclame, pas cette commande : une tâche dont on ne sait pas dire quand
-    elle est finie ne peut pas être vérifiée, donc pas fermée.
+    elle est finie ne peut pas être vérifiée, donc pas fermée. Le même
+    service sert l'outil MCP ``task_add`` (issue #638).
     """
     from grimoire.core.exceptions import GrimoireError
+    from grimoire.missions.service import TaskRefusedError
 
     service = _service(project_root, ledger_root)
-    ledger = service.ledger
-    mission_id = mission
-    if not mission_id:
-        missions = ledger.list_missions()
-        if missions:
-            mission_id = missions[0].id
-        else:
-            created = ledger.create_mission(title="Travaux courants", origin="cli", created_by=actor)
-            mission_id = created.id
-            console.print(f"[dim]Mission créée : {mission_id} (aucune n'existait).[/dim]")
     try:
-        task = ledger.create_task(
-            mission_id, title, acceptance=tuple(acceptance), owner=owner,
-            expected_evidence=tuple(evidence or ()),
+        added = service.add(
+            title, tuple(acceptance), mission_id=mission, owner=owner,
+            expected_evidence=tuple(evidence or ()), actor=actor, ready=ready,
         )
+    except TaskRefusedError as refused:
+        _refuse(ctx, refused)
     except GrimoireError as exc:
         console.print(f"[red]✗[/red] {exc}")
         raise typer.Exit(1) from exc
-    service.project_board()
-    _emit_task(ctx, task, "proposed")
+    if _fmt(ctx) == "json":
+        typer.echo(json.dumps(added.to_dict(), indent=2, ensure_ascii=False))
+        return
+    if added.mission_created:
+        console.print(f"[dim]Mission créée : {added.mission_id} (aucune n'existait).[/dim]")
+    _emit_task(ctx, added.task, added.task.status.value)
 
 
 @task_app.command("list")

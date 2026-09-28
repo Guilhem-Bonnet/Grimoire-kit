@@ -603,11 +603,13 @@ def _task_service(project_path: str, ledger_root: str) -> Any:
 
 def _task_json(task: Any) -> dict[str, Any]:
     from grimoire.missions.board import board_status_of
+    from grimoire.missions.session_link import session_fields
     from grimoire.missions.verifiability import as_dict as verifiability_as_dict
 
     data: dict[str, Any] = task.to_dict()
     data["board"] = board_status_of(task.status)
     data["verifiability"] = verifiability_as_dict(task)
+    data.update(session_fields(task))
     return data
 
 
@@ -620,6 +622,52 @@ def _task_error(exc: Exception) -> str:
         # client que l'appel a échoué, alors qu'il a répondu.
         return json.dumps(exc.to_dict(), indent=2, ensure_ascii=False)
     return _tool_error({"error": str(exc)})
+
+
+@mcp.tool(annotations=_writes(destructive=False, idempotent=False))
+def task_add(
+    title: str,
+    acceptance: list[str],
+    owner: str = "",
+    mission: str = "",
+    expected_evidence: list[str] | None = None,
+    actor: str = "mcp-agent",
+    ready: bool = False,
+    project_path: str = ".",
+    ledger_root: str = "_grimoire-runtime-output/ledger",
+) -> str:
+    """Open a task in the Mission Ledger — the same service and validation as `grimoire task add`.
+
+    At least one non-blank acceptance criterion is required (the ledger refuses
+    otherwise, exactly as the CLI does). In a governed project, a session that
+    writes files without an active task is refused at Stop: open one here, then
+    `task_claim` it (issue #638).
+
+    Args:
+        title: What the task accomplishes.
+        acceptance: Acceptance criteria — at least one, none blank.
+        owner: Who answers for it. Required by the `proposed_to_ready` gate in governed profiles.
+        mission: Mission id. Empty string uses the ledger's first mission, or opens "Travaux courants".
+        expected_evidence: Evidence the task is expected to produce (optional).
+        actor: Who acts (default: "mcp-agent").
+        ready: Also move it `proposed → ready` so it can be claimed right away (through the gate).
+        project_path: Path to project root (default: current directory).
+        ledger_root: Mission Ledger directory, relative to the project root.
+    """
+    try:
+        added = _task_service(project_path, ledger_root).add(
+            title,
+            tuple(acceptance or ()),
+            mission_id=mission,
+            owner=owner,
+            expected_evidence=tuple(expected_evidence or ()),
+            actor=actor,
+            origin="mcp",
+            ready=ready,
+        )
+        return json.dumps(added.to_dict(), indent=2, ensure_ascii=False)
+    except (GrimoireError, OSError, ValueError) as exc:
+        return _task_error(exc)
 
 
 @mcp.tool(annotations=_reads())
