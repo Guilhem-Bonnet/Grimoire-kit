@@ -132,7 +132,7 @@ def _agent_file(agent: AgentSpec, surface: ProjectSurface, owned_skills: tuple[S
         # d'un modèle qui appelle l'outil. Décision (2026-09-25) : il reçoit
         # l'union des outils des personas qu'il route, plus `agent` — sur une
         # demande directe et bornée il agit lui-même, sinon il délègue
-        # (GAO-d-le-concier-001). Sur VS Code, déléguer exige l'outil `agent`
+        # (#656). Sur VS Code, déléguer exige l'outil `agent`
         # ET une liste `agents:`. Pas de `handoffs:` : un bouton par persona
         # après chaque réponse n'aide pas.
         union: list[str] = list(fields["tools"])
