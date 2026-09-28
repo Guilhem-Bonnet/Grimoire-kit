@@ -166,7 +166,14 @@ def _emit_move(ctx: typer.Context, move: Any) -> None:
             console.print(f"  - {line}")
         console.print(f"[dim]Profil « {move.verdict.strictness} » : signalé, non bloquant.[/dim]")
     task = move.task
-    console.print(f"[green]OK[/green] {task.id} — {task.title} [dim]({move.previous.value} → {task.status.value})[/dim]")
+    move_dict = move.to_dict()
+    verifiabilite = move_dict.get("verifiability") or {}
+    modele = move_dict.get("recommended_model")
+    resume = f" [dim]· {verifiabilite.get('class', '?')} → {modele}[/dim]" if modele else ""
+    console.print(
+        f"[green]OK[/green] {task.id} — {task.title} "
+        f"[dim]({move.previous.value} → {task.status.value})[/dim]{resume}"
+    )
 
 
 def _emit_task(ctx: typer.Context, task: Any, note: str = "") -> None:
@@ -346,17 +353,20 @@ def task_show(
     rapport de ``dispatch`` pour savoir si le vert précédent mérite un regard.
     """
     from grimoire.missions.board import board_status_of
+    from grimoire.missions.dispatch_advice import dispatch_advice
     from grimoire.missions.gates import GatesFileError, declared_transitions
-    from grimoire.missions.verifiability import as_dict as verifiability_as_dict
 
     service = _service(project_root, ledger_root)
     task = _require_task(service, task_id)
-    verifiabilite = verifiability_as_dict(task)
+    advice = dispatch_advice(task)
+    verifiabilite = advice["verifiability"]
+    modele_recommande = advice["recommended_model"]
     dispatch_events = [e for e in service.ledger.list_events(task_id) if e.event_type == "task.dispatched"]
     last_dispatch = dispatch_events[-1].payload if dispatch_events else None
     if _fmt(ctx) == "json":
         payload = task.to_dict()
         payload["verifiability"] = verifiabilite
+        payload["recommended_model"] = modele_recommande
         payload["last_dispatch"] = last_dispatch
         typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
         return
@@ -364,6 +374,7 @@ def task_show(
     console.print(f"  état    : {task.status.value} (board : {board_status_of(task.status)})")
     console.print(f"  accepte : {', '.join(task.acceptance) or '—'}")
     console.print(f"  vérifiabilité : {verifiabilite['class']} — {verifiabilite['explanation']}")
+    console.print(f"  modèle recommandé : {modele_recommande}")
     for entree in verifiabilite["criteria"]:
         motif = entree["pattern"] or "non reconnu"
         console.print(f"    [dim]- {escape(entree['criterion'])} → {motif}[/dim]")
