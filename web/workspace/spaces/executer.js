@@ -417,12 +417,21 @@ async function renderTimeline(root, ctx, task) {
 // ── Inspecteur ────────────────────────────────────────────────────────────
 
 async function renderInspector(ctx, taskId, onWritten, onTimeline) {
-  ctx.inspector.replaceChildren();
+  // Le vidage attend la fin des trois lectures : reconstruire tout
+  // l'inspecteur en un seul geste synchrone une fois les données prêtes,
+  // plutôt que de le laisser vide pendant l'aller-retour réseau — utile pour
+  // un changement de tâche sélectionnée ou la transition d'état (« Réaliser »
+  // ci-dessous). Le pilotage humain (`renderSteering`, issue #638 lot B) ne
+  // passe plus par ce chemin pour ses propres écritures : il réécrit son
+  // conteneur en place et ne redéclenche qu'un rafraîchissement « board seul »
+  // (`draw({ skipInspector: true })`), donc ne revient jamais vider ce
+  // panneau sous un geste qui suit.
   const [detail, trace, recall] = await Promise.all([
     ctx.api.task(taskId).catch(() => null),
     ctx.api.taskTrace(taskId).catch(() => null),
     ctx.api.taskRecall(taskId).catch(() => null),
   ]);
+  ctx.inspector.replaceChildren();
   if (!detail) {
     ctx.inspector.append(text('p', 'lbl', 'Tâche indisponible.'));
     return;
@@ -621,6 +630,24 @@ async function renderInspector(ctx, taskId, onWritten, onTimeline) {
 // geste est un `api.taskAction` ; le refus revient en 200 `blocked: true`.
 
 function renderSteering(ctx, detail, onWritten) {
+  // Conteneur dédié (issue #638, lot B, correctif de course résiduelle) :
+  // priorité, consignes et annulation vivent dans LEUR PROPRE bloc, que
+  // `send()` réécrit en place avec la réponse déjà en main plutôt que
+  // d'attendre le rafraîchissement externe de l'inspecteur (`onWritten`, qui
+  // refait un aller-retour réseau puis remplace tout l'inspecteur). Sans ce
+  // conteneur, un second geste (poser une consigne juste après avoir changé
+  // la priorité, ou annuler juste après une consigne) pouvait tomber dans la
+  // fenêtre où l'inspecteur venait d'être vidé pour ce second rendu externe :
+  // le clic ne trouvait plus de bouton où se poser, et rien n'était écrit
+  // côté serveur, sans erreur visible (`test_workspace_executer_steering.py`,
+  // course reproduite en CI sur `cancel` puis sur `comment`).
+  const container = document.createElement('div');
+  container.className = 'ex-steering-root';
+  renderSteeringInto(container, ctx, detail, onWritten);
+  ctx.inspector.append(container);
+}
+
+function renderSteeringInto(container, ctx, detail, onWritten) {
   const readOnly = ctx.host.readOnly;
   const feedback = document.createElement('div');
   const send = async (action, body, command) => {
@@ -633,8 +660,14 @@ function renderSteering(ctx, detail, onWritten) {
         feedback.append(text('div', 'ex-refusal', 'refusé : ' + refusals.join(' ; ')));
         return result;
       }
-      feedback.append(text('div', 'lbl', result.change || result.transition || 'fait'));
-      onWritten();
+      // Réécrit ce bloc en place avec `result` — la réponse porte déjà la
+      // tâche à jour (priorité, consignes, board) — au lieu d'attendre le
+      // rafraîchissement externe. Celui-ci reste déclenché (badges et tri du
+      // board), mais en mode « board seul » : il ne touche plus jamais ce
+      // conteneur, donc ne peut plus le vider sous un geste qui suit.
+      container.replaceChildren();
+      renderSteeringInto(container, ctx, result, onWritten);
+      onWritten({ skipInspector: true });
       return result;
     } catch (error) {
       feedback.replaceChildren(text('div', 'ex-refusal', 'échec : ' + error.message));
@@ -662,7 +695,7 @@ function renderSteering(ctx, detail, onWritten) {
     send('prioritize', { to: select.value }, `grimoire task prioritize ${detail.id} --to ${select.value}`);
   });
   prioBlock.append(row(select, text('span', 'lbl', detail.priority ? 'déclarée' : 'dérivée du profil de risque')));
-  ctx.inspector.append(prioBlock);
+  container.append(prioBlock);
 
   // Consignes.
   const dirBlock = document.createElement('div');
@@ -708,7 +741,7 @@ function renderSteering(ctx, detail, onWritten) {
     form.append(area, row(kind, btn));
     dirBlock.append(form);
   }
-  ctx.inspector.append(dirBlock);
+  container.append(dirBlock);
 
   // Annulation — sauf colonne terminale, et jamais proposée en lecture seule :
   // le cockpit ne montre pas un formulaire qu'il ne laisserait pas partir.
@@ -743,9 +776,9 @@ function renderSteering(ctx, detail, onWritten) {
       if (result && result.blocked && (result.refusals || []).some((r) => r.evidence === 'claim')) forceLabel.hidden = false;
     });
     cancelBlock.append(reason, forceLabel, btn);
-    ctx.inspector.append(cancelBlock);
+    container.append(cancelBlock);
   }
-  ctx.inspector.append(feedback);
+  container.append(feedback);
 }
 
 function actionFor(target, task, reason) {
@@ -842,7 +875,7 @@ export async function mount(root, ctx) {
 
   const setView = (id) => { view = id; draw(); };
 
-  async function draw() {
+  async function draw(opts = {}) {
     wrap.replaceChildren();
     const fresh = await ctx.api.tasks();
     const tasks = fresh.tasks || [];
@@ -870,6 +903,13 @@ export async function mount(root, ctx) {
         await renderTimeline(wrap, ctx, task);
       }
     }
+
+    // `{ skipInspector: true }` (issue #638, lot B) : le pilotage humain
+    // réécrit son propre bloc en place (`renderSteeringInto`) et ne déclenche
+    // ce rafraîchissement que pour le board (tri par priorité, badge
+    // consigne) — jamais pour reconstruire l'inspecteur par-dessus un
+    // panneau que l'utilisateur est peut-être déjà en train de réutiliser.
+    if (opts.skipInspector) return;
 
     if (selected && tasks.some((t) => t.id === selected)) {
       const onTimeline = (id) => { selected = id; setView('timeline'); };

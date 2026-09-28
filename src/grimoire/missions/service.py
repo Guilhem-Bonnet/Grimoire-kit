@@ -93,6 +93,17 @@ class TaskMove:
         data = self.task.to_dict()
         data["transition"] = f"{self.previous.value} → {self.task.status.value}"
         data["board"] = board_status_of(self.task.status)
+        # Même champ que TaskNote.to_dict() (issue #638 lot B) : un consommateur
+        # qui rejoue cette réponse pour rafraîchir son propre affichage (le
+        # cockpit réécrit son bloc de pilotage humain en place plutôt que de
+        # refaire un aller-retour réseau après `cancel`/`claim`/`move`/`close`)
+        # doit voir la même forme qu'après `prioritize`/`comment` — sans lui,
+        # la priorité déclarée reste correcte mais la priorité *effective*
+        # retombe sur son repli (medium), masquant une priorité critique tant
+        # qu'aucun autre rafraîchissement complet n'est venu la corriger.
+        data["effective_priority"] = priority_of(self.task)
+        data["directives_pending"] = len(self.task.pending_directives)
+        data["directives_unacknowledged"] = len(self.task.unacknowledged_directives)
         if self.advisories:
             data["advisories"] = list(self.advisories)
         if self.board_path is not None:
