@@ -47,6 +47,11 @@ class HookInput:
     stop_active: bool = False
     """True when the host is already re-running the agent because of a previous
     block. Blocking again here is how a session gets stuck in a loop."""
+    host: str = ""
+    """The host id (:class:`grimoire.bridges.schemas.HostId` value) the hook was
+    invoked for — ``grimoire-hook --host claude`` — or ``""`` when a decision is
+    run without a host (tests, direct calls). Read by the session ↔ task link
+    (issue #638): a resume command exists only for a host known to have one."""
     raw: dict[str, Any] = field(default_factory=dict)
 
 

@@ -7,8 +7,9 @@ from pathlib import Path
 from typing import Any
 
 from grimoire.core.claude_activation import activation_context_text
-from grimoire.core.standard_state import active_task_id
+from grimoire.core.standard_state import active_profile_id, resolve_active_task
 from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
+from grimoire.hosts.decisions.enrolment import BLOCKING_PROFILES, link_session, no_task_context
 from grimoire.hosts.decisions.record import _record_agent_dispatch
 
 
@@ -270,9 +271,22 @@ def decide_activation(hook: HookInput) -> Decision:
     function's shape (order, best-effort lines, session reset) is unchanged.
     """
     _reset_temporal_session(hook)
-    task_id = active_task_id(hook.project_root)
+    active = resolve_active_task(hook.project_root)
+    task_id = active.task_id
     governed = _is_governed(hook.project_root)
     scaffold_detail = _scaffold_active_task(hook.project_root, task_id) if governed else {}
+    # Issue #638 lot A : sous un profil qui refuse la clôture hors tâche, la
+    # session apprend dès son premier souffle qu'aucune tâche n'est en cours
+    # et comment en ouvrir une ; sinon, le claim actif apprend sa session.
+    enrolment = ""
+    link: dict[str, Any] = {}
+    if governed:
+        if active.source == "bootstrap":
+            profile = active_profile_id(hook.project_root)
+            if profile in BLOCKING_PROFILES:
+                enrolment = no_task_context(profile)
+        else:
+            link = link_session(hook, active)
     directive = (
         activation_context_text(hook.project_root, task_id=task_id)
         if governed
@@ -285,16 +299,18 @@ def decide_activation(hook: HookInput) -> Decision:
     providers_line = _providers_status_line(hook.project_root)
     proposals_line = _proposals_status_line(hook.project_root)
     context = "\n".join(
-        part for part in (persona, recall, directive, providers_line, proposals_line) if part
+        part for part in (persona, recall, enrolment, directive, providers_line, proposals_line) if part
     )
     return Decision(
         outcome=Outcome.ALLOW,
         context=context,
         detail={
             "task_id": task_id,
+            "task_source": active.source,
             "entry_agent": entry_name,
             "recall_injected": bool(recall),
             "governed": governed,
             **scaffold_detail,
+            **link,
         },
     )

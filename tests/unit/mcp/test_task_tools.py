@@ -38,7 +38,7 @@ from grimoire.missions.ledger import MissionLedger
 from grimoire.missions.schemas import TaskState
 from grimoire.missions.service import DEFAULT_LEDGER_RELPATH
 
-TASK_TOOLS = {"task_list_ready", "task_show", "task_claim", "task_update", "task_context", "task_recall"}
+TASK_TOOLS = {"task_add", "task_list_ready", "task_show", "task_claim", "task_update", "task_context", "task_recall"}
 ACCEPTATION = "un client MCP liste, reclame et clot une tache reelle"
 EVIDENCE = Path("_grimoire-runtime-output/evidence")
 BOARD = Path("_grimoire/standard/task-board.yaml")
@@ -153,7 +153,7 @@ def hook_nomme(projet: Path) -> str:
 
 # ── la surface existe pour un client ─────────────────────────────────────────
 
-def test_un_client_voit_les_six_outils() -> None:
+def test_un_client_voit_les_sept_outils() -> None:
     async def scenario(session: ClientSession) -> set[str]:
         return {tool.name for tool in (await session.list_tools()).tools}
 

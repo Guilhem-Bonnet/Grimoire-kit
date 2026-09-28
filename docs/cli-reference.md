@@ -407,7 +407,7 @@ prochain export l'écrase.
 | `grimoire task board export . --dry-run` | Afficher la projection sans écrire |
 | `grimoire task board export . --mission <id>` | N'exporter qu'une mission |
 | `grimoire task board export . -o <chemin>` | Écrire ailleurs que dans le board du standard |
-| `grimoire task add "<titre>" -a "<critère>" [--owner <qui>]` | Ouvrir une tâche (un critère d'acceptation au moins) |
+| `grimoire task add "<titre>" -a "<critère>" [--owner <qui>] [--ready]` | Ouvrir une tâche (un critère d'acceptation au moins) ; `--ready` la rend réclamable tout de suite, gate `proposed_to_ready` compris |
 | `grimoire task list [--status <état>] [--mission <id>]` | Lister les tâches et leur colonne de board |
 | `grimoire task show <id>` | Détailler une tâche et ce que chaque prochain pas exigera |
 | `grimoire task claim <id> [--actor <qui>] [--host <où>]` | Réclamer une tâche prête (`ready → claimed`) |
@@ -431,9 +431,10 @@ remède ; rien n'est écrit. Après une écriture acceptée, le board du standar
 reprojeté depuis le ledger si le projet est enrôlé (`_grimoire/standard/` présent)
 — plus besoin de relancer `task board export` pour qu'un claim se voie.
 
-Les mêmes gestes sont exposés aux agents par le serveur MCP (`task_list_ready`,
-`task_show`, `task_claim`, `task_update`, `task_context`) : même service, même
-gate, même refus. Voir [Intégration MCP](mcp-integration.md).
+Les mêmes gestes sont exposés aux agents par le serveur MCP (`task_add`,
+`task_list_ready`, `task_show`, `task_claim`, `task_update`, `task_context`) :
+même service (`TaskService.add` pour l'ouverture), même gate, même refus. Voir
+[Intégration MCP](mcp-integration.md).
 
 ### Vérifiabilité d'une tâche
 
