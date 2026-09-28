@@ -1266,6 +1266,178 @@ def test_a_broken_unguarded_project_is_told_not_blocked(project: Path) -> None:
     assert "non évaluables" in decision.context
 
 
+# ── Done gate (issue #644) ───────────────────────────────────────────────────
+
+
+def _make_gates_green(root: Path, task_id: str = "bootstrap") -> None:
+    """Scaffold the artifacts ``check_evidence_gates`` requires for *task_id*.
+
+    The done gate is orthogonal to the red/green evidence gate — it must be
+    tested against a governed closure that would otherwise be *allowed*, not
+    against the red-gate fixtures the tests above already cover.
+    """
+    from grimoire.core.standard_task_scaffold import scaffold_task_artifacts
+
+    scaffold_task_artifacts(root, task_id=task_id)
+
+
+def _append_bash_event(root: Path, task_id: str, command: str, exit_code: int | None) -> None:
+    from grimoire.core.standard_checks.evidence_journal import append_evidence_event, build_bash_event
+
+    append_evidence_event(root, task_id, build_bash_event(command, exit_code=exit_code))
+
+
+def _append_write_event(root: Path, task_id: str, path: str) -> None:
+    from grimoire.core.standard_checks.evidence_journal import append_evidence_event, build_file_write_event
+
+    append_evidence_event(root, task_id, build_file_write_event(path))
+
+
+def test_done_gate_says_nothing_without_any_mutation(governed: Path) -> None:
+    _set_task_in_progress(governed)
+    _make_gates_green(governed)
+    decision = decide_evidence_gate(HookInput(event=HookEvent.STOP, project_root=governed))
+    assert decision.outcome is Outcome.ALLOW
+    assert decision.context == ""
+    assert decision.detail["done_gate"] == {
+        "stale": False,
+        "reason": "no_mutation",
+        "enforce": False,
+        "blocked": False,
+        "capped": False,
+        "command_hint": "",
+        "last_mutation_ts": "",
+    }
+
+
+def test_done_gate_veto_dur_a_fresh_green_check_after_the_mutation_is_never_blocked(governed: Path) -> None:
+    """Veto dur : même en profil enforce, un check frais vert postérieur à la mutation gagne toujours."""
+    import os
+
+    os.environ["GRIMOIRE_DONE_GATE"] = "enforce"
+    try:
+        _set_task_in_progress(governed)
+        _make_gates_green(governed)
+        _append_write_event(governed, "bootstrap", "src/foo.py")
+        _append_bash_event(governed, "bootstrap", "pytest -q", 0)
+        decision = decide_evidence_gate(HookInput(event=HookEvent.STOP, project_root=governed, session_id="s-veto"))
+    finally:
+        del os.environ["GRIMOIRE_DONE_GATE"]
+    assert decision.outcome is Outcome.ALLOW
+    assert decision.detail["done_gate"]["stale"] is False
+    assert decision.detail["done_gate"]["reason"] == "green_check_after_mutation"
+
+
+def test_done_gate_flags_a_stale_mutation_but_stays_shadow_by_default(governed: Path) -> None:
+    _set_task_in_progress(governed)
+    _make_gates_green(governed)
+    _append_bash_event(governed, "bootstrap", "pytest -q", 0)
+    _append_write_event(governed, "bootstrap", "src/foo.py")
+    decision = decide_evidence_gate(HookInput(event=HookEvent.STOP, project_root=governed, session_id="s-shadow"))
+    assert decision.outcome is Outcome.ALLOW
+    assert decision.detail["done_gate"]["stale"] is True
+    assert decision.detail["done_gate"]["blocked"] is False
+    assert decision.detail["done_gate"]["enforce"] is False
+    assert "gate « fini »" in decision.context
+
+
+def test_done_gate_blocks_when_the_enforce_option_is_set(governed: Path) -> None:
+    import os
+
+    os.environ["GRIMOIRE_DONE_GATE"] = "enforce"
+    try:
+        _set_task_in_progress(governed)
+        _make_gates_green(governed)
+        _append_bash_event(governed, "bootstrap", "pytest -q", 0)
+        _append_write_event(governed, "bootstrap", "src/foo.py")
+        decision = decide_evidence_gate(HookInput(event=HookEvent.STOP, project_root=governed, session_id="s-enf"))
+    finally:
+        del os.environ["GRIMOIRE_DONE_GATE"]
+    assert decision.outcome is Outcome.BLOCK
+    assert decision.detail["done_gate"]["blocked"] is True
+    assert "postérieure au dernier check vert" in decision.reason
+    assert "pytest -q" in decision.reason
+
+
+def test_done_gate_never_fires_when_stop_is_already_active(governed: Path) -> None:
+    import os
+
+    os.environ["GRIMOIRE_DONE_GATE"] = "enforce"
+    try:
+        _set_task_in_progress(governed)
+        _make_gates_green(governed)
+        _append_bash_event(governed, "bootstrap", "pytest -q", 0)
+        _append_write_event(governed, "bootstrap", "src/foo.py")
+        decision = decide_evidence_gate(HookInput(event=HookEvent.STOP, project_root=governed, stop_active=True))
+    finally:
+        del os.environ["GRIMOIRE_DONE_GATE"]
+    assert decision.outcome is Outcome.ALLOW
+    assert "done_gate" not in decision.detail
+
+
+def test_done_gate_caps_a_task_cooldown_and_a_session_total(governed: Path) -> None:
+    """Un blocage par tâche toutes les 60 s, trois par session — au-delà, capped sans jamais bloquer."""
+    import os
+
+    from grimoire.hosts.decisions.done_gate import evaluate_done_gate
+
+    os.environ["GRIMOIRE_DONE_GATE"] = "enforce"
+    try:
+        _set_task_in_progress(governed)
+        _make_gates_green(governed)
+        _append_bash_event(governed, "bootstrap", "pytest -q", 0)
+        _append_write_event(governed, "bootstrap", "src/foo.py")
+        hook = HookInput(event=HookEvent.STOP, project_root=governed, session_id="s-caps")
+
+        v1 = evaluate_done_gate(hook, "bootstrap", "governed", now_iso="2026-01-01T00:00:00+00:00")
+        assert v1.blocked is True
+        assert v1.capped is False
+
+        # 30 s later: cooldown (60 s) still open.
+        v2 = evaluate_done_gate(hook, "bootstrap", "governed", now_iso="2026-01-01T00:00:30+00:00")
+        assert v2.blocked is False
+        assert v2.capped is True
+
+        # 61 s after v1: cooldown cleared, session count goes 1 -> 2.
+        v3 = evaluate_done_gate(hook, "bootstrap", "governed", now_iso="2026-01-01T00:01:01+00:00")
+        assert v3.blocked is True
+        assert v3.capped is False
+
+        # 61 s after v3: cooldown cleared again, session count goes 2 -> 3.
+        v4 = evaluate_done_gate(hook, "bootstrap", "governed", now_iso="2026-01-01T00:02:02+00:00")
+        assert v4.blocked is True
+        assert v4.capped is False
+
+        # 61 s after v4: cooldown clear, but the session cap (3) is reached.
+        v5 = evaluate_done_gate(hook, "bootstrap", "governed", now_iso="2026-01-01T00:03:03+00:00")
+        assert v5.blocked is False
+        assert v5.capped is True
+    finally:
+        del os.environ["GRIMOIRE_DONE_GATE"]
+
+
+def test_done_gate_option_in_standard_profile_also_enforces(governed: Path) -> None:
+    """L'option de projet (``standard-profile.yaml``) marche sans variable d'environnement."""
+    import io
+
+    from ruamel.yaml import YAML
+
+    _set_task_in_progress(governed)
+    _make_gates_green(governed)
+    _append_bash_event(governed, "bootstrap", "pytest -q", 0)
+    _append_write_event(governed, "bootstrap", "src/foo.py")
+    profile_path = governed / "_grimoire/standard/standard-profile.yaml"
+    yaml = YAML()
+    data = yaml.load(profile_path.read_text(encoding="utf-8")) or {}
+    data["options"] = {"done_gate": "enforce"}
+    stream = io.StringIO()
+    yaml.dump(data, stream)
+    profile_path.write_text(stream.getvalue(), encoding="utf-8")
+    decision = decide_evidence_gate(HookInput(event=HookEvent.STOP, project_root=governed, session_id="s-opt"))
+    assert decision.outcome is Outcome.BLOCK
+    assert decision.detail["done_gate"]["blocked"] is True
+
+
 def test_a_subagent_gate_that_cannot_be_evaluated_says_so(governed: Path) -> None:
     (governed / "_grimoire/standard/task-board.yaml").write_text("[oups", encoding="utf-8")
     decision = decide_subagent_gate(HookInput(event=HookEvent.SUBAGENT_STOP, project_root=governed))

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from grimoire.core.standard_state import active_profile_id, is_standard_enrolled, resolve_active_task
 from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
 from grimoire.hosts.decisions.enrolment import (
@@ -69,11 +71,18 @@ def decide_evidence_gate(hook: HookInput) -> Decision:
                 ),
                 detail=detail,
             )
-        return Decision(detail=detail)
+        return _with_done_gate(Decision(detail=detail), hook, task_id, profile)
     if profile not in _BLOCKING_PROFILES:
-        return Decision(
-            context=(f"[Grimoire] Gates de preuve rouges pour {task_id} (profil {profile}, non bloquant) :\n{summary}"),
-            detail=detail,
+        return _with_done_gate(
+            Decision(
+                context=(
+                    f"[Grimoire] Gates de preuve rouges pour {task_id} (profil {profile}, non bloquant) :\n{summary}"
+                ),
+                detail=detail,
+            ),
+            hook,
+            task_id,
+            profile,
         )
     reason = (
         f"[Grimoire] Tâche {task_id} non terminée : les gates de preuve sont rouges (profil {profile}).\n"
@@ -82,7 +91,52 @@ def decide_evidence_gate(hook: HookInput) -> Decision:
         f"`grimoire standard gate check --task-id {task_id} --strict`. "
         "Si la tâche doit rester ouverte, dis-le explicitement à l'utilisateur au lieu de conclure."
     )
-    return Decision(outcome=Outcome.BLOCK, reason=reason, detail=detail)
+    return _with_done_gate(Decision(outcome=Outcome.BLOCK, reason=reason, detail=detail), hook, task_id, profile)
+
+
+def _with_done_gate(decision: Decision, hook: HookInput, task_id: str, profile: str) -> Decision:
+    """Attach the issue #644 "done" gate verdict, and escalate to ``BLOCK`` only if enforced.
+
+    Called only on the two paths above where the task's board state owes
+    evidence at all (:data:`_STATES_WITHOUT_EVIDENCE` and ``archived`` return
+    before reaching here) — the same condition the issue asks this path to
+    share with the existing gate. Never called on the ``stop_active``,
+    unenrolled, unevaluable-gate or no-task-closure early returns: those
+    already decide the turn on their own, and a project whose board could not
+    even be read has nothing reliable to say about mutation order either.
+
+    Best-effort in the same sense as the rest of this package: a crash inside
+    :func:`grimoire.hosts.decisions.done_gate.evaluate_done_gate` must not
+    turn an otherwise-fine ``Stop`` into a broken hook, so it is caught here
+    and reported as an unevaluated (never a stale) verdict — never as an
+    invented ``BLOCK``.
+    """
+    from grimoire.hosts.decisions.done_gate import DoneGateVerdict, evaluate_done_gate
+
+    try:
+        verdict = evaluate_done_gate(hook, task_id, profile)
+    except Exception as exc:
+        verdict = DoneGateVerdict(
+            stale=False, reason=f"error:{type(exc).__name__}", enforce=False, blocked=False, capped=False
+        )
+    detail = {**decision.detail, "done_gate": verdict.to_dict()}
+    if not verdict.stale:
+        return replace(decision, detail=detail)
+    if verdict.blocked and decision.outcome is not Outcome.BLOCK:
+        reason = (
+            f"[Grimoire] Tâche {task_id} : une mutation est postérieure au dernier check vert (profil {profile}).\n"
+            f"Relance `{verdict.command_hint}` ; si c'est vert, conclus. Sinon, dis-le explicitement à "
+            "l'utilisateur au lieu de conclure."
+        )
+        return replace(decision, outcome=Outcome.BLOCK, reason=reason, detail=detail)
+    if profile in _BLOCKING_PROFILES and decision.outcome is not Outcome.BLOCK:
+        warning = (
+            f"[Grimoire] Avertissement (gate « fini », shadow) : une mutation pour {task_id} est postérieure "
+            f"au dernier check vert. Relance `{verdict.command_hint}` avant de conclure."
+        )
+        context = f"{decision.context}\n{warning}" if decision.context else warning
+        return replace(decision, context=context, detail=detail)
+    return replace(decision, detail=detail)
 
 
 def _unevaluable_gate(task_id: str, profile: str, exc: Exception) -> Decision:
