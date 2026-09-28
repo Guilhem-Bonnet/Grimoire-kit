@@ -48,7 +48,11 @@ from grimoire.core.claude_activation import (
 )
 from grimoire.core.standard_checks.acceptance_test_run import record_acceptance_test_run
 from grimoire.core.standard_checks.gate_remedy import remedy_for_relpath
-from grimoire.core.standard_checks.gate_test_run import board_state_of_task, ensure_fresh_test_run
+from grimoire.core.standard_checks.gate_test_run import (
+    board_state_of_task,
+    ensure_fresh_test_run,
+    resolve_gate_check_task_id,
+)
 from grimoire.core.standard_task_scaffold import scaffold_task_artifacts
 from grimoire.hosts.sync import HostSyncOutcome, sync_host_surfaces
 
@@ -1124,7 +1128,10 @@ def _test_run_verdict_label(ok: bool | None) -> str:
 def gate_check(
     ctx: typer.Context,
     project_root: Path = typer.Argument(Path(), help="Target project root."),  # noqa: B008
-    task_id: str = typer.Option("bootstrap", "--task-id", help="Task id to evaluate."),
+    task_id: str = typer.Option(
+        "", "--task-id",
+        help="Task id to evaluate (default: the board's in_progress card, else the session's active task).",
+    ),
     target_state: str | None = typer.Option(None, "--target-state", help="Optional target lifecycle state."),
     profile: str | None = typer.Option(None, "--profile", "-p", help="Expected profile. Defaults to generated manifest."),
     strict: bool = typer.Option(False, "--strict", help="Use exit code 2 when gates fail, whatever the profile."),
@@ -1145,7 +1152,30 @@ def gate_check(
     verdict (vert, rouge, ou rien collecté ; issue #582 lot I) — puis évalue
     comme avant. ``--no-run`` restaure le comportement pré-lot-G1 (aucune
     exécution). ``--rerun`` force malgré tout une nouvelle exécution.
+
+    Sans ``--task-id`` (issue #642 lot K), résout via
+    :func:`grimoire.core.standard_checks.gate_test_run.resolve_gate_check_task_id`
+    plutôt que d'évaluer les gates d'une tâche fantôme (``rust/poker run2``
+    du lot J : 22 tours perdus sur exactement ce cas).
     """
+    task_id, phantom_check = resolve_gate_check_task_id(project_root, task_id)
+    if phantom_check is not None:
+        payload = {
+            "schema": "grimoire.standard-gate-check/v1",
+            "ok": False,
+            "task_id": task_id,
+            "profile": None,
+            "state": None,
+            "missing": [],
+            "checks": [phantom_check],
+            "strict": strict,
+            "test_run": None,
+        }
+        if _get_fmt(ctx) == "json":
+            typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+        else:
+            console.print(f"[red][x][/red] {phantom_check['message']}", soft_wrap=True)
+        raise typer.Exit(1)
     test_run = None
     if strict and not no_run:
         state = board_state_of_task(project_root, task_id, target_state=target_state)

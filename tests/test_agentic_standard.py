@@ -1077,6 +1077,59 @@ def test_cli_gate_exits_nonzero_on_an_unknown_task(tmp_path: Path) -> None:
     assert json.loads(result.output)["ok"] is False
 
 
+# ── Repli --task-id bootstrap : pas de tâche fantôme (issue #642 lot K) ──────
+
+
+def test_cli_gate_check_without_task_id_fails_when_bootstrap_is_not_on_the_board(tmp_path: Path) -> None:
+    """Rouge-avant : sans --task-id, ni carte in_progress, ni 'bootstrap' réelle sur le board, l'ancien
+    comportement évaluait quand même les gates de la tâche fantôme 'bootstrap' (rust/poker run2 du lot J,
+    22 tours perdus). Doit désormais échouer en nommant le board et la commande de réparation."""
+    from grimoire.missions.schemas import TaskState
+    from grimoire.missions.service import TaskService
+
+    setup_standard_profile(tmp_path, profile_id="starter")
+    assert not (tmp_path / "_grimoire/standard/task-board.yaml").exists()
+    service = TaskService(tmp_path)
+    mission = service.ledger.create_mission(title="Travaux", origin="test")
+    task = service.ledger.create_task(mission.id, "Une vraie tâche", acceptance=("les tests passent",))
+    service.ledger.transition_task(task.id, TaskState.READY, actor_id="a")
+    service.project_board()
+    board_path = tmp_path / "_grimoire/standard/task-board.yaml"
+    assert board_path.is_file()
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["-o", "json", "standard", "gate", "check", str(tmp_path)])
+
+    assert result.exit_code != 0, result.output
+    payload = json.loads(result.output)
+    assert payload["ok"] is False
+    checks = [c for c in payload["checks"] if c["id"] == "gate.no_task_to_evaluate"]
+    assert len(checks) == 1, payload
+    message = checks[0]["message"]
+    assert str(board_path) in message
+    assert "grimoire task add" in message and "grimoire task claim" in message
+    # Ne doit plus évaluer les gates de la tâche fantôme 'bootstrap' : un
+    # seul constat (le refus), rien sur les artefacts per-tâche attendus
+    # (task_envelope, evidence_pack, ...).
+    assert payload["checks"] == checks, payload
+
+
+def test_cli_gate_check_without_task_id_resolves_the_board_in_progress_card(tmp_path: Path) -> None:
+    """Une carte in_progress unique reste résolue sans --task-id, y compris quand 'bootstrap' n'est pas sur le board."""
+    from grimoire.core.standard_task_scaffold import scaffold_task_artifacts
+
+    setup_standard_profile(tmp_path, profile_id="starter")
+    task_id = _claimed_ledger_task(tmp_path)
+    scaffold_task_artifacts(tmp_path, task_id=task_id)
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["-o", "json", "standard", "gate", "check", str(tmp_path)])
+
+    payload = json.loads(result.output)
+    assert payload["task_id"] == task_id, payload
+    assert not [c for c in payload["checks"] if c["id"] == "gate.no_task_to_evaluate"]
+
+
 def test_gate_check_surfaces_an_unproven_passed_criterion_without_failing(tmp_path: Path) -> None:
     """Issue #582 lot B : `gate check`, pas seulement `verify`, voit le même signal.
 
@@ -1656,6 +1709,11 @@ def test_cli_gate_check_strict_warns_instead_of_failing_when_nothing_collected(t
     assert result["test_run"]["ran"] is True and result["test_run"]["ok"] is None
     warnings = [c for c in result["checks"] if c["id"] == "acceptance.no_tests_collected"]
     assert len(warnings) == 1 and warnings[0]["severity"] == "warning"
+    message = warnings[0]["message"]
+    assert "écris un test" not in message and "justifie" not in message, (
+        f"un avertissement non actionnable pour un agent (issue #642 lot K) : {message!r}"
+    )
+    assert "needs.commands.test-runner" in message
     recorded = json.loads((tmp_path / f"_grimoire-output/evidence/{task_id}/test-run.json").read_text(encoding="utf-8"))
     assert recorded["ok"] is None and recorded["collected"] == 0
 
