@@ -80,3 +80,4 @@ grimoire-kit/
 | [Rejeu du bras `kit-gov` après le lot I (2026-09-18)](bench/rejeu-lot-j-2026-09-18.md) | Verdict du lot J : tours identiques à `nu` (1,0×) et succès au-dessus de `nu`, coût à ≈112 % du nu — deux critères de sortie de phase sur trois atteints, décision de dégel proposée à Guilhem sous réserve de re-base du critère de coût |
 | [Direction d'Anthropic — chevaucher/envelopper/ignorer](veille/anthropic-direction-2026-09.md) | Verdict par capacité Anthropic récente, lot du plan qui l'absorbe |
 | [Idées à récolter — instruction et verdict](veille/idees-a-recolter-2026-09.md) | Adopter/adapter/écarter par idée concurrente, fichier source et licence |
+| [Modèles de décision (Jev et clones)](veille/decision-models-2026-09.md) | Verdict mesuré écarter pour l'instant, conditions de réouverture, récolte sans modèle |
