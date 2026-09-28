@@ -1350,6 +1350,60 @@ def test_the_entry_persona_is_a_one_line_summary_not_a_full_read_mandate(project
     assert len(text) < 500, len(text)
 
 
+def test_claude_session_start_carries_the_dispatch_policy_and_roster(project: Path) -> None:
+    """#655 : la boucle principale Claude Code voit la politique de
+    dispatch et le répertoire routable à chaque session, pas seulement
+    quand elle lit `concierge.md` en entier.
+
+    Avant le correctif, `decide_activation` ne portait ni la politique
+    V0/V1/V2 ni aucun `subagent_type` : seul le fichier sous-agent de
+    l'entrée les documentait, et rien ne les lisait jamais depuis la boucle
+    principale.
+    """
+    _, decision, _ = run_hook(
+        {"hook_event_name": "SessionStart", "cwd": str(project)}, host_id=HostId.CLAUDE_CODE_CLI
+    )
+    context = decision.context
+    assert "Politique de dispatch" in context
+    assert "V0" in context and "haiku" in context
+    assert "V1" in context and "sonnet" in context
+    assert "V2" in context and "le modèle de la session" in context
+    # `scribe` (reasoning=low par défaut du fixture `project`) est routable ;
+    # `concierge` (l'entrée) ne doit pas s'y lister lui-même.
+    assert "`scribe` → `haiku`" in context or "`scribe` →" in context
+    assert "subagent_type" in context
+    assert decision.detail["dispatch_context_injected"] is True
+
+
+def test_non_claude_hosts_do_not_get_the_claude_dispatch_context(project: Path) -> None:
+    """Non-régression Copilot (#655) : `decide_activation` est partagé
+    entre hôtes ; la politique de dispatch et le répertoire `subagent_type`
+    n'ont de sens que pour Claude Code et ne doivent apparaître ni pour
+    Copilot ni pour un hôte inconnu."""
+    _, copilot_decision, _ = run_hook(
+        {"hook_event_name": "SessionStart", "cwd": str(project)}, host_id=HostId.GITHUB_COPILOT
+    )
+    assert "Politique de dispatch" not in copilot_decision.context
+    assert copilot_decision.detail["dispatch_context_injected"] is False
+
+    # Sans host_id du tout (appel direct, comme le fait le reste de la suite) :
+    # même comportement, jamais la section Claude.
+    bare_context = _session_start(project)
+    assert "Politique de dispatch" not in bare_context
+
+
+def test_the_entry_persona_tool_boundary_no_longer_reads_as_binding_the_main_loop(project: Path) -> None:
+    """#655, point 2 : la frontière d'outils du résumé ne doit
+    plus se lire comme si elle bornait la boucle principale elle-même —
+    seul le sous-agent d'entrée, s'il tourne isolément, y est vraiment
+    borné."""
+    text, _ = entry_persona_context(project)
+    assert "Tu gardes tous les outils de l'hôte" in text
+    assert "ne vaut que si concierge tourne en sous-agent" in text
+    # Toujours un résumé, pas un mandat de lecture intégrale.
+    assert len(text) < 500, len(text)
+
+
 def test_the_validated_directive_survives_the_persona(governed: Path) -> None:
     """La persona s'ajoute au standard, elle ne le remplace pas — sur un projet gouverné.
 
