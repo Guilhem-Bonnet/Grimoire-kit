@@ -83,7 +83,7 @@ def entry_persona_context(
     return text, entry.name
 
 
-def _claude_dispatch_context(project_root: Path, agents: tuple[AgentSpec, ...] | None = None) -> str:
+def _claude_dispatch_context(project_root: Path, agents: tuple[AgentSpec, ...]) -> str:
     """La "Politique de dispatch" + le répertoire routable, pour la boucle principale (#655).
 
     ``.claude/agents/<entrée>.md`` porte déjà cette règle
@@ -116,13 +116,6 @@ def _claude_dispatch_context(project_root: Path, agents: tuple[AgentSpec, ...] |
     """
     from grimoire.hosts.emitters.claude_code import _dispatch_policy_section, _model_for
 
-    if agents is None:
-        from grimoire.hosts.collect import collect_agents
-
-        try:
-            agents = collect_agents(project_root)
-        except OSError:
-            return ""
     routable = [agent for agent in agents if not agent.entry_point]
     if not routable:
         return ""

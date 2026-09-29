@@ -1916,6 +1916,27 @@ def test_collect_agents_runs_once_per_claude_session_start(project: Path, monkey
     assert "Politique de dispatch" not in bare_context
 
 
+def test_claude_session_start_survives_an_unreadable_agent_inventory(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#662 : un inventaire illisible (``OSError``) ne casse pas le hook — ni
+    persona ni politique, le reste du contexte ``SessionStart`` passe."""
+    import grimoire.hosts.collect as collect_module
+
+    def unreadable(*args: object, **kwargs: object) -> tuple:
+        raise OSError("inventaire illisible")
+
+    monkeypatch.setattr(collect_module, "collect_agents", unreadable)
+
+    _rendered, decision, _hook = run_hook(
+        {"hook_event_name": "SessionStart", "cwd": str(project)}, host_id=HostId.CLAUDE_CODE_CLI
+    )
+    context = decision.context
+
+    assert "Politique de dispatch" not in context
+    assert "persona d'entrée" not in context
+
+
 def test_the_entry_persona_tool_boundary_no_longer_reads_as_binding_the_main_loop(project: Path) -> None:
     """#655, point 2 : la frontière d'outils du résumé ne doit
     plus se lire comme si elle bornait la boucle principale elle-même —
