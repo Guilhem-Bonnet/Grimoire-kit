@@ -168,8 +168,16 @@ def _emit_move(ctx: typer.Context, move: Any) -> None:
     task = move.task
     move_dict = move.to_dict()
     verifiabilite = move_dict.get("verifiability") or {}
-    modele = move_dict.get("recommended_model")
-    resume = f" [dim]· {verifiabilite.get('class', '?')} → {modele}[/dim]" if modele else ""
+    # `recommended_model` est `None` sur V2 (aucun nom de modèle valide pour
+    # l'outil `Agent` — défaut du lot G) ; `model_hint` rend alors le palier
+    # (`model_tier`) et sa consigne plutôt que d'afficher `None`.
+    from grimoire.missions.dispatch_advice import model_hint
+
+    resume = (
+        f" [dim]· {verifiabilite.get('class', '?')} → {model_hint(move_dict)}[/dim]"
+        if verifiabilite
+        else ""
+    )
     console.print(
         f"[green]OK[/green] {task.id} — {task.title} "
         f"[dim]({move.previous.value} → {task.status.value})[/dim]{resume}"
@@ -353,20 +361,24 @@ def task_show(
     rapport de ``dispatch`` pour savoir si le vert précédent mérite un regard.
     """
     from grimoire.missions.board import board_status_of
-    from grimoire.missions.dispatch_advice import dispatch_advice
+    from grimoire.missions.dispatch_advice import dispatch_advice, model_hint
     from grimoire.missions.gates import GatesFileError, declared_transitions
 
     service = _service(project_root, ledger_root)
     task = _require_task(service, task_id)
     advice = dispatch_advice(task)
     verifiabilite = advice["verifiability"]
-    modele_recommande = advice["recommended_model"]
+    # `recommended_model` est `None` sur V2 (aucun nom de modèle valide pour
+    # l'outil `Agent` — défaut du lot G) ; `model_tier` reste toujours
+    # renseigné. Le JSON garde les deux champs bruts, le texte passe par
+    # `model_hint` pour ne jamais afficher `None` littéralement.
     dispatch_events = [e for e in service.ledger.list_events(task_id) if e.event_type == "task.dispatched"]
     last_dispatch = dispatch_events[-1].payload if dispatch_events else None
     if _fmt(ctx) == "json":
         payload = task.to_dict()
         payload["verifiability"] = verifiabilite
-        payload["recommended_model"] = modele_recommande
+        payload["recommended_model"] = advice["recommended_model"]
+        payload["model_tier"] = advice["model_tier"]
         payload["last_dispatch"] = last_dispatch
         typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
         return
@@ -374,7 +386,7 @@ def task_show(
     console.print(f"  état    : {task.status.value} (board : {board_status_of(task.status)})")
     console.print(f"  accepte : {', '.join(task.acceptance) or '—'}")
     console.print(f"  vérifiabilité : {verifiabilite['class']} — {verifiabilite['explanation']}")
-    console.print(f"  modèle recommandé : {modele_recommande}")
+    console.print(f"  modèle recommandé : {model_hint(advice)} [dim](palier : {advice['model_tier']})[/dim]")
     for entree in verifiabilite["criteria"]:
         motif = entree["pattern"] or "non reconnu"
         console.print(f"    [dim]- {escape(entree['criterion'])} → {motif}[/dim]")

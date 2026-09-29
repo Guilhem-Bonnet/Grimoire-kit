@@ -859,6 +859,39 @@ class TraceLedger:
         starts = [t.started_at for t in traces if t.started_at]
         return min(starts) if starts else None
 
+    def _dispatch_and_delegation_last_seen(self) -> dict[str, dict[str, Any]]:
+        """``agent_dispatch_counts()`` ⊕ ``delegation_counts()``, ``last_seen`` = le plus récent des deux.
+
+        Lot G, point 4 : une délégation (:meth:`delegation_counts`,
+        :data:`DELEGATION_TAG`) est un signe de vie au même titre qu'un choix
+        de persona d'entrée (:meth:`agent_dispatch_counts`,
+        :data:`AGENT_DISPATCH_TAG`) — sans cette fusion, une persona déléguée
+        30 fois mais jamais choisie comme entrée ressort « jamais choisie »
+        de ``grimoire registry dispatches``, doctor et le cockpit
+        (:func:`agent_freshness_report`, seul appelant).
+
+        Seul ``last_seen`` compte pour la fraîcheur : ``count`` n'a pas
+        besoin d'être additionné (:func:`compute_agent_freshness` ne lit que
+        ``last_seen``), et un compte fusionné mélangerait deux mesures
+        distinctes (« choisie comme entrée » vs « déléguée ») sans qu'aucun
+        appelant actuel en ait besoin. Faite en Python, avant tout choix de
+        backend : :func:`compute_agent_freshness` ne voit que ce dict déjà
+        fusionné, jamais les deux sources séparément — sa délégation
+        éventuelle à ``grimoire_traces_core`` reste donc en parité avec le
+        chemin Python par construction, sans code Rust supplémentaire (le
+        même raisonnement que :meth:`delegation_counts` applique à son propre
+        volume : la fusion elle-même n'a jamais justifié un port).
+        """
+        combined: dict[str, dict[str, Any]] = {
+            name: dict(stats) for name, stats in self.agent_dispatch_counts().items()
+        }
+        for name, stats in self.delegation_counts().items():
+            last_seen = str(stats.get("last_seen") or "")
+            entry = combined.setdefault(name, {"count": 0, "last_seen": ""})
+            if last_seen > str(entry.get("last_seen") or ""):
+                entry["last_seen"] = last_seen
+        return combined
+
     def agent_freshness_report(
         self,
         agent_names: Iterable[str],
@@ -869,16 +902,17 @@ class TraceLedger:
     ) -> FreshnessReport:
         """Commodité : assemble :func:`compute_agent_freshness` depuis ce journal.
 
-        Lit ``agent_dispatch_counts()`` et ``oldest_started_at()`` sur *self*
-        plutôt que de les faire recalculer par chaque appelant (doctor,
-        cockpit, ``registry dispatches``) — les trois lisent le même journal
-        pour la même question. *agent_ages* (âge en jours du fichier de
-        définition de chaque agent) vient de l'appelant : ce module lit des
-        traces, pas des fichiers d'agent.
+        Lit :meth:`_dispatch_and_delegation_last_seen` (choix de persona
+        d'entrée *et* délégations, voir son docstring — lot G, point 4) et
+        ``oldest_started_at()`` sur *self* plutôt que de les faire recalculer
+        par chaque appelant (doctor, cockpit, ``registry dispatches``) — les
+        trois lisent le même journal pour la même question. *agent_ages*
+        (âge en jours du fichier de définition de chaque agent) vient de
+        l'appelant : ce module lit des traces, pas des fichiers d'agent.
         """
         return compute_agent_freshness(
             agent_names,
-            self.agent_dispatch_counts(),
+            self._dispatch_and_delegation_last_seen(),
             threshold_days=threshold_days,
             oldest_started_at=self.oldest_started_at(),
             agent_ages=agent_ages,

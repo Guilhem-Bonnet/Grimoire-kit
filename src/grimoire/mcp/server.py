@@ -610,10 +610,14 @@ def _task_json(task: Any) -> dict[str, Any]:
     data["board"] = board_status_of(task.status)
     # #654 : la classe de vérifiabilité et le modèle qu'elle
     # recommande, calculés une seule fois par `dispatch_advice` — jamais une
-    # seconde classification propre à cette surface MCP.
+    # seconde classification propre à cette surface MCP. `recommended_model`
+    # est `None` sur V2 (aucun nom de modèle valide pour l'outil `Agent` —
+    # défaut du lot G) ; `model_tier` ("cheap"/"mid"/"session"), lui, est
+    # toujours renseigné.
     advice = dispatch_advice(task)
     data["verifiability"] = advice["verifiability"]
     data["recommended_model"] = advice["recommended_model"]
+    data["model_tier"] = advice["model_tier"]
     # Issue #638 lot B : la priorité effective (déclarée ou dérivée) et le
     # compte des consignes non lues, pour qu'un agent voie ce que l'humain a
     # posé sans relire tout le journal.
