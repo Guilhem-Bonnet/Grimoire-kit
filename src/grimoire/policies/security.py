@@ -67,6 +67,12 @@ class ThreatEntry:
     grimoire_mitigation: str
     implemented: bool = False
     negative_test_id: str = ""
+    #: ``"module.path:Attr.chain"`` naming the real object the mitigation
+    #: claim rests on (e.g. ``"grimoire.policies.security:evaluate_pack_trust"``).
+    #: Required whenever ``implemented`` is True — see
+    #: ``tests/security/test_threat_matrix_honesty.py``, which resolves it via
+    #: ``importlib`` and fails the entry if it does not import.
+    mitigation_ref: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -76,6 +82,7 @@ class ThreatEntry:
             "grimoire_mitigation": self.grimoire_mitigation,
             "implemented": self.implemented,
             "negative_test_id": self.negative_test_id,
+            "mitigation_ref": self.mitigation_ref,
         }
 
 
@@ -235,33 +242,49 @@ GRIMOIRE_THREAT_MATRIX = ThreatMatrix(entries=[
         id="THR-001",
         category=ThreatCategory.PROMPT_INJECTION,
         description="Malicious content in tool outputs rewrites agent instructions",
-        grimoire_mitigation="hook grimoire-control-surface-guard blocks directive injection patterns in PreToolUse",
+        grimoire_mitigation=(
+            "session memory of untrusted tool output (session_memory.py) escalates "
+            "allow→ask in tool_policy.py::_untrusted_escalation when a proposed command "
+            "appears only in content flagged untrusted, never in the user's own words"
+        ),
         implemented=True,
-        negative_test_id="test_control_surface_guard_blocks_injection",
+        negative_test_id="test_injection_suite_blocks_or_escalates_at_least_90_percent",
+        mitigation_ref="grimoire.hosts.decisions.tool_policy:_untrusted_escalation",
     ),
     ThreatEntry(
         id="THR-002",
         category=ThreatCategory.PROMPT_INJECTION,
         description="Indirect injection via memory recall retrieves adversarial content",
-        grimoire_mitigation="MemoryManager.recall() governed — promotion requires human approval, digest-only storage",
+        grimoire_mitigation=(
+            "validate_memory_write() refuses (MemoryWriteRefusedError) authored content "
+            "that poses as a system instruction before it reaches storage; content "
+            "tagged content_origin='derived' (read from repo files) is only logged, "
+            "not blocked — the write-time gate, not a recall-time one"
+        ),
         implemented=True,
-        negative_test_id="test_memory_guard_blocks_unapproved_recall",
+        negative_test_id="test_refuse",
+        mitigation_ref="grimoire.memory.validation:validate_memory_write",
     ),
     ThreatEntry(
         id="THR-003",
         category=ThreatCategory.EXCESSIVE_AGENCY,
         description="Agent closes task without evidence (unverified completion)",
-        grimoire_mitigation="PolicyEngine rule task_close_requires_verification; NEEDS_VERIFICATION guardrail",
+        grimoire_mitigation=(
+            "decide_evidence_gate() refuses Stop while a governed task's evidence "
+            "gates are red or unevaluable (evidence_gate.py)"
+        ),
         implemented=True,
-        negative_test_id="test_policy_blocks_task_close_without_evidence",
+        negative_test_id="test_red_gates_block_a_governed_closure",
+        mitigation_ref="grimoire.hosts.decisions.evidence_gate:decide_evidence_gate",
     ),
     ThreatEntry(
         id="THR-004",
         category=ThreatCategory.EXCESSIVE_AGENCY,
         description="External A2A task marked completed bypasses verification",
-        grimoire_mitigation="A2AAdapter: completed→NEEDS_VERIFICATION (never CLOSED); guardrail documented",
+        grimoire_mitigation="A2AAdapter.import_task: completed→NEEDS_VERIFICATION (never CLOSED)",
         implemented=True,
-        negative_test_id="test_a2a_completed_maps_to_needs_verification",
+        negative_test_id="test_completed_maps_to_needs_verification",
+        mitigation_ref="grimoire.bridges.a2a_adapter:A2AAdapter.import_task",
     ),
     ThreatEntry(
         id="THR-005",
@@ -269,7 +292,8 @@ GRIMOIRE_THREAT_MATRIX = ThreatMatrix(entries=[
         description="Untrusted pack activates with destructive mutation class",
         grimoire_mitigation="TRUST_TIER_GATES: UNTRUSTED tier restricted to READ_ONLY + allowed_tools=(read, search)",
         implemented=True,
-        negative_test_id="test_untrusted_pack_blocks_destructive_mutation",
+        negative_test_id="test_untrusted_blocks_destructive_and_missing_proofs",
+        mitigation_ref="grimoire.policies.security:TRUST_TIER_GATES",
     ),
     ThreatEntry(
         id="THR-006",
@@ -277,7 +301,8 @@ GRIMOIRE_THREAT_MATRIX = ThreatMatrix(entries=[
         description="Pack installed without doctor check or content digest",
         grimoire_mitigation="evaluate_pack_trust() enforces requires_doctor + requires_digest per tier",
         implemented=True,
-        negative_test_id="test_pack_trust_requires_doctor_for_community_tier",
+        negative_test_id="test_community_doctor_required",
+        mitigation_ref="grimoire.policies.security:evaluate_pack_trust",
     ),
     ThreatEntry(
         id="THR-007",
@@ -285,23 +310,32 @@ GRIMOIRE_THREAT_MATRIX = ThreatMatrix(entries=[
         description="Secrets stored in evidence artifacts or A2A message content",
         grimoire_mitigation="A2AAdapter.normalize_trace: digest-only input storage; EvidenceItem: no secret fields",
         implemented=True,
-        negative_test_id="test_a2a_normalize_hashes_input",
+        negative_test_id="test_hashes_input",
+        mitigation_ref="grimoire.bridges.a2a_adapter:A2AAdapter.normalize_trace",
     ),
     ThreatEntry(
         id="THR-008",
         category=ThreatCategory.INSECURE_PLUGIN,
         description="Skill/hook activates without safety gate clearance",
-        grimoire_mitigation="Hook gateway requires hook-safety-registry.json entry; new hooks start in shadow mode",
-        implemented=True,
-        negative_test_id="test_hook_gateway_blocks_unregistered_hook",
+        grimoire_mitigation=(
+            "not implemented in the kit — install_hooks()/stigmergy_hooks.py logs new "
+            "hooks in shadow mode (best-effort) but hooks stay non-blocking by "
+            "construction (module docstring); no gateway blocks an unregistered hook "
+            "(that class of guard is Forge-only tooling: "
+            ".github/hooks/scripts/grimoire-hook-gateway.sh)"
+        ),
+        implemented=False,
+        negative_test_id="",
+        mitigation_ref="",
     ),
     ThreatEntry(
         id="THR-009",
         category=ThreatCategory.INSECURE_OUTPUT,
         description="Terminal command injection via unvalidated tool arguments",
-        grimoire_mitigation="grimoire-terminal-guard (PreToolUse): warns on unbalanced quotes, dangerous patterns",
-        implemented=True,
-        negative_test_id="test_terminal_guard_warns_injection_pattern",
+        grimoire_mitigation="not implemented in the kit (Forge-only guard, never shipped in src/grimoire)",
+        implemented=False,
+        negative_test_id="",
+        mitigation_ref="",
     ),
     ThreatEntry(
         id="THR-010",
@@ -309,6 +343,7 @@ GRIMOIRE_THREAT_MATRIX = ThreatMatrix(entries=[
         description="CrewAI/A2A trace contains sensitive reasoning or tool outputs",
         grimoire_mitigation="normalize_crewai_trace() and normalize_trace() strip/hash sensitive fields",
         implemented=True,
-        negative_test_id="test_crewai_normalize_hashes_thoughts",
+        negative_test_id="test_hashes_thoughts",
+        mitigation_ref="grimoire.runtime.crewai_adapter:CrewAIAdapter.normalize_crewai_trace",
     ),
 ])
