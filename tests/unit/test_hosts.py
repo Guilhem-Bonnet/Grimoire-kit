@@ -315,6 +315,24 @@ def test_a_hook_declared_on_post_tool_use_failure_is_wired_by_host_sync(governed
     assert settings["hooks"]["PostToolUseFailure"][0]["matcher"] == "Bash"
 
 
+def test_evidence_trace_matcher_covers_bash_calls(governed: Path) -> None:
+    """Défaut vérifié : sans ``execute`` dans son matcher, ``grimoire.evidence-trace``
+
+    ne recevait jamais ``Bash`` sur Claude Code (``_MATCHER_TABLE`` ne route
+    ``Bash`` que via la famille ``execute``). Consequence réelle :
+    ``_record_session_mutation`` ne comptait jamais une mutation faite en
+    shell (``sed -i``, ``git commit``…), et ``evidence_gate.py`` laissait
+    clore une tâche hors gate après une telle mutation.
+    """
+    emitter = emitter_for(HostId.CLAUDE_CODE_CLI)
+    assert emitter is not None
+    apply_plan(emitter.plan(build_surface(governed), governed), governed)
+    settings = json.loads((governed / ".claude/settings.json").read_text(encoding="utf-8"))
+    # ``grimoire.evidence-trace`` est le seul décideur câblé sur PostToolUse
+    # (voir governance_hooks) : une seule entrée, son matcher doit couvrir Bash.
+    assert "Bash" in settings["hooks"]["PostToolUse"][0]["matcher"].split("|")
+
+
 def test_agent_tool_boundary_reaches_the_host_file(governed: Path) -> None:
     emitter = emitter_for(HostId.CLAUDE_CODE_CLI)
     assert emitter is not None
@@ -982,6 +1000,42 @@ def test_post_tool_use_logs_bash_test_run_and_file_write_events(governed: Path) 
     assert entries[2]["path"] == "src/foo.py"
 
 
+def test_post_tool_use_counts_a_mutating_bash_call_but_not_a_read_only_one(governed: Path) -> None:
+    """Défaut #1 (suite) : une fois Bash reçu par ce hook (matcher élargi ci-dessus),
+
+    seule une commande qui mute réellement doit incrémenter le compteur que
+    ``evidence_gate.py`` lit pour refuser une clôture hors tâche — un ``git
+    status`` en lecture seule ne doit jamais compter, et ni l'un ni l'autre ne
+    doit renvoyer le rappel « Écriture enregistrée », réservé aux vrais
+    ``ActionKind.FILE_WRITE``.
+    """
+    from grimoire.policies.session_state import session_mutations
+
+    read_only = decide_evidence_trace(
+        HookInput(
+            event=HookEvent.POST_TOOL_USE,
+            project_root=governed,
+            tool_name="Bash",
+            tool_input={"command": "git status"},
+            session_id="sess-mut",
+        )
+    )
+    assert read_only.context == ""
+    assert session_mutations(governed, "sess-mut") == 0
+
+    mutating = decide_evidence_trace(
+        HookInput(
+            event=HookEvent.POST_TOOL_USE,
+            project_root=governed,
+            tool_name="Bash",
+            tool_input={"command": "sed -i 's/a/b/' src/foo.py"},
+            session_id="sess-mut",
+        )
+    )
+    assert mutating.context == ""
+    assert session_mutations(governed, "sess-mut") == 1
+
+
 def test_post_tool_use_journal_write_stays_under_the_30ms_budget(governed: Path) -> None:
     """Issue #582 lot G2 : le hook tourne à chaque outil, le budget est serré.
 
@@ -1075,6 +1129,97 @@ def test_post_tool_use_logs_a_delegation_call_without_a_model(governed: Path) ->
     assert len(delegations) == 1
     assert delegations[0].agent_id == "Explore"
     assert delegations[0].model == ""
+
+
+def test_post_tool_use_reads_a_copilot_delegation_nested_under_tool_specific_data(governed: Path) -> None:
+    """Défaut #2 : les vraies sessions Copilot de cette machine portent
+
+    ``agentName``/``modelName`` sous ``toolSpecificData``, pas à plat dans
+    ``tool_input`` (preuve : ``_scratch/delegation-audit/delegation_audit.py``
+    l.393-397). Sans ``agentName`` dans ``_DELEGATION_AGENT_KEYS`` et sans lire
+    sous ``toolSpecificData``, un tel appel réel se journalisait sous
+    ``agent_id == "(sans nom)"`` et modèle vide.
+    """
+    from grimoire.core.standard_generation import TRACES_DIR
+    from grimoire.traces.ledger import DELEGATION_TAG, TraceLedger
+
+    decide_evidence_trace(
+        HookInput(
+            event=HookEvent.POST_TOOL_USE,
+            project_root=governed,
+            tool_name="runSubagent",
+            tool_input={"toolSpecificData": {"agentName": "expert-playwright", "modelName": "gpt-5"}},
+        )
+    )
+    ledger = TraceLedger(governed / TRACES_DIR)
+    delegations = [t for t in ledger.list_traces() if DELEGATION_TAG in t.tags]
+    assert len(delegations) == 1
+    assert delegations[0].agent_id == "expert-playwright"
+    assert delegations[0].model == "gpt-5"
+
+
+def test_post_tool_use_never_falls_back_to_the_full_prompt_for_desc_tag(governed: Path) -> None:
+    """Défaut #3 : ``prompt`` n'est plus un repli pour la description.
+
+    Avant #657 (suite), un appel sans ``description``/``task`` explicite
+    faisait partir les 160 premiers caractères du prompt complet dans un tag
+    ``desc:`` — exporté tel quel par ``_to_langfuse_trace`` et OTel. Un appel
+    sans description ne doit plus produire aucun tag ``desc:``.
+    """
+    from grimoire.core.standard_generation import TRACES_DIR
+    from grimoire.traces.ledger import DELEGATION_TAG, TraceLedger
+
+    decide_evidence_trace(
+        HookInput(
+            event=HookEvent.POST_TOOL_USE,
+            project_root=governed,
+            tool_name="Task",
+            tool_input={
+                "subagent_type": "general-purpose",
+                "prompt": "Un très long prompt qui ne doit jamais être journalisé tel quel...",
+            },
+        )
+    )
+    ledger = TraceLedger(governed / TRACES_DIR)
+    delegations = [t for t in ledger.list_traces() if DELEGATION_TAG in t.tags]
+    assert len(delegations) == 1
+    assert not [tag for tag in delegations[0].tags if tag.startswith("desc:")]
+
+
+def test_delegation_trace_id_never_relies_on_next_id_and_its_journal_reread(
+    governed: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Défaut #4, preuve déterministe (pas un pari sur l'ordre d'exécution).
+
+    ``TraceLedger._next_id`` relit tout le journal et calcule ``len(existing)
+    + 1`` : sans ``trace_id`` explicite, ``_record_delegation`` retombait sur
+    cette méthode, et deux lectures concurrentes du même état du journal
+    (deux ``Agent`` dans un même message, avant que l'une des deux écritures
+    n'ait eu lieu) produisent alors le même id. On rend cette course
+    déterministe en figeant ``_next_id`` sur une valeur fixe : le correctif
+    doit ne jamais l'appeler pour une délégation, donc jamais produire cette
+    valeur ni collisionner.
+    """
+    from grimoire.core.standard_generation import TRACES_DIR
+    from grimoire.traces.ledger import DELEGATION_TAG, TraceLedger
+
+    monkeypatch.setattr(TraceLedger, "_next_id", lambda self, run_id: "TRC-RACE-WOULD-COLLIDE")
+
+    for _ in range(2):
+        decide_evidence_trace(
+            HookInput(
+                event=HookEvent.POST_TOOL_USE,
+                project_root=governed,
+                tool_name="Task",
+                tool_input={"subagent_type": "general-purpose", "description": "recherche"},
+                session_id="sess-concurrent",
+            )
+        )
+    ledger = TraceLedger(governed / TRACES_DIR)
+    delegations = [t for t in ledger.list_traces() if DELEGATION_TAG in t.tags]
+    assert len(delegations) == 2
+    assert delegations[0].id != delegations[1].id
+    assert "TRC-RACE-WOULD-COLLIDE" not in {t.id for t in delegations}
 
 
 def test_post_tool_use_does_not_log_a_non_delegating_tool_call(governed: Path) -> None:
