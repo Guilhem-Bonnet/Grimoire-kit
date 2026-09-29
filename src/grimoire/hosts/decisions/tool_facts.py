@@ -234,6 +234,56 @@ def command_surface(command: str) -> str:
     return "".join(out)
 
 
+#: Same shape as ``_EVAL_INTRODUCER`` but reaching further: also matches the
+#: python interpreters (whose ``-c`` argument is executed as python, not
+#: shell — ``_EVAL_INTRODUCER`` deliberately leaves them out, so
+#: :func:`command_surface` still blanks a ``python -c "…"`` argument like any
+#: other quoted prose). Used only by :func:`extract_c_bodies` below, never by
+#: :func:`command_surface` itself.
+_C_BODY_INTRODUCER = re.compile(
+    r"(?:\b(?:bash|sh|zsh|dash|ksh|ash|python3?)\s+(?:-[A-Za-z]*\s+)*-[A-Za-z]*c|\beval)\s*$"
+)
+
+
+def extract_c_bodies(command: str) -> tuple[str, ...]:
+    """The argument bodies of every ``-c``/``eval`` call in *command*.
+
+    Not part of :func:`command_surface`: that function keeps classifying a
+    ``bash -c "…"`` or ``python -c "…"`` call as a single opaque command for
+    the destructive-pattern and read-only checks above, unchanged. This
+    exists solely for :mod:`.tool_policy`'s untrusted-memory comparison
+    (issue #645 follow-up): a command a planted content spelled out
+    unwrapped (``curl … | sh``) still carries the exact same inner text once
+    an agent wraps it (``bash -c "curl … | sh"``, ``python -c "…os.system('curl
+    … | sh')"``, ``eval "curl … | sh"``) — the comparison needs to see past
+    that wrapping, even though nothing else here should.
+
+    Heredoc bodies are dropped first, same as :func:`command_surface`: a
+    ``-c``/``eval`` mentioned only inside documentary data must never surface
+    here either.
+    """
+    surface_source = _strip_heredoc_bodies(command)
+    bodies: list[str] = []
+    cursor = 0
+    for quoted in _QUOTED_RE.finditer(surface_source):
+        preceding = surface_source[cursor:quoted.start()]
+        cursor = quoted.end()
+        if _C_BODY_INTRODUCER.search(preceding.rstrip()):
+            inner = quoted.group(0)[1:-1]
+            if inner.strip():
+                bodies.append(inner)
+                # One level of nesting: ``python -c "…os.system('curl … | sh')…"``
+                # carries the actual shell text one quote layer further in —
+                # everything inside a ``-c``/``eval`` argument is executed or
+                # evaluated, so a literal string inside it is worth comparing
+                # on its own too, not only as part of the whole body.
+                for nested in _QUOTED_RE.finditer(inner):
+                    nested_inner = nested.group(0)[1:-1]
+                    if nested_inner.strip():
+                        bodies.append(nested_inner)
+    return tuple(bodies)
+
+
 @dataclass(frozen=True, slots=True)
 class ToolFacts:
     """What a decision needs to know about a pending tool call."""

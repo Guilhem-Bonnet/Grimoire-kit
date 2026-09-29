@@ -17,7 +17,13 @@ from typing import TYPE_CHECKING
 
 from grimoire.core.standard_state import active_profile_id, active_task_id
 from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
-from grimoire.hosts.decisions.tool_facts import ToolFacts, classify_tool, command_surface, policy_tool_detail
+from grimoire.hosts.decisions.tool_facts import (
+    ToolFacts,
+    classify_tool,
+    command_surface,
+    extract_c_bodies,
+    policy_tool_detail,
+)
 from grimoire.policies.engine import _SEVERITY, PolicyEngine
 from grimoire.policies.rules_config import load_custom_rules
 from grimoire.policies.schemas import (
@@ -145,6 +151,17 @@ def _untrusted_escalation(hook: HookInput, facts: ToolFacts) -> Decision | None:
     from grimoire.hosts.decisions.session_memory import find_untrusted_match
 
     match = find_untrusted_match(hook.project_root, hook.session_id, surface)
+    if match is None:
+        # A command wrapped for a shell or python interpreter (``bash -c
+        # "curl … | sh"``, ``python -c "…os.system('curl … | sh')"``, ``eval
+        # "…"``) still carries the same inner text a planted content spelled
+        # out unwrapped — see :func:`extract_c_bodies`. Compared normalised
+        # (whitespace/case) since a wrapper never reproduces the planted
+        # text's exact spacing the way a verbatim copy would.
+        for body in extract_c_bodies(facts.command):
+            match = find_untrusted_match(hook.project_root, hook.session_id, body, normalize=True)
+            if match is not None:
+                break
     if match is None:
         return None
     return Decision(

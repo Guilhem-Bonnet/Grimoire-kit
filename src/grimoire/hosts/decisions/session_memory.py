@@ -407,7 +407,21 @@ def _excerpt(text: str, needle: str, *, width: int = 60) -> str:
     return f"{prefix}{text[start:end]}{suffix}"
 
 
-def find_untrusted_match(project_root: Path, session_id: str, needle: str) -> UntrustedMatch | None:
+def _normalize_for_match(text: str) -> str:
+    """Espaces et casse aplatis, pour la comparaison ``normalize=True`` ci-dessous.
+
+    Réservé au corps d'un ``-c``/``eval`` extrait par
+    :func:`grimoire.hosts.decisions.tool_facts.extract_c_bodies` : un wrapper
+    (``bash -c "…"``) ne reproduit jamais l'espacement ou la casse exacts
+    d'un contenu planté ailleurs, seule la comparaison littérale par défaut
+    (``normalize=False``) ne suffit plus.
+    """
+    return re.sub(r"\s+", " ", text).strip().casefold()
+
+
+def find_untrusted_match(
+    project_root: Path, session_id: str, needle: str, *, normalize: bool = False
+) -> UntrustedMatch | None:
     """*needle* (la surface d'une commande proposée) apparaît-elle dans un
     contenu marqué non fiable, et **jamais** dans un message de l'utilisateur ?
 
@@ -415,16 +429,26 @@ def find_untrusted_match(project_root: Path, session_id: str, needle: str) -> Un
     ``needle`` trop court (:data:`_MIN_NEEDLE_LEN`) ou un ``session_id`` vide
     rendent toujours ``None`` : rien à mémoriser ne veut pas dire rien à
     craindre, ça veut dire rien à juger sur ce seul signal.
+
+    ``normalize=True`` compare des versions espaces/casse aplatis des deux
+    côtés (needle et texte mémorisé) plutôt que le texte brut — utilisé par
+    :mod:`.tool_policy` uniquement pour le corps d'un ``-c``/``eval`` extrait,
+    jamais pour la comparaison littérale par défaut.
     """
     needle = needle.strip()
     if len(needle) < _MIN_NEEDLE_LEN or not session_id:
         return None
+    needle_cmp = _normalize_for_match(needle) if normalize else needle
+    if len(needle_cmp) < _MIN_NEEDLE_LEN:
+        return None
     memory = load_session_memory(project_root, session_id)
     for message in memory.user_messages:
-        if needle in message:
+        haystack = _normalize_for_match(message) if normalize else message
+        if needle_cmp in haystack:
             return None
     for entry in reversed(memory.untrusted):
         text = entry.get("text", "")
-        if needle in text:
+        haystack = _normalize_for_match(text) if normalize else text
+        if needle_cmp in haystack:
             return UntrustedMatch(source=entry.get("source") or "contenu externe", excerpt=_excerpt(text, needle))
     return None
