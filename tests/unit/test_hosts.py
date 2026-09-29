@@ -1073,6 +1073,35 @@ def test_other_standard_yaml_file_is_unaffected_by_the_profile_guard(governed: P
     assert decision.outcome is Outcome.ALLOW
 
 
+def test_profile_guard_never_ranks_a_profile_off_target(governed: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Budget guard: an ordinary ``Edit`` elsewhere must never pay for the
+    lazy ``profile_rank`` import/call the downgrade guard only needs once it
+    has already matched ``standard-profile.yaml`` by a plain string
+    comparison. A coordinator-reported latency concern (an off-target `Edit`
+    measured ~90ms vs a ~60ms `Read` baseline) turned out, on a proper
+    before/after A/B against ``origin/main`` (7 runs each, same machine), to
+    be pre-existing engine-evaluation cost unrelated to this guard (delta
+    within a few ms, noise-level) — this test is the standing proof that stays
+    true regardless of what the ambient noise does.
+    """
+    import grimoire.core.agentic_standard as agentic_standard
+
+    def _must_not_be_called(profile_id: str) -> int:
+        raise AssertionError("profile_rank must not be called for a call that never targets standard-profile.yaml")
+
+    monkeypatch.setattr(agentic_standard, "profile_rank", _must_not_be_called)
+    path = governed / "notes.md"
+    decision = decide_tool_policy(
+        HookInput(
+            event=HookEvent.PRE_TOOL_USE,
+            project_root=governed,
+            tool_name="Edit",
+            tool_input={"file_path": str(path), "old_string": "a", "new_string": "b"},
+        )
+    )
+    assert decision.outcome is Outcome.ALLOW
+
+
 def test_post_tool_use_logs_bash_test_run_and_file_write_events(governed: Path) -> None:
     """Issue #582 lot G2 : le hook consigne, l'agent n'a plus à recopier."""
     from grimoire.core.standard_checks.evidence_journal import read_evidence_log
