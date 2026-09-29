@@ -126,6 +126,12 @@ def governed(project: Path) -> Path:
     return project
 
 
+@pytest.fixture
+def production(project: Path) -> Path:
+    setup_standard_profile(project, profile_id="production", task_id="bootstrap")
+    return project
+
+
 # ── Collection ───────────────────────────────────────────────────────────────
 
 
@@ -961,6 +967,110 @@ def test_read_only_calls_are_not_slowed_down(governed: Path) -> None:
     )
     assert decision.outcome is Outcome.ALLOW
     assert decision.detail == {}
+
+
+# ── Standard profile downgrade guard (fix/profile-downgrade-guard) ──────────
+#
+# `_grimoire/standard/standard-profile.yaml`'s `profile:` field selects which
+# rule set `_risk_profile` applies (see `tool_policy._RISK_BY_PROFILE`). Any
+# write that weakens it therefore relaxes every threshold the standard
+# enforces, without touching a single rule — and nothing guarded that field
+# before this. Design: `_scratch/party-oss/gouvernance.md`, idea A.
+
+_PROFILE_YAML_RELPATH = "_grimoire/standard/standard-profile.yaml"
+
+
+def test_profile_downgrade_by_edit_asks_for_confirmation(production: Path) -> None:
+    path = production / _PROFILE_YAML_RELPATH
+    decision = decide_tool_policy(
+        HookInput(
+            event=HookEvent.PRE_TOOL_USE,
+            project_root=production,
+            tool_name="Edit",
+            tool_input={
+                "file_path": str(path),
+                "old_string": "profile: production",
+                "new_string": "profile: starter",
+            },
+        )
+    )
+    assert decision.outcome is Outcome.ASK
+    assert "production" in decision.reason
+    assert "starter" in decision.reason
+
+
+def test_profile_downgrade_by_write_asks_for_confirmation(production: Path) -> None:
+    path = production / _PROFILE_YAML_RELPATH
+    decision = decide_tool_policy(
+        HookInput(
+            event=HookEvent.PRE_TOOL_USE,
+            project_root=production,
+            tool_name="Write",
+            tool_input={"file_path": str(path), "content": "profile: starter\n"},
+        )
+    )
+    assert decision.outcome is Outcome.ASK
+
+
+def test_profile_downgrade_by_shell_command_asks_for_confirmation(production: Path) -> None:
+    decision = decide_tool_policy(
+        HookInput(
+            event=HookEvent.PRE_TOOL_USE,
+            project_root=production,
+            tool_name="Bash",
+            tool_input={
+                "command": (
+                    "sed -i 's/profile: production/profile: starter/' "
+                    f"{_PROFILE_YAML_RELPATH}"
+                )
+            },
+        )
+    )
+    assert decision.outcome is Outcome.ASK
+
+
+def test_profile_upgrade_is_allowed(governed: Path) -> None:
+    path = governed / _PROFILE_YAML_RELPATH
+    decision = decide_tool_policy(
+        HookInput(
+            event=HookEvent.PRE_TOOL_USE,
+            project_root=governed,
+            tool_name="Edit",
+            tool_input={
+                "file_path": str(path),
+                "old_string": "profile: governed",
+                "new_string": "profile: production",
+            },
+        )
+    )
+    assert decision.outcome is Outcome.ALLOW
+
+
+def test_profile_written_with_same_value_is_allowed(governed: Path) -> None:
+    path = governed / _PROFILE_YAML_RELPATH
+    decision = decide_tool_policy(
+        HookInput(
+            event=HookEvent.PRE_TOOL_USE,
+            project_root=governed,
+            tool_name="Write",
+            tool_input={"file_path": str(path), "content": "profile: governed\n"},
+        )
+    )
+    assert decision.outcome is Outcome.ALLOW
+
+
+def test_other_standard_yaml_file_is_unaffected_by_the_profile_guard(governed: Path) -> None:
+    """Scope guard (design risk (b)): only `standard-profile.yaml` is watched."""
+    policies_path = governed / "_grimoire/standard/policies.yaml"
+    decision = decide_tool_policy(
+        HookInput(
+            event=HookEvent.PRE_TOOL_USE,
+            project_root=governed,
+            tool_name="Write",
+            tool_input={"file_path": str(policies_path), "content": "profile: starter\nrules: []\n"},
+        )
+    )
+    assert decision.outcome is Outcome.ALLOW
 
 
 def test_post_tool_use_logs_bash_test_run_and_file_write_events(governed: Path) -> None:
