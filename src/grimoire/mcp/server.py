@@ -612,7 +612,7 @@ def _task_json(task: Any) -> dict[str, Any]:
     # recommande, calculés une seule fois par `dispatch_advice` — jamais une
     # seconde classification propre à cette surface MCP. `recommended_model`
     # est `None` sur V2 (aucun nom de modèle valide pour l'outil `Agent` —
-    # défaut du lot G) ; `model_tier` ("cheap"/"mid"/"session"), lui, est
+    # #662) ; `model_tier` ("cheap"/"mid"/"session"), lui, est
     # toujours renseigné.
     advice = dispatch_advice(task)
     data["verifiability"] = advice["verifiability"]

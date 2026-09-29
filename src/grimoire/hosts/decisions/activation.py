@@ -49,7 +49,7 @@ def entry_persona_context(
     Returns ``(text, name)``; both empty when the project designates no entry.
 
     *agents* lets :func:`decide_activation` pass an inventory it already
-    collected once (lot G, point 3 — this call site and
+    collected once (#662 — this call site and
     :func:`_claude_dispatch_context` both used to run their own
     ``collect_agents``, ~35 ms + ~16 ms measured on the Forge for the same
     project at the same ``SessionStart``). Left ``None`` — the default, and
@@ -105,14 +105,14 @@ def _claude_dispatch_context(project_root: Path, agents: tuple[AgentSpec, ...] |
 
     Le roster (`subagent_type` → modèle *par défaut de la persona*, ex.
     `scribe` → `haiku`) est injecté juste sous la politique (classe de la
-    tâche → modèle) sans qu'aucune phrase ne les départage — lot G, point 2 :
+    tâche → modèle) sans qu'aucune phrase ne les départage — #662 :
     les deux se lisent comme deux règles concurrentes pour qui ne devine pas
     que le roster n'est qu'un repli hors tâche réclamée. Une phrase le dit
     maintenant explicitement, dans l'ordre où les deux blocs apparaissent.
 
     *agents* — voir le docstring de :func:`entry_persona_context` : même
     inventaire, passé une fois par :func:`decide_activation` plutôt que
-    recollecté ici (lot G, point 3).
+    recollecté ici (#662).
     """
     from grimoire.hosts.emitters.claude_code import _dispatch_policy_section, _model_for
 
@@ -129,9 +129,8 @@ def _claude_dispatch_context(project_root: Path, agents: tuple[AgentSpec, ...] |
     roster = "\n".join(f"- `{agent.name}` → {_model_for(agent)}" for agent in routable)
     return (
         f"{_dispatch_policy_section()}\nPersonas routables (`subagent_type` → modèle) :\n{roster}\n"
-        "Ce modèle par défaut ne vaut que hors tâche réclamée : sur une tâche réclamée, "
-        "la classe de la tâche prime toujours — passe `model=` selon la politique "
-        "ci-dessus, jamais le défaut du roster.\n"
+        "Ce modèle est le défaut de la persona, appliqué si tu omets `model=` ; la classe "
+        "de la sous-tâche déléguée prime : passe `model=` selon la politique ci-dessus.\n"
     )
 
 
@@ -351,7 +350,7 @@ def decide_activation(hook: HookInput) -> Decision:
     register (how the main loop should act), read before anything about the
     current task.
 
-    Lot G, point 3: :func:`entry_persona_context` and
+    #662: :func:`entry_persona_context` and
     :func:`_claude_dispatch_context` both used to call ``collect_agents`` on
     their own — the same inventory, twice, at the same ``SessionStart``
     (~35 ms + ~16 ms measured on the Forge). Collected once here instead and

@@ -58,7 +58,6 @@ if TYPE_CHECKING:
     from grimoire.missions.schemas import MissionTask
 
 __all__ = [
-    "MODEL_TIER_BY_CLASS",
     "RECOMMENDED_MODEL_BY_CLASS",
     "dispatch_advice",
     "model_hint",
@@ -79,19 +78,6 @@ RECOMMENDED_MODEL_BY_CLASS: dict[Verifiability, str] = {
     Verifiability.V2: "session",
 }
 
-#: Le palier de coût de chaque classe — toujours renseigné, contrairement à
-#: ``recommended_model`` qui peut être ``None``. Même vocabulaire que
-#: :func:`grimoire.missions.dispatch.start_tier_for` pour V0/V1
-#: (``cheap``/``mid``) ; ``"session"`` pour V2, là où ``start_tier_for``
-#: renvoie ``None`` (il refuse la classe plutôt que de poser un repli — un
-#: dispatch automatique n'a personne à qui demander, un dispatch interactif
-#: si).
-MODEL_TIER_BY_CLASS: dict[Verifiability, str] = {
-    Verifiability.V0: "cheap",
-    Verifiability.V1: "mid",
-    Verifiability.V2: "session",
-}
-
 
 def recommended_model_for(verifiability: Verifiability) -> str | None:
     """Le nom de modèle à passer à ``model=`` pour cette classe, ``None`` si aucun (V2).
@@ -105,8 +91,10 @@ def recommended_model_for(verifiability: Verifiability) -> str | None:
 
 
 def model_tier_for(verifiability: Verifiability) -> str:
-    """Le palier de cette classe — une entrée de :data:`MODEL_TIER_BY_CLASS`, toujours renseignée."""
-    return MODEL_TIER_BY_CLASS[verifiability]
+    """Le palier de cette classe, lu dans ``start_tier_for`` (``grimoire task dispatch``) ; ``session`` s'il n'y en a pas (V2)."""
+    from grimoire.missions.dispatch import start_tier_for
+
+    return start_tier_for(verifiability) or "session"
 
 
 def model_hint(advice: dict[str, Any]) -> str:

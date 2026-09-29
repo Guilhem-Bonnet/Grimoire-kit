@@ -4,7 +4,7 @@ Une seule fonction, dans ``missions/`` (pas dans un hôte) : la classe vient de
 ``verifiability.classify``, jamais recalculée — même source que ``grimoire
 task dispatch`` (``missions.dispatch.start_tier_for``).
 
-Depuis le lot G (défaut « V2 sans valeur invalide ») : ``recommended_model``
+Depuis #662 (défaut « V2 sans valeur invalide ») : ``recommended_model``
 n'est jamais ``"session"`` — ce n'est pas un nom de modèle que l'outil
 ``Agent`` de Claude Code accepte pour ``model=``. V2 rend ``recommended_model:
 None`` (« omets le paramètre ») plus ``model_tier: "session"``, toujours
@@ -17,10 +17,10 @@ from __future__ import annotations
 
 from grimoire.missions.dispatch import start_tier_for
 from grimoire.missions.dispatch_advice import (
-    MODEL_TIER_BY_CLASS,
     RECOMMENDED_MODEL_BY_CLASS,
     dispatch_advice,
     model_hint,
+    model_tier_for,
     recommended_model_for,
 )
 from grimoire.missions.schemas import MissionTask, RiskProfile, TaskState, TaskType
@@ -108,7 +108,11 @@ def test_recommended_model_for_couvre_les_trois_classes() -> None:
     assert recommended_model_for(Verifiability.V1) == "sonnet"
     assert recommended_model_for(Verifiability.V2) is None
     assert set(RECOMMENDED_MODEL_BY_CLASS) == set(Verifiability)
-    assert set(MODEL_TIER_BY_CLASS) == set(Verifiability)
+    assert [model_tier_for(v) for v in (Verifiability.V0, Verifiability.V1, Verifiability.V2)] == [
+        "cheap",
+        "mid",
+        "session",
+    ]
 
 
 def test_recommended_model_by_class_garde_sa_valeur_interne_pour_model_label() -> None:
@@ -122,8 +126,7 @@ def test_coherence_avec_task_dispatch_meme_tache() -> None:
     """La classe qui pilote ``recommended_model``/``model_tier`` est celle que ``task dispatch`` verrait.
 
     ``start_tier_for`` refuse une V2 (``None``) et pose ``cheap``/``mid`` pour
-    V0/V1 — pas la même table que ``MODEL_TIER_BY_CLASS``, mais dérivée de la
-    même classe : si l'une refuse (V2), l'autre retombe sur le palier le plus
+    V0/V1 — ``model_tier_for`` lit ``start_tier_for`` lui-même : si l'une refuse (V2), l'autre retombe sur le palier le plus
     prudent (``session``), jamais un accident de calcul indépendant.
     """
     for acceptance, attendu_tier_dispatch, attendu_modele, attendu_tier in (

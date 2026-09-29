@@ -169,7 +169,7 @@ def _emit_move(ctx: typer.Context, move: Any) -> None:
     move_dict = move.to_dict()
     verifiabilite = move_dict.get("verifiability") or {}
     # `recommended_model` est `None` sur V2 (aucun nom de modèle valide pour
-    # l'outil `Agent` — défaut du lot G) ; `model_hint` rend alors le palier
+    # l'outil `Agent` — #662) ; `model_hint` rend alors le palier
     # (`model_tier`) et sa consigne plutôt que d'afficher `None`.
     from grimoire.missions.dispatch_advice import model_hint
 
@@ -369,7 +369,7 @@ def task_show(
     advice = dispatch_advice(task)
     verifiabilite = advice["verifiability"]
     # `recommended_model` est `None` sur V2 (aucun nom de modèle valide pour
-    # l'outil `Agent` — défaut du lot G) ; `model_tier` reste toujours
+    # l'outil `Agent` — #662) ; `model_tier` reste toujours
     # renseigné. Le JSON garde les deux champs bruts, le texte passe par
     # `model_hint` pour ne jamais afficher `None` littéralement.
     dispatch_events = [e for e in service.ledger.list_events(task_id) if e.event_type == "task.dispatched"]

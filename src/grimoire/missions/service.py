@@ -103,7 +103,7 @@ class TaskMove:
         advice = dispatch_advice(self.task)
         data["verifiability"] = advice["verifiability"]
         # `None` sur V2 : aucun nom de modèle valide pour l'outil `Agent` (défaut
-        # du lot G) — `model_tier` ("cheap"/"mid"/"session") reste toujours renseigné.
+        # #662) — `model_tier` ("cheap"/"mid"/"session") reste toujours renseigné.
         data["recommended_model"] = advice["recommended_model"]
         data["model_tier"] = advice["model_tier"]
         # Même champ que TaskNote.to_dict() (issue #638 lot B) : un consommateur

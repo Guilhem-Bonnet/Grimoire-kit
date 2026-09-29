@@ -862,7 +862,7 @@ class TraceLedger:
     def _dispatch_and_delegation_last_seen(self) -> dict[str, dict[str, Any]]:
         """``agent_dispatch_counts()`` ⊕ ``delegation_counts()``, ``last_seen`` = le plus récent des deux.
 
-        Lot G, point 4 : une délégation (:meth:`delegation_counts`,
+        #662 : une délégation (:meth:`delegation_counts`,
         :data:`DELEGATION_TAG`) est un signe de vie au même titre qu'un choix
         de persona d'entrée (:meth:`agent_dispatch_counts`,
         :data:`AGENT_DISPATCH_TAG`) — sans cette fusion, une persona déléguée
@@ -903,7 +903,7 @@ class TraceLedger:
         """Commodité : assemble :func:`compute_agent_freshness` depuis ce journal.
 
         Lit :meth:`_dispatch_and_delegation_last_seen` (choix de persona
-        d'entrée *et* délégations, voir son docstring — lot G, point 4) et
+        d'entrée *et* délégations, voir son docstring — #662) et
         ``oldest_started_at()`` sur *self* plutôt que de les faire recalculer
         par chaque appelant (doctor, cockpit, ``registry dispatches``) — les
         trois lisent le même journal pour la même question. *agent_ages*

@@ -287,7 +287,7 @@ class TestTraceLedger:
         }
 
     def test_agent_freshness_report_counts_a_delegation_as_a_sign_of_life(self, tmp_path) -> None:
-        """Lot G, point 4 : ``agent_freshness_report`` ne lisait que
+        """#662 : ``agent_freshness_report`` ne lisait que
         ``agent_dispatch_counts`` (choix de persona d'entrée) et ignorait
         ``delegation_counts`` — une persona déléguée 30 fois mais jamais
         choisie comme entrée ressortait « jamais choisie » de ``grimoire

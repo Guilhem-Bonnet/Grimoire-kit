@@ -1730,22 +1730,22 @@ def test_non_claude_hosts_do_not_get_the_claude_dispatch_context(project: Path) 
 
 
 def test_the_roster_default_model_is_explicitly_subordinate_to_the_task_class(project: Path) -> None:
-    """Lot G, point 2 : le répertoire `subagent_type` → modèle par défaut de
+    """#662 : le répertoire `subagent_type` → modèle par défaut de
     la persona (ex. `scribe` → `haiku`) est injecté juste sous la « Politique
     de dispatch » (classe de la tâche → modèle) sans qu'aucune phrase ne
     tranche entre les deux — les deux règles semblent se contredire pour qui
-    ne devine pas que le roster n'est qu'un repli hors tâche réclamée."""
+    ne devine pas que le roster n'est que le défaut appliqué quand `model=` est omis."""
     _, decision, _ = run_hook(
         {"hook_event_name": "SessionStart", "cwd": str(project)}, host_id=HostId.CLAUDE_CODE_CLI
     )
     context = decision.context
     roster_index = context.index("Personas routables")
-    priority_index = context.index("la classe de la tâche prime")
+    priority_index = context.index("la classe de la sous-tâche déléguée prime")
     assert priority_index > roster_index, "la phrase de priorité doit suivre le roster, pas le précéder"
 
 
 def test_collect_agents_runs_once_per_claude_session_start(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Lot G, point 3 : `entry_persona_context` et `_claude_dispatch_context`
+    """#662 : `entry_persona_context` et `_claude_dispatch_context`
     appelaient chacune `collect_agents` au même `SessionStart` (mesuré
     ~35 ms + ~16 ms sur la Forge) — le même inventaire d'agents, recalculé
     deux fois."""
