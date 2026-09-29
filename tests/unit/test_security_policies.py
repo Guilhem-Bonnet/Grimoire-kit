@@ -25,6 +25,7 @@ class TestThreatEntry:
             grimoire_mitigation="mitigation",
             implemented=True,
             negative_test_id="test_x",
+            mitigation_ref="pkg.mod:Thing",
         )
         assert entry.to_dict() == {
             "id": "THR-X",
@@ -33,6 +34,7 @@ class TestThreatEntry:
             "grimoire_mitigation": "mitigation",
             "implemented": True,
             "negative_test_id": "test_x",
+            "mitigation_ref": "pkg.mod:Thing",
         }
 
     def test_defaults(self) -> None:
@@ -44,6 +46,7 @@ class TestThreatEntry:
         )
         assert entry.implemented is False
         assert entry.negative_test_id == ""
+        assert entry.mitigation_ref == ""
 
 
 class TestThreatMatrix:
@@ -83,15 +86,30 @@ class TestThreatMatrix:
 
 
 class TestGrimoireThreatMatrix:
-    def test_canonical_matrix_is_fully_implemented(self) -> None:
+    def test_canonical_matrix_has_two_honestly_unimplemented_entries(self) -> None:
+        # THR-008 and THR-009 named a hook gateway and a terminal guard that
+        # never shipped in src/grimoire (Forge-only tooling, or nothing at
+        # all) — see tests/security/test_threat_matrix_honesty.py, which is
+        # what now keeps this number honest instead of a hand assertion.
         assert len(GRIMOIRE_THREAT_MATRIX.entries) == 10
-        assert GRIMOIRE_THREAT_MATRIX.not_implemented() == []
-        assert GRIMOIRE_THREAT_MATRIX.coverage_pct() == 100.0
+        assert {e.id for e in GRIMOIRE_THREAT_MATRIX.not_implemented()} == {"THR-008", "THR-009"}
+        assert GRIMOIRE_THREAT_MATRIX.coverage_pct() == 80.0
 
-    def test_every_entry_has_negative_test(self) -> None:
+    def test_every_entry_has_a_well_formed_id(self) -> None:
         for entry in GRIMOIRE_THREAT_MATRIX.entries:
-            assert entry.negative_test_id.startswith("test_")
             assert entry.id.startswith("THR-")
+
+    def test_implemented_entries_declare_a_negative_test_and_a_mitigation_ref(self) -> None:
+        # The real existence/import checks live in
+        # tests/security/test_threat_matrix_honesty.py; this only checks the
+        # fields are populated (shape), not that they resolve (substance).
+        for entry in GRIMOIRE_THREAT_MATRIX.implemented():
+            assert entry.negative_test_id.startswith("test_")
+            assert entry.mitigation_ref, f"{entry.id}: implemented=True with no mitigation_ref"
+
+    def test_not_implemented_entries_declare_no_test_id(self) -> None:
+        for entry in GRIMOIRE_THREAT_MATRIX.not_implemented():
+            assert entry.negative_test_id == ""
 
 
 class TestSecurityGate:
