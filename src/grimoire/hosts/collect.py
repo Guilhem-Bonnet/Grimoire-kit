@@ -689,12 +689,15 @@ def governance_hooks(*, governed: bool) -> tuple[HookSpec, ...]:
                 event=HookEvent.POST_TOOL_USE,
                 decision="grimoire.evidence-trace",
                 enforcement=Enforcement.ADVISORY,
-                matcher=("write", "delegation"),
+                matcher=("write", "delegation", "execute"),
                 timeout=10,
                 rationale=(
                     "Rappelle qu'une écriture doit laisser une ligne de preuve ; journalise aussi, "
                     "sans contexte ajouté, tout appel de délégation vers un sous-agent "
-                    "(#657)."
+                    "(#657). ``execute`` est nécessaire pour que _record_session_mutation "
+                    "compte une mutation Bash (sed -i, git commit…) : sans lui, sur Claude "
+                    "Code, ce hook ne recevait jamais Bash et evidence_gate.py laissait "
+                    "clore hors tâche après une mutation faite en shell (défaut #4bis)."
                 ),
             ),
             HookSpec(

@@ -113,11 +113,20 @@ _DELEGATION_TOOL_NAMES = frozenset({"task", "agent", "runsubagent"})
 
 #: Keys tried in order for each field, across hosts whose delegation tool
 #: input shape has not converged. Claude Code's ``Task``/``Agent`` documents
-#: ``subagent_type``/``description``/``model``; the rest are defensive
-#: fallbacks for a host that spells them differently.
-_DELEGATION_AGENT_KEYS = ("subagent_type", "agent_type", "agentType", "agent", "name")
-_DELEGATION_MODEL_KEYS = ("model",)
-_DELEGATION_DESCRIPTION_KEYS = ("description", "task", "prompt")
+#: ``subagent_type``/``description``/``model``; ``agentName``/``modelName``
+#: are what real Copilot sessions on this machine actually carry on a
+#: ``runSubagent`` invocation (audit: ``_scratch/delegation-audit/
+#: delegation_audit.py``, #657 follow-up) — the rest are defensive fallbacks
+#: for a host that spells them differently still.
+_DELEGATION_AGENT_KEYS = ("subagent_type", "agent_type", "agentType", "agentName", "agent", "name")
+_DELEGATION_MODEL_KEYS = ("model", "modelName")
+#: ``prompt`` is deliberately absent: it is the full delegation prompt, not a
+#: short caller-declared description, and it used to leak its first 160
+#: characters into a ``desc:`` tag exported by ``_to_langfuse_trace`` and
+#: OTel — the exact thing this constant's docstring already promised not to
+#: do. A call with no ``description``/``task`` now logs no ``desc:`` tag at
+#: all, rather than falling back to the prompt.
+_DELEGATION_DESCRIPTION_KEYS = ("description", "task")
 
 #: Free text truncated to this length before it reaches the ledger — enough
 #: to identify the delegation, never the full prompt (which can carry file
@@ -136,6 +145,20 @@ def _first_str(tool_input: dict[str, object], keys: tuple[str, ...]) -> str:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return ""
+
+
+def _delegation_fields(tool_input: dict[str, object]) -> dict[str, object]:
+    """*tool_input*, with a nested ``toolSpecificData`` dict flattened in.
+
+    A real Copilot ``runSubagent`` invocation carries ``agentName``/
+    ``modelName`` under ``toolSpecificData``, not at the top level (#657
+    follow-up). Top-level keys win on a collision — they are the shape
+    Claude Code's ``Task``/``Agent`` already documents.
+    """
+    nested = tool_input.get("toolSpecificData")
+    if isinstance(nested, dict):
+        return {**nested, **tool_input}
+    return tool_input
 
 
 def _record_delegation(hook: HookInput, task_id: str) -> None:
@@ -159,9 +182,10 @@ def _record_delegation(hook: HookInput, task_id: str) -> None:
         from grimoire.traces.ledger import DELEGATION_TAG, TraceLedger
         from grimoire.traces.schemas import TraceOutcome
 
-        agent_name = _first_str(hook.tool_input, _DELEGATION_AGENT_KEYS) or "(sans nom)"
-        model = _first_str(hook.tool_input, _DELEGATION_MODEL_KEYS)
-        description = _first_str(hook.tool_input, _DELEGATION_DESCRIPTION_KEYS)[:_DELEGATION_DESCRIPTION_MAX_LEN]
+        fields = _delegation_fields(hook.tool_input)
+        agent_name = _first_str(fields, _DELEGATION_AGENT_KEYS) or "(sans nom)"
+        model = _first_str(fields, _DELEGATION_MODEL_KEYS)
+        description = _first_str(fields, _DELEGATION_DESCRIPTION_KEYS)[:_DELEGATION_DESCRIPTION_MAX_LEN]
 
         tags = [DELEGATION_TAG, f"tool:{hook.tool_name}"]
         if description:
@@ -179,6 +203,12 @@ def _record_delegation(hook: HookInput, task_id: str) -> None:
             host_id=hook.host,
             model=model,
             tags=tags,
+            # #657 follow-up : sans trace_id, TraceLedger._next_id relit tout
+            # le journal et fait len(existing)+1 — deux appels PostToolUse
+            # concurrents (plusieurs délégations dans un même message)
+            # produisent alors le même id. Un uuid4 est unique sans relire
+            # le journal.
+            trace_id=f"TRC-delegation-{uuid.uuid4().hex}",
         )
     except Exception:  # observabilité pure : jamais au prix du hook lui-même
         return
