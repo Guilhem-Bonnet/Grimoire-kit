@@ -286,6 +286,46 @@ class TestTraceLedger:
             },
         }
 
+    def test_agent_freshness_report_counts_a_delegation_as_a_sign_of_life(self, tmp_path) -> None:
+        """#662 : ``agent_freshness_report`` ne lisait que
+        ``agent_dispatch_counts`` (choix de persona d'entrée) et ignorait
+        ``delegation_counts`` — une persona déléguée 30 fois mais jamais
+        choisie comme entrée ressortait « jamais choisie » de ``grimoire
+        registry dispatches``, doctor et le cockpit.
+
+        Journal : un enregistrement ancien et sans tag (pour donner au
+        journal une portée ≥ au seuil, condition de ``judged``), puis une
+        délégation récente vers ``general-purpose`` — jamais un
+        ``agent.dispatch``. Sans le correctif, ``last_seen`` reste ``None``
+        pour cet agent (« jamais choisie », faux) ; avec, il porte la date de
+        la délégation et l'agent n'est pas périmé.
+        """
+        from grimoire.traces.ledger import DELEGATION_TAG
+
+        now = datetime(2026, 3, 1, tzinfo=UTC)
+        ledger = TraceLedger(tmp_path)
+        _make_trace(ledger, run_id="RUN-old")  # started_at="2026-01-01T00:00:00+00:00", sans tag
+        ledger.record(
+            run_id="RUN-deleg",
+            workflow_instance_id="",
+            mission_id="",
+            task_id="GAO-x",
+            recipe_id="grimoire.delegation",
+            outcome=TraceOutcome.SUCCESS,
+            started_at="2026-02-24T00:00:00+00:00",  # 5 j avant `now`
+            agent_id="general-purpose",
+            model="claude-sonnet-4-6",
+            tags=[DELEGATION_TAG],
+        )
+
+        report = ledger.agent_freshness_report(["general-purpose"], threshold_days=30, now=now)
+
+        assert report.judged is True, "le journal (59 j) doit couvrir le seuil (30 j)"
+        entry = report.entries[0]
+        assert entry.last_seen == "2026-02-24T00:00:00+00:00", "la délégation doit compter comme signe de vie"
+        assert entry.days_since == 5
+        assert entry.stale is False
+
     def test_export_otel_jsonl(self, tmp_path) -> None:
         """One `invoke_agent` parent span, plus one `execute_tool` child per call."""
         ledger = TraceLedger(tmp_path)

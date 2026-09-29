@@ -1873,10 +1873,68 @@ def test_non_claude_hosts_do_not_get_the_claude_dispatch_context(project: Path) 
     assert "Politique de dispatch" not in copilot_decision.context
     assert copilot_decision.detail["dispatch_context_injected"] is False
 
+
+def test_the_roster_default_model_is_explicitly_subordinate_to_the_task_class(project: Path) -> None:
+    """#662 : le répertoire `subagent_type` → modèle par défaut de
+    la persona (ex. `scribe` → `haiku`) est injecté juste sous la « Politique
+    de dispatch » (classe de la tâche → modèle) sans qu'aucune phrase ne
+    tranche entre les deux — les deux règles semblent se contredire pour qui
+    ne devine pas que le roster n'est que le défaut appliqué quand `model=` est omis."""
+    _, decision, _ = run_hook(
+        {"hook_event_name": "SessionStart", "cwd": str(project)}, host_id=HostId.CLAUDE_CODE_CLI
+    )
+    context = decision.context
+    roster_index = context.index("Personas routables")
+    priority_index = context.index("la classe de la sous-tâche déléguée prime")
+    assert priority_index > roster_index, "la phrase de priorité doit suivre le roster, pas le précéder"
+
+
+def test_collect_agents_runs_once_per_claude_session_start(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """#662 : `entry_persona_context` et `_claude_dispatch_context`
+    appelaient chacune `collect_agents` au même `SessionStart` (mesuré
+    ~35 ms + ~16 ms sur la Forge) — le même inventaire d'agents, recalculé
+    deux fois."""
+    import grimoire.hosts.collect as collect_module
+
+    calls = 0
+    original = collect_module.collect_agents
+
+    def counting(*args: object, **kwargs: object) -> tuple:
+        nonlocal calls
+        calls += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(collect_module, "collect_agents", counting)
+
+    run_hook({"hook_event_name": "SessionStart", "cwd": str(project)}, host_id=HostId.CLAUDE_CODE_CLI)
+
+    assert calls == 1, f"collect_agents appelé {calls} fois au lieu d'une seule"
+
     # Sans host_id du tout (appel direct, comme le fait le reste de la suite) :
     # même comportement, jamais la section Claude.
     bare_context = _session_start(project)
     assert "Politique de dispatch" not in bare_context
+
+
+def test_claude_session_start_survives_an_unreadable_agent_inventory(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#662 : un inventaire illisible (``OSError``) ne casse pas le hook — ni
+    persona ni politique, le reste du contexte ``SessionStart`` passe."""
+    import grimoire.hosts.collect as collect_module
+
+    def unreadable(*args: object, **kwargs: object) -> tuple:
+        raise OSError("inventaire illisible")
+
+    monkeypatch.setattr(collect_module, "collect_agents", unreadable)
+
+    _rendered, decision, _hook = run_hook(
+        {"hook_event_name": "SessionStart", "cwd": str(project)}, host_id=HostId.CLAUDE_CODE_CLI
+    )
+    context = decision.context
+
+    assert "Politique de dispatch" not in context
+    assert "persona d'entrée" not in context
 
 
 def test_the_entry_persona_tool_boundary_no_longer_reads_as_binding_the_main_loop(project: Path) -> None:

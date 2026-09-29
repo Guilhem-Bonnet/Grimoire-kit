@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from grimoire.bridges.schemas import HostId
 from grimoire.core.claude_activation import activation_context_text
@@ -13,8 +13,13 @@ from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
 from grimoire.hosts.decisions.enrolment import BLOCKING_PROFILES, link_session, no_task_context
 from grimoire.hosts.decisions.record import _record_agent_dispatch
 
+if TYPE_CHECKING:
+    from grimoire.hosts.surface import AgentSpec
 
-def entry_persona_context(project_root: Path) -> tuple[str, str]:
+
+def entry_persona_context(
+    project_root: Path, agents: tuple[AgentSpec, ...] | None = None
+) -> tuple[str, str]:
     """The session-start stand-in for an agent no host can be told to open.
 
     ``collect_agents`` has always marked one persona ``entry_point``, and
@@ -42,14 +47,24 @@ def entry_persona_context(project_root: Path) -> tuple[str, str]:
     when the request truly needs triage.
 
     Returns ``(text, name)``; both empty when the project designates no entry.
+
+    *agents* lets :func:`decide_activation` pass an inventory it already
+    collected once (#662 — this call site and
+    :func:`_claude_dispatch_context` both used to run their own
+    ``collect_agents``, ~35 ms + ~16 ms measured on the Forge for the same
+    project at the same ``SessionStart``). Left ``None`` — the default, and
+    every direct call outside :func:`decide_activation` — this collects its
+    own inventory exactly as before.
     """
-    from grimoire.hosts.collect import collect_agents
     from grimoire.hosts.surface import ProjectSurface
 
-    try:
-        agents = collect_agents(project_root)
-    except OSError:
-        return "", ""
+    if agents is None:
+        from grimoire.hosts.collect import collect_agents
+
+        try:
+            agents = collect_agents(project_root)
+        except OSError:
+            return "", ""
     entry = ProjectSurface(project_name=project_root.name, agents=agents).entry_agent()
     if entry is None:
         return "", ""
@@ -68,7 +83,7 @@ def entry_persona_context(project_root: Path) -> tuple[str, str]:
     return text, entry.name
 
 
-def _claude_dispatch_context(project_root: Path) -> str:
+def _claude_dispatch_context(project_root: Path, agents: tuple[AgentSpec, ...]) -> str:
     """La "Politique de dispatch" + le répertoire routable, pour la boucle principale (#655).
 
     ``.claude/agents/<entrée>.md`` porte déjà cette règle
@@ -87,19 +102,29 @@ def _claude_dispatch_context(project_root: Path) -> str:
     pour un autre hôte, et :func:`decide_activation` tourne pour chacun
     d'eux. Best-effort comme le reste de ce module : un inventaire d'agents
     illisible dégrade en absence de ligne, jamais en hook cassé.
+
+    Le roster (`subagent_type` → modèle *par défaut de la persona*, ex.
+    `scribe` → `haiku`) est injecté juste sous la politique (classe de la
+    tâche → modèle) sans qu'aucune phrase ne les départage — #662 :
+    les deux se lisent comme deux règles concurrentes pour qui ne devine pas
+    que le roster n'est qu'un repli hors tâche réclamée. Une phrase le dit
+    maintenant explicitement, dans l'ordre où les deux blocs apparaissent.
+
+    *agents* — voir le docstring de :func:`entry_persona_context` : même
+    inventaire, passé une fois par :func:`decide_activation` plutôt que
+    recollecté ici (#662).
     """
-    from grimoire.hosts.collect import collect_agents
     from grimoire.hosts.emitters.claude_code import _dispatch_policy_section, _model_for
 
-    try:
-        agents = collect_agents(project_root)
-    except OSError:
-        return ""
     routable = [agent for agent in agents if not agent.entry_point]
     if not routable:
         return ""
     roster = "\n".join(f"- `{agent.name}` → {_model_for(agent)}" for agent in routable)
-    return f"{_dispatch_policy_section()}\nPersonas routables (`subagent_type` → modèle) :\n{roster}\n"
+    return (
+        f"{_dispatch_policy_section()}\nPersonas routables (`subagent_type` → modèle) :\n{roster}\n"
+        "Ce modèle est le défaut de la persona, appliqué si tu omets `model=` ; la classe "
+        "de la sous-tâche déléguée prime : passe `model=` selon la politique ci-dessus.\n"
+    )
 
 
 def _claimed_task_recall(project_root: Path, task_id: str) -> str:
@@ -317,6 +342,14 @@ def decide_activation(hook: HookInput) -> Decision:
     means nothing to any other one. It sits right after the persona: same
     register (how the main loop should act), read before anything about the
     current task.
+
+    #662: :func:`entry_persona_context` and
+    :func:`_claude_dispatch_context` both used to call ``collect_agents`` on
+    their own — the same inventory, twice, at the same ``SessionStart``
+    (~35 ms + ~16 ms measured on the Forge). Collected once here instead and
+    handed to both; an unreadable inventory (``OSError``) degrades to an
+    empty tuple, the same "no line" outcome either function already produced
+    on its own failed collection.
     """
     _reset_temporal_session(hook)
     active = resolve_active_task(hook.project_root)
@@ -340,10 +373,18 @@ def decide_activation(hook: HookInput) -> Decision:
         if governed
         else _SHORT_ACTIVATION_CONTEXT
     )
-    persona, entry_name = entry_persona_context(hook.project_root)
+    from grimoire.hosts.collect import collect_agents
+
+    try:
+        agents = collect_agents(hook.project_root)
+    except OSError:
+        agents = ()
+    persona, entry_name = entry_persona_context(hook.project_root, agents)
     if entry_name:
         _record_agent_dispatch(hook.project_root, entry_name, task_id)
-    dispatch_context = _claude_dispatch_context(hook.project_root) if hook.host == HostId.CLAUDE_CODE_CLI.value else ""
+    dispatch_context = (
+        _claude_dispatch_context(hook.project_root, agents) if hook.host == HostId.CLAUDE_CODE_CLI.value else ""
+    )
     recall = _claimed_task_recall(hook.project_root, task_id)
     steering, steering_detail = _steering(hook, task_id)
     providers_line = _providers_status_line(hook.project_root)
