@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import builtins
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -13,6 +14,7 @@ from grimoire.core.config import GrimoireConfig, MemoryConfig
 from grimoire.core.exceptions import GrimoireMemoryError
 from grimoire.memory.backends.base import BackendStatus, MemoryBackend, MemoryEntry
 from grimoire.memory.manager import MemoryManager, _create_backend, _resolve_auto
+from grimoire.providers.state import load_state
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -375,6 +377,150 @@ class TestHybridRetrieval:
     def test_reindex_without_companion_is_noop(self, mock_backend: MagicMock) -> None:
         mgr = MemoryManager.from_backend(mock_backend)
         assert mgr.reindex_lexical_companion() == 0
+
+
+# ── Disjoncteur mémoire (#<issue>) : qdrant/weaviate refroidis via providers.state ──
+#
+# Un backend distant (mode `qdrant-server`/`weaviate-server`) injoignable ne
+# doit plus payer son plein timeout réseau (5-10 s) à CHAQUE recherche —
+# `providers/state.py` (déjà en production pour la cascade de dispatch LLM)
+# est réutilisé tel quel, avec l'identifiant `memory:<kind>`. Une horloge
+# injectée remplace `datetime.now(UTC)` dans `manager.py` ET `providers/state.py`
+# (le même appel « now » doit être vu par les deux) — jamais un vrai sommeil
+# de 5 minutes dans un test.
+
+
+class _FakeClock:
+    """Remplace le nom ``datetime`` d'un module — seul ``.now()`` et
+    ``.fromisoformat()`` (utilisé par ``providers.state`` pour relire l'état
+    persistant) sont exercés par le code sous test."""
+
+    def __init__(self, start: datetime) -> None:
+        self.current = start
+
+    def now(self, tz: Any = None) -> datetime:
+        return self.current
+
+    def fromisoformat(self, value: str) -> datetime:
+        return datetime.fromisoformat(value)
+
+
+class TestMemoryBackendCooldown:
+    @pytest.fixture()
+    def clock(self, monkeypatch: pytest.MonkeyPatch) -> _FakeClock:
+        fake = _FakeClock(datetime(2026, 1, 1, tzinfo=UTC))
+        monkeypatch.setattr("grimoire.memory.manager.datetime", fake)
+        monkeypatch.setattr("grimoire.providers.state.datetime", fake)
+        return fake
+
+    def _cooled_manager(self, mock_backend: MagicMock, tmp_path: Path, **kwargs: Any) -> MemoryManager:
+        return MemoryManager(
+            mock_backend, project_root=tmp_path, cooldown_backend_kind="qdrant", **kwargs
+        )
+
+    def test_from_backend_never_activates_cooldown(self, mock_backend: MagicMock) -> None:
+        """Sans racine de projet (``from_backend``), pas de fichier d'état
+        possible — la recherche reste une délégation directe, comme avant ce
+        correctif (voir ``TestFromBackend.test_search_delegates``)."""
+        mock_backend.search.side_effect = ConnectionError("down")
+        mgr = MemoryManager.from_backend(mock_backend)
+
+        with pytest.raises(ConnectionError):
+            mgr.search("q")
+        with pytest.raises(ConnectionError):
+            mgr.search("q")
+        assert mock_backend.search.call_count == 2
+
+    def test_second_call_after_failure_short_circuits(
+        self, mock_backend: MagicMock, tmp_path: Path, clock: _FakeClock
+    ) -> None:
+        mock_backend.search.side_effect = ConnectionError("qdrant down")
+        mgr = self._cooled_manager(mock_backend, tmp_path)
+
+        with pytest.raises(ConnectionError):
+            mgr.search("q")
+        assert mock_backend.search.call_count == 1
+
+        clock.current += timedelta(seconds=10)
+        results = mgr.search("q")
+
+        assert results == []
+        assert mock_backend.search.call_count == 1  # pas rappelé pendant le refroidissement
+
+    def test_cooldown_reason_is_exposed_in_logs(
+        self, mock_backend: MagicMock, tmp_path: Path, clock: _FakeClock, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        mock_backend.search.side_effect = ConnectionError("qdrant down")
+        mgr = self._cooled_manager(mock_backend, tmp_path)
+        with pytest.raises(ConnectionError):
+            mgr.search("q")
+        clock.current += timedelta(seconds=10)
+
+        with caplog.at_level("WARNING"):
+            mgr.search("q")
+
+        assert "qdrant" in caplog.text
+        assert "refroidi jusqu'à" in caplog.text
+
+    def test_recovers_after_cooldown_expires(
+        self, mock_backend: MagicMock, tmp_path: Path, clock: _FakeClock
+    ) -> None:
+        mock_backend.search.side_effect = [
+            ConnectionError("qdrant down"),
+            [MemoryEntry(id="m-1", text="ok")],
+        ]
+        mgr = self._cooled_manager(mock_backend, tmp_path)
+        with pytest.raises(ConnectionError):
+            mgr.search("q")
+
+        clock.current += timedelta(minutes=6)
+        results = mgr.search("q")
+
+        assert [e.id for e in results] == ["m-1"]
+        assert mock_backend.search.call_count == 2
+
+    def test_success_resets_failure_state(
+        self, mock_backend: MagicMock, tmp_path: Path, clock: _FakeClock
+    ) -> None:
+        mock_backend.search.side_effect = [
+            ConnectionError("qdrant down"),
+            [MemoryEntry(id="m-1", text="ok")],
+        ]
+        mgr = self._cooled_manager(mock_backend, tmp_path)
+        with pytest.raises(ConnectionError):
+            mgr.search("q")
+        clock.current += timedelta(minutes=6)
+        mgr.search("q")
+
+        entry = load_state(tmp_path)["memory:qdrant"]
+        assert entry.failure_count == 0
+        assert entry.cooldown_until is None
+
+    def test_hybrid_search_applies_the_same_cooldown_to_the_vector_backend(
+        self, mock_backend: MagicMock, tmp_path: Path, clock: _FakeClock
+    ) -> None:
+        """La lecture la plus courante (``grimoire_memory_search`` MCP, cockpit)
+        passe par ``hybrid_search`` dès qu'un compagnon lexical existe — le
+        refroidissement doit s'y appliquer aussi, pas seulement à ``search``
+        seule (voir ``_CooldownGuardedBackend``)."""
+        from grimoire.memory.backends.lexical import LexicalMemoryBackend, fts5_available
+
+        if not fts5_available():
+            pytest.skip("SQLite build lacks FTS5")
+        companion = LexicalMemoryBackend(tmp_path / "companion.sqlite3")
+        companion.upsert("lex-1", "resilient entry")
+        mock_backend.search.side_effect = ConnectionError("qdrant down")
+        mgr = self._cooled_manager(mock_backend, tmp_path, lexical_companion=companion)
+
+        first = mgr.hybrid_search("resilient")
+        assert [e.id for e in first] == ["lex-1"]
+        assert mock_backend.search.call_count == 1
+
+        clock.current += timedelta(seconds=10)
+        second = mgr.hybrid_search("resilient")
+
+        assert [e.id for e in second] == ["lex-1"]
+        assert mock_backend.search.call_count == 1  # toujours pas rappelé
 
 
 # ── _create_backend branches ─────────────────────────────────────────────────

@@ -126,6 +126,12 @@ def governed(project: Path) -> Path:
     return project
 
 
+@pytest.fixture
+def production(project: Path) -> Path:
+    setup_standard_profile(project, profile_id="production", task_id="bootstrap")
+    return project
+
+
 # ── Collection ───────────────────────────────────────────────────────────────
 
 
@@ -961,6 +967,139 @@ def test_read_only_calls_are_not_slowed_down(governed: Path) -> None:
     )
     assert decision.outcome is Outcome.ALLOW
     assert decision.detail == {}
+
+
+# ── Standard profile downgrade guard (fix/profile-downgrade-guard) ──────────
+#
+# `_grimoire/standard/standard-profile.yaml`'s `profile:` field selects which
+# rule set `_risk_profile` applies (see `tool_policy._RISK_BY_PROFILE`). Any
+# write that weakens it therefore relaxes every threshold the standard
+# enforces, without touching a single rule — and nothing guarded that field
+# before this. Design: `_scratch/party-oss/gouvernance.md`, idea A.
+
+_PROFILE_YAML_RELPATH = "_grimoire/standard/standard-profile.yaml"
+
+
+def test_profile_downgrade_by_edit_asks_for_confirmation(production: Path) -> None:
+    path = production / _PROFILE_YAML_RELPATH
+    decision = decide_tool_policy(
+        HookInput(
+            event=HookEvent.PRE_TOOL_USE,
+            project_root=production,
+            tool_name="Edit",
+            tool_input={
+                "file_path": str(path),
+                "old_string": "profile: production",
+                "new_string": "profile: starter",
+            },
+        )
+    )
+    assert decision.outcome is Outcome.ASK
+    assert "production" in decision.reason
+    assert "starter" in decision.reason
+
+
+def test_profile_downgrade_by_write_asks_for_confirmation(production: Path) -> None:
+    path = production / _PROFILE_YAML_RELPATH
+    decision = decide_tool_policy(
+        HookInput(
+            event=HookEvent.PRE_TOOL_USE,
+            project_root=production,
+            tool_name="Write",
+            tool_input={"file_path": str(path), "content": "profile: starter\n"},
+        )
+    )
+    assert decision.outcome is Outcome.ASK
+
+
+def test_profile_downgrade_by_shell_command_asks_for_confirmation(production: Path) -> None:
+    decision = decide_tool_policy(
+        HookInput(
+            event=HookEvent.PRE_TOOL_USE,
+            project_root=production,
+            tool_name="Bash",
+            tool_input={
+                "command": (
+                    "sed -i 's/profile: production/profile: starter/' "
+                    f"{_PROFILE_YAML_RELPATH}"
+                )
+            },
+        )
+    )
+    assert decision.outcome is Outcome.ASK
+
+
+def test_profile_upgrade_is_allowed(governed: Path) -> None:
+    path = governed / _PROFILE_YAML_RELPATH
+    decision = decide_tool_policy(
+        HookInput(
+            event=HookEvent.PRE_TOOL_USE,
+            project_root=governed,
+            tool_name="Edit",
+            tool_input={
+                "file_path": str(path),
+                "old_string": "profile: governed",
+                "new_string": "profile: production",
+            },
+        )
+    )
+    assert decision.outcome is Outcome.ALLOW
+
+
+def test_profile_written_with_same_value_is_allowed(governed: Path) -> None:
+    path = governed / _PROFILE_YAML_RELPATH
+    decision = decide_tool_policy(
+        HookInput(
+            event=HookEvent.PRE_TOOL_USE,
+            project_root=governed,
+            tool_name="Write",
+            tool_input={"file_path": str(path), "content": "profile: governed\n"},
+        )
+    )
+    assert decision.outcome is Outcome.ALLOW
+
+
+def test_other_standard_yaml_file_is_unaffected_by_the_profile_guard(governed: Path) -> None:
+    """Scope guard (design risk (b)): only `standard-profile.yaml` is watched."""
+    policies_path = governed / "_grimoire/standard/policies.yaml"
+    decision = decide_tool_policy(
+        HookInput(
+            event=HookEvent.PRE_TOOL_USE,
+            project_root=governed,
+            tool_name="Write",
+            tool_input={"file_path": str(policies_path), "content": "profile: starter\nrules: []\n"},
+        )
+    )
+    assert decision.outcome is Outcome.ALLOW
+
+
+def test_profile_guard_never_ranks_a_profile_off_target(governed: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Budget guard: an ordinary ``Edit`` elsewhere must never pay for the
+    lazy ``profile_rank`` import/call the downgrade guard only needs once it
+    has already matched ``standard-profile.yaml`` by a plain string
+    comparison. A coordinator-reported latency concern (an off-target `Edit`
+    measured ~90ms vs a ~60ms `Read` baseline) turned out, on a proper
+    before/after A/B against ``origin/main`` (7 runs each, same machine), to
+    be pre-existing engine-evaluation cost unrelated to this guard (delta
+    within a few ms, noise-level) — this test is the standing proof that stays
+    true regardless of what the ambient noise does.
+    """
+    import grimoire.core.agentic_standard as agentic_standard
+
+    def _must_not_be_called(profile_id: str) -> int:
+        raise AssertionError("profile_rank must not be called for a call that never targets standard-profile.yaml")
+
+    monkeypatch.setattr(agentic_standard, "profile_rank", _must_not_be_called)
+    path = governed / "notes.md"
+    decision = decide_tool_policy(
+        HookInput(
+            event=HookEvent.PRE_TOOL_USE,
+            project_root=governed,
+            tool_name="Edit",
+            tool_input={"file_path": str(path), "old_string": "a", "new_string": "b"},
+        )
+    )
+    assert decision.outcome is Outcome.ALLOW
 
 
 def test_post_tool_use_logs_bash_test_run_and_file_write_events(governed: Path) -> None:

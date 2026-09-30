@@ -18,6 +18,7 @@ import logging
 import os
 import time
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, ClassVar, cast
 
@@ -29,6 +30,7 @@ from grimoire.memory.profiles import VECTOR_BACKENDS
 from grimoire.memory.sidecar import DiaryRecord, KnowledgeFact, MemorySidecar
 from grimoire.memory.taxonomy import build_taxonomy, entry_matches_filters, normalize_palace_metadata
 from grimoire.memory.validation import MemoryWritePolicy, ValidatedWrite, validate_memory_write
+from grimoire.providers.state import cooling_down_entry, record_failure, record_success
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +53,19 @@ _BACKEND_WEAVIATE_SERVER = "weaviate-server"
 _BACKEND_MEMPALACE = "mempalace"
 _BACKEND_OLLAMA = "ollama"
 _BACKEND_AUTO = "auto"
+
+#: Backends dont l'indisponibilité paie un vrai délai réseau par appel (5 s
+#: Qdrant, 10 s Weaviate — voir leurs clients respectifs) et mérite donc le
+#: même refroidissement que la cascade de dispatch LLM
+#: (``providers/state.py``, réutilisé tel quel avec un nouvel identifiant
+#: ``memory:<kind>``). Qdrant en mode local (fichier embarqué, pas de
+#: serveur) n'a pas ce risque — un échec y a une autre cause (verrou de
+#: fichier, dimension de collection...) qu'un refroidissement réseau ne
+#: doit pas masquer, donc il en est exclu.
+_COOLDOWN_BACKEND_KIND: dict[str, str] = {
+    _BACKEND_QDRANT_SERVER: "qdrant",
+    _BACKEND_WEAVIATE_SERVER: "weaviate",
+}
 
 #: Délai maximal accordé à chacune des sondes réseau de
 #: :meth:`MemoryManager.health_check` (backend vectoriel, Redis, Neo4j). Voir
@@ -325,6 +340,28 @@ def _create_hot_memory(config: GrimoireConfig) -> tuple[RedisHotMemory | None, s
         return None, f"Redis hot memory unavailable: {exc}"
 
 
+class _CooldownGuardedBackend:
+    """Adapte ``MemoryManager._guarded_backend_search`` à l'interface ``.search()``
+    attendue par :class:`~grimoire.memory.retrieval.HybridRetriever`.
+
+    ``hybrid_search`` construit un ``HybridRetriever`` qui appelle
+    ``backend.search(...)`` directement sur chaque backend qu'on lui donne —
+    sans ce petit adaptateur, le refroidissement de :meth:`MemoryManager.search`
+    ne s'appliquerait qu'au chemin sans compagnon lexical, alors que c'est le
+    chemin hybride (le seul qui compose vecteur + lexical) qui est le plus
+    courant en lecture (``grimoire_memory_search`` MCP, cockpit). Même
+    refroidissement, même identifiant, une seule politique.
+    """
+
+    __slots__ = ("_manager",)
+
+    def __init__(self, manager: MemoryManager) -> None:
+        self._manager = manager
+
+    def search(self, query: str, *, user_id: str = "", limit: int = 5) -> list[MemoryEntry]:
+        return self._manager._guarded_backend_search(query, user_id=user_id, limit=limit)
+
+
 class MemoryManager:
     """Unified API wrapping whichever backend the project configures.
 
@@ -345,6 +382,7 @@ class MemoryManager:
         lexical_companion: MemoryBackend | None = None,
         write_policy: MemoryWritePolicy | None = None,
         project_root: Path | None = None,
+        cooldown_backend_kind: str = "",
     ) -> None:
         self._backend = backend
         self._project_name = project_name
@@ -364,6 +402,14 @@ class MemoryManager:
         # une consigne. Un manager construit sans politique n'est pas un
         # manager sans frontière.
         self._write_policy = write_policy or MemoryWritePolicy()
+        # Identifiant providers.state (``memory:qdrant``, ``memory:weaviate``)
+        # pour les backends distants dont l'indisponibilité mérite un
+        # refroidissement (voir ``_COOLDOWN_BACKEND_KIND``) — ``None`` sans
+        # racine de projet (pas de fichier d'état possible, ``from_backend``)
+        # ou pour un backend local/lexical (pas ce risque réseau).
+        self._cooldown_provider_id: str | None = (
+            f"memory:{cooldown_backend_kind}" if cooldown_backend_kind and project_root is not None else None
+        )
 
     @classmethod
     def from_config(cls, config: GrimoireConfig, *, project_root: Path | None = None) -> MemoryManager:
@@ -403,6 +449,7 @@ class MemoryManager:
             lexical_companion=_create_lexical_companion(config, backend_id, root),
             write_policy=MemoryWritePolicy.from_project(root),
             project_root=root,
+            cooldown_backend_kind=_COOLDOWN_BACKEND_KIND.get(backend_id, ""),
         )
 
     @classmethod
@@ -516,8 +563,50 @@ class MemoryManager:
     def recall(self, entry_id: str) -> MemoryEntry | None:
         return self._backend.recall(entry_id)
 
+    def _cooldown_reason(self) -> str | None:
+        """``None`` si le backend peut être appelé maintenant, sinon un motif nommé.
+
+        Un seul point de lecture de ``providers.state`` pour :meth:`search` et
+        :class:`_CooldownGuardedBackend` (chemin hybride) — même
+        refroidissement, jamais deux calculs qui pourraient diverger.
+        """
+        if self._cooldown_provider_id is None or self._project_root is None:
+            return None
+        entry = cooling_down_entry(self._project_root, self._cooldown_provider_id, now=datetime.now(UTC))
+        if entry is None:
+            return None
+        until = entry.cooldown_until.isoformat(timespec="seconds") if entry.cooldown_until else "?"
+        kind = self._cooldown_provider_id.split(":", 1)[-1]
+        return f"backend {kind} refroidi jusqu'à {until}"
+
+    def _guarded_backend_search(self, query: str, *, user_id: str = "", limit: int = 5) -> list[MemoryEntry]:
+        """L'appel réel à ``self._backend.search``, refroidissement tenu à jour.
+
+        Un backend distant en refroidissement (échecs récents, voir
+        ``providers/state.py``) n'est jamais rappelé : dégradé silencieux —
+        liste vide, raison nommée dans les logs — jamais une exception qui
+        remonterait au cockpit ou au client MCP. Hors refroidissement,
+        l'appel réel est tenté ; un échec pose (ou allonge) le
+        refroidissement puis se propage tel quel — le tout premier échec
+        d'un incident n'est jamais masqué, seuls les suivants, tant que la
+        fenêtre est ouverte, le sont.
+        """
+        reason = self._cooldown_reason()
+        if reason is not None:
+            logger.warning("recherche mémoire ignorée : %s", reason)
+            return []
+        if self._cooldown_provider_id is None or self._project_root is None:
+            return self._backend.search(query, user_id=user_id, limit=limit)
+        try:
+            result = self._backend.search(query, user_id=user_id, limit=limit)
+        except Exception:
+            record_failure(self._project_root, self._cooldown_provider_id, kind="backend_unreachable")
+            raise
+        record_success(self._project_root, self._cooldown_provider_id)
+        return result
+
     def search(self, query: str, *, user_id: str = "", limit: int = 5) -> list[MemoryEntry]:
-        return self._backend.search(query, user_id=user_id, limit=limit)
+        return self._guarded_backend_search(query, user_id=user_id, limit=limit)
 
     # ── Hybrid retrieval (vector + lexical BM25, RRF fusion) ─────────────────
 
@@ -547,7 +636,10 @@ class MemoryManager:
         from grimoire.memory.retrieval import HybridRetriever
 
         retriever = HybridRetriever([
-            ("vector", self._backend),
+            # HybridRetriever n'appelle que `.search()` sur chaque entrée — le
+            # cast reflète cette interface réduite, pas une vraie implémentation
+            # de MemoryBackend (voir _CooldownGuardedBackend).
+            ("vector", cast(MemoryBackend, _CooldownGuardedBackend(self))),
             ("lexical", self._lexical_companion),
         ])
         return retriever.search(query, user_id=user_id, limit=limit)

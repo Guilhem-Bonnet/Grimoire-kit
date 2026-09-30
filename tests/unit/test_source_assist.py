@@ -17,11 +17,13 @@ import http.server
 import json
 import threading
 import time
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
 
+from grimoire.providers.state import load_state
 from grimoire.tools import source_assist
 from grimoire.tools.workspace_api import WorkspacePathError
 
@@ -523,3 +525,150 @@ def test_texte_manquant_refuse(tmp_path: Path) -> None:
     del body["text"]
     with pytest.raises(ValueError, match="`text` requis"):
         source_assist.assist_view(tmp_path, body)
+
+
+# ── Refroidissement (#<issue>) : deux échecs d'affilée réutilisent providers.state ──
+#
+# Distinct du refus « délai dépassé » ci-dessus (un seul appel réel, jamais
+# muet) : ici, un DEUXIÈME appel dans la fenêtre de refroidissement ne doit
+# plus atteindre Ollama du tout — même disjoncteur, mêmes identifiants
+# (``source_assist:ollama``) que ``memory.manager`` pour les backends
+# vectoriels, réutilisant ``providers/state.py`` tel quel.
+
+
+class _FakeClock:
+    """Remplace le nom ``datetime`` d'un module — seuls ``.now()`` et
+    ``.fromisoformat()`` (relecture de l'état persistant) sont exercés."""
+
+    def __init__(self, start: datetime) -> None:
+        self.current = start
+
+    def now(self, tz: Any = None) -> datetime:
+        return self.current
+
+    def fromisoformat(self, value: str) -> datetime:
+        return datetime.fromisoformat(value)
+
+
+def test_deuxieme_appel_apres_echec_ne_rappelle_pas_ollama(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_ollama: http.server.HTTPServer
+) -> None:
+    """``_call_ollama`` est remplacé par un compteur qui échoue toujours —
+    le vrai serveur (``fake_ollama``) ne sert ici qu'à la sonde de résidence
+    (``/api/tags``, ``/api/ps``) : il est mono-thread, un vrai délai réseau
+    de :data:`source_assist.ASSIST_TIMEOUT_S` y serait une course (le second
+    appel doit être court-circuité AVANT même la tentative réseau, pas
+    juste échouer plus vite)."""
+    _write_project(tmp_path, model="qwen3-coder:30b")
+    port = fake_ollama.server_address[1]
+    monkeypatch.setenv("OLLAMA_HOST", f"http://127.0.0.1:{port}")
+    calls: list[str] = []
+
+    def _failing_call(base_url: str, model: str, prompt: str) -> str | None:
+        calls.append(model)
+        return None
+
+    monkeypatch.setattr(source_assist, "_call_ollama", _failing_call)
+
+    first = source_assist.assist_view(tmp_path, _body())
+    assert first["available"] is False
+    assert "n'a pas répondu" in first["reason"]
+    assert len(calls) == 1
+
+    second = source_assist.assist_view(tmp_path, _body())
+
+    assert second["available"] is False
+    assert "refroidi" in second["reason"]
+    assert len(calls) == 1  # pas un second appel réel
+
+
+def test_raison_du_refroidissement_nomme_le_modele_et_l_echeance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_ollama: http.server.HTTPServer
+) -> None:
+    _write_project(tmp_path, model="qwen3-coder:30b")
+    port = fake_ollama.server_address[1]
+    monkeypatch.setenv("OLLAMA_HOST", f"http://127.0.0.1:{port}")
+    monkeypatch.setattr(source_assist, "_call_ollama", lambda base_url, model, prompt: None)
+
+    source_assist.assist_view(tmp_path, _body())
+    result = source_assist.assist_view(tmp_path, _body())
+
+    assert "qwen3-coder:30b" in result["reason"]
+    assert "refroidi jusqu'à" in result["reason"]
+
+
+def test_reprend_apres_expiration_du_refroidissement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_ollama: http.server.HTTPServer
+) -> None:
+    _write_project(tmp_path, model="qwen3-coder:30b")
+    port = fake_ollama.server_address[1]
+    monkeypatch.setenv("OLLAMA_HOST", f"http://127.0.0.1:{port}")
+    calls: list[str] = []
+    monkeypatch.setattr(
+        source_assist, "_call_ollama", lambda base_url, model, prompt: calls.append(model) or None
+    )
+
+    source_assist.assist_view(tmp_path, _body())
+    assert len(calls) == 1
+
+    fake = _FakeClock(datetime.now(UTC))
+    monkeypatch.setattr(source_assist, "datetime", fake)
+    monkeypatch.setattr("grimoire.providers.state.datetime", fake)
+    fake.current += timedelta(minutes=6)
+    monkeypatch.setattr(
+        source_assist,
+        "_call_ollama",
+        lambda base_url, model, prompt: (calls.append(model), "suggestion après reprise.")[1],
+    )
+
+    result = source_assist.assist_view(tmp_path, _body())
+
+    assert result["available"] is True
+    assert result["suggestion"] == "suggestion après reprise."
+    assert len(calls) == 2
+
+
+def test_succes_reinitialise_l_etat_de_refroidissement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_ollama: http.server.HTTPServer
+) -> None:
+    """Après un échec (refroidissement posé), un appel réussi hors fenêtre
+    doit tout remettre à zéro — jamais un fournisseur qui reste marqué
+    « en échec » alors qu'il vient de répondre."""
+    _write_project(tmp_path, model="qwen3-coder:30b")
+    port = fake_ollama.server_address[1]
+    monkeypatch.setenv("OLLAMA_HOST", f"http://127.0.0.1:{port}")
+
+    from grimoire.providers.state import record_failure
+
+    record_failure(tmp_path, "source_assist:ollama", "timeout")
+    before = load_state(tmp_path)["source_assist:ollama"]
+    assert before.cooldown_until is not None
+
+    fake = _FakeClock(before.cooldown_until + timedelta(seconds=1))
+    monkeypatch.setattr(source_assist, "datetime", fake)
+    monkeypatch.setattr("grimoire.providers.state.datetime", fake)
+    _FakeOllama.generate_response = "ok"
+
+    result = source_assist.assist_view(tmp_path, _body())
+
+    assert result["available"] is True
+    entry = load_state(tmp_path)["source_assist:ollama"]
+    assert entry.failure_count == 0
+    assert entry.cooldown_until is None
+
+
+def test_chargement_du_modele_n_est_jamais_compte_comme_un_echec(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_ollama: http.server.HTTPServer
+) -> None:
+    """Refus 5 (chargement) : jamais un `record_failure`, sinon un modèle qui
+    met du temps à charger déclencherait le disjoncteur pour rien."""
+    _write_project(tmp_path, model="qwen3-coder:30b")
+    port = fake_ollama.server_address[1]
+    monkeypatch.setenv("OLLAMA_HOST", f"http://127.0.0.1:{port}")
+    _FakeOllama.running = ()
+
+    result = source_assist.assist_view(tmp_path, _body())
+
+    assert result["available"] is False
+    assert result.get("reason", "") and "charge encore" in result["reason"]
+    assert load_state(tmp_path).get("source_assist:ollama") is None

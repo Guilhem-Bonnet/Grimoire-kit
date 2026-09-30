@@ -175,6 +175,61 @@ def _untrusted_escalation(hook: HookInput, facts: ToolFacts) -> Decision | None:
     )
 
 
+def _profile_downgrade_check(hook: HookInput, facts: ToolFacts) -> Decision | None:
+    """A weaker ``profile:`` value in ``standard-profile.yaml`` is a silent
+    threshold change (party-mode idea A, ``_scratch/party-oss/gouvernance.md``):
+    :func:`_risk_profile` translates the profile straight into which rules
+    apply, and nothing before this guarded *that* field — only the rule set
+    it selects (:data:`_DESTRUCTIVE_AT_STRICT`, :data:`grimoire.policies.engine._BUILTIN_RULES`).
+    An ordinary ``Edit``/``Write``, or a ``sed -i``, could move a project from
+    ``production`` to ``starter`` in one call and relax every threshold at
+    once without touching a single rule.
+
+    ``None`` means "nothing to say", same contract as
+    :func:`_untrusted_escalation` and the same reason it is only ever called
+    from the branch where the base engine and the temporal layer already
+    agreed on ``allow`` (see :func:`decide_tool_policy`): raising a profile
+    (or leaving it unchanged) is ordinary, ungated work, and a call that
+    already earned a ``deny``/``ask`` for some other reason keeps it —
+    this never downgrades one.
+
+    Only ever returns ``Outcome.ASK``, never ``deny``/``block``: whether a
+    downgrade is legitimate (a project winding down, an experiment scoped
+    back) is a human call the standard has no way to make for itself.
+    """
+    if facts.standard_profile_write is None:
+        return None
+
+    current = active_profile_id(hook.project_root)
+    proposed = facts.standard_profile_write
+    if not proposed:
+        return Decision(
+            outcome=Outcome.ASK,
+            reason=(
+                "[Grimoire policy] Une commande shell écrit "
+                "_grimoire/standard/standard-profile.yaml (profil actuel : "
+                f"« {current} ») ; la valeur proposée du champ profile n'est pas "
+                "lisible depuis la commande. Confirme le profil visé avant d'exécuter."
+            ),
+            detail={"tool": hook.tool_name, "current_profile": current},
+        )
+
+    from grimoire.core.agentic_standard import profile_rank
+
+    if profile_rank(proposed) < profile_rank(current):
+        return Decision(
+            outcome=Outcome.ASK,
+            reason=(
+                "[Grimoire policy] Cette écriture abaisse le profil du standard de "
+                f"« {current} » à « {proposed} » (_grimoire/standard/standard-profile.yaml), "
+                "ce qui relâche tous les seuils de gouvernance qui en dépendent. "
+                "Confirme si c'est voulu (ex. archivage de fin de vie)."
+            ),
+            detail={"tool": hook.tool_name, "current_profile": current, "proposed_profile": proposed},
+        )
+    return None
+
+
 def decide_tool_policy(hook: HookInput) -> Decision:
     """Pre tool use: run the pending call through the policy engine.
 
@@ -247,4 +302,8 @@ def decide_tool_policy(hook: HookInput) -> Decision:
             reason=f"[Grimoire policy] {reason or 'action sensible'} (profil {risk}).",
             detail=detail,
         )
-    return _untrusted_escalation(hook, facts) or Decision(detail=detail)
+    return (
+        _untrusted_escalation(hook, facts)
+        or _profile_downgrade_check(hook, facts)
+        or Decision(detail=detail)
+    )
