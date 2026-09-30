@@ -26,6 +26,7 @@ from grimoire.providers.routing import choose
 from grimoire.providers.state import (
     PROVIDERS_STATE_FILE,
     ProviderRuntimeState,
+    cooling_down_entry,
     load_state,
     record_failure,
     record_success,
@@ -44,6 +45,7 @@ __all__ = [
     "ProviderSpec",
     "audit_providers",
     "choose",
+    "cooling_down_entry",
     "load_state",
     "probe_provider",
     "read_default_fallback_chain",

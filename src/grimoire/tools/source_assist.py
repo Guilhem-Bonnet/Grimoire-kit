@@ -32,7 +32,15 @@ Refus, dans l'ordre où ils sont vérifiés :
    délai de 10 s ci-dessous : le premier appel pendant qu'Ollama charge un
    modèle de plusieurs Go ne doit pas ressembler à une panne.
 6. délai dépassé (10 s, modèle résident) ou erreur réseau pendant l'appel —
-   même forme de refus discret.
+   même forme de refus discret ; enregistré comme un échec de
+   ``source_assist:ollama`` (:mod:`grimoire.providers.state`, mêmes
+   identifiants et même refroidissement exponentiel que la cascade de
+   dispatch LLM) plutôt qu'oublié aussitôt le refus rendu.
+7. deux échecs consécutifs (timeout ou réseau) et le refroidissement encore
+   ouvert — refus discret immédiat, jamais un nouvel appel ni un nouveau
+   délai de :data:`ASSIST_TIMEOUT_S` tant que la fenêtre n'a pas expiré ;
+   distinct du refus 5 (modèle en cours de chargement, jamais compté comme
+   un échec).
 """
 
 from __future__ import annotations
@@ -42,6 +50,7 @@ import json
 import threading
 import urllib.error
 import urllib.request
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -50,6 +59,7 @@ from grimoire.core import integrity
 from grimoire.core.config import GrimoireConfig, SourceAssistConfig
 from grimoire.core.exceptions import GrimoireConfigError
 from grimoire.providers.audit import ollama_base_url, probe_ollama_models
+from grimoire.providers.state import cooling_down_entry, record_failure, record_success
 from grimoire.tools import workspace_api, workspace_language
 
 __all__ = ["ASSIST_TIMEOUT_S", "INTENTS", "assist_enabled_model", "assist_status", "assist_view"]
@@ -63,6 +73,14 @@ INTENTS = ("complete-clause", "draft-body", "explain-diagnostic")
 #: un modèle en cours de chargement répond avant ce délai, discrètement
 #: (issue #450).
 ASSIST_TIMEOUT_S = 10.0
+
+#: Identifiant ``providers.state`` de l'appel modèle réel (:func:`_call_ollama`
+#: dans :func:`assist_view`) — même refroidissement exponentiel, même fichier
+#: d'état que la cascade de dispatch LLM (``providers/state.py``), jamais un
+#: nouveau mécanisme. Distinct des sondes de :func:`_readiness` (opt-in, LAN,
+#: ``ollama list``, résidence) : celles-ci restent des refus immédiats, pas
+#: des échecs qui referment la porte pour les appels suivants.
+_PROVIDER_ID = "source_assist:ollama"
 
 #: Délai de la sonde ``GET /api/ps`` (résidence en mémoire) — même ordre de
 #: grandeur que la sonde ``/api/tags`` de :func:`probe_ollama_models`.
@@ -462,12 +480,22 @@ def assist_view(project_root: Path, body: dict[str, Any]) -> dict[str, Any]:
         _trigger_warm_up(base_url, model)
         return {"available": False, "reason": f"le modèle local {model!r} charge encore, réessayez dans quelques secondes"}
 
+    cooling = cooling_down_entry(root, _PROVIDER_ID, now=datetime.now(UTC))
+    if cooling is not None:
+        until = cooling.cooldown_until.isoformat(timespec="seconds") if cooling.cooldown_until else "?"
+        return {
+            "available": False,
+            "reason": f"assistant local {model!r} refroidi jusqu'à {until} (échecs récents)",
+        }
+
     facts = _language_facts(root)
     diagnostic = body.get("diagnostic") if intent == "explain-diagnostic" else None
     prompt = _build_prompt(intent, rel, text, line, facts, diagnostic if isinstance(diagnostic, dict) else None)
     suggestion = _call_ollama(base_url, model, prompt)
     if suggestion is None:
+        record_failure(root, _PROVIDER_ID, kind="timeout")
         return {"available": False, "reason": f"le modèle local {model!r} n'a pas répondu à temps"}
+    record_success(root, _PROVIDER_ID)
 
     return {
         "available": True,

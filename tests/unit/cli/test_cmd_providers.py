@@ -122,6 +122,33 @@ def test_status_on_project_without_registry_does_not_crash(tmp_path: Path) -> No
     assert result.exit_code == 0, result.stdout
 
 
+def test_status_never_lists_memory_or_source_assist_cooldown_ids(tmp_path: Path) -> None:
+    """Disjoncteur mémoire/assistant local (#<issue>) : ces identifiants
+    partagent le fichier d'état runtime des fournisseurs LLM (mêmes
+    ``record_failure``/``record_success``), mais ne sont pas des fournisseurs
+    LLM — ``providers status`` ne doit jamais les afficher comme tels, ni en
+    JSON ni dans le tableau texte, quelle que soit leur présence dans l'état.
+    """
+    from grimoire.providers.state import record_failure
+
+    root = _project(tmp_path)
+    for provider_id in ("memory:qdrant", "memory:weaviate", "source_assist:ollama"):
+        record_failure(root, provider_id, "backend_unreachable")
+
+    json_result = runner.invoke(app, ["providers", "status", "--project-root", str(root), "--json"])
+    assert json_result.exit_code == 0, json_result.stdout
+    payload = json.loads(json_result.stdout)
+    ids = {p["id"] for p in payload["providers"]}
+    assert ids == {"anthropic", "local"}
+    assert all(not pid.startswith(("memory:", "source_assist:")) for pid in payload["next_choice"].values() if pid)
+
+    text_result = runner.invoke(app, ["providers", "status", "--project-root", str(root)])
+    assert text_result.exit_code == 0, text_result.stdout
+    assert "memory:qdrant" not in text_result.stdout
+    assert "memory:weaviate" not in text_result.stdout
+    assert "source_assist:ollama" not in text_result.stdout
+
+
 # ── `grimoire providers audit` (issue #330) ───────────────────────────────
 
 
