@@ -990,33 +990,6 @@ class TraceLedger:
         records = [(trace.tags, trace.token_usage.estimated_cost_usd) for trace in traces]
         return compute_dispatch_outcome_stats(records)
 
-    def open_policy_hold(self, session_id: str) -> TraceRecord | None:
-        """The most recent :data:`POLICY_HOLD_TAG` of *session_id* still without
-        a matching :data:`HOLD_FOLLOWUP_TAG` — ``None`` when there is none.
-
-        "Matching" is the ``hold_id:`` tag both records share (see
-        :func:`grimoire.hosts.decisions.calibration.record_policy_hold` for
-        where it is minted). A hold already followed up is never returned
-        twice — each ``PostToolUse`` labels at most the one hold still open,
-        never re-labels a settled one.
-        """
-        if not session_id:
-            return None
-        traces = self._load_all()
-        followed_up = {
-            _last_tag_value(t.tags, "hold_id:") for t in traces if HOLD_FOLLOWUP_TAG in t.tags
-        }
-        candidates = [
-            t
-            for t in traces
-            if POLICY_HOLD_TAG in t.tags
-            and _last_tag_value(t.tags, "session:") == session_id
-            and _last_tag_value(t.tags, "hold_id:") not in followed_up
-        ]
-        if not candidates:
-            return None
-        return max(candidates, key=lambda t: t.started_at)
-
     def record_hold_followup(self, *, hold: TraceRecord, label: str) -> None:
         """Label *hold* (a :data:`POLICY_HOLD_TAG` record from :meth:`open_policy_hold`)
         with a structural reaction label — see :data:`HOLD_LABELS`.

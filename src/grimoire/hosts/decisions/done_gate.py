@@ -68,7 +68,7 @@ from typing import Any
 
 from grimoire.core.standard_checks.evidence_journal import evidence_log_relpath, read_evidence_log
 from grimoire.hosts.decisions.enrolment import BLOCKING_PROFILES
-from grimoire.hosts.decisions.tool_facts import is_read_only_command
+from grimoire.hosts.decisions.tool_facts import command_surface, is_read_only_command
 
 __all__ = ["DoneGateVerdict", "evaluate_done_gate"]
 
@@ -141,6 +141,41 @@ def _entry_ts(entry: dict[str, Any]) -> str:
 #: actual token boundary.
 _ABS_PATH_TOKEN_RE = re.compile(r"(?<!\S)(/\S+)")
 
+#: ``<<TAG``/``<<'TAG'``/``<<-TAG`` opening a heredoc body, matched against
+#: the *flattened* (whitespace-collapsed) command the journal actually
+#: stores — see :func:`_strip_flattened_heredoc_bodies` for why this cannot
+#: reuse :func:`grimoire.hosts.decisions.tool_facts.command_surface`'s own
+#: heredoc stripping, which requires real newlines this text no longer has.
+_FLATTENED_HEREDOC_RE = re.compile(r"(<<-?\s*(['\"]?)(\w+)\2\s)(.*?)\s\3\b", re.DOTALL)
+
+
+def _strip_flattened_heredoc_bodies(command: str) -> str:
+    """Drop a heredoc body from an already whitespace-flattened command.
+
+    2026-09-29 calibration follow-up (Refs #644, incidents #3/#4):
+    ``evidence_journal.build_bash_event`` stores every command through
+    ``_truncate_command`` (``" ".join(command.split())``) *before* this
+    module ever sees it — a real multi-line heredoc (``cat >> /tmp/x <<'EOF'
+    \\nsome text\\nEOF``) is already a single space-joined line by the time
+    it reaches :func:`_bash_targets_all_outside_root`.
+    :func:`~grimoire.hosts.decisions.tool_facts.command_surface`'s own
+    heredoc stripping (:func:`~grimoire.hosts.decisions.
+    tool_facts._strip_heredoc_bodies`) anchors on the body starting *after a
+    literal newline* and the closing tag sitting *alone on its own line* —
+    both permanently gone here, so that function is a silent no-op on this
+    text, and any in-project path merely *mentioned* inside the heredoc body
+    (a note, a log excerpt) would otherwise still read as a second,
+    in-project "target", defeating :func:`_bash_targets_all_outside_root`
+    exactly when the write target itself is legitimately outside the
+    project.
+
+    This is the flattened-text equivalent: the body is whatever sits
+    between the opening ``<<TAG`` and the next bare occurrence of the same
+    tag as its own word. No tag anywhere in the (flattened) command -> the
+    text is returned unchanged, never an error.
+    """
+    return _FLATTENED_HEREDOC_RE.sub(r"\1", command)
+
 
 def _resolve_quiet(path: Path) -> Path | None:
     """``Path.resolve()``, or ``None`` on anything that stops it — never raises."""
@@ -181,12 +216,26 @@ def _bash_targets_all_outside_root(command: str, project_root: Path) -> bool:
     classification, never a new source of it.
 
     "Identifiable target" means an absolute-path-looking token in the
-    command line (see :data:`_ABS_PATH_TOKEN_RE`) — this deliberately does
-    not attempt to resolve a bare relative argument (``cp file.py
-    ../other/``): the hook's own cwd is not carried in the journal, so a
-    relative path cannot be judged in or out of the project root with any
-    confidence, and this function must never manufacture false confidence
-    either way (see the "ambiguous -> count" branches below).
+    command's :func:`~grimoire.hosts.decisions.tool_facts.command_surface`
+    (see :data:`_ABS_PATH_TOKEN_RE`) — never the raw command line. 2026-09-29
+    calibration follow-up (Refs #644, observed in real Forge sessions,
+    incidents #3/#4): a heredoc body redirected to a file outside the
+    project (``cat >> /tmp/x/notes.md <<'EOF' … EOF``) can freely mention an
+    unrelated in-project path in its *documented text* (a note, a log
+    excerpt) — reading the raw command found that mention as a second
+    "target", made the mix-of-inside/outside branch below fire, and kept a
+    write that only ever touched ``/tmp`` counting as an in-project
+    mutation. ``command_surface`` already drops heredoc bodies and quoted
+    text for exactly this reason (documented data must never read as the
+    action itself) — the same guard :mod:`.tool_policy` relies on for its
+    own destructive-pattern and untrusted-content checks.
+
+    This deliberately does not attempt to resolve a bare relative argument
+    (``cp file.py ../other/``): the hook's own cwd is not carried in the
+    journal, so a relative path cannot be judged in or out of the project
+    root with any confidence, and this function must never manufacture
+    false confidence either way (see the "ambiguous -> count" branches
+    below).
 
     Returns ``True`` only when at least one identifiable target was found
     *and* every one of them resolves outside *project_root*. No identifiable
@@ -194,7 +243,7 @@ def _bash_targets_all_outside_root(command: str, project_root: Path) -> bool:
     all return ``False`` — "count it" is the fail-closed default throughout
     this function, never "exclude it".
     """
-    targets = _ABS_PATH_TOKEN_RE.findall(command)
+    targets = _ABS_PATH_TOKEN_RE.findall(command_surface(_strip_flattened_heredoc_bodies(command)))
     if not targets:
         return False
     resolved_root = _resolve_quiet(project_root)

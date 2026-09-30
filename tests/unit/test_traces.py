@@ -591,72 +591,19 @@ class TestAgentFreshness:
 
 
 class TestPolicyHoldCalibration:
-    """Issue #<calibration> (Refs #644) : ``policy.hold`` / ``policy.hold_followup``."""
+    """Issue #<calibration> (Refs #644) : ``policy.hold`` / ``policy.hold_followup``.
 
-    def test_open_policy_hold_is_none_without_any_hold(self, tmp_path) -> None:
-        ledger = TraceLedger(tmp_path)
-        assert ledger.open_policy_hold("s-1") is None
-
-    def test_open_policy_hold_finds_the_most_recent_unfollowed_hold(self, tmp_path) -> None:
-        from grimoire.traces.ledger import POLICY_HOLD_TAG
-
-        ledger = TraceLedger(tmp_path)
-        ledger.record(
-            run_id="hold-a",
-            workflow_instance_id="",
-            mission_id="",
-            task_id="",
-            recipe_id="grimoire.policy-hold",
-            outcome=TraceOutcome.SUCCESS,
-            started_at="2026-01-01T00:00:00+00:00",
-            tags=[POLICY_HOLD_TAG, "session:s-1", "hook:grimoire.tool-policy", "reason:x", "hold_id:h1"],
-        )
-        ledger.record(
-            run_id="hold-b",
-            workflow_instance_id="",
-            mission_id="",
-            task_id="",
-            recipe_id="grimoire.policy-hold",
-            outcome=TraceOutcome.SUCCESS,
-            started_at="2026-01-01T00:01:00+00:00",
-            tags=[POLICY_HOLD_TAG, "session:s-1", "hook:grimoire.tool-policy", "reason:x", "hold_id:h2"],
-        )
-        open_hold = ledger.open_policy_hold("s-1")
-        assert open_hold is not None
-        assert open_hold.tags[-1] == "hold_id:h2"
-
-    def test_open_policy_hold_ignores_an_already_followed_up_hold(self, tmp_path) -> None:
-        from grimoire.traces.ledger import POLICY_HOLD_TAG
-
-        ledger = TraceLedger(tmp_path)
-        hold = ledger.record(
-            run_id="hold-a",
-            workflow_instance_id="",
-            mission_id="",
-            task_id="",
-            recipe_id="grimoire.policy-hold",
-            outcome=TraceOutcome.SUCCESS,
-            started_at="2026-01-01T00:00:00+00:00",
-            tags=[POLICY_HOLD_TAG, "session:s-1", "hook:grimoire.tool-policy", "reason:x", "hold_id:h1"],
-        )
-        ledger.record_hold_followup(hold=hold, label="respected")
-        assert ledger.open_policy_hold("s-1") is None
-
-    def test_open_policy_hold_ignores_a_different_session(self, tmp_path) -> None:
-        from grimoire.traces.ledger import POLICY_HOLD_TAG
-
-        ledger = TraceLedger(tmp_path)
-        ledger.record(
-            run_id="hold-a",
-            workflow_instance_id="",
-            mission_id="",
-            task_id="",
-            recipe_id="grimoire.policy-hold",
-            outcome=TraceOutcome.SUCCESS,
-            started_at="2026-01-01T00:00:00+00:00",
-            tags=[POLICY_HOLD_TAG, "session:s-other", "hook:grimoire.tool-policy", "reason:x", "hold_id:h1"],
-        )
-        assert ledger.open_policy_hold("s-1") is None
+    ``TraceLedger`` no longer exposes an ``open_policy_hold`` lookup — it was
+    a full ``traces.jsonl`` parse on every call, measured to cost ~10 ms per
+    ``PostToolUse`` against a 200-line journal (above the noise this feature
+    was meant to stay under, and a cost that only grows with the project's
+    age). That lookup now lives entirely in a small bounded per-session
+    state file (:mod:`grimoire.hosts.decisions.calibration`), never in the
+    ledger — see ``tests/unit/test_calibration.py`` for its coverage. This
+    class only tests the ledger's *own* remaining responsibility:
+    aggregating already-written ``policy.hold``/``policy.hold_followup``
+    records for ``grimoire hooks calibrate``.
+    """
 
     def test_policy_hold_calibration_counts_a_label_per_hook_and_reason(self, tmp_path) -> None:
         from grimoire.traces.ledger import POLICY_HOLD_TAG

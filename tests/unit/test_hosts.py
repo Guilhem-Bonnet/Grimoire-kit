@@ -1770,6 +1770,88 @@ def test_done_gate_still_flags_an_ambiguous_bash_command_with_no_identifiable_ta
     assert decision.detail["done_gate"]["stale"] is True
 
 
+def test_done_gate_ignores_a_compound_command_whose_two_targets_are_both_outside_root(governed: Path) -> None:
+    """Incident réel #2 (2026-09-29) : `python3 script.py <hors racine> && git -C <hors racine> push`."""
+    _set_task_in_progress(governed)
+    _make_gates_green(governed)
+    _append_bash_event(governed, "bootstrap", "pytest -q", 0)
+    _append_bash_event(
+        governed,
+        "bootstrap",
+        "python3 script.py /var/tmp/grimoire-calib-fixture/other-repo 0 "
+        "&& git -C /var/tmp/grimoire-calib-fixture/other-repo push",
+        None,
+    )
+    decision = decide_evidence_gate(HookInput(event=HookEvent.STOP, project_root=governed))
+    assert decision.detail["done_gate"]["stale"] is False
+    assert decision.detail["done_gate"]["reason"] == "no_mutation"
+
+
+def test_done_gate_ignores_a_heredoc_write_outside_root_even_if_its_body_mentions_an_in_root_path() -> None:
+    """Incidents réels #3/#4 (2026-09-29) : `cat >> /tmp/.../notes.md <<'EOF' ... EOF`.
+
+    Le corps du heredoc peut librement citer un chemin du projet (une note,
+    un extrait de log) sans que ça fasse de l'écriture vers ``/tmp`` une
+    mutation du projet — lire la ligne brute plutôt que
+    ``command_surface`` (qui élague déjà corps de heredoc et texte cité)
+    faisait lire cette mention comme une deuxième cible, mélange
+    dedans/dehors qui gardait, à tort, l'écriture comptée.
+
+    Racine de projet construite dans un ``tempfile.TemporaryDirectory()``
+    manuel plutôt que la fixture ``governed`` (``tmp_path`` pytest) : un
+    ``tmp_path`` réel s'appelle ``/tmp/pytest-of-<user>/pytest-<N>/…`` — y
+    citer un chemin absolu, ne serait-ce que dans un corps de heredoc,
+    ferait apparaître le mot ``pytest`` en sous-chaîne et classerait toute
+    la commande en ``test_run`` (voir ``is_test_command``), masquant le
+    scénario que ce test vérifie pour une tout autre raison que le
+    correctif.
+    """
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as td:
+        project = Path(td) / "project"
+        project.mkdir()
+        _write_agent(project, "concierge", "Tu tries et tu routes.")
+        setup_standard_profile(project, profile_id="governed", task_id="bootstrap")
+        _set_task_in_progress(project)
+        _make_gates_green(project)
+        _append_bash_event(project, "bootstrap", "pytest -q", 0)
+        heredoc_command = (
+            "cat >> /tmp/grimoire-calib-fixture/notes.md << 'EOF'\n"
+            f"Voir {project / 'src' / 'grimoire' / 'foo.py'} pour le contexte\n"
+            "EOF"
+        )
+        _append_bash_event(project, "bootstrap", heredoc_command, None)
+        decision = decide_evidence_gate(HookInput(event=HookEvent.STOP, project_root=project))
+    assert decision.detail["done_gate"]["stale"] is False
+    assert decision.detail["done_gate"]["reason"] == "no_mutation"
+
+
+def test_done_gate_ignores_a_turn_with_only_reads_after_an_earlier_out_of_root_background_push(
+    governed: Path,
+) -> None:
+    """Incident réel #5 (2026-09-29) : un tour sans écriture, avec seulement `cat`/`gh pr view`.
+
+    La seule mutation du journal vient d'une commande Bash lancée en
+    arrière-plan *plus tôt* (``git -C <worktree hors racine> push``) — le
+    hook ``PostToolUse`` la journalise au lancement, avec la commande
+    complète déjà connue à cet instant (voir le docstring du module) ; la
+    même exclusion « hors racine » s'applique, qu'elle vienne du tour
+    courant ou d'un tour précédent de la même tâche.
+    """
+    _set_task_in_progress(governed)
+    _make_gates_green(governed)
+    _append_bash_event(governed, "bootstrap", "pytest -q", 0)
+    _append_bash_event(
+        governed, "bootstrap", "git -C /var/tmp/grimoire-calib-fixture/other-repo push &", None
+    )
+    _append_bash_event(governed, "bootstrap", "cat README.md", 0)
+    _append_bash_event(governed, "bootstrap", "gh pr view 678", 0)
+    decision = decide_evidence_gate(HookInput(event=HookEvent.STOP, project_root=governed))
+    assert decision.detail["done_gate"]["stale"] is False
+    assert decision.detail["done_gate"]["reason"] == "no_mutation"
+
+
 # ── Calibration (Refs #644, party-mode idée B) ───────────────────────────────
 
 
