@@ -60,6 +60,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -132,15 +133,104 @@ def _entry_ts(entry: dict[str, Any]) -> str:
     return str(entry.get("ts") or "")
 
 
-def _is_mutation_candidate(entry: dict[str, Any]) -> bool:
-    """A ``file_write`` event is always a mutation (Edit/Write never read).
+#: An absolute-path-looking token: whitespace (or start of string) followed
+#: by ``/``. Used only to find *identifiable* out-of-root targets in a bash
+#: command line — see :func:`_bash_targets_all_outside_root`. Deliberately
+#: does not match a ``/`` glued onto a preceding non-space character (a URL's
+#: ``https://…``, a path fragment mid-word): the lookbehind requires an
+#: actual token boundary.
+_ABS_PATH_TOKEN_RE = re.compile(r"(?<!\S)(/\S+)")
+
+
+def _resolve_quiet(path: Path) -> Path | None:
+    """``Path.resolve()``, or ``None`` on anything that stops it — never raises."""
+    try:
+        return path.resolve()
+    except (OSError, RuntimeError, ValueError):
+        return None
+
+
+def _is_outside_root(target: str, resolved_root: Path) -> bool:
+    """Whether *target* (an absolute path string) resolves outside *resolved_root*.
+
+    ``False`` on anything unresolvable — an unresolvable path is ambiguous,
+    never confidently "outside" (see the two callers: both count an
+    ambiguous target as a reason *not* to exclude a candidate mutation,
+    never as a reason to).
+    """
+    resolved_target = _resolve_quiet(Path(target))
+    if resolved_target is None:
+        return False
+    try:
+        resolved_target.relative_to(resolved_root)
+    except ValueError:
+        return True
+    return False
+
+
+def _bash_targets_all_outside_root(command: str, project_root: Path) -> bool:
+    """Issue #644 follow-up (calibration, Refs #644): the 2026-09-29 false positive.
+
+    A mutation candidate whose *only* identifiable targets are outside the
+    project — a ``bash`` command run against a worktree of another repo, for
+    instance ``git -C /some/other/repo push`` or ``python3 script.py
+    /some/other/repo/file.py`` — must never make an otherwise-untouched
+    project read as "stale". :func:`_is_mutation_candidate` reads the
+    journal's ``command`` string for every ``bash`` entry it has always
+    classified as a mutation; this adds one more condition to that
+    classification, never a new source of it.
+
+    "Identifiable target" means an absolute-path-looking token in the
+    command line (see :data:`_ABS_PATH_TOKEN_RE`) — this deliberately does
+    not attempt to resolve a bare relative argument (``cp file.py
+    ../other/``): the hook's own cwd is not carried in the journal, so a
+    relative path cannot be judged in or out of the project root with any
+    confidence, and this function must never manufacture false confidence
+    either way (see the "ambiguous -> count" branches below).
+
+    Returns ``True`` only when at least one identifiable target was found
+    *and* every one of them resolves outside *project_root*. No identifiable
+    target at all, an unresolvable one, or a mix of inside/outside targets
+    all return ``False`` — "count it" is the fail-closed default throughout
+    this function, never "exclude it".
+    """
+    targets = _ABS_PATH_TOKEN_RE.findall(command)
+    if not targets:
+        return False
+    resolved_root = _resolve_quiet(project_root)
+    if resolved_root is None:
+        return False
+    return all(_is_outside_root(target, resolved_root) for target in targets)
+
+
+def _file_write_target_outside_root(path: str, project_root: Path) -> bool:
+    """Same guarantee as :func:`_bash_targets_all_outside_root`, for a ``file_write``
+    entry's own ``path``. A relative path is never excluded (ambiguous ->
+    count): every real ``Edit``/``Write`` call observed so far sends an
+    absolute path, but a hand-written journal or a future host might not.
+    """
+    if not path.startswith("/"):
+        return False
+    resolved_root = _resolve_quiet(project_root)
+    if resolved_root is None:
+        return False
+    return _is_outside_root(path, resolved_root)
+
+
+def _is_mutation_candidate(entry: dict[str, Any], project_root: Path) -> bool:
+    """A ``file_write`` event is a mutation when its path is under *project_root*
+    (see :func:`_file_write_target_outside_root` for what "ambiguous" means
+    here — never excluded).
 
     A ``bash`` event is one when its command is not classified read-only —
     reusing :func:`grimoire.hosts.decisions.tool_facts.is_read_only_command`
     on the stored command string rather than storing a redundant flag at
     write time: the journal already carries the one thing that
     classification needs (the full command line), and a second copy of the
-    verdict could drift from it if the classifier ever changes.
+    verdict could drift from it if the classifier ever changes — *and* when
+    it is not a command whose only identifiable targets sit outside
+    *project_root* (:func:`_bash_targets_all_outside_root`, the 2026-09-29
+    false positive this reads).
 
     A ``test_run`` event is never a mutation candidate, deliberately: running
     a recognised test/lint command is not read-only under
@@ -156,10 +246,13 @@ def _is_mutation_candidate(entry: dict[str, Any]) -> bool:
     """
     kind = entry.get("type")
     if kind == "file_write":
-        return True
+        path = str(entry.get("path") or "")
+        return bool(path) and not _file_write_target_outside_root(path, project_root)
     if kind == "bash":
         command = str(entry.get("command") or "")
-        return bool(command) and not is_read_only_command(command)
+        if not command or is_read_only_command(command):
+            return False
+        return not _bash_targets_all_outside_root(command, project_root)
     return False
 
 
@@ -307,7 +400,9 @@ def evaluate_done_gate(hook: Any, task_id: str, profile: str, *, now_iso: str | 
     # outright but a plain ``bash`` mutation is not yet final — it might
     # still turn out to be the project's own resolved test command, which
     # pass 2 alone can tell).
-    candidate_indices = [index for index, entry in enumerate(entries) if _is_mutation_candidate(entry)]
+    candidate_indices = [
+        index for index, entry in enumerate(entries) if _is_mutation_candidate(entry, hook.project_root)
+    ]
     if not candidate_indices:
         return DoneGateVerdict(stale=False, reason="no_mutation", enforce=False, blocked=False, capped=False)
 

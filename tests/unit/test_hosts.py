@@ -1722,6 +1722,175 @@ def test_done_gate_option_in_standard_profile_also_enforces(governed: Path) -> N
     assert decision.detail["done_gate"]["blocked"] is True
 
 
+def test_done_gate_ignores_a_bash_command_scoped_entirely_outside_the_project_root(governed: Path) -> None:
+    """2026-09-29 false positive : la seule mutation observée était `git -C <hors racine> push`.
+
+    L'« ailleurs » est un chemin littéral fixe, jamais dérivé de ``governed``
+    (un ``tmp_path`` pytest réel s'appelle ``/tmp/pytest-of-<user>/pytest-<N>/…``
+    — y dériver un chemin « hors racine » y ferait apparaître le mot
+    ``pytest`` en sous-chaîne et ferait classer la commande en ``test_run``
+    plutôt qu'en ``bash``, ce qui fausserait ce test).
+    """
+    _set_task_in_progress(governed)
+    _make_gates_green(governed)
+    _append_bash_event(governed, "bootstrap", "pytest -q", 0)
+    _append_bash_event(governed, "bootstrap", "git -C /var/tmp/grimoire-calib-fixture/other-repo push", None)
+    decision = decide_evidence_gate(HookInput(event=HookEvent.STOP, project_root=governed))
+    assert decision.detail["done_gate"]["stale"] is False
+    assert decision.detail["done_gate"]["reason"] == "no_mutation"
+
+
+def test_done_gate_ignores_an_edit_whose_absolute_path_is_outside_the_project_root(governed: Path) -> None:
+    _set_task_in_progress(governed)
+    _make_gates_green(governed)
+    _append_bash_event(governed, "bootstrap", "pytest -q", 0)
+    _append_write_event(governed, "bootstrap", "/var/tmp/grimoire-calib-fixture/other-repo/script.py")
+    decision = decide_evidence_gate(HookInput(event=HookEvent.STOP, project_root=governed))
+    assert decision.detail["done_gate"]["stale"] is False
+    assert decision.detail["done_gate"]["reason"] == "no_mutation"
+
+
+def test_done_gate_still_flags_an_edit_under_the_project_root_given_as_an_absolute_path(governed: Path) -> None:
+    """Non-régression : un vrai ``Edit``/``Write`` envoie toujours un chemin absolu."""
+    _set_task_in_progress(governed)
+    _make_gates_green(governed)
+    _append_bash_event(governed, "bootstrap", "pytest -q", 0)
+    _append_write_event(governed, "bootstrap", str(governed / "src" / "foo.py"))
+    decision = decide_evidence_gate(HookInput(event=HookEvent.STOP, project_root=governed))
+    assert decision.detail["done_gate"]["stale"] is True
+
+
+def test_done_gate_still_flags_an_ambiguous_bash_command_with_no_identifiable_target(governed: Path) -> None:
+    """Jamais échouer ouvert : sans cible identifiable, la commande compte comme mutation."""
+    _set_task_in_progress(governed)
+    _make_gates_green(governed)
+    _append_bash_event(governed, "bootstrap", "pytest -q", 0)
+    _append_bash_event(governed, "bootstrap", "python3 script.py output.txt", 0)
+    decision = decide_evidence_gate(HookInput(event=HookEvent.STOP, project_root=governed))
+    assert decision.detail["done_gate"]["stale"] is True
+
+
+# ── Calibration (Refs #644, party-mode idée B) ───────────────────────────────
+
+
+def _calibration(governed: Path):
+    from grimoire.core.standard_generation import TRACES_DIR
+    from grimoire.traces.ledger import TraceLedger
+
+    return TraceLedger(governed / TRACES_DIR).policy_hold_calibration()
+
+
+def test_a_tool_policy_deny_is_journaled_as_a_policy_hold(governed: Path) -> None:
+    decision = decide_tool_policy(
+        HookInput(
+            event=HookEvent.PRE_TOOL_USE,
+            project_root=governed,
+            tool_name="Bash",
+            tool_input={"command": "rm -rf src"},
+            session_id="s-calib-1",
+        )
+    )
+    assert decision.outcome is Outcome.DENY
+    report = _calibration(governed)
+    assert report["groups"] == [
+        {
+            "hook": "grimoire.tool-policy",
+            "reason": "tool_policy:deny",
+            "total": 1,
+            "labels": {"respected": 0, "retried_same": 0, "retried_variant": 0, "abandoned": 1},
+        }
+    ]
+
+
+def test_a_tool_policy_allow_is_never_journaled(governed: Path) -> None:
+    from grimoire.core.standard_generation import TRACES_DIR
+
+    decision = decide_tool_policy(
+        HookInput(
+            event=HookEvent.PRE_TOOL_USE,
+            project_root=governed,
+            tool_name="Read",
+            tool_input={"file_path": "README.md"},
+            session_id="s-calib-allow",
+        )
+    )
+    assert decision.outcome is Outcome.ALLOW
+    assert not (governed / TRACES_DIR / "traces.jsonl").exists()
+
+
+def test_a_stale_done_gate_verdict_is_journaled_as_a_policy_hold(governed: Path) -> None:
+    _set_task_in_progress(governed)
+    _make_gates_green(governed)
+    _append_bash_event(governed, "bootstrap", "pytest -q", 0)
+    _append_write_event(governed, "bootstrap", "src/foo.py")
+    decision = decide_evidence_gate(
+        HookInput(event=HookEvent.STOP, project_root=governed, session_id="s-calib-2")
+    )
+    assert decision.detail["done_gate"]["stale"] is True
+    report = _calibration(governed)
+    assert report["groups"] == [
+        {
+            "hook": "grimoire.evidence-gate",
+            "reason": "done_gate:stale",
+            "total": 1,
+            "labels": {"respected": 0, "retried_same": 0, "retried_variant": 0, "abandoned": 1},
+        }
+    ]
+
+
+def test_a_denied_command_retried_verbatim_is_labelled_retried_same(governed: Path) -> None:
+    session_id = "s-calib-3"
+    decide_tool_policy(
+        HookInput(
+            event=HookEvent.PRE_TOOL_USE,
+            project_root=governed,
+            tool_name="Bash",
+            tool_input={"command": "rm -rf src"},
+            session_id=session_id,
+        )
+    )
+    decide_evidence_trace(
+        HookInput(
+            event=HookEvent.POST_TOOL_USE,
+            project_root=governed,
+            tool_name="Bash",
+            tool_input={"command": "rm -rf src"},
+            tool_response={"exit_code": 0},
+            session_id=session_id,
+        )
+    )
+    report = _calibration(governed)
+    assert report["groups"][0]["labels"] == {
+        "respected": 0, "retried_same": 1, "retried_variant": 0, "abandoned": 0,
+    }
+
+
+def test_a_denied_command_followed_by_something_unrelated_is_respected(governed: Path) -> None:
+    session_id = "s-calib-4"
+    decide_tool_policy(
+        HookInput(
+            event=HookEvent.PRE_TOOL_USE,
+            project_root=governed,
+            tool_name="Bash",
+            tool_input={"command": "rm -rf src"},
+            session_id=session_id,
+        )
+    )
+    decide_evidence_trace(
+        HookInput(
+            event=HookEvent.POST_TOOL_USE,
+            project_root=governed,
+            tool_name="Read",
+            tool_input={"file_path": "README.md"},
+            session_id=session_id,
+        )
+    )
+    report = _calibration(governed)
+    assert report["groups"][0]["labels"] == {
+        "respected": 1, "retried_same": 0, "retried_variant": 0, "abandoned": 0,
+    }
+
+
 def test_a_subagent_gate_that_cannot_be_evaluated_says_so(governed: Path) -> None:
     (governed / "_grimoire/standard/task-board.yaml").write_text("[oups", encoding="utf-8")
     decision = decide_subagent_gate(HookInput(event=HookEvent.SUBAGENT_STOP, project_root=governed))

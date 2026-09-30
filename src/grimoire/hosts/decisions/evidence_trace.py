@@ -255,11 +255,41 @@ def _record_untrusted_content(hook: HookInput, facts: ToolFacts) -> None:
         return
 
 
+def _record_hold_followup(hook: HookInput, facts: ToolFacts) -> None:
+    """Calibration (Refs #644): label the hold this call may be answering.
+
+    Best-effort, same contract as :func:`_record_temporal_approval` above.
+    Runs before the enrolment check, same reason as
+    :func:`_record_untrusted_content`: a hold can be written by
+    :mod:`.tool_policy` even on an unenrolled project (its own verdict never
+    conditions on enrolment — see that module's docstring), so its followup
+    must be reachable the same way, on the very next ``PostToolUse`` of the
+    session regardless of what wrote the hold (:mod:`.tool_policy` or the
+    ``Stop`` gate's ``done_gate``, :mod:`.evidence_gate`).
+    """
+    if not hook.session_id:
+        return
+    try:
+        from grimoire.hosts.decisions.calibration import action_fingerprint, record_hold_followup, target_key
+
+        detail = policy_tool_detail(facts)
+        tool_name = hook.tool_name or ""
+        record_hold_followup(
+            hook.project_root,
+            session_id=hook.session_id,
+            fingerprint=action_fingerprint(tool_name, detail),
+            target=target_key(tool_name, detail),
+        )
+    except Exception:  # noqa: S110 — observabilité : jamais au prix du hook lui-même
+        pass
+
+
 def decide_evidence_trace(hook: HookInput) -> Decision:
     """Post tool use: remind the agent that a write owes a line of proof."""
     facts = classify_tool(hook.tool_name, hook.tool_input)
     _record_temporal_approval(hook, facts)
     _record_untrusted_content(hook, facts)
+    _record_hold_followup(hook, facts)
     if not is_standard_enrolled(hook.project_root):
         return Decision()
     task_id = active_task_id(hook.project_root)

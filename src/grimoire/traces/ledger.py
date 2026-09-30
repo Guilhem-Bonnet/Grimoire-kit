@@ -48,6 +48,13 @@ __all__ = [
     "AGENT_MISS_TAG",
     "DELEGATION_TAG",
     "DISPATCH_OUTCOME_TAG",
+    "HOLD_FOLLOWUP_TAG",
+    "HOLD_LABELS",
+    "HOLD_LABEL_ABANDONED",
+    "HOLD_LABEL_RESPECTED",
+    "HOLD_LABEL_RETRIED_SAME",
+    "HOLD_LABEL_RETRIED_VARIANT",
+    "POLICY_HOLD_TAG",
     "AgentFreshness",
     "DispatchOutcomeGroupStats",
     "DispatchOutcomeStats",
@@ -139,6 +146,49 @@ DELEGATION_TAG = "agent.delegation"
 #: mesurent une fois, cet événement le rend continu et lisible par un gate —
 #: voir :meth:`TraceLedger.dispatch_outcome_stats`.
 DISPATCH_OUTCOME_TAG = "dispatch.outcome"
+
+#: Tag qui marque un enregistrement comme un verdict de hook non-``allow``
+#: (``done_gate`` périmé, ``tool_policy`` ``ask``/``deny``) — calibration des
+#: gates avant activation (issue #<calibration>, Refs #644 : party-mode idée
+#: B, ``_scratch/party-oss/gouvernance.md``). Écrit par
+#: ``grimoire.hosts.decisions.calibration.record_policy_hold``, jamais
+#: ailleurs. Le contenu de l'action retenue (commande, chemin) n'est jamais
+#: porté par ce tag ni par aucun de ses champs : seule une empreinte à sens
+#: unique (``fingerprint:``, voir :func:`grimoire.hosts.decisions.
+#: calibration.action_fingerprint`) et une clé grossière (``target:``)
+#: identifient l'action, jamais elle-même.
+POLICY_HOLD_TAG = "policy.hold"
+
+#: Tag qui marque un enregistrement comme la réaction observée au prochain
+#: ``PostToolUse`` de la même session après un :data:`POLICY_HOLD_TAG` —
+#: relié à lui par un tag ``hold_id:`` commun aux deux enregistrements.
+#: Symétrique de ``POLICY_HOLD_TAG`` du même chantier de calibration.
+HOLD_FOLLOWUP_TAG = "policy.hold_followup"
+
+#: Étiquettes structurelles d'une réaction à un hold — jamais « regret » : ce
+#: mot suppose un jugement sur la légitimité du hold qu'aucune deuxième
+#: source de vérité (test rouge après coup, revert) ne vient encore étayer
+#: (party-mode idée B, désaccord data analyst / mainteneur unique non
+#: résolu, arbitré ici en faveur du vocabulaire structurel). Une même
+#: empreinte d'action rejouée -> :data:`HOLD_LABEL_RETRIED_SAME` ; le même
+#: outil sur une cible proche mais pas identique -> :data:`
+#: HOLD_LABEL_RETRIED_VARIANT` ; toute autre action suivante ->
+#: :data:`HOLD_LABEL_RESPECTED` (l'agent a fait autre chose, jamais lu comme
+#: une satisfaction) ; aucun ``hold_followup`` retrouvé pour ce hold ->
+#: :data:`HOLD_LABEL_ABANDONED` — qui ne distingue pas encore, faute de
+#: signal de fin de session dans ce paquet de décisions, « la session s'est
+#: arrêtée là » de « le prochain outil n'a simplement pas encore tourné » :
+#: une limite documentée, pas une mesure.
+HOLD_LABEL_RESPECTED = "respected"
+HOLD_LABEL_RETRIED_SAME = "retried_same"
+HOLD_LABEL_RETRIED_VARIANT = "retried_variant"
+HOLD_LABEL_ABANDONED = "abandoned"
+HOLD_LABELS: tuple[str, ...] = (
+    HOLD_LABEL_RESPECTED,
+    HOLD_LABEL_RETRIED_SAME,
+    HOLD_LABEL_RETRIED_VARIANT,
+    HOLD_LABEL_ABANDONED,
+)
 
 _OTEL_SPAN_KIND_INTERNAL = "SPAN_KIND_INTERNAL"
 _OTEL_STATUS_OK = "STATUS_CODE_OK"
@@ -939,6 +989,105 @@ class TraceLedger:
             traces = [t for t in traces if t.started_at >= since_iso]
         records = [(trace.tags, trace.token_usage.estimated_cost_usd) for trace in traces]
         return compute_dispatch_outcome_stats(records)
+
+    def open_policy_hold(self, session_id: str) -> TraceRecord | None:
+        """The most recent :data:`POLICY_HOLD_TAG` of *session_id* still without
+        a matching :data:`HOLD_FOLLOWUP_TAG` — ``None`` when there is none.
+
+        "Matching" is the ``hold_id:`` tag both records share (see
+        :func:`grimoire.hosts.decisions.calibration.record_policy_hold` for
+        where it is minted). A hold already followed up is never returned
+        twice — each ``PostToolUse`` labels at most the one hold still open,
+        never re-labels a settled one.
+        """
+        if not session_id:
+            return None
+        traces = self._load_all()
+        followed_up = {
+            _last_tag_value(t.tags, "hold_id:") for t in traces if HOLD_FOLLOWUP_TAG in t.tags
+        }
+        candidates = [
+            t
+            for t in traces
+            if POLICY_HOLD_TAG in t.tags
+            and _last_tag_value(t.tags, "session:") == session_id
+            and _last_tag_value(t.tags, "hold_id:") not in followed_up
+        ]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda t: t.started_at)
+
+    def record_hold_followup(self, *, hold: TraceRecord, label: str) -> None:
+        """Label *hold* (a :data:`POLICY_HOLD_TAG` record from :meth:`open_policy_hold`)
+        with a structural reaction label — see :data:`HOLD_LABELS`.
+
+        Denormalises ``hook:``/``reason:`` from *hold* onto the followup
+        record too: :meth:`policy_hold_calibration` groups by them, and
+        reading them back off the followup half alone (rather than joining
+        the two records again at report time) keeps that method a single
+        pass over the journal.
+        """
+        hold_id = _last_tag_value(hold.tags, "hold_id:")
+        self.record(
+            run_id=f"followup-{hold_id}",
+            workflow_instance_id="",
+            mission_id="",
+            task_id=hold.task_id,
+            recipe_id="grimoire.policy-hold-followup",
+            outcome=TraceOutcome.SUCCESS,
+            started_at=_now_iso(),
+            tags=[
+                HOLD_FOLLOWUP_TAG,
+                f"hold_id:{hold_id}",
+                f"label:{label}",
+                f"hook:{_last_tag_value(hold.tags, 'hook:')}",
+                f"reason:{_last_tag_value(hold.tags, 'reason:')}",
+            ],
+            trace_id=f"TRC-policy-hold-followup-{hold_id}",
+        )
+
+    def policy_hold_calibration(self, *, since_iso: str | None = None) -> dict[str, Any]:
+        """Par hook et par motif : nombre de verdicts et distribution des étiquettes.
+
+        Lit :data:`POLICY_HOLD_TAG` (le verdict) et :data:`HOLD_FOLLOWUP_TAG`
+        (l'étiquette qui le suit), reliés par ``hold_id:`` — jamais un second
+        calcul, le même journal que :meth:`open_policy_hold` écrit. Un hold
+        sans followup encore retrouvé compte sous :data:`HOLD_LABEL_ABANDONED`
+        (voir la limite documentée sur cette étiquette). *since_iso* filtre
+        les holds sur leur propre ``started_at``, comme
+        :meth:`dispatch_outcome_stats` — un followup plus ancien ou plus
+        récent que la fenêtre reste apparié à son hold par ``hold_id:``,
+        jamais reperdu par le filtre temporel.
+
+        Retourne ``{"groups": [{"hook", "reason", "total", "labels": {...}}]}``,
+        trié par ``(hook, reason)`` — la forme que ``grimoire hooks
+        calibrate`` rend telle quelle en JSON et projette en table en texte.
+        """
+        traces = self._load_all()
+        holds = {
+            _last_tag_value(t.tags, "hold_id:"): t
+            for t in traces
+            if POLICY_HOLD_TAG in t.tags and (not since_iso or t.started_at >= since_iso)
+        }
+        followups = {
+            _last_tag_value(t.tags, "hold_id:"): _last_tag_value(t.tags, "label:")
+            for t in traces
+            if HOLD_FOLLOWUP_TAG in t.tags
+        }
+        groups: dict[tuple[str, str], dict[str, int]] = {}
+        for hold_id, hold in holds.items():
+            key = (_last_tag_value(hold.tags, "hook:"), _last_tag_value(hold.tags, "reason:"))
+            label = followups.get(hold_id) or HOLD_LABEL_ABANDONED
+            if label not in HOLD_LABELS:
+                label = HOLD_LABEL_ABANDONED
+            bucket = groups.setdefault(key, dict.fromkeys(HOLD_LABELS, 0))
+            bucket[label] += 1
+        return {
+            "groups": [
+                {"hook": hook_id, "reason": reason, "total": sum(labels.values()), "labels": labels}
+                for (hook_id, reason), labels in sorted(groups.items())
+            ]
+        }
 
     def policy_block_rate(self, mission_id: str | None = None) -> float:
         """Fraction of tool calls that were blocked."""

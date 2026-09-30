@@ -588,3 +588,138 @@ class TestAgentFreshness:
         entry = report.entries[0]
         assert entry.too_recent is False
         assert entry.stale is True
+
+
+class TestPolicyHoldCalibration:
+    """Issue #<calibration> (Refs #644) : ``policy.hold`` / ``policy.hold_followup``."""
+
+    def test_open_policy_hold_is_none_without_any_hold(self, tmp_path) -> None:
+        ledger = TraceLedger(tmp_path)
+        assert ledger.open_policy_hold("s-1") is None
+
+    def test_open_policy_hold_finds_the_most_recent_unfollowed_hold(self, tmp_path) -> None:
+        from grimoire.traces.ledger import POLICY_HOLD_TAG
+
+        ledger = TraceLedger(tmp_path)
+        ledger.record(
+            run_id="hold-a",
+            workflow_instance_id="",
+            mission_id="",
+            task_id="",
+            recipe_id="grimoire.policy-hold",
+            outcome=TraceOutcome.SUCCESS,
+            started_at="2026-01-01T00:00:00+00:00",
+            tags=[POLICY_HOLD_TAG, "session:s-1", "hook:grimoire.tool-policy", "reason:x", "hold_id:h1"],
+        )
+        ledger.record(
+            run_id="hold-b",
+            workflow_instance_id="",
+            mission_id="",
+            task_id="",
+            recipe_id="grimoire.policy-hold",
+            outcome=TraceOutcome.SUCCESS,
+            started_at="2026-01-01T00:01:00+00:00",
+            tags=[POLICY_HOLD_TAG, "session:s-1", "hook:grimoire.tool-policy", "reason:x", "hold_id:h2"],
+        )
+        open_hold = ledger.open_policy_hold("s-1")
+        assert open_hold is not None
+        assert open_hold.tags[-1] == "hold_id:h2"
+
+    def test_open_policy_hold_ignores_an_already_followed_up_hold(self, tmp_path) -> None:
+        from grimoire.traces.ledger import POLICY_HOLD_TAG
+
+        ledger = TraceLedger(tmp_path)
+        hold = ledger.record(
+            run_id="hold-a",
+            workflow_instance_id="",
+            mission_id="",
+            task_id="",
+            recipe_id="grimoire.policy-hold",
+            outcome=TraceOutcome.SUCCESS,
+            started_at="2026-01-01T00:00:00+00:00",
+            tags=[POLICY_HOLD_TAG, "session:s-1", "hook:grimoire.tool-policy", "reason:x", "hold_id:h1"],
+        )
+        ledger.record_hold_followup(hold=hold, label="respected")
+        assert ledger.open_policy_hold("s-1") is None
+
+    def test_open_policy_hold_ignores_a_different_session(self, tmp_path) -> None:
+        from grimoire.traces.ledger import POLICY_HOLD_TAG
+
+        ledger = TraceLedger(tmp_path)
+        ledger.record(
+            run_id="hold-a",
+            workflow_instance_id="",
+            mission_id="",
+            task_id="",
+            recipe_id="grimoire.policy-hold",
+            outcome=TraceOutcome.SUCCESS,
+            started_at="2026-01-01T00:00:00+00:00",
+            tags=[POLICY_HOLD_TAG, "session:s-other", "hook:grimoire.tool-policy", "reason:x", "hold_id:h1"],
+        )
+        assert ledger.open_policy_hold("s-1") is None
+
+    def test_policy_hold_calibration_counts_a_label_per_hook_and_reason(self, tmp_path) -> None:
+        from grimoire.traces.ledger import POLICY_HOLD_TAG
+
+        ledger = TraceLedger(tmp_path)
+        hold = ledger.record(
+            run_id="hold-a",
+            workflow_instance_id="",
+            mission_id="",
+            task_id="",
+            recipe_id="grimoire.policy-hold",
+            outcome=TraceOutcome.SUCCESS,
+            started_at="2026-01-01T00:00:00+00:00",
+            tags=[POLICY_HOLD_TAG, "session:s-1", "hook:grimoire.tool-policy", "reason:tool_policy:ask", "hold_id:h1"],
+        )
+        ledger.record_hold_followup(hold=hold, label="retried_same")
+        report = ledger.policy_hold_calibration()
+        assert report == {
+            "groups": [
+                {
+                    "hook": "grimoire.tool-policy",
+                    "reason": "tool_policy:ask",
+                    "total": 1,
+                    "labels": {
+                        "respected": 0,
+                        "retried_same": 1,
+                        "retried_variant": 0,
+                        "abandoned": 0,
+                    },
+                }
+            ]
+        }
+
+    def test_policy_hold_calibration_labels_an_unfollowed_hold_as_abandoned(self, tmp_path) -> None:
+        from grimoire.traces.ledger import POLICY_HOLD_TAG
+
+        ledger = TraceLedger(tmp_path)
+        ledger.record(
+            run_id="hold-a",
+            workflow_instance_id="",
+            mission_id="",
+            task_id="",
+            recipe_id="grimoire.policy-hold",
+            outcome=TraceOutcome.SUCCESS,
+            started_at="2026-01-01T00:00:00+00:00",
+            tags=[POLICY_HOLD_TAG, "session:s-1", "hook:grimoire.evidence-gate", "reason:done_gate:stale", "hold_id:h1"],
+        )
+        report = ledger.policy_hold_calibration()
+        assert report["groups"][0]["labels"]["abandoned"] == 1
+
+    def test_policy_hold_calibration_since_iso_filters_holds_by_their_own_timestamp(self, tmp_path) -> None:
+        from grimoire.traces.ledger import POLICY_HOLD_TAG
+
+        ledger = TraceLedger(tmp_path)
+        ledger.record(
+            run_id="hold-old",
+            workflow_instance_id="",
+            mission_id="",
+            task_id="",
+            recipe_id="grimoire.policy-hold",
+            outcome=TraceOutcome.SUCCESS,
+            started_at="2020-01-01T00:00:00+00:00",
+            tags=[POLICY_HOLD_TAG, "session:s-1", "hook:grimoire.tool-policy", "reason:tool_policy:ask", "hold_id:h1"],
+        )
+        report = ledger.policy_hold_calibration(since_iso="2026-01-01T00:00:00+00:00")
+        assert report == {"groups": []}
