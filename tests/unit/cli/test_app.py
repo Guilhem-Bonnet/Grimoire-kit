@@ -7,6 +7,7 @@ import inspect
 import json
 import sys
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -14,6 +15,7 @@ import typer
 from typer.testing import CliRunner
 
 from grimoire.cli.app import _ALIASES, _expand_aliases, add_agent, app, doctor, history_cmd, main, remove_agent
+from grimoire.traces.ledger import DELEGATION_BURST_WINDOW_S
 
 runner = CliRunner()
 skip_windows_process_replacement = pytest.mark.skipif(
@@ -721,7 +723,7 @@ class TestRegistryDispatches:
             result = runner.invoke(app, ["-o", "json", "registry", "dispatches"])
         assert result.exit_code == 0
         payload = json.loads(result.output)
-        assert set(payload) == {"dispatches", "misses", "delegations", "freshness"}
+        assert set(payload) == {"dispatches", "misses", "delegations", "bursts", "freshness"}
         assert payload["misses"]["terraform"]["count"] == 1
 
     def test_registry_dispatches_shows_delegations_with_model_coverage(self, tmp_path: Path) -> None:
@@ -767,6 +769,66 @@ class TestRegistryDispatches:
             "last_model": "",
             "last_seen": "2026-01-02T00:00:00+00:00",
         }
+
+    @staticmethod
+    def _record_delegation(ledger: Any, run_id: str, started_at: str) -> None:
+        from grimoire.traces.ledger import DELEGATION_TAG
+        from grimoire.traces.schemas import TraceOutcome
+
+        ledger.record(
+            run_id=run_id,
+            workflow_instance_id="",
+            mission_id="",
+            task_id="GAO-x",
+            recipe_id="grimoire.delegation",
+            outcome=TraceOutcome.SUCCESS,
+            started_at=started_at,
+            agent_id="general-purpose",
+            model="",
+            tags=[DELEGATION_TAG],
+        )
+
+    def test_registry_dispatches_measures_delegation_bursts_per_session(self, tmp_path: Path) -> None:
+        """#687 lot B : une rafale = au moins 2 délégations d'une même session dans la fenêtre."""
+        from grimoire.core.standard_generation import TRACES_DIR
+        from grimoire.traces.ledger import TraceLedger
+
+        ledger = TraceLedger(tmp_path / TRACES_DIR)
+        # Session A : rafale de 3 (écarts de 1 s), puis une délégation isolée bien plus tard.
+        for ts in ("2026-01-01T10:00:00+00:00", "2026-01-01T10:00:01+00:00", "2026-01-01T10:00:02+00:00"):
+            self._record_delegation(ledger, "sess-A", ts)
+        self._record_delegation(ledger, "sess-A", "2026-01-01T11:00:00+00:00")
+        # Session B : une seule délégation.
+        self._record_delegation(ledger, "sess-B", "2026-01-01T10:00:00+00:00")
+        # Session C : deux délégations séparées de plus que la fenêtre, donc pas de rafale.
+        self._record_delegation(ledger, "sess-C", "2026-01-01T10:00:00+00:00")
+        self._record_delegation(ledger, "sess-C", "2026-01-01T10:05:00+00:00")
+        # Cas limites : sans horodatage ou horodatage illisible, ignorés sans planter.
+        self._record_delegation(ledger, "sess-D", "")
+        self._record_delegation(ledger, "sess-D", "pas-une-date")
+
+        assert ledger.delegation_bursts() == {
+            "window_seconds": DELEGATION_BURST_WINDOW_S,
+            "sessions_with_delegation": 3,
+            "sessions_with_burst": 1,
+            "burst_count": 1,
+            "mean_burst_size": 3.0,
+        }
+        with patch("grimoire.tools._common.find_project_root", return_value=tmp_path):
+            json_result = runner.invoke(app, ["-o", "json", "registry", "dispatches"])
+            text_result = runner.invoke(app, ["registry", "dispatches"])
+        assert json_result.exit_code == 0
+        assert json.loads(json_result.output)["bursts"]["burst_count"] == 1
+        assert text_result.exit_code == 0
+        assert "Rafales" in text_result.output
+
+    def test_delegation_bursts_empty_ledger(self, tmp_path: Path) -> None:
+        from grimoire.traces.ledger import TraceLedger
+
+        result = TraceLedger(tmp_path / "t").delegation_bursts()
+        assert result["sessions_with_delegation"] == 0
+        assert result["burst_count"] == 0
+        assert result["mean_burst_size"] == 0.0
 
     def test_registry_dispatches_json_freshness_is_info_without_history(self, tmp_path: Path) -> None:
         """Issue #396 : sans agent connu ni historique, la fraîcheur n'est pas jugée."""
