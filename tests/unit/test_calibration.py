@@ -200,3 +200,23 @@ class TestHoldStateFileIsBounded:
         path = _hold_state_path(tmp_path, "s-1")
         assert path.is_file()
         assert list(path.parent.glob(".policy-holds-*.tmp")) == []
+
+
+def test_a_repetition_nudge_is_journaled_as_a_policy_hold(tmp_path: Path) -> None:
+    from grimoire.hosts.decisions import HookInput, decide_evidence_trace
+    from grimoire.hosts.events import HookEvent
+
+    for _ in range(6):
+        decide_evidence_trace(
+            HookInput(
+                event=HookEvent.POST_TOOL_USE,
+                project_root=tmp_path,
+                tool_name="Bash",
+                tool_input={"command": "false-cmd"},
+                tool_response={"exit_code": 1, "stderr": "boom"},
+                session_id="s-rep",
+            )
+        )
+    groups = TraceLedger(tmp_path / TRACES_DIR).policy_hold_calibration()["groups"]
+    reasons = {g["reason"] for g in groups}
+    assert "repetition:nudge" in reasons
