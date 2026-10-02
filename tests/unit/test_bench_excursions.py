@@ -66,3 +66,29 @@ def test_pure_mandate_vs_excursion(tmp_path: Path) -> None:
 def test_gate_mention_in_heredoc_is_not_a_call() -> None:
     _, ranks = ex.gate_calls(_transcript([f"cat <<EOF\n{GATE_CMD}\nEOF"]).splitlines())
     assert ranks == []
+
+
+def test_gate_chained_after_heredoc_is_a_call() -> None:
+    cmd = f"cat > f.go <<'EOF'\npackage x\nEOF\n{GATE_CMD} --strict 2>&1 | tail -5"
+    calls, ranks = ex.gate_calls(_transcript(["cat TASK.md", cmd]).splitlines())
+    assert (calls, ranks) == (2, [2])
+    assert ex.is_pure_mandate(calls, ranks)
+
+
+def test_benign_vs_costly_excursion() -> None:
+    def trace(results: list[tuple[str, str]]) -> list[str]:
+        lines: list[str] = []
+        for i, (cmd, out) in enumerate(results):
+            block = {"type": "tool_use", "id": f"t{i}", "name": "Bash", "input": {"command": cmd}}
+            lines.append(json.dumps({"type": "assistant", "message": {"content": [block]}}))
+            res = {"type": "tool_result", "tool_use_id": f"t{i}", "content": out}
+            lines.append(json.dumps({"type": "user", "message": {"content": [res]}}))
+        return lines
+
+    ok, ko = "OK evidence gates for task x", "FAIL evidence gates"
+    benign = trace([(GATE_CMD, ok), ("npx eslint .", "")])
+    costly = trace([(GATE_CMD, ko), ("pytest", ""), (GATE_CMD, ok)])
+    for lines, expected in ((benign, True), (costly, False)):
+        calls, ranks, green = ex.gate_trace(lines)
+        assert ex.is_benign(calls, ranks, green) is expected
+    assert ex.gate_trace(costly)[2] == {1: False, 3: True}
