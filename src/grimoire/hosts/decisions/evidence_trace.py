@@ -21,6 +21,9 @@ before this issue.
 
 from __future__ import annotations
 
+from dataclasses import replace
+from typing import TYPE_CHECKING
+
 from grimoire.core.standard_checks.evidence_journal import (
     append_evidence_event,
     build_bash_event,
@@ -30,6 +33,9 @@ from grimoire.core.standard_state import active_task_id, is_standard_enrolled
 from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
 from grimoire.hosts.decisions.tool_facts import ToolFacts, classify_tool, policy_tool_detail
 from grimoire.policies.schemas import ActionKind, MutationClass
+
+if TYPE_CHECKING:
+    from grimoire.hosts.decisions.repetition_guard import RepetitionVerdict
 
 
 def _record_temporal_approval(hook: HookInput, facts: ToolFacts) -> None:
@@ -113,11 +119,20 @@ _DELEGATION_TOOL_NAMES = frozenset({"task", "agent", "runsubagent"})
 
 #: Keys tried in order for each field, across hosts whose delegation tool
 #: input shape has not converged. Claude Code's ``Task``/``Agent`` documents
-#: ``subagent_type``/``description``/``model``; the rest are defensive
-#: fallbacks for a host that spells them differently.
-_DELEGATION_AGENT_KEYS = ("subagent_type", "agent_type", "agentType", "agent", "name")
-_DELEGATION_MODEL_KEYS = ("model",)
-_DELEGATION_DESCRIPTION_KEYS = ("description", "task", "prompt")
+#: ``subagent_type``/``description``/``model``; ``agentName``/``modelName``
+#: are what real Copilot sessions on this machine actually carry on a
+#: ``runSubagent`` invocation (audit: ``_scratch/delegation-audit/
+#: delegation_audit.py``, #657 follow-up) — the rest are defensive fallbacks
+#: for a host that spells them differently still.
+_DELEGATION_AGENT_KEYS = ("subagent_type", "agent_type", "agentType", "agentName", "agent", "name")
+_DELEGATION_MODEL_KEYS = ("model", "modelName")
+#: ``prompt`` is deliberately absent: it is the full delegation prompt, not a
+#: short caller-declared description, and it used to leak its first 160
+#: characters into a ``desc:`` tag exported by ``_to_langfuse_trace`` and
+#: OTel — the exact thing this constant's docstring already promised not to
+#: do. A call with no ``description``/``task`` now logs no ``desc:`` tag at
+#: all, rather than falling back to the prompt.
+_DELEGATION_DESCRIPTION_KEYS = ("description", "task")
 
 #: Free text truncated to this length before it reaches the ledger — enough
 #: to identify the delegation, never the full prompt (which can carry file
@@ -136,6 +151,20 @@ def _first_str(tool_input: dict[str, object], keys: tuple[str, ...]) -> str:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return ""
+
+
+def _delegation_fields(tool_input: dict[str, object]) -> dict[str, object]:
+    """*tool_input*, with a nested ``toolSpecificData`` dict flattened in.
+
+    A real Copilot ``runSubagent`` invocation carries ``agentName``/
+    ``modelName`` under ``toolSpecificData``, not at the top level (#657
+    follow-up). Top-level keys win on a collision — they are the shape
+    Claude Code's ``Task``/``Agent`` already documents.
+    """
+    nested = tool_input.get("toolSpecificData")
+    if isinstance(nested, dict):
+        return {**nested, **tool_input}
+    return tool_input
 
 
 def _record_delegation(hook: HookInput, task_id: str) -> None:
@@ -159,9 +188,10 @@ def _record_delegation(hook: HookInput, task_id: str) -> None:
         from grimoire.traces.ledger import DELEGATION_TAG, TraceLedger
         from grimoire.traces.schemas import TraceOutcome
 
-        agent_name = _first_str(hook.tool_input, _DELEGATION_AGENT_KEYS) or "(sans nom)"
-        model = _first_str(hook.tool_input, _DELEGATION_MODEL_KEYS)
-        description = _first_str(hook.tool_input, _DELEGATION_DESCRIPTION_KEYS)[:_DELEGATION_DESCRIPTION_MAX_LEN]
+        fields = _delegation_fields(hook.tool_input)
+        agent_name = _first_str(fields, _DELEGATION_AGENT_KEYS) or "(sans nom)"
+        model = _first_str(fields, _DELEGATION_MODEL_KEYS)
+        description = _first_str(fields, _DELEGATION_DESCRIPTION_KEYS)[:_DELEGATION_DESCRIPTION_MAX_LEN]
 
         tags = [DELEGATION_TAG, f"tool:{hook.tool_name}"]
         if description:
@@ -179,6 +209,12 @@ def _record_delegation(hook: HookInput, task_id: str) -> None:
             host_id=hook.host,
             model=model,
             tags=tags,
+            # #657 follow-up : sans trace_id, TraceLedger._next_id relit tout
+            # le journal et fait len(existing)+1 — deux appels PostToolUse
+            # concurrents (plusieurs délégations dans un même message)
+            # produisent alors le même id. Un uuid4 est unique sans relire
+            # le journal.
+            trace_id=f"TRC-delegation-{uuid.uuid4().hex}",
         )
     except Exception:  # observabilité pure : jamais au prix du hook lui-même
         return
@@ -225,23 +261,65 @@ def _record_untrusted_content(hook: HookInput, facts: ToolFacts) -> None:
         return
 
 
+def _record_repetition(hook: HookInput, facts: ToolFacts) -> RepetitionVerdict | None:
+    """Issue #668 : même appel, même échec, trois fois — un signal, jamais un blocage.
+
+    Best-effort, comme :func:`_record_untrusted_content` juste au-dessus :
+    avant toute question d'enrôlement (le rappel « tourne en rond » n'a pas de
+    raison de dépendre de l'adoption du standard), et le ``try`` ici ne couvre
+    que l'import. Jamais pour un appel de délégation (:func:`_is_delegation_tool`) :
+    ce chemin est une mesure pure « zéro coût en tokens » (#657) — un appel de
+    délégation qui ne répète jamais son propre outil de délégation n'a de
+    toute façon rien d'exact à répéter, et le test qui pin ce contrat
+    (``test_post_tool_use_logs_a_delegation_call_silently``) attend une
+    ``Decision`` strictement vide.
+    """
+    if _is_delegation_tool(hook.tool_name):
+        return None
+    try:
+        from grimoire.hosts.decisions.repetition_guard import evaluate_and_record
+
+        return evaluate_and_record(hook, facts)
+    except Exception:
+        return None
+
+
+def _with_repetition(decision: Decision, verdict: RepetitionVerdict | None) -> Decision:
+    """Fusionne le verdict de répétition dans *decision*, sans jamais écraser
+    le contexte déjà présent (le rappel d'évidence sur une écriture) — les deux
+    peuvent coexister, séparés par un saut de ligne, plutôt que de se disputer
+    le seul champ ``additionalContext`` qu'un hôte lit sur ``PostToolUse``.
+    """
+    if verdict is None:
+        return decision
+    detail = {**decision.detail, "repetition": verdict.to_dict()}
+    context = decision.context
+    if verdict.nudge:
+        context = f"{context}\n{verdict.nudge}" if context else verdict.nudge
+    return replace(decision, context=context, detail=detail)
+
+
 def decide_evidence_trace(hook: HookInput) -> Decision:
     """Post tool use: remind the agent that a write owes a line of proof."""
     facts = classify_tool(hook.tool_name, hook.tool_input)
     _record_temporal_approval(hook, facts)
     _record_untrusted_content(hook, facts)
+    repetition = _record_repetition(hook, facts)
     if not is_standard_enrolled(hook.project_root):
-        return Decision()
+        return _with_repetition(Decision(), repetition)
     task_id = active_task_id(hook.project_root)
     _record_observed_actions(hook, facts, task_id)
     _record_session_mutation(hook, facts, task_id)
     if _is_delegation_tool(hook.tool_name):
         _record_delegation(hook, task_id)
     if facts.kind is not ActionKind.FILE_WRITE:
-        return Decision()
+        return _with_repetition(Decision(), repetition)
     touched = ", ".join(facts.targets[:3]) or "le fichier modifié"
     context = (
         f"[Grimoire] Écriture enregistrée ({touched}). Ajoute la preuve correspondante à "
         f"_grimoire-output/evidence/{task_id}/evidence-pack.md — commande exécutée, test vert ou diff clé."
     )
-    return Decision(outcome=Outcome.ALLOW, context=context, detail={"task_id": task_id, "targets": list(facts.targets)})
+    decision = Decision(
+        outcome=Outcome.ALLOW, context=context, detail={"task_id": task_id, "targets": list(facts.targets)}
+    )
+    return _with_repetition(decision, repetition)

@@ -24,7 +24,7 @@ from grimoire.missions.gates import _resolve_provider_policy
 from grimoire.providers.audit import audit_providers, probe_provider
 from grimoire.providers.registry import ProviderRegistryError, read_registry
 from grimoire.providers.routing import candidates, choose
-from grimoire.providers.state import load_state, record_failure, record_success, save_state
+from grimoire.providers.state import cooling_down_entry, load_state, record_failure, record_success, save_state
 
 STANDARD = Path("_grimoire/standard")
 REGISTRY_PATH = STANDARD / "llm-provider-registry.yaml"
@@ -537,3 +537,66 @@ def test_audit_never_activates_or_disables_a_provider_in_the_registry(
     registry_after = (tmp_path / REGISTRY_PATH).read_text(encoding="utf-8")
     assert registry_after == registry_before
     assert read_registry(tmp_path)[0].enabled is True
+
+
+# ── cooling_down_entry() : un seul identifiant, sans passer par candidates() ──
+#
+# Issue disjoncteur mémoire/assistant local (#<issue>) : ``memory.manager`` et
+# ``tools.source_assist`` n'ont qu'un identifiant à vérifier avant un appel
+# réel, pas une cascade de fournisseurs LLM à filtrer — cette fonction leur
+# évite de recharger l'état et de relire ``ProviderRuntimeState`` à la main.
+
+
+def test_cooling_down_entry_none_without_any_recorded_failure(tmp_path: Path) -> None:
+    assert cooling_down_entry(tmp_path, "memory:qdrant") is None
+
+
+def test_cooling_down_entry_returns_state_while_cooling(tmp_path: Path) -> None:
+    t0 = datetime(2026, 1, 1, tzinfo=UTC)
+    record_failure(tmp_path, "memory:qdrant", "backend_unreachable", now=t0)
+
+    entry = cooling_down_entry(tmp_path, "memory:qdrant", now=t0 + timedelta(seconds=1))
+
+    assert entry is not None
+    assert entry.cooldown_until == t0 + timedelta(minutes=5)
+
+
+def test_cooling_down_entry_none_once_cooldown_expires(tmp_path: Path) -> None:
+    t0 = datetime(2026, 1, 1, tzinfo=UTC)
+    record_failure(tmp_path, "memory:qdrant", "backend_unreachable", now=t0)
+
+    assert cooling_down_entry(tmp_path, "memory:qdrant", now=t0 + timedelta(minutes=6)) is None
+
+
+# ── Garde : les identifiants memory:*/source_assist:* ne sont jamais routés ──
+#
+# `providers/state.py` est un fichier d'état partagé — le disjoncteur mémoire
+# (#<issue>) y écrit sous `memory:qdrant`/`memory:weaviate`/
+# `source_assist:ollama` plutôt que d'inventer un second format. Ce test
+# tient la promesse faite dans la conception : ces identifiants ne sont ni
+# des fournisseurs LLM ni jamais rendus par le routage, même quand leur état
+# de refroidissement partage le même fichier que ceux du registre.
+
+
+def test_state_ids_outside_the_llm_registry_never_enter_routing(tmp_path: Path) -> None:
+    _write_registry(tmp_path, _TIERED_REGISTRY)
+    t0 = datetime(2026, 1, 1, tzinfo=UTC)
+    # Les trois identifiants du disjoncteur mémoire/assistant local partagent
+    # le même fichier d'état runtime que les fournisseurs LLM du registre —
+    # jamais le même registre déclaratif.
+    for provider_id in ("memory:qdrant", "memory:weaviate", "source_assist:ollama"):
+        record_failure(tmp_path, provider_id, "backend_unreachable", now=t0)
+
+    found = candidates(tmp_path, "cheap", now=t0 + timedelta(seconds=1))
+    picked = choose(tmp_path, "cheap", now=t0 + timedelta(seconds=1))
+
+    assert [p.id for p in found] == ["anthropic", "local"]
+    assert all(not p.id.startswith(("memory:", "source_assist:")) for p in found)
+    assert picked is not None
+    assert not picked.id.startswith(("memory:", "source_assist:"))
+
+    # Les trois identifiants sont bien restés dans l'état runtime partagé —
+    # ce n'est pas qu'ils n'ont jamais été écrits, c'est que le routage ne
+    # lit que le registre déclaratif, jamais les clés brutes de l'état.
+    state = load_state(tmp_path)
+    assert set(state) >= {"memory:qdrant", "memory:weaviate", "source_assist:ollama"}

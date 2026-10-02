@@ -139,6 +139,27 @@ def save_state(root: Path, state: dict[str, ProviderRuntimeState]) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
+def cooling_down_entry(root: Path, provider_id: str, *, now: datetime | None = None) -> ProviderRuntimeState | None:
+    """L'état de *provider_id* s'il est encore en refroidissement, sinon ``None``.
+
+    Combine :func:`load_state` et :meth:`ProviderRuntimeState.is_cooling_down` —
+    le même calcul que ``routing.candidates`` fait fournisseur par
+    fournisseur, réutilisable par un appelant qui n'a qu'un seul identifiant
+    à vérifier avant un appel réel (pas de raison de charger l'état à la
+    main pour ça). Ce module ne connaît que des identifiants de chaîne : un
+    appelant hors cascade LLM (mémoire vectorielle, assistant local...) peut
+    poser ses propres identifiants (``memory:qdrant``, ``source_assist:ollama``)
+    sans que ``routing.py``/``registry.py`` en sachent rien — ils ne
+    reviennent jamais de ``candidates()``/``choose()``, qui ne lisent que le
+    registre déclaratif des fournisseurs LLM.
+    """
+    effective_now = _now(now)
+    entry = load_state(root).get(provider_id)
+    if entry is not None and entry.is_cooling_down(now=effective_now):
+        return entry
+    return None
+
+
 def record_failure(
     root: Path,
     provider_id: str,

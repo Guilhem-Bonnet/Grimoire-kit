@@ -126,6 +126,12 @@ def governed(project: Path) -> Path:
     return project
 
 
+@pytest.fixture
+def production(project: Path) -> Path:
+    setup_standard_profile(project, profile_id="production", task_id="bootstrap")
+    return project
+
+
 # ── Collection ───────────────────────────────────────────────────────────────
 
 
@@ -313,6 +319,24 @@ def test_a_hook_declared_on_post_tool_use_failure_is_wired_by_host_sync(governed
     settings = json.loads((governed / ".claude/settings.json").read_text(encoding="utf-8"))
     assert "PostToolUseFailure" in settings["hooks"]
     assert settings["hooks"]["PostToolUseFailure"][0]["matcher"] == "Bash"
+
+
+def test_evidence_trace_matcher_covers_bash_calls(governed: Path) -> None:
+    """Défaut vérifié : sans ``execute`` dans son matcher, ``grimoire.evidence-trace``
+
+    ne recevait jamais ``Bash`` sur Claude Code (``_MATCHER_TABLE`` ne route
+    ``Bash`` que via la famille ``execute``). Consequence réelle :
+    ``_record_session_mutation`` ne comptait jamais une mutation faite en
+    shell (``sed -i``, ``git commit``…), et ``evidence_gate.py`` laissait
+    clore une tâche hors gate après une telle mutation.
+    """
+    emitter = emitter_for(HostId.CLAUDE_CODE_CLI)
+    assert emitter is not None
+    apply_plan(emitter.plan(build_surface(governed), governed), governed)
+    settings = json.loads((governed / ".claude/settings.json").read_text(encoding="utf-8"))
+    # ``grimoire.evidence-trace`` est le seul décideur câblé sur PostToolUse
+    # (voir governance_hooks) : une seule entrée, son matcher doit couvrir Bash.
+    assert "Bash" in settings["hooks"]["PostToolUse"][0]["matcher"].split("|")
 
 
 def test_agent_tool_boundary_reaches_the_host_file(governed: Path) -> None:
@@ -945,6 +969,139 @@ def test_read_only_calls_are_not_slowed_down(governed: Path) -> None:
     assert decision.detail == {}
 
 
+# ── Standard profile downgrade guard (fix/profile-downgrade-guard) ──────────
+#
+# `_grimoire/standard/standard-profile.yaml`'s `profile:` field selects which
+# rule set `_risk_profile` applies (see `tool_policy._RISK_BY_PROFILE`). Any
+# write that weakens it therefore relaxes every threshold the standard
+# enforces, without touching a single rule — and nothing guarded that field
+# before this. Design: `_scratch/party-oss/gouvernance.md`, idea A.
+
+_PROFILE_YAML_RELPATH = "_grimoire/standard/standard-profile.yaml"
+
+
+def test_profile_downgrade_by_edit_asks_for_confirmation(production: Path) -> None:
+    path = production / _PROFILE_YAML_RELPATH
+    decision = decide_tool_policy(
+        HookInput(
+            event=HookEvent.PRE_TOOL_USE,
+            project_root=production,
+            tool_name="Edit",
+            tool_input={
+                "file_path": str(path),
+                "old_string": "profile: production",
+                "new_string": "profile: starter",
+            },
+        )
+    )
+    assert decision.outcome is Outcome.ASK
+    assert "production" in decision.reason
+    assert "starter" in decision.reason
+
+
+def test_profile_downgrade_by_write_asks_for_confirmation(production: Path) -> None:
+    path = production / _PROFILE_YAML_RELPATH
+    decision = decide_tool_policy(
+        HookInput(
+            event=HookEvent.PRE_TOOL_USE,
+            project_root=production,
+            tool_name="Write",
+            tool_input={"file_path": str(path), "content": "profile: starter\n"},
+        )
+    )
+    assert decision.outcome is Outcome.ASK
+
+
+def test_profile_downgrade_by_shell_command_asks_for_confirmation(production: Path) -> None:
+    decision = decide_tool_policy(
+        HookInput(
+            event=HookEvent.PRE_TOOL_USE,
+            project_root=production,
+            tool_name="Bash",
+            tool_input={
+                "command": (
+                    "sed -i 's/profile: production/profile: starter/' "
+                    f"{_PROFILE_YAML_RELPATH}"
+                )
+            },
+        )
+    )
+    assert decision.outcome is Outcome.ASK
+
+
+def test_profile_upgrade_is_allowed(governed: Path) -> None:
+    path = governed / _PROFILE_YAML_RELPATH
+    decision = decide_tool_policy(
+        HookInput(
+            event=HookEvent.PRE_TOOL_USE,
+            project_root=governed,
+            tool_name="Edit",
+            tool_input={
+                "file_path": str(path),
+                "old_string": "profile: governed",
+                "new_string": "profile: production",
+            },
+        )
+    )
+    assert decision.outcome is Outcome.ALLOW
+
+
+def test_profile_written_with_same_value_is_allowed(governed: Path) -> None:
+    path = governed / _PROFILE_YAML_RELPATH
+    decision = decide_tool_policy(
+        HookInput(
+            event=HookEvent.PRE_TOOL_USE,
+            project_root=governed,
+            tool_name="Write",
+            tool_input={"file_path": str(path), "content": "profile: governed\n"},
+        )
+    )
+    assert decision.outcome is Outcome.ALLOW
+
+
+def test_other_standard_yaml_file_is_unaffected_by_the_profile_guard(governed: Path) -> None:
+    """Scope guard (design risk (b)): only `standard-profile.yaml` is watched."""
+    policies_path = governed / "_grimoire/standard/policies.yaml"
+    decision = decide_tool_policy(
+        HookInput(
+            event=HookEvent.PRE_TOOL_USE,
+            project_root=governed,
+            tool_name="Write",
+            tool_input={"file_path": str(policies_path), "content": "profile: starter\nrules: []\n"},
+        )
+    )
+    assert decision.outcome is Outcome.ALLOW
+
+
+def test_profile_guard_never_ranks_a_profile_off_target(governed: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Budget guard: an ordinary ``Edit`` elsewhere must never pay for the
+    lazy ``profile_rank`` import/call the downgrade guard only needs once it
+    has already matched ``standard-profile.yaml`` by a plain string
+    comparison. A coordinator-reported latency concern (an off-target `Edit`
+    measured ~90ms vs a ~60ms `Read` baseline) turned out, on a proper
+    before/after A/B against ``origin/main`` (7 runs each, same machine), to
+    be pre-existing engine-evaluation cost unrelated to this guard (delta
+    within a few ms, noise-level) — this test is the standing proof that stays
+    true regardless of what the ambient noise does.
+    """
+    import grimoire.core.agentic_standard as agentic_standard
+
+    def _must_not_be_called(profile_id: str) -> int:
+        raise AssertionError("profile_rank must not be called for a call that never targets standard-profile.yaml")
+
+    monkeypatch.setattr(agentic_standard, "profile_rank", _must_not_be_called)
+    path = governed / "notes.md"
+    decision = decide_tool_policy(
+        HookInput(
+            event=HookEvent.PRE_TOOL_USE,
+            project_root=governed,
+            tool_name="Edit",
+            tool_input={"file_path": str(path), "old_string": "a", "new_string": "b"},
+        )
+    )
+    assert decision.outcome is Outcome.ALLOW
+
+
 def test_post_tool_use_logs_bash_test_run_and_file_write_events(governed: Path) -> None:
     """Issue #582 lot G2 : le hook consigne, l'agent n'a plus à recopier."""
     from grimoire.core.standard_checks.evidence_journal import read_evidence_log
@@ -980,6 +1137,42 @@ def test_post_tool_use_logs_bash_test_run_and_file_write_events(governed: Path) 
     assert entries[0]["command"] == "git status" and entries[0]["exit_code"] == 0
     assert entries[1]["command"] == "pytest -q" and entries[1]["exit_code"] == 1
     assert entries[2]["path"] == "src/foo.py"
+
+
+def test_post_tool_use_counts_a_mutating_bash_call_but_not_a_read_only_one(governed: Path) -> None:
+    """Défaut #1 (suite) : une fois Bash reçu par ce hook (matcher élargi ci-dessus),
+
+    seule une commande qui mute réellement doit incrémenter le compteur que
+    ``evidence_gate.py`` lit pour refuser une clôture hors tâche — un ``git
+    status`` en lecture seule ne doit jamais compter, et ni l'un ni l'autre ne
+    doit renvoyer le rappel « Écriture enregistrée », réservé aux vrais
+    ``ActionKind.FILE_WRITE``.
+    """
+    from grimoire.policies.session_state import session_mutations
+
+    read_only = decide_evidence_trace(
+        HookInput(
+            event=HookEvent.POST_TOOL_USE,
+            project_root=governed,
+            tool_name="Bash",
+            tool_input={"command": "git status"},
+            session_id="sess-mut",
+        )
+    )
+    assert read_only.context == ""
+    assert session_mutations(governed, "sess-mut") == 0
+
+    mutating = decide_evidence_trace(
+        HookInput(
+            event=HookEvent.POST_TOOL_USE,
+            project_root=governed,
+            tool_name="Bash",
+            tool_input={"command": "sed -i 's/a/b/' src/foo.py"},
+            session_id="sess-mut",
+        )
+    )
+    assert mutating.context == ""
+    assert session_mutations(governed, "sess-mut") == 1
 
 
 def test_post_tool_use_journal_write_stays_under_the_30ms_budget(governed: Path) -> None:
@@ -1075,6 +1268,97 @@ def test_post_tool_use_logs_a_delegation_call_without_a_model(governed: Path) ->
     assert len(delegations) == 1
     assert delegations[0].agent_id == "Explore"
     assert delegations[0].model == ""
+
+
+def test_post_tool_use_reads_a_copilot_delegation_nested_under_tool_specific_data(governed: Path) -> None:
+    """Défaut #2 : les vraies sessions Copilot de cette machine portent
+
+    ``agentName``/``modelName`` sous ``toolSpecificData``, pas à plat dans
+    ``tool_input`` (preuve : ``_scratch/delegation-audit/delegation_audit.py``
+    l.393-397). Sans ``agentName`` dans ``_DELEGATION_AGENT_KEYS`` et sans lire
+    sous ``toolSpecificData``, un tel appel réel se journalisait sous
+    ``agent_id == "(sans nom)"`` et modèle vide.
+    """
+    from grimoire.core.standard_generation import TRACES_DIR
+    from grimoire.traces.ledger import DELEGATION_TAG, TraceLedger
+
+    decide_evidence_trace(
+        HookInput(
+            event=HookEvent.POST_TOOL_USE,
+            project_root=governed,
+            tool_name="runSubagent",
+            tool_input={"toolSpecificData": {"agentName": "expert-playwright", "modelName": "gpt-5"}},
+        )
+    )
+    ledger = TraceLedger(governed / TRACES_DIR)
+    delegations = [t for t in ledger.list_traces() if DELEGATION_TAG in t.tags]
+    assert len(delegations) == 1
+    assert delegations[0].agent_id == "expert-playwright"
+    assert delegations[0].model == "gpt-5"
+
+
+def test_post_tool_use_never_falls_back_to_the_full_prompt_for_desc_tag(governed: Path) -> None:
+    """Défaut #3 : ``prompt`` n'est plus un repli pour la description.
+
+    Avant #657 (suite), un appel sans ``description``/``task`` explicite
+    faisait partir les 160 premiers caractères du prompt complet dans un tag
+    ``desc:`` — exporté tel quel par ``_to_langfuse_trace`` et OTel. Un appel
+    sans description ne doit plus produire aucun tag ``desc:``.
+    """
+    from grimoire.core.standard_generation import TRACES_DIR
+    from grimoire.traces.ledger import DELEGATION_TAG, TraceLedger
+
+    decide_evidence_trace(
+        HookInput(
+            event=HookEvent.POST_TOOL_USE,
+            project_root=governed,
+            tool_name="Task",
+            tool_input={
+                "subagent_type": "general-purpose",
+                "prompt": "Un très long prompt qui ne doit jamais être journalisé tel quel...",
+            },
+        )
+    )
+    ledger = TraceLedger(governed / TRACES_DIR)
+    delegations = [t for t in ledger.list_traces() if DELEGATION_TAG in t.tags]
+    assert len(delegations) == 1
+    assert not [tag for tag in delegations[0].tags if tag.startswith("desc:")]
+
+
+def test_delegation_trace_id_never_relies_on_next_id_and_its_journal_reread(
+    governed: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Défaut #4, preuve déterministe (pas un pari sur l'ordre d'exécution).
+
+    ``TraceLedger._next_id`` relit tout le journal et calcule ``len(existing)
+    + 1`` : sans ``trace_id`` explicite, ``_record_delegation`` retombait sur
+    cette méthode, et deux lectures concurrentes du même état du journal
+    (deux ``Agent`` dans un même message, avant que l'une des deux écritures
+    n'ait eu lieu) produisent alors le même id. On rend cette course
+    déterministe en figeant ``_next_id`` sur une valeur fixe : le correctif
+    doit ne jamais l'appeler pour une délégation, donc jamais produire cette
+    valeur ni collisionner.
+    """
+    from grimoire.core.standard_generation import TRACES_DIR
+    from grimoire.traces.ledger import DELEGATION_TAG, TraceLedger
+
+    monkeypatch.setattr(TraceLedger, "_next_id", lambda self, run_id: "TRC-RACE-WOULD-COLLIDE")
+
+    for _ in range(2):
+        decide_evidence_trace(
+            HookInput(
+                event=HookEvent.POST_TOOL_USE,
+                project_root=governed,
+                tool_name="Task",
+                tool_input={"subagent_type": "general-purpose", "description": "recherche"},
+                session_id="sess-concurrent",
+            )
+        )
+    ledger = TraceLedger(governed / TRACES_DIR)
+    delegations = [t for t in ledger.list_traces() if DELEGATION_TAG in t.tags]
+    assert len(delegations) == 2
+    assert delegations[0].id != delegations[1].id
+    assert "TRC-RACE-WOULD-COLLIDE" not in {t.id for t in delegations}
 
 
 def test_post_tool_use_does_not_log_a_non_delegating_tool_call(governed: Path) -> None:
@@ -1728,10 +2012,68 @@ def test_non_claude_hosts_do_not_get_the_claude_dispatch_context(project: Path) 
     assert "Politique de dispatch" not in copilot_decision.context
     assert copilot_decision.detail["dispatch_context_injected"] is False
 
+
+def test_the_roster_default_model_is_explicitly_subordinate_to_the_task_class(project: Path) -> None:
+    """#662 : le répertoire `subagent_type` → modèle par défaut de
+    la persona (ex. `scribe` → `haiku`) est injecté juste sous la « Politique
+    de dispatch » (classe de la tâche → modèle) sans qu'aucune phrase ne
+    tranche entre les deux — les deux règles semblent se contredire pour qui
+    ne devine pas que le roster n'est que le défaut appliqué quand `model=` est omis."""
+    _, decision, _ = run_hook(
+        {"hook_event_name": "SessionStart", "cwd": str(project)}, host_id=HostId.CLAUDE_CODE_CLI
+    )
+    context = decision.context
+    roster_index = context.index("Personas routables")
+    priority_index = context.index("la classe de la sous-tâche déléguée prime")
+    assert priority_index > roster_index, "la phrase de priorité doit suivre le roster, pas le précéder"
+
+
+def test_collect_agents_runs_once_per_claude_session_start(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """#662 : `entry_persona_context` et `_claude_dispatch_context`
+    appelaient chacune `collect_agents` au même `SessionStart` (mesuré
+    ~35 ms + ~16 ms sur la Forge) — le même inventaire d'agents, recalculé
+    deux fois."""
+    import grimoire.hosts.collect as collect_module
+
+    calls = 0
+    original = collect_module.collect_agents
+
+    def counting(*args: object, **kwargs: object) -> tuple:
+        nonlocal calls
+        calls += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(collect_module, "collect_agents", counting)
+
+    run_hook({"hook_event_name": "SessionStart", "cwd": str(project)}, host_id=HostId.CLAUDE_CODE_CLI)
+
+    assert calls == 1, f"collect_agents appelé {calls} fois au lieu d'une seule"
+
     # Sans host_id du tout (appel direct, comme le fait le reste de la suite) :
     # même comportement, jamais la section Claude.
     bare_context = _session_start(project)
     assert "Politique de dispatch" not in bare_context
+
+
+def test_claude_session_start_survives_an_unreadable_agent_inventory(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#662 : un inventaire illisible (``OSError``) ne casse pas le hook — ni
+    persona ni politique, le reste du contexte ``SessionStart`` passe."""
+    import grimoire.hosts.collect as collect_module
+
+    def unreadable(*args: object, **kwargs: object) -> tuple:
+        raise OSError("inventaire illisible")
+
+    monkeypatch.setattr(collect_module, "collect_agents", unreadable)
+
+    _rendered, decision, _hook = run_hook(
+        {"hook_event_name": "SessionStart", "cwd": str(project)}, host_id=HostId.CLAUDE_CODE_CLI
+    )
+    context = decision.context
+
+    assert "Politique de dispatch" not in context
+    assert "persona d'entrée" not in context
 
 
 def test_the_entry_persona_tool_boundary_no_longer_reads_as_binding_the_main_loop(project: Path) -> None:

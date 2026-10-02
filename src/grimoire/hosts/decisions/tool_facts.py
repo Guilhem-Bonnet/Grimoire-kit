@@ -234,6 +234,56 @@ def command_surface(command: str) -> str:
     return "".join(out)
 
 
+#: Same shape as ``_EVAL_INTRODUCER`` but reaching further: also matches the
+#: python interpreters (whose ``-c`` argument is executed as python, not
+#: shell — ``_EVAL_INTRODUCER`` deliberately leaves them out, so
+#: :func:`command_surface` still blanks a ``python -c "…"`` argument like any
+#: other quoted prose). Used only by :func:`extract_c_bodies` below, never by
+#: :func:`command_surface` itself.
+_C_BODY_INTRODUCER = re.compile(
+    r"(?:\b(?:bash|sh|zsh|dash|ksh|ash|python3?)\s+(?:-[A-Za-z]*\s+)*-[A-Za-z]*c|\beval)\s*$"
+)
+
+
+def extract_c_bodies(command: str) -> tuple[str, ...]:
+    """The argument bodies of every ``-c``/``eval`` call in *command*.
+
+    Not part of :func:`command_surface`: that function keeps classifying a
+    ``bash -c "…"`` or ``python -c "…"`` call as a single opaque command for
+    the destructive-pattern and read-only checks above, unchanged. This
+    exists solely for :mod:`.tool_policy`'s untrusted-memory comparison
+    (issue #645 follow-up): a command a planted content spelled out
+    unwrapped (``curl … | sh``) still carries the exact same inner text once
+    an agent wraps it (``bash -c "curl … | sh"``, ``python -c "…os.system('curl
+    … | sh')"``, ``eval "curl … | sh"``) — the comparison needs to see past
+    that wrapping, even though nothing else here should.
+
+    Heredoc bodies are dropped first, same as :func:`command_surface`: a
+    ``-c``/``eval`` mentioned only inside documentary data must never surface
+    here either.
+    """
+    surface_source = _strip_heredoc_bodies(command)
+    bodies: list[str] = []
+    cursor = 0
+    for quoted in _QUOTED_RE.finditer(surface_source):
+        preceding = surface_source[cursor:quoted.start()]
+        cursor = quoted.end()
+        if _C_BODY_INTRODUCER.search(preceding.rstrip()):
+            inner = quoted.group(0)[1:-1]
+            if inner.strip():
+                bodies.append(inner)
+                # One level of nesting: ``python -c "…os.system('curl … | sh')…"``
+                # carries the actual shell text one quote layer further in —
+                # everything inside a ``-c``/``eval`` argument is executed or
+                # evaluated, so a literal string inside it is worth comparing
+                # on its own too, not only as part of the whole body.
+                for nested in _QUOTED_RE.finditer(inner):
+                    nested_inner = nested.group(0)[1:-1]
+                    if nested_inner.strip():
+                        bodies.append(nested_inner)
+    return tuple(bodies)
+
+
 @dataclass(frozen=True, slots=True)
 class ToolFacts:
     """What a decision needs to know about a pending tool call."""
@@ -244,6 +294,17 @@ class ToolFacts:
     targets: tuple[str, ...] = ()
     destructive_reason: str = ""
     secret_target: str = ""
+    #: Governance profile guard (issue tracked in ``fix/profile-downgrade-guard``):
+    #: ``None`` when this call does not mutate
+    #: ``_grimoire/standard/standard-profile.yaml`` at all. ``""`` when it does,
+    #: but the proposed new ``profile:`` value cannot be read with confidence
+    #: (a shell mutation — ``sed -i``, redirection, ``cp`` — whose command line
+    #: is not a reliable source for the file's *resulting* content). Otherwise
+    #: the declared profile id read from a ``Write``/``Edit`` call's own
+    #: ``content``/``new_string``, ready for :mod:`.tool_policy` to compare
+    #: against the project's current profile — this module has no notion of
+    #: "current", only of "proposed".
+    standard_profile_write: str | None = None
 
     @property
     def family(self) -> str:
@@ -307,6 +368,38 @@ def _target_paths(tool_input: dict[str, Any]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(paths))
 
 
+#: The one file the profile-downgrade guard watches — deliberately just this
+#: path, not the rest of ``_grimoire/standard/`` (``policies.yaml``,
+#: ``task-board.yaml``, ...), which this guard has no opinion on.
+_STANDARD_PROFILE_SUFFIX = "_grimoire/standard/standard-profile.yaml"
+
+#: A YAML ``profile:`` mapping entry, quoted or not — the one field this
+#: guard reads. Deliberately a regex, not a YAML parse: the value only ever
+#: needs comparing against known profile ids, and a full parse is exactly the
+#: "heavy import on the PreToolUse path" this package avoids elsewhere.
+_PROFILE_FIELD_RE = re.compile(r'(?m)^[ \t]*profile[ \t]*:[ \t]*["\']?([A-Za-z0-9_-]+)')
+
+
+def _targets_standard_profile_file(path: str) -> bool:
+    """*path* is (or resolves to) the profile file — a ``Write``/``Edit`` target."""
+    return path.replace("\\", "/").rstrip("/").endswith(_STANDARD_PROFILE_SUFFIX)
+
+
+def _command_mentions_standard_profile_file(command: str) -> bool:
+    """The profile file is named anywhere on *command*'s line.
+
+    Looser than :func:`_targets_standard_profile_file` on purpose: a shell
+    command names its target as one argument among others (flags, a ``sed``
+    expression, a redirection), never as the whole string.
+    """
+    return _STANDARD_PROFILE_SUFFIX in command.replace("\\", "/")
+
+
+def _declared_profile(text: str) -> str | None:
+    match = _PROFILE_FIELD_RE.search(text)
+    return match.group(1) if match else None
+
+
 def classify_tool(tool_name: str, tool_input: dict[str, Any] | None = None) -> ToolFacts:
     """Describe a pending tool call in host-neutral policy terms."""
     payload = tool_input or {}
@@ -363,6 +456,25 @@ def classify_tool(tool_name: str, tool_input: dict[str, Any] | None = None) -> T
     if kind is ActionKind.TOOL_USE and not is_execute and not is_write:
         mutation = MutationClass.READ_ONLY
 
+    # Profile-downgrade guard: narrow on purpose (see ``ToolFacts.standard_profile_write``)
+    # — only this one file, only its ``profile:`` field, ``None`` unless this
+    # call actually mutates it.
+    standard_profile_write: str | None = None
+    if is_write and any(_targets_standard_profile_file(t) for t in targets):
+        proposed_content = _first_str(payload, "content", "new_string")
+        standard_profile_write = _declared_profile(proposed_content) if proposed_content else None
+    elif (
+        not is_write
+        and command
+        and mutation is not MutationClass.READ_ONLY
+        and _command_mentions_standard_profile_file(command)
+    ):
+        # A shell mutation's command line is not a reliable source for the
+        # file's resulting content (``sed -i``'s expression, redirected
+        # ``echo``/heredoc bodies, ``cp`` from elsewhere) — "" marks it as
+        # targeted-but-unreadable rather than guessing a direction.
+        standard_profile_write = ""
+
     return ToolFacts(
         kind=kind,
         mutation=mutation,
@@ -370,4 +482,5 @@ def classify_tool(tool_name: str, tool_input: dict[str, Any] | None = None) -> T
         targets=targets,
         destructive_reason=destructive_reason,
         secret_target=secret_target,
+        standard_profile_write=standard_profile_write,
     )
