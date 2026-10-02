@@ -82,7 +82,7 @@ qui échouaient dans les lots précédents). Voir `report.md` du workspace pour 
 
 ## 4. Défaut du classifieur trouvé par ce lot
 
-La première exécution de `excursions.py` sur le lot L donnait 46/60 excursions (76,7 %),, dont de nombreux runs « sans gate » à 2 appels outils. Faux : l'agent
+La première exécution de `excursions.py` sur le lot L donnait 46/60 excursions (76,7 %), dont de nombreux runs « sans gate » à 2 appels outils. Faux : l'agent
 (Opus 5.5) enchaîne désormais l'écriture de la solution et `grimoire standard gate check` dans le **même** appel Bash (`cat > f <<'EOF' … EOF` puis la commande gate).
 Le classifieur coupait la commande à la première occurrence de `<<` pour ignorer les mentions dans un heredoc, et perdait donc l'appel enchaîné après lui.
 Correctif : retirer les **corps** de heredoc et chercher la commande dans le reste ; ajout de `gate_trace` (verdict vert/rouge par appel gate, par `tool_use_id`),
