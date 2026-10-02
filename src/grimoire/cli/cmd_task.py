@@ -12,6 +12,7 @@ que le serveur MCP appelle aussi (issue #138). Ce module ne fait que présenter.
 
 from __future__ import annotations
 
+import contextlib
 import json
 from pathlib import Path
 from typing import Annotated, Any
@@ -438,6 +439,47 @@ def task_claim(
 
     claim = TaskClaim.new(actor_id=actor, host_id=host, exclusive_files=tuple(files or ()))
     _transition(ctx, task_id, TaskState.CLAIMED, project_root, ledger_root, actor, claim=claim)
+    # Issue #680 : un claim lancé depuis une session lui appartient — sans cela,
+    # deux claims concurrents ne se distinguent plus et chaque session retombe
+    # sur `bootstrap`. Silencieux quand l'environnement ne désigne aucune session.
+    with contextlib.suppress(Exception):
+        _service(project_root, ledger_root).attach_current_session(task_id, actor=actor)
+
+
+@task_app.command("attach")
+def task_attach(
+    ctx: typer.Context,
+    task_id: Annotated[str, typer.Argument()],
+    session_id: Annotated[
+        str, typer.Option("--session-id", help="Session d'hôte (défaut : GRIMOIRE_SESSION_ID ou CLAUDE_CODE_SESSION_ID).")
+    ] = "",
+    project_root: _PROJECT_ROOT = Path(),
+    ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
+    actor: _ACTOR = "cli",
+) -> None:
+    """Rattache cette session au claim de la tâche — quand plusieurs claims coexistent."""
+    from grimoire.core.exceptions import GrimoireError
+    from grimoire.core.standard_state import current_session
+
+    env_session, env_host = current_session()
+    sid = session_id.strip() or env_session
+    if not sid:
+        console.print(
+            "[red]✗[/red] Aucune session identifiable : ni --session-id, ni GRIMOIRE_SESSION_ID, "
+            "ni la variable d'environnement de l'hôte (CLAUDE_CODE_SESSION_ID)."
+        )
+        raise typer.Exit(1)
+    service = _service(project_root, ledger_root)
+    _require_task(service, task_id)
+    try:
+        task = service.attach_session(task_id, sid, session_host=env_host if not session_id.strip() else "", actor=actor)
+    except GrimoireError as exc:
+        console.print(f"[red]✗[/red] {exc}")
+        raise typer.Exit(1) from exc
+    if _fmt(ctx) == "json":
+        typer.echo(json.dumps({"task_id": task.id, "session_id": sid}, indent=2, ensure_ascii=False))
+        return
+    console.print(f"[green]✓[/green] Session {sid} rattachée à {task.id}")
 
 
 @task_app.command("move")

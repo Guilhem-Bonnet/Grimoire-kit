@@ -51,8 +51,28 @@ def remedy_text() -> str:
     return "\n".join(_REMEDY_LINES)
 
 
-def no_task_context(profile: str) -> str:
+def ambiguity_text(candidates: tuple[str, ...]) -> str:
+    """Issue #680 : plusieurs claims, aucun n'est rattaché à cette session — les nommer, avec la commande."""
+    names = ", ".join(candidates)
+    return (
+        f"Plusieurs tâches sont réclamées en même temps ({names}) et aucune n'est rattachée à cette session.\n"
+        "Rattache la tienne : `grimoire task attach <id>` (la session est lue dans l'environnement ; "
+        "sinon `--session-id <id>`), ou task_context/GRIMOIRE_TASK_ID. "
+        "Un `grimoire task claim` lancé depuis cette session la rattache déjà."
+    )
+
+
+def _ambiguity_tail(profile: str) -> str:
+    if profile in BLOCKING_PROFILES:
+        return f"En profil {profile}, une clôture après une écriture hors tâche est refusée au Stop."
+    return f"Profil {profile} : une écriture hors tâche est signalée au Stop, pas refusée."
+
+
+def no_task_context(profile: str, candidates: tuple[str, ...] = ()) -> str:
     """Ce qu'une session sans tâche lit au ``SessionStart`` et au ``UserPromptSubmit``."""
+    if candidates:
+        head = f"[Grimoire] Tâche de la session indéterminée (profil {profile}). {ambiguity_text(candidates)}\n"
+        return head + _ambiguity_tail(profile)
     head = (
         f"[Grimoire] Aucune tâche du Mission Ledger n'est en cours (repli `bootstrap`, profil {profile}). "
         "Ouvre-en une avant d'écrire :\n"
@@ -65,8 +85,15 @@ def no_task_context(profile: str) -> str:
     return head + remedy_text() + tail
 
 
-def no_task_stop_reason(profile: str, mutations: int) -> str:
+def no_task_stop_reason(profile: str, mutations: int, candidates: tuple[str, ...] = ()) -> str:
     """Le motif que ``Stop`` rend quand une session a écrit sans tâche."""
+    if candidates:
+        return (
+            f"[Grimoire] Clôture hors tâche : {mutations} action(s) d'écriture observée(s) dans cette session "
+            f"et aucune tâche n'est rattachée à elle (profil {profile}).\n"
+            f"{ambiguity_text(candidates)}\n"
+            "Si le travail doit rester hors ledger, dis-le explicitement à l'utilisateur au lieu de conclure."
+        )
     return (
         f"[Grimoire] Clôture hors tâche : {mutations} action(s) d'écriture observée(s) dans cette session "
         f"et aucune tâche du Mission Ledger n'est en cours (repli `bootstrap`, profil {profile}).\n"
