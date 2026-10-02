@@ -307,7 +307,7 @@ def decide_evidence_trace(hook: HookInput) -> Decision:
     repetition = _record_repetition(hook, facts)
     if not is_standard_enrolled(hook.project_root):
         return _with_repetition(Decision(), repetition)
-    task_id = active_task_id(hook.project_root)
+    task_id = active_task_id(hook.project_root, session_id=hook.session_id)
     _record_observed_actions(hook, facts, task_id)
     _record_session_mutation(hook, facts, task_id)
     if _is_delegation_tool(hook.tool_name):

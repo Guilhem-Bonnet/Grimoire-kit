@@ -96,6 +96,10 @@ def _isolate_user_state(tmp_path_factory: pytest.TempPathFactory) -> Iterator[No
         # relatifs au répertoire courant, comme hors hook.
         for var in _GIT_REDIRECT_VARS:
             mp.delenv(var, raising=False)
+        # Issue #680 : la session de l'hôte qui lance pytest (Claude Code exporte
+        # CLAUDE_CODE_SESSION_ID) ne doit pas rattacher les claims des tests.
+        for var in ("GRIMOIRE_SESSION_ID", "CLAUDE_CODE_SESSION_ID"):
+            mp.delenv(var, raising=False)
         # Rich formate l'aide de la CLI à la largeur du terminal. Sous 80
         # colonnes — la valeur d'un runner CI — un nom d'option long est coupé
         # en deux, et une assertion `"--interactive" in result.output` échoue

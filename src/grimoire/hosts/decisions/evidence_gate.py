@@ -38,11 +38,11 @@ def decide_evidence_gate(hook: HookInput) -> Decision:
     if not is_standard_enrolled(hook.project_root):
         return Decision(detail={"skipped": "project_not_enrolled"})
 
-    active = resolve_active_task(hook.project_root)
+    active = resolve_active_task(hook.project_root, session_id=hook.session_id)
     task_id = active.task_id
     profile = active_profile_id(hook.project_root)
-    if active.source == "bootstrap":
-        no_task = _no_task_closure(hook, profile)
+    if active.is_fallback:
+        no_task = _no_task_closure(hook, profile, active.candidates)
         if no_task is not None:
             return no_task
     try:
@@ -171,7 +171,7 @@ def _unevaluable_gate(task_id: str, profile: str, exc: Exception) -> Decision:
     )
 
 
-def _no_task_closure(hook: HookInput, profile: str) -> Decision | None:
+def _no_task_closure(hook: HookInput, profile: str, candidates: tuple[str, ...] = ()) -> Decision | None:
     """Issue #638 lot A: a session that wrote without a task is not a finished task.
 
     ``bootstrap`` is a fallback, not a task: nothing in the Mission Ledger
@@ -189,7 +189,7 @@ def _no_task_closure(hook: HookInput, profile: str) -> Decision | None:
     if mutations <= 0:
         return None
     detail = {"task_id": "bootstrap", "profile": profile, "blocked_on": NO_ACTIVE_TASK, "mutations": mutations}
-    reason = no_task_stop_reason(profile, mutations)
+    reason = no_task_stop_reason(profile, mutations, candidates)
     if profile in _BLOCKING_PROFILES:
         return Decision(outcome=Outcome.BLOCK, reason=reason, detail=detail)
     return Decision(context=reason, detail=detail)
