@@ -137,7 +137,7 @@ def resolve_gate_check_task_id(project_root: Path, task_id: str) -> tuple[str, d
 
     active = resolve_active_task(project_root)
     resolved = active.task_id
-    if active.source != "bootstrap":
+    if not active.is_fallback:
         return resolved, None
     board_path = project_root.resolve() / TASK_BOARD_RELPATH
     board = _load_mapping(board_path)

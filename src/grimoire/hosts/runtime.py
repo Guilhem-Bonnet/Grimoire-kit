@@ -150,7 +150,7 @@ def _persist_capsule(hook: HookInput, decision: Decision) -> tuple[Path | None, 
     """
     if hook.event is not HookEvent.PRE_COMPACT or not decision.context:
         return None, ""
-    task_id = str(decision.detail.get("task_id") or active_task_id(hook.project_root))
+    task_id = str(decision.detail.get("task_id") or active_task_id(hook.project_root, session_id=hook.session_id))
     dest = hook.project_root / CONTEXT_DIR / task_id / "compaction-capsule.md"
     try:
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -252,7 +252,7 @@ def _record_decision(
         # pas dans son détail, donc chaque refus d'outil était journalisé sous
         # un task_id vide et `grimoire task trace` ne pouvait pas le retrouver.
         # Le gateway est l'unique écrivain de ce ledger ; c'est lui qui résout.
-        task_id = str(detail.get("task_id") or active_task_id(hook.project_root))
+        task_id = str(detail.get("task_id") or active_task_id(hook.project_root, session_id=hook.session_id))
         verdict = _LEDGER_VERDICT.get(decision.outcome, "allow")
         record_started_at = started_at or _now_iso()
         tool_calls = []

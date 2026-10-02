@@ -753,8 +753,15 @@ def task_claim(
         ledger_root: Mission Ledger directory, relative to the project root.
     """
     try:
-        move = _task_service(project_path, ledger_root).claim(task_id, actor, host)
-        return json.dumps(move.to_dict(), indent=2, ensure_ascii=False)
+        service = _task_service(project_path, ledger_root)
+        move = service.claim(task_id, actor, host)
+        payload = move.to_dict()
+        # Issue #680 : le claim d'une session lui appartient (session lue dans
+        # l'environnement du serveur MCP, quand l'hôte l'y exporte).
+        session = service.attach_current_session(task_id, actor=actor)
+        if session:
+            payload["session_id"] = session
+        return json.dumps(payload, indent=2, ensure_ascii=False)
     except (GrimoireError, OSError, ValueError) as exc:
         return _task_error(exc)
 
@@ -870,6 +877,9 @@ def task_context(
             active = resolve_active_task(root)
             resolved, source = active.task_id, active.source
         payload: dict[str, Any] = {"task_id": resolved, "resolved_from": source}
+        if not task_id and active.candidates:
+            payload["candidates"] = list(active.candidates)
+            payload["note"] = "several claims, none attached to this session — `grimoire task attach <id>`"
         task = service.ledger.get_task(resolved) if service.has_ledger else None
         if task is not None:
             payload["task"] = _task_json(task)

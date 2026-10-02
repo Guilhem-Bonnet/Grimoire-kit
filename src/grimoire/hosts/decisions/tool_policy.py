@@ -262,7 +262,7 @@ def decide_tool_policy(hook: HookInput) -> Decision:
     if read_only and not has_temporal_rules:
         return _untrusted_escalation(hook, facts) or Decision()
 
-    task_id = active_task_id(hook.project_root)
+    task_id = active_task_id(hook.project_root, session_id=hook.session_id)
     risk = _risk_profile(hook.project_root)
     base_verdict = (
         _engine(base_rules).evaluate(_policy_request(hook, facts, task_id, risk))
