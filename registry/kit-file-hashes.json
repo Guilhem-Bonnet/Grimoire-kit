@@ -1,6 +1,6 @@
 {
  "schema": "grimoire-kit-file-hashes/v1",
- "generated_for": "3.61.1",
+ "generated_for": "3.62.0",
  "digests": {
   "002d1e68ce00769ee09d1e94f4af260b952837f7d1557080c2fd505216c23ac0": {
    "version": "3.11.2",
@@ -385,6 +385,10 @@
   "1b42ee6767003028dc2e1d182da2f2b33246ab71b6fb07439ca0974dd41c2190": {
    "version": "3.7.0",
    "path": "framework/agentic-standard/templates/cluster-action-policy.yaml"
+  },
+  "1b5a6afbc39443febca777271a7229f18d9d34fe1c67c46a595b2a48f990dc3b": {
+   "version": "3.62.0",
+   "path": "archetypes/infra-ops/agents/monitoring-specialist.md"
   },
   "1b6c56f3c4cf8abdb017b1238e53ba861a68773771d74c859020e2598ac72b03": {
    "version": "3.4.2",
@@ -3101,6 +3105,10 @@
   "cc4d26e42bb43f5a71fa0c4b7162ff242ad212a3069e408a0a95a02d47151a7d": {
    "version": "3.4.2",
    "path": "archetypes/infra-ops/agents/pipeline-architect.md"
+  },
+  "cc5ba34db7f1e5f36211003891b1dd854208384a0200e5e23366908f9d8684fb": {
+   "version": "3.62.0",
+   "path": "archetypes/infra-ops/archetype.dna.yaml"
   },
   "cc8670d68493ca3903cba9a410ac6ec1a2262e6894c24f19d5cbd3abda45475d": {
    "version": "3.42.0",
