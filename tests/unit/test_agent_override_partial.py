@@ -201,6 +201,28 @@ def test_convert_reel_produit_un_override_partiel_equivalent(tmp_path: Path) -> 
     assert agent.description == "ops-engineer — persona de test"
 
 
+def test_convert_description_longue_reste_lisible_en_entier_par_les_lecteurs_du_kit(tmp_path: Path) -> None:
+    """Issue #679 : le YAML replié écrit par `convert_override` ne tronque pas la description."""
+    from grimoire.core.scaffold import ProjectScaffolder
+
+    root = tmp_path
+    long_desc = (
+        "Vectus — Architecte de la mémoire vectorielle (Qdrant, embeddings, RAG, hybrid search, "
+        "quantization, sharding, reranking)"
+    )
+    kit_path = _kit_agent(root, "ops-engineer")
+    override_path = root / OVERRIDE_AGENTS / "ops-engineer.md"
+    override_path.parent.mkdir(parents=True, exist_ok=True)
+    override_path.write_text(
+        kit_path.read_text(encoding="utf-8").replace("ops-engineer — persona de test", long_desc),
+        encoding="utf-8",
+    )
+
+    convert_override(root, "ops-engineer", dry_run=False)
+
+    assert ProjectScaffolder._extract_agent_description(override_path) == long_desc
+
+
 def test_convert_refuse_quand_le_corps_diverge(tmp_path: Path) -> None:
     root = tmp_path
     _kit_agent(root, "ops-engineer", body="Corps du kit.\n")

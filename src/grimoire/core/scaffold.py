@@ -691,6 +691,7 @@ class ProjectScaffolder:
         same priority :func:`layout.agent_dirs` enforces everywhere else
         (issue #345).
         """
+        kit_sources: dict[str, Path] = {}
         sources: dict[str, Path] = {}
         for fc in sorted(p.copies, key=lambda c: c.dst.name):
             if not fc.src.is_file() or not _is_agent_markdown(fc.dst):
@@ -699,6 +700,7 @@ class ProjectScaffolder:
             if identity is None:
                 continue
             sources[identity[0]] = fc.src
+            kit_sources[fc.dst.name] = fc.src
         overrides_dir = layout.overrides_dir(self._target) / layout.AGENTS_SUBDIR
         if overrides_dir.is_dir():
             for path in sorted(overrides_dir.iterdir()):
@@ -711,15 +713,50 @@ class ProjectScaffolder:
 
         rows: list[str] = []
         for tag, src in sorted(sources.items()):
-            identity = self._agent_identity(src)
+            identity, description = self._effective_agent_card(src, kit_sources.get(src.name))
             if identity is None:
                 continue
             _, persona = identity
-            role = self._extract_agent_description(src).replace('"', "'")
+            role = description.replace('"', "'")
             rows.append(
                 f'      <agent tag="{tag}" name="{persona}" role="{role}"/>'
             )
         return "\n".join(rows) if rows else "      <!-- aucun agent installé -->"
+
+    def _effective_agent_card(
+        self, src: Path, kit_src: Path | None
+    ) -> tuple[tuple[str, str] | None, str]:
+        """``(identity, description)`` of the agent *src* effectively is.
+
+        A partial override (``extends: kit``) carries neither a persona nor, in
+        general, a description: both come from the kit file it extends, merged
+        by :func:`grimoire.hosts.collect.resolve_extends_kit` — the same rule
+        ``collect_agents`` applies, not a second one (issue #679). *kit_src* is
+        the kit file planned under the same name (the installed kit tier is not
+        regenerated yet at plan time). Anything that is not a partial, or whose
+        kit counterpart is missing, is read as is, as before.
+        """
+        from grimoire.core.exceptions import GrimoireAgentError
+        from grimoire.hosts.collect import parse_frontmatter, resolve_extends_kit
+
+        plain = (self._agent_identity(src), self._extract_agent_description(src))
+        if kit_src is None or src == kit_src:
+            return plain
+        try:
+            meta, _ = parse_frontmatter(src.read_text(encoding="utf-8"))
+        except OSError:
+            return plain
+        if str(meta.get("extends", "")).strip().lower() != "kit":
+            return plain
+        try:
+            effective, _body, _ = resolve_extends_kit(self._target, src, meta, kit_path=kit_src)
+        except GrimoireAgentError:
+            return plain
+        description = effective.get("description")
+        return (
+            self._agent_identity(kit_src),
+            " ".join(str(description).split()) if description else "Grimoire agent",
+        )
 
     def _plan_placeholder_rendering(self, p: ScaffoldPlan) -> None:
         """Resolve template placeholders in the agents and workflows being installed.
@@ -1220,6 +1257,15 @@ class ProjectScaffolder:
             text = src.read_text(encoding="utf-8")
         except OSError:
             return "Grimoire agent"
+        # The frontmatter is YAML: a long description may be folded over several
+        # lines (``convert_override`` writes it that way), which a one-line regex
+        # truncates (issue #679). Parse first; the regex only serves files whose
+        # frontmatter is not valid YAML (unrendered ``{{…}}`` templates).
+        from grimoire.hosts.collect import parse_frontmatter
+
+        description = parse_frontmatter(text)[0].get("description")
+        if isinstance(description, str) and description.strip():
+            return " ".join(description.split())
         m = re.search(r'^description:\s*["\']?(.+?)["\']?\s*$', text, re.MULTILINE)
         if m:
             return m.group(1)
