@@ -114,7 +114,7 @@ agents:
     description: "Forge — généraliste infra : Terraform, Ansible, Docker Compose, LXC, plus les skills attachés infra-pipeline-cicd, infra-security-hardening, infra-backup-dr, infra-k8s-gitops"
   - path: "../../archetypes/infra-ops/agents/monitoring-specialist.md"
     required: true
-    description: "Hawk — Prometheus, Grafana, Loki, alertes (faisceau outils distinct : read+edit, pas execute)"
+    description: "Hawk — Prometheus, Grafana, Loki, alertes (faisceau outils distinct : skills propres, interroge le système en lecture ; execute pour kubectl, PromQL, amtool)"
   - path: "../../archetypes/infra-ops/agents/systems-debugger.md"
     required: true
     description: "Debugger systèmes — logs, profiling, incidents (faisceau outils distinct : read+execute, pas edit)"

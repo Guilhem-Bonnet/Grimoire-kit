@@ -233,6 +233,73 @@ class TestAgentRoutingMapOverrides:
         assert 'tag="site-agent"' not in _concierge(tmp_path).read_text(encoding="utf-8")
 
 
+def _map_row(root: Path, tag: str) -> str:
+    """The concierge's ``<agent tag="…"/>`` row for *tag*, whole."""
+    text = _concierge(root).read_text(encoding="utf-8")
+    start = text.index(f'<agent tag="{tag}"')
+    return text[start : text.index("/>", start) + 2]
+
+
+class TestAgentRoutingMapPartialOverrides:
+    """A partial override (``extends: kit``) is routed as its *effective* agent — issue #679."""
+
+    TAG = "ops-engineer"
+
+    def _partial(self, root: Path, meta: str) -> None:
+        path = root / "_grimoire" / "overrides" / "agents" / f"{self.TAG}.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"---\nextends: kit\n{meta}---\n", encoding="utf-8")
+
+    def test_partial_without_name_or_description_keeps_the_kit_identity_and_role(self, tmp_path: Path) -> None:
+        _install(tmp_path)
+        kit_row = _map_row(tmp_path, self.TAG)
+        assert 'role="Grimoire agent"' not in kit_row
+        assert f'name="{self.TAG}"' not in kit_row  # le kit a un vrai nom de persona
+
+        self._partial(tmp_path, "model_affinity:\n  reasoning: medium\n")
+        _install(tmp_path)
+
+        assert _map_row(tmp_path, self.TAG) == kit_row
+
+    def test_partial_description_wins_over_the_kit_one(self, tmp_path: Path) -> None:
+        _install(tmp_path)
+        kit_row = _map_row(tmp_path, self.TAG)
+
+        self._partial(tmp_path, 'description: "Rôle propre au homelab"\n')
+        _install(tmp_path)
+
+        row = _map_row(tmp_path, self.TAG)
+        assert 'role="Rôle propre au homelab"' in row
+        # La persona, elle, vient toujours du kit.
+        assert row.split('role="')[0] == kit_row.split('role="')[0]
+
+    def test_a_fresh_partial_is_not_reported_stale_after_the_map_is_regenerated(self, tmp_path: Path) -> None:
+        from grimoire.core.override_drift import compute_kit_source_hash, project_override_drift
+
+        _install(tmp_path)
+        kit_file = _concierge(tmp_path)
+        self._partial_for(tmp_path, "concierge", f"kit_source_hash: {compute_kit_source_hash(kit_file)}\n")
+        _install(tmp_path)  # `up` régénère la carte du concierge
+
+        drift = next(d for d in project_override_drift(tmp_path) if d.name == "concierge")
+        assert drift.status == "fresh"
+
+    def _partial_for(self, root: Path, name: str, meta: str) -> None:
+        path = root / "_grimoire" / "overrides" / "agents" / f"{name}.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"---\nextends: kit\n{meta}---\n", encoding="utf-8")
+
+    def test_folded_long_description_of_a_partial_is_whole_in_the_map(self, tmp_path: Path) -> None:
+        _install(tmp_path)
+        long_desc = "Architecte de la mémoire vectorielle (Qdrant, embeddings, RAG, hybrid search, quantization, sharding)"
+        assert len(long_desc) > 80
+        # Écriture repliée, telle que la produit `convert_override` (YAML width=80).
+        self._partial(tmp_path, f"description: {long_desc[:70]}\n  {long_desc[70:]}\n")
+        _install(tmp_path)
+
+        assert f'role="{long_desc}"' in _map_row(tmp_path, self.TAG)
+
+
 class TestDoctorReportsThem:
     def test_doctor_passes_on_a_sound_install(self, tmp_path: Path) -> None:
         _install(tmp_path)

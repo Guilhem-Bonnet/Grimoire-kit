@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Any
 
 from grimoire.core.exceptions import GrimoireError, GrimoireMissionError
 from grimoire.core.standard_generation import STANDARD_DIR
-from grimoire.core.standard_state import invalidate_cache
+from grimoire.core.standard_state import current_session, invalidate_cache
 from grimoire.missions.board import PRIORITIES, board_status_of, build_board, priority_of, write_board
 from grimoire.missions.gates import GateRefusal, GateVerdict, check_transition
 from grimoire.missions.ledger import MissionLedger
@@ -33,6 +33,8 @@ from grimoire.missions.recall import DEFAULT_TOKEN_BUDGET, TaskRecall, build_tas
 from grimoire.missions.schemas import DIRECTIVE_KINDS, MissionTask, TaskClaim, TaskDirective, TaskState
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from grimoire.core.agentic_standard import StandardRuntimeArtifact
     from grimoire.memory.manager import MemoryManager
 
@@ -301,6 +303,24 @@ class TaskService:
         task = self.ledger.attach_session(task_id, session_id, session_host=session_host, actor_id=actor)
         self.project_board()
         return task
+
+    def attach_current_session(self, task_id: str, *, actor: str, env: Mapping[str, str] | None = None) -> str:
+        """Rattache la session que l'environnement désigne au claim de *task_id* (issue #680).
+
+        Pour un claim lancé depuis la session (CLI dans Bash, outil MCP) : le
+        hook ne le verra qu'au tour suivant, et pas du tout s'il y a plusieurs
+        claims. Rend le ``session_id`` rattaché, ``""`` quand l'environnement
+        n'en désigne pas ou que le claim appartient déjà à une autre session —
+        jamais une erreur : le claim, lui, a réussi.
+        """
+        session_id, session_host = current_session(env)
+        if not session_id:
+            return ""
+        try:
+            self.attach_session(task_id, session_id, session_host=session_host, actor=actor)
+        except GrimoireMissionError:
+            return ""
+        return session_id
 
     def claim(
         self, task_id: str, actor: str, host: str = "local", files: tuple[str, ...] = ()

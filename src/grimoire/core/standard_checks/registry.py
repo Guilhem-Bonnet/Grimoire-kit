@@ -148,6 +148,7 @@ CHECK_DIMENSIONS: dict[str, str] = {
     "toolreg.error_capture_policy_unknown": "hook_registry",
     "toolreg.mcp_logging_missing": "hook_registry",
     "toolreg.mcp_owner_missing": "hook_registry",
+    "toolreg.mcp_out_of_scope_reason_missing": "hook_registry",
     "toolreg.mcp_scopes_missing": "hook_registry",
     "toolreg.mcp_timeout_s_missing": "hook_registry",
     "toolreg.no_tool": "hook_registry",

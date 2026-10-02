@@ -293,6 +293,26 @@ def test_an_mcp_server_without_scopes_or_timeout_is_an_error_when_governed(tmp_p
     assert "toolreg.mcp_owner_missing" not in errors
 
 
+def _mcp_registry(root: Path, body: str) -> None:
+    _replace(root / "_grimoire/standard/tool-registry.yaml", "mcp_servers: []", "mcp_servers:\n" + body)
+
+
+def test_an_out_of_scope_mcp_server_requires_no_scopes_nor_timeout(tmp_path: Path) -> None:
+    """#682 : « se déclare, ne s'omet pas » — un serveur hors périmètre n'exige rien d'autre que son motif."""
+    setup_standard_profile(tmp_path, profile_id="governed", project_name="Demo")
+    _mcp_registry(tmp_path, '  - id: MCP-001\n    server: github\n    out_of_scope: true\n'
+                  '    out_of_scope_reason: "non utilisé par ce projet"\n')
+    assert _ids(verify_standard_profile(tmp_path), "toolreg.mcp_") == set()
+
+
+def test_an_out_of_scope_mcp_server_without_reason_is_an_explicit_error(tmp_path: Path) -> None:
+    setup_standard_profile(tmp_path, profile_id="governed", project_name="Demo")
+    _mcp_registry(tmp_path, '  - id: MCP-001\n    server: github\n    out_of_scope: true\n    out_of_scope_reason: ""\n')
+    result = verify_standard_profile(tmp_path)
+    assert "toolreg.mcp_out_of_scope_reason_missing" in _ids(result, "toolreg.", "error")
+    assert "toolreg.mcp_scopes_missing" not in _ids(result, "toolreg.")
+
+
 def test_tool_errors_must_have_a_capture_policy(tmp_path: Path) -> None:
     setup_standard_profile(tmp_path, profile_id="controlled", project_name="Demo")
     _replace(tmp_path / "_grimoire/standard/tool-registry.yaml", "  policy: evidence", "  policy: ignore")
@@ -369,3 +389,31 @@ def test_cli_joins_the_verdicts_when_given_a_project(tmp_path: Path) -> None:
     assert payload["profile"] == "controlled"
     assert payload["verdicts"]["tool_registry"] == "ok"
     assert "AG-TOL-001" in payload["verified_requirements"]
+
+
+def _pack_ids(root: Path, text: str) -> set[str]:
+    from grimoire.core.standard_checks.base import StandardVerificationResult
+    from grimoire.core.standard_checks.verifiers import _verify_evidence_pack
+
+    pack = root / "_grimoire-output/evidence/T-1/evidence-pack.md"
+    pack.parent.mkdir(parents=True, exist_ok=True)
+    pack.write_text(text, encoding="utf-8")
+    result = StandardVerificationResult(profile="governed", project_root=root)
+    _verify_evidence_pack(root, "T-1", result)
+    return {c.id for c in result.checks}
+
+
+_GATES_HEAD = "## Evidence gates\n\n| Gate | Status |\n|---|---|\n"
+
+
+def test_the_word_pending_in_free_text_is_not_a_pending_gate(tmp_path: Path) -> None:
+    """#682 : « 0 pending » dans une ligne d'inventaire n'est pas une gate en attente."""
+    text = ("# Pack\n\n## Evidence inventory\n\n| Evidence | Location | Produced by | Result |\n|---|---|---|---|\n"
+            "| inventaire | docs | agent | 12 gates, 0 pending |\n\nRien n'est pending ici.\n\n"
+            + _GATES_HEAD + "| run-tests | passed |\n")
+    assert "evidence.pending_gate" not in _pack_ids(tmp_path, text)
+
+
+def test_a_gate_row_left_pending_is_reported(tmp_path: Path) -> None:
+    text = "# Pack\n\n" + _GATES_HEAD + "| run-tests | passed |\n| review | Pending |\n"
+    assert "evidence.pending_gate" in _pack_ids(tmp_path, text)

@@ -32,7 +32,7 @@ def decide_task_context(hook: HookInput) -> Decision:
     record_user_message(hook)
     if not is_standard_enrolled(hook.project_root):
         return Decision()
-    active = resolve_active_task(hook.project_root)
+    active = resolve_active_task(hook.project_root, session_id=hook.session_id)
     profile = active_profile_id(hook.project_root)
     detail = {"task_id": active.task_id, "profile": profile, "task_source": active.source}
     # Issue #638 lot B : ce que l'orchestrateur humain a dit depuis le cockpit
@@ -46,8 +46,8 @@ def decide_task_context(hook: HookInput) -> Decision:
     from grimoire.hosts.decisions.steering import steering_context
 
     steering, steering_detail = steering_context(hook.project_root, active.task_id, hook.session_id)
-    if active.source == "bootstrap":
-        context = no_task_context(profile)
+    if active.is_fallback:
+        context = no_task_context(profile, active.candidates)
         if steering:
             context = f"{context}\n{steering}"
         return Decision(outcome=Outcome.ALLOW, context=context, detail={**detail, **steering_detail})

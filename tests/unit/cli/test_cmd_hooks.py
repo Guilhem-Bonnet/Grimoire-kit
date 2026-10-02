@@ -157,3 +157,76 @@ class TestHooksStaleness:
         result = runner.invoke(app, ["-o", "json", "hooks", "list", str(kit_repo)])
         states = {h["name"]: h["state"] for h in json.loads(result.stdout)["hooks"]}
         assert states["pre-commit"] == "installed"
+
+
+class TestHooksCalibrate:
+    """``grimoire hooks calibrate`` (Refs #644, party-mode idée B)."""
+
+    def test_no_journal_reports_an_empty_calibration(self, tmp_path: Path) -> None:
+        result = runner.invoke(app, ["-o", "json", "hooks", "calibrate", "--project-root", str(tmp_path)])
+        assert result.exit_code == 0
+        assert json.loads(result.stdout) == {"groups": []}
+
+    def test_calibrate_reports_holds_by_hook_and_reason(self, tmp_path: Path) -> None:
+        from grimoire.hosts.decisions.calibration import record_hold_followup, record_policy_hold
+
+        record_policy_hold(
+            tmp_path, session_id="s-1", task_id="t1", hook_id="grimoire.tool-policy",
+            reason="tool_policy:deny", fingerprint="fp1", target="bash:rm",
+        )
+        record_hold_followup(tmp_path, session_id="s-1", fingerprint="fp1", target="bash:rm")
+
+        result = runner.invoke(app, ["-o", "json", "hooks", "calibrate", "--project-root", str(tmp_path)])
+        assert result.exit_code == 0
+        payload = json.loads(result.stdout)
+        assert payload == {
+            "groups": [
+                {
+                    "hook": "grimoire.tool-policy",
+                    "reason": "tool_policy:deny",
+                    "total": 1,
+                    "labels": {"respected": 0, "retried_same": 1, "retried_variant": 0, "abandoned": 0},
+                }
+            ]
+        }
+
+    def test_calibrate_renders_a_table_in_text_mode(self, tmp_path: Path) -> None:
+        from grimoire.hosts.decisions.calibration import record_policy_hold
+
+        record_policy_hold(
+            tmp_path, session_id="s-1", task_id="t1", hook_id="grimoire.evidence-gate",
+            reason="done_gate:stale", fingerprint="fp1", target="done_gate:t1",
+        )
+        result = runner.invoke(app, ["hooks", "calibrate", "--project-root", str(tmp_path)])
+        assert result.exit_code == 0
+        # ``console = Console(stderr=True)`` (comme ``cmd_dispatch``) : la table
+        # texte va sur stderr, jamais sur le stdout que le mode ``--json`` réserve.
+        assert "grimoire.evidence-gate" in result.stderr
+        assert "done_gate:stale" in result.stderr
+
+    def test_calibrate_since_rejects_a_malformed_value(self, tmp_path: Path) -> None:
+        result = runner.invoke(app, ["hooks", "calibrate", "--project-root", str(tmp_path), "--since", "3weeks"])
+        assert result.exit_code == 2
+
+    def test_calibrate_since_excludes_an_older_hold(self, tmp_path: Path) -> None:
+        from grimoire.core.standard_generation import TRACES_DIR
+        from grimoire.hosts.decisions.calibration import record_policy_hold
+
+        record_policy_hold(
+            tmp_path, session_id="s-1", task_id="t1", hook_id="grimoire.tool-policy",
+            reason="tool_policy:ask", fingerprint="fp1", target="bash:rm",
+        )
+        # Backdate the just-written hold well outside any `--since` window.
+        traces_file = tmp_path / TRACES_DIR / "traces.jsonl"
+        import json as _json
+
+        lines = traces_file.read_text(encoding="utf-8").splitlines()
+        record = _json.loads(lines[0])
+        record["started_at"] = "2020-01-01T00:00:00+00:00"
+        traces_file.write_text(_json.dumps(record) + "\n", encoding="utf-8")
+
+        result = runner.invoke(
+            app, ["-o", "json", "hooks", "calibrate", "--project-root", str(tmp_path), "--since", "7d"]
+        )
+        assert result.exit_code == 0
+        assert json.loads(result.stdout) == {"groups": []}

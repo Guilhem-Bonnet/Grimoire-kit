@@ -301,6 +301,35 @@ def _record_untrusted_content(hook: HookInput, facts: ToolFacts) -> None:
         return
 
 
+def _record_hold_followup(hook: HookInput, facts: ToolFacts) -> None:
+    """Calibration (Refs #644): label the hold this call may be answering.
+
+    Best-effort, same contract as :func:`_record_temporal_approval` above.
+    Runs before the enrolment check, same reason as
+    :func:`_record_untrusted_content`: a hold can be written by
+    :mod:`.tool_policy` even on an unenrolled project (its own verdict never
+    conditions on enrolment — see that module's docstring), so its followup
+    must be reachable the same way, on the very next ``PostToolUse`` of the
+    session regardless of what wrote the hold (:mod:`.tool_policy` or the
+    ``Stop`` gate's ``done_gate``, :mod:`.evidence_gate`).
+    """
+    if not hook.session_id:
+        return
+    try:
+        from grimoire.hosts.decisions.calibration import action_fingerprint, record_hold_followup, target_key
+
+        detail = policy_tool_detail(facts)
+        tool_name = hook.tool_name or ""
+        record_hold_followup(
+            hook.project_root,
+            session_id=hook.session_id,
+            fingerprint=action_fingerprint(tool_name, detail),
+            target=target_key(tool_name, detail),
+        )
+    except Exception:  # noqa: S110 — observabilité : jamais au prix du hook lui-même
+        pass
+
+
 def _record_repetition(hook: HookInput, facts: ToolFacts) -> RepetitionVerdict | None:
     """Issue #668 : même appel, même échec, trois fois — un signal, jamais un blocage.
 
@@ -319,9 +348,38 @@ def _record_repetition(hook: HookInput, facts: ToolFacts) -> RepetitionVerdict |
     try:
         from grimoire.hosts.decisions.repetition_guard import evaluate_and_record
 
-        return evaluate_and_record(hook, facts)
+        verdict = evaluate_and_record(hook, facts)
     except Exception:
         return None
+    if verdict is not None and verdict.nudge:
+        _record_repetition_hold(hook, facts)
+    return verdict
+
+
+def _record_repetition_hold(hook: HookInput, facts: ToolFacts) -> None:
+    """Calibration (Refs #644) : le rappel « tourne en rond » est un hold comme un autre.
+
+    Écrit une seule fois par série (``verdict.nudge`` n'est non vide qu'à la
+    première atteinte du seuil). Le suivi (``hold_followup``) l'étiquette au
+    ``PostToolUse`` suivant : « le rappel a-t-il été respecté ou la même
+    action rejouée ». Best-effort, jamais de relecture du journal.
+    """
+    try:
+        from grimoire.hosts.decisions.calibration import action_fingerprint, record_policy_hold, target_key
+
+        detail = policy_tool_detail(facts)
+        tool_name = hook.tool_name or ""
+        record_policy_hold(
+            hook.project_root,
+            session_id=hook.session_id,
+            task_id=active_task_id(hook.project_root),
+            hook_id="grimoire.evidence-trace",
+            reason="repetition:nudge",
+            fingerprint=action_fingerprint(tool_name, detail),
+            target=target_key(tool_name, detail),
+        )
+    except Exception:  # noqa: S110
+        pass
 
 
 def _with_repetition(decision: Decision, verdict: RepetitionVerdict | None) -> Decision:
@@ -344,10 +402,11 @@ def decide_evidence_trace(hook: HookInput) -> Decision:
     facts = classify_tool(hook.tool_name, hook.tool_input)
     _record_temporal_approval(hook, facts)
     _record_untrusted_content(hook, facts)
+    _record_hold_followup(hook, facts)
     repetition = _record_repetition(hook, facts)
     if not is_standard_enrolled(hook.project_root):
         return _with_repetition(Decision(), repetition)
-    task_id = active_task_id(hook.project_root)
+    task_id = active_task_id(hook.project_root, session_id=hook.session_id)
     _record_observed_actions(hook, facts, task_id)
     _record_session_mutation(hook, facts, task_id)
     if _is_delegation_tool(hook.tool_name):
