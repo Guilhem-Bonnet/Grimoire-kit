@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.62.0] - 2026-10-02
+
 - docs(bench): rejeu du bras `kit-gov` après le correctif du lot K (#651, issue #642) — `docs/bench/rejeu-lot-k-2026-09-29.md`. Aucun des quatre critères chiffrés de l'issue n'est atteint : part des runs « avec excursion » 26,7 % (16/60, contre 30,0 % au lot J, cible < 10 %), coût médian/tâche résolue ≈122 % du nu (contre ≈112 %, cible ≤ 105 %), succès 90,0 % (contre 96,7 %, cible ≥ 96,7 %) ; `gate check` vert au dernier appel 60/60 (seul critère atteint, inchangé depuis le lot J). Régression notable non tranchée par ce lot : `rust/scale-generator` passe de 3/3 à 0/3 (gate agent vert, verdict caché du harnais négatif — même signature qu'avant le lot I). Campagne propre (60/60 `completed`, aucun incident d'authentification, contre 30 runs perdus au lot J).
   - Classifieur d'excursions versionné : `scripts/bench/excursions.py` (`--workspace`, `--arm`, `--reference-arm`, `--json`), qui retrouve 18/60 (lot J) et 16/60 (lot K) ; test `tests/unit/test_bench_excursions.py`.
 - fix(missions): plusieurs sessions sur un projet — la tâche active suit le `session_id`, et un claim lancé depuis une session la rattache (issue #680). Constat du 2026-10-02 (homelab, kit 3.61.1) : cinq sessions Claude Code, deux claims, et toutes retombaient sur `bootstrap` (« Clôture hors tâche » au Stop), parce que `resolve_active_task` sautait le niveau « claim unique » dès que deux claims coexistaient sans jamais lire le rattachement `task.session_attached` du lot A (#638), et qu'un `grimoire task claim` lancé depuis la session ne produisait pas cet événement.
