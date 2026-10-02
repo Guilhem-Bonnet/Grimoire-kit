@@ -13,6 +13,7 @@ import uuid
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +47,7 @@ from grimoire.traces.schemas import (
 __all__ = [
     "AGENT_DISPATCH_TAG",
     "AGENT_MISS_TAG",
+    "DELEGATION_BURST_WINDOW_S",
     "DELEGATION_TAG",
     "DISPATCH_OUTCOME_TAG",
     "HOLD_FOLLOWUP_TAG",
@@ -135,6 +137,17 @@ _UNNAMED_SPECIALTY = UNNAMED_SPECIALTY
 #: seul point d'écriture (#657) et
 #: :meth:`TraceLedger.delegation_counts` pour la lecture agrégée.
 DELEGATION_TAG = "agent.delegation"
+
+#: Fenêtre (secondes) qui sépare deux délégations d'une même session : un
+#: écart consécutif <= cette valeur les range dans la même rafale (#687).
+#: Plusieurs appels ``Task``/``Agent`` émis dans UN SEUL message de
+#: l'assistant sont journalisés à ``PostToolUse`` à quelques centaines de
+#: millisecondes d'écart (ils s'exécutent en parallèle) ; deux messages
+#: successifs, eux, sont séparés par au moins le temps d'un tour de modèle
+#: avec le résultat du premier sous-agent. 10 s absorbe le jitter des hooks
+#: sans fusionner deux tours distincts. Valeur de départ à réviser sur les
+#: écarts réellement observés, pas une mesure.
+DELEGATION_BURST_WINDOW_S = 10.0
 
 #: Tag qui marque un enregistrement comme le résumé d'une cascade de dispatch
 #: entière — une entrée par tâche/node réellement dispatché, écrite une fois
@@ -888,6 +901,77 @@ class TraceLedger:
                 entry["last_seen"] = trace.started_at
                 entry["last_model"] = trace.model
         return counts
+
+    def delegation_bursts(self, window_seconds: float = DELEGATION_BURST_WINDOW_S) -> dict[str, Any]:
+        """Mesurer les rafales de délégation : plusieurs sous-agents lancés d'un coup (#687).
+
+        Lit les mêmes enregistrements que :meth:`delegation_counts`, regroupés
+        par ``run_id`` (= ``session_id`` de l'hôte, voir
+        ``evidence_trace._record_delegation``). Dans une session, les
+        délégations triées par ``started_at`` sont chaînées : un écart
+        consécutif <= ``window_seconds`` prolonge la rafale en cours. Une
+        rafale compte au moins 2 délégations.
+
+        Biais de datation : ``started_at`` est la date du lancement quand
+        l'hôte a fourni la durée du sous-agent (``now - durée``) ou quand le
+        lancement est en arrière-plan (tag ``background``). Sans durée, un
+        sous-agent au premier plan est daté à sa FIN (tag
+        ``timing:completion``) : trois sous-agents lancés ensemble mais
+        finis à des minutes d'écart ne forment alors pas de rafale. Ces
+        délégations restent dans le calcul, mais leurs sessions sont comptées
+        à part (``sessions_timing_approx``) pour que le biais ne soit pas tu.
+
+        Ignorés sans erreur : les enregistrements sans ``started_at``
+        exploitable, et ceux dont le ``run_id`` est le repli
+        ``delegation-<uuid>`` (l'hôte n'a pas fourni de session — chacun
+        serait une « session » artificielle d'une seule délégation).
+
+        Retourne ``window_seconds``, ``sessions_with_delegation``,
+        ``sessions_with_burst``, ``burst_count`` et ``mean_burst_size``
+        (0.0 sans rafale).
+        """
+        by_session: dict[str, list[datetime]] = {}
+        approx_sessions: set[str] = set()
+        for trace in self._load_all():
+            if DELEGATION_TAG not in trace.tags or not trace.run_id or trace.run_id.startswith("delegation-"):
+                continue
+            try:
+                moment = datetime.fromisoformat(trace.started_at)
+            except (TypeError, ValueError):
+                continue
+            if moment.tzinfo is None:
+                moment = moment.replace(tzinfo=UTC)
+            by_session.setdefault(trace.run_id, []).append(moment)
+            if "timing:completion" in trace.tags and "background" not in trace.tags:
+                approx_sessions.add(trace.run_id)
+
+        burst_sizes: list[int] = []
+        sessions_with_burst = 0
+        for moments in by_session.values():
+            moments.sort()
+            sizes: list[int] = []
+            current = 1
+            for previous, moment in pairwise(moments):
+                if (moment - previous).total_seconds() <= window_seconds:
+                    current += 1
+                else:
+                    if current >= 2:
+                        sizes.append(current)
+                    current = 1
+            if current >= 2:
+                sizes.append(current)
+            if sizes:
+                sessions_with_burst += 1
+                burst_sizes.extend(sizes)
+
+        return {
+            "window_seconds": window_seconds,
+            "sessions_with_delegation": len(by_session),
+            "sessions_with_burst": sessions_with_burst,
+            "sessions_timing_approx": len(approx_sessions),
+            "burst_count": len(burst_sizes),
+            "mean_burst_size": round(sum(burst_sizes) / len(burst_sizes), 2) if burst_sizes else 0.0,
+        }
 
     def oldest_started_at(self) -> str | None:
         """Horodatage du plus ancien enregistrement du journal, tous tags confondus.

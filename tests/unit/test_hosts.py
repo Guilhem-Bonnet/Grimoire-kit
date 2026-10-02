@@ -1250,6 +1250,50 @@ def test_post_tool_use_logs_a_delegation_call_silently(governed: Path) -> None:
     assert all(t.host_id == "claude" for t in delegations)
 
 
+def _logged_delegation(governed: Path, tool_input: dict[str, object], tool_response: dict[str, object]):
+    from grimoire.core.standard_generation import TRACES_DIR
+    from grimoire.traces.ledger import DELEGATION_TAG, TraceLedger
+
+    decide_evidence_trace(
+        HookInput(
+            event=HookEvent.POST_TOOL_USE,
+            project_root=governed,
+            tool_name="Agent",
+            tool_input=tool_input,
+            tool_response=tool_response,
+            session_id="sess-t",
+        )
+    )
+    return [t for t in TraceLedger(governed / TRACES_DIR).list_traces() if DELEGATION_TAG in t.tags][-1]
+
+
+def test_delegation_with_duration_is_dated_at_launch(governed: Path) -> None:
+    """#687 : premier plan avec durée -> started_at = maintenant - durée (lancement), pas la fin."""
+    from datetime import UTC, datetime, timedelta
+
+    before = datetime.now(UTC)
+    trace = _logged_delegation(governed, {"subagent_type": "Explore"}, {"totalDurationMs": 180_000})
+    after = datetime.now(UTC)
+    started = datetime.fromisoformat(trace.started_at)
+    assert before - timedelta(seconds=180) <= started <= after - timedelta(seconds=180)
+    assert "timing:completion" not in trace.tags
+    assert "background" not in trace.tags
+
+
+def test_delegation_without_duration_is_tagged_completion_timing(governed: Path) -> None:
+    trace = _logged_delegation(governed, {"subagent_type": "Explore"}, {})
+    assert "timing:completion" in trace.tags
+
+
+def test_delegation_in_background_is_tagged_and_dated_now(governed: Path) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    trace = _logged_delegation(governed, {"subagent_type": "Explore", "run_in_background": True}, {})
+    assert "background" in trace.tags
+    assert "timing:completion" not in trace.tags
+    assert abs(datetime.now(UTC) - datetime.fromisoformat(trace.started_at)) < timedelta(seconds=30)
+
+
 def test_post_tool_use_logs_a_delegation_call_without_a_model(governed: Path) -> None:
     """Un appel de délégation sans modèle explicite reste journalisé — pas d'erreur, modèle vide."""
     from grimoire.core.standard_generation import TRACES_DIR

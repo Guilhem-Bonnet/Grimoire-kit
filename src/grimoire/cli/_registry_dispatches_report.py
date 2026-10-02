@@ -28,6 +28,7 @@ def render(
     counts: dict[str, dict[str, Any]],
     misses: dict[str, dict[str, Any]],
     delegations: dict[str, dict[str, Any]],
+    bursts: dict[str, Any],
     freshness: FreshnessReport | None,
     freshness_payload: dict[str, Any] | None,
 ) -> None:
@@ -39,6 +40,7 @@ def render(
                     "dispatches": counts,
                     "misses": misses,
                     "delegations": delegations,
+                    "bursts": bursts,
                     "freshness": freshness_payload,
                 },
                 indent=2,
@@ -94,6 +96,21 @@ def render(
             )
 
         console.print(deleg_tbl)
+
+    if bursts["sessions_with_delegation"]:
+        # #687 : mesure de la règle « plusieurs sous-agents dans un seul message ».
+        console.print(
+            f"Rafales de délégation (>= 2 en {bursts['window_seconds']:g} s, par session) : "
+            f"{bursts['sessions_with_burst']}/{bursts['sessions_with_delegation']} sessions avec délégation, "
+            f"{bursts['burst_count']} rafale(s), taille moyenne {bursts['mean_burst_size']:g}."
+        )
+        if bursts["sessions_timing_approx"]:
+            console.print(
+                f"[yellow]{bursts['sessions_timing_approx']} session(s) avec délégation datée à sa fin "
+                "(durée absente) : rafales possiblement sous-estimées.[/yellow]"
+            )
+    else:
+        console.print("[dim]Rafales de délégation : aucune session avec délégation datée.[/dim]")
 
     console.print()
     if freshness is None:

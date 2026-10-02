@@ -140,6 +140,32 @@ _DELEGATION_DESCRIPTION_KEYS = ("description", "task")
 _DELEGATION_DESCRIPTION_MAX_LEN = 160
 
 
+#: Clés où l'hôte donne la durée d'un sous-agent terminé, dans ``tool_response``.
+#: Claude Code : ``totalDurationMs`` (observé dans les transcripts locaux, champ
+#: ``toolUseResult`` d'un appel ``Agent`` au premier plan terminé) ; les autres
+#: orthographes sont des replis défensifs, non observés.
+_DELEGATION_DURATION_KEYS = ("totalDurationMs", "total_duration_ms", "durationMs", "duration_ms")
+
+#: Tags de datation d'une délégation (#687). ``PostToolUse`` d'un sous-agent au
+#: premier plan part à sa FIN : sans durée, ``started_at`` est une date de fin.
+DELEGATION_BACKGROUND_TAG = "background"
+DELEGATION_TIMING_COMPLETION_TAG = "timing:completion"
+
+
+def _delegation_duration_ms(tool_response: dict[str, object]) -> float | None:
+    """Durée (ms) du sous-agent lue dans *tool_response*, ``None`` si absente ou invalide."""
+    for key in _DELEGATION_DURATION_KEYS:
+        value = tool_response.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0:
+            return float(value)
+    return None
+
+
+def _is_background_delegation(tool_input: dict[str, object], tool_response: dict[str, object]) -> bool:
+    """Lancement en arrière-plan : l'outil rend aussitôt, ``PostToolUse`` date donc le lancement."""
+    return bool(tool_input.get("run_in_background")) or bool(tool_response.get("isAsync"))
+
+
 def _is_delegation_tool(tool_name: str) -> bool:
     """Whether *tool_name* is a sub-agent delegation call, host-independently."""
     return tool_name.strip().lower() in _DELEGATION_TOOL_NAMES
@@ -182,7 +208,7 @@ def _record_delegation(hook: HookInput, task_id: str) -> None:
     """
     try:
         import uuid
-        from datetime import UTC, datetime
+        from datetime import UTC, datetime, timedelta
 
         from grimoire.core.standard_generation import TRACES_DIR
         from grimoire.traces.ledger import DELEGATION_TAG, TraceLedger
@@ -194,6 +220,20 @@ def _record_delegation(hook: HookInput, task_id: str) -> None:
         description = _first_str(fields, _DELEGATION_DESCRIPTION_KEYS)[:_DELEGATION_DESCRIPTION_MAX_LEN]
 
         tags = [DELEGATION_TAG, f"tool:{hook.tool_name}"]
+        # #687 : dater la délégation à son LANCEMENT. Au premier plan,
+        # PostToolUse part à la fin du sous-agent : maintenant - durée.
+        # En arrière-plan, l'outil rend aussitôt : maintenant est le lancement.
+        # Sans durée (premier plan), la date reste une date de fin, signalée.
+        now = datetime.now(UTC)
+        started_at = now
+        if _is_background_delegation(hook.tool_input, hook.tool_response):
+            tags.append(DELEGATION_BACKGROUND_TAG)
+        else:
+            duration_ms = _delegation_duration_ms(hook.tool_response)
+            if duration_ms is None:
+                tags.append(DELEGATION_TIMING_COMPLETION_TAG)
+            else:
+                started_at = now - timedelta(milliseconds=duration_ms)
         if description:
             tags.append(f"desc:{description}")
 
@@ -204,7 +244,7 @@ def _record_delegation(hook: HookInput, task_id: str) -> None:
             task_id=task_id,
             recipe_id="grimoire.delegation",
             outcome=TraceOutcome.SUCCESS,
-            started_at=datetime.now(UTC).isoformat(),
+            started_at=started_at.isoformat(),
             agent_id=agent_name,
             host_id=hook.host,
             model=model,
