@@ -214,7 +214,18 @@ def test_accepter_une_proposition_override_migration_refusee_journalise_le_motif
     """Sans le préfixe « conversion sûre » dans `carrier_reason`, `_accept_
     override_migration` refuse avant même de toucher un override — motif
     affiché via `ctx.dock.echo` (`#dock-echo`), jamais une exception muette."""
+    from grimoire.core import layout
     from grimoire.proposals import create_manual_proposal, list_proposals
+
+    # Précondition réelle d'une migration en revue : un override COMPLET (non
+    # partiel) existe. Depuis #681 une proposition dont l'override est déjà
+    # `extends: kit` est « résolue » — or `real_project` est partagé et le test
+    # d'attache de skill écrit un override partiel pour TARGET_AGENT. On dédie
+    # donc un agent à ce scénario plutôt que de dépendre de l'ordre des tests.
+    migration_agent = "e2e-migration-review"
+    override = layout.overrides_dir(real_project) / layout.AGENTS_SUBDIR / f"{migration_agent}.md"
+    override.parent.mkdir(parents=True, exist_ok=True)
+    override.write_text(f'---\nname: "{migration_agent}"\n---\n\nCorps complet divergent.\n', encoding="utf-8")
 
     slug = "override-migration-e2e"
     create_manual_proposal(
@@ -222,7 +233,7 @@ def test_accepter_une_proposition_override_migration_refusee_journalise_le_motif
         slug=slug,
         specialty=OVERRIDE_MIGRATION_SPECIALTY,
         artifact_type="override-migration",
-        target_agent=TARGET_AGENT,
+        target_agent=migration_agent,
         carrier_reason="revue nécessaire : divergence non triviale",
     )
 
@@ -242,6 +253,7 @@ def test_accepter_une_proposition_override_migration_refusee_journalise_le_motif
     )
     proposals = {p.slug: p for p in list_proposals(real_project, sync=False)}
     assert proposals[slug].status == "rejected"
+    override.unlink(missing_ok=True)
 
 
 def test_accepter_une_proposition_memory_link_refusee_sans_porteur(
