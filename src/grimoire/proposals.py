@@ -689,7 +689,9 @@ def _resolution_reason(root: Path, proposal: Proposal) -> str:
 
             path = layout.overrides_dir(root) / layout.AGENTS_SUBDIR / f"{proposal.target_agent}.md"
             if not path.is_file():
-                return f"aucun override pour « {proposal.target_agent} » — rien à migrer"
+                # Pas d'override à relire : la condition de la migration n'est
+                # pas démontrée satisfaite (agent kit, revue en attente).
+                return ""
             meta, _ = parse_frontmatter(path.read_text(encoding="utf-8"))
             if str(meta.get("extends", "")).strip().lower() == "kit":
                 return f"override « {proposal.target_agent} » déjà partiel (`extends: kit`)"
@@ -723,8 +725,12 @@ def _declared_hosts(root: Path) -> list[str] | None:
     return [str(h) for h in enabled] if isinstance(enabled, list) else None
 
 
-def _revalidate(root: Path, proposal: Proposal) -> Proposal:
-    """Turn a pending proposal whose condition now holds into ``resolved`` (on disk)."""
+def _revalidate(root: Path, proposal: Proposal, *, persist: bool) -> Proposal:
+    """Turn a pending proposal whose condition now holds into ``resolved``.
+
+    ``persist=False`` (lecture seule : comptage du SessionStart) renvoie la
+    proposition résolue en mémoire sans rien écrire.
+    """
     if proposal.status != "pending":
         return proposal
     reason = _resolution_reason(root, proposal)
@@ -733,7 +739,8 @@ def _revalidate(root: Path, proposal: Proposal) -> Proposal:
     resolved = replace(
         proposal, status="resolved", resolved_at=datetime.now(UTC).isoformat(), resolved_reason=reason
     )
-    _save_proposal(_proposal_path(root, proposal.slug), resolved)
+    if persist:
+        _save_proposal(_proposal_path(root, proposal.slug), resolved)
     return resolved
 
 
@@ -882,7 +889,7 @@ def sync_proposals(project_root: Path, *, threshold: int | None = None) -> list[
                 results.append(existing)
                 seen.add(path.stem)
 
-    return sorted((_revalidate(root, p) for p in results), key=lambda p: p.slug)
+    return sorted((_revalidate(root, p, persist=True) for p in results), key=lambda p: p.slug)
 
 
 def list_proposals(project_root: Path, *, sync: bool = True, threshold: int | None = None) -> list[Proposal]:
@@ -899,7 +906,7 @@ def list_proposals(project_root: Path, *, sync: bool = True, threshold: int | No
         return []
     found = (_load_proposal(path) for path in sorted(proposals_dir.glob("*.yaml")))
     root = project_root.resolve()
-    return sorted((_revalidate(root, p) for p in found if p is not None), key=lambda p: p.slug)
+    return sorted((_revalidate(root, p, persist=False) for p in found if p is not None), key=lambda p: p.slug)
 
 
 def count_pending(project_root: Path) -> int:

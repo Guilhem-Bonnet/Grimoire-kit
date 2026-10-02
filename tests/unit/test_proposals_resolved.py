@@ -179,3 +179,32 @@ def test_aucun_fichier_src_ne_cite_upgrade_flow_status() -> None:
         and "upgrade-flow status" in p.read_text(encoding="utf-8", errors="ignore")
     ]
     assert offenders == []
+
+
+# ── réserves de la revue (E2E #683) ──────────────────────────────────────────
+
+
+def test_override_absent_ne_resout_pas_une_migration_en_revue(project: Path) -> None:
+    create_manual_proposal(
+        project,
+        slug="override-migration-dev",
+        specialty="override dev",
+        artifact_type="override-migration",
+        target_agent="dev",
+        carrier_reason="revue nécessaire : divergence non triviale",
+    )
+    assert _status(project, "override-migration-dev") == "pending"
+
+
+def test_le_comptage_ne_persiste_rien_mais_le_listing_explicite_oui(project: Path) -> None:
+    _declare_hosts(project, ["claude"])
+    _hosts_proposal(project, "claude")
+    path = project / "_grimoire-output" / "proposals" / "hosts-declare-enabled.yaml"
+    before = path.read_text(encoding="utf-8")
+
+    assert count_pending(project) == 0
+    assert list_proposals(project, sync=False)[0].status == "resolved"
+    assert path.read_text(encoding="utf-8") == before  # lecture : rien d'écrit
+
+    assert list_proposals(project)[0].status == "resolved"
+    assert path.read_text(encoding="utf-8") != before  # listing explicite : persisté
