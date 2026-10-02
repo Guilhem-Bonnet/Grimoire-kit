@@ -7,6 +7,7 @@ StandardVerificationResult via _add_check. Les identifiants qu'elles
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -669,6 +670,28 @@ def _verify_task_envelope(
         )
 
 
+_PENDING_LIST_LINE = re.compile(r"^\s*[-*]\s+(?:\[\s\]\s+)?(?:status\s*:\s*)?`?pending`?\s*$", re.IGNORECASE)
+
+
+def _has_pending_gate(text: str) -> bool:
+    """Une gate laissée en attente, lue dans la structure et non dans la prose.
+
+    Issue #682 : le mot « pending » dans une phrase ou une cellule d'inventaire
+    (« 12 gates, 0 pending ») n'est pas une gate. Compte seulement une cellule
+    de tableau dont tout le contenu est ``pending`` (colonne Status), ou une
+    ligne de liste qui se réduit à ``Status: pending``.
+    """
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("|"):
+            cells = [cell.strip().strip("`").strip().lower() for cell in stripped.strip("|").split("|")]
+            if "pending" in cells:
+                return True
+        elif _PENDING_LIST_LINE.match(line):
+            return True
+    return False
+
+
 def _verify_evidence_pack(root: Path, task_id: str, result: StandardVerificationResult) -> None:
     # Issue #582 lot G2 : le journal observé par les hooks compte comme
     # preuve d'inventaire (garde fermée : absent/illisible = rien observé,
@@ -684,7 +707,7 @@ def _verify_evidence_pack(root: Path, task_id: str, result: StandardVerification
     text = _text_file(root, rel_path)
     if not text:
         return
-    if "pending" in text.lower():
+    if _has_pending_gate(text):
         _add_check(
             result, "evidence.pending_gate", "warning", "Evidence pack still contains pending gates.", path=rel_path
         )

@@ -1158,6 +1158,15 @@ def _verify_tool_registry(root: Path, profile: StandardProfile, result: Standard
             _add_check(result, "toolreg.tool_permission_unknown", "warning", f"{tid} uses a permission outside the allowed set.", path=rel_path)
     for server in _entries(data, "mcp_servers"):
         sid = str(server.get("id", "?"))
+        if server.get("out_of_scope") is True:
+            # Issue #682 : un serveur volontairement hors périmètre se déclare
+            # (motif obligatoire) mais n'a ni scopes, ni délai, ni journal à tenir.
+            if not str(server.get("out_of_scope_reason") or "").strip():
+                _add_check(
+                    result, "toolreg.mcp_out_of_scope_reason_missing", "error",
+                    f"MCP server {sid} is out_of_scope without out_of_scope_reason.", path=rel_path,
+                )
+            continue
         for key in ("owner", "scopes", "timeout_s", "logging"):
             if server.get(key) in (None, "", []):
                 _add_check(result, f"toolreg.mcp_{key}_missing", severity, f"MCP server {sid} has no {key}.", path=rel_path)
