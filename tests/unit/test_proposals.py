@@ -287,13 +287,15 @@ def test_accepting_an_agent_proposal_writes_a_real_override_file(project: Path) 
     assert count_pending(project) == 0
 
 
-def test_accepting_twice_is_refused_the_second_time(project: Path) -> None:
+def test_accepting_twice_is_an_explicit_noop_the_second_time(project: Path) -> None:
     _miss(project, specialty="terraform")
     _miss(project, specialty="terraform")
     proposal = list_proposals(project)[0]
     accept_proposal(project, proposal.slug)
     second = accept_proposal(project, proposal.slug)
-    assert second["ok"] is False
+    # Idempotent depuis #681 : un no-op explicite, pas une erreur.
+    assert second["ok"] is True
+    assert second["status"] == "already-resolved"
 
 
 def test_accepting_an_unknown_slug_is_an_honest_refusal(project: Path) -> None:
