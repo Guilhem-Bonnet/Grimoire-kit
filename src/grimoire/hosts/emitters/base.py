@@ -298,3 +298,27 @@ def map_verbs(verbs: tuple[ToolVerb, ...], table: dict[ToolVerb, tuple[str, ...]
             if name not in names:
                 names.append(name)
     return tuple(names)
+
+
+def parallel_brainstorm_section(per_angle_clause: str) -> str:
+    """Sous-section « Quand déléguer en parallèle » (#687), commune aux émetteurs.
+
+    Le texte vit ici, une seule fois : Claude Code l'injecte aussi à chaque
+    ``SessionStart`` (injecté à chaque session, donc court). *per_angle_clause*
+    est la seule partie propre à l'hôte — comment l'angle est calibré —, pour que
+    la variante Copilot ne nomme aucun modèle.
+    """
+    return f"""### Quand déléguer en parallèle (brainstorm)
+
+Sans qu'on te le demande, lance 2 à 4 sous-agents indépendants dans UN SEUL message quand la demande :
+- est ouverte (« qu'est-ce que tu proposes », « comment aborder », « quelles options ») ;
+- porte un arbitrage d'architecture, ou un choix coûteux à défaire ;
+- couvre plusieurs axes indépendants, ou une recherche sur plusieurs sources.
+Ne le fais PAS pour une correction ciblée, une tâche mécanique (V0), une question factuelle,
+ni quand l'utilisateur a déjà désigné le fichier ou l'action.
+Annonce en une ligne « Je brainstorme sur N angles : … » avant de lancer ; 4 angles maximum, un seul tour.
+Un angle = un brief autonome (pas le contexte des autres angles), {per_angle_clause},
+bloc grimoire-uncertainties exigé. Fais toi-même la synthèse : accords, désaccords, coût de chaque
+option ; ne moyenne pas. Relance un second tour uniquement sur les désaccords réels.
+Si tu hésites entre déléguer et agir seul, agis seul.
+"""

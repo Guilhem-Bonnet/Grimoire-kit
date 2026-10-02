@@ -22,6 +22,7 @@ from grimoire.hosts.emitters.base import (
     context_load_instruction,
     managed_header,
     map_verbs,
+    parallel_brainstorm_section,
 )
 from grimoire.hosts.surface import (
     AgentSpec,
@@ -184,7 +185,8 @@ Exige de chaque sous-agent, en fin de réponse, un bloc ```grimoire-uncertaintie
 portant une liste JSON d'objets `{{"where": ..., "what": ..., "why": ...}}` —
 un par point qu'il n'a pas pu vérifier. Un sous-agent qui clôt sans ce bloc
 n'a pas rendu un résultat vérifiable, il a rendu une opinion.
-"""
+
+{parallel_brainstorm_section("modèle selon la classe ci-dessus")}"""
 
 
 def _attached_skill_section(skill: SkillSpec) -> str:
