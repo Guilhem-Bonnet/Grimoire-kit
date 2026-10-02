@@ -15,7 +15,7 @@ def decide_subagent_gate(hook: HookInput) -> Decision:
     """
     if not is_standard_enrolled(hook.project_root):
         return Decision()
-    task_id = active_task_id(hook.project_root)
+    task_id = active_task_id(hook.project_root, session_id=hook.session_id)
     try:
         ok, summary, detail = _gate_summary(hook.project_root, task_id)
     except Exception as exc:

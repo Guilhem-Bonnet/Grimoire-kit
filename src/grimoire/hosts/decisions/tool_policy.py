@@ -246,6 +246,48 @@ def decide_tool_policy(hook: HookInput) -> Decision:
     temporal rule pays one ``Path.is_file()`` check more than before and
     behaves exactly as it did before this change.
     """
+    decision = _evaluate_tool_policy(hook)
+    if decision.outcome is not Outcome.ALLOW:
+        _record_hold(hook, decision)
+    return decision
+
+
+def _record_hold(hook: HookInput, decision: Decision) -> None:
+    """Calibration (Refs #644): journal this non-``allow`` verdict as a ``policy.hold``.
+
+    Best-effort, never allowed to change *decision* — see :mod:`.calibration`
+    for the write itself and why nothing here ever carries the pending
+    command/target, only a hash and a coarse key. Recomputes
+    :func:`classify_tool` rather than threading it out of
+    :func:`_evaluate_tool_policy`: it is pure string parsing, no I/O, and
+    doing it a second time only on the (uncommon) non-``allow`` path keeps
+    the diff to a single wrapper around the existing function instead of a
+    second return value on every one of its five return sites.
+    """
+    try:
+        from grimoire.hosts.decisions.calibration import action_fingerprint, record_policy_hold, target_key
+
+        facts = classify_tool(hook.tool_name, hook.tool_input)
+        detail = policy_tool_detail(facts)
+        tool_name = hook.tool_name or ""
+        record_policy_hold(
+            hook.project_root,
+            session_id=hook.session_id,
+            task_id=active_task_id(hook.project_root),
+            hook_id="grimoire.tool-policy",
+            reason=f"tool_policy:{decision.outcome.value}",
+            fingerprint=action_fingerprint(tool_name, detail),
+            target=target_key(tool_name, detail),
+        )
+    except Exception:  # noqa: S110 — observabilité : jamais au prix de la décision elle-même
+        pass
+
+
+def _evaluate_tool_policy(hook: HookInput) -> Decision:
+    """The original body of :func:`decide_tool_policy`, unchanged — split out
+    so :func:`_record_hold` can wrap it without duplicating its five return
+    sites.
+    """
     facts = classify_tool(hook.tool_name, hook.tool_input)
     custom_rules = load_custom_rules(hook.project_root)
     # A temporal rule (require_approval/per_session/cooldown_after) commonly
@@ -262,7 +304,7 @@ def decide_tool_policy(hook: HookInput) -> Decision:
     if read_only and not has_temporal_rules:
         return _untrusted_escalation(hook, facts) or Decision()
 
-    task_id = active_task_id(hook.project_root)
+    task_id = active_task_id(hook.project_root, session_id=hook.session_id)
     risk = _risk_profile(hook.project_root)
     base_verdict = (
         _engine(base_rules).evaluate(_policy_request(hook, facts, task_id, risk))

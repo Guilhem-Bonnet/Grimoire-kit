@@ -122,5 +122,26 @@ class TestDistinctionGuardNoLongerFlagsInfraOps:
         build_surface(tmp_path)
 
 
+class TestMonitoringSpecialistCanExecute:
+    """#682 : l'observabilité se vérifie en interrogeant le système (kubectl,
+    PromQL, amtool) ; un persona sans execute ne rend que des opinions."""
+
+    def test_the_declared_tools_include_execute(self, tmp_path: Path) -> None:
+        from grimoire.hosts.surface import ToolVerb
+
+        _scaffolder(tmp_path).execute(_scaffolder(tmp_path).plan())
+        agent = next(a for a in build_surface(tmp_path).agents if a.name == "monitoring-specialist")
+        assert ToolVerb.EXECUTE in agent.tools
+
+    def test_claude_code_projects_it_with_bash(self, tmp_path: Path) -> None:
+        from grimoire.hosts.emitters.claude_code import ClaudeCodeEmitter
+
+        _scaffolder(tmp_path).execute(_scaffolder(tmp_path).plan())
+        plan = ClaudeCodeEmitter().plan(build_surface(tmp_path), tmp_path)
+        (emitted,) = [f for f in plan.files if f.relpath.name == "monitoring-specialist.md"]
+        (tools_line,) = [ln for ln in emitted.content.splitlines() if ln.startswith("tools:")]
+        assert "Bash" in tools_line
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))

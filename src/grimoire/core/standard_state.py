@@ -215,6 +215,12 @@ LEDGER_RELPATH = Path("_grimoire-runtime-output/ledger")
 #: Un opérateur ou un agent dit qui il est ; les claims des autres ne comptent plus.
 ACTOR_ENV = "GRIMOIRE_ACTOR"
 TASK_ENV = "GRIMOIRE_TASK_ID"
+#: Identifiant de la session d'hôte, quand l'environnement le porte : posé par
+#: l'opérateur (``GRIMOIRE_SESSION_ID``) ou exporté par Claude Code
+#: (``CLAUDE_CODE_SESSION_ID``) aux commandes que la session lance.
+SESSION_ENV = "GRIMOIRE_SESSION_ID"
+#: variable d'environnement exportée par l'hôte → identifiant d'hôte (``HookInput.host``).
+HOST_SESSION_ENVS = {"CLAUDE_CODE_SESSION_ID": "claude-code-cli"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -225,17 +231,51 @@ class ActiveTask:
     du Mission Ledger), ``board`` (unique carte ``in_progress`` du board) ou
     ``bootstrap`` (rien ne désigne de tâche). Une réponse qui ne dit pas d'où
     elle vient ne se vérifie pas.
+
+    Deux sources s'ajoutent avec plusieurs sessions (issue #680) :
+    ``session_claim`` (le claim rattaché au ``session_id`` demandeur) et
+    ``ambiguous`` (plusieurs claims, aucun rattaché à cette session : la tâche
+    reste ``bootstrap`` mais *candidates* nomme les claims en concurrence, pour
+    que le message dise lesquels au lieu de « aucune tâche »).
     """
 
     task_id: str
     source: str
+    candidates: tuple[str, ...] = ()
+
+    @property
+    def is_fallback(self) -> bool:
+        """``True`` quand aucune tâche n'est désignée (``bootstrap``, ambiguë ou non)."""
+        return self.source in ("bootstrap", "ambiguous")
 
 
-def claimed_task_ids(project_root: Path, *, actor: str = "") -> list[str]:
-    """Tâches ``claimed`` ou ``running`` du ledger — celles de *actor* seulement s'il est nommé.
+def current_session(env: Mapping[str, str] | None = None) -> tuple[str, str]:
+    """``(session_id, host)`` que l'environnement désigne — ``("", "")`` s'il n'en désigne aucun.
 
-    Ne lève jamais : un ledger illisible vaut « aucun claim », et la résolution
-    continue sur le board.
+    ``GRIMOIRE_SESSION_ID`` (explicite, hôte inconnu) prime sur la variable que
+    l'hôte exporte. Jamais de supposition par « journal le plus récent » : avec
+    plusieurs sessions concurrentes, ce serait rattacher au hasard.
+    """
+    environ = os.environ if env is None else env
+    explicit = str(environ.get(SESSION_ENV, "")).strip()
+    if explicit:
+        return explicit, ""
+    for name, host in HOST_SESSION_ENVS.items():
+        value = str(environ.get(name, "")).strip()
+        if value:
+            return value, host
+    return "", ""
+
+
+def current_session_id(env: Mapping[str, str] | None = None) -> str:
+    """Le ``session_id`` d'hôte de :func:`current_session` — ``""`` s'il n'y en a pas."""
+    return current_session(env)[0]
+
+
+def _active_claims(project_root: Path, *, actor: str = "") -> list[tuple[str, str]]:
+    """``(task_id, session_id)`` des claims ``claimed``/``running`` — ``session_id`` vide si non rattaché.
+
+    Ne lève jamais : un ledger illisible vaut « aucun claim ».
     """
     events = project_root.resolve() / LEDGER_RELPATH / "events.jsonl"
     if not events.is_file():
@@ -247,30 +287,50 @@ def claimed_task_ids(project_root: Path, *, actor: str = "") -> list[str]:
         tasks = MissionLedger(events.parent).list_tasks()
     except Exception:  # frontière de hook : ne jamais casser une session
         return []
-    active = [t for t in tasks if t.status in (TaskState.CLAIMED, TaskState.RUNNING)]
+    active = [t for t in tasks if t.status in (TaskState.CLAIMED, TaskState.RUNNING) and t.claim is not None]
     if actor:
         active = [t for t in active if t.claim is not None and t.claim.actor_id == actor]
-    return [t.id for t in active]
+    return [(t.id, t.claim.session_id if t.claim is not None else "") for t in active]
+
+
+def claimed_task_ids(project_root: Path, *, actor: str = "") -> list[str]:
+    """Tâches ``claimed`` ou ``running`` du ledger — celles de *actor* seulement s'il est nommé.
+
+    Ne lève jamais : un ledger illisible vaut « aucun claim », et la résolution
+    continue sur le board.
+    """
+    return [task_id for task_id, _ in _active_claims(project_root, actor=actor)]
 
 
 def resolve_active_task(
-    project_root: Path, *, env: Mapping[str, str] | None = None, write_cache: bool = True
+    project_root: Path,
+    *,
+    env: Mapping[str, str] | None = None,
+    write_cache: bool = True,
+    session_id: str = "",
 ) -> ActiveTask:
     """Task a lifecycle hook should evaluate, with the rule that chose it.
 
     Resolution order:
 
     1. ``GRIMOIRE_TASK_ID`` — an operator saying which task this session is about.
-    2. The Mission Ledger's active claim: the single ``claimed``/``running``
-       task, restricted to ``GRIMOIRE_ACTOR``'s claims when that is set. The
-       ledger is the source (ADR-005); a claim is visible here the moment it is
-       written, whether or not the board has been re-projected since.
-    3. The board's single ``in_progress`` task — a project whose board was
+    2. The claim attached to this session (``task.session_attached``, issue
+       #680): the ``claimed``/``running`` task whose claim carries *session_id*
+       — passed by a hook from its payload, else read from the environment
+       (:func:`current_session_id`). With several sessions on one project this
+       is what tells their tasks apart.
+    3. The Mission Ledger's single ``claimed``/``running`` task, restricted to
+       ``GRIMOIRE_ACTOR``'s claims when that is set. The ledger is the source
+       (ADR-005); a claim is visible here the moment it is written, whether or
+       not the board has been re-projected since.
+    4. The board's single ``in_progress`` task — a project whose board was
        written by hand, or imported, and has no ledger.
-    4. ``bootstrap``.
+    5. ``bootstrap``.
 
-    Two concurrent claims (or two in-progress cards) are ambiguous: that level
-    is skipped rather than guessed at, and ``GRIMOIRE_TASK_ID`` decides.
+    Several claims and none attached to this session are ambiguous: the answer
+    is ``bootstrap`` with source ``ambiguous`` and the competing claims in
+    ``candidates`` — never a silent fallback. Two in-progress cards on the
+    board are skipped as before.
 
     *write_cache* — see :func:`active_profile_id`: ``False`` for a caller that
     must never write anything (a ``readOnlyHint`` MCP tool).
@@ -280,10 +340,20 @@ def resolve_active_task(
     if override:
         return ActiveTask(normalize_task_id(override), "env")
 
-    claimed = claimed_task_ids(project_root, actor=str(environ.get(ACTOR_ENV, "")).strip())
-    if len(claimed) == 1:
+    session = session_id.strip() or current_session_id(environ)
+    actor = str(environ.get(ACTOR_ENV, "")).strip()
+    if session:
+        mine = [tid for tid, sid in _active_claims(project_root) if sid == session]
+        if len(mine) == 1:
+            try:
+                return ActiveTask(normalize_task_id(mine[0]), "session_claim")
+            except ValueError:
+                pass
+
+    claims = _active_claims(project_root, actor=actor)
+    if len(claims) == 1:
         try:
-            return ActiveTask(normalize_task_id(claimed[0]), "ledger_claim")
+            return ActiveTask(normalize_task_id(claims[0][0]), "ledger_claim")
         except ValueError:
             pass
 
@@ -304,9 +374,17 @@ def resolve_active_task(
     )
     if len(in_progress) == 1:
         return ActiveTask(normalize_task_id(in_progress[0]), "board")
+    if len(claims) > 1:
+        return ActiveTask("bootstrap", "ambiguous", tuple(tid for tid, _ in claims))
     return ActiveTask("bootstrap", "bootstrap")
 
 
-def active_task_id(project_root: Path, *, env: Mapping[str, str] | None = None, write_cache: bool = True) -> str:
+def active_task_id(
+    project_root: Path,
+    *,
+    env: Mapping[str, str] | None = None,
+    write_cache: bool = True,
+    session_id: str = "",
+) -> str:
     """Task a lifecycle hook should evaluate — see :func:`resolve_active_task`."""
-    return resolve_active_task(project_root, env=env, write_cache=write_cache).task_id
+    return resolve_active_task(project_root, env=env, write_cache=write_cache, session_id=session_id).task_id

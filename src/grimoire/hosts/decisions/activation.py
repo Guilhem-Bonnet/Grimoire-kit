@@ -352,7 +352,7 @@ def decide_activation(hook: HookInput) -> Decision:
     on its own failed collection.
     """
     _reset_temporal_session(hook)
-    active = resolve_active_task(hook.project_root)
+    active = resolve_active_task(hook.project_root, session_id=hook.session_id)
     task_id = active.task_id
     governed = _is_governed(hook.project_root)
     scaffold_detail = _scaffold_active_task(hook.project_root, task_id) if governed else {}
@@ -362,10 +362,10 @@ def decide_activation(hook: HookInput) -> Decision:
     enrolment = ""
     link: dict[str, Any] = {}
     if governed:
-        if active.source == "bootstrap":
+        if active.is_fallback:
             profile = active_profile_id(hook.project_root)
             if profile in BLOCKING_PROFILES:
-                enrolment = no_task_context(profile)
+                enrolment = no_task_context(profile, active.candidates)
         else:
             link = link_session(hook, active)
     directive = (

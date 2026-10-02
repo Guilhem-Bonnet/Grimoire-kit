@@ -333,7 +333,13 @@ def _is_override_tier_path(project_root: Path, path: Path) -> bool:
     return True
 
 
-def resolve_extends_kit(project_root: Path, override_path: Path, override_meta: dict[str, Any]) -> tuple[dict[str, Any], str, Path]:
+def resolve_extends_kit(
+    project_root: Path,
+    override_path: Path,
+    override_meta: dict[str, Any],
+    *,
+    kit_path: Path | None = None,
+) -> tuple[dict[str, Any], str, Path]:
     """Merge a ``extends: kit`` override onto its kit counterpart.
 
     Returns ``(effective_meta, effective_body, kit_path)`` — *effective_meta*
@@ -345,8 +351,14 @@ def resolve_extends_kit(project_root: Path, override_path: Path, override_meta: 
     agent of the same name exists: ``extends: kit`` promises a base to extend,
     and a promise with nothing behind it is a build error, not a silent
     fallback to an empty persona.
+
+    *kit_path* names the kit file to extend when the caller knows it better
+    than the installed tier does — the scaffolder, which merges at plan time,
+    before the regenerated kit tier is on disk (issue #679). Default: the
+    installed kit counterpart of the same name.
     """
-    kit_path = _kit_counterpart(project_root, override_path)
+    if kit_path is None:
+        kit_path = _kit_counterpart(project_root, override_path)
     if not kit_path.is_file():
         try:
             override_ref = override_path.relative_to(project_root).as_posix()
