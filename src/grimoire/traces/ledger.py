@@ -862,6 +862,15 @@ class TraceLedger:
         consécutif <= ``window_seconds`` prolonge la rafale en cours. Une
         rafale compte au moins 2 délégations.
 
+        Biais de datation : ``started_at`` est la date du lancement quand
+        l'hôte a fourni la durée du sous-agent (``now - durée``) ou quand le
+        lancement est en arrière-plan (tag ``background``). Sans durée, un
+        sous-agent au premier plan est daté à sa FIN (tag
+        ``timing:completion``) : trois sous-agents lancés ensemble mais
+        finis à des minutes d'écart ne forment alors pas de rafale. Ces
+        délégations restent dans le calcul, mais leurs sessions sont comptées
+        à part (``sessions_timing_approx``) pour que le biais ne soit pas tu.
+
         Ignorés sans erreur : les enregistrements sans ``started_at``
         exploitable, et ceux dont le ``run_id`` est le repli
         ``delegation-<uuid>`` (l'hôte n'a pas fourni de session — chacun
@@ -872,6 +881,7 @@ class TraceLedger:
         (0.0 sans rafale).
         """
         by_session: dict[str, list[datetime]] = {}
+        approx_sessions: set[str] = set()
         for trace in self._load_all():
             if DELEGATION_TAG not in trace.tags or not trace.run_id or trace.run_id.startswith("delegation-"):
                 continue
@@ -882,6 +892,8 @@ class TraceLedger:
             if moment.tzinfo is None:
                 moment = moment.replace(tzinfo=UTC)
             by_session.setdefault(trace.run_id, []).append(moment)
+            if "timing:completion" in trace.tags and "background" not in trace.tags:
+                approx_sessions.add(trace.run_id)
 
         burst_sizes: list[int] = []
         sessions_with_burst = 0
@@ -906,6 +918,7 @@ class TraceLedger:
             "window_seconds": window_seconds,
             "sessions_with_delegation": len(by_session),
             "sessions_with_burst": sessions_with_burst,
+            "sessions_timing_approx": len(approx_sessions),
             "burst_count": len(burst_sizes),
             "mean_burst_size": round(sum(burst_sizes) / len(burst_sizes), 2) if burst_sizes else 0.0,
         }

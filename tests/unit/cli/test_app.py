@@ -811,6 +811,7 @@ class TestRegistryDispatches:
             "window_seconds": DELEGATION_BURST_WINDOW_S,
             "sessions_with_delegation": 3,
             "sessions_with_burst": 1,
+            "sessions_timing_approx": 0,
             "burst_count": 1,
             "mean_burst_size": 3.0,
         }
@@ -821,6 +822,24 @@ class TestRegistryDispatches:
         assert json.loads(json_result.output)["bursts"]["burst_count"] == 1
         assert text_result.exit_code == 0
         assert "Rafales" in text_result.output
+
+    def test_delegation_bursts_counts_sessions_with_completion_timing_apart(self, tmp_path: Path) -> None:
+        from grimoire.traces.ledger import DELEGATION_TAG, TraceLedger
+        from grimoire.traces.schemas import TraceOutcome
+
+        ledger = TraceLedger(tmp_path / "t")
+        for run_id, ts, tags in (
+            ("S1", "2026-01-01T10:00:00+00:00", [DELEGATION_TAG, "timing:completion"]),
+            ("S2", "2026-01-01T10:00:00+00:00", [DELEGATION_TAG, "background"]),
+            ("S3", "2026-01-01T10:00:00+00:00", [DELEGATION_TAG]),
+        ):
+            ledger.record(
+                run_id=run_id, workflow_instance_id="", mission_id="", task_id="x", recipe_id="g",
+                outcome=TraceOutcome.SUCCESS, started_at=ts, agent_id="a", model="", tags=tags,
+            )
+        result = ledger.delegation_bursts()
+        assert result["sessions_with_delegation"] == 3
+        assert result["sessions_timing_approx"] == 1
 
     def test_delegation_bursts_empty_ledger(self, tmp_path: Path) -> None:
         from grimoire.traces.ledger import TraceLedger

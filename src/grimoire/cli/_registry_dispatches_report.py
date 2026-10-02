@@ -104,6 +104,11 @@ def render(
             f"{bursts['sessions_with_burst']}/{bursts['sessions_with_delegation']} sessions avec délégation, "
             f"{bursts['burst_count']} rafale(s), taille moyenne {bursts['mean_burst_size']:g}."
         )
+        if bursts["sessions_timing_approx"]:
+            console.print(
+                f"[yellow]{bursts['sessions_timing_approx']} session(s) avec délégation datée à sa fin "
+                "(durée absente) : rafales possiblement sous-estimées.[/yellow]"
+            )
     else:
         console.print("[dim]Rafales de délégation : aucune session avec délégation datée.[/dim]")
 
