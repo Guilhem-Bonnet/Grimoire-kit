@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- docs(bench): rejeu `nu` et `kit-gov` le même jour (lot L, issue #642) — `docs/bench/rejeu-lot-l-2026-10-02.md`. Trois critères sur quatre atteints, pas le coût (≈124 % du nu, surcoût fixe ≈ +0,04 $ par run) ; excursions 16,7 % au sens binaire, 8,3 % coûteuses ; la régression `rust/scale-generator` du lot K vient d'une contamination du lot J (dossiers de tâche réutilisés, tests visibles), pas du kit. `scripts/bench/excursions.py` : un gate enchaîné après un heredoc compte comme un appel, distinction excursions bénignes et coûteuses (J et K inchangés : 18/60, 16/60).
+
 ## [3.62.0] - 2026-10-02
 
 - docs(bench): rejeu du bras `kit-gov` après le correctif du lot K (#651, issue #642) — `docs/bench/rejeu-lot-k-2026-09-29.md`. Aucun des quatre critères chiffrés de l'issue n'est atteint : part des runs « avec excursion » 26,7 % (16/60, contre 30,0 % au lot J, cible < 10 %), coût médian/tâche résolue ≈122 % du nu (contre ≈112 %, cible ≤ 105 %), succès 90,0 % (contre 96,7 %, cible ≥ 96,7 %) ; `gate check` vert au dernier appel 60/60 (seul critère atteint, inchangé depuis le lot J). Régression notable non tranchée par ce lot : `rust/scale-generator` passe de 3/3 à 0/3 (gate agent vert, verdict caché du harnais négatif — même signature qu'avant le lot I). Campagne propre (60/60 `completed`, aucun incident d'authentification, contre 30 runs perdus au lot J).

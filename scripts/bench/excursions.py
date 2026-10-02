@@ -3,7 +3,10 @@
 
 Un run est « mandat pur » si son seul appel réel ``grimoire ... standard gate
 check`` est le dernier appel outil de la session ; sinon (plusieurs appels gate,
-ou tout appel outil après le premier) il est « avec excursion ».
+ou tout appel outil après le premier) il est « avec excursion ». Une excursion est
+« bénigne » si le premier gate est vert et qu'au plus un appel outil le suit (lint,
+relecture), « coûteuse » sinon (plusieurs gates, gate rouge, absence de gate, boucle).
+Un gate enchaîné après un heredoc dans le même appel Bash compte comme un appel (lot L).
 
 Entrées : ``<workspace>/state/results.jsonl`` et les transcriptions
 ``<workspace>/tasks/<langue>__<tâche>/<bras>/run<k>.stream.jsonl``.
@@ -23,6 +26,16 @@ from pathlib import Path
 from typing import Any
 
 GATE = re.compile(r"grimoire\s+(?:\S+\s+)*standard\s+gate\s+check")
+HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1[^\n]*\n.*?^\s*\2\s*$", re.DOTALL | re.MULTILINE)
+GATE_GREEN = "OK evidence gates"
+#: au plus ce nombre d'appels outils après un premier gate vert : excursion « bénigne »
+BENIGN_MAX_AFTER = 1
+
+
+def strip_heredocs(command: str) -> str:
+    """Retire les corps de heredoc : une mention de la commande dans un corps n'est pas un appel,
+    mais un appel enchaîné APRÈS le heredoc, dans le même appel Bash, en est un (lot L)."""
+    return HEREDOC.sub("", command)
 
 
 def _text(content: Any) -> str:
@@ -35,8 +48,16 @@ def _text(content: Any) -> str:
 
 def gate_calls(lines: Sequence[str]) -> tuple[int, list[int]]:
     """Retourne (nombre d'appels outils, rangs 1-based des appels gate check réels)."""
+    tool_calls, ranks, _ = gate_trace(lines)
+    return tool_calls, ranks
+
+
+def gate_trace(lines: Sequence[str]) -> tuple[int, list[int], dict[int, bool]]:
+    """Comme :func:`gate_calls`, plus le verdict (vert ou non) de chaque appel gate, par rang."""
     tool_calls = 0
     ranks: list[int] = []
+    rank_of_id: dict[str, int] = {}
+    green: dict[int, bool] = {}
     for line in lines:
         if not line.startswith("{"):
             continue
@@ -44,7 +65,17 @@ def gate_calls(lines: Sequence[str]) -> tuple[int, list[int]]:
             obj = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if not isinstance(obj, dict) or obj.get("type") != "assistant":
+        if not isinstance(obj, dict):
+            continue
+        if obj.get("type") == "user":
+            content = obj.get("message", {}).get("content", [])
+            for block in content if isinstance(content, list) else []:
+                if isinstance(block, dict) and block.get("type") == "tool_result":
+                    rank = rank_of_id.get(str(block.get("tool_use_id")))
+                    if rank is not None:
+                        green[rank] = GATE_GREEN in _text(block.get("content"))
+            continue
+        if obj.get("type") != "assistant":
             continue
         for block in obj.get("message", {}).get("content", []):
             if not isinstance(block, dict) or block.get("type") != "tool_use":
@@ -52,10 +83,16 @@ def gate_calls(lines: Sequence[str]) -> tuple[int, list[int]]:
             tool_calls += 1
             if block.get("name") == "Bash":
                 command = str(block.get("input", {}).get("command", ""))
-                # une mention dans un heredoc n'est pas un appel
-                if GATE.search(command.split("<<")[0]):
+                # une mention dans le corps d'un heredoc n'est pas un appel
+                if GATE.search(strip_heredocs(command)):
                     ranks.append(tool_calls)
-    return tool_calls, ranks
+                    rank_of_id[str(block.get("id"))] = tool_calls
+    return tool_calls, ranks, green
+
+
+def is_benign(tool_calls: int, ranks: Sequence[int], green: dict[int, bool]) -> bool:
+    """Excursion bénigne : premier gate vert, au plus ``BENIGN_MAX_AFTER`` appel(s) ensuite, jamais un second gate."""
+    return len(ranks) == 1 and green.get(ranks[0], False) and tool_calls - ranks[0] <= BENIGN_MAX_AFTER
 
 
 def is_pure_mandate(tool_calls: int, ranks: Sequence[int]) -> bool:
@@ -82,7 +119,7 @@ def classify(workspace: Path, arm: str, reference_arm: str) -> dict[str, Any]:
         if not path.is_file():
             missing.append(f"{task}#{k}")
             continue
-        calls, ranks = gate_calls(path.read_text(encoding="utf-8", errors="replace").splitlines())
+        calls, ranks, green = gate_trace(path.read_text(encoding="utf-8", errors="replace").splitlines())
         ref = reference.get((task, k))
         runs.append(
             {
@@ -91,11 +128,14 @@ def classify(workspace: Path, arm: str, reference_arm: str) -> dict[str, Any]:
                 "tool_calls": calls,
                 "gate_calls": len(ranks),
                 "pure_mandate": is_pure_mandate(calls, ranks),
+                "benign": not is_pure_mandate(calls, ranks) and is_benign(calls, ranks, green),
+                "last_gate_green": green.get(ranks[-1], False) if ranks else None,
                 "cost": rec["total_cost_usd"],
                 "reference_cost": ref["total_cost_usd"] if ref else None,
             }
         )
     exc = [r for r in runs if not r["pure_mandate"]]
+    benign = [r for r in exc if r["benign"]]
     paired = [r for r in runs if r["reference_cost"] is not None]
     over = {id(r): r["cost"] - r["reference_cost"] for r in paired}
     total = sum(over.values())
@@ -107,6 +147,10 @@ def classify(workspace: Path, arm: str, reference_arm: str) -> dict[str, Any]:
         "runs": len(runs),
         "excursions": len(exc),
         "excursion_share": len(exc) / len(runs) if runs else 0.0,
+        "excursions_benign": len(benign),
+        "excursions_costly": len(exc) - len(benign),
+        "excursion_costly_share": (len(exc) - len(benign)) / len(runs) if runs else 0.0,
+        "last_gate_green": sum(1 for r in runs if r["last_gate_green"]),
         "overcost_total": total,
         "overcost_excursions": exc_over,
         "overcost_excursion_share": exc_over / total if total else None,
@@ -132,6 +176,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     share = rep["overcost_excursion_share"]
     print(f"{rep['arm']} : {rep['excursions']}/{rep['runs']} runs avec excursion ({rep['excursion_share']:.1%})")
+    print(
+        f"dont {rep['excursions_costly']} coûteuses ({rep['excursion_costly_share']:.1%} des runs) et "
+        f"{rep['excursions_benign']} bénignes ; dernier gate vert : {rep['last_gate_green']}/{rep['runs']}"
+    )
     if share is not None:
         print(
             f"surcoût vs {rep['reference_arm']} : {rep['overcost_total']:+.2f} $ au total, "
