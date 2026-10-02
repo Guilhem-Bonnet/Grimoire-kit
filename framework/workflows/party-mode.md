@@ -20,6 +20,8 @@ Une seule session LLM joue successivement plusieurs agents installés du projet,
 
 **Ne pas utiliser quand :** la question a une seule bonne réponse technique. Un agent spécialisé répond mieux et plus vite qu'un panel.
 
+Sur Claude Code, une demande ouverte déclenche déjà seule un brainstorm en sous-agents parallèles (« Quand déléguer en parallèle » dans la politique de dispatch) ; le party mode reste la discussion pilotée, lancée par [PM].
+
 ## <img src="../../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> Déroulé
 
 ### 1. Cadrer la question

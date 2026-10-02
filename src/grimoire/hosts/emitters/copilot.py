@@ -27,6 +27,7 @@ from grimoire.hosts.emitters.base import (
     context_load_instruction,
     managed_header,
     map_verbs,
+    parallel_brainstorm_section,
 )
 from grimoire.hosts.surface import (
     AgentSpec,
@@ -107,7 +108,8 @@ vérifier. Une persona qui clôt sans ce bloc n'a pas rendu un résultat
 vérifiable, elle a rendu une opinion. Un chiffre ou un verdict qu'elle ne
 relie à aucune commande exécutée ni à aucun fichier:ligne se relit comme
 non vérifié, quel que soit son ton.
-"""
+
+{parallel_brainstorm_section("résultat relu selon la classe ci-dessus")}"""
 
 
 def _agent_file(agent: AgentSpec, surface: ProjectSurface, owned_skills: tuple[SkillSpec, ...] = ()) -> EmittedFile:

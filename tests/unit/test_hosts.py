@@ -2252,6 +2252,52 @@ def test_claude_session_start_carries_the_dispatch_policy_and_roster(project: Pa
     assert decision.detail["dispatch_context_injected"] is True
 
 
+def test_claude_session_start_carries_the_parallel_brainstorm_trigger(project: Path) -> None:
+    """#687 : la boucle principale reçoit, sans qu'on le demande, le déclencheur
+    du brainstorm parallèle — et son anti-signal, pour ne pas déléguer à tout bout de champ."""
+    _, decision, _ = run_hook(
+        {"hook_event_name": "SessionStart", "cwd": str(project)}, host_id=HostId.CLAUDE_CODE_CLI
+    )
+    context = decision.context
+    assert "Quand déléguer en parallèle" in context
+    assert "UN SEUL message" in context
+    assert "correction ciblée" in context
+
+
+def test_claude_entry_agent_carries_the_same_parallel_brainstorm_section(project: Path) -> None:
+    """Non-dérive (#687) : la section émise dans `.claude/agents/<entrée>.md` est
+    la même que celle injectée au SessionStart, et les sous-agents n'en portent pas."""
+    emitter = emitter_for(HostId.CLAUDE_CODE_CLI)
+    assert emitter is not None
+    apply_plan(emitter.plan(build_surface(project), project), project)
+    entry = (project / ".claude/agents/concierge.md").read_text(encoding="utf-8")
+    sub = (project / ".claude/agents/scribe.md").read_text(encoding="utf-8")
+    _, decision, _ = run_hook(
+        {"hook_event_name": "SessionStart", "cwd": str(project)}, host_id=HostId.CLAUDE_CODE_CLI
+    )
+
+    start = entry.index("### Quand déléguer en parallèle")
+    section = entry[start:].split("\n## ", 1)[0].strip()
+    assert "UN SEUL message" in section
+    assert section in decision.context
+    assert "Quand déléguer en parallèle" not in sub
+
+
+def test_copilot_entry_agent_carries_the_parallel_brainstorm_without_a_model_name(governed: Path) -> None:
+    """#687 : même déclencheur côté Copilot, sans aucun nom de modèle."""
+    emitter = emitter_for(HostId.GITHUB_COPILOT)
+    assert emitter is not None
+    apply_plan(emitter.plan(build_surface(governed), governed), governed)
+    entry = (governed / ".github/agents/concierge.agent.md").read_text(encoding="utf-8")
+
+    start = entry.index("### Quand déléguer en parallèle")
+    section = entry[start:].split("\n## ", 1)[0].lower()
+    assert "un seul message" in section
+    assert "correction ciblée" in section
+    for model in ("haiku", "sonnet", "opus"):
+        assert model not in section
+
+
 def test_non_claude_hosts_do_not_get_the_claude_dispatch_context(project: Path) -> None:
     """Non-régression Copilot (#655) : `decide_activation` est partagé
     entre hôtes ; la politique de dispatch et le répertoire `subagent_type`
