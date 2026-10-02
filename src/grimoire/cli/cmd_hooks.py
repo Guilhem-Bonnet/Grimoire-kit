@@ -12,10 +12,13 @@ plan, ``planning/resorption-bash.md``).  Improvements over the bash version:
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import stat
 import subprocess
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Annotated
 
 import typer
 from rich.console import Console
@@ -300,3 +303,106 @@ def hooks_install(
     if config_written:
         console.print("  [green][OK][/green] .pre-commit-config.yaml généré")
     console.print(f"  {len(installed)} hook(s) installé(s)")
+
+
+# ── Calibration (Refs #644, party-mode idée B) ───────────────────────────────
+#
+# Distinct des commandes ci-dessus : ``list``/``status``/``install`` gèrent
+# les *git hooks* (pre-commit & co) ; ``calibrate`` lit le journal des
+# *hooks d'agent* (``PreToolUse``/``Stop``, :mod:`grimoire.hosts.decisions`)
+# — un « hook » côté agent, pas côté git. Les deux partagent le même verbe
+# CLI (``grimoire hooks``) parce que c'est la même famille de commandes pour
+# l'utilisateur, jamais le même mécanisme en dessous.
+
+_SINCE_PATTERN = re.compile(r"^(?P<amount>\d+)(?P<unit>[dh])$")
+_CALIB_PROJECT_ROOT_OPTION = typer.Option("--project-root", help="Racine du projet.", show_default=False)
+_CALIB_SINCE_OPTION = typer.Option("--since", help="Ne garder que les holds depuis cette ancienneté, ex. `7d`.")
+_CALIB_JSON_OPTION = typer.Option("--json", help="Sortie JSON.")
+
+
+def _since_iso(since: str | None, *, now: datetime | None = None) -> str | None:
+    """Convertit ``--since`` (``"7d"``, ``"12h"``) en horodatage ISO plancher.
+
+    Même contrat que ``grimoire dispatch stats`` (:mod:`grimoire.cli.
+    cmd_dispatch`) — dupliqué plutôt que partagé : ``cmd_dispatch.py`` et
+    ``cmd_task.py`` font déjà chacun la même chose, ce module suit la même
+    convention plutôt que d'introduire un module utilitaire commun pour
+    quatre lignes.
+    """
+    if since is None:
+        return None
+    match = _SINCE_PATTERN.match(since.strip())
+    if match is None:
+        raise typer.BadParameter(f"--since invalide : {since!r} (attendu un entier suivi de `d` ou `h`, ex. `7d`)")
+    amount = int(match.group("amount"))
+    delta = timedelta(days=amount) if match.group("unit") == "d" else timedelta(hours=amount)
+    reference = now or datetime.now(tz=UTC)
+    return (reference - delta).isoformat()
+
+
+@hooks_app.command("calibrate")
+def hooks_calibrate(
+    ctx: typer.Context,
+    project_root: Annotated[Path, _CALIB_PROJECT_ROOT_OPTION] = Path(),
+    since: Annotated[str | None, _CALIB_SINCE_OPTION] = None,
+    json_output: Annotated[bool, _CALIB_JSON_OPTION] = False,
+) -> None:
+    """Calibrer les verdicts des hooks d'agent avant activation (Refs #644).
+
+    Par hook (``grimoire.tool-policy``, ``grimoire.evidence-gate``) et par
+    motif (``tool_policy:ask``, ``tool_policy:deny``, ``done_gate:stale``) :
+    combien de fois ce verdict a tenu, et comment la session a réagi juste
+    après — ``respected`` (l'agent a fait autre chose), ``retried_same``
+    (rejoué la même action), ``retried_variant`` (même outil, cible proche),
+    ``abandoned`` (aucun ``PostToolUse`` suivant retrouvé pour l'étiqueter).
+
+    Jamais « regret » : ces étiquettes décrivent ce qui a suivi, jamais si le
+    hold avait raison de tenir — voir le docstring de
+    :mod:`grimoire.hosts.decisions.calibration`. Lit exclusivement le
+    journal de traces existant (``policy.hold``/``policy.hold_followup``),
+    jamais un second calcul ni un nouveau format.
+    """
+    from grimoire.core.standard_generation import TRACES_DIR
+    from grimoire.traces.ledger import TraceLedger
+
+    root = project_root.resolve()
+    as_json = json_output or _get_fmt(ctx) == "json"
+    try:
+        since_iso = _since_iso(since)
+    except typer.BadParameter as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(2) from exc
+
+    traces_path = root / TRACES_DIR
+    if not (traces_path / "traces.jsonl").is_file():
+        if as_json:
+            typer.echo(json.dumps({"groups": []}, indent=2, ensure_ascii=False))
+            return
+        console.print(f"[dim]Aucun journal de traces sous {traces_path}.[/dim]")
+        return
+
+    report = TraceLedger(traces_path).policy_hold_calibration(since_iso=since_iso)
+
+    if as_json:
+        typer.echo(json.dumps(report, indent=2, ensure_ascii=False))
+        return
+
+    if not report["groups"]:
+        console.print("[dim]Aucun `policy.hold` dans cette fenêtre (rien à calibrer).[/dim]")
+        return
+
+    table = Table(title="Calibration des verdicts de hooks")
+    for column in ("Hook", "Motif", "Holds", "respected", "retried_same", "retried_variant", "abandoned"):
+        table.add_column(column)
+    for group in report["groups"]:
+        labels = group["labels"]
+        table.add_row(
+            group["hook"],
+            group["reason"],
+            str(group["total"]),
+            str(labels["respected"]),
+            str(labels["retried_same"]),
+            str(labels["retried_variant"]),
+            str(labels["abandoned"]),
+        )
+    console.print(table)

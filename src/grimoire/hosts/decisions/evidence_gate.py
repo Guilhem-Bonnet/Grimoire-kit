@@ -122,6 +122,7 @@ def _with_done_gate(decision: Decision, hook: HookInput, task_id: str, profile: 
     detail = {**decision.detail, "done_gate": verdict.to_dict()}
     if not verdict.stale:
         return replace(decision, detail=detail)
+    _record_done_gate_hold(hook, task_id)
     if verdict.blocked and decision.outcome is not Outcome.BLOCK:
         reason = (
             f"[Grimoire] Tâche {task_id} : une mutation est postérieure au dernier check vert (profil {profile}).\n"
@@ -137,6 +138,34 @@ def _with_done_gate(decision: Decision, hook: HookInput, task_id: str, profile: 
         context = f"{decision.context}\n{warning}" if decision.context else warning
         return replace(decision, context=context, detail=detail)
     return replace(decision, detail=detail)
+
+
+def _record_done_gate_hold(hook: HookInput, task_id: str) -> None:
+    """Calibration (Refs #644): journal a stale ``done_gate`` verdict as a ``policy.hold``.
+
+    Written whenever :func:`~grimoire.hosts.decisions.done_gate.
+    evaluate_done_gate` reports ``stale`` — shadow (unenforced) sessions
+    included: that is exactly the data the party-mode design needs before
+    deciding whether ``GRIMOIRE_DONE_GATE=enforce`` is safe to widen. The
+    fingerprint/target key are keyed on the task, not on a command or path
+    — the "action" a done-gate hold is about is "close this task", not any
+    one tool call. Best-effort, same contract as
+    :mod:`.tool_policy`'s own ``_record_hold``.
+    """
+    try:
+        from grimoire.hosts.decisions.calibration import action_fingerprint, record_policy_hold, target_key
+
+        record_policy_hold(
+            hook.project_root,
+            session_id=hook.session_id,
+            task_id=task_id,
+            hook_id="grimoire.evidence-gate",
+            reason="done_gate:stale",
+            fingerprint=action_fingerprint("done_gate", task_id),
+            target=target_key("done_gate", task_id),
+        )
+    except Exception:  # noqa: S110 — observabilité : jamais au prix de la décision elle-même
+        pass
 
 
 def _unevaluable_gate(task_id: str, profile: str, exc: Exception) -> Decision:
