@@ -60,7 +60,7 @@ d'expiration OAuth en cours de campagne (défaut du lot J, §1.2 de son rapport)
 | **kit-gov (lot K, 2026-09-29)** | 60 | **90,0 %** | **[82 %, 97 %]** | **85 %** | **78 s** | **7,0** | **0,488 $** | **33,72 $** | **75,0 %** | **100 % (60/60)** | **1,0 (54 appels/60 runs)** |
 
 Nouvelle métrique de ce lot — **part des runs « avec excursion »** (définition de l'issue #642, reprise et vérifiée sur
-le lot J avant application ici, script `excursions.py`/`excursions_k.py` : un run est « mandat pur » si son seul appel
+le lot J avant application ici, script `scripts/bench/excursions.py` : un run est « mandat pur » si son seul appel
 `grimoire … standard gate check` réel est le dernier appel outil de la session, « avec excursion » sinon — plusieurs
 appels gate, ou tout appel outil après le premier) :
 
@@ -68,6 +68,8 @@ appels gate, ou tout appel outil après le premier) :
 |---|---:|---:|---:|
 | J (2026-09-18) | 18/60 | 30,0 % | 103 % (+4,95 $ sur +4,94 $ total) |
 | **K (2026-09-29)** | **16/60** | **26,7 %** | **37 % (+2,45 $ sur +6,68 $ total)** |
+
+Rejeu : `python scripts/bench/excursions.py --workspace <dossier du banc> --arm kit-gov --reference-arm nu` (option `--json` pour le détail par run ; le dossier du banc contient `state/results.jsonl` et `tasks/`).
 
 Le nombre d'excursions recule (18 → 16) et leur poids relatif dans le surcoût recule fortement (103 % → 37 %), mais le
 surcoût total J−nu → K−nu augmente (+4,94 $ → +6,68 $) : les runs « mandat pur » eux-mêmes coûtent désormais plus cher
@@ -140,7 +142,7 @@ Deux mouvements notables par rapport au lot J, tous deux sur des tâches déjà 
   (9,0 → 6,0, §3).
 - **Ce qu'il ne corrige pas** : la définition « mandat pur » de l'issue (un seul appel gate, rien après) exclut aussi
   un run qui enchaîne un appel bénin après un gate déjà vert — par exemple `javascript/affine-cipher run0` lance
-  `npx eslint` après un `gate check` vert (§2, script `excursions_k.py`). Sur les 16 runs « avec excursion » du lot K,
+  `npx eslint` après un `gate check` vert (§2, script `scripts/bench/excursions.py`). Sur les 16 runs « avec excursion » du lot K,
   10 ont un gate vert dès le premier appel et un seul appel supplémentaire (souvent un lint ou une relecture finale) —
   un ordre de grandeur sans rapport avec les boucles de 3 à 22 tours du lot J. Cette catégorie n'est pas nommée par
   l'issue #642 et n'est donc pas résolue par son critère binaire actuel.
