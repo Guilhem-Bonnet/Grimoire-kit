@@ -7,6 +7,9 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- fix(hosts): `Stop` nomme les claims concurrents au lieu de juger la tâche fantôme `bootstrap` (issue #692, suite de #680/#686 ; empilée sur la PR #696). Rejeu du 2026-10-02 : deux claims sans session, aucune écriture — `UserPromptSubmit` nommait les candidates et `grimoire task attach <id>`, mais `decide_evidence_gate` ne traitait l'ambiguïté qu'après une écriture et retombait sinon sur « Tâche bootstrap encore en état proposed ».
+  - `hosts/decisions/evidence_gate.py` : résolution `ambiguous` sans écriture → contexte (rendu en `systemMessage` au Stop) qui nomme les candidates et la commande de rattachement, sans bloquer ; avec écriture, comportement de #680 inchangé (blocage en profil bloquant).
+  - Rouge-avant / vert-après : `tests/unit/test_stop_names_candidates.py` (3 tests, 1 rouge avant).
 - fix(missions): les claims de sous-agents ne détrônent plus la tâche que l'orchestrateur a rattachée (issue #695, suite de #680/#686). Les sous-agents de Claude Code héritent de `CLAUDE_CODE_SESSION_ID` : leurs `task claim` se rattachaient à la session du parent, `resolve_active_task` voyait plusieurs claims sur la même session et retombait sur `ambiguous` → « Clôture hors tâche », même juste après un `grimoire task attach`.
   - `grimoire task attach` marque désormais son événement `task.session_attached` (`explicit: true`) et s'écrit même quand la session est déjà celle du claim ; le claim porte `attached_explicit_at`. Le rattachement automatique (claim CLI/MCP, hook) ne le marque jamais. `core/standard_state.py` : parmi les claims d'une session, le dernier attach explicite gagne, puis le claim unique de `GRIMOIRE_ACTOR` dans la session ; sinon, comportement de #686 inchangé (`ambiguous`, candidates nommées).
   - Rouge-avant / vert-après : `tests/unit/test_active_task_subagent_claims.py` (7 tests, 5 rouges avant).
