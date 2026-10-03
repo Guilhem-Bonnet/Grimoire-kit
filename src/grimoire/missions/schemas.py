@@ -127,6 +127,12 @@ class TaskClaim:
     #: si une commande de reprise existe (``claude --resume``), jamais une
     #: valeur devinée.
     session_host: str = ""
+    #: Quand la session a *explicitement* déclaré ce claim sien (``grimoire task
+    #: attach``, issue #695), ISO 8601 UTC du dernier tel rattachement. Les
+    #: sous-agents héritent du ``session_id`` de leur parent : leurs claims s'y
+    #: rattachent automatiquement ; seul ce marqueur dit laquelle des tâches
+    #: d'une session est celle que l'opérateur a désignée. ``""`` = jamais.
+    attached_explicit_at: str = ""
 
     @classmethod
     def new(
@@ -181,6 +187,9 @@ class TaskClaim:
             "expires_at": self.expires_at,
             "session_id": self.session_id,
             "session_host": self.session_host,
+            # Absent tant qu'aucun attach explicite : les sérialisations
+            # existantes (board, cockpit, tests) ne changent pas.
+            **({"attached_explicit_at": self.attached_explicit_at} if self.attached_explicit_at else {}),
         }
 
     @classmethod
@@ -192,10 +201,15 @@ class TaskClaim:
             expires_at=d.get("expires_at", ""),
             session_id=str(d.get("session_id", "") or ""),
             session_host=str(d.get("session_host", "") or ""),
+            attached_explicit_at=str(d.get("attached_explicit_at", "") or ""),
         )
 
-    def with_session(self, session_id: str, session_host: str = "") -> TaskClaim:
-        """Le même claim, rattaché à *session_id* — une valeur, jamais une mutation."""
+    def with_session(self, session_id: str, session_host: str = "", *, explicit_at: str = "") -> TaskClaim:
+        """Le même claim, rattaché à *session_id* — une valeur, jamais une mutation.
+
+        *explicit_at* date un rattachement explicite (``task attach``) ; sans lui,
+        un rattachement automatique conserve la date du dernier explicite.
+        """
         return TaskClaim(
             actor_id=self.actor_id,
             host_id=self.host_id,
@@ -203,6 +217,7 @@ class TaskClaim:
             expires_at=self.expires_at,
             session_id=session_id,
             session_host=session_host,
+            attached_explicit_at=explicit_at or self.attached_explicit_at,
         )
 
 

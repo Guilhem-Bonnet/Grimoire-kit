@@ -218,7 +218,10 @@ class MissionLedger:
                 current = self._tasks.get(tid)
                 if current is not None and current.claim is not None:
                     claim = current.claim.with_session(
-                        str(payload.get("session_id", "") or ""), str(payload.get("session_host", "") or "")
+                        str(payload.get("session_id", "") or ""),
+                        str(payload.get("session_host", "") or ""),
+                        # Issue #695 : seul un ``task attach`` marque ``explicit``.
+                        explicit_at=str(raw.get("created_at", "") or "") if payload.get("explicit") else "",
                     )
                     self._tasks[tid] = MissionTask.from_dict({**current.to_dict(), "claim": claim.to_dict()})
             self._events.append(LedgerEvent.from_dict(raw))
@@ -529,13 +532,18 @@ class MissionLedger:
         self._load()
         return self._tasks[task_id]
 
-    def attach_session(self, task_id: str, session_id: str, *, session_host: str = "", actor_id: str = "hook") -> MissionTask:
+    def attach_session(
+        self, task_id: str, session_id: str, *, session_host: str = "", actor_id: str = "hook", explicit: bool = False
+    ) -> MissionTask:
         """Rattache *session_id* au claim de *task_id* — un événement, pas une réécriture.
 
         Refuse (``GrimoireMissionError``) une tâche inconnue, une tâche sans
         claim, ou un claim déjà rattaché à une *autre* session : une session
         ne vole jamais le claim d'une autre. Idempotent quand la session est
-        déjà celle du claim : rien n'est ajouté au journal.
+        déjà celle du claim : rien n'est ajouté au journal — sauf pour un
+        rattachement *explicite* (``task attach``, issue #695), qui s'écrit
+        toujours : c'est la déclaration d'intention datée dont la résolution de
+        la tâche active se sert pour départager les claims d'une même session.
         """
         self._load()
         task = self._tasks.get(task_id)
@@ -546,9 +554,9 @@ class MissionLedger:
         session_id = session_id.strip()
         if not session_id:
             raise GrimoireMissionError("A session id is required")
-        if task.claim.session_id == session_id:
+        if task.claim.session_id == session_id and not explicit:
             return task
-        if task.claim.session_id:
+        if task.claim.session_id and task.claim.session_id != session_id:
             raise GrimoireMissionError(
                 f"Task {task_id} is already attached to session {task.claim.session_id}"
             )
@@ -557,7 +565,12 @@ class MissionLedger:
             task_id,
             "task",
             actor_id,
-            {"task_id": task_id, "session_id": session_id, "session_host": session_host},
+            {
+                "task_id": task_id,
+                "session_id": session_id,
+                "session_host": session_host,
+                **({"explicit": True} if explicit else {}),
+            },
         )
         self._load()
         return self._tasks[task_id]
