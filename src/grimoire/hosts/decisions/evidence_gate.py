@@ -9,6 +9,7 @@ from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
 from grimoire.hosts.decisions.enrolment import (
     BLOCKING_PROFILES,
     NO_ACTIVE_TASK,
+    ambiguity_text,
     no_task_stop_reason,
     session_mutation_count,
 )
@@ -45,6 +46,15 @@ def decide_evidence_gate(hook: HookInput) -> Decision:
         no_task = _no_task_closure(hook, profile, active.candidates)
         if no_task is not None:
             return no_task
+        if active.source == "ambiguous":
+            # Issue #692 : rien n'a été écrit, la session n'est pas bloquée —
+            # mais juger la tâche fantôme `bootstrap` (« encore en état
+            # proposed ») dirait faux. Même résolution et même message que
+            # UserPromptSubmit : les claims concurrents et `task attach`.
+            return Decision(
+                context=f"[Grimoire] {ambiguity_text(active.candidates)}",
+                detail={"task_id": task_id, "task_source": active.source, "candidates": list(active.candidates)},
+            )
     try:
         ok, summary, detail = _gate_summary(hook.project_root, task_id)
     except Exception as exc:
