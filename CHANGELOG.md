@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.62.1] - 2026-10-03
+
 - fix(hosts): `Stop` nomme les claims concurrents au lieu de juger la tâche fantôme `bootstrap` (issue #692, suite de #680/#686 ; empilée sur la PR #696). Rejeu du 2026-10-02 : deux claims sans session, aucune écriture — `UserPromptSubmit` nommait les candidates et `grimoire task attach <id>`, mais `decide_evidence_gate` ne traitait l'ambiguïté qu'après une écriture et retombait sinon sur « Tâche bootstrap encore en état proposed ».
   - `hosts/decisions/evidence_gate.py` : résolution `ambiguous` sans écriture → contexte (rendu en `systemMessage` au Stop) qui nomme les candidates et la commande de rattachement, sans bloquer ; avec écriture, comportement de #680 inchangé (blocage en profil bloquant).
   - Rouge-avant / vert-après : `tests/unit/test_stop_names_candidates.py` (3 tests, 1 rouge avant).
