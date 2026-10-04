@@ -472,7 +472,9 @@ def task_attach(
     service = _service(project_root, ledger_root)
     _require_task(service, task_id)
     try:
-        task = service.attach_session(task_id, sid, session_host=env_host if not session_id.strip() else "", actor=actor)
+        task = service.attach_session(
+            task_id, sid, session_host=env_host if not session_id.strip() else "", actor=actor, explicit=True
+        )
     except GrimoireError as exc:
         console.print(f"[red]✗[/red] {exc}")
         raise typer.Exit(1) from exc

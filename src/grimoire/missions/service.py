@@ -292,7 +292,9 @@ class TaskService:
             task = self.transition(task.id, TaskState.READY, actor).task
         return TaskAdded(task=task, mission_id=mission_id, mission_created=created_mission, board_path=self.project_board())
 
-    def attach_session(self, task_id: str, session_id: str, *, session_host: str = "", actor: str = "hook") -> MissionTask:
+    def attach_session(
+        self, task_id: str, session_id: str, *, session_host: str = "", actor: str = "hook", explicit: bool = False
+    ) -> MissionTask:
         """Rattache la session d'hôte courante au claim de *task_id* (issue #638).
 
         Même règle que :meth:`MissionLedger.attach_session` — un événement de
@@ -300,7 +302,9 @@ class TaskService:
         une autre session — puis le board est reprojeté pour que le cockpit
         voie la session sans attendre un autre geste.
         """
-        task = self.ledger.attach_session(task_id, session_id, session_host=session_host, actor_id=actor)
+        task = self.ledger.attach_session(
+            task_id, session_id, session_host=session_host, actor_id=actor, explicit=explicit
+        )
         self.project_board()
         return task
 

@@ -15,7 +15,7 @@ import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 # Tout vient de ``standard_generation``, le module léger : ce lecteur tourne dans
 # le chemin des hooks, à chaque appel d'outil, et importer le moteur du standard
@@ -272,8 +272,18 @@ def current_session_id(env: Mapping[str, str] | None = None) -> str:
     return current_session(env)[0]
 
 
-def _active_claims(project_root: Path, *, actor: str = "") -> list[tuple[str, str]]:
-    """``(task_id, session_id)`` des claims ``claimed``/``running`` — ``session_id`` vide si non rattaché.
+class _Claim(NamedTuple):
+    """Un claim actif tel que la résolution le lit."""
+
+    task_id: str
+    session_id: str
+    actor: str
+    #: ISO 8601 du dernier ``task attach`` explicite, ``""`` sinon (issue #695).
+    explicit_at: str
+
+
+def _active_claims(project_root: Path, *, actor: str = "") -> list[_Claim]:
+    """Les claims ``claimed``/``running`` — ``session_id`` vide si non rattaché.
 
     Ne lève jamais : un ledger illisible vaut « aucun claim ».
     """
@@ -290,7 +300,11 @@ def _active_claims(project_root: Path, *, actor: str = "") -> list[tuple[str, st
     active = [t for t in tasks if t.status in (TaskState.CLAIMED, TaskState.RUNNING) and t.claim is not None]
     if actor:
         active = [t for t in active if t.claim is not None and t.claim.actor_id == actor]
-    return [(t.id, t.claim.session_id if t.claim is not None else "") for t in active]
+    return [
+        _Claim(t.id, t.claim.session_id, t.claim.actor_id, t.claim.attached_explicit_at)
+        for t in active
+        if t.claim is not None
+    ]
 
 
 def claimed_task_ids(project_root: Path, *, actor: str = "") -> list[str]:
@@ -299,7 +313,33 @@ def claimed_task_ids(project_root: Path, *, actor: str = "") -> list[str]:
     Ne lève jamais : un ledger illisible vaut « aucun claim », et la résolution
     continue sur le board.
     """
-    return [task_id for task_id, _ in _active_claims(project_root, actor=actor)]
+    return [claim.task_id for claim in _active_claims(project_root, actor=actor)]
+
+
+def _claim_of_session(mine: list[_Claim], actor: str) -> str | None:
+    """La tâche qu'une session désigne parmi ses claims, ``None`` si elle n'en désigne pas une seule.
+
+    Un seul claim rattaché : c'est lui. Plusieurs (issue #695 : les sous-agents
+    héritent du ``session_id`` de leur parent et rattachent leurs claims à la
+    session de l'orchestrateur) : le dernier rattachement *explicite* gagne —
+    une déclaration d'intention vaut plus qu'un claim incident — puis, à défaut,
+    le claim unique de ``GRIMOIRE_ACTOR`` dans cette session. Une égalité
+    (même horodatage explicite, plusieurs claims du même acteur) ne départage
+    rien : l'appelant retombe sur l'ambiguïté nommée.
+    """
+    if len(mine) == 1:
+        return mine[0].task_id
+    explicit = [c for c in mine if c.explicit_at]
+    if explicit:
+        latest = max(c.explicit_at for c in explicit)
+        winners = [c for c in explicit if c.explicit_at == latest]
+        if len(winners) == 1:
+            return winners[0].task_id
+    if actor:
+        by_actor = [c for c in mine if c.actor == actor]
+        if len(by_actor) == 1:
+            return by_actor[0].task_id
+    return None
 
 
 def resolve_active_task(
@@ -318,7 +358,10 @@ def resolve_active_task(
        #680): the ``claimed``/``running`` task whose claim carries *session_id*
        — passed by a hook from its payload, else read from the environment
        (:func:`current_session_id`). With several sessions on one project this
-       is what tells their tasks apart.
+       is what tells their tasks apart. When one session holds several claims
+       (subagents inherit their parent's session id, issue #695) the latest
+       explicit ``grimoire task attach`` wins, then the claim of
+       ``GRIMOIRE_ACTOR`` when it is unique in the session.
     3. The Mission Ledger's single ``claimed``/``running`` task, restricted to
        ``GRIMOIRE_ACTOR``'s claims when that is set. The ledger is the source
        (ADR-005); a claim is visible here the moment it is written, whether or
@@ -343,17 +386,18 @@ def resolve_active_task(
     session = session_id.strip() or current_session_id(environ)
     actor = str(environ.get(ACTOR_ENV, "")).strip()
     if session:
-        mine = [tid for tid, sid in _active_claims(project_root) if sid == session]
-        if len(mine) == 1:
+        mine = [c for c in _active_claims(project_root) if c.session_id == session]
+        chosen = _claim_of_session(mine, actor)
+        if chosen is not None:
             try:
-                return ActiveTask(normalize_task_id(mine[0]), "session_claim")
+                return ActiveTask(normalize_task_id(chosen), "session_claim")
             except ValueError:
                 pass
 
     claims = _active_claims(project_root, actor=actor)
     if len(claims) == 1:
         try:
-            return ActiveTask(normalize_task_id(claims[0][0]), "ledger_claim")
+            return ActiveTask(normalize_task_id(claims[0].task_id), "ledger_claim")
         except ValueError:
             pass
 
@@ -375,7 +419,7 @@ def resolve_active_task(
     if len(in_progress) == 1:
         return ActiveTask(normalize_task_id(in_progress[0]), "board")
     if len(claims) > 1:
-        return ActiveTask("bootstrap", "ambiguous", tuple(tid for tid, _ in claims))
+        return ActiveTask("bootstrap", "ambiguous", tuple(c.task_id for c in claims))
     return ActiveTask("bootstrap", "bootstrap")
 
 
