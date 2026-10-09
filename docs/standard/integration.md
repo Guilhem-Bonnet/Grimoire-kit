@@ -97,7 +97,10 @@ de `compliance-declaration.md`.
 avertissement : il attend d'être rempli — sauf le claim-ledger en `governed` et
 `production`, où un registre vierge, vidé ou absent est une erreur dès `review`
 (exception : une tâche classée V0 hors `governed` n'a pas à le remplir, lot I
-de #582). Pendant `in_progress`, une ligne de claim mal formée ou hors
+de #582 ; `grimoire standard verify` et le gate appliquent la même exception).
+Une ligne sans affirmation, ou dont l'identifiant n'est pas `CL-NNN`, est
+signalée mal formée, mais ses contradictions sont tout de même contrôlées.
+Pendant `in_progress`, une ligne de claim mal formée ou hors
 vocabulaire reste un avertissement ; seuls « prouvé » sans preuve et « utiliser »
 sans « prouvé » bloquent. Ce qui est une erreur, c'est une
 déclaration fausse — un critère `passé` sans preuve, un livrable `accepté`

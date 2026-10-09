@@ -186,3 +186,116 @@ def test_contradictions_stay_errors_while_in_progress(tmp_path: Path, row: str, 
     ledger = tmp_path / LEDGER
     ledger.write_text(ledger.read_text(encoding="utf-8").replace(TEMPLATE_ROW, row), encoding="utf-8")
     assert _in_progress_claims(tmp_path).get(check_id) == "error"
+
+
+# --- Revue W1-05 (2e tour) : la forme ne masque pas le fond ------------------
+
+SUMMARY_EMPTY = "| Affirmations bloquantes non prouvées |  |"
+
+
+def _write_row(root: Path, row: str) -> None:
+    ledger = root / LEDGER
+    text = ledger.read_text(encoding="utf-8").replace(SUMMARY_EMPTY, "| Affirmations bloquantes non prouvées | 0 |")
+    ledger.write_text(text.replace(TEMPLATE_ROW, row), encoding="utf-8")
+
+
+def _verify_claims(root: Path) -> dict[str, set[str]]:
+    result = verify_standard_profile(root)
+    found: dict[str, set[str]] = {}
+    for c in result.checks:
+        if c.id.startswith("claims."):
+            found.setdefault(c.id, set()).add(c.severity)
+    return found
+
+
+@pytest.mark.parametrize("claim_id", ["CL-2", "CL-01", "cl-002"])
+@pytest.mark.parametrize("profile", ["starter", "orchestrated"])
+def test_badly_numbered_proved_row_without_evidence_is_an_error_at_review(
+    tmp_path: Path, claim_id: str, profile: str
+) -> None:
+    """Un identifiant hors `CL-NNN` ne dispense pas du fond : « prouvé » sans preuve reste une erreur."""
+    setup_standard_profile(tmp_path, profile_id=profile, project_name="Demo")
+    _write_row(tmp_path, f"| {claim_id} | a | fait |  | prouvé | haute | vérifier |")
+    review = _review_claims(tmp_path)
+    assert review.get("claims.proved_without_evidence") == "error"
+    assert review.get("claims.row_invalid") is not None
+    assert "error" in _verify_claims(tmp_path).get("claims.proved_without_evidence", set())
+
+
+@pytest.mark.parametrize("claim_id", ["CL-2", "CL-01", "cl-002"])
+@pytest.mark.parametrize(
+    ("row_tail", "check_id", "severity"),
+    [
+        ("| a | fait |  | prouvé | haute | vérifier |", "claims.proved_without_evidence", "error"),
+        ("| a | fait |  | hypothèse | faible | utiliser |", "claims.used_unproved", "error"),
+    ],
+)
+def test_badly_numbered_contradiction_blocks_in_progress_in_governed(
+    tmp_path: Path, claim_id: str, row_tail: str, check_id: str, severity: str
+) -> None:
+    setup_standard_profile(tmp_path, profile_id="governed", project_name="Demo")
+    _write_row(tmp_path, f"| {claim_id} {row_tail}")
+    claims = _in_progress_claims(tmp_path)
+    assert claims.get(check_id) == severity
+    assert claims.get("claims.row_invalid") == "warning"
+    assert _review_claims(tmp_path).get(check_id) == severity
+
+
+@pytest.mark.parametrize("claim_id", ["CL-2", "CL-01", "cl-002"])
+@pytest.mark.parametrize("profile", ["starter", "orchestrated"])
+def test_badly_numbered_used_unproved_row_is_a_warning_outside_strict_profiles(
+    tmp_path: Path, claim_id: str, profile: str
+) -> None:
+    setup_standard_profile(tmp_path, profile_id=profile, project_name="Demo")
+    _write_row(tmp_path, f"| {claim_id} | a | fait |  | hypothèse | faible | utiliser |")
+    assert _review_claims(tmp_path).get("claims.used_unproved") == "warning"
+
+
+@pytest.mark.parametrize(
+    ("row", "expected"),
+    [
+        ("| CL-001 |  | fait |  | hypothèse | moyenne | vérifier |", "claims.row_invalid"),
+        ("| CL-001 |  | fait |  | hypothèse | faible | rejeter |", "claims.row_invalid"),
+        ("| CL-001 |  |  |  |  |  |  |", "claims.row_invalid"),
+        ("| CL-001 |  | fait |  | Hypothèse | faible | Vérifier |", "claims.empty"),
+    ],
+)
+@pytest.mark.parametrize("profile", ["governed", "production"])
+def test_row_without_claim_text_is_never_a_silent_pass_in_strict_profiles(
+    tmp_path: Path, row: str, expected: str, profile: str
+) -> None:
+    """Une ligne sans affirmation n'est pas une affirmation : erreur à la revue, jamais « tout va bien »."""
+    setup_standard_profile(tmp_path, profile_id=profile, project_name="Demo")
+    _write_row(tmp_path, row)
+    assert _review_claims(tmp_path).get(expected) == "error"
+    assert "error" in _verify_claims(tmp_path).get(expected, set())
+
+
+def test_row_without_claim_text_is_not_counted_as_evaluated() -> None:
+    from grimoire.core.standard_checks.claim_ledger_verify import scan_claim_rows
+
+    scan = scan_claim_rows(
+        "## Claims\n\n| ID | A | T | P | S | C | D |\n|---|---|---|---|---|---|---|\n"
+        "| CL-001 |  | fait |  | hypothèse | moyenne | vérifier |\n"
+        "| CL-002 | a | fait | src | prouvé | haute | utiliser |\n"
+    )
+    assert len(scan.evaluated) == 1
+    assert scan.unevaluated_count == 1
+
+
+def _empty_ledger_verify(root: Path, profile: str, klass: str) -> dict[str, set[str]]:
+    setup_standard_profile(root, profile_id=profile, project_name="Demo")
+    _classify_bootstrap(root, klass)
+    (root / LEDGER).write_text("", encoding="utf-8")
+    return _verify_claims(root)
+
+
+def test_verify_applies_the_same_v0_exemption_as_the_gate(tmp_path: Path) -> None:
+    """`standard verify` et le gate rendent le même constat : tâche V0 hors governed, pas de `claims.empty`."""
+    assert "claims.empty" not in _empty_ledger_verify(tmp_path, "production", "V0")
+    assert "claims.empty" not in _review_claims(tmp_path)
+
+
+def test_verify_keeps_claims_empty_for_non_v0_or_governed(tmp_path: Path) -> None:
+    assert _empty_ledger_verify(tmp_path / "a", "production", "V2").get("claims.empty") == {"error"}
+    assert _empty_ledger_verify(tmp_path / "b", "governed", "V0").get("claims.empty") == {"error"}
