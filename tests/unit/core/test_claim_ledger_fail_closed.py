@@ -412,3 +412,90 @@ def test_rows_under_five_cells_stay_form_only() -> None:
     scan = scan_claim_rows("## Claims\n\n| CL-002 | a | fait | prouvé |\n")
     assert scan.unevaluated_count == 1
     assert scan.unevaluated_cells == []
+
+
+# --- Revue W1-05 (4e tour) : ni la forme du tableau ni la section ne cachent une ligne ---
+
+_BAD_PROVED = "CL-002 | b | fait |  | prouvé | élevée | utiliser"
+_SECOND_SECTION = "\n## Claims supplémentaires\n\n| ID | A | T | P | S | C | D |\n|---|---|---|---|---|---|---|\n"
+
+
+def _append_second_claims_section(root: Path, row: str) -> None:
+    ledger = root / LEDGER
+    ledger.write_text(ledger.read_text(encoding="utf-8") + _SECOND_SECTION + row + "\n", encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        _BAD_PROVED,
+        f"{_BAD_PROVED} |",
+        f"  {_BAD_PROVED}",
+        f"> | {_BAD_PROVED} |",
+        f"> {_BAD_PROVED}",
+    ],
+    ids=["no-outer-pipes", "trailing-pipe-only", "indented", "blockquote", "blockquote-no-pipes"],
+)
+@pytest.mark.parametrize("profile", ["starter", "orchestrated", "governed"])
+def test_row_without_leading_pipe_is_evaluated(tmp_path: Path, profile: str, row: str) -> None:
+    """GFM autorise un tableau sans barres extérieures : la ligne est évaluée, pas ignorée."""
+    setup_standard_profile(tmp_path, profile_id=profile, project_name="Demo")
+    _write_row(tmp_path, row)
+    review = _review_claims(tmp_path)
+    assert review.get("claims.proved_without_evidence") == "error"
+    assert "claims.empty" not in review
+    assert "error" in _verify_claims(tmp_path).get("claims.proved_without_evidence", set())
+
+
+@pytest.mark.parametrize("profile", ["starter", "orchestrated", "governed"])
+def test_row_of_a_second_claims_section_is_evaluated(tmp_path: Path, profile: str) -> None:
+    setup_standard_profile(tmp_path, profile_id=profile, project_name="Demo")
+    _write_row(tmp_path, "| CL-001 | a | fait | src/x | prouvé | haute | utiliser |")
+    _append_second_claims_section(tmp_path, "| C3 | b | fait |  | prouvé | élevée | utiliser |")
+    review = _review_claims(tmp_path)
+    assert review.get("claims.proved_without_evidence") == "error"
+    assert review.get("claims.row_invalid") is not None
+    expected = {"error"} if profile == "governed" else {"warning"}
+    assert _verify_claims(tmp_path).get("claims.row_invalid") == expected
+
+
+@pytest.mark.parametrize("profile", ["starter", "orchestrated", "governed"])
+def test_only_row_without_leading_pipe_is_not_an_empty_ledger(tmp_path: Path, profile: str) -> None:
+    """Seule ligne, sans barre initiale : le diagnostic n'est pas « le registre est vierge »."""
+    setup_standard_profile(tmp_path, profile_id=profile, project_name="Demo")
+    _write_row(tmp_path, _BAD_PROVED)
+    assert "claims.empty" not in _review_claims(tmp_path)
+    assert "claims.empty" not in _verify_claims(tmp_path)
+
+
+def test_scan_covers_every_claims_section_and_pipeless_rows() -> None:
+    from grimoire.core.standard_checks.claim_ledger_verify import scan_claim_rows
+
+    text = (
+        "## Claims\n\n| ID | A | T | P | S | C | D |\n|---|---|---|---|---|---|---|\n"
+        "| CL-001 | a | fait | src | prouvé | haute | utiliser |\n"
+        "ID | A | T | P | S | C | D\n---|---|---|---|---|---|---\n"
+        "CL-002 | b | fait |  | prouvé | haute | utiliser\n\n"
+        "## Autre\n\n| x | y |\n|---|---|\n| 1 | 2 |\n\n"
+        "## Claims (suite)\n\nC3 | b | fait |  | prouvé | haute | utiliser\n"
+        "Du texte sans barre.\n"
+    )
+    scan = scan_claim_rows(text)
+    assert scan.candidate_count == 3
+    assert len(scan.evaluated) == 2
+    assert scan.unevaluated_count == 1
+
+
+def test_pipeless_cl_row_is_a_candidate_outside_any_claims_section() -> None:
+    from grimoire.core.standard_checks.claim_ledger_verify import scan_claim_rows
+
+    scan = scan_claim_rows("# Ledger\n\nCL-002 | b | fait |  | prouvé | haute | utiliser\n")
+    assert scan.candidate_count == 1
+    assert scan.evaluated and scan.evaluated[0][1][0] == "CL-002"
+
+
+def test_prose_without_a_pipe_is_not_a_candidate() -> None:
+    from grimoire.core.standard_checks.claim_ledger_verify import scan_claim_rows
+
+    text = "## Claims\n\nCL-002 est discuté ici.\nTypes : `a \\| b`.\n\n```\nnote\n```\n"
+    assert scan_claim_rows(text).candidate_count == 0

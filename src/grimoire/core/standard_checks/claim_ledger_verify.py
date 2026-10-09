@@ -22,7 +22,10 @@ __all__ = ["ClaimRowScan", "scan_claim_rows", "v0_non_governed", "verify_claim_l
 _TEMPLATE_CELLS = ["CL-001", "", "fait", "", "hypothèse", "faible", "vérifier"]
 _TEMPLATE_CELLS_LOWER = [c.lower() for c in _TEMPLATE_CELLS]
 _ID_RE = re.compile(r"^CL-\d{3,}$")
-_CANDIDATE_RE = re.compile(r"^\s*\|\s*cl-", re.IGNORECASE)
+# Début de ligne candidate : citation GFM (``> ``) tolérée, barre initiale facultative.
+_CANDIDATE_RE = re.compile(r"^\s*(?:>\s*)*(\|\s*)?cl-", re.IGNORECASE)
+_QUOTE_RE = re.compile(r"^\s*(?:>\s*)+")
+_FENCE_RE = re.compile(r"^\s*(```|~~~)")
 _SECTION_RE = re.compile(r"^##\s+Claims\b", re.IGNORECASE)
 _SEPARATOR_CELL_RE = re.compile(r"^:?-+:?$")
 _STATUSES = frozenset({"prouvé", "hypothèse", "contredit", "réfuté"})
@@ -87,28 +90,48 @@ class ClaimRowScan:
         return len(self.unevaluated)
 
 
+def _is_candidate(line: str, in_section: bool, in_fence: bool) -> bool:
+    """Ligne retenue pour évaluation, avec ou sans barres extérieures (GFM les rend facultatives)."""
+    body = _QUOTE_RE.sub("", line)
+    has_lead = body.lstrip().startswith("|")
+    if has_lead and (in_section or _CANDIDATE_RE.match(line)):
+        return True
+    if in_fence:
+        return False
+    if not _UNESCAPED_PIPE_RE.search(body):
+        return False
+    return in_section or _CANDIDATE_RE.match(line) is not None
+
+
 def scan_claim_rows(text: str) -> ClaimRowScan:
     """Repère les lignes candidates sans aucune perte silencieuse.
 
-    Candidate = toute ligne de tableau de la section ``## Claims`` (tout titre de
-    niveau 2 qui commence par « Claims », donc aussi ``## Claims (registre)``),
-    hors en-tête, séparateur et ligne modèle, ou, où que ce soit dans le
-    fichier, toute ligne dont la première cellule commence par ``cl-`` (casse
-    et espaces tolérés). Une ligne candidate dont l'identifiant n'est pas
+    Candidate = toute ligne de tableau de toute section ``## Claims`` (tout titre
+    de niveau 2 qui commence par « Claims », donc aussi ``## Claims (registre)``,
+    et il peut y en avoir plusieurs), avec ou sans barres extérieures et sous
+    une citation ``> `` éventuelle, hors en-tête, séparateur et ligne modèle ;
+    ou, où que ce soit dans le fichier, toute ligne de tableau dont la première
+    cellule commence par ``cl-`` (casse et espaces tolérés). Une ligne sans
+    barre non échappée, ou dans un bloc de code sans barre initiale, n'est pas
+    une ligne de tableau. Une ligne candidate dont l'identifiant n'est pas
     ``CL-NNN``, dont la cellule Affirmation est vide, ou qui a moins de 7
     cellules est comptée non évaluée. La ligne modèle est reconnue sans égard à
     la casse.
     """
     lines = text.splitlines()
-    start = next((n for n, ln in enumerate(lines) if _SECTION_RE.match(ln.strip())), None)
-    in_section: set[int] = set()
-    if start is not None:
-        end = next((n for n in range(start + 1, len(lines)) if re.match(r"^##\s", lines[n])), len(lines))
-        in_section = {n for n in range(start + 1, end) if lines[n].strip().startswith("|")}
-    pool = [ln for n, ln in enumerate(lines) if n in in_section or _CANDIDATE_RE.match(ln)]
+    pool: list[str] = []
+    in_section = in_fence = False
+    for line in lines:
+        if _FENCE_RE.match(line):
+            in_fence = not in_fence
+        elif re.match(r"^##\s", line) or _SECTION_RE.match(line.strip()):
+            in_section = bool(_SECTION_RE.match(line.strip()))
+            in_fence = False
+        elif _is_candidate(line, in_section, in_fence):
+            pool.append(line)
     scan = ClaimRowScan()
     for line in pool:
-        cells = _cells(line)
+        cells = _cells(_QUOTE_RE.sub("", line))
         if cells[0].lower() == "id" or all(_SEPARATOR_CELL_RE.match(c) for c in cells):
             continue
         if [c.lower() for c in cells] == _TEMPLATE_CELLS_LOWER:
