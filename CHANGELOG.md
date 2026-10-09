@@ -7,6 +7,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- fix(memory,missions): `MemoryLint` et `MissionIntakeService` étaient du code mort — le premier n'était référencé que par `tools/__init__.py`, le second n'avait aucun appelant, et toute tâche naissait en `risk_profile` `standard`.
+- Nouvelle commande `grimoire memory lint [--json]` : sort en code 1 dès qu'une erreur est relevée (une contradiction entre fichiers de mémoire en est une), 0 sinon.
+- `TaskService.add` (donc `grimoire task add` et l'outil MCP `task_add`) pose le `risk_profile` de la tâche par l'intake déterministe, lu sur le titre ; il ne rabaisse rien ensuite.
+- Garde d'architecture : tout export de `grimoire.tools` doit avoir un appelant dans `cli/` ou `mcp/`, avec un cliquet sur les quatre orphelins restants (`AgentForge`, `ContextGuard`, `ContextRouter`, `PreflightCheck`).
+- Rouge-avant / vert-après : `tests/unit/test_w1_11_wire_or_delete.py` (6 tests, 4 rouges avant).
+- Non fait : l'appel de `memory lint` par `standard verify`, la proposition de relèvement quand le risque monte, et un intake qui lit autre chose que le titre. L'intake ne connaît que l'anglais : un titre français reste `standard`. Les quatre orphelins du cliquet ne sont ni branchés ni supprimés.
+
 ## [3.62.1] - 2026-10-03
 
 - fix(hosts): `Stop` nomme les claims concurrents au lieu de juger la tâche fantôme `bootstrap` (issue #692, suite de #680/#686 ; empilée sur la PR #696). Rejeu du 2026-10-02 : deux claims sans session, aucune écriture — `UserPromptSubmit` nommait les candidates et `grimoire task attach <id>`, mais `decide_evidence_gate` ne traitait l'ambiguïté qu'après une écriture et retombait sinon sur « Tâche bootstrap encore en état proposed ».

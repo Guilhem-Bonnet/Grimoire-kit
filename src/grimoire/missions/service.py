@@ -28,6 +28,7 @@ from grimoire.core.standard_generation import STANDARD_DIR
 from grimoire.core.standard_state import current_session, invalidate_cache
 from grimoire.missions.board import PRIORITIES, board_status_of, build_board, priority_of, write_board
 from grimoire.missions.gates import GateRefusal, GateVerdict, check_transition
+from grimoire.missions.intake import IntakeRequest, MissionIntakeService
 from grimoire.missions.ledger import MissionLedger
 from grimoire.missions.recall import DEFAULT_TOKEN_BUDGET, TaskRecall, build_task_recall, consolidate_task_memory
 from grimoire.missions.schemas import DIRECTIVE_KINDS, MissionTask, TaskClaim, TaskDirective, TaskState
@@ -285,8 +286,12 @@ class TaskService:
             else:
                 mission_id = ledger.create_mission(title=DEFAULT_MISSION_TITLE, origin=origin, created_by=actor).id
                 created_mission = True
+        # Le risque se pose à la création, par l'intake déterministe (W1-11) ; il
+        # ne se rabaisse jamais ensuite tout seul.
+        risk = MissionIntakeService().analyze(IntakeRequest(raw_text=title)).risk_profile
         task = ledger.create_task(
-            mission_id, title, acceptance=acceptance, owner=owner, expected_evidence=expected_evidence
+            mission_id, title, acceptance=acceptance, owner=owner, expected_evidence=expected_evidence,
+            risk_profile=risk,
         )
         if ready:
             task = self.transition(task.id, TaskState.READY, actor).task

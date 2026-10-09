@@ -336,3 +336,34 @@ def memory_status(ctx: typer.Context) -> None:
     console.print(tbl)
 
 
+
+
+# ── grimoire memory lint ──────────────────────────────────────────────────────
+
+
+@memory_app.command("lint")
+def memory_lint(
+    ctx: typer.Context,
+    project_root: Path = typer.Option(Path(), "--project-root", help="Racine du projet."),  # noqa: B008
+    as_json: bool = typer.Option(False, "--json", help="Rapport JSON sur stdout."),
+) -> None:
+    """Cohérence de la mémoire : contradictions, doublons, orphelins, péremption.
+
+    Sort en code 1 dès qu'une erreur est relevée (une contradiction entre deux
+    fichiers de mémoire en est une) ; les avertissements n'échouent pas.
+    """
+    from grimoire.tools.memory_lint import MemoryLint
+
+    report = MemoryLint(project_root.resolve()).run()
+    if as_json or _get_fmt(ctx) == "json":
+        typer.echo(json.dumps(report.to_dict(), indent=2, ensure_ascii=False))
+    else:
+        console.print(
+            f"{report.files_scanned} fichiers, {report.entries_scanned} entrées : "
+            f"{report.error_count} erreur(s), {report.warning_count} avertissement(s)"
+        )
+        for issue in report.issues:
+            if issue.severity == "error":
+                console.print(f"[red]✗[/red] {issue.title} — {issue.description}")
+    if report.error_count:
+        raise typer.Exit(1)
