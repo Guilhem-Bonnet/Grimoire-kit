@@ -161,6 +161,7 @@ def _done_gate_unevaluable(decision: Decision, hook: HookInput, task_id: str, pr
     """
     from grimoire.hosts.decisions.done_gate import (
         DoneGateVerdict,
+        caps_state_relpath,
         resolve_done_gate_block,
         resolve_done_gate_block_after_crash,
     )
@@ -168,6 +169,7 @@ def _done_gate_unevaluable(decision: Decision, hook: HookInput, task_id: str, pr
     cause = f"{type(exc).__name__}: {exc}"
     record_guard_error(hook.project_root, task_id, "done_gate", type(exc).__name__, str(exc))
     now_iso = datetime.now(UTC).isoformat()
+    remedy = ""
     try:
         enforce, blocked, capped = resolve_done_gate_block(
             hook.project_root, task_id, hook.session_id, profile, now_iso
@@ -178,19 +180,27 @@ def _done_gate_unevaluable(decision: Decision, hook: HookInput, task_id: str, pr
         record_guard_error(
             hook.project_root, task_id, "done_gate.resolution", type(resolution_exc).__name__, str(resolution_exc)
         )
-        enforce, blocked, capped = resolve_done_gate_block_after_crash(hook.project_root, task_id, profile)
+        enforce, blocked, capped = resolve_done_gate_block_after_crash(
+            hook.project_root, task_id, profile, hook.session_id
+        )
+        remedy = (
+            f"\nL'état de refroidissement et de plafond {caps_state_relpath(task_id).as_posix()} est illisible "
+            f"({type(resolution_exc).__name__}) : supprime ce fichier pour le réarmer."
+        )
     verdict = DoneGateVerdict(
         stale=False, reason=f"error:{type(exc).__name__}", enforce=enforce, blocked=blocked, capped=capped
     )
     detail = {**decision.detail, "done_gate": verdict.to_dict()}
     if blocked and decision.outcome is not Outcome.BLOCK:
         reason = (
-            f"[Grimoire] Tâche {task_id} : gate « fini » non évaluable (profil {profile}) — {cause}\n"
+            f"[Grimoire] Tâche {task_id} : gate « fini » non évaluable (profil {profile}) — {cause}{remedy}\n"
             f"Cette panne est tracée (guard.error, visible via `grimoire standard verify --task-id {task_id}`). "
             "Si la tâche doit rester ouverte, dis-le explicitement à l'utilisateur au lieu de conclure."
         )
         return replace(decision, outcome=Outcome.BLOCK, reason=reason, detail=detail)
-    warning = f"[Grimoire] Avertissement : gate « fini » non évaluable pour {task_id} (profil {profile}) — {cause}"
+    warning = (
+        f"[Grimoire] Avertissement : gate « fini » non évaluable pour {task_id} (profil {profile}) — {cause}{remedy}"
+    )
     context = f"{decision.context}\n{warning}" if decision.context else warning
     return replace(decision, context=context, detail=detail)
 

@@ -78,6 +78,14 @@ __all__ = ["DoneGateVerdict", "evaluate_done_gate", "resolve_done_gate_block", "
 #: for, and it must never be committed.
 _CAPS_STATE_FILENAME = "done-gate-state.json"
 
+#: Sidecar of the "after a crash of the resolution" path (W1-06) : the sessions
+#: already refused once there. Separate from :data:`_CAPS_STATE_FILENAME` on
+#: purpose — that file is exactly what could not be read when this path runs.
+_CRASH_BLOCKS_FILENAME = "done-gate-crash-blocks.json"
+
+#: Sessions remembered in that sidecar (oldest dropped) — keeps the file bounded.
+_CRASH_BLOCKS_MAX = 50
+
 #: One refusal per task per this many seconds (jev-belay/pi-warden: "60 s").
 _COOLDOWN_SECONDS = 60.0
 
@@ -387,14 +395,20 @@ def _caps_path(project_root: Path, task_id: str) -> Path:
     return project_root / evidence_log_relpath(task_id).parent / _CAPS_STATE_FILENAME
 
 
+def caps_state_relpath(task_id: str) -> Path:
+    """Project-relative path of the cooldown/cap state of *task_id* (named in the messages that ask to delete it)."""
+    return evidence_log_relpath(task_id).parent / _CAPS_STATE_FILENAME
+
+
+def _crash_blocks_path(project_root: Path, task_id: str) -> Path:
+    return project_root / evidence_log_relpath(task_id).parent / _CRASH_BLOCKS_FILENAME
+
+
 def _load_caps(path: Path) -> dict[str, Any]:
+    """The JSON object stored at *path*, ``{}`` when missing, unreadable, not UTF-8 or not an object."""
     try:
-        raw = path.read_text(encoding="utf-8")
-    except OSError:
-        return {}
-    try:
-        data = json.loads(raw)
-    except ValueError:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):  # ``UnicodeDecodeError`` and ``JSONDecodeError`` are ``ValueError``
         return {}
     return data if isinstance(data, dict) else {}
 
@@ -415,8 +429,9 @@ def _save_caps(path: Path, data: dict[str, Any]) -> None:
 def _seconds_between(a: str, b: str) -> float:
     try:
         return abs((datetime.fromisoformat(b) - datetime.fromisoformat(a)).total_seconds())
-    except ValueError:
-        # Unparseable state: never let a corrupt timestamp hold a cooldown
+    except (ValueError, TypeError):
+        # Unparseable state (or a naive timestamp against an aware one, which
+        # raises ``TypeError``): never let a corrupt timestamp hold a cooldown
         # open forever — treat it as long enough ago to have expired.
         return _COOLDOWN_SECONDS + 1.0
 
@@ -472,13 +487,20 @@ def resolve_done_gate_block(
     return enforce, False, False
 
 
-def resolve_done_gate_block_after_crash(project_root: Path, task_id: str, profile: str) -> tuple[bool, bool, bool]:
+def resolve_done_gate_block_after_crash(
+    project_root: Path, task_id: str, profile: str, session_id: str = ""
+) -> tuple[bool, bool, bool]:
     """``(enforce, blocked, capped)`` quand :func:`resolve_done_gate_block` a lui-même planté (W1-06).
 
     Fail-closed là où le profil le promet : profil bloquant ET opt-in
-    ``enforce`` → ``blocked`` (le refroidissement et le plafond, dont l'état est
-    justement ce qui n'a pas pu être lu, sont suspendus : ``stop_active`` laisse
-    de toute façon passer le second ``Stop``). Ailleurs, jamais de refus.
+    ``enforce`` → ``blocked``. Mais le refroidissement et le plafond de session
+    ne peuvent plus s'appuyer sur leur état (c'est justement lui qui n'a pas pu
+    être lu) : un sidecar minimal (``done-gate-crash-blocks.json``) retient les
+    sessions déjà refusées une fois ici, et une session ne l'est qu'une fois —
+    la règle « prévenue une fois, pas bouclée » s'applique aussi à ce chemin.
+    Un sidecar illisible compte pour vide (refus fail-closed, réécrit sain) ; un
+    sidecar impossible à écrire ne peut rien retenir (l'hôte laisse de toute
+    façon passer le second ``Stop``, ``stop_active``). Ailleurs, jamais de refus.
     ``enforce`` est relu séparément (``_is_enforced`` trace sa propre panne) au
     lieu d'être réécrit à ``False``.
     """
@@ -487,7 +509,16 @@ def resolve_done_gate_block_after_crash(project_root: Path, task_id: str, profil
     except Exception as exc:
         record_guard_error(project_root, task_id, "done_gate.enforce_option", type(exc).__name__, str(exc))
         enforce = False
-    return enforce, profile in BLOCKING_PROFILES and enforce, False
+    if not (enforce and profile in BLOCKING_PROFILES):
+        return enforce, False, False
+    path = _crash_blocks_path(project_root, task_id)
+    raw = _load_caps(path).get("sessions")
+    sessions = [s for s in raw if isinstance(s, str)] if isinstance(raw, list) else []
+    sid = session_id or "unknown"
+    if sid in sessions:
+        return enforce, False, True
+    _save_caps(path, {"sessions": [*sessions, sid][-_CRASH_BLOCKS_MAX:]})
+    return enforce, True, False
 
 
 def evaluate_done_gate(hook: Any, task_id: str, profile: str, *, now_iso: str | None = None) -> DoneGateVerdict:

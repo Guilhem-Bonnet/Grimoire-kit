@@ -317,3 +317,133 @@ def test_a_full_guard_journal_rotates_and_keeps_the_latest_failure(tmp_path: Pat
     message = describe_guard_errors(tmp_path, "T-1")
     assert "« autre »" in message
     assert "écartées" in message
+
+
+# --- troisième relecture W1-06 : T3-01 (octets illisibles), T3-02 (boucle après panne), dédoublonnage ---
+
+_CUT_MULTIBYTE = b'{"type": "guard.error", "guard_id": "g", "error_message": "caf\xc3'  # coupé dans « é »
+
+
+def _write_bytes(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+
+
+def test_a_guard_journal_cut_inside_a_multibyte_character_keeps_the_in_progress_block(
+    tmp_path: Path, enforce: None
+) -> None:
+    root = _project(tmp_path, "governed")
+    _write_bytes(root / guard_events_relpath("bootstrap"), _CUT_MULTIBYTE)
+    decision = _stop(root, "s-1")  # ne doit pas lever : un ALLOW silencieux vaudrait un fail-open
+    assert decision.outcome is Outcome.BLOCK  # type: ignore[attr-defined]
+    assert decision.detail["done_gate"]["reason"] == "error:RuntimeError"  # type: ignore[attr-defined]
+    assert [e["guard_id"] for e in read_guard_events(root, "bootstrap")] == ["done_gate"]
+
+
+def test_an_evidence_log_cut_inside_a_multibyte_character_is_read_line_by_line(tmp_path: Path) -> None:
+    from grimoire.core.standard_checks.evidence_journal import read_evidence_log
+
+    good = b'{"type": "bash", "command": "ls"}\n'
+    _write_bytes(tmp_path / evidence_log_relpath("T-1"), good + b'{"type": "bash", "command": "caf\xc3\n' + good)
+    assert [e["command"] for e in read_evidence_log(tmp_path, "T-1")] == ["ls", "ls"]
+    assert has_observed_inventory(tmp_path, "T-1")
+
+
+def test_verify_and_gate_check_survive_an_unreadable_guard_journal(tmp_path: Path, shadow: None) -> None:
+    from grimoire.core.agentic_standard import check_evidence_gates, verify_standard_profile
+
+    root = _project(tmp_path, "governed")
+    _write_bytes(root / guard_events_relpath("bootstrap"), _CUT_MULTIBYTE)
+    _write_bytes(root / evidence_log_relpath("bootstrap"), _CUT_MULTIBYTE)
+    verify_standard_profile(root, task_id="bootstrap")
+    check_evidence_gates(root, task_id="bootstrap", target_state="review")
+
+
+def test_the_best_effort_writers_never_raise(tmp_path: Path) -> None:
+    from grimoire.core.standard_checks.evidence_journal import append_evidence_event, record_guard_error
+
+    _write_bytes(tmp_path / guard_events_relpath("T-1"), _CUT_MULTIBYTE)
+    record_guard_error(tmp_path, "T-1", "g", "ValueError", "café")
+    record_guard_error(tmp_path, "T-2", "g", "ValueError", "lone surrogate \ud800")  # non encodable en UTF-8
+    append_evidence_event(tmp_path, "T-2", {"type": "bash", "command": "echo \ud800"})
+
+
+def test_an_unreadable_caps_state_is_treated_as_empty(tmp_path: Path, enforce: None) -> None:
+    from grimoire.hosts.decisions.done_gate import resolve_done_gate_block
+
+    root = _project(tmp_path, "governed")
+    _write_bytes(
+        root / evidence_log_relpath("bootstrap").parent / "done-gate-state.json", b'{"last_block_ts": "caf\xc3'
+    )
+    assert resolve_done_gate_block(root, "bootstrap", "s-1", "governed", _NOW) == (True, True, False)
+
+
+def test_a_naive_timestamp_in_the_caps_state_counts_as_an_expired_cooldown(tmp_path: Path, enforce: None) -> None:
+    from grimoire.hosts.decisions.done_gate import resolve_done_gate_block
+
+    root = _project(tmp_path, "governed")
+    state = root / evidence_log_relpath("bootstrap").parent / "done-gate-state.json"
+    state.parent.mkdir(parents=True, exist_ok=True)
+    state.write_text(
+        json.dumps({"last_block_ts": "2026-10-09T00:00:00", "session_blocks": {"s-1": 1}}), encoding="utf-8"
+    )
+    assert resolve_done_gate_block(root, "bootstrap", "s-1", "governed", _NOW) == (True, True, False)
+    assert read_guard_events(root, "bootstrap") == []
+    # L'état est réécrit avec un horodatage valide : le refroidissement s'applique de nouveau.
+    assert resolve_done_gate_block(root, "bootstrap", "s-1", "governed", _NOW) == (True, False, True)
+
+
+def test_a_resolution_crash_blocks_once_per_session_not_on_every_stop(tmp_path: Path, enforce: None) -> None:
+    root = _project(tmp_path, "governed")
+    with patch(_RESOLVE, side_effect=ValueError("état illisible")):
+        first = _stop(root, "s-1")
+        again = [_stop(root, "s-1") for _ in range(4)]
+        other = _stop(root, "s-2")
+        other_again = _stop(root, "s-2")
+    assert first.outcome is Outcome.BLOCK  # type: ignore[attr-defined]
+    assert [d.outcome for d in again] == [Outcome.ALLOW] * 4  # type: ignore[attr-defined]
+    assert all(d.detail["done_gate"]["capped"] is True for d in again)  # type: ignore[attr-defined]
+    assert other.outcome is Outcome.BLOCK  # type: ignore[attr-defined]  # une autre session est prévenue à son tour
+    assert other_again.outcome is Outcome.ALLOW  # type: ignore[attr-defined]
+
+
+def test_the_reason_after_a_resolution_crash_names_the_corrupted_file_and_the_remedy(
+    tmp_path: Path, enforce: None
+) -> None:
+    root = _project(tmp_path, "governed")
+    with patch(_RESOLVE, side_effect=ValueError("état illisible")):
+        decision = _stop(root, "s-1")
+    reason = decision.reason  # type: ignore[attr-defined]
+    expected = (evidence_log_relpath("bootstrap").parent / "done-gate-state.json").as_posix()
+    assert expected in reason
+    assert "supprime" in reason
+
+
+def test_alternating_guard_errors_are_deduplicated_per_guard(tmp_path: Path) -> None:
+    from grimoire.core.standard_checks.evidence_journal import describe_guard_errors, record_guard_error
+
+    for _ in range(5):
+        record_guard_error(tmp_path, "T-1", "done_gate", "TypeError", "naive")
+        record_guard_error(tmp_path, "T-1", "done_gate.resolution", "TypeError", "naive")
+    events = read_guard_events(tmp_path, "T-1")
+    assert [(e["guard_id"], e.get("count", 1)) for e in events] == [("done_gate", 5), ("done_gate.resolution", 5)]
+    # La dernière ligne reste la panne la plus récente.
+    record_guard_error(tmp_path, "T-1", "done_gate", "TypeError", "naive")
+    events = read_guard_events(tmp_path, "T-1")
+    assert [(e["guard_id"], e["count"]) for e in events] == [("done_gate.resolution", 5), ("done_gate", 6)]
+    assert describe_guard_errors(tmp_path, "T-1").startswith("11 panne(s)")
+
+
+def test_an_event_appended_after_a_cut_line_is_not_glued_to_it(tmp_path: Path) -> None:
+    from grimoire.core.standard_checks.evidence_journal import (
+        append_evidence_event,
+        read_evidence_log,
+        record_guard_error,
+    )
+
+    _write_bytes(tmp_path / guard_events_relpath("T-1"), _CUT_MULTIBYTE)
+    record_guard_error(tmp_path, "T-1", "g", "ValueError", "après la coupure")
+    assert [e["error_message"] for e in read_guard_events(tmp_path, "T-1")] == ["après la coupure"]
+    _write_bytes(tmp_path / evidence_log_relpath("T-1"), b'{"type": "bash", "command": "caf\xc3')
+    append_evidence_event(tmp_path, "T-1", {"type": "bash", "command": "ls"})
+    assert [e["command"] for e in read_evidence_log(tmp_path, "T-1")] == ["ls"]
