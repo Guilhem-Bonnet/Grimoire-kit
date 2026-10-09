@@ -30,6 +30,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import re
 import sys
 from collections.abc import Iterator
@@ -126,7 +127,21 @@ def collect_pinned_refs(filepath: Path) -> list[str]:
     ]
 
 
+def _force_utf8_output() -> None:
+    """Le garde imprime ✓, ✗ et des accents : une console cp1252 (Windows) ne doit pas le tuer.
+
+    Autonome à dessein (pas d'import du paquet `grimoire`, absent de l'étape lint).
+    `errors="replace"` : un caractère non représentable dégrade l'affichage, pas le verdict.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            with contextlib.suppress(OSError, ValueError):
+                reconfigure(encoding="utf-8", errors="replace")
+
+
 def main() -> None:
+    _force_utf8_output()
     parser = argparse.ArgumentParser(description="Vérifie que toutes les GitHub Actions sont épinglées par SHA")
     parser.add_argument(
         "--root",

@@ -210,6 +210,35 @@ class TestF6VersionComment:
         assert result.returncode != 0
 
 
+class TestConsoleEncoding:
+    """Le garde imprime ✓/✗/é : une console non UTF-8 (cp1252 sous Windows) ne doit pas le tuer."""
+
+    @staticmethod
+    def _run_cp1252(root: Path) -> subprocess.CompletedProcess[bytes]:
+        env = {k: v for k, v in os.environ.items() if k != "PYTHONUTF8"}
+        env["PYTHONIOENCODING"] = "cp1252"
+        return subprocess.run(
+            [sys.executable, str(SCRIPT_PATH), "--root", str(root)],
+            capture_output=True,
+            timeout=60,
+            check=False,
+            env=env,
+        )
+
+    def test_conforming_workflow_passes_under_cp1252(self, tmp_path: Path) -> None:
+        _workflow(tmp_path, _steps(f"- uses: actions/checkout@{SHA}  # v7"))
+        result = self._run_cp1252(tmp_path)
+        assert result.returncode == 0, result.stderr.decode("utf-8", "replace")
+        assert "✓".encode() in result.stdout
+
+    def test_failure_report_survives_cp1252(self, tmp_path: Path) -> None:
+        _workflow(tmp_path, _steps("- uses: actions/checkout@v1"))
+        result = self._run_cp1252(tmp_path)
+        assert result.returncode == 1
+        assert b"UnicodeEncodeError" not in result.stderr
+        assert b"actions/checkout@v1" in result.stderr
+
+
 class TestF4Root:
     """F4 : le garde ne dépend plus du cwd."""
 
