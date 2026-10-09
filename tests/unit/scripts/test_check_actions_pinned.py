@@ -136,14 +136,15 @@ jobs:
         assert "checkout@a83e7850d592aacd9ed61157eb88bafe1c4b8289" not in result.stderr
 
     def test_current_repo_workflows(self):
-        """Teste le repo actuel - doit échouer car des actions ne sont pas épinglées."""
-        # Ce test provoque l'état ROUGE sur origin/main
-        # car les workflows actuels ont des actions non épinglées
+        """Teste le repo actuel - doit réussir après le correctif."""
+        # Ce test passe sur la branche avec le correctif D-02
+        # et échoue sur origin/main (où les actions ne sont pas épinglées)
         result = subprocess.run(
             [sys.executable, str(SCRIPT_PATH)],
             capture_output=True,
             text=True
         )
 
-        # On DOIT échouer au départ pour prouver que le défaut existe
-        assert result.returncode != 0, "Le repo actuel doit avoir des actions non épinglées"
+        # Après le correctif, le repo doit avoir toutes les actions épinglées
+        assert result.returncode == 0, f"Le repo doit avoir toutes les actions épinglées.\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        assert "✓" in result.stdout
