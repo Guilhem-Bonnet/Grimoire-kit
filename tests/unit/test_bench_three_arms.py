@@ -193,6 +193,19 @@ def test_prepare_task_repo_has_single_initial_commit(synthetic_bench_root: Path,
     assert "état initial" in result.stdout
 
 
+def test_errata_lot_j_contamination_is_present() -> None:
+    """Lot J : vérifier que l'errata documenting the contamination issue est présent.
+
+    W1-08a exige l'errata daté dans le dossier docs/bench/.
+    """
+    errata_path = ROOT / "docs" / "bench" / "ERRATA-lot-j-contamination.md"
+    assert errata_path.is_file(), f"L'errata doit exister à {errata_path}"
+    content = errata_path.read_text(encoding="utf-8")
+    assert "Lot J" in content
+    assert "#694" in content
+    assert "W1-08a" in content
+
+
 # ── 3. Détection de succès sur tests verts/rouges ──────────────────────────
 
 

@@ -7,6 +7,11 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- fix(bench): `prepare_task_repo` refuse un dossier non vide pour éviter la contamination par les tests cachés (issue #694, W1-08a). Lot J : 30/60 dossiers `kit-gov` avaient été réutilisés d'une tentative antérieure, les tests cachés devenaient visibles et le succès de 96,7 % était surévalué.
+  - `scripts/bench/three_arms.py::prepare_task_repo` : lève `FileExistsError` si le dossier de destination existe et n'est pas vide.
+  - Nouveau fichier `docs/bench/ERRATA-lot-j-contamination.md` : impact chiffré et remède.
+  - Rouge-avant / vert-après : `tests/unit/test_bench_three_arms.py` (3 tests, 1 rouge avant : `test_prepare_task_repo_refuses_non_empty_directory`).
+
 ## [3.62.1] - 2026-10-03
 
 - fix(hosts): `Stop` nomme les claims concurrents au lieu de juger la tâche fantôme `bootstrap` (issue #692, suite de #680/#686 ; empilée sur la PR #696). Rejeu du 2026-10-02 : deux claims sans session, aucune écriture — `UserPromptSubmit` nommait les candidates et `grimoire task attach <id>`, mais `decide_evidence_gate` ne traitait l'ambiguïté qu'après une écriture et retombait sinon sur « Tâche bootstrap encore en état proposed ».
