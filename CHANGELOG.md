@@ -7,6 +7,9 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- fix(hooks): exception dans done_gate tracée comme guard.error au lieu de passer silencieusement (W1-06). `evidence_gate.py:_with_done_gate` captait une exception dans `evaluate_done_gate` et retournait `stale=False`, ce qui signifiait que le gate passait silencieusement (fail-open). Nouvelle fonction `_record_guard_error` écrit un événement `guard_error` dans le journal des événements, et le verdict devient `stale=True` pour bloquer fail-closed. L'événement est lisible par `grimoire verify`.
+  - Rouge-avant / vert-après : `tests/unit/test_hosts.py::test_done_gate_exception_traces_error_not_silent_allow` (1 test, 1 rouge avant).
+
 ## [3.62.1] - 2026-10-03
 
 - fix(hosts): `Stop` nomme les claims concurrents au lieu de juger la tâche fantôme `bootstrap` (issue #692, suite de #680/#686 ; empilée sur la PR #696). Rejeu du 2026-10-02 : deux claims sans session, aucune écriture — `UserPromptSubmit` nommait les candidates et `grimoire task attach <id>`, mais `decide_evidence_gate` ne traitait l'ambiguïté qu'après une écriture et retombait sinon sur « Tâche bootstrap encore en état proposed ».

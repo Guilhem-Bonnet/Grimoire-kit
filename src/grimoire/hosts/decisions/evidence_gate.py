@@ -126,8 +126,14 @@ def _with_done_gate(decision: Decision, hook: HookInput, task_id: str, profile: 
     try:
         verdict = evaluate_done_gate(hook, task_id, profile)
     except Exception as exc:
+        # W1-06: Record the error and fail-closed (stale=True, blocked=True)
+        _record_guard_error(hook, task_id, "done_gate", str(exc), type(exc).__name__)
         verdict = DoneGateVerdict(
-            stale=False, reason=f"error:{type(exc).__name__}", enforce=False, blocked=False, capped=False
+            stale=True,
+            reason=f"error:{type(exc).__name__}",
+            enforce=True,  # Force evaluation as if enforced to block
+            blocked=True,  # Block if in a blocking profile
+            capped=False,
         )
     detail = {**decision.detail, "done_gate": verdict.to_dict()}
     if not verdict.stale:
@@ -148,6 +154,36 @@ def _with_done_gate(decision: Decision, hook: HookInput, task_id: str, profile: 
         context = f"{decision.context}\n{warning}" if decision.context else warning
         return replace(decision, context=context, detail=detail)
     return replace(decision, detail=detail)
+
+
+def _record_guard_error(
+    hook: HookInput, task_id: str, guard_id: str, error_message: str, error_type: str
+) -> None:
+    """W1-06: Record a guard error event for ``verify`` to report.
+
+    Writes to the evidence log so the error is traceable and visible in
+    ``grimoire verify``. Best-effort: if the write fails, do not break the hook.
+    """
+    import json
+    from datetime import UTC, datetime
+
+    from grimoire.core.standard_checks.evidence_journal import evidence_log_relpath
+
+    try:
+        log_dir = hook.project_root / evidence_log_relpath(task_id).parent
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = log_dir / "evidence-log.jsonl"
+        event = {
+            "type": "guard_error",
+            "guard_id": guard_id,
+            "error_type": error_type,
+            "error_message": error_message,
+            "ts": datetime.now(UTC).isoformat(),
+        }
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(event) + "\n")
+    except Exception:  # noqa: S110 — best-effort: do not break the hook
+        pass
 
 
 def _record_done_gate_hold(hook: HookInput, task_id: str) -> None:
