@@ -1,0 +1,25 @@
+# Empreintes gitleaks acceptées au 2026-10-09 (D-08), relevées par le premier scan complet.
+# Tous les motifs sont dans des fixtures de test, des exemples de documentation ou des
+# manifestes de hachage (src/.../validation.py, tests/, test/, bmad/_cfg/*.csv) ; relevé
+# automatique, valeurs masquées : à confirmer par un humain avant de s'y fier.
+3e3c92ed3e80307674a8c38092aa19292db4e32b:src/modules/bmm/testarch/knowledge/api-testing-patterns.md:generic-api-key:682
+5ee4cf535c81255e3245aaf5545908a8f4f8b866:bmad/_cfg/files-manifest.csv:generic-api-key:216
+5ee4cf535c81255e3245aaf5545908a8f4f8b866:bmad/_cfg/files-manifest.csv:generic-api-key:95
+7eb52520fa001b98a6827b7f022eb61ee198209a:.bmad/_cfg/files-manifest.csv:generic-api-key:114
+a2fc1ab9de72362804b5b9eb1118f06c57028190:tests/unit/test_hook_ledger.py:curl-auth-header:82
+aad132c9b1d4ce25904589d1a2979b39af1eba77:test/adversarial-review-tests/sample-content.md:generic-api-key:24
+ab05cdcdd2cf29e31d4716dfc00fd644d42f5691:bmad/_cfg/files-manifest.csv:generic-api-key:100
+ab05cdcdd2cf29e31d4716dfc00fd644d42f5691:bmad/_cfg/files-manifest.csv:generic-api-key:228
+b61d92b093ea6f9fa84f34322b9cf0eb6535fc05:tests/unit/test_hook_ledger.py:curl-auth-header:82
+cfedecbd53514ef208c38e4fc69ee302bd4777d2:bmad/_cfg/files-manifest.csv:generic-api-key:113
+e28d68e958d4bfba3aeb7bbae99c074a202fbf84:src/grimoire/memory/validation.py:generic-api-key:142
+e28d68e958d4bfba3aeb7bbae99c074a202fbf84:tests/unit/memory/test_write_validation.py:generic-api-key:50
+e28d68e958d4bfba3aeb7bbae99c074a202fbf84:tests/unit/memory/test_write_validation.py:generic-api-key:51
+e28d68e958d4bfba3aeb7bbae99c074a202fbf84:tests/unit/memory/test_write_validation.py:github-pat:44
+e28d68e958d4bfba3aeb7bbae99c074a202fbf84:tests/unit/memory/test_write_validation.py:github-pat:502
+e28d68e958d4bfba3aeb7bbae99c074a202fbf84:tests/unit/memory/test_write_validation.py:github-pat:505
+e28d68e958d4bfba3aeb7bbae99c074a202fbf84:tests/unit/memory/test_write_validation.py:jwt:49
+e28d68e958d4bfba3aeb7bbae99c074a202fbf84:tests/unit/memory/test_write_validation.py:jwt:545
+f077a31aa05a1a368e6434b74dc5b4375dad061f:bmad/_cfg/files-manifest.csv:generic-api-key:213
+f077a31aa05a1a368e6434b74dc5b4375dad061f:bmad/_cfg/files-manifest.csv:generic-api-key:96
+ffcc85f6e72e84d22867892e9ebcb0e3e02498b5:tests/test_evaluator.py:generic-api-key:183

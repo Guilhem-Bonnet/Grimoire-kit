@@ -38,8 +38,9 @@ jobs:
       # pannes qu'ils couvrent sont silencieuses au moment du tag et coûteuses
       # des mois plus tard, chez les projets installés.
       - name: Le tag et version.txt disent la même chose
+        env:
+          TAG: ${{ github.ref_name || inputs.tag }}
         run: |
-          TAG="${{ github.ref_name || inputs.tag }}"
           DECLARED="v$(tr -d '[:space:]' < version.txt)"
           if [[ "$TAG" != "$DECLARED" ]]; then
             echo "::error::tag $TAG mais version.txt annonce $DECLARED."

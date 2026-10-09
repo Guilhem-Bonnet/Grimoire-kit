@@ -7,10 +7,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
-- chore(ci): scan de secrets sur l'historique et audit statique des permissions des workflows (issue #???). Deux nouvelles étapes de CI pour durcir la sécurité :
-  - Un job `gitleaks` qui scrute tout l'historique git pour détecter les secrets accidentellement commités, actif sur les PR.
-  - Un audit statique des permissions des workflows (`audit-workflow-permissions.py`) qui refuse les permissions `write-all` et les permissions excessives sur les ressources sensibles.
-  - Nouvelle suite de tests `tests/ci/test_secret_scan.py` (5 tests).
+- chore(ci): scan de secrets sur tout l'historique et audit statique des workflows (D-08, ENG-14). Constat : aucun des deux n'existait. Ce qui change : `.github/workflows/secret-scan.yml` s'exécute sur toutes les PR (sans filtre `paths`) et sur `main`, installe le binaire gitleaks 8.30.1 épinglé et vérifié par sha256, puis `gitleaks git --redact --exit-code 1` sur l'historique complet (`fetch-depth: 0`) ; 21 empreintes déjà présentes dans l'historique (fixtures de test, exemples de doc, manifestes de hachage) sont listées dans `.gitleaksignore`. `scripts/ci/audit-workflow-permissions.py` sort en 1 sur : `write-all`, toute permission `write` absente de la liste blanche par workflow et par job, interpolation `${{ github.event.* }}` / `github.head_ref` / `github.ref_name` / `inputs.*` dans `run:` ou `script:`, `pull_request_target` combiné à un checkout de la PR, et toute erreur d'analyse (YAML invalide, lecture impossible, racine ou `jobs` non-mapping, fichier vide). Lecture en UTF-8, sorties ASCII. Deux workflows existants passent la valeur par `env:` (`release.yml`, `weekly-bench.yml`). Rouge-avant / vert-après : `tests/unit/test_secret_scan.py` (23 tests, 15 rouges avant). Non fait : le check n'est pas rendu requis (protection de `main`), actions non épinglées par SHA (D-02), les 21 empreintes ignorées n'ont pas été relues une à une, aucun run CI réel du workflow.
 
 ## [3.62.1] - 2026-10-03
 
