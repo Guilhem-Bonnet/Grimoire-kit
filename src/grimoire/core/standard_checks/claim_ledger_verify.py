@@ -67,13 +67,19 @@ def verify_claim_ledger(
         claim_id, _claim, _kind, proof, status, _confidence, decision = cells[:7]
         if status == "prouvé" and not proof:
             _add_check(
-                result, "claims.proved_without_evidence", "error",
-                f"{claim_id} is marked prouvé with no source or evidence.", path=rel_path,
+                result,
+                "claims.proved_without_evidence",
+                "error",
+                f"{claim_id} is marked prouvé with no source or evidence.",
+                path=rel_path,
             )
         if decision == "utiliser" and status != "prouvé":
             _add_check(
-                result, "claims.used_unproved", "error" if strict else "warning",
-                f"{claim_id} is used while its status is {status}.", path=rel_path,
+                result,
+                "claims.used_unproved",
+                "error" if strict else "warning",
+                f"{claim_id} is used while its status is {status}.",
+                path=rel_path,
             )
     if strict and rows and not rows_only and "| Affirmations bloquantes non prouvées |  |" in text:
         _add_check(result, "claims.summary_placeholder", "error", "Claim ledger summary is still empty.", path=rel_path)
