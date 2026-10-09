@@ -744,3 +744,228 @@ def test_missing_gitleaks_fails_when_required_and_skips_otherwise(tmp_path: Path
     assert skipped.returncode == 0 and "1 skipped" in skipped.stdout, skipped.stdout + skipped.stderr
     required = run({**base, "GRIMOIRE_REQUIRE_GITLEAKS": "1"})
     assert required.returncode == 1 and "GRIMOIRE_REQUIRE_GITLEAKS" in required.stdout, required.stdout
+
+
+# --- D08-T3-01 : .gitleaksignore ne double pas l'exemption par chemin -----------------------
+
+
+def test_gitleaksignore_has_no_fingerprint_for_a_path_already_exempt() -> None:
+    regexes = [re.compile(p) for al in _config()["allowlists"] for p in al.get("paths", [])]
+    redundant = [
+        line
+        for line in (ROOT / ".gitleaksignore").read_text(encoding="utf-8").splitlines()
+        if line and not line.startswith("#") and any(rx.search(line.split(":")[1]) for rx in regexes)
+    ]
+    assert not redundant, f"empreintes déjà couvertes par .gitleaks.toml : {redundant}"
+
+
+def test_gitleaksignore_lists_exactly_the_two_leaks_left_by_the_config() -> None:
+    lines = [
+        line
+        for line in (ROOT / ".gitleaksignore").read_text(encoding="utf-8").splitlines()
+        if line and not line.startswith("#")
+    ]
+    assert len(lines) == 2, lines
+    assert {line.split(":")[1] for line in lines} == {
+        "src/grimoire/memory/validation.py",
+        "tests/unit/test_hook_ledger.py",
+    }
+
+
+# --- D08-T3-02 : clone, worktree, reset, archive, workflow_run, casse de ``uses`` ------------
+
+WORKFLOW_RUN = "\n  workflow_run:\n    workflows: [ci]"
+HEAD_SHA_ENV = "      - env:\n          SHA: ${{ github.event.pull_request.head.sha }}\n        run: "
+
+
+@pytest.mark.parametrize(
+    "step",
+    [
+        "      - env:\n          URL: ${{ github.event.pull_request.head.repo.clone_url }}\n"
+        '        run: git clone "$URL" pr && make -C pr\n',
+        HEAD_SHA_ENV + 'git worktree add pr "$SHA"\n',
+        HEAD_SHA_ENV + 'git reset --hard "$SHA"\n',
+        HEAD_SHA_ENV + 'git cherry-pick "$SHA"\n',
+        HEAD_SHA_ENV + 'git -C repo fetch origin "$SHA"\n',
+        "      - env:\n          N: ${{ github.event.number }}\n          GH_TOKEN: x\n"
+        "        run: gh api repos/o/r/tarball/refs/pull/$N/head > pr.tgz\n",
+        "      - env:\n          SHA: ${{ github.event.pull_request.head.sha }}\n"
+        '        run: curl -sL "https://github.com/o/r/archive/$SHA.tar.gz" | tar xz\n',
+        _checkout("ref: ${{ github.event.pull_request.head.sha }}").replace("actions/checkout", "Actions/Checkout"),
+    ],
+    ids=["clone", "worktree", "reset", "cherry-pick", "git-dash-C", "gh-api-tarball", "curl-archive", "uses-uppercase"],
+)
+def test_pull_request_target_other_ways_to_get_pr_code_fail(tmp_path: Path, step: str) -> None:
+    res = audit(tmp_path, workflow(step, on=TARGET))
+    assert res.returncode == 1, res.stdout
+    assert "checks out PR code under pull_request_target" in res.stdout
+
+
+@pytest.mark.parametrize(
+    "step",
+    [
+        _checkout("ref: ${{ github.event.workflow_run.head_sha }}"),
+        _checkout("ref: ${{ github.event.workflow_run.head_branch }}"),
+        HEAD_SHA_ENV.replace("pull_request.head.sha", "workflow_run.head_sha") + 'git fetch origin "$SHA"\n',
+    ],
+    ids=["head-sha", "head-branch", "fetch-env"],
+)
+def test_workflow_run_checking_out_the_triggering_head_fails(tmp_path: Path, step: str) -> None:
+    res = audit(tmp_path, workflow(step, on=WORKFLOW_RUN))
+    assert res.returncode == 1, res.stdout
+    assert "checks out PR code under workflow_run" in res.stdout
+
+
+@pytest.mark.parametrize(
+    "step",
+    [
+        "      - uses: actions/checkout@v7\n",
+        _checkout("ref: ${{ github.sha }}"),
+        "      - run: git fetch origin main\n",
+    ],
+    ids=["default", "github-sha", "fetch-main"],
+)
+def test_workflow_run_without_head_checkout_passes(tmp_path: Path, step: str) -> None:
+    res = audit(tmp_path, workflow(step, on=WORKFLOW_RUN))
+    assert res.returncode == 0, res.stdout
+
+
+def test_audit_doc_lists_what_it_does_not_cover() -> None:
+    doc = SCRIPT.read_text(encoding="utf-8")
+    assert "Limites" in doc and "workflow_run" in doc
+
+
+# --- D08-T3-03 : GITHUB_ENV et matrix -------------------------------------------------------
+
+GH_ENV_WRITE = (
+    "      - env:\n          T: ${{{{ github.event.pull_request.title }}}}\n        run: {run}\n"
+    "      - run: echo ${{{{ env.X }}}}\n"
+)
+
+
+@pytest.mark.parametrize(
+    "run",
+    [
+        'echo "X=$T" >> "$GITHUB_ENV"',
+        "echo X=$T >> $GITHUB_ENV",
+        'echo "X=$T" | tee -a "$GITHUB_ENV"',
+        "echo \"${NAME}=$T\" >> '$GITHUB_ENV'",
+        '|\n          {\n            echo \'X<<EOF\'\n            echo "$T"\n            echo EOF\n          } >> "$GITHUB_ENV"',
+    ],
+    ids=["quoted", "plain", "tee", "dynamic-name", "heredoc"],
+)
+def test_tainted_value_propagated_through_github_env_fails(tmp_path: Path, run: str) -> None:
+    res = audit(tmp_path, workflow(GH_ENV_WRITE.format(run=run)))
+    assert res.returncode == 1, res.stdout
+    assert "untrusted context" in res.stdout
+
+
+def test_untainted_github_env_value_read_through_expression_is_reported(tmp_path: Path) -> None:
+    step = '      - run: echo "X=$(cat VERSION)" >> "$GITHUB_ENV"\n      - run: echo ${{ env.X }}\n'
+    res = audit(tmp_path, workflow(step))
+    assert res.returncode == 0, res.stdout
+    assert "WARNING" in res.stdout and "GITHUB_ENV" in res.stdout, res.stdout
+
+
+def test_github_env_value_read_as_shell_variable_passes(tmp_path: Path) -> None:
+    step = GH_ENV_WRITE.format(run='echo "X=$T" >> "$GITHUB_ENV"').replace("${{ env.X }}", '"$X"')
+    res = audit(tmp_path, workflow(step))
+    assert res.returncode == 0 and "WARNING" not in res.stdout, res.stdout
+
+
+def test_github_env_write_after_the_read_is_not_a_taint(tmp_path: Path) -> None:
+    step = '      - run: echo ${{ env.X }}\n      - run: echo "X=$(cat VERSION)" >> "$GITHUB_ENV"\n'
+    res = audit(tmp_path, workflow(step))
+    assert res.returncode == 0 and "WARNING" not in res.stdout, res.stdout
+
+
+def _matrix_workflow(matrix: str, run: str, on: str = "[workflow_dispatch]") -> str:
+    return (
+        f"name: x\non: {on}\npermissions:\n  contents: read\njobs:\n  a:\n    runs-on: x\n"
+        f"    strategy:\n      matrix:\n{matrix}    steps:\n      - run: {run}\n"
+    )
+
+
+@pytest.mark.parametrize(
+    "matrix",
+    [
+        "        v: ${{ fromJSON(inputs.l) }}\n",
+        "        v: ${{ fromJSON(github.event.inputs.l) }}\n",
+        "        include:\n          - v: ${{ github.event.pull_request.title }}\n",
+        "        v: [a, '${{ github.head_ref }}']\n",
+    ],
+    ids=["inputs", "event-inputs", "include", "list"],
+)
+def test_matrix_built_from_untrusted_context_fails_when_read_in_run(tmp_path: Path, matrix: str) -> None:
+    res = audit(tmp_path, _matrix_workflow(matrix, "echo ${{ matrix.v }}"))
+    assert res.returncode == 1, res.stdout
+    assert "untrusted context" in res.stdout
+
+
+def test_matrix_read_as_env_value_passes(tmp_path: Path) -> None:
+    content = _matrix_workflow("        v: ${{ fromJSON(inputs.l) }}\n", 'echo "$V"').replace(
+        "      - run:", "      - env:\n          V: ${{ matrix.v }}\n        run:"
+    )
+    assert audit(tmp_path, content).returncode == 0
+
+
+def test_static_matrix_read_in_run_passes(tmp_path: Path) -> None:
+    res = audit(tmp_path, _matrix_workflow("        v: [a, b]\n", "echo ${{ matrix.v }}"))
+    assert res.returncode == 0 and "WARNING" not in res.stdout, res.stdout
+
+
+def test_matrix_from_needs_outputs_read_in_run_is_reported(tmp_path: Path) -> None:
+    res = audit(tmp_path, _matrix_workflow("        v: ${{ fromJSON(needs.s.outputs.m) }}\n", "echo ${{ matrix.v }}"))
+    assert res.returncode == 0, res.stdout
+    assert "WARNING" in res.stdout and "matrix" in res.stdout, res.stdout
+
+
+# --- D08-T3-04 : pas de faux positif sur les valeurs côté base ou sans lien avec git ---------
+
+
+@pytest.mark.parametrize(
+    "ref_line",
+    [
+        "ref: ${{ github.base_ref }}",
+        "ref: ${{ github.ref }}",
+        "ref: ${{ github.ref_name }}",
+        "ref: ${{ github.event.pull_request.base.sha }}",
+        "ref: ${{ github.event.pull_request.base.ref }}",
+        "repository: ${{ github.event.repository.full_name }}",
+    ],
+    ids=["base_ref", "ref", "ref_name", "base-sha", "base-ref", "repository"],
+)
+def test_pull_request_target_checkout_of_the_base_side_passes(tmp_path: Path, ref_line: str) -> None:
+    res = audit(tmp_path, workflow(_checkout(ref_line), on=TARGET))
+    assert res.returncode == 0, res.stdout
+
+
+def test_base_side_value_carried_by_env_to_git_passes(tmp_path: Path) -> None:
+    step = '      - env:\n          REF: ${{ github.base_ref }}\n        run: git fetch origin "$REF"\n'
+    assert audit(tmp_path, workflow(step, on=TARGET)).returncode == 0
+
+
+@pytest.mark.parametrize(
+    "run",
+    [
+        'echo "$T"\n          git fetch origin main',
+        'echo "$T" && git fetch origin main',
+        'git fetch origin main; echo "$T"',
+        'git fetch origin main | tee "$T"',
+        'git fetch origin main \\\n            && echo "$T"',
+    ],
+    ids=["newline", "and", "semicolon", "pipe", "continuation"],
+)
+def test_tainted_variable_in_another_command_than_git_passes(tmp_path: Path, run: str) -> None:
+    step = f"      - env:\n          T: ${{{{ github.event.pull_request.title }}}}\n        run: |\n          {run}\n"
+    res = audit(tmp_path, workflow(step, on=TARGET))
+    assert res.returncode == 0, res.stdout
+
+
+def test_tainted_variable_as_argument_of_git_still_fails(tmp_path: Path) -> None:
+    step = (
+        "      - env:\n          T: ${{ github.event.pull_request.head.ref }}\n"
+        '        run: |\n          echo start\n          git fetch origin "$T" --depth=1\n'
+    )
+    res = audit(tmp_path, workflow(step, on=TARGET))
+    assert res.returncode == 1, res.stdout
