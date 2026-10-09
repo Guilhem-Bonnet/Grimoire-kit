@@ -185,6 +185,23 @@ def test_task_add_ne_prend_pas_un_token_de_llm_pour_un_secret(tmp_path: Path, ti
     assert _profil_de(tmp_path, titre) == "standard", titre
 
 
+@pytest.mark.parametrize(
+    "titre",
+    [
+        "Save refresh tokens in plaintext",
+        "Saving GitHub tokens to keyring",
+        "Count leaked tokens in logs",
+        "Reduce session tokens lifetime",
+        "Enforce minimum reset token length",
+        "Fix access token overflow",
+        "Store input token from OAuth callback",
+    ],
+)
+def test_task_add_un_jeton_d_acces_qualifie_reste_critique(tmp_path: Path, titre: str) -> None:
+    # Ni un verbe (count/save/reduce) ni un mot (length/overflow/input) ne rend un secret inoffensif.
+    assert _profil_de(tmp_path, titre) == "security_critical", titre
+
+
 def test_memory_lint_remonte_jusqu_a_la_racine_du_projet(tmp_path: Path) -> None:
     _memoire(tmp_path, contradiction=True)
     sub = tmp_path / "sub"
@@ -248,6 +265,11 @@ def _lint_avec_journal(tmp_path: Path, ligne: str | None) -> int:
         "- [2023-12-31] Resolved: TDD approach adopted for backend; the rejected entry is superseded",
         # résolution postérieure à l'une des deux entrées seulement
         "- [2024-01-01] Resolved: TDD approach adopted for backend; the rejected entry is superseded",
+        # case non cochée ou point d'exclamation : pas une résolution
+        "- [ ] Resolved: TDD approach adopted vs rejected for backend (to confirm)",
+        "- [!] Resolved: TDD approach adopted vs rejected for backend",
+        # non datée : ne peut pas couvrir des entrées datées
+        "- Resolved: TDD approach adopted for backend; the rejected entry is superseded",
     ],
 )
 def test_memory_lint_une_fausse_resolution_ne_masque_pas_la_contradiction(tmp_path: Path, ligne: str) -> None:
@@ -263,8 +285,65 @@ def test_memory_lint_sans_journal_sort_en_1(tmp_path: Path) -> None:
     [
         "- [2024-01-03] Resolved: TDD approach adopted for backend; the rejected entry is superseded",
         "- [2024-01-02] RESOLVED : TDD approach adopted for backend; the rejected entry is superseded",
-        "- Resolved: TDD approach adopted for backend; the rejected entry is superseded",
+        "- [2024-01-03 10:00] Resolved: TDD approach adopted for backend; the rejected entry is superseded",
     ],
 )
 def test_memory_lint_une_vraie_resolution_ancree_et_datee_masque_la_contradiction(tmp_path: Path, ligne: str) -> None:
     assert _lint_avec_journal(tmp_path, ligne) == 0
+
+
+def test_memory_lint_une_resolution_non_datee_ne_masque_pas_la_reapparition(tmp_path: Path) -> None:
+    _memoire(tmp_path, contradiction=True)
+    mem = tmp_path / "_grimoire" / "_memory"
+    (mem / "decisions-log.md").write_text(
+        "# Dec\n- [2024-01-02] TDD approach rejected and abandoned for backend\n"
+        "- [2025-06-01] TDD approach rejected again for backend\n",
+        encoding="utf-8",
+    )
+    (mem / "contradiction-log.md").write_text(
+        "# Contradictions\n- Resolved: TDD approach adopted for backend; the rejected entry is superseded\n",
+        encoding="utf-8",
+    )
+    res = runner.invoke(app, ["memory", "lint", "--json", "--project-root", str(tmp_path)])
+    assert res.exit_code == 1, res.output
+
+
+def test_memory_lint_une_resolution_datee_ne_masque_pas_une_reapparition_posterieure(tmp_path: Path) -> None:
+    _memoire(tmp_path, contradiction=True)
+    mem = tmp_path / "_grimoire" / "_memory"
+    (mem / "decisions-log.md").write_text(
+        "# Dec\n- [2025-06-01] TDD approach rejected again for backend\n", encoding="utf-8"
+    )
+    (mem / "contradiction-log.md").write_text(
+        "# Contradictions\n- [2024-01-03] Resolved: TDD approach adopted for backend; the rejected entry is superseded\n",
+        encoding="utf-8",
+    )
+    res = runner.invoke(app, ["memory", "lint", "--json", "--project-root", str(tmp_path)])
+    assert res.exit_code == 1, res.output
+
+
+_GABARIT = Path(__file__).resolve().parents[2] / "framework" / "memory" / "contradiction-log.tpl.md"
+
+
+def test_le_gabarit_du_journal_documente_le_format_reconnu_par_memory_lint(tmp_path: Path) -> None:
+    gabarit = _GABARIT.read_text(encoding="utf-8")
+    exemples = [ligne for ligne in gabarit.splitlines() if ligne.startswith("- [YYYY-MM-DD] Resolved:")]
+    assert exemples, "le gabarit ne documente pas le format `- [date] Resolved:` lu par memory lint"
+    # La ligne documentée, une fois la date posée, résout bel et bien la contradiction.
+    ligne = exemples[0].replace("YYYY-MM-DD", "2024-01-03").split("<")[0].rstrip()
+    assert _lint_avec_journal(tmp_path, f"{ligne} TDD approach adopted for backend; rejected entry superseded") == 0
+
+
+def test_le_gabarit_copie_tel_quel_ne_masque_aucune_contradiction(tmp_path: Path) -> None:
+    _memoire(tmp_path, contradiction=True)
+    log = tmp_path / "_grimoire" / "_memory" / "contradiction-log.md"
+    log.write_text(_GABARIT.read_text(encoding="utf-8"), encoding="utf-8")
+    res = runner.invoke(app, ["memory", "lint", "--json", "--project-root", str(tmp_path)])
+    assert res.exit_code == 1, res.output
+
+
+def test_la_suggestion_de_correction_donne_le_format_attendu(tmp_path: Path) -> None:
+    _memoire(tmp_path, contradiction=True)
+    res = runner.invoke(app, ["memory", "lint", "--json", "--project-root", str(tmp_path)])
+    suggestion = json.loads(res.output)["issues"][0]["fix_suggestion"]
+    assert "[YYYY-MM-DD] Resolved:" in suggestion

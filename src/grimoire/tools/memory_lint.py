@@ -285,20 +285,25 @@ def collect_memory_files(project_root: Path) -> list[MemoryFile]:
     return files
 
 
-# Une résolution est une entrée du journal qui COMMENCE par « Resolved: » (date
-# entre crochets facultative). « Unresolved », « Not resolved yet » ou une simple
-# mention du mot en cours de phrase ne sont pas des résolutions.
-_RESOLUTION_RE = re.compile(r"^\s*(?:\[[^\]]*\]\s*)?resolved\s*:", re.IGNORECASE)
+# Une résolution est une entrée du journal qui COMMENCE par « Resolved: ». Le préfixe
+# entre crochets n'est accepté que s'il porte une date ISO (``[2024-01-03]``) ou une
+# case cochée (``[x]``) : ``[ ]`` ou ``[!]`` ne sont pas des résolutions. « Unresolved »,
+# « Not resolved yet » ou une simple mention du mot en cours de phrase non plus.
+_RESOLUTION_RE = re.compile(
+    r"^\s*(?:\[(?:\d{4}-\d{2}-\d{2}[^\]]*|x)\]\s*)?resolved\s*:", re.IGNORECASE,
+)
 
 
 def _resolution_is_later(res_date: str, *entry_dates: str) -> bool:
     """Une résolution datée ne couvre pas une entrée qui lui est postérieure.
 
-    Les dates sont ISO (comparables en texte). Une date absente d'un côté ne peut
-    pas être comparée : elle n'invalide pas la résolution.
+    Les dates sont ISO (comparables en texte). Une résolution non datée ne peut être
+    comparée à aucune entrée datée : elle ne couvre que des entrées non datées, sinon
+    elle masquerait à jamais une contradiction qui réapparaît plus tard. Une entrée
+    non datée, elle, ne peut pas être comparée à une résolution datée et ne l'invalide pas.
     """
     if not res_date:
-        return True
+        return all(not d for d in entry_dates)
     return all(not d or d <= res_date for d in entry_dates)
 
 
@@ -350,7 +355,11 @@ def check_contradictions(files: list[MemoryFile]) -> list[LintIssue]:
                     description=f"Opposite polarity on similar topic (similarity: {sim:.0%})",
                     files=(pos_file, neg_file),
                     entries=(pos_text[:120], neg_text[:120]),
-                    fix_suggestion="Resolve and document in contradiction-log.md",
+                    fix_suggestion=(
+                        "Resolve, then record it in contradiction-log.md as a line "
+                        "'- [YYYY-MM-DD] Resolved: <topic shared by both entries>' "
+                        "(dated on or after both entries)"
+                    ),
                 ))
     return issues
 

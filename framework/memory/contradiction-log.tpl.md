@@ -16,6 +16,15 @@
 |---------------|----------------|-------|-------|--------|
 | — | — | — | — | — |
 
+## Format lu par `grimoire memory lint`
+
+Seule une ligne de liste commençant par `Resolved:` (préfixe `[date ISO]` obligatoire pour couvrir
+des entrées datées) marque une paire de mémoires comme résolue. Les tableaux ci-dessus sont lus
+par les humains et par `memory-audit`, pas par `memory lint`. La date doit être égale ou postérieure
+aux deux entrées contradictoires : une contradiction qui réapparaît plus tard est de nouveau signalée.
+
+- [YYYY-MM-DD] Resolved: <sujet commun aux deux mémoires> ; <décision retenue>
+
 ---
 
 ## Règles de résolution
