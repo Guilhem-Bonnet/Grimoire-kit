@@ -366,26 +366,37 @@ def _is_enforced(project_root: Path, task_id: str) -> bool:
     module docstring for why shadow is the default. Checked in this order:
     the environment variable (cheapest, and the one named in the issue when
     no project option exists yet), then an ``options.done_gate: enforce`` key
-    hand-added to ``standard-profile.yaml`` — the same file and the same
-    ``_load_mapping`` helper :func:`grimoire.core.standard_checks.
-    gate_test_run.board_state_of_task` already reads privately across module
-    boundaries for a project-declared value, so this is not a new pattern.
+    hand-added to ``standard-profile.yaml``.
 
     An unreadable profile still answers ``False`` (shadow is the safe default
     for the opt-in), but no longer silently (W1-06) : the failure is traced as
     a ``guard.error`` (``guard_id`` ``done_gate.enforce_option``) for *task_id*,
     so ``grimoire standard verify`` shows that the option could not be read.
+    "Unreadable" covers an invalid YAML, a file that is not valid UTF-8, an I/O
+    error and a root that is not a mapping. The profile is parsed here rather
+    than through ``standard_state._load_mapping``, which swallows those very
+    errors and returns ``{}``: the failure would never reach this ``except``.
+    A missing profile, or one without the option, is not a failure.
     """
     if os.environ.get(_ENFORCE_ENV, "").strip().lower() == "enforce":
         return True
     try:
-        from grimoire.core.standard_generation import STANDARD_PROFILE_FILE
-        from grimoire.core.standard_state import _load_mapping
+        from ruamel.yaml import YAML
 
-        options = _load_mapping(project_root.resolve() / STANDARD_PROFILE_FILE).get("options")
+        from grimoire.core.standard_generation import STANDARD_PROFILE_FILE
+
+        profile = project_root.resolve() / STANDARD_PROFILE_FILE
+        if not profile.is_file():
+            return False
+        data = YAML(typ="safe").load(profile)
+        if data is None:
+            return False
+        if not isinstance(data, dict):
+            raise TypeError(f"{STANDARD_PROFILE_FILE} : la racine n'est pas un mapping ({type(data).__name__})")
     except Exception as exc:
         record_guard_error(project_root, task_id, "done_gate.enforce_option", type(exc).__name__, str(exc))
         return False
+    options = data.get("options")
     if not isinstance(options, dict):
         return False
     return str(options.get("done_gate", "")).strip().lower() == "enforce"

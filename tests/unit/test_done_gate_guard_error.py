@@ -161,19 +161,54 @@ def test_guard_events_round_trip_and_skip_corrupt_lines(tmp_path: Path) -> None:
     assert read_guard_events(tmp_path, "absent") == []
 
 
-def test_an_unreadable_enforce_option_is_traced_not_silently_shadow(tmp_path: Path, shadow: None) -> None:
+def _resolve_with_profile_bytes(root: Path, raw: bytes | None) -> tuple[tuple[bool, bool, bool], list[dict]]:
+    """Run the resolution against a REAL ``standard-profile.yaml`` (no patching)."""
+    from grimoire.core.standard_generation import STANDARD_PROFILE_FILE
     from grimoire.hosts.decisions.done_gate import resolve_done_gate_block
 
+    if raw is not None:
+        (root / STANDARD_PROFILE_FILE).write_bytes(raw)
+    result = resolve_done_gate_block(root, "bootstrap", "s-1", "governed", "2026-10-09T00:00:00+00:00")
+    return result, read_guard_events(root, "bootstrap")
+
+
+@pytest.mark.parametrize(
+    ("raw", "error_type"),
+    [
+        pytest.param(b"options: [pas ferme\n  done_gate: : enforce\n", None, id="yaml-invalide"),
+        pytest.param(b"options:\n  done_gate: enforc\xc3\n", "ReaderError", id="octet-utf8-coupe"),
+        pytest.param(b"- une\n- liste\n", "TypeError", id="racine-non-mapping"),
+    ],
+)
+def test_an_unreadable_enforce_option_is_traced_not_silently_shadow(
+    tmp_path: Path, shadow: None, raw: bytes, error_type: str | None
+) -> None:
     root = _project(tmp_path, "governed")
-    with patch("grimoire.core.standard_state._load_mapping", side_effect=RuntimeError("profil illisible")):
-        enforce, blocked, capped = resolve_done_gate_block(
-            root, "bootstrap", "s-1", "governed", "2026-10-09T00:00:00+00:00"
-        )
-    assert (enforce, blocked, capped) == (False, False, False)
-    events = read_guard_events(root, "bootstrap")
+    result, events = _resolve_with_profile_bytes(root, raw)
+    assert result == (False, False, False)
     assert [e["guard_id"] for e in events] == ["done_gate.enforce_option"]
     assert events[0]["type"] == GUARD_ERROR_EVENT
-    assert events[0]["error_type"] == "RuntimeError"
+    if error_type is not None:
+        assert events[0]["error_type"] == error_type
+    else:
+        assert events[0]["error_type"]  # le vrai type d'exception YAML, pas un type inventé
+
+
+def test_a_valid_enforce_option_is_honoured_without_guard_event(tmp_path: Path, shadow: None) -> None:
+    from grimoire.hosts.decisions.done_gate import _is_enforced
+
+    root = _project(tmp_path, "governed")
+    _resolve_with_profile_bytes(root, b"options:\n  done_gate: enforce\n")
+    assert _is_enforced(root, "bootstrap") is True
+    assert read_guard_events(root, "bootstrap") == []
+
+
+def test_a_profile_without_the_option_or_empty_leaves_no_guard_event(tmp_path: Path, shadow: None) -> None:
+    root = _project(tmp_path, "governed")
+    _, events = _resolve_with_profile_bytes(root, b"")
+    assert events == []
+    _, events = _resolve_with_profile_bytes(root, b"options:\n  autre: 1\n")
+    assert events == []
 
 
 def test_a_readable_enforce_option_leaves_no_guard_event(tmp_path: Path, shadow: None) -> None:
