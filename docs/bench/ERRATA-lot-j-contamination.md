@@ -26,8 +26,8 @@ Le harnais du banc à trois bras réutilisait les dossiers de préparation des t
 PR W1-08a (issue #694) :
 
 1. `prepare_task_repo` refuse un dossier non vide (`FileExistsError`).
-2. `assert_task_repo_clean` est appelée dans `_run_one` après la préparation et avant `claude` : elle lève `ContaminatedTaskRepoError` si un fichier de `test_files` est présent dans le dépôt (suivi, non suivi ou ignoré par git), si l'un d'eux est suivi par git (même absent du disque) ou si l'historique ne compte pas exactement un commit. L'erreur n'est pas enregistrée comme un échec : `main` arrête la campagne (code 1, 0 $ dépensé pour ce run) sans rien écrire dans `results.jsonl`, de sorte que la clé reste rejouable avec `--resume` et ne pèse pas dans les taux de succès. `--dry-run` s'arrête de la même façon.
-3. `_run_one` et `_do_dry_run` effacent le résidu d'un run interrompu avant de le rejouer (la garde 2 reste le filet) ; l'effacement lève les protections en lecture seule des objets git (Windows) et échoue bruyamment si le dossier survit.
+2. `assert_task_repo_clean` est appelée dans `_run_one` après la préparation et avant `claude` : elle lève `ContaminatedTaskRepoError` si un fichier de `test_files` est présent dans le dépôt (suivi, non suivi ou ignoré par git), si l'un d'eux est suivi par git (même absent du disque) ou si l'historique ne compte pas exactement un commit. L'erreur n'est pas enregistrée comme un échec : `main` arrête la campagne (code 1, 0 $ dépensé pour ce run, gardes de sécurité de fin de campagne exécutées) sans rien écrire dans `results.jsonl`, de sorte que la clé reste rejouable avec `--resume` et ne pèse pas dans les taux de succès. `--dry-run` s'arrête de la même façon.
+3. `_run_one` et `_do_dry_run` effacent sans condition le dossier de run existant avant de le préparer (la garde 2 reste le filet). Sans `--resume`, `main` signale sur stderr l'effacement du dossier d'un run déjà enregistré dans `results.jsonl` ; l'effacement lève les protections en lecture seule des objets git (Windows) et échoue bruyamment si le dossier survit.
 
 ## Limites
 

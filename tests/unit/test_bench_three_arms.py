@@ -2234,3 +2234,119 @@ def test_verify_agent_toolchain_environment_raises_when_npm_install_fails(
         ta.verify_agent_toolchain_environment(
             tasks, workspace=workspace, grimoire_bin="grimoire", go_bin=None, npm_cache_dir=workspace / "npm-cache"
         )
+
+
+# ── W1-08a, 3e revue : gardes de fin de campagne, effacement signalé, taille ─
+
+
+def _ok_record(task: Any, arm: str, run_index: int, cost: float = 0.5) -> Any:
+    return ta.RunRecord(
+        task_id=task.task_id, language=task.language, arm=arm, run_index=run_index, success=True,
+        total_cost_usd=cost, input_tokens=1, output_tokens=1, num_turns=1, wall_seconds=1.0,
+        terminated_reason="completed",
+    )
+
+
+def _spy_security_guards(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
+    spies = {"left": 0, "leak": 0}
+
+    def _left(*a: Any, **k: Any) -> list[Path]:
+        spies["left"] += 1
+        return []
+
+    def _leak(*a: Any, **k: Any) -> list[Path]:
+        spies["leak"] += 1
+        return []
+
+    monkeypatch.setattr(ta, "find_leftover_credentials", _left)
+    monkeypatch.setattr(ta, "find_leaked_api_keys", _leak)
+    return spies
+
+
+def test_main_runs_security_guards_when_contamination_follows_a_real_run(
+    synthetic_bench_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """W1-08a (T2-01) : une contamination au 2e run ne doit pas sauter les deux
+    gardes de sécurité de fin de campagne (identifiants oubliés, clé API
+    fuitée) : le 1er run a bien tourné avec des identifiants."""
+    workspace = tmp_path / "workspace"
+    _patch_main_environment(monkeypatch, synthetic_bench_root, tmp_path)
+    attempts: list[int] = []
+
+    def _one(task: Any, arm: str, run_index: int, **kwargs: Any) -> Any:
+        attempts.append(run_index)
+        if len(attempts) == 1:
+            return _ok_record(task, arm, run_index)
+        raise ta.ContaminatedTaskRepoError("contaminé")
+
+    def _no_report(*a: Any, **k: Any) -> None:
+        raise AssertionError("aucun rapport ne doit être écrit après une contamination")
+
+    spies = _spy_security_guards(monkeypatch)
+    monkeypatch.setattr(ta, "_run_one", _one)
+    monkeypatch.setattr(ta, "write_report", _no_report)
+
+    rc = ta.main(["--full", "--workspace", str(workspace)])
+
+    assert rc == 1
+    assert len(attempts) == 2  # la campagne s'arrête au premier dépôt contaminé
+    assert spies == {"left": 1, "leak": 1}
+    lines = (workspace / "state" / "results.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1  # le run réel est enregistré, le contaminé non
+
+
+def test_main_warns_before_erasing_a_completed_run_dir_without_resume(
+    synthetic_bench_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """W1-08a (T2-02) : sans ``--resume``, le dossier d'un run DÉJÀ enregistré
+    dans results.jsonl est effacé puis rejoué ; ce n'est pas le « résidu d'un
+    run interrompu » : l'opérateur doit en être prévenu."""
+    workspace = tmp_path / "workspace"
+    _patch_main_environment(monkeypatch, synthetic_bench_root, tmp_path)
+    monkeypatch.setattr(ta, "write_report", lambda *a, **k: None)
+    _spy_security_guards(monkeypatch)
+    monkeypatch.setattr(ta, "_run_one", lambda task, arm, run_index, **kw: _ok_record(task, arm, run_index))
+    task = _task(synthetic_bench_root)
+    run_dir = ta.run_dir_for(workspace, task, "nu", 0)
+    run_dir.mkdir(parents=True)
+    (run_dir / "SOLUTION_DU_RUN_PRECEDENT.txt").write_text("preuve\n", encoding="utf-8")
+    (workspace / "state").mkdir(parents=True)
+    (workspace / "state" / "results.jsonl").write_text(
+        json.dumps(_ok_record(task, "nu", 0).to_dict()) + "\n", encoding="utf-8"
+    )
+
+    ta.main(["--full", "--workspace", str(workspace)])
+
+    err = capsys.readouterr().err
+    assert str(run_dir) in err
+    assert "effacé" in err  # message nommant le dossier effacé et la clé déjà enregistrée
+    assert "--resume" in err
+
+
+def test_main_does_not_warn_for_interrupted_run_residue(
+    synthetic_bench_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Un dossier sans ligne dans results.jsonl est un vrai résidu : pas d'alerte."""
+    workspace = tmp_path / "workspace"
+    _patch_main_environment(monkeypatch, synthetic_bench_root, tmp_path)
+    monkeypatch.setattr(ta, "write_report", lambda *a, **k: None)
+    _spy_security_guards(monkeypatch)
+    monkeypatch.setattr(ta, "_run_one", lambda task, arm, run_index, **kw: _ok_record(task, arm, run_index))
+    task = _task(synthetic_bench_root)
+    run_dir = ta.run_dir_for(workspace, task, "nu", 0)
+    run_dir.mkdir(parents=True)
+    (run_dir / "TASK.md").write_text("résidu\n", encoding="utf-8")
+
+    ta.main(["--full", "--workspace", str(workspace)])
+
+    assert "effacé" not in capsys.readouterr().err
+
+
+def test_task_repo_guards_live_in_their_own_module_and_script_does_not_grow() -> None:
+    """W1-08a (T2-03) : ``three_arms.py`` dépassait déjà le seuil du ratchet
+    (non couvert pour ``scripts/``) ; les gardes vivent dans ``task_repo.py``
+    et le script n'est pas plus long que sur ``origin/main`` (2584 lignes)."""
+    for name in ("ContaminatedTaskRepoError", "assert_task_repo_clean", "reset_run_dir"):
+        assert getattr(ta, name).__module__ == "task_repo"
+    assert (SCRIPT.parent / "task_repo.py").is_file()
+    assert len(SCRIPT.read_text(encoding="utf-8").splitlines()) <= 2584
