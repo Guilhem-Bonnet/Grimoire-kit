@@ -19,12 +19,12 @@ jobs:
     name: "Create GitHub Release"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           fetch-depth: 0  # Nécessaire pour le changelog git
 
       - name: Setup Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7
         with:
           python-version: "3.11"
 
@@ -82,7 +82,7 @@ jobs:
           echo "hooks=$HOOKS" >> $GITHUB_OUTPUT
 
       - name: Créer la release GitHub
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64  # v3
         with:
           tag_name: ${{ github.ref_name || inputs.tag }}
           name: "Grimoire Custom Kit ${{ github.ref_name || inputs.tag }}"

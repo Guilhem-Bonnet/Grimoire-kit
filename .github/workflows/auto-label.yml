@@ -15,7 +15,7 @@ jobs:
     steps:
       # Étiquettes `type:*`, posées selon les chemins touchés. Elles servent au
       # tri et à la recherche ; elles ne décident rien de ce qui est publié.
-      - uses: actions/labeler@bf12e9b00b37c5c0ca2b87b79b2daf7891dbda13
+      - uses: actions/labeler@bf12e9b00b37c5c0ca2b87b79b2daf7891dbda13  # v7
         with:
           configuration-path: .github/labeler.yml
           sync-labels: true

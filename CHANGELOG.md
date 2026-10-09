@@ -7,11 +7,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
-- chore(ci): actions GitHub épinglées par SHA, avec garde. Toutes les actions des workflows sont désormais épinglées par 40 caractères hexadécimaux (SHA du commit) au lieu de tags de version (@v1, @v3, @release/v1). Cela prévient les risques de sécurité si une action reçoit une nouvelle version potentiellement malveillante. Nouveau script `scripts/check-actions-pinned.py` qui scanne tous les fichiers `.github/workflows/*.yml` et vérifie que chaque action est épinglée par SHA. Le script échoue (exit code 1) si une action non épinglée est détectée.
-  - `.github/workflows/*.yml` : épinglage de 22 actions uniques sur 14 workflows (agentic-standard, auto-label, ci-sdk, ci-validate, cleanup-branches, codeql-analysis, dep-audit-cron, docs, publish, release, release-drafter, rust-cores, stale, weekly-bench). Exemple : `actions/checkout@v7` → `actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1`.
-  - `scripts/check-actions-pinned.py` : garde qui vérifie l'épinglage. Résout les SHA depuis GitHub API (`gh api repos/...`), accepte les références branches (`@stable`, `@release/v1`) et les tags (@v1, etc.).
-  - `tests/unit/scripts/test_check_actions_pinned.py` : tests unitaires avec cas positifs (actions épinglées), négatifs (versions @v1), mixtes (une action non épinglée bloque), et test du repo actuel prouvant que tous les workflows sont conformes après le correctif.
-  - Rouge-avant / vert-après : `tests/unit/scripts/test_check_actions_pinned.py` (5 tests, 1 rouge avant le correctif sur le repo courant)
+- chore(ci): actions GitHub épinglées par SHA, avec garde. Les 112 usages `uses:` des workflows (origin/main : tags `@v7`, `@v3`, branches `@release/v1`, `@stable`) sont épinglés par 40 caractères hexadécimaux, chaque pin suivi d'un commentaire de version (`# v7`) pour rester relisible et suivi par Dependabot. Un tag ou une branche peut être réassigné sans préavis ; un SHA non.
+  - `.github/workflows/*.yml` : 112 remplacements sur 14 workflows (22 actions distinctes). Les SHA ont été résolus une seule fois par `gh api` à l'épinglage ; le garde, lui, ne fait aucun appel réseau.
+  - `scripts/check-actions-pinned.py` : garde hors ligne. Il parse chaque workflow en YAML (`*.yml` et `*.yaml`), contrôle les `uses` de `jobs.*.steps[*]` et de `jobs.*` (workflows réutilisables), exige `@<40 hex>` plus un commentaire de version et rejette tout tag ou toute branche (`@v1`, `@stable`, `@release/v1`). Exemptions : `./action-locale` ; `docker://` exige un digest `@sha256:`. Il échoue aussi quand il ne peut pas vérifier : workflow illisible, YAML invalide, entrée qui n'est pas un fichier régulier, ou zéro workflow. Option `--root` (défaut : racine du dépôt du script, plus le cwd).
+  - `.github/workflows/ci-sdk.yml` : étape « Actions pinned by SHA » dans le job lint, et `.github/workflows/**` plus le script ajoutés aux chemins du push.
+  - `tests/unit/scripts/test_check_actions_pinned.py` : tests par forme (valeur sur plusieurs lignes, `.yaml`, répertoire vide, `uses:` de job, fichier illisible, répertoire nommé `*.yml`, `./`, `docker://`, commentaire, texte de `run:`, commentaire de version, racine indépendante du cwd, branchement CI).
+  - Rouge-avant / vert-après : `tests/unit/scripts/test_check_actions_pinned.py` (21 tests, 19 rouges avant, dont une partie parce que l'ancien garde ne connaît pas `--root`) ; le garde lancé sur les workflows de origin/main liste 112 lignes non épinglées, code de sortie 1.
+  - Non fait : la forme `uses` dans des actions composites (`action.yml`) n'est pas scannée ; le comportement de Dependabot sur ces commentaires n'est pas vérifié.
 
 ## [3.62.1] - 2026-10-03
 
