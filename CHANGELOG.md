@@ -7,6 +7,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- chore(ci): actions GitHub épinglées par SHA, avec garde. Toutes les actions des workflows sont désormais épinglées par 40 caractères hexadécimaux (SHA du commit) au lieu de tags de version (@v1, @v3, @release/v1). Cela prévient les risques de sécurité si une action reçoit une nouvelle version potentiellement malveillante. Nouveau script `scripts/check-actions-pinned.py` qui scanne tous les fichiers `.github/workflows/*.yml` et vérifie que chaque action est épinglée par SHA. Le script échoue (exit code 1) si une action non épinglée est détectée.
+  - `.github/workflows/*.yml` : épinglage de 22 actions uniques sur 14 workflows (agentic-standard, auto-label, ci-sdk, ci-validate, cleanup-branches, codeql-analysis, dep-audit-cron, docs, publish, release, release-drafter, rust-cores, stale, weekly-bench). Exemple : `actions/checkout@v7` → `actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1`.
+  - `scripts/check-actions-pinned.py` : garde qui vérifie l'épinglage. Résout les SHA depuis GitHub API (`gh api repos/...`), accepte les références branches (`@stable`, `@release/v1`) et les tags (@v1, etc.).
+  - `tests/unit/scripts/test_check_actions_pinned.py` : tests unitaires avec cas positifs (actions épinglées), négatifs (versions @v1), mixtes (une action non épinglée bloque), et test du repo actuel prouvant que tous les workflows sont conformes après le correctif.
+  - Rouge-avant / vert-après : `tests/unit/scripts/test_check_actions_pinned.py` (5 tests, 1 rouge avant le correctif sur le repo courant)
+
 ## [3.62.1] - 2026-10-03
 
 - fix(hosts): `Stop` nomme les claims concurrents au lieu de juger la tâche fantôme `bootstrap` (issue #692, suite de #680/#686 ; empilée sur la PR #696). Rejeu du 2026-10-02 : deux claims sans session, aucune écriture — `UserPromptSubmit` nommait les candidates et `grimoire task attach <id>`, mais `decide_evidence_gate` ne traitait l'ambiguïté qu'après une écriture et retombait sinon sur « Tâche bootstrap encore en état proposed ».
