@@ -47,7 +47,7 @@ def decide_task_context(hook: HookInput) -> Decision:
 
     steering, steering_detail = steering_context(hook.project_root, active.task_id, hook.session_id)
     if active.is_fallback:
-        context = no_task_context(profile, active.candidates)
+        context = no_task_context(profile, active.candidates, active.expired)
         if steering:
             context = f"{context}\n{steering}"
         return Decision(outcome=Outcome.ALLOW, context=context, detail={**detail, **steering_detail})

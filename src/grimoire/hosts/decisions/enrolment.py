@@ -62,14 +62,31 @@ def ambiguity_text(candidates: tuple[str, ...]) -> str:
     )
 
 
+def expired_text(expired: tuple[str, ...]) -> str:
+    """Issue #710 : le bail du claim est dépassé — la tâche n'est plus celle de la session, et pourquoi."""
+    names = ", ".join(expired)
+    return (
+        f"Claim expiré sur {names} : son bail est dépassé, il ne désigne plus la tâche de cette session. "
+        f"Pour continuer dessus, pose GRIMOIRE_TASK_ID={expired[0]} ; sinon réclame une autre tâche."
+    )
+
+
+def _with_expired(text: str, expired: tuple[str, ...]) -> str:
+    return f"{text}\n{expired_text(expired)}" if expired else text
+
+
 def _ambiguity_tail(profile: str) -> str:
     if profile in BLOCKING_PROFILES:
         return f"En profil {profile}, une clôture après une écriture hors tâche est refusée au Stop."
     return f"Profil {profile} : une écriture hors tâche est signalée au Stop, pas refusée."
 
 
-def no_task_context(profile: str, candidates: tuple[str, ...] = ()) -> str:
+def no_task_context(profile: str, candidates: tuple[str, ...] = (), expired: tuple[str, ...] = ()) -> str:
     """Ce qu'une session sans tâche lit au ``SessionStart`` et au ``UserPromptSubmit``."""
+    return _with_expired(_no_task_context(profile, candidates), expired)
+
+
+def _no_task_context(profile: str, candidates: tuple[str, ...]) -> str:
     if candidates:
         head = f"[Grimoire] Tâche de la session indéterminée (profil {profile}). {ambiguity_text(candidates)}\n"
         return head + _ambiguity_tail(profile)
@@ -85,8 +102,14 @@ def no_task_context(profile: str, candidates: tuple[str, ...] = ()) -> str:
     return head + remedy_text() + tail
 
 
-def no_task_stop_reason(profile: str, mutations: int, candidates: tuple[str, ...] = ()) -> str:
+def no_task_stop_reason(
+    profile: str, mutations: int, candidates: tuple[str, ...] = (), expired: tuple[str, ...] = ()
+) -> str:
     """Le motif que ``Stop`` rend quand une session a écrit sans tâche."""
+    return _with_expired(_no_task_stop_reason(profile, mutations, candidates), expired)
+
+
+def _no_task_stop_reason(profile: str, mutations: int, candidates: tuple[str, ...]) -> str:
     if candidates:
         return (
             f"[Grimoire] Clôture hors tâche : {mutations} action(s) d'écriture observée(s) dans cette session "

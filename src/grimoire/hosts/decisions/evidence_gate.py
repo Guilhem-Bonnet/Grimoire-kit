@@ -10,6 +10,7 @@ from grimoire.hosts.decisions.enrolment import (
     BLOCKING_PROFILES,
     NO_ACTIVE_TASK,
     ambiguity_text,
+    expired_text,
     no_task_stop_reason,
     session_mutation_count,
 )
@@ -43,7 +44,7 @@ def decide_evidence_gate(hook: HookInput) -> Decision:
     task_id = active.task_id
     profile = active_profile_id(hook.project_root)
     if active.is_fallback:
-        no_task = _no_task_closure(hook, profile, active.candidates)
+        no_task = _no_task_closure(hook, profile, active.candidates, active.expired)
         if no_task is not None:
             return no_task
         if active.source == "ambiguous":
@@ -54,6 +55,13 @@ def decide_evidence_gate(hook: HookInput) -> Decision:
             return Decision(
                 context=f"[Grimoire] {ambiguity_text(active.candidates)}",
                 detail={"task_id": task_id, "task_source": active.source, "candidates": list(active.candidates)},
+            )
+        if active.expired:
+            # Issue #710 : même logique que #692 — rien d'écrit, pas de blocage,
+            # mais dire « claim expiré » plutôt que juger la tâche fantôme.
+            return Decision(
+                context=f"[Grimoire] {expired_text(active.expired)}",
+                detail={"task_id": task_id, "task_source": active.source, "expired": list(active.expired)},
             )
     try:
         ok, summary, detail = _gate_summary(hook.project_root, task_id)
@@ -210,7 +218,9 @@ def _unevaluable_gate(task_id: str, profile: str, exc: Exception) -> Decision:
     )
 
 
-def _no_task_closure(hook: HookInput, profile: str, candidates: tuple[str, ...] = ()) -> Decision | None:
+def _no_task_closure(
+    hook: HookInput, profile: str, candidates: tuple[str, ...] = (), expired: tuple[str, ...] = ()
+) -> Decision | None:
     """Issue #638 lot A: a session that wrote without a task is not a finished task.
 
     ``bootstrap`` is a fallback, not a task: nothing in the Mission Ledger
@@ -228,7 +238,7 @@ def _no_task_closure(hook: HookInput, profile: str, candidates: tuple[str, ...] 
     if mutations <= 0:
         return None
     detail = {"task_id": "bootstrap", "profile": profile, "blocked_on": NO_ACTIVE_TASK, "mutations": mutations}
-    reason = no_task_stop_reason(profile, mutations, candidates)
+    reason = no_task_stop_reason(profile, mutations, candidates, expired)
     if profile in _BLOCKING_PROFILES:
         return Decision(outcome=Outcome.BLOCK, reason=reason, detail=detail)
     return Decision(context=reason, detail=detail)

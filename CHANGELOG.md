@@ -7,6 +7,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- fix(missions): un claim expiré ne désigne plus la tâche active, une session n'hérite plus du claim d'une autre, et deux claims simultanés ne réussissent plus tous les deux (#710, coordonné avec #698/#699 qui touchent la même résolution). Reproduit sur 3.62.1 : claim posé il y a 5 h toujours rendu en `ledger_claim` ; claim rattaché à la session A rendu à la session B ; deux `TaskService` chargés avant toute écriture réclamaient la même tâche, le second écrasant le premier.
+  - `core/standard_state.py` : `_active_claims` écarte les claims dont `TaskClaim.is_expired()` est vrai — de toutes les règles, celle de la session comprise, et du repli sur le board (qui projette les claims) ; `ActiveTask.expired` les nomme. Règle 3 : un claim rattaché à une autre session n'est jamais hérité (B retombe sur `bootstrap`/`ambiguous`) ; un claim sans session n'est retenu que tant que son bail court ; sans session identifiable (CLI hors hôte), le claim unique vivant reste désigné.
+  - `hosts/decisions/` : `SessionStart`, `UserPromptSubmit` et `Stop` disent « claim expiré » avec le remède (`GRIMOIRE_TASK_ID`) ; `Stop` sans écriture le dit sans bloquer (même logique que #692).
+  - `missions/ledger.py` : `transition_task` relit le journal et valide la transition *sous* le verrou qui protège l'écriture (compare-and-set) ; un claim sur une tâche déjà `claimed`/`running` est refusé en nommant le détenteur ; `expected_from` (passé par `TaskService.transition`) refuse une transition jugée sur un état périmé. Windows : verrou réel par `msvcrt.locking` au lieu du no-op ; un claim sans verrou effectivement tenu est refusé (fail-closed), les autres écritures restent best-effort.
+  - Rouge-avant / vert-après : `tests/unit/test_claims_expiry_atomic.py` (15 tests, 13 rouges avant), dont 50 essais à deux processus réels avec barrière. `tests/unit/test_session_enrolment.py` ajusté : l'autre session ne juge plus la tâche de la première.
+  - Non fait (hors PR) : renouvellement de bail (`task renew`, activité des hooks), récolte `expired_claims()` (lot #721), `RUNNING → READY` « bail perdu », raison d'expiration dans `task show`, vérification des fichiers exclusifs sous le même verrou.
+
 ## [3.62.1] - 2026-10-03
 
 - fix(hosts): `Stop` nomme les claims concurrents au lieu de juger la tâche fantôme `bootstrap` (issue #692, suite de #680/#686 ; empilée sur la PR #696). Rejeu du 2026-10-02 : deux claims sans session, aucune écriture — `UserPromptSubmit` nommait les candidates et `grimoire task attach <id>`, mais `decide_evidence_gate` ne traitait l'ambiguïté qu'après une écriture et retombait sinon sur « Tâche bootstrap encore en état proposed ».
