@@ -7,6 +7,11 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- ci: rejeu du test de régression sur la base de la PR (campagne « Dépasser AI-DLC », D-14). Le critère « test rouge visible sur un commit antérieur » ne tient pas : le squash efface l'historique et l'auto-merge tire avant les correctifs demandés. Rien ne vérifiait qu'une PR `fix:` apporte un test qui échoue sans son correctif.
+  - `scripts/check-regression-on-base.py` + `.github/workflows/regression-on-base.yml` : sur une PR dont le titre est `fix:`, les tests `tests/**/test_*.py` ajoutés ou modifiés sont exécutés contre le code de `base_sha` (worktree détaché, tests pris à la tête) ; au moins un échec est exigé (échec de collecte compris). Aucun test modifié, ou tests verts sur la base : le job échoue. Échappatoire : étiquette `no-regression-test` ET ligne `no-regression-test: <justification>` (10 caractères minimum) dans la description ; le recours est écrit dans le résumé du job. Actions épinglées par SHA, titre/description/étiquettes passés par l'environnement.
+  - Rouge-avant / vert-après : `tests/unit/scripts/test_check_regression_on_base.py` (14 tests, 14 rouges avant : le garde n'existait pas).
+  - Non fait : le job n'est pas encore une vérification requise de la protection de branche (réglage du dépôt, hors code) ; le rejeu complet dans GitHub Actions n'a pas été exécuté, seul le script l'a été en local.
+
 ## [3.62.1] - 2026-10-03
 
 - fix(hosts): `Stop` nomme les claims concurrents au lieu de juger la tâche fantôme `bootstrap` (issue #692, suite de #680/#686 ; empilée sur la PR #696). Rejeu du 2026-10-02 : deux claims sans session, aucune écriture — `UserPromptSubmit` nommait les candidates et `grimoire task attach <id>`, mais `decide_evidence_gate` ne traitait l'ambiguïté qu'après une écriture et retombait sinon sur « Tâche bootstrap encore en état proposed ».
