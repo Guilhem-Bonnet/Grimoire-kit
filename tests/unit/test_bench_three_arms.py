@@ -138,6 +138,61 @@ def test_prepare_task_repo_can_include_tests_for_verification(synthetic_bench_ro
     assert (dest / "python_ex_0_test.py").is_file()
 
 
+def test_prepare_task_repo_refuses_non_empty_directory(synthetic_bench_root: Path, tmp_path: Path) -> None:
+    """Lot J : prepare_task_repo ne doit pas réutiliser un dossier existant.
+
+    Reproduit le défaut #694 : appeler prepare_task_repo deux fois avec la
+    même destination reléve les tests cachés de la première tâche dans la
+    seconde préparation.
+    """
+    catalog = ta.discover_catalog(synthetic_bench_root)
+    task1 = next(t for t in catalog if t.slug == "python-ex-0")
+    task2 = next(t for t in catalog if t.slug == "python-ex-1")
+    dest = tmp_path / "task-repo"
+
+    # Premier appel : prépare la tâche 1
+    ta.prepare_task_repo(task1, dest)
+    assert (dest / "TASK.md").is_file()
+    assert (dest / "python_ex_0.py").is_file()
+    assert not (dest / "python_ex_0_test.py").exists()  # tests cachés
+
+    # Deuxième appel : doit refuser de réutiliser le dossier existant
+    with pytest.raises(FileExistsError):
+        ta.prepare_task_repo(task2, dest)
+    # En l'absence de refus, les tests cachés de task1 seraient visibles
+    # dans le dépôt de task2 (contamination).
+
+
+def test_prepare_task_repo_has_single_initial_commit(synthetic_bench_root: Path, tmp_path: Path) -> None:
+    """Vérifier que prepare_task_repo crée exactement un commit initial.
+
+    Lot J : reproductibilité du test initial et pas d'historique pollué
+    par d'anciennes tentatives.
+    """
+    catalog = ta.discover_catalog(synthetic_bench_root)
+    task = next(t for t in catalog if t.slug == "python-ex-0")
+    dest = tmp_path / "task-repo"
+    ta.prepare_task_repo(task, dest)
+
+    # Vérifier un seul commit
+    result = ta._run(
+        ["git", "rev-list", "--count", "HEAD"],
+        cwd=dest,
+        timeout=5,
+    )
+    assert result.returncode == 0
+    assert result.stdout.strip() == "1"
+
+    # Vérifier que c'est nommé correctement
+    result = ta._run(
+        ["git", "log", "--oneline", "-1"],
+        cwd=dest,
+        timeout=5,
+    )
+    assert result.returncode == 0
+    assert "état initial" in result.stdout
+
+
 # ── 3. Détection de succès sur tests verts/rouges ──────────────────────────
 
 

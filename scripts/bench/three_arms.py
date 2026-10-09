@@ -275,7 +275,16 @@ def prepare_task_repo(task: TaskMeta, dest: Path, *, include_tests: bool = False
     tout comme tout ce qui vit sous ``.meta/`` et ``.docs/`` (solution de
     référence, générateurs). ``git init`` pour que l'agent puisse diffs/commits
     s'il le souhaite.
+
+    Lot J (#694) : refuse un dossier non vide pour éviter la contamination par
+    des tests cachés d'une préparation antérieure.
     """
+    # Refuse un dossier non vide pour éviter la contamination
+    if dest.exists() and any(dest.iterdir()):
+        raise FileExistsError(
+            f"Le dossier de destination {dest} existe déjà et n'est pas vide. "
+            f"Impossible de préparer la tâche de façon isolée (risque de contamination)."
+        )
     dest.mkdir(parents=True, exist_ok=True)
     (dest / "TASK.md").write_text(_read_instructions(task.exercise_dir), encoding="utf-8")
 
