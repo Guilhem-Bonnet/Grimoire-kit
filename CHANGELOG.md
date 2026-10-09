@@ -7,6 +7,11 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- chore(ci): scan de secrets sur l'historique et audit statique des permissions des workflows (issue #???). Deux nouvelles étapes de CI pour durcir la sécurité :
+  - Un job `gitleaks` qui scrute tout l'historique git pour détecter les secrets accidentellement commités, actif sur les PR.
+  - Un audit statique des permissions des workflows (`audit-workflow-permissions.py`) qui refuse les permissions `write-all` et les permissions excessives sur les ressources sensibles.
+  - Nouvelle suite de tests `tests/ci/test_secret_scan.py` (5 tests).
+
 ## [3.62.1] - 2026-10-03
 
 - fix(hosts): `Stop` nomme les claims concurrents au lieu de juger la tâche fantôme `bootstrap` (issue #692, suite de #680/#686 ; empilée sur la PR #696). Rejeu du 2026-10-02 : deux claims sans session, aucune écriture — `UserPromptSubmit` nommait les candidates et `grimoire task attach <id>`, mais `decide_evidence_gate` ne traitait l'ambiguïté qu'après une écriture et retombait sinon sur « Tâche bootstrap encore en état proposed ».
