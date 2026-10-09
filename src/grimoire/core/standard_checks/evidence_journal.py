@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -185,10 +186,13 @@ def append_guard_event(project_root: Path, task_id: str, event: dict[str, Any]) 
     """Append one guard event (``guard.error``…) to the task's guard journal. Best-effort: never raises.
 
     The journal is bounded (W1-06) : ``error_message`` is cut at the same
-    length as a command in ``evidence-log.jsonl``, an event identical to the
-    previous one (same fields, ``ts`` aside) is not written again — a gate
-    that crashes on every ``Stop`` leaves one line, not one per turn — and
-    the file stops growing at :data:`GUARD_EVENTS_MAX`.
+    length as a command in ``evidence-log.jsonl``. An event identical to the
+    previous one (same fields, ``ts``/``count``/``last_ts`` aside) is not
+    written as a new line — a gate that crashes on every ``Stop`` leaves one
+    line, not one per turn — but it is *counted* : the last line is rewritten
+    with ``count`` (occurrences) and ``last_ts``, so "N panne(s)" stays true.
+    At :data:`GUARD_EVENTS_MAX` lines the oldest are dropped (rotation), so the
+    journal always ends on the most recent failure.
     """
     try:
         message = event.get("error_message")
@@ -196,15 +200,39 @@ def append_guard_event(project_root: Path, task_id: str, event: dict[str, Any]) 
             event = {**event, "error_message": _truncate_command(message)}
         full_path = project_root / guard_events_relpath(task_id)
         existing = read_guard_events(project_root, task_id)
-        if len(existing) >= GUARD_EVENTS_MAX:
-            return
         if existing and _without_ts(existing[-1]) == _without_ts(event):
+            last = existing[-1]
+            last["count"] = _event_count(last) + 1
+            last["last_ts"] = event.get("ts", last.get("ts"))
+            _write_guard_events(full_path, existing)
             return
         full_path.parent.mkdir(parents=True, exist_ok=True)
+        if len(existing) >= GUARD_EVENTS_MAX:
+            _write_guard_events(full_path, [*existing[len(existing) - GUARD_EVENTS_MAX + 1 :], event])
+            return
         with open(full_path, "a", encoding="utf-8") as handle:
             handle.write(json.dumps(event, ensure_ascii=False) + "\n")
     except OSError:
         return
+
+
+def _event_count(event: dict[str, Any]) -> int:
+    """Occurrences carried by one journal line : ``count`` when it is a positive int, else ``1``."""
+    count = event.get("count", 1)
+    return count if isinstance(count, int) and not isinstance(count, bool) and count > 0 else 1
+
+
+def _write_guard_events(path: Path, events: list[dict[str, Any]]) -> None:
+    """Rewrite the whole guard journal atomically (temp file + ``replace``). Raises ``OSError`` on failure."""
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_text("".join(json.dumps(e, ensure_ascii=False) + "\n" for e in events), encoding="utf-8")
+        tmp.replace(path)
+    except OSError:
+        with contextlib.suppress(OSError):
+            tmp.unlink(missing_ok=True)
+        raise
 
 
 def record_guard_error(project_root: Path, task_id: str, guard_id: str, error_type: str, error_message: str) -> None:
@@ -223,21 +251,28 @@ def record_guard_error(project_root: Path, task_id: str, guard_id: str, error_ty
 
 
 def describe_guard_errors(project_root: Path, task_id: str) -> str:
-    """The ``guard.error_recorded`` message for *task_id*, with its remedy. ``""`` when none."""
-    errors = [e for e in read_guard_events(project_root, task_id) if e.get("type") == GUARD_ERROR_EVENT]
+    """The ``guard.error_recorded`` message for *task_id*, with its remedy. ``""`` when none.
+
+    The count is the sum of the occurrences carried by each line (``count``,
+    see :func:`append_guard_event`), not the number of lines.
+    """
+    events = read_guard_events(project_root, task_id)
+    errors = [e for e in events if e.get("type") == GUARD_ERROR_EVENT]
     if not errors:
         return ""
     last = errors[-1]
+    total = sum(_event_count(e) for e in errors)
+    rotated = " Journal plein : les pannes les plus anciennes sont écartées." if len(events) >= GUARD_EVENTS_MAX else ""
     return (
-        f"{len(errors)} panne(s) de garde tracée(s) pour {task_id} (dernière : garde « {last.get('guard_id', '?')} », "
-        f"{last.get('error_type', '?')}) : la garde n'a pas pu juger, ce n'est pas un vert. "
+        f"{total} panne(s) de garde tracée(s) pour {task_id} (dernière : garde « {last.get('guard_id', '?')} », "
+        f"{last.get('error_type', '?')}) : la garde n'a pas pu juger, ce n'est pas un vert.{rotated} "
         f"Corrige la cause puis relance `grimoire standard gate check --task-id {task_id}` ; "
         f"journal : {guard_events_relpath(task_id).as_posix()} (le supprimer acquitte les pannes)."
     )
 
 
 def _without_ts(event: dict[str, Any]) -> dict[str, Any]:
-    return {key: value for key, value in event.items() if key != "ts"}
+    return {key: value for key, value in event.items() if key not in {"ts", "count", "last_ts"}}
 
 
 def read_guard_events(project_root: Path, task_id: str) -> list[dict[str, Any]]:

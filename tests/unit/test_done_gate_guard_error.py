@@ -80,6 +80,7 @@ def test_orchestrated_never_blocks_on_a_crash_but_warns_and_traces(tmp_path: Pat
     assert events[0]["type"] == GUARD_ERROR_EVENT == "guard.error"
     assert events[0]["guard_id"] == "done_gate"
     assert events[0]["error_type"] == "RuntimeError"
+    assert events[0]["count"] == 6
 
 
 def test_governed_in_shadow_warns_only_and_is_not_capped_into_a_block(tmp_path: Path, shadow: None) -> None:
@@ -221,3 +222,98 @@ def test_verify_message_names_a_real_remedy(tmp_path: Path, shadow: None) -> Non
     check = next(c for c in verify_standard_profile(root, task_id="bootstrap").checks if c.id == "guard.error_recorded")
     assert "grimoire standard gate check --task-id bootstrap" in check.message
     assert "guard-events.jsonl" in check.message
+
+
+# --- seconde revue W1-06 : T2-01 (résolution du refus) et T2-02 (compteur, rotation) ---
+
+_NOW = "2026-10-09T00:00:00+00:00"
+_RESOLVE = "grimoire.hosts.decisions.done_gate.resolve_done_gate_block"
+
+
+def _corrupt_caps(root: Path) -> None:
+    state = root / evidence_log_relpath("bootstrap").parent / "done-gate-state.json"
+    state.parent.mkdir(parents=True, exist_ok=True)
+    state.write_text(json.dumps({"session_blocks": {"s-1": "x"}}), encoding="utf-8")
+
+
+def test_a_corrupt_session_count_neither_crashes_nor_silences_the_refusal(tmp_path: Path, enforce: None) -> None:
+    from grimoire.hosts.decisions.done_gate import resolve_done_gate_block
+
+    root = _project(tmp_path, "governed")
+    _corrupt_caps(root)
+    assert resolve_done_gate_block(root, "bootstrap", "s-1", "governed", _NOW) == (True, True, False)
+    events = read_guard_events(root, "bootstrap")
+    assert [e["guard_id"] for e in events] == ["done_gate.caps_state"]
+    # L'état est réécrit sain : la corruption n'est tracée qu'une fois.
+    resolve_done_gate_block(root, "bootstrap", "s-1", "governed", "2026-10-09T01:00:00+00:00")
+    assert len(read_guard_events(root, "bootstrap")) == 1
+
+
+def test_a_crashed_gate_with_a_corrupt_cap_state_still_blocks_in_enforced_governed(
+    tmp_path: Path, enforce: None
+) -> None:
+    root = _project(tmp_path, "governed")
+    _corrupt_caps(root)
+    decision = _stop(root, "s-1")
+    assert decision.outcome is Outcome.BLOCK  # type: ignore[attr-defined]
+    assert decision.detail["done_gate"]["enforce"] is True  # type: ignore[attr-defined]
+
+
+def test_a_resolution_crash_is_traced_and_fails_closed_in_enforced_governed(tmp_path: Path, enforce: None) -> None:
+    root = _project(tmp_path, "governed")
+    with patch(_RESOLVE, side_effect=ValueError("état illisible")):
+        decision = _stop(root, "s-1")
+    assert decision.outcome is Outcome.BLOCK  # type: ignore[attr-defined]
+    assert decision.detail["done_gate"]["enforce"] is True  # type: ignore[attr-defined]
+    guards = [e["guard_id"] for e in read_guard_events(root, "bootstrap")]
+    assert "done_gate.resolution" in guards
+
+
+def test_a_resolution_crash_stays_non_blocking_without_the_opt_in_or_a_blocking_profile(
+    tmp_path: Path, shadow: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = _project(tmp_path, "governed")
+    with patch(_RESOLVE, side_effect=ValueError("état illisible")):
+        decision = _stop(root, "s-1")
+    assert decision.outcome is Outcome.ALLOW  # type: ignore[attr-defined]
+    assert decision.detail["done_gate"]["enforce"] is False  # type: ignore[attr-defined]
+    assert "done_gate.resolution" in [e["guard_id"] for e in read_guard_events(root, "bootstrap")]
+    monkeypatch.setenv("GRIMOIRE_DONE_GATE", "enforce")
+    other = _project(tmp_path / "orch", "orchestrated")
+    with patch(_RESOLVE, side_effect=ValueError("état illisible")):
+        decision = _stop(other, "s-1")
+    assert decision.outcome is Outcome.ALLOW  # type: ignore[attr-defined]
+    assert decision.detail["done_gate"]["enforce"] is True  # type: ignore[attr-defined]
+
+
+def test_repeated_identical_guard_errors_are_counted_not_swallowed(tmp_path: Path) -> None:
+    from grimoire.core.standard_checks.evidence_journal import describe_guard_errors, record_guard_error
+
+    for _ in range(5):
+        record_guard_error(tmp_path, "T-1", "g", "ValueError", "boom")
+    events = read_guard_events(tmp_path, "T-1")
+    assert len(events) == 1
+    assert events[0]["count"] == 5
+    assert events[0]["last_ts"] >= events[0]["ts"]
+    assert describe_guard_errors(tmp_path, "T-1").startswith("5 panne(s)")
+    record_guard_error(tmp_path, "T-1", "g", "ValueError", "autre")
+    assert describe_guard_errors(tmp_path, "T-1").startswith("6 panne(s)")
+
+
+def test_a_full_guard_journal_rotates_and_keeps_the_latest_failure(tmp_path: Path) -> None:
+    from grimoire.core.standard_checks.evidence_journal import (
+        GUARD_EVENTS_MAX,
+        describe_guard_errors,
+        record_guard_error,
+    )
+
+    for n in range(GUARD_EVENTS_MAX + 5):
+        record_guard_error(tmp_path, "T-1", "g", "ValueError", f"boom {n}")
+    record_guard_error(tmp_path, "T-1", "autre", "KeyError", "dernier")
+    events = read_guard_events(tmp_path, "T-1")
+    assert len(events) == GUARD_EVENTS_MAX
+    assert events[-1]["guard_id"] == "autre"
+    assert events[0]["error_message"] == "boom 6"
+    message = describe_guard_errors(tmp_path, "T-1")
+    assert "« autre »" in message
+    assert "écartées" in message

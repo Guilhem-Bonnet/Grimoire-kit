@@ -70,7 +70,7 @@ from grimoire.core.standard_checks.evidence_journal import evidence_log_relpath,
 from grimoire.hosts.decisions.enrolment import BLOCKING_PROFILES
 from grimoire.hosts.decisions.tool_facts import command_surface, is_read_only_command
 
-__all__ = ["DoneGateVerdict", "evaluate_done_gate", "resolve_done_gate_block"]
+__all__ = ["DoneGateVerdict", "evaluate_done_gate", "resolve_done_gate_block", "resolve_done_gate_block_after_crash"]
 
 #: Same directory as ``evidence-log.jsonl`` (see the module docstring) —
 #: never ``_grimoire-output/evidence`` (the versioned pack): a per-task
@@ -434,7 +434,17 @@ def _check_and_record_cap(project_root: Path, task_id: str, session_id: str, now
     session_blocks_raw = state.get("session_blocks")
     session_blocks: dict[str, int] = session_blocks_raw if isinstance(session_blocks_raw, dict) else {}
     sid = session_id or "unknown"
-    count = int(session_blocks.get(sid, 0) or 0)
+    raw_count = session_blocks.get(sid, 0)
+    if isinstance(raw_count, int) and not isinstance(raw_count, bool) and raw_count >= 0:
+        count = raw_count
+    else:
+        # État de plafond corrompu (W1-06) : une valeur non entière ne doit ni planter la
+        # résolution du refus ni la faire taire. Comptée 0 (le refus reste possible, le
+        # fichier est réécrit sain), et la corruption est tracée.
+        record_guard_error(
+            project_root, task_id, "done_gate.caps_state", "ValueError", f"session_blocks[{sid!r}]={raw_count!r}"
+        )
+        count = 0
     if count >= _SESSION_CAP:
         return True
     session_blocks[sid] = count + 1
@@ -460,6 +470,24 @@ def resolve_done_gate_block(
         capped = _check_and_record_cap(project_root, task_id, session_id, now_iso)
         return enforce, not capped, capped
     return enforce, False, False
+
+
+def resolve_done_gate_block_after_crash(project_root: Path, task_id: str, profile: str) -> tuple[bool, bool, bool]:
+    """``(enforce, blocked, capped)`` quand :func:`resolve_done_gate_block` a lui-même planté (W1-06).
+
+    Fail-closed là où le profil le promet : profil bloquant ET opt-in
+    ``enforce`` → ``blocked`` (le refroidissement et le plafond, dont l'état est
+    justement ce qui n'a pas pu être lu, sont suspendus : ``stop_active`` laisse
+    de toute façon passer le second ``Stop``). Ailleurs, jamais de refus.
+    ``enforce`` est relu séparément (``_is_enforced`` trace sa propre panne) au
+    lieu d'être réécrit à ``False``.
+    """
+    try:
+        enforce = _is_enforced(project_root, task_id)
+    except Exception as exc:
+        record_guard_error(project_root, task_id, "done_gate.enforce_option", type(exc).__name__, str(exc))
+        enforce = False
+    return enforce, profile in BLOCKING_PROFILES and enforce, False
 
 
 def evaluate_done_gate(hook: Any, task_id: str, profile: str, *, now_iso: str | None = None) -> DoneGateVerdict:

@@ -159,7 +159,11 @@ def _done_gate_unevaluable(decision: Decision, hook: HookInput, task_id: str, pr
     bloquant avec l'opt-in ``enforce``, via le refroidissement et le plafond de
     session ; sinon un avertissement, jamais un ``BLOCK``.
     """
-    from grimoire.hosts.decisions.done_gate import DoneGateVerdict, resolve_done_gate_block
+    from grimoire.hosts.decisions.done_gate import (
+        DoneGateVerdict,
+        resolve_done_gate_block,
+        resolve_done_gate_block_after_crash,
+    )
 
     cause = f"{type(exc).__name__}: {exc}"
     record_guard_error(hook.project_root, task_id, "done_gate", type(exc).__name__, str(exc))
@@ -168,8 +172,13 @@ def _done_gate_unevaluable(decision: Decision, hook: HookInput, task_id: str, pr
         enforce, blocked, capped = resolve_done_gate_block(
             hook.project_root, task_id, hook.session_id, profile, now_iso
         )
-    except Exception:
-        enforce, blocked, capped = False, False, False
+    except Exception as resolution_exc:
+        # Pas de silence (W1-06) : la panne de la résolution est tracée, et l'opt-in
+        # ``enforce`` n'est pas réécrit à False — fail-closed en profil bloquant.
+        record_guard_error(
+            hook.project_root, task_id, "done_gate.resolution", type(resolution_exc).__name__, str(resolution_exc)
+        )
+        enforce, blocked, capped = resolve_done_gate_block_after_crash(hook.project_root, task_id, profile)
     verdict = DoneGateVerdict(
         stale=False, reason=f"error:{type(exc).__name__}", enforce=enforce, blocked=blocked, capped=capped
     )
