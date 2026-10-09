@@ -19,6 +19,7 @@ from grimoire.core.standard_state import active_profile_id, active_task_id
 from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
 from grimoire.hosts.decisions.tool_facts import (
     ToolFacts,
+    approval_fingerprint,
     classify_tool,
     command_surface,
     extract_c_bodies,
@@ -125,6 +126,7 @@ def _evaluate_temporal_layer(
         tool_detail=policy_tool_detail(facts),
         is_write=facts.mutation is not MutationClass.READ_ONLY,
         now=now,
+        fingerprint=approval_fingerprint(hook.tool_name or "unknown", hook.tool_input, facts),
     )
     save_session_state(hook.project_root, decision.state, now_iso=now_iso)
     return decision.verdict, decision.reason, [rule.rule_id for rule in decision.matched_rules]

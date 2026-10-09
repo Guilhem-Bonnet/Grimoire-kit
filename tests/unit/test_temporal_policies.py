@@ -328,6 +328,15 @@ def test_approved_fingerprints_survive_a_save_load_round_trip() -> None:
     assert restored.rule_state("approval").approved_fingerprints == state.rule_state("approval").approved_fingerprints
 
 
+def test_fingerprint_keeps_whitespace_inside_a_quoted_argument() -> None:
+    """S3 : `rm "my  file"` et `rm "my file"` visent deux fichiers distincts."""
+    from grimoire.policies.temporal import action_fingerprint
+
+    assert action_fingerprint("Bash", 'rm "my  file"') != action_fingerprint("Bash", 'rm "my file"')
+    assert action_fingerprint("Bash", 'rm   "my file" ') == action_fingerprint("Bash", 'rm "my file"')
+    assert action_fingerprint("Bash", 'rm "unclosed') != action_fingerprint("Bash", 'rm  "unclosed ')
+
+
 # ── tool_pattern_matches: the "tool key" fix ─────────────────────────────────
 #
 # Defect found in real use on Grimoire-Forge: `tool_pattern` used to be

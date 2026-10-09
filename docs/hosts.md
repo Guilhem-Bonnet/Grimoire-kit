@@ -399,9 +399,13 @@ Seul `PostToolUse` — l'événement qu'un hôte n'émet que si l'outil a
 réellement tourné, donc que le `ask` précédent a été accordé — enregistre
 l'approbation, via `record_post_tool_use_approval`
 (`grimoire.policies.temporal`), appelée depuis la décision `PostToolUse`
-existante (`grimoire.hosts.decisions.evidence_trace`). Un appel suivant sur
-le même motif, dans la même session, passe alors en `allow` silencieux ; une
-session neuve redemande. Sans cette étape, un garde `require_approval`
+existante (`grimoire.hosts.decisions.evidence_trace`). L'approbation porte
+sur l'empreinte de l'action exécutée (outil + commande normalisée, ou entrée
+complète de l'outil — toutes les cibles, arguments et contenu — hors Bash) :
+seule une action identique passe en `allow` silencieux, toute autre action
+correspondant au motif redemande. Les empreintes sont conservées dans
+`approved_fingerprints` (64 au plus par règle, les plus anciennes sortent) ; un
+état hérité sans empreinte redemande, et une session neuve aussi. Sans cette étape, un garde `require_approval`
 échouait ouvert (la version initiale de ce chantier faisait cette erreur,
 corrigée en revue le 2026-09-12).
 

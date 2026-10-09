@@ -31,7 +31,7 @@ from grimoire.core.standard_checks.evidence_journal import (
 )
 from grimoire.core.standard_state import active_task_id, is_standard_enrolled
 from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
-from grimoire.hosts.decisions.tool_facts import ToolFacts, classify_tool, policy_tool_detail
+from grimoire.hosts.decisions.tool_facts import ToolFacts, approval_fingerprint, classify_tool, policy_tool_detail
 from grimoire.policies.schemas import ActionKind, MutationClass
 
 if TYPE_CHECKING:
@@ -73,6 +73,7 @@ def _record_temporal_approval(hook: HookInput, facts: ToolFacts) -> None:
             state,
             tool_name=hook.tool_name or "unknown",
             tool_detail=policy_tool_detail(facts),
+            fingerprint=approval_fingerprint(hook.tool_name or "unknown", hook.tool_input, facts),
         ):
             save_session_state(hook.project_root, state, now_iso=now_iso)
     except Exception:

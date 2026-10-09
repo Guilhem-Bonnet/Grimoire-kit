@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import shlex
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -494,6 +495,7 @@ def evaluate_temporal(
     tool_detail: str = "",
     is_write: bool,
     now: datetime | None = None,
+    fingerprint: str | None = None,
 ) -> TemporalDecision:
     """Evaluate every temporal rule in *rules* against *state* for one call.
 
@@ -514,7 +516,8 @@ def evaluate_temporal(
     # L'approbation porte sur l'empreinte de l'action : le booléen `approved`
     # que lisent les deux backends est rendu vrai pour CETTE action seulement,
     # puis ramené à « au moins une action approuvée » (W1-09).
-    fingerprint = action_fingerprint(tool_name, tool_detail)
+    if fingerprint is None:
+        fingerprint = action_fingerprint(tool_name, tool_detail)
     approval_states = [state.rules[r.id] for r in rules if r.require_approval and r.id in state.rules]
     for rs in approval_states:
         rs.approved = fingerprint in rs.approved_fingerprints
@@ -537,14 +540,31 @@ _MAX_APPROVED_FINGERPRINTS = 64
 """Borne par règle : les plus anciennes empreintes sortent (re-demande, jamais ouvert)."""
 
 
-def action_fingerprint(tool_name: str, tool_detail: str = "") -> str:
-    """Empreinte stable d'une action : ``sha256(outil + détail normalisé)``.
+def normalize_command(command: str) -> str:
+    """Normalise une ligne de commande sans confondre deux arguments distincts.
 
-    Le détail est la commande (Bash) ou la cible (fichier) telle que la voit
-    ``policy_tool_detail`` ; les espaces sont normalisés, rien d'autre.
+    ``shlex.join(shlex.split(...))`` re-cite chaque jeton : les espaces *dans*
+    un argument cité (``rm "my  file"``) restent distincts, ceux *entre*
+    arguments sont normalisés. Commande multi-lignes ou citation invalide :
+    repli sur le texte brut (``strip`` seul), donc plus strict, jamais plus lâche.
     """
-    normalized = " ".join(tool_detail.split())
-    return hashlib.sha256(f"{tool_name}\0{normalized}".encode()).hexdigest()
+    if "\n" in command:
+        return command.strip()
+    try:
+        return shlex.join(shlex.split(command))
+    except ValueError:
+        return command.strip()
+
+
+def action_fingerprint(tool_name: str, tool_detail: str = "", *, normalize: bool = True) -> str:
+    """Empreinte stable d'une action : ``sha256(outil + détail)``.
+
+    *tool_detail* est la commande (voir :func:`normalize_command`) ou, pour les
+    outils sans commande, la forme canonique de l'entrée de l'outil (voir
+    ``tool_facts.approval_fingerprint``, qui passe ``normalize=False``).
+    """
+    detail = normalize_command(tool_detail) if normalize else tool_detail
+    return hashlib.sha256(f"{tool_name}\0{detail}".encode()).hexdigest()
 
 
 def _mark_approved_python(rules: Sequence[PolicyRule], tool_name: str, tool_detail: str) -> list[str]:
@@ -559,7 +579,12 @@ def _mark_approved_rust(rules: Sequence[PolicyRule], tool_name: str, tool_detail
 
 
 def record_post_tool_use_approval(
-    rules: Sequence[PolicyRule], state: SessionState, *, tool_name: str, tool_detail: str = ""
+    rules: Sequence[PolicyRule],
+    state: SessionState,
+    *,
+    tool_name: str,
+    tool_detail: str = "",
+    fingerprint: str | None = None,
 ) -> bool:
     """Record the executed action's fingerprint on every matching ``require_approval`` rule.
 
@@ -584,7 +609,8 @@ def record_post_tool_use_approval(
         if _use_rust_backend()
         else _mark_approved_python(approval_rules, tool_name, tool_detail)
     )
-    fingerprint = action_fingerprint(tool_name, tool_detail)
+    if fingerprint is None:
+        fingerprint = action_fingerprint(tool_name, tool_detail)
     changed = False
     for rule_id in rule_ids:
         rule_state = state.rule_state(rule_id)
