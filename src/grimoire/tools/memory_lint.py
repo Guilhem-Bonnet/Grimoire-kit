@@ -285,42 +285,60 @@ def collect_memory_files(project_root: Path) -> list[MemoryFile]:
     return files
 
 
+# Une résolution est une entrée du journal qui COMMENCE par « Resolved: » (date
+# entre crochets facultative). « Unresolved », « Not resolved yet » ou une simple
+# mention du mot en cours de phrase ne sont pas des résolutions.
+_RESOLUTION_RE = re.compile(r"^\s*(?:\[[^\]]*\]\s*)?resolved\s*:", re.IGNORECASE)
+
+
+def _resolution_is_later(res_date: str, *entry_dates: str) -> bool:
+    """Une résolution datée ne couvre pas une entrée qui lui est postérieure.
+
+    Les dates sont ISO (comparables en texte). Une date absente d'un côté ne peut
+    pas être comparée : elle n'invalide pas la résolution.
+    """
+    if not res_date:
+        return True
+    return all(not d or d <= res_date for d in entry_dates)
+
+
 # ── Checks ────────────────────────────────────────────────────────────────────
 
 def check_contradictions(files: list[MemoryFile]) -> list[LintIssue]:
     """Detect contradictions: similar topics with opposite polarity across files."""
     issues: list[LintIssue] = []
-    positives: list[tuple[str, str]] = []  # (file_path, text)
-    negatives: list[tuple[str, str]] = []
+    positives: list[tuple[str, str, str]] = []  # (file_path, text, date)
+    negatives: list[tuple[str, str, str]] = []
 
     # Le journal des contradictions n'est pas une source de décisions : on y
     # consigne des résolutions, il ne doit pas se contredire lui-même.
     resolved = [
-        text for mf in files if mf.kind == "contradictions"
-        for _date, text in mf.entries if "resolved" in text.lower()
+        (date, text) for mf in files if mf.kind == "contradictions"
+        for date, text in mf.entries if _RESOLUTION_RE.match(text)
     ]
 
     for mf in files:
         if mf.kind == "contradictions":
             continue
-        for _date, text in mf.entries:
+        for date, text in mf.entries:
             is_pos, is_neg = _has_polarity(text)
             if is_pos:
-                positives.append((mf.path, text))
+                positives.append((mf.path, text, date))
             if is_neg:
-                negatives.append((mf.path, text))
+                negatives.append((mf.path, text, date))
 
     idx = 0
-    for pos_file, pos_text in positives:
-        for neg_file, neg_text in negatives:
+    for pos_file, pos_text, pos_date in positives:
+        for neg_file, neg_text, neg_date in negatives:
             if pos_file == neg_file:
                 continue
             sim = similarity(pos_text, neg_text)
             if sim >= CONTRADICTION_THRESHOLD:
                 if any(
-                    similarity(r, pos_text) >= CONTRADICTION_THRESHOLD
-                    and similarity(r, neg_text) >= CONTRADICTION_THRESHOLD
-                    for r in resolved
+                    similarity(r_text, pos_text) >= CONTRADICTION_THRESHOLD
+                    and similarity(r_text, neg_text) >= CONTRADICTION_THRESHOLD
+                    and _resolution_is_later(r_date, pos_date, neg_date)
+                    for r_date, r_text in resolved
                 ):
                     continue  # déjà consignée comme résolue
                 idx += 1

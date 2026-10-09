@@ -30,7 +30,16 @@ _RISK_CRITICAL_PATTERNS = re.compile(
     r"\b(drop\s+table|rm\s+-rf|delete\s+(all|database|schema|prod)|"
     r"truncate|wipe|nuke|overwrite\s+prod|force[\s-]push|reset[\s-]hard|"
     r"revoke\s+access|disable\s+(auth|security|tls|ssl)|"
-    r"secret|password|(access|auth|api|bearer|refresh|session)[\s_-]?token|credential|api.?key)\b",
+    r"secret|password|tokens?|credential|api.?key)\b",
+    re.IGNORECASE,
+)
+# Les « tokens » de LLM (budget, comptage, fenêtre) ne sont pas des secrets : ces
+# locutions sont retirées du titre avant le test du motif critique. Un « tokenizer »
+# n'est pas capté (le motif exige la fin de mot après ``tokens?``).
+_LLM_TOKEN_PHRASES = re.compile(
+    r"\b(llm|prompt|context|completion|output|input|max)[\s_-]+tokens?\b|"
+    r"\btokens?[\s_-]+(count(ing|er)?|budget|usage|limits?|window|length|cost|estimat\w*|overflow)\b|"
+    r"\b(count(ing)?|estimate|estimating|reduce|reducing|save|saving)\s+(\w+\s+)?tokens\b",
     re.IGNORECASE,
 )
 _RISK_HIGH_PATTERNS = re.compile(
@@ -186,7 +195,7 @@ class MissionIntakeService:
     # ── Scoring helpers ────────────────────────────────────────────────────
 
     def _score_risk(self, text: str) -> RiskProfile:
-        if _RISK_CRITICAL_PATTERNS.search(text) or _SENSITIVE_PATHS.search(text):
+        if _RISK_CRITICAL_PATTERNS.search(_LLM_TOKEN_PHRASES.sub(" ", text)) or _SENSITIVE_PATHS.search(text):
             return RiskProfile.SECURITY_CRITICAL
         hits_high = len(_RISK_HIGH_PATTERNS.findall(text))
         hits_std = len(_RISK_STANDARD_PATTERNS.findall(text))

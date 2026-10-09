@@ -13,6 +13,7 @@ import json
 import re
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from grimoire.cli.app import app
@@ -155,6 +156,35 @@ def test_task_add_ne_prend_pas_token_pour_un_secret(tmp_path: Path) -> None:
     assert _profil_de(tmp_path, "Rotate the api token") in {"strict", "security_critical"}
 
 
+@pytest.mark.parametrize(
+    "titre",
+    [
+        "Rotate the GitHub token",
+        "Leaked OAuth token in logs",
+        "Fix CSRF token validation",
+        "Rotate the token",
+        "Revoke refresh tokens",
+        "Rotate the api token",
+    ],
+)
+def test_task_add_garde_les_jetons_d_acces_en_critique(tmp_path: Path, titre: str) -> None:
+    assert _profil_de(tmp_path, titre) in {"strict", "security_critical"}, titre
+
+
+@pytest.mark.parametrize(
+    "titre",
+    [
+        "Fix the token budget overflow",
+        "Count tokens in the prompt",
+        "Improve the tokenizer speed",
+        "Reduce LLM token usage",
+        "Raise the token limit",
+    ],
+)
+def test_task_add_ne_prend_pas_un_token_de_llm_pour_un_secret(tmp_path: Path, titre: str) -> None:
+    assert _profil_de(tmp_path, titre) == "standard", titre
+
+
 def test_memory_lint_remonte_jusqu_a_la_racine_du_projet(tmp_path: Path) -> None:
     _memoire(tmp_path, contradiction=True)
     sub = tmp_path / "sub"
@@ -165,7 +195,16 @@ def test_memory_lint_remonte_jusqu_a_la_racine_du_projet(tmp_path: Path) -> None
 
 def test_memory_lint_racine_inexistante_sort_non_nul(tmp_path: Path) -> None:
     res = runner.invoke(app, ["memory", "lint", "--json", "--project-root", str(tmp_path / "absent")])
-    assert res.exit_code != 0, res.output
+    assert res.exit_code == 1, res.output
+    assert "Not a Grimoire project" in res.output
+
+
+def test_memory_lint_racine_inexistante_ne_remonte_pas_vers_un_projet_ancetre(tmp_path: Path) -> None:
+    # Une racine absente sous un projet existant ne doit pas être résolue vers l'ancêtre.
+    _memoire(tmp_path, contradiction=True)
+    res = runner.invoke(app, ["memory", "lint", "--json", "--project-root", str(tmp_path / "absent" / "sub")])
+    assert res.exit_code == 1, res.output
+    assert "Not a Grimoire project" in res.output
 
 
 def test_memory_lint_memoire_vide_sort_en_2_sauf_allow_empty(tmp_path: Path) -> None:
@@ -187,3 +226,45 @@ def test_memory_lint_contradiction_resolue_et_consignee_sort_a_zero(tmp_path: Pa
     res = runner.invoke(app, ["memory", "lint", "--json", "--project-root", str(tmp_path)])
     assert res.exit_code == 0, res.output
     assert json.loads(res.output)["summary"]["errors"] == 0
+
+
+def _lint_avec_journal(tmp_path: Path, ligne: str | None) -> int:
+    _memoire(tmp_path, contradiction=True)
+    if ligne is not None:
+        log = tmp_path / "_grimoire" / "_memory" / "contradiction-log.md"
+        log.write_text(f"# Contradictions\n{ligne}\n", encoding="utf-8")
+    return runner.invoke(app, ["memory", "lint", "--json", "--project-root", str(tmp_path)]).exit_code
+
+
+@pytest.mark.parametrize(
+    "ligne",
+    [
+        "- [2024-01-03] UNRESOLVED: TDD approach adopted vs rejected for backend, still open",
+        "- Not resolved yet: TDD approach adopted vs rejected for backend",
+        "- [2024-01-03] Not resolved: TDD approach adopted and rejected for backend",
+        "- Unresolved: TDD backend approach adopted vs rejected",
+        "- [2024-01-03] Open: TDD approach adopted vs rejected for backend, resolved later maybe",
+        # résolution antérieure aux deux entrées (2024-01-01 et 2024-01-02)
+        "- [2023-12-31] Resolved: TDD approach adopted for backend; the rejected entry is superseded",
+        # résolution postérieure à l'une des deux entrées seulement
+        "- [2024-01-01] Resolved: TDD approach adopted for backend; the rejected entry is superseded",
+    ],
+)
+def test_memory_lint_une_fausse_resolution_ne_masque_pas_la_contradiction(tmp_path: Path, ligne: str) -> None:
+    assert _lint_avec_journal(tmp_path, ligne) == 1
+
+
+def test_memory_lint_sans_journal_sort_en_1(tmp_path: Path) -> None:
+    assert _lint_avec_journal(tmp_path, None) == 1
+
+
+@pytest.mark.parametrize(
+    "ligne",
+    [
+        "- [2024-01-03] Resolved: TDD approach adopted for backend; the rejected entry is superseded",
+        "- [2024-01-02] RESOLVED : TDD approach adopted for backend; the rejected entry is superseded",
+        "- Resolved: TDD approach adopted for backend; the rejected entry is superseded",
+    ],
+)
+def test_memory_lint_une_vraie_resolution_ancree_et_datee_masque_la_contradiction(tmp_path: Path, ligne: str) -> None:
+    assert _lint_avec_journal(tmp_path, ligne) == 0

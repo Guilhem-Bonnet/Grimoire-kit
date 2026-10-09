@@ -357,6 +357,11 @@ def memory_lint(
     from grimoire.cli.cmd_memory import _load_config_context
     from grimoire.tools.memory_lint import MemoryLint
 
+    # Une racine explicitement donnée mais absente est refusée : sans cela, la
+    # remontée adopterait le projet d'un répertoire ancêtre.
+    if not project_root.is_dir():
+        console.print("[red]Not a Grimoire project[/red] — dossier introuvable ; run [bold]grimoire init[/bold] first.")
+        raise typer.Exit(1)
     # Même résolution de racine que les commandes sœurs : remonte jusqu'au
     # project-context.yaml, sort en 1 hors projet.
     _cfg, root = _load_config_context(project_root)
