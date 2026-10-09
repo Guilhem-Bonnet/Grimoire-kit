@@ -15,7 +15,12 @@ barrière.
 Usage (CI)::
 
     PR_TITLE=... PR_BODY=... PR_LABELS='["fix"]' \\
-        scripts/check-regression-on-base.py --base-sha A --head-sha B
+        scripts/check-regression-on-base.py --base-sha A --head-sha B [--verify-sha M]
+
+Limites assumées : la tête est vérifiée sur `--verify-sha` (commit de fusion en
+CI), pas sur `--head-sha` seul ; un rouge sur la base reste attribué aux
+fichiers de la PR sans prouver la cause (par exemple une fixture de conftest
+en erreur au setup compte comme rouge).
 """
 
 from __future__ import annotations
@@ -37,9 +42,9 @@ _FIX_TITLE = re.compile(r"^fix(\([^)]*\))?!?:", re.IGNORECASE)
 _JUSTIFICATION = re.compile(rf"^\s*{ESCAPE_LABEL}\s*:\s*(\S.*)$", re.IGNORECASE | re.MULTILINE)
 _MIN_JUSTIFICATION = 10
 #: Codes pytest : 0 tout passe, 5 rien collecté : la base ne prouve rien.
-#: 1 : au moins un test en échec. 2 (collecte, interruption), 3, 4 (conftest,
-#: usage) : rouge seulement si un testcase des fichiers de la PR est en échec
-#: ou en erreur (JUnit) ; sinon le verdict est `inconclusive`.
+#: 1 : au moins un test en échec. 2 (collecte, interruption) : rouge seulement
+#: si un testcase des fichiers de la PR est en échec ou en erreur (JUnit) ;
+#: sinon `inconclusive`. 3 et 4 (erreur interne, usage) : toujours `inconclusive`.
 _NOT_FAILING = (0, 5)
 _RED_CODES = (1, 2)
 
@@ -83,9 +88,10 @@ def changed_test_files(repo: Path, base: str, head: str) -> tuple[list[str], lis
 
     L'appui couvre tout type de fichier (fixtures JSON, binaires, conftest) :
     les écarter ferait échouer le test sur la base pour une raison qui n'est
-    pas le code testé.
+    pas le code testé. `--no-renames` : un fichier déplacé (fixture, test)
+    ressort en `A` à sa destination au lieu d'un `R` que `AM` écarte.
     """
-    out = _git(repo, "diff", "--name-only", "--diff-filter=AM", f"{base}...{head}", "--", "tests")
+    out = _git(repo, "diff", "--name-only", "--no-renames", "--diff-filter=AM", f"{base}...{head}", "--", "tests")
     files = [line for line in out.splitlines() if line]
     tests = [f for f in files if f.endswith(".py") and Path(f).name.startswith("test_")]
     return tests, [f for f in files if f not in tests]
@@ -150,8 +156,15 @@ class Replay:
     head_code: int | None  # None : non exécuté (la base n'a pas prouvé de rouge)
 
 
-def run_replay(repo: Path, base: str, head: str, tests: list[str], support: list[str]) -> Replay:
-    """Tests de `head` contre le code de `base`, puis (si rouge) contre `head`."""
+def run_replay(
+    repo: Path, base: str, head: str, tests: list[str], support: list[str], verify: str | None = None
+) -> Replay:
+    """Tests de `head` contre le code de `base`, puis (si rouge) contre `verify`.
+
+    `verify` vaut `head` par défaut ; en CI c'est le commit de fusion que
+    `actions/checkout` extrait, pour qu'une branche en retard sur main ne soit
+    pas validée contre un code que main a déjà changé.
+    """
     tmp = Path(tempfile.mkdtemp(prefix="regression-on-base-", dir=os.environ.get("RUNNER_TEMP")))
     trees: list[Path] = []
     try:
@@ -165,7 +178,7 @@ def run_replay(repo: Path, base: str, head: str, tests: list[str], support: list
         head_code: int | None = None
         if code in _RED_CODES and failing:
             htree = tmp / "head"
-            _add_tree(repo, htree, head)
+            _add_tree(repo, htree, verify or head)
             trees.append(htree)
             head_code = _pytest(htree, tests, tmp / "head.xml")
         return Replay(code, failing, head_code)
@@ -179,7 +192,15 @@ def run_replay(repo: Path, base: str, head: str, tests: list[str], support: list
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def evaluate(repo: Path, base: str, head: str, title: str, body: str, labels: list[str]) -> Verdict:
+def evaluate(
+    repo: Path,
+    base: str,
+    head: str,
+    title: str,
+    body: str,
+    labels: list[str],
+    verify: str | None = None,
+) -> Verdict:
     if not is_fix_title(title):
         return Verdict(True, "skipped", "PR non `fix:` : rejeu sans objet.")
     labelled, why = escape_justification(labels, body)
@@ -200,7 +221,7 @@ def evaluate(repo: Path, base: str, head: str, title: str, body: str, labels: li
             "PR `fix:` sans test ajouté ou modifié. Ajoutez le test de régression, "
             f"ou posez `{ESCAPE_LABEL}` avec une justification.",
         )
-    replay = run_replay(repo, base, head, tests, support)
+    replay = run_replay(repo, base, head, tests, support, verify)
     code = replay.base_code
     if code in _NOT_FAILING:
         return Verdict(
@@ -221,7 +242,8 @@ def evaluate(repo: Path, base: str, head: str, title: str, body: str, labels: li
         return Verdict(
             False,
             "red-on-head",
-            f"Les tests de la PR échouent aussi sur sa tête (pytest code {replay.head_code}) : "
+            f"Les tests de la PR échouent aussi sur sa tête{' (commit de fusion)' if verify else ''} "
+            f"(pytest code {replay.head_code}) : "
             "un test cassé n'est pas une preuve de régression.",
             tests,
         )
@@ -246,6 +268,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-sha", required=True)
     parser.add_argument("--head-sha", required=True)
+    parser.add_argument(
+        "--verify-sha",
+        default=None,
+        help="commit sur lequel les tests doivent être verts (commit de fusion en CI) ; défaut : --head-sha",
+    )
     parser.add_argument("--repo", default=".")
     args = parser.parse_args()
     verdict = evaluate(
@@ -255,6 +282,7 @@ def main() -> int:
         os.environ.get("PR_TITLE", ""),
         os.environ.get("PR_BODY", ""),
         json.loads(os.environ.get("PR_LABELS", "[]")),
+        verify=args.verify_sha,
     )
     summary = render_summary(verdict)
     print(summary)

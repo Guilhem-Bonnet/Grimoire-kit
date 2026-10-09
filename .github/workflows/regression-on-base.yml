@@ -37,10 +37,23 @@ jobs:
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
           PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MERGE_SHA: ${{ github.sha }}
         # Le garde est lu depuis base.sha : une PR qui l'affaiblit ne peut pas
-        # se faire valider par sa propre version.
+        # se faire valider par sa propre version. Absent de base.sha (PR qui
+        # l'introduit), il n'y a rien à rejouer : sans ce test, `git show`
+        # fait échouer le pas sous bash -e avant tout verdict.
+        # La tête est vérifiée sur le commit de fusion (github.sha), celui que
+        # actions/checkout extrait : une branche en retard sur main n'est pas
+        # validée contre un code que main a déjà changé.
         run: |
-          git show "${{ github.event.pull_request.base.sha }}:scripts/check-regression-on-base.py" > "$RUNNER_TEMP/guard.py"
+          if ! git cat-file -e "$BASE_SHA:scripts/check-regression-on-base.py" 2>/dev/null; then
+            echo "garde absent de base.sha (amorçage) : rejeu sans objet" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          git show "$BASE_SHA:scripts/check-regression-on-base.py" > "$RUNNER_TEMP/guard.py"
           python "$RUNNER_TEMP/guard.py" --repo . \
-            --base-sha "${{ github.event.pull_request.base.sha }}" \
-            --head-sha "${{ github.event.pull_request.head.sha }}"
+            --base-sha "$BASE_SHA" \
+            --head-sha "$HEAD_SHA" \
+            --verify-sha "$MERGE_SHA"
