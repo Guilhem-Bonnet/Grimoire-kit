@@ -237,6 +237,9 @@ class TestConsoleEncoding:
         assert result.returncode == 1
         assert b"UnicodeEncodeError" not in result.stderr
         assert b"actions/checkout@v1" in result.stderr
+        # Le rapport est écrit en UTF-8 réel, pas dégradé en \u2717 par backslashreplace.
+        assert "✗".encode() in result.stderr
+        assert b"\\u2717" not in result.stderr
 
 
 class TestF4Root:
