@@ -22,6 +22,7 @@ __all__ = ["ClaimRowScan", "scan_claim_rows", "verify_claim_ledger"]
 _TEMPLATE_CELLS = ["CL-001", "", "fait", "", "hypothèse", "faible", "vérifier"]
 _ID_RE = re.compile(r"^CL-\d{3,}$")
 _CANDIDATE_RE = re.compile(r"^\s*\|\s*cl-", re.IGNORECASE)
+_SECTION_RE = re.compile(r"^##\s+Claims\b", re.IGNORECASE)
 _SEPARATOR_CELL_RE = re.compile(r"^:?-+:?$")
 _STATUSES = frozenset({"prouvé", "hypothèse", "contredit", "réfuté"})
 _DECISIONS = frozenset({"utiliser", "vérifier", "rejeter", "écarter"})
@@ -50,17 +51,18 @@ class ClaimRowScan:
 def scan_claim_rows(text: str) -> ClaimRowScan:
     """Repère les lignes candidates sans aucune perte silencieuse.
 
-    Candidate = toute ligne de tableau de la section ``## Claims`` (hors en-tête,
-    séparateur et ligne modèle), ou, où que ce soit dans le fichier, toute ligne
-    dont la première cellule commence par ``cl-`` (casse et espaces tolérés). Une ligne
-    candidate dont l'identifiant n'est pas ``CL-NNN`` ou qui a moins de 7
-    cellules est comptée non évaluée.
+    Candidate = toute ligne de tableau de la section ``## Claims`` (tout titre de
+    niveau 2 qui commence par « Claims », donc aussi ``## Claims (registre)``),
+    hors en-tête, séparateur et ligne modèle, ou, où que ce soit dans le
+    fichier, toute ligne dont la première cellule commence par ``cl-`` (casse
+    et espaces tolérés). Une ligne candidate dont l'identifiant n'est pas
+    ``CL-NNN`` ou qui a moins de 7 cellules est comptée non évaluée.
     """
     lines = text.splitlines()
-    start = next((n for n, ln in enumerate(lines) if re.match(r"^##\s+Claims\s*$", ln.strip(), re.IGNORECASE)), None)
+    start = next((n for n, ln in enumerate(lines) if _SECTION_RE.match(ln.strip())), None)
     in_section: set[int] = set()
     if start is not None:
-        end = next((n for n in range(start + 1, len(lines)) if lines[n].startswith("## ")), len(lines))
+        end = next((n for n in range(start + 1, len(lines)) if re.match(r"^##\s", lines[n])), len(lines))
         in_section = {n for n in range(start + 1, end) if lines[n].strip().startswith("|")}
     pool = [ln for n, ln in enumerate(lines) if n in in_section or _CANDIDATE_RE.match(ln)]
     scan = ClaimRowScan()
@@ -90,7 +92,8 @@ def verify_claim_ledger(
 
     Un registre vierge, vidé ou absent est un avertissement (starter,
     controlled, orchestrated) mais une erreur en governed et production dès
-    ``review``. Ce qui est aussi une erreur, c'est une affirmation dite prouvée sans preuve, ou —
+    ``review`` — sauf pour une tâche V0 hors governed (``suppress_v0``, ci-dessous).
+    Ce qui est aussi une erreur, c'est une affirmation dite prouvée sans preuve, ou —
     en profil governed et production — une affirmation utilisée alors qu'elle
     n'est pas prouvée, et une synthèse laissée vide.
 
@@ -102,15 +105,21 @@ def verify_claim_ledger(
     comme avant, quel que soit ce drapeau.
 
     ``rows_only`` (issue #614) : pendant ``in_progress``, seules les
-    contradictions ligne à ligne comptent — « prouvé » sans preuve, « utiliser »
-    sans « prouvé ». Le registre vierge (``claims.empty``) et la synthèse non
-    remplie (``claims.summary_placeholder``) sont des constats de clôture,
-    levés à partir de ``review`` seulement.
+    contradictions ligne à ligne bloquent — « prouvé » sans preuve, « utiliser »
+    sans « prouvé ». Une ligne en cours d'écriture (``claims.row_invalid``,
+    ``claims.status_invalid``, ``claims.decision_invalid``) reste signalée mais
+    en avertissement : ``Stop``, ``SubagentStop`` et ``PreCompact`` ne doivent
+    pas bloquer une affirmation à moitié rédigée, que la revue refusera en
+    erreur. Le registre vierge (``claims.empty``) et la synthèse non remplie
+    (``claims.summary_placeholder``) sont des constats de clôture, levés à
+    partir de ``review`` seulement.
     """
     rel_path = EVIDENCE_DIR / task_id / "claim-ledger.md"
     text = _text_file(root, rel_path)
     strict = profile.id in {"governed", "production"}
     severity = "error" if strict else "warning"
+    # Pendant le travail, une ligne mal formée avertit ; la revue la refuse.
+    form_severity = "warning" if rows_only else severity
     if not text.strip():
         if not suppress_v0 and not rows_only:
             _add_check(result, "claims.empty", severity, "Claim ledger is missing or empty.", path=rel_path)
@@ -129,7 +138,7 @@ def verify_claim_ledger(
         )
     for line in scan.unevaluated:
         _add_check(
-            result, "claims.row_invalid", severity, f"Claim row is malformed: {line.strip()[:60]}", path=rel_path
+            result, "claims.row_invalid", form_severity, f"Claim row is malformed: {line.strip()[:60]}", path=rel_path
         )
     rows = scan.evaluated
     for _line, cells in rows:
@@ -139,7 +148,7 @@ def verify_claim_ledger(
             _add_check(
                 result,
                 "claims.status_invalid",
-                severity,
+                form_severity,
                 f"{claim_id} has an unknown status: {status or '(empty)'}.",
                 path=rel_path,
             )
@@ -147,7 +156,7 @@ def verify_claim_ledger(
             _add_check(
                 result,
                 "claims.decision_invalid",
-                severity,
+                form_severity,
                 f"{claim_id} has an unknown decision: {decision or '(empty)'}.",
                 path=rel_path,
             )

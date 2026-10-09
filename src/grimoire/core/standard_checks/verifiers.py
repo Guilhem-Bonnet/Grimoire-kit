@@ -1407,7 +1407,7 @@ def _verify_pattern_catalog_ref(pattern: dict[str, Any], rel_path: Path, result:
         return
     try:
         catalog_ids = catalog_pattern_ids()
-    except (OSError, ValueError):
+    except (OSError, ValueError):  # silent-ok — catalogue injoignable : dégradation voulue (commentaire)
         # Bundled catalogue unreachable in this environment — degrade silently
         # rather than fail a check the project artifact itself did not cause.
         return

@@ -93,6 +93,32 @@ def test_scan_counts_every_candidate_either_evaluated_or_unevaluated() -> None:
         assert scan.candidate_count == len(scan.evaluated) + scan.unevaluated_count
 
 
+@pytest.mark.parametrize(
+    "heading",
+    ["## Claims", "## Claims (registre)", "## Claims — projet", "##  claims", "## Claims : état"],
+)
+def test_any_claims_heading_variant_opens_the_section(heading: str) -> None:
+    """Un titre « ## Claims (…) » ne doit pas faire écarter en silence les lignes qui suivent."""
+    from grimoire.core.standard_checks.claim_ledger_verify import scan_claim_rows
+
+    text = (
+        f"{heading}\n\n| ID | A | T | P | S | C | D |\n|---|---|---|---|---|---|---|\n"
+        "| CL-001 | a | fait | src | prouvé | haute | utiliser |\n"
+        "| CL 002 | b | fait |  | prouvé | haute | utiliser |\n"
+        "| C-003 | b | fait |  | prouvé | haute | utiliser |\n"
+    )
+    scan = scan_claim_rows(text)
+    assert scan.candidate_count == 3, heading
+    assert scan.unevaluated_count == 2, heading
+
+
+def test_a_claims_prefixed_word_is_not_the_claims_section() -> None:
+    from grimoire.core.standard_checks.claim_ledger_verify import scan_claim_rows
+
+    text = "## Claimsmanship\n\n| a | b |\n|---|---|\n| x | y |\n"
+    assert scan_claim_rows(text).candidate_count == 0
+
+
 def test_summary_check_exposes_unevaluated_count(tmp_path: Path) -> None:
     _project(tmp_path, "governed", "| CL-002 | a | fait |")
     result = verify_standard_profile(tmp_path)
@@ -100,22 +126,70 @@ def test_summary_check_exposes_unevaluated_count(tmp_path: Path) -> None:
     assert summary and "unevaluated_count=1" in summary[0].message
 
 
-def test_no_silent_swallow_in_standard_checks() -> None:
-    """Aucun `except ...: pass` dans standard_checks sans justification explicite.
+_JUSTIFIED = ("noqa: S110 —", "silent-ok —")
 
-    Seul est toléré un handler dont la ligne porte `noqa: S110 —` suivi de la raison.
+
+def _is_trivial(node: ast.expr | None) -> bool:
+    """Valeur sans appel ni nom : ``None``, constante, ou conteneur de telles valeurs."""
+    if node is None or isinstance(node, ast.Constant):
+        return True
+    if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
+        return all(_is_trivial(e) for e in node.elts)
+    if isinstance(node, ast.Dict):
+        return all(k is not None and _is_trivial(k) for k in node.keys) and all(_is_trivial(v) for v in node.values)
+    return False
+
+
+def _is_silent(handler: ast.ExceptHandler) -> bool:
+    """Handler qui avale l'exception : seulement pass, continue ou return d'une valeur triviale."""
+    return all(
+        isinstance(s, (ast.Pass, ast.Continue)) or (isinstance(s, ast.Return) and _is_trivial(s.value))
+        for s in handler.body
+    )
+
+
+def _silent_handlers(source: str) -> list[tuple[int, bool]]:
+    """``(ligne, justifié)`` pour chaque handler silencieux de *source*."""
+    lines = source.splitlines()
+    return [
+        (node.lineno, any(tag in lines[node.lineno - 1] for tag in _JUSTIFIED))
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.ExceptHandler) and _is_silent(node)
+    ]
+
+
+@pytest.mark.parametrize(
+    "body",
+    ["pass", "continue", "return", "return None", "return []", "return ([], False)", "return {}", "return 0"],
+)
+def test_silent_handler_detector_flags_every_swallow_shape(body: str) -> None:
+    source = f"def f():\n    for x in y:\n        try:\n            g()\n        except OSError:\n            {body}\n"
+    assert _silent_handlers(source) == [(5, False)]
+
+
+@pytest.mark.parametrize("body", ["return helper()", "log(err)", "raise", "_add_check(r, 'x', 'error', 'm')"])
+def test_silent_handler_detector_ignores_handlers_that_act(body: str) -> None:
+    source = f"def f():\n    try:\n        g()\n    except OSError:\n        {body}\n"
+    assert _silent_handlers(source) == []
+
+
+def test_silent_handler_detector_accepts_a_justified_swallow() -> None:
+    source = "try:\n    g()\nexcept OSError:  # silent-ok — raison\n    pass\n"
+    assert _silent_handlers(source) == [(3, True)]
+
+
+def test_no_silent_swallow_in_standard_checks() -> None:
+    """Aucun handler qui avale l'exception dans standard_checks sans justification explicite.
+
+    Silencieux = corps réduit à ``pass``, ``continue`` ou ``return`` d'une valeur
+    triviale. Toléré seulement si la ligne ``except`` porte ``noqa: S110 —`` ou
+    ``silent-ok —`` suivi de la raison. Sous-dossiers inclus.
     """
     import grimoire.core.standard_checks as pkg
 
     offenders: list[str] = []
-    for path in Path(pkg.__file__).parent.glob("*.py"):
-        source = path.read_text(encoding="utf-8")
-        src_lines = source.splitlines()
-        for node in ast.walk(ast.parse(source)):
-            if (
-                isinstance(node, ast.ExceptHandler)
-                and all(isinstance(s, ast.Pass) for s in node.body)
-                and "noqa: S110 —" not in src_lines[node.lineno - 1]
-            ):
-                offenders.append(f"{path.name}:{node.lineno}")
+    for path in sorted(Path(pkg.__file__).parent.rglob("*.py")):
+        for lineno, justified in _silent_handlers(path.read_text(encoding="utf-8")):
+            if not justified:
+                offenders.append(f"{path.name}:{lineno}")
     assert not offenders, offenders

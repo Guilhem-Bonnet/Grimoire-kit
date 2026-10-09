@@ -113,7 +113,7 @@ def test_setup_can_enable_selected_provider(tmp_path: Path) -> None:
     registry = (tmp_path / "_grimoire/standard/llm-provider-registry.yaml").read_text(encoding="utf-8")
     result = verify_standard_profile(tmp_path)
 
-    assert "default_provider: github-copilot" in registry
+    assert 'default_provider: github-copilot' in registry
     assert result.ok
     assert not any(check.id == "providers.none_enabled" for check in result.checks)
 
@@ -139,10 +139,7 @@ def test_detect_standard_providers_masks_secret_values(provider_id: str, env_var
 def test_verify_fails_when_default_provider_is_disabled(tmp_path: Path) -> None:
     setup_standard_profile(tmp_path, profile_id="controlled", provider_ids=("github-copilot",))
     registry = tmp_path / "_grimoire/standard/llm-provider-registry.yaml"
-    registry.write_text(
-        registry.read_text(encoding="utf-8").replace("default_provider: github-copilot", "default_provider: openai"),
-        encoding="utf-8",
-    )
+    registry.write_text(registry.read_text(encoding="utf-8").replace("default_provider: github-copilot", "default_provider: openai"), encoding="utf-8")
 
     result = verify_standard_profile(tmp_path)
 
@@ -171,9 +168,7 @@ def test_orchestrated_verify_reports_knowledge_placeholder(tmp_path: Path) -> No
 def test_verify_blocks_knowledge_locator_outside_project_root(tmp_path: Path) -> None:
     setup_standard_profile(tmp_path, profile_id="orchestrated")
     registry = tmp_path / "_grimoire/standard/knowledge-source-registry.yaml"
-    registry.write_text(
-        registry.read_text(encoding="utf-8").replace('locator: ""', 'locator: "../../../etc/passwd"'), encoding="utf-8"
-    )
+    registry.write_text(registry.read_text(encoding="utf-8").replace('locator: ""', 'locator: "../../../etc/passwd"'), encoding="utf-8")
 
     result = verify_standard_profile(tmp_path)
 
@@ -184,10 +179,7 @@ def test_verify_blocks_knowledge_locator_outside_project_root(tmp_path: Path) ->
 def test_verify_blocks_knowledge_index_manifest_outside_project_root(tmp_path: Path) -> None:
     setup_standard_profile(tmp_path, profile_id="orchestrated")
     registry = tmp_path / "_grimoire/standard/knowledge-source-registry.yaml"
-    registry.write_text(
-        registry.read_text(encoding="utf-8").replace('index_manifest: ""', 'index_manifest: "../../../etc/passwd"'),
-        encoding="utf-8",
-    )
+    registry.write_text(registry.read_text(encoding="utf-8").replace('index_manifest: ""', 'index_manifest: "../../../etc/passwd"'), encoding="utf-8")
 
     result = verify_standard_profile(tmp_path)
 
@@ -206,9 +198,7 @@ def test_runtime_builders_create_context_decision_hooks_and_events(tmp_path: Pat
 
     assert context.path == Path("_grimoire-output/context/bootstrap/context-bundle.yaml")
     assert context.data["provider_constraints"]["matched_provider"] == "openai"
-    assert (
-        _posix_path(context.data["knowledge_graph_ref"]) == "_grimoire-output/knowledge/bootstrap/knowledge-graph.yaml"
-    )
+    assert _posix_path(context.data["knowledge_graph_ref"]) == "_grimoire-output/knowledge/bootstrap/knowledge-graph.yaml"
     assert context.data["memory_os"]["target"]["semantic_memory"] == "weaviate-server"
     assert decision.path == Path("_grimoire-output/decisions/bootstrap/decision-trace.yaml")
     assert knowledge.path == Path("_grimoire-output/knowledge/bootstrap/index-manifest.yaml")
@@ -254,9 +244,7 @@ def test_standard_pattern_catalog_lists_patterns(tmp_path: Path) -> None:
 def test_verify_fails_on_manifest_profile_mismatch(tmp_path: Path) -> None:
     setup_standard_profile(tmp_path, profile_id="starter")
     manifest = tmp_path / "_grimoire" / "standard" / "standard-profile.yaml"
-    manifest.write_text(
-        manifest.read_text(encoding="utf-8").replace("profile: starter", "profile: production"), encoding="utf-8"
-    )
+    manifest.write_text(manifest.read_text(encoding="utf-8").replace("profile: starter", "profile: production"), encoding="utf-8")
 
     result = verify_standard_profile(tmp_path, profile_id="starter")
 
@@ -266,33 +254,27 @@ def test_verify_fails_on_manifest_profile_mismatch(tmp_path: Path) -> None:
 
 def test_cli_standard_init_and_verify_json(tmp_path: Path) -> None:
     runner = CliRunner()
-    init_result = runner.invoke(
-        app,
-        [
-            "-o",
-            "json",
-            "standard",
-            "init",
-            str(tmp_path),
-            "--profile",
-            "starter",
-        ],
-    )
+    init_result = runner.invoke(app, [
+        "-o",
+        "json",
+        "standard",
+        "init",
+        str(tmp_path),
+        "--profile",
+        "starter",
+    ])
     assert init_result.exit_code == 0
     init_data = json.loads(init_result.output)
     assert init_data["ok"] is True
     assert init_data["profile"] == "starter"
 
-    verify_result = runner.invoke(
-        app,
-        [
-            "-o",
-            "json",
-            "standard",
-            "verify",
-            str(tmp_path),
-        ],
-    )
+    verify_result = runner.invoke(app, [
+        "-o",
+        "json",
+        "standard",
+        "verify",
+        str(tmp_path),
+    ])
     assert verify_result.exit_code == 0
     verify_data = json.loads(verify_result.output)
     assert verify_data["ok"] is True
@@ -302,22 +284,19 @@ def test_cli_standard_init_and_verify_json(tmp_path: Path) -> None:
 
 def test_cli_standard_init_accepts_provider_selection(tmp_path: Path) -> None:
     runner = CliRunner()
-    init_result = runner.invoke(
-        app,
-        [
-            "-o",
-            "json",
-            "standard",
-            "init",
-            str(tmp_path),
-            "--profile",
-            "controlled",
-            "--providers",
-            "github-copilot,claude",
-            "--provider-policy",
-            "mixed",
-        ],
-    )
+    init_result = runner.invoke(app, [
+        "-o",
+        "json",
+        "standard",
+        "init",
+        str(tmp_path),
+        "--profile",
+        "controlled",
+        "--providers",
+        "github-copilot,claude",
+        "--provider-policy",
+        "mixed",
+    ])
 
     assert init_result.exit_code == 0
     init_data = json.loads(init_result.output)
@@ -342,17 +321,14 @@ def test_cli_standard_audit_markdown(tmp_path: Path) -> None:
     runner = CliRunner()
     runner.invoke(app, ["standard", "init", str(tmp_path), "--profile", "orchestrated"])
 
-    result = runner.invoke(
-        app,
-        [
-            "standard",
-            "audit",
-            str(tmp_path),
-            "--profile",
-            "orchestrated",
-            "--markdown",
-        ],
-    )
+    result = runner.invoke(app, [
+        "standard",
+        "audit",
+        str(tmp_path),
+        "--profile",
+        "orchestrated",
+        "--markdown",
+    ])
 
     assert result.exit_code == 0
     assert "# Agentic Standard Audit" in result.output
@@ -361,53 +337,37 @@ def test_cli_standard_audit_markdown(tmp_path: Path) -> None:
 
 def test_cli_standard_runtime_commands_json(tmp_path: Path) -> None:
     runner = CliRunner()
-    runner.invoke(
-        app,
-        [
-            "-o",
-            "json",
-            "standard",
-            "init",
-            str(tmp_path),
-            "--profile",
-            "orchestrated",
-            "--provider",
-            "openai",
-        ],
-    )
+    runner.invoke(app, [
+        "-o",
+        "json",
+        "standard",
+        "init",
+        str(tmp_path),
+        "--profile",
+        "orchestrated",
+        "--provider",
+        "openai",
+    ])
 
     context_result = runner.invoke(app, ["-o", "json", "standard", "context", "build", str(tmp_path)])
     decision_result = runner.invoke(app, ["-o", "json", "standard", "decision", "trace", str(tmp_path)])
     knowledge_result = runner.invoke(app, ["-o", "json", "standard", "knowledge", "index", str(tmp_path)])
     graph_result = runner.invoke(app, ["-o", "json", "standard", "knowledge", "graph", str(tmp_path)])
     pattern_result = runner.invoke(app, ["-o", "json", "standard", "pattern", "list", str(tmp_path)])
-    hooks_result = runner.invoke(
-        app, ["-o", "json", "standard", "hooks", "simulate", str(tmp_path), "--phase", "pre_context_build"]
-    )
-    gate_result = runner.invoke(
-        app, ["-o", "json", "standard", "gate", "check", str(tmp_path), "--target-state", "review"]
-    )
+    hooks_result = runner.invoke(app, ["-o", "json", "standard", "hooks", "simulate", str(tmp_path), "--phase", "pre_context_build"])
+    gate_result = runner.invoke(app, ["-o", "json", "standard", "gate", "check", str(tmp_path), "--target-state", "review"])
     events_result = runner.invoke(app, ["-o", "json", "standard", "events", "audit", str(tmp_path)])
     fix_result = runner.invoke(app, ["-o", "json", "standard", "fix", str(tmp_path)])
     score_result = runner.invoke(app, ["-o", "json", "standard", "score", str(tmp_path)])
 
     assert context_result.exit_code == 0
-    assert (
-        _posix_path(json.loads(context_result.output)["path"])
-        == "_grimoire-output/context/bootstrap/context-bundle.yaml"
-    )
+    assert _posix_path(json.loads(context_result.output)["path"]) == "_grimoire-output/context/bootstrap/context-bundle.yaml"
     assert json.loads(context_result.output)["data"]["provider_constraints"]["matched_provider"] == "openai"
     assert decision_result.exit_code == 0
     assert knowledge_result.exit_code == 0
-    assert (
-        _posix_path(json.loads(knowledge_result.output)["path"])
-        == "_grimoire-output/knowledge/bootstrap/index-manifest.yaml"
-    )
+    assert _posix_path(json.loads(knowledge_result.output)["path"]) == "_grimoire-output/knowledge/bootstrap/index-manifest.yaml"
     assert graph_result.exit_code == 0
-    assert (
-        _posix_path(json.loads(graph_result.output)["path"])
-        == "_grimoire-output/knowledge/bootstrap/knowledge-graph.yaml"
-    )
+    assert _posix_path(json.loads(graph_result.output)["path"]) == "_grimoire-output/knowledge/bootstrap/knowledge-graph.yaml"
     assert pattern_result.exit_code == 0
     assert any(pattern["id"] == "advanced-context-orchestrator" for pattern in json.loads(pattern_result.output))
     assert hooks_result.exit_code == 0
@@ -436,9 +396,7 @@ def test_cli_standard_gate_strict_uses_ci_blocking_exit_for_governed(tmp_path: P
     runner = CliRunner()
     runner.invoke(app, ["standard", "init", str(tmp_path), "--profile", "governed", "--provider", "github-copilot"])
 
-    memory_result = runner.invoke(
-        app, ["-o", "json", "standard", "memory", "verify", str(tmp_path), "--profile", "governed"]
-    )
+    memory_result = runner.invoke(app, ["-o", "json", "standard", "memory", "verify", str(tmp_path), "--profile", "governed"])
     assert memory_result.exit_code == 0
     assert json.loads(memory_result.output)["ok"] is True
 
@@ -468,9 +426,7 @@ def test_governed_gate_fails_when_memory_os_contract_drifted(tmp_path: Path) -> 
     runner.invoke(app, ["standard", "init", str(tmp_path), "--profile", "governed", "--provider", "github-copilot"])
     memory_policy = tmp_path / "_grimoire/standard/memory-policy.yaml"
     memory_policy.write_text(
-        memory_policy.read_text(encoding="utf-8").replace(
-            'semantic_memory: "weaviate-server"', 'semantic_memory: "qdrant-server"'
-        ),
+        memory_policy.read_text(encoding="utf-8").replace('semantic_memory: "weaviate-server"', 'semantic_memory: "qdrant-server"'),
         encoding="utf-8",
     )
 
@@ -610,20 +566,17 @@ def test_cli_standard_doctor_json_reports_extras() -> None:
 def test_cli_standard_init_with_needs_writes_manifest(tmp_path: Path) -> None:
     runner = CliRunner()
 
-    init_result = runner.invoke(
-        app,
-        [
-            "-o",
-            "json",
-            "standard",
-            "init",
-            str(tmp_path),
-            "--needs",
-            "semantic-memory-rag",
-            "--project-name",
-            "RagApp",
-        ],
-    )
+    init_result = runner.invoke(app, [
+        "-o",
+        "json",
+        "standard",
+        "init",
+        str(tmp_path),
+        "--needs",
+        "semantic-memory-rag",
+        "--project-name",
+        "RagApp",
+    ])
 
     assert init_result.exit_code == 0
     init_data = json.loads(init_result.output)
@@ -641,46 +594,44 @@ def test_cli_standard_init_with_needs_writes_manifest(tmp_path: Path) -> None:
     assert json.loads(verify_result.output)["ok"] is True
 
 
-_EXPECTED_PATTERNS = frozenset(
-    {
-        "advanced-context-orchestrator",
-        "governed-memory-policy",
-        "evidence-gated-fsm",
-        "provider-routing-contract",
-        "runtime-journal",
-        "redis-hot-memory-soft-gate",
-        "governed-hook-gateway",
-        "skill-classification-matrix",
-        "governed-observability-cockpit",
-        "code-graph-projection",
-        "governed-agent-orchestration",
-        "governed-knowledge-indexing",
-        "mission-evidence-ledger",
-        "tool-mediation-gate",
-        "provider-cost-slo",
-        "tool-blast-radius-limiter",
-        "agent-privilege-boundary",
-        "prompt-injection-firewall",
-        "remote-hygiene-guard",
-        "decision-council-gate",
-        "context-compression-gate",
-        "memory-integrity-validator",
-        "merge-lane-fault-classifier",
-        "llm-cost-registry",
-        "guardrail-contract",
-        "visual-evidence-gate",
-        "workspace-isolation",
-        "policy-by-environment",
-        "browser-tool-contract",
-        "runtime-provider-contract",
-        "prompt-version-observability",
-        "cluster-action-dry-run",
-        "doc-to-graph-pipeline",
-        "flow-dsl-minimal",
-        "workflow-state-manifest",
-        "k8s-agent-manifest",
-    }
-)
+_EXPECTED_PATTERNS = frozenset({
+    "advanced-context-orchestrator",
+    "governed-memory-policy",
+    "evidence-gated-fsm",
+    "provider-routing-contract",
+    "runtime-journal",
+    "redis-hot-memory-soft-gate",
+    "governed-hook-gateway",
+    "skill-classification-matrix",
+    "governed-observability-cockpit",
+    "code-graph-projection",
+    "governed-agent-orchestration",
+    "governed-knowledge-indexing",
+    "mission-evidence-ledger",
+    "tool-mediation-gate",
+    "provider-cost-slo",
+    "tool-blast-radius-limiter",
+    "agent-privilege-boundary",
+    "prompt-injection-firewall",
+    "remote-hygiene-guard",
+    "decision-council-gate",
+    "context-compression-gate",
+    "memory-integrity-validator",
+    "merge-lane-fault-classifier",
+    "llm-cost-registry",
+    "guardrail-contract",
+    "visual-evidence-gate",
+    "workspace-isolation",
+    "policy-by-environment",
+    "browser-tool-contract",
+    "runtime-provider-contract",
+    "prompt-version-observability",
+    "cluster-action-dry-run",
+    "doc-to-graph-pipeline",
+    "flow-dsl-minimal",
+    "workflow-state-manifest",
+    "k8s-agent-manifest",
+})
 
 
 def test_verify_detects_unbounded_blast_radius(tmp_path: Path) -> None:
@@ -779,7 +730,9 @@ def test_detects_bad_privilege_boundary(tmp_path: Path) -> None:
 def test_detects_bad_decision_council(tmp_path: Path) -> None:
     setup_standard_profile(tmp_path, profile_id="governed")
     (tmp_path / "_grimoire/standard/decision-council.yaml").write_text(
-        '$schema: "grimoire-agentic-standard-decision-council/v1"\nquorum: 1\nveto_roles: []\n',
+        '$schema: "grimoire-agentic-standard-decision-council/v1"\n'
+        "quorum: 1\n"
+        "veto_roles: []\n",
         encoding="utf-8",
     )
     codes = {check.id for check in verify_standard_profile(tmp_path, profile_id="governed").checks}
@@ -826,9 +779,7 @@ def test_profile_mapped_capabilities_are_real_patterns() -> None:
         assert not unknown, f"{profile['id']}: mapped_capabilities not implemented as patterns: {sorted(unknown)}"
         planned = set(profile.get("planned_capabilities", []))
         already = planned & patterns
-        assert not already, (
-            f"{profile['id']}: planned_capabilities already implemented (promote them): {sorted(already)}"
-        )
+        assert not already, f"{profile['id']}: planned_capabilities already implemented (promote them): {sorted(already)}"
 
 
 def test_governed_controls_doc_covers_all_patterns() -> None:
@@ -912,7 +863,9 @@ def test_gate_check_strict_exits_2_for_every_profile(tmp_path: Path, profile_id:
     project = tmp_path / profile_id
     setup_standard_profile(project, profile_id=profile_id)
     runner = CliRunner()
-    result = runner.invoke(app, ["standard", "gate", "check", str(project), "--target-state", "released", "--strict"])
+    result = runner.invoke(
+        app, ["standard", "gate", "check", str(project), "--target-state", "released", "--strict"]
+    )
     assert result.exit_code == 2, result.output
 
 
@@ -923,48 +876,24 @@ def test_gate_check_strict_exits_2_for_every_profile(tmp_path: Path, profile_id:
             ["standard", "verify"],
             "grimoire.standard-verify/v1",
             {
-                "schema",
-                "ok",
-                "profile",
-                "project_root",
-                "present",
-                "missing",
-                "invalid_yaml",
-                "warnings",
-                "checks",
-                "error_count",
-                "warning_count",
+                "schema", "ok", "profile", "project_root", "present", "missing",
+                "invalid_yaml", "warnings", "checks", "error_count", "warning_count",
             },
         ),
         (
             ["standard", "audit"],
             "grimoire.standard-audit/v1",
             {
-                "schema",
-                "ok",
-                "profile",
-                "project_root",
-                "error_count",
-                "warning_count",
-                "present",
-                "missing",
-                "invalid_yaml",
-                "checks",
+                "schema", "ok", "profile", "project_root", "error_count",
+                "warning_count", "present", "missing", "invalid_yaml", "checks",
             },
         ),
         (
             ["standard", "score"],
             "grimoire.standard-score/v1",
             {
-                "schema",
-                "ok",
-                "profile",
-                "score",
-                "threshold",
-                "warnings",
-                "errors",
-                "dimensions",
-                "output_path",
+                "schema", "ok", "profile", "score", "threshold", "warnings",
+                "errors", "dimensions", "output_path",
             },
         ),
         (
@@ -1039,13 +968,27 @@ def test_declarative_refs_resolve() -> None:
     rule_ids = {rule["id"] for rule in packs["rules"]}
 
     orphan_checks = sorted(
-        {ref for pattern in catalog["patterns"] for ref in pattern.get("check_refs") or [] if ref not in literals}
+        {
+            ref
+            for pattern in catalog["patterns"]
+            for ref in pattern.get("check_refs") or []
+            if ref not in literals
+        }
     )
     orphan_rules = sorted(
-        {ref for pattern in catalog["patterns"] for ref in pattern.get("rule_refs") or [] if ref not in rule_ids}
+        {
+            ref
+            for pattern in catalog["patterns"]
+            for ref in pattern.get("rule_refs") or []
+            if ref not in rule_ids
+        }
     )
     orphan_rule_checks = sorted(
-        {rule["check_id"] for rule in packs["rules"] if rule.get("check_id") and rule["check_id"] not in literals}
+        {
+            rule["check_id"]
+            for rule in packs["rules"]
+            if rule.get("check_id") and rule["check_id"] not in literals
+        }
     )
 
     assert orphan_checks == [], f"check_refs sans check émis : {orphan_checks}"
@@ -1063,9 +1006,17 @@ def test_capability_artifacts_are_generatable() -> None:
     capability = _framework_yaml("capability-map.yaml")
     profiles = _framework_yaml("profile-map.yaml")
     artifact_types = set(profiles["artifact_types"])
-    targets = {entry["source_artifact"] for scope in profiles["generation_targets"].values() for entry in scope}
+    targets = {
+        entry["source_artifact"]
+        for scope in profiles["generation_targets"].values()
+        for entry in scope
+    }
 
-    declared = {artifact for spec in capability["patterns"].values() for artifact in spec.get("artifacts") or []}
+    declared = {
+        artifact
+        for spec in capability["patterns"].values()
+        for artifact in spec.get("artifacts") or []
+    }
     assert declared <= artifact_types, f"artefacts inconnus : {sorted(declared - artifact_types)}"
     assert declared <= targets, f"artefacts sans destination : {sorted(declared - targets)}"
 
@@ -1300,9 +1251,7 @@ def test_gate_check_in_progress_does_not_demand_a_finished_ledger(tmp_path: Path
         encoding="utf-8",
     )
     en_cours = check_evidence_gates(tmp_path, task_id="bootstrap", target_state="in_progress")
-    assert not any(check.id in {"claims.summary_placeholder", "claims.empty"} for check in en_cours.checks), (
-        en_cours.checks
-    )
+    assert not any(check.id in {"claims.summary_placeholder", "claims.empty"} for check in en_cours.checks), en_cours.checks
     assert not any(check.id.startswith("claims.") and check.is_error for check in en_cours.checks)
 
 
@@ -1366,17 +1315,15 @@ def test_cli_gate_run_tests_reports_no_known_command(tmp_path: Path) -> None:
 # ── P0.3 : chaque check émis déclare sa dimension ────────────────────────────
 
 
-_UNRESOLVABLE_EMISSIONS = frozenset(
-    {
-        "gate.compliance_score_missing",
-        "gate.context_bundle_missing",
-        "gate.decision_trace_missing",
-        "gate.evidence_pack_missing",
-        "gate.memory_policy_missing",
-        "gate.task_board_missing",
-        "gate.task_envelope_missing",
-    }
-)
+_UNRESOLVABLE_EMISSIONS = frozenset({
+    "gate.compliance_score_missing",
+    "gate.context_bundle_missing",
+    "gate.decision_trace_missing",
+    "gate.evidence_pack_missing",
+    "gate.memory_policy_missing",
+    "gate.task_board_missing",
+    "gate.task_envelope_missing",
+})
 
 
 def _emitted_check_ids() -> set[str]:
@@ -1396,30 +1343,24 @@ def _emitted_check_ids() -> set[str]:
     import itertools
 
     core = Path(__file__).resolve().parent.parent / "src" / "grimoire" / "core"
-    modules = [
-        core / "agentic_standard.py",
-        core / "standard_checks" / "verifiers.py",
-        core / "standard_checks" / "controls.py",
-        # Issue #582 lot I : extraits de verifiers.py/controls.py (ratchet de taille) —
-        # sans ces trois modules, le registre certifierait moins que ce que le kit émet.
-        core / "standard_checks" / "gate_test_run.py",
-        core / "standard_checks" / "claim_ledger_verify.py",
-        core / "standard_checks" / "no_tests_collected.py",
-    ]
-    trees = {
-        path: ast.parse(path.read_text(encoding="utf-8")) for path in [*modules, core / "standard_checks" / "base.py"]
-    }
+    modules = [core / "agentic_standard.py", core / "standard_checks" / "verifiers.py",
+               core / "standard_checks" / "controls.py",
+               # Issue #582 lot I : extraits de verifiers.py/controls.py (ratchet de taille) —
+               # sans ces trois modules, le registre certifierait moins que ce que le kit émet.
+               core / "standard_checks" / "gate_test_run.py",
+               core / "standard_checks" / "claim_ledger_verify.py",
+               core / "standard_checks" / "no_tests_collected.py"]
+    trees = {path: ast.parse(path.read_text(encoding="utf-8")) for path in
+             [*modules, core / "standard_checks" / "base.py"]}
 
     module_constants: dict[str, set[str]] = {}
     for tree in trees.values():
         for node in tree.body:
-            if not (isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)):
+            if not (isinstance(node, ast.Assign) and len(node.targets) == 1
+                    and isinstance(node.targets[0], ast.Name)):
                 continue
-            elements = (
-                node.value.keys
-                if isinstance(node.value, ast.Dict)
-                else (node.value.elts if isinstance(node.value, (ast.Tuple, ast.List, ast.Set)) else [])
-            )
+            elements = node.value.keys if isinstance(node.value, ast.Dict) else (
+                node.value.elts if isinstance(node.value, (ast.Tuple, ast.List, ast.Set)) else [])
             values = {e.value for e in elements if isinstance(e, ast.Constant) and isinstance(e.value, str)}
             if values:
                 module_constants[node.targets[0].id] = values
@@ -1431,28 +1372,20 @@ def _emitted_check_ids() -> set[str]:
         """Rows of a literal table assigned inside ``function``, by variable name."""
         tables: dict[str, list[tuple[str | None, ...]]] = {}
         for node in ast.walk(function):
-            if not (isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)):
+            if not (isinstance(node, ast.Assign) and len(node.targets) == 1
+                    and isinstance(node.targets[0], ast.Name)):
                 continue
             name, value = node.targets[0].id, node.value
-            if (
-                isinstance(value, (ast.Tuple, ast.List))
-                and value.elts
-                and all(isinstance(e, (ast.Tuple, ast.List)) for e in value.elts)
-            ):
+            if isinstance(value, (ast.Tuple, ast.List)) and value.elts and all(
+                    isinstance(e, (ast.Tuple, ast.List)) for e in value.elts):
                 tables[name] = [
-                    tuple(
-                        x.value if isinstance(x, ast.Constant) and isinstance(x.value, str) else None for x in row.elts
-                    )
+                    tuple(x.value if isinstance(x, ast.Constant) and isinstance(x.value, str) else None
+                          for x in row.elts)
                     for row in value.elts
                 ]
             elif isinstance(value, ast.Dict):
-                flat = {
-                    x.value
-                    for row in value.values
-                    if isinstance(row, (ast.Tuple, ast.List))
-                    for x in row.elts
-                    if isinstance(x, ast.Constant) and isinstance(x.value, str)
-                }
+                flat = {x.value for row in value.values if isinstance(row, (ast.Tuple, ast.List))
+                        for x in row.elts if isinstance(x, ast.Constant) and isinstance(x.value, str)}
                 if flat:
                     tables[f"[]{name}"] = [(v,) for v in sorted(flat)]
         return tables
@@ -1465,12 +1398,8 @@ def _emitted_check_ids() -> set[str]:
                 if isinstance(element, ast.Constant) and isinstance(element.value, str):
                     rows.append((element.value,))
                 elif isinstance(element, (ast.Tuple, ast.List)):
-                    rows.append(
-                        tuple(
-                            x.value if isinstance(x, ast.Constant) and isinstance(x.value, str) else None
-                            for x in element.elts
-                        )
-                    )
+                    rows.append(tuple(x.value if isinstance(x, ast.Constant) and isinstance(x.value, str)
+                                      else None for x in element.elts))
                 else:
                     return None
             return rows
@@ -1482,13 +1411,9 @@ def _emitted_check_ids() -> set[str]:
             return None
         if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name):
             return tables.get(f"[]{node.value.id}")
-        if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr in {"items", "keys"}
-            and isinstance(node.func.value, ast.Name)
-            and node.func.value.id in module_constants
-        ):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr in {"items", "keys"} and isinstance(node.func.value, ast.Name)
+                and node.func.value.id in module_constants):
             return [(v, None) for v in sorted(module_constants[node.func.value.id])]
         return None
 
@@ -1524,13 +1449,9 @@ def _emitted_check_ids() -> set[str]:
             scope = dict(scope)
             rows = domain(node.iter, tables)
             target = node.target
-            names = (
-                [e.id if isinstance(e, ast.Name) else None for e in target.elts]
-                if isinstance(target, ast.Tuple)
-                else [target.id]
-                if isinstance(target, ast.Name)
-                else []
-            )
+            names = ([e.id if isinstance(e, ast.Name) else None for e in target.elts]
+                     if isinstance(target, ast.Tuple) else
+                     [target.id] if isinstance(target, ast.Name) else [])
             for position, name in enumerate(names):
                 if name is None:
                     continue
@@ -1544,17 +1465,13 @@ def _emitted_check_ids() -> set[str]:
                 arguments = {kw.arg: kw.value for kw in node.keywords}
                 prefix, keys = arguments.get("check_prefix"), arguments.get("keys")
                 if isinstance(prefix, ast.Constant) and isinstance(keys, (ast.Tuple, ast.List)):
-                    ids.update(
-                        f"{prefix.value}.{key.value}_missing" for key in keys.elts if isinstance(key, ast.Constant)
-                    )
+                    ids.update(f"{prefix.value}.{key.value}_missing"
+                               for key in keys.elts if isinstance(key, ast.Constant))
                 else:
                     unresolved.append(f"_require_keys ligne {node.lineno}")
             elif called in {"_add_check", "StandardCheck"} and not inside_require_keys:
-                argument = (
-                    node.args[1]
-                    if called == "_add_check" and len(node.args) >= 2
-                    else next((kw.value for kw in node.keywords if kw.arg == "id"), None)
-                )
+                argument = (node.args[1] if called == "_add_check" and len(node.args) >= 2
+                            else next((kw.value for kw in node.keywords if kw.arg == "id"), None))
                 if argument is not None:
                     rendered = render(argument, scope)
                     if rendered:
@@ -1632,9 +1549,7 @@ def _no_tests_collected_context(root: Path, exit_code: int = 1) -> str:
     import sys
 
     script = root / "_no_tests_collected.py"
-    script.write_text(
-        "import sys\nprint('No tests found, exiting with code 1')\nsys.exit(" + str(exit_code) + ")\n", encoding="utf-8"
-    )
+    script.write_text("import sys\nprint('No tests found, exiting with code 1')\nsys.exit(" + str(exit_code) + ")\n", encoding="utf-8")
     command = f'"{sys.executable}" "{script}"'
     return f"project:\n  name: demo\nneeds:\n  commands:\n    test-runner: '{command}'\n"
 
@@ -1668,14 +1583,7 @@ def test_every_missing_gate_artifact_names_its_path_and_a_copyable_remedy(tmp_pa
     result = check_evidence_gates(tmp_path, task_id="bootstrap", target_state="released")
 
     missing = {check.id: check for check in result.checks if check.id.endswith("_missing")}
-    expected = {
-        "task_envelope",
-        "context_bundle",
-        "memory_policy",
-        "evidence_pack",
-        "decision_trace",
-        "compliance_score",
-    }
+    expected = {"task_envelope", "context_bundle", "memory_policy", "evidence_pack", "decision_trace", "compliance_score"}
     assert {key.removeprefix("gate.").removesuffix("_missing") for key in missing} == expected
     for check in missing.values():
         assert check.path is not None and check.path.as_posix() in check.message, check.message
@@ -1683,12 +1591,8 @@ def test_every_missing_gate_artifact_names_its_path_and_a_copyable_remedy(tmp_pa
         assert str(tmp_path) in check.message, "le remède cite la racine en absolu, copiable de n'importe où"
     scaffold = f"grimoire standard task scaffold {tmp_path} --task-id bootstrap"
     assert missing["gate.context_bundle_missing"].message.endswith(scaffold)
-    assert missing["gate.memory_policy_missing"].message.endswith(
-        f"grimoire standard init {tmp_path} --profile governed"
-    )
-    assert missing["gate.compliance_score_missing"].message.endswith(
-        f"grimoire standard score {tmp_path} --task-id bootstrap"
-    )
+    assert missing["gate.memory_policy_missing"].message.endswith(f"grimoire standard init {tmp_path} --profile governed")
+    assert missing["gate.compliance_score_missing"].message.endswith(f"grimoire standard score {tmp_path} --task-id bootstrap")
 
 
 def test_cli_gate_check_text_output_carries_path_and_remedy(tmp_path: Path) -> None:
@@ -1697,9 +1601,7 @@ def test_cli_gate_check_text_output_carries_path_and_remedy(tmp_path: Path) -> N
     task_id = _claimed_ledger_task(tmp_path)
     runner = CliRunner()
 
-    result = runner.invoke(
-        app, ["standard", "gate", "check", str(tmp_path), "--task-id", task_id, "--strict", "--no-run"]
-    )
+    result = runner.invoke(app, ["standard", "gate", "check", str(tmp_path), "--task-id", task_id, "--strict", "--no-run"])
 
     assert result.exit_code == 2
     assert f"_grimoire-output/context/{task_id}/context-bundle.yaml" in result.output
@@ -1771,9 +1673,7 @@ def test_cli_gate_check_no_run_never_executes_anything(tmp_path: Path) -> None:
     scaffold_task_artifacts(tmp_path, task_id=task_id)
     runner = CliRunner()
 
-    result = runner.invoke(
-        app, ["-o", "json", "standard", "gate", "check", str(tmp_path), "--task-id", task_id, "--strict", "--no-run"]
-    )
+    result = runner.invoke(app, ["-o", "json", "standard", "gate", "check", str(tmp_path), "--task-id", task_id, "--strict", "--no-run"])
 
     assert json.loads(result.output)["ok"] is True
     assert not (tmp_path / f"_grimoire-output/evidence/{task_id}/test-run.json").exists()
@@ -1791,19 +1691,10 @@ def test_gate_check_strict_owes_no_run_before_the_task_starts(tmp_path: Path) ->
     service.project_board()
     runner = CliRunner()
 
-    result = json.loads(
-        runner.invoke(
-            app, ["-o", "json", "standard", "gate", "check", str(tmp_path), "--task-id", task.id, "--strict"]
-        ).output
-    )
+    result = json.loads(runner.invoke(app, ["-o", "json", "standard", "gate", "check", str(tmp_path), "--task-id", task.id, "--strict"]).output)
 
     assert result["ok"] is True and result["test_run"] == {
-        "ran": False,
-        "reason": "state_owes_no_run",
-        "command": "",
-        "ok": None,
-        "exit_code": None,
-        "path": None,
+        "ran": False, "reason": "state_owes_no_run", "command": "", "ok": None, "exit_code": None, "path": None,
     }
 
 
@@ -1822,9 +1713,7 @@ def test_cli_gate_check_strict_warns_instead_of_failing_when_nothing_collected(t
     runner = CliRunner()
 
     result = json.loads(
-        runner.invoke(
-            app, ["-o", "json", "standard", "gate", "check", str(tmp_path), "--task-id", task_id, "--strict"]
-        ).output
+        runner.invoke(app, ["-o", "json", "standard", "gate", "check", str(tmp_path), "--task-id", task_id, "--strict"]).output
     )
 
     assert result["ok"] is True, "« rien collecté » n'est pas un rouge : pas d'erreur"
@@ -1850,16 +1739,13 @@ def test_cli_gate_check_strict_no_tests_collected_silenced_by_justification(tmp_
     scaffold_task_artifacts(tmp_path, task_id=task_id)
     record_path = tmp_path / f"_grimoire-output/evidence/{task_id}/acceptance-record.md"
     record_path.write_text(
-        record_path.read_text(encoding="utf-8")
-        + "\nsans test : tests caches par le harnais, juges par le validateur.\n",
+        record_path.read_text(encoding="utf-8") + "\nsans test : tests caches par le harnais, juges par le validateur.\n",
         encoding="utf-8",
     )
     runner = CliRunner()
 
     result = json.loads(
-        runner.invoke(
-            app, ["-o", "json", "standard", "gate", "check", str(tmp_path), "--task-id", task_id, "--strict"]
-        ).output
+        runner.invoke(app, ["-o", "json", "standard", "gate", "check", str(tmp_path), "--task-id", task_id, "--strict"]).output
     )
 
     assert result["ok"] is True
@@ -1876,17 +1762,8 @@ def test_cli_gate_check_strict_no_tests_collected_is_an_error_in_governed_review
     scaffold_task_artifacts(tmp_path, task_id=task_id, profile_id="governed")
     runner = CliRunner()
     argv = [
-        "-o",
-        "json",
-        "standard",
-        "gate",
-        "check",
-        str(tmp_path),
-        "--task-id",
-        task_id,
-        "--strict",
-        "--target-state",
-        "review",
+        "-o", "json", "standard", "gate", "check", str(tmp_path),
+        "--task-id", task_id, "--strict", "--target-state", "review",
     ]
 
     result = json.loads(runner.invoke(app, argv).output)
@@ -1896,9 +1773,7 @@ def test_cli_gate_check_strict_no_tests_collected_is_an_error_in_governed_review
     assert result["ok"] is False
 
 
-def test_cli_gate_check_strict_no_tests_collected_stays_a_warning_in_progress_even_when_governed(
-    tmp_path: Path,
-) -> None:
+def test_cli_gate_check_strict_no_tests_collected_stays_a_warning_in_progress_even_when_governed(tmp_path: Path) -> None:
     """Même profil strict : en cours de travail (`in_progress`), rien n'interdit encore d'écrire le test — avertissement."""
     from grimoire.core.standard_task_scaffold import scaffold_task_artifacts
 
@@ -1915,9 +1790,7 @@ def test_cli_gate_check_strict_no_tests_collected_stays_a_warning_in_progress_ev
     assert len(warnings) == 1 and warnings[0]["severity"] == "warning"
 
 
-def test_cli_gate_check_strict_does_not_rerun_a_matching_red_run(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_cli_gate_check_strict_does_not_rerun_a_matching_red_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """I-2 rouge-avant : deux `gate check --strict` consécutifs sur un run rouge -> une seule exécution ; `--rerun` en force une seconde."""
     import grimoire.core.standard_checks.acceptance_test_run as acceptance_test_run_module
     from grimoire.core.standard_task_scaffold import scaffold_task_artifacts
@@ -1997,17 +1870,8 @@ def test_cli_gate_check_v0_task_is_ok_with_no_content_warnings_at_review(tmp_pat
     scaffold_task_artifacts(tmp_path, task_id=task.id)
     runner = CliRunner()
     argv = [
-        "-o",
-        "json",
-        "standard",
-        "gate",
-        "check",
-        str(tmp_path),
-        "--task-id",
-        task.id,
-        "--strict",
-        "--target-state",
-        "review",
+        "-o", "json", "standard", "gate", "check", str(tmp_path),
+        "--task-id", task.id, "--strict", "--target-state", "review",
     ]
 
     result = json.loads(runner.invoke(app, argv).output)
@@ -2035,17 +1899,8 @@ def test_cli_gate_check_v1_task_keeps_content_warnings_at_review(tmp_path: Path)
     scaffold_task_artifacts(tmp_path, task_id=task.id)
     runner = CliRunner()
     argv = [
-        "-o",
-        "json",
-        "standard",
-        "gate",
-        "check",
-        str(tmp_path),
-        "--task-id",
-        task.id,
-        "--strict",
-        "--target-state",
-        "review",
+        "-o", "json", "standard", "gate", "check", str(tmp_path),
+        "--task-id", task.id, "--strict", "--target-state", "review",
     ]
 
     result = json.loads(runner.invoke(app, argv).output)
@@ -2072,19 +1927,8 @@ def test_cli_gate_check_v0_task_keeps_content_warnings_when_governed(tmp_path: P
     scaffold_task_artifacts(tmp_path, task_id=task.id, profile_id="governed")
     runner = CliRunner()
     argv = [
-        "-o",
-        "json",
-        "standard",
-        "gate",
-        "check",
-        str(tmp_path),
-        "--task-id",
-        task.id,
-        "--strict",
-        "--target-state",
-        "review",
-        "--profile",
-        "governed",
+        "-o", "json", "standard", "gate", "check", str(tmp_path),
+        "--task-id", task.id, "--strict", "--target-state", "review", "--profile", "governed",
     ]
 
     result = json.loads(runner.invoke(app, argv).output)

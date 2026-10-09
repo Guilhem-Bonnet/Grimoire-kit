@@ -95,7 +95,11 @@ de `compliance-declaration.md`.
 
 `grimoire standard verify` les lit tous. Un registre vierge est un
 avertissement : il attend d'être rempli — sauf le claim-ledger en `governed` et
-`production`, où un registre vierge, vidé ou absent est une erreur dès `review`. Ce qui est une erreur, c'est une
+`production`, où un registre vierge, vidé ou absent est une erreur dès `review`
+(exception : une tâche classée V0 hors `governed` n'a pas à le remplir, lot I
+de #582). Pendant `in_progress`, une ligne de claim mal formée ou hors
+vocabulaire reste un avertissement ; seuls « prouvé » sans preuve et « utiliser »
+sans « prouvé » bloquent. Ce qui est une erreur, c'est une
 déclaration fausse — un critère `passé` sans preuve, un livrable `accepté`
 sans validateur, une source `superseded` sans remplaçante, un `on_critical`
 qui n'est ni `stop` ni `reduce_autonomy`, une délégation ouverte — et, en
