@@ -46,6 +46,7 @@ from typing import Any
 
 # Gardes du dépôt de tâche (W1-08a) : module voisin, aussi quand ce script est chargé par chemin.
 sys.path.append(str(Path(__file__).resolve().parent))
+from results_io import read_results_rows
 from task_repo import (
     ContaminatedTaskRepoError,
     assert_task_repo_clean,
@@ -2189,11 +2190,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     results_path = state_dir / "results.jsonl"
     # Clés enregistrées : sautées avec ``--resume`` ; sinon rejouées, dossier effacé (alerte plus bas).
-    recorded_keys: set[tuple[str, str, int]] = set()
-    if results_path.is_file():
-        for line in results_path.read_text(encoding="utf-8").splitlines():
-            record = json.loads(line)
-            recorded_keys.add((record["task_id"], record["arm"], record["run_index"]))
+    try:
+        previous_rows = read_results_rows(results_path) if results_path.is_file() else []
+    except ValueError as exc:  # ligne tronquée : arrêt net avant tout run
+        print(str(exc), file=sys.stderr)
+        return 1
+    recorded_keys = {(row["task_id"], row["arm"], row["run_index"]) for row in previous_rows}
     already_done = recorded_keys if args.resume else set()
 
     if args.pilot:
@@ -2204,10 +2206,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         k = K_REPLAY
 
     records: list[RunRecord] = []
-    if args.resume and results_path.is_file():
-        for line in results_path.read_text(encoding="utf-8").splitlines():
-            d = json.loads(line)
-            records.append(RunRecord(**d))
+    if args.resume:
+        records.extend(RunRecord(**row) for row in previous_rows)
 
     disk_exhausted = False
     contaminated = False

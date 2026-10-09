@@ -31,7 +31,8 @@ PR W1-08a (issue #694) :
 
 ## Limites
 
-- Les lots K et L sont sains parce que leurs workspaces étaient neufs (lot L § 5), pas grâce à ce remède, qui leur est postérieur.
+- Les lots K et L ne sont pas prouvés sains. Leurs dossiers de préparation étaient neufs (lot L § 5), ce qui écarte la contamination du lot J (deux commits, tests suivis), pas la lecture de la suite masquée pendant le run. Le lot K contient au moins un succès obtenu après lecture de cette suite : `python/bowling`, bras `kit-gov`, run 2 (transcription `bench-k/workspace/tasks/python__bowling/kit-gov/run2.stream.jsonl`, ligne 44 : `cat` de `hidden-tests/bowling_test.py` ; ligne 45 : le contenu de la suite est rendu), enregistré `success=True` dans `state/results.jsonl` le 2026-09-29T22:26:27. Le lot L n'a pas été relu pour cette lecture.
+- La disposition du banc expose deux choses à l'agent, et le remède n'en traite aucune : `workspace/tasks/<tâche>/hidden-tests/` (frère du dossier `<bras>/run<i>`, atteignable par `../../hidden-tests/`) et les `test_files` que `run_hidden_tests` copie dans le dossier du run pour la vérification finale et ne retire jamais, donc présents dans les `run<i>` précédents du même bras (`../run0/`, `../run1/`). W1-08b doit couvrir ces deux expositions (sortir `hidden-tests/` de l'arbre `tasks/`, retirer les `test_files` du `run<i>` après la vérification, ou interdire l'accès).
 - Le remède ne détecte pas la lecture de tests cachés pendant le run (glob, outil, accès indirect) : W1-08b.
 - Le rejeu du lot J n'est pas fait ; le vrai score de `kit-gov` au lot J est inférieur à 96,7 %, sans valeur mesurée.
 

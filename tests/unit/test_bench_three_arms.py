@@ -418,6 +418,13 @@ def test_errata_lot_j_contamination_is_present() -> None:
     assert "dossiers frais pour" not in content
     # un dépôt contaminé arrête la campagne, il n'est pas enregistré comme un échec
     assert "terminated_reason" not in content
+    # T3-01 : les lots K et L ne sont PAS sains (le lot K a lu la suite masquée)
+    assert "sont sains" not in content
+    assert "python/bowling" in content
+    assert "2026-09-29T22:26:27" in content
+    # la disposition expose deux choses à l'agent : hidden-tests/ et les tests copiés dans les run<i>
+    assert "hidden-tests/" in content
+    assert "run<i>" in content
 
 
 # ── 3. Détection de succès sur tests verts/rouges ──────────────────────────
@@ -2321,6 +2328,60 @@ def test_main_warns_before_erasing_a_completed_run_dir_without_resume(
     assert str(run_dir) in err
     assert "effacé" in err  # message nommant le dossier effacé et la clé déjà enregistrée
     assert "--resume" in err
+
+
+def test_main_full_tolerates_blank_lines_in_results_without_resume(
+    synthetic_bench_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """W1-08a (T3-02) : ``main`` lit désormais results.jsonl sans ``--resume`` ;
+    une ligne vide (comme dans ``_do_report_only``) ne doit pas le faire planter."""
+    workspace = tmp_path / "workspace"
+    _patch_main_environment(monkeypatch, synthetic_bench_root, tmp_path)
+    monkeypatch.setattr(ta, "write_report", lambda *a, **k: None)
+    _spy_security_guards(monkeypatch)
+    monkeypatch.setattr(ta, "_run_one", lambda task, arm, run_index, **kw: _ok_record(task, arm, run_index))
+    task = _task(synthetic_bench_root)
+    (workspace / "state").mkdir(parents=True)
+    (workspace / "state" / "results.jsonl").write_text(
+        json.dumps(_ok_record(task, "nu", 0).to_dict()) + "\n\n", encoding="utf-8"
+    )
+
+    assert ta.main(["--full", "--workspace", str(workspace)]) == 0
+
+
+def test_main_full_tolerates_blank_lines_in_results_with_resume(
+    synthetic_bench_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    _patch_main_environment(monkeypatch, synthetic_bench_root, tmp_path)
+    monkeypatch.setattr(ta, "write_report", lambda *a, **k: None)
+    _spy_security_guards(monkeypatch)
+    monkeypatch.setattr(ta, "_run_one", lambda task, arm, run_index, **kw: _ok_record(task, arm, run_index))
+    task = _task(synthetic_bench_root)
+    (workspace / "state").mkdir(parents=True)
+    (workspace / "state" / "results.jsonl").write_text(
+        "\n" + json.dumps(_ok_record(task, "nu", 0).to_dict()) + "\n  \n", encoding="utf-8"
+    )
+
+    assert ta.main(["--full", "--resume", "--workspace", str(workspace)]) == 0
+
+
+def test_main_names_the_truncated_results_line(
+    synthetic_bench_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Une ligne tronquée n'est pas ignorée en silence : échec net qui nomme la ligne."""
+    workspace = tmp_path / "workspace"
+    _patch_main_environment(monkeypatch, synthetic_bench_root, tmp_path)
+    monkeypatch.setattr(ta, "_run_one", lambda *a, **k: pytest.fail("aucun run ne doit partir"))
+    task = _task(synthetic_bench_root)
+    (workspace / "state").mkdir(parents=True)
+    good = json.dumps(_ok_record(task, "nu", 0).to_dict())
+    (workspace / "state" / "results.jsonl").write_text(good + '\n{"task_id": "pyth', encoding="utf-8")
+
+    assert ta.main(["--full", "--workspace", str(workspace)]) == 1
+    err = capsys.readouterr().err
+    assert "results.jsonl" in err
+    assert "ligne 2" in err
 
 
 def test_main_does_not_warn_for_interrupted_run_residue(
