@@ -969,3 +969,50 @@ def test_tainted_variable_as_argument_of_git_still_fails(tmp_path: Path) -> None
     )
     res = audit(tmp_path, workflow(step, on=TARGET))
     assert res.returncode == 1, res.stdout
+
+
+# --- D08-T5-01 : la casse des noms écrits dans GITHUB_ENV est celle du shell ---------------
+
+_HEAD_SHA_ENV_STEP = (
+    "      - env:\n          H: ${{{{ github.event.pull_request.head.sha }}}}\n"
+    '        run: echo "{name}=$H" >> "$GITHUB_ENV"\n'
+)
+
+
+@pytest.mark.parametrize("name", ["SHA", "sha", "Sha"], ids=["upper", "lower", "mixed"])
+@pytest.mark.parametrize("on", [TARGET, WORKFLOW_RUN], ids=["pull_request_target", "workflow_run"])
+def test_github_env_value_read_as_shell_variable_by_git_fails_whatever_the_case(
+    tmp_path: Path, name: str, on: str
+) -> None:
+    step = (
+        _HEAD_SHA_ENV_STEP.format(name=name)
+        + f'      - run: git fetch origin "${name}" && git checkout FETCH_HEAD && make\n'
+    )
+    res = audit(tmp_path, workflow(step, on=on))
+    assert res.returncode == 1, res.stdout
+    assert "checks out PR code" in res.stdout
+
+
+@pytest.mark.parametrize("name", ["R", "r"], ids=["upper", "lower"])
+@pytest.mark.parametrize("on", [TARGET, WORKFLOW_RUN], ids=["pull_request_target", "workflow_run"])
+def test_chained_github_env_writer_stays_tainted_whatever_the_case(tmp_path: Path, name: str, on: str) -> None:
+    step = (
+        _HEAD_SHA_ENV_STEP.format(name="SHA")
+        + f'      - run: echo "{name}=$SHA" >> "$GITHUB_ENV"\n'
+        + f"      - run: echo ${{{{ env.{name} }}}}\n"
+    )
+    res = audit(tmp_path, workflow(step, on=on))
+    assert res.returncode == 1, res.stdout
+    assert "untrusted context" in res.stdout
+
+
+def test_github_env_name_read_with_another_case_in_shell_is_not_the_same_variable(tmp_path: Path) -> None:
+    step = _HEAD_SHA_ENV_STEP.format(name="SHA") + '      - run: git fetch origin "$sha"\n'
+    res = audit(tmp_path, workflow(step, on=TARGET))
+    assert res.returncode == 0, res.stdout
+
+
+def test_clean_github_env_name_is_still_matched_case_insensitively_in_expressions(tmp_path: Path) -> None:
+    step = '      - run: echo "X=$(cat VERSION)" >> "$GITHUB_ENV"\n      - run: echo ${{ env.x }}\n'
+    res = audit(tmp_path, workflow(step))
+    assert "WARNING" in res.stdout and "GITHUB_ENV" in res.stdout, res.stdout

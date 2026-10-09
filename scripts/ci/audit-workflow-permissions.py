@@ -210,8 +210,12 @@ def _strings(node: Any) -> list[str]:
 
 
 def _written_env_names(run: str) -> tuple[frozenset[str], bool]:
-    """Clés qu'une étape écrit dans ``$GITHUB_ENV`` et vrai si certaines sont calculées (``$K=$V``)."""
-    names = frozenset(n.lower() for n in _ENV_NAME.findall(run))
+    """Clés qu'une étape écrit dans ``$GITHUB_ENV`` et vrai si certaines sont calculées (``$K=$V``).
+
+    La casse d'origine est conservée : un nom shell y est sensible (``$SHA`` n'est pas ``$sha``).
+    Seules les lectures ``${{ env.* }}``, insensibles à la casse, se comparent en minuscules.
+    """
+    names = frozenset(_ENV_NAME.findall(run))
     return names, not names or bool(_ENV_NAME_DYNAMIC.search(run))
 
 
@@ -314,7 +318,7 @@ def _check_steps(job_name: str, job: dict[Any, Any], privileged: str | None, wor
                         " (read it from env:)",
                     )
                 )
-            elif reads & dyn_clean or (dyn_unknown["clean"] and reads - static):
+            elif reads & {n.lower() for n in dyn_clean} or (dyn_unknown["clean"] and reads - static):
                 issues.append(
                     Issue(
                         "warning",
