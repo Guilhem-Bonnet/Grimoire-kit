@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from grimoire.core.exceptions import GrimoireRuntimeError
+from grimoire.costs import Cost, cap_reason
 from grimoire.flows.blueprint_loader import load_blueprint, resolve_composite_ref
 from grimoire.flows.dispatch_executor import DispatchExecutor, NodeDispatchOutcome
 from grimoire.flows.engine import FlowEngine
@@ -34,7 +35,7 @@ class _ChildRun:
 
     child_run_id: str
     status: str  # "finished" | "blocked" | "waiting_host" | "cost_capped"
-    cost_usd: float | None
+    cost: Cost
     faults: tuple[str, ...]
     host_reason: str | None
     attempts: int
@@ -44,6 +45,11 @@ class _ChildRun:
     #: annexe (``novelty_key`` pour ``loop-until-dry``) que le contrat de
     #: pins ignore déjà.
     output: dict[str, Any] | None = None
+
+    @property
+    def cost_usd(self) -> float | None:
+        """Le montant connu — ``None`` si inconnu, un minimum si ``cost.status == "lower_bound"`` (W1-01)."""
+        return self.cost.usd
 
 
 def _launch_child(
@@ -116,7 +122,7 @@ def _launch_child(
     return _ChildRun(
         child_run_id=child_run_id,
         status=status,
-        cost_usd=cost,
+        cost=cost,
         faults=faults,
         host_reason=host_reason,
         attempts=len(child_executor.node_outcomes),
@@ -132,7 +138,7 @@ def _record_genre_outcome(
     *,
     verifiability_label: str,
     verdict: str,
-    cost_usd: float | None,
+    cost: Cost,
     attempts: int,
     escalations: int,
     child_run_id: str | None = None,
@@ -146,7 +152,8 @@ def _record_genre_outcome(
         provider=None,
         attempts=attempts,
         escalations=escalations,
-        cost_usd=cost_usd,
+        cost_usd=cost.usd,
+        unpriced_calls=cost.unpriced_calls,
         uncertainties=(),
         acceptance_status=verifiability_label,
         child_run_id=child_run_id,
@@ -194,7 +201,7 @@ def _execute_composite(executor: DispatchExecutor, contract: NodeContract, conte
             run_id,
             verifiability_label="composite",
             verdict="waiting_host",
-            cost_usd=child.cost_usd,
+            cost=child.cost,
             attempts=child.attempts,
             escalations=child.escalations,
             child_run_id=child.child_run_id,
@@ -212,7 +219,7 @@ def _execute_composite(executor: DispatchExecutor, contract: NodeContract, conte
         run_id,
         verifiability_label="composite",
         verdict=verdict,
-        cost_usd=child.cost_usd,
+        cost=child.cost,
         attempts=child.attempts,
         escalations=child.escalations,
         child_run_id=child.child_run_id,
@@ -298,11 +305,11 @@ def _execute_fanout(executor: DispatchExecutor, contract: NodeContract, context_
         return result
 
     children: list[_ChildRun] = []
-    total_cost = 0.0
+    total_cost = Cost.none()
     cap = executor._pilot_policy.max_cost_usd_per_node
     cost_capped = False
     for i in range(len(items)):
-        if cap is not None and total_cost > cap:
+        if _over_cap(executor, total_cost, cap):
             cost_capped = True
             break
         child = _launch_child(executor, 
@@ -315,13 +322,13 @@ def _execute_fanout(executor: DispatchExecutor, contract: NodeContract, context_
             extra_context=f"Élément de fan-out {i + 1}/{len(items)}. [genre_attempt_index={i}]",
         )
         children.append(child)
-        total_cost += child.cost_usd or 0.0
+        total_cost += child.cost
         if child.status == "waiting_host":
             executor.host_node = node_id
             executor.host_reason = f"fanout : élément {i} (sous-flow {child.child_run_id}) suspendu à l'hôte"
             _record_genre_outcome(executor, 
                 node_id, run_id, verifiability_label="fanout", verdict="waiting_host",
-                cost_usd=total_cost, attempts=sum(c.attempts for c in children),
+                cost=total_cost, attempts=sum(c.attempts for c in children),
                 escalations=sum(c.escalations for c in children),
             )
             result = NodeExecutionResult(pending=True, extra={"dispatch_refused": "fanout_waiting_host", "node_id": node_id})
@@ -333,7 +340,7 @@ def _execute_fanout(executor: DispatchExecutor, contract: NodeContract, context_
     all_green = len(children) == len(items) and all(c.status == "finished" for c in children)
     verdict = "cost_capped" if cost_capped else ("green" if all_green else "red")
     _record_genre_outcome(executor, 
-        node_id, run_id, verifiability_label="fanout", verdict=verdict, cost_usd=total_cost,
+        node_id, run_id, verifiability_label="fanout", verdict=verdict, cost=total_cost,
         attempts=attempts, escalations=escalations,
     )
     fanout_results = [
@@ -373,13 +380,13 @@ def _execute_verify_panel(executor: DispatchExecutor, contract: NodeContract, co
     angles = list(vp["angles"])
 
     children: list[_ChildRun] = []
-    total_cost = 0.0
+    total_cost = Cost.none()
     cap = executor._pilot_policy.max_cost_usd_per_node
     for i in range(k):
-        if cap is not None and total_cost > cap:
+        if _over_cap(executor, total_cost, cap):
             _record_genre_outcome(executor, 
                 node_id, run_id, verifiability_label="verify-panel", verdict="cost_capped",
-                cost_usd=total_cost, attempts=sum(c.attempts for c in children),
+                cost=total_cost, attempts=sum(c.attempts for c in children),
                 escalations=sum(c.escalations for c in children),
             )
             executor.blocked_node = node_id
@@ -399,13 +406,13 @@ def _execute_verify_panel(executor: DispatchExecutor, contract: NodeContract, co
             ),
         )
         children.append(child)
-        total_cost += child.cost_usd or 0.0
+        total_cost += child.cost
         if child.status == "waiting_host":
             executor.host_node = node_id
             executor.host_reason = f"verify-panel : vérificateur {i} (sous-flow {child.child_run_id}) suspendu à l'hôte"
             _record_genre_outcome(executor, 
                 node_id, run_id, verifiability_label="verify-panel", verdict="waiting_host",
-                cost_usd=total_cost, attempts=sum(c.attempts for c in children),
+                cost=total_cost, attempts=sum(c.attempts for c in children),
                 escalations=sum(c.escalations for c in children),
             )
             result = NodeExecutionResult(pending=True, extra={"dispatch_refused": "verify_panel_waiting_host"})
@@ -418,7 +425,7 @@ def _execute_verify_panel(executor: DispatchExecutor, contract: NodeContract, co
     attempts = sum(c.attempts for c in children)
     escalations = sum(c.escalations for c in children)
     _record_genre_outcome(executor, 
-        node_id, run_id, verifiability_label="verify-panel", verdict=verdict, cost_usd=total_cost,
+        node_id, run_id, verifiability_label="verify-panel", verdict=verdict, cost=total_cost,
         attempts=attempts, escalations=escalations,
     )
     panel_results = [
@@ -460,24 +467,24 @@ def _execute_loop_until_dry(executor: DispatchExecutor, contract: NodeContract, 
 
     seen: set[str] = set()
     rounds: list[dict[str, Any]] = []
-    total_cost = 0.0
+    total_cost = Cost.none()
     cap = executor._pilot_policy.max_cost_usd_per_node
     stop_reason = "max_rounds"
     for i in range(max_rounds):
-        if cap is not None and total_cost > cap:
+        if _over_cap(executor, total_cost, cap):
             stop_reason = "cost_capped"
             break
         child = _launch_child(executor, 
             contract.ref, node_id=node_id, run_id=run_id, blueprint_id=blueprint_id, suffix=f"round{i}",
             max_cost_usd=None, extra_context=f"Tour {i + 1}/{max_rounds}. [genre_attempt_index={i}]",
         )
-        total_cost += child.cost_usd or 0.0
+        total_cost += child.cost
         if child.status == "waiting_host":
             executor.host_node = node_id
             executor.host_reason = f"loop-until-dry : tour {i} (sous-flow {child.child_run_id}) suspendu à l'hôte"
             _record_genre_outcome(executor, 
                 node_id, run_id, verifiability_label="loop-until-dry", verdict="waiting_host",
-                cost_usd=total_cost, attempts=child.attempts, escalations=child.escalations,
+                cost=total_cost, attempts=child.attempts, escalations=child.escalations,
             )
             result = NodeExecutionResult(pending=True, extra={"dispatch_refused": "loop_until_dry_waiting_host"})
             executor.last_result = result
@@ -486,7 +493,7 @@ def _execute_loop_until_dry(executor: DispatchExecutor, contract: NodeContract, 
             rounds.append({"index": i, "child_run_id": child.child_run_id, "status": child.status, "novel": False})
             _record_genre_outcome(executor, 
                 node_id, run_id, verifiability_label="loop-until-dry", verdict="red",
-                cost_usd=total_cost, attempts=child.attempts, escalations=child.escalations,
+                cost=total_cost, attempts=child.attempts, escalations=child.escalations,
             )
             executor.blocked_node = node_id
             result = NodeExecutionResult(pending=False, output=None, extra={"loop_until_dry_rounds": rounds})
@@ -505,7 +512,7 @@ def _execute_loop_until_dry(executor: DispatchExecutor, contract: NodeContract, 
 
     verdict = "cost_capped" if stop_reason == "cost_capped" else "green"
     _record_genre_outcome(executor, 
-        node_id, run_id, verifiability_label="loop-until-dry", verdict=verdict, cost_usd=total_cost,
+        node_id, run_id, verifiability_label="loop-until-dry", verdict=verdict, cost=total_cost,
         attempts=len(rounds), escalations=0,
     )
     output: dict[str, Any] = {"pins": {pin.pin_id: {"contract": pin.contract} for pin in contract.outputs}}
@@ -541,12 +548,12 @@ def _execute_judge(executor: DispatchExecutor, contract: NodeContract, context_p
     angles = list(j["angles"])
 
     candidates: list[_ChildRun] = []
-    total_cost = 0.0
+    total_cost = Cost.none()
     cap = executor._pilot_policy.max_cost_usd_per_node
     for i in range(n):
-        if cap is not None and total_cost > cap:
+        if _over_cap(executor, total_cost, cap):
             _record_genre_outcome(executor, 
-                node_id, run_id, verifiability_label="judge", verdict="cost_capped", cost_usd=total_cost,
+                node_id, run_id, verifiability_label="judge", verdict="cost_capped", cost=total_cost,
                 attempts=sum(c.attempts for c in candidates), escalations=sum(c.escalations for c in candidates),
             )
             executor.blocked_node = node_id
@@ -562,12 +569,12 @@ def _execute_judge(executor: DispatchExecutor, contract: NodeContract, context_p
             extra_context=f"Angle imposé ({i + 1}/{n}) : {angles[i]} [genre_attempt_index={i}]",
         )
         candidates.append(child)
-        total_cost += child.cost_usd or 0.0
+        total_cost += child.cost
         if child.status == "waiting_host":
             executor.host_node = node_id
             executor.host_reason = f"judge : tentative {i} (sous-flow {child.child_run_id}) suspendue à l'hôte"
             _record_genre_outcome(executor, 
-                node_id, run_id, verifiability_label="judge", verdict="waiting_host", cost_usd=total_cost,
+                node_id, run_id, verifiability_label="judge", verdict="waiting_host", cost=total_cost,
                 attempts=sum(c.attempts for c in candidates), escalations=sum(c.escalations for c in candidates),
             )
             result = NodeExecutionResult(pending=True, extra={"dispatch_refused": "judge_waiting_host"})
@@ -576,7 +583,7 @@ def _execute_judge(executor: DispatchExecutor, contract: NodeContract, context_p
 
     if not all(c.status == "finished" for c in candidates):
         _record_genre_outcome(executor, 
-            node_id, run_id, verifiability_label="judge", verdict="red", cost_usd=total_cost,
+            node_id, run_id, verifiability_label="judge", verdict="red", cost=total_cost,
             attempts=sum(c.attempts for c in candidates), escalations=sum(c.escalations for c in candidates),
         )
         executor.blocked_node = node_id
@@ -591,7 +598,7 @@ def _execute_judge(executor: DispatchExecutor, contract: NodeContract, context_p
         {"index": i, "child_run_id": c.child_run_id, "status": c.status, "cost_usd": c.cost_usd}
         for i, c in enumerate(candidates)
     ]
-    summary = "\n".join(f"  [{row['index']}] run {row['child_run_id']} — coût {row['cost_usd']}" for row in trace)
+    summary = "\n".join(f"  [{row['index']}] run {row['child_run_id']} — coût {'inconnu' if row['cost_usd'] is None else row['cost_usd']}" for row in trace)
     saved_context = executor._extra_context
     executor._extra_context = (
         f"{saved_context}\n\nTentatives à départager (indices 0..{n - 1}) :\n{summary}\n\n"
@@ -619,11 +626,10 @@ def _execute_judge(executor: DispatchExecutor, contract: NodeContract, context_p
         return result
 
     existing = executor.node_outcomes.get(node_id)
-    judge_cost = existing.cost_usd if existing else None
     _record_genre_outcome(executor, 
         node_id, run_id, verifiability_label="judge",
         verdict="green" if existing is None or existing.verdict == "green" else existing.verdict,
-        cost_usd=total_cost + (judge_cost or 0.0),
+        cost=total_cost + (existing.cost if existing else Cost.none()),
         attempts=sum(c.attempts for c in candidates) + (existing.attempts if existing else 0),
         escalations=sum(c.escalations for c in candidates) + (existing.escalations if existing else 0),
     )
@@ -675,21 +681,21 @@ def _execute_budget(executor: DispatchExecutor, contract: NodeContract, context_
     passes = list(b["passes"])
 
     rows: list[dict[str, Any]] = []
-    total_cost = 0.0
+    total_cost = Cost.none()
     for i, ref in enumerate(passes):
         mandatory = i == 0
-        if not mandatory and total_cost >= max_cost_usd:
+        if not mandatory and cap_reason(total_cost, max_cost_usd, executor._pilot_policy.on_unknown_cost) is not None:
             rows.append({"index": i, "ref": ref, "launched": False})
             continue
         child = _launch_child(executor, 
             ref, node_id=node_id, run_id=run_id, blueprint_id=blueprint_id, suffix=f"pass{i}", max_cost_usd=None,
         )
-        total_cost += child.cost_usd or 0.0
+        total_cost += child.cost
         if child.status == "waiting_host":
             executor.host_node = node_id
             executor.host_reason = f"budget : passe {i} (sous-flow {child.child_run_id}) suspendue à l'hôte"
             _record_genre_outcome(executor, 
-                node_id, run_id, verifiability_label="budget", verdict="waiting_host", cost_usd=total_cost,
+                node_id, run_id, verifiability_label="budget", verdict="waiting_host", cost=total_cost,
                 attempts=child.attempts, escalations=child.escalations,
             )
             result = NodeExecutionResult(pending=True, extra={"dispatch_refused": "budget_waiting_host"})
@@ -700,7 +706,7 @@ def _execute_budget(executor: DispatchExecutor, contract: NodeContract, context_
         )
         if mandatory and child.status != "finished":
             _record_genre_outcome(executor, 
-                node_id, run_id, verifiability_label="budget", verdict="red", cost_usd=total_cost,
+                node_id, run_id, verifiability_label="budget", verdict="red", cost=total_cost,
                 attempts=child.attempts, escalations=child.escalations,
             )
             executor.blocked_node = node_id
@@ -709,7 +715,7 @@ def _execute_budget(executor: DispatchExecutor, contract: NodeContract, context_
             return result
 
     _record_genre_outcome(executor, 
-        node_id, run_id, verifiability_label="budget", verdict="green", cost_usd=total_cost,
+        node_id, run_id, verifiability_label="budget", verdict="green", cost=total_cost,
         attempts=sum(1 for r in rows if r.get("launched")), escalations=0,
     )
     output: dict[str, Any] = {"pins": {pin.pin_id: {"contract": pin.contract} for pin in contract.outputs}}
@@ -735,11 +741,11 @@ def _execute_replay_diff(executor: DispatchExecutor, contract: NodeContract, con
     cap = executor._pilot_policy.max_cost_usd_per_node
 
     children: list[_ChildRun] = []
-    total_cost = 0.0
+    total_cost = Cost.none()
     for i in range(2):
-        if cap is not None and total_cost > cap:
+        if _over_cap(executor, total_cost, cap):
             _record_genre_outcome(executor, 
-                node_id, run_id, verifiability_label="replay-diff", verdict="cost_capped", cost_usd=total_cost,
+                node_id, run_id, verifiability_label="replay-diff", verdict="cost_capped", cost=total_cost,
                 attempts=sum(c.attempts for c in children), escalations=sum(c.escalations for c in children),
             )
             executor.blocked_node = node_id
@@ -750,12 +756,12 @@ def _execute_replay_diff(executor: DispatchExecutor, contract: NodeContract, con
             contract.ref, node_id=node_id, run_id=run_id, blueprint_id=blueprint_id, suffix=f"replay{i}", max_cost_usd=None,
         )
         children.append(child)
-        total_cost += child.cost_usd or 0.0
+        total_cost += child.cost
         if child.status == "waiting_host":
             executor.host_node = node_id
             executor.host_reason = f"replay-diff : relecture {i} (sous-flow {child.child_run_id}) suspendue à l'hôte"
             _record_genre_outcome(executor, 
-                node_id, run_id, verifiability_label="replay-diff", verdict="waiting_host", cost_usd=total_cost,
+                node_id, run_id, verifiability_label="replay-diff", verdict="waiting_host", cost=total_cost,
                 attempts=sum(c.attempts for c in children), escalations=sum(c.escalations for c in children),
             )
             result = NodeExecutionResult(pending=True, extra={"dispatch_refused": "replay_diff_waiting_host"})
@@ -770,7 +776,7 @@ def _execute_replay_diff(executor: DispatchExecutor, contract: NodeContract, con
     both_finished = all(c.status == "finished" for c in children)
     verdict = "green" if both_finished else "red"
     _record_genre_outcome(executor, 
-        node_id, run_id, verifiability_label="replay-diff", verdict=verdict, cost_usd=total_cost,
+        node_id, run_id, verifiability_label="replay-diff", verdict=verdict, cost=total_cost,
         attempts=sum(c.attempts for c in children), escalations=sum(c.escalations for c in children),
     )
     rows = [{"index": i, "child_run_id": c.child_run_id, "status": c.status} for i, c in enumerate(children)]
@@ -837,9 +843,15 @@ def execute_genre_node(
     return genre_fn(executor, contract, context_pack)
 
 
-def _total_cost(executor: DispatchExecutor) -> float | None:
-    known = [o.cost_usd for o in executor.node_outcomes.values() if o.cost_usd is not None]
-    return sum(known) if known else None
+def _total_cost(executor: DispatchExecutor) -> Cost:
+    return Cost.total(o.cost for o in executor.node_outcomes.values())
+
+
+def _over_cap(executor: DispatchExecutor, total: Cost, cap: float | None) -> bool:
+    """Le plafond du pilote interdit-il de continuer ? Un coût inconnu compte selon ``on_unknown_cost`` (W1-01)."""
+    if cap is None:
+        return False
+    return cap_reason(total, cap, executor._pilot_policy.on_unknown_cost, inclusive=False) is not None
 
 
 def _drive_composite_child(
@@ -849,7 +861,7 @@ def _drive_composite_child(
     result: NodeExecutionResult,
     *,
     max_cost_usd: float | None,
-) -> tuple[str, tuple[str, ...], float | None, str | None, dict[str, Any] | None]:
+) -> tuple[str, tuple[str, ...], Cost, str | None, dict[str, Any] | None]:
     """Enchaîne les nodes du sous-flow d'un node composite (issue #206) — variante coût-plafonné de :func:`_drive`.
 
     Même boucle que :func:`_drive`, avec une différence : le plafond de coût
@@ -874,10 +886,10 @@ def _drive_composite_child(
         if result.output is None:
             return "blocked", (), _total_cost(executor), None, None
         total = _total_cost(executor)
-        if max_cost_usd is not None and total is not None and total > max_cost_usd:
+        if _over_cap(executor, total, max_cost_usd):
             engine.abort(
                 run_id,
-                reason=f"plafond du pilote dépassé pour le sous-flow ({total} USD > {max_cost_usd} USD, issue #206/#209)",
+                reason=f"plafond du pilote dépassé pour le sous-flow ({total.render()} pour {max_cost_usd} USD, issue #206/#209)",
             )
             return "cost_capped", (), total, None, None
         last_output = result.output

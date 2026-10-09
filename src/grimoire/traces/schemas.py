@@ -6,6 +6,11 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from grimoire.costs import Cost
+
+TRACE_SCHEMA_V1 = "grimoire.trace.v1"
+TRACE_SCHEMA_VERSION = "grimoire.trace.v2"
+
 
 class TraceOutcome(StrEnum):
     SUCCESS = "success"
@@ -16,10 +21,22 @@ class TraceOutcome(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class TokenUsage:
+    """Usage d'un appel ou d'une cascade. ``estimated_cost_usd`` vaut ``None`` quand rien n'est chiffré (W1-01).
+
+    Un coût inconnu n'est pas ``0.0`` : ``unpriced_calls`` dit combien d'appels
+    n'ont pas de prix, et :attr:`cost` en tire le statut (``exact`` |
+    ``lower_bound`` | ``unknown``).
+    """
+
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
-    estimated_cost_usd: float = 0.0
+    estimated_cost_usd: float | None = None
+    unpriced_calls: int = 0
+
+    @property
+    def cost(self) -> Cost:
+        return Cost.from_parts(self.estimated_cost_usd, self.unpriced_calls)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -27,15 +44,29 @@ class TokenUsage:
             "completion_tokens": self.completion_tokens,
             "total_tokens": self.total_tokens,
             "estimated_cost_usd": self.estimated_cost_usd,
+            "unpriced_calls": self.unpriced_calls,
+            "cost_status": self.cost.status,
         }
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> TokenUsage:
+    def from_dict(cls, d: dict[str, Any], *, schema_version: str = TRACE_SCHEMA_VERSION) -> TokenUsage:
+        """Lecture tolérante de ``trace.v1`` : son ``0.0`` ne distinguait pas « gratuit » d'« inconnu ».
+
+        Un enregistrement v1 à ``0.0`` (ou sans coût) est lu comme inconnu — le
+        seul reproche honnête qu'on puisse lui faire ; un montant v1 positif
+        reste exact. Un enregistrement v2 est pris tel quel.
+        """
+        raw = d.get("estimated_cost_usd")
+        cost = float(raw) if isinstance(raw, int | float) and not isinstance(raw, bool) else None
+        unpriced = int(d.get("unpriced_calls", 0) or 0)
+        if schema_version == TRACE_SCHEMA_V1 and not cost:
+            cost = None
         return cls(
             prompt_tokens=int(d.get("prompt_tokens", 0)),
             completion_tokens=int(d.get("completion_tokens", 0)),
             total_tokens=int(d.get("total_tokens", 0)),
-            estimated_cost_usd=float(d.get("estimated_cost_usd", 0.0)),
+            estimated_cost_usd=cost,
+            unpriced_calls=max(unpriced, 1) if cost is None else unpriced,
         )
 
 
@@ -104,7 +135,7 @@ class TraceRecord:
     recipe_id: str
     outcome: TraceOutcome
     started_at: str
-    schema_version: str = "grimoire.trace.v1"
+    schema_version: str = TRACE_SCHEMA_VERSION
     completed_at: str = ""
     agent_id: str = ""
     host_id: str = ""
@@ -149,6 +180,7 @@ class TraceRecord:
     def from_dict(cls, d: dict[str, Any]) -> TraceRecord:
         agent = d.get("agent", {})
         stats = d.get("stats", {})
+        schema_version = d.get("schema_version", TRACE_SCHEMA_V1)
         return cls(
             id=d["id"],
             run_id=d["run_id"],
@@ -158,7 +190,7 @@ class TraceRecord:
             recipe_id=d["recipe_id"],
             outcome=TraceOutcome(d["outcome"]),
             started_at=d["started_at"],
-            schema_version=d.get("schema_version", "grimoire.trace.v1"),
+            schema_version=schema_version,
             completed_at=d.get("completed_at", ""),
             agent_id=agent.get("agent_id", ""),
             host_id=agent.get("host_id", ""),
@@ -170,6 +202,6 @@ class TraceRecord:
             retry_count=int(stats.get("retry_count", 0)),
             quality_score=float(stats.get("quality_score", 0.0)),
             latency_ms=float(stats.get("latency_ms", 0.0)),
-            token_usage=TokenUsage.from_dict(d.get("token_usage", {})),
+            token_usage=TokenUsage.from_dict(d.get("token_usage", {}), schema_version=schema_version),
             tags=tuple(d.get("tags", [])),
         )

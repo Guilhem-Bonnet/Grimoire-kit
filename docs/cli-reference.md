@@ -561,6 +561,7 @@ start_tier:
   V0: mid          # ne peut jamais descendre sous le plancher de la classe
 max_escalations: 1  # 0 = aucune escalade permise, absent = pas de plafond posé ici
 max_cost_usd_per_node: 0.50
+on_unknown_cost: stop  # défaut ; ou continue_flagged
 ```
 
 `max_cost_usd_per_node` s'applique dans `missions.dispatch.run_dispatch`
@@ -572,6 +573,17 @@ apparaît avec le verdict `cost_capped`. Un `pilot.yaml` malformé refuse
 nommément le chargement plutôt que de retomber en silence sur « aucun
 plafond » — contrairement à `orchestration-policy.yaml`, un plafond de coût
 est un mécanisme de sécurité.
+
+Un fournisseur qui ne rend pas son coût (aucun JSON portant `total_cost_usd`,
+le cas de la plupart des fournisseurs headless) laisse ce coût *inconnu* :
+il n'est jamais compté pour zéro. `on_unknown_cost: stop` (défaut,
+fail-closed) arrête l'escalade dès qu'un palier a répondu sans coût alors
+qu'un plafond est posé — le rapport porte `cost_capped` avec la raison
+`cost_unknown` (`cost_cap_reason`). `continue_flagged` laisse escalader ;
+le coût reste alors signalé `lower_bound` (`>= 0,42 USD (1 non pricés)`) ou
+`unknown` dans le rapport, la trace `dispatch.outcome`, `grimoire dispatch
+stats`, `flow status` et le contrôle `dispatch.cost_slo`. La politique
+`assume_tier_ceiling` (estimer au plafond du palier) n'existe pas encore.
 
 #### Classe de relisibilité
 

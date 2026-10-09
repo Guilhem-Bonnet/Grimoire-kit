@@ -554,3 +554,42 @@ def test_build_proposal_is_backend_agnostic_dataclass(monkeypatch: pytest.Monkey
         assert isinstance(proposal, Proposal)
         assert proposal.artifact_type == "agent"
         assert proposal.slug == "terraform-specialist"
+
+
+# ── Coût à trois états : parité Python/Rust (W1-01, issue #709) ─────────────
+
+_COST_PARITY_RECORDS = [
+    ((DISPATCH_OUTCOME_TAG, "class:V0", "provider:a", "replay:x:n", "resolved:true"), 0.42),
+    ((DISPATCH_OUTCOME_TAG, "class:V0", "provider:a", "replay:x:n", "resolved:true"), None),
+    ((DISPATCH_OUTCOME_TAG, "class:V1", "provider:b", "replay:y:m", "resolved:false"), None),
+    ((DISPATCH_OUTCOME_TAG, "class:V1", "provider:b", "replay:y:m", "resolved:true"), 1.5),
+    ((DISPATCH_OUTCOME_TAG, "class:V2", "provider:c", "resolved:true"), None),
+]
+
+
+@requires_rust_core
+def test_cout_inconnu_donne_les_memes_status_usd_et_unpriced_calls_sur_les_deux_backends(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _with_backend("python", monkeypatch)
+    python_stats = compute_dispatch_outcome_stats(_COST_PARITY_RECORDS).to_dict()
+    _with_backend("rust", monkeypatch)
+    rust_stats = compute_dispatch_outcome_stats(_COST_PARITY_RECORDS).to_dict()
+
+    assert python_stats == rust_stats
+    overall = rust_stats["overall"]
+    assert overall["cost_status"] == "lower_bound"
+    assert overall["unpriced_calls"] == 3
+    assert overall["total_cost_usd"] == pytest.approx(1.92)
+    # Un groupe où rien n'est chiffré reste inconnu, jamais 0.0, des deux côtés.
+    assert rust_stats["by_class"]["V2"]["cost_status"] == "unknown"
+    assert rust_stats["by_class"]["V2"]["total_cost_usd"] is None
+
+
+@pytest.mark.parametrize("backend", _backends_for_test())
+def test_cout_inconnu_n_est_jamais_zero_sur_chaque_backend(backend: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    _with_backend(backend, monkeypatch)
+    stats = compute_dispatch_outcome_stats(_COST_PARITY_RECORDS)
+    assert stats.by_class["V2"].total_cost_usd is None
+    assert stats.by_class["V2"].cost_per_resolved_task_usd is None
+    assert stats.by_class["V0"].cost.status == "lower_bound"

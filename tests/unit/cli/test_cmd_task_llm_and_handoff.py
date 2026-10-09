@@ -75,7 +75,7 @@ def test_record_model_call_flags_error(projet: Path) -> None:
     assert trace.outcome is TraceOutcome.FAILURE
 
 
-def test_record_model_call_unknown_model_costs_nothing_invented(projet: Path) -> None:
+def test_record_model_call_unknown_model_cost_is_unknown_not_zero(projet: Path) -> None:
     res = runner.invoke(
         task_app,
         ["record-model-call", "GAO-demo", "--model", "totally-unknown-model", "--tokens-in", "500", "--project-root", str(projet)],
@@ -84,7 +84,9 @@ def test_record_model_call_unknown_model_costs_nothing_invented(projet: Path) ->
     from grimoire.traces.ledger import TraceLedger
 
     trace = TraceLedger(projet / TRACES).list_traces(task_id="GAO-demo")[0]
-    assert trace.token_usage.estimated_cost_usd == 0.0
+    # Un modèle sans tarif : coût inconnu (W1-01, issue #709), jamais 0.0.
+    assert trace.token_usage.estimated_cost_usd is None
+    assert trace.token_usage.cost.status == "unknown"
 
 
 def _capsule(projet: Path, *, event: str = "SubagentStop") -> Path:

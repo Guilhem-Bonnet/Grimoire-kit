@@ -77,6 +77,7 @@ from ruamel.yaml.error import YAMLError
 from grimoire.core.exceptions import GrimoireMissionError
 from grimoire.core.grounding import GROUNDING_RULE
 from grimoire.core.standard_generation import STANDARD_DIR
+from grimoire.costs import POLICY_STOP, Cost, cap_reason
 from grimoire.missions.dispatch_history import recommend_start_tier
 from grimoire.missions.schemas import TaskState
 from grimoire.missions.verifiability import Verifiability, classify
@@ -654,6 +655,11 @@ class DispatchAttempt:
     uncertainties: tuple[Uncertainty, ...] = ()
     uncertainty_warnings: tuple[str, ...] = ()
 
+    @property
+    def cost(self) -> Cost:
+        """Le coût de la tentative — inconnu (``cost_usd is None``), jamais ``0.0`` (W1-01)."""
+        return Cost.coerce(self.cost_usd)
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "attempt": self.attempt,
@@ -714,6 +720,15 @@ class DispatchReport:
     #: reste un succès, la cascade s'arrête d'escalader, jamais de rétracter
     #: un vert déjà acquis.
     cost_capped: str | None = None
+    #: Pourquoi le plafond a arrêté l'escalade : ``cost_reached`` (le montant
+    #: connu atteint le plafond) ou ``cost_unknown`` (un palier n'a pas rendu
+    #: son coût et la politique est ``stop``, W1-01).
+    cost_cap_reason: str | None = None
+
+    @property
+    def cost(self) -> Cost:
+        """Coût cumulé des tentatives : ``lower_bound``/``unknown`` si certaines n'ont pas rendu le leur."""
+        return Cost.total(a.cost for a in self.attempts)
 
     @property
     def refusal_message(self) -> str | None:
@@ -774,6 +789,7 @@ class DispatchReport:
             "planned_chain": list(self.planned_chain),
             "prompt": self.prompt,
             "attempts": [a.to_dict() for a in self.attempts],
+            "cost": self.cost.to_dict(),
             "exit_code": self.exit_code,
             "review": self.review,
             "review_files": list(self.review_files),
@@ -794,6 +810,7 @@ class DispatchReport:
             data["unrunnable"] = self.unrunnable
         if self.cost_capped is not None:
             data["cost_capped"] = self.cost_capped
+            data["cost_cap_reason"] = self.cost_cap_reason
         return data
 
 
@@ -1001,7 +1018,7 @@ def _record_dispatch_outcome(
         from grimoire.traces.schemas import TraceOutcome
 
         tiers = dict.fromkeys(attempt.tier for attempt in report.attempts)  # ordonné, dédupliqué
-        total_cost = sum(attempt.cost_usd or 0.0 for attempt in report.attempts)
+        cost = report.cost
         last = report.attempts[-1]
         acceptance = (
             "unrunnable" if report.unrunnable is not None else ("executed" if acceptance_declared else "judged")
@@ -1017,6 +1034,8 @@ def _record_dispatch_outcome(
         ]
         if last.provider:
             tags.append(f"provider:{last.provider}")
+        if report.cost_cap_reason:
+            tags.append(f"cost_cap:{report.cost_cap_reason}")
 
         TraceLedger(root / TRACES_DIR).record(
             run_id=f"dispatch-{uuid.uuid4().hex[:12]}",
@@ -1027,7 +1046,7 @@ def _record_dispatch_outcome(
             outcome=TraceOutcome.SUCCESS if resolved else TraceOutcome.FAILURE,
             started_at=datetime.now(UTC).isoformat(),
             agent_id=last.provider,
-            token_usage={"estimated_cost_usd": total_cost},
+            token_usage={"estimated_cost_usd": cost.usd, "unpriced_calls": cost.unpriced_calls},
             tags=tags,
         )
     except Exception:  # noqa: S110 — observabilité : jamais au prix du dispatch lui-même
@@ -1055,6 +1074,7 @@ def run_dispatch(
     verifiability_warning: str | None = None,
     replay_key: str | None = None,
     max_cost_usd: float | None = None,
+    cost_unknown_policy: str = POLICY_STOP,
 ) -> DispatchReport:
     """Cascade la tâche *task_id* à travers les paliers de fournisseurs.
 
@@ -1097,7 +1117,11 @@ def run_dispatch(
     jamais au milieu d'une tentative en cours ni après un vert : un palier qui
     vient de réussir reste un succès même s'il dépasse le plafond après coup
     — seule l'escalade vers un palier *plus cher* est abandonnée. ``None`` :
-    comportement inchangé, aucun plafond.
+    comportement inchangé, aucun plafond. Un palier dont le coût est inconnu
+    (fournisseur muet) ne compte jamais pour zéro (W1-01, issue #709) :
+    *cost_unknown_policy* ``"stop"`` (défaut, fail-closed) arrête l'escalade
+    avec ``cost_cap_reason == "cost_unknown"`` ; ``"continue_flagged"`` la
+    laisse continuer, le coût du rapport restant ``lower_bound``/``unknown``.
 
     Le palier de départ vient, par défaut, de l'historique des dispatchs
     passés pour ce couple (type de tâche, classe) — :mod:`dispatch_history`,
@@ -1184,6 +1208,7 @@ def run_dispatch(
     attempts: list[DispatchAttempt] = []
     attempt_no = 0
     capped_before_next_tier = False
+    cap_why: str | None = None
     for tier_idx, tier in enumerate(chain):
         # Un fournisseur sans `invocation` déclarée n'est jamais candidat ici :
         # `candidates()` sert aussi `providers status`, où un fournisseur sans
@@ -1321,12 +1346,13 @@ def run_dispatch(
         # abandonné, le rapport reste une chaîne épuisée ordinaire.
         has_next_tier = tier_idx < len(chain) - 1
         if max_cost_usd is not None and attempts and has_next_tier:
-            spent_so_far = sum(a.cost_usd or 0.0 for a in attempts)
-            if spent_so_far >= max_cost_usd:
+            cap_why = cap_reason(Cost.total(a.cost for a in attempts), max_cost_usd, cost_unknown_policy)
+            if cap_why is not None:
                 capped_before_next_tier = True
                 break
 
     if capped_before_next_tier:
+        capped_cost = Cost.total(a.cost for a in attempts)
         capped_report = DispatchReport(
             task_id=task_id,
             verifiability=verifiability.value,
@@ -1337,10 +1363,15 @@ def run_dispatch(
             start_tier=chosen_tier,
             start_tier_reason=start_tier_reason,
             cost_capped=(
-                f"plafond de {max_cost_usd:.4f} USD atteint après "
-                f"{sum(a.cost_usd or 0.0 for a in attempts):.4f} USD sur {len(attempts)} tentative(s) — "
+                f"plafond de {max_cost_usd:.4f} USD : coût inconnu ({capped_cost.unpriced_calls} appel(s) sans coût "
+                f"rapporté sur {len(attempts)} tentative(s), connu {capped_cost.render()}) — "
+                "escalade abandonnée avant le palier suivant"
+                if cap_why == "cost_unknown"
+                else f"plafond de {max_cost_usd:.4f} USD atteint après "
+                f"{capped_cost.known_usd:.4f} USD sur {len(attempts)} tentative(s) — "
                 "escalade abandonnée avant le palier suivant"
             ),
+            cost_cap_reason=cap_why,
         )
         _record_dispatch_outcome(root, task, capped_report, acceptance_declared=acceptance_declared, replay_key=replay_key)
         return capped_report

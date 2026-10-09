@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import Any
 
 from grimoire.core.exceptions import GrimoireMissionError, GrimoireRuntimeError
+from grimoire.costs import Cost
 from grimoire.flows import pilot
 from grimoire.flows.blueprint_loader import build_node_contracts, load_blueprint
 from grimoire.flows.engine import FlowEngine, check_output_against_contract
@@ -212,6 +213,13 @@ class NodeDispatchOutcome:
     #: (par node) vit dans le Mission Ledger de CE run, pas dans celui du
     #: parent : ``grimoire flow status <child_run_id>`` la montre.
     child_run_id: str | None = None
+    #: Appels de ce node sans prix (W1-01, issue #709) : ``cost_usd`` est alors
+    #: un minimum (``lower_bound``) ou ``None`` (``unknown``), jamais un total.
+    unpriced_calls: int = 0
+
+    @property
+    def cost(self) -> Cost:
+        return Cost.from_parts(self.cost_usd, self.unpriced_calls)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -224,6 +232,8 @@ class NodeDispatchOutcome:
             "attempts": self.attempts,
             "escalations": self.escalations,
             "cost_usd": self.cost_usd,
+            "cost_status": self.cost.status,
+            "unpriced_calls": self.unpriced_calls,
             "uncertainties": [dict(u) for u in self.uncertainties],
             "acceptance_status": self.acceptance_status,
             "verifiability_warning": self.verifiability_warning,
@@ -266,7 +276,7 @@ def _node_outcome_from_report(
     verifiability_warning: str | None = None,
 ) -> NodeDispatchOutcome:
     last = report.attempts[-1] if report.attempts else None
-    known_costs = [a.cost_usd for a in report.attempts if a.cost_usd is not None]
+    cost = report.cost
     if report.unrunnable is not None:
         verdict = "acceptance_unrunnable"
     elif report.cost_capped is not None:
@@ -285,7 +295,8 @@ def _node_outcome_from_report(
         provider=last.provider if last else None,
         attempts=len(report.attempts),
         escalations=_escalations(report),
-        cost_usd=sum(known_costs) if known_costs else None,
+        cost_usd=cost.usd,
+        unpriced_calls=cost.unpriced_calls,
         uncertainties=tuple(u.to_dict() for u in report.uncertainties),
         acceptance_status=_acceptance_status(report, has_structured_acceptance=has_structured_acceptance),
         verifiability_warning=verifiability_warning,
@@ -452,6 +463,7 @@ class DispatchExecutor:
             start_tier=pilot_decision.start_tier,
             max_tier=effective_max_tier,
             max_cost_usd=pilot_decision.max_cost_usd,
+            cost_unknown_policy=pilot_decision.cost_unknown_policy,
             call_timeout=self._call_timeout,
             actor=self._actor,
             agent=self._agent,
@@ -545,9 +557,13 @@ class FlowDispatchOutcome:
     contract: NodeContract | None = None
 
     @property
+    def cost(self) -> Cost:
+        return Cost.total(n.cost for n in self.nodes)
+
+    @property
     def total_cost_usd(self) -> float | None:
-        known = [n.cost_usd for n in self.nodes if n.cost_usd is not None]
-        return sum(known) if known else None
+        """Le coût connu du run — un minimum quand ``cost.status == "lower_bound"``, ``None`` si inconnu."""
+        return self.cost.usd
 
     @property
     def escalations(self) -> int:
@@ -562,6 +578,8 @@ class FlowDispatchOutcome:
             "faults": list(self.faults),
             "host_reason": self.host_reason,
             "total_cost_usd": self.total_cost_usd,
+            "cost_status": self.cost.status,
+            "unpriced_calls": self.cost.unpriced_calls,
             "escalations": self.escalations,
             "contract": self.contract.to_dict() if self.contract else None,
         }
@@ -687,6 +705,7 @@ def node_dispatch_history(project_root: Path, run_id: str, node_ids: Sequence[st
         if not events:
             continue
         last = events[-1].payload
+        node_cost = Cost.total(Cost.coerce(e.payload.get("cost_usd")) for e in events)
         rows.append(
             {
                 "node_id": node_id,
@@ -697,7 +716,11 @@ def node_dispatch_history(project_root: Path, run_id: str, node_ids: Sequence[st
                 "provider": last.get("provider"),
                 "tier": last.get("tier"),
                 "verdict": last.get("verdict"),
-                "cost_usd": last.get("cost_usd"),
+                # Coût du node entier (toutes ses tentatives), pas de la seule dernière :
+                # une tentative muette rend le total ``lower_bound``/``unknown`` (W1-01).
+                "cost_usd": node_cost.usd,
+                "cost_status": node_cost.status,
+                "unpriced_calls": node_cost.unpriced_calls,
                 "uncertainties": last.get("uncertainties", []),
                 # « executed »/« unrunnable »/« judged » (issue #428) — absent
                 # (``None``) sur un événement écrit avant ce correctif.

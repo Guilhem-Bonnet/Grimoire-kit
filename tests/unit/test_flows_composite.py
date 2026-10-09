@@ -475,3 +475,66 @@ def test_flow_list_require_measure_couvre_le_sous_flow(tmp_path: Path) -> None:
         ["--output", "json", "flow", "list", "--project-root", str(tmp_path), "--require-measure", "child-flow"],
     )
     assert result.exit_code == 0, result.output
+
+
+# ── 11. Un fournisseur muet ne compte jamais pour zéro face au plafond (W1-01, #709) ─
+
+
+def _setup_silent_tier(tmp_path: Path) -> None:
+    """Comme ``_setup_single_tier`` mais le fournisseur ne rapporte aucun coût."""
+    path = tmp_path / "scripts" / "silent-writer.py"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    silent = dedent(_WRITER).rsplit("print(", 1)[0]
+    path.write_text(silent, encoding="utf-8")
+    _write_registry(tmp_path, _provider_yaml("silent-writer", "cheap", _invocation(path)))
+
+
+def _three_node_child(tmp_path: Path) -> None:
+    child = {
+        "blueprintVersion": 1,
+        "id": "child-flow",
+        "nodes": [
+            _leaf_node("c1", out_contract="cc"),
+            _leaf_node("c2", out_contract="cc2", in_contract="cc"),
+            _leaf_node("c3", in_contract="cc2"),
+        ],
+        "edges": [
+            {"from": "c1.out", "to": "c2.in", "contract": "cc"},
+            {"from": "c2.out", "to": "c3.in", "contract": "cc2"},
+        ],
+    }
+    (tmp_path / "child-flow.blueprint.json").write_text(json.dumps(child), encoding="utf-8")
+
+
+def test_plafond_du_pilote_arrete_un_sous_flow_dont_le_cout_est_inconnu(tmp_path: Path) -> None:
+    _setup_silent_tier(tmp_path)
+    _write_pilot_policy(tmp_path, max_cost_usd_per_node=0.5)
+    _three_node_child(tmp_path)
+    parent_path = _parent_blueprint(tmp_path, ref="child-flow.blueprint.json")
+
+    outcome = run_with_dispatch(_engine(tmp_path), parent_path, project_root=tmp_path)
+
+    assert outcome.status == "blocked", outcome.to_dict()
+    sub = next(n for n in outcome.nodes if n.node_id == "sub")
+    assert sub.verdict == "cost_capped"
+    assert sub.cost_usd is None  # inconnu, pas 0.0
+    assert sub.to_dict()["cost_status"] == "unknown"
+    assert outcome.to_dict()["cost_status"] == "unknown"
+    assert outcome.total_cost_usd is None
+
+
+def test_politique_continue_flagged_laisse_le_sous_flow_finir_et_signale_le_cout(tmp_path: Path) -> None:
+    _setup_silent_tier(tmp_path)
+    _write_pilot_policy(tmp_path, max_cost_usd_per_node=0.5)
+    (tmp_path / PILOT_POLICY).write_text(
+        "max_cost_usd_per_node: 0.5\non_unknown_cost: continue_flagged\n", encoding="utf-8"
+    )
+    _three_node_child(tmp_path)
+    parent_path = _parent_blueprint(tmp_path, ref="child-flow.blueprint.json")
+
+    outcome = run_with_dispatch(_engine(tmp_path), parent_path, project_root=tmp_path)
+
+    assert outcome.status == "finished", outcome.to_dict()
+    assert outcome.total_cost_usd is None
+    assert outcome.to_dict()["cost_status"] == "unknown"
+    assert outcome.to_dict()["unpriced_calls"] >= 1

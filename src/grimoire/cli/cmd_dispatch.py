@@ -67,8 +67,13 @@ def _pct(value: float | None) -> str:
     return "—" if value is None else f"{value:.0%}"
 
 
-def _usd(value: float | None) -> str:
-    return "—" if value is None else f"${value:.4f}"
+def _usd(value: float | None, status: str = "exact") -> str:
+    """``inconnu`` (pas ``—``) quand le coût existe mais n'a pas été rendu ; ``>=`` pour un minimum (W1-01)."""
+    if status == "unknown":
+        return "inconnu"
+    if value is None:
+        return "—"
+    return f">= ${value:.4f}" if status == "lower_bound" else f"${value:.4f}"
 
 
 @dispatch_app.command("stats")
@@ -132,7 +137,7 @@ def dispatch_stats(
             name,
             str(group.total),  # type: ignore[attr-defined]
             str(group.resolved),  # type: ignore[attr-defined]
-            _usd(group.cost_per_resolved_task_usd),  # type: ignore[attr-defined]
+            _usd(group.cost_per_resolved_task_usd, group.cost.status),  # type: ignore[attr-defined]
             _pct(group.escalation_rate),  # type: ignore[attr-defined]
             _pct(group.inexecutable_share),  # type: ignore[attr-defined]
         )
