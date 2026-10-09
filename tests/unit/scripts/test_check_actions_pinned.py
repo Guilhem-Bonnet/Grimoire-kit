@@ -3,9 +3,6 @@
 import subprocess
 import sys
 from pathlib import Path
-import tempfile
-import pytest
-
 
 # Récupérer le chemin absolu du script de garde
 SCRIPT_PATH = Path(__file__).parent.parent.parent.parent / "scripts" / "check-actions-pinned.py"

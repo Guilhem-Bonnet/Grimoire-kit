@@ -24,6 +24,7 @@ import re
 import sys
 from pathlib import Path
 
+
 def extract_action_ref(uses_line: str) -> str:
     """Extrait la référence d'action (ex: owner/repo@ref) d'une ligne 'uses:'."""
     match = re.search(r"uses:\s*(.+?)(?:\s*#|$)", uses_line)
@@ -39,11 +40,11 @@ def is_pinned_by_sha(action_ref: str) -> bool:
 
 def check_workflow_file(filepath: Path) -> list[tuple[int, str, str, bool]]:
     """Vérifie un fichier workflow. Retourne une liste de (ligne, action, ref, est_valide)."""
-    issues = []
+    issues: list[tuple[int, str, str, bool]] = []
     try:
-        with open(filepath, "r", encoding="utf-8") as f:
+        with open(filepath, encoding="utf-8") as f:
             lines = f.readlines()
-    except (IOError, OSError) as e:
+    except OSError as e:
         print(f"Erreur lecture {filepath}: {e}", file=sys.stderr)
         return issues
 
@@ -57,7 +58,7 @@ def check_workflow_file(filepath: Path) -> list[tuple[int, str, str, bool]]:
 
     return issues
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Vérifie que toutes les GitHub Actions sont épinglées par SHA"
     )
@@ -85,7 +86,7 @@ def main():
 
         # Collecter les SHA valides si demandé
         if args.print_shas:
-            with open(workflow_file, "r", encoding="utf-8") as f:
+            with open(workflow_file, encoding="utf-8") as f:
                 for line in f:
                     if "uses:" in line:
                         action_ref = extract_action_ref(line)
@@ -97,7 +98,7 @@ def main():
         print("Actions non épinglées par SHA détectées :\n", file=sys.stderr)
         for filepath in sorted(all_issues.keys()):
             print(f"{filepath}:", file=sys.stderr)
-            for line_no, action_name, action_ref, _ in all_issues[filepath]:
+            for line_no, _action_name, action_ref, _ in all_issues[filepath]:
                 print(f"  Ligne {line_no}: {action_ref}", file=sys.stderr)
             print()
 
