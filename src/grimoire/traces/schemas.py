@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
 from grimoire.costs import Cost
+
+#: « Coût non fourni » : distinct de ``None`` (inconnu déclaré) et de ``0.0`` (gratuit déclaré).
+_COST_NOT_PROVIDED = float("nan")
 
 TRACE_SCHEMA_V1 = "grimoire.trace.v1"
 TRACE_SCHEMA_VERSION = "grimoire.trace.v2"
@@ -26,13 +30,29 @@ class TokenUsage:
     Un coût inconnu n'est pas ``0.0`` : ``unpriced_calls`` dit combien d'appels
     n'ont pas de prix, et :attr:`cost` en tire le statut (``exact`` |
     ``lower_bound`` | ``unknown``).
+
+    Un coût non fourni n'est pas ``0.0`` : avec des tokens ou des appels sans
+    prix il devient inconnu (comme à la lecture, :meth:`from_dict`) ; sans
+    token ni appel (``TokenUsage()``), c'est ``0.0`` exact, aucun appel.
+    ``estimated_cost_usd=0.0`` passé explicitement reste un coût connu.
     """
 
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
-    estimated_cost_usd: float | None = 0.0
+    estimated_cost_usd: float | None = _COST_NOT_PROVIDED
     unpriced_calls: int = 0
+
+    def __post_init__(self) -> None:
+        cost = self.estimated_cost_usd
+        if cost is None or not math.isnan(cost):
+            return
+        has_tokens = any((self.prompt_tokens, self.completion_tokens, self.total_tokens))
+        if has_tokens or self.unpriced_calls > 0:
+            object.__setattr__(self, "estimated_cost_usd", None)
+            object.__setattr__(self, "unpriced_calls", max(self.unpriced_calls, 1))
+        else:
+            object.__setattr__(self, "estimated_cost_usd", 0.0)
 
     @property
     def cost(self) -> Cost:

@@ -253,6 +253,40 @@ def test_token_usage_vide_n_a_pas_de_statut_contradictoire() -> None:
     assert usage["estimated_cost_usd"] == 0.0
 
 
+def test_token_usage_avec_tokens_et_sans_cout_fourni_est_inconnu_comme_from_dict() -> None:
+    """Le constructeur ne fabrique pas de faux zéro : des tokens sans prix = un appel non chiffré."""
+    from grimoire.traces.schemas import TokenUsage
+
+    built = TokenUsage(prompt_tokens=100, completion_tokens=50, total_tokens=150)
+    read = TokenUsage.from_dict({"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150})
+
+    assert built.to_dict() == read.to_dict()
+    assert built == read
+    assert built.to_dict()["estimated_cost_usd"] is None
+    assert built.to_dict()["cost_status"] == "unknown"
+    assert built.to_dict()["unpriced_calls"] == 1
+
+
+def test_token_usage_avec_zero_explicite_reste_un_cout_connu() -> None:
+    from grimoire.traces.schemas import TokenUsage
+
+    free = TokenUsage(prompt_tokens=100, total_tokens=100, estimated_cost_usd=0.0)
+
+    assert free.to_dict()["cost_status"] == "exact"
+    assert free.to_dict()["estimated_cost_usd"] == 0.0
+    assert TokenUsage.from_dict(free.to_dict()) == free
+
+
+def test_token_usage_sans_cout_mais_avec_appels_non_chiffres_est_inconnu() -> None:
+    from grimoire.traces.schemas import TokenUsage
+
+    usage = TokenUsage(unpriced_calls=2)
+
+    assert usage.estimated_cost_usd is None
+    assert usage.to_dict()["unpriced_calls"] == 2
+    assert usage.to_dict()["cost_status"] == "unknown"
+
+
 def test_to_dict_serialise_le_compteur_depuis_le_cout_a_trois_etats() -> None:
     from grimoire.traces.schemas import TokenUsage
 
