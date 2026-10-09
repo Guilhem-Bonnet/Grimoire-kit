@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -242,6 +244,119 @@ def test_head_checkout_is_allowed_outside_pull_request_target(tmp_path: Path) ->
     assert audit(tmp_path, workflow(step)).returncode == 0
 
 
+# --- clés env souillées, casse, sorties d'étape (revue D08-T2-03 / T2-04) ---------------
+
+TITLE_ENV = "          TITLE: ${{ github.event.issue.title }}\n"
+
+
+def _job_env(env_lines: str, run: str, on: str = "[issues]") -> str:
+    """Workflow dont le JOB porte ``env`` et dont l'étape exécute ``run``."""
+    return (
+        f"name: x\non: {on}\npermissions:\n  contents: read\njobs:\n  a:\n    runs-on: x\n"
+        f"    env:\n{env_lines}    steps:\n      - run: |\n          {run}\n"
+    )
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        _job_env(TITLE_ENV, 'echo "${{ env.TITLE }}"'),
+        _job_env(TITLE_ENV, "echo ${{ env['TITLE'] }}"),
+        _job_env(TITLE_ENV, "echo ${{ ENV.title }}"),
+        _job_env(TITLE_ENV, "echo ${{ toJSON(env) }}"),
+        _job_env(TITLE_ENV + "          COPY: ${{ env.TITLE }}\n", "echo ${{ env.COPY }}"),
+        "name: x\non: [issues]\npermissions:\n  contents: read\nenv:\n"
+        + TITLE_ENV
+        + "jobs:\n  a:\n    runs-on: x\n    steps:\n      - run: echo ${{ env.TITLE }}\n",
+        "name: x\non: [issues]\npermissions:\n  contents: read\njobs:\n  a:\n    runs-on: x\n    steps:\n"
+        "      - env:\n          TITLE: ${{ github.event.issue.title }}\n        run: echo ${{ env.TITLE }}\n",
+    ],
+    ids=["job-env", "bracket", "case", "whole-env", "chained", "workflow-env", "step-env"],
+)
+def test_env_value_read_back_through_expression_fails(tmp_path: Path, content: str) -> None:
+    res = audit(tmp_path, content)
+    assert res.returncode == 1, res.stdout
+    assert "untrusted context" in res.stdout
+
+
+def test_untainted_env_key_read_through_expression_passes(tmp_path: Path) -> None:
+    content = _job_env(TITLE_ENV + "          MODE: release\n", "echo ${{ env.MODE }}")
+    assert audit(tmp_path, content).returncode == 0
+
+
+def test_env_value_read_as_shell_variable_passes(tmp_path: Path) -> None:
+    assert audit(tmp_path, _job_env(TITLE_ENV, 'echo "$TITLE"')).returncode == 0
+
+
+@pytest.mark.parametrize(
+    "command",
+    ['echo "${{ steps.meta.outputs.t }}"', 'echo "${{ needs.build.outputs.t }}"'],
+)
+def test_step_and_job_outputs_in_run_are_reported(tmp_path: Path, command: str) -> None:
+    res = audit(tmp_path, workflow("      - run: |\n          " + command + "\n"))
+    assert "WARNING" in res.stdout and "outputs" in res.stdout, res.stdout
+    assert res.returncode == 0  # signalé, non bloquant : le dépôt en contient déjà
+
+
+def test_env_tainted_checkout_ref_under_pull_request_target_fails(tmp_path: Path) -> None:
+    content = (
+        f"name: x\non:{TARGET}\npermissions:\n  contents: read\njobs:\n  a:\n    runs-on: x\n"
+        "    env:\n      PR_SHA: ${{ github.event.pull_request.head.sha }}\n    steps:\n"
+        + _checkout("ref: ${{ env.PR_SHA }}")
+    )
+    res = audit(tmp_path, content)
+    assert res.returncode == 1, res.stdout
+    assert "checks out PR code under pull_request_target" in res.stdout
+
+
+@pytest.mark.parametrize(
+    "env_line",
+    [
+        "REF: refs/pull/${{ github.event.number }}/head",
+        "REF: ${{ github.head_ref }}",
+        "REF: ${{ github.event.pull_request.head.ref }}",
+    ],
+    ids=["pull-in-env", "head-ref-in-env", "event-ref-in-env"],
+)
+@pytest.mark.parametrize("use", ['"$REF"', '"${REF}"'], ids=["dollar", "braces"])
+def test_fetching_a_pr_ref_carried_by_env_fails(tmp_path: Path, env_line: str, use: str) -> None:
+    step = f"      - env:\n          {env_line}\n        run: git fetch origin {use}\n"
+    res = audit(tmp_path, workflow(step, on=TARGET))
+    assert res.returncode == 1, res.stdout
+    assert "checks out PR code under pull_request_target" in res.stdout
+
+
+def test_fetching_a_trusted_ref_carried_by_env_passes(tmp_path: Path) -> None:
+    step = '      - env:\n          REF: main\n        run: git fetch origin "$REF"\n'
+    assert audit(tmp_path, workflow(step, on=TARGET)).returncode == 0
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo ${{ GITHUB.EVENT.issue.title }}",
+        "echo ${{ Github.Head_Ref }}",
+        "echo ${{ INPUTS.x }}",
+        "echo ${{ GitHub.Event_Name }} ${{ Github.REF_NAME }}",
+        "echo ${{ toJSON(GITHUB) }}",
+    ],
+)
+def test_context_names_are_case_insensitive(tmp_path: Path, command: str) -> None:
+    res = audit(tmp_path, workflow("      - run: |\n          " + command + "\n"))
+    assert res.returncode == 1, res.stdout
+    assert "untrusted context" in res.stdout
+
+
+def test_pull_request_target_checkout_is_case_insensitive(tmp_path: Path) -> None:
+    res = audit(tmp_path, workflow(_checkout("ref: ${{ GitHub.Event.pull_request.head.sha }}"), on=TARGET))
+    assert res.returncode == 1, res.stdout
+
+
+def test_audit_doc_says_env_is_read_as_shell_variable() -> None:
+    doc = SCRIPT.read_text(encoding="utf-8")
+    assert "$CLE" in doc and "${{ env.CLE }}" in doc
+
+
 NO_PERMS = "name: x\non: [push]\njobs:\n  a:\n    runs-on: x\n    steps:\n      - run: echo hi\n"
 
 
@@ -395,7 +510,7 @@ def test_gitleaksignore_only_lists_fingerprints_in_expected_shape() -> None:
         assert len(commit) == 40 and lineno.isdigit(), line
 
 
-def _git(repo: Path, *args: str) -> None:
+def _git(repo: Path, *args: str) -> str:
     env = {
         **os.environ,
         "GIT_AUTHOR_NAME": "t",
@@ -403,19 +518,26 @@ def _git(repo: Path, *args: str) -> None:
         "GIT_COMMITTER_NAME": "t",
         "GIT_COMMITTER_EMAIL": "t@example.invalid",
     }
-    subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, encoding="utf-8", env=env)
+    res = subprocess.run(
+        ["git", "-C", str(repo), *args], check=True, capture_output=True, text=True, encoding="utf-8", env=env
+    )
+    return res.stdout
 
 
-def _scan_repo(tmp_path: Path, relpath: str) -> int:
-    """Commite un faux jeton à ``relpath`` dans un dépôt jetable et lance gitleaks avec la config du kit."""
-    repo = tmp_path / "repo"
-    target = repo / relpath
-    target.parent.mkdir(parents=True)
-    # Assemblé à l'exécution : aucun littéral de jeton dans ce fichier.
-    target.write_text("TOKEN = '" + "ghp_" + "aB3dE5gH7jK9" * 3 + "'\n", encoding="utf-8")
-    _git(repo, "init", "-q")
-    _git(repo, "add", relpath)
-    _git(repo, "commit", "-q", "-m", "fixture")
+def _require_gitleaks() -> None:
+    """Saute si gitleaks manque, sauf si ``GRIMOIRE_REQUIRE_GITLEAKS`` l'exige (job de scan de la CI)."""
+    if shutil.which("gitleaks") is not None:
+        return
+    if os.environ.get("GRIMOIRE_REQUIRE_GITLEAKS"):
+        pytest.fail("gitleaks absent alors que GRIMOIRE_REQUIRE_GITLEAKS est défini")
+    pytest.skip("gitleaks absent")
+
+
+# Assemblé à l'exécution : aucun littéral de jeton dans ce fichier.
+FAKE_TOKEN = "ghp_" + "aB3dE5gH7jK9" * 3
+
+
+def _gitleaks(repo: Path, *extra: str) -> int:
     res = subprocess.run(
         [
             "gitleaks",
@@ -426,6 +548,7 @@ def _scan_repo(tmp_path: Path, relpath: str) -> int:
             "--redact",
             "--exit-code",
             "1",
+            *extra,
             str(repo),
         ],
         capture_output=True,
@@ -437,12 +560,187 @@ def _scan_repo(tmp_path: Path, relpath: str) -> int:
     return res.returncode
 
 
-@pytest.mark.skipif(shutil.which("gitleaks") is None, reason="gitleaks absent")
+def _commit_file(repo: Path, relpath: str, content: str, message: str = "fixture") -> None:
+    target = repo / relpath
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(content, encoding="utf-8")
+    _git(repo, "add", relpath)
+    _git(repo, "commit", "-q", "-m", message)
+
+
+def _scan_repo(tmp_path: Path, relpath: str, content: str | None = None) -> int:
+    """Commite ``content`` (par défaut un faux jeton) à ``relpath`` dans un dépôt jetable et lance gitleaks."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    _commit_file(repo, relpath, content if content is not None else "TOKEN = '" + FAKE_TOKEN + "'\n")
+    return _gitleaks(repo)
+
+
 def test_allowlisted_fixture_path_is_exempt_without_any_fingerprint(tmp_path: Path) -> None:
+    _require_gitleaks()
     # Le commit est créé ici, son SHA ne figure dans aucun .gitleaksignore : comme après un squash.
     assert _scan_repo(tmp_path, "tests/unit/memory/test_write_validation.py") == 0
 
 
-@pytest.mark.skipif(shutil.which("gitleaks") is None, reason="gitleaks absent")
 def test_same_token_outside_allowlisted_path_is_still_a_leak(tmp_path: Path) -> None:
+    _require_gitleaks()
     assert _scan_repo(tmp_path, "src/grimoire/new_module.py") == 1
+
+
+# --- D08-T2-05 : un module de production n'est jamais exempté par chemin -------------
+
+PRODUCTION_FILES_WITH_FAKE_SECRETS = ["src/grimoire/memory/validation.py", "tests/unit/test_hook_ledger.py"]
+
+
+@pytest.mark.parametrize("relpath", PRODUCTION_FILES_WITH_FAKE_SECRETS)
+def test_config_does_not_exempt_whole_files_by_path(relpath: str) -> None:
+    regexes = [re.compile(p) for al in _config()["allowlists"] for p in al.get("paths", [])]
+    assert not any(rx.search(relpath) for rx in regexes), f"{relpath} exempté en bloc"
+
+
+@pytest.mark.parametrize("relpath", PRODUCTION_FILES_WITH_FAKE_SECRETS)
+def test_real_file_is_clean_thanks_to_its_inline_allow(tmp_path: Path, relpath: str) -> None:
+    _require_gitleaks()
+    assert _scan_repo(tmp_path, relpath, (ROOT / relpath).read_text(encoding="utf-8")) == 0
+
+
+@pytest.mark.parametrize("relpath", PRODUCTION_FILES_WITH_FAKE_SECRETS)
+def test_real_token_added_to_a_formerly_exempt_file_is_a_leak(tmp_path: Path, relpath: str) -> None:
+    _require_gitleaks()
+    content = (ROOT / relpath).read_text(encoding="utf-8") + "\nTOKEN = '" + FAKE_TOKEN + "'\n"
+    assert _scan_repo(tmp_path, relpath, content) == 1
+
+
+# --- D08-T2-01 : le verdict ne dépend que de l'historique du commit testé ---------------
+
+
+def _scan_command() -> list[str]:
+    """La ligne ``gitleaks git ...`` de secret-scan.yml, telle que le workflow la lance."""
+    jobs = _scan()["jobs"]
+    runs = [step["run"] for job in jobs.values() for step in job["steps"] if "gitleaks git" in step.get("run", "")]
+    assert len(runs) == 1, runs
+    args = shlex.split(runs[0])
+    return [str(ROOT / ".gitleaks.toml") if a == ".gitleaks.toml" else a for a in args]
+
+
+def test_scan_is_restricted_to_the_tested_commit() -> None:
+    cmd = _scan_command()
+    opts = [a for a in cmd if a.startswith("--log-opts")]
+    assert opts, "gitleaks scannerait toutes les refs récupérées par fetch-depth: 0"
+    value = opts[0].partition("=")[2] or cmd[cmd.index(opts[0]) + 1]
+    assert value == "HEAD"
+
+
+def test_leak_on_another_branch_does_not_fail_the_scan(tmp_path: Path) -> None:
+    _require_gitleaks()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _commit_file(repo, "README.md", "clean\n", "base")
+    _git(repo, "checkout", "-q", "-b", "other")
+    _commit_file(repo, "src/leak.py", "TOKEN = '" + FAKE_TOKEN + "'\n", "leak")
+    _git(repo, "checkout", "-q", "main")
+    cmd = [*_scan_command()[:-1], str(repo)]
+    res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", timeout=120, check=False, cwd=repo)
+    assert res.returncode == 0, res.stdout + res.stderr
+    # Garde-fou du test : sans la restriction, la fuite de l'autre branche est bien vue.
+    assert _gitleaks(repo) == 1
+
+
+def test_leak_in_the_tested_history_still_fails_the_scan(tmp_path: Path) -> None:
+    _require_gitleaks()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _commit_file(repo, "src/leak.py", "TOKEN = '" + FAKE_TOKEN + "'\n", "leak")
+    cmd = [*_scan_command()[:-1], str(repo)]
+    res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", timeout=120, check=False, cwd=repo)
+    assert res.returncode == 1, res.stdout + res.stderr
+
+
+# --- D08-T2-02 : .gitleaksignore ne ment pas sur ce qu'il couvre ---------------------------
+
+
+def _fingerprint_commits() -> list[str]:
+    return [
+        line.split(":")[0]
+        for line in (ROOT / ".gitleaksignore").read_text(encoding="utf-8").splitlines()
+        if line and not line.startswith("#")
+    ]
+
+
+def test_gitleaksignore_commits_are_all_reachable_from_head() -> None:
+    probe = subprocess.run(
+        ["git", "-C", str(ROOT), "rev-parse", "--is-shallow-repository"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    if probe.returncode != 0 or probe.stdout.strip() != "false":
+        pytest.skip("historique git complet indisponible")
+    for commit in dict.fromkeys(_fingerprint_commits()):
+        res = subprocess.run(
+            ["git", "-C", str(ROOT), "merge-base", "--is-ancestor", commit, "HEAD"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        assert res.returncode == 0, f"{commit} n'est pas atteignable depuis HEAD (tag ou branche seulement)"
+
+
+def test_gitleaksignore_header_matches_the_scanned_range() -> None:
+    header = "\n".join(
+        line for line in (ROOT / ".gitleaksignore").read_text(encoding="utf-8").splitlines() if line.startswith("#")
+    )
+    assert "966 commits (main" not in header, "966 est le total de toutes les refs, pas de main"
+    assert "--log-opts" in header and "870" in header
+
+
+# --- D08-T2-06 : les tests qui exécutent gitleaks tournent vraiment en CI ------------------
+
+
+def test_scan_job_runs_this_test_module_with_gitleaks_required() -> None:
+    job = _scan()["jobs"]["gitleaks"]
+    steps = job["steps"]
+    pytest_steps = [st for st in steps if "test_secret_scan.py" in st.get("run", "")]
+    assert len(pytest_steps) == 1, "le job de scan doit lancer tests/unit/test_secret_scan.py"
+    step = pytest_steps[0]
+    assert "pytest" in step["run"]
+    assert step.get("env", {}).get("GRIMOIRE_REQUIRE_GITLEAKS") == "1"
+    names = [st.get("run", "") + st.get("uses", "") for st in steps]
+    install = next(i for i, n in enumerate(names) if "sha256sum" in n)
+    assert install < steps.index(step), "pytest doit passer après l'installation de gitleaks"
+    assert any(st.get("uses", "").startswith("actions/setup-python") for st in steps)
+
+
+def test_missing_gitleaks_fails_when_required_and_skips_otherwise(tmp_path: Path) -> None:
+    empty_bin = tmp_path / "bin"
+    empty_bin.mkdir()
+    base = {k: v for k, v in os.environ.items() if k != "GRIMOIRE_REQUIRE_GITLEAKS"}
+    base["PATH"] = str(empty_bin)  # ni gitleaks ni git : le test doit s'arrêter avant
+    cmd = [
+        sys.executable,
+        "-m",
+        "pytest",
+        "--noconftest",
+        "-p",
+        "no:cacheprovider",
+        str(Path(__file__)),
+        "-k",
+        "test_allowlisted_fixture_path_is_exempt_without_any_fingerprint",
+        "-o",
+        "addopts=",
+    ]
+
+    def run(env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            cmd, capture_output=True, text=True, encoding="utf-8", env=env, cwd=ROOT, timeout=120, check=False
+        )
+
+    skipped = run(base)
+    assert skipped.returncode == 0 and "1 skipped" in skipped.stdout, skipped.stdout + skipped.stderr
+    required = run({**base, "GRIMOIRE_REQUIRE_GITLEAKS": "1"})
+    assert required.returncode == 1 and "GRIMOIRE_REQUIRE_GITLEAKS" in required.stdout, required.stdout

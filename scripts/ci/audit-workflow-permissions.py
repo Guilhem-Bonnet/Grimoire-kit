@@ -11,10 +11,17 @@
   ``script:``, quelle que soit la fonction qui l'enveloppe (``toJSON``,
   ``format``, ``join``, accès par crochets) : ``github.event``, ``github.head_ref``,
   ``github.base_ref``, ``github.ref``, ``github.ref_name``, ``inputs``, ou le contexte
-  ``github`` entier. Passer la valeur par ``env:`` ;
+  ``github`` entier. Les noms de contexte sont insensibles à la casse. Une clé ``env``
+  (workflow, job ou étape) dont la valeur contient un contexte non fiable est « souillée » :
+  la relire par ``${{ env.CLE }}`` dans ``run:``/``script:`` échoue elle aussi. La valeur
+  passée par ``env:`` ne se lit que par ``$CLE`` dans le shell, jamais par ``${{ env.CLE }}`` ;
+- une interpolation de ``steps.*.outputs`` ou ``needs.*.outputs`` dans ``run:``/``script:``
+  (avertissement, non bloquant : la sortie peut venir d'une entrée non fiable) ;
 - ``pull_request_target`` combiné à un checkout de code de PR : ``actions/checkout``
-  dont ``ref`` ou ``repository`` contient une expression non fiable ou ``pull/``,
-  ``gh pr checkout`` ou ``git fetch ... pull/`` dans ``run:`` ;
+  dont ``ref`` ou ``repository`` contient une expression non fiable (y compris par une clé
+  ``env`` souillée) ou ``pull/``, ``gh pr checkout`` ou ``git fetch ... pull/`` dans ``run:``
+  (y compris quand ``pull/`` ou la valeur non fiable arrive par une variable ``env`` lue
+  en ``$VAR``) ;
 - toute erreur d'analyse (YAML invalide, lecture impossible, racine ou ``jobs``
   qui n'est pas un mapping, fichier vide).
 
@@ -50,13 +57,22 @@ WRITE_ALLOWLIST: dict[str, dict[str, set[str]]] = {
 
 # Contextes que l'utilisateur d'une PR, d'une branche ou d'un déclenchement manuel
 # contrôle. Cherchés dans le corps d'une expression débarrassé de ses littéraux.
+# Les noms de contexte GitHub Actions ne sont pas sensibles à la casse.
 _UNTRUSTED_REFS = (
-    re.compile(r"(?<![\w.])github\s*\.\s*(?:event|head_ref|base_ref|ref_name|ref)\b"),
-    re.compile(r"(?<![\w.])github\b(?!\s*\.)"),  # contexte entier ou accès par crochets
-    re.compile(r"(?<![\w.])inputs\b"),
+    re.compile(r"(?<![\w.])github\s*\.\s*(?:event|head_ref|base_ref|ref_name|ref)\b", re.IGNORECASE),
+    re.compile(r"(?<![\w.])github\b(?!\s*\.)", re.IGNORECASE),  # contexte entier ou accès par crochets
+    re.compile(r"(?<![\w.])inputs\b", re.IGNORECASE),
 )
-PR_FETCH = re.compile(r"\bgh\s+pr\s+(?:checkout|co)\b|\bgit\s+(?:fetch|checkout|pull|switch|merge)\b[^\n]*\bpull/")
-PR_REF = re.compile(r"(?<![\w])pull/")
+# Sortie d'une étape ou d'un job : peut transporter une entrée non fiable (avertissement).
+_OUTPUT_REFS = re.compile(r"(?<![\w.])(?:steps|needs)\b[^\n]*?\boutputs\b", re.IGNORECASE)
+# ``env`` entier ou accès par crochets : lit n'importe quelle clé, souillée ou non.
+_ENV_WHOLE = re.compile(r"(?<![\w.])env\b(?!\s*\.)", re.IGNORECASE)
+GIT_CMD = re.compile(r"\bgit\s+(?:fetch|checkout|pull|switch|merge)\b", re.IGNORECASE)
+PR_FETCH = re.compile(
+    r"\bgh\s+pr\s+(?:checkout|co)\b|\bgit\s+(?:fetch|checkout|pull|switch|merge)\b[^\n]*\bpull/",
+    re.IGNORECASE,
+)
+PR_REF = re.compile(r"(?<![\w])pull/", re.IGNORECASE)
 
 
 def _expression_bodies(text: str) -> list[str]:
@@ -92,8 +108,51 @@ def _expression_bodies(text: str) -> list[str]:
     return bodies
 
 
-def _has_untrusted(text: str) -> bool:
-    return any(rx.search(body) for body in _expression_bodies(text) for rx in _UNTRUSTED_REFS)
+def _has_untrusted(text: str, tainted: frozenset[str] = frozenset()) -> bool:
+    """Vrai si ``text`` interpole un contexte non fiable, ou une clé ``env`` souillée."""
+    env_keys = (
+        re.compile(r"(?<![\w.])env\s*\.\s*(?:" + "|".join(map(re.escape, sorted(tainted))) + r")\b", re.IGNORECASE)
+        if tainted
+        else None
+    )
+    for body in _expression_bodies(text):
+        if any(rx.search(body) for rx in _UNTRUSTED_REFS):
+            return True
+        if env_keys is not None and (env_keys.search(body) or _ENV_WHOLE.search(body)):
+            return True
+    return False
+
+
+def _has_output_ref(text: str) -> bool:
+    return any(_OUTPUT_REFS.search(body) for body in _expression_bodies(text))
+
+
+def _env_of(*layers: Any) -> dict[str, str]:
+    """Fusionne les blocs ``env`` (workflow, job, étape)."""
+    merged: dict[str, str] = {}
+    for layer in layers:
+        if isinstance(layer, dict):
+            for key, value in layer.items():
+                merged[str(key)] = str(value)
+    return merged
+
+
+def _tainted_keys(env: dict[str, str]) -> frozenset[str]:
+    """Clés dont la valeur est non fiable, directement ou par une autre clé souillée."""
+    tainted: frozenset[str] = frozenset()
+    while True:
+        found = frozenset(k for k, v in env.items() if _has_untrusted(v, tainted))
+        if found == tainted:
+            return tainted
+        tainted = found
+
+
+def _expand_env(run: str, env: dict[str, str]) -> str:
+    """Remplace ``$CLE`` et ``${CLE}`` par la valeur ``env`` pour lire ce que le shell verra."""
+    out = run.replace("\\\n", " ")
+    for key, value in env.items():
+        out = re.sub(r"\$\{?" + re.escape(key) + r"\}?(?!\w)", value.replace("\\", "\\\\"), out)
+    return out
 
 
 class Issue(NamedTuple):
@@ -135,7 +194,7 @@ def _triggers(workflow: dict[Any, Any]) -> set[str]:
     return set()
 
 
-def _check_steps(job_name: str, job: dict[Any, Any], target: bool) -> list[Issue]:
+def _check_steps(job_name: str, job: dict[Any, Any], target: bool, workflow_env: Any = None) -> list[Issue]:
     steps = job.get("steps")
     if not isinstance(steps, list):
         return []
@@ -144,22 +203,39 @@ def _check_steps(job_name: str, job: dict[Any, Any], target: bool) -> list[Issue
         if not isinstance(step, dict):
             continue
         where = f"Job '{job_name}' step {i + 1}"
+        env = _env_of(workflow_env, job.get("env"), step.get("env"))
+        tainted = _tainted_keys(env)
         scripts = [step.get("run")]
         with_ = step.get("with")
         if isinstance(with_, dict):
             scripts.append(with_.get("script"))
         for code in scripts:
-            if isinstance(code, str) and _has_untrusted(code):
-                issues.append(_err(f"{where} interpolates an untrusted context in run/script (use env:)"))
+            if not isinstance(code, str):
+                continue
+            if _has_untrusted(code, tainted):
+                issues.append(
+                    _err(f"{where} interpolates an untrusted context in run/script (read it as $VAR from env:)")
+                )
+            elif _has_output_ref(code):
+                issues.append(
+                    Issue("warning", f"{where} interpolates steps/needs outputs in run/script (read it from env:)")
+                )
         run = step.get("run")
-        if target and isinstance(run, str) and PR_FETCH.search(run):
-            issues.append(_err(f"{where} checks out PR code under pull_request_target (run)"))
+        if target and isinstance(run, str):
+            flat = run.replace("\\\n", " ")
+            carries_tainted = any(re.search(r"\$\{?" + re.escape(k) + r"(?!\w)", flat) for k in tainted)
+            if (
+                PR_FETCH.search(flat)
+                or PR_FETCH.search(_expand_env(run, env))
+                or (carries_tainted and GIT_CMD.search(flat))
+            ):
+                issues.append(_err(f"{where} checks out PR code under pull_request_target (run)"))
         uses = step.get("uses")
         checkout = isinstance(uses, str) and uses.startswith("actions/checkout")
         if target and checkout and isinstance(with_, dict):
             for key in ("ref", "repository"):
                 val = with_.get(key)
-                if isinstance(val, str) and (_has_untrusted(val) or PR_REF.search(val)):
+                if isinstance(val, str) and (_has_untrusted(val, tainted) or PR_REF.search(val)):
                     issues.append(_err(f"{where} checks out PR code under pull_request_target"))
     return issues
 
@@ -193,7 +269,7 @@ def audit_workflow(workflow_path: Path) -> list[Issue]:
         if not workflow_declares and job.get("permissions") is None:
             issues.append(_err(f"Job '{job_name}' has no permissions block and the workflow declares none"))
         issues += _check_permissions(job.get("permissions"), f"Job '{job_name}'", allow.get(str(job_name), set()))
-        issues += _check_steps(str(job_name), job, target)
+        issues += _check_steps(str(job_name), job, target, workflow.get("env"))
     return issues
 
 

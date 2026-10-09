@@ -4,15 +4,16 @@ title = "Grimoire-kit gitleaks"
 [extend]
 useDefault = true
 
-# Fixtures de test et validateur de secrets : ces fichiers CONTIENNENT volontairement des
-# motifs de secrets factices. L'exemption est par chemin et non par empreinte : le kit
-# fusionne en squash, le SHA d'un commit de branche disparaît à la fusion et son
-# empreinte `.gitleaksignore` ne couvrirait plus le commit squashé. Pour une nouvelle
-# fixture, ajouter son chemin ici (ancré) ou `gitleaks:allow` sur la ligne concernée.
+# Fixtures de test : ce fichier CONTIENT volontairement des motifs de secrets factices
+# (sept occurrences). L'exemption est par chemin et non par empreinte : le kit fusionne
+# en squash, le SHA d'un commit de branche disparaît à la fusion et son empreinte
+# `.gitleaksignore` ne couvrirait plus le commit squashé.
+# Jamais de fichier de production ici : une exemption par chemin désactive TOUTES les
+# règles sur le fichier entier, un vrai jeton y passerait. Pour une ligne isolée (exemple
+# de doc, commande factice), mettre `gitleaks:allow` sur la ligne : c'est le cas de
+# `src/grimoire/memory/validation.py` et de `tests/unit/test_hook_ledger.py`.
 [[allowlists]]
-description = "Fixtures et exemples de secrets factices du validateur d'écriture mémoire"
+description = "Fixtures de secrets factices du validateur d'écriture mémoire"
 paths = [
-  '''^src/grimoire/memory/validation\.py$''',
   '''^tests/unit/memory/test_write_validation\.py$''',
-  '''^tests/unit/test_hook_ledger\.py$''',
 ]

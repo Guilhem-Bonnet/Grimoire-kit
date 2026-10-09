@@ -4,12 +4,17 @@
 # Ne jamais y ajouter un commit de PR : exempter un fichier de fixture par chemin dans
 # `.gitleaks.toml` (ou une ligne par `gitleaks:allow`).
 #
+# Le scan de la CI est restreint à l'historique de HEAD (`--log-opts=HEAD`), pas à toutes les
+# refs d'origin : une empreinte ne sert que si son commit est atteignable depuis HEAD.
+#
 # Relevé reproductible, à lancer sur un clone d'origin (pas sur un dépôt avec des refs locales) :
 #   git clone https://github.com/Guilhem-Bonnet/Grimoire-kit.git x && cd x
-#   gitleaks git --redact --no-banner --report-format json --report-path found.json .
-# Au 2026-10-09 : 10 fuites sur 966 commits (main en 7c17259), toutes dans des fixtures de
+#   gitleaks git --log-opts=origin/main --redact --no-banner --report-format json --report-path found.json .
+# Au 2026-10-09 : 9 fuites sur 870 commits scannés de `main` (7c17259), toutes dans des fixtures de
 # test, des exemples de documentation ou des manifestes de hachage ; valeurs masquées,
-# classement par chemin, à confirmer par un humain avant de s'y fier.
+# classement par chemin, à confirmer par un humain avant de s'y fier. (Sur toutes les refs d'origin,
+# 966 commits et 10 fuites : la dixième, ffcc85f6 `tests/test_evaluator.py`, n'est atteignable que
+# par le tag `archive/nested-rnd-20260703`, aucune branche ni `main` ; elle n'est donc pas listée.)
 a2fc1ab9de72362804b5b9eb1118f06c57028190:tests/unit/test_hook_ledger.py:curl-auth-header:82
 e28d68e958d4bfba3aeb7bbae99c074a202fbf84:src/grimoire/memory/validation.py:generic-api-key:142
 e28d68e958d4bfba3aeb7bbae99c074a202fbf84:tests/unit/memory/test_write_validation.py:generic-api-key:50
@@ -19,4 +24,3 @@ e28d68e958d4bfba3aeb7bbae99c074a202fbf84:tests/unit/memory/test_write_validation
 e28d68e958d4bfba3aeb7bbae99c074a202fbf84:tests/unit/memory/test_write_validation.py:github-pat:505
 e28d68e958d4bfba3aeb7bbae99c074a202fbf84:tests/unit/memory/test_write_validation.py:jwt:49
 e28d68e958d4bfba3aeb7bbae99c074a202fbf84:tests/unit/memory/test_write_validation.py:jwt:545
-ffcc85f6e72e84d22867892e9ebcb0e3e02498b5:tests/test_evaluator.py:generic-api-key:183
