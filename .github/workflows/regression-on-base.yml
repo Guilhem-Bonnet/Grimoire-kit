@@ -37,7 +37,10 @@ jobs:
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
           PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
-        run: >
-          python scripts/check-regression-on-base.py
-          --base-sha "${{ github.event.pull_request.base.sha }}"
-          --head-sha "${{ github.event.pull_request.head.sha }}"
+        # Le garde est lu depuis base.sha : une PR qui l'affaiblit ne peut pas
+        # se faire valider par sa propre version.
+        run: |
+          git show "${{ github.event.pull_request.base.sha }}:scripts/check-regression-on-base.py" > "$RUNNER_TEMP/guard.py"
+          python "$RUNNER_TEMP/guard.py" --repo . \
+            --base-sha "${{ github.event.pull_request.base.sha }}" \
+            --head-sha "${{ github.event.pull_request.head.sha }}"

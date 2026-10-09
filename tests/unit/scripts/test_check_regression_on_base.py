@@ -8,6 +8,7 @@ qu'un `fix:` sans test ; le cas nominal sert de contre-épreuve.
 from __future__ import annotations
 
 import importlib.util
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -130,3 +131,133 @@ def test_non_fix_pr_is_skipped(repo):
 )
 def test_title_detection(title, expected):
     assert guard.is_fix_title(title) is expected
+
+
+# ── Revue D-14 : fixtures, tête verte, rouge attribuable, main(), workflow ──
+
+GOOD = "def add(a, b):\n    return a + b\n"
+
+
+@pytest.fixture
+def good_repo(tmp_path: Path) -> tuple[Path, str]:
+    """Base dont le code est déjà correct : tout rouge vient du garde ou du test."""
+    root = tmp_path / "g"
+    root.mkdir()
+    _git(root, "init", "-q")
+    return root, _commit(root, {"src/calc.py": GOOD})
+
+
+def test_json_fixture_is_copied_so_a_green_test_stays_green(good_repo):
+    root, base = good_repo
+    test = (
+        "import json, pathlib\nfrom calc import add\n\n"
+        "def test_case():\n"
+        "    data = json.loads((pathlib.Path(__file__).parent / 'fixtures' / 'case.json').read_text())\n"
+        "    assert add(*data) == 3\n"
+    )
+    head = _commit(root, {"tests/fixtures/case.json": "[1, 2]", "tests/test_case.py": test})
+    verdict = _run(root, base, head)
+    assert verdict.status == "green-on-base" and not verdict.ok
+
+
+def test_binary_fixture_is_copied_byte_for_byte(good_repo):
+    root, base = good_repo
+    blob = bytes(range(256))
+    (root / "tests").mkdir()
+    (root / "tests" / "blob.bin").write_bytes(blob)
+    test = (
+        "import pathlib\n\n"
+        "def test_blob():\n"
+        "    assert (pathlib.Path(__file__).parent / 'blob.bin').read_bytes() == bytes(range(256))\n"
+    )
+    head = _commit(root, {"tests/test_blob.py": test})
+    _git(root, "add", "tests/blob.bin")
+    _git(root, "commit", "-q", "--amend", "--no-edit")
+    head = _git(root, "rev-parse", "HEAD")
+    assert _run(root, base, head).status == "green-on-base"
+
+
+def test_always_failing_test_is_refused_as_red_on_head(good_repo):
+    root, base = good_repo
+    head = _commit(root, {"tests/test_x.py": "def test_x():\n    assert False\n"})
+    verdict = _run(root, base, head)
+    assert not verdict.ok and verdict.status == "red-on-head"
+
+
+def test_syntax_error_in_test_is_refused(good_repo):
+    root, base = good_repo
+    head = _commit(root, {"tests/test_x.py": "def test_x(:\n"})
+    verdict = _run(root, base, head)
+    assert not verdict.ok and verdict.status == "red-on-head"
+
+
+def test_support_conftest_failing_on_base_is_inconclusive(good_repo):
+    root, base = good_repo
+    head = _commit(
+        root,
+        {
+            "src/calc.py": GOOD + "HELPER = 1\n",
+            "tests/conftest.py": "from calc import HELPER\n",
+            "tests/test_calc.py": "from calc import add\n\ndef test_add():\n    assert add(1, 2) == 3\n",
+        },
+    )
+    verdict = _run(root, base, head)
+    assert not verdict.ok and verdict.status == "inconclusive"
+
+
+def test_real_regression_still_accepted_with_green_head(repo):
+    root, base = repo
+    head = _commit(root, {"src/calc.py": FIXED, "tests/test_calc.py": RED_TEST})
+    verdict = _run(root, base, head)
+    assert verdict.ok and verdict.status == "red-on-base"
+
+
+def _main(monkeypatch, root: Path, base: str, head: str, env: dict[str, str], summary: Path):
+    monkeypatch.setattr(sys, "argv", ["g", "--repo", str(root), "--base-sha", base, "--head-sha", head])
+    for key in ("PR_TITLE", "PR_BODY", "PR_LABELS"):
+        monkeypatch.delenv(key, raising=False)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    return guard.main()
+
+
+def test_main_exit_code_is_one_for_fix_without_test(repo, monkeypatch, tmp_path):
+    root, base = repo
+    head = _commit(root, {"src/calc.py": FIXED})
+    summary = tmp_path / "summary.md"
+    code = _main(monkeypatch, root, base, head, {"PR_TITLE": FIX, "PR_LABELS": "[]"}, summary)
+    assert code == 1
+    assert "ÉCHEC" in summary.read_text(encoding="utf-8")
+
+
+def test_main_exit_code_zero_with_escape_and_summary_lists_it(repo, monkeypatch, tmp_path):
+    root, base = repo
+    head = _commit(root, {"src/calc.py": FIXED})
+    summary = tmp_path / "summary.md"
+    env = {
+        "PR_TITLE": FIX,
+        "PR_BODY": "no-regression-test: correctif de documentation non testable",
+        "PR_LABELS": json.dumps(["no-regression-test"]),
+    }
+    assert _main(monkeypatch, root, base, head, env, summary) == 0
+    assert "Recours à l'échappatoire `no-regression-test`" in summary.read_text(encoding="utf-8")
+
+
+def test_main_label_lookalike_is_not_the_escape_label(repo, monkeypatch, tmp_path):
+    root, base = repo
+    head = _commit(root, {"src/calc.py": FIXED})
+    env = {
+        "PR_TITLE": FIX,
+        "PR_BODY": "no-regression-test: correctif de documentation non testable",
+        "PR_LABELS": json.dumps(["no-regression-test-x"]),
+    }
+    assert _main(monkeypatch, root, base, head, env, tmp_path / "s.md") == 1
+
+
+def test_workflow_runs_the_guard_from_the_base_sha():
+    text = (Path(__file__).resolve().parents[3] / ".github" / "workflows" / "regression-on-base.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "git show" in text and "pull_request.base.sha }}:scripts/check-regression-on-base.py" in text
+    assert "python scripts/check-regression-on-base.py" not in text

@@ -28,6 +28,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -35,16 +36,18 @@ ESCAPE_LABEL = "no-regression-test"
 _FIX_TITLE = re.compile(r"^fix(\([^)]*\))?!?:", re.IGNORECASE)
 _JUSTIFICATION = re.compile(rf"^\s*{ESCAPE_LABEL}\s*:\s*(\S.*)$", re.IGNORECASE | re.MULTILINE)
 _MIN_JUSTIFICATION = 10
-#: Codes pytest : 0 tout passe, 5 rien collecté. Tout autre code est un échec
-#: (1 test rouge, 2 erreur de collecte : ImportError d'un symbole que le
-#: correctif introduit, c'est bien un test qui ne passe pas sur la base).
+#: Codes pytest : 0 tout passe, 5 rien collecté : la base ne prouve rien.
+#: 1 : au moins un test en échec. 2 (collecte, interruption), 3, 4 (conftest,
+#: usage) : rouge seulement si un testcase des fichiers de la PR est en échec
+#: ou en erreur (JUnit) ; sinon le verdict est `inconclusive`.
 _NOT_FAILING = (0, 5)
+_RED_CODES = (1, 2)
 
 
 @dataclass
 class Verdict:
     ok: bool
-    status: str  # skipped | escaped | red-on-base | green-on-base | no-tests | bad-escape
+    status: str  # skipped | escaped | red-on-base | green-on-base | red-on-head | inconclusive | no-tests | bad-escape
     message: str
     tests: list[str] = field(default_factory=list)
     justification: str = ""
@@ -76,41 +79,103 @@ def _git(repo: Path, *args: str) -> str:
 
 
 def changed_test_files(repo: Path, base: str, head: str) -> tuple[list[str], list[str]]:
-    """(tests `test_*.py` ajoutés/modifiés, autres fichiers sous tests/ touchés)."""
+    """(tests `test_*.py` ajoutés/modifiés, autres fichiers d'appui sous tests/ touchés).
+
+    L'appui couvre tout type de fichier (fixtures JSON, binaires, conftest) :
+    les écarter ferait échouer le test sur la base pour une raison qui n'est
+    pas le code testé.
+    """
     out = _git(repo, "diff", "--name-only", "--diff-filter=AM", f"{base}...{head}", "--", "tests")
-    files = [line for line in out.splitlines() if line.endswith(".py")]
-    tests = [f for f in files if Path(f).name.startswith("test_")]
+    files = [line for line in out.splitlines() if line]
+    tests = [f for f in files if f.endswith(".py") and Path(f).name.startswith("test_")]
     return tests, [f for f in files if f not in tests]
 
 
-def run_tests_on_base(repo: Path, base: str, head: str, tests: list[str], support: list[str]) -> int:
-    """Exécute `tests` (version `head`) contre le code de `base`. Renvoie le code pytest."""
-    tmp = Path(tempfile.mkdtemp(prefix="regression-on-base-", dir=os.environ.get("RUNNER_TEMP")))
-    tree = tmp / "base"
-    _git(repo, "worktree", "add", "--detach", str(tree), base)
+def _module_id(rel: str) -> str:
+    """`tests/a/test_x.py` -> `tests.a.test_x`, forme que pytest met dans le JUnit."""
+    return rel.removesuffix(".py").replace("/", ".")
+
+
+def _failing_modules(junit: Path, tests: list[str]) -> set[str]:
+    """Fichiers de `tests` qui portent un testcase en échec ou en erreur."""
     try:
-        for rel in [*tests, *support]:
-            target = tree / rel
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(_git(repo, "show", f"{head}:{rel}"), encoding="utf-8")
-        env = {**os.environ, "PYTHONPATH": str(tree / "src")}
-        done = subprocess.run(
-            [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "--tb=line", *tests],
-            cwd=tree,
-            env=env,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            check=False,
-        )
-        print(done.stdout[-4000:])
-        return done.returncode
+        root = ET.parse(junit).getroot()  # noqa: S314 - produit par notre propre pytest
+    except (OSError, ET.ParseError):
+        return set()
+    hit: set[str] = set()
+    for case in root.iter("testcase"):
+        if case.find("failure") is None and case.find("error") is None:
+            continue
+        cid = f"{case.get('classname')}.{case.get('name')}" if case.get("classname") else case.get("name", "")
+        for rel in tests:
+            mod = _module_id(rel)
+            if cid == mod or cid.startswith(mod + "."):
+                hit.add(rel)
+    return hit
+
+
+def _add_tree(repo: Path, tree: Path, rev: str) -> None:
+    _git(repo, "worktree", "add", "--detach", str(tree), rev)
+
+
+def _pytest(tree: Path, tests: list[str], junit: Path) -> int:
+    env = {**os.environ, "PYTHONPATH": str(tree / "src")}
+    done = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            "--tb=line",
+            f"--junitxml={junit}",
+            *tests,
+        ],
+        cwd=tree,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    print(done.stdout[-4000:])
+    return done.returncode
+
+
+@dataclass
+class Replay:
+    base_code: int
+    base_failing: set[str]
+    head_code: int | None  # None : non exécuté (la base n'a pas prouvé de rouge)
+
+
+def run_replay(repo: Path, base: str, head: str, tests: list[str], support: list[str]) -> Replay:
+    """Tests de `head` contre le code de `base`, puis (si rouge) contre `head`."""
+    tmp = Path(tempfile.mkdtemp(prefix="regression-on-base-", dir=os.environ.get("RUNNER_TEMP")))
+    trees: list[Path] = []
+    try:
+        btree = tmp / "base"
+        _add_tree(repo, btree, base)
+        trees.append(btree)
+        # Checkout git : binaire exact, fixtures non corrompues.
+        _git(btree, "checkout", head, "--", *tests, *support)
+        code = _pytest(btree, tests, tmp / "base.xml")
+        failing = _failing_modules(tmp / "base.xml", tests)
+        head_code: int | None = None
+        if code in _RED_CODES and failing:
+            htree = tmp / "head"
+            _add_tree(repo, htree, head)
+            trees.append(htree)
+            head_code = _pytest(htree, tests, tmp / "head.xml")
+        return Replay(code, failing, head_code)
     finally:
-        subprocess.run(
-            ["git", "-C", str(repo), "worktree", "remove", "--force", str(tree)],
-            capture_output=True,
-            check=False,
-        )
+        for tree in trees:
+            subprocess.run(
+                ["git", "-C", str(repo), "worktree", "remove", "--force", str(tree)],
+                capture_output=True,
+                check=False,
+            )
         shutil.rmtree(tmp, ignore_errors=True)
 
 
@@ -135,7 +200,8 @@ def evaluate(repo: Path, base: str, head: str, title: str, body: str, labels: li
             "PR `fix:` sans test ajouté ou modifié. Ajoutez le test de régression, "
             f"ou posez `{ESCAPE_LABEL}` avec une justification.",
         )
-    code = run_tests_on_base(repo, base, head, tests, support)
+    replay = run_replay(repo, base, head, tests, support)
+    code = replay.base_code
     if code in _NOT_FAILING:
         return Verdict(
             False,
@@ -143,7 +209,28 @@ def evaluate(repo: Path, base: str, head: str, title: str, body: str, labels: li
             f"Les tests de la PR passent déjà sur la base (pytest code {code}) : ils ne prouvent pas le correctif.",
             tests,
         )
-    return Verdict(True, "red-on-base", f"Au moins un test échoue sur la base (pytest code {code}).", tests)
+    if replay.head_code is None:
+        return Verdict(
+            False,
+            "inconclusive",
+            f"Rouge sur la base sans preuve exploitable (pytest code {code}) : aucun test de la PR "
+            "n'est en échec ou en erreur (conftest, usage, interruption). Le rouge ne vient pas du code testé.",
+            tests,
+        )
+    if replay.head_code != 0:
+        return Verdict(
+            False,
+            "red-on-head",
+            f"Les tests de la PR échouent aussi sur sa tête (pytest code {replay.head_code}) : "
+            "un test cassé n'est pas une preuve de régression.",
+            tests,
+        )
+    return Verdict(
+        True,
+        "red-on-base",
+        f"Au moins un test échoue sur la base (pytest code {code}) et la tête est verte.",
+        tests,
+    )
 
 
 def render_summary(v: Verdict) -> str:
