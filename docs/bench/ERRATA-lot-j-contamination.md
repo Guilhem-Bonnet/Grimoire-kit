@@ -4,7 +4,7 @@
 **Lot affecté** : Lot J (2026-09-18, `docs/bench/rejeu-lot-j-2026-09-18.md`, issue #582)  
 **Cause établie par** : le rejeu du lot L (#693, `docs/bench/rejeu-lot-l-2026-10-02.md` § 5)  
 **Issue** : #694  
-**Statut** : garde livrée par la PR W1-08a (refus du dossier sale, contrôle du dépôt préparé avant tout appel au modèle). La lecture de tests cachés pendant le run n'est pas couverte : W1-08b.
+**Statut** : garde livrée par la PR W1-08a (refus du dossier sale, contrôle du dépôt préparé avant tout appel au modèle, arrêt de la campagne à 0 $ si le dépôt est contaminé). La lecture de tests cachés pendant le run n'est pas couverte : W1-08b.
 
 ## Constat
 
@@ -19,15 +19,15 @@ Le harnais du banc à trois bras réutilisait les dossiers de préparation des t
 - **Succès surévalué** : le 96,7 % du lot J est surévalué, au moins 30 runs sur 60 ayant vu les tests.
 - **Fausse régression** : `rust/scale-generator` passe de 3/3 (lot J) à 0/3 (lot K). Le 0/3 vient d'une ambiguïté de l'énoncé (gamme de 12 notes produite, 13 attendues par la suite masquée), pas d'une régression du kit. Au lot L, les 6 runs (`nu` et `kit-gov`) passent sans test visible.
 - **Portée non chiffrée** : seule `scale-generator` a été vérifiée en détail. L'effet sur les 9 autres tâches contaminées n'est pas chiffré.
-- **Bras** : seul `kit-gov` est concerné au lot J (dossiers frais pour `nu`, `ecc`, `kit`).
+- **Bras** : seul `kit-gov` a été rejoué au lot J (`rejeu-lot-j-2026-09-18.md`) ; `nu`, `ecc` et `kit` sont repris du lot F (dossiers frais à l'époque, lot L § 5), donc non contaminés mais mesurés à une autre date.
 
 ## Remède
 
 PR W1-08a (issue #694) :
 
 1. `prepare_task_repo` refuse un dossier non vide (`FileExistsError`).
-2. `assert_task_repo_clean` est appelée dans `_run_one` après la préparation et avant `run_environment` et `claude` : elle lève `ContaminatedTaskRepoError` si un fichier de `test_files` est suivi par git ou si l'historique ne compte pas exactement un commit. Le run est alors enregistré à 0 $ avec `terminated_reason="contaminated"`.
-3. `_run_one` et `_do_dry_run` effacent le résidu d'un run interrompu avant de le rejouer (la garde 2 reste le filet).
+2. `assert_task_repo_clean` est appelée dans `_run_one` après la préparation et avant `claude` : elle lève `ContaminatedTaskRepoError` si un fichier de `test_files` est présent dans le dépôt (suivi, non suivi ou ignoré par git), si l'un d'eux est suivi par git (même absent du disque) ou si l'historique ne compte pas exactement un commit. L'erreur n'est pas enregistrée comme un échec : `main` arrête la campagne (code 1, 0 $ dépensé pour ce run) sans rien écrire dans `results.jsonl`, de sorte que la clé reste rejouable avec `--resume` et ne pèse pas dans les taux de succès. `--dry-run` s'arrête de la même façon.
+3. `_run_one` et `_do_dry_run` effacent le résidu d'un run interrompu avant de le rejouer (la garde 2 reste le filet) ; l'effacement lève les protections en lecture seule des objets git (Windows) et échoue bruyamment si le dossier survit.
 
 ## Limites
 

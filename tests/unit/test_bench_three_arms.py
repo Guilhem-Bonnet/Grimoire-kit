@@ -12,6 +12,7 @@ réseau, aucune clé API.
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import importlib.util
 import json
 import os
@@ -236,20 +237,60 @@ def _call_run_one(task: Any, workspace: Path, homes: dict[str, Path]) -> Any:
     )
 
 
-def test_run_one_stops_at_zero_cost_when_repo_contaminated(
+def test_run_one_raises_before_any_model_call_when_repo_contaminated(
     synthetic_bench_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """W1-08a : un dépôt contaminé n'est PAS un résultat (pas de RunRecord) :
+    l'erreur remonte, ``claude`` n'est jamais appelé."""
     task = _task(synthetic_bench_root)
     calls: list[Path] = []
     homes = _patch_run_one(monkeypatch, tmp_path, calls)
     real_prepare = ta.prepare_task_repo
     # préparation fautive : le test caché est commité (état de la contamination du lot J)
     monkeypatch.setattr(ta, "prepare_task_repo", lambda t, d, **k: real_prepare(t, d, include_tests=True))
-    record = _call_run_one(task, tmp_path / "ws", homes)
+    with pytest.raises(ta.ContaminatedTaskRepoError):
+        _call_run_one(task, tmp_path / "ws", homes)
     assert calls == []  # claude n'a jamais été appelé
-    assert record.terminated_reason == "contaminated"
-    assert record.total_cost_usd == 0.0
-    assert record.success is False
+
+
+def _patch_main_environment(monkeypatch: pytest.MonkeyPatch, synthetic_bench_root: Path, tmp_path: Path) -> None:
+    monkeypatch.setattr(ta, "ensure_polyglot_benchmark", lambda ws: synthetic_bench_root)
+    monkeypatch.setattr(ta, "ensure_ecc_repo", lambda ws: (tmp_path / "ecc-repo", "deadbeef"))
+    monkeypatch.setattr(ta, "ensure_go_toolchain", lambda ws: None)
+    monkeypatch.setattr(ta, "disk_guard_ok", lambda workspace, min_free_gb=ta.DISK_GUARD_MIN_FREE_GB: True)
+    monkeypatch.setattr(ta, "resolve_grimoire_bin", lambda explicit: "grimoire")
+    monkeypatch.setattr(ta, "verify_grimoire_binary_matches_template", lambda *a, **k: None)
+    monkeypatch.setattr(ta, "ensure_system_toolchains_present", lambda languages: None)
+    monkeypatch.setattr(ta, "verify_agent_toolchain_environment", lambda *a, **k: {})
+
+
+def test_main_stops_without_recording_when_repo_contaminated(
+    synthetic_bench_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """W1-08a, « arrêt à 0 dollar » : la campagne s'arrête (code non nul), rien
+    n'est écrit dans results.jsonl (sinon ``--resume`` sauterait la clé et le
+    run compterait comme un échec), aucun rapport n'est produit."""
+    workspace = tmp_path / "workspace"
+    _patch_main_environment(monkeypatch, synthetic_bench_root, tmp_path)
+    attempts: list[tuple[str, str, int]] = []
+
+    def _contaminated(task: Any, arm: str, run_index: int, **kwargs: Any) -> Any:
+        attempts.append((task.task_id, arm, run_index))
+        raise ta.ContaminatedTaskRepoError(f"{task.task_id} contaminé")
+
+    def _no_report(*a: Any, **k: Any) -> None:
+        raise AssertionError("aucun rapport ne doit être écrit après une contamination")
+
+    monkeypatch.setattr(ta, "_run_one", _contaminated)
+    monkeypatch.setattr(ta, "write_report", _no_report)
+
+    rc = ta.main(["--full", "--workspace", str(workspace)])
+
+    assert rc != 0
+    assert len(attempts) == 1  # la campagne s'arrête au premier dépôt contaminé
+    results = workspace / "state" / "results.jsonl"
+    assert not results.exists() or results.read_text(encoding="utf-8") == ""
+    assert "contamin" in capsys.readouterr().err
 
 
 def test_run_one_replays_from_clean_dir_after_interrupted_run(
@@ -282,6 +323,83 @@ def test_do_dry_run_can_run_twice_on_same_workspace(
     assert ta._do_dry_run([task], **kwargs) == 0
 
 
+def test_do_dry_run_returns_error_when_repo_contaminated(
+    synthetic_bench_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    task = _task(synthetic_bench_root)
+    real_prepare = ta.prepare_task_repo
+    monkeypatch.setattr(ta, "prepare_task_repo", lambda t, d, **k: real_prepare(t, d, include_tests=True))
+    homes = {arm: tmp_path / "home" / arm for arm in ta.ARMS}
+    kwargs: dict[str, Any] = {"workspace": tmp_path / "ws", "ecc_repo": tmp_path / "ecc", "homes": homes, "grimoire_bin": "g"}
+    assert ta._do_dry_run([task], **kwargs) == 1
+
+
+# ── W1-08a : tests cachés présents dans le dépôt (suivis ou non) ───────────
+
+
+def test_assert_task_repo_clean_rejects_untracked_hidden_test(synthetic_bench_root: Path, tmp_path: Path) -> None:
+    task = _task(synthetic_bench_root)
+    dest = tmp_path / "repo"
+    ta.prepare_task_repo(task, dest)
+    (dest / "python_ex_0_test.py").write_text("def test_x(): pass\n", encoding="utf-8")  # jamais `git add`
+    with pytest.raises(ta.ContaminatedTaskRepoError, match=r"python_ex_0_test\.py"):
+        ta.assert_task_repo_clean(task, dest)
+
+
+def test_assert_task_repo_clean_rejects_git_ignored_hidden_test(synthetic_bench_root: Path, tmp_path: Path) -> None:
+    task = _task(synthetic_bench_root)
+    dest = tmp_path / "repo"
+    ta.prepare_task_repo(task, dest)
+    with (dest / ".git" / "info" / "exclude").open("a", encoding="utf-8") as fh:
+        fh.write("python_ex_0_test.py\n")
+    (dest / "python_ex_0_test.py").write_text("def test_x(): pass\n", encoding="utf-8")
+    with pytest.raises(ta.ContaminatedTaskRepoError, match=r"python_ex_0_test\.py"):
+        ta.assert_task_repo_clean(task, dest)
+
+
+def test_assert_task_repo_clean_names_tracked_non_ascii_hidden_test(synthetic_bench_root: Path, tmp_path: Path) -> None:
+    """``git ls-files`` met entre guillemets les noms non ASCII : sans ``-z``,
+    un test suivi mais absent du disque échapperait à la comparaison."""
+    task = dataclasses.replace(_task(synthetic_bench_root), test_files=("tést.py",))
+    dest = tmp_path / "repo"
+    ta.prepare_task_repo(task, dest)
+    (dest / "tést.py").write_text("def test_x(): pass\n", encoding="utf-8")
+    _git(dest, "add", "tést.py")
+    _git(dest, "commit", "-q", "--amend", "--no-edit")
+    (dest / "tést.py").unlink()  # suivi par git, absent du disque
+    with pytest.raises(ta.ContaminatedTaskRepoError, match="suivi"):
+        ta.assert_task_repo_clean(task, dest)
+
+
+# ── W1-08a : reset_run_dir tolère les fichiers en lecture seule ────────────
+
+
+def test_reset_run_dir_removes_read_only_tree(tmp_path: Path) -> None:
+    """Les objets git sont en 0444 (échec de ``rmtree`` sous Windows) ; un
+    dossier en lecture seule reproduit le même ``PermissionError`` sous Linux."""
+    run_dir = tmp_path / "run0"
+    objects = run_dir / ".git" / "objects" / "ab"
+    objects.mkdir(parents=True)
+    obj = objects / "cdef"
+    obj.write_text("x\n", encoding="utf-8")
+    obj.chmod(0o444)
+    objects.chmod(0o555)
+    try:
+        ta.reset_run_dir(run_dir)
+    finally:
+        if objects.exists():
+            objects.chmod(0o755)
+    assert not run_dir.exists()
+
+
+def test_reset_run_dir_fails_loudly_when_dir_survives(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    run_dir = tmp_path / "run0"
+    run_dir.mkdir()
+    monkeypatch.setattr(ta.shutil, "rmtree", lambda *a, **k: None)
+    with pytest.raises(RuntimeError, match="run0"):
+        ta.reset_run_dir(run_dir)
+
+
 def test_errata_lot_j_contamination_is_present() -> None:
     """L'errata existe, date correctement le lot J et ne sur-affirme pas."""
     errata_path = ROOT / "docs" / "bench" / "ERRATA-lot-j-contamination.md"
@@ -295,6 +413,11 @@ def test_errata_lot_j_contamination_is_present() -> None:
     assert "_scratch/" not in content  # chemin hors dépôt
     assert "Fermé" not in content  # la lecture de tests pendant le run reste ouverte (W1-08b)
     assert "W1-08b" in content
+    # seul kit-gov a été rejoué au lot J : nu/ecc/kit viennent du lot F
+    assert "repris du lot F" in content
+    assert "dossiers frais pour" not in content
+    # un dépôt contaminé arrête la campagne, il n'est pas enregistré comme un échec
+    assert "terminated_reason" not in content
 
 
 # ── 3. Détection de succès sur tests verts/rouges ──────────────────────────

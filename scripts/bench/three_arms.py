@@ -30,6 +30,7 @@ import random
 import re
 import shlex
 import shutil
+import stat
 import statistics
 import subprocess
 import sys
@@ -38,7 +39,7 @@ import tempfile
 import time
 import urllib.request
 from collections import defaultdict
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -106,7 +107,7 @@ class RunOutcome:
     cache_creation_input_tokens: int = 0
     num_turns: int = 0
     wall_seconds: float = 0.0
-    terminated_reason: str = "completed"  # completed|timeout|loop|error|contaminated
+    terminated_reason: str = "completed"  # completed|timeout|loop|error
     model_usage: dict[str, Any] = field(default_factory=dict)
     tool_commands_seen: int = 0
     raw_result: dict[str, Any] | None = None
@@ -319,15 +320,22 @@ class ContaminatedTaskRepoError(RuntimeError):
 def assert_task_repo_clean(task: TaskMeta, repo_dir: Path) -> None:
     """Refuse un dépôt de tâche contaminé, avant tout appel au modèle.
 
-    Deux conditions, toutes deux fail-closed : aucun fichier de test caché de
-    ``task.test_files`` ne doit être suivi par git, et l'historique doit
-    compter exactement un commit (l'état initial). Un échec de ``git`` lui-même
-    est traité comme une contamination : on ne devine pas.
+    Trois conditions, toutes fail-closed : aucun fichier de test caché de
+    ``task.test_files`` ne doit être présent sur le disque (suivi, non suivi
+    ou ignoré par git : l'agent le lirait dans tous les cas), aucun ne doit
+    être suivi par git (même absent du disque : il reste dans l'historique),
+    et l'historique doit compter exactement un commit (l'état initial). Un
+    échec de ``git`` lui-même est traité comme une contamination : on ne devine
+    pas.
     """
-    ls = _run(["git", "ls-files"], cwd=repo_dir, timeout=30)
+    present = sorted(rel for rel in task.test_files if (repo_dir / rel).exists())
+    if present:
+        raise ContaminatedTaskRepoError(f"{repo_dir} : test(s) caché(s) présent(s) dans le dépôt : {', '.join(present)}")
+    # ``-z`` : sans lui, git met entre guillemets (octal) les noms non ASCII.
+    ls = _run(["git", "ls-files", "-z"], cwd=repo_dir, timeout=30)
     if ls.returncode != 0:
         raise ContaminatedTaskRepoError(f"{repo_dir} : `git ls-files` a échoué ({ls.stderr.strip()[-200:]})")
-    tracked = {line.strip() for line in ls.stdout.splitlines()}
+    tracked = {name for name in ls.stdout.split("\0") if name}
     leaked = sorted(tracked & set(task.test_files))
     if leaked:
         raise ContaminatedTaskRepoError(f"{repo_dir} : test(s) caché(s) suivi(s) par git : {', '.join(leaked)}")
@@ -339,14 +347,30 @@ def assert_task_repo_clean(task: TaskMeta, repo_dir: Path) -> None:
         )
 
 
+def _make_writable_and_retry(func: Callable[[str], object], path: str, _exc: BaseException) -> None:
+    """``onexc`` de ``shutil.rmtree`` : rend l'entrée (et son dossier) inscriptible, puis réessaie.
+
+    Les objets git sont en 0444 : sous Windows ``rmtree`` y échoue en
+    ``PermissionError`` ; sous POSIX l'échec vient d'un dossier en lecture seule.
+    """
+    target = Path(path)
+    for entry in (target.parent, target):
+        with contextlib.suppress(OSError):
+            entry.chmod(entry.stat().st_mode | stat.S_IWRITE | stat.S_IRUSR | (stat.S_IXUSR if entry.is_dir() else 0))
+    func(path)
+
+
 def reset_run_dir(run_dir: Path) -> None:
     """Supprime le résidu d'un run interrompu avant de le rejouer.
 
     Un run sans ligne dans ``results.jsonl`` est par construction à rejouer ;
     ``assert_task_repo_clean`` reste le filet de sécurité après préparation.
+    Lève ``RuntimeError`` si le dossier survit : on ne rejoue jamais dessus.
     """
     if run_dir.exists():
-        shutil.rmtree(run_dir)
+        shutil.rmtree(run_dir, onexc=_make_writable_and_retry)
+    if run_dir.exists():
+        raise RuntimeError(f"{run_dir} : impossible d'effacer le résidu d'un run interrompu")
 
 
 def hidden_tests_dir(task: TaskMeta, dest: Path) -> Path:
@@ -2312,18 +2336,28 @@ def main(argv: Sequence[str] | None = None) -> int:
                             file=sys.stderr,
                         )
                         break
-                    record = _run_one(
-                        task,
-                        arm,
-                        run_index,
-                        workspace=workspace,
-                        ecc_repo=ecc_repo,
-                        homes=homes,
-                        go_bin=go_bin,
-                        run_timeout_s=args.run_timeout_s,
-                        grimoire_bin=grimoire_bin,
-                        auth_mode=auth_mode,
-                    )
+                    try:
+                        record = _run_one(
+                            task,
+                            arm,
+                            run_index,
+                            workspace=workspace,
+                            ecc_repo=ecc_repo,
+                            homes=homes,
+                            go_bin=go_bin,
+                            run_timeout_s=args.run_timeout_s,
+                            grimoire_bin=grimoire_bin,
+                            auth_mode=auth_mode,
+                        )
+                    except ContaminatedTaskRepoError as exc:
+                        # W1-08a : arrêt à 0 $, comme la garde du lot H. Rien n'est
+                        # écrit pour ce run : sa clé reste rejouable avec ``--resume``.
+                        print(
+                            f"[contaminated] {task.task_id} / {arm} / run{run_index} : {exc} — "
+                            "campagne arrêtée avant tout appel modèle pour ce run, 0 $ dépensé.",
+                            file=sys.stderr,
+                        )
+                        return 1
                     records.append(record)
                     results_f.write(json.dumps(record.to_dict()) + "\n")
                     results_f.flush()
@@ -2465,7 +2499,11 @@ def _do_dry_run(
             task_dir = tasks_root / task.task_id.replace("/", "__") / arm / "prep"
             reset_run_dir(task_dir)
             prepare_task_repo(task, task_dir)
-            assert_task_repo_clean(task, task_dir)
+            try:
+                assert_task_repo_clean(task, task_dir)
+            except ContaminatedTaskRepoError as exc:
+                print(f"[contaminated] {task.task_id} / {arm} : {exc} — arrêt, 0 $ dépensé.", file=sys.stderr)
+                return 1
             hidden_tests_dir(task, tasks_root / task.task_id.replace("/", "__") / "hidden-tests")
             if arm == "nu":
                 setup_arm_nu(task_dir, npm_cache_dir=npm_cache_dir)
@@ -2526,25 +2564,10 @@ def _run_one(
         setup_result = None
 
     # W1-08a : contrôle du dépôt préparé AVANT tout appel au modèle (0 $).
-    try:
-        assert_task_repo_clean(task, run_dir)
-    except ContaminatedTaskRepoError as exc:
-        print(f"[contaminated] {task.task_id} / {arm} / run{run_index} : {exc}", file=sys.stderr)
-        return RunRecord(
-            task_id=task.task_id,
-            language=task.language,
-            arm=arm,
-            run_index=run_index,
-            success=False,
-            total_cost_usd=0.0,
-            input_tokens=0,
-            output_tokens=0,
-            num_turns=0,
-            wall_seconds=0.0,
-            recorded_at=datetime.now(tz=UTC).isoformat(),
-            terminated_reason="contaminated",
-            auth_mode=auth_mode,
-        )
+    # ``ContaminatedTaskRepoError`` remonte : un dépôt contaminé n'est pas un
+    # résultat (jamais un RunRecord, que ``--resume`` sauterait et que
+    # l'agrégation compterait comme un échec) ; ``main`` arrête la campagne.
+    assert_task_repo_clean(task, run_dir)
 
     test_deps_install_ok: bool | None = None
     if setup_result is not None:
