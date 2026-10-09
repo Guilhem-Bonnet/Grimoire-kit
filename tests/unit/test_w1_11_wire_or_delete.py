@@ -49,9 +49,9 @@ def _source_appelle(source: str, classe: str, module: str) -> bool:
         elif isinstance(noeud, ast.Import):
             if any(a.name.startswith(f"grimoire.tools.{module}") for a in noeud.names):
                 return True
-        elif isinstance(noeud, ast.Name) and noeud.id == classe:
-            return True
-        elif isinstance(noeud, ast.Attribute) and noeud.attr == classe:
+        elif (isinstance(noeud, ast.Name) and noeud.id == classe) or (
+            isinstance(noeud, ast.Attribute) and noeud.attr == classe
+        ):
             return True
     return False
 
@@ -141,7 +141,12 @@ def test_task_add_garde_standard_sans_signal_de_risque(tmp_path: Path) -> None:
 
 
 def test_task_add_ne_rabaisse_jamais_en_light(tmp_path: Path) -> None:
-    for titre in ("Review the migration of production user accounts", "Inspect prod database", "List the files", "Check the CI"):
+    for titre in (
+        "Review the migration of production user accounts",
+        "Inspect prod database",
+        "List the files",
+        "Check the CI",
+    ):
         assert _profil_de(tmp_path, titre) != "light", titre
 
 
