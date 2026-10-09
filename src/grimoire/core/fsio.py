@@ -45,6 +45,8 @@ _POLL_S = 0.01
 _RELEASE_DELAY_S = 0.05
 _RELEASE_TRIES = 20
 #: Le test de pid n'existe qu'en POSIX ; ailleurs on ne relit pas un verrou frais (la lecture gêne le ``unlink`` du porteur).
+#: Le repli n'est pris que sans ``fcntl`` ou sous win32 : sous Windows (le seul repli réel) ``os.name`` vaut « nt »,
+#: donc seule la péremption par l'âge s'applique ; la reprise sur pid mort ne sert qu'à un POSIX sans ``fcntl``.
 _PID_LIVENESS = os.name == "posix"
 
 
@@ -72,7 +74,14 @@ def _break_if_abandoned(lock: Path) -> bool:
     Jamais de ``unlink`` direct après un simple ``stat`` : le verrou est d'abord
     renommé hors du chemin partagé, puis on vérifie que c'est bien le fichier jugé
     abandonné (même inode, même mtime). Sinon on a pris le verrou neuf d'un autre :
-    on le remet en place.
+    on tente de le remettre en place.
+
+    Limite assumée : le système de fichiers n'offre pas de « supprimer si c'est ce fichier »,
+    donc la restitution n'est pas atomique. Pendant que le verrou d'un autre est dans
+    *grave*, le chemin partagé est vide, et deux issues sont possibles (figées par les tests) :
+    le porteur a déjà fini, la restitution recrée un verrou sans propriétaire (orphelin,
+    il bloque jusqu'à sa péremption de 60 s) ; un tiers a recréé le verrou, ``os.link`` échoue
+    sans bruit et le porteur d'origine partage sa section critique avec ce tiers.
     """
     try:
         before = lock.stat()
@@ -92,7 +101,8 @@ def _break_if_abandoned(lock: Path) -> bool:
         after = grave.stat()
         if (after.st_ino, after.st_mtime_ns) == (before.st_ino, before.st_mtime_ns):
             return True
-        # Pas celui qu'on a jugé : verrou neuf d'un autre, on le restitue (échoue si recréé entre-temps).
+        # Pas celui qu'on a jugé : verrou neuf d'un autre, on le restitue (échoue si recréé entre-temps ;
+        # orphelin si son porteur est déjà sorti : voir la docstring).
         with contextlib.suppress(OSError):
             os.link(grave, lock)
         return False
@@ -105,7 +115,8 @@ def _release(lock: Path, token: str) -> None:
     """Supprime *lock* s'il porte encore *token* (cassé puis repris par un autre : ce n'est plus le nôtre).
 
     Un refus transitoire (``PermissionError``, partage Windows) est retenté ; un échec
-    persistant lève, plutôt que de laisser un verrou orphelin que tous attendraient.
+    persistant lève, pour que l'échec soit visible plutôt qu'avalé. Il ne retire pas le
+    verrou : celui-ci reste en place et bloque les suivants jusqu'à sa péremption (60 s).
     """
     for attempt in range(_RELEASE_TRIES):
         try:
@@ -164,7 +175,14 @@ def locked(path: str | os.PathLike[str], *, timeout: float = 30.0) -> Iterator[N
         break
     try:
         yield
-    finally:
+    except BaseException as exc:
+        # L'erreur du corps prime : un échec de libération s'y attache au lieu de la masquer.
+        try:
+            _release(lock, token)
+        except OSError as release_exc:
+            exc.add_note(f"libération du verrou {lock} impossible ({release_exc}) : il reste jusqu'à sa péremption")
+        raise
+    else:
         _release(lock, token)
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import json
 import os
 import re
 import stat
@@ -195,19 +196,36 @@ def test_atomic_write_new_file_follows_current_umask(tmp_path: Path, mask: int, 
     assert stat.S_IMODE(target.stat().st_mode) == expected
 
 
-def test_atomic_write_never_touches_the_process_umask(tmp_path: Path) -> None:
-    """Lire l'umask par ``os.umask(0)`` ouvre une fenetre ou un autre thread cree en 0666 : on ne le fait jamais."""
-    seen: list[int] = []
+_UMASK_PROBE = textwrap.dedent(
+    """
+    import json, os, sys, tempfile
+    from pathlib import Path
+    calls = []
     real = os.umask
-
-    def spy(mask: int) -> int:
-        seen.append(mask)
+    def spy(mask):
+        calls.append(mask)
         return real(mask)
+    os.umask = spy  # installe AVANT l'import : un umask lu au chargement du module serait vu
+    from grimoire.core import fsio
+    with tempfile.TemporaryDirectory() as d:
+        fsio.atomic_write(Path(d) / "f", "y")
+    print(json.dumps(calls))
+    """
+)
 
-    with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(os, "umask", spy)
-        fsio.atomic_write(tmp_path / "f", "y")
-    assert seen == []
+
+def test_atomic_write_never_touches_the_process_umask() -> None:
+    """Lire l'umask par ``os.umask(0)`` ouvre une fenetre ou un autre thread cree en 0666 : on ne le fait jamais.
+
+    Sous-processus : l'espion doit etre en place avant l'import de ``fsio`` (W1-00-T2-4), sinon un umask
+    lu au chargement du module (version 2ac66b03 : ``_UMASK = _read_umask()``) passerait inapercu.
+    """
+    env = {**os.environ, "PYTHONPATH": str(SRC.parent)}
+    out = subprocess.run(
+        [sys.executable, "-c", _UMASK_PROBE], env=env, capture_output=True, text=True, encoding="utf-8", timeout=60
+    )
+    assert out.returncode == 0, out.stderr
+    assert json.loads(out.stdout) == []
 
 
 def _unlink_raising(monkeypatch: pytest.MonkeyPatch, lock_name: str, times: int) -> list[int]:
@@ -247,6 +265,21 @@ def test_release_failure_is_raised_not_swallowed(tmp_path: Path, monkeypatch: py
     _unlink_raising(monkeypatch, lock.name, times=10_000)
     with pytest.raises(PermissionError), fsio.locked(target):
         pass
+    # l'echec est rendu visible, il ne supprime pas le verrou : celui-ci reste jusqu'a sa peremption (60 s)
+    assert lock.exists()
+
+
+def test_release_failure_does_not_mask_the_body_exception(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """W1-00-T2-2 : si le corps leve, l'appelant recoit cette erreur-la ; l'echec de liberation y est attache."""
+    monkeypatch.setattr(fsio, "_fcntl", None)
+    monkeypatch.setattr(fsio, "_RELEASE_DELAY_S", 0.0)
+    target = tmp_path / "w3"
+    lock = fsio._lock_path(target)
+    _unlink_raising(monkeypatch, lock.name, times=10_000)
+    with pytest.raises(ValueError, match="corps") as excinfo, fsio.locked(target):
+        raise ValueError("corps")
+    assert any("libération" in note and str(lock) in note for note in excinfo.value.__notes__)
+    assert lock.exists()
 
 
 def test_fresh_lock_is_not_read_where_liveness_is_unknown(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -305,6 +338,11 @@ def test_flock_branch_honours_timeout(tmp_path: Path) -> None:
 
 @pytest.mark.skipif(os.name != "posix", reason="liveness par pid POSIX")
 def test_fallback_breaks_a_fresh_lock_of_a_dead_process(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Configuration SIMULEE (W1-00-T2-3) : repli force par ``_fcntl = None`` sous POSIX.
+
+    Dans la realite le repli n'est pris que sous Windows, ou ``os.name`` vaut « nt » : pas de test de pid,
+    seule la peremption par l'age (60 s) s'applique. Ce test ne couvre que le POSIX sans ``fcntl``.
+    """
     monkeypatch.setattr(fsio, "_fcntl", None)
     dead = subprocess.Popen([sys.executable, "-c", "pass"])
     dead.wait()
@@ -322,6 +360,87 @@ def test_fallback_keeps_a_fresh_lock_of_a_live_process(tmp_path: Path, monkeypat
     fsio._lock_path(target).write_text(f"{os.getpid()}:jeton")
     with pytest.raises(TimeoutError), fsio.locked(target, timeout=0.1):
         pass
+
+
+# --- restitution d'un verrou pris par erreur : limites figees (W1-00-T2-1) -----
+
+
+def _stale_lock_stolen_by_rename(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, at_link: object
+) -> tuple[Path, Path, str, object, bool]:
+    """B juge X abandonne ; entre son ``stat`` et son ``rename``, C casse X et A prend un verrou neuf.
+
+    Rejoue B (``_break_if_abandoned``) : son ``rename`` emporte le verrou de A. *at_link* s'execute
+    dans la fenetre entre ce ``rename`` et la restitution par ``os.link``. Rend la cible, le verrou,
+    le jeton de A, le gestionnaire de A et le retour de B.
+    """
+    monkeypatch.setattr(fsio, "_fcntl", None)
+    target = tmp_path / "t"
+    lock = fsio._lock_path(target)
+    lock.write_text("999999:ancien", encoding="utf-8")
+    old = time.time() - fsio._STALE_AFTER_S - 60
+    os.utime(lock, (old, old))
+    holder: dict[str, object] = {}
+    real_rename, real_link = Path.rename, os.link
+
+    def rename(self: Path, dst: object) -> Path:
+        if self == lock and "cm" not in holder:
+            lock.unlink()  # C casse X
+            cm = fsio.locked(target)
+            cm.__enter__()  # A prend un verrou neuf
+            holder["cm"] = cm
+            holder["token"] = lock.read_text(encoding="utf-8")
+        return real_rename(self, dst)  # type: ignore[arg-type]
+
+    def link(src: object, dst: object, **kw: object) -> None:
+        at_link(holder, dst)  # type: ignore[operator]
+        real_link(src, dst, **kw)  # type: ignore[arg-type]
+
+    with monkeypatch.context() as mp:
+        mp.setattr(Path, "rename", rename)
+        mp.setattr(os, "link", link)
+        broke = fsio._break_if_abandoned(lock)
+    assert broke is False
+    return target, lock, str(holder["token"]), holder["cm"], broke
+
+
+def test_restitution_can_leave_an_orphan_lock_when_the_holder_already_left(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Limite connue : A sort de sa section pendant la fenetre, la restitution recree son verrou.
+
+    Pas de primitive atomique « supprimer si c'est ce fichier » : le verrou rendu n'a plus de
+    proprietaire. Il bloque les suivants jusqu'a sa peremption (60 s d'age, sans test de pid sous Windows),
+    donc un ``TimeoutError`` pour un delai plus court.
+    """
+
+    def a_leaves(holder: dict[str, object], _dst: object) -> None:
+        holder["cm"].__exit__(None, None, None)  # type: ignore[attr-defined]
+
+    target, lock, a_id, _cm, _broke = _stale_lock_stolen_by_rename(tmp_path, monkeypatch, at_link=a_leaves)
+    assert lock.read_text(encoding="utf-8") == a_id  # orphelin : A est deja sorti
+    monkeypatch.setattr(fsio, "_PID_LIVENESS", False)  # Windows : seule l'age compte
+    with pytest.raises(TimeoutError), fsio.locked(target, timeout=0.2):
+        pass
+    assert lock.exists()
+
+
+def test_restitution_can_lose_exclusion_when_a_third_party_recreates_the_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Limite connue : C cree le verrou dans la fenetre, ``os.link`` echoue sans bruit.
+
+    Le verrou porte alors le jeton de C pendant que A est encore dans sa section : deux detenteurs.
+    """
+
+    def c_takes_it(_holder: dict[str, object], dst: object) -> None:
+        fd = os.open(dst, os.O_CREAT | os.O_EXCL | os.O_WRONLY)  # type: ignore[arg-type]
+        os.write(fd, b"C:jeton")
+        os.close(fd)
+
+    _target, lock, a_id, _cm, _broke = _stale_lock_stolen_by_rename(tmp_path, monkeypatch, at_link=c_takes_it)
+    assert lock.read_text(encoding="utf-8") == "C:jeton"
+    assert a_id != "C:jeton"  # A croit encore tenir le verrou
 
 
 # --- architecture : un seul helper de verrou et d'ecriture atomique ---------
