@@ -7,6 +7,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- refactor(core): `core/fsio.py`, utilitaire unique de verrou inter-processus et d'écriture atomique (chantier W1-00, socle des couloirs ledger de missions, traces et émetteurs d'hôtes). Constat : deux verrous `flock` distincts (`missions/ledger.py` `_ledger_file_lock`, `tools/stigmergy.py` `_board_lock`) qui dégradent en no-op silencieux sans `fcntl` ou sur `OSError` — exclusion mutuelle inexistante sous Windows, sans signal — et trois copies du motif temporaire + `os.replace` dans `hosts/decisions/`.
+  - `fsio.locked(path, timeout=)` : `flock` si `fcntl` existe, sinon création exclusive d'un fichier verrou avec attente bornée (`TimeoutError`) et reprise d'un verrou abandonné de plus de 60 s ; une erreur de verrouillage lève au lieu d'être avalée. `fsio.atomic_write(path, data)` : temporaire voisin, `fsync`, `os.replace`, `fsync` du dossier (POSIX) ; le temporaire est supprimé si l'écriture échoue et l'ancien fichier reste intact.
+  - Test d'architecture : tout import de `fcntl`/`msvcrt` ou appel `flock`/`lockf`/`locking` hors `core/fsio.py` échoue, sauf les deux anciens helpers listés (liste qui ne fait que rétrécir : le test exige aussi de retirer un module migré).
+  - Rouge-avant / vert-après : `tests/unit/test_fsio.py` (8 tests, 8 rouges avant : le module n'existe pas sur main).
+  - Non fait : aucun appelant migré (hors périmètre de la fiche). Repli sans `fcntl` éprouvé par monkeypatch, jamais sous un vrai Windows. La reprise d'un verrou abandonné se fonde sur l'âge du fichier (60 s) : une section critique plus longue sous Windows pourrait se voir voler son verrou.
+
 ## [3.62.1] - 2026-10-03
 
 - fix(hosts): `Stop` nomme les claims concurrents au lieu de juger la tâche fantôme `bootstrap` (issue #692, suite de #680/#686 ; empilée sur la PR #696). Rejeu du 2026-10-02 : deux claims sans session, aucune écriture — `UserPromptSubmit` nommait les candidates et `grimoire task attach <id>`, mais `decide_evidence_gate` ne traitait l'ambiguïté qu'après une écriture et retombait sinon sur « Tâche bootstrap encore en état proposed ».
