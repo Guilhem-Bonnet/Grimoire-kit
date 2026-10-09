@@ -7,10 +7,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
-- fix(bench): `prepare_task_repo` refuse un dossier non vide pour éviter la contamination par les tests cachés (issue #694, W1-08a). Lot J : 30/60 dossiers `kit-gov` avaient été réutilisés d'une tentative antérieure, les tests cachés devenaient visibles et le succès de 96,7 % était surévalué.
-  - `scripts/bench/three_arms.py::prepare_task_repo` : lève `FileExistsError` si le dossier de destination existe et n'est pas vide.
-  - Nouveau fichier `docs/bench/ERRATA-lot-j-contamination.md` : impact chiffré et remède.
-  - Rouge-avant / vert-après : `tests/unit/test_bench_three_arms.py` (3 tests, 1 rouge avant : `test_prepare_task_repo_refuses_non_empty_directory`).
+- fix(bench): le banc à trois bras ne réutilise plus un dossier de tâche sale et contrôle le dépôt préparé avant tout appel au modèle (issue #694, W1-08a). Au lot J (2026-09-18), 30 des 60 runs `kit-gov` (go et rust) tournaient dans des dossiers préparés par des campagnes antérieures : deux commits « état initial », fichiers de test suivis par git, donc visibles de l'agent ; le 96,7 % de succès est surévalué (errata `docs/bench/ERRATA-lot-j-contamination.md`).
+  - `scripts/bench/three_arms.py::prepare_task_repo` lève `FileExistsError` si la destination existe et n'est pas vide.
+  - Nouvelle `assert_task_repo_clean(task, repo_dir)` : lève `ContaminatedTaskRepoError` si un fichier de `task.test_files` est suivi par git ou si l'historique ne compte pas exactement un commit (une erreur de `git` compte comme contamination). `_run_one` l'appelle après la préparation et avant `run_environment` et `claude` ; le run est enregistré à 0 $ avec `terminated_reason="contaminated"`.
+  - `_run_one` et `_do_dry_run` effacent le résidu d'un run interrompu (dossier présent sans ligne dans `results.jsonl`) avant de le rejouer ; sans cela, la nouvelle exigence de dossier vide faisait planter la campagne sur `--resume` ou après un `--pilot`.
+  - Errata réécrit : lot J daté, 30/60 runs, cause du 0/3 de `scale-generator` au lot K (énoncé ambigu, 12 contre 13 notes), effet sur les 9 autres tâches non chiffré.
+  - Rouge-avant / vert-après : `tests/unit/test_bench_three_arms.py` (116 tests dans le fichier, 8 rouges avant sur `origin/main`).
+  - Non fait : détection de la lecture de tests cachés pendant le run (W1-08b) ; rejeu du lot J ; mypy du script reste à 1 erreur préexistante (`_collect_dispatch_stats`).
 
 ## [3.62.1] - 2026-10-03
 

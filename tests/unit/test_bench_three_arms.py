@@ -163,47 +163,138 @@ def test_prepare_task_repo_refuses_non_empty_directory(synthetic_bench_root: Pat
     # dans le dépôt de task2 (contamination).
 
 
-def test_prepare_task_repo_has_single_initial_commit(synthetic_bench_root: Path, tmp_path: Path) -> None:
-    """Vérifier que prepare_task_repo crée exactement un commit initial.
+def _git(repo: Path, *args: str) -> None:
+    ta.subprocess.run(
+        ["git", "-c", "user.email=t@t.local", "-c", "user.name=t", *args],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        encoding="utf-8",
+    )
 
-    Lot J : reproductibilité du test initial et pas d'historique pollué
-    par d'anciennes tentatives.
-    """
-    catalog = ta.discover_catalog(synthetic_bench_root)
-    task = next(t for t in catalog if t.slug == "python-ex-0")
-    dest = tmp_path / "task-repo"
+
+def _task(root: Path, slug: str = "python-ex-0") -> Any:
+    return next(t for t in ta.discover_catalog(root) if t.slug == slug)
+
+
+def test_assert_task_repo_clean_accepts_fresh_repo(synthetic_bench_root: Path, tmp_path: Path) -> None:
+    task = _task(synthetic_bench_root)
+    dest = tmp_path / "repo"
     ta.prepare_task_repo(task, dest)
+    ta.assert_task_repo_clean(task, dest)  # ne lève pas
 
-    # Vérifier un seul commit
-    result = ta._run(
-        ["git", "rev-list", "--count", "HEAD"],
-        cwd=dest,
-        timeout=5,
-    )
-    assert result.returncode == 0
-    assert result.stdout.strip() == "1"
 
-    # Vérifier que c'est nommé correctement
-    result = ta._run(
-        ["git", "log", "--oneline", "-1"],
-        cwd=dest,
-        timeout=5,
+def test_assert_task_repo_clean_rejects_two_commits(synthetic_bench_root: Path, tmp_path: Path) -> None:
+    task = _task(synthetic_bench_root)
+    dest = tmp_path / "repo"
+    ta.prepare_task_repo(task, dest)
+    (dest / "extra.txt").write_text("x\n", encoding="utf-8")
+    _git(dest, "add", "extra.txt")
+    _git(dest, "commit", "-q", "-m", "second")
+    with pytest.raises(ta.ContaminatedTaskRepoError, match="1 commit"):
+        ta.assert_task_repo_clean(task, dest)
+
+
+def test_assert_task_repo_clean_rejects_tracked_hidden_test(synthetic_bench_root: Path, tmp_path: Path) -> None:
+    task = _task(synthetic_bench_root)
+    dest = tmp_path / "repo"
+    ta.prepare_task_repo(task, dest, include_tests=True)  # un seul commit, mais le test est suivi
+    with pytest.raises(ta.ContaminatedTaskRepoError, match=r"python_ex_0_test\.py"):
+        ta.assert_task_repo_clean(task, dest)
+
+
+def _patch_run_one(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, calls: list[Path]) -> dict[str, Path]:
+    """Neutralise tout ce qui n'est pas la préparation ; ``claude`` est tracé."""
+    homes = {arm: tmp_path / "home" / arm for arm in ta.ARMS}
+    for h in homes.values():
+        h.mkdir(parents=True)
+    monkeypatch.setattr(ta, "setup_arm_nu", lambda *a, **k: None)
+    monkeypatch.setattr(ta, "run_environment", lambda *a, **k: {})
+    monkeypatch.setattr(ta, "run_hidden_tests", lambda *a, **k: (True, ""))
+    monkeypatch.setattr(ta, "cleanup_build_artifacts", lambda *a, **k: None)
+
+    def _fake_claude(task_dir: Path, *a: Any, **k: Any) -> Any:
+        calls.append(task_dir)
+        return ta.RunOutcome()
+
+    monkeypatch.setattr(ta, "run_claude_headless", _fake_claude)
+    return homes
+
+
+def _call_run_one(task: Any, workspace: Path, homes: dict[str, Path]) -> Any:
+    return ta._run_one(
+        task,
+        "nu",
+        0,
+        workspace=workspace,
+        ecc_repo=workspace / "ecc",
+        homes=homes,
+        go_bin=None,
+        run_timeout_s=5,
+        grimoire_bin="grimoire",
+        auth_mode="api-key",
     )
-    assert result.returncode == 0
-    assert "état initial" in result.stdout
+
+
+def test_run_one_stops_at_zero_cost_when_repo_contaminated(
+    synthetic_bench_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    task = _task(synthetic_bench_root)
+    calls: list[Path] = []
+    homes = _patch_run_one(monkeypatch, tmp_path, calls)
+    real_prepare = ta.prepare_task_repo
+    # préparation fautive : le test caché est commité (état de la contamination du lot J)
+    monkeypatch.setattr(ta, "prepare_task_repo", lambda t, d, **k: real_prepare(t, d, include_tests=True))
+    record = _call_run_one(task, tmp_path / "ws", homes)
+    assert calls == []  # claude n'a jamais été appelé
+    assert record.terminated_reason == "contaminated"
+    assert record.total_cost_usd == 0.0
+    assert record.success is False
+
+
+def test_run_one_replays_from_clean_dir_after_interrupted_run(
+    synthetic_bench_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    task = _task(synthetic_bench_root)
+    calls: list[Path] = []
+    homes = _patch_run_one(monkeypatch, tmp_path, calls)
+    workspace = tmp_path / "ws"
+    run_dir = workspace / "tasks" / task.task_id.replace("/", "__") / "nu" / "run0"
+    run_dir.mkdir(parents=True)
+    (run_dir / "TASK.md").write_text("résidu\n", encoding="utf-8")
+    (run_dir / "python_ex_0_test.py").write_text("résidu\n", encoding="utf-8")
+    record = _call_run_one(task, workspace, homes)
+    assert calls == [run_dir]
+    assert record.terminated_reason == "completed"
+    assert not (run_dir / "python_ex_0_test.py").exists()
+    ta.assert_task_repo_clean(task, run_dir)
+
+
+def test_do_dry_run_can_run_twice_on_same_workspace(
+    synthetic_bench_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    task = _task(synthetic_bench_root)
+    for name in ("setup_arm_nu", "setup_arm_ecc", "setup_arm_kit", "setup_arm_kit_gov"):
+        monkeypatch.setattr(ta, name, lambda *a, **k: None)
+    homes = {arm: tmp_path / "home" / arm for arm in ta.ARMS}
+    kwargs: dict[str, Any] = {"workspace": tmp_path / "ws", "ecc_repo": tmp_path / "ecc", "homes": homes, "grimoire_bin": "g"}
+    assert ta._do_dry_run([task], **kwargs) == 0
+    assert ta._do_dry_run([task], **kwargs) == 0
 
 
 def test_errata_lot_j_contamination_is_present() -> None:
-    """Lot J : vérifier que l'errata documenting the contamination issue est présent.
-
-    W1-08a exige l'errata daté dans le dossier docs/bench/.
-    """
+    """L'errata existe, date correctement le lot J et ne sur-affirme pas."""
     errata_path = ROOT / "docs" / "bench" / "ERRATA-lot-j-contamination.md"
     assert errata_path.is_file(), f"L'errata doit exister à {errata_path}"
     content = errata_path.read_text(encoding="utf-8")
     assert "Lot J" in content
     assert "#694" in content
     assert "W1-08a" in content
+    assert "2026-09-18" in content  # date du lot J (rejeu-lot-j-2026-09-18.md)
+    assert "30/60 runs" in content or "30 des 60 runs" in content
+    assert "_scratch/" not in content  # chemin hors dépôt
+    assert "Fermé" not in content  # la lecture de tests pendant le run reste ouverte (W1-08b)
+    assert "W1-08b" in content
 
 
 # ── 3. Détection de succès sur tests verts/rouges ──────────────────────────

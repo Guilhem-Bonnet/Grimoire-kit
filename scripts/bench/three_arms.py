@@ -106,7 +106,7 @@ class RunOutcome:
     cache_creation_input_tokens: int = 0
     num_turns: int = 0
     wall_seconds: float = 0.0
-    terminated_reason: str = "completed"  # completed|timeout|loop|error
+    terminated_reason: str = "completed"  # completed|timeout|loop|error|contaminated
     model_usage: dict[str, Any] = field(default_factory=dict)
     tool_commands_seen: int = 0
     raw_result: dict[str, Any] | None = None
@@ -310,6 +310,43 @@ def prepare_task_repo(task: TaskMeta, dest: Path, *, include_tests: bool = False
         cwd=dest,
         check=True,
     )
+
+
+class ContaminatedTaskRepoError(RuntimeError):
+    """Le dépôt préparé n'est pas dans l'état initial attendu (#694, W1-08a)."""
+
+
+def assert_task_repo_clean(task: TaskMeta, repo_dir: Path) -> None:
+    """Refuse un dépôt de tâche contaminé, avant tout appel au modèle.
+
+    Deux conditions, toutes deux fail-closed : aucun fichier de test caché de
+    ``task.test_files`` ne doit être suivi par git, et l'historique doit
+    compter exactement un commit (l'état initial). Un échec de ``git`` lui-même
+    est traité comme une contamination : on ne devine pas.
+    """
+    ls = _run(["git", "ls-files"], cwd=repo_dir, timeout=30)
+    if ls.returncode != 0:
+        raise ContaminatedTaskRepoError(f"{repo_dir} : `git ls-files` a échoué ({ls.stderr.strip()[-200:]})")
+    tracked = {line.strip() for line in ls.stdout.splitlines()}
+    leaked = sorted(tracked & set(task.test_files))
+    if leaked:
+        raise ContaminatedTaskRepoError(f"{repo_dir} : test(s) caché(s) suivi(s) par git : {', '.join(leaked)}")
+    count = _run(["git", "rev-list", "--count", "HEAD"], cwd=repo_dir, timeout=30)
+    if count.returncode != 0 or count.stdout.strip() != "1":
+        raise ContaminatedTaskRepoError(
+            f"{repo_dir} : l'historique doit compter exactement 1 commit, trouvé "
+            f"{count.stdout.strip() or '?'} (code {count.returncode})"
+        )
+
+
+def reset_run_dir(run_dir: Path) -> None:
+    """Supprime le résidu d'un run interrompu avant de le rejouer.
+
+    Un run sans ligne dans ``results.jsonl`` est par construction à rejouer ;
+    ``assert_task_repo_clean`` reste le filet de sécurité après préparation.
+    """
+    if run_dir.exists():
+        shutil.rmtree(run_dir)
 
 
 def hidden_tests_dir(task: TaskMeta, dest: Path) -> Path:
@@ -2426,7 +2463,9 @@ def _do_dry_run(
     for task in tasks:
         for arm in ARMS:
             task_dir = tasks_root / task.task_id.replace("/", "__") / arm / "prep"
+            reset_run_dir(task_dir)
             prepare_task_repo(task, task_dir)
+            assert_task_repo_clean(task, task_dir)
             hidden_tests_dir(task, tasks_root / task.task_id.replace("/", "__") / "hidden-tests")
             if arm == "nu":
                 setup_arm_nu(task_dir, npm_cache_dir=npm_cache_dir)
@@ -2461,6 +2500,7 @@ def _run_one(
     auth_mode: str = "oauth-copy",
 ) -> RunRecord:
     run_dir = workspace / "tasks" / task.task_id.replace("/", "__") / arm / f"run{run_index}"
+    reset_run_dir(run_dir)
     prepare_task_repo(task, run_dir)
     hidden_dir = hidden_tests_dir(task, workspace / "tasks" / task.task_id.replace("/", "__") / "hidden-tests")
 
@@ -2484,6 +2524,27 @@ def _run_one(
         )
     else:
         setup_result = None
+
+    # W1-08a : contrôle du dépôt préparé AVANT tout appel au modèle (0 $).
+    try:
+        assert_task_repo_clean(task, run_dir)
+    except ContaminatedTaskRepoError as exc:
+        print(f"[contaminated] {task.task_id} / {arm} / run{run_index} : {exc}", file=sys.stderr)
+        return RunRecord(
+            task_id=task.task_id,
+            language=task.language,
+            arm=arm,
+            run_index=run_index,
+            success=False,
+            total_cost_usd=0.0,
+            input_tokens=0,
+            output_tokens=0,
+            num_turns=0,
+            wall_seconds=0.0,
+            recorded_at=datetime.now(tz=UTC).isoformat(),
+            terminated_reason="contaminated",
+            auth_mode=auth_mode,
+        )
 
     test_deps_install_ok: bool | None = None
     if setup_result is not None:
