@@ -694,19 +694,11 @@ def _has_pending_gate(text: str) -> bool:
 
 def _verify_guard_errors(root: Path, task_id: str, result: StandardVerificationResult) -> None:
     """W1-06 : une garde tombée en panne (``guard.error``) est dite, jamais muette."""
-    from grimoire.core.standard_checks.evidence_journal import GUARD_ERROR_EVENT, read_guard_events
+    from grimoire.core.standard_checks.evidence_journal import describe_guard_errors
 
-    errors = [e for e in read_guard_events(root, task_id) if e.get("type") == GUARD_ERROR_EVENT]
-    if not errors:
-        return
-    last = errors[-1]
-    _add_check(
-        result,
-        "guard.error_recorded",
-        "warning",
-        f"{len(errors)} panne(s) de garde tracée(s) pour {task_id} (dernière : garde « {last.get('guard_id', '?')} », "
-        f"{last.get('error_type', '?')}) : la garde n'a pas pu juger, ce n'est pas un vert.",
-    )
+    message = describe_guard_errors(root, task_id)
+    if message:
+        _add_check(result, "guard.error_recorded", "warning", message)
 
 
 def _verify_evidence_pack(root: Path, task_id: str, result: StandardVerificationResult) -> None:

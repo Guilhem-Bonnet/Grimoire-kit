@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import UTC, datetime
 
-from grimoire.core.standard_checks.evidence_journal import GUARD_ERROR_EVENT, append_guard_event
+from grimoire.core.standard_checks.evidence_journal import record_guard_error
 from grimoire.core.standard_state import active_profile_id, is_standard_enrolled, resolve_active_task
 from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
 from grimoire.hosts.decisions.enrolment import (
@@ -162,7 +162,7 @@ def _done_gate_unevaluable(decision: Decision, hook: HookInput, task_id: str, pr
     from grimoire.hosts.decisions.done_gate import DoneGateVerdict, resolve_done_gate_block
 
     cause = f"{type(exc).__name__}: {exc}"
-    _record_guard_error(hook, task_id, "done_gate", str(exc), type(exc).__name__)
+    record_guard_error(hook.project_root, task_id, "done_gate", type(exc).__name__, str(exc))
     now_iso = datetime.now(UTC).isoformat()
     try:
         enforce, blocked, capped = resolve_done_gate_block(
@@ -177,28 +177,13 @@ def _done_gate_unevaluable(decision: Decision, hook: HookInput, task_id: str, pr
     if blocked and decision.outcome is not Outcome.BLOCK:
         reason = (
             f"[Grimoire] Tâche {task_id} : gate « fini » non évaluable (profil {profile}) — {cause}\n"
-            "Cette panne est tracée (guard.error, visible dans `grimoire verify`). Si la tâche doit rester "
-            "ouverte, dis-le explicitement à l'utilisateur au lieu de conclure."
+            f"Cette panne est tracée (guard.error, visible via `grimoire standard verify --task-id {task_id}`). "
+            "Si la tâche doit rester ouverte, dis-le explicitement à l'utilisateur au lieu de conclure."
         )
         return replace(decision, outcome=Outcome.BLOCK, reason=reason, detail=detail)
     warning = f"[Grimoire] Avertissement : gate « fini » non évaluable pour {task_id} (profil {profile}) — {cause}"
     context = f"{decision.context}\n{warning}" if decision.context else warning
     return replace(decision, context=context, detail=detail)
-
-
-def _record_guard_error(hook: HookInput, task_id: str, guard_id: str, error_message: str, error_type: str) -> None:
-    """W1-06: journalise un ``guard.error`` dans le flux de garde (pas dans l'inventaire observé)."""
-    append_guard_event(
-        hook.project_root,
-        task_id,
-        {
-            "ts": datetime.now(UTC).isoformat(),
-            "type": GUARD_ERROR_EVENT,
-            "guard_id": guard_id,
-            "error_type": error_type,
-            "error_message": error_message,
-        },
-    )
 
 
 def _record_done_gate_hold(hook: HookInput, task_id: str) -> None:

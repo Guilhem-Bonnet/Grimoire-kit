@@ -66,7 +66,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from grimoire.core.standard_checks.evidence_journal import evidence_log_relpath, read_evidence_log
+from grimoire.core.standard_checks.evidence_journal import evidence_log_relpath, read_evidence_log, record_guard_error
 from grimoire.hosts.decisions.enrolment import BLOCKING_PROFILES
 from grimoire.hosts.decisions.tool_facts import command_surface, is_read_only_command
 
@@ -97,18 +97,21 @@ class DoneGateVerdict:
     inferred from the outcome."""
 
     stale: bool
-    """A mutation with no green check after it — the only condition that
-    can ever lead to a refusal via this path."""
+    """A mutation with no green check after it. ``False`` for a crash of the
+    evaluation itself (``reason`` ``error:*``) : no mutation was judged stale
+    there, but a refusal can still follow (see ``blocked``)."""
     reason: str
-    """One of ``no_mutation``, ``green_check_after_mutation`` (the veto dur)
-    or ``mutation_after_last_check``."""
+    """One of ``no_mutation``, ``green_check_after_mutation`` (the veto dur),
+    ``mutation_after_last_check``, or ``error:<ExceptionType>`` when the
+    evaluation crashed (:func:`.evidence_gate._done_gate_unevaluable`)."""
     enforce: bool
     """Whether this project/environment opted into a real ``BLOCK`` (see the
     module docstring) — independent of whether *this* call actually used it."""
     blocked: bool
     """``True`` only when :mod:`.evidence_gate` should escalate its outcome
     to :attr:`~grimoire.hosts.decisions._shared.Outcome.BLOCK` for this call:
-    stale, enforced, a blocking profile, and the caps below did not apply."""
+    stale (or the evaluation crashed, ``reason`` ``error:*``), enforced, a
+    blocking profile, and the caps below did not apply."""
     capped: bool
     """A refusal was due here but a cooldown or session cap suppressed it."""
     command_hint: str = ""
@@ -350,7 +353,7 @@ def _resolved_test_command(project_root: Path) -> str:
     return str(need.command) if need.resolved and need.command else ""
 
 
-def _is_enforced(project_root: Path) -> bool:
+def _is_enforced(project_root: Path, task_id: str) -> bool:
     """Whether this project/environment opted into a real ``BLOCK`` — see the
     module docstring for why shadow is the default. Checked in this order:
     the environment variable (cheapest, and the one named in the issue when
@@ -359,6 +362,11 @@ def _is_enforced(project_root: Path) -> bool:
     ``_load_mapping`` helper :func:`grimoire.core.standard_checks.
     gate_test_run.board_state_of_task` already reads privately across module
     boundaries for a project-declared value, so this is not a new pattern.
+
+    An unreadable profile still answers ``False`` (shadow is the safe default
+    for the opt-in), but no longer silently (W1-06) : the failure is traced as
+    a ``guard.error`` (``guard_id`` ``done_gate.enforce_option``) for *task_id*,
+    so ``grimoire standard verify`` shows that the option could not be read.
     """
     if os.environ.get(_ENFORCE_ENV, "").strip().lower() == "enforce":
         return True
@@ -367,7 +375,8 @@ def _is_enforced(project_root: Path) -> bool:
         from grimoire.core.standard_state import _load_mapping
 
         options = _load_mapping(project_root.resolve() / STANDARD_PROFILE_FILE).get("options")
-    except Exception:
+    except Exception as exc:
+        record_guard_error(project_root, task_id, "done_gate.enforce_option", type(exc).__name__, str(exc))
         return False
     if not isinstance(options, dict):
         return False
@@ -446,7 +455,7 @@ def resolve_done_gate_block(
     refroidissement et le plafond de session. Consomme un tour du plafond
     uniquement quand un refus est dû.
     """
-    enforce = _is_enforced(project_root)
+    enforce = _is_enforced(project_root, task_id)
     if profile in BLOCKING_PROFILES and enforce:
         capped = _check_and_record_cap(project_root, task_id, session_id, now_iso)
         return enforce, not capped, capped

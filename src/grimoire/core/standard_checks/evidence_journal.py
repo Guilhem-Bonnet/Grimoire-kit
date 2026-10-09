@@ -59,13 +59,16 @@ __all__ = [
     "EVIDENCE_LOG_FILENAME",
     "GUARD_ERROR_EVENT",
     "GUARD_EVENTS_FILENAME",
+    "GUARD_EVENTS_MAX",
     "append_evidence_event",
     "append_guard_event",
+    "describe_guard_errors",
     "evidence_log_relpath",
     "guard_events_relpath",
     "has_observed_inventory",
     "read_evidence_log",
     "read_guard_events",
+    "record_guard_error",
     "regenerate_observed_inventory_section",
 ]
 
@@ -77,6 +80,9 @@ EVIDENCE_LOG_FILENAME = "evidence-log.jsonl"
 #: observées (:func:`has_observed_inventory`) — y écrire une panne de garde
 #: ferait croire qu'une action a été observée.
 GUARD_EVENTS_FILENAME = "guard-events.jsonl"
+
+#: Nombre maximal d'événements conservés par tâche dans le journal de garde.
+GUARD_EVENTS_MAX = 200
 
 #: Type d'un événement de garde en panne (fail-open évité, W1-06).
 GUARD_ERROR_EVENT = "guard.error"
@@ -176,14 +182,62 @@ def append_evidence_event(project_root: Path, task_id: str, event: dict[str, Any
 
 
 def append_guard_event(project_root: Path, task_id: str, event: dict[str, Any]) -> None:
-    """Append one guard event (``guard.error``…) to the task's guard journal. Best-effort: never raises."""
+    """Append one guard event (``guard.error``…) to the task's guard journal. Best-effort: never raises.
+
+    The journal is bounded (W1-06) : ``error_message`` is cut at the same
+    length as a command in ``evidence-log.jsonl``, an event identical to the
+    previous one (same fields, ``ts`` aside) is not written again — a gate
+    that crashes on every ``Stop`` leaves one line, not one per turn — and
+    the file stops growing at :data:`GUARD_EVENTS_MAX`.
+    """
     try:
+        message = event.get("error_message")
+        if isinstance(message, str):
+            event = {**event, "error_message": _truncate_command(message)}
         full_path = project_root / guard_events_relpath(task_id)
+        existing = read_guard_events(project_root, task_id)
+        if len(existing) >= GUARD_EVENTS_MAX:
+            return
+        if existing and _without_ts(existing[-1]) == _without_ts(event):
+            return
         full_path.parent.mkdir(parents=True, exist_ok=True)
         with open(full_path, "a", encoding="utf-8") as handle:
             handle.write(json.dumps(event, ensure_ascii=False) + "\n")
     except OSError:
         return
+
+
+def record_guard_error(project_root: Path, task_id: str, guard_id: str, error_type: str, error_message: str) -> None:
+    """Trace a ``guard.error`` (W1-06) in the guard journal. Best-effort: never raises."""
+    append_guard_event(
+        project_root,
+        task_id,
+        {
+            "ts": datetime.now(UTC).isoformat(),
+            "type": GUARD_ERROR_EVENT,
+            "guard_id": guard_id,
+            "error_type": error_type,
+            "error_message": error_message,
+        },
+    )
+
+
+def describe_guard_errors(project_root: Path, task_id: str) -> str:
+    """The ``guard.error_recorded`` message for *task_id*, with its remedy. ``""`` when none."""
+    errors = [e for e in read_guard_events(project_root, task_id) if e.get("type") == GUARD_ERROR_EVENT]
+    if not errors:
+        return ""
+    last = errors[-1]
+    return (
+        f"{len(errors)} panne(s) de garde tracée(s) pour {task_id} (dernière : garde « {last.get('guard_id', '?')} », "
+        f"{last.get('error_type', '?')}) : la garde n'a pas pu juger, ce n'est pas un vert. "
+        f"Corrige la cause puis relance `grimoire standard gate check --task-id {task_id}` ; "
+        f"journal : {guard_events_relpath(task_id).as_posix()} (le supprimer acquitte les pannes)."
+    )
+
+
+def _without_ts(event: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in event.items() if key != "ts"}
 
 
 def read_guard_events(project_root: Path, task_id: str) -> list[dict[str, Any]]:

@@ -75,7 +75,8 @@ def test_orchestrated_never_blocks_on_a_crash_but_warns_and_traces(tmp_path: Pat
     assert "non évaluable" in decision.context  # type: ignore[attr-defined]
     assert decision.detail["done_gate"]["stale"] is False  # type: ignore[attr-defined]
     events = read_guard_events(root, "bootstrap")
-    assert len(events) == 6
+    # Six Stop identiques = une ligne (journal borné, W1-06 T1-04).
+    assert len(events) == 1
     assert events[0]["type"] == GUARD_ERROR_EVENT == "guard.error"
     assert events[0]["guard_id"] == "done_gate"
     assert events[0]["error_type"] == "RuntimeError"
@@ -98,6 +99,9 @@ def test_governed_enforced_blocks_with_an_honest_reason_then_respects_the_cap(tm
     assert "non évaluable" in first.reason  # type: ignore[attr-defined]
     assert "RuntimeError: boom" in first.reason  # type: ignore[attr-defined]
     assert "Relance ``" not in first.reason  # type: ignore[attr-defined]
+    # La commande nommée existe : `grimoire verify` n'existe pas, `grimoire standard verify` oui.
+    assert "grimoire standard verify --task-id bootstrap" in first.reason  # type: ignore[attr-defined]
+    assert "`grimoire verify`" not in first.reason  # type: ignore[attr-defined]
     # Le cooldown de 60 s s'applique aussi à la panne : le second Stop passe.
     second = _stop(root, "s-cap")
     assert second.outcome is Outcome.ALLOW  # type: ignore[attr-defined]
@@ -154,3 +158,66 @@ def test_guard_events_round_trip_and_skip_corrupt_lines(tmp_path: Path) -> None:
     assert [e["guard_id"] for e in read_guard_events(tmp_path, "T-1")] == ["g", "h"]
     assert json.loads(path.read_text(encoding="utf-8").splitlines()[0])["guard_id"] == "g"
     assert read_guard_events(tmp_path, "absent") == []
+
+
+def test_an_unreadable_enforce_option_is_traced_not_silently_shadow(tmp_path: Path, shadow: None) -> None:
+    from grimoire.hosts.decisions.done_gate import resolve_done_gate_block
+
+    root = _project(tmp_path, "governed")
+    with patch("grimoire.core.standard_state._load_mapping", side_effect=RuntimeError("profil illisible")):
+        enforce, blocked, capped = resolve_done_gate_block(
+            root, "bootstrap", "s-1", "governed", "2026-10-09T00:00:00+00:00"
+        )
+    assert (enforce, blocked, capped) == (False, False, False)
+    events = read_guard_events(root, "bootstrap")
+    assert [e["guard_id"] for e in events] == ["done_gate.enforce_option"]
+    assert events[0]["type"] == GUARD_ERROR_EVENT
+    assert events[0]["error_type"] == "RuntimeError"
+
+
+def test_a_readable_enforce_option_leaves_no_guard_event(tmp_path: Path, shadow: None) -> None:
+    from grimoire.hosts.decisions.done_gate import resolve_done_gate_block
+
+    root = _project(tmp_path, "governed")
+    resolve_done_gate_block(root, "bootstrap", "s-1", "governed", "2026-10-09T00:00:00+00:00")
+    assert read_guard_events(root, "bootstrap") == []
+
+
+def test_guard_error_message_is_truncated(tmp_path: Path) -> None:
+    from grimoire.core.standard_checks.evidence_journal import record_guard_error
+
+    record_guard_error(tmp_path, "T-1", "g", "ValueError", "x" * 5000)
+    line = (tmp_path / guard_events_relpath("T-1")).read_text(encoding="utf-8")
+    assert len(line) < 600
+    message = read_guard_events(tmp_path, "T-1")[0]["error_message"]
+    assert message.startswith("x" * 240)
+    assert message.endswith("(tronqué)")
+    assert len(message) < 260
+
+
+def test_identical_consecutive_guard_errors_are_written_once_and_distinct_ones_are_kept(tmp_path: Path) -> None:
+    from grimoire.core.standard_checks.evidence_journal import record_guard_error
+
+    for _ in range(5):
+        record_guard_error(tmp_path, "T-1", "g", "ValueError", "boom")
+    record_guard_error(tmp_path, "T-1", "g", "ValueError", "autre")
+    record_guard_error(tmp_path, "T-1", "g", "ValueError", "boom")
+    assert [e["error_message"] for e in read_guard_events(tmp_path, "T-1")] == ["boom", "autre", "boom"]
+
+
+def test_the_guard_journal_stops_growing_at_its_cap(tmp_path: Path) -> None:
+    from grimoire.core.standard_checks.evidence_journal import GUARD_EVENTS_MAX, record_guard_error
+
+    for n in range(GUARD_EVENTS_MAX + 20):
+        record_guard_error(tmp_path, "T-1", "g", "ValueError", f"boom {n}")
+    assert len(read_guard_events(tmp_path, "T-1")) == GUARD_EVENTS_MAX
+
+
+def test_verify_message_names_a_real_remedy(tmp_path: Path, shadow: None) -> None:
+    from grimoire.core.agentic_standard import verify_standard_profile
+
+    root = _project(tmp_path, "governed")
+    _stop(root)
+    check = next(c for c in verify_standard_profile(root, task_id="bootstrap").checks if c.id == "guard.error_recorded")
+    assert "grimoire standard gate check --task-id bootstrap" in check.message
+    assert "guard-events.jsonl" in check.message
