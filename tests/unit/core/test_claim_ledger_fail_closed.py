@@ -299,3 +299,116 @@ def test_verify_applies_the_same_v0_exemption_as_the_gate(tmp_path: Path) -> Non
 def test_verify_keeps_claims_empty_for_non_v0_or_governed(tmp_path: Path) -> None:
     assert _empty_ledger_verify(tmp_path / "a", "production", "V2").get("claims.empty") == {"error"}
     assert _empty_ledger_verify(tmp_path / "b", "governed", "V0").get("claims.empty") == {"error"}
+
+
+# --- Revue W1-05 (tour 3) : vocabulaire émis, barre échappée, lignes courtes --
+
+
+@pytest.mark.parametrize("profile", ["governed", "production"])
+@pytest.mark.parametrize(
+    "row",
+    [
+        # valeur prescrite par le skill grimoire-evidence : « marquée non vérifié »
+        "| CL-001 | Le cache est invalidé au redémarrage | fait |  | non vérifié | faible | vérifier |",
+        "| CL-001 | a | fait | src/x.py:3 | prouvé (par lecture) | élevée | utiliser |",
+        "| CL-001 | a | fait | src/x.py:3 | prouvé par construction. | élevée | utiliser |",
+        "| CL-001 | a | fait |  | hypothèse | faible | vérifier (relecture humaine). |",
+        "| CL-001 | a | fait |  | Non vérifié ; à relire | faible | vérifier (utilisateur) |",
+    ],
+)
+def test_values_with_annotations_and_the_skill_wording_are_accepted(tmp_path: Path, row: str, profile: str) -> None:
+    """Le vocabulaire fermé tolère l'annotation (parenthèse, `;`, point final) et le « non vérifié » du skill."""
+    setup_standard_profile(tmp_path, profile_id=profile, project_name="Demo")
+    _write_row(tmp_path, row)
+    review = _review_claims(tmp_path)
+    assert "claims.status_invalid" not in review
+    assert "claims.decision_invalid" not in review
+    verify = _verify_claims(tmp_path)
+    assert "claims.status_invalid" not in verify
+    assert "claims.decision_invalid" not in verify
+
+
+def test_non_verifie_counts_as_unproved_not_as_proved(tmp_path: Path) -> None:
+    """« non vérifié » est un synonyme d'hypothèse : « utiliser » dessus reste une contradiction."""
+    setup_standard_profile(tmp_path, profile_id="governed", project_name="Demo")
+    _write_row(tmp_path, "| CL-001 | a | fait |  | non vérifié | faible | utiliser |")
+    assert _review_claims(tmp_path).get("claims.used_unproved") == "error"
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        "| CL-001 | a | fait |  | non prouvé | faible | vérifier |",
+        "| CL-001 | a | fait |  | à vérifier | faible | vérifier |",
+        "| CL-001 | a | fait |  | prouvéeee | faible | vérifier |",
+        "| CL-001 | a | fait |  | hypothèse | faible | vérifierx |",
+    ],
+)
+def test_normalisation_does_not_open_the_vocabulary(tmp_path: Path, row: str) -> None:
+    setup_standard_profile(tmp_path, profile_id="governed", project_name="Demo")
+    _write_row(tmp_path, row)
+    review = _review_claims(tmp_path)
+    assert "error" in {review.get("claims.status_invalid"), review.get("claims.decision_invalid")}
+
+
+def test_escaped_pipe_in_a_cell_is_not_a_column_separator(tmp_path: Path) -> None:
+    """GFM : `\\|` reste dans la cellule. Une ligne valide ne lève aucun constat de forme."""
+    setup_standard_profile(tmp_path, profile_id="governed", project_name="Demo")
+    _write_row(tmp_path, "| CL-002 | `a \\| b` est vrai | fait | src/x | prouvé | élevée | utiliser |")
+    review = _review_claims(tmp_path)
+    assert not {"claims.status_invalid", "claims.decision_invalid", "claims.row_invalid"} & set(review)
+    assert not {"claims.status_invalid", "claims.decision_invalid", "claims.row_invalid"} & set(
+        _verify_claims(tmp_path)
+    )
+
+
+def test_escaped_pipe_proved_without_evidence_is_still_an_error(tmp_path: Path) -> None:
+    setup_standard_profile(tmp_path, profile_id="starter", project_name="Demo")
+    _write_row(tmp_path, "| CL-002 | a \\| b | fait |  | prouvé | haute | utiliser |")
+    assert _review_claims(tmp_path).get("claims.proved_without_evidence") == "error"
+
+
+def test_escaped_pipe_at_the_end_of_the_last_cell_is_kept() -> None:
+    from grimoire.core.standard_checks.claim_ledger_verify import _cells
+
+    assert _cells("| CL-002 | a \\| b | fait |  | prouvé | haute | x \\| |") == [
+        "CL-002",
+        "a | b",
+        "fait",
+        "",
+        "prouvé",
+        "haute",
+        "x |",
+    ]
+
+
+@pytest.mark.parametrize("profile", ["starter", "orchestrated", "governed"])
+@pytest.mark.parametrize(
+    "row",
+    [
+        "| CL-002 | a | fait |  | prouvé | haute |",
+        "| CL-002 | a | fait |  | prouvé |",
+    ],
+)
+def test_short_proved_row_without_evidence_is_an_error_at_review(tmp_path: Path, row: str, profile: str) -> None:
+    """Le fond se contrôle aussi pour une ligne de 5 ou 6 cellules, signalée `row_invalid`."""
+    setup_standard_profile(tmp_path, profile_id=profile, project_name="Demo")
+    _write_row(tmp_path, row)
+    review = _review_claims(tmp_path)
+    assert review.get("claims.proved_without_evidence") == "error"
+    assert review.get("claims.row_invalid") is not None
+    assert "error" in _verify_claims(tmp_path).get("claims.proved_without_evidence", set())
+
+
+def test_short_row_with_a_proof_does_not_raise_a_false_contradiction(tmp_path: Path) -> None:
+    setup_standard_profile(tmp_path, profile_id="starter", project_name="Demo")
+    _write_row(tmp_path, "| CL-002 | a | fait | src/x | prouvé | haute |")
+    assert "claims.proved_without_evidence" not in _review_claims(tmp_path)
+
+
+def test_rows_under_five_cells_stay_form_only() -> None:
+    from grimoire.core.standard_checks.claim_ledger_verify import scan_claim_rows
+
+    scan = scan_claim_rows("## Claims\n\n| CL-002 | a | fait | prouvé |\n")
+    assert scan.unevaluated_count == 1
+    assert scan.unevaluated_cells == []

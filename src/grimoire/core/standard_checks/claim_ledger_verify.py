@@ -27,19 +27,50 @@ _SECTION_RE = re.compile(r"^##\s+Claims\b", re.IGNORECASE)
 _SEPARATOR_CELL_RE = re.compile(r"^:?-+:?$")
 _STATUSES = frozenset({"prouvé", "hypothèse", "contredit", "réfuté"})
 _DECISIONS = frozenset({"utiliser", "vérifier", "rejeter", "écarter"})
+# « non vérifié » est la valeur que le skill grimoire-evidence prescrit pour une
+# affirmation sans source : synonyme d'« hypothèse », jamais de « prouvé ».
+_STATUS_ALIASES = {"non vérifié": "hypothèse"}
+_ANNOTATION_RE = re.compile(r"[(;]")
+_MIN_CELLS = 7
+# Une ligne courte garde un contrôle de fond à partir de 5 cellules : Preuve et
+# Statut sont alors présents (colonnes 4 et 5), les suivantes sont complétées.
+_MIN_SHORT_ROW_CELLS = 5
+_UNESCAPED_PIPE_RE = re.compile(r"(?<!\\)\|")
 
 
 def _cells(line: str) -> list[str]:
-    return [c.strip() for c in line.strip().strip("|").split("|")]
+    """Découpe une ligne de tableau GFM : ``\\|`` reste dans la cellule (sans son antislash)."""
+    body = line.strip()
+    body = body.removeprefix("|")
+    body = body[:-1] if body.endswith("|") and not body.endswith("\\|") else body
+    return [c.replace("\\|", "|").strip() for c in _UNESCAPED_PIPE_RE.split(body)]
+
+
+def _canonical(value: str, vocabulary: frozenset[str], aliases: dict[str, str] | None = None) -> str | None:
+    """Valeur du vocabulaire fermé désignée par *value*, ou ``None`` si elle n'en fait pas partie.
+
+    Tolère l'annotation d'un auteur : casse, texte après ``(`` ou ``;``, point
+    final, et suite après un terme du vocabulaire (« prouvé par construction »).
+    Le terme doit être un mot entier : « non prouvé » ou « prouvéeee » restent hors vocabulaire.
+    """
+    head = _ANNOTATION_RE.split(value.lower(), maxsplit=1)[0].strip().rstrip(".!:").strip()
+    terms = {t: t for t in vocabulary} | (aliases or {})
+    if head in terms:
+        return terms[head]
+    for term in sorted(terms, key=len, reverse=True):
+        if head.startswith(term + " "):
+            return terms[term]
+    return None
 
 
 class ClaimRowScan:
     """Lignes candidates du registre : chacune est évaluée ou comptée non évaluée.
 
-    ``unevaluated_cells`` garde, pour les lignes non évaluées qui ont au moins 7
-    cellules (identifiant hors ``CL-NNN``, affirmation vide), leurs cellules : la
-    forme fautive est signalée, mais le fond (contradictions) est tout de même
-    contrôlé — une ligne mal numérotée ne s'exonère pas d'une preuve manquante.
+    ``unevaluated_cells`` garde, pour les lignes non évaluées qui ont au moins 5
+    cellules (identifiant hors ``CL-NNN``, affirmation vide, ligne courte
+    complétée jusqu'à 7 cellules), leurs cellules : la forme fautive est
+    signalée, mais le fond (contradictions) est tout de même contrôlé — une
+    ligne mal formée ne s'exonère pas d'une preuve manquante.
     """
 
     def __init__(self) -> None:
@@ -82,8 +113,10 @@ def scan_claim_rows(text: str) -> ClaimRowScan:
             continue
         if [c.lower() for c in cells] == _TEMPLATE_CELLS_LOWER:
             continue
-        if len(cells) < 7:
+        if len(cells) < _MIN_CELLS:
             scan.unevaluated.append(line)
+            if len(cells) >= _MIN_SHORT_ROW_CELLS:
+                scan.unevaluated_cells.append((line, cells + [""] * (_MIN_CELLS - len(cells))))
         elif not _ID_RE.match(cells[0]) or not cells[1]:
             scan.unevaluated.append(line)
             scan.unevaluated_cells.append((line, cells))
@@ -139,6 +172,13 @@ def verify_claim_ledger(
     ``CL-NNN`` ou sans affirmation est signalée ``claims.row_invalid``, et ses
     contradictions (« prouvé » sans preuve, « utiliser » sans « prouvé ») sont
     tout de même levées. Une ligne sans affirmation ne compte pas comme évaluée.
+    Une ligne de 5 ou 6 cellules est complétée jusqu'à 7 pour ce contrôle de
+    fond ; en dessous de 5, seule la forme est signalée.
+
+    Vocabulaire fermé, annotations tolérées : une valeur peut porter une
+    précision après ``(`` ou ``;`` ou après le terme (``prouvé (par lecture)``,
+    ``vérifier (utilisateur).``). ``non vérifié``, la valeur que prescrit le skill
+    grimoire-evidence, vaut ``hypothèse``. Toute autre valeur est hors vocabulaire.
 
     ``rows_only`` (issue #614) : pendant ``in_progress``, seules les
     contradictions ligne à ligne bloquent — « prouvé » sans preuve, « utiliser »
@@ -181,21 +221,23 @@ def verify_claim_ledger(
     rows = scan.evaluated + scan.unevaluated_cells
     for _line, cells in rows:
         claim_id, _claim, _kind, proof, status, _confidence, decision = cells[:7]
-        status, decision = status.lower(), decision.lower()
-        if status not in _STATUSES:
+        raw_status, raw_decision = status, decision
+        status = _canonical(raw_status, _STATUSES, _STATUS_ALIASES) or ""
+        decision = _canonical(raw_decision, _DECISIONS) or ""
+        if not status:
             _add_check(
                 result,
                 "claims.status_invalid",
                 form_severity,
-                f"{claim_id} has an unknown status: {status or '(empty)'}.",
+                f"{claim_id} has an unknown status: {raw_status or '(empty)'}.",
                 path=rel_path,
             )
-        if decision not in _DECISIONS:
+        if not decision:
             _add_check(
                 result,
                 "claims.decision_invalid",
                 form_severity,
-                f"{claim_id} has an unknown decision: {decision or '(empty)'}.",
+                f"{claim_id} has an unknown decision: {raw_decision or '(empty)'}.",
                 path=rel_path,
             )
         if status == "prouvé" and not proof:
@@ -211,7 +253,7 @@ def verify_claim_ledger(
                 result,
                 "claims.used_unproved",
                 severity,
-                f"{claim_id} is used while its status is {status}.",
+                f"{claim_id} is used while its status is {raw_status or '(empty)'}.",
                 path=rel_path,
             )
     if strict and scan.evaluated and not rows_only and "| Affirmations bloquantes non prouvées |  |" in text:
