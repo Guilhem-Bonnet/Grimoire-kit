@@ -7,6 +7,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- fix(standard): le vérificateur de claims échoue fermé en profil governed. Une ligne malformée ou un registre vide donne une erreur (au lieu d'un avertissement) dans les profils `governed` et `production`, complétant le principe W1-05 du plan « Dépasser AI-DLC » : aucune divergence n'est silencieuse en mode strict. Les profils non gouvernés gardent le comportement existant (warning). Profiles non-governed conservent le comportement antérieur.
+  - `src/grimoire/core/standard_checks/claim_ledger_verify.py` : sévérité conditionnée au profil pour `claims.empty` et `claims.row_invalid`.
+  - `tests/unit/core/test_standard_mandatory_artifacts.py` : test existant aligné sur le nouveau comportement.
+  - `tests/unit/core/test_standard_gap_artifacts.py` : test existant aligné sur le nouveau comportement.
+  - Rouge-avant / vert-après : `tests/unit/core/test_claim_ledger_fail_closed.py` (6 tests, 5 rouges avant).
+
 ## [3.62.1] - 2026-10-03
 
 - fix(hosts): `Stop` nomme les claims concurrents au lieu de juger la tâche fantôme `bootstrap` (issue #692, suite de #680/#686 ; empilée sur la PR #696). Rejeu du 2026-10-02 : deux claims sans session, aucune écriture — `UserPromptSubmit` nommait les candidates et `grimoire task attach <id>`, mais `decide_evidence_gate` ne traitait l'ambiguïté qu'après une écriture et retombait sinon sur « Tâche bootstrap encore en état proposed ».
