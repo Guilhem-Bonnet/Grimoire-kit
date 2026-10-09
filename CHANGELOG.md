@@ -7,12 +7,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
-- fix(memory,missions): `MemoryLint` et `MissionIntakeService` étaient du code mort — le premier n'était référencé que par `tools/__init__.py`, le second n'avait aucun appelant, et toute tâche naissait en `risk_profile` `standard`.
-- Nouvelle commande `grimoire memory lint [--json]` : sort en code 1 dès qu'une erreur est relevée (une contradiction entre fichiers de mémoire en est une), 0 sinon.
-- `TaskService.add` (donc `grimoire task add` et l'outil MCP `task_add`) pose le `risk_profile` de la tâche par l'intake déterministe, lu sur le titre ; il ne rabaisse rien ensuite.
-- Garde d'architecture : tout export de `grimoire.tools` doit avoir un appelant dans `cli/` ou `mcp/`, avec un cliquet sur les quatre orphelins restants (`AgentForge`, `ContextGuard`, `ContextRouter`, `PreflightCheck`).
-- Rouge-avant / vert-après : `tests/unit/test_w1_11_wire_or_delete.py` (6 tests, 4 rouges avant).
-- Non fait : l'appel de `memory lint` par `standard verify`, la proposition de relèvement quand le risque monte, et un intake qui lit autre chose que le titre. L'intake ne connaît que l'anglais : un titre français reste `standard`. Les quatre orphelins du cliquet ne sont ni branchés ni supprimés.
+- fix(memory,missions): `MemoryLint` et `MissionIntakeService` n'avaient aucun appelant CLI/MCP (`MemoryLint` n'était référencé que par `tools/__init__.py`), et toute tâche créée par `task add` naissait en `risk_profile` `standard`. Les exports de `grimoire.tools` sont l'API SDK publique (`docs/sdk-guide.md`) : ils ne sont pas du code à supprimer.
+- Nouvelle commande `grimoire memory lint [--json] [--allow-empty]` : racine résolue comme les commandes sœurs (remonte jusqu'à `project-context.yaml`, sort en 1 hors projet), code 1 dès qu'une erreur est relevée, code 2 si aucune mémoire n'a été lue (rien vérifié n'est pas un vert) sauf `--allow-empty`, 0 sinon.
+- `MemoryLint` : le journal `contradiction-log.md` n'est plus balayé comme source de décisions, et une paire déjà consignée « Resolved » dans ce journal n'est plus signalée (le correctif suggéré aggravait auparavant le résultat).
+- `TaskService.add` (donc `grimoire task add` et l'outil MCP `task_add`) ne retient de l'intake que les hausses : `max(standard, risque proposé)`, jamais de `light` automatique. Le motif critique `token` est resserré en `access|auth|api|bearer|refresh|session token`.
+- Garde d'architecture : tout export de `grimoire.tools` a un appelant dans `cli/` ou `mcp/`, mesuré par AST sur l'import réel de `__all__`, avec un cliquet sur les quatre orphelins (`AgentForge`, `ContextGuard`, `ContextRouter`, `PreflightCheck`), qui n'autorise pas leur suppression ; un test vérifie que les noms cités par `docs/sdk-guide.md` restent importables.
+- Rouge-avant / vert-après : `tests/unit/test_w1_11_wire_or_delete.py` (14 tests, voir la fiche de PR pour le nombre de rouges avant).
+- Non fait : l'appel de `memory lint` par `standard verify`, la proposition de relèvement quand le risque monte, un intake qui lit autre chose que le titre (anglais seulement), une option `--risk` pour choisir `light`. Seul `TaskService.add` pose le risque : `flows/engine.py:272,392` et six autres appelants de `create_task` (a2a_adapter, task_board_ledger, dispatch_executor, beads_adapter, task_flow_adapter, task_unification) restent en `standard`.
 
 ## [3.62.1] - 2026-10-03
 

@@ -346,15 +346,21 @@ def memory_lint(
     ctx: typer.Context,
     project_root: Path = typer.Option(Path(), "--project-root", help="Racine du projet."),  # noqa: B008
     as_json: bool = typer.Option(False, "--json", help="Rapport JSON sur stdout."),
+    allow_empty: bool = typer.Option(False, "--allow-empty", help="Accepter une mémoire vide (code 0)."),
 ) -> None:
     """Cohérence de la mémoire : contradictions, doublons, orphelins, péremption.
 
     Sort en code 1 dès qu'une erreur est relevée (une contradiction entre deux
-    fichiers de mémoire en est une) ; les avertissements n'échouent pas.
+    fichiers de mémoire en est une) ; code 2 si aucune mémoire n'a été lue
+    (sauf --allow-empty) ; les avertissements n'échouent pas.
     """
+    from grimoire.cli.cmd_memory import _load_config_context
     from grimoire.tools.memory_lint import MemoryLint
 
-    report = MemoryLint(project_root.resolve()).run()
+    # Même résolution de racine que les commandes sœurs : remonte jusqu'au
+    # project-context.yaml, sort en 1 hors projet.
+    _cfg, root = _load_config_context(project_root)
+    report = MemoryLint(root).run()
     if as_json or _get_fmt(ctx) == "json":
         typer.echo(json.dumps(report.to_dict(), indent=2, ensure_ascii=False))
     else:
@@ -367,3 +373,7 @@ def memory_lint(
                 console.print(f"[red]✗[/red] {issue.title} — {issue.description}")
     if report.error_count:
         raise typer.Exit(1)
+    if report.files_scanned == 0 and not allow_empty:
+        # Rien lu = rien vérifié : ce n'est pas un vert.
+        console.print("[red]Aucune mémoire lue[/red] — rien n'a été vérifié (--allow-empty pour l'accepter).")
+        raise typer.Exit(2)

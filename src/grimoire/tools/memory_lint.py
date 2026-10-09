@@ -293,7 +293,16 @@ def check_contradictions(files: list[MemoryFile]) -> list[LintIssue]:
     positives: list[tuple[str, str]] = []  # (file_path, text)
     negatives: list[tuple[str, str]] = []
 
+    # Le journal des contradictions n'est pas une source de décisions : on y
+    # consigne des résolutions, il ne doit pas se contredire lui-même.
+    resolved = [
+        text for mf in files if mf.kind == "contradictions"
+        for _date, text in mf.entries if "resolved" in text.lower()
+    ]
+
     for mf in files:
+        if mf.kind == "contradictions":
+            continue
         for _date, text in mf.entries:
             is_pos, is_neg = _has_polarity(text)
             if is_pos:
@@ -308,6 +317,12 @@ def check_contradictions(files: list[MemoryFile]) -> list[LintIssue]:
                 continue
             sim = similarity(pos_text, neg_text)
             if sim >= CONTRADICTION_THRESHOLD:
+                if any(
+                    similarity(r, pos_text) >= CONTRADICTION_THRESHOLD
+                    and similarity(r, neg_text) >= CONTRADICTION_THRESHOLD
+                    for r in resolved
+                ):
+                    continue  # déjà consignée comme résolue
                 idx += 1
                 issues.append(LintIssue(
                     issue_id=f"ML-{idx:03d}",

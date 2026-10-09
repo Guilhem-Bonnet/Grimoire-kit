@@ -30,7 +30,7 @@ _RISK_CRITICAL_PATTERNS = re.compile(
     r"\b(drop\s+table|rm\s+-rf|delete\s+(all|database|schema|prod)|"
     r"truncate|wipe|nuke|overwrite\s+prod|force[\s-]push|reset[\s-]hard|"
     r"revoke\s+access|disable\s+(auth|security|tls|ssl)|"
-    r"secret|password|token|credential|api.?key)\b",
+    r"secret|password|(access|auth|api|bearer|refresh|session)[\s_-]?token|credential|api.?key)\b",
     re.IGNORECASE,
 )
 _RISK_HIGH_PATTERNS = re.compile(
