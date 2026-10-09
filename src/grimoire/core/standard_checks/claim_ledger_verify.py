@@ -56,11 +56,13 @@ def verify_claim_ledger(
     template_row = "| CL-001 |  | fait |  | hypothèse | faible | vérifier |"
     rows = [line for line in text.splitlines() if line.startswith("| CL-") and line.strip() != template_row]
     if not rows and not suppress_v0 and not rows_only:
-        _add_check(result, "claims.empty", "warning", "Claim ledger still holds only the template row.", path=rel_path)
+        severity = "error" if strict else "warning"
+        _add_check(result, "claims.empty", severity, "Claim ledger still holds only the template row.", path=rel_path)
     for line in rows:
         cells = [c.strip() for c in line.strip().strip("|").split("|")]
         if len(cells) < 7:
-            _add_check(result, "claims.row_invalid", "warning", f"Claim row is malformed: {line[:60]}", path=rel_path)
+            severity = "error" if strict else "warning"
+            _add_check(result, "claims.row_invalid", severity, f"Claim row is malformed: {line[:60]}", path=rel_path)
             continue
         claim_id, _claim, _kind, proof, status, _confidence, decision = cells[:7]
         if status == "prouvé" and not proof:
