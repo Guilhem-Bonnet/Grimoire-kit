@@ -283,6 +283,51 @@ def test_record_post_tool_use_approval_is_idempotent_and_pattern_scoped() -> Non
     assert record_post_tool_use_approval(rules, state, tool_name="Bash", tool_detail="rm -rf x") is False
 
 
+# ── W1-09: approval bound to the action fingerprint ──────────────────────────
+
+
+def test_approving_rm_a_does_not_let_rm_b_through() -> None:
+    """Défaut W1-09 : `approved` était un booléen par règle — approuver
+    `rm a` laissait passer `rm b`. L'approbation porte désormais sur l'empreinte
+    de l'action (outil + détail normalisé)."""
+    rules = (_approval_rule(pattern="Bash(rm:*)"),)
+    state = SessionState.new("s", datetime.now(UTC).isoformat())
+    assert record_post_tool_use_approval(rules, state, tool_name="Bash", tool_detail="rm a") is True
+
+    same = evaluate_temporal(rules, state, tool_name="Bash", tool_detail="rm a", is_write=True)
+    assert same.verdict is VerdictKind.ALLOW
+    other = evaluate_temporal(rules, state, tool_name="Bash", tool_detail="rm b", is_write=True)
+    assert other.verdict is VerdictKind.WARN
+    # L'évaluation ne perd ni ne gagne d'approbation.
+    from grimoire.policies.temporal import action_fingerprint
+
+    assert state.rule_state("approval").approved_fingerprints == [action_fingerprint("Bash", "rm a")]
+
+
+def test_fingerprint_ignores_whitespace_but_not_the_tool_or_the_target() -> None:
+    from grimoire.policies.temporal import action_fingerprint
+
+    assert action_fingerprint("Bash", "rm   a ") == action_fingerprint("Bash", "rm a")
+    assert action_fingerprint("Bash", "rm a") != action_fingerprint("Bash", "rm b")
+    assert action_fingerprint("Bash", "rm a") != action_fingerprint("Write", "rm a")
+
+
+def test_a_legacy_boolean_approval_without_fingerprint_asks_again() -> None:
+    rules = (_approval_rule(),)
+    state = SessionState.new("s", datetime.now(UTC).isoformat())
+    state.rule_state("approval").approved = True  # état d'avant W1-09
+    decision = evaluate_temporal(rules, state, tool_name="Bash", tool_detail="rm a", is_write=False)
+    assert decision.verdict is VerdictKind.WARN
+
+
+def test_approved_fingerprints_survive_a_save_load_round_trip() -> None:
+    state = SessionState.new("s", "2026-01-01T00:00:00+00:00")
+    rules = (_approval_rule(),)
+    record_post_tool_use_approval(rules, state, tool_name="Bash", tool_detail="rm a")
+    restored = SessionState.from_dict(state.to_dict(), session_id="s", started_at="2026-01-01T00:00:00+00:00")
+    assert restored.rule_state("approval").approved_fingerprints == state.rule_state("approval").approved_fingerprints
+
+
 # ── tool_pattern_matches: the "tool key" fix ─────────────────────────────────
 #
 # Defect found in real use on Grimoire-Forge: `tool_pattern` used to be

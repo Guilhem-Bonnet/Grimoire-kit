@@ -34,6 +34,7 @@ both backends — only the decision crosses into Rust.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -510,15 +511,40 @@ def evaluate_temporal(
     exact function exercised by the Rust parity tests.
     """
     now = now or datetime.now(UTC)
-    if _use_rust_backend():
-        verdict, reason, matched = _evaluate_rust(
-            rules, state, tool_name=tool_name, tool_detail=tool_detail, is_write=is_write, now=now
-        )
-    else:
-        verdict, reason, matched = _evaluate_python(
-            rules, state, tool_name=tool_name, tool_detail=tool_detail, is_write=is_write, now=now
-        )
+    # L'approbation porte sur l'empreinte de l'action : le booléen `approved`
+    # que lisent les deux backends est rendu vrai pour CETTE action seulement,
+    # puis ramené à « au moins une action approuvée » (W1-09).
+    fingerprint = action_fingerprint(tool_name, tool_detail)
+    approval_states = [state.rules[r.id] for r in rules if r.require_approval and r.id in state.rules]
+    for rs in approval_states:
+        rs.approved = fingerprint in rs.approved_fingerprints
+    try:
+        if _use_rust_backend():
+            verdict, reason, matched = _evaluate_rust(
+                rules, state, tool_name=tool_name, tool_detail=tool_detail, is_write=is_write, now=now
+            )
+        else:
+            verdict, reason, matched = _evaluate_python(
+                rules, state, tool_name=tool_name, tool_detail=tool_detail, is_write=is_write, now=now
+            )
+    finally:
+        for rs in approval_states:
+            rs.approved = bool(rs.approved_fingerprints)
     return TemporalDecision(verdict=verdict, reason=reason, matched_rules=matched, state=state)
+
+
+_MAX_APPROVED_FINGERPRINTS = 64
+"""Borne par règle : les plus anciennes empreintes sortent (re-demande, jamais ouvert)."""
+
+
+def action_fingerprint(tool_name: str, tool_detail: str = "") -> str:
+    """Empreinte stable d'une action : ``sha256(outil + détail normalisé)``.
+
+    Le détail est la commande (Bash) ou la cible (fichier) telle que la voit
+    ``policy_tool_detail`` ; les espaces sont normalisés, rien d'autre.
+    """
+    normalized = " ".join(tool_detail.split())
+    return hashlib.sha256(f"{tool_name}\0{normalized}".encode()).hexdigest()
 
 
 def _mark_approved_python(rules: Sequence[PolicyRule], tool_name: str, tool_detail: str) -> list[str]:
@@ -535,7 +561,7 @@ def _mark_approved_rust(rules: Sequence[PolicyRule], tool_name: str, tool_detail
 def record_post_tool_use_approval(
     rules: Sequence[PolicyRule], state: SessionState, *, tool_name: str, tool_detail: str = ""
 ) -> bool:
-    """Mark every ``require_approval`` rule matching *tool_name* as approved.
+    """Record the executed action's fingerprint on every matching ``require_approval`` rule.
 
     The counterpart to the fix in :func:`_evaluate_one_rule`'s docstring:
     ``PostToolUse`` is the one event a host emits only when the tool actually
@@ -558,9 +584,14 @@ def record_post_tool_use_approval(
         if _use_rust_backend()
         else _mark_approved_python(approval_rules, tool_name, tool_detail)
     )
+    fingerprint = action_fingerprint(tool_name, tool_detail)
     changed = False
     for rule_id in rule_ids:
         rule_state = state.rule_state(rule_id)
+        if fingerprint not in rule_state.approved_fingerprints:
+            rule_state.approved_fingerprints.append(fingerprint)
+            del rule_state.approved_fingerprints[:-_MAX_APPROVED_FINGERPRINTS]
+            changed = True
         if not rule_state.approved:
             rule_state.approved = True
             changed = True

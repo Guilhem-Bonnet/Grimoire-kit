@@ -54,7 +54,10 @@ class RuleState:
     writes: int = 0
     cost_usd: float = 0.0
     approved: bool = False
-    """Set the first time a ``require_approval`` rule matched and asked."""
+    """Au moins une action a été approuvée (``approved_fingerprints`` non vide)."""
+    approved_fingerprints: list[str] = field(default_factory=list)
+    """Empreintes (voir ``temporal.action_fingerprint``) des actions réellement
+    exécutées après un ``ask`` : l'approbation porte sur l'action, pas sur la règle."""
     hits: list[str] = field(default_factory=list)
     """ISO timestamps of past matches, kept for :class:`CooldownRule` windows."""
 
@@ -64,6 +67,7 @@ class RuleState:
             "writes": self.writes,
             "cost_usd": self.cost_usd,
             "approved": self.approved,
+            "approved_fingerprints": list(self.approved_fingerprints),
             "hits": list(self.hits),
         }
 
@@ -74,6 +78,7 @@ class RuleState:
             writes=int(d.get("writes", 0)) if isinstance(d.get("writes"), int | float) else 0,
             cost_usd=float(d.get("cost_usd", 0.0)) if isinstance(d.get("cost_usd"), int | float) else 0.0,
             approved=bool(d.get("approved", False)),
+            approved_fingerprints=[str(f) for f in d.get("approved_fingerprints", []) if isinstance(f, str)],
             hits=[str(h) for h in d.get("hits", []) if isinstance(h, str)],
         )
 

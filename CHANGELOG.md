@@ -7,6 +7,11 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- fix(policies): l'approbation d'une règle `require_approval` est liée à l'empreinte de l'action, plus au nom de l'outil (W1-09). Constat : `RuleState.approved` était un booléen par règle, posé par `record_post_tool_use_approval` pour toute règle dont le motif correspondait — approuver `rm a` laissait passer `rm b` sans nouvelle demande.
+  - `policies/temporal.py` : `action_fingerprint(tool_name, tool_detail)` = sha256 de l'outil et du détail aux espaces normalisés ; `record_post_tool_use_approval` ajoute l'empreinte de l'action réellement exécutée (bornée à 64 par règle), `evaluate_temporal` ne considère la règle approuvée que si l'empreinte de l'appel courant y figure (les deux backends lisent le même booléen, rendu vrai pour cette action seulement). Un état hérité avec `approved: true` sans empreinte redemande une fois (fail-closed). `policies/session_state.py` : champ persisté `approved_fingerprints` ; `grimoire policies status --json` l'expose par règle.
+  - Rouge-avant / vert-après : `tests/unit/test_temporal_policies.py` et `tests/unit/cli/test_cmd_policies.py` (5 tests, 5 rouges avant).
+  - Non fait : l'empreinte ne couvre pas le contenu des cibles (seul le détail transmis par `policy_tool_detail` est haché) ; le cœur Rust n'est pas modifié et ses tests de parité sont ignorés sans module compilé, donc non rejoués ici.
+
 ## [3.62.1] - 2026-10-03
 
 - fix(hosts): `Stop` nomme les claims concurrents au lieu de juger la tâche fantôme `bootstrap` (issue #692, suite de #680/#686 ; empilée sur la PR #696). Rejeu du 2026-10-02 : deux claims sans session, aucune écriture — `UserPromptSubmit` nommait les candidates et `grimoire task attach <id>`, mais `decide_evidence_gate` ne traitait l'ambiguïté qu'après une écriture et retombait sinon sur « Tâche bootstrap encore en état proposed ».

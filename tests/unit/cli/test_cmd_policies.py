@@ -156,6 +156,36 @@ def test_reset_session_json_output(tmp_path: Path) -> None:
     assert payload["deleted"] is True
 
 
+def test_status_json_exposes_the_approved_fingerprints(tmp_path: Path) -> None:
+    _write_policies_yaml(
+        tmp_path,
+        """
+rules:
+  - id: rm-approval
+    description: "approval"
+    action_kinds: []
+    mutation_classes: []
+    risk_profiles: []
+    verdict_on_match: warn
+    reason_template: "approval"
+    tool_pattern: "Bash(rm:*)"
+    require_approval: true
+""",
+    )
+    state = SessionState.new("sess-fp", "2026-01-01T00:00:00+00:00")
+    rule_state = state.rule_state("rm-approval")
+    rule_state.approved = True
+    rule_state.approved_fingerprints = ["a" * 64]
+    save_session_state(tmp_path, state, now_iso="2026-01-01T00:05:00+00:00")
+
+    result = runner.invoke(
+        app, ["policies", "status", "--session-id", "sess-fp", "--project-root", str(tmp_path), "--json"]
+    )
+    assert result.exit_code == 0
+    row = json.loads(result.output)["rules"][0]
+    assert row["approved_fingerprints"] == ["a" * 64]
+
+
 # ── Defect 5: `doctor` warns about a globally-blocking `per_session` rule ────
 
 
