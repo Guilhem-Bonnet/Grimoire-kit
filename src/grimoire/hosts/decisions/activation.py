@@ -365,7 +365,7 @@ def decide_activation(hook: HookInput) -> Decision:
         if active.is_fallback:
             profile = active_profile_id(hook.project_root)
             if profile in BLOCKING_PROFILES:
-                enrolment = no_task_context(profile, active.candidates)
+                enrolment = no_task_context(profile, active.candidates, active.expired)
         else:
             link = link_session(hook, active)
     directive = (

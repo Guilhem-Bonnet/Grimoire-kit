@@ -102,9 +102,61 @@ def _new_id(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:12]}"
 
 
+def _acquire_os_lock(fh: Any) -> bool:
+    """Prend le verrou exclusif de l'OS sur *fh* ; ``False`` si aucun n'a pu être pris.
+
+    POSIX : ``fcntl.flock`` (bloquant). Windows : ``msvcrt.locking`` sur le
+    premier octet du fichier de verrou — ``LK_LOCK`` réessaie une dizaine de
+    secondes puis lève ``OSError``. Un FS sans ``flock`` (certains montages
+    réseau) ou un Windows contendu au-delà de ce délai rendent ``False`` :
+    c'est à l'appelant de décider si l'écriture peut se passer du verrou.
+    """
+    try:
+        import fcntl
+    except ImportError:
+        fcntl = None  # type: ignore[assignment]
+    if fcntl is not None:
+        try:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+            return True
+        except OSError:
+            return False
+    try:
+        import msvcrt
+    except ImportError:
+        return False
+    try:
+        fh.seek(0)
+        msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)  # type: ignore[attr-defined,unused-ignore]
+        return True
+    except OSError:
+        return False
+
+
+def _release_os_lock(fh: Any) -> None:
+    try:
+        import fcntl
+    except ImportError:
+        fcntl = None  # type: ignore[assignment]
+    with contextlib.suppress(OSError):
+        if fcntl is not None:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+            return
+        import msvcrt
+
+        fh.seek(0)
+        msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)  # type: ignore[attr-defined,unused-ignore]
+
+
 @contextmanager
-def _ledger_file_lock(target_path: Path) -> Iterator[None]:
+def _ledger_file_lock(target_path: Path) -> Iterator[bool]:
     """Verrou exclusif inter-process sur *target_path* (POSIX/Windows, best-effort).
+
+    Rend ``True`` quand le verrou de l'OS est réellement tenu. Sans lui
+    (:func:`_acquire_os_lock` rend ``False``), le bloc s'exécute quand même :
+    un simple ajout d'événement reste best-effort comme avant, mais un claim
+    — qui doit être un compare-and-set — est refusé par
+    :meth:`MissionLedger.transition_task` (fail-closed, issue #710).
 
     ``_atomic_append`` lit le fichier entier, ajoute une ligne, puis renomme
     un temporaire par-dessus : sans ce verrou, deux écrivains concurrents
@@ -118,23 +170,15 @@ def _ledger_file_lock(target_path: Path) -> Iterator[None]:
     target_path.parent.mkdir(parents=True, exist_ok=True)
     lock_path = target_path.with_name(f".{target_path.name}.lock")
     fh = None
+    locked = False
     try:
         fh = lock_path.open("w", encoding="utf-8")
-        try:
-            import fcntl
-
-            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
-        except (ImportError, OSError):
-            pass  # Windows ou FS sans flock : best-effort
-        yield
+        locked = _acquire_os_lock(fh)
+        yield locked
     finally:
         if fh is not None:
-            try:
-                import fcntl
-
-                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
-            except (ImportError, OSError):
-                pass
+            if locked:
+                _release_os_lock(fh)
             fh.close()
 
 
@@ -281,7 +325,16 @@ class MissionLedger:
         """Record a custom event on any ledger entity (public API)."""
         return self._append_event(event_type, entity_id, entity_kind, actor_id, payload)
 
-    def _append_event(self, event_type: str, entity_id: str, entity_kind: str, actor_id: str, payload: dict[str, Any]) -> LedgerEvent:
+    def _append_event(
+        self,
+        event_type: str,
+        entity_id: str,
+        entity_kind: str,
+        actor_id: str,
+        payload: dict[str, Any],
+        *,
+        lock_held: bool = False,
+    ) -> LedgerEvent:
         evt = LedgerEvent(
             id=_new_id("evt"),
             event_type=event_type,
@@ -291,29 +344,42 @@ class MissionLedger:
             created_at=_now_iso(),
             payload=payload,
         )
-        self._atomic_append(self._events_path, evt.to_dict())
+        if lock_held:
+            self._write_appended(self._events_path, evt.to_dict())
+        else:
+            self._atomic_append(self._events_path, evt.to_dict())
         self._invalidate()
         return evt
 
     def _atomic_append(self, path: Path, record: dict[str, Any]) -> None:
-        line = json.dumps(record, ensure_ascii=False) + "\n"
         # Verrouillé : lire « existing » puis renommer un temporaire par-dessus
         # n'est atomique que pour un seul écrivain à la fois. Deux requêtes
         # concurrentes (cockpit multi-thread) sans ce verrou perdaient
         # silencieusement l'une des deux écritures (« lost update »).
         with _ledger_file_lock(path):
-            fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".tmp-ledger-")
-            try:
-                # Copy existing content + append new line
-                existing = path.read_text(encoding="utf-8") if path.exists() else ""
-                with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                    fh.write(existing)
-                    fh.write(line)
-                Path(tmp).replace(path)
-            except Exception:
-                with contextlib.suppress(OSError):
-                    Path(tmp).unlink()
-                raise
+            self._write_appended(path, record)
+
+    @staticmethod
+    def _write_appended(path: Path, record: dict[str, Any]) -> None:
+        """Ajoute *record* à *path* par temporaire + rename — l'appelant tient le verrou.
+
+        ``flock`` n'est pas réentrant d'un descripteur à l'autre : qui tient déjà
+        :func:`_ledger_file_lock` (``transition_task``) écrit par ici, jamais
+        par :meth:`_atomic_append`, sous peine de s'attendre lui-même.
+        """
+        line = json.dumps(record, ensure_ascii=False) + "\n"
+        fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".tmp-ledger-")
+        try:
+            # Copy existing content + append new line
+            existing = path.read_text(encoding="utf-8") if path.exists() else ""
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(existing)
+                fh.write(line)
+            Path(tmp).replace(path)
+        except Exception:
+            with contextlib.suppress(OSError):
+                Path(tmp).unlink()
+            raise
 
     def _next_seq(self, prefix: str, id_map: dict[str, Any]) -> str:
         existing = [k for k in id_map if k.startswith(prefix)]
@@ -437,11 +503,60 @@ class MissionLedger:
         reason: str = "",
         claim: TaskClaim | None = None,
         extra_payload: dict[str, Any] | None = None,
+        expected_from: TaskState | None = None,
     ) -> MissionTask:
-        self._load()
+        """Valide puis écrit la transition, en un seul geste sous le verrou du journal.
+
+        Issue #710 : l'état était lu (cache de l'instance, parfois chargé bien
+        avant) hors verrou, puis l'événement ajouté sous verrou — deux claims
+        simultanés réussissaient tous les deux. Désormais le journal est relu
+        *sous* :func:`_ledger_file_lock` et la transition validée sur cet état
+        frais : un compare-and-set. *expected_from* (l'état sur lequel
+        l'appelant a jugé, ex. :meth:`TaskService.transition` et son gate)
+        resserre encore : si l'état a bougé depuis, la transition est refusée.
+
+        Un claim (``→ claimed``) sans verrou de l'OS réellement tenu
+        (:func:`_acquire_os_lock` rend ``False`` : FS sans ``flock``, Windows
+        contendu au-delà du délai de ``msvcrt.locking``) est refusé — fail-closed :
+        deux titulaires valent pire qu'un claim à refaire. Les autres
+        transitions gardent le best-effort historique.
+        """
+        with _ledger_file_lock(self._events_path) as locked:
+            if to_state is TaskState.CLAIMED and not locked:
+                raise GrimoireMissionError(
+                    f"Claim refusé pour {task_id} : aucun verrou inter-processus n'a pu être pris sur "
+                    f"{self._events_path.name} — sans lui, deux claims simultanés pourraient réussir tous les deux. "
+                    "Réessaie ; si cela persiste, le système de fichiers ne supporte pas le verrouillage."
+                )
+            self._invalidate()
+            self._load()
+            return self._transition_locked(task_id, to_state, actor_id, reason, claim, extra_payload, expected_from)
+
+    def _transition_locked(
+        self,
+        task_id: str,
+        to_state: TaskState,
+        actor_id: str,
+        reason: str,
+        claim: TaskClaim | None,
+        extra_payload: dict[str, Any] | None,
+        expected_from: TaskState | None,
+    ) -> MissionTask:
         task = self._tasks.get(task_id)
         if task is None:
             raise GrimoireMissionError(f"Task not found: {task_id}")
+        held = task.claim
+        if to_state is TaskState.CLAIMED and task.status in (TaskState.CLAIMED, TaskState.RUNNING) and held is not None:
+            session = f", session {held.session_id}" if held.session_id else ""
+            raise GrimoireMissionError(
+                f"Claim refusé pour {task_id} : déjà {task.status.value} par {held.actor_id}{session} "
+                f"jusqu'à {held.expires_at or 'sans expiration'}"
+            )
+        if expected_from is not None and task.status is not expected_from:
+            raise GrimoireMissionError(
+                f"Transition refusée pour {task_id} : l'état a changé entre-temps "
+                f"({expected_from.value} attendu, {task.status.value} trouvé) — relire la tâche puis réessayer"
+            )
         allowed = _TASK_TRANSITIONS.get(task.status, frozenset())
         if to_state not in allowed:
             raise GrimoireMissionError(
@@ -466,7 +581,7 @@ class MissionLedger:
                     f"extra_payload ne peut pas redéfinir {', '.join(sorted(clashes))} sur task.transitioned"
                 )
             payload.update(extra_payload)
-        self._append_event("task.transitioned", task_id, "task", actor_id, payload)
+        self._append_event("task.transitioned", task_id, "task", actor_id, payload, lock_held=True)
         self._load()
         return self._tasks[task_id]
 

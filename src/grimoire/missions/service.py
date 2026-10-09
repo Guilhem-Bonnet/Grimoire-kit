@@ -357,8 +357,17 @@ class TaskService:
         if verdict.blocked:
             self._record_refusal(task, target, verdict, actor)
             raise TaskRefusedError(task_id, verdict)
+        # `expected_from` : le gate a jugé `task.status` ; si l'état a bougé
+        # depuis (autre session, autre processus), le ledger refuse sous son
+        # verrou au lieu d'écrire une transition jugée sur un état périmé (#710).
         moved = self.ledger.transition_task(
-            task_id, target, actor_id=actor, reason=reason, claim=claim, extra_payload=extra_payload
+            task_id,
+            target,
+            actor_id=actor,
+            reason=reason,
+            claim=claim,
+            extra_payload=extra_payload,
+            expected_from=task.status,
         )
         self._consolidate(moved, target, actor=actor, reason=reason)
         return TaskMove(task=moved, previous=task.status, verdict=verdict, board_path=self.project_board())

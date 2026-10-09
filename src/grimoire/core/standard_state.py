@@ -237,11 +237,17 @@ class ActiveTask:
     ``ambiguous`` (plusieurs claims, aucun rattaché à cette session : la tâche
     reste ``bootstrap`` mais *candidates* nomme les claims en concurrence, pour
     que le message dise lesquels au lieu de « aucune tâche »).
+
+    *expired* (issue #710) : les claims dont le bail est dépassé et qui
+    auraient sinon désigné la tâche — rattachés à cette session, ou sans
+    session. Ils ne désignent plus rien ; ils sont nommés pour que le message
+    dise « claim expiré » plutôt que « aucune tâche ».
     """
 
     task_id: str
     source: str
     candidates: tuple[str, ...] = ()
+    expired: tuple[str, ...] = ()
 
     @property
     def is_fallback(self) -> bool:
@@ -280,10 +286,13 @@ class _Claim(NamedTuple):
     actor: str
     #: ISO 8601 du dernier ``task attach`` explicite, ``""`` sinon (issue #695).
     explicit_at: str
+    #: Bail dépassé (:meth:`TaskClaim.is_expired`, issue #710) : le claim ne
+    #: désigne plus aucune tâche, il n'est plus lu que pour le dire.
+    expired: bool = False
 
 
-def _active_claims(project_root: Path, *, actor: str = "") -> list[_Claim]:
-    """Les claims ``claimed``/``running`` — ``session_id`` vide si non rattaché.
+def _held_claims(project_root: Path, *, actor: str = "") -> list[_Claim]:
+    """Les claims ``claimed``/``running``, expirés compris — ``session_id`` vide si non rattaché.
 
     Ne lève jamais : un ledger illisible vaut « aucun claim ».
     """
@@ -301,10 +310,20 @@ def _active_claims(project_root: Path, *, actor: str = "") -> list[_Claim]:
     if actor:
         active = [t for t in active if t.claim is not None and t.claim.actor_id == actor]
     return [
-        _Claim(t.id, t.claim.session_id, t.claim.actor_id, t.claim.attached_explicit_at)
+        _Claim(t.id, t.claim.session_id, t.claim.actor_id, t.claim.attached_explicit_at, t.claim.is_expired())
         for t in active
         if t.claim is not None
     ]
+
+
+def _active_claims(project_root: Path, *, actor: str = "") -> list[_Claim]:
+    """Les claims vivants : ``claimed``/``running`` *et* bail non expiré (issue #710).
+
+    Un claim expiré ne désigne plus la tâche de personne — ni de la session qui
+    le portait, ni d'une autre : le bail est la seule preuve que quelqu'un y
+    travaille encore. Ne lève jamais : un ledger illisible vaut « aucun claim ».
+    """
+    return [c for c in _held_claims(project_root, actor=actor) if not c.expired]
 
 
 def claimed_task_ids(project_root: Path, *, actor: str = "") -> list[str]:
@@ -365,10 +384,20 @@ def resolve_active_task(
     3. The Mission Ledger's single ``claimed``/``running`` task, restricted to
        ``GRIMOIRE_ACTOR``'s claims when that is set. The ledger is the source
        (ADR-005); a claim is visible here the moment it is written, whether or
-       not the board has been re-projected since.
+       not the board has been re-projected since. When the caller knows its
+       session, a claim attached to *another* session is never inherited
+       (issue #710): only a claim with no session yet qualifies — the one the
+       hook then attaches (:func:`grimoire.hosts.decisions.enrolment.link_session`).
+       A caller with no identifiable session (CLI outside any host) cannot
+       tell whose claim it is and keeps the single claim.
     4. The board's single ``in_progress`` task — a project whose board was
        written by hand, or imported, and has no ledger.
     5. ``bootstrap``.
+
+    Claims whose lease has expired (:meth:`TaskClaim.is_expired`, issue #710)
+    take part in none of these rules, a session's own included: the answer
+    falls back and names them in ``expired``. Hence a claim without a session
+    is retained only while its lease runs.
 
     Several claims and none attached to this session are ambiguous: the answer
     is ``bootstrap`` with source ``ambiguous`` and the competing claims in
@@ -394,12 +423,17 @@ def resolve_active_task(
             except ValueError:
                 pass
 
-    claims = _active_claims(project_root, actor=actor)
-    if len(claims) == 1:
+    every_held = _held_claims(project_root)
+    held = [c for c in every_held if c.actor == actor] if actor else every_held
+    claims = [c for c in held if not c.expired]
+    # Issue #710 : un claim d'une autre session ne désigne jamais la tâche de
+    # celle-ci — B retombe sur bootstrap/ambiguous, jamais sur la tâche de A.
+    if len(claims) == 1 and (not session or claims[0].session_id in ("", session)):
         try:
             return ActiveTask(normalize_task_id(claims[0].task_id), "ledger_claim")
         except ValueError:
             pass
+    expired = tuple(c.task_id for c in held if c.expired and c.session_id in ("", session))
 
     root = project_root.resolve()
 
@@ -416,11 +450,17 @@ def resolve_active_task(
     in_progress = _cached_or_fresh(
         root, "board_in_progress", TASK_BOARD_RELPATH, compute, write_cache=write_cache
     )
+    # Le board projette les claims du ledger en `in_progress` : sans ce filtre,
+    # un claim expiré ou tenu par une autre session reviendrait par la règle 4.
+    disqualified = {
+        c.task_id for c in every_held if c.expired or (session and c.session_id not in ("", session))
+    }
+    in_progress = [tid for tid in in_progress if tid not in disqualified]
     if len(in_progress) == 1:
         return ActiveTask(normalize_task_id(in_progress[0]), "board")
     if len(claims) > 1:
-        return ActiveTask("bootstrap", "ambiguous", tuple(c.task_id for c in claims))
-    return ActiveTask("bootstrap", "bootstrap")
+        return ActiveTask("bootstrap", "ambiguous", tuple(c.task_id for c in claims), expired)
+    return ActiveTask("bootstrap", "bootstrap", expired=expired)
 
 
 def active_task_id(
