@@ -114,7 +114,7 @@ def _rule_row(rule_id: str, rule_by_id: dict[str, Any], state: RuleState) -> dic
         "calls": state.calls,
         "writes": state.writes,
         "cost_usd": state.cost_usd,
-        "approved": state.approved,
+        "approved": bool(state.approved_fingerprints),
         "approved_fingerprints": list(state.approved_fingerprints),
         "hits": len(state.hits),
         "summary": "; ".join(lines) or "—",

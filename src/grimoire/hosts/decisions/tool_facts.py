@@ -364,8 +364,11 @@ def approval_fingerprint(tool_name: str, tool_input: dict[str, Any], facts: Tool
     sa valeur y est remplacée par la commande normalisée (blancs hors
     guillemets) ; ``description``/``timeout`` (Bash natif) et
     ``explanation``/``goal`` (Copilot ``run_in_terminal``) sont ignorés, tout
-    autre argument compte. Calculée au PreToolUse et au PostToolUse depuis le même
-    ``tool_input``, donc identique des deux côtés.
+    autre argument compte. Calculée au PreToolUse puis, sans identifiant d'appel,
+    recalculée au PostToolUse depuis son ``tool_input`` : un hook qui réécrit
+    l'entrée entre les deux (``git status`` -> ``rtk git status``) la change.
+    Avec un ``tool_use_id``, le PostToolUse reprend donc l'empreinte retenue au
+    PreToolUse (``temporal.remember_pending_approval``) au lieu de la recalculer.
     """
     from grimoire.policies.temporal import action_fingerprint, normalize_command
 

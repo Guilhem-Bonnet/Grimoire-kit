@@ -40,6 +40,7 @@ from grimoire.policies.temporal import (
     evaluate_temporal,
     glob_match,
     record_post_tool_use_approval,
+    remember_pending_approval,
     tool_pattern_matches,
 )
 
@@ -270,6 +271,38 @@ def test_require_approval_allows_once_post_tool_use_recorded_it() -> None:
     assert allowed.verdict is VerdictKind.ALLOW
 
 
+def test_pending_approval_is_consumed_by_tool_use_id_and_survives_a_reload(tmp_path: Path) -> None:
+    """Revue W1-09 tour 4 S2 : le Post reprend l'empreinte et les règles du Pre."""
+    rules = (_approval_rule(pattern="Bash(git:*)"),)
+    now_iso = datetime.now(UTC).isoformat()
+    state = SessionState.new("s-pending", now_iso)
+    assert remember_pending_approval(
+        rules, state, tool_use_id="t1", tool_name="Bash", tool_detail="git status", fingerprint="fp-pre"
+    )
+    save_session_state(tmp_path, state, now_iso=now_iso)
+    reloaded = load_session_state(tmp_path, "s-pending", now_iso=now_iso)
+    assert reloaded.pending_approvals["t1"]["fingerprint"] == "fp-pre"
+    # Le Post voit `rtk git status` : le motif `Bash(git:*)` n'y correspond plus.
+    assert record_post_tool_use_approval(
+        rules, reloaded, tool_name="Bash", tool_detail="rtk git status", fingerprint="fp-post", tool_use_id="t1"
+    )
+    assert reloaded.rule_state("approval").approved_fingerprints == ["fp-pre"]
+    assert "t1" not in reloaded.pending_approvals
+
+
+def test_pending_approval_needs_an_id_and_a_matching_rule_and_stays_bounded() -> None:
+    rules = (_approval_rule(pattern="Bash(git:*)"),)
+    state = SessionState.new("s", datetime.now(UTC).isoformat())
+    assert not remember_pending_approval(rules, state, tool_use_id="", tool_name="Bash", tool_detail="git status")
+    assert not remember_pending_approval(rules, state, tool_use_id="t", tool_name="Bash", tool_detail="ls")
+    assert not state.pending_approvals
+    for index in range(80):
+        remember_pending_approval(rules, state, tool_use_id=f"t{index}", tool_name="Bash", tool_detail="git status")
+    assert len(state.pending_approvals) == 64
+    assert "t79" in state.pending_approvals
+    assert "t0" not in state.pending_approvals
+
+
 def test_record_post_tool_use_approval_is_idempotent_and_pattern_scoped() -> None:
     rules = (_approval_rule(pattern="Bash(rm:*)"),)
     state = SessionState.new("s", datetime.now(UTC).isoformat())
@@ -354,6 +387,14 @@ def test_fingerprint_keeps_whitespace_inside_a_quoted_argument() -> None:
         # Motifs extglob : @(a b) et @(a  b) ne reconnaissent pas les mêmes chaînes.
         ("ls @(a b)", "ls @(a  b)"),
         ("ls !(a b)", "ls !(a  b)"),
+        # Revue W1-09 tour 4 S1 : guillemets typographiques (PowerShell les lit comme des guillemets).
+        ("Remove-Item \u201ca  b\u201d", "Remove-Item \u201ca b\u201d"),
+        ("Remove-Item \u201ea  b\u201c", "Remove-Item \u201ea b\u201c"),
+        ("Remove-Item \u2018a  b\u2019", "Remove-Item \u2018a b\u2019"),
+        ("Remove-Item \u201aa  b\u201b", "Remove-Item \u201aa b\u201b"),
+        ("Remove-Item \u00aba  b\u00bb", "Remove-Item \u00aba b\u00bb"),
+        # Indice de tableau associatif : `m[a  b]` et `m[a b]` sont deux clés.
+        ("declare -A m; m[k  1]=x", "declare -A m; m[k 1]=x"),
     ],
 )
 def test_fingerprint_never_merges_commands_the_shell_reads_differently(approved: str, other: str) -> None:

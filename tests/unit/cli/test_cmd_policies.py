@@ -212,6 +212,14 @@ rules:
     assert result.exit_code == 0
     assert "pas encore demandée" in result.output
     assert "approuvée" not in result.output
+    as_json = runner.invoke(
+        app, ["policies", "status", "--json", "--session-id", "sess-legacy", "--project-root", str(tmp_path)]
+    )
+    assert as_json.exit_code == 0
+    row = json.loads(as_json.output)["rules"][0]
+    assert row["approved"] is False
+    assert row["approved_fingerprints"] == []
+    assert row["summary"] == "pas encore demandée"
 
 
 # ── Defect 5: `doctor` warns about a globally-blocking `per_session` rule ────

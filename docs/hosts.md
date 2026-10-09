@@ -403,13 +403,21 @@ existante (`grimoire.hosts.decisions.evidence_trace`). L'approbation porte
 sur l'empreinte de l'action exécutée (outil + entrée complète de l'outil —
 toutes les cibles, arguments et contenu —, la commande n'étant normalisée que
 par ses blancs hors guillemets, et pas du tout dès que le shell lit lui-même
-ces blancs : `${...}`, `$[`, motifs extglob ; `description` et `timeout` du
+ces blancs : `${...}`, `$[`, `[`, motifs extglob, ni dès qu'un caractère hors
+ASCII (guillemets typographiques) apparaît ; `description` et `timeout` du
 Bash natif, `explanation` et `goal` du `run_in_terminal` de Copilot sont
 ignorés) :
 seule une action identique passe en `allow` silencieux, toute autre action
 correspondant au motif redemande. Les empreintes sont conservées dans
 `approved_fingerprints` (64 au plus par règle, les plus anciennes sortent) ; un
-état hérité sans empreinte redemande, et une session neuve aussi. Sans cette étape, un garde `require_approval`
+état hérité sans empreinte redemande, et une session neuve aussi. Un hook peut
+réécrire l'entrée de l'outil entre `PreToolUse` et `PostToolUse` (RTK :
+`git status` devient `rtk git status`, et `PostToolUse` reçoit l'entrée
+réécrite) : quand l'hôte envoie un `tool_use_id`, `PreToolUse` retient
+l'empreinte et les règles concernées dans `pending_approvals`
+(`remember_pending_approval`) et `PostToolUse` les reprend par cet identifiant
+au lieu de les recalculer ; sans identifiant, il retombe sur sa propre entrée
+(une entrée réécrite redemande alors, jamais plus lâche). Sans cette étape, un garde `require_approval`
 échouait ouvert (la version initiale de ce chantier faisait cette erreur,
 corrigée en revue le 2026-09-12).
 

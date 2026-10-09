@@ -538,12 +538,25 @@ def evaluate_temporal(
 _MAX_APPROVED_FINGERPRINTS = 64
 """Borne par règle : les plus anciennes empreintes sortent (re-demande, jamais ouvert)."""
 
+_MAX_PENDING_APPROVALS = 64
+"""Borne des approbations en attente (appels dont le PostToolUse n'est pas venu)."""
+
 
 #: Caractères après lesquels la lecture des guillemets n'est plus fiable
 #: (échappements, substitutions imbriquées, fins de ligne) ou où le shell lit
 #: lui-même les blancs hors guillemets (``${v// /_}``, ``$[1 + 2]``, motifs
-#: extglob ``@(a b)``) : texte brut.
-_RAW_ONLY_MARKERS = ("\\", "`", "$(", "${", "$[", "@(", "?(", "*(", "+(", "!(", "\n", "\r")
+#: extglob ``@(a b)``, indice de tableau associatif ``m[a  b]``) : texte brut.
+_RAW_ONLY_MARKERS = ("\\", "`", "$(", "${", "$[", "@(", "?(", "*(", "+(", "!(", "[", "\n", "\r")
+
+
+def _has_non_ascii(command: str) -> bool:
+    """Vrai dès qu'un caractère hors ASCII apparaît.
+
+    PowerShell cite avec les guillemets typographiques (U+2018 à U+201E) et
+    d'autres interpréteurs lisent encore d'autres signes ; la lecture ne porte
+    que sur ``'`` et ``"`` : tout caractère hors ASCII renvoie au texte brut.
+    """
+    return not command.isascii()
 
 
 def normalize_command(command: str) -> str:
@@ -555,14 +568,17 @@ def normalize_command(command: str) -> str:
     ce que ``shlex.join(shlex.split(...))`` effaçait en re-citant. Texte brut
     (``strip`` seul) dès que la lecture des guillemets n'est pas sûre :
     antislash (chemins Windows compris), backtick, ``$(``, ``${``, ``$[``,
-    motif extglob (``@(``, ``?(``, ``*(``, ``+(``, ``!(``), retour à la ligne,
-    guillemet non fermé. Toujours plus strict, jamais plus lâche.
+    motif extglob (``@(``, ``?(``, ``*(``, ``+(``, ``!(``), crochet ``[``
+    (indice de tableau associatif : ``m[a  b]`` et ``m[a b]`` sont deux clés),
+    retour à la ligne, caractère hors ASCII (guillemets typographiques
+    ``“”„‘’‚‛`` que PowerShell lit comme des guillemets), guillemet non fermé.
+    Toujours plus strict, jamais plus lâche.
 
     Limite : ``cmd.exe`` restitue ``echo a  b`` tel quel, donc deux blancs et
     un blanc y diffèrent alors qu'ils sont fusionnés ici ; l'empreinte ne
     lit que la syntaxe POSIX/PowerShell.
     """
-    if any(marker in command for marker in _RAW_ONLY_MARKERS):
+    if _has_non_ascii(command) or any(marker in command for marker in _RAW_ONLY_MARKERS):
         return command.strip()
     out: list[str] = []
     quote = ""
@@ -609,6 +625,50 @@ def _mark_approved_rust(rules: Sequence[PolicyRule], tool_name: str, tool_detail
     return list(_rust_core.matching_approval_rule_ids(rule_tuples, tool_name, tool_detail))
 
 
+def remember_pending_approval(
+    rules: Sequence[PolicyRule],
+    state: SessionState,
+    *,
+    tool_use_id: str,
+    tool_name: str,
+    tool_detail: str = "",
+    fingerprint: str | None = None,
+) -> bool:
+    """Retient au PreToolUse l'empreinte et les règles ``require_approval`` de l'appel.
+
+    Un hook peut réécrire l'entrée de l'outil entre le PreToolUse et le
+    PostToolUse (``git status`` devient ``rtk git status``) et le PostToolUse
+    reçoit l'entrée réécrite : recalculer l'empreinte depuis elle approuverait
+    une autre action que celle qui a été demandée, et la règle ne
+    correspondrait plus au motif. L'empreinte (un hachage) et les identifiants
+    de règles sont donc gardés par *tool_use_id* ; :func:`record_post_tool_use_approval`
+    les reprend. Sans *tool_use_id* ou sans règle correspondante, rien n'est
+    retenu et le PostToolUse retombe sur sa propre entrée. Borné à
+    ``_MAX_PENDING_APPROVALS`` appels, les plus anciens sortent. Renvoie vrai
+    si l'état a changé.
+    """
+    approval_rules = tuple(rule for rule in rules if rule.require_approval)
+    if not tool_use_id or not approval_rules:
+        return False
+    rule_ids = (
+        _mark_approved_rust(approval_rules, tool_name, tool_detail)
+        if _use_rust_backend()
+        else _mark_approved_python(approval_rules, tool_name, tool_detail)
+    )
+    if not rule_ids:
+        return False
+    if fingerprint is None:
+        fingerprint = action_fingerprint(tool_name, tool_detail)
+    entry = {"fingerprint": fingerprint, "rules": list(rule_ids)}
+    if state.pending_approvals.get(tool_use_id) == entry:
+        return False
+    state.pending_approvals.pop(tool_use_id, None)
+    state.pending_approvals[tool_use_id] = entry
+    for stale in list(state.pending_approvals)[:-_MAX_PENDING_APPROVALS]:
+        del state.pending_approvals[stale]
+    return True
+
+
 def record_post_tool_use_approval(
     rules: Sequence[PolicyRule],
     state: SessionState,
@@ -616,6 +676,7 @@ def record_post_tool_use_approval(
     tool_name: str,
     tool_detail: str = "",
     fingerprint: str | None = None,
+    tool_use_id: str = "",
 ) -> bool:
     """Record the executed action's fingerprint on every matching ``require_approval`` rule.
 
@@ -635,14 +696,23 @@ def record_post_tool_use_approval(
     approval_rules = tuple(rule for rule in rules if rule.require_approval)
     if not approval_rules:
         return False
-    rule_ids = (
-        _mark_approved_rust(approval_rules, tool_name, tool_detail)
-        if _use_rust_backend()
-        else _mark_approved_python(approval_rules, tool_name, tool_detail)
-    )
-    if fingerprint is None:
-        fingerprint = action_fingerprint(tool_name, tool_detail)
     changed = False
+    pending = state.pending_approvals.pop(tool_use_id, None) if tool_use_id else None
+    if pending is not None:
+        # L'action approuvée est celle que le PreToolUse a demandée, pas
+        # forcément celle que ce PostToolUse a vue (entrée réécrite par un hook).
+        changed = True
+        fingerprint = str(pending["fingerprint"])
+        known = {rule.id for rule in approval_rules}
+        rule_ids = [rule_id for rule_id in pending["rules"] if rule_id in known]
+    else:
+        rule_ids = (
+            _mark_approved_rust(approval_rules, tool_name, tool_detail)
+            if _use_rust_backend()
+            else _mark_approved_python(approval_rules, tool_name, tool_detail)
+        )
+        if fingerprint is None:
+            fingerprint = action_fingerprint(tool_name, tool_detail)
     for rule_id in rule_ids:
         rule_state = state.rule_state(rule_id)
         if fingerprint not in rule_state.approved_fingerprints:

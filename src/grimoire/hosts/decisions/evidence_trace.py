@@ -74,6 +74,7 @@ def _record_temporal_approval(hook: HookInput, facts: ToolFacts) -> None:
             tool_name=hook.tool_name or "unknown",
             tool_detail=policy_tool_detail(facts),
             fingerprint=approval_fingerprint(hook.tool_name or "unknown", hook.tool_input, facts),
+            tool_use_id=hook.tool_use_id,
         ):
             save_session_state(hook.project_root, state, now_iso=now_iso)
     except Exception:

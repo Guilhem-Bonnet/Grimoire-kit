@@ -285,6 +285,10 @@ class PolicyRule:
       ``run_in_terminal`` are ignored) allows silently; any other
       matching action asks again. ``approved_fingerprints`` keeps at most 64
       per rule and a legacy state without a fingerprint asks again
+      (a hook may rewrite the input between ``PreToolUse`` and
+      ``PostToolUse``: with a host ``tool_use_id`` the fingerprint taken at
+      ``PreToolUse`` is the one recorded,
+      :func:`grimoire.policies.temporal.remember_pending_approval`)
       (:func:`grimoire.policies.temporal.record_post_tool_use_approval`,
       wired from ``PostToolUse`` in
       :mod:`grimoire.hosts.decisions.evidence_trace`). Marking a rule
