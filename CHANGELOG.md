@@ -7,8 +7,9 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
-- fix(hooks): exception dans done_gate tracée comme guard.error au lieu de passer silencieusement (W1-06). `evidence_gate.py:_with_done_gate` captait une exception dans `evaluate_done_gate` et retournait `stale=False`, ce qui signifiait que le gate passait silencieusement (fail-open). Nouvelle fonction `_record_guard_error` écrit un événement `guard_error` dans le journal des événements, et le verdict devient `stale=True` pour bloquer fail-closed. L'événement est lisible par `grimoire verify`.
-  - Rouge-avant / vert-après : `tests/unit/test_hosts.py::test_done_gate_exception_traces_error_not_silent_allow` (1 test, 1 rouge avant).
+- fix(hooks): une panne du gate « fini » est tracée (`guard.error`) et jugée comme `_unevaluable_gate`, au lieu de passer en ALLOW muet (W1-06). `evidence_gate._with_done_gate` captait toute exception de `evaluate_done_gate` en `stale=False` (fail-open, aucune trace). Désormais : un événement `guard.error` (`guard_id`, `error_type`, `error_message`, `ts`) est écrit dans `guard-events.jsonl`, à côté de `evidence-log.jsonl` mais DISTINCT (l'inventaire observé ne compte pas une panne de garde comme une action) ; le refus passe par `resolve_done_gate_block`, la même résolution que le verdict `stale` (profil bloquant ET `enforce`, refroidissement 60 s, plafond de session) ; hors de ce cas, un avertissement dans `context`, jamais un BLOCK ; pas de `policy.hold` pour une panne ; message propre (« gate « fini » non évaluable : Type: msg »). `grimoire verify` émet `guard.error_recorded` (warning) quand la tâche a une panne tracée. Le premier jet de cette correction fabriquait un `stale=True, blocked=True` dans tous les profils, hors plafond, avec un `command_hint` vide.
+  - Rouge-avant / vert-après : `tests/unit/test_done_gate_guard_error.py` (8 tests, 6 rouges avant).
+  - Pas fait : la fiche W1-06 demande aussi `guard.disabled` pour `GRIMOIRE_DONE_GATE` et un test d'architecture sur les lectures d'environnement sous `src/grimoire/hosts` ; ni l'un ni l'autre n'est livré ici (W1-06 reste partiel). Seul le gate « fini » émet `guard.error` : les autres chemins fail-open éventuels ne sont pas recensés.
 
 ## [3.62.1] - 2026-10-03
 

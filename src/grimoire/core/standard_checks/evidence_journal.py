@@ -57,15 +57,29 @@ from grimoire.core.standard_generation import EVIDENCE_DIR, RUNS_DIR, normalize_
 
 __all__ = [
     "EVIDENCE_LOG_FILENAME",
+    "GUARD_ERROR_EVENT",
+    "GUARD_EVENTS_FILENAME",
     "append_evidence_event",
+    "append_guard_event",
     "evidence_log_relpath",
+    "guard_events_relpath",
     "has_observed_inventory",
     "read_evidence_log",
+    "read_guard_events",
     "regenerate_observed_inventory_section",
 ]
 
 #: Nom du fichier journal, un par tâche, sous ``RUNS_DIR / "evidence" / <task_id>/``.
 EVIDENCE_LOG_FILENAME = "evidence-log.jsonl"
+
+#: Journal des événements de garde (``guard.error``, W1-06), à côté du journal
+#: d'actions mais DISTINCT : ``evidence-log.jsonl`` est l'inventaire des actions
+#: observées (:func:`has_observed_inventory`) — y écrire une panne de garde
+#: ferait croire qu'une action a été observée.
+GUARD_EVENTS_FILENAME = "guard-events.jsonl"
+
+#: Type d'un événement de garde en panne (fail-open évité, W1-06).
+GUARD_ERROR_EVENT = "guard.error"
 
 #: Longueur maximale d'une commande consignée ; au-delà, tronquée avec un
 #: marqueur explicite plutôt que de laisser grossir le journal sans borne.
@@ -106,6 +120,11 @@ def evidence_log_relpath(task_id: str) -> Path:
     :func:`grimoire.core.standard_generation.ensure_grimoire_gitignore`).
     """
     return RUNS_DIR / "evidence" / normalize_task_id(task_id) / EVIDENCE_LOG_FILENAME
+
+
+def guard_events_relpath(task_id: str) -> Path:
+    """Chemin (relatif à la racine projet) du journal d'événements de garde de *task_id*."""
+    return RUNS_DIR / "evidence" / normalize_task_id(task_id) / GUARD_EVENTS_FILENAME
 
 
 def _truncate_command(command: str) -> str:
@@ -154,6 +173,35 @@ def append_evidence_event(project_root: Path, task_id: str, event: dict[str, Any
             handle.write(line + "\n")
     except OSError:
         return
+
+
+def append_guard_event(project_root: Path, task_id: str, event: dict[str, Any]) -> None:
+    """Append one guard event (``guard.error``…) to the task's guard journal. Best-effort: never raises."""
+    try:
+        full_path = project_root / guard_events_relpath(task_id)
+        full_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(full_path, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(event, ensure_ascii=False) + "\n")
+    except OSError:
+        return
+
+
+def read_guard_events(project_root: Path, task_id: str) -> list[dict[str, Any]]:
+    """Every well-formed guard event logged for *task_id*. ``[]`` when none or unreadable."""
+    full_path = project_root / guard_events_relpath(task_id)
+    try:
+        raw = full_path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    events: list[dict[str, Any]] = []
+    for line in raw.splitlines():
+        try:
+            parsed = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict) and parsed.get("type"):
+            events.append(parsed)
+    return events
 
 
 def read_evidence_log(project_root: Path, task_id: str) -> list[dict[str, Any]]:

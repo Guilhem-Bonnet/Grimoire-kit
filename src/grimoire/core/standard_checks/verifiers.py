@@ -692,6 +692,23 @@ def _has_pending_gate(text: str) -> bool:
     return False
 
 
+def _verify_guard_errors(root: Path, task_id: str, result: StandardVerificationResult) -> None:
+    """W1-06 : une garde tombée en panne (``guard.error``) est dite, jamais muette."""
+    from grimoire.core.standard_checks.evidence_journal import GUARD_ERROR_EVENT, read_guard_events
+
+    errors = [e for e in read_guard_events(root, task_id) if e.get("type") == GUARD_ERROR_EVENT]
+    if not errors:
+        return
+    last = errors[-1]
+    _add_check(
+        result,
+        "guard.error_recorded",
+        "warning",
+        f"{len(errors)} panne(s) de garde tracée(s) pour {task_id} (dernière : garde « {last.get('guard_id', '?')} », "
+        f"{last.get('error_type', '?')}) : la garde n'a pas pu juger, ce n'est pas un vert.",
+    )
+
+
 def _verify_evidence_pack(root: Path, task_id: str, result: StandardVerificationResult) -> None:
     # Issue #582 lot G2 : le journal observé par les hooks compte comme
     # preuve d'inventaire (garde fermée : absent/illisible = rien observé,
@@ -703,6 +720,7 @@ def _verify_evidence_pack(root: Path, task_id: str, result: StandardVerification
     from grimoire.core.standard_checks.evidence_journal import has_observed_inventory
 
     observed = has_observed_inventory(root, task_id)
+    _verify_guard_errors(root, task_id, result)
     rel_path = EVIDENCE_DIR / task_id / "evidence-pack.md"
     text = _text_file(root, rel_path)
     if not text:

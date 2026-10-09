@@ -70,7 +70,7 @@ from grimoire.core.standard_checks.evidence_journal import evidence_log_relpath,
 from grimoire.hosts.decisions.enrolment import BLOCKING_PROFILES
 from grimoire.hosts.decisions.tool_facts import command_surface, is_read_only_command
 
-__all__ = ["DoneGateVerdict", "evaluate_done_gate"]
+__all__ = ["DoneGateVerdict", "evaluate_done_gate", "resolve_done_gate_block"]
 
 #: Same directory as ``evidence-log.jsonl`` (see the module docstring) —
 #: never ``_grimoire-output/evidence`` (the versioned pack): a per-task
@@ -435,6 +435,24 @@ def _check_and_record_cap(project_root: Path, task_id: str, session_id: str, now
     return False
 
 
+def resolve_done_gate_block(
+    project_root: Path, task_id: str, session_id: str, profile: str, now_iso: str
+) -> tuple[bool, bool, bool]:
+    """``(enforce, blocked, capped)`` : la résolution unique du refus du gate « fini ».
+
+    Partagée par le verdict ``stale`` et par l'échec d'évaluation
+    (:mod:`.evidence_gate`) : un refus n'est possible que dans un profil
+    bloquant ET avec l'opt-in ``enforce``, et passe alors par le
+    refroidissement et le plafond de session. Consomme un tour du plafond
+    uniquement quand un refus est dû.
+    """
+    enforce = _is_enforced(project_root)
+    if profile in BLOCKING_PROFILES and enforce:
+        capped = _check_and_record_cap(project_root, task_id, session_id, now_iso)
+        return enforce, not capped, capped
+    return enforce, False, False
+
+
 def evaluate_done_gate(hook: Any, task_id: str, profile: str, *, now_iso: str | None = None) -> DoneGateVerdict:
     """The verdict for *task_id* — never raises, never touches the network or
     a model. ``hook`` is a :class:`grimoire.hosts.decisions._shared.HookInput`
@@ -488,13 +506,10 @@ def evaluate_done_gate(hook: Any, task_id: str, profile: str, *, now_iso: str | 
             last_mutation_ts=last_mutation_ts,
         )
 
-    enforce = _is_enforced(hook.project_root)
     command_hint = resolved_command or _last_check_command(check_entries) or "ta commande de test"
-    capped = False
-    blocked = False
-    if profile in BLOCKING_PROFILES and enforce:
-        capped = _check_and_record_cap(hook.project_root, task_id, hook.session_id, now_iso)
-        blocked = not capped
+    enforce, blocked, capped = resolve_done_gate_block(
+        hook.project_root, task_id, hook.session_id, profile, now_iso
+    )
     return DoneGateVerdict(
         stale=True,
         reason="mutation_after_last_check",
