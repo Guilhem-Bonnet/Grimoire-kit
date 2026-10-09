@@ -7,6 +7,10 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- fix(hosts): les hooks ne prennent plus la racine du projet dans le `cwd` du payload avant `CLAUDE_PROJECT_DIR` (issue #717). Le `cwd` suit chaque `cd` du shell : après un `cd` dans un sous-dossier ou un dépôt imbriqué, traces, caches et ledger étaient écrits et lus au mauvais endroit.
+  - `hosts/runtime.py` `resolve_project_root` : `--project-root`, puis `CLAUDE_PROJECT_DIR` / `GRIMOIRE_PROJECT_ROOT` / `COPILOT_WORKSPACE_FOLDER`, puis clés de projet du payload, puis le `cwd` remonté jusqu'au premier dossier portant `_grimoire/` ; sans marqueur, le `cwd` est conservé.
+  - Rouge-avant / vert-après : `tests/unit/test_hook_project_root.py`.
+
 ## [3.62.1] - 2026-10-03
 
 - fix(hosts): `Stop` nomme les claims concurrents au lieu de juger la tâche fantôme `bootstrap` (issue #692, suite de #680/#686 ; empilée sur la PR #696). Rejeu du 2026-10-02 : deux claims sans session, aucune écriture — `UserPromptSubmit` nommait les candidates et `grimoire task attach <id>`, mais `decide_evidence_gate` ne traitait l'ambiguïté qu'après une écriture et retombait sinon sur « Tâche bootstrap encore en état proposed ».
