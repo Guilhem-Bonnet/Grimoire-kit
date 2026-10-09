@@ -814,3 +814,148 @@ def test_fanout_phase1_payee_compte_pour_le_plafond_des_freres(tmp_path: Path) -
     assert node.verdict == "cost_capped", outcome.to_dict()
     assert node.cost_cap_reason == "cost_reached"
     assert node.attempts == 1  # seul le premier enfant est lancé
+
+
+# ── 10. Revue du tour 3 : plafond non évalué, coût du juge, motif par genre ─
+
+
+def _sibling_bp(tmp_path: Path, kind: str) -> tuple[Path, str, dict[str, dict]]:
+    """Un blueprint à un node du genre *kind* (à frères), son id, et la ``extra_map`` du fournisseur."""
+    _child(tmp_path)
+    node: dict = {"id": "gn", "kind": kind, "ref": "child.blueprint.json", "pins": []}
+    extra: dict[str, dict] = {}
+    if kind == "fanout":
+        node["acceptance"] = [{"run": "true"}]
+        extra["gn"] = {"fanout_items": ["a", "b", "c"]}
+    elif kind == "verify-panel":
+        node["config"] = {"verifyPanel": {"k": 3, "angles": ["a", "b", "c"]}}
+    elif kind == "loop-until-dry":
+        node["config"] = {"loopUntilDry": {"maxRounds": 4}}
+        extra.update({f"idx{i}": {"novelty_key": f"k{i}"} for i in range(4)})
+    elif kind == "judge":
+        node["acceptance"] = [{"run": "true"}]
+        node["config"] = {"judge": {"n": 3, "angles": ["a", "b", "c"]}}
+        extra["gn"] = {"judge_winner": 0}
+    elif kind == "replay-diff":
+        pass
+    return _write_bp(tmp_path / "bp.blueprint.json", f"{kind}-demo", [node]), "gn", extra
+
+
+SIBLING_KINDS = ["fanout", "verify-panel", "loop-until-dry", "judge", "replay-diff"]
+
+
+@pytest.mark.parametrize("kind", SIBLING_KINDS)
+def test_frere_muet_sous_plafond_et_stop_continue_mais_marque_le_plafond_non_evalue(tmp_path: Path, kind: str) -> None:
+    """Un genre à frères continue sous un coût inconnu (S1) ; il le DIT : plafond non évalué, pas « sous le plafond »."""
+    bp, node_id, extra = _sibling_bp(tmp_path, kind)
+    _write_registry(tmp_path, _silent_script(tmp_path, extra_map=extra))
+    _write_pilot_policy(tmp_path, "max_fanout_n: 5\nmax_cost_usd_per_node: 0.01\non_unknown_cost: stop\n")
+
+    outcome = run_with_dispatch(_engine(tmp_path), bp, project_root=tmp_path)
+
+    node = next(n for n in outcome.nodes if n.node_id == node_id)
+    assert node.verdict == "green", outcome.to_dict()
+    assert node.cost_cap_reason is None
+    assert node.cost_cap_unevaluated is True
+    assert node.to_dict()["cost_cap_unevaluated"] is True
+    assert node.to_dict()["cost_status"] == "unknown"
+
+
+@pytest.mark.parametrize("kind", SIBLING_KINDS)
+@pytest.mark.parametrize(
+    "policy",
+    [
+        "max_cost_usd_per_node: 100\non_unknown_cost: continue_flagged\n",
+        "on_unknown_cost: stop\n",
+    ],
+    ids=["continue_flagged", "sans_plafond"],
+)
+def test_frere_muet_sans_plafond_a_evaluer_ne_porte_pas_la_marque(tmp_path: Path, kind: str, policy: str) -> None:
+    """La marque n'existe que si un plafond est posé ET que la politique ``stop`` n'a pas pu le juger."""
+    bp, node_id, extra = _sibling_bp(tmp_path, kind)
+    _write_registry(tmp_path, _silent_script(tmp_path, extra_map=extra))
+    _write_pilot_policy(tmp_path, "max_fanout_n: 5\n" + policy)
+
+    outcome = run_with_dispatch(_engine(tmp_path), bp, project_root=tmp_path)
+
+    node = next(n for n in outcome.nodes if n.node_id == node_id)
+    assert node.verdict == "green", outcome.to_dict()
+    assert node.cost_cap_unevaluated is False
+
+
+@pytest.mark.parametrize("kind", SIBLING_KINDS)
+def test_frere_dont_le_cout_est_connu_et_sous_le_plafond_ne_porte_pas_la_marque(tmp_path: Path, kind: str) -> None:
+    bp, node_id, extra = _sibling_bp(tmp_path, kind)
+    _write_registry(tmp_path, _writer_script(tmp_path, extra_map=extra, cost_map={"leaf": 0.01, "gn": 0.01}))
+    _write_pilot_policy(tmp_path, "max_fanout_n: 5\nmax_cost_usd_per_node: 100\n")
+
+    outcome = run_with_dispatch(_engine(tmp_path), bp, project_root=tmp_path)
+
+    node = next(n for n in outcome.nodes if n.node_id == node_id)
+    assert node.verdict == "green", outcome.to_dict()
+    assert node.cost_cap_unevaluated is False
+    assert node.to_dict()["cost_status"] == "exact"
+
+
+@pytest.mark.parametrize(
+    ("kind", "leaf_cost"),
+    [("fanout", 0.4), ("verify-panel", 0.4), ("loop-until-dry", 0.4), ("judge", 0.4), ("replay-diff", 0.6)],
+)
+def test_cout_atteint_dit_cost_reached_sur_chaque_genre(tmp_path: Path, kind: str, leaf_cost: float) -> None:
+    """S3 : ``cost_cap_reason == 'cost_reached'`` porté par le node ET sérialisé, pour chaque genre à frères."""
+    bp, node_id, extra = _sibling_bp(tmp_path, kind)
+    _write_registry(tmp_path, _writer_script(tmp_path, extra_map=extra, cost_map={"leaf": leaf_cost}))
+    _write_pilot_policy(tmp_path, "max_fanout_n: 5\nmax_cost_usd_per_node: 0.5\n")
+
+    outcome = run_with_dispatch(_engine(tmp_path), bp, project_root=tmp_path)
+
+    node = next(n for n in outcome.nodes if n.node_id == node_id)
+    assert node.verdict == "cost_capped", outcome.to_dict()
+    assert node.cost_cap_reason == "cost_reached"
+    assert node.to_dict()["cost_cap_reason"] == "cost_reached"
+    assert node.cost_cap_unevaluated is False  # le plafond a été jugé : atteint
+
+
+# -- le juge : le coût des candidats survit à toute sortie non verte -------------
+
+
+def _judge_bp(tmp_path: Path, *, with_acceptance: bool = True) -> Path:
+    _child(tmp_path)
+    node: dict = {
+        "id": "judge",
+        "kind": "judge",
+        "ref": "child.blueprint.json",
+        "config": {"judge": {"n": 2, "angles": ["angle-a", "angle-b"]}},
+        "pins": [],
+    }
+    # Un critère de texte ambigu fait un node V2 : le juge lui-même revient à l'hôte (``pending``).
+    node["acceptance"] = [{"run": "true"}] if with_acceptance else ["le meilleur candidat est choisi avec soin"]
+    return _write_bp(tmp_path / "bp.blueprint.json", "judge-cost", [node])
+
+
+@pytest.mark.parametrize("candidates", ["muets", "payes"])
+@pytest.mark.parametrize("issue", ["winner_invalide", "juge_rouge", "juge_en_attente"])
+def test_juge_non_vert_garde_le_cout_des_candidats(tmp_path: Path, candidates: str, issue: str) -> None:
+    kwargs: dict = {"cost_map": {"leaf": None if candidates == "muets" else 0.1}}
+    if issue == "winner_invalide":
+        kwargs["extra_map"] = {"judge": {"judge_winner": 9}}
+    elif issue == "juge_rouge":
+        kwargs["fail_for"] = ("judge",)
+    bp = _judge_bp(tmp_path, with_acceptance=issue != "juge_en_attente")
+    _write_registry(tmp_path, _writer_script(tmp_path, **kwargs))
+
+    outcome = run_with_dispatch(_engine(tmp_path), bp, project_root=tmp_path)
+
+    assert outcome.status in {"blocked", "waiting_host"}, outcome.to_dict()
+    node = next(n for n in outcome.nodes if n.node_id == "judge")
+    assert node.verdict == {"winner_invalide": "red", "juge_rouge": "red", "juge_en_attente": "waiting_host"}[issue]
+    d = node.to_dict()
+    if candidates == "muets":
+        assert d["unpriced_calls"] >= 2, d  # les deux candidats muets, jamais perdus
+        assert d["cost_status"] in {"lower_bound", "unknown"}
+        assert outcome.to_dict()["unpriced_calls"] >= 2
+    else:
+        judge_cost = 0.05 if issue == "winner_invalide" else 0.0  # le juge rouge/en attente n'imprime rien
+        assert d["cost_usd"] == pytest.approx(0.2 + judge_cost), d  # les 0.20 USD des candidats sont conservés
+        assert outcome.to_dict()["total_cost_usd"] == pytest.approx(0.2 + judge_cost)
+    assert d["attempts"] >= 2

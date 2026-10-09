@@ -589,6 +589,9 @@ sous-flow et aux passes optionnelles de `budget` (non lancées sous `stop`,
 `skipped_reason: cost_unknown`) : un coût inconnu ne jette jamais un node déjà vert ni les éléments
 frères d'un `fanout`, `verify-panel`, `loop-until-dry`, `judge` ou `replay-diff`
 (seul un montant connu qui atteint le plafond, `cost_reached`, les arrête).
+Ces nodes continuent donc sous `stop` malgré un coût inconnu, mais ne passent pas pour
+« sous le plafond » : le node porte `cost_cap_unevaluated: true` (plafond posé, politique
+`stop`, appels sans prix — le plafond n'a pas pu être jugé), à lire avec `cost_status`.
 Le node porte `cost_cap_reason` (`cost_reached` | `cost_unknown`). La politique
 `assume_tier_ceiling` (estimer au plafond du palier) n'existe pas encore.
 

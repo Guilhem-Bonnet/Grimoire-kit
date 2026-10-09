@@ -219,6 +219,10 @@ class NodeDispatchOutcome:
     #: Pourquoi le node a été arrêté sur le plafond de coût (``cost_reached`` | ``cost_unknown``),
     #: ``None`` hors verdict ``cost_capped`` (W1-01, revue S3).
     cost_cap_reason: str | None = None
+    #: Un plafond de coût est posé, la politique est ``stop`` et le node porte des appels sans prix :
+    #: le plafond n'a PAS pu être évalué (un genre à frères continue malgré tout, revue S1), et le node
+    #: le dit ici plutôt que de passer pour « sous le plafond » (W1-01, revue tour 3).
+    cost_cap_unevaluated: bool = False
 
     @property
     def cost(self) -> Cost:
@@ -238,6 +242,7 @@ class NodeDispatchOutcome:
             "cost_status": self.cost.status,
             "unpriced_calls": self.unpriced_calls,
             "cost_cap_reason": self.cost_cap_reason,
+            "cost_cap_unevaluated": self.cost_cap_unevaluated,
             "uncertainties": [dict(u) for u in self.uncertainties],
             "acceptance_status": self.acceptance_status,
             "verifiability_warning": self.verifiability_warning,

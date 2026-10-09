@@ -561,6 +561,7 @@ def test_composite_a_un_seul_node_vert_et_muet_reste_vert_sous_plafond(tmp_path:
     sub = next(n for n in outcome.nodes if n.node_id == "sub")
     assert sub.verdict == "green", outcome.to_dict()
     assert sub.cost_cap_reason is None
+    assert sub.cost_cap_unevaluated is True  # plafond posé, coût muet : non évalué, et le node le dit
     assert sub.to_dict()["cost_status"] == "unknown"  # le statut du coût reste porté
     assert engine.status(sub.child_run_id).status == WorkflowStatus.COMPLETED.value
 
@@ -577,3 +578,46 @@ def test_composite_vert_dont_le_cout_connu_depasse_le_plafond_n_est_pas_retracte
     sub = next(n for n in outcome.nodes if n.node_id == "sub")
     assert sub.verdict == "green", outcome.to_dict()
     assert sub.cost_usd == pytest.approx(0.9)
+
+
+def _capture_aborts(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    reasons: list[str] = []
+    real = FlowEngine.abort
+
+    def spy(self, run_id, *, reason=""):  # type: ignore[no-untyped-def]
+        reasons.append(reason)
+        return real(self, run_id, reason=reason)
+
+    monkeypatch.setattr(FlowEngine, "abort", spy)
+    return reasons
+
+
+def test_motif_d_abort_dit_cout_inconnu_sous_stop_avec_un_fournisseur_muet(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Revue tour 3 : le libellé du run enfant abandonné distingue « coût inconnu » de « plafond atteint »."""
+    reasons = _capture_aborts(monkeypatch)
+    _setup_silent_tier(tmp_path)
+    _write_pilot_policy(tmp_path, max_cost_usd_per_node=0.5)
+    _three_node_child(tmp_path)
+    parent_path = _parent_blueprint(tmp_path, ref="child-flow.blueprint.json")
+
+    run_with_dispatch(_engine(tmp_path), parent_path, project_root=tmp_path)
+
+    assert len(reasons) == 1, reasons
+    assert "coût inconnu" in reasons[0]
+    assert "plafond atteint" not in reasons[0]
+
+
+def test_motif_d_abort_dit_plafond_atteint_sur_un_montant_connu(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    reasons = _capture_aborts(monkeypatch)
+    _setup_single_tier(tmp_path, cost=0.3)
+    _write_pilot_policy(tmp_path, max_cost_usd_per_node=0.5)
+    _three_node_child(tmp_path)
+    parent_path = _parent_blueprint(tmp_path, ref="child-flow.blueprint.json")
+
+    run_with_dispatch(_engine(tmp_path), parent_path, project_root=tmp_path)
+
+    assert len(reasons) == 1, reasons
+    assert "plafond atteint" in reasons[0]
+    assert "coût inconnu" not in reasons[0]

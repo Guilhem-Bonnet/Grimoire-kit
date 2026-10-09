@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from grimoire.core.exceptions import GrimoireRuntimeError
-from grimoire.costs import POLICY_CONTINUE_FLAGGED, Cost, cap_reason
+from grimoire.costs import POLICY_CONTINUE_FLAGGED, POLICY_STOP, Cost, cap_reason
 from grimoire.flows.blueprint_loader import load_blueprint, resolve_composite_ref
 from grimoire.flows.dispatch_executor import DispatchExecutor, NodeDispatchOutcome
 from grimoire.flows.engine import FlowEngine
@@ -183,6 +183,23 @@ def _record_genre_outcome(
         acceptance_status=verifiability_label,
         child_run_id=child_run_id,
         cost_cap_reason=cost_cap_reason,
+        cost_cap_unevaluated=_cap_unevaluated(executor, cost, cost_cap_reason, verifiability_label),
+    )
+
+
+def _cap_unevaluated(executor: DispatchExecutor, cost: Cost, cost_cap_reason: str | None, label: str) -> bool:
+    """Le plafond du pilote est posé, la politique est ``stop``, et un appel sans prix l'a empêché de juger.
+
+    Un genre à frères continue sous un coût inconnu (``_cap_why(siblings=True)``, revue S1) ; il ne doit
+    pas pour autant passer pour « sous le plafond » : le node porte cette marque, jamais un silence.
+    ``budget`` applique son propre plafond (``maxCostUsd``) avec la politique, sans passer par ici.
+    """
+    return (
+        label != "budget"
+        and cost_cap_reason is None
+        and executor._pilot_policy.max_cost_usd_per_node is not None
+        and executor._pilot_policy.on_unknown_cost == POLICY_STOP
+        and cost.unpriced_calls > 0
     )
 
 
@@ -648,14 +665,33 @@ def _execute_judge(executor: DispatchExecutor, contract: NodeContract, context_p
     finally:
         executor._extra_context = saved_context
 
+    # ``_execute_plain`` n'inscrit que le coût du juge : les N candidats, déjà dépensés, sont
+    # ajoutés ici sur TOUTES les sorties (pending, rouge, winner invalide, vert), sinon leur coût
+    # disparaît du node et du run (revue tour 3).
+    existing = executor.node_outcomes.get(node_id)
+    judge_cost = existing.cost if existing else Cost.none()
+
+    def _record(verdict: str) -> None:
+        _record_genre_outcome(executor,
+            node_id, run_id, verifiability_label="judge", verdict=verdict,
+            cost=total_cost + judge_cost,
+            attempts=sum(c.attempts for c in candidates) + (existing.attempts if existing else 0),
+            escalations=sum(c.escalations for c in candidates) + (existing.escalations if existing else 0),
+            cost_cap_reason=existing.cost_cap_reason if existing else None,
+        )
+
     if judge_result.pending or judge_result.output is None:
-        # V2/host, ou rouge sur la phase de jugement elle-même : hérité
-        # tel quel — les N tentatives restent dans le Mission Ledger de
-        # leurs propres runs, rien n'est perdu même si le juge coince.
+        # V2/host, ou rouge sur la phase de jugement elle-même : hérité tel quel côté résultat,
+        # mais le coût des N tentatives reste inscrit sur le node.
+        if judge_result.pending:
+            _record("waiting_host")
+        else:
+            _record("red" if existing is None or existing.verdict == "green" else existing.verdict)
         return judge_result
 
     winner = judge_result.output.get("judge_winner")
     if not isinstance(winner, int) or isinstance(winner, bool) or not (0 <= winner < n):
+        _record("red")
         executor.blocked_node = node_id
         result = NodeExecutionResult(
             pending=False, output=None,
@@ -664,14 +700,7 @@ def _execute_judge(executor: DispatchExecutor, contract: NodeContract, context_p
         executor.last_result = result
         return result
 
-    existing = executor.node_outcomes.get(node_id)
-    _record_genre_outcome(executor, 
-        node_id, run_id, verifiability_label="judge",
-        verdict="green" if existing is None or existing.verdict == "green" else existing.verdict,
-        cost=total_cost + (existing.cost if existing else Cost.none()),
-        attempts=sum(c.attempts for c in candidates) + (existing.attempts if existing else 0),
-        escalations=sum(c.escalations for c in candidates) + (existing.escalations if existing else 0),
-    )
+    _record("green" if existing is None or existing.verdict == "green" else existing.verdict)
     output = dict(judge_result.output)
     output["judge_trace"] = trace
     output["judge_winner"] = winner
