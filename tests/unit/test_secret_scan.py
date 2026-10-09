@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -27,7 +30,12 @@ jobs:
 """
 
 
-def audit(tmp_path: Path, content: str | bytes, name: str = "w.yml") -> subprocess.CompletedProcess[str]:
+def audit(
+    tmp_path: Path,
+    content: str | bytes,
+    name: str = "w.yml",
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     wf = tmp_path / "workflows"
     wf.mkdir(exist_ok=True)
     path = wf / name
@@ -40,9 +48,16 @@ def audit(tmp_path: Path, content: str | bytes, name: str = "w.yml") -> subproce
         capture_output=True,
         text=True,
         encoding="utf-8",
+        env=env,
         timeout=60,
         check=False,
     )
+
+
+def workflow(step: str, on: str = "[pull_request]", perms: bool = True) -> str:
+    """Workflow minimal à un job dont l'unique étape est ``step`` (YAML déjà indenté de 6)."""
+    head = f"name: x\non: {on}\n" + ("permissions:\n  contents: read\n" if perms else "")
+    return head + f"jobs:\n  a:\n    runs-on: x\n    steps:\n{step}"
 
 
 def test_clean_workflow_passes(tmp_path: Path) -> None:
@@ -91,8 +106,6 @@ def test_non_utf8_locale_does_not_open_hole(tmp_path: Path) -> None:
         "# commentaire accentué é\nname: x\non: [push]\npermissions: write-all\njobs: {}\n",
         encoding="utf-8",
     )
-    import os
-
     env = {**os.environ, "LC_ALL": "C", "PYTHONUTF8": "0", "PYTHONCOERCECLOCALE": "0", "PYTHONIOENCODING": "ascii"}
     res = subprocess.run(
         [sys.executable, str(SCRIPT), str(wf)],
@@ -107,45 +120,176 @@ def test_non_utf8_locale_does_not_open_hole(tmp_path: Path) -> None:
     assert "write-all" in res.stdout
 
 
-def test_untrusted_interpolation_in_run_fails(tmp_path: Path) -> None:
-    content = (
-        "name: x\non: [pull_request]\njobs:\n  a:\n    runs-on: x\n    steps:\n"
-        '      - run: echo "${{ github.event.pull_request.title }}"\n'
-    )
-    assert audit(tmp_path, content).returncode == 1
+UNTRUSTED_RUN = [
+    'echo "${{ github.event.pull_request.title }}"',
+    "git checkout ${{ github.head_ref }}",
+    "echo ${{ github.ref_name }}",
+    "echo ${{ github.base_ref }}",
+    "echo ${{ github.ref }}",
+    "echo ${{ inputs.name }}",
+    "echo ${{ github.event.inputs.name }}",
+    'echo "${{ toJSON(github.event) }}"',
+    "echo ${{ toJSON(github) }}",
+    "echo ${{ github.event['pull_request']['title'] }}",
+    "echo ${{ github['event'].pull_request.title }}",
+    "echo ${{ inputs['name'] }}",
+    "echo ${{ format('{0}', github.event.pull_request.title) }}",
+    "echo ${{ join(github.event.commits.*.message, ' ') }}",
+    "echo ${{ format('}}', github.event.pull_request.title) }}",
+    "echo ${{ 'a' || github.head_ref }}",
+    "echo ${{ github . event . pull_request.title }}",
+]
 
 
-def test_head_ref_interpolation_in_run_fails(tmp_path: Path) -> None:
-    content = (
-        "name: x\non: [pull_request]\njobs:\n  a:\n    runs-on: x\n    steps:\n"
-        "      - run: git checkout ${{ github.head_ref }}\n"
-    )
-    assert audit(tmp_path, content).returncode == 1
+@pytest.mark.parametrize("command", UNTRUSTED_RUN)
+def test_untrusted_interpolation_in_run_fails(tmp_path: Path, command: str) -> None:
+    res = audit(tmp_path, workflow("      - run: |\n          " + command + "\n"))
+    assert res.returncode == 1, res.stdout
+    assert "untrusted context" in res.stdout
+
+
+def test_untrusted_interpolation_in_github_script_fails(tmp_path: Path) -> None:
+    step = "      - uses: actions/github-script@v7\n        with:\n          script: |\n"
+    step += "            core.info(`${{ format('{0}', github.event.pull_request.title) }}`)\n"
+    res = audit(tmp_path, workflow(step))
+    assert res.returncode == 1
+    assert "untrusted context" in res.stdout
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo ${{ github.sha }}",
+        "echo ${{ github.event_name }}",
+        "echo ${{ github.repository }}",
+        "echo ${{ matrix.os }}",
+        "echo ${{ steps.x.outputs.inputs }}",
+        "echo ${{ 'mentions github.event.title and inputs.x in a literal' }}",
+        "echo ${{ format('{0}', 'it''s github.head_ref') }}",
+    ],
+)
+def test_trusted_interpolation_in_run_passes(tmp_path: Path, command: str) -> None:
+    res = audit(tmp_path, workflow("      - run: |\n          " + command + "\n"))
+    assert res.returncode == 0, res.stdout
 
 
 def test_untrusted_value_through_env_passes(tmp_path: Path) -> None:
-    content = (
-        "name: x\non: [pull_request]\njobs:\n  a:\n    runs-on: x\n    steps:\n"
+    step = (
         "      - env:\n          TITLE: ${{ github.event.pull_request.title }}\n"
-        '        run: echo "$TITLE"\n'
+        '          REF: ${{ toJSON(github.event) }}\n        run: echo "$TITLE" "$REF"\n'
+    )
+    assert audit(tmp_path, workflow(step)).returncode == 0
+
+
+TARGET = "\n  pull_request_target:\n    types: [opened]"
+
+
+def _checkout(ref_line: str) -> str:
+    return f"      - uses: actions/checkout@v7\n        with:\n          {ref_line}\n"
+
+
+@pytest.mark.parametrize(
+    "step",
+    [
+        _checkout("ref: ${{ github.event.pull_request.head.sha }}"),
+        _checkout("ref: refs/pull/${{ github.event.number }}/merge"),
+        _checkout("ref: ${{ github.event.after }}"),
+        _checkout("ref: ${{ github.head_ref }}"),
+        _checkout("ref: refs/pull/123/merge"),
+        _checkout("repository: ${{ github.event.pull_request.head.repo.full_name }}"),
+        _checkout("ref: ${{ format('refs/pull/{0}/head', github.event.number) }}"),
+        '      - env:\n          N: ${{ github.event.number }}\n        run: gh pr checkout "$N"\n',
+        "      - run: gh pr co 12\n",
+        '      - env:\n          N: ${{ github.event.number }}\n        run: git fetch origin "pull/$N/head"\n',
+    ],
+    ids=[
+        "head-sha",
+        "refs-pull-number",
+        "event-after",
+        "head-ref",
+        "refs-pull-literal",
+        "head-repo",
+        "format-wrapped",
+        "gh-pr-checkout",
+        "gh-pr-co",
+        "git-fetch-pull",
+    ],
+)
+def test_pull_request_target_checking_out_pr_code_fails(tmp_path: Path, step: str) -> None:
+    res = audit(tmp_path, workflow(step, on=TARGET))
+    assert res.returncode == 1, res.stdout
+    assert "checks out PR code under pull_request_target" in res.stdout
+
+
+@pytest.mark.parametrize(
+    "step",
+    [
+        "      - uses: actions/checkout@v7\n",
+        _checkout("ref: refs/heads/main"),
+        _checkout("ref: ${{ github.sha }}"),
+        _checkout("ref: heads/release-head"),
+        "      - run: git fetch origin main\n",
+    ],
+    ids=["default", "main", "github-sha", "head-word-alone", "fetch-main"],
+)
+def test_pull_request_target_without_pr_checkout_passes(tmp_path: Path, step: str) -> None:
+    res = audit(tmp_path, workflow(step, on=TARGET))
+    assert res.returncode == 0, res.stdout
+
+
+def test_head_checkout_is_allowed_outside_pull_request_target(tmp_path: Path) -> None:
+    step = _checkout("ref: ${{ github.event.pull_request.head.sha }}")
+    assert audit(tmp_path, workflow(step)).returncode == 0
+
+
+NO_PERMS = "name: x\non: [push]\njobs:\n  a:\n    runs-on: x\n    steps:\n      - run: echo hi\n"
+
+
+def test_workflow_without_any_permissions_block_fails(tmp_path: Path) -> None:
+    res = audit(tmp_path, NO_PERMS)
+    assert res.returncode == 1
+    assert "no permissions block" in res.stdout
+
+
+def test_one_job_without_permissions_fails_when_workflow_declares_none(tmp_path: Path) -> None:
+    content = (
+        "name: x\non: [push]\njobs:\n"
+        "  a:\n    runs-on: x\n    permissions:\n      contents: read\n    steps: []\n"
+        "  b:\n    runs-on: x\n    steps: []\n"
+    )
+    res = audit(tmp_path, content)
+    assert res.returncode == 1
+    assert "Job 'b' has no permissions block" in res.stdout
+    assert "Job 'a'" not in res.stdout
+
+
+def test_permissions_on_every_job_passes(tmp_path: Path) -> None:
+    content = (
+        "name: x\non: [push]\njobs:\n"
+        "  a:\n    runs-on: x\n    permissions:\n      contents: read\n    steps: []\n"
+        "  b:\n    runs-on: x\n    permissions: {}\n    steps: []\n"
     )
     assert audit(tmp_path, content).returncode == 0
 
 
-def test_pull_request_target_with_head_checkout_fails(tmp_path: Path) -> None:
-    content = (
-        "name: x\non:\n  pull_request_target:\n    types: [opened]\njobs:\n  a:\n    runs-on: x\n    steps:\n"
-        "      - uses: actions/checkout@v7\n        with:\n          ref: ${{ github.event.pull_request.head.sha }}\n"
-    )
-    assert audit(tmp_path, content).returncode == 1
+def test_workflow_level_empty_permissions_passes(tmp_path: Path) -> None:
+    assert audit(tmp_path, NO_PERMS.replace("jobs:", "permissions: {}\njobs:")).returncode == 0
 
 
-def test_pull_request_target_without_head_checkout_passes(tmp_path: Path) -> None:
+def test_output_is_ascii_even_with_accented_names(tmp_path: Path) -> None:
     content = (
-        "name: x\non:\n  pull_request_target:\n    types: [opened]\njobs:\n  a:\n    runs-on: x\n    steps:\n"
-        "      - uses: actions/checkout@v7\n"
+        "name: x\non: [push]\njobs:\n"
+        "  déploiement:\n    runs-on: x\n    permissions:\n      contents: write\n    steps: []\n"
+        "  publié:\n    runs-on: x\n    permissions:\n      contents: write\n    steps: []\n"
     )
-    assert audit(tmp_path, content).returncode == 0
+    env = {**os.environ, "PYTHONIOENCODING": "ascii", "PYTHONUTF8": "0"}
+    res = audit(tmp_path, content, env=env)
+    assert res.returncode == 1
+    assert "Traceback" not in res.stderr, res.stderr
+    assert "d\\xe9ploiement" in res.stdout
+    assert "publi\\xe9" in res.stdout
+    assert res.stdout.isascii()
+    assert "FAILED: 2 error(s)" in res.stdout
 
 
 def test_missing_or_empty_directory_fails(tmp_path: Path) -> None:
@@ -220,3 +364,85 @@ def test_scan_actions_aligned_and_deps_pinned() -> None:
     assert "actions/setup-python@v4" not in text
     assert "actions/checkout@v7" in text and "actions/setup-python@v7" in text
     assert "PyYAML==" in text
+
+
+def test_scan_uses_the_repository_gitleaks_config() -> None:
+    text = (WORKFLOWS / "secret-scan.yml").read_text(encoding="utf-8")
+    assert "--config .gitleaks.toml" in text
+
+
+def _config() -> dict[str, Any]:
+    return tomllib.loads((ROOT / ".gitleaks.toml").read_text(encoding="utf-8"))
+
+
+def test_gitleaks_config_extends_defaults_and_allowlists_fixture_paths() -> None:
+    cfg = _config()
+    assert cfg["extend"]["useDefault"] is True
+    paths = [p for al in cfg["allowlists"] for p in al["paths"]]
+    assert paths, "aucune exemption par chemin"
+    assert all(p.startswith("^") and p.endswith("$") for p in paths), "chemins non ancrés"
+
+
+def test_gitleaksignore_only_lists_fingerprints_in_expected_shape() -> None:
+    lines = [
+        line
+        for line in (ROOT / ".gitleaksignore").read_text(encoding="utf-8").splitlines()
+        if line and not line.startswith("#")
+    ]
+    assert lines
+    for line in lines:
+        commit, _path, _rule, lineno = line.split(":")
+        assert len(commit) == 40 and lineno.isdigit(), line
+
+
+def _git(repo: Path, *args: str) -> None:
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@example.invalid",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@example.invalid",
+    }
+    subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, encoding="utf-8", env=env)
+
+
+def _scan_repo(tmp_path: Path, relpath: str) -> int:
+    """Commite un faux jeton à ``relpath`` dans un dépôt jetable et lance gitleaks avec la config du kit."""
+    repo = tmp_path / "repo"
+    target = repo / relpath
+    target.parent.mkdir(parents=True)
+    # Assemblé à l'exécution : aucun littéral de jeton dans ce fichier.
+    target.write_text("TOKEN = '" + "ghp_" + "aB3dE5gH7jK9" * 3 + "'\n", encoding="utf-8")
+    _git(repo, "init", "-q")
+    _git(repo, "add", relpath)
+    _git(repo, "commit", "-q", "-m", "fixture")
+    res = subprocess.run(
+        [
+            "gitleaks",
+            "git",
+            "--config",
+            str(ROOT / ".gitleaks.toml"),
+            "--no-banner",
+            "--redact",
+            "--exit-code",
+            "1",
+            str(repo),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=120,
+        check=False,
+    )
+    return res.returncode
+
+
+@pytest.mark.skipif(shutil.which("gitleaks") is None, reason="gitleaks absent")
+def test_allowlisted_fixture_path_is_exempt_without_any_fingerprint(tmp_path: Path) -> None:
+    # Le commit est créé ici, son SHA ne figure dans aucun .gitleaksignore : comme après un squash.
+    assert _scan_repo(tmp_path, "tests/unit/memory/test_write_validation.py") == 0
+
+
+@pytest.mark.skipif(shutil.which("gitleaks") is None, reason="gitleaks absent")
+def test_same_token_outside_allowlisted_path_is_still_a_leak(tmp_path: Path) -> None:
+    assert _scan_repo(tmp_path, "src/grimoire/new_module.py") == 1

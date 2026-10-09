@@ -1,0 +1,18 @@
+# Configuration gitleaks du kit (D-08). Les règles par défaut restent actives.
+title = "Grimoire-kit gitleaks"
+
+[extend]
+useDefault = true
+
+# Fixtures de test et validateur de secrets : ces fichiers CONTIENNENT volontairement des
+# motifs de secrets factices. L'exemption est par chemin et non par empreinte : le kit
+# fusionne en squash, le SHA d'un commit de branche disparaît à la fusion et son
+# empreinte `.gitleaksignore` ne couvrirait plus le commit squashé. Pour une nouvelle
+# fixture, ajouter son chemin ici (ancré) ou `gitleaks:allow` sur la ligne concernée.
+[[allowlists]]
+description = "Fixtures et exemples de secrets factices du validateur d'écriture mémoire"
+paths = [
+  '''^src/grimoire/memory/validation\.py$''',
+  '''^tests/unit/memory/test_write_validation\.py$''',
+  '''^tests/unit/test_hook_ledger\.py$''',
+]

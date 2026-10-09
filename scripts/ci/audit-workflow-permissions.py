@@ -2,17 +2,24 @@
 """Audit statique des workflows GitHub Actions (D-08).
 
 Échoue (code 1) sur :
+- un workflow sans bloc ``permissions`` ni au niveau du workflow ni sur chacun de
+  ses jobs (le jeton prendrait alors le réglage par défaut du dépôt) ;
 - toute permission ``write`` absente de la liste blanche explicite ci-dessous
   (par fichier de workflow et par portée : workflow entier ou job) ;
 - ``write-all`` ou une valeur de permissions inconnue ;
 - une interpolation ``${{ ... }}`` de contexte non fiable dans ``run:`` ou
-  ``script:`` (``github.event.*``, ``github.head_ref``, ``github.ref_name``,
-  ``inputs.*``) : passer la valeur par ``env:`` ;
-- ``pull_request_target`` combiné à un checkout du dépôt ou de la ref de la PR ;
+  ``script:``, quelle que soit la fonction qui l'enveloppe (``toJSON``,
+  ``format``, ``join``, accès par crochets) : ``github.event``, ``github.head_ref``,
+  ``github.base_ref``, ``github.ref``, ``github.ref_name``, ``inputs``, ou le contexte
+  ``github`` entier. Passer la valeur par ``env:`` ;
+- ``pull_request_target`` combiné à un checkout de code de PR : ``actions/checkout``
+  dont ``ref`` ou ``repository`` contient une expression non fiable ou ``pull/``,
+  ``gh pr checkout`` ou ``git fetch ... pull/`` dans ``run:`` ;
 - toute erreur d'analyse (YAML invalide, lecture impossible, racine ou ``jobs``
   qui n'est pas un mapping, fichier vide).
 
-Sorties en ASCII : le résultat ne dépend pas de la locale.
+Sorties en ASCII (``backslashreplace``) : un nom accentué ne fait jamais planter
+l'affichage, quel que soit l'encodage de la sortie standard.
 """
 
 from __future__ import annotations
@@ -41,8 +48,52 @@ WRITE_ALLOWLIST: dict[str, dict[str, set[str]]] = {
     "weekly-bench.yml": {WORKFLOW_SCOPE: {"contents", "issues"}},  # pousse le rapport, ouvre l'issue
 }
 
-UNTRUSTED_EXPR = re.compile(r"\$\{\{[^}]*\b(?:github\.event\.|github\.head_ref|github\.ref_name|inputs\.)[^}]*\}\}")
-HEAD_REF = re.compile(r"head|github\.event\.pull_request", re.IGNORECASE)
+# Contextes que l'utilisateur d'une PR, d'une branche ou d'un déclenchement manuel
+# contrôle. Cherchés dans le corps d'une expression débarrassé de ses littéraux.
+_UNTRUSTED_REFS = (
+    re.compile(r"(?<![\w.])github\s*\.\s*(?:event|head_ref|base_ref|ref_name|ref)\b"),
+    re.compile(r"(?<![\w.])github\b(?!\s*\.)"),  # contexte entier ou accès par crochets
+    re.compile(r"(?<![\w.])inputs\b"),
+)
+PR_FETCH = re.compile(r"\bgh\s+pr\s+(?:checkout|co)\b|\bgit\s+(?:fetch|checkout|pull|switch|merge)\b[^\n]*\bpull/")
+PR_REF = re.compile(r"(?<![\w])pull/")
+
+
+def _expression_bodies(text: str) -> list[str]:
+    """Corps de chaque ``${{ ... }}``, littéraux entre apostrophes vidés.
+
+    Un balayage tient compte des chaînes (``'a}}b'``, ``''`` échappée) : un ``}``
+    dans un littéral ne ferme pas l'expression, et un littéral qui cite
+    ``github.event`` n'est pas une référence.
+    """
+    bodies: list[str] = []
+    n = len(text)
+    i = text.find("${{")
+    while i != -1:
+        j = i + 3
+        out: list[str] = []
+        while j < n and not text.startswith("}}", j):
+            if text[j] == "'":
+                j += 1
+                while j < n:
+                    if text[j] == "'":
+                        if text[j + 1 : j + 2] == "'":
+                            j += 2
+                            continue
+                        break
+                    j += 1
+                out.append("''")
+                j += 1
+                continue
+            out.append(text[j])
+            j += 1
+        bodies.append("".join(out))
+        i = text.find("${{", j + 2)
+    return bodies
+
+
+def _has_untrusted(text: str) -> bool:
+    return any(rx.search(body) for body in _expression_bodies(text) for rx in _UNTRUSTED_REFS)
 
 
 class Issue(NamedTuple):
@@ -98,14 +149,17 @@ def _check_steps(job_name: str, job: dict[Any, Any], target: bool) -> list[Issue
         if isinstance(with_, dict):
             scripts.append(with_.get("script"))
         for code in scripts:
-            if isinstance(code, str) and UNTRUSTED_EXPR.search(code):
+            if isinstance(code, str) and _has_untrusted(code):
                 issues.append(_err(f"{where} interpolates an untrusted context in run/script (use env:)"))
+        run = step.get("run")
+        if target and isinstance(run, str) and PR_FETCH.search(run):
+            issues.append(_err(f"{where} checks out PR code under pull_request_target (run)"))
         uses = step.get("uses")
         checkout = isinstance(uses, str) and uses.startswith("actions/checkout")
         if target and checkout and isinstance(with_, dict):
             for key in ("ref", "repository"):
                 val = with_.get(key)
-                if isinstance(val, str) and HEAD_REF.search(val):
+                if isinstance(val, str) and (_has_untrusted(val) or PR_REF.search(val)):
                     issues.append(_err(f"{where} checks out PR code under pull_request_target"))
     return issues
 
@@ -131,41 +185,49 @@ def audit_workflow(workflow_path: Path) -> list[Issue]:
         return issues
 
     target = "pull_request_target" in _triggers(workflow)
+    workflow_declares = workflow.get("permissions") is not None
     for job_name, job in jobs.items():
         if not isinstance(job, dict):
             issues.append(_err(f"Job '{job_name}' is not a mapping"))
             continue
+        if not workflow_declares and job.get("permissions") is None:
+            issues.append(_err(f"Job '{job_name}' has no permissions block and the workflow declares none"))
         issues += _check_permissions(job.get("permissions"), f"Job '{job_name}'", allow.get(str(job_name), set()))
         issues += _check_steps(str(job_name), job, target)
     return issues
 
 
+def _say(text: str) -> None:
+    """Affiche en ASCII pur, quel que soit l'encodage de la sortie standard."""
+    sys.stdout.write(text.encode("ascii", "backslashreplace").decode("ascii") + "\n")
+
+
 def main() -> int:
     if len(sys.argv) < 2:
-        print("Usage: audit-workflow-permissions.py <workflows_directory>")
+        _say("Usage: audit-workflow-permissions.py <workflows_directory>")
         return 1
 
     workflows_dir = Path(sys.argv[1])
     if not workflows_dir.is_dir():
-        print(f"ERROR: {workflows_dir} is not a directory")
+        _say(f"ERROR: {workflows_dir} is not a directory")
         return 1
 
     files = sorted(workflows_dir.glob("*.yml")) + sorted(workflows_dir.glob("*.yaml"))
     if not files:
-        print(f"ERROR: no workflow files found in {workflows_dir}")
+        _say(f"ERROR: no workflow files found in {workflows_dir}")
         return 1
 
     errors = 0
     for workflow_file in files:
         for issue in audit_workflow(workflow_file):
-            print(f"{issue.severity.upper()}: {workflow_file.name}: {issue.message}")
+            _say(f"{issue.severity.upper()}: {workflow_file.name}: {issue.message}")
             if issue.severity == "error":
                 errors += 1
 
     if errors:
-        print(f"FAILED: {errors} error(s) in workflow audit.")
+        _say(f"FAILED: {errors} error(s) in workflow audit.")
         return 1
-    print(f"OK: {len(files)} workflow(s) audited.")
+    _say(f"OK: {len(files)} workflow(s) audited.")
     return 0
 
 
