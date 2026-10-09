@@ -345,20 +345,34 @@ def policy_tool_detail(facts: ToolFacts) -> str:
     return ""
 
 
+#: Clés du Bash natif sans effet sur ce que la commande fait : seules ignorées.
+_NATIVE_BASH_VOLATILE_KEYS = frozenset({"description", "timeout"})
+_COMMAND_KEYS = ("command", "cmd", "commandLine", "script")
+
+
 def approval_fingerprint(tool_name: str, tool_input: dict[str, Any], facts: ToolFacts) -> str:
     """Empreinte de l'action pour une règle ``require_approval`` (W1-09).
 
-    Commande (Bash) : la commande normalisée. Tout autre outil (MCP, Write,
-    MultiEdit...) : l'entrée canonique complète de l'outil — toutes les cibles,
-    tous les arguments et le contenu — de sorte qu'un autre dépôt, une autre
-    cible ou un autre contenu redemande. Calculée au PreToolUse et au
-    PostToolUse depuis le même ``tool_input``, donc identique des deux côtés.
+    Toujours l'entrée canonique complète de l'outil (JSON trié : toutes les
+    cibles, tous les arguments, le contenu), de sorte qu'un autre hôte, dépôt,
+    répertoire, cible ou contenu redemande. Quand l'appel porte une commande,
+    sa valeur y est remplacée par la commande normalisée (blancs hors
+    guillemets) ; pour le seul Bash natif, ``description`` et ``timeout``
+    sont ignorés. Calculée au PreToolUse et au PostToolUse depuis le même
+    ``tool_input``, donc identique des deux côtés.
     """
     from grimoire.policies.temporal import action_fingerprint, normalize_command
 
+    payload = dict(tool_input)
+    if tool_name == "Bash":
+        for key in _NATIVE_BASH_VOLATILE_KEYS:
+            payload.pop(key, None)
     if facts.command:
-        return action_fingerprint(tool_name, normalize_command(facts.command), normalize=False)
-    canonical = json.dumps(tool_input, sort_keys=True, separators=(",", ":"), default=str, ensure_ascii=False)
+        for key in _COMMAND_KEYS:
+            if payload.get(key) == facts.command:
+                payload[key] = normalize_command(facts.command)
+                break
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str, ensure_ascii=False)
     return action_fingerprint(tool_name, canonical, normalize=False)
 
 

@@ -400,8 +400,10 @@ réellement tourné, donc que le `ask` précédent a été accordé — enregist
 l'approbation, via `record_post_tool_use_approval`
 (`grimoire.policies.temporal`), appelée depuis la décision `PostToolUse`
 existante (`grimoire.hosts.decisions.evidence_trace`). L'approbation porte
-sur l'empreinte de l'action exécutée (outil + commande normalisée, ou entrée
-complète de l'outil — toutes les cibles, arguments et contenu — hors Bash) :
+sur l'empreinte de l'action exécutée (outil + entrée complète de l'outil —
+toutes les cibles, arguments et contenu —, la commande n'étant normalisée que
+par ses blancs hors guillemets ; `description` et `timeout` du seul Bash natif
+sont ignorés) :
 seule une action identique passe en `allow` silencieux, toute autre action
 correspondant au motif redemande. Les empreintes sont conservées dans
 `approved_fingerprints` (64 au plus par règle, les plus anciennes sortent) ; un

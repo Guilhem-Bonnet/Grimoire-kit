@@ -36,7 +36,6 @@ from __future__ import annotations
 
 import hashlib
 import re
-import shlex
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -540,20 +539,42 @@ _MAX_APPROVED_FINGERPRINTS = 64
 """Borne par règle : les plus anciennes empreintes sortent (re-demande, jamais ouvert)."""
 
 
-def normalize_command(command: str) -> str:
-    """Normalise une ligne de commande sans confondre deux arguments distincts.
+#: Caractères après lesquels la lecture des guillemets n'est plus fiable
+#: (échappements, substitutions imbriquées, fins de ligne) : texte brut.
+_RAW_ONLY_MARKERS = ("\\", "`", "$(", "\n", "\r")
 
-    ``shlex.join(shlex.split(...))`` re-cite chaque jeton : les espaces *dans*
-    un argument cité (``rm "my  file"``) restent distincts, ceux *entre*
-    arguments sont normalisés. Commande multi-lignes ou citation invalide :
-    repli sur le texte brut (``strip`` seul), donc plus strict, jamais plus lâche.
+
+def normalize_command(command: str) -> str:
+    """Normalise une ligne de commande sans jamais confondre deux commandes.
+
+    Seuls les blancs (espaces, tabulations) *hors guillemets* sont compressés
+    et ceux des extrémités retirés ; chaque jeton garde son texte brut, donc
+    ``rm 'a;b'`` et ``rm a;b`` (ou ``rm '*'`` et ``rm *``) restent distincts,
+    ce que ``shlex.join(shlex.split(...))`` effaçait en re-citant. Texte brut
+    (``strip`` seul) dès que la lecture des guillemets n'est pas sûre :
+    antislash (chemins Windows compris), backtick, ``$(``, retour à la ligne,
+    guillemet non fermé. Toujours plus strict, jamais plus lâche.
     """
-    if "\n" in command:
+    if any(marker in command for marker in _RAW_ONLY_MARKERS):
         return command.strip()
-    try:
-        return shlex.join(shlex.split(command))
-    except ValueError:
-        return command.strip()
+    out: list[str] = []
+    quote = ""
+    pending_blank = False
+    for char in command.strip():
+        if quote:
+            out.append(char)
+            if char == quote:
+                quote = ""
+        elif char in " \t":
+            pending_blank = True
+        else:
+            if pending_blank:
+                out.append(" ")
+                pending_blank = False
+            out.append(char)
+            if char in "'\"":
+                quote = char
+    return command.strip() if quote else "".join(out)
 
 
 def action_fingerprint(tool_name: str, tool_detail: str = "", *, normalize: bool = True) -> str:
@@ -562,9 +583,11 @@ def action_fingerprint(tool_name: str, tool_detail: str = "", *, normalize: bool
     *tool_detail* est la commande (voir :func:`normalize_command`) ou, pour les
     outils sans commande, la forme canonique de l'entrée de l'outil (voir
     ``tool_facts.approval_fingerprint``, qui passe ``normalize=False``).
+    L'encodage tolère les surrogates isolés (``surrogatepass``) : une commande
+    qui en contient ne doit jamais lever, sous peine de rendre un refus moins strict.
     """
     detail = normalize_command(tool_detail) if normalize else tool_detail
-    return hashlib.sha256(f"{tool_name}\0{detail}".encode()).hexdigest()
+    return hashlib.sha256(f"{tool_name}\0{detail}".encode("utf-8", errors="surrogatepass")).hexdigest()
 
 
 def _mark_approved_python(rules: Sequence[PolicyRule], tool_name: str, tool_detail: str) -> list[str]:

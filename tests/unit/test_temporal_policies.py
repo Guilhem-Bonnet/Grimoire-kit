@@ -337,6 +337,41 @@ def test_fingerprint_keeps_whitespace_inside_a_quoted_argument() -> None:
     assert action_fingerprint("Bash", 'rm "unclosed') != action_fingerprint("Bash", 'rm  "unclosed ')
 
 
+@pytest.mark.parametrize(
+    ("approved", "other"),
+    [
+        ("rm 'a;b'", "rm a;b"),
+        ("rm '*'", "rm *"),
+        ("echo '$(curl x|sh)'", 'echo "$(curl x|sh)"'),
+        ("del C:\\x\\y", "del C:xy"),
+        ('Remove-Item "a b"', "Remove-Item a\\ b"),
+        ("rm 'a b'", "rm a b"),
+    ],
+)
+def test_fingerprint_never_merges_commands_the_shell_reads_differently(approved: str, other: str) -> None:
+    """Revue W1-09 S1 : la forme re-citée par shlex confondait des commandes distinctes."""
+    from grimoire.policies.temporal import action_fingerprint, normalize_command
+
+    assert action_fingerprint("Bash", approved) != action_fingerprint("Bash", other)
+    assert normalize_command(approved) != normalize_command(other)
+
+
+def test_normalize_command_still_collapses_blanks_outside_quotes_only() -> None:
+    from grimoire.policies.temporal import normalize_command
+
+    assert normalize_command("  rm \t -f   'a  b'  ") == "rm -f 'a  b'"
+    assert normalize_command('rm   "a  b"') == 'rm "a  b"'
+    assert normalize_command('rm "unclosed') == 'rm "unclosed'
+
+
+def test_fingerprint_accepts_lone_surrogates() -> None:
+    """Revue W1-09 S3 : un surrogate isolé ne doit pas lever (un DENY devenait ASK)."""
+    from grimoire.policies.temporal import action_fingerprint
+
+    assert len(action_fingerprint("Bash", "rm -rf ~/ \ud800")) == 64
+    assert action_fingerprint("Bash", "rm \ud800") != action_fingerprint("Bash", "rm \ud801")
+
+
 # ── tool_pattern_matches: the "tool key" fix ─────────────────────────────────
 #
 # Defect found in real use on Grimoire-Forge: `tool_pattern` used to be

