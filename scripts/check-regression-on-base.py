@@ -17,8 +17,8 @@ Usage (CI)::
     PR_TITLE=... PR_BODY=... PR_LABELS='["fix"]' \\
         scripts/check-regression-on-base.py --base-sha A --head-sha B [--verify-sha M]
 
-Limites assumées : la tête est vérifiée sur `--verify-sha` (commit de fusion en
-CI), pas sur `--head-sha` seul ; un rouge sur la base reste attribué aux
+Limites assumées : les tests rejoués et la tête vérifiée viennent de
+`--verify-sha` (commit de fusion en CI), pas de `--head-sha` seul ; un rouge sur la base reste attribué aux
 fichiers de la PR sans prouver la cause (par exemple une fixture de conftest
 en erreur au setup compte comme rouge).
 """
@@ -159,11 +159,13 @@ class Replay:
 def run_replay(
     repo: Path, base: str, head: str, tests: list[str], support: list[str], verify: str | None = None
 ) -> Replay:
-    """Tests de `head` contre le code de `base`, puis (si rouge) contre `verify`.
+    """Tests de `verify` contre le code de `base`, puis (si rouge) contre `verify`.
 
     `verify` vaut `head` par défaut ; en CI c'est le commit de fusion que
-    `actions/checkout` extrait, pour qu'une branche en retard sur main ne soit
-    pas validée contre un code que main a déjà changé.
+    `actions/checkout` extrait. Les fichiers de test sont pris sur ce même
+    commit (la liste vient de `base...head`) : une branche en retard sur main
+    n'est ainsi ni validée contre un code que main a déjà changé, ni refusée
+    ou acceptée à cause d'un test qui n'est plus celui qui sera fusionné.
     """
     tmp = Path(tempfile.mkdtemp(prefix="regression-on-base-", dir=os.environ.get("RUNNER_TEMP")))
     trees: list[Path] = []
@@ -171,8 +173,11 @@ def run_replay(
         btree = tmp / "base"
         _add_tree(repo, btree, base)
         trees.append(btree)
-        # Checkout git : binaire exact, fixtures non corrompues.
-        _git(btree, "checkout", head, "--", *tests, *support)
+        # Checkout git : binaire exact, fixtures non corrompues. Les fichiers
+        # viennent de `verify` (le commit de fusion en CI), pas de `head` : sur
+        # une branche en retard, le test fusionné peut différer de celui de la
+        # tête (main l'a mis à jour) et ne doit pas échouer sur la base par dérive.
+        _git(btree, "checkout", verify or head, "--", *tests, *support)
         code = _pytest(btree, tests, tmp / "base.xml")
         failing = _failing_modules(tmp / "base.xml", tests)
         head_code: int | None = None

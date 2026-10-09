@@ -314,27 +314,37 @@ def _workflow_run_script() -> str:
     return next(s["run"] for s in steps if s.get("name", "").startswith("Replay"))
 
 
-def test_workflow_step_is_a_noop_when_the_guard_is_absent_from_base(good_repo, tmp_path):
-    """D14-T1-3 : sous `bash -e`, `git show base:guard` échouait avant tout verdict
-    (PR d'introduction du garde, ou PR `ci:` qui devrait être `skipped`)."""
-    root, base = good_repo  # base sans scripts/check-regression-on-base.py
-    head = _commit(root, {"scripts/check-regression-on-base.py": "raise SystemExit(7)\n"})
+def _run_workflow_step(
+    root: Path,
+    tmp_path: Path,
+    *,
+    base: str,
+    head: str,
+    title: str,
+    merge: str | None = None,
+    use_current_python: bool = False,
+    script: str | None = None,
+) -> tuple[subprocess.CompletedProcess[str], Path]:
+    """Exécute le `run` du pas Replay sous `bash -e`, comme le fait Actions."""
     summary = tmp_path / "summary.md"
     runner = tmp_path / "runner"
-    runner.mkdir()
+    runner.mkdir(exist_ok=True)
     env = {
         "PATH": __import__("os").environ["PATH"],
         "RUNNER_TEMP": str(runner),
         "GITHUB_STEP_SUMMARY": str(summary),
         "BASE_SHA": base,
         "HEAD_SHA": head,
-        "MERGE_SHA": head,
-        "PR_TITLE": "ci: autre chose",
+        "MERGE_SHA": merge or head,
+        "PR_TITLE": title,
         "PR_BODY": "",
         "PR_LABELS": "[]",
     }
+    run = script if script is not None else _workflow_run_script()
+    if use_current_python:
+        run = run.replace("python ", f"{sys.executable} ")
     done = subprocess.run(
-        ["bash", "-e", "-c", _workflow_run_script()],
+        ["bash", "-e", "-c", run],
         cwd=root,
         env=env,
         capture_output=True,
@@ -342,37 +352,66 @@ def test_workflow_step_is_a_noop_when_the_guard_is_absent_from_base(good_repo, t
         encoding="utf-8",
         check=False,
     )
+    return done, summary
+
+
+def test_workflow_step_bootstraps_when_the_pr_itself_adds_the_guard(good_repo, tmp_path):
+    """D14-T1-3 : sous `bash -e`, `git show base:guard` échouait avant tout verdict
+    pour la PR qui introduit le garde. D14-T2-2 : l'amorçage n'est admis que dans ce cas."""
+    root, base = good_repo  # base sans scripts/check-regression-on-base.py
+    head = _commit(root, {"scripts/check-regression-on-base.py": "raise SystemExit(7)\n"})
+    done, summary = _run_workflow_step(root, tmp_path, base=base, head=head, title="ci: autre chose")
     assert done.returncode == 0, done.stderr
     assert "amorçage" in summary.read_text(encoding="utf-8")
 
 
+def test_workflow_step_fails_when_the_guard_vanished_from_base(good_repo, tmp_path):
+    """D14-T2-2 : base valide mais sans garde, que la PR n'ajoute pas (renommé ou
+    supprimé sur main) : l'ancien pas sortait en 0 comme pour l'amorçage."""
+    root, base = good_repo
+    head = _commit(root, {"src/other.py": "X = 1\n"})
+    done, summary = _run_workflow_step(root, tmp_path, base=base, head=head, title="fix: x")
+    assert done.returncode != 0
+    assert "amorçage" not in (summary.read_text(encoding="utf-8") if summary.exists() else "")
+
+
+def test_workflow_step_fails_when_the_base_object_is_missing(good_repo, tmp_path):
+    """D14-T2-2 : un `base.sha` absent du dépôt ne doit pas passer pour un amorçage."""
+    root, _ = good_repo
+    head = _commit(root, {"scripts/check-regression-on-base.py": "raise SystemExit(7)\n"})
+    missing = "0" * 39 + "1"
+    done, summary = _run_workflow_step(root, tmp_path, base=missing, head=head, title="fix: x")
+    assert done.returncode != 0
+    assert "amorçage" not in (summary.read_text(encoding="utf-8") if summary.exists() else "")
+
+
 def test_workflow_step_still_runs_the_guard_from_base_when_present(good_repo, tmp_path):
+    """Le garde exécuté est celui de `base.sha`, pas celui de la tête (D14-T2-3 :
+    la tête porte un garde différent, qui sortirait en 0)."""
     root, _ = good_repo
     base = _commit(root, {"scripts/check-regression-on-base.py": "raise SystemExit(7)\n"})
-    head = _commit(root, {"src/other.py": "X = 1\n"})
-    runner = tmp_path / "runner"
-    runner.mkdir()
-    env = {
-        "PATH": __import__("os").environ["PATH"],
-        "RUNNER_TEMP": str(runner),
-        "GITHUB_STEP_SUMMARY": str(tmp_path / "s.md"),
-        "BASE_SHA": base,
-        "HEAD_SHA": head,
-        "MERGE_SHA": head,
-        "PR_TITLE": "fix: x",
-        "PR_BODY": "",
-        "PR_LABELS": "[]",
-    }
-    done = subprocess.run(
-        ["bash", "-e", "-c", _workflow_run_script().replace("python ", f"{sys.executable} ")],
-        cwd=root,
-        env=env,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        check=False,
+    head = _commit(
+        root,
+        {"scripts/check-regression-on-base.py": "raise SystemExit(0)\n", "src/other.py": "X = 1\n"},
     )
+    done, _ = _run_workflow_step(root, tmp_path, base=base, head=head, title="fix: x", use_current_python=True)
     assert done.returncode == 7, done.stderr
+
+
+def test_workflow_step_run_from_the_checkout_would_be_caught(good_repo, tmp_path):
+    """D14-T2-3 : contre-épreuve par mutation, le pas qui lirait le garde de la
+    tête (`scripts/...` du checkout) ne rend plus 7 et le test ci-dessus le voit."""
+    root, _ = good_repo
+    base = _commit(root, {"scripts/check-regression-on-base.py": "raise SystemExit(7)\n"})
+    head = _commit(root, {"scripts/check-regression-on-base.py": "raise SystemExit(0)\n"})
+    mutant = _workflow_run_script().replace(
+        'python "$RUNNER_TEMP/guard.py"', "python scripts/check-regression-on-base.py"
+    )
+    assert mutant != _workflow_run_script()
+    done, _ = _run_workflow_step(
+        root, tmp_path, base=base, head=head, title="fix: x", use_current_python=True, script=mutant
+    )
+    assert done.returncode == 0
 
 
 def test_conftest_fixture_error_at_setup_counts_as_red_on_base(good_repo):
@@ -395,37 +434,68 @@ def test_conftest_fixture_error_at_setup_counts_as_red_on_base(good_repo):
     assert verdict.status == "red-on-base"
 
 
-def test_stale_branch_is_verified_on_the_merge_commit(tmp_path: Path):
-    """D14-T1-5 : sur head.sha seul, un test modifié contre une API que main a changée
-    passe ; sur le commit de fusion (ce que `actions/checkout` extrait), il échoue."""
+def _stale_repo(tmp_path: Path) -> tuple[Path, str, str, str]:
+    """Branche en retard et vraie fusion `git merge --no-ff` propre.
+
+    main change l'API de `f` et met son test à jour ; la branche ne touche que
+    `test_other`, loin de `test_f`. (root, base, head, merge).
+    """
     root = tmp_path / "s"
     root.mkdir()
     _git(root, "init", "-q", "-b", "main")
-    old_src = "def f(a):\n    return a\n\ndef add(a, b):\n    return a - b\n"
-    old_test = "from calc import f\n\ndef test_f():\n    assert f(1) == 1\n"
-    fork = _commit(root, {"src/calc.py": old_src, "tests/test_f.py": old_test})
-    # main change l'API de f pendant que la branche vit.
-    new_src = "def f(a, b):\n    return a\n\ndef add(a, b):\n    return a - b\n"
+    src = "def f(a):\n    return a\n\n\ndef add(a, b):\n    return a + b\n"
+    test_f = (
+        "from calc import f\n\n\ndef test_f():\n    assert f(1) == 1\n\n\n"
+        "# separateur\n# separateur\n\n\ndef test_other():\n    assert 1 == 1\n"
+    )
+    fork = _commit(root, {"src/calc.py": src, "tests/test_f.py": test_f})
     base = _commit(
         root,
-        {"src/calc.py": new_src, "tests/test_f.py": old_test.replace("f(1)", "f(1, 2)")},
+        {
+            "src/calc.py": src.replace("def f(a):", "def f(a, b):"),
+            "tests/test_f.py": test_f.replace("f(1) == 1", "f(1, 2) == 1"),
+        },
     )
+    _git(root, "checkout", "-q", "-b", "pr", fork)
+    head = _commit(root, {"tests/test_f.py": test_f.replace("assert 1 == 1", "assert 2 == 2")})
+    _git(root, "checkout", "-q", "main")
+    _git(root, "merge", "-q", "--no-ff", "-m", "merge", "pr")  # propre, comme refs/pull/N/merge
+    return root, base, head, _git(root, "rev-parse", "HEAD")
+
+
+def test_stale_branch_tests_are_taken_from_the_merge_commit(tmp_path: Path):
+    """D14-T2-1 : les tests rejoués sur la base viennent du commit de fusion. Pris à
+    la tête, `test_f` (ancienne API) échouait sur la base : faux `red-on-base`."""
+    root, base, head, merge = _stale_repo(tmp_path)
+    verdict = guard.evaluate(root, base, head, FIX, "", [], verify=merge)
+    assert not verdict.ok and verdict.status == "green-on-base", verdict.message
+
+
+def test_stale_branch_head_alone_is_a_false_positive_without_verify(tmp_path: Path):
+    """Caractérisation : sans `--verify-sha` le garde juge sur `head.sha` seul et
+    se laisse tromper par la dérive ; d'où le commit de fusion dans le workflow."""
+    root, base, head, _ = _stale_repo(tmp_path)
+    assert _run(root, base, head).status == "red-on-base"
+
+
+def test_stale_branch_real_regression_is_still_accepted(tmp_path: Path):
+    """Contre-épreuve de D14-T2-1 : un vrai correctif d'une branche en retard passe."""
+    root = tmp_path / "t"
+    root.mkdir()
+    _git(root, "init", "-q", "-b", "main")
+    buggy = "def f(a):\n    return a\n\n\ndef add(a, b):\n    return a - b\n"
+    fork = _commit(root, {"src/calc.py": buggy})
+    base = _commit(root, {"src/calc.py": buggy.replace("def f(a):", "def f(a, b):")})
     _git(root, "checkout", "-q", "-b", "pr", fork)
     head = _commit(
         root,
         {
-            "src/calc.py": old_src.replace("a - b", "a + b"),
-            "tests/test_f.py": old_test + "# touché\n",
-            "tests/test_add.py": "from calc import add\n\ndef test_add():\n    assert add(1, 2) == 3\n",
+            "src/calc.py": buggy.replace("a - b", "a + b"),
+            "tests/test_add.py": "from calc import add\n\n\ndef test_add():\n    assert add(1, 2) == 3\n",
         },
     )
-    # Fusion : le correctif de la branche sur la base de main (f(a, b) conservé).
-    _git(root, "checkout", "-q", "--detach", base)
-    (root / "src" / "calc.py").write_text(new_src.replace("a - b", "a + b"), encoding="utf-8")
-    _git(root, "checkout", head, "--", "tests/test_f.py", "tests/test_add.py")
-    _git(root, "add", "src/calc.py", "tests/test_f.py", "tests/test_add.py")
-    _git(root, "commit", "-q", "-m", "merge")
+    _git(root, "checkout", "-q", "main")
+    _git(root, "merge", "-q", "--no-ff", "-m", "merge", "pr")
     merge = _git(root, "rev-parse", "HEAD")
-    assert _run(root, base, head).status == "red-on-base"  # sur head.sha seul : faux positif
     verdict = guard.evaluate(root, base, head, FIX, "", [], verify=merge)
-    assert not verdict.ok and verdict.status == "red-on-head"
+    assert verdict.ok and verdict.status == "red-on-base", verdict.message
