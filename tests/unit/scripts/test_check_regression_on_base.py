@@ -509,6 +509,36 @@ def test_stale_branch_head_alone_is_a_false_positive_without_verify(tmp_path: Pa
     assert _run(root, base, head).status == "red-on-base"
 
 
+def test_stale_event_base_is_replaced_by_the_first_parent_of_the_merge(tmp_path: Path):
+    """D14-T4-1 : `base.sha` de l'événement est celui de la création de la PR ; main a
+    avancé (f(a) devient f(a, b), son test suit). Le test fusionné rejoué sur ce vieux
+    code échoue par dérive : faux `red-on-base`. La base utile est `merge^1`."""
+    root, _, head, merge = _stale_repo(tmp_path)
+    stale = _git(root, "rev-parse", f"{head}^")  # fourche : l'ancien base.sha
+    verdict = guard.evaluate(root, stale, head, FIX, "", [], verify=merge)
+    assert not verdict.ok and verdict.status == "green-on-base", verdict.message
+    assert "premier parent" in verdict.message
+
+
+def test_symbolic_verify_ref_is_resolved_before_the_base_worktree(tmp_path: Path):
+    """D14-T4-1 (correction de la repro) : `--verify-sha HEAD` était relu dans le
+    worktree de la base, où HEAD vaut la base elle-même : le garde jugeait le fichier
+    de la base. Les références sont résolues une fois, dans le dépôt."""
+    root, _, head, merge = _stale_repo(tmp_path)
+    stale = _git(root, "rev-parse", f"{head}^")
+    by_sha = guard.evaluate(root, stale, head, FIX, "", [], verify=merge)
+    by_ref = guard.evaluate(root, stale, head, FIX, "", [], verify="HEAD")
+    assert (by_ref.status, by_ref.tests) == (by_sha.status, by_sha.tests) == ("green-on-base", ["tests/test_f.py"])
+
+
+def test_current_event_base_gets_no_derivation_note(tmp_path: Path):
+    """Contre-épreuve : quand `base.sha` est déjà `merge^1`, rien n'est remplacé."""
+    root, base, head, merge = _stale_repo(tmp_path)
+    assert _git(root, "rev-parse", f"{merge}^1") == base
+    verdict = guard.evaluate(root, base, head, FIX, "", [], verify=merge)
+    assert verdict.status == "green-on-base" and "premier parent" not in verdict.message
+
+
 def test_stale_branch_real_regression_is_still_accepted(tmp_path: Path):
     """Contre-épreuve de D14-T2-1 : un vrai correctif d'une branche en retard passe."""
     root = tmp_path / "t"

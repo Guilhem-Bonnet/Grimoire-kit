@@ -50,6 +50,10 @@ jobs:
         # La tête et les tests rejoués viennent du commit de fusion (github.sha),
         # celui que actions/checkout extrait : une branche en retard sur main
         # n'est pas validée contre un code que main a déjà changé.
+        # base.sha peut être en retard sur main (D14-T4-1) : rejouer les tests
+        # fusionnés sur ce vieux code donnerait un faux rouge. Le garde remplace
+        # alors la base par le premier parent du commit de fusion et le dit dans
+        # le résumé ; ce pas ne compare pas BASE_SHA et MERGE_SHA lui-même.
         run: |
           guard=scripts/check-regression-on-base.py
           if ! git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then

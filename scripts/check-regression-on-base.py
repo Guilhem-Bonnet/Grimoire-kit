@@ -21,6 +21,15 @@ Limites assumées : les tests rejoués et la tête vérifiée viennent de
 `--verify-sha` (commit de fusion en CI), pas de `--head-sha` seul ; un rouge sur la base reste attribué aux
 fichiers de la PR sans prouver la cause (par exemple une fixture de conftest
 en erreur au setup compte comme rouge).
+
+Base périmée : les tests sont pris sur le commit de fusion, donc ils suivent
+main ; les rejouer sur un `--base-sha` plus ancien que main donnerait un faux
+rouge (le test fusionné échoue sur du code que main a déjà changé). Quand
+`--verify-sha` est un commit de fusion (deux parents) dont le premier parent
+n'est pas `--base-sha`, la base rejouée devient ce premier parent, et le message
+du verdict le dit. Les trois références sont résolues en SHA dans le dépôt avant
+tout worktree (`HEAD` serait sinon relu dans celui de la base). Un commit de
+fusion à un seul parent n'est pas corrigé : `--base-sha` est alors pris tel quel.
 """
 
 from __future__ import annotations
@@ -81,6 +90,17 @@ def _git(repo: Path, *args: str) -> str:
     if done.returncode != 0:
         raise RuntimeError(f"git {' '.join(args)} : {done.stderr.strip()}")
     return done.stdout
+
+
+def _resolve(repo: Path, rev: str) -> str:
+    """SHA complet de `rev`, résolu dans le dépôt (jamais dans un worktree détaché)."""
+    return _git(repo, "rev-parse", "--verify", f"{rev}^{{commit}}").strip()
+
+
+def _first_parent_of_merge(repo: Path, verify: str) -> str | None:
+    """Premier parent de `verify` s'il s'agit d'un commit de fusion à deux parents."""
+    parents = _git(repo, "rev-list", "--parents", "-n", "1", verify).split()[1:]
+    return parents[0] if len(parents) == 2 else None
 
 
 def changed_test_files(repo: Path, base: str, head: str) -> tuple[list[str], list[str]]:
@@ -270,7 +290,17 @@ def evaluate(
             f"L'étiquette `{ESCAPE_LABEL}` exige une ligne `{ESCAPE_LABEL}: <justification>` "
             f"(au moins {_MIN_JUSTIFICATION} caractères) dans la description de la PR.",
         )
+    note = ""
     try:
+        base, head = _resolve(repo, base), _resolve(repo, head)
+        verify = _resolve(repo, verify) if verify else None
+        merged_base = _first_parent_of_merge(repo, verify) if verify and verify != head else None
+        if merged_base and merged_base != base:
+            note = (
+                f" Base remplacée par le premier parent du commit de fusion ({merged_base[:12]}) : "
+                f"`base.sha` ({base[:12]}) est en retard sur main, les tests fusionnés suivent main."
+            )
+            base = merged_base
         tests, support = changed_test_files(repo, base, head)
         if verify and verify != head:
             tests, support = _split_tests(follow_to_verify(repo, base, head, verify, [*tests, *support]))
@@ -287,6 +317,12 @@ def evaluate(
         replay = run_replay(repo, base, head, tests, support, verify)
     except RuntimeError as exc:
         return _inconclusive_git(exc, tests)
+    verdict = _judge(replay, tests, verify)
+    verdict.message += note
+    return verdict
+
+
+def _judge(replay: Replay, tests: list[str], verify: str | None) -> Verdict:
     code = replay.base_code
     if code in _NOT_FAILING:
         return Verdict(
