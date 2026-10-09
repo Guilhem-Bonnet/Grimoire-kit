@@ -766,20 +766,38 @@ pub fn dispatch_outcome_stats_core(
         let escalated = tiers.len() > 1;
         let inexecutable = acceptance == "unrunnable";
 
-        overall.accumulate(resolved, inexecutable, escalated, record.cost_usd, record.unpriced_calls);
+        overall.accumulate(
+            resolved,
+            inexecutable,
+            escalated,
+            record.cost_usd,
+            record.unpriced_calls,
+        );
         if !class_.is_empty() {
             let entry = by_class.entry(class_.clone()).or_insert_with(|| {
                 class_order.push(class_.clone());
                 DispatchGroupStats::empty()
             });
-            entry.accumulate(resolved, inexecutable, escalated, record.cost_usd, record.unpriced_calls);
+            entry.accumulate(
+                resolved,
+                inexecutable,
+                escalated,
+                record.cost_usd,
+                record.unpriced_calls,
+            );
         }
         if !provider.is_empty() {
             let entry = by_provider.entry(provider.clone()).or_insert_with(|| {
                 provider_order.push(provider.clone());
                 DispatchGroupStats::empty()
             });
-            entry.accumulate(resolved, inexecutable, escalated, record.cost_usd, record.unpriced_calls);
+            entry.accumulate(
+                resolved,
+                inexecutable,
+                escalated,
+                record.cost_usd,
+                record.unpriced_calls,
+            );
         }
         if !replay_key.is_empty() {
             *replay_total.entry(replay_key.clone()).or_insert(0) += 1;
@@ -1473,11 +1491,13 @@ mod py_bridge {
     ) {
         let projections: Vec<DispatchOutcomeProjection> = records
             .into_iter()
-            .map(|(tags, cost_usd, unpriced_calls)| DispatchOutcomeProjection {
-                tags,
-                cost_usd,
-                unpriced_calls,
-            })
+            .map(
+                |(tags, cost_usd, unpriced_calls)| DispatchOutcomeProjection {
+                    tags,
+                    cost_usd,
+                    unpriced_calls,
+                },
+            )
             .collect();
         let result = dispatch_outcome_stats_core(&projections);
         (
