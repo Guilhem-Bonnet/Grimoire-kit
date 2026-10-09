@@ -44,7 +44,9 @@ jobs:
         # se faire valider par sa propre version. Un base.sha absent du dépôt
         # fait échouer le pas (jamais pris pour un amorçage). Garde absent de
         # base.sha : on n'accepte l'amorçage que si la PR l'ajoute elle-même ;
-        # sinon il a été renommé ou supprimé sur main et le pas échoue.
+        # sinon il a été renommé ou supprimé sur main et le pas échoue. En
+        # amorçage il n'y a pas de version de base à protéger : le garde de la
+        # tête tourne, une PR `fix:` n'échappe donc pas au rejeu.
         # La tête et les tests rejoués viennent du commit de fusion (github.sha),
         # celui que actions/checkout extrait : une branche en retard sur main
         # n'est pas validée contre un code que main a déjà changé.
@@ -54,16 +56,17 @@ jobs:
             echo "base.sha $BASE_SHA absent du dépôt : rejeu impossible" | tee -a "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
-          if ! git cat-file -e "$BASE_SHA:$guard" 2>/dev/null; then
-            if [ -n "$(git diff --diff-filter=A --name-only "$BASE_SHA...$HEAD_SHA" -- "$guard")" ]; then
-              echo "garde absent de base.sha (amorçage) : la PR l'introduit, rejeu sans objet" >> "$GITHUB_STEP_SUMMARY"
-              exit 0
-            fi
+          if git cat-file -e "$BASE_SHA:$guard" 2>/dev/null; then
+            git show "$BASE_SHA:scripts/check-regression-on-base.py" > "$RUNNER_TEMP/guard.py"
+            guard_path="$RUNNER_TEMP/guard.py"
+          elif [ -n "$(git diff --diff-filter=A --name-only "$BASE_SHA...$HEAD_SHA" -- "$guard")" ]; then
+            echo "garde absent de base.sha (amorçage) : la PR l'introduit, c'est sa version qui juge" >> "$GITHUB_STEP_SUMMARY"
+            guard_path="$guard"
+          else
             echo "garde absent de base.sha et non ajouté par la PR : renommé ou supprimé sur main ?" | tee -a "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
-          git show "$BASE_SHA:scripts/check-regression-on-base.py" > "$RUNNER_TEMP/guard.py"
-          python "$RUNNER_TEMP/guard.py" --repo . \
+          python "$guard_path" --repo . \
             --base-sha "$BASE_SHA" \
             --head-sha "$HEAD_SHA" \
             --verify-sha "$MERGE_SHA"

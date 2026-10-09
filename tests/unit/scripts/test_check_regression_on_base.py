@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -329,8 +331,10 @@ def _run_workflow_step(
     summary = tmp_path / "summary.md"
     runner = tmp_path / "runner"
     runner.mkdir(exist_ok=True)
+    # Hérite de l'environnement (SYSTEMROOT, HOME... indispensables à CPython sous
+    # Windows) ; seules les variables du pas Actions sont imposées.
     env = {
-        "PATH": __import__("os").environ["PATH"],
+        **os.environ,
         "RUNNER_TEMP": str(runner),
         "GITHUB_STEP_SUMMARY": str(summary),
         "BASE_SHA": base,
@@ -342,7 +346,8 @@ def _run_workflow_step(
     }
     run = script if script is not None else _workflow_run_script()
     if use_current_python:
-        run = run.replace("python ", f"{sys.executable} ")
+        # Chemin POSIX et protégé : bash -c mange les `\\` d'un chemin Windows.
+        run = run.replace("python ", f"{shlex.quote(Path(sys.executable).as_posix())} ")
     done = subprocess.run(
         ["bash", "-e", "-c", run],
         cwd=root,
@@ -355,14 +360,36 @@ def _run_workflow_step(
     return done, summary
 
 
+REAL_GUARD = (Path(__file__).resolve().parents[3] / "scripts" / "check-regression-on-base.py").read_text(
+    encoding="utf-8"
+)
+
+
 def test_workflow_step_bootstraps_when_the_pr_itself_adds_the_guard(good_repo, tmp_path):
     """D14-T1-3 : sous `bash -e`, `git show base:guard` échouait avant tout verdict
-    pour la PR qui introduit le garde. D14-T2-2 : l'amorçage n'est admis que dans ce cas."""
+    pour la PR qui introduit le garde. D14-T2-2 : l'amorçage n'est admis que dans ce cas.
+    D14-T3-3 : le garde de la tête tourne, il juge ici une PR non fix (rejeu sans objet)."""
     root, base = good_repo  # base sans scripts/check-regression-on-base.py
-    head = _commit(root, {"scripts/check-regression-on-base.py": "raise SystemExit(7)\n"})
-    done, summary = _run_workflow_step(root, tmp_path, base=base, head=head, title="ci: autre chose")
+    head = _commit(root, {"scripts/check-regression-on-base.py": REAL_GUARD})
+    done, summary = _run_workflow_step(
+        root, tmp_path, base=base, head=head, title="ci: autre chose", use_current_python=True
+    )
     assert done.returncode == 0, done.stderr
-    assert "amorçage" in summary.read_text(encoding="utf-8")
+    text = summary.read_text(encoding="utf-8")
+    assert "amorçage" in text and "sans objet" in text
+
+
+def test_workflow_step_bootstrap_does_not_let_a_fix_pr_skip_the_replay(good_repo, tmp_path):
+    """D14-T3-3 : une PR `fix:` qui ajoute le garde et un correctif sans test passait
+    en 0 (« rejeu sans objet »). Le garde de la tête, seul disponible, la juge."""
+    root, base = good_repo
+    head = _commit(
+        root,
+        {"scripts/check-regression-on-base.py": REAL_GUARD, "src/calc.py": "def add(a, b):\n    return 42\n"},
+    )
+    done, summary = _run_workflow_step(root, tmp_path, base=base, head=head, title="fix: x", use_current_python=True)
+    assert done.returncode == 1, done.stderr
+    assert "sans test" in summary.read_text(encoding="utf-8")
 
 
 def test_workflow_step_fails_when_the_guard_vanished_from_base(good_repo, tmp_path):
@@ -371,8 +398,10 @@ def test_workflow_step_fails_when_the_guard_vanished_from_base(good_repo, tmp_pa
     root, base = good_repo
     head = _commit(root, {"src/other.py": "X = 1\n"})
     done, summary = _run_workflow_step(root, tmp_path, base=base, head=head, title="fix: x")
-    assert done.returncode != 0
-    assert "amorçage" not in (summary.read_text(encoding="utf-8") if summary.exists() else "")
+    text = summary.read_text(encoding="utf-8") if summary.exists() else ""
+    assert done.returncode == 1, done.stderr
+    assert "renommé ou supprimé" in text
+    assert "amorçage" not in text
 
 
 def test_workflow_step_fails_when_the_base_object_is_missing(good_repo, tmp_path):
@@ -381,8 +410,10 @@ def test_workflow_step_fails_when_the_base_object_is_missing(good_repo, tmp_path
     head = _commit(root, {"scripts/check-regression-on-base.py": "raise SystemExit(7)\n"})
     missing = "0" * 39 + "1"
     done, summary = _run_workflow_step(root, tmp_path, base=missing, head=head, title="fix: x")
-    assert done.returncode != 0
-    assert "amorçage" not in (summary.read_text(encoding="utf-8") if summary.exists() else "")
+    text = summary.read_text(encoding="utf-8") if summary.exists() else ""
+    assert done.returncode == 1, done.stderr  # pas 128 : le pas a son propre contrôle
+    assert "absent du dépôt" in text
+    assert "amorçage" not in text
 
 
 def test_workflow_step_still_runs_the_guard_from_base_when_present(good_repo, tmp_path):
@@ -405,7 +436,7 @@ def test_workflow_step_run_from_the_checkout_would_be_caught(good_repo, tmp_path
     base = _commit(root, {"scripts/check-regression-on-base.py": "raise SystemExit(7)\n"})
     head = _commit(root, {"scripts/check-regression-on-base.py": "raise SystemExit(0)\n"})
     mutant = _workflow_run_script().replace(
-        'python "$RUNNER_TEMP/guard.py"', "python scripts/check-regression-on-base.py"
+        'guard_path="$RUNNER_TEMP/guard.py"', 'guard_path="scripts/check-regression-on-base.py"'
     )
     assert mutant != _workflow_run_script()
     done, _ = _run_workflow_step(
@@ -499,3 +530,73 @@ def test_stale_branch_real_regression_is_still_accepted(tmp_path: Path):
     merge = _git(root, "rev-parse", "HEAD")
     verdict = guard.evaluate(root, base, head, FIX, "", [], verify=merge)
     assert verdict.ok and verdict.status == "red-on-base", verdict.message
+
+
+def test_workflow_env_keeps_the_host_environment(good_repo, tmp_path, monkeypatch):
+    """D14-T3-5 : le pas hérite de l'environnement (SYSTEMROOT, indispensable à
+    CPython sous Windows) au lieu d'un dictionnaire réduit à quelques variables."""
+    monkeypatch.setenv("SYSTEMROOT", "marqueur-systemroot")
+    root, _ = good_repo
+    script = 'printf "%s|%s" "$SYSTEMROOT" "$PR_TITLE"'
+    done, _ = _run_workflow_step(root, tmp_path, base="a", head="b", title="t", script=script)
+    assert done.stdout == "marqueur-systemroot|t"
+
+
+# ── Revue D-14, 4e tour : renommage sur main, résumé toujours écrit ──
+
+
+def _renamed_on_main_repo(tmp_path: Path) -> tuple[Path, str, str, str]:
+    """Main renomme `tests/test_calc.py`, la PR le modifie : fusion git propre (D14-T3-1)."""
+    root = tmp_path / "rn"
+    root.mkdir()
+    _git(root, "init", "-q", "-b", "main")
+    body = "from calc import add\n\n" + "".join(
+        f"def test_{i}():\n    assert add({i}, 0) == {i}\n\n" for i in range(15)
+    )
+    fork = _commit(root, {"src/calc.py": "def add(a, b):\n    return a - b\n", "tests/test_calc.py": body})
+    _git(root, "mv", "tests/test_calc.py", "tests/test_arith.py")
+    _git(root, "commit", "-q", "-m", "rename")
+    base = _git(root, "rev-parse", "HEAD")
+    _git(root, "checkout", "-q", "-b", "pr", fork)
+    head = _commit(
+        root,
+        {"src/calc.py": FIXED, "tests/test_calc.py": body + "def test_reg():\n    assert add(1, 2) == 3\n"},
+    )
+    _git(root, "checkout", "-q", "main")
+    _git(root, "merge", "-q", "--no-ff", "-m", "merge", "pr")
+    return root, base, head, _git(root, "rev-parse", "HEAD")
+
+
+def test_test_renamed_on_main_is_replayed_from_its_new_path(tmp_path: Path):
+    """D14-T3-1 : `git checkout merge -- tests/test_calc.py` levait RuntimeError (le
+    chemin de la tête n'existe plus dans le commit de fusion) et le pas finissait
+    sur une trace. Le test est suivi sous son nom de fusion."""
+    root, base, head, merge = _renamed_on_main_repo(tmp_path)
+    verdict = guard.evaluate(root, base, head, FIX, "", [], verify=merge)
+    assert verdict.ok and verdict.status == "red-on-base", verdict.message
+    assert verdict.tests == ["tests/test_arith.py"]
+
+
+def test_git_failure_during_replay_is_an_inconclusive_verdict(repo, monkeypatch):
+    """D14-T3-1 (repli) : une erreur git ne doit jamais sortir en exception, le
+    résumé du job doit toujours être écrit."""
+    root, base = repo
+    head = _commit(root, {"src/calc.py": FIXED, "tests/test_calc.py": RED_TEST})
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("git checkout : chemin inconnu")
+
+    monkeypatch.setattr(guard, "run_replay", boom)
+    verdict = _run(root, base, head)
+    assert not verdict.ok and verdict.status == "inconclusive"
+    assert "chemin inconnu" in verdict.message
+
+
+def test_main_writes_the_summary_when_git_fails(repo, monkeypatch, tmp_path):
+    root, base = repo
+    head = _commit(root, {"src/calc.py": FIXED, "tests/test_calc.py": RED_TEST})
+    monkeypatch.setattr(guard, "run_replay", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("git cassé")))
+    summary = tmp_path / "summary.md"
+    code = _main(monkeypatch, root, base, head, {"PR_TITLE": FIX, "PR_LABELS": "[]"}, summary)
+    assert code == 1
+    assert "git cassé" in summary.read_text(encoding="utf-8")

@@ -93,8 +93,50 @@ def changed_test_files(repo: Path, base: str, head: str) -> tuple[list[str], lis
     """
     out = _git(repo, "diff", "--name-only", "--no-renames", "--diff-filter=AM", f"{base}...{head}", "--", "tests")
     files = [line for line in out.splitlines() if line]
+    return _split_tests(files)
+
+
+def _split_tests(files: list[str]) -> tuple[list[str], list[str]]:
     tests = [f for f in files if f.endswith(".py") and Path(f).name.startswith("test_")]
     return tests, [f for f in files if f not in tests]
+
+
+def _renamed_on_base(repo: Path, base: str, head: str) -> dict[str, str]:
+    """Renommages faits par la base depuis le point de fourche : ancien -> nouveau chemin."""
+    fork = _git(repo, "merge-base", base, head).strip()
+    fields = _git(repo, "diff", "--name-status", "--find-renames", "-z", fork, base).split("\0")
+    moved: dict[str, str] = {}
+    i = 0
+    while i < len(fields) and fields[i]:
+        status = fields[i]
+        if status.startswith(("R", "C")) and i + 2 < len(fields):
+            if status.startswith("R"):
+                moved[fields[i + 1]] = fields[i + 2]
+            i += 3
+        else:
+            i += 2
+    return moved
+
+
+def follow_to_verify(repo: Path, base: str, head: str, verify: str, files: list[str]) -> list[str]:
+    """Chemins de la tête (`base...head`) tels qu'ils existent dans le commit `verify`.
+
+    Une fusion git propre applique la modification de la PR au fichier que la
+    base a renommé : `tests/test_calc.py` de la tête devient `tests/test_arith.py`
+    dans le commit de fusion. Un chemin absent de `verify` et sans renommage connu
+    (supprimé par la base) est écarté.
+    """
+    if verify == head or not files:
+        return files
+    present = set(_git(repo, "ls-tree", "-r", "--name-only", verify, "--", "tests").splitlines())
+    missing = [f for f in files if f not in present]
+    moved = _renamed_on_base(repo, base, head) if missing else {}
+    followed: list[str] = []
+    for f in files:
+        target = f if f in present else moved.get(f, "")
+        if target in present and target not in followed:
+            followed.append(target)
+    return followed
 
 
 def _module_id(rel: str) -> str:
@@ -197,6 +239,16 @@ def run_replay(
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def _inconclusive_git(exc: RuntimeError, tests: list[str] | None = None) -> Verdict:
+    """Une erreur git ne sort jamais en trace : le résumé du job doit être écrit."""
+    return Verdict(
+        False,
+        "inconclusive",
+        f"Rejeu impossible, git a échoué (fichier renommé ou supprimé sur la base, objet absent ?) : {exc}",
+        tests or [],
+    )
+
+
 def evaluate(
     repo: Path,
     base: str,
@@ -218,7 +270,12 @@ def evaluate(
             f"L'étiquette `{ESCAPE_LABEL}` exige une ligne `{ESCAPE_LABEL}: <justification>` "
             f"(au moins {_MIN_JUSTIFICATION} caractères) dans la description de la PR.",
         )
-    tests, support = changed_test_files(repo, base, head)
+    try:
+        tests, support = changed_test_files(repo, base, head)
+        if verify and verify != head:
+            tests, support = _split_tests(follow_to_verify(repo, base, head, verify, [*tests, *support]))
+    except RuntimeError as exc:
+        return _inconclusive_git(exc)
     if not tests:
         return Verdict(
             False,
@@ -226,7 +283,10 @@ def evaluate(
             "PR `fix:` sans test ajouté ou modifié. Ajoutez le test de régression, "
             f"ou posez `{ESCAPE_LABEL}` avec une justification.",
         )
-    replay = run_replay(repo, base, head, tests, support, verify)
+    try:
+        replay = run_replay(repo, base, head, tests, support, verify)
+    except RuntimeError as exc:
+        return _inconclusive_git(exc, tests)
     code = replay.base_code
     if code in _NOT_FAILING:
         return Verdict(
