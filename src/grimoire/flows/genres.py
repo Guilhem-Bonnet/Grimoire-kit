@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from grimoire.core.exceptions import GrimoireRuntimeError
-from grimoire.costs import Cost, cap_reason
+from grimoire.costs import POLICY_CONTINUE_FLAGGED, Cost, cap_reason
 from grimoire.flows.blueprint_loader import load_blueprint, resolve_composite_ref
 from grimoire.flows.dispatch_executor import DispatchExecutor, NodeDispatchOutcome
 from grimoire.flows.engine import FlowEngine
@@ -45,6 +45,9 @@ class _ChildRun:
     #: annexe (``novelty_key`` pour ``loop-until-dry``) que le contrat de
     #: pins ignore déjà.
     output: dict[str, Any] | None = None
+    #: Pourquoi le run enfant a été abandonné sur le plafond : ``cost_reached`` ou
+    #: ``cost_unknown`` (``status == "cost_capped"`` seulement, W1-01 revue S3).
+    cost_cap_reason: str | None = None
 
     @property
     def cost_usd(self) -> float | None:
@@ -101,6 +104,9 @@ def _launch_child(
         engine=child_engine,
         extra_context=extra_context,
     )
+    # Le plafond du sous-flow est vérifié par le child_executor lui-même, AVANT de lancer un
+    # node suivant (jamais en rétractant la sortie d'un node déjà produit — revue S1).
+    child_executor.node_cost_cap = max_cost_usd
     tag = f"-{suffix}" if suffix else ""
     # Le contrat du premier node de l'enfant n'est jamais réutilisé ici :
     # `_drive_composite_child` pilote sur `executor.last_result`/
@@ -116,7 +122,7 @@ def _launch_child(
     )
     child_run_id = wfi.id
     first_result = child_executor.last_result or NodeExecutionResult(pending=True)
-    status, faults, cost, host_reason, last_output = _drive_composite_child(
+    status, faults, cost, host_reason, last_output, cap_why = _drive_composite_child(
         child_engine, child_run_id, child_executor, first_result, max_cost_usd=max_cost_usd
     )
     return _ChildRun(
@@ -128,7 +134,25 @@ def _launch_child(
         attempts=len(child_executor.node_outcomes),
         escalations=sum(o.escalations for o in child_executor.node_outcomes.values()),
         output=last_output,
+        cost_cap_reason=cap_why,
     )
+
+
+def _child_row(index: int, child: _ChildRun) -> dict[str, Any]:
+    """Une ligne de rapport par enfant : le coût porte son statut, jamais un nombre nu (revue S6)."""
+    return {
+        "index": index,
+        "child_run_id": child.child_run_id,
+        "status": child.status,
+        "cost_usd": child.cost_usd,
+        "cost_status": child.cost.status,
+        "unpriced_calls": child.cost.unpriced_calls,
+    }
+
+
+def _candidates_summary(candidates: list[_ChildRun]) -> str:
+    """Résumé des tentatives remis au juge : ``Cost.render()`` dit « >= X » pour un minimum, « inconnu » sinon."""
+    return "\n".join(f"  [{i}] run {c.child_run_id} — coût {c.cost.render()}" for i, c in enumerate(candidates))
 
 
 def _record_genre_outcome(
@@ -142,6 +166,7 @@ def _record_genre_outcome(
     attempts: int,
     escalations: int,
     child_run_id: str | None = None,
+    cost_cap_reason: str | None = None,
 ) -> None:
     executor.node_outcomes[node_id] = NodeDispatchOutcome(
         node_id=node_id,
@@ -157,6 +182,7 @@ def _record_genre_outcome(
         uncertainties=(),
         acceptance_status=verifiability_label,
         child_run_id=child_run_id,
+        cost_cap_reason=cost_cap_reason,
     )
 
 
@@ -223,6 +249,7 @@ def _execute_composite(executor: DispatchExecutor, contract: NodeContract, conte
         attempts=child.attempts,
         escalations=child.escalations,
         child_run_id=child.child_run_id,
+        cost_cap_reason=child.cost_cap_reason,
     )
     if verdict != "green":
         executor.blocked_node = node_id
@@ -308,8 +335,10 @@ def _execute_fanout(executor: DispatchExecutor, contract: NodeContract, context_
     total_cost = Cost.none()
     cap = executor._pilot_policy.max_cost_usd_per_node
     cost_capped = False
+    cap_why: str | None = None
     for i in range(len(items)):
-        if _over_cap(executor, total_cost, cap):
+        cap_why = _cap_why(executor, total_cost, cap, siblings=True)
+        if cap_why is not None:
             cost_capped = True
             break
         child = _launch_child(executor, 
@@ -341,10 +370,10 @@ def _execute_fanout(executor: DispatchExecutor, contract: NodeContract, context_
     verdict = "cost_capped" if cost_capped else ("green" if all_green else "red")
     _record_genre_outcome(executor, 
         node_id, run_id, verifiability_label="fanout", verdict=verdict, cost=total_cost,
-        attempts=attempts, escalations=escalations,
+        attempts=attempts, escalations=escalations, cost_cap_reason=cap_why if cost_capped else None,
     )
     fanout_results = [
-        {"index": i, "child_run_id": c.child_run_id, "status": c.status, "cost_usd": c.cost_usd}
+        _child_row(i, c)
         for i, c in enumerate(children)
     ]
     if verdict != "green":
@@ -383,11 +412,12 @@ def _execute_verify_panel(executor: DispatchExecutor, contract: NodeContract, co
     total_cost = Cost.none()
     cap = executor._pilot_policy.max_cost_usd_per_node
     for i in range(k):
-        if _over_cap(executor, total_cost, cap):
+        cap_why = _cap_why(executor, total_cost, cap, siblings=True)
+        if cap_why is not None:
             _record_genre_outcome(executor, 
                 node_id, run_id, verifiability_label="verify-panel", verdict="cost_capped",
                 cost=total_cost, attempts=sum(c.attempts for c in children),
-                escalations=sum(c.escalations for c in children),
+                escalations=sum(c.escalations for c in children), cost_cap_reason=cap_why,
             )
             executor.blocked_node = node_id
             result = NodeExecutionResult(
@@ -429,7 +459,7 @@ def _execute_verify_panel(executor: DispatchExecutor, contract: NodeContract, co
         attempts=attempts, escalations=escalations,
     )
     panel_results = [
-        {"index": i, "child_run_id": c.child_run_id, "status": c.status, "cost_usd": c.cost_usd}
+        _child_row(i, c)
         for i, c in enumerate(children)
     ]
     if verdict != "green":
@@ -470,8 +500,10 @@ def _execute_loop_until_dry(executor: DispatchExecutor, contract: NodeContract, 
     total_cost = Cost.none()
     cap = executor._pilot_policy.max_cost_usd_per_node
     stop_reason = "max_rounds"
+    cap_why: str | None = None
     for i in range(max_rounds):
-        if _over_cap(executor, total_cost, cap):
+        cap_why = _cap_why(executor, total_cost, cap, siblings=True)
+        if cap_why is not None:
             stop_reason = "cost_capped"
             break
         child = _launch_child(executor, 
@@ -513,7 +545,7 @@ def _execute_loop_until_dry(executor: DispatchExecutor, contract: NodeContract, 
     verdict = "cost_capped" if stop_reason == "cost_capped" else "green"
     _record_genre_outcome(executor, 
         node_id, run_id, verifiability_label="loop-until-dry", verdict=verdict, cost=total_cost,
-        attempts=len(rounds), escalations=0,
+        attempts=len(rounds), escalations=0, cost_cap_reason=cap_why if stop_reason == "cost_capped" else None,
     )
     output: dict[str, Any] = {"pins": {pin.pin_id: {"contract": pin.contract} for pin in contract.outputs}}
     output["loop_until_dry_rounds"] = rounds
@@ -551,10 +583,12 @@ def _execute_judge(executor: DispatchExecutor, contract: NodeContract, context_p
     total_cost = Cost.none()
     cap = executor._pilot_policy.max_cost_usd_per_node
     for i in range(n):
-        if _over_cap(executor, total_cost, cap):
+        cap_why = _cap_why(executor, total_cost, cap, siblings=True)
+        if cap_why is not None:
             _record_genre_outcome(executor, 
                 node_id, run_id, verifiability_label="judge", verdict="cost_capped", cost=total_cost,
                 attempts=sum(c.attempts for c in candidates), escalations=sum(c.escalations for c in candidates),
+                cost_cap_reason=cap_why,
             )
             executor.blocked_node = node_id
             result = NodeExecutionResult(
@@ -595,10 +629,11 @@ def _execute_judge(executor: DispatchExecutor, contract: NodeContract, context_p
         return result
 
     trace = [
-        {"index": i, "child_run_id": c.child_run_id, "status": c.status, "cost_usd": c.cost_usd}
+        _child_row(i, c)
         for i, c in enumerate(candidates)
     ]
-    summary = "\n".join(f"  [{row['index']}] run {row['child_run_id']} — coût {'inconnu' if row['cost_usd'] is None else row['cost_usd']}" for row in trace)
+    # ``Cost.render()`` : un minimum se lit ``>= 0.42 USD``, jamais « coût 0.42 » (revue S6).
+    summary = _candidates_summary(candidates)
     saved_context = executor._extra_context
     executor._extra_context = (
         f"{saved_context}\n\nTentatives à départager (indices 0..{n - 1}) :\n{summary}\n\n"
@@ -684,8 +719,10 @@ def _execute_budget(executor: DispatchExecutor, contract: NodeContract, context_
     total_cost = Cost.none()
     for i, ref in enumerate(passes):
         mandatory = i == 0
-        if not mandatory and cap_reason(total_cost, max_cost_usd, executor._pilot_policy.on_unknown_cost) is not None:
-            rows.append({"index": i, "ref": ref, "launched": False})
+        skipped_why = None if mandatory else cap_reason(total_cost, max_cost_usd, executor._pilot_policy.on_unknown_cost)
+        if skipped_why is not None:
+            # La passe optionnelle n'est pas lancée : on dit pourquoi (budget atteint ou coût inconnu).
+            rows.append({"index": i, "ref": ref, "launched": False, "skipped_reason": skipped_why})
             continue
         child = _launch_child(executor, 
             ref, node_id=node_id, run_id=run_id, blueprint_id=blueprint_id, suffix=f"pass{i}", max_cost_usd=None,
@@ -702,7 +739,7 @@ def _execute_budget(executor: DispatchExecutor, contract: NodeContract, context_
             executor.last_result = result
             return result
         rows.append(
-            {"index": i, "ref": ref, "launched": True, "child_run_id": child.child_run_id, "status": child.status, "cost_usd": child.cost_usd}
+            {**_child_row(i, child), "ref": ref, "launched": True}
         )
         if mandatory and child.status != "finished":
             _record_genre_outcome(executor, 
@@ -743,10 +780,12 @@ def _execute_replay_diff(executor: DispatchExecutor, contract: NodeContract, con
     children: list[_ChildRun] = []
     total_cost = Cost.none()
     for i in range(2):
-        if _over_cap(executor, total_cost, cap):
+        cap_why = _cap_why(executor, total_cost, cap, siblings=True)
+        if cap_why is not None:
             _record_genre_outcome(executor, 
                 node_id, run_id, verifiability_label="replay-diff", verdict="cost_capped", cost=total_cost,
                 attempts=sum(c.attempts for c in children), escalations=sum(c.escalations for c in children),
+                cost_cap_reason=cap_why,
             )
             executor.blocked_node = node_id
             result = NodeExecutionResult(pending=False, output=None, extra={"replay_diff_error": "plafond dépassé avant la seconde relecture"})
@@ -847,11 +886,20 @@ def _total_cost(executor: DispatchExecutor) -> Cost:
     return Cost.total(o.cost for o in executor.node_outcomes.values())
 
 
-def _over_cap(executor: DispatchExecutor, total: Cost, cap: float | None) -> bool:
-    """Le plafond du pilote interdit-il de continuer ? Un coût inconnu compte selon ``on_unknown_cost`` (W1-01)."""
+def _cap_why(executor: DispatchExecutor, total: Cost, cap: float | None, *, siblings: bool = False) -> str | None:
+    """Pourquoi le plafond du pilote interdit de continuer — ``None`` s'il le permet (W1-01).
+
+    ``siblings=True`` : travail frère d'un genre à plusieurs enfants (fanout, verify-panel,
+    loop-until-dry, judge, replay-diff). Un coût *inconnu* n'y bloque jamais (seul un
+    montant connu qui atteint le plafond, ``cost_reached``) : ``cost_unknown`` est réservé
+    à l'escalade vers un palier plus cher et à l'enchaînement des nodes d'un sous-flow, où
+    continuer dépense plus sans savoir. Sinon, un fournisseur muet jetterait des frères
+    dont rien n'indique qu'ils dépassent (revue S1).
+    """
     if cap is None:
-        return False
-    return cap_reason(total, cap, executor._pilot_policy.on_unknown_cost, inclusive=False) is not None
+        return None
+    policy = POLICY_CONTINUE_FLAGGED if siblings else executor._pilot_policy.on_unknown_cost
+    return cap_reason(total, cap, policy, inclusive=False)
 
 
 def _drive_composite_child(
@@ -861,20 +909,23 @@ def _drive_composite_child(
     result: NodeExecutionResult,
     *,
     max_cost_usd: float | None,
-) -> tuple[str, tuple[str, ...], Cost, str | None, dict[str, Any] | None]:
+) -> tuple[str, tuple[str, ...], Cost, str | None, dict[str, Any] | None, str | None]:
     """Enchaîne les nodes du sous-flow d'un node composite (issue #206) — variante coût-plafonné de :func:`_drive`.
 
     Même boucle que :func:`_drive`, avec une différence : le plafond de coût
-    du pilote (issue #209) est vérifié à chaque tour, **avant** de faire
-    avancer l'enfant d'un node de plus — jamais après un node déjà vert
-    (même garantie que ``run_dispatch`` applique à un dispatch simple). Un
-    dépassement abandonne le run enfant (``FlowEngine.abort``, motif nommé)
-    plutôt que de le laisser suspendu à mi-chemin sans qu'aucun futur
-    ``resume`` ne le débloque.
+    du pilote (issue #209) est vérifié **avant de lancer** le node suivant de
+    l'enfant (``DispatchExecutor.node_cost_cap``, posé par :func:`_launch_child`),
+    jamais en rétractant la sortie d'un node déjà produit : un node vert est
+    toujours soumis à ``engine.resume`` (même garantie que ``run_dispatch``
+    pour un dispatch simple, W1-01 revue S1). Un dépassement — ou un coût
+    inconnu sous la politique ``stop`` — abandonne le run enfant
+    (``FlowEngine.abort``, motif nommé) plutôt que de le laisser suspendu à
+    mi-chemin sans qu'aucun futur ``resume`` ne le débloque.
 
-    Rend ``(status, faults, total_cost, host_reason, last_output)`` où
-    ``status`` vaut ``"finished"``, ``"blocked"``, ``"waiting_host"`` ou
-    ``"cost_capped"``. ``last_output`` (issue #207) est la sortie soumise
+    Rend ``(status, faults, total_cost, host_reason, last_output, cap_reason)``
+    où ``status`` vaut ``"finished"``, ``"blocked"``, ``"waiting_host"`` ou
+    ``"cost_capped"`` (``cap_reason`` : ``cost_reached`` | ``cost_unknown``,
+    ``None`` sinon). ``last_output`` (issue #207) est la sortie soumise
     pour le DERNIER node exécuté de l'enfant quand ``status == "finished"``
     (``None`` sinon) — un genre à plusieurs tentatives (``loop-until-dry``)
     y lit une clé annexe (``novelty_key``) que ``check_output_against_contract``
@@ -882,21 +933,26 @@ def _drive_composite_child(
     """
     while True:
         if result.pending:
-            return "waiting_host", (), _total_cost(executor), executor.host_reason, None
+            return "waiting_host", (), _total_cost(executor), executor.host_reason, None, None
         if result.output is None:
-            return "blocked", (), _total_cost(executor), None, None
-        total = _total_cost(executor)
-        if _over_cap(executor, total, max_cost_usd):
-            engine.abort(
-                run_id,
-                reason=f"plafond du pilote dépassé pour le sous-flow ({total.render()} pour {max_cost_usd} USD, issue #206/#209)",
-            )
-            return "cost_capped", (), total, None, None
+            why = executor.cost_cap_stop
+            if why is not None:
+                total = _total_cost(executor)
+                label = "coût inconnu" if why == "cost_unknown" else "plafond atteint"
+                engine.abort(
+                    run_id,
+                    reason=(
+                        f"plafond du pilote pour le sous-flow : {label} "
+                        f"({total.render()} pour {max_cost_usd} USD, issue #206/#209)"
+                    ),
+                )
+                return "cost_capped", (), total, None, None, why
+            return "blocked", (), _total_cost(executor), None, None, None
         last_output = result.output
         outcome: ResumeOutcome = engine.resume(run_id, output=result.output, executor=executor)
         if not outcome.ok:
-            return "blocked", outcome.faults, _total_cost(executor), None, None
+            return "blocked", outcome.faults, _total_cost(executor), None, None, None
         if outcome.finished:
-            return "finished", (), _total_cost(executor), None, last_output
+            return "finished", (), _total_cost(executor), None, last_output, None
         assert outcome.contract is not None  # non fini : le moteur a rouvert le node suivant
         result = executor.last_result or NodeExecutionResult(pending=True)

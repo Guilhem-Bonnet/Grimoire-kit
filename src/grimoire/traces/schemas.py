@@ -31,7 +31,7 @@ class TokenUsage:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
-    estimated_cost_usd: float | None = None
+    estimated_cost_usd: float | None = 0.0
     unpriced_calls: int = 0
 
     @property
@@ -44,7 +44,8 @@ class TokenUsage:
             "completion_tokens": self.completion_tokens,
             "total_tokens": self.total_tokens,
             "estimated_cost_usd": self.estimated_cost_usd,
-            "unpriced_calls": self.unpriced_calls,
+            # Le compteur vient du coût à trois états, pour ne jamais contredire ``cost_status``.
+            "unpriced_calls": self.cost.unpriced_calls,
             "cost_status": self.cost.status,
         }
 
@@ -56,6 +57,16 @@ class TokenUsage:
         seul reproche honnête qu'on puisse lui faire ; un montant v1 positif
         reste exact. Un enregistrement v2 est pris tel quel.
         """
+        if (
+            schema_version != TRACE_SCHEMA_V1
+            and "estimated_cost_usd" not in d
+            and not d.get("unpriced_calls")
+            and not any(d.get(k) for k in ("prompt_tokens", "completion_tokens", "total_tokens"))
+        ):
+            # v2 sans coût, sans compteur et sans token : aucun appel modèle (un gate, un
+            # choix d'agent) — 0.0 exact, pas un appel inconnu. En v1 un ``0.0`` ne
+            # distinguait pas gratuit et inconnu : il reste lu comme inconnu (ci-dessous).
+            return cls(estimated_cost_usd=0.0, unpriced_calls=0)
         raw = d.get("estimated_cost_usd")
         cost = float(raw) if isinstance(raw, int | float) and not isinstance(raw, bool) else None
         unpriced = int(d.get("unpriced_calls", 0) or 0)

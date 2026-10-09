@@ -10,6 +10,7 @@ import contextlib
 import json
 import os
 import uuid
+import warnings
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -72,13 +73,33 @@ except ImportError:  # pragma: no cover - exercised by the dedicated Rust CI job
     _rust_core = None
 
 
+#: Version de l'ABI Python/Rust attendue (W1-01, revue S8). ``dispatch_outcome_stats``
+#: échange des tuples de longueur fixe : une extension plus ancienne, encore installée,
+#: lèverait un ``ValueError`` opaque. Le cœur exporte la même constante ``ABI_VERSION`` ;
+#: à incrémenter des deux côtés à chaque changement de signature ou de forme d'échange.
+RUST_ABI_VERSION = 2
+
+
+def _rust_abi_mismatch() -> str | None:
+    """Pourquoi le module Rust importé est inutilisable, ou ``None`` s'il est absent ou compatible."""
+    if _rust_core is None:
+        return None
+    found = getattr(_rust_core, "ABI_VERSION", None)
+    if found == RUST_ABI_VERSION:
+        return None
+    return (
+        f"grimoire_traces_core a l'ABI {found!r}, ce kit attend l'ABI {RUST_ABI_VERSION} "
+        "(extension périmée : la reconstruire avec `maturin develop` dans rust/grimoire-traces-core/)"
+    )
+
+
 def rust_backend_available() -> bool:
-    """Whether the compiled ``grimoire_traces_core`` module is importable.
+    """Whether a *compatible* compiled ``grimoire_traces_core`` module is importable.
 
     Purely informational (used by tests and diagnostics) — every call site
     below decides its own backend fresh via :func:`_use_rust_backend`.
     """
-    return _rust_core is not None
+    return _rust_core is not None and _rust_abi_mismatch() is None
 
 
 def _use_rust_backend() -> bool:
@@ -101,9 +122,16 @@ def _use_rust_backend() -> bool:
                 "localement (voir CONTRIBUTING.md, `maturin develop` dans "
                 "rust/grimoire-traces-core/) ou revenir a auto/python."
             )
+        mismatch = _rust_abi_mismatch()
+        if mismatch is not None:
+            raise GrimoireRuntimeError(f"GRIMOIRE_TRACES_BACKEND=rust : {mismatch}")
         return True
     if override not in ("auto", ""):
         raise GrimoireRuntimeError(f"GRIMOIRE_TRACES_BACKEND invalide: {override!r} (attendu auto/python/rust)")
+    mismatch = _rust_abi_mismatch()
+    if mismatch is not None:
+        warnings.warn(f"{mismatch} — repli sur le backend Python.", RuntimeWarning, stacklevel=2)
+        return False
     return _rust_core is not None
 
 #: Tag qui marque un enregistrement comme « un agent a été choisi » plutôt

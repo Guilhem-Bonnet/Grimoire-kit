@@ -238,3 +238,149 @@ def test_cas_limite_un_appel_chiffre_a_zero_explicite_reste_un_zero_connu_signal
     cost = report.to_dict()["cost"]
 
     assert cost == {"usd": 0.0, "status": "lower_bound", "unpriced_calls": 1}
+
+
+# ── Revue W1-01 (S7) : « aucun appel » n'est pas « un appel non chiffré » ────
+
+
+def test_token_usage_vide_n_a_pas_de_statut_contradictoire() -> None:
+    from grimoire.traces.schemas import TokenUsage
+
+    usage = TokenUsage().to_dict()
+
+    assert usage["cost_status"] == "exact"  # aucun appel : 0.0 exact, pas « inconnu »
+    assert usage["unpriced_calls"] == 0
+    assert usage["estimated_cost_usd"] == 0.0
+
+
+def test_to_dict_serialise_le_compteur_depuis_le_cout_a_trois_etats() -> None:
+    from grimoire.traces.schemas import TokenUsage
+
+    unknown = TokenUsage(estimated_cost_usd=None, unpriced_calls=0).to_dict()
+
+    assert unknown["cost_status"] == "unknown"
+    assert unknown["unpriced_calls"] >= 1  # jamais « inconnu » avec zéro appel non chiffré
+
+
+def test_une_trace_de_gate_sans_token_usage_n_est_pas_un_appel_inconnu(tmp_path: Path) -> None:
+    ledger = TraceLedger(tmp_path)
+
+    trace = ledger.record(
+        run_id="gate", workflow_instance_id="", mission_id="", task_id="T-1", recipe_id="grimoire.gate",
+        outcome=TraceOutcome.SUCCESS, started_at="2026-01-01T00:00:00+00:00", tags=["gate"],
+    )
+
+    assert trace.token_usage.to_dict()["unpriced_calls"] == 0
+    assert trace.token_usage.cost.status == "exact"
+    on_disk = json.loads((tmp_path / "traces.jsonl").read_text(encoding="utf-8").splitlines()[0])
+    assert on_disk["token_usage"]["unpriced_calls"] == 0
+    assert on_disk["token_usage"]["cost_status"] == "exact"
+
+
+def test_un_appel_modele_sans_prix_reste_inconnu_avec_son_compteur(tmp_path: Path) -> None:
+    ledger = TraceLedger(tmp_path)
+    _ledger_record(ledger, {"estimated_cost_usd": None, "unpriced_calls": 0, "prompt_tokens": 5})
+
+    usage = ledger.list_traces()[0].token_usage
+
+    assert usage.cost.status == "unknown"
+    assert usage.to_dict()["unpriced_calls"] == 1
+
+
+# ── Revue W1-01 (S4) : le coût d'un node lu du ledger garde son statut ───────
+
+
+def _dispatch_history_with(tmp_path: Path, costs: list[float | None]) -> dict:
+    from grimoire.flows.dispatch_executor import _task_id_for, node_dispatch_history
+    from grimoire.missions.service import TaskService
+
+    ledger = TaskService(tmp_path).ledger
+    ledger.create_mission("m", origin="test", mission_id="MIS-1")
+    task_id = _task_id_for("RUN", "n")
+    ledger.create_task("MIS-1", "t", acceptance=("a",), description="d", guardrails=(), task_id=task_id)
+    for i, cost in enumerate(costs):
+        ledger.append_event(
+            "task.dispatched", task_id, "task", "test",
+            {"provider": "p", "tier": "cheap", "verdict": "red" if i < len(costs) - 1 else "green", "cost_usd": cost},
+        )
+    (row,) = node_dispatch_history(tmp_path, "RUN", ["n"])
+    return row
+
+
+def test_historique_de_node_avec_tentative_muette_est_un_minimum_pas_un_exact(tmp_path: Path) -> None:
+    row = _dispatch_history_with(tmp_path, [0.3, None])
+
+    assert row["cost_usd"] == pytest.approx(0.3)
+    assert row["cost_status"] == "lower_bound"
+    assert row["unpriced_calls"] == 1
+    assert row["attempts"] == 2
+
+
+def test_historique_de_node_tout_muet_n_est_jamais_zero(tmp_path: Path) -> None:
+    row = _dispatch_history_with(tmp_path, [None, None])
+
+    assert row["cost_usd"] is None
+    assert row["cost_status"] == "unknown"
+    assert row["unpriced_calls"] == 2
+
+
+def test_historique_de_node_la_derniere_tentative_ne_masque_pas_les_precedentes(tmp_path: Path) -> None:
+    row = _dispatch_history_with(tmp_path, [None, 0.3])
+
+    assert row["cost_usd"] == pytest.approx(0.3)
+    assert row["cost_status"] == "lower_bound"
+
+
+# ── Revue W1-01 (S8) : ABI du cœur Rust ──────────────────────────────────────
+
+
+def _fake_rust_core(abi: int | None) -> SimpleNamespace:
+    def boom(*_args: object, **_kwargs: object) -> None:
+        raise ValueError("expected tuple of length 2, but got tuple of length 3 while processing 'records'")
+
+    core = SimpleNamespace(dispatch_outcome_stats=boom)
+    if abi is not None:
+        core.ABI_VERSION = abi
+    return core
+
+
+@pytest.mark.parametrize("abi", [None, 1])
+def test_extension_rust_perimee_en_auto_retombe_sur_python_avec_avertissement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, abi: int | None
+) -> None:
+    from grimoire.traces import ledger as ledger_module
+
+    monkeypatch.setattr(ledger_module, "_rust_core", _fake_rust_core(abi))
+    monkeypatch.setenv("GRIMOIRE_TRACES_BACKEND", "auto")
+    ledger = TraceLedger(tmp_path)
+    _ledger_record(ledger, {"estimated_cost_usd": 0.1})
+
+    with pytest.warns(RuntimeWarning, match="ABI"):
+        stats = ledger.dispatch_outcome_stats()
+
+    assert stats.overall.total == 1  # le calcul Python a répondu, pas le cœur périmé
+    assert ledger_module.rust_backend_available() is False
+
+
+def test_extension_rust_perimee_en_mode_rust_leve_une_erreur_nommee(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from grimoire.core.exceptions import GrimoireRuntimeError
+    from grimoire.traces import ledger as ledger_module
+
+    monkeypatch.setattr(ledger_module, "_rust_core", _fake_rust_core(1))
+    monkeypatch.setenv("GRIMOIRE_TRACES_BACKEND", "rust")
+    ledger = TraceLedger(tmp_path)
+    _ledger_record(ledger, {"estimated_cost_usd": 0.1})
+
+    with pytest.raises(GrimoireRuntimeError, match="ABI"):
+        ledger.dispatch_outcome_stats()
+
+
+def test_extension_rust_a_l_abi_attendue_est_utilisee(monkeypatch: pytest.MonkeyPatch) -> None:
+    from grimoire.traces import ledger as ledger_module
+
+    monkeypatch.setattr(ledger_module, "_rust_core", _fake_rust_core(ledger_module.RUST_ABI_VERSION))
+    monkeypatch.setenv("GRIMOIRE_TRACES_BACKEND", "auto")
+
+    assert ledger_module._use_rust_backend() is True

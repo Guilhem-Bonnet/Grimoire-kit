@@ -326,6 +326,7 @@ def test_plafond_du_pilote_arrete_le_sous_flow_sur_le_total(tmp_path: Path) -> N
     assert outcome.node_id == "sub"
     by_node = {n.node_id: n for n in outcome.nodes}
     assert by_node["sub"].verdict == "cost_capped"
+    assert by_node["sub"].cost_cap_reason == "cost_reached"
     # Un seul node de plus après le dépassement : jamais un vert déjà acquis
     # qui serait rétracté, mais aucune tentative après le dépassement.
     assert by_node["sub"].cost_usd == pytest.approx(0.6)
@@ -517,6 +518,8 @@ def test_plafond_du_pilote_arrete_un_sous_flow_dont_le_cout_est_inconnu(tmp_path
     assert outcome.status == "blocked", outcome.to_dict()
     sub = next(n for n in outcome.nodes if n.node_id == "sub")
     assert sub.verdict == "cost_capped"
+    assert sub.cost_cap_reason == "cost_unknown"  # la raison est dite, pas seulement le verdict (revue S3)
+    assert sub.to_dict()["cost_cap_reason"] == "cost_unknown"
     assert sub.cost_usd is None  # inconnu, pas 0.0
     assert sub.to_dict()["cost_status"] == "unknown"
     assert outcome.to_dict()["cost_status"] == "unknown"
@@ -538,3 +541,39 @@ def test_politique_continue_flagged_laisse_le_sous_flow_finir_et_signale_le_cout
     assert outcome.total_cost_usd is None
     assert outcome.to_dict()["cost_status"] == "unknown"
     assert outcome.to_dict()["unpriced_calls"] >= 1
+
+
+def _one_node_child(tmp_path: Path) -> None:
+    child = {"blueprintVersion": 1, "id": "child-flow", "nodes": [_leaf_node("c1", out_contract="c2")], "edges": []}
+    (tmp_path / "child-flow.blueprint.json").write_text(json.dumps(child), encoding="utf-8")
+
+
+def test_composite_a_un_seul_node_vert_et_muet_reste_vert_sous_plafond(tmp_path: Path) -> None:
+    """Revue S1 : le dernier vert n'est jamais jeté parce que son coût est inconnu."""
+    _setup_silent_tier(tmp_path)
+    _write_pilot_policy(tmp_path, max_cost_usd_per_node=0.5)
+    _one_node_child(tmp_path)
+    parent_path = _parent_blueprint(tmp_path, ref="child-flow.blueprint.json")
+    engine = _engine(tmp_path)
+
+    outcome = run_with_dispatch(engine, parent_path, project_root=tmp_path)
+
+    sub = next(n for n in outcome.nodes if n.node_id == "sub")
+    assert sub.verdict == "green", outcome.to_dict()
+    assert sub.cost_cap_reason is None
+    assert sub.to_dict()["cost_status"] == "unknown"  # le statut du coût reste porté
+    assert engine.status(sub.child_run_id).status == WorkflowStatus.COMPLETED.value
+
+
+def test_composite_vert_dont_le_cout_connu_depasse_le_plafond_n_est_pas_retracte(tmp_path: Path) -> None:
+    """Un node déjà vert est soumis même si son coût dépasse le plafond ; seul le node suivant est refusé."""
+    _setup_single_tier(tmp_path, cost=0.9)
+    _write_pilot_policy(tmp_path, max_cost_usd_per_node=0.5)
+    _one_node_child(tmp_path)
+    parent_path = _parent_blueprint(tmp_path, ref="child-flow.blueprint.json")
+
+    outcome = run_with_dispatch(_engine(tmp_path), parent_path, project_root=tmp_path)
+
+    sub = next(n for n in outcome.nodes if n.node_id == "sub")
+    assert sub.verdict == "green", outcome.to_dict()
+    assert sub.cost_usd == pytest.approx(0.9)

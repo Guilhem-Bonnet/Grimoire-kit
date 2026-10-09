@@ -21,12 +21,16 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
+from grimoire.core.exceptions import GrimoireRuntimeError
+
 __all__ = [
     "COST_POLICIES",
     "POLICY_CONTINUE_FLAGGED",
     "POLICY_STOP",
     "Cost",
     "cap_reason",
+    "format_usd",
+    "validate_policy",
 ]
 
 #: Un coût inconnu face à un plafond arrête l'escalade (défaut, fail-closed).
@@ -102,12 +106,35 @@ class Cost:
         return {"usd": self.usd, "status": self.status, "unpriced_calls": self.unpriced_calls}
 
     def render(self) -> str:
-        """``0,42 USD`` | ``>= 0,42 USD (3 non pricés)`` | ``inconnu (2 appels non pricés)``."""
-        if self.status == "exact":
-            return f"{self.known_usd:.4f} USD"
-        if self.status == "lower_bound":
-            return f">= {self.known_usd:.4f} USD ({self.unpriced_calls} non pricés)"
-        return f"inconnu ({self.unpriced_calls} non pricés)"
+        """``0.4200 USD`` | ``>= 0.4200 USD (3 non pricés)`` | ``inconnu (2 non pricés)``."""
+        return format_usd(self.usd, self.status, self.unpriced_calls)
+
+
+def format_usd(usd: float | None, status: str, unpriced_calls: int = 0) -> str:
+    """L'unique rendu d'un montant : ``inconnu``, ``>= X USD (N non pricés)`` pour un minimum, ``X USD`` sinon.
+
+    Utilisé par :meth:`Cost.render` et par les tableaux CLI (``dispatch stats``, ``flow status``,
+    ``flow list``) pour que tous portent le décompte des appels sans prix (revue S9).
+    """
+    tail = f" ({unpriced_calls} non pricés)" if unpriced_calls else ""
+    if status == "unknown":
+        return f"inconnu{tail}"
+    if usd is None:
+        return "—"
+    return f">= {usd:.4f} USD{tail}" if status == "lower_bound" else f"{usd:.4f} USD"
+
+
+def validate_policy(policy: str) -> str:
+    """Rend *policy* si elle est déclarée, sinon lève : une politique inconnue ne se replie jamais en silence.
+
+    Sans cette garde, ``"STOP"`` ou ``"assume_tier_ceiling"`` (non implémentée)
+    désarmaient le plafond comme ``continue_flagged`` (W1-01, revue S5).
+    """
+    if policy not in COST_POLICIES:
+        raise GrimoireRuntimeError(
+            f"politique on_unknown_cost invalide : {policy!r} (attendu l'une de {list(COST_POLICIES)})"
+        )
+    return policy
 
 
 def cap_reason(cost: Cost, cap: float, policy: str, *, inclusive: bool = True) -> str | None:
@@ -117,7 +144,9 @@ def cap_reason(cost: Cost, cap: float, policy: str, *, inclusive: bool = True) -
     quelle que soit la part inchiffrée. ``"cost_unknown"`` : la part inchiffrée
     empêche d'affirmer qu'on est sous le plafond, et la politique est
     :data:`POLICY_STOP`. *inclusive* distingue ``>=`` (dispatch) de ``>`` (genres de flow).
+    Une *policy* hors :data:`COST_POLICIES` lève (:func:`validate_policy`).
     """
+    validate_policy(policy)
     reached = cost.known_usd >= cap if inclusive else cost.known_usd > cap
     if reached and cost.priced_calls > 0:
         return "cost_reached"

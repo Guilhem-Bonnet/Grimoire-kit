@@ -38,7 +38,7 @@ from pathlib import Path
 from typing import Any
 
 from grimoire.core.exceptions import GrimoireMissionError, GrimoireRuntimeError
-from grimoire.costs import Cost
+from grimoire.costs import Cost, cap_reason
 from grimoire.flows import pilot
 from grimoire.flows.blueprint_loader import build_node_contracts, load_blueprint
 from grimoire.flows.engine import FlowEngine, check_output_against_contract
@@ -216,6 +216,9 @@ class NodeDispatchOutcome:
     #: Appels de ce node sans prix (W1-01, issue #709) : ``cost_usd`` est alors
     #: un minimum (``lower_bound``) ou ``None`` (``unknown``), jamais un total.
     unpriced_calls: int = 0
+    #: Pourquoi le node a été arrêté sur le plafond de coût (``cost_reached`` | ``cost_unknown``),
+    #: ``None`` hors verdict ``cost_capped`` (W1-01, revue S3).
+    cost_cap_reason: str | None = None
 
     @property
     def cost(self) -> Cost:
@@ -234,6 +237,7 @@ class NodeDispatchOutcome:
             "cost_usd": self.cost_usd,
             "cost_status": self.cost.status,
             "unpriced_calls": self.unpriced_calls,
+            "cost_cap_reason": self.cost_cap_reason,
             "uncertainties": [dict(u) for u in self.uncertainties],
             "acceptance_status": self.acceptance_status,
             "verifiability_warning": self.verifiability_warning,
@@ -297,6 +301,7 @@ def _node_outcome_from_report(
         escalations=_escalations(report),
         cost_usd=cost.usd,
         unpriced_calls=cost.unpriced_calls,
+        cost_cap_reason=report.cost_cap_reason,
         uncertainties=tuple(u.to_dict() for u in report.uncertainties),
         acceptance_status=_acceptance_status(report, has_structured_acceptance=has_structured_acceptance),
         verifiability_warning=verifiability_warning,
@@ -359,6 +364,11 @@ class DispatchExecutor:
         self.host_reason: str | None = None
         self.blocked_node: str | None = None
         self.blocked_report: DispatchReport | None = None
+        #: Plafond de coût du sous-flow que CETTE instance exécute (posé par ``genres._launch_child``) :
+        #: vérifié avant de lancer un node, jamais sur la sortie d'un node déjà produit (revue S1).
+        self.node_cost_cap: float | None = None
+        #: ``cost_reached`` | ``cost_unknown`` quand ``node_cost_cap`` a refusé de lancer un node.
+        self.cost_cap_stop: str | None = None
 
     def execute(self, contract: NodeContract, *, context_pack: dict[str, Any]) -> NodeExecutionResult:
         # Issues #206/#207 : un node de genre (composite, fanout, verify-panel,
@@ -370,6 +380,22 @@ class DispatchExecutor:
         # `DispatchExecutor` depuis CE module ; un import en tête de fichier
         # ici formerait un cycle au chargement.
         from grimoire.flows import genres
+
+        if self.node_cost_cap is not None and self.node_outcomes:
+            why = cap_reason(
+                Cost.total(o.cost for o in self.node_outcomes.values()),
+                self.node_cost_cap,
+                self._pilot_policy.on_unknown_cost,
+                inclusive=False,
+            )
+            if why is not None:
+                # Le node précédent est déjà vert et soumis : seul CE node-ci n'est pas lancé.
+                self.cost_cap_stop = why
+                stopped = NodeExecutionResult(
+                    pending=False, output=None, extra={"cost_capped": why, "node_id": contract.node_id}
+                )
+                self.last_result = stopped
+                return stopped
 
         genre_result = genres.execute_genre_node(self, contract, context_pack)
         if genre_result is not None:

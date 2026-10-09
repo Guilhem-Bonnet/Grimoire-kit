@@ -200,3 +200,39 @@ def _write_dispatch_outcome_unknown_cost(root: Path, *, day: int) -> None:
         token_usage={"prompt_tokens": 10},  # aucun coût rapporté : ce que écrit un fournisseur muet
         tags=[DISPATCH_OUTCOME_TAG, "class:V0", "tier:cheap", "acceptance:judged", "resolved:true", f"replay:n{day}"],
     )
+
+
+def test_historique_v1_a_zero_avec_enforce_ne_donne_pas_d_erreur_permanente(tmp_path: Path) -> None:
+    """Revue S2 : « non évalué » reste un warning, même sous ``enforce`` (relecture v1 ``0.0`` = inconnu)."""
+    import json
+
+    _write_registry(
+        tmp_path,
+        "dispatch_cost_slo:\n  max_cost_per_resolved_task_usd: 2.0\n  min_resolved_observations: 2\n"
+        "  min_pass_k_observations: 1\n  enforce: true\n",
+    )
+    path = tmp_path / TRACES_DIR / "traces.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as fh:
+        for day in (1, 2, 3):
+            fh.write(
+                json.dumps(
+                    {
+                        "id": f"TRC-{day}", "schema_version": "grimoire.trace.v1", "run_id": f"r{day}",
+                        "workflow_instance_id": "", "mission_id": "", "task_id": f"GAO-{day}",
+                        "recipe_id": "grimoire.dispatch", "outcome": "success",
+                        "started_at": f"2026-01-0{day}T00:00:00+00:00", "token_usage": {"estimated_cost_usd": 0.0},
+                        "tags": [DISPATCH_OUTCOME_TAG, "class:V0", "tier:cheap", "acceptance:judged",
+                                 "resolved:true", f"replay:n{day}"],
+                    }
+                )
+                + "\n"
+            )
+
+    result = verify_standard_profile(tmp_path)
+
+    costs = [c for c in _checks(result) if "per resolved task" in c.message]
+    assert len(costs) == 1
+    assert "not evaluated" in costs[0].message
+    assert costs[0].severity == "warning"
+    assert all(c.severity != "error" for c in _checks(result))

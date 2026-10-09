@@ -398,7 +398,7 @@ def _verify_dispatch_cost_slo(root: Path, result: StandardVerificationResult) ->
     pas un mapping — même règle que tous les autres ``_verify_*`` de ce
     module : sans artefact, rien à comparer.
 
-    Trois issues, jamais un ``error`` par défaut :
+    Quatre issues, jamais un ``error`` par défaut :
 
     - ``info`` quand trop peu de données existent (moins de
       ``min_resolved_observations`` dispatchs résolus pour le coût, moins de
@@ -410,6 +410,10 @@ def _verify_dispatch_cost_slo(root: Path, result: StandardVerificationResult) ->
     - ``error`` à la place du ``warning`` ci-dessus, uniquement quand le
       projet déclare ``dispatch_cost_slo.enforce: true`` — un dépassement
       silencieux par défaut, un gate dur seulement sur demande explicite.
+    - ``warning`` (jamais ``error``, même avec ``enforce``) quand des appels
+      n'ont pas de coût : le SLO est « non évalué », pas violé. ``enforce`` ne
+      durcit qu'un dépassement prouvé ; sinon un historique ``trace.v1`` (où
+      ``0.0`` est relu comme inconnu) ferait échouer le gate pour toujours.
     """
     rel_path = STANDARD_DIR / "llm-provider-registry.yaml"
     data = _load_yaml_file(root, rel_path, result)
@@ -450,7 +454,7 @@ def _verify_dispatch_cost_slo(root: Path, result: StandardVerificationResult) ->
             _add_check(
                 result,
                 "dispatch.cost_slo",
-                severity,
+                "warning",
                 f"Cost per resolved task is {known}: {unpriced} dispatched call(s) reported no cost, "
                 f"so the declared SLO (${max_cost:.4f}) is not evaluated.",
                 path=rel_path,

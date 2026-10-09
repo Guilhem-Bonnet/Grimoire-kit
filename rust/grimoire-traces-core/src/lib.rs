@@ -83,6 +83,12 @@ use std::collections::HashMap;
 
 // ── Constantes miroir de grimoire.traces.ledger / grimoire.proposals ───────
 
+/// Version de l'ABI Python/Rust (W1-01, revue S8). `dispatch_outcome_stats` echange des
+/// tuples de longueur fixe : `ledger.py` refuse (ou ignore, en `auto`) une extension dont
+/// cette constante differe de `RUST_ABI_VERSION`. A incrementer des deux cotes a chaque
+/// changement de signature ou de forme d'echange. 2 : cout a trois etats (enregistrements a 3 champs).
+pub const ABI_VERSION: u32 = 2;
+
 /// Miroir de `grimoire.traces.ledger.AGENT_DISPATCH_TAG`.
 const AGENT_DISPATCH_TAG: &str = "agent.dispatch";
 /// Miroir de `grimoire.traces.ledger.AGENT_MISS_TAG`.
@@ -1535,6 +1541,7 @@ mod py_bridge {
         m.add_function(wrap_pyfunction!(clamp_threshold, m)?)?;
         m.add_function(wrap_pyfunction!(sync_decision, m)?)?;
         m.add("__version__", env!("CARGO_PKG_VERSION"))?;
+        m.add("ABI_VERSION", super::ABI_VERSION)?;
         Ok(())
     }
 }

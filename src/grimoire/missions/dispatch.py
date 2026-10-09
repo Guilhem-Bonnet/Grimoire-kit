@@ -77,7 +77,7 @@ from ruamel.yaml.error import YAMLError
 from grimoire.core.exceptions import GrimoireMissionError
 from grimoire.core.grounding import GROUNDING_RULE
 from grimoire.core.standard_generation import STANDARD_DIR
-from grimoire.costs import POLICY_STOP, Cost, cap_reason
+from grimoire.costs import POLICY_STOP, Cost, cap_reason, validate_policy
 from grimoire.missions.dispatch_history import recommend_start_tier
 from grimoire.missions.schemas import TaskState
 from grimoire.missions.verifiability import Verifiability, classify
@@ -1131,6 +1131,7 @@ def run_dispatch(
     court-circuite entièrement cette recommandation — l'opérateur qui la
     fournit sait mieux que l'historique pour ce dispatch précis.
     """
+    validate_policy(cost_unknown_policy)
     task = service.require(task_id)
     verifiability = verifiability_override if verifiability_override is not None else classify(task)
     declared_context = agent_declared_context(project_root, agent) if agent and project_root else ()

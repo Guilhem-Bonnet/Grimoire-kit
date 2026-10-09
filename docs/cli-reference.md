@@ -580,9 +580,16 @@ il n'est jamais compté pour zéro. `on_unknown_cost: stop` (défaut,
 fail-closed) arrête l'escalade dès qu'un palier a répondu sans coût alors
 qu'un plafond est posé — le rapport porte `cost_capped` avec la raison
 `cost_unknown` (`cost_cap_reason`). `continue_flagged` laisse escalader ;
-le coût reste alors signalé `lower_bound` (`>= 0,42 USD (1 non pricés)`) ou
+le coût reste alors signalé `lower_bound` (`>= 0.4200 USD (1 non pricés)`) ou
 `unknown` dans le rapport, la trace `dispatch.outcome`, `grimoire dispatch
-stats`, `flow status` et le contrôle `dispatch.cost_slo`. La politique
+stats`, `flow status`, `flow list` et le contrôle `dispatch.cost_slo`
+(tous rendent le même format, avec le décompte des appels sans prix). Dans un
+flow, `cost_unknown` ne sert qu'à l'escalade et à l'enchaînement des nodes d'un
+sous-flow : un coût inconnu ne jette jamais un node déjà vert ni les éléments
+frères d'un `fanout`, `verify-panel`, `loop-until-dry`, `judge` ou `replay-diff`
+(seul un montant connu qui atteint le plafond, `cost_reached`, les arrête).
+Le node porte `cost_cap_reason` (`cost_reached` | `cost_unknown`) ; une passe
+`budget` non lancée porte `skipped_reason`. La politique
 `assume_tier_ceiling` (estimer au plafond du palier) n'existe pas encore.
 
 #### Classe de relisibilité

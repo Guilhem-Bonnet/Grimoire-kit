@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from grimoire.costs import POLICY_CONTINUE_FLAGGED, POLICY_STOP, Cost, cap_reason
+from grimoire.core.exceptions import GrimoireRuntimeError
+from grimoire.costs import POLICY_CONTINUE_FLAGGED, POLICY_STOP, Cost, cap_reason, format_usd
 
 
 def test_somme_vide_est_exacte_a_zero_appel() -> None:
@@ -53,3 +54,29 @@ def test_coerce_none_est_inconnu_et_un_nombre_est_exact() -> None:
 )
 def test_cap_reason(cost: Cost, policy: str, inclusive: bool, expected: str | None) -> None:
     assert cap_reason(cost, 0.4, policy, inclusive=inclusive) == expected
+
+
+# ── Revue W1-01 : politique invalide, rendu commun ──────────────────────────
+
+
+@pytest.mark.parametrize("policy", ["STOP", "assume_tier_ceiling", "", "continue"])
+def test_cap_reason_refuse_une_politique_non_declaree(policy: str) -> None:
+    """S5 : une faute de frappe ne désarme plus le plafond en silence."""
+    with pytest.raises(GrimoireRuntimeError, match="on_unknown_cost"):
+        cap_reason(Cost.unpriced(), 0.4, policy)
+
+
+def test_run_dispatch_refuse_une_politique_non_declaree(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from grimoire.missions.dispatch import run_dispatch
+
+    with pytest.raises(GrimoireRuntimeError, match="on_unknown_cost"):
+        run_dispatch(None, "T-1", cost_unknown_policy="assume_tier_ceiling", max_cost_usd=1.0)  # type: ignore[arg-type]
+
+
+def test_format_usd_porte_le_decompte_des_appels_sans_prix() -> None:
+    """S9 : un seul rendu pour la fiche, les tableaux CLI et ``Cost.render``."""
+    assert format_usd(0.42, "exact") == "0.4200 USD"
+    assert format_usd(0.42, "lower_bound", 1) == ">= 0.4200 USD (1 non pricés)"
+    assert format_usd(None, "unknown", 2) == "inconnu (2 non pricés)"
+    assert format_usd(None, "exact") == "—"
+    assert Cost.exact(0.42).render() == format_usd(0.42, "exact", 0)

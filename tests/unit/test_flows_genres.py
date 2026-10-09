@@ -628,3 +628,119 @@ def test_demo_sept_genres_tourne_sextrait_et_se_rejoue_a_lidentique(tmp_path: Pa
     second_status = engine.status(replay_run_id)
     assert second_status.completed_nodes == first_status.completed_nodes
     assert second_status.status == first_status.status
+
+
+# ── 9. Coût inconnu et plafond : jamais un frère ni un vert jeté (W1-01, revue) ──
+
+
+def _silent_script(tmp_path: Path, **kwargs: object) -> Path:
+    """Le même fournisseur, mais muet : il n'imprime jamais ``total_cost_usd``."""
+    script = _writer_script(tmp_path, **kwargs)  # type: ignore[arg-type]
+    script.write_text(script.read_text(encoding="utf-8").rsplit("print(", 1)[0], encoding="utf-8")
+    return script
+
+
+def _fanout_bp(tmp_path: Path) -> Path:
+    _child(tmp_path)
+    return _write_bp(
+        tmp_path / "bp.blueprint.json",
+        "fanout-demo",
+        [{"id": "spread", "kind": "fanout", "ref": "child.blueprint.json", "acceptance": [{"run": "true"}], "pins": []}],
+    )
+
+
+def test_fanout_fournisseur_muet_sous_plafond_large_lance_tous_les_elements(tmp_path: Path) -> None:
+    """S1 : un coût inconnu ne jette pas les frères — ``cost_unknown`` est réservé à l'escalade."""
+    _write_registry(tmp_path, _silent_script(tmp_path, extra_map={"spread": {"fanout_items": ["a", "b", "c"]}}))
+    _write_pilot_policy(tmp_path, "max_fanout_n: 5\nmax_cost_usd_per_node: 100\n")
+    bp = _fanout_bp(tmp_path)
+
+    outcome = run_with_dispatch(_engine(tmp_path), bp, project_root=tmp_path)
+
+    node = next(n for n in outcome.nodes if n.node_id == "spread")
+    assert node.verdict == "green", outcome.to_dict()
+    assert node.attempts == 3
+    assert node.cost_cap_reason is None
+    assert node.to_dict()["cost_status"] == "unknown"  # le statut reste sur le node
+
+
+def test_fanout_dont_le_cout_connu_atteint_le_plafond_dit_cost_reached(tmp_path: Path) -> None:
+    """S3 : la raison du plafond est portée par le node, pas seulement le verdict."""
+    _write_registry(
+        tmp_path, _writer_script(tmp_path, extra_map={"spread": {"fanout_items": ["a", "b", "c"]}}, cost_map={"leaf": 0.4})
+    )
+    _write_pilot_policy(tmp_path, "max_fanout_n: 5\nmax_cost_usd_per_node: 0.5\n")
+    bp = _fanout_bp(tmp_path)
+
+    outcome = run_with_dispatch(_engine(tmp_path), bp, project_root=tmp_path)
+
+    node = next(n for n in outcome.nodes if n.node_id == "spread")
+    assert node.verdict == "cost_capped", outcome.to_dict()
+    assert node.cost_cap_reason == "cost_reached"
+    assert node.to_dict()["cost_cap_reason"] == "cost_reached"
+
+
+def test_budget_muet_dit_pourquoi_la_passe_optionnelle_n_est_pas_lancee(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """S3 : ``launched: False`` porte ``skipped_reason`` (coût inconnu sous la politique ``stop``)."""
+    from grimoire.flows import genres
+
+    captured: list[tuple[str, object]] = []
+    real = genres.execute_genre_node
+
+    def spy(executor, contract, context_pack):  # type: ignore[no-untyped-def]
+        result = real(executor, contract, context_pack)
+        captured.append((contract.node_id, result))
+        return result
+
+    monkeypatch.setattr(genres, "execute_genre_node", spy)
+    _write_registry(tmp_path, _silent_script(tmp_path))
+    _child(tmp_path, "pass0.blueprint.json", "leaf_a")
+    _child(tmp_path, "pass1.blueprint.json", "leaf_b")
+    bp = _write_bp(
+        tmp_path / "bp.blueprint.json",
+        "budget-demo",
+        [
+            {
+                "id": "spend",
+                "kind": "budget",
+                "ref": "",
+                "config": {"budget": {"maxCostUsd": 0.15, "passes": ["pass0.blueprint.json", "pass1.blueprint.json"]}},
+                "pins": [],
+            }
+        ],
+    )
+
+    outcome = run_with_dispatch(_engine(tmp_path), bp, project_root=tmp_path)
+
+    assert outcome.status == "finished", outcome.to_dict()
+    result = next(r for node_id, r in captured if node_id == "spend")
+    rows = result.output["budget_passes"]  # type: ignore[attr-defined]
+    assert rows[0]["launched"] is True
+    assert rows[0]["cost_status"] == "unknown"
+    assert rows[1]["launched"] is False
+    assert rows[1]["skipped_reason"] == "cost_unknown"
+
+
+def test_lignes_enfants_et_resume_du_juge_portent_le_statut_du_cout() -> None:
+    """S6 : un minimum se lit ``>= 0.42``, jamais « coût 0.42 » ; la ligne porte statut et décompte."""
+    from grimoire.costs import Cost
+    from grimoire.flows.genres import _candidates_summary, _child_row, _ChildRun
+
+    partial = _ChildRun(
+        child_run_id="WFI-1", status="finished", cost=Cost.exact(0.42) + Cost.unpriced(2),
+        faults=(), host_reason=None, attempts=3, escalations=0,
+    )
+    silent = _ChildRun(
+        child_run_id="WFI-2", status="finished", cost=Cost.unpriced(1),
+        faults=(), host_reason=None, attempts=1, escalations=0,
+    )
+
+    row = _child_row(0, partial)
+    assert (row["cost_usd"], row["cost_status"], row["unpriced_calls"]) == (0.42, "lower_bound", 2)
+    assert _child_row(1, silent)["cost_status"] == "unknown"
+    summary = _candidates_summary([partial, silent])
+    assert "coût >= 0.4200 USD (2 non pricés)" in summary
+    assert "coût inconnu (1 non pricés)" in summary
+    assert "coût 0.42\n" not in summary
