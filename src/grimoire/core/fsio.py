@@ -23,7 +23,6 @@ import contextlib
 import os
 import stat
 import sys
-import tempfile
 import time
 import uuid
 from collections.abc import Iterator
@@ -42,14 +41,11 @@ _STALE_AFTER_S = 60.0
 _POLL_S = 0.01
 
 
-def _read_umask() -> int:
-    old = os.umask(0)
-    os.umask(old)
-    return old
-
-
-#: Lu une seule fois au chargement (``os.umask`` n'a pas de lecture sans écriture, donc pas de course tardive).
-_UMASK = _read_umask()
+#: Attente entre deux tentatives de libération refusée (Windows : un lecteur concurrent tient le fichier).
+_RELEASE_DELAY_S = 0.05
+_RELEASE_TRIES = 20
+#: Le test de pid n'existe qu'en POSIX ; ailleurs on ne relit pas un verrou frais (la lecture gêne le ``unlink`` du porteur).
+_PID_LIVENESS = os.name == "posix"
 
 
 def _lock_path(path: Path) -> Path:
@@ -58,7 +54,7 @@ def _lock_path(path: Path) -> Path:
 
 def _pid_dead(content: str) -> bool:
     """Vrai si le verrou nomme un pid POSIX qui n'existe plus (contenu illisible : faux)."""
-    if os.name != "posix":
+    if not _PID_LIVENESS:
         return False
     try:
         pid = int(content.split(":", 1)[0])
@@ -80,10 +76,11 @@ def _break_if_abandoned(lock: Path) -> bool:
     """
     try:
         before = lock.stat()
-        content = lock.read_text(encoding="utf-8", errors="replace")
+        abandoned = time.time() - before.st_mtime > _STALE_AFTER_S
+        if not abandoned and _PID_LIVENESS:  # sinon la lecture ne servirait à rien
+            abandoned = _pid_dead(lock.read_text(encoding="utf-8", errors="replace"))
     except OSError:
         return False
-    abandoned = time.time() - before.st_mtime > _STALE_AFTER_S or _pid_dead(content)
     if not abandoned:
         return False
     grave = lock.with_name(f"{lock.name}.stale.{os.getpid()}.{uuid.uuid4().hex}")
@@ -102,6 +99,26 @@ def _break_if_abandoned(lock: Path) -> bool:
     finally:
         with contextlib.suppress(OSError):
             grave.unlink()
+
+
+def _release(lock: Path, token: str) -> None:
+    """Supprime *lock* s'il porte encore *token* (cassé puis repris par un autre : ce n'est plus le nôtre).
+
+    Un refus transitoire (``PermissionError``, partage Windows) est retenté ; un échec
+    persistant lève, plutôt que de laisser un verrou orphelin que tous attendraient.
+    """
+    for attempt in range(_RELEASE_TRIES):
+        try:
+            if lock.read_text(encoding="utf-8") != token:
+                return
+            lock.unlink()
+            return
+        except FileNotFoundError:
+            return
+        except PermissionError:
+            if attempt == _RELEASE_TRIES - 1:
+                raise
+            time.sleep(_RELEASE_DELAY_S)
 
 
 @contextmanager
@@ -148,33 +165,35 @@ def locked(path: str | os.PathLike[str], *, timeout: float = 30.0) -> Iterator[N
     try:
         yield
     finally:
-        # Ne supprime que son propre verrou : s'il a été cassé puis repris, ce n'est plus le nôtre.
-        with contextlib.suppress(OSError):
-            if lock.read_text(encoding="utf-8") == token:
-                lock.unlink()
+        _release(lock, token)
 
 
 def atomic_write(path: str | os.PathLike[str], data: str | bytes) -> None:
-    """Remplace *path* par *data* de façon atomique (temporaire, ``fsync``, ``os.replace``)."""
+    """Remplace *path* par *data* de façon atomique (temporaire, ``fsync``, ``os.replace``).
+
+    Le mode d'une cible existante est conservé ; un fichier neuf reçoit 0o666 filtré par
+    l'umask *courant* du noyau (``O_CREAT``), sans jamais lire ni modifier l'umask du processus.
+    """
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     payload = data.encode("utf-8") if isinstance(data, str) else data
-    try:  # le mode d'une cible existante est conservé ; un fichier neuf suit l'umask
-        mode = stat.S_IMODE(target.stat().st_mode)
+    try:
+        mode: int | None = stat.S_IMODE(target.stat().st_mode)
     except OSError:
-        mode = 0o666 & ~_UMASK
-    fd, tmp_name = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".tmp")
+        mode = None
+    tmp = target.with_name(f".{target.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+    fd = os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_BINARY", 0), 0o666)
     try:
         with os.fdopen(fd, "wb") as fh:
-            if hasattr(os, "fchmod"):
+            if mode is not None and hasattr(os, "fchmod"):
                 os.fchmod(fh.fileno(), mode)
             fh.write(payload)
             fh.flush()
             os.fsync(fh.fileno())
-        Path(tmp_name).replace(target)
+        tmp.replace(target)
     except BaseException:
         with contextlib.suppress(OSError):
-            Path(tmp_name).unlink()
+            tmp.unlink()
         raise
     if os.name == "posix":  # rendre le renommage durable ; best-effort
         with contextlib.suppress(OSError):

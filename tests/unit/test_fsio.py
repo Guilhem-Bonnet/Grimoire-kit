@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import os
+import re
 import stat
 import subprocess
 import sys
@@ -111,22 +112,31 @@ _RACE_WORKER = textwrap.dedent(
     from grimoire.core import fsio
     fsio._fcntl = None
     target, role, log = Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3])
-    if role == "b":  # point d'injection : fenetre entre la detection et la suppression
+    lock = fsio._lock_path(target)
+    if role == "b":  # point d'injection : fenetre entre la lecture du verrou et la casse
         orig = Path.stat
         def slow_stat(self, *a, **k):
             r = orig(self, *a, **k)
-            if self.name.endswith(".lock") or ".lock." in self.name:
-                time.sleep(0.5)
+            if self.name == lock.name:  # le seul stat initial, pas celui du verrou renomme
+                time.sleep(0.6)
             return r
         Path.stat = slow_stat
     else:
         time.sleep(0.15)
     with fsio.locked(target, timeout=20):
         t0 = time.time()
-        time.sleep(0.8 if role == "a" else 0.05)
+        try:
+            own = lock.read_text(encoding="utf-8")
+        except OSError:
+            own = None
+        time.sleep(1.5 if role == "a" else 0.05)
+        try:
+            kept = own is not None and lock.read_text(encoding="utf-8") == own
+        except OSError:
+            kept = False
         t1 = time.time()
     with log.open("a") as fh:
-        fh.write(f"{role} {t0} {t1}\\n")
+        fh.write(f"{role} {t0} {t1} {int(kept)}\\n")
     """
 )
 
@@ -145,8 +155,11 @@ def test_breaking_a_stale_lock_never_steals_a_fresh_one(tmp_path: Path) -> None:
     ]
     # A d'abord : un zombie non attendu passerait pour un processus vivant au test de pid
     assert [p.wait(timeout=60) for p in reversed(procs)] == [0, 0]
-    spans = sorted((float(t0), float(t1)) for _r, t0, t1 in (ln.split() for ln in log.read_text().splitlines()))
-    assert len(spans) == 2
+    rows = {r: (float(t0), float(t1), k) for r, t0, t1, k in (ln.split() for ln in log.read_text().splitlines())}
+    assert set(rows) == {"a", "b"}
+    # le vol lui-meme : le verrou de A a disparu (ou change de jeton) pendant sa section critique
+    assert rows["a"][2] == "1", f"le verrou de A a ete vole pendant sa section critique : {rows}"
+    spans = sorted((t0, t1) for t0, t1, _k in rows.values())
     assert spans[0][1] <= spans[1][0], f"sections critiques chevauchees : {spans}"
 
 
@@ -160,6 +173,7 @@ def test_release_does_not_remove_a_lock_that_is_not_ours(tmp_path: Path, monkeyp
     assert lock.read_text() == f"{os.getpid()}:autre-jeton"
 
 
+@pytest.mark.skipif(os.name != "posix", reason="bits de mode POSIX")
 def test_atomic_write_keeps_existing_mode(tmp_path: Path) -> None:
     target = tmp_path / "f.txt"
     target.write_text("x")
@@ -168,11 +182,92 @@ def test_atomic_write_keeps_existing_mode(tmp_path: Path) -> None:
     assert stat.S_IMODE(target.stat().st_mode) == 0o644
 
 
-def test_atomic_write_new_file_follows_umask(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(fsio, "_UMASK", 0o027)
-    target = tmp_path / "neuf.txt"
-    fsio.atomic_write(target, "y")
-    assert stat.S_IMODE(target.stat().st_mode) == 0o640
+@pytest.mark.skipif(os.name != "posix", reason="bits de mode POSIX")
+@pytest.mark.parametrize(("mask", "expected"), [(0o027, 0o640), (0o077, 0o600), (0o002, 0o664)])
+def test_atomic_write_new_file_follows_current_umask(tmp_path: Path, mask: int, expected: int) -> None:
+    """W1-00-T1-5 : l'umask est lu a chaque ecriture (un resserrement apres l'import compte)."""
+    old = os.umask(mask)
+    try:
+        target = tmp_path / "neuf.txt"
+        fsio.atomic_write(target, "y")
+    finally:
+        os.umask(old)
+    assert stat.S_IMODE(target.stat().st_mode) == expected
+
+
+def test_atomic_write_never_touches_the_process_umask(tmp_path: Path) -> None:
+    """Lire l'umask par ``os.umask(0)`` ouvre une fenetre ou un autre thread cree en 0666 : on ne le fait jamais."""
+    seen: list[int] = []
+    real = os.umask
+
+    def spy(mask: int) -> int:
+        seen.append(mask)
+        return real(mask)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(os, "umask", spy)
+        fsio.atomic_write(tmp_path / "f", "y")
+    assert seen == []
+
+
+def _unlink_raising(monkeypatch: pytest.MonkeyPatch, lock_name: str, times: int) -> list[int]:
+    """Fait lever ``PermissionError`` (partage Windows) aux *times* premiers ``unlink`` du verrou."""
+    calls = [0]
+    real = Path.unlink
+
+    def flaky(self: Path, *a: object, **k: object) -> None:
+        if self.name == lock_name:
+            calls[0] += 1
+            if calls[0] <= times:
+                raise PermissionError("violation de partage")
+        real(self, *a, **k)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "unlink", flaky)
+    return calls
+
+
+def test_release_retries_a_transient_unlink_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """W1-00-T1-3 : un unlink refuse un instant (lecteur concurrent sous Windows) ne laisse pas de verrou orphelin."""
+    monkeypatch.setattr(fsio, "_fcntl", None)
+    monkeypatch.setattr(fsio, "_RELEASE_DELAY_S", 0.0)
+    target = tmp_path / "w3"
+    lock = fsio._lock_path(target)
+    calls = _unlink_raising(monkeypatch, lock.name, times=1)
+    with fsio.locked(target):
+        pass
+    assert calls[0] == 2
+    assert not lock.exists()
+
+
+def test_release_failure_is_raised_not_swallowed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(fsio, "_fcntl", None)
+    monkeypatch.setattr(fsio, "_RELEASE_DELAY_S", 0.0)
+    target = tmp_path / "w3"
+    lock = fsio._lock_path(target)
+    _unlink_raising(monkeypatch, lock.name, times=10_000)
+    with pytest.raises(PermissionError), fsio.locked(target):
+        pass
+
+
+def test_fresh_lock_is_not_read_where_liveness_is_unknown(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """W1-00-T1-3 : sans test de pid (Windows), attendre un verrou frais ne le relit pas (lecteur = unlink refuse)."""
+    monkeypatch.setattr(fsio, "_fcntl", None)
+    monkeypatch.setattr(fsio, "_PID_LIVENESS", False)
+    target = tmp_path / "f"
+    lock = fsio._lock_path(target)
+    reads: list[str] = []
+    real = Path.read_text
+
+    def spy(self: Path, *a: object, **k: object) -> str:
+        reads.append(self.name)
+        return real(self, *a, **k)  # type: ignore[arg-type]
+
+    with fsio.locked(target):
+        monkeypatch.setattr(Path, "read_text", spy)
+        with pytest.raises(TimeoutError), fsio.locked(target, timeout=0.15):
+            pass
+        monkeypatch.setattr(Path, "read_text", real)
+    assert lock.name not in reads
 
 
 _HOLDER = textwrap.dedent(
@@ -251,11 +346,34 @@ _LEGACY_ATOMIC_WRITERS = {
 _LOCK_MODULES = {"fcntl", "msvcrt", "filelock", "portalocker", "fasteners"}
 _LOCK_CALLS = {"flock", "lockf", "locking"}
 _DYNAMIC_IMPORTS = {"import_module", "__import__"}
+_EXCLUSIVE_MODE = re.compile(r"[rwabt+]*x[rwabt+]*")  # mode d'open() qui crée en exclusif
+_OS_MOVES = {"replace", "rename"}
 
 
 def _call_name(node: ast.Call) -> str:
     f = node.func
     return f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else ""
+
+
+def _exclusive_open(node: ast.Call) -> bool:
+    """``open(f, 'x')``, ``io.open``, ``Path.open('x')`` ou ``mode='x...'`` : création exclusive, donc un verrou."""
+    if _call_name(node) != "open":
+        return False
+    candidates = [kw.value for kw in node.keywords if kw.arg == "mode"] + node.args[1:2]
+    if isinstance(node.func, ast.Attribute):  # Path.open(mode) : le mode vient en premier
+        candidates += node.args[:1]
+    return any(
+        isinstance(c, ast.Constant) and isinstance(c.value, str) and _EXCLUSIVE_MODE.fullmatch(c.value)
+        for c in candidates
+    )
+
+
+def _exclusive_touch(node: ast.Call) -> bool:
+    """``Path.touch(exist_ok=False)`` (aussi en second argument positionnel) échoue si le fichier existe : un verrou."""
+    if _call_name(node) != "touch":
+        return False
+    flags = [kw.value for kw in node.keywords if kw.arg == "exist_ok"] + node.args[1:2]
+    return any(isinstance(f, ast.Constant) and f.value is False for f in flags)
 
 
 def _lock_users(root: Path = SRC) -> set[str]:
@@ -277,31 +395,35 @@ def _lock_users(root: Path = SRC) -> set[str]:
             elif isinstance(node, ast.Call) and _call_name(node) in _DYNAMIC_IMPORTS and node.args:
                 arg = node.args[0]
                 hit = isinstance(arg, ast.Constant) and str(arg.value).split(".")[0] in _LOCK_MODULES
+            if not hit and isinstance(node, ast.Call):
+                hit = _exclusive_open(node) or _exclusive_touch(node)
             if hit:
                 found.add(rel)
     return found
 
 
 def _atomic_writers(root: Path = SRC) -> set[str]:
-    """Fichiers qui écrivent « temporaire puis replace » : ``mkstemp``, ``os.replace`` ou ``Path.replace(x)``."""
+    """Fichiers qui écrivent « temporaire puis replace » : ``mkstemp``, ``os.replace/rename``, ``Path.replace(x)``,
+    ``Path.rename(x)`` ou l'import direct de ``replace``/``rename`` depuis ``os``."""
     found: set[str] = set()
     for py in root.rglob("*.py"):
         rel = py.relative_to(root).as_posix()
         for node in ast.walk(ast.parse(py.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.ImportFrom):
+                if node.module == "os" and any(a.name in _OS_MOVES for a in node.names):
+                    found.add(rel)
+                continue
             if not isinstance(node, ast.Call):
                 continue
             name = _call_name(node)
-            one_arg_replace = name == "replace" and len(node.args) == 1 and not node.keywords
-            if (
-                name == "mkstemp"
-                or one_arg_replace
-                or (
-                    name == "replace"
-                    and isinstance(node.func, ast.Attribute)
-                    and isinstance(node.func.value, ast.Name)
-                    and node.func.value.id == "os"
-                )
-            ):
+            one_arg_move = name in _OS_MOVES and len(node.args) == 1 and not node.keywords
+            os_move = (
+                name in _OS_MOVES
+                and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "os"
+            )
+            if name == "mkstemp" or one_arg_move or os_move:
                 found.add(rel)
     return found
 
@@ -334,6 +456,12 @@ def test_no_other_atomic_writer_in_src() -> None:
         "from portalocker import Lock\n",
         "import fasteners\n",
         "import msvcrt\nmsvcrt.locking(1, 1, 1)\n",
+        "open('x.lock', 'x')\n",
+        "open('x.lock', mode='xb')\n",
+        "from pathlib import Path\nPath('x.lock').open('x')\n",
+        "import io\nio.open('x.lock', 'x+')\n",
+        "from pathlib import Path\nPath('t').touch(exist_ok=False)\n",
+        "from pathlib import Path\nPath('t').touch(0o644, False)\n",
     ],
 )
 def test_lock_guard_detects_booby_trapped_modules(tmp_path: Path, body: str) -> None:
@@ -341,9 +469,37 @@ def test_lock_guard_detects_booby_trapped_modules(tmp_path: Path, body: str) -> 
     assert _lock_users(tmp_path) == {"rogue.py"}
 
 
-def test_atomic_guard_detects_booby_trapped_modules(tmp_path: Path) -> None:
-    (tmp_path / "a.py").write_text("import tempfile\ntempfile.mkstemp()\n", encoding="utf-8")
-    (tmp_path / "b.py").write_text("import os\nos.replace('a', 'b')\n", encoding="utf-8")
-    (tmp_path / "c.py").write_text("from pathlib import Path\nPath('a').replace(Path('b'))\n", encoding="utf-8")
-    (tmp_path / "ok.py").write_text("'a'.replace('a', 'b')\n", encoding="utf-8")
-    assert _atomic_writers(tmp_path) == {"a.py", "b.py", "c.py"}
+@pytest.mark.parametrize(
+    "body",
+    [
+        "open('f.txt', 'w')\n",
+        "open('f.txt')\n",
+        "from pathlib import Path\nPath('t').touch()\nPath('t').touch(exist_ok=True)\n",
+        "from pathlib import Path\nPath('t').open('r')\nPath('t').open(encoding='utf-8')\n",
+    ],
+)
+def test_lock_guard_ignores_ordinary_file_access(tmp_path: Path, body: str) -> None:
+    (tmp_path / "ok.py").write_text(body, encoding="utf-8")
+    assert _lock_users(tmp_path) == set()
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "import tempfile\ntempfile.mkstemp()\n",
+        "import os\nos.replace('a', 'b')\n",
+        "from pathlib import Path\nPath('a').replace(Path('b'))\n",
+        "from pathlib import Path\nPath('a').rename(Path('b'))\n",
+        "import os\nos.rename('a', 'b')\n",
+        "from os import replace\nreplace('a', 'b')\n",
+        "from os import rename as mv\nmv('a', 'b')\n",
+    ],
+)
+def test_atomic_guard_detects_booby_trapped_modules(tmp_path: Path, body: str) -> None:
+    (tmp_path / "rogue.py").write_text(body, encoding="utf-8")
+    assert _atomic_writers(tmp_path) == {"rogue.py"}
+
+
+def test_atomic_guard_ignores_lookalikes(tmp_path: Path) -> None:
+    (tmp_path / "ok.py").write_text("'a'.replace('a', 'b')\nimport os\nos.remove('x')\n", encoding="utf-8")
+    assert _atomic_writers(tmp_path) == set()
