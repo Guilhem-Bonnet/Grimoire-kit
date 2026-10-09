@@ -20,8 +20,11 @@
 
 Seule une ligne de liste commençant par `Resolved:` (préfixe `[date ISO]` obligatoire pour couvrir
 des entrées datées) marque une paire de mémoires comme résolue. Les tableaux ci-dessus sont lus
-par les humains et par `memory-audit`, pas par `memory lint`. La date doit être égale ou postérieure
-aux deux entrées contradictoires : une contradiction qui réapparaît plus tard est de nouveau signalée.
+par les humains et par `memory-audit`, pas par `memory lint`. La date, lue dans le préfixe seul,
+doit être égale ou postérieure aux deux entrées contradictoires et ne pas être dans le futur : une
+contradiction qui réapparaît plus tard est de nouveau signalée. La ligne doit reprendre les termes
+que les deux entrées ont en commun (la commande les liste) : une résolution sur un autre sujet ne
+couvre pas la paire. Une entrée sans date n'est couverte que par une ligne `Resolved:` sans date.
 
 - [YYYY-MM-DD] Resolved: <sujet commun aux deux mémoires> ; <décision retenue>
 

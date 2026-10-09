@@ -347,3 +347,90 @@ def test_la_suggestion_de_correction_donne_le_format_attendu(tmp_path: Path) -> 
     res = runner.invoke(app, ["memory", "lint", "--json", "--project-root", str(tmp_path)])
     suggestion = json.loads(res.output)["issues"][0]["fix_suggestion"]
     assert "[YYYY-MM-DD] Resolved:" in suggestion
+
+
+# ── Revue 4 : la résolution désigne la paire, sa date vient du préfixe ───────
+
+
+def _lint_sujet(tmp_path: Path, learning: str, decision: str, journal: str) -> int:
+    """Lint d'une mémoire dont le contenu est donné tel quel (entrées + journal)."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "project-context.yaml").write_text("project:\n  name: t\n", encoding="utf-8")
+    mem = tmp_path / "_grimoire" / "_memory"
+    (mem / "agent-learnings").mkdir(parents=True)
+    (mem / "agent-learnings" / "dev.md").write_text(f"# Dev\n{learning}\n", encoding="utf-8")
+    (mem / "decisions-log.md").write_text(f"# Dec\n{decision}\n", encoding="utf-8")
+    (mem / "contradiction-log.md").write_text(f"# Contradictions\n{journal}\n", encoding="utf-8")
+    return runner.invoke(app, ["memory", "lint", "--json", "--project-root", str(tmp_path)]).exit_code
+
+
+_FRONT_POS = "- [2024-01-01] TDD approach adopted and validated for frontend"
+_FRONT_NEG = "- [2024-01-02] TDD approach rejected and abandoned for frontend"
+
+
+def test_une_resolution_sur_un_autre_sujet_ne_masque_pas_la_contradiction(tmp_path: Path) -> None:
+    journal = "- [2024-01-03] Resolved: TDD approach adopted for backend; the rejected entry is superseded"
+    assert _lint_sujet(tmp_path, _FRONT_POS, _FRONT_NEG, journal) == 1
+
+
+def test_une_resolution_sur_le_bon_sujet_masque_la_contradiction(tmp_path: Path) -> None:
+    journal = "- [2024-01-03] Resolved: TDD approach adopted for frontend; the rejected entry is superseded"
+    assert _lint_sujet(tmp_path, _FRONT_POS, _FRONT_NEG, journal) == 0
+
+
+def test_la_suggestion_nomme_les_termes_a_reprendre(tmp_path: Path) -> None:
+    _lint_sujet(tmp_path, _FRONT_POS, _FRONT_NEG, "")
+    res = runner.invoke(app, ["memory", "lint", "--json", "--project-root", str(tmp_path)])
+    suggestion = json.loads(res.output)["issues"][0]["fix_suggestion"]
+    assert "frontend" in suggestion
+
+
+def test_une_entree_non_datee_n_est_pas_couverte_par_une_resolution_datee(tmp_path: Path) -> None:
+    pos = "- TDD approach adopted and validated for frontend"
+    assert _lint_sujet(tmp_path / "a", pos, _FRONT_NEG, "- [2024-01-03] Resolved: TDD approach adopted for frontend") == 1
+    assert _lint_sujet(tmp_path / "b", pos, _FRONT_NEG, "- [2099-01-01] Resolved: TDD approach adopted for frontend") == 1
+
+
+def test_entrees_non_datees_et_resolution_non_datee_restent_couvertes(tmp_path: Path) -> None:
+    pos = "- TDD approach adopted and validated for frontend"
+    neg = "- TDD approach rejected and abandoned for frontend"
+    assert _lint_sujet(tmp_path, pos, neg, "- Resolved: TDD approach adopted for frontend") == 0
+
+
+def test_une_date_en_fin_de_ligne_n_est_pas_la_date_de_la_resolution(tmp_path: Path) -> None:
+    journal = "- Resolved: TDD approach adopted for frontend (ticket [2099-01-01])"
+    assert _lint_sujet(tmp_path, _FRONT_POS, _FRONT_NEG, journal) == 1
+
+
+def test_une_resolution_datee_dans_le_futur_ne_masque_rien(tmp_path: Path) -> None:
+    journal = "- [2099-01-01] Resolved: TDD approach adopted for frontend"
+    assert _lint_sujet(tmp_path, _FRONT_POS, _FRONT_NEG, journal) == 1
+
+
+# ── Revue 4 : le niveau de risque de l'enveloppe suit RiskProfile ────────────
+
+
+def test_chaque_profil_de_risque_a_un_niveau_dans_l_enveloppe() -> None:
+    from grimoire.core.standard_task_scaffold import _RISK_LEVEL_BY_PROFILE
+    from grimoire.missions.schemas import RiskProfile
+
+    assert {p.value for p in RiskProfile} == {str(k) for k in _RISK_LEVEL_BY_PROFILE}
+    assert _RISK_LEVEL_BY_PROFILE[RiskProfile.SECURITY_CRITICAL] == "critical"
+
+
+def test_l_enveloppe_d_une_tache_security_critical_porte_le_risque_critical(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from grimoire.core.standard_state import LEDGER_RELPATH
+    from grimoire.core.standard_task_scaffold import _task_facts
+    from grimoire.missions.ledger import MissionLedger
+
+    root = tmp_path / "p"
+    root.mkdir()
+    assert runner.invoke(app, ["init", "-y", str(root)]).exit_code == 0
+    monkeypatch.chdir(root)
+    res = runner.invoke(app, ["task", "add", "Rotate the GitHub token", "-a", "fait"])
+    assert res.exit_code == 0, res.output
+    tache = MissionLedger(root / LEDGER_RELPATH).list_tasks()[0]
+    assert tache.risk_profile.value == "security_critical"
+    assert _task_facts(root, tache.id).risk_level == "critical"

@@ -36,6 +36,7 @@ from typing import Any
 
 from grimoire.core.standard_checks.gate_remedy import gate_artifact_relpath
 from grimoire.core.standard_generation import normalize_task_id
+from grimoire.missions.schemas import RiskProfile
 
 __all__ = [
     "ScaffoldResult",
@@ -71,12 +72,14 @@ _ENVELOPE_STATE_BY_BOARD_STATUS: dict[str, str] = {
     "archived": "done",
 }
 #: Profil de risque du ledger → « Risk level » de l'enveloppe.
-_RISK_LEVEL_BY_PROFILE: dict[str, str] = {
-    "light": "low",
-    "standard": "medium",
-    "strict": "high",
-    "security-critical": "critical",
-    "release": "high",
+#: Indexée par ``RiskProfile`` : un renommage d'un profil casse au typage au lieu de
+#: rétrograder en silence une tâche critique (le « Risk level » reste alors un gabarit).
+_RISK_LEVEL_BY_PROFILE: dict[RiskProfile, str] = {
+    RiskProfile.LIGHT: "low",
+    RiskProfile.STANDARD: "medium",
+    RiskProfile.STRICT: "high",
+    RiskProfile.SECURITY_CRITICAL: "critical",
+    RiskProfile.RELEASE: "high",
 }
 #: Priorité du board (projection) → « Risk level », quand le ledger est absent.
 _RISK_LEVEL_BY_PRIORITY: dict[str, str] = {"low": "low", "medium": "medium", "high": "high", "critical": "critical"}
@@ -285,7 +288,7 @@ def _facts_from_ledger(root: Path, task_id: str) -> TaskFacts | None:
         board_status=board_status_of(task.status),
         acceptance=tuple(task.acceptance),
         owner=owner,
-        risk_level=_RISK_LEVEL_BY_PROFILE.get(task.risk_profile.value, ""),
+        risk_level=_RISK_LEVEL_BY_PROFILE.get(task.risk_profile, ""),
         source="ledger",
     )
 
