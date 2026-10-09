@@ -362,6 +362,71 @@ def test_fallback_keeps_a_fresh_lock_of_a_live_process(tmp_path: Path, monkeypat
         pass
 
 
+# --- refus d'acces a l'acquisition et melange des deux branches (W1-00-T3-1, W1-00-T3-2) -----
+
+
+@pytest.mark.skipif(os.name != "posix" or (hasattr(os, "geteuid") and os.geteuid() == 0), reason="chmod 555 sans effet")
+def test_fallback_raises_permission_error_at_once_on_posix(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """W1-00-T3-1 : un dossier en lecture seule n'est pas « un verrou occupe » ; la cause n'est pas attendue puis masquee."""
+    monkeypatch.setattr(fsio, "_fcntl", None)
+    ro = tmp_path / "ro"
+    ro.mkdir()
+    ro.chmod(0o555)
+    try:
+        t0 = time.monotonic()
+        with pytest.raises(PermissionError), fsio.locked(ro / "f", timeout=5):
+            pass
+        assert time.monotonic() - t0 < 2
+    finally:
+        ro.chmod(0o755)
+
+
+def test_fallback_timeout_keeps_the_permission_error_as_cause(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """W1-00-T3-1 : ou le refus peut etre transitoire (Windows), le delai expire mais la cause reste attachee."""
+    monkeypatch.setattr(fsio, "_fcntl", None)
+    monkeypatch.setattr(fsio, "_PID_LIVENESS", False)
+    real = os.open
+
+    def deny(path: object, *a: object, **k: object) -> int:
+        if str(path).endswith(".lock") or str(path).endswith(".xlock"):
+            raise PermissionError(13, "acces refuse")
+        return real(path, *a, **k)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(os, "open", deny)
+    with pytest.raises(TimeoutError) as excinfo, fsio.locked(tmp_path / "f", timeout=0.1):
+        pass
+    assert isinstance(excinfo.value.__cause__, PermissionError)
+
+
+@pytest.mark.parametrize("age", [0.0, 120.0])
+def test_fallback_never_touches_the_flock_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, age: float) -> None:
+    """W1-00-T3-2 : le fichier de ``flock`` (vide, persistant) n'est ni attendu ni casse par le repli."""
+    target = tmp_path / "f"
+    flock_file = fsio._flock_path(target)
+    flock_file.write_text("", encoding="utf-8")
+    if age:
+        old = time.time() - age
+        os.utime(flock_file, (old, old))
+    inode = flock_file.stat().st_ino
+    monkeypatch.setattr(fsio, "_fcntl", None)
+    with fsio.locked(target, timeout=0.5):
+        pass
+    assert flock_file.exists()
+    assert flock_file.stat().st_ino == inode
+    assert fsio._lock_path(target) != flock_file
+
+
+def test_flock_and_fallback_branches_do_not_exclude_each_other(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """W1-00-T3-2 : limite figee. Les deux branches n'ont pas le meme verrou : pas d'exclusion entre hotes mixtes."""
+    if fsio._fcntl is None:
+        pytest.skip("fcntl indisponible")
+    target = tmp_path / "f"
+    with fsio.locked(target), monkeypatch.context() as mp:
+        mp.setattr(fsio, "_fcntl", None)
+        with fsio.locked(target, timeout=0.5):  # ne leve pas : les deux sections coexistent
+            pass
+
+
 # --- restitution d'un verrou pris par erreur : limites figees (W1-00-T2-1) -----
 
 

@@ -2,6 +2,10 @@
 
 ``locked(path)`` donne l'exclusion mutuelle sur *path* : ``flock`` quand
 ``fcntl`` existe, sinon création exclusive d'un fichier verrou (Windows).
+Les deux branches n'utilisent pas le même fichier (``.<nom>.lock`` pour ``flock``,
+``.<nom>.xlock`` pour le repli) et ne s'excluent donc pas l'une l'autre : ne pas
+partager un dossier entre un hôte ``flock`` et un hôte de repli (Windows natif et
+WSL sur le même ``/mnt/c``). Le repli ne casse en revanche jamais le fichier d'un porteur ``flock``.
 ``atomic_write(path, data)`` écrit un temporaire voisin, le synchronise sur
 disque, puis le renomme par-dessus : un lecteur voit l'ancien contenu ou le
 nouveau, jamais un fichier tronqué, et une panne avant le renommage laisse
@@ -50,8 +54,15 @@ _RELEASE_TRIES = 20
 _PID_LIVENESS = os.name == "posix"
 
 
-def _lock_path(path: Path) -> Path:
+def _flock_path(path: Path) -> Path:
+    """Fichier de la branche ``flock`` : vide, persistant (le verrou est sur le descripteur, pas sur le fichier)."""
     return path.with_name(f".{path.name}.lock")
+
+
+def _lock_path(path: Path) -> Path:
+    """Fichier de la branche de repli (création exclusive). Nom distinct de ``_flock_path`` : le repli,
+    qui casse un verrou « vieux » de 60 s, ne doit jamais casser ni attendre le fichier d'un porteur ``flock``."""
+    return path.with_name(f".{path.name}.xlock")
 
 
 def _pid_dead(content: str) -> bool:
@@ -141,9 +152,9 @@ def locked(path: str | os.PathLike[str], *, timeout: float = 30.0) -> Iterator[N
     """
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    lock = _lock_path(target)
     deadline = time.monotonic() + timeout
     if sys.platform != "win32" and _fcntl is not None:  # le test de plateforme sert mypy --platform win32
+        lock = _flock_path(target)
         with lock.open("a", encoding="utf-8") as fh:
             while True:
                 try:
@@ -159,15 +170,29 @@ def locked(path: str | os.PathLike[str], *, timeout: float = 30.0) -> Iterator[N
                 _fcntl.flock(fh.fileno(), _fcntl.LOCK_UN)
         return
 
+    lock = _lock_path(target)
     token = f"{os.getpid()}:{uuid.uuid4().hex}"
+    denied: PermissionError | None = None
     while True:
         try:
             fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        except (FileExistsError, PermissionError):  # Windows : PermissionError si le verrou est en cours de suppression
+        except FileExistsError:
             if _break_if_abandoned(lock):
                 continue
             if time.monotonic() >= deadline:
                 raise TimeoutError(f"verrou {lock} non obtenu en {timeout:g} s") from None
+            time.sleep(_POLL_S)
+            continue
+        except PermissionError as exc:
+            # Windows : refus transitoire si le verrou est en cours de suppression. Ailleurs (POSIX), c'est un vrai
+            # refus d'accès (dossier en lecture seule) : on le lève, on ne l'attend pas en le faisant passer pour un verrou occupé.
+            if _PID_LIVENESS:
+                raise
+            denied = exc
+            if _break_if_abandoned(lock):
+                continue
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"verrou {lock} non obtenu en {timeout:g} s") from denied
             time.sleep(_POLL_S)
             continue
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
