@@ -11,12 +11,70 @@ check --strict``) — aucun des deux n'importe l'autre, pas de cycle.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from grimoire.core.standard_checks.base import StandardProfile, StandardVerificationResult, _add_check, _text_file
 from grimoire.core.standard_generation import EVIDENCE_DIR
 
-__all__ = ["verify_claim_ledger"]
+__all__ = ["ClaimRowScan", "scan_claim_rows", "verify_claim_ledger"]
+
+_TEMPLATE_CELLS = ["CL-001", "", "fait", "", "hypothèse", "faible", "vérifier"]
+_ID_RE = re.compile(r"^CL-\d{3,}$")
+_CANDIDATE_RE = re.compile(r"^\s*\|\s*cl-", re.IGNORECASE)
+_SEPARATOR_CELL_RE = re.compile(r"^:?-+:?$")
+_STATUSES = frozenset({"prouvé", "hypothèse", "contredit", "réfuté"})
+_DECISIONS = frozenset({"utiliser", "vérifier", "rejeter", "écarter"})
+
+
+def _cells(line: str) -> list[str]:
+    return [c.strip() for c in line.strip().strip("|").split("|")]
+
+
+class ClaimRowScan:
+    """Lignes candidates du registre : chacune est évaluée ou comptée non évaluée."""
+
+    def __init__(self) -> None:
+        self.evaluated: list[tuple[str, list[str]]] = []
+        self.unevaluated: list[str] = []
+
+    @property
+    def candidate_count(self) -> int:
+        return len(self.evaluated) + len(self.unevaluated)
+
+    @property
+    def unevaluated_count(self) -> int:
+        return len(self.unevaluated)
+
+
+def scan_claim_rows(text: str) -> ClaimRowScan:
+    """Repère les lignes candidates sans aucune perte silencieuse.
+
+    Candidate = toute ligne de tableau de la section ``## Claims`` (hors en-tête,
+    séparateur et ligne modèle), ou, où que ce soit dans le fichier, toute ligne
+    dont la première cellule commence par ``cl-`` (casse et espaces tolérés). Une ligne
+    candidate dont l'identifiant n'est pas ``CL-NNN`` ou qui a moins de 7
+    cellules est comptée non évaluée.
+    """
+    lines = text.splitlines()
+    start = next((n for n, ln in enumerate(lines) if re.match(r"^##\s+Claims\s*$", ln.strip(), re.IGNORECASE)), None)
+    in_section: set[int] = set()
+    if start is not None:
+        end = next((n for n in range(start + 1, len(lines)) if lines[n].startswith("## ")), len(lines))
+        in_section = {n for n in range(start + 1, end) if lines[n].strip().startswith("|")}
+    pool = [ln for n, ln in enumerate(lines) if n in in_section or _CANDIDATE_RE.match(ln)]
+    scan = ClaimRowScan()
+    for line in pool:
+        cells = _cells(line)
+        if cells[0].lower() == "id" or all(_SEPARATOR_CELL_RE.match(c) for c in cells):
+            continue
+        if cells == _TEMPLATE_CELLS:
+            continue
+        if len(cells) < 7 or not _ID_RE.match(cells[0]):
+            scan.unevaluated.append(line)
+        else:
+            scan.evaluated.append((line, cells))
+    return scan
 
 
 def verify_claim_ledger(
@@ -30,8 +88,9 @@ def verify_claim_ledger(
 ) -> None:
     """AG-QUA-002 : une affirmation critique sans preuve reste une hypothèse.
 
-    Un registre encore vierge est un avertissement : il attend d'être rempli.
-    Ce qui est une erreur, c'est une affirmation dite prouvée sans preuve, ou —
+    Un registre vierge, vidé ou absent est un avertissement (starter,
+    controlled, orchestrated) mais une erreur en governed et production dès
+    ``review``. Ce qui est aussi une erreur, c'est une affirmation dite prouvée sans preuve, ou —
     en profil governed et production — une affirmation utilisée alors qu'elle
     n'est pas prouvée, et une synthèse laissée vide.
 
@@ -50,21 +109,48 @@ def verify_claim_ledger(
     """
     rel_path = EVIDENCE_DIR / task_id / "claim-ledger.md"
     text = _text_file(root, rel_path)
-    if not text:
-        return
     strict = profile.id in {"governed", "production"}
-    template_row = "| CL-001 |  | fait |  | hypothèse | faible | vérifier |"
-    rows = [line for line in text.splitlines() if line.startswith("| CL-") and line.strip() != template_row]
-    if not rows and not suppress_v0 and not rows_only:
-        severity = "error" if strict else "warning"
+    severity = "error" if strict else "warning"
+    if not text.strip():
+        if not suppress_v0 and not rows_only:
+            _add_check(result, "claims.empty", severity, "Claim ledger is missing or empty.", path=rel_path)
+        return
+    scan = scan_claim_rows(text)
+    if not scan.candidate_count and not suppress_v0 and not rows_only:
         _add_check(result, "claims.empty", severity, "Claim ledger still holds only the template row.", path=rel_path)
-    for line in rows:
-        cells = [c.strip() for c in line.strip().strip("|").split("|")]
-        if len(cells) < 7:
-            severity = "error" if strict else "warning"
-            _add_check(result, "claims.row_invalid", severity, f"Claim row is malformed: {line[:60]}", path=rel_path)
-            continue
+    if scan.candidate_count:
+        _add_check(
+            result,
+            "claims.summary",
+            "info",
+            f"{scan.candidate_count} claim rows, {len(scan.evaluated)} evaluated, "
+            f"unevaluated_count={scan.unevaluated_count}.",
+            path=rel_path,
+        )
+    for line in scan.unevaluated:
+        _add_check(
+            result, "claims.row_invalid", severity, f"Claim row is malformed: {line.strip()[:60]}", path=rel_path
+        )
+    rows = scan.evaluated
+    for _line, cells in rows:
         claim_id, _claim, _kind, proof, status, _confidence, decision = cells[:7]
+        status, decision = status.lower(), decision.lower()
+        if status not in _STATUSES:
+            _add_check(
+                result,
+                "claims.status_invalid",
+                severity,
+                f"{claim_id} has an unknown status: {status or '(empty)'}.",
+                path=rel_path,
+            )
+        if decision not in _DECISIONS:
+            _add_check(
+                result,
+                "claims.decision_invalid",
+                severity,
+                f"{claim_id} has an unknown decision: {decision or '(empty)'}.",
+                path=rel_path,
+            )
         if status == "prouvé" and not proof:
             _add_check(
                 result,
@@ -77,7 +163,7 @@ def verify_claim_ledger(
             _add_check(
                 result,
                 "claims.used_unproved",
-                "error" if strict else "warning",
+                severity,
                 f"{claim_id} is used while its status is {status}.",
                 path=rel_path,
             )

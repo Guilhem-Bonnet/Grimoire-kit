@@ -7,11 +7,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
-- fix(standard): le vérificateur de claims échoue fermé en profil governed. Une ligne malformée ou un registre vide donne une erreur (au lieu d'un avertissement) dans les profils `governed` et `production`, complétant le principe W1-05 du plan « Dépasser AI-DLC » : aucune divergence n'est silencieuse en mode strict. Les profils non gouvernés gardent le comportement existant (warning). Profiles non-governed conservent le comportement antérieur.
-  - `src/grimoire/core/standard_checks/claim_ledger_verify.py` : sévérité conditionnée au profil pour `claims.empty` et `claims.row_invalid`.
-  - `tests/unit/core/test_standard_mandatory_artifacts.py` : test existant aligné sur le nouveau comportement.
-  - `tests/unit/core/test_standard_gap_artifacts.py` : test existant aligné sur le nouveau comportement.
-  - Rouge-avant / vert-après : `tests/unit/core/test_claim_ledger_fail_closed.py` (6 tests, 5 rouges avant).
+- fix(standard): le vérificateur de claims échoue fermé en profil governed. Un registre vierge, vidé ou absent, une ligne malformée (identifiant `cl-002`, `|CL-002|…`, ligne indentée, moins de 7 cellules, `CL-2`) ou une cellule hors vocabulaire (statut `prouvé`/`hypothèse`/`contredit`/`réfuté`, décision `utiliser`/`vérifier`/`rejeter`/`écarter`) donnent une erreur en `governed` et `production`, un avertissement ailleurs. Avant, le filtre `startswith("| CL-")` écartait en silence les lignes mal écrites et `if not text: return` laissait passer un fichier vidé ou supprimé. Chaque ligne candidate est évaluée ou comptée : le contrôle `claims.summary` (info) expose `unevaluated_count`, et un test d'architecture interdit les `except …: pass` non justifiés dans `standard_checks/`.
+  - Changement visible : en `governed`, le gate `review`/`accepted` est bloqué par un claim-ledger resté vierge (le template seul rendait déjà `claims.empty`, désormais en erreur).
+  - `src/grimoire/core/standard_checks/claim_ledger_verify.py`, `registry.py` (3 nouveaux ids), `docs/standard/integration.md` (exception du claim-ledger).
+  - Tests existants alignés : `test_standard_mandatory_artifacts.py`, `test_standard_gap_artifacts.py`, `test_agentic_standard.py` (le ledger du test d'acceptation est rempli pour garder son intention).
+  - Rouge-avant / vert-après : `tests/unit/core/test_claim_ledger_fail_closed.py` (6 tests, 4 rouges avant) et `tests/unit/core/test_claim_ledger_scan_invariants.py` (23 tests, 19 rouges avant ; rejeu avec les sources d'origin/main restaurées par `git checkout origin/main -- <src>`).
+  - Non fait : test de propriété `hypothesis` (remplacé par un produit cartésien de cas) ; la confiance et le type de l'affirmation ne sont pas validés (vocabulaire du template non figé).
 
 ## [3.62.1] - 2026-10-03
 

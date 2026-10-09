@@ -94,7 +94,8 @@ borné, `open_delegation: forbidden`), AG-AUD-001 par la section `Traceability`
 de `compliance-declaration.md`.
 
 `grimoire standard verify` les lit tous. Un registre vierge est un
-avertissement : il attend d'être rempli. Ce qui est une erreur, c'est une
+avertissement : il attend d'être rempli — sauf le claim-ledger en `governed` et
+`production`, où un registre vierge, vidé ou absent est une erreur dès `review`. Ce qui est une erreur, c'est une
 déclaration fausse — un critère `passé` sans preuve, un livrable `accepté`
 sans validateur, une source `superseded` sans remplaçante, un `on_critical`
 qui n'est ni `stop` ni `reduce_autonomy`, une délégation ouverte — et, en
