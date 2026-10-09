@@ -90,24 +90,41 @@ def _as_dict(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, dict) else {}
 
 
+def _climb_to_project(start: Path) -> Path | None:
+    """First directory from *start* upward that carries ``_grimoire/``."""
+    for folder in (start, *start.parents):
+        if (folder / "_grimoire").is_dir():
+            return folder
+    return None
+
+
 def resolve_project_root(payload: dict[str, Any] | None = None, explicit: Path | None = None) -> Path:
     """Project root for a hook run.
 
-    Order: an explicit ``--project-root``, then the host's own signal (its
-    payload ``cwd`` or the project-dir variable it exports), then the process
-    working directory. A hook that guesses this wrong evaluates the gates of
-    the wrong project, so every candidate is a value the host actually stated.
+    Order: an explicit ``--project-root``; the project-dir variables the host
+    exports (``CLAUDE_PROJECT_DIR``, ``GRIMOIRE_PROJECT_ROOT``,
+    ``COPILOT_WORKSPACE_FOLDER``); a project key of the payload
+    (``workspaceFolder``, ``project_root``...); then the payload ``cwd``,
+    climbed to the first folder carrying ``_grimoire/``; then the process
+    working directory. The payload ``cwd`` is the shell's current directory:
+    it follows every ``cd`` and does not name the project (issue #717), so it
+    only serves as a starting point for the climb. When no ``_grimoire/`` is
+    found above it, the ``cwd`` itself is kept (unchanged behaviour).
     """
     if explicit is not None:
         return explicit.resolve()
-    data = payload or {}
-    candidate = _pick(data, "cwd", "workspaceFolder", "workspace_folder", "project_root", "projectRoot")
-    if isinstance(candidate, str) and candidate.strip():
-        return Path(candidate).resolve()
     for var in ("CLAUDE_PROJECT_DIR", "GRIMOIRE_PROJECT_ROOT", "COPILOT_WORKSPACE_FOLDER"):
         value = os.environ.get(var, "").strip()
         if value:
             return Path(value).resolve()
+    data = payload or {}
+    stated = _pick(data, "workspaceFolder", "workspace_folder", "project_root", "projectRoot")
+    if isinstance(stated, str) and stated.strip():
+        return Path(stated).resolve()
+    cwd = _pick(data, "cwd")
+    if isinstance(cwd, str) and cwd.strip():
+        start = Path(cwd).resolve()
+        return _climb_to_project(start) or start
     return Path.cwd().resolve()
 
 
