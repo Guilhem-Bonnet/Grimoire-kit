@@ -332,7 +332,11 @@ def _execute_fanout(executor: DispatchExecutor, contract: NodeContract, context_
         return result
 
     children: list[_ChildRun] = []
-    total_cost = Cost.none()
+    # La phase 1 a déjà été dépensée (et inscrite par ``_execute_plain``) : on repart
+    # de son coût, jamais de ``Cost.none()`` — sinon une phase 1 muette ressortirait
+    # « exact » et une phase 1 payée serait perdue, y compris pour le plafond des frères.
+    phase1_outcome = executor.node_outcomes.get(node_id)
+    total_cost = phase1_outcome.cost if phase1_outcome else Cost.none()
     cap = executor._pilot_policy.max_cost_usd_per_node
     cost_capped = False
     cap_why: str | None = None

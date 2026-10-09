@@ -58,7 +58,9 @@ _WRITER_TMPL = f"""\
     payload.update(extra_map.get(key, extra_map.get(node, {{}})))
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(payload, fh)
-    print(json.dumps({{"total_cost_usd": cost_map.get(key, cost_map.get(node, 0.05))}}))
+    cost = cost_map.get(key, cost_map.get(node, 0.05))
+    if cost is not None:  # None = fournisseur muet : aucun coût imprimé
+        print(json.dumps({{"total_cost_usd": cost}}))
     """
 
 
@@ -66,14 +68,14 @@ def _writer_script(
     tmp_path: Path,
     *,
     extra_map: dict[str, dict] | None = None,
-    cost_map: dict[str, float] | None = None,
+    cost_map: dict[str, float | None] | None = None,
     fail_for: tuple[str, ...] = (),
 ) -> Path:
     path = tmp_path / "scripts" / "writer.py"
     path.parent.mkdir(parents=True, exist_ok=True)
     body = (
         _WRITER_TMPL.replace("EXTRA_MAP_JSON", json.dumps(extra_map or {}))
-        .replace("COST_MAP_JSON", json.dumps(cost_map or {}))
+        .replace("COST_MAP_JSON", repr(cost_map or {}))  # repr, pas json : ``None`` (muet), pas ``null``
         .replace("FAIL_FOR_JSON", json.dumps(list(fail_for)))
     )
     path.write_text(dedent(body), encoding="utf-8")
@@ -636,7 +638,10 @@ def test_demo_sept_genres_tourne_sextrait_et_se_rejoue_a_lidentique(tmp_path: Pa
 def _silent_script(tmp_path: Path, **kwargs: object) -> Path:
     """Le même fournisseur, mais muet : il n'imprime jamais ``total_cost_usd``."""
     script = _writer_script(tmp_path, **kwargs)  # type: ignore[arg-type]
-    script.write_text(script.read_text(encoding="utf-8").rsplit("print(", 1)[0], encoding="utf-8")
+    text = script.read_text(encoding="utf-8")
+    muted = text.replace("cost = cost_map.get(key, cost_map.get(node, 0.05))", "cost = None")
+    assert muted != text
+    script.write_text(muted, encoding="utf-8")
     return script
 
 
@@ -744,3 +749,68 @@ def test_lignes_enfants_et_resume_du_juge_portent_le_statut_du_cout() -> None:
     assert "coût >= 0.4200 USD (2 non pricés)" in summary
     assert "coût inconnu (1 non pricés)" in summary
     assert "coût 0.42\n" not in summary
+
+
+@pytest.mark.parametrize("policy", ["", "max_cost_usd_per_node: 100\n"], ids=["sans_plafond", "plafond_large"])
+def test_fanout_phase1_muette_laisse_le_cout_du_node_inconnu(tmp_path: Path, policy: str) -> None:
+    """La phase 1 (``_execute_plain``) sans coût imprimé ne devient pas « exact » : le node et le run le disent."""
+    _write_registry(
+        tmp_path,
+        _writer_script(
+            tmp_path, extra_map={"spread": {"fanout_items": ["a", "b"]}}, cost_map={"spread": None, "leaf": 0.05}
+        ),
+    )
+    _write_pilot_policy(tmp_path, "max_fanout_n: 5\n" + policy)
+    bp = _fanout_bp(tmp_path)
+
+    outcome = run_with_dispatch(_engine(tmp_path), bp, project_root=tmp_path)
+
+    node = next(n for n in outcome.nodes if n.node_id == "spread")
+    assert node.verdict == "green", outcome.to_dict()
+    node_dict = node.to_dict()
+    assert node_dict["cost_status"] == "lower_bound"
+    assert node_dict["unpriced_calls"] >= 1
+    assert abs(node_dict["cost_usd"] - 0.1) < 1e-9  # minimum : les deux enfants chiffrés
+    run_dict = outcome.to_dict()
+    assert run_dict["cost_status"] == "lower_bound"
+
+
+@pytest.mark.parametrize("policy", ["", "max_cost_usd_per_node: 100\n"], ids=["sans_plafond", "plafond_large"])
+def test_fanout_phase1_payee_est_comptee_dans_le_node(tmp_path: Path, policy: str) -> None:
+    """Phase 1 à 0.07 + deux enfants à 0.05 = 0.17, pas 0.10 : la phase 1 n'est pas écrasée."""
+    _write_registry(
+        tmp_path,
+        _writer_script(
+            tmp_path, extra_map={"spread": {"fanout_items": ["a", "b"]}}, cost_map={"spread": 0.07, "leaf": 0.05}
+        ),
+    )
+    _write_pilot_policy(tmp_path, "max_fanout_n: 5\n" + policy)
+    bp = _fanout_bp(tmp_path)
+
+    outcome = run_with_dispatch(_engine(tmp_path), bp, project_root=tmp_path)
+
+    node = next(n for n in outcome.nodes if n.node_id == "spread")
+    assert node.verdict == "green", outcome.to_dict()
+    node_dict = node.to_dict()
+    assert abs(node_dict["cost_usd"] - 0.17) < 1e-9
+    assert node_dict["cost_status"] == "exact"
+    assert node_dict["unpriced_calls"] == 0
+
+
+def test_fanout_phase1_payee_compte_pour_le_plafond_des_freres(tmp_path: Path) -> None:
+    """Le plafond voit ce que la phase 1 a déjà dépensé : 0.07 + 0.05 atteint 0.1 avant le 2e enfant."""
+    _write_registry(
+        tmp_path,
+        _writer_script(
+            tmp_path, extra_map={"spread": {"fanout_items": ["a", "b", "c"]}}, cost_map={"spread": 0.07, "leaf": 0.05}
+        ),
+    )
+    _write_pilot_policy(tmp_path, "max_fanout_n: 5\nmax_cost_usd_per_node: 0.1\n")
+    bp = _fanout_bp(tmp_path)
+
+    outcome = run_with_dispatch(_engine(tmp_path), bp, project_root=tmp_path)
+
+    node = next(n for n in outcome.nodes if n.node_id == "spread")
+    assert node.verdict == "cost_capped", outcome.to_dict()
+    assert node.cost_cap_reason == "cost_reached"
+    assert node.attempts == 1  # seul le premier enfant est lancé
