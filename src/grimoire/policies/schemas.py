@@ -279,8 +279,10 @@ class PolicyRule:
       ``ask`` outcome by ``tool_policy.py``) until a ``PostToolUse`` for a
       matching tool is actually recorded in the session — proof the host
       granted a prior ``ask`` and the call ran — at which point only an
-      *identical* action (same fingerprint: tool + normalised command, or the
-      whole tool input for non-shell tools) allows silently; any other
+      *identical* action (same fingerprint: the tool's whole canonical input,
+      the command in it being normalised; ``description``/``timeout`` of the
+      native Bash tool and ``explanation``/``goal`` of Copilot's
+      ``run_in_terminal`` are ignored) allows silently; any other
       matching action asks again. ``approved_fingerprints`` keeps at most 64
       per rule and a legacy state without a fingerprint asks again
       (:func:`grimoire.policies.temporal.record_post_tool_use_approval`,

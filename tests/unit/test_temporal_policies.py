@@ -346,6 +346,14 @@ def test_fingerprint_keeps_whitespace_inside_a_quoted_argument() -> None:
         ("del C:\\x\\y", "del C:xy"),
         ('Remove-Item "a b"', "Remove-Item a\\ b"),
         ("rm 'a b'", "rm a b"),
+        # Revue W1-09 tour 3 S1 : le shell lit les blancs d'une expansion de paramètre.
+        ('v="x  y"; echo ${v// /_}', 'v="x  y"; echo ${v//  /_}'),
+        (": ${f:=a b}", ": ${f:=a  b}"),
+        ("chmod -R 000 ${d% *}", "chmod -R 000 ${d%  *}"),
+        ("echo $[1 + 2]", "echo $[1  +  2]"),
+        # Motifs extglob : @(a b) et @(a  b) ne reconnaissent pas les mêmes chaînes.
+        ("ls @(a b)", "ls @(a  b)"),
+        ("ls !(a b)", "ls !(a  b)"),
     ],
 )
 def test_fingerprint_never_merges_commands_the_shell_reads_differently(approved: str, other: str) -> None:

@@ -540,8 +540,10 @@ _MAX_APPROVED_FINGERPRINTS = 64
 
 
 #: Caractères après lesquels la lecture des guillemets n'est plus fiable
-#: (échappements, substitutions imbriquées, fins de ligne) : texte brut.
-_RAW_ONLY_MARKERS = ("\\", "`", "$(", "\n", "\r")
+#: (échappements, substitutions imbriquées, fins de ligne) ou où le shell lit
+#: lui-même les blancs hors guillemets (``${v// /_}``, ``$[1 + 2]``, motifs
+#: extglob ``@(a b)``) : texte brut.
+_RAW_ONLY_MARKERS = ("\\", "`", "$(", "${", "$[", "@(", "?(", "*(", "+(", "!(", "\n", "\r")
 
 
 def normalize_command(command: str) -> str:
@@ -552,8 +554,13 @@ def normalize_command(command: str) -> str:
     ``rm 'a;b'`` et ``rm a;b`` (ou ``rm '*'`` et ``rm *``) restent distincts,
     ce que ``shlex.join(shlex.split(...))`` effaçait en re-citant. Texte brut
     (``strip`` seul) dès que la lecture des guillemets n'est pas sûre :
-    antislash (chemins Windows compris), backtick, ``$(``, retour à la ligne,
+    antislash (chemins Windows compris), backtick, ``$(``, ``${``, ``$[``,
+    motif extglob (``@(``, ``?(``, ``*(``, ``+(``, ``!(``), retour à la ligne,
     guillemet non fermé. Toujours plus strict, jamais plus lâche.
+
+    Limite : ``cmd.exe`` restitue ``echo a  b`` tel quel, donc deux blancs et
+    un blanc y diffèrent alors qu'ils sont fusionnés ici ; l'empreinte ne
+    lit que la syntaxe POSIX/PowerShell.
     """
     if any(marker in command for marker in _RAW_ONLY_MARKERS):
         return command.strip()
@@ -580,9 +587,10 @@ def normalize_command(command: str) -> str:
 def action_fingerprint(tool_name: str, tool_detail: str = "", *, normalize: bool = True) -> str:
     """Empreinte stable d'une action : ``sha256(outil + détail)``.
 
-    *tool_detail* est la commande (voir :func:`normalize_command`) ou, pour les
-    outils sans commande, la forme canonique de l'entrée de l'outil (voir
-    ``tool_facts.approval_fingerprint``, qui passe ``normalize=False``).
+    *tool_detail* est soit une commande (``normalize=True``, voir
+    :func:`normalize_command`), soit, pour tout outil, l'entrée canonique
+    complète produite par ``tool_facts.approval_fingerprint``, qui passe
+    ``normalize=False`` (la commande y est déjà normalisée).
     L'encodage tolère les surrogates isolés (``surrogatepass``) : une commande
     qui en contient ne doit jamais lever, sous peine de rendre un refus moins strict.
     """

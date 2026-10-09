@@ -345,8 +345,13 @@ def policy_tool_detail(facts: ToolFacts) -> str:
     return ""
 
 
-#: Clés du Bash natif sans effet sur ce que la commande fait : seules ignorées.
-_NATIVE_BASH_VOLATILE_KEYS = frozenset({"description", "timeout"})
+#: Clés sans effet sur ce que la commande fait, par outil : seules ignorées.
+#: Bash natif : ``description``, ``timeout`` ; Copilot ``run_in_terminal`` :
+#: ``explanation``, ``goal`` (texte d'affichage, reformulé à chaque appel).
+_VOLATILE_KEYS: dict[str, frozenset[str]] = {
+    "Bash": frozenset({"description", "timeout"}),
+    "run_in_terminal": frozenset({"explanation", "goal"}),
+}
 _COMMAND_KEYS = ("command", "cmd", "commandLine", "script")
 
 
@@ -357,16 +362,16 @@ def approval_fingerprint(tool_name: str, tool_input: dict[str, Any], facts: Tool
     cibles, tous les arguments, le contenu), de sorte qu'un autre hôte, dépôt,
     répertoire, cible ou contenu redemande. Quand l'appel porte une commande,
     sa valeur y est remplacée par la commande normalisée (blancs hors
-    guillemets) ; pour le seul Bash natif, ``description`` et ``timeout``
-    sont ignorés. Calculée au PreToolUse et au PostToolUse depuis le même
+    guillemets) ; ``description``/``timeout`` (Bash natif) et
+    ``explanation``/``goal`` (Copilot ``run_in_terminal``) sont ignorés, tout
+    autre argument compte. Calculée au PreToolUse et au PostToolUse depuis le même
     ``tool_input``, donc identique des deux côtés.
     """
     from grimoire.policies.temporal import action_fingerprint, normalize_command
 
     payload = dict(tool_input)
-    if tool_name == "Bash":
-        for key in _NATIVE_BASH_VOLATILE_KEYS:
-            payload.pop(key, None)
+    for key in _VOLATILE_KEYS.get(tool_name, ()):
+        payload.pop(key, None)
     if facts.command:
         for key in _COMMAND_KEYS:
             if payload.get(key) == facts.command:

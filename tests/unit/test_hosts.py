@@ -3077,6 +3077,25 @@ def test_bash_approval_does_not_cover_a_differently_quoted_command(
 
 
 @pytest.mark.parametrize(
+    ("approved", "other"),
+    [
+        ({"command": "chmod -R 000 ${d% *}"}, {"command": "chmod -R 000 ${d%  *}"}),
+        ({"command": 'v="x  y"; echo ${v// /_}'}, {"command": 'v="x  y"; echo ${v//  /_}'}),
+        ({"command": ": ${f:=a b}"}, {"command": ": ${f:=a  b}"}),
+    ],
+)
+def test_bash_approval_does_not_cover_a_parameter_expansion_read_differently(
+    tmp_path: Path, approved: dict[str, object], other: dict[str, object]
+) -> None:
+    """Revue W1-09 tour 3 S1 : Pre/Post/Pre, `${d% *}` et `${d%  *}` ne développent pas pareil."""
+    root = _approval_project(tmp_path, "any-approval", "Bash")
+    assert _pre(root, "Bash", approved) is Outcome.ASK
+    _post(root, "Bash", approved)
+    assert _pre(root, "Bash", other) is Outcome.ASK
+    assert _pre(root, "Bash", approved) is Outcome.ALLOW
+
+
+@pytest.mark.parametrize(
     ("tool", "approved", "other"),
     [
         (
@@ -3106,6 +3125,19 @@ def test_native_bash_approval_ignores_description_and_timeout_only(tmp_path: Pat
     _post(root, "Bash", first)
     assert _pre(root, "Bash", {"command": "rm  tmp_a", "description": "autre", "timeout": 5}) is Outcome.ALLOW
     assert _pre(root, "Bash", {"command": "rm tmp_a", "run_in_background": True}) is Outcome.ASK
+
+
+def test_copilot_terminal_approval_ignores_explanation_and_goal_only(tmp_path: Path) -> None:
+    """Revue W1-09 tour 3 S3 : `explanation`/`goal` sont du texte d'affichage, pas l'action."""
+    root = _approval_project(tmp_path, "term-approval", "run_in_terminal")
+    first = {"command": "npm run deploy", "explanation": "Deploy the app", "goal": "ship", "isBackground": False}
+    assert _pre(root, "run_in_terminal", first) is Outcome.ASK
+    _post(root, "run_in_terminal", first)
+    same = {"command": "npm  run deploy", "explanation": "Redeploy after fix", "goal": "x", "isBackground": False}
+    assert _pre(root, "run_in_terminal", same) is Outcome.ALLOW
+    assert _pre(root, "run_in_terminal", {**same, "isBackground": True}) is Outcome.ASK
+    assert _pre(root, "run_in_terminal", {**same, "cwd": "/home"}) is Outcome.ASK
+    assert _pre(root, "run_in_terminal", {**same, "command": "npm run drop"}) is Outcome.ASK
 
 
 def test_a_lone_surrogate_keeps_a_destructive_command_denied(tmp_path: Path) -> None:
