@@ -203,7 +203,6 @@ module = [
     "ollama.*",
     "jsonschema.*",
     "tantivy.*",
-    "yaml.*",  # PyYAML : scripts/ci et tests/unit/test_secret_scan.py (stubs non installés)
 ]
 ignore_missing_imports = true
 
