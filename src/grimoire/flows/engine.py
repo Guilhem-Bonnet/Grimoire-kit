@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import uuid
 from dataclasses import replace
@@ -40,7 +41,27 @@ from grimoire.flows.schemas import FlowRunMeta, FlowStatusView, NodeContract, Re
 from grimoire.runtime.kernel import RuntimeKernel
 from grimoire.runtime.schemas import Checkpoint, ExecutionContext, RunEventType, WorkflowInstance, WorkflowStatus
 
-__all__ = ["FlowEngine", "check_output_against_contract", "checkpoint_decision_faults", "rust_backend_available"]
+__all__ = [
+    "FlowEngine",
+    "check_output_against_contract",
+    "checkpoint_decision_faults",
+    "log_repairs",
+    "rust_backend_available",
+]
+
+_LOG = logging.getLogger(__name__)
+
+
+def log_repairs(run_id: str, repaired: tuple[str, ...]) -> None:
+    """Journalise (WARNING) ce que ``resume`` a réparé — pour les pilotes qui ne rendent pas ``repaired``.
+
+    ``resume`` complète l'écriture qu'un crash a interrompue même avec
+    ``allow_replay=False``. Les pilotes automatiques qui n'ont pas de rapport où
+    la loger (``genres``, ``upgrade-flow``) l'appellent pour qu'une réparation
+    ne soit jamais silencieuse (W1-03b-S1).
+    """
+    for note in repaired:
+        _LOG.warning("flow %s : réparé — %s", run_id, note)
 
 try:
     import grimoire_flows_core as _rust_core

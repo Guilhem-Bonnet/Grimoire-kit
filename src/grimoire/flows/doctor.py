@@ -5,9 +5,14 @@ Un run vit dans trois fichiers sans transaction commune : l'instance
 et la méta de run (``flows/<run>.json``). Chaque écriture est atomique (W1-02),
 rien ne garantit la cohérence ENTRE elles.
 
-**Le journal d'événements fait autorité.** Le docteur en dérive ce que le run
-devrait être (nodes franchis, node ouvert, statut) et compare le reste à cette
-dérivation. Il est strictement en lecture seule : une réparation est
+**Le journal d'événements fait autorité**, avec une exception qui est celle du
+moteur : le dernier checkpoint de ``checkpoints.jsonl`` compte comme « node
+franchi » (``FlowEngine._reconcile``). Le docteur dérive du journal ce que le
+run devrait être (nodes franchis, node ouvert, statut) et compare le reste à
+cette dérivation ; un checkpoint dont les événements manquent est une écriture
+INTERROMPUE, pas un node encore ouvert : le docteur la signale et ne propose
+que de rouler en avant (``flow resume``), jamais de ramener le statut en
+arrière. Il est strictement en lecture seule : une réparation est
 *proposée* (champ ``repair`` de chaque violation), jamais appliquée — la seule
 écriture de réparation du moteur est la complétion d'un checkpoint interrompu
 par ``resume``, signalée dans ``ResumeOutcome.repaired``.
@@ -266,8 +271,27 @@ def diagnose(
     done, open_node, derived_status, replay_violations = _derive_from_events(events, order)
     violations.extend(replay_violations)
 
-    # Checkpoints : un par node, préfixe de l'ordre, avec leurs deux événements.
     real = [c for c in checkpoints if c.step_id != "refused"]
+    # Le fichier de checkpoints est écrit AVANT le statut et les événements : un
+    # dernier checkpoint dont le node est encore « ouvert » dans le journal est
+    # un node franchi dont l'écriture a été interrompue (W1-03b-S2). Le moteur le
+    # lit ainsi (`_current_node`, `_reconcile`) ; le docteur aussi, sinon il
+    # désignerait ce node comme courant et proposerait de revenir en arrière.
+    # Les violations de l'écriture interrompue (`checkpoint_event_missing`,
+    # `step_completed_missing`, `checkpoint_refs_mismatch`) proposent déjà `resume`.
+    if (
+        real
+        and open_node is not None
+        and real[-1].step_id == open_node
+        and len(done) < len(order)
+        and order[len(done)] == open_node
+        and derived_status in ("running", "checkpointed")
+    ):
+        done = [*done, open_node]
+        open_node = None
+        derived_status = "checkpointed"
+
+    # Checkpoints : un par node, préfixe de l'ordre, avec leurs deux événements.
     saved_ids = {
         e.payload.get("checkpoint_id") for e in events if e.event_type is RunEventType.CHECKPOINT_SAVED
     }

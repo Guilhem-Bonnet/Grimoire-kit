@@ -578,7 +578,7 @@ def upgrade_flow_run(
     soumet jamais de `checkpoint_decision` à la place d'un humain.
     `--dry-run` s'arrête plus tôt encore, juste après `preview`.
     """
-    from grimoire.flows.engine import FlowEngine
+    from grimoire.flows.engine import FlowEngine, log_repairs
     from grimoire.flows.executor import InteractiveNodeExecutor
     from grimoire.tools.project_upgrade import bundled_blueprint_path
 
@@ -607,6 +607,8 @@ def upgrade_flow_run(
         if _fmt(ctx, json_flag=json_flag) == "json":
             typer.echo(json.dumps(dispatch_outcome.to_dict(), ensure_ascii=False))
         else:
+            for note in dispatch_outcome.repaired:
+                console.print(f"[yellow]réparé[/yellow] {dispatch_outcome.run_id} — {note}")
             console.print(f"[bold]{dispatch_outcome.run_id}[/bold] — {dispatch_outcome.status}")
         if dispatch_outcome.status == "blocked":
             raise typer.Exit(1)
@@ -699,6 +701,7 @@ def upgrade_flow_run(
         node_outputs[node_id] = detail
         output = _submit_envelope(contract, detail)
         outcome = engine.resume(run_id, output=output, executor=_silent_executor(), allow_replay=False)
+        log_repairs(run_id, outcome.repaired)
         if not outcome.ok:
             _fail_run(
                 ctx, f"node {node_id} refusé : {list(outcome.faults)}",

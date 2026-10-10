@@ -20,6 +20,15 @@ Défauts reproduits sur la base (W1-03) :
 - crash entre ``fail_step`` et son événement : le node bloqué est relu comme
   le premier du run ;
 - checkpoints et ``STEP_COMPLETED`` dupliqués quand le même node est refranchi.
+
+Défauts de revue (W1-03b-S1, S2) :
+
+- ``resume`` répare sans le dire quand le pilote est ``--executor dispatch`` (et
+  les pilotes automatiques de ``genres``/``upgrade-flow``) : la note ne vivait
+  que dans ``ResumeOutcome.repaired``, jamais rendue par ``FlowDispatchOutcome`` ;
+- le docteur, dérivant le node ouvert des seuls événements, désignait le node
+  déjà checkpointé comme courant et proposait de revenir en arrière dans les
+  fenêtres d'un checkpoint à moitié écrit — alors que ``resume`` avance.
 """
 
 from __future__ import annotations
@@ -348,3 +357,160 @@ def test_a_blocked_node_survives_a_crash_between_the_status_and_its_event(tmp_pa
     outcome = reborn.resume(wfi.id, output=OUT_B, executor=executor)
     assert outcome.ok and outcome.node_id == "c"
     assert [c.step_id for c in RuntimeKernel(tmp_path / "runtime").list_checkpoints(wfi.id)] == ["a", "b"]
+
+
+# ── W1-03b-S1 : une réparation n'est jamais silencieuse, pilote dispatch compris ──
+
+#: La sortie que l'exécuteur doublé « produit » pour chaque node.
+_DISPATCH_OUTPUTS = {"a": OUT_A, "b": OUT_B, "c": OUT_C}
+
+
+@pytest.fixture
+def scripted_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Remplace la cascade de ``DispatchExecutor`` par une sortie conforme par node."""
+    from grimoire.flows.dispatch_executor import DispatchExecutor
+    from grimoire.flows.schemas import NodeExecutionResult
+
+    def execute_plain(self: DispatchExecutor, contract: Any, context_pack: dict[str, Any]) -> NodeExecutionResult:
+        result = NodeExecutionResult(pending=False, output=_DISPATCH_OUTPUTS[contract.node_id])
+        self.last_result = result
+        return result
+
+    monkeypatch.setattr(DispatchExecutor, "_execute_plain", execute_plain)
+
+
+#: 10 = checkpoint du node a écrit, statut jamais changé : ``resume`` complète l'écriture.
+_REPAIRING_BOUNDARY = 10
+
+
+def test_resume_with_dispatch_reports_the_repair_it_performed(tmp_path: Path, scripted_dispatch: None) -> None:
+    from grimoire.flows.dispatch_executor import resume_with_dispatch
+
+    bp = _blueprint(tmp_path)
+    _log, crashed, known = _play(tmp_path, bp, _REPAIRING_BOUNDARY)
+    assert crashed is not None and known is not None
+
+    outcome = resume_with_dispatch(_engine(tmp_path), known, project_root=tmp_path)
+
+    assert outcome.status == "finished"
+    body = outcome.to_dict()
+    assert body["repaired"], "la réparation écrite par resume doit figurer dans le rapport du pilote"
+    assert "checkpoint a" in " ".join(body["repaired"])
+
+
+def test_resume_with_dispatch_on_a_healthy_run_reports_no_repair(tmp_path: Path, scripted_dispatch: None) -> None:
+    from grimoire.flows.dispatch_executor import resume_with_dispatch
+
+    bp = _blueprint(tmp_path)
+    engine = _engine(tmp_path)
+    wfi, _ = engine.run(bp, executor=InteractiveNodeExecutor(stream=io.StringIO()))
+
+    outcome = resume_with_dispatch(engine, wfi.id, project_root=tmp_path)
+
+    assert outcome.status == "finished"
+    assert outcome.to_dict()["repaired"] == []
+
+
+def _crashed_project(root: Path) -> str:
+    """Un projet dont le run a planté à la frontière 10, rangé là où la CLI le cherche."""
+    import shutil
+
+    bp = _blueprint(root)
+    _log, crashed, known = _play(root, bp, _REPAIRING_BOUNDARY)
+    assert crashed is not None and known is not None
+    output = root / "_grimoire-runtime-output"
+    output.mkdir()
+    shutil.move(str(root / "runtime"), str(output / "runtime"))
+    shutil.move(str(root / "flows"), str(output / "flows"))
+    return known
+
+
+@pytest.mark.parametrize("fmt", ["human", "json"])
+def test_cli_resume_dispatch_prints_the_repair(tmp_path: Path, scripted_dispatch: None, fmt: str) -> None:
+    from typer.testing import CliRunner
+
+    from grimoire.cli.app import app
+
+    run_id = _crashed_project(tmp_path)
+    args = ["flow", "resume", run_id, "--executor", "dispatch", "--project-root", str(tmp_path)]
+
+    result = CliRunner().invoke(app, ["--output", "json", *args] if fmt == "json" else args)
+
+    assert result.exit_code == 0, result.output
+    if fmt == "json":
+        assert json.loads(result.output)["repaired"]
+    else:
+        assert "réparé" in result.output
+        assert "checkpoint a" in result.output
+
+
+def test_the_composite_child_driver_logs_the_repair_it_triggers(
+    tmp_path: Path, scripted_dispatch: None, caplog: pytest.LogCaptureFixture
+) -> None:
+    """``genres`` appelle ``resume(allow_replay=False)`` sans rendre le rapport : le journal de logs le dit."""
+    import logging
+
+    from grimoire.flows.dispatch_executor import DispatchExecutor
+    from grimoire.flows.genres import _drive_composite_child
+    from grimoire.flows.schemas import NodeExecutionResult
+
+    bp = _blueprint(tmp_path)
+    _log, crashed, known = _play(tmp_path, bp, _REPAIRING_BOUNDARY)
+    assert crashed is not None and known is not None
+    engine = _engine(tmp_path)
+    executor = DispatchExecutor(project_root=tmp_path, blueprint_path=bp, engine=engine)
+
+    with caplog.at_level(logging.WARNING, logger="grimoire.flows.engine"):
+        status, *_ = _drive_composite_child(
+            engine, known, executor, NodeExecutionResult(pending=False, output=OUT_B), max_cost_usd=None
+        )
+
+    assert status == "finished"
+    assert any(known in r.getMessage() and "checkpoint a" in r.getMessage() for r in caplog.records)
+
+
+def test_log_repairs_is_silent_without_a_repair(caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+
+    from grimoire.flows.engine import log_repairs
+
+    with caplog.at_level(logging.WARNING, logger="grimoire.flows.engine"):
+        log_repairs("WFI-x-001", ())
+    assert not caplog.records
+
+
+# ── W1-03b-S2 : le docteur ne propose que de rouler en avant dans une écriture interrompue ──
+
+#: Les fenêtres où un checkpoint est écrit mais pas encore complet, pour les trois nodes.
+_INTERRUPTED_CHECKPOINT_BOUNDARIES = [10, 11, 12, 13, 17, 18, 19, 20, 24, 25, 26, 27]
+
+
+@pytest.mark.parametrize("limit", _INTERRUPTED_CHECKPOINT_BOUNDARIES)
+def test_the_doctor_only_proposes_to_roll_forward_in_an_interrupted_checkpoint(tmp_path: Path, limit: int) -> None:
+    from grimoire.flows.doctor import _RESUME
+
+    bp = _blueprint(tmp_path)
+    _log, crashed, known = _play(tmp_path, bp, limit)
+    assert crashed is not None and known is not None
+    engine = _engine(tmp_path)
+
+    report = engine.doctor(known)
+
+    assert not report.ok, "un checkpoint à moitié écrit est une violation, jamais un « ok »"
+    assert _RESUME in report.repairs
+    for repair in report.repairs:
+        assert "flow resume" in repair, f"réparation qui ne roule pas en avant : {repair}"
+    codes = {v.code for v in report.violations}
+    assert not codes & {"current_node_mismatch", "instance_ahead_of_journal", "status_conflict"}, report.to_dict()
+
+
+@pytest.mark.parametrize("limit", _INTERRUPTED_CHECKPOINT_BOUNDARIES)
+def test_the_doctor_repair_is_the_one_resume_performs(tmp_path: Path, limit: int) -> None:
+    """Le docteur annonce `flow resume` : appliqué, il ramène bien un run sain (la prédiction se vérifie)."""
+    bp = _blueprint(tmp_path)
+    _log, crashed, known = _play(tmp_path, bp, limit)
+    assert crashed is not None and known is not None
+
+    _engine_after, run_id = _recover(tmp_path, bp, crashed, known)
+
+    assert _engine(tmp_path).doctor(run_id).ok

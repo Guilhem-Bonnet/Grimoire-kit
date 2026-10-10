@@ -201,6 +201,8 @@ def _emit_dispatch_outcome(ctx: typer.Context, outcome: FlowDispatchOutcome) -> 
     if _fmt(ctx) == "json":
         typer.echo(json.dumps(outcome.to_dict(), indent=2, ensure_ascii=False))
         return
+    for note in outcome.repaired:
+        console.print(f"[yellow]réparé[/yellow] {outcome.run_id} — {note}")
     for node in outcome.nodes:
         relire = " [magenta]à relire[/magenta]" if node.needs_review else ""
         acceptance = _ACCEPTANCE_LABELS.get(node.acceptance_status, "n/a")
