@@ -44,6 +44,17 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+# Gardes du dépôt de tâche (W1-08a) : module voisin, aussi quand ce script est chargé par chemin.
+sys.path.append(str(Path(__file__).resolve().parent))
+from results_io import read_results_rows
+from task_repo import (
+    ContaminatedTaskRepoError,
+    assert_task_repo_clean,
+    prepare_task_repo,
+    reset_run_dir,
+    run_dir_for,
+)
+
 # ── Constantes du protocole ──────────────────────────────────────────────────
 
 POLYGLOT_REPO_URL = "https://github.com/Aider-AI/polyglot-benchmark.git"
@@ -253,54 +264,6 @@ def sample_tasks(
         rng = random.Random(f"{seed}:{language}")  # noqa: S311 - reproductibilité, pas cryptographie
         selected.extend(rng.sample(pool, per_language))
     return selected
-
-
-def _read_instructions(exercise_dir: Path) -> str:
-    docs_dir = exercise_dir / ".docs"
-    parts = []
-    main = docs_dir / "instructions.md"
-    if main.is_file():
-        parts.append(main.read_text(encoding="utf-8"))
-    appendix = docs_dir / "instructions.append.md"
-    if appendix.is_file():
-        parts.append(appendix.read_text(encoding="utf-8"))
-    return "\n\n".join(parts).strip() + "\n"
-
-
-def prepare_task_repo(task: TaskMeta, dest: Path, *, include_tests: bool = False) -> None:
-    """Construit un dépôt de tâche jetable pour ``task`` dans ``dest``.
-
-    Copie l'énoncé (``TASK.md``) et les fichiers stub/support de l'exercice ;
-    les fichiers de test sont exclus par défaut (« tests cachés à l'agent »),
-    tout comme tout ce qui vit sous ``.meta/`` et ``.docs/`` (solution de
-    référence, générateurs). ``git init`` pour que l'agent puisse diffs/commits
-    s'il le souhaite.
-    """
-    dest.mkdir(parents=True, exist_ok=True)
-    (dest / "TASK.md").write_text(_read_instructions(task.exercise_dir), encoding="utf-8")
-
-    test_set = set(task.test_files)
-    for item in sorted(task.exercise_dir.rglob("*")):
-        if item.is_dir():
-            continue
-        rel = item.relative_to(task.exercise_dir)
-        rel_parts = rel.parts
-        if rel_parts[0] in (".meta", ".docs"):
-            continue
-        rel_str = rel.as_posix()
-        if rel_str in test_set and not include_tests:
-            continue
-        target = dest / rel
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(item, target)
-
-    subprocess.run(["git", "init", "-q", "."], cwd=dest, check=True)
-    subprocess.run(["git", "add", "-A"], cwd=dest, check=True)
-    subprocess.run(
-        ["git", "-c", "user.email=bench@grimoire-kit.local", "-c", "user.name=grimoire-bench", "commit", "-q", "-m", "task: état initial"],
-        cwd=dest,
-        check=True,
-    )
 
 
 def hidden_tests_dir(task: TaskMeta, dest: Path) -> Path:
@@ -2226,11 +2189,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     (state_dir / "toolchain_check.json").write_text(json.dumps(toolchain_check, indent=2), encoding="utf-8")
 
     results_path = state_dir / "results.jsonl"
-    already_done: set[tuple[str, str, int]] = set()
-    if args.resume and results_path.is_file():
-        for line in results_path.read_text(encoding="utf-8").splitlines():
-            record = json.loads(line)
-            already_done.add((record["task_id"], record["arm"], record["run_index"]))
+    # Clés enregistrées : sautées avec ``--resume`` ; sinon rejouées, dossier effacé (alerte plus bas).
+    try:
+        previous_rows = read_results_rows(results_path) if results_path.is_file() else []
+    except ValueError as exc:  # ligne tronquée : arrêt net avant tout run
+        print(str(exc), file=sys.stderr)
+        return 1
+    recorded_keys = {(row["task_id"], row["arm"], row["run_index"]) for row in previous_rows}
+    already_done = recorded_keys if args.resume else set()
 
     if args.pilot:
         selected = tasks[:2]
@@ -2240,19 +2206,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         k = K_REPLAY
 
     records: list[RunRecord] = []
-    if args.resume and results_path.is_file():
-        for line in results_path.read_text(encoding="utf-8").splitlines():
-            d = json.loads(line)
-            records.append(RunRecord(**d))
+    if args.resume:
+        records.extend(RunRecord(**row) for row in previous_rows)
 
     disk_exhausted = False
+    contaminated = False
     with open(results_path, "a", encoding="utf-8") as results_f:
         for task in selected:
-            if disk_exhausted:
+            if disk_exhausted or contaminated:
                 break
             order = [arm for arm in select_run_order(ARMS, task_id=task.task_id, seed=args.seed) if arm in selected_arms]
             for arm in order:
-                if disk_exhausted:
+                if disk_exhausted or contaminated:
                     break
                 for run_index in range(k):
                     key = (task.task_id, arm, run_index)
@@ -2266,18 +2231,38 @@ def main(argv: Sequence[str] | None = None) -> int:
                             file=sys.stderr,
                         )
                         break
-                    record = _run_one(
-                        task,
-                        arm,
-                        run_index,
-                        workspace=workspace,
-                        ecc_repo=ecc_repo,
-                        homes=homes,
-                        go_bin=go_bin,
-                        run_timeout_s=args.run_timeout_s,
-                        grimoire_bin=grimoire_bin,
-                        auth_mode=auth_mode,
-                    )
+                    existing_dir = run_dir_for(workspace, task, arm, run_index)
+                    if key in recorded_keys and existing_dir.exists():
+                        print(
+                            f"[ALERTE EFFACEMENT] {key} figure déjà dans results.jsonl : son dossier "
+                            f"{existing_dir} est effacé puis le run rejoué (sans --resume tout est "
+                            "rejoué) ; la ligne d'origine reste, la clé aura une ligne en double.",
+                            file=sys.stderr,
+                        )
+                    try:
+                        record = _run_one(
+                            task,
+                            arm,
+                            run_index,
+                            workspace=workspace,
+                            ecc_repo=ecc_repo,
+                            homes=homes,
+                            go_bin=go_bin,
+                            run_timeout_s=args.run_timeout_s,
+                            grimoire_bin=grimoire_bin,
+                            auth_mode=auth_mode,
+                        )
+                    except ContaminatedTaskRepoError as exc:
+                        # W1-08a : arrêt à 0 $, comme la garde du lot H. Rien n'est
+                        # écrit pour ce run : sa clé reste rejouable avec ``--resume``.
+                        print(
+                            f"[contaminated] {task.task_id} / {arm} / run{run_index} : {exc} — "
+                            "campagne arrêtée avant tout appel modèle pour ce run, 0 $ dépensé.",
+                            file=sys.stderr,
+                        )
+                        # Pas de ``return`` : les gardes de sécurité de fin de campagne doivent tourner.
+                        contaminated = True
+                        break
                     records.append(record)
                     results_f.write(json.dumps(record.to_dict()) + "\n")
                     results_f.flush()
@@ -2291,7 +2276,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             # déclencherait un arrêt immédiat (« les 20 tâches ont été
             # rejouées ») dès la première tâche kit. Le critère ne s'applique
             # donc qu'à une campagne qui rejoue bien les trois bras.
-            if not disk_exhausted and args.full and selected_arms == ARMS:
+            if not (disk_exhausted or contaminated) and args.full and selected_arms == ARMS:
                 stop, reason = should_stop_early(records, total_tasks=len(tasks), seed=args.seed)
                 print(f"[stop-check] {reason}")
                 if stop:
@@ -2300,7 +2285,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     expected_cost = None
     expected_cost_path = state_dir / "expected_cost.json"
-    if args.pilot:
+    if args.pilot and not contaminated:
         planned = {arm: len(tasks) * K_REPLAY for arm in ARMS}
         expected_cost = expected_cost_report(records, planned_runs_per_arm=planned)
         expected_cost_path.write_text(json.dumps(expected_cost, indent=2), encoding="utf-8")
@@ -2308,7 +2293,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif expected_cost_path.is_file():
         expected_cost = json.loads(expected_cost_path.read_text(encoding="utf-8"))
 
-    if args.full or disk_exhausted:
+    if (args.full or disk_exhausted) and not contaminated:
         report_dir = args.report_dir or (workspace / "reports" / datetime.now(tz=UTC).strftime("%Y-%m-%d"))
         write_report(
             records,
@@ -2365,7 +2350,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif auth_mode == "api-key":
         print("[sécurité] aucune fuite d'ANTHROPIC_API_KEY détectée sous un HOME isolé ou un journal.")
 
-    return 0
+    # Contamination : gardes de sécurité passées, mais la campagne est un échec.
+    return 1 if contaminated else 0
 
 
 def _do_report_only(
@@ -2417,7 +2403,13 @@ def _do_dry_run(
     for task in tasks:
         for arm in ARMS:
             task_dir = tasks_root / task.task_id.replace("/", "__") / arm / "prep"
+            reset_run_dir(task_dir)
             prepare_task_repo(task, task_dir)
+            try:
+                assert_task_repo_clean(task, task_dir)
+            except ContaminatedTaskRepoError as exc:
+                print(f"[contaminated] {task.task_id} / {arm} : {exc} — arrêt, 0 $ dépensé.", file=sys.stderr)
+                return 1
             hidden_tests_dir(task, tasks_root / task.task_id.replace("/", "__") / "hidden-tests")
             if arm == "nu":
                 setup_arm_nu(task_dir, npm_cache_dir=npm_cache_dir)
@@ -2451,7 +2443,8 @@ def _run_one(
     grimoire_bin: str,
     auth_mode: str = "oauth-copy",
 ) -> RunRecord:
-    run_dir = workspace / "tasks" / task.task_id.replace("/", "__") / arm / f"run{run_index}"
+    run_dir = run_dir_for(workspace, task, arm, run_index)
+    reset_run_dir(run_dir)
     prepare_task_repo(task, run_dir)
     hidden_dir = hidden_tests_dir(task, workspace / "tasks" / task.task_id.replace("/", "__") / "hidden-tests")
 
@@ -2475,6 +2468,12 @@ def _run_one(
         )
     else:
         setup_result = None
+
+    # W1-08a : contrôle du dépôt préparé AVANT tout appel au modèle (0 $).
+    # ``ContaminatedTaskRepoError`` remonte : un dépôt contaminé n'est pas un
+    # résultat (jamais un RunRecord, que ``--resume`` sauterait et que
+    # l'agrégation compterait comme un échec) ; ``main`` arrête la campagne.
+    assert_task_repo_clean(task, run_dir)
 
     test_deps_install_ok: bool | None = None
     if setup_result is not None:
