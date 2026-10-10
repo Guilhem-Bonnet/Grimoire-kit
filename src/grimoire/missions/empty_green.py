@@ -24,7 +24,19 @@ import re
 _NO_FILES_VITEST = re.compile(r"No test files? found", re.IGNORECASE)
 _NO_TESTS_JEST = re.compile(r"No tests found", re.IGNORECASE)
 _GO_NO_TEST = re.compile(r"\[no test files\]")
-_GO_RAN = re.compile(r"^(?:ok|FAIL)\s+\S+\s+\S+|^--- (?:PASS|FAIL)", re.MULTILINE)
+#: go a trouvé des fichiers de test mais n'a rien lancé (filtre ``-run`` sans correspondance,
+#: fichiers sans fonction ``TestXxx``) : la ligne ``ok`` du paquet porte ``[no tests to run]``,
+#: et ``-v`` l'annonce en amont par ``testing: warning: no tests to run``.
+_GO_NO_TEST_TO_RUN = re.compile(r"\[no tests to run\]|testing: warning: no tests to run")
+_GO_OK_VIDE = r"(?![^\n]*\[no tests to run\])"
+_GO_RAN = re.compile(rf"^(?:ok|FAIL){_GO_OK_VIDE}\s+\S+\s+\S+|^--- (?:PASS|FAIL)", re.MULTILINE)
+#: Avec ``-v``, un paquet sans test imprime l'avertissement, ``PASS`` puis une ligne ``ok`` sans
+#: suffixe : cette ligne n'est pas une preuve (texte, puis ``-json`` où chaque ligne est un événement).
+_GO_VIDE_VERBOSE = re.compile(
+    r"testing: warning: no tests to run\r?\n(?:PASS\r?\n)?ok\b[^\n]*\n?"
+    r'|"Output":\s*"testing: warning: no tests to run\\n"[^\n]*\n'
+    r'(?:[^\n]*"Output":\s*"PASS\\n"[^\n]*\n)?[^\n]*"Output":\s*"ok\b[^\n]*(?:\n|$)'
+)
 _CARGO_RESULT = re.compile(r"test result: \w+\. (\d+) passed; (\d+) failed")
 _UNITTEST_ZERO = re.compile(r"^Ran 0 tests?\b", re.MULTILINE)
 _PYTEST_NONE = re.compile(r"^(?:=+ )?no tests ran\b", re.MULTILINE | re.IGNORECASE)
@@ -38,9 +50,13 @@ _PROOF_PATTERNS = (
     _GO_RAN,
     # go test -json : événement d'un test, ou ligne ``ok``/``FAIL`` dans un champ Output.
     re.compile(r'"Action":\s*"(?:pass|fail)"[^\n]*"Test"|"Test":[^\n]*"Action":\s*"(?:pass|fail)"'),
-    re.compile(r'"Output":\s*"(?:ok|FAIL|--- (?:PASS|FAIL))\b'),
+    re.compile(rf'"Output":\s*"(?:ok|FAIL|--- (?:PASS|FAIL))\b{_GO_OK_VIDE}'),
     # cargo : un binaire a compté au moins un test.
     re.compile(r"test result: \w+\. (?:[1-9]\d* passed|\d+ passed; [1-9]\d* failed)"),
+    # cargo : un binaire a démarré des tests, même s'il a avorté (SIGABRT, ``exit``) avant d'imprimer
+    # son ``test result:`` ; ligne de test individuelle déjà rendue.
+    re.compile(r"^running [1-9]\d* tests?\s*$", re.MULTILINE),
+    re.compile(r"^test \S.* \.\.\. (?:ok|FAILED)\b", re.MULTILINE),
     # unittest.
     re.compile(r"^Ran [1-9]\d* tests?\b", re.MULTILINE),
     # mocha.
@@ -50,6 +66,7 @@ _PROOF_PATTERNS = (
 
 def has_execution_proof(output: str) -> bool:
     """Vrai si *output* prouve qu'au moins un test a tourné, quel que soit l'exécuteur."""
+    output = _GO_VIDE_VERBOSE.sub("", output)
     return any(pattern.search(output) for pattern in _PROOF_PATTERNS)
 
 
@@ -67,6 +84,8 @@ def classify_empty_green(output: str) -> str | None:
         return "jest : aucun test trouvé (« No tests found »)"
     if _GO_NO_TEST.search(output):
         return "go test : aucun paquet ne contient de test (« [no test files] »)"
+    if _GO_NO_TEST_TO_RUN.search(output):
+        return "go test : aucun test à lancer (« [no tests to run] »)"
     cargo = _CARGO_RESULT.findall(output)
     if cargo and all(int(passed) + int(failed) == 0 for passed, failed in cargo):
         return "cargo test : aucun test exécuté (« 0 passed » sur chaque binaire)"

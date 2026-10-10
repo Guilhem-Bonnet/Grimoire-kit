@@ -153,3 +153,85 @@ def test_un_vrai_rouge_qui_cite_un_motif_de_vide_reste_un_rouge(tmp_path: Path) 
 def test_un_vide_sans_aucune_preuve_reste_inexecutable(exit_code: int) -> None:
     for out in (_VITEST_VIDE, _JEST_VIDE, _GO_VIDE, _GO_JSON.splitlines()[2]):
         assert _classify_unrunnable("npx vitest", exit_code, out, "") is not None, out
+
+
+# W1-04-S2-01 : un binaire cargo avorté (SIGABRT) n'imprime pas son ``test result:``.
+_CARGO_VIDE = "running 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\n"
+_CARGO_AVORTE = (
+    "     Running unittests src/lib.rs (target/debug/deps/w104-68ff)\n\n"
+    + _CARGO_VIDE
+    + "\n     Running tests/it.rs (target/debug/deps/it-75c8)\n\n"
+    "running 2 tests\ntest a_passes ... ok\ntest b_aborts ... error: test failed, to rerun pass `--test it`\n\n"
+    "Caused by:\n  process didn't exit successfully: `it --test-threads=1` (signal: 6, SIGABRT: process abort signal)\n"
+)
+_CARGO_AVORTE_SEUL = (
+    _CARGO_VIDE
+    + "\nrunning 1 test\ntest b_aborts ... error: test failed, to rerun pass `--test it`\n"
+    "Caused by:\n  process didn't exit successfully: `it` (signal: 6, SIGABRT: process abort signal)\n"
+)
+
+# W1-04-S2-02 : go a trouvé des fichiers de test mais aucun test à lancer.
+_GO_AUCUN_TEST = "ok  \texample.com/m/b\t0.002s [no tests to run]\n"
+_GO_AUCUN_TEST_JSON = '{"Action":"output","Package":"example.com/m/b","Output":"ok  \\texample.com/m/b\\t0.002s [no tests to run]\\n"}\n'
+_GO_AUCUN_TEST_V = "testing: warning: no tests to run\nPASS\nok  \texample.com/m/b\t0.002s\n"
+_GO_AUCUN_TEST_V_JSON = (
+    '{"Action":"output","Package":"ex.com/b","Output":"testing: warning: no tests to run\\n"}\n'
+    '{"Action":"output","Package":"ex.com/b","Output":"PASS\\n"}\n'
+    '{"Action":"output","Package":"ex.com/b","Output":"ok  \\tex.com/b\\t0.002s\\n"}\n'
+    '{"Action":"pass","Package":"ex.com/b","Elapsed":0.002}\n'
+)
+
+
+@pytest.mark.parametrize("exit_code", [101, 134])
+@pytest.mark.parametrize("output", [_CARGO_AVORTE, _CARGO_AVORTE_SEUL], ids=["avorte-apres-ok", "avorte-seul"])
+def test_un_binaire_cargo_avorte_reste_un_rouge(output: str, exit_code: int) -> None:
+    """Des tests ont démarré : l'échec est un rouge ordinaire, pas un vert vide."""
+    assert _classify_unrunnable("cargo test --offline", exit_code, output, "") is None
+
+
+def test_un_binaire_cargo_avorte_via_un_vrai_check_reste_un_rouge(tmp_path: Path) -> None:
+    (result,) = _run_checks((f"printf %s {shlex.quote(_CARGO_AVORTE)}; exit 101",), project_root=tmp_path)
+
+    assert result.exit_code == 101
+    assert result.unrunnable_reason is None
+    assert result.ok is False
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        _GO_AUCUN_TEST,
+        _GO_AUCUN_TEST_JSON,
+        _GO_AUCUN_TEST_V,
+        _GO_AUCUN_TEST_V_JSON,
+        _GO_VIDE + _GO_AUCUN_TEST,
+    ],
+    ids=["texte", "json", "verbose", "verbose-json", "melange-no-test-files"],
+)
+@pytest.mark.parametrize("exit_code", [0, 1])
+def test_go_sans_aucun_test_a_lancer_est_inexecutable(output: str, exit_code: int) -> None:
+    assert _classify_unrunnable("go test ./...", exit_code, output, "") is not None
+
+
+def test_go_sans_aucun_test_a_lancer_via_un_vrai_check_est_inexecutable(tmp_path: Path) -> None:
+    result = _check(tmp_path, _GO_VIDE + _GO_AUCUN_TEST)
+
+    assert result.exit_code == 0
+    assert result.unrunnable_reason is not None
+    assert result.ok is False
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        _GO_AUCUN_TEST + "ok  \texample.com/m/c\t0.010s\n",
+        "FAIL\texample.com/m/a [build failed]\n" + _GO_AUCUN_TEST,
+        _GO_AUCUN_TEST + "=== RUN   TestA\n--- PASS: TestA (0.00s)\nPASS\nok  \texample.com/m/c\t0.010s\n",
+        _GO_AUCUN_TEST_V + "ok  \texample.com/m/c\t0.010s\n",
+        _GO_AUCUN_TEST_JSON + '{"Action":"output","Package":"ex.com/c","Output":"ok  \\tex.com/c\\t0.010s\\n"}\n',
+        _GO_AUCUN_TEST_V_JSON + '{"Action":"output","Package":"ex.com/c","Output":"ok  \\tex.com/c\\t0.010s\\n"}\n',
+    ],
+    ids=["texte", "build-failed", "verbose-run", "verbose-sans-test", "json", "verbose-json"],
+)
+def test_un_paquet_go_reellement_execute_reste_une_preuve(output: str) -> None:
+    assert _classify_unrunnable("go test ./...", 0, output, "") is None
