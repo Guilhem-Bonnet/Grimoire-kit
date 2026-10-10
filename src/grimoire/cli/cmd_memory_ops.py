@@ -336,3 +336,49 @@ def memory_status(ctx: typer.Context) -> None:
     console.print(tbl)
 
 
+
+
+# ── grimoire memory lint ──────────────────────────────────────────────────────
+
+
+@memory_app.command("lint")
+def memory_lint(
+    ctx: typer.Context,
+    project_root: Path = typer.Option(Path(), "--project-root", help="Racine du projet."),  # noqa: B008
+    as_json: bool = typer.Option(False, "--json", help="Rapport JSON sur stdout."),
+    allow_empty: bool = typer.Option(False, "--allow-empty", help="Accepter une mémoire vide (code 0)."),
+) -> None:
+    """Cohérence de la mémoire : contradictions, doublons, orphelins, péremption.
+
+    Sort en code 1 dès qu'une erreur est relevée (une contradiction entre deux
+    fichiers de mémoire en est une) ; code 2 si aucune mémoire n'a été lue
+    (sauf --allow-empty) ; les avertissements n'échouent pas.
+    """
+    from grimoire.cli.cmd_memory import _load_config_context
+    from grimoire.tools.memory_lint import MemoryLint
+
+    # Une racine explicitement donnée mais absente est refusée : sans cela, la
+    # remontée adopterait le projet d'un répertoire ancêtre.
+    if not project_root.is_dir():
+        console.print("[red]Not a Grimoire project[/red] — dossier introuvable ; run [bold]grimoire init[/bold] first.")
+        raise typer.Exit(1)
+    # Même résolution de racine que les commandes sœurs : remonte jusqu'au
+    # project-context.yaml, sort en 1 hors projet.
+    _cfg, root = _load_config_context(project_root)
+    report = MemoryLint(root).run()
+    if as_json or _get_fmt(ctx) == "json":
+        typer.echo(json.dumps(report.to_dict(), indent=2, ensure_ascii=False))
+    else:
+        console.print(
+            f"{report.files_scanned} fichiers, {report.entries_scanned} entrées : "
+            f"{report.error_count} erreur(s), {report.warning_count} avertissement(s)"
+        )
+        for issue in report.issues:
+            if issue.severity == "error":
+                console.print(f"[red]✗[/red] {issue.title} — {issue.description}")
+    if report.error_count:
+        raise typer.Exit(1)
+    if report.files_scanned == 0 and not allow_empty:
+        # Rien lu = rien vérifié : ce n'est pas un vert.
+        console.print("[red]Aucune mémoire lue[/red] — rien n'a été vérifié (--allow-empty pour l'accepter).")
+        raise typer.Exit(2)

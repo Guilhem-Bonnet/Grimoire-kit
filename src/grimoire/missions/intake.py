@@ -30,7 +30,28 @@ _RISK_CRITICAL_PATTERNS = re.compile(
     r"\b(drop\s+table|rm\s+-rf|delete\s+(all|database|schema|prod)|"
     r"truncate|wipe|nuke|overwrite\s+prod|force[\s-]push|reset[\s-]hard|"
     r"revoke\s+access|disable\s+(auth|security|tls|ssl)|"
-    r"secret|password|token|credential|api.?key)\b",
+    r"secret|password|tokens?|credential|api.?key)\b",
+    re.IGNORECASE,
+)
+# Les « tokens » de LLM (budget, comptage, fenêtre) ne sont pas des secrets : ces
+# locutions sont retirées du titre avant le test du motif critique. Un « tokenizer »
+# n'est pas capté (le motif exige la fin de mot après ``tokens?``). Les locutions
+# sont volontairement étroites : seul un contexte LLM explicite (``llm``, ``prompt``,
+# ``context``, ``completion``) ou un nom de mesure (``token count``, ``token budget``…)
+# exclut. ``input``/``output``/``max`` seuls, ``length``/``cost``/``overflow`` après
+# ``token`` et un qualificatif libre entre le verbe et ``tokens`` sont exclus de la
+# liste : ils effaceraient un secret (« reset token length », « Count leaked tokens »).
+_LLM_TOKEN_PHRASES = re.compile(
+    r"\b(llm|prompt|context|completion)[\s_-]+tokens?\b|"
+    r"\btokens?[\s_-]+(count(ing|er)?|budget|usage|limits?|window|estimat\w*)\b|"
+    r"\b(count(ing)?|estimate|estimating)\s+tokens\b",
+    re.IGNORECASE,
+)
+# Un jeton qualifié comme secret n'est jamais exclu, quelle que soit la locution
+# voisine (« Count leaked tokens », « access token limit »).
+_SECRET_TOKEN = re.compile(
+    r"\b(refresh|access|session|reset|oauth2?|github|gitlab|api|csrf|xsrf|bearer|leaked|"
+    r"jwt|auth|id|login|personal|pat|secret|service|deploy)[\s_-]+tokens?\b",
     re.IGNORECASE,
 )
 _RISK_HIGH_PATTERNS = re.compile(
@@ -186,7 +207,8 @@ class MissionIntakeService:
     # ── Scoring helpers ────────────────────────────────────────────────────
 
     def _score_risk(self, text: str) -> RiskProfile:
-        if _RISK_CRITICAL_PATTERNS.search(text) or _SENSITIVE_PATHS.search(text):
+        visible = text if _SECRET_TOKEN.search(text) else _LLM_TOKEN_PHRASES.sub(" ", text)
+        if _RISK_CRITICAL_PATTERNS.search(visible) or _SENSITIVE_PATHS.search(text):
             return RiskProfile.SECURITY_CRITICAL
         hits_high = len(_RISK_HIGH_PATTERNS.findall(text))
         hits_std = len(_RISK_STANDARD_PATTERNS.findall(text))

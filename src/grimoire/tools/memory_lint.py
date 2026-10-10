@@ -285,29 +285,98 @@ def collect_memory_files(project_root: Path) -> list[MemoryFile]:
     return files
 
 
+# Une résolution est une entrée du journal qui COMMENCE par « Resolved: ». Le préfixe
+# entre crochets n'est accepté que s'il porte une date ISO (``[2024-01-03]``) ou une
+# case cochée (``[x]``) : ``[ ]`` ou ``[!]`` ne sont pas des résolutions. « Unresolved »,
+# « Not resolved yet » ou une simple mention du mot en cours de phrase non plus.
+# La date de la résolution se lit dans ce préfixe et nulle part ailleurs : une date
+# citée plus loin dans la ligne (``(ticket [2099-01-01])``) n'est pas la sienne.
+_RESOLUTION_RE = re.compile(
+    r"^\s*(?:\[(?:(\d{4}-\d{2}-\d{2})[^\]]*|x)\]\s*)?resolved\s*:", re.IGNORECASE,
+)
+
+
+def _today() -> str:
+    return datetime.now().strftime("%Y-%m-%d")
+
+
+def _resolution_date(match: re.Match[str]) -> str:
+    """Date du préfixe de la résolution ; vide si absente ou postérieure à aujourd'hui.
+
+    Une résolution datée dans le futur n'a pas pu être écrite à cette date : la tenir
+    pour datée masquerait toute réapparition jusque-là. Elle est traitée comme non datée.
+    """
+    date = match.group(1) or ""
+    return date if date and date <= _today() else ""
+
+
+def _resolution_is_later(res_date: str, *entry_dates: str) -> bool:
+    """Une résolution ne couvre que des entrées dont la date est comparable à la sienne.
+
+    Les dates sont ISO (comparables en texte). Une résolution datée couvre des entrées
+    toutes datées et qui ne lui sont pas postérieures ; une entrée non datée n'est pas
+    comparable, donc la paire est de nouveau signalée (dater l'entrée suffit). Une
+    résolution non datée ne couvre que des entrées non datées, sinon elle masquerait à
+    jamais une contradiction qui réapparaît plus tard.
+    """
+    if not res_date:
+        return all(not d for d in entry_dates)
+    return all(d and d <= res_date for d in entry_dates)
+
+
+def _pair_topic(text_a: str, text_b: str) -> set[str]:
+    """Termes que les deux entrées de la paire ont en commun, marqueurs de polarité exclus.
+
+    C'est le sujet de la contradiction : une résolution ne la désigne que si elle les reprend
+    tous. Une résolution sur « backend » ne couvre donc pas une paire sur « frontend ».
+    """
+    markers = POSITIVE_MARKERS + NEGATIVE_MARKERS
+    shared = _extract_keywords(text_a) & _extract_keywords(text_b)
+    return {w for w in shared if not any(m in w or w in m for m in markers)}
+
+
 # ── Checks ────────────────────────────────────────────────────────────────────
 
 def check_contradictions(files: list[MemoryFile]) -> list[LintIssue]:
     """Detect contradictions: similar topics with opposite polarity across files."""
     issues: list[LintIssue] = []
-    positives: list[tuple[str, str]] = []  # (file_path, text)
-    negatives: list[tuple[str, str]] = []
+    positives: list[tuple[str, str, str]] = []  # (file_path, text, date)
+    negatives: list[tuple[str, str, str]] = []
+
+    # Le journal des contradictions n'est pas une source de décisions : on y
+    # consigne des résolutions, il ne doit pas se contredire lui-même.
+    resolved: list[tuple[str, set[str]]] = []  # (date du préfixe, termes de la résolution)
+    for mf in files:
+        if mf.kind != "contradictions":
+            continue
+        for _date, text in mf.entries:
+            m = _RESOLUTION_RE.match(text)
+            if m:
+                resolved.append((_resolution_date(m), _extract_keywords(text[m.end():])))
 
     for mf in files:
-        for _date, text in mf.entries:
+        if mf.kind == "contradictions":
+            continue
+        for date, text in mf.entries:
             is_pos, is_neg = _has_polarity(text)
             if is_pos:
-                positives.append((mf.path, text))
+                positives.append((mf.path, text, date))
             if is_neg:
-                negatives.append((mf.path, text))
+                negatives.append((mf.path, text, date))
 
     idx = 0
-    for pos_file, pos_text in positives:
-        for neg_file, neg_text in negatives:
+    for pos_file, pos_text, pos_date in positives:
+        for neg_file, neg_text, neg_date in negatives:
             if pos_file == neg_file:
                 continue
             sim = similarity(pos_text, neg_text)
             if sim >= CONTRADICTION_THRESHOLD:
+                topic = _pair_topic(pos_text, neg_text)
+                if any(
+                    topic <= r_terms and _resolution_is_later(r_date, pos_date, neg_date)
+                    for r_date, r_terms in resolved
+                ):
+                    continue  # déjà consignée comme résolue
                 idx += 1
                 issues.append(LintIssue(
                     issue_id=f"ML-{idx:03d}",
@@ -317,7 +386,12 @@ def check_contradictions(files: list[MemoryFile]) -> list[LintIssue]:
                     description=f"Opposite polarity on similar topic (similarity: {sim:.0%})",
                     files=(pos_file, neg_file),
                     entries=(pos_text[:120], neg_text[:120]),
-                    fix_suggestion="Resolve and document in contradiction-log.md",
+                    fix_suggestion=(
+                        "Resolve, then record it in contradiction-log.md as a line "
+                        f"'- [YYYY-MM-DD] Resolved: {' '.join(sorted(topic)) or '<topic>'}' "
+                        "(the line must repeat these terms, and be dated on or after both entries; "
+                        "an undated entry is only covered by an undated 'Resolved:' line)"
+                    ),
                 ))
     return issues
 
