@@ -46,6 +46,7 @@ from typing import Any
 
 # Gardes du dépôt de tâche (W1-08a) : module voisin, aussi quand ce script est chargé par chemin.
 sys.path.append(str(Path(__file__).resolve().parent))
+from hidden_reads import check_transcript, invalid_run_alert, invalid_runs_rows, render_invalid_runs
 from results_io import read_results_rows
 from task_repo import (
     ContaminatedTaskRepoError,
@@ -189,6 +190,17 @@ class RunRecord:
     # avant ce lot (toutes en ``oauth-copy`` de fait, jamais reconstruit a
     # posteriori — même convention que ``recorded_at``).
     auth_mode: str | None = None
+    # W1-08b (#694) : verdict de ``hidden_reads.check_transcript`` — ``"clean"``,
+    # ``"invalid"`` (la transcription désigne un test caché : le run sort des
+    # taux, ``hidden_test_reads`` porte les lignes déclenchantes pour revue
+    # humaine) ou ``"unevaluated"`` (transcription illisible : jamais « propre »).
+    # ``None`` pour les lignes antérieures, jamais reconstruit.
+    transcript_check: str | None = None
+    hidden_test_reads: list[dict[str, Any]] | None = None
+
+    @property
+    def invalid(self) -> bool:
+        return self.transcript_check == "invalid"
 
     def to_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
@@ -506,7 +518,8 @@ def should_alert_cost_overrun(expected_usd: float, actual_usd: float, *, factor:
 def aggregate_success_by_arm(records: Sequence[RunRecord]) -> dict[str, list[bool]]:
     by_arm: dict[str, list[bool]] = defaultdict(list)
     for record in records:
-        by_arm[record.arm].append(record.success)
+        if not record.invalid:  # W1-08b : un run invalidé n'entre dans aucun taux
+            by_arm[record.arm].append(record.success)
     return dict(by_arm)
 
 
@@ -522,7 +535,7 @@ def should_stop_early(
     Retourne ``(arrêt?, motif)``. Ne se prononce pas avant ``min_tasks``
     tâches entièrement rejouées sur les trois bras (bruit sinon).
     """
-    tasks_done = len({record.task_id for record in records})
+    tasks_done = len({record.task_id for record in records if not record.invalid})
     if tasks_done < min_tasks:
         return (False, f"seulement {tasks_done}/{total_tasks} tâches, minimum {min_tasks}")
     if tasks_done >= total_tasks:
@@ -1752,9 +1765,14 @@ def build_report(
     ``state/toolchain_check.json`` — ``None`` pour un rapport reconstruit
     sans ce fichier (campagnes antérieures à ce lot).
     """
+    # W1-08b : un run invalidé (transcription qui désigne un test caché) sort de
+    # tous les taux et médianes ; son coût reste dans ``spent_by_arm``.
     by_arm: dict[str, list[RunRecord]] = defaultdict(list)
+    spent_by_arm: dict[str, list[RunRecord]] = defaultdict(list)
     for record in records:
-        by_arm[record.arm].append(record)
+        spent_by_arm[record.arm].append(record)
+        if not record.invalid:
+            by_arm[record.arm].append(record)
 
     carried_over_notes: dict[str, str] = {}
     if rerun_arms is not None:
@@ -1765,6 +1783,7 @@ def build_report(
     per_arm: dict[str, Any] = {}
     for arm in ARMS:
         arm_records = by_arm.get(arm, [])
+        spent_records = spent_by_arm.get(arm, [])
         successes = [r.success for r in arm_records]
         success_values = [1.0 if s else 0.0 for s in successes]
         success_ci = bootstrap_ci(success_values, seed=seed)
@@ -1776,6 +1795,8 @@ def build_report(
         pass_k_ci = bootstrap_ci([float(v) for v in pass_k_values], seed=seed)
         per_arm[arm] = {
             "n_runs": len(arm_records),
+            "n_invalid": len(spent_records) - len(arm_records),
+            "n_transcript_unevaluated": sum(1 for r in arm_records if r.transcript_check == "unevaluated"),
             "n_tasks": len(by_task),
             "success_rate": statistics.fmean(success_values) if success_values else 0.0,
             "success_rate_ci95": list(success_ci),
@@ -1783,7 +1804,7 @@ def build_report(
             "pass_hat_k_ci95": list(pass_k_ci),
             "median_wall_seconds": _median([r.wall_seconds for r in arm_records]),
             "median_cost_usd_resolved": _median([r.total_cost_usd for r in resolved]),
-            "total_cost_usd": sum(r.total_cost_usd for r in arm_records),
+            "total_cost_usd": sum(r.total_cost_usd for r in spent_records),
             "median_num_turns": _median([r.num_turns for r in arm_records]),
             "terminated_reasons": {
                 reason: sum(1 for r in arm_records if r.terminated_reason == reason)
@@ -1807,8 +1828,8 @@ def build_report(
     by_task_arm: dict[str, dict[str, Any]] = {}
     task_ids = sorted({r.task_id for r in records})
     for task_id in task_ids:
-        task_records = [r for r in records if r.task_id == task_id]
-        row: dict[str, Any] = {"language": task_records[0].language if task_records else "?"}
+        task_records = [r for r in records if r.task_id == task_id and not r.invalid]
+        row: dict[str, Any] = {"language": next((r.language for r in records if r.task_id == task_id), "?")}
         for arm in ARMS:
             arm_task_records = [r for r in task_records if r.arm == arm]
             row[arm] = {
@@ -1856,6 +1877,7 @@ def build_report(
         "kit_runs": kit_runs,
         "kit_gov_runs": kit_gov_runs,
         "carried_over_notes": carried_over_notes,
+        "invalid_runs": invalid_runs_rows(records),
         "agent_toolchain_check": toolchain_check,
         # Lot J (#582) : mode(s) d'authentification effectivement utilisés
         # par les runs de CE rapport — voir ``RunRecord.auth_mode``. Vide
@@ -1932,6 +1954,8 @@ def render_report_markdown(report: dict[str, Any]) -> str:
             cells.append(f"{arm_row.get('successes', 0)}/{arm_row.get('runs', 0)}")
         lines.append(f"| {task_id} | {row.get('language', '?')} | " + " | ".join(cells) + " |")
     lines.append("")
+
+    lines.extend(render_invalid_runs(report.get("invalid_runs") or []))
 
     def _render_governed_detail(title: str, rows: list[dict[str, Any]]) -> None:
         if not rows:
@@ -2263,6 +2287,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                         # Pas de ``return`` : les gardes de sécurité de fin de campagne doivent tourner.
                         contaminated = True
                         break
+                    if record.invalid:
+                        print(invalid_run_alert(record), file=sys.stderr)
                     records.append(record)
                     results_f.write(json.dumps(record.to_dict()) + "\n")
                     results_f.flush()
@@ -2522,6 +2548,14 @@ def _run_one(
                 run_dir, build_prompt(task), home=home, env=env, timeout_s=run_timeout_s, auth_mode=auth_mode
             )
 
+    # W1-08b : ce que l'agent a réellement lu, y compris pour un run tué (timeout, boucle).
+    transcript_check, hidden_test_reads = check_transcript(
+        run_dir.parent / f"{run_dir.name}.stream.jsonl",
+        test_files=task.test_files,
+        run_dir=run_dir,
+        hidden_dir=hidden_dir,
+    )
+
     if outcome.terminated_reason in ("timeout", "loop"):
         success = False
     else:
@@ -2560,6 +2594,8 @@ def _run_one(
         dispatch_stats=dispatch_stats,
         toolchain_friction_bash_calls=outcome.toolchain_friction_bash_calls,
         auth_mode=auth_mode,
+        transcript_check=transcript_check,
+        hidden_test_reads=hidden_test_reads,
     )
 
 

@@ -2406,8 +2406,281 @@ def test_main_does_not_warn_for_interrupted_run_residue(
 def test_task_repo_guards_live_in_their_own_module_and_script_does_not_grow() -> None:
     """W1-08a (T2-03) : ``three_arms.py`` dépassait déjà le seuil du ratchet
     (non couvert pour ``scripts/``) ; les gardes vivent dans ``task_repo.py``
-    et le script n'est pas plus long que sur ``origin/main`` (2584 lignes)."""
+    et le script ne grossit pas au-delà de ``origin/main`` (2584 lignes) + le
+    câblage de W1-08b (35 lignes : champs de ``RunRecord``, exclusion des taux,
+    appel de ``hidden_reads``) ; le détecteur et le rendu vivent dans ``hidden_reads.py``."""
     for name in ("ContaminatedTaskRepoError", "assert_task_repo_clean", "reset_run_dir"):
         assert getattr(ta, name).__module__ == "task_repo"
     assert (SCRIPT.parent / "task_repo.py").is_file()
-    assert len(SCRIPT.read_text(encoding="utf-8").splitlines()) <= 2584
+    assert len(SCRIPT.read_text(encoding="utf-8").splitlines()) <= 2584 + 35
+
+
+# ── W1-08b (#694) : run invalidé si la transcription lit un test caché ─────
+
+
+def _hidden_reads_module() -> Any:
+    """Import tardif : un module absent ne doit rougir que ces tests."""
+    return importlib.import_module("hidden_reads")
+
+
+def _tool_line(name: str, **tool_input: Any) -> str:
+    return json.dumps({"type": "assistant", "message": {"content": [{"type": "tool_use", "name": name, "input": tool_input}]}})
+
+
+class _Layout:
+    """La disposition du banc : ``tasks/<slug>/{hidden-tests,<arm>/run<i>}``."""
+
+    def __init__(self, workspace: Path) -> None:
+        self.task_root = workspace / "tasks" / "python__ex"
+        self.hidden = self.task_root / "hidden-tests"
+        self.run_dir = self.task_root / "kit-gov" / "run1"
+        self.previous = self.task_root / "kit-gov" / "run0"
+        for directory in (self.hidden, self.run_dir, self.previous):
+            directory.mkdir(parents=True)
+        (self.hidden / "ex_test.py").write_text("def test_x(): ...\n", encoding="utf-8")
+        (self.previous / "ex_test.py").write_text("def test_x(): ...\n", encoding="utf-8")  # copié par run_hidden_tests
+        (self.run_dir / "ex.py").write_text("pass\n", encoding="utf-8")
+
+    def find(self, *lines: str) -> list[Any]:
+        return _hidden_reads_module().find_hidden_test_reads(
+            lines,
+            test_files=("ex_test.py",),
+            run_dir=self.run_dir,
+            hidden_dir=self.hidden,
+            other_run_dirs=(self.previous,),
+        )
+
+
+@pytest.mark.parametrize(
+    ("kind", "line"),
+    [
+        ("direct", _tool_line("Read", file_path="{hidden}/ex_test.py")),
+        ("direct", _tool_line("Bash", command="cat ../../hidden-tests/ex_test.py")),
+        ("direct", _tool_line("Bash", command="cd ../.. && cat hidden-tests/ex_test.py")),
+        ("direct", _tool_line("Bash", command="cat ../run0/ex_test.py")),
+        ("direct", _tool_line("Bash", command="python -c \"print(open('../../hidden-tests/ex_test.py').read())\"")),
+        ("direct", _tool_line("Bash", command="cat {hidden}/ex_test.py | head -50")),
+        ("glob", _tool_line("Glob", pattern="**/*_test.py", path="{task_root}")),
+        ("glob", _tool_line("Bash", command="cat ../../hidden-tests/*.py")),
+        ("glob", _tool_line("Bash", command="cat ../../hidden*/ex_*")),
+        ("glob", _tool_line("Bash", command="cat ../run?/ex_test.py")),
+        ("directory", _tool_line("Bash", command="ls ../../hidden-tests")),
+        ("directory", _tool_line("Grep", pattern="def test", path="{task_root}")),
+        ("directory", _tool_line("Bash", command="grep -rn 'def test' ../..")),
+        ("directory", _tool_line("Bash", command="find ../.. -name '*.py'")),
+        ("directory", _tool_line("Bash", command="find / -name 'ex_test.py'")),
+        ("direct", _tool_line("Bash", command="python3 - <<'EOF'\nprint(open('../../hidden-tests/ex_test.py').read())\nEOF")),
+        ("glob", _tool_line("Bash", command="cat ../../hidden-tests/ex_[t]est.py")),
+    ],
+)
+def test_hidden_test_read_makes_the_transcript_invalid(tmp_path: Path, kind: str, line: str) -> None:
+    layout = _Layout(tmp_path)
+    line = line.replace("{hidden}", str(layout.hidden)).replace("{task_root}", str(layout.task_root))
+    found = layout.find(line)
+    assert [read.kind for read in found] == [kind], line
+    assert found[0].line == 1
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        _tool_line("Read", file_path="{run_dir}/ex.py"),
+        _tool_line("Bash", command="cat ex.py"),
+        _tool_line("Bash", command="python -m pytest ex_test.py"),  # son propre test, écrit dans le dépôt
+        _tool_line("Bash", command="ls .. && git status"),
+        _tool_line("Bash", command="grep -rn solve ."),
+        # le code d'une heredoc n'est pas une racine : `//`, `///`, `/**` et la division
+        _tool_line("Bash", command="grep -rn x . && cat > ex.py <<'EOF'\n// note\n/// doc\n/** c */\nx = a / b\nEOF"),
+        # `"$SP"/` est un chemin sous une variable, pas la racine, même derrière `rm -rf`
+        _tool_line("Bash", command='SP=/tmp/x\nrm -rf "$SP" && cp ex.py "$SP"/'),
+        _tool_line("Write", file_path="{run_dir}/ex_test.py", content="# voir ../../hidden-tests/ex_test.py\n"),
+        _tool_line("Edit", file_path="{run_dir}/ex.py", old_string="pass", new_string="return 1"),
+        _tool_line("Glob", pattern="**/*.py"),
+        _tool_line("Grep", pattern="solve"),
+        json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "je ne lirai pas hidden-tests/ex_test.py"}]}}),
+        json.dumps({"type": "user", "message": {"content": [{"type": "tool_result", "content": "../../hidden-tests/ex_test.py"}]}}),
+        "pas du json",
+    ],
+)
+def test_clean_transcript_stays_valid(tmp_path: Path, line: str) -> None:
+    layout = _Layout(tmp_path)
+    assert layout.find(line.replace("{run_dir}", str(layout.run_dir))) == []
+
+
+def test_cd_persists_between_tool_calls_and_report_names_the_triggering_line(tmp_path: Path) -> None:
+    """Le shell de Claude Code est persistant : ``cd`` puis une lecture « innocente »."""
+    layout = _Layout(tmp_path)
+    lines = [
+        _tool_line("Bash", command="cat ex.py"),
+        _tool_line("Bash", command="cd ../../hidden-tests"),
+        _tool_line("Bash", command="cat ex_test.py"),
+    ]
+    found = layout.find(*lines)
+    assert [(read.line, read.tool) for read in found] == [(2, "Bash"), (3, "Bash")]
+    assert found[1].kind == "direct"
+    assert "cat ex_test.py" in found[1].excerpt
+    assert found[1].to_dict()["line"] == 3
+
+
+def test_symlinked_run_dir_is_still_the_agents_own_repo(tmp_path: Path) -> None:
+    """La transcription peut donner le chemin réel (lien symbolique résolu)."""
+    layout = _Layout(tmp_path)
+    alias = tmp_path / "alias"
+    alias.symlink_to(layout.task_root)
+    own = _tool_line("Read", file_path=f"{alias}/kit-gov/run1/ex.py")
+    hidden = _tool_line("Read", file_path=f"{alias}/hidden-tests/ex_test.py")
+    assert layout.find(own) == []
+    assert [read.kind for read in layout.find(hidden)] == ["direct"]
+
+
+def _invalid_record(task: Any, arm: str = "kit-gov", run_index: int = 2, *, success: bool = True) -> Any:
+    reads = [{"line": 7, "tool": "Read", "kind": "direct", "reference": "hidden-tests/x_test.py", "excerpt": "{...}"}]
+    return ta.RunRecord(
+        task_id=task.task_id, language=task.language, arm=arm, run_index=run_index, success=success,
+        total_cost_usd=0.4, input_tokens=1, output_tokens=1, num_turns=1, wall_seconds=1.0,
+        terminated_reason="completed", transcript_check="invalid", hidden_test_reads=reads,
+    )  # fmt: skip
+
+
+def test_invalid_run_is_excluded_from_every_rate_but_not_from_the_cost(synthetic_bench_root: Path) -> None:
+    task = _task(synthetic_bench_root)
+    records = [_ok_record(task, "kit-gov", 0), _ok_record(task, "kit-gov", 1), _invalid_record(task, success=True)]
+    records[1].success = False
+    assert ta.aggregate_success_by_arm(records) == {"kit-gov": [True, False]}
+
+    report = ta.build_report(records, total_tasks=20, expected_cost=None, seed=0)
+    arm = report["per_arm"]["kit-gov"]
+    assert arm["n_runs"] == 2
+    assert arm["n_invalid"] == 1
+    assert arm["success_rate"] == pytest.approx(0.5)
+    assert arm["total_cost_usd"] == pytest.approx(0.5 + 0.5 + 0.4)  # l'argent dépensé reste compté
+    assert report["by_task"][task.task_id]["kit-gov"]["successes"] == 1
+    assert report["by_task"][task.task_id]["kit-gov"]["runs"] == 2
+
+
+def test_report_lists_invalid_runs_with_the_triggering_line(synthetic_bench_root: Path) -> None:
+    task = _task(synthetic_bench_root)
+    report = ta.build_report([_ok_record(task, "nu", 0), _invalid_record(task)], total_tasks=20, expected_cost=None, seed=0)
+    assert [(r["task_id"], r["arm"], r["run_index"]) for r in report["invalid_runs"]] == [(task.task_id, "kit-gov", 2)]
+    assert report["invalid_runs"][0]["reads"][0]["line"] == 7
+    md = ta.render_report_markdown(report)
+    assert "Runs invalidés" in md
+    assert "hidden-tests/x_test.py" in md
+    assert "ligne 7" in md
+
+
+def test_report_without_invalid_run_has_no_invalid_section(synthetic_bench_root: Path) -> None:
+    task = _task(synthetic_bench_root)
+    report = ta.build_report([_ok_record(task, "nu", 0)], total_tasks=20, expected_cost=None, seed=0)
+    assert report["invalid_runs"] == []
+    assert "Runs invalidés" not in ta.render_report_markdown(report)
+
+
+def test_rows_written_before_w1_08b_still_load(synthetic_bench_root: Path) -> None:
+    task = _task(synthetic_bench_root)
+    row = _ok_record(task, "nu", 0).to_dict()
+    for name in ("transcript_check", "hidden_test_reads"):
+        row.pop(name)
+    record = ta.RunRecord(**row)
+    assert record.transcript_check is None  # jamais reconstruit : on ignore ce que cette ligne a lu
+    assert record.hidden_test_reads is None
+    assert ta.aggregate_success_by_arm([record]) == {"nu": [True]}
+
+
+def _write_transcript(run_dir: Path, *lines: str) -> None:
+    (run_dir.parent / f"{run_dir.name}.stream.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _run_one_with_transcript(
+    synthetic_bench_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, lines: list[str] | None
+) -> Any:
+    task = _task(synthetic_bench_root)
+    workspace = tmp_path / "ws"
+    homes = _patch_run_one(monkeypatch, tmp_path, [])
+    run_dir = ta.run_dir_for(workspace, task, "nu", 1)
+    # un run précédent de la même tâche, tests copiés (comme ``run_hidden_tests``)
+    previous = ta.run_dir_for(workspace, task, "nu", 0)
+    previous.mkdir(parents=True)
+    (previous / "python_ex_0_test.py").write_text("def test_solve(): ...\n", encoding="utf-8")
+
+    def _claude(task_dir: Path, *a: Any, **k: Any) -> Any:
+        if lines is not None:
+            _write_transcript(task_dir, *lines)
+        return ta.RunOutcome()
+
+    monkeypatch.setattr(ta, "run_claude_headless", _claude)
+    record = ta._run_one(
+        task, "nu", 1, workspace=workspace, ecc_repo=workspace / "ecc", homes=homes, go_bin=None,
+        run_timeout_s=5, grimoire_bin="grimoire", auth_mode="api-key",
+    )  # fmt: skip
+    assert run_dir.exists()
+    return record
+
+
+def test_run_one_marks_the_run_invalid_when_the_transcript_reads_a_hidden_test(
+    synthetic_bench_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lines = [_tool_line("Read", file_path="TASK.md"), _tool_line("Bash", command="cat ../../hidden-tests/python_ex_0_test.py")]
+    record = _run_one_with_transcript(synthetic_bench_root, tmp_path, monkeypatch, lines)
+    assert record.transcript_check == "invalid"
+    assert record.hidden_test_reads[0]["line"] == 2
+    assert record.hidden_test_reads[0]["kind"] == "direct"
+    assert record.success is True  # le résultat brut est conservé ; c'est le rapport qui l'exclut
+    json.dumps(record.to_dict())  # persistable dans results.jsonl
+
+
+def test_run_one_marks_a_clean_transcript_clean(
+    synthetic_bench_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lines = [_tool_line("Read", file_path="TASK.md"), _tool_line("Bash", command="cat python_ex_0.py")]
+    record = _run_one_with_transcript(synthetic_bench_root, tmp_path, monkeypatch, lines)
+    assert record.transcript_check == "clean"
+    assert record.hidden_test_reads == []
+
+
+def test_run_one_without_transcript_is_unevaluated_not_clean(
+    synthetic_bench_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pas de transcription lisible : on ne prétend pas que le run est propre."""
+    record = _run_one_with_transcript(synthetic_bench_root, tmp_path, monkeypatch, None)
+    assert record.transcript_check == "unevaluated"
+    assert record.hidden_test_reads is None
+
+
+def test_main_announces_an_invalid_run_on_stderr(
+    synthetic_bench_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    workspace = tmp_path / "workspace"
+    _patch_main_environment(monkeypatch, synthetic_bench_root, tmp_path)
+    monkeypatch.setattr(ta, "write_report", lambda *a, **k: None)
+    _spy_security_guards(monkeypatch)
+    monkeypatch.setattr(ta, "_run_one", lambda task, arm, run_index, **kw: _invalid_record(task, arm, run_index))
+
+    ta.main(["--pilot", "--workspace", str(workspace)])
+
+    err = capsys.readouterr().err
+    assert "[INVALIDE]" in err
+    assert "ligne 7" in err
+
+
+def test_empty_or_missing_transcript_is_unevaluated(tmp_path: Path) -> None:
+    layout = _Layout(tmp_path)
+    check = _hidden_reads_module().check_transcript
+    kwargs: dict[str, Any] = {"test_files": ("ex_test.py",), "run_dir": layout.run_dir, "hidden_dir": layout.hidden}
+    assert check(tmp_path / "absent.jsonl", **kwargs) == ("unevaluated", None)
+    empty = tmp_path / "empty.jsonl"
+    empty.write_text("\n\n", encoding="utf-8")
+    assert check(empty, **kwargs) == ("unevaluated", None)
+
+
+def test_check_transcript_sees_the_copied_tests_of_sibling_runs(tmp_path: Path) -> None:
+    """Les ``run<i>`` frères sont découverts sur le disque (tests copiés par ``run_hidden_tests``)."""
+    layout = _Layout(tmp_path)
+    log = tmp_path / "t.jsonl"
+    log.write_text(_tool_line("Bash", command="cat ../run0/ex_test.py") + "\n", encoding="utf-8")
+    verdict, reads = _hidden_reads_module().check_transcript(
+        log, test_files=("ex_test.py",), run_dir=layout.run_dir, hidden_dir=layout.hidden
+    )
+    assert verdict == "invalid"
+    assert reads is not None
+    assert reads[0]["kind"] == "direct"
