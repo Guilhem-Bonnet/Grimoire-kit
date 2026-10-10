@@ -414,7 +414,7 @@ def _ffi_text(text: str) -> str:
     """*text* sous une forme que le cœur Rust accepte toujours.
 
     PyO3 encode chaque ``str`` en UTF-8 strict : un surrogate isolé (un
-    ``\ud800`` venu d'une commande mal décodée) lève ``UnicodeEncodeError``
+    ``\\ud800`` venu d'une commande mal décodée) lève ``UnicodeEncodeError``
     au passage de la frontière, et l'appel de politique plante au lieu de
     rendre son verdict. Le texte franchit donc la frontière avec chaque
     surrogate isolé remplacé par U+FFFD — un motif de règle n'en contient
