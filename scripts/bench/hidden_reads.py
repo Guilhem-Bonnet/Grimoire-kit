@@ -15,7 +15,8 @@ qui exposent les tests. Le suivi du répertoire courant calque Claude Code (voir
 ``_ShellCwd``) : un ``cd`` vaut pour la suite de la commande ; d'un appel ``Bash``
 à l'autre, le répertoire final n'est gardé que s'il reste dans le dépôt du run.
 Sinon le shell est ramené à ce dépôt (« Shell cwd was reset to ... »), ce que le
-``tool_result`` confirme ; sans confirmation, les deux répertoires restent candidats.
+``tool_result`` confirme ; sans confirmation (message absent, résultat en erreur
+ou absent), le dépôt reste candidat à côté du répertoire où la commande a fini.
 
 - ``direct`` : le chemin est un fichier de test exposé (``hidden-tests/<test>``,
   ``<test>`` copié dans un autre dossier ``run<i>`` de la tâche, ou ``<test>``
@@ -31,7 +32,7 @@ Un drapeau n'est pas un verdict de fraude : il invalide le run (exclu des
 taux) et la ligne déclenchante est listée pour revue humaine. Limites connues,
 volontairement du côté du faux positif ou du « non vu » écrit : variables
 shell non développées (``$HOME``, ``$(...)``), liens symboliques créés par
-l'agent, ``cd`` d'une commande qui échoue, contenu d'un script écrit puis lancé
+l'agent, ``cd`` d'une commande qui échoue dans le dépôt, contenu d'un script écrit puis lancé
 (le script n'est pas relu), accès par un serveur MCP qui n'expose pas de chemin.
 """
 
@@ -198,7 +199,28 @@ def _standalone(text: str, match: re.Match[str]) -> bool:
     return (not before or before.isspace()) and (not after or after.isspace())
 
 
-def _shell_references(command: str, cwd: PurePath) -> tuple[list[tuple[str, PurePath, bool]], PurePath]:
+#: Options de ``cd`` qui ne changent pas la cible.
+_CD_OPTIONS = frozenset({"-L", "-P", "-e", "-@", "--"})
+#: Un ``cd -`` / ``pushd -`` quelque part dans la commande (retour au répertoire précédent).
+_CD_DASH = re.compile(r"(?:^|[;&|\n])[ \t]*(?:cd|pushd)[ \t]+(?:-[LPe@][ \t]+|--[ \t]+)*-(?=[ \t;&|\n]|$)")
+
+
+def _cd_target(tokens: Sequence[str]) -> str | None:
+    """La cible d'un ``cd``/``pushd`` (``-`` : le répertoire précédent), ``None`` si inconnue ou absente."""
+    if not tokens or tokens[0] not in ("cd", "pushd"):
+        return None
+    for word in tokens[1:]:
+        if word in _CD_OPTIONS:
+            continue
+        if word == "-":
+            return word
+        return None if word.startswith(("-", "$", "~")) else word
+    return None
+
+
+def _shell_references(
+    command: str, cwd: PurePath, dash: PurePath | None = None
+) -> tuple[list[tuple[str, PurePath, bool]], PurePath]:
     """``(fragment, chemin résolu, parcours récursif)`` d'une commande Bash, et le cwd final.
 
     ``cd``/``pushd`` change le répertoire des segments suivants (``&&``, ``;``,
@@ -207,7 +229,11 @@ def _shell_references(command: str, cwd: PurePath) -> tuple[list[tuple[str, Pure
     (``//``, ``/``) n'y désigne pas la racine. Un fragment sans caractère de nom
     (``//``, ``///``, ``/**``) n'est jamais une référence ; ``/`` seul l'est
     uniquement comme argument à part entière de la commande (``find / -name x``).
+    ``cd -`` revient au répertoire d'avant le dernier ``cd`` de la commande ; s'il
+    n'y en a pas (le précédent vient d'un autre appel), il mène à *dash*, ou ne
+    bouge pas si *dash* est ``None`` : l'appelant joue les deux (fail-closed).
     """
+    previous: PurePath | None = None
     bodies = [m.group(3) for m in _HEREDOC.finditer(command)]
     head = _HEREDOC.sub("", command)
     recursive = bool(_RECURSIVE.search(head))
@@ -222,8 +248,14 @@ def _shell_references(command: str, cwd: PurePath) -> tuple[list[tuple[str, Pure
             if not _NAME_CHAR.search(word) and not (word == "/" and _standalone(segment, match)):
                 continue
             refs.append((word, _resolve(word, cwd), recursive))
-        if tokens and tokens[0] in ("cd", "pushd") and len(tokens) > 1 and not tokens[1].startswith(("-", "$", "~")):
-            cwd = _resolve(tokens[1], cwd)
+        target = _cd_target(tokens)
+        if target == "-":  # retour au répertoire précédent
+            if previous is not None:
+                cwd, previous = previous, cwd
+            elif dash is not None:  # précédent inconnu : l'appelant essaie `dash` (le dépôt) puis ne bouge pas
+                cwd, previous = dash, cwd
+        elif target is not None:
+            cwd, previous = _resolve(target, cwd), cwd
     for body in bodies:
         for token in _FRAGMENT.findall(body):
             if not token.startswith(("-", "$", "~")) and _NAME_CHAR.search(token):
@@ -232,7 +264,7 @@ def _shell_references(command: str, cwd: PurePath) -> tuple[list[tuple[str, Pure
 
 
 def _tool_references(
-    name: str, tool_input: dict[str, Any], cwd: PurePath
+    name: str, tool_input: dict[str, Any], cwd: PurePath, dash: PurePath | None = None
 ) -> tuple[list[tuple[str, PurePath, bool]], PurePath]:
     """``(fragment, chemin résolu, parcours récursif)`` pour un appel d'outil, et le cwd suivant."""
     refs: list[tuple[str, PurePath, bool]] = []
@@ -247,7 +279,7 @@ def _tool_references(
     elif name == "Bash":
         command = tool_input.get("command")
         if isinstance(command, str):
-            shell_refs, cwd = _shell_references(command, cwd)
+            shell_refs, cwd = _shell_references(command, cwd, dash)
             refs.extend(shell_refs)
     elif name == "Glob":
         base = _resolve(tool_input["path"], cwd) if isinstance(tool_input.get("path"), str) else cwd
@@ -295,8 +327,14 @@ class _ShellCwd:
     n'est pas systématique (un ``cd`` vers le scratchpad de l'agent y échappe dans
     certaines transcriptions archivées) : tant que le ``tool_result`` ne tranche
     pas, les DEUX répertoires restent candidats et une référence relative est
-    jugée contre chacun (fail-closed). Le message tranche vers le répertoire qu'il
-    nomme ; son absence, vers le répertoire où la commande a fini.
+    jugée contre chacun (fail-closed). Seul le message tranche, vers le répertoire
+    qu'il nomme. Son absence ne prouve pas que le shell soit resté dehors
+    (W1-08b-S2-01) : sur les 483 transcriptions archivées, 160 résultats
+    portent le message, tous réussis, et aucun des 383 résultats en erreur ; après
+    un ``cd <tâche>; find ..`` en erreur, la commande suivante a tourné dans le dépôt. Un résultat en erreur
+    ou sans message laisse donc le dépôt candidat à côté du répertoire où la
+    commande a fini. ``cd -`` est joué des deux
+    façons (précédent inconnu : pas de déplacement, ou retour au dépôt).
     """
 
     def __init__(self, home: PurePath, exposure: _Exposure):
@@ -314,10 +352,13 @@ class _ShellCwd:
     ) -> list[tuple[str, PurePath, bool]]:
         refs: list[tuple[str, PurePath, bool]] = []
         finals: set[PurePath] = set()
+        command = tool_input.get("command")
+        back = name == "Bash" and isinstance(command, str) and _CD_DASH.search(command) is not None
         for cwd in sorted(self.candidates):
-            found, final = _tool_references(name, tool_input, cwd)
-            refs.extend(found)
-            finals.add(final)
+            for dash in (None, self.home) if back else (None,):
+                found, final = _tool_references(name, tool_input, cwd, dash)
+                refs.extend(found)
+                finals.add(final)
         if name != "Bash":
             return refs
         self._pending = None
@@ -329,14 +370,19 @@ class _ShellCwd:
         return refs
 
     def settle(self, tool_use_id: object, text: str) -> None:
-        """Tranche, d'après le résultat de la dernière commande, où le shell se trouve."""
+        """Tranche, d'après le résultat de la dernière commande, où le shell se trouve.
+
+        Le message de réinitialisation est le seul signal positif : il ramène au dépôt
+        qu'il nomme. Sans lui, le dépôt reste candidat (résultat en erreur compris : le
+        corpus n'y porte jamais le message alors que le shell est revenu au dépôt).
+        """
         if self._pending is None or tool_use_id is None or self._pending[0] != tool_use_id:
             return
         _, finals = self._pending
         self._pending = None
         last = next((line for line in reversed(text.splitlines()) if line.strip()), "")
         reset = _CWD_RESET.search(last)
-        self.candidates = {_lexical(reset.group(1))} if reset else finals
+        self.candidates = {_lexical(reset.group(1))} if reset else finals | {self.home}
 
 
 def find_hidden_test_reads(

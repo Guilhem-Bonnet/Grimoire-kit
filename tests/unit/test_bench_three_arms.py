@@ -2581,10 +2581,53 @@ def test_cd_outside_the_repo_does_not_carry_over_to_the_next_call(tmp_path: Path
     # résultat qui confirme la réinitialisation
     reset = _bash_result("t1", f"x\nShell cwd was reset to {layout.run_dir}")
     assert [(r.line, r.kind) for r in layout.find(init, _bash_call("t1", cd), reset, cat)] == [(4, "direct")]
-    # résultat sans message : le shell est resté dehors, `../run0` n'y est pas la copie
-    assert layout.find(init, _bash_call("t1", cd), _bash_result("t1", "ok"), cat) == []
+    # résultat sans message : ce n'est pas un signal que le shell soit resté dehors (W1-08b-S2-01)
+    assert [(r.line, r.kind) for r in layout.find(init, _bash_call("t1", cd), _bash_result("t1", "ok"), cat)] == [(4, "direct")]
     # dans la MÊME commande, le cwd de `cd` vaut encore pour les segments suivants
     assert layout.find(init, _tool_line("Bash", command=f"cd {elsewhere} && cat ../run0/ex_test.py")) == []
+
+
+def _bash_error(tool_id: str, text: str) -> str:
+    return json.dumps(
+        {"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": tool_id, "content": text, "is_error": True}]}}
+    )
+
+
+def test_failed_command_outside_the_repo_leaves_the_repo_candidate(tmp_path: Path) -> None:
+    """W1-08b-S2-01 : un résultat en erreur n'a pas le message de réinitialisation, et le shell est revenu au dépôt."""
+    layout = _Layout(tmp_path)
+    init = json.dumps({"type": "system", "subtype": "init", "cwd": str(layout.run_dir)})
+    cd = f"cd {layout.task_root}; false"
+    cat = _tool_line("Bash", command="cat ../run0/ex_test.py")
+    failed = layout.find(init, _bash_call("t1", cd), _bash_error("t1", "Exit code 1"), cat)
+    assert [(r.line, r.kind) for r in failed] == [(4, "direct")]
+    # avec le message, le shell est au dépôt : même verdict
+    reset = _bash_result("t1", f"Exit code 1\nShell cwd was reset to {layout.run_dir}")
+    assert [(r.line, r.kind) for r in layout.find(init, _bash_call("t1", cd), reset, cat)] == [(4, "direct")]
+    # le répertoire où la commande a fini reste candidat : la lecture relative qui n'a de sens que là est vue aussi
+    inside_task = _tool_line("Bash", command="cat hidden-tests/ex_test.py")
+    after = layout.find(init, _bash_call("t1", cd), _bash_error("t1", "Exit code 1"), inside_task)
+    assert [(r.line, r.kind) for r in after] == [(4, "direct")]
+    # le message, lui, écarte le répertoire de la tâche
+    assert layout.find(init, _bash_call("t1", cd), reset, inside_task) == []
+
+
+def test_cd_dash_returns_to_the_previous_directory(tmp_path: Path) -> None:
+    """W1-08b-S2-01 : ``cd -`` n'était pas modélisé, le shell restait dehors alors qu'il revenait au dépôt."""
+    layout = _Layout(tmp_path)
+    init = json.dumps({"type": "system", "subtype": "init", "cwd": str(layout.run_dir)})
+    cat = "cat ../run0/ex_test.py"
+    # dans la même commande : retour au répertoire d'avant le cd
+    back = _tool_line("Bash", command=f"cd {layout.task_root} && ls; cd - >/dev/null; {cat}")
+    assert [(r.line, r.kind) for r in layout.find(init, back)] == [(2, "direct")]
+    # d'un appel à l'autre : le précédent est inconnu, les deux issues sont jouées
+    leave = _bash_call("t1", f"cd {tmp_path} && ls; cd -")
+    ok = _bash_result("t1", "ok")
+    assert [(r.line, r.kind) for r in layout.find(init, leave, ok, _tool_line("Bash", command=cat))] == [(4, "direct")]
+    # `cd -` sans rien avant : le dépôt reste candidat
+    assert [(r.line, r.kind) for r in layout.find(init, _tool_line("Bash", command=f"cd - && {cat}"))] == [(2, "direct")]
+    # les options de cd ne changent pas la cible
+    assert [r.kind for r in layout.find(init, _tool_line("Bash", command=f"cd -P {layout.task_root} && cat hidden-tests/ex_test.py"))] == ["direct"]
 
 
 def test_reset_message_of_another_call_does_not_settle_the_shell(tmp_path: Path) -> None:
