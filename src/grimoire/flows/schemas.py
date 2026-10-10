@@ -228,6 +228,11 @@ class ResumeOutcome:
     node_id: str | None
     faults: tuple[str, ...] = ()
     contract: NodeContract | None = None
+    #: ``True`` quand la sortie soumise rejoue celle déjà acceptée pour un
+    #: node franchi (``replay_of``) : ``ok`` reste vrai, rien n'a été écrit,
+    #: ``node_id``/``contract`` désignent toujours ce que le run attend.
+    replay: bool = False
+    replay_of: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -236,6 +241,8 @@ class ResumeOutcome:
             "node_id": self.node_id,
             "faults": list(self.faults),
             "contract": self.contract.to_dict() if self.contract else None,
+            "replay": self.replay,
+            "replay_of": self.replay_of,
         }
 
 
