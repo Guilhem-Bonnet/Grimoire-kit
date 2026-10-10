@@ -9,17 +9,27 @@ Règle commune à chaque exécuteur : le motif « rien exécuté » ne suffit pa
 car ces outils l'impriment aussi par paquet ou par binaire sans test au milieu
 d'une exécution réelle (``go test ./...``, ``cargo test`` et ses doc-tests).
 Le diagnostic n'est rendu que si aucune ligne de la même sortie ne prouve
-qu'au moins un test a tourné, **quel que soit l'outil qui l'imprime** : un
-``pnpm -r`` mêle un paquet vide et un paquet testé, ``pytest && go test`` met
-deux exécuteurs dans une sortie, ``go test -json`` enferme la ligne ``ok`` dans
-un champ JSON, et un vrai rouge peut citer un motif dans l'identifiant d'un
-test. Une sortie sans motif reconnu rend ``None`` : comportement inchangé pour
-une commande dont l'exécuteur est inconnu.
+qu'au moins un test a tourné, **quel que soit l'outil qui l'imprime parmi ceux
+que la liste couvre** (pytest, vitest, jest, go, cargo, unittest, mocha,
+node:test et TAP, minitest, rspec, phpunit, dotnet) : un ``pnpm -r`` mêle un
+paquet vide et un paquet testé, ``pytest && go test`` met deux exécuteurs dans
+une sortie, ``go test -json`` enferme la ligne ``ok`` dans un champ JSON, et un
+vrai rouge peut citer un motif dans l'identifiant d'un test. Les orchestrateurs
+de monorepo (turbo, ``pnpm -r``, nx, lerna) préfixent chaque ligne
+(``api:test: ``, ``packages/api test: ``) : les preuves ancrées en début de
+ligne acceptent ce préfixe. Une sortie sans motif reconnu rend ``None`` :
+comportement inchangé pour une commande dont l'exécuteur est inconnu, y compris
+un rouge d'un exécuteur hors liste mêlé à un motif de vide d'un autre outil
+(limite assumée, voir le CHANGELOG).
 """
 
 from __future__ import annotations
 
 import re
+
+#: Préfixe de ligne optionnel des orchestrateurs de monorepo (``api:test: ``, ``packages/api test: ``,
+#: ``[0] ``) : tout jusqu'au premier ``: `` ou ``] `` de la ligne.
+_PFX = r"^(?:[^\n]*?[:\]] )?"
 
 _NO_FILES_VITEST = re.compile(r"No test files? found", re.IGNORECASE)
 _NO_TESTS_JEST = re.compile(r"No tests found", re.IGNORECASE)
@@ -29,18 +39,18 @@ _GO_NO_TEST = re.compile(r"\[no test files\]")
 #: et ``-v`` l'annonce en amont par ``testing: warning: no tests to run``.
 _GO_NO_TEST_TO_RUN = re.compile(r"\[no tests to run\]|testing: warning: no tests to run")
 _GO_OK_VIDE = r"(?![^\n]*\[no tests to run\])"
-_GO_RAN = re.compile(rf"^(?:ok|FAIL){_GO_OK_VIDE}\s+\S+\s+\S+|^--- (?:PASS|FAIL)", re.MULTILINE)
+_GO_RAN = re.compile(rf"{_PFX}(?:(?:ok|FAIL){_GO_OK_VIDE}\s+\S+\s+\S+|--- (?:PASS|FAIL))", re.MULTILINE)
 #: Avec ``-v``, un paquet sans test imprime l'avertissement, ``PASS`` puis une ligne ``ok`` sans
 #: suffixe : cette ligne n'est pas une preuve (texte, puis ``-json`` où chaque ligne est un événement).
 _GO_VIDE_VERBOSE = re.compile(
-    r"testing: warning: no tests to run\r?\n(?:PASS\r?\n)?ok\b[^\n]*\n?"
+    r"testing: warning: no tests to run\r?\n(?:(?:[^\n]*?[:\]] )?PASS\r?\n)?(?:[^\n]*?[:\]] )?ok\b[^\n]*\n?"
     r'|"Output":\s*"testing: warning: no tests to run\\n"[^\n]*\n'
     r'(?:[^\n]*"Output":\s*"PASS\\n"[^\n]*\n)?[^\n]*"Output":\s*"ok\b[^\n]*(?:\n|$)'
 )
 _CARGO_RESULT = re.compile(r"test result: \w+\. (\d+) passed; (\d+) failed")
-_UNITTEST_ZERO = re.compile(r"^Ran 0 tests?\b", re.MULTILINE)
+_UNITTEST_ZERO = re.compile(rf"{_PFX}Ran 0 tests?\b", re.MULTILINE)
 _PYTEST_NONE = re.compile(r"^(?:=+ )?no tests ran\b", re.MULTILINE | re.IGNORECASE)
-_MOCHA_PASSING = re.compile(r"^\s*(\d+) passing\b", re.MULTILINE)
+_MOCHA_PASSING = re.compile(rf"{_PFX}\s*(\d+) passing\b", re.MULTILINE)
 
 #: Preuves qu'au moins un test a tourné, une par exécuteur (compte non nul).
 _PROOF_PATTERNS = (
@@ -55,12 +65,21 @@ _PROOF_PATTERNS = (
     re.compile(r"test result: \w+\. (?:[1-9]\d* passed|\d+ passed; [1-9]\d* failed)"),
     # cargo : un binaire a démarré des tests, même s'il a avorté (SIGABRT, ``exit``) avant d'imprimer
     # son ``test result:`` ; ligne de test individuelle déjà rendue.
-    re.compile(r"^running [1-9]\d* tests?\s*$", re.MULTILINE),
-    re.compile(r"^test \S.* \.\.\. (?:ok|FAILED)\b", re.MULTILINE),
+    re.compile(rf"{_PFX}running [1-9]\d* tests?\s*$", re.MULTILINE),
+    re.compile(rf"{_PFX}test \S.* \.\.\. (?:ok|FAILED)\b", re.MULTILINE),
     # unittest.
-    re.compile(r"^Ran [1-9]\d* tests?\b", re.MULTILINE),
+    re.compile(rf"{_PFX}Ran [1-9]\d* tests?\b", re.MULTILINE),
     # mocha.
-    re.compile(r"^\s*[1-9]\d* (?:passing|failing)\b", re.MULTILINE),
+    re.compile(rf"{_PFX}\s*[1-9]\d* (?:passing|failing)\b", re.MULTILINE),
+    # node:test (« ℹ tests 3 », « ℹ pass 3 », « ℹ fail 1 ») et TAP (« # pass 3 »).
+    re.compile(rf"{_PFX}(?:ℹ|#) (?:tests|pass|fail) [1-9]\d*\s*$", re.MULTILINE),
+    # minitest (« 3 runs, 5 assertions, ... »), rspec (« 3 examples, 0 failures »).
+    re.compile(rf"{_PFX}[1-9]\d* runs?, \d+ assertions?", re.MULTILINE),
+    re.compile(rf"{_PFX}[1-9]\d* examples?, \d+ failures?", re.MULTILINE),
+    # phpunit (« OK (3 tests, 5 assertions) », « Tests: 3, Assertions: 5, Failures: 1 »).
+    re.compile(rf"{_PFX}(?:OK \([1-9]\d* tests?,|Tests: [1-9]\d*,)", re.MULTILINE),
+    # dotnet test (« Passed!  - Failed: 0, Passed: 3, Skipped: 0, Total: 3 »).
+    re.compile(rf"{_PFX}(?:Passed|Failed)!\s+- Failed:[^\n]*Total:\s+[1-9]", re.MULTILINE),
 )
 
 

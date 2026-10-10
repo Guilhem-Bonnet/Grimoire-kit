@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from grimoire.missions.dispatch import _classify_unrunnable, _run_checks
+from grimoire.missions.empty_green import has_execution_proof
 
 
 def _check(tmp_path: Path, printed: str, *, stream: str = "stdout"):
@@ -235,3 +236,113 @@ def test_go_sans_aucun_test_a_lancer_via_un_vrai_check_est_inexecutable(tmp_path
 )
 def test_un_paquet_go_reellement_execute_reste_une_preuve(output: str) -> None:
     assert _classify_unrunnable("go test ./...", 0, output, "") is None
+
+
+# W1-04-S3-01 : turbo et ``pnpm -r`` préfixent chaque ligne de la sortie de l'exécuteur.
+_TURBO_GO_VIDE = "cli:test: ?   \texample.com/cli\t[no test files]\n"
+_PNPM_VITEST_VIDE = "packages/web test: No test files found, exiting with code 1\n"
+_PNPM_MOCHA_VIDE = "packages/web test: No test files found...\n"
+
+
+@pytest.mark.parametrize(
+    ("label", "printed", "exit_code"),
+    [
+        ("turbo go, vert", _TURBO_GO_VIDE + "api:test: ok  \texample.com/api\t0.004s\n", 0),
+        (
+            "turbo go, rouge",
+            _TURBO_GO_VIDE
+            + "api:test: --- FAIL: TestA (0.00s)\napi:test: FAIL\napi:test: FAIL\texample.com/api\t0.004s\n",
+            1,
+        ),
+        ("pnpm mocha, vert", _PNPM_MOCHA_VIDE + "packages/api test:   4 passing (8ms)\n", 0),
+        (
+            "pnpm mocha, rouge",
+            _PNPM_MOCHA_VIDE + "packages/api test:   3 passing (8ms)\npackages/api test:   1 failing\n",
+            1,
+        ),
+        ("pnpm vitest, vert", _PNPM_VITEST_VIDE + "packages/api test:       Tests  7 passed (7)\n", 0),
+        ("turbo cargo, vert", _TURBO_GO_VIDE + "api:test: running 2 tests\napi:test: test a ... ok\n", 0),
+        ("turbo unittest, vert", _TURBO_GO_VIDE + "api:test: Ran 5 tests in 0.001s\n", 0),
+        (
+            "turbo go -v, vert",
+            "api:test: testing: warning: no tests to run\napi:test: PASS\napi:test: ok  \texample.com/m/b\t0.002s\n"
+            "api:test: ok  \texample.com/m/c\t0.010s\n",
+            0,
+        ),
+    ],
+)
+def test_une_preuve_prefixee_par_un_orchestrateur_de_monorepo_reste_une_preuve(
+    tmp_path: Path, label: str, printed: str, exit_code: int
+) -> None:
+    (result,) = _run_checks((f"printf %s {shlex.quote(printed)}; exit {exit_code}",), project_root=tmp_path)
+
+    assert result.exit_code == exit_code
+    assert result.unrunnable_reason is None, label
+    assert result.ok is (exit_code == 0)
+
+
+@pytest.mark.parametrize(
+    ("printed", "ligne"),
+    [
+        ("api:test: ?   \texample.com/api\t[no test files]\n", "go"),
+        ("api:test: ok  \texample.com/m/b\t0.002s [no tests to run]\n", "go à lancer"),
+        ("packages/api test: Ran 0 tests in 0.000s\n", "unittest"),
+        ("packages/api test:   0 passing (1ms)\n", "mocha"),
+    ],
+)
+def test_un_vide_prefixe_sans_preuve_reste_inexecutable(printed: str, ligne: str) -> None:
+    assert _classify_unrunnable("turbo run test", 0, printed, "") is not None, ligne
+
+
+# W1-04-S3-02 : des exécuteurs hors de la liste d'origine (node:test, minitest, rspec...).
+_NODE_TEST = "ℹ tests 3\nℹ suites 0\nℹ pass 3\nℹ fail 0\nℹ cancelled 0\n"
+_NODE_TEST_ROUGE = "ℹ tests 3\nℹ pass 2\nℹ fail 1\n"
+_MINITEST = "Finished in 0.001s\n3 runs, 5 assertions, 0 failures, 0 errors, 0 skips\n"
+_MINITEST_ROUGE = "3 runs, 5 assertions, 1 failures, 0 errors, 0 skips\n"
+
+
+@pytest.mark.parametrize(
+    ("label", "printed", "exit_code"),
+    [
+        ("node:test pnpm, vert", _PNPM_VITEST_VIDE + "".join(f"packages/api test: {x}\n" for x in _NODE_TEST.splitlines()), 0),
+        (
+            "node:test pnpm, rouge",
+            _PNPM_VITEST_VIDE + "".join(f"packages/api test: {x}\n" for x in _NODE_TEST_ROUGE.splitlines()),
+            1,
+        ),
+        ("node:test, vert", _JEST_VIDE + _NODE_TEST, 0),
+        ("TAP, rouge", _JEST_VIDE + "# tests 4\n# pass 3\n# fail 1\n", 1),
+        ("minitest, vert", _JEST_VIDE + _MINITEST, 0),
+        ("minitest, rouge", _JEST_VIDE + _MINITEST_ROUGE, 1),
+        ("rspec, vert", _JEST_VIDE + "Finished in 0.01 seconds\n3 examples, 0 failures\n", 0),
+        ("rspec, rouge", _JEST_VIDE + "3 examples, 1 failure\n", 1),
+        ("phpunit, vert", _JEST_VIDE + "OK (3 tests, 5 assertions)\n", 0),
+        ("phpunit, rouge", _JEST_VIDE + "Tests: 3, Assertions: 5, Failures: 1.\n", 1),
+        (
+            "dotnet, vert",
+            _JEST_VIDE + "Passed!  - Failed:     0, Passed:     3, Skipped:     0, Total:     3, Duration: 12 ms\n",
+            0,
+        ),
+        (
+            "dotnet, rouge",
+            _JEST_VIDE + "Failed!  - Failed:     1, Passed:     2, Skipped:     0, Total:     3, Duration: 12 ms\n",
+            1,
+        ),
+    ],
+)
+def test_un_executeur_hors_de_la_liste_d_origine_reste_une_preuve(
+    tmp_path: Path, label: str, printed: str, exit_code: int
+) -> None:
+    (result,) = _run_checks((f"printf %s {shlex.quote(printed)}; exit {exit_code}",), project_root=tmp_path)
+
+    assert result.exit_code == exit_code
+    assert result.unrunnable_reason is None, label
+    assert result.ok is (exit_code == 0)
+
+
+@pytest.mark.parametrize(
+    "printed",
+    ["ℹ tests 0\nℹ pass 0\nℹ fail 0\n", "0 runs, 0 assertions, 0 failures, 0 errors, 0 skips\n", "0 examples, 0 failures\n"],
+)
+def test_un_decompte_nul_hors_liste_n_est_pas_une_preuve(printed: str) -> None:
+    assert has_execution_proof(printed) is False
