@@ -2554,6 +2554,7 @@ def _run_one(
         test_files=task.test_files,
         run_dir=run_dir,
         hidden_dir=hidden_dir,
+        canonical_dirs=(task.exercise_dir,),
     )
 
     if outcome.terminated_reason in ("timeout", "loop"):

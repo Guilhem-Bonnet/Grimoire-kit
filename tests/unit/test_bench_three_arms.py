@@ -2407,12 +2407,12 @@ def test_task_repo_guards_live_in_their_own_module_and_script_does_not_grow() ->
     """W1-08a (T2-03) : ``three_arms.py`` dépassait déjà le seuil du ratchet
     (non couvert pour ``scripts/``) ; les gardes vivent dans ``task_repo.py``
     et le script ne grossit pas au-delà de ``origin/main`` (2584 lignes) + le
-    câblage de W1-08b (35 lignes : champs de ``RunRecord``, exclusion des taux,
-    appel de ``hidden_reads``) ; le détecteur et le rendu vivent dans ``hidden_reads.py``."""
+    câblage de W1-08b (36 lignes : champs de ``RunRecord``, exclusion des taux,
+    appel de ``hidden_reads`` avec le dossier de l'exercice canonique) ; le détecteur et le rendu vivent dans ``hidden_reads.py``."""
     for name in ("ContaminatedTaskRepoError", "assert_task_repo_clean", "reset_run_dir"):
         assert getattr(ta, name).__module__ == "task_repo"
     assert (SCRIPT.parent / "task_repo.py").is_file()
-    assert len(SCRIPT.read_text(encoding="utf-8").splitlines()) <= 2584 + 35
+    assert len(SCRIPT.read_text(encoding="utf-8").splitlines()) <= 2584 + 36
 
 
 # ── W1-08b (#694) : run invalidé si la transcription lit un test caché ─────
@@ -2435,8 +2435,13 @@ class _Layout:
         self.hidden = self.task_root / "hidden-tests"
         self.run_dir = self.task_root / "kit-gov" / "run1"
         self.previous = self.task_root / "kit-gov" / "run0"
-        for directory in (self.hidden, self.run_dir, self.previous):
+        # la source canonique : le dossier de l'exercice dans le clone polyglot-benchmark
+        self.clone = workspace / "polyglot-benchmark"
+        self.canonical = self.clone / "python" / "exercises" / "practice" / "ex"
+        for directory in (self.hidden, self.run_dir, self.previous, self.canonical / ".meta"):
             directory.mkdir(parents=True)
+        (self.canonical / "ex_test.py").write_text("def test_x(): ...\n", encoding="utf-8")
+        (self.canonical / ".meta" / "example.py").write_text("def solve(): ...\n", encoding="utf-8")
         (self.hidden / "ex_test.py").write_text("def test_x(): ...\n", encoding="utf-8")
         (self.previous / "ex_test.py").write_text("def test_x(): ...\n", encoding="utf-8")  # copié par run_hidden_tests
         (self.run_dir / "ex.py").write_text("pass\n", encoding="utf-8")
@@ -2447,6 +2452,7 @@ class _Layout:
             test_files=("ex_test.py",),
             run_dir=self.run_dir,
             hidden_dir=self.hidden,
+            canonical_dirs=(self.canonical,),
             other_run_dirs=(self.previous,),
         )
 
@@ -2471,11 +2477,26 @@ class _Layout:
         ("directory", _tool_line("Bash", command="find / -name 'ex_test.py'")),
         ("direct", _tool_line("Bash", command="python3 - <<'EOF'\nprint(open('../../hidden-tests/ex_test.py').read())\nEOF")),
         ("glob", _tool_line("Bash", command="cat ../../hidden-tests/ex_[t]est.py")),
+        # W1-08b-S1-01 : le test canonique du clone polyglot-benchmark est la même fuite
+        ("direct", _tool_line("Read", file_path="{canonical}/ex_test.py")),
+        ("direct", _tool_line("Bash", command="cat ../../../../polyglot-benchmark/python/exercises/practice/ex/ex_test.py")),
+        ("direct", _tool_line("Bash", command="cd {canonical} && sed -n 1,20p ex_test.py")),
+        ("direct", _tool_line("Bash", command="grep -n test {canonical}/ex_test.py")),
+        ("glob", _tool_line("Glob", pattern="*_test.py", path="{canonical}")),
+        ("directory", _tool_line("Read", file_path="{canonical}/.meta/example.py")),  # la solution de référence
+        ("directory", _tool_line("Bash", command="ls {canonical}")),
+        ("directory", _tool_line("Bash", command="find {clone} -name '*_test.py'")),
+        ("directory", _tool_line("Grep", pattern="def test", path="{clone}")),
     ],
 )
 def test_hidden_test_read_makes_the_transcript_invalid(tmp_path: Path, kind: str, line: str) -> None:
     layout = _Layout(tmp_path)
-    line = line.replace("{hidden}", str(layout.hidden)).replace("{task_root}", str(layout.task_root))
+    line = (
+        line.replace("{hidden}", str(layout.hidden))
+        .replace("{task_root}", str(layout.task_root))
+        .replace("{canonical}", str(layout.canonical))
+        .replace("{clone}", str(layout.clone))
+    )
     found = layout.find(line)
     assert [read.kind for read in found] == [kind], line
     assert found[0].line == 1
@@ -2507,19 +2528,72 @@ def test_clean_transcript_stays_valid(tmp_path: Path, line: str) -> None:
     assert layout.find(line.replace("{run_dir}", str(layout.run_dir))) == []
 
 
-def test_cd_persists_between_tool_calls_and_report_names_the_triggering_line(tmp_path: Path) -> None:
-    """Le shell de Claude Code est persistant : ``cd`` puis une lecture « innocente »."""
+def test_cd_inside_the_repo_persists_between_tool_calls_and_report_names_the_triggering_line(tmp_path: Path) -> None:
+    """``cd src`` (dans le dépôt du run) tient d'un appel ``Bash`` au suivant."""
     layout = _Layout(tmp_path)
+    (layout.run_dir / "src").mkdir()
     lines = [
         _tool_line("Bash", command="cat ex.py"),
-        _tool_line("Bash", command="cd ../../hidden-tests"),
-        _tool_line("Bash", command="cat ex_test.py"),
+        _tool_line("Bash", command="cd src"),
+        _tool_line("Bash", command="cat ../../run0/ex_test.py"),  # src/../../run0 = le run0 frère
     ]
     found = layout.find(*lines)
-    assert [(read.line, read.tool) for read in found] == [(2, "Bash"), (3, "Bash")]
-    assert found[1].kind == "direct"
-    assert "cat ex_test.py" in found[1].excerpt
-    assert found[1].to_dict()["line"] == 3
+    assert [(read.line, read.tool, read.kind) for read in found] == [(3, "Bash", "direct")]
+    assert "cat ../../run0/ex_test.py" in found[0].excerpt
+    assert found[0].to_dict()["line"] == 3
+
+
+def _bash_result(tool_id: str, text: str) -> str:
+    return json.dumps({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": tool_id, "content": text}]}})
+
+
+def _bash_call(tool_id: str, command: str) -> str:
+    event = json.loads(_tool_line("Bash", command=command))
+    event["message"]["content"][0]["id"] = tool_id
+    return json.dumps(event)
+
+
+def test_cd_to_the_hidden_dir_stays_candidate_until_the_result_settles_it(tmp_path: Path) -> None:
+    """Sans résultat, ``cd`` hors du dépôt garde les deux répertoires candidats (fail-closed)."""
+    layout = _Layout(tmp_path)
+    cd, cat = _tool_line("Bash", command="cd ../../hidden-tests"), _tool_line("Bash", command="cat ex_test.py")
+    unsettled = layout.find(cd, cat)
+    assert [(read.line, read.kind) for read in unsettled] == [(1, "directory"), (2, "direct")]
+    reset = f"Shell cwd was reset to {layout.run_dir}"
+    settled = layout.find(_bash_call("t1", "cd ../../hidden-tests"), _bash_result("t1", reset), cat)
+    assert [(read.line, read.kind) for read in settled] == [(1, "directory")]  # le shell est revenu au dépôt
+    kept = layout.find(_bash_call("t1", "cd ../../hidden-tests"), _bash_result("t1", "ok"), cat)
+    assert [(read.line, read.kind) for read in kept] == [(1, "directory"), (3, "direct")]  # pas de reset : il y est resté
+
+
+def test_cd_outside_the_repo_does_not_carry_over_to_the_next_call(tmp_path: Path) -> None:
+    """W1-08b-S1-02 : Claude Code ramène le shell au dépôt (« Shell cwd was reset to ... »)."""
+    layout = _Layout(tmp_path)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    init = json.dumps({"type": "system", "subtype": "init", "cwd": str(layout.run_dir)})
+    cat = _tool_line("Bash", command="cat ../run0/ex_test.py")
+    witness = layout.find(init, cat)
+    assert [read.kind for read in witness] == ["direct"]
+    cd = f"cd {elsewhere} && ls"
+    # résultat absent : les deux candidats sont jugés, le dépôt trouve la copie
+    assert [(r.line, r.kind) for r in layout.find(init, _tool_line("Bash", command=cd), cat)] == [(3, "direct")]
+    # résultat qui confirme la réinitialisation
+    reset = _bash_result("t1", f"x\nShell cwd was reset to {layout.run_dir}")
+    assert [(r.line, r.kind) for r in layout.find(init, _bash_call("t1", cd), reset, cat)] == [(4, "direct")]
+    # résultat sans message : le shell est resté dehors, `../run0` n'y est pas la copie
+    assert layout.find(init, _bash_call("t1", cd), _bash_result("t1", "ok"), cat) == []
+    # dans la MÊME commande, le cwd de `cd` vaut encore pour les segments suivants
+    assert layout.find(init, _tool_line("Bash", command=f"cd {elsewhere} && cat ../run0/ex_test.py")) == []
+
+
+def test_reset_message_of_another_call_does_not_settle_the_shell(tmp_path: Path) -> None:
+    layout = _Layout(tmp_path)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    cat = _tool_line("Bash", command="cat ../run0/ex_test.py")
+    found = layout.find(_bash_call("t1", f"cd {elsewhere}"), _bash_result("autre", "ok"), cat)
+    assert [(read.line, read.kind) for read in found] == [(3, "direct")]
 
 
 def test_symlinked_run_dir_is_still_the_agents_own_repo(tmp_path: Path) -> None:
@@ -2629,6 +2703,20 @@ def test_run_one_marks_the_run_invalid_when_the_transcript_reads_a_hidden_test(
     json.dumps(record.to_dict())  # persistable dans results.jsonl
 
 
+def test_run_one_marks_the_run_invalid_when_the_transcript_reads_the_canonical_test(
+    synthetic_bench_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """W1-08b-S1-01 : ``task.exercise_dir`` (clone polyglot-benchmark) est passé au détecteur."""
+    task = _task(synthetic_bench_root)
+    canonical_test = task.exercise_dir / task.test_files[0]
+    assert canonical_test.is_file()
+    lines = [_tool_line("Read", file_path=str(canonical_test))]
+    record = _run_one_with_transcript(synthetic_bench_root, tmp_path, monkeypatch, lines)
+    assert record.transcript_check == "invalid"
+    assert record.hidden_test_reads[0]["kind"] == "direct"
+    assert record.hidden_test_reads[0]["line"] == 1
+
+
 def test_run_one_marks_a_clean_transcript_clean(
     synthetic_bench_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2666,7 +2754,12 @@ def test_main_announces_an_invalid_run_on_stderr(
 def test_empty_or_missing_transcript_is_unevaluated(tmp_path: Path) -> None:
     layout = _Layout(tmp_path)
     check = _hidden_reads_module().check_transcript
-    kwargs: dict[str, Any] = {"test_files": ("ex_test.py",), "run_dir": layout.run_dir, "hidden_dir": layout.hidden}
+    kwargs: dict[str, Any] = {
+        "test_files": ("ex_test.py",),
+        "run_dir": layout.run_dir,
+        "hidden_dir": layout.hidden,
+        "canonical_dirs": (layout.canonical,),
+    }
     assert check(tmp_path / "absent.jsonl", **kwargs) == ("unevaluated", None)
     empty = tmp_path / "empty.jsonl"
     empty.write_text("\n\n", encoding="utf-8")
@@ -2679,8 +2772,9 @@ def test_check_transcript_sees_the_copied_tests_of_sibling_runs(tmp_path: Path) 
     log = tmp_path / "t.jsonl"
     log.write_text(_tool_line("Bash", command="cat ../run0/ex_test.py") + "\n", encoding="utf-8")
     verdict, reads = _hidden_reads_module().check_transcript(
-        log, test_files=("ex_test.py",), run_dir=layout.run_dir, hidden_dir=layout.hidden
-    )
+        log, test_files=("ex_test.py",), run_dir=layout.run_dir, hidden_dir=layout.hidden,
+        canonical_dirs=(layout.canonical,),
+    )  # fmt: skip
     assert verdict == "invalid"
     assert reads is not None
     assert reads[0]["kind"] == "direct"

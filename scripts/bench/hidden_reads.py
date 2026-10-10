@@ -10,16 +10,22 @@ tests copiés compris, à un ``..`` du dépôt de l'agent) et comptait comme suc
 Le détecteur lit le flux ``--output-format stream-json`` et ne regarde que les
 APPELS D'OUTIL de l'agent (``tool_use``), jamais le texte : citer un nom de
 fichier dans une réponse n'est pas le lire. Il résout chaque référence de chemin
-contre le répertoire courant suivi de l'agent (``cd`` compris, le shell de
-Claude Code est persistant) et la compare aux emplacements qui exposent les tests :
+contre le répertoire courant suivi de l'agent et la compare aux emplacements
+qui exposent les tests. Le suivi du répertoire courant calque Claude Code (voir
+``_ShellCwd``) : un ``cd`` vaut pour la suite de la commande ; d'un appel ``Bash``
+à l'autre, le répertoire final n'est gardé que s'il reste dans le dépôt du run.
+Sinon le shell est ramené à ce dépôt (« Shell cwd was reset to ... »), ce que le
+``tool_result`` confirme ; sans confirmation, les deux répertoires restent candidats.
 
-- ``direct`` : le chemin est un fichier de test exposé (``hidden-tests/<test>``
-  ou ``<test>`` copié dans un autre dossier ``run<i>`` de la tâche) ;
+- ``direct`` : le chemin est un fichier de test exposé (``hidden-tests/<test>``,
+  ``<test>`` copié dans un autre dossier ``run<i>`` de la tâche, ou ``<test>``
+  de l'exercice canonique du clone ``polyglot-benchmark``) ;
 - ``glob`` : un motif (``*``, ``**``, ``?``, ``[..]``) qui en désigne un, que ce
   soit dans un argument ``Bash`` ou dans l'outil ``Glob`` ;
-- ``directory`` : le dossier ``hidden-tests`` (de n'importe quelle tâche) ou
-  un autre ``run<i>`` désigné nommément, ou un ancêtre parcouru récursivement
-  (outil ``Grep``, ``grep -r``, ``rg``, ``find``...).
+- ``directory`` : le dossier ``hidden-tests`` (de n'importe quelle tâche), un
+  autre ``run<i>`` ou le dossier de l'exercice canonique (son ``.meta/`` porte
+  la solution de référence) désigné nommément, ou un ancêtre parcouru
+  récursivement (outil ``Grep``, ``grep -r``, ``rg``, ``find``...).
 
 Un drapeau n'est pas un verdict de fraude : il invalide le run (exclu des
 taux) et la ligne déclenchante est listée pour revue humaine. Limites connues,
@@ -127,14 +133,24 @@ def _forms(path: Path) -> set[PurePath]:
 class _Exposure:
     """Ce que l'agent ne doit pas lire : tests cachés et copies de tests."""
 
-    def __init__(self, test_files: Sequence[str], run_dir: Path, hidden_dir: Path, other_run_dirs: Sequence[Path]):
+    def __init__(
+        self,
+        test_files: Sequence[str],
+        run_dir: Path,
+        hidden_dir: Path,
+        other_run_dirs: Sequence[Path],
+        canonical_dirs: Sequence[Path],
+    ):
         self.run_dirs = _forms(run_dir)
         self.dirs: set[PurePath] = _forms(hidden_dir)
-        for other in other_run_dirs:
+        # Les copies de tests (``run<i>`` frères) et la source canonique (le
+        # dossier de l'exercice dans le clone polyglot-benchmark, solution de
+        # référence de ``.meta/`` comprise) exposent les mêmes fichiers que ``hidden-tests``.
+        for other in (*other_run_dirs, *canonical_dirs):
             self.dirs |= _forms(other)
         self.files: set[PurePath] = {base / rel for base in self.dirs for rel in test_files}
 
-    def _inside_run_dir(self, path: PurePath) -> bool:
+    def inside_run_dir(self, path: PurePath) -> bool:
         return any(path == run or path.is_relative_to(run) for run in self.run_dirs)
 
     def classify(self, path: PurePath, *, is_glob: bool, recursive: bool) -> str | None:
@@ -148,7 +164,7 @@ class _Exposure:
         if not is_glob:
             with contextlib.suppress(OSError, RuntimeError):
                 forms.add(PurePath(Path(path).resolve()))
-        if any(self._inside_run_dir(form) for form in forms):
+        if any(self.inside_run_dir(form) for form in forms):
             return None
         kinds = [k for form in forms if (k := self._classify(form, is_glob=is_glob, recursive=recursive))]
         return min(kinds, key=lambda k: _KIND_RANK[k]) if kinds else None
@@ -257,12 +273,79 @@ def _excerpt(tool_input: dict[str, Any]) -> str:
     return text if len(text) <= _EXCERPT_MAX else text[: _EXCERPT_MAX - 1] + "…"
 
 
+_CWD_RESET = re.compile(r"Shell cwd was reset to (.+?)\s*$")
+
+
+def _result_text(content: Any) -> str:
+    """Le texte d'un ``tool_result`` (chaîne, ou liste de blocs ``text``)."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(str(b.get("text", "")) for b in content if isinstance(b, dict) and b.get("type") == "text")
+    return ""
+
+
+class _ShellCwd:
+    """Le répertoire courant du shell de l'agent, calqué sur Claude Code (W1-08b-S1-02).
+
+    Dans une commande, un ``cd`` vaut pour les segments suivants. D'un appel
+    ``Bash`` au suivant, le répertoire final n'est gardé que s'il reste dans le
+    dépôt du run ; sinon Claude Code ramène le shell au dépôt et l'écrit dans le
+    ``tool_result`` (``Shell cwd was reset to <dépôt>``). Cette réinitialisation
+    n'est pas systématique (un ``cd`` vers le scratchpad de l'agent y échappe dans
+    certaines transcriptions archivées) : tant que le ``tool_result`` ne tranche
+    pas, les DEUX répertoires restent candidats et une référence relative est
+    jugée contre chacun (fail-closed). Le message tranche vers le répertoire qu'il
+    nomme ; son absence, vers le répertoire où la commande a fini.
+    """
+
+    def __init__(self, home: PurePath, exposure: _Exposure):
+        self.home = home
+        self.exposure = exposure
+        self.candidates: set[PurePath] = {home}
+        self._pending: tuple[object, set[PurePath]] | None = None
+
+    def restart(self, cwd: PurePath) -> None:
+        self.candidates = {cwd}
+        self._pending = None
+
+    def references(
+        self, name: str, tool_input: dict[str, Any], tool_use_id: object
+    ) -> list[tuple[str, PurePath, bool]]:
+        refs: list[tuple[str, PurePath, bool]] = []
+        finals: set[PurePath] = set()
+        for cwd in sorted(self.candidates):
+            found, final = _tool_references(name, tool_input, cwd)
+            refs.extend(found)
+            finals.add(final)
+        if name != "Bash":
+            return refs
+        self._pending = None
+        outside = {c for c in finals if not self.exposure.inside_run_dir(c)}
+        if outside:
+            self._pending = (tool_use_id, finals)
+            finals = finals | {self.home}
+        self.candidates = finals
+        return refs
+
+    def settle(self, tool_use_id: object, text: str) -> None:
+        """Tranche, d'après le résultat de la dernière commande, où le shell se trouve."""
+        if self._pending is None or tool_use_id is None or self._pending[0] != tool_use_id:
+            return
+        _, finals = self._pending
+        self._pending = None
+        last = next((line for line in reversed(text.splitlines()) if line.strip()), "")
+        reset = _CWD_RESET.search(last)
+        self.candidates = {_lexical(reset.group(1))} if reset else finals
+
+
 def find_hidden_test_reads(
     lines: Iterable[str],
     *,
     test_files: Sequence[str],
     run_dir: Path,
     hidden_dir: Path,
+    canonical_dirs: Sequence[Path],
     other_run_dirs: Sequence[Path] = (),
 ) -> list[HiddenTestRead]:
     """Les appels d'outil d'une transcription stream-json qui désignent un test caché.
@@ -270,11 +353,14 @@ def find_hidden_test_reads(
     *run_dir* est le dépôt de l'agent (son répertoire courant de départ),
     *hidden_dir* le dossier ``hidden-tests`` de la tâche, *other_run_dirs* les
     autres dossiers ``run<i>`` de la même tâche (ils contiennent les tests
-    copiés par ``run_hidden_tests``). Une liste vide est une transcription
-    propre ; l'appelant décide quoi faire d'une transcription illisible.
+    copiés par ``run_hidden_tests``), *canonical_dirs* les dossiers d'exercice
+    du clone ``polyglot-benchmark`` d'où viennent les tests (``task.exercise_dir``,
+    chemin absolu) : obligatoire, car l'oublier laisse la source canonique
+    lisible sans drapeau. Une liste vide est une transcription propre ;
+    l'appelant décide quoi faire d'une transcription illisible.
     """
-    exposure = _Exposure(test_files, run_dir, hidden_dir, other_run_dirs)
-    cwd = _lexical(run_dir)
+    exposure = _Exposure(test_files, run_dir, hidden_dir, other_run_dirs, canonical_dirs)
+    shell = _ShellCwd(_lexical(run_dir), exposure)
     found: list[HiddenTestRead] = []
     for number, raw in enumerate(lines, start=1):
         try:
@@ -284,11 +370,16 @@ def find_hidden_test_reads(
         if not isinstance(event, dict):
             continue
         if event.get("type") == "system" and event.get("subtype") == "init" and isinstance(event.get("cwd"), str):
-            cwd = _lexical(event["cwd"])
+            shell.restart(_lexical(event["cwd"]))
+            continue
+        content = (event.get("message") or {}).get("content")
+        if event.get("type") == "user":
+            for block in content if isinstance(content, list) else []:
+                if isinstance(block, dict) and block.get("type") == "tool_result":
+                    shell.settle(block.get("tool_use_id"), _result_text(block.get("content")))
             continue
         if event.get("type") != "assistant":
             continue
-        content = (event.get("message") or {}).get("content")
         for block in content if isinstance(content, list) else []:
             if not isinstance(block, dict) or block.get("type") != "tool_use":
                 continue
@@ -296,7 +387,7 @@ def find_hidden_test_reads(
             if not isinstance(tool_input, dict):
                 continue
             name = str(block.get("name") or "?")
-            refs, cwd = _tool_references(name, tool_input, cwd)
+            refs = shell.references(name, tool_input, block.get("id"))
             hits = [
                 (kind, token)
                 for token, path, recursive in refs
@@ -309,14 +400,16 @@ def find_hidden_test_reads(
 
 
 def check_transcript(
-    log_path: Path, *, test_files: Sequence[str], run_dir: Path, hidden_dir: Path
+    log_path: Path, *, test_files: Sequence[str], run_dir: Path, hidden_dir: Path, canonical_dirs: Sequence[Path]
 ) -> tuple[str, list[dict[str, Any]] | None]:
     """Verdict d'un run : ``("clean", [])``, ``("invalid", [lectures])`` ou ``("unevaluated", None)``.
 
     ``unevaluated`` : transcription absente, illisible ou vide. Un contrôle qui
     n'a rien pu lire ne rend jamais « propre ». Les autres dossiers ``run<i>``
     de la tâche (frères de *run_dir* sous ``hidden_dir.parent``) sont exposés
-    au même titre que ``hidden-tests`` : ils contiennent les tests copiés.
+    au même titre que ``hidden-tests`` : ils contiennent les tests copiés. Les
+    *canonical_dirs* (``task.exercise_dir``) le sont aussi : le test canonique
+    du clone ``polyglot-benchmark`` est la même fuite.
     """
     try:
         lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
@@ -326,7 +419,12 @@ def check_transcript(
         return ("unevaluated", None)
     others = sorted(d for d in hidden_dir.parent.glob("*/run*") if d.is_dir() and d != run_dir)
     reads = find_hidden_test_reads(
-        lines, test_files=test_files, run_dir=run_dir, hidden_dir=hidden_dir, other_run_dirs=others
+        lines,
+        test_files=test_files,
+        run_dir=run_dir,
+        hidden_dir=hidden_dir,
+        canonical_dirs=canonical_dirs,
+        other_run_dirs=others,
     )
     return ("invalid", [read.to_dict() for read in reads]) if reads else ("clean", [])
 
