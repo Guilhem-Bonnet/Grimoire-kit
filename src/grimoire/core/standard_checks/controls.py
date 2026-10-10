@@ -945,7 +945,7 @@ def _load_recorded_test_run(root: Path, task_id: str) -> dict[str, Any] | None:
         return None
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except (OSError, ValueError):  # silent-ok — illisible = aucune exécution prouvée, l'appelant échoue fermé
         return None
     return data if isinstance(data, dict) else None
 
@@ -1376,7 +1376,7 @@ def _mcp_server_names(path: Path, root: Path) -> tuple[list[str], bool]:
         return [], True
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError, UnicodeDecodeError):
+    except (OSError, ValueError, UnicodeDecodeError):  # silent-ok — illisible : signalé par le second membre du tuple
         return [], False
     if not isinstance(raw, dict):
         return [], False

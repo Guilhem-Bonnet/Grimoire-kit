@@ -24,7 +24,7 @@ gouverné n'a plus à appeler depuis ce lot :
 
 Issue #582 lot I (dosage V0) : une tâche classée V0 (:mod:`grimoire.missions.
 verifiability`) dont le profil n'est pas ``governed`` n'a, par construction,
-aucun jugement humain à consigner — le gate suffit. `_v0_non_governed` lit la
+aucun jugement humain à consigner — le gate suffit. `v0_non_governed` (défini dans ``claim_ledger_verify``, partagé avec ``standard verify``) lit la
 classe déjà projetée sur le board (`missions.board`, jamais recalculée ici :
 une seule source de vérité) et éteint ``acceptance.decision_pending`` et
 ``claims.empty`` pour ce seul cas, jamais pour V1/V2, jamais en profil
@@ -40,6 +40,7 @@ from grimoire.core.standard_checks.base import (
     StandardProfile,
     StandardVerificationResult,
 )
+from grimoire.core.standard_checks.claim_ledger_verify import v0_non_governed
 from grimoire.core.standard_checks.claim_ledger_verify import verify_claim_ledger as _verify_claim_ledger
 from grimoire.core.standard_checks.controls import _verify_acceptance_record
 from grimoire.core.standard_checks.verifiers import _verify_evidence_pack
@@ -50,28 +51,18 @@ __all__ = ["in_progress_content_checks", "review_state_content_checks"]
 def in_progress_content_checks(root: Path, profile: StandardProfile, task_id: str) -> tuple[StandardCheck, ...]:
     """Constats de contenu pendant ``in_progress`` (issue #614) : le claim-ledger, lignes seulement.
 
-    Une affirmation « utiliser » non prouvée pèse sur les décisions pendant le
-    travail, pas seulement à la revue ; avant ce lot elle passait
-    ``gate check --strict`` sans un mot jusqu'au passage en ``review``. Les
-    constats de clôture (registre vierge, synthèse vide) restent à la revue —
-    les lever ici bloquerait toute tâche gouvernée dès sa première minute.
+    Une affirmation « utiliser » non prouvée, ou « prouvé » sans preuve, pèse
+    sur les décisions pendant le travail, pas seulement à la revue ; avant ce
+    lot elle passait ``gate check --strict`` sans un mot jusqu'au passage en
+    ``review``. Une ligne mal formée ou hors vocabulaire n'est qu'un
+    avertissement ici (``rows_only``) : elle devient une erreur à la revue.
+    Les constats de clôture (registre vierge, synthèse vide) restent à la
+    revue — les lever ici bloquerait toute tâche gouvernée dès sa première
+    minute.
     """
     result = StandardVerificationResult(profile=profile.id, project_root=root)
     _verify_claim_ledger(root, profile, task_id, result, rows_only=True)
     return tuple(result.checks)
-
-
-def _v0_non_governed(root: Path, profile: StandardProfile, task_id: str) -> bool:
-    """True quand *task_id* est classé V0 et le profil n'est pas ``governed``."""
-    if profile.id == "governed":
-        return False
-    from grimoire.core.standard_generation import STANDARD_DIR
-    from grimoire.core.standard_state import _load_mapping, task_from_board
-
-    board = _load_mapping(root / STANDARD_DIR / "task-board.yaml")
-    verifiability = task_from_board(board, task_id).get("verifiability")
-    klass = verifiability.get("class") if isinstance(verifiability, dict) else None
-    return klass == "V0"
 
 
 def review_state_content_checks(root: Path, profile: StandardProfile, task_id: str) -> tuple[StandardCheck, ...]:
@@ -85,7 +76,7 @@ def review_state_content_checks(root: Path, profile: StandardProfile, task_id: s
     except Exception:  # noqa: S110 — projection best-effort, jamais au prix du gate lui-même
         pass
 
-    suppress_v0 = _v0_non_governed(root, profile, task_id)
+    suppress_v0 = v0_non_governed(root, profile, task_id)
     checks: list[StandardCheck] = []
 
     evidence_pack_result = StandardVerificationResult(profile=profile.id, project_root=root)

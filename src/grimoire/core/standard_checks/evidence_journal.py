@@ -152,7 +152,7 @@ def append_evidence_event(project_root: Path, task_id: str, event: dict[str, Any
         line = json.dumps(event, ensure_ascii=False)
         with open(full_path, "a", encoding="utf-8") as handle:
             handle.write(line + "\n")
-    except OSError:
+    except OSError:  # silent-ok — hook best-effort, jamais cassé (docstring)
         return
 
 
@@ -170,7 +170,7 @@ def read_evidence_log(project_root: Path, task_id: str) -> list[dict[str, Any]]:
     entries: list[dict[str, Any]] = []
     try:
         raw = full_path.read_text(encoding="utf-8")
-    except OSError:
+    except OSError:  # silent-ok — illisible = « rien observé », garde fermée (docstring)
         return []
     for line in raw.splitlines():
         line = line.strip()
@@ -178,7 +178,7 @@ def read_evidence_log(project_root: Path, task_id: str) -> list[dict[str, Any]]:
             continue
         try:
             parsed = json.loads(line)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError:  # silent-ok — ligne corrompue sautée, les autres comptent (docstring)
             continue
         if isinstance(parsed, dict) and parsed.get("type"):
             entries.append(parsed)
