@@ -2630,6 +2630,101 @@ def test_cd_dash_returns_to_the_previous_directory(tmp_path: Path) -> None:
     assert [r.kind for r in layout.find(init, _tool_line("Bash", command=f"cd -P {layout.task_root} && cat hidden-tests/ex_test.py"))] == ["direct"]
 
 
+
+# Chaque commande lit `../run0/ex_test.py` (la copie du test dans le run précédent) ; seul le répertoire
+# où elle s'exécute dépend de la portée du `cd`. Depuis le dépôt du run (`kit-gov/run1`) : `direct`.
+_SCOPE_READ = "cat ../run0/ex_test.py"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        pytest.param(_SCOPE_READ, id="temoin"),
+        pytest.param(f"(cd /opt && ls); {_SCOPE_READ}", id="sous-shell"),
+        pytest.param(f"(cd src && ls) && {_SCOPE_READ}", id="sous-shell-et"),
+        pytest.param(f"pushd /opt && ls && popd && {_SCOPE_READ}", id="pushd-popd"),
+        pytest.param(f"cd /opt | true; {_SCOPE_READ}", id="cd-dans-un-tube"),
+        pytest.param(f"echo $(cd /opt && pwd); {_SCOPE_READ}", id="substitution"),
+        pytest.param(f"bash -c 'cd /opt && ls'; {_SCOPE_READ}", id="bash-c"),
+        pytest.param(f"echo '(' ; (cd src); {_SCOPE_READ}", id="parenthese-entre-guillemets"),
+    ],
+)
+def test_cd_in_a_subshell_pipe_or_after_popd_does_not_move_the_rest_of_the_command(tmp_path: Path, command: str) -> None:
+    """W1-08b-S3-01 : un ``cd`` dans ``( ... )``, un élément de tube ou défait par ``popd`` ne déplace pas la suite."""
+    layout = _Layout(tmp_path)
+    (layout.run_dir / "src").mkdir()
+    assert [(r.line, r.kind) for r in layout.find(_tool_line("Bash", command=command))] == [(1, "direct")]
+
+
+@pytest.mark.parametrize(
+    "first",
+    [
+        pytest.param("(cd src && ls)", id="sous-shell"),
+        pytest.param("(cd /opt && ls) | cat", id="sous-shell-dans-un-tube"),
+        pytest.param("pushd src && popd", id="pushd-popd"),
+        pytest.param("cd src | true", id="cd-dans-un-tube"),
+    ],
+)
+def test_scoped_cd_does_not_carry_over_to_the_next_call(tmp_path: Path, first: str) -> None:
+    """W1-08b-S3-01 : le répertoire final d'un appel ne garde pas un ``cd`` dont la portée est close."""
+    layout = _Layout(tmp_path)
+    (layout.run_dir / "src").mkdir()
+    init = json.dumps({"type": "system", "subtype": "init", "cwd": str(layout.run_dir)})
+    found = layout.find(init, _bash_call("t1", first), _bash_result("t1", "ok"), _tool_line("Bash", command=_SCOPE_READ))
+    assert [(r.line, r.kind) for r in found] == [(4, "direct")]
+
+
+def test_cd_that_leaves_the_scope_still_moves_the_rest_of_the_command(tmp_path: Path) -> None:
+    """Contre-épreuve : ce qui n'est PAS dans un sous-shell déplace bien la suite (``{ ...; }`` et ``cd`` d'un tube terminal)."""
+    layout = _Layout(tmp_path)
+    (layout.run_dir / "src").mkdir()
+    deep = "cat ../../run0/ex_test.py"  # src/../../run0 : le run0 frère
+    for command in (f"cd src && {deep}", f"{{ cd src; }}; {deep}", f"(cd /opt); cd src && {deep}"):
+        assert [r.kind for r in layout.find(_tool_line("Bash", command=command))] == ["direct"], command
+    # un cd dans un sous-shell ne déplace pas la suite : `../../run0` y sort de l'arborescence du banc
+    assert layout.find(_tool_line("Bash", command=f"(cd src); {deep}")) == []
+
+
+def test_cd_in_the_last_element_of_a_pipe_keeps_both_directories_candidate(tmp_path: Path) -> None:
+    """zsh (et ``shopt -s lastpipe``) exécutent le dernier élément d'un tube dans le shell courant : fail-closed."""
+    layout = _Layout(tmp_path)
+    (layout.run_dir / "src").mkdir()
+    deep = "cat ../../run0/ex_test.py"
+    found = layout.find(_tool_line("Bash", command=f"echo x | cd src; {_SCOPE_READ}; {deep}"))
+    assert [(r.line, r.kind) for r in found] == [(1, "direct")]  # `../run0` depuis le dépôt, `../../run0` depuis src
+    init = json.dumps({"type": "system", "subtype": "init", "cwd": str(layout.run_dir)})
+    nxt = layout.find(init, _bash_call("t1", "echo x | cd src"), _bash_result("t1", "ok"), _tool_line("Bash", command=deep))
+    assert [(r.line, r.kind) for r in nxt] == [(4, "direct")]
+    nxt = layout.find(init, _bash_call("t1", "echo x | cd src"), _bash_result("t1", "ok"), _tool_line("Bash", command=_SCOPE_READ))
+    assert [(r.line, r.kind) for r in nxt] == [(4, "direct")]
+
+
+def test_unbalanced_parenthesis_keeps_the_entry_directory_candidate(tmp_path: Path) -> None:
+    """Une parenthèse jamais refermée ou un guillemet mal lu ne doit pas masquer le dépôt : fail-closed."""
+    layout = _Layout(tmp_path)
+    (layout.run_dir / "src").mkdir()
+    init = json.dumps({"type": "system", "subtype": "init", "cwd": str(layout.run_dir)})
+    unclosed = _bash_call("t1", "(cd src; ls")
+    found = layout.find(init, unclosed, _bash_result("t1", "ok"), _tool_line("Bash", command=_SCOPE_READ))
+    assert [(r.line, r.kind) for r in found] == [(4, "direct")]
+    # un guillemet jamais fermé cache les parenthèses : on les lit quand même, et le dépôt reste candidat
+    stray = layout.find(_tool_line("Bash", command=f"echo it's; (cd src); {_SCOPE_READ}"))
+    assert [r.kind for r in stray] == ["direct"]
+
+
+def test_popd_with_an_unknown_stack_plays_both_outcomes(tmp_path: Path) -> None:
+    """``popd`` sans ``pushd`` dans la commande : la pile vient d'un autre appel, comme ``cd -`` on joue rester ou revenir au dépôt."""
+    layout = _Layout(tmp_path)
+    (layout.run_dir / "src").mkdir()
+    init = json.dumps({"type": "system", "subtype": "init", "cwd": str(layout.run_dir)})
+    cd = _tool_line("Bash", command="cd src")
+    popd = _tool_line("Bash", command=f"popd; {_SCOPE_READ}")
+    assert [(r.line, r.kind) for r in layout.find(init, cd, popd)] == [(3, "direct")]
+    # les deux issues restent candidates : la lecture qui n'a de sens que depuis `src` est vue aussi
+    deep = _tool_line("Bash", command="popd; cat ../../run0/ex_test.py")
+    assert [(r.line, r.kind) for r in layout.find(init, cd, deep)] == [(3, "direct")]
+
+
 def test_reset_message_of_another_call_does_not_settle_the_shell(tmp_path: Path) -> None:
     layout = _Layout(tmp_path)
     elsewhere = tmp_path / "elsewhere"

@@ -12,7 +12,8 @@ APPELS D'OUTIL de l'agent (``tool_use``), jamais le texte : citer un nom de
 fichier dans une réponse n'est pas le lire. Il résout chaque référence de chemin
 contre le répertoire courant suivi de l'agent et la compare aux emplacements
 qui exposent les tests. Le suivi du répertoire courant calque Claude Code (voir
-``_ShellCwd``) : un ``cd`` vaut pour la suite de la commande ; d'un appel ``Bash``
+``_ShellCwd``) : un ``cd`` vaut pour la suite de la commande, sauf dans un sous-shell
+``( ... )`` ou un élément de tube, dont il ne sort pas ; d'un appel ``Bash``
 à l'autre, le répertoire final n'est gardé que s'il reste dans le dépôt du run.
 Sinon le shell est ramené à ce dépôt (« Shell cwd was reset to ... »), ce que le
 ``tool_result`` confirme ; sans confirmation (message absent, résultat en erreur
@@ -32,7 +33,9 @@ Un drapeau n'est pas un verdict de fraude : il invalide le run (exclu des
 taux) et la ligne déclenchante est listée pour revue humaine. Limites connues,
 volontairement du côté du faux positif ou du « non vu » écrit : variables
 shell non développées (``$HOME``, ``$(...)``), liens symboliques créés par
-l'agent, ``cd`` d'une commande qui échoue dans le dépôt, contenu d'un script écrit puis lancé
+l'agent, ``cd`` d'une commande qui échoue dans le dépôt, ``popd``/``pushd`` dont la
+pile vient d'un autre appel (joué comme ``cd -`` : rester, ou revenir au dépôt),
+mots-clés devant un ``cd`` (``then cd src``), contenu d'un script écrit puis lancé
 (le script n'est pas relu), accès par un serveur MCP qui n'expose pas de chemin.
 """
 
@@ -54,7 +57,8 @@ HIDDEN_DIR_NAME = "hidden-tests"
 #: ``content``/``new_string`` est du code produit par l'agent, pas une lecture).
 _WRITE_TOOLS = frozenset({"Write", "Edit", "MultiEdit", "NotebookEdit"})
 
-_BASH_SEGMENT = re.compile(r"&&|\|\||[;|\n]")
+#: Séparateurs de commandes ; ``(`` et ``)`` ouvrent et ferment un sous-shell (``_split_command`` les trie).
+_BASH_SEPARATOR = re.compile(r"&&|\|\||[;|\n()]")
 #: Corps de heredoc (``<<'EOF' ... EOF``) : du code ou du texte, pas des arguments.
 _HEREDOC = re.compile(r"<<-?[ \t]*(['\"]?)(\w+)\1[^\n]*\n(.*?)(?:\n[ \t]*\2[ \t]*(?=\n|\Z)|\Z)", re.DOTALL)
 _NAME_CHAR = re.compile(r"[\w.-]")
@@ -201,8 +205,17 @@ def _standalone(text: str, match: re.Match[str]) -> bool:
 
 #: Options de ``cd`` qui ne changent pas la cible.
 _CD_OPTIONS = frozenset({"-L", "-P", "-e", "-@", "--"})
-#: Un ``cd -`` / ``pushd -`` quelque part dans la commande (retour au répertoire précédent).
-_CD_DASH = re.compile(r"(?:^|[;&|\n])[ \t]*(?:cd|pushd)[ \t]+(?:-[LPe@][ \t]+|--[ \t]+)*-(?=[ \t;&|\n]|$)")
+#: Un ``cd -`` / ``pushd -`` / ``popd`` quelque part dans la commande (retour au répertoire précédent).
+_CD_DASH = re.compile(r"(?:^|[;&|\n(])[ \t]*(?:(?:cd|pushd)[ \t]+(?:-[LPe@][ \t]+|--[ \t]+)*-|popd)(?=[ \t;&|\n)]|$)")
+
+
+@dataclass(frozen=True)
+class _Dirs:
+    """Où est le shell : répertoire courant, précédent (``cd -``) et pile de ``pushd``."""
+
+    cwd: PurePath
+    previous: PurePath | None = None
+    stack: tuple[PurePath, ...] = ()
 
 
 def _cd_target(tokens: Sequence[str]) -> str | None:
@@ -218,56 +231,144 @@ def _cd_target(tokens: Sequence[str]) -> str | None:
     return None
 
 
+def _quote_states(text: str) -> tuple[list[str], bool]:
+    """Le guillemet ouvert (``''``, ``'\'``, ``'"'``) avant chaque caractère, et si un guillemet reste ouvert à la fin."""
+    states: list[str] = []
+    quote = ""
+    escaped = False
+    for char in text:
+        states.append(quote)
+        if escaped:
+            escaped = False
+        elif char == "\\" and quote != "'":
+            escaped = True
+        elif not quote and char in "'\"":
+            quote = char
+        elif char == quote:
+            quote = ""
+    return states, bool(quote)
+
+
+def _split_command(head: str) -> tuple[list[tuple[str, str]], bool]:
+    """``[(séparateur qui précède, segment)]`` d'une commande, et si la lecture des guillemets est sûre.
+
+    ``(``/``)`` ouvrent et ferment un sous-shell (``$(...)``, ``<(...)`` compris) ; un
+    séparateur de tube est ``|`` (jamais ``||``). Une parenthèse entre guillemets simples,
+    ou entre guillemets doubles sans ``$`` devant, est du texte ; ``(dq``/``)dq`` marquent
+    celles que seuls les guillemets doubles ont laissées passer (``"$(...)"``). Un guillemet
+    jamais fermé rend la lecture douteuse : toutes les parenthèses comptent alors.
+    """
+    quotes, unclosed = _quote_states(head)
+    pieces: list[tuple[str, str]] = []
+    separator, start = "", 0
+    for match in _BASH_SEPARATOR.finditer(head):
+        mark = match.group()
+        if mark in ("(", ")") and not unclosed:
+            quote = quotes[match.start()]
+            if quote == "'" or (quote == '"' and mark == "(" and head[match.start() - 1 : match.start()] != "$"):
+                continue
+            if quote == '"':
+                mark += "dq"
+        pieces.append((separator, head[start : match.start()]))
+        separator, start = mark, match.end()
+    pieces.append((separator, head[start:]))
+    return pieces, unclosed
+
+
+def _after_command(state: _Dirs, tokens: Sequence[str], dash: PurePath | None) -> set[_Dirs]:
+    """Les positions possibles du shell après une commande (``cd``, ``pushd``, ``popd`` ou rien)."""
+    if tokens and tokens[0] == "popd":
+        if len(tokens) > 1:  # `popd -n`, `popd +2` : on ne sait pas laquelle de la pile bouge
+            return {state} | _after_command(state, tokens[:1], dash)
+        if state.stack:
+            return {_Dirs(state.stack[0], state.cwd, state.stack[1:])}
+        # pile vide : le `pushd` vient d'un autre appel, comme `cd -` sans précédent
+        return {_Dirs(dash, state.cwd)} if dash is not None else {state}
+    target = _cd_target(tokens)
+    if target is None:
+        return {state}
+    if target != "-":
+        moved = _Dirs(_resolve(target, state.cwd), state.cwd, state.stack)
+    elif state.previous is not None:  # retour au répertoire d'avant le dernier cd de la commande
+        moved = _Dirs(state.previous, state.cwd, state.stack)
+    elif dash is not None:  # précédent inconnu : l'appelant essaie `dash` (le dépôt) puis ne bouge pas
+        moved = _Dirs(dash, state.cwd, state.stack)
+    else:
+        moved = state
+    if tokens[0] == "pushd":
+        moved = _Dirs(moved.cwd, moved.previous, (state.cwd, *state.stack))
+    return {moved}
+
+
 def _shell_references(
     command: str, cwd: PurePath, dash: PurePath | None = None
-) -> tuple[list[tuple[str, PurePath, bool]], PurePath]:
-    """``(fragment, chemin résolu, parcours récursif)`` d'une commande Bash, et le cwd final.
+) -> tuple[list[tuple[str, PurePath, bool]], set[PurePath]]:
+    """``(fragment, chemin résolu, parcours récursif)`` d'une commande Bash, et les cwd finaux possibles.
 
     ``cd``/``pushd`` change le répertoire des segments suivants (``&&``, ``;``,
-    ``|``, saut de ligne). Les corps de heredoc (code écrit ou lancé) sont lus
-    sans parcours récursif : une barre oblique de commentaire ou de division
-    (``//``, ``/``) n'y désigne pas la racine. Un fragment sans caractère de nom
-    (``//``, ``///``, ``/**``) n'est jamais une référence ; ``/`` seul l'est
-    uniquement comme argument à part entière de la commande (``find / -name x``).
-    ``cd -`` revient au répertoire d'avant le dernier ``cd`` de la commande ; s'il
-    n'y en a pas (le précédent vient d'un autre appel), il mène à *dash*, ou ne
-    bouge pas si *dash* est ``None`` : l'appelant joue les deux (fail-closed).
+    saut de ligne), sauf dans un sous-shell ``( ... )`` ou un élément de tube
+    (``|``), qui n'en laissent rien derrière eux (W1-08b-S3-01) ; ``popd``
+    dépile le ``pushd`` de la commande. Le dernier élément d'un tube s'exécute dans
+    le shell courant sous zsh (ou ``lastpipe``) : son ``cd`` laisse les deux
+    répertoires candidats, de même qu'une parenthèse jamais refermée. Les corps de
+    heredoc (code écrit ou lancé) sont lus sans parcours récursif : une barre
+    oblique de commentaire ou de division (``//``, ``/``) n'y désigne pas la
+    racine. Un fragment sans caractère de nom (``//``, ``///``, ``/**``) n'est
+    jamais une référence ; ``/`` seul l'est uniquement comme argument à part
+    entière de la commande (``find / -name x``). ``cd -`` (et ``popd`` sans
+    ``pushd`` dans la commande) revient au répertoire d'avant le dernier ``cd`` de la
+    commande ; s'il n'y en a pas (le précédent vient d'un autre appel), il mène à
+    *dash*, ou ne bouge pas si *dash* est ``None`` : l'appelant joue les deux
+    (fail-closed). Un ensemble de positions remplace le cwd unique, chaque
+    segment est jugé contre chacune.
     """
-    previous: PurePath | None = None
     bodies = [m.group(3) for m in _HEREDOC.finditer(command)]
     head = _HEREDOC.sub("", command)
     recursive = bool(_RECURSIVE.search(head))
     refs: list[tuple[str, PurePath, bool]] = []
-    for segment in _BASH_SEGMENT.split(head):
+    states = {_Dirs(cwd)}
+    scopes: list[
+        tuple[set[_Dirs], bool]
+    ] = []  # positions à l'ouverture d'un sous-shell, et s'il est entre guillemets doubles
+    pieces, unclosed = _split_command(head)
+    for index, (separator, segment) in enumerate(pieces):
+        if separator in ("(", "(dq"):
+            scopes.append((states, separator == "(dq"))
+        elif separator in (")", ")dq") and scopes and (separator == ")" or scopes[-1][1]):
+            states = scopes.pop()[0]
         matches = list(_FRAGMENT.finditer(segment))
         tokens = [m.group() for m in matches]
-        for match in matches:
-            word = match.group()
-            if word.startswith(("-", "$", "~")):
-                continue
-            if not _NAME_CHAR.search(word) and not (word == "/" and _standalone(segment, match)):
-                continue
-            refs.append((word, _resolve(word, cwd), recursive))
-        target = _cd_target(tokens)
-        if target == "-":  # retour au répertoire précédent
-            if previous is not None:
-                cwd, previous = previous, cwd
-            elif dash is not None:  # précédent inconnu : l'appelant essaie `dash` (le dépôt) puis ne bouge pas
-                cwd, previous = dash, cwd
-        elif target is not None:
-            cwd, previous = _resolve(target, cwd), cwd
+        for here in sorted({state.cwd for state in states}):
+            for match in matches:
+                word = match.group()
+                if word.startswith(("-", "$", "~")):
+                    continue
+                if not _NAME_CHAR.search(word) and not (word == "/" and _standalone(segment, match)):
+                    continue
+                refs.append((word, _resolve(word, here), recursive))
+        moved = {after for state in states for after in _after_command(state, tokens, dash)}
+        if index + 1 < len(pieces) and pieces[index + 1][0] == "|":  # élément de tube : sous-shell
+            continue
+        states = states | moved if separator == "|" else moved  # dernier élément d'un tube : zsh, lastpipe
+    for snapshot, _ in scopes:  # sous-shell jamais refermé : l'entrée reste possible
+        states = states | snapshot
+    if unclosed:
+        states = states | {_Dirs(cwd)}
+    finals = {state.cwd for state in states}
     for body in bodies:
-        for token in _FRAGMENT.findall(body):
-            if not token.startswith(("-", "$", "~")) and _NAME_CHAR.search(token):
-                refs.append((token, _resolve(token, cwd), False))
-    return refs, cwd
+        for here in sorted(finals):
+            for token in _FRAGMENT.findall(body):
+                if not token.startswith(("-", "$", "~")) and _NAME_CHAR.search(token):
+                    refs.append((token, _resolve(token, here), False))
+    return refs, finals
 
 
 def _tool_references(
     name: str, tool_input: dict[str, Any], cwd: PurePath, dash: PurePath | None = None
-) -> tuple[list[tuple[str, PurePath, bool]], PurePath]:
-    """``(fragment, chemin résolu, parcours récursif)`` pour un appel d'outil, et le cwd suivant."""
+) -> tuple[list[tuple[str, PurePath, bool]], set[PurePath]]:
+    """``(fragment, chemin résolu, parcours récursif)`` pour un appel d'outil, et les cwd suivants possibles."""
     refs: list[tuple[str, PurePath, bool]] = []
+    finals = {cwd}
 
     def add(value: Any, *, base: PurePath = cwd, recursive: bool = False) -> None:
         if isinstance(value, str) and value:
@@ -279,7 +380,7 @@ def _tool_references(
     elif name == "Bash":
         command = tool_input.get("command")
         if isinstance(command, str):
-            shell_refs, cwd = _shell_references(command, cwd, dash)
+            shell_refs, finals = _shell_references(command, cwd, dash)
             refs.extend(shell_refs)
     elif name == "Glob":
         base = _resolve(tool_input["path"], cwd) if isinstance(tool_input.get("path"), str) else cwd
@@ -297,7 +398,7 @@ def _tool_references(
                 for token in _FRAGMENT.findall(value):
                     if not token.startswith(("-", "$", "~")):
                         add(token)
-    return refs, cwd
+    return refs, finals
 
 
 def _excerpt(tool_input: dict[str, Any]) -> str:
@@ -358,7 +459,7 @@ class _ShellCwd:
             for dash in (None, self.home) if back else (None,):
                 found, final = _tool_references(name, tool_input, cwd, dash)
                 refs.extend(found)
-                finals.add(final)
+                finals |= final
         if name != "Bash":
             return refs
         self._pending = None
