@@ -35,6 +35,7 @@ from grimoire.flows.dispatch_executor import (
     resume_with_dispatch,
     run_with_dispatch,
 )
+from grimoire.flows.doctor import FlowDoctorReport
 from grimoire.flows.engine import FlowEngine
 from grimoire.flows.executor import InteractiveNodeExecutor
 from grimoire.flows.extract import extract_blueprint
@@ -173,6 +174,8 @@ def _emit_resume(ctx: typer.Context, run_id: str, outcome: ResumeOutcome) -> Non
     if _fmt(ctx) == "json":
         typer.echo(json.dumps({"run_id": run_id, **outcome.to_dict()}, indent=2, ensure_ascii=False))
         return
+    for note in outcome.repaired:
+        console.print(f"[yellow]réparé[/yellow] {run_id} — {note}")
     if not outcome.ok:
         console.print(f"[red]suspendu[/red] {run_id} — node {outcome.node_id}")
         for fault in outcome.faults:
@@ -340,6 +343,51 @@ def flow_status(
         _fail(ctx, exc)
         return
     _emit_status(ctx, view, project_root)
+
+
+def _emit_doctor(ctx: typer.Context, report: FlowDoctorReport, as_json: bool) -> None:
+    if as_json or _fmt(ctx) == "json":
+        typer.echo(json.dumps(report.to_dict(), indent=2, ensure_ascii=False))
+        return
+    if report.ok:
+        console.print(f"[green]OK[/green] {report.run_id} — journal cohérent ({report.checked})")
+    else:
+        console.print(f"[red]incohérent[/red] {report.run_id} — {len(report.violations)} violation(s)")
+        for violation in report.violations:
+            console.print(f"  - [bold]{violation.code}[/bold] : {violation.detail}")
+        console.print("[bold]réparations proposées (aucune appliquée)[/bold] :")
+        for repair in report.repairs:
+            console.print(f"  - {repair}")
+    for note in report.unevaluated:
+        console.print(f"  [dim]non évalué : {note}[/dim]")
+
+
+@flow_app.command("doctor")
+def flow_doctor(
+    ctx: typer.Context,
+    run_id: Annotated[str, typer.Argument(help="Identifiant du run (WFI-...).")],
+    as_json: Annotated[bool, typer.Option("--json", help="Rapport JSON sur stdout (équivaut à --output json).")] = False,
+    project_root: _PROJECT_ROOT = Path(),
+) -> None:
+    """Rejoue le journal du run et vérifie ses invariants — lecture seule.
+
+    Le journal d'événements fait autorité : un seul node ouvert, aucun saut,
+    aucun doublon, statut d'instance et méta cohérents avec lui. Une
+    incohérence est nommée avec une réparation PROPOSÉE, jamais appliquée.
+    Code de sortie 1 si au moins une violation.
+    """
+    engine = _engine(project_root)
+    try:
+        report = engine.doctor(run_id)
+    except GrimoireRuntimeError as exc:
+        if as_json:  # `--json` local : l'erreur aussi est du JSON sur stdout
+            typer.echo(json.dumps({"error": str(exc)}, indent=2, ensure_ascii=False))
+            raise typer.Exit(1) from exc
+        _fail(ctx, exc)
+        return
+    _emit_doctor(ctx, report, as_json)
+    if not report.ok:
+        raise typer.Exit(1)
 
 
 @flow_app.command("resume")
