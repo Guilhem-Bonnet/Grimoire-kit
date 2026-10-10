@@ -335,6 +335,36 @@ git tag -a vx.y.z -m "Release x.y.z"
 git push origin main --tags     # publish.yml prend le relais
 ```
 
+### Contrôles hors arbre
+
+La voie unique et le garde « tag sur `main` » vivent dans l'arbre du tag : ils
+ne valent que pour un arbre qui contient ce changement (`publish.yml` sans
+`release.yml`, `scripts/check-release-tag.py`). Un arbre antérieur garde
+l'ancienne paire de workflows — PyPI s'y ouvre dès que la variable de dépôt
+`GRIMOIRE_ENABLE_PYPI` vaut `true`, et deux créateurs de release s'y exécutent
+de nouveau. Un arbre taggué peut aussi modifier le script ou l'étape qui le
+surveille, donc désarmer son propre garde. Rien de cela ne se ferme par du
+code : c'est de la configuration GitHub, à faire une fois la voie unique
+fusionnée.
+
+1. **Supprimer** la variable de dépôt `GRIMOIRE_ENABLE_PYPI` (Settings →
+   Secrets and variables → Actions → Variables). Elle ne pilote plus rien dans
+   `publish.yml` ; supprimée, elle ferme PyPI aux anciens arbres.
+2. **Restreindre l'environnement `pypi`** par une politique de déploiement sur
+   les tags `v*`. Cela réduit la surface, mais l'environnement ne vérifie pas
+   l'ascendance `main` : il ne remplace pas le garde.
+3. **Ajouter un ruleset de tags** sur `refs/tags/v*` qui limite qui peut créer
+   ou déplacer un tag de release. C'est le seul contrôle réel contre un tag
+   posé sur un arbre qui n'a pas les gardes. Le ruleset `Base` existant cible
+   des branches (`target: branch`) et n'agit pas sur les tags.
+4. **Rebaser les branches `aidlc/*`** (et toute branche antérieure au merge)
+   sur `origin/main` avant d'y poser un tag : un tag posé sur leur arbre
+   rejouerait l'ancienne paire de workflows.
+
+Ces contrôles ne sont pas vérifiables depuis le dépôt : `gh api
+repos/<org>/<repo>/environments/pypi` et le listing des rulesets disent leur
+état, et la lecture de `actions/variables` exige un droit que l'App de CI n'a pas.
+
 ## Questions ?
 
 Ouvrir une issue sur GitHub.

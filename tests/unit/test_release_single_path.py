@@ -316,3 +316,56 @@ def test_missing_main_ref_fails_closed(repo: Path, capsys: pytest.CaptureFixture
 def test_malformed_tags_fail(repo: Path, tag: str) -> None:
     mod = _load_script("check-release-tag")
     assert mod.problems(repo, tag, "origin/main")
+
+
+# ── 6. Ce que l'arbre ne peut pas garantir : les contrôles hors arbre ────────
+#
+# Les gardes de `publish.yml` vivent dans l'arbre du tag : un arbre antérieur au
+# merge (les branches aidlc/* en contiennent déjà) garde l'ancien `release.yml`
+# et l'ancien `publish.yml` conditionné par `vars.GRIMOIRE_ENABLE_PYPI`, et un
+# arbre taggué peut modifier le garde qui le surveille. Aucun test de code ne
+# peut le fermer : c'est de la configuration GitHub. Ce qu'un test peut tenir,
+# c'est que la doc ne laisse pas croire le contraire et nomme les actions.
+
+
+def _contributing_release_section() -> str:
+    text = (_ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    start = text.find("### Contrôles hors arbre")
+    assert start != -1, "CONTRIBUTING.md ne nomme pas les contrôles hors arbre de la voie de release"
+    end = text.find("\n#", start + 1)
+    return text[start : end if end != -1 else len(text)]
+
+
+def _changelog_d01_entry() -> str:
+    text = (_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    start = text.index("- fix(release): une seule voie de release")
+    end = text.find("\n## [", start)
+    return text[start : end if end != -1 else len(text)]
+
+
+def test_contributing_lists_the_out_of_tree_actions_to_take_after_the_merge() -> None:
+    section = _contributing_release_section()
+    # 1. la variable qui rouvre PyPI aux anciens arbres
+    assert "GRIMOIRE_ENABLE_PYPI" in section and "supprimer" in section.lower()
+    # 2. l'environnement `pypi` : restreint aux tags v*, sans prétendre vérifier main
+    assert "`pypi`" in section and "v*" in section
+    assert "ne vérifie pas" in section or "ne peut pas vérifier" in section
+    # 3. le seul vrai contrôle : une règle sur les tags
+    assert "refs/tags/v*" in section and "ruleset" in section.lower()
+    # 4. les branches antérieures au merge sont rebasées avant tout tag
+    assert "aidlc/*" in section and "rebas" in section.lower()
+
+
+def test_contributing_says_the_guarantees_only_hold_for_trees_containing_the_change() -> None:
+    section = _contributing_release_section()
+    assert "contient" in section and "voie unique" in section
+    assert "désarmer" in section or "désarme" in section, (
+        "un arbre taggué peut modifier le garde qui le surveille : la doc doit le dire"
+    )
+
+
+def test_changelog_entry_does_not_overstate_the_guarantee() -> None:
+    entry = _changelog_d01_entry()
+    assert "GRIMOIRE_ENABLE_PYPI" in entry and "refs/tags/v*" in entry
+    assert "contiennent" in entry or "contient" in entry
+    assert "désarm" in entry
