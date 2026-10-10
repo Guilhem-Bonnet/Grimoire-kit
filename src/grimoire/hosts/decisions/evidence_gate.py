@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import UTC, datetime
 
+from grimoire.core.standard_checks.evidence_journal import record_guard_error
 from grimoire.core.standard_state import active_profile_id, is_standard_enrolled, resolve_active_task
 from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
 from grimoire.hosts.decisions.enrolment import (
@@ -118,17 +120,16 @@ def _with_done_gate(decision: Decision, hook: HookInput, task_id: str, profile: 
     Best-effort in the same sense as the rest of this package: a crash inside
     :func:`grimoire.hosts.decisions.done_gate.evaluate_done_gate` must not
     turn an otherwise-fine ``Stop`` into a broken hook, so it is caught here
-    and reported as an unevaluated (never a stale) verdict — never as an
-    invented ``BLOCK``.
+    and traced as a ``guard.error`` (W1-06). It is never reported as a stale
+    verdict (no mutation was observed to be stale), but it is not a silent
+    ``ALLOW`` either: see :func:`_done_gate_unevaluable`.
     """
-    from grimoire.hosts.decisions.done_gate import DoneGateVerdict, evaluate_done_gate
+    from grimoire.hosts.decisions.done_gate import evaluate_done_gate
 
     try:
         verdict = evaluate_done_gate(hook, task_id, profile)
     except Exception as exc:
-        verdict = DoneGateVerdict(
-            stale=False, reason=f"error:{type(exc).__name__}", enforce=False, blocked=False, capped=False
-        )
+        return _done_gate_unevaluable(decision, hook, task_id, profile, exc)
     detail = {**decision.detail, "done_gate": verdict.to_dict()}
     if not verdict.stale:
         return replace(decision, detail=detail)
@@ -148,6 +149,60 @@ def _with_done_gate(decision: Decision, hook: HookInput, task_id: str, profile: 
         context = f"{decision.context}\n{warning}" if decision.context else warning
         return replace(decision, context=context, detail=detail)
     return replace(decision, detail=detail)
+
+
+def _done_gate_unevaluable(decision: Decision, hook: HookInput, task_id: str, profile: str, exc: Exception) -> Decision:
+    """W1-06: le gate « fini » a planté — tracé, puis fail-closed là où le profil le promet.
+
+    Même règle que pour une mutation périmée (pas de verdict ``stale``
+    inventé, pas de ``policy.hold``) : un refus seulement dans un profil
+    bloquant avec l'opt-in ``enforce``, via le refroidissement et le plafond de
+    session ; sinon un avertissement, jamais un ``BLOCK``.
+    """
+    from grimoire.hosts.decisions.done_gate import (
+        DoneGateVerdict,
+        caps_state_relpath,
+        resolve_done_gate_block,
+        resolve_done_gate_block_after_crash,
+    )
+
+    cause = f"{type(exc).__name__}: {exc}"
+    record_guard_error(hook.project_root, task_id, "done_gate", type(exc).__name__, str(exc))
+    now_iso = datetime.now(UTC).isoformat()
+    remedy = ""
+    try:
+        enforce, blocked, capped = resolve_done_gate_block(
+            hook.project_root, task_id, hook.session_id, profile, now_iso
+        )
+    except Exception as resolution_exc:
+        # Pas de silence (W1-06) : la panne de la résolution est tracée, et l'opt-in
+        # ``enforce`` n'est pas réécrit à False — fail-closed en profil bloquant.
+        record_guard_error(
+            hook.project_root, task_id, "done_gate.resolution", type(resolution_exc).__name__, str(resolution_exc)
+        )
+        enforce, blocked, capped = resolve_done_gate_block_after_crash(
+            hook.project_root, task_id, profile, hook.session_id
+        )
+        remedy = (
+            f"\nL'état de refroidissement et de plafond {caps_state_relpath(task_id).as_posix()} est illisible "
+            f"({type(resolution_exc).__name__}) : supprime ce fichier pour le réarmer."
+        )
+    verdict = DoneGateVerdict(
+        stale=False, reason=f"error:{type(exc).__name__}", enforce=enforce, blocked=blocked, capped=capped
+    )
+    detail = {**decision.detail, "done_gate": verdict.to_dict()}
+    if blocked and decision.outcome is not Outcome.BLOCK:
+        reason = (
+            f"[Grimoire] Tâche {task_id} : gate « fini » non évaluable (profil {profile}) — {cause}{remedy}\n"
+            f"Cette panne est tracée (guard.error, visible via `grimoire standard verify --task-id {task_id}`). "
+            "Si la tâche doit rester ouverte, dis-le explicitement à l'utilisateur au lieu de conclure."
+        )
+        return replace(decision, outcome=Outcome.BLOCK, reason=reason, detail=detail)
+    warning = (
+        f"[Grimoire] Avertissement : gate « fini » non évaluable pour {task_id} (profil {profile}) — {cause}{remedy}"
+    )
+    context = f"{decision.context}\n{warning}" if decision.context else warning
+    return replace(decision, context=context, detail=detail)
 
 
 def _record_done_gate_hold(hook: HookInput, task_id: str) -> None:

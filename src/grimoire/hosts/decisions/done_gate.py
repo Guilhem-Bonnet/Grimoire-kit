@@ -66,17 +66,25 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from grimoire.core.standard_checks.evidence_journal import evidence_log_relpath, read_evidence_log
+from grimoire.core.standard_checks.evidence_journal import evidence_log_relpath, read_evidence_log, record_guard_error
 from grimoire.hosts.decisions.enrolment import BLOCKING_PROFILES
 from grimoire.hosts.decisions.tool_facts import command_surface, is_read_only_command
 
-__all__ = ["DoneGateVerdict", "evaluate_done_gate"]
+__all__ = ["DoneGateVerdict", "evaluate_done_gate", "resolve_done_gate_block", "resolve_done_gate_block_after_crash"]
 
 #: Same directory as ``evidence-log.jsonl`` (see the module docstring) —
 #: never ``_grimoire-output/evidence`` (the versioned pack): a per-task
 #: cooldown/cap counter is exactly the kind of run state ``RUNS_DIR`` exists
 #: for, and it must never be committed.
 _CAPS_STATE_FILENAME = "done-gate-state.json"
+
+#: Sidecar of the "after a crash of the resolution" path (W1-06) : the sessions
+#: already refused once there. Separate from :data:`_CAPS_STATE_FILENAME` on
+#: purpose — that file is exactly what could not be read when this path runs.
+_CRASH_BLOCKS_FILENAME = "done-gate-crash-blocks.json"
+
+#: Sessions remembered in that sidecar (oldest dropped) — keeps the file bounded.
+_CRASH_BLOCKS_MAX = 50
 
 #: One refusal per task per this many seconds (jev-belay/pi-warden: "60 s").
 _COOLDOWN_SECONDS = 60.0
@@ -97,18 +105,21 @@ class DoneGateVerdict:
     inferred from the outcome."""
 
     stale: bool
-    """A mutation with no green check after it — the only condition that
-    can ever lead to a refusal via this path."""
+    """A mutation with no green check after it. ``False`` for a crash of the
+    evaluation itself (``reason`` ``error:*``) : no mutation was judged stale
+    there, but a refusal can still follow (see ``blocked``)."""
     reason: str
-    """One of ``no_mutation``, ``green_check_after_mutation`` (the veto dur)
-    or ``mutation_after_last_check``."""
+    """One of ``no_mutation``, ``green_check_after_mutation`` (the veto dur),
+    ``mutation_after_last_check``, or ``error:<ExceptionType>`` when the
+    evaluation crashed (:func:`.evidence_gate._done_gate_unevaluable`)."""
     enforce: bool
     """Whether this project/environment opted into a real ``BLOCK`` (see the
     module docstring) — independent of whether *this* call actually used it."""
     blocked: bool
     """``True`` only when :mod:`.evidence_gate` should escalate its outcome
     to :attr:`~grimoire.hosts.decisions._shared.Outcome.BLOCK` for this call:
-    stale, enforced, a blocking profile, and the caps below did not apply."""
+    stale (or the evaluation crashed, ``reason`` ``error:*``), enforced, a
+    blocking profile, and the caps below did not apply."""
     capped: bool
     """A refusal was due here but a cooldown or session cap suppressed it."""
     command_hint: str = ""
@@ -350,25 +361,42 @@ def _resolved_test_command(project_root: Path) -> str:
     return str(need.command) if need.resolved and need.command else ""
 
 
-def _is_enforced(project_root: Path) -> bool:
+def _is_enforced(project_root: Path, task_id: str) -> bool:
     """Whether this project/environment opted into a real ``BLOCK`` — see the
     module docstring for why shadow is the default. Checked in this order:
     the environment variable (cheapest, and the one named in the issue when
     no project option exists yet), then an ``options.done_gate: enforce`` key
-    hand-added to ``standard-profile.yaml`` — the same file and the same
-    ``_load_mapping`` helper :func:`grimoire.core.standard_checks.
-    gate_test_run.board_state_of_task` already reads privately across module
-    boundaries for a project-declared value, so this is not a new pattern.
+    hand-added to ``standard-profile.yaml``.
+
+    An unreadable profile still answers ``False`` (shadow is the safe default
+    for the opt-in), but no longer silently (W1-06) : the failure is traced as
+    a ``guard.error`` (``guard_id`` ``done_gate.enforce_option``) for *task_id*,
+    so ``grimoire standard verify`` shows that the option could not be read.
+    "Unreadable" covers an invalid YAML, a file that is not valid UTF-8, an I/O
+    error and a root that is not a mapping. The profile is parsed here rather
+    than through ``standard_state._load_mapping``, which swallows those very
+    errors and returns ``{}``: the failure would never reach this ``except``.
+    A missing profile, or one without the option, is not a failure.
     """
     if os.environ.get(_ENFORCE_ENV, "").strip().lower() == "enforce":
         return True
     try:
-        from grimoire.core.standard_generation import STANDARD_PROFILE_FILE
-        from grimoire.core.standard_state import _load_mapping
+        from ruamel.yaml import YAML
 
-        options = _load_mapping(project_root.resolve() / STANDARD_PROFILE_FILE).get("options")
-    except Exception:
+        from grimoire.core.standard_generation import STANDARD_PROFILE_FILE
+
+        profile = project_root.resolve() / STANDARD_PROFILE_FILE
+        if not profile.is_file():
+            return False
+        data = YAML(typ="safe").load(profile)
+        if data is None:
+            return False
+        if not isinstance(data, dict):
+            raise TypeError(f"{STANDARD_PROFILE_FILE} : la racine n'est pas un mapping ({type(data).__name__})")
+    except Exception as exc:
+        record_guard_error(project_root, task_id, "done_gate.enforce_option", type(exc).__name__, str(exc))
         return False
+    options = data.get("options")
     if not isinstance(options, dict):
         return False
     return str(options.get("done_gate", "")).strip().lower() == "enforce"
@@ -378,14 +406,20 @@ def _caps_path(project_root: Path, task_id: str) -> Path:
     return project_root / evidence_log_relpath(task_id).parent / _CAPS_STATE_FILENAME
 
 
+def caps_state_relpath(task_id: str) -> Path:
+    """Project-relative path of the cooldown/cap state of *task_id* (named in the messages that ask to delete it)."""
+    return evidence_log_relpath(task_id).parent / _CAPS_STATE_FILENAME
+
+
+def _crash_blocks_path(project_root: Path, task_id: str) -> Path:
+    return project_root / evidence_log_relpath(task_id).parent / _CRASH_BLOCKS_FILENAME
+
+
 def _load_caps(path: Path) -> dict[str, Any]:
+    """The JSON object stored at *path*, ``{}`` when missing, unreadable, not UTF-8 or not an object."""
     try:
-        raw = path.read_text(encoding="utf-8")
-    except OSError:
-        return {}
-    try:
-        data = json.loads(raw)
-    except ValueError:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):  # ``UnicodeDecodeError`` and ``JSONDecodeError`` are ``ValueError``
         return {}
     return data if isinstance(data, dict) else {}
 
@@ -406,8 +440,9 @@ def _save_caps(path: Path, data: dict[str, Any]) -> None:
 def _seconds_between(a: str, b: str) -> float:
     try:
         return abs((datetime.fromisoformat(b) - datetime.fromisoformat(a)).total_seconds())
-    except ValueError:
-        # Unparseable state: never let a corrupt timestamp hold a cooldown
+    except (ValueError, TypeError):
+        # Unparseable state (or a naive timestamp against an aware one, which
+        # raises ``TypeError``): never let a corrupt timestamp hold a cooldown
         # open forever — treat it as long enough ago to have expired.
         return _COOLDOWN_SECONDS + 1.0
 
@@ -425,7 +460,17 @@ def _check_and_record_cap(project_root: Path, task_id: str, session_id: str, now
     session_blocks_raw = state.get("session_blocks")
     session_blocks: dict[str, int] = session_blocks_raw if isinstance(session_blocks_raw, dict) else {}
     sid = session_id or "unknown"
-    count = int(session_blocks.get(sid, 0) or 0)
+    raw_count = session_blocks.get(sid, 0)
+    if isinstance(raw_count, int) and not isinstance(raw_count, bool) and raw_count >= 0:
+        count = raw_count
+    else:
+        # État de plafond corrompu (W1-06) : une valeur non entière ne doit ni planter la
+        # résolution du refus ni la faire taire. Comptée 0 (le refus reste possible, le
+        # fichier est réécrit sain), et la corruption est tracée.
+        record_guard_error(
+            project_root, task_id, "done_gate.caps_state", "ValueError", f"session_blocks[{sid!r}]={raw_count!r}"
+        )
+        count = 0
     if count >= _SESSION_CAP:
         return True
     session_blocks[sid] = count + 1
@@ -433,6 +478,58 @@ def _check_and_record_cap(project_root: Path, task_id: str, session_id: str, now
     state["session_blocks"] = session_blocks
     _save_caps(path, state)
     return False
+
+
+def resolve_done_gate_block(
+    project_root: Path, task_id: str, session_id: str, profile: str, now_iso: str
+) -> tuple[bool, bool, bool]:
+    """``(enforce, blocked, capped)`` : la résolution unique du refus du gate « fini ».
+
+    Partagée par le verdict ``stale`` et par l'échec d'évaluation
+    (:mod:`.evidence_gate`) : un refus n'est possible que dans un profil
+    bloquant ET avec l'opt-in ``enforce``, et passe alors par le
+    refroidissement et le plafond de session. Consomme un tour du plafond
+    uniquement quand un refus est dû.
+    """
+    enforce = _is_enforced(project_root, task_id)
+    if profile in BLOCKING_PROFILES and enforce:
+        capped = _check_and_record_cap(project_root, task_id, session_id, now_iso)
+        return enforce, not capped, capped
+    return enforce, False, False
+
+
+def resolve_done_gate_block_after_crash(
+    project_root: Path, task_id: str, profile: str, session_id: str = ""
+) -> tuple[bool, bool, bool]:
+    """``(enforce, blocked, capped)`` quand :func:`resolve_done_gate_block` a lui-même planté (W1-06).
+
+    Fail-closed là où le profil le promet : profil bloquant ET opt-in
+    ``enforce`` → ``blocked``. Mais le refroidissement et le plafond de session
+    ne peuvent plus s'appuyer sur leur état (c'est justement lui qui n'a pas pu
+    être lu) : un sidecar minimal (``done-gate-crash-blocks.json``) retient les
+    sessions déjà refusées une fois ici, et une session ne l'est qu'une fois —
+    la règle « prévenue une fois, pas bouclée » s'applique aussi à ce chemin.
+    Un sidecar illisible compte pour vide (refus fail-closed, réécrit sain) ; un
+    sidecar impossible à écrire ne peut rien retenir (l'hôte laisse de toute
+    façon passer le second ``Stop``, ``stop_active``). Ailleurs, jamais de refus.
+    ``enforce`` est relu séparément (``_is_enforced`` trace sa propre panne) au
+    lieu d'être réécrit à ``False``.
+    """
+    try:
+        enforce = _is_enforced(project_root, task_id)
+    except Exception as exc:
+        record_guard_error(project_root, task_id, "done_gate.enforce_option", type(exc).__name__, str(exc))
+        enforce = False
+    if not (enforce and profile in BLOCKING_PROFILES):
+        return enforce, False, False
+    path = _crash_blocks_path(project_root, task_id)
+    raw = _load_caps(path).get("sessions")
+    sessions = [s for s in raw if isinstance(s, str)] if isinstance(raw, list) else []
+    sid = session_id or "unknown"
+    if sid in sessions:
+        return enforce, False, True
+    _save_caps(path, {"sessions": [*sessions, sid][-_CRASH_BLOCKS_MAX:]})
+    return enforce, True, False
 
 
 def evaluate_done_gate(hook: Any, task_id: str, profile: str, *, now_iso: str | None = None) -> DoneGateVerdict:
@@ -488,13 +585,10 @@ def evaluate_done_gate(hook: Any, task_id: str, profile: str, *, now_iso: str | 
             last_mutation_ts=last_mutation_ts,
         )
 
-    enforce = _is_enforced(hook.project_root)
     command_hint = resolved_command or _last_check_command(check_entries) or "ta commande de test"
-    capped = False
-    blocked = False
-    if profile in BLOCKING_PROFILES and enforce:
-        capped = _check_and_record_cap(hook.project_root, task_id, hook.session_id, now_iso)
-        blocked = not capped
+    enforce, blocked, capped = resolve_done_gate_block(
+        hook.project_root, task_id, hook.session_id, profile, now_iso
+    )
     return DoneGateVerdict(
         stale=True,
         reason="mutation_after_last_check",

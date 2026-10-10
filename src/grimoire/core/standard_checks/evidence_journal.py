@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -57,15 +58,35 @@ from grimoire.core.standard_generation import EVIDENCE_DIR, RUNS_DIR, normalize_
 
 __all__ = [
     "EVIDENCE_LOG_FILENAME",
+    "GUARD_ERROR_EVENT",
+    "GUARD_EVENTS_FILENAME",
+    "GUARD_EVENTS_MAX",
     "append_evidence_event",
+    "append_guard_event",
+    "describe_guard_errors",
     "evidence_log_relpath",
+    "guard_events_relpath",
     "has_observed_inventory",
     "read_evidence_log",
+    "read_guard_events",
+    "record_guard_error",
     "regenerate_observed_inventory_section",
 ]
 
 #: Nom du fichier journal, un par tâche, sous ``RUNS_DIR / "evidence" / <task_id>/``.
 EVIDENCE_LOG_FILENAME = "evidence-log.jsonl"
+
+#: Journal des événements de garde (``guard.error``, W1-06), à côté du journal
+#: d'actions mais DISTINCT : ``evidence-log.jsonl`` est l'inventaire des actions
+#: observées (:func:`has_observed_inventory`) — y écrire une panne de garde
+#: ferait croire qu'une action a été observée.
+GUARD_EVENTS_FILENAME = "guard-events.jsonl"
+
+#: Nombre maximal d'événements conservés par tâche dans le journal de garde.
+GUARD_EVENTS_MAX = 200
+
+#: Type d'un événement de garde en panne (fail-open évité, W1-06).
+GUARD_ERROR_EVENT = "guard.error"
 
 #: Longueur maximale d'une commande consignée ; au-delà, tronquée avec un
 #: marqueur explicite plutôt que de laisser grossir le journal sans borne.
@@ -106,6 +127,11 @@ def evidence_log_relpath(task_id: str) -> Path:
     :func:`grimoire.core.standard_generation.ensure_grimoire_gitignore`).
     """
     return RUNS_DIR / "evidence" / normalize_task_id(task_id) / EVIDENCE_LOG_FILENAME
+
+
+def guard_events_relpath(task_id: str) -> Path:
+    """Chemin (relatif à la racine projet) du journal d'événements de garde de *task_id*."""
+    return RUNS_DIR / "evidence" / normalize_task_id(task_id) / GUARD_EVENTS_FILENAME
 
 
 def _truncate_command(command: str) -> str:
@@ -151,9 +177,164 @@ def append_evidence_event(project_root: Path, task_id: str, event: dict[str, Any
         full_path.parent.mkdir(parents=True, exist_ok=True)
         line = json.dumps(event, ensure_ascii=False)
         with open(full_path, "a", encoding="utf-8") as handle:
-            handle.write(line + "\n")
-    except OSError:
+            handle.write(_line_break_if_cut(full_path) + line + "\n")
+    except (OSError, ValueError, TypeError):
+        # ``ValueError`` : ``UnicodeEncodeError`` (substitut isolé dans une commande), JSON non sérialisable.
         return
+
+
+def append_guard_event(project_root: Path, task_id: str, event: dict[str, Any]) -> None:
+    """Append one guard event (``guard.error``…) to the task's guard journal. Best-effort: never raises (``OSError``, nor a value that cannot be encoded).
+
+    The journal is bounded (W1-06) : ``error_message`` is cut at the same
+    length as a command in ``evidence-log.jsonl``. An event identical to the
+    previous one (same fields, ``ts``/``count``/``last_ts`` aside) is not
+    written as a new line — a gate that crashes on every ``Stop`` leaves one
+    line, not one per turn — but it is *counted* : the last line is rewritten
+    with ``count`` (occurrences) and ``last_ts``, so "N panne(s)" stays true.
+    At :data:`GUARD_EVENTS_MAX` lines the oldest are dropped (rotation), so the
+    journal always ends on the most recent failure.
+    """
+    try:
+        message = event.get("error_message")
+        if isinstance(message, str):
+            event = {**event, "error_message": _truncate_command(message)}
+        full_path = project_root / guard_events_relpath(task_id)
+        existing = read_guard_events(project_root, task_id)
+        # Dédoublonnage par garde : deux pannes qui alternent (``done_gate`` puis
+        # ``done_gate.resolution`` à chaque Stop) ne doivent pas le contourner.
+        # La ligne fusionnée passe en dernière position : le journal reste ordonné par la
+        # dernière occurrence, donc « la dernière panne » reste la plus récente.
+        twin = next(
+            (
+                index
+                for index in range(len(existing) - 1, -1, -1)
+                if existing[index].get("type") == event.get("type")
+                and existing[index].get("guard_id") == event.get("guard_id")
+            ),
+            None,
+        )
+        if twin is not None and _without_ts(existing[twin]) == _without_ts(event):
+            last = existing.pop(twin)
+            last["count"] = _event_count(last) + 1
+            last["last_ts"] = event.get("ts", last.get("ts"))
+            _write_guard_events(full_path, [*existing, last])
+            return
+        full_path.parent.mkdir(parents=True, exist_ok=True)
+        if len(existing) >= GUARD_EVENTS_MAX:
+            _write_guard_events(full_path, [*existing[len(existing) - GUARD_EVENTS_MAX + 1 :], event])
+            return
+        with open(full_path, "a", encoding="utf-8") as handle:
+            handle.write(_line_break_if_cut(full_path) + json.dumps(event, ensure_ascii=False) + "\n")
+    except (OSError, ValueError, TypeError):
+        return
+
+
+def _line_break_if_cut(path: Path) -> str:
+    """``"\\n"`` when the journal ends mid-line (a write cut by a crash), else ``""``.
+
+    Without it the next event is glued to the cut line and both are lost.
+    """
+    try:
+        with open(path, "rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            if handle.tell() == 0:
+                return ""
+            handle.seek(-1, os.SEEK_END)
+            return "" if handle.read(1) == b"\n" else "\n"
+    except OSError:
+        return ""
+
+
+def _event_count(event: dict[str, Any]) -> int:
+    """Occurrences carried by one journal line : ``count`` when it is a positive int, else ``1``."""
+    count = event.get("count", 1)
+    return count if isinstance(count, int) and not isinstance(count, bool) and count > 0 else 1
+
+
+def _write_guard_events(path: Path, events: list[dict[str, Any]]) -> None:
+    """Rewrite the whole guard journal atomically (temp file + ``replace``). Raises on failure (callers catch)."""
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_text("".join(json.dumps(e, ensure_ascii=False) + "\n" for e in events), encoding="utf-8")
+        tmp.replace(path)
+    except (OSError, ValueError, TypeError):
+        with contextlib.suppress(OSError):
+            tmp.unlink(missing_ok=True)
+        raise
+
+
+def record_guard_error(project_root: Path, task_id: str, guard_id: str, error_type: str, error_message: str) -> None:
+    """Trace a ``guard.error`` (W1-06) in the guard journal. Best-effort: never raises."""
+    append_guard_event(
+        project_root,
+        task_id,
+        {
+            "ts": datetime.now(UTC).isoformat(),
+            "type": GUARD_ERROR_EVENT,
+            "guard_id": guard_id,
+            "error_type": error_type,
+            "error_message": error_message,
+        },
+    )
+
+
+def describe_guard_errors(project_root: Path, task_id: str) -> str:
+    """The ``guard.error_recorded`` message for *task_id*, with its remedy. ``""`` when none.
+
+    The count is the sum of the occurrences carried by each line (``count``,
+    see :func:`append_guard_event`), not the number of lines.
+    """
+    events = read_guard_events(project_root, task_id)
+    errors = [e for e in events if e.get("type") == GUARD_ERROR_EVENT]
+    if not errors:
+        return ""
+    last = errors[-1]
+    total = sum(_event_count(e) for e in errors)
+    rotated = " Journal plein : les pannes les plus anciennes sont écartées." if len(events) >= GUARD_EVENTS_MAX else ""
+    return (
+        f"{total} panne(s) de garde tracée(s) pour {task_id} (dernière : garde « {last.get('guard_id', '?')} », "
+        f"{last.get('error_type', '?')}) : la garde n'a pas pu juger, ce n'est pas un vert.{rotated} "
+        f"Corrige la cause puis relance `grimoire standard gate check --task-id {task_id}` ; "
+        f"journal : {guard_events_relpath(task_id).as_posix()} (le supprimer acquitte les pannes)."
+    )
+
+
+def _without_ts(event: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in event.items() if key not in {"ts", "count", "last_ts"}}
+
+
+def _read_journal_text(path: Path) -> str | None:
+    """The text of a journal, ``None`` when unreadable. Never raises.
+
+    Decoded with ``errors="replace"`` (W1-06) : a crash mid-write can cut a line
+    inside a multibyte character, and a strict decode would raise
+    ``UnicodeDecodeError`` for the whole file, turning one damaged line into a
+    crashed guard (hence an ``ALLOW``). Replaced, only that line stops parsing as
+    JSON and is skipped by the callers, like any other truncated line.
+    """
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+
+
+def read_guard_events(project_root: Path, task_id: str) -> list[dict[str, Any]]:
+    """Every well-formed guard event logged for *task_id*. ``[]`` when none or unreadable."""
+    full_path = project_root / guard_events_relpath(task_id)
+    raw = _read_journal_text(full_path)
+    if raw is None:
+        return []
+    events: list[dict[str, Any]] = []
+    for line in raw.splitlines():
+        try:
+            parsed = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict) and parsed.get("type"):
+            events.append(parsed)
+    return events
 
 
 def read_evidence_log(project_root: Path, task_id: str) -> list[dict[str, Any]]:
@@ -168,9 +349,8 @@ def read_evidence_log(project_root: Path, task_id: str) -> list[dict[str, Any]]:
     if not full_path.is_file():
         return []
     entries: list[dict[str, Any]] = []
-    try:
-        raw = full_path.read_text(encoding="utf-8")
-    except OSError:
+    raw = _read_journal_text(full_path)
+    if raw is None:
         return []
     for line in raw.splitlines():
         line = line.strip()
@@ -271,7 +451,7 @@ def regenerate_observed_inventory_section(project_root: Path, task_id: str) -> b
     entries = read_evidence_log(project_root, task_id)
     try:
         text = full_path.read_text(encoding="utf-8")
-    except OSError:
+    except (OSError, ValueError):
         return bool(entries)
     block = render_observed_inventory(entries)
     if _SECTION_START in text and _SECTION_END in text:
