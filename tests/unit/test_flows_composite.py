@@ -326,6 +326,7 @@ def test_plafond_du_pilote_arrete_le_sous_flow_sur_le_total(tmp_path: Path) -> N
     assert outcome.node_id == "sub"
     by_node = {n.node_id: n for n in outcome.nodes}
     assert by_node["sub"].verdict == "cost_capped"
+    assert by_node["sub"].cost_cap_reason == "cost_reached"
     # Un seul node de plus après le dépassement : jamais un vert déjà acquis
     # qui serait rétracté, mais aucune tentative après le dépassement.
     assert by_node["sub"].cost_usd == pytest.approx(0.6)
@@ -475,3 +476,148 @@ def test_flow_list_require_measure_couvre_le_sous_flow(tmp_path: Path) -> None:
         ["--output", "json", "flow", "list", "--project-root", str(tmp_path), "--require-measure", "child-flow"],
     )
     assert result.exit_code == 0, result.output
+
+
+# ── 11. Un fournisseur muet ne compte jamais pour zéro face au plafond (W1-01, #709) ─
+
+
+def _setup_silent_tier(tmp_path: Path) -> None:
+    """Comme ``_setup_single_tier`` mais le fournisseur ne rapporte aucun coût."""
+    path = tmp_path / "scripts" / "silent-writer.py"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    silent = dedent(_WRITER).rsplit("print(", 1)[0]
+    path.write_text(silent, encoding="utf-8")
+    _write_registry(tmp_path, _provider_yaml("silent-writer", "cheap", _invocation(path)))
+
+
+def _three_node_child(tmp_path: Path) -> None:
+    child = {
+        "blueprintVersion": 1,
+        "id": "child-flow",
+        "nodes": [
+            _leaf_node("c1", out_contract="cc"),
+            _leaf_node("c2", out_contract="cc2", in_contract="cc"),
+            _leaf_node("c3", in_contract="cc2"),
+        ],
+        "edges": [
+            {"from": "c1.out", "to": "c2.in", "contract": "cc"},
+            {"from": "c2.out", "to": "c3.in", "contract": "cc2"},
+        ],
+    }
+    (tmp_path / "child-flow.blueprint.json").write_text(json.dumps(child), encoding="utf-8")
+
+
+def test_plafond_du_pilote_arrete_un_sous_flow_dont_le_cout_est_inconnu(tmp_path: Path) -> None:
+    _setup_silent_tier(tmp_path)
+    _write_pilot_policy(tmp_path, max_cost_usd_per_node=0.5)
+    _three_node_child(tmp_path)
+    parent_path = _parent_blueprint(tmp_path, ref="child-flow.blueprint.json")
+
+    outcome = run_with_dispatch(_engine(tmp_path), parent_path, project_root=tmp_path)
+
+    assert outcome.status == "blocked", outcome.to_dict()
+    sub = next(n for n in outcome.nodes if n.node_id == "sub")
+    assert sub.verdict == "cost_capped"
+    assert sub.cost_cap_reason == "cost_unknown"  # la raison est dite, pas seulement le verdict (revue S3)
+    assert sub.to_dict()["cost_cap_reason"] == "cost_unknown"
+    assert sub.cost_usd is None  # inconnu, pas 0.0
+    assert sub.to_dict()["cost_status"] == "unknown"
+    assert outcome.to_dict()["cost_status"] == "unknown"
+    assert outcome.total_cost_usd is None
+
+
+def test_politique_continue_flagged_laisse_le_sous_flow_finir_et_signale_le_cout(tmp_path: Path) -> None:
+    _setup_silent_tier(tmp_path)
+    _write_pilot_policy(tmp_path, max_cost_usd_per_node=0.5)
+    (tmp_path / PILOT_POLICY).write_text(
+        "max_cost_usd_per_node: 0.5\non_unknown_cost: continue_flagged\n", encoding="utf-8"
+    )
+    _three_node_child(tmp_path)
+    parent_path = _parent_blueprint(tmp_path, ref="child-flow.blueprint.json")
+
+    outcome = run_with_dispatch(_engine(tmp_path), parent_path, project_root=tmp_path)
+
+    assert outcome.status == "finished", outcome.to_dict()
+    assert outcome.total_cost_usd is None
+    assert outcome.to_dict()["cost_status"] == "unknown"
+    assert outcome.to_dict()["unpriced_calls"] >= 1
+
+
+def _one_node_child(tmp_path: Path) -> None:
+    child = {"blueprintVersion": 1, "id": "child-flow", "nodes": [_leaf_node("c1", out_contract="c2")], "edges": []}
+    (tmp_path / "child-flow.blueprint.json").write_text(json.dumps(child), encoding="utf-8")
+
+
+def test_composite_a_un_seul_node_vert_et_muet_reste_vert_sous_plafond(tmp_path: Path) -> None:
+    """Revue S1 : le dernier vert n'est jamais jeté parce que son coût est inconnu."""
+    _setup_silent_tier(tmp_path)
+    _write_pilot_policy(tmp_path, max_cost_usd_per_node=0.5)
+    _one_node_child(tmp_path)
+    parent_path = _parent_blueprint(tmp_path, ref="child-flow.blueprint.json")
+    engine = _engine(tmp_path)
+
+    outcome = run_with_dispatch(engine, parent_path, project_root=tmp_path)
+
+    sub = next(n for n in outcome.nodes if n.node_id == "sub")
+    assert sub.verdict == "green", outcome.to_dict()
+    assert sub.cost_cap_reason is None
+    assert sub.cost_cap_unevaluated is True  # plafond posé, coût muet : non évalué, et le node le dit
+    assert sub.to_dict()["cost_status"] == "unknown"  # le statut du coût reste porté
+    assert engine.status(sub.child_run_id).status == WorkflowStatus.COMPLETED.value
+
+
+def test_composite_vert_dont_le_cout_connu_depasse_le_plafond_n_est_pas_retracte(tmp_path: Path) -> None:
+    """Un node déjà vert est soumis même si son coût dépasse le plafond ; seul le node suivant est refusé."""
+    _setup_single_tier(tmp_path, cost=0.9)
+    _write_pilot_policy(tmp_path, max_cost_usd_per_node=0.5)
+    _one_node_child(tmp_path)
+    parent_path = _parent_blueprint(tmp_path, ref="child-flow.blueprint.json")
+
+    outcome = run_with_dispatch(_engine(tmp_path), parent_path, project_root=tmp_path)
+
+    sub = next(n for n in outcome.nodes if n.node_id == "sub")
+    assert sub.verdict == "green", outcome.to_dict()
+    assert sub.cost_usd == pytest.approx(0.9)
+
+
+def _capture_aborts(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    reasons: list[str] = []
+    real = FlowEngine.abort
+
+    def spy(self, run_id, *, reason=""):  # type: ignore[no-untyped-def]
+        reasons.append(reason)
+        return real(self, run_id, reason=reason)
+
+    monkeypatch.setattr(FlowEngine, "abort", spy)
+    return reasons
+
+
+def test_motif_d_abort_dit_cout_inconnu_sous_stop_avec_un_fournisseur_muet(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Revue tour 3 : le libellé du run enfant abandonné distingue « coût inconnu » de « plafond atteint »."""
+    reasons = _capture_aborts(monkeypatch)
+    _setup_silent_tier(tmp_path)
+    _write_pilot_policy(tmp_path, max_cost_usd_per_node=0.5)
+    _three_node_child(tmp_path)
+    parent_path = _parent_blueprint(tmp_path, ref="child-flow.blueprint.json")
+
+    run_with_dispatch(_engine(tmp_path), parent_path, project_root=tmp_path)
+
+    assert len(reasons) == 1, reasons
+    assert "coût inconnu" in reasons[0]
+    assert "plafond atteint" not in reasons[0]
+
+
+def test_motif_d_abort_dit_plafond_atteint_sur_un_montant_connu(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    reasons = _capture_aborts(monkeypatch)
+    _setup_single_tier(tmp_path, cost=0.3)
+    _write_pilot_policy(tmp_path, max_cost_usd_per_node=0.5)
+    _three_node_child(tmp_path)
+    parent_path = _parent_blueprint(tmp_path, ref="child-flow.blueprint.json")
+
+    run_with_dispatch(_engine(tmp_path), parent_path, project_root=tmp_path)
+
+    assert len(reasons) == 1, reasons
+    assert "plafond atteint" in reasons[0]
+    assert "coût inconnu" not in reasons[0]

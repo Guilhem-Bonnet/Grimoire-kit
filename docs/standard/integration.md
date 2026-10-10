@@ -192,6 +192,14 @@ plancher de données) :
 - `FAIL` à la place du `WARN` ci-dessus, uniquement si `enforce: true` — un
   dépassement reste silencieux (`WARN`) par défaut, jamais bloquant sans
   décision explicite du projet.
+- `WARN` « non évalué » quand des appels dispatchés n'ont pas de coût
+  (`unpriced_calls > 0`, fournisseur muet) et que le minimum connu ne dépasse
+  pas encore le SLO : le SLO n'est ni tenu ni violé. C'est un `WARN` même avec
+  `enforce: true` — `enforce` ne durcit qu'un dépassement prouvé. Un minimum
+  déjà au-dessus du SLO (« au moins X ») compte, lui, comme un dépassement.
+  Les traces `grimoire.trace.v1` écrivaient `0.0` sans distinguer « gratuit »
+  d'« inconnu » : elles sont relues comme inconnues, donc comptées dans
+  `unpriced_calls` tant qu'elles restent dans le journal.
 
 Le cockpit n'affiche pas encore ces chiffres — seuls `grimoire dispatch
 stats` et `grimoire standard verify`/`gate` les exposent pour l'instant.

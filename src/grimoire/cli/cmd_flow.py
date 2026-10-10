@@ -28,6 +28,7 @@ from rich.table import Table
 
 from grimoire.core.exceptions import GrimoireRuntimeError
 from grimoire.core.standard_generation import TRACES_DIR
+from grimoire.costs import format_usd
 from grimoire.flows.blueprint_loader import hardcoded_command_warnings, load_blueprint
 from grimoire.flows.dispatch_executor import (
     FlowDispatchOutcome,
@@ -150,7 +151,7 @@ def _emit_status(ctx: typer.Context, view: FlowStatusView, project_root: Path) -
             acceptance = _ACCEPTANCE_LABELS.get(row.get("acceptance_status"), "n/a")
             console.print(
                 f"  - {row['node_id']} : {row['verdict']} par {row['provider']} ({row['tier']}), "
-                f"{row['attempts']} tentative(s), coût {row['cost_usd']}{relire} — acceptance {acceptance}"
+                f"{row['attempts']} tentative(s), coût {_cost_cell(row['cost_usd'], row['cost_status'], row.get('unpriced_calls', 0))}{relire} — acceptance {acceptance}"
             )
             if row.get("verifiability_warning"):
                 console.print(f"      [yellow]![/yellow] {row['verifiability_warning']}")
@@ -187,6 +188,11 @@ def _emit_resume(ctx: typer.Context, run_id: str, outcome: ResumeOutcome) -> Non
         console.print(outcome.contract.to_text())
 
 
+def _cost_cell(usd: float | None, status: str, unpriced_calls: int = 0) -> str:
+    """``inconnu`` | ``>= 0.4200 USD (1 non pricés)`` | ``0.4200 USD`` | ``—`` : un coût non rendu ne s'affiche jamais comme 0 (W1-01)."""
+    return format_usd(usd, status, unpriced_calls)
+
+
 def _emit_dispatch_outcome(ctx: typer.Context, outcome: FlowDispatchOutcome) -> None:
     """Rapport de ``--executor dispatch`` : coût total connu et escalades (lot 0, #311)."""
     if _fmt(ctx) == "json":
@@ -197,12 +203,12 @@ def _emit_dispatch_outcome(ctx: typer.Context, outcome: FlowDispatchOutcome) -> 
         acceptance = _ACCEPTANCE_LABELS.get(node.acceptance_status, "n/a")
         console.print(
             f"  {node.node_id} : {node.verdict} par {node.provider} — {node.attempts} tentative(s), "
-            f"{node.escalations} escalade(s), coût {node.cost_usd}{relire} — acceptance {acceptance}"
+            f"{node.escalations} escalade(s), coût {_cost_cell(node.cost_usd, node.cost.status, node.unpriced_calls)}{relire} — acceptance {acceptance}"
         )
         if node.verifiability_warning:
             console.print(f"    [yellow]![/yellow] {node.verifiability_warning}")
     console.print(
-        f"[bold]coût total connu[/bold] : {outcome.total_cost_usd} — [bold]escalades[/bold] : {outcome.escalations}"
+        f"[bold]coût total[/bold] : {outcome.cost.render()} — [bold]escalades[/bold] : {outcome.escalations}"
     )
     if outcome.status == "finished":
         console.print(f"[green]terminé[/green] {outcome.run_id}")
@@ -588,7 +594,7 @@ def flow_list(
             str(len(local_runs)),
             max(v.run_id for v in local_runs),
             "—" if measure is None else f"{measure.resolved}/{measure.total}",
-            "—" if measure is None or measure.cost_per_resolved_task_usd is None else f"${measure.cost_per_resolved_task_usd:.4f}",
+            "—" if measure is None else _cost_cell(measure.cost_per_resolved_task_usd, measure.cost.status, measure.unpriced_calls),
             "—" if measure is None or measure.escalation_rate is None else f"{measure.escalation_rate:.0%}",
             "[dim]non mesuré[/dim]" if measure is None else "mesuré",
         )

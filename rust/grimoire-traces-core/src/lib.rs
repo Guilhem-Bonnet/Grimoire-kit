@@ -83,6 +83,12 @@ use std::collections::HashMap;
 
 // ── Constantes miroir de grimoire.traces.ledger / grimoire.proposals ───────
 
+/// Version de l'ABI Python/Rust (W1-01, revue S8). `dispatch_outcome_stats` echange des
+/// tuples de longueur fixe : `ledger.py` refuse (ou ignore, en `auto`) une extension dont
+/// cette constante differe de `RUST_ABI_VERSION`. A incrementer des deux cotes a chaque
+/// changement de signature ou de forme d'echange. 2 : cout a trois etats (enregistrements a 3 champs).
+pub const ABI_VERSION: u32 = 2;
+
 /// Miroir de `grimoire.traces.ledger.AGENT_DISPATCH_TAG`.
 const AGENT_DISPATCH_TAG: &str = "agent.dispatch";
 /// Miroir de `grimoire.traces.ledger.AGENT_MISS_TAG`.
@@ -618,14 +624,17 @@ const DISPATCH_OUTCOME_TAG: &str = "dispatch.outcome";
 /// Projection minimale d'un enregistrement `dispatch.outcome` deja decode —
 /// les seuls deux champs dont l'agregation ci-dessous a besoin. Construite
 /// cote Python a partir de `TraceLedger._load_all()`
-/// (`(list(trace.tags), trace.token_usage.estimated_cost_usd)`), jamais un
-/// contenu de prompt ou de sortie de commande : ce crate ne recoit que des
+/// (`(list(trace.tags), usd, unpriced_calls)` depuis `trace.token_usage.cost`),
+/// jamais un contenu de prompt ou de sortie de commande : ce crate ne recoit que des
 /// etiquettes mecaniques (voir `missions.dispatch._record_dispatch_outcome`
 /// cote Python pour ce qu'elles portent).
 #[derive(Debug, Clone)]
 pub struct DispatchOutcomeProjection {
     pub tags: Vec<String>,
-    pub cost_usd: f64,
+    /// `None` : coût inconnu (aucun appel chiffré), jamais `0.0` (W1-01).
+    pub cost_usd: Option<f64>,
+    /// Appels sans prix. Un enregistrement au coût inconnu en compte au moins un.
+    pub unpriced_calls: i64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -634,23 +643,62 @@ pub struct DispatchGroupStats {
     pub resolved: i64,
     pub inexecutable: i64,
     pub escalated: i64,
-    pub total_cost_usd: f64,
+    /// Somme des seuls montants connus : un minimum quand `unpriced_calls > 0`.
+    pub known_usd: f64,
+    pub priced_calls: i64,
+    pub unpriced_calls: i64,
 }
 
 impl DispatchGroupStats {
+    /// `exact` | `lower_bound` | `unknown` — miroir de `grimoire.costs.Cost.status`.
+    pub fn cost_status(&self) -> &'static str {
+        if self.unpriced_calls == 0 {
+            "exact"
+        } else if self.priced_calls > 0 {
+            "lower_bound"
+        } else {
+            "unknown"
+        }
+    }
+
+    /// Le montant connu, `None` quand rien n'est chiffre (jamais `0.0`).
+    pub fn total_cost_usd(&self) -> Option<f64> {
+        if self.cost_status() == "unknown" {
+            None
+        } else {
+            Some(self.known_usd)
+        }
+    }
+
     fn empty() -> Self {
         Self {
             total: 0,
             resolved: 0,
             inexecutable: 0,
             escalated: 0,
-            total_cost_usd: 0.0,
+            known_usd: 0.0,
+            priced_calls: 0,
+            unpriced_calls: 0,
         }
     }
 
-    fn accumulate(&mut self, resolved: bool, inexecutable: bool, escalated: bool, cost_usd: f64) {
+    fn accumulate(
+        &mut self,
+        resolved: bool,
+        inexecutable: bool,
+        escalated: bool,
+        cost_usd: Option<f64>,
+        unpriced_calls: i64,
+    ) {
         self.total += 1;
-        self.total_cost_usd += cost_usd;
+        match cost_usd {
+            Some(usd) => {
+                self.known_usd += usd;
+                self.priced_calls += 1;
+                self.unpriced_calls += unpriced_calls.max(0);
+            }
+            None => self.unpriced_calls += unpriced_calls.max(1),
+        }
         if resolved {
             self.resolved += 1;
         }
@@ -724,20 +772,38 @@ pub fn dispatch_outcome_stats_core(
         let escalated = tiers.len() > 1;
         let inexecutable = acceptance == "unrunnable";
 
-        overall.accumulate(resolved, inexecutable, escalated, record.cost_usd);
+        overall.accumulate(
+            resolved,
+            inexecutable,
+            escalated,
+            record.cost_usd,
+            record.unpriced_calls,
+        );
         if !class_.is_empty() {
             let entry = by_class.entry(class_.clone()).or_insert_with(|| {
                 class_order.push(class_.clone());
                 DispatchGroupStats::empty()
             });
-            entry.accumulate(resolved, inexecutable, escalated, record.cost_usd);
+            entry.accumulate(
+                resolved,
+                inexecutable,
+                escalated,
+                record.cost_usd,
+                record.unpriced_calls,
+            );
         }
         if !provider.is_empty() {
             let entry = by_provider.entry(provider.clone()).or_insert_with(|| {
                 provider_order.push(provider.clone());
                 DispatchGroupStats::empty()
             });
-            entry.accumulate(resolved, inexecutable, escalated, record.cost_usd);
+            entry.accumulate(
+                resolved,
+                inexecutable,
+                escalated,
+                record.cost_usd,
+                record.unpriced_calls,
+            );
         }
         if !replay_key.is_empty() {
             *replay_total.entry(replay_key.clone()).or_insert(0) += 1;
@@ -1396,7 +1462,7 @@ mod py_bridge {
         (action.as_str().to_string(), threshold, reopen_at)
     }
 
-    type GroupStatsTuple = (i64, i64, i64, i64, f64);
+    type GroupStatsTuple = (i64, i64, i64, i64, f64, i64, i64);
 
     fn group_stats_to_tuple(stats: DispatchGroupStats) -> GroupStatsTuple {
         (
@@ -1404,22 +1470,24 @@ mod py_bridge {
             stats.resolved,
             stats.inexecutable,
             stats.escalated,
-            stats.total_cost_usd,
+            stats.known_usd,
+            stats.priced_calls,
+            stats.unpriced_calls,
         )
     }
 
     /// Frontiere PyO3 pour `TraceLedger.dispatch_outcome_stats`
     /// (`compute_dispatch_outcome_stats`, issue #442). `records` est
-    /// `[(tags, cost_usd), ...]` — la projection minimale construite par
+    /// `[(tags, usd | None, unpriced_calls), ...]` — la projection minimale construite par
     /// `TraceLedger._load_all()` cote Python. Retourne `(overall, by_class,
     /// by_provider, pass_k_observations, pass_k_fully_green)` ou chaque
     /// groupe est `(total, resolved, inexecutable, escalated,
-    /// total_cost_usd)` et `by_class`/`by_provider` sont
+    /// known_usd, priced_calls, unpriced_calls)` et `by_class`/`by_provider` sont
     /// `[(nom, groupe), ...]`.
     #[pyfunction]
     #[allow(clippy::type_complexity)]
     fn dispatch_outcome_stats(
-        records: Vec<(Vec<String>, f64)>,
+        records: Vec<(Vec<String>, Option<f64>, i64)>,
     ) -> (
         GroupStatsTuple,
         Vec<(String, GroupStatsTuple)>,
@@ -1429,7 +1497,13 @@ mod py_bridge {
     ) {
         let projections: Vec<DispatchOutcomeProjection> = records
             .into_iter()
-            .map(|(tags, cost_usd)| DispatchOutcomeProjection { tags, cost_usd })
+            .map(
+                |(tags, cost_usd, unpriced_calls)| DispatchOutcomeProjection {
+                    tags,
+                    cost_usd,
+                    unpriced_calls,
+                },
+            )
             .collect();
         let result = dispatch_outcome_stats_core(&projections);
         (
@@ -1467,6 +1541,7 @@ mod py_bridge {
         m.add_function(wrap_pyfunction!(clamp_threshold, m)?)?;
         m.add_function(wrap_pyfunction!(sync_decision, m)?)?;
         m.add("__version__", env!("CARGO_PKG_VERSION"))?;
+        m.add("ABI_VERSION", super::ABI_VERSION)?;
         Ok(())
     }
 }
@@ -2059,7 +2134,16 @@ mod tests {
     fn outcome(tags: &[&str], cost_usd: f64) -> DispatchOutcomeProjection {
         DispatchOutcomeProjection {
             tags: tags.iter().map(|s| s.to_string()).collect(),
-            cost_usd,
+            cost_usd: Some(cost_usd),
+            unpriced_calls: 0,
+        }
+    }
+
+    fn unpriced(tags: &[&str], unpriced_calls: i64) -> DispatchOutcomeProjection {
+        DispatchOutcomeProjection {
+            tags: tags.iter().map(|s| s.to_string()).collect(),
+            cost_usd: None,
+            unpriced_calls,
         }
     }
 
@@ -2097,7 +2181,8 @@ mod tests {
         let stats = dispatch_outcome_stats_core(&records);
         assert_eq!(stats.overall.total, 2);
         assert_eq!(stats.overall.resolved, 1);
-        assert!((stats.overall.total_cost_usd - 0.03).abs() < 1e-9);
+        assert!((stats.overall.total_cost_usd().unwrap() - 0.03).abs() < 1e-9);
+        assert_eq!(stats.overall.cost_status(), "exact");
     }
 
     #[test]
@@ -2111,7 +2196,34 @@ mod tests {
         )];
         let stats = dispatch_outcome_stats_core(&records);
         assert_eq!(stats.overall.resolved, 0);
-        assert_eq!(stats.overall.total_cost_usd, 5.0);
+        assert_eq!(stats.overall.total_cost_usd(), Some(5.0));
+    }
+
+    #[test]
+    fn dispatch_stats_unknown_cost_is_never_zero() {
+        // W1-01 : tous les couts inconnus => `None` et `unknown`, jamais `0.0`.
+        let tags = [DISPATCH_OUTCOME_TAG, "class:V0", "resolved:true"];
+        let stats = dispatch_outcome_stats_core(&[unpriced(&tags, 1), unpriced(&tags, 2)]);
+        assert_eq!(stats.overall.cost_status(), "unknown");
+        assert_eq!(stats.overall.total_cost_usd(), None);
+        assert_eq!(stats.overall.unpriced_calls, 3);
+        assert_eq!(stats.overall.priced_calls, 0);
+    }
+
+    #[test]
+    fn dispatch_stats_one_unpriced_among_priced_is_a_lower_bound() {
+        let tags = [DISPATCH_OUTCOME_TAG, "class:V0", "resolved:true"];
+        let stats = dispatch_outcome_stats_core(&[outcome(&tags, 0.42), unpriced(&tags, 1)]);
+        assert_eq!(stats.overall.cost_status(), "lower_bound");
+        assert_eq!(stats.overall.total_cost_usd(), Some(0.42));
+        assert_eq!(stats.overall.unpriced_calls, 1);
+    }
+
+    #[test]
+    fn dispatch_stats_unknown_record_counts_at_least_one_unpriced_call() {
+        let tags = [DISPATCH_OUTCOME_TAG, "resolved:true"];
+        let stats = dispatch_outcome_stats_core(&[unpriced(&tags, 0)]);
+        assert_eq!(stats.overall.unpriced_calls, 1);
     }
 
     #[test]

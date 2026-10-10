@@ -137,3 +137,28 @@ def test_load_pilot_policy_malformed_yaml_refuse_au_lieu_de_retomber_en_silence(
     )
     with pytest.raises(GrimoireRuntimeError):
         load_pilot_policy(tmp_path)
+
+
+# ── on_unknown_cost : que faire d'un coût inconnu face au plafond (W1-01, #709) ──
+
+
+def test_load_pilot_policy_on_unknown_cost_par_defaut_est_stop(tmp_path: Path) -> None:
+    assert PilotPolicy().on_unknown_cost == "stop"
+    assert decide(Verifiability.V0, policy=PilotPolicy()).cost_unknown_policy == "stop"
+
+
+def test_load_pilot_policy_on_unknown_cost_continue_flagged(tmp_path: Path) -> None:
+    (tmp_path / "_grimoire" / "standard").mkdir(parents=True)
+    (tmp_path / "_grimoire" / "standard" / "pilot.yaml").write_text(
+        "on_unknown_cost: continue_flagged\n", encoding="utf-8"
+    )
+    policy = load_pilot_policy(tmp_path)
+    assert policy.on_unknown_cost == "continue_flagged"
+    assert decide(Verifiability.V0, policy=policy).cost_unknown_policy == "continue_flagged"
+
+
+def test_load_pilot_policy_on_unknown_cost_inconnu_est_refuse_nomme(tmp_path: Path) -> None:
+    (tmp_path / "_grimoire" / "standard").mkdir(parents=True)
+    (tmp_path / "_grimoire" / "standard" / "pilot.yaml").write_text("on_unknown_cost: ignore\n", encoding="utf-8")
+    with pytest.raises(GrimoireRuntimeError, match="on_unknown_cost"):
+        load_pilot_policy(tmp_path)
