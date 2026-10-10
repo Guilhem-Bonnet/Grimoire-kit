@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from grimoire.core.exceptions import GrimoireRuntimeError
+from grimoire.core.fsio import atomic_write, locked
 from grimoire.runtime.schemas import (
     DEFAULT_MAX_BUDGET,
     DEFAULT_MAX_TOOL_CALLS,
@@ -165,11 +166,22 @@ class RuntimeKernel:
         return instances
 
     def _save_instance(self, wfi: WorkflowInstance) -> None:
-        """Replace the serialized instance in the instances file."""
+        """Replace the serialized instance in the instances file.
+
+        Relecture, remplacement puis ré-écriture se font sous le verrou du
+        fichier (``fsio.locked``) et la ré-écriture est atomique
+        (``fsio.atomic_write``) : deux écrivains concurrents ne se perdent plus
+        l'un l'autre et un crash ne laisse jamais un fichier tronqué.
+        """
+        with locked(self._instances_path):
+            self._store_instance(wfi)
+
+    def _store_instance(self, wfi: WorkflowInstance) -> None:
+        """Corps de :meth:`_save_instance` ; l'appelant tient déjà le verrou."""
         instances = self._load_instances()
         instances[wfi.id] = wfi
         lines = [json.dumps(v.to_dict(), ensure_ascii=False) for v in instances.values()]
-        self._instances_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        atomic_write(self._instances_path, "\n".join(lines) + "\n")
 
     def _append_event(self, event: RunEvent) -> None:
         line = json.dumps(event.to_dict(), ensure_ascii=False) + "\n"
@@ -249,26 +261,29 @@ class RuntimeKernel:
         the module-level defaults are the "reasonable default" caps.
         """
         run_id = ctx.run_id or f"RUN-{uuid.uuid4().hex[:12]}"
-        instances = self._load_instances()
-        if wfi_id is None:
-            slug = _slug_for_recipe_id(recipe_id)
-            seq = sum(1 for k in instances if k.startswith(f"WFI-{slug}")) + 1
-            wfi_id = f"WFI-{slug}-{seq:03d}"
-        wfi = WorkflowInstance(
-            id=wfi_id,
-            recipe_id=recipe_id,
-            recipe_version=recipe_version,
-            mission_id=ctx.mission_id,
-            task_id=ctx.task_id,
-            run_id=run_id,
-            status=WorkflowStatus.CREATED,
-            host_id=ctx.host_id,
-            actor_id=ctx.actor_id,
-            created_at=_now_iso(),
-            max_tool_calls=max_tool_calls,
-            max_budget=max_budget,
-        )
-        self._save_instance(wfi)
+        # Le numéro de séquence est pris SOUS le verrou, dans la même section
+        # critique que l'écriture : sinon deux créations concurrentes lisent le
+        # même décompte, obtiennent le même identifiant et l'une écrase l'autre.
+        with locked(self._instances_path):
+            if wfi_id is None:
+                slug = _slug_for_recipe_id(recipe_id)
+                seq = sum(1 for k in self._load_instances() if k.startswith(f"WFI-{slug}")) + 1
+                wfi_id = f"WFI-{slug}-{seq:03d}"
+            wfi = WorkflowInstance(
+                id=wfi_id,
+                recipe_id=recipe_id,
+                recipe_version=recipe_version,
+                mission_id=ctx.mission_id,
+                task_id=ctx.task_id,
+                run_id=run_id,
+                status=WorkflowStatus.CREATED,
+                host_id=ctx.host_id,
+                actor_id=ctx.actor_id,
+                created_at=_now_iso(),
+                max_tool_calls=max_tool_calls,
+                max_budget=max_budget,
+            )
+            self._store_instance(wfi)
         return wfi
 
     def start(self, wfi_id: str, ctx: ExecutionContext) -> WorkflowInstance:
