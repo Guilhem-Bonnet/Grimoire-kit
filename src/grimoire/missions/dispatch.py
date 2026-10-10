@@ -207,7 +207,8 @@ def _classify_unrunnable(cmd: str, exit_code: int | None, stdout: str, stderr: s
     combined = f"{stdout}\n{stderr}"
     if any(marker in combined for marker in _IMPORT_ERROR_MARKERS):
         return "erreur d'import détectée dans la sortie : la collecte n'a pas pu s'exécuter"
-    # Vert vide (W1-04) : appliqué même à code de sortie 0, c'est son objet.
+    # Vert vide (W1-04) : appliqué à tout code de sortie (0 est son objet), mais jamais
+    # quand la sortie prouve qu'un test a tourné — un vrai rouge reste un rouge.
     return classify_empty_green(combined)
 
 #: Surfaces sensibles par défaut (issue #327) — un diff qui en touche une

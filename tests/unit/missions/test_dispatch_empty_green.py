@@ -87,3 +87,69 @@ def test_un_echec_reel_d_un_executeur_n_est_pas_un_vert_vide() -> None:
     assert _classify_unrunnable("npx mocha", 1, out, "") is None
     cargo = "test result: FAILED. 0 passed; 2 failed; 0 ignored\n"
     assert _classify_unrunnable("cargo test", 101, cargo, "") is None
+
+
+_VITEST_VIDE = " RUN  v1.6.0 /app\n\nNo test files found, exiting with code 1\n"
+_JEST_VIDE = "No tests found, exiting with code 0\n"
+_GO_VIDE = "?   \texample.com/app\t[no test files]\n"
+_GO_JSON = (
+    '{"Action":"output","Package":"ex.com/pkg","Output":"ok  \\tex.com/pkg\\t0.004s\\n"}\n'
+    '{"Action":"pass","Package":"ex.com/pkg","Test":"TestA","Elapsed":0}\n'
+    '{"Action":"output","Package":"ex.com/cmd","Output":"?   \\tex.com/cmd\\t[no test files]\\n"}\n'
+)
+
+
+@pytest.mark.parametrize(
+    ("label", "printed"),
+    [
+        # W1-04-S1-01 : monorepo ``pnpm -r``, un paquet vide et un paquet testé.
+        (
+            "vitest monorepo",
+            _VITEST_VIDE + "\n Test Files  2 passed (2)\n      Tests  7 passed (7)\n",
+        ),
+        (
+            "jest monorepo",
+            _JEST_VIDE + "\nTests:       3 passed, 3 total\nTest Suites: 1 passed, 1 total\n",
+        ),
+        ("vitest monorepo, un échec", _VITEST_VIDE + "\n      Tests  1 failed | 4 passed (5)\n"),
+        # W1-04-S1-02 : go -json, et vide go dans un check composite.
+        ("go -json", _GO_JSON),
+        ("go vide puis pytest", _GO_VIDE + "50 passed in 1.2s\n"),
+        ("go vide puis cargo", _GO_VIDE + "test result: ok. 3 passed; 0 failed; 0 ignored\n"),
+        ("go vide puis mocha", _GO_VIDE + "\n  4 passing (8ms)\n"),
+        ("go vide puis unittest", _GO_VIDE + "Ran 5 tests in 0.001s\n\nOK\n"),
+        # W1-04-S1-03 : un identifiant de test cite le motif.
+        (
+            "pytest rouge citant le motif",
+            "FAILED tests/test_x.py::test_a[vitest- RUN  v1.6.0 /app\\n\\nNo test files found, "
+            "exiting with code 1\\n-stdout]\n=== 1 failed, 14 passed in 0.5s ===\n",
+        ),
+    ],
+)
+def test_une_preuve_d_execution_de_n_importe_quel_outil_l_emporte_sur_un_vide(
+    tmp_path: Path, label: str, printed: str
+) -> None:
+    result = _check(tmp_path, printed)
+
+    assert result.unrunnable_reason is None, label
+    assert result.ok is True
+
+
+def test_un_vrai_rouge_qui_cite_un_motif_de_vide_reste_un_rouge(tmp_path: Path) -> None:
+    """Le motif cité dans un identifiant de test ne transforme pas le rouge en inexécutable."""
+    out = (
+        "FAILED tests/test_x.py::test_a[vitest- RUN  v1.6.0 /app\\n\\nNo test files found, "
+        "exiting with code 1\\n-stdout]\n=== 1 failed, 14 passed in 0.5s ===\n"
+    )
+    assert _classify_unrunnable("pytest tests/unit/missions", 1, out, "") is None
+
+    (result,) = _run_checks((f"printf %s {shlex.quote(out)}; exit 1",), project_root=tmp_path)
+    assert result.exit_code == 1
+    assert result.unrunnable_reason is None
+    assert result.ok is False
+
+
+@pytest.mark.parametrize("exit_code", [0, 1])
+def test_un_vide_sans_aucune_preuve_reste_inexecutable(exit_code: int) -> None:
+    for out in (_VITEST_VIDE, _JEST_VIDE, _GO_VIDE, _GO_JSON.splitlines()[2]):
+        assert _classify_unrunnable("npx vitest", exit_code, out, "") is not None, out
