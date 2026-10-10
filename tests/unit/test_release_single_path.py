@@ -1,0 +1,318 @@
+"""Une release, une seule voie (D-01).
+
+Avant : ``release.yml`` et ``publish.yml`` créaient chacun la release GitHub du
+même tag. ``publish-pypi`` étant opt-in, ``github-release`` (qui en dépend) était
+ignoré tant que PyPI était désactivé — c'est ``release.yml`` qui écrivait alors
+la release, avec un ``git log`` ; PyPI activé, les deux la réécrivaient.
+
+Ces tests simulent la sémantique de GitHub Actions (un job dont un ``needs``
+n'a pas réussi est ignoré, sauf si son ``if`` porte une fonction de statut) sur
+le vrai ``publish.yml``, et exécutent les deux scripts de la voie unique dans
+des dépôts git jetables.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import re
+import subprocess
+from pathlib import Path
+from types import ModuleType
+from typing import Any
+
+import pytest
+from ruamel.yaml import YAML
+
+_ROOT = Path(__file__).resolve().parents[2]
+_WORKFLOWS = _ROOT / ".github" / "workflows"
+_SCRIPTS = _ROOT / "scripts"
+_PUBLISH = _WORKFLOWS / "publish.yml"
+
+pytestmark = pytest.mark.skipif(not _PUBLISH.is_file(), reason="dépôt source uniquement")
+
+
+def _load_workflows() -> dict[str, dict[str, Any]]:
+    yaml = YAML(typ="safe")
+    return {p.name: yaml.load(p.read_text(encoding="utf-8")) for p in sorted(_WORKFLOWS.glob("*.yml"))}
+
+
+def _load_script(name: str) -> ModuleType:
+    spec = importlib.util.spec_from_file_location(name.replace("-", "_"), _SCRIPTS / f"{name}.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+# ── 1. Un seul créateur de release ───────────────────────────────────────────
+
+
+def test_exactly_one_workflow_step_creates_the_github_release() -> None:
+    creators = [
+        (name, job_name)
+        for name, wf in _load_workflows().items()
+        for job_name, job in (wf.get("jobs") or {}).items()
+        for step in job.get("steps", [])
+        if str(step.get("uses", "")).startswith("softprops/action-gh-release")
+    ]
+    assert creators == [("publish.yml", "github-release")], f"créateurs de release : {creators}"
+
+
+def test_only_publish_yml_reacts_to_a_release_tag() -> None:
+    # YAML 1.1 lit la clé `on` comme le booléen True ; ruamel « safe » suit.
+    reacting = [
+        name
+        for name, wf in _load_workflows().items()
+        if "tags" in ((wf.get(True) or wf.get("on") or {}).get("push") or {})
+    ]
+    assert reacting == ["publish.yml"], f"workflows déclenchés par un tag : {reacting}"
+
+
+# ── 2. Sémantique des jobs : la release survit à PyPI désactivé ──────────────
+
+_STATUS_FUNCTIONS = re.compile(r"\b(always|cancelled|failure|success)\(\)")
+
+
+def _evaluate(expr: str, results: dict[str, str], outputs: dict[str, dict[str, str]], variables: dict[str, str]) -> bool:
+    text = " ".join(expr.replace("${{", " ").replace("}}", " ").split())
+    text = text.replace("!cancelled()", "True")
+    text = re.sub(r"needs\.([\w-]+)\.result", lambda m: repr(results.get(m.group(1), "skipped")), text)
+    text = re.sub(
+        r"needs\.([\w-]+)\.outputs\.([\w-]+)", lambda m: repr(outputs.get(m.group(1), {}).get(m.group(2), "")), text
+    )
+    text = re.sub(r"vars\.([\w-]+)", lambda m: repr(variables.get(m.group(1), "")), text)
+    text = text.replace("&&", " and ").replace("||", " or ")
+    assert re.fullmatch(r"[\w\s'()=!.\-]*", text), f"expression non simulée : {text}"
+    return bool(eval(text, {"__builtins__": {}}, {}))  # noqa: S307 — expression issue de notre propre workflow
+
+
+def _simulate(
+    stable: bool, *, failing: frozenset[str] = frozenset(), variables: dict[str, str] | None = None
+) -> dict[str, str]:
+    """Résultat de chaque job de publish.yml pour un tag stable ou pré-version."""
+    jobs: dict[str, dict[str, Any]] = _load_workflows()["publish.yml"]["jobs"]
+    outputs = {"gates": {"stable": "true" if stable else "false", "version": "9.9.9"}}
+    results: dict[str, str] = {}
+    pending = list(jobs)
+    while pending:
+        progressed = False
+        for name in list(pending):
+            needs = jobs[name].get("needs", [])
+            needs = [needs] if isinstance(needs, str) else list(needs)
+            if any(n not in results for n in needs):
+                continue
+            expr = str(jobs[name].get("if", "true"))
+            if _STATUS_FUNCTIONS.search(expr) or "!cancelled()" in expr:
+                runs = _evaluate(expr, results, outputs, variables or {})
+            elif any(results[n] != "success" for n in needs):
+                runs = False  # success() implicite
+            else:
+                runs = _evaluate(expr, results, outputs, variables or {}) if "if" in jobs[name] else True
+            results[name] = ("failure" if name in failing else "success") if runs else "skipped"
+            pending.remove(name)
+            progressed = True
+        assert progressed, "cycle de dépendances entre jobs"
+    return results
+
+
+def test_stable_tag_publishes_to_pypi_then_creates_the_release() -> None:
+    results = _simulate(stable=True)
+    assert results["publish-pypi"] == "success"
+    assert results["github-release"] == "success"
+
+
+def test_release_is_still_created_when_pypi_is_disabled() -> None:
+    # PyPI désactivé = pré-version (ou variable absente avant D-01) : la release
+    # GitHub ne dépend pas d'un job ignoré.
+    results = _simulate(stable=False)
+    assert results["publish-pypi"] == "skipped"
+    assert results["github-release"] == "success"
+
+
+@pytest.mark.parametrize("stable", [True, False])
+def test_a_failed_smoke_test_blocks_publication_and_release(stable: bool) -> None:
+    results = _simulate(stable=stable, failing=frozenset({"test"}))
+    assert results["publish-pypi"] == "skipped"
+    assert results["github-release"] == "skipped"
+
+
+def test_a_failed_pypi_publication_leaves_no_release() -> None:
+    results = _simulate(stable=True, failing=frozenset({"publish-pypi"}))
+    assert results["github-release"] == "skipped"
+
+
+def test_failed_gates_stop_everything() -> None:
+    results = _simulate(stable=True, failing=frozenset({"gates"}))
+    assert {n: r for n, r in results.items() if n != "gates"} == {
+        "build": "skipped",
+        "test": "skipped",
+        "publish-pypi": "skipped",
+        "github-release": "skipped",
+    }
+
+
+# ── 3. Les notes sont la section du CHANGELOG validée ────────────────────────
+
+
+def _release_step() -> dict[str, Any]:
+    steps = _load_workflows()["publish.yml"]["jobs"]["github-release"]["steps"]
+    return next(s for s in steps if str(s.get("uses", "")).startswith("softprops/action-gh-release"))
+
+
+def test_release_body_is_the_changelog_file_and_nothing_generated() -> None:
+    with_ = _release_step()["with"]
+    assert with_.get("body_path") == "RELEASE_NOTES.md"
+    assert "body" not in with_, "un corps inline s'ajouterait au fichier"
+    assert with_.get("generate_release_notes") is False, "les notes générées s'ajouteraient à la section"
+
+
+def test_release_notes_file_is_written_by_the_changelog_section_script() -> None:
+    steps = _load_workflows()["publish.yml"]["jobs"]["github-release"]["steps"]
+    writers = [s for s in steps if "changelog-section.py" in str(s.get("run", ""))]
+    assert writers and all("RELEASE_NOTES.md" in s["run"] for s in writers)
+    assert steps.index(writers[0]) < steps.index(_release_step())
+
+
+def test_the_gates_run_the_changelog_and_tag_checks_before_any_build() -> None:
+    jobs = _load_workflows()["publish.yml"]["jobs"]
+    runs = " ".join(str(s.get("run", "")) for s in jobs["gates"]["steps"])
+    for script in ("check-release-tag.py", "check-changelog-release.py", "gen-kit-hashes.py --check"):
+        assert script in runs, f"{script} absent des garde-fous"
+    needs = jobs["build"]["needs"]
+    assert "gates" in ([needs] if isinstance(needs, str) else needs)
+
+
+# ── 4. scripts/changelog-section.py ──────────────────────────────────────────
+
+_CHANGELOG = """# Changelog
+
+## [Unreleased]
+
+## [1.2.0] - 2026-01-02
+
+- feat: la deux.
+  - détail
+
+## [1.1.0] - 2026-01-01
+
+- fix: la une.
+
+## [1.0.0-rc1] - 2025-12-31
+
+- chore: pré-version.
+"""
+
+
+def test_section_body_is_exactly_the_section_without_its_heading() -> None:
+    mod = _load_script("changelog-section")
+    assert mod.section_body(_CHANGELOG, "1.2.0") == "- feat: la deux.\n  - détail"
+    assert mod.section_body(_CHANGELOG, "1.1.0") == "- fix: la une."
+    assert mod.section_body(_CHANGELOG, "1.0.0-rc1") == "- chore: pré-version."
+
+
+def test_section_body_is_none_for_an_unknown_version() -> None:
+    assert _load_script("changelog-section").section_body(_CHANGELOG, "9.9.9") is None
+
+
+def test_script_refuses_a_missing_or_empty_section(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    mod = _load_script("changelog-section")
+    log = tmp_path / "CHANGELOG.md"
+    log.write_text(_CHANGELOG, encoding="utf-8")
+    assert mod.main(["9.9.9", "--changelog", str(log)]) == 1
+    assert mod.main(["Unreleased", "--changelog", str(log)]) == 1  # section vide
+    assert "9.9.9" in capsys.readouterr().err
+
+
+def test_script_writes_the_section_and_accepts_a_v_prefix(tmp_path: Path) -> None:
+    mod = _load_script("changelog-section")
+    log = tmp_path / "CHANGELOG.md"
+    log.write_text(_CHANGELOG, encoding="utf-8")
+    out = tmp_path / "RELEASE_NOTES.md"
+    assert mod.main(["v1.2.0", "--changelog", str(log), "--output", str(out)]) == 0
+    assert out.read_text(encoding="utf-8") == "- feat: la deux.\n  - détail\n"
+
+
+def test_the_real_changelog_has_a_section_for_the_current_version() -> None:
+    mod = _load_script("changelog-section")
+    version = (_ROOT / "version.txt").read_text(encoding="utf-8").strip()
+    body = mod.section_body((_ROOT / "CHANGELOG.md").read_text(encoding="utf-8"), version)
+    assert body, f"CHANGELOG.md n'a pas de section non vide pour {version}"
+    assert not body.startswith("## ")
+
+
+# ── 5. scripts/check-release-tag.py ──────────────────────────────────────────
+
+
+def _git(repo: Path, *args: str) -> str:
+    done = subprocess.run(
+        ["git", *args], cwd=repo, capture_output=True, text=True, encoding="utf-8", check=True,
+    )
+    return done.stdout.strip()
+
+
+def _commit(repo: Path, version: str, message: str) -> None:
+    (repo / "version.txt").write_text(version + "\n", encoding="utf-8")
+    _git(repo, "add", "version.txt")
+    _git(repo, "commit", "-q", "-m", message)
+
+
+@pytest.fixture
+def repo(tmp_path: Path) -> Path:
+    """Un dépôt avec `origin/main` simulé par une référence de suivi."""
+    root = tmp_path / "repo"
+    root.mkdir()
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "config", "user.email", "t@example.invalid")
+    _git(root, "config", "user.name", "test")
+    _git(root, "config", "commit.gpgsign", "false")
+    _git(root, "config", "tag.gpgsign", "false")
+    _commit(root, "1.2.3", "release")
+    _git(root, "update-ref", "refs/remotes/origin/main", "HEAD")
+    return root
+
+
+def test_tag_on_main_matching_version_is_accepted(repo: Path, tmp_path: Path) -> None:
+    mod = _load_script("check-release-tag")
+    _git(repo, "tag", "-a", "v1.2.3", "-m", "Release 1.2.3")
+    out = tmp_path / "gh_output"
+    assert mod.main(["--repo", str(repo), "--tag", "v1.2.3", "--github-output", str(out)]) == 0
+    assert out.read_text(encoding="utf-8") == "version=1.2.3\nstable=true\n"
+
+
+def test_prerelease_tag_is_accepted_and_not_stable(repo: Path, tmp_path: Path) -> None:
+    mod = _load_script("check-release-tag")
+    _commit(repo, "1.3.0-rc1", "rc")
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _git(repo, "tag", "v1.3.0-rc1")
+    out = tmp_path / "gh_output"
+    assert mod.main(["--repo", str(repo), "--tag", "v1.3.0-rc1", "--github-output", str(out)]) == 0
+    assert out.read_text(encoding="utf-8") == "version=1.3.0-rc1\nstable=false\n"
+
+
+def test_tag_differing_from_version_txt_fails(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    mod = _load_script("check-release-tag")
+    _git(repo, "tag", "v1.2.4")
+    assert mod.main(["--repo", str(repo), "--tag", "v1.2.4"]) == 1
+    assert "version.txt" in capsys.readouterr().err
+
+
+def test_tag_on_a_commit_outside_main_fails(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    mod = _load_script("check-release-tag")
+    _git(repo, "checkout", "-q", "-b", "feature")
+    _commit(repo, "1.2.4", "branche de travail")
+    _git(repo, "tag", "-a", "v1.2.4", "-m", "hors main")
+    assert mod.main(["--repo", str(repo), "--tag", "v1.2.4"]) == 1
+    assert "n'est pas sur origin/main" in capsys.readouterr().err
+
+
+def test_missing_main_ref_fails_closed(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    mod = _load_script("check-release-tag")
+    _git(repo, "tag", "v1.2.3")
+    assert mod.main(["--repo", str(repo), "--tag", "v1.2.3", "--main-ref", "origin/inconnue"]) == 1
+    assert "introuvable" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("tag", ["1.2.3", "v1.2", "v1.2.3.4", "v1.2.3-", "latest"])
+def test_malformed_tags_fail(repo: Path, tag: str) -> None:
+    mod = _load_script("check-release-tag")
+    assert mod.problems(repo, tag, "origin/main")

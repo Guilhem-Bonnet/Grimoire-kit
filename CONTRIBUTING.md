@@ -302,8 +302,9 @@ où un numéro consommé l'est définitivement :
    wheel puis exécute `make wheel-check` : installation de la wheel dans un
    venv neuf (`.wheel-check-venv/`), `grimoire --version`, import du SDK.
    Une wheel qui ne démarre pas ne se tague pas.
-2. **Au tag, dans `release.yml`** — trois gardes bloquants : le tag et
-   `version.txt` disent la même chose, `scripts/gen-kit-hashes.py --check`
+2. **Au tag, dans le job `gates` de `publish.yml`** — quatre gardes bloquants,
+   avant tout `build` : le tag et `version.txt` disent la même chose et le tag
+   pointe un commit de `main` (`scripts/check-release-tag.py`), `scripts/gen-kit-hashes.py --check`
    couvre les fichiers livrés, `scripts/check-changelog-release.py` décrit la
    version publiée. Ce dernier exige que chaque commit `feat`/`fix`/`perf`
    fusionné depuis le tag précédent touche `CHANGELOG.md` — sauf repli : un
@@ -318,6 +319,13 @@ où un numéro consommé l'est définitivement :
    vient de construire ; le job `test` la réinstalle dans un runner neuf sur
    chaque Python supporté et importe le SDK. `publish-pypi` dépend des deux :
    rien ne part si l'un échoue, et aucun job n'est en `continue-on-error`.
+
+`publish.yml` est la seule voie de release : `gates` → `build` → `test` →
+`publish-pypi` → `github-release`. PyPI part sur un tag stable (`vX.Y.Z`) ;
+une pré-version (`vX.Y.Z-rc1`) ne produit qu'une release GitHub marquée
+pre-release, sans PyPI. La release GitHub est créée après la publication, et le
+corps est la section du `CHANGELOG.md` que `gates` vient de valider
+(`scripts/changelog-section.py`) — rien n'est généré à partir de `git log`.
 
 ```bash
 make release VERSION=x.y.z      # check + hashes + build + wheel-check
