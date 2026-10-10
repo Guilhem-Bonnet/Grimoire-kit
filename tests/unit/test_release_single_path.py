@@ -233,12 +233,66 @@ def test_script_writes_the_section_and_accepts_a_v_prefix(tmp_path: Path) -> Non
     assert out.read_text(encoding="utf-8") == "- feat: la deux.\n  - détail\n"
 
 
+def _utf16_units(text: str) -> int:
+    """Indépendant du script : ce que ``String.prototype.substring`` compte."""
+    return sum(2 if ord(c) > 0xFFFF else 1 for c in text)
+
+
+def _log_with_body_of(tmp_path: Path, units: int, filler: str = "a") -> Path:
+    """Un CHANGELOG dont la section 9.9.9 pèse, une fois écrite (corps + saut de ligne), ``units`` unités UTF-16."""
+    per_char = 2 if ord(filler) > 0xFFFF else 1
+    count = (units - 1) // per_char  # -1 : le "\n" final
+    log = tmp_path / "CHANGELOG.md"
+    log.write_text("# Changelog\n\n## [9.9.9] - 2026-01-01\n\n" + filler * count + "\n", encoding="utf-8")
+    return log
+
+
+@pytest.mark.parametrize(
+    ("filler", "units"),
+    [("a", 124_998), ("a", 124_999), ("\U0001f4a1", 124_997)],
+    ids=["bmp-sous-le-seuil", "bmp-au-seuil", "hors-bmp-sous-le-seuil"],
+)
+def test_script_accepts_a_body_the_release_action_would_keep_whole(tmp_path: Path, filler: str, units: int) -> None:
+    mod = _load_script("changelog-section")
+    log = _log_with_body_of(tmp_path, units, filler)
+    out = tmp_path / "RELEASE_NOTES.md"
+    assert mod.main(["9.9.9", "--changelog", str(log), "--output", str(out)]) == 0
+    assert _utf16_units(out.read_text(encoding="utf-8")) == units
+
+
+@pytest.mark.parametrize(
+    ("filler", "units"),
+    [("a", 125_000), ("a", 139_761), ("\U0001f4a1", 125_001)],
+    ids=["bmp-juste-au-dessus", "bmp-le-cas-reproduit", "hors-bmp-juste-au-dessus"],
+)
+def test_script_refuses_a_body_the_release_action_would_silently_truncate(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], filler: str, units: int
+) -> None:
+    mod = _load_script("changelog-section")
+    log = _log_with_body_of(tmp_path, units, filler)
+    out = tmp_path / "RELEASE_NOTES.md"
+    assert mod.main(["9.9.9", "--changelog", str(log), "--output", str(out)]) == 1
+    assert not out.exists()
+    err = capsys.readouterr().err
+    assert err.startswith("::error::") and "124999" in err
+
+
+def test_script_counts_utf16_units_not_python_characters(tmp_path: Path) -> None:
+    """62 500 caractères hors BMP = 125 000 unités : sous 124 999 en ``len()``, mais la release les couperait."""
+    mod = _load_script("changelog-section")
+    log = tmp_path / "CHANGELOG.md"
+    log.write_text("## [9.9.9] - 2026-01-01\n\n" + "\U0001f4a1" * 62_500 + "\n", encoding="utf-8")
+    assert mod.main(["9.9.9", "--changelog", str(log)]) == 1
+
+
 def test_the_real_changelog_has_a_section_for_the_current_version() -> None:
     mod = _load_script("changelog-section")
     version = (_ROOT / "version.txt").read_text(encoding="utf-8").strip()
     body = mod.section_body((_ROOT / "CHANGELOG.md").read_text(encoding="utf-8"), version)
     assert body, f"CHANGELOG.md n'a pas de section non vide pour {version}"
     assert not body.startswith("## ")
+    assert _utf16_units(body + "\n") <= 124_999
+
 
 
 # ── 5. scripts/check-release-tag.py ──────────────────────────────────────────
