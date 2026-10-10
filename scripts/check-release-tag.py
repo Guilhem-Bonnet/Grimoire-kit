@@ -35,6 +35,18 @@ STABLE = re.compile(r"^v\d+\.\d+\.\d+$")
 PRERELEASE = re.compile(r"^v\d+\.\d+\.\d+-[0-9A-Za-z][0-9A-Za-z.]*$")
 
 
+def is_release_version(version: str) -> bool:
+    """``version`` (sans le ``v``) est-elle une version que ce garde laisse partir ?
+
+    Source unique de la graphie : ``tests/unit/test_version_sync.py``, qui tourne
+    sur chaque pull request, l'importe d'ici. Deux regex séparées laisseraient
+    une pré-version passer un garde et pas l'autre — c'était le cas, et aucun
+    tag de pré-version n'était atteignable.
+    """
+    tag = f"v{version}"
+    return bool(STABLE.match(tag) or PRERELEASE.match(tag))
+
+
 def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["git", *args], cwd=repo, capture_output=True, text=True, encoding="utf-8", check=False, timeout=60

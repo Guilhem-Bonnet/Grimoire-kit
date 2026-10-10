@@ -323,7 +323,13 @@ où un numéro consommé l'est définitivement :
 `publish.yml` est la seule voie de release : `gates` → `build` → `test` →
 `publish-pypi` → `github-release`. PyPI part sur un tag stable (`vX.Y.Z`) ;
 une pré-version (`vX.Y.Z-rc1`) ne produit qu'une release GitHub marquée
-pre-release, sans PyPI. La release GitHub est créée après la publication, et le
+pre-release, sans PyPI — `make release VERSION=x.y.z-rc1` écrit alors
+`x.y.z-rc1` dans `version.txt` et `__version__` (la graphie SemVer ; hatch la
+normalise en `x.y.zrc1` dans les métadonnées de la wheel), et
+`tests/unit/test_version_sync.py` accepte cette forme parce qu'il lit le même
+prédicat que le garde de tag. Le job `publish-pypi` relance sans échouer sur un
+fichier déjà reçu (`skip-existing`) : après un téléversement interrompu, relancer
+les jobs en échec suffit à créer la release. La release GitHub est créée après la publication, et le
 corps est la section du `CHANGELOG.md` que `gates` vient de valider
 (`scripts/changelog-section.py`) — rien n'est généré à partir de `git log`.
 

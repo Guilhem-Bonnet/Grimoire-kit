@@ -16,6 +16,7 @@ from __future__ import annotations
 import importlib.util
 import re
 import subprocess
+import sys
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -369,3 +370,94 @@ def test_changelog_entry_does_not_overstate_the_guarantee() -> None:
     assert "GRIMOIRE_ENABLE_PYPI" in entry and "refs/tags/v*" in entry
     assert "contiennent" in entry or "contient" in entry
     assert "désarm" in entry
+
+
+# ── 7. Une pré-version doit pouvoir traverser les deux portes ────────────────
+#
+# `check-release-tag.py` accepte `vX.Y.Z-rc1` ; `tests/unit/test_version_sync.py`
+# tourne sur chaque pull request et exigeait trois champs numériques. Aucune
+# graphie de pré-version ne passait donc les deux : la voie « release GitHub
+# sans PyPI » existait dans le workflow et n'était atteignable par aucun tag.
+# Ces tests rejouent les deux portes ensemble, sur la même version, dans un
+# dépôt jetable (le vrai `test_version_sync.py` et le vrai garde y sont copiés).
+
+
+def _gate_repo(root: Path, version: str) -> Path:
+    """Un dépôt jetable qui porte ``version`` partout et le tag ``v<version>`` sur ``origin/main``."""
+    (root / "grimoire").mkdir(parents=True)
+    (root / "tests" / "unit").mkdir(parents=True)
+    (root / "scripts").mkdir()
+    (root / "grimoire" / "__init__.py").write_text("", encoding="utf-8")
+    (root / "grimoire" / "__version__.py").write_text(f'__version__ = "{version}"\n', encoding="utf-8")
+    (root / "version.txt").write_text(version + "\n", encoding="utf-8")
+    for rel in ("tests/unit/test_version_sync.py", "scripts/check-release-tag.py"):
+        (root / rel).write_text((_ROOT / rel).read_text(encoding="utf-8"), encoding="utf-8")
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "config", "user.email", "t@example.invalid")
+    _git(root, "config", "user.name", "test")
+    _git(root, "config", "commit.gpgsign", "false")
+    _git(root, "config", "tag.gpgsign", "false")
+    _git(root, "add", ".")
+    _git(root, "commit", "-q", "-m", "release")
+    _git(root, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _git(root, "tag", f"v{version}")
+    return root
+
+
+def _version_sync_passes(root: Path) -> bool:
+    """Le test de synchronisation des versions, tel que la CI le lance sur chaque PR."""
+    env = {"PATH": "/usr/bin:/bin", "PYTHONPATH": str(root), "PYTHONDONTWRITEBYTECODE": "1"}
+    done = subprocess.run(
+        [sys.executable, "-m", "pytest", "tests/unit/test_version_sync.py", "-q", "-p", "no:cacheprovider"],
+        cwd=root, env=env, capture_output=True, text=True, encoding="utf-8", check=False, timeout=120,
+    )
+    return done.returncode == 0
+
+
+def _tag_gate_passes(root: Path, version: str) -> bool:
+    done = subprocess.run(
+        [sys.executable, str(root / "scripts" / "check-release-tag.py"), "--repo", str(root), "--tag", f"v{version}"],
+        capture_output=True, text=True, encoding="utf-8", check=False, timeout=120,
+    )
+    return done.returncode == 0
+
+
+@pytest.mark.parametrize("version", ["3.63.0", "3.63.0-rc1"])
+def test_a_release_version_crosses_both_gates(tmp_path: Path, version: str) -> None:
+    root = _gate_repo(tmp_path / "r", version)
+    assert _tag_gate_passes(root, version), "le garde de tag refuse la version"
+    assert _version_sync_passes(root), "test_version_sync refuse la version que le garde de tag accepte"
+
+
+@pytest.mark.parametrize("version", ["3.63.0", "3.63.0-rc1", "3.63.0rc1", "3.63", "3.63.0-"])
+def test_the_two_gates_agree_on_every_spelling(tmp_path: Path, version: str) -> None:
+    root = _gate_repo(tmp_path / "r", version)
+    assert _version_sync_passes(root) == _tag_gate_passes(root, version)
+
+
+# ── 8. Reprise après un téléversement PyPI partiel ───────────────────────────
+#
+# Un téléversement PyPI peut s'arrêter entre le sdist et la wheel. Relancer le
+# job échoue alors sur le fichier déjà reçu (HTTP 400) tant que l'action n'a
+# pas `skip-existing: true` ; `github-release` dépend de `publish-pypi`, donc
+# la release ne se crée plus, et il n'existe plus de second workflow pour la
+# rattraper (`release.yml` avait un `workflow_dispatch`).
+
+
+def _pypi_step() -> dict[str, Any]:
+    steps = _load_workflows()["publish.yml"]["jobs"]["publish-pypi"]["steps"]
+    return next(s for s in steps if str(s.get("uses", "")).startswith("pypa/gh-action-pypi-publish"))
+
+
+def test_pypi_step_skips_files_already_uploaded() -> None:
+    options = _pypi_step().get("with") or {}
+    assert str(options.get("skip-existing", "false")).lower() == "true"
+
+
+def test_rerun_after_a_partial_pypi_upload_still_creates_the_release() -> None:
+    # PyPI refuse un fichier déjà présent ; sans skip-existing, la reprise échoue.
+    skips = str((_pypi_step().get("with") or {}).get("skip-existing", "false")).lower() == "true"
+    rerun_fails = frozenset() if skips else frozenset({"publish-pypi"})
+    results = _simulate(stable=True, failing=rerun_fails)
+    assert results["publish-pypi"] == "success"
+    assert results["github-release"] == "success"
