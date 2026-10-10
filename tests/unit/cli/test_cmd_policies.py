@@ -14,7 +14,9 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from grimoire.cli.app import app
+from grimoire.policies.rules_config import load_custom_rules
 from grimoire.policies.session_state import SessionState, save_session_state, session_state_path
+from grimoire.policies.temporal import action_fingerprint, record_post_tool_use_approval
 
 runner = CliRunner()
 
@@ -154,6 +156,70 @@ def test_reset_session_json_output(tmp_path: Path) -> None:
     payload = json.loads(result.output)
     assert payload["session_id"] == "sess-json"
     assert payload["deleted"] is True
+
+
+def test_status_json_exposes_the_approved_fingerprints(tmp_path: Path) -> None:
+    _write_policies_yaml(
+        tmp_path,
+        """
+rules:
+  - id: rm-approval
+    description: "approval"
+    action_kinds: []
+    mutation_classes: []
+    risk_profiles: []
+    verdict_on_match: warn
+    reason_template: "approval"
+    tool_pattern: "Bash(rm:*)"
+    require_approval: true
+""",
+    )
+    state = SessionState.new("sess-fp", "2026-01-01T00:00:00+00:00")
+    rules = load_custom_rules(tmp_path)
+    assert record_post_tool_use_approval(rules, state, tool_name="Bash", tool_detail="rm a") is True
+    save_session_state(tmp_path, state, now_iso="2026-01-01T00:05:00+00:00")
+
+    result = runner.invoke(
+        app, ["policies", "status", "--session-id", "sess-fp", "--project-root", str(tmp_path), "--json"]
+    )
+    assert result.exit_code == 0
+    row = json.loads(result.output)["rules"][0]
+    assert row["approved_fingerprints"] == [action_fingerprint("Bash", "rm a")]
+    assert row["summary"] == "1 action(s) approuvée(s) cette session"
+
+
+def test_status_text_does_not_claim_approval_for_a_legacy_boolean(tmp_path: Path) -> None:
+    """S5 : `approved=True` sans empreinte (état d'avant W1-09) redemandera."""
+    _write_policies_yaml(
+        tmp_path,
+        """
+rules:
+  - id: rm-approval
+    description: "approval"
+    action_kinds: []
+    mutation_classes: []
+    risk_profiles: []
+    verdict_on_match: warn
+    reason_template: "approval"
+    tool_pattern: "Bash(rm:*)"
+    require_approval: true
+""",
+    )
+    state = SessionState.new("sess-legacy", "2026-01-01T00:00:00+00:00")
+    state.rule_state("rm-approval").approved = True
+    save_session_state(tmp_path, state, now_iso="2026-01-01T00:05:00+00:00")
+    result = runner.invoke(app, ["policies", "status", "--session-id", "sess-legacy", "--project-root", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "pas encore demandée" in result.output
+    assert "approuvée" not in result.output
+    as_json = runner.invoke(
+        app, ["policies", "status", "--json", "--session-id", "sess-legacy", "--project-root", str(tmp_path)]
+    )
+    assert as_json.exit_code == 0
+    row = json.loads(as_json.output)["rules"][0]
+    assert row["approved"] is False
+    assert row["approved_fingerprints"] == []
+    assert row["summary"] == "pas encore demandée"
 
 
 # ── Defect 5: `doctor` warns about a globally-blocking `per_session` rule ────

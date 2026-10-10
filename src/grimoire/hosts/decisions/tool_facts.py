@@ -9,6 +9,7 @@ Needs :mod:`grimoire.policies.schemas` for ``ActionKind``/``MutationClass``
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -342,6 +343,45 @@ def policy_tool_detail(facts: ToolFacts) -> str:
     if facts.targets:
         return facts.targets[0]
     return ""
+
+
+#: Clés sans effet sur ce que la commande fait, par outil : seules ignorées.
+#: Bash natif : ``description``, ``timeout`` ; Copilot ``run_in_terminal`` :
+#: ``explanation``, ``goal`` (texte d'affichage, reformulé à chaque appel).
+_VOLATILE_KEYS: dict[str, frozenset[str]] = {
+    "Bash": frozenset({"description", "timeout"}),
+    "run_in_terminal": frozenset({"explanation", "goal"}),
+}
+_COMMAND_KEYS = ("command", "cmd", "commandLine", "script")
+
+
+def approval_fingerprint(tool_name: str, tool_input: dict[str, Any], facts: ToolFacts) -> str:
+    """Empreinte de l'action pour une règle ``require_approval`` (W1-09).
+
+    Toujours l'entrée canonique complète de l'outil (JSON trié : toutes les
+    cibles, tous les arguments, le contenu), de sorte qu'un autre hôte, dépôt,
+    répertoire, cible ou contenu redemande. Quand l'appel porte une commande,
+    sa valeur y est remplacée par la commande normalisée (blancs hors
+    guillemets) ; ``description``/``timeout`` (Bash natif) et
+    ``explanation``/``goal`` (Copilot ``run_in_terminal``) sont ignorés, tout
+    autre argument compte. Calculée au PreToolUse puis, sans identifiant d'appel,
+    recalculée au PostToolUse depuis son ``tool_input`` : un hook qui réécrit
+    l'entrée entre les deux (``git status`` -> ``rtk git status``) la change.
+    Avec un ``tool_use_id``, le PostToolUse reprend donc l'empreinte retenue au
+    PreToolUse (``temporal.remember_pending_approval``) au lieu de la recalculer.
+    """
+    from grimoire.policies.temporal import action_fingerprint, normalize_command
+
+    payload = dict(tool_input)
+    for key in _VOLATILE_KEYS.get(tool_name, ()):
+        payload.pop(key, None)
+    if facts.command:
+        for key in _COMMAND_KEYS:
+            if payload.get(key) == facts.command:
+                payload[key] = normalize_command(facts.command)
+                break
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str, ensure_ascii=False)
+    return action_fingerprint(tool_name, canonical, normalize=False)
 
 
 def _first_str(data: dict[str, Any], *keys: str) -> str:

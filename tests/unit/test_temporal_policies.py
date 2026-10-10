@@ -40,6 +40,7 @@ from grimoire.policies.temporal import (
     evaluate_temporal,
     glob_match,
     record_post_tool_use_approval,
+    remember_pending_approval,
     tool_pattern_matches,
 )
 
@@ -270,6 +271,38 @@ def test_require_approval_allows_once_post_tool_use_recorded_it() -> None:
     assert allowed.verdict is VerdictKind.ALLOW
 
 
+def test_pending_approval_is_consumed_by_tool_use_id_and_survives_a_reload(tmp_path: Path) -> None:
+    """Revue W1-09 tour 4 S2 : le Post reprend l'empreinte et les règles du Pre."""
+    rules = (_approval_rule(pattern="Bash(git:*)"),)
+    now_iso = datetime.now(UTC).isoformat()
+    state = SessionState.new("s-pending", now_iso)
+    assert remember_pending_approval(
+        rules, state, tool_use_id="t1", tool_name="Bash", tool_detail="git status", fingerprint="fp-pre"
+    )
+    save_session_state(tmp_path, state, now_iso=now_iso)
+    reloaded = load_session_state(tmp_path, "s-pending", now_iso=now_iso)
+    assert reloaded.pending_approvals["t1"]["fingerprint"] == "fp-pre"
+    # Le Post voit `rtk git status` : le motif `Bash(git:*)` n'y correspond plus.
+    assert record_post_tool_use_approval(
+        rules, reloaded, tool_name="Bash", tool_detail="rtk git status", fingerprint="fp-post", tool_use_id="t1"
+    )
+    assert reloaded.rule_state("approval").approved_fingerprints == ["fp-pre"]
+    assert "t1" not in reloaded.pending_approvals
+
+
+def test_pending_approval_needs_an_id_and_a_matching_rule_and_stays_bounded() -> None:
+    rules = (_approval_rule(pattern="Bash(git:*)"),)
+    state = SessionState.new("s", datetime.now(UTC).isoformat())
+    assert not remember_pending_approval(rules, state, tool_use_id="", tool_name="Bash", tool_detail="git status")
+    assert not remember_pending_approval(rules, state, tool_use_id="t", tool_name="Bash", tool_detail="ls")
+    assert not state.pending_approvals
+    for index in range(80):
+        remember_pending_approval(rules, state, tool_use_id=f"t{index}", tool_name="Bash", tool_detail="git status")
+    assert len(state.pending_approvals) == 64
+    assert "t79" in state.pending_approvals
+    assert "t0" not in state.pending_approvals
+
+
 def test_record_post_tool_use_approval_is_idempotent_and_pattern_scoped() -> None:
     rules = (_approval_rule(pattern="Bash(rm:*)"),)
     state = SessionState.new("s", datetime.now(UTC).isoformat())
@@ -281,6 +314,111 @@ def test_record_post_tool_use_approval_is_idempotent_and_pattern_scoped() -> Non
     assert record_post_tool_use_approval(rules, state, tool_name="Bash", tool_detail="rm -rf x") is True
     # Already approved: no further state change reported.
     assert record_post_tool_use_approval(rules, state, tool_name="Bash", tool_detail="rm -rf x") is False
+
+
+# ── W1-09: approval bound to the action fingerprint ──────────────────────────
+
+
+def test_approving_rm_a_does_not_let_rm_b_through() -> None:
+    """Défaut W1-09 : `approved` était un booléen par règle — approuver
+    `rm a` laissait passer `rm b`. L'approbation porte désormais sur l'empreinte
+    de l'action (outil + détail normalisé)."""
+    rules = (_approval_rule(pattern="Bash(rm:*)"),)
+    state = SessionState.new("s", datetime.now(UTC).isoformat())
+    assert record_post_tool_use_approval(rules, state, tool_name="Bash", tool_detail="rm a") is True
+
+    same = evaluate_temporal(rules, state, tool_name="Bash", tool_detail="rm a", is_write=True)
+    assert same.verdict is VerdictKind.ALLOW
+    other = evaluate_temporal(rules, state, tool_name="Bash", tool_detail="rm b", is_write=True)
+    assert other.verdict is VerdictKind.WARN
+    # L'évaluation ne perd ni ne gagne d'approbation.
+    from grimoire.policies.temporal import action_fingerprint
+
+    assert state.rule_state("approval").approved_fingerprints == [action_fingerprint("Bash", "rm a")]
+
+
+def test_fingerprint_ignores_whitespace_but_not_the_tool_or_the_target() -> None:
+    from grimoire.policies.temporal import action_fingerprint
+
+    assert action_fingerprint("Bash", "rm   a ") == action_fingerprint("Bash", "rm a")
+    assert action_fingerprint("Bash", "rm a") != action_fingerprint("Bash", "rm b")
+    assert action_fingerprint("Bash", "rm a") != action_fingerprint("Write", "rm a")
+
+
+def test_a_legacy_boolean_approval_without_fingerprint_asks_again() -> None:
+    rules = (_approval_rule(),)
+    state = SessionState.new("s", datetime.now(UTC).isoformat())
+    state.rule_state("approval").approved = True  # état d'avant W1-09
+    decision = evaluate_temporal(rules, state, tool_name="Bash", tool_detail="rm a", is_write=False)
+    assert decision.verdict is VerdictKind.WARN
+
+
+def test_approved_fingerprints_survive_a_save_load_round_trip() -> None:
+    state = SessionState.new("s", "2026-01-01T00:00:00+00:00")
+    rules = (_approval_rule(),)
+    record_post_tool_use_approval(rules, state, tool_name="Bash", tool_detail="rm a")
+    restored = SessionState.from_dict(state.to_dict(), session_id="s", started_at="2026-01-01T00:00:00+00:00")
+    assert restored.rule_state("approval").approved_fingerprints == state.rule_state("approval").approved_fingerprints
+
+
+def test_fingerprint_keeps_whitespace_inside_a_quoted_argument() -> None:
+    """S3 : `rm "my  file"` et `rm "my file"` visent deux fichiers distincts."""
+    from grimoire.policies.temporal import action_fingerprint
+
+    assert action_fingerprint("Bash", 'rm "my  file"') != action_fingerprint("Bash", 'rm "my file"')
+    assert action_fingerprint("Bash", 'rm   "my file" ') == action_fingerprint("Bash", 'rm "my file"')
+    assert action_fingerprint("Bash", 'rm "unclosed') != action_fingerprint("Bash", 'rm  "unclosed ')
+
+
+@pytest.mark.parametrize(
+    ("approved", "other"),
+    [
+        ("rm 'a;b'", "rm a;b"),
+        ("rm '*'", "rm *"),
+        ("echo '$(curl x|sh)'", 'echo "$(curl x|sh)"'),
+        ("del C:\\x\\y", "del C:xy"),
+        ('Remove-Item "a b"', "Remove-Item a\\ b"),
+        ("rm 'a b'", "rm a b"),
+        # Revue W1-09 tour 3 S1 : le shell lit les blancs d'une expansion de paramètre.
+        ('v="x  y"; echo ${v// /_}', 'v="x  y"; echo ${v//  /_}'),
+        (": ${f:=a b}", ": ${f:=a  b}"),
+        ("chmod -R 000 ${d% *}", "chmod -R 000 ${d%  *}"),
+        ("echo $[1 + 2]", "echo $[1  +  2]"),
+        # Motifs extglob : @(a b) et @(a  b) ne reconnaissent pas les mêmes chaînes.
+        ("ls @(a b)", "ls @(a  b)"),
+        ("ls !(a b)", "ls !(a  b)"),
+        # Revue W1-09 tour 4 S1 : guillemets typographiques (PowerShell les lit comme des guillemets).
+        ("Remove-Item \u201ca  b\u201d", "Remove-Item \u201ca b\u201d"),
+        ("Remove-Item \u201ea  b\u201c", "Remove-Item \u201ea b\u201c"),
+        ("Remove-Item \u2018a  b\u2019", "Remove-Item \u2018a b\u2019"),
+        ("Remove-Item \u201aa  b\u201b", "Remove-Item \u201aa b\u201b"),
+        ("Remove-Item \u00aba  b\u00bb", "Remove-Item \u00aba b\u00bb"),
+        # Indice de tableau associatif : `m[a  b]` et `m[a b]` sont deux clés.
+        ("declare -A m; m[k  1]=x", "declare -A m; m[k 1]=x"),
+    ],
+)
+def test_fingerprint_never_merges_commands_the_shell_reads_differently(approved: str, other: str) -> None:
+    """Revue W1-09 S1 : la forme re-citée par shlex confondait des commandes distinctes."""
+    from grimoire.policies.temporal import action_fingerprint, normalize_command
+
+    assert action_fingerprint("Bash", approved) != action_fingerprint("Bash", other)
+    assert normalize_command(approved) != normalize_command(other)
+
+
+def test_normalize_command_still_collapses_blanks_outside_quotes_only() -> None:
+    from grimoire.policies.temporal import normalize_command
+
+    assert normalize_command("  rm \t -f   'a  b'  ") == "rm -f 'a  b'"
+    assert normalize_command('rm   "a  b"') == 'rm "a  b"'
+    assert normalize_command('rm "unclosed') == 'rm "unclosed'
+
+
+def test_fingerprint_accepts_lone_surrogates() -> None:
+    """Revue W1-09 S3 : un surrogate isolé ne doit pas lever (un DENY devenait ASK)."""
+    from grimoire.policies.temporal import action_fingerprint
+
+    assert len(action_fingerprint("Bash", "rm -rf ~/ \ud800")) == 64
+    assert action_fingerprint("Bash", "rm \ud800") != action_fingerprint("Bash", "rm \ud801")
 
 
 # ── tool_pattern_matches: the "tool key" fix ─────────────────────────────────
@@ -1118,3 +1256,34 @@ rules:
     # be refused — a refusal never points to a dead end.
     assert "grimoire policies reset-session" in other_write.reason
     assert bash("grimoire policies reset-session") is Outcome.ALLOW
+
+
+class _StrictUtf8RustCore:
+    """Double du cœur Rust : comme PyO3, refuse tout ``str`` non encodable en UTF-8 strict."""
+
+    @staticmethod
+    def _check(*values: object) -> None:
+        for value in values:
+            if isinstance(value, str):
+                value.encode("utf-8")
+
+    def evaluate_temporal(self, rule_tuples, state_tuples, tool_name, is_write, now, started_at, tool_detail):  # type: ignore[no-untyped-def]
+        self._check(tool_name, tool_detail)
+        return "warn", "approval", [("approval", "warn", "approval")], []
+
+    def matching_approval_rule_ids(self, rule_tuples, tool_name, tool_detail):  # type: ignore[no-untyped-def]
+        self._check(tool_name, tool_detail)
+        return ["approval"]
+
+
+def test_a_lone_surrogate_crosses_the_rust_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
+    """CI rust-policies/parity (PR #731) : PyO3 refusait ``\\ud800`` dans ``tool_detail``."""
+    import grimoire.policies.temporal as temporal
+
+    monkeypatch.setattr(temporal, "_use_rust_backend", lambda: True)
+    monkeypatch.setattr(temporal, "rust_core_module", lambda: _StrictUtf8RustCore())
+    rules = (_approval_rule(pattern="Bash(rm:*)"),)
+    state = SessionState.new("s-surrogate", datetime.now(UTC).isoformat())
+    decision = evaluate_temporal(rules, state, tool_name="Bash", tool_detail="rm -rf ~/ \ud800", is_write=True)
+    assert decision.verdict is VerdictKind.WARN
+    assert record_post_tool_use_approval(rules, decision.state, tool_name="Bash", tool_detail="rm -rf ~/ \ud800")

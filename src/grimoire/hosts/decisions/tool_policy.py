@@ -19,6 +19,7 @@ from grimoire.core.standard_state import active_profile_id, active_task_id
 from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
 from grimoire.hosts.decisions.tool_facts import (
     ToolFacts,
+    approval_fingerprint,
     classify_tool,
     command_surface,
     extract_c_bodies,
@@ -113,18 +114,32 @@ def _evaluate_temporal_layer(
         return VerdictKind.ALLOW, "", []
 
     from grimoire.policies.session_state import load_session_state, save_session_state
-    from grimoire.policies.temporal import evaluate_temporal
+    from grimoire.policies.temporal import evaluate_temporal, remember_pending_approval
 
     now = datetime.now(UTC)
     now_iso = now.isoformat()
     state = load_session_state(hook.project_root, hook.session_id, now_iso=now_iso)
+    tool_name = hook.tool_name or "unknown"
+    tool_detail = policy_tool_detail(facts)
+    fingerprint = approval_fingerprint(tool_name, hook.tool_input, facts)
     decision = evaluate_temporal(
         temporal_rules,
         state,
-        tool_name=hook.tool_name or "unknown",
-        tool_detail=policy_tool_detail(facts),
+        tool_name=tool_name,
+        tool_detail=tool_detail,
         is_write=facts.mutation is not MutationClass.READ_ONLY,
         now=now,
+        fingerprint=fingerprint,
+    )
+    # Un hook peut réécrire l'entrée avant l'exécution : le PostToolUse reprend
+    # l'empreinte d'ici par `tool_use_id` au lieu de la recalculer (W1-09).
+    remember_pending_approval(
+        temporal_rules,
+        decision.state,
+        tool_use_id=hook.tool_use_id,
+        tool_name=tool_name,
+        tool_detail=tool_detail,
+        fingerprint=fingerprint,
     )
     save_session_state(hook.project_root, decision.state, now_iso=now_iso)
     return decision.verdict, decision.reason, [rule.rule_id for rule in decision.matched_rules]

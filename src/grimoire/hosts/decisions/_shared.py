@@ -52,6 +52,11 @@ class HookInput:
     invoked for — ``grimoire-hook --host claude`` — or ``""`` when a decision is
     run without a host (tests, direct calls). Read by the session ↔ task link
     (issue #638): a resume command exists only for a host known to have one."""
+    tool_use_id: str = ""
+    """The host's identifier of this tool call, shared by its ``PreToolUse`` and
+    ``PostToolUse`` payloads, or ``""`` when the host sends none. The temporal
+    layer keys a pending approval on it: a hook may rewrite the tool input
+    between the two events (W1-09)."""
     raw: dict[str, Any] = field(default_factory=dict)
 
 
