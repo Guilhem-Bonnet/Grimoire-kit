@@ -410,6 +410,19 @@ def _evaluate_python(
     return effective, reason, tuple(matched)
 
 
+def _ffi_text(text: str) -> str:
+    """*text* sous une forme que le cœur Rust accepte toujours.
+
+    PyO3 encode chaque ``str`` en UTF-8 strict : un surrogate isolé (un
+    ``\ud800`` venu d'une commande mal décodée) lève ``UnicodeEncodeError``
+    au passage de la frontière, et l'appel de politique plante au lieu de
+    rendre son verdict. Le texte franchit donc la frontière avec chaque
+    surrogate isolé remplacé par U+FFFD — un motif de règle n'en contient
+    jamais, le filtrage reste celui du backend Python.
+    """
+    return text.encode("utf-8", errors="surrogatepass").decode("utf-8", errors="replace")
+
+
 def _evaluate_rust(
     rules: Sequence[PolicyRule],
     state: SessionState,
@@ -456,11 +469,11 @@ def _evaluate_rust(
     verdict_str, reason, matched_raw, deltas = _rust_core.evaluate_temporal(
         rule_tuples,
         state_tuples,
-        tool_name,
+        _ffi_text(tool_name),
         is_write,
         now.timestamp(),
         _iso_to_epoch(state.started_at, now),
-        tool_detail,
+        _ffi_text(tool_detail),
     )
     for rule_id, calls, writes, cost_usd, approved, hits_epoch in deltas:
         rs = state.rule_state(rule_id)
@@ -622,7 +635,7 @@ def _mark_approved_rust(rules: Sequence[PolicyRule], tool_name: str, tool_detail
     _rust_core = rust_core_module()
     assert _rust_core is not None
     rule_tuples = [(rule.id, rule.tool_pattern) for rule in rules]
-    return list(_rust_core.matching_approval_rule_ids(rule_tuples, tool_name, tool_detail))
+    return list(_rust_core.matching_approval_rule_ids(rule_tuples, _ffi_text(tool_name), _ffi_text(tool_detail)))
 
 
 def remember_pending_approval(

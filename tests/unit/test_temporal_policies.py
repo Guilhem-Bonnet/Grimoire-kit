@@ -1256,3 +1256,34 @@ rules:
     # be refused — a refusal never points to a dead end.
     assert "grimoire policies reset-session" in other_write.reason
     assert bash("grimoire policies reset-session") is Outcome.ALLOW
+
+
+class _StrictUtf8RustCore:
+    """Double du cœur Rust : comme PyO3, refuse tout ``str`` non encodable en UTF-8 strict."""
+
+    @staticmethod
+    def _check(*values: object) -> None:
+        for value in values:
+            if isinstance(value, str):
+                value.encode("utf-8")
+
+    def evaluate_temporal(self, rule_tuples, state_tuples, tool_name, is_write, now, started_at, tool_detail):  # type: ignore[no-untyped-def]
+        self._check(tool_name, tool_detail)
+        return "warn", "approval", [("approval", "warn", "approval")], []
+
+    def matching_approval_rule_ids(self, rule_tuples, tool_name, tool_detail):  # type: ignore[no-untyped-def]
+        self._check(tool_name, tool_detail)
+        return ["approval"]
+
+
+def test_a_lone_surrogate_crosses_the_rust_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
+    """CI rust-policies/parity (PR #731) : PyO3 refusait ``\\ud800`` dans ``tool_detail``."""
+    import grimoire.policies.temporal as temporal
+
+    monkeypatch.setattr(temporal, "_use_rust_backend", lambda: True)
+    monkeypatch.setattr(temporal, "rust_core_module", lambda: _StrictUtf8RustCore())
+    rules = (_approval_rule(pattern="Bash(rm:*)"),)
+    state = SessionState.new("s-surrogate", datetime.now(UTC).isoformat())
+    decision = evaluate_temporal(rules, state, tool_name="Bash", tool_detail="rm -rf ~/ \ud800", is_write=True)
+    assert decision.verdict is VerdictKind.WARN
+    assert record_post_tool_use_approval(rules, decision.state, tool_name="Bash", tool_detail="rm -rf ~/ \ud800")
