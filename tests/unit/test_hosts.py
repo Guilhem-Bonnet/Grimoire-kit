@@ -1270,6 +1270,26 @@ def test_post_tool_use_logs_a_delegation_call_without_a_model(governed: Path) ->
     assert delegations[0].model == ""
 
 
+def test_post_tool_use_names_a_claude_agent_call_without_subagent_type_general_purpose(governed: Path) -> None:
+    """Un ``Agent`` Claude Code sans ``subagent_type`` lance ``general-purpose`` : il est journalisé
+    sous ce nom, pas « (sans nom) » — sinon la table des délégations coupe un même agent en deux lignes."""
+    from grimoire.core.standard_generation import TRACES_DIR
+    from grimoire.traces.ledger import DELEGATION_TAG, TraceLedger
+
+    for tool_name in ("Agent", "runSubagent"):
+        decide_evidence_trace(
+            HookInput(
+                event=HookEvent.POST_TOOL_USE,
+                project_root=governed,
+                tool_name=tool_name,
+                tool_input={"description": "chercher un fichier"},
+            )
+        )
+    ledger = TraceLedger(governed / TRACES_DIR)
+    names = sorted(t.agent_id for t in ledger.list_traces() if DELEGATION_TAG in t.tags)
+    assert names == ["(sans nom)", "general-purpose"]
+
+
 def test_post_tool_use_reads_a_copilot_delegation_nested_under_tool_specific_data(governed: Path) -> None:
     """Défaut #2 : les vraies sessions Copilot de cette machine portent
 
