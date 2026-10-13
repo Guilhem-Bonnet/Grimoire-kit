@@ -514,3 +514,108 @@ def test_the_doctor_repair_is_the_one_resume_performs(tmp_path: Path, limit: int
     _engine_after, run_id = _recover(tmp_path, bp, crashed, known)
 
     assert _engine(tmp_path).doctor(run_id).ok
+
+
+# ── W1-03b-SK1-01 : `flow resume` ne répare que le DERNIER checkpoint d'un run en cours ──
+
+
+def _play_to(tmp_path: Path, bp: Path, *, finished: bool) -> tuple[FlowEngine, str, list[dict[str, Any]]]:
+    """Un run a→b→c, terminé ou arrêté après b ; rend aussi les sorties déjà envoyées."""
+    engine = _engine(tmp_path)
+    executor = InteractiveNodeExecutor(stream=io.StringIO())
+    wfi, _ = engine.run(bp, executor=executor)
+    sent = [OUT_A, OUT_B, *([OUT_C] if finished else [])]
+    for output in sent:
+        assert engine.resume(wfi.id, output=output, executor=executor).ok
+    return engine, wfi.id, sent
+
+
+def _drop_event(tmp_path: Path, event_type: str, step_id: str) -> None:
+    path = tmp_path / "runtime" / "run_events.jsonl"
+    lines = path.read_text(encoding="utf-8").splitlines()
+    kept = [
+        line
+        for line in lines
+        if not (json.loads(line)["event_type"] == event_type and json.loads(line)["payload"].get("step_id") == step_id)
+    ]
+    assert len(kept) == len(lines) - 1, f"{event_type} de {step_id} introuvable"
+    path.write_text("\n".join(kept) + "\n", encoding="utf-8")
+
+
+def _drop_ref(tmp_path: Path, run_id: str, step_id: str) -> None:
+    path = tmp_path / "runtime" / "instances.jsonl"
+    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    touched = 0
+    for row in rows:
+        if row.get("id") == run_id:
+            row["checkpoint_refs"] = [r for r in row["checkpoint_refs"] if not r.endswith(f"-{step_id}")]
+            touched += 1
+    assert touched
+    path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+
+
+_EARLIER_CHECKPOINT_DAMAGES = [
+    pytest.param(lambda p, rid: _drop_event(p, "checkpoint.saved", "a"), "checkpoint_event_missing", id="checkpoint.saved"),
+    pytest.param(lambda p, rid: _drop_event(p, "step.completed", "a"), "step_completed_missing", id="step.completed"),
+    pytest.param(lambda p, rid: _drop_ref(p, rid, "a"), "checkpoint_refs_mismatch", id="checkpoint_refs"),
+]
+
+
+@pytest.mark.parametrize("finished", [True, False], ids=["run-terminé", "run-arrêté-après-b"])
+@pytest.mark.parametrize(("damage", "code"), _EARLIER_CHECKPOINT_DAMAGES)
+def test_the_doctor_does_not_promise_a_resume_that_cannot_heal_an_earlier_checkpoint(
+    tmp_path: Path, finished: bool, damage: Any, code: str
+) -> None:
+    from grimoire.flows.doctor import _RESUME
+
+    bp = _blueprint(tmp_path)
+    engine, run_id, sent = _play_to(tmp_path, bp, finished=finished)
+    damage(tmp_path, run_id)
+    engine = _engine(tmp_path)
+
+    before = engine.doctor(run_id)
+
+    assert not before.ok
+    flagged = [v for v in before.violations if v.code == code]
+    assert flagged, before.to_dict()
+    assert all(v.repair != _RESUME for v in flagged), "resume ne complète que le dernier checkpoint d'un run en cours"
+    assert all("sauvegarde" in v.repair for v in flagged), [v.repair for v in flagged]
+    # Si une réparation `resume` reste proposée, l'appliquer doit rendre le run sain.
+    if _RESUME in before.repairs:
+        engine.resume(run_id, output=sent[-1], executor=InteractiveNodeExecutor(stream=io.StringIO()))
+        assert _engine(tmp_path).doctor(run_id).ok
+
+
+@pytest.mark.parametrize("finished", [True, False], ids=["run-terminé", "run-arrêté-après-b"])
+def test_following_the_proposed_repair_never_leaves_the_doctor_red_behind_a_green_resume(
+    tmp_path: Path, finished: bool
+) -> None:
+    """Invariant : une réparation `resume` annoncée est tenue — jamais un run avancé sur un journal toujours altéré."""
+    from grimoire.flows.doctor import _RESUME
+
+    bp = _blueprint(tmp_path)
+    _engine_unused, run_id, sent = _play_to(tmp_path, bp, finished=finished)
+    _drop_event(tmp_path, "checkpoint.saved", "a")
+    engine = _engine(tmp_path)
+
+    if _RESUME in engine.doctor(run_id).repairs:
+        engine.resume(run_id, output=sent[-1], executor=InteractiveNodeExecutor(stream=io.StringIO()))
+        assert _engine(tmp_path).doctor(run_id).ok
+    else:
+        assert not engine.doctor(run_id).ok
+
+
+def test_the_doctor_still_proposes_resume_for_the_last_checkpoint_of_a_running_run(tmp_path: Path) -> None:
+    """Le correctif ne retire pas la bonne réparation : dernier checkpoint, run en cours."""
+    from grimoire.flows.doctor import _RESUME
+
+    bp = _blueprint(tmp_path)
+    _engine_unused, run_id, sent = _play_to(tmp_path, bp, finished=False)
+    _drop_event(tmp_path, "checkpoint.saved", "b")
+    engine = _engine(tmp_path)
+
+    report = engine.doctor(run_id)
+
+    assert [v.repair for v in report.violations if v.code == "checkpoint_event_missing"] == [_RESUME]
+    engine.resume(run_id, output=sent[-1], executor=InteractiveNodeExecutor(stream=io.StringIO()))
+    assert _engine(tmp_path).doctor(run_id).ok

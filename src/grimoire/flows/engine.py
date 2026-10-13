@@ -35,7 +35,7 @@ from typing import Any
 from grimoire.core.exceptions import GrimoireRuntimeError
 from grimoire.core.fsio import atomic_write, locked
 from grimoire.flows.blueprint_loader import build_node_contracts, load_blueprint, topo_order
-from grimoire.flows.doctor import FlowDoctorReport, diagnose
+from grimoire.flows.doctor import FlowDoctorReport, checkpoint_interrupted, diagnose
 from grimoire.flows.executor import InteractiveNodeExecutor, NodeExecutor
 from grimoire.flows.schemas import FlowRunMeta, FlowStatusView, NodeContract, ResumeOutcome
 from grimoire.runtime.kernel import RuntimeKernel
@@ -454,22 +454,7 @@ class FlowEngine:
         if not checkpoints:
             return wfi, None
         last = checkpoints[-1]
-        events = self._kernel.get_run_events(wfi.id)
-        if wfi.status is WorkflowStatus.RUNNING:
-            started = next(
-                (e.payload.get("step_id") for e in reversed(events) if e.event_type is RunEventType.STEP_STARTED), None
-            )
-            interrupted = started == last.step_id
-        else:
-            saved = any(
-                e.event_type is RunEventType.CHECKPOINT_SAVED and e.payload.get("checkpoint_id") == last.id
-                for e in events
-            )
-            completed = any(
-                e.event_type is RunEventType.STEP_COMPLETED and e.payload.get("step_id") == last.step_id
-                for e in events
-            )
-            interrupted = last.id not in wfi.checkpoint_refs or not (saved and completed)
+        interrupted = checkpoint_interrupted(wfi, checkpoints, self._kernel.get_run_events(wfi.id))
         if not interrupted:
             return wfi, None
         wfi, healed = self._kernel.checkpoint(

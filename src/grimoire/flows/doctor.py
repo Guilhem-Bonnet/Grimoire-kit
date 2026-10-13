@@ -53,7 +53,7 @@ from typing import Any
 from grimoire.flows.schemas import FlowRunMeta
 from grimoire.runtime.schemas import Checkpoint, RunEvent, RunEventType, WorkflowInstance, WorkflowStatus
 
-__all__ = ["FlowDoctorReport", "FlowViolation", "diagnose"]
+__all__ = ["FlowDoctorReport", "FlowViolation", "checkpoint_interrupted", "diagnose"]
 
 #: Ce que le docteur ne sait pas conclure — toujours rendu, jamais passé sous silence.
 _BLUEPRINT_DRIFT_UNEVALUATED = (
@@ -62,6 +62,21 @@ _BLUEPRINT_DRIFT_UNEVALUATED = (
 )
 
 _RESUME = "relancer `grimoire flow resume` avec la dernière sortie envoyée : il complète l'écriture interrompue"
+
+#: Ce que `resume` ne répare PAS : il ne complète que le DERNIER checkpoint d'un run en cours
+#: (`FlowEngine._reconcile`). Un événement perdu ailleurs reste perdu quoi qu'on relance.
+_RESTORE_EVENTS = (
+    "restaurer run_events.jsonl depuis une sauvegarde : `grimoire flow resume` ne complète que le dernier "
+    "checkpoint d'un run en cours, pas celui-ci"
+)
+_RESTORE_REFS = (
+    "restaurer instances.jsonl depuis une sauvegarde (ou aligner `checkpoint_refs` sur checkpoints.jsonl) : "
+    "`grimoire flow resume` ne ressoude que la référence du dernier checkpoint d'un run en cours"
+)
+_RESTORE_STATUS = (
+    "le journal fait autorité : aligner le statut de l'instance dessus ; "
+    "`grimoire flow resume` ne le ferait pas dans cet état"
+)
 
 #: Réparation PROPOSÉE par code. Jamais exécutée par le docteur.
 _REPAIRS: dict[str, str] = {
@@ -154,8 +169,34 @@ class FlowDoctorReport:
         }
 
 
-def _violation(code: str, detail: str, node_id: str | None = None) -> FlowViolation:
-    return FlowViolation(code=code, detail=detail, node_id=node_id, repair=_REPAIRS.get(code, ""))
+def _violation(code: str, detail: str, node_id: str | None = None, repair: str | None = None) -> FlowViolation:
+    return FlowViolation(code=code, detail=detail, node_id=node_id, repair=_REPAIRS.get(code, "") if repair is None else repair)
+
+
+def checkpoint_interrupted(
+    instance: WorkflowInstance, checkpoints: Sequence[Checkpoint], events: Sequence[RunEvent]
+) -> bool:
+    """Vrai quand ``resume`` complèterait le dernier checkpoint de ce run.
+
+    Source unique de la condition de ``FlowEngine._reconcile`` : le docteur ne
+    propose ``flow resume`` que là où le moteur répare réellement, sans
+    pouvoir dériver de lui. Seul le DERNIER checkpoint d'un run RUNNING ou
+    CHECKPOINTED est complété ; un run terminé ou un checkpoint antérieur ne le
+    sont jamais.
+    """
+    if instance.status not in (WorkflowStatus.RUNNING, WorkflowStatus.CHECKPOINTED) or not checkpoints:
+        return False
+    last = checkpoints[-1]
+    if instance.status is WorkflowStatus.RUNNING:
+        started = next(
+            (e.payload.get("step_id") for e in reversed(events) if e.event_type is RunEventType.STEP_STARTED), None
+        )
+        return bool(started == last.step_id)
+    saved = any(
+        e.event_type is RunEventType.CHECKPOINT_SAVED and e.payload.get("checkpoint_id") == last.id for e in events
+    )
+    completed = any(e.event_type is RunEventType.STEP_COMPLETED and e.payload.get("step_id") == last.step_id for e in events)
+    return last.id not in instance.checkpoint_refs or not (saved and completed)
 
 
 def _derive_from_events(
@@ -221,7 +262,7 @@ def _derive_from_events(
     return done, open_node, status, violations
 
 
-def _status_violation(actual: str, derived: str) -> FlowViolation | None:
+def _status_violation(actual: str, derived: str, *, resumable: bool) -> FlowViolation | None:
     if actual == derived or (actual == "verified" and derived == "completed"):
         return None
     detail = f"statut de l'instance {actual!r}, le journal dérive {derived!r}"
@@ -229,7 +270,7 @@ def _status_violation(actual: str, derived: str) -> FlowViolation | None:
     if rank_actual > rank_derived:
         return _violation("instance_ahead_of_journal", detail)
     if rank_actual < rank_derived:
-        return _violation("instance_behind_journal", detail)
+        return _violation("instance_behind_journal", detail, repair=_RESUME if resumable else _RESTORE_STATUS)
     return _violation("status_conflict", detail)
 
 
@@ -297,6 +338,11 @@ def diagnose(
     }
     completed_ids = {e.payload.get("step_id") for e in events if e.event_type is RunEventType.STEP_COMPLETED}
     seen_steps: set[str] = set()
+    # `resume` ne complète que le dernier checkpoint d'un run en cours : la réparation
+    # `_RESUME` n'est proposée que là (même condition que `_reconcile`), sinon le
+    # journal reste altéré après un `resume` réussi — voire après la fin du run.
+    resumable = checkpoint_interrupted(instance, checkpoints, events)
+    last_checkpoint = checkpoints[-1] if checkpoints else None
     for chk in real:
         if chk.step_id in seen_steps:
             violations.append(_violation("checkpoint_duplicate", f"deux checkpoints pour le node {chk.step_id}", chk.step_id))
@@ -313,21 +359,35 @@ def diagnose(
                         chk.step_id,
                     )
                 )
+        repair = _RESUME if resumable and chk is last_checkpoint else _RESTORE_EVENTS
         if chk.id not in saved_ids:
-            violations.append(_violation("checkpoint_event_missing", f"checkpoint {chk.id} sans événement checkpoint.saved", chk.step_id))
+            violations.append(
+                _violation(
+                    "checkpoint_event_missing", f"checkpoint {chk.id} sans événement checkpoint.saved", chk.step_id, repair
+                )
+            )
         if chk.step_id not in completed_ids:
-            violations.append(_violation("step_completed_missing", f"checkpoint {chk.id} sans événement step.completed", chk.step_id))
+            violations.append(
+                _violation(
+                    "step_completed_missing", f"checkpoint {chk.id} sans événement step.completed", chk.step_id, repair
+                )
+            )
     expected_refs = [c.id for c in checkpoints]
     if list(instance.checkpoint_refs) != expected_refs:
+        # `resume` ne rajoute que la référence du dernier checkpoint, en fin de liste.
+        refs_repair = _RESUME if resumable and list(instance.checkpoint_refs) == expected_refs[:-1] else _RESTORE_REFS
         violations.append(
             _violation(
                 "checkpoint_refs_mismatch",
                 f"références de l'instance {list(instance.checkpoint_refs)} != checkpoints du fichier {expected_refs}",
+                repair=refs_repair,
             )
         )
 
     # Statut : celui de l'instance contre celui que le journal dérive.
-    status_violation = _status_violation(instance.status.value, derived_status)
+    status_violation = _status_violation(
+        instance.status.value, derived_status, resumable=resumable and derived_status in ("running", "checkpointed")
+    )
     if status_violation is not None:
         violations.append(status_violation)
 
