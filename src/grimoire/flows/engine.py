@@ -22,6 +22,7 @@ risque pas de le faire progresser par erreur.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import uuid
@@ -152,6 +153,28 @@ def check_output_against_contract(contract: NodeContract, output: dict[str, Any]
                 f"node={contract.node_id} pin={pin.pin_id} : contrat produit {produced!r} != attendu {pin.contract!r}"
             )
     return faults
+
+
+#: Préfixe de la référence qui range, dans ``Checkpoint.evidence_refs``,
+#: l'empreinte de la sortie acceptée pour un node (W1-03).
+_OUTPUT_DIGEST_PREFIX = "output-sha256:"
+
+
+def _output_digest(output: Any) -> str | None:
+    """Empreinte sha256 canonique d'une sortie d'hôte, ou ``None`` si elle n'est pas sérialisable.
+
+    Forme canonique : JSON à clés triées, sans espace, **ASCII pur**
+    (``ensure_ascii=True``). Deux sorties égales donnent la même empreinte quel
+    que soit l'ordre des clés, et une chaîne portant un substitut isolé ne
+    peut pas faire échouer l'encodage UTF-8 strict (frontière PyO3 comprise).
+    Pure Python sur les deux backends : la décision de rejeu ne dépend jamais
+    de ``grimoire_flows_core``.
+    """
+    try:
+        canonical = json.dumps(output, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    except (TypeError, ValueError):
+        return None
+    return hashlib.sha256(canonical.encode("ascii")).hexdigest()
 
 
 _CHECKPOINT_DECISIONS = ("approve", "reject", "amend")
@@ -413,13 +436,56 @@ class FlowEngine:
         (executor or InteractiveNodeExecutor()).execute(contract, context_pack=self._context_pack(wfi, blueprint_id))
         return wfi, contract
 
-    def resume(self, run_id: str, *, output: dict[str, Any], executor: NodeExecutor | None = None) -> ResumeOutcome:
-        """Vérifie la sortie du node courant, avance ou suspend le run."""
+    def _crossed_node_for_digest(self, wfi: WorkflowInstance, digest: str) -> str | None:
+        """Le node déjà franchi dont la sortie acceptée a cette empreinte, sinon ``None``.
+
+        Lue dans les checkpoints du run (écrits avant tout changement de
+        statut) : un crash après le checkpoint ne perd donc pas l'empreinte.
+        """
+        ref = _OUTPUT_DIGEST_PREFIX + digest
+        for chk in self._kernel.list_checkpoints(wfi.id):
+            if ref in chk.evidence_refs:
+                return chk.step_id
+        return None
+
+    def resume(
+        self,
+        run_id: str,
+        *,
+        output: dict[str, Any],
+        executor: NodeExecutor | None = None,
+        allow_replay: bool = True,
+    ) -> ResumeOutcome:
+        """Vérifie la sortie du node courant, avance ou suspend le run.
+
+        Idempotent (W1-03) : une sortie qui viole le contrat du node courant
+        mais qui est **identique** (empreinte sha256 canonique) à celle déjà
+        acceptée pour un node franchi est un rejeu — un hôte qui n'a pas reçu
+        la réponse et renvoie la même requête. Le résultat est ``ok=True,
+        replay=True`` et **rien n'est écrit** : ni ``STEP_STARTED``, ni
+        ``STEP_FAILED``, ni checkpoint. Une sortie valide pour le node courant
+        avance toujours normalement, même identique à une sortie antérieure
+        (deux nodes sans pin de sortie acceptent la même sortie vide) ; une
+        sortie invalide et inconnue reste refusée.
+
+        ``allow_replay=False`` rend la sémantique antérieure (refus) aux
+        pilotes automatiques qui produisent eux-mêmes la sortie du node
+        courant : pour eux un rejeu ne ferait pas avancer le run.
+        """
         meta = self._load_meta(run_id)
         wfi = self._kernel.get_instance(run_id)
         if wfi is None:
             raise GrimoireRuntimeError(f"run introuvable côté kernel : {run_id}")
         if _is_flow_terminal(wfi.status):
+            if allow_replay and wfi.status in (WorkflowStatus.COMPLETED, WorkflowStatus.VERIFIED):
+                # Le dernier node a été accepté puis la réponse s'est perdue :
+                # le même renvoi sur un run terminé réussi est un rejeu.
+                digest = _output_digest(output)
+                crossed = self._crossed_node_for_digest(wfi, digest) if digest is not None else None
+                if crossed is not None:
+                    return ResumeOutcome(
+                        ok=True, finished=True, node_id=meta.order[-1], replay=True, replay_of=crossed
+                    )
             raise GrimoireRuntimeError(f"run {run_id} est {wfi.status.value}, rien à reprendre")
 
         order = list(meta.order)
@@ -431,12 +497,6 @@ class FlowEngine:
             raise GrimoireRuntimeError(f"run {run_id} : aucun node courant résoluble (status={wfi.status.value})")
 
         ctx = self._ctx_for(wfi)
-        if wfi.status is not WorkflowStatus.RUNNING:
-            # CHECKPOINTED (crash avant le advance_step du node suivant) ou
-            # BLOCKED (retentative après correction de l'hôte) : les deux
-            # ramènent au même point, ouvrir l'exécution du node courant.
-            wfi = self._kernel.advance_step(wfi.id, ctx, step_id=current_id)
-
         contract = contracts[current_id]
         faults = check_output_against_contract(contract, output)
         if contract.kind == "checkpoint":
@@ -446,6 +506,20 @@ class FlowEngine:
             # rien) — vérifiée ici, Python-only, au même endroit que le
             # reste de la précondition de resume().
             faults = [*faults, *checkpoint_decision_faults(output)]
+        digest = _output_digest(output)
+        if faults and allow_replay and digest is not None:
+            # Vérification pure, avant toute écriture : un rejeu ne doit ni
+            # rouvrir le node courant (STEP_STARTED) ni le bloquer.
+            crossed = self._crossed_node_for_digest(wfi, digest)
+            if crossed is not None:
+                return ResumeOutcome(
+                    ok=True, finished=False, node_id=current_id, contract=contract, replay=True, replay_of=crossed
+                )
+        if wfi.status is not WorkflowStatus.RUNNING:
+            # CHECKPOINTED (crash avant le advance_step du node suivant) ou
+            # BLOCKED (retentative après correction de l'hôte) : les deux
+            # ramènent au même point, ouvrir l'exécution du node courant.
+            wfi = self._kernel.advance_step(wfi.id, ctx, step_id=current_id)
         if faults:
             wfi = self._kernel.fail_step(wfi.id, ctx, step_id=current_id, reason="; ".join(faults))
             return ResumeOutcome(ok=False, finished=False, node_id=current_id, faults=tuple(faults), contract=contract)
@@ -477,6 +551,7 @@ class FlowEngine:
             step_id=current_id,
             completed_steps=completed,
             pending_steps=pending,
+            evidence_refs=[_OUTPUT_DIGEST_PREFIX + digest] if digest is not None else None,
         )
         if finished:
             self._kernel.complete(wfi.id, ctx)
