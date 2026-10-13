@@ -302,8 +302,9 @@ où un numéro consommé l'est définitivement :
    wheel puis exécute `make wheel-check` : installation de la wheel dans un
    venv neuf (`.wheel-check-venv/`), `grimoire --version`, import du SDK.
    Une wheel qui ne démarre pas ne se tague pas.
-2. **Au tag, dans `release.yml`** — trois gardes bloquants : le tag et
-   `version.txt` disent la même chose, `scripts/gen-kit-hashes.py --check`
+2. **Au tag, dans le job `gates` de `publish.yml`** — quatre gardes bloquants,
+   avant tout `build` : le tag et `version.txt` disent la même chose et le tag
+   pointe un commit de `main` (`scripts/check-release-tag.py`), `scripts/gen-kit-hashes.py --check`
    couvre les fichiers livrés, `scripts/check-changelog-release.py` décrit la
    version publiée. Ce dernier exige que chaque commit `feat`/`fix`/`perf`
    fusionné depuis le tag précédent touche `CHANGELOG.md` — sauf repli : un
@@ -319,6 +320,22 @@ où un numéro consommé l'est définitivement :
    chaque Python supporté et importe le SDK. `publish-pypi` dépend des deux :
    rien ne part si l'un échoue, et aucun job n'est en `continue-on-error`.
 
+`publish.yml` est la seule voie de release : `gates` → `build` → `test` →
+`publish-pypi` → `github-release`. PyPI part sur un tag stable (`vX.Y.Z`) ;
+une pré-version (`vX.Y.Z-rc1`) ne produit qu'une release GitHub marquée
+pre-release, sans PyPI — `make release VERSION=x.y.z-rc1` écrit alors
+`x.y.z-rc1` dans `version.txt` et `__version__` (la graphie SemVer ; hatch la
+normalise en `x.y.zrc1` dans les métadonnées de la wheel), et
+`tests/unit/test_version_sync.py` accepte cette forme parce qu'il lit le même
+prédicat que le garde de tag. Le job `publish-pypi` relance sans échouer sur un
+fichier déjà reçu (`skip-existing`) : après un téléversement interrompu, relancer
+les jobs en échec suffit à créer la release. Le `Makefile` n'a aucune voie manuelle vers PyPI : `make publish` refuse
+et renvoie à ce push de tag (un téléversement hors `publish.yml` contournerait
+les gardes, et `skip-existing` accepterait ensuite le fichier sans comparer son
+contenu). La release GitHub est créée après la publication, et le
+corps est la section du `CHANGELOG.md` que `gates` vient de valider
+(`scripts/changelog-section.py`) — rien n'est généré à partir de `git log`.
+
 ```bash
 make release VERSION=x.y.z      # check + hashes + build + wheel-check
 git add version.txt src/grimoire/__version__.py registry/kit-file-hashes.json
@@ -326,6 +343,36 @@ git commit -m "chore: release x.y.z"
 git tag -a vx.y.z -m "Release x.y.z"
 git push origin main --tags     # publish.yml prend le relais
 ```
+
+### Contrôles hors arbre
+
+La voie unique et le garde « tag sur `main` » vivent dans l'arbre du tag : ils
+ne valent que pour un arbre qui contient ce changement (`publish.yml` sans
+`release.yml`, `scripts/check-release-tag.py`). Un arbre antérieur garde
+l'ancienne paire de workflows — PyPI s'y ouvre dès que la variable de dépôt
+`GRIMOIRE_ENABLE_PYPI` vaut `true`, et deux créateurs de release s'y exécutent
+de nouveau. Un arbre taggué peut aussi modifier le script ou l'étape qui le
+surveille, donc désarmer son propre garde. Rien de cela ne se ferme par du
+code : c'est de la configuration GitHub, à faire une fois la voie unique
+fusionnée.
+
+1. **Supprimer** la variable de dépôt `GRIMOIRE_ENABLE_PYPI` (Settings →
+   Secrets and variables → Actions → Variables). Elle ne pilote plus rien dans
+   `publish.yml` ; supprimée, elle ferme PyPI aux anciens arbres.
+2. **Restreindre l'environnement `pypi`** par une politique de déploiement sur
+   les tags `v*`. Cela réduit la surface, mais l'environnement ne vérifie pas
+   l'ascendance `main` : il ne remplace pas le garde.
+3. **Ajouter un ruleset de tags** sur `refs/tags/v*` qui limite qui peut créer
+   ou déplacer un tag de release. C'est le seul contrôle réel contre un tag
+   posé sur un arbre qui n'a pas les gardes. Le ruleset `Base` existant cible
+   des branches (`target: branch`) et n'agit pas sur les tags.
+4. **Rebaser les branches `aidlc/*`** (et toute branche antérieure au merge)
+   sur `origin/main` avant d'y poser un tag : un tag posé sur leur arbre
+   rejouerait l'ancienne paire de workflows.
+
+Ces contrôles ne sont pas vérifiables depuis le dépôt : `gh api
+repos/<org>/<repo>/environments/pypi` et le listing des rulesets disent leur
+état, et la lecture de `actions/variables` exige un droit que l'App de CI n'a pas.
 
 ## Questions ?
 
