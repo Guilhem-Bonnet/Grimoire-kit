@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from grimoire.core.exceptions import GrimoireRuntimeError
+from grimoire.core.fsio import atomic_write, locked
 from grimoire.flows.blueprint_loader import build_node_contracts, load_blueprint, topo_order
 from grimoire.flows.executor import InteractiveNodeExecutor, NodeExecutor
 from grimoire.flows.schemas import FlowRunMeta, FlowStatusView, NodeContract, ResumeOutcome
@@ -238,9 +239,9 @@ class FlowEngine:
         return self._flows_root / f"{run_id}.json"
 
     def _save_meta(self, meta: FlowRunMeta) -> None:
-        self._meta_path(meta.run_id).write_text(
-            json.dumps(meta.to_dict(), indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-        )
+        path = self._meta_path(meta.run_id)
+        with locked(path):
+            atomic_write(path, json.dumps(meta.to_dict(), indent=2, ensure_ascii=False) + "\n")
 
     def _load_meta(self, run_id: str) -> FlowRunMeta:
         path = self._meta_path(run_id)
