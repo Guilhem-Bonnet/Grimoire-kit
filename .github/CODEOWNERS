@@ -25,6 +25,7 @@ framework/memory/                    @Guilhem-Bonnet
 # ── CI/CD — review obligatoire ────────────────────────────────────────────────
 .github/workflows/              @Guilhem-Bonnet
 .github/CODEOWNERS              @Guilhem-Bonnet
+scripts/check-regression-on-base.py  @Guilhem-Bonnet
 
 # ── Documentation ─────────────────────────────────────────────────────────────
 docs/                           @Guilhem-Bonnet
