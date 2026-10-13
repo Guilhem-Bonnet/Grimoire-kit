@@ -43,7 +43,10 @@ mots-clés devant un ``cd`` (``then cd src``), contenu d'un script écrit puis l
 
 Un heredoc ne retire du texte analysé que son corps et son délimiteur : la fin de la
 ligne d'ouverture (``<<'EOF' && cat x``, ``<<EOF; cp x .``) est une commande qui
-s'exécute et reste lue ; ``<<<`` (here-string) n'est pas un heredoc. Une transcription
+s'exécute et reste lue ; ``<<<`` (here-string) n'est pas un heredoc, pas plus qu'un ``<<`` entre
+guillemets ou dans ``$((1<<3))``, ni un ``<<`` dont aucune ligne ne ferme le délimiteur (les lignes
+suivantes restent alors des commandes). Dans une liste ``a || b && c``, la suite s'exécute
+après un succès de ``a`` (``b`` sauté) comme de ``b``. Une transcription
 qui n'a pas été lue en entier (aucun événement ``system/init`` ou ``assistant``, ou une
 ligne illisible qui porte une accolade : un événement coupé par une ligne de stderr)
 rend ``unevaluated``, jamais ``clean`` ; une lecture déjà trouvée reste ``invalid``.
@@ -69,10 +72,12 @@ _WRITE_TOOLS = frozenset({"Write", "Edit", "MultiEdit", "NotebookEdit"})
 
 #: Séparateurs de commandes ; ``(`` et ``)`` ouvrent et ferment un sous-shell (``_split_command`` les trie).
 _BASH_SEPARATOR = re.compile(r"&&|\|\||[;|\n()]")
-#: Heredoc (``<<'EOF' ... EOF``) : groupe 3, la fin de la ligne d'ouverture (``&& cat x``,
-#: ``; cp x .`` : des commandes qui s'exécutent) ; groupe 4, le corps (du code ou du texte,
-#: pas des arguments). ``<<<`` (here-string) n'en est pas un.
-_HEREDOC = re.compile(r"(?<!<)<<(?!<)-?[ \t]*(['\"]?)(\w+)\1([^\n]*)\n(.*?)(?:\n[ \t]*\2[ \t]*(?=\n|\Z)|\Z)", re.DOTALL)
+#: Ouverture d'un heredoc (``<<'EOF'``, ``<<-EOF``, ``<<\\EOF``, ``<<END-OF``) : groupes 1 et 2, le
+#: délimiteur entre guillemets ; groupe 3, le délimiteur nu (un mot du shell : tiret, point... compris) ;
+#: groupe 4, la fin de la ligne d'ouverture (``&& cat x``, ``; cp x .`` : des commandes qui s'exécutent).
+#: ``<<<`` (here-string) n'en est pas un. Le corps ne vaut que si une ligne de fermeture existe
+#: (``_split_heredocs``) et que ``<<`` n'est ni entre guillemets ni dans une expression arithmétique.
+_HEREDOC_OPEN = re.compile(r"(?<!<)<<(?!<)-?[ \t]*(?:'([^'\n]+)'|\"([^\"\n]+)\"|\\?([^\s;&|<>()'\"\\]+))([^\n]*)")
 _NAME_CHAR = re.compile(r"[\w.-]")
 _FRAGMENT = re.compile(r"[^\s'\"`()<>;|&=,{}]+")
 _GLOB_CHARS = frozenset("*?[")
@@ -287,6 +292,42 @@ def _split_command(head: str) -> tuple[list[tuple[str, str]], bool]:
     return pieces, unclosed
 
 
+def _in_arithmetic(prefix: str) -> bool:
+    """``prefix`` finit à l'intérieur d'un ``$(( ... ))`` ou d'un ``(( ... ))`` encore ouvert."""
+    return prefix.rfind("((") > prefix.rfind("))")
+
+
+def _split_heredocs(command: str) -> tuple[str, list[str]]:
+    """``(texte hors heredoc, corps de heredoc)`` d'une commande.
+
+    Un heredoc ne retire du texte que son corps et sa ligne de fermeture ; la fin de la ligne
+    d'ouverture reste une commande. ``<<`` n'ouvre un heredoc que s'il n'est ni entre guillemets
+    (``grep '<<EOF'``, ``python -c 'print(1 << 2)'``) ni dans une expression arithmétique
+    (``$((1<<3))``), et seulement si une ligne ne contenant que le délimiteur le ferme : sans elle,
+    rien n'est avalé et les lignes suivantes restent des commandes (fail-closed, W1-08b-T2-02).
+    """
+    head = ""
+    bodies: list[str] = []
+    pos = 0
+    while True:
+        match = _HEREDOC_OPEN.search(command, pos)
+        if match is None:
+            return head + command[pos:], bodies
+        before = head + command[pos : match.start()]
+        quote = _quote_states(before + "x")[0][-1]
+        if quote or _in_arithmetic(before):
+            head, pos = before + command[match.start() : match.start() + 2], match.start() + 2
+            continue
+        delimiter = match.group(1) or match.group(2) or match.group(3)
+        closing = re.compile(r"\n[ \t]*" + re.escape(delimiter) + r"[ \t]*(?=\n|\Z)")
+        end = closing.search(command, match.end())
+        if end is None:
+            head, pos = before + command[match.start() : match.start() + 2], match.start() + 2
+            continue
+        bodies.append(command[match.end() + 1 : end.start()])
+        head, pos = before + match.group(4), end.end()
+
+
 def _after_command(state: _Dirs, tokens: Sequence[str], dash: PurePath | None) -> set[_Dirs]:
     """Les positions possibles du shell après une commande (``cd``, ``pushd``, ``popd`` ou rien)."""
     if tokens and tokens[0] == "popd":
@@ -337,8 +378,7 @@ def _shell_references(
     (fail-closed). Un ensemble de positions remplace le cwd unique, chaque
     segment est jugé contre chacune.
     """
-    bodies = [m.group(4) for m in _HEREDOC.finditer(command)]
-    head = _HEREDOC.sub(lambda m: m.group(3), command)  # le corps part, la fin de la ligne d'ouverture reste
+    head, bodies = _split_heredocs(command)  # le corps part, la fin de la ligne d'ouverture reste
     recursive = bool(_RECURSIVE.search(head))
     refs: list[tuple[str, PurePath, bool]] = []
     pieces, unclosed = _split_command(head)
@@ -351,6 +391,7 @@ def _shell_references(
     visited: set[_Dirs] = set()
     chain: set[_Dirs] = set()
     ored = False
+    left_ok: set[_Dirs] | None = None  # succès de la partie gauche d'un ``||`` en cours (W1-08b-T2-01)
     scopes: list[
         tuple[set[_Dirs], set[_Dirs], set[_Dirs], bool, bool]
     ] = []  # à l'ouverture d'un sous-shell : ok, visited, chain, ored et s'il est entre guillemets doubles
@@ -361,9 +402,9 @@ def _shell_references(
             if not tokens:  # ligne vide, ``;`` final : pas de commande
                 continue
             entry = visited | ok
-            visited, chain, ored = set(), set(), False
+            visited, chain, ored, left_ok = set(), set(), False, None
         elif separator == "||":
-            entry, ored = chain or ok, True
+            entry, ored, left_ok = chain or ok, True, ok
         elif separator in ("(", "(dq"):
             scopes.append((ok, visited, chain, ored, separator == "(dq"))
             entry, visited, chain, ored = ok, set(), set(), False
@@ -386,6 +427,8 @@ def _shell_references(
             ok = entry
         else:  # dernier élément d'un tube : zsh (ou lastpipe) l'exécute dans le shell courant
             ok = entry | moved if separator == "|" else moved
+            if left_ok is not None:  # ``a || b`` réussit par ``a`` (``b`` sauté) ou par ``b``
+                ok, left_ok = ok | left_ok, None
         visited, chain = visited | entry | ok, chain | entry
     finals_states = ok | visited if ored else ok
     for outer_ok, *_ in scopes:  # sous-shell jamais refermé : l'entrée reste possible

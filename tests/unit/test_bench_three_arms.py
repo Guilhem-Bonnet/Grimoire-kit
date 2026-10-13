@@ -3098,3 +3098,72 @@ def test_check_transcript_sees_the_copied_tests_of_sibling_runs(tmp_path: Path) 
     assert verdict == "invalid"
     assert reads is not None
     assert reads[0]["kind"] == "direct"
+
+
+# ── W1-08b-T2-01 : le succès de `a || b` passe aussi par `a` quand `b` est sauté ─────
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        pytest.param("cd .. || cd /tmp && cat run0/ex_test.py", id="a-reussit-b-saute"),
+        pytest.param("cd .. 2>/dev/null || cd /opt && cat run0/ex_test.py", id="redirection-stderr"),
+        pytest.param("cd .. && ls || cd /opt && cat run0/ex_test.py", id="chaine-et-puis-ou"),
+        pytest.param("cd .. || cd /tmp || cd /opt && cat run0/ex_test.py", id="deux-ou"),
+        pytest.param("cd /nonexistent || cd .. && cat run0/ex_test.py", id="b-reussit"),
+        pytest.param("cd .. || echo x | cat && cat run0/ex_test.py", id="ou-puis-tube"),
+        pytest.param("false || cd .. && cat run0/ex_test.py", id="temoin-b-seul"),
+    ],
+)
+def test_success_of_an_or_list_includes_the_left_side_when_the_right_side_is_skipped(tmp_path: Path, command: str) -> None:
+    """W1-08b-T2-01 : après ``a || b``, le shell est là où ``a`` l'a laissé si ``a`` réussit (``b`` n'est pas joué)."""
+    layout = _Layout(tmp_path)
+    found = layout.find(_tool_line("Bash", command=command))
+    assert [(r.line, r.kind, r.reference) for r in found] == [(1, "direct", "run0/ex_test.py")]
+
+
+def test_or_list_followed_by_and_still_needs_a_success_of_one_side(tmp_path: Path) -> None:
+    """Contre-épreuve : si aucune des deux alternatives ne mène à ``run0``, la lecture reste propre."""
+    layout = _Layout(tmp_path)
+    for command in (
+        "cd /opt || cd /tmp && cat run0/ex_test.py",
+        "cd /opt && ls || cd /tmp && cat run0/ex_test.py",
+    ):
+        assert layout.find(_tool_line("Bash", command=command)) == [], command
+
+
+# ── W1-08b-T2-02 : `<<` n'ouvre un heredoc que s'il en est un ─────
+
+
+@pytest.mark.parametrize(
+    ("command", "kind", "reference"),
+    [
+        pytest.param("echo $((1<<3))\ncd ..\ncat run0/ex_test.py", "direct", "run0/ex_test.py", id="decalage-arithmetique"),
+        pytest.param("echo $((1<<3))\nfind .. -name '*_test.py'", "directory", "..", id="decalage-puis-find"),
+        pytest.param("python3 -c 'print(1 << 2)'\nfind .. -name '*_test.py'", "directory", "..", id="python-c-entre-guillemets"),
+        pytest.param("grep -n '<<EOF' notes.md\ncd ..\ncat run0/ex_test.py", "direct", "run0/ex_test.py", id="motif-entre-guillemets"),
+        pytest.param('grep -n "<<EOF" notes.md\ncd ..\ncat run0/ex_test.py', "direct", "run0/ex_test.py", id="motif-entre-guillemets-doubles"),
+        pytest.param("(( x = 1 << 3 ))\ncd ..\ncat run0/ex_test.py", "direct", "run0/ex_test.py", id="double-parenthese"),
+        pytest.param("cat > f <<END-OF\nbody\nEND-OF\ncd ..\ncat run0/ex_test.py", "direct", "run0/ex_test.py", id="delimiteur-avec-tiret"),
+        pytest.param("cat > f <<'END.OF'\nbody\nEND.OF\ncd ..\ncat run0/ex_test.py", "direct", "run0/ex_test.py", id="delimiteur-avec-point-entre-guillemets"),
+        pytest.param("cat <<EOF\nline\ncd ..\ncat run0/ex_test.py", "direct", "run0/ex_test.py", id="sans-delimiteur-fermant"),
+    ],
+)
+def test_a_shift_a_quoted_marker_or_an_unclosed_heredoc_does_not_swallow_the_following_lines(
+    tmp_path: Path, command: str, kind: str, reference: str
+) -> None:
+    """W1-08b-T2-02 : les lignes qui suivent un faux heredoc (ou un heredoc au délimiteur élargi) restent des commandes."""
+    layout = _Layout(tmp_path)
+    found = layout.find(_tool_line("Bash", command=command))
+    assert [(r.line, r.kind, r.reference) for r in found] == [(1, kind, reference)]
+
+
+def test_a_real_heredoc_body_is_still_text_with_a_wide_delimiter(tmp_path: Path) -> None:
+    """Contre-épreuve : un heredoc fermé, délimiteur à tiret, point ou barre inverse compris, garde son corps hors de la lecture."""
+    layout = _Layout(tmp_path)
+    for command in (
+        "grep -rn x . && cat > ex.py <<'END-OF'\n// note\nx = a / b\nEND-OF",
+        'cat > ex.py <<"E.O.F"\n// note\nE.O.F\nls',
+        "cat > ex.py <<\\EOF\nx = a / b\nEOF\nls",
+    ):
+        assert layout.find(_tool_line("Bash", command=command)) == [], command
