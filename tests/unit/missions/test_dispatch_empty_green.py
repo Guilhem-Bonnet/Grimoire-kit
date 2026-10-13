@@ -507,3 +507,64 @@ def test_une_commande_sans_executeur_de_tests_n_est_pas_reconnue(cmd: str) -> No
     from grimoire.missions.empty_green import invokes_test_runner
 
     assert invokes_test_runner(cmd) is False
+
+
+# W1-04-K2-01 : depuis go 1.22, ``go test -cover`` n'imprime plus ``[no test files]`` pour un
+# paquet sans test, mais ``\tpkg\t\tcoverage: 0.0% of statements``.
+_GO_COVER_VIDE = "\texample.com/m/api\t\tcoverage: 0.0% of statements\n"
+_GO_COVER_VIDE_PKG = "\texample.com/m/api\t\tcoverage: 0.0% of statements in ./...\n"
+_GO_COVER_VIDE_JSON = (
+    '{"Action":"output","Package":"example.com/m/api","Output":"\\texample.com/m/api\\t\\tcoverage: 0.0% of statements\\n"}\n'
+    '{"Action":"skip","Package":"example.com/m/api","Elapsed":0}\n'
+)
+_GO_COVER_OK = "ok  \texample.com/m/core\t0.004s\tcoverage: 80.0% of statements\n"
+_GO_COVER_OK_ZERO = "ok  \texample.com/m/core\t0.004s\tcoverage: 0.0% of statements\n"
+_GO_COVER_OK_JSON = (
+    '{"Action":"output","Package":"example.com/m/core","Output":"ok  \\texample.com/m/core\\t0.004s\\tcoverage: 80.0% of statements\\n"}\n'
+)
+
+
+@pytest.mark.parametrize("exit_code", [0, 1])
+@pytest.mark.parametrize(
+    "printed",
+    [
+        _GO_COVER_VIDE,
+        _GO_COVER_VIDE_PKG,
+        _GO_COVER_VIDE_JSON,
+        "api:test: \texample.com/m/api\t\tcoverage: 0.0% of statements\n",
+        _GO_COVER_VIDE + "\texample.com/m/web\t\tcoverage: 0.0% of statements\n",
+        _GO_COVER_VIDE + "?   \texample.com/m/cmd\t[no test files]\n",
+    ],
+    ids=["texte", "coverpkg", "json", "prefixe-turbo", "deux-paquets-vides", "vide-cover-et-no-test-files"],
+)
+def test_go_cover_sans_aucun_test_est_inexecutable(printed: str, exit_code: int) -> None:
+    reason = _classify_unrunnable("go test -cover ./...", exit_code, printed, "")
+
+    assert reason is not None
+    assert "go test" in reason
+
+
+def test_go_cover_sans_test_est_inexecutable_dans_un_vrai_check(tmp_path: Path) -> None:
+    result = _check(tmp_path, _GO_COVER_VIDE, runner="go test -cover ./...")
+
+    assert result.exit_code == 0
+    assert result.unrunnable_reason is not None
+    assert result.ok is False
+
+
+@pytest.mark.parametrize(
+    "printed",
+    [
+        _GO_COVER_OK + _GO_COVER_VIDE,
+        _GO_COVER_VIDE + _GO_COVER_OK,
+        _GO_COVER_OK_ZERO,
+        _GO_COVER_OK_ZERO + _GO_COVER_VIDE,
+        _GO_COVER_OK_JSON + _GO_COVER_VIDE_JSON,
+        "api:test: " + _GO_COVER_VIDE.lstrip("\t") + "core:test: " + _GO_COVER_OK,
+        _GO_COVER_VIDE + "--- FAIL: TestX (0.00s)\nFAIL\nFAIL\texample.com/m/core\t0.004s\n",
+    ],
+    ids=["ok-puis-vide", "vide-puis-ok", "ok-couverture-nulle", "ok-nulle-et-vide", "json-mixte", "prefixe-mixte", "rouge-reel"],
+)
+def test_go_cover_avec_un_paquet_execute_reste_vert_ou_rouge(printed: str) -> None:
+    assert has_execution_proof(printed) is True
+    assert _classify_unrunnable("go test -cover ./...", 0, printed, "") is None

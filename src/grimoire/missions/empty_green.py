@@ -55,6 +55,16 @@ _PFX = r"^(?:[^\n]*?[:\]] )?"
 _NO_FILES_VITEST = re.compile(r"No test files? found", re.IGNORECASE)
 _NO_TESTS_JEST = re.compile(r"No tests found", re.IGNORECASE)
 _GO_NO_TEST = re.compile(r"\[no test files\]")
+#: Depuis go 1.22, ``go test -cover`` n'imprime plus ``[no test files]`` pour un paquet sans test :
+#: la ligne devient ``\tpkg\t\tcoverage: 0.0% of statements`` (sans ``ok`` ni durée), et
+#: ``-coverpkg`` ajoute `` in <motif>``. Un paquet qui a tourné écrit ``ok  pkg 0.1s coverage: ...`` :
+#: l'ancre exige un seul jeton avant ``coverage:``, et la preuve d'exécution prime de toute façon.
+#: En ``-json`` la ligne est enfermée dans un champ ``"Output"`` (tabulations échappées).
+_GO_NO_TEST_COVER = re.compile(
+    rf"{_PFX}\s*\S+\s+coverage: 0\.0% of statements(?: in [^\n]*)?\s*$"
+    r'|"Output":\s*"(?!ok\b|FAIL\b)[^"\n]*?\\t+coverage: 0\.0% of statements',
+    re.MULTILINE,
+)
 #: go a trouvé des fichiers de test mais n'a rien lancé (filtre ``-run`` sans correspondance,
 #: fichiers sans fonction ``TestXxx``) : la ligne ``ok`` du paquet porte ``[no tests to run]``,
 #: et ``-v`` l'annonce en amont par ``testing: warning: no tests to run``.
@@ -130,6 +140,8 @@ def classify_empty_green(output: str) -> str | None:
         return "jest : aucun test trouvé (« No tests found »)"
     if _GO_NO_TEST.search(output):
         return "go test : aucun paquet ne contient de test (« [no test files] »)"
+    if _GO_NO_TEST_COVER.search(output):
+        return "go test -cover : aucun paquet ne contient de test (« coverage: 0.0% of statements » sans ligne ok)"
     if _GO_NO_TEST_TO_RUN.search(output):
         return "go test : aucun test à lancer (« [no tests to run] »)"
     cargo = _CARGO_RESULT.findall(output)
