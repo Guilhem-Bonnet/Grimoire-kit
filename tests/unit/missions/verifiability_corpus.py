@@ -138,4 +138,40 @@ CORPUS: tuple[tuple[str, str, str], ...] = (
     ("the test suite is maintainable", "en", "V2"),  # piège
     ("the command is easy to use", "en", "V2"),  # piège
     ("the config file is well organised", "en", "V2"),
+    # --- Revue S1 (W3-05) : lignes de commande nues, verdict = code de sortie
+    ("pytest tests/unit -q", "en", "V0"),
+    ("mypy --strict src/grimoire/", "en", "V0"),
+    ("ruff check src/", "en", "V0"),
+    ("uv run pytest", "en", "V0"),
+    ("cargo test", "en", "V0"),
+    ("npm test", "en", "V0"),
+    ("pytest -q && ruff check .", "en", "V0"),
+    ("Run pytest tests/unit/missions", "en", "V0"),
+    ("le fichier README existe", "fr", "V0"),
+    ("the file README.md exists", "en", "V0"),
+    ("le fichier « dist/out.json » existe (acceptance exécutée)", "fr", "V0"),
+    # --- Revue S1 (W3-05) : « exists » / « existe » loin du fichier n'est pas un verdict
+    ("a file explains why the design exists", "en", "V2"),  # piège
+    ("the profile file captures what matters; a clear rationale exists", "en", "V2"),  # piège
+    ("le fichier README explique pourquoi le module existe", "fr", "V2"),  # piège
+    ("tests exist", "en", "V2"),  # piège : existence de tests, aucun verdict
+    ("des tests existent", "fr", "V2"),  # piège
+    ("il existe des tests", "fr", "V2"),  # piège
+    # --- Revue S1 (W3-05) : adjectifs de jugement qui ne sont pas des verdicts
+    ("tests are clean and readable", "en", "V2"),  # piège
+    ("the test code is clean", "en", "V2"),  # piège
+    ("tests are valid", "en", "V2"),  # piège : même statut que « clean »
+    ("les tests correspondent aux besoins métier", "fr", "V2"),  # piège
+    ("the schema matches the product vision", "en", "V2"),  # piège
+    ("the test suite matches our expectations", "en", "V2"),  # piège
+    ("le schéma est valide à mon avis", "fr", "V2"),  # piège
+    ("le seuil de qualité des tests est raisonnable", "fr", "V2"),  # piège
+    ("zéro test flaky ressenti", "fr", "V2"),  # piège
+    ("aucun test ne doit être fragile", "fr", "V2"),  # piège
+    ("les tests sont nuls", "fr", "V2"),  # piège
+    ("tests pass muster", "en", "V2"),  # piège : locution, pas un verdict
+    ("les tests passent la barre de qualité attendue par l'équipe", "fr", "V2"),  # piège
+    ("pytest est un bon outil", "fr", "V2"),  # piège : outil nommé, pas une commande
+    ("pytest is a great framework", "en", "V2"),  # piège
+    ("Test ; audit rapport.md ligne R31", "fr", "V2"),  # pointeur de preuve, ni commande ni verdict
 )

@@ -105,6 +105,9 @@ def _motifs(paires: tuple[tuple[str, str], ...]) -> tuple[tuple[str, re.Pattern[
     return tuple((motif, re.compile(pattern, re.IGNORECASE)) for motif, pattern in paires)
 
 
+#: Un nom de fichier : un jeton, ou une chaîne citée (« dist/out.json »).
+_NOM_FICHIER = r"(?:«[^»]*»|\"[^\"]*\"|'[^']*'|`[^`]*`|\S+)"
+
 #: Vocabulaire d'un verdict qu'un programme rend seul, sans arbitrage humain.
 #: Français et anglais côte à côte : une tâche peut être rédigée dans l'un
 #: ou l'autre, et le classement ne doit pas dépendre de la langue choisie.
@@ -135,9 +138,13 @@ MECHANICAL_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = _motifs(
             r"\b(grimoire standard gate|gate check|standard gate|gates?)\b",
         ),
         (
+            # Le code de sortie est lui-même le verdict : il faut qu'il soit
+            # nommé avec sa valeur (« retourne 0 », « code de sortie nul »).
+            # « Le code de sortie est documenté » ne dit rien d'un verdict.
             "commande_code_sortie",
-            r"\b(code de sortie|exit code|exit status|retourne 0|"
-            r"returns? exit code|commande r[ée]ussit)\b",
+            r"\b(?:(?:retourne|returns?)\s+(?:(?:le\s+|the\s+)?(?:code de sortie|exit\s+(?:code|status))\s+)?(?:\d+|z[ée]ro)\b|"
+            r"(?:code de sortie|exit\s+(?:code|status))\s+(?:(?:est|is|vaut|=|==)\s*)?(?:z[ée]ro|nul(?:le)?|\d+)\b|"
+            r"commande r[ée]ussit)",
         ),
         (
             "build_ci",
@@ -145,9 +152,18 @@ MECHANICAL_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = _motifs(
             r"pipeline (?:vert|verte|green)|build r[ée]ussi)\b",
         ),
         (
+            # Sujet direct de « existe » : « fichier docs/guide.md existe »,
+            # « the config file exists ». Jamais `[\s\S]*` entre les deux :
+            # « a file explains why the design exists » n'est pas un verdict
+            # sur un fichier (W3-05, revue S1-01).
             "fichier_attendu",
-            r"(fichier\b[\s\S]*\bexiste\b|existence du fichier|file\b[\s\S]*\bexists\b|"
-            r"\bcontenu (?:exact|pr[ée]cis)\b)",
+            rf"(\bfichier(?:\s+(?:de\s+|nomm[ée]\s+)?{_NOM_FICHIER})?\s+existe\b|\bexistence du fichier\b|"
+            rf"\bfile(?:\s+(?:named\s+|at\s+)?{_NOM_FICHIER})?\s+exists\b)",
+        ),
+        (
+            "contenu_exact",
+            r"\b(?:contenu (?:exact|pr[ée]cis)|exact content)\b[^.;]*\b"
+            r"(?:correspond(?:ent)?|identique|[ée]gale?|matches|equals?|identical)\b",
         ),
     )
 )
@@ -178,18 +194,86 @@ JUDGE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = _motifs(
 
 
 #: Marqueur d'un verdict : un critère mécanique doit dire ce qui est attendu
-#: du programme (passe, vert, aucun, retourne 0, existe...), pas seulement
+#: du programme (passe, vert, aucune erreur, retourne 0...), pas seulement
 #: nommer un outil. « Les tests sont lisibles » nomme des tests sans verdict :
 #: c'est un jugement de qualité, donc ambigu, jamais V0 (W3-05, mesuré par
 #: le jeu étiqueté de ``tests/unit/missions/verifiability_corpus.py``).
+#:
+#: Chaque marqueur est lié à ce qu'un programme constate. Les adjectifs de
+#: jugement (« clean », « valide », « correspond », « seuil », « zéro »,
+#: « aucun » tout nu) en sont exclus : « the test code is clean » ou « le
+#: schéma est valide à mon avis » ne disent pas qui rend le verdict. « Clean »
+#: ne vaut que collé à un outil de lint ; « valide » que comme verbe d'une
+#: validation (« valide le fichier », « validates against ») ; « seuil » que
+#: derrière un comparateur ; « aucun »/« zéro » que devant erreur, échec,
+#: avertissement ou régression. L'existence (« existe », « exists ») n'est pas
+#: un marqueur général : elle ne compte que dans le motif ``fichier_attendu``,
+#: où elle est le verdict (« tests exist » reste donc ambigu, comme
+#: « des tests existent »).
+_RESULTATS = r"(?:erreurs?|errors?|[ée]checs?|failures?|failing|avertissements?|warnings?|r[ée]gressions?|d[ée]fauts?)"
 VERDICT_MARKER: re.Pattern[str] = re.compile(
-    r"\b(pass(?:e|es|ent|ing|ed)?|verts?|vertes?|green|r[ée]ussi\w*|r[ée]ussit|"
-    r"succe(?:ed|eds|ss)|succ[èe]s|sans\s+(?:erreur|avertissement|warning)s?|"
-    r"no\s+(?:error|warning)s?|aucune?s?|z[ée]ro|nul(?:le)?|retourne|returns?|"
-    r"gate check|grimoire standard gate|validation du sch[ée]ma|schema validation|existe|existence|exists?|valid(?:e|es|ent|ates?|ated)|clean|seuil|threshold|"
-    r"correspond(?:ent)?|match(?:es)?)\b",
+    r"(?:\b(?:"
+    # « passe » : sauf les locutions qui n'énoncent aucun verdict.
+    r"pass(?:e|es|ent|ing|ed)?\b(?!\s+(?:muster|the\s+(?:bar|smell\s+test)|la\s+barre))|"
+    r"verts?|vertes?|green|r[ée]ussi\w*|r[ée]ussit|succe(?:ed|eds|ss)|succ[èe]s|"
+    rf"sans\s+{_RESULTATS}|no\s+{_RESULTATS}|aucune?s?\s+{_RESULTATS}|z[ée]ro\s+{_RESULTATS}|"
+    r"gate check|grimoire standard gate|validation du sch[ée]ma|schema validation|"
+    r"(?:lint\w*|ruff|mypy|flake8|pylint)\s+(?:(?:is|est|reports?)\s+)?clean|"
+    r"valid(?:e|es|ent)\s+(?:selon|le|la|les|l['’]|un|une|ce|cette|ces|chaque|tous|toutes|contre)|"
+    # « le schéma valide » (verbe) mais pas « le schéma est valide » (adjectif).
+    r"(?<!\best\s)(?<!\bsont\s)(?<!\breste\s)(?<!\brestent\s)(?<!\bsemble\s)valid(?:e|ent)(?=\s*[.!;,]?\s*$)|"
+    r"valid(?:ates?|ated|ating)|valid\s+(?:against|according|per|selon)|"
+    r"(?:above|below|over|under|exceeds?|d[ée]passe|au[- ]dessus d[eu]|en[- ]dessous d[eu]|"
+    r"sup[ée]rieure? [àa]|inf[ée]rieure? [àa])\s+(?:the\s+|le\s+|du\s+|d['’]un\s+)?(?:seuil|threshold|\d)"
+    r")|[<>]=?\s*\d|[≥≤])",
     re.IGNORECASE,
 )
+
+#: Outils dont l'invocation nue rend un code de sortie : lancer la commande
+#: EST le verdict (docstring du module : « code de sortie d'une commande »).
+#: Volontairement une liste fermée d'outils de vérification, pas « tout ce qui
+#: ressemble à une commande ».
+_COMMANDE_TETE = re.compile(
+    r"^(?:\$\s*)?(?:(?:run|lancer|lance|ex[ée]cuter|execute)\s+)?"
+    r"(?:(?:uv\s+run|python3?\s+-m|poetry\s+run|npx|pipx\s+run)\s+)?"
+    r"(?:pytest|py\.test|mypy|ruff|flake8|pylint|tox|nox|pre-commit|"
+    r"cargo\s+(?:test|clippy|check|build|fmt)|"
+    r"(?:npm|pnpm|yarn)\s+(?:run\s+)?(?:test|lint|build|typecheck)|"
+    r"go\s+(?:test|vet|build)|make\s+(?:test|lint|check|ci|build)|"
+    r"grimoire\s+standard\s+(?:gate|verify|audit))"
+    r"(?=\s|$)",
+    re.IGNORECASE,
+)
+
+#: Un argument de ligne de commande : option, chemin/sélecteur (``/ . = : * [``)
+#: ou sous-commande connue. Un mot de prose (« est », « and », « great »)
+#: n'en est pas un : la ligne retombe alors dans le vocabulaire ordinaire.
+_COMMANDE_ARG = re.compile(
+    r"^(?:-\S*|[\w.\-]*[/.=:*\[\]][\w./:=*\[\]\-,]*|check|tests?|src|run|build|lint|clippy|fmt|vet|ci|all|\d+)$",
+    re.IGNORECASE,
+)
+
+#: Motifs dont la simple présence énonce déjà le verdict : ils n'ont pas besoin
+#: d'un marqueur à côté.
+_MOTIFS_AUTO_VERDICT = frozenset({"fichier_attendu", "commande_code_sortie", "contenu_exact"})
+
+
+def _est_commande_nue(texte: str) -> bool:
+    """Vrai si tout le critère est une ligne de commande d'un outil de vérification.
+
+    ``pytest tests/unit -q`` ou ``uv run mypy --strict src/`` : le verdict est
+    le code de sortie, sans prose de jugement. ``Test ; audit ...`` ou
+    ``pytest est un bon outil`` n'en sont pas : le premier ne nomme aucune
+    commande, le second contient un mot qui n'est pas un argument.
+    """
+    for segment in texte.replace("`", "").strip().rstrip(".").split("&&"):
+        segment = segment.strip()
+        tete = _COMMANDE_TETE.match(segment)
+        if tete is None:
+            return False
+        if not all(_COMMANDE_ARG.match(jeton) for jeton in segment[tete.end() :].split()):
+            return False
+    return True
 
 
 def _classer_critere(texte: str) -> _Verdict:
@@ -204,12 +288,12 @@ def _classer_critere(texte: str) -> _Verdict:
     for motif, motif_re in JUDGE_PATTERNS:
         if motif_re.search(texte):
             return _Verdict(_Categorie.JUGE, motif)
+    if _est_commande_nue(texte):
+        return _Verdict(_Categorie.MECANIQUE, "commande_nue")
     for motif, motif_re in MECHANICAL_PATTERNS:
-        if motif_re.search(texte):
-            if VERDICT_MARKER.search(texte) is None:
-                # Outil nommé, verdict absent : le silence ne vaut pas confiance.
-                return _Verdict(_Categorie.AMBIGU, None)
+        if motif_re.search(texte) and (motif in _MOTIFS_AUTO_VERDICT or VERDICT_MARKER.search(texte)):
             return _Verdict(_Categorie.MECANIQUE, motif)
+    # Outil nommé sans verdict, ou rien de reconnu : le silence ne vaut pas confiance.
     return _Verdict(_Categorie.AMBIGU, None)
 
 

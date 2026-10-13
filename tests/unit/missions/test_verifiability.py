@@ -173,3 +173,71 @@ def test_as_dict_expose_reason_citant_le_critere_decisif() -> None:
     assert "revue" in as_dict(tache(acceptance=("revue par un pair",)))["reason"]
     assert as_dict(tache(acceptance=("le build passe",)))["reason"]
     assert "aucun critère" in as_dict(tache())["reason"]
+
+
+# --- W3-05, revue S1 : pièges nommés (chacun rouge sur la version précédente du classeur)
+
+
+def test_existe_loin_du_fichier_n_est_pas_un_verdict_de_fichier() -> None:
+    for critere in (
+        "a file explains why the design exists",
+        "the profile file captures what matters; a clear rationale exists",
+        "le fichier README explique pourquoi le module existe",
+    ):
+        assert classify(tache(acceptance=(critere,))) is Verifiability.V2, critere
+
+
+def test_existence_de_tests_sans_verdict_est_ambigue_dans_les_deux_langues() -> None:
+    classes = {
+        c: classify(tache(acceptance=(c,))) for c in ("tests exist", "des tests existent", "il existe des tests")
+    }
+    assert set(classes.values()) == {Verifiability.V2}, classes
+
+
+def test_fichier_attendu_reste_mecanique_avec_sujet_direct() -> None:
+    for critere in ("file docs/guide.md exists", "the config file exists", "le fichier README existe"):
+        assert classify(tache(acceptance=(critere,))) is Verifiability.V0, critere
+
+
+def test_adjectifs_de_jugement_ne_sont_pas_des_verdicts() -> None:
+    for critere in (
+        "the test code is clean",
+        "tests are clean and readable",
+        "tests are valid",
+        "les tests correspondent aux besoins métier",
+        "the schema matches the product vision",
+        "le schéma est valide à mon avis",
+        "le seuil de qualité des tests est raisonnable",
+        "zéro test flaky ressenti",
+        "tests pass muster",
+        "les tests passent la barre de qualité attendue par l'équipe",
+    ):
+        assert classify(tache(acceptance=(critere,))) is Verifiability.V2, critere
+
+
+def test_verdicts_lies_a_un_outil_restent_mecaniques() -> None:
+    for critere in ("lint is clean", "ruff ne signale aucune erreur", "test coverage >= 80", "le schéma valide"):
+        assert classify(tache(acceptance=("pytest vert", critere))) is Verifiability.V0, critere
+
+
+def test_ligne_de_commande_nue_est_un_verdict_par_code_de_sortie() -> None:
+    for critere in (
+        "pytest tests/unit -q",
+        "mypy --strict src/grimoire/",
+        "ruff check src/",
+        "uv run pytest",
+        "cargo test",
+        "npm test",
+        "pytest -q && ruff check .",
+    ):
+        assert classify(tache(acceptance=(critere,))) is Verifiability.V0, critere
+        assert explain(tache(acceptance=(critere,)))[0][1] == "commande_nue"
+
+
+def test_outil_nomme_dans_une_phrase_n_est_pas_une_commande() -> None:
+    for critere in ("pytest est un bon outil", "pytest is a great framework", "Test ; audit rapport.md ligne R31"):
+        assert classify(tache(acceptance=(critere,))) is Verifiability.V2, critere
+
+
+def test_commande_nue_ne_masque_pas_une_revue() -> None:
+    assert classify(tache(acceptance=("pytest tests/unit à la main",))) is Verifiability.V1
