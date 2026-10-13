@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import Any
 
 from grimoire.codegraph.graph import CodeGraph
+from grimoire.core import fsio
 
 __all__ = [
     "EXCLUDED_DIRS",
@@ -151,11 +152,8 @@ def _resolve_source(root: Path, source_dir: str) -> Path:
 
 def _write_receipt(root: Path, receipt: dict[str, Any]) -> None:
     target = root / RECEIPT_PATH
-    target.parent.mkdir(parents=True, exist_ok=True)
-    tmp = target.with_suffix(".json.tmp")
     # ensure_ascii (défaut) : un nom non UTF-8 s'écrit en échappement JSON ASCII, jamais en octets invalides.
-    tmp.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    tmp.replace(target)
+    fsio.atomic_write(target, json.dumps(receipt, indent=2, sort_keys=True) + "\n")
 
 
 def record_index(root: Path, source_dir: str = "src") -> tuple[CodeGraph, dict[str, Any]]:
