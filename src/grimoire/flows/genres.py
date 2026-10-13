@@ -982,7 +982,7 @@ def _drive_composite_child(
                 return "cost_capped", (), total, None, None, why
             return "blocked", (), _total_cost(executor), None, None, None
         last_output = result.output
-        outcome: ResumeOutcome = engine.resume(run_id, output=result.output, executor=executor)
+        outcome: ResumeOutcome = engine.resume(run_id, output=result.output, executor=executor, allow_replay=False)
         if not outcome.ok:
             return "blocked", outcome.faults, _total_cost(executor), None, None, None
         if outcome.finished:

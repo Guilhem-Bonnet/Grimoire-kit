@@ -12,12 +12,13 @@ import os
 import uuid
 import warnings
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from grimoire.core.exceptions import GrimoireRuntimeError
+from grimoire.core.fsio import locked
 from grimoire.costs import Cost
 from grimoire.traces.otel_conventions import (
     ATTR_AGENT_NAME,
@@ -743,6 +744,11 @@ class TraceLedger:
     # ── Private helpers ────────────────────────────────────────────────────
 
     def _append(self, record: dict[str, Any]) -> None:
+        with locked(self._traces_path):
+            self._write_line(record)
+
+    def _write_line(self, record: dict[str, Any]) -> None:
+        """Ajoute une ligne ; l'appelant tient déjà ``locked(self._traces_path)``."""
         line = json.dumps(record, ensure_ascii=False) + "\n"
         with open(self._traces_path, "a", encoding="utf-8") as fh:
             fh.write(line)
@@ -791,7 +797,7 @@ class TraceLedger:
         trace_id: str | None = None,
     ) -> TraceRecord:
         trace = TraceRecord(
-            id=trace_id or self._next_id(run_id),
+            id=trace_id or "",
             run_id=run_id,
             workflow_instance_id=workflow_instance_id,
             mission_id=mission_id,
@@ -813,7 +819,14 @@ class TraceLedger:
             token_usage=TokenUsage.from_dict(token_usage or {}),
             tags=tuple(tags or []),
         )
-        self._append(trace.to_dict())
+        if trace_id:
+            self._append(trace.to_dict())
+            return trace
+        # Identifiant dérivé du décompte : lecture, calcul et ajout dans la même section
+        # critique, sinon deux processus lisent le même décompte et écrivent le même id.
+        with locked(self._traces_path):
+            trace = replace(trace, id=self._next_id(run_id))
+            self._write_line(trace.to_dict())
         return trace
 
     # ── Queries ────────────────────────────────────────────────────────────
