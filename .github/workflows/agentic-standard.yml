@@ -18,6 +18,9 @@ on:
       - "docs/standard/integration.md"
       - ".github/workflows/agentic-standard.yml"
 
+permissions:
+  contents: read
+
 jobs:
   standard:
     runs-on: ubuntu-latest
