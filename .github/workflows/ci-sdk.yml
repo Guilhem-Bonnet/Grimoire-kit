@@ -132,10 +132,13 @@ jobs:
         # La suite complète sur les trois systèmes (D-10) : l'ancien sous-ensemble
         # Windows et le `-x` (arrêt au premier échec, aussi posé par `addopts`)
         # cachaient chaque défaut derrière le précédent. xdist (`-n auto`) paie
-        # le surcoût ; `--maxfail` n'est volontairement pas posé.
+        # le surcoût ; `--maxfail` n'est volontairement pas posé. `--dist loadfile` :
+        # la répartition par test (défaut) mélange les fichiers sur un même worker et
+        # révèle des états partagés (21 échecs en `-n 8` contre 10 en série) ; par
+        # fichier, on retrouve exactement l'ensemble des échecs de la série.
         shell: bash
         run: |
-          pytest tests/unit/ tests/test_agentic_standard.py -q --tb=short -n auto \
+          pytest tests/unit/ tests/test_agentic_standard.py -q --tb=short -n auto --dist loadfile \
             --cov=src/grimoire \
             --cov-report=xml \
             --cov-report=term-missing \
