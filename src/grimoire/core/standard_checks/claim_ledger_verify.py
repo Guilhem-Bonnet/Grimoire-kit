@@ -11,12 +11,158 @@ check --strict``) — aucun des deux n'importe l'autre, pas de cycle.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from grimoire.core.standard_checks.base import StandardProfile, StandardVerificationResult, _add_check, _text_file
 from grimoire.core.standard_generation import EVIDENCE_DIR
 
-__all__ = ["verify_claim_ledger"]
+__all__ = ["ClaimRowScan", "scan_claim_rows", "v0_non_governed", "verify_claim_ledger"]
+
+_TEMPLATE_CELLS = ["CL-001", "", "fait", "", "hypothèse", "faible", "vérifier"]
+_TEMPLATE_CELLS_LOWER = [c.lower() for c in _TEMPLATE_CELLS]
+_ID_RE = re.compile(r"^CL-\d{3,}$")
+# Début de ligne candidate : citation GFM (``> ``) tolérée, barre initiale facultative.
+_CANDIDATE_RE = re.compile(r"^\s*(?:>\s*)*(\|\s*)?cl-", re.IGNORECASE)
+_QUOTE_RE = re.compile(r"^\s*(?:>\s*)+")
+_FENCE_RE = re.compile(r"^\s*(```|~~~)")
+_SECTION_RE = re.compile(r"^##\s+Claims\b", re.IGNORECASE)
+_SEPARATOR_CELL_RE = re.compile(r"^:?-+:?$")
+_STATUSES = frozenset({"prouvé", "hypothèse", "contredit", "réfuté"})
+_DECISIONS = frozenset({"utiliser", "vérifier", "rejeter", "écarter"})
+# « non vérifié » est la valeur que le skill grimoire-evidence prescrit pour une
+# affirmation sans source : synonyme d'« hypothèse », jamais de « prouvé ».
+_STATUS_ALIASES = {"non vérifié": "hypothèse"}
+_ANNOTATION_RE = re.compile(r"[(;]")
+_MIN_CELLS = 7
+# Une ligne courte garde un contrôle de fond à partir de 5 cellules : Preuve et
+# Statut sont alors présents (colonnes 4 et 5), les suivantes sont complétées.
+_MIN_SHORT_ROW_CELLS = 5
+_UNESCAPED_PIPE_RE = re.compile(r"(?<!\\)\|")
+
+
+def _cells(line: str) -> list[str]:
+    """Découpe une ligne de tableau GFM : ``\\|`` reste dans la cellule (sans son antislash)."""
+    body = line.strip()
+    body = body.removeprefix("|")
+    body = body[:-1] if body.endswith("|") and not body.endswith("\\|") else body
+    return [c.replace("\\|", "|").strip() for c in _UNESCAPED_PIPE_RE.split(body)]
+
+
+def _canonical(value: str, vocabulary: frozenset[str], aliases: dict[str, str] | None = None) -> str | None:
+    """Valeur du vocabulaire fermé désignée par *value*, ou ``None`` si elle n'en fait pas partie.
+
+    Tolère l'annotation d'un auteur : casse, texte après ``(`` ou ``;``, point
+    final, et suite après un terme du vocabulaire (« prouvé par construction »).
+    Le terme doit être un mot entier : « non prouvé » ou « prouvéeee » restent hors vocabulaire.
+    """
+    head = _ANNOTATION_RE.split(value.lower(), maxsplit=1)[0].strip().rstrip(".!:").strip()
+    terms = {t: t for t in vocabulary} | (aliases or {})
+    if head in terms:
+        return terms[head]
+    for term in sorted(terms, key=len, reverse=True):
+        if head.startswith(term + " "):
+            return terms[term]
+    return None
+
+
+class ClaimRowScan:
+    """Lignes candidates du registre : chacune est évaluée ou comptée non évaluée.
+
+    ``unevaluated_cells`` garde, pour les lignes non évaluées qui ont au moins 5
+    cellules (identifiant hors ``CL-NNN``, affirmation vide, ligne courte
+    complétée jusqu'à 7 cellules), leurs cellules : la forme fautive est
+    signalée, mais le fond (contradictions) est tout de même contrôlé — une
+    ligne mal formée ne s'exonère pas d'une preuve manquante.
+    """
+
+    def __init__(self) -> None:
+        self.evaluated: list[tuple[str, list[str]]] = []
+        self.unevaluated: list[str] = []
+        self.unevaluated_cells: list[tuple[str, list[str]]] = []
+
+    @property
+    def candidate_count(self) -> int:
+        return len(self.evaluated) + len(self.unevaluated)
+
+    @property
+    def unevaluated_count(self) -> int:
+        return len(self.unevaluated)
+
+
+def _is_candidate(line: str, in_section: bool, in_fence: bool) -> bool:
+    """Ligne retenue pour évaluation, avec ou sans barres extérieures (GFM les rend facultatives)."""
+    body = _QUOTE_RE.sub("", line)
+    has_lead = body.lstrip().startswith("|")
+    if has_lead and (in_section or _CANDIDATE_RE.match(line)):
+        return True
+    if in_fence:
+        return False
+    if not _UNESCAPED_PIPE_RE.search(body):
+        return False
+    return in_section or _CANDIDATE_RE.match(line) is not None
+
+
+def scan_claim_rows(text: str) -> ClaimRowScan:
+    """Repère les lignes candidates sans aucune perte silencieuse.
+
+    Candidate = toute ligne de tableau de toute section ``## Claims`` (tout titre
+    de niveau 2 qui commence par « Claims », donc aussi ``## Claims (registre)``,
+    et il peut y en avoir plusieurs), avec ou sans barres extérieures et sous
+    une citation ``> `` éventuelle, hors en-tête, séparateur et ligne modèle ;
+    ou, où que ce soit dans le fichier, toute ligne de tableau dont la première
+    cellule commence par ``cl-`` (casse et espaces tolérés). Une ligne sans
+    barre non échappée, ou dans un bloc de code sans barre initiale, n'est pas
+    une ligne de tableau. Une ligne candidate dont l'identifiant n'est pas
+    ``CL-NNN``, dont la cellule Affirmation est vide, ou qui a moins de 7
+    cellules est comptée non évaluée. La ligne modèle est reconnue sans égard à
+    la casse.
+    """
+    lines = text.splitlines()
+    pool: list[str] = []
+    in_section = in_fence = False
+    for line in lines:
+        if _FENCE_RE.match(line):
+            in_fence = not in_fence
+        elif re.match(r"^##\s", line) or _SECTION_RE.match(line.strip()):
+            in_section = bool(_SECTION_RE.match(line.strip()))
+            in_fence = False
+        elif _is_candidate(line, in_section, in_fence):
+            pool.append(line)
+    scan = ClaimRowScan()
+    for line in pool:
+        cells = _cells(_QUOTE_RE.sub("", line))
+        if cells[0].lower() == "id" or all(_SEPARATOR_CELL_RE.match(c) for c in cells):
+            continue
+        if [c.lower() for c in cells] == _TEMPLATE_CELLS_LOWER:
+            continue
+        if len(cells) < _MIN_CELLS:
+            scan.unevaluated.append(line)
+            if len(cells) >= _MIN_SHORT_ROW_CELLS:
+                scan.unevaluated_cells.append((line, cells + [""] * (_MIN_CELLS - len(cells))))
+        elif not _ID_RE.match(cells[0]) or not cells[1]:
+            scan.unevaluated.append(line)
+            scan.unevaluated_cells.append((line, cells))
+        else:
+            scan.evaluated.append((line, cells))
+    return scan
+
+
+def v0_non_governed(root: Path, profile: StandardProfile, task_id: str) -> bool:
+    """True quand *task_id* est classé V0 et le profil n'est pas ``governed``.
+
+    Seule source du dosage V0 : le gate de revue et ``standard verify`` la
+    partagent, pour que le même registre rende le même constat dans les deux.
+    """
+    if profile.id == "governed":
+        return False
+    from grimoire.core.standard_generation import STANDARD_DIR
+    from grimoire.core.standard_state import _load_mapping, task_from_board
+
+    board = _load_mapping(root / STANDARD_DIR / "task-board.yaml")
+    verifiability = task_from_board(board, task_id).get("verifiability")
+    klass = verifiability.get("class") if isinstance(verifiability, dict) else None
+    return klass == "V0"
 
 
 def verify_claim_ledger(
@@ -30,48 +176,108 @@ def verify_claim_ledger(
 ) -> None:
     """AG-QUA-002 : une affirmation critique sans preuve reste une hypothèse.
 
-    Un registre encore vierge est un avertissement : il attend d'être rempli.
-    Ce qui est une erreur, c'est une affirmation dite prouvée sans preuve, ou —
+    Un registre vierge, vidé ou absent est un avertissement (starter,
+    controlled, orchestrated) mais une erreur en governed et production dès
+    ``review`` — sauf pour une tâche V0 hors governed (``suppress_v0``, ci-dessous).
+    Ce qui est aussi une erreur, c'est une affirmation dite prouvée sans preuve, ou —
     en profil governed et production — une affirmation utilisée alors qu'elle
     n'est pas prouvée, et une synthèse laissée vide.
 
     ``suppress_v0`` (issue #582 lot I) éteint uniquement ``claims.empty`` :
     une tâche V0 en profil non gouverné n'a, par construction, aucune
-    affirmation critique à consigner — voir :func:`grimoire.core.
-    standard_checks.gate_review_checks.review_state_content_checks`, seul
-    appelant qui le passe. Une affirmation réellement écrite reste vérifiée
-    comme avant, quel que soit ce drapeau.
+    affirmation critique à consigner. Le gate de revue (:func:`grimoire.core.
+    standard_checks.gate_review_checks.review_state_content_checks`) et
+    ``standard verify`` (``verifiers.run_verifiers``) le calculent tous deux par
+    :func:`v0_non_governed`, donc rendent le même constat. Une affirmation
+    réellement écrite reste vérifiée comme avant, quel que soit ce drapeau.
+
+    Le fond se contrôle quelle que soit la forme : une ligne à identifiant hors
+    ``CL-NNN`` ou sans affirmation est signalée ``claims.row_invalid``, et ses
+    contradictions (« prouvé » sans preuve, « utiliser » sans « prouvé ») sont
+    tout de même levées. Une ligne sans affirmation ne compte pas comme évaluée.
+    Une ligne de 5 ou 6 cellules est complétée jusqu'à 7 pour ce contrôle de
+    fond ; en dessous de 5, seule la forme est signalée.
+
+    Vocabulaire fermé, annotations tolérées : une valeur peut porter une
+    précision après ``(`` ou ``;`` ou après le terme (``prouvé (par lecture)``,
+    ``vérifier (utilisateur).``). ``non vérifié``, la valeur que prescrit le skill
+    grimoire-evidence, vaut ``hypothèse``. Toute autre valeur est hors vocabulaire.
 
     ``rows_only`` (issue #614) : pendant ``in_progress``, seules les
-    contradictions ligne à ligne comptent — « prouvé » sans preuve, « utiliser »
-    sans « prouvé ». Le registre vierge (``claims.empty``) et la synthèse non
-    remplie (``claims.summary_placeholder``) sont des constats de clôture,
-    levés à partir de ``review`` seulement.
+    contradictions ligne à ligne bloquent — « prouvé » sans preuve, « utiliser »
+    sans « prouvé ». Une ligne en cours d'écriture (``claims.row_invalid``,
+    ``claims.status_invalid``, ``claims.decision_invalid``) reste signalée mais
+    en avertissement : ``Stop``, ``SubagentStop`` et ``PreCompact`` ne doivent
+    pas bloquer une affirmation à moitié rédigée, que la revue refusera en
+    erreur. Le registre vierge (``claims.empty``) et la synthèse non remplie
+    (``claims.summary_placeholder``) sont des constats de clôture, levés à
+    partir de ``review`` seulement.
     """
     rel_path = EVIDENCE_DIR / task_id / "claim-ledger.md"
     text = _text_file(root, rel_path)
-    if not text:
-        return
     strict = profile.id in {"governed", "production"}
-    template_row = "| CL-001 |  | fait |  | hypothèse | faible | vérifier |"
-    rows = [line for line in text.splitlines() if line.startswith("| CL-") and line.strip() != template_row]
-    if not rows and not suppress_v0 and not rows_only:
-        _add_check(result, "claims.empty", "warning", "Claim ledger still holds only the template row.", path=rel_path)
-    for line in rows:
-        cells = [c.strip() for c in line.strip().strip("|").split("|")]
-        if len(cells) < 7:
-            _add_check(result, "claims.row_invalid", "warning", f"Claim row is malformed: {line[:60]}", path=rel_path)
-            continue
+    severity = "error" if strict else "warning"
+    # Pendant le travail, une ligne mal formée avertit ; la revue la refuse.
+    form_severity = "warning" if rows_only else severity
+    if not text.strip():
+        if not suppress_v0 and not rows_only:
+            _add_check(result, "claims.empty", severity, "Claim ledger is missing or empty.", path=rel_path)
+        return
+    scan = scan_claim_rows(text)
+    if not scan.candidate_count and not suppress_v0 and not rows_only:
+        _add_check(result, "claims.empty", severity, "Claim ledger still holds only the template row.", path=rel_path)
+    if scan.candidate_count:
+        _add_check(
+            result,
+            "claims.summary",
+            "info",
+            f"{scan.candidate_count} claim rows, {len(scan.evaluated)} evaluated, "
+            f"unevaluated_count={scan.unevaluated_count}.",
+            path=rel_path,
+        )
+    for line in scan.unevaluated:
+        _add_check(
+            result, "claims.row_invalid", form_severity, f"Claim row is malformed: {line.strip()[:60]}", path=rel_path
+        )
+    # Le fond se contrôle quelle que soit la forme : les lignes à identifiant
+    # fautif ou sans affirmation, déjà signalées row_invalid, y passent aussi.
+    rows = scan.evaluated + scan.unevaluated_cells
+    for _line, cells in rows:
         claim_id, _claim, _kind, proof, status, _confidence, decision = cells[:7]
+        raw_status, raw_decision = status, decision
+        status = _canonical(raw_status, _STATUSES, _STATUS_ALIASES) or ""
+        decision = _canonical(raw_decision, _DECISIONS) or ""
+        if not status:
+            _add_check(
+                result,
+                "claims.status_invalid",
+                form_severity,
+                f"{claim_id} has an unknown status: {raw_status or '(empty)'}.",
+                path=rel_path,
+            )
+        if not decision:
+            _add_check(
+                result,
+                "claims.decision_invalid",
+                form_severity,
+                f"{claim_id} has an unknown decision: {raw_decision or '(empty)'}.",
+                path=rel_path,
+            )
         if status == "prouvé" and not proof:
             _add_check(
-                result, "claims.proved_without_evidence", "error",
-                f"{claim_id} is marked prouvé with no source or evidence.", path=rel_path,
+                result,
+                "claims.proved_without_evidence",
+                "error",
+                f"{claim_id} is marked prouvé with no source or evidence.",
+                path=rel_path,
             )
         if decision == "utiliser" and status != "prouvé":
             _add_check(
-                result, "claims.used_unproved", "error" if strict else "warning",
-                f"{claim_id} is used while its status is {status}.", path=rel_path,
+                result,
+                "claims.used_unproved",
+                severity,
+                f"{claim_id} is used while its status is {raw_status or '(empty)'}.",
+                path=rel_path,
             )
-    if strict and rows and not rows_only and "| Affirmations bloquantes non prouvées |  |" in text:
+    if strict and scan.evaluated and not rows_only and "| Affirmations bloquantes non prouvées |  |" in text:
         _add_check(result, "claims.summary_placeholder", "error", "Claim ledger summary is still empty.", path=rel_path)
