@@ -131,3 +131,45 @@ def test_faux_v0_tests_manuels_sont_un_jugement_humain() -> None:
 def test_validation_contre_un_schema_reste_mecanique() -> None:
     t = tache(acceptance=("validation du schéma JSON",), expected_evidence=("schema validation passes",))
     assert classify(t) is Verifiability.V0
+
+
+# --- W3-05 : jeu étiqueté, zéro faux V0 mesuré
+
+
+def test_corpus_etiquete_taille_et_langues() -> None:
+    from tests.unit.missions.verifiability_corpus import CORPUS
+
+    assert len(CORPUS) >= 100
+    assert sum(1 for _, langue, _ in CORPUS if langue == "fr") >= 40
+    assert sum(1 for _, langue, _ in CORPUS if langue == "en") >= 40
+    assert {classe for _, _, classe in CORPUS} == {"V0", "V1", "V2"}
+
+
+def test_corpus_etiquete_zero_faux_v0() -> None:
+    from tests.unit.missions.verifiability_corpus import CORPUS
+
+    faux_v0 = [
+        t for t, _, attendu in CORPUS if attendu != "V0" and classify(tache(acceptance=(t,))) is Verifiability.V0
+    ]
+    assert faux_v0 == []
+
+
+def test_corpus_etiquete_classe_exacte() -> None:
+    from tests.unit.missions.verifiability_corpus import CORPUS
+
+    ecarts = [(t, attendu, classify(tache(acceptance=(t,))).value) for t, _, attendu in CORPUS]
+    assert [e for e in ecarts if e[1] != e[2]] == []
+
+
+def test_critere_vague_fait_passer_la_tache_en_v2() -> None:
+    t = tache(acceptance=("pytest vert", "les tests sont lisibles et bien nommés"))
+    assert classify(t) is Verifiability.V2
+
+
+def test_as_dict_expose_reason_citant_le_critere_decisif() -> None:
+    vague = as_dict(tache(acceptance=("pytest vert", "le code est propre")))
+    assert vague["class"] == "V2"
+    assert "le code est propre" in vague["reason"]
+    assert "revue" in as_dict(tache(acceptance=("revue par un pair",)))["reason"]
+    assert as_dict(tache(acceptance=("le build passe",)))["reason"]
+    assert "aucun critère" in as_dict(tache())["reason"]

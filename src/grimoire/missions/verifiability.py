@@ -43,11 +43,13 @@ if TYPE_CHECKING:
 __all__ = [
     "JUDGE_PATTERNS",
     "MECHANICAL_PATTERNS",
+    "VERDICT_MARKER",
     "Verifiability",
     "as_dict",
     "classify",
     "classify_criteria",
     "explain",
+    "reason_for_criteria",
 ]
 
 
@@ -144,7 +146,7 @@ MECHANICAL_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = _motifs(
         ),
         (
             "fichier_attendu",
-            r"(fichier\b[\s\S]*\bexiste\b|existence du fichier|file\s+exists|"
+            r"(fichier\b[\s\S]*\bexiste\b|existence du fichier|file\b[\s\S]*\bexists\b|"
             r"\bcontenu (?:exact|pr[ée]cis)\b)",
         ),
     )
@@ -157,7 +159,7 @@ MECHANICAL_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = _motifs(
 JUDGE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = _motifs(
     (
         ("revue", r"\b(revue|review|relecture|peer review|code review)\b"),
-        ("juge", r"\b(juge|jugement|judge)\b"),
+        ("juge", r"\b(juge|jugement|judge|judg(?:e)?ment)\b"),
         # Un test « manuel » ou une vérification « à la main » est un verdict
         # humain quel que soit le mot « test » à côté : sans ce motif, le
         # vocabulaire mécanique l'aurait avalé et produit un faux V0.
@@ -175,6 +177,21 @@ JUDGE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = _motifs(
 )
 
 
+#: Marqueur d'un verdict : un critère mécanique doit dire ce qui est attendu
+#: du programme (passe, vert, aucun, retourne 0, existe...), pas seulement
+#: nommer un outil. « Les tests sont lisibles » nomme des tests sans verdict :
+#: c'est un jugement de qualité, donc ambigu, jamais V0 (W3-05, mesuré par
+#: le jeu étiqueté de ``tests/unit/missions/verifiability_corpus.py``).
+VERDICT_MARKER: re.Pattern[str] = re.compile(
+    r"\b(pass(?:e|es|ent|ing|ed)?|verts?|vertes?|green|r[ée]ussi\w*|r[ée]ussit|"
+    r"succe(?:ed|eds|ss)|succ[èe]s|sans\s+(?:erreur|avertissement|warning)s?|"
+    r"no\s+(?:error|warning)s?|aucune?s?|z[ée]ro|nul(?:le)?|retourne|returns?|"
+    r"gate check|grimoire standard gate|validation du sch[ée]ma|schema validation|existe|existence|exists?|valid(?:e|es|ent|ates?|ated)|clean|seuil|threshold|"
+    r"correspond(?:ent)?|match(?:es)?)\b",
+    re.IGNORECASE,
+)
+
+
 def _classer_critere(texte: str) -> _Verdict:
     """Classe un critère isolé — la revue prime sur le mécanique.
 
@@ -189,6 +206,9 @@ def _classer_critere(texte: str) -> _Verdict:
             return _Verdict(_Categorie.JUGE, motif)
     for motif, motif_re in MECHANICAL_PATTERNS:
         if motif_re.search(texte):
+            if VERDICT_MARKER.search(texte) is None:
+                # Outil nommé, verdict absent : le silence ne vaut pas confiance.
+                return _Verdict(_Categorie.AMBIGU, None)
             return _Verdict(_Categorie.MECANIQUE, motif)
     return _Verdict(_Categorie.AMBIGU, None)
 
@@ -227,6 +247,26 @@ def classify_criteria(criteria: Sequence[str]) -> Verifiability:
     return Verifiability.V0
 
 
+def reason_for_criteria(criteria: Sequence[str]) -> str:
+    """Dit POURQUOI la classe est celle-là, en citant le critère décisif.
+
+    Pour V2, le premier critère sans verdict reconnu (ou l'absence de
+    critère) ; pour V1, le premier critère de revue et son motif ; pour V0,
+    le nombre de critères mécaniques. Une classe sans raison lisible ne
+    permet pas de la faire descendre.
+    """
+    if not criteria:
+        return "aucun critère déclaré : rien à vérifier mécaniquement"
+    verdicts = [(c, _classer_critere(c)) for c in criteria]
+    for critere, v in verdicts:
+        if v.categorie is _Categorie.AMBIGU:
+            return f"critère sans verdict reconnu : {critere!r}"
+    for critere, v in verdicts:
+        if v.categorie is _Categorie.JUGE:
+            return f"critère de revue ({v.motif}) : {critere!r}"
+    return f"{len(verdicts)} critère(s) mécanique(s), chacun avec un verdict"
+
+
 def classify(task: MissionTask) -> Verifiability:
     """Dérive la classe — jamais déclarée, toujours recalculée depuis le texte.
 
@@ -259,5 +299,6 @@ def as_dict(task: MissionTask) -> dict[str, Any]:
     return {
         "class": klass.value,
         "explanation": klass.explanation,
+        "reason": reason_for_criteria(_criteres(task)),
         "criteria": [{"criterion": critere, "pattern": motif} for critere, motif in explain(task)],
     }
