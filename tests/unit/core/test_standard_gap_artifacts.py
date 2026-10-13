@@ -1,7 +1,8 @@
 """Les artefacts qui ferment les dix-sept exigences AG-* sans artefact (#246).
 
 Un projet neuf les reçoit selon son profil et vérifie sans erreur nouvelle ;
-un registre vierge est un avertissement. Ce qui est une erreur, c'est une
+un registre vierge est un avertissement en profil non-gouverné et une erreur
+en profil governed/production (W1-05). Ce qui est une erreur, c'est une
 déclaration fausse : un critère « passé » sans preuve, un livrable accepté
 sans validateur, une source remplacée sans remplaçante, un incident fermé
 sans prévention, une délégation ouverte.
@@ -22,11 +23,13 @@ from grimoire.core.standard_checks.acceptance_test_run import record_acceptance_
 from grimoire.core.standard_traceability import matrix_for, with_verdicts
 
 PROFILES = ("starter", "controlled", "orchestrated", "governed", "production")
-# Ce qu'un projet gouverné fraîchement généré a toujours eu en erreur : le task
-# envelope attend d'être rempli. Rien d'autre ne doit s'y ajouter.
+# Ce qu'un projet fraîchement généré a toujours eu en erreur selon son profil.
+# En profil non-gouverné : le task envelope attend d'être rempli.
+# En profil governed/production : task envelope + claim ledger vide (W1-05).
 ENVELOPE_PLACEHOLDERS = {
     "task.state_placeholder", "task.context_placeholder", "task.tool_boundary_placeholder", "task.pending_gate",
 }
+GOVERNED_PLACEHOLDERS = ENVELOPE_PLACEHOLDERS | {"claims.empty"}
 
 
 def _ids(result, prefix: str, severity: str | None = None) -> set[str]:
@@ -55,7 +58,8 @@ def test_a_fresh_project_adds_no_error_on_any_profile(tmp_path: Path, profile: s
     result = verify_standard_profile(tmp_path)
     assert not result.missing, result.missing
     errors = {c.id for c in result.checks if c.severity == "error"}
-    assert errors <= ENVELOPE_PLACEHOLDERS, errors
+    expected_errors = GOVERNED_PLACEHOLDERS if profile in {"governed", "production"} else ENVELOPE_PLACEHOLDERS
+    assert errors <= expected_errors, errors
     if profile in {"starter", "controlled", "orchestrated"}:
         assert result.ok
 

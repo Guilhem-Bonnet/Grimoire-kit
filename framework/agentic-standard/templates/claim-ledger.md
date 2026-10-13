@@ -13,8 +13,10 @@ affirmation qui pèse sur une décision ou une livraison à ce qui la prouve.
 | CL-001 |  | fait |  | hypothèse | faible | vérifier |
 
 Types : `fait`, `hypothèse`, `résultat`, `décision`. Statuts : `prouvé`,
-`hypothèse`, `contredit`. Confiance : `faible`, `moyenne`, `élevée`. Décision :
-`utiliser`, `vérifier`, `rejeter`.
+`hypothèse` (ou `non vérifié`, son synonyme), `contredit`, `réfuté`. Confiance :
+`faible`, `moyenne`, `élevée`. Décision : `utiliser`, `vérifier`, `rejeter`,
+`écarter`. Une précision entre parenthèses ou après `;` est tolérée
+(`prouvé (par lecture)`) ; une barre dans une cellule s'écrit `\|`.
 
 ## Preuve minimale par type d'affirmation
 
