@@ -18,6 +18,7 @@ import logging
 import os
 import time
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, ClassVar, cast
@@ -28,7 +29,7 @@ from grimoire.memory.backends.base import BackendStatus, MemoryBackend, MemoryEn
 from grimoire.memory.hot import HotMemoryStatus, RedisHotMemory
 from grimoire.memory.profiles import VECTOR_BACKENDS
 from grimoire.memory.sidecar import DiaryRecord, KnowledgeFact, MemorySidecar
-from grimoire.memory.supersession import SUPERSEDED_KEY, search_live
+from grimoire.memory.supersession import SUPERSEDED_KEY, search_live, supersession_state
 from grimoire.memory.taxonomy import build_taxonomy, entry_matches_filters, normalize_palace_metadata
 from grimoire.memory.validation import MemoryWritePolicy, ValidatedWrite, validate_memory_write
 from grimoire.providers.state import cooling_down_entry, record_failure, record_success
@@ -370,14 +371,17 @@ class _LiveOnlySearch:
     consomme un rang de l'un des deux classements.
     """
 
-    __slots__ = ("_inner",)
+    __slots__ = ("_inner", "_recall")
 
-    def __init__(self, inner: Any) -> None:
+    def __init__(self, inner: Any, recall: Callable[[str], MemoryEntry | None]) -> None:
         self._inner = inner
+        self._recall = recall
 
     def search(self, query: str, *, user_id: str = "", limit: int = 5) -> list[MemoryEntry]:
         return search_live(
-            lambda size: cast(list[MemoryEntry], self._inner.search(query, user_id=user_id, limit=size)), limit,
+            lambda size: cast(list[MemoryEntry], self._inner.search(query, user_id=user_id, limit=size)),
+            limit,
+            self._recall,
         )
 
 
@@ -631,7 +635,9 @@ class MemoryManager:
         if include_superseded:
             return self._guarded_backend_search(query, user_id=user_id, limit=limit)
         return search_live(
-            lambda size: self._guarded_backend_search(query, user_id=user_id, limit=size), limit,
+            lambda size: self._guarded_backend_search(query, user_id=user_id, limit=size),
+            limit,
+            self.recall,
         )
 
     # ── Hybrid retrieval (vector + lexical BM25, RRF fusion) ─────────────────
@@ -671,7 +677,7 @@ class MemoryManager:
         vector: Any = _CooldownGuardedBackend(self)
         lexical: Any = self._lexical_companion
         if not include_superseded:
-            vector, lexical = _LiveOnlySearch(vector), _LiveOnlySearch(lexical)
+            vector, lexical = _LiveOnlySearch(vector, self.recall), _LiveOnlySearch(lexical, self.recall)
         retriever = HybridRetriever([
             ("vector", cast(MemoryBackend, vector)),
             ("lexical", cast(MemoryBackend, lexical)),
@@ -795,23 +801,51 @@ class MemoryManager:
                 ][:size]
         if include_superseded:
             return fetch(limit)
-        return search_live(fetch, limit)
+        return search_live(fetch, limit, self.recall)
 
     def supersede(self, old_id: str, new_id: str) -> MemoryEntry | None:
         """Marque ``old_id`` comme remplacé par ``new_id`` (métadonnées conservées).
 
-        Refuse un remplaçant inconnu ou identique : un renvoi vers rien
-        ferait disparaître le souvenir de la recherche sans le remplacer.
-        Renvoie ``None`` quand ``old_id`` n'existe pas.
+        Refuse un remplaçant inconnu, identique, déjà remplacé lui-même (le
+        renvoi doit viser le dernier maillon) ou dont la chaîne revient sur
+        ``old_id`` (cycle) : un renvoi de ce genre ferait disparaître le
+        souvenir de la recherche sans rien servir à sa place. Renvoie ``None``
+        quand ``old_id`` n'existe pas.
         """
         if old_id == new_id:
             raise GrimoireMemoryError("Un souvenir ne peut pas se remplacer lui-même.")
-        if self._backend.recall(new_id) is None:
+        replacement = self._backend.recall(new_id)
+        if replacement is None:
             raise GrimoireMemoryError(f"Remplaçant introuvable : {new_id!r}.")
+        self._refuse_cycle_or_replaced(old_id, replacement)
         existing = self._backend.recall(old_id)
         if existing is None:
             return None
         return self.update(old_id, metadata={**existing.metadata, SUPERSEDED_KEY: new_id})
+
+    def _refuse_cycle_or_replaced(self, old_id: str, replacement: MemoryEntry) -> None:
+        """Lève si viser ``replacement`` fermerait un cycle ou viserait un souvenir déjà remplacé."""
+        visited = {replacement.id}
+        current = replacement
+        while True:
+            target_id = str((current.metadata or {}).get(SUPERSEDED_KEY) or "").strip()
+            if not target_id:
+                break
+            if target_id == old_id:
+                raise GrimoireMemoryError(
+                    f"Cycle de remplacement : {replacement.id!r} mène déjà à {old_id!r}.",
+                )
+            if target_id in visited:
+                break
+            nxt = self._backend.recall(target_id)
+            if nxt is None:
+                break
+            visited.add(target_id)
+            current = nxt
+        if supersession_state(replacement, self._backend.recall) == "superseded":
+            raise GrimoireMemoryError(
+                f"Remplaçant déjà remplacé : {replacement.id!r} ; viser son remplaçant.",
+            )
 
     def get_all(self, *, user_id: str = "", offset: int = 0, limit: int | None = None) -> list[MemoryEntry]:
         return self._backend.get_all(user_id=user_id, offset=offset, limit=limit)

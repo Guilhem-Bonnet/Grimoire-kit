@@ -14,9 +14,10 @@ import pytest
 from typer.testing import CliRunner
 
 from grimoire.cli.app import app
+from grimoire.core.exceptions import GrimoireMemoryError
 from grimoire.memory.backends.local import LocalMemoryBackend
 from grimoire.memory.manager import MemoryManager
-from grimoire.memory.supersession import bench_supersession, is_superseded
+from grimoire.memory.supersession import bench_supersession, is_superseded, supersession_state
 
 runner = CliRunner()
 
@@ -82,7 +83,7 @@ class TestSearchExcludesSuperseded:
         assert _ids(mgr.search(QUERY)) == ["a"]
         entry = mgr.recall("a")
         assert entry is not None
-        assert is_superseded(entry) is False
+        assert is_superseded(entry, mgr.recall) is False
 
 
 class TestSupersedeApi:
@@ -117,6 +118,117 @@ class TestSupersedeApi:
         mgr = MemoryManager(LocalMemoryBackend(tmp_path / "m.json"))
         mgr.upsert("new", NEW)
         assert mgr.supersede("ghost", "new") is None
+
+
+class TestBrokenChains:
+    """W6-06-S1-01 : « remplacé » se décide sur l'état réel du remplaçant, pas sur la marque."""
+
+    @staticmethod
+    def _pair(tmp_path: Path, *, companion: bool = False) -> MemoryManager:
+        lexical = LocalMemoryBackend(tmp_path / "lexical.json") if companion else None
+        mgr = MemoryManager(LocalMemoryBackend(tmp_path / "m.json"), lexical_companion=lexical)
+        mgr.upsert("a", OLD)
+        mgr.upsert("b", NEW)
+        mgr.supersede("a", "b")
+        return mgr
+
+    def test_deleting_the_replacement_serves_the_old_memory_again(self, tmp_path: Path) -> None:
+        mgr = self._pair(tmp_path)
+        assert _ids(mgr.search(QUERY)) == ["b"]
+        assert mgr.delete("b") is True
+        assert _ids(mgr.search(QUERY)) == ["a"]
+        assert _ids(mgr.hybrid_search(QUERY)) == ["a"]
+        assert _ids(mgr.search_taxonomy(QUERY)) == ["a"]
+
+    def test_deleting_the_replacement_serves_the_old_memory_in_fusion(self, tmp_path: Path) -> None:
+        mgr = self._pair(tmp_path, companion=True)
+        mgr.delete("b")
+        assert "a" in _ids(mgr.hybrid_search(QUERY))
+
+    def test_a_replacement_cycle_is_refused(self, tmp_path: Path) -> None:
+        mgr = self._pair(tmp_path)
+        with pytest.raises(GrimoireMemoryError, match="Cycle"):
+            mgr.supersede("b", "a")
+        assert _ids(mgr.search(QUERY)) == ["b"]
+        b = mgr.recall("b")
+        assert b is not None
+        assert "superseded_by" not in b.metadata
+
+    def test_a_longer_cycle_is_refused(self, tmp_path: Path) -> None:
+        mgr = self._pair(tmp_path)
+        mgr.upsert("c", "Décision : le backend vectoriel retenu est Milvus.")
+        mgr.supersede("b", "c")
+        with pytest.raises(GrimoireMemoryError, match="Cycle"):
+            mgr.supersede("c", "a")
+
+    def test_a_forged_cycle_never_empties_the_search(self, tmp_path: Path) -> None:
+        mgr = MemoryManager(LocalMemoryBackend(tmp_path / "m.json"))
+        mgr.upsert("a", OLD)
+        mgr.upsert("b", NEW)
+        _mark(mgr, "a", "b")
+        _mark(mgr, "b", "a")
+        assert set(_ids(mgr.search(QUERY))) == {"a", "b"}
+        assert set(_ids(mgr.hybrid_search(QUERY))) == {"a", "b"}
+
+    def test_a_self_mark_forged_by_update_is_served(self, tmp_path: Path) -> None:
+        mgr = MemoryManager(LocalMemoryBackend(tmp_path / "m.json"))
+        mgr.upsert("a", OLD)
+        _mark(mgr, "a", "a")
+        assert _ids(mgr.search(QUERY)) == ["a"]
+
+    def test_a_phantom_mark_set_by_update_is_served(self, tmp_path: Path) -> None:
+        mgr = MemoryManager(LocalMemoryBackend(tmp_path / "m.json"))
+        mgr.upsert("x", OLD)
+        _mark(mgr, "x", "ghost")
+        assert _ids(mgr.search(QUERY)) == ["x"]
+        assert _ids(mgr.hybrid_search(QUERY)) == ["x"]
+        assert _ids(mgr.search_taxonomy(QUERY)) == ["x"]
+
+    def test_a_replacement_that_is_itself_replaced_is_refused(self, tmp_path: Path) -> None:
+        mgr = self._pair(tmp_path)
+        mgr.upsert("z", "Décision : le backend vectoriel retenu est Chroma.")
+        with pytest.raises(GrimoireMemoryError, match="déjà remplacé"):
+            mgr.supersede("z", "a")
+        assert "z" in _ids(mgr.search(QUERY))
+
+    def test_a_replacement_with_a_dangling_mark_is_accepted_and_served(self, tmp_path: Path) -> None:
+        mgr = self._pair(tmp_path)
+        mgr.upsert("z", "Décision : le backend vectoriel retenu est Chroma.")
+        _mark(mgr, "b", "ghost")
+        mgr.supersede("z", "b")
+        assert "b" in _ids(mgr.search(QUERY))
+
+    def test_a_chain_serves_only_its_last_link(self, tmp_path: Path) -> None:
+        mgr = self._pair(tmp_path)
+        mgr.upsert("c", "Décision : le backend vectoriel retenu est Milvus.")
+        mgr.supersede("b", "c")
+        assert _ids(mgr.search(QUERY)) == ["c"]
+
+    def test_a_chain_with_a_deleted_tail_serves_the_new_last_link_only(self, tmp_path: Path) -> None:
+        mgr = self._pair(tmp_path)
+        mgr.upsert("c", "Décision : le backend vectoriel retenu est Milvus.")
+        mgr.supersede("b", "c")
+        mgr.delete("c")
+        assert _ids(mgr.search(QUERY)) == ["b"]
+
+    def test_state_distinguishes_live_superseded_and_orphan(self, tmp_path: Path) -> None:
+        mgr = self._pair(tmp_path)
+        mgr.upsert("x", "Décision : le backend vectoriel retenu est Chroma.")
+        _mark(mgr, "x", "ghost")
+        states = {}
+        for entry_id in ("a", "b", "x"):
+            entry = mgr.recall(entry_id)
+            assert entry is not None
+            states[entry_id] = supersession_state(entry, mgr.recall)
+        assert states == {"a": "superseded", "b": "live", "x": "orphan"}
+
+    def test_bench_counts_orphan_marks(self, tmp_path: Path) -> None:
+        mgr = self._pair(tmp_path)
+        mgr.delete("b")
+        report = bench_supersession(mgr, [QUERY])
+        assert report["stale_served_as_fact_rate"] == 0.0
+        assert report["orphan_marks_served"] == 1
+        assert bench_supersession(mgr, ["inconnu zzz"])["orphan_marks_served"] is None
 
 
 class TestBench:
