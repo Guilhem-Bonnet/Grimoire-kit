@@ -373,7 +373,9 @@ def grimoire_memory_store(text: str, user_id: str = "", project_path: str = ".")
 
 
 @mcp.tool(annotations=_reads(open_world=True))
-def grimoire_memory_search(query: str, user_id: str = "", limit: int = 5, project_path: str = ".") -> str:
+def grimoire_memory_search(
+    query: str, user_id: str = "", limit: int = 5, project_path: str = ".", include_superseded: bool = False,
+) -> str:
     """Search project memories by keyword or semantic similarity.
 
     Args:
@@ -381,6 +383,8 @@ def grimoire_memory_search(query: str, user_id: str = "", limit: int = 5, projec
         user_id: Optional user ID to filter results.
         limit: Maximum number of results (default: 5).
         project_path: Path to project root (default: current directory).
+        include_superseded: Also return memories replaced by a newer one
+            (metadata ``superseded_by``); hidden by default.
     """
     from grimoire.memory.manager import MemoryManager
 
@@ -391,7 +395,7 @@ def grimoire_memory_search(query: str, user_id: str = "", limit: int = 5, projec
         # Agents read through this tool. Fusing the vector and BM25 rankings
         # here is what makes a composed memory observable to them at all;
         # hybrid_search falls back to plain search when there is nothing to fuse.
-        entries = mgr.hybrid_search(query, user_id=user_id, limit=limit)
+        entries = mgr.hybrid_search(query, user_id=user_id, limit=limit, include_superseded=include_superseded)
         return json.dumps({
             "query": query,
             "results": [e.to_dict() for e in entries],
