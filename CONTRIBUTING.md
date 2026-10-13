@@ -329,7 +329,10 @@ normalise en `x.y.zrc1` dans les métadonnées de la wheel), et
 `tests/unit/test_version_sync.py` accepte cette forme parce qu'il lit le même
 prédicat que le garde de tag. Le job `publish-pypi` relance sans échouer sur un
 fichier déjà reçu (`skip-existing`) : après un téléversement interrompu, relancer
-les jobs en échec suffit à créer la release. La release GitHub est créée après la publication, et le
+les jobs en échec suffit à créer la release. Le `Makefile` n'a aucune voie manuelle vers PyPI : `make publish` refuse
+et renvoie à ce push de tag (un téléversement hors `publish.yml` contournerait
+les gardes, et `skip-existing` accepterait ensuite le fichier sans comparer son
+contenu). La release GitHub est créée après la publication, et le
 corps est la section du `CHANGELOG.md` que `gates` vient de valider
 (`scripts/changelog-section.py`) — rien n'est généré à partir de `git log`.
 

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import importlib.util
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -515,3 +516,62 @@ def test_rerun_after_a_partial_pypi_upload_still_creates_the_release() -> None:
     results = _simulate(stable=True, failing=rerun_fails)
     assert results["publish-pypi"] == "success"
     assert results["github-release"] == "success"
+
+
+# ── 9. Le Makefile n'ouvre pas une seconde voie vers PyPI ────────────────────
+#
+# `make release` annonçait « Then publish to PyPI: make publish », et la cible
+# `publish` lançait `twine upload dist/*` sans garde de stabilité, de tag sur
+# main, de CHANGELOG ni de test de la wheel. Un fichier ainsi envoyé serait en
+# outre sauté sans erreur par `skip-existing` de publish.yml.
+
+_MAKEFILE = _ROOT / "Makefile"
+
+
+def _makefile_code() -> str:
+    """Le Makefile sans ses lignes de commentaire (la doc peut nommer l'interdit)."""
+    lines = _MAKEFILE.read_text(encoding="utf-8").splitlines()
+    return "\n".join(line for line in lines if not line.lstrip().startswith("#"))
+
+
+def _recipe(target: str) -> str:
+    out: list[str] = []
+    active = False
+    for line in _makefile_code().splitlines():
+        if re.match(rf"^{re.escape(target)}\s*:", line):
+            active = True
+            continue
+        if active and line.startswith("\t"):
+            out.append(line)
+        elif active and line.strip():
+            break
+    return "\n".join(out)
+
+
+@pytest.mark.skipif(not _MAKEFILE.is_file(), reason="dépôt source uniquement")
+def test_makefile_never_uploads_to_pypi() -> None:
+    assert not re.search(r"\btwine\b", _makefile_code()), "le Makefile téléverse sur PyPI hors de publish.yml"
+
+
+@pytest.mark.skipif(not _MAKEFILE.is_file(), reason="dépôt source uniquement")
+def test_make_release_does_not_advertise_a_manual_publish() -> None:
+    recipe = _recipe("release")
+    assert recipe, "recette `release` introuvable"
+    assert not re.search(r"make\s+publish|publish to pypi", recipe, re.IGNORECASE), recipe
+
+
+@pytest.mark.skipif(not _MAKEFILE.is_file() or shutil.which("make") is None, reason="make absent")
+def test_make_publish_refuses_and_points_to_the_tag_path() -> None:
+    # Exécution réelle (`-n` n'exécute pas la recette, donc ne prouve pas le refus) ;
+    # PYTHON=true neutralise tout téléversement si une voie manuelle revenait.
+    run = subprocess.run(
+        ["make", "-f", str(_MAKEFILE), "PYTHON=true", "publish"],
+        cwd=_ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+        timeout=60,
+    )
+    assert run.returncode != 0, "make publish réussit : une voie manuelle reste ouverte"
+    assert "publish.yml" in run.stdout + run.stderr
