@@ -190,7 +190,7 @@ class TestMemorySearch:
         result = runner.invoke(app, ["memory", "search", "hello"])
         assert result.exit_code == 0
         assert "Hello world" in result.output
-        mock_manager.search_taxonomy.assert_called_once_with("hello", user_id="", limit=10, wing="", hall="", room="")
+        mock_manager.search_taxonomy.assert_called_once_with("hello", user_id="", limit=10, wing="", hall="", room="", include_superseded=False)
 
     def test_search_fuses_by_default_when_the_project_composes(self, mock_manager: MagicMock) -> None:
         """A project with both rankings reads from both without asking.
@@ -226,12 +226,12 @@ class TestMemorySearch:
     def test_search_with_limit(self, mock_manager: MagicMock) -> None:
         result = runner.invoke(app, ["memory", "search", "hello", "-n", "3"])
         assert result.exit_code == 0
-        mock_manager.search_taxonomy.assert_called_once_with("hello", user_id="", limit=3, wing="", hall="", room="")
+        mock_manager.search_taxonomy.assert_called_once_with("hello", user_id="", limit=3, wing="", hall="", room="", include_superseded=False)
 
     def test_search_with_user(self, mock_manager: MagicMock) -> None:
         result = runner.invoke(app, ["memory", "search", "hello", "-u", "bob"])
         assert result.exit_code == 0
-        mock_manager.search_taxonomy.assert_called_once_with("hello", user_id="bob", limit=10, wing="", hall="", room="")
+        mock_manager.search_taxonomy.assert_called_once_with("hello", user_id="bob", limit=10, wing="", hall="", room="", include_superseded=False)
 
     def test_search_no_results(self, mock_manager: MagicMock) -> None:
         mock_manager.search_taxonomy.return_value = []
