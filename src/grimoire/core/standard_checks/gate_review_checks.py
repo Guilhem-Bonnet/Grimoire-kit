@@ -66,8 +66,15 @@ def in_progress_content_checks(root: Path, profile: StandardProfile, task_id: st
     return tuple(result.checks)
 
 
-def review_state_content_checks(root: Path, profile: StandardProfile, task_id: str) -> tuple[StandardCheck, ...]:
-    """Constats de contenu pour *task_id*, mêmes règles que celles rendues par `standard verify`."""
+def review_state_content_checks(
+    root: Path, profile: StandardProfile, task_id: str, *, target_state: str = "review",
+) -> tuple[StandardCheck, ...]:
+    """Constats de contenu pour *task_id*, mêmes règles que celles rendues par `standard verify`.
+
+    La fraîcheur du graphe de code ne se juge qu'à la transition vers review :
+    pour une tâche acceptée ou livrée, un état du code postérieur à sa clôture
+    ne dit rien de sa preuve.
+    """
     try:
         from grimoire.core.standard_checks.evidence_journal import (
             regenerate_observed_inventory_section,
@@ -92,6 +99,7 @@ def review_state_content_checks(root: Path, profile: StandardProfile, task_id: s
     _verify_claim_ledger(root, profile, task_id, claim_ledger_result, suppress_v0=suppress_v0)
     checks.extend(claim_ledger_result.checks)
 
-    checks.extend(codegraph_fresh_checks(root))
+    if target_state == "review":
+        checks.extend(codegraph_fresh_checks(root))
 
     return tuple(checks)

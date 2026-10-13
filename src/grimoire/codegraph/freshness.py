@@ -13,8 +13,17 @@ recalcule à chaque lecture, sans rien geler par hook.
   comparé : ``reason`` distingue ``no_receipt`` (rien n'a jamais été
   indexé) des cas où un reçu existe mais ne peut pas être lu.
 
-Limite : l'empreinte porte sur le contenu des ``.py`` du répertoire source,
-pas sur la version de l'analyseur ni sur les dépendances installées.
+Le reçu décrit la dernière indexation, quelle qu'en soit la cible
+(``target``) : ``memory`` pour l'indexation en mémoire de l'outil MCP,
+``neo4j`` pour la projection de ``memory graph sync-code``. Une seule liste
+de fichiers sert à l'empreinte et à l'indexation, avec les exclusions
+enregistrées dans le reçu, appliquées au chemin sous la source (jamais au
+chemin absolu du projet).
+
+Limite : l'empreinte porte sur le contenu des ``.py`` des sources, pas sur la
+version de l'analyseur ni sur les dépendances installées. Un nom de fichier
+non UTF-8 est comparé octet pour octet (``surrogateescape``) et affiché
+échappé.
 """
 
 from __future__ import annotations
@@ -22,6 +31,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from collections.abc import Collection, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -34,8 +44,11 @@ __all__ = [
     "RECEIPT_PATH",
     "Freshness",
     "check_freshness",
+    "collect_sources",
     "fingerprint_sources",
+    "hash_files",
     "record_index",
+    "record_projection",
 ]
 
 #: Reçu d'indexation, relatif à la racine du projet.
@@ -43,8 +56,9 @@ RECEIPT_PATH = Path("_grimoire-output/codegraph/receipt.json")
 
 _SCHEMA = 1
 
-#: Dossiers jamais lus : l'indexation et l'empreinte partagent cette liste,
-#: sinon un fichier compté d'un côté seulement ferait mentir le verdict.
+#: Dossiers jamais lus par défaut. Le reçu garde l'ensemble réellement utilisé :
+#: l'indexation et l'empreinte partagent la même liste de fichiers, sinon un
+#: fichier compté d'un côté seulement ferait mentir le verdict.
 EXCLUDED_DIRS = frozenset({
     "__pycache__", ".venv", "venv", ".git", "node_modules", "_grimoire-output",
     ".pytest_cache", ".ruff_cache", ".mypy_cache", ".tox", "build", "dist",
@@ -63,12 +77,14 @@ class Freshness:
     added: tuple[str, ...] = field(default_factory=tuple)
     modified: tuple[str, ...] = field(default_factory=tuple)
     removed: tuple[str, ...] = field(default_factory=tuple)
+    target: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "verdict": self.verdict,
             "reason": self.reason,
             "source_dir": self.source_dir,
+            "target": self.target,
             "recorded_fingerprint": self.recorded_fingerprint,
             "current_fingerprint": self.current_fingerprint,
             "added": list(self.added),
@@ -77,34 +93,69 @@ class Freshness:
         }
 
 
-def _file_hashes(source: Path) -> dict[str, str]:
-    """``{chemin relatif posix: sha256 du contenu}`` des ``.py`` sous *source*."""
-    hashes: dict[str, str] = {}
-    for dirpath, dirnames, filenames in os.walk(source):
-        dirnames[:] = [d for d in dirnames if d not in EXCLUDED_DIRS]
-        for name in filenames:
-            if not name.endswith(".py"):
-                continue
-            path = Path(dirpath) / name
-            rel = path.relative_to(source).as_posix()
-            hashes[rel] = hashlib.sha256(path.read_bytes()).hexdigest()
-    return hashes
+def _key(path: Path, base: Path) -> str:
+    """Clé posix de *path* relative à *base* (absolue si *path* en sort)."""
+    try:
+        return path.relative_to(base).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def _shown(rel: str) -> str:
+    """Nom affichable : un octet non UTF-8 est écrit ``\\xNN`` au lieu d'un substitut."""
+    return rel.encode("utf-8", "surrogateescape").decode("utf-8", "backslashreplace")
+
+
+def collect_sources(base: Path, sources: Iterable[Path], exclude: Collection[str] = EXCLUDED_DIRS) -> dict[str, Path]:
+    """``{clé relative à *base*: fichier}`` des ``.py`` de *sources* (fichiers ou dossiers).
+
+    Une seule liste pour l'empreinte et pour l'indexation. Les exclusions
+    portent sur les noms de dossiers *sous* chaque source : le dossier où vit
+    le projet (``build/``, ``venv/`` plus haut dans l'arborescence) n'y compte pas.
+    """
+    found: dict[str, Path] = {}
+    for source in sources:
+        if source.is_file():
+            if source.suffix == ".py":
+                found[_key(source, base)] = source
+            continue
+        for dirpath, dirnames, filenames in os.walk(source):
+            dirnames[:] = [d for d in dirnames if d not in exclude]
+            for name in filenames:
+                if name.endswith(".py"):
+                    path = Path(dirpath) / name
+                    found[_key(path, base)] = path
+    return found
+
+
+def hash_files(files: dict[str, Path]) -> dict[str, str]:
+    """``{clé: sha256 du contenu}``."""
+    return {key: hashlib.sha256(path.read_bytes()).hexdigest() for key, path in files.items()}
 
 
 def _combine(hashes: dict[str, str]) -> str:
     digest = hashlib.sha256()
     for rel in sorted(hashes):
-        digest.update(f"{rel}\0{hashes[rel]}\n".encode())
+        digest.update(f"{rel}\0{hashes[rel]}\n".encode("utf-8", "surrogateescape"))
     return digest.hexdigest()
 
 
 def fingerprint_sources(source: Path) -> str:
     """Empreinte des sources Python de *source* (chemins et contenus)."""
-    return _combine(_file_hashes(source))
+    return _combine(hash_files(collect_sources(source, [source])))
 
 
 def _resolve_source(root: Path, source_dir: str) -> Path:
     return (root / source_dir).resolve()
+
+
+def _write_receipt(root: Path, receipt: dict[str, Any]) -> None:
+    target = root / RECEIPT_PATH
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_suffix(".json.tmp")
+    # ensure_ascii (défaut) : un nom non UTF-8 s'écrit en échappement JSON ASCII, jamais en octets invalides.
+    tmp.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    tmp.replace(target)
 
 
 def record_index(root: Path, source_dir: str = "src") -> tuple[CodeGraph, dict[str, Any]]:
@@ -112,27 +163,59 @@ def record_index(root: Path, source_dir: str = "src") -> tuple[CodeGraph, dict[s
 
     Le reçu est écrit après l'indexation, avec les hachages lus avant elle :
     un fichier modifié pendant l'indexation rend le verdict ``stale`` au
-    lieu d'être déclaré frais.
+    lieu d'être déclaré frais. Cible ``memory`` : le graphe n'est gardé que
+    par l'appelant, rien n'est écrit dans Neo4j.
     """
     root = root.resolve()
     source = _resolve_source(root, source_dir)
-    hashes = _file_hashes(source)
+    files = collect_sources(source, [source])
+    hashes = hash_files(files)
     graph = CodeGraph()
-    graph.index_directory(source, exclude=set(EXCLUDED_DIRS))
+    for path in files.values():
+        graph.index_file(path, root=str(source))
     receipt: dict[str, Any] = {
         "schema": _SCHEMA,
+        "target": "memory",
         "source_dir": source_dir,
+        "exclude": sorted(EXCLUDED_DIRS),
         "fingerprint": _combine(hashes),
         "files": hashes,
         "stats": graph.stats(),
         "indexed_at": datetime.now(UTC).isoformat(),
     }
-    target = root / RECEIPT_PATH
-    target.parent.mkdir(parents=True, exist_ok=True)
-    tmp = target.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    tmp.replace(target)
+    _write_receipt(root, receipt)
     return graph, receipt
+
+
+def record_projection(
+    root: Path,
+    sources: Iterable[Path],
+    exclude: Collection[str],
+    hashes: dict[str, str],
+    stats: dict[str, int],
+    *,
+    target: str = "neo4j",
+) -> dict[str, Any]:
+    """Écrit le reçu d'une projection (``memory graph sync-code``) une fois qu'elle a réussi.
+
+    *hashes* est calculé par l'appelant avant l'indexation, sur la liste de
+    fichiers que :func:`collect_sources` a rendue pour ces *sources* et ces
+    *exclude* ; les clés sont relatives à *root*.
+    """
+    root = root.resolve()
+    receipt: dict[str, Any] = {
+        "schema": _SCHEMA,
+        "target": target,
+        "source_dir": ".",
+        "sources": [_key(s if s.is_absolute() else root / s, root) for s in sources],
+        "exclude": sorted(exclude),
+        "fingerprint": _combine(hashes),
+        "files": hashes,
+        "stats": stats,
+        "indexed_at": datetime.now(UTC).isoformat(),
+    }
+    _write_receipt(root, receipt)
+    return receipt
 
 
 def check_freshness(root: Path) -> Freshness:
@@ -148,25 +231,30 @@ def check_freshness(root: Path) -> Freshness:
         recorded = str(receipt["fingerprint"])
         recorded_files = {str(k): str(v) for k, v in dict(receipt["files"]).items()}
         source_dir = str(receipt["source_dir"])
+        target = str(receipt.get("target", "memory"))
+        exclude = {str(e) for e in receipt.get("exclude", EXCLUDED_DIRS)}
+        raw_sources = receipt.get("sources")
+        sources = None if raw_sources is None else [str(s) for s in raw_sources]
     except (OSError, ValueError, KeyError, TypeError):
         return Freshness(verdict="unverified", reason="receipt_unreadable")
-    source = _resolve_source(root, source_dir)
-    if not source.is_dir():
+    base = _resolve_source(root, source_dir)
+    if sources is None and not base.is_dir():
         return Freshness(verdict="unverified", reason="source_dir_missing", source_dir=source_dir,
-                         recorded_fingerprint=recorded)
+                         recorded_fingerprint=recorded, target=target)
+    scan = [base] if sources is None else [root / s for s in sources]
     try:
-        current_files = _file_hashes(source)
-    except OSError:
+        current_files = hash_files(collect_sources(base, scan, exclude))
+        current = _combine(current_files)
+    except (OSError, UnicodeError):
         return Freshness(verdict="unverified", reason="source_unreadable", source_dir=source_dir,
-                         recorded_fingerprint=recorded)
-    current = _combine(current_files)
-    added = tuple(sorted(set(current_files) - set(recorded_files)))
-    removed = tuple(sorted(set(recorded_files) - set(current_files)))
+                         recorded_fingerprint=recorded, target=target)
+    added = tuple(sorted(_shown(r) for r in set(current_files) - set(recorded_files)))
+    removed = tuple(sorted(_shown(r) for r in set(recorded_files) - set(current_files)))
     modified = tuple(sorted(
-        rel for rel in set(current_files) & set(recorded_files) if current_files[rel] != recorded_files[rel]
+        _shown(rel) for rel in set(current_files) & set(recorded_files) if current_files[rel] != recorded_files[rel]
     ))
     verdict = "current" if current == recorded else "stale"
     return Freshness(
         verdict=verdict, source_dir=source_dir, recorded_fingerprint=recorded,
-        current_fingerprint=current, added=added, modified=modified, removed=removed,
+        current_fingerprint=current, added=added, modified=modified, removed=removed, target=target,
     )
