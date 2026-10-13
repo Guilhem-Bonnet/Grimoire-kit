@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import importlib.util
+from pathlib import Path
+
 from grimoire.missions.schemas import MissionTask, RiskProfile, TaskState, TaskType
 from grimoire.missions.verifiability import Verifiability, as_dict, classify, explain
 
@@ -136,28 +139,39 @@ def test_validation_contre_un_schema_reste_mecanique() -> None:
 # --- W3-05 : jeu étiqueté, zéro faux V0 mesuré
 
 
-def test_corpus_etiquete_taille_et_langues() -> None:
-    from tests.unit.missions.verifiability_corpus import CORPUS
+def _corpus() -> list[tuple[str, str, str]]:
+    # tests/ n'est pas un package : on charge le jeu par chemin.
+    spec = importlib.util.spec_from_file_location(
+        "verifiability_corpus", Path(__file__).with_name("verifiability_corpus.py")
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return list(module.CORPUS)
 
-    assert len(CORPUS) >= 100
-    assert sum(1 for _, langue, _ in CORPUS if langue == "fr") >= 40
-    assert sum(1 for _, langue, _ in CORPUS if langue == "en") >= 40
-    assert {classe for _, _, classe in CORPUS} == {"V0", "V1", "V2"}
+
+def test_corpus_etiquete_taille_et_langues() -> None:
+    corpus = _corpus()
+
+    assert len(corpus) >= 100
+    assert sum(1 for _, langue, _ in corpus if langue == "fr") >= 40
+    assert sum(1 for _, langue, _ in corpus if langue == "en") >= 40
+    assert {classe for _, _, classe in corpus} == {"V0", "V1", "V2"}
 
 
 def test_corpus_etiquete_zero_faux_v0() -> None:
-    from tests.unit.missions.verifiability_corpus import CORPUS
+    corpus = _corpus()
 
     faux_v0 = [
-        t for t, _, attendu in CORPUS if attendu != "V0" and classify(tache(acceptance=(t,))) is Verifiability.V0
+        t for t, _, attendu in corpus if attendu != "V0" and classify(tache(acceptance=(t,))) is Verifiability.V0
     ]
     assert faux_v0 == []
 
 
 def test_corpus_etiquete_classe_exacte() -> None:
-    from tests.unit.missions.verifiability_corpus import CORPUS
+    corpus = _corpus()
 
-    ecarts = [(t, attendu, classify(tache(acceptance=(t,))).value) for t, _, attendu in CORPUS]
+    ecarts = [(t, attendu, classify(tache(acceptance=(t,))).value) for t, _, attendu in corpus]
     assert [e for e in ecarts if e[1] != e[2]] == []
 
 
