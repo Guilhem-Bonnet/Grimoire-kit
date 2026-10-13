@@ -225,9 +225,9 @@ def atomic_write(path: str | os.PathLike[str], data: str | bytes) -> None:
     except OSError:
         mode = None
     tmp = target.with_name(f".{target.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
-    fd = os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_BINARY", 0), 0o666)
     try:
-        with os.fdopen(fd, "wb") as fh:
+        # « xb » : création exclusive, 0o666 filtré par l'umask courant (comme open()).
+        with open(tmp, "xb") as fh:
             if mode is not None and hasattr(os, "fchmod"):
                 os.fchmod(fh.fileno(), mode)
             fh.write(payload)
