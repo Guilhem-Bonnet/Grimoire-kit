@@ -2690,6 +2690,10 @@
    "version": "3.35.4",
    "path": "framework/workflows/subagent-orchestration.md"
   },
+  "b40c2f2047d744517fee9ad89dbacc6e5c8d03a5c53b6fab98920ea81a020c40": {
+   "version": "3.62.1",
+   "path": "framework/memory/contradiction-log.tpl.md"
+  },
   "b420389b2676dcf0e1a1c1ea511cd0eda268eb669aa5579c6d4f27f3fcabe160": {
    "version": "3.24.0",
    "path": "archetypes/meta/agents/agent-optimizer.md"
