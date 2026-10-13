@@ -231,7 +231,8 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-addopts = "-q --tb=short -x"
+# Pas de `-x` ici : il masquait chaque échec derrière le premier, y compris en CI (D-10).
+addopts = "-q --tb=short"
 markers = [
     "slow: marks tests as slow (deselect with -m 'not slow')",
     "integration: marks tests requiring external services (network, Ollama, Qdrant)",

@@ -35,11 +35,24 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("playwright.sync_api", reason="playwright absent — harnais e2e ignoré")
+from ._strict import promote_skip, strict_mode
+
+if strict_mode():
+    # En CI le job installe Playwright : son absence est un échec, pas un skip.
+    import playwright.sync_api  # noqa: F401
+else:
+    pytest.importorskip("playwright.sync_api", reason="playwright absent — harnais e2e ignoré")
 
 from playwright.sync_api import Browser, Page, sync_playwright
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) -> Iterator[None]:
+    """Mode strict (``GRIMOIRE_E2E_STRICT=1``) : un skip d'exécution devient un échec."""
+    outcome = yield
+    promote_skip(outcome.get_result())
 
 #: Le vrai répertoire personnel, capturé à l'import de CE fichier — et non
 #: réimporté depuis ``tests/conftest.py``. Sans ``tests/__init__.py``, pytest
