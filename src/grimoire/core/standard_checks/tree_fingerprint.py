@@ -94,7 +94,7 @@ def _run_git(root: Path, *args: str) -> str | None:
             timeout=_GIT_TIMEOUT_S,
             check=False,
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except (OSError, subprocess.TimeoutExpired):  # silent-ok — git indisponible : None, repli filesystem
         return None
     if completed.returncode != 0:
         return None
@@ -125,7 +125,7 @@ def _stat_entries(root: Path, rel_path: str) -> list[str]:
             continue
         try:
             stat = path.stat()
-        except OSError:
+        except OSError:  # silent-ok — fichier disparu entre listage et stat : hors empreinte
             continue
         entries.append(f"{rel.as_posix()}\t{stat.st_size}\t{stat.st_mtime_ns}")
     return entries
@@ -160,7 +160,7 @@ def _fs_fingerprint(root: Path) -> str:
             continue
         try:
             stat = path.stat()
-        except OSError:
+        except OSError:  # silent-ok — fichier disparu entre listage et stat : hors empreinte
             continue
         entries.append(f"{rel.as_posix()}\t{stat.st_size}\t{stat.st_mtime_ns}")
     digest = hashlib.sha256()
