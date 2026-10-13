@@ -1150,6 +1150,17 @@ def test_gate_check_surfaces_an_unproven_passed_criterion_without_failing(tmp_pa
         encoding="utf-8",
     )
 
+    ledger = tmp_path / "_grimoire-output/evidence/bootstrap/claim-ledger.md"
+    ledger.write_text(
+        ledger.read_text(encoding="utf-8")
+        .replace(
+            "| CL-001 |  | fait |  | hypothèse | faible | vérifier |",
+            "| CL-001 | a | fait | src/x | prouvé | haute | utiliser |",
+        )
+        .replace("| Affirmations bloquantes non prouvées |  |", "| Affirmations bloquantes non prouvées | 0 |"),
+        encoding="utf-8",
+    )
+
     result = check_evidence_gates(tmp_path, task_id="bootstrap", target_state="accepted")
 
     assert any(check.id == "acceptance.passed_without_test_run" for check in result.checks)
