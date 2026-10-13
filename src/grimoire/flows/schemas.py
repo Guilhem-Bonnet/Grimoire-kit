@@ -233,6 +233,10 @@ class ResumeOutcome:
     #: ``node_id``/``contract`` désignent toujours ce que le run attend.
     replay: bool = False
     replay_of: str | None = None
+    #: Ce que cette reprise a complété d'une écriture qu'un crash avait
+    #: interrompue (W1-03b) — vide dans le cas normal. Une réparation n'est
+    #: jamais silencieuse.
+    repaired: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -243,6 +247,7 @@ class ResumeOutcome:
             "contract": self.contract.to_dict() if self.contract else None,
             "replay": self.replay,
             "replay_of": self.replay_of,
+            "repaired": list(self.repaired),
         }
 
 
