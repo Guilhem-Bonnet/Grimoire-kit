@@ -242,8 +242,7 @@ LocalRegistry (local.py)
 **Workflows CI :**
 - `ci-sdk.yml` : lint + mypy + tests Python 3.12/3.13
 - `ci-validate.yml` : bash, shellcheck, YAML, DNA, doctor, context-guard, tests framework
-- `publish.yml` : publication PyPI sur tag `v*`
-- `release.yml` : création de release GitHub
+- `publish.yml` : voie unique de release sur tag `v*` — garde-fous, build, smoke test, PyPI (tag stable), release GitHub (notes = section du CHANGELOG)
 - `codeql.yml` : analyse de sécurité
 - `dependabot.yml` : mises à jour automatiques des dépendances
 

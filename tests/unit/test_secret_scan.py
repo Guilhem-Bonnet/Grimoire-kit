@@ -83,12 +83,15 @@ def test_excessive_permissions_fail(tmp_path: Path, content: str) -> None:
 
 
 def test_allowlisted_write_passes(tmp_path: Path) -> None:
-    content = "name: x\non: [push]\npermissions:\n  contents: write\n  id-token: write\njobs: {}\n"
+    content = (
+        "name: x\non: [push]\njobs:\n  publish-pypi:\n    runs-on: x\n    permissions:\n      id-token: write\n"
+        "    steps: []\n  github-release:\n    runs-on: x\n    permissions:\n      contents: write\n    steps: []\n"
+    )
     assert audit(tmp_path, content, "publish.yml").returncode == 0
 
 
 def test_allowlist_does_not_cover_other_permissions(tmp_path: Path) -> None:
-    content = "name: x\non: [push]\npermissions:\n  contents: write\n  packages: write\njobs: {}\n"
+    content = "name: x\non: [push]\njobs:\n  publish-pypi:\n    runs-on: x\n    permissions:\n      id-token: write\n      packages: write\n    steps: []\n"
     assert audit(tmp_path, content, "publish.yml").returncode == 1
 
 

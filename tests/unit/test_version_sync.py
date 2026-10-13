@@ -9,11 +9,26 @@ on any divergence.
 
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
 
 from grimoire.__version__ import __version__
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _is_release_version(version: str) -> bool:
+    """La graphie de version du garde de tag (``scripts/check-release-tag.py``), pas une copie.
+
+    Une version que ce test refuse ne peut jamais être taguée ; une version que
+    le garde refuse ne doit pas passer ici non plus. Une pré-version
+    (``3.63.0-rc1``) est valide dans les deux.
+    """
+    spec = importlib.util.spec_from_file_location("check_release_tag", _REPO_ROOT / "scripts" / "check-release-tag.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return bool(module.is_release_version(version))
 
 
 def test_version_txt_matches_package_version() -> None:
@@ -23,6 +38,6 @@ def test_version_txt_matches_package_version() -> None:
 
 
 def test_version_is_semver_like() -> None:
-    parts = __version__.split(".")
-    assert len(parts) == 3
-    assert all(part.isdigit() for part in parts)
+    assert _is_release_version(__version__), (
+        f"{__version__!r} n'a pas la forme X.Y.Z ou X.Y.Z-<suffixe> que scripts/check-release-tag.py laisse partir"
+    )

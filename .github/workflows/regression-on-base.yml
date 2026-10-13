@@ -1,0 +1,76 @@
+name: Regression test on base
+
+# Une PR `fix:` doit apporter un test qui échoue sur son point de départ
+# (scripts/check-regression-on-base.py). Les actions sont épinglées par SHA.
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  replay:
+    name: "Replay regression test on base"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Replay PR tests on base_sha
+        env:
+          # Via l'environnement, jamais interpolé dans le script (injection).
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MERGE_SHA: ${{ github.sha }}
+        # Le garde est lu depuis base.sha : une PR qui l'affaiblit ne peut pas
+        # se faire valider par sa propre version. Un base.sha absent du dépôt
+        # fait échouer le pas (jamais pris pour un amorçage). Garde absent de
+        # base.sha : on n'accepte l'amorçage que si la PR l'ajoute elle-même ;
+        # sinon il a été renommé ou supprimé sur main et le pas échoue. En
+        # amorçage il n'y a pas de version de base à protéger : le garde de la
+        # tête tourne, une PR `fix:` n'échappe donc pas au rejeu.
+        # La tête et les tests rejoués viennent du commit de fusion (github.sha),
+        # celui que actions/checkout extrait : une branche en retard sur main
+        # n'est pas validée contre un code que main a déjà changé.
+        # base.sha peut être en retard sur main (D14-T4-1) : rejouer les tests
+        # fusionnés sur ce vieux code donnerait un faux rouge. Le garde remplace
+        # alors la base par le premier parent du commit de fusion et le dit dans
+        # le résumé ; ce pas ne compare pas BASE_SHA et MERGE_SHA lui-même.
+        run: |
+          guard=scripts/check-regression-on-base.py
+          if ! git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
+            echo "base.sha $BASE_SHA absent du dépôt : rejeu impossible" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          if git cat-file -e "$BASE_SHA:$guard" 2>/dev/null; then
+            git show "$BASE_SHA:scripts/check-regression-on-base.py" > "$RUNNER_TEMP/guard.py"
+            guard_path="$RUNNER_TEMP/guard.py"
+          elif [ -n "$(git diff --diff-filter=A --name-only "$BASE_SHA...$HEAD_SHA" -- "$guard")" ]; then
+            echo "garde absent de base.sha (amorçage) : la PR l'introduit, c'est sa version qui juge" >> "$GITHUB_STEP_SUMMARY"
+            guard_path="$guard"
+          else
+            echo "garde absent de base.sha et non ajouté par la PR : renommé ou supprimé sur main ?" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          python "$guard_path" --repo . \
+            --base-sha "$BASE_SHA" \
+            --head-sha "$HEAD_SHA" \
+            --verify-sha "$MERGE_SHA"

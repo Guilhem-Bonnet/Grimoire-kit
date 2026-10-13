@@ -602,7 +602,7 @@ def _drive(
             return _outcome(executor, run_id, status="waiting_host", node_id=contract.node_id, contract=contract)
         if result.output is None:
             return _outcome(executor, run_id, status="blocked", node_id=contract.node_id, contract=contract)
-        outcome: ResumeOutcome = engine.resume(run_id, output=result.output, executor=executor)
+        outcome: ResumeOutcome = engine.resume(run_id, output=result.output, executor=executor, allow_replay=False)
         if not outcome.ok:
             return _outcome(executor, run_id, status="blocked", node_id=outcome.node_id, faults=outcome.faults)
         if outcome.finished:

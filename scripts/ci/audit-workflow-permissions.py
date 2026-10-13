@@ -63,9 +63,11 @@ WRITE_ALLOWLIST: dict[str, dict[str, set[str]]] = {
     "codeql-analysis.yml": {WORKFLOW_SCOPE: {"security-events"}},  # envoie les alertes
     "cleanup-branches.yml": {WORKFLOW_SCOPE: {"contents"}},  # supprime la branche fusionnée
     "docs.yml": {"deploy": {"pages", "id-token"}},  # déploiement GitHub Pages (OIDC)
-    "publish.yml": {WORKFLOW_SCOPE: {"contents", "id-token"}},  # publication PyPI (OIDC)
+    "publish.yml": {  # voie de release unique : PyPI (OIDC) puis release GitHub
+        "publish-pypi": {"id-token"},
+        "github-release": {"contents"},
+    },
     "release-drafter.yml": {WORKFLOW_SCOPE: {"contents", "pull-requests"}},
-    "release.yml": {WORKFLOW_SCOPE: {"contents"}},  # crée la release
     "stale.yml": {WORKFLOW_SCOPE: {"issues", "pull-requests"}},  # ferme les inactifs
     "weekly-bench.yml": {WORKFLOW_SCOPE: {"contents", "issues"}},  # pousse le rapport, ouvre l'issue
 }
