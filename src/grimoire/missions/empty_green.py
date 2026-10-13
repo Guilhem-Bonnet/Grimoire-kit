@@ -17,15 +17,36 @@ une sortie, ``go test -json`` enferme la ligne ``ok`` dans un champ JSON, et un
 vrai rouge peut citer un motif dans l'identifiant d'un test. Les orchestrateurs
 de monorepo (turbo, ``pnpm -r``, nx, lerna) préfixent chaque ligne
 (``api:test: ``, ``packages/api test: ``) : les preuves ancrées en début de
-ligne acceptent ce préfixe. Une sortie sans motif reconnu rend ``None`` :
-comportement inchangé pour une commande dont l'exécuteur est inconnu, y compris
-un rouge d'un exécuteur hors liste mêlé à un motif de vide d'un autre outil
+ligne acceptent ce préfixe. Une sortie sans motif reconnu rend ``None``.
+
+Deux garde-fous de lecture. La sortie est lue **sans ses séquences ANSI** : vitest,
+jest et pytest colorent dès que ``CI`` ou ``FORCE_COLOR`` est posé, et le ``m`` d'un
+``\\x1b[32m`` colle au chiffre qui suit (``\\x1b[32m2 passed``), ce qui défait ``\\b`` et
+les ancres de début de ligne. Et le diagnostic ne vaut que pour une commande qui invoque
+un exécuteur reconnu (:func:`invokes_test_runner`) : une commande arbitraire qui imprime
+``Ran 0 tests`` ou ``No tests found`` garde le résultat qu'elle avait avant W1-04,
+y compris quand un ``expect_stdout_contains`` cite ce motif. Comportement inchangé aussi
+pour un rouge d'un exécuteur hors liste mêlé à un motif de vide d'un autre outil
 (limite assumée, voir le CHANGELOG).
 """
 
 from __future__ import annotations
 
 import re
+
+#: Séquences CSI (couleurs SGR, curseur) que les exécuteurs impriment sous ``CI`` ou ``FORCE_COLOR``.
+_ANSI_CSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
+
+#: Exécuteurs de tests reconnus dans une commande (un jeton nu, hors suffixe de nom ou de fichier :
+#: ``vitest.config.ts`` ou ``my-jest`` ne sont pas ``vitest`` / ``jest``).
+_RUNNER_COMMAND = re.compile(
+    r"(?<![\w-])(?:"
+    r"(?:pytest|py\.test|vitest|jest|mocha|rspec|phpunit|unittest|turbo|nx|lerna|tox|nox)"
+    r"|go\s+test|cargo\s+(?:test|nextest)|dotnet\s+test|bun\s+test|rake\s+test|manage\.py\s+test"
+    r"|node\b[^;&|\n]*--test"
+    r"|(?:npm|pnpm|yarn)\b[^;&|\n]*?\btest\b"
+    r")(?![\w.-])"
+)
 
 #: Préfixe de ligne optionnel des orchestrateurs de monorepo (``api:test: ``, ``packages/api test: ``,
 #: ``[0] ``) : tout jusqu'au premier ``: `` ou ``] `` de la ligne.
@@ -83,9 +104,14 @@ _PROOF_PATTERNS = (
 )
 
 
+def invokes_test_runner(cmd: str) -> bool:
+    """Vrai si *cmd* invoque un exécuteur de tests reconnu (pytest, vitest, go test, npm test, turbo...)."""
+    return _RUNNER_COMMAND.search(cmd) is not None
+
+
 def has_execution_proof(output: str) -> bool:
     """Vrai si *output* prouve qu'au moins un test a tourné, quel que soit l'exécuteur."""
-    output = _GO_VIDE_VERBOSE.sub("", output)
+    output = _GO_VIDE_VERBOSE.sub("", _ANSI_CSI.sub("", output))
     return any(pattern.search(output) for pattern in _PROOF_PATTERNS)
 
 
@@ -95,6 +121,7 @@ def classify_empty_green(output: str) -> str | None:
     Toute preuve d'exécution (:func:`has_execution_proof`) l'emporte sur un motif
     « rien exécuté » : un test qui a tourné fait un vert ou un rouge, jamais un vide.
     """
+    output = _ANSI_CSI.sub("", output)
     if has_execution_proof(output):
         return None
     if _NO_FILES_VITEST.search(output):

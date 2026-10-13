@@ -17,11 +17,21 @@ from grimoire.missions.dispatch import _classify_unrunnable, _run_checks
 from grimoire.missions.empty_green import has_execution_proof
 
 
-def _check(tmp_path: Path, printed: str, *, stream: str = "stdout"):
-    """Un vrai ``--check`` qui imprime *printed* sur *stream* et sort en 0."""
+def _cmd(printed: str, *, runner: str = "vitest run", exit_code: int = 0, stream: str = "stdout") -> str:
+    """Une commande qui invoque *runner* (reconnu par son nom) et en imite la sortie.
+
+    L'exécuteur est une fonction shell du même nom : le diagnostic de vert vide ne s'applique
+    qu'aux commandes dont l'exécuteur est reconnu (W1-04-K1-02), un simple ``printf`` ne
+    l'exercerait plus.
+    """
     redirect = " >&2" if stream == "stderr" else ""
-    cmd = f"printf %s {shlex.quote(printed)}{redirect}"
-    (result,) = _run_checks((cmd,), project_root=tmp_path)
+    name = runner.split()[0]
+    return f"{name}() {{ printf %s {shlex.quote(printed)}{redirect}; return {exit_code}; }}; {runner}"
+
+
+def _check(tmp_path: Path, printed: str, *, stream: str = "stdout", runner: str = "vitest run"):
+    """Un vrai ``--check`` qui invoque *runner*, imprime *printed* sur *stream* et sort en 0."""
+    (result,) = _run_checks((_cmd(printed, runner=runner, stream=stream),), project_root=tmp_path)
     return result
 
 
@@ -76,7 +86,7 @@ def test_une_execution_reelle_reste_verte(tmp_path: Path, label: str, printed: s
 
 
 def test_une_commande_sans_executeur_reconnu_garde_son_comportement(tmp_path: Path) -> None:
-    ok = _check(tmp_path, "tout va bien\n")
+    (ok,) = _run_checks(("printf %s 'tout va bien'",), project_root=tmp_path)
     assert ok.ok is True and ok.unrunnable_reason is None
     assert _classify_unrunnable("make check", 0, "tout va bien", "") is None
     assert _classify_unrunnable("make check", 1, "boom", "") is None
@@ -144,7 +154,7 @@ def test_un_vrai_rouge_qui_cite_un_motif_de_vide_reste_un_rouge(tmp_path: Path) 
     )
     assert _classify_unrunnable("pytest tests/unit/missions", 1, out, "") is None
 
-    (result,) = _run_checks((f"printf %s {shlex.quote(out)}; exit 1",), project_root=tmp_path)
+    (result,) = _run_checks((_cmd(out, runner="pytest tests", exit_code=1),), project_root=tmp_path)
     assert result.exit_code == 1
     assert result.unrunnable_reason is None
     assert result.ok is False
@@ -191,7 +201,7 @@ def test_un_binaire_cargo_avorte_reste_un_rouge(output: str, exit_code: int) -> 
 
 
 def test_un_binaire_cargo_avorte_via_un_vrai_check_reste_un_rouge(tmp_path: Path) -> None:
-    (result,) = _run_checks((f"printf %s {shlex.quote(_CARGO_AVORTE)}; exit 101",), project_root=tmp_path)
+    (result,) = _run_checks((_cmd(_CARGO_AVORTE, runner="cargo test", exit_code=101),), project_root=tmp_path)
 
     assert result.exit_code == 101
     assert result.unrunnable_reason is None
@@ -274,7 +284,7 @@ _PNPM_MOCHA_VIDE = "packages/web test: No test files found...\n"
 def test_une_preuve_prefixee_par_un_orchestrateur_de_monorepo_reste_une_preuve(
     tmp_path: Path, label: str, printed: str, exit_code: int
 ) -> None:
-    (result,) = _run_checks((f"printf %s {shlex.quote(printed)}; exit {exit_code}",), project_root=tmp_path)
+    (result,) = _run_checks((_cmd(printed, runner="pnpm -r test", exit_code=exit_code),), project_root=tmp_path)
 
     assert result.exit_code == exit_code
     assert result.unrunnable_reason is None, label
@@ -333,7 +343,7 @@ _MINITEST_ROUGE = "3 runs, 5 assertions, 1 failures, 0 errors, 0 skips\n"
 def test_un_executeur_hors_de_la_liste_d_origine_reste_une_preuve(
     tmp_path: Path, label: str, printed: str, exit_code: int
 ) -> None:
-    (result,) = _run_checks((f"printf %s {shlex.quote(printed)}; exit {exit_code}",), project_root=tmp_path)
+    (result,) = _run_checks((_cmd(printed, runner="pnpm -r test", exit_code=exit_code),), project_root=tmp_path)
 
     assert result.exit_code == exit_code
     assert result.unrunnable_reason is None, label
@@ -346,3 +356,154 @@ def test_un_executeur_hors_de_la_liste_d_origine_reste_une_preuve(
 )
 def test_un_decompte_nul_hors_liste_n_est_pas_une_preuve(printed: str) -> None:
     assert has_execution_proof(printed) is False
+
+
+# W1-04-K1-01 : sous ``CI=true`` (ou ``FORCE_COLOR``), vitest, jest et pytest colorent leur sortie ;
+# le ``m`` de la séquence SGR colle au chiffre (``\x1b[32m2 passed``) et un ``\b`` ne s'y arrête plus.
+_ESC_VITEST_OK = (
+    " \x1b[2m Test Files \x1b[22m \x1b[1m\x1b[32m1 passed\x1b[39m\x1b[22m\x1b[90m (1)\x1b[39m\n"
+    "      \x1b[2m Tests \x1b[22m \x1b[1m\x1b[32m2 passed\x1b[39m\x1b[22m\x1b[90m (2)\x1b[39m\n"
+)
+_ESC_VITEST_ROUGE = (
+    " \x1b[2m Test Files \x1b[22m \x1b[1m\x1b[31m1 failed\x1b[39m\x1b[22m\x1b[90m (1)\x1b[39m\n"
+    "      \x1b[2m Tests \x1b[22m \x1b[1m\x1b[31m1 failed\x1b[39m\x1b[22m\x1b[2m | \x1b[22m"
+    "\x1b[1m\x1b[32m1 passed\x1b[39m\x1b[22m\x1b[90m (2)\x1b[39m\n"
+)
+_ESC_VITEST_VIDE = "\x1b[33mNo test files found, exiting with code 1\x1b[39m\n"
+_ESC_JEST_OK = "\x1b[1mTests:\x1b[22m       \x1b[1m\x1b[32m3 passed\x1b[39m\x1b[22m, 3 total\n"
+_ESC_PYTEST_ROUGE = (
+    "FAILED tests/test_x.py::test_a[vitest- RUN  v1.6.0 /app\\n\\nNo test files found, exiting with code 1\\n-stdout]\n"
+    "\x1b[31m\x1b[1m================== \x1b[31m\x1b[1m1 failed\x1b[0m, \x1b[32m14 passed\x1b[0m\x1b[31m in 0.5s\x1b[0m"
+    "\x1b[31m ===\x1b[0m\n"
+)
+_ESC_MOCHA_OK = "\x1b[92m  4 passing\x1b[0m\x1b[90m (8ms)\x1b[0m\n"
+
+
+@pytest.mark.parametrize(
+    ("label", "printed", "exit_code"),
+    [
+        ("vitest coloré, vert", _ESC_VITEST_VIDE + _ESC_VITEST_OK, 0),
+        ("vitest coloré, rouge", _ESC_VITEST_VIDE + _ESC_VITEST_ROUGE, 1),
+        ("jest coloré, vert", "\x1b[33mNo tests found, exiting with code 0\x1b[39m\n" + _ESC_JEST_OK, 0),
+        ("mocha coloré, vert", _ESC_VITEST_VIDE + _ESC_MOCHA_OK, 0),
+        ("pytest --color=yes, rouge citant le motif", _ESC_PYTEST_ROUGE, 1),
+    ],
+)
+def test_une_preuve_colorisee_reste_une_preuve(tmp_path: Path, label: str, printed: str, exit_code: int) -> None:
+    """Rejoué avec le vrai vitest 3.2.4 sous ``CI=true`` : sortie 0, ``ok=False``, inexécutable à tort."""
+    (result,) = _run_checks((_cmd(printed, runner="pnpm -r test", exit_code=exit_code),), project_root=tmp_path)
+
+    assert result.exit_code == exit_code
+    assert result.unrunnable_reason is None, label
+    assert result.ok is (exit_code == 0)
+
+
+@pytest.mark.parametrize(
+    "printed",
+    [
+        _ESC_VITEST_VIDE,
+        "\x1b[33mNo tests found, exiting with code 0\x1b[39m\n",
+        "\x1b[33m\x1b[1m============================ no tests ran in 0.01s ============================\x1b[0m\n",
+        "\x1b[2m\x1b[36m?\x1b[0m   \texample.com/app\t[no test files]\n",
+        "\x1b[32m  0 passing\x1b[0m\x1b[90m (1ms)\x1b[0m\n",
+    ],
+)
+@pytest.mark.parametrize("exit_code", [0, 1])
+def test_un_vide_colorise_sans_preuve_reste_inexecutable(printed: str, exit_code: int) -> None:
+    assert _classify_unrunnable("npx vitest", exit_code, printed, "") is not None
+
+
+def test_les_sequences_de_controle_ne_cachent_pas_la_preuve() -> None:
+    assert has_execution_proof(_ESC_VITEST_OK) is True
+    assert has_execution_proof(_ESC_PYTEST_ROUGE) is True
+    assert has_execution_proof("\x1b[1m\x1b[32m0 passed\x1b[39m\x1b[22m\n") is False
+
+
+# W1-04-K1-02 : le diagnostic ne vaut que pour une commande qui invoque un exécuteur reconnu.
+def test_un_motif_cite_par_une_commande_sans_executeur_reste_vert(tmp_path: Path) -> None:
+    """``expect_stdout_contains`` qui cite le motif : la commande est ce que l'utilisateur voulait."""
+    (result,) = _run_checks(
+        ("printf 'Error: No tests found for pattern foo\\n'",),
+        project_root=tmp_path,
+        expect_stdout_contains=("No tests found",),
+    )
+
+    assert result.exit_code == 0
+    assert result.unrunnable_reason is None
+    assert result.ok is True
+
+
+@pytest.mark.parametrize(
+    "printed",
+    [
+        "Ran 0 tests in 0.000s\n",
+        "?   \texample.com/app\t[no test files]\n",
+        "No test files found, exiting with code 1\n",
+        "test result: ok. 0 passed; 0 failed; 0 ignored\n",
+        "  0 passing (1ms)\n",
+        "============ no tests ran in 0.01s ============\n",
+    ],
+)
+@pytest.mark.parametrize("cmd", ["make check", "./scripts/ci.sh", "grep -c motif rapport.txt", "echo 'vitest.config.ts'"])
+@pytest.mark.parametrize("exit_code", [0, 1])
+def test_une_commande_sans_executeur_reconnu_garde_le_resultat_de_la_base(
+    cmd: str, printed: str, exit_code: int
+) -> None:
+    assert _classify_unrunnable(cmd, exit_code, printed, "") is None
+
+
+def test_une_commande_arbitraire_qui_imprime_un_vide_reste_verte(tmp_path: Path) -> None:
+    for printed in ("Ran 0 tests in 0.000s", "?   \texample.com/app\t[no test files]"):
+        (result,) = _run_checks((f"printf %s {shlex.quote(printed)}",), project_root=tmp_path)
+
+        assert result.unrunnable_reason is None, printed
+        assert result.ok is True, printed
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        "pytest -q tests/",
+        "python -m pytest",
+        "py.test",
+        "./node_modules/.bin/vitest run",
+        "npx vitest run --passWithNoTests",
+        "jest --ci",
+        "mocha 'test/**/*.js'",
+        "go test ./...",
+        "CGO_ENABLED=0 go test -json ./...",
+        "cargo test --offline",
+        "cargo nextest run",
+        "python -m unittest discover",
+        "node --test",
+        "npm test",
+        "npm run test -- --ci",
+        "pnpm -r test",
+        "pnpm --filter api run test",
+        "yarn test",
+        "bun test",
+        "turbo run test",
+        "npx nx run-many -t test",
+        "lerna run test",
+        "bundle exec rspec",
+        "rake test",
+        "phpunit",
+        "dotnet test",
+        "cd web && vitest run && cd ../api && go test ./...",
+        "tox -e py312",
+    ],
+)
+def test_un_executeur_de_tests_est_reconnu_dans_la_commande(cmd: str) -> None:
+    from grimoire.missions.empty_green import invokes_test_runner
+
+    assert invokes_test_runner(cmd) is True
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    ["make check", "printf ok", "echo 'vitest.config.ts'", "cat jest.config.js", "./scripts/ci.sh", "git diff --stat", "go build ./...", "cargo build", "npm install", "ls attest/"],
+)
+def test_une_commande_sans_executeur_de_tests_n_est_pas_reconnue(cmd: str) -> None:
+    from grimoire.missions.empty_green import invokes_test_runner
+
+    assert invokes_test_runner(cmd) is False
