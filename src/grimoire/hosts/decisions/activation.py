@@ -122,8 +122,8 @@ def _claude_dispatch_context(project_root: Path, agents: tuple[AgentSpec, ...]) 
     roster = "\n".join(f"- `{agent.name}` → {_model_for(agent)}" for agent in routable)
     return (
         f"{_dispatch_policy_section()}\nPersonas routables (`subagent_type` → modèle) :\n{roster}\n"
-        "Ce modèle est le défaut de la persona, appliqué si tu omets `model=` ; la classe "
-        "de la sous-tâche déléguée prime : passe `model=` selon la politique ci-dessus.\n"
+        "Ce modèle n'est que le défaut de la persona, appliqué si tu omets `model=` ; la classe "
+        "de la sous-tâche déléguée prime : passe toujours `model=` selon la politique ci-dessus.\n"
     )
 
 
