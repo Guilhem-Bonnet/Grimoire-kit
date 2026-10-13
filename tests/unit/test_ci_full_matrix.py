@@ -186,11 +186,12 @@ def test_real_e2e_conftest_turns_a_skip_into_a_failure(tmp_path: Path) -> None:
 def test_real_e2e_conftest_fails_without_playwright_in_strict_mode(tmp_path: Path) -> None:
     _, fake = _e2e_sandbox(tmp_path, with_sync_api=False)
     lax = _run_e2e(tmp_path, fake, "0")
-    assert "passed" not in lax.stdout and "failed" not in lax.stdout, lax.stdout
+    assert "Skipped: playwright absent" in lax.stdout + lax.stderr
     strict = _run_e2e(tmp_path, fake, "1")
-    assert strict.returncode != 0, strict.stdout
-    assert "skipped" not in strict.stdout, strict.stdout
-    assert "playwright" in strict.stdout + strict.stderr
+    out = strict.stdout + strict.stderr
+    assert strict.returncode != 0, out
+    assert "No module named 'playwright.sync_api'" in out, out
+    assert "Skipped: playwright absent" not in out, out
 
 
 def test_e2e_conftest_wiring_is_structural() -> None:
