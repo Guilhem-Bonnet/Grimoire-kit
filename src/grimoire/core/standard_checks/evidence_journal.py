@@ -226,7 +226,7 @@ def append_guard_event(project_root: Path, task_id: str, event: dict[str, Any]) 
             return
         with open(full_path, "a", encoding="utf-8") as handle:
             handle.write(_line_break_if_cut(full_path) + json.dumps(event, ensure_ascii=False) + "\n")
-    except (OSError, ValueError, TypeError):
+    except (OSError, ValueError, TypeError):  # silent-ok — journal des gardes best-effort : une écriture ratée ne casse jamais le hook (docstring)
         return
 
 
@@ -242,7 +242,7 @@ def _line_break_if_cut(path: Path) -> str:
                 return ""
             handle.seek(-1, os.SEEK_END)
             return "" if handle.read(1) == b"\n" else "\n"
-    except OSError:
+    except OSError:  # silent-ok — fichier absent ou illisible : rien à séparer, l'ajout suivant le dira
         return ""
 
 
@@ -330,7 +330,7 @@ def read_guard_events(project_root: Path, task_id: str) -> list[dict[str, Any]]:
     for line in raw.splitlines():
         try:
             parsed = json.loads(line)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError:  # silent-ok — ligne coupée par un crash : ignorée comme toute ligne non JSON (docstring)
             continue
         if isinstance(parsed, dict) and parsed.get("type"):
             events.append(parsed)
