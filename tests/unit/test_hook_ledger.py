@@ -79,7 +79,7 @@ def test_arguments_are_hashed_not_stored(governed: Path) -> None:
     Tool arguments carry commands, file contents and occasionally credentials.
     A trace that quotes them turns an observability file into a leak.
     """
-    leaky_command = "curl -H 'Authorization: Bearer sk-live-should-not-appear' https://x"
+    leaky_command = "curl -H 'Authorization: Bearer sk-live-should-not-appear' https://x"  # gitleaks:allow
     _call(governed, "Bash", {"command": leaky_command})
     raw = (governed / TRACES_DIR / "traces.jsonl").read_text(encoding="utf-8")
     assert "sk-live-should-not-appear" not in raw
