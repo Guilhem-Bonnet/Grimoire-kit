@@ -23,7 +23,7 @@ from grimoire.core.exceptions import GrimoireRuntimeError
 from grimoire.costs import POLICY_CONTINUE_FLAGGED, POLICY_STOP, Cost, cap_reason
 from grimoire.flows.blueprint_loader import load_blueprint, resolve_composite_ref
 from grimoire.flows.dispatch_executor import DispatchExecutor, NodeDispatchOutcome
-from grimoire.flows.engine import FlowEngine
+from grimoire.flows.engine import FlowEngine, log_repairs
 from grimoire.flows.schemas import NodeContract, NodeExecutionResult, ResumeOutcome
 
 __all__ = ["execute_genre_node"]
@@ -983,6 +983,7 @@ def _drive_composite_child(
             return "blocked", (), _total_cost(executor), None, None, None
         last_output = result.output
         outcome: ResumeOutcome = engine.resume(run_id, output=result.output, executor=executor, allow_replay=False)
+        log_repairs(run_id, outcome.repaired)
         if not outcome.ok:
             return "blocked", outcome.faults, _total_cost(executor), None, None, None
         if outcome.finished:

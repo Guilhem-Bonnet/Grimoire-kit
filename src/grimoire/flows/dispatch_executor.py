@@ -586,6 +586,9 @@ class FlowDispatchOutcome:
     faults: tuple[str, ...] = ()
     host_reason: str | None = None
     contract: NodeContract | None = None
+    #: Ce que ``resume`` a complété d'une écriture interrompue par un crash
+    #: (``ResumeOutcome.repaired``, cumulé sur tout l'appel) — jamais silencieux (W1-03b).
+    repaired: tuple[str, ...] = ()
 
     @property
     def cost(self) -> Cost:
@@ -613,6 +616,7 @@ class FlowDispatchOutcome:
             "unpriced_calls": self.cost.unpriced_calls,
             "escalations": self.escalations,
             "contract": self.contract.to_dict() if self.contract else None,
+            "repaired": list(self.repaired),
         }
 
 
@@ -624,6 +628,7 @@ def _outcome(
     node_id: str | None,
     faults: tuple[str, ...] = (),
     contract: NodeContract | None = None,
+    repaired: tuple[str, ...] = (),
 ) -> FlowDispatchOutcome:
     return FlowDispatchOutcome(
         run_id=run_id,
@@ -633,6 +638,7 @@ def _outcome(
         faults=faults,
         host_reason=executor.host_reason,
         contract=contract,
+        repaired=repaired,
     )
 
 
@@ -646,16 +652,24 @@ def _drive(
     boucle ne fait qu'interpréter ``executor.last_result``, jamais un second
     appel à l'exécuteur.
     """
+    repaired: tuple[str, ...] = ()
     while True:
         if result.pending:
-            return _outcome(executor, run_id, status="waiting_host", node_id=contract.node_id, contract=contract)
+            return _outcome(
+                executor, run_id, status="waiting_host", node_id=contract.node_id, contract=contract, repaired=repaired
+            )
         if result.output is None:
-            return _outcome(executor, run_id, status="blocked", node_id=contract.node_id, contract=contract)
+            return _outcome(
+                executor, run_id, status="blocked", node_id=contract.node_id, contract=contract, repaired=repaired
+            )
         outcome: ResumeOutcome = engine.resume(run_id, output=result.output, executor=executor, allow_replay=False)
+        repaired = (*repaired, *outcome.repaired)
         if not outcome.ok:
-            return _outcome(executor, run_id, status="blocked", node_id=outcome.node_id, faults=outcome.faults)
+            return _outcome(
+                executor, run_id, status="blocked", node_id=outcome.node_id, faults=outcome.faults, repaired=repaired
+            )
         if outcome.finished:
-            return _outcome(executor, run_id, status="finished", node_id=outcome.node_id)
+            return _outcome(executor, run_id, status="finished", node_id=outcome.node_id, repaired=repaired)
         assert outcome.contract is not None  # non fini : le moteur a rouvert le node suivant
         contract = outcome.contract
         result = executor.last_result or NodeExecutionResult(pending=True)
