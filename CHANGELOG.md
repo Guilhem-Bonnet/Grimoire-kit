@@ -15,6 +15,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   - Rouge-avant / vert-après : `tests/unit/scripts/test_check_actions_pinned.py` (23 tests, 21 rouges avant, dont une partie parce que l'ancien garde ne connaît pas `--root`) ; le garde lancé sur les workflows de origin/main liste 112 lignes non épinglées, code de sortie 1.
   - Non fait : la forme `uses` dans des actions composites (`action.yml`) n'est pas scannée ; le comportement de Dependabot sur ces commentaires n'est pas vérifié ; `dtolnay/rust-toolchain` (12 usages dans `rust-cores.yml`) est épinglé sur la tête de la branche `stable`, qui ne porte aucun tag : Dependabot ne pourra pas le suivre, le commentaire `# stable` reste un nom de branche. Le pin `pypa/gh-action-pypi-publish` est commenté `# v1.14.2`, la version réelle de son SHA (et non plus `# release/v1`).
   - Sortie console : le garde force stdout/stderr en UTF-8 (`errors="replace"`) ; sous `PYTHONIOENCODING=cp1252` il mourait en `UnicodeEncodeError` sur « ✓ ». Tests `TestConsoleEncoding` (2, rouges avant : le rapport d'échec doit contenir le vrai « ✗ » UTF-8, pas son repli `\u2717`).
+- fix(hosts): un appel `Agent` de Claude Code sans `subagent_type` est journalisé `general-purpose` (son défaut documenté), plus « (sans nom) » ; la table des délégations de `grimoire registry dispatches` ne coupe plus un même agent en deux lignes (#735).
 
 ## [3.62.1] - 2026-10-03
 
