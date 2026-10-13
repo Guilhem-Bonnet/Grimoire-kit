@@ -63,6 +63,20 @@ def log_repairs(run_id: str, repaired: tuple[str, ...]) -> None:
     for note in repaired:
         _LOG.warning("flow %s : réparé — %s", run_id, note)
 
+def _refusal(message: str, run_id: str, repaired: tuple[str, ...]) -> GrimoireRuntimeError:
+    """L'erreur de ``resume`` qui dit aussi ce qu'il a réparé avant de refuser (W1-03b-SK2-02).
+
+    ``resume`` complète l'écriture interrompue AVANT de juger la sortie : si la
+    sortie est ensuite refusée, aucun ``ResumeOutcome`` ne porte la réparation,
+    alors qu'elle est écrite. Elle figure donc dans le message et dans le journal
+    de logs ; sans réparation, le message est rendu tel quel.
+    """
+    if not repaired:
+        return GrimoireRuntimeError(message)
+    log_repairs(run_id, repaired)
+    return GrimoireRuntimeError(f"{message} (réparé avant ce refus : {' ; '.join(repaired)})")
+
+
 try:
     import grimoire_flows_core as _rust_core
 except ImportError:  # pragma: no cover - exercised by the dedicated Rust CI job
@@ -645,13 +659,17 @@ class FlowEngine:
                         replay_of=last.step_id,
                         repaired=(*repaired_notes, "run terminé : tous les nodes étaient déjà checkpointés"),
                     )
-                raise GrimoireRuntimeError(
+                raise _refusal(
                     f"run {run_id} : tous les nodes sont déjà validés (dernier : {last.step_id}) mais le run n'est pas "
                     f"terminé ; renvoyer la sortie acceptée du node {last.step_id} pour le terminer, "
-                    "ou `grimoire flow doctor` / `grimoire flow abort`"
+                    "ou `grimoire flow doctor` / `grimoire flow abort`",
+                    run_id,
+                    repaired_notes,
                 )
         if current_id is None or current_id not in contracts:
-            raise GrimoireRuntimeError(f"run {run_id} : aucun node courant résoluble (status={wfi.status.value})")
+            raise _refusal(
+                f"run {run_id} : aucun node courant résoluble (status={wfi.status.value})", run_id, repaired_notes
+            )
 
         contract = contracts[current_id]
         faults = check_output_against_contract(contract, output)
@@ -677,6 +695,8 @@ class FlowEngine:
                     repaired=repaired_notes,
                 )
         if wfi.status is not WorkflowStatus.RUNNING:
+            # (Le docteur s'appuie sur ce test : un run déjà RUNNING n'est pas rouvert,
+            # voir `doctor.resume_realigns_status`.)
             # CHECKPOINTED (crash avant le advance_step du node suivant) ou
             # BLOCKED (retentative après correction de l'hôte) : les deux
             # ramènent au même point, ouvrir l'exécution du node courant.
@@ -704,7 +724,7 @@ class FlowEngine:
             try:
                 _ok, finished, next_id, _faults = _rust_core.resume_outcome(order, current_id, [])
             except ValueError as exc:
-                raise GrimoireRuntimeError(str(exc)) from exc
+                raise _refusal(str(exc), run_id, repaired_notes) from exc
         else:
             idx0 = order.index(current_id)
             finished = idx0 == len(order) - 1

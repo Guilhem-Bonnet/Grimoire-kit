@@ -53,7 +53,7 @@ from typing import Any
 from grimoire.flows.schemas import FlowRunMeta
 from grimoire.runtime.schemas import Checkpoint, RunEvent, RunEventType, WorkflowInstance, WorkflowStatus
 
-__all__ = ["FlowDoctorReport", "FlowViolation", "checkpoint_interrupted", "diagnose"]
+__all__ = ["FlowDoctorReport", "FlowViolation", "checkpoint_interrupted", "diagnose", "resume_realigns_status"]
 
 #: Ce que le docteur ne sait pas conclure — toujours rendu, jamais passé sous silence.
 _BLUEPRINT_DRIFT_UNEVALUATED = (
@@ -62,6 +62,14 @@ _BLUEPRINT_DRIFT_UNEVALUATED = (
 )
 
 _RESUME = "relancer `grimoire flow resume` avec la dernière sortie envoyée : il complète l'écriture interrompue"
+
+#: Instance RUNNING alors que le journal s'arrête sur `step.failed` (crash entre la transition
+#: `advance_step` et son `step.started`) : `resume` ne rouvre pas un run déjà RUNNING, il juge la
+#: sortie du node bloqué et réécrit le statut (checkpoint ou `fail_step`), sans rien « compléter ».
+_RESUME_BLOCKED = (
+    "relancer `grimoire flow resume` avec la sortie du node bloqué : il réécrit le statut de l'instance "
+    "(rien à compléter, le statut RUNNING avait déjà rouvert le node)"
+)
 
 #: Ce que `resume` ne répare PAS : il ne complète que le DERNIER checkpoint d'un run en cours
 #: (`FlowEngine._reconcile`). Un événement perdu ailleurs reste perdu quoi qu'on relance.
@@ -199,6 +207,29 @@ def checkpoint_interrupted(
     return last.id not in instance.checkpoint_refs or not (saved and completed)
 
 
+def resume_realigns_status(actual: str, derived: str, *, interrupted: bool) -> str | None:
+    """La réparation de statut que ``resume`` accomplit réellement dans cet état, sinon ``None``.
+
+    Source unique de ce que le docteur annonce pour ``instance_behind_journal``,
+    à confronter à ``FlowEngine.resume`` (la matrice des frontières le fait pour
+    chacune des 31 écritures) :
+
+    - checkpoint à moitié écrit (``interrupted``, voir
+      :func:`checkpoint_interrupted`) et journal running/checkpointed :
+      ``_reconcile`` rejoue le checkpoint, ce qui réécrit statut, références et
+      événements ;
+    - instance RUNNING alors que le journal dérive BLOCKED : ``resume`` saute
+      ``advance_step`` (le statut est déjà RUNNING), juge la sortie du node
+      bloqué, puis ``checkpoint`` ou ``fail_step`` réécrit le statut et son
+      événement.
+    """
+    if interrupted and derived in ("running", "checkpointed"):
+        return _RESUME
+    if actual == "running" and derived == "blocked":
+        return _RESUME_BLOCKED
+    return None
+
+
 def _derive_from_events(
     events: Sequence[RunEvent], order: Sequence[str]
 ) -> tuple[list[str], str | None, str, list[FlowViolation]]:
@@ -262,7 +293,7 @@ def _derive_from_events(
     return done, open_node, status, violations
 
 
-def _status_violation(actual: str, derived: str, *, resumable: bool) -> FlowViolation | None:
+def _status_violation(actual: str, derived: str, *, interrupted: bool) -> FlowViolation | None:
     if actual == derived or (actual == "verified" and derived == "completed"):
         return None
     detail = f"statut de l'instance {actual!r}, le journal dérive {derived!r}"
@@ -270,7 +301,8 @@ def _status_violation(actual: str, derived: str, *, resumable: bool) -> FlowViol
     if rank_actual > rank_derived:
         return _violation("instance_ahead_of_journal", detail)
     if rank_actual < rank_derived:
-        return _violation("instance_behind_journal", detail, repair=_RESUME if resumable else _RESTORE_STATUS)
+        repair = resume_realigns_status(actual, derived, interrupted=interrupted) or _RESTORE_STATUS
+        return _violation("instance_behind_journal", detail, repair=repair)
     return _violation("status_conflict", detail)
 
 
@@ -385,9 +417,7 @@ def diagnose(
         )
 
     # Statut : celui de l'instance contre celui que le journal dérive.
-    status_violation = _status_violation(
-        instance.status.value, derived_status, resumable=resumable and derived_status in ("running", "checkpointed")
-    )
+    status_violation = _status_violation(instance.status.value, derived_status, interrupted=resumable)
     if status_violation is not None:
         violations.append(status_violation)
 

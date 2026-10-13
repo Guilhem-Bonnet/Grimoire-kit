@@ -619,3 +619,152 @@ def test_the_doctor_still_proposes_resume_for_the_last_checkpoint_of_a_running_r
     assert [v.repair for v in report.violations if v.code == "checkpoint_event_missing"] == [_RESUME]
     engine.resume(run_id, output=sent[-1], executor=InteractiveNodeExecutor(stream=io.StringIO()))
     assert _engine(tmp_path).doctor(run_id).ok
+
+
+# ── W1-03b-SK2-01 : ce que le docteur annonce de `resume` est ce que `resume` fait ──
+
+#: Un run avec ces frontières a un identifiant côté hôte ou lisible dans le dossier de flows
+#: (les frontières 1 à 4 meurent avant la méta : rien à diagnostiquer, voir « Limites »).
+_BOUNDARIES_WITH_A_RUN = [(i + 1, label) for i, label in enumerate(BOUNDARIES) if i + 1 >= 5]
+
+
+def _denials(doctor: Any) -> set[str]:
+    return {doctor._RESTORE_STATUS, doctor._RESTORE_EVENTS, doctor._RESTORE_REFS}
+
+
+def _repair_claims(report: Any) -> tuple[bool, bool]:
+    """(le docteur promet que `resume` soigne, le docteur affirme que `resume` ne soigne pas)."""
+    from grimoire.flows import doctor
+
+    repairs = set(report.repairs)
+    promised = any("flow resume" in repair and repair not in _denials(doctor) for repair in repairs)
+    denied = bool(repairs & _denials(doctor))
+    return promised, denied
+
+
+@pytest.mark.parametrize(
+    "limit", [pytest.param(i, id=f"{i:02d}-{label}") for i, label in _BOUNDARIES_WITH_A_RUN]
+)
+def test_the_doctor_prediction_about_resume_holds_at_every_boundary(tmp_path: Path, limit: int) -> None:
+    """Réparation promise (`flow resume`) => `resume` remet le run sain ; refusée (« ne le ferait pas ») => il ne le fait pas."""
+    bp = _blueprint(tmp_path)
+    _log, crashed, known = _play(tmp_path, bp, limit)
+    assert crashed is not None
+    run_id = known or _engine(tmp_path).list_run_ids()[0]
+    promised, denied = _repair_claims(_engine(tmp_path).doctor(run_id))
+
+    _recover(tmp_path, bp, crashed, known)
+    healed = _engine(tmp_path).doctor(run_id).ok
+
+    assert not (promised and not healed), "le docteur promet `flow resume`, le run reste altéré après la reprise"
+    assert not (denied and healed), "le docteur affirme que `flow resume` ne répare pas, et il remet le run sain"
+
+
+def test_the_doctor_proposes_resume_when_the_status_was_reopened_before_its_event(tmp_path: Path) -> None:
+    """Frontière 8 : `advance_step` a écrit RUNNING, `step.started` manque, le journal s'arrête sur `step.failed`."""
+    from grimoire.flows.doctor import _RESTORE_STATUS
+
+    bp = _blueprint(tmp_path)
+    _log, crashed, known = _play(tmp_path, bp, 8)
+    assert crashed is not None and known is not None
+
+    report = _engine(tmp_path).doctor(known)
+
+    behind = [v for v in report.violations if v.code == "instance_behind_journal"]
+    assert len(behind) == 1, report.to_dict()
+    assert _RESTORE_STATUS not in report.repairs, "resume reprend ce run : le docteur ne dit pas le contraire"
+    assert "flow resume" in behind[0].repair and "ne le ferait pas" not in behind[0].repair, behind[0].repair
+    # La promesse se vérifie : la sortie suivante de l'hôte remet le run sain.
+    assert _engine(tmp_path).resume(known, output=OUT_A).ok
+    assert _engine(tmp_path).doctor(known).ok
+
+
+@pytest.mark.parametrize("finished", [False, True], ids=["run-arrêté-après-b", "run-terminé-côté-journal"])
+def test_the_doctor_keeps_restoring_the_status_when_resume_cannot_realign_it(tmp_path: Path, finished: bool) -> None:
+    """Une instance relue CREATED alors que le journal est avancé : `resume` n'y peut rien, la restauration reste dite."""
+    from grimoire.core.exceptions import GrimoireRuntimeError
+    from grimoire.flows.doctor import _RESTORE_STATUS
+
+    bp = _blueprint(tmp_path)
+    _engine_unused, run_id, sent = _play_to(tmp_path, bp, finished=finished)
+    path = tmp_path / "runtime" / "instances.jsonl"
+    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    for row in rows:
+        if row.get("id") == run_id:
+            row["status"] = WorkflowStatus.CREATED.value
+    path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+    engine = _engine(tmp_path)
+
+    report = engine.doctor(run_id)
+
+    assert _RESTORE_STATUS in report.repairs, report.to_dict()
+    with pytest.raises(GrimoireRuntimeError):
+        engine.resume(run_id, output=sent[-1], executor=InteractiveNodeExecutor(stream=io.StringIO()))
+    assert not _engine(tmp_path).doctor(run_id).ok
+
+
+# ── W1-03b-SK2-02 : un refus qui suit une réparation la dit ──
+
+#: 24 = checkpoint du dernier node écrit, statut RUNNING : `resume` complète l'écriture avant de juger la sortie.
+_REPAIRING_THEN_REFUSING_BOUNDARY = 24
+_NEVER_ACCEPTED = {"pins": {"autre": {"contract": "zz"}}}
+
+
+def test_a_refusal_after_a_repair_names_the_repair(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+
+    from grimoire.core.exceptions import GrimoireRuntimeError
+
+    bp = _blueprint(tmp_path)
+    _log, crashed, known = _play(tmp_path, bp, _REPAIRING_THEN_REFUSING_BOUNDARY)
+    assert crashed is not None and known is not None
+    engine = _engine(tmp_path)
+
+    with caplog.at_level(logging.WARNING, logger="grimoire.flows.engine"), pytest.raises(GrimoireRuntimeError) as raised:
+        engine.resume(known, output=_NEVER_ACCEPTED)
+
+    message = str(raised.value)
+    assert "tous les nodes sont déjà validés" in message
+    assert "réparé avant ce refus" in message and "checkpoint c" in message, message
+    assert any(known in r.getMessage() and "checkpoint c" in r.getMessage() for r in caplog.records)
+    # La réparation a bien eu lieu : le refus ne l'annule pas, et l'erreur n'a pas menti.
+    assert engine.status(known).status == WorkflowStatus.CHECKPOINTED.value
+
+
+def test_a_refusal_without_a_repair_keeps_its_message(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+
+    from grimoire.core.exceptions import GrimoireRuntimeError
+
+    bp = _blueprint(tmp_path)
+    _log, crashed, known = _play(tmp_path, bp, 28)
+    assert crashed is not None and known is not None
+
+    with caplog.at_level(logging.WARNING, logger="grimoire.flows.engine"), pytest.raises(GrimoireRuntimeError) as raised:
+        _engine(tmp_path).resume(known, output=_NEVER_ACCEPTED)
+
+    assert "réparé" not in str(raised.value)
+    assert not caplog.records
+
+
+def test_every_refusal_raised_after_the_reconcile_goes_through_the_repair_note() -> None:
+    """Les trois `raise` de `resume` postérieurs à `_reconcile` passent par `_refusal` : aucun ne perd `repaired_notes`."""
+    import inspect
+    import re
+
+    source = inspect.getsource(FlowEngine.resume)
+    after = source.split("self._reconcile(wfi, ctx)", 1)[1]
+    assert not re.search(r"raise GrimoireRuntimeError\(", after), "un refus de resume ignore les réparations déjà écrites"
+    assert after.count("raise _refusal(") == 3
+
+
+def test_refusal_formats_the_repairs_and_logs_them(caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+
+    err = flows_engine._refusal("run X : refus", "WFI-x-001", ("checkpoint a : complété", "autre"))
+
+    assert str(err) == "run X : refus (réparé avant ce refus : checkpoint a : complété ; autre)"
+    assert flows_engine._refusal("run X : refus", "WFI-x-001", ()).args == ("run X : refus",)
+    with caplog.at_level(logging.WARNING, logger="grimoire.flows.engine"):
+        flows_engine._refusal("m", "WFI-x-002", ("n",))
+    assert any("WFI-x-002" in r.getMessage() for r in caplog.records)
