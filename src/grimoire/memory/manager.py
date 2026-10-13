@@ -18,6 +18,7 @@ import logging
 import os
 import time
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, ClassVar, cast
@@ -28,6 +29,7 @@ from grimoire.memory.backends.base import BackendStatus, MemoryBackend, MemoryEn
 from grimoire.memory.hot import HotMemoryStatus, RedisHotMemory
 from grimoire.memory.profiles import VECTOR_BACKENDS
 from grimoire.memory.sidecar import DiaryRecord, KnowledgeFact, MemorySidecar
+from grimoire.memory.supersession import SUPERSEDED_KEY, search_live, supersession_state
 from grimoire.memory.taxonomy import build_taxonomy, entry_matches_filters, normalize_palace_metadata
 from grimoire.memory.validation import MemoryWritePolicy, ValidatedWrite, validate_memory_write
 from grimoire.providers.state import cooling_down_entry, record_failure, record_success
@@ -362,6 +364,27 @@ class _CooldownGuardedBackend:
         return self._manager._guarded_backend_search(query, user_id=user_id, limit=limit)
 
 
+class _LiveOnlySearch:
+    """Écarte les souvenirs remplacés d'un classement avant la fusion RRF.
+
+    Filtrer avant la fusion (et non après) évite qu'une entrée périmée
+    consomme un rang de l'un des deux classements.
+    """
+
+    __slots__ = ("_inner", "_recall")
+
+    def __init__(self, inner: Any, recall: Callable[[str], MemoryEntry | None]) -> None:
+        self._inner = inner
+        self._recall = recall
+
+    def search(self, query: str, *, user_id: str = "", limit: int = 5) -> list[MemoryEntry]:
+        return search_live(
+            lambda size: cast(list[MemoryEntry], self._inner.search(query, user_id=user_id, limit=size)),
+            limit,
+            self._recall,
+        )
+
+
 class MemoryManager:
     """Unified API wrapping whichever backend the project configures.
 
@@ -605,8 +628,17 @@ class MemoryManager:
         record_success(self._project_root, self._cooldown_provider_id)
         return result
 
-    def search(self, query: str, *, user_id: str = "", limit: int = 5) -> list[MemoryEntry]:
-        return self._guarded_backend_search(query, user_id=user_id, limit=limit)
+    def search(
+        self, query: str, *, user_id: str = "", limit: int = 5, include_superseded: bool = False,
+    ) -> list[MemoryEntry]:
+        """Recherche ; les souvenirs remplacés (``superseded_by``) sont exclus par défaut."""
+        if include_superseded:
+            return self._guarded_backend_search(query, user_id=user_id, limit=limit)
+        return search_live(
+            lambda size: self._guarded_backend_search(query, user_id=user_id, limit=size),
+            limit,
+            self.recall,
+        )
 
     # ── Hybrid retrieval (vector + lexical BM25, RRF fusion) ─────────────────
 
@@ -625,22 +657,30 @@ class MemoryManager:
         """
         return self._lexical_companion is not None
 
-    def hybrid_search(self, query: str, *, user_id: str = "", limit: int = 5) -> list[MemoryEntry]:
+    def hybrid_search(
+        self, query: str, *, user_id: str = "", limit: int = 5, include_superseded: bool = False,
+    ) -> list[MemoryEntry]:
         """Fuse vector and lexical rankings via RRF.
 
         Falls back to plain :meth:`search` when no lexical companion is
-        configured (local/lexical primaries already are lexical).
+        configured (local/lexical primaries already are lexical). Les
+        souvenirs remplacés sont exclus de chaque classement avant la fusion
+        sauf ``include_superseded``.
         """
         if self._lexical_companion is None:
-            return self.search(query, user_id=user_id, limit=limit)
+            return self.search(query, user_id=user_id, limit=limit, include_superseded=include_superseded)
         from grimoire.memory.retrieval import HybridRetriever
 
+        # HybridRetriever n'appelle que `.search()` sur chaque entrée — le
+        # cast reflète cette interface réduite, pas une vraie implémentation
+        # de MemoryBackend (voir _CooldownGuardedBackend).
+        vector: Any = _CooldownGuardedBackend(self)
+        lexical: Any = self._lexical_companion
+        if not include_superseded:
+            vector, lexical = _LiveOnlySearch(vector, self.recall), _LiveOnlySearch(lexical, self.recall)
         retriever = HybridRetriever([
-            # HybridRetriever n'appelle que `.search()` sur chaque entrée — le
-            # cast reflète cette interface réduite, pas une vraie implémentation
-            # de MemoryBackend (voir _CooldownGuardedBackend).
-            ("vector", cast(MemoryBackend, _CooldownGuardedBackend(self))),
-            ("lexical", self._lexical_companion),
+            ("vector", cast(MemoryBackend, vector)),
+            ("lexical", cast(MemoryBackend, lexical)),
         ])
         return retriever.search(query, user_id=user_id, limit=limit)
 
@@ -744,17 +784,68 @@ class MemoryManager:
         wing: str = "",
         hall: str = "",
         room: str = "",
+        include_superseded: bool = False,
     ) -> list[MemoryEntry]:
         filters = {"wing": wing, "hall": hall, "room": room}
         search_filtered = getattr(self._backend, "search_filtered", None)
         if callable(search_filtered):
-            return cast(list[MemoryEntry], search_filtered(query, user_id=user_id, limit=limit, filters=filters))
-        candidates = self._backend.search(query, user_id=user_id, limit=max(limit * 10, limit))
-        return [
-            entry
-            for entry in candidates
-            if entry_matches_filters(entry, wing=wing, hall=hall, room=room)
-        ][:limit]
+            def fetch(size: int) -> list[MemoryEntry]:
+                return cast(list[MemoryEntry], search_filtered(query, user_id=user_id, limit=size, filters=filters))
+        else:
+            def fetch(size: int) -> list[MemoryEntry]:
+                candidates = self._backend.search(query, user_id=user_id, limit=max(size * 10, size))
+                return [
+                    entry
+                    for entry in candidates
+                    if entry_matches_filters(entry, wing=wing, hall=hall, room=room)
+                ][:size]
+        if include_superseded:
+            return fetch(limit)
+        return search_live(fetch, limit, self.recall)
+
+    def supersede(self, old_id: str, new_id: str) -> MemoryEntry | None:
+        """Marque ``old_id`` comme remplacé par ``new_id`` (métadonnées conservées).
+
+        Refuse un remplaçant inconnu, identique, déjà remplacé lui-même (le
+        renvoi doit viser le dernier maillon) ou dont la chaîne revient sur
+        ``old_id`` (cycle) : un renvoi de ce genre ferait disparaître le
+        souvenir de la recherche sans rien servir à sa place. Renvoie ``None``
+        quand ``old_id`` n'existe pas.
+        """
+        if old_id == new_id:
+            raise GrimoireMemoryError("Un souvenir ne peut pas se remplacer lui-même.")
+        replacement = self._backend.recall(new_id)
+        if replacement is None:
+            raise GrimoireMemoryError(f"Remplaçant introuvable : {new_id!r}.")
+        self._refuse_cycle_or_replaced(old_id, replacement)
+        existing = self._backend.recall(old_id)
+        if existing is None:
+            return None
+        return self.update(old_id, metadata={**existing.metadata, SUPERSEDED_KEY: new_id})
+
+    def _refuse_cycle_or_replaced(self, old_id: str, replacement: MemoryEntry) -> None:
+        """Lève si viser ``replacement`` fermerait un cycle ou viserait un souvenir déjà remplacé."""
+        visited = {replacement.id}
+        current = replacement
+        while True:
+            target_id = str((current.metadata or {}).get(SUPERSEDED_KEY) or "").strip()
+            if not target_id:
+                break
+            if target_id == old_id:
+                raise GrimoireMemoryError(
+                    f"Cycle de remplacement : {replacement.id!r} mène déjà à {old_id!r}.",
+                )
+            if target_id in visited:
+                break
+            nxt = self._backend.recall(target_id)
+            if nxt is None:
+                break
+            visited.add(target_id)
+            current = nxt
+        if supersession_state(replacement, self._backend.recall) == "superseded":
+            raise GrimoireMemoryError(
+                f"Remplaçant déjà remplacé : {replacement.id!r} ; viser son remplaçant.",
+            )
 
     def get_all(self, *, user_id: str = "", offset: int = 0, limit: int | None = None) -> list[MemoryEntry]:
         return self._backend.get_all(user_id=user_id, offset=offset, limit=limit)
