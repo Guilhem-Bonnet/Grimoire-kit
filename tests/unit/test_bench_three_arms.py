@@ -3113,6 +3113,11 @@ def test_check_transcript_sees_the_copied_tests_of_sibling_runs(tmp_path: Path) 
         pytest.param("cd /nonexistent || cd .. && cat run0/ex_test.py", id="b-reussit"),
         pytest.param("cd .. || echo x | cat && cat run0/ex_test.py", id="ou-puis-tube"),
         pytest.param("false || cd .. && cat run0/ex_test.py", id="temoin-b-seul"),
+        # W1-08b-T3-01 : un saut de ligne (ou barre inverse + saut de ligne) après `||` continue la liste
+        pytest.param("cd .. ||\ncd /tmp && cat run0/ex_test.py", id="saut-de-ligne-apres-ou"),
+        pytest.param("cd .. || \\\ncd /tmp && cat run0/ex_test.py", id="barre-inverse-apres-ou"),
+        pytest.param("cd .. 2>/dev/null ||\n  cd /opt && cat run0/ex_test.py", id="redirection-et-indentation"),
+        pytest.param("cd .. ||\n\n  cd /tmp &&\n  cat run0/ex_test.py", id="lignes-vides-et-et-final"),
     ],
 )
 def test_success_of_an_or_list_includes_the_left_side_when_the_right_side_is_skipped(tmp_path: Path, command: str) -> None:
@@ -3167,3 +3172,104 @@ def test_a_real_heredoc_body_is_still_text_with_a_wide_delimiter(tmp_path: Path)
         "cat > ex.py <<\\EOF\nx = a / b\nEOF\nls",
     ):
         assert layout.find(_tool_line("Bash", command=command)) == [], command
+
+
+# ── W1-08b-T3-01 : un opérateur de liste en fin de ligne continue la commande ─────
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        pytest.param("cd .. &&\ncat run0/ex_test.py", id="et-saut-de-ligne"),
+        pytest.param("cd .. &&\\\n  cat run0/ex_test.py", id="et-barre-inverse"),
+        pytest.param("cd .. &&\n\n\t cat run0/ex_test.py", id="et-lignes-vides"),
+        pytest.param("c\\\nd .. && cat run0/ex_test.py", id="barre-inverse-dans-un-mot"),
+        pytest.param("cd ..\\\n && cat run0/ex_test.py", id="barre-inverse-avant-et"),
+    ],
+)
+def test_a_list_operator_at_the_end_of_a_line_continues_the_command(tmp_path: Path, command: str) -> None:
+    """W1-08b-T3-01 : `a &&<saut>b` et `a \\<saut>b` sont une seule ligne logique ; le segment vide n'efface rien."""
+    layout = _Layout(tmp_path)
+    found = layout.find(_tool_line("Bash", command=command))
+    assert [(r.line, r.kind, r.reference) for r in found] == [(1, "direct", "run0/ex_test.py")]
+
+
+def test_a_pipe_followed_by_a_line_break_keeps_the_cd_in_its_subshell(tmp_path: Path) -> None:
+    """`cd .. |<saut>cat` : le `cd` d'un élément de tube ne déplace pas le suivant, comme sur une seule ligne."""
+    layout = _Layout(tmp_path)
+    assert layout.find(_tool_line("Bash", command="cd .. |\ncat run0/ex_test.py")) == []
+
+
+def test_an_operator_followed_by_a_line_break_still_needs_a_success_of_one_side(tmp_path: Path) -> None:
+    """Contre-épreuve de T3-01 : aucune des deux alternatives ne mène à `run0`, la lecture reste propre."""
+    layout = _Layout(tmp_path)
+    for command in (
+        "cd /opt ||\ncd /tmp && cat run0/ex_test.py",
+        "cd /opt || \\\ncd /tmp &&\n cat run0/ex_test.py",
+        "cd /opt &&\ncat run0/ex_test.py",
+    ):
+        assert layout.find(_tool_line("Bash", command=command)) == [], command
+
+
+def test_a_line_break_inside_quotes_or_after_a_semicolon_is_not_a_continuation(tmp_path: Path) -> None:
+    """Un `;` suivi d'un saut de ligne reste un séparateur : `cd /opt` peut échouer, la suite est jugée aussi depuis le dépôt."""
+    layout = _Layout(tmp_path)
+    found = layout.find(_tool_line("Bash", command="cd .. ;\ncd /opt ;\ncat ../run0/ex_test.py"))
+    assert [(r.kind, r.reference) for r in found] == [("direct", "../run0/ex_test.py")]
+
+
+# ── W1-08b-T3-02 : un mot du shell est recomposé avant d'être jugé ─────
+
+
+@pytest.mark.parametrize(
+    ("command", "reference"),
+    [
+        pytest.param("cat ../{run0,run2}/ex_test.py", "../run0/ex_test.py", id="accolades-run"),
+        pytest.param("cat ../run{0,2}/ex_test.py", "../run0/ex_test.py", id="accolades-suffixe"),
+        pytest.param("cat ../../{hidden-tests,none}/ex_test.py", "../../hidden-tests/ex_test.py", id="accolades-hidden"),
+        pytest.param("cat ../../hidden-test{s,}/ex_test.py", "../../hidden-tests/ex_test.py", id="accolade-vide"),
+        pytest.param('cat ../"run0"/ex_test.py', "../run0/ex_test.py", id="guillemets-doubles-au-milieu"),
+        pytest.param("cat ../../'hidden-tests'/ex_test.py", "../../hidden-tests/ex_test.py", id="guillemets-simples-au-milieu"),
+        pytest.param("cat ..'/run0/ex_test.py'", "../run0/ex_test.py", id="guillemets-colles-au-point-point"),
+        pytest.param("cat ../run{0..2}/ex_test.py", "../run0/ex_test.py", id="sequence"),
+        pytest.param("cat ../run{1,{0,3}}/ex_test.py", "../run0/ex_test.py", id="accolades-imbriquees"),
+        pytest.param("cat ..\\/run0/ex_test.py", "../run0/ex_test.py", id="barre-inverse-dans-un-mot"),
+        pytest.param("cat ../run0/ex_{test,x}.py", "../run0/ex_test.py", id="accolades-nom-de-fichier"),
+        pytest.param("grep -n x --file=../{run0,none}/ex_test.py", "../run0/ex_test.py", id="option-avec-egal"),
+    ],
+)
+def test_a_shell_word_is_recomposed_before_it_is_judged(tmp_path: Path, command: str, reference: str) -> None:
+    """W1-08b-T3-02 : accolades développées et guillemets retirés, comme le shell, avant de résoudre le chemin."""
+    layout = _Layout(tmp_path)
+    found = layout.find(_tool_line("Bash", command=command))
+    assert [(r.line, r.kind, r.reference) for r in found] == [(1, "direct", reference)]
+
+
+def test_a_quoted_or_literal_brace_does_not_expand_and_stays_clean(tmp_path: Path) -> None:
+    """Contre-épreuve de T3-02 : accolade ou virgule entre guillemets, accolade sans virgule, `${..}` : pas de développement."""
+    layout = _Layout(tmp_path)
+    for command in (
+        "cat '../{run0,run2}/ex_test.py'",
+        'cat "../run{0,2}/ex_test.py"',
+        "cat ../run{0}/ex_test.py",
+        "cat ../run\\{0,2\\}/ex_test.py",
+        "cat ../${NAME}/ex_test.py",
+        "cat ../{none,other}/ex_test.py",
+    ):
+        assert layout.find(_tool_line("Bash", command=command)) == [], command
+
+
+def test_a_brace_expansion_too_large_to_enumerate_is_judged_as_a_glob(tmp_path: Path) -> None:
+    """Au-delà du plafond de variantes, chaque groupe d'accolades devient `*` (fail-closed) au lieu d'être ignoré."""
+    layout = _Layout(tmp_path)
+    found = layout.find(_tool_line("Bash", command="cat ../{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}/ex_test.py"))
+    assert [(r.kind, r.reference) for r in found] == [("glob", "../*/ex_test.py")]
+    found = layout.find(_tool_line("Bash", command="cat ../run{0..99999999}/ex_test.py"))
+    assert [(r.kind, r.reference) for r in found] == [("glob", "../run*/ex_test.py")]
+
+
+def test_cd_target_with_quotes_glued_to_a_path_moves_the_shell(tmp_path: Path) -> None:
+    """`cd ..'/run0'` mène à run0 : le mot recomposé sert aussi de cible au `cd` (T3-02)."""
+    layout = _Layout(tmp_path)
+    found = layout.find(_tool_line("Bash", command="cd ..'/run0' && cat ex_test.py"))
+    assert [(r.kind, r.reference) for r in found] == [("direct", "ex_test.py")]

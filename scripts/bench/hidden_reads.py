@@ -38,7 +38,7 @@ shell non développées (``$HOME``, ``$(...)``), liens symboliques créés par
 l'agent, ``cd`` en fin de commande ou d'une chaîne ``&&`` qui échoue dans le dépôt (la
 cible reste le cwd suivi d'un appel au suivant), ``popd``/``pushd`` dont la
 pile vient d'un autre appel (joué comme ``cd -`` : rester, ou revenir au dépôt),
-mots-clés devant un ``cd`` (``then cd src``), contenu d'un script écrit puis lancé
+mots-clés devant un ``cd`` (``then cd src``), citation ANSI-C (``$'\\056\\056'``), contenu d'un script écrit puis lancé
 (le script n'est pas relu), accès par un serveur MCP qui n'expose pas de chemin.
 
 Un heredoc ne retire du texte analysé que son corps et son délimiteur : la fin de la
@@ -46,7 +46,14 @@ ligne d'ouverture (``<<'EOF' && cat x``, ``<<EOF; cp x .``) est une commande qui
 s'exécute et reste lue ; ``<<<`` (here-string) n'est pas un heredoc, pas plus qu'un ``<<`` entre
 guillemets ou dans ``$((1<<3))``, ni un ``<<`` dont aucune ligne ne ferme le délimiteur (les lignes
 suivantes restent alors des commandes). Dans une liste ``a || b && c``, la suite s'exécute
-après un succès de ``a`` (``b`` sauté) comme de ``b``. Une transcription
+après un succès de ``a`` (``b`` sauté) comme de ``b`` ; un saut de ligne (ou ``\\`` + saut de ligne) qui
+suit ``&&``, ``||`` ou ``|`` continue la liste au lieu de la terminer, y compris à travers des lignes vides
+(W1-08b-T3-01), mais pas un commentaire ``# ...`` intercalé. Chaque mot du shell est recomposé avant d'être
+jugé (W1-08b-T3-02) : guillemets retirés et parties collées concaténées (``..'/run0/x'``, ``../"run0"/x``),
+barre inverse levée, accolades développées (``../{run0,run2}/x``, ``hidden-test{s,}``, séquences ``{0..2}``) ;
+le texte brut, coupé aux guillemets et aux accolades, reste jugé aussi. Au-delà de 256 variantes, chaque
+groupe d'accolades devient ``*`` (glob, du côté du faux positif) ; accolade ou virgule entre guillemets ou
+échappées, ``${..}`` et groupe sans virgule ni séquence ne se développent pas. Une transcription
 qui n'a pas été lue en entier (aucun événement ``system/init`` ou ``assistant``, ou une
 ligne illisible qui porte une accolade : un événement coupé par une ligne de stderr)
 rend ``unevaluated``, jamais ``clean`` ; une lecture déjà trouvée reste ``invalid``.
@@ -72,6 +79,8 @@ _WRITE_TOOLS = frozenset({"Write", "Edit", "MultiEdit", "NotebookEdit"})
 
 #: Séparateurs de commandes ; ``(`` et ``)`` ouvrent et ferment un sous-shell (``_split_command`` les trie).
 _BASH_SEPARATOR = re.compile(r"&&|\|\||[;|\n()]")
+#: Opérateurs après lesquels un saut de ligne ne termine pas la commande : la liste continue sur la ligne suivante.
+_LIST_OPERATORS = frozenset({"&&", "||", "|"})
 #: Ouverture d'un heredoc (``<<'EOF'``, ``<<-EOF``, ``<<\\EOF``, ``<<END-OF``) : groupes 1 et 2, le
 #: délimiteur entre guillemets ; groupe 3, le délimiteur nu (un mot du shell : tiret, point... compris) ;
 #: groupe 4, la fin de la ligne d'ouverture (``&& cat x``, ``; cp x .`` : des commandes qui s'exécutent).
@@ -280,6 +289,11 @@ def _split_command(head: str) -> tuple[list[tuple[str, str]], bool]:
     separator, start = "", 0
     for match in _BASH_SEPARATOR.finditer(head):
         mark = match.group()
+        blank_after_operator = mark == "\n" and separator in _LIST_OPERATORS and not head[start : match.start()].strip()
+        if blank_after_operator and not unclosed and not quotes[match.start()]:
+            # Un saut de ligne qui suit `&&`, `||` ou `|` continue la liste : ce n'est pas un `;` (W1-08b-T3-01).
+            start = match.end()
+            continue
         if mark in ("(", ")") and not unclosed:
             quote = quotes[match.start()]
             if quote == "'" or (quote == '"' and mark == "(" and head[match.start() - 1 : match.start()] != "$"):
@@ -290,6 +304,176 @@ def _split_command(head: str) -> tuple[list[tuple[str, str]], bool]:
         separator, start = mark, match.end()
     pieces.append((separator, head[start:]))
     return pieces, unclosed
+
+
+def _join_continuations(text: str) -> str:
+    """Retire les ``\\`` suivis d'un saut de ligne, sauf entre guillemets simples (continuation de ligne du shell)."""
+    out: list[str] = []
+    quote = ""
+    i = 0
+    while i < len(text):
+        char = text[i]
+        if char == "\\" and quote != "'" and i + 1 < len(text):
+            if text[i + 1] != "\n":
+                out.append(text[i : i + 2])
+            i += 2
+            continue
+        if not quote and char in "'\"":
+            quote = char
+        elif char == quote:
+            quote = ""
+        out.append(char)
+        i += 1
+    return "".join(out)
+
+
+#: Accolades et virgule entre guillemets (ou précédées d'une barre inverse) : littérales, jamais développées.
+_LITERAL = {"{": "\ue000", "}": "\ue001", ",": "\ue002"}
+_UNLITERAL = str.maketrans({v: k for k, v in _LITERAL.items()})
+#: Plafond de variantes d'un développement d'accolades ; au-delà, chaque groupe devient ``*`` (fail-closed).
+_BRACE_LIMIT = 256
+
+
+class _TooManyVariantsError(Exception):
+    """Un développement d'accolades dépasse ``_BRACE_LIMIT``."""
+
+
+def _shell_words(segment: str) -> list[str]:
+    """Les mots d'un segment tels que le shell les compose : guillemets retirés, parties collées concaténées.
+
+    ``..'/run0/x'``, ``../"run0"/x`` et ``..\\/run0`` valent ``../run0/x``. Les espaces et ``<>&`` et
+    l'apostrophe inverse séparent les mots ; une accolade ou une virgule entre guillemets ou
+    échappée est marquée littérale (``_LITERAL``) pour que ``_brace_variants`` ne la développe pas.
+    """
+    words: list[str] = []
+    current: list[str] = []
+    quote = ""
+    i = 0
+    while i < len(segment):
+        char = segment[i]
+        if quote == "'":
+            if char == "'":
+                quote = ""
+            else:
+                current.append(_LITERAL.get(char, char))
+        elif quote == '"':
+            if char == '"':
+                quote = ""
+            elif char == "\\" and i + 1 < len(segment) and segment[i + 1] in '"\\$`':
+                i += 1
+                current.append(_LITERAL.get(segment[i], segment[i]))
+            else:
+                current.append(_LITERAL.get(char, char))
+        elif char == "\\" and i + 1 < len(segment):
+            i += 1
+            current.append(_LITERAL.get(segment[i], segment[i]))
+        elif char in "'\"":
+            quote = char
+        elif char.isspace() or char in "<>&`":
+            if current:
+                words.append("".join(current))
+                current = []
+        else:
+            current.append(char)
+        i += 1
+    if current:
+        words.append("".join(current))
+    return words
+
+
+_SEQUENCE = re.compile(r"(-?\w+)\.\.(-?\w+)(?:\.\.(-?\d+))?")
+
+
+def _sequence_items(body: str) -> list[str] | None:
+    """Les éléments de ``{a..b}`` / ``{1..9}`` / ``{01..10..3}``, ``None`` si ce n'est pas une séquence."""
+    match = _SEQUENCE.fullmatch(body)
+    if match is None:
+        return None
+    first, last, raw_step = match.groups()
+    step = abs(int(raw_step)) or 1 if raw_step else 1
+    numeric = re.fullmatch(r"-?\d+", first) and re.fullmatch(r"-?\d+", last)
+    if numeric:
+        low, high = int(first), int(last)
+        width = (
+            max(len(first), len(last)) if first.lstrip("-").startswith("0") or last.lstrip("-").startswith("0") else 0
+        )
+    elif len(first) == 1 and len(last) == 1 and first.isalpha() and last.isalpha():
+        low, high, width = ord(first), ord(last), 0
+    else:
+        return None
+    count = abs(high - low) // step + 1
+    if count > _BRACE_LIMIT:
+        raise _TooManyVariantsError
+    values = range(low, high + 1, step) if low <= high else range(low, high - 1, -step)
+    return [f"{v:0{width}d}" if numeric else chr(v) for v in values]
+
+
+def _brace_variants(word: str) -> list[str]:
+    """Le développement des accolades d'un mot (``a{b,c}d`` → ``abd``, ``acd``), comme bash.
+
+    Un groupe n'est développé que s'il porte une virgule au premier niveau ou une séquence ``..`` ;
+    ``${..}`` et un groupe sans virgule restent tels quels. Lève ``_TooManyVariantsError`` au-delà de
+    ``_BRACE_LIMIT`` variantes.
+    """
+    start = 0
+    while (opening := word.find("{", start)) != -1:
+        depth, commas, closing = 0, [], -1
+        for j in range(opening, len(word)):
+            if word[j] == "{":
+                depth += 1
+            elif word[j] == "}":
+                depth -= 1
+                if depth == 0:
+                    closing = j
+                    break
+            elif word[j] == "," and depth == 1:
+                commas.append(j)
+        if closing == -1:
+            start = opening + 1
+            continue
+        body = word[opening + 1 : closing]
+        dollar = opening > 0 and word[opening - 1] == "$"
+        items: list[str] | None = None
+        if not dollar and commas:
+            cuts = [opening, *commas, closing]
+            items = [word[cuts[k] + 1 : cuts[k + 1]] for k in range(len(cuts) - 1)]
+        elif not dollar:
+            items = _sequence_items(body)
+        if items is None:
+            start = closing + 1 if dollar else opening + 1
+            continue
+        variants: list[str] = []
+        for item in items:
+            variants.extend(_brace_variants(word[:opening] + item + word[closing + 1 :]))
+            if len(variants) > _BRACE_LIMIT:
+                raise _TooManyVariantsError
+        return variants
+    return [word]
+
+
+def _brace_glob(word: str) -> str:
+    """Repli quand le développement est trop grand : chaque groupe d'accolades de premier niveau devient ``*``."""
+    out: list[str] = []
+    depth = 0
+    for char in word:
+        if char == "{":
+            depth += 1
+            if depth == 1 and not (out and out[-1] == "*"):  # `**` serait un parcours récursif
+                out.append("*")
+        elif char == "}" and depth:
+            depth -= 1
+        elif depth == 0:
+            out.append(char)
+    return "".join(out)
+
+
+def _word_variants(word: str) -> list[str]:
+    """Les chemins que désigne un mot du shell : accolades développées, guillemets déjà retirés."""
+    try:
+        variants = _brace_variants(word)
+    except _TooManyVariantsError:
+        variants = [_brace_glob(word)]
+    return [variant.translate(_UNLITERAL) for variant in variants]
 
 
 def _in_arithmetic(prefix: str) -> bool:
@@ -353,6 +537,32 @@ def _after_command(state: _Dirs, tokens: Sequence[str], dash: PurePath | None) -
     return {moved}
 
 
+def _segment_candidates(segment: str, matches: Sequence[re.Match[str]], words: Sequence[str]) -> list[str]:
+    """Les fragments de chemin d'un segment : ceux du texte brut, puis ceux des mots recomposés (W1-08b-T3-02).
+
+    Le texte brut est coupé aux guillemets, ``=``, ``,`` et accolades : ``..'/run0/x'``, ``../"run0"/x`` ou
+    ``../{run0,run2}/x`` n'y donnent que des morceaux qui ne désignent rien. Le mot recomposé
+    (guillemets retirés, accolades développées) est jugé en plus, entier et par fragments.
+    """
+    found: dict[str, None] = {}
+    for match in matches:
+        word = match.group()
+        if word.startswith(("-", "$", "~")):
+            continue
+        if _NAME_CHAR.search(word) or (word == "/" and _standalone(segment, match)):
+            found[word] = None
+    for word in words:
+        for variant in _word_variants(word):
+            parts = [variant] if not any(c.isspace() for c in variant) else []
+            parts.extend(_FRAGMENT.findall(variant))
+            for part in parts:
+                if part.startswith(("-", "$", "~")):
+                    continue
+                if _NAME_CHAR.search(part) or part == variant == "/":
+                    found[part] = None
+    return list(found)
+
+
 def _shell_references(
     command: str, cwd: PurePath, dash: PurePath | None = None
 ) -> tuple[list[tuple[str, PurePath, bool]], set[PurePath]]:
@@ -381,7 +591,7 @@ def _shell_references(
     head, bodies = _split_heredocs(command)  # le corps part, la fin de la ligne d'ouverture reste
     recursive = bool(_RECURSIVE.search(head))
     refs: list[tuple[str, PurePath, bool]] = []
-    pieces, unclosed = _split_command(head)
+    pieces, unclosed = _split_command(_join_continuations(head))
     # Où est le shell quand le segment démarre (*entry*) et après le segment précédent s'il a réussi
     # (*ok*). Un ``cd`` peut échouer et laisser le shell en place : ``&&`` ne regarde que le succès,
     # ``||`` que les positions où un segment de la chaîne a pu échouer (*chain*), ``;`` et le saut de
@@ -398,6 +608,7 @@ def _shell_references(
     for index, (separator, segment) in enumerate(pieces):
         matches = list(_FRAGMENT.finditer(segment))
         tokens = [m.group() for m in matches]
+        words = _shell_words(segment)
         if separator in (";", "\n"):
             if not tokens:  # ligne vide, ``;`` final : pas de commande
                 continue
@@ -414,15 +625,11 @@ def _shell_references(
         elif separator != "|":  # début, ``&&``, parenthèse sans paire : la suite d'un succès
             entry = ok
         # ``|`` : tous les éléments d'un tube partent de la même position.
+        candidates = _segment_candidates(segment, matches, words)
         for here in sorted({state.cwd for state in entry}):
-            for match in matches:
-                word = match.group()
-                if word.startswith(("-", "$", "~")):
-                    continue
-                if not _NAME_CHAR.search(word) and not (word == "/" and _standalone(segment, match)):
-                    continue
-                refs.append((word, _resolve(word, here), recursive))
-        moved = {after for state in entry for after in _after_command(state, tokens, dash)}
+            refs.extend((word, _resolve(word, here), recursive) for word in candidates)
+        command_words = words[1:] if words[:1] in (["{"], ["!"]) else words  # `{ cd src; }`, `! cd x`
+        moved = {after for state in entry for after in _after_command(state, command_words, dash)}
         if index + 1 < len(pieces) and pieces[index + 1][0] == "|":  # élément de tube : sous-shell
             ok = entry
         else:  # dernier élément d'un tube : zsh (ou lastpipe) l'exécute dans le shell courant
