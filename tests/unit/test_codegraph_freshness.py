@@ -139,7 +139,7 @@ class TestMcp:
 
         root = _project(tmp_path)
         result = grimoire_codegraph_index(str(root), source_dir="..")
-        assert getattr(result, "isError", False)
+        assert result.model_dump(by_alias=True).get("isError") is True
         assert "error" in "".join(getattr(b, "text", "") for b in result.content)
         assert not (root / RECEIPT_PATH).exists()
 
