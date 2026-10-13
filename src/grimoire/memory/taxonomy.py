@@ -40,10 +40,11 @@ if TYPE_CHECKING:
             wing: str,
             hall: str,
             room: str,
+            include_superseded: bool,
         ) -> list[MemoryEntry]: ...
 
         def hybrid_search(
-            self, query: str, *, user_id: str, limit: int
+            self, query: str, *, user_id: str, limit: int, include_superseded: bool
         ) -> list[MemoryEntry]: ...
 
 __all__ = [
@@ -238,20 +239,25 @@ def run_memory_search(
     wing: str = "",
     hall: str = "",
     room: str = "",
+    include_superseded: bool = False,
 ) -> list[MemoryEntry]:
     """Resolve a memory search, optionally fusing vector and lexical rankings.
 
     When ``hybrid`` is set, results come from the RRF fusion of the vector and
     lexical BM25 backends; palace filters are then applied post-hoc because the
     fusion layer is filter-agnostic. Otherwise the taxonomy-aware backend query
-    is used directly.
+    is used directly. Les souvenirs remplacés (``superseded_by``) sont exclus
+    sauf ``include_superseded``.
     """
     if not hybrid:
-        return mgr.search_taxonomy(query, user_id=user_id, limit=limit, wing=wing, hall=hall, room=room)
+        return mgr.search_taxonomy(
+            query, user_id=user_id, limit=limit, wing=wing, hall=hall, room=room,
+            include_superseded=include_superseded,
+        )
 
     has_filters = bool(wing or hall or room)
     fetch = max(limit * 10, limit) if has_filters else limit
-    results = mgr.hybrid_search(query, user_id=user_id, limit=fetch)
+    results = mgr.hybrid_search(query, user_id=user_id, limit=fetch, include_superseded=include_superseded)
     if has_filters:
         results = [
             entry for entry in results
