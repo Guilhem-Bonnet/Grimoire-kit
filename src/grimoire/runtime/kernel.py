@@ -389,18 +389,35 @@ class RuntimeKernel:
             safe_to_resume=True,
             evidence_refs=tuple(evidence_refs or []),
         )
-        self._append_checkpoint(chk)
-        updated_refs = (*wfi.checkpoint_refs, chk.id)
-        wfi = self._transition(wfi, WorkflowStatus.CHECKPOINTED)
-        # Store the new checkpoint ref
-        wfi = WorkflowInstance.from_dict({**wfi.to_dict(), "checkpoint_refs": list(updated_refs)})
-        self._save_instance(wfi)
-        self._emit(RunEventType.CHECKPOINT_SAVED, wfi, ctx, payload={"checkpoint_id": chk.id, "step_id": step_id})
+        # W1-03b : un checkpoint est écrit en cinq temps (fichier de checkpoints,
+        # statut, références, deux événements) sans transaction commune. Rejouer
+        # cet appel pour le même step COMPLÈTE ce qui manque au lieu de le
+        # dupliquer : c'est ce qui rend sûre la reprise après un crash entre
+        # deux de ces écritures (voir ``FlowEngine._reconcile``).
+        already = any(c.id == chk.id for c in self.list_checkpoints(wfi_id))
+        if not already:
+            self._append_checkpoint(chk)
+        if not (already and wfi.status is WorkflowStatus.CHECKPOINTED):
+            wfi = self._transition(wfi, WorkflowStatus.CHECKPOINTED)
+        if chk.id not in wfi.checkpoint_refs:
+            # Store the new checkpoint ref
+            wfi = WorkflowInstance.from_dict({**wfi.to_dict(), "checkpoint_refs": [*wfi.checkpoint_refs, chk.id]})
+            self._save_instance(wfi)
+        have_saved = have_completed = False
+        if already:
+            for evt in self.get_run_events(wfi_id):
+                if evt.event_type is RunEventType.CHECKPOINT_SAVED and evt.payload.get("checkpoint_id") == chk.id:
+                    have_saved = True
+                elif evt.event_type is RunEventType.STEP_COMPLETED and evt.payload.get("step_id") == step_id:
+                    have_completed = True
+        if not have_saved:
+            self._emit(RunEventType.CHECKPOINT_SAVED, wfi, ctx, payload={"checkpoint_id": chk.id, "step_id": step_id})
         # Un checkpoint clôt toujours le step qu'il nomme : STEP_COMPLETED est
         # l'événement de step, CHECKPOINT_SAVED celui de persistance. Les deux
         # sont vrais en même temps, `missions/trace.py` ne lisait jusqu'ici
         # que le second faute d'un producteur pour le premier.
-        self._emit(RunEventType.STEP_COMPLETED, wfi, ctx, payload={"step_id": step_id})
+        if not have_completed:
+            self._emit(RunEventType.STEP_COMPLETED, wfi, ctx, payload={"step_id": step_id})
         return wfi, chk
 
     def resume_from_checkpoint(self, wfi_id: str, ctx: ExecutionContext) -> tuple[WorkflowInstance, Checkpoint | None]:
@@ -531,6 +548,15 @@ class RuntimeKernel:
         wfi = instances.get(wfi_id)
         if wfi is None:
             raise GrimoireRuntimeError(f"WorkflowInstance not found: {wfi_id}")
+        if wfi.status in (WorkflowStatus.COMPLETED, WorkflowStatus.VERIFIED):
+            # W1-03b : le statut est écrit avant l'événement ; un crash entre les
+            # deux laisse une instance terminée sans ``workflow.completed``.
+            # Rejouer ``complete`` ne refait que l'événement manquant.
+            if not any(
+                e.event_type is RunEventType.WORKFLOW_COMPLETED for e in self.get_run_events(wfi_id)
+            ):
+                self._emit(RunEventType.WORKFLOW_COMPLETED, wfi, ctx)
+            return wfi
         if wfi.status == WorkflowStatus.CHECKPOINTED:
             wfi = self._transition(wfi, WorkflowStatus.RUNNING)
         wfi = self._transition(wfi, WorkflowStatus.COMPLETED)

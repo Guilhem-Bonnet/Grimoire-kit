@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import uuid
 from dataclasses import replace
@@ -34,12 +35,47 @@ from typing import Any
 from grimoire.core.exceptions import GrimoireRuntimeError
 from grimoire.core.fsio import atomic_write, locked
 from grimoire.flows.blueprint_loader import build_node_contracts, load_blueprint, topo_order
+from grimoire.flows.doctor import FlowDoctorReport, checkpoint_interrupted, diagnose
 from grimoire.flows.executor import InteractiveNodeExecutor, NodeExecutor
 from grimoire.flows.schemas import FlowRunMeta, FlowStatusView, NodeContract, ResumeOutcome
 from grimoire.runtime.kernel import RuntimeKernel
-from grimoire.runtime.schemas import ExecutionContext, RunEventType, WorkflowInstance, WorkflowStatus
+from grimoire.runtime.schemas import Checkpoint, ExecutionContext, RunEventType, WorkflowInstance, WorkflowStatus
 
-__all__ = ["FlowEngine", "check_output_against_contract", "checkpoint_decision_faults", "rust_backend_available"]
+__all__ = [
+    "FlowEngine",
+    "check_output_against_contract",
+    "checkpoint_decision_faults",
+    "log_repairs",
+    "rust_backend_available",
+]
+
+_LOG = logging.getLogger(__name__)
+
+
+def log_repairs(run_id: str, repaired: tuple[str, ...]) -> None:
+    """Journalise (WARNING) ce que ``resume`` a réparé — pour les pilotes qui ne rendent pas ``repaired``.
+
+    ``resume`` complète l'écriture qu'un crash a interrompue même avec
+    ``allow_replay=False``. Les pilotes automatiques qui n'ont pas de rapport où
+    la loger (``genres``, ``upgrade-flow``) l'appellent pour qu'une réparation
+    ne soit jamais silencieuse (W1-03b-S1).
+    """
+    for note in repaired:
+        _LOG.warning("flow %s : réparé — %s", run_id, note)
+
+def _refusal(message: str, run_id: str, repaired: tuple[str, ...]) -> GrimoireRuntimeError:
+    """L'erreur de ``resume`` qui dit aussi ce qu'il a réparé avant de refuser (W1-03b-SK2-02).
+
+    ``resume`` complète l'écriture interrompue AVANT de juger la sortie : si la
+    sortie est ensuite refusée, aucun ``ResumeOutcome`` ne porte la réparation,
+    alors qu'elle est écrite. Elle figure donc dans le message et dans le journal
+    de logs ; sans réparation, le message est rendu tel quel.
+    """
+    if not repaired:
+        return GrimoireRuntimeError(message)
+    log_repairs(run_id, repaired)
+    return GrimoireRuntimeError(f"{message} (réparé avant ce refus : {' ; '.join(repaired)})")
+
 
 try:
     import grimoire_flows_core as _rust_core
@@ -175,6 +211,14 @@ def _output_digest(output: Any) -> str | None:
     except (TypeError, ValueError):
         return None
     return hashlib.sha256(canonical.encode("ascii")).hexdigest()
+
+
+def _checkpoint_digest(chk: Checkpoint) -> str | None:
+    """L'empreinte de sortie rangée dans ce checkpoint (W1-03), ou ``None`` s'il n'en porte pas."""
+    for ref in chk.evidence_refs:
+        if ref.startswith(_OUTPUT_DIGEST_PREFIX):
+            return ref[len(_OUTPUT_DIGEST_PREFIX) :]
+    return None
 
 
 _CHECKPOINT_DECISIONS = ("approve", "reject", "amend")
@@ -324,8 +368,12 @@ class FlowEngine:
         checkpoint_pending_head: str | None = None
 
         if wfi.status is WorkflowStatus.BLOCKED:
+            # W1-03b : le statut BLOCKED est écrit AVANT l'événement STEP_FAILED.
+            # Un STEP_STARTED plus récent que le dernier STEP_FAILED (ou sans
+            # aucun STEP_FAILED) signe un crash entre les deux : le node bloqué
+            # est alors celui qu'on venait d'ouvrir, jamais le premier du run.
             for event in reversed(self._kernel.get_run_events(wfi.id)):
-                if event.event_type is RunEventType.STEP_FAILED:
+                if event.event_type in (RunEventType.STEP_FAILED, RunEventType.STEP_STARTED):
                     last_step_failed = event.payload.get("step_id")
                     break
         elif wfi.status is WorkflowStatus.CHECKPOINTED:
@@ -342,6 +390,18 @@ class FlowEngine:
                 if event.event_type is RunEventType.STEP_STARTED:
                     last_step_started = event.payload.get("step_id")
                     break
+            if wfi.status is WorkflowStatus.RUNNING and last_step_started is not None:
+                # W1-03b : le statut RUNNING est écrit AVANT STEP_STARTED (et
+                # avant le statut CHECKPOINTED d'un checkpoint déjà écrit). Si le
+                # dernier node ouvert est déjà dans le dernier checkpoint, il est
+                # franchi : le courant est le suivant, pas lui — sinon la reprise
+                # le rejouerait.
+                checkpoints = self._kernel.list_checkpoints(wfi.id)
+                if checkpoints and last_step_started in checkpoints[-1].state.completed_steps:
+                    pending = checkpoints[-1].state.pending_steps
+                    if not pending:
+                        return None  # tout est checkpointé : il ne reste qu'à terminer
+                    last_step_started = pending[0]
 
         if _use_rust_backend():
             assert _rust_core is not None  # guarded by _use_rust_backend
@@ -379,6 +439,47 @@ class FlowEngine:
                     "at": event.created_at,
                 }
         return None
+
+    def _reconcile(
+        self, wfi: WorkflowInstance, ctx: ExecutionContext
+    ) -> tuple[WorkflowInstance, Checkpoint | None]:
+        """Complète le checkpoint qu'un crash a laissé à moitié écrit (W1-03b).
+
+        Un checkpoint s'écrit en cinq temps sans transaction commune (fichier
+        de checkpoints, statut, références, ``CHECKPOINT_SAVED``,
+        ``STEP_COMPLETED``). Le fichier de checkpoints est écrit en premier : sa
+        dernière ligne fait autorité sur « ce node est franchi ». Deux états
+        signent une écriture interrompue :
+
+        - RUNNING alors que le dernier node ouvert est déjà le dernier
+          checkpoint (statut CHECKPOINTED jamais écrit, ou RUNNING réécrit par
+          ``advance_step``/``complete`` avant l'événement qui le suit) ;
+        - CHECKPOINTED alors que les références de l'instance ou l'un des deux
+          événements manquent.
+
+        La réparation rejoue ``checkpoint`` avec les données DU checkpoint déjà
+        écrit — idempotent côté kernel, aucune décision nouvelle. Rend
+        l'instance relue et le checkpoint complété, ou ``(wfi, None)`` si rien
+        n'était interrompu.
+        """
+        if wfi.status not in (WorkflowStatus.RUNNING, WorkflowStatus.CHECKPOINTED):
+            return wfi, None
+        checkpoints = self._kernel.list_checkpoints(wfi.id)
+        if not checkpoints:
+            return wfi, None
+        last = checkpoints[-1]
+        interrupted = checkpoint_interrupted(wfi, checkpoints, self._kernel.get_run_events(wfi.id))
+        if not interrupted:
+            return wfi, None
+        wfi, healed = self._kernel.checkpoint(
+            wfi.id,
+            ctx,
+            step_id=last.step_id,
+            completed_steps=list(last.state.completed_steps),
+            pending_steps=list(last.state.pending_steps),
+            evidence_refs=list(last.evidence_refs),
+        )
+        return wfi, healed
 
     # ── Commandes ────────────────────────────────────────────────────────────
 
@@ -483,8 +584,21 @@ class FlowEngine:
                 digest = _output_digest(output)
                 crossed = self._crossed_node_for_digest(wfi, digest) if digest is not None else None
                 if crossed is not None:
+                    repaired: tuple[str, ...] = ()
+                    if not any(
+                        e.event_type is RunEventType.WORKFLOW_COMPLETED for e in self._kernel.get_run_events(wfi.id)
+                    ):
+                        # Le statut COMPLETED est écrit avant son événement : un
+                        # crash entre les deux laisse le journal sans clôture.
+                        self._kernel.complete(wfi.id, self._ctx_for(wfi))
+                        repaired = ("événement workflow.completed manquant rétabli",)
                     return ResumeOutcome(
-                        ok=True, finished=True, node_id=meta.order[-1], replay=True, replay_of=crossed
+                        ok=True,
+                        finished=True,
+                        node_id=meta.order[-1],
+                        replay=True,
+                        replay_of=crossed,
+                        repaired=repaired,
                     )
             raise GrimoireRuntimeError(f"run {run_id} est {wfi.status.value}, rien à reprendre")
 
@@ -492,11 +606,71 @@ class FlowEngine:
         contracts = build_node_contracts(
             load_blueprint(Path(meta.blueprint_path), self._project_root), self._project_root
         )
-        current_id = self._current_node(wfi, order)
-        if current_id is None or current_id not in contracts:
-            raise GrimoireRuntimeError(f"run {run_id} : aucun node courant résoluble (status={wfi.status.value})")
-
         ctx = self._ctx_for(wfi)
+        digest = _output_digest(output)
+        # W1-03b : avant toute décision, complète le checkpoint qu'un crash a
+        # laissé à moitié écrit — la suite lit alors un état cohérent.
+        wfi, healed = self._reconcile(wfi, ctx)
+        repaired_notes: tuple[str, ...] = (
+            (f"checkpoint {healed.step_id} : écriture interrompue complétée (statut, références, événements)",)
+            if healed is not None
+            else ()
+        )
+        if healed is not None and allow_replay and digest is not None and digest == _checkpoint_digest(healed):
+            # L'hôte renvoie l'appel que le crash a interrompu : c'est un rejeu
+            # de CE node, que la sortie soit ou non valide pour le suivant.
+            if not healed.state.pending_steps:
+                self._kernel.complete(wfi.id, ctx)
+                return ResumeOutcome(
+                    ok=True,
+                    finished=True,
+                    node_id=healed.step_id,
+                    replay=True,
+                    replay_of=healed.step_id,
+                    repaired=(*repaired_notes, "run terminé : tous les nodes étaient déjà checkpointés"),
+                )
+            following = healed.state.pending_steps[0]
+            return ResumeOutcome(
+                ok=True,
+                finished=False,
+                node_id=following,
+                contract=contracts.get(following),
+                replay=True,
+                replay_of=healed.step_id,
+                repaired=repaired_notes,
+            )
+
+        current_id = self._current_node(wfi, order)
+        if current_id is None and wfi.status is WorkflowStatus.CHECKPOINTED:
+            last_checkpoint = self._kernel.list_checkpoints(wfi.id)[-1:]
+            if last_checkpoint and not last_checkpoint[0].state.pending_steps:
+                # Tous les nodes sont checkpointés ; seul ``complete`` n'a pas eu
+                # lieu. Terminer sur la foi de la dernière sortie ACCEPTÉE : la
+                # renvoyer suffit, toute autre est refusée (jamais de clôture
+                # sur une sortie que ce run n'a pas vue).
+                last = last_checkpoint[0]
+                if allow_replay and digest is not None and digest == _checkpoint_digest(last):
+                    self._kernel.complete(wfi.id, ctx)
+                    return ResumeOutcome(
+                        ok=True,
+                        finished=True,
+                        node_id=last.step_id,
+                        replay=True,
+                        replay_of=last.step_id,
+                        repaired=(*repaired_notes, "run terminé : tous les nodes étaient déjà checkpointés"),
+                    )
+                raise _refusal(
+                    f"run {run_id} : tous les nodes sont déjà validés (dernier : {last.step_id}) mais le run n'est pas "
+                    f"terminé ; renvoyer la sortie acceptée du node {last.step_id} pour le terminer, "
+                    "ou `grimoire flow doctor` / `grimoire flow abort`",
+                    run_id,
+                    repaired_notes,
+                )
+        if current_id is None or current_id not in contracts:
+            raise _refusal(
+                f"run {run_id} : aucun node courant résoluble (status={wfi.status.value})", run_id, repaired_notes
+            )
+
         contract = contracts[current_id]
         faults = check_output_against_contract(contract, output)
         if contract.kind == "checkpoint":
@@ -506,23 +680,37 @@ class FlowEngine:
             # rien) — vérifiée ici, Python-only, au même endroit que le
             # reste de la précondition de resume().
             faults = [*faults, *checkpoint_decision_faults(output)]
-        digest = _output_digest(output)
         if faults and allow_replay and digest is not None:
             # Vérification pure, avant toute écriture : un rejeu ne doit ni
             # rouvrir le node courant (STEP_STARTED) ni le bloquer.
             crossed = self._crossed_node_for_digest(wfi, digest)
             if crossed is not None:
                 return ResumeOutcome(
-                    ok=True, finished=False, node_id=current_id, contract=contract, replay=True, replay_of=crossed
+                    ok=True,
+                    finished=False,
+                    node_id=current_id,
+                    contract=contract,
+                    replay=True,
+                    replay_of=crossed,
+                    repaired=repaired_notes,
                 )
         if wfi.status is not WorkflowStatus.RUNNING:
+            # (Le docteur s'appuie sur ce test : un run déjà RUNNING n'est pas rouvert,
+            # voir `doctor.resume_realigns_status`.)
             # CHECKPOINTED (crash avant le advance_step du node suivant) ou
             # BLOCKED (retentative après correction de l'hôte) : les deux
             # ramènent au même point, ouvrir l'exécution du node courant.
             wfi = self._kernel.advance_step(wfi.id, ctx, step_id=current_id)
         if faults:
             wfi = self._kernel.fail_step(wfi.id, ctx, step_id=current_id, reason="; ".join(faults))
-            return ResumeOutcome(ok=False, finished=False, node_id=current_id, faults=tuple(faults), contract=contract)
+            return ResumeOutcome(
+                ok=False,
+                finished=False,
+                node_id=current_id,
+                faults=tuple(faults),
+                contract=contract,
+                repaired=repaired_notes,
+            )
 
         # Décision "termine / avance vers quel node" déléguée à
         # grimoire_flows_core.resume_outcome (issue #354) quand le backend
@@ -536,7 +724,7 @@ class FlowEngine:
             try:
                 _ok, finished, next_id, _faults = _rust_core.resume_outcome(order, current_id, [])
             except ValueError as exc:
-                raise GrimoireRuntimeError(str(exc)) from exc
+                raise _refusal(str(exc), run_id, repaired_notes) from exc
         else:
             idx0 = order.index(current_id)
             finished = idx0 == len(order) - 1
@@ -555,7 +743,7 @@ class FlowEngine:
         )
         if finished:
             self._kernel.complete(wfi.id, ctx)
-            return ResumeOutcome(ok=True, finished=True, node_id=current_id, contract=None)
+            return ResumeOutcome(ok=True, finished=True, node_id=current_id, contract=None, repaired=repaired_notes)
 
         assert next_id is not None  # finished est False => resume_outcome a nommé le node suivant
         next_contract = contracts[next_id]
@@ -566,7 +754,9 @@ class FlowEngine:
         (executor or InteractiveNodeExecutor()).execute(
             next_contract, context_pack=self._context_pack(wfi, meta.blueprint_id)
         )
-        return ResumeOutcome(ok=True, finished=False, node_id=next_id, contract=next_contract)
+        return ResumeOutcome(
+            ok=True, finished=False, node_id=next_id, contract=next_contract, repaired=repaired_notes
+        )
 
     def status(self, run_id: str, *, include_contract: bool = True) -> FlowStatusView:
         """Vue de lecture seule — ne mute jamais le kernel."""
@@ -626,6 +816,37 @@ class FlowEngine:
             contract=contract,
             parent_run_id=meta.parent_run_id,
         )
+
+    def doctor(self, run_id: str) -> FlowDoctorReport:
+        """Rejoue le journal d'un run et vérifie ses invariants — lecture seule (W1-03b).
+
+        Le journal d'événements fait autorité ; toute réparation est proposée
+        dans le rapport, jamais appliquée. Lève si ni la méta ni l'instance du
+        run n'existent (rien à diagnostiquer).
+        """
+        path = self._meta_path(run_id)
+        meta: FlowRunMeta | None = None
+        meta_unreadable = ""
+        if path.is_file():
+            try:
+                meta = FlowRunMeta.from_dict(json.loads(path.read_text(encoding="utf-8")))
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                meta_unreadable = f"méta illisible ({exc})"
+        wfi = self._kernel.get_instance(run_id)
+        if meta is None and wfi is None and not meta_unreadable:
+            raise GrimoireRuntimeError(f"run introuvable : {run_id}")
+        current = self._current_node(wfi, list(meta.order)) if meta is not None and wfi is not None else None
+        report = diagnose(
+            run_id=run_id,
+            meta=meta,
+            instance=wfi,
+            events=self._kernel.get_run_events(run_id),
+            checkpoints=self._kernel.list_checkpoints(run_id),
+            current_node=current,
+        )
+        if meta_unreadable:
+            return replace(report, unevaluated=(*report.unevaluated, meta_unreadable))
+        return report
 
     def list_runs(self) -> list[FlowStatusView]:
         return [self.status(run_id, include_contract=False) for run_id in self.list_run_ids()]
