@@ -21,6 +21,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   - Lignes courtes : une ligne de 5 ou 6 cellules est complétée jusqu'à 7 pour le contrôle de fond (« prouvé » sans preuve, « utiliser » sans « prouvé »), en plus de `claims.row_invalid`. En dessous de 5 cellules, seule la forme est signalée : la phrase « le fond se contrôle quelle que soit la forme » vaut pour les lignes d'au moins 5 cellules.
   - Forme du tableau : une ligne sans barre initiale (`CL-002 | b | … | utiliser`), indentée ou citée (`> | CL-002 | … |`), et une ligne placée sous une seconde section `## Claims supplémentaires`, sont évaluées comme les autres (« prouvé » sans preuve, `claims.row_invalid`) ; elles étaient ignorées, et un registre qui ne contenait qu'une telle ligne était diagnostiqué `claims.empty`. Une ligne sans barre non échappée n'est pas une ligne de tableau (texte libre, légende). Non traité : barre pleine chasse `｜`.
   - Non fait : la confiance et le type de l'affirmation ne sont pas validés (vocabulaire du template non figé). Une ligne dont la cellule Affirmation est renseignée mais vide de sens (un seul caractère, par exemple) passe.
+- fix(hosts): un appel `Agent` de Claude Code sans `subagent_type` est journalisé `general-purpose` (son défaut documenté), plus « (sans nom) » ; la table des délégations de `grimoire registry dispatches` ne coupe plus un même agent en deux lignes (#735).
 
 ## [3.62.1] - 2026-10-03
 
