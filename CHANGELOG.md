@@ -17,6 +17,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   - `main` lit `results.jsonl` à chaque lancement : les lignes vides sont ignorées (comme `--report-only`), une ligne tronquée arrête la campagne (code 1) avec un message qui nomme le fichier et la ligne, avant tout run.
   - L'errata ne dit plus que les lots K et L sont sains : `python/bowling` `kit-gov` run 2 du lot K a lu `hidden-tests/bowling_test.py` et compte comme succès (2026-09-29T22:26:27). La disposition du banc expose `hidden-tests/` et les tests copiés dans les `run<i>` précédents ; ni le remède ni cette PR n'y touchent : W1-08b.
   - Non fait : détection de la lecture de tests cachés pendant le run (W1-08b) ; rejeu du lot J ; mypy du script reste à 1 erreur préexistante (`_collect_dispatch_stats`).
+- fix(hosts): un appel `Agent` de Claude Code sans `subagent_type` est journalisé `general-purpose` (son défaut documenté), plus « (sans nom) » ; la table des délégations de `grimoire registry dispatches` ne coupe plus un même agent en deux lignes (#735).
 
 ## [3.62.1] - 2026-10-03
 
