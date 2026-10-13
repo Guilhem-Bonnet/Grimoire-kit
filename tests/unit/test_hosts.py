@@ -517,9 +517,8 @@ def test_claude_model_affinity_crosses_reasoning_and_cost(project: Path) -> None
     - `cost: low` + `reasoning: medium` doit dégrader vers haiku : un agent
       qu'on veut bon marché ne doit pas hériter du modèle de session par
       défaut.
-    - `reasoning: high` gagne toujours, même avec `cost: low` (cas réel du
-      concierge : gros raisonnement de triage, invoqué à chaque tour) — le
-      raisonnement fort ne doit jamais être rétrogradé pour l'économie.
+    - `reasoning: high` + `cost: low` (cas réel du concierge : triage en
+      lecture seule, invoqué à chaque tour) donne `sonnet`, pas `opus` (#740).
     - Sans signal fort dans un sens ou l'autre (medium/medium), `inherit`
       reste le défaut honnête.
     """
@@ -543,7 +542,7 @@ def test_claude_model_affinity_crosses_reasoning_and_cost(project: Path) -> None
     gros_cerveau = (project / ".claude/agents/gros-cerveau.md").read_text(encoding="utf-8")
     concierge = (project / ".claude/agents/concierge.md").read_text(encoding="utf-8")
     assert "model: 'haiku'" in petit_malin  # cost low prime sur reasoning medium
-    assert "model: 'opus'" in gros_cerveau  # reasoning high prime sur cost low
+    assert "model: 'sonnet'" in gros_cerveau  # reasoning high + cost low : palier intermédiaire (#740)
     assert "model: 'inherit'" in concierge  # medium/medium : pas de signal fort
 
 
@@ -2252,6 +2251,17 @@ def test_the_entry_persona_is_a_one_line_summary_not_a_full_read_mandate(project
     # Le résumé doit rester très inférieur au mandat de lecture intégrale
     # qu'il remplace (~2 800 tokens, mesurés par le diagnostic).
     assert len(text) < 500, len(text)
+
+
+def test_dispatch_policy_gives_an_unclassed_subtask_a_cheap_default(project: Path) -> None:
+    """#740 : mesuré le 2026-10-12, 54 % des délégations omettaient `model=` et tournaient sur
+    le modèle de la session. Sans classe calculée, la politique donne un défaut (haiku pour
+    chercher, sonnet pour juger) et réserve l'omission au jugement propre."""
+    from grimoire.hosts.emitters.claude_code import _dispatch_policy_section
+
+    policy = _dispatch_policy_section()
+    assert "Sans classe calculée" in policy
+    assert "N'omets `model=` que si la sous-tâche exige ton propre jugement" in policy
 
 
 def test_claude_session_start_carries_the_dispatch_policy_and_roster(project: Path) -> None:
