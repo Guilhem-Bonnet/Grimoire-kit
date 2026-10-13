@@ -518,7 +518,7 @@ def test_claude_model_affinity_crosses_reasoning_and_cost(project: Path) -> None
       qu'on veut bon marché ne doit pas hériter du modèle de session par
       défaut.
     - `reasoning: high` + `cost: low` (cas réel du concierge : triage en
-      lecture seule, invoqué à chaque tour) donne `sonnet`, pas `opus` (#736).
+      lecture seule, invoqué à chaque tour) donne `sonnet`, pas `opus` (#740).
     - Sans signal fort dans un sens ou l'autre (medium/medium), `inherit`
       reste le défaut honnête.
     """
@@ -542,7 +542,7 @@ def test_claude_model_affinity_crosses_reasoning_and_cost(project: Path) -> None
     gros_cerveau = (project / ".claude/agents/gros-cerveau.md").read_text(encoding="utf-8")
     concierge = (project / ".claude/agents/concierge.md").read_text(encoding="utf-8")
     assert "model: 'haiku'" in petit_malin  # cost low prime sur reasoning medium
-    assert "model: 'sonnet'" in gros_cerveau  # reasoning high + cost low : palier intermédiaire (#736)
+    assert "model: 'sonnet'" in gros_cerveau  # reasoning high + cost low : palier intermédiaire (#740)
     assert "model: 'inherit'" in concierge  # medium/medium : pas de signal fort
 
 
@@ -2247,7 +2247,7 @@ def test_the_entry_persona_is_a_one_line_summary_not_a_full_read_mandate(project
 
 
 def test_dispatch_policy_gives_an_unclassed_subtask_a_cheap_default(project: Path) -> None:
-    """#736 : mesuré le 2026-10-12, 54 % des délégations omettaient `model=` et tournaient sur
+    """#740 : mesuré le 2026-10-12, 54 % des délégations omettaient `model=` et tournaient sur
     le modèle de la session. Sans classe calculée, la politique donne un défaut (haiku pour
     chercher, sonnet pour juger) et réserve l'omission au jugement propre."""
     from grimoire.hosts.emitters.claude_code import _dispatch_policy_section

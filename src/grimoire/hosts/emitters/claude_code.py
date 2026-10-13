@@ -104,7 +104,7 @@ def _model_for(agent: AgentSpec) -> str:
     ``cost: low`` : un agent invoqué souvent (le concierge, qui trie en
     lecture seule) prend alors ``sonnet``, le palier qui raisonne sans payer
     ``opus`` à chaque appel — mesuré le 2026-10-12, 54 % des délégations sans
-    ``model=`` tombaient sur ce défaut (#736). En dessous de ce plancher,
+    ``model=`` tombaient sur ce défaut (#740). En dessous de ce plancher,
     `cost: low` prime sur `reasoning` : un agent qu'on veut bon marché doit
     rester bon marché même à raisonnement moyen. Ce n'est qu'en l'absence de
     tout signal fort — ni gros raisonnement, ni petit coût, ni petit

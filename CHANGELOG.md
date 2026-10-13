@@ -7,6 +7,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- fix(hosts): défaut économique de délégation — sans classe calculée, une sous-tâche de recherche, lecture ou mesure part en `haiku`, une revue ou analyse en `sonnet` ; `model=` n'est omis que pour le jugement propre de l'orchestrateur, et le concierge lancé en sous-agent (`reasoning: high`, `cost: low`) est émis en `sonnet` au lieu d'`opus`. Mesuré le 2026-10-12 : 54,2 % des délégations sans `model=` sur les sessions Opus (#740).
 - fix(hosts): un appel `Agent` de Claude Code sans `subagent_type` est journalisé `general-purpose` (son défaut documenté), plus « (sans nom) » ; la table des délégations de `grimoire registry dispatches` ne coupe plus un même agent en deux lignes (#735).
 
 ## [3.62.1] - 2026-10-03
