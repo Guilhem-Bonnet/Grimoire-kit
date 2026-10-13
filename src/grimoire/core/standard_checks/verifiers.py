@@ -411,10 +411,8 @@ def _verify_dispatch_cost_slo(root: Path, result: StandardVerificationResult) ->
     - ``error`` à la place du ``warning`` ci-dessus, uniquement quand le
       projet déclare ``dispatch_cost_slo.enforce: true`` — un dépassement
       silencieux par défaut, un gate dur seulement sur demande explicite.
-    - ``warning`` (jamais ``error``, même avec ``enforce``) quand des appels
-      n'ont pas de coût : le SLO est « non évalué », pas violé. ``enforce`` ne
-      durcit qu'un dépassement prouvé ; sinon un historique ``trace.v1`` (où
-      ``0.0`` est relu comme inconnu) ferait échouer le gate pour toujours.
+    - ``warning`` (jamais ``error``) si des appels n'ont pas de coût : SLO non évalué, pas
+      violé ; ``enforce`` ne durcit qu'un dépassement prouvé (un ``trace.v1`` bloquerait à vie).
     """
     rel_path = STANDARD_DIR / "llm-provider-registry.yaml"
     data = _load_yaml_file(root, rel_path, result)
