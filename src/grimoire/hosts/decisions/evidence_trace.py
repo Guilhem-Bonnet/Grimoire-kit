@@ -124,6 +124,11 @@ _DELEGATION_TOOL_NAMES = frozenset({"task", "agent", "runsubagent"})
 #: ``runSubagent`` invocation (audit: ``_scratch/delegation-audit/
 #: delegation_audit.py``, #657 follow-up) — the rest are defensive fallbacks
 #: for a host that spells them differently still.
+#: Claude Code's ``Agent``/``Task`` without ``subagent_type`` runs ``general-purpose``
+#: (the tool's documented default) — recorded under that name, not "(sans nom)",
+#: or the delegation table splits one agent into two rows.
+_CLAUDE_DEFAULT_SUBAGENT = "general-purpose"
+_CLAUDE_DELEGATION_TOOLS = frozenset({"Agent", "Task"})
 _DELEGATION_AGENT_KEYS = ("subagent_type", "agent_type", "agentType", "agentName", "agent", "name")
 _DELEGATION_MODEL_KEYS = ("model", "modelName")
 #: ``prompt`` is deliberately absent: it is the full delegation prompt, not a
@@ -189,7 +194,8 @@ def _record_delegation(hook: HookInput, task_id: str) -> None:
         from grimoire.traces.schemas import TraceOutcome
 
         fields = _delegation_fields(hook.tool_input)
-        agent_name = _first_str(fields, _DELEGATION_AGENT_KEYS) or "(sans nom)"
+        default_name = _CLAUDE_DEFAULT_SUBAGENT if hook.tool_name in _CLAUDE_DELEGATION_TOOLS else "(sans nom)"
+        agent_name = _first_str(fields, _DELEGATION_AGENT_KEYS) or default_name
         model = _first_str(fields, _DELEGATION_MODEL_KEYS)
         description = _first_str(fields, _DELEGATION_DESCRIPTION_KEYS)[:_DELEGATION_DESCRIPTION_MAX_LEN]
 
