@@ -30,6 +30,10 @@ Invariants vérifiés (un code par violation) :
 - ``step_skipped`` / ``step_unknown`` / ``step_reopened`` / ``step_duplicated`` : les nodes se
   franchissent dans l'ordre de la méta, chacun une fois ;
 - ``step_completed_without_start`` : un node franchi sans avoir été ouvert ;
+- ``step_failed_without_start`` : un refus (``step.failed``) ne porte que sur le
+  node ouvert ;
+- ``step_started_missing`` : une méta de run suppose au moins un ``step.started``
+  (le moteur l'écrit avant la méta) ;
 - ``checkpoint_event_missing`` / ``step_completed_missing`` : tout checkpoint a
   ses deux événements ;
 - ``checkpoint_duplicate`` / ``checkpoint_order_mismatch`` : un checkpoint par
@@ -99,6 +103,8 @@ _REPAIRS: dict[str, str] = {
     "step_reopened": "restaurer run_events.jsonl : un node franchi ne se rouvre pas",
     "step_duplicated": "restaurer run_events.jsonl : un node ne se franchit qu'une fois",
     "step_completed_without_start": "restaurer run_events.jsonl : l'événement `step.started` a disparu",
+    "step_failed_without_start": "restaurer run_events.jsonl : l'événement `step.started` du node refusé a disparu",
+    "step_started_missing": "restaurer run_events.jsonl : l'événement `step.started` a disparu",
     "checkpoint_event_missing": _RESUME,
     "step_completed_missing": _RESUME,
     "checkpoint_duplicate": "retirer la ligne en double de checkpoints.jsonl (le premier checkpoint du node fait foi)",
@@ -265,6 +271,11 @@ def _derive_from_events(
             open_node = step
         elif kind is RunEventType.STEP_FAILED:
             status = "blocked"
+            # Un refus se juge sur le node ouvert : `engine.run` écrit `step.started` avant tout
+            # `fail_step`, et un crash ne produit jamais un `step.failed` hors de ce node.
+            if step != open_node:
+                opened = f"le node ouvert est {open_node}" if open_node is not None else "aucun node n'est ouvert"
+                violations.append(_violation("step_failed_without_start", f"node {step} refusé alors que {opened}", step))
         elif kind is RunEventType.CHECKPOINT_SAVED:
             status = "checkpointed"
         elif kind is RunEventType.STEP_COMPLETED:
@@ -343,6 +354,13 @@ def diagnose(
 
     done, open_node, derived_status, replay_violations = _derive_from_events(events, order)
     violations.extend(replay_violations)
+    # `engine.run` écrit `step.started` AVANT la méta (frontière 4 avant 5) : une méta sans aucun
+    # `step.started`, sur un run que le journal dit en cours ou bloqué, a perdu cet événement.
+    # Sans lui, le moteur retombe sur `order[0]` et le journal, vide de tout node, semble sain.
+    if derived_status in ("running", "blocked") and not any(e.event_type is RunEventType.STEP_STARTED for e in events):
+        violations.append(
+            _violation("step_started_missing", f"statut dérivé {derived_status!r} mais aucun step.started dans le journal")
+        )
 
     real = [c for c in checkpoints if c.step_id != "refused"]
     # Le fichier de checkpoints est écrit AVANT le statut et les événements : un

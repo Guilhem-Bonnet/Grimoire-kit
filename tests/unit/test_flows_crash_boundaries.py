@@ -768,3 +768,95 @@ def test_refusal_formats_the_repairs_and_logs_them(caplog: pytest.LogCaptureFixt
     with caplog.at_level(logging.WARNING, logger="grimoire.flows.engine"):
         flows_engine._refusal("m", "WFI-x-002", ("n",))
     assert any("WFI-x-002" in r.getMessage() for r in caplog.records)
+
+
+# ── W1-03b-SK3-01 : un `step.started` perdu ne se confond pas avec un run sain ──
+
+
+def _play_calls(tmp_path: Path, calls: list[tuple[str, dict[str, Any] | None]]) -> tuple[FlowEngine, str]:
+    """Joue ``calls`` sans crash et rend l'hôte et le run."""
+    bp = _blueprint(tmp_path)
+    engine = _engine(tmp_path)
+    run_id: str | None = None
+    for call in calls:
+        result = _call(engine, bp, run_id, call)
+        if call[0] == "run":
+            run_id = result
+    assert run_id is not None
+    return engine, run_id
+
+
+def _drop_event_at(tmp_path: Path, index: int) -> dict[str, Any]:
+    path = tmp_path / "runtime" / "run_events.jsonl"
+    lines = path.read_text(encoding="utf-8").splitlines()
+    removed: dict[str, Any] = json.loads(lines[index])
+    path.write_text("\n".join(lines[:index] + lines[index + 1 :]) + "\n", encoding="utf-8")
+    return removed
+
+
+@pytest.mark.parametrize(
+    ("calls", "expected_code"),
+    [
+        pytest.param(CALLS[:1], "step_started_missing", id="run-frais"),
+        pytest.param(CALLS[:2], "step_failed_without_start", id="refus-puis-arret"),
+        pytest.param(CALLS[:3], "step_failed_without_start", id="refus-puis-a-accepte"),
+        pytest.param(CALLS, "step_failed_without_start", id="refus-puis-run-termine"),
+    ],
+)
+def test_the_doctor_flags_a_run_whose_first_step_started_is_gone(
+    tmp_path: Path, calls: list[tuple[str, dict[str, Any] | None]], expected_code: str
+) -> None:
+    """Le premier `step.started` retiré (index 1) laissait le docteur à ``ok=True`` : journal d'un run sans node ouvert."""
+    engine, run_id = _play_calls(tmp_path, calls)
+    assert engine.doctor(run_id).ok
+    removed = _drop_event_at(tmp_path, 1)
+    assert removed["event_type"] == RunEventType.STEP_STARTED.value
+
+    report = engine.doctor(run_id)
+
+    assert not report.ok, report.to_dict()
+    assert expected_code in {v.code for v in report.violations}
+    assert all(v.repair for v in report.violations)
+    # Jamais `resume` : il ne réécrit pas un `step.started` perdu (et ne le ferait pas pour un refus passé).
+    assert not any("flow resume" in v.repair for v in report.violations if v.code == expected_code)
+    assert "restaurer run_events.jsonl" in next(v for v in report.violations if v.code == expected_code).repair
+
+
+def test_the_fresh_run_without_step_started_stays_red_after_a_resume(tmp_path: Path) -> None:
+    """Rejoué : `resume(OUT_A)` réussit mais le journal reste altéré, et le docteur le dit encore."""
+    engine, run_id = _play_calls(tmp_path, CALLS[:1])
+    _drop_event_at(tmp_path, 1)
+    assert "step_started_missing" in {v.code for v in engine.doctor(run_id).violations}
+
+    assert engine.resume(run_id, output=OUT_A, executor=InteractiveNodeExecutor(stream=io.StringIO())).ok
+
+    report = engine.doctor(run_id)
+    assert not report.ok
+    assert "step_completed_without_start" in {v.code for v in report.violations}
+
+
+#: Suppressions d'un événement du scénario avec refus qu'aucun docteur ne peut distinguer d'un crash :
+#: ``step.failed`` (crash après ``fail_step``, avant son événement, puis ``resume`` d'une sortie valide qui
+#: rouvre le node) et le second ``step.started`` du node a (crash après ``advance_step``, avant son
+#: événement : ``resume`` ne le réécrit pas). Les deux journaux sont ceux qu'un crash laisse, et
+#: ``test_crash_then_resume_leaves_a_run_the_doctor_calls_healthy`` exige qu'ils soient jugés sains.
+_INDISTINGUISHABLE_FROM_A_CRASH = {"step.failed#2", "step.started#3"}
+
+
+def test_every_deleted_event_of_a_refused_then_finished_run_is_detected_but_the_two_a_crash_also_leaves(
+    tmp_path: Path,
+) -> None:
+    engine, run_id = _play_calls(tmp_path, CALLS)
+    events_path = tmp_path / "runtime" / "run_events.jsonl"
+    original = events_path.read_text(encoding="utf-8").splitlines()
+    assert len(original) == 13
+
+    undetected: set[str] = set()
+    for index in range(len(original)):
+        events_path.write_text("\n".join(original[:index] + original[index + 1 :]) + "\n", encoding="utf-8")
+        if engine.doctor(run_id).ok:
+            undetected.add(json.loads(original[index])["event_type"] + f"#{index}")
+    events_path.write_text("\n".join(original) + "\n", encoding="utf-8")
+
+    assert undetected == _INDISTINGUISHABLE_FROM_A_CRASH
+    assert engine.doctor(run_id).ok
