@@ -698,7 +698,7 @@ def upgrade_flow_run(
         # refus d'`apply` ci-dessus.
         node_outputs[node_id] = detail
         output = _submit_envelope(contract, detail)
-        outcome = engine.resume(run_id, output=output, executor=_silent_executor())
+        outcome = engine.resume(run_id, output=output, executor=_silent_executor(), allow_replay=False)
         if not outcome.ok:
             _fail_run(
                 ctx, f"node {node_id} refusé : {list(outcome.faults)}",

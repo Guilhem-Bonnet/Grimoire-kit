@@ -54,7 +54,10 @@ class RuleState:
     writes: int = 0
     cost_usd: float = 0.0
     approved: bool = False
-    """Set the first time a ``require_approval`` rule matched and asked."""
+    """Au moins une action a été approuvée (``approved_fingerprints`` non vide)."""
+    approved_fingerprints: list[str] = field(default_factory=list)
+    """Empreintes (voir ``temporal.action_fingerprint``) des actions réellement
+    exécutées après un ``ask`` : l'approbation porte sur l'action, pas sur la règle."""
     hits: list[str] = field(default_factory=list)
     """ISO timestamps of past matches, kept for :class:`CooldownRule` windows."""
 
@@ -64,6 +67,7 @@ class RuleState:
             "writes": self.writes,
             "cost_usd": self.cost_usd,
             "approved": self.approved,
+            "approved_fingerprints": list(self.approved_fingerprints),
             "hits": list(self.hits),
         }
 
@@ -74,6 +78,7 @@ class RuleState:
             writes=int(d.get("writes", 0)) if isinstance(d.get("writes"), int | float) else 0,
             cost_usd=float(d.get("cost_usd", 0.0)) if isinstance(d.get("cost_usd"), int | float) else 0.0,
             approved=bool(d.get("approved", False)),
+            approved_fingerprints=[str(f) for f in d.get("approved_fingerprints", []) if isinstance(f, str)],
             hits=[str(h) for h in d.get("hits", []) if isinstance(h, str)],
         )
 
@@ -96,6 +101,13 @@ class SessionState:
     #: jamais leur contenu. C'est ce que ``Stop`` lit pour distinguer une
     #: session qui a travaillé hors tâche d'une session qui n'a fait que lire.
     mutations: int = 0
+    #: Approbations en attente, par identifiant d'appel d'outil de l'hôte :
+    #: ``{"fingerprint": ..., "rules": [...]}`` posé au PreToolUse, repris au
+    #: PostToolUse (W1-09). Le PostToolUse peut recevoir une entrée réécrite par
+    #: un hook (``git status`` -> ``rtk git status``) : recalculer l'empreinte
+    #: depuis elle approuverait une autre action. Ni commande ni argument ici,
+    #: seulement l'empreinte (un hachage) et des identifiants de règles.
+    pending_approvals: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def rule_state(self, rule_id: str) -> RuleState:
         return self.rules.setdefault(rule_id, RuleState())
@@ -109,6 +121,7 @@ class SessionState:
             "rules": {rule_id: state.to_dict() for rule_id, state in self.rules.items()},
             "task_id": self.task_id,
             "mutations": self.mutations,
+            "pending_approvals": {key: dict(value) for key, value in self.pending_approvals.items()},
         }
 
     @classmethod
@@ -120,6 +133,17 @@ class SessionState:
             if isinstance(state, dict)
         } if isinstance(rules_raw, dict) else {}
         mutations = d.get("mutations", 0)
+        pending_raw = d.get("pending_approvals", {})
+        pending: dict[str, dict[str, Any]] = {}
+        if isinstance(pending_raw, dict):
+            for key, entry in pending_raw.items():
+                if not isinstance(entry, dict) or not isinstance(entry.get("fingerprint"), str):
+                    continue
+                rule_ids = entry.get("rules", [])
+                pending[str(key)] = {
+                    "fingerprint": entry["fingerprint"],
+                    "rules": [str(r) for r in rule_ids if isinstance(r, str)] if isinstance(rule_ids, list) else [],
+                }
         return cls(
             session_id=session_id,
             started_at=str(d.get("started_at") or started_at),
@@ -127,6 +151,7 @@ class SessionState:
             rules=rules,
             task_id=str(d.get("task_id", "") or ""),
             mutations=int(mutations) if isinstance(mutations, int | float) and not isinstance(mutations, bool) else 0,
+            pending_approvals=pending,
         )
 
     @classmethod

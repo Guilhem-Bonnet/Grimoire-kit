@@ -133,6 +133,7 @@ def normalize_input(
         session_id=str(_pick(payload, "session_id", "sessionId", default="") or ""),
         stop_active=stop_active,
         host=host_id.value if host_id is not None and host_id is not HostId.UNKNOWN else "",
+        tool_use_id=str(_pick(payload, "tool_use_id", "toolUseId", "tool_call_id", "toolCallId", default="") or ""),
         raw=dict(payload),
     )
 
