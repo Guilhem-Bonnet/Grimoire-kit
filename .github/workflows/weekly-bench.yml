@@ -49,8 +49,9 @@ jobs:
       # benchmark lisait un fichier absent et publiait chaque semaine un
       # rapport à zéro entrée conclu par « aucune anomalie détectée ».
       - name: Reconstruire Grimoire_TRACE depuis l'historique git
+        env:
+          SINCE: ${{ github.event.inputs.since || '' }}
         run: |
-          SINCE="${{ github.event.inputs.since || '' }}"
           ARGS="--branch ${GITHUB_REF_NAME} --min-entries 1"
           [[ -n "$SINCE" ]] && ARGS="$ARGS --since $SINCE"
 
@@ -60,10 +61,10 @@ jobs:
       # ── Générer le rapport ────────────────────────────────────────────────
       - name: Run agent-bench --report
         id: bench
+        env:
+          SINCE: ${{ github.event.inputs.since || '' }}
+          AGENT: ${{ github.event.inputs.agent || '' }}
         run: |
-          SINCE="${{ github.event.inputs.since || '' }}"
-          AGENT="${{ github.event.inputs.agent || '' }}"
-
           ARGS="--report"
           [[ -n "$SINCE" ]] && ARGS="$ARGS --since $SINCE"
           [[ -n "$AGENT" ]] && ARGS="$ARGS --agent $AGENT"

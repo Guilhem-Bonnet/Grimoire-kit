@@ -139,7 +139,7 @@ _REDACTION_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("url-basic-auth", re.compile(r"(?<=://)[^\s/:@]+:[^\s/:@]{6,}(?=@)")),
     # Affectation générique. La valeur doit être compacte (aucune espace), longue
     # (douze caractères au moins) et contenir un chiffre : c'est ce qui distingue
-    # `password: Tr0ub4dor3xKm9Qz` de `password policy is documented in ADR-004`.
+    # `password: Tr0ub4dor3xKm9Qz` de `password policy is documented in ADR-004`.  # gitleaks:allow
     ("credential-assignment", re.compile(
         r"(?i)\b(?:api[_-]?key|secret[_-]?key|access[_-]?key|auth[_-]?token|"
         r"password|passwd|secret|token)\b\s*[:=]\s*[\"']?(?=[^\s\"']*\d)"
