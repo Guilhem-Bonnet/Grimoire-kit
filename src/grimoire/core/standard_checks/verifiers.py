@@ -31,6 +31,7 @@ from grimoire.core.standard_checks.base import (
     _require_keys,
     _text_file,
 )
+from grimoire.core.standard_checks.claim_ledger_verify import v0_non_governed
 from grimoire.core.standard_checks.claim_ledger_verify import verify_claim_ledger as _verify_claim_ledger
 from grimoire.core.standard_checks.controls import (
     _verify_acceptance_record,
@@ -1407,7 +1408,7 @@ def _verify_pattern_catalog_ref(pattern: dict[str, Any], rel_path: Path, result:
         return
     try:
         catalog_ids = catalog_pattern_ids()
-    except (OSError, ValueError):
+    except (OSError, ValueError):  # silent-ok — catalogue injoignable : dégradation voulue (commentaire)
         # Bundled catalogue unreachable in this environment — degrade silently
         # rather than fail a check the project artifact itself did not cause.
         return
@@ -1437,7 +1438,7 @@ def run_verifiers(root: Path, profile: StandardProfile, task_id: str, result: St
     _verify_knowledge_registry(root, profile, result)
     _verify_task_envelope(root, profile, task_id, result)
     _verify_evidence_pack(root, task_id, result)
-    _verify_claim_ledger(root, profile, task_id, result)
+    _verify_claim_ledger(root, profile, task_id, result, suppress_v0=v0_non_governed(root, profile, task_id))
     _verify_acceptance_record(root, profile, task_id, result)
     _verify_compliance_declaration(root, result)
     _verify_compliance_traceability(root, profile, result)
