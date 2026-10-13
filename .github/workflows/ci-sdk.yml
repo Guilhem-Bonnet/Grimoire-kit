@@ -75,6 +75,9 @@ jobs:
       - name: Type check
         run: mypy --strict src/grimoire/
 
+      - name: Type check (Windows, fsio)
+        run: mypy --strict --platform win32 --follow-imports=silent src/grimoire/core/fsio.py
+
   dep-audit:
     name: "Dependency audit"
     runs-on: ubuntu-latest
@@ -134,6 +137,7 @@ jobs:
               tests/unit/cli/test_app.py::TestVersion \
               tests/unit/cli/test_app.py::TestInit \
               tests/unit/cli/test_app.py::TestDoctor \
+              tests/unit/test_fsio.py \
               tests/test_agentic_standard.py \
               -q --tb=short -x
           else
