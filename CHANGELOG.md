@@ -15,6 +15,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 - Garde d'architecture : tout export de `grimoire.tools` a un appelant dans `cli/` ou `mcp/`, mesuré par AST sur l'import réel de `__all__`, avec un cliquet sur les quatre orphelins (`AgentForge`, `ContextGuard`, `ContextRouter`, `PreflightCheck`), qui n'autorise pas leur suppression ; un test vérifie que les noms cités par `docs/sdk-guide.md` restent importables.
 - Rouge-avant / vert-après : `tests/unit/test_w1_11_wire_or_delete.py` (61 tests, voir la fiche de PR pour le nombre de rouges avant).
 - Non fait : l'appel de `memory lint` par `standard verify`, la proposition de relèvement quand le risque monte, un intake qui lit autre chose que le titre (anglais seulement), une option `--risk` pour choisir `light`. Seul `TaskService.add` pose le risque : `flows/engine.py:272,392` et six autres appelants de `create_task` (a2a_adapter, task_board_ledger, dispatch_executor, beads_adapter, task_flow_adapter, task_unification) restent en `standard`.
+- fix(hosts): un appel `Agent` de Claude Code sans `subagent_type` est journalisé `general-purpose` (son défaut documenté), plus « (sans nom) » ; la table des délégations de `grimoire registry dispatches` ne coupe plus un même agent en deux lignes (#735).
 
 ## [3.62.1] - 2026-10-03
 
