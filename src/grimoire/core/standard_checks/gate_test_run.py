@@ -77,7 +77,9 @@ class GateTestRunOutcome:
 
     ``reason`` vaut ``state_owes_no_run``, ``no_test_command``, ``fresh_run``
     ou ``executed`` ; ``command`` est la commande résolue (vide si aucune) ;
-    ``ok``/``exit_code`` ne sont renseignés que pour ``executed``.
+    ``ok``/``exit_code`` ne sont renseignés que pour ``executed`` ou
+    ``fresh_run``. ``reused`` vaut ``True`` quand un run enregistré, frais
+    (même empreinte d'arbre et même toolchain), a été repris sans relance.
     """
 
     ran: bool
@@ -86,11 +88,13 @@ class GateTestRunOutcome:
     ok: bool | None = None
     exit_code: int | None = None
     path: Path | None = None
+    reused: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "ran": self.ran,
             "reason": self.reason,
+            "reused": self.reused,
             "command": self.command,
             "ok": self.ok,
             "exit_code": self.exit_code,
@@ -206,6 +210,7 @@ def ensure_fresh_test_run(project_root: Path, *, task_id: str, state: str, rerun
             return GateTestRunOutcome(
                 ran=False,
                 reason="fresh_run",
+                reused=True,
                 command=str(matching.get("command") or need.command),
                 ok=matching.get("ok"),
                 exit_code=matching.get("exit_code"),

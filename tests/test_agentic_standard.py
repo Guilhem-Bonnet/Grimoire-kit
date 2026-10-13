@@ -1638,6 +1638,7 @@ def test_cli_gate_check_strict_runs_the_tests_itself_and_reuses_a_fresh_run(tmp_
     recorded = json.loads((tmp_path / f"_grimoire-output/evidence/{task_id}/test-run.json").read_text(encoding="utf-8"))
     assert recorded["ok"] is True and "sys.exit(0)" in recorded["command"]
     assert second["test_run"]["ran"] is False and second["test_run"]["reason"] == "fresh_run"
+    assert first["test_run"]["reused"] is False and second["test_run"]["reused"] is True, "W3-04 : reused exposé"
 
 
 def test_cli_gate_check_strict_fails_only_on_a_red_fresh_run(tmp_path: Path) -> None:
@@ -1694,7 +1695,7 @@ def test_gate_check_strict_owes_no_run_before_the_task_starts(tmp_path: Path) ->
     result = json.loads(runner.invoke(app, ["-o", "json", "standard", "gate", "check", str(tmp_path), "--task-id", task.id, "--strict"]).output)
 
     assert result["ok"] is True and result["test_run"] == {
-        "ran": False, "reason": "state_owes_no_run", "command": "", "ok": None, "exit_code": None, "path": None,
+        "ran": False, "reason": "state_owes_no_run", "reused": False, "command": "", "ok": None, "exit_code": None, "path": None,
     }
 
 
@@ -1815,7 +1816,7 @@ def test_cli_gate_check_strict_does_not_rerun_a_matching_red_run(tmp_path: Path,
     second = json.loads(runner.invoke(app, argv).output)
 
     assert first["test_run"]["ran"] is True and first["test_run"]["ok"] is False
-    assert second["test_run"] == {**first["test_run"], "ran": False, "reason": "fresh_run"}
+    assert second["test_run"] == {**first["test_run"], "ran": False, "reason": "fresh_run", "reused": True}
     assert len(calls) == 1, "run rouge identique : une seule exécution, pas deux"
 
     rerun = json.loads(runner.invoke(app, [*argv, "--rerun"]).output)
