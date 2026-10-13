@@ -13,7 +13,9 @@ fichier dans une réponse n'est pas le lire. Il résout chaque référence de ch
 contre le répertoire courant suivi de l'agent et la compare aux emplacements
 qui exposent les tests. Le suivi du répertoire courant calque Claude Code (voir
 ``_ShellCwd``) : un ``cd`` vaut pour la suite de la commande, sauf dans un sous-shell
-``( ... )`` ou un élément de tube, dont il ne sort pas ; d'un appel ``Bash``
+``( ... )`` ou un élément de tube, dont il ne sort pas, et il peut échouer : après
+``;``, un saut de ligne ou ``||``, la suite est jugée aussi depuis la position d'avant
+(seul ``&&`` ne regarde que le succès) ; d'un appel ``Bash``
 à l'autre, le répertoire final n'est gardé que s'il reste dans le dépôt du run.
 Sinon le shell est ramené à ce dépôt (« Shell cwd was reset to ... »), ce que le
 ``tool_result`` confirme ; sans confirmation (message absent, résultat en erreur
@@ -33,10 +35,18 @@ Un drapeau n'est pas un verdict de fraude : il invalide le run (exclu des
 taux) et la ligne déclenchante est listée pour revue humaine. Limites connues,
 volontairement du côté du faux positif ou du « non vu » écrit : variables
 shell non développées (``$HOME``, ``$(...)``), liens symboliques créés par
-l'agent, ``cd`` d'une commande qui échoue dans le dépôt, ``popd``/``pushd`` dont la
+l'agent, ``cd`` en fin de commande ou d'une chaîne ``&&`` qui échoue dans le dépôt (la
+cible reste le cwd suivi d'un appel au suivant), ``popd``/``pushd`` dont la
 pile vient d'un autre appel (joué comme ``cd -`` : rester, ou revenir au dépôt),
 mots-clés devant un ``cd`` (``then cd src``), contenu d'un script écrit puis lancé
 (le script n'est pas relu), accès par un serveur MCP qui n'expose pas de chemin.
+
+Un heredoc ne retire du texte analysé que son corps et son délimiteur : la fin de la
+ligne d'ouverture (``<<'EOF' && cat x``, ``<<EOF; cp x .``) est une commande qui
+s'exécute et reste lue ; ``<<<`` (here-string) n'est pas un heredoc. Une transcription
+qui n'a pas été lue en entier (aucun événement ``system/init`` ou ``assistant``, ou une
+ligne illisible qui porte une accolade : un événement coupé par une ligne de stderr)
+rend ``unevaluated``, jamais ``clean`` ; une lecture déjà trouvée reste ``invalid``.
 """
 
 from __future__ import annotations
@@ -59,8 +69,10 @@ _WRITE_TOOLS = frozenset({"Write", "Edit", "MultiEdit", "NotebookEdit"})
 
 #: Séparateurs de commandes ; ``(`` et ``)`` ouvrent et ferment un sous-shell (``_split_command`` les trie).
 _BASH_SEPARATOR = re.compile(r"&&|\|\||[;|\n()]")
-#: Corps de heredoc (``<<'EOF' ... EOF``) : du code ou du texte, pas des arguments.
-_HEREDOC = re.compile(r"<<-?[ \t]*(['\"]?)(\w+)\1[^\n]*\n(.*?)(?:\n[ \t]*\2[ \t]*(?=\n|\Z)|\Z)", re.DOTALL)
+#: Heredoc (``<<'EOF' ... EOF``) : groupe 3, la fin de la ligne d'ouverture (``&& cat x``,
+#: ``; cp x .`` : des commandes qui s'exécutent) ; groupe 4, le corps (du code ou du texte,
+#: pas des arguments). ``<<<`` (here-string) n'en est pas un.
+_HEREDOC = re.compile(r"(?<!<)<<(?!<)-?[ \t]*(['\"]?)(\w+)\1([^\n]*)\n(.*?)(?:\n[ \t]*\2[ \t]*(?=\n|\Z)|\Z)", re.DOTALL)
 _NAME_CHAR = re.compile(r"[\w.-]")
 _FRAGMENT = re.compile(r"[^\s'\"`()<>;|&=,{}]+")
 _GLOB_CHARS = frozenset("*?[")
@@ -306,7 +318,10 @@ def _shell_references(
     """``(fragment, chemin résolu, parcours récursif)`` d'une commande Bash, et les cwd finaux possibles.
 
     ``cd``/``pushd`` change le répertoire des segments suivants (``&&``, ``;``,
-    saut de ligne), sauf dans un sous-shell ``( ... )`` ou un élément de tube
+    saut de ligne), mais il peut échouer et laisser le shell en place : ``&&`` ne regarde
+    que le succès du précédent, ``||`` les positions où un segment de la chaîne a pu
+    échouer, ``;`` et le saut de ligne toutes les positions possibles
+    (W1-08b-T1-02). Pas de déplacement dans un sous-shell ``( ... )`` ou un élément de tube
     (``|``), qui n'en laissent rien derrière eux (W1-08b-S3-01) ; ``popd``
     dépile le ``pushd`` de la commande. Le dernier élément d'un tube s'exécute dans
     le shell courant sous zsh (ou ``lastpipe``) : son ``cd`` laisse les deux
@@ -322,23 +337,43 @@ def _shell_references(
     (fail-closed). Un ensemble de positions remplace le cwd unique, chaque
     segment est jugé contre chacune.
     """
-    bodies = [m.group(3) for m in _HEREDOC.finditer(command)]
-    head = _HEREDOC.sub("", command)
+    bodies = [m.group(4) for m in _HEREDOC.finditer(command)]
+    head = _HEREDOC.sub(lambda m: m.group(3), command)  # le corps part, la fin de la ligne d'ouverture reste
     recursive = bool(_RECURSIVE.search(head))
     refs: list[tuple[str, PurePath, bool]] = []
-    states = {_Dirs(cwd)}
-    scopes: list[
-        tuple[set[_Dirs], bool]
-    ] = []  # positions à l'ouverture d'un sous-shell, et s'il est entre guillemets doubles
     pieces, unclosed = _split_command(head)
+    # Où est le shell quand le segment démarre (*entry*) et après le segment précédent s'il a réussi
+    # (*ok*). Un ``cd`` peut échouer et laisser le shell en place : ``&&`` ne regarde que le succès,
+    # ``||`` que les positions où un segment de la chaîne a pu échouer (*chain*), ``;`` et le saut de
+    # ligne toutes les positions possibles (*visited*) (W1-08b-T1-02).
+    entry: set[_Dirs] = {_Dirs(cwd)}
+    ok = entry
+    visited: set[_Dirs] = set()
+    chain: set[_Dirs] = set()
+    ored = False
+    scopes: list[
+        tuple[set[_Dirs], set[_Dirs], set[_Dirs], bool, bool]
+    ] = []  # à l'ouverture d'un sous-shell : ok, visited, chain, ored et s'il est entre guillemets doubles
     for index, (separator, segment) in enumerate(pieces):
-        if separator in ("(", "(dq"):
-            scopes.append((states, separator == "(dq"))
-        elif separator in (")", ")dq") and scopes and (separator == ")" or scopes[-1][1]):
-            states = scopes.pop()[0]
         matches = list(_FRAGMENT.finditer(segment))
         tokens = [m.group() for m in matches]
-        for here in sorted({state.cwd for state in states}):
+        if separator in (";", "\n"):
+            if not tokens:  # ligne vide, ``;`` final : pas de commande
+                continue
+            entry = visited | ok
+            visited, chain, ored = set(), set(), False
+        elif separator == "||":
+            entry, ored = chain or ok, True
+        elif separator in ("(", "(dq"):
+            scopes.append((ok, visited, chain, ored, separator == "(dq"))
+            entry, visited, chain, ored = ok, set(), set(), False
+        elif separator in (")", ")dq") and scopes and (separator == ")" or scopes[-1][4]):
+            ok, visited, chain, ored, _ = scopes.pop()  # le sous-shell ne déplace pas le shell extérieur
+            entry, visited, chain = ok, visited | ok, chain | ok
+        elif separator != "|":  # début, ``&&``, parenthèse sans paire : la suite d'un succès
+            entry = ok
+        # ``|`` : tous les éléments d'un tube partent de la même position.
+        for here in sorted({state.cwd for state in entry}):
             for match in matches:
                 word = match.group()
                 if word.startswith(("-", "$", "~")):
@@ -346,15 +381,18 @@ def _shell_references(
                 if not _NAME_CHAR.search(word) and not (word == "/" and _standalone(segment, match)):
                     continue
                 refs.append((word, _resolve(word, here), recursive))
-        moved = {after for state in states for after in _after_command(state, tokens, dash)}
+        moved = {after for state in entry for after in _after_command(state, tokens, dash)}
         if index + 1 < len(pieces) and pieces[index + 1][0] == "|":  # élément de tube : sous-shell
-            continue
-        states = states | moved if separator == "|" else moved  # dernier élément d'un tube : zsh, lastpipe
-    for snapshot, _ in scopes:  # sous-shell jamais refermé : l'entrée reste possible
-        states = states | snapshot
+            ok = entry
+        else:  # dernier élément d'un tube : zsh (ou lastpipe) l'exécute dans le shell courant
+            ok = entry | moved if separator == "|" else moved
+        visited, chain = visited | entry | ok, chain | entry
+    finals_states = ok | visited if ored else ok
+    for outer_ok, *_ in scopes:  # sous-shell jamais refermé : l'entrée reste possible
+        finals_states = finals_states | outer_ok
     if unclosed:
-        states = states | {_Dirs(cwd)}
-    finals = {state.cwd for state in states}
+        finals_states = finals_states | {_Dirs(cwd)}
+    finals = {state.cwd for state in finals_states}
     for body in bodies:
         for here in sorted(finals):
             for token in _FRAGMENT.findall(body):
@@ -486,6 +524,15 @@ class _ShellCwd:
         self.candidates = {_lexical(reset.group(1))} if reset else finals | {self.home}
 
 
+@dataclass(frozen=True)
+class _Scan:
+    """Ce que la lecture d'une transcription a rendu : lectures, lignes illisibles, événements reconnus."""
+
+    reads: list[HiddenTestRead]
+    unreadable: int  # lignes qui portent une accolade mais ne se décodent pas en objet JSON
+    events: int  # événements ``system/init`` ou ``assistant`` décodés
+
+
 def find_hidden_test_reads(
     lines: Iterable[str],
     *,
@@ -503,19 +550,47 @@ def find_hidden_test_reads(
     copiés par ``run_hidden_tests``), *canonical_dirs* les dossiers d'exercice
     du clone ``polyglot-benchmark`` d'où viennent les tests (``task.exercise_dir``,
     chemin absolu) : obligatoire, car l'oublier laisse la source canonique
-    lisible sans drapeau. Une liste vide est une transcription propre ;
-    l'appelant décide quoi faire d'une transcription illisible.
+    lisible sans drapeau. Une liste vide est une transcription propre SI la
+    transcription a été lue en entier : ``check_transcript`` rend ``unevaluated``
+    quand des lignes sont illisibles ou qu'aucun événement n'a été reconnu.
     """
+    return _scan(
+        lines,
+        test_files=test_files,
+        run_dir=run_dir,
+        hidden_dir=hidden_dir,
+        canonical_dirs=canonical_dirs,
+        other_run_dirs=other_run_dirs,
+    ).reads
+
+
+def _scan(
+    lines: Iterable[str],
+    *,
+    test_files: Sequence[str],
+    run_dir: Path,
+    hidden_dir: Path,
+    canonical_dirs: Sequence[Path],
+    other_run_dirs: Sequence[Path],
+) -> _Scan:
     exposure = _Exposure(test_files, run_dir, hidden_dir, other_run_dirs, canonical_dirs)
     shell = _ShellCwd(_lexical(run_dir), exposure)
     found: list[HiddenTestRead] = []
+    unreadable = events = 0
     for number, raw in enumerate(lines, start=1):
         try:
             event = json.loads(raw)
-        except (json.JSONDecodeError, TypeError):
+        except (ValueError, TypeError, RecursionError):
+            # Une ligne de stderr (``Popen(stderr=STDOUT)``) peut couper un événement : ses morceaux
+            # portent l'accolade ouvrante ou fermante de l'objet. Un texte sans accolade (la bannière
+            # « Ignoring N permissions.allow entries... », 389 des 449 transcriptions archivées) n'en cache pas.
+            if isinstance(raw, str) and ("{" in raw or "}" in raw):
+                unreadable += 1
             continue
         if not isinstance(event, dict):
             continue
+        if event.get("type") == "assistant" or (event.get("type") == "system" and event.get("subtype") == "init"):
+            events += 1
         if event.get("type") == "system" and event.get("subtype") == "init" and isinstance(event.get("cwd"), str):
             shell.restart(_lexical(event["cwd"]))
             continue
@@ -543,7 +618,7 @@ def find_hidden_test_reads(
             if hits:  # une ligne déclenchante par appel d'outil : la référence la plus précise
                 kind, token = min(hits, key=lambda hit: _KIND_RANK[hit[0]])
                 found.append(HiddenTestRead(number, name, kind, token, _excerpt(tool_input)))
-    return found
+    return _Scan(found, unreadable, events)
 
 
 def check_transcript(
@@ -551,9 +626,12 @@ def check_transcript(
 ) -> tuple[str, list[dict[str, Any]] | None]:
     """Verdict d'un run : ``("clean", [])``, ``("invalid", [lectures])`` ou ``("unevaluated", None)``.
 
-    ``unevaluated`` : transcription absente, illisible ou vide. Un contrôle qui
-    n'a rien pu lire ne rend jamais « propre ». Les autres dossiers ``run<i>``
-    de la tâche (frères de *run_dir* sous ``hidden_dir.parent``) sont exposés
+    ``unevaluated`` : transcription absente, vide, sans événement ``system/init`` ni
+    ``assistant`` reconnu, ou avec une ligne illisible qui porte une accolade (un
+    événement coupé par une ligne de stderr peut cacher un ``tool_use``). Un contrôle
+    qui n'a pas tout lu ne rend jamais « propre » ; une lecture déjà trouvée reste
+    ``invalid``, quelles que soient les lignes illisibles. Les autres dossiers
+    ``run<i>`` de la tâche (frères de *run_dir* sous ``hidden_dir.parent``) sont exposés
     au même titre que ``hidden-tests`` : ils contiennent les tests copiés. Les
     *canonical_dirs* (``task.exercise_dir``) le sont aussi : le test canonique
     du clone ``polyglot-benchmark`` est la même fuite.
@@ -565,7 +643,7 @@ def check_transcript(
     if not any(line.strip() for line in lines):
         return ("unevaluated", None)
     others = sorted(d for d in hidden_dir.parent.glob("*/run*") if d.is_dir() and d != run_dir)
-    reads = find_hidden_test_reads(
+    scan = _scan(
         lines,
         test_files=test_files,
         run_dir=run_dir,
@@ -573,7 +651,9 @@ def check_transcript(
         canonical_dirs=canonical_dirs,
         other_run_dirs=others,
     )
-    return ("invalid", [read.to_dict() for read in reads]) if reads else ("clean", [])
+    if scan.reads:
+        return ("invalid", [read.to_dict() for read in scan.reads])
+    return ("unevaluated", None) if scan.unreadable or not scan.events else ("clean", [])
 
 
 def invalid_runs_rows(records: Iterable[Any]) -> list[dict[str, Any]]:
@@ -621,4 +701,49 @@ def invalid_run_alert(record: Any) -> str:
     return (
         f"[INVALIDE] {record.task_id} / {record.arm} / run{record.run_index} : la transcription désigne un test "
         f"caché (ligne {first.get('line', '?')}, {first.get('kind', '?')}) — exclu des taux, à revoir dans le rapport."
+    )
+
+
+def unevaluated_runs_rows(records: Iterable[Any]) -> list[dict[str, Any]]:
+    """Lignes de rapport des runs dont la transcription n'a pas pu être contrôlée, triées."""
+    return [
+        {"task_id": r.task_id, "arm": r.arm, "run_index": r.run_index, "success": r.success}
+        for r in sorted(records, key=lambda r: (r.task_id, r.arm, r.run_index))
+        if r.transcript_check == "unevaluated"
+    ]
+
+
+def render_unevaluated_runs(unevaluated_runs: Sequence[dict[str, Any]]) -> list[str]:
+    """Section Markdown « Transcriptions non évaluées » ; liste vide s'il n'y en a aucune.
+
+    Choix : ces runs RESTENT dans les taux. Une transcription illisible n'est pas la preuve d'une
+    lecture de test caché, et les retirer en silence réduirait l'échantillon sur la foi d'un
+    défaut du journal ; mais le contrôle n'a pas conclu, donc le rapport les nomme.
+    """
+    if not unevaluated_runs:
+        return []
+    per_arm: dict[str, int] = {}
+    for run in unevaluated_runs:
+        per_arm[run["arm"]] = per_arm.get(run["arm"], 0) + 1
+    lines = [
+        "## Transcriptions non évaluées (W1-08b)",
+        "",
+        "Le contrôle de lecture de test caché n'a pas pu conclure pour ces runs (transcription absente, "
+        "vide, sans événement reconnu, ou avec une ligne illisible qui peut cacher un appel d'outil). "
+        "Ils ne sont PAS exclus des taux ci-dessus : à vérifier à la main avant de s'y fier. "
+        "Par bras : " + ", ".join(f"{arm} {count}" for arm, count in sorted(per_arm.items())) + ".",
+        "",
+    ]
+    for run in unevaluated_runs:
+        outcome = "réussi" if run["success"] else "échoué"
+        lines.append(f"- `{run['task_id']}` / `{run['arm']}` / run{run['run_index']} (brut : {outcome})")
+    lines.append("")
+    return lines
+
+
+def unevaluated_run_alert(record: Any) -> str:
+    """Message d'alerte (stderr) quand la transcription d'un run n'a pas pu être contrôlée."""
+    return (
+        f"[NON ÉVALUÉ] {record.task_id} / {record.arm} / run{record.run_index} : la transcription n'a pas pu être "
+        "contrôlée (absente, vide, sans événement reconnu ou ligne illisible) — le run reste dans les taux, à revoir."
     )

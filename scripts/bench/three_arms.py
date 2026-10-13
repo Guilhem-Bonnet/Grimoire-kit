@@ -46,7 +46,15 @@ from typing import Any
 
 # Gardes du dépôt de tâche (W1-08a) : module voisin, aussi quand ce script est chargé par chemin.
 sys.path.append(str(Path(__file__).resolve().parent))
-from hidden_reads import check_transcript, invalid_run_alert, invalid_runs_rows, render_invalid_runs
+from hidden_reads import (
+    check_transcript,
+    invalid_run_alert,
+    invalid_runs_rows,
+    render_invalid_runs,
+    render_unevaluated_runs,
+    unevaluated_run_alert,
+    unevaluated_runs_rows,
+)
 from results_io import read_results_rows
 from task_repo import (
     ContaminatedTaskRepoError,
@@ -1878,6 +1886,7 @@ def build_report(
         "kit_gov_runs": kit_gov_runs,
         "carried_over_notes": carried_over_notes,
         "invalid_runs": invalid_runs_rows(records),
+        "unevaluated_runs": unevaluated_runs_rows(records),
         "agent_toolchain_check": toolchain_check,
         # Lot J (#582) : mode(s) d'authentification effectivement utilisés
         # par les runs de CE rapport — voir ``RunRecord.auth_mode``. Vide
@@ -1956,6 +1965,7 @@ def render_report_markdown(report: dict[str, Any]) -> str:
     lines.append("")
 
     lines.extend(render_invalid_runs(report.get("invalid_runs") or []))
+    lines.extend(render_unevaluated_runs(report.get("unevaluated_runs") or []))
 
     def _render_governed_detail(title: str, rows: list[dict[str, Any]]) -> None:
         if not rows:
@@ -2289,6 +2299,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                         break
                     if record.invalid:
                         print(invalid_run_alert(record), file=sys.stderr)
+                    elif record.transcript_check == "unevaluated":
+                        print(unevaluated_run_alert(record), file=sys.stderr)
                     records.append(record)
                     results_f.write(json.dumps(record.to_dict()) + "\n")
                     results_f.flush()
