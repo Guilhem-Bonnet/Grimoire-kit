@@ -178,6 +178,12 @@ def _emit_resume(ctx: typer.Context, run_id: str, outcome: ResumeOutcome) -> Non
         for fault in outcome.faults:
             console.print(f"  - {fault}")
         return
+    if outcome.replay:
+        console.print(
+            f"[yellow]rejeu[/yellow] {run_id} — sortie déjà acceptée pour le node {outcome.replay_of}, "
+            f"rien n'a changé ; attendu : {'(run terminé)' if outcome.finished else outcome.node_id}"
+        )
+        return
     if outcome.finished:
         console.print(f"[green]terminé[/green] {run_id} — dernier node : {outcome.node_id}")
         return
