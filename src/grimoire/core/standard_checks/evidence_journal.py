@@ -253,16 +253,10 @@ def _event_count(event: dict[str, Any]) -> int:
 
 
 def _write_guard_events(path: Path, events: list[dict[str, Any]]) -> None:
-    """Rewrite the whole guard journal atomically (temp file + ``replace``). Raises on failure (callers catch)."""
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp.write_text("".join(json.dumps(e, ensure_ascii=False) + "\n" for e in events), encoding="utf-8")
-        tmp.replace(path)
-    except (OSError, ValueError, TypeError):
-        with contextlib.suppress(OSError):
-            tmp.unlink(missing_ok=True)
-        raise
+    """Rewrite the whole guard journal atomically (:func:`grimoire.core.fsio.atomic_write`). Raises on failure."""
+    from grimoire.core.fsio import atomic_write
+
+    atomic_write(path, "".join(json.dumps(e, ensure_ascii=False) + "\n" for e in events))
 
 
 def record_guard_error(project_root: Path, task_id: str, guard_id: str, error_type: str, error_message: str) -> None:
