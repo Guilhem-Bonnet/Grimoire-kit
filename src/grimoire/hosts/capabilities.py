@@ -14,7 +14,9 @@ never read.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Any
 
 from grimoire.bridges.schemas import (
@@ -256,3 +258,167 @@ def gaps_for(profile: HostProfile) -> tuple[CapabilityGap, ...]:
     elif not profile.permissions_native:
         gaps.append(CapabilityGap("permissions", "permission rules enforced through the pre_tool_use hook"))
     return tuple(gaps)
+
+
+# ---------------------------------------------------------------------------
+# Contrats réels (K0, #765) : ce qui a été observé sur l'hôte, pas ce qu'il
+# documente. ``HostProfile`` ci-dessus décrit les surfaces que le kit sait
+# écrire ; ce qui suit décrit ce que le kit a *vu* faire. Le fencing d'un bail
+# (refuser les effets d'une session périmée) ne repose que sur le second.
+#
+# La table est jumelle des ``manifest.json`` de ``tests/fixtures/hosts/<hôte>/``
+# (``tests/unit/test_host_contracts.py`` verrouille l'égalité). Règle unique :
+# une capacité sans fixture vaut ``False``.
+# ---------------------------------------------------------------------------
+
+#: Les capacités tranchées par les neuf points de K0, dans l'ordre de la fiche.
+CONTRACT_KEYS: tuple[str, ...] = (
+    "pretooluse_deny",
+    "session_end",
+    "quota_signal",
+    "liveness_probe",
+    "subagent_model",
+    "resume_after_quota",
+    "bg_workspace_trust",
+    "bg_cost_source",
+    "bg_wake",
+    "local_token_usage",
+    "systemd_user_linger",
+)
+
+
+class ContractStatus(StrEnum):
+    """Niveau de preuve d'une capacité sur une version d'hôte."""
+
+    #: Observée sur l'hôte réel ; au moins une fixture la porte.
+    VERIFIED = "verified"
+    #: Jamais observée (ou observée seulement en partie). Vaut ``False``.
+    UNVERIFIED = "unverified"
+    #: Observée comme absente sur cette version d'hôte. Vaut ``False``.
+    ABSENT = "absent"
+
+
+@dataclass(frozen=True, slots=True)
+class ContractEvidence:
+    """Preuve d'une capacité : son statut, ses fixtures, le canal observé."""
+
+    status: ContractStatus = ContractStatus.UNVERIFIED
+    #: Chemins relatifs à ``tests/fixtures/hosts/``.
+    fixtures: tuple[str, ...] = ()
+    #: Par où l'information passe réellement (charge utile, journal, commande).
+    channel: str = ""
+
+    def __post_init__(self) -> None:
+        if self.status is ContractStatus.VERIFIED and not self.fixtures:
+            msg = "a verified capability needs at least one fixture"
+            raise ValueError(msg)
+
+    @property
+    def verified(self) -> bool:
+        return self.status is ContractStatus.VERIFIED
+
+
+@dataclass(frozen=True, slots=True)
+class HostContract:
+    """Ce que le kit a observé d'un hôte, à une version donnée."""
+
+    host_id: HostId
+    #: Version de l'hôte sur laquelle les captures ont été faites ; vide si aucune.
+    host_version: str = ""
+    evidence: Mapping[str, ContractEvidence] = field(default_factory=dict)
+
+    def verified(self, capability: str) -> bool:
+        """``True`` seulement si la capacité est vérifiée ; inconnue vaut ``False``."""
+        entry = self.evidence.get(capability)
+        return entry is not None and entry.verified
+
+    @property
+    def fenced(self) -> bool:
+        """Un refus au PreToolUse arrête réellement l'outil (observé)."""
+        return self.verified("pretooluse_deny")
+
+
+def _unverified_contract(host_id: HostId) -> HostContract:
+    return HostContract(
+        host_id=host_id,
+        evidence={key: ContractEvidence() for key in CONTRACT_KEYS},
+    )
+
+
+_V = ContractStatus.VERIFIED
+
+_CLAUDE_CODE_CONTRACT = HostContract(
+    host_id=HostId.CLAUDE_CODE_CLI,
+    host_version="2.1.301",
+    evidence={
+        "pretooluse_deny": ContractEvidence(
+            _V,
+            (
+                "claude-code/01-pretooluse-control-allow.json",
+                "claude-code/01-pretooluse-deny-exit2.json",
+                "claude-code/01-pretooluse-deny-json.json",
+            ),
+            "exit code 2 + stderr, or exit 0 + hookSpecificOutput.permissionDecision=deny",
+        ),
+        "session_end": ContractEvidence(_V, ("claude-code/02-session-end.json",), "hook SessionEnd"),
+        "quota_signal": ContractEvidence(fixtures=("claude-code/03-quota-signal.json",)),
+        "liveness_probe": ContractEvidence(_V, ("claude-code/04-agents-json.json",), "claude agents --json"),
+        "subagent_model": ContractEvidence(
+            _V,
+            ("claude-code/05-subagent-stop.json",),
+            "agent_transcript_path (ligne assistant : message.model)",
+        ),
+        "resume_after_quota": ContractEvidence(fixtures=("claude-code/06-resume-after-quota.json",)),
+        "bg_workspace_trust": ContractEvidence(_V, ("claude-code/07-bg-untrusted-workspace.json",), "claude --bg"),
+        "bg_cost_source": ContractEvidence(fixtures=("claude-code/07-bg-untrusted-workspace.json",)),
+        "bg_wake": ContractEvidence(fixtures=("claude-code/07-bg-untrusted-workspace.json",)),
+        "local_token_usage": ContractEvidence(
+            _V,
+            ("claude-code/08-token-usage.json",),
+            "flux stream-json (result.usage, modelUsage) et journal de session (assistant.message.usage)",
+        ),
+        "systemd_user_linger": ContractEvidence(_V, ("claude-code/09-systemd-linger.json",), "loginctl show-user"),
+    },
+)
+
+_CONTRACTS: dict[HostId, HostContract] = {
+    HostId.CLAUDE_CODE_CLI: _CLAUDE_CODE_CONTRACT,
+    # Copilot, Codex, Cursor, Gemini : aucune capture (K0 du 2026-10-16, poste sans
+    # opérateur). Tout est « non vérifié », donc faux, donc hôte non fencé.
+    HostId.GITHUB_COPILOT: _unverified_contract(HostId.GITHUB_COPILOT),
+    HostId.CODEX: _unverified_contract(HostId.CODEX),
+    HostId.CURSOR: _unverified_contract(HostId.CURSOR),
+    HostId.GEMINI_CLI: _unverified_contract(HostId.GEMINI_CLI),
+}
+
+
+def recorded_contract(host_id: HostId) -> HostContract:
+    """Contrat tel que capturé, à la version qu'il porte (``host_version``).
+
+    À réserver à l'audit de la table et des fixtures : une décision (fencing,
+    récolte) passe par :func:`contract_for`, qui exige la version de l'hôte.
+    """
+    return _CONTRACTS.get(host_id) or _unverified_contract(host_id)
+
+
+def contract_for(host_id: HostId, host_version: str | None) -> HostContract:
+    """Contrat de *host_id* valable pour *host_version* ; rien de vérifié sinon.
+
+    Une preuve vaut pour la version sur laquelle elle a été capturée, pas pour
+    les autres. Version absente (``None``, vide), différente de la version
+    capturée ou jamais capturée : contrat entièrement non vérifié.
+    """
+    recorded = recorded_contract(host_id)
+    wanted = (host_version or "").strip()
+    if wanted and recorded.host_version and wanted == recorded.host_version:
+        return recorded
+    return _unverified_contract(host_id)
+
+
+def is_fenced(host_id: HostId, host_version: str | None) -> bool:
+    """Un bail perdu peut-il être récolté sur cet hôte, à cette version ? Non, sauf preuve.
+
+    La preuve est celle de la version capturée : toute autre version, ou une
+    version inconnue (``None``), vaut ``False``.
+    """
+    return contract_for(host_id, host_version).fenced
