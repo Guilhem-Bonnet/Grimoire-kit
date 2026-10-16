@@ -18,7 +18,7 @@ from grimoire.core.standard_checks.base import StandardProfile, StandardVerifica
 from grimoire.core.standard_checks.claim_proof_resolve import MemoryLookup, resolve_proof_cell
 from grimoire.core.standard_generation import EVIDENCE_DIR
 
-__all__ = ["ClaimRowScan", "scan_claim_rows", "v0_non_governed", "verify_claim_ledger"]
+__all__ = ["ClaimRowScan", "scan_claim_rows", "task_settled", "v0_non_governed", "verify_claim_ledger"]
 
 _TEMPLATE_CELLS = ["CL-001", "", "fait", "", "hypothèse", "faible", "vérifier"]
 _TEMPLATE_CELLS_LOWER = [c.lower() for c in _TEMPLATE_CELLS]
@@ -166,6 +166,15 @@ def v0_non_governed(root: Path, profile: StandardProfile, task_id: str) -> bool:
     return klass == "V0"
 
 
+def task_settled(root: Path, task_id: str) -> bool:
+    """True quand le tableau de tâches donne *task_id* ``accepted`` ou ``released``."""
+    from grimoire.core.standard_generation import STANDARD_DIR
+    from grimoire.core.standard_state import _load_mapping, task_from_board
+
+    board = _load_mapping(root / STANDARD_DIR / "task-board.yaml")
+    return str(task_from_board(board, task_id).get("status", "")) in {"accepted", "released"}
+
+
 def _check_proof_cell(
     root: Path,
     task_id: str,
@@ -178,6 +187,8 @@ def _check_proof_cell(
     memory_lookup: MemoryLookup | None,
 ) -> None:
     resolutions = resolve_proof_cell(root, task_id, proof, memory_lookup=memory_lookup)
+    # Une tentative de référence (kind != unstructured) qui ne se résout pas est toujours
+    # signalée ; seul le texte libre sans aucune référence relève de proof_unstructured.
     references = [r for r in resolutions if r.kind != "unstructured"]
     for res in references:
         if not res.resolved:
@@ -207,6 +218,7 @@ def verify_claim_ledger(
     suppress_v0: bool = False,
     rows_only: bool = False,
     memory_lookup: MemoryLookup | None = None,
+    settled: bool | None = None,
 ) -> None:
     """AG-QUA-002 : une affirmation critique sans preuve reste une hypothèse.
 
@@ -253,7 +265,16 @@ def verify_claim_ledger(
     sinon ``claims.proof_unresolved`` : erreur en governed et production, avertissement
     ailleurs et pendant ``in_progress``. Une cellule « prouvé » sans aucune référence
     (texte libre) lève ``claims.proof_unstructured`` en avertissement : le texte libre
-    ne se vérifie pas, mais il n'est plus passé sous silence.
+    ne se vérifie pas, mais il n'est plus passé sous silence. Un jeton qui a l'allure
+    d'un chemin (``/``, extension, ``Makefile``…) est une tentative de référence : mal
+    formé ou introuvable, il est ``proof_unresolved``, même quand un autre jeton de la
+    cellule se résout.
+
+    ``settled`` : une tâche déjà ``accepted`` ou ``released`` n'est pas rejugée contre
+    l'arbre courant (le fichier a pu changer, le run de test a pu être rejoué avec un
+    autre ``run_id`` depuis la revue) ; ses références irrésolues restent signalées en
+    avertissement. ``None`` (``standard verify``) lit l'état dans le tableau de tâches ;
+    le gate passe l'état cible.
     """
     rel_path = EVIDENCE_DIR / task_id / "claim-ledger.md"
     text = _text_file(root, rel_path)
@@ -261,6 +282,9 @@ def verify_claim_ledger(
     severity = "error" if strict else "warning"
     # Pendant le travail, une ligne mal formée avertit ; la revue la refuse.
     form_severity = "warning" if rows_only else severity
+    if settled is None:
+        settled = task_settled(root, task_id)
+    proof_severity = "warning" if settled else form_severity
     if not text.strip():
         if not suppress_v0 and not rows_only:
             _add_check(result, "claims.empty", severity, "Claim ledger is missing or empty.", path=rel_path)
@@ -314,7 +338,7 @@ def verify_claim_ledger(
                 path=rel_path,
             )
         if proof:
-            _check_proof_cell(root, task_id, result, claim_id, proof, status, form_severity, rel_path, memory_lookup)
+            _check_proof_cell(root, task_id, result, claim_id, proof, status, proof_severity, rel_path, memory_lookup)
         if decision == "utiliser" and status != "prouvé":
             _add_check(
                 result,
