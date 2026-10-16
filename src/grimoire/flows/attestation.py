@@ -28,6 +28,15 @@ l'atteste (``session_id``, ``turn_ts``, empreinte) dans un registre commun à
 tous les runs du dossier (``@consumed-turns.authority.jsonl``, sous verrou), et
 :func:`attest` ignore un tour déjà inscrit. Le nom du registre ne peut pas
 être celui d'un run (``@`` n'est pas dans les identifiants admis).
+Plafond d'amendements (W2-10) : ``amend`` rouvre le node (une révision est
+demandée, le run n'avance pas) et est compté dans ce même journal. Tant que le
+node n'a pas reçu N amendements (``config.checkpoint.max_amendments``, 3 par
+défaut), ``accept_as_is`` est refusé ; ensuite il fait avancer le run, exige le
+risque nommé (``checkpoint_reason``) et inscrit ``accepted_risk`` (nombre
+d'amendements, plafond, motif) dans la décision. Limite : le compteur est celui
+du journal du run, y compris des ``amend`` non attestés — il borne la
+persévérance, il ne prouve pas que N humains ont relu ; l'attestation de
+``accept_as_is`` reste, elle, exigée comme celle de ``approve``.
 Python seul : aucune de ces décisions ne traverse ``grimoire_flows_core``.
 """
 
@@ -51,6 +60,7 @@ from grimoire.hosts.decisions.human_turns import ORIGIN_USER, is_unattended, loa
 __all__ = [
     "ATTESTED",
     "CONSUMED_TURNS_FILENAME",
+    "DEFAULT_MAX_AMENDMENTS",
     "NO_HUMAN_TURN",
     "UNATTESTED",
     "Attestation",
@@ -59,9 +69,13 @@ __all__ = [
     "attest",
     "destructive_checkpoints",
     "judge_checkpoint",
+    "max_amendments",
     "refusal_text",
     "warning_text",
 ]
+
+#: Nombre d'amendements après lequel ``accept_as_is`` devient possible (W2-10).
+DEFAULT_MAX_AMENDMENTS = 3
 
 ATTESTED = "attested"
 UNATTESTED = "unattested"
@@ -153,6 +167,19 @@ def destructive_checkpoints(blueprint: Mapping[str, Any]) -> frozenset[str]:
     return frozenset(out)
 
 
+def max_amendments(blueprint: Mapping[str, Any]) -> dict[str, int]:
+    """Le plafond d'amendements de chaque node ``checkpoint`` qui en déclare un (``config.checkpoint.max_amendments``)."""
+    out: dict[str, int] = {}
+    for node in blueprint.get("nodes") or []:
+        if not isinstance(node, dict) or node.get("kind") != "checkpoint":
+            continue
+        config = (node.get("config") or {}).get("checkpoint") or {}
+        cap = config.get("max_amendments") if isinstance(config, dict) else None
+        if isinstance(cap, int) and not isinstance(cap, bool) and cap >= 1:
+            out[str(node.get("id"))] = cap
+    return out
+
+
 class CheckpointJournal:
     """Challenges et décisions de checkpoint d'un run — ajout seul, sous verrou."""
 
@@ -237,11 +264,28 @@ class CheckpointJournal:
         with locked(self.consumed_path), self.consumed_path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(entry, ensure_ascii=True) + "\n")
 
-    def record_decision(self, node_id: str, decision: str, reason: str, attestation: Attestation) -> None:
+    def amendment_count(self, node_id: str) -> int:
+        """Les ``amend`` déjà inscrits pour *node_id* dans ce run."""
+        return sum(
+            1
+            for e in self.entries()
+            if e.get("type") == "decision" and e.get("node_id") == node_id and e.get("decision") == "amend"
+        )
+
+    def record_decision(
+        self,
+        node_id: str,
+        decision: str,
+        reason: str,
+        attestation: Attestation,
+        accepted_risk: Mapping[str, Any] | None = None,
+    ) -> None:
         if attestation.attested:
             self._consume_turn(node_id, attestation)
+        extra = {"accepted_risk": dict(accepted_risk)} if accepted_risk else {}
         self._append(
             {
+                **extra,
                 "type": "decision",
                 "challenge_id": attestation.challenge_id,
                 "node_id": node_id,
@@ -257,7 +301,10 @@ class CheckpointJournal:
 
     def decisions(self) -> tuple[dict[str, Any], ...]:
         return tuple(
-            {k: e.get(k, "") for k in ("node_id", "decision", "reason", "attestation", "attestation_reason", "ts")}
+            {
+                **{k: e.get(k, "") for k in ("node_id", "decision", "reason", "attestation", "attestation_reason", "ts")},
+                **({"accepted_risk": e["accepted_risk"]} if isinstance(e.get("accepted_risk"), dict) else {}),
+            }
             for e in self.entries()
             if e.get("type") == "decision"
         )
@@ -310,7 +357,8 @@ def attest(
 
 
 #: Les décisions qui font avancer un run : seules elles exigent une attestation.
-_ADVANCING = ("approve", "amend")
+#: ``amend`` rouvre le node (W2-10) : il n'avance plus, donc n'en exige pas.
+_ADVANCING = ("approve", "accept_as_is")
 
 
 @dataclass(frozen=True, slots=True)
@@ -322,6 +370,8 @@ class CheckpointGate:
     attestation: Attestation
     refusal: str = ""
     warning: str = ""
+    #: ``accept_as_is`` accepté (W2-10) : amendements, plafond, motif.
+    accepted_risk: Mapping[str, Any] | None = None
 
 
 def judge_checkpoint(
@@ -331,21 +381,44 @@ def judge_checkpoint(
     output: Mapping[str, Any],
     *,
     destructive: bool,
+    cap: int = DEFAULT_MAX_AMENDMENTS,
     env: Mapping[str, str] | None = None,
 ) -> CheckpointGate | None:
     """Classe la décision de *output* ; ``None`` si elle n'est pas une décision valide (déjà un défaut nommé).
 
     ``reject`` est classé mais jamais refusé : il ne fait pas avancer le run.
-    ``approve``/``amend`` non attestés sont refusés sur un checkpoint
-    destructif (``refusal``), acceptés avec ``warning`` ailleurs.
+    ``amend`` rouvre le node (``refusal`` = la révision demandée, ``n/cap``) et
+    compte vers *cap*. ``accept_as_is`` est refusé tant que *cap* amendements
+    ne sont pas inscrits, puis exige le risque nommé ; accepté, il porte
+    ``accepted_risk``. ``approve``/``accept_as_is`` non attestés sont refusés
+    sur un checkpoint destructif (``refusal``), acceptés avec ``warning`` ailleurs.
     """
     decision = output.get("checkpoint_decision")
-    if decision not in ("approve", "reject", "amend"):
+    if decision not in ("approve", "reject", "amend", "accept_as_is"):
         return None
     reason = str(output.get("checkpoint_reason") or "")
     attestation = attest(project_root, journal.open_challenge(node_id), env, journal.consumed_turns())
+    done = journal.amendment_count(node_id)
+    if decision == "amend":
+        refusal = (
+            f"amend : révision demandée ({done + 1}/{cap}), le node reste ouvert"
+            + ("" if done + 1 < cap else " ; accept_as_is devient possible")
+            + (f" — {reason}" if reason else "")
+        )
+        return CheckpointGate("amend", reason, attestation, refusal=refusal)
+    accepted: dict[str, Any] | None = None
+    if decision == "accept_as_is":
+        if done < cap:
+            refusal = f"accept_as_is refusé : {done}/{cap} amendements, il en faut {cap} avant d'accepter en l'état"
+            return CheckpointGate("accept_as_is", reason, attestation, refusal=refusal)
+        if not reason.strip():
+            refusal = "accept_as_is refusé : 'checkpoint_reason' doit nommer le risque accepté"
+            return CheckpointGate("accept_as_is", reason, attestation, refusal=refusal)
+        accepted = {"amendments": done, "cap": cap, "reason": reason}
     if decision not in _ADVANCING or attestation.attested:
-        return CheckpointGate(str(decision), reason, attestation)
+        return CheckpointGate(str(decision), reason, attestation, accepted_risk=accepted)
     if destructive:
-        return CheckpointGate(str(decision), reason, attestation, refusal=refusal_text(attestation))
-    return CheckpointGate(str(decision), reason, attestation, warning=warning_text(attestation))
+        return CheckpointGate(
+            str(decision), reason, attestation, refusal=refusal_text(attestation), accepted_risk=accepted
+        )
+    return CheckpointGate(str(decision), reason, attestation, warning=warning_text(attestation), accepted_risk=accepted)

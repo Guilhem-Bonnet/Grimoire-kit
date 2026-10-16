@@ -235,6 +235,14 @@ def _validate_genre_config(node: dict[str, Any]) -> None:
             raise GrimoireRuntimeError(
                 f"node={node_id} : config.checkpoint.destructive doit être un booléen (true/false)"
             )
+        # W2-10 : `max_amendments` (optionnel) = amendements requis avant
+        # `accept_as_is`. Un entier ≥ 1 strict : `"3"`, `true` ou 0 (qui
+        # rendrait l'acceptation en l'état immédiate) sont refusés.
+        cap = c.get("max_amendments")
+        if "max_amendments" in c and (not isinstance(cap, int) or isinstance(cap, bool) or cap < 1):
+            raise GrimoireRuntimeError(
+                f"node={node_id} : config.checkpoint.max_amendments doit être un entier >= 1"
+            )
     # "fanout" : aucune clé de config obligatoire — le plafond du nombre
     # d'éléments (pilot.max_fanout_n) est une politique de projet, vérifiée à
     # l'exécution (flows/dispatch_executor.py, DispatchExecutor._execute_fanout),
@@ -355,7 +363,7 @@ def _tool_boundary(node: dict[str, Any]) -> tuple[str, ...]:
         if kind == "judge":
             return (f"judge(n={config.get('n')}):{node.get('ref', '')}",)
         if kind == "checkpoint":
-            return ("checkpoint(approve/reject/amend)",)
+            return ("checkpoint(approve/reject/amend/accept_as_is)",)
         if kind == "budget":
             passes = config.get("passes") or []
             return (f"budget(max_cost_usd={config.get('maxCostUsd')}, passes={len(passes)})",)
