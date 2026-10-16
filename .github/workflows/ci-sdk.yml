@@ -107,6 +107,9 @@ jobs:
   test:
     name: "Tests (Python ${{ matrix.python-version }}, ${{ matrix.os }})"
     runs-on: ${{ matrix.os }}
+    # Sans borne, un test qui se bloque sous Windows garde le job six heures
+    # (défaut GitHub) sans qu'aucun journal ne soit lisible avant la fin.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -139,6 +142,7 @@ jobs:
         shell: bash
         run: |
           pytest tests/unit/ tests/test_agentic_standard.py -q --tb=short -n auto --dist loadfile \
+            -o faulthandler_timeout=300 \
             --cov=src/grimoire \
             --cov-report=xml \
             --cov-report=term-missing \

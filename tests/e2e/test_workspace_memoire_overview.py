@@ -151,6 +151,15 @@ def test_memoire_view_seg_bascule_correctement(memory_fleet_workspace: Page) -> 
     """Sur un projet à mémoire initialisée, le groupe de segments a plusieurs
     boutons ; cliqué, un seul est `aria-pressed=true`, celui cliqué."""
     page = memory_fleet_workspace
+    # Jamais sondé, le projet est « uninitialized » et n'offre que la Flotte :
+    # le segment à plusieurs boutons n'existe qu'après une sonde (le geste du
+    # bouton « Sonder la mémoire »).
+    probed = page.evaluate(
+        "() => fetch('/api/memory/status' + location.search + '&probe=1').then(r => r.status)"
+    )
+    assert probed == 200, f"sonde mémoire refusée : HTTP {probed}"
+    page.reload(wait_until="domcontentloaded")
+    page.wait_for_selector("body[data-ready='1']", timeout=30_000)
     _goto(page, "memoire")
     page.wait_for_selector("#view-seg button")
     buttons = page.locator("#view-seg button")
