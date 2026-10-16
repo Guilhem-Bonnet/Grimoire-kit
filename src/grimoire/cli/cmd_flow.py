@@ -145,6 +145,7 @@ def _emit_status(ctx: typer.Context, view: FlowStatusView, project_root: Path) -
         d = view.blueprint_drift
         console.print(
             f"  [red]blueprint_drift[/red] : modifiés {d['changed_nodes'] or '-'}, retirés {d['removed_nodes'] or '-'}, "
+            f"ajoutés {d['added_nodes'] or '-'}, "
             f"ordre {' '.join(d['order_diff']) or 'identique'} — `grimoire flow migrate` ou rétablir le blueprint"
         )
     if view.last_refusal:

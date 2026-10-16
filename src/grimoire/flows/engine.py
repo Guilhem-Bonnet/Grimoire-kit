@@ -799,11 +799,13 @@ class FlowEngine:
         drift = self.blueprint_drift(run_id)
         if drift is not None:
             raise GrimoireRuntimeError(
-                f"run {run_id} : {DRIFT_KIND} — le blueprint a changé pour des nodes déjà franchis "
+                f"run {run_id} : {DRIFT_KIND} — le blueprint ne colle plus au run "
                 f"(modifiés : {drift['changed_nodes'] or 'aucun'} ; retirés : {drift['removed_nodes'] or 'aucun'} ; "
+                f"ajoutés, non adoptés : {drift['added_nodes'] or 'aucun'} ; "
                 f"ordre changé : {'oui' if drift['reordered'] else 'non'}) ; diff d'ordre : "
                 f"{' '.join(drift['order_diff']) or '(identique)'} ; rien n'a été écrit. "
-                "Rétablir le blueprint, ou `grimoire flow migrate` si les nodes franchis forment un préfixe identique."
+                "Rétablir le blueprint, ou `grimoire flow migrate` si les nodes franchis forment un préfixe identique "
+                "et que le node courant les suit."
             )
         if directive_id is not None:
             self._directive_refusal(run_id, directive_id, output, allow_replay)
@@ -866,6 +868,15 @@ class FlowEngine:
         order = list(meta.order)
         blueprint = load_blueprint(self._blueprint_file(meta), self._project_root)
         contracts = build_node_contracts(blueprint, self._project_root)
+        missing = [n for n in order if n not in contracts]
+        if missing:
+            # W2-04-S4 : le run avance sur l'ordre figé ; un node que le blueprint n'a plus
+            # ne s'ouvre pas (``contracts[next_id]`` levait un KeyError après le checkpoint).
+            raise GrimoireRuntimeError(
+                f"run {run_id} : les nodes {missing} n'existent plus dans le blueprint "
+                f"{self._blueprint_file(meta)} ; rien n'a été écrit. "
+                "Rétablir le blueprint, ou `grimoire flow migrate` si le node courant suit les nodes franchis."
+            )
         ctx = self._ctx_for(wfi)
         digest = _output_digest(output)
         # W1-03b : avant toute décision, complète le checkpoint qu'un crash a
@@ -1020,6 +1031,7 @@ class FlowEngine:
         idx = order.index(current_id)
         completed = order[: idx + 1]
         pending = order[idx + 1 :]
+        self._record_accepted_contract(meta, contracts, order, current_id)
         wfi, _chk = self._kernel.checkpoint(
             wfi.id,
             ctx,
@@ -1065,6 +1077,26 @@ class FlowEngine:
             attestation=attestation,
             warnings=warnings,
         )
+
+    def _record_accepted_contract(
+        self, meta: FlowRunMeta, contracts: dict[str, NodeContract], order: list[str], node_id: str
+    ) -> None:
+        """W2-04-S1 : le contrat sous lequel le node est franchi devient son empreinte.
+
+        Une retouche du node courant est acceptée (voir ``fingerprint``) ; sans ce
+        ré-enregistrement le node franchi garderait l'empreinte d'avant la retouche
+        et le franchissement suivant serait refusé en ``blueprint_drift``. Écrit AVANT
+        le checkpoint : un crash entre les deux laisse un node encore courant, jamais
+        un node franchi à l'empreinte périmée. Un run sans empreinte (antérieur à
+        W2-04) reste « non vérifié ». ``blueprint_sha256`` est celui du blueprint vu
+        à ce franchissement.
+        """
+        if meta.blueprint_sha256 is None:
+            return
+        digests = {**meta.node_digests, node_id: contract_digest(contracts[node_id].to_dict())}
+        sha = self._digest_of(contracts, order)
+        if digests != dict(meta.node_digests) or sha != meta.blueprint_sha256:
+            self._save_meta(replace(meta, blueprint_sha256=sha, node_digests=digests))
 
     def status(self, run_id: str, *, include_contract: bool = True) -> FlowStatusView:
         """Vue de lecture seule — ne mute jamais le kernel."""

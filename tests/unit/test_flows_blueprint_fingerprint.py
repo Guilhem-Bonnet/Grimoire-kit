@@ -125,10 +125,18 @@ def test_rename_of_a_crossed_node_is_drift_with_order_diff(tmp_path: Path) -> No
     assert any(line.startswith("-a") for line in drift["order_diff"])
 
 
-def test_node_added_after_the_current_one_is_accepted(tmp_path: Path) -> None:
+def test_node_added_after_the_current_one_blocks_until_migrate(tmp_path: Path) -> None:
+    """W2-04-S2 : le run avance sur ``meta.order`` ; un node que le blueprint ajoute n'y est pas ouvert."""
     engine, run_id, _ = _start(tmp_path)
     assert engine.resume(run_id, output=OUT_A).ok
     _write(tmp_path, _bp(extra_after=True))
+    drift = engine.blueprint_drift(run_id)
+    assert drift is not None and drift["added_nodes"] == ["d"]
+    before = _events(tmp_path)
+    with pytest.raises(GrimoireRuntimeError, match="ajout"):
+        engine.resume(run_id, output=OUT_B)
+    assert _events(tmp_path) == before
+    engine.migrate(run_id)
     assert engine.blueprint_drift(run_id) is None
     assert engine.resume(run_id, output=OUT_B).ok
 
@@ -201,3 +209,228 @@ def test_import_refuses_an_unsafe_run_id_and_an_escaping_path(tmp_path: Path) ->
     escaping["meta"]["blueprint_path"] = "../../outside.json"
     meta = import_run(_engine(dst), escaping, dst)
     assert (dst / meta.blueprint_path).is_file() and not (tmp_path / "outside.json").exists()
+
+
+# ── Revue W2-04 : S1 à S4 ────────────────────────────────────────────────────
+
+
+def _chain(ids: list[str], labels: dict[str, str] | None = None) -> dict[str, Any]:
+    labels = labels or {}
+    nodes: list[dict[str, Any]] = []
+    edges: list[dict[str, str]] = []
+    for k, i in enumerate(ids):
+        pins = ([{"id": "in", "direction": "in", "contract": f"c{k}"}] if k else []) + [
+            {"id": "out", "direction": "out", "contract": f"c{k + 1}"}
+        ]
+        nodes.append(_node(i, pins, labels.get(i)))
+        if k:
+            edges.append({"from": f"{ids[k - 1]}.out", "to": f"{i}.in", "contract": f"c{k}"})
+    return {"blueprintVersion": 1, "id": "trois", "name": "Trois", "nodes": nodes, "edges": edges}
+
+
+def _out(k: int) -> dict[str, Any]:
+    return {"pins": {"out": {"contract": f"c{k}"}}}
+
+
+def _start_chain(root: Path, ids: list[str]) -> tuple[FlowEngine, str, Path]:
+    path = _write(root, _chain(ids))
+    engine = _engine(root)
+    wfi, _ = engine.run(path, executor=InteractiveNodeExecutor(stream=io.StringIO()))
+    return engine, wfi.id, path
+
+
+def test_retouched_current_node_does_not_block_the_next_crossing(tmp_path: Path) -> None:
+    """S1 : la retouche du node courant est acceptée à son franchissement ; elle ne devient pas une dérive juste après."""
+    engine, run_id, path = _start_chain(tmp_path, ["a", "b", "c"])
+    assert engine.resume(run_id, output=_out(1)).ok
+    path.write_text(json.dumps(_chain(["a", "b", "c"], {"b": "B RETOUCHE"})), encoding="utf-8")
+    assert engine.blueprint_drift(run_id) is None
+    assert engine.resume(run_id, output=_out(2)).ok  # b franchi sous le contrat retouché
+    assert engine.blueprint_drift(run_id) is None
+    meta = engine.run_meta(run_id)
+    assert meta.blueprint_sha256 and len(meta.blueprint_sha256) == 64
+    outcome = engine.resume(run_id, output=_out(3))
+    assert outcome.ok and outcome.finished
+    assert engine.status(run_id).completed_nodes == ("a", "b", "c")
+
+
+def test_retouching_a_crossed_node_after_the_fact_is_still_drift(tmp_path: Path) -> None:
+    engine, run_id, path = _start_chain(tmp_path, ["a", "b", "c"])
+    assert engine.resume(run_id, output=_out(1)).ok
+    path.write_text(json.dumps(_chain(["a", "b", "c"], {"b": "B RETOUCHE"})), encoding="utf-8")
+    assert engine.resume(run_id, output=_out(2)).ok
+    path.write_text(json.dumps(_chain(["a", "b", "c"], {"b": "B ENCORE"})), encoding="utf-8")
+    drift = engine.blueprint_drift(run_id)
+    assert drift is not None and drift["changed_nodes"] == ["b"]
+
+
+def test_node_inserted_after_the_current_one_is_blocking_and_migratable(tmp_path: Path) -> None:
+    """S2 : insertion au milieu, run sur b ; x ne doit jamais être sauté en silence."""
+    engine, run_id, path = _start_chain(tmp_path, ["a", "b", "c", "d"])
+    assert engine.resume(run_id, output=_out(1)).ok
+    path.write_text(json.dumps(_chain(["a", "b", "x", "c", "d"])), encoding="utf-8")
+    drift = engine.blueprint_drift(run_id)
+    assert drift is not None and drift["added_nodes"] == ["x"]
+    before = _events(tmp_path)
+    with pytest.raises(GrimoireRuntimeError, match="blueprint_drift"):
+        engine.resume(run_id, output=_out(2))
+    assert _events(tmp_path) == before
+    engine.migrate(run_id)
+    outcome = engine.resume(run_id, output=_out(2))
+    assert outcome.ok and outcome.node_id == "x"  # x est bien ouvert
+
+
+def test_node_inserted_before_the_current_one_cannot_be_adopted(tmp_path: Path) -> None:
+    engine, run_id, path = _start_chain(tmp_path, ["a", "b", "c"])
+    assert engine.resume(run_id, output=_out(1)).ok
+    assert engine.resume(run_id, output=_out(2)).ok  # c courant
+    path.write_text(json.dumps(_chain(["a", "b", "x", "c"])), encoding="utf-8")
+    assert engine.blueprint_drift(run_id) is not None
+    with pytest.raises(GrimoireRuntimeError, match="blueprint_drift"):
+        engine.resume(run_id, output=_out(3))
+    with pytest.raises(GrimoireRuntimeError, match="migration refusée"):
+        engine.migrate(run_id)
+    assert engine.status(run_id).current_node == "c"
+
+
+def test_node_appended_at_the_end_is_not_skipped_by_a_finishing_run(tmp_path: Path) -> None:
+    engine, run_id, path = _start_chain(tmp_path, ["a", "b"])
+    assert engine.resume(run_id, output=_out(1)).ok  # b courant, dernier
+    path.write_text(json.dumps(_chain(["a", "b", "z"])), encoding="utf-8")
+    with pytest.raises(GrimoireRuntimeError, match="blueprint_drift"):
+        engine.resume(run_id, output=_out(2))
+    assert engine.status(run_id).status != "completed"
+    engine.migrate(run_id)
+    assert engine.resume(run_id, output=_out(2)).node_id == "z"
+    done = engine.resume(run_id, output=_out(3))
+    assert done.ok and done.finished
+    assert engine.status(run_id).completed_nodes == ("a", "b", "z")
+
+
+def test_current_or_later_node_removed_is_a_named_refusal_not_a_keyerror(tmp_path: Path) -> None:
+    """S4 : un node suivant retiré du blueprint ne fait plus lever KeyError au franchissement du courant."""
+    engine, run_id, path = _start_chain(tmp_path, ["a", "b", "c"])
+    assert engine.resume(run_id, output=_out(1)).ok  # b courant
+    path.write_text(json.dumps(_chain(["a", "b", "q"])), encoding="utf-8")
+    drift = engine.blueprint_drift(run_id)
+    assert drift is not None and drift["removed_nodes"] == ["c"]
+    before = _events(tmp_path)
+    with pytest.raises(GrimoireRuntimeError, match="blueprint_drift"):
+        engine.resume(run_id, output=_out(2))
+    assert _events(tmp_path) == before
+    directive = engine.status(run_id).directive
+    assert directive is not None and directive.kind == "blocked" and directive.reason == "blueprint_drift"
+
+
+def test_legacy_run_without_fingerprint_refuses_a_removed_next_node_before_writing(tmp_path: Path) -> None:
+    engine, run_id, path = _start_chain(tmp_path, ["a", "b", "c"])
+    meta_file = tmp_path / "_grimoire-runtime-output" / "flows" / f"{run_id}.json"
+    legacy = json.loads(meta_file.read_text(encoding="utf-8"))
+    legacy.update(blueprint_sha256=None, node_digests={})
+    meta_file.write_text(json.dumps(legacy), encoding="utf-8")
+    assert engine.resume(run_id, output=_out(1)).ok
+    path.write_text(json.dumps(_chain(["a", "b", "q"])), encoding="utf-8")
+    before = _events(tmp_path)
+    with pytest.raises(GrimoireRuntimeError, match="n'existent plus"):
+        engine.resume(run_id, output=_out(2))
+    assert _events(tmp_path) == before
+
+
+def _bundle(root: Path, ids: list[str] | None = None) -> tuple[dict[str, Any], str]:
+    from grimoire.flows.transfer import export_run
+
+    engine, run_id, _ = _start_chain(root, ids or ["a", "b", "c"])
+    assert engine.resume(run_id, output=_out(1)).ok
+    return export_run(engine, run_id, root), run_id
+
+
+def test_import_refuses_a_non_blueprint_text_and_writes_nothing(tmp_path: Path) -> None:
+    """S3 : un paquet dont le « blueprint » est du code et le chemin ``conftest.py`` ne pose rien."""
+    from grimoire.flows.transfer import import_run
+
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    src.mkdir()
+    dst.mkdir()
+    bundle, run_id = _bundle(src)
+    bundle["meta"]["blueprint_path"] = "conftest.py"
+    bundle["blueprint"]["text"] = "import os\nos.environ['PWNED'] = '1'\n"
+    engine = _engine(dst)
+    with pytest.raises(GrimoireRuntimeError, match="blueprint"):
+        import_run(engine, bundle, dst)
+    assert not (dst / "conftest.py").exists()
+    assert not (dst / "_grimoire-runtime-output").exists() or not engine.has_instance(run_id)
+    assert [p.name for p in dst.iterdir() if p.is_file()] == []
+
+
+@pytest.mark.parametrize("text", [123, None, "[1, 2]", '{"blueprintVersion": 1, "id": "autre", "nodes": [], "edges": []}'])
+def test_import_refuses_an_invalid_or_foreign_blueprint(tmp_path: Path, text: Any) -> None:
+    from grimoire.flows.transfer import import_run
+
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    src.mkdir()
+    dst.mkdir()
+    bundle, run_id = _bundle(src)
+    bundle["blueprint"]["text"] = text
+    engine = _engine(dst)
+    with pytest.raises(GrimoireRuntimeError):
+        import_run(engine, bundle, dst)
+    assert not engine.has_instance(run_id)
+    assert not (dst / "bp").exists()
+
+
+def test_import_with_a_valid_blueprint_on_a_non_blueprint_path_falls_back(tmp_path: Path) -> None:
+    from grimoire.flows.transfer import import_run
+
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    src.mkdir()
+    dst.mkdir()
+    bundle, run_id = _bundle(src)
+    bundle["meta"]["blueprint_path"] = "conftest.py"
+    meta = import_run(_engine(dst), bundle, dst)
+    assert not (dst / "conftest.py").exists()
+    assert meta.blueprint_path == f"_grimoire-runtime-output/flows/blueprints/{run_id}.blueprint.json"
+    assert json.loads((dst / meta.blueprint_path).read_text(encoding="utf-8"))["id"] == "trois"
+
+
+def test_import_over_a_diverging_local_blueprint_is_refused_before_any_write(tmp_path: Path) -> None:
+    """S4 : le blueprint local [a, b, q] diffère du paquet [a, b, c] ; l'import ne fabrique pas un run bancal."""
+    from grimoire.flows.transfer import import_run
+
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    src.mkdir()
+    dst.mkdir()
+    bundle, run_id = _bundle(src)
+    _write(dst, _chain(["a", "b", "q"]))
+    engine = _engine(dst)
+    with pytest.raises(GrimoireRuntimeError, match="diverge"):
+        import_run(engine, bundle, dst)
+    assert not engine.has_instance(run_id)
+    assert not (dst / "_grimoire-runtime-output" / "flows" / f"{run_id}.json").exists()
+    assert not (dst / "_grimoire-runtime-output" / "runtime" / "run_events.jsonl").exists()
+
+
+def test_import_over_an_equivalent_local_blueprint_is_accepted(tmp_path: Path) -> None:
+    from grimoire.flows.transfer import import_run
+
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    src.mkdir()
+    dst.mkdir()
+    bundle, _run_id = _bundle(src)
+    _write(dst, _chain(["a", "b", "c"]))
+    (dst / "bp" / "trois.blueprint.json").write_text(json.dumps(_chain(["a", "b", "c"]), indent=4), encoding="utf-8")
+    meta = import_run(_engine(dst), bundle, dst)
+    assert meta.blueprint_path == "bp/trois.blueprint.json"
+
+
+def test_import_refuses_a_text_that_cannot_cross_a_strict_utf8_boundary(tmp_path: Path) -> None:
+    from grimoire.flows.transfer import import_run
+
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    src.mkdir()
+    dst.mkdir()
+    bundle, run_id = _bundle(src)
+    bundle["blueprint"]["text"] = bundle["blueprint"]["text"].replace('"Trois"', '"T' + chr(0xD800) + '"')
+    engine = _engine(dst)
+    with pytest.raises(GrimoireRuntimeError, match="UTF-8"):
+        import_run(engine, bundle, dst)
+    assert not engine.has_instance(run_id)

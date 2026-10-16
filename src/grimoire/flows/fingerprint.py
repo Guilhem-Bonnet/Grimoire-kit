@@ -5,9 +5,12 @@ et juge la sortie contre lui : un node déjà franchi dont le contrat a changé,
 un ordre modifié, passe inaperçu. Ce module est pur (aucune lecture, aucune
 écriture) : l'engine lui donne l'ordre et les contrats compilés.
 
-Règle de dérive : seuls les nodes DÉJÀ FRANCHIS sont comparés (contrat, présence,
-position). Ce qui vient après le node courant peut évoluer sans bloquer le run ;
-``flow migrate`` l'adopte explicitement.
+Règle de dérive : le contrat, la présence et la position des nodes DÉJÀ FRANCHIS
+sont comparés. Le contrat du node courant et des suivants peut être retouché sans
+bloquer le run (le courant est ré-enregistré à son franchissement). En revanche le
+run avance sur l'ordre qu'il a figé : un node retiré du blueprint (courant ou
+suivant) ou AJOUTÉ à lui (jamais ouvert par le run) bloque jusqu'à ``flow migrate``
+ou au rétablissement du blueprint.
 """
 
 from __future__ import annotations
@@ -22,6 +25,7 @@ from typing import Any
 
 __all__ = [
     "DRIFT_KIND",
+    "blueprint_divergence",
     "contract_digest",
     "drift_of",
     "migration_refusal",
@@ -73,29 +77,63 @@ def drift_of(
     new_order: Sequence[str],
     new_contracts: Mapping[str, Mapping[str, Any]],
 ) -> dict[str, Any] | None:
-    """``None`` si les nodes franchis sont inchangés ; sinon le constat ``blueprint_drift``.
+    """``None`` si le blueprint colle encore au run ; sinon le constat ``blueprint_drift``.
+
+    Nodes franchis : contrat, présence, position. Nodes courant et suivants : seule
+    leur présence compte (``removed_nodes``) ; un node du blueprint absent de
+    ``stored_order`` est ``added_nodes`` (jamais ouvert par un run qui avance sur
+    son ordre figé).
 
     ``stored_digests`` vide (run antérieur à W2-04) : rien à comparer, ``None`` —
     l'appelant distingue ce cas « non vérifié » avant d'appeler.
     """
-    removed = [n for n in crossed if n not in new_contracts]
+    removed = [n for n in stored_order if n not in new_contracts]
+    added = [n for n in new_order if n not in stored_order]
     changed = [
         n
         for n in crossed
         if n in new_contracts and n in stored_digests and contract_digest(new_contracts[n]) != stored_digests[n]
     ]
-    reordered = list(new_order[: len(crossed)]) != list(crossed) and not removed
-    if not (removed or changed or reordered):
+    reordered = list(new_order[: len(crossed)]) != list(crossed) and not any(n in removed for n in crossed)
+    if not (removed or added or changed or reordered):
         return None
     return {
         "kind": DRIFT_KIND,
         "changed_nodes": changed,
         "removed_nodes": removed,
+        "added_nodes": added,
         "reordered": reordered,
         "stored_order": list(stored_order),
         "current_order": list(new_order),
         "order_diff": _order_diff(stored_order, new_order),
     }
+
+
+def blueprint_divergence(
+    order_a: Sequence[str],
+    contracts_a: Mapping[str, Mapping[str, Any]],
+    order_b: Sequence[str],
+    contracts_b: Mapping[str, Mapping[str, Any]],
+) -> str | None:
+    """Ce qui sépare deux blueprints compilés (nodes en plus, en moins, contrats modifiés, ordre), ou ``None``."""
+    only_a = [n for n in order_a if n not in contracts_b]
+    only_b = [n for n in order_b if n not in contracts_a]
+    changed = [
+        n for n in order_a if n in contracts_b and contract_digest(contracts_a[n]) != contract_digest(contracts_b[n])
+    ]
+    reordered = not (only_a or only_b) and list(order_a) != list(order_b)
+    if not (only_a or only_b or changed or reordered):
+        return None
+    parts = []
+    if only_a:
+        parts.append(f"seulement dans le premier : {only_a}")
+    if only_b:
+        parts.append(f"seulement dans le second : {only_b}")
+    if changed:
+        parts.append(f"contrats modifiés : {changed}")
+    if reordered:
+        parts.append("ordre différent : " + " ".join(_order_diff(order_a, order_b)))
+    return " ; ".join(parts)
 
 
 def migration_refusal(
