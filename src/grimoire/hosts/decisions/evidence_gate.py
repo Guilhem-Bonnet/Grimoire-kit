@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import UTC, datetime
+from typing import Any
 
 from grimoire.core.standard_checks.evidence_journal import record_guard_error
 from grimoire.core.standard_state import active_profile_id, is_standard_enrolled, resolve_active_task
@@ -35,9 +36,10 @@ def decide_evidence_gate(hook: HookInput) -> Decision:
     this is the only decision in the package that can make a host refuse.
     """
     if hook.stop_active:
-        # The host is already re-running us after a previous block. Blocking a
-        # second time is how a session becomes unexitable.
-        return Decision(detail={"skipped": "stop_hook_already_active"})
+        # The host is already re-running us after a previous block. Blocking
+        # again without limit is how a session becomes unexitable : W2-02 keeps
+        # the refusal only while the progress signature changes, under a cap.
+        return _continued_stop(hook)
     if not is_standard_enrolled(hook.project_root):
         return Decision(detail={"skipped": "project_not_enrolled"})
 
@@ -103,7 +105,67 @@ def decide_evidence_gate(hook: HookInput) -> Decision:
         f"`grimoire standard gate check --task-id {task_id} --strict`. "
         "Si la tâche doit rester ouverte, dis-le explicitement à l'utilisateur au lieu de conclure."
     )
+    _open_stop_chain(hook, task_id, summary, detail)
     return _with_done_gate(Decision(outcome=Outcome.BLOCK, reason=reason, detail=detail), hook, task_id, profile)
+
+
+def _signature_of(hook: HookInput, task_id: str, summary: str, detail: dict[str, Any]) -> str:
+    from grimoire.hosts.decisions.done_gate import stop_signature
+
+    return stop_signature(hook.project_root, task_id, summary, [str(m) for m in detail.get("missing") or []])
+
+
+def _open_stop_chain(hook: HookInput, task_id: str, summary: str, detail: dict[str, Any]) -> None:
+    """W2-02 : un premier refus ouvre la chaîne que les ``Stop`` continués jugeront. Best-effort."""
+    from grimoire.hosts.decisions.done_gate import record_stop_block
+
+    try:
+        record_stop_block(hook.project_root, task_id, _signature_of(hook, task_id, summary, detail))
+    except Exception as exc:
+        record_guard_error(hook.project_root, task_id, "done_gate.stop_chain", type(exc).__name__, str(exc))
+
+
+def _continued_stop(hook: HookInput) -> Decision:
+    """W2-02 : ``Stop`` rejoué par l'hôte après un refus — maintenu tant que la session progresse.
+
+    Tout ce qui n'est pas « gates rouges en profil bloquant avec une chaîne de
+    refus connue » sort comme avant (``stop_hook_already_active``). Sinon la
+    signature de progrès décide : changée et sous le plafond du profil, le refus
+    est maintenu ; identique ou plafond atteint, la session sort et
+    ``stop.released`` est tracé (journal de garde de la tâche).
+    """
+    skipped = Decision(detail={"skipped": "stop_hook_already_active"})
+    try:
+        if not is_standard_enrolled(hook.project_root):
+            return skipped
+        active = resolve_active_task(hook.project_root, session_id=hook.session_id)
+        profile = active_profile_id(hook.project_root)
+        if active.is_fallback or profile not in _BLOCKING_PROFILES:
+            return skipped
+        task_id = active.task_id
+        ok, summary, detail = _gate_summary(hook.project_root, task_id)
+        if ok:
+            return skipped
+        from grimoire.hosts.decisions.done_gate import stop_step
+
+        signature = _signature_of(hook, task_id, summary, detail)
+        step = stop_step(hook.project_root, task_id, profile, signature, summary, datetime.now(UTC).isoformat())
+    except Exception as exc:
+        # Un échec ici ne doit jamais rendre la session inquittable : elle sort, et c'est tracé.
+        record_guard_error(hook.project_root, "bootstrap", "done_gate.stop_signature", type(exc).__name__, str(exc))
+        return skipped
+    detail = {**detail, "stop_signature": {"release": step.release, "reason": step.reason, "blocks": step.count, "cap": step.cap}}
+    if step.release:
+        return Decision(detail={**detail, "skipped": "stop_hook_already_active"})
+    reason = (
+        f"[Grimoire] Tâche {task_id} non terminée : les gates de preuve sont encore rouges (profil {profile}), "
+        f"mais la session a progressé depuis le refus précédent (refus {step.count}/{step.cap}).\n"
+        f"{summary}\n"
+        f"Complète _grimoire-output/evidence/{task_id}/ puis relance "
+        f"`grimoire standard gate check --task-id {task_id} --strict`. "
+        "Si la tâche doit rester ouverte, dis-le explicitement à l'utilisateur au lieu de conclure."
+    )
+    return Decision(outcome=Outcome.BLOCK, reason=reason, detail=detail)
 
 
 def _with_done_gate(decision: Decision, hook: HookInput, task_id: str, profile: str) -> Decision:

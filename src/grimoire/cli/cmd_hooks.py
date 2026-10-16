@@ -186,9 +186,13 @@ def hooks_status(ctx: typer.Context, path: Path = _hooks_path_arg) -> None:
     states = _hook_states(hooks_dir, sources)
     installed = sum(1 for state in states.values() if state == "installed")
     stale = sum(1 for state in states.values() if state == "stale")
+    from grimoire.hosts.decisions.done_gate import stop_cap
+
+    stop_caps = {profile: stop_cap(profile) for profile in ("orchestrated", "governed", "production")}
     if _get_fmt(ctx) == "json":
         typer.echo(json.dumps({
             "installed": installed, "stale": stale, "total": len(states), "states": states,
+            "stop_caps": stop_caps,
         }, indent=2))
     else:
         icons = {
@@ -201,6 +205,7 @@ def hooks_status(ctx: typer.Context, path: Path = _hooks_path_arg) -> None:
             suffix = " (version obsolète)" if state == "stale" else ""
             console.print(f"  {icons[state]} {name}{suffix}")
         console.print(f"  {installed}/{len(states)} hooks à jour")
+        console.print("  plafond de refus du Stop : " + ", ".join(f"{k}={v}" for k, v in stop_caps.items()))
         if installed < len(states):
             console.print("  → grimoire hooks install")
     raise typer.Exit(0 if installed == len(states) else 1)

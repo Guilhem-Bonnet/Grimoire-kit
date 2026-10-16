@@ -58,19 +58,36 @@ alone — see :func:`_caps_path`.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import os
 import re
+import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from grimoire.core.standard_checks.evidence_journal import evidence_log_relpath, read_evidence_log, record_guard_error
+from grimoire.core.standard_checks.evidence_journal import (
+    append_guard_event,
+    evidence_log_relpath,
+    read_evidence_log,
+    record_guard_error,
+)
 from grimoire.hosts.decisions.enrolment import BLOCKING_PROFILES
 from grimoire.hosts.decisions.tool_facts import command_surface, is_read_only_command
 
-__all__ = ["DoneGateVerdict", "evaluate_done_gate", "resolve_done_gate_block", "resolve_done_gate_block_after_crash"]
+__all__ = [
+    "DoneGateVerdict",
+    "StopStep",
+    "evaluate_done_gate",
+    "record_stop_block",
+    "resolve_done_gate_block",
+    "resolve_done_gate_block_after_crash",
+    "stop_cap",
+    "stop_signature",
+    "stop_step",
+]
 
 #: Same directory as ``evidence-log.jsonl`` (see the module docstring) —
 #: never ``_grimoire-output/evidence`` (the versioned pack): a per-task
@@ -598,3 +615,146 @@ def evaluate_done_gate(hook: Any, task_id: str, profile: str, *, now_iso: str | 
         command_hint=command_hint,
         last_mutation_ts=last_mutation_ts,
     )
+
+
+# --- W2-02 : signature de progrès du Stop ---------------------------------
+#
+# Le compteur ci-dessus (``done-gate-state.json``) est étendu, pas doublé : la
+# clé ``stop`` y porte la chaîne de refus des gates de preuve rouges. Avant, un
+# ``Stop`` continué (``stop_hook_active``) passait sans rien regarder : un seul
+# refus, que la session ait avancé ou non. Désormais le refus est maintenu tant
+# que la signature change (la session avance), et libère dès qu'une signature se
+# répète (elle tourne en rond) ou que le plafond du profil est atteint.
+
+#: Plafond de refus par chaîne de ``Stop``, par profil. Jamais une variable
+#: d'environnement : un plafond réglable par l'agent serait un plafond désarmé.
+_STOP_CAPS: dict[str, int] = {"governed": 4, "production": 8}
+_STOP_CAP_DEFAULT = 2
+
+#: Événement tracé à chaque relâchement (journal de garde de la tâche).
+STOP_RELEASED_EVENT = "stop.released"
+
+_STOP_KEY = "stop"
+_FINGERPRINT_TIMEOUT_SECONDS = 5.0
+
+
+@dataclass(frozen=True, slots=True)
+class StopStep:
+    """Décision d'un ``Stop`` continué : ``release`` (la session sort) ou refus maintenu."""
+
+    release: bool
+    reason: str = ""
+    count: int = 0
+    cap: int = 0
+
+
+def stop_cap(profile: str) -> int:
+    """Plafond de refus consécutifs du profil *profile* (2 par défaut, 4 governed, 8 production)."""
+    return _STOP_CAPS.get(profile, _STOP_CAP_DEFAULT)
+
+
+def _tree_fingerprint(project_root: Path, task_id: str) -> str:
+    """Empreinte de l'arbre de travail : fichiers modifiés ou non suivis, taille et mtime.
+
+    Hors ``RUNS_DIR`` (le compteur lui-même y vit). Sans git, repli sur le
+    journal d'actions de la tâche (taille). Jamais d'exception.
+    """
+    try:
+        listing = subprocess.run(
+            ["git", "-C", str(project_root), "ls-files", "-m", "-o", "--exclude-standard", "-z"],
+            capture_output=True,
+            timeout=_FINGERPRINT_TIMEOUT_SECONDS,
+            check=True,
+        ).stdout
+        digest = hashlib.sha256()
+        for raw in sorted(listing.split(b"\0")):
+            rel = raw.decode("utf-8", errors="replace")
+            if not rel or rel.startswith("_grimoire-output/.runs/"):
+                continue
+            try:
+                st = (project_root / rel).stat()
+                digest.update(f"{rel}\0{st.st_size}\0{st.st_mtime_ns}\n".encode())
+            except OSError:
+                digest.update(f"{rel}\0gone\n".encode())
+        return "git:" + digest.hexdigest()[:16]
+    except (OSError, subprocess.SubprocessError):
+        pass
+    try:
+        size = (project_root / evidence_log_relpath(task_id)).stat().st_size
+    except OSError:
+        size = 0
+    return f"journal:{size}"
+
+
+def stop_signature(
+    project_root: Path, task_id: str, summary: str, missing: list[str], *, flow_node: str = ""
+) -> str:
+    """Signature de progrès : ``(tâche, digest des gates rouges, empreinte d'arbre, node de flow)``.
+
+    ``flow_node`` n'est pas lu dans un hook (le moteur de flows n'est pas
+    accessible à bas coût depuis ``Stop``) : le paramètre fixe l'emplacement du
+    composant, vide tant que rien ne l'alimente.
+    """
+    gates = hashlib.sha256((summary + "\0" + "\0".join(sorted(missing))).encode("utf-8", "replace")).hexdigest()[:16]
+    return "|".join((task_id, gates, _tree_fingerprint(project_root, task_id), flow_node))
+
+
+def _load_stop_chain(state: dict[str, Any], project_root: Path, task_id: str) -> tuple[str, int]:
+    """``(dernière signature, refus émis)`` ; un état corrompu revient à ``("", 0)``, tracé."""
+    raw = state.get(_STOP_KEY)
+    if raw is None:
+        return "", 0
+    count = raw.get("count") if isinstance(raw, dict) else None
+    signature = raw.get("signature") if isinstance(raw, dict) else None
+    if isinstance(count, int) and not isinstance(count, bool) and count >= 0 and isinstance(signature, str):
+        return signature, count
+    record_guard_error(project_root, task_id, "done_gate.stop_state", "ValueError", f"stop={raw!r}")
+    return "", 0
+
+
+def record_stop_block(project_root: Path, task_id: str, signature: str) -> None:
+    """Un ``Stop`` initial vient de refuser : ouvre la chaîne (compte 1). Best-effort."""
+    path = _caps_path(project_root, task_id)
+    state = _load_caps(path)
+    state[_STOP_KEY] = {"signature": signature, "count": 1}
+    _save_caps(path, state)
+
+
+def stop_step(project_root: Path, task_id: str, profile: str, signature: str, red_gates: str, now_iso: str) -> StopStep:
+    """Un ``Stop`` continué avec des gates rouges : maintenir le refus ou relâcher.
+
+    Relâche (et trace ``stop.released``) quand la signature est identique à celle
+    du dernier refus (la session ne progresse pas), quand le plafond du profil
+    est atteint (le (cap+1)-ième ``Stop`` passe toujours), ou quand aucune chaîne
+    n'est connue (état absent ou corrompu : rien ne prouve un progrès, la session
+    sort comme avant). Sinon le refus est maintenu et le compteur avance.
+    """
+    path = _caps_path(project_root, task_id)
+    state = _load_caps(path)
+    last_signature, count = _load_stop_chain(state, project_root, task_id)
+    cap = stop_cap(profile)
+    if count <= 0:
+        return StopStep(release=True, reason="no_chain", count=0, cap=cap)
+    why = "same_signature" if signature == last_signature else "cap_reached" if count >= cap else ""
+    if why:
+        append_guard_event(
+            project_root,
+            task_id,
+            {
+                "ts": now_iso,
+                "type": STOP_RELEASED_EVENT,
+                "guard_id": "done_gate.stop_signature",
+                "reason": why,
+                "profile": profile,
+                "blocks": count,
+                "cap": cap,
+                "signature": signature,
+                "red_gates": red_gates,
+            },
+        )
+        state[_STOP_KEY] = {"signature": signature, "count": 0}
+        _save_caps(path, state)
+        return StopStep(release=True, reason=why, count=count, cap=cap)
+    state[_STOP_KEY] = {"signature": signature, "count": count + 1}
+    _save_caps(path, state)
+    return StopStep(release=False, reason="signature_changed", count=count + 1, cap=cap)
