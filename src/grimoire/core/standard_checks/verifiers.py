@@ -399,7 +399,7 @@ def _verify_dispatch_cost_slo(root: Path, result: StandardVerificationResult) ->
     pas un mapping — même règle que tous les autres ``_verify_*`` de ce
     module : sans artefact, rien à comparer.
 
-    Trois issues, jamais un ``error`` par défaut :
+    Quatre issues, jamais un ``error`` par défaut :
 
     - ``info`` quand trop peu de données existent (moins de
       ``min_resolved_observations`` dispatchs résolus pour le coût, moins de
@@ -411,6 +411,8 @@ def _verify_dispatch_cost_slo(root: Path, result: StandardVerificationResult) ->
     - ``error`` à la place du ``warning`` ci-dessus, uniquement quand le
       projet déclare ``dispatch_cost_slo.enforce: true`` — un dépassement
       silencieux par défaut, un gate dur seulement sur demande explicite.
+    - ``warning`` (jamais ``error``) si des appels n'ont pas de coût : SLO non évalué, pas
+      violé ; ``enforce`` ne durcit qu'un dépassement prouvé (un ``trace.v1`` bloquerait à vie).
     """
     rel_path = STANDARD_DIR / "llm-provider-registry.yaml"
     data = _load_yaml_file(root, rel_path, result)
@@ -433,14 +435,15 @@ def _verify_dispatch_cost_slo(root: Path, result: StandardVerificationResult) ->
     else:
         cost = stats.overall.cost_per_resolved_task_usd
         max_cost = config["max_cost_per_resolved_task_usd"]
+        unpriced = stats.overall.unpriced_calls
+        known = "unknown" if cost is None else f"at least ${cost:.4f}"
+        # Un coût partiel ou inconnu ne prouve jamais que le SLO est tenu (W1-01, #709).
         if cost is not None and cost > max_cost:
-            _add_check(
-                result,
-                "dispatch.cost_slo",
-                severity,
-                f"Cost per resolved task (${cost:.4f}) exceeds the declared SLO (${max_cost:.4f}).",
-                path=rel_path,
-            )
+            msg = f"{'At least: ' if unpriced else ''}Cost per resolved task (${cost:.4f}) exceeds the declared SLO (${max_cost:.4f})."
+            _add_check(result, "dispatch.cost_slo", severity, msg, path=rel_path)
+        elif unpriced:
+            msg = f"Cost per resolved task is {known}: {unpriced} call(s) reported no cost, so the SLO (${max_cost:.4f}) is not evaluated."
+            _add_check(result, "dispatch.cost_slo", "warning", msg, path=rel_path)
 
     if stats.pass_k_observations < config["min_pass_k_observations"]:
         _add_check(

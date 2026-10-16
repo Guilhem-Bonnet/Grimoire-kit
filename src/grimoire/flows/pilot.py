@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from grimoire.core.exceptions import GrimoireRuntimeError
+from grimoire.costs import COST_POLICIES, POLICY_STOP
 from grimoire.missions.dispatch import start_tier_for
 from grimoire.missions.verifiability import Verifiability
 from grimoire.providers.registry import SUPPORTED_MODEL_TIERS
@@ -69,13 +70,18 @@ class PilotPolicy:
     #: silencieusement illimité (même doctrine que ``max_cost_usd_per_node`` :
     #: un plafond de sécurité absent n'est jamais un plafond infini implicite).
     max_fanout_n: int | None = None
+    #: Que faire d'un coût inconnu face à ``max_cost_usd_per_node`` (W1-01,
+    #: issue #709) : ``stop`` (défaut, fail-closed) arrête l'escalade ;
+    #: ``continue_flagged`` la laisse continuer, le coût restant signalé
+    #: ``lower_bound``/``unknown`` dans tous les rapports.
+    on_unknown_cost: str = POLICY_STOP
 
 
 _DEFAULT_POLICY = PilotPolicy()
 
 
 def _validate_and_build(data: dict[str, Any]) -> PilotPolicy:
-    known_keys = {"start_tier", "max_escalations", "max_cost_usd_per_node", "max_fanout_n"}
+    known_keys = {"start_tier", "max_escalations", "max_cost_usd_per_node", "max_fanout_n", "on_unknown_cost"}
     unknown = sorted(set(data) - known_keys)
     if unknown:
         raise GrimoireRuntimeError(
@@ -116,7 +122,12 @@ def _validate_and_build(data: dict[str, Any]) -> PilotPolicy:
     ):
         raise GrimoireRuntimeError("pilot.yaml : 'max_fanout_n' doit être un entier strictement positif")
 
+    on_unknown_cost = data.get("on_unknown_cost", POLICY_STOP)
+    if on_unknown_cost not in COST_POLICIES:
+        raise GrimoireRuntimeError(f"pilot.yaml : 'on_unknown_cost' doit valoir l'un de {list(COST_POLICIES)}")
+
     return PilotPolicy(
+        on_unknown_cost=on_unknown_cost,
         start_tier=start_tier,
         max_escalations=max_escalations,
         max_cost_usd_per_node=float(max_cost) if max_cost is not None else None,
@@ -161,6 +172,7 @@ class PilotDecision:
     #: explicite, s'il existe, s'applique quand même — voir l'appelant).
     max_tier: str | None
     max_cost_usd: float | None
+    cost_unknown_policy: str = POLICY_STOP
 
 
 def decide(verifiability: Verifiability, *, policy: PilotPolicy) -> PilotDecision:
@@ -172,7 +184,7 @@ def decide(verifiability: Verifiability, *, policy: PilotPolicy) -> PilotDecisio
     """
     floor = start_tier_for(verifiability)
     if floor is None:
-        return PilotDecision(start_tier=None, max_tier=None, max_cost_usd=policy.max_cost_usd_per_node)
+        return PilotDecision(start_tier=None, max_tier=None, max_cost_usd=policy.max_cost_usd_per_node, cost_unknown_policy=policy.on_unknown_cost)
 
     override = policy.start_tier.get(verifiability.value)
     # Même garantie que ``--start-tier`` explicite dans ``run_dispatch`` :
@@ -188,4 +200,4 @@ def decide(verifiability: Verifiability, *, policy: PilotPolicy) -> PilotDecisio
         capped_idx = min(base_idx + policy.max_escalations, len(SUPPORTED_MODEL_TIERS) - 1)
         max_tier = SUPPORTED_MODEL_TIERS[capped_idx]
 
-    return PilotDecision(start_tier=start_tier, max_tier=max_tier, max_cost_usd=policy.max_cost_usd_per_node)
+    return PilotDecision(start_tier=start_tier, max_tier=max_tier, max_cost_usd=policy.max_cost_usd_per_node, cost_unknown_policy=policy.on_unknown_cost)
