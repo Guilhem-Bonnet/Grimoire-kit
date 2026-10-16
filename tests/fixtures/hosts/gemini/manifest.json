@@ -1,0 +1,73 @@
+{
+  "host": "gemini",
+  "host_version": "",
+  "captured_on": "",
+  "capabilities": {
+    "pretooluse_deny": {
+      "status": "unverified",
+      "fixtures": [],
+      "channel": "",
+      "note": "Non vérifié : aucune capture de Gemini CLI (Guilhem absent le 2026-10-16, pas de session de l'hôte lancée)."
+    },
+    "session_end": {
+      "status": "unverified",
+      "fixtures": [],
+      "channel": "",
+      "note": "Non vérifié : aucune capture de Gemini CLI (Guilhem absent le 2026-10-16, pas de session de l'hôte lancée)."
+    },
+    "quota_signal": {
+      "status": "unverified",
+      "fixtures": [],
+      "channel": "",
+      "note": "Non vérifié : aucune capture de Gemini CLI (Guilhem absent le 2026-10-16, pas de session de l'hôte lancée)."
+    },
+    "liveness_probe": {
+      "status": "unverified",
+      "fixtures": [],
+      "channel": "",
+      "note": "Non vérifié : aucune capture de Gemini CLI (Guilhem absent le 2026-10-16, pas de session de l'hôte lancée)."
+    },
+    "subagent_model": {
+      "status": "unverified",
+      "fixtures": [],
+      "channel": "",
+      "note": "Non vérifié : aucune capture de Gemini CLI (Guilhem absent le 2026-10-16, pas de session de l'hôte lancée)."
+    },
+    "resume_after_quota": {
+      "status": "unverified",
+      "fixtures": [],
+      "channel": "",
+      "note": "Non vérifié : aucune capture de Gemini CLI (Guilhem absent le 2026-10-16, pas de session de l'hôte lancée)."
+    },
+    "bg_workspace_trust": {
+      "status": "unverified",
+      "fixtures": [],
+      "channel": "",
+      "note": "Non vérifié : aucune capture de Gemini CLI (Guilhem absent le 2026-10-16, pas de session de l'hôte lancée)."
+    },
+    "bg_cost_source": {
+      "status": "unverified",
+      "fixtures": [],
+      "channel": "",
+      "note": "Non vérifié : aucune capture de Gemini CLI (Guilhem absent le 2026-10-16, pas de session de l'hôte lancée)."
+    },
+    "bg_wake": {
+      "status": "unverified",
+      "fixtures": [],
+      "channel": "",
+      "note": "Non vérifié : aucune capture de Gemini CLI (Guilhem absent le 2026-10-16, pas de session de l'hôte lancée)."
+    },
+    "local_token_usage": {
+      "status": "unverified",
+      "fixtures": [],
+      "channel": "",
+      "note": "Non vérifié : aucune capture de Gemini CLI (Guilhem absent le 2026-10-16, pas de session de l'hôte lancée)."
+    },
+    "systemd_user_linger": {
+      "status": "unverified",
+      "fixtures": [],
+      "channel": "",
+      "note": "Non vérifié : aucune capture de Gemini CLI (Guilhem absent le 2026-10-16, pas de session de l'hôte lancée)."
+    }
+  }
+}
