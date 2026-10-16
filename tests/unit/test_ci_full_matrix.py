@@ -124,10 +124,10 @@ def test_a_skip_becomes_a_failure_under_strict_mode(tmp_path: Path) -> None:
     )
 
     def run(strict: str) -> subprocess.CompletedProcess[str]:
-        env = {**os.environ, "GRIMOIRE_E2E_STRICT": strict}
+        env = {**os.environ, "GRIMOIRE_E2E_STRICT": strict, "PYTHONUTF8": "1"}  # sortie en UTF-8 sous Windows aussi
         return subprocess.run(
             [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-o", "addopts=", str(tmp_path)],
-            capture_output=True, text=True, encoding="utf-8", env=env, cwd=tmp_path, timeout=120, check=False,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, cwd=tmp_path, timeout=120, check=False,
         )
 
     lax = run("0")
@@ -166,10 +166,10 @@ def _e2e_sandbox(tmp_path: Path, *, with_sync_api: bool) -> tuple[Path, Path]:
 
 
 def _run_e2e(tmp_path: Path, fake: Path, strict: str) -> subprocess.CompletedProcess[str]:
-    env = {**os.environ, "GRIMOIRE_E2E_STRICT": strict, "PYTHONPATH": str(fake)}
+    env = {**os.environ, "GRIMOIRE_E2E_STRICT": strict, "PYTHONPATH": str(fake), "PYTHONUTF8": "1"}
     return subprocess.run(
         [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-o", "addopts=", "e2e"],
-        capture_output=True, text=True, encoding="utf-8", env=env, cwd=tmp_path, timeout=120, check=False,
+        capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, cwd=tmp_path, timeout=120, check=False,
     )
 
 

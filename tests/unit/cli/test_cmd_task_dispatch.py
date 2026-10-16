@@ -301,6 +301,8 @@ def test_dispatch_texte_affiche_les_incertitudes_declarees(tmp_path: Path) -> No
         "declare.py",
         """\
         from pathlib import Path
+        import sys
+        sys.stdout.reconfigure(encoding="utf-8")  # le kit lit la sortie de l'ouvrier en UTF-8
         Path("marker.txt").write_text("done", encoding="utf-8")
         print("```grimoire-uncertainties")
         print('[{"where": "src/x.py", "what": "cas limite", "why": "non testé"}]')
@@ -323,6 +325,8 @@ def test_task_show_affiche_les_uncertainties_du_dernier_dispatch(tmp_path: Path)
         "declare.py",
         """\
         from pathlib import Path
+        import sys
+        sys.stdout.reconfigure(encoding="utf-8")  # le kit lit la sortie de l'ouvrier en UTF-8
         Path("marker.txt").write_text("done", encoding="utf-8")
         print("```grimoire-uncertainties")
         print('[{"where": "src/x.py", "what": "cas limite", "why": "non testé"}]')
