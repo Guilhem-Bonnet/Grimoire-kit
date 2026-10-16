@@ -38,6 +38,14 @@ from grimoire.flows.blueprint_loader import build_node_contracts, load_blueprint
 from grimoire.flows.directive import Directive, blueprint_digest, directive_id_for
 from grimoire.flows.doctor import FlowDoctorReport, checkpoint_interrupted, diagnose
 from grimoire.flows.executor import InteractiveNodeExecutor, NodeExecutor
+from grimoire.flows.fingerprint import (
+    DRIFT_KIND,
+    contract_digest,
+    drift_of,
+    migration_refusal,
+    relative_blueprint_path,
+    resolve_blueprint_path,
+)
 from grimoire.flows.schemas import FlowRunMeta, FlowStatusView, NodeContract, ResumeOutcome
 from grimoire.runtime.kernel import RuntimeKernel
 from grimoire.runtime.schemas import Checkpoint, ExecutionContext, RunEventType, WorkflowInstance, WorkflowStatus
@@ -326,6 +334,89 @@ class FlowEngine:
     def list_run_ids(self) -> list[str]:
         return sorted(p.stem for p in self._flows_root.glob("*.json"))
 
+    def _blueprint_file(self, meta: FlowRunMeta) -> Path:
+        """Le fichier blueprint du run : le chemin stocké est relatif à la racine du projet (W2-04)."""
+        return resolve_blueprint_path(meta.blueprint_path, self._project_root)
+
+    def blueprint_file(self, run_id: str) -> Path:
+        """Le fichier blueprint (résolu) d'un run — pour les appelants qui rechargent le blueprint."""
+        return self._blueprint_file(self._load_meta(run_id))
+
+    def _drift_state(self, meta: FlowRunMeta, wfi: WorkflowInstance) -> tuple[dict[str, Any] | None, list[str]]:
+        """``(constat de dérive ou None, nodes franchis)``. Rien à comparer : ``(None, [])``.
+
+        Un run terminé, ou lancé avant W2-04 (pas d'empreinte), n'est pas jugé :
+        ``FlowStatusView.blueprint_sha256`` ``None`` le dit.
+        """
+        if meta.blueprint_sha256 is None or _is_flow_terminal(wfi.status):
+            return None, []
+        order = list(meta.order)
+        current = self._current_node(wfi, order)
+        crossed = order if current is None else (order[: order.index(current)] if current in order else [])
+        blueprint = load_blueprint(self._blueprint_file(meta), self._project_root)
+        contracts = build_node_contracts(blueprint, self._project_root)
+        drift = drift_of(
+            stored_order=order,
+            stored_digests=meta.node_digests,
+            crossed=crossed,
+            new_order=topo_order(blueprint),
+            new_contracts={n: c.to_dict() for n, c in contracts.items()},
+        )
+        return drift, crossed
+
+    def blueprint_drift(self, run_id: str) -> dict[str, Any] | None:
+        """Le constat ``blueprint_drift`` du run, ou ``None`` (sain, terminé ou non vérifié). Lecture seule."""
+        meta = self._load_meta(run_id)
+        wfi = self._kernel.get_instance(run_id)
+        if wfi is None:
+            raise GrimoireRuntimeError(f"run introuvable côté kernel : {run_id}")
+        return self._drift_state(meta, wfi)[0]
+
+    def kernel_export(self, run_id: str) -> dict[str, Any]:
+        """Instance + événements + checkpoints du run (voir ``flows.transfer``)."""
+        return self._kernel.export_instance(run_id)
+
+    def kernel_import(self, data: dict[str, Any]) -> None:
+        self._kernel.import_instance(data)
+
+    def has_instance(self, run_id: str) -> bool:
+        return self._kernel.get_instance(run_id) is not None
+
+    def save_imported_meta(self, meta: FlowRunMeta) -> None:
+        """Écrit la méta d'un run importé — ``flows.transfer`` seul."""
+        self._save_meta(meta)
+
+    def migrate(self, run_id: str) -> tuple[FlowRunMeta, FlowRunMeta]:
+        """Adopte le blueprint actuel (ordre, contrats, empreintes) si les nodes franchis en forment un préfixe identique.
+
+        Refuse, sans rien écrire, sinon. Seul chemin qui réécrit ``order`` et les
+        empreintes d'un run. Un run antérieur à W2-04 (sans empreinte) y gagne la sienne.
+        Rend ``(ancienne méta, nouvelle méta)``.
+        """
+        meta = self._load_meta(run_id)
+        wfi = self._kernel.get_instance(run_id)
+        if wfi is None:
+            raise GrimoireRuntimeError(f"run introuvable côté kernel : {run_id}")
+        if _is_flow_terminal(wfi.status):
+            raise GrimoireRuntimeError(f"run {run_id} est {wfi.status.value} : rien à migrer")
+        order = list(meta.order)
+        current = self._current_node(wfi, order)
+        crossed = order if current is None else (order[: order.index(current)] if current in order else [])
+        blueprint = load_blueprint(self._blueprint_file(meta), self._project_root)
+        contracts = build_node_contracts(blueprint, self._project_root)
+        new_order = topo_order(blueprint)
+        why = migration_refusal(crossed=crossed, current=current, new_order=new_order, new_contracts=contracts)
+        if why is not None:
+            raise GrimoireRuntimeError(f"run {run_id} : migration refusée — {why} ; rien n'a été écrit.")
+        new_meta = replace(
+            meta,
+            order=tuple(new_order),
+            blueprint_sha256=self._digest_of(contracts, new_order),
+            node_digests={n: contract_digest(contracts[n].to_dict()) for n in new_order if n in contracts},
+        )
+        self._save_meta(new_meta)
+        return meta, new_meta
+
     def run_meta(self, run_id: str) -> FlowRunMeta:
         """Accès public aux métadonnées d'un run — utile à un exécuteur qui doit
 
@@ -571,11 +662,13 @@ class FlowEngine:
             FlowRunMeta(
                 run_id=wfi.id,
                 blueprint_id=blueprint_id,
-                blueprint_path=str(blueprint_path),
+                blueprint_path=relative_blueprint_path(blueprint_path, self._project_root),
                 order=tuple(order),
                 created_at=_now_iso(),
                 parent_run_id=parent_run_id,
                 parent_node_id=parent_node_id,
+                blueprint_sha256=self._digest_of(contracts, order),
+                node_digests={n: contract_digest(contracts[n].to_dict()) for n in order if n in contracts},
             )
         )
 
@@ -631,8 +724,11 @@ class FlowEngine:
             # laisserait en l'état. La directive reste celle du dernier node ;
             # renvoyer sa sortie acceptée, avec ce directive_id, termine le run.
             node_id = order[-1]
+        if self._drift_state(meta, wfi)[0] is not None:
+            # Pas de directive_id : aucune réponse n'est attendue tant que le blueprint a dérivé.
+            return Directive("blocked", run_id, node_id, None, self._attempt(run_id, node_id), DRIFT_KIND)
         contracts = build_node_contracts(
-            load_blueprint(Path(meta.blueprint_path), self._project_root), self._project_root
+            load_blueprint(self._blueprint_file(meta), self._project_root), self._project_root
         )
         attempt = self._attempt(run_id, node_id)
         did = directive_id_for(run_id, node_id, attempt, self._digest_of(contracts, order))
@@ -670,7 +766,7 @@ class FlowEngine:
             if crossed is not None:
                 meta = self._load_meta(run_id)
                 contracts = build_node_contracts(
-                    load_blueprint(Path(meta.blueprint_path), self._project_root), self._project_root
+                    load_blueprint(self._blueprint_file(meta), self._project_root), self._project_root
                 )
                 bp = self._digest_of(contracts, list(meta.order))
                 if any(
@@ -700,6 +796,15 @@ class FlowEngine:
         l'hôte répond. Une autre que la courante est refusée avant toute écriture.
         Le résultat porte toujours la directive suivante (``directive_id``).
         """
+        drift = self.blueprint_drift(run_id)
+        if drift is not None:
+            raise GrimoireRuntimeError(
+                f"run {run_id} : {DRIFT_KIND} — le blueprint a changé pour des nodes déjà franchis "
+                f"(modifiés : {drift['changed_nodes'] or 'aucun'} ; retirés : {drift['removed_nodes'] or 'aucun'} ; "
+                f"ordre changé : {'oui' if drift['reordered'] else 'non'}) ; diff d'ordre : "
+                f"{' '.join(drift['order_diff']) or '(identique)'} ; rien n'a été écrit. "
+                "Rétablir le blueprint, ou `grimoire flow migrate` si les nodes franchis forment un préfixe identique."
+            )
         if directive_id is not None:
             self._directive_refusal(run_id, directive_id, output, allow_replay)
         outcome = self._resume_core(run_id, output=output, executor=executor, allow_replay=allow_replay)
@@ -759,7 +864,7 @@ class FlowEngine:
             raise GrimoireRuntimeError(f"run {run_id} est {wfi.status.value}, rien à reprendre")
 
         order = list(meta.order)
-        blueprint = load_blueprint(Path(meta.blueprint_path), self._project_root)
+        blueprint = load_blueprint(self._blueprint_file(meta), self._project_root)
         contracts = build_node_contracts(blueprint, self._project_root)
         ctx = self._ctx_for(wfi)
         digest = _output_digest(output)
@@ -1006,7 +1111,7 @@ class FlowEngine:
         contract = None
         if include_contract and current_id is not None:
             contract = build_node_contracts(
-                load_blueprint(Path(meta.blueprint_path), self._project_root), self._project_root
+                load_blueprint(self._blueprint_file(meta), self._project_root), self._project_root
             ).get(current_id)
         return FlowStatusView(
             run_id=wfi.id,
@@ -1020,6 +1125,8 @@ class FlowEngine:
             parent_run_id=meta.parent_run_id,
             directive=self.directive(run_id) if include_contract else None,
             checkpoint_decisions=self._authority(run_id).decisions(),
+            blueprint_drift=self._drift_state(meta, wfi)[0] if include_contract else None,
+            blueprint_sha256=meta.blueprint_sha256,
         )
 
     def doctor(self, run_id: str) -> FlowDoctorReport:

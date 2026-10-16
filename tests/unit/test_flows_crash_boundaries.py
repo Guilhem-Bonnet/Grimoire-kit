@@ -152,7 +152,7 @@ def _blueprint(tmp_path: Path) -> Path:
 
 
 def _engine(tmp_path: Path) -> FlowEngine:
-    return FlowEngine(kernel_root=tmp_path / "runtime", flows_root=tmp_path / "flows")
+    return FlowEngine(kernel_root=tmp_path / "runtime", flows_root=tmp_path / "flows", project_root=tmp_path)
 
 
 @contextmanager
