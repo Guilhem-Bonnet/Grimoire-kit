@@ -261,7 +261,11 @@ def test_un_claim_sans_verrou_disponible_est_refuse(governed: Path, monkeypatch:
     from grimoire.missions import ledger as ledger_mod
 
     tid = _ready(governed, "Sans verrou")
-    monkeypatch.setattr(ledger_mod, "_acquire_os_lock", lambda fh: False)
+
+    def no_lock(path: Path) -> Any:
+        raise TimeoutError(f"verrou {path} non obtenu")
+
+    monkeypatch.setattr(ledger_mod, "locked", no_lock)
     with pytest.raises(GrimoireMissionError, match="verrou"):
         TaskService(governed).claim(tid, "agent-a")
     assert TaskService(governed).require(tid).status is TaskState.READY

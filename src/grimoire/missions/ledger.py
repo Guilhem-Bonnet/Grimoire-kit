@@ -16,18 +16,31 @@ from __future__ import annotations
 
 import contextlib
 import json
-import os
+import logging
 import re
-import tempfile
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from grimoire.core.exceptions import GrimoireMissionError
+from grimoire.core.fsio import atomic_write, locked
+from grimoire.missions.lease import (
+    CLOCK_TOLERANCE_SECONDS,
+    DEFAULT_LEASE_TTL_SECONDS,
+    MAX_ATTEMPTS,
+    LeaseFile,
+    backoff_delay,
+    lease_path,
+    parse_instant,
+    read_lease,
+    write_lease,
+)
 from grimoire.missions.schemas import (
+    DEFAULT_CLAIM_TTL_SECONDS,
     Incident,
     IncidentSeverity,
     IncidentStatus,
@@ -43,6 +56,8 @@ from grimoire.missions.schemas import (
     TaskType,
 )
 
+_log = logging.getLogger(__name__)
+
 # Valid state transitions for missions
 _MISSION_TRANSITIONS: dict[MissionState, frozenset[MissionState]] = {
     MissionState.DRAFT: frozenset({MissionState.OPEN, MissionState.CANCELLED}),
@@ -57,8 +72,13 @@ _MISSION_TRANSITIONS: dict[MissionState, frozenset[MissionState]] = {
 _TASK_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
     TaskState.PROPOSED: frozenset({TaskState.READY, TaskState.CANCELLED}),
     TaskState.READY: frozenset({TaskState.CLAIMED, TaskState.BLOCKED, TaskState.CANCELLED}),
-    TaskState.CLAIMED: frozenset({TaskState.RUNNING, TaskState.READY, TaskState.CANCELLED}),
-    TaskState.RUNNING: frozenset({TaskState.NEEDS_VERIFICATION, TaskState.BLOCKED, TaskState.FAILED, TaskState.CANCELLED}),
+    TaskState.CLAIMED: frozenset(
+        {TaskState.RUNNING, TaskState.READY, TaskState.BLOCKED, TaskState.FAILED, TaskState.CANCELLED}
+    ),
+    # RUNNING → READY : bail perdu, réservé à la récolte (:meth:`MissionLedger.reap`).
+    TaskState.RUNNING: frozenset(
+        {TaskState.NEEDS_VERIFICATION, TaskState.BLOCKED, TaskState.FAILED, TaskState.CANCELLED, TaskState.READY}
+    ),
     TaskState.BLOCKED: frozenset({TaskState.READY, TaskState.CANCELLED}),
     TaskState.NEEDS_VERIFICATION: frozenset({TaskState.CLOSED, TaskState.RUNNING, TaskState.FAILED}),
     TaskState.FAILED: frozenset({TaskState.READY, TaskState.CANCELLED}),
@@ -83,6 +103,75 @@ SESSION_ATTACHED_EVENT = "task.session_attached"
 #: checkpoint de flow (``FlowEngine``). Rejoué dans ``MissionTask.accepted_risks``.
 RISK_ACCEPTED_EVENT = "task.risk_accepted"
 
+#: K2 (issue #767) : le plafond dur ``expires_at`` du claim repoussé par ``task renew``.
+LEASE_RENEWED_EVENT = "task.lease_renewed"
+#: K2 : une récolte qui ne relance pas (quota, tentatives épuisées, hôte sans frein).
+REAP_DEFERRED_EVENT = "task.reap_deferred"
+#: K2 : la clé, dans un ``task.transitioned`` de récolte, qui marque un bail perdu.
+LEASE_LOST_KEY = "lease_lost"
+#: K6 (à venir) : une réponse humaine remet le compteur de tentatives à zéro.
+HUMAN_ANSWERED_EVENT = "task.human_answered"
+#: Verdicts de ``task.dispatched`` comptés comme tentatives (``rate_limit`` est un quota, pas un échec).
+_FAILED_DISPATCH = frozenset({"red", "timeout", "error"})
+_HELD = (TaskState.CLAIMED, TaskState.RUNNING)
+
+
+@dataclass(frozen=True, slots=True)
+class LeaseView:
+    """L'état du bail d'une tâche tenue : ``valid``, ``lost`` ou ``unknown`` (horloge incohérente)."""
+
+    task_id: str
+    status: str
+    reason: str
+    epoch: int
+    actor_id: str
+    host: str
+    session_id: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class HolderCheck:
+    """Le verdict du contrôle d'epoch d'un titulaire — ``source`` : ``lease`` (cache) ou ``ledger``."""
+
+    ok: bool
+    reason: str
+    source: str
+
+
+@dataclass(frozen=True, slots=True)
+class ReapDecision:
+    """Ce que la récolte fait d'un bail perdu : ``ready`` (relancée) ou ``defer`` (cause nommée)."""
+
+    task_id: str
+    action: str
+    cause: str
+    epoch: int
+    attempts: int
+    retry_at: str = ""
+    written: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "task_id": self.task_id,
+            "action": self.action,
+            "cause": self.cause,
+            "epoch": self.epoch,
+            "attempts": self.attempts,
+            "retry_at": self.retry_at,
+            "written": self.written,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ReapReport:
+    """Le résultat d'une récolte : ``clock`` vaut ``unknown`` quand rien n'a pu être jugé."""
+
+    clock: str
+    decisions: tuple[ReapDecision, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"clock": self.clock, "decisions": [d.to_dict() for d in self.decisions]}
+
 
 def _slug(title: str, limit: int) -> str:
     """Fragment d'identifiant sûr dans un chemin.
@@ -106,84 +195,33 @@ def _new_id(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:12]}"
 
 
-def _acquire_os_lock(fh: Any) -> bool:
-    """Prend le verrou exclusif de l'OS sur *fh* ; ``False`` si aucun n'a pu être pris.
-
-    POSIX : ``fcntl.flock`` (bloquant). Windows : ``msvcrt.locking`` sur le
-    premier octet du fichier de verrou — ``LK_LOCK`` réessaie une dizaine de
-    secondes puis lève ``OSError``. Un FS sans ``flock`` (certains montages
-    réseau) ou un Windows contendu au-delà de ce délai rendent ``False`` :
-    c'est à l'appelant de décider si l'écriture peut se passer du verrou.
-    """
-    try:
-        import fcntl
-    except ImportError:
-        fcntl = None  # type: ignore[assignment]
-    if fcntl is not None:
-        try:
-            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
-            return True
-        except OSError:
-            return False
-    try:
-        import msvcrt
-    except ImportError:
-        return False
-    try:
-        fh.seek(0)
-        msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)  # type: ignore[attr-defined,unused-ignore]
-        return True
-    except OSError:
-        return False
-
-
-def _release_os_lock(fh: Any) -> None:
-    try:
-        import fcntl
-    except ImportError:
-        fcntl = None  # type: ignore[assignment]
-    with contextlib.suppress(OSError):
-        if fcntl is not None:
-            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
-            return
-        import msvcrt
-
-        fh.seek(0)
-        msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)  # type: ignore[attr-defined,unused-ignore]
-
-
 @contextmanager
-def _ledger_file_lock(target_path: Path) -> Iterator[bool]:
-    """Verrou exclusif inter-process sur *target_path* (POSIX/Windows, best-effort).
-
-    Rend ``True`` quand le verrou de l'OS est réellement tenu. Sans lui
-    (:func:`_acquire_os_lock` rend ``False``), le bloc s'exécute quand même :
-    un simple ajout d'événement reste best-effort comme avant, mais un claim
-    — qui doit être un compare-and-set — est refusé par
-    :meth:`MissionLedger.transition_task` (fail-closed, issue #710).
+def _ledger_file_lock(target_path: Path) -> Iterator[None]:
+    """Verrou exclusif inter-processus sur *target_path* — :func:`grimoire.core.fsio.locked`.
 
     ``_atomic_append`` lit le fichier entier, ajoute une ligne, puis renomme
     un temporaire par-dessus : sans ce verrou, deux écrivains concurrents
     (deux requêtes HTTP du cockpit servies par des threads séparés,
     typiquement) peuvent tous deux lire le même contenu avant que l'un des
     deux n'écrive — le second écrase alors l'événement du premier, silencieux
-    (« lost update »). Même pattern que ``tools/stigmergy._board_lock`` :
-    dégrade en no-op si ``fcntl`` est indisponible (Windows), jamais bloquant
-    au point de casser un ledger qui marchait sans lui.
+    (« lost update »). :meth:`MissionLedger.transition_task` relit et valide
+    sous ce même verrou : un compare-and-set (issue #710).
+
+    Un verrou impossible à prendre (délai dépassé, système de fichiers sans
+    ``flock``) lève :class:`GrimoireMissionError` au lieu d'écrire sans
+    exclusion : deux titulaires valent pire qu'une écriture à refaire. Un
+    ledger partagé par un système de fichiers réseau n'est pas supporté.
     """
-    target_path.parent.mkdir(parents=True, exist_ok=True)
-    lock_path = target_path.with_name(f".{target_path.name}.lock")
-    fh = None
-    locked = False
-    try:
-        fh = lock_path.open("w", encoding="utf-8")
-        locked = _acquire_os_lock(fh)
-        yield locked
-    finally:
-        if fh is not None:
-            if locked:
-                _release_os_lock(fh)
-            fh.close()
+    with contextlib.ExitStack() as stack:
+        try:
+            stack.enter_context(locked(target_path))
+        except (TimeoutError, OSError) as exc:
+            raise GrimoireMissionError(
+                f"Écriture refusée : aucun verrou inter-processus n'a pu être pris sur {target_path.name} ({exc}) "
+                "— sans lui, deux écritures simultanées pourraient réussir toutes les deux. "
+                "Réessaie ; si cela persiste, le système de fichiers ne supporte pas le verrouillage."
+            ) from exc
+        yield
 
 
 class MissionLedger:
@@ -199,8 +237,10 @@ class MissionLedger:
         ledger.transition_task(task.id, TaskState.READY, actor_id="agent-dev")
     """
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, *, clock: Callable[[], datetime] | None = None) -> None:
         self._root = root
+        #: L'horloge des baux (K2) — injectable pour les tests, UTC par défaut.
+        self._clock = clock or (lambda: datetime.now(UTC))
         self._root.mkdir(parents=True, exist_ok=True)
         self._events_path = root / "events.jsonl"
         self._incidents_path = root / "incidents.jsonl"
@@ -209,6 +249,12 @@ class MissionLedger:
         self._tasks: dict[str, MissionTask] = {}
         self._events: list[LedgerEvent] = []
         self._incidents: dict[str, Incident] = {}
+        #: K2 : epoch le plus haut vu par tâche (claims et barrières de récolte).
+        self._epoch_high: dict[str, int] = {}
+        #: K2 : événements refusés au rejeu (id → motif) — gardés au journal, jamais appliqués.
+        self._rejected: dict[str, str] = {}
+        #: K2 : clés ``idem = (task_id, lease_epoch, step)`` des effets déjà appliqués.
+        self._idem_seen: set[str] = set()
         self._loaded = False
 
     # ── Private helpers ────────────────────────────────────────────────────
@@ -247,11 +293,20 @@ class MissionLedger:
             elif evt_type == "task.transitioned":
                 tid = payload["task_id"]
                 if tid in self._tasks:
-                    old_task = self._tasks[tid]
-                    update: dict[str, Any] = {"status": payload["to_state"]}
-                    if "claim" in payload:
-                        update["claim"] = payload["claim"]
-                    self._tasks[tid] = MissionTask.from_dict({**old_task.to_dict(), **update})
+                    refusal = self._effect_refusal(tid, payload)
+                    if refusal:
+                        self._rejected[str(raw.get("id", ""))] = refusal
+                    else:
+                        self._apply_transition(tid, payload)
+            elif evt_type == LEASE_RENEWED_EVENT:
+                tid = str(raw.get("entity_id") or payload.get("task_id") or "")
+                refusal = self._effect_refusal(tid, payload)
+                current = self._tasks.get(tid)
+                if refusal or current is None or current.claim is None:
+                    self._rejected[str(raw.get("id", ""))] = refusal or "aucun claim à renouveler"
+                else:
+                    claim = replace(current.claim, expires_at=str(payload.get("expires_at", "") or ""))
+                    self._tasks[tid] = MissionTask.from_dict({**current.to_dict(), "claim": claim.to_dict()})
             elif evt_type in _STEERING_EVENTS:
                 self._replay_steering(evt_type, payload)
             elif evt_type == SESSION_ATTACHED_EVENT:
@@ -284,6 +339,45 @@ class MissionLedger:
                         {**current.to_dict(), "accepted_risks": [*(dict(r) for r in current.accepted_risks), risk]}
                     )
             self._events.append(LedgerEvent.from_dict(raw))
+
+    def _apply_transition(self, tid: str, payload: dict[str, Any]) -> None:
+        old_task = self._tasks[tid]
+        update: dict[str, Any] = {"status": payload["to_state"]}
+        if "claim" in payload:
+            update["claim"] = payload["claim"]
+        self._tasks[tid] = MissionTask.from_dict({**old_task.to_dict(), **update})
+        claim_epoch = payload.get("claim", {}).get("lease_epoch") if isinstance(payload.get("claim"), dict) else None
+        for value in (claim_epoch, payload.get("fence_epoch")):
+            if isinstance(value, int) and not isinstance(value, bool):
+                self._epoch_high[tid] = max(self._epoch_high.get(tid, 0), value)
+        if payload.get("idem"):
+            self._idem_seen.add(str(payload["idem"]))
+
+    def _effect_refusal(self, tid: str, payload: dict[str, Any]) -> str:
+        """Motif de refus, au rejeu, d'un effet porteur d'un epoch (K2) ; ``""`` s'il s'applique.
+
+        Un effet signé ``lease_epoch`` n'est appliqué que si cet epoch est celui
+        du claim courant *et* le plus haut connu pour la tâche (aucune barrière
+        de récolte ni claim plus récent) ; une clé ``idem`` déjà appliquée est un
+        doublon. Un événement sans ``lease_epoch`` (historique, humain, claim)
+        n'est pas concerné.
+        """
+        idem = str(payload.get("idem", "") or "")
+        if idem and idem in self._idem_seen:
+            return f"doublon de l'effet {idem}"
+        if "lease_epoch" not in payload:
+            return ""
+        task = self._tasks.get(tid)
+        return self._epoch_refusal(task, payload.get("lease_epoch"))
+
+    def _epoch_refusal(self, task: MissionTask | None, epoch: Any) -> str:
+        if task is None or task.claim is None:
+            return "aucun claim ne porte cet epoch"
+        current = task.claim.lease_epoch
+        high = self._epoch_high.get(task.id, current)
+        if isinstance(epoch, bool) or not isinstance(epoch, int) or epoch != current or epoch != high:
+            return f"epoch {epoch!r} périmé : le bail de {task.id} est à l'epoch {max(current, high)}"
+        return ""
 
     def _replay_steering(self, evt_type: str, payload: dict[str, Any]) -> None:
         """Pilotage humain (issue #638) : priorité et journal de consignes.
@@ -334,6 +428,9 @@ class MissionLedger:
         self._tasks = {}
         self._events = []
         self._incidents = {}
+        self._epoch_high = {}
+        self._rejected = {}
+        self._idem_seen = set()
         self._loaded = False
 
     def append_event(self, event_type: str, entity_id: str, entity_kind: str, actor_id: str, payload: dict[str, Any]) -> LedgerEvent:
@@ -383,18 +480,10 @@ class MissionLedger:
         par :meth:`_atomic_append`, sous peine de s'attendre lui-même.
         """
         line = json.dumps(record, ensure_ascii=False) + "\n"
-        fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".tmp-ledger-")
-        try:
-            # Copy existing content + append new line
-            existing = path.read_text(encoding="utf-8") if path.exists() else ""
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                fh.write(existing)
-                fh.write(line)
-            Path(tmp).replace(path)
-        except Exception:
-            with contextlib.suppress(OSError):
-                Path(tmp).unlink()
-            raise
+        existing = path.read_text(encoding="utf-8") if path.exists() else ""
+        # K2 (§2.3) : ajout puis ``fsync`` — ``atomic_write`` synchronise le
+        # fichier et le dossier avant de rendre la main.
+        atomic_write(path, existing + line)
 
     def _next_seq(self, prefix: str, id_map: dict[str, Any]) -> str:
         existing = [k for k in id_map if k.startswith(prefix)]
@@ -519,6 +608,8 @@ class MissionLedger:
         claim: TaskClaim | None = None,
         extra_payload: dict[str, Any] | None = None,
         expected_from: TaskState | None = None,
+        lease_epoch: int | None = None,
+        step: str = "",
     ) -> MissionTask:
         """Valide puis écrit la transition, en un seul geste sous le verrou du journal.
 
@@ -530,22 +621,23 @@ class MissionLedger:
         l'appelant a jugé, ex. :meth:`TaskService.transition` et son gate)
         resserre encore : si l'état a bougé depuis, la transition est refusée.
 
-        Un claim (``→ claimed``) sans verrou de l'OS réellement tenu
-        (:func:`_acquire_os_lock` rend ``False`` : FS sans ``flock``, Windows
-        contendu au-delà du délai de ``msvcrt.locking``) est refusé — fail-closed :
-        deux titulaires valent pire qu'un claim à refaire. Les autres
-        transitions gardent le best-effort historique.
+        Sans verrou de l'OS réellement tenu, rien n'est écrit (fail-closed,
+        :func:`_ledger_file_lock`) : deux titulaires valent pire qu'un claim à refaire.
+
+        K2 (issue #767) : un claim reçoit son ``lease_epoch`` ici — le plus haut
+        connu pour la tâche, plus un — et le fichier de bail est écrit *avant*
+        l'événement (§2.3). *lease_epoch* signe l'effet d'un titulaire : un
+        epoch qui n'est plus celui du bail (récolte, nouveau claim, barrière en
+        avance sur le journal) est refusé. *step* nomme l'effet : la clé
+        ``idem = (task_id, lease_epoch, step)`` rend sa répétition sans effet.
+        ``RUNNING → READY`` est réservé à la récolte (:meth:`reap`).
         """
-        with _ledger_file_lock(self._events_path) as locked:
-            if to_state is TaskState.CLAIMED and not locked:
-                raise GrimoireMissionError(
-                    f"Claim refusé pour {task_id} : aucun verrou inter-processus n'a pu être pris sur "
-                    f"{self._events_path.name} — sans lui, deux claims simultanés pourraient réussir tous les deux. "
-                    "Réessaie ; si cela persiste, le système de fichiers ne supporte pas le verrouillage."
-                )
+        with _ledger_file_lock(self._events_path):
             self._invalidate()
             self._load()
-            return self._transition_locked(task_id, to_state, actor_id, reason, claim, extra_payload, expected_from)
+            return self._transition_locked(
+                task_id, to_state, actor_id, reason, claim, extra_payload, expected_from, lease_epoch, step
+            )
 
     def _transition_locked(
         self,
@@ -556,10 +648,26 @@ class MissionLedger:
         claim: TaskClaim | None,
         extra_payload: dict[str, Any] | None,
         expected_from: TaskState | None,
+        lease_epoch: int | None = None,
+        step: str = "",
+        *,
+        reaper: bool = False,
     ) -> MissionTask:
         task = self._tasks.get(task_id)
         if task is None:
             raise GrimoireMissionError(f"Task not found: {task_id}")
+        if lease_epoch is not None:
+            refusal = self._holder_refusal(task, lease_epoch)
+            if refusal:
+                raise GrimoireMissionError(f"Effet refusé pour {task_id} : {refusal}")
+        idem = f"{task_id}#{lease_epoch}#{step}" if step and lease_epoch is not None else ""
+        if idem and idem in self._idem_seen:
+            return task  # effet déjà appliqué : la répétition ne réécrit rien
+        if task.status is TaskState.RUNNING and to_state is TaskState.READY and not reaper:
+            raise GrimoireMissionError(
+                f"Transition refusée pour {task_id} : running → ready est réservé à la récolte d'un bail perdu "
+                "(grimoire task reap) ; le titulaire rend la tâche par blocked, failed ou cancelled"
+            )
         held = task.claim
         if to_state is TaskState.CLAIMED and task.status in (TaskState.CLAIMED, TaskState.RUNNING) and held is not None:
             session = f", session {held.session_id}" if held.session_id else ""
@@ -584,6 +692,16 @@ class MissionLedger:
             "reason": reason,
             "actor_id": actor_id,
         }
+        if lease_epoch is not None:
+            payload["lease_epoch"] = lease_epoch
+        if idem:
+            payload["idem"] = idem
+        if to_state is TaskState.CLAIMED and claim is not None:
+            epoch = self._epoch_high.get(task_id, 0) + 1
+            claim = replace(claim, lease_epoch=epoch)
+            # §2.3 : (1) le fichier de bail, (2) l'événement — interrompu entre
+            # les deux, le fichier est en avance et rien n'en profite.
+            write_lease(lease_path(self._root, task_id), LeaseFile(task_id, epoch, self._now().isoformat()))
         if claim is not None:
             payload["claim"] = claim.to_dict()
         if extra_payload:
@@ -604,6 +722,261 @@ class MissionLedger:
         """Convenience: READY → CLAIMED."""
         claim = TaskClaim.new(actor_id=actor_id, host_id=host_id, exclusive_files=exclusive_files)
         return self.transition_task(task_id, TaskState.CLAIMED, actor_id=actor_id, claim=claim)
+
+    # ── Bail, epoch, récolte (K2, issue #767) ──────────────────────────────
+
+    def _now(self) -> datetime:
+        return self._clock()
+
+    def _holder_refusal(self, task: MissionTask, lease_epoch: int) -> str:
+        """Motif de refus de l'effet d'un titulaire d'epoch *lease_epoch* ; ``""`` s'il le tient encore.
+
+        Le ledger d'abord (epoch du claim, barrière de récolte journalisée),
+        puis le fichier de bail : un fichier *en avance* (barrière écrite,
+        événement pas encore) refuse aussi l'ancien titulaire — fail-closed.
+        """
+        refusal = self._epoch_refusal(task, lease_epoch)
+        if refusal:
+            return refusal
+        cached = read_lease(lease_path(self._root, task.id))
+        if cached is not None and (cached.epoch != lease_epoch or not cached.holder):
+            return f"epoch {lease_epoch} périmé : le fichier de bail porte l'epoch {cached.epoch} (récolte en cours)"
+        return ""
+
+    def check_holder(self, task_id: str, lease_epoch: int) -> HolderCheck:
+        """Le contrôle d'epoch du frein d'outil : le fichier de bail seul, le ledger s'il manque.
+
+        Ne dépend pas de l'horloge. Un fichier absent ou illisible est un défaut
+        de cache (``lease.cache_miss``, journalisé) : la décision est alors prise
+        sur le ledger relu une fois.
+        """
+        cached = read_lease(lease_path(self._root, task_id))
+        if cached is not None:
+            if cached.holder and cached.epoch == lease_epoch:
+                return HolderCheck(True, "", "lease")
+            return HolderCheck(
+                False, f"epoch {lease_epoch} périmé : le bail de {task_id} est à l'epoch {cached.epoch}", "lease"
+            )
+        _log.info("lease.cache_miss task=%s epoch=%s", task_id, lease_epoch)
+        self._invalidate()
+        refusal = self._epoch_refusal(self.get_task(task_id), lease_epoch)
+        return HolderCheck(not refusal, refusal, "ledger")
+
+    def clock_state(self, now: datetime | None = None) -> str:
+        """``ok``, ou ``unknown`` si *now* précède le dernier événement du journal de plus de la tolérance.
+
+        Une horloge qui recule ne rend jamais un bail « valide » ni « perdu » :
+        la récolte ne fait rien et les baux comptent comme occupés.
+        """
+        self._load()
+        moment = now or self._now()
+        stamps = [t for t in (parse_instant(e.created_at) for e in self._events) if t is not None]
+        if stamps and moment < max(stamps) - timedelta(seconds=CLOCK_TOLERANCE_SECONDS):
+            return "unknown"
+        return "ok"
+
+    def lease_view(self, task: MissionTask, now: datetime | None = None) -> LeaseView | None:
+        """Le bail d'une tâche tenue (``claimed``/``running``) ; ``None`` sinon.
+
+        Perdu si ``now > max(renewed_at + ttl, busy_until)`` (fichier de bail),
+        si le plafond dur ``expires_at`` est dépassé, ou si le fichier est en
+        avance sur le journal (récolte interrompue). Sans fichier, le ledger
+        seul décide. La vivacité de la session (K5) n'est pas encore lue.
+        """
+        moment = now or self._now()
+        return self._lease_view(task, moment, self.clock_state(moment))
+
+    def _lease_view(self, task: MissionTask, moment: datetime, clock: str) -> LeaseView | None:
+        claim = task.claim
+        if task.status not in _HELD or claim is None:
+            return None
+
+        def view(status: str, reason: str) -> LeaseView:
+            host = claim.session_host or claim.host_id
+            return LeaseView(task.id, status, reason, claim.lease_epoch, claim.actor_id, host, claim.session_id)
+
+        if clock == "unknown":
+            return view("unknown", "horloge incohérente : plus tôt que le dernier événement du journal")
+        cached = read_lease(lease_path(self._root, task.id))
+        if cached is not None and cached.epoch > claim.lease_epoch:
+            return view("lost", "fence_pending")
+        if claim.is_expired(moment):
+            return view("lost", "expires_at")
+        if cached is not None and cached.epoch == claim.lease_epoch and cached.is_lost(moment):
+            return view("lost", "heartbeat")
+        return view("valid", "")
+
+    def expired_claims(self, now: datetime | None = None) -> list[LeaseView]:
+        """Les baux perdus — vide quand l'horloge est incohérente (rien n'est jugé perdu)."""
+        moment = now or self._now()
+        clock = self.clock_state(moment)
+        views = [self._lease_view(t, moment, clock) for t in self.list_tasks()]
+        return [v for v in views if v is not None and v.status == "lost"]
+
+    def renew_lease(
+        self,
+        task_id: str,
+        lease_epoch: int,
+        *,
+        actor_id: str = "system",
+        busy_until: datetime | None = None,
+        ttl_seconds: int = DEFAULT_LEASE_TTL_SECONDS,
+        now: datetime | None = None,
+    ) -> MissionTask:
+        """Battement de cœur du titulaire : le fichier de bail, et le plafond dur s'il approche.
+
+        Refusé à un epoch qui n'est plus celui du bail. Le fichier est réécrit à
+        chaque appel ; ``expires_at`` n'est repoussé (événement
+        ``task.lease_renewed``) que s'il reste moins de la moitié du TTL du
+        claim et que l'horloge est cohérente : au plus un événement par demi-TTL.
+        """
+        with _ledger_file_lock(self._events_path):
+            self._invalidate()
+            self._load()
+            task = self._tasks.get(task_id)
+            if task is None:
+                raise GrimoireMissionError(f"Task not found: {task_id}")
+            if task.status not in _HELD or task.claim is None:
+                raise GrimoireMissionError(f"Renouvellement refusé pour {task_id} : tâche {task.status.value}, aucun bail")
+            refusal = self._holder_refusal(task, lease_epoch)
+            if refusal:
+                raise GrimoireMissionError(f"Renouvellement refusé pour {task_id} : {refusal}")
+            moment = now or self._now()
+            path = lease_path(self._root, task_id)
+            previous = read_lease(path)
+            busy = busy_until.isoformat() if busy_until else (previous.busy_until if previous else "")
+            write_lease(path, LeaseFile(task_id, lease_epoch, moment.isoformat(), ttl_seconds, busy))
+            expires = parse_instant(task.claim.expires_at)
+            if (
+                expires is not None
+                and expires - moment < timedelta(seconds=DEFAULT_CLAIM_TTL_SECONDS / 2)
+                and self.clock_state(moment) == "ok"
+            ):
+                pushed = (moment + timedelta(seconds=DEFAULT_CLAIM_TTL_SECONDS)).isoformat()
+                payload = {"task_id": task_id, "lease_epoch": lease_epoch, "expires_at": pushed, "actor_id": actor_id}
+                self._append_event(LEASE_RENEWED_EVENT, task_id, "task", actor_id, payload, lock_held=True)
+                self._load()
+            return self._tasks[task_id]
+
+    def _since_last_answer(self, task_id: str) -> list[LedgerEvent]:
+        events = [e for e in self.list_events(task_id) if e.id not in self._rejected]
+        answers = [i for i, e in enumerate(events) if e.event_type == HUMAN_ANSWERED_EVENT]
+        return events[answers[-1] + 1 :] if answers else events
+
+    def attempts(self, task_id: str) -> int:
+        """Tentatives, dérivées du journal seul : baux perdus et dispatchs en échec depuis la dernière réponse humaine."""
+        return sum(
+            1
+            for evt in self._since_last_answer(task_id)
+            if (evt.event_type == "task.transitioned" and LEASE_LOST_KEY in evt.payload)
+            or (evt.event_type == "task.dispatched" and evt.payload.get("verdict") in _FAILED_DISPATCH)
+        )
+
+    def backoff_until(self, task_id: str) -> datetime | None:
+        """Avant cet instant, une tâche récoltée n'est pas réadmise : ``last_lost_at + 10 min × 2^(attempts−1)``."""
+        lost = [
+            e for e in self._since_last_answer(task_id)
+            if e.event_type == "task.transitioned" and LEASE_LOST_KEY in e.payload
+        ]
+        last = parse_instant(lost[-1].created_at) if lost else None
+        return last + backoff_delay(self.attempts(task_id)) if last is not None else None
+
+    def _last_route_quota(self, task: MissionTask) -> bool:
+        dispatched = [e for e in self.list_events(task.id) if e.event_type == "task.dispatched"]
+        return bool(dispatched) and dispatched[-1].payload.get("verdict") == "rate_limit"
+
+    def reap(
+        self,
+        *,
+        fenced_hosts: frozenset[str] = frozenset(),
+        quota_blocked: Callable[[MissionTask], bool] | None = None,
+        actor_id: str = "tick",
+        apply: bool = True,
+        now: datetime | None = None,
+    ) -> ReapReport:
+        """Récolte des baux perdus — le seul chemin de ``RUNNING → READY``.
+
+        Sous le verrou du journal, pour chaque bail perdu :
+
+        - fournisseur de la dernière route en quota (*quota_blocked*, défaut :
+          dernier ``task.dispatched`` en ``rate_limit``) : différée, cause
+          ``quota``, sans compter de tentative ;
+        - plus de :data:`MAX_ATTEMPTS` tentatives : différée, ``retry_exhausted`` ;
+        - hôte hors de *fenced_hosts* (sans frein vérifié) : différée,
+          ``resume_unfenced`` — on ne relance pas de doublon ;
+        - sinon : barrière (fichier de bail à l'epoch suivant, sans titulaire)
+          puis ``task.transitioned`` vers ``ready`` marqué ``lease_lost``.
+
+        Une différée s'écrit une fois par (epoch, cause) en ``task.reap_deferred`` ;
+        la tâche reste tenue jusqu'à l'état ``waiting`` (K6). Horloge incohérente :
+        rien n'est jugé. *apply* faux : les décisions sans aucune écriture.
+        """
+        is_quota = quota_blocked or self._last_route_quota
+        with _ledger_file_lock(self._events_path):
+            self._invalidate()
+            self._load()
+            moment = now or self._now()
+            if self.clock_state(moment) == "unknown":
+                return ReapReport("unknown")
+            decisions: list[ReapDecision] = []
+            for view in self.expired_claims(moment):
+                task = self._tasks[view.task_id]
+                decisions.append(self._reap_one(task, view, moment, fenced_hosts, is_quota, actor_id, apply))
+            return ReapReport("ok", tuple(decisions))
+
+    def _reap_one(
+        self,
+        task: MissionTask,
+        view: LeaseView,
+        moment: datetime,
+        fenced_hosts: frozenset[str],
+        is_quota: Callable[[MissionTask], bool],
+        actor_id: str,
+        apply: bool,
+    ) -> ReapDecision:
+        before = self.attempts(task.id)
+        cause = ""
+        if view.reason != "fence_pending":  # récolte interrompue : la décision était déjà prise
+            if is_quota(task):
+                cause = "quota"
+            elif before + 1 > MAX_ATTEMPTS:
+                cause = "retry_exhausted"
+            elif view.host not in fenced_hosts:
+                cause = "resume_unfenced"
+        if cause:
+            written = apply and not self._already_deferred(task.id, view.epoch, cause)
+            if written:
+                payload = {"task_id": task.id, "lease_epoch_lost": view.epoch, "cause": cause,
+                           "attempts": before, "lease_reason": view.reason, "actor_id": actor_id}
+                self._append_event(REAP_DEFERRED_EVENT, task.id, "task", actor_id, payload, lock_held=True)
+                self._load()
+            return ReapDecision(task.id, "defer", cause, view.epoch, before, written=written)
+        attempt = before + 1
+        retry_at = (moment + backoff_delay(attempt)).isoformat()
+        if not apply:
+            return ReapDecision(task.id, "ready", view.reason, view.epoch, attempt, retry_at)
+        path = lease_path(self._root, task.id)
+        cached = read_lease(path)
+        fence = cached.epoch if view.reason == "fence_pending" and cached is not None else (
+            self._epoch_high.get(task.id, view.epoch) + 1
+        )
+        write_lease(path, LeaseFile(task.id, fence, moment.isoformat(), holder=False))
+        lost = {"epoch": view.epoch, "reason": view.reason, "attempt": attempt, "retry_at": retry_at}
+        self._transition_locked(
+            task.id, TaskState.READY, actor_id, f"bail perdu ({view.reason})", None,
+            {LEASE_LOST_KEY: lost, "fence_epoch": fence}, None, reaper=True,
+        )
+        return ReapDecision(task.id, "ready", view.reason, view.epoch, attempt, retry_at, written=True)
+
+    def _already_deferred(self, task_id: str, epoch: int, cause: str) -> bool:
+        deferred = [e for e in self.list_events(task_id) if e.event_type == REAP_DEFERRED_EVENT]
+        last = deferred[-1].payload if deferred else {}
+        return last.get("lease_epoch_lost") == epoch and last.get("cause") == cause
+
+    def rejected_events(self) -> dict[str, str]:
+        """Les événements refusés au rejeu (id → motif) : epoch périmé ou effet en double."""
+        self._load()
+        return dict(self._rejected)
 
     # ── Pilotage humain (issue #638, lot B) ────────────────────────────────
 
