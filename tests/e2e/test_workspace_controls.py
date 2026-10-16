@@ -24,10 +24,6 @@ par espace.
 from __future__ import annotations
 
 import json
-import os
-import subprocess
-import sys
-from pathlib import Path
 
 import pytest
 from playwright.sync_api import Page
@@ -125,27 +121,11 @@ def test_observer_activite_rtk_bench_ne_restent_jamais_muets(workspace: Page) ->
         assert body.strip(), f"onglet {view_id} : #canvas ne doit jamais rester vide"
 
 
-def test_memoire_view_seg_bascule_correctement(workspace: Page, real_project: Path) -> None:
-    """La mémoire d'un projet vierge n'offre qu'un onglet (Flotte) : le groupe
-    à deux boutons n'existe qu'une fois la mémoire du projet initialisée. Le
-    test l'initialise lui-même (une décision écrite) au lieu de se skipper
-    quand le projet servi n'en a pas — en CI stricte, ce skip était un échec.
-    """
-    remembered = subprocess.run(
-        [
-            sys.executable, "-m", "grimoire", "memory", "remember",
-            "décision de fixture pour le segment mémoire",
-            "--type", "decisions", "--agent", "e2e-fixture",
-        ],
-        cwd=str(real_project), capture_output=True, text=True, timeout=60, encoding="utf-8",
-        env={**os.environ, "GRIMOIRE_NO_COCKPIT": "1"}, check=False,
-    )
-    assert remembered.returncode == 0, f"`grimoire memory remember` a échoué : {remembered.stderr[-400:]}"
-    workspace.reload(wait_until="domcontentloaded")
-    workspace.wait_for_selector("body[data-ready='1']", timeout=30_000)
-    _goto(workspace, "memoire")
-    workspace.wait_for_selector("#view-seg button")
-    _assert_segment_toggles(workspace, "#view-seg button")
+# `test_memoire_view_seg_bascule_correctement` vit dans
+# test_workspace_memoire_overview.py : le groupe de segments de la Mémoire n'a
+# plus d'un bouton que sur un projet dont la mémoire est initialisée, et seul
+# le cockpit de ce module en sert un. Ici, le projet servi n'en a pas : le test
+# se skippait, ce que la CI stricte (D-10) refuse à raison.
 
 
 # ── Couverture élargie : les autres segments de la coque ────────────────────

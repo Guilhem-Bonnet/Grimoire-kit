@@ -147,6 +147,29 @@ def memory_fleet_workspace(browser: Browser, served_memory_fleet: tuple[str, str
         context.close()
 
 
+def test_memoire_view_seg_bascule_correctement(memory_fleet_workspace: Page) -> None:
+    """Sur un projet à mémoire initialisée, le groupe de segments a plusieurs
+    boutons ; cliqué, un seul est `aria-pressed=true`, celui cliqué."""
+    page = memory_fleet_workspace
+    _goto(page, "memoire")
+    page.wait_for_selector("#view-seg button")
+    buttons = page.locator("#view-seg button")
+    count = buttons.count()
+    assert count >= 2, f"#view-seg button : au moins deux boutons attendus, {count} trouvé(s)"
+    for order in (range(count), reversed(range(count))):
+        for index in order:
+            buttons.nth(index).click()
+            page.wait_for_function(
+                "(i) => document.querySelectorAll('#view-seg button')[i]"
+                "?.getAttribute('aria-pressed') === 'true'",
+                arg=index,
+            )
+            pressed = [buttons.nth(i).get_attribute("aria-pressed") for i in range(count)]
+            assert pressed.count("true") == 1 and pressed[index] == "true", (
+                f"seul le bouton {index} doit être actif (observé : {pressed})"
+            )
+
+
 def test_switching_to_all_projects_shows_two_rows(memory_fleet_workspace: Page) -> None:
     page = memory_fleet_workspace
     _goto(page, "memoire")
