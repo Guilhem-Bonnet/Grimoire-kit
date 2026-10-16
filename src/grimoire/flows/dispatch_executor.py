@@ -725,7 +725,7 @@ def resume_with_dispatch(
         raise GrimoireRuntimeError(f"run {run_id} : rien à reprendre (status={status.status})")
     executor = DispatchExecutor(
         project_root=project_root,
-        blueprint_path=Path(meta.blueprint_path),
+        blueprint_path=engine.blueprint_file(run_id),
         max_tier=max_tier,
         call_timeout=call_timeout,
         engine=engine,

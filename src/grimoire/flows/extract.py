@@ -144,7 +144,7 @@ def extract_blueprint(engine: FlowEngine, run_id: str, project_root: Path) -> tu
     run) puisse l'afficher sans redemander au Mission Ledger.
     """
     meta = engine.run_meta(run_id)
-    original = load_blueprint(Path(meta.blueprint_path), project_root)
+    original = load_blueprint(engine.blueprint_file(run_id), project_root)
     status = engine.status(run_id, include_contract=False)
     nodes_by_id = {node["id"]: node for node in original["nodes"]}
     completed = set(status.completed_nodes)
