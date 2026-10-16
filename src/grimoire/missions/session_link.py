@@ -21,19 +21,20 @@ RESUME_COMMANDS: dict[str, str] = {
 }
 
 
-#: Graphies historiques ou abrégées → valeur de ``HostId``. Le ledger a reçu
-#: ``claude-code-cli`` (rattachement par ``task attach`` / ``task_claim``) en plus
-#: de ``host-claude-code-cli`` (hooks) : les deux restent lues, une seule s'écrit.
-HOST_ALIASES: dict[str, str] = {
-    "claude-code-cli": HostId.CLAUDE_CODE_CLI.value,
-    "claude": HostId.CLAUDE_CODE_CLI.value,
-}
-
-
 def canonical_host(host: str) -> str:
-    """La graphie canonique (valeur de ``HostId``) de *host* ; un hôte inconnu reste tel quel."""
+    """La graphie canonique (valeur de ``HostId``) de *host*.
+
+    Une seule table d'alias, celle de la CLI (:func:`grimoire.hosts.capabilities.resolve_host`,
+    insensible à la casse) : le ledger a reçu ``claude-code-cli`` (``task attach`` /
+    ``task_claim``) en plus de ``host-claude-code-cli`` (hooks), et ``task claim --host``
+    prend du texte libre (``claude``, ``claude-code``, ``Claude``). Un hôte inconnu reste
+    tel quel, nettoyé.
+    """
+    from grimoire.hosts.capabilities import resolve_host
+
     cleaned = (host or "").strip()
-    return HOST_ALIASES.get(cleaned, cleaned)
+    resolved = resolve_host(cleaned)
+    return resolved.value if resolved is not None else cleaned
 
 
 def resume_command(session_host: str, session_id: str) -> str:

@@ -25,6 +25,10 @@ ALIAS_TABLE = {
     "host-claude-code-cli": CANON,
     "claude-code-cli": CANON,
     "claude": CANON,
+    "Claude": CANON,
+    "claude-code": CANON,
+    "Claude-Code": CANON,
+    "  claude-code  ": CANON,
     "host-github-copilot": "host-github-copilot",
     "host-codex": "host-codex",
     "": "",
@@ -39,7 +43,7 @@ def test_table_de_verite_des_alias(raw: str, expected: str) -> None:
     assert canonical_host(raw) == expected
 
 
-@pytest.mark.parametrize("host", [CANON, "claude-code-cli"])
+@pytest.mark.parametrize("host", [CANON, "claude-code-cli", "claude", "claude-code", "Claude"])
 def test_meme_commande_sur_les_trois_surfaces(host: str) -> None:
     attendu = "claude --resume abc-123"
     assert resume_command(host, "abc-123") == attendu
@@ -79,3 +83,23 @@ def test_un_ledger_a_l_ancienne_graphie_reste_lisible_et_affiche_la_commande(tmp
     fields = session_fields(relu)
     assert fields["resume_command"] == "claude --resume abc-123"
     assert fields["host"] == CANON
+
+
+def test_une_seule_table_d_alias_pour_l_hote() -> None:
+    """S1-03 : ``canonical_host`` et ``resolve_host`` ne peuvent plus diverger."""
+    from grimoire.hosts.capabilities import HOST_ALIASES as TABLE_CLI
+    from grimoire.hosts.capabilities import resolve_host
+    from grimoire.missions import session_link
+
+    assert not hasattr(session_link, "HOST_ALIASES")
+    for alias in ("claude", "claude-code", "claude-code-cli", "host-claude-code-cli", "Claude"):
+        assert resolve_host(alias) is HostId.CLAUDE_CODE_CLI, alias
+    # tout alias de la CLI se canonise vers la valeur de son HostId
+    for alias, host in TABLE_CLI.items():
+        assert session_link.canonical_host(alias) == host.value
+
+
+@pytest.mark.parametrize("host", ["claude", "claude-code", "Claude", "claude-code-cli", "host-claude-code-cli"])
+def test_la_commande_de_reprise_du_portefeuille_couvre_tous_les_alias_claude(host: str) -> None:
+    assert wp.resume_command("abc", host) == "claude --resume abc"
+    assert resume_command(host, "abc") == "claude --resume abc"
