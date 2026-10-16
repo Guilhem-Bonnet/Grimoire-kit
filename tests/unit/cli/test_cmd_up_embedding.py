@@ -48,7 +48,7 @@ def test_declared_model_path_that_exists_is_ok(tmp_path: Path) -> None:
     check = check_embedding_model(root)
 
     assert check.level == "ok"
-    assert model.as_posix() in check.detail
+    assert str(model) in check.detail
 
 
 def test_declared_model_path_that_is_missing_is_flagged(tmp_path: Path) -> None:

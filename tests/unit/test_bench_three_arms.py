@@ -2596,6 +2596,12 @@ def _bash_error(tool_id: str, text: str) -> str:
     )
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : l'analyseur de transcripts du banc lit des chemins POSIX absolus (/...) : un chemin à lettre de lecteur (C:/...) y est relatif, donc jamais « hors du dépôt »"
+    ),
+)
 def test_failed_command_outside_the_repo_leaves_the_repo_candidate(tmp_path: Path) -> None:
     """W1-08b-S2-01 : un résultat en erreur n'a pas le message de réinitialisation, et le shell est revenu au dépôt."""
     layout = _Layout(tmp_path)
@@ -2615,6 +2621,12 @@ def test_failed_command_outside_the_repo_leaves_the_repo_candidate(tmp_path: Pat
     assert layout.find(init, _bash_call("t1", cd), reset, inside_task) == []
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : l'analyseur de transcripts du banc lit des chemins POSIX absolus (/...) : un chemin à lettre de lecteur (C:/...) y est relatif, donc jamais « hors du dépôt »"
+    ),
+)
 def test_cd_dash_returns_to_the_previous_directory(tmp_path: Path) -> None:
     """W1-08b-S2-01 : ``cd -`` n'était pas modélisé, le shell restait dehors alors qu'il revenait au dépôt."""
     layout = _Layout(tmp_path)
@@ -3222,6 +3234,12 @@ def test_a_line_break_inside_quotes_or_after_a_semicolon_is_not_a_continuation(t
 # ── W1-08b-T3-02 : un mot du shell est recomposé avant d'être jugé ─────
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : l'analyseur de transcripts du banc lit des chemins POSIX absolus (/...) : un chemin à lettre de lecteur (C:/...) y est relatif, donc jamais « hors du dépôt »"
+    ),
+)
 @pytest.mark.parametrize(
     ("command", "reference"),
     [
