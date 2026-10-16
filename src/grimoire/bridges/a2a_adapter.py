@@ -202,6 +202,8 @@ _GRIMOIRE_TO_A2A: dict[TaskState, str] = {
     TaskState.CLOSED: A2ATaskState.COMPLETED,
     TaskState.FAILED: A2ATaskState.FAILED,
     TaskState.CANCELLED: A2ATaskState.CANCELED,
+    # État inconnu de ce lecteur : une tâche figée attend un humain, elle ne « travaille » pas.
+    TaskState.UNKNOWN: A2ATaskState.INPUT_REQUIRED,
 }
 
 

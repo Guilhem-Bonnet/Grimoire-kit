@@ -64,6 +64,10 @@ _TO_BOARD: dict[TaskState, str] = {
     # acceptée, elle ne devient « publiée » que par une décision de release.
     TaskState.CLOSED: "accepted",
     TaskState.CANCELLED: "archived",
+    # État écrit par une version plus récente : la tâche est figée et n'avance
+    # plus ici ; « bloqué » est la colonne la plus proche, la valeur brute
+    # restant dans le ledger.
+    TaskState.UNKNOWN: "blocked",
 }
 
 # Board → ledger, pour l'import d'un board existant. Les fusions ci-dessus sont
