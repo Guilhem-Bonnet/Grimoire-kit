@@ -514,6 +514,10 @@
    "version": "3.21.1",
    "path": "framework/tools/dark-matter.py"
   },
+  "24517afd63b1a078b787bb57a596a0d58f59327da32f4b9f95f9bbd27f931d99": {
+   "version": "3.62.1",
+   "path": "framework/agentic-standard/templates/claim-ledger.md"
+  },
   "2475a6be3e9a391ca9a787cb557420d36afc026543d046b6febfa9e81230c89f": {
    "version": "3.35.0",
    "path": "framework/tools/synapse-trace.py"
