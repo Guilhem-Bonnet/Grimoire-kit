@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from grimoire.cli.cmd_up import check_hook_commands
+from grimoire.cli.doctor_hooks import check_hook_commands
 from grimoire.hosts.emitters.base import Emitter
 from grimoire.hosts.emitters.claude_code import _hook_entry
 from grimoire.hosts.emitters.copilot import _hook_file
@@ -139,6 +139,7 @@ def test_program_resolution(tmp_path: Path) -> None:
     assert hook_program_resolves('"$CLAUDE_PROJECT_DIR"/.venv/bin/grimoire-hook', tmp_path)
     assert not hook_program_resolves("grimoire-hook", tmp_path, environ={"PATH": ""})
     assert not hook_program_resolves(".venv/bin/absent", tmp_path)
+    assert not hook_program_resolves("../outside/grimoire-hook", tmp_path / ".venv")
 
 
 def _write_copilot_hook(project: Path, command: str) -> None:

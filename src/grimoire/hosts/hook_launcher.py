@@ -47,10 +47,6 @@ class HookLauncher:
     project_relative: bool = False
     machine_specific: bool = False
 
-    @property
-    def is_bare(self) -> bool:
-        return not self.project_relative and not self.machine_specific
-
 
 BARE = HookLauncher(posix=HOOK_SCRIPT)
 
@@ -141,5 +137,13 @@ def hook_program_resolves(program: str, project_root: Path, *, environ: Mapping[
             program = str(project_root) + program[len(var) :].replace('"', "")
     if "/" not in program and "\\" not in program:
         return shutil.which(program, path=path_without_active_venv(env)) is not None
-    path = Path(program.replace("\\", os.sep) if os.sep != "\\" else program)
-    return (path if path.is_absolute() else project_root / path).is_file()
+    # ``shutil.which`` sur un chemin : il doit exister *et* être exécutable,
+    # sans ouvrir le fichier. Un chemin relatif reste confiné à la racine.
+    native = program.replace("\\", os.sep) if os.sep != "\\" else program
+    if Path(native).is_absolute():
+        return shutil.which(native) is not None
+    root = project_root.resolve()
+    candidate = (root / native).resolve()
+    if not candidate.is_relative_to(root):
+        return False
+    return shutil.which(str(candidate)) is not None
