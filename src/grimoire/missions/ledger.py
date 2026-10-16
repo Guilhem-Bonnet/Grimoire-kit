@@ -377,6 +377,10 @@ class MissionLedger:
         high = self._epoch_high.get(task.id, current)
         if isinstance(epoch, bool) or not isinstance(epoch, int) or epoch != current or epoch != high:
             return f"epoch {epoch!r} périmé : le bail de {task.id} est à l'epoch {max(current, high)}"
+        if task.status not in _HELD:
+            # Le claim survit au rendu (release, annulation, blocage) : sans ce garde, son epoch
+            # resterait « le plus haut » et un effet périmé s'appliquerait à l'écriture comme au rejeu.
+            return f"epoch {epoch!r} périmé : {task.id} est {task.status.value}, le bail est rendu"
         return ""
 
     def _replay_steering(self, evt_type: str, payload: dict[str, Any]) -> None:
@@ -656,13 +660,13 @@ class MissionLedger:
         task = self._tasks.get(task_id)
         if task is None:
             raise GrimoireMissionError(f"Task not found: {task_id}")
+        idem = f"{task_id}#{lease_epoch}#{step}" if step and lease_epoch is not None else ""
+        if idem and idem in self._idem_seen:
+            return task  # effet déjà appliqué : la répétition ne réécrit rien, même après que le bail est rendu
         if lease_epoch is not None:
             refusal = self._holder_refusal(task, lease_epoch)
             if refusal:
                 raise GrimoireMissionError(f"Effet refusé pour {task_id} : {refusal}")
-        idem = f"{task_id}#{lease_epoch}#{step}" if step and lease_epoch is not None else ""
-        if idem and idem in self._idem_seen:
-            return task  # effet déjà appliqué : la répétition ne réécrit rien
         if task.status is TaskState.RUNNING and to_state is TaskState.READY and not reaper:
             raise GrimoireMissionError(
                 f"Transition refusée pour {task_id} : running → ready est réservé à la récolte d'un bail perdu "
@@ -692,10 +696,23 @@ class MissionLedger:
             "reason": reason,
             "actor_id": actor_id,
         }
+        hands_back = False
         if lease_epoch is not None:
             payload["lease_epoch"] = lease_epoch
         if idem:
             payload["idem"] = idem
+        if (
+            task.status in _HELD
+            and to_state not in _HELD
+            and to_state is not TaskState.NEEDS_VERIFICATION
+            and not reaper
+        ):
+            # Le titulaire rend le bail (release, blocage, échec, annulation) : même barrière que la
+            # récolte — le fichier d'abord (§2.3), sans titulaire, à l'epoch suivant ; le journal la
+            # porte en ``fence_epoch`` pour que le claim suivant parte au-dessus. Seul
+            # RUNNING → NEEDS_VERIFICATION garde le titulaire (il rend sa preuve).
+            payload["fence_epoch"] = self._epoch_high.get(task_id, 0) + 1
+            hands_back = True
         if to_state is TaskState.CLAIMED and claim is not None:
             epoch = self._epoch_high.get(task_id, 0) + 1
             claim = replace(claim, lease_epoch=epoch)
@@ -714,6 +731,9 @@ class MissionLedger:
                     f"extra_payload ne peut pas redéfinir {', '.join(sorted(clashes))} sur task.transitioned"
                 )
             payload.update(extra_payload)
+        if hands_back:
+            fence = int(payload["fence_epoch"])
+            write_lease(lease_path(self._root, task_id), LeaseFile(task_id, fence, self._now().isoformat(), holder=False))
         self._append_event("task.transitioned", task_id, "task", actor_id, payload, lock_held=True)
         self._load()
         return self._tasks[task_id]
@@ -969,9 +989,11 @@ class MissionLedger:
         return ReapDecision(task.id, "ready", view.reason, view.epoch, attempt, retry_at, written=True)
 
     def _already_deferred(self, task_id: str, epoch: int, cause: str) -> bool:
-        deferred = [e for e in self.list_events(task_id) if e.event_type == REAP_DEFERRED_EVENT]
-        last = deferred[-1].payload if deferred else {}
-        return last.get("lease_epoch_lost") == epoch and last.get("cause") == cause
+        return any(
+            e.payload.get("lease_epoch_lost") == epoch and e.payload.get("cause") == cause
+            for e in self.list_events(task_id)
+            if e.event_type == REAP_DEFERRED_EVENT
+        )
 
     def rejected_events(self) -> dict[str, str]:
         """Les événements refusés au rejeu (id → motif) : epoch périmé ou effet en double."""

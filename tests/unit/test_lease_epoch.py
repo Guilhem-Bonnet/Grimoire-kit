@@ -218,7 +218,8 @@ def test_stale_epoch_event_rejected(tmp_path: Path) -> None:
     assert ledger.transition_task(tid, TaskState.BLOCKED, lease_epoch=1, actor_id="agent-a").status is TaskState.BLOCKED
     ledger.transition_task(tid, TaskState.READY)
     ledger.claim_task(tid, "agent-b", "claude-code-cli")
-    ledger.transition_task(tid, TaskState.RUNNING, actor_id="agent-b", lease_epoch=2)
+    # Le blocage du titulaire a posé la barrière (epoch 2) : le claim d'agent-b prend l'epoch 3.
+    ledger.transition_task(tid, TaskState.RUNNING, actor_id="agent-b", lease_epoch=3)
 
     # À l'écriture : l'ancien titulaire (epoch 1) ne passe plus.
     with pytest.raises(GrimoireMissionError, match="epoch 1 périmé"):
@@ -589,3 +590,89 @@ def test_cli_reap_says_clock_unknown_and_lock_refusal(tmp_path: Path, monkeypatc
     monkeypatch.setattr(ledger_mod, "locked", no_lock)
     res = runner.invoke(task_app, ["reap", *common])
     assert res.exit_code == 1 and "aucun verrou" in res.output
+
+
+# ── CA : un bail rendu ne signe plus d'effet (K2-S1-01) ─────────────────────
+
+#: (état atteint en rendant le bail, effet périmé tenté ensuite, acteur du rendu, tâche déjà running)
+_HANDED_BACK = [
+    pytest.param(TaskState.READY, TaskState.BLOCKED, "human", False, id="release-humaine"),
+    pytest.param(TaskState.CANCELLED, TaskState.READY, "human", True, id="annulation"),
+    pytest.param(TaskState.BLOCKED, TaskState.READY, "agent-a", True, id="blocage-du-titulaire"),
+    pytest.param(TaskState.FAILED, TaskState.READY, "agent-a", True, id="echec-du-titulaire"),
+]
+
+
+@pytest.mark.parametrize(("handed", "stale_to", "actor", "running"), _HANDED_BACK)
+def test_handed_back_lease_signs_no_effect(
+    tmp_path: Path, handed: TaskState, stale_to: TaskState, actor: str, running: bool
+) -> None:
+    ledger = _ledger(tmp_path)
+    if running:
+        tid = _running(ledger)
+    else:
+        tid = _ready(ledger)
+        ledger.claim_task(tid, "agent-a", "local")
+    ledger.transition_task(tid, handed, actor_id=actor)
+    root = tmp_path / "ledger"
+
+    # À l'écriture : l'epoch 1 n'est plus celui d'un bail.
+    with pytest.raises(GrimoireMissionError, match="périmé"):
+        ledger.transition_task(tid, stale_to, actor_id="agent-a", lease_epoch=1, step="s1")
+    with pytest.raises(GrimoireMissionError, match="Renouvellement refusé"):
+        ledger.renew_lease(tid, 1)
+
+    # Au rejeu, sur une instance neuve : un effet périmé écrit hors verrou n'est pas appliqué.
+    stale = ledger.append_event(
+        "task.transitioned", tid, "task", "agent-a",
+        {"task_id": tid, "from_state": handed.value, "to_state": stale_to.value, "lease_epoch": 1},
+    )
+    replayed = MissionLedger(root)
+    task = replayed.get_task(tid)
+    assert task is not None and task.status is handed
+    assert "périmé" in replayed.rejected_events()[stale.id]
+
+    # Le frein d'outil : le fichier de bail seul refuse, et le ledger aussi quand le fichier manque.
+    fence = read_lease(lease_path(root, tid))
+    assert fence is not None and fence.epoch == 2 and not fence.holder
+    assert (replayed.check_holder(tid, 1).ok, replayed.check_holder(tid, 1).source) == (False, "lease")
+    lease_path(root, tid).unlink()
+    assert (replayed.check_holder(tid, 1).ok, replayed.check_holder(tid, 1).source) == (False, "ledger")
+
+
+def test_next_claim_starts_above_the_handback_barrier(tmp_path: Path) -> None:
+    ledger = _ledger(tmp_path)
+    tid = _running(ledger)
+    ledger.transition_task(tid, TaskState.BLOCKED, actor_id="agent-a", lease_epoch=1)
+    ledger.transition_task(tid, TaskState.READY, actor_id="human")
+    ledger.claim_task(tid, "agent-b", "local")
+    assert _epoch(ledger, tid) == 3  # la barrière a pris l'epoch 2
+    assert ledger.check_holder(tid, 3).ok and not ledger.check_holder(tid, 1).ok
+    # Le nouveau titulaire signe ses effets ; l'ancien reste refusé.
+    ledger.transition_task(tid, TaskState.RUNNING, actor_id="agent-b", lease_epoch=3)
+    with pytest.raises(GrimoireMissionError, match="périmé"):
+        ledger.transition_task(tid, TaskState.NEEDS_VERIFICATION, actor_id="agent-a", lease_epoch=1)
+
+
+def test_holder_hands_in_proof_without_losing_the_lease(tmp_path: Path) -> None:
+    ledger = _ledger(tmp_path)
+    tid = _running(ledger)
+    ledger.transition_task(tid, TaskState.NEEDS_VERIFICATION, actor_id="agent-a", lease_epoch=1)
+    lease = read_lease(lease_path(tmp_path / "ledger", tid))
+    assert lease is not None and lease.epoch == 1 and lease.holder  # pas de barrière sur la preuve
+
+
+# ── CA : une différée se nomme une fois par (epoch, cause) (K2-S1-02) ───────
+
+
+def test_reap_deferred_once_per_epoch_and_cause_even_when_the_cause_alternates(tmp_path: Path) -> None:
+    clock = _Clock()
+    ledger = _ledger(tmp_path, clock)
+    tid = _running(ledger, host="host-copilot")
+    clock.now += timedelta(minutes=30)
+    for i in range(5):
+        ledger.reap(quota_blocked=lambda _t, flag=(i % 2 == 0): flag)  # quota, hors quota, quota…
+    deferred = [e for e in ledger.list_events(tid) if e.event_type == ledger_mod.REAP_DEFERRED_EVENT]
+    assert sorted((e.payload["lease_epoch_lost"], e.payload["cause"]) for e in deferred) == [
+        (1, "quota"), (1, "resume_unfenced"),
+    ]
