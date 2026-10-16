@@ -198,6 +198,26 @@ def _new_id(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:12]}"
 
 
+#: Les seuls journaux que le ledger écrit sous sa racine.
+_LEDGER_FILES = frozenset({"events.jsonl", "incidents.jsonl"})
+
+
+def _confined_ledger_file(path: Path) -> Path:
+    """Résout *path* et refuse tout ce qui n'est pas un journal du ledger sous sa racine.
+
+    La racine vient du CLI (``--ledger-root``) : on n'écrit que ``events.jsonl``
+    et ``incidents.jsonl``, et le chemin résolu (liens symboliques compris) doit
+    rester directement sous le dossier résolu de la racine.
+    """
+    if path.name not in _LEDGER_FILES:
+        raise GrimoireMissionError(f"Fichier de ledger non autorisé : {path.name!r}")
+    base = path.parent.resolve()
+    resolved = (base / path.name).resolve()
+    if resolved.parent != base or not resolved.is_relative_to(base):
+        raise GrimoireMissionError(f"Fichier de ledger hors de sa racine : {path.name!r}")
+    return resolved
+
+
 @contextmanager
 def _ledger_file_lock(target_path: Path) -> Iterator[None]:
     """Verrou exclusif inter-processus sur *target_path* — :func:`grimoire.core.fsio.locked`.
@@ -486,6 +506,7 @@ class MissionLedger:
         :func:`_ledger_file_lock` (``transition_task``) écrit par ici, jamais
         par :meth:`_atomic_append`, sous peine de s'attendre lui-même.
         """
+        path = _confined_ledger_file(path)
         line = json.dumps(record, ensure_ascii=False) + "\n"
         existing = path.read_text(encoding="utf-8") if path.exists() else ""
         # K2 (§2.3) : ajout puis ``fsync`` — ``atomic_write`` synchronise le
