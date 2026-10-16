@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "grimoire-traces-core"
-version = "0.1.0"
+version = "0.2.0"
 description = "Coeur Rust optionnel des agregations du journal de traces, de la regle de fraicheur et du declencheur de propositions (PyO3). Non publie sur PyPI — build local uniquement, voir CONTRIBUTING.md."
 requires-python = ">=3.12"
 license = { text = "MIT" }

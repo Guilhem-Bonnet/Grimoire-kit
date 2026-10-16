@@ -762,12 +762,12 @@ _TRACES_ROOT = Annotated[Path, typer.Option("--traces-root", help="Racine du Tra
 _DEFAULT_TRACES = Path("_grimoire-output/traces")
 
 
-def _estimate_model_cost(model: str, tokens_in: int, tokens_out: int) -> float:
+def _estimate_model_cost(model: str, tokens_in: int, tokens_out: int) -> float | None:
     """Ordre de grandeur $ à partir de `tools.cost_model.MODEL_RATES` — jamais une facture.
 
     Reconnaissance par sous-chaîne (``model.lower()`` contient ``"opus"``,
-    ``"sonnet"``, ``"haiku"``...) : un modèle non reconnu vaut 0.0, jamais une
-    estimation inventée.
+    ``"sonnet"``, ``"haiku"``...) : un modèle non reconnu rend ``None`` (coût
+    inconnu, W1-01), jamais ``0.0`` ni une estimation inventée.
     """
     from grimoire.tools.cost_model import MODEL_RATES
 
@@ -775,7 +775,7 @@ def _estimate_model_cost(model: str, tokens_in: int, tokens_out: int) -> float:
     for family, rates in MODEL_RATES.items():
         if family in needle:
             return round((tokens_in / 1_000_000) * rates["in"] * 1000 + (tokens_out / 1_000_000) * rates["out"] * 1000, 6)
-    return 0.0
+    return None
 
 
 @task_app.command("record-model-call")
@@ -815,6 +815,7 @@ def task_record_model_call(
         completion_tokens=tokens_out,
         total_tokens=tokens_in + tokens_out,
         estimated_cost_usd=cost,
+        unpriced_calls=0 if cost is not None else 1,
     )
     ledger = TraceLedger(traces_path)
     trace = ledger.record(
@@ -834,7 +835,7 @@ def task_record_model_call(
     if _fmt(ctx) == "json":
         typer.echo(json.dumps(trace.to_dict(), indent=2, ensure_ascii=False, default=str))
         return
-    console.print(f"[green]OK[/green] appel modèle journalisé : {model}, {tokens_in}+{tokens_out} tokens (~${cost:.4f})")
+    console.print(f"[green]OK[/green] appel modèle journalisé : {model}, {tokens_in}+{tokens_out} tokens ({f'~${cost:.4f}' if cost is not None else 'coût inconnu : modèle non tarifé'})")
 
 
 def _now_iso() -> str:

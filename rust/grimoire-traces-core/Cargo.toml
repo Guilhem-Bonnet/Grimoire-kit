@@ -1,6 +1,6 @@
 [package]
 name = "grimoire-traces-core"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Coeur Rust optionnel des agregations du journal de traces (grimoire.traces.ledger), de la regle de fraicheur (grimoire.core.agent_freshness) et du declencheur de propositions d'artefact (grimoire.proposals), expose via PyO3."
 license = "MIT"
