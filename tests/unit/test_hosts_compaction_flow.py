@@ -105,3 +105,51 @@ def test_a_fresh_session_start_does_not_reinject_the_run(tmp_path: Path) -> None
     decision = decide_activation(fresh)
     assert run_id not in decision.context
     assert decision.detail["flow_lines_injected"] is False
+
+
+def _capsule(project: Path) -> str:
+    return decide_context_capsule(HookInput(event=HookEvent.PRE_COMPACT, project_root=project)).context
+
+
+def test_a_deleted_blueprint_keeps_the_run_id_and_node(tmp_path: Path) -> None:
+    """W2-05-S1 : la dérive non évaluable ne doit pas effacer le run de la capsule."""
+    project = _governed(tmp_path)
+    (project / "bp").mkdir()
+    wfi, _ = _project_engine(project).run(
+        _blueprint(project / "bp"), executor=InteractiveNodeExecutor(stream=io.StringIO())
+    )
+    (project / "bp" / "trois.blueprint.json").unlink()
+    capsule = _capsule(project)
+    assert wfi.id in capsule
+    assert "nœud courant a" in capsule
+    assert "dérive non évaluable" in capsule
+    compact = HookInput(event=HookEvent.SESSION_START, project_root=project, raw={"source": "compact"})
+    assert wfi.id in decide_activation(compact).context
+
+
+def _orphan_meta(project: Path, source_run_id: str) -> None:
+    flows = project / "_grimoire-runtime-output/flows"
+    meta = json.loads((flows / f"{source_run_id}.json").read_text(encoding="utf-8"))
+    meta["run_id"] = "wf-orphan"
+    (flows / "wf-orphan.json").write_text(json.dumps(meta), encoding="utf-8")
+
+
+def test_an_orphan_meta_does_not_hide_a_healthy_run(tmp_path: Path) -> None:
+    """W2-05-S2 : un run isolé en échec ne remplace pas la liste entière."""
+    project = _governed(tmp_path)
+    run_id = _start_run(project)
+    _orphan_meta(project, run_id)
+    capsule = _capsule(project)
+    assert run_id in capsule
+    assert "nœud courant a" in capsule
+    assert "wf-orphan" not in capsule
+
+
+def test_an_orphan_meta_alone_leaves_the_capsule_identical(tmp_path: Path) -> None:
+    """W2-05-S2 : sans run vivant, la capsule est identique au caractère près."""
+    project = _governed(tmp_path)
+    run_id = _start_run(project)
+    _project_engine(project).abort(run_id, reason="fin de test")
+    before = _capsule(project)
+    _orphan_meta(project, run_id)
+    assert _capsule(project) == before

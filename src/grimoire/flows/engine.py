@@ -334,6 +334,10 @@ class FlowEngine:
     def list_run_ids(self) -> list[str]:
         return sorted(p.stem for p in self._flows_root.glob("*.json"))
 
+    def knows_run(self, run_id: str) -> bool:
+        """Le kernel a-t-il encore l'instance de ce run ? Une métadonnée orpheline (kernel nettoyé) répond non."""
+        return self._kernel.get_instance(run_id) is not None
+
     def _blueprint_file(self, meta: FlowRunMeta) -> Path:
         """Le fichier blueprint du run : le chemin stocké est relatif à la racine du projet (W2-04)."""
         return resolve_blueprint_path(meta.blueprint_path, self._project_root)
