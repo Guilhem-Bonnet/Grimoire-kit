@@ -228,7 +228,7 @@ class TestCLIIntegration(unittest.TestCase):
     def _run(self, *args):
         return subprocess.run(
             [sys.executable, str(TOOL), *args],
-            capture_output=True, text=True, timeout=15,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15,
         )
 
     def test_help(self):

@@ -191,7 +191,7 @@ def _grimoire(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
         [sys.executable, "-m", "grimoire", *args],
         cwd=str(cwd),
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         check=False,
         timeout=180,
     )

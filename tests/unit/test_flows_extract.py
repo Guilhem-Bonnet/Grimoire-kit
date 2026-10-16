@@ -18,10 +18,14 @@ from grimoire.flows.engine import FlowEngine
 from grimoire.flows.executor import InteractiveNodeExecutor
 from grimoire.flows.extract import extract_blueprint
 
+# Commande d'acceptation « qui réussit », valable sous sh comme sous cmd.exe
+# (`true` n'existe pas sous Windows, où `shell=True` lance cmd.exe).
+_TRUE = f'"{sys.executable}" -c pass'
+
 STANDARD = Path("_grimoire/standard")
 REGISTRY = STANDARD / "llm-provider-registry.yaml"
 
-_V0_RUN = {"run": "true"}
+_V0_RUN = {"run": _TRUE}
 _V1 = "revue humaine avant fusion"
 _V2 = "le code est propre"
 
@@ -166,8 +170,8 @@ def test_extract_completed_run_replaces_run_with_observed_acceptance(tmp_path: P
     assert by_id["c"].verifiability == "V1"
 
     nodes = {n["id"]: n for n in draft["nodes"]}
-    assert nodes["a"]["acceptance"] == [{"run": "true"}]
-    assert nodes["b"]["acceptance"] == [{"run": "true"}]
+    assert nodes["a"]["acceptance"] == [{"run": _TRUE}]
+    assert nodes["b"]["acceptance"] == [{"run": _TRUE}]
     # V1 : jamais d'acceptance exécutée observée — la prose d'origine survit,
     # jamais remplacée par une inférence depuis le texte.
     assert nodes["c"]["acceptance"] == [_V1]

@@ -22,6 +22,10 @@ from grimoire.flows.engine import FlowEngine
 from grimoire.traces.ledger import DISPATCH_OUTCOME_TAG, TraceLedger
 from grimoire.traces.schemas import TraceOutcome
 
+# Commande d'acceptation « qui réussit », valable sous sh comme sous cmd.exe
+# (`true` n'existe pas sous Windows, où `shell=True` lance cmd.exe).
+_TRUE = f'"{sys.executable}" -c pass'
+
 runner = CliRunner()
 _WIDE = {"COLUMNS": "250"}
 
@@ -118,7 +122,7 @@ routing:
             {
                 "blueprintVersion": 1,
                 "id": "silent-flow",
-                "nodes": [{"id": "n", "kind": "pattern", "ref": "ORC-01", "acceptance": [{"run": "true"}], "pins": []}],
+                "nodes": [{"id": "n", "kind": "pattern", "ref": "ORC-01", "acceptance": [{"run": _TRUE}], "pins": []}],
                 "edges": [],
             }
         ),

@@ -20,6 +20,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 from grimoire.flows.dispatch_executor import node_dispatch_history, run_with_dispatch
 from grimoire.flows.engine import FlowEngine
 
@@ -179,6 +181,12 @@ def test_pytest_non_collectable_est_un_refus_acceptance_inexecutable(tmp_path: P
 # ── 2. Un test qui échoue est rouge, puis l'escalade répare et ferme vert ────
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : les commandes d'acceptation sont du shell POSIX (fonctions shell, printf) et « shell=True » lance cmd.exe sous Windows : le contrat de la commande de check est POSIX"
+    ),
+)
 def test_acceptance_qui_echoue_puis_escalade_vers_un_palier_qui_repare(tmp_path: Path) -> None:
     test_file = tmp_path / "tests_project" / "test_fix.py"
     test_file.parent.mkdir(parents=True, exist_ok=True)
@@ -216,6 +224,12 @@ def test_acceptance_qui_echoue_puis_escalade_vers_un_palier_qui_repare(tmp_path:
 # ── 3. Un test qui passe dès le premier palier est vert, trace à l'appui ────
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : les commandes d'acceptation sont du shell POSIX (fonctions shell, printf) et « shell=True » lance cmd.exe sous Windows : le contrat de la commande de check est POSIX"
+    ),
+)
 def test_acceptance_qui_passe_est_verte_avec_la_sortie_pytest_en_trace(tmp_path: Path) -> None:
     test_file = tmp_path / "tests_project" / "test_ok.py"
     test_file.parent.mkdir(parents=True, exist_ok=True)

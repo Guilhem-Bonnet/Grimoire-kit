@@ -13,6 +13,7 @@ from __future__ import annotations
 import http.server
 import json
 import stat
+import sys
 import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -464,6 +465,12 @@ def test_audit_missing_executable_marks_unavailable_and_choose_skips_it(
     assert candidates(tmp_path, "cheap") == ()
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : fabrique un exécutable factice (script shell sans extension .exe/.cmd, bit x) que Windows ne lance pas par son nom"
+    ),
+)
 def test_audit_present_executable_marks_available(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _write_registry(tmp_path, _ANTHROPIC_ONLY_REGISTRY)
     bin_dir = tmp_path / "bin"
@@ -500,6 +507,12 @@ def test_audit_never_executes_the_full_invocation(tmp_path: Path, monkeypatch: p
     assert not marker.exists()
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : fabrique un exécutable factice (script shell sans extension .exe/.cmd, bit x) que Windows ne lance pas par son nom"
+    ),
+)
 def test_audit_lists_ollama_models_via_fake_http_server(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_ollama_server: http.server.HTTPServer
 ) -> None:

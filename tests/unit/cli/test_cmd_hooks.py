@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -30,6 +31,12 @@ def kit_repo(tmp_path: Path) -> Path:
 
 
 class TestHooksInstall:
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason=(
+            "Windows : dépend de la sémantique POSIX des droits (bit x, geteuid) qui n'existe pas sous Windows"
+        ),
+    )
     def test_installs_all_hooks(self, kit_repo: Path) -> None:
         result = runner.invoke(app, ["-o", "json", "hooks", "install", str(kit_repo)])
         assert result.exit_code == 0

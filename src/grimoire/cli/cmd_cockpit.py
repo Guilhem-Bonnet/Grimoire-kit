@@ -675,7 +675,7 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         if values:
             cmd += ["--", *values]
         try:
-            res = subprocess.run(cmd, cwd=str(proot), capture_output=True, text=True, timeout=30)
+            res = subprocess.run(cmd, cwd=str(proot), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
         except subprocess.TimeoutExpired:
             self._send_json(504, {"ok": False, "error": "timeout"})
             return
@@ -1038,7 +1038,7 @@ def _generate_data(serve_dir: Path, with_tests: bool) -> bool:
     cmd = [sys.executable, str(gen), "--registry", str(registry_file()), "--out-dir", str(serve_dir / "data")]
     if with_tests:
         cmd.append("--with-tests")
-    res = subprocess.run(cmd, capture_output=True, text=True)
+    res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if res.returncode != 0:
         console.print("[yellow]⚠[/yellow] Génération partielle (voir détail) — repli sur les données disponibles.")
         if res.stderr.strip():

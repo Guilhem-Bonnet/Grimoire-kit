@@ -52,7 +52,7 @@ def concevoir_scratch_blueprint(workspace: Page, real_project: Path) -> tuple[Pa
     result = subprocess.run(
         [sys.executable, "-m", "grimoire", "blueprint", "new", bp_id,
          "--out", str(target), "--template", "pipeline"],
-        cwd=str(real_project), capture_output=True, text=True, check=False, timeout=60,
+        cwd=str(real_project), capture_output=True, text=True, encoding="utf-8", errors="replace", check=False, timeout=60,
     )
     if not target.is_file():
         pytest.skip(f"`grimoire blueprint new` n'a pas produit de fichier ici : {result.stderr[-400:]}")

@@ -511,7 +511,7 @@ def test_restitution_can_lose_exclusion_when_a_third_party_recreates_the_lock(
 # --- architecture : un seul helper de verrou et d'ecriture atomique ---------
 
 #: Anciens helpers de verrou, a migrer vers fsio (chantiers suivants) : la liste ne fait que rétrécir.
-_LEGACY_LOCKERS = {"missions/ledger.py", "tools/stigmergy.py"}
+_LEGACY_LOCKERS = {"missions/ledger.py"}
 #: Creations exclusives legitimes hors verrou : la liste ne fait que rétrécir (vide aujourd'hui).
 _EXCL_ALLOWED: set[str] = set()
 #: Copies du motif temporaire + replace a migrer vers fsio.atomic_write : la liste ne fait que rétrécir.

@@ -144,7 +144,7 @@ def _run(args: list[str], cwd: str | Path, *, env: dict | None = None) -> subpro
             subprocess.run(
                 ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
                 capture_output=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
             )
         else:
             proc.kill()

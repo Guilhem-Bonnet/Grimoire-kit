@@ -859,7 +859,7 @@ def file_history(project_root: Path, raw_path: str | None) -> dict[str, Any]:
             ],
             cwd=str(root),
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=10,
             check=False,
         )

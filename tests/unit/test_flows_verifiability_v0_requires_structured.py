@@ -24,6 +24,10 @@ from grimoire.flows.engine import FlowEngine
 from grimoire.missions.schemas import TaskState
 from grimoire.missions.service import TaskService
 
+# Commande d'acceptation « qui réussit », valable sous sh comme sous cmd.exe
+# (`true` n'existe pas sous Windows, où `shell=True` lance cmd.exe).
+_TRUE = f'"{sys.executable}" -c pass'
+
 STANDARD = Path("_grimoire/standard")
 REGISTRY = STANDARD / "llm-provider-registry.yaml"
 LEDGER = Path("_grimoire-runtime-output/ledger")
@@ -153,7 +157,7 @@ def test_v0_textuel_sans_acceptance_structuree_est_traite_comme_v1(tmp_path: Pat
 
 def test_v0_structure_reste_v0_inchange(tmp_path: Path) -> None:
     _write_registry(tmp_path)
-    bp = _blueprint(tmp_path, acceptance=["la suite de tests passe", {"run": "true"}])
+    bp = _blueprint(tmp_path, acceptance=["la suite de tests passe", {"run": _TRUE}])
     engine = _engine(tmp_path)
 
     outcome = run_with_dispatch(engine, bp, project_root=tmp_path)

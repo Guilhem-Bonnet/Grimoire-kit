@@ -30,6 +30,10 @@ from grimoire.flows.extract import extract_blueprint
 from grimoire.flows.registry import describe_flow
 from grimoire.runtime.schemas import WorkflowStatus
 
+# Commande d'acceptation « qui réussit », valable sous sh comme sous cmd.exe
+# (`true` n'existe pas sous Windows, où `shell=True` lance cmd.exe).
+_TRUE = f'"{sys.executable}" -c pass'
+
 STANDARD = Path("_grimoire/standard")
 REGISTRY = STANDARD / "llm-provider-registry.yaml"
 PILOT_POLICY = STANDARD / "pilot.yaml"
@@ -128,7 +132,7 @@ def _leaf_node(node_id: str, *, out_contract: str | None = None, in_contract: st
         "kind": "pattern",
         "ref": "ORC-01",
         "label": node_id,
-        "acceptance": [{"run": "true"}],
+        "acceptance": [{"run": _TRUE}],
         "pins": pins,
     }
 

@@ -31,6 +31,10 @@ from grimoire.flows.engine import FlowEngine
 from grimoire.flows.executor import InteractiveNodeExecutor
 from grimoire.flows.extract import extract_blueprint
 
+# Commande d'acceptation « qui réussit », valable sous sh comme sous cmd.exe
+# (`true` n'existe pas sous Windows, où `shell=True` lance cmd.exe).
+_TRUE = f'"{sys.executable}" -c pass'
+
 STANDARD = Path("_grimoire/standard")
 REGISTRY = STANDARD / "llm-provider-registry.yaml"
 PILOT_POLICY = STANDARD / "pilot.yaml"
@@ -127,7 +131,7 @@ def _engine(tmp_path: Path) -> FlowEngine:
 
 
 def _leaf(node_id: str = "leaf") -> dict:
-    return {"id": node_id, "kind": "pattern", "ref": "ORC-01", "acceptance": [{"run": "true"}], "pins": []}
+    return {"id": node_id, "kind": "pattern", "ref": "ORC-01", "acceptance": [{"run": _TRUE}], "pins": []}
 
 
 def _write_bp(path: Path, blueprint_id: str, nodes: list[dict], edges: list[dict] | None = None) -> Path:
@@ -152,7 +156,7 @@ def test_fanout_produit_n_elements_et_recolle(tmp_path: Path) -> None:
     bp = _write_bp(
         tmp_path / "bp.blueprint.json",
         "fanout-demo",
-        [{"id": "spread", "kind": "fanout", "ref": "child.blueprint.json", "acceptance": [{"run": "true"}], "pins": []}],
+        [{"id": "spread", "kind": "fanout", "ref": "child.blueprint.json", "acceptance": [{"run": _TRUE}], "pins": []}],
     )
     engine = _engine(tmp_path)
 
@@ -171,7 +175,7 @@ def test_fanout_sans_plafond_pilote_est_refuse(tmp_path: Path) -> None:
     bp = _write_bp(
         tmp_path / "bp.blueprint.json",
         "fanout-demo",
-        [{"id": "spread", "kind": "fanout", "ref": "child.blueprint.json", "acceptance": [{"run": "true"}], "pins": []}],
+        [{"id": "spread", "kind": "fanout", "ref": "child.blueprint.json", "acceptance": [{"run": _TRUE}], "pins": []}],
     )
     engine = _engine(tmp_path)
 
@@ -313,7 +317,7 @@ def test_judge_designe_un_gagnant_parmi_n_tentatives(tmp_path: Path) -> None:
                 "id": "judge",
                 "kind": "judge",
                 "ref": "child.blueprint.json",
-                "acceptance": [{"run": "true"}],
+                "acceptance": [{"run": _TRUE}],
                 "config": {"judge": {"n": 2, "angles": ["angle-a", "angle-b"]}},
                 "pins": [],
             }
@@ -338,7 +342,7 @@ def test_judge_angles_mal_comptees_refuse_au_chargement(tmp_path: Path) -> None:
                 "id": "judge",
                 "kind": "judge",
                 "ref": "child.blueprint.json",
-                "acceptance": [{"run": "true"}],
+                "acceptance": [{"run": _TRUE}],
                 "config": {"judge": {"n": 2, "angles": ["angle-a"]}},
                 "pins": [],
             }
@@ -358,7 +362,7 @@ def test_checkpoint_toujours_pending_reject_bloque_avec_motif_approve_avance(tmp
         "checkpoint-demo",
         [
             {"id": "gate", "kind": "checkpoint", "ref": "", "pins": [{"id": "out", "direction": "out", "contract": "c1"}]},
-            {"id": "after", "kind": "pattern", "ref": "ORC-01", "acceptance": [{"run": "true"}], "pins": [{"id": "in", "direction": "in", "contract": "c1"}]},
+            {"id": "after", "kind": "pattern", "ref": "ORC-01", "acceptance": [{"run": _TRUE}], "pins": [{"id": "in", "direction": "in", "contract": "c1"}]},
         ],
         [{"from": "gate.out", "to": "after.in", "contract": "c1"}],
     )
@@ -495,7 +499,7 @@ def _demo_blueprint(tmp_path: Path) -> Path:
                 "id": "spread",
                 "kind": "fanout",
                 "ref": "child.blueprint.json",
-                "acceptance": [{"run": "true"}],
+                "acceptance": [{"run": _TRUE}],
                 "pins": [
                     {"id": "in", "direction": "in", "contract": "c2"},
                     {"id": "out", "direction": "out", "contract": "c3"},
@@ -525,7 +529,7 @@ def _demo_blueprint(tmp_path: Path) -> Path:
                 "id": "judge",
                 "kind": "judge",
                 "ref": "child.blueprint.json",
-                "acceptance": [{"run": "true"}],
+                "acceptance": [{"run": _TRUE}],
                 "config": {"judge": {"n": 2, "angles": ["angle-a", "angle-b"]}},
                 "pins": [
                     {"id": "in", "direction": "in", "contract": "c5"},
@@ -650,7 +654,7 @@ def _fanout_bp(tmp_path: Path) -> Path:
     return _write_bp(
         tmp_path / "bp.blueprint.json",
         "fanout-demo",
-        [{"id": "spread", "kind": "fanout", "ref": "child.blueprint.json", "acceptance": [{"run": "true"}], "pins": []}],
+        [{"id": "spread", "kind": "fanout", "ref": "child.blueprint.json", "acceptance": [{"run": _TRUE}], "pins": []}],
     )
 
 
@@ -825,7 +829,7 @@ def _sibling_bp(tmp_path: Path, kind: str) -> tuple[Path, str, dict[str, dict]]:
     node: dict = {"id": "gn", "kind": kind, "ref": "child.blueprint.json", "pins": []}
     extra: dict[str, dict] = {}
     if kind == "fanout":
-        node["acceptance"] = [{"run": "true"}]
+        node["acceptance"] = [{"run": _TRUE}]
         extra["gn"] = {"fanout_items": ["a", "b", "c"]}
     elif kind == "verify-panel":
         node["config"] = {"verifyPanel": {"k": 3, "angles": ["a", "b", "c"]}}
@@ -833,7 +837,7 @@ def _sibling_bp(tmp_path: Path, kind: str) -> tuple[Path, str, dict[str, dict]]:
         node["config"] = {"loopUntilDry": {"maxRounds": 4}}
         extra.update({f"idx{i}": {"novelty_key": f"k{i}"} for i in range(4)})
     elif kind == "judge":
-        node["acceptance"] = [{"run": "true"}]
+        node["acceptance"] = [{"run": _TRUE}]
         node["config"] = {"judge": {"n": 3, "angles": ["a", "b", "c"]}}
         extra["gn"] = {"judge_winner": 0}
     elif kind == "replay-diff":
@@ -929,7 +933,7 @@ def _judge_bp(tmp_path: Path, *, with_acceptance: bool = True) -> Path:
         "pins": [],
     }
     # Un critère de texte ambigu fait un node V2 : le juge lui-même revient à l'hôte (``pending``).
-    node["acceptance"] = [{"run": "true"}] if with_acceptance else ["le meilleur candidat est choisi avec soin"]
+    node["acceptance"] = [{"run": _TRUE}] if with_acceptance else ["le meilleur candidat est choisi avec soin"]
     return _write_bp(tmp_path / "bp.blueprint.json", "judge-cost", [node])
 
 

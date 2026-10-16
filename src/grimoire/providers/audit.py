@@ -73,7 +73,7 @@ def _probe_version(resolved_path: str) -> str | None:
         completed = subprocess.run(
             [resolved_path, "--version"],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=_VERSION_TIMEOUT_S,
             check=False,
         )

@@ -161,7 +161,7 @@ def test_editer_un_fichier_du_kit_cree_l_override_diffuse_et_laisse_doctor_vert(
         [sys.executable, "-m", "grimoire", "doctor"],
         cwd=str(real_project),
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         timeout=60,
     )
     assert result.returncode == 0, result.stdout + result.stderr

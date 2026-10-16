@@ -157,12 +157,24 @@ class TestCatalogRefuses:
 
 
 class TestCatalogAccepts:
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason=(
+            "Windows : rejoue un garde de workflow écrit pour bash sous ubuntu-latest (CI) ; Git Bash de Windows (CRLF, chemins, sortie redirigée) n'est pas la cible de ce garde"
+        ),
+    )
     def test_a_fully_catalogued_tree(self, catalog: ModuleType) -> None:
         _track(catalog.REPO, "framework/outil.md", "contenu\n")
         _catalogued(catalog, {"framework/outil.md": "contenu\n"})
         cat = json.loads(catalog.OUT.read_text(encoding="utf-8"))["digests"]
         assert catalog._check(cat, "9.9.9") == 0
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason=(
+            "Windows : rejoue un garde de workflow écrit pour bash sous ubuntu-latest (CI) ; Git Bash de Windows (CRLF, chemins, sortie redirigée) n'est pas la cible de ce garde"
+        ),
+    )
     def test_an_untracked_file_is_not_catalogued(self, catalog: ModuleType) -> None:
         """Régression : un `__pycache__` laissé par des tests injectait des
         digests de bytecode, propres à une version de Python. 304 s'étaient
@@ -385,6 +397,12 @@ def test_pr_title_gate_refuses(title: str) -> None:
     assert _title_gate(title) == 1
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : rejoue un garde de workflow écrit pour bash sous ubuntu-latest (CI) ; Git Bash de Windows (CRLF, chemins, sortie redirigée) n'est pas la cible de ce garde"
+    ),
+)
 @pytest.mark.parametrize(
     "title",
     [

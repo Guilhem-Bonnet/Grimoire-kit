@@ -8,6 +8,7 @@ d'événements et du board. Aucune ne doit pouvoir répondre « oui » par défa
 from __future__ import annotations
 
 import json
+import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -531,6 +532,12 @@ def test_declared_project_tool_ignores_a_tool_field_pointing_nowhere(project: Pa
     assert ph._declared_project_tool(project) is None
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : fabrique un exécutable factice (script shell sans extension .exe/.cmd, bit x) que Windows ne lance pas par son nom"
+    ),
+)
 def test_project_tool_version_runs_the_declared_binary(project: Path) -> None:
     venv_bin = project / ".venv" / "bin"
     venv_bin.mkdir(parents=True)
@@ -577,6 +584,12 @@ def test_kit_alignment_up_version_reads_the_marker_written_by_up(project: Path) 
     assert kit["upVersion"] == "3.51.1"
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : fabrique un exécutable factice (script shell sans extension .exe/.cmd, bit x) que Windows ne lance pas par son nom"
+    ),
+)
 def test_kit_alignment_carries_the_declared_project_tool(project: Path) -> None:
     venv_bin = project / ".venv" / "bin"
     venv_bin.mkdir(parents=True)

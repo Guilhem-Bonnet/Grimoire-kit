@@ -494,7 +494,7 @@ def _classify_review(project_root: Path) -> tuple[str, tuple[str, ...], str | No
     """
     try:
         completed = subprocess.run(
-            ["git", "diff", "--name-only"], cwd=project_root, capture_output=True, text=True, timeout=CHECK_TIMEOUT_S
+            ["git", "diff", "--name-only"], cwd=project_root, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=CHECK_TIMEOUT_S
         )
     except (OSError, subprocess.TimeoutExpired):
         return "review_optional", (), "projet non versionné (git indisponible) : relisibilité non calculée"
@@ -836,7 +836,7 @@ def _run_provider_call(
     started = time.monotonic()
     try:
         completed = subprocess.run(
-            argv, cwd=project_root, capture_output=True, text=True, timeout=call_timeout, shell=False
+            argv, cwd=project_root, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=call_timeout, shell=False
         )
     except subprocess.TimeoutExpired:
         return None, "", "", time.monotonic() - started, "timeout"

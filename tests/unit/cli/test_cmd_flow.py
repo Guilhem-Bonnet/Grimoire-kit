@@ -11,6 +11,10 @@ from typer.testing import CliRunner
 
 from grimoire.cli.app import app
 
+# Commande d'acceptation « qui réussit », valable sous sh comme sous cmd.exe
+# (`true` n'existe pas sous Windows, où `shell=True` lance cmd.exe).
+_TRUE = f'"{sys.executable}" -c pass'
+
 runner = CliRunner()
 
 
@@ -232,18 +236,18 @@ def _write_dispatchable_blueprint(tmp_path: Path) -> Path:
                 "id": "a",
                 "kind": "pattern",
                 "ref": "ORC-01",
-                # `{"run": "true"}` (issue #428, suite) : garde ce node
+                # `{"run": _TRUE}` (issue #428, suite) : garde ce node
                 # authentiquement V0 (cheap, jamais needs_verification) — sans
                 # acceptance structurée, un V0 purement textuel est traité
                 # comme V1, ce que ce test-ci ne veut pas exercer.
-                "acceptance": ["la suite de tests passe", {"run": "true"}],
+                "acceptance": ["la suite de tests passe", {"run": _TRUE}],
                 "pins": [{"id": "out", "direction": "out", "contract": "c1"}],
             },
             {
                 "id": "b",
                 "kind": "pattern",
                 "ref": "QUA-04",
-                "acceptance": ["la suite de tests passe", {"run": "true"}],
+                "acceptance": ["la suite de tests passe", {"run": _TRUE}],
                 "pins": [{"id": "in", "direction": "in", "contract": "c1"}],
             },
         ],
