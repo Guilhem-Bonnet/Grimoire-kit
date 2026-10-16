@@ -768,19 +768,18 @@ _DEFAULT_TRACES = Path("_grimoire-output/traces")
 
 
 def _estimate_model_cost(model: str, tokens_in: int, tokens_out: int) -> float | None:
-    """Ordre de grandeur $ à partir de `tools.cost_model.MODEL_RATES` — jamais une facture.
+    """Ordre de grandeur $ à partir de la table versionnée `tools.cost_model` — jamais une facture.
 
-    Reconnaissance par sous-chaîne (``model.lower()`` contient ``"opus"``,
-    ``"sonnet"``, ``"haiku"``...) : un modèle non reconnu rend ``None`` (coût
-    inconnu, W1-01), jamais ``0.0`` ni une estimation inventée.
+    Reconnaissance par version exacte (``rate_for``) : un modèle non listé, ou
+    une version absente de la table, rend ``None`` (coût inconnu, W1-01), jamais
+    ``0.0`` ni le tarif d'une autre version ou d'une famille.
     """
-    from grimoire.tools.cost_model import MODEL_RATES
+    from grimoire.tools.cost_model import rate_for
 
-    needle = model.lower()
-    for family, rates in MODEL_RATES.items():
-        if family in needle:
-            return round((tokens_in / 1_000_000) * rates["in"] * 1000 + (tokens_out / 1_000_000) * rates["out"] * 1000, 6)
-    return None
+    rates = rate_for(model)
+    if rates is None:
+        return None
+    return round((tokens_in * rates["in"] + tokens_out * rates["out"]) / 1_000_000, 6)
 
 
 @task_app.command("record-model-call")

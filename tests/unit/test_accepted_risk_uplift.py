@@ -9,7 +9,9 @@ remontée vit désormais dans la tâche rejouée par le ledger
 
 from __future__ import annotations
 
+import importlib.util
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -22,17 +24,38 @@ from grimoire.missions.dispatch_advice import dispatch_advice
 from grimoire.missions.ledger import MissionLedger
 from grimoire.missions.schemas import MissionTask, TaskState
 from grimoire.missions.verifiability import Verifiability, as_dict, classify
-from tests.unit.missions.test_dispatch import (
-    _WRITE_MARKER,
-    _invocation,
-    _provider_yaml,
-    _run_task,
-    _script,
-    _service,
-    _task,
-    _write_registry,
-)
-from tests.unit.test_flows_amend_cap import _amend, _decide, _session_env, _start  # noqa: F401
+
+
+def _load_sibling(name: str, *parts: str) -> Any:
+    """Charge un module de test voisin par son chemin.
+
+    `tests/` n'est pas un paquet et `tests/unit/missions/` non plus : un
+    `from tests.unit...` ne résout que si le cwd est sur sys.path, ce qui est
+    faux sous `pytest` nu en CI.
+    """
+    path = Path(__file__).parent.joinpath(*parts)
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+_td = _load_sibling("_w210_test_dispatch", "missions", "test_dispatch.py")
+_tf = _load_sibling("_w210_test_flows_amend_cap", "test_flows_amend_cap.py")
+_WRITE_MARKER = _td._WRITE_MARKER
+_invocation = _td._invocation
+_provider_yaml = _td._provider_yaml
+_run_task = _td._run_task
+_script = _td._script
+_service = _td._service
+_task = _td._task
+_write_registry = _td._write_registry
+_amend = _tf._amend
+_decide = _tf._decide
+_session_env = _tf._session_env
+_start = _tf._start
 
 runner = CliRunner()
 LEDGER = Path("_grimoire-runtime-output/ledger")
