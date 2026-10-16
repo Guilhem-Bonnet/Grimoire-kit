@@ -30,7 +30,7 @@ import uuid
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from grimoire.core.exceptions import GrimoireRuntimeError
 from grimoire.core.fsio import atomic_write, locked
@@ -41,6 +41,9 @@ from grimoire.flows.executor import InteractiveNodeExecutor, NodeExecutor
 from grimoire.flows.schemas import FlowRunMeta, FlowStatusView, NodeContract, ResumeOutcome
 from grimoire.runtime.kernel import RuntimeKernel
 from grimoire.runtime.schemas import Checkpoint, ExecutionContext, RunEventType, WorkflowInstance, WorkflowStatus
+
+if TYPE_CHECKING:
+    from grimoire.flows.attestation import CheckpointJournal
 
 __all__ = [
     "FlowEngine",
@@ -237,11 +240,10 @@ def checkpoint_decision_faults(output: dict[str, Any]) -> list[str]:
     « le motif dans le graphe de décision » que l'issue demande) : la reprise
     suivante rouvre exactement ce même node, jamais le suivant.
 
-    Limite documentée, pas une garde silencieuse : ``"amend"`` avance
-    exactement comme ``"approve"`` au niveau du moteur — son motif n'est pas
-    persisté séparément dans cette version (le kernel n'a pas de canal pour
-    un motif de succès, seulement pour un motif d'échec). Un futur lot peut
-    ajouter ce canal ; ce correctif-ci ne l'invente pas.
+    Ne juge que la *valeur*. Qui a décidé — ``attested`` ou ``unattested`` —
+    est jugé par :func:`grimoire.flows.attestation.judge_checkpoint` (W2-01),
+    qui persiste aussi la décision et son motif (``amend`` compris) dans le
+    journal d'autorité du run, relu par :meth:`FlowEngine.status`.
     """
     decision = output.get("checkpoint_decision")
     if decision not in _CHECKPOINT_DECISIONS:
@@ -482,6 +484,18 @@ class FlowEngine:
         )
         return wfi, healed
 
+    # ── Autorité humaine sur les checkpoints (W2-01) ────────────────────────
+
+    def _authority(self, run_id: str) -> CheckpointJournal:
+        from grimoire.flows.attestation import CheckpointJournal
+
+        return CheckpointJournal(self._flows_root, run_id)
+
+    def _present(self, run_id: str, contract: NodeContract | None) -> None:
+        """Un checkpoint présenté émet son challenge, lié à la session courante (rien pour un autre kind)."""
+        if contract is not None and contract.kind == "checkpoint":
+            self._authority(run_id).issue_challenge(contract.node_id)
+
     # ── Commandes ────────────────────────────────────────────────────────────
 
     def run(
@@ -535,6 +549,7 @@ class FlowEngine:
         )
 
         contract = contracts[order[0]]
+        self._present(wfi.id, contract)
         (executor or InteractiveNodeExecutor()).execute(contract, context_pack=self._context_pack(wfi, blueprint_id))
         return wfi, contract
 
@@ -591,7 +606,16 @@ class FlowEngine:
         attempt = self._attempt(run_id, node_id)
         did = directive_id_for(run_id, node_id, attempt, self._digest_of(contracts, order))
         if wfi.status is WorkflowStatus.BLOCKED:
-            return Directive("blocked", run_id, node_id, did, attempt, "contract_violation")
+            # Un checkpoint destructif sans décision attestée (W2-01) est un
+            # ``blocked`` comme un autre (quatre kinds seulement) : seule la
+            # raison dit que l'issue est humaine, pas une correction de sortie.
+            refusal = self._last_refusal(wfi)
+            awaiting = (
+                refusal is not None
+                and refusal["node_id"] == node_id
+                and str(refusal["reason"] or "").startswith("awaiting_human")
+            )
+            return Directive("blocked", run_id, node_id, did, attempt, "awaiting_human" if awaiting else "contract_violation")
         contract = contracts.get(node_id)
         kind = "checkpoint" if contract is not None and contract.kind == "checkpoint" else "execute"
         return Directive(kind, run_id, node_id, did, attempt)
@@ -704,9 +728,8 @@ class FlowEngine:
             raise GrimoireRuntimeError(f"run {run_id} est {wfi.status.value}, rien à reprendre")
 
         order = list(meta.order)
-        contracts = build_node_contracts(
-            load_blueprint(Path(meta.blueprint_path), self._project_root), self._project_root
-        )
+        blueprint = load_blueprint(Path(meta.blueprint_path), self._project_root)
+        contracts = build_node_contracts(blueprint, self._project_root)
         ctx = self._ctx_for(wfi)
         digest = _output_digest(output)
         # W1-03b : avant toute décision, complète le checkpoint qu'un crash a
@@ -781,6 +804,21 @@ class FlowEngine:
             # rien) — vérifiée ici, Python-only, au même endroit que le
             # reste de la précondition de resume().
             faults = [*faults, *checkpoint_decision_faults(output)]
+            from grimoire.flows.attestation import destructive_checkpoints, judge_checkpoint
+
+            gate = judge_checkpoint(
+                self._authority(run_id),
+                self._project_root,
+                current_id,
+                output,
+                destructive=current_id in destructive_checkpoints(blueprint),
+            )
+            if gate is not None and gate.refusal:
+                faults.append(gate.refusal)
+        else:
+            gate = None
+        attestation = gate.attestation.to_dict() if gate is not None else None
+        warnings = (gate.warning,) if gate is not None and gate.warning else ()
         if faults and allow_replay and digest is not None:
             # Vérification pure, avant toute écriture : un rejeu ne doit ni
             # rouvrir le node courant (STEP_STARTED) ni le bloquer.
@@ -804,6 +842,11 @@ class FlowEngine:
             wfi = self._kernel.advance_step(wfi.id, ctx, step_id=current_id)
         if faults:
             wfi = self._kernel.fail_step(wfi.id, ctx, step_id=current_id, reason="; ".join(faults))
+            if gate is not None and gate.decision == "reject":
+                # Un refus est une décision : il consomme son challenge, la
+                # présentation suivante en émet un neuf.
+                self._authority(run_id).record_decision(current_id, gate.decision, gate.reason, gate.attestation)
+            self._present(run_id, contract)
             return ResumeOutcome(
                 ok=False,
                 finished=False,
@@ -811,6 +854,7 @@ class FlowEngine:
                 faults=tuple(faults),
                 contract=contract,
                 repaired=repaired_notes,
+                attestation=attestation,
             )
 
         # Décision "termine / avance vers quel node" déléguée à
@@ -842,12 +886,23 @@ class FlowEngine:
             pending_steps=pending,
             evidence_refs=[_OUTPUT_DIGEST_PREFIX + digest] if digest is not None else None,
         )
+        if gate is not None:
+            self._authority(run_id).record_decision(current_id, gate.decision, gate.reason, gate.attestation)
         if finished:
             self._kernel.complete(wfi.id, ctx)
-            return ResumeOutcome(ok=True, finished=True, node_id=current_id, contract=None, repaired=repaired_notes)
+            return ResumeOutcome(
+                ok=True,
+                finished=True,
+                node_id=current_id,
+                contract=None,
+                repaired=repaired_notes,
+                attestation=attestation,
+                warnings=warnings,
+            )
 
         assert next_id is not None  # finished est False => resume_outcome a nommé le node suivant
         next_contract = contracts[next_id]
+        self._present(run_id, next_contract)
         # Le node suivant n'est pas encore ouvert (pas de advance_step ici) :
         # un crash juste après cet appel laisse le kernel en CHECKPOINTED, et
         # le prochain resume() rouvrira ce même node suivant en premier —
@@ -856,7 +911,13 @@ class FlowEngine:
             next_contract, context_pack=self._context_pack(wfi, meta.blueprint_id)
         )
         return ResumeOutcome(
-            ok=True, finished=False, node_id=next_id, contract=next_contract, repaired=repaired_notes
+            ok=True,
+            finished=False,
+            node_id=next_id,
+            contract=next_contract,
+            repaired=repaired_notes,
+            attestation=attestation,
+            warnings=warnings,
         )
 
     def status(self, run_id: str, *, include_contract: bool = True) -> FlowStatusView:
@@ -917,6 +978,7 @@ class FlowEngine:
             contract=contract,
             parent_run_id=meta.parent_run_id,
             directive=self.directive(run_id) if include_contract else None,
+            checkpoint_decisions=self._authority(run_id).decisions(),
         )
 
     def doctor(self, run_id: str) -> FlowDoctorReport:

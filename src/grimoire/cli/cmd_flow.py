@@ -144,6 +144,9 @@ def _emit_status(ctx: typer.Context, view: FlowStatusView, project_root: Path) -
         console.print(
             f"  [yellow]dernier refus[/yellow] : {view.last_refusal['node_id']} — {view.last_refusal['reason']}"
         )
+    for entry in view.checkpoint_decisions:
+        motif = f" — motif : {entry['reason']}" if entry.get("reason") else ""
+        console.print(f"  décision  : {entry['node_id']} {entry['decision']} ({entry['attestation']}){motif}")
     if history:
         console.print("")
         console.print("[bold]dispatch (#311)[/bold] :")
@@ -177,6 +180,8 @@ def _emit_resume(ctx: typer.Context, run_id: str, outcome: ResumeOutcome) -> Non
         return
     for note in outcome.repaired:
         console.print(f"[yellow]réparé[/yellow] {run_id} — {note}")
+    for warning in outcome.warnings:
+        console.print(f"[yellow]avertissement[/yellow] {run_id} — {warning}")
     if not outcome.ok:
         console.print(f"[red]suspendu[/red] {run_id} — node {outcome.node_id}")
         for fault in outcome.faults:

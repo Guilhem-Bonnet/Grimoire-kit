@@ -8,7 +8,8 @@
   const $ = s => document.querySelector(s);
 
   /* Table de repli statique. Remplacée à l'init par /api/cost-model quand le
-     serveur répond (modèle calibré, source de vérité unique — SPEC C2). */
+     serveur répond (modèle calibré, source de vérité unique — SPEC C2). Les
+     tarifs $/MTok n'y figurent plus : voir rateOf. */
   let calibrated = false;
   /* k-tokens par run : { in, out, runs } — hypothèses moyennes par pattern */
   let NODE_COST = {
@@ -37,18 +38,14 @@
   /* agents concrets : coût par rôle, modèle propre à l'agent */
   const ROLE_COST = { orchestrateur: { in: 4.0, out: 1.5, runs: 1 }, agent: { in: 10.0, out: 4.5, runs: 2 }, sub: { in: 5.5, out: 2.2, runs: 1 } };
 
-  /* $ / MTok (entrée / sortie) — ordres de grandeur, à titre indicatif */
-  const MODELS = {
-    haiku:  { name: 'haiku',  in: 0.8,  out: 4 },
-    sonnet: { name: 'sonnet', in: 3,    out: 15 },
-    opus:   { name: 'opus',   in: 15,   out: 75 }
-  };
   /* budget mission (k tokens) par profil projet */
   const CAPS = { starter: 80, controlled: 200, orchestrated: 500, governed: 1200, production: 2500 };
 
   let core = null;
   let model = localStorage.getItem('grimoire.atelier.bp2.model') || 'sonnet';
-  const rateOf = m => (window.BP2Team && BP2Team.MODEL_RATES[m]) || MODELS[m] || MODELS.sonnet;
+  /* Aucun tarif en dur : ils viennent de BP2Team.rateOf, qui lit /api/cost-model
+     (table Python versionnée, datée, sourcée). Sans réponse : null = inconnu. */
+  const rateOf = m => (window.BP2Team ? BP2Team.rateOf(m) : null);
 
   /* ── primitives ── */
   function baseOf(node, specOf) {
@@ -58,16 +55,18 @@
     if (s && s.kind === 'ext') return EXT_DEFAULT;
     return CAT_DEFAULT;
   }
+  /* Un coût inconnu contamine la somme : jamais compté comme 0. */
+  const addUsd = (a, b) => (a == null || b == null ? null : a + b);
   function usdOf(inK, outK, m) {
     const r = rateOf(m || model);
-    return (inK * r.in + outK * r.out) / 1000;
+    return r ? (inK * r.in + outK * r.out) / 1000 : null;
   }
   function nodeParts(node, specOf) {
     if (node.kind === 'group') {
       const acc = { inK: 0, outK: 0, usd: 0 };
       (node.sub && node.sub.nodes || []).forEach(sn => {
         const p = nodeParts(sn, specOf);
-        acc.inK += p.inK; acc.outK += p.outK; acc.usd += p.usd;
+        acc.inK += p.inK; acc.outK += p.outK; acc.usd = addUsd(acc.usd, p.usd);
       });
       return acc;
     }
@@ -90,7 +89,7 @@
 
   function totals(graph, specOf) {
     let inK = 0, outK = 0, usd = 0;
-    (graph.nodes || []).forEach(n => { const p = nodeParts(n, specOf); inK += p.inK; outK += p.outK; usd += p.usd; });
+    (graph.nodes || []).forEach(n => { const p = nodeParts(n, specOf); inK += p.inK; outK += p.outK; usd = addUsd(usd, p.usd); });
     return { inK, outK, k: inK + outK, usd };
   }
 
@@ -122,6 +121,7 @@
     return (k >= 100 ? Math.round(k) : k.toFixed(1)).toString().replace('.', ',') + 'k';
   };
   const fmt$ = v => v < 0.005 ? '<0,01 $' : v.toFixed(2).replace('.', ',') + ' $';
+  const fmtUsd = v => v == null ? 'coût inconnu' : '~' + fmt$(v);
 
   function cap() {
     const p = (Atelier.project() || {}).profile || 'controlled';
@@ -135,7 +135,7 @@
     const chip = $('#bp-cost-chip');
     if (chip) {
       const c = cap();
-      chip.innerHTML = `Σ <b>${fmtK(t.k)} tok</b> <span class="eur">· ~${fmt$(t.usd)} / run</span>`;
+      chip.innerHTML = `Σ <b>${fmtK(t.k)} tok</b> <span class="eur">· ${fmtUsd(t.usd)} / run</span>`;
       chip.classList.toggle('over', t.k > c.k);
       chip.title = 'Estimation statique par run complet — budget du profil ' + c.profile + ' : ' + fmtK(c.k) + ' tok. Ouvre l\u2019onglet COÛT.';
     }
@@ -159,14 +159,14 @@
       <div class="np-cost"><span>contexte (in)${p.runs > 1 ? ' × ' + p.runs + ' itérations' : ''}</span><b>~${fmtK(p.inK)} tok</b></div>
       <div class="np-cost"><span>sorties (out)</span><b>~${fmtK(p.outK)} tok</b></div>
       ${docLine}${eqLine}
-      <div class="np-cost" style="border-top:1px solid var(--line);margin-top:3px;padding-top:6px"><span>total · ~${fmt$(p.usd)} en ${p.model || model}</span><b>~${fmtK(p.inK + p.outK)} tok</b></div>
+      <div class="np-cost" style="border-top:1px solid var(--line);margin-top:3px;padding-top:6px"><span>total · ${fmtUsd(p.usd)} en ${p.model || model}</span><b>~${fmtK(p.inK + p.outK)} tok</b></div>
     </div>`;
   }
 
   function summaryLine(graph, specOf) {
     const t = totals(graph, specOf);
     if (!t.k) return '';
-    return `Coût estimé du run : <b>~${fmtK(t.k)} tok</b> (~${fmt$(t.usd)}) — détail par chemin dans l\u2019onglet COÛT.`;
+    return `Coût estimé du run : <b>~${fmtK(t.k)} tok</b> (${fmtUsd(t.usd)}) — détail par chemin dans l\u2019onglet COÛT.`;
   }
 
   function renderTab() {
@@ -187,7 +187,7 @@
     const ps = paths(state).map(p => {
       let inK = 0, outK = 0, usd = 0;
       const steps = p.map(id => state.nodes.find(n => n.id === id)).filter(Boolean);
-      steps.forEach(n => { const q = nodeParts(n, specOf); inK += q.inK; outK += q.outK; usd += q.usd; });
+      steps.forEach(n => { const q = nodeParts(n, specOf); inK += q.inK; outK += q.outK; usd = addUsd(usd, q.usd); });
       return { steps, inK, outK, usd, k: inK + outK };
     }).sort((a, b) => b.k - a.k).slice(0, 8);
     const maxK = ps.length ? ps[0].k : 1;
@@ -206,7 +206,7 @@
         <select class="cost-model-sel" id="cost-model-sel">${modelOptions()}</select></div>
 
       <div class="bp-prop"><div class="k">Run complet — tout le blueprint</div>
-        <div class="cost-total"><span class="big">Σ ${fmtK(t.k)} tok</span><span class="eur">~${fmt$(t.usd)} / run</span></div>
+        <div class="cost-total"><span class="big">Σ ${fmtK(t.k)} tok</span><span class="eur">${fmtUsd(t.usd)} / run</span></div>
         <div class="np-cost" style="margin-top:4px"><span>entrée ${fmtK(t.inK)} · sortie ${fmtK(t.outK)}</span><span></span></div>
         <div class="cost-budget ${budgetCls}">
           <div class="bar"><i style="width:${pct}%"></i></div>
@@ -217,7 +217,7 @@
         ${ps.map((p, i) => `
           <div class="cost-path${i === 0 && ps.length > 1 ? ' crit' : ''}">
             <div class="seq">${p.steps.map(stepChip).join('<span class="arr">→</span>')}</div>
-            <div class="m"><span class="tok">~${fmtK(p.k)} tok</span>${i === 0 && ps.length > 1 ? '<span class="tag">chemin critique</span>' : ''}<span class="eur">~${fmt$(p.usd)}</span></div>
+            <div class="m"><span class="tok">~${fmtK(p.k)} tok</span>${i === 0 && ps.length > 1 ? '<span class="tag">chemin critique</span>' : ''}<span class="eur">${fmtUsd(p.usd)}</span></div>
             <div class="bar"><i style="width:${Math.max(6, Math.round(p.k / maxK * 100))}%"></i></div>
           </div>`).join('') || '<p class="empty">reliez vos nodes — les chemins apparaîtront ici.</p>'}
       </div>
@@ -237,10 +237,10 @@
     if (window.BP2Team) {
       return BP2Team.PROVIDERS.filter(p => BP2Team.llmConnected(p.id)).map(p =>
         `<optgroup label="${p.name}">` + p.models.map(m =>
-          `<option value="${m.id}"${m.id === model ? ' selected' : ''}>${m.label} — ${m.in}/${m.out} $/MTok</option>`).join('') + '</optgroup>'
+          `<option value="${m.id}"${m.id === model ? ' selected' : ''}>${m.label} — ${BP2Team.rateLabel(m.id)}</option>`).join('') + '</optgroup>'
       ).join('');
     }
-    return Object.keys(MODELS).map(m => `<option value="${m}"${m === model ? ' selected' : ''}>${m} — ${MODELS[m].in}/${MODELS[m].out} $/MTok</option>`).join('');
+    return '';
   }
 
   window.BP2Cost = {
@@ -249,8 +249,9 @@
       const chip = $('#bp-cost-chip');
       if (chip) chip.addEventListener('click', () => core.setTab('cout'));
       // Modèle calibré (SPEC C2) : /api/cost-model est la source de vérité.
-      // Repli silencieux sur la table statique hors serveur local.
+      // Hors serveur local : patterns statiques, tarifs Anthropic inconnus (jamais 0).
       fetch('/api/cost-model').then(r => r.ok ? r.json() : null).then(m => {
+        if (m && window.BP2Team) { BP2Team.setAnthropicRates(m); refresh(); renderTab(); }
         if (m && m.calibrated) {
           if (m.patterns) NODE_COST = m.patterns;
           if (m.extDefault) EXT_DEFAULT = m.extDefault;
