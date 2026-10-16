@@ -246,26 +246,42 @@ _CLAIM_REQUIRED_PROFILES = frozenset({"governed", "production"})
 def _resolve_run_task(project_root: Path, task_id: str) -> str:
     """Le ``task_id`` du run : celui demandé, sinon le claim actif, sinon ``""`` (``FLOW-<id>``).
 
-    En profil governed/production, aucun claim actif et aucun ``--task`` : refus
-    nommant ``grimoire task claim`` — un run orphelin échapperait aux gates de
-    la tâche. Hors enrôlement ou profil plus léger, comportement inchangé.
+    En profil governed/production, la tâche (demandée par ``--task-id``, posée
+    par ``GRIMOIRE_TASK_ID`` ou résolue) doit être un claim actif du Mission
+    Ledger : un identifiant inventé, ou une tâche jamais claimée, échapperait
+    aux gates de la tâche — refus nommant ``grimoire task claim``. Hors
+    enrôlement ou profil plus léger, comportement inchangé.
     """
-    if task_id:
-        return task_id
-    from grimoire.core.standard_state import active_profile_id, is_standard_enrolled, resolve_active_task
+    from grimoire.core.standard_state import (
+        active_profile_id,
+        claimed_task_ids,
+        is_standard_enrolled,
+        resolve_active_task,
+    )
 
     root = project_root.resolve()
-    if not is_standard_enrolled(root):
+    enrolled = is_standard_enrolled(root)
+    strict = enrolled and active_profile_id(root, write_cache=False) in _CLAIM_REQUIRED_PROFILES
+    if task_id:
+        resolved = task_id
+    elif not enrolled:
         return ""
-    active = resolve_active_task(root, write_cache=False)
-    if active.task_id != "bootstrap":
-        return active.task_id
-    if active_profile_id(root, write_cache=False) in _CLAIM_REQUIRED_PROFILES:
+    else:
+        active = resolve_active_task(root, write_cache=False)
+        if active.task_id == "bootstrap":
+            if not strict:
+                return ""
+            raise GrimoireRuntimeError(
+                "flow run refusé : profil governed sans tâche claimée — `grimoire task claim <task_id>` "
+                "avant de lancer le run, ou passer --task-id <task_id> (une tâche claimée)"
+            )
+        resolved = active.task_id
+    if strict and resolved.strip() not in claimed_task_ids(root):
         raise GrimoireRuntimeError(
-            "flow run refusé : profil governed sans tâche claimée — `grimoire task claim <task_id>` "
-            "avant de lancer le run, ou passer --task <task_id>"
+            f"flow run refusé : la tâche « {resolved} » n'a aucun claim actif dans le Mission Ledger "
+            f"(profil governed) — `grimoire task claim {resolved}` d'abord, ou --task-id <une tâche claimée>"
         )
-    return ""
+    return resolved
 
 
 def _fail(ctx: typer.Context, exc: GrimoireRuntimeError) -> None:

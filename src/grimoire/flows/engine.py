@@ -577,7 +577,14 @@ class FlowEngine:
         order = list(meta.order)
         node_id = self._current_node(wfi, order)
         if node_id is None:
-            return Directive(kind="done", run_id=run_id, node_id=None, directive_id=None)
+            if not order:
+                return Directive(kind="done", run_id=run_id, node_id=None, directive_id=None)
+            # Tous les nodes sont checkpointés mais le statut n'est pas COMPLETED
+            # (crash entre le dernier checkpoint et ``complete``) : le run n'est
+            # PAS terminé, donc jamais ``done`` — l'hôte qui s'arrêterait là le
+            # laisserait en l'état. La directive reste celle du dernier node ;
+            # renvoyer sa sortie acceptée, avec ce directive_id, termine le run.
+            node_id = order[-1]
         contracts = build_node_contracts(
             load_blueprint(Path(meta.blueprint_path), self._project_root), self._project_root
         )
@@ -599,7 +606,9 @@ class FlowEngine:
         current = self.directive(run_id)
         if current.directive_id == supplied:
             return
-        if allow_replay and current.kind != "done":
+        if allow_replay:
+            # Y compris quand la directive courante est ``done`` : le rejeu du
+            # dernier node d'un run terminé est admis par ``_resume_core``.
             wfi = self._kernel.get_instance(run_id)
             digest = _output_digest(output)
             crossed = self._crossed_node_for_digest(wfi, digest) if wfi is not None and digest is not None else None
