@@ -73,7 +73,10 @@ def review_state_content_checks(
 
     La fraîcheur du graphe de code ne se juge qu'à la transition vers review :
     pour une tâche acceptée ou livrée, un état du code postérieur à sa clôture
-    ne dit rien de sa preuve.
+    ne dit rien de sa preuve. Il en va de même de la résolution des références du
+    claim-ledger : à ``accepted`` et ``released`` elle n'est plus qu'un avertissement
+    (le fichier cité a pu bouger, le run de test a pu être rejoué avec un autre
+    ``run_id``) ; elle ne bloque qu'à la revue.
     """
     try:
         from grimoire.core.standard_checks.evidence_journal import (
@@ -96,7 +99,10 @@ def review_state_content_checks(
     checks.extend(acceptance_result.checks)
 
     claim_ledger_result = StandardVerificationResult(profile=profile.id, project_root=root)
-    _verify_claim_ledger(root, profile, task_id, claim_ledger_result, suppress_v0=suppress_v0)
+    _verify_claim_ledger(
+        root, profile, task_id, claim_ledger_result, suppress_v0=suppress_v0,
+        settled=target_state in {"accepted", "released"},
+    )
     checks.extend(claim_ledger_result.checks)
 
     if target_state == "review":

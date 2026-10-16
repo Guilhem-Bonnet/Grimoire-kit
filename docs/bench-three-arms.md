@@ -434,3 +434,44 @@ Le rapport de la première campagne réelle est publié sur la branche
 `weekly-bench.yml` — sous
 `_grimoire-output/bench-reports/three-arms/<date>/report.md` et `.json`), pas
 sur `main`.
+
+## 11. Garde de coût face au nu à chaque barrière (B-00)
+
+Chaque chantier qui ajoute de l'appel modèle (panel, passes de vérification, juge) ajoute du coût ; le critère de
+coût du lot L (≈124 % du nu pour 105 % visés) ne doit pas se dégrader sans que quelqu'un le voie. À chaque barrière,
+on rejoue un **sous-lot fixe** par `nu` et `kit-gov` et on compare le ratio à celui de la barrière précédente.
+
+- **Sous-lot** : `docs/bench/cost-gate-subset.json`, 4 tâches (une par langue, première dans l'ordre alphabétique du lot L),
+  k=3, soit 24 runs. Il est saturé : il mesure le coût, pas le succès, et le rapport le dit.
+- **Base** : `docs/bench/cost-gate-baseline.json`, le ratio du même sous-lot relu dans les 120 lignes du lot L : **118,4 %**
+  (le 124 % du lot L porte sur les 20 tâches). Aucun nouveau run n'a servi à l'établir.
+- **Tolérance** : 5 points par barrière (décision 13 du plan : arbitraire, non mesurée ; `--tolerance-points`).
+- **Un coût inconnu n'est pas zéro** : `results.jsonl` porte `cost_known` (faux si `claude -p` n'a pas rendu `total_cost_usd`) et le rapport
+  `cost_known_runs` / `cost_known_ratio` par bras. Sous 1, la garde rend `unevaluated`, qui bloque comme un dépassement.
+- **Le coût des dispatchs compte** : les dispatchs du kit (panel k=3 de verify-panel, passes de vérification, juge) tournent dans des
+  sous-processus distincts du `claude -p` parent, leur coût n'est pas dans le `total_cost_usd` de la session. La garde ajoute
+  `dispatch_stats.overall.total_cost_usd` au coût de chaque ligne. `dispatch_stats` absent (bras `nu`, ligne d'avant B-00) ou `overall.total == 0`
+  vaut zéro dispatch connu ; `dispatch_stats` en `{"error": ...}`, un coût `lower_bound` / `unknown`, ou un `0.0` d'un ledger d'avant W1-01 avec
+  des dispatchs comptés valent coût inconnu, donc `unevaluated`. La base de 118,4 % reste comparable : les 60 lignes `kit-gov` du lot L ont
+  `overall.total == 0` (relu dans `results.jsonl`, voir `diagnostic-surcout-kit-2026-09-17.md`), elle ne contient donc aucun coût de dispatch.
+
+Lancer le sous-lot (dépense réelle, environ 4 $ au tarif du lot L ; non lancé par le chantier B-00) puis évaluer :
+
+```bash
+python scripts/bench/three_arms.py --full --arms nu,kit-gov --seed 551 --auth oauth-copy \
+    --workspace <workspace neuf> --grimoire-bin <chemin absolu> --label barriere-N \
+    --subset docs/bench/cost-gate-subset.json
+python scripts/bench/cost_gate.py --results <workspace>/state/results.jsonl \
+    --previous docs/bench/cost-gate-baseline.json --out-dir <dossier du rapport de barrière>
+```
+
+`--previous` reçoit le `cost-gate.json` de la barrière précédente (la base pour la première), et seulement un rapport au verdict `pass`,
+`waived` ou `baseline` : un `exceeded`, un `unevaluated` ou un rapport sans verdict est refusé comme référence (verdict `unevaluated`), sinon
+rejouer le même sous-lot contre le rapport d'un dépassement le ferait passer à l'écart zéro. Une dérogation entérine le ratio dérogé : la
+barrière suivante s'y compare (avertissement dans le rapport). Sortie : `cost-gate.md` (ratio, écart,
+verdict à inclure dans le rapport de barrière) et `cost-gate.json`. Code de sortie : 0 `pass` ou `waived`, 1 `exceeded`, 2 `unevaluated`.
+Une dérogation passe par `--waiver <fichier>` : `{"by": "Guilhem", "reason": "...", "date": "AAAA-MM-JJ"}`, tracée dans le rapport avec le verdict
+d'avant dérogation.
+
+`--subset` restreint le tirage aux 4 tâches déclarées et s'arrête avant tout run si l'une manque. Limites : un changement de modèle entre deux
+barrières est signalé en avertissement, pas refusé (voir B-01).
