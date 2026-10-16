@@ -60,6 +60,42 @@ comme **dégradation**, avec son repli, et remonté par `grimoire host status` :
   règle dans le fichier d'entrée, et n'est opposable qu'en CI. Le catalogue le
   dit explicitement plutôt que de laisser croire à une protection.
 
+## Ce que le kit a observé (contrats réels)
+
+Le tableau ci-dessus dit ce que le kit sait **écrire** pour un hôte. Il ne dit pas
+ce que l'hôte **fait** : « Hooks bloquants : oui » pour Copilot est une
+documentation, pas une observation. Le fencing d'un bail (refuser les effets
+d'une session périmée) ne s'appuie donc pas sur ce tableau mais sur
+`grimoire.hosts.capabilities.contract_for`, rempli **uniquement** depuis des
+captures versées sous `tests/fixtures/hosts/<hôte>/` (un `manifest.json` par
+hôte, une fixture par point). Règle unique : une capacité sans fixture vaut
+`false`, et un hôte dont `pretooluse_deny` n'est pas vérifié est **non fencé**.
+Une preuve vaut pour la version d'hôte sur laquelle elle a été capturée :
+`contract_for(host, version)` et `is_fenced(host, version)` exigent la version
+et rendent un contrat entièrement non vérifié (donc non fencé) si elle est
+absente, inconnue ou différente de la version capturée. `recorded_contract(host)`
+ne sert qu'à auditer la table.
+
+| Capacité | Claude Code 2.1.301 | Copilot, Codex, Cursor, Gemini |
+|---|---|---|
+| `pretooluse_deny` : un refus arrête l'outil | vérifiée (exit 2 + stderr, ou `permissionDecision: deny` ; l'agent reçoit le motif) | non vérifié |
+| `session_end` | vérifiée, sortie propre de `claude -p` seulement (kill non observé) | non vérifié |
+| `quota_signal` : un hook reçoit l'échec de forfait | **non vérifiée** (aucun forfait épuisé observé ; `rate_limit_event` du flux vu en `allowed`, date en epoch secondes) | non vérifié |
+| `liveness_probe` | vérifiée : `claude agents --json` (`pid`, `kind`, `sessionId`, `status` idle/busy ; ni `state` ni `waitingFor` sur les sessions interactives) | non vérifié |
+| `subagent_model` | vérifiée **par le journal du sous-agent** (`agent_transcript_path`) : la charge utile de `SubagentStop` n'a aucun champ modèle | non vérifié |
+| `resume_after_quota` | non vérifiée (forfait épuisé non provoqué) | non vérifié |
+| `bg_workspace_trust` | vérifiée : `claude --bg` refuse un dossier non approuvé (code 1), alors que `claude -p` ne demande rien | non vérifié |
+| `bg_cost_source`, `bg_wake` | non vérifiées (aucune session `--bg` démarrée) | non vérifié |
+| `local_token_usage` | vérifiée : `usage` et `modelUsage` du flux stream-json, `message.usage` du journal de session | non vérifié |
+| `systemd_user_linger` | vérifiée sur le poste de capture (`Linger=yes`, minuteur utilisateur déclenché, session ouverte) | non vérifié |
+
+Les captures ont été faites sans opérateur, par des appels `claude -p` d'un mot
+dans un projet jetable. Copilot (VS Code), Codex, Cursor et Gemini n'ont pas été
+lancés : leurs manifestes disent « non vérifié » et la capture reste à faire au
+poste. Les fixtures remplacent les chemins personnels, l'utilisateur et les
+identifiants de session par des marqueurs ; un test refuse tout chemin, courriel
+ou jeton.
+
 ## Hôtes activés
 
 `grimoire host sync` émettait, par défaut, la surface des cinq hôtes connus —
