@@ -1,0 +1,97 @@
+{
+  "host": "claude-code",
+  "host_version": "2.1.301",
+  "captured_on": "2026-10-16",
+  "capabilities": {
+    "pretooluse_deny": {
+      "status": "verified",
+      "fixtures": [
+        "claude-code/01-pretooluse-control-allow.json",
+        "claude-code/01-pretooluse-deny-exit2.json",
+        "claude-code/01-pretooluse-deny-json.json"
+      ],
+      "channel": "exit code 2 + stderr, or exit 0 + hookSpecificOutput.permissionDecision=deny",
+      "note": "Les deux contrats arrêtent l'outil (témoin sans refus : fichier créé ; avec refus : fichier absent). L'agent reçoit le motif dans un tool_result en erreur."
+    },
+    "session_end": {
+      "status": "verified",
+      "fixtures": [
+        "claude-code/02-session-end.json"
+      ],
+      "channel": "hook SessionEnd",
+      "note": "Sortie propre de `claude -p` seulement ; ni sortie interactive, ni SIGTERM, ni SIGKILL observés : l'absence de SessionEnd ne prouve donc pas la mort."
+    },
+    "quota_signal": {
+      "status": "unverified",
+      "fixtures": [
+        "claude-code/03-quota-signal.json"
+      ],
+      "channel": "",
+      "note": "Aucun plan épuisé observé. Le hook StopFailure existe dans le binaire mais n'a jamais tiré ; l'événement `rate_limit_event` du flux stream-json n'a été vu qu'en état `allowed` (date de réinitialisation : epoch en secondes)."
+    },
+    "liveness_probe": {
+      "status": "verified",
+      "fixtures": [
+        "claude-code/04-agents-json.json"
+      ],
+      "channel": "claude agents --json",
+      "note": "Sessions interactives : pid, kind, sessionId, status (idle|busy). Les champs `state` et `waitingFor` n'existent pas sur ces entrées ; ceux des sessions --bg ne sont pas observés."
+    },
+    "subagent_model": {
+      "status": "verified",
+      "fixtures": [
+        "claude-code/05-subagent-stop.json"
+      ],
+      "channel": "agent_transcript_path (ligne assistant : message.model)",
+      "note": "Le payload SubagentStop ne porte AUCUN champ modèle ; le modèle effectif se lit dans le journal du sous-agent nommé par `agent_transcript_path`."
+    },
+    "resume_after_quota": {
+      "status": "unverified",
+      "fixtures": [
+        "claude-code/06-resume-after-quota.json"
+      ],
+      "channel": "",
+      "note": "Demande un forfait épuisé ; non provoqué sur le poste."
+    },
+    "bg_workspace_trust": {
+      "status": "verified",
+      "fixtures": [
+        "claude-code/07-bg-untrusted-workspace.json"
+      ],
+      "channel": "claude --bg",
+      "note": "`--bg` refuse un dossier non approuvé (code 1, aucune session) alors que `claude -p` ne demande aucune approbation."
+    },
+    "bg_cost_source": {
+      "status": "unverified",
+      "fixtures": [
+        "claude-code/07-bg-untrusted-workspace.json"
+      ],
+      "channel": "",
+      "note": "Aucune session --bg démarrée : l'approbation exige un terminal interactif et modifie la configuration globale de l'utilisateur."
+    },
+    "bg_wake": {
+      "status": "unverified",
+      "fixtures": [
+        "claude-code/07-bg-untrusted-workspace.json"
+      ],
+      "channel": "",
+      "note": "Idem : pas de session --bg, donc pas de réveil observable."
+    },
+    "local_token_usage": {
+      "status": "verified",
+      "fixtures": [
+        "claude-code/08-token-usage.json"
+      ],
+      "channel": "flux stream-json (result.usage, modelUsage) et journal de session (assistant.message.usage)",
+      "note": "Tokens par modèle lisibles localement ; coût = prix catalogue calculé par l'hôte."
+    },
+    "systemd_user_linger": {
+      "status": "verified",
+      "fixtures": [
+        "claude-code/09-systemd-linger.json"
+      ],
+      "channel": "loginctl show-user",
+      "note": "Linger=yes ; minuteur transitoire utilisateur déclenché, session ouverte. Minuteur sans session ouverte non exercé."
+    }
+  }
+}

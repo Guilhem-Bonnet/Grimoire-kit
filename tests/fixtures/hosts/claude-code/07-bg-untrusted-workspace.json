@@ -1,0 +1,15 @@
+{
+  "host": "claude-code",
+  "host_version": "2.1.301",
+  "point": 7,
+  "capability": "bg_workspace_trust",
+  "captured_on": "2026-10-16",
+  "captured_with": "claude --bg --model haiku --setting-sources project --allowedTools 'Bash(touch:*)' go",
+  "observed": {
+    "process_exit_code": 1,
+    "output": "Workspace not trusted. Run `claude` in <PROJECT> once and accept the trust prompt, then retry.\n",
+    "session_started": false,
+    "contrast": "`claude -p` in the same directory ran without any trust prompt and fired its hooks (see 01 and 02).",
+    "not_observed": "cost source of a `--bg` session and waking of a sleeping session: no background session could be started without accepting the trust prompt, which needs an interactive terminal and would edit the user's global Claude configuration."
+  }
+}
