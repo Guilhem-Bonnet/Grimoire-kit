@@ -142,7 +142,7 @@ jobs:
         shell: bash
         run: |
           pytest tests/unit/ tests/test_agentic_standard.py -q --tb=short -n auto --dist loadfile \
-            -o faulthandler_timeout=300 \
+            --timeout=300 \
             --cov=src/grimoire \
             --cov-report=xml \
             --cov-report=term-missing \
