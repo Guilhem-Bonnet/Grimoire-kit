@@ -237,6 +237,13 @@ class ResumeOutcome:
     #: interrompue (W1-03b) — vide dans le cas normal. Une réparation n'est
     #: jamais silencieuse.
     repaired: tuple[str, ...] = ()
+    #: Classement de la décision d'un checkpoint (W2-01) —
+    #: :meth:`grimoire.flows.attestation.Attestation.to_dict`, ``None`` hors
+    #: checkpoint ou sur un rejeu.
+    attestation: dict[str, Any] | None = None
+    #: Avertissements nommés : décision ``unattested`` acceptée sur un
+    #: checkpoint non destructif (W2-01, décision 2).
+    warnings: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -248,6 +255,8 @@ class ResumeOutcome:
             "replay": self.replay,
             "replay_of": self.replay_of,
             "repaired": list(self.repaired),
+            "attestation": self.attestation,
+            "warnings": list(self.warnings),
         }
 
 
@@ -268,6 +277,9 @@ class FlowStatusView:
     #: argument, la liste des runs) puissent l'afficher sans redemander la
     #: méta directement.
     parent_run_id: str | None = None
+    #: Décisions de checkpoint journalisées (W2-01) : node, décision, motif
+    #: (celui d'un ``amend`` compris), attestation et son motif, horodatage.
+    checkpoint_decisions: tuple[dict[str, Any], ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -280,6 +292,7 @@ class FlowStatusView:
             "last_refusal": self.last_refusal,
             "contract": self.contract.to_dict() if self.contract else None,
             "parent_run_id": self.parent_run_id,
+            "checkpoint_decisions": [dict(d) for d in self.checkpoint_decisions],
         }
 
 

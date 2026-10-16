@@ -226,6 +226,15 @@ def _validate_genre_config(node: dict[str, Any]) -> None:
                 f"node={node_id} : config.budget.passes doit être une liste non vide de refs "
                 "(chacune résolue comme la ref d'un node composite)"
             )
+    elif kind == "checkpoint":
+        # W2-01 : `config.checkpoint.destructive` (optionnel) refuse toute
+        # décision non attestée. Un booléen strict : `"yes"` ou `1` n'y
+        # passent pas pour un `true` que personne n'a écrit.
+        c = config.get("checkpoint") or {}
+        if not isinstance(c, dict) or ("destructive" in c and not isinstance(c["destructive"], bool)):
+            raise GrimoireRuntimeError(
+                f"node={node_id} : config.checkpoint.destructive doit être un booléen (true/false)"
+            )
     # "fanout" : aucune clé de config obligatoire — le plafond du nombre
     # d'éléments (pilot.max_fanout_n) est une politique de projet, vérifiée à
     # l'exécution (flows/dispatch_executor.py, DispatchExecutor._execute_fanout),
