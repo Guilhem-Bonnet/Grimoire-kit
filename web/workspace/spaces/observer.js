@@ -68,7 +68,6 @@ function text(tag, className, value) {
 function row(...children) { const d = document.createElement('div'); d.className = 'row'; d.append(...children); return d; }
 
 const SERIES = ['--s1', '--s2', '--s3'];
-const RATE_BUCKETS = ['opus', 'sonnet', 'haiku'];
 
 function attr(span, key) {
   return span && span.attributes ? span.attributes[key] : undefined;
@@ -82,14 +81,22 @@ function spanDurationMs(span) {
   return ms >= 0 ? ms : null;
 }
 
-function rateFor(modelRates, model) {
-  if (!model) return null;
-  const needle = String(model).toLowerCase();
-  const bucket = RATE_BUCKETS.find((b) => needle.includes(b));
-  return bucket && modelRates ? modelRates[bucket] : null;
+// Même règle que `normalize_model_id` (src/grimoire/tools/cost_model.py) :
+// `claude-haiku-4.5-20251001[1m]` → `haiku-4-5`, version exacte, sans famille.
+export function normalizeModelId(model) {
+  return String(model).trim().toLowerCase().split('[')[0].replaceAll('.', '-')
+    .replace(/^claude-/, '').replace(/-\d{8}$/, '');
 }
 
-function spanCostUsd(span, modelRates) {
+// Appariement exact sur l'id normalisé : une version absente de la table n'a
+// pas de tarif (null = coût inconnu), jamais le tarif d'une famille voisine.
+export function rateFor(modelRates, model) {
+  if (!model || !modelRates) return null;
+  const key = normalizeModelId(model);
+  return Object.hasOwn(modelRates, key) ? modelRates[key] : null;
+}
+
+export function spanCostUsd(span, modelRates) {
   const model = attr(span, 'gen_ai.request.model');
   const rate = rateFor(modelRates, model);
   const tokensIn = Number(attr(span, 'gen_ai.usage.input_tokens')) || 0;
@@ -156,6 +163,7 @@ function costPanel(spans, modelRates) {
     bar.append(track, text('span', 'ob-bar-val mono', '$' + cost.toFixed(4)));
     panel.append(bar);
   }
+  if (uncosted) panel.append(text('p', 'lbl', `${uncosted} span(s) sans tarif listé pour leur version : hors du total.`));
   return panel;
 }
 
@@ -350,6 +358,8 @@ function renderRuntime(root, ctx, { spans, modelRates, runs }) {
   const agents = new Set(spans.map((s) => attr(s, 'gen_ai.agent.name')).filter(Boolean));
   const models = new Set(spans.map((s) => attr(s, 'gen_ai.request.model')).filter(Boolean));
   const totalCost = spans.reduce((sum, s) => sum + (spanCostUsd(s, modelRates) || 0), 0);
+  // Un span au modèle sans tarif listé n'est pas gratuit : il est compté à part.
+  const unpriced = spans.filter((s) => attr(s, 'gen_ai.request.model') && spanCostUsd(s, modelRates) == null).length;
   const durations = spans.map(spanDurationMs).filter((d) => d != null);
   const avgLatency = durations.length ? durations.reduce((a, b) => a + b, 0) / durations.length : null;
 
@@ -357,7 +367,7 @@ function renderRuntime(root, ctx, { spans, modelRates, runs }) {
     { value: String(spans.length), label: 'spans' },
     { value: String(agents.size), label: 'agents' },
     { value: String(models.size), label: 'modèles' },
-    { value: '$' + totalCost.toFixed(4), label: 'coût estimé' },
+    { value: '$' + totalCost.toFixed(4), label: unpriced ? `coût estimé (${unpriced} span(s) sans tarif)` : 'coût estimé' },
     { value: avgLatency == null ? '—' : Math.round(avgLatency) + ' ms', label: 'latence moyenne' },
     { value: `${errorCount}/${spans.length}`, label: 'erreurs' },
   ]));
