@@ -1,0 +1,14 @@
+{
+  "host": "claude-code",
+  "host_version": "2.1.301",
+  "point": 9,
+  "capability": "systemd_user_linger",
+  "captured_on": "2026-10-16",
+  "captured_with": "loginctl show-user $USER -p State -p Linger ; systemd-run --user --on-active=3 --unit=k0-probe-timer --collect /usr/bin/touch <file>",
+  "observed": {
+    "loginctl_output": "State=active\nLinger=yes\n",
+    "systemd": "259 (259.9-1.fc44)",
+    "transient_user_timer_fired": true,
+    "scope": "linger is enabled and a transient user timer fired while the user session was open. A timer firing with no open session (logged out, rebooted) was NOT exercised."
+  }
+}

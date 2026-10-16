@@ -1,0 +1,53 @@
+{
+  "host": "claude-code",
+  "host_version": "2.1.301",
+  "point": 1,
+  "capability": "pretooluse_deny",
+  "captured_on": "2026-10-16",
+  "captured_with": "claude -p go --model haiku --setting-sources project --output-format stream-json --verbose --max-turns 4 --allowedTools 'Bash(touch:*)'",
+  "setup": "hook command registered for every event in <PROJECT>/.claude/settings.json: a script that appends stdin to a log and, in deny mode, refuses PreToolUse (json mode: prints a hookSpecificOutput JSON with permissionDecision=deny on stdout and exits 0).",
+  "observed": {
+    "hook_exit_code": 0,
+    "hook_stdout": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "K0-DENY-MARKER json: refused by K0 probe"
+      }
+    },
+    "tool_executed": false,
+    "marker_file_created": false,
+    "tool_result_seen_by_agent": {
+      "content": "PreToolUse:Bash hook error: K0-DENY-MARKER json: refused by K0 probe",
+      "is_error": true,
+      "non_execution_kind": "permission-rule",
+      "permission_decision": {
+        "decision": "reject",
+        "source": "hook",
+        "reason_type": "hook"
+      }
+    },
+    "agent_final_text": "The Bash call to `touch EXECUTED.marker` was refused by a PreToolUse hook (`K0-DENY-MARKER json: refused by K0 probe`), so the marker file was not created. I didn't retry or work around the hook. The hook denied it, and the project instructions asked for exactly one call. Nothing else was run.",
+    "claude_process_exit_code": 0
+  },
+  "payloads": {
+    "PreToolUse": {
+      "session_id": "00000000-0000-4000-8000-000000000005",
+      "transcript_path": "<HOME>/.claude/projects/<PROJECT-SLUG>/00000000-0000-4000-8000-000000000005.jsonl",
+      "cwd": "<PROJECT>",
+      "scratchpad_dir": "<HOME>/.cache/cct/claude-<UID>/<PROJECT-SLUG>/00000000-0000-4000-8000-000000000005/scratchpad",
+      "prompt_id": "00000000-0000-4000-8000-000000000006",
+      "permission_mode": "default",
+      "effort": {
+        "level": "medium"
+      },
+      "hook_event_name": "PreToolUse",
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "touch EXECUTED.marker",
+        "description": "Create EXECUTED.marker file in working directory"
+      },
+      "tool_use_id": "toolu_019rAprbGiwGyBYj3dH1jk6u"
+    }
+  }
+}

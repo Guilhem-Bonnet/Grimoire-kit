@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from grimoire.core.standard_state import active_profile_id, active_task_id, is_standard_enrolled
+from grimoire.flows.live_runs import active_flow_lines
 from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
 from grimoire.hosts.decisions.gate_summary import _gate_summary
 
@@ -11,7 +12,9 @@ def decide_context_capsule(hook: HookInput) -> Decision:
     """Pre compact: keep the governance state across a context reset.
 
     Compaction summarises the conversation; it does not know that the task id
-    and the open gates are the two facts the next window cannot rebuild.
+    and the open gates are the two facts the next window cannot rebuild. The
+    flow run in flight (W2-05) is the third: its run_id and node live in the
+    kernel only.
     """
     if not is_standard_enrolled(hook.project_root):
         return Decision()
@@ -29,4 +32,8 @@ def decide_context_capsule(hook: HookInput) -> Decision:
         f"[Grimoire — capsule] Tâche {task_id}, profil {profile}. Gates de preuve {state}\n"
         f"Preuves : _grimoire-output/evidence/{task_id}/ — à compléter avant toute clôture."
     )
+    flow_lines = active_flow_lines(hook.project_root)
+    if flow_lines:
+        # Sans run en vol, la capsule reste identique au caractère près.
+        context += "\n" + "\n".join(flow_lines)
     return Decision(outcome=Outcome.ALLOW, context=context, detail=detail)

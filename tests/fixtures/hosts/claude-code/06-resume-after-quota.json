@@ -1,0 +1,12 @@
+{
+  "host": "claude-code",
+  "host_version": "2.1.301",
+  "point": 6,
+  "capability": "resume_after_quota",
+  "captured_on": "2026-10-16",
+  "captured_with": "(not run)",
+  "observed": {
+    "status": "unverified",
+    "reason": "needs an exhausted plan; not provoked on purpose (shared plan of the workstation)."
+  }
+}

@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 from grimoire.bridges.schemas import HostId
 from grimoire.core.claude_activation import activation_context_text
 from grimoire.core.standard_state import active_profile_id, resolve_active_task
+from grimoire.flows.live_runs import active_flow_lines
 from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
 from grimoire.hosts.decisions.enrolment import BLOCKING_PROFILES, link_session, no_task_context
 from grimoire.hosts.decisions.record import _record_agent_dispatch
@@ -386,12 +387,28 @@ def decide_activation(hook: HookInput) -> Decision:
         _claude_dispatch_context(hook.project_root, agents) if hook.host == HostId.CLAUDE_CODE_CLI.value else ""
     )
     recall = _claimed_task_recall(hook.project_root, task_id)
+    # W2-05 : après une compaction, la fenêtre repart de zéro ; le run de flow
+    # en vol (run_id, nœud) n'est plus nulle part dans le contexte. Seule cette
+    # source le réinjecte : une session neuve n'a rien à reprendre.
+    flow_part = (
+        "\n".join(active_flow_lines(hook.project_root)) if str(hook.raw.get("source") or "") == "compact" else ""
+    )
     steering, steering_detail = _steering(hook, task_id)
     providers_line = _providers_status_line(hook.project_root)
     proposals_line = _proposals_status_line(hook.project_root)
     context = "\n".join(
         part
-        for part in (persona, dispatch_context, recall, enrolment, steering, directive, providers_line, proposals_line)
+        for part in (
+            persona,
+            dispatch_context,
+            recall,
+            flow_part,
+            enrolment,
+            steering,
+            directive,
+            providers_line,
+            proposals_line,
+        )
         if part
     )
     return Decision(
@@ -402,6 +419,7 @@ def decide_activation(hook: HookInput) -> Decision:
             "task_source": active.source,
             "entry_agent": entry_name,
             "recall_injected": bool(recall),
+            "flow_lines_injected": bool(flow_part),
             "dispatch_context_injected": bool(dispatch_context),
             "governed": governed,
             **scaffold_detail,
