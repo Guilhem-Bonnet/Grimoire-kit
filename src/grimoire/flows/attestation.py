@@ -21,8 +21,13 @@ release, avant de le refuser à son tour.
 
 Le journal ``<flows>/authority/<run>.authority.jsonl`` porte les challenges
 et les décisions (motif d'``amend`` compris, relu par ``flow status``). Un
-challenge reste ouvert jusqu'à la décision qui le consomme : un tour humain
-ne sert qu'une décision, et un refus faute d'attestation ne le consomme pas.
+challenge reste ouvert jusqu'à la décision qui le consomme, et un refus faute
+d'attestation ne le consomme pas. Un tour humain ne sert qu'une décision *au
+total*, pas seulement par run : toute décision attestée inscrit le tour qui
+l'atteste (``session_id``, ``turn_ts``, empreinte) dans un registre commun à
+tous les runs du dossier (``@consumed-turns.authority.jsonl``, sous verrou), et
+:func:`attest` ignore un tour déjà inscrit. Le nom du registre ne peut pas
+être celui d'un run (``@`` n'est pas dans les identifiants admis).
 Python seul : aucune de ces décisions ne traverse ``grimoire_flows_core``.
 """
 
@@ -32,7 +37,7 @@ import hashlib
 import json
 import re
 import uuid
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -45,6 +50,7 @@ from grimoire.hosts.decisions.human_turns import ORIGIN_USER, is_unattended, loa
 
 __all__ = [
     "ATTESTED",
+    "CONSUMED_TURNS_FILENAME",
     "NO_HUMAN_TURN",
     "UNATTESTED",
     "Attestation",
@@ -71,6 +77,11 @@ _REASONS: dict[str, str] = {
 }
 
 _SAFE_ID = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
+#: Registre des tours humains déjà consommés par une décision attestée, commun
+#: à tous les runs. Suffixe ``.authority.jsonl`` : la garde d'écriture le couvre.
+CONSUMED_TURNS_FILENAME = "@consumed-turns" + AUTHORITY_SUFFIX
+#: Identité d'un tour : ``(session_id, ts, prompt_sha256)``.
+TurnKey = tuple[str, str, str]
 
 
 def _now() -> str:
@@ -94,6 +105,7 @@ class Attestation:
     challenge_id: str = ""
     session_id: str = ""
     turn_ts: str = ""
+    turn_sha256: str = ""
 
     @property
     def attested(self) -> bool:
@@ -110,6 +122,10 @@ class Attestation:
             "session_id": self.session_id,
             "turn_ts": self.turn_ts,
         }
+
+    @property
+    def turn_key(self) -> TurnKey:
+        return (self.session_id, self.turn_ts, self.turn_sha256)
 
 
 def refusal_text(attestation: Attestation) -> str:
@@ -192,7 +208,42 @@ class CheckpointJournal:
         self._append(entry)
         return entry
 
+    @property
+    def consumed_path(self) -> Path:
+        return self.path.parent / CONSUMED_TURNS_FILENAME
+
+    def consumed_turns(self) -> frozenset[TurnKey]:
+        """Les tours qu'une décision attestée de n'importe quel run a déjà consommés."""
+        try:
+            raw = self.consumed_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return frozenset()
+        out: set[TurnKey] = set()
+        for line in raw.splitlines():
+            try:
+                data = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(data, dict):
+                out.add((str(data.get("session_id", "")), str(data.get("turn_ts", "")), str(data.get("turn_sha256", ""))))
+        return frozenset(out)
+
+    def _consume_turn(self, node_id: str, attestation: Attestation) -> None:
+        entry = {
+            "session_id": attestation.session_id,
+            "turn_ts": attestation.turn_ts,
+            "turn_sha256": attestation.turn_sha256,
+            "challenge_id": attestation.challenge_id,
+            "node_id": node_id,
+            "run": self.path.name,
+            "ts": _now(),
+        }
+        with locked(self.consumed_path), self.consumed_path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry, ensure_ascii=True) + "\n")
+
     def record_decision(self, node_id: str, decision: str, reason: str, attestation: Attestation) -> None:
+        if attestation.attested:
+            self._consume_turn(node_id, attestation)
         self._append(
             {
                 "type": "decision",
@@ -216,8 +267,18 @@ class CheckpointJournal:
         )
 
 
-def attest(project_root: Path, challenge: Mapping[str, Any] | None, env: Mapping[str, str] | None = None) -> Attestation:
-    """Classe la décision soumise maintenant contre *challenge*."""
+def attest(
+    project_root: Path,
+    challenge: Mapping[str, Any] | None,
+    env: Mapping[str, str] | None = None,
+    consumed: Collection[TurnKey] = (),
+) -> Attestation:
+    """Classe la décision soumise maintenant contre *challenge*.
+
+    *consumed* : les tours qu'une décision attestée a déjà utilisés (registre
+    commun à tous les runs, :meth:`CheckpointJournal.consumed_turns`) — un tour
+    ne sert qu'une décision.
+    """
     decider, _host = current_session(env)
     challenge_id = str((challenge or {}).get("challenge_id", ""))
 
@@ -241,8 +302,14 @@ def attest(project_root: Path, challenge: Mapping[str, Any] | None, env: Mapping
         return _no("no_challenge")
     for turn in reversed(turns):
         when = _parse(turn.ts)
-        if turn.session_id == owner and turn.origin == ORIGIN_USER and when is not None and when > since:
-            return Attestation(ATTESTED, "", challenge_id, decider, turn.ts)
+        if (
+            turn.session_id == owner
+            and turn.origin == ORIGIN_USER
+            and when is not None
+            and when > since
+            and (turn.session_id, turn.ts, turn.prompt_sha256) not in consumed
+        ):
+            return Attestation(ATTESTED, "", challenge_id, decider, turn.ts, turn.prompt_sha256)
     return _no(NO_HUMAN_TURN)
 
 
@@ -280,7 +347,7 @@ def judge_checkpoint(
     if decision not in ("approve", "reject", "amend"):
         return None
     reason = str(output.get("checkpoint_reason") or "")
-    attestation = attest(project_root, journal.open_challenge(node_id), env)
+    attestation = attest(project_root, journal.open_challenge(node_id), env, journal.consumed_turns())
     if decision not in _ADVANCING or attestation.attested:
         return CheckpointGate(str(decision), reason, attestation)
     if destructive:

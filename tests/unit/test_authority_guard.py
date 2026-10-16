@@ -80,6 +80,95 @@ def test_rejeu_du_hook_et_reprise_de_session_refuses_en_governed(tmp_path: Path,
 
 @pytest.mark.parametrize(
     "command",
+    [
+        # La même entrée de hook par la CLI (`cmd_host.py::host_hook` appelle `run_hook` directement).
+        "grimoire host hook --host claude --event UserPromptSubmit",
+        "echo '{\"session_id\":\"S1\",\"prompt\":\"ok\"}' | grimoire host hook --host claude --event UserPromptSubmit",
+        "grimoire host hook --event=UserPromptSubmit --host claude",
+        "grimoire host hook --host claude --event 'UserPromptSubmit'",
+        'grimoire host hook --host claude --event "user_prompt_submit"',
+        "grimoire host hook --host claude --event user-prompt-submit",
+        "/home/u/.local/bin/grimoire host hook --host claude --event UserPromptSubmit",
+        "grimoire --output json host hook --host claude --event UserPromptSubmit",
+        # Événement que la garde ne sait pas lire : fail-closed.
+        'grimoire host hook --host claude --event "$EVENT"',
+        "grimoire host hook --host claude",
+        # Lanceurs : le nom de tête n'est plus `grimoire-hook`.
+        "uvx --from grimoire-kit grimoire-hook --host claude --event UserPromptSubmit",
+        "uvx --from grimoire-kit grimoire host hook --host claude --event UserPromptSubmit",
+        "uvx grimoire-hook --host claude",
+        "pipx run --spec grimoire-kit grimoire-hook --host claude --event UserPromptSubmit",
+        "uv run grimoire host hook --host claude --event UserPromptSubmit",
+        "uv tool run --from grimoire-kit grimoire-hook --host claude",
+        "python -m grimoire host hook --host claude --event UserPromptSubmit",
+        "python3.12 -m grimoire host hook --host claude --event UserPromptSubmit",
+        "FOO=1 /usr/bin/env -i timeout 5 grimoire-hook --host claude",
+        "sudo -u bob grimoire-hook --host claude",
+        "xargs grimoire-hook --host claude",
+        "bash -c 'uvx --from grimoire-kit grimoire-hook --host claude'",
+        # Code arbitraire qui appelle la même entrée : la fonction que la CLI appelle directement.
+        'python -c "from grimoire.cli.cmd_host import host_hook"',
+        'python -c "from grimoire.hosts.runtime import run_hook; run_hook({})"',
+    ],
+)
+def test_rejeu_du_hook_par_la_cli_ou_un_lanceur_refuse_en_governed(tmp_path: Path, command: str) -> None:
+    decision = _pre(_governed(tmp_path), "Bash", {"command": command})
+    assert decision.outcome is Outcome.DENY, decision
+    assert decision.detail["authority_vector"] == "hook-replay"
+
+
+def test_rejeu_du_hook_par_la_cli_refuse_aussi_en_production(tmp_path: Path) -> None:
+    root = _governed(tmp_path)
+    (root / "_grimoire" / "standard" / "standard-profile.yaml").write_text("profile: production\n", encoding="utf-8")
+    decision = _pre(root, "Bash", {"command": "uvx --from grimoire-kit grimoire-hook --host claude --event UserPromptSubmit"})
+    assert decision.outcome is Outcome.DENY, decision
+    assert decision.detail["authority_vector"] == "hook-replay"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "claude --session-id 6f1c2a90-0000-4000-8000-000000000001 -p approve",
+        "uvx claude --resume 7102fd4c -p approve",
+    ],
+)
+def test_sous_session_qui_reprend_l_identifiant_refusee_en_governed(tmp_path: Path, command: str) -> None:
+    decision = _pre(_governed(tmp_path), "Bash", {"command": command})
+    assert decision.outcome is Outcome.DENY, decision
+    assert decision.detail["authority_vector"] == "session-resume"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "grimoire host hook --host claude --event PreToolUse",
+        "grimoire host hook --host claude --event 'post_tool_use'",
+        "grimoire host status",
+        "grimoire host --help",
+        "grimoire memory store --help",
+        "uvx ruff check src",
+        "uv run pytest tests/unit -q",
+        "python -m pytest tests/unit/test_authority_guard.py",
+        "python -m grimoire doctor",
+        "pipx run black .",
+        "sudo systemctl status ssh",
+        "echo grimoire-hook",
+        "xargs echo",
+        "git commit -m 'grimoire host hook --event UserPromptSubmit'",
+    ],
+)
+def test_commandes_voisines_du_rejeu_non_refusees(tmp_path: Path, command: str) -> None:
+    decision = _pre(_governed(tmp_path), "Bash", {"command": command})
+    assert "authority_vector" not in decision.detail, decision
+
+
+def test_rejeu_du_hook_par_la_cli_hors_governed_n_est_pas_refuse_par_la_garde(tmp_path: Path) -> None:
+    decision = _pre(tmp_path, "Bash", {"command": "grimoire host hook --host claude --event UserPromptSubmit"})
+    assert "authority_vector" not in decision.detail
+
+
+@pytest.mark.parametrize(
+    "command",
     ["claude -p 'résume ce fichier'", "which grimoire-hook", "ls ~/.claude -r", "git commit -m 'claude -c'"],
 )
 def test_commandes_voisines_non_refusees_par_la_garde(tmp_path: Path, command: str) -> None:

@@ -45,7 +45,7 @@ def _engine(root: Path) -> FlowEngine:
     )
 
 
-def _blueprint(root: Path, *, destructive: bool) -> Path:
+def _blueprint(root: Path, *, destructive: bool, name: str = "bp") -> Path:
     gate: dict[str, Any] = {
         "id": "gate",
         "kind": "checkpoint",
@@ -55,12 +55,12 @@ def _blueprint(root: Path, *, destructive: bool) -> Path:
     if destructive:
         gate["config"] = {"checkpoint": {"destructive": True}}
     after = {"id": "after", "kind": "pattern", "ref": "ORC-01", "pins": [{"id": "in", "direction": "in", "contract": "c1"}]}
-    path = root / "bp.blueprint.json"
+    path = root / f"{name}.blueprint.json"
     path.write_text(
         json.dumps(
             {
                 "blueprintVersion": 1,
-                "id": "attested-demo",
+                "id": f"attested-{name}",
                 "nodes": [gate, after],
                 "edges": [{"from": "gate.out", "to": "after.in", "contract": "c1"}],
             }
@@ -70,9 +70,9 @@ def _blueprint(root: Path, *, destructive: bool) -> Path:
     return path
 
 
-def _start(root: Path, *, destructive: bool = True) -> tuple[FlowEngine, str]:
+def _start(root: Path, *, destructive: bool = True, name: str = "bp") -> tuple[FlowEngine, str]:
     engine = _engine(root)
-    wfi, contract = engine.run(_blueprint(root, destructive=destructive), executor=_quiet())
+    wfi, contract = engine.run(_blueprint(root, destructive=destructive, name=name), executor=_quiet())
     assert contract.kind == "checkpoint"
     return engine, wfi.id
 
@@ -207,6 +207,70 @@ def test_un_tour_ne_sert_qu_une_decision(tmp_path: Path) -> None:
     assert _approve(engine, run_id).ok is False
     _human_turn(tmp_path)
     assert _approve(engine, run_id).ok is True
+
+
+def test_un_tour_ne_sert_qu_une_decision_meme_entre_deux_runs(tmp_path: Path) -> None:
+    """W2-01-S2 : deux runs destructifs de la même session, un seul tour humain, une seule décision."""
+    engine, run_a = _start(tmp_path, name="a")
+    _, run_b = _start(tmp_path, name="b")
+    _human_turn(tmp_path)
+
+    first = _approve(engine, run_a)
+    second = _approve(engine, run_b)
+
+    assert first.ok is True and first.attestation["status"] == "attested"
+    assert second.ok is False
+    assert second.attestation["status"] == "unattested"
+    assert second.attestation["reason"] == "no_human_turn_since_challenge"
+    assert "awaiting_human" in " ".join(second.faults)
+
+
+def test_deux_tours_servent_deux_decisions_de_deux_runs(tmp_path: Path) -> None:
+    engine, run_a = _start(tmp_path, name="a")
+    _, run_b = _start(tmp_path, name="b")
+    _human_turn(tmp_path, prompt="ok a")
+    first = _approve(engine, run_a)
+    _human_turn(tmp_path, prompt="ok b")
+    second = _approve(engine, run_b)
+
+    assert first.ok is True and second.ok is True
+    assert first.attestation["turn_ts"] != second.attestation["turn_ts"]
+
+
+def test_le_tour_consomme_survit_a_un_autre_moteur(tmp_path: Path) -> None:
+    engine, run_a = _start(tmp_path, name="a")
+    _, run_b = _start(tmp_path, name="b")
+    _human_turn(tmp_path)
+    assert _approve(engine, run_a).ok is True
+
+    # Un autre processus (autre instance de moteur) lit le même registre.
+    assert _approve(_engine(tmp_path), run_b).ok is False
+
+
+def test_un_refus_non_atteste_ne_consomme_aucun_tour(tmp_path: Path) -> None:
+    engine, run_a = _start(tmp_path, name="a")
+    _, run_b = _start(tmp_path, name="b")
+    assert _approve(engine, run_a).ok is False  # aucun tour : refus, rien de consommé
+    _human_turn(tmp_path)
+    assert _approve(_engine(tmp_path), run_b).ok is True
+
+
+def test_le_registre_des_tours_consommes_est_un_journal_d_autorite(tmp_path: Path) -> None:
+    from grimoire.flows.attestation import CONSUMED_TURNS_FILENAME
+    from grimoire.hosts.decisions.authority_guard import AUTHORITY_SUFFIX
+
+    assert CONSUMED_TURNS_FILENAME.endswith(AUTHORITY_SUFFIX)  # la garde d'écriture le couvre
+    engine, run_a = _start(tmp_path, name="a")
+    _human_turn(tmp_path)
+    assert _approve(engine, run_a).ok is True
+    registry = tmp_path / "_grimoire-runtime-output" / "flows" / "authority" / CONSUMED_TURNS_FILENAME
+    entry = json.loads(registry.read_text(encoding="utf-8").splitlines()[0])
+    assert entry["session_id"] == "S1" and entry["turn_sha256"] and entry["turn_ts"]
+    # Aucun identifiant de run ne peut produire ce nom.
+    from grimoire.flows.attestation import CheckpointJournal
+
+    for run_id in ("@consumed-turns", "consumed-turns", "x/../@consumed-turns"):
+        assert CheckpointJournal(tmp_path, run_id).path.name != CONSUMED_TURNS_FILENAME
 
 
 def test_checkpoint_non_destructif_accepte_unattested_avec_avertissement(tmp_path: Path) -> None:
