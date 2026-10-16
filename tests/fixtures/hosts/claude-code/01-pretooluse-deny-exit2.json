@@ -1,0 +1,47 @@
+{
+  "host": "claude-code",
+  "host_version": "2.1.301",
+  "point": 1,
+  "capability": "pretooluse_deny",
+  "captured_on": "2026-10-16",
+  "captured_with": "claude -p go --model haiku --setting-sources project --output-format stream-json --verbose --max-turns 4 --allowedTools 'Bash(touch:*)'",
+  "setup": "hook command registered for every event in <PROJECT>/.claude/settings.json: a script that appends stdin to a log and, in deny mode, refuses PreToolUse (exit2 mode: writes a message on stderr and exits with code 2).",
+  "observed": {
+    "hook_exit_code": 2,
+    "hook_stderr": "K0-DENY-MARKER exit2: refused by K0 probe\n",
+    "tool_executed": false,
+    "marker_file_created": false,
+    "tool_result_seen_by_agent": {
+      "content": "PreToolUse:Bash hook error: [python3 <CAPTURE>/hook.py]: K0-DENY-MARKER exit2: refused by K0 probe\n",
+      "is_error": true,
+      "non_execution_kind": "permission-rule",
+      "permission_decision": {
+        "decision": "reject",
+        "source": "hook",
+        "reason_type": "hook"
+      }
+    },
+    "agent_final_text": "The `touch EXECUTED.marker` call was refused by a PreToolUse hook (`<CAPTURE>/hook.py`, reason `K0-DENY-MARKER`), so the marker was not created. I did not retry it.\n\nI'm not answering `done`, because the step it confirms did not run.",
+    "claude_process_exit_code": 0
+  },
+  "payloads": {
+    "PreToolUse": {
+      "session_id": "00000000-0000-4000-8000-000000000003",
+      "transcript_path": "<HOME>/.claude/projects/<PROJECT-SLUG>/00000000-0000-4000-8000-000000000003.jsonl",
+      "cwd": "<PROJECT>",
+      "scratchpad_dir": "<HOME>/.cache/cct/claude-<UID>/<PROJECT-SLUG>/00000000-0000-4000-8000-000000000003/scratchpad",
+      "prompt_id": "00000000-0000-4000-8000-000000000004",
+      "permission_mode": "default",
+      "effort": {
+        "level": "medium"
+      },
+      "hook_event_name": "PreToolUse",
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "touch EXECUTED.marker",
+        "description": "Create EXECUTED.marker file in working directory"
+      },
+      "tool_use_id": "toolu_01B4UEB6nXxmKbYeyU41FES1"
+    }
+  }
+}

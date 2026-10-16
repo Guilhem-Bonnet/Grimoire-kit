@@ -1,0 +1,35 @@
+{
+  "host": "claude-code",
+  "host_version": "2.1.301",
+  "point": 1,
+  "capability": "pretooluse_deny",
+  "captured_on": "2026-10-16",
+  "captured_with": "claude -p go --model haiku --setting-sources project --output-format stream-json --verbose --max-turns 4 --allowedTools 'Bash(touch:*)'",
+  "setup": "hook command registered for every event in <PROJECT>/.claude/settings.json: a script that appends stdin to a log and, in deny mode, refuses PreToolUse (allow mode: records and lets the tool run). CLAUDE.md of the probe project asks for `touch EXECUTED.marker` on the prompt `go`.",
+  "observed": {
+    "hook_exit_code": 0,
+    "tool_executed": true,
+    "marker_file_created": true,
+    "agent_final_text": "done"
+  },
+  "payloads": {
+    "PreToolUse": {
+      "session_id": "00000000-0000-4000-8000-000000000001",
+      "transcript_path": "<HOME>/.claude/projects/<PROJECT-SLUG>/00000000-0000-4000-8000-000000000001.jsonl",
+      "cwd": "<PROJECT>",
+      "scratchpad_dir": "<HOME>/.cache/cct/claude-<UID>/<PROJECT-SLUG>/00000000-0000-4000-8000-000000000001/scratchpad",
+      "prompt_id": "00000000-0000-4000-8000-000000000002",
+      "permission_mode": "default",
+      "effort": {
+        "level": "medium"
+      },
+      "hook_event_name": "PreToolUse",
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "touch EXECUTED.marker",
+        "description": "Create EXECUTED.marker in the project directory"
+      },
+      "tool_use_id": "toolu_01UP5P97kUAsDtMhfqEgtGmd"
+    }
+  }
+}
