@@ -82,6 +82,7 @@ __all__ = [
     "StopStep",
     "evaluate_done_gate",
     "record_stop_block",
+    "record_stop_would_block",
     "resolve_done_gate_block",
     "resolve_done_gate_block_after_crash",
     "stop_cap",
@@ -441,9 +442,14 @@ def _load_caps(path: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def _save_caps(path: Path, data: dict[str, Any]) -> None:
+def _save_caps(path: Path, data: dict[str, Any]) -> bool:
     """Atomic write, best-effort — mirrors
-    :func:`grimoire.policies.session_state.save_session_state`."""
+    :func:`grimoire.policies.session_state.save_session_state`.
+
+    Returns whether the state reached the disk (W2-02-S2) : the cooldown/cap
+    callers ignore it, but a counter that cannot be written must never be
+    mistaken for one that advanced (see :func:`stop_step`).
+    """
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -452,6 +458,8 @@ def _save_caps(path: Path, data: dict[str, Any]) -> None:
     except OSError:
         with contextlib.suppress(OSError):
             tmp.unlink(missing_ok=True)
+        return False
+    return True
 
 
 def _seconds_between(a: str, b: str) -> float:
@@ -634,6 +642,9 @@ _STOP_CAP_DEFAULT = 2
 #: Événement tracé à chaque relâchement (journal de garde de la tâche).
 STOP_RELEASED_EVENT = "stop.released"
 
+#: Événement tracé en shadow (W2-02-S3) : le refus maintenu aurait été émis, il ne l'est pas.
+STOP_WOULD_BLOCK_EVENT = "stop.would_block"
+
 _STOP_KEY = "stop"
 _FINGERPRINT_TIMEOUT_SECONDS = 5.0
 
@@ -653,12 +664,26 @@ def stop_cap(profile: str) -> int:
     return _STOP_CAPS.get(profile, _STOP_CAP_DEFAULT)
 
 
+def _fingerprint_excluded_prefixes() -> tuple[str, ...]:
+    """Préfixes (POSIX, avec ``/`` final) des dossiers écrits par le hook ``Stop`` lui-même."""
+    from grimoire.core.agentic_standard import EVENT_DIR
+    from grimoire.core.standard_generation import RUNS_DIR, TRACES_DIR
+
+    return tuple(f"{folder.as_posix()}/" for folder in (RUNS_DIR, EVENT_DIR, TRACES_DIR))
+
+
 def _tree_fingerprint(project_root: Path, task_id: str) -> str:
     """Empreinte de l'arbre de travail : fichiers modifiés ou non suivis, taille et mtime.
 
-    Hors ``RUNS_DIR`` (le compteur lui-même y vit). Sans git, repli sur le
-    journal d'actions de la tâche (taille). Jamais d'exception.
+    Hors de tout ce que le hook ``Stop`` écrit lui-même (W2-02-S1) :
+    ``RUNS_DIR`` (le compteur y vit), ``EVENT_DIR`` (le journal d'événements
+    que ``_gate_summary`` alimente à chaque évaluation) et ``TRACES_DIR`` (la
+    trace de ``run_hook``). Ces dossiers ne sont pas ignorés par git : sans
+    cette exclusion, chaque ``Stop`` changerait l'empreinte et la signature ne
+    serait jamais identique. Sans git, repli sur le journal d'actions de la
+    tâche (taille). Jamais d'exception.
     """
+    excluded = _fingerprint_excluded_prefixes()
     try:
         listing = subprocess.run(
             ["git", "-C", str(project_root), "ls-files", "-m", "-o", "--exclude-standard", "-z"],
@@ -669,7 +694,7 @@ def _tree_fingerprint(project_root: Path, task_id: str) -> str:
         digest = hashlib.sha256()
         for raw in sorted(listing.split(b"\0")):
             rel = raw.decode("utf-8", errors="replace")
-            if not rel or rel.startswith("_grimoire-output/.runs/"):
+            if not rel or rel.startswith(excluded):
                 continue
             try:
                 st = (project_root / rel).stat()
@@ -712,12 +737,16 @@ def _load_stop_chain(state: dict[str, Any], project_root: Path, task_id: str) ->
     return "", 0
 
 
-def record_stop_block(project_root: Path, task_id: str, signature: str) -> None:
-    """Un ``Stop`` initial vient de refuser : ouvre la chaîne (compte 1). Best-effort."""
+def record_stop_block(project_root: Path, task_id: str, signature: str) -> bool:
+    """Un ``Stop`` initial vient de refuser : ouvre la chaîne (compte 1). Best-effort.
+
+    Rend ``False`` quand la chaîne n'a pas pu être écrite (W2-02-S2) : le
+    prochain ``Stop`` continué ne la trouvera pas et sortira par ``no_chain``.
+    """
     path = _caps_path(project_root, task_id)
     state = _load_caps(path)
     state[_STOP_KEY] = {"signature": signature, "count": 1}
-    _save_caps(path, state)
+    return _save_caps(path, state)
 
 
 def stop_step(project_root: Path, task_id: str, profile: str, signature: str, red_gates: str, now_iso: str) -> StopStep:
@@ -728,6 +757,10 @@ def stop_step(project_root: Path, task_id: str, profile: str, signature: str, re
     est atteint (le (cap+1)-ième ``Stop`` passe toujours), ou quand aucune chaîne
     n'est connue (état absent ou corrompu : rien ne prouve un progrès, la session
     sort comme avant). Sinon le refus est maintenu et le compteur avance.
+
+    Fail-open (W2-02-S2) : si le compteur ne peut pas être écrit, il n'avancerait
+    jamais et le refus se répéterait sans fin ; la session sort (``state_unwritable``),
+    tracé en ``stop.released`` et en ``guard.error``.
     """
     path = _caps_path(project_root, task_id)
     state = _load_caps(path)
@@ -756,5 +789,48 @@ def stop_step(project_root: Path, task_id: str, profile: str, signature: str, re
         _save_caps(path, state)
         return StopStep(release=True, reason=why, count=count, cap=cap)
     state[_STOP_KEY] = {"signature": signature, "count": count + 1}
-    _save_caps(path, state)
+    if not _save_caps(path, state):
+        record_guard_error(
+            project_root,
+            task_id,
+            "done_gate.stop_state",
+            "OSError",
+            f"compteur du Stop non inscriptible ({path.name}) : le refus maintenu serait sans fin, la session sort",
+        )
+        append_guard_event(
+            project_root,
+            task_id,
+            {
+                "ts": now_iso,
+                "type": STOP_RELEASED_EVENT,
+                "guard_id": "done_gate.stop_signature",
+                "reason": "state_unwritable",
+                "profile": profile,
+                "blocks": count,
+                "cap": cap,
+                "signature": signature,
+                "red_gates": red_gates,
+            },
+        )
+        return StopStep(release=True, reason="state_unwritable", count=count, cap=cap)
     return StopStep(release=False, reason="signature_changed", count=count + 1, cap=cap)
+
+
+def record_stop_would_block(
+    project_root: Path, task_id: str, profile: str, step: StopStep, signature: str, red_gates: str, now_iso: str
+) -> None:
+    """Shadow (W2-02-S3) : trace le refus maintenu qui aurait été émis (``stop.would_block``). Best-effort."""
+    append_guard_event(
+        project_root,
+        task_id,
+        {
+            "ts": now_iso,
+            "type": STOP_WOULD_BLOCK_EVENT,
+            "guard_id": "done_gate.stop_signature",
+            "profile": profile,
+            "blocks": step.count,
+            "cap": step.cap,
+            "signature": signature,
+            "red_gates": red_gates,
+        },
+    )

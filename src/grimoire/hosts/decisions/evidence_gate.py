@@ -120,7 +120,11 @@ def _open_stop_chain(hook: HookInput, task_id: str, summary: str, detail: dict[s
     from grimoire.hosts.decisions.done_gate import record_stop_block
 
     try:
-        record_stop_block(hook.project_root, task_id, _signature_of(hook, task_id, summary, detail))
+        if not record_stop_block(hook.project_root, task_id, _signature_of(hook, task_id, summary, detail)):
+            # W2-02-S2 : la chaîne n'existe pas sur disque, le Stop continué sortira par ``no_chain`` — dit, pas tu.
+            record_guard_error(
+                hook.project_root, task_id, "done_gate.stop_chain", "OSError", "chaîne du Stop non inscriptible"
+            )
     except Exception as exc:
         record_guard_error(hook.project_root, task_id, "done_gate.stop_chain", type(exc).__name__, str(exc))
 
@@ -133,6 +137,11 @@ def _continued_stop(hook: HookInput) -> Decision:
     signature de progrès décide : changée et sous le plafond du profil, le refus
     est maintenu ; identique ou plafond atteint, la session sort et
     ``stop.released`` est tracé (journal de garde de la tâche).
+
+    Shadow d'abord (W2-02-S3) : tant que ni ``GRIMOIRE_DONE_GATE=enforce`` ni
+    ``options.done_gate: enforce`` n'est posé (le même interrupteur que le gate
+    « fini »), le refus maintenu n'est pas émis : il est calculé, compté et tracé
+    (``stop.would_block``), la session sort comme avant.
     """
     skipped = Decision(detail={"skipped": "stop_hook_already_active"})
     try:
@@ -146,16 +155,23 @@ def _continued_stop(hook: HookInput) -> Decision:
         ok, summary, detail = _gate_summary(hook.project_root, task_id)
         if ok:
             return skipped
-        from grimoire.hosts.decisions.done_gate import stop_step
+        from grimoire.hosts.decisions.done_gate import _is_enforced, record_stop_would_block, stop_step
 
         signature = _signature_of(hook, task_id, summary, detail)
-        step = stop_step(hook.project_root, task_id, profile, signature, summary, datetime.now(UTC).isoformat())
+        now_iso = datetime.now(UTC).isoformat()
+        step = stop_step(hook.project_root, task_id, profile, signature, summary, now_iso)
+        shadow = not step.release and not _is_enforced(hook.project_root, task_id)
+        if shadow:
+            record_stop_would_block(hook.project_root, task_id, profile, step, signature, summary, now_iso)
     except Exception as exc:
         # Un échec ici ne doit jamais rendre la session inquittable : elle sort, et c'est tracé.
         record_guard_error(hook.project_root, "bootstrap", "done_gate.stop_signature", type(exc).__name__, str(exc))
         return skipped
     detail = {**detail, "stop_signature": {"release": step.release, "reason": step.reason, "blocks": step.count, "cap": step.cap}}
     if step.release:
+        return Decision(detail={**detail, "skipped": "stop_hook_already_active"})
+    if shadow:
+        detail["stop_signature"]["shadow"] = True
         return Decision(detail={**detail, "skipped": "stop_hook_already_active"})
     reason = (
         f"[Grimoire] Tâche {task_id} non terminée : les gates de preuve sont encore rouges (profil {profile}), "
