@@ -1858,14 +1858,16 @@ def test_cli_gate_check_strict_does_not_rerun_a_matching_nothing_collected_run(
 def test_cli_gate_check_v0_task_is_ok_with_no_content_warnings_at_review(tmp_path: Path) -> None:
     """I-3 rouge-avant : une tâche V0 verte, en revue, portait `acceptance.decision_pending` et `claims.empty` ; plus après."""
     from grimoire.core.standard_task_scaffold import scaffold_task_artifacts
-    from grimoire.missions.schemas import TaskState
+    from grimoire.missions.schemas import TaskCheck, TaskState
     from grimoire.missions.service import TaskService
 
     setup_standard_profile(tmp_path, profile_id="starter")
     (tmp_path / "project-context.yaml").write_text(_test_runner_context(0), encoding="utf-8")
     service = TaskService(tmp_path)
     mission = service.ledger.create_mission(title="Travaux", origin="test")
-    task = service.ledger.create_task(mission.id, "Ajouter une fonction", acceptance=("les tests passent",))
+    task = service.ledger.create_task(
+        mission.id, "Ajouter une fonction", acceptance=("les tests passent",), checks=(TaskCheck(cmd="true"),)
+    )
     service.ledger.transition_task(task.id, TaskState.READY, actor_id="a")
     service.ledger.claim_task(task.id, "a", "local")
     service.project_board()
