@@ -72,7 +72,8 @@ class TestDatingAndSource:
         assert cm.rate_card_age_warning(date(2027, 1, 14)) is None
         assert cm.rate_card_age_warning(date(2027, 1, 15)) is not None  # 91 jours
 
-    def test_payload_keeps_the_family_view_for_the_web_observer(self) -> None:
+    def test_payload_exposes_the_per_version_table_for_the_web(self) -> None:
         payload = cm.cost_model()
-        assert set(payload["modelRates"]) >= {"opus", "sonnet", "haiku"}
+        assert payload["modelRates"] == cm.MODEL_RATES
+        assert set(payload["modelAliases"]) == {"opus", "sonnet", "haiku"}
         assert payload["modelRateCard"]["asOf"] == "2026-10-16"

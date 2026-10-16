@@ -140,15 +140,21 @@ def rate_card_age_warning(today: date) -> str | None:
     )
 
 
-def _family_view() -> dict[str, dict[str, float]]:
-    """Tarif de la version la plus récente de chaque famille (consommé par le cockpit web)."""
-    view: dict[str, dict[str, float]] = {}
+def _family_aliases() -> dict[str, str]:
+    """Alias de famille (``opus``) → id de la version la plus récente de la table.
+
+    Les alias ``haiku``/``sonnet``/``opus`` sont ceux du blueprint (``agent.model``) :
+    ils ne portent pas de tarif, ils désignent une ligne de ``MODEL_RATES``. Le
+    cockpit résout l'alias ici puis lit le tarif de la version, jamais l'inverse.
+    """
+    aliases: dict[str, str] = {}
     for family in _FAMILIES:
-        for key, rate in MODEL_RATES.items():
-            if key.startswith(f"{family}-") or key == family:
-                view[family] = {"in": rate["in"], "out": rate["out"]}
+        for key in MODEL_RATES:
+            if key.startswith(f"{family}-"):
+                aliases[family] = key
                 break
-    return view
+    return aliases
+
 
 # Budget mission (k-tokens) par profil projet.
 MISSION_CAPS_K: dict[str, int] = {
@@ -227,7 +233,10 @@ def cost_model(model: str | None = None) -> dict[str, Any]:
         "extDefault": EXT_DEFAULT,
         "catDefault": CAT_DEFAULT,
         "roleCost": ROLE_COST,
-        "modelRates": _family_view(),
+        # Par version exacte (ids normalisés, voir ``normalize_model_id``) : le
+        # cockpit apparie l'id normalisé d'un modèle, jamais une sous-chaîne de famille.
+        "modelRates": {key: dict(row) for key, row in MODEL_RATES.items()},
+        "modelAliases": _family_aliases(),
         "modelRateCard": {
             "asOf": RATE_CARD_AS_OF.isoformat(),
             "source": RATE_CARD_SOURCE,

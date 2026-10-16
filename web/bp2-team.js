@@ -58,9 +58,10 @@
   /* ══ Fournisseurs LLM — pas forcément Claude ══ */
   const PROVIDERS = [
     { id: 'anthropic', name: 'Anthropic', models: [
-      { id: 'haiku',  label: 'haiku',  in: 0.8, out: 4,  hint: 'rapide' },
-      { id: 'sonnet', label: 'sonnet', in: 3,   out: 15, hint: 'équilibré' },
-      { id: 'opus',   label: 'opus',   in: 15,  out: 75, hint: 'profond' }
+      /* Pas de tarif ici : ceux d'Anthropic viennent de /api/cost-model (table Python unique). */
+      { id: 'haiku',  label: 'haiku',  hint: 'rapide' },
+      { id: 'sonnet', label: 'sonnet', hint: 'équilibré' },
+      { id: 'opus',   label: 'opus',   hint: 'profond' }
     ] },
     { id: 'openai', name: 'OpenAI', models: [
       { id: 'gpt-4.1-mini', label: '4.1-mini', in: 0.4, out: 1.6 },
@@ -80,8 +81,26 @@
       { id: 'qwen-coder', label: 'qwen coder',    in: 0, out: 0 }
     ] }
   ];
-  const MODEL_RATES = {};
-  PROVIDERS.forEach(p => p.models.forEach(m => { MODEL_RATES[m.id] = { in: m.in, out: m.out, provider: p.id, label: m.label }; }));
+  /* Tarifs Anthropic : alias de famille → version → ligne de la table du kit.
+     Rien en dur : sans réponse de /api/cost-model, le tarif est inconnu (null). */
+  let ANTHROPIC_CARD = null;
+  function setAnthropicRates(payload) {
+    const rates = payload && payload.modelRates, aliases = payload && payload.modelAliases;
+    ANTHROPIC_CARD = rates && aliases ? { rates, aliases } : null;
+  }
+  function rateOf(mid) {
+    for (const p of PROVIDERS) {
+      const m = p.models.find(x => x.id === mid);
+      if (!m) continue;
+      if (p.id === 'anthropic') {
+        const key = ANTHROPIC_CARD && ANTHROPIC_CARD.aliases[mid];
+        return key && ANTHROPIC_CARD.rates[key] ? ANTHROPIC_CARD.rates[key] : null;
+      }
+      return { in: m.in, out: m.out };
+    }
+    return null;
+  }
+  const rateLabel = mid => { const r = rateOf(mid); return r ? r.in + '/' + r.out + ' $ par MTok' : 'tarif inconnu'; };
   const LS_LLM = 'grimoire.atelier.llm';
   function llmConnected(pid) {
     try { return (JSON.parse(localStorage.getItem(LS_LLM)) || ['anthropic', 'local']).includes(pid); }
@@ -263,7 +282,7 @@
             return `<div class="prov${on ? '' : ' off'}">
               <div class="prov-h"><span class="pnm">${esc(p.name)}${p.note ? ` <span class=\"pnote\">${esc(p.note)}</span>` : ''}</span>
                 ${on ? '<span class="pst on">connecté ●</span>' : `<button class="pst connect" data-connect="${p.id}">connecter →</button>`}</div>
-              <div class="sh-chips">${p.models.map(m => `<button class="sh-chip${node.model === m.id ? ' on' : ''}${on ? '' : ' lock'}" data-model="${m.id}" data-prov="${p.id}" title="${m.in}/${m.out} $ par MTok">${esc(m.label)}</button>`).join('')}</div>
+              <div class="sh-chips">${p.models.map(m => `<button class="sh-chip${node.model === m.id ? ' on' : ''}${on ? '' : ' lock'}" data-model="${m.id}" data-prov="${p.id}" title="${rateLabel(m.id)}">${esc(m.label)}</button>`).join('')}</div>
             </div>`;
           }).join('')}
         </div>
@@ -406,7 +425,7 @@
   window.BP2Team = {
     init(c) { core = c; },
     COLOR, TOOLS, MCPS, SKILLS, WHEN, THEN, MODELS, CARDS,
-    PROVIDERS, MODEL_RATES, TRIGS, llmConnected, connectLLM, providerOf, llmOk,
+    PROVIDERS, setAnthropicRates, rateOf, rateLabel, TRIGS, llmConnected, connectLLM, providerOf, llmOk,
     isTeamRef, cardSpec, newNode, specOf, bodyMeta, initials,
     promptOverheadK, counts, inspector, openSheet, openTriggerSheet, triggerInspector, risky, guarded
   };
