@@ -438,6 +438,27 @@ nordvpn allowlist add app /usr/share/code/code
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
+## <img src="../assets/icons/bolt.svg" width="28" height="28" alt=""> 18. Les hooks ne se lancent pas — kit installé dans un venv
+
+**Symptôme** : sous Copilot ou Claude Code, les outils de l'agent sont bloqués ou les hooks Grimoire ne produisent rien, typiquement sous Windows après `uv pip install grimoire-kit` ou `pip install` dans un venv.
+
+**Cause** : l'hôte lance ses hooks avec son propre environnement, sans le venv activé du terminal. `grimoire-hook`, installé dans `.venv/bin` (`.venv\Scripts` sous Windows), y est introuvable.
+
+**Diagnostic** :
+```bash
+grimoire doctor   # contrôle hook_commands : chaque commande de hook se lance-t-elle hors du venv ?
+```
+
+**Fix** (au choix) :
+```bash
+uv tool install grimoire-kit   # ou : pipx install grimoire-kit — grimoire-hook devient global
+grimoire host sync             # sinon : réécrit les hooks avec le chemin du venv du projet
+```
+
+Depuis la correction de l'issue #760, `grimoire host sync` écrit le chemin `.venv/bin/grimoire-hook` (et sa variante Windows pour Copilot) quand le programme n'est pas dans le PATH global. `GRIMOIRE_HOOK_COMMAND` force la commande à écrire.
+
+<img src="../assets/divider.svg" width="100%" alt="">
+
 ## <img src="../assets/icons/lightbulb.svg" width="28" height="28" alt=""> Obtenir de l'aide
 
 Si le problème persiste :
