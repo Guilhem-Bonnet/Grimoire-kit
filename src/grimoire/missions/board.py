@@ -139,6 +139,12 @@ def _blockers(task: MissionTask) -> list[dict[str, str]]:
         out.append({"reason": "échec de la tâche, remédiation requise", "target": task.id})
     if not out and task.status is TaskState.BLOCKED:
         out.append({"reason": "blocage déclaré sans dépendance nommée", "target": task.id})
+    if not out and task.status is TaskState.UNKNOWN:
+        # Le board range l'état inconnu en « blocked » : sans motif, le
+        # vérificateur rejette la carte (board.blocker_reason_missing) et chaque
+        # geste du service qui projette le board échoue.
+        raw = task.raw_status or "?"
+        out.append({"reason": f"état inconnu de cette version ({raw}) : mettre grimoire à jour", "target": task.id})
     return out
 
 

@@ -125,3 +125,33 @@ def test_rust_extensions_do_not_validate_task_states() -> None:
         if s in text
     ]
     assert hits == []
+
+
+def test_board_of_an_unknown_state_task_passes_the_governed_verifier(tmp_path: Path) -> None:
+    """K1-S1-01 : la carte « blocked » d'un état inconnu doit porter un motif.
+
+    Sans motif, ``board.blocker_reason_missing`` rejette le board et chaque
+    geste du service qui le projette échoue.
+    """
+    from grimoire.core.agentic_standard import get_profile
+    from grimoire.core.standard_checks.base import StandardVerificationResult
+    from grimoire.core.standard_checks.verifiers import _verify_task_board
+    from grimoire.missions.board import build_board, write_board
+
+    _, task_id = _ledger_with_task(tmp_path)
+    _append_raw(tmp_path, _newer_transition(task_id, "waiting"))
+    ledger = MissionLedger(tmp_path)
+
+    board = build_board(ledger)
+    root = tmp_path / "proj"
+    write_board(root / "_grimoire" / "standard" / "task-board.yaml", board)
+    profile = get_profile("governed")
+    result = StandardVerificationResult(profile=profile.id, project_root=root)
+    _verify_task_board(root, profile, result)
+
+    assert "board.blocker_reason_missing" not in {c.id for c in result.checks}
+    assert [c.id for c in result.checks if c.is_error] == []
+    card = next(c for c in board["tasks"] if c["task_id"] == task_id)
+    assert card["status"] == "blocked"
+    assert card["blockers"] and "waiting" in card["blockers"][0]["reason"]
+    assert card["blockers"][0]["target"] == task_id
