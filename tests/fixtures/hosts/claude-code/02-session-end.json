@@ -1,0 +1,59 @@
+{
+  "host": "claude-code",
+  "host_version": "2.1.301",
+  "point": 2,
+  "capability": "session_end",
+  "captured_on": "2026-10-16",
+  "captured_with": "claude -p go --model haiku --setting-sources project --output-format stream-json --verbose --max-turns 4 --allowedTools 'Bash(touch:*)'",
+  "observed": {
+    "events_in_order_per_run": {
+      "control": [
+        "SessionStart",
+        "UserPromptSubmit",
+        "PreToolUse",
+        "PostToolUse",
+        "Stop",
+        "SessionEnd"
+      ],
+      "deny-exit2": [
+        "SessionStart",
+        "UserPromptSubmit",
+        "PreToolUse",
+        "Stop",
+        "SessionEnd"
+      ],
+      "deny-json": [
+        "SessionStart",
+        "UserPromptSubmit",
+        "PreToolUse",
+        "Stop",
+        "SessionEnd"
+      ],
+      "subagent": [
+        "SessionStart",
+        "UserPromptSubmit",
+        "PreToolUse",
+        "PostToolUse",
+        "SubagentStart",
+        "Stop",
+        "SubagentStop",
+        "UserPromptSubmit",
+        "Stop",
+        "SessionEnd"
+      ]
+    },
+    "reason_field": "other",
+    "scope": "clean exit of a non-interactive `claude -p` run, 4 runs out of 4. Not observed: interactive exit, SIGTERM, SIGKILL, crash."
+  },
+  "payloads": {
+    "SessionEnd": {
+      "session_id": "00000000-0000-4000-8000-000000000001",
+      "transcript_path": "<HOME>/.claude/projects/<PROJECT-SLUG>/00000000-0000-4000-8000-000000000001.jsonl",
+      "cwd": "<PROJECT>",
+      "scratchpad_dir": "<HOME>/.cache/cct/claude-<UID>/<PROJECT-SLUG>/00000000-0000-4000-8000-000000000001/scratchpad",
+      "prompt_id": "00000000-0000-4000-8000-000000000002",
+      "hook_event_name": "SessionEnd",
+      "reason": "other"
+    }
+  }
+}
