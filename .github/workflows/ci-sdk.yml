@@ -114,8 +114,9 @@ jobs:
     name: "Tests (Python ${{ matrix.python-version }}, ${{ matrix.os }})"
     runs-on: ${{ matrix.os }}
     # Sans borne, un test qui se bloque sous Windows garde le job six heures
-    # (défaut GitHub) sans qu'aucun journal ne soit lisible avant la fin.
-    timeout-minutes: 60
+    # (défaut GitHub). 60 min coupait le job Windows à ~86 % de la suite
+    # (processus et antivirus coûtent plus cher que sous Linux) : 120 min.
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
@@ -148,7 +149,7 @@ jobs:
         shell: bash
         run: |
           pytest tests/unit/ tests/test_agentic_standard.py -q --tb=short -n auto --dist loadfile \
-            --timeout=300 \
+            --timeout=300 --durations=25 \
             --cov=src/grimoire \
             --cov-report=xml \
             --cov-report=term-missing \
