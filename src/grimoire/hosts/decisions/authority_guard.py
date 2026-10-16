@@ -37,7 +37,12 @@ from dataclasses import dataclass
 from itertools import pairwise
 
 from grimoire.hosts.decisions.human_turns import TURNS_FILENAME
-from grimoire.hosts.decisions.tool_facts import ToolFacts, command_surface, extract_c_bodies
+from grimoire.hosts.decisions.tool_facts import (
+    ToolFacts,
+    _strip_heredoc_bodies,
+    command_surface,
+    extract_c_bodies,
+)
 from grimoire.policies.schemas import ActionKind, MutationClass
 
 __all__ = ["AUTHORITY_SUFFIX", "LIMIT_NOTE", "ForgeryVector", "forgery_vector"]
@@ -55,7 +60,6 @@ LIMIT_NOTE = (
     "pas impossible."
 )
 
-_SEGMENT_SPLIT = re.compile(r"&&|\|\||;|\||\n|\$\(|`|\(")
 _ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 _NEUTRAL = frozenset({"sudo", "command", "exec", "nohup", "env", "time", "nice", "ionice", "builtin"})
 #: Le module d'entrée du hook et la fonction d'écriture du journal : les
@@ -99,16 +103,98 @@ def _names_protected(text: str) -> str:
     return ""
 
 
-def _launched(segment: str) -> list[tuple[str, list[str]]]:
+_OPERATORS = ("&&", "||", "$(", ";", "|", "\n", "`", "(", ")")
+_ESCAPE = re.compile(r"\\(.)", re.DOTALL)
+#: Modules dont ``python -m`` est l'entrée du hook : les nommer, c'est le rejouer.
+_HOOK_MODULES = ("grimoire.hosts.runtime", "hosts.decisions.human_turns", "grimoire.cli.cmd_host")
+
+
+def _command_words(text: str) -> list[list[str]]:
+    """Les segments de *text* et les mots de chacun, guillemets et antislash retirés.
+
+    Ce que le shell lancera, pas ce qu'il affichera : ``"grimoire-hook"``,
+    ``'claude' -c`` ou ``gri\\moire-hook`` lancent le même programme que leur forme
+    nue. :func:`command_surface` blanchit tout mot cité, ce qui est juste pour de
+    la prose (un message de commit) mais faisait disparaître le programme visé.
+    Ici les opérateurs ne séparent les segments qu'hors guillemets, un mot cité
+    reste un seul mot (``-m "claude -c"`` n'est pas ``claude -c``), et une
+    citation jamais fermée est lue jusqu'au bout plutôt que rejetée (fail-closed).
+    """
+    segments: list[list[str]] = []
+    words: list[str] = []
+    current: list[str] = []
+    in_word = False
+    quote = ""
+    i = 0
+
+    def end_word() -> None:
+        nonlocal in_word
+        if in_word:
+            words.append("".join(current))
+            current.clear()
+            in_word = False
+
+    def end_segment() -> None:
+        nonlocal words
+        end_word()
+        if words:
+            segments.append(words)
+        words = []
+
+    while i < len(text):
+        ch = text[i]
+        if quote == "'":
+            if ch == "'":
+                quote = ""
+            else:
+                current.append(ch)
+        elif quote == '"':
+            if ch == '"':
+                quote = ""
+            elif ch == "\\" and i + 1 < len(text):
+                current.append(ch + text[i + 1])
+                i += 1
+            else:
+                current.append(ch)
+        elif ch == "\\" and i + 1 < len(text):
+            if text[i + 1] != "\n":  # antislash-saut de ligne : continuation de ligne
+                current.append(ch + text[i + 1])
+                in_word = True
+            i += 1
+        elif ch in "'\"":
+            quote = ch
+            in_word = True
+        elif ch.isspace() and ch != "\n":
+            end_word()
+        else:
+            operator = next((op for op in _OPERATORS if text.startswith(op, i)), "")
+            if operator:
+                end_segment()
+                i += len(operator) - 1
+            else:
+                current.append(ch)
+                in_word = True
+        i += 1
+    end_segment()
+    return segments
+
+
+def _word_variants(words: list[str]) -> tuple[list[str], list[str]]:
+    """Les mots lus comme échappements shell (``\\x`` -> ``x``) puis comme chemin (``\\`` -> ``/``)."""
+    return [_ESCAPE.sub(r"\1", w) for w in words], [_norm(w) for w in words]
+
+
+def _launched(words: list[str]) -> list[tuple[str, list[str]]]:
     """Les programmes visés par un segment — nom de base et arguments qui suivent.
 
-    Sans lanceur, le seul programme est le nom de tête, après assignations
-    d'environnement. Un lanceur (``uvx``, ``uv run``, ``pipx run``,
+    *words* est la sortie de :func:`_command_words` (guillemets et antislash déjà
+    retirés). Sans lanceur, le seul programme est le nom de tête, après
+    assignations d'environnement. Un lanceur (``uvx``, ``uv run``, ``pipx run``,
     ``python -m``, ``sudo -u x``, ``timeout 5``…) masquait ce nom de tête : tout
     ``grimoire-hook``, ``grimoire``, ``claude`` ou module ``grimoire*`` placé
     après lui est un programme visé, à n'importe quelle position.
     """
-    words = [w for w in segment.split() if not _ENV_ASSIGNMENT.match(w)]
+    words = [w for w in words if not _ENV_ASSIGNMENT.match(w)]
     if not words:
         return []
     head = words[0].rsplit("/", 1)[-1]
@@ -119,8 +205,11 @@ def _launched(segment: str) -> list[tuple[str, list[str]]]:
     found = [(head, words[1:])]
     for idx in range(1, len(words)):
         base = words[idx].rsplit("/", 1)[-1]
-        if words[idx - 1] == "-m" and base.split(".", 1)[0] == "grimoire":
-            base = "grimoire"
+        if words[idx - 1] == "-m":
+            if words[idx] in _HOOK_MODULES:
+                found.append(("grimoire-hook", []))
+            if base.split(".", 1)[0] == "grimoire":
+                base = "grimoire"
         if base in ("grimoire-hook", "grimoire", "claude"):
             found.append((base, words[idx + 1 :]))
     return found
@@ -173,17 +262,19 @@ def forgery_vector(facts: ToolFacts) -> ForgeryVector | None:
         if marker:
             return ForgeryVector("journal", f"commande qui écrit un journal d'autorité ({marker})", governed_only=False)
     executed = [command_surface(command), *extract_c_bodies(command)]
-    for text in executed:
-        if facts.mutation is not MutationClass.READ_ONLY and any(m in text for m in _HOOK_MODULE_MARKERS):
-            return ForgeryVector("hook-replay", "rejeu du hook UserPromptSubmit", governed_only=True)
-        for segment in _SEGMENT_SPLIT.split(text):
-            for name, args in _launched(segment):
-                if name == "grimoire-hook" or (
-                    name == "grimoire" and _is_host_hook(args) and _replays_prompt_event(command)
-                ):
-                    return ForgeryVector("hook-replay", "rejeu du hook UserPromptSubmit", governed_only=True)
-                if name == "claude" and any(_is_resume_flag(arg) for arg in args):
-                    return ForgeryVector(
-                        "session-resume", "reprise de session claude (--resume/-c/--session-id)", governed_only=True
-                    )
+    if facts.mutation is not MutationClass.READ_ONLY and any(m in text for text in executed for m in _HOOK_MODULE_MARKERS):
+        return ForgeryVector("hook-replay", "rejeu du hook UserPromptSubmit", governed_only=True)
+    # Les programmes visés se lisent sur le texte non blanchi : un nom cité reste le nom lancé.
+    for text in (_strip_heredoc_bodies(command), *extract_c_bodies(command)):
+        for segment in _command_words(text):
+            for words in _word_variants(segment):
+                for name, args in _launched(words):
+                    if name == "grimoire-hook" or (
+                        name == "grimoire" and _is_host_hook(args) and _replays_prompt_event(command)
+                    ):
+                        return ForgeryVector("hook-replay", "rejeu du hook UserPromptSubmit", governed_only=True)
+                    if name == "claude" and any(_is_resume_flag(arg) for arg in args):
+                        return ForgeryVector(
+                            "session-resume", "reprise de session claude (--resume/-c/--session-id)", governed_only=True
+                        )
     return None

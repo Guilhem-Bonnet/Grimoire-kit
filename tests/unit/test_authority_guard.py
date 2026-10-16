@@ -117,6 +117,53 @@ def test_rejeu_du_hook_par_la_cli_ou_un_lanceur_refuse_en_governed(tmp_path: Pat
     assert decision.detail["authority_vector"] == "hook-replay"
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        '"grimoire-hook" --host claude --event UserPromptSubmit',
+        "'grimoire-hook' --host claude --event UserPromptSubmit",
+        "\\grimoire-hook --host claude --event UserPromptSubmit",
+        'grimoire "host" hook --host claude --event UserPromptSubmit',
+        "grimoire host 'hook' --host claude --event UserPromptSubmit",
+        'uvx --from grimoire-kit "grimoire-hook" --host claude',
+        'python -m "grimoire.hosts.runtime" --host claude',
+        'timeout 5 "grimoire-hook" --host claude',
+        'echo ok && "grimoire-hook" --host claude',
+    ],
+)
+def test_rejeu_du_hook_sous_citation_ou_antislash_refuse_en_governed(tmp_path: Path, command: str) -> None:
+    decision = _pre(_governed(tmp_path), "Bash", {"command": command})
+    assert decision.outcome is Outcome.DENY, decision
+    assert decision.detail["authority_vector"] == "hook-replay"
+
+
+@pytest.mark.parametrize(
+    "command",
+    ['"claude" -c approve', "'claude' --resume abc -p approve", "\\claude --continue", 'uvx "claude" -c approve'],
+)
+def test_reprise_de_session_sous_citation_ou_antislash_refusee_en_governed(tmp_path: Path, command: str) -> None:
+    decision = _pre(_governed(tmp_path), "Bash", {"command": command})
+    assert decision.outcome is Outcome.DENY, decision
+    assert decision.detail["authority_vector"] == "session-resume"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'git commit -m "grimoire-hook"',
+        'git commit -m "x && grimoire-hook"',
+        "timeout 5 git commit -m 'claude -c'",
+        'echo "a; grimoire-hook"',
+        "cat <<EOF\ngrimoire-hook --host claude\nEOF",
+        'grimoire "host" status',
+        '"claude" -p résume',
+    ],
+)
+def test_prose_citee_ne_devient_pas_un_programme_vise(tmp_path: Path, command: str) -> None:
+    decision = _pre(_governed(tmp_path), "Bash", {"command": command})
+    assert "authority_vector" not in decision.detail, decision
+
+
 def test_rejeu_du_hook_par_la_cli_refuse_aussi_en_production(tmp_path: Path) -> None:
     root = _governed(tmp_path)
     (root / "_grimoire" / "standard" / "standard-profile.yaml").write_text("profile: production\n", encoding="utf-8")
