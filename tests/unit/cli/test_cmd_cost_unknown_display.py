@@ -84,7 +84,7 @@ def _silent_flow(tmp_path: Path) -> tuple[FlowEngine, str, str]:
     script.write_text(dedent(_SILENT_WRITER), encoding="utf-8")
     standard = tmp_path / "_grimoire" / "standard"
     standard.mkdir(parents=True, exist_ok=True)
-    invocation = f"{sys.executable} {script} {{prompt}} --model {{model}}"
+    invocation = f"{Path(sys.executable).as_posix()} {Path(script).as_posix()} {{prompt}} --model {{model}}"
     (standard / "llm-provider-registry.yaml").write_text(
         f"""\
 $schema: "grimoire-llm-provider-registry/v1"
