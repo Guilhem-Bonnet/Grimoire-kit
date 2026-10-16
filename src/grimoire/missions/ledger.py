@@ -36,6 +36,7 @@ from grimoire.missions.schemas import (
     MissionState,
     MissionTask,
     RiskProfile,
+    TaskCheck,
     TaskClaim,
     TaskDependency,
     TaskDirective,
@@ -409,6 +410,7 @@ class MissionLedger:
         agent_roles: tuple[str, ...] = (),
         remediation_ref: str = "",
         extra: dict[str, Any] | None = None,
+        checks: tuple[TaskCheck, ...] = (),
     ) -> MissionTask:
         self._load()
         if mission_id not in self._missions:
@@ -439,6 +441,7 @@ class MissionLedger:
             agent_roles=agent_roles,
             remediation_ref=remediation_ref,
             extra=extra or {},
+            checks=checks,
         )
         self._append_event("task.created", task.id, "task", owner or "system", task.to_dict())
         return task

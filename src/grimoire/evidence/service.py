@@ -134,8 +134,14 @@ class EvidenceService:
         *,
         acceptance: tuple[str, ...] = (),
         verdict_id: str | None = None,
+        extra_checks: tuple[VerificationCheck, ...] = (),
     ) -> VerificationVerdict:
-        """Run verification checks against an EvidencePack and produce a verdict."""
+        """Run verification checks against an EvidencePack and produce a verdict.
+
+        *extra_checks* : contrôles déjà tranchés par l'appelant (ex. le code de
+        sortie des commandes de ``grimoire task verify``, issue #772) ; ils
+        comptent dans le verdict comme les contrôles de structure.
+        """
         required_kinds = _PROFILE_REQUIREMENTS.get(pack.profile, frozenset())
         present_kinds = {item.kind for item in pack.items}
         checks: list[VerificationCheck] = []
@@ -174,6 +180,8 @@ class EvidenceService:
                 result=VerdictResult.FAILED if missing else VerdictResult.PASSED,
                 reason=f"Uncovered criteria: {missing}" if missing else "",
             ))
+
+        checks.extend(extra_checks)
 
         overall = VerdictResult.PASSED if all(c.result == VerdictResult.PASSED for c in checks) else VerdictResult.FAILED
         reopen = overall == VerdictResult.FAILED

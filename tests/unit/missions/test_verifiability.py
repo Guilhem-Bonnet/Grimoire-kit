@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
-from grimoire.missions.schemas import MissionTask, RiskProfile, TaskState, TaskType
+from grimoire.missions.schemas import MissionTask, RiskProfile, TaskCheck, TaskState, TaskType
 from grimoire.missions.verifiability import Verifiability, as_dict, classify, explain
 
 
@@ -19,6 +19,7 @@ def tache(**kw: object) -> MissionTask:
         "risk_profile": RiskProfile.STANDARD,
         "acceptance": (),
         "created_at": "2026-08-27T00:00:00Z",
+        "checks": (TaskCheck(cmd="true"),),
     }
     base.update(kw)
     return MissionTask(**base)  # type: ignore[arg-type]

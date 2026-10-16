@@ -22,7 +22,7 @@ from grimoire.cli.app import app
 from grimoire.missions.dispatch import run_dispatch
 from grimoire.missions.dispatch_advice import dispatch_advice
 from grimoire.missions.ledger import MissionLedger
-from grimoire.missions.schemas import MissionTask, TaskState
+from grimoire.missions.schemas import MissionTask, TaskCheck, TaskState
 from grimoire.missions.verifiability import Verifiability, as_dict, classify
 
 
@@ -65,7 +65,7 @@ def _accepted_task(root: Path, acceptance: tuple[str, ...]) -> tuple[MissionLedg
     """Une tâche liée à un run dont le checkpoint a été clos par ``accept_as_is``."""
     ledger = MissionLedger(root / LEDGER)
     mission = ledger.create_mission("m", origin="user")
-    task = ledger.create_task(mission.id, "t", acceptance=acceptance)
+    task = ledger.create_task(mission.id, "t", acceptance=acceptance, checks=(TaskCheck(cmd="true"),))
     engine, run_id = _start(root, task_id=task.id, mission_id=mission.id)
     _amend(engine, run_id, 3)
     assert _decide(engine, run_id, "accept_as_is", "section 2 approximative").ok is True
@@ -126,6 +126,7 @@ def test_v2_reste_v2_et_v0_sans_risque_reste_v0(tmp_path: Path) -> None:
         MissionLedger(tmp_path / "autre").create_mission("m", origin="user").id,
         "t",
         acceptance=("pytest tests/unit -q passe",),
+        checks=(TaskCheck(cmd="true"),),
     )
     assert classify(plain) is Verifiability.V0
     assert "raised_by" not in as_dict(plain)
