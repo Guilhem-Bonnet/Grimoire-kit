@@ -123,10 +123,6 @@ class Attestation:
             "turn_ts": self.turn_ts,
         }
 
-    @property
-    def turn_key(self) -> TurnKey:
-        return (self.session_id, self.turn_ts, self.turn_sha256)
-
 
 def refusal_text(attestation: Attestation) -> str:
     """Le défaut d'un checkpoint destructif refusé — ``awaiting_human``, la cause, le remède, la limite."""
