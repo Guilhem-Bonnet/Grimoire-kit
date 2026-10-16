@@ -245,6 +245,59 @@ def _profile_downgrade_check(hook: HookInput, facts: ToolFacts) -> Decision | No
     return None
 
 
+#: Profils où une garde d'autorité en erreur refuse (fail-closed) et où les
+#: vecteurs ``governed_only`` de :mod:`.authority_guard` comptent.
+_AUTHORITY_PROFILES = frozenset({"governed", "production"})
+
+
+def _authority_guard(hook: HookInput, facts: ToolFacts) -> Decision | None:
+    """W2-01 : refuse ce qui fabriquerait la preuve d'un tour humain (:mod:`.authority_guard`).
+
+    Évaluée avant tout le reste, même sur un appel classé en lecture seule :
+    un ``echo >>`` vers le journal des tours n'a pas à attendre le moteur de
+    règles pour être refusé. Une exception ici ne devient jamais un ``allow`` :
+    refus en governed et production (profil illisible compris), question
+    ailleurs — c'est le cas de panne que W2-08 rejoue.
+    """
+    limit = "Limite : une garde de chemin se contourne par du code arbitraire."
+    try:
+        from grimoire.hosts.decisions.authority_guard import LIMIT_NOTE, forgery_vector
+
+        limit = LIMIT_NOTE
+
+        vector = forgery_vector(facts)
+        if vector is None:
+            return None
+        profile = active_profile_id(hook.project_root)
+        if vector.governed_only and profile not in _AUTHORITY_PROFILES:
+            return None
+        return Decision(
+            outcome=Outcome.DENY,
+            reason=(
+                f"[Grimoire authority] {hook.tool_name or 'action'} refusé — {vector.what}. "
+                "Le journal des tours humains et les challenges de checkpoint ne s'écrivent que par "
+                f"le hook de l'hôte : c'est la preuve qu'un humain a décidé. {limit}"
+            ),
+            detail={"tool": hook.tool_name, "authority_vector": vector.code, "profile": profile},
+        )
+    except Exception as exc:
+        try:
+            profile = active_profile_id(hook.project_root)
+        except Exception:
+            profile = "governed"
+        cause = f"{type(exc).__name__}: {exc}"
+        outcome = Outcome.DENY if profile in _AUTHORITY_PROFILES else Outcome.ASK
+        return Decision(
+            outcome=outcome,
+            reason=(
+                f"[Grimoire authority] garde d'autorité en erreur ({cause}) : "
+                f"{'refus par défaut en profil ' + profile if outcome is Outcome.DENY else 'à toi de décider'}. "
+                f"{limit}"
+            ),
+            detail={"tool": hook.tool_name, "authority_vector": "guard-error", "error": cause, "profile": profile},
+        )
+
+
 def decide_tool_policy(hook: HookInput) -> Decision:
     """Pre tool use: run the pending call through the policy engine.
 
@@ -304,6 +357,9 @@ def _evaluate_tool_policy(hook: HookInput) -> Decision:
     sites.
     """
     facts = classify_tool(hook.tool_name, hook.tool_input)
+    forged = _authority_guard(hook, facts)
+    if forged is not None:
+        return forged
     custom_rules = load_custom_rules(hook.project_root)
     # A temporal rule (require_approval/per_session/cooldown_after) commonly
     # leaves action_kinds/mutation_classes/risk_profiles empty — it has no
