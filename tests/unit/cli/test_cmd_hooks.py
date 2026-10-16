@@ -91,6 +91,10 @@ class TestHooksInstall:
 
 
 class TestHooksStatusList:
+    def test_status_exposes_the_stop_caps(self, kit_repo: Path) -> None:
+        result = runner.invoke(app, ["-o", "json", "hooks", "status", str(kit_repo)])
+        assert json.loads(result.stdout)["stop_caps"] == {"orchestrated": 2, "governed": 4, "production": 8}
+
     def test_status_incomplete_then_complete(self, kit_repo: Path) -> None:
         result = runner.invoke(app, ["-o", "json", "hooks", "status", str(kit_repo)])
         assert result.exit_code == 1

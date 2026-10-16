@@ -290,7 +290,7 @@ def test_motif_d_amend_relu_par_status_json(tmp_path: Path) -> None:
         output={**_GATE_OUT, "checkpoint_decision": "amend", "checkpoint_reason": "garder les overrides locaux"},
         executor=_quiet(),
     )
-    assert outcome.ok is True
+    assert outcome.ok is False  # W2-10 : amend rouvre le node au lieu d'avancer
 
     result = runner.invoke(app, ["--output", "json", "flow", "status", run_id, "--project-root", str(tmp_path)])
     assert result.exit_code == 0, result.output

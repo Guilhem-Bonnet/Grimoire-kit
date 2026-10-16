@@ -79,6 +79,10 @@ _STEERING_EVENTS = frozenset({
 #: L'événement qui rattache une session d'hôte au claim d'une tâche (issue #638).
 SESSION_ATTACHED_EVENT = "task.session_attached"
 
+#: Un risque accepté en l'état sur une tâche (W2-10) : ``accept_as_is`` d'un
+#: checkpoint de flow (``FlowEngine``). Rejoué dans ``MissionTask.accepted_risks``.
+RISK_ACCEPTED_EVENT = "task.risk_accepted"
+
 
 def _slug(title: str, limit: int) -> str:
     """Fragment d'identifiant sûr dans un chemin.
@@ -224,6 +228,17 @@ class MissionLedger:
                         explicit_at=str(raw.get("created_at", "") or "") if payload.get("explicit") else "",
                     )
                     self._tasks[tid] = MissionTask.from_dict({**current.to_dict(), "claim": claim.to_dict()})
+            elif evt_type == RISK_ACCEPTED_EVENT:
+                # W2-10 : la tâche ciblée est ``entity_id``, comme pour la session.
+                # Un événement orphelin n'invente rien ; l'horodatage de
+                # l'événement est gardé (``ts``) pour l'affichage.
+                tid = str(raw.get("entity_id") or payload.get("task_id") or "")
+                current = self._tasks.get(tid)
+                if current is not None:
+                    risk = {**payload, "ts": str(raw.get("created_at", "") or "")}
+                    self._tasks[tid] = MissionTask.from_dict(
+                        {**current.to_dict(), "accepted_risks": [*(dict(r) for r in current.accepted_risks), risk]}
+                    )
             self._events.append(LedgerEvent.from_dict(raw))
 
     def _replay_steering(self, evt_type: str, payload: dict[str, Any]) -> None:
