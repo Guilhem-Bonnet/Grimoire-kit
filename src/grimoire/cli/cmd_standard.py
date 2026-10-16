@@ -12,6 +12,7 @@ from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
 
+from grimoire.cli.cmd_standard_claims import claims_command
 from grimoire.core.agentic_standard import (
     InstallPlan,
     StandardProviderDetection,
@@ -84,6 +85,7 @@ standard_app.add_typer(events_app, name="events")
 standard_app.add_typer(pattern_app, name="pattern")
 standard_app.add_typer(knowledge_app, name="knowledge")
 standard_app.add_typer(task_app, name="task")
+standard_app.command("claims")(claims_command)
 # Human-readable Rich output goes to stderr so JSON emitted with typer.echo remains pipeable on stdout.
 console = Console(stderr=True)
 

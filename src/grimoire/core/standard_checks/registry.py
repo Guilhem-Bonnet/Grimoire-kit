@@ -106,6 +106,8 @@ CHECK_DIMENSIONS: dict[str, str] = {
     "claims.summary": "evidence_gates",
     "claims.proved_without_evidence": "evidence_gates",
     "claims.used_unproved": "evidence_gates",
+    "claims.proof_unresolved": "evidence_gates",
+    "claims.proof_unstructured": "evidence_gates",
     "claims.summary_placeholder": "evidence_gates",
     "browser.dom_required": "evidence_gates",
     "browser.domains_invalid": "evidence_gates",
