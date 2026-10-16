@@ -195,6 +195,12 @@ class FlowRunMeta:
     #: L'id du node composite du run parent qui a lancé ce run — ``None`` ssi
     #: ``parent_run_id`` l'est aussi (les deux sont posés ou absents ensemble).
     parent_node_id: str | None = None
+    #: W2-04 — sha256 des contrats compilés (dans ``order``) au lancement, et le
+    #: sha256 de chaque contrat. ``None``/vide pour un run antérieur : sa dérive
+    #: est alors « non vérifiée », jamais déclarée absente. Seul ``flow migrate``
+    #: réécrit ces champs et ``order`` (acte explicite de l'utilisateur).
+    blueprint_sha256: str | None = None
+    node_digests: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -206,6 +212,8 @@ class FlowRunMeta:
             "created_at": self.created_at,
             "parent_run_id": self.parent_run_id,
             "parent_node_id": self.parent_node_id,
+            "blueprint_sha256": self.blueprint_sha256,
+            "node_digests": dict(self.node_digests),
         }
 
     @classmethod
@@ -219,6 +227,8 @@ class FlowRunMeta:
             schema_version=d.get("schema_version", "grimoire.flow_run_meta.v1"),
             parent_run_id=d.get("parent_run_id"),
             parent_node_id=d.get("parent_node_id"),
+            blueprint_sha256=d.get("blueprint_sha256"),
+            node_digests=dict(d.get("node_digests") or {}),
         )
 
 
@@ -289,10 +299,17 @@ class FlowStatusView:
     #: Décisions de checkpoint journalisées (W2-01) : node, décision, motif
     #: (celui d'un ``amend`` compris), attestation et son motif, horodatage.
     checkpoint_decisions: tuple[dict[str, Any], ...] = ()
+    #: W2-04 — le constat ``blueprint_drift`` (nodes franchis modifiés, retirés ou
+    #: réordonnés depuis le lancement) ou ``None``. ``blueprint_sha256`` ``None``
+    #: dit « non vérifié » (run antérieur) : ``None`` ici ne veut alors pas dire « sain ».
+    blueprint_drift: dict[str, Any] | None = None
+    blueprint_sha256: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "directive": self.directive.to_dict() if self.directive else None,
+            "blueprint_sha256": self.blueprint_sha256,
+            "blueprint_drift": self.blueprint_drift,
             "run_id": self.run_id,
             "blueprint_id": self.blueprint_id,
             "status": self.status,
