@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NamedTuple
 
+from grimoire.bridges.schemas import HostId
+
 # Tout vient de ``standard_generation``, le module léger : ce lecteur tourne dans
 # le chemin des hooks, à chaque appel d'outil, et importer le moteur du standard
 # pour lire deux chemins et un identifiant coûtait 48 ms par appel.
@@ -220,7 +222,7 @@ TASK_ENV = "GRIMOIRE_TASK_ID"
 #: (``CLAUDE_CODE_SESSION_ID``) aux commandes que la session lance.
 SESSION_ENV = "GRIMOIRE_SESSION_ID"
 #: variable d'environnement exportée par l'hôte → identifiant d'hôte (``HookInput.host``).
-HOST_SESSION_ENVS = {"CLAUDE_CODE_SESSION_ID": "claude-code-cli"}
+HOST_SESSION_ENVS = {"CLAUDE_CODE_SESSION_ID": HostId.CLAUDE_CODE_CLI.value}
 
 
 @dataclass(frozen=True, slots=True)

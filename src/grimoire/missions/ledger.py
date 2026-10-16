@@ -42,6 +42,7 @@ from grimoire.missions.schemas import (
     TaskState,
     TaskType,
 )
+from grimoire.missions.session_link import canonical_host
 
 # Valid state transitions for missions
 _MISSION_TRANSITIONS: dict[MissionState, frozenset[MissionState]] = {
@@ -223,7 +224,7 @@ class MissionLedger:
                 if current is not None and current.claim is not None:
                     claim = current.claim.with_session(
                         str(payload.get("session_id", "") or ""),
-                        str(payload.get("session_host", "") or ""),
+                        canonical_host(str(payload.get("session_host", "") or "")),
                         # Issue #695 : seul un ``task attach`` marque ``explicit``.
                         explicit_at=str(raw.get("created_at", "") or "") if payload.get("explicit") else "",
                     )
@@ -583,7 +584,7 @@ class MissionLedger:
             {
                 "task_id": task_id,
                 "session_id": session_id,
-                "session_host": session_host,
+                "session_host": canonical_host(session_host),
                 **({"explicit": True} if explicit else {}),
             },
         )
