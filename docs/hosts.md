@@ -70,6 +70,11 @@ d'une session périmée) ne s'appuie donc pas sur ce tableau mais sur
 captures versées sous `tests/fixtures/hosts/<hôte>/` (un `manifest.json` par
 hôte, une fixture par point). Règle unique : une capacité sans fixture vaut
 `false`, et un hôte dont `pretooluse_deny` n'est pas vérifié est **non fencé**.
+Une preuve vaut pour la version d'hôte sur laquelle elle a été capturée :
+`contract_for(host, version)` et `is_fenced(host, version)` exigent la version
+et rendent un contrat entièrement non vérifié (donc non fencé) si elle est
+absente, inconnue ou différente de la version capturée. `recorded_contract(host)`
+ne sert qu'à auditer la table.
 
 | Capacité | Claude Code 2.1.301 | Copilot, Codex, Cursor, Gemini |
 |---|---|---|

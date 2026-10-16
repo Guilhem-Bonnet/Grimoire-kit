@@ -32,6 +32,7 @@ from grimoire.hosts.capabilities import (
     ContractStatus,
     contract_for,
     is_fenced,
+    recorded_contract,
 )
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "hosts"
@@ -57,7 +58,7 @@ class TestTableMatchesManifests:
     @pytest.mark.parametrize("host", list(HOST_DIRS))
     def test_code_table_is_the_manifest(self, host: HostId) -> None:
         manifest = _manifest(host)
-        contract = contract_for(host)
+        contract = recorded_contract(host)
         assert contract.host_version == manifest["host_version"]
         assert set(manifest["capabilities"]) == set(CONTRACT_KEYS)
         for key in CONTRACT_KEYS:
@@ -75,7 +76,7 @@ class TestTableMatchesManifests:
 
     @pytest.mark.parametrize("host", list(HOST_DIRS))
     def test_every_listed_fixture_exists_and_names_its_host_version(self, host: HostId) -> None:
-        contract = contract_for(host)
+        contract = recorded_contract(host)
         for key, ev in contract.evidence.items():
             for rel in ev.fixtures:
                 data = _fixture(rel)
@@ -89,7 +90,7 @@ class TestNoFixtureMeansFalse:
             ContractEvidence(status=ContractStatus.VERIFIED)
 
     def test_unverified_capability_is_false(self) -> None:
-        contract = contract_for(HostId.GITHUB_COPILOT)
+        contract = recorded_contract(HostId.GITHUB_COPILOT)
         assert all(not contract.verified(key) for key in CONTRACT_KEYS)
         assert contract.verified("a_capability_nobody_captured") is False
 
@@ -101,20 +102,58 @@ class TestNoFixtureMeansFalse:
 
     def test_hosts_without_a_capture_are_not_fenced(self) -> None:
         for host in (HostId.GITHUB_COPILOT, HostId.CODEX, HostId.CURSOR, HostId.GEMINI_CLI, HostId.UNKNOWN):
-            assert is_fenced(host) is False, host
+            assert is_fenced(host, "2.1.301") is False, host
+            assert is_fenced(host, None) is False, host
 
     def test_unknown_host_has_no_verified_capability(self) -> None:
-        contract = contract_for(HostId.UNKNOWN)
+        contract = recorded_contract(HostId.UNKNOWN)
         assert contract.host_version == ""
         assert not any(contract.verified(key) for key in CONTRACT_KEYS)
+
+
+class TestProofIsPerHostVersion:
+    """Une preuve faite sur 2.1.301 ne vaut pas pour une autre version (K0-S1-01)."""
+
+    CAPTURED = "2.1.301"
+
+    @pytest.mark.parametrize("version", ["2.1.300", "2.1.302", "2.2.0", "3.0.0", "2.1.30", "2.1.3010", "unknown"])
+    def test_another_version_is_not_fenced(self, version: str) -> None:
+        assert is_fenced(HostId.CLAUDE_CODE_CLI, version) is False
+
+    @pytest.mark.parametrize("version", [None, "", "  "])
+    def test_missing_version_is_not_fenced(self, version: str | None) -> None:
+        assert is_fenced(HostId.CLAUDE_CODE_CLI, version) is False
+
+    def test_captured_version_is_fenced(self) -> None:
+        assert is_fenced(HostId.CLAUDE_CODE_CLI, self.CAPTURED) is True
+        assert is_fenced(HostId.CLAUDE_CODE_CLI, f" {self.CAPTURED} ") is True
+
+    def test_another_version_has_nothing_verified(self) -> None:
+        contract = contract_for(HostId.CLAUDE_CODE_CLI, "2.1.300")
+        assert not any(contract.verified(key) for key in CONTRACT_KEYS)
+        assert contract.host_version == ""
+
+    def test_captured_version_keeps_its_evidence(self) -> None:
+        contract = contract_for(HostId.CLAUDE_CODE_CLI, self.CAPTURED)
+        assert contract.verified("pretooluse_deny") and contract.host_version == self.CAPTURED
+
+    def test_hosts_without_capture_are_not_fenced_whatever_the_version(self) -> None:
+        for host in (HostId.GITHUB_COPILOT, HostId.CODEX, HostId.CURSOR, HostId.GEMINI_CLI, HostId.UNKNOWN):
+            assert is_fenced(host, "") is False, host
+
+    def test_version_is_a_required_argument(self) -> None:
+        with pytest.raises(TypeError):
+            is_fenced(HostId.CLAUDE_CODE_CLI)  # type: ignore[call-arg]
+        with pytest.raises(TypeError):
+            contract_for(HostId.CLAUDE_CODE_CLI)  # type: ignore[call-arg]
 
 
 class TestVerifiedMeansProven:
     """Le contenu des fixtures porte la preuve ; le statut ne se déclare pas."""
 
     def test_claude_code_is_fenced_only_because_the_tool_really_stopped(self) -> None:
-        contract = contract_for(HostId.CLAUDE_CODE_CLI)
-        assert is_fenced(HostId.CLAUDE_CODE_CLI) is True
+        contract = recorded_contract(HostId.CLAUDE_CODE_CLI)
+        assert is_fenced(HostId.CLAUDE_CODE_CLI, "2.1.301") is True
         control = _fixture("claude-code/01-pretooluse-control-allow.json")["observed"]
         assert control["tool_executed"] is True and control["marker_file_created"] is True
         denials = [f for f in contract.evidence["pretooluse_deny"].fixtures if "deny" in f]
@@ -139,12 +178,12 @@ class TestVerifiedMeansProven:
     def test_quota_is_unverified_because_no_exhausted_plan_was_seen(self) -> None:
         fx = _fixture("claude-code/03-quota-signal.json")
         assert fx["observed"]["exhausted_plan_observed"] is False
-        assert not contract_for(HostId.CLAUDE_CODE_CLI).verified("quota_signal")
+        assert not recorded_contract(HostId.CLAUDE_CODE_CLI).verified("quota_signal")
         assert fx["stream_event_allowed_state"]["rate_limit_info"]["status"] == "allowed"
         assert isinstance(fx["stream_event_allowed_state"]["rate_limit_info"]["resetsAt"], int)
 
     def test_subagent_model_is_read_from_the_transcript_not_the_payload(self) -> None:
-        contract = contract_for(HostId.CLAUDE_CODE_CLI)
+        contract = recorded_contract(HostId.CLAUDE_CODE_CLI)
         fx = _fixture("claude-code/05-subagent-stop.json")
         assert fx["observed"]["model_field_in_SubagentStop_payload"] is False
         assert "model" not in fx["payloads"]["SubagentStop"]
@@ -157,10 +196,10 @@ class TestVerifiedMeansProven:
         assert fx["observed"]["state_field_present"] is False
         assert fx["observed"]["waitingFor_field_present"] is False
         assert {"pid", "sessionId", "status"} <= set(fx["observed"]["fields_seen"])
-        assert contract_for(HostId.CLAUDE_CODE_CLI).verified("liveness_probe")
+        assert recorded_contract(HostId.CLAUDE_CODE_CLI).verified("liveness_probe")
 
     def test_background_session_points_not_reached_stay_unverified(self) -> None:
-        contract = contract_for(HostId.CLAUDE_CODE_CLI)
+        contract = recorded_contract(HostId.CLAUDE_CODE_CLI)
         fx = _fixture("claude-code/07-bg-untrusted-workspace.json")["observed"]
         assert fx["session_started"] is False and fx["process_exit_code"] == 1
         assert contract.verified("bg_workspace_trust")

@@ -390,11 +390,33 @@ _CONTRACTS: dict[HostId, HostContract] = {
 }
 
 
-def contract_for(host_id: HostId) -> HostContract:
-    """Contrat observé de *host_id* ; un hôte jamais capturé n'a rien de vérifié."""
+def recorded_contract(host_id: HostId) -> HostContract:
+    """Contrat tel que capturé, à la version qu'il porte (``host_version``).
+
+    À réserver à l'audit de la table et des fixtures : une décision (fencing,
+    récolte) passe par :func:`contract_for`, qui exige la version de l'hôte.
+    """
     return _CONTRACTS.get(host_id) or _unverified_contract(host_id)
 
 
-def is_fenced(host_id: HostId) -> bool:
-    """Un bail perdu peut-il être récolté sur cet hôte ? Non, sauf preuve."""
-    return contract_for(host_id).fenced
+def contract_for(host_id: HostId, host_version: str | None) -> HostContract:
+    """Contrat de *host_id* valable pour *host_version* ; rien de vérifié sinon.
+
+    Une preuve vaut pour la version sur laquelle elle a été capturée, pas pour
+    les autres. Version absente (``None``, vide), différente de la version
+    capturée ou jamais capturée : contrat entièrement non vérifié.
+    """
+    recorded = recorded_contract(host_id)
+    wanted = (host_version or "").strip()
+    if wanted and recorded.host_version and wanted == recorded.host_version:
+        return recorded
+    return _unverified_contract(host_id)
+
+
+def is_fenced(host_id: HostId, host_version: str | None) -> bool:
+    """Un bail perdu peut-il être récolté sur cet hôte, à cette version ? Non, sauf preuve.
+
+    La preuve est celle de la version capturée : toute autre version, ou une
+    version inconnue (``None``), vaut ``False``.
+    """
+    return contract_for(host_id, host_version).fenced
