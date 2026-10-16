@@ -587,6 +587,53 @@ def grimoire_standard_gate(
         return _tool_error({"error": str(exc)})
 
 
+# ── Code graph : fraîcheur ────────────────────────────────────────────────────
+#
+# Le graphe de code est une dérivation des sources ; sans verdict, un agent
+# interroge un graphe qu'il ne sait pas daté. `freshness` recalcule l'empreinte
+# des sources à chaque appel et la compare à celle du reçu d'indexation.
+
+
+@mcp.tool(annotations=_reads())
+def grimoire_codegraph_freshness(project_path: str = ".") -> str:
+    """Tell whether the indexed code graph still matches the source (current/stale/unverified).
+
+    Args:
+        project_path: Path to project root (default: current directory).
+    """
+    from grimoire.codegraph.freshness import check_freshness
+
+    try:
+        fresh = check_freshness(Path(project_path).resolve())
+        return json.dumps({"freshness": fresh.to_dict()}, indent=2, ensure_ascii=False)
+    except (GrimoireError, ValueError, OSError) as exc:
+        return _tool_error({"error": str(exc)})
+
+
+@mcp.tool(annotations=_writes(destructive=False, idempotent=True))
+def grimoire_codegraph_index(project_path: str = ".", source_dir: str = "src") -> str:
+    """Index the Python sources and record the fingerprint receipt that `freshness` compares against.
+
+    Args:
+        project_path: Path to project root (default: current directory).
+        source_dir: Source directory relative to the project root (default: "src").
+    """
+    from grimoire.codegraph.freshness import check_freshness, record_index
+
+    root = Path(project_path).resolve()
+    try:
+        source = (root / source_dir).resolve()
+        if not source.is_relative_to(root) or not source.is_dir():
+            return _tool_error({"error": f"source_dir {source_dir!r} is not a directory inside the project"})
+        _, receipt = record_index(root, source_dir)
+        return json.dumps({
+            "stats": receipt["stats"],
+            "freshness": check_freshness(root).to_dict(),
+        }, indent=2, ensure_ascii=False)
+    except (GrimoireError, ValueError, OSError) as exc:
+        return _tool_error({"error": str(exc)})
+
+
 # ── Tâches (issue #138) ───────────────────────────────────────────────────────
 #
 # Un agent ne pouvait pas savoir qu'un board existait : le serveur exposait la
