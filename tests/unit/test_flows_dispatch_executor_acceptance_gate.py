@@ -78,7 +78,7 @@ def _envelope_writer(tmp_path: Path, name: str, *, extra_body: str = "") -> Path
 
 
 def _invocation(script: Path) -> str:
-    return f"{sys.executable} {script} {{prompt}} --model {{model}}"
+    return f"{Path(sys.executable).as_posix()} {Path(script).as_posix()} {{prompt}} --model {{model}}"
 
 
 def _provider_yaml(pid: str, tier: str, invocation: str) -> str:

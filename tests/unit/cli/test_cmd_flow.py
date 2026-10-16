@@ -207,7 +207,7 @@ providers:
     allowed_capabilities: ["chat", "code"]
     default_models: ["writer-model"]
     currency: "api"
-    invocation: "{sys.executable} {script} {{prompt}} --model {{model}}"
+    invocation: "{Path(sys.executable).as_posix()} {Path(script).as_posix()} {{prompt}} --model {{model}}"
     models:
       - id: "writer-model"
         tier: "cheap"

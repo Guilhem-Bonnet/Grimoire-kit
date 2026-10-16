@@ -275,7 +275,7 @@ class TestLLMRouter(unittest.TestCase):
     def test_route_logs_stats(self):
         self.router.route("Test prompt", agent_id="dev")
         self.assertTrue(self.stats_file.exists())
-        content = self.stats_file.read_text()
+        content = self.stats_file.read_text(encoding="utf-8")
         entry = json.loads(content.strip())
         self.assertIn("model", entry)
         self.assertIn("agent", entry)

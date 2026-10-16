@@ -21,7 +21,7 @@ def _project(tmp_path: Path, memory_block: str) -> Path:
         '  description: "d"\n'
         '  type: "infrastructure"\n'
         f"memory:\n{memory_block}",
-    )
+    encoding="utf-8",)
     return tmp_path
 
 

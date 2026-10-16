@@ -548,7 +548,7 @@ def _dispatch_script(tmp_path: Path, name: str, body: str) -> Path:
 
 
 def _dispatch_invocation(script: Path) -> str:
-    return f"{sys.executable} {script} {{prompt}} --model {{model}}"
+    return f"{Path(sys.executable).as_posix()} {Path(script).as_posix()} {{prompt}} --model {{model}}"
 
 
 def _dispatch_write_registry(root: Path, pid: str, tier: str, invocation: str) -> None:

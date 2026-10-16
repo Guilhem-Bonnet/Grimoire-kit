@@ -141,7 +141,7 @@ class TestTokenBudgetEnforcer(unittest.TestCase):
         """Create files to trigger token usage."""
         docs = self.tmpdir / "docs"
         docs.mkdir()
-        (docs / "big-doc.md").write_text("A" * 10000)
+        (docs / "big-doc.md").write_text("A" * 10000, encoding="utf-8")
         enforcer = self.mod.TokenBudgetEnforcer(self.tmpdir)
         status = enforcer.check()
         # Should detect the doc file
@@ -308,7 +308,7 @@ class TestUsageHistory(unittest.TestCase):
         )
         self.mod._log_usage(self.project_root, status)
         log_path = self.project_root / self.mod.TOKEN_USAGE_LOG
-        lines = log_path.read_text().strip().splitlines()
+        lines = log_path.read_text(encoding="utf-8").strip().splitlines()
         self.assertEqual(len(lines), 1)
         entry = json.loads(lines[0])
         self.assertIn("ts", entry)
@@ -327,7 +327,7 @@ class TestUsageHistory(unittest.TestCase):
             for i in range(1500):
                 f.write(json.dumps({"ts": f"t{i}", "pct": 0.1}) + "\n")
         self.mod._prune_usage_log(self.project_root, max_entries=1000)
-        lines = log_path.read_text().strip().splitlines()
+        lines = log_path.read_text(encoding="utf-8").strip().splitlines()
         self.assertEqual(len(lines), 1000)
 
     def test_prune_noop_when_under_limit(self):
@@ -337,7 +337,7 @@ class TestUsageHistory(unittest.TestCase):
             for i in range(50):
                 f.write(json.dumps({"ts": f"t{i}", "pct": 0.1}) + "\n")
         self.mod._prune_usage_log(self.project_root, max_entries=1000)
-        lines = log_path.read_text().strip().splitlines()
+        lines = log_path.read_text(encoding="utf-8").strip().splitlines()
         self.assertEqual(len(lines), 50)
 
     def test_load_usage_history_empty(self):

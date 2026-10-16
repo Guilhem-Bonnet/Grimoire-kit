@@ -45,8 +45,8 @@ def tmp_yaml(tmp_path: Path) -> Path:
         "  backend: local\n"
         "agents:\n"
         "  archetype: web-app\n"
-        "installed_archetypes: [web-app, minimal]\n"
-    )
+        "installed_archetypes: [web-app, minimal]\n",
+    encoding="utf-8",)
     return p
 
 
@@ -280,13 +280,13 @@ class TestGrimoireConfigFromYaml:
 
     def test_empty_file(self, tmp_path: Path) -> None:
         empty = tmp_path / "empty.yaml"
-        empty.write_text("")
+        empty.write_text("", encoding="utf-8")
         with pytest.raises(GrimoireConfigError, match="empty"):
             GrimoireConfig.from_yaml(empty)
 
     def test_invalid_yaml(self, tmp_path: Path) -> None:
         bad = tmp_path / "bad.yaml"
-        bad.write_text("{{{{not yaml")
+        bad.write_text("{{{{not yaml", encoding="utf-8")
         with pytest.raises(GrimoireConfigError, match="Cannot parse"):
             GrimoireConfig.from_yaml(bad)
 
@@ -296,13 +296,13 @@ class TestGrimoireConfigFromYaml:
 class TestGrimoireConfigFindAndLoad:
     def test_finds_in_current_dir(self, tmp_path: Path) -> None:
         cfg_file = tmp_path / "project-context.yaml"
-        cfg_file.write_text("project:\n  name: found-here\n")
+        cfg_file.write_text("project:\n  name: found-here\n", encoding="utf-8")
         cfg = GrimoireConfig.find_and_load(tmp_path)
         assert cfg.project.name == "found-here"
 
     def test_finds_in_parent(self, tmp_path: Path) -> None:
         cfg_file = tmp_path / "project-context.yaml"
-        cfg_file.write_text("project:\n  name: parent-found\n")
+        cfg_file.write_text("project:\n  name: parent-found\n", encoding="utf-8")
         child = tmp_path / "src" / "deep"
         child.mkdir(parents=True)
         cfg = GrimoireConfig.find_and_load(child)

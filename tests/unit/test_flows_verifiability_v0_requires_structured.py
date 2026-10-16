@@ -80,7 +80,7 @@ def _write_registry(root: Path) -> None:
     rétrogradé, ce qui ne teste rien de la règle elle-même.
     """
     (root / STANDARD).mkdir(parents=True, exist_ok=True)
-    invocation = f"{sys.executable} {_always_conforms_writer(root)} {{prompt}} --model {{model}}"
+    invocation = f"{Path(sys.executable).as_posix()} {Path(_always_conforms_writer(root)).as_posix()} {{prompt}} --model {{model}}"
     providers = "\n".join(
         f"""\
   - id: "{pid}"

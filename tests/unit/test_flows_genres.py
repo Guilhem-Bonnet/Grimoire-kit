@@ -81,7 +81,7 @@ def _writer_script(
 
 
 def _invocation(script: Path) -> str:
-    return f"{sys.executable} {script} {{prompt}} --model {{model}}"
+    return f"{Path(sys.executable).as_posix()} {Path(script).as_posix()} {{prompt}} --model {{model}}"
 
 
 def _write_registry(root: Path, script: Path) -> None:

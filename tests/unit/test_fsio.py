@@ -41,11 +41,11 @@ def test_two_processes_are_mutually_exclusive(tmp_path: Path, mode: str) -> None
     if mode == "fcntl" and fsio._fcntl is None:
         pytest.skip("fcntl indisponible")
     counter = tmp_path / "counter"
-    counter.write_text("0")
+    counter.write_text("0", encoding="utf-8")
     env = {**os.environ, "PYTHONPATH": str(SRC.parent)}
     procs = [subprocess.Popen([sys.executable, "-c", _WORKER, str(counter), "25", mode], env=env) for _ in range(2)]
     assert [p.wait(timeout=120) for p in procs] == [0, 0]
-    assert counter.read_text() == "50"  # un seul écrasement perdu suffirait à le faire échouer
+    assert counter.read_text(encoding="utf-8") == "50"  # un seul écrasement perdu suffirait à le faire échouer
 
 
 def test_fallback_lock_times_out_and_cleans_up(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -62,7 +62,7 @@ def test_fallback_lock_breaks_a_stale_lock(tmp_path: Path, monkeypatch: pytest.M
     monkeypatch.setattr(fsio, "_fcntl", None)
     target = tmp_path / "f"
     lock = fsio._lock_path(target)
-    lock.write_text("")
+    lock.write_text("", encoding="utf-8")
     old = lock.stat().st_mtime - fsio._STALE_AFTER_S - 5
     os.utime(lock, (old, old))
     with fsio.locked(target, timeout=0.5):
@@ -79,7 +79,7 @@ def test_atomic_write_replaces_content(tmp_path: Path) -> None:
 
 def test_failure_before_replace_keeps_old_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     target = tmp_path / "f.txt"
-    target.write_text("ancien")
+    target.write_text("ancien", encoding="utf-8")
 
     def boom(*_a: object, **_k: object) -> None:
         raise OSError("panne entre le temporaire et le replace")
@@ -87,13 +87,13 @@ def test_failure_before_replace_keeps_old_file(tmp_path: Path, monkeypatch: pyte
     monkeypatch.setattr(os, "replace", boom)
     with pytest.raises(OSError, match="panne"):
         fsio.atomic_write(target, "nouveau")
-    assert target.read_text() == "ancien"
+    assert target.read_text(encoding="utf-8") == "ancien"
     assert [p.name for p in tmp_path.iterdir()] == ["f.txt"]  # pas de temporaire orphelin
 
 
 def test_failure_during_write_keeps_old_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     target = tmp_path / "f.txt"
-    target.write_text("ancien")
+    target.write_text("ancien", encoding="utf-8")
 
     def boom(_fd: int) -> None:
         raise OSError("disque plein")
@@ -101,7 +101,7 @@ def test_failure_during_write_keeps_old_file(tmp_path: Path, monkeypatch: pytest
     monkeypatch.setattr(os, "fsync", boom)
     with pytest.raises(OSError, match="disque"):
         fsio.atomic_write(target, "nouveau")
-    assert target.read_text() == "ancien"
+    assert target.read_text(encoding="utf-8") == "ancien"
 
 
 # --- revue W1-00 : casse atomique, mode, délai ------------------------------
@@ -146,7 +146,7 @@ def test_breaking_a_stale_lock_never_steals_a_fresh_one(tmp_path: Path) -> None:
     """W1-00-S1 : B juge le verrou abandonne, A le casse et le reprend, B ne doit pas supprimer le neuf."""
     target = tmp_path / "t"
     lock = fsio._lock_path(target)
-    lock.write_text("")
+    lock.write_text("", encoding="utf-8")
     os.utime(lock, (1, 1))
     log = tmp_path / "log"
     env = {**os.environ, "PYTHONPATH": str(SRC.parent)}
@@ -156,7 +156,7 @@ def test_breaking_a_stale_lock_never_steals_a_fresh_one(tmp_path: Path) -> None:
     ]
     # A d'abord : un zombie non attendu passerait pour un processus vivant au test de pid
     assert [p.wait(timeout=60) for p in reversed(procs)] == [0, 0]
-    rows = {r: (float(t0), float(t1), k) for r, t0, t1, k in (ln.split() for ln in log.read_text().splitlines())}
+    rows = {r: (float(t0), float(t1), k) for r, t0, t1, k in (ln.split() for ln in log.read_text(encoding="utf-8").splitlines())}
     assert set(rows) == {"a", "b"}
     # le vol lui-meme : le verrou de A a disparu (ou change de jeton) pendant sa section critique
     assert rows["a"][2] == "1", f"le verrou de A a ete vole pendant sa section critique : {rows}"
@@ -170,14 +170,14 @@ def test_release_does_not_remove_a_lock_that_is_not_ours(tmp_path: Path, monkeyp
     lock = fsio._lock_path(target)
     with fsio.locked(target):
         lock.unlink()
-        lock.write_text(f"{os.getpid()}:autre-jeton")  # verrou casse puis repris par un autre
-    assert lock.read_text() == f"{os.getpid()}:autre-jeton"
+        lock.write_text(f"{os.getpid()}:autre-jeton", encoding="utf-8")  # verrou casse puis repris par un autre
+    assert lock.read_text(encoding="utf-8") == f"{os.getpid()}:autre-jeton"
 
 
 @pytest.mark.skipif(os.name != "posix", reason="bits de mode POSIX")
 def test_atomic_write_keeps_existing_mode(tmp_path: Path) -> None:
     target = tmp_path / "f.txt"
-    target.write_text("x")
+    target.write_text("x", encoding="utf-8")
     target.chmod(0o644)
     fsio.atomic_write(target, "y")
     assert stat.S_IMODE(target.stat().st_mode) == 0o644
@@ -347,7 +347,7 @@ def test_fallback_breaks_a_fresh_lock_of_a_dead_process(tmp_path: Path, monkeypa
     dead = subprocess.Popen([sys.executable, "-c", "pass"])
     dead.wait()
     target = tmp_path / "f"
-    fsio._lock_path(target).write_text(f"{dead.pid}:jeton")  # frais (mtime = maintenant), proprietaire mort
+    fsio._lock_path(target).write_text(f"{dead.pid}:jeton", encoding="utf-8")  # frais (mtime = maintenant), proprietaire mort
     t0 = time.monotonic()
     with fsio.locked(target, timeout=5):
         pass
@@ -357,7 +357,7 @@ def test_fallback_breaks_a_fresh_lock_of_a_dead_process(tmp_path: Path, monkeypa
 def test_fallback_keeps_a_fresh_lock_of_a_live_process(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(fsio, "_fcntl", None)
     target = tmp_path / "f"
-    fsio._lock_path(target).write_text(f"{os.getpid()}:jeton")
+    fsio._lock_path(target).write_text(f"{os.getpid()}:jeton", encoding="utf-8")
     with pytest.raises(TimeoutError), fsio.locked(target, timeout=0.1):
         pass
 

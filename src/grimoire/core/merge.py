@@ -194,7 +194,7 @@ class MergeEngine:
                 "files_created": created,
                 "files_skipped": skipped,
             }
-            log_path.write_text(json.dumps(log_entry, indent=2))
+            log_path.write_text(json.dumps(log_entry, indent=2), encoding="utf-8")
 
         return MergeResult(
             files_created=tuple(created),
@@ -215,7 +215,7 @@ class MergeEngine:
         if not log_path.is_file():
             raise GrimoireMergeError(f"Merge log not found: {log_path}")
 
-        data = json.loads(log_path.read_text())
+        data = json.loads(log_path.read_text(encoding="utf-8"))
         target = log_path.parent
         deleted: list[str] = []
 

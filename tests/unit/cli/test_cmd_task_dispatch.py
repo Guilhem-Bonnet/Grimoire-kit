@@ -125,7 +125,7 @@ def test_cascade_verte_en_json_porte_les_tentatives(tmp_path: Path) -> None:
         Path("marker.txt").write_text("done", encoding="utf-8")
         """,
     )
-    _write_registry(tmp_path, "vert", "cheap", f"{sys.executable} {green} {{prompt}} --model {{model}}")
+    _write_registry(tmp_path, "vert", "cheap", f"{Path(sys.executable).as_posix()} {Path(green).as_posix()} {{prompt}} --model {{model}}")
     tid = ajoute(tmp_path, "la suite de tests passe")
 
     res = runner.invoke(
@@ -143,7 +143,7 @@ def test_cascade_verte_en_json_porte_les_tentatives(tmp_path: Path) -> None:
 
 def test_chaine_epuisee_sort_en_1(tmp_path: Path) -> None:
     red = _script(tmp_path, "red.py", "pass\n")
-    _write_registry(tmp_path, "rouge", "cheap", f"{sys.executable} {red} {{prompt}} --model {{model}}")
+    _write_registry(tmp_path, "rouge", "cheap", f"{Path(sys.executable).as_posix()} {Path(red).as_posix()} {{prompt}} --model {{model}}")
     tid = ajoute(tmp_path, "la suite de tests passe")
 
     res = run(tmp_path, "dispatch", tid, "--check", "test -f marker.txt", "--max-tier", "cheap")
@@ -164,7 +164,7 @@ def test_dispatch_json_porte_review(tmp_path: Path) -> None:
         Path("marker.txt").write_text("done", encoding="utf-8")
         """,
     )
-    _write_registry(tmp_path, "vert", "cheap", f"{sys.executable} {green} {{prompt}} --model {{model}}")
+    _write_registry(tmp_path, "vert", "cheap", f"{Path(sys.executable).as_posix()} {Path(green).as_posix()} {{prompt}} --model {{model}}")
     tid = ajoute(tmp_path, "la suite de tests passe")
 
     res = runner.invoke(
@@ -199,7 +199,7 @@ def test_start_tier_explicite_saute_cheap(tmp_path: Path) -> None:
         Path("marker.txt").write_text("done", encoding="utf-8")
         """,
     )
-    _write_registry(tmp_path, "mid-only", "mid", f"{sys.executable} {mid_green} {{prompt}} --model {{model}}")
+    _write_registry(tmp_path, "mid-only", "mid", f"{Path(sys.executable).as_posix()} {Path(mid_green).as_posix()} {{prompt}} --model {{model}}")
     tid = ajoute(tmp_path, "la suite de tests passe")
 
     res = runner.invoke(
@@ -248,7 +248,7 @@ def test_task_show_affiche_la_relecture_du_dernier_dispatch(tmp_path: Path) -> N
         Path("marker.txt").write_text("done", encoding="utf-8")
         """,
     )
-    _write_registry(tmp_path, "vert", "cheap", f"{sys.executable} {green} {{prompt}} --model {{model}}")
+    _write_registry(tmp_path, "vert", "cheap", f"{Path(sys.executable).as_posix()} {Path(green).as_posix()} {{prompt}} --model {{model}}")
     tid = ajoute(tmp_path, "la suite de tests passe")
     dispatch_res = run(tmp_path, "dispatch", tid, "--check", "test -f marker.txt")
     assert dispatch_res.exit_code == 0, dispatch_res.output
@@ -282,7 +282,7 @@ def test_dispatch_json_porte_uncertainties(tmp_path: Path) -> None:
         Path("marker.txt").write_text("done", encoding="utf-8")
         """,
     )
-    _write_registry(tmp_path, "vert", "cheap", f"{sys.executable} {green} {{prompt}} --model {{model}}")
+    _write_registry(tmp_path, "vert", "cheap", f"{Path(sys.executable).as_posix()} {Path(green).as_posix()} {{prompt}} --model {{model}}")
     tid = ajoute(tmp_path, "la suite de tests passe")
 
     res = runner.invoke(
@@ -307,7 +307,7 @@ def test_dispatch_texte_affiche_les_incertitudes_declarees(tmp_path: Path) -> No
         print("```")
         """,
     )
-    _write_registry(tmp_path, "worker", "cheap", f"{sys.executable} {ouvrier} {{prompt}} --model {{model}}")
+    _write_registry(tmp_path, "worker", "cheap", f"{Path(sys.executable).as_posix()} {Path(ouvrier).as_posix()} {{prompt}} --model {{model}}")
     tid = ajoute(tmp_path, "la suite de tests passe")
 
     res = run(tmp_path, "dispatch", tid, "--check", "test -f marker.txt")
@@ -329,7 +329,7 @@ def test_task_show_affiche_les_uncertainties_du_dernier_dispatch(tmp_path: Path)
         print("```")
         """,
     )
-    _write_registry(tmp_path, "worker", "cheap", f"{sys.executable} {ouvrier} {{prompt}} --model {{model}}")
+    _write_registry(tmp_path, "worker", "cheap", f"{Path(sys.executable).as_posix()} {Path(ouvrier).as_posix()} {{prompt}} --model {{model}}")
     tid = ajoute(tmp_path, "la suite de tests passe")
     dispatch_res = run(tmp_path, "dispatch", tid, "--check", "test -f marker.txt")
     assert dispatch_res.exit_code == 0, dispatch_res.output

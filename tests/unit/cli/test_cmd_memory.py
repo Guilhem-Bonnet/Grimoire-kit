@@ -341,7 +341,7 @@ class TestMemoryExport:
         result = runner.invoke(app, ["memory", "export", "-f", str(out)])
         assert result.exit_code == 0
         assert out.exists()
-        data = json.loads(out.read_text())
+        data = json.loads(out.read_text(encoding="utf-8"))
         assert data["count"] == 2
 
     def test_export_with_user_filter(self, mock_manager: MagicMock) -> None:

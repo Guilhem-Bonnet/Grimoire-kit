@@ -225,7 +225,7 @@ Adopted Python 3.12 for new features.
 
     def test_parse_empty_file(self):
         f = self.tmpdir / "empty.md"
-        f.write_text("")
+        f.write_text("", encoding="utf-8")
         sections = self.mod.SectionParser.parse_file(f, self.tmpdir)
         self.assertEqual(sections, [])
 
@@ -242,7 +242,7 @@ Adopted Python 3.12 for new features.
 Some content here with enough text to pass the threshold.
 """
         f = self.tmpdir / "test.md"
-        f.write_text(content)
+        f.write_text(content, encoding="utf-8")
         sections = self.mod.SectionParser.parse_file(f, self.tmpdir)
         dated = [s for s in sections if s.date]
         self.assertGreater(len(dated), 0)

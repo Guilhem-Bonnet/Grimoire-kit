@@ -346,7 +346,7 @@ def evidence_view(project_root: Path) -> dict[str, Any]:
                     for c in gate.checks
                 ],
             },
-            "pack_path": str(pack_path),
+            "pack_path": pack_path.as_posix(),
             "pack_exists": (root / pack_path).is_file(),
         })
     return {"enrolled": True, "profile": profile, "tasks": tasks, "count": len(tasks)}

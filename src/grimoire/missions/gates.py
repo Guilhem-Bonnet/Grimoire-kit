@@ -176,7 +176,7 @@ def _file_resolver(rel: Callable[[str], Path], label: str) -> Callable[..., Gate
         path = rel(tid)
         if (root / path).is_file():
             return None
-        return GateRefusal(name, f"{label} absent", f"attendu : {path}")
+        return GateRefusal(name, f"{label} absent", f"attendu : {path.as_posix()}")
 
     return resolve
 
