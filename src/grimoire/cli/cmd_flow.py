@@ -197,6 +197,8 @@ def _emit_resume(ctx: typer.Context, run_id: str, outcome: ResumeOutcome) -> Non
         console.print(f"[green]terminé[/green] {run_id} — dernier node : {outcome.node_id}")
         return
     console.print(f"[green]OK[/green] {run_id} — node suivant : {outcome.node_id}")
+    if outcome.directive and outcome.directive.directive_id:
+        console.print(f"  directive_id : {outcome.directive.directive_id}")
     if outcome.contract:
         console.print("")
         console.print(outcome.contract.to_text())
@@ -240,6 +242,51 @@ def _emit_dispatch_outcome(ctx: typer.Context, outcome: FlowDispatchOutcome) -> 
     console.print(f"[red]bloqué[/red] {outcome.run_id} — node « {outcome.node_id} »")
     for fault in outcome.faults:
         console.print(f"  - {fault}")
+
+
+#: Profils où un run de flow doit être rattaché à une tâche réellement claimée (W2-03).
+_CLAIM_REQUIRED_PROFILES = frozenset({"governed", "production"})
+
+
+def _resolve_run_task(project_root: Path, task_id: str) -> str:
+    """Le ``task_id`` du run : celui demandé, sinon le claim actif, sinon ``""`` (``FLOW-<id>``).
+
+    En profil governed/production, la tâche (demandée par ``--task-id``, posée
+    par ``GRIMOIRE_TASK_ID`` ou résolue) doit être un claim actif du Mission
+    Ledger : un identifiant inventé, ou une tâche jamais claimée, échapperait
+    aux gates de la tâche — refus nommant ``grimoire task claim``. Hors
+    enrôlement ou profil plus léger, comportement inchangé.
+    """
+    from grimoire.core.standard_state import (
+        active_profile_id,
+        claimed_task_ids,
+        is_standard_enrolled,
+        resolve_active_task,
+    )
+
+    root = project_root.resolve()
+    enrolled = is_standard_enrolled(root)
+    strict = enrolled and active_profile_id(root, write_cache=False) in _CLAIM_REQUIRED_PROFILES
+    if task_id:
+        resolved = task_id
+    elif not enrolled:
+        return ""
+    else:
+        active = resolve_active_task(root, write_cache=False)
+        if active.task_id == "bootstrap":
+            if not strict:
+                return ""
+            raise GrimoireRuntimeError(
+                "flow run refusé : profil governed sans tâche claimée — `grimoire task claim <task_id>` "
+                "avant de lancer le run, ou passer --task-id <task_id> (une tâche claimée)"
+            )
+        resolved = active.task_id
+    if strict and resolved.strip() not in claimed_task_ids(root):
+        raise GrimoireRuntimeError(
+            f"flow run refusé : la tâche « {resolved} » n'a aucun claim actif dans le Mission Ledger "
+            f"(profil governed) — `grimoire task claim {resolved}` d'abord, ou --task-id <une tâche claimée>"
+        )
+    return resolved
 
 
 def _fail(ctx: typer.Context, exc: GrimoireRuntimeError) -> None:
@@ -289,6 +336,11 @@ def flow_run(
 
     _check_executor_name(ctx, executor)
     _check_max_tier(ctx, max_tier)
+    try:
+        task_id = _resolve_run_task(project_root, task_id)
+    except GrimoireRuntimeError as exc:
+        _fail(ctx, exc)
+        return
 
     try:
         loaded = load_blueprint(blueprint, project_root.resolve())
@@ -325,13 +377,19 @@ def flow_run(
     if _fmt(ctx) == "json":
         typer.echo(
             json.dumps(
-                {"run_id": wfi.id, "status": wfi.status.value, "contract": contract.to_dict()},
+                {
+                    "run_id": wfi.id,
+                    "status": wfi.status.value,
+                    "contract": contract.to_dict(),
+                    "directive": engine.directive(wfi.id).to_dict(),
+                },
                 indent=2,
                 ensure_ascii=False,
             )
         )
     else:
         console.print(f"[green]OK[/green] {wfi.id} démarré — node courant : {contract.node_id}")
+        console.print(f"  directive_id : {engine.directive(wfi.id).directive_id}")
         console.print("")
         console.print(contract.to_text())
 
@@ -419,6 +477,14 @@ def flow_resume(
     executor: _EXECUTOR_OPTION = "interactive",
     max_tier: _MAX_TIER_OPTION = None,
     timeout: _TIMEOUT_OPTION = DEFAULT_CALL_TIMEOUT_S,
+    directive_id: Annotated[
+        str | None,
+        typer.Option(
+            "--directive-id",
+            help="interactive seul : directive_id reçu (flow run/status/resume --output json). "
+            "Refusé sans écriture si ce n'est plus la directive courante.",
+        ),
+    ] = None,
 ) -> None:
     """Vérifie la sortie du node courant contre son contrat, avance ou suspend.
 
@@ -457,7 +523,7 @@ def flow_resume(
         _fail(ctx, GrimoireRuntimeError(f"{output} : illisible ({exc})"))
         return
     try:
-        outcome_resume = engine.resume(run_id, output=payload, executor=_executor(ctx))
+        outcome_resume = engine.resume(run_id, output=payload, executor=_executor(ctx), directive_id=directive_id)
     except GrimoireRuntimeError as exc:
         _fail(ctx, exc)
         return

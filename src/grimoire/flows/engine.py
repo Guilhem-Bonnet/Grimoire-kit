@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING, Any
 from grimoire.core.exceptions import GrimoireRuntimeError
 from grimoire.core.fsio import atomic_write, locked
 from grimoire.flows.blueprint_loader import build_node_contracts, load_blueprint, topo_order
+from grimoire.flows.directive import Directive, blueprint_digest, directive_id_for
 from grimoire.flows.doctor import FlowDoctorReport, checkpoint_interrupted, diagnose
 from grimoire.flows.executor import InteractiveNodeExecutor, NodeExecutor
 from grimoire.flows.schemas import FlowRunMeta, FlowStatusView, NodeContract, ResumeOutcome
@@ -595,7 +596,116 @@ class FlowEngine:
                 return chk.step_id
         return None
 
+    def _attempt(self, run_id: str, node_id: str) -> int:
+        """Numéro de tentative du node : refus déjà journalisés pour lui + 1."""
+        failed = sum(
+            1
+            for e in self._kernel.get_run_events(run_id)
+            if e.event_type is RunEventType.STEP_FAILED and e.payload.get("step_id") == node_id
+        )
+        return failed + 1
+
+    def _digest_of(self, contracts: dict[str, NodeContract], order: list[str]) -> str:
+        return blueprint_digest(contracts[n].to_dict() for n in order if n in contracts)
+
+    def directive(self, run_id: str) -> Directive:
+        """La directive courante du run — lecture seule, stable entre deux appels (W2-03)."""
+        meta = self._load_meta(run_id)
+        wfi = self._kernel.get_instance(run_id)
+        if wfi is None:
+            raise GrimoireRuntimeError(f"run introuvable côté kernel : {run_id}")
+        if wfi.status in (WorkflowStatus.COMPLETED, WorkflowStatus.VERIFIED):
+            return Directive(kind="done", run_id=run_id, node_id=None, directive_id=None)
+        if _is_flow_terminal(wfi.status):
+            return Directive(
+                kind="blocked", run_id=run_id, node_id=None, directive_id=None, reason=wfi.status.value
+            )
+        order = list(meta.order)
+        node_id = self._current_node(wfi, order)
+        if node_id is None:
+            if not order:
+                return Directive(kind="done", run_id=run_id, node_id=None, directive_id=None)
+            # Tous les nodes sont checkpointés mais le statut n'est pas COMPLETED
+            # (crash entre le dernier checkpoint et ``complete``) : le run n'est
+            # PAS terminé, donc jamais ``done`` — l'hôte qui s'arrêterait là le
+            # laisserait en l'état. La directive reste celle du dernier node ;
+            # renvoyer sa sortie acceptée, avec ce directive_id, termine le run.
+            node_id = order[-1]
+        contracts = build_node_contracts(
+            load_blueprint(Path(meta.blueprint_path), self._project_root), self._project_root
+        )
+        attempt = self._attempt(run_id, node_id)
+        did = directive_id_for(run_id, node_id, attempt, self._digest_of(contracts, order))
+        if wfi.status is WorkflowStatus.BLOCKED:
+            # Un checkpoint destructif sans décision attestée (W2-01) est un
+            # ``blocked`` comme un autre (quatre kinds seulement) : seule la
+            # raison dit que l'issue est humaine, pas une correction de sortie.
+            refusal = self._last_refusal(wfi)
+            awaiting = (
+                refusal is not None
+                and refusal["node_id"] == node_id
+                and str(refusal["reason"] or "").startswith("awaiting_human")
+            )
+            return Directive("blocked", run_id, node_id, did, attempt, "awaiting_human" if awaiting else "contract_violation")
+        contract = contracts.get(node_id)
+        kind = "checkpoint" if contract is not None and contract.kind == "checkpoint" else "execute"
+        return Directive(kind, run_id, node_id, did, attempt)
+
+    def _directive_refusal(self, run_id: str, supplied: str, output: dict[str, Any], allow_replay: bool) -> None:
+        """Lève une faute nommée, SANS écrire, si ``supplied`` n'est pas la directive courante.
+
+        Exception : le rejeu (W1-03) d'une sortie déjà acceptée pour un node
+        franchi, tant que ``supplied`` est bien la directive de CE node — un hôte
+        qui n'a pas reçu la réponse renvoie sa requête telle quelle.
+        """
+        current = self.directive(run_id)
+        if current.directive_id == supplied:
+            return
+        if allow_replay:
+            # Y compris quand la directive courante est ``done`` : le rejeu du
+            # dernier node d'un run terminé est admis par ``_resume_core``.
+            wfi = self._kernel.get_instance(run_id)
+            digest = _output_digest(output)
+            crossed = self._crossed_node_for_digest(wfi, digest) if wfi is not None and digest is not None else None
+            if crossed is not None:
+                meta = self._load_meta(run_id)
+                contracts = build_node_contracts(
+                    load_blueprint(Path(meta.blueprint_path), self._project_root), self._project_root
+                )
+                bp = self._digest_of(contracts, list(meta.order))
+                if any(
+                    directive_id_for(run_id, crossed, n, bp) == supplied
+                    for n in range(1, self._attempt(run_id, crossed) + 1)
+                ):
+                    return
+        raise GrimoireRuntimeError(
+            f"run {run_id} : directive_id {supplied[:12]}… périmé ou étranger — la directive courante vise "
+            f"{'le node « ' + current.node_id + ' »' if current.node_id else 'aucun node'} "
+            f"({current.kind}, directive_id={current.directive_id}) ; rien n'a été écrit. "
+            "Relire `grimoire flow status` avant de répondre."
+        )
+
     def resume(
+        self,
+        run_id: str,
+        *,
+        output: dict[str, Any],
+        executor: NodeExecutor | None = None,
+        allow_replay: bool = True,
+        directive_id: str | None = None,
+    ) -> ResumeOutcome:
+        """``_resume_core`` + la directive qui suit (W2-03).
+
+        ``directive_id`` (optionnel, rétrocompatible) : la directive à laquelle
+        l'hôte répond. Une autre que la courante est refusée avant toute écriture.
+        Le résultat porte toujours la directive suivante (``directive_id``).
+        """
+        if directive_id is not None:
+            self._directive_refusal(run_id, directive_id, output, allow_replay)
+        outcome = self._resume_core(run_id, output=output, executor=executor, allow_replay=allow_replay)
+        return replace(outcome, directive=self.directive(run_id))
+
+    def _resume_core(
         self,
         run_id: str,
         *,
@@ -908,6 +1018,7 @@ class FlowEngine:
             last_refusal=self._last_refusal(wfi),
             contract=contract,
             parent_run_id=meta.parent_run_id,
+            directive=self.directive(run_id) if include_contract else None,
             checkpoint_decisions=self._authority(run_id).decisions(),
         )
 
