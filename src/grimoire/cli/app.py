@@ -453,6 +453,16 @@ def doctor(
     if cfg and cfg.agents.archetype:
         _record("archetype", passed=True, detail=f"Archetype configured: {cfg.agents.archetype}")
 
+    # 4ter. Tarifs de coût : une table datée depuis plus de 90 jours est signalée
+    # (avertissement, sans échec : le coût reste un ordre de grandeur).
+    from datetime import date as _date
+
+    from grimoire.tools.cost_model import rate_card_age_warning
+
+    rates_warning = rate_card_age_warning(_date.today())
+    if rates_warning:
+        _record("model_rates_dated", passed=True, detail=f"avertissement : {rates_warning}")
+
     # 4bis. --fix: regenerate missing VS Code agent wrappers and .mcp.json
     # (reuses ProjectScaffolder logic — idempotent, never overwrites).
     if fix:
