@@ -388,6 +388,11 @@ def task_show(
     console.print(f"  accepte : {', '.join(task.acceptance) or '—'}")
     console.print(f"  vérifiabilité : {verifiabilite['class']} — {verifiabilite['explanation']}")
     console.print(f"  modèle recommandé : {model_hint(advice)} [dim](palier : {advice['model_tier']})[/dim]")
+    for risque in task.accepted_risks:
+        console.print(
+            f"  [yellow]risque accepté[/yellow] : {escape(str(risque.get('reason', '')))} "
+            f"[dim]({risque.get('amendments')}/{risque.get('cap')} amendements, run {risque.get('run_id')})[/dim]"
+        )
     for entree in verifiabilite["criteria"]:
         motif = entree["pattern"] or "non reconnu"
         console.print(f"    [dim]- {escape(entree['criterion'])} → {motif}[/dim]")
