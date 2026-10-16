@@ -434,3 +434,35 @@ Le rapport de la première campagne réelle est publié sur la branche
 `weekly-bench.yml` — sous
 `_grimoire-output/bench-reports/three-arms/<date>/report.md` et `.json`), pas
 sur `main`.
+
+## 11. Garde de coût face au nu à chaque barrière (B-00)
+
+Chaque chantier qui ajoute de l'appel modèle (panel, passes de vérification, juge) ajoute du coût ; le critère de
+coût du lot L (≈124 % du nu pour 105 % visés) ne doit pas se dégrader sans que quelqu'un le voie. À chaque barrière,
+on rejoue un **sous-lot fixe** par `nu` et `kit-gov` et on compare le ratio à celui de la barrière précédente.
+
+- **Sous-lot** : `docs/bench/cost-gate-subset.json`, 4 tâches (une par langue, première dans l'ordre alphabétique du lot L),
+  k=3, soit 24 runs. Il est saturé : il mesure le coût, pas le succès, et le rapport le dit.
+- **Base** : `docs/bench/cost-gate-baseline.json`, le ratio du même sous-lot relu dans les 120 lignes du lot L : **118,4 %**
+  (le 124 % du lot L porte sur les 20 tâches). Aucun nouveau run n'a servi à l'établir.
+- **Tolérance** : 5 points par barrière (décision 13 du plan : arbitraire, non mesurée ; `--tolerance-points`).
+- **Un coût inconnu n'est pas zéro** : `results.jsonl` porte `cost_known` (faux si `claude -p` n'a pas rendu `total_cost_usd`) et le rapport
+  `cost_known_runs` / `cost_known_ratio` par bras. Sous 1, la garde rend `unevaluated`, qui bloque comme un dépassement.
+
+Lancer le sous-lot (dépense réelle, environ 4 $ au tarif du lot L ; non lancé par le chantier B-00) puis évaluer :
+
+```bash
+python scripts/bench/three_arms.py --full --arms nu,kit-gov --seed 551 --auth oauth-copy \
+    --workspace <workspace neuf> --grimoire-bin <chemin absolu> --label barriere-N \
+    --subset docs/bench/cost-gate-subset.json
+python scripts/bench/cost_gate.py --results <workspace>/state/results.jsonl \
+    --previous docs/bench/cost-gate-baseline.json --out-dir <dossier du rapport de barrière>
+```
+
+`--previous` reçoit le `cost-gate.json` de la barrière précédente (la base pour la première). Sortie : `cost-gate.md` (ratio, écart,
+verdict à inclure dans le rapport de barrière) et `cost-gate.json`. Code de sortie : 0 `pass` ou `waived`, 1 `exceeded`, 2 `unevaluated`.
+Une dérogation passe par `--waiver <fichier>` : `{"by": "Guilhem", "reason": "...", "date": "AAAA-MM-JJ"}`, tracée dans le rapport avec le verdict
+d'avant dérogation.
+
+`--subset` restreint le tirage aux 4 tâches déclarées et s'arrête avant tout run si l'une manque. Limites : un changement de modèle entre deux
+barrières est signalé en avertissement, pas refusé (voir B-01).

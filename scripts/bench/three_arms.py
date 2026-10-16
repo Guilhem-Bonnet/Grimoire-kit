@@ -46,6 +46,7 @@ from typing import Any
 
 # Gardes du dépôt de tâche (W1-08a) : module voisin, aussi quand ce script est chargé par chemin.
 sys.path.append(str(Path(__file__).resolve().parent))
+from cost_gate import cost_from_result, cost_known_fields, filter_tasks, partial_cost_notes
 from hidden_reads import (
     check_transcript,
     invalid_run_alert,
@@ -120,6 +121,7 @@ class RunOutcome:
 
     success: bool | None = None  # rempli après exécution des tests
     total_cost_usd: float = 0.0
+    cost_known: bool | None = None  # B-00 : False = le 0.0 n'est pas une mesure
     input_tokens: int = 0
     output_tokens: int = 0
     cache_read_input_tokens: int = 0
@@ -205,6 +207,7 @@ class RunRecord:
     # ``None`` pour les lignes antérieures, jamais reconstruit.
     transcript_check: str | None = None
     hidden_test_reads: list[dict[str, Any]] | None = None
+    cost_known: bool | None = None  # B-00 ; None = ligne antérieure, voir cost_gate.row_cost_known
 
     @property
     def invalid(self) -> bool:
@@ -1627,7 +1630,7 @@ def run_claude_headless(
     result = parse_result_event(lines)
     if result is not None:
         outcome.raw_result = result
-        outcome.total_cost_usd = float(result.get("total_cost_usd") or 0.0)
+        outcome.total_cost_usd, outcome.cost_known = cost_from_result(result)
         usage = result.get("usage") or {}
         outcome.input_tokens = int(usage.get("input_tokens") or 0)
         outcome.output_tokens = int(usage.get("output_tokens") or 0)
@@ -1813,6 +1816,7 @@ def build_report(
             "median_wall_seconds": _median([r.wall_seconds for r in arm_records]),
             "median_cost_usd_resolved": _median([r.total_cost_usd for r in resolved]),
             "total_cost_usd": sum(r.total_cost_usd for r in spent_records),
+            **cost_known_fields([r.to_dict() for r in spent_records]),
             "median_num_turns": _median([r.num_turns for r in arm_records]),
             "terminated_reasons": {
                 reason: sum(1 for r in arm_records if r.terminated_reason == reason)
@@ -1952,6 +1956,7 @@ def render_report_markdown(report: dict[str, Any]) -> str:
         )
     lines.append("")
 
+    lines.extend(partial_cost_notes(report["per_arm"], ARMS))
     lines.append("## Par tâche")
     lines.append("")
     lines.append("| Tâche | Langue | " + " | ".join(ARMS) + " |")
@@ -2124,6 +2129,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="sous-ensemble de bras à rejouer, ex. 'kit' ou 'nu,ecc,kit' (défaut : les trois) ; "
         "combiné à --resume, les lignes results.jsonl des autres bras restent comptées dans le rapport",
     )
+    parser.add_argument("--subset", type=Path, default=None, help="B-00 : ne rejoue que les tâches de ce fichier (docs/bench/cost-gate-subset.json)")
     parser.add_argument("--label", type=str, default=None, help="étiquette libre reprise dans report.md")
     parser.add_argument(
         "--grimoire-bin",
@@ -2165,7 +2171,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     bench_root = ensure_polyglot_benchmark(workspace)
     ecc_repo, ecc_commit = ensure_ecc_repo(workspace)
     catalog = discover_catalog(bench_root)
-    tasks = sample_tasks(catalog, seed=args.seed)
+    tasks = filter_tasks(sample_tasks(catalog, seed=args.seed), args.subset)
 
     state_dir = workspace / "state"
     state_dir.mkdir(parents=True, exist_ok=True)
@@ -2593,6 +2599,7 @@ def _run_one(
         run_index=run_index,
         success=success,
         total_cost_usd=outcome.total_cost_usd,
+        cost_known=bool(outcome.cost_known),
         input_tokens=outcome.input_tokens,
         output_tokens=outcome.output_tokens,
         recorded_at=datetime.now(tz=UTC).isoformat(),

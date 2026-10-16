@@ -1,0 +1,8 @@
+{
+  "schema": "grimoire.bench.cost-gate-subset.v1",
+  "source": "lot L (docs/bench/rejeu-lot-l-2026-10-02.md), graine 551, 20 tâches",
+  "rule": "par langue (python, javascript, go, rust), la première tâche du lot L dans l'ordre alphabétique de task_id",
+  "k": 3,
+  "arms": ["nu", "kit-gov"],
+  "tasks": ["go/bottle-song", "javascript/affine-cipher", "python/bowling", "rust/forth"]
+}
