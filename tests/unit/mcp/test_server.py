@@ -734,6 +734,7 @@ class TestReadOnlyToolsWriteNothing:
         "grimoire_memory_search": {"query": "quoi que ce soit"},
         "grimoire_standard_verify": {},
         "grimoire_standard_audit": {},
+        "grimoire_codegraph_freshness": {},
         "task_list_ready": {},
         "task_show": {"task_id": "bootstrap"},
         "task_recall": {"task_id": "bootstrap"},

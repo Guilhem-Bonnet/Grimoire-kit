@@ -1455,6 +1455,8 @@ def up(
         pass
 
     if fmt == "json":
+        from grimoire.core.project_kind import detect_project_kind
+
         payload: dict[str, Any] = {
             "ok": not state.failed,
             "project": project_name,
@@ -1463,6 +1465,7 @@ def up(
             "steps": [{"step": s.step, "status": s.status, "detail": s.detail} for s in state.steps],
             "agents_count": agents_count,
             "directories_missing": directories_missing,
+            "project_kind": detect_project_kind(target).to_dict(),
             "env": [
                 {"name": c.name, "passed": c.passed, "level": c.level, "detail": c.detail, "remedy": c.remedy}
                 for c in checks

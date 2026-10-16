@@ -1593,7 +1593,7 @@ def check_evidence_gates(
         # projection de l'inventaire observé, puis les mêmes constats de
         # contenu que `standard verify` (evidence_pack, acceptance_record,
         # claim_ledger).
-        checks.extend(review_state_content_checks(root, profile, normalized_task_id))
+        checks.extend(review_state_content_checks(root, profile, normalized_task_id, target_state=state))
     if state == "released" and not (root / required_paths["compliance_score"]).is_file():
         missing.append("compliance_score")
     for key in missing:
