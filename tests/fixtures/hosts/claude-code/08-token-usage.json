@@ -1,0 +1,103 @@
+{
+  "host": "claude-code",
+  "host_version": "2.1.301",
+  "point": 8,
+  "capability": "local_token_usage",
+  "captured_on": "2026-10-16",
+  "captured_with": "claude -p go --model haiku --setting-sources project --output-format stream-json --verbose --max-turns 4 --allowedTools 'Bash(touch:*)'",
+  "observed": {
+    "stream_json_result_line": {
+      "total_cost_usd": 0.00300673,
+      "usage": {
+        "input_tokens": 4,
+        "cache_creation_input_tokens": 11588,
+        "cache_read_input_tokens": 56723,
+        "output_tokens": 243,
+        "output_tokens_details": {
+          "thinking_tokens": 146
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 11588,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "global",
+        "iterations": [
+          {
+            "input_tokens": 2,
+            "output_tokens": 3,
+            "cache_read_input_tokens": 34016,
+            "cache_creation_input_tokens": 279,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 279
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "modelUsage": {
+        "claude-haiku-5-5": {
+          "inputTokens": 4,
+          "outputTokens": 243,
+          "cacheReadInputTokens": 56723,
+          "cacheCreationInputTokens": 11588,
+          "webSearchRequests": 0,
+          "costUSD": 0.00300673,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 128000,
+          "thinkingTokens": 146,
+          "canonicalModel": "claude-haiku-5-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "num_turns": 2,
+      "duration_api_ms": 3538
+    },
+    "session_transcript": "`<HOME>/.claude/projects/<project-slug>/<session_id>.jsonl`: each `assistant` line carries `message.model` and `message.usage` (input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens); sub-agent usage is in `<session_id>/subagents/agent-<agentId>.jsonl`.",
+    "transcript_assistant_usage_sample": [
+      {
+        "input_tokens": 2,
+        "cache_creation_input_tokens": 8523,
+        "cache_read_input_tokens": 25496,
+        "output_tokens": 161,
+        "output_tokens_details": {
+          "thinking_tokens": 53
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 8523,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "global",
+        "iterations": [
+          {
+            "input_tokens": 2,
+            "output_tokens": 161,
+            "cache_read_input_tokens": 25496,
+            "cache_creation_input_tokens": 8523,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 8523
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      }
+    ],
+    "cost_field_is_exact": "total_cost_usd and modelUsage.*.costUSD (costBasis `list`) are host computed list prices"
+  }
+}
