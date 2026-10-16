@@ -436,28 +436,14 @@ def _verify_dispatch_cost_slo(root: Path, result: StandardVerificationResult) ->
         cost = stats.overall.cost_per_resolved_task_usd
         max_cost = config["max_cost_per_resolved_task_usd"]
         unpriced = stats.overall.unpriced_calls
+        known = "unknown" if cost is None else f"at least ${cost:.4f}"
+        # Un coût partiel ou inconnu ne prouve jamais que le SLO est tenu (W1-01, #709).
         if cost is not None and cost > max_cost:
-            # Vrai aussi pour un minimum (``lower_bound``) : le coût réel n'est pas inférieur.
-            bound = "At least: " if unpriced else ""
-            _add_check(
-                result,
-                "dispatch.cost_slo",
-                severity,
-                f"{bound}Cost per resolved task (${cost:.4f}) exceeds the declared SLO (${max_cost:.4f}).",
-                path=rel_path,
-            )
+            msg = f"{'At least: ' if unpriced else ''}Cost per resolved task (${cost:.4f}) exceeds the declared SLO (${max_cost:.4f})."
+            _add_check(result, "dispatch.cost_slo", severity, msg, path=rel_path)
         elif unpriced:
-            # Jamais un succès silencieux (W1-01, issue #709) : un coût partiel ou
-            # inconnu ne prouve pas que le SLO est tenu.
-            known = "unknown" if cost is None else f"at least ${cost:.4f}"
-            _add_check(
-                result,
-                "dispatch.cost_slo",
-                "warning",
-                f"Cost per resolved task is {known}: {unpriced} dispatched call(s) reported no cost, "
-                f"so the declared SLO (${max_cost:.4f}) is not evaluated.",
-                path=rel_path,
-            )
+            msg = f"Cost per resolved task is {known}: {unpriced} call(s) reported no cost, so the SLO (${max_cost:.4f}) is not evaluated."
+            _add_check(result, "dispatch.cost_slo", "warning", msg, path=rel_path)
 
     if stats.pass_k_observations < config["min_pass_k_observations"]:
         _add_check(
