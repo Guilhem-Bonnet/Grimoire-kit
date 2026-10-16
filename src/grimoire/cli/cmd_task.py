@@ -369,6 +369,30 @@ def task_show(
     task = _require_task(service, task_id)
     advice = dispatch_advice(task)
     verifiabilite = advice["verifiability"]
+    # W2-10 : un risque accepté en l'état (`accept_as_is` d'un checkpoint de
+    # flow) remonte la tâche au moins en V1 — la classe dérivée du texte des
+    # critères ne bouge pas, c'est l'affichage et le conseil qui montent.
+    risques = [
+        dict(e.payload) | {"ts": e.created_at}
+        for e in service.ledger.list_events(task_id)
+        if e.event_type == "task.risk_accepted"
+    ]
+    if risques and verifiabilite["class"] == "V0":
+        verifiabilite = {
+            **verifiabilite,
+            "class": "V1",
+            "explanation": "Remontée de V0 : un risque a été accepté en l'état (accept_as_is) — une relecture reste due.",
+            "raised_by": "accepted_risk",
+        }
+        from grimoire.missions.dispatch_advice import model_tier_for, recommended_model_for
+        from grimoire.missions.verifiability import Verifiability
+
+        advice = {
+            **advice,
+            "verifiability": verifiabilite,
+            "recommended_model": recommended_model_for(Verifiability.V1),
+            "model_tier": model_tier_for(Verifiability.V1),
+        }
     # `recommended_model` est `None` sur V2 (aucun nom de modèle valide pour
     # l'outil `Agent` — #662) ; `model_tier` reste toujours
     # renseigné. Le JSON garde les deux champs bruts, le texte passe par
@@ -378,6 +402,7 @@ def task_show(
     if _fmt(ctx) == "json":
         payload = task.to_dict()
         payload["verifiability"] = verifiabilite
+        payload["accepted_risk"] = risques
         payload["recommended_model"] = advice["recommended_model"]
         payload["model_tier"] = advice["model_tier"]
         payload["last_dispatch"] = last_dispatch
@@ -388,6 +413,11 @@ def task_show(
     console.print(f"  accepte : {', '.join(task.acceptance) or '—'}")
     console.print(f"  vérifiabilité : {verifiabilite['class']} — {verifiabilite['explanation']}")
     console.print(f"  modèle recommandé : {model_hint(advice)} [dim](palier : {advice['model_tier']})[/dim]")
+    for risque in risques:
+        console.print(
+            f"  [yellow]risque accepté[/yellow] : {escape(str(risque.get('reason', '')))} "
+            f"[dim]({risque.get('amendments')}/{risque.get('cap')} amendements, run {risque.get('run_id')})[/dim]"
+        )
     for entree in verifiabilite["criteria"]:
         motif = entree["pattern"] or "non reconnu"
         console.print(f"    [dim]- {escape(entree['criterion'])} → {motif}[/dim]")

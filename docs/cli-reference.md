@@ -900,9 +900,14 @@ l'exécuteur qui a conduit le reste du run) doit porter
 `checkpoint_decision` (`approve`/`reject`/`amend`) ; `reject` bloque le run
 en nommant le motif (`checkpoint_reason`) dans l'événement de refus du
 kernel — « le motif dans le graphe de décision » — une reprise ultérieure
-rouvre exactement ce même node. Limite documentée : `amend` avance
-identiquement à `approve` au niveau du moteur, son motif n'est pas persisté
-séparément dans ce lot (le kernel n'a pas de canal pour un motif de succès).
+rouvre exactement ce même node. `amend` (W2-10) demande une révision : le
+node reste ouvert, la décision et son motif sont inscrits dans le journal du
+run (relu par `flow status`) et comptés. `accept_as_is` n'est accepté qu'après
+`config.checkpoint.max_amendments` amendements (entier >= 1, 3 par défaut) ; il
+exige `checkpoint_reason` (le risque nommé), inscrit `accepted_risk`, et pose
+`task.risk_accepted` sur la tâche du ledger liée au run (`--task-id`) si elle
+existe : `grimoire task show` l'affiche et remonte la tâche au moins en V1.
+Limite : le compteur est celui du journal du run, `amend` non attesté compris.
 
 **`budget`** — plafond de coût déclaré (`config.budget.maxCostUsd`),
 abandon des passes optionnelles avant dépassement. `passes` est une liste

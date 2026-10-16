@@ -42,6 +42,8 @@ from grimoire.runtime.kernel import RuntimeKernel
 from grimoire.runtime.schemas import Checkpoint, ExecutionContext, RunEventType, WorkflowInstance, WorkflowStatus
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from grimoire.flows.attestation import CheckpointJournal
 
 __all__ = [
@@ -224,7 +226,7 @@ def _checkpoint_digest(chk: Checkpoint) -> str | None:
     return None
 
 
-_CHECKPOINT_DECISIONS = ("approve", "reject", "amend")
+_CHECKPOINT_DECISIONS = ("approve", "reject", "amend", "accept_as_is")
 
 
 def checkpoint_decision_faults(output: dict[str, Any]) -> list[str]:
@@ -252,6 +254,8 @@ def checkpoint_decision_faults(output: dict[str, Any]) -> list[str]:
     if decision == "reject":
         reason = output.get("checkpoint_reason") or "(aucun motif fourni)"
         return [f"checkpoint rejeté : {reason}"]
+    # ``amend`` et ``accept_as_is`` (W2-10) sont jugés par ``judge_checkpoint`` :
+    # ils dépendent du journal du run (compteur d'amendements), pas de la sortie.
     return []
 
 
@@ -485,6 +489,33 @@ class FlowEngine:
 
     # ── Autorité humaine sur les checkpoints (W2-01) ────────────────────────
 
+    def _record_accepted_risk(
+        self, wfi: WorkflowInstance, run_id: str, node_id: str, risk: Mapping[str, Any]
+    ) -> None:
+        """Pose ``task.risk_accepted`` sur la tâche du ledger liée au run, si elle existe (W2-10).
+
+        Ne crée ni ledger ni tâche : un run sans tâche de ledger (``FLOW-<id>``
+        par défaut) garde le risque dans le journal du run, relu par
+        ``flow status``. ``grimoire task show`` lit cet événement et remonte la
+        tâche au moins en V1.
+        """
+        from grimoire.missions.ledger import MissionLedger
+        from grimoire.missions.service import DEFAULT_LEDGER_RELPATH
+
+        root = Path(self._project_root) / DEFAULT_LEDGER_RELPATH
+        if not (root / "events.jsonl").is_file():
+            return
+        ledger = MissionLedger(root)
+        if ledger.get_task(wfi.task_id) is None:
+            return
+        ledger.append_event(
+            "task.risk_accepted",
+            wfi.task_id,
+            "task",
+            self._actor_id,
+            {"run_id": run_id, "node_id": node_id, **risk},
+        )
+
     def _authority(self, run_id: str) -> CheckpointJournal:
         from grimoire.flows.attestation import CheckpointJournal
 
@@ -694,7 +725,12 @@ class FlowEngine:
             # rien) — vérifiée ici, Python-only, au même endroit que le
             # reste de la précondition de resume().
             faults = [*faults, *checkpoint_decision_faults(output)]
-            from grimoire.flows.attestation import destructive_checkpoints, judge_checkpoint
+            from grimoire.flows.attestation import (
+                DEFAULT_MAX_AMENDMENTS,
+                destructive_checkpoints,
+                judge_checkpoint,
+                max_amendments,
+            )
 
             gate = judge_checkpoint(
                 self._authority(run_id),
@@ -702,6 +738,7 @@ class FlowEngine:
                 current_id,
                 output,
                 destructive=current_id in destructive_checkpoints(blueprint),
+                cap=max_amendments(blueprint).get(current_id, DEFAULT_MAX_AMENDMENTS),
             )
             if gate is not None and gate.refusal:
                 faults.append(gate.refusal)
@@ -732,9 +769,9 @@ class FlowEngine:
             wfi = self._kernel.advance_step(wfi.id, ctx, step_id=current_id)
         if faults:
             wfi = self._kernel.fail_step(wfi.id, ctx, step_id=current_id, reason="; ".join(faults))
-            if gate is not None and gate.decision == "reject":
-                # Un refus est une décision : il consomme son challenge, la
-                # présentation suivante en émet un neuf.
+            if gate is not None and gate.decision in ("reject", "amend"):
+                # Un refus ou un amendement est une décision : il consomme son
+                # challenge, la présentation suivante en émet un neuf.
                 self._authority(run_id).record_decision(current_id, gate.decision, gate.reason, gate.attestation)
             self._present(run_id, contract)
             return ResumeOutcome(
@@ -777,7 +814,11 @@ class FlowEngine:
             evidence_refs=[_OUTPUT_DIGEST_PREFIX + digest] if digest is not None else None,
         )
         if gate is not None:
-            self._authority(run_id).record_decision(current_id, gate.decision, gate.reason, gate.attestation)
+            self._authority(run_id).record_decision(
+                current_id, gate.decision, gate.reason, gate.attestation, gate.accepted_risk
+            )
+            if gate.accepted_risk is not None:
+                self._record_accepted_risk(wfi, run_id, current_id, gate.accepted_risk)
         if finished:
             self._kernel.complete(wfi.id, ctx)
             return ResumeOutcome(
