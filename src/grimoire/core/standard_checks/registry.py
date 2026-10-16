@@ -114,6 +114,7 @@ CHECK_DIMENSIONS: dict[str, str] = {
     "guard.error_recorded": "evidence_gates",
     "evidence.pending_gate": "evidence_gates",
     "evidence.summary_placeholder": "evidence_gates",
+    "gate.codegraph_fresh": "evidence_gates",
     "gate.compliance_score_missing": "evidence_gates",
     "gate.context_bundle_missing": "evidence_gates",
     "gate.decision_trace_missing": "evidence_gates",

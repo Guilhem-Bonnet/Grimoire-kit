@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import ast
 import re
+from collections.abc import Collection
 from pathlib import Path
 from typing import Any
 
 from grimoire.codegraph.schemas import CodeEdge, CodeNode, EdgeKind, NodeKind
 
-__all__ = ["PythonASTParser"]
+__all__ = ["DEFAULT_EXCLUDE", "PythonASTParser"]
+
+#: Dossiers ignorés quand l'appelant ne donne pas d'exclusions.
+DEFAULT_EXCLUDE = frozenset({"__pycache__", ".venv", ".git", "node_modules"})
 
 _TEST_FILE_PATTERN = re.compile(r"(test_|_test\.py$|/tests?/)", re.IGNORECASE)
 _TEST_FUNC_PATTERN = re.compile(r"^test_")
@@ -102,11 +106,13 @@ class PythonASTParser:
         exclude: set[str] | None = None,
     ) -> tuple[list[CodeNode], list[CodeEdge]]:
         """Recursively parse all .py files in a directory."""
-        exclude = exclude or {"__pycache__", ".venv", ".git", "node_modules"}
+        skip: Collection[str] = exclude or DEFAULT_EXCLUDE
         all_nodes: list[CodeNode] = []
         all_edges: list[CodeEdge] = []
         for py_file in sorted(path.rglob("*.py")):
-            if any(part in exclude for part in py_file.parts):
+            # Le chemin sous *path* seul : le dossier qui contient le projet
+            # (un ``build/`` ou un ``venv/`` plus haut) ne doit pas l'exclure.
+            if any(part in skip for part in py_file.relative_to(path).parts):
                 continue
             nodes, edges = self.parse_file(py_file)
             all_nodes.extend(nodes)
