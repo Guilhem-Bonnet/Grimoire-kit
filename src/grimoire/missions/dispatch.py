@@ -79,6 +79,7 @@ from grimoire.core.grounding import GROUNDING_RULE
 from grimoire.core.standard_generation import STANDARD_DIR
 from grimoire.costs import POLICY_STOP, Cost, cap_reason, validate_policy
 from grimoire.missions.dispatch_history import recommend_start_tier
+from grimoire.missions.empty_green import classify_empty_green, invokes_test_runner
 from grimoire.missions.schemas import TaskState
 from grimoire.missions.verifiability import Verifiability, classify
 from grimoire.providers.registry import SUPPORTED_MODEL_TIERS, ProviderSpec
@@ -206,7 +207,12 @@ def _classify_unrunnable(cmd: str, exit_code: int | None, stdout: str, stderr: s
     combined = f"{stdout}\n{stderr}"
     if any(marker in combined for marker in _IMPORT_ERROR_MARKERS):
         return "erreur d'import détectée dans la sortie : la collecte n'a pas pu s'exécuter"
-    return None
+    # Vert vide (W1-04) : appliqué à tout code de sortie (0 est son objet), mais jamais
+    # quand la sortie prouve qu'un test a tourné — un vrai rouge reste un rouge — ni à une
+    # commande sans exécuteur de tests reconnu, qui garde le résultat d'avant W1-04.
+    if not invokes_test_runner(cmd):
+        return None
+    return classify_empty_green(combined)
 
 #: Surfaces sensibles par défaut (issue #327) — un diff qui en touche une
 #: exige une relecture forte même si les checks mécaniques sont au vert.
