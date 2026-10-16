@@ -41,6 +41,9 @@ TARGET_RATIO_PCT = 105.0
 SUBSET_PATH = Path(__file__).resolve().parents[2] / "docs" / "bench" / "cost-gate-subset.json"
 
 EXIT_CODES = {"pass": 0, "waived": 0, "exceeded": 1, "unevaluated": 2}
+#: Verdicts d'une barrière précédente qui valent référence. Un ``exceeded`` ou un ``unevaluated`` n'a pas été
+#: validé : s'y comparer ferait passer le dépassement suivant (B00-S1-02). ``baseline`` est la base du dépôt.
+VALID_PREVIOUS_VERDICTS = ("pass", "baseline", "waived")
 
 
 def cost_from_result(result: dict[str, Any] | None) -> tuple[float, bool]:
@@ -75,6 +78,52 @@ def row_cost_known(row: dict[str, Any]) -> bool:
         return bool(explicit)
     cost = row.get("total_cost_usd")
     return isinstance(cost, int | float) and not isinstance(cost, bool) and cost > 0
+
+
+def dispatch_cost(row: dict[str, Any]) -> tuple[float, bool]:
+    """Coût des dispatchs d'une ligne ``kit`` / ``kit-gov`` : ``(montant, connu)`` (B00-S1-01).
+
+    Les dispatchs (panel k=3 de verify-panel, passes de vérification, juge) tournent dans des
+    sous-processus séparés du ``claude -p`` parent : leur coût n'est PAS dans ``total_cost_usd`` de la
+    session, il vient de ``dispatch_stats.overall.total_cost_usd`` (``grimoire dispatch stats --json``).
+
+    - ``dispatch_stats`` absent ou ``None`` (bras ``nu``, ligne d'avant B-00) : aucun dispatch connu, ``(0.0, True)``.
+    - ``{"error": ...}`` (la commande a échoué) ou ``overall`` illisible : INCONNU, jamais zéro.
+    - ``overall.total == 0`` : aucun dispatch, ``(0.0, True)`` (c'est le cas des 60 lignes ``kit-gov`` du lot L).
+    - ``overall.total > 0`` : le montant ne vaut que si ``total_cost_usd`` est un nombre et que ``cost_status``
+      est ``exact`` (ou absent d'un ledger d'avant W1-01 avec un montant strictement positif) ; ``lower_bound``,
+      ``unknown`` ou un ``0.0`` hérité qui ne distingue pas gratuit d'inconnu valent INCONNU.
+    """
+    stats = row.get("dispatch_stats")
+    if stats is None:
+        return 0.0, True
+    if not isinstance(stats, dict) or "error" in stats:
+        return 0.0, False
+    overall = stats.get("overall")
+    if overall is None:
+        return 0.0, True
+    if not isinstance(overall, dict):
+        return 0.0, False
+    total = overall.get("total")
+    if isinstance(total, bool) or not isinstance(total, int):
+        return 0.0, False
+    if total == 0:
+        return 0.0, True
+    cost = overall.get("total_cost_usd")
+    if cost is None or isinstance(cost, bool) or not isinstance(cost, int | float):
+        return 0.0, False
+    status = overall.get("cost_status")
+    if status is None:
+        return (float(cost), True) if cost > 0 else (0.0, False)
+    return (float(cost), True) if status == "exact" else (0.0, False)
+
+
+def row_total_cost(row: dict[str, Any]) -> tuple[float, bool]:
+    """Coût d'une ligne, session + dispatchs : ``(montant, connu)``. Inconnu dès qu'une des deux parts l'est."""
+    dispatch, dispatch_known = dispatch_cost(row)
+    session_known = row_cost_known(row)
+    session = float(row["total_cost_usd"]) if session_known else 0.0
+    return session + dispatch, session_known and dispatch_known
 
 
 def cost_known_fields(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
@@ -136,8 +185,11 @@ def _models(rows: Sequence[dict[str, Any]]) -> list[str]:
 def _arm_summary(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
     valid = [r for r in rows if r.get("transcript_check") != "invalid"]
     resolved = [r for r in valid if r.get("success") is True]
-    known = [r for r in valid if row_cost_known(r)]
-    resolved_known = [float(r["total_cost_usd"]) for r in resolved if row_cost_known(r)]
+    totals = [(r, *row_total_cost(r)) for r in valid]
+    known = [(amount, ok) for _, amount, ok in totals if ok]
+    dispatch_unknown = sum(1 for r in valid if not dispatch_cost(r)[1])
+    dispatch_usd = sum(dispatch_cost(r)[0] for r in valid if dispatch_cost(r)[1])
+    resolved_known = [amount for r, amount, ok in totals if ok and r.get("success") is True]
     n_valid = len(valid)
     all_resolved_known = bool(resolved) and len(resolved_known) == len(resolved)
     return {
@@ -149,7 +201,9 @@ def _arm_summary(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
         "cost_known_ratio": (len(known) / n_valid) if n_valid else None,
         "median_cost_usd_resolved": statistics.median(resolved_known) if all_resolved_known else None,
         "mean_cost_usd_resolved": statistics.fmean(resolved_known) if all_resolved_known else None,
-        "total_known_cost_usd": sum(float(r["total_cost_usd"]) for r in known),
+        "total_known_cost_usd": sum(amount for amount, _ in known),
+        "dispatch_cost_usd": dispatch_usd,
+        "dispatch_cost_unknown_runs": dispatch_unknown,
         "models": _models(valid),
     }
 
@@ -189,6 +243,12 @@ def evaluate_cost_gate(
             reasons.append(
                 f"bras {arm} : coût connu pour {summary['cost_known_runs']}/{summary['n_runs']} runs "
                 f"(cost_known_ratio {summary['cost_known_ratio']:.2f}) : ratio non évaluable, un coût inconnu n'est pas zéro"
+                + (
+                    f" ({summary['dispatch_cost_unknown_runs']} run(s) au coût de dispatch inconnu : "
+                    "dispatch_stats en erreur ou coût non chiffré)"
+                    if summary["dispatch_cost_unknown_runs"]
+                    else ""
+                )
             )
         elif summary["median_cost_usd_resolved"] is None:
             reasons.append(f"bras {arm} : aucune tâche résolue, coût par tâche résolue indéfini")
@@ -208,9 +268,24 @@ def evaluate_cost_gate(
         reasons.append("coût médian du nu nul : ratio indéfini")
 
     previous_pct = previous.get("ratio_pct") if previous else None
-    if not isinstance(previous_pct, int | float) or isinstance(previous_pct, bool):
+    previous_verdict = previous.get("verdict") if previous else None
+    if previous is not None and previous_verdict not in VALID_PREVIOUS_VERDICTS:
+        # Un exceeded / unevaluated n'a pas été validé : le prendre pour référence ferait passer le dépassement suivant.
+        previous_pct = None
+        reasons.append(
+            f"barrière précédente non validée (verdict {previous_verdict!r}) : référence refusée, "
+            "il faut un cost-gate.json au verdict pass, waived ou baseline"
+        )
+    elif not isinstance(previous_pct, int | float) or isinstance(previous_pct, bool):
         previous_pct = None
         reasons.append("pas de ratio de la barrière précédente (--previous) : aucun seuil, rien n'est jugé")
+    elif previous_verdict == "waived":
+        waiver_info = previous.get("waiver") if previous else None
+        by = waiver_info.get("by") if isinstance(waiver_info, dict) else None
+        warnings.append(
+            f"la référence est une barrière dérogée{f' par {by}' if by else ''} : sa dérogation entérine son ratio "
+            f"({previous_pct:.1f} %), il devient le point de départ de cette barrière"
+        )
     gap = None if ratio_pct is None or previous_pct is None else ratio_pct - float(previous_pct)
 
     models = sorted({m for s in arms.values() for m in s["models"]})
