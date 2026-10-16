@@ -135,26 +135,125 @@ def test_le_cockpit_pose_l_origine_humaine_et_ignore_un_origin_du_corps(projet: 
     assert note["directive"]["origin"] == ORIGIN_HUMAN
 
 
-def test_la_cli_hors_terminal_ou_en_session_d_hote_pose_l_origine_agent(monkeypatch: pytest.MonkeyPatch) -> None:
+class _Terminal:
+    """Un terminal interactif (stdin ou stderr) qui répond *reponse* à la confirmation."""
+
+    def __init__(self, reponse: str = "") -> None:
+        self.reponse = reponse
+        self.ecrit: list[str] = []
+
+    def isatty(self) -> bool:
+        return True
+
+    def readline(self) -> str:
+        return self.reponse
+
+    def write(self, texte: str) -> int:
+        self.ecrit.append(texte)
+        return len(texte)
+
+    def flush(self) -> None:
+        return None
+
+
+# Tout ce qui désigne un agent ou une exécution sans humain : la CLI doit répondre `agent`.
+ENV_AGENT = [
+    {"CLAUDE_CODE_SESSION_ID": "abc"},
+    {"GRIMOIRE_SESSION_ID": "abc"},
+    {"GRIMOIRE_UNATTENDED": "1"},
+    {"CLAUDECODE": "1"},
+    {"AI_AGENT": "claude-code"},
+    {"CURSOR_AGENT": "1"},
+    {"GEMINI_CLI": "1"},
+    {"CODEX_SANDBOX": "seatbelt"},
+]
+ENV_A_NETTOYER = (
+    "CLAUDE_CODE_SESSION_ID", "GRIMOIRE_SESSION_ID", "GRIMOIRE_UNATTENDED", "CLAUDECODE", "AI_AGENT",
+    "CURSOR_AGENT", "GEMINI_CLI", "CODEX_SANDBOX", "CODEX_SANDBOX_NETWORK_DISABLED", "TERM_PROGRAM",
+)
+
+
+@pytest.fixture
+def canal(monkeypatch: pytest.MonkeyPatch) -> pytest.MonkeyPatch:
+    for var in ENV_A_NETTOYER:
+        monkeypatch.delenv(var, raising=False)
+    return monkeypatch
+
+
+def _terminal(canal: pytest.MonkeyPatch, reponse: str) -> _Terminal:
+    term = _Terminal(reponse)
+    canal.setattr("sys.stdin", term)
+    canal.setattr("sys.stderr", term)
+    return term
+
+
+def test_la_cli_hors_terminal_pose_l_origine_agent(canal: pytest.MonkeyPatch) -> None:
     from grimoire.cli.cmd_task import _comment_origin
 
-    class _Tty:
-        def isatty(self) -> bool:
-            return True
+    canal.setattr("sys.stdin", open("/dev/null", encoding="utf-8"))  # noqa: SIM115
+    assert _comment_origin() == ORIGIN_AGENT
 
-    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
-    monkeypatch.delenv("GRIMOIRE_SESSION_ID", raising=False)
-    monkeypatch.delenv("GRIMOIRE_UNATTENDED", raising=False)
-    monkeypatch.setattr("sys.stdin", _Tty())
+
+@pytest.mark.parametrize("env", ENV_AGENT, ids=lambda e: next(iter(e)))
+def test_la_cli_en_session_d_agent_pose_l_origine_agent_meme_depuis_un_terminal(
+    canal: pytest.MonkeyPatch, env: dict[str, str]
+) -> None:
+    from grimoire.cli.cmd_task import _comment_origin
+
+    for nom, valeur in env.items():
+        canal.setenv(nom, valeur)
+    _terminal(canal, "o\n")
+    assert _comment_origin() == ORIGIN_AGENT
+
+
+def test_la_cli_depuis_un_terminal_confirme_pose_l_origine_humaine(canal: pytest.MonkeyPatch) -> None:
+    from grimoire.cli.cmd_task import _comment_origin
+
+    term = _terminal(canal, "o\n")
     assert _comment_origin() == ORIGIN_HUMAN
-    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "abc")
-    assert _comment_origin() == ORIGIN_AGENT
-    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
-    monkeypatch.setenv("GRIMOIRE_UNATTENDED", "1")
-    assert _comment_origin() == ORIGIN_AGENT
-    monkeypatch.delenv("GRIMOIRE_UNATTENDED")
-    monkeypatch.setattr("sys.stdin", open("/dev/null", encoding="utf-8"))  # noqa: SIM115
-    assert _comment_origin() == ORIGIN_AGENT
+    assert "".join(term.ecrit), "la confirmation doit être demandée à l'écran"
+
+
+@pytest.mark.parametrize("reponse", ["", "\n", "n\n", "non\n", "peut-etre\n"])
+def test_la_cli_depuis_un_terminal_sans_confirmation_n_est_pas_humaine(canal: pytest.MonkeyPatch, reponse: str) -> None:
+    """K4-S1-02 : un pty sans variable d'hôte (Copilot, terminal inconnu) ne vaut plus `human`."""
+    from grimoire.cli.cmd_task import _comment_origin
+
+    _terminal(canal, reponse)
+    assert _comment_origin() == "unverified"
+
+
+def test_la_cli_sur_un_vrai_pty_sans_variable_d_hote_ne_donne_pas_l_autorite_humaine(canal: pytest.MonkeyPatch) -> None:
+    """Le scénario rejoué : stdin sur un pty, aucune variable de session, TERM_PROGRAM=vscode."""
+    import os
+
+    from grimoire.cli.cmd_task import _comment_origin
+
+    canal.setenv("TERM_PROGRAM", "vscode")
+    master, slave = os.openpty()
+    try:
+        with open(slave, "r", encoding="utf-8", closefd=False) as stdin:  # noqa: UP015
+            canal.setattr("sys.stdin", stdin)
+            canal.setattr("sys.stderr", _Terminal())
+            assert stdin.isatty()
+            os.write(master, b"\n")  # la personne devant le pty n'a pas répondu « oui »
+            assert _comment_origin() != ORIGIN_HUMAN
+    finally:
+        if master >= 0:
+            os.close(master)
+        os.close(slave)
+
+
+def test_une_consigne_posee_depuis_un_pty_non_confirme_est_refusee_par_le_ledger(
+    projet: Path, canal: pytest.MonkeyPatch
+) -> None:
+    from grimoire.cli.cmd_task import _comment_origin
+
+    service, tid = _reclame(projet)
+    _terminal(canal, "")
+    with pytest.raises(GrimoireError):
+        service.comment(tid, INJECTION, "Guilhem", "directive", origin=_comment_origin())
+    assert service.require(tid).directives == ()
 
 
 # ── garde de complétude : aucune surface ne prend `origin` de l'appelant ─────

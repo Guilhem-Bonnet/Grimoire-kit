@@ -33,7 +33,8 @@ _FINITION_VALUES = frozenset({"", "maquette", "peaufine"})
 DIRECTIVE_KINDS: tuple[str, ...] = ("comment", "directive")
 #: D'où vient une note, posé par le canal (jamais par l'appelant, issue #706) :
 #: ``human`` (cockpit local, CLI interactive), ``agent`` (MCP, hooks, sous-agents),
-#: ``unverified`` (événement antérieur au champ : la provenance n'est pas connue).
+#: ``unverified`` (événement antérieur au champ, ou terminal interactif sans
+#: confirmation humaine : la provenance n'est pas établie).
 ORIGIN_HUMAN = "human"
 ORIGIN_AGENT = "agent"
 ORIGIN_UNVERIFIED = "unverified"

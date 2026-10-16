@@ -223,6 +223,20 @@ TASK_ENV = "GRIMOIRE_TASK_ID"
 SESSION_ENV = "GRIMOIRE_SESSION_ID"
 #: variable d'environnement exportée par l'hôte → identifiant d'hôte (``HookInput.host``).
 HOST_SESSION_ENVS = {"CLAUDE_CODE_SESSION_ID": HostId.CLAUDE_CODE_CLI.value}
+#: Variables qu'un terminal d'agent exporte aux commandes qu'il lance, même sans
+#: identifiant de session. Elles disent « un agent tient ce shell », jamais qui il
+#: est : ``AI_AGENT`` et ``CLAUDECODE`` ont été observées dans une session Claude
+#: Code ; ``CURSOR_AGENT``, ``GEMINI_CLI`` et ``CODEX_SANDBOX*`` sont celles que
+#: Cursor, Gemini CLI et Codex documentent, non observées ici. Copilot n'en pose
+#: aucune connue : le canal CLI ne s'y fie donc pas seul (voir ``_comment_origin``).
+AGENT_MARKER_ENVS = (
+    "AI_AGENT",
+    "CLAUDECODE",
+    "CURSOR_AGENT",
+    "GEMINI_CLI",
+    "CODEX_SANDBOX",
+    "CODEX_SANDBOX_NETWORK_DISABLED",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -267,6 +281,15 @@ def current_session(env: Mapping[str, str] | None = None) -> tuple[str, str]:
         if value:
             return value, host
     return "", ""
+
+
+def agent_marker(env: Mapping[str, str] | None = None) -> str:
+    """Le nom de la première variable de :data:`AGENT_MARKER_ENVS` posée, ``""`` sinon."""
+    environ = os.environ if env is None else env
+    for name in AGENT_MARKER_ENVS:
+        if str(environ.get(name, "")).strip().lower() not in ("", "0", "false"):
+            return name
+    return ""
 
 
 def current_session_id(env: Mapping[str, str] | None = None) -> str:

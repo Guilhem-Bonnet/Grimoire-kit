@@ -590,25 +590,38 @@ def task_prioritize(
 
 
 def _comment_origin() -> str:
-    """Le canal de ``task comment`` : humain seulement depuis un terminal interactif.
+    """Le canal de ``task comment`` : l'origine humaine exige un signal positif.
 
-    Une session d'agent (variable de session d'hôte présente), une exécution
-    déclarée sans humain ou une entrée qui n'est pas un terminal posent une note
-    d'origine ``agent`` : l'option ``--actor`` n'y change rien (issue #706).
+    ``agent`` : une session d'hôte (identifiant de session ou variable de terminal
+    d'agent, voir ``AGENT_MARKER_ENVS``), une exécution déclarée sans humain
+    (``GRIMOIRE_UNATTENDED=1``) ou une entrée qui n'est pas un terminal. Un
+    terminal interactif sans aucun de ces signaux ne suffit plus : un terminal
+    d'agent qui n'exporte rien (Copilot) en est indiscernable. L'humain confirme
+    alors à l'écran que la note est de lui ; sans réponse positive l'origine est
+    ``unverified`` (le ledger refuse alors une consigne). L'option ``--actor``
+    n'y change rien (issue #706).
     """
     import os
     import sys
 
-    from grimoire.core.standard_state import current_session_id
-    from grimoire.missions.schemas import ORIGIN_AGENT, ORIGIN_HUMAN
+    from grimoire.core.standard_state import agent_marker, current_session_id
+    from grimoire.missions.schemas import ORIGIN_AGENT, ORIGIN_HUMAN, ORIGIN_UNVERIFIED
 
-    if os.environ.get("GRIMOIRE_UNATTENDED", "").strip() == "1" or current_session_id():
+    if os.environ.get("GRIMOIRE_UNATTENDED", "").strip() == "1" or current_session_id() or agent_marker():
         return ORIGIN_AGENT
     try:
-        interactive = sys.stdin.isatty()
+        interactive = sys.stdin.isatty() and sys.stderr.isatty()
     except (AttributeError, ValueError):
         interactive = False
-    return ORIGIN_HUMAN if interactive else ORIGIN_AGENT
+    if not interactive:
+        return ORIGIN_AGENT
+    try:
+        sys.stderr.write("Cette note sera enregistrée au nom d'un humain. Est-ce bien toi qui la donnes ? [o/N] ")
+        sys.stderr.flush()
+        answer = sys.stdin.readline().strip().lower()
+    except (OSError, ValueError):
+        return ORIGIN_UNVERIFIED
+    return ORIGIN_HUMAN if answer in ("o", "oui", "y", "yes") else ORIGIN_UNVERIFIED
 
 
 @task_app.command("comment")
