@@ -561,7 +561,7 @@ class DispatchExecutor:
         acceptance = contract.acceptance or (f"node {contract.node_id} : aucun critère d'acceptation déclaré",)
         # Les commandes structurées du node sont les commandes déclarées de la
         # tâche (issue #772) : sans elles, `classify` ne rendrait jamais V0.
-        cmds, exits, _stdout, _timeouts = _acceptance_checks(contract)
+        cmds, exits, needles, timeouts = _acceptance_checks(contract)
         return ledger.create_task(
             mission_id,
             contract.label or contract.node_id,
@@ -569,7 +569,10 @@ class DispatchExecutor:
             description=description,
             guardrails=guardrails,
             task_id=task_id,
-            checks=tuple(TaskCheck(cmd=c, expect_exit=e) for c, e in zip(cmds, exits, strict=True)),
+            checks=tuple(
+                TaskCheck(cmd=c, expect_exit=e, expect_stdout_contains=n, timeout_s=t)
+                for c, e, n, t in zip(cmds, exits, needles, timeouts, strict=True)
+            ),
         )
 
 

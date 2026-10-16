@@ -976,6 +976,8 @@ def task_verify(
         for chk in outcome.verdict.checks:
             if chk.reason:
                 console.print(f"  - {chk.id} : {escape(chk.reason)}")
+        for criterion in outcome.uncovered:
+            console.print(f"  - critère non couvert par les commandes : {escape(criterion)}")
     raise typer.Exit(0 if outcome.passed else 1)
 
 
