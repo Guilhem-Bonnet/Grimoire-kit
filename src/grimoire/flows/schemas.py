@@ -18,7 +18,10 @@ Deux familles bien séparées, à dessein :
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from grimoire.flows.directive import Directive
 
 __all__ = [
     "AcceptanceEvidence",
@@ -237,9 +240,13 @@ class ResumeOutcome:
     #: interrompue (W1-03b) — vide dans le cas normal. Une réparation n'est
     #: jamais silencieuse.
     repaired: tuple[str, ...] = ()
+    #: La directive qui suit cette reprise (W2-03) : ce à quoi l'hôte répondra
+    #: ensuite, avec son ``directive_id`` à renvoyer à ``resume``.
+    directive: Directive | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "directive": self.directive.to_dict() if self.directive else None,
             "ok": self.ok,
             "finished": self.finished,
             "node_id": self.node_id,
@@ -268,9 +275,12 @@ class FlowStatusView:
     #: argument, la liste des runs) puissent l'afficher sans redemander la
     #: méta directement.
     parent_run_id: str | None = None
+    #: La directive courante (W2-03), ``None`` quand la vue est une simple ligne de liste.
+    directive: Directive | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "directive": self.directive.to_dict() if self.directive else None,
             "run_id": self.run_id,
             "blueprint_id": self.blueprint_id,
             "status": self.status,
