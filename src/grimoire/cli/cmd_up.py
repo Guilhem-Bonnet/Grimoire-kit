@@ -500,7 +500,14 @@ def run_env_checks(target: Path) -> list[EnvCheck]:
         check_ollama(),
         check_embedding_model(target),
         *check_mcp_json(target),
+        *_hook_command_checks(target),
     ]
+
+
+def _hook_command_checks(target: Path) -> list[EnvCheck]:
+    from grimoire.cli.doctor_hooks import check_hook_commands
+
+    return check_hook_commands(target)
 
 
 # ── Artifact repair (used by grimoire doctor --fix) ──────────────────────────
