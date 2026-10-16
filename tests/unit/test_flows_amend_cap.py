@@ -210,9 +210,9 @@ def test_risque_accepte_visible_dans_task_show_et_tache_au_moins_v1(tmp_path: Pa
 
     shown = _show()
     assert shown["verifiability"]["class"] == "V1"
-    assert shown["accepted_risk"][0]["reason"] == "section 2 approximative"
-    assert shown["accepted_risk"][0]["amendments"] == 3
-    assert shown["accepted_risk"][0]["run_id"] == run_id
+    assert shown["accepted_risks"][0]["reason"] == "section 2 approximative"
+    assert shown["accepted_risks"][0]["amendments"] == 3
+    assert shown["accepted_risks"][0]["run_id"] == run_id
 
 
 def test_risque_accepte_ne_baisse_pas_une_tache_v2(tmp_path: Path) -> None:

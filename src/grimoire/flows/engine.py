@@ -496,10 +496,10 @@ class FlowEngine:
 
         Ne crée ni ledger ni tâche : un run sans tâche de ledger (``FLOW-<id>``
         par défaut) garde le risque dans le journal du run, relu par
-        ``flow status``. ``grimoire task show`` lit cet événement et remonte la
-        tâche au moins en V1.
+        ``flow status``. Le ledger le rejoue dans ``MissionTask.accepted_risks`` et
+        ``classify`` remonte la tâche au moins en V1 pour toute surface.
         """
-        from grimoire.missions.ledger import MissionLedger
+        from grimoire.missions.ledger import RISK_ACCEPTED_EVENT, MissionLedger
         from grimoire.missions.service import DEFAULT_LEDGER_RELPATH
 
         root = Path(self._project_root) / DEFAULT_LEDGER_RELPATH
@@ -509,7 +509,7 @@ class FlowEngine:
         if ledger.get_task(wfi.task_id) is None:
             return
         ledger.append_event(
-            "task.risk_accepted",
+            RISK_ACCEPTED_EVENT,
             wfi.task_id,
             "task",
             self._actor_id,

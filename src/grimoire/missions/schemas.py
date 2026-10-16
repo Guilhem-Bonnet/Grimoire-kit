@@ -376,6 +376,12 @@ class MissionTask:
     #: par ``task.directive_delivered`` / ``task.directive_acknowledged`` au
     #: rejeu du ledger — jamais posé à la création.
     directives: tuple[TaskDirective, ...] = ()
+    #: Risques acceptés en l'état (W2-10) : un ``accept_as_is`` de checkpoint de
+    #: flow lié à cette tâche. Alimenté au rejeu par ``task.risk_accepted``,
+    #: jamais posé à la création. ``classify`` le lit : c'est ce qui fait de la
+    #: remontée V0 -> V1 un fait de la tâche, vu par toute surface qui décide,
+    #: et non un affichage propre à une commande.
+    accepted_risks: tuple[dict[str, Any], ...] = ()
 
     @property
     def pending_directives(self) -> tuple[TaskDirective, ...]:
@@ -425,6 +431,8 @@ class MissionTask:
             d["extra"] = dict(self.extra)
         if self.directives:
             d["directives"] = [directive.to_dict() for directive in self.directives]
+        if self.accepted_risks:
+            d["accepted_risks"] = [dict(risk) for risk in self.accepted_risks]
         return d
 
     @classmethod
@@ -453,6 +461,7 @@ class MissionTask:
             remediation_ref=d.get("remediation_ref", ""),
             extra=dict(d.get("extra", {})),
             directives=tuple(TaskDirective.from_dict(item) for item in d.get("directives", [])),
+            accepted_risks=tuple(dict(risk) for risk in d.get("accepted_risks", [])),
         )
 
 

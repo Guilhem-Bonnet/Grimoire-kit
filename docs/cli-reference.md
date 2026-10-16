@@ -906,7 +906,9 @@ run (relu par `flow status`) et comptés. `accept_as_is` n'est accepté qu'aprè
 `config.checkpoint.max_amendments` amendements (entier >= 1, 3 par défaut) ; il
 exige `checkpoint_reason` (le risque nommé), inscrit `accepted_risk`, et pose
 `task.risk_accepted` sur la tâche du ledger liée au run (`--task-id`) si elle
-existe : `grimoire task show` l'affiche et remonte la tâche au moins en V1.
+existe ; le ledger le rejoue dans la tâche (`accepted_risks`) et `classify` la remonte
+au moins en V1 pour toute surface (`task show`, MCP `task_show`/`task_claim`,
+`dispatch_advice`, transition `needs_verification` de `task dispatch`).
 Limite : le compteur est celui du journal du run, `amend` non attesté compris.
 
 **`budget`** — plafond de coût déclaré (`config.budget.maxCostUsd`),

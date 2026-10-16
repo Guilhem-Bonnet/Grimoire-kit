@@ -351,13 +351,29 @@ def reason_for_criteria(criteria: Sequence[str]) -> str:
     return f"{len(verdicts)} critère(s) mécanique(s), chacun avec un verdict"
 
 
+def _risque_accepte(task: MissionTask) -> bool:
+    """Vrai si un ``accept_as_is`` de checkpoint a été inscrit sur cette tâche (W2-10)."""
+    return bool(getattr(task, "accepted_risks", ()))
+
+
 def classify(task: MissionTask) -> Verifiability:
     """Dérive la classe — jamais déclarée, toujours recalculée depuis le texte.
 
-    Simple appel à :func:`classify_criteria` sur les critères du ``MissionTask``
+    Appel à :func:`classify_criteria` sur les critères du ``MissionTask``
     (``acceptance`` + ``expected_evidence``) — voir son docstring pour la règle.
+    Une seule exception, W2-10 : une tâche V0 dont un checkpoint a été clos par
+    ``accept_as_is`` (``task.accepted_risks``) remonte en V1 — un humain a
+    accepté un risque en l'état, une relecture reste due. C'est ici, et nulle
+    part ailleurs, que la remontée se décide : ``dispatch_advice``, l'outil MCP
+    ``task_show``, ``task_claim``, ``grimoire task show``, la transition
+    ``needs_verification`` de ``task dispatch`` et l'exécuteur de flow passent
+    tous par cette fonction. Une V2 reste V2 ; le texte des critères n'est pas
+    réécrit.
     """
-    return classify_criteria(_criteres(task))
+    klass = classify_criteria(_criteres(task))
+    if klass is Verifiability.V0 and _risque_accepte(task):
+        return Verifiability.V1
+    return klass
 
 
 def explain(task: MissionTask) -> list[tuple[str, str | None]]:
@@ -380,9 +396,13 @@ def as_dict(task: MissionTask) -> dict[str, Any]:
     autrement ou par oublier un critère dans son explication.
     """
     klass = classify(task)
-    return {
+    data: dict[str, Any] = {
         "class": klass.value,
         "explanation": klass.explanation,
         "reason": reason_for_criteria(_criteres(task)),
         "criteria": [{"criterion": critere, "pattern": motif} for critere, motif in explain(task)],
     }
+    if klass is not classify_criteria(_criteres(task)):
+        data["explanation"] = "Remontée de V0 : un risque a été accepté en l'état (accept_as_is) — une relecture reste due."
+        data["raised_by"] = "accepted_risk"
+    return data
