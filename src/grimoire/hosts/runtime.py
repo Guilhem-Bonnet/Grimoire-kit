@@ -25,7 +25,7 @@ from typing import Any
 
 from grimoire.bridges.schemas import HostId
 from grimoire.core.standard_generation import CONTEXT_DIR
-from grimoire.core.standard_state import active_task_id
+from grimoire.core.standard_state import active_task_id, suspended_state_writes
 from grimoire.hosts.capabilities import profile_for
 from grimoire.hosts.decisions import (
     DEFAULT_DECISION_BY_EVENT,
@@ -357,17 +357,24 @@ def run_hook(
     resolved_decision = decision_id or DEFAULT_DECISION_BY_EVENT.get(hook.event, "")
     started_at = _now_iso()
     started = time.perf_counter()
-    # Hors d'une racine reconnue (aucun `_grimoire/` au-dessus du cwd), seul le
-    # garde-fou PreToolUse tourne : les autres décisions écrivent de l'état
-    # (`_grimoire-output/`) et n'ont pas de projet auquel le rattacher (#717).
-    inert = hook.event is not HookEvent.PRE_TOOL_USE and not locate_project_root(payload, project_root)[1]
-    decision = run_decision(resolved_decision, hook) if resolved_decision and not inert else Decision()
-    latency_ms = (time.perf_counter() - started) * 1000
-    if inert:
-        capsule, capsule_error = None, ""
+    # Hors d'une racine reconnue (aucun `_grimoire/` au-dessus du cwd) il n'y a pas
+    # de projet auquel rattacher un état. Les décisions qui écrivent (`_grimoire-output/`)
+    # sont inertes ; PreToolUse, le garde-fou, garde sa décision mais en lecture
+    # seule : ni cache d'état, ni hold, ni trace, ni capsule (#717).
+    recognized = locate_project_root(payload, project_root)[1]
+    if not recognized and hook.event is not HookEvent.PRE_TOOL_USE:
+        decision = Decision()
+    elif not recognized:
+        with suspended_state_writes():
+            decision = run_decision(resolved_decision, hook) if resolved_decision else Decision()
     else:
+        decision = run_decision(resolved_decision, hook) if resolved_decision else Decision()
+    latency_ms = (time.perf_counter() - started) * 1000
+    if recognized:
         _record_decision(hook, decision, host_id, latency_ms, started_at)
         capsule, capsule_error = _persist_capsule(hook, decision)
+    else:
+        capsule, capsule_error = None, ""
     if capsule is not None or capsule_error:
         stamp = {"capsule": str(capsule)} if capsule is not None else {"capsule_error": capsule_error}
         decision = Decision(

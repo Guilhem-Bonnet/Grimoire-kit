@@ -10,9 +10,10 @@ call — imports a small module instead of the whole standard engine.
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import json
 import os
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -37,6 +38,28 @@ TASK_BOARD_RELPATH = STANDARD_DIR / "task-board.yaml"
 #: l'état de session éphémère et gitignoré ; ce cache y vit au même titre.
 _CACHE_RELPATH = Path("_grimoire-output") / ".runs" / "standard-state-cache.json"
 _CACHE_VERSION = 1
+
+
+_WRITES_SUSPENDED: contextvars.ContextVar[bool] = contextvars.ContextVar("grimoire_state_writes_suspended", default=False)
+
+
+@contextlib.contextmanager
+def suspended_state_writes() -> Iterator[None]:
+    """Le temps du bloc, aucune écriture d'état de hook (cache, holds) : lecture seule.
+
+    Pour un hook lancé hors de toute racine de projet reconnue : la décision se
+    prend, mais il n'y a pas de projet auquel rattacher du cache ni un journal.
+    """
+    token = _WRITES_SUSPENDED.set(True)
+    try:
+        yield
+    finally:
+        _WRITES_SUSPENDED.reset(token)
+
+
+def state_writes_allowed() -> bool:
+    """``False`` sous :func:`suspended_state_writes`."""
+    return not _WRITES_SUSPENDED.get()
 
 
 def _stat_fingerprint(path: Path) -> list[int] | None:
@@ -113,7 +136,7 @@ def _cached_or_fresh(
     if isinstance(cached, dict) and cached.get("fingerprint") == fingerprint and "value" in cached:
         return cached["value"]
     value = compute()
-    if write_cache:
+    if write_cache and state_writes_allowed():
         entries[key] = {"path": str(relpath), "fingerprint": fingerprint, "value": value}
         _write_cache_entries(root, entries)
     return value

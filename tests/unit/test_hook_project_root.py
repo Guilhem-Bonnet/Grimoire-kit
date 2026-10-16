@@ -75,6 +75,9 @@ def test_l_option_explicite_prime_sur_tout(tmp_path: Path, monkeypatch: pytest.M
         ("PostToolUse", {"tool_name": "Write", "tool_input": {"file_path": "a.py", "content": "x"}, "tool_response": {}}),
         ("PreCompact", {}),
         ("Stop", {}),
+        ("PreToolUse", {"tool_name": "Bash", "tool_input": {"command": "echo hi > x"}}),
+        ("PreToolUse", {"tool_name": "Write", "tool_input": {"file_path": "a.py", "content": "x"}}),
+        ("PreToolUse", {"tool_name": "Bash", "tool_input": {"command": "git push --force origin main"}}),
     ],
 )
 def test_aucun_hook_ne_cree_de_sortie_hors_d_une_racine_de_projet(
@@ -95,3 +98,81 @@ def test_un_cd_dans_un_sous_dossier_ne_deplace_pas_les_ecritures(tmp_path: Path)
     run_hook(payload, host_id=HostId.CLAUDE_CODE_CLI)
     assert not (sous / "_grimoire-output").exists()
     assert (racine / "_grimoire-output").is_dir()
+
+
+def _arbre(racine: Path) -> list[str]:
+    return sorted(str(p.relative_to(racine)) for p in racine.rglob("*"))
+
+
+@pytest.mark.parametrize(
+    "commande",
+    ["echo hi > x.txt", "git push --force origin main", "git reset --hard HEAD~3", "ls -la"],
+)
+def test_pretooluse_hors_racine_decide_sans_ecrire_un_seul_fichier(tmp_path: Path, commande: str) -> None:
+    """K4-S1-01 : la décision est gardée, ses effets de bord (cache d'état, traces, holds) non."""
+    hors_projet = tmp_path / "hors" / "projet"
+    hors_projet.mkdir(parents=True)
+    avant = _arbre(tmp_path)
+    payload = {
+        "session_id": SESSION,
+        "hook_event_name": "PreToolUse",
+        "cwd": str(hors_projet),
+        "tool_name": "Bash",
+        "tool_input": {"command": commande},
+    }
+    result, decision, _ = run_hook(payload, host_id=HostId.CLAUDE_CODE_CLI)
+    assert result, "le hook doit toujours rendre un verdict"
+    assert decision.outcome is not None
+    assert _arbre(tmp_path) == avant
+
+
+def test_pretooluse_hors_racine_garde_le_verdict_du_dedans(tmp_path: Path) -> None:
+    """Couper les effets ne désarme pas la politique : même verdict dedans et dehors."""
+    hors = tmp_path / "hors"
+    hors.mkdir()
+    dedans = _projet(tmp_path / "forge")
+    commande = {"command": "git push --force origin main"}
+    base = {"session_id": SESSION, "hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": commande}
+    _, hors_decision, _ = run_hook({**base, "cwd": str(hors)}, host_id=HostId.CLAUDE_CODE_CLI)
+    _, dedans_decision, _ = run_hook({**base, "cwd": str(dedans)}, host_id=HostId.CLAUDE_CODE_CLI)
+    assert hors_decision.outcome == dedans_decision.outcome
+
+
+def test_pretooluse_dans_un_projet_ecrit_toujours_ses_traces(tmp_path: Path) -> None:
+    """Le correctif ne coupe rien dans une racine reconnue."""
+    racine = _projet(tmp_path / "forge")
+    payload = {
+        "session_id": SESSION,
+        "hook_event_name": "PreToolUse",
+        "cwd": str(racine),
+        "tool_name": "Bash",
+        "tool_input": {"command": "git push --force origin main"},
+    }
+    run_hook(payload, host_id=HostId.CLAUDE_CODE_CLI)
+    assert (racine / "_grimoire-output").is_dir()
+
+
+def test_pretooluse_hors_racine_ne_pose_aucun_hold_et_aucun_cache(tmp_path: Path) -> None:
+    """Un hold ne s'écrit que sur un verdict non-allow : on force ce chemin avec un faux verdict."""
+    from unittest import mock
+
+    from grimoire.hosts.decisions import Decision, Outcome
+
+    hors_projet = tmp_path / "hors" / "projet"
+    hors_projet.mkdir(parents=True)
+    avant = _arbre(tmp_path)
+    payload = {
+        "session_id": SESSION,
+        "hook_event_name": "PreToolUse",
+        "cwd": str(hors_projet),
+        "tool_name": "Bash",
+        "tool_input": {"command": "rm -rf build"},
+    }
+    with mock.patch(
+        "grimoire.hosts.decisions.tool_policy._evaluate_tool_policy",
+        return_value=Decision(outcome=Outcome.ASK, reason="test"),
+    ):
+        result, decision, _ = run_hook(payload, host_id=HostId.CLAUDE_CODE_CLI)
+    assert decision.outcome is Outcome.ASK
+    assert result
+    assert _arbre(tmp_path) == avant
