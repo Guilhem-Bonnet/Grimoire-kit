@@ -231,6 +231,22 @@ class TestUpJson:
         assert steps["init"] == "done"
 
 
+class TestUpProjectKind:
+    def test_json_exposes_project_kind_and_its_source(self, runner, cli_app, tmp_path: Path) -> None:
+        empty = tmp_path / "empty"
+        result = runner.invoke(cli_app, ["-o", "json", "up", str(empty), "--backend", "local", "--no-standard"])
+        assert json.loads(result.stdout)["project_kind"] == {
+            "kind": "greenfield", "source": "source-files", "evidence": [],
+        }
+
+        legacy = tmp_path / "legacy"
+        (legacy / "src").mkdir(parents=True)
+        (legacy / "src" / "app.py").write_text("x = 1\n", encoding="utf-8")
+        result = runner.invoke(cli_app, ["-o", "json", "up", str(legacy), "--backend", "local", "--no-standard"])
+        kind = json.loads(result.stdout)["project_kind"]
+        assert (kind["kind"], kind["source"], kind["evidence"]) == ("brownfield", "source-files", ["src/app.py"])
+
+
 class TestUpAlias:
     def test_up_registered_in_help(self, runner, cli_app) -> None:
         result = runner.invoke(cli_app, ["--help"])
