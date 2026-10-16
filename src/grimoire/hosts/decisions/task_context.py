@@ -26,10 +26,16 @@ def decide_task_context(hook: HookInput) -> Decision:
     :mod:`.session_memory`). Un projet non enrôlé garde la même protection
     que :func:`.tool_policy.decide_tool_policy` lui-même, qui ne conditionne
     jamais son propre verdict à l'enrôlement.
+
+    W2-01 : c'est aussi le seul point d'écriture du journal des tours humains
+    (:mod:`.human_turns`), qu'un checkpoint de flow relit pour classer sa
+    décision ``attested`` ou ``unattested`` — enrôlé ou non, comme la mémoire.
     """
+    from grimoire.hosts.decisions.human_turns import record_human_turn
     from grimoire.hosts.decisions.session_memory import record_user_message
 
     record_user_message(hook)
+    record_human_turn(hook)
     if not is_standard_enrolled(hook.project_root):
         return Decision()
     active = resolve_active_task(hook.project_root, session_id=hook.session_id)
