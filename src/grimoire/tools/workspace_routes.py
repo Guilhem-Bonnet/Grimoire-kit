@@ -484,10 +484,16 @@ POST_ROUTES: dict[str, _PostHandler] = {
 
 def _task_steer(service: Any, task_id: str, action: str, actor: str, body: dict[str, Any]) -> Any:
     """Les gestes de l'orchestrateur humain (issue #638, lot B) — refus rendus par le service."""
+    from grimoire.missions.schemas import ORIGIN_HUMAN
+
     if action == "prioritize":
         return service.prioritize(task_id, str(body.get("to") or ""), actor, str(body.get("reason") or ""))
     if action == "comment":
-        return service.comment(task_id, str(body.get("text") or ""), actor, str(body.get("kind") or "comment"))
+        # Le cockpit local est le canal de l'humain : l'origine est posée ici,
+        # jamais lue du corps de la requête (issue #706). `actor` n'est qu'un nom.
+        return service.comment(
+            task_id, str(body.get("text") or ""), actor, str(body.get("kind") or "comment"), origin=ORIGIN_HUMAN
+        )
     if action == "cancel":
         return service.cancel(task_id, str(body.get("reason") or ""), actor, force=body.get("force") is True)
     directive_id = str(body.get("directive_id") or "")
