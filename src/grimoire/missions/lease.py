@@ -64,7 +64,13 @@ def parse_instant(value: Any) -> datetime | None:
 
 @dataclass(frozen=True, slots=True)
 class LeaseFile:
-    """Le contenu du fichier de bail. ``holder=False`` : barrière posée par une récolte."""
+    """Le contenu du fichier de bail. ``holder=False`` : barrière posée par une récolte ou un rendu.
+
+    ``origin`` dit qui a posé la barrière : ``reap`` (la récolte a décidé de relancer,
+    le geste ne se rejuge pas) ou ``hand_back`` (le titulaire ou un humain rend le bail,
+    l'événement de rendu peut ne jamais être écrit). Vide : fichier d'un titulaire, ou
+    d'une version antérieure — jamais pris pour une décision de récolte.
+    """
 
     task_id: str
     epoch: int
@@ -72,6 +78,7 @@ class LeaseFile:
     ttl_seconds: int = DEFAULT_LEASE_TTL_SECONDS
     busy_until: str = ""
     holder: bool = True
+    origin: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -82,6 +89,7 @@ class LeaseFile:
             "ttl_seconds": self.ttl_seconds,
             "busy_until": self.busy_until,
             "holder": self.holder,
+            "origin": self.origin,
         }
 
     def lost_at(self) -> datetime | None:
@@ -121,6 +129,7 @@ def read_lease(path: Path) -> LeaseFile | None:
         ttl_seconds=ttl,
         busy_until=str(raw.get("busy_until", "") or ""),
         holder=raw.get("holder", True) is not False,
+        origin=str(raw.get("origin", "") or ""),
     )
 
 

@@ -676,3 +676,125 @@ def test_reap_deferred_once_per_epoch_and_cause_even_when_the_cause_alternates(t
     assert sorted((e.payload["lease_epoch_lost"], e.payload["cause"]) for e in deferred) == [
         (1, "quota"), (1, "resume_unfenced"),
     ]
+
+
+# ── CA : la sortie de needs_verification rend le bail (K2-S2-01) ────────────
+
+#: (état atteint en sortant de needs_verification, rebond éventuel vers ready)
+_PROOF_EXITS = [
+    pytest.param(TaskState.FAILED, False, id="echec"),
+    pytest.param(TaskState.CLOSED, False, id="cloture"),
+    pytest.param(TaskState.FAILED, True, id="echec-puis-ready"),
+]
+
+
+@pytest.mark.parametrize(("exit_to", "relaunched"), _PROOF_EXITS)
+def test_leaving_needs_verification_hands_the_lease_back(tmp_path: Path, exit_to: TaskState, relaunched: bool) -> None:
+    ledger = _ledger(tmp_path)
+    tid = _running(ledger)
+    ledger.transition_task(tid, TaskState.NEEDS_VERIFICATION, actor_id="agent-a", lease_epoch=1)
+    # La remise de preuve garde le titulaire, fichier compris.
+    assert ledger.check_holder(tid, 1) == ledger_mod.HolderCheck(True, "", "lease")
+    ledger.transition_task(tid, exit_to, actor_id="verifier")
+    if relaunched:
+        ledger.transition_task(tid, TaskState.READY, actor_id="human")
+    root = tmp_path / "ledger"
+
+    # Le frein d'outil, par le fichier seul : l'epoch 1 n'est plus un bail.
+    fence = read_lease(lease_path(root, tid))
+    assert fence is not None and fence.epoch == 2 and not fence.holder
+    check = ledger.check_holder(tid, 1)
+    assert (check.ok, check.source) == (False, "lease")
+    # À l'écriture, et au rejeu sur instance neuve.
+    with pytest.raises(GrimoireMissionError, match="périmé"):
+        ledger.transition_task(tid, TaskState.CANCELLED, actor_id="agent-a", lease_epoch=1, step="s1")
+    replayed = MissionLedger(root)
+    assert not replayed.check_holder(tid, 1).ok
+    # Le claim suivant part au-dessus de la barrière.
+    if relaunched:
+        ledger.claim_task(tid, "agent-b", "local")
+        assert _epoch(ledger, tid) == 3
+
+
+def test_returning_from_needs_verification_to_running_keeps_the_holder(tmp_path: Path) -> None:
+    ledger = _ledger(tmp_path)
+    tid = _running(ledger)
+    ledger.transition_task(tid, TaskState.NEEDS_VERIFICATION, actor_id="agent-a", lease_epoch=1)
+    ledger.transition_task(tid, TaskState.RUNNING, actor_id="verifier")  # preuve refusée : retour au travail
+    lease = read_lease(lease_path(tmp_path / "ledger", tid))
+    assert lease is not None and lease.epoch == 1 and lease.holder
+    assert ledger.check_holder(tid, 1).ok
+
+
+# ── CA : un rendu interrompu n'est pas une récolte décidée (K2-S2-02) ───────
+
+
+def _fail_cancel_write(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Le journal refuse l'écriture de l'annulation (disque plein) : la barrière de rendu reste seule."""
+    real = MissionLedger._write_appended
+
+    def boom(path: Path, record: dict[str, Any]) -> Any:
+        if record.get("event_type") == "task.transitioned" and record["payload"].get("to_state") == "cancelled":
+            raise OSError(28, "No space left on device")
+        return real(path, record)
+
+    monkeypatch.setattr(MissionLedger, "_write_appended", staticmethod(boom))
+
+
+def test_interrupted_hand_back_is_not_relaunched_on_an_unfenced_host(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ledger = _ledger(tmp_path)
+    tid = _running(ledger, host="copilot-unfenced")
+    with monkeypatch.context() as patch:
+        _fail_cancel_write(patch)
+        with pytest.raises(OSError, match="No space"):
+            ledger.transition_task(tid, TaskState.CANCELLED, actor_id="human")
+    root = tmp_path / "ledger"
+    barrier = read_lease(lease_path(root, tid))
+    assert barrier is not None and barrier.epoch == 2 and not barrier.holder and barrier.origin == "hand_back"
+
+    fresh = MissionLedger(root)
+    [view] = fresh.expired_claims()
+    assert view.reason == "fence_pending"
+    report = fresh.reap(fenced_hosts=frozenset(), apply=True)
+    [decision] = report.decisions
+    assert (decision.action, decision.cause) == ("defer", "resume_unfenced")
+    task = MissionLedger(root).get_task(tid)
+    assert task is not None and task.status is TaskState.RUNNING  # pas relancée : la décision reste à l'humain
+
+
+def test_interrupted_hand_back_still_honours_quota_and_exhausted_attempts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ledger = _ledger(tmp_path)
+    tid = _running(ledger)
+    with monkeypatch.context() as patch:
+        _fail_cancel_write(patch)
+        with pytest.raises(OSError, match="No space"):
+            ledger.transition_task(tid, TaskState.CANCELLED, actor_id="human")
+    [decision] = MissionLedger(tmp_path / "ledger").reap(fenced_hosts=FENCED, quota_blocked=lambda _t: True).decisions
+    assert (decision.action, decision.cause) == ("defer", "quota")
+    # Sans quota, sur un hôte fencé, la tâche est relancée comme pour tout bail perdu.
+    [decision] = MissionLedger(tmp_path / "ledger").reap(fenced_hosts=FENCED).decisions
+    assert (decision.action, decision.cause) == ("ready", "fence_pending")
+
+
+def test_reap_barrier_carries_the_reap_origin(tmp_path: Path) -> None:
+    clock = _Clock()
+    ledger = _ledger(tmp_path, clock)
+    tid = _running(ledger)
+    clock.now += timedelta(minutes=30)
+    ledger.reap(fenced_hosts=FENCED)
+    barrier = read_lease(lease_path(tmp_path / "ledger", tid))
+    assert barrier is not None and not barrier.holder and barrier.origin == "reap"
+
+
+def test_lease_file_without_origin_reads_as_empty_and_is_not_a_reap(tmp_path: Path) -> None:
+    path = lease_path(tmp_path / "ledger", "T")
+    write_lease(path, LeaseFile("T", 2, datetime.now(UTC).isoformat(), holder=False))
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    del raw["origin"]  # fichier écrit avant K2-S2-02
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    lease = read_lease(path)
+    assert lease is not None and lease.origin == ""

@@ -114,6 +114,9 @@ HUMAN_ANSWERED_EVENT = "task.human_answered"
 #: Verdicts de ``task.dispatched`` comptés comme tentatives (``rate_limit`` est un quota, pas un échec).
 _FAILED_DISPATCH = frozenset({"red", "timeout", "error"})
 _HELD = (TaskState.CLAIMED, TaskState.RUNNING)
+#: Origine d'une barrière du fichier de bail (K2-S2-02) : voir :class:`LeaseFile`.
+ORIGIN_REAP = "reap"
+ORIGIN_HAND_BACK = "hand_back"
 
 
 @dataclass(frozen=True, slots=True)
@@ -702,15 +705,16 @@ class MissionLedger:
         if idem:
             payload["idem"] = idem
         if (
-            task.status in _HELD
+            (task.status in _HELD or task.status is TaskState.NEEDS_VERIFICATION)
             and to_state not in _HELD
             and to_state is not TaskState.NEEDS_VERIFICATION
             and not reaper
         ):
             # Le titulaire rend le bail (release, blocage, échec, annulation) : même barrière que la
             # récolte — le fichier d'abord (§2.3), sans titulaire, à l'epoch suivant ; le journal la
-            # porte en ``fence_epoch`` pour que le claim suivant parte au-dessus. Seul
-            # RUNNING → NEEDS_VERIFICATION garde le titulaire (il rend sa preuve).
+            # porte en ``fence_epoch`` pour que le claim suivant parte au-dessus. Rendre sa preuve
+            # (running → needs_verification) garde le titulaire, mais le bail ne survit pas à la
+            # sortie de needs_verification (clôture, échec) : la barrière tombe à ce moment-là.
             payload["fence_epoch"] = self._epoch_high.get(task_id, 0) + 1
             hands_back = True
         if to_state is TaskState.CLAIMED and claim is not None:
@@ -733,7 +737,10 @@ class MissionLedger:
             payload.update(extra_payload)
         if hands_back:
             fence = int(payload["fence_epoch"])
-            write_lease(lease_path(self._root, task_id), LeaseFile(task_id, fence, self._now().isoformat(), holder=False))
+            write_lease(
+                lease_path(self._root, task_id),
+                LeaseFile(task_id, fence, self._now().isoformat(), holder=False, origin=ORIGIN_HAND_BACK),
+            )
         self._append_event("task.transitioned", task_id, "task", actor_id, payload, lock_held=True)
         self._load()
         return self._tasks[task_id]
@@ -956,7 +963,10 @@ class MissionLedger:
     ) -> ReapDecision:
         before = self.attempts(task.id)
         cause = ""
-        if view.reason != "fence_pending":  # récolte interrompue : la décision était déjà prise
+        path = lease_path(self._root, task.id)
+        cached = read_lease(path)
+        pending_reap = view.reason == "fence_pending" and cached is not None and cached.origin == ORIGIN_REAP
+        if not pending_reap:  # une récolte interrompue a déjà décidé ; un rendu interrompu se juge comme un bail perdu
             if is_quota(task):
                 cause = "quota"
             elif before + 1 > MAX_ATTEMPTS:
@@ -975,12 +985,10 @@ class MissionLedger:
         retry_at = (moment + backoff_delay(attempt)).isoformat()
         if not apply:
             return ReapDecision(task.id, "ready", view.reason, view.epoch, attempt, retry_at)
-        path = lease_path(self._root, task.id)
-        cached = read_lease(path)
         fence = cached.epoch if view.reason == "fence_pending" and cached is not None else (
             self._epoch_high.get(task.id, view.epoch) + 1
         )
-        write_lease(path, LeaseFile(task.id, fence, moment.isoformat(), holder=False))
+        write_lease(path, LeaseFile(task.id, fence, moment.isoformat(), holder=False, origin=ORIGIN_REAP))
         lost = {"epoch": view.epoch, "reason": view.reason, "attempt": attempt, "retry_at": retry_at}
         self._transition_locked(
             task.id, TaskState.READY, actor_id, f"bail perdu ({view.reason})", None,
