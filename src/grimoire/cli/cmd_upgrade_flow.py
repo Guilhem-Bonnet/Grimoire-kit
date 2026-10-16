@@ -436,7 +436,9 @@ def upgrade_flow_review(
                 "[yellow]checkpoint destructif en attente[/yellow] — décider avec "
                 f"`grimoire flow resume {last_run['runId']} --result <fichier.json>` "
                 "(`{\"pins\": {\"out\": {\"contract\": \"upgrade-complete\"}}, "
-                "\"checkpoint_decision\": \"approve\"|\"reject\", \"checkpoint_reason\": \"...\"}`)"
+                "\"checkpoint_decision\": \"approve\"|\"reject\", \"checkpoint_reason\": \"...\"}`) — "
+                "un `approve` n'est accepté qu'attesté : soumis depuis la session d'hôte qui a présenté "
+                "le checkpoint, après un tour humain de cette session"
             )
     if not proposals:
         console.print("Aucune proposition en attente (`grimoire proposals list`).")
