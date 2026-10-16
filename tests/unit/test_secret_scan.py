@@ -480,7 +480,9 @@ def test_scan_actions_aligned_and_deps_pinned() -> None:
     text = (WORKFLOWS / "secret-scan.yml").read_text(encoding="utf-8")
     assert "actions/checkout@v4" not in text
     assert "actions/setup-python@v4" not in text
-    assert "actions/checkout@v7" in text and "actions/setup-python@v7" in text
+    # v7, en tag (@v7) ou épinglée par SHA avec son commentaire de version (« @<sha>  # v7 », D-02).
+    for action in ("actions/checkout", "actions/setup-python"):
+        assert re.search(rf"{action}@(v7\b|[0-9a-f]{{40}}\s+#\s*v7\b)", text), action
     assert "PyYAML==" in text
 
 
