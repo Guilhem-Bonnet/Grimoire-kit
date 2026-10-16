@@ -752,7 +752,7 @@ def test_every_refusal_raised_after_the_reconcile_goes_through_the_repair_note()
     import inspect
     import re
 
-    source = inspect.getsource(FlowEngine.resume)
+    source = inspect.getsource(FlowEngine._resume_core)
     after = source.split("self._reconcile(wfi, ctx)", 1)[1]
     assert not re.search(r"raise GrimoireRuntimeError\(", after), "un refus de resume ignore les réparations déjà écrites"
     assert after.count("raise _refusal(") == 3

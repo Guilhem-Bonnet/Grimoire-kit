@@ -97,8 +97,13 @@ def load_turns(root: Path) -> Any:
     return _load(root)
 
 
-def _approve(engine: FlowEngine, run_id: str, **extra: Any) -> Any:
-    return engine.resume(run_id, output={**_GATE_OUT, "checkpoint_decision": "approve", **extra}, executor=_quiet())
+def _approve(engine: FlowEngine, run_id: str, *, directive_id: str | None = None, **extra: Any) -> Any:
+    return engine.resume(
+        run_id,
+        output={**_GATE_OUT, "checkpoint_decision": "approve", **extra},
+        executor=_quiet(),
+        directive_id=directive_id,
+    )
 
 
 def test_approve_sans_tour_posterieur_au_challenge_est_refuse(tmp_path: Path) -> None:
@@ -322,3 +327,33 @@ def test_le_checkpoint_de_project_upgrade_est_declare_destructif() -> None:
 
     blueprint = json.loads(bundled_blueprint_path().read_text(encoding="utf-8"))
     assert destructive_checkpoints(blueprint) == {"destructive"}
+
+
+def test_directive_perimee_sur_checkpoint_destructif_est_refusee_sans_consommer_le_tour(tmp_path: Path) -> None:
+    """W2-01 + W2-03 ensemble : le directive_id gouverne AVANT l'attestation.
+
+    Le refus ``awaiting_human`` est un ``blocked`` (quatre kinds) à tentative
+    suivante ; une décision visant la directive d'avant est rejetée sans rien
+    écrire, donc sans consommer le tour humain, qui sert ensuite la bonne.
+    """
+    engine, run_id = _start(tmp_path)
+    first = engine.directive(run_id)
+    assert first.kind == "checkpoint" and first.node_id == "gate"
+
+    assert _approve(engine, run_id, directive_id=first.directive_id).ok is False  # parked
+    parked = engine.directive(run_id)
+    assert parked.kind == "blocked" and parked.reason == "awaiting_human"
+    assert parked.node_id == "gate" and parked.attempt == 2
+    assert parked.directive_id != first.directive_id
+
+    _human_turn(tmp_path)
+    decisions_before = engine.status(run_id).checkpoint_decisions
+    with pytest.raises(GrimoireRuntimeError, match="directive_id"):
+        _approve(engine, run_id, directive_id=first.directive_id)  # vise la directive d'avant le refus
+    after_stale = engine.status(run_id)
+    assert after_stale.status == "blocked" and after_stale.current_node == "gate"
+    assert after_stale.checkpoint_decisions == decisions_before
+
+    released = _approve(engine, run_id, directive_id=parked.directive_id)
+    assert released.ok is True and released.attestation["status"] == "attested"  # le tour n'avait pas été brûlé
+    assert released.directive is not None and released.directive.node_id == "after"
