@@ -69,6 +69,19 @@ _DESTRUCTIVE_PATTERNS: tuple[tuple[str, str], ...] = (
     (r"\bterraform\s+destroy\b", "infrastructure destruction"),
     (r"\bkubectl\s+delete\b", "cluster resource deletion"),
     (r"\bdocker\s+system\s+prune\b.*-a", "full docker prune"),
+    # Windows (issue #761) : PowerShell et cmd n'écrivent pas ``rm -rf``. Chaque
+    # motif reste dans un segment (``[^;|&\n]``) : un drapeau d'une autre
+    # commande de la ligne ne compte pas. PowerShell accepte tout préfixe non
+    # ambigu d'un paramètre (``-r``, ``-Rec``…) et ``-Recurse:$true``.
+    (
+        r"\b(?:remove-item|ri|rm|rmdir|rd|del|erase)\b[^;|&\n]*?\s"
+        r"-(?:r(?:e(?:c(?:u(?:r(?:s(?:e)?)?)?)?)?)?|fo(?:r(?:c(?:e)?)?)?)(?=\s|$|:|['\"])",
+        "recursive/forced delete (PowerShell)",
+    ),
+    (r"\|\s*(?:remove-item|ri|del|erase)\b", "piped delete (PowerShell)"),
+    (r"\b(?:rd|rmdir)\b[^;|&\n]*?\s/s(?=\s|$|['\"])", "recursive delete (cmd)"),
+    (r"\b(?:del|erase)\b[^;|&\n]*?\s/[sq](?=\s|$|['\"])", "forced delete (cmd)"),
+    (r"\b(?:format-volume|clear-disk|initialize-disk)\b", "disk format or wipe (PowerShell)"),
 )
 
 #: Leading verbs whose blast radius never survives the session — the read
@@ -176,7 +189,11 @@ def is_read_only_command(command: str) -> bool:
 #: is handed to these is executed, so it stays under inspection.
 _EVAL_INTRODUCER = re.compile(
     r"(?:\b(?:bash|sh|zsh|dash|ksh|ash)\s+(?:-[A-Za-z]*\s+)*-[A-Za-z]*c"
-    r"|\beval|\bxargs(?:\s+-\S+)*|\bsu\s+-c|\bssh\s+\S+|\btimeout\s+\S+)\s*$"
+    r"|\beval|\bxargs(?:\s+-\S+)*|\bsu\s+-c|\bssh\s+\S+|\btimeout\s+\S+"
+    # Windows (issue #761) : ce que reçoivent ``pwsh -Command`` et ``cmd /c``
+    # est exécuté, exactement comme ``bash -c``.
+    r"|(?i:\b(?:pwsh|powershell)(?:\.exe)?(?:\s+-\S+)*?\s+-(?:c|command|e|encodedcommand))"
+    r"|(?i:\bcmd(?:\.exe)?(?:\s+/\S+)*?\s+/[ck]))\s*$"
 )
 
 #: Single- or double-quoted runs, the shape shell arguments take when they carry
