@@ -15,6 +15,7 @@ import re
 from pathlib import Path
 
 from grimoire.core.standard_checks.base import StandardProfile, StandardVerificationResult, _add_check, _text_file
+from grimoire.core.standard_checks.claim_proof_resolve import MemoryLookup, resolve_proof_cell
 from grimoire.core.standard_generation import EVIDENCE_DIR
 
 __all__ = ["ClaimRowScan", "scan_claim_rows", "v0_non_governed", "verify_claim_ledger"]
@@ -165,6 +166,38 @@ def v0_non_governed(root: Path, profile: StandardProfile, task_id: str) -> bool:
     return klass == "V0"
 
 
+def _check_proof_cell(
+    root: Path,
+    task_id: str,
+    result: StandardVerificationResult,
+    claim_id: str,
+    proof: str,
+    status: str,
+    severity: str,
+    rel_path: Path,
+    memory_lookup: MemoryLookup | None,
+) -> None:
+    resolutions = resolve_proof_cell(root, task_id, proof, memory_lookup=memory_lookup)
+    references = [r for r in resolutions if r.kind != "unstructured"]
+    for res in references:
+        if not res.resolved:
+            _add_check(
+                result,
+                "claims.proof_unresolved",
+                severity,
+                f"{claim_id} proof does not resolve: {res.token} ({res.reason}).",
+                path=rel_path,
+            )
+    if status == "prouvé" and not references:
+        _add_check(
+            result,
+            "claims.proof_unstructured",
+            "warning",
+            f"{claim_id} is prouvé on free text only; cite path:line, test-run.json#run_id, mem:id or an archived URL.",
+            path=rel_path,
+        )
+
+
 def verify_claim_ledger(
     root: Path,
     profile: StandardProfile,
@@ -173,6 +206,7 @@ def verify_claim_ledger(
     *,
     suppress_v0: bool = False,
     rows_only: bool = False,
+    memory_lookup: MemoryLookup | None = None,
 ) -> None:
     """AG-QUA-002 : une affirmation critique sans preuve reste une hypothèse.
 
@@ -212,6 +246,14 @@ def verify_claim_ledger(
     erreur. Le registre vierge (``claims.empty``) et la synthèse non remplie
     (``claims.summary_placeholder``) sont des constats de clôture, levés à
     partir de ``review`` seulement.
+
+    Résolution de la preuve (W3-02) : chaque jeton de la cellule Preuve qui a la
+    forme d'une référence (``chemin:ligne``, ``test-run.json#run_id``, ``mem:id``,
+    URL) doit se résoudre (:mod:`~grimoire.core.standard_checks.claim_proof_resolve`),
+    sinon ``claims.proof_unresolved`` : erreur en governed et production, avertissement
+    ailleurs et pendant ``in_progress``. Une cellule « prouvé » sans aucune référence
+    (texte libre) lève ``claims.proof_unstructured`` en avertissement : le texte libre
+    ne se vérifie pas, mais il n'est plus passé sous silence.
     """
     rel_path = EVIDENCE_DIR / task_id / "claim-ledger.md"
     text = _text_file(root, rel_path)
@@ -271,6 +313,8 @@ def verify_claim_ledger(
                 f"{claim_id} is marked prouvé with no source or evidence.",
                 path=rel_path,
             )
+        if proof:
+            _check_proof_cell(root, task_id, result, claim_id, proof, status, form_severity, rel_path, memory_lookup)
         if decision == "utiliser" and status != "prouvé":
             _add_check(
                 result,
