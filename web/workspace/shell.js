@@ -28,39 +28,65 @@ import glossary from './glossary.js';
 // ── Les six espaces, dans l'ordre de la barre ───────────────────────────────
 
 const SPACES = [
-  { id: 'piloter',  label: 'Piloter',  term: 'flotte' },
-  { id: 'concevoir', label: 'Concevoir', term: 'blueprint' },
-  { id: 'executer',  label: 'Exécuter',  term: 'tache' },
-  { id: 'observer',  label: 'Observer',  term: 'trace' },
-  { id: 'memoire',   label: 'Mémoire',   term: 'memoire' },
-  { id: 'source',    label: 'Source',    term: 'etage' },
+  { id: 'piloter',  label: 'Piloter',  icon: 'rocket', term: 'flotte' },
+  { id: 'concevoir', label: 'Concevoir', icon: 'workflow', term: 'blueprint' },
+  { id: 'executer',  label: 'Exécuter',  icon: 'bolt', term: 'tache' },
+  { id: 'observer',  label: 'Observer',  icon: 'microscope', term: 'trace' },
+  { id: 'memoire',   label: 'Mémoire',   icon: 'brain', term: 'memoire' },
+  { id: 'source',    label: 'Source',    icon: 'branch', term: 'etage' },
 ];
 
 // Rail : 1 explorateur, 2 bibliothèque, 3 preuves, 4 inspecteur, 5 dock.
 const RAIL = [
   { key: '1', id: 'explorer',  label: 'Explorateur', term: 'explorateur',
-    path: 'M3 5.5h5l1.5 1.5H17v8H3z' },
+    icon: 'folder-tree' },
   { key: '2', id: 'library',   label: 'Bibliothèque', term: 'pattern',
-    path: 'M4 4h6v12H4zM10 4h6v12h-6z' },
+    icon: 'puzzle' },
   { key: '3', id: 'evidence',  label: 'Preuves', term: 'evidence-pack',
-    path: 'M10 3l6 2v5c0 4-3 6-6 7-3-1-6-3-6-7V5z' },
+    icon: 'seal' },
   { key: '4', id: 'inspector', label: 'Inspecteur', term: 'inspecteur',
-    path: 'M4 4h12v12H4zM4 8h12' },
+    icon: 'clipboard' },
   { key: '5', id: 'dock',      label: 'Dock', term: 'dock',
-    path: 'M3 4h14v12H3zM3 11h14' },
+    icon: 'terminal' },
 ];
 
 const DOCK_TABS = [
-  { id: 'console',  label: 'Console',  term: 'console' },
-  { id: 'traces',   label: 'Traces',   term: 'trace' },
-  { id: 'timeline', label: 'Timeline', term: 'timeline' },
-  { id: 'problemes', label: 'Problèmes', term: 'probleme' },
+  { id: 'console', icon: 'terminal',  label: 'Console',  term: 'console' },
+  { id: 'traces', icon: 'network',   label: 'Traces',   term: 'trace' },
+  { id: 'timeline', icon: 'chart', label: 'Timeline', term: 'timeline' },
+  { id: 'problemes', icon: 'alert', label: 'Problèmes', term: 'probleme' },
 ];
 
 const PANELS = { explorer: 'panel-explorer', inspector: 'panel-inspector', evidence: 'panel-evidence' };
 
 const $ = (id) => document.getElementById(id);
 const root = document.documentElement;
+
+// ── Icônes : le sprite icons.svg, généré depuis docs/assets/icons ───────────
+// `scripts/build-icon-sprite.py` produit le sprite ; tests/unit/
+// test_workspace_icons.py échoue si un appel à icon() cite un symbole absent.
+// Décoratif par défaut (`aria-hidden`) : le libellé voisin porte le sens.
+// Avec `label`, l'icône porte elle-même le sens (`role="img"` + `aria-label`).
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+export function icon(name, label) {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('class', 'ico');
+  const use = document.createElementNS(SVG_NS, 'use');
+  use.setAttribute('href', `icons.svg#${name}`);
+  svg.append(use);
+  if (label) {
+    svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', label);
+  } else {
+    svg.setAttribute('aria-hidden', 'true');
+  }
+  return svg;
+}
+
+/** Icône d'un état (point + mot reste la règle : l'icône double le mot). */
+export const STATE_ICON = { ok: 'check', warn: 'alert', bad: 'cross', '': 'info' };
 
 // ── État mémorisé par espace et par projet (spec §3.1) ──────────────────────
 
@@ -245,7 +271,7 @@ function renderEvidencePanel(body, payload) {
       mk('span', { class: 'ev-id mono', text: task.task_id }),
       mk('span', { class: 'ev-title', text: task.title || task.status || '' }),
       mk('span', { class: 'grow' }),
-      mk('span', { class: `chip pill ${cls}`, text }),
+      mk('span', { class: `chip pill ${cls}` }, icon(STATE_ICON[cls] ?? 'info'), text),
     );
     row.title = task.pack_exists
       ? task.pack_path
@@ -289,9 +315,8 @@ function buildRail() {
     button.dataset.term = item.term;
     button.setAttribute('aria-pressed', 'false');
     button.setAttribute('aria-label', `${item.label} (${item.key})`);
-    button.innerHTML =
-      `<svg class="ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="${item.path}"/></svg>` +
-      `<span class="rail-lbl">${item.label}</span>`;
+    button.title = `${item.label} (${item.key})`;
+    button.append(icon(item.icon), mk('span', { class: 'rail-lbl', text: item.label }));
     // Clic sur l'icône du rail : ouvre en surimpression (spec §3.1) ; un
     // second clic referme. ⌘/Ctrl + clic épingle directement dans la grille,
     // sans passer par l'entrouvert — le même geste que le cadenas du panneau.
@@ -385,7 +410,7 @@ function buildDock() {
     button.role = 'tab';
     button.dataset.dockTab = tab.id;
     button.dataset.term = tab.term;
-    button.textContent = tab.label;
+    button.append(icon(tab.icon), mk('span', { class: 'tab-lbl', text: tab.label }));
     button.setAttribute('aria-selected', String(tab.id === dockTab));
     button.addEventListener('click', () => selectDockTab(tab.id));
     tabs.append(button);
@@ -520,7 +545,7 @@ function empty(title, sentence, command) {
   const block = document.createElement('div');
   block.className = 'empty';
   const heading = document.createElement('h2');
-  heading.textContent = title;
+  heading.append(icon('inbox'), mk('span', { text: title }));
   block.append(heading);
   const paragraph = document.createElement('p');
   paragraph.textContent = sentence;
@@ -569,7 +594,7 @@ function buildSpaces() {
     button.className = 'tab';
     button.dataset.space = space.id;
     button.dataset.term = space.term;
-    button.textContent = space.label;
+    button.append(icon(space.icon), mk('span', { class: 'tab-lbl', text: space.label }));
     button.setAttribute('aria-selected', 'false');
     button.title = `${space.label} — ⌘${index + 1}`;
     button.addEventListener('click', () => goto(space.id));
@@ -611,7 +636,7 @@ async function goto(id, params) {
   docbar.setValidation('');
 
   const ctx = {
-    api, host, glossary, dock, docbar, empty,
+    api, host, glossary, dock, docbar, empty, icon,
     canvas,
     inspector: $('inspector-body'),
     explorer: $('explorer-body'),

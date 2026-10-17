@@ -48,6 +48,8 @@ const scope = { mode: 'project', state: '', slug: '', live: false };
 
 // Colonnes du standard, dans l'ordre normatif (grimoire.missions.board.BOARD_LIFECYCLE).
 const LIFECYCLE = ['proposed', 'ready', 'in_progress', 'blocked', 'review', 'accepted', 'released', 'archived'];
+import { icon } from '../shell.js';
+
 const COLUMN_LABEL = {
   proposed: 'Proposée', ready: 'Prête', in_progress: 'En cours', blocked: 'Bloquée',
   review: 'Revue', accepted: 'Acceptée', released: 'Publiée', archived: 'Archivée',
@@ -55,10 +57,10 @@ const COLUMN_LABEL = {
 // Board à 4 colonnes : regroupement des 8 états du standard. Les colonnes
 // repliées sont nommées sous le titre, jamais tues (revue §4.3).
 const GROUPS4 = [
-  { id: 'todo', label: 'À faire', cols: ['proposed', 'ready'] },
-  { id: 'doing', label: 'En cours', cols: ['in_progress', 'blocked'] },
-  { id: 'review', label: 'Revue', cols: ['review'] },
-  { id: 'done', label: 'Fait', cols: ['accepted', 'released', 'archived'] },
+  { id: 'todo', icon: 'clipboard', label: 'À faire', cols: ['proposed', 'ready'] },
+  { id: 'doing', icon: 'bolt', label: 'En cours', cols: ['in_progress', 'blocked'] },
+  { id: 'review', icon: 'microscope', label: 'Revue', cols: ['review'] },
+  { id: 'done', icon: 'seal', label: 'Fait', cols: ['accepted', 'released', 'archived'] },
 ];
 // Board → état ledger, pour appeler `move` (grimoire.missions.board._FROM_BOARD).
 const BOARD_TO_STATE = {
@@ -100,11 +102,13 @@ function injectStyles() {
   const style = document.createElement('style');
   style.id = STYLE_ID;
   style.textContent = `
-    .ex-wrap { padding: var(--sp-4); height: 100%; display: flex; flex-direction: column; gap: var(--sp-3); }
+    .ex-wrap { padding: var(--sp-4) var(--sp-5); height: 100%; display: flex; flex-direction: column; gap: var(--sp-3); }
     .ex-board { display: flex; gap: var(--sp-3); align-items: flex-start; overflow-x: auto; flex-grow: 1; }
     .ex-col { width: 260px; flex: none; display: flex; flex-direction: column; gap: var(--sp-2); }
     .ex-col-head { padding: 6px 2px; }
-    .ex-col-title { font-size: var(--t-s); font-weight: 500; color: var(--ink); display: flex; justify-content: space-between; }
+    .ex-col-title { font-size: var(--t-s); font-weight: 500; color: var(--ink); display: flex; align-items: center; gap: 6px; }
+    .ex-col-title > span:first-of-type { margin-right: auto; }
+    .ex-col-title .ico { width: 16px; height: 16px; color: var(--ink2); }
     .ex-col-gate { font-size: var(--t-min); color: var(--ink3); margin-top: 2px; }
     .ex-col-body { display: flex; flex-direction: column; gap: 6px; min-height: 60px; }
     .ex-col-body.empty { border: 1px dashed var(--line); border-radius: var(--r); align-items: center; justify-content: center; color: var(--ink3); font-size: var(--t-min); padding: var(--sp-4) 0; }
@@ -298,7 +302,7 @@ function renderBoard(root, ctx, tasks, groups, onSelect, portfolio = false) {
     head.className = 'ex-col-head';
     const title = document.createElement('div');
     title.className = 'ex-col-title';
-    title.append(text('span', null, group.label), text('span', 'mono lbl', String(inColumn.length)));
+    title.append(icon(group.icon), text('span', null, group.label), text('span', 'mono lbl', String(inColumn.length)));
     if (group.cols.length > 1) title.dataset.term = 'porte-de-preuve';
     head.append(title);
     if (group.cols.length > 1) {
