@@ -1,682 +1,381 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Grimoire Kit — Noyau Agentique</title>
-  <meta property="og:type" content="website"/>
-  <meta property="og:title" content="Grimoire Kit — Noyau Agentique"/>
-  <meta property="og:description" content="Grimoire Kit — l'OS agentique dans l'IDE : orchestration, standard gouverné (36 patterns vérifiables), catalogue de 78, mémoire, observabilité. Tout est tracé, vérifiable, composable."/>
-  <meta property="og:url" content="https://guilhem-bonnet.github.io/Grimoire-kit/"/>
-  <meta name="twitter:card" content="summary"/>
-  <meta name="description" content="Grimoire Kit orchestre agents, surfaces et artefacts dans un runtime unique. Conçu pour les builders qui exigent la trace." />
-  <link rel="stylesheet" href="forge-tokens.css" />
-  <link rel="stylesheet" href="forge-base.css" />
-  <link rel="stylesheet" href="forge-motion.css" />
-  <style>
-    /* ── Hero layout ── */
-    #hero { padding: 148px 0 100px; position: relative; overflow: hidden; }
-    .hero-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 72px; align-items: center; }
-    @media (max-width: 960px) { .hero-grid { grid-template-columns: 1fr; gap: 48px; } }
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Grimoire · Le teaser</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Des idées plein un carnet, trois commandes, et les idées devenues des choses. Puis l'explication, en vrai.">
+<style>
+/* Douce : toile claire, une carte de terminal blanche par preuve, l'anneau à 2 segments comme seule signature */
+@font-face{font-family:"Instrument Sans";src:url(fonts/instrument-sans-400.woff2) format("woff2");font-weight:400;font-display:swap}
+@font-face{font-family:"Instrument Sans";src:url(fonts/instrument-sans-500.woff2) format("woff2");font-weight:500;font-display:swap}
+@font-face{font-family:"Instrument Sans";src:url(fonts/instrument-sans-600.woff2) format("woff2");font-weight:600;font-display:swap}
+@font-face{font-family:"JetBrains Mono";src:url(fonts/JetBrainsMono-Regular.woff2) format("woff2");font-weight:400;font-display:swap}
+@font-face{font-family:"JetBrains Mono";src:url(fonts/JetBrainsMono-SemiBold.woff2) format("woff2");font-weight:600;font-display:swap}
+:root{
+  --ground:#eef0f4;--card:#ffffff;--hover:#f3f5f8;--line:#e3e6eb;--line2:#c9ced6;
+  --ink:#14171d;--ink2:#4a515c;--ink3:#606874;
+  --acc:#3451d1;--onacc:#ffffff;--accs:#eef1fd;--rub:#b4441d;
+  --ok:#1f7a4d;--okm:#22945c;--err:#c0283f;--errm:#d63c52;
+  --shadow:0 1px 2px rgba(16,24,40,.06),0 10px 28px rgba(16,24,40,.08);
+  --sans:"Instrument Sans",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --ground:#0f1115;--card:#1c2027;--hover:#242933;--line:#2a2f38;--line2:#3a404b;
+  --ink:#eef0f4;--ink2:#b9c0cb;--ink3:#9099a6;--acc:#8ea2ff;--onacc:#0b1030;--accs:#232a4a;--rub:#f08a5d;
+  --ok:#5cd39a;--okm:#3fbf80;--err:#ff7d8d;--errm:#f05a6e;--shadow:0 1px 2px rgba(0,0,0,.3),0 10px 28px rgba(0,0,0,.35);color-scheme:dark}}
+:root[data-theme="dark"]{
+  --ground:#0f1115;--card:#1c2027;--hover:#242933;--line:#2a2f38;--line2:#3a404b;
+  --ink:#eef0f4;--ink2:#b9c0cb;--ink3:#9099a6;--acc:#8ea2ff;--onacc:#0b1030;--accs:#232a4a;--rub:#f08a5d;
+  --ok:#5cd39a;--okm:#3fbf80;--err:#ff7d8d;--errm:#f05a6e;--shadow:0 1px 2px rgba(0,0,0,.3),0 10px 28px rgba(0,0,0,.35);color-scheme:dark}
 
-    /* Hero blueprint overlay */
-    #hero::before {
-      content: ''; position: absolute; inset: 0;
-      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64'%3E%3Cpath d='M64,0 L0,0 0,64' fill='none' stroke='%23FF6B3D' stroke-width='0.5' opacity='0.08'/%3E%3C/svg%3E");
-      pointer-events: none;
-    }
-    .hero-eyebrow { display: flex; align-items: center; gap: 10px; margin-bottom: 24px; }
-    .hero-h1 { margin-bottom: 18px; }
-    .hero-sub { font-size: 1rem; color: var(--ink-soft); line-height: 1.7; margin-bottom: 36px; max-width: 460px; }
-    .hero-ctas { display: flex; gap: 14px; flex-wrap: wrap; }
-    .hero-embed { position: relative; }
-    .embed-badge {
-      position: absolute; top: 12px; right: 12px; z-index: 2;
-      font-family: var(--font-mono); font-size: 0.58rem; letter-spacing: 0.1em;
-      color: var(--data-green); background: rgba(52,211,153,0.12);
-      border: 1px solid rgba(52,211,153,0.25); border-radius: 2px; padding: 3px 8px;
-      display: flex; align-items: center; gap: 5px;
-    }
-    .embed-badge .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--data-green); box-shadow: 0 0 5px var(--data-green); }
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--sans);font-size:17px;line-height:1.55;font-variant-numeric:tabular-nums;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.wrap{max-width:1180px;margin:0 auto}
+a{color:var(--acc)}
+:focus-visible{outline:2px solid var(--acc);outline-offset:2px;border-radius:6px}
+.mono{font-family:var(--mono)}
+.i{display:inline-block;width:18px;height:18px;flex:none;background:currentColor;-webkit-mask:var(--m) center/contain no-repeat;mask:var(--m) center/contain no-repeat}
+.i-copy{--m:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="%23000" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="8.5" y="8.5" width="11" height="11" rx="2.5"/><path d="M15.5 8.5V6a1.5 1.5 0 0 0-1.5-1.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"/></svg>')}
+.i-gate{--m:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="%23000" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M5 20V9a7 7 0 0 1 14 0v11M3.5 20h17M9.5 20v-5.5h5V20"/></svg>')}
+.i-deleguer{--m:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="%23000" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h14M13.5 7.5 18 12l-4.5 4.5"/></svg>')}
+.i-session{--m:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="%23000" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="10.5" width="14" height="9.5" rx="2.5"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/></svg>')}
+.i-file{--m:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="%23000" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3.5h6.5L18 8v11.5a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-15a1 1 0 0 1 1-1z"/><path d="M13 3.5V8.5h5M9 13h6M9 16.5h4"/></svg>')}
+.i-pause{--m:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="%23000" stroke-width="2" stroke-linecap="round"><path d="M9 6v12M15 6v12"/></svg>')}
+.i-replay{--m:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="%23000" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3M4.5 4.5v4h4"/></svg>')}
+.i-play{--m:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="%23000" stroke-width="1.75" stroke-linejoin="round"><path d="M8 5.5v13l10-6.5z"/></svg>')}
 
-    /* ── ChatOrchestrator ── */
-    #orchestration { padding: 120px 0; }
-    .sog-demo {
-      background: var(--elev-1); border: 1px solid var(--line);
-      border-radius: var(--r-md); padding: 40px;
-      max-width: 720px; margin: 52px auto 0;
-      position: relative; overflow: hidden;
-    }
-    .sog-demo::before {
-      content: ''; position: absolute; inset: 0;
-      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64'%3E%3Cpath d='M64,0 L0,0 0,64' fill='none' stroke='%23FF6B3D' stroke-width='0.5' opacity='0.06'/%3E%3C/svg%3E");
-      pointer-events: none;
-    }
-    .sog-stage { position: relative; height: 340px; }
-    .sog-node {
-      position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
-      width: 72px; height: 72px; border-radius: 50%;
-      background: var(--elev-2); border: 1.5px solid var(--accent);
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
-      gap: 2px; z-index: 2; transition: box-shadow 400ms;
-    }
-    .sog-node.pulse { box-shadow: 0 0 0 8px var(--accent-soft), 0 0 32px -4px var(--accent-glow); }
-    .sog-node-label { font-family: var(--font-mono); font-size: 0.65rem; color: var(--accent); letter-spacing: 0.08em; font-weight: 600; }
-    .sog-node-sub   { font-family: var(--font-mono); font-size: 0.5rem; color: var(--ink-muted); }
+/* barre */
+.bar{display:flex;align-items:center;justify-content:space-between;gap:16px;padding-block:22px}
+.word{font-weight:600;font-size:20px;letter-spacing:-.02em;text-decoration:none;color:var(--ink)}
+.word b{color:var(--rub);font-weight:600}
+.bar nav{display:flex;gap:20px;font-size:15px;font-weight:500}
+.bar nav a{color:var(--ink2);text-decoration:none}.bar nav a:hover{color:var(--ink)}
 
-    /* User bubble */
-    .sog-user {
-      position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
-      background: var(--elev-2); border: 1px solid var(--line-strong);
-      border-radius: var(--r-md); padding: 10px 16px;
-      font-family: var(--font-mono); font-size: 0.68rem; color: var(--ink-soft);
-      white-space: nowrap; opacity: 0; transition: opacity 300ms, transform 300ms;
-    }
-    .sog-user.show { opacity: 1; }
+/* boutons */
+.btn{font:inherit;font-size:14px;font-weight:500;height:34px;padding:0 14px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer;display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
+.btn:hover{border-color:var(--line2)}
+.btn.ctl{color:var(--acc);border-color:transparent;background:var(--accs)}
+.install{display:flex;align-items:center;gap:6px;background:var(--card);border:1px solid var(--line);border-radius:999px;padding:7px 7px 7px 22px;box-shadow:var(--shadow);max-width:100%;width:fit-content}
+.install code{font-family:var(--mono);font-size:17px;white-space:nowrap;overflow-x:auto;min-width:0}
+.install code .p{color:var(--rub)}
+.install .btn{background:var(--acc);border-color:var(--acc);color:var(--onacc);height:40px;padding:0 16px}
 
-    /* Agent bubbles */
-    .sog-agent {
-      position: absolute; width: 80px;
-      display: flex; flex-direction: column; align-items: center; gap: 6px;
-      opacity: 0; transition: opacity 400ms, transform 400ms;
-    }
-    .sog-agent.show { opacity: 1; }
-    .agent-avatar {
-      width: 44px; height: 44px; border-radius: var(--r-sm);
-      background: var(--elev-3); border: 1px solid var(--line);
-      display: flex; align-items: center; justify-content: center;
-      font-family: var(--font-mono); font-size: 0.62rem; color: var(--ink-soft);
-      position: relative; overflow: hidden;
-      transition: border-color 300ms;
-    }
-    .agent-avatar.working { border-color: var(--accent); }
-    .agent-avatar .working-bar {
-      position: absolute; bottom: 0; left: 0; height: 2px;
-      background: var(--accent); width: 0%; transition: width 1.2s linear;
-    }
-    .agent-avatar.working .working-bar { width: 100%; }
-    .agent-name { font-family: var(--font-mono); font-size: 0.58rem; color: var(--ink-muted); letter-spacing: 0.06em; }
+/* héros */
+.hero>div,.lane>div{min-width:0}
+.hero{display:grid;grid-template-columns:minmax(0,4fr) minmax(0,8fr);gap:56px;align-items:center;padding-block:48px 72px}
+.eyebrow{font-size:14px;font-weight:500;color:var(--ink2);letter-spacing:.01em}
+h1{font-size:clamp(52px,7.4vw,96px);line-height:.98;letter-spacing:-.045em;font-weight:600;margin:14px 0 22px;text-wrap:balance}
+.lede{font-size:21px;line-height:1.45;color:var(--ink2);margin:0 0 30px;max-width:30ch;text-wrap:pretty}
+.micro{font-size:14px;color:var(--ink3);margin:14px 0 0}
 
-    /* Artefact output */
-    .sog-artefact {
-      position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
-      background: var(--accent-soft); border: 1px solid var(--accent-dim);
-      border-radius: var(--r-sm); padding: 8px 20px;
-      font-family: var(--font-mono); font-size: 0.65rem; color: var(--accent);
-      white-space: nowrap; letter-spacing: 0.06em;
-      opacity: 0; transition: opacity 400ms, transform 400ms;
-      transform: translateX(-50%) translateY(8px);
-    }
-    .sog-artefact.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.proof{display:grid;grid-template-columns:minmax(0,1fr);gap:18px}
+.ring{width:150px;display:grid;gap:14px;justify-items:center}
+.proof .ring.live{width:auto;grid-template-columns:auto auto;justify-content:start;align-items:center;gap:22px}
+.proof .ring.live svg{width:120px;height:120px}
+.ring svg{width:150px;height:150px;overflow:visible}
+.ring .seg{fill:none;stroke-width:12;stroke-linecap:round;transition:stroke .18s cubic-bezier(.4,0,1,1)}
+.ring [data-s="idle"]{stroke:var(--ink3);stroke-dasharray:1.5 8}
+.ring [data-s="err"]{stroke:var(--errm)}
+.ring [data-s="ok"]{stroke:var(--okm);transition-duration:.4s;transition-timing-function:cubic-bezier(.2,.8,.2,1)}
+.ring .ctr{font-family:var(--sans);font-size:30px;font-weight:600;letter-spacing:-.02em}
+.ring .labs{display:grid;gap:6px;font-family:var(--mono);font-size:12.5px;color:var(--ink2)}
+.ring .labs span{display:flex;align-items:center;gap:8px}
+.ring .labs i{width:10px;height:10px;border-radius:5px;flex:none}
+.ring .labs i[data-s="idle"]{border:1.5px dashed var(--ink3)}
+.ring .labs i[data-s="err"]{background:var(--errm)}
+.ring .labs i[data-s="ok"]{background:var(--okm)}
+.ring .ctrw{fill:var(--ink)}
+.ring.err .ctrw{fill:var(--err)}.ring.ok .ctrw{fill:var(--ok)}
 
-    /* SVG connections */
-    .sog-svg { position: absolute; inset: 0; pointer-events: none; z-index: 1; overflow: visible; }
-    .sog-line { stroke: var(--accent); stroke-width: 1; fill: none; opacity: 0.5; stroke-dasharray: 6 4; }
+.term{background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);min-width:0}
+.term .head{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;white-space:nowrap;padding:10px 12px 10px 18px;border-bottom:1px solid var(--line);font-size:13.5px;color:var(--ink2)}
+.term .head .cap{font-weight:500;color:var(--ink)}
+.term .head .sp{flex:1}
+.term .head .btn{height:30px;font-size:13px;padding:0 11px}
+.log{margin:0;padding:16px 18px 18px;font-family:var(--mono);font-size:13.5px;line-height:1.75;overflow-x:auto;white-space:pre;color:var(--ink)}
+.log .r{display:block;min-height:1.75em}
+.log .p{color:var(--rub)}
+.log .err{color:var(--err)}
+.log .dim{color:var(--ink3)}
+.log .okw{color:var(--ok);font-weight:600}
+.log .u{text-decoration:underline;text-decoration-thickness:2px;text-underline-offset:5px;text-decoration-color:var(--ink)}
+.edit{display:block;white-space:normal;background:var(--hover);border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin:6px 0 10px;max-width:560px}
+.edit .f{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ink2);flex-wrap:wrap}
+.edit .tag{margin-left:auto;font-family:var(--sans);font-size:12px;font-weight:600;color:var(--acc);background:var(--accs);padding:1px 9px;border-radius:999px}
+.edit .v{font-size:13.5px}
+.prov{padding:0 18px 14px;font-size:12.5px;color:var(--ink3)}
+.prov button{font:inherit;color:var(--acc);background:none;border:0;padding:0;cursor:pointer;text-decoration:underline;text-underline-offset:3px}
+.capfig{margin:0 18px 18px;display:grid;gap:6px}
+.capfig img{border-radius:8px;display:block;width:100%;height:auto}
+.capfig figcaption{font-size:12.5px;color:var(--ink3)}
+.legend{font-size:13.5px;color:var(--ink3);margin:0 0 10px 2px}
+/* lecture : état masqué ou en cours de frappe */
+.log .r.h{visibility:hidden}
 
-    /* Controls */
-    .sog-controls { display: flex; align-items: center; gap: 14px; margin-top: 24px; position: relative; z-index: 2; }
-    .sog-input-wrap { flex: 1; display: flex; gap: 8px; }
-    .sog-input {
-      flex: 1; background: var(--elev-2); border: 1px solid var(--line);
-      border-radius: var(--r-sm); padding: 9px 14px;
-      font-family: var(--font-mono); font-size: 0.72rem; color: var(--ink-soft);
-      outline: none; transition: border-color 200ms;
-    }
-    .sog-input:focus { border-color: var(--accent); }
-    .sog-send {
-      font-family: var(--font-mono); font-size: 0.7rem; padding: 9px 18px;
-      background: var(--accent); color: var(--bg); border: none; border-radius: var(--r-sm);
-      cursor: pointer; letter-spacing: 0.06em; transition: filter 200ms;
-      position: relative; overflow: hidden;
-    }
-    .sog-send:hover { filter: brightness(1.08); }
-    .sog-send:disabled { opacity: 0.5; cursor: default; }
-    .sog-replay {
-      font-family: var(--font-mono); font-size: 0.68rem; padding: 9px 14px;
-      background: transparent; color: var(--ink-muted); border: 1px solid var(--line);
-      border-radius: var(--r-sm); cursor: pointer;
-      transition: all 200ms; display: none;
-    }
-    .sog-replay.show { display: block; }
-    .sog-replay:hover { color: var(--ink); border-color: var(--line-strong); }
-    .sog-status { font-family: var(--font-mono); font-size: 0.62rem; color: var(--ink-muted); }
+/* sections */
+section.blk{padding-block:72px;border-top:1px solid var(--line)}
+h2{font-size:clamp(32px,4.2vw,50px);line-height:1.05;letter-spacing:-.035em;font-weight:600;margin:0 0 16px;text-wrap:balance;max-width:20ch}
+.txt{font-size:19px;color:var(--ink2);max-width:58ch;margin:0 0 36px;text-wrap:pretty}
 
-    /* ── Preuves grid ── */
-    .preuves-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 64px; align-items: start; margin-top: 52px; }
-    .metrics-row { display: flex; gap: 48px; margin-bottom: 40px; }
-    @media (max-width: 960px) { .preuves-grid { grid-template-columns: 1fr; gap: 40px; } .metrics-row { flex-wrap: wrap; gap: 32px; } }
+.lanes{display:grid;gap:18px}
+.lane{display:grid;grid-template-columns:minmax(0,1fr) 150px;gap:18px;align-items:center}
+.lane .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 18px 12px calc(18px + 3ch);text-indent:-3ch;font-family:var(--mono);font-size:13.5px;line-height:1.7;white-space:pre-wrap;overflow-wrap:anywhere;min-width:0}
+.lane .card .okw{color:var(--ok);font-weight:600}
+.lane.dim .card{color:var(--ink3)}
+.lane .crit{font-size:13.5px;color:var(--ink3);margin:6px 0 0 4px}
+.dest{display:flex;align-items:center;gap:9px;font-weight:600;font-size:15px}
+.dest .i{width:24px;height:24px}
+.dest.out{color:var(--acc)}.dest.stay{color:var(--ink)}
+.lanes .src{font-size:12.5px;color:var(--ink3)}
 
-    /* ── Tweaks ── */
-    #tweaks-panel {
-      position: fixed; bottom: 24px; right: 24px;
-      background: var(--elev-2); border: 1px solid rgba(255,107,61,0.3); border-radius: var(--r-md);
-      padding: 20px; width: 232px; z-index: 9999; display: none;
-      font-family: var(--font-mono); font-size: 0.72rem;
-    }
-    #tweaks-panel.open { display: block; }
-    #tweaks-panel h4 { color: var(--accent); font-size: 0.62rem; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 16px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
-    .tw-row { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
-    .tw-row label { color: var(--ink-muted); font-size: 0.62rem; letter-spacing: 0.06em; }
-    .tw-row input[type=range] { width: 100%; accent-color: var(--accent); }
-    .tw-row select { background: var(--bg); border: 1px solid var(--line); color: var(--ink); padding: 4px 8px; border-radius: var(--r-sm); font-family: inherit; font-size: 0.68rem; }
-    .tw-row input[type=color] { width: 32px; height: 22px; border: none; background: none; cursor: pointer; }
-    .tw-sep { border: none; border-top: 1px solid var(--line); margin: 8px 0 12px; }
+.tbl{overflow-x:auto;background:var(--card);border:1px solid var(--line);border-radius:16px}
+table{border-collapse:collapse;width:100%;min-width:640px;font-size:15.5px}
+th,td{text-align:left;padding:13px 18px;border-top:1px solid var(--line);white-space:nowrap}
+thead th{border-top:0;font-size:13px;font-weight:500;color:var(--ink3)}
+tbody th{font-weight:600}
+td.oui{color:var(--ink)}
+td.non{color:var(--ink3)}
+.notes{display:grid;gap:4px;margin:18px 0 0;padding:0;list-style:none;font-size:15px;color:var(--ink2)}
 
-    /* ── Mini preview rows ── */
-    .mini-rows { padding: 8px 10px; }
-    .mini-row { display: flex; align-items: center; gap: 7px; padding: 4px 0; border-bottom: 1px solid var(--line); }
-    .mini-row:last-child { border-bottom: none; }
-    .mini-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--ink-muted); flex-shrink: 0; }
-    .mini-dot.on { background: var(--data-green); }
-    .mini-dot.wn { background: var(--data-amber); }
-    .mini-lbl { font-family: var(--font-mono); font-size: 0.58rem; color: var(--ink-muted); flex: 1; }
-    .mini-val { font-family: var(--font-mono); font-size: 0.58rem; color: var(--ink-soft); }
-  </style>
-  <script src="grimoire-mode.js"></script>
+.cmds{background:var(--card);border:1px solid var(--line);border-radius:16px;overflow:hidden;max-width:720px}
+.cmd{display:flex;align-items:center;gap:12px;padding:10px 10px 10px 20px;border-top:1px solid var(--line)}
+.cmd:first-child{border-top:0}
+.cmd code{flex:1;min-width:0;font-family:var(--mono);font-size:15px;white-space:nowrap;overflow-x:auto}
+.cmd code .p{color:var(--rub)}
+.alt{font-size:15px;color:var(--ink3);margin:14px 0 0}
+.alt code{font-family:var(--mono);color:var(--ink2)}
+
+.end{display:grid;grid-template-columns:auto minmax(0,1fr);gap:48px;align-items:center;padding-block:88px;border-top:1px solid var(--line)}
+.end .ring{padding-top:0}
+.end h2{font-size:clamp(40px,6vw,76px);max-width:none;margin-bottom:6px}
+.end .legend{margin:0 0 28px}
+
+footer{border-top:1px solid var(--line);padding-block:28px 48px;display:flex;flex-wrap:wrap;gap:12px 26px;font-size:14px;color:var(--ink3);align-items:center}
+footer a{color:var(--ink2)}
+footer .sp{flex:1}
+.film{margin-top:18px;width:100%}
+.film video{width:100%;border-radius:14px;border:1px solid var(--line);display:block;background:var(--ground)}
+
+/* reduced motion : refus et passage côte à côte */
+.rm{display:none}
+@media (prefers-reduced-motion:reduce){
+  .ring .seg{transition:none}
+  .proof .ctl{display:none}
+  .rm{display:flex;gap:18px}
+  .proof .ring.live{display:none}
+}
+.rm .ring{width:110px;padding-top:0}.rm .ring svg{width:110px;height:110px}
+
+@media (max-width:900px){
+  .hero{grid-template-columns:minmax(0,1fr);gap:40px;padding-block:24px 56px}
+  .end{grid-template-columns:minmax(0,1fr);gap:24px}
+}
+@media (max-width:620px){
+  body{font-size:16px}
+  .proof .ring.live svg,.end .ring svg{width:100px;height:100px}
+  .install code{font-size:15px}
+  .lane{grid-template-columns:minmax(0,1fr)}
+  .bar nav a.opt{display:none}
+  .lede{font-size:19px}
+  .log{font-size:12px}
+  section.blk{padding-block:56px}
+}
+
+.bar5{position:absolute;z-index:3;left:0;right:0;top:0;display:flex;justify-content:space-between;align-items:center;padding:calc(16px + env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) 16px max(16px,env(safe-area-inset-left,0px));color:#eef0f4;pointer-events:none}
+.bar5 a{pointer-events:auto;color:inherit;text-decoration:none;font-weight:600;font-size:17px}
+.bar5 a b{color:#f08a5d}
+.bar5 nav{display:flex;gap:18px}.bar5 nav a{font-weight:500;font-size:15px;opacity:.9}
+.film5{position:relative;background:#000;margin:0 calc(-1 * max(16px,env(safe-area-inset-right,0px))) 0 calc(-1 * max(16px,env(safe-area-inset-left,0px)))}
+.bar5{max-width:none}
+.proof5{position:relative}
+.film5 video{display:block;width:100%;height:auto;max-height:100vh;max-height:100dvh;object-fit:contain;background:#000}
+.ctl5{position:absolute;right:max(16px,env(safe-area-inset-right,0px));bottom:calc(16px + env(safe-area-inset-bottom,0px));display:flex;gap:8px}
+.ctl5 button{font:inherit;font-size:14px;font-weight:600;height:36px;padding:0 14px;border-radius:999px;border:1px solid rgba(255,255,255,.25);background:rgba(20,23,29,.7);color:#fff;cursor:pointer;backdrop-filter:blur(8px);display:inline-flex;align-items:center;gap:8px}
+.ctl5 button:focus-visible{outline:2px solid #8ea2ff;outline-offset:2px}
+.cmd5{display:grid;grid-template-columns:minmax(0,1fr);justify-items:center;gap:12px;padding-block:40px 8px;text-align:center}
+.cmd5 .install{max-width:100%}
+.cmd5 .micro{margin:0;font-size:15px;color:var(--ink2)}
+.h5{font-size:clamp(26px,3.4vw,40px);letter-spacing:-.03em;margin:56px 0 0;font-weight:600;text-align:center;text-wrap:balance}
+.h5s{font-size:17px;color:var(--ink2);text-align:center;margin:10px auto 0;max-width:60ch}
+.proof5{padding-block:40px 56px;max-width:1180px;margin:0 auto}
+.proof5 .legend{margin-left:2px}
+@media (prefers-reduced-motion:reduce){.film5 video{display:block}}
+</style>
 </head>
 <body>
-<a href="#main" class="skip-link">Aller au contenu</a>
-<div id="scroll-progress" aria-hidden="true"></div>
-<nav id="forge-nav" aria-label="Navigation principale"></nav>
 
-<main id="main">
-
-<!-- ═══ HERO ═══ -->
-<section id="hero">
-  <div class="container">
-    <div class="hero-grid">
-      <div class="hero-content">
-        <div class="hero-eyebrow" data-hero="0">
-          <span class="status-dot" aria-hidden="true"></span>
-          <span class="eyebrow">NOYAU AGENTIQUE &nbsp;·&nbsp; v2026</span>
-        </div>
-        <h1 class="hero-h1 grad-text" data-hero="1">Un noyau agentique.<br>Composé, gouverné, tracé.</h1>
-        <p class="hero-sub" data-hero="2">Grimoire Kit orchestre agents, surfaces et artefacts dans un runtime unique. Conçu pour les builders qui exigent la trace.</p>
-        <div class="hero-ctas" data-hero="3">
-          <a href="#" class="btn btn-primary js-launch-atelier">LANCER L'ATELIER</a>
-          <a href="demo.html"  class="btn btn-ghost">VOIR LA DÉMO</a>
-        </div>
-      </div>
-      <div class="hero-embed" data-hero="4">
-        <span class="embed-badge"><span class="dot"></span>LIVE</span>
-        <div class="cockpit-frame" role="img" aria-label="Cockpit Grimoire Kit">
-          <div class="cockpit-bar">
-            <span class="ctl-dot r"></span><span class="ctl-dot y"></span><span class="ctl-dot g"></span>
-            <span class="cockpit-label">GRIMOIRE KIT · COCKPIT · session-4a2f</span>
-          </div>
-          <div class="cockpit-body">
-            <div class="term"><span class="p">▶ </span><span class="v">grimoire init --session 4a2f --agents 3</span></div>
-            <div class="term"><span class="d">  ↳ runtime</span> <span class="ok">READY</span></div>
-            <div class="term"><span class="d">  ↳ SOG</span> <span class="ok">MOUNTED</span> <span class="d">gateway/ws</span></div>
-            <div class="term"><span class="d">  ↳ surface/cockpit</span> <span class="ok">LIVE</span></div>
-            <div class="term"><span class="d">  ↳ surface/observatory</span> <span class="wn">PARTIAL</span></div>
-            <div class="term">&nbsp;</div>
-            <div class="term"><span class="p">▶ </span><span class="v">sog.dispatch("Crée un PRD app notes")</span></div>
-            <div class="term"><span class="d">  ↳ agent/pm</span> <span class="ok">ACTIVE</span> <span class="d">pid:0x3f1</span></div>
-            <div class="term"><span class="d">  ↳ agent/analyst</span> <span class="ok">ACTIVE</span> <span class="d">pid:0x3f2</span></div>
-            <div class="term"><span class="d">  ↳ agent/tech-writer</span> <span class="ok">ACTIVE</span> <span class="d">pid:0x3f3</span></div>
-            <div class="term">&nbsp;</div>
-            <div class="term"><span class="d">  ↳ artefact/prd-app-notes-v1.md</span> <span class="ok">ÉMIS</span></div>
-            <div class="term"><span class="p">▶ </span><span class="v">_</span><span class="cursor-blink" aria-hidden="true" style="display:inline-block;width:7px;height:1em;background:var(--accent);vertical-align:middle;margin-left:1px;"></span></div>
-          </div>
-          <div class="agent-bar" aria-hidden="true">
-            <span class="agent-pill on"><span class="dot"></span>pm</span>
-            <span class="agent-pill on"><span class="dot"></span>analyst</span>
-            <span class="agent-pill on"><span class="dot"></span>tech-writer</span>
-            <span style="flex:1"></span>
-            <span class="agent-pill" style="color:var(--ink-muted)">3 agents · SOG</span>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
+<section class="film5" aria-label="Teaser, 48 secondes">
+  <header class="bar5"><a href="#top" id="top"><b>›</b> Grimoire</a><nav><a href="#capot">En vrai</a><a href="https://github.com/Guilhem-Bonnet/Grimoire-kit" rel="noopener">Code source</a></nav></header>
+  <video id="teaser" src="media/teaser-720.mp4" poster="media/teaser-poster.jpg" autoplay muted loop playsinline preload="metadata" width="1920" height="1080"></video>
+  <div class="ctl5"><button type="button" id="snd" aria-pressed="false">Son</button><button type="button" id="again">Revoir</button></div>
 </section>
+<section class="cmd5">
+  <div class="install"><code><span class="p">$ </span>uv tool install grimoire-kit</code><button class="btn copy" type="button" id="copy-top" data-copy="uv tool install grimoire-kit"><span class="i i-copy"></span><span class="lbl">Copier</span></button></div>
+  <p class="micro">Open source · Claude Code · Copilot</p>
+</section>
+<h2 class="h5" id="capot">Ce que le film montre, en vrai</h2>
+<p class="h5s">Les trois commandes et leurs sorties sont celles de grimoire-kit 3.62.1. Le cockpit est une maquette de la refonte en cours. Le reste, ci-dessous, se rejoue tel quel.</p>
+<div class="proof5">
+<div class="wrap"><p class="legend">Premier passage : ton agent prend la tâche.</p>
+      <div class="proof">
+        <div class="ring live ok" id="ring" role="img" aria-label="Exigences du passage : 2 sur 2 satisfaites">
+          <svg viewBox="0 0 150 150" aria-hidden="true">
+            <path class="seg" id="sg1" data-s="ok" d=""/>
+            <path class="seg" id="sg2" data-s="ok" d=""/>
+            <text class="ctr ctrw" id="ctr" x="75" y="86" text-anchor="middle">2/2</text>
+          </svg>
+          <div class="labs"><span><i id="lb1" data-s="ok"></i>context_bundle</span><span><i id="lb2" data-s="ok"></i>provider_policy</span></div>
+        </div>
+        <div class="rm" aria-hidden="true">
+          <div class="ring err"><svg viewBox="0 0 150 150"><path class="seg rs1" data-s="err" d=""/><path class="seg rs2" data-s="err" d=""/><text class="ctr ctrw" x="75" y="86" text-anchor="middle">0/2</text></svg><div class="labs"><span>refus</span></div></div>
+          <div class="ring ok"><svg viewBox="0 0 150 150"><path class="seg rs1" data-s="ok" d=""/><path class="seg rs2" data-s="ok" d=""/><text class="ctr ctrw" x="75" y="86" text-anchor="middle">2/2</text></svg><div class="labs"><span>passage</span></div></div>
+        </div>
 
-<!-- ═══ PROOF BAR ═══ -->
-<div id="proof-bar" aria-label="Références">
-  <div class="container">
-    <div class="proof-inner" id="proof-bar-inner">
-      <span class="proof-item">164 COMMANDES CLI</span>
-      <span class="proof-sep">·</span>
-      <span class="proof-item">36 PATTERNS GOUVERNÉS</span>
-      <span class="proof-sep">·</span>
-      <span class="proof-item">5517 TESTS</span>
-      <span class="proof-sep">·</span>
-      <span class="proof-item">10 ARCHÉTYPES · 33 AGENTS</span>
-      <span class="proof-sep">·</span>
-      <span class="proof-item">PyPI grimoire-kit · MIT</span>
-      <span class="proof-sep">·</span>
-      <span class="proof-item">TRACE COMPLÈTE · JSONL</span>
-    </div>
-  </div>
+        <div class="term">
+          <div class="head"><span class="cap">projet de démonstration</span><span>· profil governed</span><span class="sp"></span>
+            <button class="btn ctl" type="button" id="pause" hidden><span class="i i-pause"></span><span class="lbl">Pause</span></button>
+            <button class="btn ctl" type="button" id="replay" hidden><span class="i i-replay"></span>Rejouer</button>
+          </div>
+<pre class="log" id="log" aria-live="polite"><span class="r" data-k="c1"><span class="p">$ </span><span class="t">grimoire task claim GAO-corriger-l-e-001</span></span><span class="r err" data-k="x">✗ Gate de preuve « ready_to_in_progress » : 2 exigence(s) non satisfaite(s)</span><span class="r" data-k="x">  - context_bundle : context bundle absent</span><span class="r dim" data-k="x"><span id="u1">    attendu : _grimoire-output/context/GAO-corriger-l-e-001/context-bundle.yaml</span></span><span class="r" data-k="x">  - provider_policy : aucun fournisseur activé dans le registre</span><span class="r dim" data-k="x"><span id="u2">    activer un fournisseur dans _grimoire/standard/llm-provider-registry.yaml</span></span><span class="r dim" data-k="x">[code de sortie 1]</span><span class="r" data-k="x"> </span><span class="r" data-k="c2"><span class="p">$ </span><span class="t">grimoire task context GAO-corriger-l-e-001</span></span><span class="r" data-k="o2"><span class="okw">OK</span> context bundle de GAO-corriger-l-e-001 →</span><span class="r" data-k="o2">_grimoire-output/context/GAO-corriger-l-e-001/context-bundle.yaml</span><span class="r edit" data-k="ed"><span class="f mono"><span class="i i-file"></span>_grimoire/standard/llm-provider-registry.yaml<span class="tag">édition du fichier</span></span><span class="v mono">enabled: true</span></span><span class="r" data-k="c3"><span class="p">$ </span><span class="t">grimoire task claim GAO-corriger-l-e-001</span></span><span class="r" data-k="o3"><span class="okw">OK</span> GAO-corriger-l-e-001 — Corriger l'export CSV (ready → claimed) · V0 → haiku</span></pre>
+          <div class="prov">rejeu verbatim · grimoire-kit 3.62.1 (PyPI) · projet de démonstration · profil governed · 17/10/2026 · extrait · <button type="button" id="capbtn" aria-expanded="false" aria-controls="capfig">Voir la capture d'origine</button></div>
+          <figure class="capfig" id="capfig" hidden><img src="media/capture-reelle.png" alt="Capture d'écran réelle du refus dans un terminal Konsole : les deux exigences manquantes et leur remède" width="760" height="150"><figcaption>capture réelle · 17/10/2026 · Konsole, recadrée, sans retouche</figcaption></figure>
+        </div>
+      </div>
+    
 </div>
-
-<!-- ═══ MANIFESTE ═══ -->
-<section id="manifeste">
-  <div class="container">
-    <div class="divider" aria-hidden="true"></div>
-    <div class="eyebrow reveal"><span class="num">01</span> · MANIFESTE</div>
-    <div class="manifeste-grid">
-      <div class="manifeste-block reveal" data-delay="0">
-        <div class="manifeste-num">01 · LA TRACE OU RIEN</div>
-        <h3>Chaque action produit une preuve auditable.</h3>
-        <p>Pas de magie, pas de boîte noire. Chaque décision d'agent, chaque artefact émis, chaque contrat signé est enregistré dans le ledger immutable du runtime.</p>
-      </div>
-      <div class="manifeste-block reveal" data-delay="100">
-        <div class="manifeste-num">02 · UN SEUL POINT D'ENTRÉE</div>
-        <h3>Le SOG orchestre. Tu parles à une interface, pas à trente bots.</h3>
-        <p>Le Smart Orchestrator Gateway dispatche vers des sub-agents invisibles. L'opérateur contrôle un système cohérent, pas une collection d'appels API.</p>
-      </div>
-      <div class="manifeste-block reveal" data-delay="200">
-        <div class="manifeste-num">03 · COMPOSABLE PAR NATURE</div>
-        <h3>Agents, skills, workflows, instructions : tout est modulaire, tout est forgeable.</h3>
-        <p>Archétypes, agents, workflows et skills se combinent librement ; le standard agentique gouverné apporte 36 patterns vérifiables, ancrés sur un catalogue normatif de 78 patterns. Tout est remplaçable sans toucher au runtime.</p>
-      </div>
+<!-- 2. La délégation -->
+  <section class="blk" aria-labelledby="t2">
+    <h2 id="t2">Ni test ni relecteur ? Pas de délégation.</h2>
+    <p class="txt">Grimoire classe chaque tâche d'après ses critères d'acceptation. Vérifiable par un programme ou par une revue nommée : elle peut partir à un sous-agent. Sinon, elle reste dans ta session.</p>
+    <div class="lanes">
+      <div class="lane dim"><div><div class="card"><span class="okw">OK</span> GAO-corriger-l-e-001 — Corriger l'export CSV (ready → claimed) · V0 → haiku</div><div class="crit">critère : « pytest tests/test_export.py passe »</div></div><div class="dest out"><span class="i i-deleguer"></span>sous-agent</div></div>
+      <div class="lane dim"><div><div class="card"><span class="okw">OK</span> GAO-refondre-la-001 — Refondre la page de tarifs (ready → claimed) · V1 → sonnet</div><div class="crit">critère : « revue approuvée par Guilhem »</div></div><div class="dest out"><span class="i i-deleguer"></span>sous-agent</div></div>
+      <div class="lane"><div><div class="card"><span class="okw">OK</span> GAO-choisir-le-n-001 — Choisir le nom de la future offre (ready → claimed) · V2 → aucun — omets le paramètre model, garde celui de la session</div><div class="crit">critère : « le nom convient à l'équipe »</div></div><div class="dest stay"><span class="i i-session"></span>ta session</div></div>
+      <div class="src">claims réels · grimoire-kit 3.62.1 (PyPI) · projet de démonstration · 17/10/2026</div>
     </div>
-  </div>
-</section>
+  </section>
 
-<!-- ═══ SURFACES ═══ -->
-<section id="surfaces">
-  <div class="container">
-    <div class="divider" aria-hidden="true"></div>
-    <div class="eyebrow reveal"><span class="num">02</span> · SURFACES</div>
-    <h2 class="reveal" data-delay="60" style="margin-top:14px;max-width:580px">Le control plane, surface par surface.</h2>
-    <p class="reveal" data-delay="100" style="color:var(--ink-soft);margin-top:10px;font-size:.875rem;max-width:500px">Six interfaces spécialisées. Un runtime sous-jacent. Chaque surface expose un contrat strict.</p>
-    <div class="surfaces-grid">
-      <div class="surface-card reveal" data-delay="0">
-        <div class="surface-card-inner">
-          <div class="surface-card-head"><span class="surface-badge">GK-01</span><span class="surface-status partial"><span class="dot"></span>CONCEPT</span></div>
-          <div class="surface-body"><h3>Cockpit</h3><p>Interface opérationnelle temps réel. Contrôle agents, inspection pipelines, émission de directives.</p><div class="surface-meta">vue de pilotage · vision</div></div>
-          <div class="surface-preview" aria-hidden="true">
-            <div class="mini-rows">
-              <div class="mini-row"><span class="mini-dot on"></span><span class="mini-lbl">agent/pm</span><span class="mini-val">RUNNING</span></div>
-              <div class="mini-row"><span class="mini-dot on"></span><span class="mini-lbl">agent/analyst</span><span class="mini-val">RUNNING</span></div>
-              <div class="mini-row"><span class="mini-dot wn"></span><span class="mini-lbl">agent/critic</span><span class="mini-val">WAITING</span></div>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div class="surface-card reveal" data-delay="60">
-        <div class="surface-card-inner">
-          <div class="surface-card-head"><span class="surface-badge">GK-02</span><span class="surface-status partial"><span class="dot"></span>PARTIAL</span></div>
-          <div class="surface-body"><h3>Observatory</h3><p>Vue longitudinale des traces. Inspection artefacts, diff versions, audit contrats, télémétrie.</p><div class="surface-meta">observatory.py · HTML autoporté · traces</div></div>
-          <div class="surface-preview" aria-hidden="true">
-            <div class="mini-rows">
-              <div class="mini-row"><span class="mini-dot on"></span><span class="mini-lbl">artefact/prd-v3.md</span><span class="mini-val">09:14</span></div>
-              <div class="mini-row"><span class="mini-dot on"></span><span class="mini-lbl">trace/session-4a2f</span><span class="mini-val">874 ev.</span></div>
-              <div class="mini-row"><span class="mini-dot"></span><span class="mini-lbl">contrat/RFC-09</span><span class="mini-val">signé</span></div>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div class="surface-card reveal" data-delay="120">
-        <div class="surface-card-inner">
-          <div class="surface-card-head"><span class="surface-badge">GK-03</span><span class="surface-status live"><span class="dot"></span>LIVE</span></div>
-          <div class="surface-body"><h3>Kanban gouverné</h3><p>Tableau agentique : 8 états, transitions gated par la preuve. <a href="#" class="js-launch-atelier" style="color:var(--accent)">→ le board, dans l'atelier</a></p><div class="surface-meta">task-board.yaml · 8 états · evidence-gated</div></div>
-          <div class="surface-preview" aria-hidden="true">
-            <div class="mini-rows">
-              <div class="mini-row"><span class="mini-dot wn"></span><span class="mini-lbl">EN COURS · 2</span><span class="mini-val">→ dev</span></div>
-              <div class="mini-row"><span class="mini-dot wn"></span><span class="mini-lbl">REVUE · 1</span><span class="mini-val">evidence</span></div>
-              <div class="mini-row"><span class="mini-dot on"></span><span class="mini-lbl">ACCEPTÉ · 1</span><span class="mini-val">gate ✓</span></div>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div class="surface-card reveal" data-delay="0">
-        <div class="surface-card-inner">
-          <div class="surface-card-head"><span class="surface-badge">GK-04</span><span class="surface-status roadmap"><span class="dot"></span>Q3 2026</span></div>
-          <div class="surface-body"><h3>War Room</h3><p>Coordination multi-sessions. Tableaux croisés, escalade inter-agents, débats PCE, conflits ressources.</p><div class="surface-meta">runtime/warroom · multi-tenant · RBAC</div></div>
-          <div class="surface-preview" style="display:flex;align-items:center;justify-content:center;" aria-hidden="true"><span style="font-family:var(--font-mono);font-size:.6rem;color:var(--ink-muted);letter-spacing:.08em">ROADMAP · Q3 2026</span></div>
-        </div>
-      </div>
-      <div class="surface-card reveal" data-delay="60">
-        <div class="surface-card-inner">
-          <div class="surface-card-head"><span class="surface-badge">GK-05</span><span class="surface-status partial"><span class="dot"></span>BETA</span></div>
-          <div class="surface-body"><h3>Game UI</h3><p>Runtime rendu en pixel art isométrique. Chaque agent devient un personnage. Chaque tâche, une scène.</p><div class="surface-meta">runtime/gameui · canvas+CSS · temps réel</div></div>
-          <div class="surface-preview" style="display:flex;align-items:center;justify-content:center;gap:8px;" aria-hidden="true">
-            <!-- Mini isometric preview -->
-            <svg width="80" height="50" viewBox="0 0 80 50" aria-hidden="true">
-              <g transform="translate(40,10)">
-                <polygon points="0,-8 16,0 0,8 -16,0" fill="#1A1D22" stroke="rgba(255,107,61,0.3)" stroke-width="1"/>
-                <polygon points="0,8 16,0 16,16 0,24" fill="#121418" stroke="rgba(255,107,61,0.2)" stroke-width="1"/>
-                <polygon points="0,8 -16,0 -16,16 0,24" fill="#22262C" stroke="rgba(255,107,61,0.2)" stroke-width="1"/>
-                <circle cx="0" cy="-2" r="4" fill="#FF6B3D" opacity="0.8"/>
-              </g>
-            </svg>
-            <a href="game-ui.html" style="font-family:var(--font-mono);font-size:.6rem;color:var(--ink-muted)">→ VOIR</a>
-          </div>
-        </div>
-      </div>
-      <div class="surface-card reveal" data-delay="120">
-        <div class="surface-card-inner">
-          <div class="surface-card-head"><span class="surface-badge">GK-06</span><span class="surface-status partial"><span class="dot"></span>PARTIAL</span></div>
-          <div class="surface-body"><h3>Proofs</h3><p>Registre des preuves. Hash d'artefacts, signatures de contrats, replay de sessions, export audit.</p><div class="surface-meta">ledger JSONL · sha256 · immuable</div></div>
-          <div class="surface-preview" aria-hidden="true">
-            <div class="mini-rows">
-              <div class="mini-row"><span class="mini-dot on"></span><span class="mini-lbl">sha256:a3f…</span><span class="mini-val">prd-v1</span></div>
-              <div class="mini-row"><span class="mini-dot on"></span><span class="mini-lbl">sig:RFC-09</span><span class="mini-val">✓ valid</span></div>
-            </div>
-          </div>
-        </div>
-      </div>
+  <!-- 3. Où ça tourne -->
+  <section class="blk" id="hotes" aria-labelledby="t3">
+    <h2 id="t3">Dans tes outils. Sur ta machine.</h2>
+    <p class="txt">La même règle, écrite une fois, rendue pour chaque hôte. Ce qu'un hôte ne sait pas exécuter est déclaré, jamais caché.</p>
+    <div class="tbl">
+      <table>
+        <thead><tr><th scope="col">Hôte</th><th scope="col">Hooks bloquants</th><th scope="col">Sous-agents</th><th scope="col">Compétences</th><th scope="col">Commandes</th><th scope="col">Permissions</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Claude Code</th><td class="oui">oui</td><td class="oui">oui</td><td class="oui">oui</td><td class="oui">oui</td><td class="oui">oui</td></tr>
+          <tr><th scope="row">GitHub Copilot</th><td class="oui">oui</td><td class="oui">oui</td><td class="oui">oui</td><td class="oui">oui</td><td class="non">non</td></tr>
+          <tr><th scope="row">Codex</th><td class="non">non</td><td class="non">non</td><td class="non">non</td><td class="non">non</td><td class="non">non</td></tr>
+          <tr><th scope="row">Cursor</th><td class="non">non</td><td class="non">non</td><td class="non">non</td><td class="non">non</td><td class="non">non</td></tr>
+          <tr><th scope="row">Gemini CLI</th><td class="non">non</td><td class="non">non</td><td class="non">non</td><td class="non">non</td><td class="non">non</td></tr>
+        </tbody>
+      </table>
     </div>
-  </div>
-</section>
+    <ul class="notes">
+      <li>Sans hooks, la règle est écrite dans le fichier d'entrée et ne s'oppose qu'en CI.</li>
+      <li>Le kit et son cockpit tournent sur ta machine.</li>
+    </ul>
+  </section>
 
-<!-- ═══ ORCHESTRATION / SOG ═══ -->
-<section id="orchestration">
-  <div class="container">
-    <div class="divider" aria-hidden="true"></div>
-    <div class="eyebrow reveal"><span class="num">03</span> · ORCHESTRATION</div>
-    <h2 class="reveal" data-delay="60" style="margin-top:14px;max-width:600px">Un seul point d'entrée. Des dizaines de sub-agents invisibles.</h2>
-    <p class="reveal" data-delay="100" style="color:var(--ink-soft);margin-top:10px;font-size:.875rem;max-width:520px">Le SOG reçoit la requête, dispatche vers les agents spécialisés, agrège les résultats, livre l'artefact. L'opérateur ne voit qu'une interface.</p>
-
-    <div class="sog-demo reveal" data-delay="160" role="region" aria-label="Démonstration du Smart Orchestrator Gateway">
-      <div class="sog-stage" id="sog-stage" aria-live="polite">
-        <!-- User bubble -->
-        <div class="sog-user" id="sog-user">"Crée un PRD pour une app de notes"</div>
-        <!-- SVG lines -->
-        <svg class="sog-svg" id="sog-svg" aria-hidden="true"></svg>
-        <!-- SOG node -->
-        <div class="sog-node" id="sog-node" aria-label="Smart Orchestrator Gateway">
-          <span class="sog-node-label">SOG</span>
-          <span class="sog-node-sub" id="sog-subtext">EN ATTENTE</span>
-        </div>
-        <!-- Agents -->
-        <div class="sog-agent" id="ag-pm"    style="left:80px;top:50%;transform:translateY(-50%)">
-          <div class="agent-avatar" id="av-pm"><span>pm</span><div class="working-bar"></div></div>
-          <span class="agent-name">PM</span>
-        </div>
-        <div class="sog-agent" id="ag-analyst" style="left:50%;top:20px;transform:translateX(-50%)">
-          <div class="agent-avatar" id="av-analyst"><span>analyst</span><div class="working-bar"></div></div>
-          <span class="agent-name">ANALYST</span>
-        </div>
-        <div class="sog-agent" id="ag-writer"  style="right:80px;top:50%;transform:translateY(-50%)">
-          <div class="agent-avatar" id="av-writer"><span>writer</span><div class="working-bar"></div></div>
-          <span class="agent-name">TECH-WRITER</span>
-        </div>
-        <!-- Artefact -->
-        <div class="sog-artefact" id="sog-artefact">GK-0342 · prd-app-notes-v1.md · ÉMIS &amp; SCELLÉ</div>
-      </div>
-      <div class="sog-controls">
-        <div class="sog-input-wrap">
-          <input class="sog-input" id="sog-input" value="Crée un PRD pour une app de notes" readonly aria-label="Requête utilisateur" />
-          <button class="sog-send" id="sog-send">FORGER →</button>
-        </div>
-        <button class="sog-replay" id="sog-replay" aria-label="Rejouer la démonstration">REJOUER</button>
-        <span class="sog-status" id="sog-status" aria-live="polite"></span>
-      </div>
+  <!-- 4. Installer -->
+  <section class="blk" id="installer" aria-labelledby="t4">
+    <h2 id="t4">Trois commandes.</h2>
+    <p class="txt">La première installe le kit, la deuxième équipe ton dépôt, la troisième rend le gate bloquant.</p>
+    <div class="cmds">
+      <div class="cmd"><code><span class="p">$ </span>uv tool install grimoire-kit</code><button class="btn copy" type="button" id="copy-1" data-copy="uv tool install grimoire-kit"><span class="i i-copy"></span><span class="lbl">Copier</span></button></div>
+      <div class="cmd"><code><span class="p">$ </span>grimoire init . --lite -y</code><button class="btn copy" type="button" id="copy-2" data-copy="grimoire init . --lite -y"><span class="i i-copy"></span><span class="lbl">Copier</span></button></div>
+      <div class="cmd"><code><span class="p">$ </span>grimoire standard init . --profile governed</code><button class="btn copy" type="button" id="copy-3" data-copy="grimoire standard init . --profile governed"><span class="i i-copy"></span><span class="lbl">Copier</span></button></div>
     </div>
-  </div>
-</section>
+    <p class="alt">ou <code>pipx install grimoire-kit</code></p>
+  </section>
 
-<!-- ═══ TIMELINE ═══ -->
-<section id="section-timeline">
-  <div class="container">
-    <div class="divider" aria-hidden="true"></div>
-    <div class="eyebrow reveal"><span class="num">05</span> · FLUX</div>
-    <h2 class="reveal" data-delay="60" style="margin-top:14px;max-width:500px">De l'intention à l'artefact.</h2>
-    <div class="timeline-track reveal" data-delay="100" aria-hidden="true"><div class="timeline-track-fill"></div></div>
-    <div class="timeline-steps" role="list">
-      <div class="timeline-step reveal" data-delay="0" role="listitem"><div class="timeline-dot" aria-hidden="true"></div><div class="timeline-step-num">01</div><h3>Contrat</h3><p>L'opérateur définit l'objectif, les outils autorisés et les critères. Le runtime valide la signature avant exécution.</p></div>
-      <div class="timeline-step reveal" data-delay="80"  role="listitem"><div class="timeline-dot" aria-hidden="true"></div><div class="timeline-step-num">02</div><h3>Orchestration</h3><p>Le SOG sélectionne et spawne les agents selon le contrat. Chaque agent reçoit un contexte mémoire délimité.</p></div>
-      <div class="timeline-step reveal" data-delay="160" role="listitem"><div class="timeline-dot" aria-hidden="true"></div><div class="timeline-step-num">03</div><h3>Exécution</h3><p>Le runtime orchestre la séquence, gère les dépendances et enregistre chaque décision dans le trace ledger.</p></div>
-      <div class="timeline-step reveal" data-delay="240" role="listitem"><div class="timeline-dot" aria-hidden="true"></div><div class="timeline-step-num">04</div><h3>Artefact tracé</h3><p>L'artefact est versioné, adressable par hash et signé. Disponible dans l'Observatory, exportable via API.</p></div>
-    </div>
-  </div>
-</section>
-
-<!-- ═══ FEATURES ═══ -->
-<section id="capacites">
-  <div class="container">
-    <div class="divider" aria-hidden="true"></div>
-    <div class="eyebrow reveal"><span class="num">06</span> · CAPACITÉS</div>
-    <h2 class="reveal" data-delay="60" style="margin-top:14px;max-width:560px">Neuf surfaces de précision.</h2>
-    <div class="feature-grid">
-      <div class="feature-card reveal" data-delay="0"><span class="feature-badge">GK-01</span>
-        <svg class="feature-icon" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="14" cy="14" r="10"/><path d="M14 8v7l4 2.5"/></svg>
-        <h3>Sub-agents invisibles</h3><p>Le SOG dispatche vers des agents spécialisés sans exposer la complexité à l'opérateur. Un point d'entrée, des dizaines de capacités.</p>
-        <a href="demo.html" class="feature-link">VOIR LA DÉMO →</a></div>
-      <div class="feature-card reveal" data-delay="50"><span class="feature-badge">GK-02</span>
-        <svg class="feature-icon" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><rect x="4" y="6" width="20" height="16" rx="1.5"/><path d="M9 11h10M9 15h6"/></svg>
-        <h3>Surfaces hôtes</h3><p>Une description neutre du projet, rendue par hôte : sous-agents, skills, commandes, hooks bloquants. Ce qu'un hôte ne sait pas exécuter est déclaré comme dégradation, jamais passé sous silence.</p>
-        <a href="documentation.html" class="feature-link">GRIMOIRE HOST →</a></div>
-      <div class="feature-card reveal" data-delay="100"><span class="feature-badge">GK-03</span>
-        <svg class="feature-icon" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M4 20h20M4 14h12M4 8h8"/></svg>
-        <h3>Memory tiered</h3><p>Contexte mémoire structuré en niveaux : working, episodic, semantic. Isolation par namespace, TTL configurable par tier.</p>
-        <a href="documentation.html" class="feature-link">MÉMOIRE API →</a></div>
-      <div class="feature-card reveal" data-delay="0"><span class="feature-badge">GK-04</span>
-        <svg class="feature-icon" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M14 4l4 8h6l-5 4 2 7-7-4-7 4 2-7-5-4h6z"/></svg>
-        <h3>Hooks sécurisés</h3><p>Points d'interception pré/post exécution avec validation de contrat. Aucun agent ne peut contourner les hooks déclarés.</p>
-        <a href="documentation.html" class="feature-link">HOOKS SPEC →</a></div>
-      <div class="feature-card reveal" data-delay="50"><span class="feature-badge">GK-05</span>
-        <svg class="feature-icon" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M5 14h18M14 5v18"/><circle cx="14" cy="14" r="10"/></svg>
-        <h3>Multi-LLM routing</h3><p>Anthropic, OpenAI, Mistral, Ollama. Le runtime abstrait le modèle. Les contrats restent valides quelle que soit la coulée.</p>
-        <a href="documentation.html" class="feature-link">ADAPTATEURS →</a></div>
-      <div class="feature-card reveal" data-delay="100"><span class="feature-badge">GK-06</span>
-        <svg class="feature-icon" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M4 22L14 4l4 10 4-5 2 13"/><circle cx="24" cy="22" r="2"/></svg>
-        <h3>CVTL cross-validation</h3><p>Cross-Validation Trust Layer : chaque artefact est soumis à un agent critique indépendant avant scellement. Taux d'erreur mesuré.</p>
-        <a href="documentation.html" class="feature-link">CVTL DOC →</a></div>
-      <div class="feature-card reveal" data-delay="0"><span class="feature-badge">GK-07</span>
-        <svg class="feature-icon" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M7 14h4l3-8 4 16 3-8h4"/></svg>
-        <h3>PCE debates</h3><p>Productive Conflict Engine : agents configurables en opposition pour forcer l'émergence des hypothèses faibles avant livraison.</p>
-        <a href="documentation.html" class="feature-link">PCE SPEC →</a></div>
-      <div class="feature-card reveal" data-delay="50"><span class="feature-badge">GK-08</span>
-        <svg class="feature-icon" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M14 4a10 10 0 0 1 0 20M14 4A10 10 0 0 0 4 14M14 24V4"/><path d="M4 14h20"/></svg>
-        <h3>Évals rejouées</h3><p>Un flow déclare ses cas et ses assertions ; le rejeu les vérifie sur un relevé d'exécution réel. Un cas non exécuté est rapporté comme tel, jamais comme réussi.</p>
-        <a href="documentation.html" class="feature-link">PROTOCOLE D'ÉVALS →</a></div>
-      <div class="feature-card reveal" data-delay="100"><span class="feature-badge">GK-09</span>
-        <svg class="feature-icon" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1.5"/><rect x="16" y="4" width="8" height="8" rx="1.5"/><rect x="4" y="16" width="8" height="8" rx="1.5"/><rect x="16" y="16" width="8" height="8" rx="1.5"/></svg>
-        <h3>Trust scoring</h3><p>Score de confiance par agent, par session et par type d'artefact. Alerte automatique si le score descend sous le seuil du contrat.</p>
-        <a href="#" class="feature-link js-launch-atelier">OBSERVATOIRE — DANS L'ATELIER →</a></div>
-    </div>
-  </div>
-</section>
-
-<!-- ═══ PREUVES ═══ -->
-<section id="preuves" style="background:var(--elev-1);border-top:1px solid var(--line);border-bottom:1px solid var(--line);">
-  <div class="container">
-    <div class="divider" aria-hidden="true"></div>
-    <div class="eyebrow reveal"><span class="num">07</span> · PREUVES</div>
-    <div class="preuves-grid">
-      <div>
-        <div class="metrics-row">
-          <div class="reveal" data-delay="0"><div class="metric-value"><span data-counter data-target="0">0</span></div><div class="metric-label">RÉGRESSION DURE · 96 RUNS ACTIVÉS</div></div>
-          <div class="reveal" data-delay="80"><div class="metric-value"><span data-counter data-target="9" data-suffix="/40">9/40</span></div><div class="metric-label">MÊME MESURE · BRAS TÉMOIN</div></div>
-          <div class="reveal" data-delay="160"><div class="metric-value"><span data-counter data-target="3">3</span></div><div class="metric-label">CAMPAGNES PRÉ-ENREGISTRÉES</div></div>
-        </div>
-        <div class="metrics-row">
-          <div class="reveal" data-delay="0"><div class="metric-value"><span data-counter data-target="2960">2960</span></div><div class="metric-label">TESTS · SUITE BLOQUANTE</div></div>
-          <div class="reveal" data-delay="80"><div class="metric-value"><span data-counter data-target="178">178</span></div><div class="metric-label">FICHIERS SOUS MYPY STRICT</div></div>
-          <div class="reveal" data-delay="160"><div class="metric-value"><span data-counter data-target="36">36</span></div><div class="metric-label">PATTERNS DU STANDARD</div></div>
-        </div>
-      </div>
-      <div class="quote-block reveal" data-delay="200">
-        <p class="quote-text">Le critère composite pré-enregistré n'est pas atteint : effet non démontré. Publié tel quel, conformément au protocole — aucune revendication d'efficacité n'est faite sur cette base.</p>
-        <div class="quote-author">VERDICT A1-v3 · CAMPAGNE 2026-08-27 · <a href="https://github.com/Guilhem-Bonnet/Grimoire-kit/blob/main/evals/reports/2026-08-27/report.md" style="color:inherit;">RAPPORT COMPLET</a></div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ═══ CTA FINAL ═══ -->
-<section id="cta-final">
-  <div class="container" style="position:relative;z-index:1">
-    <div class="eyebrow reveal" style="justify-content:center;margin-bottom:28px"><span class="num">↓</span>&nbsp;&nbsp;ACCÈS RESTREINT · EARLY ACCESS</div>
-    <h2 class="reveal grad-text" data-delay="80" style="margin-bottom:12px">Forge ton propre noyau.</h2>
-    <p class="reveal" data-delay="140" style="color:var(--ink-soft);margin-bottom:36px;font-size:.95rem">Open source. Traçable. Composable. Prêt.</p>
-    <div class="reveal" data-delay="200" style="display:flex;justify-content:center;gap:14px;flex-wrap:wrap">
-      <a href="https://github.com/Guilhem-Bonnet/Grimoire-kit" target="_blank" rel="noopener" class="btn btn-primary">VOIR SUR GITHUB →</a>
-      <a href="demo.html" class="btn btn-ghost">VOIR LA DÉMO</a>
-    </div>
-    <p class="reveal" data-delay="280" style="margin-top:20px;font-family:var(--font-mono);font-size:.62rem;color:var(--ink-muted);letter-spacing:.08em;text-align:center">runtime/session · contrat signé · trace immédiate</p>
-  </div>
-</section>
-
-</main>
-<footer id="forge-footer"></footer>
-
-<!-- Tweaks panel -->
-<div id="tweaks-panel" role="complementary" aria-label="Panneau de configuration">
-  <h4>⚙ TWEAKS</h4>
-  <div class="tw-row"><label>Couleur accent</label><input type="color" id="tw-accent" value="#FF6B3D"/></div>
-  <hr class="tw-sep"/>
-  <div class="tw-row"><label>Taille de texte</label><input type="range" id="tw-size" min="14" max="20" step="1" value="16"/></div>
-  <div class="tw-row"><label>Densité sections</label>
-    <select id="tw-density"><option value="120">Normale</option><option value="80">Dense</option><option value="160">Aérée</option></select>
-  </div>
-  <hr class="tw-sep"/>
-  <div class="tw-row"><label>Blueprint grid</label>
-    <select id="tw-grid"><option value="1">Visible</option><option value="0">Masquée</option></select>
-  </div>
+  
+<footer>
+    <a href="https://github.com/Guilhem-Bonnet/Grimoire-kit/blob/main/CHANGELOG.md" rel="noopener">Ce qui n'est pas prouvé</a>
+    <a href="https://github.com/Guilhem-Bonnet/Grimoire-kit" rel="noopener">Code source</a>
+    <a href="https://github.com/Guilhem-Bonnet/Grimoire-kit/blob/main/CHANGELOG.md" rel="noopener">CHANGELOG</a>
+    <a href="https://github.com/Guilhem-Bonnet/Grimoire-kit/blob/main/LICENSE" rel="noopener">Licence MIT</a>
+    <span class="sp"></span>
+    
+    
+  </footer>
 </div>
-
-<script src="forge-nav.js"></script>
 <script>
-/* ── SOG ChatOrchestrator animation ── */
-(function() {
-  const stage = document.getElementById('sog-stage');
-  const sogNode = document.getElementById('sog-node');
-  const sogSub = document.getElementById('sog-subtext');
-  const userBubble = document.getElementById('sog-user');
-  const artefact = document.getElementById('sog-artefact');
-  const sendBtn = document.getElementById('sog-send');
-  const replayBtn = document.getElementById('sog-replay');
-  const statusEl = document.getElementById('sog-status');
-  const svg = document.getElementById('sog-svg');
-  const agents = ['ag-pm','ag-analyst','ag-writer'];
-  const avatars = ['av-pm','av-analyst','av-writer'];
-  let running = false;
+(function(){
+  // géométrie de l'anneau : segment 1 (context_bundle) à gauche, segment 2 (provider_policy) à droite
+  function arc(a0,a1){var c=75,r=60,p=function(a){a=(a-90)*Math.PI/180;return [c+r*Math.cos(a),c+r*Math.sin(a)]};var s=p(a0),e=p(a1);
+    return 'M'+s[0].toFixed(2)+' '+s[1].toFixed(2)+'A'+r+' '+r+' 0 0 1 '+e[0].toFixed(2)+' '+e[1].toFixed(2)}
+  var A1=arc(190,350),A2=arc(10,170);
+  document.querySelectorAll('#sg1,.rs1').forEach(function(e){e.setAttribute('d',A1)});
+  document.querySelectorAll('#sg2,.rs2').forEach(function(e){e.setAttribute('d',A2)});
 
-  function getCenter(el) {
-    const sr = stage.getBoundingClientRect();
-    const er = el.getBoundingClientRect();
-    return { x: er.left - sr.left + er.width/2, y: er.top - sr.top + er.height/2 };
-  }
-
-  function drawLine(x1,y1,x2,y2,id,col) {
-    let line = document.getElementById(id);
-    if (!line) { line = document.createElementNS('http://www.w3.org/2000/svg','line'); line.id = id; svg.appendChild(line); }
-    line.setAttribute('x1',x1); line.setAttribute('y1',y1);
-    line.setAttribute('x2',x2); line.setAttribute('y2',y2);
-    line.setAttribute('class','sog-line');
-    line.style.opacity = col === 'on' ? '0.7' : '0.25';
-    line.style.stroke = col === 'on' ? 'var(--accent)' : 'var(--ink-muted)';
-  }
-
-  function clearLines() { svg.innerHTML = ''; }
-
-  function reset() {
-    running = false;
-    userBubble.classList.remove('show');
-    artefact.classList.remove('show');
-    sogNode.classList.remove('pulse');
-    sogSub.textContent = 'EN ATTENTE';
-    agents.forEach(id => document.getElementById(id).classList.remove('show'));
-    avatars.forEach(id => { const av = document.getElementById(id); av.classList.remove('working'); });
-    clearLines();
-    sendBtn.disabled = false;
-    replayBtn.classList.remove('show');
-    statusEl.textContent = '';
-  }
-
-  async function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
-
-  async function run() {
-    if (running) return;
-    running = true;
-    sendBtn.disabled = true;
-    clearLines();
-
-    // Step 1: user bubble
-    userBubble.classList.add('show');
-    statusEl.textContent = 'Requête reçue...';
-    await delay(700);
-
-    // Step 2: SOG pulse
-    sogNode.classList.add('pulse');
-    sogSub.textContent = 'DISPATCH...';
-    statusEl.textContent = 'SOG analyse et dispatche...';
-    await delay(600);
-
-    // Step 3: fan-out
-    agents.forEach(id => document.getElementById(id).classList.add('show'));
-    await delay(200);
-
-    // Draw lines SOG→agents
-    const sogC = getCenter(sogNode);
-    agents.forEach((id, i) => {
-      const ac = getCenter(document.getElementById(id));
-      drawLine(sogC.x, sogC.y, ac.x, ac.y, 'line-'+i, 'on');
+  // copier
+  document.querySelectorAll('.copy').forEach(function(b){
+    b.addEventListener('click',function(){
+      var txt=b.dataset.copy,lbl=b.querySelector('.lbl');
+      var done=function(){lbl.textContent='Copié';setTimeout(function(){lbl.textContent='Copier'},1600)};
+      var fallback=function(){var code=b.parentNode.querySelector('code');var r=document.createRange();r.selectNodeContents(code);var s=getSelection();s.removeAllRanges();s.addRange(r);lbl.textContent='Sélectionné'};
+      try{navigator.clipboard.writeText(txt).then(done,fallback)}catch(e){fallback()}
     });
-    await delay(800);
+  });
+  function toggle(btnId,boxId){var b=document.getElementById(btnId),x=document.getElementById(boxId);
+    b.addEventListener('click',function(){x.hidden=!x.hidden;b.setAttribute('aria-expanded',String(!x.hidden))})}
+  toggle('capbtn','capfig');
 
-    // Step 4: agents working
-    avatars.forEach(id => document.getElementById(id).classList.add('working'));
-    sogSub.textContent = 'EN COURS';
-    statusEl.textContent = '3 agents en parallèle...';
-    await delay(1600);
-
-    // Step 5: results back
-    const sogC2 = getCenter(sogNode);
-    agents.forEach((id, i) => {
-      const ac = getCenter(document.getElementById(id));
-      drawLine(ac.x, ac.y, sogC2.x, sogC2.y, 'line-ret-'+i, 'dim');
-    });
-    sogSub.textContent = 'AGRÉGATION';
-    statusEl.textContent = 'Agrégation des résultats...';
-    await delay(900);
-
-    // Step 6: artefact
-    clearLines();
-    sogNode.classList.remove('pulse');
-    sogSub.textContent = 'SCELLÉ';
-    artefact.classList.add('show');
-    statusEl.textContent = '';
-    replayBtn.classList.add('show');
+  // rejeu passif : joué une fois à l'entrée dans la vue
+  if(matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+  var rows=[].slice.call(document.querySelectorAll('#log .r')),ring=document.getElementById('ring'),ctr=document.getElementById('ctr');
+  var sg=[document.getElementById('sg1'),document.getElementById('sg2')],lb=[document.getElementById('lb1'),document.getElementById('lb2')];
+  var u1=document.getElementById('u1'),u2=document.getElementById('u2');
+  var typed=[].slice.call(document.querySelectorAll('#log .t')).map(function(t){return {el:t,full:t.textContent}});
+  var pauseB=document.getElementById('pause'),replayB=document.getElementById('replay');
+  function seg(i,s){sg[i].setAttribute('data-s',s);lb[i].setAttribute('data-s',s)}
+  function state(n,cls){ctr.textContent=n;ring.className='ring live '+cls;ring.setAttribute('aria-label','Exigences du passage : '+n.replace('/',' sur ')+' satisfaites')}
+  function show(k,on){rows.forEach(function(r){if(r.dataset.k===k)r.classList.toggle('h',!on)})}
+  function type(i,p){var t=typed[i];t.el.textContent=t.full.slice(0,Math.round(p*t.full.length))}
+  function reset(){rows.forEach(function(r){r.classList.add('h')});typed.forEach(function(t){t.el.textContent=''});seg(0,'idle');seg(1,'idle');state('0/2','');u1.classList.remove('u');u2.classList.remove('u')}
+  // temps en ms, durées alignées sur le film
+  var steps=[
+    [300,800,function(p){show('c1',true);type(0,p)}],
+    [1350,0,function(){show('x',true);seg(0,'err');seg(1,'err');state('0/2','err')}],
+    [2750,0,function(){u1.classList.add('u')}],
+    [3100,700,function(p){show('c2',true);type(1,p)}],
+    [4000,0,function(){show('o2',true)}],
+    [4500,0,function(){seg(0,'ok');state('1/2','')}],
+    [5100,0,function(){u2.classList.add('u')}],
+    [5500,0,function(){show('ed',true)}],
+    [6100,0,function(){seg(1,'ok');state('2/2','ok')}],
+    [6800,800,function(p){show('c3',true);type(2,p)}],
+    [7800,0,function(){show('o3',true)}]
+  ];
+  var END=8200,clock=0,last=0,paused=false,running=false,raf=0;
+  function frame(now){
+    if(!paused)clock+=now-last;last=now;
+    steps.forEach(function(s){if(clock>=s[0]){var p=s[1]?Math.min(1,(clock-s[0])/s[1]):1;if(!s.done||p<1){s[2](p);s.done=p>=1}}});
+    if(clock<END){raf=requestAnimationFrame(frame)}else{running=false;pauseB.hidden=true}
   }
-
-  sendBtn.addEventListener('click', run);
-  replayBtn.addEventListener('click', () => { reset(); setTimeout(run, 300); });
+  function play(){cancelAnimationFrame(raf);reset();steps.forEach(function(s){s.done=false});clock=0;paused=false;running=true;
+    pauseB.hidden=false;pauseB.querySelector('.lbl').textContent='Pause';pauseB.querySelector('.i').className='i i-pause';replayB.hidden=false;
+    last=performance.now();raf=requestAnimationFrame(frame)}
+  pauseB.addEventListener('click',function(){if(!running)return;paused=!paused;
+    pauseB.querySelector('.lbl').textContent=paused?'Reprendre':'Pause';pauseB.querySelector('.i').className=paused?'i i-play':'i i-pause'});
+  replayB.addEventListener('click',play);
+  replayB.hidden=false;
+  var term=document.querySelector('.proof');
+  if('IntersectionObserver' in window){var io=new IntersectionObserver(function(es){if(es[0].isIntersecting){io.disconnect();play()}},{threshold:.45});io.observe(term)}
 })();
 
-/* ── Tweaks panel ── */
-const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
-  "accent": "#FF6B3D",
-  "size": 16,
-  "density": "120",
-  "grid": "1"
-}/*EDITMODE-END*/;
 (function(){
-  window.addEventListener('message', e => {
-    if (e.data?.type === '__activate_edit_mode')   document.getElementById('tweaks-panel').classList.add('open');
-    if (e.data?.type === '__deactivate_edit_mode') document.getElementById('tweaks-panel').classList.remove('open');
-  });
-  window.parent.postMessage({type:'__edit_mode_available'},'*');
-
-  const r = document.documentElement;
-  const d = TWEAK_DEFAULTS;
-  function apply(v) {
-    r.style.setProperty('--accent', v.accent);
-    document.documentElement.style.fontSize = v.size + 'px';
-    document.querySelectorAll('section:not(#hero):not(#cta-final)').forEach(s => {
-      s.style.paddingTop = v.density + 'px'; s.style.paddingBottom = v.density + 'px';
-    });
-    document.body.style.setProperty('--grid-vis', v.grid === '1' ? 'block' : 'none');
-  }
-  apply(d);
-
-  function send(k,v) { window.parent.postMessage({type:'__edit_mode_set_keys',edits:{[k]:v}},'*'); }
-
-  document.getElementById('tw-accent').value = d.accent;
-  document.getElementById('tw-size').value = d.size;
-  document.getElementById('tw-density').value = d.density;
-  document.getElementById('tw-grid').value = d.grid;
-
-  document.getElementById('tw-accent').addEventListener('input', function(){ d.accent=this.value; apply(d); send('accent',this.value); });
-  document.getElementById('tw-size').addEventListener('input', function(){ d.size=+this.value; apply(d); send('size',+this.value); });
-  document.getElementById('tw-density').addEventListener('change', function(){ d.density=this.value; apply(d); send('density',this.value); });
-  document.getElementById('tw-grid').addEventListener('change', function(){ d.grid=this.value; apply(d); send('grid',this.value); });
+  var v=document.getElementById('teaser'),snd=document.getElementById('snd'),again=document.getElementById('again');
+  var rm=matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if(rm){v.removeAttribute('autoplay');v.setAttribute('controls','');v.pause()}
+  snd.addEventListener('click',function(){var on=v.muted;v.muted=!on;snd.setAttribute('aria-pressed',String(on));snd.textContent=on?'Couper le son':'Son';if(on){v.currentTime=0;v.play().catch(function(){})}});
+  again.addEventListener('click',function(){v.currentTime=0;v.play().catch(function(){})});
 })();
 </script>
 </body>
