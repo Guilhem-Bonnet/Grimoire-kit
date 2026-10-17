@@ -207,7 +207,7 @@ def _run_subprocess(argv: list[str], timeout: int) -> tuple[str, int]:
     """Exécuter le navigateur ; une panne reste une donnée, pas une exception."""
     try:
         completed = subprocess.run(
-            argv, capture_output=True, text=True, timeout=timeout, check=False
+            argv, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout, check=False
         )
     except subprocess.TimeoutExpired:
         return (f"[web-browser] délai dépassé après {timeout}s", 124)

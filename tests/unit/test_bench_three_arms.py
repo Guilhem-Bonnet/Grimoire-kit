@@ -2495,10 +2495,10 @@ class _Layout:
 def test_hidden_test_read_makes_the_transcript_invalid(tmp_path: Path, kind: str, line: str) -> None:
     layout = _Layout(tmp_path)
     line = (
-        line.replace("{hidden}", str(layout.hidden))
-        .replace("{task_root}", str(layout.task_root))
-        .replace("{canonical}", str(layout.canonical))
-        .replace("{clone}", str(layout.clone))
+        line.replace("{hidden}", layout.hidden.as_posix())
+        .replace("{task_root}", layout.task_root.as_posix())
+        .replace("{canonical}", layout.canonical.as_posix())
+        .replace("{clone}", layout.clone.as_posix())
     )
     found = layout.find(line)
     assert [read.kind for read in found] == [kind], line
@@ -2562,7 +2562,7 @@ def test_cd_to_the_hidden_dir_stays_candidate_until_the_result_settles_it(tmp_pa
     cd, cat = _tool_line("Bash", command="cd ../../hidden-tests"), _tool_line("Bash", command="cat ex_test.py")
     unsettled = layout.find(cd, cat)
     assert [(read.line, read.kind) for read in unsettled] == [(1, "directory"), (2, "direct")]
-    reset = f"Shell cwd was reset to {layout.run_dir}"
+    reset = f"Shell cwd was reset to {layout.run_dir.as_posix()}"
     settled = layout.find(_bash_call("t1", "cd ../../hidden-tests"), _bash_result("t1", reset), cat)
     assert [(read.line, read.kind) for read in settled] == [(1, "directory")]  # le shell est revenu au dépôt
     kept = layout.find(_bash_call("t1", "cd ../../hidden-tests"), _bash_result("t1", "ok"), cat)
@@ -2578,16 +2578,16 @@ def test_cd_outside_the_repo_does_not_carry_over_to_the_next_call(tmp_path: Path
     cat = _tool_line("Bash", command="cat ../run0/ex_test.py")
     witness = layout.find(init, cat)
     assert [read.kind for read in witness] == ["direct"]
-    cd = f"cd {elsewhere} && ls"
+    cd = f"cd {elsewhere.as_posix()} && ls"
     # résultat absent : les deux candidats sont jugés, le dépôt trouve la copie
     assert [(r.line, r.kind) for r in layout.find(init, _tool_line("Bash", command=cd), cat)] == [(3, "direct")]
     # résultat qui confirme la réinitialisation
-    reset = _bash_result("t1", f"x\nShell cwd was reset to {layout.run_dir}")
+    reset = _bash_result("t1", f"x\nShell cwd was reset to {layout.run_dir.as_posix()}")
     assert [(r.line, r.kind) for r in layout.find(init, _bash_call("t1", cd), reset, cat)] == [(4, "direct")]
     # résultat sans message : ce n'est pas un signal que le shell soit resté dehors (W1-08b-S2-01)
     assert [(r.line, r.kind) for r in layout.find(init, _bash_call("t1", cd), _bash_result("t1", "ok"), cat)] == [(4, "direct")]
     # dans la MÊME commande, le cwd de `cd` vaut encore pour les segments suivants
-    assert layout.find(init, _tool_line("Bash", command=f"cd {elsewhere} && cat ../run0/ex_test.py")) == []
+    assert layout.find(init, _tool_line("Bash", command=f"cd {elsewhere.as_posix()} && cat ../run0/ex_test.py")) == []
 
 
 def _bash_error(tool_id: str, text: str) -> str:
@@ -2596,6 +2596,12 @@ def _bash_error(tool_id: str, text: str) -> str:
     )
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : l'analyseur de transcripts du banc lit des chemins POSIX absolus (/...) : un chemin à lettre de lecteur (C:/...) y est relatif, donc jamais « hors du dépôt »"
+    ),
+)
 def test_failed_command_outside_the_repo_leaves_the_repo_candidate(tmp_path: Path) -> None:
     """W1-08b-S2-01 : un résultat en erreur n'a pas le message de réinitialisation, et le shell est revenu au dépôt."""
     layout = _Layout(tmp_path)
@@ -2605,7 +2611,7 @@ def test_failed_command_outside_the_repo_leaves_the_repo_candidate(tmp_path: Pat
     failed = layout.find(init, _bash_call("t1", cd), _bash_error("t1", "Exit code 1"), cat)
     assert [(r.line, r.kind) for r in failed] == [(4, "direct")]
     # avec le message, le shell est au dépôt : même verdict
-    reset = _bash_result("t1", f"Exit code 1\nShell cwd was reset to {layout.run_dir}")
+    reset = _bash_result("t1", f"Exit code 1\nShell cwd was reset to {layout.run_dir.as_posix()}")
     assert [(r.line, r.kind) for r in layout.find(init, _bash_call("t1", cd), reset, cat)] == [(4, "direct")]
     # le répertoire où la commande a fini reste candidat : la lecture relative qui n'a de sens que là est vue aussi
     inside_task = _tool_line("Bash", command="cat hidden-tests/ex_test.py")
@@ -2615,6 +2621,12 @@ def test_failed_command_outside_the_repo_leaves_the_repo_candidate(tmp_path: Pat
     assert layout.find(init, _bash_call("t1", cd), reset, inside_task) == []
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : l'analyseur de transcripts du banc lit des chemins POSIX absolus (/...) : un chemin à lettre de lecteur (C:/...) y est relatif, donc jamais « hors du dépôt »"
+    ),
+)
 def test_cd_dash_returns_to_the_previous_directory(tmp_path: Path) -> None:
     """W1-08b-S2-01 : ``cd -`` n'était pas modélisé, le shell restait dehors alors qu'il revenait au dépôt."""
     layout = _Layout(tmp_path)
@@ -2733,7 +2745,7 @@ def test_reset_message_of_another_call_does_not_settle_the_shell(tmp_path: Path)
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     cat = _tool_line("Bash", command="cat ../run0/ex_test.py")
-    found = layout.find(_bash_call("t1", f"cd {elsewhere}"), _bash_result("autre", "ok"), cat)
+    found = layout.find(_bash_call("t1", f"cd {elsewhere.as_posix()}"), _bash_result("autre", "ok"), cat)
     assert [(read.line, read.kind) for read in found] == [(3, "direct")]
 
 
@@ -3222,6 +3234,12 @@ def test_a_line_break_inside_quotes_or_after_a_semicolon_is_not_a_continuation(t
 # ── W1-08b-T3-02 : un mot du shell est recomposé avant d'être jugé ─────
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : l'analyseur de transcripts du banc lit des chemins POSIX absolus (/...) : un chemin à lettre de lecteur (C:/...) y est relatif, donc jamais « hors du dépôt »"
+    ),
+)
 @pytest.mark.parametrize(
     ("command", "reference"),
     [

@@ -96,7 +96,7 @@ def test_put_writes_the_blueprint_on_the_home_project(duo_server: Any) -> None:
 
     assert status == 200
     assert body["saved"] == "demo"
-    saved = json.loads((home / "_grimoire" / "blueprints" / "demo.blueprint.json").read_text())
+    saved = json.loads((home / "_grimoire" / "blueprints" / "demo.blueprint.json").read_text(encoding="utf-8"))
     assert saved == blueprint
 
 

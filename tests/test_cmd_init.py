@@ -243,19 +243,19 @@ class TestInitCLI:
     def test_init_express_sets_project_name(self, runner, app, tmp_path: Path) -> None:
         target = tmp_path / "cool-app"
         runner.invoke(app, ["-y", "init", str(target)])
-        content = (target / "project-context.yaml").read_text()
+        content = (target / "project-context.yaml").read_text(encoding="utf-8")
         assert "cool-app" in content
 
     def test_init_with_explicit_name(self, runner, app, tmp_path: Path) -> None:
         target = tmp_path / "dir"
         runner.invoke(app, ["-y", "init", str(target), "--name", "MyApp"])
-        content = (target / "project-context.yaml").read_text()
+        content = (target / "project-context.yaml").read_text(encoding="utf-8")
         assert "MyApp" in content
 
     def test_init_with_explicit_archetype(self, runner, app, tmp_path: Path) -> None:
         target = tmp_path / "infra"
         runner.invoke(app, ["-y", "init", str(target), "--archetype", "infra-ops"])
-        content = (target / "project-context.yaml").read_text()
+        content = (target / "project-context.yaml").read_text(encoding="utf-8")
         assert "infra-ops" in content
         # Should have infra-ops agents
         agents_dir = target / "_grimoire" / "kit" / "agents"
@@ -266,24 +266,24 @@ class TestInitCLI:
         target = tmp_path / "standard"
         result = runner.invoke(app, ["-y", "init", str(target), "--archetype", "agentic-standard"])
         assert result.exit_code == 0
-        content = (target / "project-context.yaml").read_text()
+        content = (target / "project-context.yaml").read_text(encoding="utf-8")
         assert "agentic-standard" in content
         assert (target / "_grimoire" / "kit" / "archetype.dna.agentic-standard.yaml").is_file()
 
     def test_init_refuses_existing_without_force(self, runner, app, tmp_path: Path) -> None:
         target = tmp_path / "existing"
         target.mkdir()
-        (target / "project-context.yaml").write_text("existing")
+        (target / "project-context.yaml").write_text("existing", encoding="utf-8")
         result = runner.invoke(app, ["-y", "init", str(target)])
         assert result.exit_code == 1
 
     def test_init_force_overwrites(self, runner, app, tmp_path: Path) -> None:
         target = tmp_path / "overwrite"
         target.mkdir()
-        (target / "project-context.yaml").write_text("old")
+        (target / "project-context.yaml").write_text("old", encoding="utf-8")
         result = runner.invoke(app, ["-y", "init", str(target), "--force"])
         assert result.exit_code == 0
-        content = (target / "project-context.yaml").read_text()
+        content = (target / "project-context.yaml").read_text(encoding="utf-8")
         assert "old" not in content
 
     def test_init_json_output(self, runner, app, tmp_path: Path) -> None:
@@ -374,7 +374,7 @@ class TestInitCLI:
         runner.invoke(app, ["-y", "init", str(target)])
         gi = target / ".gitignore"
         assert gi.is_file()
-        content = gi.read_text()
+        content = gi.read_text(encoding="utf-8")
         assert "Grimoire Kit" in content
 
     # ── Batch 4 — Multi-archetype ──────────────────────────────

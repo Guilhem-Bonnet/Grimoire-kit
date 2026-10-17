@@ -144,7 +144,7 @@ def _run(args: list[str], cwd: str | Path, *, env: dict | None = None) -> subpro
             subprocess.run(
                 ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
                 capture_output=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
             )
         else:
             proc.kill()
@@ -177,24 +177,24 @@ def _create_fake_grimoire(base: Path) -> Path:
     (grimoire / "_memory" / "backends").mkdir(parents=True)
 
     # Framework files
-    (grimoire / "_config" / "custom" / "agent-base.md").write_text("# old agent-base")
-    (grimoire / "_config" / "custom" / "cc-verify.sh").write_text("#!/bin/bash\n# old cc")
-    (grimoire / "_config" / "custom" / "sil-collect.sh").write_text("#!/bin/bash\n# old sil")
+    (grimoire / "_config" / "custom" / "agent-base.md").write_text("# old agent-base", encoding="utf-8")
+    (grimoire / "_config" / "custom" / "cc-verify.sh").write_text("#!/bin/bash\n# old cc", encoding="utf-8")
+    (grimoire / "_config" / "custom" / "sil-collect.sh").write_text("#!/bin/bash\n# old sil", encoding="utf-8")
 
     # Memory files
-    (grimoire / "_memory" / "maintenance.py").write_text("# old maintenance")
-    (grimoire / "_memory" / "mem0-bridge.py").write_text("# old bridge")
-    (grimoire / "_memory" / "session-save.py").write_text("# old save")
-    (grimoire / "_memory" / "shared-context.md").write_text("# My context")
-    (grimoire / "_memory" / "decisions-log.md").write_text("# Decisions")
-    (grimoire / "_memory" / "memories.json").write_text("[]")
+    (grimoire / "_memory" / "maintenance.py").write_text("# old maintenance", encoding="utf-8")
+    (grimoire / "_memory" / "mem0-bridge.py").write_text("# old bridge", encoding="utf-8")
+    (grimoire / "_memory" / "session-save.py").write_text("# old save", encoding="utf-8")
+    (grimoire / "_memory" / "shared-context.md").write_text("# My context", encoding="utf-8")
+    (grimoire / "_memory" / "decisions-log.md").write_text("# Decisions", encoding="utf-8")
+    (grimoire / "_memory" / "memories.json").write_text("[]", encoding="utf-8")
 
     # Agent files
-    (grimoire / "_config" / "custom" / "agents" / "atlas.md").write_text("# Atlas")
-    (grimoire / "_config" / "custom" / "agents" / "my-custom-agent.md").write_text("# Custom")
+    (grimoire / "_config" / "custom" / "agents" / "atlas.md").write_text("# Atlas", encoding="utf-8")
+    (grimoire / "_config" / "custom" / "agents" / "my-custom-agent.md").write_text("# Custom", encoding="utf-8")
 
     # Agent learnings
-    (grimoire / "_memory" / "agent-learnings" / "atlas.md").write_text("# Learnings")
+    (grimoire / "_memory" / "agent-learnings" / "atlas.md").write_text("# Learnings", encoding="utf-8")
 
     return grimoire
 
@@ -204,7 +204,7 @@ def _create_fake_output(base: Path) -> Path:
     output = base / "_grimoire-output"
     (output / ".runs" / "main").mkdir(parents=True)
     (output / "team-vision").mkdir(parents=True)
-    (output / ".runs" / "main" / "branch.json").write_text('{"branch": "main"}')
+    (output / ".runs" / "main" / "branch.json").write_text('{"branch": "main"}', encoding="utf-8")
     return output
 
 
@@ -217,7 +217,7 @@ def _create_project_context(base: Path, version: str = "3.1.0") -> Path:
         user:
           name: "TestUser"
         grimoire_kit_version: "{version}"
-    """))
+    """), encoding="utf-8")
     return ctx
 
 
@@ -272,7 +272,7 @@ class TestCmdReset:
     def test_soft_reset_dry_run(self, project_dir):
         """Dry-run soft reset doesn't modify files."""
         # Record original content
-        ab = (project_dir / "_grimoire" / "_config" / "custom" / "agent-base.md").read_text()
+        ab = (project_dir / "_grimoire" / "_config" / "custom" / "agent-base.md").read_text(encoding="utf-8")
         assert ab == "# old agent-base"
 
         result = _run([BASH, str(INIT_SCRIPT), "reset", "--dry-run"], cwd=project_dir)
@@ -280,19 +280,19 @@ class TestCmdReset:
         assert "Dry-run" in result.stdout, _explain(result)
 
         # File should be unchanged
-        assert (project_dir / "_grimoire" / "_config" / "custom" / "agent-base.md").read_text() == ab
+        assert (project_dir / "_grimoire" / "_config" / "custom" / "agent-base.md").read_text(encoding="utf-8") == ab
 
     def test_soft_reset_preserves_memory(self, project_dir):
         """Soft reset preserves _memory/ content."""
         sc = project_dir / "_grimoire" / "_memory" / "shared-context.md"
-        sc.write_text("# Important context I wrote")
+        sc.write_text("# Important context I wrote", encoding="utf-8")
 
         result = _run([BASH, str(INIT_SCRIPT), "reset", "--yes"], cwd=project_dir)
         assert result.returncode == 0, _explain(result)
 
         # Memory should be preserved
         assert sc.exists()
-        assert sc.read_text() == "# Important context I wrote"
+        assert sc.read_text(encoding="utf-8") == "# Important context I wrote"
 
     def test_soft_reset_preserves_custom_agents(self, project_dir):
         """Soft reset preserves custom (non-meta) agents."""
@@ -303,7 +303,7 @@ class TestCmdReset:
         assert result.returncode == 0, _explain(result)
 
         assert custom.exists()
-        assert custom.read_text() == "# Custom"
+        assert custom.read_text(encoding="utf-8") == "# Custom"
 
     def test_hard_reset_dry_run(self, project_dir):
         """Hard reset dry-run doesn't delete anything."""
@@ -327,7 +327,7 @@ class TestCmdReset:
         assert (project_dir / "_grimoire" / "_memory").is_dir()
 
         # Old memory content should be gone
-        assert not custom.exists() or custom.read_text() != "# My context"
+        assert not custom.exists() or custom.read_text(encoding="utf-8") != "# My context"
 
     def test_reset_unknown_option_fails(self, project_dir):
         """Unknown option causes error."""
@@ -427,33 +427,33 @@ class TestCmdQuickUpdate:
     def test_quickupdate_dry_run(self, project_dir):
         """Dry-run doesn't modify files."""
         ab = project_dir / "_grimoire" / "_config" / "custom" / "agent-base.md"
-        original = ab.read_text()
+        original = ab.read_text(encoding="utf-8")
 
         result = _run([BASH, str(INIT_SCRIPT), "quick-update", "--dry-run"], cwd=project_dir)
         assert result.returncode == 0, _explain(result)
         assert "Dry-run" in result.stdout, _explain(result)
 
-        assert ab.read_text() == original
+        assert ab.read_text(encoding="utf-8") == original
 
     def test_quickupdate_preserves_custom_agents(self, project_dir):
         """Quick-update doesn't touch custom agents."""
         custom = project_dir / "_grimoire" / "_config" / "custom" / "agents" / "my-custom-agent.md"
-        original = custom.read_text()
+        original = custom.read_text(encoding="utf-8")
 
         result = _run([BASH, str(INIT_SCRIPT), "quick-update"], cwd=project_dir)
         assert result.returncode == 0, _explain(result)
 
-        assert custom.read_text() == original
+        assert custom.read_text(encoding="utf-8") == original
 
     def test_quickupdate_preserves_memory(self, project_dir):
         """Quick-update doesn't touch memory."""
         sc = project_dir / "_grimoire" / "_memory" / "shared-context.md"
-        sc.write_text("# My precious context")
+        sc.write_text("# My precious context", encoding="utf-8")
 
         result = _run([BASH, str(INIT_SCRIPT), "quick-update"], cwd=project_dir)
         assert result.returncode == 0, _explain(result)
 
-        assert sc.read_text() == "# My precious context"
+        assert sc.read_text(encoding="utf-8") == "# My precious context"
 
     def test_quickupdate_reports_counts(self, project_dir):
         """Output mentions update counts."""

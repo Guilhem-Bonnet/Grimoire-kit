@@ -176,7 +176,7 @@ class TestTraceWriter(unittest.TestCase):
         writer = self.mod.TraceWriter(self.tmpdir)
         writer.write("dev", "TOOL:call", "first")
         writer.write("architect", "TOOL:result", "second")
-        content = writer.trace_file.read_text()
+        content = writer.trace_file.read_text(encoding="utf-8")
         self.assertIn("first", content)
         self.assertIn("second", content)
         self.assertEqual(content.count("\n"), 2)
@@ -185,7 +185,7 @@ class TestTraceWriter(unittest.TestCase):
         (self.tmpdir / "_grimoire-output").mkdir()
         writer = self.mod.TraceWriter(self.tmpdir)
         writer.write("dev", "ACTION", "did something")
-        content = writer.trace_file.read_text()
+        content = writer.trace_file.read_text(encoding="utf-8")
         self.assertIn("[dev]", content)
         self.assertIn("[ACTION]", content)
 
@@ -363,7 +363,7 @@ class TestAgentCaller(unittest.TestCase):
         # Trace is at _grimoire-output/Grimoire_TRACE.md
         actual_trace = self.tmpdir / "_grimoire-output" / "Grimoire_TRACE.md"
         self.assertTrue(actual_trace.exists())
-        content = actual_trace.read_text()
+        content = actual_trace.read_text(encoding="utf-8")
         self.assertIn("TOOL:call", content)
 
     def test_call_records_history(self):
@@ -434,7 +434,7 @@ class TestCLIIntegration(unittest.TestCase):
     def _run(self, *args):
         return subprocess.run(
             [sys.executable, str(TOOL), *args],
-            capture_output=True, text=True, timeout=15,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15,
         )
 
     def test_help(self):

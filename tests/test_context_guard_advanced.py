@@ -43,13 +43,13 @@ class TestResolveAgentLoads(unittest.TestCase):
 
         # Agent file
         self.agent_path = agents_dir / "test-agent.md"
-        self.agent_path.write_text("# Test Agent\n<activation critical='MANDATORY'>\nNEVER break character\n")
+        self.agent_path.write_text("# Test Agent\n<activation critical='MANDATORY'>\nNEVER break character\n", encoding="utf-8")
 
         # agent-base.md
-        (self.tmpdir / "framework" / "agent-base.md").write_text("# Base Protocol\nThis is the base.\n" * 50)
+        (self.tmpdir / "framework" / "agent-base.md").write_text("# Base Protocol\nThis is the base.\n" * 50, encoding="utf-8")
 
         # project-context.yaml
-        (self.tmpdir / "project-context.yaml").write_text("project:\n  name: TestProject\n")
+        (self.tmpdir / "project-context.yaml").write_text("project:\n  name: TestProject\n", encoding="utf-8")
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
@@ -73,14 +73,14 @@ class TestResolveAgentLoads(unittest.TestCase):
     def test_loads_memory_files(self):
         # Créer un fichier mémoire agent-spécifique
         mem = self.tmpdir / "_grimoire/_memory/test-agent-learnings.md"
-        mem.write_text("- learned something\n- learned another\n")
+        mem.write_text("- learned something\n- learned another\n", encoding="utf-8")
         loads = self.cg.resolve_agent_loads(self.agent_path, self.tmpdir)
         mem_loads = [item for item in loads if item.role == "memory"]
         self.assertGreaterEqual(len(mem_loads), 1)
 
     def test_loads_failure_museum(self):
         museum = self.tmpdir / "_grimoire/_memory/failure-museum.md"
-        museum.write_text("# Failure Museum\n## Error 1\n- description\n")
+        museum.write_text("# Failure Museum\n## Error 1\n- description\n", encoding="utf-8")
         loads = self.cg.resolve_agent_loads(self.agent_path, self.tmpdir)
         mem_loads = [item for item in loads if item.role == "memory" and "failure" in str(item.path)]
         self.assertEqual(len(mem_loads), 1)
@@ -90,7 +90,7 @@ class TestResolveAgentLoads(unittest.TestCase):
         trace_dir = self.tmpdir / "_grimoire-output"
         trace_dir.mkdir(parents=True)
         trace = trace_dir / "Grimoire_TRACE.md"
-        trace.write_text("\n".join(f"Line {i}" for i in range(300)))
+        trace.write_text("\n".join(f"Line {i}" for i in range(300)), encoding="utf-8")
         loads = self.cg.resolve_agent_loads(self.agent_path, self.tmpdir)
         trace_loads = [item for item in loads if item.role == "trace"]
         self.assertEqual(len(trace_loads), 1)
@@ -118,9 +118,9 @@ class TestComputeBudget(unittest.TestCase):
         (self.tmpdir / "_grimoire/_memory").mkdir(parents=True)
 
         self.agent_path = agents_dir / "atlas.md"
-        self.agent_path.write_text("# Atlas Agent\n<activation critical='MANDATORY'>\nNEVER break character\n" * 100)
-        (self.tmpdir / "framework" / "agent-base.md").write_text("# Base\n" * 200)
-        (self.tmpdir / "project-context.yaml").write_text("project:\n  name: Test\n")
+        self.agent_path.write_text("# Atlas Agent\n<activation critical='MANDATORY'>\nNEVER break character\n" * 100, encoding="utf-8")
+        (self.tmpdir / "framework" / "agent-base.md").write_text("# Base\n" * 200, encoding="utf-8")
+        (self.tmpdir / "project-context.yaml").write_text("project:\n  name: Test\n", encoding="utf-8")
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
@@ -177,28 +177,28 @@ class TestFindAgents(unittest.TestCase):
 
     def test_finds_agents_with_activation(self):
         (self.custom_dir / "hawk.md").write_text(
-            "<activation critical='MANDATORY'>\nYou are Hawk.\n"
-        )
+            "<activation critical='MANDATORY'>\nYou are Hawk.\n",
+        encoding="utf-8",)
         agents = self.cg.find_agents(self.tmpdir)
         self.assertEqual(len(agents), 1)
         self.assertEqual(agents[0].stem, "hawk")
 
     def test_finds_agents_with_never_break(self):
         (self.custom_dir / "forge.md").write_text(
-            "You must NEVER break character until given an exit command.\n"
-        )
+            "You must NEVER break character until given an exit command.\n",
+        encoding="utf-8",)
         agents = self.cg.find_agents(self.tmpdir)
         self.assertEqual(len(agents), 1)
 
     def test_ignores_templates(self):
         (self.custom_dir / "custom-agent.tpl.md").write_text(
-            "<activation critical='MANDATORY'>\n"
-        )
+            "<activation critical='MANDATORY'>\n",
+        encoding="utf-8",)
         agents = self.cg.find_agents(self.tmpdir)
         self.assertEqual(len(agents), 0)
 
     def test_ignores_non_agent_md(self):
-        (self.custom_dir / "README.md").write_text("# Readme\nThis is not an agent.\n")
+        (self.custom_dir / "README.md").write_text("# Readme\nThis is not an agent.\n", encoding="utf-8")
         agents = self.cg.find_agents(self.tmpdir)
         self.assertEqual(len(agents), 0)
 
@@ -206,8 +206,8 @@ class TestFindAgents(unittest.TestCase):
         arch_dir = self.tmpdir / "archetypes/web-app/agents"
         arch_dir.mkdir(parents=True)
         (arch_dir / "fullstack-dev.md").write_text(
-            "NEVER break character\nYou are a fullstack dev.\n"
-        )
+            "NEVER break character\nYou are a fullstack dev.\n",
+        encoding="utf-8",)
         agents = self.cg.find_agents(self.tmpdir)
         self.assertEqual(len(agents), 1)
 
@@ -233,7 +233,7 @@ class TestAnalyzeFileForOptimize(unittest.TestCase):
         # Need > 500 tokens (~4 chars/token), so generate enough content
         lines = ["# This is a long comment line number " + str(i) + " with padding text words" for i in range(200)]
         lines += ["code_variable_name_" + str(i) + " = 'value'" for i in range(50)]
-        f.write_text("\n".join(lines))
+        f.write_text("\n".join(lines), encoding="utf-8")
         hints = self.cg.analyze_file_for_optimize(f, "agent-definition")
         comment_hints = [h for h in hints if h.category == "comments"]
         self.assertGreater(len(comment_hints), 0)
@@ -242,20 +242,20 @@ class TestAnalyzeFileForOptimize(unittest.TestCase):
         f = self.tmpdir / "heavy.yaml"
         lines = ["# This is a yaml comment line number " + str(i) + " with extra padding" for i in range(200)]
         lines += [f"key_name_{i}: value_content_{i}" for i in range(50)]
-        f.write_text("\n".join(lines))
+        f.write_text("\n".join(lines), encoding="utf-8")
         hints = self.cg.analyze_file_for_optimize(f, "agent-definition")
         comment_hints = [h for h in hints if h.category == "comments"]
         self.assertGreater(len(comment_hints), 0)
 
     def test_small_file_ignored(self):
         f = self.tmpdir / "small.py"
-        f.write_text("x = 1\n")
+        f.write_text("x = 1\n", encoding="utf-8")
         hints = self.cg.analyze_file_for_optimize(f, "agent-definition")
         self.assertEqual(len(hints), 0)
 
     def test_shared_heavy_protocol(self):
         f = self.tmpdir / "agent-base.md"
-        f.write_text("# Protocol\n" * 1000)
+        f.write_text("# Protocol\n" * 1000, encoding="utf-8")
         hints = self.cg.analyze_file_for_optimize(f, "base-protocol")
         shared = [h for h in hints if h.category == "shared-heavy"]
         self.assertGreater(len(shared), 0)
@@ -268,7 +268,7 @@ class TestAnalyzeFileForOptimize(unittest.TestCase):
         lines += ["\n```python\n"]
         lines += [f"variable_name_{i} = some_function_call(argument_{i}, option_{i})\n" for i in range(25)]
         lines += ["```\n\n", "More text after the code block.\n"]
-        f.write_text("".join(lines))
+        f.write_text("".join(lines), encoding="utf-8")
         hints = self.cg.analyze_file_for_optimize(f, "agent-definition")
         extractable = [h for h in hints if h.category == "extractable"]
         self.assertGreater(len(extractable), 0)
@@ -301,8 +301,8 @@ class TestParseModelAffinity(unittest.TestCase):
             "  speed: slow-ok\n"
             "  cost: any\n"
             "---\n"
-            "# Agent Content\n"
-        )
+            "# Agent Content\n",
+        encoding="utf-8",)
         affinity = self.cg.parse_model_affinity(f)
         self.assertIsNotNone(affinity)
         self.assertEqual(affinity.reasoning, "extreme")
@@ -316,14 +316,14 @@ class TestParseModelAffinity(unittest.TestCase):
             "---\n"
             "name: basic-agent\n"
             "---\n"
-            "Content\n"
-        )
+            "Content\n",
+        encoding="utf-8",)
         affinity = self.cg.parse_model_affinity(f)
         self.assertIsNone(affinity)
 
     def test_returns_none_without_frontmatter(self):
         f = self.tmpdir / "no-fm.md"
-        f.write_text("# Agent\nNo frontmatter here.\n")
+        f.write_text("# Agent\nNo frontmatter here.\n", encoding="utf-8")
         affinity = self.cg.parse_model_affinity(f)
         self.assertIsNone(affinity)
 
@@ -337,8 +337,8 @@ class TestParseModelAffinity(unittest.TestCase):
             "---\n"
             "model_affinity:\n"
             "  reasoning: high\n"
-            "---\n"
-        )
+            "---\n",
+        encoding="utf-8",)
         affinity = self.cg.parse_model_affinity(f)
         self.assertIsNotNone(affinity)
         self.assertEqual(affinity.reasoning, "high")
@@ -487,8 +487,8 @@ class TestLoadAvailableModels(unittest.TestCase):
             '    - id: "gpt-4o"\n'
             '      routing: "default"\n'
             '    - id: "claude-sonnet-4"\n'
-            '      routing: "complex"\n'
-        )
+            '      routing: "complex"\n',
+        encoding="utf-8",)
         result = self.cg.load_available_models(self.tmpdir)
         self.assertIsNotNone(result)
         self.assertEqual(len(result), 2)

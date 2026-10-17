@@ -18,12 +18,12 @@ def source(tmp_path: Path) -> Path:
     d = tmp_path / "source"
     d.mkdir()
     (d / "_grimoire").mkdir()
-    (d / "_grimoire" / "config.yaml").write_text("config: true\n")
+    (d / "_grimoire" / "config.yaml").write_text("config: true\n", encoding="utf-8")
     (d / "_grimoire" / "agents").mkdir()
-    (d / "_grimoire" / "agents" / "architect.md").write_text("# Architect\n")
+    (d / "_grimoire" / "agents" / "architect.md").write_text("# Architect\n", encoding="utf-8")
     (d / ".github").mkdir()
-    (d / ".github" / "copilot-instructions.md").write_text("# Instructions\n")
-    (d / "new-file.txt").write_text("new content\n")
+    (d / ".github" / "copilot-instructions.md").write_text("# Instructions\n", encoding="utf-8")
+    (d / "new-file.txt").write_text("new content\n", encoding="utf-8")
     return d
 
 
@@ -68,7 +68,7 @@ class TestAnalyze:
 
     def test_detects_conflicts(self, engine: MergeEngine, target: Path) -> None:
         # Create a conflicting file
-        (target / "new-file.txt").write_text("existing\n")
+        (target / "new-file.txt").write_text("existing\n", encoding="utf-8")
         plan = engine.analyze()
         conflict_paths = [c.path for c in plan.conflicts]
         assert "new-file.txt" in conflict_paths
@@ -77,7 +77,7 @@ class TestAnalyze:
         # Create the sensitive file
         gh = target / ".github"
         gh.mkdir()
-        (gh / "copilot-instructions.md").write_text("existing\n")
+        (gh / "copilot-instructions.md").write_text("existing\n", encoding="utf-8")
         plan = engine.analyze()
         assert len(plan.warnings) >= 1
         assert any("copilot-instructions.md" in w for w in plan.warnings)
@@ -112,18 +112,18 @@ class TestExecute:
         assert (target / "_grimoire" / "agents").is_dir()
 
     def test_skips_conflicts(self, engine: MergeEngine, target: Path) -> None:
-        (target / "new-file.txt").write_text("keep me\n")
+        (target / "new-file.txt").write_text("keep me\n", encoding="utf-8")
         plan = engine.analyze()
         result = engine.execute(plan)
         assert "new-file.txt" in result.files_skipped
-        assert (target / "new-file.txt").read_text() == "keep me\n"
+        assert (target / "new-file.txt").read_text(encoding="utf-8") == "keep me\n"
 
     def test_force_overwrites(self, engine: MergeEngine, target: Path) -> None:
-        (target / "new-file.txt").write_text("old\n")
+        (target / "new-file.txt").write_text("old\n", encoding="utf-8")
         plan = engine.analyze()
         result = engine.execute(plan, force=True)
         assert "new-file.txt" in result.files_created
-        assert (target / "new-file.txt").read_text() == "new content\n"
+        assert (target / "new-file.txt").read_text(encoding="utf-8") == "new content\n"
 
     def test_dry_run_no_changes(self, engine: MergeEngine, target: Path) -> None:
         plan = engine.analyze()
@@ -137,7 +137,7 @@ class TestExecute:
         result = engine.execute(plan)
         assert result.log_path is not None
         assert result.log_path.is_file()
-        log = json.loads(result.log_path.read_text())
+        log = json.loads(result.log_path.read_text(encoding="utf-8"))
         assert "files_created" in log
         assert "timestamp" in log
 
@@ -196,7 +196,7 @@ class TestEdgeCases:
         tgt.mkdir()
         deep = src / "a" / "b" / "c"
         deep.mkdir(parents=True)
-        (deep / "file.txt").write_text("deep\n")
+        (deep / "file.txt").write_text("deep\n", encoding="utf-8")
         e = MergeEngine(src, tgt)
         plan = e.analyze()
         e.execute(plan)

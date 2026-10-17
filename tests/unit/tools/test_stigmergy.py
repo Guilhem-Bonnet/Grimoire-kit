@@ -138,7 +138,7 @@ class TestPersistence:
         assert loaded.total_emitted == 1
 
     def test_load_corrupted_json(self, root: Path) -> None:
-        (root / "_grimoire-output" / "pheromone-board.json").write_text("{bad")
+        (root / "_grimoire-output" / "pheromone-board.json").write_text("{bad", encoding="utf-8")
         b = load_board(root)
         assert len(b.pheromones) == 0
 

@@ -595,9 +595,9 @@ class TestCompile:
         # Enrichir le catalogue de contrôles pour GOV-01
         ui = api_with_catalogue.ui_dir
         assert ui is not None
-        catalogue = json.loads((ui / "data" / "catalogue-export.json").read_text())
+        catalogue = json.loads((ui / "data" / "catalogue-export.json").read_text(encoding="utf-8"))
         catalogue["patterns"][1]["controls"] = ["allowlist", "dry-run"]
-        (ui / "data" / "catalogue-export.json").write_text(json.dumps(catalogue))
+        (ui / "data" / "catalogue-export.json").write_text(json.dumps(catalogue), encoding="utf-8")
         bp = {
             "id": "flow-req",
             "name": "Req",

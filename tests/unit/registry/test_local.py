@@ -37,20 +37,20 @@ def kit_root(tmp_path: Path) -> Path:
     agents_dir = minimal / "agents"
     agents_dir.mkdir(parents=True)
     (minimal / "archetype.dna.yaml").write_text(
-        _DNA_YAML.format(id="minimal", name="Minimal", desc="Bare bones setup", tags='"starter"')
-    )
-    (agents_dir / "agent-a.md").write_text("# Agent A\n")
-    (agents_dir / "agent-b.md").write_text("# Agent B\n")
+        _DNA_YAML.format(id="minimal", name="Minimal", desc="Bare bones setup", tags='"starter"'),
+    encoding="utf-8",)
+    (agents_dir / "agent-a.md").write_text("# Agent A\n", encoding="utf-8")
+    (agents_dir / "agent-b.md").write_text("# Agent B\n", encoding="utf-8")
 
     # infra-ops archetype
     infra = archetypes / "infra-ops"
     infra_agents = infra / "agents"
     infra_agents.mkdir(parents=True)
     (infra / "archetype.dna.yaml").write_text(
-        _DNA_YAML.format(id="infra-ops", name="Infra Ops", desc="Infrastructure team", tags='"infra", "kubernetes"')
-    )
-    (infra_agents / "agent-a.md").write_text("# Agent A\n")
-    (infra_agents / "agent-b.md").write_text("# Agent B\n")
+        _DNA_YAML.format(id="infra-ops", name="Infra Ops", desc="Infrastructure team", tags='"infra", "kubernetes"'),
+    encoding="utf-8",)
+    (infra_agents / "agent-a.md").write_text("# Agent A\n", encoding="utf-8")
+    (infra_agents / "agent-b.md").write_text("# Agent B\n", encoding="utf-8")
 
     return tmp_path
 

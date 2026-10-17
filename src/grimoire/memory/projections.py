@@ -234,9 +234,9 @@ def _content_hash(text: str) -> str:
 def _relative_path(project_root: Path, file_path: str) -> str:
     path = Path(file_path)
     try:
-        return str(path.relative_to(project_root.resolve()))
+        return path.relative_to(project_root.resolve()).as_posix()
     except ValueError:
-        return str(path)
+        return path.as_posix()
 
 
 def _projection_entry(

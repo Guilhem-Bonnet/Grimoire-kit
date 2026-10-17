@@ -180,7 +180,7 @@ class TestProjectScaffolder:
         s.execute(plan)
         ctx_file = tmp_path / "project-context.yaml"
         assert ctx_file.is_file()
-        content = ctx_file.read_text()
+        content = ctx_file.read_text(encoding="utf-8")
         assert "test-project" in content
         assert "Test User" in content
         assert "minimal" in content
@@ -191,7 +191,7 @@ class TestProjectScaffolder:
         s.execute(plan)
         cfg = tmp_path / "_grimoire" / "_memory" / "config.yaml"
         assert cfg.is_file()
-        content = cfg.read_text()
+        content = cfg.read_text(encoding="utf-8")
         assert "Test User" in content
 
     def test_execute_writes_manifest(self, tmp_path: Path) -> None:
@@ -200,7 +200,7 @@ class TestProjectScaffolder:
         s.execute(plan)
         manifest = tmp_path / "_grimoire" / "kit" / "agent-manifest.csv"
         assert manifest.is_file()
-        content = manifest.read_text()
+        content = manifest.read_text(encoding="utf-8")
         assert "name,file,category,description,icon" in content
 
     def test_plan_includes_up_version_marker(self, tmp_path: Path) -> None:
@@ -336,7 +336,7 @@ class TestProjectScaffolder:
         assert "vectus" in agent_names
 
         # Project context should mention infra-ops
-        ctx = (tmp_path / "project-context.yaml").read_text()
+        ctx = (tmp_path / "project-context.yaml").read_text(encoding="utf-8")
         assert "infra-ops" in ctx
         assert "qdrant-local" in ctx
 
@@ -367,7 +367,7 @@ class TestProjectScaffolder:
         s = _scaffolder(tmp_path)
         plan = s.plan()
         s.execute(plan)
-        ci = (tmp_path / ".github" / "copilot-instructions.md").read_text()
+        ci = (tmp_path / ".github" / "copilot-instructions.md").read_text(encoding="utf-8")
         assert "| Agent |" in ci
         assert "concierge" in ci
 
@@ -403,7 +403,7 @@ class TestProjectScaffolder:
         s = _scaffolder(tmp_path)
         plan = s.plan()
         s.execute(plan)
-        ci = (tmp_path / ".github" / "copilot-instructions.md").read_text()
+        ci = (tmp_path / ".github" / "copilot-instructions.md").read_text(encoding="utf-8")
         assert "@concierge" in ci
 
     # ── UX improvements (P1-P6) ──────────────────────────────────────
@@ -413,7 +413,7 @@ class TestProjectScaffolder:
         s = _scaffolder(tmp_path)
         plan = s.plan()
         s.execute(plan)
-        ci = (tmp_path / ".github" / "copilot-instructions.md").read_text()
+        ci = (tmp_path / ".github" / "copilot-instructions.md").read_text(encoding="utf-8")
         assert "## Quick Start" in ci
         assert "Copilot Chat" in ci
 
@@ -422,7 +422,7 @@ class TestProjectScaffolder:
         s = _scaffolder(tmp_path)
         plan = s.plan()
         s.execute(plan)
-        ci = (tmp_path / ".github" / "copilot-instructions.md").read_text()
+        ci = (tmp_path / ".github" / "copilot-instructions.md").read_text(encoding="utf-8")
         assert "## File Ownership" in ci
         assert "shared-context.md" in ci
 
@@ -431,7 +431,7 @@ class TestProjectScaffolder:
         s = _scaffolder(tmp_path)
         plan = s.plan()
         s.execute(plan)
-        ci = (tmp_path / ".github" / "copilot-instructions.md").read_text()
+        ci = (tmp_path / ".github" / "copilot-instructions.md").read_text(encoding="utf-8")
         assert "| Agent | Role | Description |" in ci
 
     def test_decisions_log_has_format_guide(self, tmp_path: Path) -> None:
@@ -439,7 +439,7 @@ class TestProjectScaffolder:
         s = _scaffolder(tmp_path)
         plan = s.plan()
         s.execute(plan)
-        dl = (tmp_path / "_grimoire" / "_memory" / "decisions-log.md").read_text()
+        dl = (tmp_path / "_grimoire" / "_memory" / "decisions-log.md").read_text(encoding="utf-8")
         assert "## Format" in dl
         assert "Contexte" in dl
         assert "Alternatives" in dl
@@ -449,7 +449,7 @@ class TestProjectScaffolder:
         s = _scaffolder(tmp_path)
         plan = s.plan()
         s.execute(plan)
-        ss = (tmp_path / "_grimoire" / "_memory" / "session-state.md").read_text()
+        ss = (tmp_path / "_grimoire" / "_memory" / "session-state.md").read_text(encoding="utf-8")
         assert "first_run: true" in ss
 
     def test_copilot_instructions_has_no_hallucination_rule(self, tmp_path: Path) -> None:
@@ -457,7 +457,7 @@ class TestProjectScaffolder:
         s = _scaffolder(tmp_path)
         plan = s.plan()
         s.execute(plan)
-        ci = (tmp_path / ".github" / "copilot-instructions.md").read_text()
+        ci = (tmp_path / ".github" / "copilot-instructions.md").read_text(encoding="utf-8")
         assert "hallucination" in ci.lower()
 
     # ── Batch 2 improvements ───────────────────────────────────────
@@ -476,7 +476,7 @@ class TestProjectScaffolder:
         s.execute(plan)
         dna = tmp_path / "_grimoire" / "kit" / "archetype.dna.yaml"
         assert dna.is_file()
-        content = dna.read_text()
+        content = dna.read_text(encoding="utf-8")
         assert "infra-ops" in content or "traits" in content
 
     def test_gitignore_generated(self, tmp_path: Path) -> None:
@@ -486,25 +486,25 @@ class TestProjectScaffolder:
         s.execute(plan)
         gi = tmp_path / ".gitignore"
         assert gi.is_file()
-        content = gi.read_text()
+        content = gi.read_text(encoding="utf-8")
         assert "Grimoire Kit" in content
         assert "_grimoire-output/.runs/" in content
 
     def test_gitignore_appends_to_existing(self, tmp_path: Path) -> None:
         """Existing .gitignore should be preserved with grimoire patterns appended."""
         gi = tmp_path / ".gitignore"
-        gi.write_text("node_modules/\n.env\n")
+        gi.write_text("node_modules/\n.env\n", encoding="utf-8")
         s = _scaffolder(tmp_path)
         plan = s.plan()
         s.execute(plan)
-        content = gi.read_text()
+        content = gi.read_text(encoding="utf-8")
         assert "node_modules/" in content
         assert "Grimoire Kit" in content
 
     def test_gitignore_not_duplicated(self, tmp_path: Path) -> None:
         """Grimoire section should not be added twice."""
         gi = tmp_path / ".gitignore"
-        gi.write_text("# --- Grimoire Kit ---\n_grimoire-output/.runs/\n")
+        gi.write_text("# --- Grimoire Kit ---\n_grimoire-output/.runs/\n", encoding="utf-8")
         s = _scaffolder(tmp_path)
         plan = s.plan()
         tpl_labels = [t.label for t in plan.templates]
@@ -516,7 +516,7 @@ class TestProjectScaffolder:
         plan = s.plan()
         s.execute(plan)
         manifest = tmp_path / "_grimoire" / "kit" / "agent-manifest.csv"
-        content = manifest.read_text()
+        content = manifest.read_text(encoding="utf-8")
         assert "name,file,category,description,icon" in content
         lines = content.strip().splitlines()
         assert len(lines) >= 4  # header + at least 3 meta agents
@@ -529,7 +529,7 @@ class TestProjectScaffolder:
         s = _scaffolder(tmp_path)
         plan = s.plan()
         s.execute(plan)
-        ci = (tmp_path / ".github" / "copilot-instructions.md").read_text()
+        ci = (tmp_path / ".github" / "copilot-instructions.md").read_text(encoding="utf-8")
         assert "archetype.dna.yaml" in ci
 
     def test_copilot_instructions_has_grimoire_init_in_cli(self, tmp_path: Path) -> None:
@@ -537,7 +537,7 @@ class TestProjectScaffolder:
         s = _scaffolder(tmp_path)
         plan = s.plan()
         s.execute(plan)
-        ci = (tmp_path / ".github" / "copilot-instructions.md").read_text()
+        ci = (tmp_path / ".github" / "copilot-instructions.md").read_text(encoding="utf-8")
         assert "grimoire init" in ci
 
 

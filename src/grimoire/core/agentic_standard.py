@@ -890,7 +890,7 @@ def _memory_os_context(memory_policy: Mapping[str, Any]) -> dict[str, Any]:
             "target": dict(MEMORY_OS_REQUIRED_TARGET),
             "legacy_vector_sources": sorted(MEMORY_OS_LEGACY_VECTOR_SOURCES),
             "promotion_gates": sorted(MEMORY_OS_REQUIRED_PROMOTION_GATES),
-            "policy_ref": str(STANDARD_DIR / "memory-policy.yaml"),
+            "policy_ref": (STANDARD_DIR / "memory-policy.yaml").as_posix(),
         }
     target = memory_os.get("target")
     return {
@@ -898,7 +898,7 @@ def _memory_os_context(memory_policy: Mapping[str, Any]) -> dict[str, Any]:
         "target": target if isinstance(target, dict) else {},
         "promotion_gates": memory_os.get("promotion_gates", []),
         "runtime_commands": memory_os.get("runtime_commands", []),
-        "policy_ref": str(STANDARD_DIR / "memory-policy.yaml"),
+        "policy_ref": (STANDARD_DIR / "memory-policy.yaml").as_posix(),
     }
 
 
@@ -1153,12 +1153,12 @@ def build_context_bundle(
             "acceptance_criteria": task.get("acceptance_criteria", []),
         },
         "selected_sources": [
-            {"source": "mission_brief", "path": str(STANDARD_DIR / "mission-brief.md")},
-            {"source": "task_board", "path": str(STANDARD_DIR / "task-board.yaml")},
-            {"source": "task_envelope", "path": str(EVIDENCE_DIR / normalized_task_id / "task-envelope.md")},
+            {"source": "mission_brief", "path": (STANDARD_DIR / "mission-brief.md").as_posix()},
+            {"source": "task_board", "path": (STANDARD_DIR / "task-board.yaml").as_posix()},
+            {"source": "task_envelope", "path": (EVIDENCE_DIR / normalized_task_id / "task-envelope.md").as_posix()},
         ],
         "knowledge_nodes": enabled_sources,
-        "knowledge_graph_ref": str(KNOWLEDGE_DIR / normalized_task_id / "knowledge-graph.yaml"),
+        "knowledge_graph_ref": (KNOWLEDGE_DIR / normalized_task_id / "knowledge-graph.yaml").as_posix(),
         "memory_inclusions": memory_entries[: int(context_contract.get("budget", {}).get("max_memory_items", 8))],
         "memory_exclusions": [],
         "memory_os": _memory_os_context(memory_policy),
@@ -1180,17 +1180,17 @@ def build_context_bundle(
             "forbidden_data_classes": context_contract.get("redaction", {}).get("forbidden_data_classes", []),
         },
         "decision_inputs": {
-            "task_ref": str(STANDARD_DIR / "task-board.yaml"),
-            "memory_policy_ref": str(STANDARD_DIR / "memory-policy.yaml"),
-            "provider_registry_ref": str(STANDARD_DIR / "llm-provider-registry.yaml"),
+            "task_ref": (STANDARD_DIR / "task-board.yaml").as_posix(),
+            "memory_policy_ref": (STANDARD_DIR / "memory-policy.yaml").as_posix(),
+            "provider_registry_ref": (STANDARD_DIR / "llm-provider-registry.yaml").as_posix(),
         },
         "evidence_requirements": [
             str(item)
             for item in task.get("acceptance_criteria", [])
         ],
         "fingerprints": {
-            "contract": str(STANDARD_DIR / "context-contract.yaml"),
-            "board": str(STANDARD_DIR / "task-board.yaml"),
+            "contract": (STANDARD_DIR / "context-contract.yaml").as_posix(),
+            "board": (STANDARD_DIR / "task-board.yaml").as_posix(),
         },
     }
     rel_path = CONTEXT_DIR / normalized_task_id / "context-bundle.yaml"
@@ -1235,13 +1235,13 @@ def build_decision_trace(
             "decision_type": decision_type,
             "profile": profile.id,
             "inputs": entry.get("inputs", []),
-            "policy_refs": [str(STANDARD_DIR / "decision-graph.yaml")],
+            "policy_refs": [(STANDARD_DIR / "decision-graph.yaml").as_posix()],
             "rule_refs": [],
             "result": "recorded",
             "confidence": "not-scored",
             "event": "decision.recorded",
-            "evidence_refs": [str(CONTEXT_DIR / normalized_task_id / "context-bundle.yaml")],
-            "remediation_ref": str(STANDARD_DIR / "remediation-plan.yaml"),
+            "evidence_refs": [(CONTEXT_DIR / normalized_task_id / "context-bundle.yaml").as_posix()],
+            "remediation_ref": (STANDARD_DIR / "remediation-plan.yaml").as_posix(),
             "timestamp": datetime.now(UTC).isoformat(),
         })
     data = {

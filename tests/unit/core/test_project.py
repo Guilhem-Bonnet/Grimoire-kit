@@ -37,18 +37,18 @@ agents:
 @pytest.fixture()
 def project_dir(tmp_path: Path) -> Path:
     """Create a fully initialised project directory."""
-    (tmp_path / "project-context.yaml").write_text(_MINIMAL_YAML)
+    (tmp_path / "project-context.yaml").write_text(_MINIMAL_YAML, encoding="utf-8")
     (tmp_path / "_grimoire").mkdir()
     (tmp_path / "_grimoire" / "_memory").mkdir()
     (tmp_path / "_grimoire-output").mkdir()
     # Deployed agents
     agents_dir = tmp_path / "_grimoire" / "agents"
     agents_dir.mkdir()
-    (agents_dir / "architect.md").write_text("# Architect\n")
-    (agents_dir / "developer.md").write_text("# Developer\n")
+    (agents_dir / "architect.md").write_text("# Architect\n", encoding="utf-8")
+    (agents_dir / "developer.md").write_text("# Developer\n", encoding="utf-8")
     # Source files for context counting
-    (tmp_path / "main.py").write_text("print('hello')")
-    (tmp_path / "README.md").write_text("# Project")
+    (tmp_path / "main.py").write_text("print('hello')", encoding="utf-8")
+    (tmp_path / "README.md").write_text("# Project", encoding="utf-8")
     (tmp_path / "src").mkdir()
     return tmp_path
 
@@ -75,12 +75,12 @@ class TestConstruction:
         assert not p.is_initialized()
 
     def test_invalid_config_strict(self, tmp_path: Path) -> None:
-        (tmp_path / "project-context.yaml").write_text("invalid: true\n")
+        (tmp_path / "project-context.yaml").write_text("invalid: true\n", encoding="utf-8")
         with pytest.raises(GrimoireProjectError, match="Invalid project config"):
             GrimoireProject(tmp_path)
 
     def test_invalid_config_lenient(self, tmp_path: Path) -> None:
-        (tmp_path / "project-context.yaml").write_text("invalid: true\n")
+        (tmp_path / "project-context.yaml").write_text("invalid: true\n", encoding="utf-8")
         p = GrimoireProject(tmp_path, strict=False)
         assert p._config is None
 
@@ -115,7 +115,7 @@ class TestIsInitialized:
         assert project.is_initialized()
 
     def test_not_initialized_no_grimoire_dir(self, tmp_path: Path) -> None:
-        (tmp_path / "project-context.yaml").write_text(_MINIMAL_YAML)
+        (tmp_path / "project-context.yaml").write_text(_MINIMAL_YAML, encoding="utf-8")
         p = GrimoireProject(tmp_path, strict=False)
         assert not p.is_initialized()
 
@@ -153,7 +153,7 @@ class TestAgents:
         assert custom.source == "custom"
 
     def test_no_agents_dir(self, tmp_path: Path) -> None:
-        (tmp_path / "project-context.yaml").write_text(_MINIMAL_YAML)
+        (tmp_path / "project-context.yaml").write_text(_MINIMAL_YAML, encoding="utf-8")
         (tmp_path / "_grimoire").mkdir()
         p = GrimoireProject(tmp_path, strict=False)
         agents = p.agents()
@@ -167,7 +167,7 @@ class TestAgents:
             'custom_agents: ["my-custom-agent"]',
             'custom_agents: ["architect"]',
         )
-        (project_dir / "project-context.yaml").write_text(yaml_with_deployed)
+        (project_dir / "project-context.yaml").write_text(yaml_with_deployed, encoding="utf-8")
         p = GrimoireProject(project_dir)
         agents = p.agents()
         arch_count = sum(1 for a in agents if a.id == "architect")
@@ -188,7 +188,7 @@ class TestStatus:
         assert "_grimoire" in s.directories_ok
 
     def test_missing_dirs(self, tmp_path: Path) -> None:
-        (tmp_path / "project-context.yaml").write_text(_MINIMAL_YAML)
+        (tmp_path / "project-context.yaml").write_text(_MINIMAL_YAML, encoding="utf-8")
         p = GrimoireProject(tmp_path, strict=False)
         s = p.status()
         assert "_grimoire" in s.directories_missing

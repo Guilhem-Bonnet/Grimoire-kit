@@ -88,7 +88,7 @@ class TestParseTrace(unittest.TestCase):
 
     def test_parse_empty_trace(self):
         f = self.tmpdir / "Grimoire_TRACE.md"
-        f.write_text("")
+        f.write_text("", encoding="utf-8")
         session = self.bench.parse_trace(f)
         self.assertEqual(session.total_entries, 0)
         self.assertEqual(len(session.agents), 0)
@@ -110,8 +110,8 @@ class TestParseTrace(unittest.TestCase):
             "[FAILURE] docker build context too large\n"
             "\n"
             "## 2026-01-16 11:00 | dev | STORY-003\n"
-            "[AC-PASS] All unit tests pass\n"
-        )
+            "[AC-PASS] All unit tests pass\n",
+        encoding="utf-8",)
         session = self.bench.parse_trace(f)
         self.assertEqual(session.total_entries, 4)
         self.assertIn("forge", session.agents)
@@ -131,8 +131,8 @@ class TestParseTrace(unittest.TestCase):
             "[GIT-COMMIT] feat: added X\n"
             "\n"
             "## 2026-01-15 15:00 | hawk | STORY-002\n"
-            "[DECISION] Chose Y\n"
-        )
+            "[DECISION] Chose Y\n",
+        encoding="utf-8",)
         session = self.bench.parse_trace(f, agent_filter="forge")
         self.assertEqual(session.total_entries, 1)
         self.assertIn("forge", session.agents)
@@ -145,8 +145,8 @@ class TestParseTrace(unittest.TestCase):
             "[GIT-COMMIT] ancient commit\n"
             "\n"
             "## 2026-06-01 10:00 | dev | new-story\n"
-            "[GIT-COMMIT] recent commit\n"
-        )
+            "[GIT-COMMIT] recent commit\n",
+        encoding="utf-8",)
         session = self.bench.parse_trace(f, since="2026-01-01")
         # Only recent entry
         self.assertEqual(session.total_commits, 1)
@@ -158,8 +158,8 @@ class TestParseTrace(unittest.TestCase):
             "[GIT-COMMIT] started\n"
             "\n"
             "## 2026-01-03 10:00 | dev | STORY-X\n"
-            "[GIT-COMMIT] finished\n"
-        )
+            "[GIT-COMMIT] finished\n",
+        encoding="utf-8",)
         session = self.bench.parse_trace(f)
         self.assertIn("STORY-X", session.story_cycle_times)
         self.assertAlmostEqual(session.story_cycle_times["STORY-X"], 2.0, places=0)
@@ -168,8 +168,8 @@ class TestParseTrace(unittest.TestCase):
         f = self.tmpdir / "Grimoire_TRACE.md"
         f.write_text(
             "## 2026-01-01 | dev | S1\n"
-            "[FAILURE] pytest error: test_login failed\n"
-        )
+            "[FAILURE] pytest error: test_login failed\n",
+        encoding="utf-8",)
         session = self.bench.parse_trace(f)
         self.assertIn("test-failure", session.failure_patterns)
 
@@ -177,8 +177,8 @@ class TestParseTrace(unittest.TestCase):
         f = self.tmpdir / "Grimoire_TRACE.md"
         f.write_text(
             "## 2026-01-01 | dev | S1\n"
-            "[CHECKPOINT] checkpoint_id: ckpt-001\n"
-        )
+            "[CHECKPOINT] checkpoint_id: ckpt-001\n",
+        encoding="utf-8",)
         session = self.bench.parse_trace(f)
         self.assertEqual(session.total_checkpoints, 1)
 

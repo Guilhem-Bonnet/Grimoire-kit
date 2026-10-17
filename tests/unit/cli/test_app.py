@@ -103,7 +103,7 @@ class TestInit:
         assert result.exit_code == 0
         cfg = tmp_path / "project-context.yaml"
         assert cfg.is_file()
-        content = cfg.read_text()
+        content = cfg.read_text(encoding="utf-8")
         assert "project:" in content
         assert tmp_path.name in content
 
@@ -115,7 +115,7 @@ class TestInit:
     def test_init_custom_name(self, tmp_path: Path) -> None:
         result = runner.invoke(app, ["init", str(tmp_path), "--name", "my-project"])
         assert result.exit_code == 0
-        content = (tmp_path / "project-context.yaml").read_text()
+        content = (tmp_path / "project-context.yaml").read_text(encoding="utf-8")
         assert "my-project" in content
 
     def test_init_local_yes_flag(self, tmp_path: Path) -> None:
@@ -147,19 +147,19 @@ class TestInit:
 
     def test_init_default_archetype(self, tmp_path: Path) -> None:
         runner.invoke(app, ["init", str(tmp_path)])
-        content = (tmp_path / "project-context.yaml").read_text()
+        content = (tmp_path / "project-context.yaml").read_text(encoding="utf-8")
         assert 'archetype: "minimal"' in content
 
     def test_init_web_app_archetype(self, tmp_path: Path) -> None:
         result = runner.invoke(app, ["init", str(tmp_path), "--archetype", "web-app"])
         assert result.exit_code == 0
-        content = (tmp_path / "project-context.yaml").read_text()
+        content = (tmp_path / "project-context.yaml").read_text(encoding="utf-8")
         assert 'archetype: "web-app"' in content
 
     def test_init_short_archetype_flag(self, tmp_path: Path) -> None:
         result = runner.invoke(app, ["init", str(tmp_path), "-a", "infra-ops"])
         assert result.exit_code == 0
-        content = (tmp_path / "project-context.yaml").read_text()
+        content = (tmp_path / "project-context.yaml").read_text(encoding="utf-8")
         assert 'archetype: "infra-ops"' in content
 
     def test_init_invalid_archetype(self, tmp_path: Path) -> None:
@@ -173,19 +173,19 @@ class TestInit:
         """Issue #496 : sans --backend explicite, jamais d'attachement silencieux
         à un service détecté sur la machine — toujours `lexical`, isolé."""
         runner.invoke(app, ["init", str(tmp_path)])
-        content = (tmp_path / "project-context.yaml").read_text()
+        content = (tmp_path / "project-context.yaml").read_text(encoding="utf-8")
         assert 'backend: "lexical"' in content
 
     def test_init_local_backend(self, tmp_path: Path) -> None:
         result = runner.invoke(app, ["init", str(tmp_path), "--backend", "local"])
         assert result.exit_code == 0
-        content = (tmp_path / "project-context.yaml").read_text()
+        content = (tmp_path / "project-context.yaml").read_text(encoding="utf-8")
         assert 'backend: "local"' in content
 
     def test_init_short_backend_flag(self, tmp_path: Path) -> None:
         result = runner.invoke(app, ["init", str(tmp_path), "-b", "ollama"])
         assert result.exit_code == 0
-        content = (tmp_path / "project-context.yaml").read_text()
+        content = (tmp_path / "project-context.yaml").read_text(encoding="utf-8")
         assert 'backend: "ollama"' in content
 
     def test_init_invalid_backend(self, tmp_path: Path) -> None:
@@ -203,7 +203,7 @@ class TestInit:
             "--backend", "qdrant-local",
         ])
         assert result.exit_code == 0
-        content = (tmp_path / "project-context.yaml").read_text()
+        content = (tmp_path / "project-context.yaml").read_text(encoding="utf-8")
         assert "my-project" in content
         assert 'archetype: "creative-studio"' in content
         assert 'backend: "qdrant-local"' in content
@@ -229,15 +229,15 @@ class TestDoctor:
         assert "FAIL" in result.output
 
     def test_doctor_invalid_config(self, tmp_path: Path) -> None:
-        (tmp_path / "project-context.yaml").write_text("project:\n  description: no name\n")
+        (tmp_path / "project-context.yaml").write_text("project:\n  description: no name\n", encoding="utf-8")
         result = runner.invoke(app, ["doctor", str(tmp_path)])
         assert result.exit_code == 1
 
     def test_doctor_missing_dirs(self, tmp_path: Path) -> None:
         # Config only, no _grimoire dirs
         (tmp_path / "project-context.yaml").write_text(
-            "project:\n  name: test\n"
-        )
+            "project:\n  name: test\n",
+        encoding="utf-8",)
         result = runner.invoke(app, ["doctor", str(tmp_path)])
         assert result.exit_code == 1
         assert "FAIL" in result.output
@@ -347,7 +347,7 @@ class TestAddRemove:
         result = runner.invoke(app, ["add", "my-agent", str(project)])
         assert result.exit_code == 0
         assert "Added agent" in result.output
-        content = (project / "project-context.yaml").read_text()
+        content = (project / "project-context.yaml").read_text(encoding="utf-8")
         assert "my-agent" in content
 
     def test_add_agent_duplicate(self, project: Path) -> None:
@@ -359,7 +359,7 @@ class TestAddRemove:
     def test_add_multiple_agents(self, project: Path) -> None:
         runner.invoke(app, ["add", "alpha", str(project)])
         runner.invoke(app, ["add", "beta", str(project)])
-        content = (project / "project-context.yaml").read_text()
+        content = (project / "project-context.yaml").read_text(encoding="utf-8")
         assert "alpha" in content
         assert "beta" in content
 
@@ -395,7 +395,7 @@ class TestAddRemove:
         result = runner.invoke(app, ["-y", "remove", "to-remove", str(project)])
         assert result.exit_code == 0
         assert "Removed agent" in result.output
-        content = (project / "project-context.yaml").read_text()
+        content = (project / "project-context.yaml").read_text(encoding="utf-8")
         assert "to-remove" not in content
 
     def test_remove_nonexistent(self, project: Path) -> None:
@@ -411,11 +411,11 @@ class TestAddRemove:
 
     def test_add_remove_roundtrip(self, project: Path) -> None:
         runner.invoke(app, ["add", "temp", str(project)])
-        content_after_add = (project / "project-context.yaml").read_text()
+        content_after_add = (project / "project-context.yaml").read_text(encoding="utf-8")
         assert "temp" in content_after_add
 
         runner.invoke(app, ["-y", "remove", "temp", str(project)])
-        content_after_rm = (project / "project-context.yaml").read_text()
+        content_after_rm = (project / "project-context.yaml").read_text(encoding="utf-8")
         assert "temp" not in content_after_rm
 
     def test_add_in_help(self) -> None:
@@ -432,8 +432,8 @@ class TestValidate:
     @pytest.fixture()
     def project(self, tmp_path: Path) -> Path:
         (tmp_path / "project-context.yaml").write_text(
-            'project:\n  name: "test"\nuser:\n  skill_level: "expert"\n'
-        )
+            'project:\n  name: "test"\nuser:\n  skill_level: "expert"\n',
+        encoding="utf-8",)
         return tmp_path
 
     def test_valid(self, project: Path) -> None:
@@ -442,7 +442,7 @@ class TestValidate:
         assert "valid" in result.output.lower()
 
     def test_invalid(self, tmp_path: Path) -> None:
-        (tmp_path / "project-context.yaml").write_text("user:\n  skill_level: 'god'\n")
+        (tmp_path / "project-context.yaml").write_text("user:\n  skill_level: 'god'\n", encoding="utf-8")
         result = runner.invoke(app, ["validate", str(tmp_path)])
         assert result.exit_code == 1
         assert "error" in result.output.lower()
@@ -464,8 +464,8 @@ class TestUp:
     @pytest.fixture()
     def project(self, tmp_path: Path) -> Path:
         (tmp_path / "project-context.yaml").write_text(
-            'project:\n  name: "test"\nmemory:\n  backend: "local"\nagents:\n  archetype: "minimal"\n'
-        )
+            'project:\n  name: "test"\nmemory:\n  backend: "local"\nagents:\n  archetype: "minimal"\n',
+        encoding="utf-8",)
         (tmp_path / "_grimoire").mkdir()
         (tmp_path / "_grimoire" / "_memory").mkdir()
         (tmp_path / "_grimoire-output").mkdir()
@@ -478,8 +478,8 @@ class TestUp:
 
     def test_up_creates_missing_dirs(self, tmp_path: Path) -> None:
         (tmp_path / "project-context.yaml").write_text(
-            'project:\n  name: "test"\nmemory:\n  backend: "local"\nagents:\n  archetype: "minimal"\n'
-        )
+            'project:\n  name: "test"\nmemory:\n  backend: "local"\nagents:\n  archetype: "minimal"\n',
+        encoding="utf-8",)
         result = runner.invoke(app, ["up", str(tmp_path)])
         assert result.exit_code == 0
         assert (tmp_path / "_grimoire").is_dir()
@@ -488,8 +488,8 @@ class TestUp:
 
     def test_up_dry_run(self, tmp_path: Path) -> None:
         (tmp_path / "project-context.yaml").write_text(
-            'project:\n  name: "test"\nmemory:\n  backend: "local"\nagents:\n  archetype: "minimal"\n'
-        )
+            'project:\n  name: "test"\nmemory:\n  backend: "local"\nagents:\n  archetype: "minimal"\n',
+        encoding="utf-8",)
         result = runner.invoke(app, ["up", "--dry-run", str(tmp_path)])
         assert result.exit_code == 0
         assert "plan" in result.output.lower() or "dry-run" in result.output.lower()
@@ -510,8 +510,8 @@ class TestUp:
 class TestStatusEdgeCases:
     def test_status_shows_stack(self, tmp_path: Path) -> None:
         (tmp_path / "project-context.yaml").write_text(
-            'project:\n  name: "test"\n  stack:\n    - python\n    - react\n'
-        )
+            'project:\n  name: "test"\n  stack:\n    - python\n    - react\n',
+        encoding="utf-8",)
         (tmp_path / "_grimoire" / "_memory").mkdir(parents=True)
         (tmp_path / "_grimoire-output").mkdir()
         result = runner.invoke(app, ["status", str(tmp_path)])
@@ -520,8 +520,8 @@ class TestStatusEdgeCases:
 
     def test_status_shows_repos(self, tmp_path: Path) -> None:
         (tmp_path / "project-context.yaml").write_text(
-            'project:\n  name: "test"\n  repos:\n    - name: "my-repo"\n      path: "."\n      default_branch: "main"\n'
-        )
+            'project:\n  name: "test"\n  repos:\n    - name: "my-repo"\n      path: "."\n      default_branch: "main"\n',
+        encoding="utf-8",)
         (tmp_path / "_grimoire" / "_memory").mkdir(parents=True)
         (tmp_path / "_grimoire-output").mkdir()
         result = runner.invoke(app, ["status", str(tmp_path)])
@@ -529,7 +529,7 @@ class TestStatusEdgeCases:
         assert "my-repo" in result.output
 
     def test_status_config_error(self, tmp_path: Path) -> None:
-        (tmp_path / "project-context.yaml").write_text("not:\n  valid: config\n")
+        (tmp_path / "project-context.yaml").write_text("not:\n  valid: config\n", encoding="utf-8")
         result = runner.invoke(app, ["status", str(tmp_path)])
         assert result.exit_code == 2  # _EXIT_CONFIG
 
@@ -950,7 +950,7 @@ class TestLint:
 
     def test_lint_json_output_invalid(self, tmp_path: Path) -> None:
         cfg = tmp_path / "project-context.yaml"
-        cfg.write_text("project:\n  name: ''\n")
+        cfg.write_text("project:\n  name: ''\n", encoding="utf-8")
         result = runner.invoke(app, ["lint", str(tmp_path), "--format", "json"])
         assert result.exit_code == 1
         data = json.loads(result.output)
@@ -958,13 +958,13 @@ class TestLint:
 
     def test_lint_direct_yaml_file(self, tmp_path: Path) -> None:
         cfg = tmp_path / "custom.yaml"
-        cfg.write_text("project:\n  name: test\n")
+        cfg.write_text("project:\n  name: test\n", encoding="utf-8")
         result = runner.invoke(app, ["lint", str(cfg)])
         assert result.exit_code == 0
 
     def test_lint_invalid_config(self, tmp_path: Path) -> None:
         cfg = tmp_path / "project-context.yaml"
-        cfg.write_text("project:\n  name: test\n  type: unknown_type\n")
+        cfg.write_text("project:\n  name: test\n  type: unknown_type\n", encoding="utf-8")
         result = runner.invoke(app, ["lint", str(tmp_path)])
         assert result.exit_code == 1
         assert "issue" in result.output.lower()
@@ -1048,13 +1048,13 @@ class TestCheck:
 
     def test_check_invalid_config(self, tmp_path: Path) -> None:
         cfg = tmp_path / "project-context.yaml"
-        cfg.write_text("project:\n  name: ''\n")
+        cfg.write_text("project:\n  name: ''\n", encoding="utf-8")
         result = runner.invoke(app, ["check", str(tmp_path)])
         assert result.exit_code == 1
 
     def test_check_missing_dirs(self, tmp_path: Path) -> None:
         cfg = tmp_path / "project-context.yaml"
-        cfg.write_text("project:\n  name: test\n")
+        cfg.write_text("project:\n  name: test\n", encoding="utf-8")
         result = runner.invoke(app, ["check", str(tmp_path)])
         # Should warn about missing directories
         assert "missing" in result.output.lower() or "!" in result.output
@@ -1125,7 +1125,7 @@ class TestValidateJson:
 
     def test_validate_json_invalid(self, tmp_path: Path) -> None:
         cfg = tmp_path / "project-context.yaml"
-        cfg.write_text("project:\n  name: ''\n")
+        cfg.write_text("project:\n  name: ''\n", encoding="utf-8")
         result = runner.invoke(app, ["-o", "json", "validate", str(tmp_path)])
         assert result.exit_code == 1
         data = json.loads(result.output)
@@ -1577,9 +1577,9 @@ class TestAddRemoveDryRun:
         assert "my-agent" in result.output
 
     def test_add_dry_run_does_not_modify(self, project: Path) -> None:
-        content_before = (project / "project-context.yaml").read_text()
+        content_before = (project / "project-context.yaml").read_text(encoding="utf-8")
         runner.invoke(app, ["add", "ghost-agent", str(project), "--dry-run"])
-        content_after = (project / "project-context.yaml").read_text()
+        content_after = (project / "project-context.yaml").read_text(encoding="utf-8")
         assert content_before == content_after
         assert "ghost-agent" not in content_after
 
@@ -1592,9 +1592,9 @@ class TestAddRemoveDryRun:
 
     def test_remove_dry_run_does_not_modify(self, project: Path) -> None:
         runner.invoke(app, ["add", "keeper", str(project)])
-        content_before = (project / "project-context.yaml").read_text()
+        content_before = (project / "project-context.yaml").read_text(encoding="utf-8")
         runner.invoke(app, ["remove", "keeper", str(project), "--dry-run"])
-        content_after = (project / "project-context.yaml").read_text()
+        content_after = (project / "project-context.yaml").read_text(encoding="utf-8")
         assert content_before == content_after
         assert "keeper" in content_after
 
@@ -2122,7 +2122,7 @@ class TestAutoDiscovery:
         """_find_config finds config in the given directory."""
         from grimoire.cli.app import _find_config
 
-        (tmp_path / "project-context.yaml").write_text("project:\n  name: test\n")
+        (tmp_path / "project-context.yaml").write_text("project:\n  name: test\n", encoding="utf-8")
         result = _find_config(tmp_path)
         assert result == tmp_path / "project-context.yaml"
 
@@ -2130,7 +2130,7 @@ class TestAutoDiscovery:
         """_find_config walks up to find config in parent directory."""
         from grimoire.cli.app import _find_config
 
-        (tmp_path / "project-context.yaml").write_text("project:\n  name: test\n")
+        (tmp_path / "project-context.yaml").write_text("project:\n  name: test\n", encoding="utf-8")
         subdir = tmp_path / "sub" / "deep"
         subdir.mkdir(parents=True)
         with patch("grimoire.tools._common.find_project_root", return_value=tmp_path):
@@ -2268,8 +2268,8 @@ class TestHistoryCommand:
         log_file = mem_dir / _AUDIT_FILENAME
         log_file.write_text(
             json.dumps({"ts": "2025-01-01T00:00:00", "cmd": "init", "ok": True}) + "\n"
-            + json.dumps({"ts": "2025-01-01T00:01:00", "cmd": "add", "ok": True, "args": {"agent": "foo"}}) + "\n"
-        )
+            + json.dumps({"ts": "2025-01-01T00:01:00", "cmd": "add", "ok": True, "args": {"agent": "foo"}}) + "\n",
+        encoding="utf-8",)
         with patch("grimoire.tools._common.find_project_root", return_value=cli_project):
             result = runner.invoke(app, ["history"])
         assert result.exit_code == 0
@@ -2281,8 +2281,8 @@ class TestHistoryCommand:
         mem_dir.mkdir(parents=True, exist_ok=True)
         log_file = mem_dir / _AUDIT_FILENAME
         log_file.write_text(
-            json.dumps({"ts": "2025-01-01T00:00:00", "cmd": "init", "ok": True}) + "\n"
-        )
+            json.dumps({"ts": "2025-01-01T00:00:00", "cmd": "init", "ok": True}) + "\n",
+        encoding="utf-8",)
         with patch("grimoire.tools._common.find_project_root", return_value=cli_project):
             result = runner.invoke(app, ["-o", "json", "history"])
         assert result.exit_code == 0
@@ -2299,8 +2299,8 @@ class TestHistoryCommand:
         log_file = mem_dir / _AUDIT_FILENAME
         log_file.write_text(
             json.dumps({"ts": "2025-01-01T00:00:00", "cmd": "init", "ok": True}) + "\n"
-            + json.dumps({"ts": "2025-01-01T00:01:00", "cmd": "add", "ok": True}) + "\n"
-        )
+            + json.dumps({"ts": "2025-01-01T00:01:00", "cmd": "add", "ok": True}) + "\n",
+        encoding="utf-8",)
         with patch("grimoire.tools._common.find_project_root", return_value=cli_project):
             result = runner.invoke(app, ["-o", "json", "history", "-f", "add"])
         assert result.exit_code == 0
@@ -2314,7 +2314,7 @@ class TestHistoryCommand:
         mem_dir.mkdir(parents=True, exist_ok=True)
         log_file = mem_dir / _AUDIT_FILENAME
         lines = [json.dumps({"ts": f"2025-01-01T00:0{i}:00", "cmd": "add", "ok": True}) for i in range(5)]
-        log_file.write_text("\n".join(lines) + "\n")
+        log_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
         with patch("grimoire.tools._common.find_project_root", return_value=cli_project):
             result = runner.invoke(app, ["-o", "json", "history", "-n", "2"])
         assert result.exit_code == 0
@@ -3654,7 +3654,7 @@ class TestR35DoctorFixAudit:
 
         log_file = tmp_path / "_grimoire" / "_memory" / _AUDIT_FILENAME
         assert log_file.is_file()
-        lines = [ln for ln in log_file.read_text().splitlines() if ln.strip()]
+        lines = [ln for ln in log_file.read_text(encoding="utf-8").splitlines() if ln.strip()]
         # Find the doctor entry
         doctor_entries = [json.loads(ln) for ln in lines if json.loads(ln).get("cmd") == "doctor"]
         assert len(doctor_entries) >= 1
@@ -3668,14 +3668,14 @@ class TestR35DoctorFixAudit:
 
         # Ensure the audit log is empty/absent before doctor
         if log_file.is_file():
-            log_file.write_text("")
+            log_file.write_text("", encoding="utf-8")
 
         with patch("grimoire.tools._common.find_project_root", return_value=tmp_path):
             result = runner.invoke(app, ["-o", "json", "doctor", str(tmp_path), "--fix"])
         assert result.exit_code == 0
 
         # No new entry because nothing was fixed
-        content = log_file.read_text() if log_file.is_file() else ""
+        content = log_file.read_text(encoding="utf-8") if log_file.is_file() else ""
         doctor_entries = [json.loads(ln) for ln in content.splitlines() if ln.strip() and json.loads(ln).get("cmd") == "doctor"]
         assert len(doctor_entries) == 0
 
@@ -3725,7 +3725,7 @@ class TestR35CompletionInstallAudit:
 
         log_file = mem_dir / _AUDIT_FILENAME
         assert log_file.is_file()
-        lines = [ln for ln in log_file.read_text().splitlines() if ln.strip()]
+        lines = [ln for ln in log_file.read_text(encoding="utf-8").splitlines() if ln.strip()]
         comp_entries = [json.loads(ln) for ln in lines if json.loads(ln).get("cmd") == "completion_install"]
         assert len(comp_entries) >= 1
         assert comp_entries[-1]["args"]["shell"] == "bash"
@@ -3741,8 +3741,8 @@ class TestR35HistoryClear:
         mem_dir.mkdir(parents=True, exist_ok=True)
         log_file = mem_dir / _AUDIT_FILENAME
         log_file.write_text(
-            json.dumps({"ts": "2025-01-01T00:00:00", "cmd": "init", "ok": True}) + "\n"
-        )
+            json.dumps({"ts": "2025-01-01T00:00:00", "cmd": "init", "ok": True}) + "\n",
+        encoding="utf-8",)
 
         with patch("grimoire.tools._common.find_project_root", return_value=cli_project):
             result = runner.invoke(app, ["-y", "history", "--clear"])
@@ -3756,8 +3756,8 @@ class TestR35HistoryClear:
         mem_dir.mkdir(parents=True, exist_ok=True)
         log_file = mem_dir / _AUDIT_FILENAME
         log_file.write_text(
-            json.dumps({"ts": "2025-01-01T00:00:00", "cmd": "init", "ok": True}) + "\n"
-        )
+            json.dumps({"ts": "2025-01-01T00:00:00", "cmd": "init", "ok": True}) + "\n",
+        encoding="utf-8",)
 
         with patch("grimoire.tools._common.find_project_root", return_value=cli_project):
             result = runner.invoke(app, ["-y", "-o", "json", "history", "--clear"])
@@ -3820,12 +3820,12 @@ class TestR36LogOperationTruncate:
 
         # Write more than max entries
         lines = [json.dumps({"ts": f"2025-01-01T00:00:{i:02d}", "cmd": "test", "ok": True}) for i in range(_AUDIT_MAX_ENTRIES + 10)]
-        log_file.write_text("\n".join(lines) + "\n")
+        log_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
         with patch("grimoire.tools._common.find_project_root", return_value=tmp_path):
             _log_operation("trigger_truncate", {"test": "yes"})
 
-        result_lines = [ln for ln in log_file.read_text().splitlines() if ln.strip()]
+        result_lines = [ln for ln in log_file.read_text(encoding="utf-8").splitlines() if ln.strip()]
         assert len(result_lines) <= _AUDIT_MAX_ENTRIES
 
 

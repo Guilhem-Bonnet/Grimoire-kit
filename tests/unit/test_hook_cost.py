@@ -121,7 +121,7 @@ def test_the_hook_path_does_not_import_the_standard_engine() -> None:
     # grimoire happens to be installed in the ambient environment.
     env = {**os.environ, "PYTHONPATH": os.pathsep.join(p for p in sys.path if p)}
     result = subprocess.run(
-        [sys.executable, "-c", probe], capture_output=True, text=True, check=True, env=env
+        [sys.executable, "-c", probe], capture_output=True, text=True, encoding="utf-8", errors="replace", check=True, env=env
     )
     leaked = result.stdout.strip()
     assert not leaked, (

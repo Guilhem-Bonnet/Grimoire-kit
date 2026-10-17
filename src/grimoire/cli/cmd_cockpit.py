@@ -20,6 +20,7 @@ import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 import webbrowser
 from dataclasses import dataclass
@@ -204,6 +205,50 @@ def _is_plain_argument(value: str) -> bool:
     déraisonnables, et on passe malgré tout les valeurs après ``--``.
     """
     return bool(value) and not value.startswith("-") and "\x00" not in value and len(value) <= _MAX_ARGUMENT_LEN
+
+
+_MEMORY_TIMEOUT_S = 30
+# CliRunner remplace ``sys.stdout``/``sys.stderr`` pour tout le processus : deux
+# invocations simultanées s'écraseraient la sortie. Ce verrou ne protège que cela
+# (pas le répertoire courant, jamais modifié).
+_CLI_CAPTURE_LOCK = threading.Lock()
+
+
+@dataclass(frozen=True)
+class _CliResult:
+    returncode: int
+    stdout: str
+    stderr: str
+
+
+def _invoke_memory_cli(proot: Path, argv: list[str]) -> _CliResult:
+    """Exécute la CLI ``grimoire`` dans ce processus, pour le projet ``proot``.
+
+    Le projet est porté par une ``ContextVar`` (propre au thread appelant) :
+    aucun ``chdir``, donc aucune interférence avec les requêtes concurrentes.
+    """
+    from typer.testing import CliRunner
+
+    from grimoire.cli.app import app
+    from grimoire.cli.cmd_memory import project_root_override
+
+    with _CLI_CAPTURE_LOCK, project_root_override(proot):
+        res = CliRunner().invoke(app, argv)
+    return _CliResult(res.exit_code, res.stdout, res.stderr)
+
+
+def _run_memory_in_process(proot: Path, argv: list[str]) -> _CliResult:
+    """Comme ``_invoke_memory_cli`` avec une échéance (``TimeoutError``)."""
+    from concurrent.futures import ThreadPoolExecutor
+    from concurrent.futures import TimeoutError as FutureTimeout
+
+    pool = ThreadPoolExecutor(max_workers=1)
+    try:
+        return pool.submit(_invoke_memory_cli, proot, argv).result(timeout=_MEMORY_TIMEOUT_S)
+    except FutureTimeout:
+        raise TimeoutError from None
+    finally:
+        pool.shutdown(wait=False)
 
 
 class _CockpitHandler(SimpleHTTPRequestHandler):
@@ -669,14 +714,16 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         if not all(_is_plain_argument(v) for v in values):
             self._send_json(400, {"ok": False, "error": "valeur d'argument refusée"})
             return
+        # La commande est rejouée dans le processus, via l'application Typer :
+        # aucun sous-processus, aucune ligne de commande construite pour l'OS.
         # Les valeurs venant de la requête passent après ``--`` : la sous-commande
         # les lit comme des positionnels, jamais comme des options.
-        cmd = [sys.executable, "-m", "grimoire", "--output", "json", "memory", subcmd, *flags]
+        argv = ["--output", "json", "memory", subcmd, *flags]
         if values:
-            cmd += ["--", *values]
+            argv += ["--", *values]
         try:
-            res = subprocess.run(cmd, cwd=str(proot), capture_output=True, text=True, timeout=30)
-        except subprocess.TimeoutExpired:
+            res = _run_memory_in_process(proot, argv)
+        except TimeoutError:
             self._send_json(504, {"ok": False, "error": "timeout"})
             return
         self._send_json(200, {
@@ -1038,7 +1085,7 @@ def _generate_data(serve_dir: Path, with_tests: bool) -> bool:
     cmd = [sys.executable, str(gen), "--registry", str(registry_file()), "--out-dir", str(serve_dir / "data")]
     if with_tests:
         cmd.append("--with-tests")
-    res = subprocess.run(cmd, capture_output=True, text=True)
+    res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if res.returncode != 0:
         console.print("[yellow]⚠[/yellow] Génération partielle (voir détail) — repli sur les données disponibles.")
         if res.stderr.strip():

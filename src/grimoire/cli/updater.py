@@ -84,7 +84,7 @@ def detect_update_cmd() -> tuple[list[str], str]:
         try:
             result = subprocess.run(
                 [tool_bin, *sub],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
             )
         except Exception:  # detection is best-effort; failure means "not here"
             return False

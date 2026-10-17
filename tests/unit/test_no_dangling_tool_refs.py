@@ -50,7 +50,7 @@ def _surface_files() -> list[Path]:
     files += sorted((ROOT / "extensions").rglob("*.md"))
     return [
         f for f in files
-        if (rel := str(f.relative_to(ROOT))) not in HISTORICAL
+        if (rel := f.relative_to(ROOT).as_posix()) not in HISTORICAL
         and not rel.startswith(HISTORICAL_PREFIXES)
     ]
 
@@ -95,7 +95,7 @@ def test_docs_do_not_promise_removed_tools(shipped: set[str]) -> None:
             )
         }
         if cited:
-            offenders[str(path.relative_to(ROOT))] = sorted(cited)
+            offenders[path.relative_to(ROOT).as_posix()] = sorted(cited)
 
     assert not offenders, (
         "documentation qui annonce des outils absents de framework/tools/ :\n"

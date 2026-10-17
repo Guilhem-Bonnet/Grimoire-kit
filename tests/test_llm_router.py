@@ -275,7 +275,7 @@ class TestLLMRouter(unittest.TestCase):
     def test_route_logs_stats(self):
         self.router.route("Test prompt", agent_id="dev")
         self.assertTrue(self.stats_file.exists())
-        content = self.stats_file.read_text()
+        content = self.stats_file.read_text(encoding="utf-8")
         entry = json.loads(content.strip())
         self.assertIn("model", entry)
         self.assertIn("agent", entry)
@@ -372,7 +372,7 @@ class TestCLIIntegration(unittest.TestCase):
     def _run(self, *args: str) -> subprocess.CompletedProcess:
         return subprocess.run(
             [sys.executable, str(TOOL), *list(args)],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
         )
 
     def test_help(self):
