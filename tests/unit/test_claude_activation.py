@@ -328,7 +328,11 @@ def _claimed_task(tmp_path: Path, *, acceptance: str, profile_id: str = "starter
     setup_standard_profile(tmp_path, profile_id=profile_id)
     service = TaskService(tmp_path)
     mission = service.ledger.create_mission(title="Travaux", origin="test")
-    task = service.ledger.create_task(mission.id, "Une tâche", acceptance=(acceptance,))
+    from grimoire.missions.schemas import TaskCheck
+
+    task = service.ledger.create_task(
+        mission.id, "Une tâche", acceptance=(acceptance,), checks=(TaskCheck(cmd="true"),)
+    )
     service.ledger.transition_task(task.id, TaskState.READY, actor_id="a")
     service.ledger.claim_task(task.id, "a", "local")
     service.project_board()
