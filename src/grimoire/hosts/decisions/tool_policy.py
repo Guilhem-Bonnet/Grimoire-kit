@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from grimoire.core.standard_state import active_profile_id, active_task_id
+from grimoire.core.standard_state import active_profile_id, active_task_id, state_writes_allowed
 from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
 from grimoire.hosts.decisions.tool_facts import (
     ToolFacts,
@@ -315,7 +315,7 @@ def decide_tool_policy(hook: HookInput) -> Decision:
     behaves exactly as it did before this change.
     """
     decision = _evaluate_tool_policy(hook)
-    if decision.outcome is not Outcome.ALLOW:
+    if decision.outcome is not Outcome.ALLOW and state_writes_allowed():
         _record_hold(hook, decision)
     return decision
 

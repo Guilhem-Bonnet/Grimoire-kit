@@ -20,7 +20,7 @@ from grimoire.hosts.decisions import HookInput, decide_activation, decide_eviden
 from grimoire.hosts.events import HookEvent
 from grimoire.missions.board import PRIORITIES, priority_of
 from grimoire.missions.gates import GATES_FILE
-from grimoire.missions.schemas import TaskState
+from grimoire.missions.schemas import ORIGIN_HUMAN, TaskState
 from grimoire.missions.service import TaskRefusedError, TaskService
 
 STANDARD = Path("_grimoire/standard")
@@ -120,7 +120,7 @@ def test_une_priorite_inconnue_est_refusee_sans_rien_ecrire(projet: Path) -> Non
 
 def test_commenter_ajoute_au_journal_append_only_et_ne_touche_pas_a_l_etat(projet: Path) -> None:
     service, tid = reclame(projet)
-    note = service.comment(tid, "regarde d'abord le test de fait", "guilhem", kind="directive")
+    note = service.comment(tid, "regarde d'abord le test de fait", "guilhem", kind="directive", origin=ORIGIN_HUMAN)
     directive = note.directive
     assert directive is not None
     assert directive.author == "guilhem"
@@ -137,9 +137,9 @@ def test_commenter_ajoute_au_journal_append_only_et_ne_touche_pas_a_l_etat(proje
 def test_un_commentaire_vide_ou_d_une_nature_inconnue_est_refuse(projet: Path) -> None:
     service, tid = reclame(projet)
     with pytest.raises(ValueError):
-        service.comment(tid, "   ", "guilhem")
+        service.comment(tid, "   ", "guilhem", origin=ORIGIN_HUMAN)
     with pytest.raises(ValueError, match="kind"):
-        service.comment(tid, "texte", "guilhem", kind="ordre")
+        service.comment(tid, "texte", "guilhem", kind="ordre", origin=ORIGIN_HUMAN)
     assert service.require(tid).directives == ()
 
 
@@ -147,7 +147,7 @@ def test_la_consigne_est_injectee_au_prompt_suivant_puis_marquee_livree(projet: 
     """Le critère de l'issue : une consigne écrite dans le cockpit apparaît
     dans le contexte de la session au tour suivant."""
     service, tid = reclame(projet)
-    service.comment(tid, "priorise le test rouge-avant", "guilhem", kind="directive")
+    service.comment(tid, "priorise le test rouge-avant", "guilhem", kind="directive", origin=ORIGIN_HUMAN)
 
     context = prompt(projet)
     assert "[Grimoire — consigne de l'orchestrateur] guilhem," in context
@@ -161,7 +161,7 @@ def test_la_consigne_est_injectee_au_prompt_suivant_puis_marquee_livree(projet: 
 
 def test_la_consigne_est_aussi_livree_au_session_start(projet: Path) -> None:
     service, tid = reclame(projet)
-    service.comment(tid, "commence par lire l'ADR", "guilhem")
+    service.comment(tid, "commence par lire l'ADR", "guilhem", origin=ORIGIN_HUMAN)
     hook = HookInput(event=HookEvent.SESSION_START, project_root=projet, session_id="s-2")
     context = decide_activation(hook).context
     assert "commence par lire l'ADR" in context
@@ -170,7 +170,7 @@ def test_la_consigne_est_aussi_livree_au_session_start(projet: Path) -> None:
 
 def test_accuser_reception_horodate_la_consigne(projet: Path) -> None:
     service, tid = reclame(projet)
-    note = service.comment(tid, "relis le CHANGELOG", "guilhem")
+    note = service.comment(tid, "relis le CHANGELOG", "guilhem", origin=ORIGIN_HUMAN)
     assert note.directive is not None
     ack = service.acknowledge(tid, note.directive.id, "claude-session")
     assert ack.task.directives[0].acknowledged_at != ""
@@ -180,7 +180,7 @@ def test_accuser_reception_horodate_la_consigne(projet: Path) -> None:
 
 def test_show_et_recall_listent_les_consignes_livrees_ou_non(projet: Path) -> None:
     service, tid = reclame(projet)
-    service.comment(tid, "une consigne", "guilhem", kind="directive")
+    service.comment(tid, "une consigne", "guilhem", kind="directive", origin=ORIGIN_HUMAN)
     recall = service.recall(tid)
     assert [d.text for d in recall.directives] == ["une consigne"]
     assert "une consigne" in recall.text

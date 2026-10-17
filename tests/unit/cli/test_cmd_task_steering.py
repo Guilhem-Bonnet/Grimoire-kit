@@ -50,7 +50,9 @@ def reclame(projet: Path) -> str:
     return tid
 
 
-def test_prioritize_puis_show_montre_la_priorite_et_les_consignes(projet: Path) -> None:
+def test_prioritize_puis_show_montre_la_priorite_et_les_consignes(projet: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Le canal humain de la CLI est un terminal interactif (issue #706) ; le runner n'en a pas.
+    monkeypatch.setattr("grimoire.cli.cmd_task._comment_origin", lambda: "human")
     tid = reclame(projet)
     res = run(projet, "prioritize", tid, "--to", "high", "--reason", "bloque la release", fmt="json")
     assert res.exit_code == 0, res.output

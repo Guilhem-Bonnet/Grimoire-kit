@@ -28,6 +28,8 @@ from typing import Any
 
 from grimoire.core.exceptions import GrimoireMissionError
 from grimoire.missions.schemas import (
+    ORIGIN_AGENT,
+    ORIGIN_HUMAN,
     Incident,
     IncidentSeverity,
     IncidentStatus,
@@ -42,6 +44,7 @@ from grimoire.missions.schemas import (
     TaskState,
     TaskType,
 )
+from grimoire.missions.session_link import canonical_host
 
 # Valid state transitions for missions
 _MISSION_TRANSITIONS: dict[MissionState, frozenset[MissionState]] = {
@@ -223,7 +226,7 @@ class MissionLedger:
                 if current is not None and current.claim is not None:
                     claim = current.claim.with_session(
                         str(payload.get("session_id", "") or ""),
-                        str(payload.get("session_host", "") or ""),
+                        canonical_host(str(payload.get("session_host", "") or "")),
                         # Issue #695 : seul un ``task attach`` marque ``explicit``.
                         explicit_at=str(raw.get("created_at", "") or "") if payload.get("explicit") else "",
                     )
@@ -510,12 +513,26 @@ class MissionLedger:
         self._load()
         return self._tasks[task_id]
 
-    def add_directive(self, task_id: str, text: str, *, actor_id: str, kind: str = "comment") -> TaskDirective:
-        """Ajoute une consigne au journal de la tâche ; rend l'entrée créée."""
+    def add_directive(
+        self, task_id: str, text: str, *, actor_id: str, kind: str = "comment", origin: str = ORIGIN_AGENT
+    ) -> TaskDirective:
+        """Ajoute une consigne au journal de la tâche ; rend l'entrée créée.
+
+        Une consigne (``kind="directive"``) n'est posée que par l'origine
+        ``human`` (issue #706) : la refuser ici, plutôt qu'au rendu, parce qu'un
+        événement écrit est déjà lu.
+        """
         self._load()
         if task_id not in self._tasks:
             raise GrimoireMissionError(f"Task not found: {task_id}")
-        directive = TaskDirective(id=_new_id("dir"), author=actor_id, created_at=_now_iso(), text=text, kind=kind)
+        if kind == "directive" and origin != ORIGIN_HUMAN:
+            raise GrimoireMissionError(
+                f"une consigne (kind=directive) ne vient que du canal humain ; origine {origin!r} refusée — "
+                "poser un commentaire (kind=comment), rendu comme note non fiable"
+            )
+        directive = TaskDirective(
+            id=_new_id("dir"), author=actor_id, created_at=_now_iso(), text=text, kind=kind, origin=origin
+        )
         self._append_event(
             "task.directive_added", task_id, "task", actor_id,
             {"task_id": task_id, "directive": directive.to_dict()},
@@ -588,7 +605,7 @@ class MissionLedger:
             {
                 "task_id": task_id,
                 "session_id": session_id,
-                "session_host": session_host,
+                "session_host": canonical_host(session_host),
                 **({"explicit": True} if explicit else {}),
             },
         )
