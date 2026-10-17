@@ -29,7 +29,7 @@ from grimoire.core.standard_state import current_session, invalidate_cache
 from grimoire.missions.board import PRIORITIES, board_status_of, build_board, priority_of, write_board
 from grimoire.missions.gates import GateRefusal, GateVerdict, check_transition
 from grimoire.missions.intake import IntakeRequest, MissionIntakeService
-from grimoire.missions.ledger import MissionLedger
+from grimoire.missions.ledger import MissionLedger, ReapReport
 from grimoire.missions.recall import DEFAULT_TOKEN_BUDGET, TaskRecall, build_task_recall, consolidate_task_memory
 from grimoire.missions.schemas import (
     DIRECTIVE_KINDS,
@@ -360,6 +360,51 @@ class TaskService:
         claim = TaskClaim.new(actor_id=actor, host_id=host, exclusive_files=files)
         return self.transition(task_id, TaskState.CLAIMED, actor, claim=claim)
 
+    def renew(self, task_id: str, actor: str, *, epoch: int | None = None) -> MissionTask:
+        """Renouvelle le bail de *task_id* (K2) — fichier de bail, et plafond dur s'il approche.
+
+        Sans *epoch*, seul l'acteur du claim renouvelle, à l'epoch courant ; un
+        autre acteur doit présenter l'epoch qu'il tient. Un epoch périmé est refusé.
+        """
+        task = self.require(task_id)
+        if epoch is None:
+            if task.claim is None or task.claim.actor_id != actor:
+                holder = task.claim.actor_id if task.claim is not None else "personne"
+                raise GrimoireMissionError(
+                    f"Renouvellement refusé pour {task_id} : le claim est tenu par {holder}, pas par {actor} "
+                    "— présente l'epoch que tu tiens (--epoch)"
+                )
+            epoch = task.claim.lease_epoch
+        return self.ledger.renew_lease(task_id, epoch, actor_id=actor)
+
+    def reap(self, *, fenced_hosts: frozenset[str] = frozenset(), apply: bool = True, actor: str = "tick") -> ReapReport:
+        """Récolte des baux perdus (:meth:`MissionLedger.reap`), quota lu dans l'état des fournisseurs."""
+        report = self.ledger.reap(
+            fenced_hosts=fenced_hosts, quota_blocked=self._quota_blocked, actor_id=actor, apply=apply
+        )
+        if any(d.written and d.action == "ready" for d in report.decisions):
+            self.project_board()
+        return report
+
+    def _quota_blocked(self, task: MissionTask) -> bool:
+        """La dernière route de *task* bute sur un quota : verdict ``rate_limit``, ou fournisseur refroidi pour ce motif."""
+        dispatched = [e for e in self.ledger.list_events(task.id) if e.event_type == "task.dispatched"]
+        if not dispatched:
+            return False
+        last = dispatched[-1].payload
+        if last.get("verdict") == "rate_limit":
+            return True
+        from datetime import UTC, datetime
+
+        from grimoire.providers.state import load_state
+
+        entry = load_state(self.project_root).get(str(last.get("provider", "")))
+        return (
+            entry is not None
+            and entry.last_failure == "rate_limit"
+            and entry.is_cooling_down(now=datetime.now(UTC))
+        )
+
     def transition(
         self,
         task_id: str,
@@ -383,8 +428,17 @@ class TaskService:
         if verdict.blocked:
             self._record_refusal(task, target, verdict, actor)
             raise TaskRefusedError(task_id, verdict)
+        # `expected_from` : le gate a jugé `task.status` ; si l'état a bougé
+        # depuis (autre session, autre processus), le ledger refuse sous son
+        # verrou au lieu d'écrire une transition jugée sur un état périmé (#710).
         moved = self.ledger.transition_task(
-            task_id, target, actor_id=actor, reason=reason, claim=claim, extra_payload=extra_payload
+            task_id,
+            target,
+            actor_id=actor,
+            reason=reason,
+            claim=claim,
+            extra_payload=extra_payload,
+            expected_from=task.status,
         )
         self._consolidate(moved, target, actor=actor, reason=reason)
         return TaskMove(task=moved, previous=task.status, verdict=verdict, board_path=self.project_board())

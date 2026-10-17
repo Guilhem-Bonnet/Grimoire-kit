@@ -42,13 +42,14 @@ DIRECTIVE_ORIGINS: tuple[str, ...] = (ORIGIN_HUMAN, ORIGIN_AGENT, ORIGIN_UNVERIF
 
 
 def _int_or_zero(value: Any) -> int:
-    """Un entier lu d'un ledger, ``0`` si absent ou illisible (jamais d'exception)."""
-    if isinstance(value, bool) or not isinstance(value, (int, str)):
+    """Epoch lu d'un ledger : entier >= 0, sinon ``0`` (absent ou illisible, jamais d'exception).
+
+    ``0`` n'est attribué à aucun claim posé par le ledger : un epoch illisible
+    (texte, booléen, négatif) ne peut donc se réclamer d'aucun titulaire.
+    """
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         return 0
-    try:
-        return max(int(value), 0)
-    except ValueError:
-        return 0
+    return value
 
 
 class MissionState(StrEnum):
@@ -160,9 +161,10 @@ class TaskClaim:
     #: rattachent automatiquement ; seul ce marqueur dit laquelle des tâches
     #: d'une session est celle que l'opérateur a désignée. ``""`` = jamais.
     attached_explicit_at: str = ""
-    #: Jeton de fencing (épopée #705, lot K1/K2) : croît à chaque nouveau claim.
-    #: Absent des ledgers existants — ``0`` = claim d'avant le fencing, jamais
-    #: une valeur devinée.
+    #: Jeton de fencing du bail (K2, issue #767) : croît à chaque nouveau claim
+    #: de la tâche, posé par le ledger sous son verrou — jamais par l'appelant.
+    #: Un effet porteur d'un autre epoch vient d'un titulaire périmé et il est
+    #: refusé. ``0`` = claim antérieur au fencing (aucun epoch à présenter).
     lease_epoch: int = 0
 
     @classmethod
@@ -221,7 +223,7 @@ class TaskClaim:
             # Absent tant qu'aucun attach explicite : les sérialisations
             # existantes (board, cockpit, tests) ne changent pas.
             **({"attached_explicit_at": self.attached_explicit_at} if self.attached_explicit_at else {}),
-            # Même règle : absent à 0, un ledger d'avant K1 se rejoue à l'identique.
+            # Absent sur un claim d'avant le fencing : sa sérialisation ne change pas.
             **({"lease_epoch": self.lease_epoch} if self.lease_epoch else {}),
         }
 
