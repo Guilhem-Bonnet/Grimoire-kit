@@ -86,6 +86,28 @@ select {
   flex: none;
 }
 
+/* Icône du sprite (icons.svg) : suit la couleur du texte, jamais une teinte
+ * propre ; `.ico-s` pour les contrôles compacts (cadenas, champ de recherche). */
+.ico-s {
+  width: 14px;
+  height: 14px;
+}
+
+.chip .ico,
+.btn .ico {
+  width: 14px;
+  height: 14px;
+}
+
+.chip.pill {
+  white-space: nowrap;
+}
+
+.chip.pill .ico {
+  width: 13px;
+  height: 13px;
+}
+
 .chip {
   display: inline-flex;
   align-items: center;
@@ -257,22 +279,33 @@ body[data-active-space="source"] {
   height: 100%;
   display: flex;
   align-items: center;
+  gap: 7px;
   padding: 0 var(--sp-3);
   color: var(--ink2);
   background: none;
-  border: 0;
+  border: 1px solid transparent;
   border-bottom: 2px solid transparent;
+  border-radius: var(--r) var(--r) 0 0;
   cursor: pointer;
-  transition: color var(--dur);
+  transition: color var(--dur), background var(--dur);
+}
+
+.tab .ico {
+  width: 16px;
+  height: 16px;
 }
 
 .tab:hover {
   color: var(--ink);
+  background: var(--e1);
 }
 
 .tab[aria-selected="true"],
 .tab.on {
   color: var(--ink);
+  border-left-color: var(--line);
+  border-right-color: var(--line);
+  border-top-color: var(--line);
   background: var(--accsoft);
   border-bottom-width: 3px;
   border-bottom-color: var(--id-current, var(--acc));
@@ -310,7 +343,16 @@ body[data-active-space="source"] {
 .seg > button:disabled {
   color: var(--ink3);
   cursor: not-allowed;
-  opacity: 0.5;
+}
+
+/* Désactivé sans transparence : l'opacité faisait tomber --ink3 sous 4,5:1
+ * (mesuré par test_workspace_tokens.py). La différence se lit à la couleur
+ * d'encre et au curseur, pas à un fondu. */
+.btn:disabled,
+.chip:disabled {
+  color: var(--ink3);
+  background: var(--e1);
+  cursor: not-allowed;
 }
 
 .kbd {
@@ -424,10 +466,19 @@ body[data-active-space="source"] {
 }
 
 .empty h2 {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
   margin: 0 0 var(--sp-2);
   font-size: var(--t-l);
   font-weight: 500;
   color: var(--ink);
+}
+
+.empty h2 .ico {
+  width: 22px;
+  height: 22px;
+  color: var(--ink2);
 }
 
 .empty code {
@@ -459,6 +510,7 @@ body[data-active-space="source"] {
 #brand {
   display: flex;
   align-items: center;
+  gap: 8px;
   font-weight: 600;
   letter-spacing: 0.08em;
   font-size: var(--t-min);
@@ -876,6 +928,13 @@ body[data-active-space] .panel-head {
 [data-term] {
   text-decoration: underline dotted;
   text-underline-offset: 3px;
+}
+
+/* Les contrôles ne se soulignent pas comme des liens : un onglet, un bouton
+ * de rail ou de segment reste un onglet. La définition vit toujours sur
+ * `data-term` (survol, focus, Tab) — seul le soulignement disparaît. */
+:where(.tab, .seg, .seg > button, .rail-btn, .btn, .chip)[data-term] {
+  text-decoration: none;
 }
 
 /* ── Mode concentration ────────────────────────────────────────────────────*/
