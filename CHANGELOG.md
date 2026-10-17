@@ -7,6 +7,10 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- feat(workspace): sprite d'icônes maison `web/workspace/icons.svg` (5 symboles `i-space-*`, 9 `i-ui-*`, grille 24, trait 1,75, `currentColor`) appelé par `<use href>` ; le rail de `shell.js` et les trois boutons d'épinglage de `index.html` n'ont plus de chemins SVG en ligne (P17, GAO-p17-sprite-001, direction « Douce »).
+  - Garde : `tests/unit/test_workspace_icons.py` (17 cas : viewBox 24, aucune couleur littérale, aucun `<style>`, un `<title>` par symbole, aucun dessin en ligne dans la coque, tous les symboles appelés existent).
+  - Non fait : captures du rail et des en-têtes à relire et valider par Guilhem ; les symboles `panel-left`, `panel-right`, `dock` et `focus` n'existent pas parmi les 71 icônes maison et sont dessinés dans la même grammaire.
+
 - fix(cockpit): /api/memory appelle la recherche en Python, sans sous-processus ni chdir (racine du projet portée par une ContextVar, sûre en multi-thread) — ferme l'alerte CodeQL #223
 - ci: suite complète sous Windows, macOS et Linux, sans `-x`, avec xdist ; skips e2e qui échouent (campagne « Dépasser AI-DLC », D-10). Constat : `ci-sdk.yml` ne lançait sous Windows que six cibles ; `-x` (en ligne de commande et dans `addopts` de `pyproject.toml`) arrêtait chaque job au premier échec, masquant les suivants ; le job e2e passait au vert avec un harnais entièrement skippé (Playwright, Chromium ou `grimoire init` absents).
   - `.github/workflows/ci-sdk.yml` : une seule commande `pytest tests/unit/ tests/test_agentic_standard.py -n auto --cov... --cov-fail-under=75` sur les trois systèmes ; plus de branche Windows ni de `-x`. `pyproject.toml` : `-x` retiré de `addopts`. `tests/e2e/_strict.py` + crochet dans `tests/e2e/conftest.py` : avec `GRIMOIRE_E2E_STRICT=1` (posé par le job e2e) tout skip d'exécution devient un échec portant la raison d'origine, et l'absence de Playwright échoue à l'import au lieu de skipper.
