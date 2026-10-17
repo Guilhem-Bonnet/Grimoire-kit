@@ -7,7 +7,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
-- fix(cockpit): /api/memory appelle la recherche en Python, sans sous-processus — ferme l'alerte CodeQL #223
+- fix(cockpit): /api/memory appelle la recherche en Python, sans sous-processus ni chdir (racine du projet portée par une ContextVar, sûre en multi-thread) — ferme l'alerte CodeQL #223
 - ci: suite complète sous Windows, macOS et Linux, sans `-x`, avec xdist ; skips e2e qui échouent (campagne « Dépasser AI-DLC », D-10). Constat : `ci-sdk.yml` ne lançait sous Windows que six cibles ; `-x` (en ligne de commande et dans `addopts` de `pyproject.toml`) arrêtait chaque job au premier échec, masquant les suivants ; le job e2e passait au vert avec un harnais entièrement skippé (Playwright, Chromium ou `grimoire init` absents).
   - `.github/workflows/ci-sdk.yml` : une seule commande `pytest tests/unit/ tests/test_agentic_standard.py -n auto --cov... --cov-fail-under=75` sur les trois systèmes ; plus de branche Windows ni de `-x`. `pyproject.toml` : `-x` retiré de `addopts`. `tests/e2e/_strict.py` + crochet dans `tests/e2e/conftest.py` : avec `GRIMOIRE_E2E_STRICT=1` (posé par le job e2e) tout skip d'exécution devient un échec portant la raison d'origine, et l'absence de Playwright échoue à l'import au lieu de skipper.
   - Rouge-avant / vert-après : `tests/unit/test_ci_full_matrix.py` (12 cas, 11 rouges avant : sous-ensemble Windows, `-x`, xdist, job e2e strict, crochet).

@@ -208,7 +208,10 @@ def _is_plain_argument(value: str) -> bool:
 
 
 _MEMORY_TIMEOUT_S = 30
-_CWD_LOCK = threading.Lock()
+# CliRunner remplace ``sys.stdout``/``sys.stderr`` pour tout le processus : deux
+# invocations simultanées s'écraseraient la sortie. Ce verrou ne protège que cela
+# (pas le répertoire courant, jamais modifié).
+_CLI_CAPTURE_LOCK = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -219,22 +222,18 @@ class _CliResult:
 
 
 def _invoke_memory_cli(proot: Path, argv: list[str]) -> _CliResult:
-    """Exécute la CLI ``grimoire`` dans ce processus, depuis la racine du projet.
+    """Exécute la CLI ``grimoire`` dans ce processus, pour le projet ``proot``.
 
-    Les sous-commandes ``memory`` résolvent le projet depuis le répertoire
-    courant ; le chdir est donc sérialisé par un verrou.
+    Le projet est porté par une ``ContextVar`` (propre au thread appelant) :
+    aucun ``chdir``, donc aucune interférence avec les requêtes concurrentes.
     """
     from typer.testing import CliRunner
 
     from grimoire.cli.app import app
+    from grimoire.cli.cmd_memory import project_root_override
 
-    with _CWD_LOCK:
-        previous = Path.cwd()
-        os.chdir(proot)
-        try:
-            res = CliRunner().invoke(app, argv)
-        finally:
-            os.chdir(previous)
+    with _CLI_CAPTURE_LOCK, project_root_override(proot):
+        res = CliRunner().invoke(app, argv)
     return _CliResult(res.exit_code, res.stdout, res.stderr)
 
 
