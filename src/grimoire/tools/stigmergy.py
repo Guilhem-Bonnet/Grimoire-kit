@@ -20,13 +20,14 @@ import json
 import sys
 from collections import defaultdict
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager, suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from math import pow as mpow
 from pathlib import Path
 from typing import Any, NotRequired, TypedDict
 
+from grimoire.core import fsio
 from grimoire.tools._common import GrimoireTool
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -304,34 +305,18 @@ def save_board(project_root: Path, board: PheromoneBoard) -> None:
 
 @contextmanager
 def _board_lock(project_root: Path) -> Iterator[None]:
-    """Verrou exclusif inter-process sur le board (POSIX/Windows, best-effort).
+    """Verrou exclusif inter-process sur le board (``core.fsio.locked``, POSIX et Windows).
 
     Évite l'anti-pattern « lost-update » quand plusieurs hooks PostToolUse
-    (subagents parallèles) font un read-modify-write concurrent. Dégrade en
-    no-op si le verrouillage n'est pas disponible — jamais bloquant.
+    (subagents parallèles) font un read-modify-write concurrent. Le hook ne
+    bloque jamais : un verrou non obtenu ou un système de fichiers qui le refuse
+    laisse passer sans verrou, comme avant.
     """
-    path = _board_path(project_root)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    lock_path = path.with_name(f".{path.name}.lock")
-    fh = None
-    try:
-        fh = lock_path.open("w", encoding="utf-8")
-        try:
-            import fcntl
-
-            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
-        except (ImportError, OSError):
-            pass  # Windows ou FS sans flock : best-effort
+    with ExitStack() as stack:
+        # Le délai compris : le hook ne doit jamais bloquer.
+        with suppress(OSError, TimeoutError):
+            stack.enter_context(fsio.locked(_board_path(project_root)))
         yield
-    finally:
-        if fh is not None:
-            try:
-                import fcntl
-
-                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
-            except (ImportError, OSError):
-                pass
-            fh.close()
 
 
 def update_board(

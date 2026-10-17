@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+
+# Rich lit COLUMNS à la construction d'une Console, et plusieurs modules du kit
+# en construisent une à l'import. La fixture ci-dessous arrive trop tard pour
+# eux : sur un runner CI sans terminal (80 colonnes), un chemin ou un
+# identifiant long est coupé en deux et l'assertion échoue sans rapport avec ce
+# qu'elle teste. On fixe donc la largeur avant tout import du kit.
+os.environ["COLUMNS"] = "200"
 
 # ── Path setup ────────────────────────────────────────────────────────────────
 
@@ -183,7 +191,7 @@ def _grimoire(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
         [sys.executable, "-m", "grimoire", *args],
         cwd=str(cwd),
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         check=False,
         timeout=180,
     )

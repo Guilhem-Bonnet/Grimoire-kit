@@ -30,7 +30,7 @@ from grimoire.tools.harmony_check import (
 @pytest.fixture()
 def project(tmp_path: Path) -> Path:
     """Minimal Grimoire project structure."""
-    (tmp_path / "project-context.yaml").write_text("project:\n  name: test\n")
+    (tmp_path / "project-context.yaml").write_text("project:\n  name: test\n", encoding="utf-8")
     (tmp_path / "_grimoire" / "core" / "agents").mkdir(parents=True)
     (tmp_path / "_grimoire" / "core" / "workflows").mkdir(parents=True)
     (tmp_path / "framework" / "tools").mkdir(parents=True)
@@ -38,20 +38,20 @@ def project(tmp_path: Path) -> Path:
     (tmp_path / "docs").mkdir(parents=True)
 
     # Agents
-    (tmp_path / "_grimoire" / "core" / "agents" / "analyst.md").write_text("# Analyst\n")
-    (tmp_path / "_grimoire" / "core" / "agents" / "architect.md").write_text("# Architect\nUses analyst.\n")
+    (tmp_path / "_grimoire" / "core" / "agents" / "analyst.md").write_text("# Analyst\n", encoding="utf-8")
+    (tmp_path / "_grimoire" / "core" / "agents" / "architect.md").write_text("# Architect\nUses analyst.\n", encoding="utf-8")
 
     # Workflow referencing analyst
-    (tmp_path / "_grimoire" / "core" / "workflows" / "plan.md").write_text("# Plan\nAgent: analyst\n")
+    (tmp_path / "_grimoire" / "core" / "workflows" / "plan.md").write_text("# Plan\nAgent: analyst\n", encoding="utf-8")
 
     # Tool
-    (tmp_path / "framework" / "tools" / "sample-tool.py").write_text("# tool\n")
+    (tmp_path / "framework" / "tools" / "sample-tool.py").write_text("# tool\n", encoding="utf-8")
 
     # Doc
-    (tmp_path / "docs" / "guide.md").write_text("# Guide\n")
+    (tmp_path / "docs" / "guide.md").write_text("# Guide\n", encoding="utf-8")
 
     # Test
-    (tmp_path / "tests" / "test_sample.py").write_text("def test_one(): pass\n")
+    (tmp_path / "tests" / "test_sample.py").write_text("def test_one(): pass\n", encoding="utf-8")
 
     return tmp_path
 
@@ -126,14 +126,14 @@ class TestDetectOversized:
     def test_normal_file_ok(self, tmp_path: Path) -> None:
         f = tmp_path / "tools" / "small.py"
         f.parent.mkdir(parents=True)
-        f.write_text("line\n" * 100)
+        f.write_text("line\n" * 100, encoding="utf-8")
         scan = ArchScan(tools=["tools/small.py"])
         assert _detect_oversized(scan, tmp_path) == []
 
     def test_oversized_flagged(self, tmp_path: Path) -> None:
         f = tmp_path / "tools" / "big.py"
         f.parent.mkdir(parents=True)
-        f.write_text("line\n" * 900)
+        f.write_text("line\n" * 900, encoding="utf-8")
         scan = ArchScan(tools=["tools/big.py"])
         dissonances = _detect_oversized(scan, tmp_path)
         assert len(dissonances) == 1
@@ -152,16 +152,16 @@ class TestDetectManifestMismatch:
     def test_matching_manifest(self, tmp_path: Path) -> None:
         (tmp_path / "_grimoire" / "_config").mkdir(parents=True)
         (tmp_path / "_grimoire" / "core" / "agents").mkdir(parents=True)
-        (tmp_path / "_grimoire" / "core" / "agents" / "analyst.md").write_text("# Analyst\n")
+        (tmp_path / "_grimoire" / "core" / "agents" / "analyst.md").write_text("# Analyst\n", encoding="utf-8")
         manifest = tmp_path / "_grimoire" / "_config" / "agent-manifest.csv"
-        manifest.write_text("name,title\nanalyst,Analyst\n")
+        manifest.write_text("name,title\nanalyst,Analyst\n", encoding="utf-8")
         scan = ArchScan(agents=["_grimoire/core/agents/analyst.md"])
         assert _detect_manifest_mismatch(scan, tmp_path) == []
 
     def test_missing_agent_in_manifest(self, tmp_path: Path) -> None:
         (tmp_path / "_grimoire" / "_config").mkdir(parents=True)
         manifest = tmp_path / "_grimoire" / "_config" / "agent-manifest.csv"
-        manifest.write_text("name,title\nanalyst,Analyst\nghost-agent,Ghost\n")
+        manifest.write_text("name,title\nanalyst,Analyst\nghost-agent,Ghost\n", encoding="utf-8")
         scan = ArchScan(agents=[])
         dissonances = _detect_manifest_mismatch(scan, tmp_path)
         # "analyst" and "ghost-agent" referenced but no agent files exist
@@ -171,7 +171,7 @@ class TestDetectManifestMismatch:
     def test_header_rows_ignored(self, tmp_path: Path) -> None:
         (tmp_path / "_grimoire" / "_config").mkdir(parents=True)
         manifest = tmp_path / "_grimoire" / "_config" / "agent-manifest.csv"
-        manifest.write_text("name,title\n# comment line\n")
+        manifest.write_text("name,title\n# comment line\n", encoding="utf-8")
         scan = ArchScan(agents=[])
         assert _detect_manifest_mismatch(scan, tmp_path) == []
 
@@ -179,21 +179,21 @@ class TestDetectManifestMismatch:
 class TestDetectBrokenRefs:
     def test_no_refs(self, tmp_path: Path) -> None:
         (tmp_path / "agents").mkdir()
-        (tmp_path / "agents" / "analyst.md").write_text("# Analyst\nNo refs here.\n")
+        (tmp_path / "agents" / "analyst.md").write_text("# Analyst\nNo refs here.\n", encoding="utf-8")
         scan = ArchScan(agents=["agents/analyst.md"])
         assert _detect_broken_refs(scan, tmp_path) == []
 
     def test_valid_ref(self, tmp_path: Path) -> None:
         (tmp_path / "agents").mkdir()
-        (tmp_path / "shared.md").write_text("shared\n")
-        (tmp_path / "agents" / "a.md").write_text("load: shared.md\n")
+        (tmp_path / "shared.md").write_text("shared\n", encoding="utf-8")
+        (tmp_path / "agents" / "a.md").write_text("load: shared.md\n", encoding="utf-8")
         scan = ArchScan(agents=["agents/a.md"])
         # shared.md exists relative to a.md's parent
         assert _detect_broken_refs(scan, tmp_path) == []
 
     def test_broken_ref_detected(self, tmp_path: Path) -> None:
         (tmp_path / "agents").mkdir()
-        (tmp_path / "agents" / "a.md").write_text("include: missing/file.md\n")
+        (tmp_path / "agents" / "a.md").write_text("include: missing/file.md\n", encoding="utf-8")
         scan = ArchScan(agents=["agents/a.md"])
         dissonances = _detect_broken_refs(scan, tmp_path)
         assert len(dissonances) == 1
@@ -202,7 +202,7 @@ class TestDetectBrokenRefs:
 
     def test_http_refs_ignored(self, tmp_path: Path) -> None:
         (tmp_path / "agents").mkdir()
-        (tmp_path / "agents" / "a.md").write_text("source: http://example.com/thing.md\n")
+        (tmp_path / "agents" / "a.md").write_text("source: http://example.com/thing.md\n", encoding="utf-8")
         scan = ArchScan(agents=["agents/a.md"])
         assert _detect_broken_refs(scan, tmp_path) == []
 
@@ -214,16 +214,16 @@ class TestDetectBrokenRefs:
 class TestDetectDuplication:
     def test_no_duplication(self, tmp_path: Path) -> None:
         (tmp_path / "agents").mkdir()
-        (tmp_path / "agents" / "a.md").write_text("This agent handles analysis of business requirements and stakeholder needs.")
-        (tmp_path / "agents" / "b.md").write_text("This agent handles infrastructure deployment with terraform and kubernetes.")
+        (tmp_path / "agents" / "a.md").write_text("This agent handles analysis of business requirements and stakeholder needs.", encoding="utf-8")
+        (tmp_path / "agents" / "b.md").write_text("This agent handles infrastructure deployment with terraform and kubernetes.", encoding="utf-8")
         scan = ArchScan(agents=["agents/a.md", "agents/b.md"])
         assert _detect_duplication(scan, tmp_path) == []
 
     def test_similar_agents_flagged(self, tmp_path: Path) -> None:
         (tmp_path / "agents").mkdir()
         content = "This agent handles architecture review, design patterns, system design, infrastructure planning, and deployment."
-        (tmp_path / "agents" / "a.md").write_text(content)
-        (tmp_path / "agents" / "b.md").write_text(content)  # identical
+        (tmp_path / "agents" / "a.md").write_text(content, encoding="utf-8")
+        (tmp_path / "agents" / "b.md").write_text(content, encoding="utf-8")  # identical
         scan = ArchScan(agents=["agents/a.md", "agents/b.md"])
         dissonances = _detect_duplication(scan, tmp_path)
         assert len(dissonances) == 1
@@ -247,7 +247,7 @@ class TestScanProjectCrossRefs:
     def test_oserror_in_cross_ref_is_ignored(self, project: Path) -> None:
         """Unreadable files should not crash the scan."""
         bad = project / "_grimoire" / "core" / "agents" / "broken.md"
-        bad.write_text("# broken\n")
+        bad.write_text("# broken\n", encoding="utf-8")
         bad.chmod(0o000)
         try:
             scan = _scan_project(project)
@@ -376,7 +376,7 @@ class TestCli:
     def test_cli_with_dissonances(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
         """CLI output with dissonances shows icons and messages."""
         (tmp_path / "_grimoire" / "core" / "agents").mkdir(parents=True)
-        (tmp_path / "_grimoire" / "core" / "agents" / "BadName.md").write_text("# BadName\n")
+        (tmp_path / "_grimoire" / "core" / "agents" / "BadName.md").write_text("# BadName\n", encoding="utf-8")
         monkeypatch.setattr("sys.argv", ["harmony_check", "--project-root", str(tmp_path)])
         assert _cli() == 0
         captured = capsys.readouterr()

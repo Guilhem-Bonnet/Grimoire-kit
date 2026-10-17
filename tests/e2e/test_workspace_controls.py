@@ -121,13 +121,11 @@ def test_observer_activite_rtk_bench_ne_restent_jamais_muets(workspace: Page) ->
         assert body.strip(), f"onglet {view_id} : #canvas ne doit jamais rester vide"
 
 
-def test_memoire_view_seg_bascule_correctement(workspace: Page) -> None:
-    _goto(workspace, "memoire")
-    workspace.wait_for_selector("#view-seg button")
-    labels = [lbl.strip() for lbl in workspace.locator("#view-seg button").all_inner_texts()]
-    if len(labels) < 2:
-        pytest.skip("mémoire non initialisée ici : un seul onglet (Flotte)")
-    _assert_segment_toggles(workspace, "#view-seg button")
+# `test_memoire_view_seg_bascule_correctement` vit dans
+# test_workspace_memoire_overview.py : le groupe de segments de la Mémoire n'a
+# plus d'un bouton que sur un projet dont la mémoire est initialisée, et seul
+# le cockpit de ce module en sert un. Ici, le projet servi n'en a pas : le test
+# se skippait, ce que la CI stricte (D-10) refuse à raison.
 
 
 # ── Couverture élargie : les autres segments de la coque ────────────────────

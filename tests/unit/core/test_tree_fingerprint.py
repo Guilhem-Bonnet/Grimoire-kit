@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -234,6 +235,12 @@ def _pytest_project(root: Path) -> None:
     (root / "app.py").write_text("print('v1')\n", encoding="utf-8")
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : fabrique un exécutable factice (script shell sans extension .exe/.cmd, bit x) que Windows ne lance pas par son nom"
+    ),
+)
 def test_another_toolchain_changes_the_fingerprint(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
     """Un binaire de test résolu ailleurs sur le PATH invalide le run (W3-04, acceptation 2)."""
     _pytest_project(tmp_path)
@@ -247,6 +254,12 @@ def test_another_toolchain_changes_the_fingerprint(tmp_path: Path, tmp_path_fact
     assert compute_tree_fingerprint(tmp_path) != before
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : fabrique un exécutable factice (script shell sans extension .exe/.cmd, bit x) que Windows ne lance pas par son nom"
+    ),
+)
 def test_a_missing_test_runner_changes_the_fingerprint(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
     """Le même arbre sans binaire de test sur le PATH n'est pas la toolchain qui a produit le run."""
     _pytest_project(tmp_path)

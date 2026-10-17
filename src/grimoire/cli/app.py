@@ -1906,7 +1906,7 @@ def _generate_completion_script(shell: str) -> str:
     env = {**os.environ, "_GRIMOIRE_COMPLETE": f"{shell}_source"}
     result = subprocess.run(
         [sys.executable, "-m", "grimoire"],
-        capture_output=True, text=True, env=env, timeout=10,
+        capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=10,
     )
 
     if result.returncode != 0 or not result.stdout.strip():

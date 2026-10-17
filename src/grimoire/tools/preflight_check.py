@@ -139,7 +139,7 @@ class PreflightCheck(GrimoireTool):
             result = subprocess.run(
                 ["git", "diff", "--name-only", "--diff-filter=U"],
                 capture_output=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
                 cwd=self._project_root,
                 timeout=10,
             )
@@ -155,7 +155,7 @@ class PreflightCheck(GrimoireTool):
             result = subprocess.run(
                 ["git", "status", "--porcelain", "--", "_grimoire/"],
                 capture_output=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
                 cwd=self._project_root,
                 timeout=10,
             )

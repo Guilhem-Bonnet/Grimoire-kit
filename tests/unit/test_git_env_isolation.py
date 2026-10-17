@@ -68,7 +68,7 @@ def test_rev_parse_resolves_to_the_sandbox(tmp_path: Path) -> None:
 
     resolved = subprocess.run(
         ["git", "rev-parse", "--absolute-git-dir"],
-        cwd=target, capture_output=True, text=True, check=True,
+        cwd=target, capture_output=True, text=True, encoding="utf-8", errors="replace", check=True,
     ).stdout.strip()
 
     assert Path(resolved).resolve() == (target / ".git").resolve()

@@ -634,7 +634,7 @@ def commits_total(project_root: Path) -> int | None:
             ["git", "rev-list", "--count", "HEAD"],
             cwd=project_root,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=_GIT_TIMEOUT_S,
             check=False,
         )

@@ -477,6 +477,12 @@ def _tag_gate_passes(root: Path, version: str) -> bool:
     return done.returncode == 0
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : rejoue un garde de workflow écrit pour bash sous ubuntu-latest (CI) ; Git Bash de Windows (CRLF, chemins, sortie redirigée) n'est pas la cible de ce garde"
+    ),
+)
 @pytest.mark.parametrize("version", ["3.63.0", "3.63.0-rc1"])
 def test_a_release_version_crosses_both_gates(tmp_path: Path, version: str) -> None:
     root = _gate_repo(tmp_path / "r", version)
@@ -484,6 +490,12 @@ def test_a_release_version_crosses_both_gates(tmp_path: Path, version: str) -> N
     assert _version_sync_passes(root), "test_version_sync refuse la version que le garde de tag accepte"
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : rejoue un garde de workflow écrit pour bash sous ubuntu-latest (CI) ; Git Bash de Windows (CRLF, chemins, sortie redirigée) n'est pas la cible de ce garde"
+    ),
+)
 @pytest.mark.parametrize("version", ["3.63.0", "3.63.0-rc1", "3.63.0rc1", "3.63", "3.63.0-"])
 def test_the_two_gates_agree_on_every_spelling(tmp_path: Path, version: str) -> None:
     root = _gate_repo(tmp_path / "r", version)

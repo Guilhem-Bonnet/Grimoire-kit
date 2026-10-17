@@ -318,7 +318,7 @@ def _start_qdrant_docker(target: Path) -> tuple[bool, str]:
             ["docker", "compose", "-f", compose_file.name, "up", "-d"],
             cwd=target,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=90,
         )
     except FileNotFoundError:
@@ -342,7 +342,7 @@ def _git_user_name() -> str:
         result = subprocess.run(
             ["git", "config", "user.name"],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=5,
         )
         return result.stdout.strip() if result.returncode == 0 else ""

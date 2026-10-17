@@ -121,7 +121,7 @@ def check_docker() -> EnvCheck:
         proc = subprocess.run(
             ["docker", "info", "--format", "{{.ServerVersion}}"],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=_SUBPROCESS_TIMEOUT,
         )
     except (OSError, subprocess.SubprocessError):

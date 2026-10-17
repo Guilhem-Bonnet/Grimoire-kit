@@ -22,7 +22,7 @@ def _make_archetype(root: Path, arch_id: str, agents: list[dict[str, str]]) -> P
     agent_lines: list[str] = []
     for a in agents:
         name = a["name"]
-        (agents_dir / f"{name}.md").write_text(f"# Agent {name}\nPersona for {name}.")
+        (agents_dir / f"{name}.md").write_text(f"# Agent {name}\nPersona for {name}.", encoding="utf-8")
         agent_lines.append(f'  - path: "agents/{name}.md"')
         agent_lines.append(f"    required: {a.get('required', 'true')}")
         agent_lines.append(f'    description: "{a.get("description", name)}"')
@@ -39,7 +39,7 @@ def _make_archetype(root: Path, arch_id: str, agents: list[dict[str, str]]) -> P
         "compatible_with: [minimal]\n"
         "incompatible_with: []\n"
     )
-    (arch_dir / "archetype.dna.yaml").write_text(dna_content)
+    (arch_dir / "archetype.dna.yaml").write_text(dna_content, encoding="utf-8")
     return root
 
 
@@ -66,7 +66,7 @@ def registry(kit_root: Path) -> AgentRegistry:
 class TestAgentDef:
     def test_exists(self, tmp_path: Path) -> None:
         f = tmp_path / "agent.md"
-        f.write_text("# Agent")
+        f.write_text("# Agent", encoding="utf-8")
         ad = AgentDef(id="test", path=f)
         assert ad.exists
 
@@ -76,7 +76,7 @@ class TestAgentDef:
 
     def test_load_persona(self, tmp_path: Path) -> None:
         f = tmp_path / "agent.md"
-        f.write_text("# My Agent\nDoes stuff.")
+        f.write_text("# My Agent\nDoes stuff.", encoding="utf-8")
         ad = AgentDef(id="my", path=f)
         assert "My Agent" in ad.load_persona()
 
@@ -111,7 +111,7 @@ class TestArchetypeDNA:
 
     def test_invalid_dna(self, tmp_path: Path) -> None:
         bad = tmp_path / "bad.yaml"
-        bad.write_text("not: a: valid: yaml: {{")
+        bad.write_text("not: a: valid: yaml: {{", encoding="utf-8")
         with pytest.raises(GrimoireRegistryError):
             ArchetypeDNA.from_yaml(bad)
 
@@ -172,7 +172,7 @@ class TestAgentRegistry:
                 required: true
                 description: "Does not exist"
         """)
-        (arch_dir / "archetype.dna.yaml").write_text(dna)
+        (arch_dir / "archetype.dna.yaml").write_text(dna, encoding="utf-8")
         reg = AgentRegistry(tmp_path)
         with pytest.raises(GrimoireAgentError, match="Required agents missing"):
             reg.resolve_agents("broken")

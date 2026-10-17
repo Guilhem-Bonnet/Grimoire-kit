@@ -22,6 +22,10 @@ from grimoire.missions.schemas import TaskState
 from grimoire.missions.service import TaskService
 from grimoire.runtime.schemas import WorkflowStatus
 
+# Commande d'acceptation « qui réussit », valable sous sh comme sous cmd.exe
+# (`true` n'existe pas sous Windows, où `shell=True` lance cmd.exe).
+_TRUE = f'"{sys.executable}" -c pass'
+
 STANDARD = Path("_grimoire/standard")
 REGISTRY = STANDARD / "llm-provider-registry.yaml"
 LEDGER = Path("_grimoire-runtime-output/ledger")
@@ -36,11 +40,11 @@ _V2 = "le code est propre"
 # en V1 (jamais fermé sur la seule foi de l'ouvrier) — voir
 # test_flows_verifiability_v0_requires_structured.py. Ces tests-ci couvrent la
 # mécanique de cascade (escalade, checkpoints, reprise), pas cette règle :
-# `{"run": "true"}` (toujours vert, sans effet de bord) garde les nodes "a" et
+# `{"run": _TRUE}` (toujours vert, sans effet de bord) garde les nodes "a" et
 # "b" authentiquement V0, comme avant ce correctif. Ajouté même au blueprint
 # du node V2 : un critère structuré supplémentaire ne fait pas redescendre un
 # critère par ailleurs ambigu (verifiability.classify — un seul ambigu suffit).
-_V0_STRUCTURED = {"run": "true"}
+_V0_STRUCTURED = {"run": _TRUE}
 
 
 def _blueprint(tmp_path: Path, *, b_acceptance: str = _V0, c_acceptance: str = _V1) -> Path:
@@ -118,7 +122,7 @@ def _writer_script(tmp_path: Path, name: str, *, fail_for: tuple[str, ...] = ())
 
 
 def _invocation(script: Path) -> str:
-    return f"{sys.executable} {script} {{prompt}} --model {{model}}"
+    return f"{Path(sys.executable).as_posix()} {Path(script).as_posix()} {{prompt}} --model {{model}}"
 
 
 def _provider_yaml(pid: str, tier: str, invocation: str) -> str:

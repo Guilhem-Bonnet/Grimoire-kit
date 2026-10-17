@@ -201,13 +201,13 @@ class TestScanGapsFromTrace(unittest.TestCase):
             "[FAILURE] db-migration lock error\n",
             "[FAILURE] db-migration schema mismatch\n",
         ]
-        f.write_text("".join(lines))
+        f.write_text("".join(lines), encoding="utf-8")
         gaps = self.forge.scan_gaps_from_trace(f, known_agents=["dev", "qa"])
         self.assertGreater(len(gaps), 0)
 
     def test_no_failures(self):
         f = self.tmpdir / "Grimoire_TRACE.md"
-        f.write_text("## 2026-01-01 | dev | story-1\nAll good here.\n")
+        f.write_text("## 2026-01-01 | dev | story-1\nAll good here.\n", encoding="utf-8")
         gaps = self.forge.scan_gaps_from_trace(f, known_agents=["dev"])
         self.assertEqual(len(gaps), 0)
 
@@ -229,8 +229,8 @@ class TestListExistingAgents(unittest.TestCase):
     def test_lists_agents(self):
         agents_dir = self.tmpdir / "agents"
         agents_dir.mkdir()
-        (agents_dir / "forge.md").write_text("# Forge\n")
-        (agents_dir / "hawk.md").write_text("# Hawk\n")
+        (agents_dir / "forge.md").write_text("# Forge\n", encoding="utf-8")
+        (agents_dir / "hawk.md").write_text("# Hawk\n", encoding="utf-8")
         result = self.forge.list_existing_agents(agents_dir)
         self.assertEqual(len(result), 2)
         self.assertIn("forge", result)
@@ -239,7 +239,7 @@ class TestListExistingAgents(unittest.TestCase):
     def test_excludes_custom_agent_template(self):
         agents_dir = self.tmpdir / "agents"
         agents_dir.mkdir()
-        (agents_dir / "custom-agent.tpl.md").write_text("# Template\n")
+        (agents_dir / "custom-agent.tpl.md").write_text("# Template\n", encoding="utf-8")
         # custom-agent starts are excluded
         # But the code checks f.name.startswith("custom-agent")
         result = self.forge.list_existing_agents(agents_dir)
@@ -292,7 +292,7 @@ class TestReadProjectContext(unittest.TestCase):
 
     def test_reads_basic_yaml(self):
         f = self.tmpdir / "project-context.yaml"
-        f.write_text("project_name: TestProject\nuser: Guilhem\n")
+        f.write_text("project_name: TestProject\nuser: Guilhem\n", encoding="utf-8")
         ctx = self.forge.read_project_context(f)
         self.assertEqual(ctx["project_name"], "TestProject")
         self.assertEqual(ctx["user"], "Guilhem")
@@ -303,7 +303,7 @@ class TestReadProjectContext(unittest.TestCase):
 
     def test_ignores_comments(self):
         f = self.tmpdir / "ctx.yaml"
-        f.write_text("# Comment\nkey: value\n# Another\nfoo: bar\n")
+        f.write_text("# Comment\nkey: value\n# Another\nfoo: bar\n", encoding="utf-8")
         ctx = self.forge.read_project_context(f)
         self.assertEqual(ctx["key"], "value")
         self.assertEqual(ctx["foo"], "bar")
@@ -325,8 +325,8 @@ class TestReadActiveDna(unittest.TestCase):
         (dna_dir / "archetype.dna.yaml").write_text(
             "acceptance_criteria:\n"
             "  - description: 'All containers must have health checks'\n"
-            "  - description: 'Terraform plan must be idempotent'\n"
-        )
+            "  - description: 'Terraform plan must be idempotent'\n",
+        encoding="utf-8",)
         ac = self.forge.read_active_dna(self.tmpdir / "archetypes")
         self.assertGreater(len(ac), 0)
 
@@ -342,7 +342,7 @@ class TestReadActiveDna(unittest.TestCase):
         lines = "acceptance_criteria:\n"
         for i in range(20):
             lines += f"  - description: 'AC number {i:02d} for testing limits'\n"
-        (dna_dir / "archetype.dna.yaml").write_text(lines)
+        (dna_dir / "archetype.dna.yaml").write_text(lines, encoding="utf-8")
         ac = self.forge.read_active_dna(self.tmpdir / "archetypes")
         self.assertLessEqual(len(ac), 10)
 

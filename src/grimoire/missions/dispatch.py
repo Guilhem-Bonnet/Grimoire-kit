@@ -82,9 +82,17 @@ from grimoire.missions.dispatch_history import recommend_start_tier
 from grimoire.missions.empty_green import classify_empty_green, invokes_test_runner
 from grimoire.missions.schemas import TaskState
 from grimoire.missions.verifiability import Verifiability, classify
+from grimoire.providers.quota import QuotaSignal, classify_failure, observe_window
 from grimoire.providers.registry import SUPPORTED_MODEL_TIERS, ProviderSpec
 from grimoire.providers.routing import candidates as provider_candidates
-from grimoire.providers.state import record_failure, record_success
+from grimoire.providers.state import (
+    available_models,
+    load_state,
+    record_failure,
+    record_quota_observation,
+    record_success,
+    record_suspension,
+)
 
 if TYPE_CHECKING:
     from grimoire.missions.schemas import MissionTask
@@ -213,6 +221,7 @@ def _classify_unrunnable(cmd: str, exit_code: int | None, stdout: str, stderr: s
     if not invokes_test_runner(cmd):
         return None
     return classify_empty_green(combined)
+
 
 #: Surfaces sensibles par défaut (issue #327) — un diff qui en touche une
 #: exige une relecture forte même si les checks mécaniques sont au vert.
@@ -494,7 +503,7 @@ def _classify_review(project_root: Path) -> tuple[str, tuple[str, ...], str | No
     """
     try:
         completed = subprocess.run(
-            ["git", "diff", "--name-only"], cwd=project_root, capture_output=True, text=True, timeout=CHECK_TIMEOUT_S
+            ["git", "diff", "--name-only"], cwd=project_root, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=CHECK_TIMEOUT_S
         )
     except (OSError, subprocess.TimeoutExpired):
         return "review_optional", (), "projet non versionné (git indisponible) : relisibilité non calculée"
@@ -822,12 +831,14 @@ class DispatchReport:
 
 def _run_provider_call(
     project_root: Path, provider: ProviderSpec, model: str, prompt: str, *, call_timeout: float
-) -> tuple[int | None, str, str, float, str | None]:
-    """Exécute l'invocation rendue ; rend (code, stdout, stderr, durée, kind d'échec).
+) -> tuple[int | None, str, str, float, str | None, QuotaSignal | None]:
+    """Exécute l'invocation rendue ; rend (code, stdout, stderr, durée, kind d'échec, signal).
 
-    *kind* vaut ``"timeout"``, ``"rate_limit"`` (sortie évoquant un 429 ou
-    une limite), ``"error"`` (code non nul sans trace de limite) ou ``None``
-    (appel réussi). ``invocation`` est
+    *kind* vaut ``"timeout"``, ``"rate_limit"`` (429 sans date), ``"quota"``
+    (forfait épuisé, avec ou sans date lue), ``"overloaded"`` (529, plateforme
+    saturée : pas le forfait), ``"error"`` (code non nul sans trace de limite)
+    ou ``None`` (appel réussi). Le signal porte la date de réouverture lue.
+    ``invocation`` est
     garanti non vide par ``candidates()`` en amont ; ``shlex.split`` d'une
     chaîne vide rendrait de toute façon une commande vide, refusée par
     ``subprocess`` — pas de garde supplémentaire nécessaire ici.
@@ -836,23 +847,46 @@ def _run_provider_call(
     started = time.monotonic()
     try:
         completed = subprocess.run(
-            argv, cwd=project_root, capture_output=True, text=True, timeout=call_timeout, shell=False
+            argv, cwd=project_root, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=call_timeout, shell=False
         )
     except subprocess.TimeoutExpired:
-        return None, "", "", time.monotonic() - started, "timeout"
+        return None, "", "", time.monotonic() - started, "timeout", None
     duration = time.monotonic() - started
     # Une saturation (429, quota) et une panne locale (CLI absent, script qui
     # plante) n'ont pas le même sens pour l'état runtime : la première dit que
     # le fournisseur est bon mais occupé, la seconde qu'il est cassé ici. Les
     # deux refroidissent, mais sous un nom distinct, pour que `providers
     # status` et l'historique du lot 4 ne confondent pas les deux.
-    if _looks_rate_limited(completed.stdout) or _looks_rate_limited(completed.stderr):
-        kind = "rate_limit"
+    # `classify_failure` (providers/quota.py) lit les `rate_limit_event` du flux
+    # sur leur statut : le nom de l'événement contient « rate_limit », que la
+    # recherche de mots (`_looks_rate_limited`) prenait pour un refus même à
+    # l'état `allowed`.
+    signal = classify_failure(
+        completed.stdout, completed.stderr, now=datetime.now().astimezone(), returncode=completed.returncode
+    )
+    if signal is not None:
+        kind: str | None = signal.kind
     elif completed.returncode != 0:
         kind = "error"
     else:
         kind = None
-    return completed.returncode, completed.stdout, completed.stderr, duration, kind
+    return completed.returncode, completed.stdout, completed.stderr, duration, kind, signal
+
+
+def _record_call_failure(
+    root: Path, provider_id: str, model: str, failure_kind: str, signal: QuotaSignal | None
+) -> None:
+    """Pose l'état runtime d'un appel raté : suspension datée, ou refroidissement.
+
+    Un forfait épuisé (``quota``), ou une limite de débit dont la sortie donne
+    une date, suspend jusqu'à cette date (``unknown`` si elle est illisible).
+    Un 529, un timeout, un 429 sans date ou une panne refroidissent.
+    """
+    if signal is not None and (signal.kind == "quota" or signal.until is not None) and failure_kind != "overloaded":
+        scoped = signal.model_hint is not None and signal.model_hint in model.lower()
+        record_suspension(root, provider_id, until=signal.until, source=signal.source, model=model if scoped else None)
+        return
+    record_failure(root, provider_id, kind=failure_kind)
 
 
 #: Combien de la sortie (stdout puis stderr) survit dans ``CheckResult.output_excerpt``
@@ -937,7 +971,7 @@ def _acceptance_status_for_verdict(verdict: str, *, acceptance_declared: bool) -
     ``flows.dispatch_executor._node_outcome_from_report`` pour le même choix
     côté rapport de flow).
     """
-    if verdict in ("rate_limit", "timeout", "error"):
+    if verdict in ("rate_limit", "quota", "overloaded", "timeout", "error"):
         return None
     if verdict == "unrunnable":
         return "unrunnable"
@@ -1223,18 +1257,25 @@ def run_dispatch(
         # `candidates()` sert aussi `providers status`, où un fournisseur sans
         # commande d'appel reste une information utile à afficher — seule la
         # cascade, qui doit réellement l'exécuter, a besoin de l'exclure.
-        tier_candidates = tuple(p for p in provider_candidates(root, tier) if p.invocation)
+        # En exécution sans humain (`GRIMOIRE_UNATTENDED=1`), un fournisseur
+        # jamais sondé n'est pas candidat : personne ne verrait qu'il est cassé.
+        autonomous = os.environ.get("GRIMOIRE_UNATTENDED", "").strip() == "1"
+        tier_candidates = tuple(p for p in provider_candidates(root, tier, autonomous=autonomous) if p.invocation)
         if provider_id:
             tier_candidates = tuple(p for p in tier_candidates if p.id == provider_id)
         tier_settled = False
         for provider in tier_candidates:
-            model = provider.models_for_tier(tier)[0].id
+            # Premier modèle du palier que le forfait n'a pas fermé.
+            model = available_models(provider, tier, load_state(root), now=datetime.now(UTC))[0].id
             attempt_no += 1
-            code, stdout, _stderr, duration, failure_kind = _run_provider_call(
+            code, stdout, _stderr, duration, failure_kind, signal = _run_provider_call(
                 root, provider, model, prompt, call_timeout=call_timeout
             )
+            window = observe_window(stdout, now=datetime.now().astimezone())
+            if window is not None:
+                record_quota_observation(root, provider.id, window)
             if failure_kind is not None:
-                record_failure(root, provider.id, kind=failure_kind)
+                _record_call_failure(root, provider.id, model, failure_kind, signal)
                 attempt = DispatchAttempt(
                     attempt=attempt_no,
                     tier=tier,
@@ -1264,7 +1305,7 @@ def run_dispatch(
                 )
                 continue  # fournisseur suivant, même palier
 
-            record_success(root, provider.id)
+            record_success(root, provider.id, model)
             check_results = _run_checks(
                 checks,
                 project_root=root,

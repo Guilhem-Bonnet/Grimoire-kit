@@ -518,7 +518,7 @@ def test_pre_tool_use_budget_with_a_filled_memory(tmp_path: Path) -> None:
             ],
             input=payload,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             env=env,
             check=True,
             timeout=10,
