@@ -1054,6 +1054,8 @@ _VERDICT_ICON: dict[str, str] = {
     "green": "[green]vert[/green]",
     "red": "[red]rouge[/red]",
     "rate_limit": "[yellow]limite/429[/yellow]",
+    "quota": "[yellow]forfait épuisé[/yellow]",
+    "overloaded": "[yellow]surcharge/529[/yellow]",
     "timeout": "[yellow]timeout[/yellow]",
     # « acceptance inexécutable » (issue #428) : un `--check` n'a rendu aucun
     # verdict exploitable (binaire absent, pytest 5/4, erreur d'import) — la

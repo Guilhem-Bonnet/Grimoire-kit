@@ -17,10 +17,14 @@ journée.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from grimoire.providers.quota import QuotaObservation
+    from grimoire.providers.registry import ModelSpec, ProviderSpec
 
 #: ``_grimoire-output/`` est la sortie jetable du projet — voir EVENT_DIR,
 #: KNOWLEDGE_DIR dans ``grimoire.core.agentic_standard`` pour le même choix
@@ -34,11 +38,30 @@ PROVIDERS_STATE_FILE = Path("_grimoire-output/providers-state.json")
 _BASE_COOLDOWN: dict[str, timedelta] = {
     "rate_limit": timedelta(minutes=5),
     "timeout": timedelta(minutes=5),
+    # 529 : la plateforme est saturée, pas le forfait. Refroidissement court
+    # qui double, jamais une suspension datée.
+    "overloaded": timedelta(minutes=2),
 }
 _DEFAULT_COOLDOWN = timedelta(minutes=5)
 _MAX_COOLDOWN = timedelta(hours=1)
 
 _SCHEMA = "grimoire-providers-runtime-state/v1"
+
+
+@dataclass(frozen=True, slots=True)
+class Suspension:
+    """Fermeture datée d'un fournisseur (ou d'un modèle) : forfait épuisé.
+
+    ``until`` est la date de réouverture lue (``source`` ``resets_at`` ou
+    ``retry_after``) ou ``None`` (``source == "unknown"``) : la date n'a pas pu
+    être lue, l'exclusion dure jusqu'à ``grimoire providers probe``.
+    """
+
+    until: datetime | None
+    source: str
+
+    def active(self, *, now: datetime) -> bool:
+        return self.until is None or self.until > now
 
 
 @dataclass(slots=True)
@@ -60,9 +83,38 @@ class ProviderRuntimeState:
     probed_at: str | None = None
     models_seen: tuple[str, ...] = ()
     probe_note: str | None = None
+    suspension: Suspension | None = None
+    model_suspensions: dict[str, Suspension] = field(default_factory=dict)
+    quota_observation: dict[str, Any] | None = None
 
     def is_cooling_down(self, *, now: datetime) -> bool:
         return self.cooldown_until is not None and self.cooldown_until > now
+
+    def is_suspended(self, *, now: datetime) -> bool:
+        return self.suspension is not None and self.suspension.active(now=now)
+
+    def is_blocked(self, *, now: datetime) -> bool:
+        """Refroidi **ou** suspendu : hors du choix pour l'instant."""
+        return self.is_cooling_down(now=now) or self.is_suspended(now=now)
+
+    def is_model_suspended(self, model_id: str, *, now: datetime) -> bool:
+        suspension = self.model_suspensions.get(model_id)
+        return suspension is not None and suspension.active(now=now)
+
+    def blocked_row(self, *, now: datetime) -> tuple[float | None, bool]:
+        """``(cooldown_ts, available)`` tel que le filtre (Python ou Rust) les lit.
+
+        Une suspension à date se projette sur la date de refroidissement la plus
+        lointaine ; une suspension ``unknown`` se projette sur
+        ``available=False``. Le filtre Rust reste ainsi identique au Python.
+        """
+        until = self.cooldown_until
+        if self.suspension is not None and self.suspension.active(now=now):
+            if self.suspension.until is None:
+                return (until.timestamp() if until else None, False)
+            if until is None or self.suspension.until > until:
+                until = self.suspension.until
+        return (until.timestamp() if until else None, self.available)
 
 
 def _now(now: datetime | None) -> datetime:
@@ -76,6 +128,18 @@ def _parse_datetime(value: Any) -> datetime | None:
         return datetime.fromisoformat(value)
     except ValueError:
         return None
+
+
+def _parse_suspension(until: Any, source: Any) -> Suspension | None:
+    if not isinstance(source, str) or not source:
+        return None
+    parsed = _parse_datetime(until)
+    # Une date illisible ne rouvre pas le fournisseur : elle devient ``unknown``.
+    return Suspension(parsed, source if parsed is not None else "unknown")
+
+
+def _dump_suspension(suspension: Suspension) -> dict[str, Any]:
+    return {"until": suspension.until.isoformat() if suspension.until else None, "source": suspension.source}
 
 
 def load_state(root: Path) -> dict[str, ProviderRuntimeState]:
@@ -105,6 +169,15 @@ def load_state(root: Path) -> dict[str, ProviderRuntimeState]:
         probed_at = entry.get("probed_at")
         models_seen = entry.get("models_seen")
         probe_note = entry.get("probe_note")
+        raw_models = entry.get("model_suspensions")
+        model_suspensions: dict[str, Suspension] = {}
+        if isinstance(raw_models, dict):
+            for model_id, item in raw_models.items():
+                if isinstance(item, dict):
+                    parsed_item = _parse_suspension(item.get("until"), item.get("source"))
+                    if parsed_item is not None:
+                        model_suspensions[str(model_id)] = parsed_item
+        raw_quota = entry.get("quota_observation")
         state[str(provider_id)] = ProviderRuntimeState(
             cooldown_until=_parse_datetime(entry.get("cooldown_until")),
             last_failure=str(last_failure) if isinstance(last_failure, str) and last_failure else None,
@@ -113,6 +186,9 @@ def load_state(root: Path) -> dict[str, ProviderRuntimeState]:
             probed_at=str(probed_at) if isinstance(probed_at, str) and probed_at else None,
             models_seen=tuple(str(m) for m in models_seen) if isinstance(models_seen, list) else (),
             probe_note=str(probe_note) if isinstance(probe_note, str) and probe_note else None,
+            suspension=_parse_suspension(entry.get("suspended_until"), entry.get("suspension_source")),
+            model_suspensions=model_suspensions,
+            quota_observation=raw_quota if isinstance(raw_quota, dict) else None,
         )
     return state
 
@@ -132,6 +208,14 @@ def save_state(root: Path, state: dict[str, ProviderRuntimeState]) -> None:
                 "probed_at": entry.probed_at,
                 "models_seen": list(entry.models_seen),
                 "probe_note": entry.probe_note,
+                "suspended_until": (
+                    entry.suspension.until.isoformat() if entry.suspension and entry.suspension.until else None
+                ),
+                "suspension_source": entry.suspension.source if entry.suspension else None,
+                "model_suspensions": {
+                    model_id: _dump_suspension(item) for model_id, item in entry.model_suspensions.items()
+                },
+                "quota_observation": entry.quota_observation,
             }
             for provider_id, entry in state.items()
         },
@@ -182,38 +266,130 @@ def record_failure(
     failure_count = previous.failure_count + 1
     base = _BASE_COOLDOWN.get(kind, _DEFAULT_COOLDOWN)
     duration = min(base * (2 ** (failure_count - 1)), _MAX_COOLDOWN)
-    entry = ProviderRuntimeState(
+    # `replace` : l'audit, les suspensions et la lecture de forfait ne sont pas
+    # touchés par un échec d'appel.
+    entry = replace(
+        previous,
         cooldown_until=effective_now + duration,
         last_failure=kind,
         failure_count=failure_count,
-        # Un échec d'appel ne dit rien sur l'audit (PATH, version, modèles) :
-        # on le préserve plutôt que de le remettre à l'état par défaut.
-        available=previous.available,
-        probed_at=previous.probed_at,
-        models_seen=previous.models_seen,
-        probe_note=previous.probe_note,
     )
     state[provider_id] = entry
     save_state(root, state)
     return entry
 
 
-def record_success(root: Path, provider_id: str) -> None:
+def record_suspension(
+    root: Path,
+    provider_id: str,
+    *,
+    until: datetime | None,
+    source: str,
+    model: str | None = None,
+    now: datetime | None = None,
+) -> ProviderRuntimeState:
+    """Ferme un fournisseur (ou un seul de ses modèles) jusqu'à une date lue.
+
+    ``until=None`` (``source="unknown"``) : date illisible, l'exclusion dure
+    jusqu'à :func:`clear_unknown_suspensions` (``grimoire providers probe``).
+    Une suspension à date **remplace** le refroidissement : on respecte la
+    date du fournisseur, on ne l'allonge pas d'un délai de notre cru. Le
+    compteur d'échecs, lui, avance.
+    """
+    del now  # signature symétrique de record_failure ; la date vient du signal
+    state = load_state(root)
+    previous = state.get(provider_id, ProviderRuntimeState())
+    suspension = Suspension(until, source if until is not None else "unknown")
+    if model is None:
+        entry = replace(
+            previous,
+            cooldown_until=None,
+            last_failure="quota",
+            failure_count=previous.failure_count + 1,
+            suspension=suspension,
+        )
+    else:
+        entry = replace(
+            previous,
+            last_failure="quota",
+            failure_count=previous.failure_count + 1,
+            model_suspensions={**previous.model_suspensions, model: suspension},
+        )
+    state[provider_id] = entry
+    save_state(root, state)
+    return entry
+
+
+def record_quota_observation(root: Path, provider_id: str, observation: QuotaObservation) -> None:
+    """Retient la fenêtre de forfait lue dans le flux (un minorant, daté)."""
+    state = load_state(root)
+    previous = state.get(provider_id, ProviderRuntimeState())
+    state[provider_id] = replace(
+        previous,
+        quota_observation={
+            "window": observation.window,
+            "utilization": observation.utilization,
+            "resets_at": observation.resets_at.isoformat() if observation.resets_at else None,
+            "observed_at": observation.observed_at.isoformat(),
+        },
+    )
+    save_state(root, state)
+
+
+def clear_unknown_suspensions(root: Path, provider_id: str | None = None) -> tuple[str, ...]:
+    """``providers probe`` : rouvre ce qu'une date illisible avait fermé.
+
+    Rend les identifiants rouverts (fournisseur, ou ``fournisseur/modèle``).
+    Les suspensions à date ne sont pas touchées : la date fait foi.
+    """
+    state = load_state(root)
+    cleared: list[str] = []
+    for pid, entry in list(state.items()):
+        if provider_id is not None and pid != provider_id:
+            continue
+        suspension = entry.suspension
+        if suspension is not None and suspension.until is None:
+            suspension = None
+            cleared.append(pid)
+        models = {m: sus for m, sus in entry.model_suspensions.items() if sus.until is not None}
+        cleared.extend(f"{pid}/{m}" for m, sus in entry.model_suspensions.items() if sus.until is None)
+        state[pid] = replace(entry, suspension=suspension, model_suspensions=models)
+    if cleared:
+        save_state(root, state)
+    return tuple(cleared)
+
+
+def available_models(
+    provider: ProviderSpec, tier: str, state: dict[str, ProviderRuntimeState], *, now: datetime
+) -> tuple[ModelSpec, ...]:
+    """Modèles de *tier* non suspendus : l'intra-palier saute un modèle fermé."""
+    runtime = state.get(provider.id)
+    models = provider.models_for_tier(tier)
+    if runtime is None:
+        return models
+    return tuple(model for model in models if not runtime.is_model_suspended(model.id, now=now))
+
+
+def record_success(root: Path, provider_id: str, model: str | None = None) -> None:
     """Efface le refroidissement — un appel a réussi, on repart à zéro.
 
     Remet le compteur de récidive à zéro plutôt que de retirer l'entrée : un
     ``last_failure`` gardé à ``None`` distingue "jamais échoué" de "a
     échoué puis guéri" pour qui lit l'état brut, sans que ça change quoi que
-    ce soit au routage.
+    ce soit au routage. Un succès rouvre aussi le fournisseur suspendu, et le
+    modèle appelé si *model* est donné.
     """
     state = load_state(root)
     if provider_id not in state:
         return
     previous = state[provider_id]
-    state[provider_id] = ProviderRuntimeState(
-        available=previous.available,
-        probed_at=previous.probed_at,
-        models_seen=previous.models_seen,
-        probe_note=previous.probe_note,
+    models = {m: sus for m, sus in previous.model_suspensions.items() if m != model}
+    state[provider_id] = replace(
+        previous,
+        cooldown_until=None,
+        last_failure=None,
+        failure_count=0,
+        suspension=None,
+        model_suspensions=models,
     )
     save_state(root, state)

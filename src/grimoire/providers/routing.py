@@ -26,7 +26,7 @@ from pathlib import Path
 
 from grimoire.core.exceptions import GrimoireRegistryError
 from grimoire.providers.registry import ProviderSpec, read_default_fallback_chain, read_registry
-from grimoire.providers.state import load_state
+from grimoire.providers.state import available_models, load_state
 
 try:
     import grimoire_dispatch_core as _rust_core
@@ -85,7 +85,9 @@ def _candidate_order(providers: tuple[ProviderSpec, ...], default_fallback_chain
     return order
 
 
-def candidates(root: Path, tier: str, *, now: datetime | None = None) -> tuple[ProviderSpec, ...]:
+def candidates(
+    root: Path, tier: str, *, now: datetime | None = None, autonomous: bool = False
+) -> tuple[ProviderSpec, ...]:
     """Tous les fournisseurs activés, disponibles et outillés pour *tier*, dans l'ordre.
 
     ``choose()`` ne rend que le premier ; une cascade de dispatch (issue #323)
@@ -96,7 +98,11 @@ def candidates(root: Path, tier: str, *, now: datetime | None = None) -> tuple[P
     liste — c'est la même notion de « disponible maintenant » que
     ``choose()``, pas une politique séparée qui pourrait diverger. Un
     fournisseur jamais audité reste candidat : ``available`` par défaut à
-    ``True`` (voir ``ProviderRuntimeState``).
+    ``True`` (voir ``ProviderRuntimeState``) — sauf en mode *autonome*
+    (``autonomous=True``, sans humain pour constater une panne) : un fournisseur
+    jamais sondé y est exclu jusqu'à ``providers probe``. Un fournisseur suspendu
+    (forfait épuisé, ``state.record_suspension``) est exclu comme un fournisseur
+    refroidi, et un modèle suspendu n'y compte pas pour le palier.
     """
     effective_now = now if now is not None else datetime.now(UTC)
     providers = read_registry(root)
@@ -107,17 +113,22 @@ def candidates(root: Path, tier: str, *, now: datetime | None = None) -> tuple[P
     if _use_rust_backend():
         assert _rust_core is not None  # guarded by _use_rust_backend
         provider_rows = [
-            (provider.id, provider.enabled, list(provider.fallback_order), bool(provider.models_for_tier(tier)))
+            (
+                provider.id,
+                provider.enabled,
+                list(provider.fallback_order),
+                bool(available_models(provider, tier, state, now=effective_now)),
+            )
             for provider in providers
         ]
         cooldown_rows = [
-            (
-                provider_id,
-                runtime.cooldown_until.timestamp() if runtime.cooldown_until is not None else None,
-                runtime.available,
-            )
-            for provider_id, runtime in state.items()
+            (provider_id, *runtime.blocked_row(now=effective_now)) for provider_id, runtime in state.items()
         ]
+        if autonomous:
+            cooldown_rows = [
+                (pid, ts, available and state[pid].probed_at is not None) for pid, ts, available in cooldown_rows
+            ]
+            cooldown_rows.extend((pid, None, False) for pid in by_id if pid not in state)
         ids = _rust_core.candidate_provider_ids_py(
             provider_rows, list(default_fallback_chain), cooldown_rows, effective_now.timestamp()
         )
@@ -129,23 +140,25 @@ def candidates(root: Path, tier: str, *, now: datetime | None = None) -> tuple[P
         provider = by_id.get(provider_id)
         if provider is None or not provider.enabled:
             continue
-        if not provider.models_for_tier(tier):
+        if not available_models(provider, tier, state, now=effective_now):
             continue
         runtime = state.get(provider_id)
-        if runtime is not None and runtime.is_cooling_down(now=effective_now):
+        if runtime is not None and runtime.is_blocked(now=effective_now):
             continue
         if runtime is not None and not runtime.available:
+            continue
+        if autonomous and (runtime is None or runtime.probed_at is None):
             continue
         out.append(provider)
     return tuple(out)
 
 
-def choose(root: Path, tier: str, *, now: datetime | None = None) -> ProviderSpec | None:
+def choose(root: Path, tier: str, *, now: datetime | None = None, autonomous: bool = False) -> ProviderSpec | None:
     """Premier fournisseur activé, disponible, et outillé pour *tier*.
 
     ``None`` si aucun ne convient — appelant fermé, pas d'exception : un
     routeur de coût qui ne trouve personne doit pouvoir le dire tranquillement
     (par exemple pour retomber sur un mode dégradé), pas planter le budget.
     """
-    found = candidates(root, tier, now=now)
+    found = candidates(root, tier, now=now, autonomous=autonomous)
     return found[0] if found else None
