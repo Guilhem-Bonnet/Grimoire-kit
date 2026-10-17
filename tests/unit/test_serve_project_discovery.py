@@ -134,6 +134,7 @@ def test_browse_refuses_a_file(api: ForgeAPI, tmp_path: Path) -> None:
 
 def test_selecting_a_project_reroots_the_server(api: ForgeAPI, tmp_path: Path) -> None:
     other = _make_project(tmp_path, "autre", managed=True)
+    api.project_add(str(other))
     status = api.select_project(path=str(other))
 
     assert status["projectRoot"] == str(other)
@@ -254,3 +255,18 @@ def test_a_sibling_prefix_is_not_mistaken_for_containment() -> None:
     """``/home/uX`` n'est pas contenu dans ``/home/u`` — le séparateur le dit."""
     with pytest.raises(PermissionError):
         reg.resolve_within_allowed(str(Path.home()) + "X")
+
+
+def test_a_request_path_outside_the_registry_never_becomes_a_root(
+    api: ForgeAPI, tmp_path: Path
+) -> None:
+    """Un chemin arbitraire (même existant) est refusé : ni sélection, ni écriture."""
+    stray = _make_project(tmp_path, "non-enregistre", managed=True)
+    served = api.project_root
+    for raw in (str(stray), "/tmp/x", "../../", str(stray / ".." / "..")):
+        with pytest.raises(FileNotFoundError):
+            api.select_project(path=raw)
+        with pytest.raises(FileNotFoundError):
+            api.project_update(dry_run=True, path=raw)
+    assert api.project_root == served
+    assert not (stray / "_grimoire" / "task-board.yaml").exists()

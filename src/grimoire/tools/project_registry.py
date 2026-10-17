@@ -251,6 +251,25 @@ def path_for_slug(slug: str) -> Path | None:
     return None
 
 
+def registered_root(*, slug: str = "", path: str = "") -> Path | None:
+    """Racine d'un projet connu du registre — et du registre seul.
+
+    Une valeur venue d'une requête (``slug`` ou ``path``) ne devient jamais un
+    chemin : elle sert de clé de recherche, et c'est le chemin *enregistré*
+    qui est rendu. ``None`` si aucune entrée ne correspond ou si le dossier a
+    disparu. Un ``path`` n'est comparé qu'en texte, sans toucher au disque.
+    """
+    wanted_path = path.strip()
+    wanted_slug = slug.strip()
+    for entry in load_registry():
+        by_slug = bool(wanted_slug) and entry.get("slug") == wanted_slug
+        by_path = bool(wanted_path) and entry.get("path") == wanted_path
+        if by_slug or by_path:
+            root = Path(str(entry.get("path", "")))
+            return root.resolve() if root.is_dir() else None
+    return None
+
+
 def primary_slug() -> str:
     projects = load_registry()
     return str(projects[0].get("slug", "")) if projects else ""
