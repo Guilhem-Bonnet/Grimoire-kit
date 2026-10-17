@@ -100,9 +100,9 @@ def resume_command(session_id: str, host: str | None) -> str | None:
     autres hôtes, l'identifiant est affiché tel quel par l'interface. Jamais
     exécutée ici : le portefeuille la rend à copier.
     """
-    if not session_id or not host or "claude" not in host.lower():
-        return None
-    return f"claude --resume {session_id}"
+    from grimoire.missions.session_link import resume_command as _resume
+
+    return _resume(host or "", session_id) or None
 
 
 def unread_directives(card: dict[str, Any]) -> int:
