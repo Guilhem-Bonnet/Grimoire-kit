@@ -569,3 +569,216 @@ def test_stop_only_informs_outside_blocking_profiles(tmp_path: Path, monkeypatch
     rendered, decision = _stop(tmp_path)
     assert decision.outcome is Outcome.ALLOW and "decision" not in rendered
     assert decision.detail["blocked_on"] == "task_unparked" and "needs_verification" in rendered["systemMessage"]
+
+
+# ── Tour 2 du sceptique : sortie légitime du bail, attache explicite, commandes chaînées, hooks du dépôt ──
+
+
+def _leave(root: Path, tid: str, how: str) -> None:
+    """La session quitte son bail par un chemin légitime : clôture, blocage, échec ou rendu."""
+    ledger = TaskService(root).ledger
+    if how == "release":
+        ledger.transition_task(tid, TaskState.READY, actor_id="claude")
+        return
+    ledger.transition_task(tid, TaskState.RUNNING, actor_id="claude")
+    if how == "blocked":
+        ledger.transition_task(tid, TaskState.BLOCKED, actor_id="claude", reason="attend une réponse")
+    elif how == "failed":
+        ledger.transition_task(tid, TaskState.FAILED, actor_id="claude", reason="rouge")
+    else:
+        ledger.transition_task(tid, TaskState.NEEDS_VERIFICATION, actor_id="claude")
+        ledger.transition_task(tid, TaskState.CLOSED, actor_id="guilhem")
+
+
+@pytest.mark.parametrize("how", ["closed", "blocked", "failed", "release"])
+def test_session_is_not_braked_after_it_leaves_its_own_lease(governed: Path, how: str) -> None:
+    """K3-S1-01 : quitter son bail par la porte (clôture, blocage, échec, rendu) n'est pas le perdre."""
+    tid = _claimed(governed)
+    _prompt(governed)
+    _leave(governed, tid, how)
+    _prompt(governed)  # le journal de la session porte encore (tâche, epoch) : il ne doit plus freiner
+    rendered, _ = _pre(governed, _real_pretooluse(governed))
+    assert _verdict(rendered) == "allow", rendered
+
+
+@pytest.mark.parametrize("how", ["closed", "blocked"])
+def test_session_is_not_braked_after_leaving_its_lease_on_a_cache_miss(governed: Path, how: str) -> None:
+    tid = _claimed(governed)
+    _prompt(governed)
+    _leave(governed, tid, how)
+    lease_path(TaskService(governed).ledger_root, tid).unlink()  # le ledger tranche : la tâche a quitté le bail
+    rendered, _ = _pre(governed, _real_pretooluse(governed))
+    assert _verdict(rendered) == "allow", rendered
+
+
+def test_a_reaped_session_is_still_braked_before_anyone_reclaims(governed: Path) -> None:
+    """La récolte retire le bail à un titulaire qui ne donnait plus signe : sortie contrainte, pas légitime."""
+    tid = _claimed(governed)
+    _prompt(governed)
+    service = TaskService(governed)
+    write_lease(
+        lease_path(service.ledger_root, tid),
+        LeaseFile(tid, 1, (datetime.now(UTC) - timedelta(hours=1)).isoformat()),
+    )
+    [decision] = service.reap().decisions
+    assert decision.action == "ready", decision
+    rendered, _ = _pre(governed, _real_pretooluse(governed))
+    assert _verdict(rendered) == "deny"
+
+
+def test_a_displaced_session_is_not_freed_by_the_new_holder_leaving(governed: Path) -> None:
+    """Le rendu du nouveau titulaire (epoch 3 → barrière 4) n'est pas celui de l'ancien (epoch 1)."""
+    tid = _claimed(governed)
+    _prompt(governed)
+    _displace(governed, tid)
+    ledger = TaskService(governed).ledger
+    ledger.transition_task(tid, TaskState.RUNNING, actor_id="autre")
+    ledger.transition_task(tid, TaskState.BLOCKED, actor_id="autre", reason="rendu")
+    rendered, _ = _pre(governed, _real_pretooluse(governed))
+    assert _verdict(rendered) == "deny"
+
+
+def test_explicit_attach_after_reclaim_notes_the_new_epoch(governed: Path) -> None:
+    """K3-S1-02 : `task attach` explicite rattache la session au claim d'un autre epoch ; le journal le suit."""
+    tid = _claimed(governed)
+    _prompt(governed)
+    _displace(governed, tid)  # "autre" tient l'epoch 3, sans session
+    service = TaskService(governed)
+    service.attach_session(tid, SESSION, session_host="claude-code-cli", actor="autre", explicit=True)
+    claim = service.require(tid).claim
+    assert claim is not None and claim.session_id == SESSION and claim.lease_epoch == 3
+    assert load_session_state(governed, SESSION, now_iso="").lease_epoch == 3
+
+    _prompt(governed)
+    rendered, _ = _pre(governed, _real_pretooluse(governed))
+    assert _verdict(rendered) == "allow", rendered
+    # Et le frein garde son sens : un nouveau déplacement après l'attache refuse encore la session.
+    ledger = service.ledger
+    ledger.transition_task(tid, TaskState.RUNNING, actor_id="autre")
+    ledger.transition_task(tid, TaskState.BLOCKED, actor_id="autre", reason="rendu")
+    ledger.transition_task(tid, TaskState.READY, actor_id="autre")
+    service.claim(tid, "troisieme", host="local")
+    rendered, _ = _pre(governed, _real_pretooluse(governed))
+    assert _verdict(rendered) == "deny"
+
+
+def test_cli_attach_notes_the_epoch_in_the_session_journal(governed: Path) -> None:
+    tid = _claimed(governed, actor="cli")
+    res = CliRunner().invoke(
+        task_app, ["attach", tid, "--session-id", SESSION, "--project-root", str(governed), "--actor", "cli"]
+    )
+    assert res.exit_code == 0, res.output
+    journal = load_session_state(governed, SESSION, now_iso="")
+    assert (journal.task_id, journal.lease_epoch) == (tid, 1)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "grimoire task show x && touch EXECUTED.marker",
+        "grimoire task show x; touch EXECUTED.marker",
+        "grimoire task show x || touch EXECUTED.marker",
+        "grimoire task show x | tee EXECUTED.marker",
+        "grimoire task show x\ntouch EXECUTED.marker",
+        "grimoire task show $(touch EXECUTED.marker)",
+        "grimoire task show `touch EXECUTED.marker`",
+        "grimoire task show x > EXECUTED.marker",
+        "grimoire task show x & touch EXECUTED.marker",
+    ],
+)
+def test_chained_grimoire_task_does_not_escape_the_brake(governed: Path, command: str) -> None:
+    """K3-S1-04 : l'exemption de `grimoire task …` ne vaut que pour une commande simple."""
+    tid = _claimed(governed)
+    _prompt(governed)
+    TaskService(governed).cancel(tid, "abandon", "guilhem", force=True)
+    rendered, decision = _pre(governed, _real_pretooluse(governed, command=command))
+    assert _verdict(rendered) == "deny", rendered
+    assert decision.detail["lease_brake"] == "cancelled"
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["grimoire task claim T", "  grimoire task show x", "/usr/bin/grimoire task show x", "grimoire task add 'a; b && c'"],
+)
+def test_a_simple_grimoire_task_command_still_passes_the_brake(governed: Path, command: str) -> None:
+    tid = _claimed(governed)
+    _prompt(governed)
+    TaskService(governed).cancel(tid, "abandon", "guilhem", force=True)
+    rendered, _ = _pre(governed, _real_pretooluse(governed, command=command))
+    assert _verdict(rendered) == "allow", rendered
+
+
+def _refusing_hook(path: Path, message: str, marker: Path | None = None) -> None:
+    body = f"#!/bin/sh\necho {message} >&2\n"
+    if marker is not None:
+        body += f'echo "$@" > {marker}\ncat >> {marker}\n'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body + "exit 1\n", encoding="utf-8")
+    path.chmod(0o755)
+
+
+def test_fence_keeps_the_repository_pre_commit_hook(worktree: tuple[Path, MissionLedger, str]) -> None:
+    """K3-S1-03 : la fence s'ajoute, elle ne désarme pas les autres hooks du dépôt."""
+    wt, _, _ = worktree
+    _refusing_hook(wt.parent / "repo" / ".git" / "hooks" / "pre-commit", "depot-pre-commit")
+    (wt / "c.txt").write_text("c", encoding="utf-8")
+    _git(wt, "add", "c.txt")
+    refused = _git(wt, "commit", "-q", "-m", "c", check=False)
+    assert refused.returncode != 0 and "depot-pre-commit" in refused.stderr
+
+
+def test_fence_relays_a_pre_push_under_a_repository_hooks_path(tmp_path: Path) -> None:
+    """Un `core.hooksPath` de dépôt (husky…) : son pre-push est relayé, avec les arguments et l'entrée de git."""
+    repo, remote, wt = tmp_path / "repo", tmp_path / "remote.git", tmp_path / "wt"
+    repo.mkdir()
+    _git(tmp_path, "init", "-q", "--bare", str(remote))
+    _git(repo, "init", "-q", "-b", "main")
+    (repo / "a.txt").write_text("a\n", encoding="utf-8")
+    _git(repo, "add", "a.txt")
+    _git(repo, "commit", "-q", "-m", "init")
+    _git(repo, "remote", "add", "origin", str(remote))
+    _git(repo, "config", "core.hooksPath", ".husky")
+    marker = tmp_path / "husky-saw.txt"
+    _refusing_hook(repo / ".husky" / "pre-push", "husky-pre-push", marker)
+    _refusing_hook(repo / ".husky" / "pre-commit", "husky-pre-commit")
+    _git(repo, "add", ".husky")
+    _git(repo, "commit", "-q", "--no-verify", "-m", "husky")  # .husky est versionné : le worktree en a sa copie
+    ledger = MissionLedger(tmp_path / "ledger")
+    mission = ledger.create_mission("M", origin="test")
+    task = ledger.create_task(mission.id, "T", acceptance=("a",))
+    ledger.transition_task(task.id, TaskState.READY)
+    ledger.claim_task(task.id, "agent", "local")
+    ledger.transition_task(task.id, TaskState.RUNNING, actor_id="agent")
+    _git(repo, "worktree", "add", "-q", "-b", "task/T", str(wt))
+    install_fence(wt, tmp_path / "ledger", task.id, 1, python=sys.executable)
+
+    (wt / "b.txt").write_text("b", encoding="utf-8")
+    _git(wt, "add", "b.txt")
+    commit = _git(wt, "commit", "-q", "-m", "b", check=False)
+    assert commit.returncode != 0 and "husky-pre-commit" in commit.stderr
+
+    (wt / ".husky" / "pre-commit").unlink()  # le titulaire a le droit de commiter ; c'est le pre-push qu'on éprouve
+    _git(wt, "commit", "-q", "-m", "b")
+    pushed = _git(wt, "push", "-q", "origin", "task/T", check=False)
+    assert pushed.returncode != 0 and "husky-pre-push" in pushed.stderr
+    seen = marker.read_text(encoding="utf-8")
+    assert "origin" in seen and "refs/heads/task/T" in seen  # arguments (remote, url) et entrée (refs) transmis
+
+
+def test_reinstalling_the_fence_keeps_pointing_at_the_original_hooks(tmp_path: Path) -> None:
+    repo, wt = tmp_path / "repo", tmp_path / "wt"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    (repo / "a.txt").write_text("a\n", encoding="utf-8")
+    _git(repo, "add", "a.txt")
+    _git(repo, "commit", "-q", "-m", "init")
+    _refusing_hook(repo / ".git" / "hooks" / "pre-commit", "depot-pre-commit")
+    _git(repo, "worktree", "add", "-q", "-b", "task/T", str(wt))
+    install_fence(wt, tmp_path / "ledger", "T", 1, python=sys.executable)
+    install_fence(wt, tmp_path / "ledger", "T", 2, python=sys.executable)  # nouveau claim : même dépôt, autre epoch
+    (wt / "c.txt").write_text("c", encoding="utf-8")
+    _git(wt, "add", "c.txt")
+    refused = _git(wt, "commit", "-q", "-m", "c", check=False)
+    assert refused.returncode != 0 and "depot-pre-commit" in refused.stderr
+    fence = json.loads((repo / ".git" / "worktrees" / "wt" / "grimoire-fence" / "fence.json").read_text(encoding="utf-8"))
+    assert fence["epoch"] == 2 and Path(fence["hooks_dir"]) == repo / ".git" / "hooks"

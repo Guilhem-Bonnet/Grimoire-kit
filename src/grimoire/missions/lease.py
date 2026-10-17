@@ -41,6 +41,9 @@ BACKOFF_BASE = timedelta(minutes=10)
 #: Origine d'une barrière posée par l'annulation de la tâche (K3, issue #768) : le frein
 #: d'outil la nomme (« annulée ») plutôt que de dire seulement « epoch périmé ».
 ORIGIN_CANCEL = "cancel"
+#: Origine d'une barrière posée quand le titulaire rend le bail par un chemin légitime (release,
+#: blocage, échec, clôture) : le frein d'outil ne la prend pas pour une perte de bail (K3-S1-01).
+ORIGIN_HAND_BACK = "hand_back"
 
 LEASES_DIRNAME = "leases"
 _SCHEMA = "grimoire-task-lease/v1"

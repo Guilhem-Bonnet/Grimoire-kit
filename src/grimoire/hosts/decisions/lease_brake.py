@@ -37,7 +37,7 @@ from typing import TYPE_CHECKING
 from grimoire.core.standard_state import LEDGER_RELPATH
 from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
 from grimoire.hosts.decisions.tool_facts import ToolFacts, command_surface
-from grimoire.missions.lease import ORIGIN_CANCEL, LeaseFile, lease_path, read_lease
+from grimoire.missions.lease import ORIGIN_CANCEL, ORIGIN_HAND_BACK, LeaseFile, lease_path, read_lease
 from grimoire.policies.schemas import MutationClass
 
 if TYPE_CHECKING:
@@ -56,6 +56,23 @@ _HOOKS_PATH_OVERRIDE = re.compile(r"\bgit\b[^;&|\n]*?\s-c\s*core\.hooksPath\b")
 #: Les commandes qui passent par le ledger lui-même (claim, attach, renew…) : le ledger
 #: refuse déjà un effet d'epoch périmé, et c'est par elles qu'une session reprend un bail.
 _GRIMOIRE_TASK = re.compile(r"^\s*(?:\S*/)?grimoire\s+task\b")
+#: Ce qui enchaîne, redirige ou substitue : une commande qui en porte n'est pas « un `grimoire task` ».
+_SHELL_COMPOSITION = re.compile(r"[;&|<>`\r\n]|\$\(")
+#: ``2>&1`` : une redirection de descripteur, pas une écriture de fichier.
+_FD_DUP = re.compile(r"\d*>&\d")
+
+
+def _simple_grimoire_task(command: str) -> bool:
+    """``True`` pour une commande ``grimoire task …`` seule, sans rien enchaîner derrière (K3-S1-04).
+
+    L'exemption existe pour que la session périmée puisse reprendre son bail ; elle ne
+    vaut que pour cette commande. ``grimoire task show x && touch f`` exécuterait ``touch``
+    sous couvert de l'exemption. Le texte entre guillemets n'est pas du shell
+    (:func:`command_surface`) : ``grimoire task add 'a; b'`` reste simple. Fail-closed :
+    la moindre composition refuse l'exemption, jamais le contraire.
+    """
+    surface = _FD_DUP.sub("", command_surface(command)).strip()
+    return bool(_GRIMOIRE_TASK.match(surface)) and not _SHELL_COMPOSITION.search(surface)
 
 
 def _lease_holder(hook: HookInput) -> tuple[str, int]:
@@ -68,29 +85,52 @@ def _lease_holder(hook: HookInput) -> tuple[str, int]:
     return (state.task_id, state.lease_epoch) if state.task_id and state.lease_epoch > 0 else ("", 0)
 
 
-def _stale_reason(root: Path, task_id: str, epoch: int) -> tuple[str, bool]:
-    """``(motif, annulée)`` — ``("", False)`` quand la session tient encore son bail.
+_HELD = "held"
+_RELEASED = "released"
+_STALE = "stale_epoch"
+_CANCELLED = "cancelled"
+
+
+def _lease_state(root: Path, task_id: str, epoch: int) -> tuple[str, str]:
+    """``(état, motif)`` du bail que la session croit tenir : ``held``, ``released``, ``stale_epoch`` ou ``cancelled``.
+
+    ``released`` : la session a quitté son bail par la porte — release, blocage, échec ou
+    clôture (barrière ``hand_back`` à l'epoch suivant le sien). Elle ne tient plus rien,
+    mais personne ne lui a pris : le frein se tait, comme pour une session sans bail
+    (K3-S1-01). Une barrière posée par la récolte, un autre titulaire, un autre epoch ou
+    une annulation restent des refus.
 
     Fichier d'abord ; absent ou illisible, le ledger relu une fois (``check_holder``).
     """
     cached = read_lease(lease_path(root, task_id))
     if cached is not None:
         if cached.holder and cached.epoch == epoch:
-            return "", False
+            return _HELD, ""
         if cached.origin == ORIGIN_CANCEL:
-            return f"la tâche {task_id} a été annulée (bail rendu, epoch {cached.epoch})", True
-        return f"epoch {epoch} périmé : le bail de {task_id} est à l'epoch {cached.epoch}", False
+            return _CANCELLED, f"la tâche {task_id} a été annulée (bail rendu, epoch {cached.epoch})"
+        if not cached.holder and cached.origin == ORIGIN_HAND_BACK and cached.epoch == epoch + 1:
+            return _RELEASED, ""
+        return _STALE, f"epoch {epoch} périmé : le bail de {task_id} est à l'epoch {cached.epoch}"
     if not (root / "events.jsonl").is_file():
-        return "", False
+        return _HELD, ""
     from grimoire.missions.ledger import MissionLedger
     from grimoire.missions.schemas import TaskState
 
     ledger = MissionLedger(root)
     check = ledger.check_holder(task_id, epoch)
     if check.ok:
-        return "", False
+        return _HELD, ""
     task = ledger.get_task(task_id)
-    return check.reason, bool(task is not None and task.status is TaskState.CANCELLED)
+    if task is not None and task.status is TaskState.CANCELLED:
+        return _CANCELLED, check.reason
+    if (
+        task is not None
+        and task.claim is not None
+        and task.claim.lease_epoch == epoch
+        and task.status in (TaskState.CLOSED, TaskState.BLOCKED, TaskState.FAILED)
+    ):
+        return _RELEASED, ""  # le claim de la session, rendu par une sortie légitime
+    return _STALE, check.reason
 
 
 def _no_verify(facts: ToolFacts) -> str:
@@ -167,11 +207,13 @@ def lease_brake(hook: HookInput, facts: ToolFacts) -> Decision | None:
         if not task_id:
             return None
         root = hook.project_root.resolve() / LEDGER_RELPATH
-        reason, cancelled = _stale_reason(root, task_id, epoch)
-        if reason:
-            if facts.command and _GRIMOIRE_TASK.match(facts.command):
+        state, reason = _lease_state(root, task_id, epoch)
+        if state == _RELEASED:
+            return None
+        if state != _HELD:
+            if facts.command and _simple_grimoire_task(facts.command):
                 return None
-            return _deny(hook, task_id, epoch, reason, "cancelled" if cancelled else "stale_epoch")
+            return _deny(hook, task_id, epoch, reason, state)
         bypass = _no_verify(facts)
         if bypass:
             return _deny(hook, task_id, epoch, f"{bypass} alors que la session tient le bail de {task_id}", "no_verify")

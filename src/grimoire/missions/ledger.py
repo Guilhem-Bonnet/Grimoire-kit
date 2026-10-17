@@ -33,6 +33,7 @@ from grimoire.missions.lease import (
     DEFAULT_LEASE_TTL_SECONDS,
     MAX_ATTEMPTS,
     ORIGIN_CANCEL,
+    ORIGIN_HAND_BACK,
     LeaseFile,
     backoff_delay,
     lease_path,
@@ -124,7 +125,6 @@ _FAILED_DISPATCH = frozenset({"red", "timeout", "error"})
 _HELD = (TaskState.CLAIMED, TaskState.RUNNING)
 #: Origine d'une barrière du fichier de bail (K2-S2-02) : voir :class:`LeaseFile`.
 ORIGIN_REAP = "reap"
-ORIGIN_HAND_BACK = "hand_back"
 
 
 @dataclass(frozen=True, slots=True)

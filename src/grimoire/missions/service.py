@@ -333,13 +333,19 @@ class TaskService:
 
         Même règle que :meth:`MissionLedger.attach_session` — un événement de
         plus, jamais une réécriture, jamais le vol d'un claim déjà rattaché à
-        une autre session — puis le board est reprojeté pour que le cockpit
+        une autre session — puis, pour un rattachement explicite, le journal de
+        la session note l'epoch du claim (:meth:`_note_session_lease`) ; enfin le board est reprojeté pour que le cockpit
         voie la session sans attendre un autre geste.
         """
         task = self.ledger.attach_session(
             task_id, session_id, session_host=session_host, actor_id=actor, explicit=explicit,
             host_version=host_version,
         )
+        if explicit:
+            # `task attach` (K3-S1-02) rattache une session à un claim qui peut être d'un autre
+            # epoch que celui qu'elle avait : sans cette note le journal garde l'ancien et le
+            # frein refuse la session pour toujours. Un geste explicite vaut reprise du bail.
+            self._note_session_lease(task, session_id)
         self.project_board()
         return task
 

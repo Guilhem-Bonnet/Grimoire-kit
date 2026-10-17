@@ -10,10 +10,15 @@ sien, un bail rendu ou annulé, et le push est refusé — quel que soit l'hôte
 Mécanisme : le dossier git du worktree reçoit ``grimoire-fence/fence.json``
 (tâche, epoch, chemin du fichier de bail) et ``grimoire-fence/hooks/pre-push``,
 et ``core.hooksPath`` de *ce worktree seul* (``extensions.worktreeConfig``) y
-pointe. Le hook rend ensuite la main au ``pre-push`` du dépôt s'il y en a un :
-la fence s'ajoute, elle ne remplace rien.
+pointe. Comme ``core.hooksPath`` est unique, la fence relaie : à l'installation elle lit le
+dossier de hooks effectif du dépôt (``core.hooksPath`` du dépôt — husky, par exemple — sinon
+``<git-common-dir>/hooks``), le note dans ``fence.json`` (``hooks_dir``) et écrit, pour
+chaque hook git client, un relais qui exécute le hook d'origine avec ses arguments et son
+entrée. Le ``pre-push`` lance d'abord le contrôle d'epoch, puis celui d'origine : la fence
+s'ajoute, elle ne remplace rien.
 
-Limites écrites : ``--no-verify`` contourne tout hook git (le frein l'interdit là
+Limites écrites : le dossier d'origine est lu à l'installation, pas à chaque hook (un
+``core.hooksPath`` changé ensuite demande de réinstaller) ; ``--no-verify`` contourne tout hook git (le frein l'interdit là
 où l'hôte le tient, et rien d'autre) ; un fichier de bail illisible ou une fence
 mal formée refuse le push (fail-closed, avec le motif) ; la fence ne protège que
 le worktree où elle est posée.
@@ -34,17 +39,35 @@ from grimoire.missions.lease import ORIGIN_CANCEL, lease_path, read_lease
 FENCE_DIRNAME = "grimoire-fence"
 _SCHEMA = "grimoire-task-fence/v1"
 
-_HOOK_TEMPLATE = """#!/bin/sh
+#: Les hooks git côté client (githooks(5)) que la fence relaie vers le dossier d'origine. Hors
+#: liste : les hooks serveur (rien à relayer dans un worktree) et ``fsmonitor-watchman``, que git
+#: ne cherche pas dans ``core.hooksPath`` mais par ``core.fsmonitor``.
+RELAYED_HOOKS: tuple[str, ...] = (
+    "applypatch-msg", "pre-applypatch", "post-applypatch", "pre-commit", "pre-merge-commit",
+    "prepare-commit-msg", "commit-msg", "post-commit", "pre-rebase", "post-checkout", "post-merge",
+    "pre-push", "pre-auto-gc", "post-rewrite", "reference-transaction", "post-index-change",
+)
+
+_RELAY_TEMPLATE = """#!/bin/sh
+# Grimoire : relais de la fence de la tache (K3, issue #768) vers le hook d'origine du depot.
+orig={orig}
+if [ -x "$orig" ]; then
+    exec "$orig" "$@"
+fi
+exit 0
+"""
+
+_PRE_PUSH_TEMPLATE = """#!/bin/sh
 # Grimoire : fence git de la tache (K3, issue #768). Refuse le push d'une session dont
-# le bail n'est plus le sien, puis rend la main au pre-push du depot s'il y en a un.
+# le bail n'est plus le sien, puis rend la main au pre-push d'origine du depot s'il y en a un.
 fence={fence}
+orig={orig}
 input="$(mktemp)" || exit 1
 trap 'rm -f "$input"' EXIT
 cat > "$input"
 {python} -m grimoire.missions.prepush_fence check "$fence" || exit 1
-common="$(git rev-parse --git-common-dir)"
-if [ -x "$common/hooks/pre-push" ]; then
-    "$common/hooks/pre-push" "$@" < "$input"
+if [ -x "$orig" ]; then
+    "$orig" "$@" < "$input"
     exit $?
 fi
 exit 0
@@ -75,27 +98,78 @@ def fence_dir(worktree: Path) -> Path:
     return Path(_git(worktree, "rev-parse", "--absolute-git-dir")) / FENCE_DIRNAME
 
 
+def _git_value(worktree: Path, *args: str) -> str:
+    """Une valeur de config git, ``""`` si elle n'existe pas (``git config --get`` sort en 1)."""
+    done = subprocess.run(
+        ["git", "-C", str(worktree), *args],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30, check=False,
+    )
+    return done.stdout.strip() if done.returncode == 0 else ""
+
+
+def _origin_hooks_dir(worktree: Path, root: Path) -> Path:
+    """Le dossier de hooks que git utiliserait sans la fence : celui qu'elle doit relayer.
+
+    ``core.hooksPath`` effectif (``--type=path`` développe ``~``) ; un chemin relatif se lit
+    depuis la racine du worktree, là où git lance les hooks. Sans ``core.hooksPath``,
+    ``<git-common-dir>/hooks``. Réinstaller : si ``core.hooksPath`` est déjà celui de la fence,
+    on garde l'origine notée la première fois — jamais la fence elle-même, qui se relaierait.
+    """
+    ours = (root / "hooks").resolve()
+    configured = _git_value(worktree, "config", "--type=path", "--get", "core.hooksPath")
+    if configured:
+        top = Path(_git(worktree, "rev-parse", "--show-toplevel"))
+        candidate = (top / configured).resolve()
+        if candidate != ours:
+            return candidate
+        noted = _noted_hooks_dir(root / "fence.json")
+        if noted is not None:
+            return noted
+    common = Path(_git(worktree, "rev-parse", "--git-common-dir"))
+    return ((worktree / common) if not common.is_absolute() else common).resolve() / "hooks"
+
+
+def _noted_hooks_dir(fence_file: Path) -> Path | None:
+    try:
+        raw = json.loads(fence_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    noted = raw.get("hooks_dir") if isinstance(raw, dict) else None
+    return Path(noted) if isinstance(noted, str) and noted else None
+
+
 def install_fence(worktree: Path, ledger_root: Path, task_id: str, epoch: int, *, python: str | None = None) -> Path:
-    """Pose la fence de *task_id* à l'epoch *epoch* dans *worktree* ; rend le chemin du hook.
+    """Pose la fence de *task_id* à l'epoch *epoch* dans *worktree* ; rend le chemin du hook ``pre-push``.
 
     *epoch* est celui que le titulaire tient à l'installation. Réinstaller après un
-    nouveau claim remplace l'ancien epoch : c'est le geste du nouveau titulaire.
+    nouveau claim remplace l'ancien epoch : c'est le geste du nouveau titulaire. Tous les
+    hooks git client du dépôt restent actifs (:data:`RELAYED_HOOKS`, relayés vers le dossier
+    d'origine) ; seul ``pre-push`` ajoute le contrôle d'epoch.
     """
     root = fence_dir(worktree)
     hooks = root / "hooks"
     hooks.mkdir(parents=True, exist_ok=True)
+    origin = _origin_hooks_dir(worktree, root)
     lease = lease_path(ledger_root.resolve(), task_id)
-    state = {"$schema": _SCHEMA, "task_id": task_id, "epoch": epoch, "lease_file": str(lease)}
+    state = {
+        "$schema": _SCHEMA, "task_id": task_id, "epoch": epoch, "lease_file": str(lease), "hooks_dir": str(origin),
+    }
     (root / "fence.json").write_text(json.dumps(state, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
-    hook = hooks / "pre-push"
-    hook.write_text(
-        _HOOK_TEMPLATE.format(fence=shlex.quote(str(root / "fence.json")), python=shlex.quote(python or sys.executable)),
-        encoding="utf-8",
-    )
-    hook.chmod(hook.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    for name in RELAYED_HOOKS:
+        quoted = shlex.quote(str(origin / name))
+        body = (
+            _PRE_PUSH_TEMPLATE.format(
+                fence=shlex.quote(str(root / "fence.json")), orig=quoted, python=shlex.quote(python or sys.executable)
+            )
+            if name == "pre-push"
+            else _RELAY_TEMPLATE.format(orig=quoted)
+        )
+        hook = hooks / name
+        hook.write_text(body, encoding="utf-8")
+        hook.chmod(hook.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     _git(worktree, "config", "extensions.worktreeConfig", "true")
     _git(worktree, "config", "--worktree", "core.hooksPath", str(hooks))
-    return hook
+    return hooks / "pre-push"
 
 
 def check_fence(fence_file: Path) -> FenceVerdict:
