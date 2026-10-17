@@ -201,12 +201,12 @@ def detect_dim(model_dir: Path) -> int | None:
     pooling = model_dir / "1_Pooling" / "config.json"
     if pooling.is_file():
         with contextlib.suppress(OSError, ValueError, KeyError):
-            value = json.loads(pooling.read_text())["word_embedding_dimension"]
+            value = json.loads(pooling.read_text(encoding="utf-8"))["word_embedding_dimension"]
             return int(value)
     config = model_dir / "config.json"
     if config.is_file():
         with contextlib.suppress(OSError, ValueError, KeyError):
-            value = json.loads(config.read_text())["hidden_size"]
+            value = json.loads(config.read_text(encoding="utf-8"))["hidden_size"]
             return int(value)
     return None
 
@@ -295,7 +295,7 @@ def export_bundle(model: str, out_path: Path, *, model_name: str = "") -> Bundle
             files=entries,
             created_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
         )
-        (staging / _MANIFEST_NAME).write_text(json.dumps(manifest.to_dict(), indent=2) + "\n")
+        (staging / _MANIFEST_NAME).write_text(json.dumps(manifest.to_dict(), indent=2) + "\n", encoding="utf-8")
 
         with tarfile.open(out_path, "w:gz") as tar:
             tar.add(staging, arcname=_ROOT_DIR)
@@ -312,7 +312,7 @@ def _read_manifest(root: Path) -> BundleManifest:
         msg = f"Bundle is missing {_MANIFEST_NAME}"
         raise BundleError(msg)
     try:
-        data = json.loads(manifest_path.read_text())
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
     except ValueError as exc:
         msg = f"Bundle manifest is not valid JSON: {exc}"
         raise BundleError(msg) from None

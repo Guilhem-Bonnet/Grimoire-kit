@@ -7,6 +7,9 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
@@ -84,6 +87,22 @@ _vector_granularity_opt = typer.Option(
 )
 
 
+# Racine de projet imposée à la place du répertoire courant, par contexte
+# d'exécution (donc par thread de requête) : le cockpit sert plusieurs projets
+# depuis un seul processus et ne doit jamais faire de ``chdir``.
+_PROJECT_ROOT_OVERRIDE: ContextVar[Path | None] = ContextVar("grimoire_memory_project_root", default=None)
+
+
+@contextmanager
+def project_root_override(path: Path) -> Iterator[None]:
+    """Résout le projet des commandes ``memory`` depuis ``path`` dans ce contexte."""
+    token = _PROJECT_ROOT_OVERRIDE.set(path)
+    try:
+        yield
+    finally:
+        _PROJECT_ROOT_OVERRIDE.reset(token)
+
+
 def _get_fmt(ctx: typer.Context) -> str:
     return str((ctx.obj or {}).get("output", "text"))
 
@@ -102,7 +121,8 @@ def _load_config_context(path: Path = Path()) -> tuple[GrimoireConfig, Path]:
     """Resolve project config without instantiating the memory backend."""
     from grimoire.tools._common import find_project_root
 
-    target = path.resolve()
+    override = _PROJECT_ROOT_OVERRIDE.get()
+    target = (override if override is not None and path == Path() else path).resolve()
     config_path = target / "project-context.yaml"
     if not config_path.is_file():
         try:
@@ -145,7 +165,11 @@ def _load_mempalace_backend(palace: Path) -> Any:
 
 
 def _parse_paths(raw: str) -> list[Path]:
-    return [Path(item.strip()) for item in raw.split(",") if item.strip()]
+    paths = [Path(item.strip()) for item in raw.split(",") if item.strip()]
+    override = _PROJECT_ROOT_OVERRIDE.get()
+    if override is None:
+        return paths
+    return [item if item.is_absolute() else override / item for item in paths]
 
 
 def _parse_exclude(raw: str) -> set[str]:

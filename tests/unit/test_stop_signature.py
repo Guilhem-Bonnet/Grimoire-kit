@@ -223,7 +223,10 @@ def _lock_state_dir(root: Path) -> Path:
     return folder
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root ignore les droits de répertoire")
+@pytest.mark.skipif(
+    os.name != "posix" or os.geteuid() == 0,
+    reason="droits de répertoire POSIX : absents sous Windows, ignorés par root",
+)
 def test_an_unwritable_counter_releases_the_continued_stop(tmp_path: Path) -> None:
     root = _project(tmp_path, git=True)
     assert _stop(root, active=False).outcome is Outcome.BLOCK  # type: ignore[attr-defined]

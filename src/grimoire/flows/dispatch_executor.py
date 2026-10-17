@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import shlex
+import subprocess
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -95,6 +96,11 @@ def _result_path(project_root: Path, run_id: str, node_id: str) -> Path:
     return project_root / DISPATCH_RESULTS_RELPATH / run_id / f"{node_id}.result.json"
 
 
+def _quote(part: str) -> str:
+    """Un argument pour ``shell=True`` : cmd.exe ne connaît pas les apostrophes de ``shlex.quote``."""
+    return subprocess.list2cmdline([part]) if sys.platform == "win32" else shlex.quote(part)
+
+
 def _verify_command(python: str, blueprint_path: Path, node_id: str, result_path: Path) -> str:
     """La commande ``--check`` : relit le même contrat, appelle la même fonction.
 
@@ -106,7 +112,7 @@ def _verify_command(python: str, blueprint_path: Path, node_id: str, result_path
     n'appelle jamais à la main.
     """
     return " ".join(
-        shlex.quote(part)
+        _quote(part)
         for part in (
             python,
             "-m",
@@ -144,17 +150,21 @@ def _acceptance_checks(
     expect_stdout: list[str | None] = []
     timeouts: list[float | None] = []
     for run in contract.acceptance_runs:
-        raw = run.raw if run.cwd in (".", "") else f"cd {shlex.quote(run.cwd)} && {run.raw}"
+        raw = run.raw if run.cwd in (".", "") else f"cd {_quote(run.cwd)} && {run.raw}"
         cmds.append(raw)
         expect_exits.append(run.expect_exit)
         expect_stdout.append(run.expect_stdout_contains)
         timeouts.append(run.timeout_s)
     for evidence in contract.acceptance_evidence:
         if evidence.kind == "path_exists":
-            cmds.append(f"test -e {shlex.quote(evidence.value)}")
+            if sys.platform == "win32":  # `test` n'existe pas sous cmd.exe
+                probe = "import os, sys; sys.exit(0 if os.path.exists(sys.argv[1]) else 1)"
+                cmds.append(" ".join(_quote(part) for part in (sys.executable, "-c", probe, evidence.value)))
+            else:
+                cmds.append(f"test -e {shlex.quote(evidence.value)}")
         else:  # "test" — le seul autre genre que blueprint_loader produit
             pytest_argv = (sys.executable, *_PYTEST_MODULE_INVOCATION, evidence.value)
-            cmds.append(" ".join(shlex.quote(part) for part in pytest_argv))
+            cmds.append(" ".join(_quote(part) for part in pytest_argv))
         expect_exits.append(0)
         expect_stdout.append(None)
         timeouts.append(None)

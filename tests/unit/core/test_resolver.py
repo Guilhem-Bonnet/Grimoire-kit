@@ -30,7 +30,7 @@ class TestResolvePath:
 
     def test_must_exist_ok(self, resolver: PathResolver, tmp_path: Path) -> None:
         f = tmp_path / "exists.txt"
-        f.write_text("hello")
+        f.write_text("hello", encoding="utf-8")
         p = resolver.resolve_path("exists.txt", must_exist=True)
         assert p == f
 

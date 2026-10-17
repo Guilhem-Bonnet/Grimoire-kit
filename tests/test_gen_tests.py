@@ -70,7 +70,7 @@ class TestLoadDna(unittest.TestCase):
 
     def test_valid_yaml(self):
         f = self.tmpdir / "test.dna.yaml"
-        f.write_text("name: test-dna\nversion: '1.0.0'\ntraits: []\n")
+        f.write_text("name: test-dna\nversion: '1.0.0'\ntraits: []\n", encoding="utf-8")
         dna = self.gen.load_dna(str(f))
         self.assertEqual(dna["name"], "test-dna")
 
@@ -80,7 +80,7 @@ class TestLoadDna(unittest.TestCase):
 
     def test_invalid_format_exits(self):
         f = self.tmpdir / "bad.yaml"
-        f.write_text("just a plain string\n")
+        f.write_text("just a plain string\n", encoding="utf-8")
         with self.assertRaises(SystemExit):
             self.gen.load_dna(str(f))
 
@@ -186,7 +186,7 @@ class TestGenerateTests(unittest.TestCase):
         files = self.gen.generate_tests(self.dna, "pytest", str(self.tmpdir), "test.dna.yaml")
         self.assertEqual(len(files), 1)
         self.assertTrue(str(files[0]).endswith(".py"))
-        content = Path(files[0]).read_text()
+        content = Path(files[0]).read_text(encoding="utf-8")
         self.assertIn("def test_", content)
         self.assertIn("test-archetype", content)
 
@@ -194,21 +194,21 @@ class TestGenerateTests(unittest.TestCase):
         files = self.gen.generate_tests(self.dna, "jest", str(self.tmpdir), "test.dna.yaml")
         self.assertEqual(len(files), 1)
         self.assertTrue(str(files[0]).endswith(".test.ts"))
-        content = Path(files[0]).read_text()
+        content = Path(files[0]).read_text(encoding="utf-8")
         self.assertIn("describe(", content)
 
     def test_bats_generates_bats_files(self):
         files = self.gen.generate_tests(self.dna, "bats", str(self.tmpdir), "test.dna.yaml")
         self.assertEqual(len(files), 1)
         self.assertTrue(str(files[0]).endswith(".bats"))
-        content = Path(files[0]).read_text()
+        content = Path(files[0]).read_text(encoding="utf-8")
         self.assertIn("@test", content)
 
     def test_go_test_generates_go_files(self):
         files = self.gen.generate_tests(self.dna, "go-test", str(self.tmpdir), "test.dna.yaml")
         self.assertEqual(len(files), 1)
         self.assertTrue(str(files[0]).endswith("_test.go"))
-        content = Path(files[0]).read_text()
+        content = Path(files[0]).read_text(encoding="utf-8")
         self.assertIn("func Test_", content)
 
     def test_unsupported_framework_exits(self):
@@ -246,7 +246,7 @@ class TestGenerateTests(unittest.TestCase):
             ],
         }
         files = self.gen.generate_tests(dna, "pytest", str(self.tmpdir), "test.dna.yaml")
-        content = Path(files[0]).read_text()
+        content = Path(files[0]).read_text(encoding="utf-8")
         self.assertIn("xfail", content)
 
 

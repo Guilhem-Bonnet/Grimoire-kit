@@ -15,16 +15,16 @@ def _monorepo(tmp_path: Path) -> Path:
     root = tmp_path / "mono"
     api = root / "api"
     api.mkdir(parents=True)
-    (api / "pyproject.toml").write_text("[build-system]\n")
+    (api / "pyproject.toml").write_text("[build-system]\n", encoding="utf-8")
     front = root / "frontend"
     front.mkdir()
-    (front / "package.json").write_text("{}")
+    (front / "package.json").write_text("{}", encoding="utf-8")
     # Excluded directories carrying markers — must never be visited.
     for excluded in ("node_modules", ".venv", "_grimoire-runtime-output", ".git"):
         d = root / excluded / "trap"
         d.mkdir(parents=True)
-        (d / "pyproject.toml").write_text("")
-        (root / excluded / "package.json").write_text("{}")
+        (d / "pyproject.toml").write_text("", encoding="utf-8")
+        (root / excluded / "package.json").write_text("{}", encoding="utf-8")
     return root
 
 
@@ -33,7 +33,7 @@ def _monorepo(tmp_path: Path) -> Path:
 
 class TestScanUnchanged:
     def test_scan_signature_and_result_on_simple_project(self, tmp_path: Path) -> None:
-        (tmp_path / "pyproject.toml").write_text("[build-system]\n")
+        (tmp_path / "pyproject.toml").write_text("[build-system]\n", encoding="utf-8")
         result = StackScanner(tmp_path).scan()
         assert [s.name for s in result.stacks] == ["python"]
         assert result.root == tmp_path
@@ -41,7 +41,7 @@ class TestScanUnchanged:
     def test_scan_does_not_recurse(self, tmp_path: Path) -> None:
         sub = tmp_path / "sub"
         sub.mkdir()
-        (sub / "go.mod").write_text("module m\n")
+        (sub / "go.mod").write_text("module m\n", encoding="utf-8")
         result = StackScanner(tmp_path).scan()
         assert result.stacks == ()
 
@@ -72,7 +72,7 @@ class TestScanTreeMonorepo:
         assert tree.is_monorepo is True
 
     def test_not_monorepo_when_root_has_markers(self, tmp_path: Path) -> None:
-        (tmp_path / "pyproject.toml").write_text("")
+        (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
         tree = StackScanner(tmp_path).scan_tree()
         assert tree.is_monorepo is False
         assert [s.name for s in tree.root_result.stacks] == ["python"]
@@ -95,7 +95,7 @@ class TestScanTreeBounds:
     def test_depth_limit(self, tmp_path: Path) -> None:
         deep = tmp_path / "a" / "b" / "c"
         deep.mkdir(parents=True)
-        (deep / "Cargo.toml").write_text("[package]\n")
+        (deep / "Cargo.toml").write_text("[package]\n", encoding="utf-8")
         shallow = StackScanner(tmp_path).scan_tree(max_depth=2)
         assert shallow.subprojects == ()
         deeper = StackScanner(tmp_path).scan_tree(max_depth=3)
@@ -105,15 +105,15 @@ class TestScanTreeBounds:
         outer = tmp_path / "outer"
         inner = outer / "inner"
         inner.mkdir(parents=True)
-        (outer / "package.json").write_text("{}")
-        (inner / "go.mod").write_text("module m\n")
+        (outer / "package.json").write_text("{}", encoding="utf-8")
+        (inner / "go.mod").write_text("module m\n", encoding="utf-8")
         tree = StackScanner(tmp_path).scan_tree(max_depth=3)
         assert {r.root.name for r in tree.subprojects} == {"outer"}
 
     def test_symlinks_not_followed(self, tmp_path: Path) -> None:
         real = tmp_path / "elsewhere"
         real.mkdir()
-        (real / "go.mod").write_text("module m\n")
+        (real / "go.mod").write_text("module m\n", encoding="utf-8")
         root = tmp_path / "root"
         root.mkdir()
         (root / "link").symlink_to(real, target_is_directory=True)
@@ -125,7 +125,7 @@ class TestScanTreeBounds:
     ) -> None:
         ok = tmp_path / "ok"
         ok.mkdir()
-        (ok / "pyproject.toml").write_text("")
+        (ok / "pyproject.toml").write_text("", encoding="utf-8")
         locked = tmp_path / "locked"
         locked.mkdir()
         real_iterdir = Path.iterdir

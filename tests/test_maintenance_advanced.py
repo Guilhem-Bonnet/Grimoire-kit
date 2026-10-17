@@ -192,7 +192,7 @@ class TestPruneDecisions(_MaintenanceTestBase):
         archives = list(self.maint.ARCHIVE_DIR.glob("decisions-archive-*.md"))
         self.assertEqual(len(archives), 1)
         # Recent should remain
-        remaining = self.maint.DECISIONS_LOG.read_text()
+        remaining = self.maint.DECISIONS_LOG.read_text(encoding="utf-8")
         self.assertIn(recent_date, remaining)
         self.assertNotIn(old_date, remaining)
 
@@ -212,8 +212,8 @@ class TestPruneLearnings(_MaintenanceTestBase):
             "# Dev Learnings\n"
             "- [2026-01-01] Always use type hints in Python\n"
             "- [2026-01-15] Always use type hints in Python functions\n"
-            "- [2026-02-01] Docker containers need health checks\n"
-        )
+            "- [2026-02-01] Docker containers need health checks\n",
+        encoding="utf-8",)
         captured = StringIO()
         with patch("sys.stdout", captured):
             self.maint.prune_learnings()
@@ -224,8 +224,8 @@ class TestPruneLearnings(_MaintenanceTestBase):
         (self.maint.LEARNINGS_DIR / "agent-learnings-qa.md").write_text(
             "# QA Learnings\n"
             "- Always run integration tests before merge\n"
-            "- Docker builds need multi-stage for security\n"
-        )
+            "- Docker builds need multi-stage for security\n",
+        encoding="utf-8",)
         captured = StringIO()
         with patch("sys.stdout", captured):
             self.maint.prune_learnings()
@@ -309,7 +309,7 @@ class TestHealthCheck(_MaintenanceTestBase):
 
     def test_rate_limited(self):
         # Write a recent health check timestamp
-        self.maint.HEALTH_STATE_FILE.write_text(datetime.now().isoformat())
+        self.maint.HEALTH_STATE_FILE.write_text(datetime.now().isoformat(), encoding="utf-8")
         captured = StringIO()
         with patch("sys.stdout", captured):
             self.maint.health_check(force=False)
@@ -317,7 +317,7 @@ class TestHealthCheck(_MaintenanceTestBase):
         self.assertEqual(captured.getvalue(), "")
 
     def test_force_bypasses_rate_limit(self):
-        self.maint.HEALTH_STATE_FILE.write_text(datetime.now().isoformat())
+        self.maint.HEALTH_STATE_FILE.write_text(datetime.now().isoformat(), encoding="utf-8")
         self.maint.save_memories([
             {"memory": "Memory for forced check.", "timestamp": datetime.now(UTC).isoformat()},
         ])
@@ -338,12 +338,12 @@ class TestConsolidateLearnings(_MaintenanceTestBase):
             "# Dev Learnings\n"
             "- [2026-01-01] Always validate inputs before processing\n"
             "- [2026-02-01] Always validate inputs before processing them\n"
-            "- [2026-03-01] Use Docker health checks in compose\n"
-        )
+            "- [2026-03-01] Use Docker health checks in compose\n",
+        encoding="utf-8",)
         captured = StringIO()
         with patch("sys.stdout", captured):
             self.maint.consolidate_learnings("dev")
-        content = f.read_text()
+        content = f.read_text(encoding="utf-8")
         # Should have removed one duplicate
         lines = [ln for ln in content.splitlines() if ln.startswith("- ")]
         self.assertEqual(len(lines), 2)
@@ -352,12 +352,12 @@ class TestConsolidateLearnings(_MaintenanceTestBase):
         self.maint.LEARNINGS_DIR.mkdir(parents=True)
         f = self.maint.LEARNINGS_DIR / "qa.md"
         original = "# QA\n- Run tests before merge\n- Check coverage metrics\n"
-        f.write_text(original)
+        f.write_text(original, encoding="utf-8")
         captured = StringIO()
         with patch("sys.stdout", captured):
             self.maint.consolidate_learnings("qa")
         # File unchanged
-        self.assertEqual(f.read_text(), original)
+        self.assertEqual(f.read_text(encoding="utf-8"), original)
 
     def test_missing_file_silent(self):
         self.maint.LEARNINGS_DIR.mkdir(parents=True)
@@ -368,8 +368,8 @@ class TestConsolidateLearnings(_MaintenanceTestBase):
         self.maint.LEARNINGS_DIR.mkdir(parents=True)
         for name in ["dev", "qa"]:
             (self.maint.LEARNINGS_DIR / f"{name}.md").write_text(
-                f"# {name}\n- Unique entry for {name}\n"
-            )
+                f"# {name}\n- Unique entry for {name}\n",
+            encoding="utf-8",)
         captured = StringIO()
         with patch("sys.stdout", captured):
             self.maint.consolidate_learnings(None)  # all files

@@ -8,6 +8,7 @@ repli legacy Grimoire_*.
 from __future__ import annotations
 
 import importlib.util
+import sys
 from pathlib import Path
 
 import pytest
@@ -23,6 +24,12 @@ def _load():
     return module
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : Windows a des variables d'environnement insensibles à la casse : GRIMOIRE_QDRANT_URL et Grimoire_QDRANT_URL y sont la même variable"
+    ),
+)
 def test_env_url_prefers_canonical_with_legacy_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     backends = _load()
 

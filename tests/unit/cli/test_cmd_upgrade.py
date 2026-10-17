@@ -21,10 +21,10 @@ from grimoire.cli.cmd_upgrade import (
 def v2_project(tmp_path: Path) -> Path:
     """A minimal v2 project structure."""
     (tmp_path / "project-context.yaml").write_text(
-        "project: my-project\ncommunication_language: Français\n"
-    )
+        "project: my-project\ncommunication_language: Français\n",
+    encoding="utf-8",)
     (tmp_path / "_grimoire/_memory").mkdir(parents=True)
-    (tmp_path / "_grimoire/_memory/shared-context.md").write_text("# Context\n")
+    (tmp_path / "_grimoire/_memory/shared-context.md").write_text("# Context\n", encoding="utf-8")
     return tmp_path
 
 
@@ -32,8 +32,8 @@ def v2_project(tmp_path: Path) -> Path:
 def v3_project(tmp_path: Path) -> Path:
     """A minimal v3 project structure."""
     (tmp_path / "project-context.yaml").write_text(
-        "grimoire:\n  version: '3.0'\nproject:\n  name: test\n"
-    )
+        "grimoire:\n  version: '3.0'\nproject:\n  name: test\n",
+    encoding="utf-8",)
     (tmp_path / "_grimoire/_config/agents").mkdir(parents=True)
     return tmp_path
 
@@ -52,11 +52,11 @@ class TestDetectVersion:
         assert detect_version(tmp_path) == "unknown"
 
     def test_unknown_empty_yaml(self, tmp_path: Path) -> None:
-        (tmp_path / "project-context.yaml").write_text("")
+        (tmp_path / "project-context.yaml").write_text("", encoding="utf-8")
         assert detect_version(tmp_path) == "unknown"
 
     def test_unknown_invalid_yaml(self, tmp_path: Path) -> None:
-        (tmp_path / "project-context.yaml").write_text("- [invalid: {yaml")
+        (tmp_path / "project-context.yaml").write_text("- [invalid: {yaml", encoding="utf-8")
         assert detect_version(tmp_path) == "unknown"
 
 
@@ -81,7 +81,7 @@ class TestPlanUpgrade:
         assert len(plan.warnings) > 0
 
     def test_creates_missing_dirs(self, tmp_path: Path) -> None:
-        (tmp_path / "project-context.yaml").write_text("project: x\n")
+        (tmp_path / "project-context.yaml").write_text("project: x\n", encoding="utf-8")
         plan = plan_upgrade(tmp_path)
         dir_actions = [a for a in plan.actions if a.kind == "create-dir"]
         assert len(dir_actions) > 0
@@ -101,7 +101,7 @@ class TestExecuteUpgrade:
         completed = execute_upgrade(v2_project, plan, dry_run=True)
         assert len(completed) > 0
         # v2 config should NOT have been modified
-        text = (v2_project / "project-context.yaml").read_text()
+        text = (v2_project / "project-context.yaml").read_text(encoding="utf-8")
         assert "grimoire" not in text or "version" not in text
 
     def test_execute_creates_v3_section(self, v2_project: Path) -> None:
@@ -114,7 +114,7 @@ class TestExecuteUpgrade:
         assert data["grimoire"]["version"] == "3.0"
 
     def test_execute_creates_directories(self, tmp_path: Path) -> None:
-        (tmp_path / "project-context.yaml").write_text("project: test\n")
+        (tmp_path / "project-context.yaml").write_text("project: test\n", encoding="utf-8")
         plan = plan_upgrade(tmp_path)
         execute_upgrade(tmp_path, plan, dry_run=False)
         assert (tmp_path / "_grimoire").is_dir()
@@ -125,7 +125,7 @@ class TestExecuteUpgrade:
         execute_upgrade(v2_project, plan, dry_run=False)
         # Memory file should still exist
         assert (v2_project / "_grimoire/_memory/shared-context.md").exists()
-        assert (v2_project / "_grimoire/_memory/shared-context.md").read_text() == "# Context\n"
+        assert (v2_project / "_grimoire/_memory/shared-context.md").read_text(encoding="utf-8") == "# Context\n"
 
     def test_migrated_passes_detect_v3(self, v2_project: Path) -> None:
         plan = plan_upgrade(v2_project)

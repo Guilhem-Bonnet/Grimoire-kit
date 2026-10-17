@@ -59,7 +59,7 @@ def _provider(pid: str, tier: str, script: Path) -> str:
         f'    allowed_capabilities: ["chat", "code"]\n'
         f'    default_models: ["{pid}-model"]\n'
         f'    currency: "api"\n'
-        f'    invocation: "{sys.executable} {script} {{prompt}} --model {{model}}"\n'
+        f'    invocation: "{Path(sys.executable).as_posix()} {Path(script).as_posix()} {{prompt}} --model {{model}}"\n'
         f"    models:\n"
         f'      - id: "{pid}-model"\n'
         f'        tier: "{tier}"\n'

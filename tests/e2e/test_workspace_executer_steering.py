@@ -47,7 +47,7 @@ def _tache(real_project: Path) -> str:
         ],
         check=True,
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         cwd=str(real_project),
     )
     return next(t.id for t in TaskService(real_project).list_tasks() if t.title == TITRE)

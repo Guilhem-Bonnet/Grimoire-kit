@@ -55,7 +55,7 @@ def _git_path(name: str, cwd: Path) -> Path | None:
     try:
         out = subprocess.run(
             ["git", "rev-parse", "--git-path", name],
-            cwd=cwd, capture_output=True, text=True, check=True,
+            cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace", check=True,
         ).stdout.strip()
     except (subprocess.CalledProcessError, FileNotFoundError):
         return None
@@ -67,7 +67,7 @@ def _git_toplevel(cwd: Path) -> Path | None:
     try:
         out = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
-            cwd=cwd, capture_output=True, text=True, check=True,
+            cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace", check=True,
         ).stdout.strip()
     except (subprocess.CalledProcessError, FileNotFoundError):
         return None

@@ -34,7 +34,7 @@ def _is_release_version(version: str) -> bool:
 def test_version_txt_matches_package_version() -> None:
     version_file = _REPO_ROOT / "version.txt"
     assert version_file.is_file(), "version.txt missing at repo root"
-    assert version_file.read_text().strip() == __version__
+    assert version_file.read_text(encoding="utf-8").strip() == __version__
 
 
 def test_version_is_semver_like() -> None:
