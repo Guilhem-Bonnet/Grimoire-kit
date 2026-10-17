@@ -57,6 +57,8 @@
 }
 
 :root {
+  color-scheme: dark;
+
   /* ── Surfaces ─────────────────────────────────────────────────────────── *
    * Première passe (#525) : les cinq niveaux, mesurés à 1,06-1,17 de rapport
    * de luminance entre voisins, sont rouverts à ~1,30. Seconde passe, plus
@@ -68,14 +70,24 @@
    * pas un cran de plus, un vrai palier. Coût mesuré : l'écart --ink/--ink2
    * se resserre de 1,32 à 1,21 (--ink2 doit suivre --e3, devenu plus clair)
    * — toujours net à l'œil, documenté plutôt que caché. */
-  --bg: #070a10;
-  --e1: #252c34;
-  --bar: #333c46;
-  --e2: #465260;
-  --e3: #54616f;
+  /* Douce (décision du 2026-10-17) : quatre surfaces, trois encres, un accent
+   * d'interaction, un repère de rubrique, et pour chaque état une teinte de
+   * texte, une marque (aplat, point) et un fond doux. Ces noms sont la source ;
+   * --bg/--e1/--bar/--e2/--e3 et le reste du vocabulaire historique y renvoient
+   * pour que shell.css et les espaces suivent sans réécriture. */
+  --ground: #0f1115;
+  --panel: #171a20;
+  --card: #1c2027;
+  --overlay: #20242c;
+  --hover: #242933;
+  --bg: var(--ground);
+  --e1: var(--panel);
+  --bar: var(--hover);
+  --e2: var(--card);
+  --e3: var(--overlay);
   --term: #0e1013;
   --termink: #c9ced6;
-  --line: rgba(255, 255, 255, 0.11);
+  --line: #2a2f38;
 
   /* ── Encre ────────────────────────────────────────────────────────────── */
   /* --ink2 reste la couleur des chips (fond --e2) et des infobulles
@@ -84,9 +96,9 @@
      texte que sur --e1 et --bar : 4,75:1 sur --bar. Écart --ink2/--ink3 :
      1,75 (net) ; écart --ink/--ink2 : 1,21 (resserré — voir le commentaire
      de --bg plus haut, c'est le compromis explicite de cette passe). */
-  --ink: #f2f3f5;
-  --ink2: #d7dfea;
-  --ink3: #a0aab5;
+  --ink: #eef0f4;
+  --ink2: #b9c0cb;
+  --ink3: #9099a6;
 
   /* ── Accent d'interaction ──────────────────────────────────────────────── *
    * Première passe (#525) : --acc reçoit la teinte de --s1 (bleu froid),
@@ -98,8 +110,11 @@
    * lisible sur un remplissage saturé — accent, ou tout badge d'état plein,
    * voir --ok/--warn/--bad/--s1/--s2/--s3 plus bas) restent distincts : l'un
    * pour une teinte discrète, l'autre pour un aplat franc. */
-  --acc: #4c9be8;
-  --accsoft: rgba(76, 155, 232, 0.16);
+  --acc: #8ea2ff;
+  --on-acc: #0b1030;
+  --acc-soft: #232a4a;
+  --accsoft: var(--acc-soft);
+  --rub: #f08a5d;
   --onfill: #0e1013;
 
   /* ── Marque et action primaire — une par écran ────────────────────────── */
@@ -109,8 +124,8 @@
      sous le seuil) ou orange assombri. La seconde est retenue au plus près :
      #d24619 porte le blanc à 4,54:1. En sombre, #ff6b3d avec #0e1013 dessus
      tient déjà 6,73:1 et n'est pas touché. */
-  --pri: #ff6b3d;
-  --onpri: #0e1013;
+  --pri: var(--acc);
+  --onpri: var(--on-acc);
 
   /* ── États : toujours point + mot, jamais la couleur seule ────────────── *
    * Seconde passe : aussi la couleur de fond des pastilles pleines (kit, CI,
@@ -118,9 +133,15 @@
    * déroulé), avec --onfill comme texte. Mesuré : --onfill tient 5,7 à 9,8:1
    * sur chacune des six couleurs (--ok/--warn/--bad/--s1/--s2/--s3) en fond
    * plein — la marge la plus juste est --bad (5,72:1). */
-  --ok: #3dbe7a;
-  --warn: #e2b33c;
-  --bad: #e5645a;
+  --ok: #5cd39a;
+  --warn: #f0c060;
+  --bad: #ff7d8d;
+  --ok-mark: #3fbf80;
+  --warn-mark: #e0a830;
+  --bad-mark: #f05a6e;
+  --ok-soft: #1c3329;
+  --warn-soft: #352d1a;
+  --bad-soft: #3a2027;
 
   /* ── Séries de données : jamais réutilisées pour un état ──────────────── *
    * Depuis la revue 2026-09, aussi le vocabulaire des badges sémantiques
@@ -156,8 +177,8 @@
   --syn-comment: #7d838c;
 
   /* ── Ombre de la surface posée ────────────────────────────────────────── */
-  --shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
-  --shadow-tip: 0 16px 40px rgba(0, 0, 0, 0.35);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.35);
+  --shadow-tip: 0 24px 48px rgba(0, 0, 0, 0.5);
 
   /* ── Typographie ──────────────────────────────────────────────────────── */
   --font: "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -216,45 +237,44 @@
  */
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
-    /* Passes #525/#530/#531 : --bg est monté trois fois (jusqu'à L* 96,5)
-       sans que le gris perçu ne bouge — parce que ce n'est pas --bg qui
-       porte le gris à l'écran. --e1 (`.pl-kpi`, `.pl-watch-row`, `.pl-table`
-       — les cartes de contenu) et --bar (`.pl-table th` — les en-têtes)
-       restaient à L* 87 et 79 : c'est là que l'œil lit « gris », puisque
-       --bg ne se voit qu'aux marges (`#canvas`). Quatrième passe, clair
-       seulement : la pile est inversée comme un thème clair sobre — les
-       cartes (--e1, --e2) deviennent blanches ou quasi (L* 99 et 100), le
-       fond de page (--bg, le « ground » derrière les cartes) et les barres/
-       en-têtes (--bar, --e3) deviennent un gris clair proche (L* 90),
-       chacun ≥1,25:1 de son voisin déclaré. --bar ne peut pas atteindre la
-       bande visée (L* 93-95) sans descendre sous 1,25:1 face à --e1 (quasi
-       blanc, contrainte algébrique : le plafond de --bar égale --bg dès
-       que --e1 est au minimum qui tient 1,25:1 depuis --bg) — équivalent à
-       --bg plutôt qu'à mi-chemin, documenté plutôt que forcé. --line monte
-       de .13 à .16 : les bordures de carte doivent se voir sans le secours
-       d'un fond gris derrière. --ink2/--ink3 inchangées, marge inchangée ou
-       meilleure (surface la plus sombre qu'elles touchent : --bar à L* 90,
-       plus clair qu'avant → plus de marge, jamais moins). */
-    --bg: #e3e2de;
-    --e1: #fcfcf9;
-    --bar: #e2e2de;
-    --e2: #ffffff;
-    --e3: #e4e5e0;
+    /* Douce clair : la page (--ground) est le seul gris ; panneaux, cartes et
+       surcouches sont blancs et se détachent par --line et --shadow. */
+    color-scheme: light;
+    --ground: #eef0f4;
+    --panel: #ffffff;
+    --card: #ffffff;
+    --overlay: #ffffff;
+    --hover: #f3f5f8;
+    --bg: var(--ground);
+    --e1: var(--panel);
+    --bar: var(--hover);
+    --e2: var(--card);
+    --e3: var(--overlay);
     --term: #1b1f25;
     --termink: #d6dae0;
-    --line: rgba(23, 25, 28, 0.16);
-    --ink: #17191c;
-    --ink2: #34383e;
-    --ink3: #42454b;
-    /* --acc : même teinte que --s1, voir le commentaire de :root. */
-    --acc: #1f6fbf;
-    --accsoft: rgba(31, 111, 191, 0.12);
+    --line: #e3e6eb;
+    --ink: #14171d;
+    --ink2: #4a515c;
+    --ink3: #606874;
+    --acc: #3451d1;
+    --on-acc: #ffffff;
+    --acc-soft: #eef1fd;
+    --accsoft: var(--acc-soft);
+    --rub: #b4441d;
     --onfill: #ffffff;
-    --pri: #d24619;
-    --onpri: #ffffff;
-    --ok: #1d814f;
-    --warn: #9c6d0c;
-    --bad: #b83a36;
+    --pri: var(--acc);
+    --onpri: var(--on-acc);
+    --ok: #1f7a4d;
+    --warn: #8a5a00;
+    --bad: #c0283f;
+    --ok-mark: #22945c;
+    --warn-mark: #c58500;
+    --bad-mark: #d63c52;
+    --ok-soft: #e7f5ee;
+    --warn-soft: #fdf1dc;
+    --bad-soft: #fde8eb;
+    --shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 8px 24px rgba(16, 24, 40, 0.06);
+    --shadow-tip: 0 24px 48px rgba(16, 24, 40, 0.16), 0 2px 6px rgba(16, 24, 40, 0.06);
     --s1: #1f6fbf;
     --s2: #6b48c4;
     --s3: #9a6a08;
@@ -276,25 +296,42 @@
 }
 
 :root[data-theme="light"] {
-  --bg: #e3e2de;
-  --e1: #fcfcf9;
-  --bar: #e2e2de;
-  --e2: #ffffff;
-  --e3: #e4e5e0;
+  color-scheme: light;
+  --ground: #eef0f4;
+  --panel: #ffffff;
+  --card: #ffffff;
+  --overlay: #ffffff;
+  --hover: #f3f5f8;
+  --bg: var(--ground);
+  --e1: var(--panel);
+  --bar: var(--hover);
+  --e2: var(--card);
+  --e3: var(--overlay);
   --term: #1b1f25;
   --termink: #d6dae0;
-  --line: rgba(23, 25, 28, 0.16);
-  --ink: #17191c;
-  --ink2: #34383e;
-  --ink3: #42454b;
-  --acc: #1f6fbf;
-  --accsoft: rgba(31, 111, 191, 0.12);
+  --line: #e3e6eb;
+  --ink: #14171d;
+  --ink2: #4a515c;
+  --ink3: #606874;
+  --acc: #3451d1;
+  --on-acc: #ffffff;
+  --acc-soft: #eef1fd;
+  --accsoft: var(--acc-soft);
+  --rub: #b4441d;
   --onfill: #ffffff;
-  --pri: #d24619;
-  --onpri: #ffffff;
-  --ok: #1d814f;
-  --warn: #9c6d0c;
-  --bad: #b83a36;
+  --pri: var(--acc);
+  --onpri: var(--on-acc);
+  --ok: #1f7a4d;
+  --warn: #8a5a00;
+  --bad: #c0283f;
+  --ok-mark: #22945c;
+  --warn-mark: #c58500;
+  --bad-mark: #d63c52;
+  --ok-soft: #e7f5ee;
+  --warn-soft: #fdf1dc;
+  --bad-soft: #fde8eb;
+  --shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 8px 24px rgba(16, 24, 40, 0.06);
+  --shadow-tip: 0 24px 48px rgba(16, 24, 40, 0.16), 0 2px 6px rgba(16, 24, 40, 0.06);
   --s1: #1f6fbf;
   --s2: #6b48c4;
   --s3: #9a6a08;
