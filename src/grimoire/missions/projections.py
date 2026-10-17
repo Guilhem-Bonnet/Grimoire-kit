@@ -422,7 +422,7 @@ class CockpitProjectionBuilder:
                 task_projections.append(TaskProjection(
                     task_id=task.id,
                     title=task.title,
-                    status=task.status.value,
+                    status=task.status_label,
                     task_type=task.type.value,
                     risk_profile=task.risk_profile.value,
                     mission_id=mission.id,
