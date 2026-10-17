@@ -18,12 +18,12 @@ Note : Les tests qui nécessitent qdrant-client ou sentence-transformers
        sont skippés si non disponibles.
 """
 
+import contextlib
 import importlib
 import importlib.util
+import io
 import json
 import shutil
-import contextlib
-import io
 import subprocess
 import sys
 import tempfile

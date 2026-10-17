@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import ast
 import json
+import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -190,7 +192,7 @@ def _terminal(canal: pytest.MonkeyPatch, reponse: str) -> _Terminal:
 def test_la_cli_hors_terminal_pose_l_origine_agent(canal: pytest.MonkeyPatch) -> None:
     from grimoire.cli.cmd_task import _comment_origin
 
-    canal.setattr("sys.stdin", open("/dev/null", encoding="utf-8"))  # noqa: SIM115
+    canal.setattr("sys.stdin", open(os.devnull, encoding="utf-8"))  # noqa: SIM115
     assert _comment_origin() == ORIGIN_AGENT
 
 
@@ -223,10 +225,12 @@ def test_la_cli_depuis_un_terminal_sans_confirmation_n_est_pas_humaine(canal: py
     assert _comment_origin() == "unverified"
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="pty POSIX : os.openpty n'existe pas sous Windows",
+)
 def test_la_cli_sur_un_vrai_pty_sans_variable_d_hote_ne_donne_pas_l_autorite_humaine(canal: pytest.MonkeyPatch) -> None:
     """Le scénario rejoué : stdin sur un pty, aucune variable de session, TERM_PROGRAM=vscode."""
-    import os
-
     from grimoire.cli.cmd_task import _comment_origin
 
     canal.setenv("TERM_PROGRAM", "vscode")
