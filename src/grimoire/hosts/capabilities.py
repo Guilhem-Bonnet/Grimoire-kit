@@ -189,6 +189,8 @@ _PROFILES: dict[HostId, HostProfile] = {
 HOST_ALIASES: dict[str, HostId] = {
     "claude": HostId.CLAUDE_CODE_CLI,
     "claude-code": HostId.CLAUDE_CODE_CLI,
+    # Graphie sans préfixe ``host-`` que le ledger a reçue (``task attach``).
+    "claude-code-cli": HostId.CLAUDE_CODE_CLI,
     "copilot": HostId.GITHUB_COPILOT,
     "github-copilot": HostId.GITHUB_COPILOT,
     "codex": HostId.CODEX,

@@ -42,6 +42,7 @@ from grimoire.flows.executor import InteractiveNodeExecutor
 from grimoire.flows.extract import extract_blueprint
 from grimoire.flows.registry import describe_flow
 from grimoire.flows.schemas import FlowStatusView, ResumeOutcome
+from grimoire.flows.transfer import export_run, import_run
 from grimoire.missions.dispatch import DEFAULT_CALL_TIMEOUT_S
 from grimoire.providers.registry import SUPPORTED_MODEL_TIERS
 from grimoire.runtime.schemas import WorkflowInstance, WorkflowStatus
@@ -140,6 +141,13 @@ def _emit_status(ctx: typer.Context, view: FlowStatusView, project_root: Path) -
     console.print(f"  fait      : {', '.join(view.completed_nodes) or '(aucun)'}")
     console.print(f"  courant   : {view.current_node or '(aucun)'}")
     console.print(f"  restant   : {', '.join(view.pending_nodes) or '(aucun)'}")
+    if view.blueprint_drift:
+        d = view.blueprint_drift
+        console.print(
+            f"  [red]blueprint_drift[/red] : modifiés {d['changed_nodes'] or '-'}, retirés {d['removed_nodes'] or '-'}, "
+            f"ajoutés {d['added_nodes'] or '-'}, "
+            f"ordre {' '.join(d['order_diff']) or 'identique'} — `grimoire flow migrate` ou rétablir le blueprint"
+        )
     if view.last_refusal:
         console.print(
             f"  [yellow]dernier refus[/yellow] : {view.last_refusal['node_id']} — {view.last_refusal['reason']}"
@@ -604,6 +612,77 @@ def flow_extract(
         console.print(f"  {n.node_id}{verif} : {n.status}{extra}")
 
 
+@flow_app.command("migrate")
+def flow_migrate(
+    ctx: typer.Context,
+    run_id: Annotated[str, typer.Argument(help="Identifiant du run (WFI-...).")],
+    project_root: _PROJECT_ROOT = Path(),
+) -> None:
+    """Adopte le blueprint modifié si les nodes déjà franchis en restent un préfixe identique (W2-04).
+
+    Sinon refuse sans rien écrire, en nommant ce qui ne colle plus.
+    """
+    engine = _engine(project_root)
+    try:
+        old, new = engine.migrate(run_id)
+    except GrimoireRuntimeError as exc:
+        _fail(ctx, exc)
+        return
+    if _fmt(ctx) == "json":
+        typer.echo(json.dumps({"run_id": run_id, "order_before": list(old.order), "order_after": list(new.order),
+                               "blueprint_sha256": new.blueprint_sha256}, indent=2))
+        return
+    console.print(f"[green]OK[/green] {run_id} migré : {', '.join(old.order)} -> {', '.join(new.order)}")
+
+
+@flow_app.command("export")
+def flow_export(
+    ctx: typer.Context,
+    run_id: Annotated[str, typer.Argument(help="Identifiant du run (WFI-...).")],
+    out: Annotated[Path | None, typer.Option("--out", help="Fichier JSON à écrire (défaut : stdout).")] = None,
+    project_root: _PROJECT_ROOT = Path(),
+) -> None:
+    """Exporte un run (méta, blueprint, journal) en un fichier JSON sans chemin absolu (W2-04)."""
+    engine = _engine(project_root)
+    try:
+        bundle = export_run(engine, run_id, project_root.resolve())
+    except GrimoireRuntimeError as exc:
+        _fail(ctx, exc)
+        return
+    text = json.dumps(bundle, indent=2, ensure_ascii=False) + "\n"
+    if out is None:
+        typer.echo(text, nl=False)
+        return
+    out.write_text(text, encoding="utf-8")
+    console.print(f"[green]OK[/green] {run_id} exporté : {out}")
+
+
+@flow_app.command("import")
+def flow_import(
+    ctx: typer.Context,
+    bundle: Annotated[Path, typer.Argument(help="Fichier produit par `flow export`.")],
+    project_root: _PROJECT_ROOT = Path(),
+) -> None:
+    """Recrée dans ce projet un run exporté. Refuse un run_id déjà présent (W2-04)."""
+    engine = _engine(project_root)
+    try:
+        data = json.loads(bundle.read_text(encoding="utf-8"))
+        meta = import_run(engine, data, project_root.resolve())
+        drift = engine.blueprint_drift(meta.run_id)
+    except (OSError, ValueError) as exc:
+        _fail(ctx, GrimoireRuntimeError(f"{bundle} : illisible ({exc})"))
+        return
+    except GrimoireRuntimeError as exc:
+        _fail(ctx, exc)
+        return
+    if _fmt(ctx) == "json":
+        typer.echo(json.dumps({"run_id": meta.run_id, "blueprint_path": meta.blueprint_path, "blueprint_drift": drift}, indent=2))
+        return
+    console.print(f"[green]OK[/green] {meta.run_id} importé ({meta.blueprint_path})")
+    if drift:
+        console.print("[yellow]blueprint_drift[/yellow] : le blueprint présent diffère de celui du run ; voir `flow status`.")
+
+
 _TERMINAL_OK_STATUSES = (WorkflowStatus.COMPLETED.value, WorkflowStatus.VERIFIED.value)
 
 
@@ -619,8 +698,7 @@ def _registry_info_for(engine: FlowEngine, root: Path, local_runs: list[FlowStat
     """
     latest_run_id = max(v.run_id for v in local_runs)
     try:
-        meta = engine.run_meta(latest_run_id)
-        return describe_flow(Path(meta.blueprint_path), root).to_dict()
+        return describe_flow(engine.blueprint_file(latest_run_id), root).to_dict()
     except GrimoireRuntimeError:
         return None
 
