@@ -229,7 +229,7 @@ def _invoke_memory_cli(proot: Path, argv: list[str]) -> _CliResult:
     from grimoire.cli.app import app
 
     with _CWD_LOCK:
-        previous = os.getcwd()
+        previous = Path.cwd()
         os.chdir(proot)
         try:
             res = CliRunner().invoke(app, argv)
