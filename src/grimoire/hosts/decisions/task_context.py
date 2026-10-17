@@ -52,8 +52,16 @@ def decide_task_context(hook: HookInput) -> Decision:
     from grimoire.hosts.decisions.steering import steering_context
 
     steering, steering_detail = steering_context(hook.project_root, active.task_id, hook.session_id)
+    # K5 : une tâche reprise n'est plus celle de la session (statut `ready`, ou
+    # claim d'une autre session) — l'annonce se lit par session, pas par tâche
+    # active, donc dans les deux branches.
+    from grimoire.hosts.decisions.self_view import takeover_notices
+
     if active.is_fallback:
         context = no_task_context(profile, active.candidates, active.expired)
+        takeover = takeover_notices(hook.project_root, hook.session_id)
+        if takeover:
+            context = f"{context}\n{takeover}"
         if steering:
             context = f"{context}\n{steering}"
         return Decision(outcome=Outcome.ALLOW, context=context, detail={**detail, **steering_detail})
@@ -67,6 +75,9 @@ def decide_task_context(hook: HookInput) -> Decision:
     )
     if self_view:
         context = f"{context}\n{self_view}"
+    takeover = takeover_notices(hook.project_root, hook.session_id)
+    if takeover:
+        context = f"{context}\n{takeover}"
     if steering:
         context = f"{context}\n{steering}"
     return Decision(outcome=Outcome.ALLOW, context=context, detail={**detail, **link, **steering_detail})

@@ -6,6 +6,13 @@ epoch, dernier battement, vivacité calculée, dernière progression. Si le bail
 n'a plus de titulaire), la ligne le dit : l'effet d'une session périmée n'est
 pas fencé partout, la prévenir est la seule parade côté ancienne session.
 
+Deux chemins, parce que la tâche reprise n'est plus celle de la session : le
+statut est alors ``ready`` (récolte) ou le claim est à une autre session, et la
+tâche active résolue est ``bootstrap`` ou une autre tâche. :func:`self_view_context`
+ne parle que de la tâche tenue ; :func:`takeover_notices` relit le ledger par
+*session* — les tâches rattachées à cette session dont un bail perdu a été
+récolté depuis — et ne dépend d'aucune tâche active.
+
 Best-effort comme tout le contexte de hook : un ledger absent ou illisible
 rend ``""``, jamais une session cassée. Ne lit que le ledger et le fichier de bail.
 """
@@ -17,7 +24,7 @@ from pathlib import Path
 
 from grimoire.core.standard_state import LEDGER_RELPATH
 
-__all__ = ["self_view_context"]
+__all__ = ["self_view_context", "takeover_notices"]
 
 
 def self_view_context(project_root: Path, task_id: str, session_id: str = "", *, now: datetime | None = None) -> str:
@@ -56,5 +63,61 @@ def self_view_context(project_root: Path, task_id: str, session_id: str = "", *,
         if warn:
             line += f" Attention : {warn.reason}."
         return line
+    except Exception:
+        return ""
+
+
+#: Au plus ce nombre d'annonces par tour : le contexte d'un hook reste court.
+_MAX_NOTICES = 3
+_TERMINAL = ("closed", "cancelled", "failed")
+
+
+def takeover_notices(project_root: Path, session_id: str) -> str:
+    """Annonce, à *session_id*, les tâches dont son bail a été repris — quel que soit leur statut.
+
+    Rejeu du journal, tâche par tâche : une tâche est « reprise » pour la
+    session quand elle lui a été rattachée (``task.session_attached``) puis
+    qu'une récolte de bail perdu (``task.transitioned`` portant ``lease_lost``)
+    est venue après, sans nouveau rattachement de cette session depuis. Un
+    rendu volontaire du bail (release, clôture) n'est pas une reprise ; une
+    tâche terminée n'est plus annoncée. Les événements refusés au rejeu (epoch
+    périmé) ne comptent pas. Best-effort : ``""`` sur tout échec.
+    """
+    session = session_id.strip()
+    root = project_root.resolve()
+    if not session or not (root / LEDGER_RELPATH / "events.jsonl").is_file():
+        return ""
+    try:
+        from grimoire.missions.ledger import LEASE_LOST_KEY, SESSION_ATTACHED_EVENT, MissionLedger
+
+        ledger = MissionLedger(root / LEDGER_RELPATH)
+        rejected = ledger.rejected_events()
+        holder: dict[str, str] = {}
+        taken: dict[str, int] = {}
+        for evt in ledger.list_events():
+            if evt.id in rejected:
+                continue
+            tid = evt.entity_id
+            if evt.event_type == SESSION_ATTACHED_EVENT:
+                holder[tid] = str(evt.payload.get("session_id", ""))
+                if holder[tid] == session:
+                    taken.pop(tid, None)
+            elif evt.event_type == "task.transitioned" and LEASE_LOST_KEY in evt.payload:
+                if holder.pop(tid, "") == session:
+                    taken[tid] = int(evt.payload.get("fence_epoch", 0) or 0)
+        lines: list[str] = []
+        for tid, fence in taken.items():
+            task = ledger.get_task(tid)
+            if task is None or task.status.value in _TERMINAL:
+                continue
+            epoch = max(fence, task.claim.lease_epoch if task.claim else 0)
+            lease = ledger.lease_file(tid)
+            if lease is not None:
+                epoch = max(epoch, lease.epoch)
+            lines.append(
+                f"[Grimoire] Ta tâche {tid} a été reprise (epoch {epoch}) : son bail est perdu, "
+                "n'émets plus d'effet distant (push, commentaire, PR) pour elle."
+            )
+        return "\n".join(lines[:_MAX_NOTICES])
     except Exception:
         return ""

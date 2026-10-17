@@ -11,8 +11,10 @@ valeurs, depuis ce qu'on a pu observer — jamais depuis une absence.
 - ``terminé`` : la session a dit elle-même qu'elle finissait (``ended``).
 
 « Vivant » n'est pas « avance » (D-10) : la progression est une dimension à
-part, ``progress_at`` (dernier commit, dernière note de progression, dernier
-verdict). Un signal d'attention monte quand un vivant n'avance pas, ou quand
+part, ``progress_at`` (dernier commit de la branche, dernière note de
+progression, dernière transition que le ledger a vraiment écrite : passage à
+``running``, preuve rendue, verdict ``closed``/``failed``). Un battement de
+bail n'est pas une progression. Un signal d'attention monte quand un vivant n'avance pas, ou quand
 l'``inconnu`` dure plus de ``2 × ttl`` — un signal, rien n'est tué.
 
 Module pur : les entrées arrivent en paramètres, la sonde d'hôte et la lecture
@@ -38,6 +40,7 @@ __all__ = [
     "INACTIF",
     "INCONNU",
     "PROGRESS_EVENT_TYPES",
+    "PROGRESS_TRANSITIONS",
     "TERMINE",
     "VIVANT",
     "Attention",
@@ -61,8 +64,14 @@ TERMINE = "terminé"
 DEFAULT_ACTIVE_WINDOW = timedelta(minutes=30)
 #: Au-delà (D19, §2.5), un vivant sans progression monte en attention.
 DEFAULT_PROGRESS_THRESHOLD = timedelta(minutes=45)
-#: Événements du ledger qui comptent comme une progression.
-PROGRESS_EVENT_TYPES = frozenset({"task.progress_noted", "task.gate"})
+#: Événement du ledger qui compte comme une progression : la note du titulaire
+#: (:meth:`MissionLedger.note_progress`, ``grimoire task note``).
+PROGRESS_EVENT_TYPES = frozenset({"task.progress_noted"})
+#: Transitions de ``task.transitioned`` qui comptent comme une progression : le
+#: travail démarre, la preuve est rendue, le verdict tombe. Pas ``claimed``
+#: (c'est le point de départ, ``claimed_at``), ni ``ready`` (récolte), ni le
+#: battement ``task.lease_renewed``.
+PROGRESS_TRANSITIONS = frozenset({"running", "needs_verification", "closed", "failed"})
 
 #: Sonde d'hôte : ``{session_id: "busy" | "idle"}`` des sessions listées, ou
 #: ``None`` quand la sonde est indisponible (binaire absent, échec, délai).
@@ -219,8 +228,20 @@ def task_progress(
     *,
     commit_at: Callable[[Path, str], datetime | None] = git_commit_at,
 ) -> datetime | None:
-    """``progress_at`` d'une tâche : dernier commit, dernière note de progression, dernier verdict."""
-    stamps = [parse_instant(e.created_at) for e in ledger.list_events(task_id) if e.event_type in PROGRESS_EVENT_TYPES]
+    """``progress_at`` d'une tâche : dernier commit, dernière note, dernière transition de progression.
+
+    Les événements refusés au rejeu (epoch périmé) ne comptent pas.
+    """
+    rejected = ledger.rejected_events()
+    stamps = [
+        parse_instant(e.created_at)
+        for e in ledger.list_events(task_id)
+        if e.id not in rejected
+        and (
+            e.event_type in PROGRESS_EVENT_TYPES
+            or (e.event_type == "task.transitioned" and e.payload.get("to_state") in PROGRESS_TRANSITIONS)
+        )
+    ]
     return progress_at(commit_at(project_root, task_id), *stamps)
 
 

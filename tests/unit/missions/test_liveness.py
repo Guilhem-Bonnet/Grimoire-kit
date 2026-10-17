@@ -226,3 +226,131 @@ class TestSelfViewLine:
         )
         line = self_view_context(root, task_id, SESSION)
         assert "reprise" in line and "PERDU" in line
+
+
+OTHER = "efd17015-0000-4000-8000-0000000000bb"
+FENCED = frozenset({"host-claude-code-cli"})
+
+
+def _prompt(root: Path, session: str) -> str:
+    payload = {"session_id": session, "hook_event_name": "UserPromptSubmit", "cwd": str(root), "prompt": "salut"}
+    rendered, _, _ = run_hook(
+        payload, host_id=HostId.CLAUDE_CODE_CLI, event=HookEvent.USER_PROMPT_SUBMIT, project_root=root
+    )
+    return str(rendered.get("hookSpecificOutput", {}).get("additionalContext", ""))
+
+
+class TestTakeoverAnnouncedToTheOldSession:
+    """K5-S1-01 : le bail repris est annoncé même quand la tâche n'est plus celle de la session."""
+
+    def test_reaped_task_is_announced_while_ready(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        root, task_id = _fleet(tmp_path, monkeypatch, journal_age=None)
+        ledger = TaskService(root, DEFAULT_LEDGER_RELPATH).ledger
+        ledger.reap(fenced_hosts=FENCED, now=datetime.now(UTC) + timedelta(hours=3))
+        assert ledger.get_task(task_id).status is TaskState.READY  # type: ignore[union-attr]
+        context = _prompt(root, SESSION)
+        assert f"Ta tâche {task_id} a été reprise" in context
+        assert "n'émets plus d'effet distant" in context
+
+    def test_reclaimed_by_another_session_is_still_announced_to_the_old_one(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root, task_id = _fleet(tmp_path, monkeypatch, journal_age=None)
+        ledger = TaskService(root, DEFAULT_LEDGER_RELPATH).ledger
+        ledger.reap(fenced_hosts=FENCED, now=datetime.now(UTC) + timedelta(hours=3))
+        ledger.claim_task(task_id, "claude-b", "host-claude-code-cli")
+        ledger.attach_session(task_id, OTHER, session_host="host-claude-code-cli")
+        epoch = ledger.get_task(task_id).claim.lease_epoch  # type: ignore[union-attr]
+        old = _prompt(root, SESSION)
+        assert f"Ta tâche {task_id} a été reprise (epoch {epoch})" in old
+        assert "reprise" not in _prompt(root, OTHER), "la nouvelle titulaire n'est pas prévenue de sa propre reprise"
+
+    def test_a_voluntary_release_is_not_a_takeover(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        root, task_id = _fleet(tmp_path, monkeypatch, journal_age=None)
+        ledger = TaskService(root, DEFAULT_LEDGER_RELPATH).ledger
+        ledger.transition_task(task_id, TaskState.READY, actor_id="claude")
+        assert "reprise" not in _prompt(root, SESSION)
+
+    def test_re_attaching_the_session_silences_the_notice(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from grimoire.hosts.decisions.self_view import takeover_notices
+
+        root, task_id = _fleet(tmp_path, monkeypatch, journal_age=None)
+        ledger = TaskService(root, DEFAULT_LEDGER_RELPATH).ledger
+        ledger.reap(fenced_hosts=FENCED, now=datetime.now(UTC) + timedelta(hours=3))
+        assert takeover_notices(root, SESSION)
+        ledger.claim_task(task_id, "claude", "host-claude-code-cli")
+        ledger.attach_session(task_id, SESSION, session_host="host-claude-code-cli")
+        assert takeover_notices(root, SESSION) == ""
+
+    def test_a_finished_task_is_no_longer_announced(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        from grimoire.hosts.decisions.self_view import takeover_notices
+
+        root, task_id = _fleet(tmp_path, monkeypatch, journal_age=None)
+        ledger = TaskService(root, DEFAULT_LEDGER_RELPATH).ledger
+        ledger.reap(fenced_hosts=FENCED, now=datetime.now(UTC) + timedelta(hours=3))
+        ledger.transition_task(task_id, TaskState.CANCELLED, actor_id="human")
+        assert takeover_notices(root, SESSION) == ""
+
+    def test_no_session_no_notice(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        from grimoire.hosts.decisions.self_view import takeover_notices
+
+        root, _ = _fleet(tmp_path, monkeypatch, journal_age=None)
+        assert takeover_notices(root, "") == ""
+
+
+class TestProgressFedByWhatTheLedgerWrites:
+    """K5-S1-02 : progress_at lit des événements que le ledger écrit vraiment."""
+
+    def test_a_real_transition_feeds_progress_at(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        root, task_id = _fleet(tmp_path, monkeypatch, journal_age=timedelta(minutes=1))
+        ledger = TaskService(root, DEFAULT_LEDGER_RELPATH).ledger
+        assert lv.task_progress(ledger, task_id, root, commit_at=lambda *_: None) is None
+        ledger.transition_task(task_id, TaskState.RUNNING, actor_id="claude")
+        running = lv.task_progress(ledger, task_id, root, commit_at=lambda *_: None)
+        assert running is not None
+        ledger.transition_task(task_id, TaskState.NEEDS_VERIFICATION, actor_id="claude")
+        proven = lv.task_progress(ledger, task_id, root, commit_at=lambda *_: None)
+        assert proven is not None and proven >= running
+
+    def test_a_lease_heartbeat_is_not_progress(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        root, task_id = _fleet(tmp_path, monkeypatch, journal_age=timedelta(minutes=1))
+        ledger = TaskService(root, DEFAULT_LEDGER_RELPATH).ledger
+        epoch = ledger.get_task(task_id).claim.lease_epoch  # type: ignore[union-attr]
+        ledger.renew_lease(task_id, epoch, now=datetime.now(UTC) + timedelta(minutes=50))
+        assert lv.task_progress(ledger, task_id, root, commit_at=lambda *_: None) is None
+
+    def test_a_progress_note_is_written_by_the_ledger_and_read_back(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root, task_id = _fleet(tmp_path, monkeypatch, journal_age=timedelta(minutes=1))
+        ledger = TaskService(root, DEFAULT_LEDGER_RELPATH).ledger
+        ledger.note_progress(task_id, "tests écrits", actor_id="claude")
+        assert [e.event_type for e in ledger.list_events(task_id)][-1] == "task.progress_noted"
+        assert lv.task_progress(ledger, task_id, root, commit_at=lambda *_: None) is not None
+
+    def test_a_note_on_a_task_nobody_holds_is_refused(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        from grimoire.core.exceptions import GrimoireError
+
+        root, task_id = _fleet(tmp_path, monkeypatch, journal_age=None)
+        ledger = TaskService(root, DEFAULT_LEDGER_RELPATH).ledger
+        ledger.transition_task(task_id, TaskState.READY, actor_id="claude")
+        with pytest.raises(GrimoireError):
+            ledger.note_progress(task_id, "x", actor_id="claude")
+        with pytest.raises(GrimoireError):
+            ledger.note_progress(task_id, "  ", actor_id="claude")
+
+    def test_the_self_view_shows_the_real_progress_and_no_false_alarm(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from grimoire.hosts.decisions.self_view import self_view_context
+
+        root, task_id = _fleet(tmp_path, monkeypatch, journal_age=timedelta(minutes=1))
+        ledger = TaskService(root, DEFAULT_LEDGER_RELPATH).ledger
+        ledger.transition_task(task_id, TaskState.RUNNING, actor_id="claude")
+        soon = self_view_context(root, task_id, SESSION, now=datetime.now(UTC) + timedelta(minutes=10))
+        assert "dernière progression il y a" in soon and "aucune progression observée" not in soon
+        assert "Attention" not in soon
+        late = self_view_context(root, task_id, SESSION, now=datetime.now(UTC) + timedelta(minutes=70))
+        assert "Attention : vivant, sans progression depuis 70 min" in late

@@ -377,6 +377,12 @@ class TaskService:
             epoch = task.claim.lease_epoch
         return self.ledger.renew_lease(task_id, epoch, actor_id=actor)
 
+    def note_progress(self, task_id: str, text: str, actor: str) -> MissionTask:
+        """Pose une note de progression sur une tâche tenue (:meth:`MissionLedger.note_progress`)."""
+        self.require(task_id)
+        self.ledger.note_progress(task_id, text, actor_id=actor)
+        return self.require(task_id)
+
     def reap(self, *, fenced_hosts: frozenset[str] = frozenset(), apply: bool = True, actor: str = "tick") -> ReapReport:
         """Récolte des baux perdus (:meth:`MissionLedger.reap`), quota lu dans l'état des fournisseurs."""
         report = self.ledger.reap(
