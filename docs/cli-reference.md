@@ -251,7 +251,9 @@ appeler maintenant, pour quel palier de coût (`cheap`/`mid`/`strong`) ?
 | --- | --- |
 | `grimoire providers status [--json]` | Fournisseurs activés, modèles par palier, disponibilité (refroidissement + dernier audit), prochain choix |
 | `grimoire providers audit [--json]` | Sonder chaque fournisseur activé sans dépenser (PATH, `--version`, modèles Ollama) et journaliser `available`/`models_seen`/`probe_note` dans l'état |
-| `grimoire providers cooldown <id> --reason rate_limit\|timeout` | Enregistrer un échec à la main (429, timeout) |
+| `grimoire providers cooldown <id> --reason rate_limit\|timeout\|overloaded` | Enregistrer un échec à la main (429, timeout, 529) |
+| `grimoire providers probe [<id>] [--json]` | Sonder (comme `audit`) puis rouvrir les fournisseurs fermés par une date de forfait illisible (`unknown`) ; une suspension à date n'est jamais levée |
+| `grimoire providers quota [--json]` | Fenêtre de forfait lue dans les flux d'appel : `lower_bound` (minorant daté) ou `unknown`, jamais 0 |
 | `grimoire providers history [--ledger-root <chemin>] [--json]` | Historique des dispatchs par couple (type de tâche, classe) et palier de départ recommandé |
 
 `providers audit` ne fait jamais l'appel réel : présence du premier mot de
