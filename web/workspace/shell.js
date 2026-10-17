@@ -39,15 +39,15 @@ const SPACES = [
 // Rail : 1 explorateur, 2 bibliothèque, 3 preuves, 4 inspecteur, 5 dock.
 const RAIL = [
   { key: '1', id: 'explorer',  label: 'Explorateur', term: 'explorateur',
-    path: 'M3 5.5h5l1.5 1.5H17v8H3z' },
+    icon: 'i-ui-panel-left' },
   { key: '2', id: 'library',   label: 'Bibliothèque', term: 'pattern',
-    path: 'M4 4h6v12H4zM10 4h6v12h-6z' },
+    icon: 'i-space-savoir' },
   { key: '3', id: 'evidence',  label: 'Preuves', term: 'evidence-pack',
-    path: 'M10 3l6 2v5c0 4-3 6-6 7-3-1-6-3-6-7V5z' },
+    icon: 'i-ui-files' },
   { key: '4', id: 'inspector', label: 'Inspecteur', term: 'inspecteur',
-    path: 'M4 4h12v12H4zM4 8h12' },
+    icon: 'i-ui-panel-right' },
   { key: '5', id: 'dock',      label: 'Dock', term: 'dock',
-    path: 'M3 4h14v12H3zM3 11h14' },
+    icon: 'i-ui-dock' },
 ];
 
 const DOCK_TABS = [
@@ -290,7 +290,7 @@ function buildRail() {
     button.setAttribute('aria-pressed', 'false');
     button.setAttribute('aria-label', `${item.label} (${item.key})`);
     button.innerHTML =
-      `<svg class="ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="${item.path}"/></svg>` +
+      `<svg class="ico" aria-hidden="true"><use href="./icons.svg#${item.icon}"/></svg>` +
       `<span class="rail-lbl">${item.label}</span>`;
     // Clic sur l'icône du rail : ouvre en surimpression (spec §3.1) ; un
     // second clic referme. ⌘/Ctrl + clic épingle directement dans la grille,
