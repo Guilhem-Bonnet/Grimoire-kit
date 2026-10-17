@@ -23,7 +23,13 @@ from urllib.parse import parse_qs, urlparse
 from grimoire.tools.ext_manager import ExtensionError
 from grimoire.tools.forge_routes import API_GET_UNHANDLED, api_get
 from grimoire.tools.project_registry import DEFAULT_SCAN_DEPTH, looks_grimoire, register_project
-from grimoire.tools.request_guard import check_host, check_mutation, has_body
+from grimoire.tools.request_guard import (
+    check_host,
+    check_mutation,
+    has_body,
+    inject_session_token,
+    new_session_token,
+)
 from grimoire.tools.workspace_legacy import legacy_redirect_target
 from grimoire.tools.workspace_routes import PREFIX as WORKSPACE_PREFIX
 from grimoire.tools.workspace_routes import WORKSPACE_UNHANDLED, workspace_post
@@ -88,7 +94,7 @@ def make_handler(api: ForgeAPI) -> type[BaseHTTPRequestHandler]:
             JSON, vérifiés avant de lire le corps.
             """
             refused = check_mutation(
-                self.headers, self.server.server_address[1], with_body=has_body(self.headers)
+                self.headers, int(cast(tuple[str, int], self.server.server_address)[1]), with_body=has_body(self.headers)
             )
             if refused:
                 self._error(refused[1], refused[0])
@@ -339,6 +345,8 @@ def make_handler(api: ForgeAPI) -> type[BaseHTTPRequestHandler]:
                 ".png": "image/png", ".ico": "image/x-icon",
             }
             body = target.read_bytes()
+            if target.suffix == ".html":
+                body = inject_session_token(body)
             self.send_response(200)
             self.send_header(
                 "Content-Type",
@@ -394,6 +402,7 @@ def serve(
     # La couche de données du projet se génère en fond : le serveur répond tout
     # de suite, et les pages runtime se remplissent quand elle est prête.
     api.data.refresh()
+    new_session_token()
     server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(api))
     return server
 

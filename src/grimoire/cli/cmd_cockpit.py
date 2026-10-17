@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 from urllib.parse import parse_qs, urlparse
 
 import typer
@@ -57,7 +57,13 @@ from grimoire.tools.project_registry import (
     write_state,
 )
 from grimoire.tools.project_update import update_project
-from grimoire.tools.request_guard import check_host, check_mutation, has_body
+from grimoire.tools.request_guard import (
+    check_host,
+    check_mutation,
+    has_body,
+    inject_session_token,
+    new_session_token,
+)
 from grimoire.tools.workspace_legacy import legacy_redirect_target
 
 cockpit_app = typer.Typer(
@@ -288,7 +294,7 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         if not self._local_only():
             return False
         refused = check_mutation(
-            self.headers, self.server.server_address[1], with_body=has_body(self.headers)
+            self.headers, int(cast(tuple[str, int], self.server.server_address)[1]), with_body=has_body(self.headers)
         )
         if refused:
             self._send_json(refused[0], {"ok": False, "error": refused[1]})
@@ -321,6 +327,22 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         """
         return bool(_HOME_SLUG) and self._query_slug() == _HOME_SLUG
 
+    def _serve_static(self) -> None:
+        """Fichier statique ; une page HTML reçoit le jeton de session."""
+        target = Path(self.translate_path(self.path))
+        if target.is_dir():
+            target = target / "index.html"
+        if target.suffix.lower() != ".html" or not target.is_file():
+            super().do_GET()
+            return
+        body = inject_session_token(target.read_bytes())
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self) -> None:  # http.server contract
         parsed = urlparse(self.path)
         path = parsed.path
@@ -335,7 +357,7 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
                 self.send_header("Content-Length", "0")
                 self.end_headers()
                 return
-            super().do_GET()
+            self._serve_static()
             return
         if not self._local_only():
             return
@@ -1155,6 +1177,7 @@ def serve(
         if notice:
             console.print(notice)
 
+    new_session_token()
     handler = partial(_CockpitHandler, directory=str(serve_dir))
     try:
         httpd = ThreadingHTTPServer(("127.0.0.1", port), handler)
