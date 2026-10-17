@@ -356,7 +356,12 @@ def _risque_accepte(task: MissionTask) -> bool:
     return bool(getattr(task, "accepted_risks", ()))
 
 
-def classify(task: MissionTask) -> Verifiability:
+def _commande_declaree(task: MissionTask) -> bool:
+    """Vrai si la tâche porte au moins une commande exécutable (``task.checks``, issue #772)."""
+    return bool(getattr(task, "checks", ()))
+
+
+def classify(task: MissionTask, *, commands_declared: bool = False) -> Verifiability:
     """Dérive la classe — jamais déclarée, toujours recalculée depuis le texte.
 
     Appel à :func:`classify_criteria` sur les critères du ``MissionTask``
@@ -369,9 +374,17 @@ def classify(task: MissionTask) -> Verifiability:
     ``needs_verification`` de ``task dispatch`` et l'exécuteur de flow passent
     tous par cette fonction. Une V2 reste V2 ; le texte des critères n'est pas
     réécrit.
+
+    Seconde exception, issue #772 : V0 est réservé aux tâches qui déclarent une
+    commande exécutable (``task.checks``). « Tests verts » sans commande à
+    lancer est une promesse que personne ne peut rejouer : la tâche remonte en
+    V1 (donc ``sonnet``, jamais ``haiku``) et ``reason_for_task`` le dit.
+    ``classify_criteria`` reste, elle, purement textuelle (blueprints).
+    *commands_declared* : l'appelant détient lui-même une commande à lancer
+    (le ``--check`` de ``task dispatch``) — elle vaut déclaration.
     """
     klass = classify_criteria(_criteres(task))
-    if klass is Verifiability.V0 and _risque_accepte(task):
+    if klass is Verifiability.V0 and (_risque_accepte(task) or not (commands_declared or _commande_declaree(task))):
         return Verifiability.V1
     return klass
 
@@ -402,7 +415,16 @@ def as_dict(task: MissionTask) -> dict[str, Any]:
         "reason": reason_for_criteria(_criteres(task)),
         "criteria": [{"criterion": critere, "pattern": motif} for critere, motif in explain(task)],
     }
-    if klass is not classify_criteria(_criteres(task)):
-        data["explanation"] = "Remontée de V0 : un risque a été accepté en l'état (accept_as_is) — une relecture reste due."
-        data["raised_by"] = "accepted_risk"
+    textual = classify_criteria(_criteres(task))
+    if klass is not textual:
+        if textual is Verifiability.V0 and not _commande_declaree(task):
+            data["explanation"] = (
+                "Remontée de V0 : les critères nomment un verdict mécanique mais aucune commande "
+                "n'est déclarée (`checks`) — rien à exécuter, le verdict reste à rendre par une revue."
+            )
+            data["reason"] = "aucune commande déclarée (checks) : le verdict mécanique n'est pas exécutable"
+            data["raised_by"] = "no_declared_command"
+        else:
+            data["explanation"] = "Remontée de V0 : un risque a été accepté en l'état (accept_as_is) — une relecture reste due."
+            data["raised_by"] = "accepted_risk"
     return data

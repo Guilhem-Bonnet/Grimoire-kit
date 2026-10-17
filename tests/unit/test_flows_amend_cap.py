@@ -194,7 +194,11 @@ def test_risque_accepte_visible_dans_task_show_et_tache_au_moins_v1(tmp_path: Pa
 
     ledger = MissionLedger(tmp_path / "_grimoire-runtime-output" / "ledger")
     mission = ledger.create_mission("m", origin="user")
-    task = ledger.create_task(mission.id, "t", acceptance=("pytest tests/unit -q passe",))
+    from grimoire.missions.schemas import TaskCheck
+
+    task = ledger.create_task(
+        mission.id, "t", acceptance=("pytest tests/unit -q passe",), checks=(TaskCheck(cmd="true"),)
+    )
 
     def _show() -> dict[str, Any]:
         result = runner.invoke(app, ["--output", "json", "task", "show", task.id, "--project-root", str(tmp_path)])

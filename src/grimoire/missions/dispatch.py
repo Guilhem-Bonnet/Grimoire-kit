@@ -1139,7 +1139,9 @@ def run_dispatch(
     """
     validate_policy(cost_unknown_policy)
     task = service.require(task_id)
-    verifiability = verifiability_override if verifiability_override is not None else classify(task)
+    verifiability = (
+        verifiability_override if verifiability_override is not None else classify(task, commands_declared=bool(checks))
+    )
     declared_context = agent_declared_context(project_root, agent) if agent and project_root else ()
     prompt = build_prompt(task, agent_context=declared_context, project_root=project_root)
 
