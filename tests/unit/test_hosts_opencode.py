@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -190,3 +192,51 @@ class TestContract:
         contract = contract_for(HostId.OPENCODE, "1.17.11")
         verified = {k for k, e in contract.evidence.items() if e.verified}
         assert verified == {"pretooluse_deny"}
+
+
+class TestGuardFailsClosedWhenTheBinaryIsMissing:
+    """`grimoire-hook` introuvable : refus en profil bloquant, avertissement sinon."""
+
+    HARNESS = (
+        'import { GrimoireGuard } from "./.opencode/plugin/grimoire-guard.js"\n'
+        "const hooks = await GrimoireGuard({ directory: process.cwd() })\n"
+        "try {\n"
+        '  await hooks["tool.execute.before"]({ tool: "bash" }, { args: { command: "ls" } })\n'
+        '  console.log("ALLOWED")\n'
+        "} catch (error) {\n"
+        '  console.log("REFUSED " + error.message)\n'
+        "}\n"
+    )
+
+    def _run(self, root: Path) -> subprocess.CompletedProcess[str]:
+        node = shutil.which("node")
+        if node is None:
+            pytest.skip("node absent")
+        (root / "package.json").write_text('{"type": "module"}', encoding="utf-8")
+        (root / "harness.mjs").write_text(self.HARNESS, encoding="utf-8")
+        empty = root / "empty-bin"
+        empty.mkdir()
+        return subprocess.run(
+            [node, "harness.mjs"], cwd=root, env={"PATH": str(empty)}, capture_output=True, text=True, timeout=60, check=False
+        )
+
+    def test_governed_project_refuses_the_tool(self, governed: Path) -> None:
+        _emit(governed)
+        out = self._run(governed)
+        assert out.stdout.startswith("REFUSED"), out
+        assert "grimoire-hook introuvable, garde indisponible" in out.stdout
+
+    def test_ungoverned_project_passes_with_a_warning(self, tmp_path: Path) -> None:
+        plugin = tmp_path / ".opencode/plugin"
+        plugin.mkdir(parents=True)
+        governed_root = tmp_path  # no _grimoire/standard/standard-profile.yaml here
+        emitter = emitter_for(HostId.OPENCODE)
+        assert emitter is not None
+        # Reuse a real emission, then drop the governed marker the fixture would have created.
+        (tmp_path / AGENT_DIR).mkdir(parents=True)
+        (tmp_path / AGENT_DIR / "scribe.md").write_text('---\nname: "scribe"\ndescription: "s"\n---\nC.\n', encoding="utf-8")
+        _emit(governed_root)
+        assert not (tmp_path / "_grimoire/standard/standard-profile.yaml").exists()
+        out = self._run(tmp_path)
+        assert out.stdout.startswith("ALLOWED"), out
+        assert "garde PreToolUse inactive" in out.stderr

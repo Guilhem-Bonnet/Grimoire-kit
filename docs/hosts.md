@@ -62,8 +62,10 @@ comme **dégradation**, avec son repli, et remonté par `grimoire host status` :
   `tool.execute.before` : exécution, écriture et lecture de secrets passent par
   le plugin `.opencode/plugin/grimoire-guard.js` (même décision, même
   formulation de refus) ; une décision `ask` y est refusée avec son motif, un
-  plugin ne pouvant pas interroger l'utilisateur ; le plugin échoue ouvert, à
-  voix haute, si `grimoire-hook` est introuvable.
+  plugin ne pouvant pas interroger l'utilisateur ; si `grimoire-hook` est
+  introuvable, le plugin refuse l'outil en profil `governed`/`production` (lu dans
+  `_grimoire/standard/standard-profile.yaml`) et se contente d'un avertissement
+  unique sur stderr sinon.
 - Les hôtes en prose n'ont pas de hooks : la gouvernance y est énoncée comme
   règle dans le fichier d'entrée, et n'est opposable qu'en CI. Le catalogue le
   dit explicitement plutôt que de laisser croire à une protection.

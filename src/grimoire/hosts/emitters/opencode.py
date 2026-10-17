@@ -154,11 +154,31 @@ _PLUGIN_TEMPLATE = """// __MARKER__ — régénéré par `grimoire host sync --h
 // Garde PreToolUse : chaque appel d'outil concerné passe par `grimoire-hook`, et un refus
 // devient une exception dans `tool.execute.before` — opencode n'exécute alors pas l'outil.
 import { spawnSync } from "node:child_process"
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 
 const GUARDED = __GUARDED__
 const SECRET_PATTERNS = __SECRETS__.map((source) => new RegExp(source, "i"))
 const TIMEOUT_MS = __TIMEOUT__
+const BLOCKING_PROFILES = ["governed", "production"]
 let warned = false
+
+// Fail closed in a blocking profile (read from the standard profile manifest, like the Python gates),
+// warn once otherwise. An unreadable manifest is not a blocking profile.
+function unavailable(directory, why) {
+  let profile = ""
+  try {
+    const manifest = readFileSync(join(directory, "_grimoire", "standard", "standard-profile.yaml"), "utf8")
+    profile = (manifest.match(/^profile:\\s*["']?([A-Za-z_-]+)/m) ?? [])[1] ?? ""
+  } catch {}
+  if (BLOCKING_PROFILES.includes(profile)) {
+    throw new Error(`grimoire-hook introuvable, garde indisponible ; installe le kit ou désactive le profil gouverné (${why})`)
+  }
+  if (!warned) {
+    warned = true
+    console.error(`[grimoire] garde PreToolUse inactive : ${why}`)
+  }
+}
 
 function touchesSecret(args) {
   const text = JSON.stringify(args ?? {})
@@ -184,17 +204,14 @@ export const GrimoireGuard = async ({ directory }) => ({
       timeout: TIMEOUT_MS,
     })
     if (run.error || run.status !== 0) {
-      // Fail open, out loud: a missing binary must not freeze the host, but nobody should believe it is guarded.
-      if (!warned) {
-        warned = true
-        console.error(`[grimoire] garde PreToolUse inactive : ${run.error ? run.error.message : `exit ${run.status}`}`)
-      }
+      unavailable(directory, run.error ? run.error.message : `exit ${run.status}`)
       return
     }
     let verdict = {}
     try {
       verdict = JSON.parse(run.stdout || "{}")
     } catch {
+      unavailable(directory, "verdict illisible")
       return
     }
     const specific = verdict.hookSpecificOutput ?? {}
