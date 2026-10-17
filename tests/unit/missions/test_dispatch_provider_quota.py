@@ -47,7 +47,7 @@ def _script(tmp_path: Path, name: str, body: str) -> str:
     path = tmp_path / "scripts" / name
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(dedent(body), encoding="utf-8")
-    return f"{sys.executable} {path} {{prompt}} --model {{model}}"
+    return f"{Path(sys.executable).as_posix()} {path.as_posix()} {{prompt}} --model {{model}}"
 
 
 def _registry(root: Path, anthropic_invocation: str, local_invocation: str | None = None) -> None:

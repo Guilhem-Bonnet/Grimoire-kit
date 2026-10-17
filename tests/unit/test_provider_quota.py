@@ -340,7 +340,7 @@ def _call(tmp_path: Path, body: str) -> tuple[str | None, object]:
     script = tmp_path / "p.py"
     script.write_text(dedent(body), encoding="utf-8")
     registry = _REGISTRY.replace(
-        "claude -p {prompt} --model {model}", f"{sys.executable} {script} {{prompt}} {{model}}"
+        "claude -p {prompt} --model {model}", f"{Path(sys.executable).as_posix()} {script.as_posix()} {{prompt}} {{model}}"
     )
     path = tmp_path / "_grimoire/standard/llm-provider-registry.yaml"
     path.parent.mkdir(parents=True, exist_ok=True)
