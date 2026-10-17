@@ -19,7 +19,7 @@ import pytest
 
 from grimoire.core.exceptions import GrimoireRuntimeError
 from grimoire.flows.blueprint_loader import build_node_contracts, hardcoded_command_warnings
-from grimoire.missions.schemas import MissionTask, RiskProfile, TaskState, TaskType
+from grimoire.missions.schemas import MissionTask, RiskProfile, TaskCheck, TaskState, TaskType
 from grimoire.missions.verifiability import Verifiability, classify
 
 
@@ -51,6 +51,7 @@ def _task_for(acceptance_texts: tuple[str, ...]) -> MissionTask:
         risk_profile=RiskProfile.STANDARD,
         acceptance=acceptance_texts,
         created_at="2026-09-11T00:00:00+00:00",
+        checks=(TaskCheck(cmd="true"),),
     )
 
 
