@@ -64,6 +64,10 @@ _TO_BOARD: dict[TaskState, str] = {
     # acceptée, elle ne devient « publiée » que par une décision de release.
     TaskState.CLOSED: "accepted",
     TaskState.CANCELLED: "archived",
+    # État écrit par une version plus récente : la tâche est figée et n'avance
+    # plus ici ; « bloqué » est la colonne la plus proche, la valeur brute
+    # restant dans le ledger.
+    TaskState.UNKNOWN: "blocked",
 }
 
 # Board → ledger, pour l'import d'un board existant. Les fusions ci-dessus sont
@@ -135,6 +139,12 @@ def _blockers(task: MissionTask) -> list[dict[str, str]]:
         out.append({"reason": "échec de la tâche, remédiation requise", "target": task.id})
     if not out and task.status is TaskState.BLOCKED:
         out.append({"reason": "blocage déclaré sans dépendance nommée", "target": task.id})
+    if not out and task.status is TaskState.UNKNOWN:
+        # Le board range l'état inconnu en « blocked » : sans motif, le
+        # vérificateur rejette la carte (board.blocker_reason_missing) et chaque
+        # geste du service qui projette le board échoue.
+        raw = task.raw_status or "?"
+        out.append({"reason": f"état inconnu de cette version ({raw}) : mettre grimoire à jour", "target": task.id})
     return out
 
 

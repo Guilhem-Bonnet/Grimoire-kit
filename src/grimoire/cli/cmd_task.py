@@ -296,7 +296,7 @@ def task_list(
     for task in tasks:
         # Sans échappement, Rich prend les crochets pour une balise de style
         # et fait disparaître l'état — la ligne restait muette sur l'essentiel.
-        etat = escape(f"[{task.status.value} · {board_status_of(task.status)}]")
+        etat = escape(f"[{task.status_label} · {board_status_of(task.status)}]")
         console.print(f"  {task.id}  {etat}  {task.title}")
 
 
@@ -390,7 +390,7 @@ def task_show(
         typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
         return
     console.print(f"[bold]{task.id}[/bold] — {task.title}")
-    console.print(f"  état    : {task.status.value} (board : {board_status_of(task.status)})")
+    console.print(f"  état    : {task.status_label} (board : {board_status_of(task.status)})")
     console.print(f"  accepte : {', '.join(task.acceptance) or '—'}")
     console.print(f"  vérifiabilité : {verifiabilite['class']} — {verifiabilite['explanation']}")
     console.print(f"  modèle recommandé : {model_hint(advice)} [dim](palier : {advice['model_tier']})[/dim]")
@@ -566,13 +566,13 @@ def task_move(
     actor: _ACTOR = "cli",
 ) -> None:
     """Déplace une tâche, si l'état le permet et si la preuve suit."""
-    from grimoire.missions.schemas import TaskState
+    from grimoire.missions.schemas import TARGETABLE_TASK_STATES, TaskState
 
     try:
         target = TaskState(to)
     except ValueError:
         console.print(f"[red]✗[/red] État inconnu : {to}")
-        console.print("[dim]états : " + ", ".join(s.value for s in TaskState) + "[/dim]")
+        console.print("[dim]états : " + ", ".join(s.value for s in TARGETABLE_TASK_STATES) + "[/dim]")
         raise typer.Exit(1) from None
     _transition(ctx, task_id, target, project_root, ledger_root, actor, reason)
 

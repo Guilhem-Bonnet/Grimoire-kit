@@ -41,6 +41,17 @@ ORIGIN_UNVERIFIED = "unverified"
 DIRECTIVE_ORIGINS: tuple[str, ...] = (ORIGIN_HUMAN, ORIGIN_AGENT, ORIGIN_UNVERIFIED)
 
 
+def _int_or_zero(value: Any) -> int:
+    """Epoch lu d'un ledger : entier >= 0, sinon ``0`` (absent ou illisible, jamais d'exception).
+
+    ``0`` n'est attribué à aucun claim posé par le ledger : un epoch illisible
+    (texte, booléen, négatif) ne peut donc se réclamer d'aucun titulaire.
+    """
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return 0
+    return value
+
+
 class MissionState(StrEnum):
     DRAFT = "draft"
     OPEN = "open"
@@ -60,6 +71,15 @@ class TaskState(StrEnum):
     FAILED = "failed"
     CLOSED = "closed"
     CANCELLED = "cancelled"
+    #: Jamais écrit : ce que lit un lecteur plus ancien devant un état qu'il ne
+    #: connaît pas (écrit par une version plus récente). La valeur brute reste
+    #: dans ``MissionTask.raw_status`` ; aucune transition ne part de cet état
+    #: ni n'y arrive. Épopée #705, lot K1.
+    UNKNOWN = "unknown"
+
+
+#: Les états qu'un opérateur peut viser (tout sauf le sentinelle de lecture).
+TARGETABLE_TASK_STATES: tuple[TaskState, ...] = tuple(s for s in TaskState if s is not TaskState.UNKNOWN)
 
 
 class TaskType(StrEnum):
@@ -114,17 +134,6 @@ class TaskDependency:
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> TaskDependency:
         return cls(kind=DependencyKind(d["kind"]), target=d["target"])
-
-
-def _epoch_of(value: Any) -> int:
-    """Un epoch lu du journal : entier >= 0, sinon 0 (champ absent : claim d'avant le fencing).
-
-    Un epoch illisible ne vaut jamais celui d'un titulaire : 0 n'est attribué à
-    aucun claim posé par le ledger, donc aucun effet ne peut s'en réclamer.
-    """
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        return 0
-    return value
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,7 +237,7 @@ class TaskClaim:
             session_id=str(d.get("session_id", "") or ""),
             session_host=str(d.get("session_host", "") or ""),
             attached_explicit_at=str(d.get("attached_explicit_at", "") or ""),
-            lease_epoch=_epoch_of(d.get("lease_epoch")),
+            lease_epoch=_int_or_zero(d.get("lease_epoch")),
         )
 
     def with_session(self, session_id: str, session_host: str = "", *, explicit_at: str = "") -> TaskClaim:
@@ -478,6 +487,22 @@ class MissionTask:
     #: remontée V0 -> V1 un fait de la tâche, vu par toute surface qui décide,
     #: et non un affichage propre à une commande.
     accepted_risks: tuple[dict[str, Any], ...] = ()
+    #: Valeur brute de ``status`` quand ce lecteur ne la connaît pas
+    #: (``status is TaskState.UNKNOWN``) ; ``""`` sinon. Réécrite telle quelle
+    #: par ``to_dict`` : relire puis réécrire ne perd pas l'état d'origine.
+    raw_status: str = ""
+
+    @property
+    def is_unknown_state(self) -> bool:
+        return self.status is TaskState.UNKNOWN
+
+    @property
+    def status_label(self) -> str:
+        """L'état à afficher : la valeur brute inconnue, jamais un état voisin."""
+        if self.status is TaskState.UNKNOWN:
+            return f"inconnu ({self.raw_status})" if self.raw_status else "inconnu"
+        return self.status.value
+
     #: Commandes déclarées dont le code de sortie rend le verdict (issue #772).
     #: Sans elles, ``classify`` ne rend jamais V0 : un vocabulaire mécanique
     #: sans commande à lancer n'est qu'une promesse.
@@ -506,7 +531,7 @@ class MissionTask:
             "mission_id": self.mission_id,
             "title": self.title,
             "description": self.description,
-            "status": self.status.value,
+            "status": self.raw_status if self.status is TaskState.UNKNOWN and self.raw_status else self.status.value,
             "type": self.type.value,
             "risk_profile": self.risk_profile.value,
             "surface": self.surface,
@@ -540,11 +565,18 @@ class MissionTask:
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> MissionTask:
         claim = TaskClaim.from_dict(d["claim"]) if d.get("claim") else None
+        raw_status = str(d["status"])
+        try:
+            status = TaskState(raw_status)
+        except ValueError:
+            # État écrit par une version plus récente : on le garde tel quel,
+            # affiché « inconnu » et figé, au lieu de rendre le ledger illisible.
+            status = TaskState.UNKNOWN
         return cls(
             id=d["id"],
             mission_id=d["mission_id"],
             title=d["title"],
-            status=TaskState(d["status"]),
+            status=status,
             type=TaskType(d["type"]),
             risk_profile=RiskProfile(d["risk_profile"]),
             acceptance=tuple(d.get("acceptance", [])),
@@ -564,6 +596,7 @@ class MissionTask:
             extra=dict(d.get("extra", {})),
             directives=tuple(TaskDirective.from_dict(item) for item in d.get("directives", [])),
             accepted_risks=tuple(dict(risk) for risk in d.get("accepted_risks", [])),
+            raw_status=raw_status if status is TaskState.UNKNOWN else "",
             checks=tuple(TaskCheck.from_dict(c) for c in d.get("checks", [])),
         )
 

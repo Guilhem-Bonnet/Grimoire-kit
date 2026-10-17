@@ -849,7 +849,7 @@ def task_update(
         directive_id: The directive to acknowledge for "ack" (as listed by task_show / task_recall).
         force: For "cancel": cancel even if another session holds the task.
     """
-    from grimoire.missions.schemas import TaskState
+    from grimoire.missions.schemas import TARGETABLE_TASK_STATES, TaskState
 
     if action not in _TASK_ACTIONS:
         return _tool_error({"error": f"unknown action {action!r}", "actions": list(_TASK_ACTIONS)})
@@ -860,7 +860,7 @@ def task_update(
         try:
             target = TaskState(to)
         except ValueError:
-            return _tool_error({"error": f"unknown state {to!r}", "states": [s.value for s in TaskState]})
+            return _tool_error({"error": f"unknown state {to!r}", "states": [s.value for s in TARGETABLE_TASK_STATES]})
     elif action == "block":
         if not reason.strip():
             return _tool_error({"error": "block requires a reason"})

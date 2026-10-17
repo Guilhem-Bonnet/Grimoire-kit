@@ -244,13 +244,6 @@ def slug_for_path(path: Path) -> str | None:
     return None
 
 
-def path_for_slug(slug: str) -> Path | None:
-    for p in load_registry():
-        if p.get("slug") == slug:
-            return Path(str(p.get("path", "")))
-    return None
-
-
 def registered_root(*, slug: str = "", path: str = "") -> Path | None:
     """Racine d'un projet connu du registre — et du registre seul.
 

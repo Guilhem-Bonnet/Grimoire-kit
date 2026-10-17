@@ -716,12 +716,17 @@ class MissionLedger:
             )
         allowed = _TASK_TRANSITIONS.get(task.status, frozenset())
         if to_state not in allowed:
+            if task.is_unknown_state:
+                raise GrimoireMissionError(
+                    f"Task {task_id} est dans un état inconnu de cette version ({task.raw_status!r}) : "
+                    f"figée, aucune transition vers {to_state.value}. Mettre grimoire à jour."
+                )
             raise GrimoireMissionError(
                 f"Invalid task transition {task.status.value} → {to_state.value} for {task_id}"
             )
         payload: dict[str, Any] = {
             "task_id": task_id,
-            "from_state": task.status.value,
+            "from_state": task.raw_status if task.is_unknown_state else task.status.value,
             "to_state": to_state.value,
             "reason": reason,
             "actor_id": actor_id,
