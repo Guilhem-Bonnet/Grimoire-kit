@@ -861,7 +861,9 @@ def _run_provider_call(
     # sur leur statut : le nom de l'événement contient « rate_limit », que la
     # recherche de mots (`_looks_rate_limited`) prenait pour un refus même à
     # l'état `allowed`.
-    signal = classify_failure(completed.stdout, completed.stderr, now=datetime.now().astimezone())
+    signal = classify_failure(
+        completed.stdout, completed.stderr, now=datetime.now().astimezone(), returncode=completed.returncode
+    )
     if signal is not None:
         kind: str | None = signal.kind
     elif completed.returncode != 0:

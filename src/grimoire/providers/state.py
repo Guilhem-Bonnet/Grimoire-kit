@@ -44,6 +44,12 @@ _BASE_COOLDOWN: dict[str, timedelta] = {
 }
 _DEFAULT_COOLDOWN = timedelta(minutes=5)
 _MAX_COOLDOWN = timedelta(hours=1)
+#: Fermeture d'une suspension dont la date de réouverture est illisible
+#: (``source == "unknown"``). On ne devine pas la date du fournisseur, mais on
+#: borne le doute : sans borne, un message mal lu fermait le fournisseur pour de
+#: bon tant que personne ne lançait ``providers probe``. Passé ce délai le
+#: fournisseur est de nouveau essayé ; un nouveau refus re-suspend.
+UNKNOWN_SUSPENSION = timedelta(hours=6)
 
 _SCHEMA = "grimoire-providers-runtime-state/v1"
 
@@ -53,8 +59,11 @@ class Suspension:
     """Fermeture datée d'un fournisseur (ou d'un modèle) : forfait épuisé.
 
     ``until`` est la date de réouverture lue (``source`` ``resets_at`` ou
-    ``retry_after``) ou ``None`` (``source == "unknown"``) : la date n'a pas pu
-    être lue, l'exclusion dure jusqu'à ``grimoire providers probe``.
+    ``retry_after``). ``source == "unknown"`` : la date n'a pas pu être lue,
+    ``until`` est alors le plafond ``UNKNOWN_SUSPENSION`` après l'enregistrement
+    (``grimoire providers probe`` rouvre plus tôt). ``until is None`` ne se
+    rencontre plus qu'à la relecture d'un état écrit avant ce plafond : il
+    reste fermé jusqu'à la sonde.
     """
 
     until: datetime | None
@@ -104,9 +113,9 @@ class ProviderRuntimeState:
     def blocked_row(self, *, now: datetime) -> tuple[float | None, bool]:
         """``(cooldown_ts, available)`` tel que le filtre (Python ou Rust) les lit.
 
-        Une suspension à date se projette sur la date de refroidissement la plus
-        lointaine ; une suspension ``unknown`` se projette sur
-        ``available=False``. Le filtre Rust reste ainsi identique au Python.
+        Une suspension à date (``unknown`` plafonnée comprise) se projette sur la
+        date de refroidissement la plus lointaine ; une suspension sans date
+        (état ancien) se projette sur ``available=False``. Le filtre Rust reste ainsi identique au Python.
         """
         until = self.cooldown_until
         if self.suspension is not None and self.suspension.active(now=now):
@@ -290,16 +299,17 @@ def record_suspension(
 ) -> ProviderRuntimeState:
     """Ferme un fournisseur (ou un seul de ses modèles) jusqu'à une date lue.
 
-    ``until=None`` (``source="unknown"``) : date illisible, l'exclusion dure
-    jusqu'à :func:`clear_unknown_suspensions` (``grimoire providers probe``).
+    ``until=None`` (``source="unknown"``) : date illisible. On ne la devine pas,
+    mais l'exclusion est bornée à ``UNKNOWN_SUSPENSION`` après *now* ;
+    :func:`clear_unknown_suspensions` (``grimoire providers probe``) la lève
+    plus tôt.
     Une suspension à date **remplace** le refroidissement : on respecte la
     date du fournisseur, on ne l'allonge pas d'un délai de notre cru. Le
     compteur d'échecs, lui, avance.
     """
-    del now  # signature symétrique de record_failure ; la date vient du signal
     state = load_state(root)
     previous = state.get(provider_id, ProviderRuntimeState())
-    suspension = Suspension(until, source if until is not None else "unknown")
+    suspension = Suspension(_now(now) + UNKNOWN_SUSPENSION, "unknown") if until is None else Suspension(until, source)
     if model is None:
         entry = replace(
             previous,
@@ -336,6 +346,10 @@ def record_quota_observation(root: Path, provider_id: str, observation: QuotaObs
     save_state(root, state)
 
 
+def _is_unknown(suspension: Suspension) -> bool:
+    return suspension.source == "unknown" or suspension.until is None
+
+
 def clear_unknown_suspensions(root: Path, provider_id: str | None = None) -> tuple[str, ...]:
     """``providers probe`` : rouvre ce qu'une date illisible avait fermé.
 
@@ -348,11 +362,11 @@ def clear_unknown_suspensions(root: Path, provider_id: str | None = None) -> tup
         if provider_id is not None and pid != provider_id:
             continue
         suspension = entry.suspension
-        if suspension is not None and suspension.until is None:
+        if suspension is not None and _is_unknown(suspension):
             suspension = None
             cleared.append(pid)
-        models = {m: sus for m, sus in entry.model_suspensions.items() if sus.until is not None}
-        cleared.extend(f"{pid}/{m}" for m, sus in entry.model_suspensions.items() if sus.until is None)
+        models = {m: sus for m, sus in entry.model_suspensions.items() if not _is_unknown(sus)}
+        cleared.extend(f"{pid}/{m}" for m, sus in entry.model_suspensions.items() if _is_unknown(sus))
         state[pid] = replace(entry, suspension=suspension, model_suspensions=models)
     if cleared:
         save_state(root, state)

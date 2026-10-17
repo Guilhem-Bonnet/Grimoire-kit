@@ -47,7 +47,13 @@ _FAIL = """\
     sys.exit(1)
     """
 
-_RATE_LIMITED = 'print("429 rate limit exceeded")\n'
+# Une vraie limite sort en non-zéro : sur un exit 0 la sortie est la réponse du
+# modèle, et `classify_failure` n'y lit plus de mots (K8-S1-01).
+_RATE_LIMITED = """\
+    import sys
+    print("429 rate limit exceeded", file=sys.stderr)
+    sys.exit(1)
+    """
 
 
 def _script(tmp_path: Path, name: str, body: str) -> Path:

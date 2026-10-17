@@ -5,8 +5,10 @@ Trois situations que le refroidissement unique (``state.record_failure``) mêlai
 * **quota** : le forfait ou la limite est épuisé. Le fournisseur n'est pas
   « occupé », il est fermé jusqu'à une date, parfois connue (``resets at 3pm``,
   ``Retry-After``, ``resetsAt`` du flux ``stream-json``), parfois non. Une date
-  illisible se rend ``unknown`` : on ne devine pas, le fournisseur reste exclu
-  jusqu'à un ``providers probe``.
+  illisible se rend ``unknown`` : on ne devine pas la date, le fournisseur reste
+  exclu quelques heures (``state.UNKNOWN_SUSPENSION``) ou jusqu'à un
+  ``providers probe``. Seul un appel en échec est lu : sur un exit 0 le texte
+  est la réponse du modèle.
 * **overloaded** (HTTP 529) : la plateforme est saturée, pas le forfait. C'est un
   refroidissement court qui double, jamais une suspension de forfait.
 * **rate_limit** : un 429 sans date ni mot de forfait, refroidissement classique.
@@ -37,8 +39,25 @@ _BENIGN_STATUSES = frozenset({"allowed", "allowed_warning"})
 #: de la suspension ; sans date, la suspension est ``unknown``.
 _QUOTA_MARKERS = ("quota", "usage limit", "limit reached", "out of credits", "plan limit")
 #: Mots d'une limite de débit : refroidissement, sauf si une date est lue.
-_RATE_MARKERS = ("429", "rate limit", "rate_limit", "too many requests")
-_OVERLOAD_MARKERS = ("529", "overloaded")
+_RATE_MARKERS = ("rate limit", "rate_limit", "too many requests")
+_OVERLOAD_MARKERS = ("overloaded",)
+
+
+def _status_code(code: str) -> re.Pattern[str]:
+    """Un code HTTP lu comme tel : borné, et à côté d'un mot d'erreur ou de statut.
+
+    La sous-chaîne nue ``529`` se trouve dans ``"duration_ms":15290`` ; un code
+    n'est retenu que isolé (``\\b``) et collé à ``error``, ``status``, ``http``,
+    ``code`` ou ``overloaded`` (``API Error: 529``, ``"status":529``, ``HTTP 529``).
+    """
+    return re.compile(
+        rf"(?:error|status|http|code)\W{{0,6}}{code}\b|\b{code}\b\W{{0,3}}(?:error|overloaded|too many)",
+        re.IGNORECASE,
+    )
+
+
+_RATE_STATUS = _status_code("429")
+_OVERLOAD_STATUS = _status_code("529")
 
 _MAX_SUSPENSION = timedelta(days=366)
 
@@ -177,24 +196,32 @@ def parse_retry_after(text: str, *, now: datetime) -> datetime | None:
     return moment if moment > now else None
 
 
-def classify_failure(stdout: str, stderr: str, *, now: datetime) -> QuotaSignal | None:
+def classify_failure(stdout: str, stderr: str, *, now: datetime, returncode: int | None = None) -> QuotaSignal | None:
     """Lit stdout/stderr d'un appel ; ``None`` quand rien n'évoque un refus.
 
     Les lignes ``rate_limit_event`` du flux sont jugées sur leur ``status`` et
     retirées du texte avant la recherche de mots : le nom de l'événement
     contient lui-même ``rate_limit`` et faisait passer pour limité un appel
     pourtant ``allowed``.
+
+    Sur un appel sorti en 0 (``returncode == 0``), stdout est la réponse du
+    modèle, pas un diagnostic : seul un événement du flux explicitement refusé
+    compte, jamais un mot (``quota``, ``limit reached``) ni un nombre (``529``
+    dans ``duration_ms``) trouvé dans le texte libre. ``returncode=None``
+    (inconnu) lit le texte comme pour un échec.
     """
     events, remaining_stdout = _rate_limit_events(stdout)
     from_stream = _from_events(events, now=now)
     if from_stream is not None:
         return from_stream
+    if returncode == 0:
+        return None
 
     text = f"{remaining_stdout}\n{stderr}"
     lowered = text.lower()
     quota = any(marker in lowered for marker in _QUOTA_MARKERS)
-    rate = any(marker in lowered for marker in _RATE_MARKERS)
-    overloaded = any(marker in lowered for marker in _OVERLOAD_MARKERS)
+    rate = any(marker in lowered for marker in _RATE_MARKERS) or _RATE_STATUS.search(text) is not None
+    overloaded = any(marker in lowered for marker in _OVERLOAD_MARKERS) or _OVERLOAD_STATUS.search(text) is not None
     if not (quota or rate or overloaded):
         return None
     if overloaded and not (quota or rate):

@@ -189,6 +189,39 @@ def test_529_is_cooldown_not_suspension(tmp_path: Path) -> None:
     assert [p.id for p in candidates(tmp_path, "mid", now=T0 + timedelta(minutes=3))] == ["anthropic", "local"]
 
 
+def test_exit_0_text_with_quota_or_limit_words_is_not_a_failure() -> None:
+    """K8-S1-01 : sur un exit 0, stdout est la réponse du modèle, pas un diagnostic."""
+    for answer in ("the quota module is ready", "retry limit reached in the loop I refactored", "too many requests"):
+        assert classify_failure(answer, "", now=T0, returncode=0) is None
+
+
+def test_exit_0_with_a_rejected_stream_event_is_still_a_refusal() -> None:
+    signal = classify_failure(_event("rejected", None), "", now=T0, returncode=0)
+
+    assert signal is not None
+    assert (signal.kind, signal.source) == ("quota", "unknown")
+
+
+def test_nonzero_exit_still_reads_the_words() -> None:
+    signal = classify_failure("", "usage limit reached", now=T0, returncode=1)
+
+    assert signal is not None
+    assert signal.kind == "quota"
+
+
+def test_529_inside_a_number_is_not_an_overload() -> None:
+    """K8-S1-02 : ``duration_ms`` 15290 contient la sous-chaîne 529."""
+    assert classify_failure('{"duration_ms":15290}', "", now=T0, returncode=1) is None
+    assert classify_failure("", "took 14290 ms", now=T0, returncode=1) is None
+
+
+def test_529_as_a_status_is_still_an_overload() -> None:
+    for text in ("API Error: 529 overloaded_error", '{"type":"error","status":529}', "HTTP 529", "overloaded"):
+        signal = classify_failure("", text, now=T0, returncode=1)
+        assert signal is not None, text
+        assert signal.kind == "overloaded", text
+
+
 def test_bare_429_stays_a_plain_cooldown() -> None:
     signal = classify_failure("429 rate limit exceeded", "", now=T0)
 
@@ -215,10 +248,25 @@ def test_suspension_excludes_until_the_date_then_reopens(tmp_path: Path) -> None
 def test_unknown_suspension_stays_excluded_until_probe(tmp_path: Path) -> None:
     _registry(tmp_path)
     _probed(tmp_path, "anthropic", "local")
-    record_suspension(tmp_path, "anthropic", until=None, source="unknown")
+    record_suspension(tmp_path, "anthropic", until=None, source="unknown", now=T0)
 
-    assert [p.id for p in candidates(tmp_path, "mid", now=T0 + timedelta(days=30))] == ["local"]
+    assert [p.id for p in candidates(tmp_path, "mid", now=T0 + timedelta(hours=2))] == ["local"]
     assert clear_unknown_suspensions(tmp_path) == ("anthropic",)
+    assert [p.id for p in candidates(tmp_path, "mid", now=T0 + timedelta(hours=2))] == ["anthropic", "local"]
+
+
+def test_unknown_suspension_is_bounded_not_indefinite(tmp_path: Path) -> None:
+    """K8-S1-01 : une date illisible ferme quelques heures, pas jusqu'à une sonde jamais lancée."""
+    _registry(tmp_path)
+    _probed(tmp_path, "anthropic", "local")
+    record_suspension(tmp_path, "anthropic", until=None, source="unknown", now=T0)
+
+    suspension = load_state(tmp_path)["anthropic"].suspension
+    assert suspension is not None
+    assert suspension.source == "unknown"
+    assert suspension.until is not None
+    assert timedelta(hours=1) <= suspension.until - T0 <= timedelta(hours=12)
+    assert [p.id for p in candidates(tmp_path, "mid", now=T0 + timedelta(hours=1))] == ["local"]
     assert [p.id for p in candidates(tmp_path, "mid", now=T0 + timedelta(days=30))] == ["anthropic", "local"]
 
 
@@ -274,9 +322,11 @@ def test_backend_rust_rows_match_the_python_filter(tmp_path: Path) -> None:
     """La frontière PyO3 ne voit que (id, ts, bool) : une suspension s'y projette."""
     entry = ProviderRuntimeState(suspension=None)
     assert entry.blocked_row(now=T0) == (None, True)
-    record_suspension(tmp_path, "p", until=None, source="unknown")
+    record_suspension(tmp_path, "p", until=None, source="unknown", now=T0)
     unknown = load_state(tmp_path)["p"]
-    assert unknown.blocked_row(now=T0) == (None, False)
+    assert unknown.suspension is not None
+    assert unknown.suspension.until is not None
+    assert unknown.blocked_row(now=T0) == (unknown.suspension.until.timestamp(), True)
     dated = ProviderRuntimeState(cooldown_until=T0 + timedelta(minutes=5))
     assert dated.blocked_row(now=T0)[0] == (T0 + timedelta(minutes=5)).timestamp()
 
@@ -311,6 +361,29 @@ def test_call_stating_529_is_overloaded_not_rate_limit(tmp_path: Path) -> None:
     kind, _ = _call(tmp_path, "import sys\nprint('API Error: 529 overloaded_error', file=sys.stderr)\nsys.exit(1)\n")
 
     assert kind == "overloaded"
+
+
+def test_successful_call_mentioning_quota_or_limit_is_not_a_failure(tmp_path: Path) -> None:
+    """K8-S1-01 : la réponse du modèle parle de quota, l'appel est un succès."""
+    for answer in ("the quota check passes", "retry limit reached is now handled"):
+        kind, signal = _call(tmp_path, f"print({answer!r})\n")
+
+        assert kind is None, answer
+        assert signal is None, answer
+
+
+def test_successful_call_whose_output_holds_529_is_not_overloaded(tmp_path: Path) -> None:
+    """K8-S1-02 : ``"duration_ms":15290`` dans le flux d'un appel sorti en 0."""
+    kind, signal = _call(tmp_path, "print('{\"type\":\"result\",\"duration_ms\":15290}')\n")
+
+    assert kind is None
+    assert signal is None
+
+
+def test_failed_call_with_529_inside_a_number_is_a_plain_error(tmp_path: Path) -> None:
+    kind, _ = _call(tmp_path, "import sys\nprint('{\"duration_ms\":15290}')\nsys.exit(1)\n")
+
+    assert kind == "error"
 
 
 def test_observe_window_is_a_positive_lower_bound_or_nothing() -> None:
