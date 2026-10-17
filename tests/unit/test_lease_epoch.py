@@ -529,7 +529,8 @@ def test_append_is_synced_to_disk(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(os, "fsync", lambda fd: (synced.append(fd), real_fsync(fd))[1])
     ledger = _ledger(tmp_path)
     ledger.create_mission("M", origin="test")
-    assert len(synced) >= 2  # le fichier, puis le dossier
+    # le fichier, puis le dossier (fsync de dossier : POSIX seulement)
+    assert len(synced) >= (2 if os.name == "posix" else 1)
 
 
 # ── CLI ─────────────────────────────────────────────────────────────────────
