@@ -23,6 +23,13 @@ from urllib.parse import parse_qs, urlparse
 from grimoire.tools.ext_manager import ExtensionError
 from grimoire.tools.forge_routes import API_GET_UNHANDLED, api_get
 from grimoire.tools.project_registry import DEFAULT_SCAN_DEPTH, looks_grimoire, register_project
+from grimoire.tools.request_guard import (
+    check_host,
+    check_mutation,
+    has_body,
+    inject_session_token,
+    new_session_token,
+)
 from grimoire.tools.workspace_legacy import legacy_redirect_target
 from grimoire.tools.workspace_routes import PREFIX as WORKSPACE_PREFIX
 from grimoire.tools.workspace_routes import WORKSPACE_UNHANDLED, workspace_post
@@ -72,32 +79,26 @@ def make_handler(api: ForgeAPI) -> type[BaseHTTPRequestHandler]:
             depuis le navigateur la page devient same-origin, donc CORS ne
             protège plus la *lecture* des réponses. Un `GET` qui liste des
             dossiers ou nomme la racine du projet devient alors un oracle sur
-            la machine. Le seul Host légitime d'un outil lié à la loopback est
-            la loopback ; tout le reste est refusé, quelle que soit la méthode.
+            la machine. La règle est celle du cockpit (``request_guard``).
             """
-            host = (self.headers.get("Host") or "").split(":")[0].lower()
-            if host not in ("127.0.0.1", "localhost", "::1", ""):
-                self._error("hôte non autorisé", 403)
+            refused = check_host(self.headers)
+            if refused:
+                self._error(refused[1], refused[0])
                 return False
             return True
 
         def _guard_mutation(self) -> bool:
-            """Anti CSRF, en plus du garde d'hôte (backend-permissif).
+            """Anti CSRF, en plus du garde d'hôte : même règle que le cockpit.
 
-            Refuse toute mutation dont l'Origin (si présent, cas navigateur) est
-            cross-origin. Un outil local ne doit répondre qu'à sa propre UI, pas
-            à une page tierce ouverte dans le navigateur de l'utilisateur.
+            Origine (schéma, hôte, port), ``Sec-Fetch-Site`` et type de contenu
+            JSON, vérifiés avant de lire le corps.
             """
-            if not self._guard_host():
+            refused = check_mutation(
+                self.headers, int(cast(tuple[str, int], self.server.server_address)[1]), with_body=has_body(self.headers)
+            )
+            if refused:
+                self._error(refused[1], refused[0])
                 return False
-            origin = self.headers.get("Origin")
-            if origin:
-                from urllib.parse import urlparse
-
-                oh = urlparse(origin).hostname or ""
-                if oh.lower() not in ("127.0.0.1", "localhost", "::1"):
-                    self._error("origine non autorisée", 403)
-                    return False
             return True
 
         def _governed_event(self, action: str, **fields: Any) -> None:
@@ -344,6 +345,8 @@ def make_handler(api: ForgeAPI) -> type[BaseHTTPRequestHandler]:
                 ".png": "image/png", ".ico": "image/x-icon",
             }
             body = target.read_bytes()
+            if target.suffix == ".html":
+                body = inject_session_token(body)
             self.send_response(200)
             self.send_header(
                 "Content-Type",
@@ -399,6 +402,7 @@ def serve(
     # La couche de données du projet se génère en fond : le serveur répond tout
     # de suite, et les pages runtime se remplissent quand elle est prête.
     api.data.refresh()
+    new_session_token()
     server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(api))
     return server
 

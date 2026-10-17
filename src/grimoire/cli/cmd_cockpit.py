@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 from urllib.parse import parse_qs, urlparse
 
 import typer
@@ -57,6 +57,13 @@ from grimoire.tools.project_registry import (
     write_state,
 )
 from grimoire.tools.project_update import update_project
+from grimoire.tools.request_guard import (
+    check_host,
+    check_mutation,
+    has_body,
+    inject_session_token,
+    new_session_token,
+)
 from grimoire.tools.workspace_legacy import legacy_redirect_target
 
 cockpit_app = typer.Typer(
@@ -270,9 +277,27 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         if self.client_address[0] not in _LOCAL_HOSTS:
             self._send_json(403, {"ok": False, "error": "cockpit local only"})
             return False
-        host = (self.headers.get("Host") or "").split(":")[0].lower()
-        if host not in ("127.0.0.1", "localhost", "::1", ""):
-            self._send_json(403, {"ok": False, "error": "hôte non autorisé"})
+        refused = check_host(self.headers)
+        if refused:
+            self._send_json(refused[0], {"ok": False, "error": refused[1]})
+            return False
+        return True
+
+    def _guard_mutation(self) -> bool:
+        """Garde des écritures (``POST``/``PUT``), commune avec l'atelier.
+
+        Pair et hôte (``_local_only``), puis ``Origin`` égal à l'origine servie,
+        ``Sec-Fetch-Site`` et type de contenu JSON — avant toute lecture du corps.
+        Une page tierce sait émettre un ``POST`` « simple » vers la loopback ; le
+        contrôle d'hôte seul ne la voit pas.
+        """
+        if not self._local_only():
+            return False
+        refused = check_mutation(
+            self.headers, int(cast(tuple[str, int], self.server.server_address)[1]), with_body=has_body(self.headers)
+        )
+        if refused:
+            self._send_json(refused[0], {"ok": False, "error": refused[1]})
             return False
         return True
 
@@ -302,6 +327,22 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         """
         return bool(_HOME_SLUG) and self._query_slug() == _HOME_SLUG
 
+    def _serve_static(self) -> None:
+        """Fichier statique ; une page HTML reçoit le jeton de session."""
+        target = Path(self.translate_path(self.path))
+        if target.is_dir():
+            target = target / "index.html"
+        if target.suffix.lower() != ".html" or not target.is_file():
+            super().do_GET()
+            return
+        body = inject_session_token(target.read_bytes())
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self) -> None:  # http.server contract
         parsed = urlparse(self.path)
         path = parsed.path
@@ -316,7 +357,7 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
                 self.send_header("Content-Length", "0")
                 self.end_headers()
                 return
-            super().do_GET()
+            self._serve_static()
             return
         if not self._local_only():
             return
@@ -390,7 +431,7 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         # il faut donc comparer le chemin sans sa query string, sinon chaque
         # route ci-dessous reste injoignable dès qu'un projet est sélectionné.
         path = urlparse(self.path).path
-        if not self._local_only():
+        if not self._guard_mutation():
             return
         from grimoire.tools.workspace_routes import PREFIX as WORKSPACE_PREFIX
 
@@ -748,7 +789,7 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         travail (#356).
         """
         path = urlparse(self.path).path
-        if not self._local_only():
+        if not self._guard_mutation():
             return
         if not path.startswith("/api/blueprints/"):
             self._send_json(404, {"ok": False, "error": "route inconnue"})
@@ -1136,6 +1177,7 @@ def serve(
         if notice:
             console.print(notice)
 
+    new_session_token()
     handler = partial(_CockpitHandler, directory=str(serve_dir))
     try:
         httpd = ThreadingHTTPServer(("127.0.0.1", port), handler)

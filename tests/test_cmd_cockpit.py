@@ -433,7 +433,8 @@ def test_api_sync_requires_confirm(api_server: int) -> None:
 
 def test_api_404_on_other_path(api_server: int) -> None:
     req = urllib.request.Request(
-        f"http://127.0.0.1:{api_server}/api/other", data=b"{}", method="POST"
+        f"http://127.0.0.1:{api_server}/api/other", data=b"{}", method="POST",
+        headers={"Content-Type": "application/json"},
     )
     try:
         urllib.request.urlopen(req, timeout=5)  # noqa: S310
