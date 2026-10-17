@@ -312,10 +312,16 @@ def _list_all_projects(
     """Le portefeuille : tableau lisible, ou la charge utile JSON telle quelle."""
     from rich.table import Table
 
+    from grimoire.missions.liveness import probe_claude_agents
     from grimoire.tools.workspace_portfolio import portfolio_tasks
 
     view = portfolio_tasks(
-        project_root.resolve(), state=status, project=project, live=live, live_minutes=live_minutes
+        project_root.resolve(),
+        state=status,
+        project=project,
+        live=live,
+        live_minutes=live_minutes,
+        probe=probe_claude_agents,
     )
     if _fmt(ctx) == "json":
         typer.echo(json.dumps(view, indent=2, ensure_ascii=False))
@@ -326,7 +332,10 @@ def _list_all_projects(
     for card in view["tasks"]:
         session = card.get("session") or {}
         if session:
-            session_text = f"{'vivante' if session.get('live') else 'inactive'} · {session.get('id', '')}"
+            state = session.get("liveness") or {}
+            session_text = f"{state.get('state', 'inconnu')} · {session.get('id', '')}"
+            if session.get("attention"):
+                session_text += f" · attention : {session['attention']['reason']}"
         else:
             session_text = "—"
         unread = card.get("unread_directives") or 0
@@ -349,8 +358,9 @@ def _list_all_projects(
     summary = view["summary"]
     console.print(
         f"[dim]{summary['projects']} projet(s), {summary['readable']} lisible(s) · "
-        f"{summary['tasks']} tâche(s), {summary['live']} session(s) vivante(s) "
-        f"(< {view['live_minutes']} min)[/dim]"
+        f"{summary['tasks']} tâche(s) · vivacité "
+        + ", ".join(f"{n} {name}" for name, n in summary["liveness"].items() if n)
+        + f" (journal < {view['live_minutes']} min)[/dim]"
     )
 
 

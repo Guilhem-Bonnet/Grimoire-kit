@@ -872,6 +872,10 @@ class MissionLedger:
         views = [self._lease_view(t, moment, clock) for t in self.list_tasks()]
         return [v for v in views if v is not None and v.status == "lost"]
 
+    def lease_file(self, task_id: str) -> LeaseFile | None:
+        """Le fichier de bail de *task_id* (indice, jamais vérité) ; ``None`` s'il manque ou est illisible."""
+        return read_lease(lease_path(self._root, task_id))
+
     def renew_lease(
         self,
         task_id: str,

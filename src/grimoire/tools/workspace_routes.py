@@ -67,6 +67,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from grimoire.missions.liveness import probe_claude_agents
 from grimoire.tools import (
     source_assist,
     workspace_api,
@@ -223,6 +224,7 @@ def _portfolio_tasks(project_root: Path, query: _Query) -> Any:
         project=_one(query, "slug") or None,
         live=live_raw not in (None, "", "0", "false"),
         live_minutes=int(minutes_raw) if minutes_raw else workspace_portfolio.DEFAULT_LIVE_MINUTES,
+        probe=probe_claude_agents,
     )
 
 

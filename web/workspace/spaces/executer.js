@@ -215,7 +215,7 @@ function portfolioRow(task) {
   line.append(project);
   const session = task.session;
   if (session && session.id) {
-    line.append(row(dot(session.live ? 'ok' : ''), text('span', null, session.live ? 'session vivante' : 'session inactive')));
+    line.append(row(dot(livenessDot(session)), text('span', null, `session ${livenessLabel(session)}`)));
   } else {
     line.append(text('span', 'lbl', 'aucune session'));
   }
@@ -351,7 +351,7 @@ function renderList(root, ctx, tasks, onSelect, portfolio = false) {
       const sessionCell = document.createElement('td');
       const session = task.session;
       if (session && session.id) {
-        sessionCell.append(row(dot(session.live ? 'ok' : ''), text('span', null, session.live ? 'vivante' : 'inactive')));
+        sessionCell.append(row(dot(livenessDot(session)), text('span', null, livenessLabel(session))));
       } else {
         sessionCell.append(text('span', 'lbl', '—'));
       }
@@ -496,6 +496,18 @@ async function renderTimeline(root, ctx, task) {
 
 // ── Inspecteur ────────────────────────────────────────────────────────────
 
+// Vivacité calculée à quatre valeurs (K5, #770) : jamais un booléen. `inconnu`
+// n'est pas « mort » ; `attention` (vivant sans progression, inconnu prolongé)
+// colore le point sans rien tuer.
+function livenessLabel(session) {
+  const l = session.liveness || { state: 'inconnu' };
+  return l.reason && l.state === 'inactif' ? `inactif (${l.reason})` : l.state;
+}
+function livenessDot(session) {
+  if (session.attention) return 'warn';
+  return (session.liveness || {}).state === 'vivant' ? 'ok' : '';
+}
+
 // « Reprendre la session » (#638) : copie la commande sur l'hôte Claude Code,
 // affiche l'identifiant ailleurs — jamais d'exécution depuis la webview.
 function sessionBlock(session) {
@@ -503,9 +515,10 @@ function sessionBlock(session) {
   block.className = 'ex-insp-block ex-session';
   block.append(text('h4', null, 'Session'));
   block.append(row(
-    dot(session.live ? 'ok' : ''),
-    text('span', null, `${session.live ? 'vivante' : 'inactive'} · ${session.id}` + (session.host ? ` · ${session.host}` : '')),
+    dot(livenessDot(session)),
+    text('span', null, `${livenessLabel(session)} · ${session.id}` + (session.host ? ` · ${session.host}` : '')),
   ));
+  if (session.attention) block.append(text('div', 'lbl', `attention : ${session.attention.reason}`));
   if (session.updated_at) block.append(text('div', 'lbl', `dernier signe : ${session.updated_at}`));
   const feedback = text('div', 'lbl', '');
   if (session.resume_command) {
