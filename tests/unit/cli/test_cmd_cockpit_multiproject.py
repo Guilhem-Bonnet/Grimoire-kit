@@ -205,11 +205,11 @@ def test_argv_values_cannot_pose_as_options(
     """Pas de shell ici, mais `--yes` en valeur vaudrait confirmation."""
     calls: list[list[str]] = []
 
-    def _fake_run(cmd: list[str], **kw: Any) -> _FakeProc:
-        calls.append(cmd)
-        return _FakeProc(0, stdout="{}")
+    def _fake_invoke(proot: Path, argv: list[str]) -> Any:
+        calls.append(argv)
+        return cmd_cockpit._CliResult(0, "{}", "")
 
-    monkeypatch.setattr(cmd_cockpit.subprocess, "run", _fake_run)
+    monkeypatch.setattr(cmd_cockpit, "_invoke_memory_cli", _fake_invoke)
     for hostile in ("--help", "-x", "--yes", "a" * 600, "nul\x00byte"):
         status, body = _post_json(
             solo_server, "/api/memory", {"action": "search", "project": "served", "query": hostile}
@@ -223,15 +223,39 @@ def test_argv_values_are_passed_after_a_separator(
 ) -> None:
     captured: dict[str, Any] = {}
 
-    def _fake_run(cmd: list[str], **kw: Any) -> _FakeProc:
-        captured["cmd"] = cmd
-        return _FakeProc(0, stdout="{}")
+    def _fake_invoke(proot: Path, argv: list[str]) -> Any:
+        captured["argv"] = argv
+        return cmd_cockpit._CliResult(0, "{}", "")
 
-    monkeypatch.setattr(cmd_cockpit.subprocess, "run", _fake_run)
+    monkeypatch.setattr(cmd_cockpit, "_invoke_memory_cli", _fake_invoke)
     _post_json(
         solo_server, "/api/memory", {"action": "search", "project": "served", "query": "mémoire"}
     )
-    assert captured["cmd"][-2:] == ["--", "mémoire"]
+    assert captured["argv"][-2:] == ["--", "mémoire"]
+
+
+def test_api_memory_spawns_no_subprocess(
+    solo_server: int, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CodeQL #223 : la requête n'atteint plus aucun sous-processus."""
+
+    def _boom(*a: Any, **kw: Any) -> Any:
+        raise AssertionError("sous-processus lancé par /api/memory")
+
+    monkeypatch.setattr(cmd_cockpit.subprocess, "run", _boom)
+    monkeypatch.setattr(cmd_cockpit.subprocess, "Popen", _boom)
+    before = Path.cwd()
+    status, body = _post_json(
+        solo_server, "/api/memory", {"action": "search", "project": "served", "query": "mémoire"}
+    )
+    assert status == 200
+    assert set(body) == {"ok", "code", "stdout", "stderr", "action", "mutation"}
+    assert body["action"] == "search" and body["mutation"] is False
+    # Même résultat que la CLI lancée directement dans le projet servi.
+    served = tmp_path / "served"
+    expected = cmd_cockpit._invoke_memory_cli(served, ["--output", "json", "memory", "search", "--", "mémoire"])
+    assert (body["code"], body["stdout"]) == (expected.returncode, expected.stdout)
+    assert Path.cwd() == before
 
 
 def test_select_rejects_malformed_json(duo_server: Any) -> None:
