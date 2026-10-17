@@ -188,3 +188,42 @@ def test_run_dispatch_does_not_suspend_a_provider_whose_answer_mentions_quota(tm
     assert [a.verdict for a in report.attempts] == ["green"]
     entry = load_state(tmp_path).get("anthropic")
     assert entry is None or (entry.suspension is None and entry.cooldown_until is None)
+
+
+def test_run_dispatch_cools_down_a_timed_out_call_without_suspending_it(tmp_path: Path) -> None:
+    sleeper = """\
+        import time
+        time.sleep(30)
+        """
+    _registry(tmp_path, _script(tmp_path, "slow.py", sleeper), _script(tmp_path, "ok.py", _WRITE_MARKER))
+    service, tid = _task(tmp_path)
+
+    report = run_dispatch(service, tid, checks=("test -f marker.txt",), call_timeout=1.0)
+
+    assert [a.verdict for a in report.attempts] == ["timeout", "green"]
+    entry = load_state(tmp_path)["anthropic"]
+    assert entry.suspension is None
+    assert entry.cooldown_until is not None
+    assert entry.last_failure == "timeout"
+
+
+def test_run_dispatch_records_the_plan_window_read_from_the_stream(tmp_path: Path) -> None:
+    streaming = """\
+        import json
+        from pathlib import Path
+        Path("marker.txt").write_text("done", encoding="utf-8")
+        print(json.dumps({"type": "rate_limit_event", "rate_limit_info": {
+            "status": "allowed",
+            "unifiedWindows": {"five_hour": {"utilization": 0.42}},
+        }}))
+        """
+    _registry(tmp_path, _script(tmp_path, "stream.py", streaming))
+    service, tid = _task(tmp_path)
+
+    report = run_dispatch(service, tid, checks=("test -f marker.txt",))
+
+    assert [a.verdict for a in report.attempts] == ["green"]
+    observation = load_state(tmp_path)["anthropic"].quota_observation
+    assert observation is not None
+    assert (observation["window"], observation["utilization"]) == ("five_hour", 0.42)
+    assert load_state(tmp_path)["anthropic"].suspension is None
