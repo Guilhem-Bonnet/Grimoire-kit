@@ -22,10 +22,11 @@ en lecture seule dégradent en « rien rattaché », jamais en session cassée.
 from __future__ import annotations
 
 import contextlib
+import subprocess
 from datetime import UTC, datetime
 from typing import Any
 
-from grimoire.core.standard_state import ActiveTask
+from grimoire.core.standard_state import LEDGER_RELPATH, ActiveTask
 from grimoire.hosts.decisions._shared import HookInput
 
 #: Profiles whose ``Stop`` hook refuses a closure — red gates, unevaluable
@@ -36,6 +37,10 @@ BLOCKING_PROFILES = frozenset({"governed", "production"})
 #: l'absence de tâche, pour qu'un test ou un journal le distingue d'un gate
 #: de preuve rouge.
 NO_ACTIVE_TASK = "no_active_task"
+
+#: Marqueur de ``Decision.detail["blocked_on"]`` quand la session tient encore une
+#: tâche ``claimed``/``running`` qu'elle n'a ni fermée ni garée (K3, §5.1).
+TASK_UNPARKED = "task_unparked"
 
 _REMEDY_LINES = (
     '  grimoire task add "<titre>" -a "<critère d\'acceptation>" --owner <nom> --ready',
@@ -137,31 +142,68 @@ def link_session(hook: HookInput, active: ActiveTask) -> dict[str, Any]:
     ``session-<id>.json`` a reçu ``task_id`` cette fois. Sans ``session_id``
     dans le payload (hôte qui n'en envoie pas) ou sous ``bootstrap``, rien
     n'est écrit nulle part.
+
+    K3 (issue #768) : le journal reçoit aussi l'epoch du bail que la session
+    tient (``lease_epoch``), et le ledger la version de l'hôte — c'est ce que le
+    frein ``PreToolUse`` et la récolte comparent. Une session dont le journal
+    porte déjà un autre epoch pour cette tâche a été reprise : elle ne se
+    rattache pas au claim du nouveau titulaire.
     """
     out: dict[str, Any] = {"session_attached": False, "journal_task_written": False}
     if not hook.session_id or active.task_id == "bootstrap":
         return out
     now_iso = datetime.now(UTC).isoformat()
+    known_epoch = _journal_epoch(hook, active.task_id)
     with contextlib.suppress(Exception):
         from grimoire.policies.session_state import note_session_task
 
         out["journal_task_written"] = note_session_task(
             hook.project_root, hook.session_id, active.task_id, now_iso=now_iso
         )
-    if active.source != "ledger_claim":
+    if active.source not in ("ledger_claim", "session_claim"):
         return out
+    if active.source == "session_claim" and known_epoch:
+        return out  # déjà rattachée, epoch et version déjà notés : une lecture du journal, pas du ledger
     try:
+        from grimoire.hosts.capabilities import resolve_host
+        from grimoire.hosts.host_version import detect_host_version
         from grimoire.missions.service import TaskService
 
         service = TaskService(hook.project_root)
         task = service.ledger.get_task(active.task_id)
-        if task is None or task.claim is None or task.claim.session_id:
+        if task is None or task.claim is None:
             return out
-        service.attach_session(task.id, hook.session_id, session_host=hook.host, actor=task.claim.actor_id)
-        out["session_attached"] = True
+        claim = task.claim
+        if claim.session_id and claim.session_id != hook.session_id:
+            return out
+        if known_epoch and claim.lease_epoch != known_epoch:
+            return out  # reprise ailleurs : le claim d'aujourd'hui n'est pas celui que cette session tenait
+        version = detect_host_version(resolve_host(hook.host) if hook.host else None, hook.raw)
+        if not claim.session_id or (version and version != claim.session_host_version):
+            service.attach_session(
+                task.id, hook.session_id, session_host=hook.host, actor=claim.actor_id, host_version=version
+            )
+            out["session_attached"] = not claim.session_id
+        with contextlib.suppress(Exception):
+            from grimoire.policies.session_state import note_session_task
+
+            note_session_task(
+                hook.project_root, hook.session_id, task.id, now_iso=now_iso, lease_epoch=claim.lease_epoch
+            )
     except Exception:
         return out
     return out
+
+
+def _journal_epoch(hook: HookInput, task_id: str) -> int:
+    """L'epoch que le journal de la session note pour *task_id* — ``0`` s'il n'en note aucun."""
+    try:
+        from grimoire.policies.session_state import load_session_state
+
+        state = load_session_state(hook.project_root, hook.session_id, now_iso="")
+    except Exception:
+        return 0
+    return state.lease_epoch if state.task_id == task_id else 0
 
 
 def session_mutation_count(hook: HookInput) -> int:
@@ -174,3 +216,73 @@ def session_mutation_count(hook: HookInput) -> int:
         return session_mutations(hook.project_root, hook.session_id)
     except Exception:
         return 0
+
+
+#: Au plus ce nombre de chemins dans ``session.unattached_work`` : un signal, pas un inventaire.
+_MAX_UNATTACHED_FILES = 50
+
+
+def stop_scope(hook: HookInput, active: ActiveTask) -> ActiveTask:
+    """La tâche que ``Stop`` juge : celle rattachée à *cette* session, jamais une autre (K3, issue #768).
+
+    ``resolve_active_task`` hérite, pour un hook qui doit désigner une tâche au
+    prompt, du claim sans session (``ledger_claim``) et de l'unique carte
+    ``in_progress`` du board (``board``) — des règles faites pour que le premier
+    prompt rattache la session, pas pour décider qu'une clôture est refusée. Au
+    ``Stop`` elles faisaient bloquer une session sans tâche sur les gates rouges
+    d'une tâche qui n'était pas la sienne. Ici, une tâche du ledger dont le claim
+    n'est pas rattaché à cette session retombe sur ``bootstrap`` ; une carte du
+    board que le ledger ne connaît pas (board écrit à la main) reste jugée.
+    Sans ``session_id`` (hôte qui n'en envoie pas), la résolution est inchangée.
+    """
+    if not hook.session_id or active.source not in ("ledger_claim", "board"):
+        return active
+    try:
+        from grimoire.missions.ledger import MissionLedger
+
+        events = hook.project_root.resolve() / LEDGER_RELPATH / "events.jsonl"
+        if not events.is_file():
+            return active
+        task = MissionLedger(events.parent).get_task(active.task_id)
+    except Exception:
+        return active
+    if task is None:
+        return active
+    if task.claim is not None and task.claim.session_id == hook.session_id:
+        return active
+    return ActiveTask("bootstrap", "bootstrap", expired=active.expired)
+
+
+def dirty_files(hook: HookInput) -> tuple[str, ...]:
+    """Les chemins que ``git status`` dit modifiés ou non suivis, au plus :data:`_MAX_UNATTACHED_FILES`.
+
+    Information, jamais décision : un arbre sale n'est pas le travail de cette session
+    (c'est le compteur d'écritures du journal qui décide). Hors dépôt git, git absent ou
+    trop lent : ``()``.
+    """
+    try:
+        done = subprocess.run(
+            ["git", "-C", str(hook.project_root), "status", "--porcelain", "--untracked-files=normal"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5, check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ()
+    if done.returncode != 0:
+        return ()
+    lines = [line[3:].strip() for line in done.stdout.splitlines() if len(line) > 3]
+    return tuple(lines[:_MAX_UNATTACHED_FILES])
+
+
+def record_unattached_work(hook: HookInput, mutations: int) -> dict[str, Any]:
+    """Journalise ``session.unattached_work{files, mutations}`` (§5.1) et le rend pour le détail de la décision.
+
+    Best-effort : un journal inscriptible ou non, la décision de ``Stop`` ne change pas.
+    """
+    files = dirty_files(hook)
+    with contextlib.suppress(Exception):
+        from grimoire.policies.session_state import note_unattached_work
+
+        note_unattached_work(
+            hook.project_root, hook.session_id, mutations=mutations, files=files, now_iso=datetime.now(UTC).isoformat()
+        )
+    return {"files": list(files), "mutations": mutations}

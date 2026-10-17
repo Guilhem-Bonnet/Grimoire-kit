@@ -19,6 +19,7 @@ Deux règles :
 from __future__ import annotations
 
 import contextlib
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -319,7 +320,14 @@ class TaskService:
         return TaskAdded(task=task, mission_id=mission_id, mission_created=created_mission, board_path=self.project_board())
 
     def attach_session(
-        self, task_id: str, session_id: str, *, session_host: str = "", actor: str = "hook", explicit: bool = False
+        self,
+        task_id: str,
+        session_id: str,
+        *,
+        session_host: str = "",
+        actor: str = "hook",
+        explicit: bool = False,
+        host_version: str = "",
     ) -> MissionTask:
         """Rattache la session d'hôte courante au claim de *task_id* (issue #638).
 
@@ -329,7 +337,8 @@ class TaskService:
         voie la session sans attendre un autre geste.
         """
         task = self.ledger.attach_session(
-            task_id, session_id, session_host=session_host, actor_id=actor, explicit=explicit
+            task_id, session_id, session_host=session_host, actor_id=actor, explicit=explicit,
+            host_version=host_version,
         )
         self.project_board()
         return task
@@ -346,11 +355,34 @@ class TaskService:
         session_id, session_host = current_session(env)
         if not session_id:
             return ""
+        from grimoire.hosts.host_version import VERSION_ENV, valid_version
+
+        version = valid_version(str((os.environ if env is None else env).get(VERSION_ENV, "")))
         try:
-            self.attach_session(task_id, session_id, session_host=session_host, actor=actor)
+            task = self.attach_session(task_id, session_id, session_host=session_host, actor=actor, host_version=version)
         except GrimoireMissionError:
             return ""
+        self._note_session_lease(task, session_id)
         return session_id
+
+    def _note_session_lease(self, task: MissionTask, session_id: str) -> None:
+        """Le journal de la session apprend l'epoch qu'elle vient de réclamer (K3) : c'est ce que le frein compare.
+
+        Un claim fait depuis la session (CLI, MCP) est un geste explicite de la
+        session elle-même : il remplace l'epoch noté, y compris celui d'un bail perdu
+        qu'elle reprend. Best-effort : un journal illisible laisse la session sans frein.
+        """
+        if task.claim is None or task.claim.session_id != session_id:
+            return
+        with contextlib.suppress(Exception):
+            from datetime import UTC, datetime
+
+            from grimoire.policies.session_state import note_session_task
+
+            note_session_task(
+                self.project_root, session_id, task.id, now_iso=datetime.now(UTC).isoformat(),
+                lease_epoch=task.claim.lease_epoch,
+            )
 
     def claim(
         self, task_id: str, actor: str, host: str = "local", files: tuple[str, ...] = ()
@@ -377,10 +409,21 @@ class TaskService:
             epoch = task.claim.lease_epoch
         return self.ledger.renew_lease(task_id, epoch, actor_id=actor)
 
-    def reap(self, *, fenced_hosts: frozenset[str] = frozenset(), apply: bool = True, actor: str = "tick") -> ReapReport:
-        """Récolte des baux perdus (:meth:`MissionLedger.reap`), quota lu dans l'état des fournisseurs."""
+    def reap(self, *, apply: bool = True, actor: str = "tick") -> ReapReport:
+        """Récolte des baux perdus (:meth:`MissionLedger.reap`), quota lu dans l'état des fournisseurs.
+
+        K3 (issue #768) : un hôte est fencé selon la table ``hosts.capabilities``
+        — par hôte *et* par version, depuis les seules fixtures de K0 — et non plus
+        selon une déclaration de l'appelant. Tout autre hôte, ou une version
+        inconnue, donne ``resume_unfenced`` : la question est posée, rien n'est relancé.
+        """
+        from grimoire.hosts.capabilities import claim_host_is_fenced
+
         report = self.ledger.reap(
-            fenced_hosts=fenced_hosts, quota_blocked=self._quota_blocked, actor_id=actor, apply=apply
+            quota_blocked=self._quota_blocked,
+            actor_id=actor,
+            apply=apply,
+            is_fenced=lambda view: claim_host_is_fenced(view.host, view.host_version),
         )
         if any(d.written and d.action == "ready" for d in report.decisions):
             self.project_board()

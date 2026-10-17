@@ -553,10 +553,13 @@ def test_cli_renew_and_reap(tmp_path: Path) -> None:
 
     path = lease_path(tmp_path / "_grimoire-runtime-output" / "ledger", tid)
     write_lease(path, LeaseFile(tid, 1, (datetime.now(UTC) - timedelta(hours=1)).isoformat()))
-    res = runner.invoke(task_app, ["reap", "--fenced-host", "claude-code-cli", *common])
+    # K3 : le frein n'est plus déclaré par l'opérateur, il vient de la table des hôtes
+    # (Claude Code 2.1.301 prouvé) ; la version de la session est celle que le hook a lue.
+    ledger.attach_session(tid, "s-cli", session_host="claude-code-cli", host_version="2.1.301")
+    res = runner.invoke(task_app, ["reap", *common])
     assert res.exit_code == 0 and "relancée" in res.output and "--apply" in res.output
     assert ledger.get_task(tid).status is TaskState.RUNNING  # type: ignore[union-attr]
-    res = runner.invoke(task_app, ["reap", "--fenced-host", "claude-code-cli", "--apply", *common])
+    res = runner.invoke(task_app, ["reap", "--apply", *common])
     assert res.exit_code == 0, res.output
     assert MissionLedger(ledger._root).get_task(tid).status is TaskState.READY  # type: ignore[union-attr]
 
@@ -753,7 +756,7 @@ def test_interrupted_hand_back_is_not_relaunched_on_an_unfenced_host(
             ledger.transition_task(tid, TaskState.CANCELLED, actor_id="human")
     root = tmp_path / "ledger"
     barrier = read_lease(lease_path(root, tid))
-    assert barrier is not None and barrier.epoch == 2 and not barrier.holder and barrier.origin == "hand_back"
+    assert barrier is not None and barrier.epoch == 2 and not barrier.holder and barrier.origin == "cancel"  # K3 : l'annulation se nomme, le frein dit « annulée »
 
     fresh = MissionLedger(root)
     [view] = fresh.expired_claims()

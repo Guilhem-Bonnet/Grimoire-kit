@@ -96,6 +96,14 @@ class SessionState:
     #: posée par le hook ``UserPromptSubmit`` dès que la tâche résolue n'est
     #: plus ``bootstrap``. ``""`` = aucune tâche connue pour cette session.
     task_id: str = ""
+    #: L'epoch du bail que cette session tient sur ``task_id`` (K3, issue #768), posé
+    #: quand la session se rattache au claim. C'est ce que le frein ``PreToolUse``
+    #: compare au fichier de bail : une session reprise ailleurs garde son ancien
+    #: epoch et se reconnaît périmée. ``0`` = aucun bail connu, donc aucun frein.
+    lease_epoch: int = 0
+    #: Travail hors tâche constaté au ``Stop`` (``session.unattached_work``, K3) :
+    #: ``{"mutations": n, "files": [...], "at": iso}``, ``{}`` s'il n'y en a pas.
+    unattached_work: dict[str, Any] = field(default_factory=dict)
     #: Nombre d'actions d'écriture observées par ``PostToolUse`` dans cette
     #: session (fichier écrit ou édité, commande Bash non lecture seule) —
     #: jamais leur contenu. C'est ce que ``Stop`` lit pour distinguer une
@@ -120,6 +128,8 @@ class SessionState:
             "updated_at": self.updated_at,
             "rules": {rule_id: state.to_dict() for rule_id, state in self.rules.items()},
             "task_id": self.task_id,
+            "lease_epoch": self.lease_epoch,
+            "unattached_work": dict(self.unattached_work),
             "mutations": self.mutations,
             "pending_approvals": {key: dict(value) for key, value in self.pending_approvals.items()},
         }
@@ -150,6 +160,8 @@ class SessionState:
             updated_at=str(d.get("updated_at", "")),
             rules=rules,
             task_id=str(d.get("task_id", "") or ""),
+            lease_epoch=_epoch_of(d.get("lease_epoch")),
+            unattached_work=dict(d["unattached_work"]) if isinstance(d.get("unattached_work"), dict) else {},
             mutations=int(mutations) if isinstance(mutations, int | float) and not isinstance(mutations, bool) else 0,
             pending_approvals=pending,
         )
@@ -157,6 +169,11 @@ class SessionState:
     @classmethod
     def new(cls, session_id: str, started_at: str) -> SessionState:
         return cls(session_id=session_id, started_at=started_at, updated_at=started_at)
+
+
+def _epoch_of(value: Any) -> int:
+    """Un epoch lu du journal : entier >= 0, sinon ``0`` (illisible = aucun bail connu)."""
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
 
 
 def load_session_state(project_root: Path, session_id: str, *, now_iso: str) -> SessionState:
@@ -225,24 +242,44 @@ def note_session_mutation(project_root: Path, session_id: str, *, task_id: str, 
     state = load_session_state(project_root, session_id, now_iso=now_iso)
     state.mutations += 1
     if task_id and task_id != "bootstrap":
+        if state.task_id != task_id:
+            state.lease_epoch = 0  # l'epoch tenu portait une autre tâche
         state.task_id = task_id
     save_session_state(project_root, state, now_iso=now_iso)
 
 
-def note_session_task(project_root: Path, session_id: str, task_id: str, *, now_iso: str) -> bool:
+def note_session_task(
+    project_root: Path, session_id: str, task_id: str, *, now_iso: str, lease_epoch: int | None = None
+) -> bool:
     """Pose *task_id* sur le journal de *session_id* — ``True`` si le fichier a changé.
 
     ``bootstrap`` n'est pas une tâche : il n'est jamais écrit, et un journal
     qui portait déjà cette tâche n'est pas réécrit.
+
+    *lease_epoch* (K3) : l'epoch que la session tient sur la tâche. Une tâche
+    différente de celle du journal repart sans epoch tant qu'on n'en donne pas.
     """
     if not session_id or not task_id or task_id == "bootstrap":
         return False
     state = load_session_state(project_root, session_id, now_iso=now_iso)
-    if state.task_id == task_id:
+    wanted = _epoch_of(lease_epoch) if lease_epoch is not None else (state.lease_epoch if state.task_id == task_id else 0)
+    if state.task_id == task_id and state.lease_epoch == wanted:
         return False
     state.task_id = task_id
+    state.lease_epoch = wanted
     save_session_state(project_root, state, now_iso=now_iso)
     return True
+
+
+def note_unattached_work(
+    project_root: Path, session_id: str, *, mutations: int, files: tuple[str, ...], now_iso: str
+) -> None:
+    """Journalise ``session.unattached_work{files, mutations}`` (K3) : écrit sans tâche, constaté au ``Stop``."""
+    if not session_id:
+        return
+    state = load_session_state(project_root, session_id, now_iso=now_iso)
+    state.unattached_work = {"mutations": mutations, "files": list(files), "at": now_iso}
+    save_session_state(project_root, state, now_iso=now_iso)
 
 
 def session_mutations(project_root: Path, session_id: str) -> int:

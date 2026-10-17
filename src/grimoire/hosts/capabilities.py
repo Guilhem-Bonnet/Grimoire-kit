@@ -422,3 +422,14 @@ def is_fenced(host_id: HostId, host_version: str | None) -> bool:
     version inconnue (``None``), vaut ``False``.
     """
     return contract_for(host_id, host_version).fenced
+
+
+def claim_host_is_fenced(host: str, host_version: str | None) -> bool:
+    """:func:`is_fenced` pour l'hôte tel qu'un claim le nomme (K3, issue #768).
+
+    *host* est une graphie du ledger (``host-claude-code-cli``, ``claude-code-cli``,
+    ``local``, ``mcp``…). Un nom que :func:`resolve_host` ne connaît pas n'est pas
+    un hôte prouvé : ``False``, comme une version absente.
+    """
+    host_id = resolve_host(host)
+    return host_id is not None and is_fenced(host_id, host_version)

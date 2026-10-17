@@ -32,6 +32,7 @@ from grimoire.missions.lease import (
     CLOCK_TOLERANCE_SECONDS,
     DEFAULT_LEASE_TTL_SECONDS,
     MAX_ATTEMPTS,
+    ORIGIN_CANCEL,
     LeaseFile,
     backoff_delay,
     lease_path,
@@ -84,7 +85,10 @@ _TASK_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
         {TaskState.NEEDS_VERIFICATION, TaskState.BLOCKED, TaskState.FAILED, TaskState.CANCELLED, TaskState.READY}
     ),
     TaskState.BLOCKED: frozenset({TaskState.READY, TaskState.CANCELLED}),
-    TaskState.NEEDS_VERIFICATION: frozenset({TaskState.CLOSED, TaskState.RUNNING, TaskState.FAILED}),
+    # NEEDS_VERIFICATION → CANCELLED (K3, issue #713) : une preuve remise peut être abandonnée.
+    TaskState.NEEDS_VERIFICATION: frozenset(
+        {TaskState.CLOSED, TaskState.RUNNING, TaskState.FAILED, TaskState.CANCELLED}
+    ),
     TaskState.FAILED: frozenset({TaskState.READY, TaskState.CANCELLED}),
     TaskState.CLOSED: frozenset(),
     TaskState.CANCELLED: frozenset(),
@@ -134,6 +138,8 @@ class LeaseView:
     actor_id: str
     host: str
     session_id: str = ""
+    #: Version de l'hôte de la session (K3) ; ``""`` = inconnue, donc hôte non fencé.
+    host_version: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,6 +162,8 @@ class ReapDecision:
     attempts: int
     retry_at: str = ""
     written: bool = False
+    #: La question posée à l'humain quand la cause est ``resume_unfenced`` (K3) ; ``""`` sinon.
+    question: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -166,6 +174,7 @@ class ReapDecision:
             "attempts": self.attempts,
             "retry_at": self.retry_at,
             "written": self.written,
+            **({"question": self.question} if self.question else {}),
         }
 
 
@@ -352,6 +361,7 @@ class MissionLedger:
                         canonical_host(str(payload.get("session_host", "") or "")),
                         # Issue #695 : seul un ``task attach`` marque ``explicit``.
                         explicit_at=str(raw.get("created_at", "") or "") if payload.get("explicit") else "",
+                        host_version=str(payload.get("session_host_version", "") or ""),
                     )
                     self._tasks[tid] = MissionTask.from_dict({**current.to_dict(), "claim": claim.to_dict()})
             elif evt_type == RISK_ACCEPTED_EVENT:
@@ -771,7 +781,10 @@ class MissionLedger:
             fence = int(payload["fence_epoch"])
             write_lease(
                 lease_path(self._root, task_id),
-                LeaseFile(task_id, fence, self._now().isoformat(), holder=False, origin=ORIGIN_HAND_BACK),
+                LeaseFile(
+                    task_id, fence, self._now().isoformat(), holder=False,
+                    origin=ORIGIN_CANCEL if to_state is TaskState.CANCELLED else ORIGIN_HAND_BACK,
+                ),
             )
         self._append_event("task.transitioned", task_id, "task", actor_id, payload, lock_held=True)
         self._load()
@@ -852,7 +865,10 @@ class MissionLedger:
 
         def view(status: str, reason: str) -> LeaseView:
             host = claim.session_host or claim.host_id
-            return LeaseView(task.id, status, reason, claim.lease_epoch, claim.actor_id, host, claim.session_id)
+            return LeaseView(
+                task.id, status, reason, claim.lease_epoch, claim.actor_id, host, claim.session_id,
+                claim.session_host_version,
+            )
 
         if clock == "unknown":
             return view("unknown", "horloge incohérente : plus tôt que le dernier événement du journal")
@@ -952,6 +968,7 @@ class MissionLedger:
         actor_id: str = "tick",
         apply: bool = True,
         now: datetime | None = None,
+        is_fenced: Callable[[LeaseView], bool] | None = None,
     ) -> ReapReport:
         """Récolte des baux perdus — le seul chemin de ``RUNNING → READY``.
 
@@ -961,8 +978,10 @@ class MissionLedger:
           dernier ``task.dispatched`` en ``rate_limit``) : différée, cause
           ``quota``, sans compter de tentative ;
         - plus de :data:`MAX_ATTEMPTS` tentatives : différée, ``retry_exhausted`` ;
-        - hôte hors de *fenced_hosts* (sans frein vérifié) : différée,
-          ``resume_unfenced`` — on ne relance pas de doublon ;
+        - hôte sans frein vérifié : différée, ``resume_unfenced``, avec la question
+          posée à l'humain — on ne relance pas de doublon. Le verdict vient de
+          *is_fenced* (K3 : la table ``hosts.capabilities``, par hôte *et* par
+          version) ; sans lui, de l'appartenance à *fenced_hosts* (primitive de K2) ;
         - sinon : barrière (fichier de bail à l'epoch suivant, sans titulaire)
           puis ``task.transitioned`` vers ``ready`` marqué ``lease_lost``.
 
@@ -980,7 +999,8 @@ class MissionLedger:
             decisions: list[ReapDecision] = []
             for view in self.expired_claims(moment):
                 task = self._tasks[view.task_id]
-                decisions.append(self._reap_one(task, view, moment, fenced_hosts, is_quota, actor_id, apply))
+                fenced = is_fenced if is_fenced is not None else (lambda v: v.host in fenced_hosts)
+                decisions.append(self._reap_one(task, view, moment, fenced, is_quota, actor_id, apply))
             return ReapReport("ok", tuple(decisions))
 
     def _reap_one(
@@ -988,7 +1008,7 @@ class MissionLedger:
         task: MissionTask,
         view: LeaseView,
         moment: datetime,
-        fenced_hosts: frozenset[str],
+        fenced: Callable[[LeaseView], bool],
         is_quota: Callable[[MissionTask], bool],
         actor_id: str,
         apply: bool,
@@ -1003,16 +1023,23 @@ class MissionLedger:
                 cause = "quota"
             elif before + 1 > MAX_ATTEMPTS:
                 cause = "retry_exhausted"
-            elif view.host not in fenced_hosts:
+            elif not fenced(view):
                 cause = "resume_unfenced"
         if cause:
             written = apply and not self._already_deferred(task.id, view.epoch, cause)
+            question = self._unfenced_question(view) if cause == "resume_unfenced" else ""
             if written:
-                payload = {"task_id": task.id, "lease_epoch_lost": view.epoch, "cause": cause,
-                           "attempts": before, "lease_reason": view.reason, "actor_id": actor_id}
+                payload: dict[str, Any] = {
+                    "task_id": task.id, "lease_epoch_lost": view.epoch, "cause": cause,
+                    "attempts": before, "lease_reason": view.reason, "actor_id": actor_id,
+                }
+                if question:
+                    payload["question"] = {
+                        "kind": "resume_unfenced", "text": question, "options": ["reprendre", "abandonner"],
+                    }
                 self._append_event(REAP_DEFERRED_EVENT, task.id, "task", actor_id, payload, lock_held=True)
                 self._load()
-            return ReapDecision(task.id, "defer", cause, view.epoch, before, written=written)
+            return ReapDecision(task.id, "defer", cause, view.epoch, before, written=written, question=question)
         attempt = before + 1
         retry_at = (moment + backoff_delay(attempt)).isoformat()
         if not apply:
@@ -1027,6 +1054,13 @@ class MissionLedger:
             {LEASE_LOST_KEY: lost, "fence_epoch": fence}, None, reaper=True,
         )
         return ReapDecision(task.id, "ready", view.reason, view.epoch, attempt, retry_at, written=True)
+
+    @staticmethod
+    def _unfenced_question(view: LeaseView) -> str:
+        """La question de §2.4 : un hôte sans frein vérifié ne se relance pas, on demande (K3)."""
+        who = f"la session {view.session_id}" if view.session_id else f"la session de {view.actor_id}"
+        version = f" {view.host_version}" if view.host_version else ", version inconnue"
+        return f"{who} (hôte {view.host}{version}, sans frein) ne donne plus signe ; reprendre ?"
 
     def _already_deferred(self, task_id: str, epoch: int, cause: str) -> bool:
         return any(
@@ -1112,7 +1146,14 @@ class MissionLedger:
         return self._tasks[task_id]
 
     def attach_session(
-        self, task_id: str, session_id: str, *, session_host: str = "", actor_id: str = "hook", explicit: bool = False
+        self,
+        task_id: str,
+        session_id: str,
+        *,
+        session_host: str = "",
+        actor_id: str = "hook",
+        explicit: bool = False,
+        host_version: str = "",
     ) -> MissionTask:
         """Rattache *session_id* au claim de *task_id* — un événement, pas une réécriture.
 
@@ -1123,6 +1164,10 @@ class MissionLedger:
         rattachement *explicite* (``task attach``, issue #695), qui s'écrit
         toujours : c'est la déclaration d'intention datée dont la résolution de
         la tâche active se sert pour départager les claims d'une même session.
+
+        *host_version* (K3) : la version de l'hôte lue par l'appelant ; un
+        rattachement déjà fait qui l'apprend s'écrit une fois de plus, pour que la
+        récolte sache si l'hôte est fencé à cette version.
         """
         self._load()
         task = self._tasks.get(task_id)
@@ -1133,7 +1178,8 @@ class MissionLedger:
         session_id = session_id.strip()
         if not session_id:
             raise GrimoireMissionError("A session id is required")
-        if task.claim.session_id == session_id and not explicit:
+        learns_version = bool(host_version) and host_version != task.claim.session_host_version
+        if task.claim.session_id == session_id and not explicit and not learns_version:
             return task
         if task.claim.session_id and task.claim.session_id != session_id:
             raise GrimoireMissionError(
@@ -1148,6 +1194,7 @@ class MissionLedger:
                 "task_id": task_id,
                 "session_id": session_id,
                 "session_host": canonical_host(session_host),
+                **({"session_host_version": host_version} if host_version else {}),
                 **({"explicit": True} if explicit else {}),
             },
         )
