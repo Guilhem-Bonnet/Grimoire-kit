@@ -44,7 +44,7 @@ from grimoire.flows.blueprint_loader import build_node_contracts, load_blueprint
 from grimoire.flows.engine import FlowEngine, check_output_against_contract
 from grimoire.flows.schemas import NodeContract, NodeExecutionResult, ResumeOutcome
 from grimoire.missions.dispatch import DEFAULT_CALL_TIMEOUT_S, DispatchReport, run_dispatch
-from grimoire.missions.schemas import MissionTask, TaskState
+from grimoire.missions.schemas import MissionTask, TaskCheck, TaskState
 from grimoire.missions.service import TaskRefusedError, TaskService
 from grimoire.missions.verifiability import Verifiability, classify
 
@@ -559,6 +559,9 @@ class DispatchExecutor:
             description = f"{description}\n\n{self._extra_context}"
         guardrails = tuple(f"Outil autorisé : {tool}" for tool in contract.tool_boundary)
         acceptance = contract.acceptance or (f"node {contract.node_id} : aucun critère d'acceptation déclaré",)
+        # Les commandes structurées du node sont les commandes déclarées de la
+        # tâche (issue #772) : sans elles, `classify` ne rendrait jamais V0.
+        cmds, exits, needles, timeouts = _acceptance_checks(contract)
         return ledger.create_task(
             mission_id,
             contract.label or contract.node_id,
@@ -566,6 +569,10 @@ class DispatchExecutor:
             description=description,
             guardrails=guardrails,
             task_id=task_id,
+            checks=tuple(
+                TaskCheck(cmd=c, expect_exit=e, expect_stdout_contains=n, timeout_s=t)
+                for c, e, n, t in zip(cmds, exits, needles, timeouts, strict=True)
+            ),
         )
 
 

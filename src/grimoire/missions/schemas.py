@@ -250,6 +250,61 @@ class TaskClaim:
 
 
 @dataclass(frozen=True, slots=True)
+class TaskCheck:
+    """Une commande déclarée dont le code de sortie rend le verdict (issue #772, D9).
+
+    C'est la seule chose qui autorise une tâche à être V0 : un critère écrit
+    « les tests passent » n'exécute rien. ``cmd`` est lancée par
+    ``grimoire task verify`` dans la racine du projet, comme le ``--check`` de
+    ``task dispatch`` (même confiance : c'est l'auteur de la tâche qui l'écrit) ;
+    ``expect_exit`` est le code attendu (0 par défaut) ; ``expect_stdout_contains``
+    (sous-chaîne exigée de la sortie standard) et ``timeout_s`` (délai propre à la
+    commande) reprennent ce que déclare une acceptance structurée de flow : sans
+    eux, un exit 0 affichant « 3 FAILED » passerait pour un vert.
+    """
+
+    cmd: str
+    expect_exit: int = 0
+    expect_stdout_contains: str | None = None
+    timeout_s: float | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.cmd, str) or not self.cmd.strip():
+            raise ValueError("TaskCheck.cmd : commande vide")
+        if isinstance(self.expect_exit, bool) or not isinstance(self.expect_exit, int):
+            raise ValueError(f"TaskCheck.expect_exit : entier attendu, reçu {self.expect_exit!r}")
+        if self.expect_stdout_contains is not None and not isinstance(self.expect_stdout_contains, str):
+            raise ValueError(
+                f"TaskCheck.expect_stdout_contains : chaîne attendue, reçu {self.expect_stdout_contains!r}"
+            )
+        if self.timeout_s is not None and (
+            isinstance(self.timeout_s, bool)
+            or not isinstance(self.timeout_s, (int, float))
+            or not self.timeout_s > 0
+        ):
+            raise ValueError(f"TaskCheck.timeout_s : nombre strictement positif attendu, reçu {self.timeout_s!r}")
+
+    def to_dict(self) -> dict[str, Any]:
+        # Les champs optionnels ne sont écrits que renseignés : une ligne de
+        # ledger antérieure garde sa forme et se relit à l'identique.
+        data: dict[str, Any] = {"cmd": self.cmd, "expect_exit": self.expect_exit}
+        if self.expect_stdout_contains is not None:
+            data["expect_stdout_contains"] = self.expect_stdout_contains
+        if self.timeout_s is not None:
+            data["timeout_s"] = self.timeout_s
+        return data
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> TaskCheck:
+        return cls(
+            cmd=d["cmd"],
+            expect_exit=d.get("expect_exit", 0),
+            expect_stdout_contains=d.get("expect_stdout_contains"),
+            timeout_s=d.get("timeout_s"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class TaskDirective:
     """Une consigne ou un commentaire posé par l'orchestrateur humain (issue #638).
 
@@ -423,6 +478,10 @@ class MissionTask:
     #: remontée V0 -> V1 un fait de la tâche, vu par toute surface qui décide,
     #: et non un affichage propre à une commande.
     accepted_risks: tuple[dict[str, Any], ...] = ()
+    #: Commandes déclarées dont le code de sortie rend le verdict (issue #772).
+    #: Sans elles, ``classify`` ne rend jamais V0 : un vocabulaire mécanique
+    #: sans commande à lancer n'est qu'une promesse.
+    checks: tuple[TaskCheck, ...] = ()
 
     @property
     def pending_directives(self) -> tuple[TaskDirective, ...]:
@@ -474,6 +533,8 @@ class MissionTask:
             d["directives"] = [directive.to_dict() for directive in self.directives]
         if self.accepted_risks:
             d["accepted_risks"] = [dict(risk) for risk in self.accepted_risks]
+        if self.checks:
+            d["checks"] = [check.to_dict() for check in self.checks]
         return d
 
     @classmethod
@@ -503,6 +564,7 @@ class MissionTask:
             extra=dict(d.get("extra", {})),
             directives=tuple(TaskDirective.from_dict(item) for item in d.get("directives", [])),
             accepted_risks=tuple(dict(risk) for risk in d.get("accepted_risks", [])),
+            checks=tuple(TaskCheck.from_dict(c) for c in d.get("checks", [])),
         )
 
 

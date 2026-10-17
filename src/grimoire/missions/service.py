@@ -36,6 +36,7 @@ from grimoire.missions.schemas import (
     ORIGIN_AGENT,
     MissionTask,
     RiskProfile,
+    TaskCheck,
     TaskClaim,
     TaskDirective,
     TaskState,
@@ -280,6 +281,7 @@ class TaskService:
         actor: str = "cli",
         origin: str = "cli",
         ready: bool = False,
+        checks: tuple[TaskCheck, ...] = (),
     ) -> TaskAdded:
         """Ouvre une tâche — le geste que ``grimoire task add`` et ``task_add`` (MCP) partagent.
 
@@ -310,7 +312,7 @@ class TaskService:
             risk = RiskProfile.STANDARD
         task = ledger.create_task(
             mission_id, title, acceptance=acceptance, owner=owner, expected_evidence=expected_evidence,
-            risk_profile=risk,
+            risk_profile=risk, checks=checks,
         )
         if ready:
             task = self.transition(task.id, TaskState.READY, actor).task

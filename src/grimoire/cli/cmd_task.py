@@ -201,6 +201,10 @@ def task_add(
     owner: Annotated[str, typer.Option("--owner", help="Qui en répond.")] = "",
     evidence: Annotated[list[str] | None, typer.Option("--expect-evidence", help="Preuve attendue (répétable).")] = None,
     ready: Annotated[bool, typer.Option("--ready", help="La rendre réclamable tout de suite (proposed → ready, gate compris).")] = False,
+    check: Annotated[
+        list[str] | None,
+        typer.Option("--check", help="Commande dont le code de sortie 0 rend le verdict (répétable) ; sans elle, jamais V0 (#772)."),
+    ] = None,
     project_root: _PROJECT_ROOT = Path(),
     ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
     actor: _ACTOR = "cli",
@@ -213,6 +217,7 @@ def task_add(
     service sert l'outil MCP ``task_add`` (issue #638).
     """
     from grimoire.core.exceptions import GrimoireError
+    from grimoire.missions.schemas import TaskCheck
     from grimoire.missions.service import TaskRefusedError
 
     service = _service(project_root, ledger_root)
@@ -220,6 +225,7 @@ def task_add(
         added = service.add(
             title, tuple(acceptance), mission_id=mission, owner=owner,
             expected_evidence=tuple(evidence or ()), actor=actor, ready=ready,
+            checks=tuple(TaskCheck(cmd=c) for c in (check or ()) if c.strip()),
         )
     except TaskRefusedError as refused:
         _refuse(ctx, refused)
@@ -1025,6 +1031,49 @@ def task_pack(
             console.print(f"  [red]Critères manquants[/red] : {manquants}")
     for item in pack.items:
         console.print(f"  - [{item.kind.value}] {escape(item.summary or item.uri)}  [dim]{item.uri}[/dim]")
+
+
+@task_app.command("verify")
+def task_verify(
+    ctx: typer.Context,
+    task_id: Annotated[str, typer.Argument(help="Identifiant de la tâche.")],
+    project_root: _PROJECT_ROOT = Path(),
+    ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
+    evidence_root: _EVIDENCE_ROOT = _DEFAULT_EVIDENCE,
+) -> None:
+    """Lance les commandes déclarées de la tâche, écrit le pack et le verdict (#772).
+
+    Code de sortie 0 si le verdict est `passed`, 1 s'il est `failed` (code de
+    sortie inattendu, délai, commande inexécutable), 2 si la tâche ne déclare
+    aucune commande : jamais un vert à vide.
+    """
+    from grimoire.missions.verify import NoDeclaredChecksError, verify_task
+
+    root = project_root.resolve()
+    service = _service(project_root, ledger_root)
+    task = _require_task(service, task_id)
+    evidence_path = evidence_root if evidence_root.is_absolute() else root / evidence_root
+    try:
+        outcome = verify_task(task, root, evidence_path)
+    except NoDeclaredChecksError as exc:
+        console.print(f"[red]✗[/red] {exc}")
+        raise typer.Exit(2) from exc
+
+    if _fmt(ctx) == "json":
+        typer.echo(
+            json.dumps(
+                {"pack": outcome.pack.to_dict(), "verdict": outcome.verdict.to_dict()}, indent=2, ensure_ascii=False
+            )
+        )
+    else:
+        icon = "[green]OK[/green]" if outcome.passed else "[red]✗[/red]"
+        console.print(f"{icon} {task_id} — verdict {outcome.verdict.verdict.value} ({outcome.pack.id}, {outcome.verdict.id})")
+        for chk in outcome.verdict.checks:
+            if chk.reason:
+                console.print(f"  - {chk.id} : {escape(chk.reason)}")
+        for criterion in outcome.uncovered:
+            console.print(f"  - critère non couvert par les commandes : {escape(criterion)}")
+    raise typer.Exit(0 if outcome.passed else 1)
 
 
 @task_app.command("trace-export")
