@@ -270,3 +270,22 @@ def test_a_request_path_outside_the_registry_never_becomes_a_root(
             api.project_update(dry_run=True, path=raw)
     assert api.project_root == served
     assert not (stray / "_grimoire" / "task-board.yaml").exists()
+
+
+def test_the_sanitizing_guard_is_a_standalone_startswith() -> None:
+    """CodeQL py/path-injection (ledger.py:218/219/515, PR #781) : le chemin venu du corps
+    de ``POST /api/projects/setup`` n'est reconnu assaini que si le ``startswith`` est la
+    seule condition de sa branche. Avec ``egal or startswith`` le flux restait ouvert
+    jusqu'au ledger et ses 224 alertes ; ce test fige la forme reconnue."""
+    import ast
+    import inspect
+
+    tree = ast.parse(inspect.getsource(reg.resolve_within_allowed))
+    guards = [
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.If) and "root_path" in ast.unparse(n.test) and "startswith" in ast.unparse(n.test)
+    ]
+    assert guards, "la garde startswith a disparu"
+    assert all(not isinstance(g.test, ast.BoolOp) for g in guards)
+    root = Path(reg.allowed_roots()[0])
+    assert reg.resolve_within_allowed(str(root)) == Path(root).resolve()

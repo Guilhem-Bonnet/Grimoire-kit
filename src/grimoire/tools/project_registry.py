@@ -108,8 +108,13 @@ def resolve_within_allowed(raw: str | Path | None, *extra: Path | str | None) ->
     resolved = os.path.realpath(requested)
     for root in allowed_roots(*extra):
         root_path = os.path.realpath(str(root))
-        if resolved == root_path or resolved.startswith(root_path + os.sep):
+        # Deux gardes distinctes, pas un ``or`` : l'analyse statique ne
+        # reconnaît comme assainissement que le ``startswith`` isolé, dont la
+        # branche vraie est la seule à laisser sortir le chemin.
+        if resolved.startswith(root_path + os.sep):
             return Path(resolved)
+        if resolved == root_path:
+            return Path(root_path)
     msg = f"chemin hors des racines autorisées : {resolved}"
     raise PermissionError(msg)
 
