@@ -9,7 +9,8 @@ import pytest
 
 from grimoire.tools import request_guard
 from grimoire.tools.request_guard import SESSION_HEADER, check_mutation, new_session_token
-from tests.unit.test_mutation_guard import JSON, Host, atelier, cockpit  # noqa: F401
+
+from .test_mutation_guard import JSON, Host, atelier, cockpit  # noqa: F401
 
 pytestmark = pytest.mark.no_session_token
 
