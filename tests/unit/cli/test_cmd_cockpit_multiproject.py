@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import threading
 import urllib.error
+import urllib.parse
 import urllib.request
 from functools import partial
 from pathlib import Path
@@ -279,3 +280,22 @@ def test_fleet_endpoint_aggregates_health_and_memory_for_every_registered_projec
         # un `.git`, voir `_project()` ci-dessus) : simples dépôts git, pas
         # initialisés Grimoire.
         assert entry["managed"] is False
+
+
+def test_portfolio_action_on_an_unregistered_project_is_refused_and_writes_nothing(
+    duo_server: Any, tmp_path: Path
+) -> None:
+    """``?project=`` n'est qu'une clé du registre : un chemin ou un slug inconnu ne mène à aucun ledger."""
+    port, alpha, beta = duo_server
+    stray = _project(tmp_path, "non-enregistre")
+    before = sorted(p.relative_to(tmp_path) for p in tmp_path.rglob("*"))
+    for key in (str(stray), "/tmp/x", "../../", "ghost"):
+        status, _body = _post_json(
+            port,
+            "/api/workspace/portfolio/tasks/T-1/claim?project=" + urllib.parse.quote(key, safe=""),
+            {"project": key, "actor": "x"},
+        )
+        assert status == 404, key
+    assert sorted(p.relative_to(tmp_path) for p in tmp_path.rglob("*")) == before
+    assert not list(tmp_path.rglob("events.jsonl"))
+    assert alpha.is_dir() and beta.is_dir()
