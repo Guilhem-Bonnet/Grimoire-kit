@@ -33,6 +33,7 @@ from grimoire.missions.ledger import MissionLedger
 from grimoire.missions.recall import DEFAULT_TOKEN_BUDGET, TaskRecall, build_task_recall, consolidate_task_memory
 from grimoire.missions.schemas import (
     DIRECTIVE_KINDS,
+    ORIGIN_AGENT,
     MissionTask,
     RiskProfile,
     TaskCheck,
@@ -401,15 +402,23 @@ class TaskService:
         task = self.ledger.prioritize_task(task_id, priority, actor_id=actor, reason=reason)
         return TaskNote(task=task, change=f"priority → {priority}", directive=None, board_path=self.project_board())
 
-    def comment(self, task_id: str, text: str, actor: str, kind: str = "comment") -> TaskNote:
-        """Pose un commentaire ou une consigne — livrée à la session au tour suivant."""
+    def comment(
+        self, task_id: str, text: str, actor: str, kind: str = "comment", *, origin: str = ORIGIN_AGENT
+    ) -> TaskNote:
+        """Pose un commentaire ou une consigne — livrée à la session au tour suivant.
+
+        *origin* est posé par le canal d'appel (cockpit et CLI interactive :
+        ``human`` ; MCP, hooks, sous-agents : ``agent``), jamais par un champ
+        que l'appelant remplit (issue #706). Seule l'origine ``human`` peut
+        poser une consigne ; le reste est rendu à la session comme note non fiable.
+        """
         cleaned = text.strip()
         if not cleaned:
             raise ValueError("`text` requis : une consigne vide n'a rien à dire")
         if kind not in DIRECTIVE_KINDS:
             raise ValueError(f"kind inconnu : {kind!r} — parmi {', '.join(DIRECTIVE_KINDS)}")
         self.require(task_id)
-        directive = self.ledger.add_directive(task_id, cleaned, actor_id=actor, kind=kind)
+        directive = self.ledger.add_directive(task_id, cleaned, actor_id=actor, kind=kind, origin=origin)
         task = self.require(task_id)
         return TaskNote(task=task, change=f"{kind} ajouté", directive=directive, board_path=self.project_board())
 

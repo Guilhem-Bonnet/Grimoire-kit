@@ -419,7 +419,7 @@ def task_show(
 
         console.print("  consignes de l'orchestrateur :")
         for directive in task.directives:
-            marque = escape(f"[{directive.kind}, {directive_status(directive)}]")
+            marque = escape(f"[{directive.kind}, {directive.origin}, {directive_status(directive)}]")
             console.print(
                 f"    - {marque} {escape(directive.author)}, "
                 f"{directive.created_at[:16]} : {escape(directive.text)}  [dim]{directive.id}[/dim]"
@@ -595,6 +595,41 @@ def task_prioritize(
     _steer(ctx, project_root, ledger_root, task_id, lambda s: s.prioritize(task_id, to, actor, reason))
 
 
+def _comment_origin() -> str:
+    """Le canal de ``task comment`` : l'origine humaine exige un signal positif.
+
+    ``agent`` : une session d'hôte (identifiant de session ou variable de terminal
+    d'agent, voir ``AGENT_MARKER_ENVS``), une exécution déclarée sans humain
+    (``GRIMOIRE_UNATTENDED=1``) ou une entrée qui n'est pas un terminal. Un
+    terminal interactif sans aucun de ces signaux ne suffit plus : un terminal
+    d'agent qui n'exporte rien (Copilot) en est indiscernable. L'humain confirme
+    alors à l'écran que la note est de lui ; sans réponse positive l'origine est
+    ``unverified`` (le ledger refuse alors une consigne). L'option ``--actor``
+    n'y change rien (issue #706).
+    """
+    import os
+    import sys
+
+    from grimoire.core.standard_state import agent_marker, current_session_id
+    from grimoire.missions.schemas import ORIGIN_AGENT, ORIGIN_HUMAN, ORIGIN_UNVERIFIED
+
+    if os.environ.get("GRIMOIRE_UNATTENDED", "").strip() == "1" or current_session_id() or agent_marker():
+        return ORIGIN_AGENT
+    try:
+        interactive = sys.stdin.isatty() and sys.stderr.isatty()
+    except (AttributeError, ValueError):
+        interactive = False
+    if not interactive:
+        return ORIGIN_AGENT
+    try:
+        sys.stderr.write("Cette note sera enregistrée au nom d'un humain. Est-ce bien toi qui la donnes ? [o/N] ")
+        sys.stderr.flush()
+        answer = sys.stdin.readline().strip().lower()
+    except (OSError, ValueError):
+        return ORIGIN_UNVERIFIED
+    return ORIGIN_HUMAN if answer in ("o", "oui", "y", "yes") else ORIGIN_UNVERIFIED
+
+
 @task_app.command("comment")
 def task_comment(
     ctx: typer.Context,
@@ -606,7 +641,7 @@ def task_comment(
     actor: _ACTOR = "cli",
 ) -> None:
     """Pose un commentaire ou une consigne sur la tâche ; la session la lit au tour suivant."""
-    _steer(ctx, project_root, ledger_root, task_id, lambda s: s.comment(task_id, text, actor, kind))
+    _steer(ctx, project_root, ledger_root, task_id, lambda s: s.comment(task_id, text, actor, kind, origin=_comment_origin()))
 
 
 @task_app.command("cancel")

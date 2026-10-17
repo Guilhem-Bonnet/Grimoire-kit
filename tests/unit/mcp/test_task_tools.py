@@ -396,7 +396,7 @@ def test_task_update_prioritise_commente_accuse_et_annule_avec_raison(projet: Pa
     assert "urgent" in _json(task_update(tid, "prioritize", to="urgent", project_path=str(projet)))["error"]
 
     assert "text" in _json(task_update(tid, "comment", project_path=str(projet)))["error"]
-    note = _json(task_update(tid, "comment", text="relis l'ADR-007", kind="directive", actor="guilhem", project_path=str(projet)))
+    note = _json(task_update(tid, "comment", text="relis l'ADR-007", kind="comment", actor="guilhem", project_path=str(projet)))
     directive_id = note["directive"]["id"]
     montre = _json(task_show(tid, project_path=str(projet)))
     assert montre["directives_pending"] == 1 and montre["effective_priority"] == "high"

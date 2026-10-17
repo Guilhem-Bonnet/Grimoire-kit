@@ -31,6 +31,14 @@ _FINITION_VALUES = frozenset({"", "maquette", "peaufine"})
 #: informe ; ``directive`` dirige — les deux sont livrées à la session au tour
 #: suivant, seule la distinction change la formulation du rappel.
 DIRECTIVE_KINDS: tuple[str, ...] = ("comment", "directive")
+#: D'où vient une note, posé par le canal (jamais par l'appelant, issue #706) :
+#: ``human`` (cockpit local, CLI interactive), ``agent`` (MCP, hooks, sous-agents),
+#: ``unverified`` (événement antérieur au champ, ou terminal interactif sans
+#: confirmation humaine : la provenance n'est pas établie).
+ORIGIN_HUMAN = "human"
+ORIGIN_AGENT = "agent"
+ORIGIN_UNVERIFIED = "unverified"
+DIRECTIVE_ORIGINS: tuple[str, ...] = (ORIGIN_HUMAN, ORIGIN_AGENT, ORIGIN_UNVERIFIED)
 
 
 class MissionState(StrEnum):
@@ -293,8 +301,19 @@ class TaskDirective:
     kind: str = "comment"
     delivered_at: str = ""
     acknowledged_at: str = ""
+    origin: str = ORIGIN_AGENT
+    """Le canal qui a posé la note. Seule l'origine ``human`` fait autorité ; le
+    défaut est la plus prudente, et un événement sans champ est ``unverified``."""
+
+    @property
+    def is_human(self) -> bool:
+        return self.origin == ORIGIN_HUMAN
 
     def __post_init__(self) -> None:
+        if self.origin not in DIRECTIVE_ORIGINS:
+            accepted = ", ".join(repr(v) for v in DIRECTIVE_ORIGINS)
+            msg = f"origin invalide : {self.origin!r}. Valeurs acceptées : {accepted}."
+            raise ValueError(msg)
         if self.kind not in DIRECTIVE_KINDS:
             accepted = ", ".join(repr(v) for v in DIRECTIVE_KINDS)
             msg = f"kind invalide : {self.kind!r}. Valeurs acceptées : {accepted}."
@@ -317,6 +336,7 @@ class TaskDirective:
             "kind": self.kind,
             "delivered_at": self.delivered_at,
             "acknowledged_at": self.acknowledged_at,
+            "origin": self.origin,
         }
 
     @classmethod
@@ -329,6 +349,7 @@ class TaskDirective:
             kind=d.get("kind", "comment"),
             delivered_at=d.get("delivered_at", ""),
             acknowledged_at=d.get("acknowledged_at", ""),
+            origin=d.get("origin", ORIGIN_UNVERIFIED),
         )
 
 

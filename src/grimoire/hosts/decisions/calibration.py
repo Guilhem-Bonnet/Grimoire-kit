@@ -215,7 +215,9 @@ def record_policy_hold(
     hook decision into a broken hook. A no-op without a *session_id* — there
     is nothing to correlate the eventual followup against.
     """
-    if not session_id:
+    from grimoire.core.standard_state import state_writes_allowed
+
+    if not session_id or not state_writes_allowed():
         return
     hold_id = uuid.uuid4().hex[:12]
     try:
