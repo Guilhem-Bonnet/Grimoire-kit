@@ -448,4 +448,7 @@ def test_both_local_hosts_guard_the_same_way() -> None:
     ):
         source = (ROOT / module).read_text(encoding="utf-8")
         assert symbol in source
-        assert 'headers.get("Host")' in source, f"{module} ne regarde pas l'en-tête Host"
+        # La règle vit à un seul endroit : les deux hôtes l'appellent.
+        assert "check_host(self.headers)" in source, f"{module} n'applique pas le garde d'hôte commun"
+    guard = (ROOT / "src/grimoire/tools/request_guard.py").read_text(encoding="utf-8")
+    assert 'headers.get("Host")' in guard
