@@ -152,6 +152,25 @@ def test_un_ecart_non_significatif_reste_unproven_et_finit_propose_au_retrait() 
     assert row["retire_suggested"] is True
 
 
+def test_une_reference_close_sous_le_seuil_ne_propose_pas_le_retrait() -> None:
+    # W6-04-S1-01 : 2/2 avant (le seuil d'une proposition), 0/40 après. `n_before`
+    # ne peut plus grandir après l'acceptation : sans référence, la règle n'est
+    # pas jugée, et surtout pas condamnée alors que le taux a chuté.
+    refusals, exposures = population(before=(2, 2), after=(0, 40))
+    (row,) = measure_effects([accepted_proposal()], refusals, exposures, min_tasks=5, review_after=20)["rules"]
+    assert (row["n_before"], row["n_after"], row["hits_after"]) == (2, 40, 0)
+    assert row["status"] == "unproven"
+    assert row["retire_suggested"] is False
+    assert "non mesurable" in row["reason"]
+
+
+def test_une_reference_close_ne_propose_pas_le_retrait_meme_si_les_refus_reviennent() -> None:
+    refusals, exposures = population(before=(1, 3), after=(30, 40))
+    (row,) = measure_effects([accepted_proposal()], refusals, exposures, min_tasks=5, review_after=20)["rules"]
+    assert row["status"] == "unproven"
+    assert row["retire_suggested"] is False
+
+
 def test_une_date_d_acceptation_illisible_ne_juge_rien() -> None:
     proposal = {**accepted_proposal(), "accepted_at": "hier"}
     refusals, exposures = population(before=(6, 6), after=(0, 6))
@@ -293,6 +312,37 @@ def test_l_effet_reel_reste_unproven_sans_recul_et_son_json_est_stable(projet: P
     (row,) = first["rules"]
     assert row["status"] == "unproven"
     assert (row["n_before"], row["hits_before"], row["n_after"]) == (2, 2, 0)
+
+
+def _proposition_en_attente(projet: Path) -> str:
+    service = TaskService(projet)
+    refuse_en_revue(service, "Première")
+    refuse_en_revue(service, "Seconde")
+    (pid,) = propose_rules(projet).created
+    return pid
+
+
+def test_l_acceptation_passe_sous_emitter_enforcement_refuse(projet: Path) -> None:
+    # W6-04-S1-02 : l'émetteur d'`accept` devait figurer dans la liste du projet,
+    # copiée de `memory-policy.yaml` ; en mode `refuse`, la règle était écartée
+    # alors que `rules add` passait pour le même texte.
+    policy = projet / "_grimoire/standard/memory-policy.yaml"
+    text = policy.read_text(encoding="utf-8")
+    assert "emitter_enforcement: observe" in text
+    policy.write_text(text.replace("emitter_enforcement: observe", "emitter_enforcement: refuse"), encoding="utf-8")
+    pid = _proposition_en_attente(projet)
+    record = accept_rule_proposal(projet, pid)
+    assert record["status"] == "accepted"
+    assert candidate_text(REVIEW, "evidence_pack") in rules_path(projet, "project").read_text(encoding="utf-8")
+
+
+def test_l_acceptation_ne_journalise_aucun_emetteur_inconnu_en_observation(
+    projet: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    pid = _proposition_en_attente(projet)
+    with caplog.at_level("WARNING"):
+        accept_rule_proposal(projet, pid)
+    assert "emitter_unrecognized" not in caplog.text
 
 
 def test_la_cli_propose_et_liste_sans_session_de_flow(projet: Path) -> None:

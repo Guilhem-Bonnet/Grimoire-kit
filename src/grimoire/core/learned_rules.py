@@ -493,7 +493,11 @@ def accept_rule_proposal(
     current = _load(path)
     if current["status"] != "pending":
         raise RuleProposalError(f"{pid} est déjà {current['status']} : seule une proposition pending se décide.")
-    add_rule(root, layer, str(current.get("rule", "")), project_name=project_name, emitter="rules-propose")
+    # Émetteur « cli » : `accept` est une commande de la CLI, et « cli » figure
+    # dans toute liste d'autorisation, y compris celles déjà copiées dans
+    # `memory-policy.yaml` d'un projet existant (un nouvel émetteur ajouté aux
+    # défauts n'y serait jamais, et `emitter_enforcement: refuse` l'écarterait).
+    add_rule(root, layer, str(current.get("rule", "")), project_name=project_name, emitter="cli")
     moment = (now or datetime.now(UTC)).astimezone(UTC).isoformat()
     return _transition_status(root, pid, lambda rec: {**rec, "status": "accepted", "layer": layer, "accepted_at": moment})
 
@@ -607,11 +611,16 @@ def measure_effects(
             "after_rate": _rate(split.hits_after, split.n_after),
             "unplaced": split.unplaced,
         })
+        # Une référence sous le seuil ne se rattrape pas : `_split` ne compte
+        # `n_before` que sur les expositions antérieures à l'acceptation, que
+        # plus rien n'allonge. Une règle sans référence n'est pas une règle qui
+        # échoue : on ne peut pas la juger, donc on ne propose pas de la retirer.
+        baseline_closed = split.n_before < min_tasks
         if split.n_before < min_tasks or split.n_after < min_tasks:
-            row.update({
-                "p_reduced": None, "p_increased": None, "status": "unproven",
-                "reason": f"échantillon insuffisant : {split.n_before} avant, {split.n_after} après, {min_tasks} requis de chaque côté",
-            })
+            reason = f"échantillon insuffisant : {split.n_before} avant, {split.n_after} après, {min_tasks} requis de chaque côté"
+            if baseline_closed:
+                reason += " ; la référence d'avant l'acceptation est close, l'effet est non mesurable (retrait non suggéré)"
+            row.update({"p_reduced": None, "p_increased": None, "status": "unproven", "reason": reason})
         else:
             p_reduced, p_increased = fisher_one_sided(split.hits_before, split.n_before, split.hits_after, split.n_after)
             row.update({"p_reduced": p_reduced, "p_increased": p_increased})
@@ -622,7 +631,7 @@ def measure_effects(
             else:
                 row.update({"status": "unproven", "reason": f"écart non significatif (p={min(p_reduced, p_increased)} ≥ {alpha})"})
         row["retire_suggested"] = row["status"] == "harmful" or (
-            row["status"] == "unproven" and split.n_after >= review_after
+            row["status"] == "unproven" and not baseline_closed and split.n_after >= review_after
         )
         rows.append(row)
     summary = {status: sum(1 for r in rows if r["status"] == status) for status in ("effective", "unproven", "harmful")}
