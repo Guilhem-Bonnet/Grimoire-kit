@@ -21,8 +21,9 @@ mesuré. Ici, rien n'est rédigé ni demandé :
   Un refus n'écrit rien, ni la règle ni le statut de la proposition.
 - **L'effet se mesure sur la même signature.** Pour une règle acceptée, les
   tâches exposées à la transition (refusées ou passées) se répartissent avant
-  et après l'acceptation, selon leur première exposition ; le taux est la part
-  de ces tâches que la signature a refusées. Le statut est ``unproven`` tant
+  et après l'acceptation, selon leur première exposition, et chaque refus compte
+  du côté de sa propre date ; le taux est la part de ces tâches que la
+  signature a refusées de ce côté. Le statut est ``unproven`` tant
   qu'un côté compte moins de ``min_tasks`` tâches, puis se décide par un test
   exact de Fisher unilatéral (``effective`` si le taux baisse significativement,
   ``harmful`` s'il monte, ``unproven`` sinon). Aucun score de confiance n'est
@@ -36,8 +37,9 @@ Limites, écrites plutôt que tues :
 - la seule source est le refus de gate de tâche ; un refus d'outil par la
   policy, un ``flow resume`` après rejet ou une correction humaine ne
   produisent pas encore de candidat ;
-- une tâche est rangée dans la période de sa *première* exposition : refusée
-  avant l'acceptation puis à nouveau après, elle compte dans « avant » ;
+- une tâche passée avant l'acceptation puis refusée après (retour de
+  ``needs_verification`` à ``running``) compte des deux côtés, avec ses refus
+  propres à chaque période : « avant » n'hérite jamais d'un refus postérieur ;
 - avant/après n'est pas une expérience contrôlée : une baisse peut venir d'autre
   chose que de la règle (nouveau modèle, autre équipe). ``effective`` dit que la
   signature a reculé après l'acceptation, pas que la règle en est la cause ;
@@ -545,24 +547,42 @@ class _Split:
 
 
 def _split(accepted: datetime, signature: tuple[str, str], refusals: list[Refusal], exposures: list[Exposure]) -> _Split:
+    """Répartir les tâches exposées avant et après *accepted*, chaque refus selon sa propre date.
+
+    Une exposition ne garde que la première présentation d'une tâche ; ranger le
+    refus avec elle prêterait à une tâche passée en avril un refus de juin. Un
+    refus compte donc du côté de sa date, et une tâche refusée après
+    l'acceptation est aussi exposée après, même si elle s'est présentée avant.
+    """
     transition = signature[0]
-    hit = {r.task_id for r in refusals if r.signature == signature}
-    n_before = n_after = hits_before = hits_after = unplaced = 0
+    before: set[str] = set()
+    after: set[str] = set()
+    hit_before: set[str] = set()
+    hit_after: set[str] = set()
+    unplaced_tasks: set[str] = set()
     for exposure in exposures:
         if exposure.transition != transition:
             continue
         moment = _parse_at(exposure.at)
         if moment is None:
-            unplaced += 1
-            continue
-        refused = exposure.task_id in hit
-        if moment < accepted:
-            n_before += 1
-            hits_before += refused
+            unplaced_tasks.add(exposure.task_id)
+        elif moment < accepted:
+            before.add(exposure.task_id)
         else:
-            n_after += 1
-            hits_after += refused
-    return _Split(n_before, n_after, hits_before, hits_after, unplaced)
+            after.add(exposure.task_id)
+    for refusal in refusals:
+        if refusal.transition != transition:
+            continue
+        moment = _parse_at(refusal.at)
+        if moment is None:
+            continue
+        unplaced_tasks.discard(refusal.task_id)
+        side, hits = (before, hit_before) if moment < accepted else (after, hit_after)
+        side.add(refusal.task_id)
+        if refusal.signature == signature:
+            hits.add(refusal.task_id)
+    unplaced = len(unplaced_tasks - before - after)
+    return _Split(len(before), len(after), len(hit_before), len(hit_after), unplaced)
 
 
 def measure_effects(

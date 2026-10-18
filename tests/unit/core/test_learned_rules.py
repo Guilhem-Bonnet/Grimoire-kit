@@ -33,6 +33,7 @@ from grimoire.core.learned_rules import (
     accept_rule_proposal,
     candidate_text,
     candidates_from_refusals,
+    exposures_from_events,
     fisher_one_sided,
     list_rule_proposals,
     measure_effects,
@@ -169,6 +170,38 @@ def test_une_reference_close_ne_propose_pas_le_retrait_meme_si_les_refus_revienn
     (row,) = measure_effects([accepted_proposal()], refusals, exposures, min_tasks=5, review_after=20)["rules"]
     assert row["status"] == "unproven"
     assert row["retire_suggested"] is False
+
+
+class _Transitioned:
+    """Un ``task.transitioned`` du Mission Ledger, réduit à ce que lit le calcul."""
+
+    def __init__(self, task: str, at: str, ident: str) -> None:
+        self.event_type = "task.transitioned"
+        self.payload = {"task_id": task, "from_state": "running", "to_state": "needs_verification"}
+        self.created_at = at
+        self.id = ident
+        self.entity_id = task
+
+
+def test_un_refus_posterieur_ne_gonfle_pas_la_reference_d_avant() -> None:
+    # W6-04-S2-01 : 5 tâches passées en avril (NEEDS_VERIFICATION -> RUNNING est
+    # permis), refusées en juin sur la signature. Leur première exposition est
+    # d'avant l'acceptation, mais leurs refus sont d'après : « avant » ne doit
+    # compter que les 2 refus d'avril, pas 7/7.
+    accepted = "2026-05-01T00:00:00+00:00"
+    refusals = [refus(f"T{i}", at=f"2026-04-0{i}T00:00:00+00:00") for i in (1, 2)]
+    events: list[_Transitioned] = []
+    for i in range(3, 8):
+        events.append(_Transitioned(f"T{i}", f"2026-04-1{i}T00:00:00+00:00", f"e{i}"))
+        refusals.append(refus(f"T{i}", at=f"2026-06-1{i}T00:00:00+00:00"))
+    for i in range(8, 13):
+        events.append(_Transitioned(f"T{i}", f"2026-06-2{i - 8}T00:00:00+00:00", f"e{i}"))
+    exposures = exposures_from_events(refusals, events, lambda a, b: REVIEW if (a, b) == ("running", "needs_verification") else "")
+    proposal = {**accepted_proposal(), "accepted_at": accepted}
+    (row,) = measure_effects([proposal], refusals, exposures)["rules"]
+    assert row["hits_before"] == 2
+    assert (row["n_before"], row["hits_after"], row["n_after"]) == (7, 5, 10)
+    assert row["status"] != "effective", "5 refus sur 10 tâches après l'acceptation ne sont pas un recul"
 
 
 def test_une_date_d_acceptation_illisible_ne_juge_rien() -> None:
