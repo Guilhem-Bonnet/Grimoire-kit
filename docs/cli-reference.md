@@ -990,6 +990,38 @@ au moins en V1 pour toute surface (`task show`, MCP `task_show`/`task_claim`,
 `dispatch_advice`, transition `needs_verification` de `task dispatch`).
 Limite : le compteur est celui du journal du run, `amend` non attesté compris.
 
+**Octroi d'autonomie (`grimoire autonomy`, W5-06)** — la seule voie pour
+faire franchir un checkpoint destructif sans humain (CI, banc) ;
+`GRIMOIRE_UNATTENDED=1` seul n'ouvre rien.
+
+| Commande | Effet |
+|---|---|
+| `grimoire autonomy grant --scope <sel> --max-cost-usd <usd> --until <échéance>` | Demander un octroi. `<sel>` : `run:<id>` ou `blueprint:<id>`, `/<node>` en option, répétable, aucun joker ; `<échéance>` : `+30m`, `+2h`, `+1d` ou un instant ISO 8601 avec fuseau. Les trois bornes sont obligatoires. |
+| `grimoire autonomy status` | Chaque octroi réévalué maintenant : actif ou révoqué (motif), coût dépensé, échéance ; `-o json` ajoute les événements. |
+| `grimoire autonomy revoke <grant-id> [--reason]` | Révoquer à la main, toujours permis. |
+
+L'octroi est lui-même une décision attestée : la première demande émet un
+challenge lié à la session et sort en code 3 (décision humaine requise) ; un
+tour humain de cette session, puis la même commande relancée, l'inscrit et
+consomme ce tour. Seul un challenge émis par la session courante est repris : un
+challenge ouvert sans session ou par une autre session n'empêche pas la demande
+d'une session, qui reçoit alors le sien. Un `/<node>` restreint le seul run que
+désigne le sélecteur, pas ses sous-flows ni les nodes homonymes d'un autre
+blueprint ; sans `/<node>`, les sous-flows sont couverts. Tant qu'il est valide, un
+`approve` ou `accept_as_is` non attesté sur un checkpoint du périmètre est accepté avec
+`attestation=granted:<grant-id>`, distinct d'`attested`. Il est révoqué, une
+fois pour toutes, à l'échéance (`expired`), quand le coût atteint le plafond
+(`cost_reached`), au premier coût inconnu (`cost_unknown`, politique `stop`
+sans alternative), et au premier gate rouge du périmètre (`gate_red` : une
+sortie refusée par son contrat, ou une tentative de dispatch `red` ou
+`unrunnable`). Le checkpoint suivant repasse en `awaiting_human` et le refus
+nomme l'octroi révoqué. Chaque challenge, octroi et révocation est une ligne de
+`_grimoire-runtime-output/flows/authority/@autonomy-grants.authority.jsonl`,
+journal que la garde d'autorité interdit d'écrire à l'agent.
+Limite : le coût mesuré est celui des tentatives `task.dispatched` des runs
+couverts, postérieures à l'octroi ; le coût de la session hôte n'est mesuré
+nulle part dans le kit et n'y entre pas (`cost_scope` dans `status`).
+
 **`budget`** — plafond de coût déclaré (`config.budget.maxCostUsd`),
 abandon des passes optionnelles avant dépassement. `passes` est une liste
 de refs de sous-flows ; la première est obligatoire (son échec fait échouer

@@ -37,6 +37,11 @@ d'amendements, plafond, motif) dans la décision. Limite : le compteur est celui
 du journal du run, y compris des ``amend`` non attestés — il borne la
 persévérance, il ne prouve pas que N humains ont relu ; l'attestation de
 ``accept_as_is`` reste, elle, exigée comme celle de ``approve``.
+Octroi d'autonomie (W5-06, :mod:`.autonomy`) : une décision ``approve`` ou
+``accept_as_is`` non attestée, sur un checkpoint que couvre un octroi valide,
+est acceptée avec le statut ``granted:<grant_id>`` — jamais ``attested`` :
+aucun humain n'a vu ce checkpoint. Un octroi révoqué qui le couvrait est nommé
+dans le refus.
 Python seul : aucune de ces décisions ne traverse ``grimoire_flows_core``.
 """
 
@@ -46,7 +51,7 @@ import hashlib
 import json
 import re
 import uuid
-from collections.abc import Collection, Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -61,6 +66,7 @@ __all__ = [
     "ATTESTED",
     "CONSUMED_TURNS_FILENAME",
     "DEFAULT_MAX_AMENDMENTS",
+    "GRANTED_PREFIX",
     "NO_HUMAN_TURN",
     "UNATTESTED",
     "Attestation",
@@ -79,6 +85,11 @@ DEFAULT_MAX_AMENDMENTS = 3
 
 ATTESTED = "attested"
 UNATTESTED = "unattested"
+#: Statut d'une décision prise sous octroi d'autonomie (W5-06) : ``granted:<grant_id>``.
+GRANTED_PREFIX = "granted:"
+#: Ce que l'octroi qui couvre un checkpoint dit de lui (W5-06) : ``(grant_id, texte de révocation)``,
+#: texte vide si l'octroi est valide, ``None`` si aucun octroi ne couvre ce checkpoint.
+GrantLookup = Callable[[], tuple[str, str] | None]
 
 NO_HUMAN_TURN = "no_human_turn_since_challenge"
 _REASONS: dict[str, str] = {
@@ -124,6 +135,10 @@ class Attestation:
     @property
     def attested(self) -> bool:
         return self.status == ATTESTED
+
+    @property
+    def granted(self) -> bool:
+        return self.status.startswith(GRANTED_PREFIX)
 
     def explain(self) -> str:
         return _REASONS.get(self.reason, self.reason)
@@ -206,21 +221,49 @@ class CheckpointJournal:
         with locked(self.path), self.path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(entry, ensure_ascii=True) + "\n")
 
-    def open_challenge(self, node_id: str) -> dict[str, Any] | None:
-        """Le dernier challenge de *node_id* qu'aucune décision n'a encore consommé."""
+    def open_challenge(self, node_id: str, session_id: str | None = None) -> dict[str, Any] | None:
+        """Le dernier challenge de *node_id* qu'aucune décision n'a encore consommé.
+
+        Avec *session_id*, le challenge émis par cette session est préféré à un
+        challenge plus récent d'une autre session (ou sans session) : une session
+        ne peut attester que le sien. À défaut, le dernier challenge du node, que
+        ``attest`` refusera avec son motif (``no_session``, ``other_session``).
+        Les challenges antérieurs à la dernière décision ``reject`` ou ``amend``
+        du node sont périmés, quelle que soit leur session.
+        """
         entries = self.entries()
         consumed = {e.get("challenge_id") for e in entries if e.get("type") == "decision"}
-        for entry in reversed(entries):
-            if entry.get("type") == "challenge" and entry.get("node_id") == node_id:
-                return None if entry.get("challenge_id") in consumed else entry
-        return None
+        # Un reject ou un amend ferme tout ce que le node avait d'ouvert, quelle
+        # que soit la session du challenge : le tour humain qui précède cette
+        # décision ne peut plus attester la version qui la suit. Un approve
+        # refusé ne consomme que le sien (voir record_decision).
+        start = 0
+        for i, e in enumerate(entries):
+            if e.get("type") == "decision" and e.get("node_id") == node_id and e.get("decision") in ("reject", "amend"):
+                start = i + 1
+        challenges = [
+            e for e in entries[start:] if e.get("type") == "challenge" and e.get("node_id") == node_id
+        ]
+        if session_id is not None:
+            own = [e for e in challenges if e.get("session_id", "") == session_id]
+            if own:
+                challenges = own
+        if not challenges:
+            return None
+        last = challenges[-1]
+        return None if last.get("challenge_id") in consumed else last
 
     def issue_challenge(self, node_id: str, env: Mapping[str, str] | None = None) -> dict[str, Any]:
-        """Émet le challenge de *node_id*, lié à la session courante — ou rend celui encore ouvert."""
-        existing = self.open_challenge(node_id)
-        if existing is not None:
-            return existing
+        """Émet le challenge de *node_id*, lié à la session courante — ou rend celui qu'elle a encore ouvert.
+
+        Un challenge ouvert sans session, ou par une autre session, ne vaut rien
+        pour celle-ci : le rendre figerait le checkpoint (``no_session`` ou
+        ``other_session`` à chaque décision, sans que le refus le consomme).
+        """
         session_id, _host = current_session(env)
+        existing = self.open_challenge(node_id, session_id)
+        if existing is not None and existing.get("session_id", "") == session_id:
+            return existing
         entry = {
             "type": "challenge",
             "challenge_id": f"CHL-{uuid.uuid4().hex[:12]}",
@@ -251,7 +294,8 @@ class CheckpointJournal:
                 out.add((str(data.get("session_id", "")), str(data.get("turn_ts", "")), str(data.get("turn_sha256", ""))))
         return frozenset(out)
 
-    def _consume_turn(self, node_id: str, attestation: Attestation) -> None:
+    def consume_turn(self, node_id: str, attestation: Attestation) -> None:
+        """Inscrit le tour qui atteste *attestation* au registre commun : il n'attestera plus rien."""
         entry = {
             "session_id": attestation.session_id,
             "turn_ts": attestation.turn_ts,
@@ -281,7 +325,7 @@ class CheckpointJournal:
         accepted_risk: Mapping[str, Any] | None = None,
     ) -> None:
         if attestation.attested:
-            self._consume_turn(node_id, attestation)
+            self.consume_turn(node_id, attestation)
         extra = {"accepted_risk": dict(accepted_risk)} if accepted_risk else {}
         self._append(
             {
@@ -383,6 +427,7 @@ def judge_checkpoint(
     destructive: bool,
     cap: int = DEFAULT_MAX_AMENDMENTS,
     env: Mapping[str, str] | None = None,
+    grant: GrantLookup | None = None,
 ) -> CheckpointGate | None:
     """Classe la décision de *output* ; ``None`` si elle n'est pas une décision valide (déjà un défaut nommé).
 
@@ -391,13 +436,16 @@ def judge_checkpoint(
     compte vers *cap*. ``accept_as_is`` est refusé tant que *cap* amendements
     ne sont pas inscrits, puis exige le risque nommé ; accepté, il porte
     ``accepted_risk``. ``approve``/``accept_as_is`` non attestés sont refusés
-    sur un checkpoint destructif (``refusal``), acceptés avec ``warning`` ailleurs.
+    sur un checkpoint destructif (``refusal``), acceptés avec ``warning`` ailleurs —
+    sauf sous un octroi valide (*grant*, W5-06) : acceptés ``granted:<grant_id>``.
+    *grant* n'est consulté que pour une décision qui avance sans attestation.
     """
     decision = output.get("checkpoint_decision")
     if decision not in ("approve", "reject", "amend", "accept_as_is"):
         return None
     reason = str(output.get("checkpoint_reason") or "")
-    attestation = attest(project_root, journal.open_challenge(node_id), env, journal.consumed_turns())
+    challenge = journal.open_challenge(node_id, current_session(env)[0])
+    attestation = attest(project_root, challenge, env, journal.consumed_turns())
     done = journal.amendment_count(node_id)
     if decision == "amend":
         refusal = (
@@ -417,8 +465,15 @@ def judge_checkpoint(
         accepted = {"amendments": done, "cap": cap, "reason": reason}
     if decision not in _ADVANCING or attestation.attested:
         return CheckpointGate(str(decision), reason, attestation, accepted_risk=accepted)
+    found = grant() if grant is not None else None
+    if found is not None and not found[1]:
+        granted = Attestation(GRANTED_PREFIX + found[0], "", attestation.challenge_id, attestation.session_id)
+        return CheckpointGate(str(decision), reason, granted, accepted_risk=accepted)
+    note = f" {found[1]}" if found is not None else ""
     if destructive:
         return CheckpointGate(
-            str(decision), reason, attestation, refusal=refusal_text(attestation), accepted_risk=accepted
+            str(decision), reason, attestation, refusal=refusal_text(attestation) + note, accepted_risk=accepted
         )
-    return CheckpointGate(str(decision), reason, attestation, warning=warning_text(attestation), accepted_risk=accepted)
+    return CheckpointGate(
+        str(decision), reason, attestation, warning=warning_text(attestation) + note, accepted_risk=accepted
+    )
