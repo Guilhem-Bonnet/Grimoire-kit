@@ -39,6 +39,7 @@ du dépôt s'applique au ``merge --ff-only`` de la cible extraite comme à tout 
 from __future__ import annotations
 
 import contextlib
+import fnmatch
 import hashlib
 import json
 import os
@@ -60,6 +61,7 @@ __all__ = [
     "MERGED_EVENT",
     "MERGE_REFUSED_EVENT",
     "TASK_BRANCH_PREFIX",
+    "TEST_CHANGES_POLICY_EVENT",
     "WORKTREE_CREATED_EVENT",
     "MergeOutcome",
     "TaskWorktree",
@@ -77,6 +79,10 @@ _MARKER_SCHEMA = "grimoire-task-worktree/v1"
 WORKTREE_CREATED_EVENT = "task.worktree_created"
 MERGED_EVENT = "task.merged"
 MERGE_REFUSED_EVENT = "task.merge_refused"
+#: La politique ``allow_test_changes`` appliquée à un merge qui modifie des tests protégés (W5-03).
+TEST_CHANGES_POLICY_EVENT = "task.test_changes_policy"
+_TEST_DIRS = frozenset({"tests", "test", "__tests__"})
+_TEST_FILE_PATTERNS = ("test_*.py", "*_test.py", "conftest.py", "*.test.*", "*.spec.*", "*_test.go")
 #: Sous ``<git-common-dir>`` : worktrees de tâche, worktrees de vérification, verrou de merge.
 _STATE_DIRNAME = "grimoire"
 #: Les variables qui détourneraient ``git -C`` vers un autre dépôt (un hook git les exporte).
@@ -110,7 +116,9 @@ class MergeOutcome:
     (contenue dans la cible sans ``task.merged`` pour cette tête), ``conflict``
     (tâche bloquée, worktree gardé), ``check_red``,
     ``unevaluated`` (aucune commande de check), ``head_moved`` (la tête de la
-    branche n'est pas le SHA vérifié), ``target_moved`` (la cible a bougé pendant le check).
+    branche n'est pas le SHA vérifié), ``target_moved`` (la cible a bougé pendant le check),
+    ``tampered`` (le check est vert mais un test protégé a été modifié ou supprimé depuis la
+    base épinglée : ``tampered`` en nomme les chemins).
     """
 
     task_id: str
@@ -122,6 +130,8 @@ class MergeOutcome:
     check: dict[str, Any] = field(default_factory=dict)
     conflicts: tuple[str, ...] = ()
     worktree_kept: bool = False
+    tampered: tuple[str, ...] = ()
+    allow_test_changes: bool = False
 
     @property
     def ok(self) -> bool:
@@ -130,7 +140,8 @@ class MergeOutcome:
     def to_dict(self) -> dict[str, Any]:
         return {"task_id": self.task_id, "status": self.status, "ok": self.ok, "reason": self.reason,
                 "into": self.into, "head_sha": self.head_sha, "merged_sha": self.merged_sha,
-                "check": dict(self.check), "conflicts": list(self.conflicts), "worktree_kept": self.worktree_kept}
+                "check": dict(self.check), "conflicts": list(self.conflicts), "worktree_kept": self.worktree_kept,
+                "tampered": list(self.tampered), "allow_test_changes": self.allow_test_changes}
 
 
 # ── git ──────────────────────────────────────────────────────────────────────
@@ -311,6 +322,31 @@ def _candidate(repo: Path, wt: TaskWorktree, head: str, target: str) -> tuple[st
     return _git(repo, "commit-tree", lines[0], "-p", target, "-p", head, "-m", message, env=env).stdout.strip(), ()
 
 
+def _validate_protect(protect: tuple[str, ...]) -> tuple[str, ...]:
+    """Les motifs protégés en plus des défauts : relatifs au projet, sans ``..`` ni racine ni lecteur."""
+    for pattern in protect:
+        norm = pattern.replace("\\", "/")
+        if not pattern.strip() or norm.startswith("/") or ":" in norm.split("/")[0] or ".." in norm.split("/"):
+            raise GrimoireMissionError(f"Motif protégé {pattern!r} hors du projet : chemin relatif sans « .. » attendu")
+    return protect
+
+
+def _is_protected(path: str, protect: tuple[str, ...]) -> bool:
+    parts = path.split("/")
+    if any(part in _TEST_DIRS for part in parts[:-1]):
+        return True
+    name = parts[-1]
+    if any(fnmatch.fnmatchcase(name, pat) for pat in _TEST_FILE_PATTERNS):
+        return True
+    return any(fnmatch.fnmatchcase(path, pat) for pat in protect)
+
+
+def _tampered_paths(repo: Path, base: str, head: str, protect: tuple[str, ...]) -> tuple[str, ...]:
+    """Les tests protégés modifiés ou supprimés entre la base épinglée et la tête (pas HEAD : il suit la branche)."""
+    done = _git(repo, "diff", "--name-only", "-z", "--no-renames", "--diff-filter=MDT", base, head)
+    return tuple(sorted(p for p in done.stdout.split("\0") if p and _is_protected(p, protect)))
+
+
 def _block(service: TaskService, task_id: str, reason: str, actor: str) -> str:
     """Passe la tâche en ``blocked`` (via ``running`` depuis ``needs_verification``) ; rend un motif si le gate refuse."""
     try:
@@ -325,12 +361,16 @@ def _block(service: TaskService, task_id: str, reason: str, actor: str) -> str:
 
 def merge_task(
     service: TaskService, task_id: str, *, repo: Path, check: str | None = None, expected_sha: str = "",
-    actor: str = "cli", timeout: float = 1800.0,
+    actor: str = "cli", timeout: float = 1800.0, allow_test_changes: bool = False, protect: tuple[str, ...] = (),
 ) -> MergeOutcome:
     """Fusionne la branche de *task_id* dans sa cible, en série, si le check est vert sur le SHA fusionné.
 
     *expected_sha* : le SHA que l'appelant a relu ; une tête de branche différente refuse.
+    *allow_test_changes* / *protect* (W5-03) : un test protégé (défauts : ``tests/``, ``test_*.py``,
+    ``conftest.py``, ``*.spec.*``... plus les motifs *protect*) modifié ou supprimé depuis la base
+    épinglée donne ``tampered`` malgré un check vert, sauf si la politique l'autorise (journalisée).
     """
+    protect = _validate_protect(tuple(protect))
     service.require(task_id)
     wt = find_task_worktree(service, task_id)
     if wt is None:
@@ -340,7 +380,7 @@ def merge_task(
     state.mkdir(parents=True, exist_ok=True)
     try:
         with locked(state / "merge", timeout=timeout + 60):
-            outcome = _merge_locked(service, wt, repo, check, expected_sha, actor, timeout)
+            outcome = _merge_locked(service, wt, repo, check, expected_sha, actor, timeout, allow_test_changes, protect)
     except (TimeoutError, OSError) as exc:
         raise GrimoireMissionError(f"Merge refusé : verrou de merge du dépôt indisponible ({exc})") from exc
     if not outcome.ok:
@@ -350,6 +390,7 @@ def merge_task(
 
 def _merge_locked(
     service: TaskService, wt: TaskWorktree, repo: Path, check: str | None, expected_sha: str, actor: str, timeout: float,
+    allow_test_changes: bool, protect: tuple[str, ...],
 ) -> MergeOutcome:
     tid, into = wt.task_id, wt.into
     head, target = _rev(repo, f"refs/heads/{wt.branch}"), _rev(repo, f"refs/heads/{into}")
@@ -358,7 +399,8 @@ def _merge_locked(
     kept = wt.path.is_dir()
 
     def out(status: str, reason: str, **kw: Any) -> MergeOutcome:
-        return MergeOutcome(task_id=tid, status=status, reason=reason, into=into, head_sha=head, worktree_kept=kept, **kw)
+        return MergeOutcome(task_id=tid, status=status, reason=reason, into=into, head_sha=head, worktree_kept=kept,
+                            allow_test_changes=allow_test_changes, **kw)
 
     if _is_ancestor(repo, head, target):
         # « Contenue dans la cible » ne prouve pas « fusionnée » : une branche restée sur sa base l'est aussi.
@@ -393,6 +435,13 @@ def _merge_locked(
                    check=receipt)
     if now_target != target:
         return out("target_moved", f"{into} a bougé pendant le check ({target[:12]} → {now_target[:12]})", check=receipt)
+    changed = _tampered_paths(repo, wt.base_sha, head, protect)
+    if changed and not allow_test_changes:
+        return out("tampered", f"check vert sur {candidate[:12]} mais {len(changed)} test(s) protégé(s) modifié(s) depuis la base "
+                   f"{wt.base_sha[:12]} : {', '.join(changed)} ; --allow-test-changes pour l'autoriser", check=receipt, tampered=changed)
+    if changed:
+        service.ledger.append_event(TEST_CHANGES_POLICY_EVENT, tid, "task", actor,
+                                    {"allow_test_changes": True, "paths": list(changed), "base_sha": wt.base_sha, "head_sha": head})
     holder = _checked_out_at(repo, into)
     if holder is not None:
         _git(holder, "merge", "--ff-only", "--quiet", candidate)
@@ -401,7 +450,8 @@ def _merge_locked(
     if _rev(repo, f"refs/heads/{into}") != candidate:
         raise GrimoireMissionError(f"{into} n'est pas au SHA vérifié {candidate[:12]} après le merge")
     service.ledger.append_event(MERGED_EVENT, tid, "task", actor,
-                                {"into": into, "base_sha": wt.base_sha, "head_sha": head, "merged_sha": candidate, "check": receipt})
+                                {"into": into, "base_sha": wt.base_sha, "head_sha": head, "merged_sha": candidate, "check": receipt,
+                                 "allow_test_changes": allow_test_changes, "tests_changed": list(changed)})
     if kept:
         with contextlib.suppress(GrimoireMissionError):
             _git(repo, "worktree", "remove", str(wt.path))  # sans --force : un worktree sale reste là

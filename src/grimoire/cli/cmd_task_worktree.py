@@ -57,6 +57,12 @@ def task_merge(
     ] = None,
     sha: Annotated[str, typer.Option("--sha", help="SHA relu : une tête de branche différente refuse.")] = "",
     timeout: Annotated[float, typer.Option("--timeout", help="Délai du check, en secondes.")] = 1800.0,
+    allow_test_changes: Annotated[
+        bool, typer.Option("--allow-test-changes", help="Autorise la modification de tests protégés (journalisé).")
+    ] = False,
+    protect: Annotated[
+        list[str] | None, typer.Option("--protect", help="Motif protégé en plus des défauts (relatif au projet, répétable).")
+    ] = None,
     project_root: Annotated[Path, typer.Option("--project-root", help="Racine du projet (dépôt git).")] = Path(),
     ledger_root: Annotated[Path, typer.Option("--ledger-root", help="Racine du Mission Ledger.")] = Path("_grimoire-runtime-output/ledger"),
     actor: Annotated[str, typer.Option("--actor", help="Qui agit.")] = "cli",
@@ -69,7 +75,8 @@ def task_merge(
     service = _service(project_root, ledger_root)
     _require_task(service, task_id)
     try:
-        outcome = merge_task(service, task_id, repo=project_root, check=check, expected_sha=sha, actor=actor, timeout=timeout)
+        outcome = merge_task(service, task_id, repo=project_root, check=check, expected_sha=sha, actor=actor, timeout=timeout,
+                             allow_test_changes=allow_test_changes, protect=tuple(protect or ()))
     except GrimoireMissionError as exc:
         console.print(f"[red]✗[/red] {exc}")
         raise typer.Exit(1) from exc
