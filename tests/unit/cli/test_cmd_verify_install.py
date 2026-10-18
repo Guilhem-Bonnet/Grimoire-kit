@@ -14,7 +14,7 @@ from typer.testing import CliRunner
 
 from grimoire.cli.app import app
 
-from ._fake_release import FakeRelease
+from ._fake_release import FakeGithub, FakeRelease
 
 runner = CliRunner()
 
@@ -93,6 +93,32 @@ def test_online_refuses_a_published_wheel_that_does_not_match_its_digest(tmp_pat
     result = _run(_install(tmp_path / "site", files), "--online", net=net)
     assert result.exit_code == 1
     assert "refusée" in result.output
+
+
+def test_online_verifies_an_installed_prerelease_against_its_github_release(tmp_path: Path) -> None:
+    """Une pré-version n'est pas sur PyPI : sans cette voie, ``verify-install --online`` échouait sur un canal preview."""
+    files = {"grimoire/a.py": b"1"}
+    net = FakeGithub(pre_wheel=_wheel_bytes(tmp_path, files))
+    dist = _install(tmp_path / "site", files, version="3.64.0rc1")
+    result = _run(dist, "--online", "--json", net=net)
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["trust_level"] == "release-only"
+    assert not any("pypi.org" in url for url in net.requested)
+
+
+def test_online_flags_a_prerelease_installation_that_differs_from_its_release(tmp_path: Path) -> None:
+    net = FakeGithub(pre_wheel=_wheel_bytes(tmp_path, {"grimoire/a.py": b"1"}))
+    dist = _install(tmp_path / "site", {"grimoire/a.py": b"1", "grimoire/extra.py": b"evil"}, version="3.64.0rc1")
+    result = _run(dist, "--online", "--json", net=net)
+    assert result.exit_code == 1
+    assert "ajouté à l'installation : grimoire/extra.py" in json.loads(result.output)["problems"]
+
+
+def test_online_refuses_an_installed_prerelease_that_has_no_github_release(tmp_path: Path) -> None:
+    files = {"grimoire/a.py": b"1"}
+    net = FakeGithub(tag="v3.70.0-rc1", pre_wheel=_wheel_bytes(tmp_path, files))
+    result = _run(_install(tmp_path / "site", files, version="3.64.0rc1"), "--online", net=net)
+    assert result.exit_code == 1 and "aucune release GitHub" in result.output
 
 
 def test_doctor_reports_trust_level_and_fails_on_a_modified_install(tmp_path: Path) -> None:

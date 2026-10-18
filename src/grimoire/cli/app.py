@@ -22,6 +22,7 @@ from grimoire.__version__ import __version__
 from grimoire.cli._condensed_help import _RootHelpGroup
 from grimoire.cli._lazy import LazyCommandSpec, LazyGroupSpec, LazyTyperGroup
 from grimoire.cli._shared import _AUDIT_FILENAME, _log_operation, _status_spinner
+from grimoire.cli.cmd_self_update import self_update_command
 from grimoire.core import layout
 from grimoire.core.config import GrimoireConfig
 from grimoire.core.exceptions import GrimoireConfigError, GrimoireError
@@ -1250,10 +1251,7 @@ def lint(
 # ── grimoire update ────────────────────────────────────────────────────────────────
 
 
-@app.command("update", rich_help_panel="Info")
-def update_cmd() -> None:
-    """Update grimoire-kit to the latest version (alias for 'self update')."""
-    self_update()
+app.command("update", rich_help_panel="Info")(self_update_command)  # alias de `self update`
 
 
 # ── Lazy sub-commands (issue #405) ─────────────────────────────────────────────
@@ -2035,12 +2033,7 @@ def self_version(ctx: typer.Context) -> None:
         console.print("  [dim]Could not check for updates[/dim]")
 
 
-@self_app.command("update")
-def self_update() -> None:
-    """Update grimoire-kit to the latest version from PyPI."""
-    from grimoire.cli.updater import run_update
-
-    run_update(__version__, online=is_online(), console=console)
+self_app.command("update")(self_update_command)
 
 
 @self_app.command("diagnose")
