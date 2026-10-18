@@ -54,6 +54,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from grimoire.flows.attestation import CheckpointJournal
+    from grimoire.flows.autonomy import GrantJournal
 
 __all__ = [
     "FlowEngine",
@@ -717,6 +718,20 @@ class FlowEngine:
 
         return CheckpointJournal(self._flows_root, run_id)
 
+    def _grants(self) -> GrantJournal:
+        from grimoire.flows.autonomy import GrantJournal
+
+        return GrantJournal(self._flows_root, Path(self._project_root))
+
+    def _grant_lookup(self, run_id: str, node_id: str) -> tuple[str, str] | None:
+        """L'octroi d'autonomie qui couvre ce checkpoint (W5-06) — ``(grant_id, texte de révocation)``."""
+        from grimoire.flows.autonomy import refusal_note
+
+        state = self._grants().for_checkpoint(run_id, node_id)
+        if state is None:
+            return None
+        return state.grant_id, "" if state.active else refusal_note(state)
+
     def _present(self, run_id: str, contract: NodeContract | None) -> None:
         """Un checkpoint présenté émet son challenge, lié à la session courante (rien pour un autre kind)."""
         if contract is not None and contract.kind == "checkpoint":
@@ -1048,6 +1063,8 @@ class FlowEngine:
 
         contract = contracts[current_id]
         faults = check_output_against_contract(contract, output)
+        #: Le gate du node : une sortie refusée par son contrat révoque les octrois qui couvrent le run (W5-06).
+        contract_faults = tuple(faults)
         if contract.kind == "checkpoint":
             # Issue #207 : la décision d'hôte ("approve"/"reject"/"amend")
             # n'est pas une pin — jamais franchie côté Rust
@@ -1069,6 +1086,7 @@ class FlowEngine:
                 output,
                 destructive=current_id in destructive_checkpoints(blueprint),
                 cap=max_amendments(blueprint).get(current_id, DEFAULT_MAX_AMENDMENTS),
+                grant=lambda: self._grant_lookup(run_id, current_id),
             )
             if gate is not None and gate.refusal:
                 faults.append(gate.refusal)
@@ -1099,6 +1117,8 @@ class FlowEngine:
             wfi = self._kernel.advance_step(wfi.id, ctx, step_id=current_id)
         if faults:
             wfi = self._kernel.fail_step(wfi.id, ctx, step_id=current_id, reason="; ".join(faults))
+            if contract_faults:
+                self._grants().revoke_on_red_gate(run_id, current_id, contract_faults)
             if gate is not None and gate.decision in ("reject", "amend"):
                 # Un refus ou un amendement est une décision : il consomme son
                 # challenge, la présentation suivante en émet un neuf.
