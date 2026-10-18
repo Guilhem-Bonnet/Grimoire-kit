@@ -20,6 +20,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -1273,6 +1274,7 @@ _up_backend_opt = typer.Option("auto", "--backend", "-b", help="Memory backend (
 _up_no_standard_opt = typer.Option(False, "--no-standard", help="Skip the agentic standard initialization.")
 _up_needs_opt = typer.Option(None, "--needs", help="Need id(s) for standard init (repeatable or comma-separated).")
 _up_dry_run_opt = typer.Option(False, "--dry-run", help="Show the plan without applying.")
+_up_prove_opt = typer.Option(False, "--prove", help="Prove the SessionStart hook fires and a first evidence gate goes green (throwaway task); exit 1 otherwise.")
 _up_no_cockpit_opt = typer.Option(False, "--no-cockpit", help="Do not enrol this project in the local cockpit registry (~/.grimoire/cockpit/registry.json). Same effect as the GRIMOIRE_NO_COCKPIT env var.")
 
 
@@ -1406,6 +1408,7 @@ def up(
     needs: list[str] | None = _up_needs_opt,
     dry_run: bool = _up_dry_run_opt,
     no_cockpit: bool = _up_no_cockpit_opt,
+    prove: bool = _up_prove_opt,
 ) -> None:
     """Bring a project fully up in one command — init, identity, standard, doctor.
 
@@ -1424,7 +1427,9 @@ def up(
       [cyan]grimoire up . --needs collab-review[/cyan] Standard init from a need profile
       [cyan]grimoire up . --no-standard[/cyan]         Skip the agentic standard step
       [cyan]grimoire up . --no-cockpit[/cyan]          Skip cockpit enrolment (throwaway project)
+      [cyan]grimoire up . --prove[/cyan]               Run the hook for real; fail unless a first gate goes green
     """
+    started = time.monotonic()
     target = path.resolve()
     fmt = (ctx.obj or {}).get("output", "text")
 
@@ -1441,6 +1446,12 @@ def up(
         interactive=interactive, no_standard=no_standard, needs=_split_csv(needs),
         dry_run=dry_run, no_cockpit=no_cockpit, quiet=fmt != "text",
     )
+
+    proof = None
+    if prove:
+        from grimoire.cli.cmd_up_prove import run_prove_step
+
+        proof = run_prove_step(state, target, started=started, dry_run=dry_run, no_standard=no_standard)
 
     # Legacy status info (kept for JSON consumers of the previous `up`).
     agents_count = 0
@@ -1470,6 +1481,7 @@ def up(
                 {"name": c.name, "passed": c.passed, "level": c.level, "detail": c.detail, "remedy": c.remedy}
                 for c in checks
             ],
+            **(proof.to_payload() if proof is not None else {}),
         }
         typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
     else:
