@@ -23,12 +23,13 @@ la cible. Ici une vague a un checkpoint :
   la vague ``stale``, jamais ``approved`` ;
 - **le verrou** : une vague déclarée requise (:func:`require`) ferme le claim de
   toute tâche d'une vague postérieure de la mission tant qu'elle n'est pas
-  ``approved`` (:func:`claim_refusal`, appelé par ``TaskService.claim``).
+  ``approved`` (:func:`claim_refusal`, appelé par ``TaskService.transition``).
 
 Limites écrites : l'attestation rend la falsification plus coûteuse, elle ne la
 rend pas impossible (voir :data:`grimoire.hosts.decisions.authority_guard.LIMIT_NOTE`) ;
-seul ``TaskService.claim`` applique le verrou, une transition écrite directement
-dans le ledger le contourne ; le checkpoint ne vaut que pour les tâches fusionnées
+``TaskService.transition`` applique le verrou à toute cible ``claimed`` (CLI, MCP,
+routes du cockpit), mais une écriture directe dans le ledger (``MissionLedger.claim_task`` :
+import du board, rejeu task-flow) le contourne ; le checkpoint ne vaut que pour les tâches fusionnées
 par ``task merge`` (un ``task.merged`` au ledger).
 """
 
@@ -41,6 +42,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from grimoire.flows.attestation import ATTESTED, GRANTED_PREFIX, CheckpointJournal, judge_checkpoint
+from grimoire.missions.schemas import TaskState
 from grimoire.missions.task_worktree import MERGED_EVENT, _git, _is_ancestor
 from grimoire.missions.waves import wave_levels
 
@@ -50,6 +52,7 @@ if TYPE_CHECKING:
 __all__ = [
     "WaveDecision",
     "WaveState",
+    "claim_blocked",
     "claim_refusal",
     "decide",
     "report",
@@ -61,6 +64,7 @@ __all__ = [
 _FLOWS_RELPATH = Path("_grimoire-runtime-output/flows")
 _REQUIRE = "require"
 APPROVED = "approved"
+_SETTLED = frozenset({TaskState.CLOSED, TaskState.CANCELLED})
 
 
 @dataclass(frozen=True, slots=True)
@@ -261,8 +265,25 @@ def report(service: TaskService, mission_id: str) -> list[dict[str, Any]]:
     return [wave_state(service, mission_id, n).to_dict() for n in waves]
 
 
+def _refusal(service: TaskService, mission_id: str, entries: list[dict[str, Any]], level: int) -> str:
+    for entry in entries:
+        if entry.get("type") != _REQUIRE:
+            continue
+        wave = int(str(entry["node_id"]).split("-")[1])
+        if wave < level:
+            st = wave_state(service, mission_id, wave)
+            if st.status != APPROVED:
+                return (f"checkpoint de la vague {wave} requis et {st.status}"
+                        + (f" ({st.reason})" if st.reason else "") + " : grimoire task wave-checkpoint")
+    return ""
+
+
 def claim_refusal(service: TaskService, task_id: str) -> str:
-    """Le motif de refus du claim de *task_id* si une vague requise antérieure n'est pas ``approved`` ; vide sinon."""
+    """Le motif de refus du claim de *task_id* si une vague requise antérieure n'est pas ``approved`` ; vide sinon.
+
+    Appelé par ``TaskService.transition`` pour toute cible ``claimed`` : la CLI, le MCP
+    (``task_claim`` comme ``task_update move``) et les routes du cockpit passent par là.
+    """
     task = service.require(task_id)
     journal = _journal(service, task.mission_id)
     if not journal.path.is_file():
@@ -270,13 +291,26 @@ def claim_refusal(service: TaskService, task_id: str) -> str:
     level = wave_levels(service.ledger.list_tasks()).get(task_id)
     if level is None:
         return ""
-    for entry in journal.entries():
-        if entry.get("type") != _REQUIRE:
+    return _refusal(service, task.mission_id, journal.entries(), level)
+
+
+def claim_blocked(service: TaskService, mission_id: str) -> dict[str, str]:
+    """``{tâche: motif}`` des tâches non terminées de la mission dont le claim est fermé par un checkpoint requis.
+
+    Ce que le MCP et le cockpit affichent à côté des vagues : le motif exact que le claim opposerait.
+    """
+    journal = _journal(service, mission_id)
+    if not journal.path.is_file():
+        return {}
+    entries = journal.entries()
+    tasks = service.ledger.list_tasks()
+    levels = wave_levels(tasks)
+    blocked: dict[str, str] = {}
+    for task in tasks:
+        level = levels.get(task.id)
+        if task.mission_id != mission_id or level is None or task.status in _SETTLED:
             continue
-        wave = int(str(entry["node_id"]).split("-")[1])
-        if wave < level:
-            st = wave_state(service, task.mission_id, wave)
-            if st.status != APPROVED:
-                return (f"checkpoint de la vague {wave} requis et {st.status}"
-                        + (f" ({st.reason})" if st.reason else "") + " : grimoire task wave-checkpoint")
-    return ""
+        reason = _refusal(service, mission_id, entries, level)
+        if reason:
+            blocked[task.id] = reason
+    return dict(sorted(blocked.items()))

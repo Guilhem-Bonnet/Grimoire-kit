@@ -331,3 +331,123 @@ def test_cli_request_puis_approve(plan: Plan) -> None:
     approved = runner.invoke(task_app, [*base, "--action", "approve", "--fingerprint", fp], obj=JSON)
     assert approved.exit_code == 0, approved.output
     assert json.loads(approved.output)["status"] == "approved"
+
+
+# ── Correctifs de revue W5-05 : verrou contourné, numérotation, exposition MCP et cockpit ──
+
+
+def _statut(plan: Plan, tid: str) -> TaskState:
+    """L'état relu par un service neuf : la CLI écrit par le sien, `plan.service` garde son cache."""
+    return TaskService(plan.repo).require(tid).status
+
+
+def _vague_une_fusionnee_et_requise(plan: Plan) -> None:
+    plan.merge_wave_one()
+    plan.close_wave_one()
+    require(plan.service, plan.mission, 1)
+
+
+def test_cli_task_claim_ne_contourne_pas_le_verrou(plan: Plan) -> None:
+    """Avant : `task claim` passait par `transition` et ignorait `claim_refusal` (exit 0, tâche CLAIMED)."""
+    _vague_une_fusionnee_et_requise(plan)
+
+    result = runner.invoke(task_app, ["claim", plan.c, "--project-root", str(plan.repo)])
+
+    assert result.exit_code == 1, result.output
+    assert "vague 1" in result.output
+    assert _statut(plan, plan.c) is TaskState.READY
+
+
+def test_mcp_task_update_move_claimed_ne_contourne_pas_le_verrou(plan: Plan) -> None:
+    from grimoire.mcp.server import task_update
+
+    _vague_une_fusionnee_et_requise(plan)
+
+    result = task_update(plan.c, "move", to="claimed", project_path=str(plan.repo))
+    body = json.loads(result if isinstance(result, str) else "".join(getattr(b, "text", "") for b in result.content))
+
+    assert "vague 1" in json.dumps(body, ensure_ascii=False)
+    assert _statut(plan, plan.c) is TaskState.READY
+
+
+def test_route_workspace_move_claimed_ne_contourne_pas_le_verrou(plan: Plan) -> None:
+    from grimoire.tools.workspace_routes import PREFIX, workspace_post
+
+    _vague_une_fusionnee_et_requise(plan)
+
+    with pytest.raises(Exception, match="vague 1"):
+        workspace_post(plan.repo, f"{PREFIX}tasks/{plan.c}/move", {"to": "claimed"})
+
+    assert _statut(plan, plan.c) is TaskState.READY
+
+
+def test_le_verrou_laisse_passer_les_autres_transitions_et_la_vague_approuvee(plan: Plan) -> None:
+    _vague_une_fusionnee_et_requise(plan)
+    plan.service.transition(plan.c, TaskState.BLOCKED, "amelia", "attend la relecture")  # autre cible : non concernée
+    plan.service.transition(plan.c, TaskState.READY, "amelia")
+    fp = request(plan.service, plan.mission, 1).fingerprint
+    _human_turn(plan.repo)
+    assert decide(plan.service, plan.mission, 1, "approve", fp).ok
+
+    result = runner.invoke(task_app, ["claim", plan.c, "--project-root", str(plan.repo)])
+
+    assert result.exit_code == 0, result.output
+    assert _statut(plan, plan.c) is TaskState.CLAIMED, result.output
+
+
+def test_task_waves_et_wave_checkpoint_parlent_de_la_meme_vague(plan: Plan) -> None:
+    """Avant : `task waves` renumérotait après la clôture (suite = vague 1) alors que le checkpoint gardait le niveau absolu (A, B = vague 1)."""
+    _vague_une_fusionnee_et_requise(plan)
+    require(plan.service, plan.mission, 2)
+
+    result = runner.invoke(task_app, ["waves", "--mission", plan.mission, "--project-root", str(plan.repo)], obj=JSON)
+
+    assert result.exit_code == 0, result.output
+    out = json.loads(result.output)
+    assert out["waves"] == [{"wave": 2, "tasks": [plan.c]}]
+    by_wave = {cp["wave"]: cp["tasks"] for cp in out["checkpoints"]}
+    assert by_wave[2] == [plan.c]
+    assert by_wave[1] == sorted([plan.a, plan.b])
+    assert {w["wave"]: w["tasks"] for w in out["waves"]}[2] == by_wave[2]
+
+
+def test_la_sortie_texte_du_checkpoint_nomme_les_taches_couvertes(plan: Plan) -> None:
+    plan.merge_wave_one()
+
+    result = runner.invoke(task_app, ["wave-checkpoint", plan.mission, "1", "--project-root", str(plan.repo)])
+
+    assert result.exit_code == 0, result.output
+    assert plan.a in result.output and plan.b in result.output
+
+
+def test_mcp_task_waves_expose_les_checkpoints_et_leur_motif(plan: Plan) -> None:
+    from grimoire.mcp.server import task_waves
+
+    _vague_une_fusionnee_et_requise(plan)
+
+    body = json.loads(task_waves(mission=plan.mission, project_path=str(plan.repo)))
+
+    assert [(c["wave"], c["status"], c["required"]) for c in body["checkpoints"]] == [(1, "unrequested", True)]
+    assert body["claim_blocked"] == {plan.c: claim_refusal(plan.service, plan.c)}
+    assert "vague 1" in body["claim_blocked"][plan.c]
+
+
+def test_mcp_task_show_nomme_le_motif_de_refus_du_claim(plan: Plan) -> None:
+    from grimoire.mcp.server import task_show
+
+    _vague_une_fusionnee_et_requise(plan)
+
+    assert "vague 1" in json.loads(task_show(plan.c, project_path=str(plan.repo)))["claim_blocked_by"]
+    assert json.loads(task_show(plan.a, project_path=str(plan.repo)))["claim_blocked_by"] == ""
+
+
+def test_route_workspace_waves_lit_les_checkpoints_pour_le_cockpit(plan: Plan) -> None:
+    from grimoire.tools.workspace_routes import PREFIX, workspace_get
+
+    _vague_une_fusionnee_et_requise(plan)
+
+    body = workspace_get(plan.repo, f"{PREFIX}waves", {"mission": [plan.mission]})
+
+    assert [(c["wave"], c["required"]) for c in body["checkpoints"]] == [(1, True)]
+    assert "vague 1" in body["claim_blocked"][plan.c]
+    assert workspace_get(plan.repo, f"{PREFIX}waves", {})["waves"] == body["waves"]

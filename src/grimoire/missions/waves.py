@@ -2,6 +2,10 @@
 
 Une vague regroupe les tâches dont toutes les dépendances ``blocks`` sont
 closes ou dans une vague précédente : ce qu'on peut lancer en parallèle. Le
+numéro d'une vague est son niveau absolu dans le DAG (une tâche vaut ``1 + max``
+des niveaux de ses dépendances, closes comprises) : il ne change pas quand la
+vague précédente se ferme, et c'est le même que celui du checkpoint
+(:mod:`grimoire.missions.wave_checkpoint`). Le
 calcul est pur — il lit des :class:`MissionTask`, n'écrit rien.
 
 Deux tâches d'une même vague qui déclarent un même fichier se marchent dessus :
@@ -90,8 +94,9 @@ def compute_waves(tasks: Iterable[MissionTask], *, only: Iterable[str] | None = 
     contre lui tout entier, comme au claim (une dépendance vers une tâche
     close d'une autre mission est libre). *only* restreint le rapport aux
     tâches d'une mission, sans changer la façon dont leurs dépendances se
-    résolvent ; les numéros de vague restent ceux du plan complet, une vague
-    sans tâche de la mission est omise.
+    résolvent ; les numéros de vague sont les niveaux absolus du plan complet
+    (closes comprises, voir :func:`wave_levels`), une vague sans tâche de la
+    mission est omise.
 
     Trois sortes de tâches restent hors de toute vague, sans jamais être
     déclarées libres :
@@ -105,6 +110,10 @@ def compute_waves(tasks: Iterable[MissionTask], *, only: Iterable[str] | None = 
     """
     by_id = {t.id: t for t in tasks}
     pending = {tid: t for tid, t in by_id.items() if t.status not in _DONE}
+    # Niveau absolu des tâches closes (W5-05) : le numéro d'une vague ne bouge pas quand la précédente se ferme,
+    # sans quoi « vague 1 » désignerait deux ensembles selon qu'on lit `task waves` ou le checkpoint de la vague.
+    closed_level = {tid: lv for tid, lv in wave_levels(by_id.values()).items() if by_id[tid].status is TaskState.CLOSED}
+    floor: dict[str, int] = {}
     deps: dict[str, set[str]] = {}
     unresolved: dict[str, list[str]] = {}
     for tid, task in pending.items():
@@ -114,6 +123,7 @@ def compute_waves(tasks: Iterable[MissionTask], *, only: Iterable[str] | None = 
                 continue
             target = by_id.get(dep.target)
             if target is not None and target.status is TaskState.CLOSED:
+                floor[tid] = max(floor.get(tid, 0), closed_level.get(dep.target, 0))
                 continue
             if target is None or target.status is TaskState.CANCELLED:
                 unresolved.setdefault(tid, []).append(dep.target)
@@ -144,7 +154,7 @@ def compute_waves(tasks: Iterable[MissionTask], *, only: Iterable[str] | None = 
         if not ready:
             break
         for tid in ready:
-            level[tid] = 1 + max((level[d] for d in deps[tid]), default=0)
+            level[tid] = 1 + max(max((level[d] for d in deps[tid]), default=0), floor.get(tid, 0))
         remaining -= set(ready)
     scope = None if only is None else frozenset(only)
 

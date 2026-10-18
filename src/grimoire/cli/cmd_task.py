@@ -852,7 +852,11 @@ def task_waves(
             f"[yellow]![/yellow] vague {overlap['wave']} : {overlap['file']} visé par {', '.join(overlap['tasks'])}"
         )
     for cp in plan.get("checkpoints", ()):
-        console.print(f"checkpoint vague {cp['wave']} : {cp['status']}{' (requis)' if cp['required'] else ''}")
+        console.print(
+            f"checkpoint vague {cp['wave']} ({', '.join(cp['tasks'])}) : {cp['status']}{' (requis)' if cp['required'] else ''}"
+        )
+    for tid, why in plan.get("claim_blocked", {}).items():
+        console.print(f"[yellow]![/yellow] {tid} : claim fermé — {why}")
     for tid, targets in plan["unresolved"].items():
         console.print(f"[yellow]![/yellow] {tid} : dépendance inconnue ou annulée ({', '.join(targets)})")
     for tid, causes in plan["blocked"].items():

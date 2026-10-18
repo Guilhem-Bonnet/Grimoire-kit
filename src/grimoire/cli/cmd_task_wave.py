@@ -20,7 +20,7 @@ def register_wave_commands(app: typer.Typer) -> None:
 def task_wave_checkpoint(
     ctx: typer.Context,
     mission: Annotated[str, typer.Argument(help="Mission du plan.")],
-    wave: Annotated[int, typer.Argument(help="Numéro de vague (voir `task waves`).")],
+    wave: Annotated[int, typer.Argument(help="Numéro de vague : le même que dans `task waves` (niveau absolu, vagues closes comprises).")],
     action: Annotated[
         str, typer.Option("--action", help="status (défaut), request, require, approve ou reject.")
     ] = "status",
@@ -55,6 +55,7 @@ def task_wave_checkpoint(
     else:
         mark = "[green]OK[/green]" if ok else "[red]✗[/red]"
         console.print(f"{mark} vague {wave} de {mission} — {line}")
+        console.print(f"  tâches : {', '.join(state.tasks) or '(aucune)'}")
         if state.fingerprint:
             console.print(f"  empreinte : {state.fingerprint}")
         if state.reason:

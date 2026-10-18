@@ -378,7 +378,7 @@ class TaskService:
 
     def waves(self, mission_id: str | None = None) -> dict[str, Any]:
         """Les vagues du plan, ``file_overlaps`` compris (:func:`grimoire.missions.waves.compute_waves`)."""
-        from grimoire.missions.wave_checkpoint import report
+        from grimoire.missions.wave_checkpoint import claim_blocked, report
         from grimoire.missions.waves import compute_waves
 
         everything = self.ledger.list_tasks()
@@ -387,6 +387,7 @@ class TaskService:
         # Les dépendances se résolvent contre tout le ledger, comme au claim : seul le rapport est filtré.
         plan = compute_waves(everything, only=[t.id for t in everything if t.mission_id == mission_id])
         plan["checkpoints"] = report(self, mission_id)  # W5-05 : les vagues closes n'y figurent plus, leur checkpoint si
+        plan["claim_blocked"] = claim_blocked(self, mission_id)  # {tâche: motif} que le claim opposerait
         return plan
 
     def attach_session(
@@ -463,11 +464,7 @@ class TaskService:
     ) -> TaskMove:
         """ready → claimed, si le gate `ready_to_in_progress` l'accorde et si aucun
         autre claim actif ne réserve déjà l'un de *files*."""
-        from grimoire.missions.wave_checkpoint import claim_refusal
-
-        refusal = claim_refusal(self, task_id)
-        if refusal:
-            raise GrimoireMissionError(f"Claim refusé pour {task_id} : {refusal}")
+        # Le verrou de vague vit dans `transition` (cible CLAIMED) : la CLI, le MCP et le cockpit y passent tous.
         claim = TaskClaim.new(actor_id=actor, host_id=host, exclusive_files=files)
         return self.transition(task_id, TaskState.CLAIMED, actor, claim=claim)
 
@@ -810,6 +807,14 @@ class TaskService:
         machine à états refuse. Dans tous les cas, rien n'a été écrit.
         """
         task = self.require(task_id)
+        if target is TaskState.CLAIMED:
+            # W5-05 : point de passage commun de `claim`, de `task claim`, de `task_update move` et de la route
+            # workspace `move` — un checkpoint de vague requis ferme le claim quel que soit le chemin.
+            from grimoire.missions.wave_checkpoint import claim_refusal
+
+            refusal = claim_refusal(self, task_id)
+            if refusal:
+                raise GrimoireMissionError(f"Claim refusé pour {task_id} : {refusal}")
         if claim is not None:
             self._check_exclusive_files(task, target, claim)
         verdict = self.gate(task, target)

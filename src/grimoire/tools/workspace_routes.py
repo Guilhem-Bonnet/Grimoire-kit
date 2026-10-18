@@ -137,6 +137,20 @@ def _tasks(project_root: Path, query: _Query) -> Any:
     )
 
 
+def _waves(project_root: Path, query: _Query) -> Any:
+    """``GET /api/workspace/waves[?mission=<id>]`` — les vagues du plan et, pour une mission, le checkpoint de chacune (W5-05).
+
+    ``checkpoints`` (statut, empreinte du diff fusionné, tâches couvertes, requis ou non) et
+    ``claim_blocked`` (le motif exact qui ferme le claim d'une tâche) sont ceux de ``grimoire task waves``.
+    """
+    from grimoire.missions.service import TaskService
+
+    service = TaskService(project_root.resolve())
+    if not service.has_ledger:
+        return {"waves": [], "ledger": False}
+    return {**service.waves(_one(query, "mission") or None), "ledger": True}
+
+
 def _files(project_root: Path, query: _Query) -> Any:
     return workspace_api.files_view(project_root, tier=_one(query, "tier"))
 
@@ -286,6 +300,7 @@ def _language(project_root: Path, query: _Query) -> Any:
 GET_ROUTES: dict[str, _GetHandler] = {
     f"{PREFIX}glossary": _glossary,
     f"{PREFIX}tasks": _tasks,
+    f"{PREFIX}waves": _waves,
     f"{PREFIX}files": _files,
     f"{PREFIX}file": _file,
     f"{PREFIX}file/diff": _file_diff,

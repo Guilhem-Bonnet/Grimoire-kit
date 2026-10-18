@@ -488,7 +488,7 @@ prochain export l'écrase.
 | `grimoire task board export . -o <chemin>` | Écrire ailleurs que dans le board du standard |
 | `grimoire task add "<titre>" -a "<critère>" [--owner <qui>] [--ready]` | Ouvrir une tâche (un critère d'acceptation au moins) ; `--ready` la rend réclamable tout de suite, gate `proposed_to_ready` compris |
 | `grimoire task list [--status <état>] [--mission <id>]` | Lister les tâches et leur colonne de board |
-| `grimoire task wave-checkpoint <mission> <vague> [--action status\|request\|require\|approve\|reject] [--fingerprint <empreinte>]` | Checkpoint humain d'une vague, lié à l'empreinte du contenu fusionné (arbres base, tête et merge de chaque tâche). `request` présente l'empreinte, `approve`/`reject` la citent et exigent un tour humain attesté postérieur (W2-01) ; `require` ferme le claim des vagues suivantes tant que la vague n'est pas `approved`. Une vague dont le contenu change devient `stale` |
+| `grimoire task wave-checkpoint <mission> <vague> [--action status\|request\|require\|approve\|reject] [--fingerprint <empreinte>]` | Checkpoint humain d'une vague, lié à l'empreinte du contenu fusionné (arbres base, tête et merge de chaque tâche). `request` présente l'empreinte, `approve`/`reject` la citent et exigent un tour humain attesté postérieur (W2-01) ; `require` ferme le claim des vagues suivantes tant que la vague n'est pas `approved`. Une vague dont le contenu change devient `stale`. Le numéro de vague est celui de `task waves` (niveau absolu, vagues closes comprises) ; le verrou s'applique à toute transition vers `claimed` |
 | `grimoire task show <id>` | Détailler une tâche et ce que chaque prochain pas exigera |
 | `grimoire task claim <id> [--actor <qui>] [--host <où>]` | Réclamer une tâche prête (`ready → claimed`) |
 | `grimoire task move <id> --to <état>` | Déplacer une tâche, si la machine à états et le gate le permettent |
@@ -516,7 +516,7 @@ reprojeté depuis le ledger si le projet est enrôlé (`_grimoire/standard/` pr�
 — plus besoin de relancer `task board export` pour qu'un claim se voie.
 
 Les mêmes gestes sont exposés aux agents par le serveur MCP (`task_add`,
-`task_list_ready`, `task_show`, `task_claim`, `task_update`, `task_context`) :
+`task_list_ready`, `task_show`, `task_waves`, `task_claim`, `task_update`, `task_context`) :
 même service (`TaskService.add` pour l'ouverture), même gate, même refus. Voir
 [Intégration MCP](mcp-integration.md).
 

@@ -204,7 +204,8 @@ def test_waves_une_dependance_vers_une_autre_mission_close_libere_la_tache(tmp_p
     y = _pret(service.ledger, m2, "Y")
     service.ledger.link_tasks(y.id, x.id)
     plan = service.waves(m2)
-    assert plan["waves"] == [{"wave": 1, "tasks": [y.id]}]
+    # W5-05 : le numéro est le niveau absolu (X close = vague 1, Y = vague 2), le même que celui du checkpoint.
+    assert plan["waves"] == [{"wave": 2, "tasks": [y.id]}]
     assert plan["unresolved"] == {} and plan["cyclic"] == [] and plan["blocked"] == {}
     service.ledger.claim_task(y.id, "marcus", "local")  # le claim, lui, aboutit
 
