@@ -166,9 +166,21 @@ def append_chained(path: Path, event: dict[str, Any]) -> None:
 
     Sous le verrou de :mod:`grimoire.core.fsio` : deux hooks parallèles ne
     forkent pas la chaîne. L'octet exact écrit est celui qu'on hache (mode
-    binaire : pas de ``\\r\\n`` fabriqué par la plate-forme). Un échec d'écriture
-    de l'ancre après l'ajout est toléré : l'ancre retarde, la vérification
-    l'accepte et le prochain ajout recompte.
+    binaire : pas de ``\\r\\n`` fabriqué par la plate-forme).
+
+    **Ordre : l'ancre d'abord, la ligne ensuite.** Une ancre qui retarde sur le
+    fichier (ligne écrite, ancre non) est indiscernable d'une dernière ligne
+    modifiée : la tolérer cachait une falsification. L'ancre annonce donc la ligne
+    avant qu'elle n'existe ; si l'ancre ne s'écrit pas, la ligne n'est pas
+    écrite (``OSError`` levée, écriture comptée par l'appelant) ; si la ligne ne
+    s'écrit pas, l'ancre précédente est restaurée.
+
+    **Une divergence ne se répare pas en ajoutant.** Si l'ancre ne désigne plus
+    la dernière ligne du fichier (dernière ligne retirée ou modifiée, journal
+    supprimé), la ligne est ajoutée mais l'ancre reste figée : la divergence
+    reste visible à chaque vérification, quel que soit le nombre d'ajouts
+    ultérieurs. Ce n'est pas le hook ``PostToolUse``, qui ajoute après chaque
+    outil, qui absorbe la preuve de la falsification.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     with locked(path, timeout=_LOCK_TIMEOUT_S):
@@ -176,20 +188,45 @@ def append_chained(path: Path, event: dict[str, Any]) -> None:
         prev = _digest(last) if last is not None else GENESIS
         line = json.dumps({**event, "prev": prev}, ensure_ascii=False).encode("utf-8")
         state = _read_head(path)
-        if state is not None and last is not None and state.head == _digest(last) and state.count > 0:
-            count = state.count
-        elif last is None:
-            count = 0
-        else:
-            count = _chained_count(path)
         dropped = state.dropped if state is not None else 0
-        with open(path, "ab") as handle:
-            handle.write(b"" if clean_end else b"\n")
-            handle.write(line + b"\n")
+        anchored = state is not None and state.count > 0
+        count = 0
+        if anchored and state is not None:
+            if last is not None and state.head == _digest(last):
+                count = state.count
+            else:
+                # La dernière ligne n'est pas celle de l'ancre : soit une écriture coupée par un crash (ligne illisible
+                # en queue, la chaîne tient en amont), soit une divergence. Le parcours complet tranche, rarement.
+                report = analyze_chain(path)
+                if report.status != "intact" or report.chained != state.count:
+                    _append_bytes(path, line, clean_end)  # divergence : l'ancre reste figée
+                    return
+                count = report.chained
+        elif last is not None:
+            count = _chained_count(path)
+        _write_head(path, _Head(count + 1, _digest(line), dropped), durable=False)
         try:
-            _write_head(path, _Head(count + 1, _digest(line), dropped), durable=False)
-        except OSError:  # silent-ok — l'ancre retarde, la vérification l'accepte et le prochain ajout recompte (docstring)
-            return
+            _append_bytes(path, line, clean_end)
+        except BaseException:
+            _restore_head(path, state)
+            raise
+
+
+def _append_bytes(path: Path, line: bytes, clean_end: bool) -> None:
+    with open(path, "ab") as handle:
+        handle.write(b"" if clean_end else b"\n")
+        handle.write(line + b"\n")
+
+
+def _restore_head(path: Path, state: _Head | None) -> None:
+    """Remet l'ancre d'avant l'ajout quand la ligne n'a pas pu s'écrire (au mieux : ne lève jamais)."""
+    try:
+        if state is None:
+            head_path(path).unlink(missing_ok=True)
+        else:
+            _write_head(path, state, durable=False)
+    except OSError:  # silent-ok — l'ancre reste en avance d'une ligne : analyze_chain le dit (« manquent en fin de journal »)
+        return
 
 
 def record_dropped_write(path: Path) -> None:
@@ -282,6 +319,10 @@ def analyze_chain(path: Path) -> ChainReport:
         elif head.count > 0 and chained_hashes[head.count - 1] != head.head:
             where = chained_lines[head.count - 1]
             broken = (where, where, "ne correspond plus à l'ancre du journal")
+        elif 0 < head.count < chained:
+            # L'ancre est écrite avant la ligne (append_chained) : une ancre en retard ne vient plus d'un crash.
+            where = chained_lines[chained - 1]
+            broken = (where, where, f"n'est pas annoncée par l'ancre (elle connaît {head.count} ligne(s) chaînée(s), le fichier {chained})")
 
     if broken is not None:
         after, line_no, why = broken

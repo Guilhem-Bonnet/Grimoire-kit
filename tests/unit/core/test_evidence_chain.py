@@ -192,17 +192,98 @@ def test_a_missing_anchor_is_said_not_silent(governed: Path) -> None:
     assert (report.chained, report.anchored) == (3, True)
 
 
-def test_a_lagging_anchor_is_accepted_and_recounted(governed: Path) -> None:
+def test_an_anchor_that_is_behind_the_file_is_a_break(governed: Path) -> None:
     log = _fill(governed, 3)
     anchor = head_path(log)
     stale = json.loads(anchor.read_text(encoding="utf-8"))
-    # Un ajout dont l'ancre n'a pas suivi (crash entre les deux écritures).
     append_evidence_event(governed, TASK, build_bash_event("echo 3", exit_code=0))
+    # L'ancre est écrite avant la ligne : une ancre en retard n'est plus un crash, c'est une divergence.
     anchor.write_text(json.dumps(stale), encoding="utf-8")
+    assert analyze_chain(log).status == "broken"
+
+
+def _tamper_drop_last(log: Path) -> None:
+    lines = log.read_text(encoding="utf-8").splitlines()
+    log.write_text("\n".join(lines[:-1]) + "\n", encoding="utf-8")
+
+
+def _tamper_modify_last(log: Path) -> None:
+    lines = log.read_text(encoding="utf-8").splitlines()
+    lines[-1] = lines[-1].replace("echo 2", "echo 777")
+    log.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _tamper_delete_journal(log: Path) -> None:
+    log.unlink()
+
+
+@pytest.mark.parametrize("tamper", [_tamper_drop_last, _tamper_modify_last, _tamper_delete_journal])
+def test_a_tampered_last_line_stays_detected_after_the_next_append(governed: Path, tamper: Any) -> None:
+    """Le hook PostToolUse ajoute une ligne après chaque outil : l'ajout ne doit pas réparer l'ancre."""
+    log = _fill(governed, 3)
+    tamper(log)
+    assert analyze_chain(log).status == "broken"
+    for index in range(3):
+        append_evidence_event(governed, TASK, build_bash_event(f"echo apres {index}", exit_code=0))
+        assert analyze_chain(log).status == "broken"
+    assert _check_ids(governed)["evidence.chain_broken"] == "error"
+    assert verify_standard_profile(governed, task_id=TASK).ok is False
+
+
+def test_a_tampered_single_line_journal_stays_detected_after_the_next_append(governed: Path) -> None:
+    log = _fill(governed, 1)
+    log.unlink()
+    append_evidence_event(governed, TASK, build_bash_event("echo apres", exit_code=0))
+    assert analyze_chain(log).status == "broken"
+
+
+def test_a_failed_anchor_write_does_not_hide_a_later_modification(
+    governed: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """L'ancre ne retarde plus en silence : une écriture d'ancre refusée perd l'événement (compté), pas la preuve."""
+    log = _fill(governed, 3)
+    real_open: Any = builtins.open
+
+    def refusing_open(file: Any, mode: str = "r", *args: Any, **kwargs: Any) -> Any:
+        if Path(str(file)) == head_path(log) and "w" in mode:
+            raise OSError(28, "No space left on device")
+        return real_open(file, mode, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", refusing_open)
+    monkeypatch.setattr(
+        "grimoire.core.standard_checks.evidence_chain.atomic_write",
+        lambda *a, **k: (_ for _ in ()).throw(OSError(28, "full")),
+    )
+    append_evidence_event(governed, TASK, build_bash_event("echo 3", exit_code=0))
+    monkeypatch.undo()
+
     assert analyze_chain(log).status == "intact"
-    append_evidence_event(governed, TASK, build_bash_event("echo 4", exit_code=0))
-    report = analyze_chain(log)
-    assert (report.status, report.chained) == ("intact", 5)
+    assert analyze_chain(log).chained == 3
+    _tamper_modify_last(log)
+    assert analyze_chain(log).status == "broken"
+    append_evidence_event(governed, TASK, build_bash_event("echo apres", exit_code=0))
+    assert analyze_chain(log).status == "broken"
+
+
+def test_a_refused_line_write_leaves_the_anchor_where_it_was(governed: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    log = _fill(governed, 2)
+    before = head_path(log).read_text(encoding="utf-8")
+    real_open: Any = builtins.open
+
+    def refusing_open(file: Any, mode: str = "r", *args: Any, **kwargs: Any) -> Any:
+        if Path(str(file)) == log and "a" in mode:
+            raise OSError(28, "No space left on device")
+        return real_open(file, mode, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", refusing_open)
+    append_evidence_event(governed, TASK, build_bash_event("echo perdu", exit_code=0))
+    monkeypatch.undo()
+
+    after = json.loads(head_path(log).read_text(encoding="utf-8"))
+    assert {k: v for k, v in after.items() if k != "dropped_writes"} == {
+        k: v for k, v in json.loads(before).items() if k != "dropped_writes"
+    }
+    assert analyze_chain(log).status == "intact"
 
 
 def test_parallel_appends_do_not_fork_the_chain(governed: Path) -> None:
