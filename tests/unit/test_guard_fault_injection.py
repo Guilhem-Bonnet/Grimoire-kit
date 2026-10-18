@@ -677,3 +677,55 @@ def _publish(metric: dict[str, Any]) -> None:
         ]
         with Path(summary).open("a", encoding="utf-8") as fh:
             fh.write("\n".join(lines) + "\n")
+
+
+# ── Garde de clôture en panne : le profil appliqué à la panne elle-même ───────
+
+
+def _stop_crash(root: Path, mp: pytest.MonkeyPatch, *, profile_fault: bool = False) -> Any:
+    """Un ``Stop`` dont le corps de décision plante ; ``profile_fault`` casse aussi la lecture du profil."""
+    import grimoire.hosts.decisions.evidence_gate as gate
+
+    mp.setattr(gate, "_decide_stop", _boom)
+    if profile_fault:
+        mp.setattr(gate, "active_profile_id", _boom)
+    return run_decision("grimoire.evidence-gate", _hook(root, HookEvent.STOP))
+
+
+def test_panne_de_cloture_sans_standard_ne_refuse_rien(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    decision = _stop_crash(tmp_path, monkeypatch, profile_fault=True)
+    assert decision.outcome.value != "block"
+    assert decision.detail["skipped"] == "project_not_enrolled"
+    assert decision.detail["guard_error"] == "evidence_gate"
+
+
+def test_panne_de_cloture_sous_profil_non_bloquant_previent_sans_refuser(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    setup_standard_profile(tmp_path, profile_id="starter", task_id=TASK)
+    decision = _stop_crash(tmp_path, monkeypatch)
+    assert decision.outcome.value != "block"
+    assert "non bloquant" in decision.context
+    assert decision.detail["profile"] == "starter"
+    assert decision.detail["ok"] is False
+
+
+def test_panne_de_cloture_profil_illisible_standard_present_refuse(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _governed(tmp_path)
+    decision = _stop_crash(tmp_path, monkeypatch, profile_fault=True)
+    assert decision.outcome.value == "block"
+    assert decision.detail["profile"] == "governed"
+    assert "InjectedFaultError" in decision.reason
+
+
+def test_panne_de_cloture_dossier_standard_illisible_refuse(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Si même la présence du standard ne se lit pas, on suppose ``governed`` : jamais un relâchement."""
+    real_is_dir = Path.is_dir
+
+    def is_dir(self: Path) -> bool:
+        if self.name == "standard":
+            raise PermissionError("illisible (W2-08)")
+        return real_is_dir(self)
+
+    monkeypatch.setattr(Path, "is_dir", is_dir)
+    decision = _stop_crash(tmp_path, monkeypatch, profile_fault=True)
+    assert decision.outcome.value == "block"
+    assert decision.detail["profile"] == "governed"
