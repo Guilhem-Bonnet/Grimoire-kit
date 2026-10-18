@@ -371,3 +371,35 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
             terminal.write_line(message, red=True, bold=True)
         else:
             print(message)
+
+
+# ── Jeton de session des serveurs locaux (W1-10) ─────────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def _session_token_on_writes(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Une écriture de test porte le jeton, comme le ferait la page servie.
+
+    Le cockpit et l'atelier exigent ``X-Grimoire-Session`` sur toute mutation ;
+    les tests qui parlent à un vrai serveur passent par ``http.client``. Un test
+    qui prouve le refus sans jeton se marque ``no_session_token``.
+    """
+    if request.node.get_closest_marker("no_session_token"):
+        return
+    import http.client
+
+    from grimoire.tools import request_guard
+
+    original = http.client.HTTPConnection.request
+
+    def request_with_token(self, method, url, body=None, headers=None, **kw):  # type: ignore[no-untyped-def]
+        headers = dict(headers or {})
+        if method.upper() not in ("GET", "HEAD", "OPTIONS") and not any(
+            k.lower() == request_guard.SESSION_HEADER.lower() for k in headers
+        ):
+            headers[request_guard.SESSION_HEADER] = request_guard.session_token()
+        return original(self, method, url, body, headers, **kw)
+
+    monkeypatch.setattr(http.client.HTTPConnection, "request", request_with_token)

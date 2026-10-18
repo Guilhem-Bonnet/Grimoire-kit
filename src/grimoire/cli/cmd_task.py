@@ -526,21 +526,21 @@ def task_renew(
 @task_app.command("reap")
 def task_reap(
     ctx: typer.Context,
-    fenced_host: Annotated[
-        list[str] | None,
-        typer.Option("--fenced-host", help="Hôte dont le frein d'outil est vérifié : ses baux perdus sont relancés (répétable)."),
-    ] = None,
     apply: Annotated[bool, typer.Option("--apply", help="Écrire les décisions (sinon : les montrer seulement).")] = False,
     project_root: _PROJECT_ROOT = Path(),
     ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
     actor: _ACTOR = "tick",
 ) -> None:
-    """Récolte les baux perdus : relance (running → ready) ou différée nommée. Sans --apply, rien n'est écrit."""
+    """Récolte les baux perdus : relance (running → ready) ou différée nommée. Sans --apply, rien n'est écrit.
+
+    Seul un hôte dont le refus d'outil est prouvé, à la version de la session, est relancé
+    (table `hosts.capabilities`, fixtures de K0) ; tout autre pose la question à l'humain.
+    """
     from grimoire.core.exceptions import GrimoireError
 
     service = _service(project_root, ledger_root)
     try:
-        report = service.reap(fenced_hosts=frozenset(fenced_host or ()), apply=apply, actor=actor)
+        report = service.reap(apply=apply, actor=actor)
     except GrimoireError as exc:
         console.print(f"[red]✗[/red] {exc}")
         raise typer.Exit(1) from exc
@@ -556,8 +556,37 @@ def task_reap(
     for d in report.decisions:
         suite = f"relancée, réadmise après {d.retry_at}" if d.action == "ready" else f"différée ({d.cause})"
         console.print(f"  - {d.task_id} epoch {d.epoch} : {suite}, tentatives {d.attempts}")
+        if d.question:
+            console.print(f"    ? {d.question}")
     if not apply:
         console.print("[dim]Aperçu : relancer avec --apply pour écrire.[/dim]")
+
+
+@task_app.command("fence")
+def task_fence(
+    ctx: typer.Context,
+    task_id: Annotated[str, typer.Argument()],
+    worktree: Annotated[Path, typer.Option("--worktree", help="Worktree de la tâche (défaut : le dossier courant).")] = Path(),
+    project_root: _PROJECT_ROOT = Path(),
+    ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
+    actor: _ACTOR = "cli",
+) -> None:
+    """Pose dans le worktree un pre-push qui refuse le push d'un titulaire périmé (fence git, K3)."""
+    from grimoire.missions.prepush_fence import install_fence
+
+    service = _service(project_root, ledger_root)
+    task = _require_task(service, task_id)
+    claim = task.claim
+    if claim is None or claim.lease_epoch <= 0 or claim.actor_id != actor:
+        holder = claim.actor_id if claim is not None else "personne"
+        console.print(f"[red]✗[/red] {task_id} n'est pas tenue par {actor} (claim de {holder}) : pas d'epoch à fencer")
+        raise typer.Exit(1)
+    try:
+        hook = install_fence(worktree.resolve(), service.ledger_root, task_id, claim.lease_epoch)
+    except (RuntimeError, OSError) as exc:
+        console.print(f"[red]✗[/red] {exc}")
+        raise typer.Exit(1) from exc
+    console.print(f"[green]OK[/green] fence posée (epoch {claim.lease_epoch}) : {hook}")
 
 
 @task_app.command("move")
