@@ -1,3 +1,7 @@
+---
+audience: contributeur
+---
+
 <p align="right"><a href="../README.md">README</a></p>
 
 # <img src="../assets/icons/lightbulb.svg" width="32" height="32" alt=""> Doctrine — quand créer un artefact, et quand s'en abstenir

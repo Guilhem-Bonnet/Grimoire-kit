@@ -1,3 +1,7 @@
+---
+audience: décision
+---
+
 # ADR-006 — La vue de travail : coque unique, contrats d'API, cinq lots
 
 - **Statut** : accepté

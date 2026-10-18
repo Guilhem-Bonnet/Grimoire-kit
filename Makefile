@@ -42,6 +42,10 @@ ratchet: ## Code-size ratchet (framework frozen, src oversize guard)
 surface-coverage: ## Surface coverage registry guards (add BASE=origin/main for the ratchet)
 	$(PYTHON) scripts/check-surface-coverage.py --check $(if $(BASE),--base $(BASE),)
 
+.PHONY: gates
+gates: ## Toutes les gardes du dépôt (comme la CI et le pre-commit)
+	$(PYTHON) -m grimoire gates repo
+
 .PHONY: format
 format: ## Run ruff formatter
 	$(PYTHON) -m ruff format src/ tests/

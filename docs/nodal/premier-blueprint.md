@@ -1,3 +1,7 @@
+---
+audience: utilisateur
+---
+
 # Votre premier blueprint
 
 Un quart d'heure, en ligne de commande, sans ouvrir l'atelier. À la fin vous

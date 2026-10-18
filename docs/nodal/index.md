@@ -1,3 +1,7 @@
+---
+audience: utilisateur
+---
+
 # Pourquoi dessiner un flow plutôt que le prompter
 
 Vous savez déjà faire travailler une IA dans votre éditeur. Vous décrivez une

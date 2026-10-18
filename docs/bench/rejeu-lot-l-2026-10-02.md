@@ -1,3 +1,7 @@
+---
+audience: décision
+---
+
 <p align="right"><a href="../../README.md">README</a> · <a href="../../CHANGELOG.md">Changelog</a> · <a href="../index.md">Docs</a></p>
 
 # <img src="../assets/icons/flask.svg" width="32" height="32" alt=""> Rejeu `nu` et `kit-gov` le même jour (lot L) — le coût reste à ≈124 % du nu, la régression `scale-generator` était une contamination du lot J — 2026-10-02

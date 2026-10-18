@@ -1,3 +1,7 @@
+---
+audience: contributeur
+---
+
 <p align="right"><a href="../README.md">README</a> · <a href="../CHANGELOG.md">Changelog</a> · <a href="index.md">Docs</a></p>
 
 # <img src="assets/icons/rocket.svg" width="32" height="32" alt=""> Banc à trois bras
