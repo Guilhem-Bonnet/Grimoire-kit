@@ -1062,10 +1062,14 @@ class _Scripted:
     """Faux ``_launch_child`` : statut, délai et coût par suffixe ; consigne les lancements dans l'ordre."""
 
     def __init__(self, *, waiting: set[str] = frozenset(), delay: dict[str, float] | None = None,  # type: ignore[assignment]
-                 cost: dict[str, float] | None = None) -> None:
+                 cost: dict[str, float] | None = None, others_after_waiting: bool = False) -> None:
         import threading
 
         self.waiting = waiting
+        # Opt-in : les enfants non suspendus ne se terminent qu'après le retour des suspendus,
+        # sans dépendre de l'ordonnancement des threads (macOS) ; les délais fixent le reste.
+        self.others_after_waiting = others_after_waiting
+        self.gate = threading.Event()
         self.delay = delay or {}
         self.cost = cost or {}
         self.lock = threading.Lock()
@@ -1081,6 +1085,12 @@ class _Scripted:
         with self.lock:
             self.launched.append((suffix, threading.current_thread().name))
         time.sleep(self.delay.get(suffix, 0.2))
+        if self.others_after_waiting:
+            if suffix in self.waiting:
+                self.gate.set()
+            else:
+                self.gate.wait(10)
+                time.sleep(0.2)
         return _ChildRun(
             child_run_id=f"f-{suffix}", status="waiting_host" if suffix in self.waiting else "finished",
             cost=Cost.exact(self.cost.get(suffix, 0.01)), faults=(), host_reason=None, attempts=1, escalations=0,
@@ -1103,7 +1113,7 @@ def test_fanout_un_enfant_suspendu_a_l_hote_arrete_les_lancements(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, max_parallel: int
 ) -> None:
     """Comme la boucle séquentielle : aucun lancement après la suspension, hors enfants déjà en vol (W5-04-S1)."""
-    scripted = _Scripted(waiting={"fanout0"}, delay={"fanout0": 0.1})
+    scripted = _Scripted(waiting={"fanout0"}, delay={"fanout0": 0.1}, others_after_waiting=True)
     engine, outcome = _run_scripted(
         tmp_path, monkeypatch, scripted, f"max_fanout_n: 8\nmax_parallel: {max_parallel}\n"
     )
