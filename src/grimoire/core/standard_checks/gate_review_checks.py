@@ -95,7 +95,10 @@ def review_state_content_checks(
     checks.extend(evidence_pack_result.checks)
 
     acceptance_result = StandardVerificationResult(profile=profile.id, project_root=root)
-    _verify_acceptance_record(root, profile, task_id, acceptance_result, suppress_v0=suppress_v0)
+    _verify_acceptance_record(
+        root, profile, task_id, acceptance_result, suppress_v0=suppress_v0,
+        settled=target_state in {"accepted", "released"},
+    )
     checks.extend(acceptance_result.checks)
 
     claim_ledger_result = StandardVerificationResult(profile=profile.id, project_root=root)
