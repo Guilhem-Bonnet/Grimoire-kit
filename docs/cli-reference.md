@@ -474,7 +474,9 @@ le ledger, et un tick qui le lit en premier.
 | `grimoire orchestrate pause [--drain\|--hold] [--project\|--global] [--task <id>...] [--reason ...]` | Pose le drapeau (`drain` par défaut) ; `--global` (toute la machine) est un geste d'humain |
 | `grimoire orchestrate resume [--global] [--task <id>...]` | Lève le drapeau, ou seulement ces tâches ; geste d'humain (l'origine humaine est exigée, comme pour `queue release`) |
 | `grimoire orchestrate status [--json]` | Les drapeaux en vigueur et, pour chaque tâche tenue, ce que `hold` fait sur son hôte (« hold dégradé en drain (hôte sans frein) ») |
-| `grimoire orchestrate tick [--apply] [--json]` | Un tick : lit la pause, puis récolte, rend les attentes levées et calcule l'admission ; sans `--apply`, rien n'est écrit ; sous pause, sort en 0 sans ouvrir le ledger |
+| `grimoire orchestrate tick [--apply\|--plan] [--json]` | Un tick : lit la pause, puis récolte, rend les attentes levées, constate les effets externes et calcule l'admission ; sans `--apply` (ou avec `--plan`), le même tick joué sur une copie du ledger, rien n'est écrit ; sous pause, sort en 0 sans ouvrir le ledger ; un second tick simultané saute, en 0 |
+| `grimoire orchestrate install-timer [--interval 5m] [--no-enable]` | Pose le minuteur optionnel du tick (unité systemd utilisateur `oneshot` et son `.timer`) ; sans systemd, rend la ligne crontab à poser à la main |
+| `grimoire orchestrate uninstall-timer` | Désactive et retire le minuteur du projet |
 
 **Portée.** `_grimoire-output/control/pause.json` porte sur le projet (avec `tasks: [...]`, seulement
 sur ces tâches) ; `$GRIMOIRE_CONTROL_HOME/pause.json` (par défaut `~/.grimoire/control/pause.json`) porte
@@ -503,6 +505,35 @@ Limites écrites : un outil MCP tiers n'est pas classé mutant par le kit (seuls
 du kit le sont pour le frein) ; la pause ne reprend pas un effet distant déjà parti ; le bail d'une tâche garée reste tenu
 jusqu'au réveil par le tick (K6) ; le frein ne juge pas une session qui ne tient aucune tâche ; un run de flow n'est pas
 refusé au démarrage sous `hold`.
+
+## Le tick : idempotent, rejouable, et son minuteur
+
+Le lot K12 de l'épopée #705 rend le tick sûr à relancer, à interrompre et à prévisualiser.
+
+- **Un seul tick à la fois.** `_grimoire-output/control/.tick.lock` (verrou `fsio`, sans attente) : un second tick
+  qui le trouve pris saute, code 0. Un tick tué rend le verrou avec son processus ; le suivant reprend, et chaque
+  étape relit le ledger sans réécrire ce qui y est déjà (récolte à barrière, différée unique, réveil rejoué).
+- **Le plan est l'application.** `orchestrate tick --plan` (le défaut sans `--apply`) joue le tick appliqué sur une
+  copie du ledger sous `_grimoire-output/control/tick-plan-*`, jamais sous `/tmp`, puis la retire : mêmes récoltes,
+  mêmes réveils, et une admission qui voit les tâches que ces gestes rendent. Ni board, ni mémoire, ni dispatch ne bougent.
+- **Le travail local n'est pas rendu.** Un bail perdu dont le worktree `task/<id>` porte des commits absents de toute
+  branche distante, un arbre modifié ou un état git illisible passe en `waiting(human, resume_branch)` avec la question,
+  au lieu de `ready`. Un worktree de tâche n'est jamais créé sous le dossier temporaire du système.
+- **Effets externes réconciliés.** Un push ou une PR passe par `effect.intended` puis `effect.observed` ; une intention
+  sans constat est vérifiée sur la remote (`git ls-remote`, `gh pr list --head`) avant tout nouvel essai : présent,
+  constaté sans être refait ; absent, fait une fois ; invérifiable, rien n'est fait. Le tick constate, il ne refait pas.
+- **Journal tronqué.** Une dernière ligne coupée par une coupure de courant est ignorée au rejeu, l'ajout suivant ne s'y
+  colle plus, et le tick l'affiche en attention.
+- **Minuteur optionnel, désactivé par défaut.** `install-timer` écrit `grimoire-tick-<nom>-<empreinte>.service` et `.timer`
+  sous `$XDG_CONFIG_HOME/systemd/user`, puis `systemctl --user enable --now` (sauf `--no-enable`). `orchestrate status`
+  dit s'il est posé. Sans minuteur, après une coupure ou un forfait épuisé, rien ne reprend avant la prochaine session
+  ou commande.
+
+Limites écrites : sans `loginctl enable-linger`, un minuteur utilisateur ne tourne pas tant que l'utilisateur ne s'est pas
+reconnecté après un redémarrage (non vérifié sur un poste) ; le banc de coupure (`pytest -m crash_bench`, scénarios A à H)
+simule les points de coupure, il ne tue aucun processus ; un backoff se compte depuis l'horodatage d'écriture de la récolte,
+si bien que plan et application diffèrent de quelques millisecondes sur cette date ; aucun job du kit n'appelle encore
+`effects.perform` (la primitive et la réconciliation du tick existent, le push et la PR restent à brancher).
 
 ## Besoins d'exécution : un flow déclare, le projet résout
 

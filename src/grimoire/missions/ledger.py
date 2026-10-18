@@ -44,6 +44,7 @@ from grimoire.missions.lease import (
 from grimoire.missions.ledger_rules import (
     blocks_path,
     deferred_waiting,
+    read_jsonl,
     replay_steering,
     unclosed_blockers,
     unfenced_question,
@@ -323,6 +324,8 @@ class MissionLedger:
         self._rejected: dict[str, str] = {}
         #: K2 : clés ``idem = (task_id, lease_epoch, step)`` des effets déjà appliqués.
         self._idem_seen: set[str] = set()
+        #: K12 : lignes du journal illisibles au dernier rejeu (tronquées par une coupure), ignorées et rendues.
+        self._unreadable: tuple[int, ...] = ()
         #: K10 : refus de claim posé par l'appelant (WIP), évalué sous le verrou ; ``""`` = accordé.
         self.claim_guard: Callable[[Mapping[str, MissionTask], MissionTask], str] | None = None
         self._loaded = False
@@ -337,16 +340,8 @@ class MissionLedger:
         self._loaded = True
 
     def _replay_events(self) -> None:
-        if not self._events_path.exists():
-            return
-        for line in self._events_path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                raw = json.loads(line)
-            except json.JSONDecodeError:
-                continue
+        records, self._unreadable = read_jsonl(self._events_path)
+        for raw in records:
             evt_type = raw.get("event_type", "")
             payload = raw.get("payload", {})
             if evt_type == "mission.created":
@@ -480,16 +475,7 @@ class MissionLedger:
         return ""
 
     def _replay_incidents(self) -> None:
-        if not self._incidents_path.exists():
-            return
-        for line in self._incidents_path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                raw = json.loads(line)
-            except json.JSONDecodeError:
-                continue
+        for raw in read_jsonl(self._incidents_path)[0]:
             inc = Incident.from_dict(raw)
             self._incidents[inc.id] = inc
 
@@ -501,7 +487,13 @@ class MissionLedger:
         self._epoch_high = {}
         self._rejected = {}
         self._idem_seen = set()
+        self._unreadable = ()
         self._loaded = False
+
+    def unreadable_lines(self) -> tuple[int, ...]:
+        """Les lignes du journal ignorées au rejeu (tronquées ou corrompues), numérotées à partir de 1 (K12)."""
+        self._load()
+        return self._unreadable
 
     def append_event(self, event_type: str, entity_id: str, entity_kind: str, actor_id: str, payload: dict[str, Any]) -> LedgerEvent:
         """Record a custom event on any ledger entity (public API)."""
@@ -551,10 +543,13 @@ class MissionLedger:
         """
         path = _confined_ledger_file(path)
         line = json.dumps(record, ensure_ascii=False) + "\n"
-        existing = path.read_text(encoding="utf-8") if path.exists() else ""
+        # K12 : octets relus tels quels (une fin coupée dans un caractère ne rend pas le journal inécrivable),
+        # et une fin tronquée sans saut de ligne ne colle pas l'événement suivant à sa ligne illisible.
+        existing = path.read_bytes() if path.exists() else b""
+        existing += b"\n" if existing and not existing.endswith(b"\n") else b""
         # K2 (§2.3) : ajout puis ``fsync`` — ``atomic_write`` synchronise le
         # fichier et le dossier avant de rendre la main.
-        atomic_write(path, existing + line)
+        atomic_write(path, existing + line.encode("utf-8"))
 
     def _next_seq(self, prefix: str, id_map: dict[str, Any]) -> str:
         existing = [k for k in id_map if k.startswith(prefix)]
@@ -1116,6 +1111,7 @@ class MissionLedger:
         now: datetime | None = None,
         is_fenced: Callable[[LeaseView], bool] | None = None,
         quota_until: Callable[[MissionTask], datetime | None] | None = None,
+        branch_hold: Callable[[MissionTask], str] | None = None,
     ) -> ReapReport:
         """Récolte des baux perdus — le seul chemin de ``RUNNING → READY``.
 
@@ -1129,6 +1125,7 @@ class MissionLedger:
           posée à l'humain — on ne relance pas de doublon. Le verdict vient de
           *is_fenced* (K3 : la table ``hosts.capabilities``, par hôte *et* par
           version) ; sans lui, de l'appartenance à *fenced_hosts* (primitive de K2) ;
+        - travail local non poussé (*branch_hold* rend sa question, K12) : différée, ``resume_branch`` ;
         - sinon : barrière (fichier de bail à l'epoch suivant, sans titulaire)
           puis ``task.transitioned`` vers ``ready`` marqué ``lease_lost``.
 
@@ -1152,7 +1149,7 @@ class MissionLedger:
             for view in self.expired_claims(moment):
                 task = self._tasks[view.task_id]
                 fenced = is_fenced if is_fenced is not None else (lambda v: v.host in fenced_hosts)
-                decisions.append(self._reap_one(task, view, moment, fenced, is_quota, actor_id, apply, quota_until))
+                decisions.append(self._reap_one(task, view, moment, fenced, is_quota, actor_id, apply, quota_until, branch_hold))
             return ReapReport("ok", tuple(decisions))
 
     def _reap_one(
@@ -1165,9 +1162,10 @@ class MissionLedger:
         actor_id: str,
         apply: bool,
         quota_until: Callable[[MissionTask], datetime | None] | None = None,
+        branch_hold: Callable[[MissionTask], str] | None = None,
     ) -> ReapDecision:
         before = self.attempts(task.id)
-        cause = ""
+        cause = held = ""
         path = lease_path(self._root, task.id)
         cached = read_lease(path)
         pending_reap = view.reason == "fence_pending" and cached is not None and cached.origin == ORIGIN_REAP
@@ -1178,9 +1176,11 @@ class MissionLedger:
                 cause = "retry_exhausted"
             elif not fenced(view):
                 cause = "resume_unfenced"
+            elif branch_hold is not None and (held := branch_hold(task)):
+                cause = "resume_branch"
         if cause:
             written = apply and not self._already_deferred(task.id, view.epoch, cause)
-            question = unfenced_question(view) if cause == "resume_unfenced" else ""
+            question = unfenced_question(view) if cause == "resume_unfenced" else held
             reopens = quota_until(task) if cause == "quota" and quota_until is not None else None
             waiting = deferred_waiting(task, view, cause, before, question, moment, reopens)
             if written:

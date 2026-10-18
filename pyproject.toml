@@ -240,6 +240,7 @@ markers = [
     "integration: marks tests requiring external services (network, Ollama, Qdrant)",
     "regression: marks known regression tests",
     "bench: marks performance benchmark tests",
+    "crash_bench: banc de coupure du tick (K12) — coupures simulées, rapides ; `-m crash_bench` les isole",
 ]
 
 [tool.coverage.run]

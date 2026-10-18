@@ -276,6 +276,9 @@ class TaskService:
         # chaque appel.
         self._memory: MemoryManager | None = memory_manager
         self._memory_resolved = memory_manager is not None
+        #: K12 : faux pour le service du plan à blanc (``orchestrate tick --plan``), qui rejoue le tick sur une
+        #: copie du ledger — ni board ni mémoire du projet ne doivent alors bouger.
+        self.writes_projections = True
 
     @property
     def ledger(self) -> MissionLedger:
@@ -557,22 +560,28 @@ class TaskService:
         self.ledger.note_progress(task_id, text, actor_id=actor)
         return self.require(task_id)
 
-    def reap(self, *, apply: bool = True, actor: str = "tick") -> ReapReport:
+    def reap(self, *, apply: bool = True, actor: str = "tick", now: datetime | None = None) -> ReapReport:
         """Récolte des baux perdus (:meth:`MissionLedger.reap`), quota lu dans l'état des fournisseurs.
 
         K3 (issue #768) : un hôte est fencé selon la table ``hosts.capabilities``
         — par hôte *et* par version, depuis les seules fixtures de K0 — et non plus
         selon une déclaration de l'appelant. Tout autre hôte, ou une version
         inconnue, donne ``resume_unfenced`` : la question est posée, rien n'est relancé.
+
+        K12 : un worktree de tâche en avance sur la remote (commits non poussés, arbre modifié, état
+        illisible) donne ``resume_branch`` — le travail local est à l'humain, pas au prochain repreneur.
         """
         from grimoire.hosts.capabilities import claim_host_is_fenced
+        from grimoire.missions.task_worktree import unpushed_work
 
         report = self.ledger.reap(
             quota_blocked=self._quota_blocked,
             quota_until=self._quota_until,
             actor_id=actor,
             apply=apply,
+            now=now,
             is_fenced=lambda view: claim_host_is_fenced(view.host, view.host_version),
+            branch_hold=lambda task: unpushed_work(self, task.id),
         )
         if any(d.written and d.action == "ready" for d in report.decisions):
             self.project_board()
@@ -1094,7 +1103,7 @@ class TaskService:
         Best-effort : la transition est déjà au ledger, qui est la source ;
         une mémoire indisponible n'y change rien.
         """
-        if target not in (TaskState.CLOSED, TaskState.BLOCKED, TaskState.FAILED):
+        if target not in (TaskState.CLOSED, TaskState.BLOCKED, TaskState.FAILED) or not self.writes_projections:
             return
         # best-effort : la transition est déjà au ledger, qui est la source ;
         # une mémoire indisponible n'y change rien.
@@ -1145,7 +1154,7 @@ class TaskService:
         transition — elle est déjà au ledger, qui est la source — mais il ne
         doit pas non plus passer pour un succès : on rend ``None``.
         """
-        if not (self.home_root / STANDARD_DIR).is_dir():
+        if not self.writes_projections or not (self.home_root / STANDARD_DIR).is_dir():
             return None
         dest = self.home_root / BOARD_RELPATH
         try:
