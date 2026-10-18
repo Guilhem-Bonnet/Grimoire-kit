@@ -1119,6 +1119,7 @@ def run_dispatch(
     replay_key: str | None = None,
     max_cost_usd: float | None = None,
     cost_unknown_policy: str = POLICY_STOP,
+    check_runner: Any = None,  # W3-03 : `CheckGate.run` (approbation par empreinte)
 ) -> DispatchReport:
     """Cascade la tâche *task_id* à travers les paliers de fournisseurs.
 
@@ -1317,12 +1318,9 @@ def run_dispatch(
                 continue  # fournisseur suivant, même palier
 
             record_success(root, provider.id, model)
-            check_results = _run_checks(
-                checks,
-                project_root=root,
-                expect_exits=check_expect_exits,
-                expect_stdout_contains=check_expect_stdout_contains,
-                timeouts=check_timeouts,
+            check_results = (check_runner or _run_checks)(
+                checks, project_root=root, expect_exits=check_expect_exits,
+                expect_stdout_contains=check_expect_stdout_contains, timeouts=check_timeouts,
             )
             # Un check « inexécutable » (issue #428) prime sur tout le reste :
             # aucun verdict n'a pu être rendu, donc ni vert ni même un rouge

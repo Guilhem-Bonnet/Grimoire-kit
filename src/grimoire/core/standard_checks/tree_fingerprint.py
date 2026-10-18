@@ -54,6 +54,7 @@ __all__ = ["compute_tree_fingerprint"]
 #: installées, artefacts de build, métadonnées VCS).
 _EXCLUDED_DIRS = frozenset({
     "_grimoire-output",
+    "_grimoire-runtime-output",
     ".venv",
     "node_modules",
     "target",

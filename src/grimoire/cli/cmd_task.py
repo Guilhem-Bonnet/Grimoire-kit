@@ -1191,7 +1191,7 @@ def task_verify(
     sortie inattendu, délai, commande inexécutable), 2 si la tâche ne déclare
     aucune commande : jamais un vert à vide.
     """
-    from grimoire.missions.verify import NoDeclaredChecksError, verify_task
+    from grimoire.missions.verify import NoDeclaredChecksError, UnapprovedChecksError, verify_task
 
     root = project_root.resolve()
     service = _service(project_root, ledger_root)
@@ -1202,11 +1202,30 @@ def task_verify(
     except NoDeclaredChecksError as exc:
         console.print(f"[red]✗[/red] {exc}")
         raise typer.Exit(2) from exc
+    except UnapprovedChecksError as exc:
+        # W3-03 : rien n'a été lancé. Le détail dit quoi lire avant d'approuver.
+        if _fmt(ctx) == "json":
+            rows = [{"index": b.index, "command_sha256": b.command_sha256, "reason": b.reason} for b in exc.blocked]
+            typer.echo(json.dumps({"status": "unapproved", "task_id": task_id, "unapproved": rows}, indent=2))
+        else:
+            console.print(f"[red]✗[/red] unapproved — {exc}")
+            for b in exc.blocked:
+                console.print(f"  - {escape(b.display)}  [dim]sha256 {b.command_sha256[:12]} : {b.reason}[/dim]")
+            console.print(f"[dim]Lis ces commandes, puis `grimoire task approve-check {task_id}`.[/dim]")
+        raise typer.Exit(3) from exc
 
     if _fmt(ctx) == "json":
         typer.echo(
             json.dumps(
-                {"pack": outcome.pack.to_dict(), "verdict": outcome.verdict.to_dict()}, indent=2, ensure_ascii=False
+                {
+                    "pack": outcome.pack.to_dict(),
+                    "verdict": outcome.verdict.to_dict(),
+                    "receipts": [
+                        {k: r[k] for k in ("command_sha256", "tree_fingerprint", "exit", "reused")} for r in outcome.receipts
+                    ],
+                },
+                indent=2,
+                ensure_ascii=False,
             )
         )
     else:
@@ -1496,3 +1515,8 @@ _register_waiting(task_app)
 from grimoire.cli.cmd_task_worktree import register_worktree_commands  # noqa: E402
 
 register_worktree_commands(task_app)
+
+# W3-03 : `task approve-check`, dans son module (plafond de taille d'un module).
+from grimoire.cli.cmd_task_approve import register_approve_commands  # noqa: E402
+
+register_approve_commands(task_app)
