@@ -38,6 +38,10 @@ lint-fix: ## Run ruff linter with auto-fix
 ratchet: ## Code-size ratchet (framework frozen, src oversize guard)
 	$(PYTHON) scripts/check-code-ratchet.py
 
+.PHONY: surface-coverage
+surface-coverage: ## Surface coverage registry guards (add BASE=origin/main for the ratchet)
+	$(PYTHON) scripts/check-surface-coverage.py --check $(if $(BASE),--base $(BASE),)
+
 .PHONY: format
 format: ## Run ruff formatter
 	$(PYTHON) -m ruff format src/ tests/

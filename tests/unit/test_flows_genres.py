@@ -31,6 +31,16 @@ from grimoire.flows.engine import FlowEngine
 from grimoire.flows.executor import InteractiveNodeExecutor
 from grimoire.flows.extract import extract_blueprint
 
+pytestmark = pytest.mark.covers(
+    "genre:budget",
+    "genre:checkpoint",
+    "genre:fanout",
+    "genre:judge",
+    "genre:loop-until-dry",
+    "genre:replay-diff",
+    "genre:verify-panel",
+)
+
 # Commande d'acceptation « qui réussit », valable sous sh comme sous cmd.exe
 # (`true` n'existe pas sous Windows, où `shell=True` lance cmd.exe).
 _TRUE = f'"{sys.executable}" -c pass'

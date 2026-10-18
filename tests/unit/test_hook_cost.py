@@ -40,6 +40,17 @@ import pytest
 
 from grimoire.hosts.emitters.base import Emitter
 
+pytestmark = pytest.mark.covers(
+    "hook:activation",
+    "hook:context-capsule",
+    "hook:evidence-gate",
+    "hook:evidence-trace",
+    "hook:subagent-gate",
+    "hook:task-context",
+    "hook:tool-policy",
+    level="real",
+)
+
 #: Modules a hook decision must never pull at import time. Each one is a heavy
 #: subtree that only the closure path (or a specific decision) needs, loaded
 #: lazily where it is used.
