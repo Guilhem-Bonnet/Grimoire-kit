@@ -496,3 +496,14 @@ def test_cli_without_a_report_md_next_to_the_json_does_not_fail(tmp_path: Path) 
     verdict = _verdict(results, report)
     assert verdict["markdown"]["status"] == "non vérifié"
     assert rc.main(["--results", str(results), "--report", str(report)]) == 0
+
+
+def test_markdown_of_an_earlier_schema_is_not_compared_to_the_current_rendering(tmp_path: Path) -> None:
+    """Le rendu actuel a des sections que l'ancien report.md n'avait pas : « non vérifié », jamais un faux écart."""
+    results, report = _campaign(tmp_path)
+    _old_schema(report)
+    report.with_name("report.md").write_text("# ancien rendu\n", encoding="utf-8")
+    verdict = _md_verdict(results, report)
+    assert verdict["markdown"]["status"] == "non vérifié"
+    assert verdict["ok"] is True
+    assert "schéma antérieur" in "\n".join(rc.render_verdict_lines(verdict))

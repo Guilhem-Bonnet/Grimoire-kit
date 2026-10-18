@@ -261,7 +261,11 @@ def recompute_report(
         mismatches.extend(_differences(published.get(key), rebuilt.get(key), key, unpublished))
 
     markdown: dict[str, Any] = {"status": "non vérifié", "differences": []}
-    if report_md_path is not None:
+    if report_md_path is not None and unpublished:
+        # Le rendu actuel ajoute des sections que le report.md d'un schéma antérieur ne pouvait pas avoir :
+        # les comparer donnerait un écart qui n'en est pas un. Dit, pas déduit.
+        markdown = {"status": "non vérifié", "reason": "rapport d'un schéma antérieur", "differences": []}
+    elif report_md_path is not None:
         inputs = {key: published[key] for key in INPUT_KEYS if key in published}
         rendered = ta.render_report_markdown({**rebuilt, **inputs, "data": seal} if seal else {**rebuilt, **inputs})
         md_diffs = markdown_differences(report_md_path.read_text(encoding="utf-8"), rendered)
@@ -329,7 +333,8 @@ def render_verdict_lines(verdict: dict[str, Any]) -> list[str]:
         lines.append(f"NON PUBLIÉS (schéma antérieur, pas un écart) : {len(verdict['unpublished'])} champ(s) : {shown}{more}.")
     md = verdict["markdown"]
     if md["status"] == "non vérifié":
-        lines.append("MARKDOWN : NON VÉRIFIÉ (aucun report.md).")
+        reason = md.get("reason") or "aucun report.md"
+        lines.append(f"MARKDOWN : NON VÉRIFIÉ ({reason}).")
     else:
         lines.append("MARKDOWN : " + ("OK, report.md identique au rendu recalculé." if md["status"] == "ok" else "ÉCART."))
         for diff in md["differences"][:20]:

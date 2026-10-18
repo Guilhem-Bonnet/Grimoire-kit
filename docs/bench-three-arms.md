@@ -510,7 +510,7 @@ la suite peut détecter, donc « pas de différence » pouvait se lire « équiv
 `tests/unit/test_bench_recompute.py`, `tests/unit/test_evals_aggregate.py`.
 
 ```bash
-python scripts/bench/recompute.py --results <workspace>/state/results.jsonl --report <rapport>/report.json [--mde 0.10] [--arms nu,kit-gov] [--require-seal]
+python scripts/bench/recompute.py --results <workspace>/state/results.jsonl --report <rapport>/report.json [--mde 0.10] [--arms nu,kit-gov] [--require-seal] [--report-md <report.md>]
 python scripts/bench/power_calc.py --mde 0.10 --tasks 20
 ```
 
@@ -521,6 +521,15 @@ python scripts/bench/power_calc.py --mde 0.10 --tasks 20
 - **Hash des données** : `write_report` (campagne et `--report-only`) écrit dans `report.json` un bloc `data` (`results_file`, `results_rows`, `results_sha256`, sha256
   des octets de `results.jsonl`) et le cite dans `report.md`. `recompute` compare : fichier modifié depuis = `mismatch`, sortie 1. Un rapport antérieur à B-02 est « NON SCELLÉ » :
   ses chiffres se recalculent, mais rien ne prouve que le fichier est celui d'origine ; `--require-seal` en fait une erreur (à utiliser à la barrière 3).
+- **Ce que le sceau couvre** : `write_report` ne cite un hash que si `results.jsonl` contient exactement les lignes que le rapport agrège (mêmes clés tâche/bras/rejeu). Un pilote
+  suivi de `--full` sans `--resume`, ou `--full --arms kit` sur un fichier qui contient déjà `nu`/`ecc`, laisse des lignes que le rapport n'a pas comptées : le bloc `data` porte alors
+  `sealed: false`, `report_rows` et la raison, sans hash, et `report.md` écrit « NON SCELLÉ ». `recompute` rend « NON SCELLÉ (rien n'a été recalculé) » (sortie 0, 1 avec `--require-seal`) : il ne
+  peut pas refaire ce rapport depuis ce fichier, et le dit au lieu d'annoncer un hash « ok » suivi d'écarts.
+- **Schéma antérieur** : un champ absent du rapport publié, ou publié à `null` quand le recalcul en donne une valeur (`cost_known_*`, `n_invalid`, `suite_saturation`,
+  `nu_baseline_pass_rate`...), n'est pas un écart : il est listé sous « NON PUBLIÉS ». Une valeur publiée non nulle qui diffère reste REFUSÉE. Limite : un champ mis à `null` à la main n'est pas non plus un écart.
+- **`report.md`** : régénéré par `render_report_markdown` depuis le rapport recalculé (entrées et `data` repris du rapport publié) puis comparé ligne à ligne ; tout écart donne REFUSÉ, les lignes
+  fautives sont listées. Par défaut `report.md` à côté de `report.json` (s'il existe) ; `--report-md` en désigne un autre. Un rapport d'un schéma antérieur n'est pas comparé (le rendu actuel a des sections que
+  son Markdown n'avait pas) : « NON VÉRIFIÉ », dit.
 - **Clés dupliquées** : deux lignes pour la même (tâche, bras, rejeu) sont refusées. Le rapport les compterait deux fois et le recalcul aussi, donc aucun écart ne le trahirait.
 - **`cost_known_ratio`** : repris par bras dans le verdict (déjà dans `report.json` depuis B-00). Dans `evals/aggregate.py`, `summarize` publie maintenant
   `cost_known_runs`, `cost_known_ratio` et `cost_is_lower_bound`, `cost_total` vaut `null` (et non 0.0) sans aucun coût connu, et le critère de coût du verdict A1 rend
