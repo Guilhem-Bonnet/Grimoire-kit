@@ -19,7 +19,7 @@ import json
 import logging
 import re
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
@@ -153,6 +153,8 @@ _FAILED_DISPATCH = frozenset({"red", "timeout", "error"})
 _HELD = (TaskState.CLAIMED, TaskState.RUNNING)
 #: Les états où le claim est encore à son titulaire : tenu, ou garé en attente (K6, reprise sur place).
 _HOLDING = (*_HELD, TaskState.WAITING)
+#: États qui ne tiennent pas de place de WIP et peuvent rentrer en ``running`` : la reprise repasse par la garde (K10).
+_RESUMING = (TaskState.WAITING, TaskState.NEEDS_VERIFICATION)
 #: Origine d'une barrière du fichier de bail (K2-S2-02) : voir :class:`LeaseFile`.
 ORIGIN_REAP = "reap"
 
@@ -321,6 +323,8 @@ class MissionLedger:
         self._rejected: dict[str, str] = {}
         #: K2 : clés ``idem = (task_id, lease_epoch, step)`` des effets déjà appliqués.
         self._idem_seen: set[str] = set()
+        #: K10 : refus de claim posé par l'appelant (WIP), évalué sous le verrou ; ``""`` = accordé.
+        self.claim_guard: Callable[[Mapping[str, MissionTask], MissionTask], str] | None = None
         self._loaded = False
 
     # ── Private helpers ────────────────────────────────────────────────────
@@ -752,6 +756,10 @@ class MissionLedger:
                     f"Claim refusé pour {task_id} : dépend de {'; '.join(waiting)} — "
                     "une tâche ne se réclame que lorsque ses dépendances `blocks` sont closes"
                 )
+            if self.claim_guard is not None and (limit := self.claim_guard(self._tasks, task)):
+                raise GrimoireMissionError(f"Claim refusé pour {task_id} : {limit}")
+        elif to_state is TaskState.RUNNING and task.status in _RESUMING and self.claim_guard is not None and (limit := self.claim_guard(self._tasks, task)):
+            raise GrimoireMissionError(f"Reprise refusée pour {task_id} : {limit} — elle attend une place, la tâche reste {task.status.value}")
         if expected_from is not None and task.status is not expected_from:
             raise GrimoireMissionError(
                 f"Transition refusée pour {task_id} : l'état a changé entre-temps "
