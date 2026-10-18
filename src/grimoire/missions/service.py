@@ -28,6 +28,17 @@ from typing import TYPE_CHECKING, Any
 from grimoire.core.exceptions import GrimoireError, GrimoireMissionError
 from grimoire.core.standard_generation import STANDARD_DIR
 from grimoire.core.standard_state import current_session, invalidate_cache
+from grimoire.missions.admission import (
+    QueuePlan,
+    RouteRef,
+    build_plan,
+    load_capacity,
+    queue_order,
+    read_host,
+    ready_since,
+    release_capacity,
+    wip_claim_guard,
+)
 from grimoire.missions.board import PRIORITIES, board_status_of, build_board, priority_of, write_board
 from grimoire.missions.gates import GateRefusal, GateVerdict, check_transition
 from grimoire.missions.intake import IntakeRequest, MissionIntakeService
@@ -258,6 +269,7 @@ class TaskService:
     def ledger(self) -> MissionLedger:
         if self._ledger is None:
             self._ledger = MissionLedger(self.ledger_root)
+            self._ledger.claim_guard = wip_claim_guard(self.home_root)  # K10 : WIP global et par rôle, sous le verrou
         return self._ledger
 
     @property
@@ -306,8 +318,52 @@ class TaskService:
         return sorted(tasks, key=attention_rank)
 
     def list_ready(self, mission_id: str | None = None) -> list[MissionTask]:
-        """Les tâches qu'un agent peut réclamer maintenant."""
-        return self.list_tasks(mission_id, TaskState.READY.value)
+        """Les tâches qu'un agent peut réclamer, dans l'ordre de la file (K10) : priorité, vieillissement, ancienneté."""
+        ready = self.list_tasks(mission_id, TaskState.READY.value)
+        capacity = load_capacity(self.home_root)
+        since = ready_since(self.ledger)
+        return [e.task for e in queue_order(ready, since, now=datetime.now(UTC), aging_hours=capacity.aging_hours)]
+
+    def queue_plan(
+        self,
+        *,
+        now: datetime | None = None,
+        autonomous: bool | None = None,
+        probe_host: bool = True,
+        routes: bool = True,
+        paused: bool = False,
+    ) -> QueuePlan:
+        """Ce que l'admission déciderait maintenant, sans rien écrire (``grimoire queue plan``, K10).
+
+        La sonde de l'hôte ne tourne que si le pool ``host`` est déclaré. Les routes viennent du
+        routeur (K9), sans événement ``task.routed`` : l'admission les lit, ne les change pas.
+        """
+        capacity = load_capacity(self.home_root)
+        host = read_host() if probe_host and capacity.host is not None else None
+        unattended = os.environ.get("GRIMOIRE_UNATTENDED", "").strip() == "1" if autonomous is None else autonomous
+        return build_plan(
+            self.ledger, capacity, now=now or datetime.now(UTC), host=host,
+            route_of=self._route_ref if routes else None, paused=paused, autonomous=unattended,
+        )
+
+    def _route_ref(self, task: MissionTask) -> RouteRef:
+        from grimoire.missions.route_dispatch import record_route
+        from grimoire.missions.verifiability import classify
+
+        routing = record_route(self, task, classify(task, commands_declared=bool(task.checks)), actor="queue", write=False)
+        decision = routing.decision
+        if routing.policy_invalid or decision is None:
+            return RouteRef("refuse")
+        if routing.mode == "active" and decision.outcome == "defer":
+            return RouteRef("defer", defer_until=decision.defer_until or "")
+        if decision.outcome != "route":
+            return RouteRef("session")
+        return RouteRef("route", decision.provider or "", decision.model or "")
+
+    def release_capacity(self, task_id: str, pool: str, actor: str, reason: str = "") -> None:
+        """Un humain rend le créneau *pool* d'une tâche dont la fin des checks n'est pas observable (``capacity.released``)."""
+        self.require(task_id)
+        release_capacity(self.ledger, task_id, pool, actor=actor, reason=reason)
 
     def gate(self, task: MissionTask, target: TaskState) -> GateVerdict:
         """Le verdict du gate pour cette transition, sans rien écrire."""

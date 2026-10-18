@@ -402,6 +402,63 @@ closes, chacune avec ses résultats enregistrés par modèle
 et coût connu <= celui de la base. Un coût inconnu, un résultat manquant ou
 moins de 20 tâches rendent « non mesuré » : on n'active pas.
 
+## La file et l'admission : des réservoirs déclarés, jamais devinés
+
+`task_list_ready` rendait les tâches dans l'ordre du ledger, rien ne bornait la
+concurrence au claim et aucune sonde de ressource n'existait. Le lot K10 de
+l'épopée #705 ajoute une file triée et une admission pure (aucun appel de LLM,
+aucun démon) ; le routeur ne lit pas ce module, le quota relève de l'admission seule.
+
+| Commande | Description |
+| --- | --- |
+| `grimoire queue plan [--json] [--no-routes]` | Ce que l'admission déciderait maintenant, à blanc : l'ordre de la file, les tâches admises, et pour chaque `Defer` sa raison ; sortie 1 si la capacité déclarée est illisible, 2 si une tâche est en famine |
+| `grimoire queue release <tâche> [--pool ci] [--reason ...]` | Libère un créneau CI dont la fin des checks n'est pas observable (`capacity.released`) ; geste d'humain, l'origine humaine est exigée comme pour `task comment` |
+
+**File** : priorité, puis vieillissement (+1 cran toutes les 24 h passées à l'état `ready`,
+plafonné à `critical`), puis ancienneté. `TaskService.list_ready` et l'outil MCP `task_list_ready` rendent cet ordre.
+Une tâche dont une dépendance `blocks` n'est pas close, ou dont le backoff de réadmission n'est
+pas échu, reste `ready` mais sort de la file du plan (`hors file`).
+
+**Admission** : `Admit`, ou `Defer(raison)` avec la date de reprise ou `unknown`. Toutes les
+gardes échouent fermées. Ordre : pause, route différée par le routeur, WIP, `ci`, `host`, `llm`, quota.
+Le **WIP** global et par rôle (rôle = `owner` de la tâche) vient de `capacity.yaml`, sinon de
+`orchestration-policy.yaml` (`wip.limit_global`, `wip.limit_per_role`) ; il est appliqué **au claim**,
+sous le verrou du ledger. Une limite illisible refuse le claim. Sans limite déclarée, rien n'est refusé.
+Seules les tâches `claimed` et `running` comptent : un bail perdu occupe son créneau jusqu'à `task reap`.
+
+**Capacité** : `_grimoire/standard/capacity.yaml` (facultatif, `version: 1`). Un pool non
+déclaré n'est pas sondé ; une section invalide refuse la garde qu'elle porte, les autres continuent.
+
+```yaml
+version: 1
+quota:
+  tokens_per_day: unlimited   # défaut ; ou un entier > 0. 0 et les valeurs illisibles sont refusés, jamais lus comme « illimité »
+pools:
+  ci:
+    runners: 3                # défaut 3 ; analysis et architecture ne prennent pas de créneau (exempt_types)
+  host:                       # facultatif : lu dans /proc ; hors Linux ou illisible, Defer(unknown)
+    max_load_per_cpu: 1.5
+    min_mem_available_mb: 2048
+  llm:
+    claude: {sessions: 2}     # sessions concurrentes par fournisseur, d'après la route du dernier task.routed
+wip: {limit_global: 5, limit_per_role: 2}
+queue: {aging_hours: 24, famine_hours: 24}
+```
+
+**Occupation** : dérivée du ledger à chaque appel, aucun compteur ni fichier `held/`. Un créneau
+`ci` est pris par une tâche qui détient un claim (type non exempté) ou dont un push est observé
+(`task.ci_pushed`), jusqu'à `task.ci_finished` ou `capacity.released`. Si la fin des checks
+n'est pas observable, le créneau reste pris et visible dans `queue plan` jusqu'à `queue release`.
+
+**Quota** : `unlimited` est la valeur par défaut, acceptée par la configuration : le kit ne pose
+alors jamais `Defer(quota)`, seul un refus du fournisseur le peut. Fini, le jour (UTC) est atteint
+à la consommation connue, un minimum lu dans `quota.consumed` ; la décision porte la route du
+routeur, inchangée. Si des appels ont eu lieu aujourd'hui sans chiffre de tokens, la consommation
+est `unknown` : refusée en autonome (`GRIMOIRE_UNATTENDED=1`), affichée en interactif.
+
+**Famine** : une tâche différée depuis plus de 24 h (`queue.famine_hours`) monte au niveau 2
+d'attention, sa raison est affichée.
+
 ## Besoins d'exécution : un flow déclare, le projet résout
 
 Un node de flow ne référence pas `pytest` ni `npm test` en dur : son
