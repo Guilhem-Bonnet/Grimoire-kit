@@ -58,6 +58,7 @@ const scope = { mode: 'project', state: '', slug: '', live: false };
 // Colonnes du standard, dans l'ordre normatif (grimoire.missions.board.BOARD_LIFECYCLE).
 const LIFECYCLE = ['proposed', 'ready', 'in_progress', 'blocked', 'review', 'accepted', 'released', 'archived'];
 import { icon, stateIcon } from '../shell.js';
+import { agoText, costText, durationText } from '../live.js';
 
 const COLUMN_LABEL = {
   proposed: 'Proposée', ready: 'Prête', in_progress: 'En cours', blocked: 'Bloquée',
@@ -152,6 +153,8 @@ function injectStyles() {
     .ex-card-meta { font-size: var(--t-s); color: var(--ink2); display: flex; align-items: center; gap: 6px; }
     .ex-card-chips { display: flex; flex-wrap: wrap; gap: 4px; }
     .ex-card-next { font-size: var(--t-s); color: var(--ink2); display: flex; justify-content: space-between; align-items: center; gap: 6px; border-top: 1px solid var(--line); padding-top: 6px; }
+    .ex-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; font-size: var(--t-min); }
+    .ex-cost { font-size: var(--t-min); }
     .ex-list-wrap { overflow: auto; border: 1px solid var(--line); border-radius: var(--r); }
     .ex-list { width: 100%; border-collapse: collapse; font-size: var(--t-s); }
     .ex-list th { text-align: left; font-size: var(--t-min); color: var(--ink3); font-weight: 500; padding: 8px var(--sp-3); border-bottom: 1px solid var(--line); background: var(--bar); }
@@ -276,6 +279,57 @@ function portfolioRow(task) {
   return line;
 }
 
+// Dernier signe de vie, durée et coût d'une session / d'une carte (UI-3). Le
+// temps relatif est un <time data-since> : le minuteur de la coque le tient à
+// jour entre deux sondages. Un coût que personne n'a mesuré se lit « inconnu »,
+// jamais « 0 » (W1-01) ; la portée du chiffre (dispatch) est écrite, parce que
+// le coût de la session hôte n'est mesuré nulle part.
+function sinceNode(iso) {
+  const node = document.createElement('time');
+  node.dateTime = iso;
+  node.dataset.since = iso;
+  node.title = iso;
+  node.textContent = agoText(Date.now() - Date.parse(iso));
+  return node;
+}
+
+function liveRow(session, { withState = true } = {}) {
+  const line = document.createElement('div');
+  line.className = 'ex-facts lbl';
+  line.dataset.role = 'live-facts';
+  if (withState) line.append(row(dot(livenessDot(session)), text('span', null, `session ${livenessLabel(session)}`)));
+  if (session.updated_at && !Number.isNaN(Date.parse(session.updated_at))) {
+    const sign = text('span', null, 'signe ');
+    sign.append(sinceNode(session.updated_at));
+    line.append(sign);
+  } else {
+    line.append(text('span', null, 'aucun signe de vie lu'));
+  }
+  line.append(text('span', null, `durée ${durationText(session.duration_s)}`));
+  return line;
+}
+
+// Un coût d'étape non démarrée (proposée, prête, annulée) n'a rien à dire : la
+// ligne « coût inconnu » sur chaque carte du backlog serait du bruit. Dès qu'un
+// dispatch existe, ou que le travail a commencé, la ligne est toujours là.
+const COST_QUIET = new Set(['proposed', 'ready', 'cancelled']);
+function costLabel(cost) {
+  const unpriced = cost && cost.unpriced_calls ? `, ${cost.unpriced_calls} non chiffré(s)` : '';
+  const text_ = costText(cost);
+  if (text_ === 'inconnu') return unpriced ? `coût inconnu${unpriced}` : 'coût inconnu';
+  return `coût ${text_} (dispatch${unpriced})`;
+}
+function costRow(task) {
+  if (COST_QUIET.has(task.status) && !(task.cost && task.cost.calls)) return null;
+  const line = text('div', 'ex-cost lbl', costLabel(task.cost));
+  line.dataset.role = 'cost';
+  line.dataset.costStatus = (task.cost && task.cost.status) || 'unknown';
+  line.title = task.cost && task.cost.calls
+    ? `${task.cost.calls} tentative(s) de dispatch. Le coût de la session hôte n'est pas mesuré.`
+    : "Aucun dispatch : le kit n'a rien mesuré. Le coût de la session hôte n'est pas mesuré non plus.";
+  return line;
+}
+
 function taskCard(task, onSelect, portfolio = false) {
   const card = document.createElement('div');
   card.className = 'ex-card';
@@ -324,6 +378,11 @@ function taskCard(task, onSelect, portfolio = false) {
   // viennent du claim, posés par le hook UserPromptSubmit de la session —
   // absents tant qu'aucune session d'hôte n'a travaillé sous ce claim.
   if (task.session_id) card.append(sessionLine(task));
+  // UI-3 : vivacité, dernier signe, durée — en portefeuille l'état est déjà dans
+  // la ligne projet (portfolioRow), on n'y ajoute que signe et durée.
+  if (task.session && task.session.id) card.append(liveRow(task.session, { withState: !portfolio }));
+  const cost = costRow(task);
+  if (cost) card.append(cost);
 
   const next = nextColumn(task.board);
   const nextRow = document.createElement('div');
@@ -388,8 +447,8 @@ function renderList(root, ctx, tasks, onSelect, portfolio = false) {
   const thead = document.createElement('thead');
   const headRow = document.createElement('tr');
   const columns = portfolio
-    ? ['Projet', 'Tâche', 'État', 'Session', 'Priorité', 'Owner', 'Prochaine porte']
-    : ['Tâche', 'État', 'Priorité', 'Owner', 'Session', 'Preuves', 'Prochaine porte'];
+    ? ['Projet', 'Tâche', 'État', 'Session', 'Priorité', 'Owner', 'Coût', 'Prochaine porte']
+    : ['Tâche', 'État', 'Priorité', 'Owner', 'Session', 'Preuves', 'Coût', 'Prochaine porte'];
   for (const label of columns) headRow.append(text('th', null, label));
   thead.append(headRow);
   table.append(thead);
@@ -439,6 +498,8 @@ function renderList(root, ctx, tasks, onSelect, portfolio = false) {
       if (!(task.expected_evidence || []).length) evCell.append(text('span', 'lbl', '—'));
       tr.append(evCell);
     }
+    // Coût : « inconnu » reste lisible, et une tâche jamais démarrée garde un tiret.
+    tr.append(text('td', 'lbl', costRow(task) ? costLabel(task.cost).replace(/^coût /, '') : '—'));
     const next = nextColumn(task.board);
     tr.append(text('td', 'lbl', next ? `→ ${COLUMN_LABEL[next]}` : '—'));
     tbody.append(tr);
@@ -675,7 +736,7 @@ function livenessDot(session) {
 
 // « Reprendre la session » (#638) : copie la commande sur l'hôte Claude Code,
 // affiche l'identifiant ailleurs — jamais d'exécution depuis la webview.
-function sessionBlock(session) {
+function sessionBlock(session, { resume = true } = {}) {
   const block = document.createElement('div');
   block.className = 'ex-insp-block ex-session';
   block.append(text('h4', null, 'Session'));
@@ -684,8 +745,18 @@ function sessionBlock(session) {
     text('span', null, `${livenessLabel(session)} · ${session.id}` + (session.host ? ` · ${session.host}` : '')),
   ));
   if (session.attention) block.append(text('div', 'lbl', `attention : ${session.attention.reason}`));
-  if (session.updated_at) block.append(text('div', 'lbl', `dernier signe : ${session.updated_at}`));
+  if (session.updated_at && !Number.isNaN(Date.parse(session.updated_at))) {
+    const sign = text('div', 'lbl', 'dernier signe de vie : ');
+    sign.dataset.role = 'last-sign';
+    sign.append(sinceNode(session.updated_at));
+    block.append(sign);
+  } else {
+    block.append(text('div', 'lbl', 'aucun signe de vie lu'));
+  }
+  block.append(text('div', 'lbl', `durée : ${durationText(session.duration_s)}` + (session.duration_s == null ? '' : ' (du premier au dernier signe de vie)')));
+  block.append(text('div', 'lbl', `coût de la session : ${costText(session.cost)}` + (costText(session.cost) === 'inconnu' ? " (non mesuré par le kit)" : '')));
   const feedback = text('div', 'lbl', '');
+  if (!resume) return block;
   if (session.resume_command) {
     const cmd = document.createElement('pre');
     cmd.className = 'ex-session-cmd';
@@ -742,7 +813,19 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
   if (portfolio) {
     ctx.inspector.append(text('div', 'lbl', `Projet : ${task.project?.name || task.project?.slug || '—'}`));
     if (task.session && task.session.id) ctx.inspector.append(sessionBlock(task.session));
+  } else if (task.session && task.session.id) {
+    // Portée projet : vivacité, signes de vie, durée ; la reprise reste dans le bloc « Session » plus bas.
+    ctx.inspector.append(sessionBlock(task.session, { resume: false }));
   }
+  const costBlock = document.createElement('div');
+  costBlock.className = 'ex-insp-block';
+  costBlock.dataset.role = 'cost-block';
+  costBlock.append(text('h4', null, 'Coût'));
+  costBlock.append(text('p', null, costLabel(task.cost)));
+  costBlock.append(text('p', 'lbl', task.cost && task.cost.calls
+    ? `${task.cost.calls} tentative(s) de dispatch. Le coût de la session hôte n'est mesuré nulle part dans le kit.`
+    : "Aucun dispatch sur cette tâche : le kit n'a rien mesuré, ce qui n'est pas un coût nul."));
+  ctx.inspector.append(costBlock);
 
   // Finition (lot 4.3, issue #561) : lecture seule ici — le champ existe déjà
   // au ledger et à la projection board (ADR-007 point 6) mais aucune
@@ -1188,7 +1271,7 @@ function scopeToolbar(ctx, portfolio, onChange) {
     liveLabel.append(liveBox, text('span', null, `Sessions vivantes (< ${portfolio.live_minutes} min)`));
 
     const summary = portfolio.summary || {};
-    const count = text('span', 'ex-count', `${portfolio.count} / ${summary.tasks ?? 0} tâche(s) · ${summary.live ?? 0} session(s) vivante(s) · ${summary.readable ?? 0}/${summary.projects ?? 0} projet(s) lisible(s)`);
+    const count = text('span', 'ex-count', `${portfolio.count} / ${summary.tasks ?? 0} tâche(s) · ${(summary.liveness || {}).vivant ?? 0} session(s) vivante(s) · ${summary.readable ?? 0}/${summary.projects ?? 0} projet(s) lisible(s)`);
     bar.append(stateLabel, projectLabel, liveLabel, count);
   }
   return bar;
@@ -1207,6 +1290,34 @@ function unreadableNotice(portfolio) {
   return notice;
 }
 
+// Ce qu'une actualisation conserve : défilement de la toile et du board / de la
+// liste, et la carte qui avait le focus clavier.
+function captureView(wrap) {
+  const canvas = wrap.parentElement;
+  const board = wrap.querySelector('.ex-board, .ex-list-wrap');
+  const focus = document.activeElement && document.activeElement.closest ? document.activeElement.closest('.ex-card, tr[data-task]') : null;
+  return {
+    canvasTop: canvas ? canvas.scrollTop : 0,
+    wrapTop: wrap.scrollTop,
+    boardLeft: board ? board.scrollLeft : 0,
+    boardTop: board ? board.scrollTop : 0,
+    focus: focus && wrap.contains(focus) ? { task: focus.dataset.task || '', project: focus.dataset.project || '' } : null,
+  };
+}
+
+function restoreView(wrap, kept) {
+  const canvas = wrap.parentElement;
+  if (canvas) canvas.scrollTop = kept.canvasTop;
+  wrap.scrollTop = kept.wrapTop;
+  const board = wrap.querySelector('.ex-board, .ex-list-wrap');
+  if (board) { board.scrollLeft = kept.boardLeft; board.scrollTop = kept.boardTop; }
+  if (kept.focus && kept.focus.task) {
+    const same = [...wrap.querySelectorAll('.ex-card, tr[data-task]')]
+      .find((n) => n.dataset.task === kept.focus.task && (n.dataset.project || '') === kept.focus.project);
+    if (same && typeof same.focus === 'function') same.focus({ preventScroll: true });
+  }
+}
+
 export async function mount(root, ctx) {
   injectStyles();
   const wrap = document.createElement('div');
@@ -1217,10 +1328,12 @@ export async function mount(root, ctx) {
   // Observer s'en sert pour ouvrir directement la timeline d'une tâche depuis
   // un span OTel qui en porte l'identifiant (#139). `scope: 'portfolio'`
   // ouvre directement le portefeuille (#638).
-  let view = ctx.params.view === 'timeline' ? 'timeline' : 'board4';
+  // `decisions` : le compteur de la barre du haut (UI-3) ouvre directement la vue.
+  let view = ['timeline', 'decisions'].includes(ctx.params.view) ? ctx.params.view : 'board4';
   // Sélection par (projet, id) : en portée projet, `project` reste vide.
   let selected = ctx.params.task ? { id: ctx.params.task, project: '' } : null;
   if (ctx.params.scope === 'portfolio' && ctx.host.kind === 'cockpit') scope.mode = 'portfolio';
+  else if (ctx.params.scope === 'project') scope.mode = 'project';
   if (ctx.host.kind !== 'cockpit') scope.mode = 'project';
   const board = await ctx.api.tasks();
 
@@ -1293,10 +1406,18 @@ export async function mount(root, ctx) {
     ctx.dock.echo('grimoire task add');
   }
 
+  // Un seul dessin « gagne » : un clic pendant qu'une actualisation est en vol,
+  // ou deux actualisations qui se chevauchent, ne s'écrasent pas à moitié.
+  let drawSeq = 0;
+  // Signature de la carte rendue dans l'inspecteur : une actualisation ne le
+  // reconstruit (trois lectures, perte du défilement) que si la carte a changé.
+  let inspectedSig = '';
+
   async function draw(opts = {}) {
-    wrap.replaceChildren();
+    const seq = ++drawSeq;
     const portfolioMode = scope.mode === 'portfolio';
     if (!portfolioMode && !board.ledger) {
+      wrap.replaceChildren();
       renderNoLedger();
       return;
     }
@@ -1313,10 +1434,15 @@ export async function mount(root, ctx) {
       const fresh = await ctx.api.tasks();
       tasks = fresh.tasks || [];
     }
+    if (ctx.signal.aborted || seq !== drawSeq) return;
     ctx.docbar.setBreadcrumb([portfolioMode ? 'Tous les projets' : (ctx.host.project || 'projet'), 'Exécuter']);
     ctx.docbar.setViews(VIEW_LABELS, view, setView);
-    if (ctx.signal.aborted) return;
 
+    // Les données sont là : on remplace d'un geste synchrone, en gardant le
+    // défilement du board et la carte au clavier (une actualisation ne doit
+    // pas renvoyer l'utilisateur au début ni lui voler le focus).
+    const kept = captureView(wrap);
+    wrap.replaceChildren();
     wrap.append(scopeToolbar(ctx, portfolio, redraw));
     if (portfolio) {
       const notice = unreadableNotice(portfolio);
@@ -1350,8 +1476,10 @@ export async function mount(root, ctx) {
       } else {
         selected = { id: task.id, project: task.project?.slug || '' };
         await renderTimeline(wrap, ctx, task);
+        if (seq !== drawSeq) return;
       }
     }
+    restoreView(wrap, kept);
 
     // `{ skipInspector: true }` (issue #638, lot B) : le pilotage humain
     // réécrit son propre bloc en place (`renderSteeringInto`) et ne déclenche
@@ -1362,14 +1490,41 @@ export async function mount(root, ctx) {
 
     const current = tasks.find(same);
     if (current) {
+      const sig = JSON.stringify(current);
+      if (opts.live && sig === inspectedSig) return;
+      inspectedSig = sig;
       const onTimeline = (id) => { selected = { id, project: current.project?.slug || '' }; setView('timeline'); };
       await renderInspector(ctx, current, draw, onTimeline, portfolioMode);
       ctx.dock.echo(`grimoire task show ${current.id}`);
     } else {
+      inspectedSig = '';
       ctx.inspector.replaceChildren(text('p', 'lbl', 'Sélectionnez une tâche pour voir sa porte suivante.'));
       ctx.dock.echo(portfolioMode ? 'grimoire task list --all-projects' : 'grimoire task board');
     }
   }
+
+  // Actualisation sans rechargement (UI-3) : quand le pouls annonce un changement,
+  // l'espace relit SES données. Rien n'est jeté sous les doigts de l'utilisateur :
+  // tant qu'il écrit une réponse ou une consigne (champ actif, ou texte déjà
+  // saisi), l'actualisation attend — elle repart à la sortie du champ.
+  let refreshPending = false;
+  const editing = () => {
+    const active = document.activeElement;
+    const focused = !!active && !!active.closest && (wrap.contains(active) || ctx.inspector.contains(active))
+      && (active.tagName === 'TEXTAREA' || (active.tagName === 'INPUT' && !['checkbox', 'radio', 'button'].includes(active.type)));
+    if (focused) return true;
+    return [...wrap.querySelectorAll('textarea, input[type="text"]'), ...ctx.inspector.querySelectorAll('textarea, input[type="text"]')]
+      .some((field) => field.value.trim() !== '');
+  };
+  const refresh = () => {
+    if (editing()) { refreshPending = true; return; }
+    refreshPending = false;
+    draw({ live: true });
+  };
+  ctx.live.on(refresh);
+  const retry = () => { if (refreshPending) setTimeout(refresh, 0); };
+  wrap.addEventListener('focusout', retry, { signal: ctx.signal });
+  ctx.inspector.addEventListener('focusout', retry, { signal: ctx.signal });
 
   await draw();
 }

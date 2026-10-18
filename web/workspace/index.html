@@ -37,6 +37,13 @@
     </nav>
     <div class="grow"></div>
     <div class="row">
+      <!-- Décisions en attente d'un humain (K6), de tout le registre sur le cockpit :
+           visible quel que soit l'espace, un clic ouvre la vue Décisions d'Exécuter. -->
+      <button class="chip pill warn" id="decisions-pill" type="button" hidden
+              aria-label="Décisions en attente">
+        <svg class="ico" aria-hidden="true"><use href="icons.svg#inbox"/></svg>
+        <span id="decisions-count">0</span><span class="pill-lbl" id="decisions-lbl"> décisions</span>
+      </button>
       <button class="chip" id="palette-open" type="button" aria-label="Rechercher ou commander">
         <span class="row palette-what"><svg class="ico ico-s" aria-hidden="true"><use href="icons.svg#search"/></svg><span class="palette-lbl">Rechercher ou commander</span></span><span class="kbd">⌘K</span>
       </button>
@@ -126,6 +133,9 @@
     <span id="st-api" class="st-extra">API locale</span>
     <span class="row" style="gap:6px"><span class="dot" id="st-standard-dot"></span><span id="st-standard">standard —</span></span>
     <span id="st-host" class="st-extra">—</span>
+    <span class="row" id="st-live" style="gap:6px" title="Actualisation automatique">
+      <svg class="ico ico-s" aria-hidden="true"><use href="icons.svg#refresh"/></svg><span id="st-live-text">actualisation…</span>
+    </span>
     <span class="grow"></span>
     <button class="chip" id="st-density" type="button" data-term="densite">Densité</button>
     <div class="seg seg-s" id="st-theme" role="group" aria-label="Thème">

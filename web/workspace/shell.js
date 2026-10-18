@@ -25,9 +25,13 @@
 //   ctx.rail       `{ on(id, handler) }` : enregistre ce que fait le rail « 2 »
 //                  (bibliothèque) tant que cet espace est monté ; remis à
 //                  zéro par la coque à chaque changement d'espace
+//   ctx.live       `{ on(handler) }` : appelé quand le pouls (live.js) annonce un
+//                  changement du ledger ou des sessions ; l'espace recharge SES
+//                  données. Remis à zéro à chaque changement d'espace.
 
 import { api, boot, host } from './api.js';
 import glossary from './glossary.js';
+import { agoText, createLive, refreshSince } from './live.js';
 
 // ── Les six espaces, dans l'ordre de la barre ───────────────────────────────
 
@@ -918,6 +922,7 @@ async function goto(id, params) {
   controller = new AbortController();
   current = space.id;
   railActions = {};
+  live.clear();
   restorePanelsForSpace();
   location.hash = '#' + space.id;
   // Identité d'espace (revue 2026-09) : shell.css en tire --id-current pour
@@ -953,6 +958,7 @@ async function goto(id, params) {
     loading: (label, rows) => loadingNodes(label, rows),
     params: params || {},
     rail: { on: registerRailAction },
+    live: { on: (handler) => live.on(handler) },
   };
   try {
     const module = await import(`./spaces/${space.id}.js`);
@@ -972,6 +978,77 @@ async function goto(id, params) {
   for (const area of [canvas, $('inspector-body'), $('explorer-body')]) clearLoading(area);
   canvas.setAttribute('aria-busy', 'false');
   fillEmptyPanels();
+}
+
+// ── Pouls : actualisation, compteur de décisions, horodatage ────────────────
+
+// Le compteur de la barre du haut : les décisions que K6 met en attente d'un
+// humain, de tout le registre sur le cockpit. Caché à zéro (rien à faire), mais
+// un projet illisible reste dit : un compteur qui ignorerait ce qu'il ne peut
+// pas lire mentirait par omission.
+function renderDecisionsPill(decisions) {
+  const pill = $('decisions-pill');
+  const pending = Number(decisions && decisions.pending) || 0;
+  const unreadable = (decisions && decisions.unreadable) || [];
+  pill.hidden = pending === 0 && unreadable.length === 0;
+  $('decisions-count').textContent = String(pending);
+  $('decisions-lbl').textContent = pending > 1 ? ' décisions' : ' décision';
+  let label = `${pending} décision${pending > 1 ? 's' : ''} en attente`;
+  if (unreadable.length) label += ` — ${unreadable.length} projet(s) illisible(s) : ${unreadable.join(', ')}`;
+  pill.setAttribute('aria-label', label);
+  pill.title = `${label} — ouvrir la vue Décisions`;
+  pill.dataset.pending = String(pending);
+}
+
+function openDecisions() {
+  // Sur le cockpit le compteur est global : la vue s'ouvre sur tout le registre.
+  return goto('executer', { view: 'decisions', ...(host.kind === 'cockpit' ? { scope: 'portfolio' } : {}) });
+}
+
+const live = createLive({
+  onDecisions: renderDecisionsPill,
+  onState: () => renderLiveStamp(),
+});
+
+// « mis à jour il y a 4 s » : écrit par le minuteur d'une seconde (aucune requête),
+// donc vrai entre deux sondages. Un onglet masqué ou une API muette se disent.
+function renderLiveStamp() {
+  const text = $('st-live-text');
+  const box = $('st-live');
+  const { status, lastOkAt, failingSince, intervalMs } = live.state;
+  box.dataset.state = status;
+  // `pre` : ce qu'un petit écran délaisse (`.live-pre`) ; `tail` : ce qui reste, seul, sous 900 px.
+  let pre = '';
+  let tail = 'actualisation…';
+  if (status === 'paused') {
+    tail = 'suspendue';
+    pre = 'actualisation ';
+    box.title = "Onglet masqué : aucune requête n'est faite tant qu'il l'est.";
+  } else if (status === 'error') {
+    pre = 'API ';
+    tail = `injoignable ${agoText(Date.now() - (failingSince || Date.now()))}`;
+    box.title = "Le dernier sondage a échoué ; l'affichage n'est plus garanti à jour.";
+  } else if (lastOkAt) {
+    pre = 'mis à jour ';
+    tail = agoText(Date.now() - lastOkAt);
+    box.title = `Sondage toutes les ${Math.round(intervalMs / 1000)} s, dernier à ${new Date(lastOkAt).toLocaleTimeString('fr-FR')}`;
+  }
+  const lead = document.createElement('span');
+  lead.className = 'live-pre';
+  lead.textContent = pre;
+  text.replaceChildren(lead, document.createTextNode(tail));
+}
+
+let stampTimer = null;
+function startStampTicker() {
+  const tick = () => { renderLiveStamp(); refreshSince(document); };
+  const arm = () => {
+    if (stampTimer !== null) clearInterval(stampTimer);
+    stampTimer = document.visibilityState === 'hidden' ? null : setInterval(tick, 1000);
+    tick();
+  };
+  document.addEventListener('visibilitychange', arm);
+  arm();
 }
 
 // ── Palette de commandes ────────────────────────────────────────────────────
@@ -1202,6 +1279,8 @@ async function main() {
   });
   $('st-density').addEventListener('click', toggleDensity);
   $('palette-open').addEventListener('click', () => openPalette());
+  $('decisions-pill').addEventListener('click', openDecisions);
+  startStampTicker();
   // Le chip projet ressemblait à un sélecteur mais n'avait aucun
   // gestionnaire : un clic n'y faisait rien. Il ouvre la palette directement
   // sur la section Projets — le changement de projet reste un
@@ -1253,6 +1332,10 @@ async function main() {
   // posé plus haut doit rester. Avant, `goto()` l'effaçait aussitôt pour afficher
   // l'erreur d'un espace qui n'avait aucune donnée.
   if (status) {
+    // Le premier sondage AVANT le premier montage : l'empreinte de référence
+    // précède les données de l'espace, donc un changement survenu pendant son
+    // chargement est vu au sondage suivant au lieu d'être perdu.
+    await live.start();
     await goto((location.hash || '#piloter').slice(1));
     window.addEventListener('hashchange', () => goto(location.hash.slice(1)));
   } else {
@@ -1264,6 +1347,7 @@ async function main() {
     spaces: SPACES.map((s) => s.id),
     goto, host, glossary, dock, empty,
     panelState, setPanel,
+    live: { state: live.state, openDecisions },
     get focus() { return root.dataset.focus; },
     get theme() { return root.dataset.theme; },
     get themePref() { return root.dataset.themePref; },

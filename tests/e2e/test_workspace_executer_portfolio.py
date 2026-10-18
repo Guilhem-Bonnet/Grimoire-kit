@@ -271,6 +271,17 @@ def test_le_portefeuille_liste_les_deux_projets_et_nomme_le_troisieme(
     assert "Tous les projets" in page.locator("#breadcrumb").inner_text()
 
 
+def test_la_barre_du_portefeuille_compte_les_sessions_vivantes(portfolio_page: Page) -> None:
+    """Le décompte « session(s) vivante(s) » lisait `summary.live`, clé disparue avec K5 (`summary.liveness`).
+
+    Il affichait donc « 0 » quoi qu'il arrive : A porte une session vivante, B une session muette depuis trois heures.
+    """
+    page = portfolio_page
+    _open_portfolio(page)
+
+    assert "1 session(s) vivante(s)" in page.locator(".ex-count").inner_text()
+
+
 def test_le_filtre_sessions_vivantes_ne_garde_que_la_tache_reclamee(
     portfolio_page: Page, served_portfolio: dict[str, object]
 ) -> None:
