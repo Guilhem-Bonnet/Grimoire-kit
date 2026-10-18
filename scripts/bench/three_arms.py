@@ -2116,7 +2116,7 @@ def write_report(
         toolchain_check=toolchain_check,
     )
     if results_path is not None:  # B-02 : le rapport cite le hash de ses données brutes
-        report = {**report, "data": data_seal(results_path)}
+        report = {**report, "data": data_seal(results_path, records)}
     (out_dir / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     (out_dir / "report.md").write_text(render_report_markdown(report), encoding="utf-8")
 

@@ -345,3 +345,154 @@ def test_power_cli_prints_the_table(capsys: pytest.CaptureFixture[str]) -> None:
     out = capsys.readouterr().out
     assert "393" in out
     assert "n = 30" in out
+
+
+# ── 5. Revue B-02 : sceller ce que le rapport agrège, schéma antérieur, Markdown ───
+
+
+def _pilot_rows() -> list[dict[str, Any]]:
+    """Lignes d'un pilote (1 rejeu sur les 2 premières tâches), restées dans results.jsonl."""
+    return [_row(task, arm, 0, True, cost=0.2) for task in ("python/a", "python/b") for arm in ("nu", "kit-gov")]
+
+
+def _write_report_over(tmp_path: Path, file_rows: list[dict[str, Any]], report_rows: list[dict[str, Any]]) -> tuple[Path, Path]:
+    """Ce que fait ``--full`` sans ``--resume`` : le fichier garde des lignes que le rapport n'agrège pas."""
+    results = _write_results(tmp_path / "results.jsonl", file_rows)
+    records = [ta.RunRecord(**row) for row in report_rows]
+    ta.write_report(records, tmp_path / "report", total_tasks=4, expected_cost=None, seed=551, results_path=results)
+    return results, tmp_path / "report" / "report.json"
+
+
+def test_pilot_then_full_without_resume_is_not_refused_with_an_ok_hash(tmp_path: Path) -> None:
+    """B02-S1-01 : le fichier contient pilote + campagne, le rapport n'agrège que la campagne."""
+    results, report = _write_report_over(tmp_path, [*_pilot_rows(), *_rows()], _rows())
+    cited = json.loads(report.read_text(encoding="utf-8"))["data"]
+    assert cited.get("sealed") is False
+    assert "results_sha256" not in cited
+    verdict = _verdict(results, report)
+    assert verdict["mismatches"] == [] and verdict["duplicate_keys"] == []
+    assert verdict["ok"] is True
+    assert verdict["hash"]["status"] == "non scellé"
+    assert verdict["recomputed"] is False
+    text = "\n".join(rc.render_verdict_lines(verdict))
+    assert "NON SCELLÉ" in text and "REFUSÉ" not in text
+    assert "NON SCELLÉ" in (report.parent / "report.md").read_text(encoding="utf-8")
+    assert _verdict(results, report, require_seal=True)["ok"] is False
+
+
+def test_partial_arms_without_resume_over_a_file_holding_other_arms_is_not_refused(tmp_path: Path) -> None:
+    """B02-S1-01 : ``--full --arms kit-gov`` sans ``--resume`` sur un fichier qui contient déjà nu."""
+    only_kit = [row for row in _rows() if row["arm"] == "kit-gov"]
+    results, report = _write_report_over(tmp_path, _rows(), only_kit)
+    verdict = _verdict(results, report)
+    assert verdict["ok"] is True
+    assert verdict["hash"]["status"] == "non scellé"
+    assert verdict["hash"]["reason"] == "records ≠ fichier"
+
+
+def test_a_file_that_matches_the_report_rows_is_still_sealed(tmp_path: Path) -> None:
+    results, report = _write_report_over(tmp_path, _rows(), _rows())
+    data = json.loads(report.read_text(encoding="utf-8"))["data"]
+    assert "sealed" not in data and data["results_sha256"]
+    assert _verdict(results, report)["hash"]["status"] == "ok"
+
+
+def _old_schema(report: Path) -> None:
+    """Rapport d'avant B-00 : ni cost_known_*, ni n_invalid, ni suite_saturation, ni nu_baseline_pass_rate."""
+
+    def edit(d: dict[str, Any]) -> None:
+        for stats in d["per_arm"].values():
+            for field in ("cost_known_ratio", "cost_known_runs", "n_invalid", "n_transcript_unevaluated"):
+                stats.pop(field, None)
+        for rows in d["by_task"].values():
+            rows.pop("nu_baseline_pass_rate", None)
+        d.pop("suite_saturation", None)
+        d.pop("claude_code_versions", None)
+        d["invalid_runs"] = None
+
+    _edit_report(report, edit)
+
+
+def test_report_of_an_earlier_schema_is_unsealed_not_refused(tmp_path: Path) -> None:
+    """B02-S1-02 : un champ que le rapport ne publie pas n'est pas un écart."""
+    results, report = _campaign(tmp_path)
+    _old_schema(report)
+    _edit_report(report, lambda d: d.pop("data"))
+    verdict = _verdict(results, report)
+    assert verdict["mismatches"] == [], verdict["mismatches"]
+    assert verdict["ok"] is True
+    assert verdict["hash"]["status"] == "non scellé"
+    assert "suite_saturation" in verdict["unpublished"]
+    assert any(path.endswith(".cost_known_ratio") for path in verdict["unpublished"])
+    assert "NON PUBLIÉS" in "\n".join(rc.render_verdict_lines(verdict))
+
+
+def test_a_published_value_that_differs_stays_refused_on_an_earlier_schema(tmp_path: Path) -> None:
+    results, report = _campaign(tmp_path)
+    _old_schema(report)
+    _edit_report(report, lambda d: d["per_arm"]["nu"].__setitem__("success_rate", 0.99))
+    verdict = _verdict(results, report)
+    assert verdict["ok"] is False
+    assert [m["path"] for m in verdict["mismatches"]] == ["per_arm.nu.success_rate"]
+
+
+def test_a_published_key_the_recompute_does_not_know_is_still_an_error(tmp_path: Path) -> None:
+    results, report = _campaign(tmp_path)
+    _edit_report(report, lambda d: d["per_arm"]["nu"].__setitem__("invented", 1))
+    verdict = _verdict(results, report)
+    assert verdict["ok"] is False
+    assert "per_arm.nu.invented" in [m["path"] for m in verdict["mismatches"]]
+
+
+def _md_verdict(results: Path, report: Path) -> dict[str, Any]:
+    return _verdict(results, report, report_md_path=report.with_name("report.md"))
+
+
+def test_untouched_markdown_is_accepted(tmp_path: Path) -> None:
+    results, report = _campaign(tmp_path)
+    verdict = _md_verdict(results, report)
+    assert verdict["markdown"]["status"] == "ok", verdict["markdown"]
+    assert verdict["ok"] is True
+
+
+def test_edited_markdown_cell_is_detected(tmp_path: Path) -> None:
+    """B02-S1-03 : report.json intact, une cellule de taux retouchée dans report.md."""
+    results, report = _campaign(tmp_path)
+    md = report.with_name("report.md")
+    lines = md.read_text(encoding="utf-8").splitlines()
+    index = next(i for i, line in enumerate(lines) if line.startswith("| nu |"))
+    assert "| 50% |" in lines[index], lines[index]
+    lines[index] = lines[index].replace("| 50% |", "| 99% |", 1)
+    md.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    verdict = _md_verdict(results, report)
+    assert verdict["ok"] is False
+    assert verdict["markdown"]["status"] == "écart"
+    assert verdict["markdown"]["differences"][0]["line"] == index + 1
+    assert verdict["mismatches"] == []
+    assert "MARKDOWN : ÉCART" in "\n".join(rc.render_verdict_lines(verdict))
+
+
+def test_cli_checks_the_sibling_report_md_by_default(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    results, report = _campaign(tmp_path)
+    argv = ["--results", str(results), "--report", str(report)]
+    assert rc.main(argv) == 0
+    md = report.with_name("report.md")
+    md.write_text(md.read_text(encoding="utf-8").replace("graine 551", "graine 552"), encoding="utf-8")
+    assert rc.main(argv) == 1
+    assert "MARKDOWN : ÉCART" in capsys.readouterr().out
+
+
+def test_cli_report_md_option_points_elsewhere_and_a_missing_file_exits_1(tmp_path: Path) -> None:
+    results, report = _campaign(tmp_path)
+    assert rc.main(["--results", str(results), "--report", str(report), "--report-md", str(tmp_path / "absent.md")]) == 1
+    copy = tmp_path / "copie.md"
+    copy.write_text(report.with_name("report.md").read_text(encoding="utf-8"), encoding="utf-8")
+    assert rc.main(["--results", str(results), "--report", str(report), "--report-md", str(copy)]) == 0
+
+
+def test_cli_without_a_report_md_next_to_the_json_does_not_fail(tmp_path: Path) -> None:
+    results, report = _campaign(tmp_path)
+    report.with_name("report.md").unlink()
+    verdict = _verdict(results, report)
+    assert verdict["markdown"]["status"] == "non vérifié"
+    assert rc.main(["--results", str(results), "--report", str(report)]) == 0
