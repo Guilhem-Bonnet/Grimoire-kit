@@ -32,11 +32,13 @@
         <span class="chevron" aria-hidden="true"></span>
       </button>
     </div>
-    <nav id="spaces" aria-label="Espaces de travail"></nav>
+    <nav class="spaces-nav" aria-label="Espaces de travail">
+      <div id="spaces" role="tablist" aria-label="Espaces de travail"></div>
+    </nav>
     <div class="grow"></div>
     <div class="row">
-      <button class="chip" id="palette-open" type="button" style="width:250px;justify-content:space-between">
-        <span class="row" style="gap:6px"><svg class="ico ico-s" aria-hidden="true"><use href="icons.svg#search"/></svg>Rechercher ou commander</span><span class="kbd">⌘K</span>
+      <button class="chip" id="palette-open" type="button" aria-label="Rechercher ou commander">
+        <span class="row palette-what"><svg class="ico ico-s" aria-hidden="true"><use href="icons.svg#search"/></svg><span class="palette-lbl">Rechercher ou commander</span></span><span class="kbd">⌘K</span>
       </button>
     </div>
   </header>
@@ -52,11 +54,14 @@
         <span style="font-weight:500">Explorateur</span>
         <span class="grow"></span>
         <span class="kbd">1</span>
+        <button class="panel-close" type="button" data-close="explorer" aria-label="Fermer l'explorateur">
+          <svg class="ico ico-s" aria-hidden="true"><use href="icons.svg#cross"/></svg>
+        </button>
         <button class="pin" type="button" aria-pressed="true" aria-label="Épingler l'explorateur" data-pin="explorer">
           <svg class="ico ico-s" aria-hidden="true"><use href="icons.svg#lock"/></svg>
         </button>
       </div>
-      <div class="panel-body tree" id="explorer-body"></div>
+      <div class="panel-body tree" id="explorer-body" aria-live="polite"></div>
       <div class="panel-resize" data-resize="explorer" role="separator" aria-orientation="vertical" aria-label="Redimensionner l'explorateur" tabindex="-1"></div>
     </aside>
 
@@ -70,7 +75,7 @@
         <span class="chip" id="doc-validation" hidden><span class="dot"></span><span></span></span>
       </div>
 
-      <section id="canvas" data-grid="off" aria-live="polite"></section>
+      <section id="canvas" data-grid="off" role="tabpanel" aria-live="polite" aria-busy="false"></section>
 
       <section id="dock" data-state="pinned" aria-label="Dock">
         <div id="dock-tabs" role="tablist"></div>
@@ -84,11 +89,14 @@
         <span style="font-weight:500">Inspecteur</span>
         <span class="grow"></span>
         <span class="kbd">4</span>
+        <button class="panel-close" type="button" data-close="inspector" aria-label="Fermer l'inspecteur">
+          <svg class="ico ico-s" aria-hidden="true"><use href="icons.svg#cross"/></svg>
+        </button>
         <button class="pin" type="button" aria-pressed="true" aria-label="Épingler l'inspecteur" data-pin="inspector">
           <svg class="ico ico-s" aria-hidden="true"><use href="icons.svg#lock"/></svg>
         </button>
       </div>
-      <div class="panel-body" id="inspector-body"></div>
+      <div class="panel-body" id="inspector-body" aria-live="polite"></div>
       <div class="panel-resize" data-resize="inspector" role="separator" aria-orientation="vertical" aria-label="Redimensionner l'inspecteur" tabindex="-1"></div>
     </aside>
 
@@ -99,11 +107,14 @@
         <span style="font-weight:500">Preuves</span>
         <span class="grow"></span>
         <span class="kbd">3</span>
+        <button class="panel-close" type="button" data-close="evidence" aria-label="Fermer les preuves">
+          <svg class="ico ico-s" aria-hidden="true"><use href="icons.svg#cross"/></svg>
+        </button>
         <button class="pin" type="button" aria-pressed="false" aria-label="Épingler les preuves" data-pin="evidence">
           <svg class="ico ico-s" aria-hidden="true"><use href="icons.svg#lock"/></svg>
         </button>
       </div>
-      <div class="panel-body" id="evidence-body"></div>
+      <div class="panel-body" id="evidence-body" aria-live="polite"></div>
       <div class="panel-resize" data-resize="evidence" role="separator" aria-orientation="vertical" aria-label="Redimensionner les preuves" tabindex="-1"></div>
     </aside>
 
@@ -111,14 +122,24 @@
 
   <!-- Barre d'état -->
   <footer id="statusbar">
-    <span id="st-kit">grimoire-kit —</span>
-    <span id="st-api">API locale</span>
+    <span id="st-kit" class="st-extra">grimoire-kit —</span>
+    <span id="st-api" class="st-extra">API locale</span>
     <span class="row" style="gap:6px"><span class="dot" id="st-standard-dot"></span><span id="st-standard">standard —</span></span>
-    <span id="st-host">—</span>
+    <span id="st-host" class="st-extra">—</span>
     <span class="grow"></span>
     <button class="chip" id="st-density" type="button" data-term="densite">Densité</button>
-    <button class="chip" id="st-theme" type="button">Thème</button>
-    <span class="row" style="gap:6px">Mode concentration <span class="kbd">⇧⌘F</span></span>
+    <div class="seg seg-s" id="st-theme" role="group" aria-label="Thème">
+      <button type="button" data-theme-pref="system" aria-pressed="false" aria-label="Système" title="Thème du système">
+        <svg class="ico ico-s" aria-hidden="true"><use href="icons.svg#monitor"/></svg>
+      </button>
+      <button type="button" data-theme-pref="light" aria-pressed="false" aria-label="Clair" title="Thème clair">
+        <svg class="ico ico-s" aria-hidden="true"><use href="icons.svg#sun"/></svg>
+      </button>
+      <button type="button" data-theme-pref="dark" aria-pressed="false" aria-label="Sombre" title="Thème sombre">
+        <svg class="ico ico-s" aria-hidden="true"><use href="icons.svg#moon"/></svg>
+      </button>
+    </div>
+    <span class="row st-extra" style="gap:6px">Mode concentration <span class="kbd">⇧⌘F</span></span>
   </footer>
 
 </div>

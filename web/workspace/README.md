@@ -85,7 +85,9 @@ directement dans le DOM de la coque :
 | `ctx.inspector` | L'élément du panneau droit — idem |
 | `ctx.docbar` | `setBreadcrumb`, `setZoom`, `setViews`, `setValidation` |
 | `ctx.dock` | `log(onglet, …lignes)`, `clear`, `setTab`, `echo(commande)` |
-| `ctx.empty` | `(titre, phrase, commande)` → le bloc d'état vide unique |
+| `ctx.empty` | `(titre, phrase, commande, action?)` → le bloc d'état vide unique ; `action` est `{ label, run }` (un bouton qui fait, pas une commande à recopier) ; sans `action`, une commande que la Console du dock sait exécuter (liste blanche, sans argument) reçoit un bouton « Lancer dans la Console » |
+| `ctx.loading` | `(libellé, lignes?)` → `[squelette, texte pour lecteurs d'écran]` à poser dans une zone qui attend ses données (jamais un « Chargement… » nu) ; la coque en pose un sur la toile à chaque changement d'espace et le retire dès que l'espace y écrit du contenu |
+| `ctx.openPanel` | `(id)` → ouvre un panneau latéral (`explorer`, `inspector`, `evidence`) : épinglé au bureau, en tiroir sous 900 px |
 | `ctx.signal` | Un `AbortSignal` annulé quand l'espace est démonté |
 | `ctx.goto` | `goto(id, params?)` — naviguer vers un autre espace ; `params` n'est vu qu'au montage qui suit (ex. `goto('source', { file })` depuis ⌘K), jamais persisté dans le hash |
 | `ctx.params` | Ce que l'appelant de `goto()` a demandé pour CE montage — `{}` la plupart du temps |
@@ -99,6 +101,39 @@ Deux règles opposables :
 2. **Aucun module d'espace n'écrit une couleur.** Il utilise les tokens et les
    primitives de `shell.css`. `tests/unit/test_workspace_tokens.py` refuse tout
    littéral de couleur ailleurs que dans `tokens.css`.
+
+## Petits écrans, thème, accessibilité
+
+- **Sous 900 px** (`@media (max-width: 900px)` dans `shell.css`, `matchMedia`
+  identique dans `shell.js` : les deux seuils sont gardés par
+  `tests/unit/test_workspace_responsive.py`) la coque tient en une colonne. Le
+  rail devient une barre basse, explorateur, inspecteur et preuves sont des
+  **tiroirs** en surimpression (un seul à la fois, fermés à l'arrivée, jamais
+  mémorisés : un tiroir ouvert sur mobile ne rouvre pas, épinglé, sur le bureau).
+  Le bouton du rail ouvre, le focus entre dans le tiroir, Échap, son bouton
+  « Fermer » ou un appui sur le voile le referment et rendent le focus au rail.
+  La barre de document passe à la ligne ; les onglets des espaces défilent.
+- **Mesure** : `scrollWidth` du document ne prouve rien ici (`#shell` est en
+  `overflow: hidden`, il vaut `innerWidth` même quand le centre est écrasé à
+  0 px). `tests/e2e/test_workspace_responsive_a11y.py` mesure la largeur du
+  centre, le contenu de la toile et les bords des barres. Un espace qui ajoute
+  une grille ou un tableau large la garde dans sa propre boîte défilante.
+- **Thème** : trois états (`#st-theme`), `system` (suit `prefers-color-scheme` en
+  direct), `light`, `dark` ; défaut `dark`, mémorisé par projet. `data-theme-pref`
+  porte le choix, `data-theme` le thème résolu — tokens.css ne lit que lui.
+- **Onglets** : `role="tablist"` / `tab` / `tabpanel`, un seul onglet dans l'ordre
+  de tabulation, flèches gauche/droite (rebouclage), Début/Fin. Dock : la flèche
+  active ; espaces : elle déplace le focus et Entrée active (monter un espace
+  coûte des requêtes).
+- **Chargement** : `ctx.loading()` pose un squelette décoratif et un texte pour
+  les lecteurs d'écran ; la coque en pose un sur la toile à chaque changement
+  d'espace et le retire dès que l'espace y écrit du contenu. Les zones de données
+  (`#canvas`, `#explorer-body`, `#inspector-body`, `#evidence-body`) sont des
+  régions `aria-live="polite"`.
+- **États vides** : un bouton qui fait (`ctx.empty(…, action)`), pas une commande
+  à recopier. Sans `action`, une commande que la Console sait exécuter (liste
+  blanche, sans argument) reçoit « Lancer dans la Console ». Un explorateur ou un
+  inspecteur laissé muet par un espace reçoit une explication et un bouton.
 
 ## Citer un concept
 

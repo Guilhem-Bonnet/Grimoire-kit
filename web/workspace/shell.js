@@ -18,6 +18,10 @@
 //   ctx.params     ce que l'appelant de `goto(id, params)` a demandé pour ce
 //                  montage (ex. `{ file }` depuis ⌘K) — jamais persistant,
 //                  relu à chaque montage seulement
+//   ctx.loading    (libellé, lignes?) → [squelette, texte pour lecteurs d'écran] à
+//                  poser dans une zone qui attend ses données
+//   ctx.openPanel  (id) → ouvre un panneau latéral (`explorer`, `inspector`,
+//                  `evidence`) : épinglé au bureau, en tiroir sous 900 px
 //   ctx.rail       `{ on(id, handler) }` : enregistre ce que fait le rail « 2 »
 //                  (bibliothèque) tant que cet espace est monté ; remis à
 //                  zéro par la coque à chaque changement d'espace
@@ -112,19 +116,52 @@ function writeState(patch) {
 
 // ── Thème et densité ────────────────────────────────────────────────────────
 
-function applyPreferences() {
-  const saved = readState();
-  root.dataset.theme = saved.theme || 'dark';
-  root.dataset.density = saved.density || 'decouverte';
-  root.dataset.focus = 'off';
-  $('st-theme').textContent = root.dataset.theme === 'dark' ? 'Sombre' : 'Clair';
-  $('st-density').textContent =
-    root.dataset.density === 'concentration' ? 'Concentration' : 'Découverte';
+// Le thème a trois états : `system` (suit prefers-color-scheme, y compris en
+// direct), `light`, `dark`. `data-theme-pref` porte le choix, `data-theme` le
+// thème RÉSOLU (toujours `dark` ou `light`) : tokens.css et les tests ne lisent
+// que lui. Sans choix mémorisé, le défaut reste `dark` — celui que la coque a
+// toujours eu ; `system` est un choix, pas un changement imposé.
+const THEME_PREFS = ['system', 'light', 'dark'];
+const colorScheme = window.matchMedia('(prefers-color-scheme: dark)');
+
+function resolveTheme(pref) {
+  if (pref === 'system') return colorScheme.matches ? 'dark' : 'light';
+  return pref;
 }
 
-function toggleTheme() {
-  writeState({ theme: root.dataset.theme === 'dark' ? 'light' : 'dark' });
-  applyPreferences();
+function themePref() {
+  const saved = readState().theme;
+  return THEME_PREFS.includes(saved) ? saved : 'dark';
+}
+
+function applyTheme() {
+  const pref = themePref();
+  root.dataset.themePref = pref;
+  root.dataset.theme = resolveTheme(pref);
+  for (const button of document.querySelectorAll('#st-theme [data-theme-pref]')) {
+    button.setAttribute('aria-pressed', String(button.dataset.themePref === pref));
+  }
+}
+
+function setThemePref(pref) {
+  if (!THEME_PREFS.includes(pref)) return;
+  writeState({ theme: pref });
+  applyTheme();
+}
+
+// Le réglage « système » se suit en direct : changer le thème de l'OS pendant
+// que la coque est ouverte la fait suivre, sans rechargement.
+colorScheme.addEventListener('change', () => {
+  if (themePref() === 'system') applyTheme();
+});
+
+function applyPreferences() {
+  const saved = readState();
+  root.dataset.density = saved.density || 'decouverte';
+  root.dataset.focus = 'off';
+  applyTheme();
+  $('st-density').textContent =
+    root.dataset.density === 'concentration' ? 'Concentration' : 'Découverte';
 }
 
 function toggleDensity() {
@@ -132,9 +169,13 @@ function toggleDensity() {
   writeState({ density: next });
   applyPreferences();
   // Concentration replie tout ; Découverte réépingle les deux panneaux utiles.
-  setPanel('explorer', next === 'concentration' ? 'collapsed' : 'pinned');
-  setPanel('inspector', next === 'concentration' ? 'collapsed' : 'pinned');
-  setDock(next === 'concentration' ? 'collapsed' : 'pinned');
+  // Sous 900 px les panneaux sont des tiroirs qu'on ouvre à la main : la
+  // densité ne les ouvre pas d'office.
+  if (!isNarrow()) {
+    setPanel('explorer', next === 'concentration' ? 'collapsed' : 'pinned');
+    setPanel('inspector', next === 'concentration' ? 'collapsed' : 'pinned');
+  }
+  setDock(next === 'concentration' || isNarrow() ? 'collapsed' : 'pinned');
   selectDockTab(next === 'concentration' ? 'console' : 'traces');
 }
 
@@ -150,6 +191,22 @@ function toggleFocus() {
 // soit ici ne s'exécute — voir `restorePanelsForSpace`.
 
 let peekTimer = null;
+
+// Sous 900 px la coque tient en une colonne : les panneaux latéraux ne sont plus
+// des colonnes mais des tiroirs en surimpression (shell.css), un seul à la fois,
+// fermés au chargement. Les états `pinned` et `peek` s'y confondent : les deux
+// ouvrent le tiroir. L'état n'y est pas mémorisé — un tiroir ouvert sur mobile
+// ne doit pas rouvrir, épinglé, sur l'écran de bureau du même navigateur.
+const narrowQuery = window.matchMedia('(max-width: 900px)');
+function isNarrow() { return narrowQuery.matches; }
+
+let drawerOpener = null;
+let narrowDockSeen = false;
+
+function syncDrawer() {
+  const open = Object.keys(PANELS).some((id) => panelState(id) !== 'collapsed');
+  $('middle').toggleAttribute('data-drawer', isNarrow() && open);
+}
 
 function panelKey(kind, id) {
   return `${kind}.${current || 'piloter'}.${id}`;
@@ -167,32 +224,80 @@ function panelState(id) {
 // se rafraîchir depuis chacun sans dupliquer la condition dans les quatre.
 const PANEL_ON_OPEN = {};
 
-function setPanel(id, state) {
+function setPanel(id, state, { persist = true } = {}) {
   const el = $(PANELS[id]);
   if (!el) return;
+  const narrow = isNarrow();
+  // Un seul tiroir à la fois : ouvrir l'un referme les autres.
+  if (narrow && state !== 'collapsed') {
+    for (const other of Object.keys(PANELS)) {
+      if (other !== id && panelState(other) !== 'collapsed') setPanel(other, 'collapsed', { persist: false });
+    }
+  }
   el.dataset.state = state;
   const pin = el.querySelector(`[data-pin="${id}"]`);
   if (pin) pin.setAttribute('aria-pressed', String(state === 'pinned'));
   const button = document.querySelector(`.rail-btn[data-panel="${id}"]`);
-  if (button) button.setAttribute('aria-pressed', String(state !== 'collapsed'));
-  writeState({ [panelKey('panel', id)]: state });
+  if (button) {
+    button.setAttribute('aria-pressed', String(state !== 'collapsed'));
+    button.setAttribute('aria-expanded', String(state !== 'collapsed'));
+  }
+  if (persist && !narrow) writeState({ [panelKey('panel', id)]: state });
+  syncDrawer();
   if (state !== 'collapsed') PANEL_ON_OPEN[id]?.();
 }
 
+/** Ouvre un panneau à la demande d'un espace (bouton d'un état vide, par exemple). */
+function openPanel(id) {
+  if (!PANELS[id]) return;
+  if (isNarrow()) {
+    setPanel(id, 'peek');
+    enterDrawer(id, document.activeElement);
+  } else {
+    setPanel(id, 'pinned');
+  }
+}
+
 function togglePanel(id) {
-  setPanel(id, panelState(id) === 'collapsed' ? 'pinned' : 'collapsed');
+  const opening = panelState(id) === 'collapsed';
+  setPanel(id, opening ? 'pinned' : 'collapsed');
+  if (isNarrow()) {
+    if (opening) enterDrawer(id, document.querySelector(`.rail-btn[data-panel="${id}"]`));
+    else leaveDrawer();
+  }
+}
+
+/** Le focus entre dans le tiroir qui vient de s'ouvrir (bouton « Fermer »), et
+ * on retient d'où l'on vient pour y revenir à la fermeture. */
+function enterDrawer(id, opener) {
+  drawerOpener = opener || document.activeElement;
+  $(PANELS[id]).querySelector('.panel-close')?.focus();
+}
+
+/** Ferme tout tiroir ouvert et rend le focus à l'élément qui l'avait ouvert. */
+function leaveDrawer() {
+  let wasOpen = false;
+  for (const id of Object.keys(PANELS)) {
+    if (panelState(id) !== 'collapsed') { wasOpen = true; setPanel(id, 'collapsed', { persist: false }); }
+  }
+  if (wasOpen && drawerOpener && drawerOpener.isConnected) drawerOpener.focus();
+  drawerOpener = null;
+  return wasOpen;
 }
 
 function setDock(state) {
   $('dock').dataset.state = state;
   const button = document.querySelector('.rail-btn[data-panel="dock"]');
-  if (button) button.setAttribute('aria-pressed', String(state !== 'collapsed'));
-  writeState({ [panelKey('panel', 'dock')]: state });
+  if (button) {
+    button.setAttribute('aria-pressed', String(state !== 'collapsed'));
+    button.setAttribute('aria-expanded', String(state !== 'collapsed'));
+  }
+  if (!isNarrow()) writeState({ [panelKey('panel', 'dock')]: state });
 }
 
 /** Découverte ouvre par défaut ; Concentration replie tout (spec §3.4). */
 function defaultPanelState() {
-  return root.dataset.density === 'concentration' ? 'collapsed' : 'pinned';
+  return root.dataset.density === 'concentration' || isNarrow() ? 'collapsed' : 'pinned';
 }
 
 /** Largeur : un panneau redimensionné à la souris (poignée) la garde, par
@@ -209,6 +314,15 @@ function restoreWidth(id) {
 function restorePanelsForSpace() {
   const saved = readState();
   const fallback = defaultPanelState();
+  // Tiroirs : toujours fermés à l'arrivée dans un espace, quoi qu'ait mémorisé
+  // le bureau (voir `narrowQuery`).
+  if (isNarrow()) {
+    for (const id of Object.keys(PANELS)) setPanel(id, 'collapsed', { persist: false });
+    // Le dock, lui, garde ce que la personne en a fait d'un espace à l'autre :
+    // replié à la première arrivée seulement.
+    if (!narrowDockSeen) { setDock('collapsed'); narrowDockSeen = true; }
+    return;
+  }
   setPanel('explorer', saved[panelKey('panel', 'explorer')] || fallback);
   setPanel('inspector', saved[panelKey('panel', 'inspector')] || fallback);
   // Preuves (#534) : jamais ouvert par défaut (ce n'est pas un des « deux
@@ -236,15 +350,20 @@ let evidenceRequest = 0;
 async function loadEvidencePanel() {
   const body = $('evidence-body');
   const requestId = ++evidenceRequest;
-  body.replaceChildren(mk('p', { class: 'ev-msg' }, 'Chargement…'));
+  body.replaceChildren(...loadingNodes('Chargement des preuves…', 3));
+  body.setAttribute('aria-busy', 'true');
   let payload;
   try {
     payload = await api.evidence();
   } catch (error) {
     if (requestId !== evidenceRequest) return;
-    body.replaceChildren(empty('Preuves indisponibles', error.message, 'grimoire standard doctor'));
+    body.setAttribute('aria-busy', 'false');
+    body.replaceChildren(empty('Preuves indisponibles', error.message, 'grimoire standard doctor', {
+      label: 'Réessayer', run: loadEvidencePanel,
+    }));
     return;
   }
+  body.setAttribute('aria-busy', 'false');
   if (requestId !== evidenceRequest) return;
   renderEvidencePanel(body, payload);
 }
@@ -312,6 +431,86 @@ function mk(tag, attrs, ...children) {
   return node;
 }
 
+// ── Onglets accessibles ─────────────────────────────────────────────────────
+//
+// `role="tablist"` / `role="tab"` / `aria-selected`, un seul onglet dans l'ordre
+// de tabulation (le courant ; les autres s'atteignent aux flèches), gauche/droite
+// avec rebouclage, Début/Fin. `activate: 'auto'` active l'onglet à la flèche
+// (dock : le contenu est local) ; `'manual'` ne déplace que le focus et laisse
+// Entrée/Espace activer (espaces : monter un espace coûte des requêtes).
+
+function bindTablist(list, { activate }) {
+  list.addEventListener('keydown', (event) => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    const tabs = [...list.querySelectorAll('[role="tab"]')].filter((tab) => !tab.disabled);
+    const index = tabs.indexOf(event.target.closest('[role="tab"]'));
+    if (index < 0) return;
+    let next = index;
+    if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+    if (event.key === 'ArrowLeft') next = (index - 1 + tabs.length) % tabs.length;
+    if (event.key === 'Home') next = 0;
+    if (event.key === 'End') next = tabs.length - 1;
+    event.preventDefault();
+    tabs[next].focus();
+    if (activate === 'auto') tabs[next].click();
+  });
+}
+
+function markSelectedTab(list, selected) {
+  for (const tab of list.querySelectorAll('[role="tab"]')) {
+    const on = tab === selected;
+    tab.setAttribute('aria-selected', String(on));
+    tab.tabIndex = on ? 0 : -1;
+  }
+}
+
+/** Ramène l'onglet choisi dans la zone visible d'une barre d'onglets qui défile. */
+function revealTab(list, tab) {
+  if (!tab || list.scrollWidth <= list.clientWidth) return;
+  const left = tab.offsetLeft;
+  const right = left + tab.offsetWidth;
+  if (left < list.scrollLeft) list.scrollLeft = left;
+  else if (right > list.scrollLeft + list.clientWidth) list.scrollLeft = right - list.clientWidth;
+}
+
+// ── Chargement : squelettes et zones de données ─────────────────────────────
+//
+// Une zone qui se remplit montre un squelette (la forme de ce qui vient) plutôt
+// qu'un cadre vide ; le texte pour les lecteurs d'écran est séparé du squelette,
+// qui reste décoratif (`aria-hidden`). Les nœuds posés par la coque portent
+// `data-shell-placeholder` : dès que quelqu'un d'autre écrit dans la zone, ils
+// disparaissent seuls (`watchPlaceholders`) — aucun espace n'a à les connaître.
+
+const PLACEHOLDER = 'data-shell-placeholder';
+
+// `cover` : le squelette de la toile recouvre la zone (position absolue) au lieu
+// de s'y ajouter, pour ne pas déplacer ce qu'un espace y pose pendant qu'il charge.
+function loadingNodes(label, rows = 4, { cover = false } = {}) {
+  const bars = mk('div', {
+    class: cover ? 'skeleton skeleton-cover' : 'skeleton', 'aria-hidden': 'true', [PLACEHOLDER]: 'loading',
+  });
+  for (let i = 0; i < rows; i += 1) bars.append(mk('div', { class: 'skeleton-line' }));
+  return [bars, mk('p', { class: 'sr-only', [PLACEHOLDER]: 'loading', text: label })];
+}
+
+// Une enveloppe vide (un espace pose son conteneur avant d'avoir les données) ne
+// compte pas comme du contenu : `subtree` rattrape le moment où elle se remplit.
+function watchPlaceholders(host) {
+  const own = `:scope > [${PLACEHOLDER}]`;
+  new MutationObserver(() => {
+    const placeholders = host.querySelectorAll(own);
+    if (!placeholders.length) return;
+    const filled = [...host.children].some(
+      (child) => !child.hasAttribute(PLACEHOLDER) && (child.children.length || child.textContent.trim()),
+    );
+    if (filled) for (const node of placeholders) node.remove();
+  }).observe(host, { childList: true, subtree: true, characterData: true });
+}
+
+function clearLoading(host) {
+  for (const node of host.querySelectorAll(`[${PLACEHOLDER}="loading"]`)) node.remove();
+}
+
 function buildRail() {
   const rail = $('rail');
   rail.replaceChildren();
@@ -324,6 +523,8 @@ function buildRail() {
     button.setAttribute('aria-pressed', 'false');
     button.setAttribute('aria-label', `${item.label} (${item.key})`);
     button.title = `${item.label} (${item.key})`;
+    const controls = PANELS[item.id] || (item.id === 'dock' ? 'dock' : null);
+    if (controls) button.setAttribute('aria-controls', controls);
     button.append(icon(item.icon), mk('span', { class: 'rail-lbl', text: item.label }));
     // Clic sur l'icône du rail : ouvre en surimpression (spec §3.1) ; un
     // second clic referme. ⌘/Ctrl + clic épingle directement dans la grille,
@@ -332,6 +533,17 @@ function buildRail() {
       clearTimeout(peekTimer);
       if (item.id === 'dock') { setDock($('dock').dataset.state === 'collapsed' ? 'pinned' : 'collapsed'); return; }
       if (!PANELS[item.id]) { triggerRailAction(item.id, event); return; }
+      if (isNarrow()) {
+        // Tiroir : le bouton ouvre ou referme ; ⌘/Ctrl n'a pas de sens sans grille.
+        if (panelState(item.id) === 'collapsed') {
+          setPanel(item.id, 'peek');
+          enterDrawer(item.id, button);
+        } else {
+          setPanel(item.id, 'collapsed');
+          leaveDrawer();
+        }
+        return;
+      }
       if (event.metaKey || event.ctrlKey) {
         setPanel(item.id, panelState(item.id) === 'pinned' ? 'collapsed' : 'pinned');
         return;
@@ -340,7 +552,7 @@ function buildRail() {
     });
     // Survol du rail, 450 ms : entrouvre en surimpression. Jamais au survol du contenu.
     button.addEventListener('pointerenter', () => {
-      if (!PANELS[item.id] || panelState(item.id) !== 'collapsed') return;
+      if (isNarrow() || !PANELS[item.id] || panelState(item.id) !== 'collapsed') return;
       clearTimeout(peekTimer);
       peekTimer = setTimeout(() => setPanel(item.id, 'peek'), 450);
     });
@@ -352,14 +564,29 @@ function buildRail() {
     $(elementId).querySelector(`[data-pin="${id}"]`)?.addEventListener('click', () => {
       setPanel(id, panelState(id) === 'pinned' ? 'collapsed' : 'pinned');
     });
+    $(elementId).querySelector(`[data-close="${id}"]`)?.addEventListener('click', () => leaveDrawer());
   }
   // Un clic hors d'un panneau entrouvert le referme ; un panneau épinglé reste.
+  // Sous 900 px il n'y a pas d'épinglage : tout tiroir ouvert se referme.
   document.addEventListener('pointerdown', (event) => {
+    if (event.target.closest('.rail-btn')) return;
+    if (isNarrow()) {
+      // Un tiroir se ferme comme à Échap : le focus retourne au bouton du rail.
+      const outside = Object.values(PANELS).some((elementId) => {
+        const el = $(elementId);
+        return el.dataset.state !== 'collapsed' && !el.contains(event.target);
+      });
+      if (outside) {
+        // Sans cela le navigateur déplace le focus vers la cible juste après
+        // l'appui et annule le retour au rail ; le clic qui suit reste émis.
+        event.preventDefault();
+        leaveDrawer();
+      }
+      return;
+    }
     for (const [id, elementId] of Object.entries(PANELS)) {
       const el = $(elementId);
-      if (el.dataset.state === 'peek' && !el.contains(event.target) && !event.target.closest('.rail-btn')) {
-        setPanel(id, 'collapsed');
-      }
+      if (el.dataset.state === 'peek' && !el.contains(event.target)) setPanel(id, 'collapsed');
     }
   });
 }
@@ -415,14 +642,17 @@ function buildDock() {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'tab';
-    button.role = 'tab';
+    button.setAttribute('role', 'tab');
+    button.id = `tab-dock-${tab.id}`;
+    button.setAttribute('aria-controls', 'dock-body');
     button.dataset.dockTab = tab.id;
     button.dataset.term = tab.term;
     button.append(icon(tab.icon), mk('span', { class: 'tab-lbl', text: tab.label }));
-    button.setAttribute('aria-selected', String(tab.id === dockTab));
     button.addEventListener('click', () => selectDockTab(tab.id));
     tabs.append(button);
   }
+  tabs.setAttribute('aria-label', 'Dock');
+  bindTablist(tabs, { activate: 'auto' });
   tabs.append(Object.assign(document.createElement('div'), { className: 'grow' }));
   const echo = document.createElement('div');
   echo.className = 'row lbl';
@@ -437,14 +667,13 @@ function buildDock() {
   kbd.textContent = '5';
   kbdRow.append(kbd);
   tabs.append(kbdRow);
-  renderDock();
+  selectDockTab(dockTab);
 }
 
 function selectDockTab(id) {
   dockTab = id;
-  for (const button of document.querySelectorAll('[data-dock-tab]')) {
-    button.setAttribute('aria-selected', String(button.dataset.dockTab === id));
-  }
+  markSelectedTab($('dock-tabs'), document.querySelector(`[data-dock-tab="${id}"]`));
+  $('dock-body').setAttribute('aria-labelledby', `tab-dock-${id}`);
   renderDock();
 }
 
@@ -549,9 +778,29 @@ function segment(el, items, active, onPick) {
 
 // ── Le bloc d'état vide : un seul, et il dit d'où viendra la donnée ─────────
 
-function empty(title, sentence, command) {
+// Une commande à recopier est une impasse sur mobile et un détour au bureau : si
+// la Console du dock sait l'exécuter (liste blanche lue dans /commands, aucun
+// argument à fournir, hôte non lecture seule), l'état vide porte un bouton qui
+// la lance. `action` (`{ label, run }`) le remplace quand l'espace sait mieux.
+let consoleCatalogue = new Map();
+
+function consoleArgv(command) {
+  if (!command || host.readOnly) return null;
+  const words = command.trim().split(/\s+/);
+  if (words[0] !== 'grimoire') return null;
+  const rest = words.slice(1);
+  for (const depth of [2, 1]) {
+    const sub = consoleCatalogue.get(rest.slice(0, depth).join(' '));
+    if (!sub) continue;
+    const extra = rest.slice(depth);
+    return sub.positionals === 0 && extra.every((word) => sub.flags.has(word)) ? rest : null;
+  }
+  return null;
+}
+
+function empty(title, sentence, command, action, { compact = false } = {}) {
   const block = document.createElement('div');
-  block.className = 'empty';
+  block.className = compact ? 'empty empty-compact' : 'empty';
   const heading = document.createElement('h2');
   heading.append(icon('inbox'), mk('span', { text: title }));
   block.append(heading);
@@ -563,7 +812,48 @@ function empty(title, sentence, command) {
     code.textContent = command;
     block.append(code);
   }
+  const argv = action ? null : consoleArgv(command);
+  const resolved = action || (argv ? { label: 'Lancer dans la Console', run: () => runCommand(argv) } : null);
+  if (resolved) {
+    const button = mk('button', { type: 'button', class: 'btn', 'data-empty-action': '', text: resolved.label });
+    button.addEventListener('click', () => resolved.run());
+    block.append(mk('div', { class: 'empty-actions' }, button));
+  }
   return block;
+}
+
+/** Ce que la coque dit quand un espace laisse l'explorateur ou l'inspecteur muets. */
+function emptyPanelHint(which) {
+  if (which === 'explorer') {
+    return empty(
+      "Pas d'arborescence ici",
+      current === 'source'
+        ? "Aucun fichier à parcourir pour l'instant."
+        : "Cet espace n'a rien à parcourir à gauche. Les fichiers du projet, étage par étage, sont dans Source.",
+      null,
+      current === 'source' ? null : { label: 'Ouvrir Source', run: () => goto('source') },
+      { compact: true },
+    );
+  }
+  return empty(
+    'Rien à inspecter',
+    "Choisissez un élément dans la zone centrale : son détail s'affiche ici.",
+    null,
+    { label: 'Rechercher ou commander', run: () => openPalette() },
+    { compact: true },
+  );
+}
+
+/** Pose l'indication dans une zone latérale restée vide ; elle s'efface seule
+ * dès que l'espace y écrit (`watchPlaceholders`). */
+function fillEmptyPanels() {
+  for (const [which, id] of [['explorer', 'explorer-body'], ['inspector', 'inspector-body']]) {
+    const body = $(id);
+    if (body.children.length) continue;
+    const hint = emptyPanelHint(which);
+    hint.setAttribute(PLACEHOLDER, 'hint');
+    body.append(hint);
+  }
 }
 
 // ── Routage des espaces ─────────────────────────────────────────────────────
@@ -600,14 +890,21 @@ function buildSpaces() {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'tab';
+    button.setAttribute('role', 'tab');
+    button.id = `tab-space-${space.id}`;
+    button.setAttribute('aria-controls', 'canvas');
     button.dataset.space = space.id;
     button.dataset.term = space.term;
     button.append(icon(space.icon), mk('span', { class: 'tab-lbl', text: space.label }));
     button.setAttribute('aria-selected', 'false');
+    button.tabIndex = index === 0 ? 0 : -1;
+    // Nom accessible stable : sous 900 px seul l'onglet courant garde son libellé visible.
+    button.setAttribute('aria-label', space.label);
     button.title = `${space.label} — ⌘${index + 1}`;
     button.addEventListener('click', () => goto(space.id));
     nav.append(button);
   });
+  bindTablist(nav, { activate: 'manual' });
 }
 
 async function goto(id, params) {
@@ -630,14 +927,16 @@ async function goto(id, params) {
   // les recense pour poser `aria-selected` — poser aussi `data-space` sur
   // `<body>` le ferait matcher par ce même sélecteur).
   document.body.dataset.activeSpace = space.id;
-  for (const button of document.querySelectorAll('[data-space]')) {
-    button.setAttribute('aria-selected', String(button.dataset.space === space.id));
-  }
+  const tab = document.querySelector(`#spaces [data-space="${space.id}"]`);
+  markSelectedTab($('spaces'), tab);
+  revealTab($('spaces'), tab);
   const canvas = $('canvas');
-  canvas.replaceChildren();
+  canvas.setAttribute('aria-labelledby', `tab-space-${space.id}`);
+  canvas.setAttribute('aria-busy', 'true');
+  canvas.replaceChildren(...loadingNodes(`Chargement de l'espace ${space.label}…`, 5, { cover: true }));
   canvas.dataset.grid = space.id === 'concevoir' ? 'on' : 'off';
-  $('inspector-body').replaceChildren();
-  $('explorer-body').replaceChildren();
+  $('inspector-body').replaceChildren(...loadingNodes('Chargement du détail…', 3));
+  $('explorer-body').replaceChildren(...loadingNodes("Chargement de l'arborescence…", 3));
   docbar.setBreadcrumb([host.project || host.status?.slug || 'projet', space.label]);
   docbar.setZoom([], null);
   docbar.setViews([], null);
@@ -650,6 +949,8 @@ async function goto(id, params) {
     explorer: $('explorer-body'),
     signal: controller.signal,
     goto,
+    openPanel,
+    loading: (label, rows) => loadingNodes(label, rows),
     params: params || {},
     rail: { on: registerRailAction },
   };
@@ -657,12 +958,20 @@ async function goto(id, params) {
     const module = await import(`./spaces/${space.id}.js`);
     await module.mount(canvas, ctx);
   } catch (error) {
+    if (ctx.signal.aborted) return;
+    clearLoading(canvas);
     canvas.append(empty(
       `L'espace ${space.label} n'a pas pu s'ouvrir`,
       String(error && error.message ? error.message : error),
       null,
+      { label: 'Réessayer', run: () => goto(space.id, {}) },
     ));
   }
+  // Un `goto()` plus récent a repris la main : il gère lui-même son chargement.
+  if (ctx.signal.aborted) return;
+  for (const area of [canvas, $('inspector-body'), $('explorer-body')]) clearLoading(area);
+  canvas.setAttribute('aria-busy', 'false');
+  fillEmptyPanels();
 }
 
 // ── Palette de commandes ────────────────────────────────────────────────────
@@ -695,7 +1004,9 @@ async function buildPalette() {
   const [commandsResult, projectsResult, blueprintsResult, tasksResult, filesResult] =
     await Promise.allSettled([api.commands(), api.projects(), api.blueprints(), api.tasks(), api.files()]);
 
-  const commands = (settle(commandsResult, {}).commands || []).map((c) => ({
+  const catalogue = settle(commandsResult, {}).commands || [];
+  consoleCatalogue = new Map(catalogue.map((c) => [c.key, { flags: new Set(c.flags || []), positionals: c.positionals || 0 }]));
+  const commands = catalogue.map((c) => ({
     section: 'Commandes', label: c.command, hint: c.summary, command: c.command,
     run: () => runCommand(c.key.split(' ')),
   }));
@@ -838,6 +1149,11 @@ function bindShortcuts() {
     if (meta && event.shiftKey && event.key.toLowerCase() === 'f') { event.preventDefault(); toggleFocus(); return; }
     if (meta && /^[1-6]$/.test(event.key)) { event.preventDefault(); goto(SPACES[Number(event.key) - 1].id); return; }
 
+    if ($('palette').hidden && event.key === 'Escape' && isNarrow() && leaveDrawer()) {
+      event.preventDefault();
+      return;
+    }
+
     if (!$('palette').hidden) {
       if (event.key === 'Escape') { event.preventDefault(); closePalette(); }
       if (event.key === 'ArrowDown') { event.preventDefault(); movePalette(1); }
@@ -873,7 +1189,17 @@ async function main() {
   buildDock();
   bindResize();
   bindShortcuts();
-  $('st-theme').addEventListener('click', toggleTheme);
+  for (const button of document.querySelectorAll('#st-theme [data-theme-pref]')) {
+    button.addEventListener('click', () => setThemePref(button.dataset.themePref));
+  }
+  for (const area of [$('canvas'), $('inspector-body'), $('explorer-body')]) watchPlaceholders(area);
+  // Passer le seuil des 900 px (rotation, redimensionnement) recompose les
+  // panneaux : tiroirs fermés d'un côté, états mémorisés du bureau de l'autre.
+  narrowQuery.addEventListener('change', () => {
+    narrowDockSeen = false;
+    if (current) restorePanelsForSpace();
+    syncDrawer();
+  });
   $('st-density').addEventListener('click', toggleDensity);
   $('palette-open').addEventListener('click', () => openPalette());
   // Le chip projet ressemblait à un sélecteur mais n'avait aucun
@@ -893,6 +1219,7 @@ async function main() {
       'API locale injoignable',
       "Cette coque se sert elle-même : ouvrez-la depuis `grimoire serve` ou `grimoire cockpit serve`.",
       'grimoire serve',
+      { label: 'Réessayer', run: () => location.reload() },
     ));
   }
 
@@ -904,7 +1231,7 @@ async function main() {
     // la même avant et après l'amorçage et le rejeu ci-dessous ne changeait
     // rien d'observable. Depuis #351/#356, `cockpit serve` résout un vrai
     // slug : sans ce second appel, thème et densité se lisaient sous la
-    // bonne clé après un clic (`toggleTheme`, appelé après amorçage) mais
+    // bonne clé après un clic (`setThemePref`, appelé après amorçage) mais
     // sous `atelier` après un rechargement — la préférence semblait perdue.
     applyPreferences();
     $('project-name').textContent = host.project || status.slug || '(projet servi)';
@@ -921,16 +1248,25 @@ async function main() {
 
   // L'état des panneaux (replié, entrouvert, épinglé, largeur) est restauré
   // par `goto()` lui-même, par espace et par projet — voir `restorePanelsForSpace`.
-  await goto((location.hash || '#piloter').slice(1));
-  window.addEventListener('hashchange', () => goto(location.hash.slice(1)));
+  //
+  // Sans API il n'y a pas d'espace à monter : le bloc « API locale injoignable »
+  // posé plus haut doit rester. Avant, `goto()` l'effaçait aussitôt pour afficher
+  // l'erreur d'un espace qui n'avait aucune donnée.
+  if (status) {
+    await goto((location.hash || '#piloter').slice(1));
+    window.addEventListener('hashchange', () => goto(location.hash.slice(1)));
+  } else {
+    restorePanelsForSpace();
+  }
 
   // Surface de test : Playwright interroge la coque plutôt que ses détails.
   window.GrimoireWorkspace = {
     spaces: SPACES.map((s) => s.id),
-    goto, host, glossary, dock,
+    goto, host, glossary, dock, empty,
     panelState, setPanel,
     get focus() { return root.dataset.focus; },
     get theme() { return root.dataset.theme; },
+    get themePref() { return root.dataset.themePref; },
     get density() { return root.dataset.density; },
     get space() { return current; },
     get paletteOpen() { return !$('palette').hidden; },
