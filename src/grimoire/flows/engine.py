@@ -695,6 +695,23 @@ class FlowEngine:
                     origin=ORIGIN_HUMAN, question_id=qid, attested_by_flow=True,
                 )
 
+    def _release_linked_question(self, run_id: str, order: list[str], wfi: WorkflowInstance) -> None:
+        """Un run abandonné ne tranchera plus sa question de checkpoint : la tâche liée qu'elle garait se réveille (K6-S2-01).
+
+        Meilleur effort, comme :meth:`_ask_linked_task` : l'abandon du run ne dépend pas du ledger.
+        """
+        import contextlib
+
+        from grimoire.core.exceptions import GrimoireError
+
+        service = self._linked_service(wfi)
+        if service is None:
+            return
+        with contextlib.suppress(GrimoireError, OSError, ValueError):
+            service.release_flow_question(
+                wfi.task_id, {_flow_question_id(run_id, node) for node in order}, self._actor_id, cause="flow_aborted"
+            )
+
     def _authority(self, run_id: str) -> CheckpointJournal:
         from grimoire.flows.attestation import CheckpointJournal
 
@@ -1293,4 +1310,6 @@ class FlowEngine:
         wfi = self._kernel.get_instance(run_id)
         if wfi is None:
             raise GrimoireRuntimeError(f"run introuvable côté kernel : {run_id}")
-        return self._kernel.abort(wfi.id, self._ctx_for(wfi), reason=reason)
+        aborted = self._kernel.abort(wfi.id, self._ctx_for(wfi), reason=reason)
+        self._release_linked_question(run_id, list(self._load_meta(run_id).order), wfi)
+        return aborted

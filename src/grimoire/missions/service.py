@@ -68,7 +68,7 @@ _RISK_ORDER = (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Collection, Mapping
 
     from grimoire.core.agentic_standard import StandardRuntimeArtifact
     from grimoire.memory.manager import MemoryManager
@@ -613,15 +613,46 @@ class TaskService:
         self.ledger.add_directive(
             task_id, f"Réponse à « {question.text} » : {answer}", actor_id=actor, kind="directive", origin=origin
         )
-        return self._settle_answer(task, question, answer, actor)
+        return self._settle_answer(task, question, answer, actor, in_place=attested_by_flow)
 
-    def _settle_answer(self, task: MissionTask, question: Question, answer: str, actor: str) -> TaskMove:
+    def _settle_answer(
+        self, task: MissionTask, question: Question, answer: str, actor: str, *, in_place: bool = False
+    ) -> TaskMove:
         if answer.lower() == ABANDON and ABANDON in (o.lower() for o in question.options):
-            return self.cancel(task.id, f"abandon sur réponse humaine à {question.id}", actor)
-        woken = self.ledger.wake(task.id, actor_id=actor, reason=f"réponse humaine à {question.id}", cause="answered")
+            return self.cancel(task.id, f"abandon sur réponse humaine à {question.id}", actor, force=True)
+        woken = None
+        if in_place and task.claim is not None and not task.claim.is_expired():
+            # K6-S2-02 : le run lié continue chez son titulaire — la décision attestée le reprend sur
+            # place (même epoch), sans rendre le bail qu'un autre worker pourrait prendre.
+            with contextlib.suppress(GrimoireMissionError):
+                woken = self.ledger.resume_attested(
+                    task.id, actor_id=actor, reason=f"décision attestée à {question.id}"
+                )
+        if woken is None:
+            woken = self.ledger.wake(
+                task.id, actor_id=actor, reason=f"réponse humaine à {question.id}", cause="answered"
+            )
         return TaskMove(
             task=woken, previous=TaskState.WAITING, verdict=GateVerdict("", "", ()), board_path=self.project_board()
         )
+
+    def release_flow_question(self, task_id: str, question_ids: Collection[str], actor: str, *, cause: str) -> bool:
+        """Lève la question de checkpoint d'un run qui ne la tranchera plus (K6-S2-01), sans fabriquer de réponse.
+
+        Un run abandonné ne présentera plus son checkpoint : la question ne peut plus être attestée dans le
+        flux, et le canal humain la refuse (``origin == flow``). La tâche se réveille donc en ``ready`` avec
+        *cause* tracée sur la transition, aucune ``task.human_answered`` n'étant écrite. Une autre question
+        (posée par ``task ask``, ou par un autre run) n'est pas touchée.
+        """
+        task = self.require(task_id)
+        waiting = task.waiting
+        if task.status is not TaskState.WAITING or waiting is None or waiting.question is None:
+            return False
+        if waiting.question.origin != "flow" or waiting.question.id not in question_ids:
+            return False
+        self.ledger.wake(task_id, actor_id=actor, reason=f"question {waiting.question.id} levée ({cause})", cause=cause)
+        self.project_board()
+        return True
 
     def wake_due(self, *, apply: bool = True, now: datetime | None = None) -> list[WakeDecision]:
         """La part « attente » du tick : rend les tâches dont l'attente est levée — jamais une ``waiting(human)`` au minuteur.
@@ -843,7 +874,7 @@ class TaskService:
             raise TaskRefusedError(task_id, verdict)
         held = task.claim
         held_by_other = (
-            task.status in (TaskState.CLAIMED, TaskState.RUNNING)
+            task.status in (TaskState.CLAIMED, TaskState.RUNNING, TaskState.WAITING)  # waiting garde le claim
             and held is not None
             and not held.is_expired()
             and held.actor_id != actor

@@ -239,3 +239,36 @@ def test_resume_stays_open_for_ci_quota_and_paused(tmp_path: Path) -> None:
         tid = _running(service, f"T-{reason}", actor=f"agent-{reason}")
         service.wait(tid, reason, f"agent-{reason}")
         assert service.resume(tid, f"agent-{reason}").task.status is S.RUNNING
+
+
+# ── K6-S2-03 : un autre acteur n'annule pas une tâche en attente sans force ──
+
+
+def test_cancelling_a_waiting_task_held_by_another_actor_needs_force(tmp_path: Path) -> None:
+    """Sur 77d8d9a3/bac124e0 `held_by_other` ne couvrait que claimed/running : waiting garde pourtant le claim."""
+    clock = _Clock()
+    service = _service(tmp_path, clock)
+    tid = _running(service, actor="agent-a")
+    # Témoin : tenue en running, l'annulation par un autre sans force est refusée.
+    with pytest.raises(TaskRefusedError):
+        service.cancel(tid, "plus utile", "agent-b")
+    service.ask(tid, "Fusionner ?", "agent-a", kind="merge", options=("oui", "non"))
+    before = [d.task_id for d in service.pending_decisions()]
+    assert before == [tid]
+
+    with pytest.raises(TaskRefusedError):
+        service.cancel(tid, "plus utile", "agent-b")
+    assert service.require(tid).status is S.WAITING
+    assert [d.task_id for d in service.pending_decisions()] == before
+
+    # Le titulaire, ou un acteur qui force explicitement, annule.
+    service.cancel(tid, "plus utile", "agent-b", force=True)
+    assert service.require(tid).status is S.CANCELLED
+
+
+def test_the_holder_cancels_its_own_waiting_task_without_force(tmp_path: Path) -> None:
+    service = _service(tmp_path, _Clock())
+    tid = _running(service, actor="agent-a")
+    service.ask(tid, "Fusionner ?", "agent-a", kind="merge", options=("oui", "non"))
+    service.cancel(tid, "abandon", "agent-a")
+    assert service.require(tid).status is S.CANCELLED

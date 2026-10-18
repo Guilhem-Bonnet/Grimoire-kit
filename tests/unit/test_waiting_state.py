@@ -166,7 +166,7 @@ def test_waiting_keeps_its_fields_through_a_replay_and_clears_on_exit(tmp_path: 
     assert task.waiting.reason == "human" and task.waiting.until == ""
     assert task.waiting.question == question and task.waiting.question.options == ("fusionner", "attendre")
     assert MissionLedger(service.ledger_root).get_task(tid).to_dict()["waiting"]["question"]["id"] == question.id  # type: ignore[union-attr]
-    service.cancel(tid, "plus utile", "human")
+    service.cancel(tid, "plus utile", "human", force=True)  # waiting garde le claim de agent-a
     assert MissionLedger(service.ledger_root).get_task(tid).waiting is None  # type: ignore[union-attr]
 
 

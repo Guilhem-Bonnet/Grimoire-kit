@@ -717,6 +717,7 @@ class MissionLedger:
         step: str = "",
         *,
         reaper: bool = False,
+        attested: bool = False,
     ) -> MissionTask:
         task = self._tasks.get(task_id)
         if task is None:
@@ -755,7 +756,7 @@ class MissionLedger:
             raise GrimoireMissionError(
                 f"Invalid task transition {task.status.value} → {to_state.value} for {task_id}"
             )
-        self._waiting_guard(task, to_state, extra_payload, lease_epoch, reaper)
+        self._waiting_guard(task, to_state, extra_payload, lease_epoch, reaper, attested)
         payload: dict[str, Any] = {
             "task_id": task_id,
             "from_state": task.raw_status if task.is_unknown_state else task.status.value,
@@ -818,6 +819,7 @@ class MissionLedger:
         extra_payload: dict[str, Any] | None,
         lease_epoch: int | None,
         waker: bool,
+        attested: bool = False,
     ) -> None:
         """Les trois règles de l'état ``waiting`` (K6, §2.1), tenues ici pour qu'aucune surface ne les contourne.
 
@@ -825,7 +827,7 @@ class MissionLedger:
         - ``waiting → ready`` : le tick seul (:meth:`wake`), jamais un geste ``move`` ;
         - ``waiting → running`` : la même session, au même epoch — reprise sur place, sauf
           ``waiting(human)`` : une question en attente (``task ask``, ou posée par la récolte) ne
-          se lève que par la réponse humaine, qui réveille la tâche (``ready``) — jamais par un agent.
+          se lève que par la réponse humaine (``ready``), jamais par un agent — hors *attested* (:meth:`resume_attested`).
         """
         if to_state is TaskState.WAITING:
             raw = (extra_payload or {}).get("waiting")
@@ -842,7 +844,7 @@ class MissionLedger:
             )
         if (
             task.status is TaskState.WAITING and to_state is TaskState.RUNNING
-            and task.waiting is not None and task.waiting.reason == "human"
+            and task.waiting is not None and task.waiting.reason == "human" and not attested
         ):
             asked = task.waiting.question.id if task.waiting.question is not None else "?"
             raise GrimoireMissionError(
@@ -880,6 +882,19 @@ class MissionLedger:
             return self._transition_locked(
                 task_id, TaskState.READY, actor_id, reason or f"réveil ({cause})", None,
                 {WOKEN_KEY: {"cause": cause}, "fence_epoch": fence}, None, reaper=True,
+            )
+
+    def resume_attested(self, task_id: str, *, actor_id: str, reason: str) -> MissionTask:
+        """``waiting → running`` sur place (K6-S2-02) : décision de checkpoint attestée, le run continue chez son titulaire."""
+        with _ledger_file_lock(self._events_path):
+            self._invalidate()
+            self._load()
+            task = self._tasks.get(task_id)
+            if task is None or task.claim is None:
+                raise GrimoireMissionError(f"Reprise refusée pour {task_id} : aucun claim tenu")
+            epoch = task.claim.lease_epoch
+            return self._transition_locked(
+                task_id, TaskState.RUNNING, actor_id, reason, None, None, TaskState.WAITING, epoch, attested=True
             )
 
     def claim_task(self, task_id: str, actor_id: str, host_id: str, exclusive_files: tuple[str, ...] = ()) -> MissionTask:

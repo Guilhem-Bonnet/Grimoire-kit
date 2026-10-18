@@ -199,9 +199,63 @@ def test_a_destructive_checkpoint_asks_the_linked_task_and_an_attested_decision_
 
     ledger = MissionLedger(tmp_path / "_grimoire-runtime-output" / "ledger")
     woken = ledger.get_task("FLOW-k6-gate")
-    assert woken is not None and woken.status is S.READY and woken.waiting is None
+    # K6-S2-02 : le run continue chez son titulaire — reprise sur place, le bail n'est pas rendu.
+    assert woken is not None and woken.status is S.RUNNING and woken.waiting is None
+    assert woken.claim is not None and woken.claim.actor_id == "flow"
     [answer] = [e for e in ledger.list_events("FLOW-k6-gate") if e.event_type == "task.human_answered"]
     assert answer.payload["question_id"] == question.id and answer.payload["origin"] == "human"
+
+
+def test_an_attested_decision_keeps_the_lease_of_the_run_that_goes_on(tmp_path: Path) -> None:
+    """K6-S2-02 : sur 77d8d9a3/bac124e0 la réponse attestée rendait le bail (waiting → ready) alors que le run continue."""
+    _linked_task(tmp_path)
+    engine = _engine(tmp_path)
+    wfi, _ = engine.run(_blueprint(tmp_path), executor=_quiet())
+    _approve(engine, wfi.id)  # aucun tour humain : la tâche se gare
+    _human_turn(tmp_path)
+    accepted = _approve(engine, wfi.id)
+    assert accepted.ok is True and accepted.finished is False
+
+    service = TaskService(tmp_path)
+    task = service.require("FLOW-k6-gate")
+    assert task.status is S.RUNNING and task.claim is not None and task.claim.actor_id == "flow"
+    with pytest.raises(GrimoireMissionError):  # un autre worker ne la prend pas en cours de flux
+        service.claim("FLOW-k6-gate", "worker-b", host="host-claude-code-cli")
+    # Le titulaire d'origine garde la main : il rend sa preuve sans que son bail ait changé.
+    service.ledger.transition_task("FLOW-k6-gate", S.NEEDS_VERIFICATION, actor_id="flow")
+    assert service.require("FLOW-k6-gate").status is S.NEEDS_VERIFICATION
+
+
+def test_aborting_the_run_lifts_the_flow_question_it_parked_the_task_on(tmp_path: Path) -> None:
+    """K6-S2-01 : sur 77d8d9a3/bac124e0 l'abandon du run laissait la tâche en waiting(human) sans issue que `task cancel`."""
+    _linked_task(tmp_path)
+    engine = _engine(tmp_path)
+    wfi, _ = engine.run(_blueprint(tmp_path), executor=_quiet())
+    _approve(engine, wfi.id)
+    service = TaskService(tmp_path)
+    assert service.require("FLOW-k6-gate").status is S.WAITING and len(service.pending_decisions()) == 1
+
+    engine.abort(wfi.id, reason="abandon")
+
+    service = TaskService(tmp_path)  # un autre lecteur : le moteur a écrit par sa propre instance
+    task = service.require("FLOW-k6-gate")
+    assert task.status is S.READY and task.waiting is None
+    assert service.pending_decisions() == []
+    [woken] = [e for e in service.ledger.list_events("FLOW-k6-gate") if e.event_type == "task.transitioned"][-1:]
+    assert woken.payload["woken"]["cause"] == "flow_aborted"
+    # Aucune réponse humaine n'a été fabriquée pour lever la question.
+    assert [e for e in service.ledger.list_events("FLOW-k6-gate") if e.event_type == "task.human_answered"] == []
+
+
+def test_aborting_a_run_leaves_another_question_of_the_task_alone(tmp_path: Path) -> None:
+    _linked_task(tmp_path)
+    engine = _engine(tmp_path)
+    wfi, _ = engine.run(_blueprint(tmp_path), executor=_quiet())
+    service = TaskService(tmp_path)
+    service.ask("FLOW-k6-gate", "Fusionner ?", "flow", kind="merge", options=("oui", "non"))
+    engine.abort(wfi.id, reason="abandon")
+    task = MissionLedger(tmp_path / "_grimoire-runtime-output" / "ledger").get_task("FLOW-k6-gate")
+    assert task is not None and task.status is S.WAITING  # la question n'est pas celle de ce run
 
 
 def test_a_flow_question_is_not_answered_from_the_cockpit_or_the_cli(tmp_path: Path) -> None:
