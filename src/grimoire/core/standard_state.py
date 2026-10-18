@@ -462,8 +462,11 @@ def resolve_active_task(
 
     session = session_id.strip() or current_session_id(environ)
     actor = str(environ.get(ACTOR_ENV, "")).strip()
+    # Un seul rejeu du ledger par résolution (K13) : les claims tenus servent à la règle 2
+    # comme à la règle 3, qui les relisaient chacune en entier.
+    every_held = _held_claims(project_root)
     if session:
-        mine = [c for c in _active_claims(project_root) if c.session_id == session]
+        mine = [c for c in every_held if not c.expired and c.session_id == session]
         chosen = _claim_of_session(mine, actor)
         if chosen is not None:
             try:
@@ -471,7 +474,6 @@ def resolve_active_task(
             except ValueError:
                 pass
 
-    every_held = _held_claims(project_root)
     held = [c for c in every_held if c.actor == actor] if actor else every_held
     claims = [c for c in held if not c.expired]
     # Issue #710 : un claim d'une autre session ne désigne jamais la tâche de

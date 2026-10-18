@@ -28,6 +28,7 @@ from typing import Any
 
 from grimoire.core.exceptions import GrimoireMissionError
 from grimoire.core.fsio import atomic_write, locked
+from grimoire.missions import ledger_snapshot as snapshot
 from grimoire.missions.lease import (
     CLOCK_TOLERANCE_SECONDS,
     DEFAULT_LEASE_TTL_SECONDS,
@@ -322,6 +323,7 @@ class MissionLedger:
         #: K2 : clés ``idem = (task_id, lease_epoch, step)`` des effets déjà appliqués.
         self._idem_seen: set[str] = set()
         self._loaded = False
+        self._snapshot: snapshot.Cover | None = None  # K13 : ce que l'instantané restauré couvre
 
     # ── Private helpers ────────────────────────────────────────────────────
 
@@ -335,7 +337,8 @@ class MissionLedger:
     def _replay_events(self) -> None:
         if not self._events_path.exists():
             return
-        for line in self._events_path.read_text(encoding="utf-8").splitlines():
+        replay = snapshot.resume_from_snapshot(self)  # K13 : l'état d'un instantané prouvé, puis la suite seule
+        for line in replay.tail.splitlines():
             line = line.strip()
             if not line:
                 continue
@@ -411,6 +414,7 @@ class MissionLedger:
                         {**current.to_dict(), "accepted_risks": [*(dict(r) for r in current.accepted_risks), risk]}
                     )
             self._events.append(LedgerEvent.from_dict(raw))
+        snapshot.save_if_slow(self, replay)
 
     def _replay_link(self, raw: dict[str, Any], payload: dict[str, Any]) -> None:
         """Ajoute la dépendance d'un événement de lien à la tâche source, sans doublon."""
@@ -497,6 +501,7 @@ class MissionLedger:
         self._epoch_high = {}
         self._rejected = {}
         self._idem_seen = set()
+        self._snapshot = None
         self._loaded = False
 
     def append_event(self, event_type: str, entity_id: str, entity_kind: str, actor_id: str, payload: dict[str, Any]) -> LedgerEvent:
@@ -951,8 +956,8 @@ class MissionLedger:
         """
         self._load()
         moment = now or self._now()
-        stamps = [t for t in (parse_instant(e.created_at) for e in self._events) if t is not None]
-        if stamps and moment < max(stamps) - timedelta(seconds=CLOCK_TOLERANCE_SECONDS):
+        latest = snapshot.latest_event_time(self)
+        if latest is not None and moment < latest - timedelta(seconds=CLOCK_TOLERANCE_SECONDS):
             return "unknown"
         return "ok"
 
@@ -1431,7 +1436,7 @@ class MissionLedger:
     def list_events(self, entity_id: str | None = None) -> list[LedgerEvent]:
         """Return ledger events, optionally scoped to one entity."""
         self._load()
-        events = list(self._events)
+        events = list(snapshot.all_events(self))
         if entity_id is not None:
             events = [e for e in events if e.entity_id == entity_id]
         return events
@@ -1470,7 +1475,7 @@ class MissionLedger:
 
     def export_jsonl(self, path: Path) -> int:
         self._load()
-        lines = [json.dumps(e.to_dict(), ensure_ascii=False) for e in self._events]
+        lines = [json.dumps(e.to_dict(), ensure_ascii=False) for e in snapshot.all_events(self)]
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         return len(lines)
 

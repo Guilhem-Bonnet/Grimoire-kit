@@ -233,13 +233,15 @@ ignore_missing_imports = true
 testpaths = ["tests"]
 pythonpath = ["src"]
 # Pas de `-x` ici : il masquait chaque échec derrière le premier, y compris en CI (D-10).
-addopts = "-q --tb=short"
+# `perf` (bancs de latence, K13) est hors CI par défaut ; `-m perf` les lance (le dernier `-m` l'emporte).
+addopts = "-q --tb=short -m 'not perf'"
 markers = [
     "no_session_token: le test envoie ses écritures sans le jeton de session des serveurs locaux",
     "slow: marks tests as slow (deselect with -m 'not slow')",
     "integration: marks tests requiring external services (network, Ollama, Qdrant)",
     "regression: marks known regression tests",
     "bench: marks performance benchmark tests",
+    "perf: bancs de latence chronométrés (budgets de D21), hors CI par défaut ; lancer avec -m perf",
 ]
 
 [tool.coverage.run]

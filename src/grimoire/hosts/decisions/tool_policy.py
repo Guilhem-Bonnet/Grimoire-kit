@@ -341,7 +341,7 @@ def _record_hold(hook: HookInput, decision: Decision) -> None:
         record_policy_hold(
             hook.project_root,
             session_id=hook.session_id,
-            task_id=active_task_id(hook.project_root),
+            task_id=str(decision.detail.get("task_id") or active_task_id(hook.project_root)),
             hook_id="grimoire.tool-policy",
             reason=f"tool_policy:{decision.outcome.value}",
             fingerprint=action_fingerprint(tool_name, detail),
@@ -382,7 +382,11 @@ def _evaluate_tool_policy(hook: HookInput) -> Decision:
     if read_only and not has_temporal_rules:
         return _untrusted_escalation(hook, facts) or Decision()
 
-    task_id = active_task_id(hook.project_root, session_id=hook.session_id)
+    # K13 : la tâche d'une session qui tient son bail se lit dans son fichier de bail ; le ledger
+    # n'est rejoué que pour une session sans bail noté (PreToolUse p95 ≤ 50 ms, D21).
+    from grimoire.hosts.decisions.lease_brake import held_task_id
+
+    task_id = held_task_id(hook) or active_task_id(hook.project_root, session_id=hook.session_id)
     risk = _risk_profile(hook.project_root)
     base_verdict = (
         _engine(base_rules).evaluate(_policy_request(hook, facts, task_id, risk))
@@ -401,6 +405,9 @@ def _evaluate_tool_policy(hook: HookInput) -> Decision:
 
     detail = {
         "tool": hook.tool_name,
+        # Gardée dans le détail : la trace du gateway et le journal des holds la reprennent
+        # au lieu de la résoudre une deuxième fois, ledger rejoué à chaque fois.
+        "task_id": task_id,
         "family": facts.family,
         "mutation": facts.mutation.value,
         "risk_profile": risk,
