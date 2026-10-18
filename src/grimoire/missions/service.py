@@ -331,7 +331,11 @@ class TaskService:
         """Les vagues du plan, ``file_overlaps`` compris (:func:`grimoire.missions.waves.compute_waves`)."""
         from grimoire.missions.waves import compute_waves
 
-        return compute_waves(self.ledger.list_tasks(mission_id))
+        everything = self.ledger.list_tasks()
+        if mission_id is None:
+            return compute_waves(everything)
+        # Les dépendances se résolvent contre tout le ledger, comme au claim : seul le rapport est filtré.
+        return compute_waves(everything, only=[t.id for t in everything if t.mission_id == mission_id])
 
     def attach_session(
         self, task_id: str, session_id: str, *, session_host: str = "", actor: str = "hook", explicit: bool = False

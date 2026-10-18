@@ -791,6 +791,8 @@ def task_waves(
         )
     for tid, targets in plan["unresolved"].items():
         console.print(f"[yellow]![/yellow] {tid} : dépendance inconnue ou annulée ({', '.join(targets)})")
+    for tid, causes in plan["blocked"].items():
+        console.print(f"[yellow]![/yellow] {tid} : attend une tâche qui ne peut pas être planifiée ({', '.join(causes)})")
     if plan["cyclic"]:
         console.print(f"[red]✗[/red] tâches en cycle : {', '.join(plan['cyclic'])}")
     if not plan["waves"]:

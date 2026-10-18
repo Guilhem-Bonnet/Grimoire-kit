@@ -156,3 +156,103 @@ def test_un_evenement_de_lien_deja_ecrit_bloque_le_claim(ledger: MissionLedger, 
     ledger.append_event("task.linked", b.id, "task", "cli", {"task_id": b.id, "depends_on": a.id, "kind": "blocks"})
     with pytest.raises(GrimoireMissionError, match=a.id):
         ledger.claim_task(b.id, "marcus", "local")
+
+
+# ── Correctifs de revue W5-01 : chaîne derrière une dépendance non résolue, dépendances inter-missions, import task-flow ──
+
+
+def _plan(ledger: MissionLedger, mission: str, *titres: str):
+    return [ledger.create_task(mission, t, acceptance=(ACC,)) for t in titres]
+
+
+def test_waves_une_chaine_derriere_une_annulee_nest_pas_un_cycle(ledger: MissionLedger, mission: str) -> None:
+    """A annulée <- B <- C : B est `unresolved`, C est bloquée par B, et rien n'est `cyclic`."""
+    from grimoire.missions.waves import compute_waves
+
+    a, b, c, libre = _plan(ledger, mission, "A", "B", "C", "Libre")
+    ledger.link_tasks(b.id, a.id)
+    ledger.link_tasks(c.id, b.id)
+    ledger.transition_task(a.id, TaskState.CANCELLED)
+    plan = compute_waves(ledger.list_tasks())
+    assert plan["waves"] == [{"wave": 1, "tasks": [libre.id]}]
+    assert plan["unresolved"] == {b.id: [a.id]}
+    assert plan["blocked"] == {c.id: [b.id]}
+    assert plan["cyclic"] == []
+
+
+def test_waves_cyclic_ne_garde_que_les_composantes_en_cycle(ledger: MissionLedger, mission: str) -> None:
+    """Un cycle écrit hors `link_tasks` (rejeu d'un ancien ledger) : ses membres sont `cyclic`, l'aval est `blocked`."""
+    from grimoire.missions.waves import compute_waves
+
+    x, y, z, aval, libre = _plan(ledger, mission, "X", "Y", "Z", "Aval", "Libre")
+    for tid, dep in ((x.id, y.id), (y.id, z.id), (z.id, x.id), (aval.id, z.id)):
+        ledger.append_event("task.linked", tid, "task", "cli", {"task_id": tid, "depends_on": dep, "kind": "blocks"})
+    plan = compute_waves(MissionLedger(ledger._root).list_tasks())
+    assert plan["cyclic"] == sorted([x.id, y.id, z.id])
+    assert plan["blocked"] == {aval.id: [z.id]}
+    assert plan["unresolved"] == {}
+    assert plan["waves"] == [{"wave": 1, "tasks": [libre.id]}]
+
+
+def test_waves_une_dependance_vers_une_autre_mission_close_libere_la_tache(tmp_path: Path) -> None:
+    """Le claim résout `X` (close, autre mission) ; `task waves --mission` doit le résoudre aussi."""
+    service = TaskService(tmp_path)
+    m1 = service.ledger.create_mission(title="M1", origin="test").id
+    m2 = service.ledger.create_mission(title="M2", origin="test").id
+    x = _pret(service.ledger, m1, "X")
+    _clore(service.ledger, x.id)
+    y = _pret(service.ledger, m2, "Y")
+    service.ledger.link_tasks(y.id, x.id)
+    plan = service.waves(m2)
+    assert plan["waves"] == [{"wave": 1, "tasks": [y.id]}]
+    assert plan["unresolved"] == {} and plan["cyclic"] == [] and plan["blocked"] == {}
+    service.ledger.claim_task(y.id, "marcus", "local")  # le claim, lui, aboutit
+
+
+def test_waves_une_dependance_ouverte_dune_autre_mission_nest_ni_inconnue_ni_cyclique(tmp_path: Path) -> None:
+    service = TaskService(tmp_path)
+    m1 = service.ledger.create_mission(title="M1", origin="test").id
+    m2 = service.ledger.create_mission(title="M2", origin="test").id
+    x = _pret(service.ledger, m1, "X")
+    y = _pret(service.ledger, m2, "Y")
+    service.ledger.link_tasks(y.id, x.id)
+    plan = service.waves(m2)
+    assert plan["waves"] == [{"wave": 2, "tasks": [y.id]}]
+    assert plan["unresolved"] == {} and plan["cyclic"] == [] and plan["blocked"] == {}
+    assert x.id not in json.dumps(plan["waves"])
+
+
+def _flow_events(path: Path, *events: dict[str, object]) -> None:
+    with path.open("a", encoding="utf-8") as fh:
+        for event in events:
+            fh.write(json.dumps(event) + "\n")
+
+
+def test_import_task_flow_un_claim_refuse_ne_fait_pas_avorter_limport(ledger: MissionLedger, tmp_path: Path) -> None:
+    from grimoire.missions.task_flow_adapter import _task_id, import_task_flow_events
+
+    events = tmp_path / "events.jsonl"
+    _flow_events(
+        events,
+        {"task": "build", "event": "task-start", "flow": "f"},
+        {"task": "deploy", "event": "task-end", "flow": "f", "status": "failed", "exitCode": 1},
+    )
+    first = import_task_flow_events(ledger, events)
+    assert first.tasks_created == 2
+    build, deploy = _task_id("build"), _task_id("deploy")
+    ledger.link_tasks(deploy, build)
+    _flow_events(
+        events,
+        {"task": "deploy", "event": "task-start", "flow": "f", "n": 2},  # failed -> ready -> claim refusé
+        {"task": "lint", "event": "task-start", "flow": "f"},
+    )
+    report = import_task_flow_events(ledger, events)  # avortait sur GrimoireMissionError
+    assert ledger.get_task(_task_id("lint")).status is TaskState.RUNNING  # type: ignore[union-attr]
+    assert ledger.get_task(deploy).status is TaskState.READY  # type: ignore[union-attr]
+    assert report.events_deferred == 1 and report.events_imported == 1
+    # Rien n'est perdu : l'événement différé est rejoué quand la dépendance est close.
+    ledger.transition_task(build, TaskState.NEEDS_VERIFICATION)
+    ledger.transition_task(build, TaskState.CLOSED)
+    retry = import_task_flow_events(ledger, events)
+    assert ledger.get_task(deploy).status is TaskState.RUNNING  # type: ignore[union-attr]
+    assert retry.events_deferred == 0 and retry.events_imported == 1
