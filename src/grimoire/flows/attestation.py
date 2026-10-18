@@ -37,6 +37,11 @@ d'amendements, plafond, motif) dans la décision. Limite : le compteur est celui
 du journal du run, y compris des ``amend`` non attestés — il borne la
 persévérance, il ne prouve pas que N humains ont relu ; l'attestation de
 ``accept_as_is`` reste, elle, exigée comme celle de ``approve``.
+Octroi d'autonomie (W5-06, :mod:`.autonomy`) : une décision ``approve`` ou
+``accept_as_is`` non attestée, sur un checkpoint que couvre un octroi valide,
+est acceptée avec le statut ``granted:<grant_id>`` — jamais ``attested`` :
+aucun humain n'a vu ce checkpoint. Un octroi révoqué qui le couvrait est nommé
+dans le refus.
 Python seul : aucune de ces décisions ne traverse ``grimoire_flows_core``.
 """
 
@@ -46,7 +51,7 @@ import hashlib
 import json
 import re
 import uuid
-from collections.abc import Collection, Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -61,6 +66,7 @@ __all__ = [
     "ATTESTED",
     "CONSUMED_TURNS_FILENAME",
     "DEFAULT_MAX_AMENDMENTS",
+    "GRANTED_PREFIX",
     "NO_HUMAN_TURN",
     "UNATTESTED",
     "Attestation",
@@ -79,6 +85,11 @@ DEFAULT_MAX_AMENDMENTS = 3
 
 ATTESTED = "attested"
 UNATTESTED = "unattested"
+#: Statut d'une décision prise sous octroi d'autonomie (W5-06) : ``granted:<grant_id>``.
+GRANTED_PREFIX = "granted:"
+#: Ce que l'octroi qui couvre un checkpoint dit de lui (W5-06) : ``(grant_id, texte de révocation)``,
+#: texte vide si l'octroi est valide, ``None`` si aucun octroi ne couvre ce checkpoint.
+GrantLookup = Callable[[], tuple[str, str] | None]
 
 NO_HUMAN_TURN = "no_human_turn_since_challenge"
 _REASONS: dict[str, str] = {
@@ -124,6 +135,10 @@ class Attestation:
     @property
     def attested(self) -> bool:
         return self.status == ATTESTED
+
+    @property
+    def granted(self) -> bool:
+        return self.status.startswith(GRANTED_PREFIX)
 
     def explain(self) -> str:
         return _REASONS.get(self.reason, self.reason)
@@ -251,7 +266,8 @@ class CheckpointJournal:
                 out.add((str(data.get("session_id", "")), str(data.get("turn_ts", "")), str(data.get("turn_sha256", ""))))
         return frozenset(out)
 
-    def _consume_turn(self, node_id: str, attestation: Attestation) -> None:
+    def consume_turn(self, node_id: str, attestation: Attestation) -> None:
+        """Inscrit le tour qui atteste *attestation* au registre commun : il n'attestera plus rien."""
         entry = {
             "session_id": attestation.session_id,
             "turn_ts": attestation.turn_ts,
@@ -281,7 +297,7 @@ class CheckpointJournal:
         accepted_risk: Mapping[str, Any] | None = None,
     ) -> None:
         if attestation.attested:
-            self._consume_turn(node_id, attestation)
+            self.consume_turn(node_id, attestation)
         extra = {"accepted_risk": dict(accepted_risk)} if accepted_risk else {}
         self._append(
             {
@@ -383,6 +399,7 @@ def judge_checkpoint(
     destructive: bool,
     cap: int = DEFAULT_MAX_AMENDMENTS,
     env: Mapping[str, str] | None = None,
+    grant: GrantLookup | None = None,
 ) -> CheckpointGate | None:
     """Classe la décision de *output* ; ``None`` si elle n'est pas une décision valide (déjà un défaut nommé).
 
@@ -391,7 +408,9 @@ def judge_checkpoint(
     compte vers *cap*. ``accept_as_is`` est refusé tant que *cap* amendements
     ne sont pas inscrits, puis exige le risque nommé ; accepté, il porte
     ``accepted_risk``. ``approve``/``accept_as_is`` non attestés sont refusés
-    sur un checkpoint destructif (``refusal``), acceptés avec ``warning`` ailleurs.
+    sur un checkpoint destructif (``refusal``), acceptés avec ``warning`` ailleurs —
+    sauf sous un octroi valide (*grant*, W5-06) : acceptés ``granted:<grant_id>``.
+    *grant* n'est consulté que pour une décision qui avance sans attestation.
     """
     decision = output.get("checkpoint_decision")
     if decision not in ("approve", "reject", "amend", "accept_as_is"):
@@ -417,8 +436,15 @@ def judge_checkpoint(
         accepted = {"amendments": done, "cap": cap, "reason": reason}
     if decision not in _ADVANCING or attestation.attested:
         return CheckpointGate(str(decision), reason, attestation, accepted_risk=accepted)
+    found = grant() if grant is not None else None
+    if found is not None and not found[1]:
+        granted = Attestation(GRANTED_PREFIX + found[0], "", attestation.challenge_id, attestation.session_id)
+        return CheckpointGate(str(decision), reason, granted, accepted_risk=accepted)
+    note = f" {found[1]}" if found is not None else ""
     if destructive:
         return CheckpointGate(
-            str(decision), reason, attestation, refusal=refusal_text(attestation), accepted_risk=accepted
+            str(decision), reason, attestation, refusal=refusal_text(attestation) + note, accepted_risk=accepted
         )
-    return CheckpointGate(str(decision), reason, attestation, warning=warning_text(attestation), accepted_risk=accepted)
+    return CheckpointGate(
+        str(decision), reason, attestation, warning=warning_text(attestation) + note, accepted_risk=accepted
+    )
