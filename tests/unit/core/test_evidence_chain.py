@@ -66,7 +66,7 @@ def test_a_modified_line_is_located_and_fails_verify(governed: Path) -> None:
     log = _fill(governed, 4)
     lines = log.read_text(encoding="utf-8").splitlines()
     lines[1] = lines[1].replace("echo 1", "echo 999")
-    log.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    log.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
 
     report = analyze_chain(log)
     assert report.status == "broken"
@@ -80,7 +80,7 @@ def test_a_removed_middle_line_is_detected(governed: Path) -> None:
     log = _fill(governed, 4)
     lines = log.read_text(encoding="utf-8").splitlines()
     del lines[1]
-    log.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    log.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
     report = analyze_chain(log)
     assert report.status == "broken"
     assert (report.break_after_line, report.break_line) == (1, 2)
@@ -89,7 +89,7 @@ def test_a_removed_middle_line_is_detected(governed: Path) -> None:
 def test_a_removed_last_line_is_detected_through_the_anchor(governed: Path) -> None:
     log = _fill(governed, 3)
     lines = log.read_text(encoding="utf-8").splitlines()
-    log.write_text("\n".join(lines[:-1]) + "\n", encoding="utf-8")
+    log.write_text("\n".join(lines[:-1]) + "\n", encoding="utf-8", newline="\n")
 
     report = analyze_chain(log)
     assert report.status == "broken"
@@ -102,7 +102,7 @@ def test_a_modified_last_line_is_detected_through_the_anchor(governed: Path) -> 
     log = _fill(governed, 3)
     lines = log.read_text(encoding="utf-8").splitlines()
     lines[-1] = lines[-1].replace("echo 2", "echo 777")
-    log.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    log.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
     report = analyze_chain(log)
     assert report.status == "broken"
     assert report.break_line == 3
@@ -120,6 +120,7 @@ def test_existing_entries_are_read_as_legacy_then_chained(governed: Path) -> Non
     log.write_text(
         '{"type": "bash", "command": "pytest -q", "exit_code": 0}\n{"type": "file_write", "path": "src/a.py"}\n',
         encoding="utf-8",
+        newline="\n",
     )
     report = analyze_chain(log)
     assert (report.status, report.legacy, report.chained) == ("legacy", 2, 0)
@@ -133,7 +134,7 @@ def test_existing_entries_are_read_as_legacy_then_chained(governed: Path) -> Non
 
 def test_an_unchained_line_after_the_chain_started_is_a_break(governed: Path) -> None:
     log = _fill(governed, 2)
-    with open(log, "a", encoding="utf-8") as handle:
+    with open(log, "a", encoding="utf-8", newline="\n") as handle:
         handle.write('{"type": "bash", "command": "injecte"}\n')
     report = analyze_chain(log)
     assert report.status == "broken"
@@ -204,13 +205,13 @@ def test_an_anchor_that_is_behind_the_file_is_a_break(governed: Path) -> None:
 
 def _tamper_drop_last(log: Path) -> None:
     lines = log.read_text(encoding="utf-8").splitlines()
-    log.write_text("\n".join(lines[:-1]) + "\n", encoding="utf-8")
+    log.write_text("\n".join(lines[:-1]) + "\n", encoding="utf-8", newline="\n")
 
 
 def _tamper_modify_last(log: Path) -> None:
     lines = log.read_text(encoding="utf-8").splitlines()
     lines[-1] = lines[-1].replace("echo 2", "echo 777")
-    log.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    log.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
 
 
 def _tamper_delete_journal(log: Path) -> None:
