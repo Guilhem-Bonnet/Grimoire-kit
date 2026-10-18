@@ -9,7 +9,10 @@ tiennent la clôture au reçu, et le reçu à l'arbre présent.
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -187,6 +190,76 @@ def test_les_ecritures_du_kit_ne_perime_pas_le_recu(tmp_path: Path) -> None:
     assert (root / STANDARD / "task-board.yaml").is_file()
 
     assert service.transition(tid, TaskState.CLOSED, "amelia").task.status is TaskState.CLOSED
+
+
+@pytest.mark.parametrize("backend", ["auto", "local"])
+def test_la_memoire_ecrite_a_la_cloture_d_une_autre_tache_ne_perime_pas_le_recu(
+    tmp_path: Path, backend: str
+) -> None:
+    """Fermer A consolide la mémoire sous ``_grimoire/_memory`` : le reçu de B doit rester frais (W3-01-S1)."""
+    root = _projet(tmp_path)
+    memory_section = "" if backend == "auto" else f"memory:\n  backend: {backend}\n"
+    (root / "project-context.yaml").write_text(f"project:\n  name: p\n{memory_section}", encoding="utf-8")
+    _git(root, "init", "-q")
+    _git(root, "add", ".")
+    _git(root, "commit", "-q", "-m", "base")
+    service, premiere = _a_relire(root)
+    seconde = service.ledger.create_task(
+        service.require(premiere).mission_id, "Seconde", acceptance=(V1_ACCEPTANCE,), owner="amelia"
+    ).id
+    service.ledger.transition_task(seconde, TaskState.READY)
+    service.ledger.claim_task(seconde, actor_id="amelia", host_id="local")
+    service.ledger.transition_task(seconde, TaskState.RUNNING, actor_id="amelia")
+    service.ledger.transition_task(seconde, TaskState.NEEDS_VERIFICATION, actor_id="amelia")
+    write_receipt(root, premiere, "READY", reviewer_id="relecteur")
+    write_receipt(root, seconde, "READY", reviewer_id="relecteur")
+
+    service.transition(premiere, TaskState.CLOSED, "amelia")
+
+    ecrits = [p for p in (root / "_grimoire/_memory").rglob("*") if p.is_file()]
+    assert ecrits, "la clôture de la première tâche doit avoir écrit la mémoire (sinon le test ne prouve rien)"
+    assert check_receipt(root, service.require(seconde)) is None
+    assert service.transition(seconde, TaskState.CLOSED, "amelia").task.status is TaskState.CLOSED
+
+
+@pytest.mark.parametrize("git", [False, True], ids=["fs", "git"])
+def test_un_autre_path_au_gate_ne_perime_pas_le_recu(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, git: bool
+) -> None:
+    """Le reçu est une empreinte de contenu : le ``PATH`` du processus qui lance le gate n'en fait pas partie (W3-01-S2)."""
+    root = _projet(tmp_path)
+    (root / "tests").mkdir()
+    (root / "tests/test_x.py").write_text("def test_x():\n    pass\n", encoding="utf-8")
+    if git:
+        _git(root, "init", "-q")
+        _git(root, "add", ".")
+        _git(root, "commit", "-q", "-m", "base")
+    service, tid = _a_relire(root)
+    git_dir = str(Path(shutil.which("git") or "/usr/bin/git").parent)  # git doit rester joignable dans les deux cas
+    monkeypatch.setenv("PATH", os.pathsep.join([str(Path(sys.executable).parent), git_dir]))
+    write_receipt(root, tid, "READY", reviewer_id="relecteur")
+
+    monkeypatch.setenv("PATH", git_dir)  # cockpit ou MCP lancé sans le venv
+
+    assert check_receipt(root, service.require(tid)) is None
+
+
+def test_l_empreinte_de_contenu_seul_ignore_le_path_et_l_autre_pas(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Le défaut de ``compute_tree_fingerprint`` reste lié à la toolchain (run de test) ; l'option la retire."""
+    from grimoire.core.standard_checks.tree_fingerprint import compute_tree_fingerprint
+
+    root = _projet(tmp_path)
+    (root / "tests").mkdir()
+    (root / "tests/test_x.py").write_text("def test_x():\n    pass\n", encoding="utf-8")
+    monkeypatch.setenv("PATH", str(Path(sys.executable).parent) + os.pathsep + os.environ.get("PATH", ""))
+    avec, sans = compute_tree_fingerprint(root), compute_tree_fingerprint(root, include_toolchain=False)
+
+    monkeypatch.setenv("PATH", str(tmp_path / "vide"))
+
+    assert compute_tree_fingerprint(root) != avec
+    assert compute_tree_fingerprint(root, include_toolchain=False) == sans
 
 
 # ── Un constat sans commande reste une suggestion ───────────────────────────

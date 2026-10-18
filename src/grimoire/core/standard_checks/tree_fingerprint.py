@@ -188,7 +188,7 @@ def _toolchain_identity(root: Path) -> str:
     return f"test-runner:{need.command}\n{executable or 'absent'}"
 
 
-def _git_fingerprint(root: Path, extra: Sequence[str] = ()) -> str | None:
+def _git_fingerprint(root: Path, extra: Sequence[str] = (), *, include_toolchain: bool = True) -> str | None:
     head = _run_git(root, "rev-parse", "HEAD")
     if head is None:
         return None
@@ -205,11 +205,12 @@ def _git_fingerprint(root: Path, extra: Sequence[str] = ()) -> str | None:
     digest.update(status.encode("utf-8"))
     digest.update(diff.encode("utf-8"))
     digest.update("\n".join(sorted(untracked_entries)).encode("utf-8"))
-    digest.update(_toolchain_identity(root).encode("utf-8"))
+    if include_toolchain:
+        digest.update(_toolchain_identity(root).encode("utf-8"))
     return digest.hexdigest()
 
 
-def _fs_fingerprint(root: Path, extra: Sequence[str] = ()) -> str:
+def _fs_fingerprint(root: Path, extra: Sequence[str] = (), *, include_toolchain: bool = True) -> str:
     entries: list[str] = []
     for path in sorted(root.rglob("*")):
         if not path.is_file():
@@ -222,11 +223,17 @@ def _fs_fingerprint(root: Path, extra: Sequence[str] = ()) -> str:
             entries.append(f"{rel.as_posix()}\t{digest}")
     fingerprint = hashlib.sha256()
     fingerprint.update("\n".join(entries).encode("utf-8"))
-    fingerprint.update(_toolchain_identity(root).encode("utf-8"))
+    if include_toolchain:
+        fingerprint.update(_toolchain_identity(root).encode("utf-8"))
     return fingerprint.hexdigest()
 
 
-def compute_tree_fingerprint(root: Path, *, extra_excludes: Sequence[str] = ()) -> str:
+def compute_tree_fingerprint(
+    root: Path,
+    *,
+    extra_excludes: Sequence[str] = (),
+    include_toolchain: bool = True,
+) -> str:
     """L'empreinte de l'arbre de travail, calculée maintenant — jamais mise en cache.
 
     *extra_excludes* : chemins relatifs à *root* (POSIX, fichier ou dossier)
@@ -235,6 +242,12 @@ def compute_tree_fingerprint(root: Path, *, extra_excludes: Sequence[str] = ()) 
     kit réécrit lui-même entre le reçu et le gate (journal des tâches, board
     projeté) : sans quoi le premier geste du kit périmerait le reçu. Vide par
     défaut — l'empreinte d'un run de test ne change pas.
+
+    *include_toolchain* : mêle (défaut) l'identité de la toolchain de test
+    (:func:`_toolchain_identity`, dont le binaire résolu sur le ``PATH``
+    courant). Voulu pour l'empreinte d'un run de test ; faux pour une
+    empreinte de contenu seul, comme celle du reçu de revue : relire un code
+    ne dépend pas du ``PATH`` du processus qui lance ensuite le gate.
 
     Git-aware (voir le docstring du module) ; retombe sur le parcours du
     système de fichiers quand *root* n'est pas un dépôt git, ou quand git
@@ -254,7 +267,7 @@ def compute_tree_fingerprint(root: Path, *, extra_excludes: Sequence[str] = ()) 
     """
     extra = tuple(prefix.strip("/") for prefix in extra_excludes if prefix.strip("/"))
     if _is_git_repo(root):
-        fingerprint = _git_fingerprint(root, extra)
+        fingerprint = _git_fingerprint(root, extra, include_toolchain=include_toolchain)
         if fingerprint is not None:
             return fingerprint
-    return _fs_fingerprint(root, extra)
+    return _fs_fingerprint(root, extra, include_toolchain=include_toolchain)

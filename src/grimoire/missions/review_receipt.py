@@ -78,10 +78,14 @@ INVALID = "review.receipt_invalid"
 REFUSED = "review.not_ready"
 
 #: Ce que le kit réécrit lui-même entre le reçu et le gate : le journal des
-#: tâches (``_grimoire-runtime-output``, refus et sessions compris) et le board
-#: qu'il en projette. ``_grimoire-output`` (le reçu lui-même) est déjà exclu.
+#: tâches (``_grimoire-runtime-output``, refus et sessions compris), le board
+#: qu'il en projette et la mémoire du projet (``_grimoire/_memory``, que la
+#: clôture, le blocage ou l'échec d'une tâche consolide, quel que soit le
+#: backend : ``grimoire.json``, ``grimoire_lexical.sqlite3``...).
+#: ``_grimoire-output`` (le reçu lui-même) est déjà exclu.
 RECEIPT_FINGERPRINT_EXCLUDES: tuple[str, ...] = (
     "_grimoire-runtime-output",
+    "_grimoire/_memory",
     (STANDARD_DIR / "task-board.yaml").as_posix(),
 )
 
@@ -186,8 +190,13 @@ def receipt_path(root: Path, task_id: str) -> Path:
 
 
 def receipt_fingerprint(root: Path) -> str:
-    """L'empreinte que le reçu porte et que le gate recalcule — la même fonction, à chaque appel."""
-    return compute_tree_fingerprint(root, extra_excludes=RECEIPT_FINGERPRINT_EXCLUDES)
+    """L'empreinte que le reçu porte et que le gate recalcule — la même fonction, à chaque appel.
+
+    Contenu seul, sans l'identité de la toolchain de test : le ``PATH`` du
+    processus qui lance le gate (cockpit, MCP, autre shell) n'est pas le code
+    qui a été relu.
+    """
+    return compute_tree_fingerprint(root, extra_excludes=RECEIPT_FINGERPRINT_EXCLUDES, include_toolchain=False)
 
 
 def evidence_pack_digest(root: Path, task_id: str) -> str | None:
