@@ -50,15 +50,15 @@ def decide_evidence_gate(hook: HookInput) -> Decision:
     tapé par l'humain dans la session qui tient la tâche
     (:mod:`.gate_override`), journalisé avant d'être appliqué.
     """
-    from grimoire.hosts.decisions.gate_override import apply_override
-
-    return apply_override(hook, _guarded_stop(hook))
+    return _guarded_stop(hook)
 
 
 def _guarded_stop(hook: HookInput) -> Decision:
-    """:func:`_decide_stop` sous le filet W2-08 : une panne devient un refus tracé, jamais un ALLOW."""
+    """:func:`_decide_stop` puis la levée W2-06, sous le filet W2-08 : une panne devient un refus tracé, jamais un ALLOW."""
+    from grimoire.hosts.decisions.gate_override import apply_override
+
     try:
-        return _decide_stop(hook)
+        return apply_override(hook, _decide_stop(hook))
     except Exception as exc:
         return _stop_guard_crashed(hook, exc)
 

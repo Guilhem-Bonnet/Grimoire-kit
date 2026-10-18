@@ -485,9 +485,11 @@ MODULES: dict[str, tuple[str, str]] = {
     "enrolment": (GUARD, ""),
     "evidence_gate": (GUARD, ""),
     "evidence_trace": (GUARD, ""),
+    "gate_override": (SUPPORT, "levée d'un refus de clôture appelée par evidence_gate DANS son filet W2-08 : une panne devient un refus tracé, couverte par les cas evidence_gate"),
     "gate_summary": (SUPPORT, "résumé de gates lu par evidence_gate, subagent_gate et context_capsule : panne couverte par leurs cas"),
     "human_turns": (GUARD, ""),
     "lease_brake": (GUARD, ""),
+    "profile_floor": (SUPPORT, "plancher de profil lu par evidence_gate, activation, tool_policy et context_capsule : panne couverte par leurs cas"),
     "record": (SUPPORT, "journal d'observation (agent.dispatch / agent.miss) : ne change jamais une décision"),
     "repetition_guard": (GUARD, ""),
     "session_memory": (GUARD, ""),
@@ -613,7 +615,7 @@ def test_chaque_decision_enregistree_a_un_cas_de_panne() -> None:
     sans_cas = sorted(registered - covered)
     assert not sans_cas, f"décision(s) sans cas de panne : {sans_cas} — ajoute une ligne à CASES (W2-08)"
     assert covered <= registered, f"cas pour une décision inconnue : {sorted(covered - registered)}"
-    assert all(decision in DECISIONS for decision in registered)
+    assert all(DECISIONS.get(decision) is not None for decision in registered)
 
 
 def test_chaque_module_de_decision_est_garde_avec_cas_ou_support_justifie() -> None:

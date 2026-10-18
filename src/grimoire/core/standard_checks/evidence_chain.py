@@ -38,10 +38,12 @@ import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from grimoire.core.fsio import atomic_write, locked
-from grimoire.core.standard_checks.base import StandardVerificationResult, _add_check
+
+if TYPE_CHECKING:  # base importe ruamel : hors du chemin chaud des hooks (issue #419)
+    from grimoire.core.standard_checks.base import StandardVerificationResult
 
 __all__ = [
     "GENESIS",
@@ -354,6 +356,7 @@ def verify_evidence_chain(root: Path, task_id: str, result: StandardVerification
     Une chaîne rompue est une erreur (``standard verify`` échoue) ; une écriture
     perdue, une ligne illisible ou une chaîne sans ancre sont des avertissements.
     """
+    from grimoire.core.standard_checks.base import _add_check
     from grimoire.core.standard_checks.evidence_journal import evidence_log_relpath
 
     relpath = evidence_log_relpath(task_id)
