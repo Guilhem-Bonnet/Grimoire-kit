@@ -31,7 +31,7 @@ host_app = typer.Typer(help="Surfaces hôtes : agents, compétences, commandes e
 console = Console()
 
 _PROJECT_ROOT_OPTION = typer.Option(Path.cwd(), "--project-root", help="Racine du projet.", show_default=False)
-_HOST_OPTION = typer.Option("auto", "--host", help="claude | copilot | codex | cursor | gemini | all | auto.")
+_HOST_OPTION = typer.Option("auto", "--host", help="claude | copilot | codex | cursor | gemini | opencode | all | auto.")
 _DRY_RUN_OPTION = typer.Option(False, "--dry-run", help="Montrer sans écrire.")
 _FORCE_OPTION = typer.Option(False, "--force", help="Écraser un fichier non généré occupant un chemin géré.")
 _FORCE_HOST_OPTION = typer.Option(
@@ -111,7 +111,7 @@ def _resolve_targets(host: str, project_root: Path) -> list[HostId]:
         detected = _detected_host()
         if emitter_for(detected) is None:
             console.print(
-                "[yellow]Hôte non détecté[/yellow] — précisez `--host claude|copilot|codex|cursor|gemini|all`."
+                "[yellow]Hôte non détecté[/yellow] — précisez `--host claude|copilot|codex|cursor|gemini|opencode|all`."
             )
             raise typer.Exit(code=1)
         return [detected]

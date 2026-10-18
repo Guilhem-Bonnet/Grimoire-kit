@@ -13,6 +13,7 @@ class HostId(StrEnum):
     CODEX = "host-codex"
     CURSOR = "host-cursor"
     GEMINI_CLI = "host-gemini-cli"
+    OPENCODE = "host-opencode"
     UNKNOWN = "host-unknown"
 
 
@@ -221,10 +222,25 @@ GEMINI_CLI_MANIFEST = HostCapabilityManifest(
     tool_policy_native=False,
 )
 
+# opencode : un plugin (`.opencode/plugin`) dont le hook `tool.execute.before`
+# peut refuser un outil — observé (tests/fixtures/hosts/opencode/). Aucun autre
+# événement de cycle de vie n'a été sondé, donc aucun n'est déclaré.
+OPENCODE_MANIFEST = HostCapabilityManifest(
+    host_id=HostId.OPENCODE,
+    display_name="opencode",
+    hooks=HostHooks(pre_tool_use=True),
+    fallback=HostFallback(mode=FallbackMode.CLI_GUARDED, required_controls=("explicit_proof_for_risky_changes",)),
+    supports_mcp=True,
+    supports_streaming=True,
+    supports_workspace_mutation=True,
+    tool_policy_native=False,
+)
+
 _HOST_REGISTRY: dict[HostId, HostCapabilityManifest] = {
     HostId.CLAUDE_CODE_CLI: CLAUDE_CODE_CLI_MANIFEST,
     HostId.GITHUB_COPILOT: GITHUB_COPILOT_MANIFEST,
     HostId.CODEX: CODEX_MANIFEST,
     HostId.CURSOR: CURSOR_MANIFEST,
     HostId.GEMINI_CLI: GEMINI_CLI_MANIFEST,
+    HostId.OPENCODE: OPENCODE_MANIFEST,
 }
