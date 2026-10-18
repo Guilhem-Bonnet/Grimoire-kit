@@ -666,13 +666,20 @@ body[data-active-space="source"] {
 
 /* Panneau actif (seconde marche) : liseré plus large, à la place du 1px
    discret, sur le panneau qui contient réellement le focus clavier — pas
-   besoin d'un état posé par shell.js, `:focus-within` suffit. */
+   besoin d'un état posé par shell.js, `:focus-within` suffit. Le liseré grossit
+   de 2px sans bouger le contenu : la largeur croît d'autant et la marge
+   négative la rend, sinon le panneau se reflue entre `mousedown` et `mouseup`
+   et le clic atterrit à côté du bouton pressé. */
 .panel-left:focus-within {
   border-right: 3px solid var(--id-current, var(--acc));
+  width: calc(var(--w-panel) + 2px);
+  margin-right: -2px;
 }
 
 .panel-right:focus-within {
   border-left: 3px solid var(--id-current, var(--acc));
+  width: calc(var(--w-inspector) + 2px);
+  margin-left: -2px;
 }
 
 .panel-head {

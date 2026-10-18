@@ -124,6 +124,8 @@ LEASE_RENEWED_EVENT = "task.lease_renewed"
 REAP_DEFERRED_EVENT = "task.reap_deferred"
 #: K2 : la clé, dans un ``task.transitioned`` de récolte, qui marque un bail perdu.
 LEASE_LOST_KEY = "lease_lost"
+#: K5 (issue #770) : la note de progression du titulaire (``grimoire task note``).
+PROGRESS_NOTED_EVENT = "task.progress_noted"
 #: K6 (à venir) : une réponse humaine remet le compteur de tentatives à zéro.
 HUMAN_ANSWERED_EVENT = "task.human_answered"
 #: Verdicts de ``task.dispatched`` comptés comme tentatives (``rate_limit`` est un quota, pas un échec).
@@ -992,6 +994,10 @@ class MissionLedger:
         views = [self._lease_view(t, moment, clock) for t in self.list_tasks()]
         return [v for v in views if v is not None and v.status == "lost"]
 
+    def lease_file(self, task_id: str) -> LeaseFile | None:
+        """Le fichier de bail de *task_id* (indice, jamais vérité) ; ``None`` s'il manque ou est illisible."""
+        return read_lease(lease_path(self._root, task_id))
+
     def renew_lease(
         self,
         task_id: str,
@@ -1036,6 +1042,26 @@ class MissionLedger:
                 self._append_event(LEASE_RENEWED_EVENT, task_id, "task", actor_id, payload, lock_held=True)
                 self._load()
             return self._tasks[task_id]
+
+    def note_progress(self, task_id: str, text: str, *, actor_id: str = "system") -> LedgerEvent:
+        """Note de progression du titulaire : ce que ``progress_at`` (K5) lit, sans changer d'état.
+
+        Un battement de bail n'est pas une progression ; une note, si. Refusée
+        pour une tâche inconnue, non tenue (``claimed``/``running``) ou sans texte.
+        """
+        text = text.strip()
+        if not text:
+            raise GrimoireMissionError("Une note de progression ne peut pas être vide")
+        with _ledger_file_lock(self._events_path):
+            self._invalidate()
+            self._load()
+            task = self._tasks.get(task_id)
+            if task is None:
+                raise GrimoireMissionError(f"Task not found: {task_id}")
+            if task.status not in _HELD or task.claim is None:
+                raise GrimoireMissionError(f"Note refusée pour {task_id} : tâche {task.status.value}, personne ne la tient")
+            payload = {"task_id": task_id, "lease_epoch": task.claim.lease_epoch, "note": text, "actor_id": actor_id}
+            return self._append_event(PROGRESS_NOTED_EVENT, task_id, "task", actor_id, payload, lock_held=True)
 
     def _since_last_answer(self, task_id: str) -> list[LedgerEvent]:
         events = [e for e in self.list_events(task_id) if e.id not in self._rejected]

@@ -131,7 +131,9 @@ class TestPortfolioTasks:
         assert by_slug["projet-b"]["state"] == "ok"
         assert by_slug["projet-c"]["state"] == "unreadable"
         assert "n-existe-pas" in by_slug["projet-c"]["reason"]
-        assert view["summary"] == {"projects": 3, "readable": 2, "tasks": 2, "live": 1}
+        summary = view["summary"]
+        assert (summary["projects"], summary["readable"], summary["tasks"]) == (3, 2, 2)
+        assert summary["liveness"] == {"vivant": 1, "inactif": 0, "inconnu": 1, "terminé": 0}
 
     def test_la_session_vivante_est_reconnue_par_le_journal_et_le_filtre_live_la_garde_seule(
         self, fleet: dict[str, object], tmp_path: Path
@@ -141,12 +143,12 @@ class TestPortfolioTasks:
 
         session_a = by_id[fleet["task_a"]]["session"]
         assert session_a["id"] == "sess-a-vivante"
-        assert session_a["live"] is True
+        assert session_a["liveness"]["state"] == "vivant"
         assert session_a["host"] == "host-claude-code-cli"
         assert session_a["resume_command"] == "claude --resume sess-a-vivante"
         session_b = by_id[fleet["task_b"]]["session"]
         assert session_b["id"] == "sess-b-eteinte"
-        assert session_b["live"] is False
+        assert session_b["liveness"]["state"] == "inconnu", "journal ancien : inconnu, jamais « mort »"
 
         live_only = wp.portfolio_tasks(tmp_path, live=True)
         assert [t["id"] for t in live_only["tasks"]] == [fleet["task_a"]]
@@ -225,7 +227,7 @@ class TestSessionFor:
 
         assert session["id"] == "sess-manquante"
         assert session["journal"] is None
-        assert session["live"] is False, "aucun journal pour cette session : pas d'updated_at à comparer"
+        assert session["liveness"]["state"] == "inconnu", "aucun journal pour cette session : inconnu, pas mort"
         assert session["host"] == "host-claude-code-cli", "l'hôte du claim, jamais celui de sess-autre"
 
     def test_le_journal_le_plus_recent_est_choisi_par_horodatage_pas_par_ordre_de_chaine(self) -> None:

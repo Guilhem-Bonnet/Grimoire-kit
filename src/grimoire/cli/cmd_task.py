@@ -317,10 +317,17 @@ def _list_all_projects(
     """Le portefeuille : tableau lisible, ou la charge utile JSON telle quelle."""
     from rich.table import Table
 
+    from grimoire.missions.liveness import label as liveness_label
+    from grimoire.missions.liveness import probe_claude_agents
     from grimoire.tools.workspace_portfolio import portfolio_tasks
 
     view = portfolio_tasks(
-        project_root.resolve(), state=status, project=project, live=live, live_minutes=live_minutes
+        project_root.resolve(),
+        state=status,
+        project=project,
+        live=live,
+        live_minutes=live_minutes,
+        probe=probe_claude_agents,
     )
     if _fmt(ctx) == "json":
         typer.echo(json.dumps(view, indent=2, ensure_ascii=False))
@@ -331,7 +338,10 @@ def _list_all_projects(
     for card in view["tasks"]:
         session = card.get("session") or {}
         if session:
-            session_text = f"{'vivante' if session.get('live') else 'inactive'} · {session.get('id', '')}"
+            state = session.get("liveness") or {}
+            session_text = f"{liveness_label(state.get('state', 'inconnu'))} · {session.get('id', '')}"
+            if session.get("attention"):
+                session_text += f" · attention : {session['attention']['reason']}"
         else:
             session_text = "—"
         unread = card.get("unread_directives") or 0
@@ -354,8 +364,9 @@ def _list_all_projects(
     summary = view["summary"]
     console.print(
         f"[dim]{summary['projects']} projet(s), {summary['readable']} lisible(s) · "
-        f"{summary['tasks']} tâche(s), {summary['live']} session(s) vivante(s) "
-        f"(< {view['live_minutes']} min)[/dim]"
+        f"{summary['tasks']} tâche(s) · vivacité "
+        + ", ".join(f"{n} {name}" for name, n in summary["liveness"].items() if n)
+        + f" (journal < {view['live_minutes']} min)[/dim]"
     )
 
 
@@ -521,6 +532,28 @@ def task_renew(
         raise typer.Exit(1) from exc
     claim = task.claim
     _emit_task(ctx, task, f"bail renouvelé, epoch {claim.lease_epoch}, plafond {claim.expires_at or '-'}" if claim else "")
+
+
+@task_app.command("note")
+def task_note(
+    ctx: typer.Context,
+    task_id: Annotated[str, typer.Argument()],
+    text: Annotated[str, typer.Argument(help="Ce qui vient d'avancer (une phrase).")],
+    project_root: _PROJECT_ROOT = Path(),
+    ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
+    actor: _ACTOR = "cli",
+) -> None:
+    """Note une progression sur une tâche tenue : c'est ce qui évite l'alerte « vivant, sans progression »."""
+    from grimoire.core.exceptions import GrimoireError
+
+    service = _service(project_root, ledger_root)
+    _require_task(service, task_id)
+    try:
+        task = service.note_progress(task_id, text, actor)
+    except GrimoireError as exc:
+        console.print(f"[red]✗[/red] {exc}")
+        raise typer.Exit(1) from exc
+    _emit_task(ctx, task, "progression notée")
 
 
 @task_app.command("reap")
@@ -1171,8 +1204,8 @@ def task_trace_export(
 # de l'épic — l'hôte tient la session, le kit remet une tranche de travail à un
 # exécuteur puis applique le gate — se livre ici au niveau d'une tâche unique,
 # en croisant la classe de vérifiabilité (#309) et le registre par palier de
-# coût (#310). Pas de juge LLM, pas de worktree automatique : l'utilisateur
-# travaille sur une branche propre, et c'est un `--check` mécanique qui décide.
+# coût (#310). Pas de juge LLM ; le worktree par tâche et le merge vérifié sont
+# `task worktree` / `task merge` (W5-02) ; c'est un `--check` mécanique qui décide.
 
 _VERDICT_ICON: dict[str, str] = {
     "green": "[green]vert[/green]",
@@ -1404,3 +1437,9 @@ def task_migrate_standard(
     )
     if not dry_run and report.snapshot_path:
         console.print(f"[dim]Instantané : {report.snapshot_path} (restaurer avec --restore {report.stamp})[/dim]")
+
+
+# W5-02 : `task worktree` et `task merge`, dans leur module (plafond de taille d'un module).
+from grimoire.cli.cmd_task_worktree import register_worktree_commands  # noqa: E402
+
+register_worktree_commands(task_app)

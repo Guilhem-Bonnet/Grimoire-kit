@@ -802,3 +802,18 @@ def test_lease_file_without_origin_reads_as_empty_and_is_not_a_reap(tmp_path: Pa
     path.write_text(json.dumps(raw), encoding="utf-8")
     lease = read_lease(path)
     assert lease is not None and lease.origin == ""
+
+
+def test_cli_note_writes_a_progress_event_and_refuses_a_task_nobody_holds(tmp_path: Path) -> None:
+    """K5-S1-02 : `task note` est le producteur réel de `task.progress_noted`."""
+    runner = CliRunner()
+    ledger = MissionLedger(tmp_path / "_grimoire-runtime-output" / "ledger")
+    tid = _running(ledger, actor="cli")
+    common = ["--project-root", str(tmp_path)]
+    res = runner.invoke(task_app, ["note", tid, "tests écrits", *common])
+    assert res.exit_code == 0, res.output
+    fresh = MissionLedger(tmp_path / "_grimoire-runtime-output" / "ledger")
+    assert [e.event_type for e in fresh.list_events(tid)][-1] == "task.progress_noted"
+    ledger.transition_task(tid, TaskState.CANCELLED, actor_id="cli")
+    res = runner.invoke(task_app, ["note", tid, "trop tard", *common])
+    assert res.exit_code == 1 and "refusée" in res.output
