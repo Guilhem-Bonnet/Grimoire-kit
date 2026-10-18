@@ -11,16 +11,17 @@ Grammaire (une règle par ligne) ::
     ALWAYS|NEVER <verbe> <objet> [@<portée>]
 
 - ``<verbe>`` : un mot, minuscules latines, tiret admis (``run``, ``vérifier``).
-- ``<objet>`` : un à douze mots (lettres latines, chiffres, ``_ . - / +``).
+- ``<objet>`` : un à douze mots (lettres ASCII, éventuellement accentuées,
+  chiffres, ``_ . - / +``).
 - ``@<portée>`` : un motif de chemin relatif à la racine du projet
   (``src/**``, ``docs/*.md``). Absent, la règle vaut pour tout le projet.
   Le motif est un glob exact : ``src`` ne couvre pas ``src/a.py``, écrire
   ``src/**``.
 
 La grammaire est volontairement étroite. Tout ce qu'elle n'admet pas est refusé
-avant d'être stocké : saut de ligne, caractère invisible, lettre non latine
-(homoglyphe cyrillique ou grec qui ferait passer ``run`` pour deux objets
-distincts), guillemet, barre, substitution de commande, URL, mot-clé de règle
+avant d'être stocké : saut de ligne, caractère invisible, lettre qui n'est pas
+de l'ASCII ou de l'ASCII accentué (homoglyphe cyrillique, grec ou latin comme
+``ı`` ou ``ɑ``, qui ferait passer ``run`` pour deux objets distincts), guillemet, barre, substitution de commande, URL, mot-clé de règle
 glissé dans l'objet, portée absolue ou qui remonte (``..``).
 
 Couches, de la plus extérieure (qui l'emporte) à la plus intérieure :
@@ -42,7 +43,10 @@ le conflit et le plafond de la couche. Un refus n'écrit rien.
 Limites connues, documentées plutôt que tues : la détection de conflit compare
 des chaînes. Deux synonymes (``remove`` et ``delete``), un pluriel ou une
 traduction forment deux objets distincts. Le filtre des règles qui affaiblissent
-la gouvernance repose sur deux listes de mots : un synonyme les contourne. Ce
+la gouvernance repose sur deux listes de mots, cherchées dans chaque fragment
+d'un mot composé : un synonyme les contourne. Une lettre accentuée forme un
+mot distinct de sa version nue pour le conflit (``maïn`` n'est pas ``main``),
+alors que le filtre de gouvernance ignore les accents. Ce
 module est une couche de défense en profondeur, pas une frontière étanche.
 """
 
@@ -130,6 +134,11 @@ _GOVERNANCE_WORDS = frozenset({
     "validation", "sandbox", "permission", "garde", "vérification",
     "preuve", "revue", "approbation", "politique", "securite", "sécurité",
 })
+#: ``_GOVERNANCE_WORDS`` sans accents : c'est contre elle que se comparent les fragments.
+_GOVERNANCE_PLAIN = frozenset(
+    "".join(c for c in unicodedata.normalize("NFD", w) if unicodedata.category(c) != "Mn")
+    for w in _GOVERNANCE_WORDS
+)
 
 
 class RuleRefusedError(GrimoireMemoryError):
@@ -226,9 +235,32 @@ class RuleWrite:
 # ── Grammaire ─────────────────────────────────────────────────────────────────
 
 
+#: Ligatures du français, sans équivalent ASCII mot à mot mais sans ressemblance
+#: avec une lettre ASCII isolée : admises telles quelles.
+_FRENCH_LIGATURES = frozenset("œŒæÆ")
+
+
 @functools.cache
 def _is_latin_letter(ch: str) -> bool:
-    return ch.isalpha() and unicodedata.name(ch, "").startswith("LATIN ")
+    """Lettre admise dans un mot : ASCII, ou ASCII + diacritiques (``é``, ``ç``, ``ï``).
+
+    Le nom Unicode ne sert pas de test : ``ı`` (U+0131), ``ɑ`` (U+0251), ``ɡ``
+    (U+0261), ``ɴ`` (U+0274) ou ``ʀ`` (U+0280) s'appellent ``LATIN ...`` et se
+    lisent pourtant ``i``, ``a``, ``g``, ``n``, ``r``. Une lettre est admise si
+    sa décomposition canonique est une lettre ASCII suivie de marques seules ;
+    ce qui n'a pas d'équivalent ASCII décomposable est refusé.
+    """
+    if ch.isascii():
+        return ch.isalpha()
+    if ch in _FRENCH_LIGATURES:
+        return True
+    decomposed = unicodedata.normalize("NFD", ch)
+    return (
+        len(decomposed) > 1
+        and decomposed[0].isascii()
+        and decomposed[0].isalpha()
+        and all(unicodedata.category(c) == "Mn" for c in decomposed[1:])
+    )
 
 
 def _refuse_syntax(message: str, remedy: str = "") -> RuleRefusedError:
@@ -278,8 +310,31 @@ def _singular(word: str) -> str:
     return word.removesuffix("s")
 
 
+def _without_accents(word: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFD", word) if unicodedata.category(c) != "Mn")
+
+
+_FRAGMENT_SPLIT = re.compile(r"[_.\-/+]+")
+
+
+def _governance_fragments(word: str) -> Iterable[str]:
+    """Le mot entier, puis chaque fragment que les séparateurs du mot isolent.
+
+    ``code-review``, ``pre-commit-hooks`` ou ``hooks/pre-push`` portent ``review``
+    et ``hook`` : tester le mot entier seulement laissait passer ces composés.
+    Les accents sont retirés (``vérification`` et ``verification`` se valent).
+    """
+    plain = _without_accents(word)
+    yield plain
+    yield from (frag for frag in _FRAGMENT_SPLIT.split(plain) if frag)
+
+
 def _refuse_governance_weakening(modality: str, verb: str, words: list[str]) -> None:
-    on_governance = any(w in _GOVERNANCE_WORDS or _singular(w) in _GOVERNANCE_WORDS for w in words)
+    on_governance = any(
+        frag in _GOVERNANCE_PLAIN or _singular(frag) in _GOVERNANCE_PLAIN
+        for w in words
+        for frag in _governance_fragments(w)
+    )
     if not on_governance:
         return
     weakens = (modality == "ALWAYS" and verb in _WEAKENING_VERBS) or (
