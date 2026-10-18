@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import multiprocessing
 import os
+import shutil
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -32,6 +33,8 @@ from grimoire.missions.lease import (
 )
 from grimoire.missions.ledger import MissionLedger
 from grimoire.missions.schemas import TaskClaim, TaskState
+from grimoire.missions.service import TaskService
+from grimoire.missions.waiting import parse_until
 
 FENCED = frozenset({"claude-code-cli"})
 
@@ -393,7 +396,8 @@ def test_reap_under_quota_waits_not_retries(tmp_path: Path) -> None:
     assert (decision.action, decision.cause, decision.attempts, decision.written) == ("defer", "quota", 0, True)
     task = ledger.get_task(tid)
     assert task is not None and task.status is TaskState.WAITING  # jamais relancée dans le mur du forfait : garée (K6)
-    assert task.waiting is not None and (task.waiting.reason, task.waiting.until) == ("quota", "unknown")
+    assert task.waiting is not None and task.waiting.reason == "quota"
+    assert parse_until(task.waiting.until) is not None  # datée (K6-S1-01) : le tick la lève, aucune sonde n'est requise
     assert ledger.attempts(tid) == 0
     deferred = [e for e in ledger.list_events(tid) if e.event_type == ledger_mod.REAP_DEFERRED_EVENT]
     assert [e.payload["cause"] for e in deferred] == ["quota"]
@@ -788,13 +792,22 @@ def test_interrupted_hand_back_still_honours_quota_and_exhausted_attempts(
         _fail_cancel_write(patch)
         with pytest.raises(OSError, match="No space"):
             ledger.transition_task(tid, TaskState.CANCELLED, actor_id="human")
-    # Aperçu d'abord (rien n'est écrit) : sous quota, la différée est nommée sans toucher à la tâche.
-    [decision] = MissionLedger(tmp_path / "ledger").reap(
-        fenced_hosts=FENCED, quota_blocked=lambda _t: True, apply=False
-    ).decisions
+    # Deux fois le même état interrompu : l'un sous quota, l'autre sans.
+    shutil.copytree(tmp_path / "ledger", tmp_path / "ledger2")
+    # Sous quota (écrit, K6) : la tâche est garée avec une échéance, puis le tick la rend quand le quota est levé.
+    [decision] = MissionLedger(tmp_path / "ledger").reap(fenced_hosts=FENCED, quota_blocked=lambda _t: True).decisions
     assert (decision.action, decision.cause) == ("defer", "quota")
+    parked = MissionLedger(tmp_path / "ledger").get_task(tid)
+    assert parked is not None and parked.status is TaskState.WAITING and parked.waiting is not None
+    due = parse_until(parked.waiting.until)
+    assert parked.waiting.reason == "quota" and due is not None
+    service = TaskService(tmp_path, ledger_root=tmp_path / "ledger")
+    assert service.wake_due(now=due - timedelta(seconds=1))[0].action == "keep"
+    assert service.wake_due(now=due)[0].action == "wake"
+    back = MissionLedger(tmp_path / "ledger").get_task(tid)
+    assert back is not None and back.status is TaskState.READY  # le quota levé, la tâche revient (K6-S1-01)
     # Sans quota, sur un hôte fencé, la tâche est relancée comme pour tout bail perdu.
-    [decision] = MissionLedger(tmp_path / "ledger").reap(fenced_hosts=FENCED).decisions
+    [decision] = MissionLedger(tmp_path / "ledger2").reap(fenced_hosts=FENCED).decisions
     assert (decision.action, decision.cause) == ("ready", "fence_pending")
 
 

@@ -63,7 +63,6 @@ from grimoire.missions.schemas import (
 from grimoire.missions.session_link import canonical_host, resume_command
 from grimoire.missions.waiting import (
     HUMAN_ANSWERED_EVENT,
-    UNTIL_UNKNOWN,
     Question,
     ResumeHint,
     Waiting,
@@ -824,7 +823,9 @@ class MissionLedger:
 
         - vers ``waiting`` : l'attente est écrite, nommée et valide (``task ask`` / ``task wait``) ;
         - ``waiting → ready`` : le tick seul (:meth:`wake`), jamais un geste ``move`` ;
-        - ``waiting → running`` : la même session, au même epoch — reprise sur place.
+        - ``waiting → running`` : la même session, au même epoch — reprise sur place, sauf
+          ``waiting(human)`` : une question en attente (``task ask``, ou posée par la récolte) ne
+          se lève que par la réponse humaine, qui réveille la tâche (``ready``) — jamais par un agent.
         """
         if to_state is TaskState.WAITING:
             raw = (extra_payload or {}).get("waiting")
@@ -838,6 +839,15 @@ class MissionLedger:
             raise GrimoireMissionError(
                 f"Transition refusée pour {task.id} : waiting → ready est réservé au tick "
                 "(`grimoire task wake`) ; une réponse humaine (`grimoire task answer`) le déclenche"
+            )
+        if (
+            task.status is TaskState.WAITING and to_state is TaskState.RUNNING
+            and task.waiting is not None and task.waiting.reason == "human"
+        ):
+            asked = task.waiting.question.id if task.waiting.question is not None else "?"
+            raise GrimoireMissionError(
+                f"Reprise refusée pour {task.id} : waiting(human) attend la réponse de l'humain (question {asked}) ; "
+                "seule `grimoire task answer` (canal humain) la lève — un agent ne reprend pas sur sa propre question"
             )
         if task.status is TaskState.WAITING and to_state is TaskState.RUNNING and lease_epoch is None:
             raise GrimoireMissionError(
@@ -1056,6 +1066,7 @@ class MissionLedger:
         apply: bool = True,
         now: datetime | None = None,
         is_fenced: Callable[[LeaseView], bool] | None = None,
+        quota_until: Callable[[MissionTask], datetime | None] | None = None,
     ) -> ReapReport:
         """Récolte des baux perdus — le seul chemin de ``RUNNING → READY``.
 
@@ -1073,9 +1084,12 @@ class MissionLedger:
           puis ``task.transitioned`` vers ``ready`` marqué ``lease_lost``.
 
         Une différée s'écrit une fois par (epoch, cause) en ``task.reap_deferred`` et la
-        tâche se gare en ``waiting`` (K6) — ``quota`` : ``waiting(quota)`` ; ``retry_exhausted``
-        et ``resume_unfenced`` : ``waiting(human)`` avec la question posée. Elle sort alors de
-        la récolte, et seule une réponse humaine (``task answer``) la rend. Horloge
+        tâche se gare en ``waiting`` (K6) et sort de la récolte. ``quota`` : ``waiting(quota)``
+        **datée** — la réouverture lue par *quota_until* (service : fin de suspension ou de
+        refroidissement du fournisseur), à défaut ``maintenant + backoff_delay(tentatives)`` —
+        pour que le tick (``wake_due``) la rende ``ready`` ; jamais ``unknown`` ici, aucune sonde
+        ne la lèverait. ``retry_exhausted`` et ``resume_unfenced`` : ``waiting(human)`` avec la
+        question posée, que seule une réponse humaine (``task answer``) rend. Horloge
         incohérente : rien n'est jugé. *apply* faux : les décisions sans aucune écriture.
         """
         is_quota = quota_blocked or self._last_route_quota
@@ -1089,7 +1103,7 @@ class MissionLedger:
             for view in self.expired_claims(moment):
                 task = self._tasks[view.task_id]
                 fenced = is_fenced if is_fenced is not None else (lambda v: v.host in fenced_hosts)
-                decisions.append(self._reap_one(task, view, moment, fenced, is_quota, actor_id, apply))
+                decisions.append(self._reap_one(task, view, moment, fenced, is_quota, actor_id, apply, quota_until))
             return ReapReport("ok", tuple(decisions))
 
     def _reap_one(
@@ -1101,6 +1115,7 @@ class MissionLedger:
         is_quota: Callable[[MissionTask], bool],
         actor_id: str,
         apply: bool,
+        quota_until: Callable[[MissionTask], datetime | None] | None = None,
     ) -> ReapDecision:
         before = self.attempts(task.id)
         cause = ""
@@ -1117,7 +1132,8 @@ class MissionLedger:
         if cause:
             written = apply and not self._already_deferred(task.id, view.epoch, cause)
             question = self._unfenced_question(view) if cause == "resume_unfenced" else ""
-            waiting = self._deferred_waiting(task, view, cause, before, question, moment)
+            reopens = quota_until(task) if cause == "quota" and quota_until is not None else None
+            waiting = self._deferred_waiting(task, view, cause, before, question, moment, reopens)
             if written:
                 payload: dict[str, Any] = {
                     "task_id": task.id, "lease_epoch_lost": view.epoch, "cause": cause,
@@ -1155,16 +1171,22 @@ class MissionLedger:
 
     @staticmethod
     def _deferred_waiting(
-        task: MissionTask, view: LeaseView, cause: str, attempts: int, question: str, moment: datetime
+        task: MissionTask, view: LeaseView, cause: str, attempts: int, question: str, moment: datetime,
+        reopens: datetime | None = None,
     ) -> Waiting:
-        """L'attente que la récolte pose à la place d'un silence : quota, ou une décision humaine nommée (§2.3, §2.6)."""
+        """L'attente que la récolte pose à la place d'un silence : quota, ou une décision humaine nommée (§2.3, §2.6).
+
+        Le quota porte une échéance : *reopens* si elle est future, sinon un délai
+        ``backoff_delay`` des tentatives (au moins un cran) — le tick la rend alors ``ready``.
+        """
         hint = ResumeHint(
             session_id=view.session_id, host=view.host,
             resume_command=resume_command(view.host, view.session_id),
         )
         since = moment.isoformat()
         if cause == "quota":
-            return Waiting("quota", UNTIL_UNKNOWN, None, hint, since)
+            due = reopens if reopens is not None and reopens > moment else moment + backoff_delay(max(attempts, 1))
+            return Waiting("quota", due.isoformat(), None, hint, since)
         if cause == "retry_exhausted":
             text = (
                 f"{task.id} a perdu son bail {attempts} fois (plafond {MAX_ATTEMPTS}) : "

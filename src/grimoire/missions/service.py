@@ -460,6 +460,7 @@ class TaskService:
 
         report = self.ledger.reap(
             quota_blocked=self._quota_blocked,
+            quota_until=self._quota_until,
             actor_id=actor,
             apply=apply,
             is_fenced=lambda view: claim_host_is_fenced(view.host, view.host_version),
@@ -700,6 +701,29 @@ class TaskService:
             and entry.is_cooling_down(now=datetime.now(UTC))
         )
 
+    def _quota_until(self, task: MissionTask) -> datetime | None:
+        """Quand le fournisseur de la dernière route de *task* rouvre (K6) ; ``None`` si l'état ne le dit pas.
+
+        La suspension ou le refroidissement encore actifs, le plus lointain : c'est l'échéance
+        de ``waiting(quota)`` que le tick (:meth:`wake_due`) lève. Un état sans date (rien
+        d'actif) laisse la récolte retomber sur son délai de reprise.
+        """
+        dispatched = [e for e in self.ledger.list_events(task.id) if e.event_type == "task.dispatched"]
+        if not dispatched:
+            return None
+        from grimoire.providers.state import load_state
+
+        provider = str(dispatched[-1].payload.get("provider", ""))
+        entry = load_state(self.project_root).get(provider)
+        if entry is None:
+            return None
+        now = datetime.now(UTC)
+        dates = [entry.cooldown_until] if entry.is_cooling_down(now=now) else []
+        if entry.is_suspended(now=now) and entry.suspension is not None:
+            dates.append(entry.suspension.until)
+        known = [d for d in dates if d is not None]
+        return max(known) if known else None
+
     def transition(
         self,
         task_id: str,
@@ -857,18 +881,28 @@ class TaskService:
                 continue
             held = other.claim
             # Une tâche en attente (K6) garde ses fichiers : elle reprend sur place, son bail n'est plus jugé.
-            expired = held.is_expired() if held is not None and other.status is not TaskState.WAITING else False
+            parked = other.status is TaskState.WAITING
+            expired = held.is_expired() if held is not None and not parked else False
             if held is None or not held.exclusive_files or expired:
                 continue
             overlap = requested & set(held.exclusive_files)
             if not overlap:
                 continue
             fichier = min(overlap)
-            refusal = GateRefusal(
-                evidence=fichier,
-                reason=f"réservé par {other.id} ({held.actor_id}) jusqu'à {held.expires_at or 'sans expiration'}",
-                remedy="attendre l'expiration du claim ou réclamer une autre tâche",
-            )
+            if parked:
+                # Pas la date d'expiration du claim (périmée, sans effet ici) : ce qui rend les fichiers.
+                due = other.waiting.until if other.waiting is not None else ""
+                reason, remedy = (
+                    f"réservé par {other.id} ({held.actor_id}), en attente"
+                    + (f" ({other.waiting.reason})" if other.waiting is not None else "")
+                    + (f" jusqu'à {due}" if due and due != "unknown" else ""),
+                    "répondre à sa question (`grimoire task answer`) ou attendre son réveil (`grimoire task wake`), "
+                    "ou réclamer une autre tâche",
+                )
+            else:
+                reason = f"réservé par {other.id} ({held.actor_id}) jusqu'à {held.expires_at or 'sans expiration'}"
+                remedy = "attendre l'expiration du claim ou réclamer une autre tâche"
+            refusal = GateRefusal(evidence=fichier, reason=reason, remedy=remedy)
             verdict = GateVerdict(transition_id="exclusive_files", strictness="hard_fail", refusals=(refusal,))
             self._record_refusal(task, target, verdict, claim.actor_id)
             raise TaskRefusedError(task.id, verdict)

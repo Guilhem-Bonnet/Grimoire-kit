@@ -33,7 +33,7 @@ from grimoire.missions.lease import lease_path, read_lease
 from grimoire.missions.ledger import MissionLedger
 from grimoire.missions.schemas import ORIGIN_AGENT, ORIGIN_HUMAN, TaskState
 from grimoire.missions.service import TaskService
-from grimoire.missions.waiting import Question, Waiting, lint_decision_text
+from grimoire.missions.waiting import Question, Waiting, lint_decision_text, parse_until
 
 runner = CliRunner()
 
@@ -367,7 +367,8 @@ def test_reap_quota_waits_in_quota_and_a_legacy_deferred_task_is_parked(tmp_path
     assert (decision.action, decision.cause) == ("defer", "quota")
     task = MissionLedger(tmp_path / "ledger").get_task(tid)
     assert task is not None and task.status is S.WAITING and task.waiting is not None
-    assert (task.waiting.reason, task.waiting.until, task.waiting.question) == ("quota", "unknown", None)
+    assert (task.waiting.reason, task.waiting.question) == ("quota", None)
+    assert parse_until(task.waiting.until) is not None  # K6-S1-01 : datée, jamais « unknown » (aucune sonde ne la lèverait)
     assert len([e for e in MissionLedger(tmp_path / "ledger").list_events(tid) if e.event_type == "task.reap_deferred"]) == 1
 
 
