@@ -357,3 +357,37 @@ def test_directive_perimee_sur_checkpoint_destructif_est_refusee_sans_consommer_
     released = _approve(engine, run_id, directive_id=parked.directive_id)
     assert released.ok is True and released.attestation["status"] == "attested"  # le tour n'avait pas été brûlé
     assert released.directive is not None and released.directive.node_id == "after"
+
+
+@pytest.mark.parametrize("first_session", [None, "S0"])
+def test_un_challenge_sans_session_ou_d_une_autre_session_ne_bloque_pas_la_session_courante(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, first_session: str | None
+) -> None:
+    """Un run présenté depuis un terminal sans session (ou une autre session) reste décidable par S1."""
+    if first_session is None:
+        monkeypatch.delenv("GRIMOIRE_SESSION_ID")
+    else:
+        monkeypatch.setenv("GRIMOIRE_SESSION_ID", first_session)
+    engine, run_id = _start(tmp_path)
+    monkeypatch.setenv("GRIMOIRE_SESSION_ID", "S1")
+
+    first = _approve(engine, run_id)  # S1 décide : refusé, et le checkpoint est représenté à S1
+    assert first.ok is False
+    _human_turn(tmp_path)  # le tour humain de S1, postérieur à son challenge
+    released = _approve(engine, run_id)
+
+    assert released.ok is True and released.attestation["status"] == "attested"
+
+
+def test_la_tentative_d_une_sous_session_ne_prend_pas_le_challenge_de_la_session_parente(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    engine, run_id = _start(tmp_path)  # challenge de S1
+    _human_turn(tmp_path)  # tour humain de S1, postérieur à son challenge
+    monkeypatch.setenv("GRIMOIRE_SESSION_ID", "S2")  # une sous-session tente la décision
+    assert _approve(engine, run_id).attestation["reason"] == "other_session"
+
+    monkeypatch.setenv("GRIMOIRE_SESSION_ID", "S1")
+    released = _approve(engine, run_id)
+
+    assert released.ok is True and released.attestation["status"] == "attested"

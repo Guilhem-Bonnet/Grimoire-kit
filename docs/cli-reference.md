@@ -926,8 +926,12 @@ faire franchir un checkpoint destructif sans humain (CI, banc) ;
 L'octroi est lui-même une décision attestée : la première demande émet un
 challenge lié à la session et sort en code 3 (décision humaine requise) ; un
 tour humain de cette session, puis la même commande relancée, l'inscrit et
-consomme ce tour. Tant qu'il est valide, un `approve` ou `accept_as_is` non
-attesté sur un checkpoint du périmètre est accepté avec
+consomme ce tour. Seul un challenge émis par la session courante est repris : un
+challenge ouvert sans session ou par une autre session n'empêche pas la demande
+d'une session, qui reçoit alors le sien. Un `/<node>` restreint le seul run que
+désigne le sélecteur, pas ses sous-flows ni les nodes homonymes d'un autre
+blueprint ; sans `/<node>`, les sous-flows sont couverts. Tant qu'il est valide, un
+`approve` ou `accept_as_is` non attesté sur un checkpoint du périmètre est accepté avec
 `attestation=granted:<grant-id>`, distinct d'`attested`. Il est révoqué, une
 fois pour toutes, à l'échéance (`expired`), quand le coût atteint le plafond
 (`cost_reached`), au premier coût inconnu (`cost_unknown`, politique `stop`

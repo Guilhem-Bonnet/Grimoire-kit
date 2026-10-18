@@ -145,6 +145,19 @@ class Selector:
         index = 0 if self.kind == "run" else 1
         return any(link[index] == self.ident for link in lineage)
 
+    def covers_checkpoint(self, lineage: Sequence[tuple[str, str]], node_id: str) -> bool:
+        """Le checkpoint *node_id* du run de tête de *lineage* est-il dans le périmètre ?
+
+        Sans ``/<node>``, toute la lignée est couverte (sous-flows compris). Avec
+        ``/<node>``, la restriction vise le seul run que le sélecteur désigne : le
+        run courant doit être celui de ``run:<id>`` (ou de ``blueprint:<id>``), et
+        c'est son node qui doit porter ce nom. Un node homonyme d'un sous-flow
+        d'un autre blueprint n'est pas couvert.
+        """
+        if not self.node:
+            return self.covers_lineage(lineage)
+        return bool(lineage) and self.covers_lineage(lineage[:1]) and node_id == self.node
+
 
 def parse_until(raw: str, now: datetime | None = None) -> datetime:
     """``+30m``/``+2h``/``+1d`` depuis *now*, ou un instant ISO 8601 avec fuseau ; toujours dans le futur."""
@@ -340,11 +353,22 @@ class GrantJournal:
 
     # ── Octroi ───────────────────────────────────────────────────────────────
 
-    def _open_challenge(self, request_sha: str) -> dict[str, Any] | None:
+    def _open_challenge(self, request_sha: str, env: Mapping[str, str] | None = None) -> dict[str, Any] | None:
+        """Le dernier challenge de cette demande **émis par la session courante**, s'il est encore ouvert.
+
+        Un challenge sans session, ou d'une autre session, ne peut jamais être
+        attesté par celle-ci (``no_session``/``other_session``, sans être consommé) :
+        le réutiliser bloquerait la demande pour toujours. On en émet un nouveau.
+        """
         entries = self.entries()
         used = {e.get("challenge_id") for e in entries if e.get("type") == "grant"}
+        session_id, _host = current_session(env)
         for entry in reversed(entries):
-            if entry.get("type") == "grant_challenge" and entry.get("request_sha256") == request_sha:
+            if (
+                entry.get("type") == "grant_challenge"
+                and entry.get("request_sha256") == request_sha
+                and entry.get("session_id", "") == session_id
+            ):
                 return None if entry.get("challenge_id") in used else entry
         return None
 
@@ -357,7 +381,7 @@ class GrantJournal:
         demande n'est pas attestée. La même demande relancée retrouve son
         challenge ; un refus ne le consomme pas.
         """
-        challenge = self._open_challenge(request.sha256)
+        challenge = self._open_challenge(request.sha256, env)
         if challenge is None:
             session_id, _host = current_session(env)
             challenge = self._append(
@@ -456,9 +480,7 @@ class GrantJournal:
         if not states:
             return None
         lineage = _Runs(self._flows_root).lineage(run_id)
-        covering = [
-            s for s in states if any(sel.covers_lineage(lineage) and sel.node in ("", node_id) for sel in s.scope)
-        ]
+        covering = [s for s in states if any(sel.covers_checkpoint(lineage, node_id) for sel in s.scope)]
         active = [s for s in covering if s.active]
         if active:
             return active[-1]

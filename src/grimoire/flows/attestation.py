@@ -221,21 +221,37 @@ class CheckpointJournal:
         with locked(self.path), self.path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(entry, ensure_ascii=True) + "\n")
 
-    def open_challenge(self, node_id: str) -> dict[str, Any] | None:
-        """Le dernier challenge de *node_id* qu'aucune décision n'a encore consommé."""
+    def open_challenge(self, node_id: str, session_id: str | None = None) -> dict[str, Any] | None:
+        """Le dernier challenge de *node_id* qu'aucune décision n'a encore consommé.
+
+        Avec *session_id*, le challenge émis par cette session est préféré à un
+        challenge plus récent d'une autre session (ou sans session) : une session
+        ne peut attester que le sien. À défaut, le dernier challenge du node, que
+        ``attest`` refusera avec son motif (``no_session``, ``other_session``).
+        """
         entries = self.entries()
         consumed = {e.get("challenge_id") for e in entries if e.get("type") == "decision"}
-        for entry in reversed(entries):
-            if entry.get("type") == "challenge" and entry.get("node_id") == node_id:
-                return None if entry.get("challenge_id") in consumed else entry
-        return None
+        challenges = [e for e in entries if e.get("type") == "challenge" and e.get("node_id") == node_id]
+        if session_id is not None:
+            own = [e for e in challenges if e.get("session_id", "") == session_id]
+            if own:
+                challenges = own
+        if not challenges:
+            return None
+        last = challenges[-1]
+        return None if last.get("challenge_id") in consumed else last
 
     def issue_challenge(self, node_id: str, env: Mapping[str, str] | None = None) -> dict[str, Any]:
-        """Émet le challenge de *node_id*, lié à la session courante — ou rend celui encore ouvert."""
-        existing = self.open_challenge(node_id)
-        if existing is not None:
-            return existing
+        """Émet le challenge de *node_id*, lié à la session courante — ou rend celui qu'elle a encore ouvert.
+
+        Un challenge ouvert sans session, ou par une autre session, ne vaut rien
+        pour celle-ci : le rendre figerait le checkpoint (``no_session`` ou
+        ``other_session`` à chaque décision, sans que le refus le consomme).
+        """
         session_id, _host = current_session(env)
+        existing = self.open_challenge(node_id, session_id)
+        if existing is not None and existing.get("session_id", "") == session_id:
+            return existing
         entry = {
             "type": "challenge",
             "challenge_id": f"CHL-{uuid.uuid4().hex[:12]}",
@@ -416,7 +432,8 @@ def judge_checkpoint(
     if decision not in ("approve", "reject", "amend", "accept_as_is"):
         return None
     reason = str(output.get("checkpoint_reason") or "")
-    attestation = attest(project_root, journal.open_challenge(node_id), env, journal.consumed_turns())
+    challenge = journal.open_challenge(node_id, current_session(env)[0])
+    attestation = attest(project_root, challenge, env, journal.consumed_turns())
     done = journal.amendment_count(node_id)
     if decision == "amend":
         refusal = (

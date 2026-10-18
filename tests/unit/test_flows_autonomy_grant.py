@@ -246,6 +246,50 @@ def test_un_perimetre_de_blueprint_restreint_a_un_node(tmp_path: Path, monkeypat
     assert refused.ok is False and narrow not in refused.attestation["status"]
 
 
+def _lineage_flows(root: Path) -> None:
+    """PARENT (blueprint X : build, gate) et son sous-flow CHILD (blueprint Y : gate) — des nodes homonymes."""
+    flows = root / _FLOWS
+    flows.mkdir(parents=True, exist_ok=True)
+    (flows / "PARENT.json").write_text(
+        json.dumps({"run_id": "PARENT", "blueprint_id": "X", "order": ["build", "gate"]}), encoding="utf-8"
+    )
+    (flows / "CHILD.json").write_text(
+        json.dumps({"run_id": "CHILD", "blueprint_id": "Y", "order": ["gate"], "parent_run_id": "PARENT"}),
+        encoding="utf-8",
+    )
+
+
+@pytest.mark.parametrize("scope", ["blueprint:X/gate", "run:PARENT/gate"])
+def test_la_restriction_de_node_ne_deborde_pas_sur_un_sous_flow(tmp_path: Path, scope: str) -> None:
+    _lineage_flows(tmp_path)
+    grant_id = _grant(tmp_path, scope)
+    journal = _journal(tmp_path)
+
+    covered = journal.for_checkpoint("PARENT", "gate")
+    assert covered is not None and covered.grant_id == grant_id and covered.active
+    assert journal.for_checkpoint("PARENT", "build") is None  # un autre node du run désigné
+    assert journal.for_checkpoint("CHILD", "gate") is None  # le node homonyme du sous-flow n'est pas désigné
+
+
+def test_sans_node_le_perimetre_couvre_toute_la_lignee(tmp_path: Path) -> None:
+    _lineage_flows(tmp_path)
+    grant_id = _grant(tmp_path, "blueprint:X")
+    journal = _journal(tmp_path)
+    for run_id, node in (("PARENT", "gate"), ("PARENT", "build"), ("CHILD", "gate")):
+        state = journal.for_checkpoint(run_id, node)
+        assert state is not None and state.grant_id == grant_id, (run_id, node)
+
+
+def test_le_cout_d_un_octroi_a_node_couvre_toujours_les_sous_flows(tmp_path: Path) -> None:
+    """La mesure de coût ignore le node (borne plus large, donc plus prudente) : la décision, elle, le respecte."""
+    from grimoire.flows.autonomy import GrantState, Selector, _Runs
+
+    _lineage_flows(tmp_path)
+    runs = _Runs(tmp_path / _FLOWS).covered((Selector.parse("blueprint:X/gate"),))
+    assert sorted(runs) == ["CHILD", "PARENT"]
+    assert GrantState({"grant_id": "G", "scope": ["blueprint:X/gate"]}).scope == (Selector("blueprint", "X", "gate"),)
+
+
 # ── Révocations : chacune est un événement, et la session repasse en décision humaine requise ──
 
 
@@ -402,3 +446,43 @@ def test_le_journal_des_octrois_est_protege_en_ecriture(tmp_path: Path) -> None:
             ),
         )
         assert decision.outcome is Outcome.DENY, decision
+
+
+# ── Challenge d'octroi : lié à la session qui demande ─────────────────────────────────────────
+
+
+def _challenges(root: Path) -> list[dict[str, Any]]:
+    return [e for e in _events(root) if e["type"] == "grant_challenge"]
+
+
+@pytest.mark.parametrize("first_session", [None, "S0"])
+def test_un_challenge_d_une_autre_session_ou_sans_session_ne_bloque_pas_la_session_courante(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, first_session: str | None
+) -> None:
+    from grimoire.flows.autonomy import GrantRequest
+
+    request = GrantRequest.build(["blueprint:bp"], 1.0, "+1h")
+    if first_session is None:
+        monkeypatch.delenv("GRIMOIRE_SESSION_ID", raising=False)  # un terminal sans session
+    else:
+        monkeypatch.setenv("GRIMOIRE_SESSION_ID", first_session)
+    stale, refused = _journal(tmp_path).request(request)
+    assert stale is None and refused.status == "unattested"
+
+    monkeypatch.setenv("GRIMOIRE_SESSION_ID", "S1")
+    pending, _ = _journal(tmp_path).request(request)  # la session S1 demande : son propre challenge
+    assert pending is None
+    _human_turn(tmp_path)  # le tour humain de S1
+    grant, attestation = _journal(tmp_path).request(request)  # la même commande, relancée
+    assert grant is not None and attestation.status == "attested" and grant["session_id"] == "S1"
+    challenges = _challenges(tmp_path)
+    assert [c["session_id"] for c in challenges] == [first_session or "", "S1"]
+
+
+def test_la_meme_session_retrouve_son_challenge_ouvert(tmp_path: Path) -> None:
+    from grimoire.flows.autonomy import GrantRequest
+
+    request = GrantRequest.build(["blueprint:bp"], 1.0, "+1h")
+    _journal(tmp_path).request(request)
+    _journal(tmp_path).request(request)
+    assert len(_challenges(tmp_path)) == 1  # une relance de S1 ne multiplie pas les challenges
