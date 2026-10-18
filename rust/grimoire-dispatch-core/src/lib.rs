@@ -696,7 +696,7 @@ fn dispatch_exit_code(dry_run: bool, refusal: Option<&str>, succeeded: bool) -> 
 }
 
 /// Miroir de `dispatch._REFUSAL_MESSAGES`.
-const REFUSAL_MESSAGES: [(&str, &str); 4] = [
+const REFUSAL_MESSAGES: [(&str, &str); 7] = [
     ("v2", "classe de verifiabilite V2 : aucun verdict ne peut juger ce travail, pas de delegation"),
     (
         "no_check",
@@ -704,6 +704,18 @@ const REFUSAL_MESSAGES: [(&str, &str); 4] = [
     ),
     ("no_tier", "aucun palier disponible entre le plancher de la classe et --max-tier"),
     ("no_provider", "aucun fournisseur invocable sur la chaine de paliers prevue"),
+    (
+        "routing_policy_invalid",
+        "politique de routage illisible : aucune route autonome (`on_invalid: refuse`)",
+    ),
+    (
+        "routed_to_session",
+        "le routeur actif decide `session` : aucun appel autonome, la session tranche",
+    ),
+    (
+        "routed_defer",
+        "le routeur actif decide `defer` : aucun modele admis disponible, attente",
+    ),
 ];
 
 /// Miroir de `DispatchReport.refusal_message` : le libelle du code de
@@ -1606,6 +1618,9 @@ mod tests {
         assert!(refusal_message("no_check").contains("--check"));
         assert!(refusal_message("no_tier").contains("--max-tier"));
         assert!(refusal_message("no_provider").contains("fournisseur"));
+        assert!(refusal_message("routing_policy_invalid").contains("on_invalid"));
+        assert!(refusal_message("routed_to_session").contains("session"));
+        assert!(refusal_message("routed_defer").contains("defer"));
     }
 
     #[test]
