@@ -228,10 +228,22 @@ class CheckpointJournal:
         challenge plus récent d'une autre session (ou sans session) : une session
         ne peut attester que le sien. À défaut, le dernier challenge du node, que
         ``attest`` refusera avec son motif (``no_session``, ``other_session``).
+        Les challenges antérieurs à la dernière décision ``reject`` ou ``amend``
+        du node sont périmés, quelle que soit leur session.
         """
         entries = self.entries()
         consumed = {e.get("challenge_id") for e in entries if e.get("type") == "decision"}
-        challenges = [e for e in entries if e.get("type") == "challenge" and e.get("node_id") == node_id]
+        # Un reject ou un amend ferme tout ce que le node avait d'ouvert, quelle
+        # que soit la session du challenge : le tour humain qui précède cette
+        # décision ne peut plus attester la version qui la suit. Un approve
+        # refusé ne consomme que le sien (voir record_decision).
+        start = 0
+        for i, e in enumerate(entries):
+            if e.get("type") == "decision" and e.get("node_id") == node_id and e.get("decision") in ("reject", "amend"):
+                start = i + 1
+        challenges = [
+            e for e in entries[start:] if e.get("type") == "challenge" and e.get("node_id") == node_id
+        ]
         if session_id is not None:
             own = [e for e in challenges if e.get("session_id", "") == session_id]
             if own:

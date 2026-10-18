@@ -391,3 +391,40 @@ def test_la_tentative_d_une_sous_session_ne_prend_pas_le_challenge_de_la_session
     released = _approve(engine, run_id)
 
     assert released.ok is True and released.attestation["status"] == "attested"
+
+
+def test_un_tour_anterieur_a_l_amendement_n_atteste_pas_la_version_amendee(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Un amend ferme tout challenge ouvert du node, même celui d'une autre session (W5-06-S3)."""
+    engine, run_id = _start(tmp_path)  # C1 (S1)
+    _human_turn(tmp_path)  # tour de S1, antérieur à l'amendement
+    monkeypatch.setenv("GRIMOIRE_SESSION_ID", "S2")
+    assert _approve(engine, run_id).ok is False  # refusé (other_session), représenté à S2 : C2
+    amended = engine.resume(
+        run_id, output={**_GATE_OUT, "checkpoint_decision": "amend", "checkpoint_reason": "revoir"}, executor=_quiet()
+    )
+    assert amended.ok is False  # l'amend consomme C2 et périme C1, le node est rouvert
+
+    monkeypatch.setenv("GRIMOIRE_SESSION_ID", "S1")
+    stale = _approve(engine, run_id)  # S1 approuve la version amendée sans nouveau tour humain
+    assert stale.ok is False
+    assert stale.attestation["status"] != "attested"
+
+    # Le refus a représenté le node à S1 (challenge neuf) : un tour postérieur à celui-ci atteste.
+    _human_turn(tmp_path)
+    released = _approve(engine, run_id)
+    assert released.ok is True and released.attestation["status"] == "attested"
+
+
+def test_un_approve_refuse_ne_perime_pas_le_challenge_des_autres_sessions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Seuls reject et amend consomment : le refus d'un approve de S2 laisse S1 attester."""
+    engine, run_id = _start(tmp_path)  # C1 (S1)
+    monkeypatch.setenv("GRIMOIRE_SESSION_ID", "S2")
+    assert _approve(engine, run_id).ok is False
+    monkeypatch.setenv("GRIMOIRE_SESSION_ID", "S1")
+    _human_turn(tmp_path)
+    released = _approve(engine, run_id)
+    assert released.ok is True and released.attestation["status"] == "attested"
