@@ -37,6 +37,9 @@ on:
       - "framework/agentic-standard/**"
   pull_request:
     branches: [main]
+    # `edited` : la garde `changelog` juge le titre de la PR (celui que le
+    # squash-merge conserve) ; le renommer doit relancer le job qui le lit.
+    types: [opened, synchronize, reopened, edited]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

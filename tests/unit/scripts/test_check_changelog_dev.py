@@ -7,6 +7,7 @@ garde de la juger. Le cas sain n'est là qu'en contre-épreuve.
 from __future__ import annotations
 
 import importlib.util
+import json
 import subprocess
 from pathlib import Path
 from types import ModuleType
@@ -119,3 +120,78 @@ def test_an_indented_detail_line_alone_is_not_an_entry(repo: Path) -> None:
     detail = START.replace("- **Départ.** Rien.\n", "- **Départ.** Rien.\n  - Détail ajouté.\n", 1)
     _commit(repo, "feat: une fonctionnalité", CHANGELOG__md=detail, code__py="a = 2\n")
     assert "sans nouvelle entrée" in MOD.dev_problems(repo)[0]
+
+
+# ── D11-S1-01 : la garde juge le titre de la PR, que le squash-merge conserve ─────
+
+
+def test_a_fix_title_over_neutral_commits_is_refused(repo: Path) -> None:
+    """Les commits de la branche ne portent pas le type : le titre de la PR, si."""
+    _commit(repo, "corrige le calcul (relecture)", code__py="a = 2\n")
+    assert MOD.dev_problems(repo) == []  # repli sur les commits : rien à voir
+    found = MOD.dev_problems(repo, title="fix(x): corrige le calcul")
+    assert len(found) == 1 and "sans nouvelle entrée" in found[0] and "titre de la PR" in found[0]
+
+
+def test_a_docs_title_over_a_fix_commit_needs_no_entry(repo: Path) -> None:
+    _commit(repo, "fix(docs): coquille relevée en relecture", code__py="a = 2\n")
+    assert MOD.dev_problems(repo)  # sans titre, le sujet du commit déclenche
+    assert MOD.dev_problems(repo, title="docs: corrige une coquille") == []
+
+
+def test_a_fix_title_with_an_entry_under_unreleased_passes(repo: Path) -> None:
+    entry = START.replace("## [Unreleased]\n", "## [Unreleased]\n\n- **Calcul.** Corrigé.\n", 1)
+    _commit(repo, "corrige le calcul (relecture)", CHANGELOG__md=entry, code__py="a = 2\n")
+    assert MOD.dev_problems(repo, title="fix(x): corrige le calcul (#1)") == []
+
+
+def _event(tmp_path: Path, payload: object) -> dict[str, str]:
+    path = tmp_path / "event.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return {"GITHUB_EVENT_PATH": str(path)}
+
+
+def test_the_title_is_read_from_the_github_event(tmp_path: Path) -> None:
+    assert MOD.pr_title_from_event(_event(tmp_path, {"pull_request": {"title": " fix(x): a "}})) == "fix(x): a"
+
+
+@pytest.mark.parametrize(
+    "payload", [{"ref": "refs/heads/main"}, {"pull_request": {}}, {"pull_request": {"title": "  "}}, ["x"], {"pull_request": {"title": 3}}]
+)
+def test_an_event_without_a_title_gives_none(tmp_path: Path, payload: object) -> None:
+    assert MOD.pr_title_from_event(_event(tmp_path, payload)) is None
+
+
+def test_no_event_or_an_unreadable_one_gives_none(tmp_path: Path) -> None:
+    assert MOD.pr_title_from_event({}) is None
+    assert MOD.pr_title_from_event({"GITHUB_EVENT_PATH": str(tmp_path / "absent.json")}) is None
+    broken = tmp_path / "broken.json"
+    broken.write_text("{pas du json", encoding="utf-8")
+    assert MOD.pr_title_from_event({"GITHUB_EVENT_PATH": str(broken)}) is None
+
+
+def test_main_judges_the_event_title_and_says_so(repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    _commit(repo, "corrige le calcul (relecture)", code__py="a = 2\n")
+    monkeypatch.setattr(MOD, "REPO", repo)
+    monkeypatch.setenv("GITHUB_EVENT_PATH", _event(tmp_path, {"pull_request": {"title": "fix(x): corrige le calcul"}})["GITHUB_EVENT_PATH"])
+    assert MOD.main(["--dev"]) == 1
+    captured = capsys.readouterr()
+    assert "titre de la PR (événement GitHub)" in captured.out
+    assert "sans nouvelle entrée" in captured.err
+
+
+def test_main_says_when_it_falls_back_on_commit_subjects(repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    _commit(repo, "docs: une précision", code__py="a = 2\n")
+    monkeypatch.setattr(MOD, "REPO", repo)
+    monkeypatch.delenv("GITHUB_EVENT_PATH", raising=False)
+    assert MOD.main(["--dev"]) == 0
+    assert "sujets des commits" in capsys.readouterr().out
+
+
+def test_main_title_argument_wins_and_needs_a_value(repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    _commit(repo, "fix(docs): coquille", code__py="a = 2\n")
+    monkeypatch.setattr(MOD, "REPO", repo)
+    monkeypatch.delenv("GITHUB_EVENT_PATH", raising=False)
+    assert MOD.main(["--dev", "--title", "docs: coquille"]) == 0
+    assert "--title" in capsys.readouterr().out
+    assert MOD.main(["--dev", "--title"]) == 2

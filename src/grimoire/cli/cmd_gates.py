@@ -18,6 +18,7 @@ from grimoire.repo_gates import (
     PROFILES,
     all_passed,
     find_kit_root,
+    foreign_package_note,
     run_repo_gates,
 )
 
@@ -61,16 +62,19 @@ def gates_repo(
         raise typer.Exit(2) from exc
 
     ok = all_passed(results)
+    note = foreign_package_note(kit_root)
     as_json = json_output or str((ctx.obj or {}).get("output", "text") or "text") == "json"
     if as_json:
         typer.echo(
             json.dumps(
-                {"root": str(kit_root), "profile": profile, "ok": ok, "results": [r.to_dict() for r in results]},
+                {"root": str(kit_root), "profile": profile, "ok": ok, "warnings": [note] if note else [], "results": [r.to_dict() for r in results]},
                 indent=2,
                 ensure_ascii=False,
             )
         )
     else:
+        if note:
+            typer.echo(f"Attention : {note}", err=True)
         for result in results:
             typer.echo(f"{_MARK[result.status]}  {result.id:<15} {result.seconds:5.1f}s")
             if result.status != "passed" and result.detail:

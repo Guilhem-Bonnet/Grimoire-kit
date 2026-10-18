@@ -63,7 +63,10 @@ def build_kit(root: Path) -> Path:
     shutil.copy(SCRIPTS / "emitted-prose-allowlist.txt", root / "scripts" / "emitted-prose-allowlist.txt")
     _write(root, "scripts/code-ratchet-baseline.json", json.dumps({"frozen": {}, "src_oversized": {}}))
     _write(root, "version.txt", "1.0.0\n")
-    _write(root, "src/grimoire/__init__.py", "")
+    # Le faux clone passe avant tout autre `grimoire` sur le chemin d'import des gardes
+    # (`gate_environment`) : son paquet délègue ses sous-modules au vrai, sinon les gardes
+    # qui importent la CLI n'auraient rien à lire.
+    _write(root, "src/grimoire/__init__.py", f"__path__.append({str(REPO / 'src' / 'grimoire')!r})\n")
     _write(root, "src/grimoire/core/scaffold.py", "_PROTOCOL_DOCS: ClassVar[tuple[str, ...]] = ()\n")
     _write(root, "CHANGELOG.md", "# Changelog\n\n## [Unreleased]\n\n## [1.0.0] - 2026-01-01\n\n- **Départ.** Rien.\n")
     _write(root, ".github/workflows/ci.yml", f"jobs:\n  a:\n    steps:\n      - uses: actions/checkout@{SHA}  # v7\n")
@@ -247,6 +250,65 @@ def test_cli_outside_a_kit_checkout_says_so_instead_of_passing(tmp_path: Path) -
 def test_cli_rejects_an_unknown_gate(kit: Path) -> None:
     result = runner.invoke(app, ["gates", "repo", "--root", str(kit), "--only", "nope"])
     assert result.exit_code == 2
+
+
+# ── D11-S1-02 : le verdict suit le code de la branche, pas le paquet installé ────
+
+
+def _foreign_grimoire(tmp_path: Path) -> Path:
+    """Un dossier qui contient un autre `grimoire` importable (un clone voisin, une release)."""
+    foreign = tmp_path / "foreign"
+    _write(foreign, "grimoire/__init__.py", "")
+    return foreign
+
+
+_WHERE = (
+    "import pathlib, sys\n"
+    "import grimoire\n"
+    "root = pathlib.Path(__file__).resolve().parent.parent\n"
+    "origin = pathlib.Path(grimoire.__file__).resolve()\n"
+    "print(origin)\n"
+    "sys.exit(0 if (root / 'src') in origin.parents else 1)\n"
+)
+
+
+def test_a_gate_imports_the_clone_package_not_a_foreign_one(kit: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write(kit, "scripts/check-where.py", _WHERE)
+    monkeypatch.setenv("PYTHONPATH", str(_foreign_grimoire(tmp_path)))
+    gate = repo_gates.Gate("where", "check-where.py", "un grimoire étranger")
+    result = repo_gates.run_gate(gate, kit)
+    assert result.status == "passed", result.detail
+    assert str(kit / "src" / "grimoire") in result.detail
+
+
+def test_the_inherited_pythonpath_is_kept_after_the_clone(kit: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    foreign = _foreign_grimoire(tmp_path)
+    monkeypatch.setenv("PYTHONPATH", str(foreign))
+    env = repo_gates.gate_environment(kit)
+    assert env["PYTHONPATH"].split(repo_gates.os.pathsep) == [str(kit / "src"), str(foreign)]
+    monkeypatch.delenv("PYTHONPATH")
+    assert repo_gates.gate_environment(kit)["PYTHONPATH"] == str(kit / "src")
+
+
+def test_the_verdict_does_not_depend_on_which_grimoire_is_installed(kit: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Un `grimoire` étranger sans CLI ne doit pas rougir (ni verdir) les gardes qui importent le paquet."""
+    monkeypatch.setenv("PYTHONPATH", str(_foreign_grimoire(tmp_path)))
+    results = repo_gates.run_repo_gates(kit, only=["tenets", "doc-commands"])
+    assert all(r.status == "passed" for r in results), [(r.id, r.detail) for r in results]
+
+
+def test_the_event_file_reaches_the_gates(kit: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(tmp_path / "event.json"))
+    assert repo_gates.gate_environment(kit)["GITHUB_EVENT_PATH"] == str(tmp_path / "event.json")
+
+
+def test_a_foreign_orchestrating_package_is_reported(kit: Path) -> None:
+    """Le test tourne avec le grimoire de ce dépôt : face à un faux clone, il est étranger et le dit."""
+    note = repo_gates.foreign_package_note(kit)
+    assert note is not None and str(kit / "src") in note
+    assert repo_gates.foreign_package_note(REPO) is None
+    payload = json.loads(runner.invoke(app, ["gates", "repo", "--root", str(kit), "--only", "doc-audience", "--json"]).output)
+    assert payload["warnings"] == [note]
 
 
 # ── Même commande en local et en CI ──────────────────────────────────────────────

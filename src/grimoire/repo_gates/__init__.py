@@ -134,9 +134,42 @@ def find_kit_root(start: Path) -> Path | None:
     return None
 
 
+def foreign_package_note(root: Path) -> str | None:
+    """Dit d'où vient le ``grimoire`` qui orchestre, quand ce n'est pas ``<root>/src``.
+
+    Les gardes, elles, tournent sur le code du clone (``gate_environment``) ; le
+    registre des gardes et le profil viennent en revanche du paquet qui exécute
+    cette commande. S'il est étranger au clone (release installée, autre clone),
+    on le dit au lieu de laisser croire que tout vient de la branche.
+    """
+    import grimoire
+
+    origin = Path(grimoire.__file__).resolve() if getattr(grimoire, "__file__", None) else None
+    if origin is not None and (root.resolve() / "src") in origin.parents:
+        return None
+    return (
+        f"le paquet grimoire qui orchestre vient de {origin.parent if origin else 'un emplacement inconnu'}, "
+        f"pas de {root / 'src'} : les gardes jugent le code du clone, mais le registre des gardes est celui de ce paquet"
+    )
+
+
 def _tail(output: str, lines: int = 12) -> str:
     kept = [line for line in output.strip().splitlines() if line.strip()]
     return "\n".join(kept[-lines:])
+
+
+def gate_environment(root: Path) -> dict[str, str]:
+    """L'environnement d'une garde : le code du clone passe avant tout ``grimoire`` installé.
+
+    Deux gardes (``tenets``, ``doc-commands``) importent ``grimoire``. Sans cela
+    elles jugent le paquet que l'interpréteur trouve (un autre clone, une release
+    installée) et leur verdict dépend de l'environnement, pas de la branche.
+    ``<root>/src`` vient donc en tête de ``PYTHONPATH``, le reste suit.
+    """
+    env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
+    inherited = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = str(root / "src") + (os.pathsep + inherited if inherited else "")
+    return env
 
 
 def run_gate(gate: Gate, root: Path, profile: str = "dev", timeout: float = GATE_TIMEOUT_SECONDS) -> GateResult:
@@ -145,7 +178,7 @@ def run_gate(gate: Gate, root: Path, profile: str = "dev", timeout: float = GATE
     started = time.monotonic()
     if not script.is_file():
         return GateResult(gate.id, "unevaluated", f"script absent : scripts/{gate.script}", 0.0)
-    env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
+    env = gate_environment(root)
     try:
         proc = subprocess.run(
             [sys.executable, str(script), *gate.args_for(profile)],
