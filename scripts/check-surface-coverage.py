@@ -68,6 +68,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import contextlib
 import io
 import json
 import os
@@ -479,7 +480,21 @@ def to_json(registry: dict[str, Unit]) -> dict[str, object]:
     }
 
 
+def _force_utf8_output() -> None:
+    """Le script imprime des accents : une console cp1252 (Windows) ne doit pas le tuer.
+
+    Même parade que `check-actions-pinned.py`, autonome à dessein (pas d'import du paquet).
+    `errors="replace"` : un caractère non représentable dégrade l'affichage, pas le verdict.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            with contextlib.suppress(OSError, ValueError):
+                reconfigure(encoding="utf-8", errors="replace")
+
+
 def main(argv: list[str] | None = None) -> int:
+    _force_utf8_output()
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0] if __doc__ else None)
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--check", action="store_true", help="échoue sur une garde rompue (et sur une perte avec --base)")

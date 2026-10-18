@@ -52,10 +52,10 @@ def _write(repo: Path, rel: str, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def _run(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
+def _run(repo: Path, *args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(_SCRIPT), "--root", str(repo), *args],
-        capture_output=True, text=True, encoding="utf-8", check=False,
+        capture_output=True, text=True, encoding="utf-8", check=False, env=env,
     )
 
 
@@ -109,6 +109,26 @@ def test_a_new_uncovered_unit_is_listed_never_a_failure(repo: Path) -> None:
     _write(repo, "units2.json", json.dumps(units))
     done = _run(repo, "--units-from", str(repo / "units2.json"), "--check", "--base", "HEAD")
     assert done.returncode == 0, done.stderr
+
+
+def _cp1252_env() -> dict[str, str]:
+    """Console Windows : le sous-processus hérite d'un encodage de flux non UTF-8."""
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONUTF8"}
+    env["PYTHONIOENCODING"] = "cp1252"
+    return env
+
+
+def test_the_script_prints_utf8_even_on_a_cp1252_console(repo: Path) -> None:
+    """La CI lance ces tests sous windows-latest : un accent ne doit pas dépendre de la console."""
+    units = {**_UNITS, "cli": [*_UNITS["cli"], "flow new"]}
+    _write(repo, "units2.json", json.dumps(units))
+    done = subprocess.run(
+        [sys.executable, str(_SCRIPT), "--root", str(repo), "--units-from", str(repo / "units2.json"),
+         "--check", "--base", "HEAD"],
+        capture_output=True, check=False, env=_cp1252_env(),
+    )
+    assert done.returncode == 0, done.stderr.decode("utf-8", "replace")
+    assert "unités couvertes" in done.stdout.decode("utf-8")
 
 
 def test_a_deleted_unit_is_not_a_loss() -> None:
