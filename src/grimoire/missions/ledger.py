@@ -60,7 +60,15 @@ from grimoire.missions.schemas import (
     TaskState,
     TaskType,
 )
-from grimoire.missions.session_link import canonical_host
+from grimoire.missions.session_link import canonical_host, resume_command
+from grimoire.missions.waiting import (
+    HUMAN_ANSWERED_EVENT,
+    UNTIL_UNKNOWN,
+    Question,
+    ResumeHint,
+    Waiting,
+    new_question_id,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -79,12 +87,22 @@ _TASK_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
     TaskState.PROPOSED: frozenset({TaskState.READY, TaskState.CANCELLED}),
     TaskState.READY: frozenset({TaskState.CLAIMED, TaskState.BLOCKED, TaskState.CANCELLED}),
     TaskState.CLAIMED: frozenset(
-        {TaskState.RUNNING, TaskState.READY, TaskState.BLOCKED, TaskState.FAILED, TaskState.CANCELLED}
+        {
+            TaskState.RUNNING, TaskState.READY, TaskState.BLOCKED, TaskState.FAILED, TaskState.CANCELLED,
+            TaskState.WAITING,
+        }
     ),
     # RUNNING → READY : bail perdu, réservé à la récolte (:meth:`MissionLedger.reap`).
+    # RUNNING → WAITING (K6) : l'agent se gare avec une raison, ou la récolte différée.
     TaskState.RUNNING: frozenset(
-        {TaskState.NEEDS_VERIFICATION, TaskState.BLOCKED, TaskState.FAILED, TaskState.CANCELLED, TaskState.READY}
+        {
+            TaskState.NEEDS_VERIFICATION, TaskState.BLOCKED, TaskState.FAILED, TaskState.CANCELLED, TaskState.READY,
+            TaskState.WAITING,
+        }
     ),
+    # K6 : WAITING → RUNNING, la même session au même epoch (reprise sur place) ;
+    # WAITING → READY, le tick seul (:meth:`MissionLedger.wake`, bail rendu) ; WAITING → CANCELLED, un humain.
+    TaskState.WAITING: frozenset({TaskState.RUNNING, TaskState.READY, TaskState.CANCELLED}),
     TaskState.BLOCKED: frozenset({TaskState.READY, TaskState.CANCELLED}),
     # NEEDS_VERIFICATION → CANCELLED (K3, issue #713) : une preuve remise peut être abandonnée.
     TaskState.NEEDS_VERIFICATION: frozenset(
@@ -118,11 +136,13 @@ LEASE_RENEWED_EVENT = "task.lease_renewed"
 REAP_DEFERRED_EVENT = "task.reap_deferred"
 #: K2 : la clé, dans un ``task.transitioned`` de récolte, qui marque un bail perdu.
 LEASE_LOST_KEY = "lease_lost"
-#: K6 (à venir) : une réponse humaine remet le compteur de tentatives à zéro.
-HUMAN_ANSWERED_EVENT = "task.human_answered"
+#: K6 : le tick rend une tâche en attente (``waiting → ready``) ; la clé qui en dit la cause.
+WOKEN_KEY = "woken"
 #: Verdicts de ``task.dispatched`` comptés comme tentatives (``rate_limit`` est un quota, pas un échec).
 _FAILED_DISPATCH = frozenset({"red", "timeout", "error"})
 _HELD = (TaskState.CLAIMED, TaskState.RUNNING)
+#: Les états où le claim est encore à son titulaire : tenu, ou garé en attente (K6, reprise sur place).
+_HOLDING = (*_HELD, TaskState.WAITING)
 #: Origine d'une barrière du fichier de bail (K2-S2-02) : voir :class:`LeaseFile`.
 ORIGIN_REAP = "reap"
 
@@ -380,6 +400,8 @@ class MissionLedger:
     def _apply_transition(self, tid: str, payload: dict[str, Any]) -> None:
         old_task = self._tasks[tid]
         update: dict[str, Any] = {"status": payload["to_state"]}
+        # K6 : l'attente n'existe que dans l'état ``waiting`` ; toute autre transition l'efface.
+        update["waiting"] = payload.get("waiting") if payload["to_state"] == TaskState.WAITING.value else None
         if "claim" in payload:
             update["claim"] = payload["claim"]
         self._tasks[tid] = MissionTask.from_dict({**old_task.to_dict(), **update})
@@ -414,7 +436,7 @@ class MissionLedger:
         high = self._epoch_high.get(task.id, current)
         if isinstance(epoch, bool) or not isinstance(epoch, int) or epoch != current or epoch != high:
             return f"epoch {epoch!r} périmé : le bail de {task.id} est à l'epoch {max(current, high)}"
-        if task.status not in _HELD:
+        if task.status not in _HOLDING:
             # Le claim survit au rendu (release, annulation, blocage) : sans ce garde, son epoch
             # resterait « le plus haut » et un effet périmé s'appliquerait à l'écriture comme au rejeu.
             return f"epoch {epoch!r} périmé : {task.id} est {task.status.value}, le bail est rendu"
@@ -734,6 +756,7 @@ class MissionLedger:
             raise GrimoireMissionError(
                 f"Invalid task transition {task.status.value} → {to_state.value} for {task_id}"
             )
+        self._waiting_guard(task, to_state, extra_payload, lease_epoch, reaper)
         payload: dict[str, Any] = {
             "task_id": task_id,
             "from_state": task.raw_status if task.is_unknown_state else task.status.value,
@@ -747,9 +770,8 @@ class MissionLedger:
         if idem:
             payload["idem"] = idem
         if (
-            (task.status in _HELD or task.status is TaskState.NEEDS_VERIFICATION)
-            and to_state not in _HELD
-            and to_state is not TaskState.NEEDS_VERIFICATION
+            (task.status in _HOLDING or task.status is TaskState.NEEDS_VERIFICATION)
+            and to_state not in (*_HELD, TaskState.NEEDS_VERIFICATION, TaskState.WAITING)
             and not reaper
         ):
             # Le titulaire rend le bail (release, blocage, échec, annulation) : même barrière que la
@@ -789,6 +811,66 @@ class MissionLedger:
         self._append_event("task.transitioned", task_id, "task", actor_id, payload, lock_held=True)
         self._load()
         return self._tasks[task_id]
+
+    @staticmethod
+    def _waiting_guard(
+        task: MissionTask,
+        to_state: TaskState,
+        extra_payload: dict[str, Any] | None,
+        lease_epoch: int | None,
+        waker: bool,
+    ) -> None:
+        """Les trois règles de l'état ``waiting`` (K6, §2.1), tenues ici pour qu'aucune surface ne les contourne.
+
+        - vers ``waiting`` : l'attente est écrite, nommée et valide (``task ask`` / ``task wait``) ;
+        - ``waiting → ready`` : le tick seul (:meth:`wake`), jamais un geste ``move`` ;
+        - ``waiting → running`` : la même session, au même epoch — reprise sur place.
+        """
+        if to_state is TaskState.WAITING:
+            raw = (extra_payload or {}).get("waiting")
+            problem = Waiting.from_dict(raw).problem() if isinstance(raw, dict) else "aucune attente décrite"
+            if problem:
+                raise GrimoireMissionError(
+                    f"Transition vers waiting refusée pour {task.id} : {problem} "
+                    "(poser l'attente par `grimoire task ask` ou `grimoire task wait`)"
+                )
+        if task.status is TaskState.WAITING and to_state is TaskState.READY and not waker:
+            raise GrimoireMissionError(
+                f"Transition refusée pour {task.id} : waiting → ready est réservé au tick "
+                "(`grimoire task wake`) ; une réponse humaine (`grimoire task answer`) le déclenche"
+            )
+        if task.status is TaskState.WAITING and to_state is TaskState.RUNNING and lease_epoch is None:
+            raise GrimoireMissionError(
+                f"Reprise refusée pour {task.id} : waiting → running est la reprise sur place de la même session, "
+                "au même epoch — présenter l'epoch tenu (`grimoire task resume --epoch`)"
+            )
+
+    def wake(self, task_id: str, *, actor_id: str = "tick", reason: str = "", cause: str = "") -> MissionTask:
+        """``waiting → ready`` — le seul chemin, réservé au tick : réponse reçue, échéance passée, quota ou CI rendus.
+
+        Le bail est rendu : barrière (fichier de bail à l'epoch suivant, sans titulaire) puis
+        transition, sous le verrou — la session qui attendait ne tient plus rien et reprend par
+        un nouveau claim (``resume_hint`` dit comment). *cause* nomme ce qui a réveillé la tâche.
+        """
+        with _ledger_file_lock(self._events_path):
+            self._invalidate()
+            self._load()
+            task = self._tasks.get(task_id)
+            if task is None:
+                raise GrimoireMissionError(f"Task not found: {task_id}")
+            if task.status is not TaskState.WAITING:
+                raise GrimoireMissionError(f"Réveil refusé pour {task_id} : tâche {task.status.value}, pas en attente")
+            path = lease_path(self._root, task_id)
+            cached = read_lease(path)
+            fence = max(self._epoch_high.get(task_id, 0) + 1, cached.epoch if cached is not None else 0)
+            write_lease(
+                path,
+                LeaseFile(task_id, fence, self._now().isoformat(), holder=False, origin=ORIGIN_HAND_BACK),
+            )
+            return self._transition_locked(
+                task_id, TaskState.READY, actor_id, reason or f"réveil ({cause})", None,
+                {WOKEN_KEY: {"cause": cause}, "fence_epoch": fence}, None, reaper=True,
+            )
 
     def claim_task(self, task_id: str, actor_id: str, host_id: str, exclusive_files: tuple[str, ...] = ()) -> MissionTask:
         """Convenience: READY → CLAIMED."""
@@ -935,7 +1017,12 @@ class MissionLedger:
 
     def _since_last_answer(self, task_id: str) -> list[LedgerEvent]:
         events = [e for e in self.list_events(task_id) if e.id not in self._rejected]
-        answers = [i for i, e in enumerate(events) if e.event_type == HUMAN_ANSWERED_EVENT]
+        # Seule une réponse venue du canal humain remet le compteur à zéro : un agent qui
+        # écrirait ``task.human_answered`` lui-même (``append_event`` est public) n'y gagne rien.
+        answers = [
+            i for i, e in enumerate(events)
+            if e.event_type == HUMAN_ANSWERED_EVENT and e.payload.get("origin") == ORIGIN_HUMAN
+        ]
         return events[answers[-1] + 1 :] if answers else events
 
     def attempts(self, task_id: str) -> int:
@@ -985,9 +1072,11 @@ class MissionLedger:
         - sinon : barrière (fichier de bail à l'epoch suivant, sans titulaire)
           puis ``task.transitioned`` vers ``ready`` marqué ``lease_lost``.
 
-        Une différée s'écrit une fois par (epoch, cause) en ``task.reap_deferred`` ;
-        la tâche reste tenue jusqu'à l'état ``waiting`` (K6). Horloge incohérente :
-        rien n'est jugé. *apply* faux : les décisions sans aucune écriture.
+        Une différée s'écrit une fois par (epoch, cause) en ``task.reap_deferred`` et la
+        tâche se gare en ``waiting`` (K6) — ``quota`` : ``waiting(quota)`` ; ``retry_exhausted``
+        et ``resume_unfenced`` : ``waiting(human)`` avec la question posée. Elle sort alors de
+        la récolte, et seule une réponse humaine (``task answer``) la rend. Horloge
+        incohérente : rien n'est jugé. *apply* faux : les décisions sans aucune écriture.
         """
         is_quota = quota_blocked or self._last_route_quota
         with _ledger_file_lock(self._events_path):
@@ -1028,17 +1117,26 @@ class MissionLedger:
         if cause:
             written = apply and not self._already_deferred(task.id, view.epoch, cause)
             question = self._unfenced_question(view) if cause == "resume_unfenced" else ""
+            waiting = self._deferred_waiting(task, view, cause, before, question, moment)
             if written:
                 payload: dict[str, Any] = {
                     "task_id": task.id, "lease_epoch_lost": view.epoch, "cause": cause,
                     "attempts": before, "lease_reason": view.reason, "actor_id": actor_id,
                 }
-                if question:
+                if waiting.question is not None:
                     payload["question"] = {
-                        "kind": "resume_unfenced", "text": question, "options": ["reprendre", "abandonner"],
+                        "kind": waiting.question.kind, "text": waiting.question.text,
+                        "options": list(waiting.question.options),
                     }
                 self._append_event(REAP_DEFERRED_EVENT, task.id, "task", actor_id, payload, lock_held=True)
                 self._load()
+            if apply:
+                # K6 : la différée n'est plus un silence — la tâche se gare, avec sa raison, et sort de la récolte.
+                self._transition_locked(
+                    task.id, TaskState.WAITING, actor_id, f"bail perdu ({view.reason}) : {cause}", None,
+                    {"waiting": waiting.to_dict()}, None, reaper=True,
+                )
+                written = True
             return ReapDecision(task.id, "defer", cause, view.epoch, before, written=written, question=question)
         attempt = before + 1
         retry_at = (moment + backoff_delay(attempt)).isoformat()
@@ -1054,6 +1152,28 @@ class MissionLedger:
             {LEASE_LOST_KEY: lost, "fence_epoch": fence}, None, reaper=True,
         )
         return ReapDecision(task.id, "ready", view.reason, view.epoch, attempt, retry_at, written=True)
+
+    @staticmethod
+    def _deferred_waiting(
+        task: MissionTask, view: LeaseView, cause: str, attempts: int, question: str, moment: datetime
+    ) -> Waiting:
+        """L'attente que la récolte pose à la place d'un silence : quota, ou une décision humaine nommée (§2.3, §2.6)."""
+        hint = ResumeHint(
+            session_id=view.session_id, host=view.host,
+            resume_command=resume_command(view.host, view.session_id),
+        )
+        since = moment.isoformat()
+        if cause == "quota":
+            return Waiting("quota", UNTIL_UNKNOWN, None, hint, since)
+        if cause == "retry_exhausted":
+            text = (
+                f"{task.id} a perdu son bail {attempts} fois (plafond {MAX_ATTEMPTS}) : "
+                "la relancer encore, ou l'abandonner ?"
+            )
+            options, kind = ("réessayer", "abandonner"), "retry_exhausted"
+        else:
+            text, options, kind = question, ("reprendre", "abandonner"), "resume_unfenced"
+        return Waiting("human", "", Question(new_question_id(), kind, text, options, "tick", since), hint, since)
 
     @staticmethod
     def _unfenced_question(view: LeaseView) -> str:

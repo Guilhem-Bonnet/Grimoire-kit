@@ -1367,3 +1367,10 @@ def task_migrate_standard(
     )
     if not dry_run and report.snapshot_path:
         console.print(f"[dim]Instantané : {report.snapshot_path} (restaurer avec --restore {report.stamp})[/dim]")
+
+
+# K6 (issue #771) : `ask`, `answer`, `wait`, `resume`, `wake`, `note`, `decisions`, `lint-decisions`
+# vivent dans leur module — celui-ci porte déjà de quoi se relire.
+from grimoire.cli.cmd_task_waiting import register as _register_waiting  # noqa: E402
+
+_register_waiting(task_app)

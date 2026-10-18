@@ -168,6 +168,11 @@ def _is_flow_terminal(status: WorkflowStatus) -> bool:
     return status in _TERMINAL_STATUSES
 
 
+def _flow_question_id(run_id: str, node_id: str) -> str:
+    """L'identifiant stable de la question qu'un checkpoint pose à l'humain sur la tâche liée (K6)."""
+    return f"q-flow-{run_id}-{node_id}"
+
+
 def _now_iso() -> str:
     return datetime.now(tz=UTC).isoformat()
 
@@ -612,6 +617,84 @@ class FlowEngine:
             {"run_id": run_id, "node_id": node_id, **risk},
         )
 
+    def _linked_service(self, wfi: WorkflowInstance) -> Any:
+        """Le ``TaskService`` du projet si le run a une tâche de ledger liée (K6), sinon ``None``.
+
+        Même règle que :meth:`_record_accepted_risk` : ni ledger ni tâche n'est créé pour un run
+        qui n'en a pas ; il garde sa question dans le journal du run (``flow status``).
+        """
+        from grimoire.missions.service import DEFAULT_LEDGER_RELPATH, TaskService
+
+        root = Path(self._project_root) / DEFAULT_LEDGER_RELPATH
+        if not (root / "events.jsonl").is_file():
+            return None
+        service = TaskService(Path(self._project_root))
+        return service if service.ledger.get_task(wfi.task_id) is not None else None
+
+    def _ask_linked_task(self, wfi: WorkflowInstance, run_id: str, node_id: str, why: str) -> None:
+        """Un checkpoint destructif sans décision attestée (W2-01) devient une question tracée sur la tâche liée (K6).
+
+        La tâche tenue se gare en ``waiting(human)`` ; une tâche qui n'est pas tenue reçoit
+        seulement l'événement ``task.question_asked``. L'identifiant de la question est celui du
+        checkpoint : un refus répété ne la repose pas. Meilleur effort : le flux n'en dépend pas.
+        """
+        import contextlib
+
+        from grimoire.core.exceptions import GrimoireError
+        from grimoire.missions.schemas import TaskState
+        from grimoire.missions.waiting import QUESTION_ASKED_EVENT, Question
+
+        service = self._linked_service(wfi)
+        if service is None:
+            return
+        qid = _flow_question_id(run_id, node_id)
+        text = (
+            f"Checkpoint destructif « {node_id} » du run {run_id} : la décision attend un humain "
+            f"(tour humain de la session qui l'a présenté, ou jeton cockpit) — {why}"
+        )
+        with contextlib.suppress(GrimoireError, OSError, ValueError):
+            task = service.require(wfi.task_id)
+            if task.status in (TaskState.CLAIMED, TaskState.RUNNING):
+                service.ask(
+                    wfi.task_id, text, self._actor_id, kind="permission",
+                    options=("approve", "reject", "amend"), origin="flow", question_id=qid,
+                )
+            elif not any(
+                e.event_type == QUESTION_ASKED_EVENT and e.payload.get("question", {}).get("id") == qid
+                for e in service.ledger.list_events(wfi.task_id)
+            ):
+                question = Question(qid, "permission", text, ("approve", "reject", "amend"), "flow")
+                service.ledger.append_event(
+                    QUESTION_ASKED_EVENT, wfi.task_id, "task", self._actor_id,
+                    {"task_id": wfi.task_id, "reason": "human", "question": question.to_dict(),
+                     "actor_id": self._actor_id},
+                )
+
+    def _settle_linked_question(self, wfi: WorkflowInstance, run_id: str, node_id: str, decision: str) -> None:
+        """La décision d'un checkpoint est attestée humaine : elle répond à la question de la tâche liée (K6).
+
+        L'attestation est la preuve d'autorité (un tour humain, W2-01) : c'est elle, et non le
+        champ ``actor``, qui fait de ceci une réponse du canal humain.
+        """
+        import contextlib
+
+        from grimoire.core.exceptions import GrimoireError
+        from grimoire.missions.schemas import ORIGIN_HUMAN, TaskState
+
+        service = self._linked_service(wfi)
+        if service is None:
+            return
+        qid = _flow_question_id(run_id, node_id)
+        with contextlib.suppress(GrimoireError, OSError, ValueError):
+            task = service.require(wfi.task_id)
+            waiting = task.waiting
+            if task.status is TaskState.WAITING and waiting is not None and waiting.question is not None \
+                    and waiting.question.id == qid:
+                service.answer(
+                    wfi.task_id, f"décision de checkpoint attestée : {decision}", self._actor_id,
+                    origin=ORIGIN_HUMAN, question_id=qid, attested_by_flow=True,
+                )
+
     def _authority(self, run_id: str) -> CheckpointJournal:
         from grimoire.flows.attestation import CheckpointJournal
 
@@ -1003,6 +1086,10 @@ class FlowEngine:
                 # Un refus ou un amendement est une décision : il consomme son
                 # challenge, la présentation suivante en émet un neuf.
                 self._authority(run_id).record_decision(current_id, gate.decision, gate.reason, gate.attestation)
+                if gate.attestation.attested:
+                    self._settle_linked_question(wfi, run_id, current_id, gate.decision)
+            if gate is not None and gate.refusal and gate.refusal.startswith("awaiting_human"):
+                self._ask_linked_task(wfi, run_id, current_id, gate.attestation.explain())
             self._present(run_id, contract)
             return ResumeOutcome(
                 ok=False,
@@ -1050,6 +1137,8 @@ class FlowEngine:
             )
             if gate.accepted_risk is not None:
                 self._record_accepted_risk(wfi, run_id, current_id, gate.accepted_risk)
+            if gate.attestation.attested:
+                self._settle_linked_question(wfi, run_id, current_id, gate.decision)
         if finished:
             self._kernel.complete(wfi.id, ctx)
             return ResumeOutcome(

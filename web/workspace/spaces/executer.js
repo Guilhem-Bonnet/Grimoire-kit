@@ -21,6 +21,15 @@
 // et zone de consigne dans l'inspecteur, « Annuler » avec raison exigée, tri
 // par priorité dans chaque colonne, badge « consigne non lue » sur la carte.
 //
+// Attente nommée (K6, issue #771) : un état `waiting` à raison nommée
+// (`human`, `ci`, `quota`, `paused`). `waiting(human)` porte une question ;
+// la vue « Décisions » (et le bandeau au-dessus du board) les liste, la plus
+// ancienne d'abord, avec les réponses proposées. Répondre est `api.taskAction(
+// id, 'answer', { text, question_id })` — le serveur pose l'origine humaine
+// (canal cockpit, jeton de session), jamais ce corps. Une question posée par
+// un checkpoint de flow ne se tranche pas ici : la décision s'atteste dans le
+// flux, la vue le dit au lieu d'offrir un bouton qui ne déciderait rien.
+//
 // Timeline (#139) : `api.taskTrace(id)` porte maintenant jusqu'à cinq sources
 // (ledger, hooks, gate, runtime, evidence, otel) triées dans le temps —
 // filtrables par source et par gravité, chaque ligne s'ouvrant en accordéon
@@ -91,9 +100,32 @@ const PRIORITY_DOT = { low: '', medium: '', high: 'warn', critical: 'bad' };
 const priorityRank = (p) => PRIORITIES.indexOf(p);
 // Dans une colonne, la plus pressante d'abord ; à égalité, l'identifiant
 // garde un ordre stable (même règle que `build_board`).
+// Ce qui attend la décision d'un humain passe devant tout (K6).
+const isHumanWait = (t) => t.status === 'waiting' && !!t.waiting && t.waiting.reason === 'human' && !!t.waiting.question;
 const byPriority = (a, b) =>
+  (Number(isHumanWait(b)) - Number(isHumanWait(a))) ||
   (priorityRank(b.effective_priority || 'medium') - priorityRank(a.effective_priority || 'medium')) ||
   String(a.id).localeCompare(String(b.id));
+// La raison d'une attente, en clair — point + mot, jamais la couleur seule.
+const WAIT_LABEL = { human: 'décision attendue', ci: 'attend la CI', quota: 'attend le quota', paused: 'en pause' };
+const QUESTION_KIND_LABEL = {
+  merge: 'fusion', permission: 'permission', choice: 'choix', resume_branch: 'reprise de branche',
+  resume_unfenced: 'reprise sans frein', retry_exhausted: 'tentatives épuisées',
+};
+function waitingText(waiting) {
+  const label = WAIT_LABEL[waiting.reason] || `attente (${waiting.reason})`;
+  if (waiting.reason === 'human') return label;
+  if (waiting.until && waiting.until !== 'unknown') return `${label} jusqu'à ${waiting.until.slice(0, 16).replace('T', ' ')}`;
+  return `${label}, échéance inconnue`;
+}
+function ageText(iso) {
+  const then = Date.parse(iso || '');
+  if (Number.isNaN(then)) return '';
+  const minutes = Math.max(0, Math.round((Date.now() - then) / 60000));
+  if (minutes < 60) return `depuis ${minutes} min`;
+  const hours = Math.round(minutes / 60);
+  return hours < 48 ? `depuis ${hours} h` : `depuis ${Math.round(hours / 24)} j`;
+}
 
 function injectStyles() {
   if (document.getElementById(STYLE_ID)) return;
@@ -155,6 +187,17 @@ function injectStyles() {
     .ex-steer-form { display: flex; flex-direction: column; gap: 6px; }
     .ex-steer-form textarea { min-height: 56px; font: inherit; font-size: var(--t-s); }
     .ex-steer-row { display: flex; gap: 6px; align-items: center; }
+    .ex-wait { font-size: var(--t-s); color: var(--ink2); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .ex-wait.human { color: var(--ink); font-weight: 500; }
+    .ex-banner { display: flex; align-items: center; gap: var(--sp-3); padding: 8px var(--sp-3); border: 1px solid var(--warn); border-radius: var(--r); background: var(--e1); font-size: var(--t-s); }
+    .ex-decisions { display: flex; flex-direction: column; gap: var(--sp-3); max-width: 760px; }
+    .ex-decision { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3); border: 1px solid var(--line); border-left: 3px solid var(--warn); border-radius: var(--r); background: var(--e1); }
+    .ex-decision-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: var(--t-s); color: var(--ink2); }
+    .ex-decision-title { font-size: var(--t-s); font-weight: 500; color: var(--ink); }
+    .ex-decision-question { font-size: var(--t-m, var(--t-s)); color: var(--ink); margin: 0; white-space: pre-wrap; }
+    .ex-decision-options { display: flex; flex-wrap: wrap; gap: 6px; }
+    .ex-decision textarea { min-height: 44px; font: inherit; font-size: var(--t-s); }
+    .ex-decision-note { font-size: var(--t-min); color: var(--ink3); }
   `;
   document.head.append(style);
 }
@@ -255,6 +298,16 @@ function taskCard(task, onSelect, portfolio = false) {
     meta.append(text('span', 'ex-badge', `consigne non accusée (${task.directives_unacknowledged})`));
   }
   card.append(meta);
+  if (task.status === 'waiting' && task.waiting) {
+    const human = isHumanWait(task);
+    const line = document.createElement('div');
+    line.className = 'ex-wait' + (human ? ' human' : '');
+    line.dataset.role = 'waiting';
+    line.append(dot(human ? 'warn' : ''), text('span', null, waitingText(task.waiting)));
+    if (human) line.append(text('span', 'lbl', QUESTION_KIND_LABEL[task.waiting.question.kind] || task.waiting.question.kind));
+    card.append(line);
+    if (human) card.append(text('div', 'lbl', task.waiting.question.text));
+  }
 
   const chips = document.createElement('div');
   chips.className = 'ex-card-chips';
@@ -336,7 +389,7 @@ function renderList(root, ctx, tasks, onSelect, portfolio = false) {
   thead.append(headRow);
   table.append(thead);
   const tbody = document.createElement('tbody');
-  const ordered = [...tasks].sort((a, b) => (LIFECYCLE.indexOf(a.board) - LIFECYCLE.indexOf(b.board)) || byPriority(a, b));
+  const ordered = [...tasks].sort((a, b) => (Number(isHumanWait(b)) - Number(isHumanWait(a))) || (LIFECYCLE.indexOf(a.board) - LIFECYCLE.indexOf(b.board)) || byPriority(a, b));
   for (const task of ordered) {
     const tr = document.createElement('tr');
     tr.dataset.project = task.project?.slug || '';
@@ -345,7 +398,11 @@ function renderList(root, ctx, tasks, onSelect, portfolio = false) {
     if (portfolio) tr.append(text('td', null, task.project?.name || task.project?.slug || '—'));
     tr.append(text('td', null, task.title || task.id));
     const stateCell = document.createElement('td');
-    stateCell.append(row(dot(task.board === 'blocked' ? 'bad' : (task.board === 'accepted' || task.board === 'released' ? 'ok' : '')), text('span', null, COLUMN_LABEL[task.board] || task.board)));
+    const waitingNow = task.status === 'waiting' && task.waiting;
+    stateCell.append(row(
+      dot(waitingNow ? 'warn' : (task.board === 'blocked' ? 'bad' : (task.board === 'accepted' || task.board === 'released' ? 'ok' : ''))),
+      text('span', null, waitingNow ? waitingText(task.waiting) : (COLUMN_LABEL[task.board] || task.board)),
+    ));
     tr.append(stateCell);
     if (portfolio) {
       const sessionCell = document.createElement('td');
@@ -494,6 +551,107 @@ async function renderTimeline(root, ctx, task) {
   ctx.dock.log('traces', ...allEntries.map((e) => `${e.at} · ${e.source} · ${e.summary}`));
 }
 
+// ── Décisions en attente (K6) ─────────────────────────────────────────────
+
+// Une décision : la question, ses réponses proposées, une zone libre. Le clic
+// poste `answer` ; le serveur répond 200 avec la tâche rendue (`ready`) ou
+// refuse (question déjà tranchée, question de flow) — le refus s'affiche.
+function decisionCard(ctx, task, portfolio, onWritten) {
+  const q = task.waiting.question;
+  const node = document.createElement('div');
+  node.className = 'ex-decision';
+  node.dataset.role = 'decision';
+  node.dataset.task = task.id;
+  const head = document.createElement('div');
+  head.className = 'ex-decision-head';
+  if (portfolio) head.append(text('span', 'chip', task.project?.name || task.project?.slug || 'projet'));
+  head.append(
+    text('span', 'ex-decision-title', task.title || task.id),
+    text('span', 'lbl', QUESTION_KIND_LABEL[q.kind] || q.kind),
+    text('span', 'lbl', ageText(task.waiting.since || q.asked_at)),
+  );
+  node.append(head, text('p', 'ex-decision-question', q.text));
+
+  const hint = task.waiting.resume_hint;
+  if (hint && hint.session_id) {
+    node.append(text('div', 'ex-decision-note', `session ${hint.session_id}` + (hint.resume_command ? ` — ${hint.resume_command}` : '')));
+  }
+  if (q.origin === 'flow') {
+    node.append(text('div', 'ex-decision-note', "Cette décision est celle d'un checkpoint de flow : elle s'atteste dans le flux (un tour humain de la session qui l'a présenté, puis la même décision renvoyée), pas ici."));
+    return node;
+  }
+
+  const locked = !portfolio && ctx.host.readOnly;
+  const feedback = document.createElement('div');
+  const area = document.createElement('textarea');
+  area.className = 'input';
+  area.placeholder = 'Votre réponse (ou choisissez une option)';
+  area.dataset.role = 'answer-text';
+  area.disabled = locked;
+  const send = async (value) => {
+    const answer = (value || '').trim();
+    if (!answer) { feedback.replaceChildren(text('div', 'ex-refusal', 'une réponse vide ne tranche rien')); return; }
+    const body = { text: answer, question_id: q.id };
+    ctx.dock.echo(`grimoire task answer ${task.id} "${answer}"` + (portfolio ? `  # projet ${task.project?.slug}` : ''));
+    try {
+      if (portfolio) await ctx.api.portfolioTaskAction(task.id, 'answer', body, task.project?.slug);
+      else await ctx.api.taskAction(task.id, 'answer', body);
+      onWritten();
+    } catch (error) {
+      feedback.replaceChildren(text('div', 'ex-refusal', 'échec : ' + error.message));
+    }
+  };
+  const options = document.createElement('div');
+  options.className = 'ex-decision-options';
+  for (const option of q.options || []) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn' + (option.toLowerCase() === 'abandonner' ? '' : ' pri');
+    btn.textContent = option;
+    btn.dataset.role = 'answer-option';
+    btn.disabled = locked;
+    btn.addEventListener('click', () => send(option));
+    options.append(btn);
+  }
+  const submit = document.createElement('button');
+  submit.type = 'button';
+  submit.className = 'btn';
+  submit.textContent = 'Répondre';
+  submit.dataset.role = 'answer-submit';
+  submit.disabled = locked;
+  submit.addEventListener('click', () => send(area.value));
+  node.append(options, area, row(submit), feedback);
+  if (locked) node.append(text('div', 'ex-decision-note', "le cockpit est en lecture seule : ouvrez l'atelier de ce projet, ou la portée « Tous les projets »"));
+  return node;
+}
+
+function renderDecisions(root, ctx, tasks, portfolio, onWritten) {
+  const pending = tasks.filter(isHumanWait).sort((a, b) =>
+    String(a.waiting.since || '').localeCompare(String(b.waiting.since || '')) || String(a.id).localeCompare(String(b.id)));
+  const wrap = document.createElement('div');
+  wrap.className = 'ex-decisions';
+  if (!pending.length) {
+    wrap.append(ctx.empty('Décisions en attente', "Aucune décision n'attend un humain.", 'grimoire task decisions'));
+  }
+  for (const task of pending) wrap.append(decisionCard(ctx, task, portfolio, onWritten));
+  root.append(wrap);
+}
+
+// Le bandeau au-dessus du board : ce qui attend un humain ne se découvre pas en cherchant.
+function decisionsBanner(count, onOpen) {
+  const banner = document.createElement('div');
+  banner.className = 'ex-banner';
+  banner.dataset.role = 'decisions-banner';
+  banner.append(dot('warn'), text('span', null, `${count} décision${count > 1 ? 's' : ''} en attente d'un humain`));
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'btn pri';
+  btn.textContent = 'Voir les décisions';
+  btn.addEventListener('click', onOpen);
+  banner.append(btn);
+  return banner;
+}
+
 // ── Inspecteur ────────────────────────────────────────────────────────────
 
 // « Reprendre la session » (#638) : copie la commande sur l'hôte Claude Code,
@@ -635,6 +793,19 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
     pre.textContent = recall.text;
     recallBlock.append(pre);
     ctx.inspector.append(recallBlock);
+  }
+
+  if (detail.status === 'waiting' && detail.waiting) {
+    const waitBlock = document.createElement('div');
+    waitBlock.className = 'ex-insp-block';
+    waitBlock.dataset.role = 'waiting-block';
+    waitBlock.append(text('h4', null, 'En attente'));
+    waitBlock.append(row(dot(detail.waiting.reason === 'human' ? 'warn' : ''), text('span', null, waitingText(detail.waiting))));
+    if (detail.waiting.since) waitBlock.append(text('div', 'lbl', ageText(detail.waiting.since)));
+    if (isHumanWait(detail)) {
+      waitBlock.append(decisionCard(ctx, { ...detail, project: task.project }, portfolio, onWritten));
+    }
+    ctx.inspector.append(waitBlock);
   }
 
   renderSteering(ctx, detail, onWritten);
@@ -1038,6 +1209,7 @@ export async function mount(root, ctx) {
     { id: 'board8', label: 'Board 8' },
     { id: 'liste', label: 'Liste' },
     { id: 'timeline', label: 'Timeline' },
+    { id: 'decisions', label: 'Décisions' },
   ];
 
   const setView = (id) => { view = id; draw(); };
@@ -1137,7 +1309,15 @@ export async function mount(root, ctx) {
       draw();
     };
 
-    if (view === 'board4') {
+    // K6 : ce qui attend un humain ne se cherche pas dans une colonne — bandeau sur le board,
+    // vue dédiée « Décisions ».
+    const waitingHuman = tasks.filter(isHumanWait).length;
+    if (waitingHuman && view !== 'decisions' && view !== 'timeline') {
+      wrap.append(decisionsBanner(waitingHuman, () => setView('decisions')));
+    }
+    if (view === 'decisions') {
+      renderDecisions(wrap, ctx, tasks, portfolioMode, () => draw());
+    } else if (view === 'board4') {
       renderBoard(wrap, ctx, tasks, GROUPS4, onSelect, portfolioMode);
     } else if (view === 'board8') {
       renderBoard(wrap, ctx, tasks, LIFECYCLE.map((id) => ({ id, label: COLUMN_LABEL[id], cols: [id] })), onSelect, portfolioMode);

@@ -316,6 +316,8 @@ def portfolio_tasks(
     if live:
         cards = [c for c in cards if c["session"] and c["session"]["live"]]
     cards.sort(key=lambda c: str(c.get("updated_at") or ""), reverse=True)
+    # K6 : ce qui attend la décision d'un humain passe devant tout (tri stable : le reste garde son ordre).
+    cards.sort(key=lambda c: 0 if c.get("status") == "waiting" and (c.get("waiting") or {}).get("reason") == "human" else 1)
 
     return {
         "schemaVersion": SCHEMA_VERSION,

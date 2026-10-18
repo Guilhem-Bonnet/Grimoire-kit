@@ -21,6 +21,7 @@ from __future__ import annotations
 import contextlib
 import os
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -35,12 +36,27 @@ from grimoire.missions.recall import DEFAULT_TOKEN_BUDGET, TaskRecall, build_tas
 from grimoire.missions.schemas import (
     DIRECTIVE_KINDS,
     ORIGIN_AGENT,
+    ORIGIN_HUMAN,
     MissionTask,
     RiskProfile,
     TaskCheck,
     TaskClaim,
     TaskDirective,
     TaskState,
+)
+from grimoire.missions.waiting import (
+    ABANDON,
+    HUMAN_ANSWERED_EVENT,
+    PROGRESS_NOTED_EVENT,
+    QUESTION_ASKED_EVENT,
+    UNTIL_UNKNOWN,
+    WAIT_REASONS,
+    Question,
+    ResumeHint,
+    Waiting,
+    attention_rank,
+    new_question_id,
+    parse_until,
 )
 
 _RISK_ORDER = (
@@ -64,6 +80,7 @@ __all__ = [
     "TaskNote",
     "TaskRefusedError",
     "TaskService",
+    "WakeDecision",
 ]
 
 #: Là où le ledger vit par défaut, relativement à la racine du projet.
@@ -192,6 +209,23 @@ class TaskAdded:
 DEFAULT_MISSION_TITLE = "Travaux courants"
 
 
+@dataclass(frozen=True, slots=True)
+class WakeDecision:
+    """Ce que le tick fait d'une tâche en attente : ``wake`` (rendue), ``keep`` (elle attend encore)."""
+
+    task_id: str
+    reason: str
+    action: str
+    cause: str
+    written: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "task_id": self.task_id, "reason": self.reason, "action": self.action,
+            "cause": self.cause, "written": self.written,
+        }
+
+
 class TaskService:
     """Lire, réclamer et déplacer les tâches d'un projet, gates compris."""
 
@@ -259,7 +293,8 @@ class TaskService:
         tasks = self.ledger.list_tasks(mission_id)
         if status:
             tasks = [t for t in tasks if t.status.value == status]
-        return tasks
+        # K6 : une décision qui attend un humain passe en tête ; le reste garde l'ordre du ledger (tri stable).
+        return sorted(tasks, key=attention_rank)
 
     def list_ready(self, mission_id: str | None = None) -> list[MissionTask]:
         """Les tâches qu'un agent peut réclamer maintenant."""
@@ -381,8 +416,6 @@ class TaskService:
         if task.claim is None or task.claim.session_id != session_id:
             return
         with contextlib.suppress(Exception):
-            from datetime import UTC, datetime
-
             from grimoire.policies.session_state import note_session_task
 
             note_session_task(
@@ -435,6 +468,221 @@ class TaskService:
             self.project_board()
         return report
 
+    # ── Attente nommée (K6, issue #771) ────────────────────────────────────
+
+    def _held_epoch(self, task: MissionTask, actor: str, epoch: int | None) -> int | None:
+        """L'epoch qui signe l'effet : celui présenté, sinon celui du claim de *actor* ; ``None`` pour un tiers (tick, flow)."""
+        if epoch is not None:
+            return epoch
+        claim = task.claim
+        if claim is not None and claim.actor_id == actor and claim.lease_epoch > 0:
+            return claim.lease_epoch
+        return None
+
+    def _hint_of(self, task: MissionTask) -> ResumeHint | None:
+        from grimoire.missions.session_link import session_fields
+
+        fields = session_fields(task)
+        if not fields["session_id"]:
+            return None
+        return ResumeHint(
+            session_id=fields["session_id"], host=fields["host"], resume_command=fields["resume_command"],
+        )
+
+    def wait(
+        self, task_id: str, reason: str, actor: str, *, until: str = "", note: str = "", epoch: int | None = None
+    ) -> TaskMove:
+        """``claimed|running → waiting(ci|quota|paused)`` — l'agent se gare avec une raison nommée.
+
+        ``human`` passe par :meth:`ask` : une décision attendue porte toujours une question.
+        *until* : une date ISO 8601, ``unknown`` (défaut pour ``quota`` et ``paused``) ou rien
+        pour ``ci`` (la fin des checks est observée par le tick).
+        """
+        if reason not in WAIT_REASONS or reason == "human":
+            raise ValueError(
+                f"raison d'attente inconnue pour `task wait` : {reason!r} — parmi "
+                f"{', '.join(r for r in WAIT_REASONS if r != 'human')} ; une attente humaine se pose par `task ask`"
+            )
+        task = self.require(task_id)
+        moment = datetime.now(UTC).isoformat()
+        waiting = Waiting(
+            reason, until or (UNTIL_UNKNOWN if reason in ("quota", "paused") else ""), None,
+            self._hint_of(task), moment,
+        )
+        if problem := waiting.problem():
+            raise ValueError(problem)
+        return self.transition(
+            task_id, TaskState.WAITING, actor, note or f"en attente ({reason})",
+            extra_payload={"waiting": waiting.to_dict()}, lease_epoch=self._held_epoch(task, actor, epoch),
+        )
+
+    def ask(
+        self,
+        task_id: str,
+        text: str,
+        actor: str,
+        *,
+        kind: str = "choice",
+        options: tuple[str, ...] = (),
+        origin: str = "agent",
+        epoch: int | None = None,
+        question_id: str = "",
+    ) -> TaskMove:
+        """``claimed|running → waiting(human)`` avec sa question, tracée par ``task.question_asked``.
+
+        La tâche se gare ; la question remonte au cockpit (« Décisions en attente »), à
+        ``grimoire status`` et à la notification. Seul le canal humain y répond
+        (:meth:`answer`) : aucune échéance ne décide à la place de l'humain.
+        """
+        task = self.require(task_id)
+        moment = datetime.now(UTC).isoformat()
+        question = Question(question_id or new_question_id(), kind, text.strip(), tuple(options), origin, moment)
+        waiting = Waiting("human", "", question, self._hint_of(task), moment)
+        if problem := waiting.problem():
+            raise ValueError(problem)
+        move = self.transition(
+            task_id, TaskState.WAITING, actor, f"question : {question.text}",
+            extra_payload={"waiting": waiting.to_dict()}, lease_epoch=self._held_epoch(task, actor, epoch),
+        )
+        self.ledger.append_event(
+            QUESTION_ASKED_EVENT, task_id, "task", actor,
+            {"task_id": task_id, "reason": "human", "question": question.to_dict(), "actor_id": actor},
+        )
+        return move
+
+    def resume(self, task_id: str, actor: str, *, epoch: int | None = None) -> TaskMove:
+        """``waiting → running`` — la même session, au même epoch : reprise sur place.
+
+        Un bail rendu entre-temps (réponse reçue, tick) refuse : la tâche est ``ready``,
+        on la réclame de nouveau (``task claim``).
+        """
+        task = self.require(task_id)
+        signed = self._held_epoch(task, actor, epoch)
+        if signed is None:
+            raise GrimoireMissionError(
+                f"Reprise refusée pour {task_id} : aucun epoch à présenter — `--epoch` (celui du claim de {actor})"
+            )
+        return self.transition(task_id, TaskState.RUNNING, actor, "reprise sur place", lease_epoch=signed)
+
+    def answer(
+        self, task_id: str, text: str, actor: str, *, origin: str, question_id: str = "",
+        attested_by_flow: bool = False,
+    ) -> TaskMove:
+        """Répond à la question en attente — **canal humain seulement** — puis réveille la tâche.
+
+        *origin* est posé par le canal d'appel (cockpit, CLI interactive), jamais par un
+        champ que l'appelant remplit : un agent ne répond pas à sa propre attente
+        (``test_agent_cannot_answer_own_await``). La réponse est écrite d'abord
+        (``task.human_answered``, qui remet le compteur de tentatives à zéro) ; le réveil
+        suit, et le tick le rejoue si le processus s'interrompt entre les deux. La réponse
+        est aussi remise à la prochaine session de la tâche comme consigne humaine.
+        ``abandonner`` (quand c'est une option) annule la tâche au lieu de la rendre.
+
+        Une question posée par un checkpoint de flow (``origin == "flow"``) ne se tranche pas ici : la
+        décision doit être attestée dans le flux (W2-01), et c'est le flux qui répond, avec
+        *attested_by_flow*. Répondre à sa place réveillerait la tâche sans rien décider.
+        """
+        if origin != ORIGIN_HUMAN:
+            raise GrimoireMissionError(
+                f"Réponse refusée pour {task_id} : origine {origin!r}. Seul le canal humain (cockpit, CLI interactive) "
+                "répond à une question — un agent ne tranche pas ce qu'il a demandé"
+            )
+        task = self.require(task_id)
+        waiting = task.waiting
+        if task.status is not TaskState.WAITING or waiting is None or waiting.question is None:
+            raise GrimoireMissionError(f"{task_id} n'attend aucune réponse (état {task.status.value})")
+        question = waiting.question
+        if question_id and question_id != question.id:
+            raise GrimoireMissionError(
+                f"Question {question_id} inconnue pour {task_id} : la question en attente est {question.id}"
+            )
+        if question.origin == "flow" and not attested_by_flow:
+            raise GrimoireMissionError(
+                f"Réponse refusée pour {task_id} : la question {question.id} vient d'un checkpoint de flow, dont la "
+                "décision s'atteste dans le flux (un tour humain de la session qui l'a présenté, puis la même "
+                "décision renvoyée). Répondre ici réveillerait la tâche sans décider le checkpoint"
+            )
+        answer = text.strip()
+        if not answer:
+            raise ValueError("`text` requis : une réponse vide ne tranche rien")
+        self.ledger.append_event(
+            HUMAN_ANSWERED_EVENT, task_id, "task", actor,
+            {"task_id": task_id, "question_id": question.id, "answer": answer, "origin": origin, "actor_id": actor},
+        )
+        self.ledger.add_directive(
+            task_id, f"Réponse à « {question.text} » : {answer}", actor_id=actor, kind="directive", origin=origin
+        )
+        return self._settle_answer(task, question, answer, actor)
+
+    def _settle_answer(self, task: MissionTask, question: Question, answer: str, actor: str) -> TaskMove:
+        if answer.lower() == ABANDON and ABANDON in (o.lower() for o in question.options):
+            return self.cancel(task.id, f"abandon sur réponse humaine à {question.id}", actor)
+        woken = self.ledger.wake(task.id, actor_id=actor, reason=f"réponse humaine à {question.id}", cause="answered")
+        return TaskMove(
+            task=woken, previous=TaskState.WAITING, verdict=GateVerdict("", "", ()), board_path=self.project_board()
+        )
+
+    def wake_due(self, *, apply: bool = True, now: datetime | None = None) -> list[WakeDecision]:
+        """La part « attente » du tick : rend les tâches dont l'attente est levée — jamais une ``waiting(human)`` au minuteur.
+
+        - ``human`` : seulement si une réponse humaine est écrite (réveil interrompu rejoué) ;
+        - ``ci``, ``quota``, ``paused`` : à l'échéance ``until`` ; ``unknown`` ou absente, la
+          tâche attend (une sonde explicite est l'affaire d'un lot suivant).
+        """
+        moment = now or datetime.now(UTC)
+        decisions: list[WakeDecision] = []
+        for task in self.ledger.list_tasks():
+            waiting = task.waiting
+            if task.status is not TaskState.WAITING or waiting is None:
+                continue
+            action, cause = "keep", "attend"
+            if waiting.reason == "human":
+                answered = self._answer_of(task, waiting)
+                if answered is not None:
+                    action, cause = "wake", "answered"
+            else:
+                due = parse_until(waiting.until)
+                if due is not None and moment >= due:
+                    action, cause = "wake", f"échéance {waiting.reason} atteinte"
+            written = False
+            if action == "wake" and apply:
+                if waiting.reason == "human" and waiting.question is not None:
+                    self._settle_answer(task, waiting.question, self._answer_of(task, waiting) or "", "tick")
+                else:
+                    self.ledger.wake(task.id, actor_id="tick", cause=cause)
+                    self.project_board()
+                written = True
+            decisions.append(WakeDecision(task.id, waiting.reason, action, cause, written))
+        return decisions
+
+    def _answer_of(self, task: MissionTask, waiting: Waiting) -> str | None:
+        if waiting.question is None:
+            return None
+        for event in reversed(self.ledger.list_events(task.id)):
+            if (
+                event.event_type == HUMAN_ANSWERED_EVENT
+                and event.payload.get("question_id") == waiting.question.id
+                and event.payload.get("origin") == ORIGIN_HUMAN
+            ):
+                return str(event.payload.get("answer", ""))
+        return None
+
+    def note_progress(self, task_id: str, note: str, actor: str) -> MissionTask:
+        """``task.progress_noted`` : ce que l'agent dit avoir fait — information, jamais décision ni preuve."""
+        cleaned = note.strip()
+        if not cleaned:
+            raise ValueError("`note` requise : une note de progression vide n'apprend rien")
+        self.require(task_id)
+        self.ledger.append_event(
+            PROGRESS_NOTED_EVENT, task_id, "task", actor, {"task_id": task_id, "note": cleaned, "actor_id": actor}
+        )
+        return self.require(task_id)
+
+    def pending_decisions(self) -> list[Any]:
+        from grimoire.missions.decisions import pending_decisions
+
+        return pending_decisions(self.ledger)
+
     def _quota_blocked(self, task: MissionTask) -> bool:
         """La dernière route de *task* bute sur un quota : verdict ``rate_limit``, ou fournisseur refroidi pour ce motif."""
         dispatched = [e for e in self.ledger.list_events(task.id) if e.event_type == "task.dispatched"]
@@ -443,8 +691,6 @@ class TaskService:
         last = dispatched[-1].payload
         if last.get("verdict") == "rate_limit":
             return True
-        from datetime import UTC, datetime
-
         from grimoire.providers.state import load_state
 
         entry = load_state(self.project_root).get(str(last.get("provider", "")))
@@ -463,8 +709,11 @@ class TaskService:
         *,
         claim: TaskClaim | None = None,
         extra_payload: dict[str, Any] | None = None,
+        lease_epoch: int | None = None,
     ) -> TaskMove:
         """Déplace une tâche : machine à états, verrou de fichiers, gate, puis ledger, puis board.
+
+        *lease_epoch* (K2/K6) signe l'effet d'un titulaire : un epoch qui n'est plus celui du bail est refusé.
 
         Lève :class:`TaskRefusedError` sur un verrou de fichiers ou un gate bloquant,
         :class:`GrimoireMissionError` sur une tâche inconnue ou une transition que la
@@ -488,6 +737,7 @@ class TaskService:
             claim=claim,
             extra_payload=extra_payload,
             expected_from=task.status,
+            lease_epoch=lease_epoch,
         )
         self._consolidate(moved, target, actor=actor, reason=reason)
         return TaskMove(task=moved, previous=task.status, verdict=verdict, board_path=self.project_board())
@@ -603,10 +853,12 @@ class TaskService:
             return
         requested = set(claim.exclusive_files)
         for other in self.ledger.list_tasks():
-            if other.id == task.id or other.status not in (TaskState.CLAIMED, TaskState.RUNNING):
+            if other.id == task.id or other.status not in (TaskState.CLAIMED, TaskState.RUNNING, TaskState.WAITING):
                 continue
             held = other.claim
-            if held is None or not held.exclusive_files or held.is_expired():
+            # Une tâche en attente (K6) garde ses fichiers : elle reprend sur place, son bail n'est plus jugé.
+            expired = held.is_expired() if held is not None and other.status is not TaskState.WAITING else False
+            if held is None or not held.exclusive_files or expired:
                 continue
             overlap = requested & set(held.exclusive_files)
             if not overlap:
@@ -645,8 +897,6 @@ class TaskService:
         ses refus. Best-effort : un journal inaccessible ne bloque pas le refus.
         """
         try:
-            from datetime import UTC, datetime
-
             from grimoire.core.standard_generation import TRACES_DIR
             from grimoire.traces.ledger import TraceLedger
             from grimoire.traces.schemas import TraceOutcome

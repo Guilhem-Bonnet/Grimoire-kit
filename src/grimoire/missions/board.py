@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 from grimoire.missions.schemas import DependencyKind, RiskProfile, TaskState
 from grimoire.missions.verifiability import as_dict as verifiability_as_dict
+from grimoire.missions.waiting import attention_rank
 
 if TYPE_CHECKING:
     from grimoire.missions.ledger import MissionLedger
@@ -68,6 +69,11 @@ _TO_BOARD: dict[TaskState, str] = {
     # plus ici ; « bloqué » est la colonne la plus proche, la valeur brute
     # restant dans le ledger.
     TaskState.UNKNOWN: "blocked",
+    # Une attente nommée (K6) : la tâche n'avance pas tant qu'on n'a pas réglé ce qu'elle
+    # attend. Le board du standard n'a que huit colonnes ; « bloqué » est la plus proche,
+    # et la carte dit pourquoi (``_blockers``). C'est aussi ce qui la garde hors de
+    # « en cours » : une tâche garée n'est plus celle que la session doit clore.
+    TaskState.WAITING: "blocked",
 }
 
 # Board → ledger, pour l'import d'un board existant. Les fusions ci-dessus sont
@@ -128,6 +134,17 @@ def task_state_of(status: str) -> TaskState:
         raise ValueError(msg) from None
 
 
+def _waiting_reason(task: MissionTask) -> str:
+    """Le motif de blocage d'une tâche en attente : la raison, et la question quand c'est un humain."""
+    waiting = task.waiting
+    if waiting is None:
+        return "en attente"
+    if waiting.question is not None:
+        return f"en attente d'une décision humaine : {waiting.question.text}"
+    until = f" jusqu'à {waiting.until}" if waiting.until else ""
+    return f"en attente ({waiting.reason}){until}"
+
+
 def _blockers(task: MissionTask) -> list[dict[str, str]]:
     """Blocages déclarés — le vérificateur exige un motif sur toute carte bloquée."""
     out = [
@@ -139,6 +156,8 @@ def _blockers(task: MissionTask) -> list[dict[str, str]]:
         out.append({"reason": "échec de la tâche, remédiation requise", "target": task.id})
     if not out and task.status is TaskState.BLOCKED:
         out.append({"reason": "blocage déclaré sans dépendance nommée", "target": task.id})
+    if not out and task.status is TaskState.WAITING:
+        out.append({"reason": _waiting_reason(task), "target": task.id})
     if not out and task.status is TaskState.UNKNOWN:
         # Le board range l'état inconnu en « blocked » : sans motif, le
         # vérificateur rejette la carte (board.blocker_reason_missing) et chaque
@@ -213,11 +232,13 @@ def build_board(
     le vérificateur du standard : cycle de vie normatif, clés requises sur chaque
     carte, motif de blocage sur toute carte bloquée.
     """
-    # Dans chaque colonne, la plus pressante d'abord (issue #638) ; à priorité
-    # égale, l'identifiant garde l'ordre stable qu'un diff de board attend.
+    # Ce qui attend la décision d'un humain passe en tête (K6) ; puis, dans chaque colonne, la plus
+    # pressante d'abord (issue #638) ; à priorité égale, l'identifiant garde l'ordre stable qu'un diff attend.
     tasks = sorted(
         ledger.list_tasks(mission_id),
-        key=lambda t: (BOARD_LIFECYCLE.index(board_status_of(t.status)), -priority_rank(priority_of(t)), t.id),
+        key=lambda t: (
+            attention_rank(t), BOARD_LIFECYCLE.index(board_status_of(t.status)), -priority_rank(priority_of(t)), t.id
+        ),
     )
     return {
         "$schema": "grimoire-agentic-standard-task-board/v1",
