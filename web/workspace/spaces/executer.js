@@ -135,6 +135,7 @@ function injectStyles() {
   style.id = STYLE_ID;
   style.textContent = `
     .ex-wrap { padding: var(--sp-4) var(--sp-5); height: 100%; display: flex; flex-direction: column; gap: var(--sp-3); }
+    @media (max-width: 900px) { .ex-wrap { padding: var(--sp-3); } }
     .ex-board { display: flex; gap: var(--sp-3); align-items: flex-start; overflow-x: auto; flex-grow: 1; }
     .ex-col { width: 260px; flex: none; display: flex; flex-direction: column; gap: var(--sp-2); }
     .ex-col-head { padding: 6px 2px; }

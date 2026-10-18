@@ -276,6 +276,8 @@ function renderCanvas(root, ctx) {
         ? `${total} fichier(s) répartis sur ${state.tree.tiers.length} étages. Choisissez un fichier dans l'explorateur.`
         : "Aucun fichier trouvé. `grimoire init` puis `grimoire standard init` peuplent les étages.",
       'grimoire doctor --check-paths',
+      // Sous 900 px l'explorateur est un tiroir fermé : le bouton l'ouvre.
+      total ? { label: "Ouvrir l'explorateur", run: () => ctx.openPanel('explorer') } : undefined,
     ));
     return;
   }

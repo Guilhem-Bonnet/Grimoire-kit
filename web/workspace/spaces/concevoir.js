@@ -696,7 +696,7 @@ export async function mount(root, ctx) {
       return;
     }
     if (!state.blueprint) {
-      root.replaceChildren(el('p', { class: 'cv-msg' }, 'Chargement du blueprint…'));
+      root.replaceChildren(...ctx.loading('Chargement du blueprint…', 4));
       return;
     }
     const bp = state.blueprint;
