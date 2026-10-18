@@ -79,7 +79,8 @@ Dans `claude_desktop_config.json` :
 | `grimoire_providers_status` | Fournisseurs LLM activés, modèles par palier (cheap/mid/strong), refroidissement, dernier audit (`available`/`probed_at`/`models_seen`/`probe_note`, issue #330) et prochain choix — même donnée que `grimoire providers status` | lecture, monde ouvert |
 | `task_add` | Ouvrir une tâche (titre, critères d'acceptation ≥ 1, owner, mission, preuves attendues) — `ready=true` la rend réclamable tout de suite ; même service et même validation que `grimoire task add` (issue #638) | écriture |
 | `task_list_ready` | Les tâches qu'un agent peut réclamer maintenant | lecture |
-| `task_show` | Une tâche : état, acceptation, claim, et ce que chaque prochain pas exigera | lecture |
+| `task_show` | Une tâche : état, acceptation, claim, et ce que chaque prochain pas exigera ; `claim_blocked_by` nomme le checkpoint de vague qui ferme son claim (vide sinon) | lecture |
+| `task_waves` | Les vagues du plan ; avec `mission`, le checkpoint de chaque vague (statut, empreinte du diff fusionné, tâches couvertes) et `claim_blocked`, le motif de refus par tâche (W5-05) | lecture |
 | `task_claim` | Réclamer une tâche prête (`ready → claimed`) | écriture, destructif |
 | `task_update` | Déplacer (`move`), bloquer (`block`) ou fermer (`close`) une tâche | écriture, destructif |
 | `task_context` | Sur quelle tâche la session est, et son context bundle | écriture : produit `context-bundle.yaml` et journalise |
