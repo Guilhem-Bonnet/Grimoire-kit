@@ -360,6 +360,13 @@ def _evaluate_tool_policy(hook: HookInput) -> Decision:
     forged = _authority_guard(hook, facts)
     if forged is not None:
         return forged
+    # K3 (issue #768) : une session qui ne tient plus son bail n'écrit plus, quel que soit
+    # le profil — le frein précède le moteur de règles, comme la garde d'autorité.
+    from grimoire.hosts.decisions.lease_brake import lease_brake
+
+    braked = lease_brake(hook, facts)
+    if braked is not None:
+        return braked
     custom_rules = load_custom_rules(hook.project_root)
     # A temporal rule (require_approval/per_session/cooldown_after) commonly
     # leaves action_kinds/mutation_classes/risk_profiles empty — it has no
