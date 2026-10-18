@@ -24,6 +24,7 @@
 // source-editor.js, jamais ici.
 
 import * as sourceEditor from './source-editor.js';
+import { stateIcon } from '../shell.js';
 import { renderMarkdown } from '../markdown.js';
 
 const CSS_HREF = new URL('./source.css', import.meta.url).href;
@@ -186,8 +187,8 @@ function renderExplorer(ctx, root) {
         row.append(name);
         const badge = fileBadge(file);
         if (badge) {
-          const dot = document.createElement('span');
-          dot.className = `dot ${badge.cls.split(' ')[1]} sr-badge`;
+          const dot = stateIcon(badge.cls.split(' ')[1]);
+          dot.classList.add('sr-badge');
           dot.title = badge.title;
           row.append(dot);
         }
@@ -248,18 +249,18 @@ function jumpToLine(root, line) {
 function chipEtat(entry) {
   const chip = document.createElement('span');
   chip.className = 'chip';
-  const dot = document.createElement('span');
+  let dot;
   if (!entry.editable) {
-    dot.className = 'dot warn';
+    dot = stateIcon('warn');
     chip.append(dot, document.createTextNode(' lecture seule'));
   } else if (entry.tier === 'overrides' && entry.masks_kit && !entry.diverges) {
-    dot.className = 'dot ok';
+    dot = stateIcon('ok');
     chip.append(dot, document.createTextNode(` identique au kit${entry.kit_version ? ' ' + entry.kit_version : ''}`));
   } else if (entry.tier === 'overrides' && entry.diverges) {
-    dot.className = 'dot warn';
+    dot = stateIcon('warn');
     chip.append(dot, document.createTextNode(' override — diverge du kit'));
   } else {
-    dot.className = 'dot acc';
+    dot = stateIcon('acc');
     chip.append(dot, document.createTextNode(' override'));
   }
   return chip;
@@ -305,8 +306,7 @@ function renderCanvas(root, ctx) {
     const banner = document.createElement('div');
     banner.className = 'sr-banner';
     banner.dataset.term = 'kit';
-    const dot = document.createElement('span');
-    dot.className = 'dot acc';
+    const dot = stateIcon('acc');
     const text = document.createElement('span');
     text.append(document.createTextNode('Ce fichier est généré par le kit. Le modifier crée '));
     const code = document.createElement('span');
