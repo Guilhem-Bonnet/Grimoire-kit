@@ -985,6 +985,7 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
     let reasonInput = null;
     if (target === 'blocked') {
       reasonInput = document.createElement('input');
+      reasonInput.type = 'text';
       reasonInput.className = 'input';
       reasonInput.placeholder = 'raison du blocage';
       gateRow.append(reasonInput);
@@ -1157,6 +1158,7 @@ function renderSteeringInto(container, ctx, detail, onWritten) {
     cancelBlock.className = 'ex-insp-block';
     cancelBlock.append(text('h4', null, 'Annuler'));
     const reason = document.createElement('input');
+    reason.type = 'text';
     reason.className = 'input';
     reason.placeholder = "raison de l'annulation (obligatoire)";
     reason.dataset.role = 'cancel-reason';
@@ -1335,7 +1337,7 @@ export async function mount(root, ctx) {
   if (ctx.params.scope === 'portfolio' && ctx.host.kind === 'cockpit') scope.mode = 'portfolio';
   else if (ctx.params.scope === 'project') scope.mode = 'project';
   if (ctx.host.kind !== 'cockpit') scope.mode = 'project';
-  const board = await ctx.api.tasks();
+  let board = await ctx.api.tasks();
 
   const VIEW_LABELS = [
     { id: 'board4', label: 'Board 4' },
@@ -1417,9 +1419,20 @@ export async function mount(root, ctx) {
     const seq = ++drawSeq;
     const portfolioMode = scope.mode === 'portfolio';
     if (!portfolioMode && !board.ledger) {
-      wrap.replaceChildren();
-      renderNoLedger();
-      return;
+      // Le ledger peut naître HORS du navigateur (`grimoire task add`) pendant que cet état vide
+      // est affiché : on relit avant de choisir, sinon le pouls tourne pour rien (UI3-S1-01).
+      const latest = await ctx.api.tasks();
+      if (ctx.signal.aborted || seq !== drawSeq) return;
+      const unchanged = !latest.ledger && !board.ledger
+        && (latest.note || '') === (board.note || '')
+        && !!latest.migration_available === !!board.migration_available;
+      board = latest;
+      if (!board.ledger) {
+        if (opts.live && unchanged) return; // rien de neuf : on ne redessine pas l'état vide
+        wrap.replaceChildren();
+        renderNoLedger();
+        return;
+      }
     }
     let tasks = [];
     let portfolio = null;
@@ -1513,8 +1526,11 @@ export async function mount(root, ctx) {
     const focused = !!active && !!active.closest && (wrap.contains(active) || ctx.inspector.contains(active))
       && (active.tagName === 'TEXTAREA' || (active.tagName === 'INPUT' && !['checkbox', 'radio', 'button'].includes(active.type)));
     if (focused) return true;
-    return [...wrap.querySelectorAll('textarea, input[type="text"]'), ...ctx.inspector.querySelectorAll('textarea, input[type="text"]')]
-      .some((field) => field.value.trim() !== '');
+    // Un `<input>` sans attribut `type` (raison de blocage, raison d'annulation) vaut « text » mais
+    // n'est pas trouvé par `input[type="text"]` : on filtre sur la propriété (UI3-S1-02).
+    const typed = (root) => [...root.querySelectorAll('textarea, input')]
+      .filter((field) => field.tagName === 'TEXTAREA' || field.type === 'text');
+    return [...typed(wrap), ...typed(ctx.inspector)].some((field) => field.value.trim() !== '');
   };
   const refresh = () => {
     if (editing()) { refreshPending = true; return; }

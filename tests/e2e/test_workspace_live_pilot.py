@@ -444,3 +444,102 @@ def test_a_390_px_le_compteur_et_l_horodatage_ne_font_rien_deborder(phone: Page,
     phone.wait_for_selector(".ex-decision")
     _capture(phone, "mobile-decisions")
     _answer_all(service)
+
+
+# ── Correctifs de revue sceptique (UI3-S1-01, UI3-S1-02) ────────────────────
+
+
+def _serve(root: Path, home: Path) -> tuple[subprocess.Popen[bytes], str]:
+    port = _free_port()
+    env = dict(os.environ)
+    env["GRIMOIRE_COCKPIT_HOME"] = str(home)
+    env["GRIMOIRE_PULSE_SECONDS"] = str(INTERVAL_S)
+    env["NO_COLOR"] = "1"
+    process = subprocess.Popen(
+        [sys.executable, "-m", "grimoire", "serve", "--project-root", str(root), "--port", str(port), "--no-open"],
+        cwd=str(root), env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    _wait_ready(port, time.monotonic() + 60)
+    return process, f"http://127.0.0.1:{port}"
+
+
+def _stop(process: subprocess.Popen[bytes]) -> None:
+    process.terminate()
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=10)
+
+
+def test_le_premier_ledger_ouvert_hors_du_navigateur_apparait_sans_rechargement(
+    browser: Browser, tmp_path: Path
+) -> None:
+    """UI3-S1-01 : projet SANS Mission Ledger au montage ; la première carte, créée ailleurs, doit paraître seule.
+
+    Défaut d'origine : `board` était lu une fois au montage et `draw()` sortait sur « aucun ledger »
+    avant tout appel réseau — le pouls tournait pour rien, il fallait recharger la page.
+    """
+    from grimoire.missions.service import TaskService
+
+    root = tmp_path / "sans-ledger"
+    root.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=str(root), check=False, capture_output=True)
+    subprocess.run(
+        [sys.executable, "-m", "grimoire", "init", ".", "-y", "--name", "sans-ledger", "--backend", "local"],
+        cwd=str(root), check=False, capture_output=True, timeout=180,
+    )
+    if not (root / "_grimoire" / "kit").is_dir():
+        pytest.skip("`grimoire init` indisponible ici")
+    process, url = _serve(root, tmp_path / "cockpit-home")
+    try:
+        opened, context = _open(browser, url)
+        try:
+            _goto(opened, "executer")
+            opened.wait_for_function("() => document.querySelector('.ex-wrap, #space-root, body').innerText.includes('Mission Ledger')")
+            assert opened.locator(".ex-card").count() == 0
+            opened.evaluate("() => { window.__marqueur = 'jamais rechargee'; }")
+            title = "Première carte née hors du navigateur"
+
+            TaskService(root).add(title, ("critère",), actor="t", owner="winston", ready=True)
+
+            _card(opened, title).wait_for(timeout=APPEAR_MS)
+            assert opened.evaluate("() => window.__marqueur") == "jamais rechargee", "la page a été rechargée"
+        finally:
+            context.close()  # type: ignore[attr-defined]
+    finally:
+        _stop(process)
+
+
+def test_une_raison_d_annulation_saisie_survit_au_battement_d_une_session(
+    page: Page, service, live_project: Path
+) -> None:  # type: ignore[no-untyped-def]
+    """UI3-S1-02 : le champ `cancel-reason` est un `<input>` sans attribut `type` ; sa saisie doit protéger l'inspecteur.
+
+    Défaut d'origine : `editing()` ne cherchait que `input[type="text"]` — un input sans attribut n'y
+    correspond pas — et la signature de la carte change à chaque battement (`updated_at` de la session) :
+    l'inspecteur était reconstruit, la raison saisie perdue et le focus rendu au corps de la page.
+    """
+    title = "Carte dont la raison d'annulation est en cours de saisie"
+    tid = _running(service, title)
+    beat_at = datetime.now(UTC)
+    _journal(live_project, "S-saisie-ui3", tid, started=beat_at - timedelta(minutes=5), updated=beat_at)
+    service.attach_session(tid, "S-saisie-ui3", session_host="claude-code-cli", actor="agent-a")
+    _goto(page, "executer")
+    _card(page, title).wait_for(timeout=APPEAR_MS)
+    _card(page, title).dispatch_event("click")
+    reason = page.locator("#inspector-body [data-role='cancel-reason']")
+    reason.wait_for(timeout=APPEAR_MS)
+    page.wait_for_timeout(int(INTERVAL_S * 1000 * 1.5))
+    reason.fill("raison saisie par l'humain")
+    page.locator("#inspector-body [data-role='cancel-submit']").focus()
+
+    page.wait_for_timeout(1200)
+    now = datetime.now(UTC)
+    _journal(live_project, "S-saisie-ui3", tid, started=now - timedelta(minutes=5), updated=now)
+    page.wait_for_timeout(int(INTERVAL_S * 1000 * 4.5))
+
+    assert page.locator("#inspector-body [data-role='cancel-reason']").input_value() == "raison saisie par l'humain", (
+        "la raison saisie a été perdue au battement de la session"
+    )
+    assert page.evaluate("() => document.activeElement.dataset.role") == "cancel-submit", "le focus a été volé"
