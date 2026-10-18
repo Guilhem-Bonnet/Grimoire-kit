@@ -534,26 +534,7 @@ def task_renew(
     _emit_task(ctx, task, f"bail renouvelé, epoch {claim.lease_epoch}, plafond {claim.expires_at or '-'}" if claim else "")
 
 
-# `task note` est servi par cmd_task_waiting (enregistré en dernier, il masquait cette définition).
-def task_note(
-    ctx: typer.Context,
-    task_id: Annotated[str, typer.Argument()],
-    text: Annotated[str, typer.Argument(help="Ce qui vient d'avancer (une phrase).")],
-    project_root: _PROJECT_ROOT = Path(),
-    ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
-    actor: _ACTOR = "cli",
-) -> None:
-    """Note une progression sur une tâche tenue : c'est ce qui évite l'alerte « vivant, sans progression »."""
-    from grimoire.core.exceptions import GrimoireError
-
-    service = _service(project_root, ledger_root)
-    _require_task(service, task_id)
-    try:
-        task = service.note_progress(task_id, text, actor)
-    except GrimoireError as exc:
-        console.print(f"[red]✗[/red] {exc}")
-        raise typer.Exit(1) from exc
-    _emit_task(ctx, task, "progression notée")
+# `task note` est défini et enregistré dans cmd_task_waiting.
 
 
 @task_app.command("reap")
