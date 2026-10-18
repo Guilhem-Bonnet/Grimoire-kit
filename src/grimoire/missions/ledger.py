@@ -28,6 +28,7 @@ from typing import Any
 
 from grimoire.core.exceptions import GrimoireMissionError
 from grimoire.core.fsio import atomic_write, locked
+from grimoire.missions import ledger_snapshot as snapshot
 from grimoire.missions.lease import (
     CLOCK_TOLERANCE_SECONDS,
     DEFAULT_LEASE_TTL_SECONDS,
@@ -37,6 +38,7 @@ from grimoire.missions.lease import (
     LeaseFile,
     backoff_delay,
     lease_path,
+    mark_waiting,
     parse_instant,
     read_lease,
     write_lease,
@@ -45,6 +47,7 @@ from grimoire.missions.ledger_rules import (
     UnjudgedClaimError,
     blocks_path,
     deferred_waiting,
+    parse_jsonl,
     read_jsonl,
     replay_steering,
     unclosed_blockers,
@@ -330,6 +333,7 @@ class MissionLedger:
         #: K10 : refus de claim posé par l'appelant (WIP), évalué sous le verrou ; ``""`` = accordé.
         self.claim_guard: Callable[[Mapping[str, MissionTask], MissionTask], str] | None = None
         self._loaded = False
+        self._snapshot: snapshot.Cover | None = None  # K13 : ce que l'instantané restauré couvre
 
     # ── Private helpers ────────────────────────────────────────────────────
 
@@ -341,7 +345,11 @@ class MissionLedger:
         self._loaded = True
 
     def _replay_events(self) -> None:
-        records, self._unreadable = read_jsonl(self._events_path)
+        if not self._events_path.exists():
+            self._unreadable = ()
+            return
+        replay = snapshot.resume_from_snapshot(self)  # K13 : l'état d'un instantané prouvé, puis la suite seule
+        records, self._unreadable = parse_jsonl(replay.tail, replay.first_line)  # K12 : lignes illisibles numérotées sur tout le journal
         for raw in records:
             evt_type = raw.get("event_type", "")
             payload = raw.get("payload", {})
@@ -411,6 +419,7 @@ class MissionLedger:
                         {**current.to_dict(), "accepted_risks": [*(dict(r) for r in current.accepted_risks), risk]}
                     )
             self._events.append(LedgerEvent.from_dict(raw))
+        snapshot.save_if_slow(self, replay)
 
     def _replay_link(self, raw: dict[str, Any], payload: dict[str, Any]) -> None:
         """Ajoute la dépendance d'un événement de lien à la tâche source, sans doublon."""
@@ -489,6 +498,7 @@ class MissionLedger:
         self._rejected = {}
         self._idem_seen = set()
         self._unreadable = ()
+        self._snapshot = None
         self._loaded = False
 
     def unreadable_lines(self) -> tuple[int, ...]:
@@ -796,6 +806,8 @@ class MissionLedger:
             # sortie de needs_verification (clôture, échec) : la barrière tombe à ce moment-là.
             payload["fence_epoch"] = self._epoch_high.get(task_id, 0) + 1
             hands_back = True
+        entering, leaving = to_state is TaskState.WAITING, task.status is TaskState.WAITING  # K13 : marque de garde
+        mark_waiting(lease_path(self._root, task_id), entering=entering, leaving=leaving)
         if to_state is TaskState.CLAIMED and claim is not None:
             epoch = self._epoch_high.get(task_id, 0) + 1
             claim = replace(claim, lease_epoch=epoch)
@@ -955,8 +967,8 @@ class MissionLedger:
         """
         self._load()
         moment = now or self._now()
-        stamps = [t for t in (parse_instant(e.created_at) for e in self._events) if t is not None]
-        if stamps and moment < max(stamps) - timedelta(seconds=CLOCK_TOLERANCE_SECONDS):
+        latest = snapshot.latest_event_time(self)
+        if latest is not None and moment < latest - timedelta(seconds=CLOCK_TOLERANCE_SECONDS):
             return "unknown"
         return "ok"
 
@@ -1440,7 +1452,7 @@ class MissionLedger:
     def list_events(self, entity_id: str | None = None) -> list[LedgerEvent]:
         """Return ledger events, optionally scoped to one entity."""
         self._load()
-        events = list(self._events)
+        events = list(snapshot.all_events(self))
         if entity_id is not None:
             events = [e for e in events if e.entity_id == entity_id]
         return events
@@ -1479,7 +1491,7 @@ class MissionLedger:
 
     def export_jsonl(self, path: Path) -> int:
         self._load()
-        lines = [json.dumps(e.to_dict(), ensure_ascii=False) for e in self._events]
+        lines = [json.dumps(e.to_dict(), ensure_ascii=False) for e in snapshot.all_events(self)]
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         return len(lines)
 

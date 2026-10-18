@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from grimoire.missions.ledger import LeaseView
 
 __all__ = [
-    "UnjudgedClaimError", "blocks_path", "deferred_waiting", "read_jsonl", "replay_steering", "unclosed_blockers", "unfenced_question",
+    "UnjudgedClaimError", "blocks_path", "deferred_waiting", "parse_jsonl", "read_jsonl", "replay_steering", "unclosed_blockers", "unfenced_question",
     "waiting_guard",
 ]
 
@@ -44,9 +44,14 @@ def read_jsonl(path: Path) -> tuple[list[dict[str, Any]], tuple[int, ...]]:
     """
     if not path.exists():
         return [], ()
+    return parse_jsonl(path.read_bytes())
+
+
+def parse_jsonl(data: bytes, first_line: int = 1) -> tuple[list[dict[str, Any]], tuple[int, ...]]:
+    """Comme :func:`read_jsonl` sur des octets déjà lus ; ``first_line`` numérote la première ligne (queue d'un instantané, K12 x K13)."""
     records: list[dict[str, Any]] = []
     unreadable: list[int] = []
-    for number, chunk in enumerate(path.read_bytes().split(b"\n"), start=1):
+    for number, chunk in enumerate(data.split(b"\n"), start=first_line):
         if not chunk.strip():
             continue
         try:
