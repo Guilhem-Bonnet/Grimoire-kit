@@ -7,6 +7,10 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- fix(missions): `mission report` lie une cascade à sa trace `dispatch.outcome` par l'id de sa dernière tentative, plus par horodatage (#827).
+- Changement : `_record_dispatch_outcome` pose le tag `ledger_event:<id>` ; `_link_traces` s'en sert d'abord et ne retombe sur la fenêtre temporelle que pour les traces sans tag. Sous Windows (horloge ~15 ms) deux écritures partageaient un horodatage et la première cascade perdait sa trace.
+- Rouge-avant / vert-après : `test_mission_report.py::test_two_cascades_each_link_to_their_own_trace` (horloges figées, rouge sur l'ancien lecteur) ; `test_untagged_legacy_trace_still_links_by_time_window` garde l'ancien chemin.
+- Non fait / non mesuré : les traces anciennes sans tag restent liées par fenêtre temporelle, donc ambiguës sur une horloge grossière.
 - feat(standard): couverture critère -> preuve du dossier d'acceptance (campagne « Dépasser AI-DLC », W3-06 / VER-10). Constat : `_verify_acceptance_record` ne relevait que le critère « passé » sans preuve ; un livrable « accepté » pouvait garder un critère `à vérifier` ou `partiel` sans preuve, perdre un critère du tableau de tâches ou citer une preuve sans critère, sans un seul constat.
 - Changement : `standard_checks/criterion_coverage.py` émet `acceptance.uncovered` (critère sans preuve, ou critère du tableau absent du dossier, reconnu par son identifiant d'ordre `AC-NNN` ou son texte) et `evidence.orphan` (preuve sans critère, avertissement). `acceptance.uncovered` est une erreur en profil governed/production quand le livrable est accepté (décision `accepté` ou tâche `accepted`/`released`), un avertissement sinon ; un critère `à vérifier` avant cette décision et un critère `échoué` (déjà couvert) ne sont pas relevés. Ids déclarés au registre.
 - Rouge-avant / vert-après : `tests/unit/core/test_criterion_coverage.py` (8 cas) : 5 échouent sur la base (aucun des deux ids n'existe), les 3 garde-fous négatifs passent avant et après ; 8 verts après.
