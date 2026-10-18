@@ -206,6 +206,33 @@ def _journal_epoch(hook: HookInput, task_id: str) -> int:
     return state.lease_epoch if state.task_id == task_id else 0
 
 
+def waiting_task_of_session(hook: HookInput) -> Any:
+    """La tâche que cette session a garée en ``waiting`` (K6), ou ``None``.
+
+    Une tâche en attente n'est plus ``claimed``/``running`` : la résolution de tâche active ne la
+    désigne plus, et le ``Stop`` prendrait le travail de la session pour une écriture hors tâche.
+    Le journal de la session dit quelle tâche elle a tenue ; le ledger, que ce claim est le sien et
+    qu'il attend. Une session qui se gare avec une raison peut s'arrêter — c'est le but de l'état.
+    """
+    if not hook.session_id:
+        return None
+    try:
+        from grimoire.missions.ledger import MissionLedger
+        from grimoire.missions.schemas import TaskState
+        from grimoire.policies.session_state import load_session_state
+
+        task_id = load_session_state(hook.project_root, hook.session_id, now_iso="").task_id
+        events = hook.project_root.resolve() / LEDGER_RELPATH / "events.jsonl"
+        if not task_id or not events.is_file():
+            return None
+        task = MissionLedger(events.parent).get_task(task_id)
+    except Exception:
+        return None
+    if task is None or task.status is not TaskState.WAITING or task.claim is None:
+        return None
+    return task if task.claim.session_id == hook.session_id else None
+
+
 def session_mutation_count(hook: HookInput) -> int:
     """Les écritures que ``PostToolUse`` a comptées pour cette session — ``0`` sans journal."""
     if not hook.session_id:
