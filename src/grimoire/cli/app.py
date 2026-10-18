@@ -557,6 +557,25 @@ def doctor(
                     ),
                 )
 
+    # 4quater-ter. Confiance dans l'installation de l'outil (D-03) : les fichiers
+    # installés sont-ils ceux de leur RECORD ? Hors ligne ; la provenance se
+    # vérifie par `grimoire verify-install --online`. FAIL seulement si un
+    # fichier a changé depuis l'installation.
+    with _timed_phase("trust_level"):
+        from grimoire.tools.install_trust import local_trust
+
+        trust_verdict = local_trust()
+        trust_entry: dict[str, Any] = {
+            "name": "trust_level",
+            "passed": trust_verdict.ok,
+            "detail": f"trust_level={trust_verdict.level} : {trust_verdict.detail}",
+            "trust_level": trust_verdict.level,
+        }
+        results.append(trust_entry)
+        if fmt != "json":
+            tag = "[green]OK[/green]" if trust_verdict.ok else "[red]FAIL[/red]"
+            console.print(f"  {tag}  {trust_entry['detail']}")
+
     # 4quinquies. Override drift (issue #427) — un override est une copie ou
     # une extension du kit, jamais une garantie qu'il en reçoit encore les
     # mises à jour. Jamais FAIL : une dette de personnalisation, pas une
@@ -1284,6 +1303,7 @@ LazyTyperGroup.configure(
         "context-pack": LazyCommandSpec("grimoire.cli.cmd_context_pack", "context_pack_command", rich_help_panel="Data"),
         "migrate": LazyCommandSpec("grimoire.cli.cmd_migrate", "migrate_command", rich_help_panel="Project"),
         "upgrade": LazyCommandSpec("grimoire.cli.cmd_upgrade", "upgrade_command", rich_help_panel="Utilities"),
+        "verify-install": LazyCommandSpec("grimoire.cli.cmd_verify_install", "verify_install_command", rich_help_panel="Utilities"),
         "serve": LazyCommandSpec("grimoire.cli.cmd_serve", "serve", hidden=True),  # alias déprécié — voir `cockpit serve` (#351)
     },
     # Exact pre-#405 order: every @app.command/app.command() in file order,
@@ -1292,7 +1312,7 @@ LazyTyperGroup.configure(
     # `LazyTyperGroup.configure`'s docstring for why this is needed.
     order=[
         "version", "init", "doctor", "status", "add", "remove", "agent-miss",
-        "validate", "lint", "update", "up", "context-pack", "migrate", "upgrade",
+        "validate", "lint", "update", "up", "context-pack", "migrate", "upgrade", "verify-install",
         "serve", "diff", "schema", "check", "merge", "setup", "env", "history",
         "repair",
         "memory", "hooks", "cadrage", "debugger", "dbg", "registry", "workflows",

@@ -148,9 +148,18 @@ def test_failed_gates_stop_everything() -> None:
     assert {n: r for n, r in results.items() if n != "gates"} == {
         "build": "skipped",
         "test": "skipped",
+        "attest": "skipped",
         "publish-pypi": "skipped",
         "github-release": "skipped",
     }
+
+
+@pytest.mark.parametrize("stable", [True, False])
+def test_a_failed_attestation_blocks_publication_and_release(stable: bool) -> None:
+    # D-03 : sans attestation, ni PyPI ni la release GitHub ne partent.
+    results = _simulate(stable=stable, failing=frozenset({"attest"}))
+    assert results["publish-pypi"] == "skipped"
+    assert results["github-release"] == "skipped"
 
 
 # ── 3. Les notes sont la section du CHANGELOG validée ────────────────────────

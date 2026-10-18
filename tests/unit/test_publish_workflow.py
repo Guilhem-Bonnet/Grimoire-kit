@@ -36,3 +36,51 @@ def test_no_stage_targets_an_index_the_project_is_not_registered_on(jobs: dict[s
     text = _WORKFLOW.read_text(encoding="utf-8")
     assert "test.pypi.org" not in text
     assert "publish-testpypi" not in jobs
+
+
+# ── D-03 : attestation, sommes, SBOM de la wheel seule ────────────────────────
+
+
+def _steps(job: dict) -> list[dict]:
+    return job["steps"]
+
+
+def test_an_attest_job_gates_both_publications(jobs: dict[str, dict]) -> None:
+    assert "attest" in jobs
+    for name in ("publish-pypi", "github-release"):
+        needs = jobs[name]["needs"]
+        assert "attest" in (needs if isinstance(needs, list) else [needs]), f"{name} ne dépend pas de attest"
+    assert "needs.attest.result == 'success'" in str(jobs["github-release"]["if"])
+
+
+def test_the_attest_job_signs_every_published_file_and_fails_without_attestation(jobs: dict[str, dict]) -> None:
+    job = jobs["attest"]
+    assert {"id-token": "write", "attestations": "write"}.items() <= job["permissions"].items()
+    attest = [s for s in _steps(job) if str(s.get("uses", "")).startswith("actions/attest-build-provenance@")]
+    assert len(attest) == 1
+    subjects = attest[0]["with"]["subject-path"]
+    for pattern in ("dist/*", "sbom/sbom.cdx.json", "checksums/SHA256SUMS"):
+        assert pattern in subjects
+    verify = [s for s in _steps(job) if "gh attestation verify" in str(s.get("run", ""))]
+    assert verify, "aucune étape ne vérifie que l'attestation existe"
+    assert verify[0].get("continue-on-error") is not True
+    order = _steps(job).index(attest[0]) < _steps(job).index(verify[0])
+    assert order, "la vérification doit suivre l'attestation"
+
+
+def test_the_sbom_describes_the_wheel_alone(jobs: dict[str, dict]) -> None:
+    runs = [str(s.get("run", "")) for s in _steps(jobs["build"])]
+    sbom = next(r for r in runs if "cyclonedx-py" in r)
+    # un environnement neuf, jamais celui du runner (build, pip, cyclonedx-bom y figurent)
+    assert ".wheel-env/bin/python" in sbom.split("cyclonedx-py", 1)[1]
+    install = next(r for r in runs if "-m venv" in r)
+    assert "--without-pip" in install and "dist/*.whl" in install
+
+
+def test_sha256sums_are_built_checked_and_published(jobs: dict[str, dict]) -> None:
+    runs = " ".join(str(s.get("run", "")) for s in _steps(jobs["build"]))
+    assert "sha256sum --check" in runs
+    uploads = [s["with"]["name"] for s in _steps(jobs["build"]) if "upload-artifact" in str(s.get("uses", ""))]
+    assert "checksums" in uploads
+    release = next(s for s in _steps(jobs["github-release"]) if "action-gh-release" in str(s.get("uses", "")))
+    assert "checksums/SHA256SUMS" in release["with"]["files"]
