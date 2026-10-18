@@ -13,8 +13,10 @@ pack du kit.
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import os
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -302,6 +304,53 @@ def test_un_parcours_tronque_n_est_pas_un_succes(tmp_path: Path, monkeypatch: py
     assert verify(corpus, Verifier(kind="require_file", paths=("zzz.txt",))).status == STATUS_UNEVALUATED
 
 
+@contextlib.contextmanager
+def _unreadable(path: Path) -> Iterator[None]:
+    """Rend le dossier illisible, et le restaure toujours ; saute le test si le mode ne protège pas (root)."""
+    path.chmod(0o000)
+    try:
+        if os.access(path, os.R_OK | os.X_OK):
+            pytest.skip("les permissions n'arrêtent pas ce compte (root ?)")
+        yield
+    finally:
+        path.chmod(0o755)
+
+
+_BAD = "try:\n    pass\nexcept:\n    pass\n"
+
+
+def test_un_dossier_illisible_n_est_pas_un_succes(tmp_path: Path) -> None:
+    _write(tmp_path, "ok.py", "x = 1\n")
+    _write(tmp_path, "pkg/closed/bad.py", _BAD)
+    with _unreadable(tmp_path / "pkg" / "closed"):
+        corpus = Corpus(tmp_path)
+        verdict = verify(corpus, _ast("bare_except"))
+        assert verdict.status == STATUS_UNEVALUATED
+        assert "pkg/closed" in verdict.reason
+        assert corpus.unreadable_dirs == ("pkg/closed",)
+        forbid = Verifier(kind="forbid_regex", pattern=r"^except:", paths=("**/*.py",))
+        assert verify(corpus, forbid).status == STATUS_UNEVALUATED
+        # un fichier requis qui n'est pas vu ne se déclare pas absent
+        assert verify(corpus, Verifier(kind="require_file", paths=("pkg/closed/*.py",))).status == STATUS_UNEVALUATED
+        assert verify(corpus, Verifier(kind="require_regex", pattern="x", paths=("pkg/closed/*.py",))).status == STATUS_UNEVALUATED
+
+
+def test_un_dossier_illisible_ne_masque_pas_une_violation_trouvee(tmp_path: Path) -> None:
+    _write(tmp_path, "bad.py", _BAD)
+    _write(tmp_path, "pkg/closed/other.py", "x = 1\n")
+    with _unreadable(tmp_path / "pkg" / "closed"):
+        assert verify(Corpus(tmp_path), _ast("bare_except")).status == STATUS_FAIL
+
+
+def test_un_dossier_illisible_remonte_dans_standard_verify(tmp_path: Path) -> None:
+    _write(tmp_path, "ok.py", "x = 1\n")
+    _write(tmp_path, "pkg/closed/bad.py", _BAD)
+    _install_python(tmp_path)
+    with _unreadable(tmp_path / "pkg" / "closed"):
+        found = [c for c in _checks(tmp_path, "rules.pack_unevaluated") if "bare-except" in c.message]
+    assert found, "la règle sur bare-except doit être non évaluée"
+
+
 def test_les_dossiers_generes_ne_sont_pas_parcourus(tmp_path: Path) -> None:
     for folder in (".venv/lib", "node_modules/x", "_grimoire/standard"):
         _write(tmp_path, f"{folder}/m.py", "try:\n    pass\nexcept:\n    pass\n")
@@ -352,6 +401,30 @@ def test_un_projet_conforme_passe_toutes_les_regles_verifiees(tmp_path: Path) ->
     report = evaluate_project(tmp_path, analyze(tmp_path).layers)
     assert (report.enforced, report.advisory, report.failing, report.unevaluated, report.unclassified) == (5, 2, 0, 0, 0)
     assert {s.status for s in report.statuses if s.status != "advisory"} == {STATUS_PASS}
+
+
+def _venv_status(root: Path) -> str:
+    report = evaluate_project(root, analyze(root).layers)
+    return next(s.status for s in report.statuses if s.rule == "ALWAYS list .venv @.gitignore")
+
+
+@pytest.mark.parametrize(
+    ("gitignore", "expected"),
+    [
+        ("venv/\n", STATUS_FAIL),
+        ("venv\n", STATUS_FAIL),
+        ("/venv/\n", STATUS_FAIL),
+        (".venv/\n", STATUS_PASS),
+        (".venv\n", STATUS_PASS),
+        ("/.venv\n", STATUS_PASS),
+        ("/.venv/\n", STATUS_PASS),
+    ],
+)
+def test_seul_le_dossier_point_venv_satisfait_la_regle_gitignore(tmp_path: Path, gitignore: str, expected: str) -> None:
+    _clean_project(tmp_path)
+    _write(tmp_path, ".gitignore", gitignore)
+    _install_python(tmp_path)
+    assert _venv_status(tmp_path) == expected
 
 
 def test_un_projet_fautif_echoue_regle_par_regle(tmp_path: Path) -> None:

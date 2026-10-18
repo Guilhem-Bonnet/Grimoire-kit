@@ -14,9 +14,10 @@ Quatre natures de vérificateur (``kind``) :
 
 Un verdict a trois états, jamais deux : ``pass``, ``fail`` et ``unevaluated``.
 Une preuve qu'on n'a pas pu faire n'est pas un succès : fichier trop gros, non
-UTF-8, syntaxe illisible, parcours tronqué ou portée vide valent ``unevaluated``
+UTF-8, syntaxe illisible, parcours tronqué, dossier illisible ou portée vide valent ``unevaluated``
 (sauf si une violation a déjà été trouvée : ``fail`` tient). Un ``pass`` veut
-dire que tous les fichiers de la portée ont été lus et que rien n'a été trouvé.
+dire que tous les fichiers de la portée ont été lus, qu'aucun dossier du projet
+n'est resté illisible et que rien n'a été trouvé.
 
 Limites connues : un motif est appliqué au texte entier du fichier (``re.M``),
 sans garde contre une expression à rétro-traçage catastrophique : les motifs
@@ -109,15 +110,27 @@ class Verdict:
 # ── Parcours du projet ────────────────────────────────────────────────────────
 
 
-def scan_project(root: Path) -> tuple[tuple[str, ...], bool]:
-    """Chemins relatifs (``/``) des fichiers du projet, triés, et si le parcours est tronqué.
+def scan_project(root: Path) -> tuple[tuple[str, ...], bool, tuple[str, ...]]:
+    """Chemins relatifs (``/``) des fichiers du projet, triés, si le parcours est tronqué,
+    et les dossiers qui n'ont pas pu être listés (relatifs, triés ; ``.`` pour la racine).
 
     Les liens symboliques ne sont ni suivis ni listés : un lien ne doit pas faire
-    lire un fichier hors de la racine.
+    lire un fichier hors de la racine. Un dossier illisible n'est pas passé sous
+    silence : ce qu'il contient n'a pas été vu, donc aucun ``pass`` ne peut le couvrir.
     """
     base = Path(root)
     found: list[str] = []
-    for current, dirs, files in os.walk(base, followlinks=False):
+    unreadable: set[str] = set()
+
+    def on_error(err: OSError) -> None:
+        name = getattr(err, "filename", None)
+        try:
+            rel = Path(os.fsdecode(name)).relative_to(base).as_posix() if name else "."
+        except ValueError:
+            rel = str(name)
+        unreadable.add(rel)
+
+    for current, dirs, files in os.walk(base, onerror=on_error, followlinks=False):
         here = Path(current)
         dirs[:] = sorted(d for d in dirs if d not in EXCLUDED_DIRS and not (here / d).is_symlink())
         prefix = here.relative_to(base).as_posix()
@@ -126,8 +139,8 @@ def scan_project(root: Path) -> tuple[tuple[str, ...], bool]:
                 continue
             found.append(name if prefix == "." else f"{prefix}/{name}")
             if len(found) >= MAX_FILES:
-                return tuple(found), True
-    return tuple(found), False
+                return tuple(found), True, tuple(sorted(unreadable))
+    return tuple(found), False, tuple(sorted(unreadable))
 
 
 class Corpus:
@@ -135,9 +148,19 @@ class Corpus:
 
     def __init__(self, root: Path) -> None:
         self.root = Path(root)
-        self.paths, self.truncated = scan_project(self.root)
+        self.paths, self.truncated, self.unreadable_dirs = scan_project(self.root)
         self._text: dict[str, str | None] = {}
         self._tree: dict[str, ast.AST | None] = {}
+
+    def gap(self) -> str:
+        """Ce que le parcours n'a pas vu (tronqué, dossiers illisibles), ou chaîne vide."""
+        reasons: list[str] = []
+        if self.unreadable_dirs:
+            shown = ", ".join(self.unreadable_dirs[:3]) + (" …" if len(self.unreadable_dirs) > 3 else "")
+            reasons.append(f"{len(self.unreadable_dirs)} dossier(s) illisible(s) : {shown}")
+        if self.truncated:
+            reasons.append(f"parcours tronqué à {MAX_FILES} fichiers")
+        return " ; ".join(reasons)
 
     def select(self, globs: Iterable[str]) -> tuple[str, ...]:
         patterns = tuple(globs)
@@ -235,8 +258,9 @@ def _incomplete(corpus: Corpus, unread: list[str]) -> str:
     if unread:
         shown = ", ".join(unread[:3]) + (" …" if len(unread) > 3 else "")
         reasons.append(f"{len(unread)} fichier(s) illisible(s) (trop gros, non UTF-8 ou syntaxe invalide) : {shown}")
-    if corpus.truncated:
-        reasons.append(f"parcours tronqué à {MAX_FILES} fichiers")
+    gap = corpus.gap()
+    if gap:
+        reasons.append(gap)
     return " ; ".join(reasons)
 
 
@@ -292,16 +316,16 @@ def _conclude(corpus: Corpus, verifier: Verifier, finder: Callable[[str], list[F
 def _require_file(corpus: Corpus, verifier: Verifier) -> Verdict:
     if corpus.select(verifier.paths):
         return Verdict(STATUS_PASS)
-    if corpus.truncated:
-        return Verdict(STATUS_UNEVALUATED, reason=f"parcours tronqué à {MAX_FILES} fichiers")
+    if gap := corpus.gap():
+        return Verdict(STATUS_UNEVALUATED, reason=gap)
     return Verdict(STATUS_FAIL, (Finding(", ".join(verifier.paths), 0, "fichier absent"),))
 
 
 def _require_regex(corpus: Corpus, verifier: Verifier) -> Verdict:
     scoped = corpus.select(verifier.paths)
     if not scoped:
-        if corpus.truncated:
-            return Verdict(STATUS_UNEVALUATED, reason=f"parcours tronqué à {MAX_FILES} fichiers")
+        if gap := corpus.gap():
+            return Verdict(STATUS_UNEVALUATED, reason=gap)
         return Verdict(STATUS_FAIL, (Finding(", ".join(verifier.paths), 0, "fichier absent"),))
     pattern = re.compile(verifier.pattern, re.MULTILINE)
     unread: list[str] = []

@@ -45,7 +45,7 @@ rules:
       porte des chemins propres au poste.
     verifier:
       kind: require_regex
-      pattern: '^/?\.?venv/?\s*$'
+      pattern: '^/?\.venv/?\s*$'
       paths: [".gitignore"]
   - rule: ALWAYS annotate public-functions
     advisory: true
