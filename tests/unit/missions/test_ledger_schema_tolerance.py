@@ -106,7 +106,7 @@ def test_ledger_of_current_main_replays_identically(tmp_path: Path) -> None:
 
     assert after == before
     assert after is not None and after.to_dict() == before.to_dict()
-    assert "lease_epoch" not in raw and "raw_status" not in raw
+    assert "raw_status" not in raw  # lease_epoch : posé par le claim depuis K2, rejoué à l'identique
     assert (tmp_path / "events.jsonl").read_text(encoding="utf-8") == raw  # lecture seule
 
 
