@@ -54,15 +54,15 @@ def _newer_transition(task_id: str, to_state: str) -> dict:
 
 def test_unknown_state_displayed_unknown_and_frozen(tmp_path: Path) -> None:
     _, task_id = _ledger_with_task(tmp_path)
-    _append_raw(tmp_path, _newer_transition(task_id, "waiting"))
+    _append_raw(tmp_path, _newer_transition(task_id, "hibernating"))
 
-    reader = MissionLedger(tmp_path)  # rejeu complet par un lecteur qui ignore « waiting »
+    reader = MissionLedger(tmp_path)  # rejeu complet par un lecteur qui ignore « hibernating »
     task = reader.get_task(task_id)
 
     assert task is not None
     assert task.status is TaskState.UNKNOWN
-    assert task.raw_status == "waiting"
-    assert "waiting" in task.status_label and "inconnu" in task.status_label
+    assert task.raw_status == "hibernating"
+    assert "hibernating" in task.status_label and "inconnu" in task.status_label
     assert board_status_of(task.status) == "blocked"
     for target in TARGETABLE_TASK_STATES:
         with pytest.raises(GrimoireMissionError, match="inconnu"):
@@ -73,11 +73,11 @@ def test_unknown_state_displayed_unknown_and_frozen(tmp_path: Path) -> None:
 
 def test_unknown_state_survives_a_rewrite(tmp_path: Path) -> None:
     _, task_id = _ledger_with_task(tmp_path)
-    _append_raw(tmp_path, _newer_transition(task_id, "waiting"))
+    _append_raw(tmp_path, _newer_transition(task_id, "hibernating"))
     task = MissionLedger(tmp_path).get_task(task_id)
     assert task is not None
-    assert task.to_dict()["status"] == "waiting"
-    assert MissionTask.from_dict(task.to_dict()).raw_status == "waiting"
+    assert task.to_dict()["status"] == "hibernating"
+    assert MissionTask.from_dict(task.to_dict()).raw_status == "hibernating"
 
 
 def test_unknown_state_is_not_offered_as_a_target() -> None:
@@ -139,7 +139,7 @@ def test_board_of_an_unknown_state_task_passes_the_governed_verifier(tmp_path: P
     from grimoire.missions.board import build_board, write_board
 
     _, task_id = _ledger_with_task(tmp_path)
-    _append_raw(tmp_path, _newer_transition(task_id, "waiting"))
+    _append_raw(tmp_path, _newer_transition(task_id, "hibernating"))
     ledger = MissionLedger(tmp_path)
 
     board = build_board(ledger)
@@ -153,5 +153,5 @@ def test_board_of_an_unknown_state_task_passes_the_governed_verifier(tmp_path: P
     assert [c.id for c in result.checks if c.is_error] == []
     card = next(c for c in board["tasks"] if c["task_id"] == task_id)
     assert card["status"] == "blocked"
-    assert card["blockers"] and "waiting" in card["blockers"][0]["reason"]
+    assert card["blockers"] and "hibernating" in card["blockers"][0]["reason"]
     assert card["blockers"][0]["target"] == task_id
