@@ -509,7 +509,7 @@ class CheckGate:
                 and entry.get("tree_fingerprint") == fingerprint
                 and entry.get("ok") is True
             ):
-                return entry
+                return dict(entry)
         return None
 
     def _store_receipt(self, receipt: Mapping[str, Any]) -> None:
