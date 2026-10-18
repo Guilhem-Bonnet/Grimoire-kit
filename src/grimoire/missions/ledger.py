@@ -153,6 +153,8 @@ _FAILED_DISPATCH = frozenset({"red", "timeout", "error"})
 _HELD = (TaskState.CLAIMED, TaskState.RUNNING)
 #: Les états où le claim est encore à son titulaire : tenu, ou garé en attente (K6, reprise sur place).
 _HOLDING = (*_HELD, TaskState.WAITING)
+#: États qui ne tiennent pas de place de WIP et peuvent rentrer en ``running`` : la reprise repasse par la garde (K10).
+_RESUMING = (TaskState.WAITING, TaskState.NEEDS_VERIFICATION)
 #: Origine d'une barrière du fichier de bail (K2-S2-02) : voir :class:`LeaseFile`.
 ORIGIN_REAP = "reap"
 
@@ -756,8 +758,8 @@ class MissionLedger:
                 )
             if self.claim_guard is not None and (limit := self.claim_guard(self._tasks, task)):
                 raise GrimoireMissionError(f"Claim refusé pour {task_id} : {limit}")
-        elif to_state is TaskState.RUNNING and task.status is TaskState.WAITING and self.claim_guard is not None and (limit := self.claim_guard(self._tasks, task)):
-            raise GrimoireMissionError(f"Reprise refusée pour {task_id} : {limit} — elle attend une place, la tâche reste en attente")
+        elif to_state is TaskState.RUNNING and task.status in _RESUMING and self.claim_guard is not None and (limit := self.claim_guard(self._tasks, task)):
+            raise GrimoireMissionError(f"Reprise refusée pour {task_id} : {limit} — elle attend une place, la tâche reste {task.status.value}")
         if expected_from is not None and task.status is not expected_from:
             raise GrimoireMissionError(
                 f"Transition refusée pour {task_id} : l'état a changé entre-temps "

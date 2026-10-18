@@ -636,3 +636,79 @@ def test_a_resume_with_room_is_still_granted(projet: Path, service: TaskService,
     epoch = _wait(service, first.id)
     resumed = service.ledger.transition_task(first.id, TaskState.RUNNING, actor_id="agent", lease_epoch=epoch)
     assert resumed.status is TaskState.RUNNING
+
+
+# ── Le retour de needs_verification vers running repasse par la garde du WIP ─────
+
+
+def _verify(service: TaskService, task_id: str, actor: str) -> None:
+    service.ledger.claim_task(task_id, actor, "claude")
+    service.ledger.transition_task(task_id, TaskState.RUNNING, actor_id=actor)
+    service.ledger.transition_task(task_id, TaskState.NEEDS_VERIFICATION, actor_id=actor)
+
+
+def test_a_rework_from_needs_verification_cannot_exceed_the_global_wip(
+    projet: Path, service: TaskService, mission: str
+) -> None:
+    _capacity(projet, "version: 1\nwip:\n  limit_global: 1\n")
+    first, second = _pret(service, mission, "A", owner="x"), _pret(service, mission, "B", owner="y")
+    _verify(service, first.id, "agent")
+    service.ledger.claim_task(second.id, "agent2", "claude")
+    service.ledger.transition_task(second.id, TaskState.RUNNING, actor_id="agent2")
+    with pytest.raises(GrimoireMissionError, match=r"Reprise refusée.*WIP global atteint \(1/1\).*reste needs_verification"):
+        service.ledger.transition_task(first.id, TaskState.RUNNING, actor_id="agent")
+    assert service.require(first.id).status is TaskState.NEEDS_VERIFICATION
+    held = [t.id for t in service.ledger.list_tasks() if t.status in (TaskState.CLAIMED, TaskState.RUNNING)]
+    assert held == [second.id]
+    service.ledger.transition_task(second.id, TaskState.NEEDS_VERIFICATION, actor_id="agent2")
+    assert service.ledger.transition_task(first.id, TaskState.RUNNING, actor_id="agent").status is TaskState.RUNNING
+
+
+def test_a_rework_from_needs_verification_cannot_exceed_the_wip_of_its_role_through_the_service(
+    projet: Path, service: TaskService, mission: str
+) -> None:
+    _capacity(projet, "version: 1\nwip:\n  limit_per_role: 1\n")
+    first, second = _pret(service, mission, "A"), _pret(service, mission, "B")
+    service.claim(first.id, "agent")
+    service.transition(first.id, TaskState.RUNNING, "agent")
+    service.transition(first.id, TaskState.NEEDS_VERIFICATION, "agent")
+    service.claim(second.id, "agent2")
+    service.transition(second.id, TaskState.RUNNING, "agent2")
+    with pytest.raises(GrimoireMissionError, match=r"Reprise refusée.*WIP du rôle amelia atteint"):
+        service.transition(first.id, TaskState.RUNNING, "verifier", "preuve rejetée, reprise")
+    assert service.require(first.id).status is TaskState.NEEDS_VERIFICATION
+
+
+def test_a_rework_from_needs_verification_with_room_is_still_granted(
+    projet: Path, service: TaskService, mission: str
+) -> None:
+    _capacity(projet, "version: 1\nwip:\n  limit_global: 1\n")
+    first = _pret(service, mission, "A")
+    _verify(service, first.id, "agent")
+    assert service.ledger.transition_task(first.id, TaskState.RUNNING, actor_id="agent").status is TaskState.RUNNING
+
+
+def test_task_flow_import_defers_a_rework_the_wip_refuses_instead_of_raising(projet: Path) -> None:
+    from grimoire.missions.task_flow_adapter import _task_id, import_task_flow_events
+
+    _capacity(projet, "version: 1\nwip:\n  limit_global: 1\n")
+    ledger = TaskService(projet).ledger
+    events = projet / "events.jsonl"
+    _lines = [
+        {"task": "a", "event": "task-start", "flow": "f"},
+        {"task": "a", "event": "task-end", "flow": "f", "status": "ok", "exitCode": 0},
+        {"task": "b", "event": "task-start", "flow": "f"},
+    ]
+    events.write_text("".join(json.dumps(e) + "\n" for e in _lines), encoding="utf-8")
+    import_task_flow_events(ledger, events)
+    assert ledger.get_task(_task_id("a")).status is TaskState.NEEDS_VERIFICATION  # type: ignore[union-attr]
+    assert ledger.get_task(_task_id("b")).status is TaskState.RUNNING  # type: ignore[union-attr]
+    with events.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"task": "a", "event": "task-start", "flow": "f", "n": 2}) + "\n")
+    report = import_task_flow_events(ledger, events)  # levait GrimoireMissionError sans le try
+    assert report.events_deferred == 1 and report.events_imported == 0
+    assert ledger.get_task(_task_id("a")).status is TaskState.NEEDS_VERIFICATION  # type: ignore[union-attr]
+    ledger.transition_task(_task_id("b"), TaskState.NEEDS_VERIFICATION, actor_id="task-flow")
+    retry = import_task_flow_events(ledger, events)  # rejoué quand une place se libère
+    assert retry.events_deferred == 0 and retry.events_imported == 1
+    assert ledger.get_task(_task_id("a")).status is TaskState.RUNNING  # type: ignore[union-attr]
