@@ -60,8 +60,16 @@ _OBSERVER = r"""
 const fs = require('fs');
 const path = require('path');
 const [src, tmp, payloadJson, idsJson] = process.argv.slice(-4);
-const target = path.join(tmp, 'observer-under-test.mjs');
-fs.writeFileSync(target, fs.readFileSync(src, 'utf8'));
+// observer.js importe désormais ../shell.js : on copie l'arbre workspace entier
+// (les .js y sont lus comme ES modules via un package.json local).
+const root = path.join(tmp, 'workspace');
+fs.cpSync(path.dirname(path.dirname(src)), root, { recursive: true });
+fs.writeFileSync(path.join(root, 'package.json'), '{"type":"module"}');
+const target = path.join(root, 'spaces', 'observer.js');
+// shell.js démarre la coque (DOM) dès l'import : seules les fonctions pures de
+// tarification sont sous test, on le remplace par un stub aux deux exports utilisés.
+fs.writeFileSync(path.join(root, 'shell.js'),
+  'export const icon = () => null; export const stateIcon = () => null;');
 import(require('url').pathToFileURL(target).href).then((m) => {
   const payload = JSON.parse(payloadJson);
   const span = (model) => ({ attributes: {

@@ -185,7 +185,7 @@
   --w-rail: 44px;
   /* Découverte : le rail porte ses libellés, donc il s'élargit — le plancher
      typographique ne se négocie pas contre une largeur de chrome. */
-  --w-rail-wide: 84px;
+  --w-rail-wide: 100px;
   --w-panel: 236px;
   --w-inspector: 300px;
   --h-dock: 200px;
