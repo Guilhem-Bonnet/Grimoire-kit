@@ -20,6 +20,7 @@ from grimoire.hosts.decisions.enrolment import (
     record_unattached_work,
     session_mutation_count,
     stop_scope,
+    waiting_task_of_session,
 )
 from grimoire.hosts.decisions.gate_summary import _gate_summary
 
@@ -113,6 +114,9 @@ def _decide_stop(hook: HookInput) -> Decision:
     task_id = active.task_id
     profile = active_profile_id(hook.project_root)
     if active.is_fallback:
+        parked = _parked_waiting(hook)
+        if parked is not None:
+            return parked
         no_task = _no_task_closure(hook, profile, active.candidates, active.expired)
         if no_task is not None:
             return no_task
@@ -185,14 +189,33 @@ def _decide_stop(hook: HookInput) -> Decision:
     return _with_done_gate(Decision(outcome=Outcome.BLOCK, reason=reason, detail=detail), hook, task_id, profile)
 
 
+def _parked_waiting(hook: HookInput) -> Decision | None:
+    """K6 : la tâche de la session est garée en ``waiting`` — la session peut s'arrêter, et le dit.
+
+    Sans cela, une session qui vient de poser sa question (``task ask``) ou son attente
+    (``task wait``) était refusée au ``Stop`` en profil gouverné comme un travail hors tâche.
+    """
+    task = waiting_task_of_session(hook)
+    if task is None:
+        return None
+    reason = task.waiting.reason if task.waiting is not None else "?"
+    return Decision(
+        context=(
+            f"[Grimoire] Tâche {task.id} garée en attente ({reason}) : la session peut s'arrêter ; "
+            "elle reprendra avec `grimoire task resume` ou par un nouveau claim une fois l'attente levée."
+        ),
+        detail={"task_id": task.id, "task_state": task.status.value, "waiting_reason": reason, "parked": True},
+    )
+
+
 def _unparked_task(hook: HookInput, active: Any, profile: str, detail: dict[str, Any]) -> Decision | None:
     """§5.1 : une tâche rattachée à la session n'est quittée que fermée ou garée avec une raison.
 
     Les gates de preuve sont verts, mais le ledger tient encore la tâche (``claimed`` ou
     ``running``) : ni rendue pour vérification, ni bloquée, ni échouée, ni annulée. Un profil
     bloquant refuse la clôture en nommant les gestes qui la garent ; les autres le disent.
-    L'état ``waiting`` (K6) n'existe pas encore : « garée » se lit aujourd'hui dans les états
-    du ledger. ``stop_hook_active`` passe avant ce contrôle : le second ``Stop`` sort toujours.
+    « Garée » : ``needs_verification``/``blocked``/``failed``/``cancelled``, ou ``waiting`` (K6,
+    :func:`_parked_waiting`). ``stop_hook_active`` passe avant ce contrôle : le second ``Stop`` sort toujours.
     """
     if active.source not in ("session_claim", "env", "ledger_claim"):
         return None
@@ -211,8 +234,10 @@ def _unparked_task(hook: HookInput, active: Any, profile: str, detail: dict[str,
         f"[Grimoire] Tâche {task.id} encore {task.status.value} : cette session la tient (bail epoch "
         f"{task.claim.lease_epoch if task.claim else 0}) et ne l'a ni fermée ni garée.\n"
         f"Rends-la avant de conclure : `grimoire task move {task.id} --to needs_verification` (preuve remise), "
-        f"`grimoire task block {task.id} --reason ...` (bloquée), ou `grimoire task cancel {task.id} "
-        "--reason ...` (abandon). Si elle doit rester en cours, dis-le explicitement à l'utilisateur au lieu de conclure."
+        f"`grimoire task block {task.id} --reason ...` (bloquée), `grimoire task ask {task.id} \"...\"` "
+        f"(une décision attend l'humain), `grimoire task wait {task.id} --reason ci|quota|paused` (attente nommée), "
+        f"ou `grimoire task cancel {task.id} --reason ...` (abandon). "
+        "Si elle doit rester en cours, dis-le explicitement à l'utilisateur au lieu de conclure."
     )
     info = {**detail, "blocked_on": TASK_UNPARKED, "task_id": task.id, "task_state": task.status.value}
     if profile in _BLOCKING_PROFILES:

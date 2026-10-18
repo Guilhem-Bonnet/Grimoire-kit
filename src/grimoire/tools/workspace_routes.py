@@ -67,6 +67,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from grimoire.missions.liveness import probe_claude_agents
 from grimoire.tools import (
     source_assist,
     workspace_api,
@@ -223,6 +224,7 @@ def _portfolio_tasks(project_root: Path, query: _Query) -> Any:
         project=_one(query, "slug") or None,
         live=live_raw not in (None, "", "0", "false"),
         live_minutes=int(minutes_raw) if minutes_raw else workspace_portfolio.DEFAULT_LIVE_MINUTES,
+        probe=probe_claude_agents,
     )
 
 
@@ -483,7 +485,7 @@ POST_ROUTES: dict[str, _PostHandler] = {
 }
 
 def _task_steer(service: Any, task_id: str, action: str, actor: str, body: dict[str, Any]) -> Any:
-    """Les gestes de l'orchestrateur humain (issue #638, lot B) — refus rendus par le service."""
+    """Les gestes de l'orchestrateur humain (issue #638, lot B ; K6 : répondre) — refus rendus par le service."""
     from grimoire.missions.schemas import ORIGIN_HUMAN
 
     if action == "prioritize":
@@ -496,6 +498,13 @@ def _task_steer(service: Any, task_id: str, action: str, actor: str, body: dict[
         )
     if action == "cancel":
         return service.cancel(task_id, str(body.get("reason") or ""), actor, force=body.get("force") is True)
+    if action == "answer":
+        # K6 : la réponse à une décision attendue. Le cockpit local, derrière le jeton de session
+        # (W1-10), est le canal de l'humain : l'origine est posée ici, jamais lue du corps.
+        return service.answer(
+            task_id, str(body.get("text") or ""), actor, origin=ORIGIN_HUMAN,
+            question_id=str(body.get("question_id") or ""),
+        )
     directive_id = str(body.get("directive_id") or "")
     if not directive_id:
         raise ValueError("`directive_id` requis pour accuser réception")
@@ -505,7 +514,7 @@ def _task_steer(service: Any, task_id: str, action: str, actor: str, body: dict[
 #: Les gestes de pilotage humain (issue #638) : jamais une transition d'état
 #: sauf `cancel`, qui passe par le même gate que `move --to cancelled` plus la
 #: raison obligatoire et le verrou de claim.
-_STEERING_ACTIONS = ("prioritize", "comment", "cancel", "ack")
+_STEERING_ACTIONS = ("prioritize", "comment", "cancel", "ack", "answer")
 
 #: Les verbes qu'une tâche accepte depuis l'interface.
 TASK_ACTIONS = ("claim", "move", "block", "close", *_STEERING_ACTIONS)

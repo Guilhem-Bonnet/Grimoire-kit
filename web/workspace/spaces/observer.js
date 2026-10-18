@@ -21,6 +21,8 @@
 // tâche dans l'espace Exécuter (`ctx.goto('executer', { task, view:
 // 'timeline' })`) — pure navigation, aucune lecture supplémentaire ici.
 
+import { icon, stateIcon } from '../shell.js';
+
 const STYLE_ID = 'ob-styles';
 
 function injectStyles() {
@@ -28,12 +30,16 @@ function injectStyles() {
   const style = document.createElement('style');
   style.id = STYLE_ID;
   style.textContent = `
-    .ob-wrap { padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-5); }
+    .ob-wrap { padding: var(--sp-4) var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-5); }
     .ob-kpi { display: flex; flex-wrap: wrap; border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); overflow: hidden; }
-    .ob-kpi-item { flex: 1; min-width: 140px; padding: var(--sp-3) var(--sp-4); border-left: 1px solid var(--line); }
+    .ob-kpi-item { flex: 1; min-width: 140px; padding: var(--sp-3) var(--sp-4); border-left: 1px solid var(--line); border-top: 3px solid var(--tone, transparent); }
     .ob-kpi-item:first-child { border-left: 0; }
-    .ob-kpi-val { font-family: var(--mono); font-size: var(--t-xl); font-weight: 600; color: var(--ink); }
-    .ob-kpi-lbl { font-size: var(--t-min); color: var(--ink3); margin-top: 2px; }
+    .ob-kpi-val { font-family: var(--font); font-size: var(--t-xl); font-weight: 600; color: var(--ink); line-height: 1.25; }
+    .ob-kpi-lbl .ico { width: 14px; height: 14px; color: var(--tone, var(--ink3)); margin-right: 6px; vertical-align: -2px; }
+    .ob-kpi-item[data-tone="ok"] { --tone: var(--ok); }
+    .ob-kpi-item[data-tone="warn"] { --tone: var(--warn); }
+    .ob-kpi-item[data-tone="bad"] { --tone: var(--bad); }
+    .ob-kpi-lbl { font-size: var(--t-min); color: var(--ink3); margin-top: 2px;  display: flex; align-items: center; }
     .ob-panels { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-4); }
     @media (max-width: 900px) { .ob-panels { grid-template-columns: 1fr; } }
     .ob-panel { border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); padding: var(--sp-3); }
@@ -58,7 +64,7 @@ function injectStyles() {
   document.head.append(style);
 }
 
-const dot = (cls) => Object.assign(document.createElement('span'), { className: 'dot' + (cls ? ' ' + cls : '') });
+const dot = (cls) => stateIcon(cls);
 function text(tag, className, value) {
   const node = document.createElement(tag);
   if (className) node.className = className;
@@ -117,7 +123,10 @@ function kpiCard(items) {
   for (const item of items) {
     const cell = document.createElement('div');
     cell.className = 'ob-kpi-item';
-    cell.append(text('div', 'ob-kpi-val mono', item.value), text('div', 'ob-kpi-lbl', item.label));
+    if (item.tone) cell.dataset.tone = item.tone;
+    const lbl = text('div', 'ob-kpi-lbl', item.label);
+    if (item.icon) lbl.prepend(icon(item.icon));
+    cell.append(text('div', 'ob-kpi-val', item.value), lbl);
     card.append(cell);
   }
   return card;
@@ -364,12 +373,12 @@ function renderRuntime(root, ctx, { spans, modelRates, runs }) {
   const avgLatency = durations.length ? durations.reduce((a, b) => a + b, 0) / durations.length : null;
 
   wrap.append(kpiCard([
-    { value: String(spans.length), label: 'spans' },
-    { value: String(agents.size), label: 'agents' },
-    { value: String(models.size), label: 'modèles' },
-    { value: '$' + totalCost.toFixed(4), label: unpriced ? `coût estimé (${unpriced} span(s) sans tarif)` : 'coût estimé' },
-    { value: avgLatency == null ? '—' : Math.round(avgLatency) + ' ms', label: 'latence moyenne' },
-    { value: `${errorCount}/${spans.length}`, label: 'erreurs' },
+    { value: String(spans.length), label: 'spans', icon: 'network' },
+    { value: String(agents.size), label: 'agents', icon: 'team' },
+    { value: String(models.size), label: 'modèles', icon: 'cognition' },
+    { value: '$' + totalCost.toFixed(4), label: unpriced ? `coût estimé (${unpriced} span(s) sans tarif)` : 'coût estimé', icon: 'chart' },
+    { value: avgLatency == null ? '—' : Math.round(avgLatency) + ' ms', label: 'latence moyenne', icon: 'bolt' },
+    { value: `${errorCount}/${spans.length}`, label: 'erreurs', icon: errorCount ? 'alert' : 'check', tone: errorCount ? 'bad' : 'ok' },
   ]));
 
   const panels = document.createElement('div');

@@ -264,7 +264,7 @@ def test_le_portefeuille_liste_les_deux_projets_et_nomme_le_troisieme(
     projects = {page.locator(f".ex-card[data-project='{slugs[k]}']").count() for k in ("a", "b")}
     assert projects == {1}, "une carte par projet, chacune sous sa puce"
     assert "projet-alpha" in text and "projet-beta" in text, "la puce projet porte le nom du projet"
-    assert "session vivante" in text and "session inactive" in text, "point + mot, jamais la couleur seule"
+    assert "session vivante" in text and "session inconnue" in text, "point + mot, jamais la couleur seule"
     notice = page.locator(".ex-notice")
     notice.wait_for()
     assert "projet-gamma" in notice.inner_text() and "introuvable" in notice.inner_text()
