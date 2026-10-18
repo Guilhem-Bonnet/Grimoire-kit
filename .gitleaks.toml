@@ -17,3 +17,18 @@ description = "Fixtures de secrets factices du validateur d'écriture mémoire"
 paths = [
   '''^tests/unit/memory/test_write_validation\.py$''',
 ]
+
+# Jeton d'exemple de la documentation GitHub, cité comme texte de règle factice dans les
+# tests du lint des règles parsables. Le scan court sur tout l'historique de la branche :
+# un `gitleaks:allow` posé après coup ne couvre pas le commit qui a introduit la ligne,
+# d'où l'exemption ici. Elle est bornée au fichier ET à cette valeur exacte
+# (condition AND) : tout autre jeton dans ce fichier reste détecté.
+[[allowlists]]
+description = "Jeton d'exemple de la documentation GitHub dans les tests du lint des règles"
+condition = "AND"
+paths = [
+  '''^tests/unit/core/test_layered_rules\.py$''',
+]
+regexes = [
+  '''ghp_16C7e42F292c6912E7710c838347Ae178B4a''',
+]

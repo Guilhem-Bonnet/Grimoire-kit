@@ -66,6 +66,7 @@ from grimoire.core.standard_checks.controls import (
 )
 from grimoire.core.standard_checks.dispatch_cost_slo import _verify_dispatch_cost_slo
 from grimoire.core.standard_checks.pattern_codes import catalog_pattern_ids
+from grimoire.core.standard_checks.rules_check import verify_layered_rules
 from grimoire.core.standard_generation import (
     EVIDENCE_DIR,
     STANDARD_DIR,
@@ -1330,6 +1331,7 @@ def run_verifiers(root: Path, profile: StandardProfile, task_id: str, result: St
     _verify_context_contract(root, result)
     _verify_decision_graph(root, result)
     _verify_rule_packs(root, result)
+    verify_layered_rules(root, result)
     _verify_hook_registry(root, result)
     _verify_runtime_surface_registry(root, profile, result)
     _verify_retention_registry(root, profile, result)

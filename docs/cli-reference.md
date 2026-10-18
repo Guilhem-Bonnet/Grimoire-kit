@@ -801,6 +801,7 @@ et projections : [Système de mémoire](memory-system.md).
 | `grimoire memory graph` / `vector` | Synchroniser et vérifier les projections |
 | `grimoire memory bundle` | Construire, installer et vérifier les bundles de modèles d'embedding |
 | `grimoire memory shared` | Mémoire transverse : ce qui reste vrai d'un projet à l'autre |
+| `grimoire memory rules add` / `list` / `check` | Règles parsables par couche (`ALWAYS\|NEVER <verbe> <objet> [@portée]`) : conflits décidés par le code, plafond `rules.max_tokens_per_layer`, écriture via la frontière de confiance |
 | `grimoire memory facts` / `diary` | Graphe de faits temporels, journaux d'agents |
 | `grimoire memory migrate` | Planifier et exporter les migrations Memory OS |
 | `grimoire memory taxonomy` | Taxonomie aile / salle / pièce |
