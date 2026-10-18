@@ -7,9 +7,18 @@ import sys
 from pathlib import Path
 from textwrap import dedent
 
+import pytest
 from typer.testing import CliRunner
 
 from grimoire.cli.app import app
+
+pytestmark = pytest.mark.covers(
+    "cli:flow abort",
+    "cli:flow list",
+    "cli:flow resume",
+    "cli:flow run",
+    "cli:flow status",
+)
 
 # Commande d'acceptation « qui réussit », valable sous sh comme sous cmd.exe
 # (`true` n'existe pas sous Windows, où `shell=True` lance cmd.exe).

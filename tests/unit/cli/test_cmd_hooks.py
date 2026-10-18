@@ -12,6 +12,13 @@ from typer.testing import CliRunner
 
 from grimoire.cli.app import app
 
+pytestmark = pytest.mark.covers(
+    "cli:hooks calibrate",
+    "cli:hooks install",
+    "cli:hooks list",
+    "cli:hooks status",
+)
+
 runner = CliRunner()
 
 

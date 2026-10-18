@@ -30,6 +30,10 @@ from grimoire.flows.extract import extract_blueprint
 from grimoire.flows.registry import describe_flow
 from grimoire.runtime.schemas import WorkflowStatus
 
+pytestmark = pytest.mark.covers(
+    "genre:composite",
+)
+
 # Commande d'acceptation « qui réussit », valable sous sh comme sous cmd.exe
 # (`true` n'existe pas sous Windows, où `shell=True` lance cmd.exe).
 _TRUE = f'"{sys.executable}" -c pass'

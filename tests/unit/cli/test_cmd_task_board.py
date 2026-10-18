@@ -22,6 +22,10 @@ from grimoire.missions.schemas import (
     TaskType,
 )
 
+pytestmark = pytest.mark.covers(
+    "cli:task board export",
+)
+
 
 @pytest.fixture
 def runner() -> CliRunner:

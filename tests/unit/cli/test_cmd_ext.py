@@ -5,9 +5,18 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from grimoire.cli.app import app
+
+pytestmark = pytest.mark.covers(
+    "cli:ext add",
+    "cli:ext list",
+    "cli:ext publish",
+    "cli:ext remove",
+    "cli:ext verify",
+)
 
 runner = CliRunner()
 
