@@ -1,3 +1,7 @@
+---
+audience: décision
+---
+
 # Errata : contamination du lot J par les tests cachés
 
 **Date** : 2026-10-09  

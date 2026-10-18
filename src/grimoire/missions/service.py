@@ -411,6 +411,7 @@ class TaskService:
         ready: bool = False,
         checks: tuple[TaskCheck, ...] = (),
         files: tuple[str, ...] = (),
+        test_depth: str = "",
     ) -> TaskAdded:
         """Ouvre une tâche — le geste que ``grimoire task add`` et ``task_add`` (MCP) partagent.
 
@@ -421,7 +422,15 @@ class TaskService:
         refusé au même titre que ``()``. Avec *ready*, la tâche passe
         ``proposed → ready`` par :meth:`transition`, donc par le gate
         ``proposed_to_ready`` — en profil gouverné, il exige un ``owner``.
+        *test_depth* (W6-01) : ``floor``, ``standard`` ou ``strict`` ; le gate de
+        fermeture refuse tant que le dernier verdict ne l'atteint pas.
         """
+        if test_depth:
+            from grimoire.missions.ceremony import DepthLevel
+
+            if test_depth not in {d.value for d in DepthLevel}:
+                accepted = ", ".join(d.value for d in DepthLevel)
+                raise GrimoireMissionError(f"test_depth inconnue : {test_depth!r} (attendu : {accepted})")
         acceptance = tuple(item.strip() for item in acceptance if item and item.strip())
         expected_evidence = tuple(item.strip() for item in expected_evidence if item and item.strip())
         ledger = self.ledger
@@ -441,7 +450,7 @@ class TaskService:
             risk = RiskProfile.STANDARD
         task = ledger.create_task(
             mission_id, title, acceptance=acceptance, owner=owner, expected_evidence=expected_evidence,
-            risk_profile=risk, checks=checks,
+            risk_profile=risk, checks=checks, test_depth=test_depth,
             extra={"files": [f for f in (x.strip() for x in files) if f]} if any(x.strip() for x in files) else None,
         )
         if ready:

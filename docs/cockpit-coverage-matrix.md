@@ -1,3 +1,7 @@
+---
+audience: contributeur
+---
+
 <!-- markdownlint-disable MD013 -->
 # Matrice de couverture — cockpit (contrôles × états, routes × codes)
 

@@ -1,3 +1,7 @@
+---
+audience: utilisateur
+---
+
 <p align="right"><a href="../README.md">README</a></p>
 
 # <img src="../assets/icons/wrench.svg" width="32" height="32" alt=""> Configuration VS Code — Grimoire Custom Kit

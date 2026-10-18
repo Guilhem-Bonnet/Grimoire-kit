@@ -19,6 +19,11 @@ from grimoire.hosts.emitters import apply_plan, emitter_for, supported_hosts
 from grimoire.hosts.runtime import run_hook
 from grimoire.hosts.sync import sync_host_surfaces
 
+pytestmark = pytest.mark.covers(
+    "host:opencode",
+    level="real",
+)
+
 AGENT_DIR = Path("_grimoire/_config/custom/agents")
 
 

@@ -1,3 +1,7 @@
+---
+audience: utilisateur
+---
+
 # Intégration du standard agentique
 
 Grimoire Kit ne remplace pas le corpus normatif agentique. Il sert de **kit consommable** pour appliquer ce corpus dans un projet réel : profils, templates, registres, limites d'outils, preuves et déclarations de conformité.

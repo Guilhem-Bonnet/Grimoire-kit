@@ -1,3 +1,7 @@
+---
+audience: utilisateur
+---
+
 # Mettre à jour un projet (`grimoire upgrade-flow`)
 
 Issue [#490](https://github.com/Guilhem-Bonnet/Grimoire-kit/issues/490). `grimoire up` régénère le tier

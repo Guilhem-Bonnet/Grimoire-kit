@@ -1,3 +1,7 @@
+---
+audience: contributeur
+---
+
 # Développement de plugins
 
 Ce guide couvre la création de plugins Grimoire : outils, backends mémoire et archétypes personnalisés.

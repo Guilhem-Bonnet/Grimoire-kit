@@ -1,4 +1,5 @@
 ---
+audience: contributeur
 description: Contrat, flux d'autorisation et statut d'implementation des guardrails ajoutés au runtime TypeScript de Grimoire Game.
 author: GitHub Copilot
 date: 2026-04-09

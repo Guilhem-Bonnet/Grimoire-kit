@@ -1,3 +1,7 @@
+---
+audience: utilisateur
+---
+
 # Contrats et pins — le système de types
 
 Un blueprint est typé. Pas au sens décoratif : une connexion mal typée ne

@@ -1,3 +1,7 @@
+---
+audience: utilisateur
+---
+
 # Les portes
 
 Une porte affirme une précondition et gouverne le passage. **Elle ne

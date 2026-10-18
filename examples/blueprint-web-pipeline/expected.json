@@ -1,0 +1,29 @@
+{
+  "example": "blueprint-web-pipeline",
+  "replay": {
+    "exit_code": 0,
+    "stdout": [
+      "Schema layer: checked against schemas/blueprint-v1.schema.json",
+      "Structural layer: validate_blueprint_file + compile-level checks",
+      "  note: artifact refs not checked (pass --project-root to check them against a project)",
+      "Valid: registry/blueprints/web-pipeline.blueprint.json passes both validation layers",
+      "  OK   __blueprint__/cout-du-pipeline-sous-plafond",
+      "  --   crew/le-crew-rend-un-handoff-packet (non exécuté)",
+      "  --   refine/le-graphe-affine-sans-perdre-le-contrat (non exécuté)",
+      "  --   verify/evidence-pack-sur-mission-nominale (non exécuté)",
+      "  --   verify/mission-hors-perimetre-refusee-proprement (non exécuté)",
+      "",
+      "1/1 réussis sur 5 déclarés"
+    ]
+  },
+  "proof": {
+    "gate": "grimoire blueprint validate puis grimoire blueprint evals contre record.json",
+    "verdict": "pass",
+    "score": null,
+    "cost": {
+      "model_calls": 0,
+      "tokens": null
+    },
+    "notes": "record.json est une fixture synthetique, pas une mesure : ses tokens ne sont pas rapportes. 1 cas sur 5 est couvert, les 4 autres restent non executes (jamais comptes comme reussis)."
+  }
+}

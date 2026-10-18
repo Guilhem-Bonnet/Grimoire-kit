@@ -11,6 +11,10 @@ from grimoire.cli.app import app
 from grimoire.cli.cmd_merge import run_merge, run_undo
 from grimoire.core.exceptions import GrimoireMergeError
 
+pytestmark = pytest.mark.covers(
+    "cli:merge",
+)
+
 runner = CliRunner()
 
 

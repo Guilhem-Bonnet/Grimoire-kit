@@ -1,3 +1,7 @@
+---
+audience: contributeur
+---
+
 <p align="right"><a href="../README.md">README</a> · <a href="../CHANGELOG.md">Changelog</a> · <a href="index.md">Docs</a></p>
 
 # <img src="assets/icons/rocket.svg" width="32" height="32" alt=""> Banc à trois bras
@@ -28,12 +32,13 @@ d'abord, puis temps, puis coût. Le critère d'arrêt du plan (§3 du plan
 | `kit` | `grimoire init . --backend local --no-cockpit` puis `grimoire host sync --host claude` (grimoire-kit ≥ 3.53.0, installé depuis PyPI). | `HOME` isolé partagé (évite d'écrire dans `~/.grimoire`) ; l'état projet (`_grimoire/`) vit dans le dépôt de tâche lui-même. |
 | `kit-gov` | Le bras `kit`, PLUS `grimoire standard init` (profil `starter`, celui qu'un développeur seul obtient sans option) et une tâche de board — à l'id de la tâche du banc — posée en `in_progress` via `grimoire task migrate-standard` (ADR-007). | `HOME` isolé propre à ce bras (`workspace/homes/kit-gov`), jamais partagé avec `kit`. |
 
-Aucun bras ne force `--model` : les quatre utilisent le modèle par défaut de
-Claude Code pour l'environnement d'exécution. C'est volontaire — les bras
-`kit`/`kit-gov` ont le droit de cascader vers un modèle moins cher via leurs
-propres hooks et leur propre routage ; c'est précisément ce que la mesure de
-coût doit révéler, pas quelque chose à neutraliser en figeant un modèle
-unique.
+Depuis B-01, `--model` est obligatoire pour `--pilot` et `--full` : les quatre
+bras partent sur le même modèle demandé (voir §12). Avant B-01 ils utilisaient
+le modèle par défaut de Claude Code, qui a changé entre le lot K et le lot L.
+Le modèle demandé fixe la session principale ; les bras `kit`/`kit-gov` gardent
+le droit de cascader vers un modèle moins cher via leurs propres hooks et leur
+propre routage, et `model_usage` (modèle effectif) le révèle : c'est ce que la
+mesure de coût doit montrer, pas quelque chose à neutraliser.
 
 ### Ce que le bras `ecc` ajoute exactement
 
@@ -389,11 +394,11 @@ python scripts/bench/three_arms.py --dry-run --workspace /chemin/scratch/bench-w
 
 # 2. Pilote réel : 2 tâches x 3 bras x 1 rejeu (6 appels claude -p réels).
 #    Écrit workspace/state/expected_cost.json (coût attendu extrapolé).
-python scripts/bench/three_arms.py --pilot --workspace /chemin/scratch/bench-workspace
+python scripts/bench/three_arms.py --pilot --model <identifiant-de-modele> --workspace /chemin/scratch/bench-workspace
 
 # 3. Campagne complète : jusqu'à 20 tâches x 3 bras x k=3 (180 runs), avec
 #    arrêt anticipé si le critère statistique est atteint plus tôt.
-python scripts/bench/three_arms.py --full --workspace /chemin/scratch/bench-workspace \
+python scripts/bench/three_arms.py --full --model <identifiant-de-modele> --workspace /chemin/scratch/bench-workspace \
     --resume  # relance sans rejouer ce qui est déjà dans results.jsonl
 
 # 4. Régénérer report.md/report.json depuis results.jsonl sans rien rejouer :
@@ -402,7 +407,7 @@ python scripts/bench/three_arms.py --report-only --workspace /chemin/scratch/ben
 # Authentification (lot J, #582, voir §3) : --auth api-key explicite (recommandé,
 # aucune copie d'identifiant) ou --auth oauth-copy explicite (repli historique) ;
 # sans l'option, le mode est déduit de la présence d'ANTHROPIC_API_KEY.
-ANTHROPIC_API_KEY=sk-ant-... python scripts/bench/three_arms.py --pilot \
+ANTHROPIC_API_KEY=sk-ant-... python scripts/bench/three_arms.py --pilot --model <identifiant-de-modele> \
     --workspace /chemin/scratch/bench-workspace --auth api-key
 ```
 
@@ -458,7 +463,7 @@ on rejoue un **sous-lot fixe** par `nu` et `kit-gov` et on compare le ratio à c
 Lancer le sous-lot (dépense réelle, environ 4 $ au tarif du lot L ; non lancé par le chantier B-00) puis évaluer :
 
 ```bash
-python scripts/bench/three_arms.py --full --arms nu,kit-gov --seed 551 --auth oauth-copy \
+python scripts/bench/three_arms.py --full --model <identifiant-de-modele> --arms nu,kit-gov --seed 551 --auth oauth-copy \
     --workspace <workspace neuf> --grimoire-bin <chemin absolu> --label barriere-N \
     --subset docs/bench/cost-gate-subset.json
 python scripts/bench/cost_gate.py --results <workspace>/state/results.jsonl \
@@ -476,7 +481,81 @@ d'avant dérogation.
 `--subset` restreint le tirage aux 4 tâches déclarées et s'arrête avant tout run si l'une manque. Limites : un changement de modèle entre deux
 barrières est signalé en avertissement, pas refusé (voir B-01).
 
-## 12. Interventions humaines par tâche vérifiée (B-05)
+## 12. Modèle épinglé, appariement et saturation (B-01)
+
+Trois défauts constatés sur le lot L : `claude -p` partait sans `--model` (le modèle effectif n'était que relu dans `model_usage`, et il avait
+changé entre K et L, `docs/bench/rejeu-lot-l-2026-10-02.md` §1.3) ; rien n'empêchait de reprendre un lot sur un autre modèle ; le `nu` réussissait
+60 runs sur 60, donc le banc ne pouvait montrer aucun gain de succès. Code : `scripts/bench/model_pin.py`, tests : `tests/unit/test_bench_model_pin.py`.
+
+- **`--model <id>`** : obligatoire pour `--pilot` et `--full` (refus avant tout travail, code de sortie 2), transmis à `claude -p --model`. Préférer un identifiant
+  complet : un alias peut pointer plus tard vers un autre modèle, et le banc ne le détecte pas.
+- **Où il est noté** : `state/selection.json` (`model_id`, `claude_code_version`, lue par `claude --version`, `null` si illisible), chaque ligne de `results.jsonl`
+  (`model_id`, `claude_code_version`) et `report.json`/`report.md` (`model_id`, `claude_code_versions`). Un `--dry-run` ne touche pas au modèle déjà noté.
+- **Appariement refusé** : un rapport (`build_report`, donc `--report-only` et la fin d'une campagne) dont les lignes viennent de deux modèles est refusé
+  (`ModelMismatchError`, aucun fichier écrit). Une campagne `--pilot`/`--full` refuse aussi, avant d'écraser `selection.json` et avant tout run, de s'ajouter à un
+  `results.jsonl` d'un autre modèle. Une ligne sans `model_id` (lot antérieur à B-01) est INCONNUE : elle ne s'apparie avec aucun modèle noté, et un lot entièrement
+  antérieur reste lisible avec la mention « non enregistré ». Pour changer de modèle : un workspace neuf.
+- **`nu_baseline_pass_rate`** : part de runs `nu` réussis, par tâche, dans `report.json` (`by_task`) ; `null` sans run `nu` valide (jamais 0.0). Les runs invalidés (W1-08b) sont exclus.
+- **SATURÉ** : strictement plus de 50 % des tâches à 1.0 pour le `nu` donne `suite_saturation.verdict = "SATURÉ"` et une mention en tête de `report.md`. Sans run `nu` : `NON ÉVALUÉ`.
+  Sur les données figées du lot L (`tests/fixtures/bench/lot-l-nu-baseline.json`) : 20 tâches sur 20 à 1.0, SATURÉ.
+- **`--fail-on-saturated`** (opt-in, `--report-only` et `--full`) : le rapport est écrit, puis la sortie est 1 si le verdict est `SATURÉ`
+  (message sur stderr). `NON SATURÉ` et `NON ÉVALUÉ` sortent en 0 : une donnée absente ne fait pas rougir. Le drapeau n'est pas câblé en CI : sur la suite actuelle
+  (lot L) il rougirait en permanence.
+
+Limites. La version de Claude Code qui diffère dans un lot est signalée dans le rapport, pas refusée. Le modèle effectif des sous-agents n'est pas comparé : seul le modèle demandé l'est.
+`cost_gate.py` ne compare pas les modèles de sa référence (`cost-gate-baseline.json`, lot L). Aucune suite non saturée n'existe encore : choisir ou construire des tâches où le `nu`
+échoue ou varie reste à faire, et ne se fait pas sans run payant.
+
+## 13. Recalcul, hash des données, MDE et n requis (B-02)
+
+Trois manques constatés : aucun moyen de refaire un rapport depuis ses données brutes (le mot `recompute` n'existait nulle part) ; aucun calcul de l'effet que
+la suite peut détecter, donc « pas de différence » pouvait se lire « équivalents » ; `evals/aggregate.py` sommait les coûts `null` comme s'ils étaient absents
+(`cost_total` à 0.0 sans aucun coût connu) sans publier `cost_known_ratio`. Code : `scripts/bench/recompute.py`, `scripts/bench/power_calc.py`, tests :
+`tests/unit/test_bench_recompute.py`, `tests/unit/test_evals_aggregate.py`.
+
+```bash
+python scripts/bench/recompute.py --results <workspace>/state/results.jsonl --report <rapport>/report.json [--mde 0.10] [--arms nu,kit-gov] [--require-seal] [--report-md <report.md>]
+python scripts/bench/power_calc.py --mde 0.10 --tasks 20
+```
+
+- **Recalcul** : `report.json` est reconstruit par le même `build_report` à partir de `results.jsonl` seul. Chaque champ dérivé (`per_arm`, `by_task`, `kit_runs`,
+  `kit_gov_runs`, `invalid_runs`, `unevaluated_runs`, `auth_modes`, `model_id`, `claude_code_versions`, `suite_saturation`, `tasks_run`, `k`) qui ne se
+  recalcule pas à 1e-9 près est listé (chemin, valeur publiée, valeur recalculée) et la sortie est 1. Graine, étiquette, coût attendu, contrôle de toolchain et bras repris sont
+  des entrées : non recalculés, et listés comme tels.
+- **Hash des données** : `write_report` (campagne et `--report-only`) écrit dans `report.json` un bloc `data` (`results_file`, `results_rows`, `results_sha256`, sha256
+  des octets de `results.jsonl`) et le cite dans `report.md`. `recompute` compare : fichier modifié depuis = `mismatch`, sortie 1. Un rapport antérieur à B-02 est « NON SCELLÉ » :
+  ses chiffres se recalculent, mais rien ne prouve que le fichier est celui d'origine ; `--require-seal` en fait une erreur (à utiliser à la barrière 3).
+- **Ce que le sceau couvre** : `write_report` ne cite un hash que si `results.jsonl` contient exactement les lignes que le rapport agrège (mêmes clés tâche/bras/rejeu). Un pilote
+  suivi de `--full` sans `--resume`, ou `--full --arms kit` sur un fichier qui contient déjà `nu`/`ecc`, laisse des lignes que le rapport n'a pas comptées : le bloc `data` porte alors
+  `sealed: false`, `report_rows` et la raison, sans hash, et `report.md` écrit « NON SCELLÉ ». `recompute` rend « NON SCELLÉ (rien n'a été recalculé) » (sortie 0, 1 avec `--require-seal`) : il ne
+  peut pas refaire ce rapport depuis ce fichier, et le dit au lieu d'annoncer un hash « ok » suivi d'écarts.
+- **Schéma antérieur** : un champ absent du rapport publié, ou publié à `null` quand le recalcul en donne une valeur (`cost_known_*`, `n_invalid`, `suite_saturation`,
+  `nu_baseline_pass_rate`...), n'est pas un écart : il est listé sous « NON PUBLIÉS ». Une valeur publiée non nulle qui diffère reste REFUSÉE. Limite : un champ mis à `null` à la main n'est pas non plus un écart.
+- **`report.md`** : régénéré par `render_report_markdown` depuis le rapport recalculé (entrées et `data` repris du rapport publié) puis comparé ligne à ligne ; tout écart donne REFUSÉ, les lignes
+  fautives sont listées. Par défaut `report.md` à côté de `report.json` (s'il existe) ; `--report-md` en désigne un autre. Un rapport d'un schéma antérieur n'est pas comparé (le rendu actuel a des sections que
+  son Markdown n'avait pas) : « NON VÉRIFIÉ », dit.
+- **Clés dupliquées** : deux lignes pour la même (tâche, bras, rejeu) sont refusées. Le rapport les compterait deux fois et le recalcul aussi, donc aucun écart ne le trahirait.
+- **`cost_known_ratio`** : repris par bras dans le verdict (déjà dans `report.json` depuis B-00). Dans `evals/aggregate.py`, `summarize` publie maintenant
+  `cost_known_runs`, `cost_known_ratio` et `cost_is_lower_bound`, `cost_total` vaut `null` (et non 0.0) sans aucun coût connu, et le critère de coût du verdict A1 rend
+  « NON CALCULABLE » quand l'un des deux bras n'a qu'un coût partiel (deux bornes basses ne se comparent pas).
+- **MDE et n requis** : approximation normale, deux bras de `n` tâches, une tâche = une unité binaire (`pass^k`), alpha 0,05 bilatéral, puissance 0,80.
+  `MDE(n) = (z_{1-α/2} + z_{puissance}) · sqrt((Var_a + Var_b) / n)`, `Var = p(1-p)`. Deux bases toujours côte à côte : **pire cas** (p = 0,5) et **variance observée**
+  sur les deux bras comparés (`--arms`, défaut `nu,kit-gov`). Un taux observé de 0 ou 1 (suite saturée, lot L) donne « NON ESTIMABLE » et non un MDE nul.
+
+  | Base pire cas | Valeur |
+  |---|---|
+  | n requis pour un MDE de 10 points | 393 tâches par bras (310 en unilatéral) |
+  | n requis pour un MDE de 20 points | 99 |
+  | MDE à n = 3 | 114 points : aucun effet détectable |
+  | MDE à n = 20 (taille du banc) | 44 points |
+  | MDE à n = 30 | 36 points |
+
+Limites. L'approximation normale est grossière pour `n` petit (3, 30) ; les tâches sont traitées comme indépendantes et de même difficulté ; la variance observée sur peu de tâches est
+elle-même incertaine ; le seuil de non-infériorité de 5 points (V1) n'a pas son calcul dédié : seul l'écart détectable bilatéral est chiffré. Le hash cité dans le rapport est aussi
+réécrivable que le rapport : il rend la falsification visible à qui compare avec une copie versionnée ou un hash publié ailleurs, il ne la rend pas impossible. Le n requis n'est atteint
+par aucun lot existant (20 tâches) : atteindre 393 tâches par bras n'est pas réaliste sur le polyglotte, et la barrière 3 doit donc re-fixer le MDE visé avant tout run.
+
+## 14. Interventions humaines par tâche vérifiée (B-05)
 
 Le critère V3 du protocole comparatif (charge humaine de `kit-gov` face à `aidlc`) ne se lit jamais dans un champ déclaré par un
 bras : `scripts/bench/human_gates.py` recompte les interventions sur les traces de chaque run, avec la même règle (`human-gates/1`)

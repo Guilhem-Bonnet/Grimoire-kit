@@ -1070,6 +1070,7 @@ def grimoire_host_status(project_path: str = ".") -> str:
             "in_sync": not pending.written and not pending.skipped and not pending.removed,
             "pending": [*pending.written, *pending.removed],
             "conflicts": pending.skipped,
+            "conflict_causes": pending.conflicts,
             "degradations": [d.to_dict() for d in plan.degradations],
             "capability_gaps": [g.surface for g in gaps_for(profile)],
         })

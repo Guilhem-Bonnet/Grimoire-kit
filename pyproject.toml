@@ -236,6 +236,7 @@ pythonpath = ["src"]
 # `perf` (bancs de latence, K13) est hors CI par défaut ; `-m perf` les lance (le dernier `-m` l'emporte).
 addopts = "-q --tb=short -m 'not perf'"
 markers = [
+    "covers(*units, level='unit'): surfaces que le test couvre (cli:flow run, genre:fanout, hook:tool-policy, host:opencode), relevées par scripts/check-surface-coverage.py ; level borné par ce que le fichier permet (D-09)",
     "no_session_token: le test envoie ses écritures sans le jeton de session des serveurs locaux",
     "slow: marks tests as slow (deselect with -m 'not slow')",
     "integration: marks tests requiring external services (network, Ollama, Qdrant)",
