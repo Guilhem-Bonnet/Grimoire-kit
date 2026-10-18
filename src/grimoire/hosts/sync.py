@@ -16,7 +16,7 @@ from typing import Any
 
 from grimoire.hosts import collect
 from grimoire.hosts.detection import enabled_host_ids
-from grimoire.hosts.emitters import apply_plan, emitter_for, supported_hosts
+from grimoire.hosts.emitters import EmitPlan, apply_plans, emitter_for, supported_hosts
 
 __all__ = ["HostSyncOutcome", "sync_host_surfaces"]
 
@@ -48,7 +48,9 @@ def sync_host_surfaces(project_root: Path) -> HostSyncOutcome:
 
     An emitter problem must not fail an otherwise successful install or
     repair, so the failure comes back as data — and is written once to
-    stderr, so that a caller in JSON mode cannot swallow it either.
+    stderr, so that a caller in JSON mode cannot swallow it either. The write
+    is one transaction: on failure ``written`` is empty because nothing was
+    kept, not because nothing was tried.
     """
     out: list[str] = []
     try:
@@ -57,13 +59,17 @@ def sync_host_surfaces(project_root: Path) -> HostSyncOutcome:
         # `hosts.enabled`, ou détectés depuis le dépôt quand la clé est
         # absente — jamais la totalité des hôtes connus par défaut.
         enabled = enabled_host_ids(project_root)
+        plans: list[EmitPlan] = []
         for host_id in supported_hosts():
             if host_id not in enabled:
                 continue
             emitter = emitter_for(host_id)
             if emitter is None:  # pragma: no cover - registry is complete
                 continue
-            out.extend(apply_plan(emitter.plan(surface, project_root), project_root).written)
+            plans.append(emitter.plan(surface, project_root))
+        # Une seule transaction pour tous les hôtes : une panne laisse l'arbre comme il était.
+        for result in apply_plans(plans, project_root):
+            out.extend(result.written)
     except Exception as exc:
         outcome = HostSyncOutcome(tuple(out), f"{type(exc).__name__}: {exc}")
         print(f"[grimoire] {outcome.warning}", file=sys.stderr)

@@ -7,21 +7,29 @@ merges, and the list of things this host cannot do — which the caller can prin
 *Idempotence.* Re-running a sync must be a no-op when nothing changed, so
 ``apply`` compares content before writing and reports what it left alone.
 
-*Ownership.* Generated files carry a marker; only marked files are overwritten.
-A file the user wrote by hand at a managed path is reported as ``skipped``,
-never silently replaced — a host surface the kit rewrites without asking is a
-surface nobody dares customise.
+*Ownership.* Generated files carry a marker and the fingerprint of what was
+emitted; only unmodified marked files are overwritten. A file the user wrote by
+hand at a managed path, or edited after generation, is reported as ``skipped``
+with its cause, never silently replaced — a host surface the kit rewrites
+without asking is a surface nobody dares customise. ``AGENTS.md`` and
+``GEMINI.md`` are shared: the kit owns one delimited block, the rest is the user's.
+
+*Transaction.* Every decision is taken before the first byte is written, and the
+writes are all-or-nothing: a failure part-way restores the tree.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
-from collections.abc import Callable
+import re
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from grimoire.bridges.schemas import HostId
+from grimoire.core.fsio import atomic_write
 from grimoire.hosts.surface import AgentSpec, ProjectSurface, ToolVerb
 
 #: Marker identifying a kit-generated artifact. Present in every managed file.
@@ -72,6 +80,9 @@ class EmittedFile:
     #: présence dans le fichier existant prouve que le kit l'a écrit. Vide,
     #: l'ancien comportement est conservé — le fichier est réécrit sans test.
     owned_if_contains: tuple[str, ...] = ()
+    #: Fichier que l'utilisateur partage avec le kit : le kit n'en possède qu'un
+    #: bloc délimité, le reste est préservé à l'octet près.
+    block: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,9 +121,16 @@ class EmitResult:
     written: list[str] = field(default_factory=list)
     unchanged: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
+    #: Cause de chaque entrée de ``skipped`` : ``edited`` (fichier du kit modifié
+    #: depuis son émission), ``foreign`` (jamais écrit par le kit) ou ``unreadable``.
+    conflicts: dict[str, str] = field(default_factory=dict)
     removed: list[str] = field(default_factory=list)
     degradations: list[Degradation] = field(default_factory=list)
     dry_run: bool = False
+
+    def skip(self, label: str, cause: str) -> None:
+        self.skipped.append(label)
+        self.conflicts[label] = cause
 
     @property
     def ok(self) -> bool:
@@ -125,35 +143,143 @@ class EmitResult:
             "written": list(self.written),
             "unchanged": list(self.unchanged),
             "skipped": list(self.skipped),
+            "conflicts": dict(self.conflicts),
             "removed": list(self.removed),
             "degradations": [d.to_dict() for d in self.degradations],
         }
 
 
-def _is_managed(path: Path) -> bool:
+#: Empreinte posée par le kit à côté du marqueur : ``grimoire:managed sha256=<16 hex>``.
+#: Elle couvre le fichier tel qu'il a été émis, empreinte retirée. Un fichier dont
+#: le corps ne correspond plus a été édité à la main : c'est un conflit, pas un
+#: fichier à réécrire. Un marqueur sans empreinte vient de la version précédente
+#: du kit (avant D-05), qui n'en posait pas : il reste reconnu comme sien et la
+#: première synchronisation le migre sans conflit.
+_STAMP = re.compile(re.escape(MANAGED_MARKER) + r" sha256=([0-9a-f]{16})")
+
+#: Bloc géré d'un fichier que l'utilisateur partage avec le kit (``AGENTS.md``,
+#: ``GEMINI.md``) : tout ce qui est hors des bornes lui appartient.
+BLOCK_BEGIN = "<!-- grimoire:begin sha256={digest} -->"
+BLOCK_END = "<!-- grimoire:end -->"
+#: Les fins de ligne ``\r\n`` sont acceptées : un fichier passé en CRLF par l'éditeur ou par git garde un bloc reconnu.
+_BLOCK = re.compile(
+    r"^<!-- grimoire:begin sha256=([0-9a-f]{16}) -->\r?\n(.*?)\r?\n<!-- grimoire:end -->(?:\r?\n|\Z)",
+    re.DOTALL | re.MULTILINE,
+)
+#: Toute ligne qui ouvre un bloc, qu'il soit bien formé ou non : un ``BEGIN`` sans ``END`` exact est un bloc abîmé.
+_BEGIN_LINE = re.compile(r"^<!-- grimoire:begin\b", re.MULTILINE)
+
+#: Causes d'un conflit, telles que ``host status`` les expose.
+CONFLICT_EDITED = "edited"  # fichier du kit modifié depuis son émission
+CONFLICT_FOREIGN = "foreign"  # fichier que le kit n'a jamais écrit
+CONFLICT_UNREADABLE = "unreadable"  # illisible ou JSON inexploitable : préservé
+
+
+def _digest(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def _unstamped(text: str) -> str:
+    return _STAMP.sub(MANAGED_MARKER, text, count=1)
+
+
+def stamp(content: str) -> str:
+    """*content* avec l'empreinte de son corps posée dans le premier marqueur ; inchangé sans marqueur."""
+    bare = _unstamped(content)
+    if MANAGED_MARKER not in bare:
+        return content
+    return bare.replace(MANAGED_MARKER, f"{MANAGED_MARKER} sha256={_digest(bare)}", 1)
+
+
+def render_block(content: str) -> str:
+    """Bloc délimité et signé qui porte *content* dans un fichier partagé avec l'utilisateur."""
+    body = content.rstrip("\n")
+    return f"{BLOCK_BEGIN.format(digest=_digest(body))}\n{body}\n{BLOCK_END}\n"
+
+
+def _target(path: Path) -> Path:
+    """Fichier réellement écrit pour *path* : la cible d'un lien symbolique, sinon *path*.
+
+    Écrire « à travers » le lien garde le lien en place (``GEMINI.md`` -> ``AGENTS.md``,
+    ``settings.json`` -> un dépôt de dotfiles) ; remplacer le lien par un fichier le casserait.
+    """
+    if not path.is_symlink():
+        return path
     try:
-        head = path.read_text(encoding="utf-8")[:4096]
-    except OSError:
+        return path.resolve()
+    except (OSError, RuntimeError):  # boucle de liens : on laisse l'écriture signaler l'erreur
+        return path
+
+
+def _read(path: Path, overlay: dict[Path, str], *, raw: bool = False) -> str | None:
+    """Contenu courant de *path* (en tenant compte des écritures déjà décidées), ``None`` s'il n'existe pas.
+
+    *raw* garde les fins de ligne telles quelles (fichiers à bloc : le contenu de l'utilisateur
+    se préserve à l'octet près) ; sinon elles sont normalisées en LF.
+
+    Lève ``OSError`` / ``ValueError`` pour un fichier présent mais illisible : l'appelant le préserve.
+    """
+    if path in overlay:
+        return overlay[path]
+    if not path.is_file():
+        return None
+    if raw:
+        with path.open(encoding="utf-8", newline="") as fh:
+            return fh.read()
+    return path.read_text(encoding="utf-8")
+
+
+def _block_body_digest(body: str) -> str:
+    """Empreinte du corps d'un bloc, indépendante du style de fin de ligne du fichier."""
+    return _digest(body.replace("\r\n", "\n"))
+
+
+def _is_legacy_whole_file(text: str) -> bool:
+    """Fichier entier de la version précédente : le marqueur ouvre le fichier et aucun bloc n'y figure."""
+    if _BEGIN_LINE.search(text) is not None:
         return False
-    return MANAGED_MARKER in head
+    first = next((line for line in text.splitlines() if line.strip()), "")
+    return MANAGED_MARKER in first
+
+
+def _file_ownership(text: str, emitted: EmittedFile) -> str | None:
+    """``None`` quand le kit peut réécrire le fichier, sinon la cause du conflit."""
+    head = text[:4096]
+    if emitted.managed:
+        if MANAGED_MARKER not in head:
+            return CONFLICT_FOREIGN
+        found = _STAMP.search(text)
+        if found is None:
+            return None  # version précédente : reconnu par le marqueur seul
+        return None if _digest(_unstamped(text)) == found.group(1) else CONFLICT_EDITED
+    if not emitted.owned_if_contains or any(marker in head for marker in emitted.owned_if_contains):
+        return None
+    return CONFLICT_FOREIGN
+
+
+def _block_ownership(text: str) -> str | None:
+    """Même question pour un fichier à bloc géré ; seul le contenu *du bloc* compte."""
+    found = _BLOCK.search(text)
+    if found is not None:
+        return None if _block_body_digest(found.group(2)) == found.group(1) else CONFLICT_EDITED
+    if _BEGIN_LINE.search(text) is not None:
+        return CONFLICT_EDITED  # un BEGIN sans END exact : bloc abîmé, rien de ce qui suit n'est au kit
+    return None if _is_legacy_whole_file(text) else CONFLICT_FOREIGN
 
 
 def _kit_owns(path: Path, emitted: EmittedFile) -> bool:
-    """Le kit a-t-il écrit le fichier déjà en place ?
-
-    Deux preuves d'appartenance, selon ce que le format autorise : un marqueur
-    en commentaire quand le fichier en accepte un, sinon la commande que le
-    fichier invoque.
-    """
-    if emitted.managed:
-        return _is_managed(path)
-    if not emitted.owned_if_contains:
-        return True
+    """Le kit a-t-il écrit, sans que personne y touche, le fichier déjà en place ?"""
     try:
-        head = path.read_text(encoding="utf-8")[:4096]
-    except OSError:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, ValueError):
         return False
-    return any(marker in head for marker in emitted.owned_if_contains)
+    if not emitted.block:
+        return _file_ownership(text, emitted) is None
+    # Un fichier à bloc n'est « au kit » que s'il n'y a rien d'autre que le bloc : on ne le supprime jamais sinon.
+    found = _BLOCK.fullmatch(text)
+    if found is not None:
+        return _block_body_digest(found.group(2)) == found.group(1)
+    return _is_legacy_whole_file(text)
 
 
 def owned_managed_paths(plan: EmitPlan, project_root: Path) -> list[Path]:
@@ -164,7 +290,8 @@ def owned_managed_paths(plan: EmitPlan, project_root: Path) -> list[Path]:
     que ``plan.files`` (fichiers entiers marqués ou reconnus par contenu) —
     jamais ``plan.merges`` (JSON fusionné, ex. ``settings.json``), qui porte
     aussi la configuration propre du projet et n'est jamais supprimé
-    automatiquement.
+    automatiquement. Un fichier édité à la main, ou un fichier à bloc qui porte
+    du contenu d'utilisateur, n'est pas au kit : on ne le propose pas à la suppression.
     """
     root = project_root.resolve()
     owned: list[Path] = []
@@ -175,68 +302,193 @@ def owned_managed_paths(plan: EmitPlan, project_root: Path) -> list[Path]:
     return owned
 
 
-def apply_plan(plan: EmitPlan, project_root: Path, *, dry_run: bool = False, force: bool = False) -> EmitResult:
-    """Write *plan* into *project_root*, leaving hand-written files alone."""
-    result = EmitResult(host_id=plan.host_id, degradations=list(plan.degradations), dry_run=dry_run)
-    root = project_root.resolve()
+def _decide_block(current: str | None, emitted: EmittedFile, force: bool) -> tuple[str | None, str]:
+    """``(nouveau contenu, verdict)`` pour un fichier à bloc ; verdict : written, unchanged ou une cause de conflit."""
+    block = render_block(emitted.content)
+    if current is None:
+        return block, "written"
+    cause = _block_ownership(current)
+    if cause is not None and not force:
+        return None, cause
+    nl = "\r\n" if "\r\n" in current else "\n"
+    if nl != "\n":  # le bloc suit le style du fichier ; ce qui l'entoure n'est jamais retouché
+        block = block.replace("\n", nl)
+    found = _BLOCK.search(current)
+    if found is not None:  # le bloc seul est remplacé : le reste est à l'utilisateur, même avec --force
+        new = current[: found.start()] + block + current[found.end() :]
+    elif _is_legacy_whole_file(current):  # version précédente : tout le fichier était au kit
+        new = block
+    elif _BEGIN_LINE.search(current) is not None:  # bloc abîmé : même --force ne devine pas où il finit
+        return None, CONFLICT_EDITED
+    else:  # fichier de l'utilisateur, --force : on ajoute le bloc sans rien retirer
+        tail = current.rstrip("\r\n")
+        new = f"{tail}{nl}{nl}{block}" if tail else block
+    return new, "unchanged" if new == current else "written"
 
+
+def _decide_files(
+    plan: EmitPlan, root: Path, result: EmitResult, overlay: dict[Path, str], writes: list[tuple[Path, str]], force: bool
+) -> None:
     for emitted in plan.files:
-        dest = root / emitted.relpath
+        dest = _target(root / emitted.relpath)
         # POSIX form on purpose: a label is an identifier reported to the user
         # and asserted in tests, so it must not change shape with the host OS.
         label = emitted.relpath.as_posix()
-        if dest.is_file():
-            current = dest.read_text(encoding="utf-8")
-            if current == emitted.content:
-                result.unchanged.append(label)
-                continue
-            if not force and not _kit_owns(dest, emitted):
-                result.skipped.append(label)
-                continue
-        if not dry_run:
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_text(emitted.content, encoding="utf-8")
-        result.written.append(label)
+        try:
+            current = _read(dest, overlay, raw=emitted.block)
+        except (OSError, ValueError):
+            result.skip(label, CONFLICT_UNREADABLE)
+            continue
+        if emitted.block:
+            new, verdict = _decide_block(current, emitted, force)
+        else:
+            new, verdict = stamp(emitted.content), "written"
+            if current == new:
+                verdict = "unchanged"
+            elif current is not None and not force:
+                cause = _file_ownership(current, emitted)
+                if cause is not None:
+                    new, verdict = None, cause
+        if new is None:
+            result.skip(label, verdict)
+        elif verdict == "unchanged":
+            result.unchanged.append(label)
+        else:
+            overlay[dest] = new
+            writes.append((dest, new))
+            result.written.append(label)
 
+
+def _decide_merges(
+    plan: EmitPlan, root: Path, result: EmitResult, overlay: dict[Path, str], writes: list[tuple[Path, str]]
+) -> None:
     for merge in plan.merges:
-        dest = root / merge.relpath
+        dest = _target(root / merge.relpath)
         label = merge.label or merge.relpath.as_posix()
-        existing: dict[str, Any] = {}
-        if dest.is_file():
-            try:
-                loaded = json.loads(dest.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                result.skipped.append(f"{label} (JSON illisible — fichier préservé)")
-                continue
-            if not isinstance(loaded, dict):
-                result.skipped.append(f"{label} (racine JSON inattendue — fichier préservé)")
-                continue
-            existing = loaded
-        merged = merge.merge(json.loads(json.dumps(existing)))
+        try:
+            text = _read(dest, overlay)
+            loaded = json.loads(text) if text is not None else {}
+        except (OSError, ValueError):
+            result.skip(f"{label} (JSON illisible — fichier préservé)", CONFLICT_UNREADABLE)
+            continue
+        if not isinstance(loaded, dict):
+            result.skip(f"{label} (racine JSON inattendue — fichier préservé)", CONFLICT_UNREADABLE)
+            continue
+        merged = merge.merge(json.loads(json.dumps(loaded)))
         rendered = json.dumps(merged, indent=2, ensure_ascii=False) + "\n"
-        if dest.is_file() and dest.read_text(encoding="utf-8") == rendered:
+        if text is not None and text == rendered:
             result.unchanged.append(label)
             continue
-        if not dry_run:
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_text(rendered, encoding="utf-8")
+        overlay[dest] = rendered
+        writes.append((dest, rendered))
         result.written.append(label)
 
-    _remove_stale(plan, root, result, dry_run=dry_run)
-    return result
+
+def _is_managed(path: Path) -> bool:
+    try:
+        head = path.read_text(encoding="utf-8")[:4096]
+    except (OSError, ValueError):
+        return False
+    return MANAGED_MARKER in head
 
 
-def _remove_stale(plan: EmitPlan, root: Path, result: EmitResult, *, dry_run: bool) -> None:
-    """Retirer les fichiers marqués que ``plan.owned_globs`` désigne et que le plan n'émet plus."""
+def _stale_files(plan: EmitPlan, root: Path) -> list[Path]:
+    """Fichiers marqués que ``plan.owned_globs`` désigne et que le plan n'émet plus (jamais un fichier sans marqueur)."""
     planned = {f.relpath.as_posix() for f in plan.files}
+    stale: list[Path] = []
     for pattern in plan.owned_globs:
-        for stale in sorted(root.glob(pattern)):
-            label = stale.relative_to(root).as_posix()
-            if label in planned or stale.is_symlink() or not stale.is_file() or not _is_managed(stale):
+        for path in sorted(root.glob(pattern)):
+            label = path.relative_to(root).as_posix()
+            if label in planned or path.is_symlink() or not path.is_file() or not _is_managed(path):
                 continue
-            if not dry_run:
-                stale.unlink()
-            result.removed.append(label)
+            stale.append(path)
+    return stale
+
+
+def _missing_dirs(parent: Path) -> list[Path]:
+    """Dossiers à créer pour que *parent* existe, du plus profond au plus proche de la racine."""
+    missing: list[Path] = []
+    while not parent.exists() and parent != parent.parent:
+        missing.append(parent)
+        parent = parent.parent
+    return missing
+
+
+def _rollback(originals: dict[Path, bytes | None], made_dirs: list[Path], failure: BaseException) -> None:
+    """Remet l'arbre dans son état initial ; ce qui ne se laisse pas défaire s'attache à *failure*."""
+    for dest, original in originals.items():
+        try:
+            if original is None:
+                dest.unlink(missing_ok=True)
+            else:
+                atomic_write(dest, original)
+        except OSError as exc:
+            failure.add_note(f"retour arrière de {dest} impossible ({exc}) : à vérifier à la main")
+    for directory in sorted(set(made_dirs), key=lambda d: len(d.parts), reverse=True):
+        try:
+            directory.rmdir()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            failure.add_note(f"dossier {directory} non retiré ({exc})")
+
+
+def _commit(writes: list[tuple[Path, str]]) -> None:
+    """Applique toutes les écritures, ou aucune : la première panne défait ce qui a été fait, puis se propage."""
+    originals: dict[Path, bytes | None] = {}
+    made_dirs: list[Path] = []
+    try:
+        for dest, text in writes:
+            original = dest.read_bytes() if dest.is_file() else None
+            missing = _missing_dirs(dest.parent)
+            made_dirs.extend(missing)
+            if missing:
+                dest.parent.mkdir(parents=True, exist_ok=True)
+            originals.setdefault(dest, original)
+            atomic_write(dest, text)
+    except BaseException as exc:
+        _rollback(originals, made_dirs, exc)
+        raise
+
+
+def apply_plans(
+    plans: Sequence[EmitPlan], project_root: Path, *, dry_run: bool = False, force: bool = False
+) -> list[EmitResult]:
+    """Write every plan into *project_root* as one transaction, leaving hand-written files alone.
+
+    Deux temps. D'abord on décide tout sans rien écrire (un plan voit les
+    écritures déjà décidées par les précédents) ; puis on écrit, fichier par
+    fichier de façon atomique. Une panne en cours de route — au troisième
+    fichier, dans le dernier hôte — rétablit l'arbre tel qu'il était, hôtes
+    précédents compris, puis se propage.
+
+    Limite : la transaction vit en mémoire. Un processus tué en pleine écriture
+    laisse les fichiers déjà remplacés ; chacun est entier (écriture atomique),
+    mais l'ensemble n'est pas rétabli.
+    """
+    root = project_root.resolve()
+    overlay: dict[Path, str] = {}
+    writes: list[tuple[Path, str]] = []
+    stale: list[Path] = []
+    results: list[EmitResult] = []
+    for plan in plans:
+        result = EmitResult(host_id=plan.host_id, degradations=list(plan.degradations), dry_run=dry_run)
+        _decide_files(plan, root, result, overlay, writes, force)
+        _decide_merges(plan, root, result, overlay, writes)
+        for path in _stale_files(plan, root):
+            result.removed.append(path.relative_to(root).as_posix())
+            stale.append(path)
+        results.append(result)
+    if not dry_run:
+        _commit(writes)
+        for path in stale:
+            path.unlink(missing_ok=True)
+    return results
+
+
+def apply_plan(plan: EmitPlan, project_root: Path, *, dry_run: bool = False, force: bool = False) -> EmitResult:
+    """Write *plan* into *project_root*, leaving hand-written files alone (see :func:`apply_plans`)."""
+    return apply_plans([plan], project_root, dry_run=dry_run, force=force)[0]
 
 
 class Emitter:

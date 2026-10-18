@@ -17,6 +17,13 @@ from typer.testing import CliRunner
 
 from grimoire.cli.app import app
 
+pytestmark = pytest.mark.covers(
+    "cli:providers audit",
+    "cli:providers cooldown",
+    "cli:providers history",
+    "cli:providers status",
+)
+
 runner = CliRunner()
 STANDARD = Path("_grimoire/standard")
 REGISTRY_PATH = STANDARD / "llm-provider-registry.yaml"

@@ -209,6 +209,13 @@ def task_add(
         list[str] | None,
         typer.Option("--file", help="Fichier que la tâche touchera (répétable) ; `task waves` signale ceux que deux tâches parallèles partagent."),
     ] = None,
+    test_depth: Annotated[
+        str,
+        typer.Option(
+            "--test-depth",
+            help="Profondeur de test exigée à la fermeture : floor, standard, strict, ou auto (celle de `ceremony suggest`).",
+        ),
+    ] = "",
     project_root: _PROJECT_ROOT = Path(),
     ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
     actor: _ACTOR = "cli",
@@ -225,12 +232,16 @@ def task_add(
     from grimoire.missions.service import TaskRefusedError
 
     service = _service(project_root, ledger_root)
+    checks = tuple(TaskCheck(cmd=c) for c in (check or ()) if c.strip())
+    if test_depth == "auto":
+        test_depth = _auto_test_depth(project_root, title, tuple(acceptance), tuple(evidence or ()), bool(checks))
     try:
         added = service.add(
             title, tuple(acceptance), mission_id=mission, owner=owner,
             expected_evidence=tuple(evidence or ()), actor=actor, ready=ready,
             checks=tuple(TaskCheck(cmd=c) for c in (check or ()) if c.strip()),
             files=tuple(files or ()),
+            test_depth=test_depth,
         )
     except TaskRefusedError as refused:
         _refuse(ctx, refused)
@@ -243,6 +254,24 @@ def task_add(
     if added.mission_created:
         console.print(f"[dim]Mission créée : {added.mission_id} (aucune n'existait).[/dim]")
     _emit_task(ctx, added.task, added.task.status.value)
+
+
+def _auto_test_depth(
+    project_root: Path, title: str, acceptance: tuple[str, ...], evidence: tuple[str, ...], has_checks: bool,
+) -> str:
+    """La profondeur de la route que `ceremony suggest` calcule pour cette tâche (W6-01).
+
+    Les fichiers touchés ne sont pas connus à la création : la route ne descend
+    pas sous `checked`, donc jamais sous `standard`.
+    """
+    from grimoire.core.execution_needs import resolve_need
+    from grimoire.missions.ceremony import inputs_for, suggest
+
+    inputs = inputs_for(
+        title=title, acceptance=acceptance, expected_evidence=evidence, has_checks=has_checks, files=None,
+        test_runner=resolve_need("test-runner", project_root.resolve()).command, impact_files=None,
+    )
+    return suggest(inputs).route.test_depth.value
 
 
 @task_app.command("list")
@@ -537,26 +566,7 @@ def task_renew(
     _emit_task(ctx, task, f"bail renouvelé, epoch {claim.lease_epoch}, plafond {claim.expires_at or '-'}" if claim else "")
 
 
-@task_app.command("note")
-def task_note(
-    ctx: typer.Context,
-    task_id: Annotated[str, typer.Argument()],
-    text: Annotated[str, typer.Argument(help="Ce qui vient d'avancer (une phrase).")],
-    project_root: _PROJECT_ROOT = Path(),
-    ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
-    actor: _ACTOR = "cli",
-) -> None:
-    """Note une progression sur une tâche tenue : c'est ce qui évite l'alerte « vivant, sans progression »."""
-    from grimoire.core.exceptions import GrimoireError
-
-    service = _service(project_root, ledger_root)
-    _require_task(service, task_id)
-    try:
-        task = service.note_progress(task_id, text, actor)
-    except GrimoireError as exc:
-        console.print(f"[red]✗[/red] {exc}")
-        raise typer.Exit(1) from exc
-    _emit_task(ctx, task, "progression notée")
+# `task note` est défini et enregistré dans cmd_task_waiting.
 
 
 @task_app.command("reap")

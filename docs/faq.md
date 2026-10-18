@@ -1,3 +1,7 @@
+---
+audience: utilisateur
+---
+
 # FAQ
 
 Questions fréquemment posées sur Grimoire Kit.

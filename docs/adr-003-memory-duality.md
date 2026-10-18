@@ -1,3 +1,7 @@
+---
+audience: décision
+---
+
 # ADR-003 — Dualité mémoire : SDK maintenu, framework/memory en maintenance
 
 - **Statut** : accepté (2026-07-02)

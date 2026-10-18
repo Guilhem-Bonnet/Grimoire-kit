@@ -64,6 +64,7 @@ WRITE_ALLOWLIST: dict[str, dict[str, set[str]]] = {
     "cleanup-branches.yml": {WORKFLOW_SCOPE: {"contents"}},  # supprime la branche fusionnée
     "docs.yml": {"deploy": {"pages", "id-token"}},  # déploiement GitHub Pages (OIDC)
     "publish.yml": {  # voie de release unique : PyPI (OIDC) puis release GitHub
+        "attest": {"id-token", "attestations"},  # signature Sigstore + dépôt de l'attestation
         "publish-pypi": {"id-token"},
         "github-release": {"contents"},
     },

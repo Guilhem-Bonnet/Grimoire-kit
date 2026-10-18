@@ -1,0 +1,149 @@
+# Budget de cérémonie des routes de tâche (W6-01).
+#
+# Vérifié en CI par `grimoire ceremony budget --file evals/ceremony-budget.yaml`
+# (job « mypy --strict » de ci-sdk.yml) et par tests/unit/missions/test_ceremony_budget.py.
+# Tout écart fait échouer le contrôle :
+#   - une route qui coûte plus que son budget (étapes, tours humains) ou change de profondeur ;
+#   - un seuil du code (grimoire.missions.ceremony.INDICES) que ce fichier ne recopie pas à l'identique ;
+#   - une tâche type du corpus dont la route calculée diffère de la route figée ;
+#   - un corpus qui dépasse ses plafonds ;
+#   - une calibration faite plus de 2 versions mineures avant la version du kit.
+#
+# Aucun seuil n'est calibré sur des runs réels : `calibrated: false` partout. Le corpus fige le
+# comportement, il ne prouve pas que les seuils sont justes.
+$schema: "grimoire-ceremony-budget/v1"
+
+calibration:
+  calibrated: false
+  as_of: "2026-10-18"
+  kit_version: "3.62"
+  method: "seuils posés à la main et rejoués sur le corpus ci-dessous ; aucun ajustement sur des runs réels"
+
+indices:
+  files_wide: {value: 10, calibrated: false, as_of: "2026-10-18"}
+  impact_wide: {value: 20, calibrated: false, as_of: "2026-10-18"}
+
+routes:
+  express: {max_steps: 1, max_human_turns: 0, test_depth: floor}
+  checked: {max_steps: 2, max_human_turns: 0, test_depth: standard}
+  reviewed: {max_steps: 3, max_human_turns: 1, test_depth: standard}
+  guarded: {max_steps: 4, max_human_turns: 2, test_depth: strict}
+  session: {max_steps: 4, max_human_turns: 3, test_depth: strict}
+
+corpus_budget:
+  # Somme des tours humains des routes calculées sur le corpus.
+  max_human_turns: 10
+  max_per_route:
+    guarded: 3
+    session: 1
+
+corpus:
+  - id: T01-doc-typo
+    title: "Corriger une coquille dans le README"
+    acceptance: ["le lint passe"]
+    checks: ["markdownlint README.md"]
+    files: ["README.md"]
+    test_runner: null
+    impact_files: null
+    expect: {route: express, test_depth: floor}
+
+  - id: T02-small-fix-with-test
+    title: "Fix off-by-one in the pagination helper"
+    acceptance: ["`pytest tests/unit/test_pagination.py` passe"]
+    checks: ["pytest tests/unit/test_pagination.py"]
+    files: ["src/app/pagination.py", "tests/unit/test_pagination.py"]
+    test_runner: "pytest"
+    impact_files: 3
+    expect: {route: express, test_depth: floor}
+
+  - id: T03-fix-without-command
+    title: "Fix off-by-one in the pagination helper"
+    acceptance: ["les tests passent"]
+    checks: []
+    files: ["src/app/pagination.py"]
+    test_runner: "pytest"
+    impact_files: 3
+    expect: {route: checked, test_depth: standard}
+
+  - id: T04-wide-refactor
+    title: "Refactor the parser module"
+    acceptance: ["`pytest tests/unit` passe"]
+    checks: ["pytest tests/unit"]
+    files: ["src/app/parser/a.py", "src/app/parser/b.py", "src/app/parser/c.py", "src/app/parser/d.py",
+            "src/app/parser/e.py", "src/app/parser/f.py", "src/app/parser/g.py", "src/app/parser/h.py",
+            "src/app/parser/i.py", "src/app/parser/j.py", "src/app/parser/k.py", "tests/unit/test_parser.py"]
+    test_runner: "pytest"
+    impact_files: 8
+    expect: {route: checked, test_depth: standard}
+
+  - id: T05-high-fan-in
+    title: "Change the return type of the config loader"
+    acceptance: ["`pytest tests/unit` passe"]
+    checks: ["pytest tests/unit"]
+    files: ["src/app/config.py", "tests/unit/test_config.py"]
+    test_runner: "pytest"
+    impact_files: 35
+    expect: {route: checked, test_depth: standard}
+
+  - id: T06-files-unknown
+    title: "Fix the date parser for leap years"
+    acceptance: ["`pytest tests/unit/test_dates.py` passe"]
+    checks: ["pytest tests/unit/test_dates.py"]
+    files: null
+    test_runner: "pytest"
+    impact_files: null
+    expect: {route: checked, test_depth: standard}
+
+  - id: T07-agent-review
+    title: "Clarifier les messages d'erreur du loader"
+    acceptance: ["revue par un agent"]
+    checks: []
+    files: ["src/app/loader.py"]
+    test_runner: "pytest"
+    impact_files: 2
+    expect: {route: checked, test_depth: standard}
+
+  - id: T08-destructive-migration
+    title: "Migrate and delete the legacy tables"
+    acceptance: ["`pytest tests/integration` passe"]
+    checks: ["pytest tests/integration"]
+    files: ["src/app/storage.py"]
+    test_runner: "pytest"
+    impact_files: 4
+    expect: {route: reviewed, test_depth: standard}
+
+  - id: T09-secret-rotation
+    title: "Rotate the API key of the deploy pipeline"
+    acceptance: ["`pytest tests/unit/test_deploy.py` passe"]
+    checks: ["pytest tests/unit/test_deploy.py"]
+    files: ["src/app/deploy.py"]
+    test_runner: "pytest"
+    impact_files: 1
+    expect: {route: guarded, test_depth: strict}
+
+  - id: T10-ci-workflow
+    title: "Update the cache step of the CI"
+    acceptance: ["le lint passe"]
+    checks: ["yamllint .github/workflows/ci.yml"]
+    files: [".github/workflows/ci.yml"]
+    test_runner: "pytest"
+    impact_files: null
+    expect: {route: guarded, test_depth: strict}
+
+  - id: T11-db-migration-file
+    title: "Add an index on the orders table"
+    acceptance: ["`pytest tests/integration/test_orders.py` passe"]
+    checks: ["pytest tests/integration/test_orders.py"]
+    files: ["app/migrations/0042_orders_index.py"]
+    test_runner: "pytest"
+    impact_files: 0
+    expect: {route: guarded, test_depth: strict}
+
+  - id: T12-design
+    title: "Concevoir l'architecture du cache"
+    acceptance: ["l'API est élégante"]
+    checks: []
+    files: null
+    test_runner: "pytest"
+    impact_files: null
+    expect: {route: session, test_depth: strict}

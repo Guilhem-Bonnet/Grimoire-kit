@@ -1,3 +1,7 @@
+---
+audience: utilisateur
+---
+
 # Mode local : `grimoire serve` et les blueprints
 
 ```bash

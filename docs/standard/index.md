@@ -1,3 +1,7 @@
+---
+audience: utilisateur
+---
+
 # Le standard agentique
 
 Le standard agentique est la **norme que le kit applique** : un ensemble de

@@ -1,3 +1,7 @@
+---
+audience: utilisateur
+---
+
 # Installation par besoins
 
 Grimoire Kit propose une **installation custom pilotée par les besoins** : vous

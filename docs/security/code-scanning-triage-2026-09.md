@@ -1,3 +1,7 @@
+---
+audience: décision
+---
+
 # Triage code scanning — 2026-09
 
 Phase 2 « nettoyage et surcoût » du plan produit 2026-Q4, épic #552. Constat de

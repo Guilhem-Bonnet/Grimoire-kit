@@ -1,3 +1,7 @@
+---
+audience: décision
+---
+
 <p align="right"><a href="../../README.md">README</a> · <a href="../../CHANGELOG.md">Changelog</a> · <a href="../index.md">Docs</a></p>
 
 # <img src="../assets/icons/microscope.svg" width="32" height="32" alt=""> Idées à récolter — instruction et verdict (2026-09)

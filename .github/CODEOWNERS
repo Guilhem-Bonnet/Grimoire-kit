@@ -26,6 +26,7 @@ framework/memory/                    @Guilhem-Bonnet
 .github/workflows/              @Guilhem-Bonnet
 .github/CODEOWNERS              @Guilhem-Bonnet
 scripts/check-regression-on-base.py  @Guilhem-Bonnet
+scripts/check-surface-coverage.py    @Guilhem-Bonnet
 
 # ── Documentation ─────────────────────────────────────────────────────────────
 docs/                           @Guilhem-Bonnet

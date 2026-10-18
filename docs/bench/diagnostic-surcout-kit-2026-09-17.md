@@ -1,3 +1,7 @@
+---
+audience: décision
+---
+
 <p align="right"><a href="../../README.md">README</a> · <a href="../../CHANGELOG.md">Changelog</a> · <a href="../index.md">Docs</a></p>
 
 # <img src="../assets/icons/microscope.svg" width="32" height="32" alt=""> Diagnostic du surcoût kit — banc à trois bras 2026-09-17
