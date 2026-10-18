@@ -28,8 +28,38 @@ _ONLINE_OPTION = typer.Option(
 _JSON_OPTION = typer.Option("--json", help="Sortie JSON.")
 
 
+def _verify_preview(version: str) -> trust.Verdict:
+    """Pré-version : elle n'existe que sur GitHub (``publish.yml`` ne l'envoie pas à PyPI)."""
+    from grimoire.tools import update_channels as channels
+
+    opener = urllib.request.urlopen
+    try:
+        with opener(channels.releases_url(), timeout=10) as resp:
+            listing = channels.releases_payload(resp.read())
+    except Exception as exc:
+        raise trust.TrustError(f"GitHub injoignable ({type(exc).__name__})") from None
+    release = channels.select_preview(listing, version)
+    if release is None:
+        raise trust.TrustError(f"aucune release GitHub de pré-version {version} avec sa wheel")
+    with tempfile.TemporaryDirectory(prefix="grimoire-verify-") as scratch:
+        wheel = trust.download_wheel(release.wheel, Path(scratch), opener)
+        sums = trust.fetch_sums(release.version, opener, tag=release.tag)
+        published = trust.check_release_wheel(wheel, version=release.version, sums=sums)
+        gaps = trust.same_as_wheel(wheel)
+    if gaps:
+        return trust.Verdict("modified", "l'installation diffère de la wheel publiée", gaps[:20])
+    return trust.Verdict(published.level, f"installation identique à la wheel publiée ; {published.detail}")
+
+
 def _verify_online(version: str) -> trust.Verdict:
     """Chaîne complète pour *version* ; :class:`trust.TrustError` si un maillon casse."""
+    from packaging.version import InvalidVersion, Version
+
+    try:
+        if Version(version).is_prerelease:
+            return _verify_preview(version)
+    except InvalidVersion:
+        pass  # illisible : la voie PyPI la refusera avec son propre message
     opener = urllib.request.urlopen
     try:
         with opener(f"https://pypi.org/pypi/{trust.DIST_NAME}/{version}/json", timeout=10) as resp:

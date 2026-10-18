@@ -65,3 +65,55 @@ class FakeRelease:
                 raise HTTPError(url, self.sums, "Server Error", {}, None)  # type: ignore[arg-type]
             return _Response(self.sums.encode())
         raise AssertionError(f"URL inattendue : {url}")
+
+
+class FakeGithub(FakeRelease):
+    """``FakeRelease`` (PyPI : une version stable) + les releases GitHub avec une pré-version.
+
+    Une pré-version n'existe que sur GitHub (``publish.yml`` ne l'envoie pas à PyPI) : tag
+    ``v3.64.0-rc1``, wheel nommée ``3.64.0rc1`` (PEP 440), ``SHA256SUMS`` à côté.
+    """
+
+    API = "https://api.github.com/repos/Guilhem-Bonnet/Grimoire-kit/releases?per_page=30"
+
+    def __init__(
+        self,
+        *,
+        stable: str = "3.62.0",
+        tag: str = "v3.64.0-rc1",
+        pre_wheel: bytes = b"rc-wheel",
+        pre_served: bytes | None = None,
+        pre_sums: str | int | None = "auto",
+        prerelease: bool = True,
+        draft: bool = False,
+        asset_url: str | None = None,
+        **kw: Any,
+    ) -> None:
+        super().__init__(version=stable, **kw)
+        self.tag = tag
+        number = tag.removeprefix("v").replace("-rc", "rc")
+        self.rc_name = f"grimoire_kit-{number}-py3-none-any.whl"
+        self.rc_url = asset_url or f"https://github.com/Guilhem-Bonnet/Grimoire-kit/releases/download/{tag}/{self.rc_name}"
+        self.rc_served = pre_wheel if pre_served is None else pre_served
+        self.rc_sums = f"{sha(pre_wheel)}  {self.rc_name}\n" if pre_sums == "auto" else pre_sums
+        self.prerelease, self.draft = prerelease, draft
+
+    def listing(self) -> list[dict[str, Any]]:
+        asset = {"name": self.rc_name, "browser_download_url": self.rc_url}
+        return [{"tag_name": self.tag, "draft": self.draft, "prerelease": self.prerelease, "assets": [asset]}]
+
+    def __call__(self, url: str, timeout: float | None = None) -> _Response:
+        if url == self.API:
+            self.requested.append(url)
+            return _Response(json.dumps(self.listing()).encode())
+        if url == self.rc_url:
+            self.requested.append(url)
+            return _Response(self.rc_served)
+        if url == f"https://github.com/Guilhem-Bonnet/Grimoire-kit/releases/download/{self.tag}/SHA256SUMS":
+            self.requested.append(url)
+            if self.rc_sums is None:
+                raise HTTPError(url, 404, "Not Found", {}, None)  # type: ignore[arg-type]
+            if isinstance(self.rc_sums, int):
+                raise HTTPError(url, self.rc_sums, "Server Error", {}, None)  # type: ignore[arg-type]
+            return _Response(self.rc_sums.encode())
+        return super().__call__(url, timeout)

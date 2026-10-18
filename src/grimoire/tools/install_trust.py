@@ -16,6 +16,9 @@ Trois questions, trois réponses qui échouent fermées :
 
 Niveaux de confiance (``trust_level``), du plus fort au plus faible :
 ``verified`` (chaîne complète), ``pypi-only`` (PyPI seul, release sans somme),
+``release-only`` (pré-version GitHub : le ``SHA256SUMS`` de la release seul, PyPI
+n'a pas la pré-version), ``bundle`` (bundle hors ligne : le ``SHA256SUMS`` livré
+avec la wheel, aucune source indépendante consultée),
 ``intact`` (fichiers conformes à leur ``RECORD``, provenance non vérifiée),
 ``dev`` (installation éditable : rien à attester), ``unknown`` (pas de
 ``RECORD``), ``modified`` (au moins un fichier diffère : refus).
@@ -157,19 +160,47 @@ def check_wheel(
     return Verdict("verified", f"empreinte conforme à PyPI et à {SUMS_NAME} de la release v{version}")
 
 
+def check_release_wheel(wheel: Path, *, version: str, sums: dict[str, str] | None) -> Verdict:
+    """Pré-version GitHub : la wheel doit figurer, intacte, dans le ``SHA256SUMS`` de sa release.
+
+    PyPI n'a pas cette version : il n'y a qu'une source. Sans ``SHA256SUMS`` il n'y a
+    donc plus rien à confronter, et il n'existe pas d'exception pour « version trop
+    ancienne » (``sums_required`` ne vaut que pour la voie PyPI).
+    """
+    if sums is None:
+        raise TrustError(f"la pré-version v{version} ne publie pas {SUMS_NAME} : aucune empreinte à confronter")
+    expected = sums.get(wheel.name)
+    if expected is None:
+        raise TrustError(f"{wheel.name} n'est pas dans {SUMS_NAME} de la release v{version}")
+    actual = sha256_file(wheel)
+    if expected != actual:
+        raise TrustError(
+            f"{wheel.name} : l'empreinte du fichier reçu ({actual[:16]}...) diffère de {SUMS_NAME} "
+            f"({expected[:16]}...)"
+        )
+    return Verdict(
+        "release-only",
+        f"empreinte conforme à {SUMS_NAME} de la pré-version v{version} ; PyPI n'a pas cette version, une seule source",
+    )
+
+
 # ── Réseau (injectable) ───────────────────────────────────────────────────────
 
 Opener = Callable[..., Any]
 
 
-def sums_url(version: str) -> str:
-    return f"https://github.com/{REPO}/releases/download/v{version}/{SUMS_NAME}"
+def sums_url(version: str, tag: str | None = None) -> str:
+    return f"https://github.com/{REPO}/releases/download/{tag or f'v{version}'}/{SUMS_NAME}"
 
 
-def fetch_sums(version: str, opener: Opener) -> dict[str, str] | None:
-    """``SHA256SUMS`` de la release, ou ``None`` si elle n'existe pas (404). Toute autre panne refuse."""
+def fetch_sums(version: str, opener: Opener, *, tag: str | None = None) -> dict[str, str] | None:
+    """``SHA256SUMS`` de la release, ou ``None`` si elle n'existe pas (404). Toute autre panne refuse.
+
+    *tag* : tag exact de la release quand il n'est pas ``v<version>`` (une pré-version
+    est taguée ``v3.64.0-rc1`` alors que PEP 440 la nomme ``3.64.0rc1``).
+    """
     try:
-        with opener(sums_url(version), timeout=15) as resp:
+        with opener(sums_url(version, tag), timeout=15) as resp:
             body = resp.read()
     except HTTPError as exc:
         if exc.code == 404:
