@@ -216,6 +216,24 @@ def _proposals_status_line(project_root: Path) -> str:
         return ""
 
 
+def _decisions_line(project_root: Path) -> str:
+    """One-line pointer to the decisions waiting for a human, for session start (K6, issue #771).
+
+    A question the agent asked is a task parked as ``waiting(human)``: the next session on the
+    project should learn that someone is still owed an answer, not discover it in the cockpit.
+    Silent at zero, and silent when the ledger cannot be read — best-effort like every other line.
+    """
+    try:
+        from grimoire.missions.decisions import decisions_summary
+
+        summary = decisions_summary(project_root)
+    except Exception:
+        return ""
+    if not summary["count"]:
+        return ""
+    return f"{summary['line']} — voir le cockpit ou `grimoire task decisions`"
+
+
 def _reset_temporal_session(hook: HookInput) -> None:
     """Drop the previous temporal-policy session state, if any (issue #429, point 3).
 
@@ -396,6 +414,7 @@ def decide_activation(hook: HookInput) -> Decision:
     steering, steering_detail = _steering(hook, task_id)
     providers_line = _providers_status_line(hook.project_root)
     proposals_line = _proposals_status_line(hook.project_root)
+    decisions_line = _decisions_line(hook.project_root)
     context = "\n".join(
         part
         for part in (
@@ -408,6 +427,7 @@ def decide_activation(hook: HookInput) -> Decision:
             directive,
             providers_line,
             proposals_line,
+            decisions_line,
         )
         if part
     )

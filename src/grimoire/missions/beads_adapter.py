@@ -19,6 +19,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from grimoire.core.exceptions import GrimoireMissionError
 from grimoire.missions.ledger import MissionLedger
 from grimoire.missions.schemas import DependencyKind, MissionState, TaskDependency, TaskType
 
@@ -193,18 +194,11 @@ def import_beads_jsonl(
         new_dep = TaskDependency(kind=dep_kind, target=target_id)
         if new_dep in source_task.dependencies:
             continue  # already linked — idempotent
-        ledger._append_event(
-            "task.dependency.added",
-            source_id,
-            "task",
-            actor_id,
-            {
-                "task_id": source_id,
-                "dependency": new_dep.to_dict(),
-                "beads_source": source_beads,
-                "beads_target": target_beads,
-            },
-        )
+        try:
+            ledger.link_tasks(source_id, target_id, dep_kind, actor_id=actor_id)
+        except GrimoireMissionError as exc:
+            report.errors.append(f"Dependency {source_beads}→{target_beads}: {exc}")
+            continue
         report.dependencies_linked += 1
 
     # Third pass: comments → ledger events (provenance)
