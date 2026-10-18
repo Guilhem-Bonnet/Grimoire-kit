@@ -44,6 +44,7 @@ from typing import TYPE_CHECKING, Any
 
 from grimoire.core.fsio import atomic_write
 from grimoire.missions.lease import parse_instant
+from grimoire.missions.ledger_rules import parse_jsonl
 from grimoire.missions.schemas import LedgerEvent, Mission, MissionTask
 
 if TYPE_CHECKING:
@@ -196,16 +197,9 @@ def all_events(ledger: MissionLedger) -> list[LedgerEvent]:
     """Tous les événements du journal : ceux que l'instantané couvre sont relus à la demande, une fois."""
     cover = ledger._snapshot
     if cover is not None and cover.offset > 0:
-        prefix = ledger._events_path.read_bytes()[: cover.offset].decode("utf-8")
-        covered: list[LedgerEvent] = []
-        for line in prefix.splitlines():
-            if not line.strip():
-                continue
-            try:
-                raw = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            covered.append(LedgerEvent.from_dict(raw))
+        # Même découpage que le rejeu (``\n`` seul, une ligne illisible sautée) : un U+2028 brut reste dans sa ligne (K12 x K13).
+        records, _ = parse_jsonl(ledger._events_path.read_bytes()[: cover.offset])
+        covered = [LedgerEvent.from_dict(raw) for raw in records]
         ledger._events = [*covered, *ledger._events]
         ledger._snapshot = Cover(0, cover.latest)
     return ledger._events
