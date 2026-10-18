@@ -43,6 +43,7 @@ HOST_DIRS: dict[HostId, str] = {
     HostId.CODEX: "codex",
     HostId.CURSOR: "cursor",
     HostId.GEMINI_CLI: "gemini",
+    HostId.OPENCODE: "opencode",
 }
 
 
@@ -103,6 +104,7 @@ class TestNoFixtureMeansFalse:
     def test_hosts_without_a_capture_are_not_fenced(self) -> None:
         for host in (HostId.GITHUB_COPILOT, HostId.CODEX, HostId.CURSOR, HostId.GEMINI_CLI, HostId.UNKNOWN):
             assert is_fenced(host, "2.1.301") is False, host
+            assert is_fenced(host, "1.17.11") is False, host
             assert is_fenced(host, None) is False, host
 
     def test_unknown_host_has_no_verified_capability(self) -> None:
