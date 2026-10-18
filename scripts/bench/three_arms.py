@@ -65,6 +65,7 @@ from model_pin import (
     saturation_exit_code,
     selection_pin,
 )
+from recompute import data_seal, render_seal_lines
 from results_io import read_results_rows
 from task_repo import (
     ContaminatedTaskRepoError,
@@ -1944,6 +1945,7 @@ def render_report_markdown(report: dict[str, Any]) -> str:
         lines.append("")
 
     lines.extend(render_pin_lines(report))
+    lines.extend(render_seal_lines(report))
 
     auth_modes = report.get("auth_modes") or []
     if auth_modes:
@@ -2101,6 +2103,7 @@ def write_report(
     rerun_arms: Sequence[str] | None = None,
     label: str | None = None,
     toolchain_check: dict[str, Any] | None = None,
+    results_path: Path | None = None,
 ) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     report = build_report(
@@ -2112,6 +2115,8 @@ def write_report(
         label=label,
         toolchain_check=toolchain_check,
     )
+    if results_path is not None:  # B-02 : le rapport cite le hash de ses données brutes
+        report = {**report, "data": data_seal(results_path)}
     (out_dir / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     (out_dir / "report.md").write_text(render_report_markdown(report), encoding="utf-8")
 
@@ -2419,6 +2424,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             rerun_arms=selected_arms,
             label=args.label,
             toolchain_check=toolchain_check,
+            results_path=results_path,
         )
         saturation_rc = saturation_exit_code(records, fail_on_saturated=args.fail_on_saturated)
         if disk_exhausted:
@@ -2508,6 +2514,7 @@ def _do_report_only(
             rerun_arms=rerun_arms,
             label=label,
             toolchain_check=toolchain_check,
+            results_path=results_path,
         )
     except ModelMismatchError as exc:  # B-01 : appariement refusé, aucun rapport écrit
         print(str(exc), file=sys.stderr)

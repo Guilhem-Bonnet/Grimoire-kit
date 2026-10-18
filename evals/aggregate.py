@@ -73,6 +73,14 @@ def _n(values: list[Any]) -> int:
     return sum(1 for v in values if v is True)
 
 
+def _is_number(value: Any) -> bool:
+    return isinstance(value, int | float) and not isinstance(value, bool)
+
+
+def _lower_bound(value: float | None) -> str:
+    return "inconnu" if value is None else f"≥ {value}"
+
+
 def _sum(values: list[Any]) -> int | None:
     known = [v for v in values if isinstance(v, int | float)]
     return int(sum(known)) if known else None
@@ -145,8 +153,12 @@ def _cost_by_model(rows: list[dict[str, Any]]) -> dict[str, float]:
 
 def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
     j = [r["judgment"] or {} for r in rows]
+    # Un coût `null` n'est pas 0 $ : il sort de la somme (borne basse) et du
+    # compte `cost_known_runs`. Aucun coût connu → `cost_total` vaut `null`, pas 0.0.
     costs = [r["external"].get("tokens_cost") for r in rows]
-    cost_total = round(sum(c for c in costs if c is not None), 2)
+    known_costs = [c for c in costs if _is_number(c)]
+    cost_known_ratio = len(known_costs) / len(rows) if rows else None
+    cost_total = round(sum(known_costs), 2) if known_costs else None
     completed = _n([x.get("completed") for x in j])
     turns = [r["run"].get("num_turns") for r in rows if r["run"].get("num_turns") is not None]
     gov = [r.get("governance") or {} for r in rows]
@@ -165,9 +177,13 @@ def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "pass_hat_k": (pass_k["overall"] or {}).get("pass_hat_k") if pass_k["overall"] else None,
         "pass_hat_k_capability": (pass_k["capability"] or {}).get("pass_hat_k") if pass_k["capability"] else None,
         "pass_hat_k_regression": (pass_k["regression"] or {}).get("pass_hat_k") if pass_k["regression"] else None,
+        "cost_known_runs": len(known_costs),
+        "cost_known_ratio": cost_known_ratio,
+        # Sous 1, `cost_total` et les coûts par run / par tâche complétée sont des bornes basses.
+        "cost_is_lower_bound": cost_known_ratio is not None and cost_known_ratio < 1.0,
         "cost_total": cost_total,
-        "cost_per_run": round(cost_total / len(rows), 3) if rows else None,
-        "cost_per_completed": round(cost_total / completed, 2) if completed else None,
+        "cost_per_run": round(cost_total / len(rows), 3) if rows and cost_total is not None else None,
+        "cost_per_completed": round(cost_total / completed, 2) if completed and cost_total is not None else None,
         "cost_by_model": cost_by_model or None,
         "turns_mean": round(sum(turns) / len(turns), 1) if turns else None,
         "max_turns_hit": sum(1 for r in rows if r["run"].get("subtype") == "error_max_turns"),
@@ -221,6 +237,16 @@ def verdict(t: dict[str, Any], r: dict[str, Any]) -> list[tuple[str, str, str, s
                 f"{t['cost_per_completed']} vs {r['cost_per_completed']} USD",
                 "≤ référence (complétion ≥ 25 %)",
                 "ÉCHEC (complétion < 25 %)",
+            )
+        )
+    elif t["cost_is_lower_bound"] or r["cost_is_lower_bound"]:
+        out.append(
+            (
+                "Coût par tâche complétée",
+                f"{_lower_bound(t['cost_per_completed'])} vs {_lower_bound(r['cost_per_completed'])} USD "
+                f"(coût connu {t['cost_known_runs']}/{t['runs']} vs {r['cost_known_runs']}/{r['runs']} runs)",
+                "≤ référence",
+                "NON CALCULABLE (coût partiel : bornes basses)",
             )
         )
     elif t["cost_per_completed"] is None or r["cost_per_completed"] is None:

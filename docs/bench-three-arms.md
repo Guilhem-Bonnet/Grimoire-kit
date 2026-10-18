@@ -501,3 +501,43 @@ changé entre K et L, `docs/bench/rejeu-lot-l-2026-10-02.md` §1.3) ; rien n'emp
 Limites. La version de Claude Code qui diffère dans un lot est signalée dans le rapport, pas refusée. Le modèle effectif des sous-agents n'est pas comparé : seul le modèle demandé l'est.
 `cost_gate.py` ne compare pas les modèles de sa référence (`cost-gate-baseline.json`, lot L). Aucune suite non saturée n'existe encore : choisir ou construire des tâches où le `nu`
 échoue ou varie reste à faire, et ne se fait pas sans run payant.
+
+## 13. Recalcul, hash des données, MDE et n requis (B-02)
+
+Trois manques constatés : aucun moyen de refaire un rapport depuis ses données brutes (le mot `recompute` n'existait nulle part) ; aucun calcul de l'effet que
+la suite peut détecter, donc « pas de différence » pouvait se lire « équivalents » ; `evals/aggregate.py` sommait les coûts `null` comme s'ils étaient absents
+(`cost_total` à 0.0 sans aucun coût connu) sans publier `cost_known_ratio`. Code : `scripts/bench/recompute.py`, `scripts/bench/power_calc.py`, tests :
+`tests/unit/test_bench_recompute.py`, `tests/unit/test_evals_aggregate.py`.
+
+```bash
+python scripts/bench/recompute.py --results <workspace>/state/results.jsonl --report <rapport>/report.json [--mde 0.10] [--arms nu,kit-gov] [--require-seal]
+python scripts/bench/power_calc.py --mde 0.10 --tasks 20
+```
+
+- **Recalcul** : `report.json` est reconstruit par le même `build_report` à partir de `results.jsonl` seul. Chaque champ dérivé (`per_arm`, `by_task`, `kit_runs`,
+  `kit_gov_runs`, `invalid_runs`, `unevaluated_runs`, `auth_modes`, `model_id`, `claude_code_versions`, `suite_saturation`, `tasks_run`, `k`) qui ne se
+  recalcule pas à 1e-9 près est listé (chemin, valeur publiée, valeur recalculée) et la sortie est 1. Graine, étiquette, coût attendu, contrôle de toolchain et bras repris sont
+  des entrées : non recalculés, et listés comme tels.
+- **Hash des données** : `write_report` (campagne et `--report-only`) écrit dans `report.json` un bloc `data` (`results_file`, `results_rows`, `results_sha256`, sha256
+  des octets de `results.jsonl`) et le cite dans `report.md`. `recompute` compare : fichier modifié depuis = `mismatch`, sortie 1. Un rapport antérieur à B-02 est « NON SCELLÉ » :
+  ses chiffres se recalculent, mais rien ne prouve que le fichier est celui d'origine ; `--require-seal` en fait une erreur (à utiliser à la barrière 3).
+- **Clés dupliquées** : deux lignes pour la même (tâche, bras, rejeu) sont refusées. Le rapport les compterait deux fois et le recalcul aussi, donc aucun écart ne le trahirait.
+- **`cost_known_ratio`** : repris par bras dans le verdict (déjà dans `report.json` depuis B-00). Dans `evals/aggregate.py`, `summarize` publie maintenant
+  `cost_known_runs`, `cost_known_ratio` et `cost_is_lower_bound`, `cost_total` vaut `null` (et non 0.0) sans aucun coût connu, et le critère de coût du verdict A1 rend
+  « NON CALCULABLE » quand l'un des deux bras n'a qu'un coût partiel (deux bornes basses ne se comparent pas).
+- **MDE et n requis** : approximation normale, deux bras de `n` tâches, une tâche = une unité binaire (`pass^k`), alpha 0,05 bilatéral, puissance 0,80.
+  `MDE(n) = (z_{1-α/2} + z_{puissance}) · sqrt((Var_a + Var_b) / n)`, `Var = p(1-p)`. Deux bases toujours côte à côte : **pire cas** (p = 0,5) et **variance observée**
+  sur les deux bras comparés (`--arms`, défaut `nu,kit-gov`). Un taux observé de 0 ou 1 (suite saturée, lot L) donne « NON ESTIMABLE » et non un MDE nul.
+
+  | Base pire cas | Valeur |
+  |---|---|
+  | n requis pour un MDE de 10 points | 393 tâches par bras (310 en unilatéral) |
+  | n requis pour un MDE de 20 points | 99 |
+  | MDE à n = 3 | 114 points : aucun effet détectable |
+  | MDE à n = 20 (taille du banc) | 44 points |
+  | MDE à n = 30 | 36 points |
+
+Limites. L'approximation normale est grossière pour `n` petit (3, 30) ; les tâches sont traitées comme indépendantes et de même difficulté ; la variance observée sur peu de tâches est
+elle-même incertaine ; le seuil de non-infériorité de 5 points (V1) n'a pas son calcul dédié : seul l'écart détectable bilatéral est chiffré. Le hash cité dans le rapport est aussi
+réécrivable que le rapport : il rend la falsification visible à qui compare avec une copie versionnée ou un hash publié ailleurs, il ne la rend pas impossible. Le n requis n'est atteint
+par aucun lot existant (20 tâches) : atteindre 393 tâches par bras n'est pas réaliste sur le polyglotte, et la barrière 3 doit donc re-fixer le MDE visé avant tout run.
