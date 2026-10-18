@@ -593,7 +593,8 @@ class FlowDispatchOutcome:
     ``status`` vaut ``"finished"`` (tous les nodes verts, run terminé),
     ``"waiting_host"`` (V2, ou tâche non préparable — le node nommé revient à
     ``flow resume`` comme en mode interactif), ou ``"blocked"`` (chaîne
-    épuisée sur ce node, ou sortie non conforme malgré un vert de cascade).
+    épuisée sur ce node, ou sortie non conforme malgré un vert de cascade), ou ``"paused"`` (un ``hold`` a
+    posé le run à la frontière de node, K11 : rien n'est perdu, la reprise suit ``orchestrate resume``).
     """
 
     run_id: str
@@ -687,6 +688,11 @@ def _drive(
             )
         if outcome.finished:
             return _outcome(executor, run_id, status="finished", node_id=outcome.node_id, repaired=repaired)
+        if outcome.paused:
+            # K11 : un hold a posé le run en PAUSED à la frontière ; le node suivant n'est ni présenté ni exécuté.
+            return _outcome(
+                executor, run_id, status="paused", node_id=outcome.node_id, faults=outcome.warnings, repaired=repaired
+            )
         assert outcome.contract is not None  # non fini : le moteur a rouvert le node suivant
         contract = outcome.contract
         result = executor.last_result or NodeExecutionResult(pending=True)

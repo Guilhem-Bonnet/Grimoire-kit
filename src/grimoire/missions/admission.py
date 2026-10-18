@@ -46,6 +46,7 @@ from grimoire.missions.board import PRIORITIES, priority_of, priority_rank
 from grimoire.missions.lease import parse_instant
 from grimoire.missions.ledger_rules import unclosed_blockers
 from grimoire.missions.liveness import Attention
+from grimoire.missions.pause import PAUSE_LIFTED_CAUSE, PauseState
 from grimoire.missions.schemas import MissionTask, TaskState
 
 if TYPE_CHECKING:
@@ -454,13 +455,24 @@ class QueueEntry:
 
 
 def ready_since(ledger: MissionLedger) -> dict[str, datetime]:
-    """Depuis quand chaque tâche est ``ready`` : sa dernière entrée dans cet état, sinon sa création."""
+    """Depuis quand chaque tâche est ``ready`` : sa dernière entrée dans cet état, sinon sa création.
+
+    Le réveil d'une tâche ``waiting(paused)`` à la levée d'une pause (K11) n'est pas une nouvelle entrée dans
+    la file : la tâche garde l'ancienneté d'avant son claim, sinon une pause d'une nuit la ferait repartir
+    derrière des tâches qu'elle précédait.
+    """
+    from grimoire.missions.ledger import WOKEN_KEY
+
     since: dict[str, datetime] = {}
     for event in ledger.list_events():
         if event.event_type == "task.transitioned" and event.payload.get("to_state") == TaskState.READY.value:
             stamp = parse_instant(event.created_at)
-            if stamp is not None:
-                since[event.entity_id] = stamp
+            if stamp is None:
+                continue
+            woken = event.payload.get(WOKEN_KEY)
+            if event.entity_id in since and isinstance(woken, dict) and woken.get("cause") == PAUSE_LIFTED_CAUSE:
+                continue
+            since[event.entity_id] = stamp
     return since
 
 
@@ -553,11 +565,13 @@ def admit(
     *,
     paused: bool = False,
     autonomous: bool = False,
+    pause_detail: str = "",
 ) -> Admit | Defer:
     """Fonction pure : ``Admit`` ou ``Defer(raison)``. Chaque garde échoue fermée.
 
     Ordre : pause, route différée par le routeur, WIP, ``ci``, ``host``, ``llm``, quota.
     La route du routeur est rendue telle quelle dans la décision, jamais remplacée.
+    *pause_detail* dit quel drapeau (``drain``/``hold``, projet/machine, illisible) retient la tâche.
     """
     tid = task.id
 
@@ -565,7 +579,7 @@ def admit(
         return Defer(tid, reason, detail, retry, route)
 
     if paused:
-        return defer("pause", "pause demandée : aucune admission")
+        return defer("pause", pause_detail or "pause demandée : aucune admission")
     if route is not None and route.outcome == "defer":
         return defer("provider", "aucun modèle disponible au palier retenu", route.defer_until or "unknown")
     if route is not None and route.outcome == "refuse":
@@ -653,6 +667,7 @@ class QueuePlan:
     view: LedgerView
     capacity: Capacity
     order: tuple[tuple[str, str, str], ...] = ()
+    pause: PauseState = field(default_factory=PauseState)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -675,6 +690,7 @@ class QueuePlan:
                 "tokens_per_day": self.capacity.tokens_per_day,
             },
             "capacity_errors": dict(self.capacity.errors),
+            "pause": self.pause.to_dict(),
         }
 
 
@@ -688,8 +704,14 @@ def build_plan(
     paused: bool = False,
     autonomous: bool = False,
     mission_id: str | None = None,
+    pause: PauseState | None = None,
 ) -> QueuePlan:
-    """La file triée, passée une fois à l'admission ; chaque tâche admise réserve son créneau pour la suivante."""
+    """La file triée, passée une fois à l'admission ; chaque tâche admise réserve son créneau pour la suivante.
+
+    *pause* (K11) est l'union des drapeaux du projet et de la machine : une tâche qu'un drapeau couvre est
+    différée (``Defer(pause)``), les autres suivent leur chemin. *paused* force la pause pour toutes.
+    """
+    pause = pause or PauseState()
     view = derive_view(ledger, capacity, now=now, host=host)
     tasks = {t.id: t for t in ledger.list_tasks()}
     since = ready_since(ledger)
@@ -708,7 +730,11 @@ def build_plan(
     by_id = {e.task.id: e for e in ordered}
     for entry in ordered:
         route = route_of(entry.task) if route_of is not None else None
-        decision = admit(entry.task, route, capacity, view, paused=paused, autonomous=autonomous)
+        held_back = paused or pause.blocks_admission(entry.task.id)
+        decision = admit(
+            entry.task, route, capacity, view, paused=held_back, autonomous=autonomous,
+            pause_detail=pause.reason_for(entry.task.id),
+        )
         if isinstance(decision, Admit):
             admitted.append(decision)
             view = view.reserve(entry.task, route, consumes_ci=_consumes_ci(entry.task, capacity))
@@ -716,7 +742,7 @@ def build_plan(
             deferred.append(decision)
     famine = tuple(_famine(d, by_id[d.task_id], capacity.famine_hours) for d in deferred if by_id[d.task_id].waited_hours >= capacity.famine_hours)
     order = tuple((e.task.id, e.base, e.effective) for e in ordered)
-    return QueuePlan(now, tuple(admitted), tuple(deferred), tuple(excluded), famine, view, capacity, order)
+    return QueuePlan(now, tuple(admitted), tuple(deferred), tuple(excluded), famine, view, capacity, order, pause)
 
 
 def _famine(defer: Defer, entry: QueueEntry, famine_hours: int) -> Famine:

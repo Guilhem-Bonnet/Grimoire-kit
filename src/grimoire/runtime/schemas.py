@@ -24,6 +24,8 @@ class RunEventType(StrEnum):
     WORKFLOW_COMPLETED = "workflow.completed"
     WORKFLOW_ABORTED = "workflow.aborted"
     WORKFLOW_REFUSED = "workflow.refused"
+    WORKFLOW_PAUSED = "workflow.paused"
+    WORKFLOW_RESUMED = "workflow.resumed"
     STEP_STARTED = "step.started"
     STEP_COMPLETED = "step.completed"
     STEP_FAILED = "step.failed"

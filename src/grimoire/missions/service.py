@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -43,6 +44,7 @@ from grimoire.missions.board import PRIORITIES, board_status_of, build_board, pr
 from grimoire.missions.gates import GateRefusal, GateVerdict, check_transition
 from grimoire.missions.intake import IntakeRequest, MissionIntakeService
 from grimoire.missions.ledger import MissionLedger, ReapReport
+from grimoire.missions.pause import PAUSE_LIFTED_CAUSE, PauseState, pause_claim_guard, read_pause
 from grimoire.missions.recall import DEFAULT_TOKEN_BUDGET, TaskRecall, build_task_recall, consolidate_task_memory
 from grimoire.missions.schemas import (
     DIRECTIVE_KINDS,
@@ -238,6 +240,16 @@ class WakeDecision:
         }
 
 
+def _claim_guards(root: Path) -> Callable[[Mapping[str, MissionTask], MissionTask], str]:
+    """Les gardes que le ledger appelle sous son verrou : la pause d'abord (K11), puis le WIP (K10)."""
+    pause, wip = pause_claim_guard(root), wip_claim_guard(root)
+
+    def guard(tasks: Mapping[str, MissionTask], task: MissionTask) -> str:
+        return pause(tasks, task) or wip(tasks, task)
+
+    return guard
+
+
 class TaskService:
     """Lire, réclamer et déplacer les tâches d'un projet, gates compris."""
 
@@ -269,7 +281,7 @@ class TaskService:
     def ledger(self) -> MissionLedger:
         if self._ledger is None:
             self._ledger = MissionLedger(self.ledger_root)
-            self._ledger.claim_guard = wip_claim_guard(self.home_root)  # K10 : WIP global et par rôle, sous le verrou
+            self._ledger.claim_guard = _claim_guards(self.home_root)  # K10 WIP + K11 pause, sous le verrou
         return self._ledger
 
     @property
@@ -332,11 +344,13 @@ class TaskService:
         probe_host: bool = True,
         routes: bool = True,
         paused: bool = False,
+        pause: PauseState | None = None,
     ) -> QueuePlan:
         """Ce que l'admission déciderait maintenant, sans rien écrire (``grimoire queue plan``, K10).
 
         La sonde de l'hôte ne tourne que si le pool ``host`` est déclaré. Les routes viennent du
         routeur (K9), sans événement ``task.routed`` : l'admission les lit, ne les change pas.
+        La pause (K11) est lue dans les drapeaux du projet et de la machine, sauf *pause* donnée.
         """
         capacity = load_capacity(self.home_root)
         host = read_host() if probe_host and capacity.host is not None else None
@@ -344,6 +358,7 @@ class TaskService:
         return build_plan(
             self.ledger, capacity, now=now or datetime.now(UTC), host=host,
             route_of=self._route_ref if routes else None, paused=paused, autonomous=unattended,
+            pause=pause if pause is not None else read_pause(self.home_root),
         )
 
     def _route_ref(self, task: MissionTask) -> RouteRef:
@@ -574,15 +589,34 @@ class TaskService:
             return claim.lease_epoch
         return None
 
-    def _hint_of(self, task: MissionTask) -> ResumeHint | None:
+    def _hint_of(self, task: MissionTask, *, observe_head: bool = False) -> ResumeHint | None:
+        """De quoi reprendre la session ; avec *observe_head* (point de reprise d'une pause, K11), la branche et le HEAD du worktree."""
         from grimoire.missions.session_link import session_fields
 
         fields = session_fields(task)
-        if not fields["session_id"]:
+        branch, head = self._observed_head() if observe_head else ("", "")
+        if not fields["session_id"] and not head:
             return None
         return ResumeHint(
-            session_id=fields["session_id"], host=fields["host"], resume_command=fields["resume_command"],
+            session_id=fields["session_id"], host=fields["host"], branch=branch, observed_head=head,
+            resume_command=fields["resume_command"],
         )
+
+    def _observed_head(self) -> tuple[str, str]:
+        """``(branche, HEAD)`` du worktree de ce service ; ``("", "")`` hors d'un dépôt git ou si git ne répond pas."""
+        import subprocess
+
+        def git(*args: str) -> str:
+            try:
+                done = subprocess.run(  # git, arguments fixes, dossier du projet
+                    ["git", *args], cwd=self.project_root, capture_output=True, text=True, encoding="utf-8",
+                    timeout=10, check=False,
+                )
+            except (OSError, subprocess.SubprocessError):
+                return ""
+            return done.stdout.strip() if done.returncode == 0 else ""
+
+        return git("rev-parse", "--abbrev-ref", "HEAD"), git("rev-parse", "HEAD")
 
     def wait(
         self, task_id: str, reason: str, actor: str, *, until: str = "", note: str = "", epoch: int | None = None
@@ -602,7 +636,7 @@ class TaskService:
         moment = datetime.now(UTC).isoformat()
         waiting = Waiting(
             reason, until or (UNTIL_UNKNOWN if reason in ("quota", "paused") else ""), None,
-            self._hint_of(task), moment,
+            self._hint_of(task, observe_head=reason == "paused"), moment,
         )
         if problem := waiting.problem():
             raise ValueError(problem)
@@ -748,15 +782,23 @@ class TaskService:
         self.project_board()
         return True
 
-    def wake_due(self, *, apply: bool = True, now: datetime | None = None) -> list[WakeDecision]:
+    def wake_due(
+        self, *, apply: bool = True, now: datetime | None = None, pause: PauseState | None = None
+    ) -> list[WakeDecision]:
         """La part « attente » du tick : rend les tâches dont l'attente est levée — jamais une ``waiting(human)`` au minuteur.
 
         - ``human`` : seulement si une réponse humaine est écrite (réveil interrompu rejoué) ;
-        - ``ci``, ``quota``, ``paused`` : à l'échéance ``until`` ; ``unknown`` ou absente, la
-          tâche attend (une sonde explicite est l'affaire d'un lot suivant).
+        - ``ci``, ``quota`` : à l'échéance ``until`` ; ``unknown`` ou absente, la tâche attend (une sonde
+          explicite est l'affaire d'un lot suivant) ;
+        - ``paused`` (K11) : tant qu'un drapeau de pause la couvre, elle attend. Une fois la pause levée, elle est
+          rendue ``ready`` (échéance ``unknown`` ou absente : tout de suite ; datée : à l'échéance), **dans l'ordre
+          de la file** (priorité, ancienneté d'avant son claim) et sans perdre cette ancienneté.
+
+        *pause* : les drapeaux déjà lus par l'appelant (le tick) ; sinon ils sont relus ici.
         """
         moment = now or datetime.now(UTC)
-        decisions: list[WakeDecision] = []
+        state = pause if pause is not None else read_pause(self.home_root)
+        planned: list[tuple[MissionTask, Waiting, str, str]] = []
         for task in self.ledger.list_tasks():
             waiting = task.waiting
             if task.status is not TaskState.WAITING or waiting is None:
@@ -766,20 +808,43 @@ class TaskService:
                 answered = self._answer_of(task, waiting)
                 if answered is not None:
                     action, cause = "wake", "answered"
+            elif waiting.reason == "paused" and state.blocks_admission(task.id):
+                cause = f"pause en cours ({state.mode_for(task.id)})"
             else:
                 due = parse_until(waiting.until)
-                if due is not None and moment >= due:
+                if waiting.reason == "paused" and due is None and waiting.until in ("", UNTIL_UNKNOWN):
+                    action, cause = "wake", PAUSE_LIFTED_CAUSE
+                elif due is not None and moment >= due:
                     action, cause = "wake", f"échéance {waiting.reason} atteinte"
-            written = False
-            if action == "wake" and apply:
+            planned.append((task, waiting, action, cause))
+        written: set[str] = set()
+        if apply:
+            for task, waiting, action, cause in self._write_order(planned):
+                if action != "wake":
+                    continue
                 if waiting.reason == "human" and waiting.question is not None:
                     self._settle_answer(task, waiting.question, self._answer_of(task, waiting) or "", "tick")
                 else:
                     self.ledger.wake(task.id, actor_id="tick", cause=cause)
-                    self.project_board()
-                written = True
-            decisions.append(WakeDecision(task.id, waiting.reason, action, cause, written))
-        return decisions
+                written.add(task.id)
+            if written:
+                self.project_board()
+        return [WakeDecision(t.id, w.reason, a, c, t.id in written) for t, w, a, c in planned]
+
+    def _write_order(
+        self, planned: list[tuple[MissionTask, Waiting, str, str]]
+    ) -> list[tuple[MissionTask, Waiting, str, str]]:
+        """Les réveils d'une pause levée passent après les autres, dans l'ordre de la file (K11)."""
+        lifted = [item for item in planned if item[2] == "wake" and item[3] == PAUSE_LIFTED_CAUSE]
+        if len(lifted) < 2:
+            return planned
+        capacity = load_capacity(self.home_root)
+        ranked = queue_order(
+            [t for t, _, _, _ in lifted], ready_since(self.ledger), now=datetime.now(UTC), aging_hours=capacity.aging_hours
+        )
+        position = {e.task.id: i for i, e in enumerate(ranked)}
+        rest = [item for item in planned if item not in lifted]
+        return [*rest, *sorted(lifted, key=lambda item: position[item[0].id])]
 
     def _answer_of(self, task: MissionTask, waiting: Waiting) -> str | None:
         if waiting.question is None:

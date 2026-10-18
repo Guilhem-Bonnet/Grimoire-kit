@@ -367,6 +367,13 @@ def _evaluate_tool_policy(hook: HookInput) -> Decision:
     braked = lease_brake(hook, facts)
     if braked is not None:
         return braked
+    # K11 : un `hold` refuse les outils mutants d'une session qui tient une tâche, sauf son point de
+    # reprise ; `drain`, hôte sans frein et drapeau illisible ne refusent rien (voir pause_brake).
+    from grimoire.hosts.decisions.pause_brake import pause_brake
+
+    paused = pause_brake(hook, facts)
+    if paused is not None:
+        return paused
     custom_rules = load_custom_rules(hook.project_root)
     # A temporal rule (require_approval/per_session/cooldown_after) commonly
     # leaves action_kinds/mutation_classes/risk_profiles empty — it has no
