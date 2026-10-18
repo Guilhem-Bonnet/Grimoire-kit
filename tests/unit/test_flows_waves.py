@@ -139,3 +139,46 @@ def test_pilot_max_parallel(tmp_path: Path) -> None:
         (std / "pilot.yaml").write_text(f"max_parallel: {bad}\n", encoding="utf-8")
         with pytest.raises(GrimoireRuntimeError, match="max_parallel"):
             load_pilot_policy(tmp_path)
+
+
+def test_next_wave_rend_les_nodes_prets_du_dag_pas_le_reste_de_la_premiere_vague(tmp_path: Path) -> None:
+    """a -> b avec c indépendant : après a, b (vague 2) est prêt autant que c (vague 1) (W5-04-S3)."""
+    bp = {
+        "blueprintVersion": 1,
+        "id": "inegal",
+        "nodes": [
+            _node("a", [{"id": "out", "direction": "out", "contract": "c1"}]),
+            _node("b", [{"id": "in", "direction": "in", "contract": "c1"}]),
+            _node("c", []),
+        ],
+        "edges": [{"from": "a.out", "to": "b.in", "contract": "c1"}],
+    }
+    path = tmp_path / "inegal.blueprint.json"
+    path.write_text(json.dumps(bp), encoding="utf-8")
+    engine = FlowEngine(kernel_root=tmp_path / "runtime", flows_root=tmp_path / "flows")
+    wfi, _ = engine.run(path, executor=InteractiveNodeExecutor(stream=io.StringIO()))
+
+    assert engine.next_wave(wfi.id) == ["a", "c"]
+    engine.resume(wfi.id, output={"pins": {"out": {"contract": "c1"}}})
+    assert engine.next_wave(wfi.id) == ["c", "b"]  # ordre des vagues puis des ids : c (vague 1), b (vague 2)
+    engine.resume(wfi.id, output={"pins": {}})
+    assert engine.next_wave(wfi.id) == ["b"]
+
+
+def test_ready_nodes_propriete_sur_200_dag_aleatoires() -> None:
+    from grimoire.flows.blueprint_loader import ready_nodes
+
+    rng = random.Random(20261018)
+    for _ in range(200):
+        n = rng.randint(1, 12)
+        edges = [(i, j) for i in range(n) for j in range(i + 1, n) if rng.random() < 0.3]
+        bp = _dag(n, edges)
+        order = topo_order(bp)
+        for cut in range(len(order) + 1):
+            done = set(order[:cut])
+            expected = {
+                f"n{k:02d}" for k in range(n)
+                if f"n{k:02d}" not in done and all(f"n{i:02d}" in done for i, j in edges if j == k)
+            }
+            got = ready_nodes(bp, done)
+            assert set(got) == expected and len(got) == len(expected)

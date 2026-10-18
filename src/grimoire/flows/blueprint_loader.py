@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import re
 import shlex
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +34,7 @@ __all__ = [
     "build_node_contracts",
     "hardcoded_command_warnings",
     "load_blueprint",
+    "ready_nodes",
     "resolve_composite_ref",
     "topo_order",
     "topo_waves",
@@ -291,6 +293,22 @@ def validate_flow_composition(
             load_blueprint(sub_path, project_root, new_chain)
 
 
+def _node_deps(blueprint: dict[str, Any]) -> dict[str, set[str]]:
+    """Les prédécesseurs directs de chaque node, lus dans les ``edges``."""
+    node_by_pin: dict[str, str] = {}
+    for n in blueprint["nodes"]:
+        for p in n.get("pins", []):
+            node_by_pin[f"{n['id']}.{p['id']}"] = n["id"]
+    deps: dict[str, set[str]] = {n["id"]: set() for n in blueprint["nodes"]}
+    for e in blueprint.get("edges", []):
+        src = node_by_pin.get(e["from"])
+        dst = node_by_pin.get(e["to"])
+        if src is None or dst is None:
+            raise GrimoireRuntimeError(f"edge non résoluble : {e['from']} -> {e['to']}")
+        deps[dst].add(src)
+    return deps
+
+
 def topo_waves(blueprint: dict[str, Any]) -> list[list[str]]:
     """Les vagues d'exécution : les nodes dont toutes les pins amont sont franchies, ensemble (Kahn par niveaux).
 
@@ -298,21 +316,10 @@ def topo_waves(blueprint: dict[str, Any]) -> list[list[str]]:
     mêmes vagues. Un cycle (ou une dépendance non résoluble) est refusé avec
     les nodes qui restent, jamais ignoré.
     """
-    nodes = [n["id"] for n in blueprint["nodes"]]
-    node_by_pin: dict[str, str] = {}
-    for n in blueprint["nodes"]:
-        for p in n.get("pins", []):
-            node_by_pin[f"{n['id']}.{p['id']}"] = n["id"]
-    deps: dict[str, set[str]] = {nid: set() for nid in nodes}
-    for e in blueprint.get("edges", []):
-        src = node_by_pin.get(e["from"])
-        dst = node_by_pin.get(e["to"])
-        if src is None or dst is None:
-            raise GrimoireRuntimeError(f"edge non résoluble : {e['from']} -> {e['to']}")
-        deps[dst].add(src)
+    deps = _node_deps(blueprint)
     waves: list[list[str]] = []
     done: set[str] = set()
-    remaining = set(nodes)
+    remaining = set(deps)
     while remaining:
         ready = sorted(n for n in remaining if deps[n] <= done)
         if not ready:
@@ -321,6 +328,19 @@ def topo_waves(blueprint: dict[str, Any]) -> list[list[str]]:
         done.update(ready)
         remaining -= set(ready)
     return waves
+
+
+def ready_nodes(blueprint: dict[str, Any], completed: Iterable[str]) -> list[str]:
+    """Les nodes prêts, au sens du DAG : non faits, tous leurs prédécesseurs dans ``completed``.
+
+    Dans l'ordre des vagues puis des ids. Contrairement au reste de la première
+    vague non franchie, un node d'une vague plus tardive est prêt dès que ses
+    propres prédécesseurs sont faits (a -> b avec c indépendant : après a,
+    b et c). Un cycle est refusé comme dans :func:`topo_waves`.
+    """
+    deps = _node_deps(blueprint)
+    done = set(completed)
+    return [n for wave in topo_waves(blueprint) for n in wave if n not in done and deps[n] <= done]
 
 
 def topo_order(blueprint: dict[str, Any]) -> list[str]:

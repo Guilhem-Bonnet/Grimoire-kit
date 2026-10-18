@@ -429,13 +429,14 @@ def flow_next(
     ctx: typer.Context,
     run_id: Annotated[str, typer.Argument(help="Identifiant du run (WFI-...).")],
     wave: Annotated[
-        bool, typer.Option("--wave", help="La vague entière : les nodes prêts ensemble, au lieu du seul node courant.")
+        bool, typer.Option("--wave", help="Tous les nodes prêts (prédécesseurs faits), au lieu du seul node courant.")
     ] = False,
     project_root: _PROJECT_ROOT = Path(),
 ) -> None:
-    """Le node courant du run, ou avec ``--wave`` tous les nodes prêts en même temps.
+    """Le node courant du run, ou avec ``--wave`` tous les nodes prêts.
 
-    Lecture seule : ne démarre aucun node. Sur un diamant A -> (B, C) -> D,
+    Prêt : non fait, et tous ses prédécesseurs du DAG sont faits. Lecture
+    seule : ne démarre aucun node. Sur un diamant A -> (B, C) -> D,
     ``--wave`` rend B et C ensemble une fois A franchi.
     """
     engine = _engine(project_root)

@@ -1056,3 +1056,118 @@ def test_fanout_parallele_un_cout_inconnu_bloque_les_lancements(
     assert node.verdict == "cost_capped"
     assert node.cost_cap_reason == "cost_unknown"
     assert sorted(probe.launched) == ["fanout0", "fanout1"]
+
+
+class _Scripted:
+    """Faux ``_launch_child`` : statut, délai et coût par suffixe ; consigne les lancements dans l'ordre."""
+
+    def __init__(self, *, waiting: set[str] = frozenset(), delay: dict[str, float] | None = None,  # type: ignore[assignment]
+                 cost: dict[str, float] | None = None) -> None:
+        import threading
+
+        self.waiting = waiting
+        self.delay = delay or {}
+        self.cost = cost or {}
+        self.lock = threading.Lock()
+        self.launched: list[tuple[str, str]] = []
+
+    def __call__(self, executor, ref, *, node_id, run_id, blueprint_id, suffix, max_cost_usd, extra_context=""):  # type: ignore[no-untyped-def]
+        import threading
+        import time
+
+        from grimoire.costs import Cost
+        from grimoire.flows.genres import _ChildRun
+
+        with self.lock:
+            self.launched.append((suffix, threading.current_thread().name))
+        time.sleep(self.delay.get(suffix, 0.2))
+        return _ChildRun(
+            child_run_id=f"f-{suffix}", status="waiting_host" if suffix in self.waiting else "finished",
+            cost=Cost.exact(self.cost.get(suffix, 0.01)), faults=(), host_reason=None, attempts=1, escalations=0,
+        )
+
+
+def _run_scripted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scripted: _Scripted, pilot: str, n: int = 6):  # type: ignore[no-untyped-def]
+    from grimoire.flows import genres
+
+    monkeypatch.setattr(genres, "_launch_child", scripted)
+    _write_registry(tmp_path, _writer_script(tmp_path, extra_map={"spread": {"fanout_items": list("abcdefgh")[:n]}}))
+    _write_pilot_policy(tmp_path, pilot)
+    engine = _engine(tmp_path)
+    outcome = run_with_dispatch(engine, _fanout_bp(tmp_path), project_root=tmp_path)
+    return engine, outcome
+
+
+@pytest.mark.parametrize("max_parallel", [1, 2, 3])
+def test_fanout_un_enfant_suspendu_a_l_hote_arrete_les_lancements(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, max_parallel: int
+) -> None:
+    """Comme la boucle séquentielle : aucun lancement après la suspension, hors enfants déjà en vol (W5-04-S1)."""
+    scripted = _Scripted(waiting={"fanout0"}, delay={"fanout0": 0.1})
+    engine, outcome = _run_scripted(
+        tmp_path, monkeypatch, scripted, f"max_fanout_n: 8\nmax_parallel: {max_parallel}\n"
+    )
+
+    started = sorted(s for s, _ in scripted.launched)
+    # fanout0 se suspend avant la fin des autres enfants ; les seuls autres lancés sont ceux déjà en vol (au plus max_parallel - 1).
+    assert started == [f"fanout{i}" for i in range(max_parallel)]
+    status = engine.status(outcome.run_id, include_contract=False)
+    assert status.current_node == "spread"
+    assert "élément 0" in (outcome.host_reason or "")
+
+
+def test_fanout_parallele_nomme_tous_les_enfants_suspendus(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    scripted = _Scripted(waiting={"fanout1", "fanout3"}, delay={"fanout1": 0.05, "fanout0": 0.3})
+    _, outcome = _run_scripted(tmp_path, monkeypatch, scripted, "max_fanout_n: 8\nmax_parallel: 4\n")
+
+    reason = outcome.host_reason or ""
+    assert "élément 1 (sous-flow f-fanout1)" in reason
+    assert "aussi suspendus" in reason
+    assert "élément 3 (sous-flow f-fanout3)" in reason
+
+
+def test_fanout_parallele_les_enfants_lances_sont_un_prefixe_indexe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Un worker préempté entre la file et le verrou ne saute pas d'élément et ne décale pas les indices (W5-04-S2)."""
+    import threading
+    import time
+
+    from grimoire.flows import genres
+
+    real_lock = threading.Lock
+
+    class _SlowFirstLock:
+        """Retarde la première prise du verrou par le 3e worker : il a déjà son élément, pas encore le verrou."""
+
+        def __init__(self) -> None:
+            self._lock = real_lock()
+            self._seen: set[str] = set()
+
+        def __enter__(self) -> _SlowFirstLock:
+            name = threading.current_thread().name
+            if name.endswith("_2") and name not in self._seen:
+                self._seen.add(name)
+                time.sleep(0.3)
+            self._lock.acquire()
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            self._lock.release()
+
+    class _Threading:
+        Lock = _SlowFirstLock
+
+    rows: list[tuple[int, str]] = []
+    real_row = genres._child_row
+    monkeypatch.setattr(genres, "threading", _Threading)
+    monkeypatch.setattr(genres, "_child_row", lambda i, c: rows.append((i, c.child_run_id)) or real_row(i, c))
+    scripted = _Scripted(delay={"fanout0": 0.01, "fanout1": 0.8, "fanout3": 0.01}, cost={"fanout3": 1.0, "fanout0": 0.0, "fanout1": 0.0})
+    _ = _run_scripted(
+        tmp_path, monkeypatch, scripted, "max_fanout_n: 8\nmax_parallel: 3\nmax_cost_usd_per_node: 0.5\n", n=4
+    )
+
+    started = sorted(s for s, _ in scripted.launched)
+    assert started == [f"fanout{i}" for i in range(len(started))], started  # un préfixe, aucun trou
+    assert rows, "des lignes de rapport étaient attendues"
+    assert all(child == f"f-fanout{i}" for i, child in rows), rows  # l'indice rapporté est celui de l'élément
