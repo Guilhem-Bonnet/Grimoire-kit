@@ -643,7 +643,7 @@ def grimoire_codegraph_index(project_path: str = ".", source_dir: str = "src") -
 # donc le même gate de preuve : une transition que le CLI refuse, MCP la
 # refuse, et le refus nomme la preuve manquante et le remède.
 
-_TASK_ACTIONS = ("move", "block", "close", "prioritize", "comment", "cancel", "ack")
+_TASK_ACTIONS = ("move", "block", "close", "prioritize", "comment", "cancel", "ack", "ask", "wait", "resume")
 
 
 def _task_service(project_path: str, ledger_root: str) -> Any:
@@ -838,8 +838,12 @@ def task_update(
         action: "move" (needs `to`), "block" (needs `reason`), "close", "prioritize" (needs `to`
             = low|medium|high|critical), "comment" (needs `text`, optional `kind`), "cancel"
             (needs `reason`; `force` to cancel a task another session holds), or "ack"
-            (needs `directive_id` — acknowledges a directive the orchestrator posted).
-        to: Target ledger state for "move", or the priority for "prioritize".
+            (needs `directive_id` — acknowledges a directive the orchestrator posted),
+            "ask" (needs `text`, optional `kind`: parks the task as waiting(human) with a question —
+            only a human answers it, from the cockpit or the CLI, never through this tool),
+            "wait" (needs `to` = ci|quota|paused, optional `reason` as note), or "resume"
+            (waiting → running, same session and epoch).
+        to: Target ledger state for "move", the priority for "prioritize", the wait reason for "wait".
         reason: Why — required for "block" and "cancel", optional otherwise.
         actor: Who acts (default: "mcp-agent").
         project_path: Path to project root (default: current directory).
@@ -853,6 +857,8 @@ def task_update(
 
     if action not in _TASK_ACTIONS:
         return _tool_error({"error": f"unknown action {action!r}", "actions": list(_TASK_ACTIONS)})
+    if action in ("ask", "wait", "resume"):
+        return _task_wait(task_id, action, project_path, ledger_root, actor, to=to, reason=reason, text=text, kind=kind)
     if action in ("prioritize", "comment", "cancel", "ack"):
         return _task_steer(task_id, action, project_path, ledger_root, actor, to=to, reason=reason,
                            text=text, kind=kind, directive_id=directive_id, force=force)
@@ -870,6 +876,26 @@ def task_update(
     try:
         move = _task_service(project_path, ledger_root).transition(task_id, target, actor, reason)
         return json.dumps(move.to_dict(), indent=2, ensure_ascii=False)
+    except (GrimoireError, OSError, ValueError) as exc:
+        return _task_error(exc)
+
+
+def _task_wait(
+    task_id: str, action: str, project_path: str, ledger_root: str, actor: str, *,
+    to: str, reason: str, text: str, kind: str,
+) -> str:
+    """Se garer avec une raison nommée (K6, issue #771) — un agent pose sa question, il n'y répond jamais."""
+    try:
+        service = _task_service(project_path, ledger_root)
+        if action == "ask":
+            if not text.strip():
+                return _tool_error({"error": "ask requires a text"})
+            result = service.ask(task_id, text, actor, kind=kind if kind != "comment" else "choice")
+        elif action == "wait":
+            result = service.wait(task_id, to, actor, note=reason)
+        else:
+            result = service.resume(task_id, actor)
+        return json.dumps(result.to_dict(), indent=2, ensure_ascii=False)
     except (GrimoireError, OSError, ValueError) as exc:
         return _task_error(exc)
 

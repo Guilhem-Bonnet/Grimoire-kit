@@ -325,6 +325,83 @@ Le contrôle du standard `dispatch.cost_slo` (voir
 mêmes agrégats — cette commande en est la vue humaine, jamais un second
 calcul.
 
+## Routeur de LLM : une politique déclarative, tracée avant d'être activée
+
+`grimoire task dispatch` choisit un palier de départ par la classe de
+vérifiabilité et l'historique d'escalade, puis prend le premier modèle du palier
+que le forfait n'a pas fermé. Le routeur (épopée #705, lot K9, issue #774) y
+ajoute une décision **déclarative et rejouable**, sans rien changer à ce chemin
+tant qu'on ne l'active pas : `route(task, history, provider_state)` choisit un
+modèle d'après la tâche seule (classe, type, difficulté), l'historique de
+réussite par modèle et la disponibilité du fournisseur. Il ne lit jamais le
+quota, le budget ni les tokens restants, et ne change jamais de modèle pour
+économiser : ces notions relèvent de l'admission, pas du choix. Un fournisseur
+suspendu par son forfait y figure comme indisponible, jusqu'à sa date de
+réouverture, comme un fournisseur injoignable.
+
+| Commande | Description |
+| --- | --- |
+| `grimoire route explain <tâche> [--json]` | Rejoue la dernière décision `task.routed` à partir de ses entrées et de `inputs_digest` ; sortie 1 si le rejeu diffère, 2 sans décision |
+| `grimoire route report [--json]` | Réussite au premier essai (pass^1) par (type, classe, modèle), escalade par couple, accord entre le routeur et le dispatch en mode `shadow` seulement (une issue `session`, `defer` ou `refuse` suivie d'un appel compte comme un désaccord) ; « non mesuré » sous 5 observations |
+| `grimoire route eval --set <jeu> [--json]` | Seuil d'activation D16 hors ligne ; sortie 0 (tenu), 1 (non tenu), 3 (non mesuré) |
+
+**Politique** : `_grimoire/standard/routing-policy.yaml`, sinon le défaut livré
+par le kit. Toutes les règles qui correspondent s'appliquent et le palier retenu
+est le maximum de leurs `min_tier` : le résultat ne dépend pas de l'ordre des
+règles. `route: session` est absorbant, V2 n'a jamais de route autonome, aucune
+règle qui correspond donne `session`, et le palier ne descend jamais sous le
+plancher de la classe (V0 `cheap`, V1 `mid`). Les conditions admises sont
+`class`, `type`, `risk_any`, `exclusive_files_gt`, `needs_local` : une règle qui
+nomme un quota ou un budget invalide la politique. `type` et `risk_any` se comparent
+en minuscules, sans espaces autour (comme les étiquettes de la tâche) : `risk_any: [Security]`
+vaut `[security]`, une étiquette vide est refusée. Une politique malformée, sans
+version ou de version inconnue n'est jamais remplacée par le défaut : aucune
+route autonome (`on_invalid: refuse`) : la décision tracée est `refuse` et
+`task dispatch` ne lance aucune cascade (refus `routing_policy_invalid`, sortie 2),
+en `shadow` comme en `active`. Seul un routeur en panne (exception) laisse le
+dispatch suivre l'ancien chemin, avec une décision `refuse` et son erreur tracées.
+
+```yaml
+version: 1
+mode: shadow            # défaut ; `active` fait gouverner la décision
+rules:
+  - {id: r-risk, when: {risk_any: [security, migration]}, min_tier: strong}
+  - {id: r-v1, when: {class: V1}, min_tier: mid}
+```
+
+**Tentatives** : `max_attempts` (défaut 3) borne le nombre d'appels de la cascade
+en mode `active` (appels en échec compris, tous paliers confondus) ; en `shadow`
+rien n'est appliqué, la valeur n'est que tracée dans les entrées de `task.routed`.
+
+**Mode** : `shadow` (défaut) émet `task.routed` avant chaque cascade et laisse le
+dispatch suivre l'ancien chemin ; `active` fait gouverner la décision (palier de
+départ sauf `--start-tier` explicite, ordre des fournisseurs, modèle dans le
+palier). Dans le palier, le départage est : réussite au premier essai (au moins 5
+observations, fenêtre de 50), puis, à réussite égale seulement, prix catalogue
+croissant (un prix inconnu passe après), puis ordre déclaré. Les modèles
+suspendus ou refroidis sont listés dans `excluded[]` avec leur raison. Sans
+candidat, la décision est `defer` : jamais de descente de palier. Revenir à
+`shadow` se fait en un seul champ.
+
+En `active`, la décision n'est pas contournée : une issue `session` (règle
+`route: session`, V2, aucune règle qui correspond) ou `defer` ne lance aucune
+cascade (refus `routed_to_session` ou `routed_defer`, sortie 2, aucun
+`task.dispatched`). Les fournisseurs appelés sont ceux que la décision admet : une
+règle `providers: {currency: local}` vaut pour tous les paliers de la cascade, un
+fournisseur d'une autre monnaie n'est jamais appelé, et au palier retenu seuls les
+fournisseurs du classement le sont. En `shadow`, ces issues ne restent qu'une trace.
+
+**Attribution** : chaque tentative (`task.dispatched`) compte pour le couple
+(type, classe, modèle) de cette tentative ; un 429, un timeout ou une panne
+d'appel sont non attribués et ne comptent jamais comme un succès.
+
+**Évaluation** : le jeu est un fichier `version: 1` / `tasks:` de tâches V0/V1
+closes, chacune avec ses résultats enregistrés par modèle
+(`results: {<modèle>: {passed, cost_usd}}`). Le routeur est comparé à la base
+« fixe » (V0 vers `cheap`, V1 vers `mid`) : pass^1 du routeur >= base - 1 tâche
+et coût connu <= celui de la base. Un coût inconnu, un résultat manquant ou
+moins de 20 tâches rendent « non mesuré » : on n'active pas.
+
 ## Besoins d'exécution : un flow déclare, le projet résout
 
 Un node de flow ne référence pas `pytest` ni `npm test` en dur : son
@@ -748,6 +825,7 @@ seconde sortie, il ne retire rien.
 | --- | --- |
 | `grimoire flow run <fichier>` | Démarrer un run et présenter le contrat du premier node ; sans argument, liste les runs |
 | `grimoire flow status <run-id>` | État du run : node courant, nodes faits, dernier refus, contrat courant |
+| `grimoire flow next <run-id> [--wave]` | Le node courant ; avec `--wave`, tous les nodes prêts (non faits, prédécesseurs du DAG faits). Lecture seule |
 | `grimoire flow resume <run-id> --result <fichier>` | Vérifier la sortie du node courant contre son contrat ; avance ou suspend |
 | `grimoire flow abort <run-id> [--reason]` | Abandonner un run — terminal, jamais repris |
 | `grimoire flow extract <run-id> [--out <fichier>]` | Extraire un blueprint brouillon de la séquence réellement exécutée par ce run |
@@ -872,6 +950,14 @@ infini implicite. Vert seulement si les N enfants finissent tous verts ;
 recoller un résultat partiel comme s'il était le tout serait l'invention que
 l'issue refuse.
 
+`pilot.max_parallel` (défaut `1`, séquentiel) borne le nombre d'enfants actifs en
+même temps. Au-delà de 1, le plafond `max_cost_usd_per_node` est relu avant
+chaque lancement et un coût inconnu bloque les lancements suivants, comme un
+enfant suspendu à l'hôte (aucun lancement après la suspension) ; les
+enfants déjà en vol ne sont pas rétractés (dépassement borné par
+`max_parallel - 1` enfants). Les enfants partagent le même répertoire : à
+n'activer que pour des enfants qui n'écrivent pas les mêmes fichiers.
+
 **`verify-panel`** — k vérificateurs indépendants (`config.verifyPanel.k`),
 chacun sous un angle distinct (`.angles`, instruit de chercher à réfuter,
 jamais de confirmer par défaut), majorité requise. Coût = k tentatives,
@@ -912,6 +998,38 @@ existe ; le ledger le rejoue dans la tâche (`accepted_risks`) et `classify` la 
 au moins en V1 pour toute surface (`task show`, MCP `task_show`/`task_claim`,
 `dispatch_advice`, transition `needs_verification` de `task dispatch`).
 Limite : le compteur est celui du journal du run, `amend` non attesté compris.
+
+**Octroi d'autonomie (`grimoire autonomy`, W5-06)** — la seule voie pour
+faire franchir un checkpoint destructif sans humain (CI, banc) ;
+`GRIMOIRE_UNATTENDED=1` seul n'ouvre rien.
+
+| Commande | Effet |
+|---|---|
+| `grimoire autonomy grant --scope <sel> --max-cost-usd <usd> --until <échéance>` | Demander un octroi. `<sel>` : `run:<id>` ou `blueprint:<id>`, `/<node>` en option, répétable, aucun joker ; `<échéance>` : `+30m`, `+2h`, `+1d` ou un instant ISO 8601 avec fuseau. Les trois bornes sont obligatoires. |
+| `grimoire autonomy status` | Chaque octroi réévalué maintenant : actif ou révoqué (motif), coût dépensé, échéance ; `-o json` ajoute les événements. |
+| `grimoire autonomy revoke <grant-id> [--reason]` | Révoquer à la main, toujours permis. |
+
+L'octroi est lui-même une décision attestée : la première demande émet un
+challenge lié à la session et sort en code 3 (décision humaine requise) ; un
+tour humain de cette session, puis la même commande relancée, l'inscrit et
+consomme ce tour. Seul un challenge émis par la session courante est repris : un
+challenge ouvert sans session ou par une autre session n'empêche pas la demande
+d'une session, qui reçoit alors le sien. Un `/<node>` restreint le seul run que
+désigne le sélecteur, pas ses sous-flows ni les nodes homonymes d'un autre
+blueprint ; sans `/<node>`, les sous-flows sont couverts. Tant qu'il est valide, un
+`approve` ou `accept_as_is` non attesté sur un checkpoint du périmètre est accepté avec
+`attestation=granted:<grant-id>`, distinct d'`attested`. Il est révoqué, une
+fois pour toutes, à l'échéance (`expired`), quand le coût atteint le plafond
+(`cost_reached`), au premier coût inconnu (`cost_unknown`, politique `stop`
+sans alternative), et au premier gate rouge du périmètre (`gate_red` : une
+sortie refusée par son contrat, ou une tentative de dispatch `red` ou
+`unrunnable`). Le checkpoint suivant repasse en `awaiting_human` et le refus
+nomme l'octroi révoqué. Chaque challenge, octroi et révocation est une ligne de
+`_grimoire-runtime-output/flows/authority/@autonomy-grants.authority.jsonl`,
+journal que la garde d'autorité interdit d'écrire à l'agent.
+Limite : le coût mesuré est celui des tentatives `task.dispatched` des runs
+couverts, postérieures à l'octroi ; le coût de la session hôte n'est mesuré
+nulle part dans le kit et n'y entre pas (`cost_scope` dans `status`).
 
 **`budget`** — plafond de coût déclaré (`config.budget.maxCostUsd`),
 abandon des passes optionnelles avant dépassement. `passes` est une liste

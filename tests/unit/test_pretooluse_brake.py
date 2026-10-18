@@ -299,7 +299,7 @@ def test_unfenced_host_asks_human(tmp_path: Path) -> None:
         decision = by_task[tid]
         assert (decision.action, decision.cause) == ("defer", "resume_unfenced")
         assert session in decision.question and "sans frein" in decision.question and "reprendre ?" in decision.question
-        assert service.require(tid).status is TaskState.RUNNING, "on ne relance pas de doublon"
+        assert service.require(tid).status is TaskState.WAITING, "on ne relance pas de doublon : la tâche se gare (K6)"
     assert "version inconnue" in by_task[no_version].question and "2.1.302" in by_task[other_version].question
     assert (by_task[proven].action, by_task[proven].cause) == ("ready", "heartbeat")
     assert service.require(proven).status is TaskState.READY
@@ -316,6 +316,7 @@ def test_cli_reap_prints_the_question_and_no_longer_trusts_the_operator(tmp_path
     res = runner.invoke(task_app, ["reap", "--project-root", str(tmp_path)])
     assert res.exit_code == 0, res.output
     assert "différée (resume_unfenced)" in res.output and "reprendre ?" in res.output
+    assert service.require(tid).status is TaskState.RUNNING  # aperçu : rien n'est écrit sans --apply
     # Déclarer un hôte fencé n'est plus un geste d'opérateur : la table de K0 est la seule source.
     refused = runner.invoke(task_app, ["reap", "--fenced-host", "host-github-copilot", "--project-root", str(tmp_path)])
     assert refused.exit_code != 0
