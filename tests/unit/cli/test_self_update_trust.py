@@ -129,3 +129,137 @@ def test_the_install_goes_through_the_manager_that_owns_the_environment(manager:
     install = calls[-1]
     assert install[0] == f"/usr/bin/{manager}" and "install" in install and "--force" in install
     assert " @ file://" in install[-1]
+
+
+# ── Ce que l'outil retient de l'installation (revue D-03, S1-02 et S1-03) ─────
+
+
+def _managed_update(
+    manager: str, state_dir: Path, *, on_install=None, installed: str = "3.0.0",
+):
+    """``self update`` sous ``uv`` ou ``pipx`` : ``state_dir`` est le dossier que l'outil annonce.
+
+    ``on_install(cmd)`` joue ce que fait l'outil à l'installation (écrire son reçu).
+    """
+    calls: list[list[str]] = []
+
+    def which(name: str) -> str | None:
+        return f"/usr/bin/{name}" if name == manager else None
+
+    def run(cmd, **_kw):
+        calls.append(list(cmd))
+        if "list" in cmd:
+            return MagicMock(stdout="grimoire-kit 3.0.0\n", returncode=0)
+        if cmd[1:3] == ["tool", "dir"] or "environment" in cmd:
+            return MagicMock(stdout=f"{state_dir}\n", returncode=0)
+        if on_install is not None:
+            on_install(cmd)
+        return MagicMock(returncode=0)
+
+    with patch("grimoire.cli.app.is_online", return_value=True), \
+         patch("grimoire.cli.app.__version__", installed), \
+         patch("urllib.request.urlopen", FakeRelease()), \
+         patch("shutil.which", side_effect=which), \
+         patch("grimoire.tools.install_trust.installed_extras", return_value=["mcp"]), \
+         patch("subprocess.run", side_effect=run):
+        result = runner.invoke(app, ["self", "update"])
+    return result, calls
+
+
+def _wheel_of(cmd: list[str]) -> str:
+    return cmd[-1].split(" @ file://", 1)[1]
+
+
+def _uv_state(tmp_path: Path, receipt_text: str) -> Path:
+    tools = tmp_path / "tools"
+    (tools / "grimoire-kit").mkdir(parents=True)
+    (tools / "grimoire-kit" / "uv-receipt.toml").write_text(receipt_text, encoding="utf-8")
+    return tools
+
+
+_UV_RECEIPT = (
+    '[tool]\nrequirements = [\n    { name = "grimoire-kit", path = "/old/grimoire_kit-3.0.0-py3-none-any.whl" },\n'
+    '    { name = "iniconfig" },\n]\npython = "3.12"\nentrypoints = []\n'
+)
+
+
+def test_uv_replays_the_with_packages_and_python_of_the_original_install(tmp_path: Path) -> None:
+    """D03-S1-02 : ``uv tool install --force`` seul perdait les ``--with`` (``uv tool upgrade`` les gardait)."""
+    tools = _uv_state(tmp_path, _UV_RECEIPT)
+    result, calls = _managed_update("uv", tools)
+    assert result.exit_code == 0, result.output
+    install = calls[-1]
+    assert install[:4] == ["/usr/bin/uv", "tool", "install", "--force"]
+    assert "--with=iniconfig" in install and "--python=3.12" in install
+    assert install[-1].startswith("grimoire-kit[mcp] @ file://")  # le spécifieur reste en dernier
+
+
+def test_uv_refuses_an_install_it_cannot_reproduce_instead_of_dropping_it(tmp_path: Path) -> None:
+    tools = _uv_state(tmp_path, _UV_RECEIPT.replace("entrypoints = []", 'constraints = [{ name = "x", specifier = ">=1" }]\nentrypoints = []'))
+    result, calls = _managed_update("uv", tools)
+    assert result.exit_code == 1
+    assert "Update refused" in result.output and "constraints" in result.output
+    assert "Nothing was installed" in result.output
+    assert not any("install" in c for c in calls), calls
+
+
+def test_uv_receipt_is_released_from_the_temporary_wheel_after_the_install(tmp_path: Path) -> None:
+    """D03-S1-03 : le reçu pointait vers le dossier temporaire supprimé, ``uv tool upgrade`` échouait."""
+    import tomllib
+
+    tools = _uv_state(tmp_path, _UV_RECEIPT)
+    receipt_file = tools / "grimoire-kit" / "uv-receipt.toml"
+
+    def uv_writes_its_receipt(cmd: list[str]) -> None:
+        wheel = _wheel_of(cmd)
+        receipt_file.write_text(
+            '[tool]\nrequirements = [\n    { name = "grimoire-kit", extras = ["mcp"], path = "' + wheel + '" },\n'
+            '    { name = "iniconfig" },\n]\nentrypoints = []\n',
+            encoding="utf-8",
+        )
+
+    result, _ = _managed_update("uv", tools, on_install=uv_writes_its_receipt)
+    assert result.exit_code == 0, result.output
+    requirements = tomllib.loads(receipt_file.read_text(encoding="utf-8"))["tool"]["requirements"]
+    assert requirements == [{"name": "grimoire-kit", "extras": ["mcp"]}, {"name": "iniconfig"}]
+    assert "still remembers" not in result.output
+
+
+def test_a_receipt_that_cannot_be_released_says_the_command_that_repairs_it(tmp_path: Path) -> None:
+    tools = _uv_state(tmp_path, _UV_RECEIPT)
+    receipt_file = tools / "grimoire-kit" / "uv-receipt.toml"
+
+    def uv_writes_a_shape_we_do_not_know(cmd: list[str]) -> None:
+        wheel = _wheel_of(cmd)
+        receipt_file.write_text(
+            '[tool]\nrequirements = [\n    { name = "grimoire-kit", path = "' + wheel + '" },\n'
+            '    { name = "iniconfig", path = "' + wheel + '" },\n]\n',
+            encoding="utf-8",
+        )
+
+    # la même chaîne apparaît deux fois : aucune réécriture à l'aveugle
+    result, _ = _managed_update("uv", tools, on_install=uv_writes_a_shape_we_do_not_know)
+    assert result.exit_code == 0, result.output
+    assert "still remembers a temporary file" in result.output
+    assert "uv tool install --force --python=3.12 --with=iniconfig 'grimoire-kit[mcp]'" in " ".join(result.output.split())
+
+
+def test_pipx_metadata_is_released_from_the_temporary_wheel_after_the_install(tmp_path: Path) -> None:
+    import json
+
+    venvs = tmp_path / "venvs"
+    (venvs / "grimoire-kit").mkdir(parents=True)
+    metadata_file = venvs / "grimoire-kit" / "pipx_metadata.json"
+
+    def pipx_writes_its_metadata(cmd: list[str]) -> None:
+        metadata_file.write_text(json.dumps({
+            "main_package": {"package_or_url": f"grimoire-kit[mcp]@ file://{_wheel_of(cmd)}"},
+            "injected_packages": {"iniconfig": {}},
+        }), encoding="utf-8")
+
+    result, calls = _managed_update("pipx", venvs, on_install=pipx_writes_its_metadata)
+    assert result.exit_code == 0, result.output
+    data = json.loads(metadata_file.read_text(encoding="utf-8"))
+    assert data["main_package"]["package_or_url"] == "grimoire-kit[mcp]"
+    assert "iniconfig" in data["injected_packages"]
+    assert calls[-1][:3] == ["/usr/bin/pipx", "install", "--force"]

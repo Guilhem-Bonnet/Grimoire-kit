@@ -55,7 +55,9 @@ PYPI_FILES_HOST = "files.pythonhosted.org"
 MAX_WHEEL_BYTES = 200 * 1024 * 1024
 
 _SUMS_LINE = re.compile(r"^([0-9a-fA-F]{64}) [ *](\S.*)$")
-_RECORD_SKIP = ("RECORD", "INSTALLER", "REQUESTED", "direct_url.json")
+#: Fichiers que l'installateur écrit dans ``<dist-info>/`` et que la wheel ne contient pas :
+#: leur présence dans le ``RECORD`` installé n'est pas un écart. ``uv_cache.json`` est celui d'``uv``.
+_INSTALLER_METADATA = ("RECORD", "INSTALLER", "REQUESTED", "direct_url.json", "uv_cache.json")
 
 
 class TrustError(Exception):
@@ -233,6 +235,15 @@ def _hash_of(path: Path) -> str:
     return base64.urlsafe_b64encode(bytes.fromhex(sha256_file(path))).rstrip(b"=").decode("ascii")
 
 
+def _is_installer_metadata(path: str) -> bool:
+    """Vrai pour une métadonnée d'installateur placée DIRECTEMENT sous ``<nom>.dist-info/``.
+
+    Le même nom ailleurs (``grimoire/INSTALLER``) est un fichier du paquet : il reste vérifié.
+    """
+    parent, _, name = path.rpartition("/")
+    return name in _INSTALLER_METADATA and parent.endswith(".dist-info") and "/" not in parent
+
+
 def parse_record(text: str) -> dict[str, str]:
     """``RECORD`` -> ``{chemin: sha256=...}``, sans les entrées qui varient d'une installation à l'autre."""
     entries: dict[str, str] = {}
@@ -240,7 +251,7 @@ def parse_record(text: str) -> dict[str, str]:
         if len(row) < 2 or not row[1]:
             continue
         path = row[0]
-        if path.endswith(".pyc") or path.startswith("../") or Path(path).name in _RECORD_SKIP:
+        if path.endswith(".pyc") or path.startswith("../") or _is_installer_metadata(path):
             continue
         entries[path] = row[1]
     return entries

@@ -11,7 +11,9 @@ the bug this module exists to prevent.
 from __future__ import annotations
 
 import json
+import shlex
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -114,20 +116,69 @@ def detect_update_cmd() -> tuple[list[str], str]:
     )
 
 
-def verified_install_cmd(wheel: Path, extras: list[str]) -> list[str]:
+def verified_install_cmd(
+    wheel: Path,
+    extras: list[str],
+    *,
+    manager: tuple[str, str | None] | None = None,
+    carry: Sequence[str] = (),
+) -> list[str]:
     """Installe le fichier déjà vérifié, jamais « la dernière version » : rien n'est retéléchargé.
 
     Les dépendances, elles, viennent toujours de l'index (leurs empreintes ne
-    sont pas publiées par le kit).
+    sont pas publiées par le kit). *carry* : options ``uv tool install`` qui
+    rejouent l'installation d'origine (``--with``, ``--python``) ; sans elles
+    ``--force`` repart de zéro et les paquets ajoutés par l'utilisateur sont perdus.
     """
     name = f"grimoire-kit[{','.join(extras)}]" if extras else "grimoire-kit"
     spec = f"{name} @ {wheel.resolve().as_uri()}"
-    kind, binary = _detect_manager()
+    kind, binary = manager or _detect_manager()
     if kind == "uv" and binary:
-        return [binary, "tool", "install", "--force", spec]
+        return [binary, "tool", "install", "--force", *carry, spec]
     if kind == "pipx" and binary:
         return [binary, "install", "--force", spec]
     return [sys.executable, "-m", "pip", "install", "--upgrade", spec]
+
+
+def _query_dir(argv: list[str]) -> Path | None:
+    """Dossier que le gestionnaire annonce (``uv tool dir``, ``pipx environment --value ...``)."""
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            argv, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
+        )
+    except Exception:  # best-effort : sans dossier, on n'a ni options à rejouer ni reçu à corriger
+        return None
+    if result.returncode != 0 or not isinstance(result.stdout, str) or not result.stdout.strip():
+        return None
+    found = Path(result.stdout.strip().splitlines()[0])
+    return found if found.is_dir() else None
+
+
+def _receipt_file(manager: tuple[str, str | None]) -> Path | None:
+    """Fichier où ``uv`` / ``pipx`` consignent la façon dont grimoire-kit a été installé."""
+    from grimoire.tools import install_receipt as receipt
+
+    kind, binary = manager
+    if kind == "uv" and binary:
+        tools = _query_dir([binary, "tool", "dir"])
+        return receipt.uv_receipt_path(tools) if tools else None
+    if kind == "pipx" and binary:
+        venvs = _query_dir([binary, "environment", "--value", "PIPX_LOCAL_VENVS"])
+        return receipt.pipx_metadata_path(venvs) if venvs else None
+    return None
+
+
+def registry_install_cmd(manager: tuple[str, str | None], extras: list[str], carry: Sequence[str] = ()) -> str:
+    """Commande qui refait une installation du registre (reçu sans chemin de fichier)."""
+    name = f"grimoire-kit[{','.join(extras)}]" if extras else "grimoire-kit"
+    kind, _ = manager
+    if kind == "uv":
+        return " ".join(["uv", "tool", "install", "--force", *(shlex.quote(c) for c in carry), shlex.quote(name)])
+    if kind == "pipx":
+        return f"pipx install --force {shlex.quote(name)}"
+    return f"pip install --upgrade {shlex.quote(name)}"
 
 
 def run_update(installed: str, *, online: bool, console: Any) -> None:
@@ -146,6 +197,7 @@ def run_update(installed: str, *, online: bool, console: Any) -> None:
 
     from rich.markup import escape
 
+    from grimoire.tools import install_receipt as receipt
     from grimoire.tools import install_trust as trust
 
     console.print(f"[bold]grimoire-kit[/bold]  {installed}\n")
@@ -188,10 +240,32 @@ def run_update(installed: str, *, online: bool, console: Any) -> None:
         trust_style = "green" if verdict.level == "verified" else "yellow"
         console.print(f"  [{trust_style}]trust_level: {verdict.level}[/{trust_style}] — {escape(verdict.detail)}")
 
-        cmd = verified_install_cmd(wheel, trust.installed_extras())
+        extras = trust.installed_extras()
+        manager = _detect_manager()
+        receipt_file = _receipt_file(manager)
+        carry: list[str] = []
+        if manager[0] == "uv" and receipt_file is not None:
+            try:
+                carry = receipt.uv_carried_options(receipt_file)
+            except receipt.UnsupportedReceiptError as exc:
+                _, manual_hint = detect_update_cmd()
+                console.print(f"[red]Update refused — {escape(str(exc))}[/red]")
+                console.print("  [dim]Nothing was installed. Without the file check, you can still run:[/dim]")
+                console.print(f"  [dim]{escape(manual_hint)}[/dim]")
+                raise typer.Exit(1) from None
+
+        cmd = verified_install_cmd(wheel, extras, manager=manager, carry=carry)
         console.print(f"  [dim]$ {escape(' '.join(cmd))}[/dim]")
 
         update_result = subprocess.run(cmd, timeout=300)
+        if update_result.returncode == 0 and receipt_file is not None:
+            # L'outil retient le chemin de la wheel du dossier temporaire, supprimé juste après.
+            pin = receipt.pin_uv_receipt if manager[0] == "uv" else receipt.pin_pipx_metadata
+            reason = pin(receipt_file, wheel)
+            if reason is not None:
+                console.print(f"\n[yellow]The tool still remembers a temporary file ({escape(reason)}).[/yellow]")
+                console.print("  Its own upgrade command would fail; restore a registry install with:")
+                console.print(f"  [dim]{escape(registry_install_cmd(manager, extras, carry))}[/dim]")
     if update_result.returncode != 0:
         _, manual_hint = detect_update_cmd()
         console.print("\n[red]Update failed.[/red] Try manually:")

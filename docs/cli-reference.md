@@ -1240,6 +1240,13 @@ puis installe ce fichier. Un écart, un fichier absent de la liste ou une liste 
 (« Nothing was installed »). Seule exception, affichée : une version antérieure à la première qui publie
 `SHA256SUMS` s'installe avec `trust_level: pypi-only`.
 
+Sous `uv tool`, les `--with` et le `--python` de l'installation d'origine (lus dans `uv-receipt.toml`) sont rejoués ;
+une option qu'on ne sait pas rejouer (`constraints`, `overrides`, `options`, un `--with` par chemin, dépôt git ou
+index) refuse la mise à jour avec la commande manuelle correspondante. Une fois l'installation faite, le chemin de
+la wheel temporaire est retiré du reçu (`uv-receipt.toml`, ou `pipx_metadata.json` pour pipx) : `uv tool upgrade` /
+`pipx upgrade` continuent de fonctionner ensuite. Si ce reçu a une forme inconnue, il n'est pas touché et la commande
+qui refait une installation du registre est affichée.
+
 | `trust_level` | Sens |
 | --- | --- |
 | `verified` | La wheel installée est celle de la release (PyPI et `SHA256SUMS` concordent, `RECORD` identique) |

@@ -190,6 +190,41 @@ def test_local_trust_ignores_bytecode_and_scripts_outside_the_package(tmp_path: 
     assert trust.local_trust(dist).level == "intact"
 
 
+def test_uv_cache_json_in_the_installed_record_is_not_a_gap_with_the_wheel(tmp_path: Path) -> None:
+    """D03-S1-01 : ``uv`` écrit ``<dist-info>/uv_cache.json`` ET le consigne dans le RECORD installé.
+
+    La wheel ne le contient pas : sans l'exception, ``verify-install --online`` rendait
+    ``modified`` pour toute installation faite par ``self update`` via ``uv tool``.
+    """
+    files = {"grimoire/a.py": b"1"}
+    dist = _fake_install(tmp_path / "site", files=files)
+    info = Path(str(dist.locate_file("grimoire_kit-1.0.0.dist-info")))
+    cache = b'{"timestamp":{"secs_since_epoch":1,"nanos_since_epoch":0}}'
+    (info / "uv_cache.json").write_bytes(cache)
+    record = info / "RECORD"
+    record.write_text(record.read_text() + f"grimoire_kit-1.0.0.dist-info/uv_cache.json,{_b64(cache)},{len(cache)}\n")
+    wheel = _wheel_with_record(tmp_path, files)
+    assert trust.same_as_wheel(wheel, dist) == ()
+    assert trust.local_trust(dist).level == "intact"
+
+
+def test_installer_metadata_is_skipped_only_directly_under_the_dist_info(tmp_path: Path) -> None:
+    """Le même nom dans le paquet reste vérifié : l'exception ne désarme pas le contrôle."""
+    record = trust.parse_record(
+        "grimoire/INSTALLER,sha256=a,1\n"
+        "grimoire/uv_cache.json,sha256=b,1\n"
+        "grimoire_kit-1.0.0.dist-info/sub/REQUESTED,sha256=c,1\n"
+        "grimoire_kit-1.0.0.dist-info/INSTALLER,sha256=d,1\n"
+        "grimoire_kit-1.0.0.dist-info/uv_cache.json,sha256=e,1\n"
+        "grimoire_kit-1.0.0.dist-info/direct_url.json,sha256=f,1\n"
+        "grimoire_kit-1.0.0.dist-info/METADATA,sha256=g,1\n"
+    )
+    assert set(record) == {
+        "grimoire/INSTALLER", "grimoire/uv_cache.json",
+        "grimoire_kit-1.0.0.dist-info/sub/REQUESTED", "grimoire_kit-1.0.0.dist-info/METADATA",
+    }
+
+
 def test_local_trust_levels_for_dev_and_missing_record(tmp_path: Path) -> None:
     dev = _fake_install(tmp_path / "a", files={"grimoire/a.py": b"x"}, direct_url={"url": "file:///x", "dir_info": {"editable": True}})
     assert trust.local_trust(dev).level == "dev"
