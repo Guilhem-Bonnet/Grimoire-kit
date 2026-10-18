@@ -1204,8 +1204,8 @@ def task_trace_export(
 # de l'épic — l'hôte tient la session, le kit remet une tranche de travail à un
 # exécuteur puis applique le gate — se livre ici au niveau d'une tâche unique,
 # en croisant la classe de vérifiabilité (#309) et le registre par palier de
-# coût (#310). Pas de juge LLM, pas de worktree automatique : l'utilisateur
-# travaille sur une branche propre, et c'est un `--check` mécanique qui décide.
+# coût (#310). Pas de juge LLM ; le worktree par tâche et le merge vérifié sont
+# `task worktree` / `task merge` (W5-02) ; c'est un `--check` mécanique qui décide.
 
 _VERDICT_ICON: dict[str, str] = {
     "green": "[green]vert[/green]",
@@ -1437,3 +1437,9 @@ def task_migrate_standard(
     )
     if not dry_run and report.snapshot_path:
         console.print(f"[dim]Instantané : {report.snapshot_path} (restaurer avec --restore {report.stamp})[/dim]")
+
+
+# W5-02 : `task worktree` et `task merge`, dans leur module (plafond de taille d'un module).
+from grimoire.cli.cmd_task_worktree import register_worktree_commands  # noqa: E402
+
+register_worktree_commands(task_app)
