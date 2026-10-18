@@ -38,6 +38,7 @@ from grimoire.hosts.emitters.base import (
     managed_header,
 )
 from grimoire.hosts.emitters.copilot import _dispatch_policy_section
+from grimoire.hosts.emitters.rules import with_rule_layers
 from grimoire.hosts.secrets import secret_patterns
 from grimoire.hosts.surface import (
     AgentSpec,
@@ -315,7 +316,6 @@ class OpenCodeEmitter(Emitter):
     host_id = HostId.OPENCODE
 
     def plan(self, surface: ProjectSurface, project_root: Path) -> EmitPlan:
-        del project_root
         by_slug = {skill.slug: skill for skill in surface.skills}
         attached = {slug for agent in surface.agents for slug in agent.skills}
         files: list[EmittedFile] = [
@@ -359,9 +359,12 @@ class OpenCodeEmitter(Emitter):
                 )
             )
         files.append(_instructions_file(surface, guarded, degradations))
-        return EmitPlan(
-            host_id=self.host_id,
-            files=tuple(files),
-            merges=(_config_merge(surface),),
-            degradations=tuple(degradations),
+        return with_rule_layers(
+            EmitPlan(
+                host_id=self.host_id,
+                files=tuple(files),
+                merges=(_config_merge(surface),),
+                degradations=tuple(degradations),
+            ),
+            project_root,
         )

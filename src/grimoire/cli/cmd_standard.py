@@ -1431,6 +1431,7 @@ def score(
         "warnings": result.warnings,
         "errors": result.errors,
         "dimensions": result.dimensions,
+        **result.rules,
         "output_path": str(result.output_path),
     }
     if _get_fmt(ctx) == "json":
@@ -1438,6 +1439,7 @@ def score(
         raise typer.Exit(0 if result.ok else 1)
     status = "[green]OK[/green]" if result.ok else "[red]FAIL[/red]"
     console.print(f"{status} compliance score {result.score}/{result.threshold} written to {result.output_path}")
+    console.print(f"rules: {result.rules.get('rules_enforced')} enforced, {result.rules.get('rules_advisory')} advisory")
     table = Table(title="Compliance dimensions")
     table.add_column("Dimension")
     table.add_column("Score")

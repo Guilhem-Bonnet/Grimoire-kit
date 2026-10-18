@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 from rich.markup import escape
@@ -84,3 +84,25 @@ def task_approve_check(
             f"[yellow]![/yellow] non attestée ({outcome.attestation_reason}) : aucun tour humain ne le prouve — "
             "l'approbation rend la falsification plus coûteuse, pas impossible."
         )
+
+
+def report_unapproved(exc: Exception, task_id: str, *, as_json: bool, console: Any) -> None:
+    """Rend le refus de `task verify` sur des commandes non approuvées (rien n'a été lancé)."""
+    blocked = exc.blocked  # type: ignore[attr-defined]
+    if as_json:
+        rows = [{"index": b.index, "command_sha256": b.command_sha256, "reason": b.reason} for b in blocked]
+        typer.echo(json.dumps({"status": "unapproved", "task_id": task_id, "unapproved": rows}, indent=2))
+        return
+    console.print(f"[red]✗[/red] unapproved — {exc}")
+    for b in blocked:
+        console.print(f"  - {escape(b.display)}  [dim]sha256 {b.command_sha256[:12]} : {b.reason}[/dim]")
+    console.print(f"[dim]Lis ces commandes, puis `grimoire task approve-check {task_id}`.[/dim]")
+
+
+def verify_payload(outcome: Any) -> dict[str, Any]:
+    """Charge JSON de `task verify` : pack, verdict et reçus d'exécution."""
+    return {
+        "pack": outcome.pack.to_dict(),
+        "verdict": outcome.verdict.to_dict(),
+        "receipts": [{k: r[k] for k in ("command_sha256", "tree_fingerprint", "exit", "reused")} for r in outcome.receipts],
+    }

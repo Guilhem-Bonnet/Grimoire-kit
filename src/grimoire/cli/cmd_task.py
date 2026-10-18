@@ -397,12 +397,14 @@ def task_show(
     # `model_hint` pour ne jamais afficher `None` littéralement.
     dispatch_events = [e for e in service.ledger.list_events(task_id) if e.event_type == "task.dispatched"]
     last_dispatch = dispatch_events[-1].payload if dispatch_events else None
+    usage = _usage_of(task, project_root.resolve())
     if _fmt(ctx) == "json":
         payload = task.to_dict()
         payload["verifiability"] = verifiabilite
         payload["recommended_model"] = advice["recommended_model"]
         payload["model_tier"] = advice["model_tier"]
         payload["last_dispatch"] = last_dispatch
+        payload["usage"] = usage
         typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
         return
     console.print(f"[bold]{task.id}[/bold] — {task.title}")
@@ -428,6 +430,7 @@ def task_show(
         _print_uncertainties(list(last_dispatch.get("uncertainties") or ()))
         for warning in last_dispatch.get("uncertainty_warnings") or ():
             console.print(f"  [yellow]![/yellow] {escape(str(warning))}")
+    console.print(f"  usage   : {_usage_line(usage)}")
     if task.owner or task.claim:
         console.print(f"  porté par : {task.owner or (task.claim.actor_id if task.claim else '—')}")
     if task.directives:
@@ -1144,6 +1147,7 @@ def task_verify(
     sortie inattendu, délai, commande inexécutable), 2 si la tâche ne déclare
     aucune commande : jamais un vert à vide.
     """
+    from grimoire.cli.cmd_task_approve import report_unapproved, verify_payload
     from grimoire.missions.verify import NoDeclaredChecksError, UnapprovedChecksError, verify_task
 
     root = project_root.resolve()
@@ -1156,31 +1160,11 @@ def task_verify(
         console.print(f"[red]✗[/red] {exc}")
         raise typer.Exit(2) from exc
     except UnapprovedChecksError as exc:
-        # W3-03 : rien n'a été lancé. Le détail dit quoi lire avant d'approuver.
-        if _fmt(ctx) == "json":
-            rows = [{"index": b.index, "command_sha256": b.command_sha256, "reason": b.reason} for b in exc.blocked]
-            typer.echo(json.dumps({"status": "unapproved", "task_id": task_id, "unapproved": rows}, indent=2))
-        else:
-            console.print(f"[red]✗[/red] unapproved — {exc}")
-            for b in exc.blocked:
-                console.print(f"  - {escape(b.display)}  [dim]sha256 {b.command_sha256[:12]} : {b.reason}[/dim]")
-            console.print(f"[dim]Lis ces commandes, puis `grimoire task approve-check {task_id}`.[/dim]")
+        report_unapproved(exc, task_id, as_json=_fmt(ctx) == "json", console=console)  # W3-03 : rien n'a été lancé.
         raise typer.Exit(3) from exc
 
     if _fmt(ctx) == "json":
-        typer.echo(
-            json.dumps(
-                {
-                    "pack": outcome.pack.to_dict(),
-                    "verdict": outcome.verdict.to_dict(),
-                    "receipts": [
-                        {k: r[k] for k in ("command_sha256", "tree_fingerprint", "exit", "reused")} for r in outcome.receipts
-                    ],
-                },
-                indent=2,
-                ensure_ascii=False,
-            )
-        )
+        typer.echo(json.dumps(verify_payload(outcome), indent=2, ensure_ascii=False))
     else:
         icon = "[green]OK[/green]" if outcome.passed else "[red]✗[/red]"
         console.print(f"{icon} {task_id} — verdict {outcome.verdict.verdict.value} ({outcome.pack.id}, {outcome.verdict.id})")
@@ -1194,26 +1178,53 @@ def task_verify(
 
 @task_app.command("trace-export")
 def task_trace_export(
-    dest: Annotated[Path, typer.Argument(help="Fichier JSONL de sortie.")],
-    fmt: Annotated[str, typer.Option("--format", help="otel ou langfuse.")] = "otel",
+    dest: Annotated[Path | None, typer.Argument(help="Fichier JSONL de sortie (inutile avec --format otlp).")] = None,
+    fmt: Annotated[str, typer.Option("--format", help="otel, langfuse ou otlp.")] = "otel",
     mission_id: Annotated[str | None, typer.Option("--mission-id", help="Filtre sur une mission.")] = None,
+    endpoint: Annotated[str | None, typer.Option("--endpoint", help="Collecteur OTLP/HTTP (--format otlp).")] = None,
+    header: Annotated[list[str] | None, typer.Option("--header", help="En-tête NOM=VALEUR, répétable (--format otlp).")] = None,
     project_root: _PROJECT_ROOT = Path(),
 ) -> None:
-    """Exporte le TraceLedger (traces d'outils, verdicts de policy) en JSONL.
+    """Exporte le TraceLedger (traces d'outils, verdicts de policy).
 
-    ``--format otel`` suit les conventions sémantiques OTel GenAI ;
-    ``--format langfuse`` le contrat REST ``/api/public/traces`` de Langfuse.
-    Aucun SDK tiers requis dans les deux cas.
+    ``--format otel`` écrit du JSONL aux conventions sémantiques OTel GenAI ;
+    ``--format langfuse`` le contrat REST ``/api/public/traces`` de Langfuse ;
+    ``--format otlp --endpoint URL`` envoie les mêmes spans à un collecteur
+    OTLP/HTTP (JSON) et échoue si le collecteur ne les accepte pas.
+    Aucun SDK tiers requis.
     """
     from grimoire.core.standard_generation import TRACES_DIR
     from grimoire.traces.ledger import TraceLedger
 
-    if fmt not in {"otel", "langfuse"}:
-        console.print(f"[red]✗[/red] Format inconnu : {fmt} (attendu : otel, langfuse)")
+    if fmt not in {"otel", "langfuse", "otlp"}:
+        console.print(f"[red]✗[/red] Format inconnu : {fmt} (attendu : otel, langfuse, otlp)")
         raise typer.Exit(2)
 
     root = project_root.resolve()
     ledger = TraceLedger(root / TRACES_DIR)
+    if fmt == "otlp":
+        from grimoire.traces.otlp import OtlpExportError, export_otlp
+
+        if not endpoint:
+            console.print("[red]✗[/red] --format otlp exige --endpoint (ex. http://127.0.0.1:4318).")
+            raise typer.Exit(2)
+        headers: dict[str, str] = {}
+        for item in header or []:
+            name, sep, value = item.partition("=")
+            if not sep or not name.strip():
+                console.print(f"[red]✗[/red] --header attend NOM=VALEUR, reçu : {escape(item)}")
+                raise typer.Exit(2)
+            headers[name.strip()] = value
+        try:
+            sent = export_otlp(ledger, endpoint, mission_id=mission_id, headers=headers)
+        except OtlpExportError as exc:
+            console.print(f"[red]✗[/red] {escape(str(exc))}")
+            raise typer.Exit(1) from exc
+        console.print(f"[green]OK[/green] {sent} span(s) acceptés par {escape(endpoint)}")
+        return
+    if dest is None:
+        console.print(f"[red]✗[/red] Le format {fmt} écrit un fichier : passez le chemin de sortie.")
+        raise typer.Exit(2)
     count = ledger.export_otel_jsonl(dest, mission_id=mission_id) if fmt == "otel" else ledger.export_langfuse(dest, mission_id=mission_id)
     console.print(f"[green]OK[/green] {count} trace(s) exportée(s) au format {fmt} → {dest}")
 
@@ -1478,3 +1489,8 @@ register_approve_commands(task_app)
 from grimoire.cli.cmd_task_review import register_review_commands  # noqa: E402
 
 register_review_commands(task_app)
+
+# W4-01 : `task fold-usage` et l'usage affiché par `task show`, dans leur module (plafond de taille).
+from grimoire.cli.cmd_task_usage import _usage_line, _usage_of, register_usage_commands  # noqa: E402
+
+register_usage_commands(task_app)
