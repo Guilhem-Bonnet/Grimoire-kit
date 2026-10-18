@@ -23,7 +23,14 @@ vecteurs connus pour fabriquer cette preuve :
   reconnaître une telle sous-session n'étant pas vérifié, l'invocation est
   refusée en governed et production. ``claude -p`` seul ouvre une session
   neuve, d'un autre ``session_id`` : il n'ouvre aucun checkpoint et n'est pas
-  refusé.
+  refusé ;
+- ``ledger-snapshot`` (K13) — écrire ``ledger.snapshot.json``, l'instantané du rejeu du
+  ledger : refusé quel que soit le profil. Ce n'est pas une preuve d'autorité, c'est un
+  cache que le ledger restaure *sans rejouer* le préfixe qu'il couvre ; son hash ne lie que
+  le journal, pas l'état qu'il porte. Écrit à la main, il imposerait un état que le journal
+  ne dit pas, sans trace d'audit. La garde ne couvre que les voies d'écriture reconnues
+  (même limite que les autres vecteurs, :data:`LIMIT_NOTE`) ; supprimer l'instantané se
+  fait hors agent.
 
 Pure analyse de texte, sans E/S : le profil est lu par l'appelant
 (:mod:`.tool_policy`), qui décide aussi du sort d'une exception ici (refus en
@@ -45,13 +52,16 @@ from grimoire.hosts.decisions.tool_facts import (
 )
 from grimoire.policies.schemas import ActionKind, MutationClass
 
-__all__ = ["AUTHORITY_SUFFIX", "LIMIT_NOTE", "ForgeryVector", "forgery_vector"]
+__all__ = ["AUTHORITY_SUFFIX", "LIMIT_NOTE", "SNAPSHOT_FILENAME", "ForgeryVector", "forgery_vector"]
 
 #: Suffixe des journaux de challenges et de décisions de checkpoint
 #: (:mod:`grimoire.flows.attestation`) — recopié ici plutôt qu'importé pour
 #: que ``PreToolUse`` n'importe jamais :mod:`grimoire.flows`.
 AUTHORITY_SUFFIX = ".authority.jsonl"
-_PROTECTED = (TURNS_FILENAME, AUTHORITY_SUFFIX)
+#: Nom de l'instantané du rejeu du ledger (:data:`grimoire.missions.ledger_snapshot.SNAPSHOT_FILENAME`),
+#: recopié ici pour la même raison ; un test fige l'égalité.
+SNAPSHOT_FILENAME = "ledger.snapshot.json"
+_PROTECTED = (TURNS_FILENAME, AUTHORITY_SUFFIX, SNAPSHOT_FILENAME)
 
 #: La limite que tout refus de cette garde affiche (principe 7 du plan).
 LIMIT_NOTE = (
@@ -93,6 +103,12 @@ class ForgeryVector:
 
 def _norm(text: str) -> str:
     return text.replace("\\", "/")
+
+
+def _write_vector(marker: str, what: str) -> ForgeryVector:
+    """Le vecteur d'une écriture qui vise *marker* : l'instantané du ledger a son propre code (K13)."""
+    code = "ledger-snapshot" if marker == SNAPSHOT_FILENAME else "journal"
+    return ForgeryVector(code, what, governed_only=False)
 
 
 def _names_protected(text: str) -> str:
@@ -253,14 +269,14 @@ def forgery_vector(facts: ToolFacts) -> ForgeryVector | None:
         for target in facts.targets:
             marker = _names_protected(target)
             if marker:
-                return ForgeryVector("journal", f"écriture de {target}", governed_only=False)
+                return _write_vector(marker, f"écriture de {target}")
     command = facts.command
     if not command:
         return None
     if facts.mutation is not MutationClass.READ_ONLY:
         marker = _names_protected(command)
         if marker:
-            return ForgeryVector("journal", f"commande qui écrit un journal d'autorité ({marker})", governed_only=False)
+            return _write_vector(marker, f"commande qui écrit un journal d'autorité ou l'instantané du ledger ({marker})")
     executed = [command_surface(command), *extract_c_bodies(command)]
     if facts.mutation is not MutationClass.READ_ONLY and any(m in text for text in executed for m in _HOOK_MODULE_MARKERS):
         return ForgeryVector("hook-replay", "rejeu du hook UserPromptSubmit", governed_only=True)

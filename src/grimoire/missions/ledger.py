@@ -38,6 +38,7 @@ from grimoire.missions.lease import (
     LeaseFile,
     backoff_delay,
     lease_path,
+    mark_waiting,
     parse_instant,
     read_lease,
     write_lease,
@@ -797,6 +798,8 @@ class MissionLedger:
             # sortie de needs_verification (clôture, échec) : la barrière tombe à ce moment-là.
             payload["fence_epoch"] = self._epoch_high.get(task_id, 0) + 1
             hands_back = True
+        entering, leaving = to_state is TaskState.WAITING, task.status is TaskState.WAITING  # K13 : marque de garde
+        mark_waiting(lease_path(self._root, task_id), entering=entering, leaving=leaving)
         if to_state is TaskState.CLAIMED and claim is not None:
             epoch = self._epoch_high.get(task_id, 0) + 1
             claim = replace(claim, lease_epoch=epoch)

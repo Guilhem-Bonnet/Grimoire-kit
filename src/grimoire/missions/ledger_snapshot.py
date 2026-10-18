@@ -1,4 +1,4 @@
-"""Instantané du rejeu du ledger (K13, épopée #705) — un cache dérivé, jamais la vérité.
+"""Instantané du rejeu du ledger (K13, épopée #705) — un cache dérivé du journal, pas une preuve.
 
 Le journal ``events.jsonl`` est un journal d'audit : sa taille n'est pas bornée et ne
 doit pas l'être. Ce qu'on borne, c'est le *coût du rejeu*. Chaque hook est un
@@ -12,10 +12,17 @@ suivant restaure l'état, vérifie le hash puis ne rejoue que la suite (rejeu in
 
 Règles :
 
-- **Un instantané n'est jamais cru sans preuve.** Schéma, version du kit, offset sur une
-  fin de ligne et hash du préfixe doivent concorder ; la moindre divergence (journal
-  réécrit, tronqué, instantané illisible ou d'une autre version) l'ignore et ramène au
-  rejeu complet, qui fait foi. Le supprimer est toujours sans danger.
+- **Un instantané n'est cru que s'il concorde avec le journal.** Schéma, version du kit,
+  offset sur une fin de ligne et hash du préfixe doivent concorder ; la moindre divergence
+  (journal réécrit, tronqué, instantané illisible ou d'une autre version) l'ignore et ramène
+  au rejeu complet, qui fait foi. Le supprimer est sans danger.
+- **Limite : le hash lie le préfixe du journal, pas l'état que l'instantané porte.** Tout ce
+  que la vérification calcule vient de ``events.jsonl`` seul : un instantané réécrit à la main,
+  au hash de préfixe valide, est restauré tel quel, sans aucune trace dans le journal d'audit
+  (``test_the_snapshot_proves_the_journal_prefix_not_the_state_it_carries``). Rien ici ne
+  l'authentifie. La défense est la garde d'autorité (:mod:`grimoire.hosts.decisions.authority_guard`,
+  vecteur ``ledger-snapshot``) : aucune voie d'écriture d'outil reconnue vers ce fichier, quel que
+  soit le profil, avec la limite de toute garde de chemin (du code arbitraire la contourne).
 - **Les événements ne sont pas dans l'instantané.** Ils restent dans le journal et ne sont
   relus que si un appelant les demande (:func:`all_events`) ; le dernier horodatage, seul
   besoin de ``clock_state``, est porté à côté (:func:`latest_event_time`).

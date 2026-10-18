@@ -24,7 +24,7 @@ from grimoire.missions.lease import lease_path, write_lease
 from grimoire.missions.ledger import MissionLedger
 from grimoire.missions.service import TaskService
 
-from .test_pretooluse_brake import (  # noqa: F401
+from .test_pretooluse_brake import (
     SESSION,
     _claimed,
     _pre,
@@ -164,3 +164,86 @@ def _barrier(task_id: str) -> Any:
     from grimoire.missions.lease import LeaseFile
 
     return LeaseFile(task_id, 2, datetime.now(UTC).isoformat(), holder=False, origin="reap")
+
+
+# ── K13-S1-01 : le chemin rapide nomme la même tâche que resolve_active_task ───────────────────
+
+
+def _ledger_task(root: Path) -> str:
+    """La tâche que la résolution classique (rejeu du ledger) donne à la session."""
+    from grimoire.core.standard_state import resolve_active_task
+
+    return resolve_active_task(root, session_id=SESSION).task_id
+
+
+def _age_lease(root: Path, tid: str, *, hours: float, busy_for_minutes: float = 0.0) -> None:
+    """Recule ``renewed_at`` du fichier de bail (un battement de cœur qui ne vient plus)."""
+    from dataclasses import replace
+    from datetime import UTC, datetime, timedelta
+
+    from grimoire.missions.lease import read_lease
+
+    path = lease_path(TaskService(root).ledger_root, tid)
+    lease = read_lease(path)
+    assert lease is not None
+    now = datetime.now(UTC)
+    busy = (now + timedelta(minutes=busy_for_minutes)).isoformat() if busy_for_minutes else ""
+    write_lease(path, replace(lease, renewed_at=(now - timedelta(hours=hours)).isoformat(), busy_until=busy))
+
+
+def test_waiting_task_is_not_a_held_task(governed: Path) -> None:
+    """Une tâche garée (``waiting``) garde son bail, mais n'est plus « la tâche active » du ledger."""
+    tid = _claimed(governed)
+    _prompt(governed)
+    service = TaskService(governed)
+    service.wait(tid, "ci", "claude")
+    assert service.require(tid).status.value == "waiting"
+
+    _, decision = _pre(governed, _real_pretooluse(governed))
+
+    assert decision.detail["task_id"] == _ledger_task(governed)
+    assert decision.detail["task_id"] != tid
+
+
+def test_resumed_task_goes_back_to_the_fast_path(governed: Path, replays: list[str]) -> None:
+    """``waiting → running`` rend la tâche au chemin rapide : pas de rejeu, et la même tâche que le ledger."""
+    tid = _claimed(governed)
+    _prompt(governed)
+    service = TaskService(governed)
+    service.wait(tid, "ci", "claude")
+    service.resume(tid, "claude")
+    replays.clear()
+
+    _, decision = _pre(governed, _real_pretooluse(governed))
+
+    assert replays == [], f"la tâche reprise a rejoué le ledger {len(replays)} fois"
+    assert decision.detail["task_id"] == tid == _ledger_task(governed)
+
+
+def test_expired_claim_is_not_a_held_task(governed: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Un bail perdu (battement absent au-delà du TTL) et un claim expiré : la tâche n'est plus tenue."""
+    from grimoire.missions.schemas import TaskClaim
+
+    tid = _claimed(governed)
+    _prompt(governed)
+    _age_lease(governed, tid, hours=5)
+    monkeypatch.setattr(TaskClaim, "is_expired", lambda self, now=None: True)
+
+    # En arrière-plan : le frein ne pose pas ``busy_until`` (un appel qui attend aurait réveillé le bail).
+    _, decision = _pre(governed, _real_pretooluse(governed, run_in_background=True))
+
+    assert decision.detail["task_id"] == _ledger_task(governed)
+    assert decision.detail["task_id"] != tid
+
+
+def test_a_busy_lease_is_still_held(governed: Path, replays: list[str]) -> None:
+    """``busy_until`` dans le futur prolonge le bail (outil long) : le chemin rapide tient, sans rejeu."""
+    tid = _claimed(governed)
+    _prompt(governed)
+    _age_lease(governed, tid, hours=5, busy_for_minutes=10)
+    replays.clear()
+
+    _, decision = _pre(governed, _real_pretooluse(governed))
+
+    assert replays == []
+    assert decision.detail["task_id"] == tid

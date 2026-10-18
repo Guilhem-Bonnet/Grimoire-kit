@@ -4,7 +4,7 @@ Le banc de K13 mesure ``≈ 170 ms`` pour rejouer 10 000 événements, rejoués 
 processus de hook* alors que D21 accorde 100 ms aux hooks. D21 prescrit alors un instantané
 ``ledger.snapshot.json`` (offset et hash) avec rejeu incrémental, et seulement alors. Ces
 tests tiennent la contrainte qui le rend acceptable : il ne change jamais ce que le ledger
-répond, et il n'est jamais cru sans preuve.
+répond, et il n'est restauré que s'il concorde avec le journal (le hash ne lie pas l'état : voir le dernier test).
 """
 
 from __future__ import annotations
@@ -260,3 +260,32 @@ def test_replay_of_a_task_replaced_after_the_snapshot(tmp_path: Path, always_sna
     task = _fresh(root).get_task(tid)
     assert task is not None and task.status is TaskState.CANCELLED
     assert replace(task) == task
+
+
+def test_the_snapshot_proves_the_journal_prefix_not_the_state_it_carries(
+    tmp_path: Path, always_snapshot: Callable[[], None]
+) -> None:
+    """La limite, nommée (K13-S1-02) : le hash lie le préfixe du journal, pas l'état de l'instantané.
+
+    Un instantané réécrit à la main, au hash de préfixe valide, est restauré tel quel : le rejeu
+    complet « fait foi » seulement tant que l'instantané est ignoré, et rien ici ne l'authentifie.
+    La défense est la garde d'autorité (``test_authority_guard.py`` : aucune voie d'écriture d'outil
+    vers ``ledger.snapshot.json``), pas ce fichier. Ce test casse le jour où l'instantané est
+    authentifié : il faudra alors retirer la limite de la docstring de ``ledger_snapshot``.
+    """
+    service = TaskService(tmp_path)
+    root = service.ledger._root
+    tid = service.add("Tâche", ("ok",), owner="g", actor="claude", ready=True).task.id
+    service.context(tid)
+    service.claim(tid, "claude", host="local")
+    always_snapshot()
+    _fresh(root).list_tasks()  # écrit l'instantané
+    forged = json.loads((root / SNAPSHOT).read_text(encoding="utf-8"))
+    forged["state"]["tasks"][tid]["status"] = TaskState.CLOSED.value
+    forged["state"]["tasks"][tid]["claim"] = None
+    (root / SNAPSHOT).write_text(json.dumps(forged), encoding="utf-8")
+
+    lines = (root / "events.jsonl").read_text(encoding="utf-8").splitlines()
+    reached = [json.loads(line)["payload"].get("to_state") for line in lines if '"task.transitioned"' in line]
+    assert TaskState.CLOSED.value not in reached  # le journal ne clôt rien
+    assert _fresh(root).get_task(tid).status is TaskState.CLOSED  # le rejeu restaure l'état falsifié

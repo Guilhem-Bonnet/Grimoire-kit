@@ -94,7 +94,10 @@ def held_task_id(hook: HookInput) -> str:
     que le reste du PreToolUse sache *quelle* tâche sans relancer ``resolve_active_task``, qui
     rejoue tout le ledger (≈ 0,4 s à 10 000 événements, contre 50 ms de budget). Vide, la
     résolution classique reste la règle : ``GRIMOIRE_TASK_ID`` d'abord, un fichier absent, une
-    barrière, un autre epoch ou une session sans bail noté renvoient au ledger.
+    barrière, un autre epoch, une session sans bail noté, une tâche garée (``waiting``, marque
+    du fichier de bail) ou un bail perdu (``renewed_at`` + TTL et ``busy_until`` dépassés, comme
+    ``LeaseFile.is_lost``) renvoient au ledger : ``resolve_active_task`` ne nomme ni une tâche
+    garée ni un claim expiré, et le chemin rapide ne doit pas dire autre chose que lui (K13-S1-01).
     """
     if os.environ.get(TASK_ENV, "").strip():
         return ""
@@ -103,8 +106,10 @@ def held_task_id(hook: HookInput) -> str:
         if not task_id:
             return ""
         cached = read_lease(lease_path(hook.project_root.resolve() / LEDGER_RELPATH, task_id))
-        if cached is None or not cached.holder or cached.epoch != epoch:
+        if cached is None or not cached.holder or cached.epoch != epoch or cached.waiting:
             return ""
+        if cached.is_lost(datetime.now(UTC)):
+            return ""  # bail perdu (TTL, ``busy_until`` dépassés) : la résolution écarte aussi un claim expiré
         return normalize_task_id(task_id)
     except Exception:
         return ""

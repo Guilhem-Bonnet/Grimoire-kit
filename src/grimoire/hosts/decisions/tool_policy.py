@@ -271,13 +271,16 @@ def _authority_guard(hook: HookInput, facts: ToolFacts) -> Decision | None:
         profile = active_profile_id(hook.project_root)
         if vector.governed_only and profile not in _AUTHORITY_PROFILES:
             return None
+        why = (
+            "L'instantané du ledger est un cache dérivé du journal, restauré sans rejouer le préfixe qu'il couvre : "
+            "écrit à la main, il imposerait un état que le journal ne dit pas. Il ne s'écrit que par le ledger."
+            if vector.code == "ledger-snapshot"
+            else "Le journal des tours humains et les challenges de checkpoint ne s'écrivent que par "
+            "le hook de l'hôte : c'est la preuve qu'un humain a décidé."
+        )
         return Decision(
             outcome=Outcome.DENY,
-            reason=(
-                f"[Grimoire authority] {hook.tool_name or 'action'} refusé — {vector.what}. "
-                "Le journal des tours humains et les challenges de checkpoint ne s'écrivent que par "
-                f"le hook de l'hôte : c'est la preuve qu'un humain a décidé. {limit}"
-            ),
+            reason=f"[Grimoire authority] {hook.tool_name or 'action'} refusé — {vector.what}. {why} {limit}",
             detail={"tool": hook.tool_name, "authority_vector": vector.code, "profile": profile},
         )
     except Exception as exc:
