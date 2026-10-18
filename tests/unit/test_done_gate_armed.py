@@ -15,12 +15,14 @@ bloquant sans variable. Le défaut livré reste shadow (décision 3 du plan).
 from __future__ import annotations
 
 import io
+import json
 from datetime import date
 from pathlib import Path
 
 import pytest
 from ruamel.yaml import YAML
 
+from grimoire.bridges.schemas import HostId
 from grimoire.core.agentic_standard import setup_standard_profile
 from grimoire.core.standard_checks.evidence_journal import (
     append_evidence_event,
@@ -32,6 +34,7 @@ from grimoire.core.standard_task_scaffold import scaffold_task_artifacts
 from grimoire.hosts.decisions import HookInput, Outcome, decide_evidence_gate
 from grimoire.hosts.decisions import done_gate as dg
 from grimoire.hosts.events import HookEvent
+from grimoire.hosts.runtime import run_hook
 
 TASK = "bootstrap"
 _PROFILE = "_grimoire/standard/standard-profile.yaml"
@@ -170,15 +173,29 @@ def test_the_armed_gate_refuses_at_most_three_times_per_session(tmp_path: Path) 
     assert verdicts[3].capped is True
 
 
-def test_an_explicit_shadow_in_the_environment_beats_the_arming_date(
+def test_an_environment_shadow_does_not_disarm_a_gate_armed_by_date(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """W2-09-S1-02 : la variable n'arme que (``enforce``), elle ne désarme jamais.
+
+    Le plan interdit toute désactivation par variable d'environnement : l'autonomie passe par un
+    octroi tracé. Un ``GRIMOIRE_DONE_GATE=shadow`` posé par la session ne fait donc pas descendre
+    un projet armé par sa date (comme sur la base, où seule ``enforce`` était lue), et la date
+    reste dans le verdict.
+    """
     monkeypatch.setenv("GRIMOIRE_DONE_GATE", "shadow")
     root = _project(tmp_path, options="  done_gate_enforce_from: '2026-01-01'\n")
     _stale(root)
     decision = _stop(root)
-    assert decision.outcome is Outcome.ALLOW  # type: ignore[attr-defined]
-    assert (_verdict(decision)["mode"], _verdict(decision)["mode_source"]) == ("shadow", "env")
+    assert decision.outcome is Outcome.BLOCK  # type: ignore[attr-defined]
+    verdict = _verdict(decision)
+    assert (verdict["mode"], verdict["mode_source"], verdict["armed_from"]) == ("enforce", "option_dated", "2026-01-01")
+
+
+def test_an_environment_shadow_is_not_a_source_of_its_own(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GRIMOIRE_DONE_GATE", "shadow")
+    root = _project(tmp_path, options="  done_gate_enforce_from: '2999-01-01'\n")
+    assert dg.resolve_done_gate_mode(root, TASK, "governed") == dg.DoneGateMode("shadow", "default", "2999-01-01")
 
 
 def test_an_explicit_shadow_option_beats_the_arming_date(tmp_path: Path) -> None:
@@ -252,3 +269,59 @@ def test_the_continued_stop_chain_follows_the_arming_date(tmp_path: Path) -> Non
     again = decide_evidence_gate(HookInput(event=HookEvent.STOP, project_root=root, session_id="s-1", stop_active=True))
     assert again.outcome is Outcome.BLOCK  # type: ignore[attr-defined]
     assert "shadow" not in again.detail["stop_signature"]  # type: ignore[attr-defined]
+
+
+# --- le mode est lu là où la mesure est lue (W2-09-S1-01) ------------------------------------
+
+
+def _run_stop(root: Path, session: str = "s-1") -> object:
+    """Un ``Stop`` par le chemin complet de l'hôte (``run_hook``) : c'est lui qui écrit les traces."""
+    payload = {"session_id": session, "hook_event_name": "Stop", "cwd": str(root)}
+    _rendered, decision, _hook = run_hook(payload, host_id=HostId.CLAUDE_CODE_CLI, event=HookEvent.STOP, project_root=root)
+    return decision
+
+
+def _records(root: Path) -> list[dict]:  # type: ignore[type-arg]
+    lines: list[str] = []
+    for path in sorted((root / "_grimoire-output" / "traces").glob("*.jsonl")):
+        lines += path.read_text(encoding="utf-8").splitlines()
+    return [json.loads(line) for line in lines if line.strip()]
+
+
+def _mode_tags(record: dict) -> list[str]:  # type: ignore[type-arg]
+    return sorted(t for t in record["tags"] if t.startswith("done_gate_"))
+
+
+def test_an_armed_stop_leaves_its_mode_in_the_trace_and_in_the_hold(tmp_path: Path) -> None:
+    root = _project(tmp_path, options="  done_gate_enforce_from: '2026-01-01'\n")
+    _stale(root)
+    assert _run_stop(root).outcome is Outcome.BLOCK  # type: ignore[attr-defined]
+    expected = [
+        "done_gate_armed_from:2026-01-01",
+        "done_gate_mode:enforce",
+        "done_gate_source:option_dated",
+    ]
+    records = _records(root)
+    stop = next(r for r in records if "stop" in r["tags"])
+    hold = next(r for r in records if "policy.hold" in r["tags"])
+    assert _mode_tags(stop) == expected
+    assert _mode_tags(hold) == expected
+    assert "reason:done_gate:stale" in hold["tags"]
+    state = json.loads(next((root / "_grimoire-output" / ".runs").glob("policy-holds-*.json")).read_text(encoding="utf-8"))
+    assert sorted(state["holds"][0]["extra_tags"]) == expected
+
+
+def test_a_shadow_stop_says_shadow_in_the_hold_that_measures_it(tmp_path: Path) -> None:
+    """La mesure de la release en shadow doit pouvoir distinguer un hold shadow d'un hold armé."""
+    root = _project(tmp_path)
+    _stale(root)
+    assert _run_stop(root).outcome is Outcome.ALLOW  # type: ignore[attr-defined]
+    hold = next(r for r in _records(root) if "policy.hold" in r["tags"])
+    assert _mode_tags(hold) == ["done_gate_mode:shadow", "done_gate_source:default"]
+
+
+def test_a_stop_without_mutation_still_names_its_mode_in_the_trace(tmp_path: Path) -> None:
+    root = _project(tmp_path, options="  done_gate_enforce_from: '2026-01-01'\n")
+    assert _run_stop(root).outcome is Outcome.ALLOW  # type: ignore[attr-defined]
+    stop = next(r for r in _records(root) if "stop" in r["tags"])
+    assert "done_gate_mode:enforce" in stop["tags"]

@@ -37,8 +37,9 @@ verdicts and someone has read whether they tracked reality.
 The mode is resolved once, by :func:`resolve_done_gate_mode`, in this order, and
 the answer (``mode`` and ``mode_source``) is written on **every** verdict:
 
-1. ``GRIMOIRE_DONE_GATE=enforce`` / ``shadow`` in the environment (an explicit
-   ``shadow`` is the operator's way back to observation, whatever else is set);
+1. ``GRIMOIRE_DONE_GATE=enforce`` in the environment — it arms, it never disarms: a
+   ``shadow`` there is ignored (it is neither a source nor an override), because the plan
+   forbids any switch-off by variable — autonomy goes through a traced grant;
 2. ``options: {done_gate: enforce | shadow}`` in ``_grimoire/standard/
    standard-profile.yaml`` (read the same way :mod:`grimoire.core.
    standard_checks.gate_test_run` reads that file's ``profile`` key — see
@@ -96,6 +97,7 @@ __all__ = [
     "DoneGateMode",
     "DoneGateVerdict",
     "StopStep",
+    "done_gate_mode_tags",
     "evaluate_done_gate",
     "record_stop_block",
     "record_stop_would_block",
@@ -128,7 +130,7 @@ _COOLDOWN_SECONDS = 60.0
 #: (jev-belay/pi-warden: "trois par session").
 _SESSION_CAP = 3
 
-#: ``GRIMOIRE_DONE_GATE=enforce|shadow`` — the environment switch (see the module docstring).
+#: ``GRIMOIRE_DONE_GATE=enforce`` — the environment switch (see the module docstring) ; it only arms.
 _ENFORCE_ENV = "GRIMOIRE_DONE_GATE"
 
 MODE_ENFORCE = "enforce"
@@ -495,9 +497,12 @@ def resolve_done_gate_mode(
     default of an opt-in. The arming date only arms a profile that can refuse
     (:data:`BLOCKING_PROFILES`).
     """
-    env = os.environ.get(_ENFORCE_ENV, "").strip().lower()
-    if env in (MODE_ENFORCE, MODE_SHADOW):
-        return DoneGateMode(env, "env")
+    # W2-09-S1-02 : la variable n'arme que. ``GRIMOIRE_DONE_GATE=shadow`` ne désarme ni une
+    # option ni une date échue, comme sur la base où seule ``enforce`` était lue : le plan
+    # interdit toute désactivation par variable d'environnement (elle passe par un octroi
+    # tracé), et une session peut poser une variable, pas lever un gate armé.
+    if os.environ.get(_ENFORCE_ENV, "").strip().lower() == MODE_ENFORCE:
+        return DoneGateMode(MODE_ENFORCE, "env")
     options = _read_options(project_root, task_id)
     option = str(options.get("done_gate", "")).strip().lower()
     if option in (MODE_ENFORCE, MODE_SHADOW):
@@ -517,6 +522,24 @@ def resolve_done_gate_mode(
             if profile in BLOCKING_PROFILES and _today(now_iso) >= day:
                 return DoneGateMode(MODE_ENFORCE, source, armed_from)
     return DoneGateMode(MODE_SHADOW, "default", armed_from)
+
+
+def done_gate_mode_tags(done_gate: Any) -> list[str]:
+    """Ledger tags that say under which mode a ``done_gate`` verdict was produced (W2-09-S1-01).
+
+    *done_gate* is ``Decision.detail["done_gate"]`` (:meth:`DoneGateVerdict.to_dict`) ; anything
+    else gives ``[]``. ``done_gate_mode:<mode>``, ``done_gate_source:<source>`` and, when a
+    date is in force, ``done_gate_armed_from:<YYYY-MM-DD>`` : the only place where the
+    ``done_gate:stale`` holds that justify flipping the default can be split by mode.
+    """
+    if not isinstance(done_gate, dict):
+        return []
+    tags = []
+    for key, name in (("mode", "mode"), ("mode_source", "source"), ("armed_from", "armed_from")):
+        value = done_gate.get(key)
+        if isinstance(value, str) and value:
+            tags.append(f"done_gate_{name}:{value}")
+    return tags
 
 
 def _is_enforced(project_root: Path, task_id: str, profile: str = "", now_iso: str = "") -> bool:

@@ -77,6 +77,7 @@ import json
 import os
 import re
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -199,6 +200,7 @@ def record_policy_hold(
     reason: str,
     fingerprint: str,
     target: str,
+    extra_tags: Sequence[str] = (),
 ) -> None:
     """Journal one non-``allow`` hook verdict — the ``policy.hold`` half.
 
@@ -214,6 +216,10 @@ def record_policy_hold(
     record_agent_miss`: a journal that cannot be written must never turn a
     hook decision into a broken hook. A no-op without a *session_id* — there
     is nothing to correlate the eventual followup against.
+
+    *extra_tags* are appended to the ledger tags, kept in the session's hold state, and
+    repeated on the followup : a caller that needs its holds split by a dimension (the
+    ``done_gate`` mode, W2-09) writes it there, where the measurement is read.
     """
     from grimoire.core.standard_state import state_writes_allowed
 
@@ -241,6 +247,7 @@ def record_policy_hold(
                 f"fingerprint:{fingerprint}",
                 f"target:{target}",
                 f"hold_id:{hold_id}",
+                *extra_tags,
             ],
             trace_id=f"TRC-policy-hold-{hold_id}",
         )
@@ -256,10 +263,17 @@ def record_policy_hold(
             "fingerprint": fingerprint,
             "target": target,
             "task_id": task_id,
+            "extra_tags": list(extra_tags),
         })
         _save_open_holds(path, session_id, holds)
     except Exception:  # noqa: S110 — observabilité : jamais au prix du hook lui-même
         pass
+
+
+def _stored_extra_tags(hold: dict[str, Any]) -> list[str]:
+    """The ``extra_tags`` a hold was opened with ; ``[]`` for a state written before they existed."""
+    raw = hold.get("extra_tags")
+    return [tag for tag in raw if isinstance(tag, str)] if isinstance(raw, list) else []
 
 
 def record_hold_followup(
@@ -338,6 +352,7 @@ def record_hold_followup(
                 f"label:{label}",
                 f"hook:{hold.get('hook') or ''}",
                 f"reason:{hold.get('reason') or ''}",
+                *_stored_extra_tags(hold),
             ],
             trace_id=f"TRC-policy-hold-followup-{hold_id}",
         )
