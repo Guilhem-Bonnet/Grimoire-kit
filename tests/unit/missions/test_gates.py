@@ -136,6 +136,27 @@ def test_une_transition_non_declaree_n_est_pas_gardee(projet: Path) -> None:
     assert not verdict.blocked
 
 
+# ── plancher de profil (W2-07-S1-01) ───────────────────────────────────────
+
+def test_le_plancher_de_profil_durcit_le_gate(projet: Path) -> None:
+    """Un profil déclaré `starter` sous un plancher `governed` ne rend pas le gate consultatif."""
+    (projet / STANDARD / "standard-profile.yaml").write_text("profile: starter\n", encoding="utf-8")
+    avant = check_transition(projet, tache(), "in_progress", "review")
+    assert avant.strictness == "advisory" and not avant.blocked
+
+    (projet / STANDARD / "profile-floor.yaml").write_text("floor: governed\n", encoding="utf-8")
+    verdict = check_transition(projet, tache(), "in_progress", "review")
+    assert verdict.strictness == "hard_fail"
+    assert verdict.refusals
+    assert verdict.blocked
+
+
+def test_un_plancher_illisible_durcit_le_gate(projet: Path) -> None:
+    (projet / STANDARD / "standard-profile.yaml").write_text("profile: starter\n", encoding="utf-8")
+    (projet / STANDARD / "profile-floor.yaml").write_text(": [yaml cassé\n", encoding="utf-8")
+    assert check_transition(projet, tache(), "in_progress", "review").blocked
+
+
 # ── fail-closed ─────────────────────────────────────────────────────────────
 
 def test_une_preuve_sans_resolveur_refuse_au_lieu_de_passer(projet: Path) -> None:

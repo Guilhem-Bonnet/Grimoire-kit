@@ -216,7 +216,7 @@ class TestGuardFailsClosedWhenTheBinaryIsMissing:
         (root / "package.json").write_text('{"type": "module"}', encoding="utf-8")
         (root / "harness.mjs").write_text(self.HARNESS, encoding="utf-8")
         empty = root / "empty-bin"
-        empty.mkdir()
+        empty.mkdir(exist_ok=True)
         env = {"PATH": str(empty)}
         # Node abandonne (abort 134) sous Windows sans SystemRoot : on le conserve, PATH reste vide.
         for key in ("SYSTEMROOT", "SystemRoot", "WINDIR"):
@@ -229,6 +229,27 @@ class TestGuardFailsClosedWhenTheBinaryIsMissing:
         out = self._run(governed)
         assert out.stdout.startswith("REFUSED"), out
         assert "grimoire-hook introuvable, garde indisponible" in out.stdout
+
+    def test_floor_above_a_lighter_declared_profile_refuses_the_tool(self, governed: Path) -> None:
+        """W2-07-S1-03 : `profile: starter` sous un plancher `governed` reste un profil bloquant."""
+        manifest = governed / "_grimoire/standard/standard-profile.yaml"
+        manifest.write_text(manifest.read_text(encoding="utf-8").replace("profile: governed", "profile: starter", 1), encoding="utf-8")
+        _emit(governed)
+        assert self._run(governed).stdout.startswith("ALLOWED")  # sans plancher : avertissement
+        (governed / "_grimoire/standard/profile-floor.yaml").write_text("floor: governed\n", encoding="utf-8")
+        out = self._run(governed)
+        assert out.stdout.startswith("REFUSED"), out
+
+    def test_unreadable_floor_file_refuses_the_tool(self, governed: Path) -> None:
+        manifest = governed / "_grimoire/standard/standard-profile.yaml"
+        manifest.write_text(manifest.read_text(encoding="utf-8").replace("profile: governed", "profile: starter", 1), encoding="utf-8")
+        (governed / "_grimoire/standard/profile-floor.yaml").write_text("floor: platinum\n", encoding="utf-8")
+        _emit(governed)
+        assert self._run(governed).stdout.startswith("REFUSED")
+
+    def test_plugin_reads_the_floor_file(self, governed: Path) -> None:
+        _emit(governed)
+        assert "profile-floor.yaml" in (governed / ".opencode/plugin/grimoire-guard.js").read_text(encoding="utf-8")
 
     def test_ungoverned_project_passes_with_a_warning(self, tmp_path: Path) -> None:
         plugin = tmp_path / ".opencode/plugin"

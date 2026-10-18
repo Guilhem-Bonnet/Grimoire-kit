@@ -234,17 +234,19 @@ def profile_floor_id(project_root: Path, *, write_cache: bool = True) -> str:
     Un fichier présent dont la valeur n'est pas un profil connu (YAML cassé,
     clé absente, faute de frappe) vaut ``governed`` : un plancher qu'on ne sait
     pas lire ne doit pas se lire comme « pas de plancher » (fail-closed).
+
+    Relu à chaque appel, jamais mis en cache : l'empreinte mtime+taille du cache
+    se recopie, et un ``Write`` du cache suffisait à effacer un plancher qui
+    promettait de tenir face aux écritures. Le fichier est petit ; le coût est un
+    ``stat`` quand il est absent et un parse YAML quand il est là (non mesuré).
+    *write_cache* est conservé pour la symétrie des signatures et n'a plus d'effet.
     """
-    root = project_root.resolve()
-
-    def compute() -> str:
-        path = root / PROFILE_FLOOR_FILE
-        if not path.is_file():
-            return ""
-        floor = _load_mapping(path).get("floor")
-        return str(floor) if isinstance(floor, str) and floor in PROFILE_LADDER else "governed"
-
-    return str(_cached_or_fresh(root, "profile_floor", PROFILE_FLOOR_FILE, compute, write_cache=write_cache))
+    del write_cache
+    path = project_root.resolve() / PROFILE_FLOOR_FILE
+    if not path.is_file():
+        return ""
+    floor = _load_mapping(path).get("floor")
+    return str(floor) if isinstance(floor, str) and floor in PROFILE_LADDER else "governed"
 
 
 def profile_below_floor(declared: str, floor: str) -> bool:

@@ -20,7 +20,6 @@ from grimoire.core.agentic_standard import (
     StandardRemediationApplyResult,
     StandardRuntimeArtifact,
     StandardVerificationResult,
-    _read_manifest_profile,
     apply_remediation_actions,
     audit_runtime_events,
     build_context_bundle,
@@ -54,6 +53,7 @@ from grimoire.core.standard_checks.gate_test_run import (
     ensure_fresh_test_run,
     resolve_gate_check_task_id,
 )
+from grimoire.core.standard_effective_profile import effective_manifest_profile
 from grimoire.core.standard_task_scaffold import scaffold_task_artifacts
 from grimoire.hosts.sync import HostSyncOutcome, sync_host_surfaces
 
@@ -331,7 +331,7 @@ def traceability(
     from grimoire.core.standard_traceability import matrix_for, with_verdicts
 
     if project_root is not None and profile is None:
-        profile = _read_manifest_profile(project_root.resolve())
+        profile = effective_manifest_profile(project_root.resolve())
     matrix = matrix_for(profile or "governed")
     if project_root is not None:
         matrix = with_verdicts(matrix, project_root, task_id=task_id)

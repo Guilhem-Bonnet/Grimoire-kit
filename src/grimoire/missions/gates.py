@@ -33,7 +33,7 @@ from ruamel.yaml.error import YAMLError
 
 from grimoire.core.exceptions import GrimoireMissionError
 from grimoire.core.standard_generation import STANDARD_DIR
-from grimoire.core.standard_profile_manifest import read_profile
+from grimoire.core.standard_state import active_profile_id
 from grimoire.evidence import EvidenceService, VerdictResult
 
 __all__ = [
@@ -158,7 +158,10 @@ def _strictness(root: Path) -> str:
     table = gates.get("profile_strictness")
     if not isinstance(table, dict):
         return _UNKNOWN_PROFILE_STRICTNESS
-    profile = read_profile(root / _PROFILE_FILE) or "starter"
+    # Le profil actif, plancher compris (W2-07) : le profil brut laissait un
+    # `starter` déclaré sous un plancher `governed` rendre le gate consultatif.
+    # Sans écriture de cache : check_transition est aussi appelé en lecture seule.
+    profile = active_profile_id(root, write_cache=False)
     value = table.get(profile)
     return value if isinstance(value, str) else _UNKNOWN_PROFILE_STRICTNESS
 

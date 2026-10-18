@@ -10,6 +10,7 @@ profil déclaré plus léger ne franchit pas (``policy.floor_applied``), et seul
 
 from __future__ import annotations
 
+import json
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -265,3 +266,56 @@ def test_doctor_reports_floor_state(governed: Path) -> None:
     _floor(governed, "floor: platinum\n")
     broken = profile_floor_entry(governed)
     assert broken is not None and broken["level"] == "warn" and "fail-closed" in broken["detail"]
+
+
+def test_a_forged_cache_entry_cannot_erase_the_floor(governed: Path) -> None:
+    """W2-07-S2-01 : l'empreinte mtime+taille du cache se recopie, le plancher ne se met pas en cache."""
+    _declare(governed, "starter")
+    _floor(governed)
+    assert active_profile_id(governed) == "governed"  # chauffe le cache
+    cache = governed / "_grimoire-output/.runs/standard-state-cache.json"
+    data = json.loads(cache.read_text(encoding="utf-8"))
+    entry = data["entries"].get("profile_floor")
+    if entry is not None:
+        entry["value"] = ""
+    else:
+        stat = (governed / FLOOR).stat()
+        data["entries"]["profile_floor"] = {
+            "path": FLOOR.as_posix(),
+            "fingerprint": [stat.st_mtime_ns, stat.st_size],
+            "value": "",
+        }
+    cache.write_text(json.dumps(data), encoding="utf-8")
+    assert active_profile_id(governed) == "governed"
+
+
+def test_verify_reads_the_profile_through_the_floor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """W2-07-S1-04 : `standard verify` sans profil explicite voit le profil que les hooks appliquent."""
+    from grimoire.core.agentic_standard import verify_standard_profile
+
+    monkeypatch.delenv("GRIMOIRE_TASK_ID", raising=False)
+    setup_standard_profile(tmp_path, profile_id="starter", task_id="bootstrap")
+    assert verify_standard_profile(tmp_path).profile == "starter"
+    _floor(tmp_path)
+    result = verify_standard_profile(tmp_path)
+    assert result.profile == "governed"
+    assert any("task-board.yaml" in str(path) for path in result.missing)
+    # Un profil explicite reste maître.
+    assert verify_standard_profile(tmp_path, profile_id="starter").profile == "starter"
+
+
+def test_traceability_default_profile_follows_the_floor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from typer.testing import CliRunner
+
+    from grimoire.cli.app import app
+    from grimoire.core.standard_effective_profile import effective_manifest_profile
+
+    monkeypatch.delenv("GRIMOIRE_TASK_ID", raising=False)
+    assert effective_manifest_profile(tmp_path) is None  # pas enrôlé
+    setup_standard_profile(tmp_path, profile_id="starter", task_id="bootstrap")
+    assert effective_manifest_profile(tmp_path) == "starter"
+    _floor(tmp_path)
+    assert effective_manifest_profile(tmp_path) == "governed"
+    result = CliRunner().invoke(app, ["--output", "json", "standard", "traceability", str(tmp_path)])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["profile"] == "governed"
