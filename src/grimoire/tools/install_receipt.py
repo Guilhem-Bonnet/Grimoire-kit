@@ -30,7 +30,8 @@ import tomllib
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote, urlparse
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 
 from grimoire.core.fsio import atomic_write
 
@@ -173,7 +174,7 @@ def pin_pipx_metadata(metadata_file: Path, wheel: Path) -> str | None:
     match = _PIPX_FILE_SPEC.match(spec.strip())
     if match is None:
         return None
-    if not _same_file(unquote(urlparse(match.group(2)).path), wheel):
+    if not _same_file(url2pathname(urlparse(match.group(2)).path), wheel):
         return "la métadonnée pipx pointe vers un autre fichier que la wheel installée"
     main["package_or_url"] = match.group(1)
     try:

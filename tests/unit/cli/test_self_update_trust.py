@@ -8,8 +8,11 @@ Constat (D-03) : la commande déléguait à ``uv tool upgrade`` / ``pipx upgrade
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 
 import pytest
 from typer.testing import CliRunner
@@ -29,7 +32,7 @@ def _update(net: FakeRelease, *, installed: str = "3.0.0", extras: list[str] | N
         spec = cmd[-1]
         seen["cmd"] = cmd
         # le fichier à installer existe au moment de l'appel (et seulement alors)
-        seen["exists"] = Path(spec.split(" @ file://", 1)[1]).is_file() if " @ file://" in spec else None
+        seen["exists"] = _wheel_path(spec).is_file() if " @ file:" in spec else None
         return ok
 
     with patch("grimoire.cli.app.is_online", return_value=True), \
@@ -166,8 +169,13 @@ def _managed_update(
     return result, calls
 
 
+def _wheel_path(spec: str) -> Path:
+    """Le fichier désigné par ``<nom> @ file:...`` (``/C:/x`` sous Windows n'est pas un chemin)."""
+    return Path(url2pathname(urlparse(spec.split(" @ ", 1)[1]).path))
+
+
 def _wheel_of(cmd: list[str]) -> str:
-    return cmd[-1].split(" @ file://", 1)[1]
+    return str(_wheel_path(cmd[-1]))
 
 
 def _uv_state(tmp_path: Path, receipt_text: str) -> Path:
@@ -213,7 +221,7 @@ def test_uv_receipt_is_released_from_the_temporary_wheel_after_the_install(tmp_p
     def uv_writes_its_receipt(cmd: list[str]) -> None:
         wheel = _wheel_of(cmd)
         receipt_file.write_text(
-            '[tool]\nrequirements = [\n    { name = "grimoire-kit", extras = ["mcp"], path = "' + wheel + '" },\n'
+            '[tool]\nrequirements = [\n    { name = "grimoire-kit", extras = ["mcp"], path = ' + json.dumps(wheel) + ' },\n'
             '    { name = "iniconfig" },\n]\nentrypoints = []\n',
             encoding="utf-8",
         )
@@ -232,8 +240,8 @@ def test_a_receipt_that_cannot_be_released_says_the_command_that_repairs_it(tmp_
     def uv_writes_a_shape_we_do_not_know(cmd: list[str]) -> None:
         wheel = _wheel_of(cmd)
         receipt_file.write_text(
-            '[tool]\nrequirements = [\n    { name = "grimoire-kit", path = "' + wheel + '" },\n'
-            '    { name = "iniconfig", path = "' + wheel + '" },\n]\n',
+            '[tool]\nrequirements = [\n    { name = "grimoire-kit", path = ' + json.dumps(wheel) + ' },\n'
+            '    { name = "iniconfig", path = ' + json.dumps(wheel) + ' },\n]\n',
             encoding="utf-8",
         )
 
@@ -245,15 +253,13 @@ def test_a_receipt_that_cannot_be_released_says_the_command_that_repairs_it(tmp_
 
 
 def test_pipx_metadata_is_released_from_the_temporary_wheel_after_the_install(tmp_path: Path) -> None:
-    import json
-
     venvs = tmp_path / "venvs"
     (venvs / "grimoire-kit").mkdir(parents=True)
     metadata_file = venvs / "grimoire-kit" / "pipx_metadata.json"
 
     def pipx_writes_its_metadata(cmd: list[str]) -> None:
         metadata_file.write_text(json.dumps({
-            "main_package": {"package_or_url": f"grimoire-kit[mcp]@ file://{_wheel_of(cmd)}"},
+            "main_package": {"package_or_url": f"grimoire-kit[mcp]@ {Path(_wheel_of(cmd)).as_uri()}"},
             "injected_packages": {"iniconfig": {}},
         }), encoding="utf-8")
 

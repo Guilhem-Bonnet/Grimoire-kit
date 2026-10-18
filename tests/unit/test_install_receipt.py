@@ -24,7 +24,7 @@ def _receipt(*requirements: str, extra: str = "") -> str:
 
 
 def _kit(path: Path) -> str:
-    return f'{{ name = "grimoire-kit", path = "{path}" }}'
+    return f'{{ name = "grimoire-kit", path = {json.dumps(str(path))} }}'
 
 
 # ── uv : options à rejouer ────────────────────────────────────────────────────
@@ -116,8 +116,8 @@ def test_the_receipt_no_longer_points_at_the_temporary_wheel(tmp_path: Path) -> 
 def test_extras_survive_the_pin_whatever_the_key_order(tmp_path: Path) -> None:
     wheel = _wheel(tmp_path)
     for entry in (
-        f'{{ name = "grimoire-kit", extras = ["mcp"], path = "{wheel}" }}',
-        f'{{ path = "{wheel}", name = "grimoire-kit", extras = ["mcp"] }}',
+        f'{{ name = "grimoire-kit", extras = ["mcp"], path = {json.dumps(str(wheel))} }}',
+        f'{{ path = {json.dumps(str(wheel))}, name = "grimoire-kit", extras = ["mcp"] }}',
     ):
         file = tmp_path / "uv-receipt.toml"
         file.write_text(_receipt(entry), encoding="utf-8")
@@ -150,7 +150,7 @@ def test_a_receipt_shape_that_is_not_recognised_is_left_untouched(tmp_path: Path
     wheel = _wheel(tmp_path)
     file = tmp_path / "uv-receipt.toml"
     # le chemin apparaît deux fois (le reçu d'un format futur) : aucune réécriture à l'aveugle
-    text = _receipt(_kit(wheel), f'{{ name = "other", path = "{wheel}" }}')
+    text = _receipt(_kit(wheel), f'{{ name = "other", path = {json.dumps(str(wheel))} }}')
     file.write_text(text, encoding="utf-8")
     reason = receipt.pin_uv_receipt(file, wheel)
     assert reason is not None and "non reconnue" in reason
