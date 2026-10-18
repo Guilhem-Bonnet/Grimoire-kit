@@ -381,12 +381,14 @@ def task_show(
     # `model_hint` pour ne jamais afficher `None` littéralement.
     dispatch_events = [e for e in service.ledger.list_events(task_id) if e.event_type == "task.dispatched"]
     last_dispatch = dispatch_events[-1].payload if dispatch_events else None
+    usage = _usage_of(task, project_root.resolve())
     if _fmt(ctx) == "json":
         payload = task.to_dict()
         payload["verifiability"] = verifiabilite
         payload["recommended_model"] = advice["recommended_model"]
         payload["model_tier"] = advice["model_tier"]
         payload["last_dispatch"] = last_dispatch
+        payload["usage"] = usage
         typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
         return
     console.print(f"[bold]{task.id}[/bold] — {task.title}")
@@ -412,6 +414,7 @@ def task_show(
         _print_uncertainties(list(last_dispatch.get("uncertainties") or ()))
         for warning in last_dispatch.get("uncertainty_warnings") or ():
             console.print(f"  [yellow]![/yellow] {escape(str(warning))}")
+    console.print(f"  usage   : {_usage_line(usage)}")
     if task.owner or task.claim:
         console.print(f"  porté par : {task.owner or (task.claim.actor_id if task.claim else '—')}")
     if task.directives:
@@ -910,6 +913,74 @@ def _estimate_model_cost(model: str, tokens_in: int, tokens_out: int) -> float |
     if rates is None:
         return None
     return round((tokens_in * rates["in"] + tokens_out * rates["out"]) / 1_000_000, 6)
+
+
+def _usage_of(task: Any, root: Path) -> dict[str, Any]:
+    """Tokens et coût repliés pour cette tâche (W4-01), sans rien créer sur le disque."""
+    from grimoire.core.standard_generation import TRACES_DIR
+    from grimoire.hosts.capabilities import recorded_contract, resolve_host
+    from grimoire.traces.ledger import TraceLedger
+    from grimoire.traces.transcript_usage import task_usage
+
+    traces_path = root / TRACES_DIR
+    traces = TraceLedger(traces_path).list_traces(task_id=task.id) if (traces_path / "traces.jsonl").is_file() else []
+    host = resolve_host(task.claim.host_id) if task.claim else None
+    available = None if host is None else recorded_contract(host).verified("local_token_usage")
+    return task_usage(traces, host_usage_available=available)
+
+
+def _usage_line(usage: dict[str, Any]) -> str:
+    from grimoire.costs import format_usd
+
+    source = usage["usage_source"]
+    if source in ("none", "unavailable"):
+        return f"{source}" + (" (l'hôte n'expose pas de journal d'usage vérifié)" if source == "unavailable" else "")
+    if source == "reported":
+        return f"rapporté par l'ouvrier seulement ({usage['reported']['calls']} appel(s))"
+    cout = format_usd(usage["cost_usd"], usage["cost_status"], usage["unpriced_calls"])
+    ligne = (
+        f"{usage['calls']} appel(s), {usage['input_tokens']} in / {usage['output_tokens']} out, "
+        f"cache {usage['cache_read_tokens']} lu / {usage['cache_creation_tokens']} écrit, coût {cout} [{source}]"
+    )
+    if usage["discrepancy"] is not None:
+        ligne += f" — écart avec le coût rapporté : {usage['discrepancy']['relative_gap']:.0%}"
+    return ligne
+
+
+@task_app.command("fold-usage")
+def task_fold_usage(
+    ctx: typer.Context,
+    task_id: Annotated[str, typer.Argument(help="Identifiant de la tâche.")],
+    transcript: Annotated[Path, typer.Argument(help="Journal de session Claude Code (.jsonl).")],
+    mission_id: Annotated[str, typer.Option("--mission-id")] = "",
+    project_root: _PROJECT_ROOT = Path(),
+    ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
+    traces_root: _TRACES_ROOT = _DEFAULT_TRACES,
+) -> None:
+    """Replie l'usage de tokens d'un journal de session dans le TraceLedger, rattaché à la tâche (W4-01).
+
+    Idempotent : rejouer la commande, ou la rejouer sur un journal qui a grandi,
+    n'ajoute que les appels nouveaux. Un appel dont le coût ne peut pas être
+    affirmé (modèle non tarifé, tokens de cache) est replié avec un coût inconnu.
+    """
+    from grimoire.traces.ledger import TraceLedger
+    from grimoire.traces.transcript_usage import fold_claude_transcript
+
+    root = project_root.resolve()
+    _require_task(_service(project_root, ledger_root), task_id)
+    traces_path = traces_root if traces_root.is_absolute() else root / traces_root
+    try:
+        result = fold_claude_transcript(TraceLedger(traces_path), transcript, task_id=task_id, mission_id=mission_id)
+    except OSError as exc:
+        console.print(f"[red]✗[/red] Journal illisible : {escape(str(exc))}")
+        raise typer.Exit(1) from None
+    if _fmt(ctx) == "json":
+        typer.echo(json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
+        return
+    console.print(
+        f"[green]OK[/green] {result.new_calls} appel(s) replié(s), {result.already_folded} déjà connu(s)"
+        f" ({result.unreadable_lines} ligne(s) illisible(s), {result.invalid_usage} sans compteurs valides)"
+    )
 
 
 @task_app.command("record-model-call")
