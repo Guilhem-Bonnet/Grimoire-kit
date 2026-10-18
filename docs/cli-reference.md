@@ -425,9 +425,11 @@ Le **WIP** global et par rôle (rôle = `owner` de la tâche) vient de `capacity
 `orchestration-policy.yaml` (`wip.limit_global`, `wip.limit_per_role`) ; il est appliqué **au claim**,
 sous le verrou du ledger. Une limite illisible refuse le claim. Sans limite déclarée, rien n'est refusé.
 Seules les tâches `claimed` et `running` comptent : un bail perdu occupe son créneau jusqu'à `task reap`.
+La **reprise** `waiting → running` (simple ou attestée) repasse par la même garde : sans place, elle est
+refusée (« Reprise refusée … elle attend une place ») et la tâche reste `waiting`.
 
 **Capacité** : `_grimoire/standard/capacity.yaml` (facultatif, `version: 1`). Un pool non
-déclaré n'est pas sondé ; une section invalide refuse la garde qu'elle porte, les autres continuent.
+déclaré n'est pas sondé ; une section invalide refuse la garde qu'elle porte, les autres continuent. La table `pools` est une seule section : une clé inconnue ou mal casée (`gpu`, `Ci`) la rend illisible et fait refuser `ci`, `host` et `llm` (`Defer(unknown)`), jamais ignorer un pool déclaré.
 
 ```yaml
 version: 1
@@ -446,8 +448,10 @@ queue: {aging_hours: 24, famine_hours: 24}
 ```
 
 **Occupation** : dérivée du ledger à chaque appel, aucun compteur ni fichier `held/`. Un créneau
-`ci` est pris par une tâche qui détient un claim (type non exempté) ou dont un push est observé
-(`task.ci_pushed`), jusqu'à `task.ci_finished` ou `capacity.released`. Si la fin des checks
+`ci` est réservé dès le claim (type non exempté) ou par un push observé (`task.ci_pushed`) et reste
+pris jusqu'à `task.ci_finished` ou `capacity.released`, tant que la tâche est `claimed`, `running`,
+`needs_verification` ou `waiting` : se garer ne rend pas le créneau, les checks n'ont pas fini.
+La clôture, l'annulation, l'échec ou le retour à `ready` le rendent. Si la fin des checks
 n'est pas observable, le créneau reste pris et visible dans `queue plan` jusqu'à `queue release`.
 
 **Quota** : `unlimited` est la valeur par défaut, acceptée par la configuration : le kit ne pose

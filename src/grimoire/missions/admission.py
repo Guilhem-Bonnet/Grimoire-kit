@@ -104,6 +104,10 @@ CAPACITY_RELEASED_EVENT = "capacity.released"
 QUOTA_CONSUMED_EVENT = "quota.consumed"
 
 _HELD = (TaskState.CLAIMED, TaskState.RUNNING)
+#: Les états où une réservation de créneau CI tient encore : une tâche garée (vérification, attente)
+#: n'a pas vu ses checks finir. La clôture, l'annulation, l'échec et le retour à ``ready`` la rendent.
+_CI_HELD = (*_HELD, TaskState.NEEDS_VERIFICATION, TaskState.WAITING)
+_POOL_SECTIONS = frozenset({"ci", "host", "llm"})
 _KNOWN_POOLS = ("ci",)
 _TOP_KEYS = frozenset({"version", "quota", "pools", "wip", "queue"})
 
@@ -144,8 +148,13 @@ class Capacity:
         return self.tokens_per_day == UNLIMITED
 
     def error_for(self, section: str) -> str:
-        """Le motif qui rend *section* inutilisable : sa propre erreur, sinon celle du fichier entier."""
-        return self.errors.get(section) or self.errors.get("*") or ""
+        """Le motif qui rend *section* inutilisable : sa propre erreur, sinon celle du fichier entier.
+
+        Les trois pools partagent la table ``pools`` : si elle est illisible (clé inconnue, casse
+        fautive), on ne sait plus lequel elle a fait taire, donc ``ci``, ``host`` et ``llm`` refusent.
+        """
+        own = self.errors.get(section) or self.errors.get("*") or ""
+        return own or (self.errors.get("pools", "") if section in _POOL_SECTIONS else "")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -398,9 +407,10 @@ def _consumed_today(events: list[Any], now: datetime) -> TokenUse:
 def derive_view(ledger: MissionLedger, capacity: Capacity, *, now: datetime, host: HostReading | None = None) -> LedgerView:
     """L'occupation, relue du ledger à chaque appel (aucun compteur, aucun fichier ``held/``).
 
-    Un créneau CI est tenu par une tâche (hors types exemptés) qui détient un claim depuis
-    son dernier claim, ou dont un push est observé ; il est rendu par ``task.ci_finished`` ou
-    ``capacity.released`` (``pool: ci``).
+    Un créneau CI est tenu par une tâche (hors types exemptés) réservé depuis son dernier claim,
+    ou dont un push est observé ; il est rendu par ``task.ci_finished`` ou ``capacity.released``
+    (``pool: ci``). Une tâche garée (``needs_verification``, ``waiting``) garde sa réservation :
+    ses checks n'ont pas fini. Clôture, annulation, échec ou retour à ``ready`` la rendent.
     """
     tasks = {t.id: t for t in ledger.list_tasks()}
     events = ledger.list_events()
@@ -425,9 +435,8 @@ def derive_view(ledger: MissionLedger, capacity: Capacity, *, now: datetime, hos
             else:
                 provider.pop(tid, None)
     held = tuple(Held(t.id, t.owner, provider.get(t.id, "")) for t in tasks.values() if t.status in _HELD)
-    holders = {h.task_id for h in held}
     exempt = set(capacity.ci_exempt_types)
-    ci = {tid for tid in reserved if tid in holders and tasks[tid].type.value not in exempt} | {tid for tid in pushed if tid in tasks}
+    ci = {tid for tid in reserved if tid in tasks and tasks[tid].status in _CI_HELD and tasks[tid].type.value not in exempt} | {tid for tid in pushed if tid in tasks}
     return LedgerView(now, held, frozenset(ci), _consumed_today(events, now), host)
 
 

@@ -508,3 +508,131 @@ def test_task_list_ready_mcp_returns_the_queue_order(projet: Path, service: Task
     high = _pret(service, mission, "haute", priority="critical")
     out = json.loads(task_list_ready(project_path=str(projet)))
     assert [t["id"] for t in out["tasks"]] == [high.id, low.id]
+
+
+# ── Sections de pools illisibles, créneau CI d'une tâche garée, WIP à la reprise ──
+
+
+@pytest.mark.parametrize(
+    "pools",
+    ["  ci:\n    runners: 1\n  gpu: {}\n", "  ci: {runners: 1}\n  Ci: {runners: 1}\n"],
+    ids=["clef-inconnue", "casse-fautive"],
+)
+def test_an_unreadable_pools_table_defers_the_pool_guards_it_carries(
+    projet: Path, service: TaskService, mission: str, pools: str
+) -> None:
+    _capacity(projet, f"version: 1\npools:\n{pools}")
+    capacity = load_capacity(projet)
+    assert "pools" in capacity.errors
+    for _ in range(3):
+        _pret(service, mission, "PR")
+    plan = service.queue_plan(probe_host=False, routes=False)
+    assert not plan.admitted
+    assert {d.label for d in plan.deferred} == {"Defer(unknown)"}
+    assert all("pool ci illisible" in d.detail for d in plan.deferred)
+
+
+def test_a_pools_typo_next_to_a_declared_host_defers_instead_of_dropping_the_host(
+    projet: Path, service: TaskService, mission: str
+) -> None:
+    _capacity(projet, "version: 1\npools:\n  host:\n    min_mem_available_mb: 99999999\n  Ci: {runners: 1}\n")
+    capacity = load_capacity(projet)
+    task = _pret(service, mission, "analyse", type=TaskType.ANALYSIS)
+    view = derive_view(service.ledger, capacity, now=datetime.now(UTC), host=None)
+    decision = admit(service.require(task.id), None, capacity, view)
+    assert isinstance(decision, Defer) and decision.reason == "unknown"
+    assert "pool host illisible" in decision.detail
+
+
+def test_a_pools_typo_does_not_refuse_the_other_sections(projet: Path) -> None:
+    _capacity(projet, "version: 1\npools:\n  gpu: {}\nwip: {limit_global: 2}\n")
+    capacity = load_capacity(projet)
+    assert capacity.error_for("wip") == "" and capacity.error_for("quota") == ""
+    assert capacity.error_for("llm") != ""
+
+
+def _park(service: TaskService, task_id: str, how: str) -> None:
+    ledger = service.ledger
+    ledger.claim_task(task_id, "agent", "claude")
+    ledger.transition_task(task_id, TaskState.RUNNING, actor_id="agent")
+    if how == "needs_verification":
+        ledger.transition_task(task_id, TaskState.NEEDS_VERIFICATION, actor_id="agent")
+        return
+    epoch = service.require(task_id).claim.lease_epoch  # type: ignore[union-attr]
+    waiting = {"waiting": {"reason": "ci", "until": None, "question": None, "resume_hint": "checks"}}
+    ledger.transition_task(task_id, TaskState.WAITING, actor_id="agent", extra_payload=waiting, lease_epoch=epoch)
+
+
+@pytest.mark.parametrize("how", ["needs_verification", "waiting"])
+def test_a_parked_task_keeps_its_ci_slot_until_the_checks_end_or_a_human_releases_it(
+    projet: Path, service: TaskService, mission: str, how: str
+) -> None:
+    _capacity(projet, "version: 1\npools:\n  ci:\n    runners: 1\n")
+    first, second = _pret(service, mission, "A"), _pret(service, mission, "B")
+    _park(service, first.id, how)
+    assert service.require(first.id).status.value == how
+    capacity = load_capacity(projet)
+    view = derive_view(service.ledger, capacity, now=datetime.now(UTC))
+    assert view.ci_occupants == frozenset({first.id})
+    decision = admit(service.require(second.id), None, capacity, view)
+    assert isinstance(decision, Defer) and decision.reason == "ci"
+    service.ledger.append_event(CI_FINISHED_EVENT, first.id, "task", "tick", {})
+    freed = derive_view(service.ledger, capacity, now=datetime.now(UTC))
+    assert not freed.ci_occupants
+    assert isinstance(admit(service.require(second.id), None, capacity, freed), Admit)
+
+
+def test_a_closed_task_gives_its_ci_slot_back(projet: Path, service: TaskService, mission: str) -> None:
+    _capacity(projet, "version: 1\npools:\n  ci:\n    runners: 1\n")
+    first = _pret(service, mission, "A")
+    _park(service, first.id, "needs_verification")
+    service.ledger.transition_task(first.id, TaskState.CANCELLED, actor_id="agent")
+    view = derive_view(service.ledger, load_capacity(projet), now=datetime.now(UTC))
+    assert not view.ci_occupants
+
+
+def _wait(service: TaskService, task_id: str) -> int:
+    _park(service, task_id, "waiting")
+    return service.require(task_id).claim.lease_epoch  # type: ignore[union-attr]
+
+
+def test_a_simple_resume_cannot_exceed_the_global_wip(projet: Path, service: TaskService, mission: str) -> None:
+    _capacity(projet, "version: 1\nwip:\n  limit_global: 1\n")
+    first, second = _pret(service, mission, "A", owner="x"), _pret(service, mission, "B", owner="y")
+    epoch = _wait(service, first.id)
+    service.ledger.claim_task(second.id, "agent2", "claude")
+    with pytest.raises(GrimoireMissionError, match=r"Reprise refusée.*WIP global atteint \(1/1\).*attend une place"):
+        service.ledger.transition_task(first.id, TaskState.RUNNING, actor_id="agent", lease_epoch=epoch)
+    assert service.require(first.id).status is TaskState.WAITING
+    service.ledger.transition_task(second.id, TaskState.RUNNING, actor_id="agent2")
+    service.ledger.transition_task(second.id, TaskState.NEEDS_VERIFICATION, actor_id="agent2")
+    resumed = service.ledger.transition_task(first.id, TaskState.RUNNING, actor_id="agent", lease_epoch=epoch)
+    assert resumed.status is TaskState.RUNNING
+
+
+def test_a_resume_cannot_exceed_the_wip_of_its_role(projet: Path, service: TaskService, mission: str) -> None:
+    _capacity(projet, "version: 1\nwip:\n  limit_per_role: 1\n")
+    first, second = _pret(service, mission, "A", owner="amelia"), _pret(service, mission, "B", owner="amelia")
+    epoch = _wait(service, first.id)
+    service.ledger.claim_task(second.id, "agent2", "claude")
+    with pytest.raises(GrimoireMissionError, match=r"Reprise refusée.*WIP du rôle amelia atteint"):
+        service.ledger.transition_task(first.id, TaskState.RUNNING, actor_id="agent", lease_epoch=epoch)
+    assert service.require(first.id).status is TaskState.WAITING
+
+
+def test_an_attested_resume_cannot_exceed_the_wip(projet: Path, service: TaskService, mission: str) -> None:
+    _capacity(projet, "version: 1\nwip:\n  limit_global: 1\n")
+    first, second = _pret(service, mission, "A", owner="x"), _pret(service, mission, "B", owner="y")
+    _wait(service, first.id)
+    service.ledger.claim_task(second.id, "agent2", "claude")
+    with pytest.raises(GrimoireMissionError, match=r"Reprise refusée.*attend une place"):
+        service.ledger.resume_attested(first.id, actor_id="agent", reason="checkpoint décidé")
+    assert service.require(first.id).status is TaskState.WAITING
+
+
+def test_a_resume_with_room_is_still_granted(projet: Path, service: TaskService, mission: str) -> None:
+    _capacity(projet, "version: 1\nwip:\n  limit_global: 1\n")
+    first = _pret(service, mission, "A")
+    epoch = _wait(service, first.id)
+    resumed = service.ledger.transition_task(first.id, TaskState.RUNNING, actor_id="agent", lease_epoch=epoch)
+    assert resumed.status is TaskState.RUNNING

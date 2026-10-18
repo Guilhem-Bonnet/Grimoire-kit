@@ -756,6 +756,8 @@ class MissionLedger:
                 )
             if self.claim_guard is not None and (limit := self.claim_guard(self._tasks, task)):
                 raise GrimoireMissionError(f"Claim refusé pour {task_id} : {limit}")
+        elif to_state is TaskState.RUNNING and task.status is TaskState.WAITING and self.claim_guard is not None and (limit := self.claim_guard(self._tasks, task)):
+            raise GrimoireMissionError(f"Reprise refusée pour {task_id} : {limit} — elle attend une place, la tâche reste en attente")
         if expected_from is not None and task.status is not expected_from:
             raise GrimoireMissionError(
                 f"Transition refusée pour {task_id} : l'état a changé entre-temps "
