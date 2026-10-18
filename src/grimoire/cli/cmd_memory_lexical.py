@@ -19,6 +19,7 @@ import typer
 from grimoire.cli import (
     cmd_memory_ops,  # noqa: F401
     cmd_memory_projections,  # noqa: F401
+    cmd_memory_rules,  # noqa: F401
     cmd_memory_shared,  # noqa: F401
 )
 from grimoire.cli.cmd_memory import (
