@@ -17,7 +17,11 @@ une expérience, pas par une lecture de configuration :
    artefacts de la tâche active ;
 4. le gate est réévalué : il doit être **vert**, et au moins un artefact doit
    être apparu. Un hook qui sort 0 sans rien faire échoue donc ;
-5. la tâche est annulée et les artefacts que le hook a créés sont retirés.
+5. la tâche est annulée et les artefacts que le hook a créés sont retirés ;
+6. ce que l'expérience a fait basculer est rendu : un projet qui n'avait ni board
+   ni ledger les retrouve absents (le board est ce qui fait « gouverné » pour le
+   hook ; le laisser derrière changerait la réponse du projet à la session
+   suivante).
 
 Limites, écrites ici parce que le message de sortie ne les porte pas :
 
@@ -28,15 +32,27 @@ Limites, écrites ici parce que le message de sortie ne les porte pas :
 - seule une commande dont le premier mot est ``grimoire-hook`` est exécutée. Une
   autre commande déclarée dans un hook SessionStart n'est jamais lancée par ce
   contrôle (un dépôt cloné ne doit pas faire exécuter ce qu'il veut à ``up``) ; elle
-  est signalée comme non prouvée ;
+  est rendue sous ``prove.skipped`` comme non prouvée, et ne compte ni dans
+  ``hooks_fired`` ni dans ``first_gate`` (la Forge lance son propre script
+  de passerelle : il n'a pas à faire échouer la preuve du hook du kit) ;
+- sur un projet non gouverné (ni board ni ledger), l'expérience ouvre le ledger et
+  projette le board le temps de la preuve : elle mesure donc le hook **dans l'état
+  gouverné**, que le projet n'a pas encore. Board et ledger sont retirés ensuite,
+  et le rapport le dit (``prove.notes``) ; en session réelle le hook y répond
+  « projet non gouverné » et ne scaffolde rien tant que le standard n'est pas
+  adopté ;
 - ``time_to_first_proof_s`` part du début de la commande ``up`` (imports du
   processus exclus) et s'arrête au premier gate vert, avant le nettoyage ;
-- le journal d'événements du ledger et du standard garde la trace de la tâche
-  jetable (créée puis annulée) : c'est voulu, la preuve est auditable.
+- sur un projet qui avait déjà un ledger, le journal d'événements garde la trace
+  de la tâche jetable (créée puis annulée) et le board la projette archivée :
+  c'est voulu, la preuve est auditable. Le journal d'exécution (traces,
+  ``_grimoire-output/events``) et les fichiers de session ``up-prove-*`` restent
+  dans tous les cas.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import shlex
@@ -105,6 +121,10 @@ class ProveReport:
 
     hooks: list[HookProof] = field(default_factory=list)
     problems: list[str] = field(default_factory=list)
+    #: Commandes SessionStart étrangères au kit : jamais lancées, hors verdict.
+    skipped: list[HookProof] = field(default_factory=list)
+    #: Ce que l'expérience a dû supposer ou défaire, sans que ce soit un échec.
+    notes: list[str] = field(default_factory=list)
     time_to_first_proof_s: float = 0.0
 
     @property
@@ -130,7 +150,12 @@ class ProveReport:
             "hooks_fired": self.hooks_fired,
             "first_gate": self.first_gate,
             "time_to_first_proof_s": self.time_to_first_proof_s,
-            "prove": {"hooks": [h.to_dict() for h in self.hooks], "problems": list(self.problems)},
+            "prove": {
+                "hooks": [h.to_dict() for h in self.hooks],
+                "problems": list(self.problems),
+                "skipped": [h.to_dict() for h in self.skipped],
+                "notes": list(self.notes),
+            },
         }
 
 
@@ -194,6 +219,15 @@ def discover_session_start_hooks(target: Path) -> tuple[list[ConfiguredHook], li
 
 
 # ── Exécution de la commande telle que l'hôte la lancerait ────────────────────
+
+
+def is_kit_hook_command(command: str) -> bool:
+    """Si le premier mot de *command* est ``grimoire-hook`` : la seule commande que ``--prove`` lance."""
+    try:
+        argv = shlex.split(command, posix=os.name != "nt")
+    except ValueError:
+        argv = command.split()
+    return bool(argv) and argv[0] == HOOK_BINARY
 
 
 def _run_configured_hook(hook: ConfiguredHook, target: Path, task_id: str, session_id: str) -> str:
@@ -282,27 +316,79 @@ def _prove_one(target: Path, service: Any, hook: ConfiguredHook) -> HookProof:
     return proof
 
 
+def _is_governed_now(target: Path) -> bool:
+    """Ce que le hook SessionStart répondrait aujourd'hui : gouverné ou non (échec de lecture = non)."""
+    try:
+        from grimoire.hosts.decisions.activation import _is_governed
+
+        return bool(_is_governed(target))
+    except Exception:
+        return False
+
+
+def _restore_governance(service: Any, *, board_existed: bool, ledger_existed: bool, report: ProveReport) -> None:
+    """Retire le board et le ledger que l'expérience a créés ; ne touche jamais à ceux qui préexistaient."""
+    from grimoire.core.standard_state import invalidate_cache
+    from grimoire.missions.service import BOARD_RELPATH
+
+    board = service.home_root / BOARD_RELPATH
+    ledger_root: Path = service.ledger_root
+    try:
+        if not board_existed:
+            board.unlink(missing_ok=True)
+        if not ledger_existed and ledger_root.is_dir():
+            shutil.rmtree(ledger_root)
+            with contextlib.suppress(OSError):
+                ledger_root.parent.rmdir()  # silent-ok — non vide : ce n'est pas à nous
+        invalidate_cache(service.home_root)
+    except OSError as exc:
+        report.problems.append(
+            f"board/ledger créés par la preuve non retirés ({exc}) — à supprimer à la main : {board}, {ledger_root}"
+        )
+
+
 def run_prove(target: Path, *, started: float) -> ProveReport:
-    """Mène l'expérience pour chaque commande SessionStart configurée."""
-    from grimoire.missions.service import TaskService
+    """Mène l'expérience pour chaque commande SessionStart du kit ; les autres sont rapportées, jamais lancées."""
+    from grimoire.missions.service import BOARD_RELPATH, TaskService
 
     report = ProveReport()
-    hooks, unfired = discover_session_start_hooks(target)
+    found, unfired = discover_session_start_hooks(target)
+    hooks = [h for h in found if is_kit_hook_command(h.command)]
+    for hook in found:
+        if not is_kit_hook_command(hook.command):
+            report.skipped.append(HookProof(
+                hook.source, hook.command,
+                detail=f"commande non reconnue, non exécutée : {hook.command[:80]!r} (seul `{HOOK_BINARY}` est lancé) ; non prouvée",
+            ))
     if not hooks and not unfired:
+        foreign = f" ({len(report.skipped)} commande(s) étrangère(s) non prouvée(s))" if report.skipped else ""
         report.problems.append(
-            "aucune commande SessionStart configurée dans .claude/settings.json ni .github/hooks/ : "
+            f"aucune commande SessionStart `{HOOK_BINARY}` configurée dans .claude/settings.json ni .github/hooks/{foreign} : "
             "rien ne tirerait au démarrage d'une session (relance `grimoire host sync`)"
         )
     service = TaskService(target)
+    board_existed = (service.home_root / BOARD_RELPATH).is_file()
+    ledger_existed = service.ledger_root.exists()
+    governed_before = _is_governed_now(target)
     proofs: list[HookProof] = list(unfired)
     first_green: float | None = None
-    for hook in hooks:
-        proofs.append(_prove_one(target, service, hook))
-        if first_green is None and proofs[-1].gate == "green":
-            first_green = time.monotonic()
-    report.time_to_first_proof_s = round((first_green or time.monotonic()) - started, 3)
-    for proof in proofs:
-        _discard(target, service, proof, report)
+    try:
+        for hook in hooks:
+            proofs.append(_prove_one(target, service, hook))
+            if first_green is None and proofs[-1].gate == "green":
+                first_green = time.monotonic()
+        report.time_to_first_proof_s = round((first_green or time.monotonic()) - started, 3)
+        for proof in proofs:
+            _discard(target, service, proof, report)
+    finally:
+        if hooks:
+            _restore_governance(service, board_existed=board_existed, ledger_existed=ledger_existed, report=report)
+    if hooks and not governed_before:
+        report.notes.append(
+            "projet non gouverné avant la preuve : board et ledger ont été ouverts le temps de l'expérience, "
+            "puis retirés ; en session réelle le hook répond « projet non gouverné » et ne scaffolde rien "
+            "(`grimoire standard init` pour adopter le standard)"
+        )
     report.hooks = proofs
     return report
 
@@ -332,6 +418,8 @@ def run_prove_step(
             "prove", "done",
             " ; ".join([
                 f"hook SessionStart tiré ({len(report.hooks)} configuration(s) d'hôte), gate vert en {report.time_to_first_proof_s:.1f} s",
+                *([f"{len(report.skipped)} commande(s) étrangère(s) non prouvée(s)"] if report.skipped else []),
+                *report.notes,
                 *report.problems,
             ]),
         ))

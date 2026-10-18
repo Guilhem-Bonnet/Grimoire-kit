@@ -77,9 +77,38 @@ def project(tmp_path: Path, runner, cli_app, hook_binary: Path) -> Path:
     return target
 
 
+@pytest.fixture
+def governed_project(project: Path) -> Path:
+    """Un projet qui a déjà un ledger et un board : une vraie tâche y est ouverte."""
+    from grimoire.missions.service import TaskService
+
+    TaskService(project).add("vraie tâche", ("elle existait avant la preuve",), owner="humain", actor="humain", ready=True)
+    return project
+
+
 def _prove_json(runner, cli_app, target: Path, *extra: str) -> tuple[int, dict[str, Any]]:
     result = runner.invoke(cli_app, ["-o", "json", "up", str(target), "--backend", "local", "--prove", *extra])
     return result.exit_code, json.loads(result.stdout)
+
+
+BOARD = Path("_grimoire") / "standard" / "task-board.yaml"
+LEDGER = Path("_grimoire-runtime-output") / "ledger"
+
+
+def _session_start_output(target: Path) -> str:
+    """Ce que le hook SessionStart de Claude Code répond ici, tel que l'hôte le recevrait."""
+    import shutil
+    import subprocess
+
+    payload = json.dumps({"session_id": "s-test", "hook_event_name": "SessionStart", "cwd": str(target)})
+    command = next(h.command for h in discover_session_start_hooks(target)[0] if h.source == ".claude/settings.json")
+    resolved = shutil.which("grimoire-hook")
+    assert resolved is not None
+    proc = subprocess.run(
+        [resolved, *command.split()[1:]], input=payload, cwd=target, capture_output=True, text=True,
+        encoding="utf-8", check=False, timeout=60, env={**__import__("os").environ, "CLAUDE_PROJECT_DIR": str(target)},
+    )
+    return proc.stdout + proc.stderr
 
 
 def _ledger_tasks(target: Path) -> list[dict[str, Any]]:
@@ -120,8 +149,9 @@ class TestProveHealthyProject:
         assert "time_to_first_proof_s" not in data
 
     def test_the_throwaway_task_is_cancelled_and_its_artifacts_removed(
-        self, runner, cli_app, project: Path
+        self, runner, cli_app, governed_project: Path
     ) -> None:
+        project = governed_project
         _, data = _prove_json(runner, cli_app, project)
         for hook in data["prove"]["hooks"]:
             task = next(t for t in _ledger_tasks(project) if t["id"] == hook["task_id"])
@@ -198,8 +228,10 @@ class TestProveFailsWhereDoctorStaysGreen:
 
 
 class TestProveNeverRunsWhatTheProjectDeclares:
-    def test_a_foreign_session_start_command_is_not_executed(self, runner, cli_app, project: Path, tmp_path: Path) -> None:
-        """Un dépôt cloné ne doit pas faire exécuter une commande arbitraire à ``up --prove``."""
+    def test_a_foreign_session_start_command_is_not_executed_nor_counted(
+        self, runner, cli_app, project: Path, tmp_path: Path
+    ) -> None:
+        """Un dépôt cloné ne fait pas exécuter une commande arbitraire à ``up --prove``, et elle ne fait pas échouer le hook du kit."""
         sentinel = tmp_path / "executed"
         (project / ".claude" / "settings.local.json").write_text(
             json.dumps({"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": f"touch {sentinel}"}]}]}}),
@@ -207,10 +239,47 @@ class TestProveNeverRunsWhatTheProjectDeclares:
         )
         code, data = _prove_json(runner, cli_app, project)
         assert not sentinel.exists()
-        assert code == 1
-        foreign = next(h for h in data["prove"]["hooks"] if h["source"] == ".claude/settings.local.json")
+        assert code == 0, data
+        assert data["hooks_fired"] is True
+        assert data["first_gate"] == "green"
+        assert {h["source"] for h in data["prove"]["hooks"]} == {
+            ".claude/settings.json",
+            ".github/hooks/grimoire-session-start.json",
+        }
+        (foreign,) = data["prove"]["skipped"]
+        assert foreign["source"] == ".claude/settings.local.json"
         assert foreign["fired"] is False
         assert "non reconnue" in foreign["detail"]
+        assert "non prouvée" in foreign["detail"]
+
+    def test_a_foreign_command_costs_no_throwaway_task(self, runner, cli_app, governed_project: Path) -> None:
+        project = governed_project
+        (project / ".github" / "hooks" / "custom.json").write_text(
+            json.dumps({"hooks": {"SessionStart": [{"type": "command", "command": "echo hi"}]}}), encoding="utf-8"
+        )
+        before = len(_ledger_tasks(project))
+        code, data = _prove_json(runner, cli_app, project)
+        assert code == 0, data
+        assert [h["source"] for h in data["prove"]["skipped"]] == [".github/hooks/custom.json"]
+        # Deux configurations du kit, deux tâches jetables : la commande étrangère n'en ouvre aucune.
+        assert len(_ledger_tasks(project)) == before + len(data["prove"]["hooks"]) == before + 2
+
+    def test_only_foreign_commands_still_fail_the_proof(self, project: Path) -> None:
+        import shutil
+
+        # `up` resynchronise les configurations d'hôte : l'état est posé après lui, comme pour « aucune commande ».
+        (project / ".claude" / "settings.json").write_text(
+            json.dumps({"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "echo hi"}]}]}}),
+            encoding="utf-8",
+        )
+        shutil.rmtree(project / ".github" / "hooks")
+        report = run_prove(project, started=time.monotonic())
+        assert report.hooks_fired is False
+        assert report.first_gate == "unevaluated"
+        assert report.ok is False
+        assert len(report.skipped) == 1
+        assert any("aucune commande SessionStart" in p and "étrangère" in p for p in report.problems)
+        assert not (project / BOARD).exists()
 
     def test_discovery_reads_both_the_nested_and_the_flat_formats(self, project: Path) -> None:
         hooks, unfired = discover_session_start_hooks(project)
@@ -249,3 +318,50 @@ class TestProveRefusesWhatItCannotProve:
         assert code == 1
         assert data["first_gate"] == "unevaluated"
         assert all("déjà vert" in h["detail"] for h in data["prove"]["hooks"])
+
+
+class TestProveLeavesTheGovernanceAsItFoundIt:
+    """B03-S1-01 : l'expérience ouvre le ledger et projette le board, ce qui fait « gouverné » pour le hook."""
+
+    def test_an_ungoverned_project_is_still_ungoverned_afterwards(self, runner, cli_app, project: Path) -> None:
+        assert not (project / BOARD).exists()
+        assert not (project / LEDGER).exists()
+        assert "non gouverné" in _session_start_output(project)
+
+        code, data = _prove_json(runner, cli_app, project)
+        assert code == 0, data
+        assert not (project / BOARD).exists()
+        assert not (project / LEDGER).exists()
+        assert "non gouverné" in _session_start_output(project)
+        assert any("non gouverné" in note for note in data["prove"]["notes"])
+
+    def test_two_runs_add_nothing_to_a_board_that_did_not_exist(self, runner, cli_app, project: Path) -> None:
+        for _ in range(2):
+            code, _data = _prove_json(runner, cli_app, project)
+            assert code == 0
+        assert not (project / BOARD).exists()
+        assert not (project / LEDGER).exists()
+
+    def test_the_text_report_carries_the_note(self, runner, cli_app, project: Path) -> None:
+        result = runner.invoke(cli_app, ["up", str(project), "--backend", "local", "--prove"])
+        assert result.exit_code == 0, result.output
+        assert "non gouverné" in result.output
+
+    def test_a_governed_project_keeps_its_ledger_and_its_board(self, runner, cli_app, governed_project: Path) -> None:
+        project = governed_project
+        (before,) = (t["id"] for t in _ledger_tasks(project))
+        code, data = _prove_json(runner, cli_app, project)
+        assert code == 0, data
+        assert (project / BOARD).is_file()
+        assert (project / LEDGER / "events.jsonl").is_file()
+        assert any(t["id"] == before and t["status"] == "ready" for t in _ledger_tasks(project))
+        assert data["prove"]["notes"] == []
+
+    def test_a_failed_proof_also_gives_the_governance_back(
+        self, runner, cli_app, project: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_hook_binary(tmp_path / "bad-bin", monkeypatch, body="#!/bin/sh\nexit 3\n")
+        code, _data = _prove_json(runner, cli_app, project)
+        assert code == 1
+        assert not (project / BOARD).exists()
+        assert not (project / LEDGER).exists()
