@@ -181,8 +181,27 @@ GEMINI_PROFILE = HostProfile(
     notes="Prose entrypoint plus MCP; no lifecycle hooks, so governance is advisory only.",
 )
 
+OPENCODE_PROFILE = HostProfile(
+    host_id=HostId.OPENCODE,
+    display_name="opencode",
+    subagents_native=True,
+    skills_native=True,
+    commands_native=True,
+    blocking_hooks=True,
+    permissions_native=False,
+    mcp_native=True,
+    plugin_packaging=False,
+    instructions_entrypoint=".opencode/grimoire.md",
+    notes=(
+        "Agents, skills, commands et MCP sont chargés depuis .opencode/ et opencode.json (vérifié, 1.17.11). "
+        "Le seul hook est un plugin : tool.execute.before refuse un outil (fixture). Pas de SessionStart, "
+        "Stop ni PostToolUse sondés ; table de permissions non émise (non vérifiée)."
+    ),
+)
+
 _PROFILES: dict[HostId, HostProfile] = {
-    p.host_id: p for p in (CLAUDE_CODE_PROFILE, COPILOT_PROFILE, CODEX_PROFILE, CURSOR_PROFILE, GEMINI_PROFILE)
+    p.host_id: p
+    for p in (CLAUDE_CODE_PROFILE, COPILOT_PROFILE, CODEX_PROFILE, CURSOR_PROFILE, GEMINI_PROFILE, OPENCODE_PROFILE)
 }
 
 #: Short ids accepted on the command line, mapped to their host.
@@ -197,6 +216,7 @@ HOST_ALIASES: dict[str, HostId] = {
     "cursor": HostId.CURSOR,
     "gemini": HostId.GEMINI_CLI,
     "gemini-cli": HostId.GEMINI_CLI,
+    "opencode": HostId.OPENCODE,
 }
 
 
@@ -381,6 +401,22 @@ _CLAUDE_CODE_CONTRACT = HostContract(
     },
 )
 
+_OPENCODE_CONTRACT = HostContract(
+    host_id=HostId.OPENCODE,
+    host_version="1.17.11",
+    evidence={
+        **{key: ContractEvidence() for key in CONTRACT_KEYS},
+        "pretooluse_deny": ContractEvidence(
+            _V,
+            (
+                "opencode/01-pretooluse-control-allow.json",
+                "opencode/01-pretooluse-deny-throw.json",
+            ),
+            "plugin .opencode/plugin : le hook tool.execute.before lève une Error",
+        ),
+    },
+)
+
 _CONTRACTS: dict[HostId, HostContract] = {
     HostId.CLAUDE_CODE_CLI: _CLAUDE_CODE_CONTRACT,
     # Copilot, Codex, Cursor, Gemini : aucune capture (K0 du 2026-10-16, poste sans
@@ -389,6 +425,8 @@ _CONTRACTS: dict[HostId, HostContract] = {
     HostId.CODEX: _unverified_contract(HostId.CODEX),
     HostId.CURSOR: _unverified_contract(HostId.CURSOR),
     HostId.GEMINI_CLI: _unverified_contract(HostId.GEMINI_CLI),
+    # opencode 1.17.11 : seul pretooluse_deny a été sondé (fournisseur local factice).
+    HostId.OPENCODE: _OPENCODE_CONTRACT,
 }
 
 
@@ -422,3 +460,14 @@ def is_fenced(host_id: HostId, host_version: str | None) -> bool:
     version inconnue (``None``), vaut ``False``.
     """
     return contract_for(host_id, host_version).fenced
+
+
+def claim_host_is_fenced(host: str, host_version: str | None) -> bool:
+    """:func:`is_fenced` pour l'hôte tel qu'un claim le nomme (K3, issue #768).
+
+    *host* est une graphie du ledger (``host-claude-code-cli``, ``claude-code-cli``,
+    ``local``, ``mcp``…). Un nom que :func:`resolve_host` ne connaît pas n'est pas
+    un hôte prouvé : ``False``, comme une version absente.
+    """
+    host_id = resolve_host(host)
+    return host_id is not None and is_fenced(host_id, host_version)

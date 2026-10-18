@@ -258,7 +258,10 @@ def test_une_session_differente_ne_vole_pas_le_claim(governed: Path) -> None:
     _prompt(governed)
     autre = {**_payload("UserPromptSubmit", governed, prompt="salut"), "session_id": "autre-session"}
     _, decision = _hook(governed, HookEvent.USER_PROMPT_SUBMIT, autre)
-    assert decision.detail["session_attached"] is False
+    # Issue #710 : l'autre session n'hérite même plus de la tâche — elle
+    # retombe sur le repli au lieu de juger (et tenter de rattacher) celle-ci.
+    assert decision.detail.get("session_attached", False) is False
+    assert decision.detail["task_id"] != tid
     assert TaskService(governed).require(tid).claim.session_id == SESSION  # type: ignore[union-attr]
 
 

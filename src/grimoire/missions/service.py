@@ -19,6 +19,7 @@ Deux règles :
 from __future__ import annotations
 
 import contextlib
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -29,7 +30,7 @@ from grimoire.core.standard_state import current_session, invalidate_cache
 from grimoire.missions.board import PRIORITIES, board_status_of, build_board, priority_of, write_board
 from grimoire.missions.gates import GateRefusal, GateVerdict, check_transition
 from grimoire.missions.intake import IntakeRequest, MissionIntakeService
-from grimoire.missions.ledger import MissionLedger
+from grimoire.missions.ledger import MissionLedger, ReapReport
 from grimoire.missions.recall import DEFAULT_TOKEN_BUDGET, TaskRecall, build_task_recall, consolidate_task_memory
 from grimoire.missions.schemas import (
     DIRECTIVE_KINDS,
@@ -319,18 +320,32 @@ class TaskService:
         return TaskAdded(task=task, mission_id=mission_id, mission_created=created_mission, board_path=self.project_board())
 
     def attach_session(
-        self, task_id: str, session_id: str, *, session_host: str = "", actor: str = "hook", explicit: bool = False
+        self,
+        task_id: str,
+        session_id: str,
+        *,
+        session_host: str = "",
+        actor: str = "hook",
+        explicit: bool = False,
+        host_version: str = "",
     ) -> MissionTask:
         """Rattache la session d'hôte courante au claim de *task_id* (issue #638).
 
         Même règle que :meth:`MissionLedger.attach_session` — un événement de
         plus, jamais une réécriture, jamais le vol d'un claim déjà rattaché à
-        une autre session — puis le board est reprojeté pour que le cockpit
+        une autre session — puis, pour un rattachement explicite, le journal de
+        la session note l'epoch du claim (:meth:`_note_session_lease`) ; enfin le board est reprojeté pour que le cockpit
         voie la session sans attendre un autre geste.
         """
         task = self.ledger.attach_session(
-            task_id, session_id, session_host=session_host, actor_id=actor, explicit=explicit
+            task_id, session_id, session_host=session_host, actor_id=actor, explicit=explicit,
+            host_version=host_version,
         )
+        if explicit:
+            # `task attach` (K3-S1-02) rattache une session à un claim qui peut être d'un autre
+            # epoch que celui qu'elle avait : sans cette note le journal garde l'ancien et le
+            # frein refuse la session pour toujours. Un geste explicite vaut reprise du bail.
+            self._note_session_lease(task, session_id)
         self.project_board()
         return task
 
@@ -346,11 +361,34 @@ class TaskService:
         session_id, session_host = current_session(env)
         if not session_id:
             return ""
+        from grimoire.hosts.host_version import VERSION_ENV, valid_version
+
+        version = valid_version(str((os.environ if env is None else env).get(VERSION_ENV, "")))
         try:
-            self.attach_session(task_id, session_id, session_host=session_host, actor=actor)
+            task = self.attach_session(task_id, session_id, session_host=session_host, actor=actor, host_version=version)
         except GrimoireMissionError:
             return ""
+        self._note_session_lease(task, session_id)
         return session_id
+
+    def _note_session_lease(self, task: MissionTask, session_id: str) -> None:
+        """Le journal de la session apprend l'epoch qu'elle vient de réclamer (K3) : c'est ce que le frein compare.
+
+        Un claim fait depuis la session (CLI, MCP) est un geste explicite de la
+        session elle-même : il remplace l'epoch noté, y compris celui d'un bail perdu
+        qu'elle reprend. Best-effort : un journal illisible laisse la session sans frein.
+        """
+        if task.claim is None or task.claim.session_id != session_id:
+            return
+        with contextlib.suppress(Exception):
+            from datetime import UTC, datetime
+
+            from grimoire.policies.session_state import note_session_task
+
+            note_session_task(
+                self.project_root, session_id, task.id, now_iso=datetime.now(UTC).isoformat(),
+                lease_epoch=task.claim.lease_epoch,
+            )
 
     def claim(
         self, task_id: str, actor: str, host: str = "local", files: tuple[str, ...] = ()
@@ -359,6 +397,62 @@ class TaskService:
         autre claim actif ne réserve déjà l'un de *files*."""
         claim = TaskClaim.new(actor_id=actor, host_id=host, exclusive_files=files)
         return self.transition(task_id, TaskState.CLAIMED, actor, claim=claim)
+
+    def renew(self, task_id: str, actor: str, *, epoch: int | None = None) -> MissionTask:
+        """Renouvelle le bail de *task_id* (K2) — fichier de bail, et plafond dur s'il approche.
+
+        Sans *epoch*, seul l'acteur du claim renouvelle, à l'epoch courant ; un
+        autre acteur doit présenter l'epoch qu'il tient. Un epoch périmé est refusé.
+        """
+        task = self.require(task_id)
+        if epoch is None:
+            if task.claim is None or task.claim.actor_id != actor:
+                holder = task.claim.actor_id if task.claim is not None else "personne"
+                raise GrimoireMissionError(
+                    f"Renouvellement refusé pour {task_id} : le claim est tenu par {holder}, pas par {actor} "
+                    "— présente l'epoch que tu tiens (--epoch)"
+                )
+            epoch = task.claim.lease_epoch
+        return self.ledger.renew_lease(task_id, epoch, actor_id=actor)
+
+    def reap(self, *, apply: bool = True, actor: str = "tick") -> ReapReport:
+        """Récolte des baux perdus (:meth:`MissionLedger.reap`), quota lu dans l'état des fournisseurs.
+
+        K3 (issue #768) : un hôte est fencé selon la table ``hosts.capabilities``
+        — par hôte *et* par version, depuis les seules fixtures de K0 — et non plus
+        selon une déclaration de l'appelant. Tout autre hôte, ou une version
+        inconnue, donne ``resume_unfenced`` : la question est posée, rien n'est relancé.
+        """
+        from grimoire.hosts.capabilities import claim_host_is_fenced
+
+        report = self.ledger.reap(
+            quota_blocked=self._quota_blocked,
+            actor_id=actor,
+            apply=apply,
+            is_fenced=lambda view: claim_host_is_fenced(view.host, view.host_version),
+        )
+        if any(d.written and d.action == "ready" for d in report.decisions):
+            self.project_board()
+        return report
+
+    def _quota_blocked(self, task: MissionTask) -> bool:
+        """La dernière route de *task* bute sur un quota : verdict ``rate_limit``, ou fournisseur refroidi pour ce motif."""
+        dispatched = [e for e in self.ledger.list_events(task.id) if e.event_type == "task.dispatched"]
+        if not dispatched:
+            return False
+        last = dispatched[-1].payload
+        if last.get("verdict") == "rate_limit":
+            return True
+        from datetime import UTC, datetime
+
+        from grimoire.providers.state import load_state
+
+        entry = load_state(self.project_root).get(str(last.get("provider", "")))
+        return (
+            entry is not None
+            and entry.last_failure == "rate_limit"
+            and entry.is_cooling_down(now=datetime.now(UTC))
+        )
 
     def transition(
         self,
@@ -383,8 +477,17 @@ class TaskService:
         if verdict.blocked:
             self._record_refusal(task, target, verdict, actor)
             raise TaskRefusedError(task_id, verdict)
+        # `expected_from` : le gate a jugé `task.status` ; si l'état a bougé
+        # depuis (autre session, autre processus), le ledger refuse sous son
+        # verrou au lieu d'écrire une transition jugée sur un état périmé (#710).
         moved = self.ledger.transition_task(
-            task_id, target, actor_id=actor, reason=reason, claim=claim, extra_payload=extra_payload
+            task_id,
+            target,
+            actor_id=actor,
+            reason=reason,
+            claim=claim,
+            extra_payload=extra_payload,
+            expected_from=task.status,
         )
         self._consolidate(moved, target, actor=actor, reason=reason)
         return TaskMove(task=moved, previous=task.status, verdict=verdict, board_path=self.project_board())

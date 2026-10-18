@@ -42,13 +42,14 @@ DIRECTIVE_ORIGINS: tuple[str, ...] = (ORIGIN_HUMAN, ORIGIN_AGENT, ORIGIN_UNVERIF
 
 
 def _int_or_zero(value: Any) -> int:
-    """Un entier lu d'un ledger, ``0`` si absent ou illisible (jamais d'exception)."""
-    if isinstance(value, bool) or not isinstance(value, (int, str)):
+    """Epoch lu d'un ledger : entier >= 0, sinon ``0`` (absent ou illisible, jamais d'exception).
+
+    ``0`` n'est attribué à aucun claim posé par le ledger : un epoch illisible
+    (texte, booléen, négatif) ne peut donc se réclamer d'aucun titulaire.
+    """
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         return 0
-    try:
-        return max(int(value), 0)
-    except ValueError:
-        return 0
+    return value
 
 
 class MissionState(StrEnum):
@@ -154,15 +155,21 @@ class TaskClaim:
     #: si une commande de reprise existe (``claude --resume``), jamais une
     #: valeur devinée.
     session_host: str = ""
+    #: Version de l'hôte de la session rattachée (K3, issue #768), lue par le hook
+    #: dans le journal de l'hôte — jamais devinée. Une preuve de fencing vaut pour
+    #: la version sur laquelle elle a été capturée (``hosts.capabilities``) :
+    #: ``""`` = version inconnue, donc hôte non fencé.
+    session_host_version: str = ""
     #: Quand la session a *explicitement* déclaré ce claim sien (``grimoire task
     #: attach``, issue #695), ISO 8601 UTC du dernier tel rattachement. Les
     #: sous-agents héritent du ``session_id`` de leur parent : leurs claims s'y
     #: rattachent automatiquement ; seul ce marqueur dit laquelle des tâches
     #: d'une session est celle que l'opérateur a désignée. ``""`` = jamais.
     attached_explicit_at: str = ""
-    #: Jeton de fencing (épopée #705, lot K1/K2) : croît à chaque nouveau claim.
-    #: Absent des ledgers existants — ``0`` = claim d'avant le fencing, jamais
-    #: une valeur devinée.
+    #: Jeton de fencing du bail (K2, issue #767) : croît à chaque nouveau claim
+    #: de la tâche, posé par le ledger sous son verrou — jamais par l'appelant.
+    #: Un effet porteur d'un autre epoch vient d'un titulaire périmé et il est
+    #: refusé. ``0`` = claim antérieur au fencing (aucun epoch à présenter).
     lease_epoch: int = 0
 
     @classmethod
@@ -218,10 +225,12 @@ class TaskClaim:
             "expires_at": self.expires_at,
             "session_id": self.session_id,
             "session_host": self.session_host,
+            # Absent tant qu'aucune version n'est connue : sérialisation inchangée.
+            **({"session_host_version": self.session_host_version} if self.session_host_version else {}),
             # Absent tant qu'aucun attach explicite : les sérialisations
             # existantes (board, cockpit, tests) ne changent pas.
             **({"attached_explicit_at": self.attached_explicit_at} if self.attached_explicit_at else {}),
-            # Même règle : absent à 0, un ledger d'avant K1 se rejoue à l'identique.
+            # Absent sur un claim d'avant le fencing : sa sérialisation ne change pas.
             **({"lease_epoch": self.lease_epoch} if self.lease_epoch else {}),
         }
 
@@ -234,15 +243,20 @@ class TaskClaim:
             expires_at=d.get("expires_at", ""),
             session_id=str(d.get("session_id", "") or ""),
             session_host=str(d.get("session_host", "") or ""),
+            session_host_version=str(d.get("session_host_version", "") or ""),
             attached_explicit_at=str(d.get("attached_explicit_at", "") or ""),
             lease_epoch=_int_or_zero(d.get("lease_epoch")),
         )
 
-    def with_session(self, session_id: str, session_host: str = "", *, explicit_at: str = "") -> TaskClaim:
+    def with_session(
+        self, session_id: str, session_host: str = "", *, explicit_at: str = "", host_version: str = ""
+    ) -> TaskClaim:
         """Le même claim, rattaché à *session_id* — une valeur, jamais une mutation.
 
         *explicit_at* date un rattachement explicite (``task attach``) ; sans lui,
         un rattachement automatique conserve la date du dernier explicite.
+        *host_version* (K3) : la version de l'hôte, ou celle déjà connue de la même
+        session si l'événement n'en porte pas.
         """
         return TaskClaim(
             actor_id=self.actor_id,
@@ -251,6 +265,7 @@ class TaskClaim:
             expires_at=self.expires_at,
             session_id=session_id,
             session_host=session_host,
+            session_host_version=host_version or (self.session_host_version if session_id == self.session_id else ""),
             attached_explicit_at=explicit_at or self.attached_explicit_at,
             lease_epoch=self.lease_epoch,
         )
