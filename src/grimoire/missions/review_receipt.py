@@ -192,11 +192,14 @@ def receipt_path(root: Path, task_id: str) -> Path:
 def receipt_fingerprint(root: Path) -> str:
     """L'empreinte que le reçu porte et que le gate recalcule — la même fonction, à chaque appel.
 
-    Contenu seul, sans l'identité de la toolchain de test : le ``PATH`` du
-    processus qui lance le gate (cockpit, MCP, autre shell) n'est pas le code
-    qui a été relu.
+    Contenu seul : ni l'identité de la toolchain de test (le ``PATH`` du
+    processus qui lance le gate n'est pas le code relu), ni ``HEAD``, le status
+    ou le diff git (``git commit`` du même contenu ne change aucun octet de
+    l'arbre : valider ce qui a été relu ne périme pas le reçu).
     """
-    return compute_tree_fingerprint(root, extra_excludes=RECEIPT_FINGERPRINT_EXCLUDES, include_toolchain=False)
+    return compute_tree_fingerprint(
+        root, extra_excludes=RECEIPT_FINGERPRINT_EXCLUDES, include_toolchain=False, content_only=True
+    )
 
 
 def evidence_pack_digest(root: Path, task_id: str) -> str | None:

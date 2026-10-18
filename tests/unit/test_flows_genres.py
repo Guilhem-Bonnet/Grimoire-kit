@@ -60,6 +60,8 @@ _WRITER_TMPL = f"""\
     if key in fail_for or node in fail_for:
         sys.exit(0)  # rien écrit : le check échoue, la cascade lit un rouge.
     payload.update(extra_map.get(key, extra_map.get(node, {{}})))
+    if VERDICT_IF_ASKED and re.search(r"'verdict'.*READY", prompt, re.DOTALL):
+        payload["verdict"] = "READY"  # un fournisseur qui obéit à la consigne reçue, jamais à un index
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(payload, fh)
     cost = cost_map.get(key, cost_map.get(node, 0.05))
@@ -74,6 +76,7 @@ def _writer_script(
     extra_map: dict[str, dict] | None = None,
     cost_map: dict[str, float | None] | None = None,
     fail_for: tuple[str, ...] = (),
+    verdict_if_asked: bool = False,
 ) -> Path:
     path = tmp_path / "scripts" / "writer.py"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -81,6 +84,7 @@ def _writer_script(
         _WRITER_TMPL.replace("EXTRA_MAP_JSON", json.dumps(extra_map or {}))
         .replace("COST_MAP_JSON", repr(cost_map or {}))  # repr, pas json : ``None`` (muet), pas ``null``
         .replace("FAIL_FOR_JSON", json.dumps(list(fail_for)))
+        .replace("VERDICT_IF_ASKED", repr(verdict_if_asked))
     )
     path.write_text(dedent(body), encoding="utf-8")
     return path
@@ -239,6 +243,21 @@ def test_verify_panel_fini_sans_verdict_nest_pas_un_vote(tmp_path: Path) -> None
     assert outcome.status == "blocked", outcome.to_dict()
     node = next(n for n in outcome.nodes if n.node_id == "panel")
     assert node.verdict == "inconclusive"
+
+
+def test_verify_panel_demande_un_verdict_au_verificateur(tmp_path: Path) -> None:
+    """W3-01-S3 : un fournisseur qui n'écrit `verdict` que si sa consigne le demande doit donner un vote.
+
+    Le contexte du vérificateur doit nommer `verdict` et ses deux valeurs : sans cela
+    (consigne = l'objet `pins` seul), le panel ne reçoit jamais que des abstentions.
+    """
+    _write_registry(tmp_path, _writer_script(tmp_path, verdict_if_asked=True))
+
+    outcome = run_with_dispatch(_engine(tmp_path), _panel_bp(tmp_path), project_root=tmp_path)
+
+    assert outcome.status == "finished", outcome.to_dict()
+    node = next(n for n in outcome.nodes if n.node_id == "panel")
+    assert node.verdict == "green"
 
 
 def test_verify_panel_deux_abstentions_sur_trois_est_inconclusive(tmp_path: Path) -> None:

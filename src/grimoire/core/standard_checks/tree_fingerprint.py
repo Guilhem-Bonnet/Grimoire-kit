@@ -210,6 +210,31 @@ def _git_fingerprint(root: Path, extra: Sequence[str] = (), *, include_toolchain
     return digest.hexdigest()
 
 
+def _git_content_fingerprint(root: Path, extra: Sequence[str] = ()) -> str | None:
+    """Empreinte de contenu seul d'un dépôt git : ``(chemin, sha256 du contenu)`` des fichiers présents.
+
+    Les fichiers suivis et les non suivis non ignorés (``git ls-files --cached
+    --others --exclude-standard``), jamais ``HEAD``, le status ni le diff : un
+    ``git commit`` du même contenu ne change aucun octet de l'arbre, donc pas
+    l'empreinte. Même format d'entrées que le mode filesystem, mêmes exclusions.
+    Un fichier ignoré par git n'y compte pas (comme dans l'empreinte d'un run de test).
+    """
+    specs = (*_EXCLUDE_PATHSPECS, *_extra_pathspecs(extra))
+    listing = _run_git(root, "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", ".", *specs)
+    if listing is None:
+        return None
+    entries: list[str] = []
+    for rel_path in sorted({name for name in listing.split("\0") if name}):
+        path = root / rel_path
+        rel_parts = Path(rel_path).parts
+        if not path.is_file() or _excluded(rel_path, rel_parts, extra):
+            continue  # supprimé de l'arbre (encore dans l'index), dossier ou sous-module
+        digest = _content_digest(path)
+        if digest is not None:
+            entries.append(f"{rel_path}\t{digest}")
+    return hashlib.sha256("\n".join(entries).encode("utf-8")).hexdigest()
+
+
 def _fs_fingerprint(root: Path, extra: Sequence[str] = (), *, include_toolchain: bool = True) -> str:
     entries: list[str] = []
     for path in sorted(root.rglob("*")):
@@ -233,6 +258,7 @@ def compute_tree_fingerprint(
     *,
     extra_excludes: Sequence[str] = (),
     include_toolchain: bool = True,
+    content_only: bool = False,
 ) -> str:
     """L'empreinte de l'arbre de travail, calculée maintenant — jamais mise en cache.
 
@@ -248,6 +274,13 @@ def compute_tree_fingerprint(
     courant). Voulu pour l'empreinte d'un run de test ; faux pour une
     empreinte de contenu seul, comme celle du reçu de revue : relire un code
     ne dépend pas du ``PATH`` du processus qui lance ensuite le gate.
+
+    *content_only* : empreinte de contenu seul, y compris en dépôt git
+    (:func:`_git_content_fingerprint`) : ni ``HEAD``, ni status, ni diff, donc
+    un ``git commit`` du même contenu ne la change pas. C'est celle du reçu de
+    revue (W3-01) : valider ce qui a été relu n'est pas changer le code. Sans
+    la toolchain (implique ``include_toolchain=False``). Faux par défaut :
+    l'empreinte d'un run de test garde ``HEAD``.
 
     Git-aware (voir le docstring du module) ; retombe sur le parcours du
     système de fichiers quand *root* n'est pas un dépôt git, ou quand git
@@ -266,8 +299,14 @@ def compute_tree_fingerprint(
     commités par la suite, par exemple).
     """
     extra = tuple(prefix.strip("/") for prefix in extra_excludes if prefix.strip("/"))
+    if content_only:
+        include_toolchain = False
     if _is_git_repo(root):
-        fingerprint = _git_fingerprint(root, extra, include_toolchain=include_toolchain)
+        fingerprint = (
+            _git_content_fingerprint(root, extra)
+            if content_only
+            else _git_fingerprint(root, extra, include_toolchain=include_toolchain)
+        )
         if fingerprint is not None:
             return fingerprint
     return _fs_fingerprint(root, extra, include_toolchain=include_toolchain)

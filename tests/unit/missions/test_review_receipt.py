@@ -262,6 +262,71 @@ def test_l_empreinte_de_contenu_seul_ignore_le_path_et_l_autre_pas(
     assert compute_tree_fingerprint(root, include_toolchain=False) == sans
 
 
+def test_commiter_le_meme_contenu_ne_perime_pas_le_recu(tmp_path: Path) -> None:
+    """Contenu seul : valider (``git commit``) ce qui a été relu ne change aucun octet de l'arbre (W3-01-S4)."""
+    root = _projet(tmp_path)
+    _git(root, "init", "-q")
+    _git(root, "add", "src.py")
+    _git(root, "commit", "-q", "-m", "base")
+    service, tid = _a_relire(root)
+    (root / "src.py").write_text("x = 2\n", encoding="utf-8")  # modifié, non commité
+    (root / "neuf.py").write_text("y = 1\n", encoding="utf-8")  # non suivi
+    write_receipt(root, tid, "READY", reviewer_id="relecteur")
+
+    _git(root, "add", "src.py", "neuf.py")
+    _git(root, "commit", "-q", "-m", "ce qui a été relu")
+
+    assert check_receipt(root, service.require(tid)) is None
+    assert service.transition(tid, TaskState.CLOSED, "amelia").task.status is TaskState.CLOSED
+
+
+def test_modifier_apres_le_commit_perime_encore_le_recu(tmp_path: Path) -> None:
+    """Le contenu reste opposable en mode git : un octet changé après le reçu le périme, commité ou non."""
+    root = _projet(tmp_path)
+    _git(root, "init", "-q")
+    _git(root, "add", "src.py")
+    _git(root, "commit", "-q", "-m", "base")
+    service, tid = _a_relire(root)
+    write_receipt(root, tid, "READY", reviewer_id="relecteur")
+
+    (root / "src.py").write_text("x = 3\n", encoding="utf-8")
+    assert _refus(service, tid) == "review.receipt_stale"
+    _git(root, "commit", "-q", "-am", "autre contenu")
+    assert _refus(service, tid) == "review.receipt_stale"
+
+
+def test_un_fichier_non_suivi_retouche_perime_le_recu_en_git(tmp_path: Path) -> None:
+    root = _projet(tmp_path)
+    _git(root, "init", "-q")
+    _git(root, "add", "src.py")
+    _git(root, "commit", "-q", "-m", "base")
+    (root / "neuf.py").write_text("y = 1\n", encoding="utf-8")
+    service, tid = _a_relire(root)
+    write_receipt(root, tid, "READY", reviewer_id="relecteur")
+
+    (root / "neuf.py").write_text("y = 2\n", encoding="utf-8")
+
+    assert _refus(service, tid) == "review.receipt_stale"
+
+
+def test_l_empreinte_de_contenu_est_la_meme_avant_et_apres_commit(tmp_path: Path) -> None:
+    """``content_only`` : l'empreinte ne dépend ni de HEAD, ni du status, ni du diff ; le défaut les garde (run de test)."""
+    from grimoire.core.standard_checks.tree_fingerprint import compute_tree_fingerprint
+
+    root = _projet(tmp_path)
+    _git(root, "init", "-q")
+    _git(root, "add", "src.py")
+    _git(root, "commit", "-q", "-m", "base")
+    (root / "src.py").write_text("x = 2\n", encoding="utf-8")
+    avant_contenu = compute_tree_fingerprint(root, content_only=True)
+    avant_run = compute_tree_fingerprint(root)
+
+    _git(root, "commit", "-q", "-am", "valide")
+
+    assert compute_tree_fingerprint(root, content_only=True) == avant_contenu
+    assert compute_tree_fingerprint(root) != avant_run  # l'empreinte d'un run de test garde HEAD
+
+
 # ── Un constat sans commande reste une suggestion ───────────────────────────
 
 

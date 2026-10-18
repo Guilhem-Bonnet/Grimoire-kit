@@ -459,6 +459,9 @@ def _execute_verify_panel(executor: DispatchExecutor, contract: NodeContract, co
             extra_context=(
                 f"Angle de vérification imposé ({i + 1}/{k}) : {angles[i]}\n"
                 "Instruction : cherche activement à réfuter, ne confirme jamais par défaut.\n"
+                "Sortie : écris dans l'objet de sortie 'verdict' : 'READY' ou 'NOT-READY' "
+                "(et 'tree_fingerprint', l'empreinte de l'arbre relu, si on te l'a donnée) ; "
+                "sans 'verdict' tu t'abstiens et ta sortie ne compte pas comme un vote.\n"
                 f"[genre_attempt_index={i}]"
             ),
         )
