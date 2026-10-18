@@ -423,7 +423,7 @@ prochain export l'écrase.
 | `grimoire task link <id> --depends-on <id>` | Déclarer une dépendance |
 | `grimoire task context <id>` | Produire le context bundle d'une tâche réelle |
 | `grimoire task trace <id> [--causes]` | Timeline unifiée d'une tâche : transitions, outils refusés, gates rouges, checkpoints, abort, preuves, incidents |
-| `grimoire task approve-check <id> [--cmd "<commande>"]` | Approuver par empreinte les commandes de vérification de la tâche (governed/production : sans approbation, `task verify` et le dispatch de flow ne lancent rien) ; l'acteur est attesté par un tour humain en session d'hôte ; les caractères cachés (U+202E, U+200B) sont refusés |
+| `grimoire task approve-check <id> [--cmd "<commande>"] [--allow-unattested]` | Approuver par empreinte les commandes de vérification de la tâche, pour cette tâche seule (governed/production : sans approbation, `task verify` et le dispatch de flow ne lancent rien) ; l'acteur est attesté par un tour humain postérieur au challenge de cet ensemble exact de commandes ; sans attestation (terminal nu), l'approbation est refusée sauf `--allow-unattested` (journalisée `unattested`) ; les caractères cachés (U+202E, U+200B) sont refusés |
 | `grimoire task trace-export <dest> [--format otel\|langfuse] [--mission-id <id>]` | Exporte le TraceLedger en JSONL, conventions sémantiques OTel GenAI ou contrat REST Langfuse |
 | `grimoire task recall <id>` | Ce que la mémoire du projet sait de cette tâche et de ses voisines — borné en tokens |
 | `grimoire task dispatch <id> --check "<commande>" [--check ...] [--dry-run] [--max-tier cheap\|mid\|strong] [--start-tier cheap\|mid\|strong] [--provider <id>] [--timeout <s>]` | Déléguer la tâche en cascade par palier de fournisseur |

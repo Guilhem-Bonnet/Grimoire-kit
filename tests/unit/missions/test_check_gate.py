@@ -23,7 +23,7 @@ import pytest
 from typer.testing import CliRunner
 
 from grimoire.cli.app import app
-from grimoire.flows.dispatch_executor import run_with_dispatch
+from grimoire.flows.dispatch_executor import resume_with_dispatch, run_with_dispatch
 from grimoire.flows.engine import FlowEngine
 from grimoire.hosts.decisions import HookInput, run_decision
 from grimoire.hosts.events import HookEvent
@@ -97,6 +97,12 @@ def _verify(root: Path, task_id: str) -> Any:
 
 
 def _approve(root: Path, task_id: str, *extra: str) -> Any:
+    """Terminal nu : rien n'atteste l'approbation, l'opt-in explicite la journalise telle quelle."""
+    return _cli(root, "approve-check", task_id, "--allow-unattested", *extra)
+
+
+def _approve_strict(root: Path, task_id: str, *extra: str) -> Any:
+    """L'approbation sans opt-in : seule une attestation humaine la fait compter."""
     return _cli(root, "approve-check", task_id, *extra)
 
 
@@ -113,9 +119,8 @@ def test_unapproved_command_runs_no_subprocess(project: Path, outside: Path) -> 
 
 def test_unapproved_batch_runs_nothing_even_the_approved_one(project: Path, outside: Path) -> None:
     approved = TaskCheck(cmd=_marker_cmd(outside, "a"))
-    first = _task(project, approved)
-    assert _approve(project, first.id).exit_code == 0
     second = _task(project, approved, TaskCheck(cmd=_marker_cmd(outside, "b")))
+    assert _approve(project, second.id, "--cmd", approved.cmd).exit_code == 0  # une seule des deux commandes
     res = _verify(project, second.id)
     assert res.exit_code == 3, res.output
     assert _runs(outside, "a") == 0
@@ -142,6 +147,7 @@ def test_approval_log_records_sha_actor_and_ts(project: Path, outside: Path) -> 
     assert entry["ts"]
     assert entry["attestation"] == "unattested"
     assert entry["attestation_reason"] == "no_challenge"  # terminal nu : aucun challenge émis
+    assert entry["allow_unattested"] is True  # l'opt-in est écrit au journal
 
 
 # ── Un octet, une attente affaiblie, `true` à la place ───────────────────────
@@ -321,6 +327,109 @@ def test_unattended_execution_cannot_approve(project: Path, outside: Path, monke
     assert _approve(project, task.id).exit_code == 3
 
 
+# ── W3-03 S1 : portée de l'approbation, de l'attestation, du terminal nu ─────
+
+
+def test_approval_of_one_task_does_not_cover_another_task_with_the_same_command(project: Path, outside: Path) -> None:
+    """S1-01 : l'approbation de A ne valait pour aucune tâche B portant la même commande."""
+    cmd = _marker_cmd(outside, "ran")
+    first = _task(project, TaskCheck(cmd=cmd))
+    assert _approve(project, first.id).exit_code == 0
+    second = _task(project, TaskCheck(cmd=cmd))
+    res = _verify(project, second.id)
+    assert res.exit_code == 3, res.output
+    assert "unapproved" in res.output
+    assert _runs(outside, "ran") == 0
+    assert _approve(project, second.id).exit_code == 0  # sa propre approbation la débloque
+    assert _verify(project, second.id).exit_code == 0
+    assert _runs(outside, "ran") == 1
+
+
+def test_a_gate_without_task_counts_no_approval(project: Path, outside: Path) -> None:
+    """S1-01 : un lanceur sans tâche (task_id vide) refuse, même si la commande est approuvée ailleurs."""
+    from grimoire.missions.check_gate import CheckGate
+
+    cmd = _marker_cmd(outside, "ran")
+    task = _task(project, TaskCheck(cmd=cmd))
+    assert _approve(project, task.id).exit_code == 0
+    results = CheckGate(project, "").run((cmd,), project_root=project)
+    assert (results[0].unrunnable_reason or "").startswith("unapproved")
+    assert _runs(outside, "ran") == 0
+
+
+def test_a_human_turn_for_other_commands_does_not_attest_this_approval(
+    project: Path, outside: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """S1-02 : le tour humain consommé pour le challenge de `pytest` n'approuvait pas `true`."""
+    monkeypatch.setenv("GRIMOIRE_SESSION_ID", "S1")
+    task = _task(project, TaskCheck(cmd=_marker_cmd(outside, "ran")))
+    assert _verify(project, task.id).exit_code == 3  # challenge pour cette commande
+    _human_turn(project, "S1")
+    res = _approve_strict(project, task.id, "--cmd", "true")
+    assert res.exit_code == 3, res.output
+    assert "awaiting_human" in res.output
+    assert not (project / "_grimoire-output/.runs/check-approvals.authority.jsonl").exists()
+    # le tour humain n'a pas été brûlé : la commande montrée, elle, s'approuve
+    assert _approve_strict(project, task.id).exit_code == 0
+
+
+def test_a_subset_of_the_shown_commands_needs_its_own_challenge(
+    project: Path, outside: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """S1-02 : approuver une partie des commandes montrées exige un challenge pour cette partie."""
+    monkeypatch.setenv("GRIMOIRE_SESSION_ID", "S1")
+    task = _task(project, TaskCheck(cmd=_marker_cmd(outside, "a")), TaskCheck(cmd=_marker_cmd(outside, "b")))
+    assert _verify(project, task.id).exit_code == 3
+    _human_turn(project, "S1")
+    res = _approve_strict(project, task.id, "--cmd", _marker_cmd(outside, "a"))
+    assert res.exit_code == 3, res.output
+
+
+def test_an_unattested_approval_is_refused_without_the_explicit_opt_in(project: Path, outside: Path) -> None:
+    """S1-03 : un terminal nu (variables d'agent retirées) obtenait un OK `unattested` qui comptait."""
+    task = _task(project, TaskCheck(cmd=_marker_cmd(outside, "ran")))
+    res = _approve_strict(project, task.id)
+    assert res.exit_code == 3, res.output
+    assert "unattested" in res.output
+    assert "--allow-unattested" in res.output
+    assert not (project / "_grimoire-output/.runs/check-approvals.authority.jsonl").exists()
+    assert _verify(project, task.id).exit_code == 3
+    assert _runs(outside, "ran") == 0
+
+
+def test_an_unattested_entry_without_the_opt_in_does_not_count(project: Path, outside: Path) -> None:
+    """S1-03 : `blocked()` ne compte une approbation non attestée que si l'opt-in y est écrit."""
+    from grimoire.missions.check_gate import APPROVALS_RELPATH, CheckGate, CheckSpec
+
+    cmd = _marker_cmd(outside, "ran")
+    spec = CheckSpec(cmd)
+    path = project / APPROVALS_RELPATH
+    path.parent.mkdir(parents=True)
+    line = {"type": "approval", "task_id": "T-1", "spec_sha256": spec.sha256, "attestation": "unattested"}
+    path.write_text(json.dumps(line) + "\n", encoding="utf-8")
+    assert CheckGate(project, "T-1").blocked([spec])
+    path.write_text(json.dumps({**line, "allow_unattested": True}) + "\n", encoding="utf-8")
+    assert not CheckGate(project, "T-1").blocked([spec])
+    path.write_text(json.dumps({**line, "attestation": "attested"}) + "\n", encoding="utf-8")
+    assert not CheckGate(project, "T-1").blocked([spec])
+
+
+def test_an_agent_that_strips_its_environment_is_not_attested(
+    project: Path, outside: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """S1-03 : retirer ses variables ne donne qu'un `unattested` refusé sans opt-in."""
+    monkeypatch.setenv("GRIMOIRE_SESSION_ID", "S1")
+    task = _task(project, TaskCheck(cmd=_marker_cmd(outside, "ran")))
+    assert _verify(project, task.id).exit_code == 3
+    assert _approve_strict(project, task.id).exit_code == 3  # avec la session : awaiting_human
+    for var in _AGENT_ENVS:
+        monkeypatch.delenv(var, raising=False)
+    res = _approve_strict(project, task.id)  # variables retirées : terminal nu
+    assert res.exit_code == 3, res.output
+    assert _verify(project, task.id).exit_code == 3
+    assert _runs(outside, "ran") == 0
+
+
 def test_agents_cannot_write_the_approval_journal() -> None:
     """Le journal porte le suffixe protégé par la garde d'écriture d'autorité."""
     from grimoire.hosts.decisions.authority_guard import AUTHORITY_SUFFIX
@@ -422,7 +531,8 @@ def test_approved_blueprint_acceptance_runs_and_a_modified_blueprint_asks_again(
     approval = _approve(project, _task_id_for(blocked.run_id, "n"))
     assert approval.exit_code == 0, approval.output
 
-    done = _flow(project, outside, command)
+    engine = FlowEngine(kernel_root=project / "runtime", flows_root=project / "flows")
+    done = resume_with_dispatch(engine, blocked.run_id, project_root=project)
     assert done.status == "finished", done.host_reason
     assert _runs(outside, "accept") == 1
     assert _runs(outside, "worker-calls") == 1
@@ -432,6 +542,11 @@ def test_approved_blueprint_acceptance_runs_and_a_modified_blueprint_asks_again(
     assert _runs(outside, "accept") == 1
     assert _runs(outside, "accept2") == 0
     assert _runs(outside, "worker-calls") == 1
+
+    again = _flow(project, outside, command)  # même blueprint, nouveau run : l'approbation est celle du run précédent
+    assert again.status == "waiting_host"
+    assert again.run_id != blocked.run_id
+    assert _runs(outside, "accept") == 1
 
 
 def test_gate_runner_marks_unapproved_checks_unrunnable_without_spawning(project: Path, outside: Path) -> None:

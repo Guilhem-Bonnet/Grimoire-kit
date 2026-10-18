@@ -17,12 +17,19 @@ autres gardes de profil) :
   d'approbations ``check-approvals.authority.jsonl`` ; un octet modifié, une
   attente affaiblie ou ``true`` à la place changent l'empreinte, donc
   l'approbation ne vaut plus ;
+- l'approbation vaut pour la tâche qui l'a reçue (``task_id`` du journal) : celle
+  d'une tâche A ne vaut jamais pour une tâche B qui porte la même commande, et
+  un lanceur sans tâche (``task_id`` vide) ne compte aucune approbation ;
 - sans approbation, aucun sous-processus : le lot entier est refusé
-  (``unapproved``) et un challenge W2-01 est émis pour la session ;
+  (``unapproved``) et un challenge W2-01 est émis pour la session, lié à
+  l'ensemble exact des empreintes montrées (``approve-check:<tâche>:<sha>``) :
+  un tour humain consommé pour approuver ``pytest`` n'approuve pas ``true`` ;
 - ``grimoire task approve-check`` écrit ``{sha256, actor, ts}`` et classe
   l'acteur avec le mécanisme de W2-01 (:func:`grimoire.flows.attestation.attest`) :
   depuis une session d'hôte, un agent ou ``GRIMOIRE_UNATTENDED=1``, l'approbation
-  exige un tour humain de la session postérieur au challenge ;
+  exige un tour humain de la session postérieur au challenge ; hors session ni
+  marqueur (terminal nu), l'approbation n'est que ``unattested`` et ne compte
+  qu'avec ``allow_unattested`` explicite (``--allow-unattested``), journalisé ;
 - les caractères de contrôle bidirectionnel et de largeur nulle (U+202E,
   U+200B…) sont refusés : une commande dont l'affichage ment ne s'approuve pas ;
 - chaque exécution laisse un reçu ``{command_sha256, tree_fingerprint, exit}``
@@ -34,10 +41,12 @@ de :mod:`grimoire.hosts.decisions.authority_guard` les protège des Write, Edit
 et redirections d'un agent.
 
 Limite écrite (principe 7) : un agent qui exécute du code arbitraire peut
-contourner une garde de chemin ; hors session d'hôte et hors marqueur d'agent
-(terminal nu), l'approbation est acceptée et classée ``unattested``
-(``no_session``) faute de moyen de prouver un humain ; le reçu ne protège pas
-d'une commande non déterministe (même arbre, autre résultat).
+contourner une garde de chemin ; la détection de « session d'hôte » ou d'agent
+lit l'environnement du processus appelant, donc un agent qui retire ses
+variables se classe terminal nu : il n'obtient alors qu'une approbation
+``unattested``, refusée sauf ``--allow-unattested`` (un opt-in visible dans sa
+ligne de commande et dans le journal, pas une preuve d'humain) ; le reçu ne
+protège pas d'une commande non déterministe (même arbre, autre résultat).
 """
 
 from __future__ import annotations
@@ -224,9 +233,21 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def _approved_specs(project_root: Path) -> frozenset[str]:
+def _approved_specs(project_root: Path, task_id: str) -> frozenset[str]:
+    """Les empreintes approuvées POUR *task_id* (jamais celles d'une autre tâche).
+
+    Une approbation compte si un humain l'a attestée ou si elle porte
+    ``allow_unattested`` (opt-in explicite d'un terminal nu). Un *task_id* vide
+    ne compte rien : toute approbation écrite nomme sa tâche.
+    """
+    if not task_id:
+        return frozenset()
     return frozenset(
-        str(e.get("spec_sha256", "")) for e in _read(project_root / APPROVALS_RELPATH) if e.get("type") == "approval"
+        str(e.get("spec_sha256", ""))
+        for e in _read(project_root / APPROVALS_RELPATH)
+        if e.get("type") == "approval"
+        and e.get("task_id") == task_id
+        and (e.get("attestation") == "attested" or e.get("allow_unattested") is True)
     )
 
 
@@ -236,8 +257,14 @@ def _journal(project_root: Path) -> Any:
     return CheckpointJournal(project_root / FLOWS_RELPATH, _JOURNAL_RUN)
 
 
-def _node(task_id: str) -> str:
-    return f"approve-check:{task_id}"
+def _set_sha256(specs: Sequence[CheckSpec]) -> str:
+    """Empreinte de l'ensemble des empreintes de *specs* (ordre et doublons sans effet)."""
+    return hashlib.sha256("\n".join(sorted({s.sha256 for s in specs})).encode("ascii")).hexdigest()
+
+
+def _node(task_id: str, specs: Sequence[CheckSpec]) -> str:
+    """Le node du challenge : la tâche ET l'ensemble exact des commandes montrées à l'humain."""
+    return f"approve-check:{task_id}:{_set_sha256(specs)}"
 
 
 def _needs_human(env: Mapping[str, str] | None) -> bool:
@@ -255,8 +282,15 @@ def approve_checks(
     *,
     actor: str,
     env: Mapping[str, str] | None = None,
+    allow_unattested: bool = False,
 ) -> ApprovalOutcome:
-    """Inscrit l'approbation de *specs* ; l'acteur est classé par W2-01 (un tour humain consommé par appel)."""
+    """Inscrit l'approbation de *specs* ; l'acteur est classé par W2-01 (un tour humain consommé par appel).
+
+    Le challenge est celui de ``(task_id, specs)`` exactement : un tour humain
+    obtenu pour d'autres commandes n'atteste pas celles-ci. Une approbation que
+    rien n'atteste (terminal nu) est refusée (``unattested``) sauf
+    *allow_unattested*, qui la journalise comme telle et la fait compter.
+    """
     from grimoire.flows.attestation import attest
 
     root = project_root.resolve()
@@ -269,7 +303,7 @@ def approve_checks(
                 f"l'affichage ne dit pas ce qui s'exécute — {visible(spec.cmd)}",
             )
     journal = _journal(root)
-    node = _node(task_id)
+    node = _node(task_id, specs)
     challenge = journal.open_challenge(node)
     attestation: Attestation = attest(root, challenge, env, journal.consumed_turns())
     if not attestation.attested and _needs_human(env):
@@ -280,6 +314,13 @@ def approve_checks(
             f"awaiting_human : {attestation.reason} — {attestation.explain()}. Une approbation depuis une session "
             "d'hôte ou un agent exige un tour humain de cette session postérieur au challenge : "
             "dis « approuvé » dans la conversation, puis relance cette commande.",
+        )
+    if not attestation.attested and not allow_unattested:
+        raise ApprovalRefusedError(
+            "unattested",
+            f"unattested : {attestation.reason} — {attestation.explain()}. Aucun tour humain n'atteste cette "
+            "approbation en profil governed/production : depuis un terminal nu, relance avec --allow-unattested "
+            "(journalisé comme non attesté ; ce n'est pas une preuve d'humain).",
         )
     journal.record_decision(node, "approve", "approve-check", attestation)
     approvals = root / APPROVALS_RELPATH
@@ -297,6 +338,7 @@ def approve_checks(
                 "session_id": attestation.session_id,
                 "attestation": attestation.status,
                 "attestation_reason": attestation.reason,
+                "allow_unattested": bool(allow_unattested and not attestation.attested),
                 "ts": stamp,
             },
             ensure_ascii=True,
@@ -334,7 +376,7 @@ class CheckGate:
         """Les commandes qui ne peuvent pas tourner (vide hors profil appliqué)."""
         if not self.enforced:
             return ()
-        approved = _approved_specs(self.root)
+        approved = _approved_specs(self.root, self.task_id)
         out: list[Blocked] = []
         for index, spec in enumerate(specs):
             if spec.cmd in self.trusted:
@@ -348,10 +390,18 @@ class CheckGate:
     def preflight(self, specs: Sequence[CheckSpec]) -> tuple[Blocked, ...]:
         """:meth:`blocked`, plus le challenge W2-01 qui permettra d'attester l'approbation (au mieux)."""
         blocked = self.blocked(specs)
-        if any("caractères" not in b.reason for b in blocked):
+        shown = [specs[b.index] for b in blocked if "caractères" not in b.reason]
+        if shown:
             # Sans challenge, l'approbation depuis une session sera refusée : le refus nomme le remède.
+            # Un challenge par ensemble que `approve-check` peut approuver : les commandes refusées,
+            # et le lot entier (ce que l'approbation par défaut d'une tâche inscrit).
+            sets = [shown]
+            whole = [s for s in specs if s.cmd not in self.trusted]
+            if _set_sha256(whole) != _set_sha256(shown):
+                sets.append(whole)
             with contextlib.suppress(OSError, ValueError):
-                _journal(self.root).issue_challenge(_node(self.task_id))
+                for chosen in sets:
+                    _journal(self.root).issue_challenge(_node(self.task_id, chosen))
         return blocked
 
     def run(
