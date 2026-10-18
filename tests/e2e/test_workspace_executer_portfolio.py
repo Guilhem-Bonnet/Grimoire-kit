@@ -264,7 +264,7 @@ def test_le_portefeuille_liste_les_deux_projets_et_nomme_le_troisieme(
     projects = {page.locator(f".ex-card[data-project='{slugs[k]}']").count() for k in ("a", "b")}
     assert projects == {1}, "une carte par projet, chacune sous sa puce"
     assert "projet-alpha" in text and "projet-beta" in text, "la puce projet porte le nom du projet"
-    assert "session vivant" in text and "session inconnu" in text, "point + mot à quatre valeurs (K5), jamais la couleur seule"
+    assert "session vivante" in text and "session inactive" in text, "point + mot, jamais la couleur seule"
     notice = page.locator(".ex-notice")
     notice.wait_for()
     assert "projet-gamma" in notice.inner_text() and "introuvable" in notice.inner_text()
@@ -303,7 +303,7 @@ def test_reprendre_la_session_montre_la_commande_sans_l_executer(
     _capture(page, "04-portefeuille-inspecteur-session")
 
     session_text = inspector.locator(".ex-session").inner_text()
-    assert "vivant" in session_text and LIVE_SESSION in session_text
+    assert "vivante" in session_text and LIVE_SESSION in session_text
     assert f"claude --resume {LIVE_SESSION}" in session_text
     button = inspector.locator("button", has_text="Reprendre la session")
     button.wait_for()
