@@ -139,6 +139,21 @@ jobs:
           grimoire --version
           python -c "from grimoire.core.config import GrimoireConfig; print('SDK OK')"
 
+      # Le parcours J1 de docs/onboarding.md, prouvé et chronométré sur la roue
+      # installée dans un environnement vierge : le hook SessionStart doit tirer,
+      # un premier gate doit passer au vert, et la durée tenir le budget que le
+      # document déclare (scripts/check-up-prove-budget.py).
+      - name: up --prove sur une installation vierge
+        env:
+          GRIMOIRE_NO_COCKPIT: "1"
+        run: |
+          python -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install dist/*.whl
+          mkdir "$RUNNER_TEMP/proj"
+          git -C "$RUNNER_TEMP/proj" init -q
+          PATH="$RUNNER_TEMP/venv/bin:$PATH" grimoire -o json up "$RUNNER_TEMP/proj" --backend local --prove > "$RUNNER_TEMP/prove.json"
+          python scripts/check-up-prove-budget.py --report "$RUNNER_TEMP/prove.json" --doc docs/onboarding.md
+
   publish-pypi:
     name: "Publish to PyPI"
     runs-on: ubuntu-latest

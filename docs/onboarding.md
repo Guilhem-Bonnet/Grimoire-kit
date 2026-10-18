@@ -49,6 +49,31 @@ Attendu : tous les checks `OK`, y compris l'environnement (uv, docker, Qdrant,
 Ollama — optionnels, avec remédiation affichée si absents). Pour régénérer des
 wrappers agents ou un `.mcp.json` manquants : `grimoire doctor . --fix`.
 
+### 2bis. Prouver que le hook tire (optionnel, recommandé)
+
+`grimoire doctor` dit que le projet est en état ; il ne lance pas le hook que
+votre hôte exécutera. Pour le vérifier pour de bon :
+
+```bash
+grimoire up . --prove
+```
+
+La commande ouvre une tâche jetable, exécute la commande `SessionStart`
+déclarée par la configuration de chaque hôte (`.claude/settings.json`,
+`.github/hooks/`) puis vérifie qu'un premier gate de preuve est passé du rouge au
+vert grâce à ce hook. Elle sort en erreur si un hook est désactivé
+(`disableAllHooks`), absent du `PATH` de l'hôte ou sans effet, alors que
+`doctor` reste vert. Avec `--output json`, elle rend `hooks_fired`,
+`first_gate` et `time_to_first_proof_s`.
+
+Cette durée a un budget testé, pas un chiffre rond : le job de release installe
+la roue dans un environnement vierge, lance `up --prove` et échoue au-delà de
+**60 s** (`scripts/check-up-prove-budget.py`). La durée mesurée par ce job est
+publiée dans son résumé, pas recopiée ici. Le budget ne couvre ni l'installation
+du paquet ni le démarrage de l'interpréteur.
+
+<!-- up-prove-budget-s: 60 -->
+
 ### 3. Enrôler vos autres projets (optionnel)
 
 ```bash
