@@ -20,6 +20,7 @@ from typing import Any
 from grimoire.core.exceptions import GrimoireRuntimeError
 from grimoire.core.fsio import locked
 from grimoire.costs import Cost
+from grimoire.traces.intervals import ratio_interval95, wilson_interval95
 from grimoire.traces.otel_conventions import (
     ATTR_AGENT_NAME,
     ATTR_CONVERSATION_ID,
@@ -377,6 +378,11 @@ class DispatchOutcomeStats:
     def pass_k_rate(self) -> float | None:
         return self.pass_k_fully_green / self.pass_k_observations if self.pass_k_observations else None
 
+    @property
+    def pass_k_ci95(self) -> tuple[float, float] | None:
+        """Intervalle de Wilson à 95 % de :attr:`pass_k_rate` ; ``None`` sans série rejouée (W4-05)."""
+        return wilson_interval95(self.pass_k_fully_green, self.pass_k_observations)
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "overall": self.overall.to_dict(),
@@ -386,6 +392,7 @@ class DispatchOutcomeStats:
             "pass_k_observations": self.pass_k_observations,
             "pass_k_fully_green": self.pass_k_fully_green,
             "pass_k_rate": self.pass_k_rate,
+            "pass_k_ci95": self.pass_k_ci95,
         }
 
 
@@ -1103,6 +1110,24 @@ class TraceLedger:
         records = [(trace.tags, trace.token_usage.cost) for trace in traces]
         return compute_dispatch_outcome_stats(records)
 
+    def dispatch_cost_interval(self, *, since_iso: str | None = None) -> tuple[float, float] | None:
+        """IC95 du coût par tâche résolue, ou ``None`` s'il n'est pas estimable (W4-05).
+
+        Calculé sur les coûts par dispatch (jamais sur l'agrégat). ``None`` dès
+        qu'un appel n'a pas de coût : un minimum n'a pas d'intervalle, le
+        contrôle retombe sur son message « non évalué ». Sans variance
+        estimable (moins de deux dispatchs), ``None`` aussi.
+        """
+        samples: list[tuple[float, int]] = []
+        for trace in self._load_all():
+            if DISPATCH_OUTCOME_TAG not in trace.tags or (since_iso and trace.started_at < since_iso):
+                continue
+            cost = trace.token_usage.cost
+            if cost.usd is None or cost.unpriced_calls:
+                return None
+            samples.append((cost.usd, 1 if _last_tag_value(trace.tags, "resolved:") == "true" else 0))
+        return ratio_interval95(samples)
+
     def record_hold_followup(self, *, hold: TraceRecord, label: str) -> None:
         """Label *hold* (a :data:`POLICY_HOLD_TAG` record from :meth:`open_policy_hold`)
         with a structural reaction label — see :data:`HOLD_LABELS`.
@@ -1196,13 +1221,13 @@ class TraceLedger:
         not traces, whenever a trace carries tool calls.
         No opentelemetry-sdk dependency required — pure JSONL output.
         """
-        traces = self.list_traces(mission_id=mission_id)
-        lines: list[str] = []
-        for trace in traces:
-            for span in self._to_otel_spans(trace):
-                lines.append(json.dumps(span, ensure_ascii=False))
+        lines = [json.dumps(span, ensure_ascii=False) for span in self.otel_spans(mission_id=mission_id)]
         dest.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
         return len(lines)
+
+    def otel_spans(self, *, mission_id: str | None = None) -> list[dict[str, Any]]:
+        """Les spans ``grimoire.otel.v2`` du journal : source unique du JSONL et de l'export OTLP."""
+        return [span for trace in self.list_traces(mission_id=mission_id) for span in self._to_otel_spans(trace)]
 
     # ── Langfuse JSONL export ──────────────────────────────────────────────
 
@@ -1304,6 +1329,12 @@ class TraceLedger:
         }
         if trace.agent_id:
             attrs[ATTR_AGENT_NAME] = trace.agent_id
+        # Coût à trois états (W1-01) : un montant inconnu n'est pas écrit, le statut le dit.
+        cost = trace.token_usage.cost
+        attrs["grimoire.cost.status"] = cost.status
+        attrs["grimoire.cost.unpriced_calls"] = cost.unpriced_calls
+        if cost.usd is not None:
+            attrs["grimoire.cost.usd"] = cost.usd
 
         parent_name = agent_span_name(trace.agent_id) if trace.agent_id else model_span_name(OP_INVOKE_AGENT, trace.recipe_id)
 

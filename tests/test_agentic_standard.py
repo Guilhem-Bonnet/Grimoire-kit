@@ -1351,7 +1351,9 @@ def _emitted_check_ids() -> set[str]:
                core / "standard_checks" / "claim_ledger_verify.py",
                core / "standard_checks" / "no_tests_collected.py",
                core / "standard_checks" / "gate_codegraph.py",
-               core / "standard_checks" / "criterion_coverage.py"]
+               core / "standard_checks" / "criterion_coverage.py",
+               # W4-05 : dispatch.cost_slo extrait de verifiers.py (ratchet de taille).
+               core / "standard_checks" / "dispatch_cost_slo.py"]
     trees = {path: ast.parse(path.read_text(encoding="utf-8")) for path in
              [*modules, core / "standard_checks" / "base.py"]}
 
