@@ -1,3 +1,7 @@
+---
+audience: utilisateur
+---
+
 # Grimoire Kit {: .gp-hero-brand }
 
 ## L'agentic OS qui empêche les projets IA de retomber à zéro {: .gp-hero-title }

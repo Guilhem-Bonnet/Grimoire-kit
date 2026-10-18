@@ -4,7 +4,7 @@ name: Publish
 # GitHub : il n'existe plus de second workflow sur le même tag, donc plus de
 # course entre deux créateurs ni de notes réécrites par l'un ou l'autre.
 #
-#   gates ─► build ─► test ─► publish-pypi ─► github-release
+#   gates ─► build ─► test ─► attest ─► publish-pypi ─► github-release
 #
 # * `gates` porte les garde-fous qui vivaient dans l'ancien release.yml, et en
 #   ajoute un : le tag doit pointer un commit de main.
@@ -84,17 +84,32 @@ jobs:
       - name: Build sdist + wheel
         run: python -m build
 
-      - name: Verify wheel installs
+      # La wheel s'installe et démarre dans un environnement neuf, sans pip ni
+      # outil de build : cet environnement est aussi celui que décrit le SBOM.
+      # Un SBOM pris dans l'environnement du runner listerait build, pip et
+      # cyclonedx-bom, c'est-à-dire des paquets que la wheel n'embarque pas.
+      - name: Verify wheel installs (environnement neuf)
         run: |
-          pip install dist/*.whl
-          grimoire --version
+          python -m venv --without-pip .wheel-env
+          pip --python .wheel-env/bin/python install dist/*.whl
+          .wheel-env/bin/grimoire --version
 
-      - name: Generate SBOM (CycloneDX)
+      - name: Generate SBOM (CycloneDX) de la wheel seule
         run: |
           pip install cyclonedx-bom
           mkdir -p sbom
-          cyclonedx-py environment --output-format json -o sbom/sbom.cdx.json
+          cyclonedx-py environment --output-format json -o sbom/sbom.cdx.json .wheel-env/bin/python
           echo "SBOM generated: sbom/sbom.cdx.json"
+
+      # Les sommes couvrent ce que la release publie : la wheel, le sdist et le
+      # SBOM. `grimoire self update` les confronte à l'empreinte de PyPI avant
+      # toute installation.
+      - name: SHA256SUMS
+        run: |
+          mkdir -p stage checksums
+          cp dist/* sbom/sbom.cdx.json stage/
+          (cd stage && sha256sum -- * > ../checksums/SHA256SUMS && sha256sum --check ../checksums/SHA256SUMS)
+          cat checksums/SHA256SUMS
 
       - name: Upload dist artifacts
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
@@ -107,6 +122,12 @@ jobs:
         with:
           name: sbom
           path: sbom/
+
+      - name: Upload SHA256SUMS
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
+        with:
+          name: checksums
+          path: checksums/
 
   # La pré-vérification avant publication, c'est ce job : la wheel construite
   # est installée dans un runner neuf, sur chaque Python supporté, et doit
@@ -139,13 +160,77 @@ jobs:
           grimoire --version
           python -c "from grimoire.core.config import GrimoireConfig; print('SDK OK')"
 
+
+      # Le parcours J1 de docs/onboarding.md, prouvé et chronométré sur la roue
+      # installée dans un environnement vierge : le hook SessionStart doit tirer,
+      # un premier gate doit passer au vert, et la durée tenir le budget que le
+      # document déclare (scripts/check-up-prove-budget.py).
+      - name: up --prove sur une installation vierge
+        env:
+          GRIMOIRE_NO_COCKPIT: "1"
+        run: |
+          python -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install dist/*.whl
+          mkdir "$RUNNER_TEMP/proj"
+          git -C "$RUNNER_TEMP/proj" init -q
+          PATH="$RUNNER_TEMP/venv/bin:$PATH" grimoire -o json up "$RUNNER_TEMP/proj" --backend local --prove > "$RUNNER_TEMP/prove.json"
+          python scripts/check-up-prove-budget.py --report "$RUNNER_TEMP/prove.json" --doc docs/onboarding.md
+
+  # Attestation de provenance (SLSA, Sigstore) des fichiers publiés. Ce job est
+  # une condition de la publication : sans attestation, ni PyPI ni la release
+  # GitHub ne partent. `attest-build-provenance` échoue si Sigstore ou l'API
+  # d'attestations répond en erreur ; l'étape suivante échoue en plus si une
+  # attestation manque pour l'un des fichiers (`gh attestation verify`).
+  attest:
+    name: "Attestation de provenance"
+    runs-on: ubuntu-latest
+    needs: [gates, build, test]
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download dist
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8
+        with:
+          name: dist
+          path: dist/
+
+      - name: Download SBOM
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8
+        with:
+          name: sbom
+          path: sbom/
+
+      - name: Download SHA256SUMS
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8
+        with:
+          name: checksums
+          path: checksums/
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
+        with:
+          subject-path: |
+            dist/*
+            sbom/sbom.cdx.json
+            checksums/SHA256SUMS
+
+      - name: Chaque fichier publié a son attestation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for f in dist/* sbom/sbom.cdx.json checksums/SHA256SUMS; do
+            gh attestation verify "$f" --repo "$GITHUB_REPOSITORY"
+          done
+
   publish-pypi:
     name: "Publish to PyPI"
     runs-on: ubuntu-latest
     # PyPI part sur un tag stable. Une pré-version n'y va pas : le numéro d'une
     # publication PyPI est consommé pour toujours.
     if: ${{ needs.gates.outputs.stable == 'true' }}
-    needs: [gates, build, test]
+    needs: [gates, build, test, attest]
     environment: pypi
     permissions:
       id-token: write  # Trusted Publisher
@@ -172,12 +257,13 @@ jobs:
   github-release:
     name: "GitHub Release"
     runs-on: ubuntu-latest
-    needs: [gates, build, test, publish-pypi]
+    needs: [gates, build, test, attest, publish-pypi]
     if: >-
       ${{ !cancelled()
       && needs.gates.result == 'success'
       && needs.build.result == 'success'
       && needs.test.result == 'success'
+      && needs.attest.result == 'success'
       && (needs.publish-pypi.result == 'success'
       || (needs.gates.outputs.stable != 'true' && needs.publish-pypi.result == 'skipped')) }}
     permissions:
@@ -201,6 +287,12 @@ jobs:
           name: sbom
           path: sbom/
 
+      - name: Download SHA256SUMS
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8
+        with:
+          name: checksums
+          path: checksums/
+
       - name: Notes de version = section du CHANGELOG
         env:
           VERSION: ${{ needs.gates.outputs.version }}
@@ -221,5 +313,6 @@ jobs:
             dist/*.whl
             dist/*.tar.gz
             sbom/sbom.cdx.json
+            checksums/SHA256SUMS
             grimoire-init.sh
             framework/archetype-dna.schema.yaml

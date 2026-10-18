@@ -1,3 +1,7 @@
+---
+audience: référence
+---
+
 # Référence Configuration
 
 Ce document décrit toutes les clés disponibles dans `project-context.yaml`.

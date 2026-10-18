@@ -1,3 +1,7 @@
+---
+audience: référence
+---
+
 # Référence API
 
 ## `grimoire.core`

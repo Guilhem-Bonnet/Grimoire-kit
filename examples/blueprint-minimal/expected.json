@@ -1,0 +1,22 @@
+{
+  "example": "blueprint-minimal",
+  "replay": {
+    "exit_code": 0,
+    "stdout": [
+      "Schema layer: checked against schemas/blueprint-v1.schema.json",
+      "Structural layer: validate_blueprint_file + compile-level checks",
+      "  note: artifact refs not checked (pass --project-root to check them against a project)",
+      "Valid: registry/blueprints/minimal.blueprint.json passes both validation layers"
+    ]
+  },
+  "proof": {
+    "gate": "grimoire blueprint validate (schema JSON + controles structurels)",
+    "verdict": "pass",
+    "score": null,
+    "cost": {
+      "model_calls": 0,
+      "tokens": null
+    },
+    "notes": "Aucun score ni cout : le rejeu valide un fichier, il n'execute aucun flow."
+  }
+}

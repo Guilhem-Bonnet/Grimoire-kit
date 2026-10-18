@@ -15,6 +15,8 @@ from typer.testing import CliRunner
 
 from grimoire.cli.app import _ALIASES, _expand_aliases, add_agent, app, doctor, history_cmd, main, remove_agent
 
+from ._fake_release import FakeRelease
+
 runner = CliRunner()
 skip_windows_process_replacement = pytest.mark.skipif(
     sys.platform == "win32",
@@ -1384,15 +1386,13 @@ class TestSelfUpdate:
 
     @patch("grimoire.cli.app.is_online", return_value=True)
     def test_self_update_performs_pip_upgrade(self, _mock_online: MagicMock) -> None:
-        fake_resp = MagicMock()
-        fake_resp.read.return_value = json.dumps({"info": {"version": "99.0.0"}}).encode()
-        fake_resp.__enter__ = lambda s: s
-        fake_resp.__exit__ = MagicMock(return_value=False)
+        net = FakeRelease()  # PyPI, wheel et SHA256SUMS cohérents : la vérification passe
 
         fake_run = MagicMock()
         fake_run.returncode = 0
 
-        with patch("urllib.request.urlopen", return_value=fake_resp), \
+        with patch("urllib.request.urlopen", net), \
+             patch("grimoire.tools.install_trust.installed_extras", return_value=[]), \
              patch("shutil.which", return_value=None), \
              patch("subprocess.run", return_value=fake_run) as mock_run:
             result = runner.invoke(app, ["self", "update"])
@@ -1401,16 +1401,13 @@ class TestSelfUpdate:
         assert "Updated to 99.0.0" in result.output
         # Verify pip upgrade was called
         call_args = mock_run.call_args[0][0]
-        assert "pip" in call_args[1] or "pip" in str(call_args)
+        assert call_args[1:4] == ["-m", "pip", "install"]
         assert "--upgrade" in call_args
-        assert "grimoire-kit" in call_args
+        assert call_args[-1].startswith("grimoire-kit @ file://")
 
     @patch("grimoire.cli.app.is_online", return_value=True)
     def test_self_update_detects_pipx(self, _mock_online: MagicMock) -> None:
-        fake_resp = MagicMock()
-        fake_resp.read.return_value = json.dumps({"info": {"version": "99.0.0"}}).encode()
-        fake_resp.__enter__ = lambda s: s
-        fake_resp.__exit__ = MagicMock(return_value=False)
+        net = FakeRelease()  # PyPI, wheel et SHA256SUMS cohérents : la vérification passe
 
         pipx_list_result = MagicMock()
         pipx_list_result.stdout = "grimoire-kit 3.3.0\n"
@@ -1427,7 +1424,8 @@ class TestSelfUpdate:
         def which(name: str) -> str | None:
             return "/usr/bin/pipx" if name == "pipx" else None
 
-        with patch("urllib.request.urlopen", return_value=fake_resp), \
+        with patch("urllib.request.urlopen", net), \
+             patch("grimoire.tools.install_trust.installed_extras", return_value=[]), \
              patch("shutil.which", side_effect=which), \
              patch("subprocess.run", side_effect=side_effect) as mock_run:
             result = runner.invoke(app, ["self", "update"])
@@ -1435,16 +1433,14 @@ class TestSelfUpdate:
         assert result.exit_code == 0
         assert "Updated to 99.0.0" in result.output
         upgrade_cmd = mock_run.call_args[0][0]
-        assert upgrade_cmd == ["/usr/bin/pipx", "upgrade", "grimoire-kit"]
+        assert upgrade_cmd[:3] == ["/usr/bin/pipx", "install", "--force"]
+        assert upgrade_cmd[-1].startswith("grimoire-kit @ file://")
 
     @patch("grimoire.cli.app.is_online", return_value=True)
     def test_self_update_detects_uv_tool(self, _mock_online: MagicMock) -> None:
         # Regression: a `uv tool install` env has no pip — `python -m pip
-        # install --upgrade` fails. update must route through `uv tool upgrade`.
-        fake_resp = MagicMock()
-        fake_resp.read.return_value = json.dumps({"info": {"version": "99.0.0"}}).encode()
-        fake_resp.__enter__ = lambda s: s
-        fake_resp.__exit__ = MagicMock(return_value=False)
+        # install --upgrade` fails. update must route through `uv tool install`.
+        net = FakeRelease()  # PyPI, wheel et SHA256SUMS cohérents : la vérification passe
 
         uv_list_result = MagicMock()
         uv_list_result.stdout = "grimoire-kit v99.0.0\n- grimoire\n"
@@ -1460,7 +1456,8 @@ class TestSelfUpdate:
         def which(name: str) -> str | None:
             return "/usr/bin/uv" if name == "uv" else None
 
-        with patch("urllib.request.urlopen", return_value=fake_resp), \
+        with patch("urllib.request.urlopen", net), \
+             patch("grimoire.tools.install_trust.installed_extras", return_value=[]), \
              patch("shutil.which", side_effect=which), \
              patch("subprocess.run", side_effect=side_effect) as mock_run:
             result = runner.invoke(app, ["self", "update"])
@@ -1468,7 +1465,8 @@ class TestSelfUpdate:
         assert result.exit_code == 0
         assert "Updated to 99.0.0" in result.output
         upgrade_cmd = mock_run.call_args[0][0]
-        assert upgrade_cmd == ["/usr/bin/uv", "tool", "upgrade", "grimoire-kit"]
+        assert upgrade_cmd[:4] == ["/usr/bin/uv", "tool", "install", "--force"]
+        assert upgrade_cmd[-1].startswith("grimoire-kit @ file://")
 
     def test_resolve_latest_prefers_releases_over_stale_info(self) -> None:
         # info.version lags the CDN; releases carries the real newest version.

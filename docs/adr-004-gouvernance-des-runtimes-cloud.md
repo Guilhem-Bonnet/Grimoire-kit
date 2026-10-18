@@ -1,3 +1,7 @@
+---
+audience: décision
+---
+
 # ADR-004 — Grimoire gouverne les runtimes d'agents cloud, il n'en devient pas un
 
 - **Statut** : accepté (2026-08-26)

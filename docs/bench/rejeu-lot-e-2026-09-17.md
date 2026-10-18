@@ -1,3 +1,7 @@
+---
+audience: décision
+---
+
 <p align="right"><a href="../../README.md">README</a> · <a href="../../CHANGELOG.md">Changelog</a> · <a href="../index.md">Docs</a></p>
 
 # <img src="../assets/icons/flask.svg" width="32" height="32" alt=""> Rejeu du banc à trois bras après les lots A/B/C — 2026-09-17

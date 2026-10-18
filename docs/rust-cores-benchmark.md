@@ -1,3 +1,7 @@
+---
+audience: contributeur
+---
+
 # Bench des cœurs Rust optionnels
 
 Deux modules du kit ont une implémentation Rust optionnelle (issue

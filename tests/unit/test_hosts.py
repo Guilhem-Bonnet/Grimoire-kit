@@ -39,6 +39,13 @@ from grimoire.hosts.runtime import normalize_input, parse_event, render, run_hoo
 from grimoire.hosts.secrets import SECRET_RULES, secret_read_globs
 from grimoire.hosts.surface import Enforcement, HookEvent, HookSpec, ToolVerb
 
+pytestmark = pytest.mark.covers(
+    "host:claude-code-cli",
+    "host:codex",
+    "host:github-copilot",
+    level="integration",
+)
+
 AGENT_DIR = Path("_grimoire/_config/custom/agents")
 
 

@@ -283,6 +283,37 @@ _RESOLVERS: dict[str, Callable[..., GateRefusal | None]] = {
 }
 
 
+#: Colonnes du board où la profondeur de test exigée doit être atteinte :
+#: les mêmes que le verdict de revue — on ne ferme pas en dessous.
+_DEPTH_TARGETS: frozenset[str] = frozenset({"accepted", "released"})
+
+
+def _depth_refusal(root: Path, task: Any, to_board: str) -> GateRefusal | None:
+    """La profondeur de test que la tâche exige (W6-01), mesurée sur son dernier verdict.
+
+    Ne lit rien pour une tâche sans ``test_depth`` : le gate des tâches
+    existantes est inchangé. La mesure porte sur les commandes que
+    ``grimoire task verify`` a réellement lancées, pas sur celles déclarées.
+    """
+    required = str(getattr(task, "test_depth", "") or "")
+    if not required or to_board not in _DEPTH_TARGETS:
+        return None
+    from grimoire.core.execution_needs import resolve_execution_needs
+    from grimoire.missions.ceremony import DEPTH_UNMET, depth_shortfall, verified_commands
+
+    service = EvidenceService(root / _EVIDENCE_LEDGER)
+    verdict = service.get_latest_verdict(_task_id(task))
+    pack = service.get_pack(verdict.evidence_pack_id) if verdict is not None else None
+    needs = {need_id: need.command for need_id, need in resolve_execution_needs(root).items()}
+    shortfall = depth_shortfall(required, verified_commands(pack, verdict), needs)
+    if shortfall is None:
+        return None
+    return GateRefusal(
+        DEPTH_UNMET, shortfall,
+        "déclarer la commande manquante (`task add --check`), puis `grimoire task verify`",
+    )
+
+
 #: Résolveurs qui lisent une déclaration du standard et non une preuve de la tâche.
 _DECLARATION_RESOLVERS = frozenset({"provider_policy"})
 
@@ -308,8 +339,11 @@ def check_transition(
         strictness = _strictness(decl)
     except GatesFileError as exc:
         return _unreadable_verdict(exc)
+    depth = _depth_refusal(root, task, to_board)
     if entry is None:
-        return GateVerdict("", strictness, ())
+        # Une transition non déclarée reste libre, sauf la profondeur de test
+        # que la tâche a elle-même déclarée : elle la suit partout.
+        return GateVerdict("test_depth", strictness, (depth,)) if depth else GateVerdict("", strictness, ())
 
     refusals: list[GateRefusal] = []
     for name in entry.get("required_evidence", []) or []:
@@ -328,5 +362,7 @@ def check_transition(
         refusal = resolver(decl if name in _DECLARATION_RESOLVERS else root, task, name)
         if refusal is not None:
             refusals.append(refusal)
+    if depth is not None:
+        refusals.append(depth)
 
     return GateVerdict(str(entry.get("id", "")), strictness, tuple(refusals))

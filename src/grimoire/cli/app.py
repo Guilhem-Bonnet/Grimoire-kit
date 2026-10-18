@@ -22,6 +22,7 @@ from grimoire.__version__ import __version__
 from grimoire.cli._condensed_help import _RootHelpGroup
 from grimoire.cli._lazy import LazyCommandSpec, LazyGroupSpec, LazyTyperGroup
 from grimoire.cli._shared import _AUDIT_FILENAME, _log_operation, _status_spinner
+from grimoire.cli.cmd_self_update import self_update_command
 from grimoire.core import layout
 from grimoire.core.config import GrimoireConfig
 from grimoire.core.exceptions import GrimoireConfigError, GrimoireError
@@ -556,6 +557,25 @@ def doctor(
                         f"({gap['aligned']})"
                     ),
                 )
+
+    # 4quater-ter. Confiance dans l'installation de l'outil (D-03) : les fichiers
+    # installés sont-ils ceux de leur RECORD ? Hors ligne ; la provenance se
+    # vérifie par `grimoire verify-install --online`. FAIL seulement si un
+    # fichier a changé depuis l'installation.
+    with _timed_phase("trust_level"):
+        from grimoire.tools.install_trust import local_trust
+
+        trust_verdict = local_trust()
+        trust_entry: dict[str, Any] = {
+            "name": "trust_level",
+            "passed": trust_verdict.ok,
+            "detail": f"trust_level={trust_verdict.level} : {trust_verdict.detail}",
+            "trust_level": trust_verdict.level,
+        }
+        results.append(trust_entry)
+        if fmt != "json":
+            tag = "[green]OK[/green]" if trust_verdict.ok else "[red]FAIL[/red]"
+            console.print(f"  {tag}  {trust_entry['detail']}")
 
     # 4quinquies. Override drift (issue #427) — un override est une copie ou
     # une extension du kit, jamais une garantie qu'il en reçoit encore les
@@ -1246,10 +1266,7 @@ def lint(
 # ── grimoire update ────────────────────────────────────────────────────────────────
 
 
-@app.command("update", rich_help_panel="Info")
-def update_cmd() -> None:
-    """Update grimoire-kit to the latest version (alias for 'self update')."""
-    self_update()
+app.command("update", rich_help_panel="Info")(self_update_command)  # alias de `self update`
 
 
 # ── Lazy sub-commands (issue #405) ─────────────────────────────────────────────
@@ -1272,6 +1289,7 @@ LazyTyperGroup.configure(
         "memory": LazyGroupSpec("grimoire.cli.cmd_memory_lexical", "memory_app", rich_help_panel="Data"),
         "hooks": LazyGroupSpec("grimoire.cli.cmd_hooks", "hooks_app", rich_help_panel="Project"),
         "cadrage": LazyGroupSpec("grimoire.cli.cmd_cadrage", "cadrage_app", rich_help_panel="Project"),
+        "ceremony": LazyGroupSpec("grimoire.cli.cmd_ceremony", "ceremony_app", rich_help_panel="Project"),
         "debugger": LazyGroupSpec("grimoire.cli.cmd_debugger", "debugger_app", rich_help_panel="Data"),
         "dbg": LazyGroupSpec("grimoire.cli.cmd_debugger", "debugger_app", hidden=True),
         "workflows": LazyGroupSpec("grimoire.cli.cmd_workflows", "workflows_app", rich_help_panel="Project"),
@@ -1290,6 +1308,7 @@ LazyTyperGroup.configure(
         "dispatch": LazyGroupSpec("grimoire.cli.cmd_dispatch", "dispatch_app", rich_help_panel="Project"),
         "route": LazyGroupSpec("grimoire.cli.cmd_route", "route_app", rich_help_panel="Project"),
         "needs": LazyGroupSpec("grimoire.cli.cmd_needs", "needs_app", rich_help_panel="Project"),
+        "gates": LazyGroupSpec("grimoire.cli.cmd_gates", "gates_app", rich_help_panel="Utilities"),
         "policies": LazyGroupSpec("grimoire.cli.cmd_policies", "policies_app", rich_help_panel="Project"),
         "proposals": LazyGroupSpec("grimoire.cli.cmd_proposals", "proposals_app", rich_help_panel="Agents"),
         "upgrade-flow": LazyGroupSpec("grimoire.cli.cmd_upgrade_flow", "upgrade_flow_app", rich_help_panel="Project"),
@@ -1302,6 +1321,7 @@ LazyTyperGroup.configure(
         "context-pack": LazyCommandSpec("grimoire.cli.cmd_context_pack", "context_pack_command", rich_help_panel="Data"),
         "migrate": LazyCommandSpec("grimoire.cli.cmd_migrate", "migrate_command", rich_help_panel="Project"),
         "upgrade": LazyCommandSpec("grimoire.cli.cmd_upgrade", "upgrade_command", rich_help_panel="Utilities"),
+        "verify-install": LazyCommandSpec("grimoire.cli.cmd_verify_install", "verify_install_command", rich_help_panel="Utilities"),
         "serve": LazyCommandSpec("grimoire.cli.cmd_serve", "serve", hidden=True),  # alias déprécié — voir `cockpit serve` (#351)
     },
     # Exact pre-#405 order: every @app.command/app.command() in file order,
@@ -1310,12 +1330,12 @@ LazyTyperGroup.configure(
     # `LazyTyperGroup.configure`'s docstring for why this is needed.
     order=[
         "version", "init", "doctor", "status", "add", "remove", "agent-miss",
-        "validate", "lint", "update", "up", "context-pack", "migrate", "upgrade",
+        "validate", "lint", "update", "up", "context-pack", "migrate", "upgrade", "verify-install",
         "serve", "diff", "schema", "check", "merge", "setup", "env", "history",
         "repair",
         "memory", "hooks", "cadrage", "debugger", "dbg", "registry", "workflows",
         "wf", "standard", "ext", "blueprint", "flow", "cockpit", "task", "mission",
-        "stigmergy", "features", "host", "providers", "dispatch", "route", "needs", "proposals", "upgrade-flow", "agent", "web",
+        "stigmergy", "features", "host", "providers", "dispatch", "route", "needs", "gates", "proposals", "upgrade-flow", "agent", "web",
         "autonomy",
         "config", "completion", "self", "plugins",
     ],
@@ -2034,12 +2054,7 @@ def self_version(ctx: typer.Context) -> None:
         console.print("  [dim]Could not check for updates[/dim]")
 
 
-@self_app.command("update")
-def self_update() -> None:
-    """Update grimoire-kit to the latest version from PyPI."""
-    from grimoire.cli.updater import run_update
-
-    run_update(__version__, online=is_online(), console=console)
+self_app.command("update")(self_update_command)
 
 
 @self_app.command("diagnose")

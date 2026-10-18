@@ -137,7 +137,9 @@ class GenericEmitter(Emitter):
     def plan(self, surface: ProjectSurface, project_root: Path) -> EmitPlan:
         profile = profile_for(self.host_id)
         entrypoint = _ENTRYPOINTS.get(self.host_id, Path("AGENTS.md"))
-        files = [EmittedFile(relpath=entrypoint, content=_catalog(surface, profile))]
+        # AGENTS.md et GEMINI.md sont des fichiers que le projet écrit aussi : le kit n'y possède qu'un bloc.
+        # La règle Cursor, elle, est au kit en entier (son frontmatter doit rester en tête de fichier).
+        files = [EmittedFile(relpath=entrypoint, content=_catalog(surface, profile), block=entrypoint.suffix == ".md")]
         files.extend(_skill_copies(surface))
         degradations = [
             Degradation(

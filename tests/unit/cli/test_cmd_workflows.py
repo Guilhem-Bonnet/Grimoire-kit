@@ -17,6 +17,15 @@ from typer.testing import CliRunner
 from grimoire.cli.app import app
 from grimoire.core import layout
 
+pytestmark = pytest.mark.covers(
+    "cli:workflows doctor",
+    "cli:workflows install",
+    "cli:workflows list",
+    "cli:workflows search",
+    "cli:workflows show",
+    "cli:workflows teams",
+)
+
 runner = CliRunner()
 
 

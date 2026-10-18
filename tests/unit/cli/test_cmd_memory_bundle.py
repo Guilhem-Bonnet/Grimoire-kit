@@ -12,6 +12,13 @@ from grimoire.cli.app import app
 from grimoire.memory import bundle as mod
 from grimoire.memory.bundle import export_bundle, install_bundle
 
+pytestmark = pytest.mark.covers(
+    "cli:memory bundle export",
+    "cli:memory bundle install",
+    "cli:memory bundle verify",
+    "cli:memory bundle where",
+)
+
 runner = CliRunner()
 
 

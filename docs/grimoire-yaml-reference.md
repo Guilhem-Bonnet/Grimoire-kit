@@ -1,3 +1,7 @@
+---
+audience: référence
+---
+
 # Référence YAML — `project-context.yaml`
 
 > Schéma complet du fichier de configuration Grimoire Kit v3.

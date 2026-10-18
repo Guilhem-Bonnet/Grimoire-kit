@@ -235,6 +235,7 @@ pythonpath = ["src"]
 # Pas de `-x` ici : il masquait chaque échec derrière le premier, y compris en CI (D-10).
 addopts = "-q --tb=short"
 markers = [
+    "covers(*units, level='unit'): surfaces que le test couvre (cli:flow run, genre:fanout, hook:tool-policy, host:opencode), relevées par scripts/check-surface-coverage.py ; level borné par ce que le fichier permet (D-09)",
     "no_session_token: le test envoie ses écritures sans le jeton de session des serveurs locaux",
     "slow: marks tests as slow (deselect with -m 'not slow')",
     "integration: marks tests requiring external services (network, Ollama, Qdrant)",

@@ -1,3 +1,7 @@
+---
+audience: référence
+---
+
 # Référence CLI
 
 Toutes les commandes disponibles via `grimoire [commande]`.
@@ -402,6 +406,24 @@ closes, chacune avec ses résultats enregistrés par modèle
 et coût connu <= celui de la base. Un coût inconnu, un résultat manquant ou
 moins de 20 tâches rendent « non mesuré » : on n'active pas.
 
+## Gardes du dépôt : `grimoire gates repo`
+
+Dans un clone du kit, une seule commande lance les gardes que la CI exécute :
+cliquet de taille, cohérence du CHANGELOG, prose émise, waivers de dépendances,
+actions épinglées par SHA, tenets de `CONTRIBUTING.md`, audience et commandes
+citées de la documentation, chiffres de vitrine sourcés. Le pre-commit
+(hook `repo-gates`, au pre-push), le job `lint` de `ci-sdk.yml` et `make gates`
+appellent la même commande. Une garde qui ne peut pas rendre son verdict (script
+absent, délai dépassé) est « non évaluée » et fait échouer l'exécution.
+
+| Commande | Description |
+| --- | --- |
+| `grimoire gates repo [--profile dev\|release] [--only <garde>] [--json] [--root .]` | Exécute les gardes ; code 1 si l'une échoue ou n'a pas été évaluée, code 2 hors d'un clone du kit |
+
+Le profil `dev` (défaut) juge une branche : un commit `feat`/`fix`/`perf` exige
+une entrée sous `[Unreleased]`. Le profil `release` juge le tag : `[Unreleased]`
+vide, section la plus récente égale à `version.txt`.
+
 ## Besoins d'exécution : un flow déclare, le projet résout
 
 Un node de flow ne référence pas `pytest` ni `npm test` en dur : son
@@ -534,6 +556,45 @@ façon vague (« le code est propre ») ne peut jamais produire un V0 : un seul
 critère ambigu suffit à faire monter la classe, jamais à la faire descendre.
 `task show` affiche, critère par critère, le motif reconnu — c'est ce qui rend
 lisible pourquoi une tâche n'est pas au niveau qu'on lui prêtait.
+
+### Route de cérémonie et profondeur de test
+
+`grimoire ceremony suggest` calcule, sans LLM, la cérémonie qu'une tâche
+mérite : une route parmi cinq, et la profondeur de test exigée à la fermeture.
+Deux appels sur les mêmes entrées rendent les mêmes octets (`--json`, avec
+l'empreinte `inputs_digest` des entrées et des seuils).
+
+| Commande | Description |
+| --- | --- |
+| `grimoire ceremony suggest <id> [-f <fichier>…] [--diff-base <ref>] [--impact <n> \| --measure-impact] [--json]` | Route d'une tâche du ledger |
+| `grimoire ceremony suggest --title "<titre>" -a "<critère>" [--check "<cmd>"] [--risk <profil>] …` | Route d'une tâche décrite en ligne |
+| `grimoire ceremony budget [--file evals/ceremony-budget.yaml] [--json]` | Vérifier un budget de cérémonie ; sortie 1 au premier écart (job CI du kit) |
+| `grimoire task add "<titre>" -a "<critère>" --test-depth <floor\|standard\|strict\|auto>` | Exiger une profondeur de test à la fermeture (`auto` : celle de la route) |
+
+Les routes, de la plus légère à la plus lourde : `express` (verdict mécanique
+seul, profondeur `floor`), `checked` (tests puis relecture par un agent,
+`standard`), `reviewed` (plus une relecture humaine, `standard`), `guarded`
+(tests et analyse statique, double relecture, checkpoint humain, `strict`),
+`session` (jugement ou conception en session avec une personne, `strict`).
+Chaque règle donne un plancher et la route est le maximum des planchers :
+V1 → `checked`, V2 → `session`, risque `strict` → `reviewed`, risque
+`security_critical` ou `release` → `guarded`, fichier de secret, de workflow CI,
+de migration ou de publication → `guarded`, plus de `files_wide` fichiers ou
+plus de `impact_wide` importeurs directs des `.py` touchés (`--measure-impact`, lu par `ast` ; le code graph du kit ne résout pas ses arêtes d'import) → `checked`. Des fichiers
+inconnus montent la route à `checked` ; un impact non mesuré ne la monte pas,
+et la sortie le dit dans `limits`. Les seuils portent `calibrated` et leur
+date : aucun n'est calibré sur des runs réels aujourd'hui.
+
+La profondeur se mesure sur les commandes du **dernier verdict**
+`grimoire task verify`, pas sur celles que la tâche promet : `floor` (une
+commande verte), `standard` (dont une commande de test : celle que le projet
+déclare en `needs.commands.test-runner`, ou un outil reconnu comme `pytest`,
+`go test`, `npm test`), `strict` (en plus une analyse statique verte : `lint`,
+`typecheck` déclarés, ou `ruff`, `mypy`, `eslint`, `tsc`…). Une tâche qui
+déclare `test_depth` ne passe en `accepted` ou `released` qu'à cette profondeur ;
+sinon le gate refuse avec `acceptance.depth_floor_unmet` (bloquant selon la
+sévérité du profil, comme les autres preuves). Une profondeur inconnue est un
+refus. Le routeur ne choisit pas de modèle : il choisit la cérémonie.
 
 ### Rapport de mission
 
@@ -1388,7 +1449,8 @@ suivi de la commande.
 | Commande | Description |
 | --- | --- |
 | `grimoire context-pack` | Écrire un context-pack durable (contrat catalogue) pour le dépôt |
-| `grimoire update` | Mettre à jour grimoire-kit — alias de `grimoire self update` |
+| `grimoire update` | Mettre à jour grimoire-kit — alias de `grimoire self update` ; la wheel est vérifiée avant installation (`--channel stable\|preview`, `--check`, `--offline`, `--from <bundle>`) |
+| `grimoire verify-install` | Vérifier l'installation de grimoire-kit (`--online` : contre la wheel et le `SHA256SUMS` publiés) |
 | `grimoire debugger status` | État de la réalité et du débogage des agents |
 | `grimoire debugger claims` | Affirmations enregistrées par les agents |
 | `grimoire debugger plan` | Plan de débogage courant |
@@ -1396,6 +1458,64 @@ suivi de la commande.
 | `grimoire debugger serve` | Servir la vue de débogage |
 
 L'alias court `grimoire dbg` existe pour `debugger`.
+
+### Confiance dans l'installation (`trust_level`)
+
+`grimoire self update` ne laisse plus le gestionnaire (uv, pipx, pip) retélécharger « la dernière version » : il
+télécharge la wheel, la confronte à l'empreinte annoncée par PyPI **et** au `SHA256SUMS` de la release GitHub,
+puis installe ce fichier. Un écart, un fichier absent de la liste ou une liste injoignable refuse l'installation
+(« Nothing was installed »). Seule exception, affichée : une version antérieure à la première qui publie
+`SHA256SUMS` s'installe avec `trust_level: pypi-only`.
+
+Sous `uv tool`, les `--with` et le `--python` de l'installation d'origine (lus dans `uv-receipt.toml`) sont rejoués ;
+une option qu'on ne sait pas rejouer (`constraints`, `overrides`, `options`, un `--with` par chemin, dépôt git ou
+index) refuse la mise à jour avec la commande manuelle correspondante. Une fois l'installation faite, le chemin de
+la wheel temporaire est retiré du reçu (`uv-receipt.toml`, ou `pipx_metadata.json` pour pipx) : `uv tool upgrade` /
+`pipx upgrade` continuent de fonctionner ensuite. Si ce reçu a une forme inconnue, il n'est pas touché et la commande
+qui refait une installation du registre est affichée.
+
+### Canaux, contrôle sans réseau et bundle hors ligne
+
+| Option de `grimoire self update` | Effet |
+| --- | --- |
+| `--channel stable` (défaut) | Plus haute version **stable** de PyPI. Ne choisit jamais une pré-version, même quand PyPI rend une pré-version comme `info.version` faute de stable. |
+| `--channel preview` | La plus haute entre la stable de PyPI et la pré-version publiée sur GitHub (une pré-version `vX.Y.Z-rc1` n'est pas envoyée à PyPI, seulement à une release GitHub *pre-release*). Une pré-version ne s'installe que si le `SHA256SUMS` de sa release la liste : `trust_level: release-only`, jamais d'exception. |
+| `--check [--json]` | Rend `up-to-date`, `update-available` ou `offline`, sans rien télécharger ni installer. Code de sortie 0 dans ces trois cas, 1 si la vérification elle-même échoue. |
+| `--offline` | Aucune requête réseau, pas même la sonde de connectivité. Avec `--check` : statut `offline`. Sans `--check` : exige `--from`. |
+| `--from <dossier\|wheel>` | Installe un bundle hors ligne. Aucune requête, index fermé (`--no-index` / `--offline`), wheels seulement (`--only-binary :all:` / `--no-build`). |
+
+Un bundle est un dossier contenant la wheel de grimoire-kit, son `SHA256SUMS` (celui de la release) et, si
+l'environnement n'a pas déjà les dépendances, leurs wheels (`pip download grimoire-kit==X -d <dossier>`, à faire une
+fois en ligne ; ajouter leurs empreintes à `SHA256SUMS`). Toute wheel du dossier doit figurer dans `SHA256SUMS` avec la
+bonne empreinte, sinon le bundle entier est refusé. Le gestionnaire n'est jamais pointé sur le dossier du bundle : `self update`
+copie la wheel du kit et les autres wheels du dossier (toutes listées, hachées après copie) dans un dossier temporaire et ne
+donne que celui-là à `--find-links`. Le reste du dossier (une page `links.html`, un sous-dossier, tout fichier qui n'est pas
+une wheel) est ignoré : `pip` suit les pages HTML d'un `--find-links`, et une wheel que `SHA256SUMS` ne liste pas ne peut pas
+entrer par là. Une pré-version dans un bundle exige `--channel preview`.
+
+Limite écrite : le `SHA256SUMS` d'un bundle voyage avec ses fichiers, donc le niveau rendu est `bundle`, jamais
+`verified` : il garantit l'intégrité du bundle, pas son origine. Les dépendances sont copiées puis hachées comme la wheel du kit :
+rien n'est lu dans le dossier du bundle après la vérification. Hors ligne,
+`gh attestation verify` n'est pas rejoué.
+
+| `trust_level` | Sens |
+| --- | --- |
+| `verified` | La wheel installée est celle de la release (PyPI et `SHA256SUMS` concordent, `RECORD` identique) |
+| `pypi-only` | Empreinte conforme à PyPI seul : la release ne publie pas de `SHA256SUMS` |
+| `release-only` | Pré-version GitHub : conforme au `SHA256SUMS` de sa release, seule source (PyPI n'a pas cette version) |
+| `bundle` | Bundle hors ligne : conforme au `SHA256SUMS` livré avec la wheel ; origine non confrontée à une source indépendante |
+| `intact` | Les fichiers installés correspondent à leur `RECORD` ; provenance non vérifiée |
+| `dev` | Installation éditable : rien à attester |
+| `unknown` | Pas de `RECORD` pour comparer |
+| `modified` | Au moins un fichier diffère de ce qui a été installé : `doctor` échoue, `verify-install` sort en 1 |
+
+`grimoire doctor` affiche le niveau hors ligne ; `grimoire verify-install --online` va jusqu'à la comparaison avec
+la wheel publiée (pour une pré-version installée : celle de sa release GitHub). Les fichiers de chaque release (wheel, sdist, SBOM CycloneDX de la wheel seule, `SHA256SUMS`)
+portent aussi une attestation de provenance Sigstore : `gh attestation verify <fichier> --repo Guilhem-Bonnet/Grimoire-kit`.
+
+Limites : les dépendances de grimoire-kit viennent de l'index sans empreinte publiée par le kit ; une somme et une
+attestation rendent la falsification plus coûteuse, pas impossible ; `install.sh --legacy` (clone de `main`) n'est
+pas couvert.
 
 ---
 

@@ -368,4 +368,7 @@ def test_post_tool_use_budget_with_the_repetition_guard(tmp_path: Path) -> None:
         f"{median_ms:.1f} ms — échantillon : {[round(d, 1) for d in durations_ms]}"
     )
     assert json.loads(last_stdout) is not None
-    assert median_ms < 250, f"médiane {median_ms:.1f} ms — régression franche par rapport au coût de base"
+    # Lancer un interpréteur coûte plus cher sous Windows : sur un runner partagé,
+    # sous xdist, la médiane y a mesuré 268 et 292 ms sans aucune régression.
+    ceiling_ms = 500 if sys.platform == "win32" else 250
+    assert median_ms < ceiling_ms, f"médiane {median_ms:.1f} ms — régression franche par rapport au coût de base"
