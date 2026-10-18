@@ -191,7 +191,7 @@ query *and enforce* the governed standard directly.
 - **mypy strict** on the SDK, **ruff** lint + format
 - CI matrix: Ubuntu / Windows / macOS × Python 3.12 / 3.13, CodeQL, dependency audit
   with governed, time-boxed waivers
-- Releases: SBOM (CycloneDX), smoke tests, PyPI trusted publishing (OIDC)
+- Releases: SBOM (CycloneDX) of the wheel alone, `SHA256SUMS`, Sigstore build-provenance attestations, smoke tests, PyPI trusted publishing (OIDC); `grimoire self update` verifies the wheel before installing it (`grimoire verify-install`)
 
 ## Documentation
 
