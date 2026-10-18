@@ -45,6 +45,7 @@ from grimoire.missions.schemas import (
     DEFAULT_CLAIM_TTL_SECONDS,
     ORIGIN_AGENT,
     ORIGIN_HUMAN,
+    DependencyKind,
     Incident,
     IncidentSeverity,
     IncidentStatus,
@@ -111,6 +112,11 @@ SESSION_ATTACHED_EVENT = "task.session_attached"
 #: Un risque accepté en l'état sur une tâche (W2-10) : ``accept_as_is`` d'un
 #: checkpoint de flow (``FlowEngine``). Rejoué dans ``MissionTask.accepted_risks``.
 RISK_ACCEPTED_EVENT = "task.risk_accepted"
+
+#: W5-01 : un lien de dépendance entre deux tâches. ``task.dependency.added`` est
+#: l'ancien nom (import Beads) : les deux se rejouent, un seul s'écrit.
+TASK_LINKED_EVENT = "task.linked"
+_LEGACY_LINK_EVENT = "task.dependency.added"
 
 #: K2 (issue #767) : le plafond dur ``expires_at`` du claim repoussé par ``task renew``.
 LEASE_RENEWED_EVENT = "task.lease_renewed"
@@ -364,6 +370,11 @@ class MissionLedger:
                         host_version=str(payload.get("session_host_version", "") or ""),
                     )
                     self._tasks[tid] = MissionTask.from_dict({**current.to_dict(), "claim": claim.to_dict()})
+            elif evt_type in (TASK_LINKED_EVENT, _LEGACY_LINK_EVENT):
+                # W5-01 : ni ``task.linked`` ni ``task.dependency.added`` n'étaient
+                # rejoués — ``task link`` écrivait un événement que rien ne lisait,
+                # et ``MissionTask.dependencies`` restait vide.
+                self._replay_link(raw, payload)
             elif evt_type == RISK_ACCEPTED_EVENT:
                 # W2-10 : la tâche ciblée est ``entity_id``, comme pour la session.
                 # Un événement orphelin n'invente rien ; l'horodatage de
@@ -376,6 +387,24 @@ class MissionLedger:
                         {**current.to_dict(), "accepted_risks": [*(dict(r) for r in current.accepted_risks), risk]}
                     )
             self._events.append(LedgerEvent.from_dict(raw))
+
+    def _replay_link(self, raw: dict[str, Any], payload: dict[str, Any]) -> None:
+        """Ajoute la dépendance d'un événement de lien à la tâche source, sans doublon."""
+        tid = str(raw.get("entity_id") or payload.get("task_id") or "")
+        current = self._tasks.get(tid)
+        if current is None:
+            return
+        try:
+            if "dependency" in payload:
+                dep = TaskDependency.from_dict(payload["dependency"])
+            else:
+                dep = TaskDependency(DependencyKind(str(payload.get("kind", "blocks"))), str(payload["depends_on"]))
+        except (KeyError, ValueError, TypeError):
+            return
+        if dep not in current.dependencies:
+            self._tasks[tid] = MissionTask.from_dict(
+                {**current.to_dict(), "dependencies": [d.to_dict() for d in (*current.dependencies, dep)]}
+            )
 
     def _apply_transition(self, tid: str, payload: dict[str, Any]) -> None:
         old_task = self._tasks[tid]
@@ -719,6 +748,13 @@ class MissionLedger:
                 f"Claim refusé pour {task_id} : déjà {task.status.value} par {held.actor_id}{session} "
                 f"jusqu'à {held.expires_at or 'sans expiration'}"
             )
+        if to_state is TaskState.CLAIMED:
+            waiting = self._unclosed_blockers(task)
+            if waiting:
+                raise GrimoireMissionError(
+                    f"Claim refusé pour {task_id} : dépend de {'; '.join(waiting)} — "
+                    "une tâche ne se réclame que lorsque ses dépendances `blocks` sont closes"
+                )
         if expected_from is not None and task.status is not expected_from:
             raise GrimoireMissionError(
                 f"Transition refusée pour {task_id} : l'état a changé entre-temps "
@@ -789,6 +825,74 @@ class MissionLedger:
         self._append_event("task.transitioned", task_id, "task", actor_id, payload, lock_held=True)
         self._load()
         return self._tasks[task_id]
+
+    def _unclosed_blockers(self, task: MissionTask) -> list[str]:
+        """Les dépendances ``blocks`` de *task* qui ne sont pas closes, chacune avec son état."""
+        out: list[str] = []
+        for dep in task.dependencies:
+            if dep.kind is not DependencyKind.BLOCKS:
+                continue
+            target = self._tasks.get(dep.target)
+            if target is None:
+                out.append(f"{dep.target} (inconnue du ledger)")
+            elif target.status is not TaskState.CLOSED:
+                out.append(f"{dep.target} ({target.status.value})")
+        return out
+
+    def link_tasks(
+        self, task_id: str, depends_on: str, kind: DependencyKind = DependencyKind.BLOCKS, *, actor_id: str = "system"
+    ) -> MissionTask:
+        """Déclare « *task_id* dépend de *depends_on* » — refusé si cela ferme un cycle ``blocks``.
+
+        Le contrôle se fait sous le verrou du journal, sur l'état relu : deux
+        liens concurrents A→B et B→A ne passent pas tous les deux. Un lien déjà
+        présent est un succès sans nouvel événement.
+        """
+        with _ledger_file_lock(self._events_path):
+            self._invalidate()
+            self._load()
+            task = self._tasks.get(task_id)
+            if task is None:
+                raise GrimoireMissionError(f"Task not found: {task_id}")
+            if depends_on not in self._tasks:
+                raise GrimoireMissionError(f"Task not found: {depends_on}")
+            if depends_on == task_id:
+                raise GrimoireMissionError(f"Lien refusé : {task_id} ne peut pas dépendre d'elle-même")
+            dep = TaskDependency(kind, depends_on)
+            if dep in task.dependencies:
+                return task
+            if kind is DependencyKind.BLOCKS:
+                path = self._blocks_path(depends_on, task_id)
+                if path:
+                    raise GrimoireMissionError(
+                        f"Lien refusé : {task_id} → {depends_on} fermerait le cycle "
+                        f"{' → '.join([task_id, *path])}"
+                    )
+            self._append_event(
+                TASK_LINKED_EVENT, task_id, "task", actor_id,
+                {"task_id": task_id, "depends_on": depends_on, "kind": kind.value}, lock_held=True,
+            )
+            self._load()
+            return self._tasks[task_id]
+
+    def _blocks_path(self, start: str, goal: str) -> list[str]:
+        """Un chemin de dépendances ``blocks`` de *start* vers *goal* (``[start, …, goal]``), ``[]`` s'il n'y en a pas."""
+        stack = [(start, [start])]
+        seen: set[str] = set()
+        while stack:
+            node, path = stack.pop()
+            if node == goal:
+                return path
+            if node in seen:
+                continue
+            seen.add(node)
+            current = self._tasks.get(node)
+            if current is None:
+                continue
+            for dep in current.dependencies:
+                if dep.kind is DependencyKind.BLOCKS:
+                    stack.append((dep.target, [*path, dep.target]))
+        return []
 
     def claim_task(self, task_id: str, actor_id: str, host_id: str, exclusive_files: tuple[str, ...] = ()) -> MissionTask:
         """Convenience: READY → CLAIMED."""
