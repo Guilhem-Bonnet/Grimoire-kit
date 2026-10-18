@@ -80,6 +80,7 @@ from grimoire.core.standard_generation import STANDARD_DIR
 from grimoire.costs import POLICY_STOP, Cost, cap_reason, validate_policy
 from grimoire.missions.dispatch_history import recommend_start_tier
 from grimoire.missions.empty_green import classify_empty_green, invokes_test_runner
+from grimoire.missions.route_dispatch import record_route
 from grimoire.missions.schemas import TaskState
 from grimoire.missions.verifiability import Verifiability, classify
 from grimoire.providers.quota import QuotaSignal, classify_failure, observe_window
@@ -1178,6 +1179,7 @@ def run_dispatch(
     )
     declared_context = agent_declared_context(project_root, agent) if agent and project_root else ()
     prompt = build_prompt(task, agent_context=declared_context, project_root=project_root)
+    routing = record_route(service, task, verifiability, actor=actor, write=not dry_run)  # K9 : task.routed
 
     floor = start_tier_for(verifiability)
     if floor is None:
@@ -1207,7 +1209,7 @@ def run_dispatch(
         else:
             start_tier_reason = "palier de départ explicite (--start-tier)"
     else:
-        chosen_tier, start_tier_reason = recommend_start_tier(
+        chosen_tier, start_tier_reason = routing.start() or recommend_start_tier(
             service.ledger, task_type=task.type.value, verifiability=verifiability.value, floor=floor
         )
 
@@ -1261,12 +1263,13 @@ def run_dispatch(
         # jamais sondé n'est pas candidat : personne ne verrait qu'il est cassé.
         autonomous = os.environ.get("GRIMOIRE_UNATTENDED", "").strip() == "1"
         tier_candidates = tuple(p for p in provider_candidates(root, tier, autonomous=autonomous) if p.invocation)
+        tier_candidates = routing.order(tier, tier_candidates)
         if provider_id:
             tier_candidates = tuple(p for p in tier_candidates if p.id == provider_id)
         tier_settled = False
         for provider in tier_candidates:
             # Premier modèle du palier que le forfait n'a pas fermé.
-            model = available_models(provider, tier, load_state(root), now=datetime.now(UTC))[0].id
+            model = routing.pick(provider, tier, available_models(provider, tier, load_state(root), now=datetime.now(UTC)))
             attempt_no += 1
             code, stdout, _stderr, duration, failure_kind, signal = _run_provider_call(
                 root, provider, model, prompt, call_timeout=call_timeout
