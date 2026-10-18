@@ -280,15 +280,29 @@ _RESOLVERS: dict[str, Callable[..., GateRefusal | None]] = {
 }
 
 
-def check_transition(root: Path, task: Any, from_board: str, to_board: str) -> GateVerdict:
+#: Résolveurs qui lisent une déclaration du standard et non une preuve de la tâche.
+_DECLARATION_RESOLVERS = frozenset({"provider_policy"})
+
+
+def check_transition(
+    root: Path, task: Any, from_board: str, to_board: str, *, declarations_root: Path | None = None,
+) -> GateVerdict:
     """Le gate autorise-t-il cette transition, en vocabulaire board ?
 
     `task` est un `MissionTask` ; le typage reste large pour que ce module ne
     dépende pas du ledger — il vérifie des artefacts, il ne transitionne rien.
+
+    *declarations_root* : où lire ce que le standard déclare (fichier de gates,
+    profil, registre des fournisseurs). Par défaut *root*, qui porte aussi les
+    preuves. Dans un worktree de tâche (W5-02), les deux divergent : les preuves
+    restent lues dans le worktree, mais les déclarations viennent du projet qui
+    porte le ledger — un fichier de gates absent ou retouché dans l'arbre de
+    l'agent ne désarme pas le gate d'une transition écrite au ledger du projet.
     """
+    decl = declarations_root if declarations_root is not None else root
     try:
-        entry = declared_transitions(root).get((from_board, to_board))
-        strictness = _strictness(root)
+        entry = declared_transitions(decl).get((from_board, to_board))
+        strictness = _strictness(decl)
     except GatesFileError as exc:
         return _unreadable_verdict(exc)
     if entry is None:
@@ -308,7 +322,7 @@ def check_transition(root: Path, task: Any, from_board: str, to_board: str) -> G
                 "ou retirer cette exigence du fichier de gates",
             ))
             continue
-        refusal = resolver(root, task, name)
+        refusal = resolver(decl if name in _DECLARATION_RESOLVERS else root, task, name)
         if refusal is not None:
             refusals.append(refusal)
 
