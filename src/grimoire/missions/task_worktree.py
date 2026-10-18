@@ -82,7 +82,11 @@ MERGE_REFUSED_EVENT = "task.merge_refused"
 #: La politique ``allow_test_changes`` appliquée à un merge qui modifie des tests protégés (W5-03).
 TEST_CHANGES_POLICY_EVENT = "task.test_changes_policy"
 _TEST_DIRS = frozenset({"tests", "test", "__tests__"})
-_TEST_FILE_PATTERNS = ("test_*.py", "*_test.py", "conftest.py", "*.test.*", "*.spec.*", "*_test.go")
+_TEST_FILE_PATTERNS = ("test_*.py", "*_test.py", "conftest.py", "pytest.ini", "*.test.*", "*.spec.*", "*_test.go")
+#: Configuration de collecte : elle agit sur les tests existants, donc son AJOUT compte (un test ajouté, non).
+_COLLECTION_CONFIG_ALWAYS = frozenset({"conftest.py", "pytest.ini"})
+#: Fichiers de configuration partagés : leur ajout ne compte que s'il porte une section pytest.
+_COLLECTION_CONFIG_SECTIONS = {"pyproject.toml": "[tool.pytest", "setup.cfg": "[tool:pytest]", "tox.ini": "[pytest]"}
 #: Sous ``<git-common-dir>`` : worktrees de tâche, worktrees de vérification, verrou de merge.
 _STATE_DIRNAME = "grimoire"
 #: Les variables qui détourneraient ``git -C`` vers un autre dépôt (un hook git les exporte).
@@ -326,7 +330,11 @@ def _validate_protect(protect: tuple[str, ...]) -> tuple[str, ...]:
     """Les motifs protégés en plus des défauts : relatifs au projet, sans ``..`` ni racine ni lecteur."""
     for pattern in protect:
         norm = pattern.replace("\\", "/")
-        if not pattern.strip() or norm.startswith("/") or ":" in norm.split("/")[0] or ".." in norm.split("/"):
+        # L'antislash seul est rejeté aussi : les chemins git s'écrivent avec « / », le motif ne correspondrait à rien.
+        if (
+            not pattern.strip() or "\\" in pattern or norm.startswith("/")
+            or ":" in norm.split("/")[0] or ".." in norm.split("/")
+        ):
             raise GrimoireMissionError(f"Motif protégé {pattern!r} hors du projet : chemin relatif sans « .. » attendu")
     return protect
 
@@ -341,10 +349,30 @@ def _is_protected(path: str, protect: tuple[str, ...]) -> bool:
     return any(fnmatch.fnmatchcase(path, pat) for pat in protect)
 
 
+def _added_collection_config(repo: Path, base: str, head: str) -> tuple[str, ...]:
+    """Les fichiers de configuration de collecte AJOUTÉS entre *base* et *head* (``conftest.py``, ``pytest.ini``, ...)."""
+    done = _git(repo, "diff", "--name-only", "-z", "--no-renames", "--diff-filter=A", base, head)
+    found: list[str] = []
+    for path in (p for p in done.stdout.split("\0") if p):
+        name = path.rsplit("/", 1)[-1]
+        if name in _COLLECTION_CONFIG_ALWAYS:
+            found.append(path)
+        elif name in _COLLECTION_CONFIG_SECTIONS:
+            body = _git(repo, "show", f"{head}:{path}", check=False)
+            if body.returncode == 0 and _COLLECTION_CONFIG_SECTIONS[name] in body.stdout:
+                found.append(path)
+    return tuple(found)
+
+
 def _tampered_paths(repo: Path, base: str, head: str, protect: tuple[str, ...]) -> tuple[str, ...]:
-    """Les tests protégés modifiés ou supprimés entre la base épinglée et la tête (pas HEAD : il suit la branche)."""
+    """Les tests protégés modifiés ou supprimés entre la base épinglée et la tête (pas HEAD : il suit la branche).
+
+    Un test AJOUTÉ ne compte pas, mais une configuration de collecte ajoutée (``conftest.py``, ``pytest.ini``,
+    section pytest d'un ``pyproject.toml``, ``setup.cfg`` ou ``tox.ini``) si : elle peut sauter les tests existants.
+    """
     done = _git(repo, "diff", "--name-only", "-z", "--no-renames", "--diff-filter=MDT", base, head)
-    return tuple(sorted(p for p in done.stdout.split("\0") if p and _is_protected(p, protect)))
+    changed = {p for p in done.stdout.split("\0") if p and _is_protected(p, protect)}
+    return tuple(sorted(changed | set(_added_collection_config(repo, base, head))))
 
 
 def _block(service: TaskService, task_id: str, reason: str, actor: str) -> str:

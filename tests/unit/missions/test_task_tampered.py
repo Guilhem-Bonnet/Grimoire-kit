@@ -172,12 +172,75 @@ def test_un_motif_protege_supplementaire(repo: Path, service: TaskService) -> No
     assert issue.tampered == ("golden/attendu.json",)
 
 
-@pytest.mark.parametrize("motif", ["../autre/*", "tests/../../x", "/etc/hosts", "C:\\x", "a\\..\\b", ""])
+@pytest.mark.parametrize("motif", ["../autre/*", "tests/../../x", "/etc/hosts", "C:\\x", "a\\..\\b", "", "golden\\attendu.json"])
 def test_un_chemin_hors_projet_est_rejete(repo: Path, service: TaskService, motif: str) -> None:
     tid = _tache(service)
     create_task_worktree(service, tid, repo=repo)
     with pytest.raises(GrimoireMissionError, match="hors du projet"):
         merge_task(service, tid, repo=repo, check=OK, protect=(motif,))
+
+
+_SKIP_CONFTEST = (
+    "import pytest\n\n\n"
+    "def pytest_collection_modifyitems(items):\n"
+    "    for item in items:\n"
+    "        item.add_marker(pytest.mark.skip(reason='ignoré'))\n"
+)
+PYTEST = f'"{sys.executable}" -m pytest -q -p no:cacheprovider tests/test_rouge.py'
+
+
+def test_un_conftest_ajoute_qui_saute_les_tests_est_tampered(repo: Path, service: TaskService) -> None:
+    _commit(repo, "tests/test_rouge.py", "def test_rouge():\n    assert False\n", "test rouge")
+    tid = _tache(service)
+    wt = create_task_worktree(service, tid, repo=repo)
+    _commit(wt.path, "tests/conftest.py", _SKIP_CONFTEST, "conftest qui saute tout")
+
+    # Sans le conftest, le check sort 1 (le test est rouge) ; avec lui, 0 (tout est sauté).
+    issue = merge_task(service, tid, repo=repo, check=PYTEST)
+    assert issue.status == "tampered", issue
+    assert issue.tampered == ("tests/conftest.py",)
+    assert issue.merged_sha == ""
+
+
+@pytest.mark.parametrize(
+    ("name", "content"),
+    [
+        ("pytest.ini", "[pytest]\naddopts = -k nothing\n"),
+        ("pyproject.toml", "[tool.pytest.ini_options]\naddopts = '-k nothing'\n"),
+        ("setup.cfg", "[tool:pytest]\naddopts = -k nothing\n"),
+        ("tox.ini", "[pytest]\naddopts = -k nothing\n"),
+        ("sous/dossier/conftest.py", _SKIP_CONFTEST),
+    ],
+)
+def test_une_configuration_de_collecte_ajoutee_est_tampered(
+    repo: Path, service: TaskService, name: str, content: str
+) -> None:
+    tid = _tache(service)
+    wt = create_task_worktree(service, tid, repo=repo)
+    _commit(wt.path, name, content, "configuration ajoutée")
+    assert merge_task(service, tid, repo=repo, check=OK).tampered == (name,)
+
+
+@pytest.mark.parametrize(
+    ("name", "content"),
+    [("pyproject.toml", "[project]\nname = 'x'\n"), ("setup.cfg", "[metadata]\nname = x\n"), ("tox.ini", "[tox]\n")],
+)
+def test_une_configuration_partagee_sans_section_pytest_se_fusionne(
+    repo: Path, service: TaskService, name: str, content: str
+) -> None:
+    tid = _tache(service)
+    wt = create_task_worktree(service, tid, repo=repo)
+    _commit(wt.path, name, content, "configuration sans pytest")
+    assert merge_task(service, tid, repo=repo, check=OK).status == "merged"
+
+
+def test_une_configuration_de_collecte_ajoutee_se_fusionne_avec_la_politique(repo: Path, service: TaskService) -> None:
+    tid = _tache(service)
+    wt = create_task_worktree(service, tid, repo=repo)
+    _commit(wt.path, "tests/conftest.py", _SKIP_CONFTEST, "conftest")
+    issue = merge_task(service, tid, repo=repo, check=OK, allow_test_changes=True)
+    assert issue.status == "merged"
+    assert any(e.event_type == TEST_CHANGES_POLICY_EVENT for e in service.ledger.events_for(tid))
 
 
 def test_cli_allow_test_changes(repo: Path, service: TaskService) -> None:
