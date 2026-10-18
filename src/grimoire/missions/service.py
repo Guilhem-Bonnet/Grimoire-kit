@@ -277,7 +277,12 @@ class TaskService:
 
     def gate(self, task: MissionTask, target: TaskState) -> GateVerdict:
         """Le verdict du gate pour cette transition, sans rien écrire."""
-        return check_transition(self.project_root, task, board_status_of(task.status), board_status_of(target))
+        from_board, to_board = board_status_of(task.status), board_status_of(target)
+        if self.home_root == self.project_root:
+            return check_transition(self.project_root, task, from_board, to_board)
+        # Worktree de tâche (W5-02) : la transition s'écrit au ledger du projet d'origine,
+        # donc ce sont ses déclarations de gate qui l'opposent ; les preuves restent lues ici.
+        return check_transition(self.project_root, task, from_board, to_board, declarations_root=self.home_root)
 
     # ── Écriture ───────────────────────────────────────────────────────────
 

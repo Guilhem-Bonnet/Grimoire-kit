@@ -8,8 +8,10 @@ enfants écrivaient le même arbre. Ici, chaque tâche reçoit :
   créé depuis une base *épinglée* : le SHA est résolu une fois, noté au ledger
   (``task.worktree_created``) et dans le dossier git du worktree ;
 - **un merge série** : un verrou par dépôt (:func:`grimoire.core.fsio.locked`),
-  puis, dans cet ordre, (1) un rejeu — la branche déjà contenue dans la cible —
-  rend ``already_merged`` sans rien écrire ; (2) le candidat est calculé *sans
+  puis, dans cet ordre, (1) une branche déjà contenue dans la cible : un rejeu
+  (``task.merged`` au ledger pour cette tête) rend ``already_merged`` sans rien
+  écrire, une branche restée sur sa base rend ``nothing_to_merge``, une branche
+  fusionnée sans reçu rend ``unrecorded`` — ces deux-là refusent ; (2) le candidat est calculé *sans
   toucher aucun worktree* (``git merge-tree --write-tree``) : un conflit refuse,
   garde le worktree et passe la tâche en ``blocked`` ; (3) le check s'exécute
   dans un worktree de vérification détaché sur le commit candidat — le SHA qui
@@ -104,7 +106,9 @@ class TaskWorktree:
 class MergeOutcome:
     """Le verdict d'un merge : ``merged`` ou ``already_merged`` fusionnent (ou l'ont fait), le reste refuse.
 
-    Refus : ``conflict`` (tâche bloquée, worktree gardé), ``check_red``,
+    Refus : ``nothing_to_merge`` (la branche est restée sur sa base), ``unrecorded``
+    (contenue dans la cible sans ``task.merged`` pour cette tête), ``conflict``
+    (tâche bloquée, worktree gardé), ``check_red``,
     ``unevaluated`` (aucune commande de check), ``head_moved`` (la tête de la
     branche n'est pas le SHA vérifié), ``target_moved`` (la cible a bougé pendant le check).
     """
@@ -357,7 +361,15 @@ def _merge_locked(
         return MergeOutcome(task_id=tid, status=status, reason=reason, into=into, head_sha=head, worktree_kept=kept, **kw)
 
     if _is_ancestor(repo, head, target):
-        return out("already_merged", f"{wt.branch} est déjà contenue dans {into} : rien à fusionner", merged_sha=target)
+        # « Contenue dans la cible » ne prouve pas « fusionnée » : une branche restée sur sa base l'est aussi.
+        # already_merged exige le reçu au ledger, pour cette tête exacte.
+        if any(e.payload.get("head_sha") == head for e in service.ledger.events_for(tid) if e.event_type == MERGED_EVENT):
+            return out("already_merged", f"{wt.branch} est déjà contenue dans {into} : rien à fusionner", merged_sha=target)
+        if head == wt.base_sha:
+            return out("nothing_to_merge", f"{wt.branch} n'a aucun commit depuis sa base ({head[:12]}) : rien à fusionner, "
+                       "le check n'a pas tourné")
+        return out("unrecorded", f"{wt.branch} est contenue dans {into} mais le ledger n'a aucun task.merged pour la tête "
+                   f"{head[:12]} : fusion non attestée, le check n'a pas tourné")
     if expected_sha and _rev(repo, expected_sha) != head:
         return out("head_moved", f"la tête de {wt.branch} ({head[:12]}) n'est pas le SHA vérifié ({expected_sha[:12]})")
     candidate, conflicts = _candidate(repo, wt, head, target)

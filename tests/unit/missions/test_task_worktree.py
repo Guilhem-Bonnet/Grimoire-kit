@@ -257,3 +257,81 @@ def test_cli_worktree_puis_merge(repo: Path, service: TaskService) -> None:
     assert fusion.exit_code == 0, fusion.output
     refus = runner.invoke(task_app, ["merge", tid, "--project-root", str(repo), "--check", OK, "--sha", wt.base_sha])
     assert refus.exit_code == 0, refus.output  # déjà fusionnée : le rejeu ne refuse pas et n'écrit rien
+
+
+# ── Défauts relevés à la revue (W5-02) ───────────────────────────────────────
+
+_GATES = """\
+$schema: "grimoire-agentic-standard-evidence-gates/v1"
+states: [proposed, ready, in_progress, blocked, review, accepted, released, archived]
+transitions:
+  - id: in_progress_to_review
+    from: in_progress
+    to: review
+    required_evidence: ["evidence_pack"]
+profile_strictness:
+  starter: advisory
+  governed: hard_fail
+"""
+
+
+@pytest.mark.parametrize("suivi", [True, False], ids=["gates-suivis-puis-supprimes", "gates-non-suivis"])
+def test_le_gate_d_un_worktree_lit_les_declarations_du_projet(repo: Path, service: TaskService, suivi: bool) -> None:
+    """Le worktree écrit au ledger du projet : un fichier de gates absent de SON arbre ne désarme pas le gate."""
+    from grimoire.missions.service import TaskRefusedError
+
+    standard = repo / "_grimoire" / "standard"
+    standard.mkdir(parents=True)
+    (standard / "evidence-gates.yaml").write_text(_GATES, encoding="utf-8")
+    (standard / "standard-profile.yaml").write_text("profile: governed\n", encoding="utf-8")
+    if suivi:
+        _git(repo, "add", "--", "_grimoire/standard")
+        _git(repo, "commit", "-q", "-m", "gates")
+    tid = _tache(service, "Enfant A")
+    wt = create_task_worktree(service, tid, repo=repo)
+    for nom in ("evidence-gates.yaml", "standard-profile.yaml"):
+        (wt.path / "_grimoire" / "standard" / nom).unlink(missing_ok=True)  # absent de l'arbre de l'agent
+
+    depuis_le_projet = service.gate(service.require(tid), TaskState.NEEDS_VERIFICATION)
+    depuis_le_worktree = TaskService(wt.path)
+    assert depuis_le_worktree.ledger_root == service.ledger_root  # même journal, donc mêmes déclarations
+    verdict = depuis_le_worktree.gate(depuis_le_worktree.require(tid), TaskState.NEEDS_VERIFICATION)
+
+    assert depuis_le_projet.blocked
+    assert verdict.blocked, "le gate du worktree doit refuser comme celui du projet"
+    assert [r.evidence for r in verdict.refusals] == [r.evidence for r in depuis_le_projet.refusals] == ["evidence_pack"]
+    avant = len(service.ledger.events_for(tid))
+    with pytest.raises(TaskRefusedError):
+        depuis_le_worktree.transition(tid, TaskState.NEEDS_VERIFICATION, "amelia", "fini")
+    assert service.require(tid).status is TaskState.RUNNING
+    assert not [e for e in service.ledger.events_for(tid)[avant:] if e.event_type == "task.transitioned"]
+
+
+def test_une_branche_restee_sur_sa_base_n_est_pas_deja_fusionnee(repo: Path, service: TaskService) -> None:
+    tid = _tache(service, "Enfant A")
+    create_task_worktree(service, tid, repo=repo)  # aucun commit
+    avant = _rev(repo, "main")
+
+    issue = merge_task(service, tid, repo=repo, check=KO)
+    assert issue.status == "nothing_to_merge"
+    assert not issue.ok
+    assert issue.merged_sha == ""
+    assert _rev(repo, "main") == avant
+    assert not [e for e in service.ledger.events_for(tid) if e.event_type == MERGED_EVENT]
+
+    runner = CliRunner()
+    cli = runner.invoke(task_app, ["merge", tid, "--project-root", str(repo), "--check", OK])
+    assert cli.exit_code == 1, cli.output
+    assert "nothing_to_merge" in cli.output
+
+
+def test_contenue_dans_la_cible_sans_recu_au_ledger_n_est_pas_attestee(repo: Path, service: TaskService) -> None:
+    tid = _tache(service, "Enfant A")
+    wt = create_task_worktree(service, tid, repo=repo)
+    _commit(wt.path, "c.txt", "travail\n", "travail")
+    _git(repo, "merge", "--ff-only", "--quiet", wt.branch)  # fusionnée à la main, hors du chemin vérifié
+
+    issue = merge_task(service, tid, repo=repo, check=OK)
+    assert issue.status == "unrecorded"
+    assert not issue.ok
+    assert not [e for e in service.ledger.events_for(tid) if e.event_type == MERGED_EVENT]
