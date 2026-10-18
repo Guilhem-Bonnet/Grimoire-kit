@@ -34,6 +34,7 @@ from grimoire.missions.recall import DEFAULT_TOKEN_BUDGET, TaskRecall, build_tas
 from grimoire.missions.schemas import (
     DIRECTIVE_KINDS,
     ORIGIN_AGENT,
+    DependencyKind,
     MissionTask,
     RiskProfile,
     TaskCheck,
@@ -282,6 +283,7 @@ class TaskService:
         origin: str = "cli",
         ready: bool = False,
         checks: tuple[TaskCheck, ...] = (),
+        files: tuple[str, ...] = (),
     ) -> TaskAdded:
         """Ouvre une tâche — le geste que ``grimoire task add`` et ``task_add`` (MCP) partagent.
 
@@ -313,10 +315,23 @@ class TaskService:
         task = ledger.create_task(
             mission_id, title, acceptance=acceptance, owner=owner, expected_evidence=expected_evidence,
             risk_profile=risk, checks=checks,
+            extra={"files": [f for f in (x.strip() for x in files) if f]} if any(x.strip() for x in files) else None,
         )
         if ready:
             task = self.transition(task.id, TaskState.READY, actor).task
         return TaskAdded(task=task, mission_id=mission_id, mission_created=created_mission, board_path=self.project_board())
+
+    def link(self, task_id: str, depends_on: str, kind: DependencyKind = DependencyKind.BLOCKS, *, actor: str = "cli") -> MissionTask:
+        """« *task_id* dépend de *depends_on* » ; un lien qui ferme un cycle ``blocks`` est refusé (W5-01)."""
+        task = self.ledger.link_tasks(task_id, depends_on, kind, actor_id=actor)
+        self.project_board()
+        return task
+
+    def waves(self, mission_id: str | None = None) -> dict[str, Any]:
+        """Les vagues du plan, ``file_overlaps`` compris (:func:`grimoire.missions.waves.compute_waves`)."""
+        from grimoire.missions.waves import compute_waves
+
+        return compute_waves(self.ledger.list_tasks(mission_id))
 
     def attach_session(
         self, task_id: str, session_id: str, *, session_host: str = "", actor: str = "hook", explicit: bool = False

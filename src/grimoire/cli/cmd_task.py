@@ -205,6 +205,10 @@ def task_add(
         list[str] | None,
         typer.Option("--check", help="Commande dont le code de sortie 0 rend le verdict (répétable) ; sans elle, jamais V0 (#772)."),
     ] = None,
+    files: Annotated[
+        list[str] | None,
+        typer.Option("--file", help="Fichier que la tâche touchera (répétable) ; `task waves` signale ceux que deux tâches parallèles partagent."),
+    ] = None,
     project_root: _PROJECT_ROOT = Path(),
     ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
     actor: _ACTOR = "cli",
@@ -226,6 +230,7 @@ def task_add(
             title, tuple(acceptance), mission_id=mission, owner=owner,
             expected_evidence=tuple(evidence or ()), actor=actor, ready=ready,
             checks=tuple(TaskCheck(cmd=c) for c in (check or ()) if c.strip()),
+            files=tuple(files or ()),
         )
     except TaskRefusedError as refused:
         _refuse(ctx, refused)
@@ -753,15 +758,43 @@ def task_link(
         console.print(f"[red]✗[/red] Nature de lien inconnue : {kind}")
         console.print("[dim]natures : " + ", ".join(k.value for k in DependencyKind) + "[/dim]")
         raise typer.Exit(1) from None
-    service.ledger.append_event(
-        "task.linked", task.id, "task", actor,
-        {"task_id": task.id, "depends_on": depends_on, "kind": dependency_kind.value},
-    )
-    service.project_board()
+    from grimoire.core.exceptions import GrimoireError
+
+    try:
+        service.link(task.id, depends_on, dependency_kind, actor=actor)
+    except GrimoireError as exc:
+        console.print(f"[red]✗[/red] {escape(str(exc))}")
+        raise typer.Exit(1) from exc
     if _fmt(ctx) == "json":
         typer.echo(json.dumps({"task": task.id, "depends_on": depends_on, "kind": dependency_kind.value}, indent=2))
         return
     console.print(f"[green]OK[/green] {task.id} dépend de {depends_on} ({dependency_kind.value})")
+
+
+@task_app.command("waves")
+def task_waves(
+    ctx: typer.Context,
+    mission: Annotated[str | None, typer.Option("--mission", help="Restreindre à une mission.")] = None,
+    project_root: _PROJECT_ROOT = Path(),
+    ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
+) -> None:
+    """Les vagues du plan : ce qui peut partir en parallèle, et les fichiers que deux tâches d'une vague se disputent."""
+    plan = _service(project_root, ledger_root).waves(mission)
+    if _fmt(ctx) == "json":
+        typer.echo(json.dumps(plan, indent=2, ensure_ascii=False))
+        return
+    for wave in plan["waves"]:
+        console.print(f"vague {wave['wave']} : {', '.join(wave['tasks'])}")
+    for overlap in plan["file_overlaps"]:
+        console.print(
+            f"[yellow]![/yellow] vague {overlap['wave']} : {overlap['file']} visé par {', '.join(overlap['tasks'])}"
+        )
+    for tid, targets in plan["unresolved"].items():
+        console.print(f"[yellow]![/yellow] {tid} : dépendance inconnue ou annulée ({', '.join(targets)})")
+    if plan["cyclic"]:
+        console.print(f"[red]✗[/red] tâches en cycle : {', '.join(plan['cyclic'])}")
+    if not plan["waves"]:
+        console.print("[dim]aucune tâche en attente[/dim]")
 
 
 @task_app.command("context")
