@@ -63,7 +63,9 @@ tests, donc une route ajoutée sans test de cible se voit.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+import threading
+import time
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -75,6 +77,7 @@ from grimoire.tools import (
     workspace_language,
     workspace_memory,
     workspace_portfolio,
+    workspace_pulse,
 )
 
 __all__ = [
@@ -131,9 +134,29 @@ def _glossary(project_root: Path, _query: _Query) -> Any:
     return workspace_api.glossary_view(project_root)
 
 
+#: La sonde d'hôte (``claude agents --json``) lance un sous-processus. Avec
+#: l'actualisation automatique de l'interface (UI-3), chaque lecture des tâches
+#: d'un projet dont une session bat ferait un lancement : un résultat vaut donc
+#: ce délai, pour les deux lectures qui l'utilisent (projet et portefeuille).
+_PROBE_TTL_SECONDS = 10.0
+_probe_memo: tuple[float, Mapping[str, str] | None] | None = None
+_probe_lock = threading.Lock()
+
+
+def _host_probe() -> Mapping[str, str] | None:
+    global _probe_memo
+    with _probe_lock:
+        now = time.monotonic()
+        if _probe_memo is not None and now - _probe_memo[0] < _PROBE_TTL_SECONDS:
+            return _probe_memo[1]
+        result = probe_claude_agents()
+        _probe_memo = (now, result)
+        return result
+
+
 def _tasks(project_root: Path, query: _Query) -> Any:
     return workspace_api.tasks_view(
-        project_root, mission=_one(query, "mission"), status=_one(query, "status")
+        project_root, mission=_one(query, "mission"), status=_one(query, "status"), probe=_host_probe
     )
 
 
@@ -224,7 +247,24 @@ def _portfolio_tasks(project_root: Path, query: _Query) -> Any:
         project=_one(query, "slug") or None,
         live=live_raw not in (None, "", "0", "false"),
         live_minutes=int(minutes_raw) if minutes_raw else workspace_portfolio.DEFAULT_LIVE_MINUTES,
-        probe=probe_claude_agents,
+        probe=_host_probe,
+    )
+
+
+def _pulse(project_root: Path, query: _Query) -> Any:
+    """``GET /api/workspace/pulse`` — « quelque chose a-t-il changé ? » (UI-3).
+
+    ``since`` est l'empreinte que l'interface connaît : identique, la réponse
+    ne relit rien et dit ``changed: false`` ; différente, elle porte le compte
+    des décisions en attente. ``scope=portfolio`` agrège le registre du
+    cockpit (le compteur de la barre du haut), sinon le projet servi seul.
+    ``interval_seconds`` est l'intervalle de sondage que l'interface doit
+    suivre (:data:`workspace_pulse.INTERVAL_ENV`).
+    """
+    return workspace_pulse.pulse_view(
+        project_root,
+        since=_one(query, "since") or None,
+        portfolio=_one(query, "scope") == "portfolio",
     )
 
 
@@ -301,6 +341,7 @@ GET_ROUTES: dict[str, _GetHandler] = {
     f"{PREFIX}sheet": _sheet,
     f"{PREFIX}evidence": _evidence,
     f"{PREFIX}portfolio/tasks": _portfolio_tasks,
+    f"{PREFIX}pulse": _pulse,
     f"{PREFIX}flows/runs": _flow_runs,
     f"{PREFIX}memory/overview": _memory_overview,
     f"{PREFIX}memory/search": _memory_search,

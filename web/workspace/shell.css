@@ -973,6 +973,27 @@ body[data-active-space] .panel-head {
   flex: none;
 }
 
+/* Pouls (UI-3) : l'horodatage d'actualisation de la barre d'état, et le
+   compteur de décisions de la barre du haut. */
+#st-live {
+  white-space: nowrap;
+}
+
+#st-live[data-state="error"],
+#st-live[data-state="paused"] {
+  color: var(--ink2);
+}
+
+#st-live[data-state="error"] {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+#decisions-pill {
+  font-weight: 500;
+  white-space: nowrap;
+}
+
 /* ── Palette de commandes ──────────────────────────────────────────────────*/
 
 #palette[hidden] {
@@ -1141,6 +1162,8 @@ body[data-active-space] .panel-head {
   #brand span,
   #appbar > .grow,
   .palette-lbl,
+  .pill-lbl,
+  .live-pre,
   #palette-open .kbd,
   #project-chip .chevron {
     display: none;
