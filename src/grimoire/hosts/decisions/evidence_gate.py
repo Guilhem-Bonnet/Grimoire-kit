@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from grimoire.core.standard_checks.evidence_journal import record_guard_error
@@ -38,7 +39,68 @@ def decide_evidence_gate(hook: HookInput) -> Decision:
     The kit's own directive says a closure without green gates is an unfinished
     task. Said in a prompt, that is a suggestion; said here, it is the rule —
     this is the only decision in the package that can make a host refuse.
+
+    W2-08 : une panne imprévue de la garde elle-même (lecture du profil, de la
+    tâche active, de la portée du ``Stop``…) ne devient jamais un ``ALLOW`` :
+    voir :func:`_stop_guard_crashed`.
     """
+    try:
+        return _decide_stop(hook)
+    except Exception as exc:
+        return _stop_guard_crashed(hook, exc)
+
+
+def _crash_profile(project_root: Path) -> str:
+    """Le profil à appliquer à une garde en panne ; ``governed`` si un standard est posé mais illisible.
+
+    Même règle que la garde d'autorité (:func:`grimoire.hosts.decisions.tool_policy._authority_guard`) :
+    un profil qu'on ne peut pas lire ne relâche pas le refus. Un projet sans dossier de standard
+    n'a rien à refuser (``""``).
+    """
+    try:
+        return active_profile_id(project_root)
+    except Exception:
+        try:
+            return "governed" if (project_root / "_grimoire" / "standard").is_dir() else ""
+        except Exception:
+            return "governed"
+
+
+def _stop_guard_crashed(hook: HookInput, exc: Exception) -> Decision:
+    """W2-08 : le ``Stop`` a planté hors des gates — tracé, puis refusé là où le profil le promet.
+
+    Avant, l'exception remontait à :func:`grimoire.hosts.decisions.run_decision`, qui rend
+    ``ALLOW`` sur tout événement autre que ``PreToolUse`` : sur ``Stop`` aucun hôte ne lit
+    le contexte, donc une lecture de profil ou de tâche en panne clôturait en silence une
+    tâche gouvernée aux gates rouges. Un profil bloquant refuse maintenant, avec la cause ;
+    les autres sont prévenus. Le ``Stop`` continué passe toujours (``stop_active`` est testé
+    avant tout) : la panne coûte un tour, jamais la session.
+    """
+    cause = f"{type(exc).__name__}: {exc}"
+    profile = _crash_profile(hook.project_root)
+    record_guard_error(hook.project_root, "bootstrap", "evidence_gate", type(exc).__name__, str(exc))
+    detail = {"error": cause, "profile": profile, "ok": False, "guard_error": "evidence_gate"}
+    if profile in _BLOCKING_PROFILES:
+        return Decision(
+            outcome=Outcome.BLOCK,
+            reason=(
+                f"[Grimoire] Garde de clôture en erreur (profil {profile}) — {cause}\n"
+                "Elle n'a pas pu juger la tâche : ce n'est pas un vert. Cette panne est tracée "
+                "(guard.error). Corrige la cause ; si la tâche doit rester ouverte, dis-le "
+                "explicitement à l'utilisateur au lieu de conclure. Le Stop suivant passe."
+            ),
+            detail=detail,
+        )
+    if not profile:
+        return Decision(detail={**detail, "skipped": "project_not_enrolled"})
+    return Decision(
+        context=f"[Grimoire] Garde de clôture en erreur (profil {profile}, non bloquant) : {cause}",
+        detail=detail,
+    )
+
+
+def _decide_stop(hook: HookInput) -> Decision:
+    """The body of :func:`decide_evidence_gate`, split out so one ``try`` covers every unforeseen failure."""
     if hook.stop_active:
         # The host is already re-running us after a previous block. Blocking
         # again without limit is how a session becomes unexitable : W2-02 keeps
