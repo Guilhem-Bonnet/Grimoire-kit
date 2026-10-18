@@ -9,6 +9,7 @@ import zipfile
 from importlib import metadata
 from pathlib import Path
 from unittest.mock import patch
+from urllib.parse import urlparse
 
 from typer.testing import CliRunner
 
@@ -103,7 +104,7 @@ def test_online_verifies_an_installed_prerelease_against_its_github_release(tmp_
     result = _run(dist, "--online", "--json", net=net)
     assert result.exit_code == 0, result.output
     assert json.loads(result.output)["trust_level"] == "release-only"
-    assert not any("pypi.org" in url for url in net.requested)
+    assert not any(urlparse(url).hostname == "pypi.org" for url in net.requested)
 
 
 def test_online_flags_a_prerelease_installation_that_differs_from_its_release(tmp_path: Path) -> None:

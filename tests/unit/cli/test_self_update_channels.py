@@ -216,10 +216,11 @@ def test_a_bundle_installs_with_every_socket_closed(tmp_path: Path) -> None:
     assert "--no-index" in cmd and "--only-binary" in cmd
     link = cmd[cmd.index("--find-links") + 1]
     # jamais le dossier du bundle (HTML, intrus) : le dossier temporaire où la wheel vérifiée a été copiée
-    assert link != str(bundle) and cmd[-1].startswith(f"grimoire-kit @ {Path(link).as_uri()}/")
+    assert link != str(bundle) and cmd[-1].startswith(f"grimoire-kit @ {Path(link).resolve().as_uri()}/")
     assert cmd[-1].startswith("grimoire-kit @ file://") and cmd[-1].endswith("grimoire_kit-99.0.0-py3-none-any.whl")
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="venv POSIX (bin/python, PATH /usr/bin) : le contrat pip est le même, l'environnement jeté est propre à POSIX")
 def test_a_real_pip_cannot_reach_a_wheel_the_bundle_does_not_list(tmp_path: Path) -> None:
     """D04-S1-01 : un ``links.html`` du bundle vers une wheel extérieure ne fait pas entrer une dépendance non listée.
 

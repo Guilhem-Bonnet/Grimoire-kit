@@ -257,6 +257,8 @@ def host_sync(
         for label in result.skipped:
             cause = _CONFLICT_TEXT.get(result.conflicts.get(label, ""), "conflit")
             console.print(f"    [yellow][!][/yellow] {label} — {cause}, préservé (utilisez --force)")
+        for label in result.removed:
+            console.print(f"    [yellow][-][/yellow] {label} — {'retirerait' if dry_run else 'retiré'} : la règle source n'existe plus")
         for degradation in result.degradations:
             console.print(f"    [dim]dégradé[/dim] {degradation.surface} — repli : {degradation.fallback}")
     if prune_disabled:
@@ -287,8 +289,8 @@ def host_status(
             _HostStatus(
                 host=host_id.value,
                 display_name=profile.display_name,
-                in_sync=not pending.written and not pending.skipped,
-                pending=list(pending.written),
+                in_sync=not pending.written and not pending.skipped and not pending.removed,
+                pending=[*pending.written, *pending.removed],
                 conflicts=list(pending.skipped),
                 conflict_causes=dict(pending.conflicts),
                 blocking_hooks=[h.event.value for h in surface.hooks if h.enforcement is Enforcement.BLOCKING],

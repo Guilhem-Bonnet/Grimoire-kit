@@ -23,6 +23,7 @@ from grimoire.hosts.emitters.base import (
     managed_header,
     map_verbs,
 )
+from grimoire.hosts.emitters.rules import with_rule_layers
 from grimoire.hosts.surface import (
     AgentSpec,
     CommandSpec,
@@ -411,7 +412,6 @@ class ClaudeCodeEmitter(Emitter):
     host_id = HostId.CLAUDE_CODE_CLI
 
     def plan(self, surface: ProjectSurface, project_root: Path) -> EmitPlan:
-        del project_root  # every path is project-relative
         files: list[EmittedFile] = []
         by_slug = {skill.slug: skill for skill in surface.skills}
         attached_slugs = {slug for agent in surface.agents for slug in agent.skills}
@@ -430,11 +430,14 @@ class ClaudeCodeEmitter(Emitter):
         files.extend(_command_file(command) for command in surface.commands)
         blocking = [h for h in surface.hooks if h.enforcement is Enforcement.BLOCKING]
         files.append(_readme(surface, blocking))
-        return EmitPlan(
-            host_id=self.host_id,
-            files=tuple(files),
-            merges=(_settings_merge(surface),),
-            degradations=(),
+        return with_rule_layers(
+            EmitPlan(
+                host_id=self.host_id,
+                files=tuple(files),
+                merges=(_settings_merge(surface),),
+                degradations=(),
+            ),
+            project_root,
         )
 
 

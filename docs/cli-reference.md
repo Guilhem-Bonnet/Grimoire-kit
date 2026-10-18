@@ -230,7 +230,7 @@ exécuter. Détail et dégradations par hôte : [Surfaces hôtes](hosts.md).
 |---|---|
 | `grimoire host list` | Hôtes connus, surfaces natives de chacun, hôte détecté |
 | `grimoire host surface` | Description host-neutre du projet |
-| `grimoire host sync --host all` | Générer les surfaces (`--dry-run`, `--force`) |
+| `grimoire host sync --host all` | Générer les surfaces (`--dry-run`, `--force`). Les règles `team` et `project` partent en `.cursor/rules/grimoire-rules*.mdc` (`globs:`) et `.github/instructions/grimoire-rules*.instructions.md` (`applyTo:`) ; le fichier d'une règle retirée est retiré |
 | `grimoire host status` | Écart entre ce que le projet déclare et ce que l'hôte exécute |
 | `grimoire host run <slug>` | Corps d'une commande, pour un hôte sans commandes natives |
 | `grimoire host hook --host <h> --event <e>` | Point d'entrée des hooks générés (stdin vers stdout) |
@@ -480,7 +480,7 @@ Le groupe `grimoire standard` pilote le standard agentique (profils, patterns go
 | `grimoire standard init [.] --needs <id>` | Générer les artefacts standard du projet |
 | `grimoire standard verify` | Vérifier les artefacts (fail-closed) |
 | `grimoire standard audit` | Rapport de conformité + gaps restants |
-| `grimoire standard score` | Calculer et persister un score de conformité |
+| `grimoire standard score` | Calculer et persister un score de conformité ; rapporte à part `rules_enforced` (règles de pack vérifiées), `rules_advisory`, `rules_failing`, `rules_unevaluated` et `rules_unclassified` |
 | `grimoire standard gate check [--strict] [--no-run]` | Gate CI : échoue si une preuve obligatoire manque ; chaque manque nomme son chemin et un remède copiable. `--strict` exécute lui-même `gate run-tests` si la tâche doit une preuve d'exécution et qu'aucun run vert et frais n'existe ; `--no-run` restaure l'ancien comportement |
 | `grimoire standard gate run-tests` | Exécuter la commande de test connue et enregistrer le verdict (`test-run.json`) |
 | `grimoire standard task scaffold [--task-id X] [--dry-run]` | Créer, s'ils manquent seulement, les artefacts par tâche que les gates exigent (enveloppe, pack de preuve, registre d'affirmations, dossier d'acceptance, context bundle, decision trace), pré-remplis depuis le Mission Ledger ; idempotent ; le hook SessionStart le fait déjà pour la tâche active |
@@ -522,7 +522,7 @@ prochain export l'écrase.
 | `grimoire task link <id> --depends-on <id>` | Déclarer une dépendance |
 | `grimoire task context <id>` | Produire le context bundle d'une tâche réelle |
 | `grimoire task trace <id> [--causes]` | Timeline unifiée d'une tâche : transitions, outils refusés, gates rouges, checkpoints, abort, preuves, incidents |
-| `grimoire task trace-export <dest> [--format otel\|langfuse] [--mission-id <id>]` | Exporte le TraceLedger en JSONL, conventions sémantiques OTel GenAI ou contrat REST Langfuse |
+| `grimoire task trace-export [<dest>] [--format otel\|langfuse\|otlp] [--endpoint <url>] [--header NOM=VALEUR] [--mission-id <id>]` | Exporte le TraceLedger : JSONL aux conventions OTel GenAI ou Langfuse, ou `--format otlp --endpoint` vers un collecteur OTLP/HTTP (échoue si le lot n'est pas accepté) |
 | `grimoire task recall <id>` | Ce que la mémoire du projet sait de cette tâche et de ses voisines — borné en tokens |
 | `grimoire task dispatch <id> --check "<commande>" [--check ...] [--dry-run] [--max-tier cheap\|mid\|strong] [--start-tier cheap\|mid\|strong] [--provider <id>] [--timeout <s>]` | Déléguer la tâche en cascade par palier de fournisseur |
 
@@ -593,6 +593,33 @@ déclare `test_depth` ne passe en `accepted` ou `released` qu'à cette profondeu
 sinon le gate refuse avec `acceptance.depth_floor_unmet` (bloquant selon la
 sévérité du profil, comme les autres preuves). Une profondeur inconnue est un
 refus. Le routeur ne choisit pas de modèle : il choisit la cérémonie.
+
+### Rapport de mission
+
+| Commande | Description |
+| --- | --- |
+| `grimoire mission report <mission> [--json]` | Coût, acceptance, palier, preuves et rejeu d'une mission, chaque ligne avec sa source |
+
+`grimoire mission report` rassemble ce que trois journaux gardaient chacun de leur
+côté : les tentatives de la cascade (`task.dispatched`, Mission Ledger), le résumé
+de cascade et l'usage de tokens replié (TraceLedger) et les packs et verdicts
+(EvidenceService). Chaque tentative porte son `cost.status` (`exact` ou
+`unknown`), l'issue de l'acceptance (`passed`, `failed`, `unrunnable`, `not_run`)
+et le `trace_id` de sa cascade ; chaque ligne nomme sa source (`ledger:`,
+`traces:`, `evidence:`).
+
+- **Jamais de chiffre inventé.** Sans aucun coût connu, le rapport n'a aucun total
+  numérique et écrit « coût inconnu ». Un agrégat partiel est une borne basse
+  (`>= X USD`), et une tâche sans donnée de coût est comptée à part.
+- **Le journal de session et les tentatives ne s'additionnent pas.** Ce sont deux
+  vues des mêmes appels : une tâche retient le journal replié par `task fold-usage`
+  s'il existe, sinon les tentatives, et les deux vues restent affichées.
+- **Le lien tentative vers trace est exact ou absent.** Une cascade est rattachée à
+  l'unique trace `dispatch.outcome` écrite entre sa dernière tentative et la
+  première de la suivante ; sinon `trace_id` vaut `null` (`trace_link: none`).
+- **Lecture seule et déterministe.** Aucun dossier n'est créé, aucune date de
+  génération n'est écrite : deux exécutions sur les mêmes journaux donnent les
+  mêmes octets. Mission inconnue ou ledger absent : sortie 1.
 
 ### Plafonds MAST par instance de workflow
 
@@ -835,6 +862,11 @@ et projections : [Système de mémoire](memory-system.md).
 | `grimoire memory graph` / `vector` | Synchroniser et vérifier les projections |
 | `grimoire memory bundle` | Construire, installer et vérifier les bundles de modèles d'embedding |
 | `grimoire memory shared` | Mémoire transverse : ce qui reste vrai d'un projet à l'autre |
+| `grimoire memory rules add` / `list` / `check` | Règles parsables par couche (`ALWAYS\|NEVER <verbe> <objet> [@portée]`) : conflits décidés par le code, plafond `rules.max_tokens_per_layer`, écriture via la frontière de confiance |
+| `grimoire memory rules explain <chemin>` | Règles qui valent pour un fichier : rang, couche d'origine (`organization` > `team` > `project` > `agent`), ce qui la fait céder, et si `host sync` la livre (couches `team` et `project` seulement) |
+| `grimoire memory rules pack list` / `show <id>` / `install <id> [--layer]` / `verify` | Packs de règles par stack (`python`) : chaque règle porte un vérificateur lu sur le code du projet, ou se déclare `advisory` (un pack de plus de 50 % d'advisory est refusé). `install` écrit les règles par la frontière de confiance ; `verify` rend `pass`, `fail` ou `unevaluated` par règle et sort en code 1 si l'une est violée |
+| `grimoire memory rules propose` / `proposals [--pending]` / `accept <id> [--layer]` / `reject <id>` | Règles candidates tirées des refus de gate observés (TraceLedger, recette `grimoire.task-gate`) : une signature (transition, preuve manquante) vue sur au moins 2 tâches distinctes devient `ALWAYS provide <preuve> before <transition>`, avec ses citations de preuve. Rejouer `propose` ne réécrit rien ; `accept` passe par les contrôles de `rules add` (un refus n'écrit rien) ; une proposition refusée ne revient qu'une fois ses tâches doublées. Aucune question n'est posée pendant un flow |
+| `grimoire memory rules effect [--min-tasks 5]` | Effet de chaque règle acceptée sur sa signature : `before_rate`, `after_rate`, `n_before`, `n_after`, `status` (`effective`, `unproven`, `harmful`, test exact de Fisher unilatéral à 5 %). Sous le seuil de tâches de chaque côté, `unproven` quel que soit l'écart ; `retire_suggested` sur `harmful` ou sur `unproven` après 20 tâches. JSON reproductible, aucun score de confiance |
 | `grimoire memory facts` / `diary` | Graphe de faits temporels, journaux d'agents |
 | `grimoire memory migrate` | Planifier et exporter les migrations Memory OS |
 | `grimoire memory taxonomy` | Taxonomie aile / salle / pièce |

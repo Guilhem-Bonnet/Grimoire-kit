@@ -105,6 +105,11 @@ class EmitPlan:
     files: tuple[EmittedFile, ...] = ()
     merges: tuple[JsonMerge, ...] = ()
     degradations: tuple[Degradation, ...] = ()
+    #: Motifs (relatifs à la racine) des fichiers générés par ce plan dont la
+    #: disparition de la source doit retirer le fichier : un fichier marqué qui
+    #: correspond à un motif sans être dans ``files`` est périmé (règle retirée,
+    #: portée renommée) et ``apply_plan`` le supprime. Jamais un fichier sans marqueur.
+    owned_globs: tuple[str, ...] = ()
 
     def labels(self) -> list[str]:
         return [f.relpath.as_posix() for f in self.files] + [m.relpath.as_posix() for m in self.merges]
@@ -119,6 +124,7 @@ class EmitResult:
     #: Cause de chaque entrée de ``skipped`` : ``edited`` (fichier du kit modifié
     #: depuis son émission), ``foreign`` (jamais écrit par le kit) ou ``unreadable``.
     conflicts: dict[str, str] = field(default_factory=dict)
+    removed: list[str] = field(default_factory=list)
     degradations: list[Degradation] = field(default_factory=list)
     dry_run: bool = False
 
@@ -138,6 +144,7 @@ class EmitResult:
             "unchanged": list(self.unchanged),
             "skipped": list(self.skipped),
             "conflicts": dict(self.conflicts),
+            "removed": list(self.removed),
             "degradations": [d.to_dict() for d in self.degradations],
         }
 
@@ -377,6 +384,27 @@ def _decide_merges(
         result.written.append(label)
 
 
+def _is_managed(path: Path) -> bool:
+    try:
+        head = path.read_text(encoding="utf-8")[:4096]
+    except (OSError, ValueError):
+        return False
+    return MANAGED_MARKER in head
+
+
+def _stale_files(plan: EmitPlan, root: Path) -> list[Path]:
+    """Fichiers marqués que ``plan.owned_globs`` désigne et que le plan n'émet plus (jamais un fichier sans marqueur)."""
+    planned = {f.relpath.as_posix() for f in plan.files}
+    stale: list[Path] = []
+    for pattern in plan.owned_globs:
+        for path in sorted(root.glob(pattern)):
+            label = path.relative_to(root).as_posix()
+            if label in planned or path.is_symlink() or not path.is_file() or not _is_managed(path):
+                continue
+            stale.append(path)
+    return stale
+
+
 def _missing_dirs(parent: Path) -> list[Path]:
     """Dossiers à créer pour que *parent* existe, du plus profond au plus proche de la racine."""
     missing: list[Path] = []
@@ -441,14 +469,20 @@ def apply_plans(
     root = project_root.resolve()
     overlay: dict[Path, str] = {}
     writes: list[tuple[Path, str]] = []
+    stale: list[Path] = []
     results: list[EmitResult] = []
     for plan in plans:
         result = EmitResult(host_id=plan.host_id, degradations=list(plan.degradations), dry_run=dry_run)
         _decide_files(plan, root, result, overlay, writes, force)
         _decide_merges(plan, root, result, overlay, writes)
+        for path in _stale_files(plan, root):
+            result.removed.append(path.relative_to(root).as_posix())
+            stale.append(path)
         results.append(result)
     if not dry_run:
         _commit(writes)
+        for path in stale:
+            path.unlink(missing_ok=True)
     return results
 
 
