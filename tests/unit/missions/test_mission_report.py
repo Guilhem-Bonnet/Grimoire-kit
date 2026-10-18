@@ -168,16 +168,14 @@ def test_partial_cost_is_a_lower_bound_and_names_the_task_without_data(tmp_path:
     assert by_id[silent]["cost"]["source"] == "none" and by_id[silent]["cost"]["usd"] is None
 
 
-def test_transcript_view_and_dispatch_view_are_never_added(tmp_path: Path) -> None:
+def _fold_usage(tmp_path: Path, task_id: str, *, cost: float | None, unpriced: int = 0, run: str = "usage-1") -> None:
     from grimoire.traces.schemas import TokenUsage, TraceRecord
 
-    ledger, mission_id, (task_id,) = _mission(tmp_path)
-    _dispatch(ledger, task_id, _attempt_payload(1, "green", cost=10.0))
     TraceLedger(tmp_path / TRACES_DIR).append_new(
         [
             TraceRecord(
-                id="TRC-usage-1",
-                run_id="usage-1",
+                id=f"TRC-{run}",
+                run_id=run,
                 workflow_instance_id="",
                 mission_id="",
                 task_id=task_id,
@@ -185,18 +183,84 @@ def test_transcript_view_and_dispatch_view_are_never_added(tmp_path: Path) -> No
                 outcome=TraceOutcome.SUCCESS,
                 started_at=_now(),
                 completed_at=_now(),
-                token_usage=TokenUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15, estimated_cost_usd=0.5, unpriced_calls=0),
+                token_usage=TokenUsage(
+                    prompt_tokens=10,
+                    completion_tokens=5,
+                    total_tokens=15,
+                    estimated_cost_usd=cost,
+                    unpriced_calls=unpriced,
+                ),
                 tags=("usage.source:claude-code-transcript", "usage.cache_read:0", "usage.cache_creation:0"),
             )
         ]
     )
 
-    task = _report(tmp_path, mission_id)["tasks"][0]
 
-    assert task["cost"]["source"] == "transcript"
-    assert task["cost"]["usd"] == pytest.approx(0.5)
+def test_smaller_transcript_view_does_not_hide_a_larger_dispatch_view(tmp_path: Path) -> None:
+    """Rien ne relie le journal replié aux tentatives : le plus fort montant connu, en borne basse, jamais 0.5 exact."""
+    ledger, mission_id, (task_id,) = _mission(tmp_path)
+    _dispatch(ledger, task_id, _attempt_payload(1, "green", cost=10.0))
+    _fold_usage(tmp_path, task_id, cost=0.5)
+
+    report = _report(tmp_path, mission_id)
+    task = report["tasks"][0]
+
+    assert task["cost"]["source"] == "dispatch"
+    assert task["cost"]["status"] == "lower_bound" and task["cost"]["usd"] == pytest.approx(10.0)
+    assert task["cost"]["overlap"] == "unproven"
+    assert task["cost"]["views"]["transcript"]["usd"] == pytest.approx(0.5)
     assert task["cost"]["views"]["dispatch"]["usd"] == pytest.approx(10.0)
     assert task["usage"]["calls"] == 1
+    assert report["cost"]["status"] == "lower_bound" and report["cost"]["usd"] == pytest.approx(10.0)
+    assert ">= 10.0000 USD" in render_markdown(report)
+    assert "mêmes appels et ne s'additionnent pas" not in render_markdown(report)
+
+
+def test_larger_transcript_view_is_kept_as_a_lower_bound(tmp_path: Path) -> None:
+    ledger, mission_id, (task_id,) = _mission(tmp_path)
+    _dispatch(ledger, task_id, _attempt_payload(1, "green", cost=1.0))
+    _fold_usage(tmp_path, task_id, cost=12.0)
+
+    report = _report(tmp_path, mission_id)
+
+    assert report["tasks"][0]["cost"]["source"] == "transcript"
+    assert report["cost"]["status"] == "lower_bound" and report["cost"]["usd"] == pytest.approx(12.0)
+
+
+def test_unknown_transcript_view_with_known_dispatch_is_a_lower_bound_not_unknown(tmp_path: Path) -> None:
+    ledger, mission_id, (task_id,) = _mission(tmp_path)
+    _dispatch(ledger, task_id, _attempt_payload(1, "green", cost=10.0))
+    _fold_usage(tmp_path, task_id, cost=None, unpriced=3)
+
+    report = _report(tmp_path, mission_id)
+    task = report["tasks"][0]
+
+    assert task["cost"]["views"]["transcript"]["status"] == "unknown"
+    assert task["cost"]["usd"] == pytest.approx(10.0) and task["cost"]["status"] == "lower_bound"
+    assert report["cost"]["usd"] == pytest.approx(10.0) and report["cost"]["status"] == "lower_bound"
+    markdown = render_markdown(report)
+    assert ">= 10.0000 USD" in markdown
+    assert "Mission : coût inconnu" not in markdown
+
+
+def test_identical_views_stay_exact(tmp_path: Path) -> None:
+    ledger, mission_id, (task_id,) = _mission(tmp_path)
+    _dispatch(ledger, task_id, _attempt_payload(1, "green", cost=2.0))
+    _fold_usage(tmp_path, task_id, cost=2.0)
+
+    report = _report(tmp_path, mission_id)
+
+    assert report["cost"]["status"] == "exact" and report["cost"]["usd"] == pytest.approx(2.0)
+
+
+def test_transcript_only_stays_exact(tmp_path: Path) -> None:
+    _, mission_id, (task_id,) = _mission(tmp_path)
+    _fold_usage(tmp_path, task_id, cost=0.5)
+
+    report = _report(tmp_path, mission_id)
+
+    assert report["tasks"][0]["cost"]["overlap"] is None
+    assert report["cost"]["status"] == "exact" and report["cost"]["usd"] == pytest.approx(0.5)
 
 
 # ── Lien tentative -> trace : exact ou absent ─────────────────────────────────

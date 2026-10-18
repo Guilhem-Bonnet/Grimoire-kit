@@ -12,11 +12,14 @@ Règles :
 * **Jamais de chiffre inventé.** Un coût inconnu vaut ``None`` / ``unknown``. Un
   agrégat partiel est une borne basse (``lower_bound``). Sans aucun coût connu, le
   rapport n'a aucun total numérique et écrit « coût inconnu ».
-* **Deux vues d'une même dépense ne s'additionnent pas.** Le journal de session
-  (``transcript``) et les tentatives de dispatch (``dispatch``) décrivent les mêmes
-  appels vus de deux côtés : une tâche retient le journal de session s'il existe,
-  sinon les tentatives, et les deux vues restent affichées côte à côte. Une tâche
-  sans aucune donnée compte comme inconnue dans le total de la mission (borne basse).
+* **Deux vues ne s'additionnent pas, et aucune n'est écartée en silence.** Le journal de
+  session (``transcript``, replié à la main par ``task fold-usage``) et les tentatives de
+  dispatch (``dispatch``, un ouvrier lancé dans un sous-processus dont le journal n'est jamais
+  replié) ne portent aucun identifiant commun : rien ne prouve qu'elles décrivent les mêmes
+  appels. Une tâche aux deux vues retient donc le plus fort montant connu et le déclare borne
+  basse (``lower_bound``, ``overlap: unproven``) dès que l'autre vue diffère ou est inconnue ;
+  les deux vues restent affichées côte à côte. Une tâche sans aucune donnée compte comme
+  inconnue dans le total de la mission (borne basse).
 * **Le lien tentative -> trace est exact ou absent.** Les événements ``task.dispatched``
   ne portent pas l'identifiant de la trace de cascade. Une cascade (suite de tentatives
   qui commence à ``attempt == 1``) est rattachée à l'unique trace ``dispatch.outcome``
@@ -207,15 +210,41 @@ def _evidence(task: MissionTask, service: Any | None) -> dict[str, Any]:
     return {"expected": list(task.expected_evidence), "packs": packs, "verdicts": verdicts}
 
 
+def _retain(transcript: Cost | None, dispatch: Cost | None) -> tuple[str, dict[str, Any], str | None]:
+    """Choisit la vue d'une tâche et dit ce que ce choix garantit : ``(source, corps, recouvrement)``.
+
+    Un seul côté chiffré ou connu : sa valeur telle quelle. Les deux vues présentes : rien ne prouve
+    qu'elles décrivent les mêmes appels (aucun identifiant commun, le journal replié peut être celui
+    d'une autre session que l'ouvrier du dispatch), donc la tâche retient la vue au plus fort montant
+    connu et ne le présente comme un total exact que si l'autre vue dit la même chose. Sinon c'est une
+    borne basse : la dépense réelle est au moins ce montant, au plus la somme des deux.
+    """
+    if transcript is None:
+        if dispatch is None:
+            return "none", {"usd": None, "status": "unknown", "unpriced_calls": 0}, None
+        return "dispatch", _cost_dict(dispatch), None
+    if dispatch is None:
+        return "transcript", _cost_dict(transcript), None
+    if _cost_dict(transcript) == _cost_dict(dispatch):
+        return "transcript", _cost_dict(transcript), "unproven"
+    known = [(name, c) for name, c in (("transcript", transcript), ("dispatch", dispatch)) if c.usd is not None]
+    if not known:
+        name, picked = max((("transcript", transcript), ("dispatch", dispatch)), key=lambda p: p[1].unpriced_calls)
+        return name, _cost_dict(picked), "unproven"
+    name, picked = max(known, key=lambda pair: pair[1].known_usd)
+    body = _cost_dict(picked)
+    body["status"] = "lower_bound"
+    return name, body, "unproven"
+
+
 def _task_cost(usage: dict[str, Any], attempts: list[dict[str, Any]]) -> dict[str, Any]:
     transcript = Cost.from_parts(usage["cost_usd"], usage["unpriced_calls"]) if usage["calls"] else None
     dispatch = Cost.total(Cost.coerce(a["cost"]["usd"]) for a in attempts) if attempts else None
-    chosen = transcript if transcript is not None else dispatch
-    source = "transcript" if transcript is not None else ("dispatch" if dispatch is not None else "none")
-    body = _cost_dict(chosen) if chosen is not None else {"usd": None, "status": "unknown", "unpriced_calls": 0}
+    source, body, overlap = _retain(transcript, dispatch)
     return {
         "source": source,
         **body,
+        "overlap": overlap,
         "views": {
             "transcript": _cost_dict(transcript) if transcript is not None else None,
             "dispatch": _cost_dict(dispatch) if dispatch is not None else None,
@@ -224,14 +253,21 @@ def _task_cost(usage: dict[str, Any], attempts: list[dict[str, Any]]) -> dict[st
 
 
 def _mission_cost(task_costs: list[dict[str, Any]]) -> dict[str, Any]:
-    without = sum(1 for c in task_costs if c["source"] == "none")
-    chosen = [Cost.from_parts(c["usd"], c["unpriced_calls"]) for c in task_costs if c["source"] != "none"]
-    total = Cost.total([*chosen, *([Cost.unpriced(without)] if without else [])])
     if not task_costs:
         return {"usd": None, "status": "unknown", "unpriced_calls": 0, "tasks_without_data": 0}
-    body = _cost_dict(total)
-    body["unpriced_calls"] = sum(c["unpriced_calls"] for c in task_costs)
-    return {**body, "tasks_without_data": without}
+    without = sum(1 for c in task_costs if c["source"] == "none")
+    priced = [c for c in task_costs if c["usd"] is not None]
+    unpriced_calls = sum(c["unpriced_calls"] for c in task_costs)
+    if not priced:
+        return {"usd": None, "status": "unknown", "unpriced_calls": unpriced_calls, "tasks_without_data": without}
+    # Une tâche dont le montant est une borne basse, inconnu ou absent ne permet pas un total exact.
+    complete = not without and all(c["status"] == "exact" for c in task_costs)
+    return {
+        "usd": sum(c["usd"] for c in priced),
+        "status": "exact" if complete else "lower_bound",
+        "unpriced_calls": unpriced_calls,
+        "tasks_without_data": without,
+    }
 
 
 def _replay(cascades: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -381,8 +417,9 @@ def render_markdown(report: dict[str, Any]) -> str:
         "",
         f"- Mission : {_money(cost)}"
         + (f" ({cost['tasks_without_data']} tâche(s) sans donnée de coût)" if cost["tasks_without_data"] else ""),
-        "- Une tâche retient le journal de session s'il existe, sinon les tentatives de dispatch : "
-        "ces deux vues décrivent les mêmes appels et ne s'additionnent pas.",
+        "- Journal de session et tentatives de dispatch ne portent aucun identifiant commun : rien ne prouve "
+        "qu'elles décrivent les mêmes appels. Une tâche aux deux vues retient le plus fort montant connu, en "
+        "borne basse quand l'autre vue diffère ou est inconnue, et ne les additionne pas.",
     ]
     if report["replay"]:
         lines += ["", "## Rejeu", "", "| Clé | Exécutions | Résolues | Toutes résolues |", "| --- | --- | --- | --- |"]
