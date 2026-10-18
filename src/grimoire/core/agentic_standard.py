@@ -207,6 +207,8 @@ class StandardScoreResult:
     errors: int
     output_path: Path
     dimensions: dict[str, dict[str, int]] = field(default_factory=dict)
+    #: Règles de packs par stack, comptées à part (W6-08) : voir ``stack_packs.rules_score_fields``.
+    rules: dict[str, int | None] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1746,6 +1748,9 @@ def calculate_compliance_score(
     total_weight = sum(item["weight"] for item in dimensions.values())
     total_earned = sum(item["earned"] for item in dimensions.values())
     score = int((total_earned / total_weight) * 100) if total_weight else max(0, min(100, 100 - (result.error_count * 20) - (result.warning_count * 3)))
+    from grimoire.core.stack_packs import rules_score_fields
+
+    rules = rules_score_fields(root)
     data = {
         "$schema": "grimoire-agentic-standard-score-result/v1",
         "task_id": normalized_task_id,
@@ -1757,6 +1762,7 @@ def calculate_compliance_score(
         "warnings": result.warning_count,
         "generated_at": datetime.now(UTC).isoformat(),
         "dimensions": dimensions,
+        "rules": rules,
     }
     rel_path = SCORE_DIR / normalized_task_id / "compliance-score.yaml"
     written = _write_yaml_mapping(root, rel_path, data)
@@ -1770,6 +1776,7 @@ def calculate_compliance_score(
         errors=result.error_count,
         output_path=written,
         dimensions=dimensions,
+        rules=rules,
     )
 
 

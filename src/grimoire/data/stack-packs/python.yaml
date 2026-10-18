@@ -1,0 +1,61 @@
+$schema: grimoire-stack-rule-pack/v1
+id: python
+stack: python
+title: Hygiène Python vérifiable
+description: >-
+  Règles de base d'un projet Python. Chacune porte un vérificateur mécanique
+  (lu sur le code du projet) ou se déclare advisory ; aucune n'est de la prose
+  que personne ne contrôle.
+rules:
+  - rule: NEVER use bare-except
+    rationale: >-
+      Un `except:` nu avale KeyboardInterrupt et SystemExit et masque les
+      défauts réels ; nommer l'exception attendue.
+    verifier:
+      kind: python_ast
+      check: bare_except
+      paths: ["**/*.py"]
+  - rule: NEVER use mutable-default-arguments
+    rationale: >-
+      Un défaut `[]`, `{}` ou `set()` est créé une fois et partagé entre les
+      appels : un état caché qui survit d'un appel à l'autre.
+    verifier:
+      kind: python_ast
+      check: mutable_default_argument
+      paths: ["**/*.py"]
+  - rule: NEVER call eval
+    rationale: >-
+      `eval()` exécute du texte comme du code ; `ast.literal_eval` ou un
+      analyseur dédié couvrent les besoins légitimes.
+    verifier:
+      kind: python_ast
+      check: eval_call
+      paths: ["**/*.py"]
+  - rule: ALWAYS pin requires-python @pyproject.toml
+    rationale: >-
+      Sans borne de version Python déclarée, l'installeur résout pour un
+      interpréteur que le projet n'a jamais testé.
+    verifier:
+      kind: require_regex
+      pattern: '^requires-python\s*='
+      paths: ["pyproject.toml"]
+  - rule: ALWAYS list .venv @.gitignore
+    rationale: >-
+      Un environnement virtuel commité pèse des centaines de mégaoctets et
+      porte des chemins propres au poste.
+    verifier:
+      kind: require_regex
+      pattern: '^/?\.venv/?\s*$'
+      paths: [".gitignore"]
+  - rule: ALWAYS annotate public-functions
+    advisory: true
+    rationale: >-
+      Les annotations des fonctions publiques documentent le contrat ; mypy ou
+      pyright le vérifient seulement si le projet les configure, ce que ce
+      pack ne peut pas affirmer.
+  - rule: ALWAYS prefer pathlib
+    advisory: true
+    rationale: >-
+      `pathlib` évite les concaténations de chaînes de chemins ; l'usage
+      d'`os.path` n'est pas fautif en soi, donc non vérifiable sans faux
+      positifs.
