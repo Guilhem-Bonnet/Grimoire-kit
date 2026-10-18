@@ -56,6 +56,14 @@ from hidden_reads import (
     unevaluated_run_alert,
     unevaluated_runs_rows,
 )
+from model_pin import (
+    ModelMismatchError,
+    detect_claude_code_version,
+    ensure_results_match_model,
+    pin_report_fields,
+    render_pin_lines,
+    selection_pin,
+)
 from results_io import read_results_rows
 from task_repo import (
     ContaminatedTaskRepoError,
@@ -208,6 +216,12 @@ class RunRecord:
     transcript_check: str | None = None
     hidden_test_reads: list[dict[str, Any]] | None = None
     cost_known: bool | None = None  # B-00 ; None = ligne antérieure, voir cost_gate.row_cost_known
+    # B-01 : modèle DEMANDÉ (``--model``) et version de Claude Code de ce run.
+    # ``None`` = ligne antérieure à B-01 (modèle inconnu, jamais reconstruit) :
+    # elle ne s'apparie avec aucune ligne au modèle enregistré, voir
+    # ``model_pin.require_single_model``. Le modèle EFFECTIF reste dans ``model_usage``.
+    model_id: str | None = None
+    claude_code_version: str | None = None
 
     @property
     def invalid(self) -> bool:
@@ -1542,6 +1556,7 @@ def run_claude_headless(
     poll_interval: float = DEFAULT_POLL_INTERVAL_S,
     log_path: Path | None = None,
     auth_mode: str = "oauth-copy",
+    model: str | None = None,
 ) -> RunOutcome:
     """Lance ``claude -p`` en tête sans tête, avec garde-fou timeout + boucle.
 
@@ -1582,6 +1597,9 @@ def run_claude_headless(
     ]
     if auth_mode == "api-key":
         cmd.append("--bare")
+    if model:
+        # B-01 : sans ``--model`` le modèle est celui par défaut de l'outil, qui change d'une version à l'autre.
+        cmd.extend(["--model", model])
 
     outcome = RunOutcome()
     start = time.monotonic()
@@ -1776,6 +1794,8 @@ def build_report(
     ``state/toolchain_check.json`` — ``None`` pour un rapport reconstruit
     sans ce fichier (campagnes antérieures à ce lot).
     """
+    # B-01 : deux modèles dans un même rapport = comparaison entre bras faussée, refusée avant tout calcul.
+    pin_fields, nu_rates = pin_report_fields(records)
     # W1-08b : un run invalidé (transcription qui désigne un test caché) sort de
     # tous les taux et médianes ; son coût reste dans ``spent_by_arm``.
     by_arm: dict[str, list[RunRecord]] = defaultdict(list)
@@ -1841,7 +1861,10 @@ def build_report(
     task_ids = sorted({r.task_id for r in records})
     for task_id in task_ids:
         task_records = [r for r in records if r.task_id == task_id and not r.invalid]
-        row: dict[str, Any] = {"language": next((r.language for r in records if r.task_id == task_id), "?")}
+        row: dict[str, Any] = {
+            "language": next((r.language for r in records if r.task_id == task_id), "?"),
+            "nu_baseline_pass_rate": nu_rates.get(task_id),
+        }
         for arm in ARMS:
             arm_task_records = [r for r in task_records if r.arm == arm]
             row[arm] = {
@@ -1880,6 +1903,7 @@ def build_report(
         "generated_at": datetime.now(tz=UTC).isoformat(),
         "seed": seed,
         "label": label,
+        **pin_fields,  # B-01 : modèle demandé, versions de Claude Code, saturation de la suite
         "total_tasks": total_tasks,
         "tasks_run": len(task_ids),
         "k": K_REPLAY,
@@ -1917,6 +1941,8 @@ def render_report_markdown(report: dict[str, Any]) -> str:
     if report.get("label"):
         lines.append(f"Étiquette : **{report['label']}**.")
         lines.append("")
+
+    lines.extend(render_pin_lines(report))
 
     auth_modes = report.get("auth_modes") or []
     if auth_modes:
@@ -2132,6 +2158,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--subset", type=Path, default=None, help="B-00 : ne rejoue que les tâches de ce fichier (docs/bench/cost-gate-subset.json)")
     parser.add_argument("--label", type=str, default=None, help="étiquette libre reprise dans report.md")
     parser.add_argument(
+        "--model",
+        type=str,
+        default=None,
+        help="B-01 : modèle passé à `claude -p --model`, obligatoire pour --pilot et --full (identifiant complet "
+        "de préférence : un alias peut changer de cible). Noté dans selection.json et sur chaque ligne ; "
+        "deux lots de modèles différents ne s'apparient pas.",
+    )
+    parser.add_argument(
         "--grimoire-bin",
         type=str,
         default=None,
@@ -2159,6 +2193,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ValueError as exc:
         parser.error(str(exc))
 
+    args.model = args.model.strip() if args.model else None
+    if (args.pilot or args.full) and not args.model:
+        parser.error("--model est obligatoire pour --pilot et --full : un run payant ne part pas sur le modèle par défaut")
+
     if args.report_only:
         workspace = args.workspace or _default_workspace()
         return _do_report_only(workspace, seed=args.seed, report_dir=args.report_dir, arms=args.arms, label=args.label)
@@ -2175,8 +2213,24 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     state_dir = workspace / "state"
     state_dir.mkdir(parents=True, exist_ok=True)
+    if args.pilot or args.full:
+        # B-01 : avant d'écraser selection.json et avant toute dépense, refus de mêler ce modèle à un autre.
+        try:
+            ensure_results_match_model(state_dir / "results.jsonl", args.model)
+        except (ModelMismatchError, ValueError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+    claude_code_version = detect_claude_code_version() if (args.pilot or args.full) else None
     (state_dir / "selection.json").write_text(
-        json.dumps({"seed": args.seed, "ecc_commit": ecc_commit, "tasks": [t.to_dict() for t in tasks]}, indent=2),
+        json.dumps(
+            {
+                "seed": args.seed,
+                "ecc_commit": ecc_commit,
+                **selection_pin(state_dir / "selection.json", args.model, claude_code_version),
+                "tasks": [t.to_dict() for t in tasks],
+            },
+            indent=2,
+        ),
         encoding="utf-8",
     )
 
@@ -2291,6 +2345,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                             run_timeout_s=args.run_timeout_s,
                             grimoire_bin=grimoire_bin,
                             auth_mode=auth_mode,
+                            model=args.model,
+                            claude_code_version=claude_code_version,
                         )
                     except ContaminatedTaskRepoError as exc:
                         # W1-08a : arrêt à 0 $, comme la garde du lot H. Rien n'est
@@ -2425,16 +2481,20 @@ def _do_report_only(
     # annoter le rapport (quels bras la campagne dont ``results.jsonl`` est
     # issu a réellement rejoués), pas à filtrer quoi que ce soit.
     rerun_arms = parse_arms(arms) if arms else None
-    write_report(
-        records,
-        out_dir,
-        total_tasks=total_tasks,
-        expected_cost=expected_cost,
-        seed=seed,
-        rerun_arms=rerun_arms,
-        label=label,
-        toolchain_check=toolchain_check,
-    )
+    try:
+        write_report(
+            records,
+            out_dir,
+            total_tasks=total_tasks,
+            expected_cost=expected_cost,
+            seed=seed,
+            rerun_arms=rerun_arms,
+            label=label,
+            toolchain_check=toolchain_check,
+        )
+    except ModelMismatchError as exc:  # B-01 : appariement refusé, aucun rapport écrit
+        print(str(exc), file=sys.stderr)
+        return 1
     print(f"[report] écrit sous {out_dir}")
     return 0
 
@@ -2486,6 +2546,8 @@ def _run_one(
     run_timeout_s: int,
     grimoire_bin: str,
     auth_mode: str = "oauth-copy",
+    model: str | None = None,
+    claude_code_version: str | None = None,
 ) -> RunRecord:
     run_dir = run_dir_for(workspace, task, arm, run_index)
     reset_run_dir(run_dir)
@@ -2548,7 +2610,7 @@ def _run_one(
         # précisément ce qui élimine le bug de rotation OAuth partagée :
         # rien n'est jamais écrit dans `home`.
         outcome = run_claude_headless(
-            run_dir, build_prompt(task), home=home, env=env, timeout_s=run_timeout_s, auth_mode=auth_mode
+            run_dir, build_prompt(task), home=home, env=env, timeout_s=run_timeout_s, auth_mode=auth_mode, model=model
         )
     else:
         # Les identifiants ne vivent dans `home` que le temps de cet appel : le
@@ -2563,7 +2625,7 @@ def _run_one(
                     "ou passe --auth api-key avec ANTHROPIC_API_KEY exportée."
                 )
             outcome = run_claude_headless(
-                run_dir, build_prompt(task), home=home, env=env, timeout_s=run_timeout_s, auth_mode=auth_mode
+                run_dir, build_prompt(task), home=home, env=env, timeout_s=run_timeout_s, auth_mode=auth_mode, model=model
             )
 
     # W1-08b : ce que l'agent a réellement lu, y compris pour un run tué (timeout, boucle).
@@ -2616,6 +2678,8 @@ def _run_one(
         auth_mode=auth_mode,
         transcript_check=transcript_check,
         hidden_test_reads=hidden_test_reads,
+        model_id=model,
+        claude_code_version=claude_code_version,
     )
 
 
