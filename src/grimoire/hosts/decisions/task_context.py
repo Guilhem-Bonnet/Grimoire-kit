@@ -59,25 +59,27 @@ def decide_task_context(hook: HookInput) -> Decision:
 
     if active.is_fallback:
         context = no_task_context(profile, active.candidates, active.expired)
-        takeover = takeover_notices(hook.project_root, hook.session_id)
-        if takeover:
-            context = f"{context}\n{takeover}"
-        if steering:
-            context = f"{context}\n{steering}"
-        return Decision(outcome=Outcome.ALLOW, context=context, detail={**detail, **steering_detail})
-    link = link_session(hook, active)
-    from grimoire.hosts.decisions.self_view import self_view_context
+        link: dict[str, object] = {}
+        self_view = ""
+    else:
+        link = link_session(hook, active)
+        from grimoire.hosts.decisions.self_view import self_view_context
 
-    self_view = self_view_context(hook.project_root, active.task_id, hook.session_id)
-    context = (
-        f"[Grimoire] Tâche courante : {active.task_id} (profil {profile}). "
-        f"Toute preuve va dans _grimoire-output/evidence/{active.task_id}/."
-    )
+        self_view = self_view_context(hook.project_root, active.task_id, hook.session_id)
+        context = (
+            f"[Grimoire] Tâche courante : {active.task_id} (profil {profile}). "
+            f"Toute preuve va dans _grimoire-output/evidence/{active.task_id}/."
+        )
     if self_view:
         context = f"{context}\n{self_view}"
     takeover = takeover_notices(hook.project_root, hook.session_id)
     if takeover:
         context = f"{context}\n{takeover}"
-    if steering:
-        context = f"{context}\n{steering}"
-    return Decision(outcome=Outcome.ALLOW, context=context, detail={**detail, **link, **steering_detail})
+    # W2-06 : la phrase « Override Gate <tâche>: <raison> » — après le rattachement de session ci-dessus.
+    from grimoire.hosts.decisions.gate_override import record_override_request
+
+    override, override_detail = record_override_request(hook)
+    context = "\n".join(part for part in (context, steering, override) if part)
+    return Decision(
+        outcome=Outcome.ALLOW, context=context, detail={**detail, **link, **steering_detail, **override_detail}
+    )

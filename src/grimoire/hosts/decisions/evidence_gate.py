@@ -44,7 +44,18 @@ def decide_evidence_gate(hook: HookInput) -> Decision:
     W2-08 : une panne imprévue de la garde elle-même (lecture du profil, de la
     tâche active, de la portée du ``Stop``…) ne devient jamais un ``ALLOW`` :
     voir :func:`_stop_guard_crashed`.
+
+    W2-06 : un refus sur une tâche est levé, une fois, par un contournement
+    tapé par l'humain dans la session qui tient la tâche
+    (:mod:`.gate_override`), journalisé avant d'être appliqué.
     """
+    from grimoire.hosts.decisions.gate_override import apply_override
+
+    return apply_override(hook, _guarded_stop(hook))
+
+
+def _guarded_stop(hook: HookInput) -> Decision:
+    """:func:`_decide_stop` sous le filet W2-08 : une panne devient un refus tracé, jamais un ALLOW."""
     try:
         return _decide_stop(hook)
     except Exception as exc:
