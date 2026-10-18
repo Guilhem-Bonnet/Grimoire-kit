@@ -38,6 +38,13 @@ MAX_ATTEMPTS = 3
 #: Premier délai de réadmission après une récolte, doublé à chaque tentative.
 BACKOFF_BASE = timedelta(minutes=10)
 
+#: Origine d'une barrière posée par l'annulation de la tâche (K3, issue #768) : le frein
+#: d'outil la nomme (« annulée ») plutôt que de dire seulement « epoch périmé ».
+ORIGIN_CANCEL = "cancel"
+#: Origine d'une barrière posée quand le titulaire rend le bail par un chemin légitime (release,
+#: blocage, échec, clôture) : le frein d'outil ne la prend pas pour une perte de bail (K3-S1-01).
+ORIGIN_HAND_BACK = "hand_back"
+
 LEASES_DIRNAME = "leases"
 _SCHEMA = "grimoire-task-lease/v1"
 _SAFE_NAME = re.compile(r"[A-Za-z0-9_.-]{1,120}")
@@ -67,8 +74,8 @@ class LeaseFile:
     """Le contenu du fichier de bail. ``holder=False`` : barrière posée par une récolte ou un rendu.
 
     ``origin`` dit qui a posé la barrière : ``reap`` (la récolte a décidé de relancer,
-    le geste ne se rejuge pas) ou ``hand_back`` (le titulaire ou un humain rend le bail,
-    l'événement de rendu peut ne jamais être écrit). Vide : fichier d'un titulaire, ou
+    le geste ne se rejuge pas), ``hand_back`` (le titulaire ou un humain rend le bail,
+    l'événement de rendu peut ne jamais être écrit) ou ``cancel`` (annulation, K3). Vide : fichier d'un titulaire, ou
     d'une version antérieure — jamais pris pour une décision de récolte.
     """
 

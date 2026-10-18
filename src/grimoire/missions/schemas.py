@@ -155,6 +155,11 @@ class TaskClaim:
     #: si une commande de reprise existe (``claude --resume``), jamais une
     #: valeur devinée.
     session_host: str = ""
+    #: Version de l'hôte de la session rattachée (K3, issue #768), lue par le hook
+    #: dans le journal de l'hôte — jamais devinée. Une preuve de fencing vaut pour
+    #: la version sur laquelle elle a été capturée (``hosts.capabilities``) :
+    #: ``""`` = version inconnue, donc hôte non fencé.
+    session_host_version: str = ""
     #: Quand la session a *explicitement* déclaré ce claim sien (``grimoire task
     #: attach``, issue #695), ISO 8601 UTC du dernier tel rattachement. Les
     #: sous-agents héritent du ``session_id`` de leur parent : leurs claims s'y
@@ -220,6 +225,8 @@ class TaskClaim:
             "expires_at": self.expires_at,
             "session_id": self.session_id,
             "session_host": self.session_host,
+            # Absent tant qu'aucune version n'est connue : sérialisation inchangée.
+            **({"session_host_version": self.session_host_version} if self.session_host_version else {}),
             # Absent tant qu'aucun attach explicite : les sérialisations
             # existantes (board, cockpit, tests) ne changent pas.
             **({"attached_explicit_at": self.attached_explicit_at} if self.attached_explicit_at else {}),
@@ -236,15 +243,20 @@ class TaskClaim:
             expires_at=d.get("expires_at", ""),
             session_id=str(d.get("session_id", "") or ""),
             session_host=str(d.get("session_host", "") or ""),
+            session_host_version=str(d.get("session_host_version", "") or ""),
             attached_explicit_at=str(d.get("attached_explicit_at", "") or ""),
             lease_epoch=_int_or_zero(d.get("lease_epoch")),
         )
 
-    def with_session(self, session_id: str, session_host: str = "", *, explicit_at: str = "") -> TaskClaim:
+    def with_session(
+        self, session_id: str, session_host: str = "", *, explicit_at: str = "", host_version: str = ""
+    ) -> TaskClaim:
         """Le même claim, rattaché à *session_id* — une valeur, jamais une mutation.
 
         *explicit_at* date un rattachement explicite (``task attach``) ; sans lui,
         un rattachement automatique conserve la date du dernier explicite.
+        *host_version* (K3) : la version de l'hôte, ou celle déjà connue de la même
+        session si l'événement n'en porte pas.
         """
         return TaskClaim(
             actor_id=self.actor_id,
@@ -253,6 +265,7 @@ class TaskClaim:
             expires_at=self.expires_at,
             session_id=session_id,
             session_host=session_host,
+            session_host_version=host_version or (self.session_host_version if session_id == self.session_id else ""),
             attached_explicit_at=explicit_at or self.attached_explicit_at,
             lease_epoch=self.lease_epoch,
         )
