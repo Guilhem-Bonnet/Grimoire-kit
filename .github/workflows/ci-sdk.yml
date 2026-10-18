@@ -17,6 +17,8 @@ on:
       # 2026-07-13 — la #71 path-filtrée n'avait jamais lancé ces tests).
       - "evals/tasks/**"
       - "evals/collect.py"
+      # Budget de cérémonie (W6-01) : un budget modifié doit être revérifié.
+      - "evals/ceremony-budget.yaml"
       # Gouvernent le job dep-audit : sans eux dans le filtre, ajouter un
       # waiver ou en laisser expirer un ne relance jamais l'audit qu'ils
       # pilotent — le controle serait modifie sans etre reverifie.
@@ -83,6 +85,12 @@ jobs:
 
       - name: Type check (Windows, fsio)
         run: mypy --strict --platform win32 --follow-imports=silent src/grimoire/core/fsio.py
+
+      # W6-01 : une route qui coûte plus que son budget, un seuil non recopié,
+      # une tâche type qui change de route ou une calibration de plus de deux
+      # versions mineures fait échouer la CI.
+      - name: Ceremony budget
+        run: grimoire ceremony budget --file evals/ceremony-budget.yaml
 
   dep-audit:
     name: "Dependency audit"

@@ -533,6 +533,45 @@ critère ambigu suffit à faire monter la classe, jamais à la faire descendre.
 `task show` affiche, critère par critère, le motif reconnu — c'est ce qui rend
 lisible pourquoi une tâche n'est pas au niveau qu'on lui prêtait.
 
+### Route de cérémonie et profondeur de test
+
+`grimoire ceremony suggest` calcule, sans LLM, la cérémonie qu'une tâche
+mérite : une route parmi cinq, et la profondeur de test exigée à la fermeture.
+Deux appels sur les mêmes entrées rendent les mêmes octets (`--json`, avec
+l'empreinte `inputs_digest` des entrées et des seuils).
+
+| Commande | Description |
+| --- | --- |
+| `grimoire ceremony suggest <id> [-f <fichier>…] [--diff-base <ref>] [--impact <n> \| --measure-impact] [--json]` | Route d'une tâche du ledger |
+| `grimoire ceremony suggest --title "<titre>" -a "<critère>" [--check "<cmd>"] [--risk <profil>] …` | Route d'une tâche décrite en ligne |
+| `grimoire ceremony budget [--file evals/ceremony-budget.yaml] [--json]` | Vérifier un budget de cérémonie ; sortie 1 au premier écart (job CI du kit) |
+| `grimoire task add "<titre>" -a "<critère>" --test-depth <floor\|standard\|strict\|auto>` | Exiger une profondeur de test à la fermeture (`auto` : celle de la route) |
+
+Les routes, de la plus légère à la plus lourde : `express` (verdict mécanique
+seul, profondeur `floor`), `checked` (tests puis relecture par un agent,
+`standard`), `reviewed` (plus une relecture humaine, `standard`), `guarded`
+(tests et analyse statique, double relecture, checkpoint humain, `strict`),
+`session` (jugement ou conception en session avec une personne, `strict`).
+Chaque règle donne un plancher et la route est le maximum des planchers :
+V1 → `checked`, V2 → `session`, risque `strict` → `reviewed`, risque
+`security_critical` ou `release` → `guarded`, fichier de secret, de workflow CI,
+de migration ou de publication → `guarded`, plus de `files_wide` fichiers ou
+plus de `impact_wide` importeurs directs des `.py` touchés (`--measure-impact`, lu par `ast` ; le code graph du kit ne résout pas ses arêtes d'import) → `checked`. Des fichiers
+inconnus montent la route à `checked` ; un impact non mesuré ne la monte pas,
+et la sortie le dit dans `limits`. Les seuils portent `calibrated` et leur
+date : aucun n'est calibré sur des runs réels aujourd'hui.
+
+La profondeur se mesure sur les commandes du **dernier verdict**
+`grimoire task verify`, pas sur celles que la tâche promet : `floor` (une
+commande verte), `standard` (dont une commande de test : celle que le projet
+déclare en `needs.commands.test-runner`, ou un outil reconnu comme `pytest`,
+`go test`, `npm test`), `strict` (en plus une analyse statique verte : `lint`,
+`typecheck` déclarés, ou `ruff`, `mypy`, `eslint`, `tsc`…). Une tâche qui
+déclare `test_depth` ne passe en `accepted` ou `released` qu'à cette profondeur ;
+sinon le gate refuse avec `acceptance.depth_floor_unmet` (bloquant selon la
+sévérité du profil, comme les autres preuves). Une profondeur inconnue est un
+refus. Le routeur ne choisit pas de modèle : il choisit la cérémonie.
+
 ### Plafonds MAST par instance de workflow
 
 Chaque instance créée par le RuntimeKernel (`create_instance`) porte deux

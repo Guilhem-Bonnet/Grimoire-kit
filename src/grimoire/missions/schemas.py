@@ -530,6 +530,11 @@ class MissionTask:
     #: Sans elles, ``classify`` ne rend jamais V0 : un vocabulaire mécanique
     #: sans commande à lancer n'est qu'une promesse.
     checks: tuple[TaskCheck, ...] = ()
+    #: Profondeur de test exigée à la fermeture (W6-01) : ``floor``, ``standard``
+    #: ou ``strict`` ; ``""`` = aucune exigence. Gardée telle quelle, jamais
+    #: validée à la lecture : une valeur inconnue (écrite par une version plus
+    #: récente) se relit, et c'est le gate qui la refuse.
+    test_depth: str = ""
 
     @property
     def pending_directives(self) -> tuple[TaskDirective, ...]:
@@ -585,6 +590,8 @@ class MissionTask:
             d["checks"] = [check.to_dict() for check in self.checks]
         if self.waiting is not None:
             d["waiting"] = self.waiting.to_dict()
+        if self.test_depth:
+            d["test_depth"] = self.test_depth
         return d
 
     @classmethod
@@ -624,6 +631,7 @@ class MissionTask:
             raw_status=raw_status if status is TaskState.UNKNOWN else "",
             checks=tuple(TaskCheck.from_dict(c) for c in d.get("checks", [])),
             waiting=Waiting.from_dict(d["waiting"]) if isinstance(d.get("waiting"), dict) else None,
+            test_depth=str(d.get("test_depth", "") or ""),
         )
 
 
