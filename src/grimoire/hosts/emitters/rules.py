@@ -38,11 +38,11 @@ from grimoire.bridges.schemas import HostId
 from grimoire.core.layered_rules import LAYERS, RULES_DIR, Rule, RulesReport, analyze
 from grimoire.core.rule_resolution import (
     EMITTED_LAYERS,
-    STATUS_EFFECTIVE,
     STATUS_PARTIAL,
     STATUS_SHADOWED,
     STATUS_UNRESOLVED,
     ResolvedRule,
+    emitted_rules,
     resolve_rules,
 )
 from grimoire.hosts.capabilities import profile_for
@@ -173,7 +173,7 @@ def with_rule_layers(plan: EmitPlan, project_root: Path) -> EmitPlan:
     if not resolved and not report.problems:
         return replace(plan, owned_globs=(*plan.owned_globs, *owned))
 
-    live = [rr for rr in resolved if rr.layer in EMITTED_LAYERS and rr.status in {STATUS_EFFECTIVE, STATUS_PARTIAL}]
+    live = list(emitted_rules(resolved))
     degradations = list(plan.degradations)
     files = list(plan.files)
     if renderer is None:

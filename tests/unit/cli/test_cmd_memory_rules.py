@@ -150,3 +150,44 @@ def test_host_sync_cursor_ecrit_le_mdc_a_globs_puis_status_voit_la_peremption(pr
     assert mdc in json.loads(status.output)[0]["pending"]
     resynced = json.loads(runner.invoke(app, ["-o", "json", "host", "sync", "--host", "cursor", "--force-host", "--project-root", str(project)]).output)
     assert resynced["hosts"][0]["removed"] == [mdc] and not (project / mdc).exists()
+
+
+def _write(root: Path, layer: str, *lines: str) -> None:
+    path = _layer(root, layer)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _sync_cursor(root: Path) -> list[str]:
+    result = runner.invoke(app, ["-o", "json", "host", "sync", "--host", "cursor", "--force-host", "--project-root", str(root)])
+    assert result.exit_code == 0, result.output
+    written = json.loads(result.output)["hosts"][0]["written"]
+    assert isinstance(written, list)
+    return [w for w in written if w.startswith(".cursor/rules/grimoire-rules")]
+
+
+def test_explain_ne_dit_pas_emise_une_regle_que_host_sync_n_ecrit_pas(project: Path) -> None:
+    # W6-05-S1-02 : sur src/app.py la résolution par chemin ne voit pas le conflit
+    # (src/gen/** ne couvre pas src/app.py), mais host sync, lui, retient les deux règles.
+    _write(project, "team", "ALWAYS run tests @src/**", "NEVER run tests @src/gen/**")
+    row = _explain("src/app.py")["rules"][0]
+    assert row["rule"] == "ALWAYS run tests @src/**"
+    assert _sync_cursor(project) == []
+    assert row["emitted"] is False
+
+
+def test_explain_et_host_sync_s_accordent_quand_la_regle_est_emise(project: Path) -> None:
+    _write(project, "team", "ALWAYS run tests @src/**")
+    assert _explain("src/app.py")["rules"][0]["emitted"] is True
+    assert len(_sync_cursor(project)) == 1
+
+
+def test_une_regle_de_projet_contredite_par_une_regle_partielle_est_emise(project: Path) -> None:
+    # W6-05-S1-01, par la vraie CLI.
+    _write(project, "organization", "NEVER run tests @src/**")
+    _write(project, "team", "ALWAYS run tests")
+    _write(project, "project", "NEVER run tests @src/a/**")
+    rows = {r["layer"]: r for r in _explain("src/a/x.py")["rules"]}
+    assert rows["project"]["status"] == "effective" and rows["project"]["emitted"] is True
+    written = _sync_cursor(project)
+    assert any(project.joinpath(w).read_text(encoding="utf-8").count("globs: src/a/**") for w in written), written

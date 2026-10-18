@@ -168,6 +168,16 @@ class TestPrecedenceEmise:
         text = next(f.content for f in plan.files if f.relpath.name == rule_file_name("**/*.py", ".mdc"))
         assert "ALWAYS touch lockfile — cède devant « NEVER touch lockfile @src/** » (team)" in text
 
+    def test_une_regle_contredite_seulement_par_une_regle_partielle_est_emise(self, project: Path) -> None:
+        # W6-05-S1-01 : l'équipe cède devant l'organisation sur src/**, elle ne tue pas le projet sur src/a/**.
+        _write_layer(project, "organization", "NEVER run tests @src/**")
+        _write_layer(project, "team", "ALWAYS run tests")
+        _write_layer(project, "project", "NEVER run tests @src/a/**")
+        plan = _plan(project, HostId.CURSOR)
+        text = next(f.content for f in plan.files if f.relpath.name == rule_file_name("src/a/**", ".mdc"))
+        assert "NEVER run tests" in text
+        assert "à l'ombre" not in _degraded(plan)
+
     def test_un_conflit_non_decide_n_emet_aucune_des_deux_regles(self, project: Path) -> None:
         _write_layer(project, "project", "ALWAYS run tests", "NEVER run tests", "ALWAYS run linter")
         plan = _plan(project, HostId.CURSOR)

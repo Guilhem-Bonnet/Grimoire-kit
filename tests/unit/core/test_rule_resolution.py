@@ -197,6 +197,42 @@ def test_une_regle_ne_cede_pas_devant_une_regle_qui_cede_elle_meme() -> None:
     assert resolved[project] == STATUS_EFFECTIVE  # l'organisation dit la même chose que lui
 
 
+def _cas_b() -> tuple[Rule, Rule, Rule]:
+    org = _rule("NEVER run tests @src/**", "organization")
+    team = _rule("ALWAYS run tests", "team")
+    project = _rule("NEVER run tests @src/a/**", "project")
+    return org, team, project
+
+
+def test_une_regle_partielle_ne_fait_pas_ceder_une_regle_interieure_en_entier() -> None:
+    # W6-05-S1-01 : l'équipe cède devant l'organisation sur src/**, donc elle ne peut pas
+    # condamner le projet sur src/a/**, où l'organisation dit la même chose que lui.
+    org, team, project = _cas_b()
+    resolved = {r.rule: r for r in resolve_rules([org, team, project])}
+    assert resolved[team].status == STATUS_PARTIAL
+    assert resolved[project].status != STATUS_SHADOWED and not resolved[project].dead
+    assert resolved[project].status == STATUS_PARTIAL  # prudent : l'équipe vaut hors de src/**
+    assert resolved[project].defeated_by == (team,)
+
+
+def test_sur_le_chemin_du_cas_b_le_projet_reste_effectif() -> None:
+    org, team, project = _cas_b()
+    on = {r.rule: r.status for r in resolve_rules([org, team, project], "src/a/x.py")}
+    assert on == {org: STATUS_EFFECTIVE, team: STATUS_SHADOWED, project: STATUS_EFFECTIVE}
+
+
+def test_la_regle_partielle_est_emise_et_la_regle_a_l_ombre_non() -> None:
+    from grimoire.core.rule_resolution import emitted_rules  # import local : le reste du module se juge sans lui
+
+    org, team, project = _cas_b()
+    assert [r.rule for r in emitted_rules(resolve_rules([org, team, project]))] == [team, project]
+    inside = _rule("ALWAYS edit generated-files @docs/api/**", "project")
+    outside = _rule("NEVER edit generated-files @docs/**", "organization")
+    assert emitted_rules(resolve_rules([outside, inside])) == ()  # à l'ombre d'une couche extérieure
+    a, b = _rule("ALWAYS run tests @src/**", "team", 1), _rule("NEVER run tests @src/gen/**", "team", 2)
+    assert emitted_rules(resolve_rules([a, b])) == ()  # conflit non décidé : rien ne part
+
+
 def test_la_resolution_est_pure_et_deterministe() -> None:
     rules = [_rule("ALWAYS run tests", "project"), _rule("NEVER run tests @src/**", "team")]
     snapshot = list(rules)

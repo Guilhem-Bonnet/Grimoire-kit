@@ -21,6 +21,15 @@ Une règle qui cède n'est comptée comme telle que devant une règle qui, elle,
 cède pas : ``ALWAYS x`` (organisation), ``NEVER x`` (équipe) et ``ALWAYS x``
 (projet) laissent l'équipe à l'ombre de l'organisation, et le projet reste
 effectif puisque l'organisation dit la même chose que lui.
+
+Une règle ``partial`` cède elle aussi, là où les portées se recouvrent : elle ne
+fait donc pas céder en entier une règle intérieure (``NEVER x @src/**``
+(organisation), ``ALWAYS x`` (équipe), ``NEVER x @src/a/**`` (projet) : l'équipe
+est ``partial``, le projet ne peut pas être ``shadowed`` à cause d'elle). Il est
+au plus ``partial``, puisque l'équipe vaut hors de ``src/**``.
+
+:func:`emitted_rules` décide ce que ``host sync`` livre ; ``rules explain`` s'y
+réfère au lieu de recalculer, pour que les deux ne se contredisent pas.
 """
 
 from __future__ import annotations
@@ -39,8 +48,10 @@ __all__ = [
     "STATUS_SHADOWED",
     "STATUS_UNRESOLVED",
     "ResolvedRule",
+    "emitted_rules",
     "normalize_path",
     "resolve_rules",
+    "rule_identity",
     "scope_covers",
     "scope_matches",
 ]
@@ -186,24 +197,48 @@ def resolve_rules(rules: Iterable[Rule], path: str | None = None) -> tuple[Resol
             opposed.setdefault(mine, []).append(other)
 
     resolved: list[ResolvedRule] = []
-    effective: set[tuple[str, int, str]] = set()  # (couche, ligne, texte) des règles qui ne cèdent pas
+    effective: set[tuple[str, int, str]] = set()  # (couche, ligne, texte) des règles qui ne cèdent nulle part
+    partial: set[tuple[str, int, str]] = set()  # idem, mais qui cèdent là où les portées se recouvrent
     for rank, rule in enumerate(ranked, start=1):
-        outer = [o for o in opposed.get(rule, ()) if _layer_index(o) < _layer_index(rule) and _ident(o) in effective]
+        opponents = [o for o in opposed.get(rule, ()) if _layer_index(o) < _layer_index(rule)]
+        outer = [o for o in opponents if rule_identity(o) in effective]
+        maybe = [o for o in opponents if rule_identity(o) in partial]
         same = tuple(o for o in opposed.get(rule, ()) if o.layer == rule.layer)
         if outer:
             full = any(scope_covers(o.scope, rule.scope) for o in outer) if path is None else True
             status = STATUS_SHADOWED if full else STATUS_PARTIAL
             resolved.append(ResolvedRule(rule, rank, status, defeated_by=tuple(outer), contested_by=same))
             if status == STATUS_PARTIAL:
-                effective.add(_ident(rule))
+                partial.add(rule_identity(rule))
+            continue
+        if maybe:
+            # Une règle qui cède elle-même ne prouve rien contre celle-ci sur toute sa portée.
+            resolved.append(ResolvedRule(rule, rank, STATUS_PARTIAL, defeated_by=tuple(maybe), contested_by=same))
+            partial.add(rule_identity(rule))
             continue
         if same:
             resolved.append(ResolvedRule(rule, rank, STATUS_UNRESOLVED, contested_by=same))
             continue
         resolved.append(ResolvedRule(rule, rank))
-        effective.add(_ident(rule))
+        effective.add(rule_identity(rule))
     return tuple(resolved)
 
 
-def _ident(rule: Rule) -> tuple[str, int, str]:
+def rule_identity(rule: Rule) -> tuple[str, int, str]:
+    """Identité stable d'une règle dans une résolution : (couche, ligne, texte)."""
     return (rule.layer, rule.line, rule.render())
+
+
+def emitted_rules(resolved: Iterable[ResolvedRule]) -> tuple[ResolvedRule, ...]:
+    """Les règles que ``host sync`` livre, d'après une résolution **sans chemin**.
+
+    Couches :data:`EMITTED_LAYERS` seules ; ``effective`` et ``partial`` partent
+    (la seconde avec la mention de ce devant quoi elle cède), ``shadowed`` et
+    ``unresolved`` non. C'est l'unique décision d'émission : l'émetteur et
+    ``rules explain`` l'appellent, aucun ne la recalcule.
+    """
+    return tuple(
+        rr
+        for rr in resolved
+        if rr.layer in EMITTED_LAYERS and rr.status in {STATUS_EFFECTIVE, STATUS_PARTIAL}
+    )
