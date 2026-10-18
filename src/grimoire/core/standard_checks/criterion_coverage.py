@@ -15,8 +15,9 @@ Deux identifiants, déclarés dans le registre des checks :
 
 - ``acceptance.uncovered`` : un critère sans preuve. Erreur en profil
   gouverné/production quand le livrable est accepté (décision ``accepté`` dans
-  le dossier, ou tâche ``accepted``/``released`` au tableau), avertissement
-  sinon. Un critère ``à vérifier`` sans preuve avant cette décision est l'état
+  le dossier, tâche ``accepted``/``released`` au tableau, ou gate évalué vers
+  l'un de ces états), avertissement sinon, y compris pour un critère du tableau
+  absent du dossier avant l'acceptation. Un critère ``à vérifier`` sans preuve avant cette décision est l'état
   normal d'une tâche en cours : rien n'est signalé. Un critère ``échoué`` est
   déjà porté par ``acceptance.accepted_with_failed_criterion``.
 - ``evidence.orphan`` : une preuve sans critère. Avertissement : la preuve
@@ -70,6 +71,7 @@ def verify_criterion_coverage(
     rows: Sequence[Sequence[str]],
     *,
     accepted: bool,
+    settled: bool = False,
     result: StandardVerificationResult,
     rel_path: Path,
 ) -> None:
@@ -78,9 +80,11 @@ def verify_criterion_coverage(
     *rows* : les cellules (au moins quatre : id, critère, preuve, statut) des
     lignes de critères déjà reconnues valides par l'appelant, modèle exclu.
     *accepted* : le dossier porte une décision ``accepté``.
+    *settled* : le gate évalue la transition vers ``accepted``/``released`` (état
+    cible, pas encore celui du tableau).
     """
     task = _board_task(root, task_id)
-    settled = accepted or str(task.get("status", "")) in _SETTLED_STATUSES
+    settled = accepted or settled or str(task.get("status", "")) in _SETTLED_STATUSES
     severity = "error" if settled and profile.id in _STRICT_PROFILES else "warning"
 
     for cells in rows:

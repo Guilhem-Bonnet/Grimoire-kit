@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from grimoire.core.agentic_standard import setup_standard_profile, verify_standard_profile
+from grimoire.core.agentic_standard import check_evidence_gates, setup_standard_profile, verify_standard_profile
 
 _RECORD = Path("_grimoire-output/evidence/bootstrap/acceptance-record.md")
 _BOARD = Path("_grimoire/standard/task-board.yaml")
@@ -127,3 +127,52 @@ def test_a_complete_record_raises_nothing(tmp_path: Path) -> None:
     )
     assert _checks(root, "acceptance.uncovered") == []
     assert _checks(root, "evidence.orphan") == []
+
+
+def _gate_checks(root: Path, check_id: str, target_state: str) -> list[tuple[str, str]]:
+    result = check_evidence_gates(root, task_id="bootstrap", target_state=target_state)
+    return [(c.severity, c.message) for c in result.checks if c.id == check_id]
+
+
+def _board_status(root: Path) -> str:
+    import re
+
+    match = re.search(r"^  status: (\S+)$", (root / _BOARD).read_text(encoding="utf-8"), re.MULTILINE)
+    assert match, "statut du tableau introuvable"
+    return match.group(1)
+
+
+@pytest.mark.parametrize("target_state", ["accepted", "released"])
+def test_the_gate_to_accepted_already_flags_an_uncovered_criterion_while_the_board_is_in_review(
+    tmp_path: Path, target_state: str
+) -> None:
+    """Défaut W3-06-S1-01 : le check ne parlait qu'une fois la tâche déjà acceptée au tableau."""
+    root = _project(
+        tmp_path / "t",
+        "governed",
+        "| AC-001 | Les artefacts sont générés | pytest -q | passé |\n| AC-002 | Le rapport est relu |  | à vérifier |\n",
+        decision=_PENDING,
+    )
+    _replace(root / _BOARD, "status: " + _board_status(root), "status: review")
+    assert _gate_checks(root, "acceptance.uncovered", "review") == []
+    found = _gate_checks(root, "acceptance.uncovered", target_state)
+    assert [sev for sev, _ in found] == ["error"], found
+    assert "AC-002" in found[0][1]
+
+
+def test_the_gate_to_accepted_flags_a_board_criterion_missing_from_the_record_as_an_error(tmp_path: Path) -> None:
+    root = _project(
+        tmp_path / "m",
+        "governed",
+        "| AC-001 | Standard artifacts are generated and verified. | pytest -q | passé |\n",
+        decision=_PENDING,
+    )
+    _replace(root / _BOARD, "status: " + _board_status(root), "status: review")
+    _replace(
+        root / _BOARD,
+        "  acceptance_criteria:\n  - Standard artifacts are generated and verified.\n",
+        "  acceptance_criteria:\n  - Standard artifacts are generated and verified.\n  - Le rapport est relu.\n",
+    )
+    # Avant l'acceptation : avertissement (la tâche est en cours). Vers `accepted` : erreur.
+    assert [sev for sev, _ in _gate_checks(root, "acceptance.uncovered", "review")] == ["warning"]
+    assert [sev for sev, _ in _gate_checks(root, "acceptance.uncovered", "accepted")] == ["error"]

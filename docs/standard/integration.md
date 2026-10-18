@@ -518,10 +518,12 @@ critères sans preuve et les preuves sans critère
 (`standard_checks/criterion_coverage.py`) :
 
 - `acceptance.uncovered` : un critère sans preuve une fois le livrable accepté
-  (décision `accepté`, ou tâche `accepted`/`released`), ou un critère de
+  (décision `accepté`, tâche `accepted`/`released`, ou gate évalué vers l'un de
+  ces états, par exemple `gate check --target-state accepted`), ou un critère de
   `acceptance_criteria` du tableau de tâches qui n'a aucune ligne dans le
   dossier (reconnu par son identifiant d'ordre `AC-NNN` ou par son texte).
-  Erreur en `governed`/`production`, avertissement ailleurs. Un critère
+  Erreur en `governed`/`production` dès que le livrable est accepté ou en passe
+  de l'être ; avertissement avant (tâche en cours) et dans les autres profils. Un critère
   `à vérifier` avant la décision, ou `échoué`, n'est pas relevé ;
 - `evidence.orphan` : une ligne qui cite une preuve sans dire quel critère
   elle démontre (avertissement).

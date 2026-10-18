@@ -1021,7 +1021,13 @@ def _verify_acceptance_test_execution(
 
 
 def _verify_acceptance_record(
-    root: Path, profile: StandardProfile, task_id: str, result: StandardVerificationResult, *, suppress_v0: bool = False
+    root: Path,
+    profile: StandardProfile,
+    task_id: str,
+    result: StandardVerificationResult,
+    *,
+    suppress_v0: bool = False,
+    settled: bool = False,
 ) -> None:
     """AG-QUA-003 : le livrable est accepté ou refusé par celui qui le reçoit, sur des critères prouvés.
 
@@ -1029,6 +1035,11 @@ def _verify_acceptance_record(
     une tâche V0 en profil non gouverné n'a, par construction, rien qu'un
     jugement humain doive trancher — voir :func:`grimoire.core.standard_checks.
     gate_review_checks.review_state_content_checks`, seul appelant qui le passe.
+
+    ``settled`` (revue W3-06, défaut S1-01) : le gate évalue la transition vers
+    ``accepted``/``released``. La couverture critère -> preuve doit alors porter sa
+    sévérité de livrable accepté dès ce passage, pas seulement une fois la tâche
+    déjà acceptée au tableau.
     """
     rel_path = EVIDENCE_DIR / task_id / "acceptance-record.md"
     text = _text_file(root, rel_path)
@@ -1067,7 +1078,8 @@ def _verify_acceptance_record(
 
     verify_criterion_coverage(
         root, profile, task_id, valid_rows,
-        accepted=any(cells[0] == "accepté" for cells in decisions), result=result, rel_path=rel_path,
+        accepted=any(cells[0] == "accepté" for cells in decisions), settled=settled,
+        result=result, rel_path=rel_path,
     )
     for cells in decisions:
         decision, validator, date = [*cells, "", "", ""][:3]
