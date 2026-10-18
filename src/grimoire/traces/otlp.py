@@ -6,9 +6,12 @@ OTLP/JSON, jamais une seconde vérité : mêmes spans, mêmes attributs, donc un
 collecteur et un fichier ne divergent pas.
 
 Un échec se voit. Un statut HTTP hors 2xx, un ``partialSuccess`` qui rejette
-des spans, un collecteur injoignable ou un schéma d'URL autre que http(s)
-lèvent :class:`OtlpExportError` — l'export ne rend un nombre de spans que
-s'ils ont été acceptés. Pas de relance automatique : l'appelant décide.
+des spans, une redirection, une réponse qui n'est pas un accusé OTLP, un
+collecteur injoignable ou un schéma d'URL autre que http(s) lèvent :class:`OtlpExportError` — l'export ne rend un nombre de spans que
+s'ils ont été acceptés. Une redirection 3xx est un refus (urllib la suivrait en
+GET sans corps et prendrait la page d'arrivée pour un accusé), et un corps 2xx
+non vide qui n'est pas du JSON ``application/json`` n'est pas un accusé OTLP.
+Pas de relance automatique : l'appelant décide.
 
 Une commande explicite l'appelle (``grimoire task trace-export --format
 otlp``) ; rien n'émet vers le réseau de lui-même.
@@ -129,6 +132,16 @@ def _traces_url(endpoint: str) -> str:
     return urlparse.urlunsplit(parts)
 
 
+class _NoRedirect(urlrequest.HTTPRedirectHandler):
+    """Refuse de suivre une redirection : le POST ne doit pas devenir un GET sans corps."""
+
+    def redirect_request(self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> None:
+        return None  # urllib lève alors HTTPError(3xx), mappée en OtlpExportError
+
+
+_OPENER = urlrequest.build_opener(_NoRedirect)
+
+
 def _post(url: str, body: dict[str, Any], headers: Mapping[str, str], timeout: float) -> None:
     data = json.dumps(body, ensure_ascii=False).encode("utf-8")
     request = urlrequest.Request(url, data=data, method="POST")  # noqa: S310 — schéma validé par _traces_url
@@ -136,8 +149,9 @@ def _post(url: str, body: dict[str, Any], headers: Mapping[str, str], timeout: f
     for name, value in headers.items():
         request.add_header(name, value)
     try:
-        with urlrequest.urlopen(request, timeout=timeout) as response:  # noqa: S310
+        with _OPENER.open(request, timeout=timeout) as response:
             status = int(response.status)
+            content_type = str(response.headers.get("Content-Type", ""))
             raw = response.read()
     except urlerror.HTTPError as exc:
         raise OtlpExportError(f"Le collecteur {url} a refusé le lot : HTTP {exc.code}.") from exc
@@ -145,15 +159,24 @@ def _post(url: str, body: dict[str, Any], headers: Mapping[str, str], timeout: f
         raise OtlpExportError(f"Collecteur OTLP injoignable ({url}) : {exc}.") from exc
     if not 200 <= status < 300:
         raise OtlpExportError(f"Le collecteur {url} a répondu HTTP {status}.")
-    _check_partial_success(url, raw)
+    _check_partial_success(url, raw, content_type)
 
 
-def _check_partial_success(url: str, raw: bytes) -> None:
+def _check_partial_success(url: str, raw: bytes, content_type: str = "application/json") -> None:
+    if not raw.strip():
+        return  # OTLP autorise un ExportTraceServiceResponse vide : accusé sans rien à lire
+    media_type = content_type.split(";", 1)[0].strip().lower()
+    if media_type != "application/json":
+        raise OtlpExportError(
+            f"Le collecteur {url} a répondu 2xx avec un corps {media_type or 'sans type'} : ce n'est pas un accusé OTLP/JSON."
+        )
     try:
-        reply = json.loads(raw.decode("utf-8")) if raw.strip() else {}
-    except (UnicodeDecodeError, ValueError):
-        return  # silent-ok — un 2xx sans corps JSON : le collecteur a accepté, rien à lire
-    partial = reply.get("partialSuccess") if isinstance(reply, dict) else None
+        reply = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise OtlpExportError(f"Le collecteur {url} a répondu 2xx avec un corps JSON illisible : ce n'est pas un accusé OTLP.") from exc
+    if not isinstance(reply, dict):
+        raise OtlpExportError(f"Le collecteur {url} a répondu 2xx avec un JSON qui n'est pas un objet : ce n'est pas un accusé OTLP.")
+    partial = reply.get("partialSuccess")
     if not isinstance(partial, dict):
         return
     try:

@@ -30,6 +30,9 @@ class _Collector:
         self.requests: list[dict[str, Any]] = []
         self.status = 200
         self.reply: bytes = b"{}"
+        self.content_type = "application/json"
+        self.redirect_to: str | None = None
+        self.gets: list[str] = []
         collector = self
 
         class _Handler(BaseHTTPRequestHandler):
@@ -38,11 +41,26 @@ class _Collector:
                 collector.requests.append(
                     {"path": self.path, "headers": dict(self.headers), "body": json.loads(body)}
                 )
+                if collector.redirect_to is not None:
+                    self.send_response(302)
+                    self.send_header("Location", collector.redirect_to)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
                 self.send_response(collector.status)
-                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Type", collector.content_type)
                 self.send_header("Content-Length", str(len(collector.reply)))
                 self.end_headers()
                 self.wfile.write(collector.reply)
+
+            def do_GET(self) -> None:
+                collector.gets.append(self.path)
+                page = b"<html>login</html>"
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.send_header("Content-Length", str(len(page)))
+                self.end_headers()
+                self.wfile.write(page)
 
             def log_message(self, *args: object) -> None:
                 return
@@ -166,6 +184,44 @@ def test_rejet_partiel_est_une_erreur(tmp_path: Path, collector: _Collector) -> 
 
     with pytest.raises(OtlpExportError, match="trop vieux"):
         export_otlp(ledger, collector.url)
+
+
+def test_redirection_3xx_est_un_refus_jamais_un_accuse(tmp_path: Path, collector: _Collector) -> None:
+    ledger = TraceLedger(tmp_path)
+    _record(ledger)
+    collector.redirect_to = "/login"  # urllib suivrait en GET sans corps et lirait un 200 html
+
+    with pytest.raises(OtlpExportError, match="302"):
+        export_otlp(ledger, collector.url)
+    assert collector.gets == []  # la redirection n'a pas été suivie
+
+
+def test_2xx_non_json_n_est_pas_un_accuse_otlp(tmp_path: Path, collector: _Collector) -> None:
+    ledger = TraceLedger(tmp_path)
+    _record(ledger)
+    collector.content_type = "text/plain"
+    collector.reply = b"hello"
+
+    with pytest.raises(OtlpExportError, match="text/plain"):
+        export_otlp(ledger, collector.url)
+
+
+def test_2xx_json_illisible_ou_non_objet_est_refuse(tmp_path: Path, collector: _Collector) -> None:
+    ledger = TraceLedger(tmp_path)
+    _record(ledger)
+    for reply in (b"{pas du json", b"[1, 2]"):
+        collector.reply = reply
+        with pytest.raises(OtlpExportError, match="accusé OTLP"):
+            export_otlp(ledger, collector.url)
+
+
+def test_2xx_a_corps_vide_reste_un_accuse(tmp_path: Path, collector: _Collector) -> None:
+    ledger = TraceLedger(tmp_path)
+    _record(ledger)
+    collector.content_type = "text/plain"
+    collector.reply = b""
+
+    assert export_otlp(ledger, collector.url) == 2
 
 
 def test_collecteur_injoignable_est_une_erreur(tmp_path: Path) -> None:
