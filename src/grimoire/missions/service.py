@@ -45,6 +45,7 @@ from grimoire.missions.schemas import (
     TaskDirective,
     TaskState,
 )
+from grimoire.missions.task_worktree import home_of_worktree
 from grimoire.missions.waiting import (
     ABANDON,
     HUMAN_ANSWERED_EVENT,
@@ -236,6 +237,14 @@ class TaskService:
         memory_manager: MemoryManager | None = None,
     ) -> None:
         self.project_root = project_root.resolve()
+        #: La racine du projet qui porte le ledger et le board : la même, sauf dans un
+        #: worktree de tâche (W5-02), où une racine relative du ledger se résout contre
+        #: le projet d'origine — sinon le worktree ouvrirait un second ledger.
+        self.home_root = self.project_root
+        home = None if ledger_root.is_absolute() else home_of_worktree(self.project_root)
+        if home is not None:
+            self.home_root = home[0]
+            ledger_root = home[1] if ledger_root == DEFAULT_LEDGER_RELPATH else self.home_root / ledger_root
         self.ledger_root = ledger_root if ledger_root.is_absolute() else self.project_root / ledger_root
         self._ledger: MissionLedger | None = None
         # ``None`` explicite (mémoire injectée sans backend) et « pas encore
@@ -302,7 +311,12 @@ class TaskService:
 
     def gate(self, task: MissionTask, target: TaskState) -> GateVerdict:
         """Le verdict du gate pour cette transition, sans rien écrire."""
-        return check_transition(self.project_root, task, board_status_of(task.status), board_status_of(target))
+        from_board, to_board = board_status_of(task.status), board_status_of(target)
+        if self.home_root == self.project_root:
+            return check_transition(self.project_root, task, from_board, to_board)
+        # Worktree de tâche (W5-02) : la transition s'écrit au ledger du projet d'origine,
+        # donc ce sont ses déclarations de gate qui l'opposent ; les preuves restent lues ici.
+        return check_transition(self.project_root, task, from_board, to_board, declarations_root=self.home_root)
 
     # ── Écriture ───────────────────────────────────────────────────────────
 
@@ -1010,17 +1024,17 @@ class TaskService:
         transition — elle est déjà au ledger, qui est la source — mais il ne
         doit pas non plus passer pour un succès : on rend ``None``.
         """
-        if not (self.project_root / STANDARD_DIR).is_dir():
+        if not (self.home_root / STANDARD_DIR).is_dir():
             return None
-        dest = self.project_root / BOARD_RELPATH
+        dest = self.home_root / BOARD_RELPATH
         try:
-            write_board(dest, build_board(self.ledger, project=self.project_root.name))
+            write_board(dest, build_board(self.ledger, project=self.home_root.name))
         except (OSError, GrimoireError):
             return None
         # Le hook lit la tâche ``in_progress`` du board via un cache dérivé,
         # invalidé par empreinte fichier (grimoire.core.standard_state) ; sans
         # cet appel, la reprojection ne serait visible qu'au hook *suivant*.
-        invalidate_cache(self.project_root)
+        invalidate_cache(self.home_root)
         return dest
 
     # ── Contexte ───────────────────────────────────────────────────────────
