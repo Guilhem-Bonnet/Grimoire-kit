@@ -801,3 +801,152 @@ def test_the_kernel_table_allows_pausing_after_a_checkpoint() -> None:
 
     assert W.PAUSED in _WF_TRANSITIONS[W.CHECKPOINTED] and W.PAUSED in _WF_TRANSITIONS[W.RUNNING]
     assert _WF_TRANSITIONS[W.PAUSED] == frozenset({W.RUNNING, W.ABORTED, W.REFUSED})
+
+
+# ── Flows : le challenge d'un checkpoint et le contrat d'un run en pause (défauts du sceptique K11) ───────────────
+
+
+def _gated_blueprint(root: Path, *, destructive: bool) -> Path:
+    gate: dict[str, Any] = {
+        "id": "gate", "kind": "checkpoint", "ref": "",
+        "pins": [{"id": "in", "direction": "in", "contract": "c1"}, {"id": "out", "direction": "out", "contract": "c2"}],
+    }
+    if destructive:
+        gate["config"] = {"checkpoint": {"destructive": True}}
+    path = root / f"gated-{int(destructive)}.blueprint.json"
+    path.write_text(json.dumps({
+        "blueprintVersion": 1, "id": "gated",
+        "nodes": [
+            {"id": "a", "kind": "pattern", "ref": "ORC-01", "pins": [{"id": "out", "direction": "out", "contract": "c1"}]},
+            gate,
+            {"id": "after", "kind": "pattern", "ref": "QUA-04", "pins": [{"id": "in", "direction": "in", "contract": "c2"}]},
+        ],
+        "edges": [
+            {"from": "a.out", "to": "gate.in", "contract": "c1"},
+            {"from": "gate.out", "to": "after.in", "contract": "c2"},
+        ],
+    }), encoding="utf-8")
+    return path
+
+
+def _human_turn(root: Path) -> None:
+    import time
+
+    from grimoire.hosts.decisions import HookInput, run_decision
+
+    time.sleep(0.02)
+    run_decision(
+        "grimoire.task-context",
+        HookInput(event=HookEvent.USER_PROMPT_SUBMIT, project_root=root, prompt="ok", session_id="S1", host="host-claude-code-cli"),
+    )
+    time.sleep(0.02)
+
+
+def _gated_engine(root: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
+    from grimoire.flows.engine import FlowEngine
+
+    monkeypatch.setenv("GRIMOIRE_SESSION_ID", "S1")
+    home = root / "home"
+    home.mkdir(exist_ok=True)
+    monkeypatch.setenv("HOME", str(home))
+    return FlowEngine(
+        kernel_root=root / "_grimoire-runtime-output" / "runtime",
+        flows_root=root / "_grimoire-runtime-output" / "flows",
+        project_root=root,
+    )
+
+
+@pytest.mark.parametrize("destructive", [True, False])
+def test_after_a_lifted_hold_the_checkpoint_can_be_attested(
+    tmp_path: Path, machine: Path, monkeypatch: pytest.MonkeyPatch, destructive: bool
+) -> None:
+    """K11-S1-01 : la frontière posait le run sans présenter le checkpoint suivant, donc sans challenge ;
+    la session qui reprend lisait la directive, l'humain répondait, et la décision finissait ``no_challenge``."""
+    import io
+
+    from grimoire.flows.executor import InteractiveNodeExecutor
+
+    engine = _gated_engine(tmp_path, monkeypatch)
+    quiet = InteractiveNodeExecutor(stream=io.StringIO())
+    wfi, _ = engine.run(_gated_blueprint(tmp_path, destructive=destructive), executor=quiet)
+    (machine / "pause.json").write_text('{"mode": "hold"}', encoding="utf-8")
+    paused = engine.resume(wfi.id, output=OUT_A, executor=quiet)
+    assert paused.paused and paused.node_id == "gate"
+    (machine / "pause.json").unlink()
+
+    # La session qui reprend lit la directive (le checkpoint), l'humain répond à son tour suivant, elle décide.
+    assert engine.directive(wfi.id).kind == "checkpoint"
+    _human_turn(tmp_path)
+    outcome = engine.resume(wfi.id, output={**OUT_B, "checkpoint_decision": "approve"}, executor=quiet)
+    assert outcome.ok, (outcome.faults, outcome.attestation)
+    assert outcome.attestation is not None and outcome.attestation["status"] == "attested"
+    assert not outcome.warnings
+
+
+def test_a_session_skipping_the_directive_gets_a_precise_refusal_not_no_challenge(
+    tmp_path: Path, machine: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Sans passer par la directive, le premier ``resume`` après la pause présente le checkpoint avant de le juger."""
+    import io
+
+    from grimoire.flows.executor import InteractiveNodeExecutor
+
+    engine = _gated_engine(tmp_path, monkeypatch)
+    quiet = InteractiveNodeExecutor(stream=io.StringIO())
+    wfi, _ = engine.run(_gated_blueprint(tmp_path, destructive=True), executor=quiet)
+    (machine / "pause.json").write_text('{"mode": "hold"}', encoding="utf-8")
+    assert engine.resume(wfi.id, output=OUT_A, executor=quiet).paused
+    (machine / "pause.json").unlink()
+    _human_turn(tmp_path)
+    refused = engine.resume(wfi.id, output={**OUT_B, "checkpoint_decision": "approve"}, executor=quiet)
+    assert not refused.ok and refused.attestation is not None
+    assert refused.attestation["reason"] != "no_challenge"  # un challenge existe, c'est le tour humain qui manque
+    _human_turn(tmp_path)
+    assert engine.resume(wfi.id, output={**OUT_B, "checkpoint_decision": "approve"}, executor=quiet).ok
+
+
+def test_a_run_paused_under_hold_serves_no_contract(
+    tmp_path: Path, machine: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """K11-S1-02 : ``status`` servait le contrat du node en pause, donc n'importe quel appelant pouvait l'exécuter."""
+    import io
+
+    from grimoire.flows.executor import InteractiveNodeExecutor
+
+    engine = _gated_engine(tmp_path, monkeypatch)
+    quiet = InteractiveNodeExecutor(stream=io.StringIO())
+    wfi, _ = engine.run(_gated_blueprint(tmp_path, destructive=False), executor=quiet)
+    (machine / "pause.json").write_text('{"mode": "hold"}', encoding="utf-8")
+    assert engine.resume(wfi.id, output=OUT_A, executor=quiet).paused
+    held = engine.status(wfi.id, include_contract=True)
+    assert held.status == "paused" and held.contract is None
+    assert held.directive is not None and held.directive.reason == "paused"
+    (machine / "pause.json").unlink()
+    assert engine.status(wfi.id, include_contract=True).contract is not None  # levée : le contrat est servi
+
+
+def test_dispatch_resume_under_hold_launches_no_agent(
+    tmp_path: Path, machine: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """K11-S1-02 : ``flow resume --executor dispatch`` lançait l'agent du node suivant puis se faisait refuser."""
+    import io
+
+    from grimoire.core.exceptions import GrimoireRuntimeError
+    from grimoire.flows import dispatch_executor as de
+    from grimoire.flows.executor import InteractiveNodeExecutor
+    from grimoire.flows.schemas import NodeExecutionResult
+
+    engine = _gated_engine(tmp_path, monkeypatch)
+    quiet = InteractiveNodeExecutor(stream=io.StringIO())
+    wfi, _ = engine.run(_gated_blueprint(tmp_path, destructive=False), executor=quiet)
+    (machine / "pause.json").write_text('{"mode": "hold"}', encoding="utf-8")
+    assert engine.resume(wfi.id, output=OUT_A, executor=quiet).paused
+
+    spy = mock.Mock()
+    spy.return_value.execute.return_value = NodeExecutionResult(pending=False, output={"pins": {}})
+    spy.return_value.last_result = None
+    monkeypatch.setattr(de, "DispatchExecutor", spy)
+    with pytest.raises(GrimoireRuntimeError, match="pause"):
+        de.resume_with_dispatch(engine, wfi.id, project_root=tmp_path)
+    assert spy.return_value.execute.call_count == 0
+    assert engine.status(wfi.id).status == "paused"  # et rien n'a été écrit

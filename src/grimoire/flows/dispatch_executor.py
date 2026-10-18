@@ -737,6 +737,11 @@ def resume_with_dispatch(
     """
     meta = engine.run_meta(run_id)
     status = engine.status(run_id, include_contract=True)
+    if status.directive is not None and status.directive.kind == "blocked" and status.directive.reason == "paused":
+        # K11 : un hold est en vigueur ; l'agent du node suivant ne se lance pas pour se faire refuser ensuite.
+        raise GrimoireRuntimeError(
+            f"run {run_id} : pause hold en vigueur, aucun agent lancé ; reprendre après `grimoire orchestrate resume`"
+        )
     if status.contract is None:
         raise GrimoireRuntimeError(f"run {run_id} : rien à reprendre (status={status.status})")
     executor = DispatchExecutor(

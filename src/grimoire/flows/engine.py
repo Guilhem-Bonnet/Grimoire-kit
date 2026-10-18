@@ -880,6 +880,10 @@ class FlowEngine:
             return Directive("blocked", run_id, node_id, None, attempt, "paused")
         contract = contracts.get(node_id)
         kind = "checkpoint" if contract is not None and contract.kind == "checkpoint" else "execute"
+        if wfi.status is WorkflowStatus.PAUSED and kind == "checkpoint":
+            # K11 : la frontière a posé le run sans présenter ce checkpoint (donc sans challenge) ; la session qui
+            # reprend le reçoit ici, avant le tour humain qui doit y répondre. Idempotent pour une même session.
+            self._present(run_id, contract)
         return Directive(kind, run_id, node_id, did, attempt)
 
     def _directive_refusal(self, run_id: str, supplied: str, output: dict[str, Any], allow_replay: bool) -> None:
@@ -1088,6 +1092,10 @@ class FlowEngine:
         #: Le gate du node : une sortie refusée par son contrat révoque les octrois qui couvrent le run (W5-06).
         contract_faults = tuple(faults)
         if contract.kind == "checkpoint":
+            if wfi.status is WorkflowStatus.PAUSED and (digest is None or self._crossed_node_for_digest(wfi, digest) is None):
+                # K11 : pause levée, checkpoint jamais présenté : le challenge précède le jugement, sinon la décision
+                # courante serait refusée en `no_challenge` alors que personne n'a pu y répondre. (Pas pour un rejeu.)
+                self._present(run_id, contract)
             # Issue #207 : la décision d'hôte ("approve"/"reject"/"amend")
             # n'est pas une pin — jamais franchie côté Rust
             # (`check_output_against_contract` ci-dessus n'en sait toujours
@@ -1132,10 +1140,9 @@ class FlowEngine:
                 )
         resumed_from_pause = wfi.status is WorkflowStatus.PAUSED
         if resumed_from_pause:
-            # K11 : la pause est levée (sinon on a refusé plus haut) ; le challenge d'un checkpoint est émis
-            # maintenant, pour la session qui reprend — celle qui a posé la pause n'est plus forcément là.
+            # K11 : la pause est levée (sinon on a refusé plus haut) ; le challenge d'un checkpoint a été émis
+            # plus haut, pour la session qui reprend — celle qui a posé la pause n'est plus forcément là.
             wfi = self._kernel.unpause(wfi.id, ctx)
-            self._present(run_id, contract)
         if wfi.status is not WorkflowStatus.RUNNING or resumed_from_pause:
             # (Le docteur s'appuie sur ce test : un run déjà RUNNING n'est pas rouvert,
             # voir `doctor.resume_realigns_status`.)
@@ -1314,7 +1321,8 @@ class FlowEngine:
             pending_list = []
 
         contract = None
-        if include_contract and current_id is not None:
+        if include_contract and current_id is not None and not (wfi.status is WorkflowStatus.PAUSED and self._hold_in_force(wfi)):
+            # K11 : un run posé par un hold ne sert pas le contrat du node suivant, qu'aucun appelant ne doit exécuter.
             contract = build_node_contracts(
                 load_blueprint(self._blueprint_file(meta), self._project_root), self._project_root
             ).get(current_id)
