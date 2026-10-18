@@ -209,7 +209,7 @@ class TestSelfViewLine:
         )
         context = rendered["hookSpecificOutput"]["additionalContext"]
         assert f"Vue de soi — {task_id}" in context
-        assert "bail epoch" in context and "vivacité vivant" in context
+        assert "bail epoch" in context and "session vivante" in context
 
     def test_a_taken_over_lease_is_announced_to_the_old_session(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

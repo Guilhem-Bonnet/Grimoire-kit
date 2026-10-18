@@ -31,7 +31,7 @@
 // Portefeuille (#638, lot C) : la portée « Tous les projets » lit
 // `api.portfolioTasks()` — toutes les tâches de tous les projets du registre
 // cockpit, agrégées côté serveur — avec une puce projet par carte, la session
-// qui la porte (point + mot : vivante / inactive), sa priorité et ses
+// qui la porte (point + mot : vivante / inactive / inconnue), sa priorité et ses
 // consignes non lues quand le champ existe. Les cartes se clé-ent par
 // (projet, id) : deux ledgers peuvent dériver le même identifiant d'un même
 // titre. Une action depuis le portefeuille passe par
@@ -501,7 +501,9 @@ async function renderTimeline(root, ctx, task) {
 // colore le point sans rien tuer.
 function livenessLabel(session) {
   const l = session.liveness || { state: 'inconnu' };
-  return l.reason && l.state === 'inactif' ? `inactif (${l.reason})` : l.state;
+  // Accord avec « session » : les valeurs stockées restent masculines.
+  const word = { vivant: 'vivante', inactif: 'inactive', inconnu: 'inconnue', 'terminé': 'terminée' }[l.state] || l.state;
+  return l.reason && l.state === 'inactif' ? `${word} (${l.reason})` : word;
 }
 function livenessDot(session) {
   if (session.attention) return 'warn';

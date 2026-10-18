@@ -48,6 +48,7 @@ __all__ = [
     "attention",
     "claimed_at",
     "git_commit_at",
+    "label",
     "liveness",
     "probe_claude_agents",
     "progress_at",
@@ -59,6 +60,14 @@ VIVANT = "vivant"
 INACTIF = "inactif"
 INCONNU = "inconnu"
 TERMINE = "terminé"
+
+#: Forme affichée, accordée avec « session » (les valeurs stockées restent masculines).
+LABELS = {VIVANT: "vivante", INACTIF: "inactive", INCONNU: "inconnue", TERMINE: "terminée"}
+
+
+def label(state: str) -> str:
+    """Libellé féminin d'une valeur de vivacité (« session vivante »)."""
+    return LABELS.get(state, state)
 
 #: Un journal de session écrit depuis moins de ce délai vaut « signe de vie ».
 DEFAULT_ACTIVE_WINDOW = timedelta(minutes=30)
@@ -275,4 +284,4 @@ def self_view_line(
         if lease.is_lost(now):
             bail += " — PERDU"
     avance = f"dernière progression il y a {_ago(progress, now)}" if progress else "aucune progression observée"
-    return f"[Grimoire] Vue de soi — {task_id} : {bail} ; vivacité {live.state} ; {avance}."
+    return f"[Grimoire] Vue de soi — {task_id} : {bail} ; session {label(live.state)} ; {avance}."

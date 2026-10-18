@@ -312,6 +312,7 @@ def _list_all_projects(
     """Le portefeuille : tableau lisible, ou la charge utile JSON telle quelle."""
     from rich.table import Table
 
+    from grimoire.missions.liveness import label as liveness_label
     from grimoire.missions.liveness import probe_claude_agents
     from grimoire.tools.workspace_portfolio import portfolio_tasks
 
@@ -333,7 +334,7 @@ def _list_all_projects(
         session = card.get("session") or {}
         if session:
             state = session.get("liveness") or {}
-            session_text = f"{state.get('state', 'inconnu')} · {session.get('id', '')}"
+            session_text = f"{liveness_label(state.get('state', 'inconnu'))} · {session.get('id', '')}"
             if session.get("attention"):
                 session_text += f" · attention : {session['attention']['reason']}"
         else:
