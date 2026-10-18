@@ -400,10 +400,36 @@ _SHELL_OPERATORS = frozenset({"&&", "||", ";", "|", "&", "|&"})
 _ENV_ASSIGN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 _PYTHON = re.compile(r"^python(\d+(\.\d+)?)?$")
 #: Arguments qui n'exécutent rien : l'outil affiche une version ou une aide, ou liste sans lancer.
-_INFO_FLAGS = frozenset({"--version", "-V", "--help", "-h", "--collect-only", "--co", "--dry-run"})
+_INFO_FLAGS = frozenset({
+    "--version", "-V", "--help", "-h", "--collect-only", "--co", "--dry-run",
+    # pytest : prépare ou liste sans exécuter le moindre test.
+    "--setup-only", "--setup-plan", "--fixtures", "--fixtures-per-test", "--markers",
+    # ruff, flake8, pylint, bandit : le code de sortie est forcé à 0 quoi que l'outil trouve.
+    "--exit-zero",
+})
 
 
 _PUNCTUATION = "();<>|&\n"
+#: Un mot fait de ponctuation, découpé en ses opérateurs maximaux : le shell lit ``||(`` comme ``||``
+#: puis ``(``, jamais comme un seul mot. Les redirections (``>``, ``>&``, ``&>``…) passent avant ``&``
+#: et ``|`` pour ne pas être prises pour des opérateurs de chaîne.
+_PUNCT_PIECE = re.compile(r"&>>|&>|<<<|<<|>>|>&|<&|>\||<>|&&|\|\||\|&|[;&|()<>\n]")
+
+
+def _punctuation_pieces(token: str) -> list[str]:
+    """Les opérateurs, parenthèses et redirections d'un mot de ponctuation, un saut de ligne valant ``;``.
+
+    Un saut de ligne derrière un opérateur, un ``;`` ou une parenthèse ouvrante
+    prolonge la commande : il ne sépare rien.
+    """
+    out: list[str] = []
+    for piece in _PUNCT_PIECE.findall(token):
+        if piece == "\n":
+            if out and (out[-1] in _SHELL_OPERATORS or out[-1] == "("):
+                continue
+            piece = ";"
+        out.append(piece)
+    return out
 
 
 def _tokens(cmd: str) -> list[str]:
@@ -417,10 +443,11 @@ def _tokens(cmd: str) -> list[str]:
         raw = cmd.split()
     out: list[str] = []
     for token in raw:
-        if "\n" in token and not token.strip(_PUNCTUATION):
-            # Un saut de ligne sépare deux commandes comme un « ; », sauf derrière un opérateur.
-            token = token.replace("\n", "") or ";"
-        out.append(token)
+        if token.strip(_PUNCTUATION):
+            out.append(token)
+        else:
+            # Un mot de ponctuation fusionne ce que le shell lit séparément : ``||(``, ``;(``, ``\n(``.
+            out.extend(_punctuation_pieces(token))
     return out
 
 

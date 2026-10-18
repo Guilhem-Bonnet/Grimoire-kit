@@ -111,6 +111,16 @@ def test_une_commande_verte_qui_ne_lance_pas_le_test_est_refusee(projet: Path, c
     assert v.blocked and _depth(v) and "floor" in _depth(v)[0]
 
 
+@pytest.mark.parametrize(
+    "cmd",
+    ["pytest -q||(true)", "pytest -q;(true)", "pytest -q&(true)", "pytest -q\n(true)", "pytest --setup-only", "pytest --fixtures"],
+)
+def test_operateur_colle_a_une_parenthese_ou_option_inerte_est_refuse(projet: Path, cmd: str) -> None:
+    verdict(projet, (cmd, True))
+    v = check_transition(projet, tache(test_depth="standard"), "review", "accepted")
+    assert v.blocked and _depth(v) and "floor" in _depth(v)[0]
+
+
 def test_strict_refuse_des_segments_masques(projet: Path) -> None:
     verdict(projet, ("ruff check . || true && pytest -q || true", True))
     assert _depth(check_transition(projet, tache(test_depth="strict"), "review", "accepted"))

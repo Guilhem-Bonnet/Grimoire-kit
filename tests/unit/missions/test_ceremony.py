@@ -198,6 +198,26 @@ _COMMANDES_QUI_NE_VERIFIENT_RIEN = [
     "pytest --collect-only",
     "pytest\ntrue",
     "pytest &&",
+    # Un opérateur collé à une parenthèse reste un opérateur (W6-01-S2-01).
+    "pytest -q||(true)",
+    "pytest -q ||(true)",
+    "pytest -q;(true)",
+    "pytest -q ;(true)",
+    "pytest -q&(true)",
+    "pytest -q |(cat)",
+    "pytest -q |&(cat)",
+    "pytest -q\n(true)",
+    "pytest -q;\n(true)",
+    "pytest -q 2>&1 ||(true)",
+    "(pytest -q)||true",
+    "(true) || pytest",
+    # Options qui n'exécutent aucun test, ou dont le code de sortie est forcé à 0 (W6-01-S2-02).
+    "pytest --setup-only",
+    "pytest --setup-plan",
+    "pytest --fixtures",
+    "pytest --fixtures-per-test",
+    "pytest --markers",
+    "python -m pytest -q --setup-only tests",
 ]
 
 
@@ -208,7 +228,17 @@ def test_une_commande_masquee_ou_court_circuitee_ne_verifie_rien(cmd: str) -> No
     assert depth_shortfall("standard", [(cmd, True)]) is not None
 
 
-@pytest.mark.parametrize("cmd", ["ruff --version && pytest --version", "ruff check . || true && pytest || true"])
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        "ruff --version && pytest --version",
+        "ruff check . || true && pytest || true",
+        "ruff check . ||(true) && pytest -q ||(true)",
+        "ruff check . ;(true) && pytest -q &(true)",
+        "ruff check --exit-zero . && pytest --setup-only",
+        "ruff check --exit-zero . && pytest --collect-only",
+    ],
+)
 def test_strict_n_est_pas_atteint_par_des_segments_qui_ne_verifient_rien(cmd: str) -> None:
     assert depth_shortfall("strict", [(cmd, True)]) is not None
     assert reached_depth([(cmd, True)]) is DepthLevel.FLOOR
@@ -225,6 +255,17 @@ def test_strict_n_est_pas_atteint_par_des_segments_qui_ne_verifient_rien(cmd: st
         ("pytest -q ;", {"test"}),
         ('pytest -k "a || b"', {"test"}),
         ("cd sub && ruff check . && pytest -q", {"test", "static"}),
+        ("pytest -q &&(true)", {"test"}),
+        ("pytest -q && (true)", {"test"}),
+        ("(true) && pytest -q", {"test"}),
+        ("pytest -q >out.log 2>&1", {"test"}),
+        ("pytest -q &>out.log", {"test"}),
+        ("pytest -q >&2", {"test"}),
+        ("true ;(true) ; pytest -q", {"test"}),
+        ("true;\n(true)\npytest -q", {"test"}),
+        ("pytest -q --fixtures-dir x", {"test"}),
+        ("ruff check . && pytest -q", {"test", "static"}),
+        ("ruff check --output-format=full . && pytest -q", {"test", "static"}),
     ],
 )
 def test_une_chaine_dont_le_code_decide_garde_sa_nature(cmd: str, kinds: set[str]) -> None:
@@ -369,3 +410,17 @@ def test_cli_measure_impact(tmp_path: Path) -> None:
                                       "--project-root", str(tmp_path), "--json"])
     assert result.exit_code == 0, result.output
     assert json.loads(result.stdout)["inputs"]["impact_files"] == 4
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    ["ruff check --exit-zero .", "flake8 --exit-zero src", "pylint --exit-zero src", "uv run ruff check --exit-zero ."],
+)
+def test_une_analyse_dont_le_code_est_force_a_zero_n_est_pas_statique(cmd: str) -> None:
+    assert check_kinds(cmd) == frozenset()
+
+
+def test_une_analyse_forcee_a_zero_ne_vaut_pas_strict() -> None:
+    assert check_kinds("ruff check --exit-zero . && pytest -q") == {"test"}
+    assert depth_shortfall("strict", [("ruff check --exit-zero . && pytest -q", True)]) is not None
+    assert depth_shortfall("standard", [("ruff check --exit-zero . && pytest -q", True)]) is None
