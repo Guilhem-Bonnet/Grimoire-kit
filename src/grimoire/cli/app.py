@@ -1257,6 +1257,7 @@ LazyTyperGroup.configure(
         "memory": LazyGroupSpec("grimoire.cli.cmd_memory_lexical", "memory_app", rich_help_panel="Data"),
         "hooks": LazyGroupSpec("grimoire.cli.cmd_hooks", "hooks_app", rich_help_panel="Project"),
         "cadrage": LazyGroupSpec("grimoire.cli.cmd_cadrage", "cadrage_app", rich_help_panel="Project"),
+        "ceremony": LazyGroupSpec("grimoire.cli.cmd_ceremony", "ceremony_app", rich_help_panel="Project"),
         "debugger": LazyGroupSpec("grimoire.cli.cmd_debugger", "debugger_app", rich_help_panel="Data"),
         "dbg": LazyGroupSpec("grimoire.cli.cmd_debugger", "debugger_app", hidden=True),
         "workflows": LazyGroupSpec("grimoire.cli.cmd_workflows", "workflows_app", rich_help_panel="Project"),

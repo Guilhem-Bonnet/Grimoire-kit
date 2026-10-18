@@ -607,6 +607,7 @@ class MissionLedger:
         remediation_ref: str = "",
         extra: dict[str, Any] | None = None,
         checks: tuple[TaskCheck, ...] = (),
+        test_depth: str = "",
     ) -> MissionTask:
         self._load()
         if mission_id not in self._missions:
@@ -638,6 +639,7 @@ class MissionLedger:
             remediation_ref=remediation_ref,
             extra=extra or {},
             checks=checks,
+            test_depth=test_depth,
         )
         self._append_event("task.created", task.id, "task", owner or "system", task.to_dict())
         return task
