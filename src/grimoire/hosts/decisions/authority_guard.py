@@ -12,7 +12,9 @@ vecteurs connus pour fabriquer cette preuve :
   profil ;
 - ``hook-replay`` — lancer soi-même l'entrée du hook avec un faux
   ``UserPromptSubmit`` : ``grimoire-hook``, ``grimoire host hook`` (la CLI
-  appelle la même ``run_hook``), leur module ou la fonction d'écriture, nus
+  appelle la même ``run_hook``), leur module, la fonction d'écriture ou le
+  paquet des décisions (``grimoire.hosts.decisions`` : ``decide_task_context``
+  enregistre le tour humain puis la demande de contournement), nus
   ou derrière un lanceur (``uvx``, ``uv run``, ``pipx run``, ``python -m
   grimoire``, ``sudo``, ``timeout``…). La CLI n'est refusée que si son
   ``--event`` est lisible et n'est pas ``UserPromptSubmit`` (un événement
@@ -78,6 +80,17 @@ _HOOK_MODULE_MARKERS = (
 #: ``gate_override._append`` suffit à écrire une paire forgée. Le mot entier,
 #: sans identifiant collé devant (``test_gate_override.py`` n'est pas le module).
 _GATE_OVERRIDE_WORD = re.compile(r"(?<![A-Za-z0-9_])gate_override(?![A-Za-z0-9])")
+#: Le paquet des décisions de hook, nommé par n'importe quelle importation
+#: (``grimoire.hosts.decisions``, ``from grimoire.hosts import decisions``,
+#: ``importlib.import_module(...)``). ``decide_task_context`` appelle
+#: ``record_human_turn`` puis ``record_override_request`` : l'atteindre depuis un
+#: outil, c'est forger le tour humain et la phrase sans passer par le hook. On
+#: refuse donc le paquet entier plutôt que d'énumérer ses points d'entrée ; les
+#: noms d'entrée (``decide_task_context``, ``run_decision``, ``DECISIONS``) restent
+#: listés pour le cas où ils sont atteints sans nommer le paquet.
+_DECISIONS_PACKAGE = re.compile(r"hosts\s*\.\s*decisions|hosts\s+import\s[^;\n]*(?<![A-Za-z0-9_])decisions(?![A-Za-z0-9_])")
+_DECISION_ENTRY_NAMES = re.compile(r"(?<![A-Za-z0-9_])(?:decide_task_context|run_decision|DECISIONS)(?![A-Za-z0-9_])")
+_DECISIONS_MODULE_PREFIX = "grimoire.hosts.decisions"
 _RESUME_LONG = ("--resume", "--continue", "--session-id")
 #: Programmes qui en lancent un autre : le binaire visé peut suivre à n'importe
 #: quelle position (``uvx --from grimoire-kit grimoire-hook``, ``timeout 5 …``).
@@ -104,7 +117,12 @@ def _norm(text: str) -> str:
 
 def _names_hook_module(text: str) -> bool:
     """Vrai si *text* nomme un point d'entrée du hook ou le module du journal des contournements."""
-    return any(m in text for m in _HOOK_MODULE_MARKERS) or bool(_GATE_OVERRIDE_WORD.search(text))
+    return (
+        any(m in text for m in _HOOK_MODULE_MARKERS)
+        or bool(_GATE_OVERRIDE_WORD.search(text))
+        or bool(_DECISIONS_PACKAGE.search(text))
+        or bool(_DECISION_ENTRY_NAMES.search(text))
+    )
 
 
 def _names_protected(text: str) -> str:
@@ -118,12 +136,18 @@ def _names_protected(text: str) -> str:
 _OPERATORS = ("&&", "||", "$(", ";", "|", "\n", "`", "(", ")")
 _ESCAPE = re.compile(r"\\(.)", re.DOTALL)
 #: Modules dont ``python -m`` est l'entrée du hook : les nommer, c'est le rejouer.
+#: Tout module du paquet ``grimoire.hosts.decisions`` en fait partie (voir
+#: :func:`_is_hook_module`).
 _HOOK_MODULES = (
     "grimoire.hosts.runtime",
     "hosts.decisions.human_turns",
     "grimoire.cli.cmd_host",
-    "grimoire.hosts.decisions.gate_override",
 )
+
+
+def _is_hook_module(module: str) -> bool:
+    """Vrai si ``python -m <module>`` lance l'entrée du hook ou une décision."""
+    return module in _HOOK_MODULES or module == _DECISIONS_MODULE_PREFIX or module.startswith(_DECISIONS_MODULE_PREFIX + ".")
 
 
 def _command_words(text: str) -> list[list[str]]:
@@ -223,7 +247,7 @@ def _launched(words: list[str]) -> list[tuple[str, list[str]]]:
     for idx in range(1, len(words)):
         base = words[idx].rsplit("/", 1)[-1]
         if words[idx - 1] == "-m":
-            if words[idx] in _HOOK_MODULES:
+            if _is_hook_module(words[idx]):
                 found.append(("grimoire-hook", []))
             if base.split(".", 1)[0] == "grimoire":
                 base = "grimoire"
