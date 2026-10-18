@@ -95,9 +95,13 @@ def test_snapshot_replay_equals_full_replay(tmp_path: Path, always_snapshot: Cal
     service.note_progress(ids[0], "un autre pas", "claude")
     service.cancel(ids[1], "plus utile", "g", force=True)
     after = _fresh(root)
-    (root / SNAPSHOT).rename(root / "ledger.snapshot.json.bak")
+    # Path.replace, pas Path.rename : le rejeu complet réécrit l'instantané, la cible existe donc déjà au retour
+    # (Path.rename lève FileExistsError sous Windows) ; on restitue l'instantané d'origine par-dessus.
+    original = (root / SNAPSHOT).read_bytes()
+    (root / SNAPSHOT).replace(root / "ledger.snapshot.json.bak")
     expected = _view(_fresh(root))
-    (root / "ledger.snapshot.json.bak").rename(root / SNAPSHOT)
+    (root / "ledger.snapshot.json.bak").replace(root / SNAPSHOT)
+    assert (root / SNAPSHOT).read_bytes() == original
     assert _view(after) == expected
     assert expected != full
 

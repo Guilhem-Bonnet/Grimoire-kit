@@ -611,7 +611,7 @@ def test_install_timer_writes_a_oneshot_unit_and_its_timer(projet: Path, tmp_pat
     service_text = plan.service_path.read_text(encoding="utf-8")
     timer_text = plan.timer_path.read_text(encoding="utf-8")
     assert "Type=oneshot" in service_text and '"orchestrate" "tick" "--apply"' in service_text
-    assert f'"{projet.resolve()}"' in service_text
+    assert timer._systemd_quote(str(projet.resolve())) in service_text  # même échappement que le code (\\ doublés sous Windows)
     assert "OnUnitActiveSec=15min" in timer_text and f"Unit={plan.name}.service" in timer_text
     assert spy.calls == [["systemctl", "--user", "daemon-reload"], ["systemctl", "--user", "enable", "--now", f"{plan.name}.timer"]]
     assert done[-1] == f"activé : {plan.name}.timer" and "enable-linger" in plan.notes[0]
