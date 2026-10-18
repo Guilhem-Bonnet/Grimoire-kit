@@ -253,18 +253,29 @@ class CheckpointJournal:
         last = challenges[-1]
         return None if last.get("challenge_id") in consumed else last
 
-    def issue_challenge(self, node_id: str, env: Mapping[str, str] | None = None) -> dict[str, Any]:
+    def issue_challenge(
+        self, node_id: str, env: Mapping[str, str] | None = None, bound: Mapping[str, str] | None = None
+    ) -> dict[str, Any]:
         """Émet le challenge de *node_id*, lié à la session courante — ou rend celui qu'elle a encore ouvert.
 
         Un challenge ouvert sans session, ou par une autre session, ne vaut rien
         pour celle-ci : le rendre figerait le checkpoint (``no_session`` ou
         ``other_session`` à chaque décision, sans que le refus le consomme).
+
+        *bound* (W5-05) : des valeurs que le challenge porte (l'empreinte d'une vague). Un
+        challenge ouvert qui ne porte pas les mêmes valeurs est périmé : il n'est pas rendu,
+        un nouveau est émis, et son horodatage exige un tour humain postérieur.
         """
         session_id, _host = current_session(env)
         existing = self.open_challenge(node_id, session_id)
-        if existing is not None and existing.get("session_id", "") == session_id:
+        if (
+            existing is not None
+            and existing.get("session_id", "") == session_id
+            and all(existing.get(k) == v for k, v in (bound or {}).items())
+        ):
             return existing
         entry = {
+            **(bound or {}),
             "type": "challenge",
             "challenge_id": f"CHL-{uuid.uuid4().hex[:12]}",
             "node_id": node_id,
@@ -323,6 +334,7 @@ class CheckpointJournal:
         reason: str,
         attestation: Attestation,
         accepted_risk: Mapping[str, Any] | None = None,
+        bound: Mapping[str, str] | None = None,
     ) -> None:
         if attestation.attested:
             self.consume_turn(node_id, attestation)
@@ -330,6 +342,7 @@ class CheckpointJournal:
         self._append(
             {
                 **extra,
+                **(bound or {}),
                 "type": "decision",
                 "challenge_id": attestation.challenge_id,
                 "node_id": node_id,

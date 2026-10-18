@@ -27,6 +27,7 @@ import contextlib
 import os
 import stat
 import sys
+import threading
 import time
 import uuid
 from collections.abc import Iterator
@@ -43,6 +44,8 @@ __all__ = ["atomic_write", "locked"]
 #: Un verrou de repli plus vieux que cela est tenu pour abandonné (processus tué).
 _STALE_AFTER_S = 60.0
 _POLL_S = 0.01
+#: Période du rafraîchissement d'un verrou de repli tenu (``keepalive``) : bien en deçà de la péremption.
+_KEEPALIVE_S = _STALE_AFTER_S / 4
 
 
 #: Attente entre deux tentatives de libération refusée (Windows : un lecteur concurrent tient le fichier).
@@ -125,6 +128,38 @@ def _break_if_abandoned(lock: Path) -> bool:
             grave.unlink()
 
 
+@contextmanager
+def _keepalive(lock: Path, enabled: bool) -> Iterator[None]:
+    """Rafraîchit la date de *lock* tant que son porteur vit (repli sans ``flock`` : la péremption se lit sur la date).
+
+    Sans cela, un porteur qui dure plus de ``_STALE_AFTER_S`` voit son verrou cassé par un second, vivant lui aussi.
+    Le fichier est reconnu à son inode : un verrou cassé puis recréé par un autre n'est pas prolongé.
+    """
+    if not enabled:
+        yield
+        return
+    try:
+        inode = lock.stat().st_ino
+    except OSError:
+        yield
+        return
+    stop = threading.Event()
+
+    def beat() -> None:
+        while not stop.wait(_KEEPALIVE_S):
+            with contextlib.suppress(OSError):
+                if lock.stat().st_ino == inode:
+                    os.utime(lock)
+
+    thread = threading.Thread(target=beat, name="fsio-keepalive", daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        thread.join()
+
+
 def _release(lock: Path, token: str) -> None:
     """Supprime *lock* s'il porte encore *token* (cassé puis repris par un autre : ce n'est plus le nôtre).
 
@@ -147,11 +182,15 @@ def _release(lock: Path, token: str) -> None:
 
 
 @contextmanager
-def locked(path: str | os.PathLike[str], *, timeout: float = 30.0) -> Iterator[None]:
+def locked(path: str | os.PathLike[str], *, timeout: float = 30.0, keepalive: bool = False) -> Iterator[None]:
     """Verrou exclusif inter-processus associé à *path* (le fichier lui-même n'est pas touché).
 
     Lève ``TimeoutError`` si le verrou n'est pas obtenu en *timeout* secondes,
     avec ou sans ``fcntl``.
+
+    *keepalive* (repli sans ``fcntl`` seulement) : un fil rafraîchit la date du verrou tant que le corps
+    s'exécute, pour qu'une section critique plus longue que la péremption de 60 s ne soit pas cassée par un
+    second porteur. Avec ``flock`` le verrou tient avec le descripteur et n'a pas de date : sans effet.
     """
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -202,7 +241,8 @@ def locked(path: str | os.PathLike[str], *, timeout: float = 30.0) -> Iterator[N
             fh.write(token)
         break
     try:
-        yield
+        with _keepalive(lock, keepalive):
+            yield
     except BaseException as exc:
         # L'erreur du corps prime : un échec de libération s'y attache au lieu de la masquer.
         try:

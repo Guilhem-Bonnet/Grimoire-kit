@@ -746,6 +746,7 @@ class TestReadOnlyToolsWriteNothing:
         "grimoire_codegraph_freshness": {},
         "task_list_ready": {},
         "task_show": {"task_id": "bootstrap"},
+        "task_waves": {},
         "task_recall": {"task_id": "bootstrap"},
         "grimoire_host_status": {},
         "grimoire_providers_status": {},

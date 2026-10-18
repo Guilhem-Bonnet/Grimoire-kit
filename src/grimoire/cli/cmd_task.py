@@ -21,6 +21,8 @@ import typer
 from rich.console import Console
 from rich.markup import escape
 
+from grimoire.cli.cmd_task_portfolio import list_all_projects
+
 task_app = typer.Typer(
     help="Tâches agentiques : projection du Mission Ledger vers le board gouverné.",
     no_args_is_help=True,
@@ -309,7 +311,7 @@ def task_list(
     from grimoire.missions.board import board_status_of
 
     if all_projects:
-        _list_all_projects(ctx, project_root, status=status, project=project, live=live, live_minutes=live_minutes)
+        list_all_projects(ctx, project_root, status=status, project=project, live=live, live_minutes=live_minutes)
         return
 
     if project is not None or live or live_minutes != 30:
@@ -332,73 +334,6 @@ def task_list(
         # et fait disparaître l'état — la ligne restait muette sur l'essentiel.
         etat = escape(f"[{task.status_label} · {board_status_of(task.status)}]")
         console.print(f"  {task.id}  {etat}  {task.title}")
-
-
-def _list_all_projects(
-    ctx: typer.Context,
-    project_root: Path,
-    *,
-    status: str | None,
-    project: str | None,
-    live: bool,
-    live_minutes: int,
-) -> None:
-    """Le portefeuille : tableau lisible, ou la charge utile JSON telle quelle."""
-    from rich.table import Table
-
-    from grimoire.missions.liveness import label as liveness_label
-    from grimoire.missions.liveness import probe_claude_agents
-    from grimoire.tools.workspace_portfolio import portfolio_tasks
-
-    view = portfolio_tasks(
-        project_root.resolve(),
-        state=status,
-        project=project,
-        live=live,
-        live_minutes=live_minutes,
-        probe=probe_claude_agents,
-    )
-    if _fmt(ctx) == "json":
-        typer.echo(json.dumps(view, indent=2, ensure_ascii=False))
-        return
-    table = Table(title="Portefeuille de tâches", show_lines=False)
-    for column in ("Projet", "Tâche", "État", "Board", "Priorité", "Session", "Mis à jour"):
-        table.add_column(column)
-    for card in view["tasks"]:
-        session = card.get("session") or {}
-        if session:
-            state = session.get("liveness") or {}
-            session_text = f"{liveness_label(state.get('state', 'inconnu'))} · {session.get('id', '')}"
-            if session.get("attention"):
-                session_text += f" · attention : {session['attention']['reason']}"
-        else:
-            session_text = "—"
-        unread = card.get("unread_directives") or 0
-        table.add_row(
-            escape(str(card["project"]["name"])),
-            escape(f"{card['id']}  {card.get('title', '')}") + (f"  ({unread} consigne(s) non lue(s))" if unread else ""),
-            escape(str(card.get("status", ""))),
-            escape(str(card.get("board", ""))),
-            escape(str(card.get("priority", "") or "—")),
-            escape(session_text),
-            escape(str(card.get("updated_at", ""))[:19]),
-        )
-    if view["tasks"]:
-        console.print(table)
-    else:
-        console.print("[dim]Aucune tâche dans le portefeuille pour ces filtres.[/dim]")
-    for row in view["projects"]:
-        if row["state"] != "ok":
-            console.print(f"[red]✗[/red] {escape(row['slug'])} — {escape(str(row['reason']))}")
-    summary = view["summary"]
-    console.print(
-        f"[dim]{summary['projects']} projet(s), {summary['readable']} lisible(s) · "
-        f"{summary['tasks']} tâche(s) · vivacité "
-        + ", ".join(f"{n} {name}" for name, n in summary["liveness"].items() if n)
-        + f" (journal < {view['live_minutes']} min)[/dim]"
-    )
-
-
 @task_app.command("show")
 def task_show(
     ctx: typer.Context,
@@ -864,6 +799,12 @@ def task_waves(
         console.print(
             f"[yellow]![/yellow] vague {overlap['wave']} : {overlap['file']} visé par {', '.join(overlap['tasks'])}"
         )
+    for cp in plan.get("checkpoints", ()):
+        console.print(
+            f"checkpoint vague {cp['wave']} ({', '.join(cp['tasks'])}) : {cp['status']}{' (requis)' if cp['required'] else ''}"
+        )
+    for tid, why in plan.get("claim_blocked", {}).items():
+        console.print(f"[yellow]![/yellow] {tid} : claim fermé — {why}")
     for tid, targets in plan["unresolved"].items():
         console.print(f"[yellow]![/yellow] {tid} : dépendance inconnue ou annulée ({', '.join(targets)})")
     for tid, causes in plan["blocked"].items():
@@ -1489,6 +1430,10 @@ _register_waiting(task_app)
 from grimoire.cli.cmd_task_worktree import register_worktree_commands  # noqa: E402
 
 register_worktree_commands(task_app)
+
+from grimoire.cli.cmd_task_wave import register_wave_commands  # noqa: E402
+
+register_wave_commands(task_app)
 
 # W4-01 : `task fold-usage` et l'usage affiché par `task show`, dans leur module (plafond de taille).
 from grimoire.cli.cmd_task_usage import _usage_line, _usage_of, register_usage_commands  # noqa: E402

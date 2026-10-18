@@ -234,6 +234,13 @@ def _decisions_line(project_root: Path) -> str:
     return f"{summary['line']} — voir le cockpit ou `grimoire task decisions`"
 
 
+def _pause_line(hook: HookInput, task_id: str) -> str:
+    """The pause in force for this session at start (K11, plan §5.1): drain, hold, degraded hold or unreadable flag."""
+    from grimoire.hosts.decisions.pause_brake import pause_context
+
+    return pause_context(hook, task_id)
+
+
 def _reset_temporal_session(hook: HookInput) -> None:
     """Drop the previous temporal-policy session state, if any (issue #429, point 3).
 
@@ -415,6 +422,7 @@ def decide_activation(hook: HookInput) -> Decision:
     providers_line = _providers_status_line(hook.project_root)
     proposals_line = _proposals_status_line(hook.project_root)
     decisions_line = _decisions_line(hook.project_root)
+    pause_line = _pause_line(hook, task_id)
     context = "\n".join(
         part
         for part in (
@@ -428,6 +436,7 @@ def decide_activation(hook: HookInput) -> Decision:
             providers_line,
             proposals_line,
             decisions_line,
+            pause_line,
         )
         if part
     )

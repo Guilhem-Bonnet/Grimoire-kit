@@ -245,8 +245,11 @@ def projet(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def refuse_en_revue(service: TaskService, title: str) -> str:
     """Une tâche qui demande la revue sans pack de preuve : un seul refus, `evidence_pack`."""
     mission = next(iter(service.ledger.list_missions()), None) or service.ledger.create_mission(title="Travaux", origin="test")
-    task = service.ledger.create_task(mission.id, title, acceptance=("livré",), owner="amelia")
-    service.transition(task.id, TaskState.READY, "amelia")
+    # Un titulaire par tâche : ces tâches restent `running` après le refus, et la limite de WIP par rôle
+    # du gabarit governed (K10) refuserait le claim de la troisième sous un même titulaire.
+    owner = f"amelia-{len(service.ledger.list_tasks(mission.id)) + 1}"
+    task = service.ledger.create_task(mission.id, title, acceptance=("livré",), owner=owner)
+    service.transition(task.id, TaskState.READY, owner)
     service.context(task.id)
     service.claim(task.id, "claude", "claude-code")
     service.transition(task.id, TaskState.RUNNING, "claude")

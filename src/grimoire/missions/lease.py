@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from pathlib import Path
@@ -77,6 +77,11 @@ class LeaseFile:
     le geste ne se rejuge pas), ``hand_back`` (le titulaire ou un humain rend le bail,
     l'événement de rendu peut ne jamais être écrit) ou ``cancel`` (annulation, K3). Vide : fichier d'un titulaire, ou
     d'une version antérieure — jamais pris pour une décision de récolte.
+
+    ``waiting`` (K13) : la tâche est garée (``waiting``, K6). Le titulaire garde son bail pour la
+    reprise, mais la résolution de « la tâche active » ne la nomme plus — le chemin rapide du
+    ``PreToolUse`` (:func:`~grimoire.hosts.decisions.lease_brake.held_task_id`) le lit ici pour
+    ne pas contredire le ledger sans le rejouer. Un fichier d'avant ce champ vaut ``False``.
     """
 
     task_id: str
@@ -86,9 +91,10 @@ class LeaseFile:
     busy_until: str = ""
     holder: bool = True
     origin: str = ""
+    waiting: bool = False
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "$schema": _SCHEMA,
             "task_id": self.task_id,
             "epoch": self.epoch,
@@ -98,6 +104,9 @@ class LeaseFile:
             "holder": self.holder,
             "origin": self.origin,
         }
+        if self.waiting:  # absent hors attente : les fichiers de bail ordinaires restent identiques
+            out["waiting"] = True
+        return out
 
     def lost_at(self) -> datetime | None:
         """``max(renewed_at + ttl, busy_until)`` ; ``None`` si ``renewed_at`` est illisible."""
@@ -137,12 +146,28 @@ def read_lease(path: Path) -> LeaseFile | None:
         busy_until=str(raw.get("busy_until", "") or ""),
         holder=raw.get("holder", True) is not False,
         origin=str(raw.get("origin", "") or ""),
+        waiting=raw.get("waiting") is True,
     )
 
 
 def write_lease(path: Path, lease: LeaseFile) -> None:
     """Écrit *lease* de façon durable (``fsio.atomic_write`` : fichier puis dossier synchronisés)."""
     atomic_write(path, json.dumps(lease.to_dict(), ensure_ascii=False, sort_keys=True) + "\n")
+
+
+def mark_waiting(path: Path, *, entering: bool, leaving: bool) -> None:
+    """Pose ou retire la marque ``waiting`` d'un fichier de bail de titulaire (K13) ; sans effet sur une barrière.
+
+    Appelée avant l'événement de transition (§2.3 : le fichier d'abord). Une barrière
+    (``holder=False``) n'est jamais réécrite : elle dit déjà « personne ne tient ». Fichier
+    absent ou illisible : rien — le ledger tranche, comme partout.
+    """
+    if not (entering or leaving):
+        return
+    cached = read_lease(path)
+    if cached is None or not cached.holder or cached.waiting is entering:
+        return
+    write_lease(path, replace(cached, waiting=entering))
 
 
 def backoff_delay(attempts: int) -> timedelta:

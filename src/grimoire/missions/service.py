@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -28,10 +29,22 @@ from typing import TYPE_CHECKING, Any
 from grimoire.core.exceptions import GrimoireError, GrimoireMissionError
 from grimoire.core.standard_generation import STANDARD_DIR
 from grimoire.core.standard_state import current_session, invalidate_cache
+from grimoire.missions.admission import (
+    QueuePlan,
+    RouteRef,
+    build_plan,
+    load_capacity,
+    queue_order,
+    read_host,
+    ready_since,
+    release_capacity,
+    wip_claim_guard,
+)
 from grimoire.missions.board import PRIORITIES, board_status_of, build_board, priority_of, write_board
 from grimoire.missions.gates import GateRefusal, GateVerdict, check_transition
 from grimoire.missions.intake import IntakeRequest, MissionIntakeService
 from grimoire.missions.ledger import MissionLedger, ReapReport
+from grimoire.missions.pause import PAUSE_LIFTED_CAUSE, PauseState, pause_claim_guard, read_pause
 from grimoire.missions.recall import DEFAULT_TOKEN_BUDGET, TaskRecall, build_task_recall, consolidate_task_memory
 from grimoire.missions.schemas import (
     DIRECTIVE_KINDS,
@@ -227,6 +240,16 @@ class WakeDecision:
         }
 
 
+def _claim_guards(root: Path) -> Callable[[Mapping[str, MissionTask], MissionTask], str]:
+    """Les gardes que le ledger appelle sous son verrou : la pause d'abord (K11), puis le WIP (K10)."""
+    pause, wip = pause_claim_guard(root), wip_claim_guard(root)
+
+    def guard(tasks: Mapping[str, MissionTask], task: MissionTask) -> str:
+        return pause(tasks, task) or wip(tasks, task)
+
+    return guard
+
+
 class TaskService:
     """Lire, réclamer et déplacer les tâches d'un projet, gates compris."""
 
@@ -253,12 +276,20 @@ class TaskService:
         # chaque appel.
         self._memory: MemoryManager | None = memory_manager
         self._memory_resolved = memory_manager is not None
+        #: K12 : faux pour le service du plan à blanc (``orchestrate tick --plan``), qui rejoue le tick sur une
+        #: copie du ledger — ni board ni mémoire du projet ne doivent alors bouger.
+        self.writes_projections = True
 
     @property
     def ledger(self) -> MissionLedger:
         if self._ledger is None:
             self._ledger = MissionLedger(self.ledger_root)
+            self._ledger.claim_guard = _claim_guards(self.home_root)  # K10 WIP + K11 pause, sous le verrou
         return self._ledger
+
+    def refresh(self) -> None:
+        """Oublie le cache du ledger : la lecture suivante relit le disque (les écritures d'un autre processus y sont)."""
+        self.ledger._invalidate()
 
     @property
     def has_ledger(self) -> bool:
@@ -306,8 +337,55 @@ class TaskService:
         return sorted(tasks, key=attention_rank)
 
     def list_ready(self, mission_id: str | None = None) -> list[MissionTask]:
-        """Les tâches qu'un agent peut réclamer maintenant."""
-        return self.list_tasks(mission_id, TaskState.READY.value)
+        """Les tâches qu'un agent peut réclamer, dans l'ordre de la file (K10) : priorité, vieillissement, ancienneté."""
+        ready = self.list_tasks(mission_id, TaskState.READY.value)
+        capacity = load_capacity(self.home_root)
+        since = ready_since(self.ledger)
+        return [e.task for e in queue_order(ready, since, now=datetime.now(UTC), aging_hours=capacity.aging_hours)]
+
+    def queue_plan(
+        self,
+        *,
+        now: datetime | None = None,
+        autonomous: bool | None = None,
+        probe_host: bool = True,
+        routes: bool = True,
+        paused: bool = False,
+        pause: PauseState | None = None,
+    ) -> QueuePlan:
+        """Ce que l'admission déciderait maintenant, sans rien écrire (``grimoire queue plan``, K10).
+
+        La sonde de l'hôte ne tourne que si le pool ``host`` est déclaré. Les routes viennent du
+        routeur (K9), sans événement ``task.routed`` : l'admission les lit, ne les change pas.
+        La pause (K11) est lue dans les drapeaux du projet et de la machine, sauf *pause* donnée.
+        """
+        capacity = load_capacity(self.home_root)
+        host = read_host() if probe_host and capacity.host is not None else None
+        unattended = os.environ.get("GRIMOIRE_UNATTENDED", "").strip() == "1" if autonomous is None else autonomous
+        return build_plan(
+            self.ledger, capacity, now=now or datetime.now(UTC), host=host,
+            route_of=self._route_ref if routes else None, paused=paused, autonomous=unattended,
+            pause=pause if pause is not None else read_pause(self.home_root),
+        )
+
+    def _route_ref(self, task: MissionTask) -> RouteRef:
+        from grimoire.missions.route_dispatch import record_route
+        from grimoire.missions.verifiability import classify
+
+        routing = record_route(self, task, classify(task, commands_declared=bool(task.checks)), actor="queue", write=False)
+        decision = routing.decision
+        if routing.policy_invalid or decision is None:
+            return RouteRef("refuse")
+        if routing.mode == "active" and decision.outcome == "defer":
+            return RouteRef("defer", defer_until=decision.defer_until or "")
+        if decision.outcome != "route":
+            return RouteRef("session")
+        return RouteRef("route", decision.provider or "", decision.model or "")
+
+    def release_capacity(self, task_id: str, pool: str, actor: str, reason: str = "") -> None:
+        """Un humain rend le créneau *pool* d'une tâche dont la fin des checks n'est pas observable (``capacity.released``)."""
+        self.require(task_id)
+        release_capacity(self.ledger, task_id, pool, actor=actor, reason=reason)
 
     def gate(self, task: MissionTask, target: TaskState) -> GateVerdict:
         """Le verdict du gate pour cette transition, sans rien écrire."""
@@ -387,13 +465,17 @@ class TaskService:
 
     def waves(self, mission_id: str | None = None) -> dict[str, Any]:
         """Les vagues du plan, ``file_overlaps`` compris (:func:`grimoire.missions.waves.compute_waves`)."""
+        from grimoire.missions.wave_checkpoint import claim_blocked, report
         from grimoire.missions.waves import compute_waves
 
         everything = self.ledger.list_tasks()
         if mission_id is None:
             return compute_waves(everything)
         # Les dépendances se résolvent contre tout le ledger, comme au claim : seul le rapport est filtré.
-        return compute_waves(everything, only=[t.id for t in everything if t.mission_id == mission_id])
+        plan = compute_waves(everything, only=[t.id for t in everything if t.mission_id == mission_id])
+        plan["checkpoints"] = report(self, mission_id)  # W5-05 : les vagues closes n'y figurent plus, leur checkpoint si
+        plan["claim_blocked"] = claim_blocked(self, mission_id)  # {tâche: motif} que le claim opposerait
+        return plan
 
     def attach_session(
         self,
@@ -469,6 +551,7 @@ class TaskService:
     ) -> TaskMove:
         """ready → claimed, si le gate `ready_to_in_progress` l'accorde et si aucun
         autre claim actif ne réserve déjà l'un de *files*."""
+        # Le verrou de vague vit dans `transition` (cible CLAIMED) : la CLI, le MCP et le cockpit y passent tous.
         claim = TaskClaim.new(actor_id=actor, host_id=host, exclusive_files=files)
         return self.transition(task_id, TaskState.CLAIMED, actor, claim=claim)
 
@@ -495,22 +578,42 @@ class TaskService:
         self.ledger.note_progress(task_id, text, actor_id=actor)
         return self.require(task_id)
 
-    def reap(self, *, apply: bool = True, actor: str = "tick") -> ReapReport:
+    def reap(self, *, apply: bool = True, actor: str = "tick", now: datetime | None = None) -> ReapReport:
         """Récolte des baux perdus (:meth:`MissionLedger.reap`), quota lu dans l'état des fournisseurs.
 
         K3 (issue #768) : un hôte est fencé selon la table ``hosts.capabilities``
         — par hôte *et* par version, depuis les seules fixtures de K0 — et non plus
         selon une déclaration de l'appelant. Tout autre hôte, ou une version
         inconnue, donne ``resume_unfenced`` : la question est posée, rien n'est relancé.
+
+        K12 : un worktree de tâche en avance sur la remote (commits non poussés, arbre modifié, état
+        illisible) donne ``resume_branch`` — le travail local est à l'humain, pas au prochain repreneur.
+
+        K12-SC2-02 : les git de ``unpushed_work`` (jusqu'à 120 s) se jouent **avant** le verrou du journal,
+        sur les baux perdus à cet instant, et sont gardés par (tâche, epoch). Sous le verrou, un bail dont
+        l'epoch a changé depuis n'est pas jugé à ce tick (:class:`UnjudgedClaimError`) ; le suivant le jugera.
         """
         from grimoire.hosts.capabilities import claim_host_is_fenced
+        from grimoire.missions.ledger_rules import UnjudgedClaimError
+        from grimoire.missions.task_worktree import unpushed_work
+
+        self.refresh()
+        held = {(v.task_id, v.epoch): unpushed_work(self, v.task_id) for v in self.ledger.expired_claims(now)}
+
+        def branch_hold(task: MissionTask) -> str:
+            key = (task.id, task.claim.lease_epoch if task.claim is not None else -1)
+            if key not in held:
+                raise UnjudgedClaimError(task.id)
+            return held[key]
 
         report = self.ledger.reap(
             quota_blocked=self._quota_blocked,
             quota_until=self._quota_until,
             actor_id=actor,
             apply=apply,
+            now=now,
             is_fenced=lambda view: claim_host_is_fenced(view.host, view.host_version),
+            branch_hold=branch_hold,
         )
         if any(d.written and d.action == "ready" for d in report.decisions):
             self.project_board()
@@ -527,15 +630,34 @@ class TaskService:
             return claim.lease_epoch
         return None
 
-    def _hint_of(self, task: MissionTask) -> ResumeHint | None:
+    def _hint_of(self, task: MissionTask, *, observe_head: bool = False) -> ResumeHint | None:
+        """De quoi reprendre la session ; avec *observe_head* (point de reprise d'une pause, K11), la branche et le HEAD du worktree."""
         from grimoire.missions.session_link import session_fields
 
         fields = session_fields(task)
-        if not fields["session_id"]:
+        branch, head = self._observed_head() if observe_head else ("", "")
+        if not fields["session_id"] and not head:
             return None
         return ResumeHint(
-            session_id=fields["session_id"], host=fields["host"], resume_command=fields["resume_command"],
+            session_id=fields["session_id"], host=fields["host"], branch=branch, observed_head=head,
+            resume_command=fields["resume_command"],
         )
+
+    def _observed_head(self) -> tuple[str, str]:
+        """``(branche, HEAD)`` du worktree de ce service ; ``("", "")`` hors d'un dépôt git ou si git ne répond pas."""
+        import subprocess
+
+        def git(*args: str) -> str:
+            try:
+                done = subprocess.run(  # git, arguments fixes, dossier du projet
+                    ["git", *args], cwd=self.project_root, capture_output=True, text=True, encoding="utf-8",
+                    timeout=10, check=False,
+                )
+            except (OSError, subprocess.SubprocessError):
+                return ""
+            return done.stdout.strip() if done.returncode == 0 else ""
+
+        return git("rev-parse", "--abbrev-ref", "HEAD"), git("rev-parse", "HEAD")
 
     def wait(
         self, task_id: str, reason: str, actor: str, *, until: str = "", note: str = "", epoch: int | None = None
@@ -555,7 +677,7 @@ class TaskService:
         moment = datetime.now(UTC).isoformat()
         waiting = Waiting(
             reason, until or (UNTIL_UNKNOWN if reason in ("quota", "paused") else ""), None,
-            self._hint_of(task), moment,
+            self._hint_of(task, observe_head=reason == "paused"), moment,
         )
         if problem := waiting.problem():
             raise ValueError(problem)
@@ -701,15 +823,23 @@ class TaskService:
         self.project_board()
         return True
 
-    def wake_due(self, *, apply: bool = True, now: datetime | None = None) -> list[WakeDecision]:
+    def wake_due(
+        self, *, apply: bool = True, now: datetime | None = None, pause: PauseState | None = None
+    ) -> list[WakeDecision]:
         """La part « attente » du tick : rend les tâches dont l'attente est levée — jamais une ``waiting(human)`` au minuteur.
 
         - ``human`` : seulement si une réponse humaine est écrite (réveil interrompu rejoué) ;
-        - ``ci``, ``quota``, ``paused`` : à l'échéance ``until`` ; ``unknown`` ou absente, la
-          tâche attend (une sonde explicite est l'affaire d'un lot suivant).
+        - ``ci``, ``quota`` : à l'échéance ``until`` ; ``unknown`` ou absente, la tâche attend (une sonde
+          explicite est l'affaire d'un lot suivant) ;
+        - ``paused`` (K11) : tant qu'un drapeau de pause la couvre, elle attend. Une fois la pause levée, elle est
+          rendue ``ready`` (échéance ``unknown`` ou absente : tout de suite ; datée : à l'échéance), **dans l'ordre
+          de la file** (priorité, ancienneté d'avant son claim) et sans perdre cette ancienneté.
+
+        *pause* : les drapeaux déjà lus par l'appelant (le tick) ; sinon ils sont relus ici.
         """
         moment = now or datetime.now(UTC)
-        decisions: list[WakeDecision] = []
+        state = pause if pause is not None else read_pause(self.home_root)
+        planned: list[tuple[MissionTask, Waiting, str, str]] = []
         for task in self.ledger.list_tasks():
             waiting = task.waiting
             if task.status is not TaskState.WAITING or waiting is None:
@@ -719,20 +849,43 @@ class TaskService:
                 answered = self._answer_of(task, waiting)
                 if answered is not None:
                     action, cause = "wake", "answered"
+            elif waiting.reason == "paused" and state.blocks_admission(task.id):
+                cause = f"pause en cours ({state.mode_for(task.id)})"
             else:
                 due = parse_until(waiting.until)
-                if due is not None and moment >= due:
+                if waiting.reason == "paused" and due is None and waiting.until in ("", UNTIL_UNKNOWN):
+                    action, cause = "wake", PAUSE_LIFTED_CAUSE
+                elif due is not None and moment >= due:
                     action, cause = "wake", f"échéance {waiting.reason} atteinte"
-            written = False
-            if action == "wake" and apply:
+            planned.append((task, waiting, action, cause))
+        written: set[str] = set()
+        if apply:
+            for task, waiting, action, cause in self._write_order(planned):
+                if action != "wake":
+                    continue
                 if waiting.reason == "human" and waiting.question is not None:
                     self._settle_answer(task, waiting.question, self._answer_of(task, waiting) or "", "tick")
                 else:
                     self.ledger.wake(task.id, actor_id="tick", cause=cause)
-                    self.project_board()
-                written = True
-            decisions.append(WakeDecision(task.id, waiting.reason, action, cause, written))
-        return decisions
+                written.add(task.id)
+            if written:
+                self.project_board()
+        return [WakeDecision(t.id, w.reason, a, c, t.id in written) for t, w, a, c in planned]
+
+    def _write_order(
+        self, planned: list[tuple[MissionTask, Waiting, str, str]]
+    ) -> list[tuple[MissionTask, Waiting, str, str]]:
+        """Les réveils d'une pause levée passent après les autres, dans l'ordre de la file (K11)."""
+        lifted = [item for item in planned if item[2] == "wake" and item[3] == PAUSE_LIFTED_CAUSE]
+        if len(lifted) < 2:
+            return planned
+        capacity = load_capacity(self.home_root)
+        ranked = queue_order(
+            [t for t, _, _, _ in lifted], ready_since(self.ledger), now=datetime.now(UTC), aging_hours=capacity.aging_hours
+        )
+        position = {e.task.id: i for i, e in enumerate(ranked)}
+        rest = [item for item in planned if item not in lifted]
+        return [*rest, *sorted(lifted, key=lambda item: position[item[0].id])]
 
     def _answer_of(self, task: MissionTask, waiting: Waiting) -> str | None:
         if waiting.question is None:
@@ -811,6 +964,14 @@ class TaskService:
         machine à états refuse. Dans tous les cas, rien n'a été écrit.
         """
         task = self.require(task_id)
+        if target is TaskState.CLAIMED:
+            # W5-05 : point de passage commun de `claim`, de `task claim`, de `task_update move` et de la route
+            # workspace `move` — un checkpoint de vague requis ferme le claim quel que soit le chemin.
+            from grimoire.missions.wave_checkpoint import claim_refusal
+
+            refusal = claim_refusal(self, task_id)
+            if refusal:
+                raise GrimoireMissionError(f"Claim refusé pour {task_id} : {refusal}")
         if claim is not None:
             self._check_exclusive_files(task, target, claim)
         verdict = self.gate(task, target)
@@ -982,7 +1143,7 @@ class TaskService:
         Best-effort : la transition est déjà au ledger, qui est la source ;
         une mémoire indisponible n'y change rien.
         """
-        if target not in (TaskState.CLOSED, TaskState.BLOCKED, TaskState.FAILED):
+        if target not in (TaskState.CLOSED, TaskState.BLOCKED, TaskState.FAILED) or not self.writes_projections:
             return
         # best-effort : la transition est déjà au ledger, qui est la source ;
         # une mémoire indisponible n'y change rien.
@@ -1033,7 +1194,7 @@ class TaskService:
         transition — elle est déjà au ledger, qui est la source — mais il ne
         doit pas non plus passer pour un succès : on rend ``None``.
         """
-        if not (self.home_root / STANDARD_DIR).is_dir():
+        if not self.writes_projections or not (self.home_root / STANDARD_DIR).is_dir():
             return None
         dest = self.home_root / BOARD_RELPATH
         try:

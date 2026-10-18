@@ -483,3 +483,40 @@ def test_shipped_blueprints_agree_across_backends_node_by_node(
     assert python_final.current_node == rust_final.current_node
     assert python_final.completed_nodes == rust_final.completed_nodes
     assert python_final.pending_nodes == rust_final.pending_nodes
+
+
+# ── K11 : un run posé en PAUSED à la frontière de node, mêmes verdicts des deux côtés ───────────
+
+
+@pytest.mark.parametrize("backend", ["python", "rust"])
+def test_a_run_paused_at_a_node_boundary_agrees_across_backends(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, backend: str
+) -> None:
+    """``CHECKPOINTED → PAUSED`` (table de transitions), puis ``current_node`` et ``status_slices`` sur ``paused``.
+
+    Le côté Python ramène ``last_step_started`` au node suivant quand le dernier node ouvert est déjà dans le dernier
+    checkpoint ; le cœur Rust traite ``paused`` comme ``running`` : les deux désignent le node suivant, et le
+    découpage ``completed``/``pending`` en découle sans branche propre à ``paused``."""
+    if backend == "rust" and not rust_backend_available():
+        pytest.skip("grimoire_flows_core not installed")
+    _with_backend(backend, monkeypatch)
+    control = tmp_path / "control"
+    control.mkdir()
+    monkeypatch.setenv("GRIMOIRE_CONTROL_HOME", str(control))
+    (control / "pause.json").write_text('{"mode": "hold"}', encoding="utf-8")
+    engine = _engine(tmp_path)
+    wfi, _ = engine.run(_write_three_node_blueprint(tmp_path), executor=InteractiveNodeExecutor(stream=io.StringIO()))
+
+    outcome = engine.resume(wfi.id, output={"pins": {"out": {"contract": "c1"}}})
+    assert outcome.ok and outcome.paused and outcome.node_id == "b" and outcome.contract is None
+
+    view = engine.status(wfi.id)
+    assert (view.status, view.current_node, view.completed_nodes, view.pending_nodes) == (
+        WorkflowStatus.PAUSED.value, "b", ("a",), ("c",),
+    )
+    assert engine.doctor(wfi.id).ok
+
+    (control / "pause.json").unlink()
+    resumed = engine.resume(wfi.id, output={"pins": {"out": {"contract": "c2"}}})
+    assert resumed.ok and not resumed.paused and resumed.node_id == "c"
+    assert engine.status(wfi.id).status == WorkflowStatus.CHECKPOINTED.value

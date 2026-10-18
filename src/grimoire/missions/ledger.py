@@ -19,8 +19,8 @@ import json
 import logging
 import re
 import uuid
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -28,6 +28,7 @@ from typing import Any
 
 from grimoire.core.exceptions import GrimoireMissionError
 from grimoire.core.fsio import atomic_write, locked
+from grimoire.missions import ledger_snapshot as snapshot
 from grimoire.missions.lease import (
     CLOCK_TOLERANCE_SECONDS,
     DEFAULT_LEASE_TTL_SECONDS,
@@ -37,13 +38,18 @@ from grimoire.missions.lease import (
     LeaseFile,
     backoff_delay,
     lease_path,
+    mark_waiting,
     parse_instant,
     read_lease,
     write_lease,
 )
 from grimoire.missions.ledger_rules import (
+    UnjudgedClaimError,
     blocks_path,
     deferred_waiting,
+    parse_jsonl,
+    read_jsonl,
+    replay_link,
     replay_steering,
     unclosed_blockers,
     unfenced_question,
@@ -153,6 +159,8 @@ _FAILED_DISPATCH = frozenset({"red", "timeout", "error"})
 _HELD = (TaskState.CLAIMED, TaskState.RUNNING)
 #: Les états où le claim est encore à son titulaire : tenu, ou garé en attente (K6, reprise sur place).
 _HOLDING = (*_HELD, TaskState.WAITING)
+#: États qui ne tiennent pas de place de WIP et peuvent rentrer en ``running`` : la reprise repasse par la garde (K10).
+_RESUMING = (TaskState.WAITING, TaskState.NEEDS_VERIFICATION)
 #: Origine d'une barrière du fichier de bail (K2-S2-02) : voir :class:`LeaseFile`.
 ORIGIN_REAP = "reap"
 
@@ -321,7 +329,12 @@ class MissionLedger:
         self._rejected: dict[str, str] = {}
         #: K2 : clés ``idem = (task_id, lease_epoch, step)`` des effets déjà appliqués.
         self._idem_seen: set[str] = set()
+        #: K12 : lignes du journal illisibles au dernier rejeu (tronquées par une coupure), ignorées et rendues.
+        self._unreadable: tuple[int, ...] = ()
+        #: K10 : refus de claim posé par l'appelant (WIP), évalué sous le verrou ; ``""`` = accordé.
+        self.claim_guard: Callable[[Mapping[str, MissionTask], MissionTask], str] | None = None
         self._loaded = False
+        self._snapshot: snapshot.Cover | None = None  # K13 : ce que l'instantané restauré couvre
 
     # ── Private helpers ────────────────────────────────────────────────────
 
@@ -334,15 +347,11 @@ class MissionLedger:
 
     def _replay_events(self) -> None:
         if not self._events_path.exists():
+            self._unreadable = ()
             return
-        for line in self._events_path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                raw = json.loads(line)
-            except json.JSONDecodeError:
-                continue
+        replay = snapshot.resume_from_snapshot(self)  # K13 : l'état d'un instantané prouvé, puis la suite seule
+        records, self._unreadable = parse_jsonl(replay.tail, replay.first_line)  # K12 : lignes illisibles numérotées sur tout le journal
+        for raw in records:
             evt_type = raw.get("event_type", "")
             payload = raw.get("payload", {})
             if evt_type == "mission.created":
@@ -398,7 +407,7 @@ class MissionLedger:
                 # W5-01 : ni ``task.linked`` ni ``task.dependency.added`` n'étaient
                 # rejoués — ``task link`` écrivait un événement que rien ne lisait,
                 # et ``MissionTask.dependencies`` restait vide.
-                self._replay_link(raw, payload)
+                replay_link(self._tasks, raw, payload)
             elif evt_type == RISK_ACCEPTED_EVENT:
                 # W2-10 : la tâche ciblée est ``entity_id``, comme pour la session.
                 # Un événement orphelin n'invente rien ; l'horodatage de
@@ -411,24 +420,7 @@ class MissionLedger:
                         {**current.to_dict(), "accepted_risks": [*(dict(r) for r in current.accepted_risks), risk]}
                     )
             self._events.append(LedgerEvent.from_dict(raw))
-
-    def _replay_link(self, raw: dict[str, Any], payload: dict[str, Any]) -> None:
-        """Ajoute la dépendance d'un événement de lien à la tâche source, sans doublon."""
-        tid = str(raw.get("entity_id") or payload.get("task_id") or "")
-        current = self._tasks.get(tid)
-        if current is None:
-            return
-        try:
-            if "dependency" in payload:
-                dep = TaskDependency.from_dict(payload["dependency"])
-            else:
-                dep = TaskDependency(DependencyKind(str(payload.get("kind", "blocks"))), str(payload["depends_on"]))
-        except (KeyError, ValueError, TypeError):
-            return
-        if dep not in current.dependencies:
-            self._tasks[tid] = MissionTask.from_dict(
-                {**current.to_dict(), "dependencies": [d.to_dict() for d in (*current.dependencies, dep)]}
-            )
+        snapshot.save_if_slow(self, replay)
 
     def _apply_transition(self, tid: str, payload: dict[str, Any]) -> None:
         old_task = self._tasks[tid]
@@ -476,16 +468,7 @@ class MissionLedger:
         return ""
 
     def _replay_incidents(self) -> None:
-        if not self._incidents_path.exists():
-            return
-        for line in self._incidents_path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                raw = json.loads(line)
-            except json.JSONDecodeError:
-                continue
+        for raw in read_jsonl(self._incidents_path)[0]:
             inc = Incident.from_dict(raw)
             self._incidents[inc.id] = inc
 
@@ -497,7 +480,14 @@ class MissionLedger:
         self._epoch_high = {}
         self._rejected = {}
         self._idem_seen = set()
+        self._unreadable = ()
+        self._snapshot = None
         self._loaded = False
+
+    def unreadable_lines(self) -> tuple[int, ...]:
+        """Les lignes du journal ignorées au rejeu (tronquées ou corrompues), numérotées à partir de 1 (K12)."""
+        self._load()
+        return self._unreadable
 
     def append_event(self, event_type: str, entity_id: str, entity_kind: str, actor_id: str, payload: dict[str, Any]) -> LedgerEvent:
         """Record a custom event on any ledger entity (public API)."""
@@ -547,10 +537,13 @@ class MissionLedger:
         """
         path = _confined_ledger_file(path)
         line = json.dumps(record, ensure_ascii=False) + "\n"
-        existing = path.read_text(encoding="utf-8") if path.exists() else ""
+        # K12 : octets relus tels quels (une fin coupée dans un caractère ne rend pas le journal inécrivable),
+        # et une fin tronquée sans saut de ligne ne colle pas l'événement suivant à sa ligne illisible.
+        existing = path.read_bytes() if path.exists() else b""
+        existing += b"\n" if existing and not existing.endswith(b"\n") else b""
         # K2 (§2.3) : ajout puis ``fsync`` — ``atomic_write`` synchronise le
         # fichier et le dossier avant de rendre la main.
-        atomic_write(path, existing + line)
+        atomic_write(path, existing + line.encode("utf-8"))
 
     def _next_seq(self, prefix: str, id_map: dict[str, Any]) -> str:
         existing = [k for k in id_map if k.startswith(prefix)]
@@ -754,6 +747,10 @@ class MissionLedger:
                     f"Claim refusé pour {task_id} : dépend de {'; '.join(waiting)} — "
                     "une tâche ne se réclame que lorsque ses dépendances `blocks` sont closes"
                 )
+            if self.claim_guard is not None and (limit := self.claim_guard(self._tasks, task)):
+                raise GrimoireMissionError(f"Claim refusé pour {task_id} : {limit}")
+        elif to_state is TaskState.RUNNING and task.status in _RESUMING and self.claim_guard is not None and (limit := self.claim_guard(self._tasks, task)):
+            raise GrimoireMissionError(f"Reprise refusée pour {task_id} : {limit} — elle attend une place, la tâche reste {task.status.value}")
         if expected_from is not None and task.status is not expected_from:
             raise GrimoireMissionError(
                 f"Transition refusée pour {task_id} : l'état a changé entre-temps "
@@ -794,6 +791,8 @@ class MissionLedger:
             # sortie de needs_verification (clôture, échec) : la barrière tombe à ce moment-là.
             payload["fence_epoch"] = self._epoch_high.get(task_id, 0) + 1
             hands_back = True
+        entering, leaving = to_state is TaskState.WAITING, task.status is TaskState.WAITING  # K13 : marque de garde
+        mark_waiting(lease_path(self._root, task_id), entering=entering, leaving=leaving)
         if to_state is TaskState.CLAIMED and claim is not None:
             epoch = self._epoch_high.get(task_id, 0) + 1
             claim = replace(claim, lease_epoch=epoch)
@@ -953,8 +952,8 @@ class MissionLedger:
         """
         self._load()
         moment = now or self._now()
-        stamps = [t for t in (parse_instant(e.created_at) for e in self._events) if t is not None]
-        if stamps and moment < max(stamps) - timedelta(seconds=CLOCK_TOLERANCE_SECONDS):
+        latest = snapshot.latest_event_time(self)
+        if latest is not None and moment < latest - timedelta(seconds=CLOCK_TOLERANCE_SECONDS):
             return "unknown"
         return "ok"
 
@@ -1110,30 +1109,31 @@ class MissionLedger:
         now: datetime | None = None,
         is_fenced: Callable[[LeaseView], bool] | None = None,
         quota_until: Callable[[MissionTask], datetime | None] | None = None,
+        branch_hold: Callable[[MissionTask], str] | None = None,
     ) -> ReapReport:
         """Récolte des baux perdus — le seul chemin de ``RUNNING → READY``.
 
         Sous le verrou du journal, pour chaque bail perdu :
 
-        - fournisseur de la dernière route en quota (*quota_blocked*, défaut :
-          dernier ``task.dispatched`` en ``rate_limit``) : différée, cause
-          ``quota``, sans compter de tentative ;
+        - fournisseur de la dernière route en quota (*quota_blocked*, défaut : dernier
+          ``task.dispatched`` en ``rate_limit``) : différée, ``quota``, sans tentative comptée ;
         - plus de :data:`MAX_ATTEMPTS` tentatives : différée, ``retry_exhausted`` ;
-        - hôte sans frein vérifié : différée, ``resume_unfenced``, avec la question
-          posée à l'humain — on ne relance pas de doublon. Le verdict vient de
-          *is_fenced* (K3 : la table ``hosts.capabilities``, par hôte *et* par
-          version) ; sans lui, de l'appartenance à *fenced_hosts* (primitive de K2) ;
+        - hôte sans frein vérifié : différée, ``resume_unfenced``, avec la question posée à
+          l'humain — on ne relance pas de doublon. Le verdict vient de *is_fenced* (K3 : la table
+          ``hosts.capabilities``, par hôte *et* par version) ; sans lui, de *fenced_hosts* (K2) ;
+        - travail local non poussé (*branch_hold* rend sa question, K12) : différée, ``resume_branch``.
+          Ses git sont lents : l'appelant les joue **avant** la récolte, hors du verrou, et
+          *branch_hold* lève :class:`UnjudgedClaimError` pour un bail non jugé (K12-SC2-02) ;
         - sinon : barrière (fichier de bail à l'epoch suivant, sans titulaire)
           puis ``task.transitioned`` vers ``ready`` marqué ``lease_lost``.
 
-        Une différée s'écrit une fois par (epoch, cause) en ``task.reap_deferred`` et la
-        tâche se gare en ``waiting`` (K6) et sort de la récolte. ``quota`` : ``waiting(quota)``
-        **datée** — la réouverture lue par *quota_until* (service : fin de suspension ou de
-        refroidissement du fournisseur), à défaut ``maintenant + backoff_delay(tentatives)`` —
-        pour que le tick (``wake_due``) la rende ``ready`` ; jamais ``unknown`` ici, aucune sonde
-        ne la lèverait. ``retry_exhausted`` et ``resume_unfenced`` : ``waiting(human)`` avec la
-        question posée, que seule une réponse humaine (``task answer``) rend. Horloge
-        incohérente : rien n'est jugé. *apply* faux : les décisions sans aucune écriture.
+        Une différée s'écrit une fois par (epoch, cause) en ``task.reap_deferred`` et la tâche se gare en
+        ``waiting`` (K6), hors de la récolte. ``quota`` : ``waiting(quota)`` **datée** — réouverture lue
+        par *quota_until* (service : fin de suspension ou de refroidissement du fournisseur), à défaut
+        ``maintenant + backoff_delay(tentatives)`` — que le tick (``wake_due``) rend ``ready`` ; jamais
+        ``unknown`` ici, aucune sonde ne la lèverait. Les autres causes : ``waiting(human)`` avec la
+        question, que seule une réponse humaine (``task answer``) rend. Horloge incohérente : rien
+        n'est jugé. *apply* faux : les décisions sans aucune écriture.
         """
         is_quota = quota_blocked or self._last_route_quota
         with _ledger_file_lock(self._events_path):
@@ -1146,7 +1146,8 @@ class MissionLedger:
             for view in self.expired_claims(moment):
                 task = self._tasks[view.task_id]
                 fenced = is_fenced if is_fenced is not None else (lambda v: v.host in fenced_hosts)
-                decisions.append(self._reap_one(task, view, moment, fenced, is_quota, actor_id, apply, quota_until))
+                with suppress(UnjudgedClaimError):  # bail changé depuis le jugement fait hors verrou : pas jugé à ce tick
+                    decisions.append(self._reap_one(task, view, moment, fenced, is_quota, actor_id, apply, quota_until, branch_hold))
             return ReapReport("ok", tuple(decisions))
 
     def _reap_one(
@@ -1159,9 +1160,10 @@ class MissionLedger:
         actor_id: str,
         apply: bool,
         quota_until: Callable[[MissionTask], datetime | None] | None = None,
+        branch_hold: Callable[[MissionTask], str] | None = None,
     ) -> ReapDecision:
         before = self.attempts(task.id)
-        cause = ""
+        cause = held = ""
         path = lease_path(self._root, task.id)
         cached = read_lease(path)
         pending_reap = view.reason == "fence_pending" and cached is not None and cached.origin == ORIGIN_REAP
@@ -1172,9 +1174,11 @@ class MissionLedger:
                 cause = "retry_exhausted"
             elif not fenced(view):
                 cause = "resume_unfenced"
+            elif branch_hold is not None and (held := branch_hold(task)):
+                cause = "resume_branch"
         if cause:
             written = apply and not self._already_deferred(task.id, view.epoch, cause)
-            question = unfenced_question(view) if cause == "resume_unfenced" else ""
+            question = unfenced_question(view) if cause == "resume_unfenced" else held
             reopens = quota_until(task) if cause == "quota" and quota_until is not None else None
             waiting = deferred_waiting(task, view, cause, before, question, moment, reopens)
             if written:
@@ -1433,7 +1437,7 @@ class MissionLedger:
     def list_events(self, entity_id: str | None = None) -> list[LedgerEvent]:
         """Return ledger events, optionally scoped to one entity."""
         self._load()
-        events = list(self._events)
+        events = list(snapshot.all_events(self))
         if entity_id is not None:
             events = [e for e in events if e.entity_id == entity_id]
         return events
@@ -1472,7 +1476,7 @@ class MissionLedger:
 
     def export_jsonl(self, path: Path) -> int:
         self._load()
-        lines = [json.dumps(e.to_dict(), ensure_ascii=False) for e in self._events]
+        lines = [json.dumps(e.to_dict(), ensure_ascii=False) for e in snapshot.all_events(self)]
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         return len(lines)
 

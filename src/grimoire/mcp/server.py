@@ -759,6 +759,29 @@ def task_list_ready(
 
 
 @mcp.tool(annotations=_reads())
+def task_waves(
+    mission: str = "", project_path: str = ".", ledger_root: str = "_grimoire-runtime-output/ledger"
+) -> str:
+    """Show the plan's waves, and for one mission the human checkpoint of each wave.
+
+    A wave checkpoint is tied to the fingerprint of the merged diff and goes stale when the
+    content changes. `claim_blocked` names, per task, the checkpoint that currently refuses its claim.
+
+    Args:
+        mission: Mission id. Empty string lists the waves of every mission (no checkpoints then).
+        project_path: Path to project root (default: current directory).
+        ledger_root: Mission Ledger directory, relative to the project root.
+    """
+    try:
+        service = _task_service(project_path, ledger_root)
+        if not service.has_ledger:
+            return json.dumps({"waves": [], "note": "no Mission Ledger yet — `task add` opens one"})
+        return json.dumps(service.waves(mission or None), indent=2, ensure_ascii=False)
+    except (GrimoireError, OSError, ValueError) as exc:
+        return _task_error(exc)
+
+
+@mcp.tool(annotations=_reads())
 def task_show(task_id: str, project_path: str = ".", ledger_root: str = "_grimoire-runtime-output/ledger") -> str:
     """Show one task: state, acceptance, claim, and what each next move will require.
 
@@ -769,6 +792,7 @@ def task_show(task_id: str, project_path: str = ".", ledger_root: str = "_grimoi
     """
     from grimoire.missions.board import board_status_of
     from grimoire.missions.gates import declared_transitions
+    from grimoire.missions.wave_checkpoint import claim_refusal
 
     try:
         service = _task_service(project_path, ledger_root)
@@ -781,6 +805,8 @@ def task_show(task_id: str, project_path: str = ".", ledger_root: str = "_grimoi
         }
         payload = _task_json(task)
         payload["next_moves_require"] = requires
+        # W5-05 : le motif exact que `task_claim` opposerait (checkpoint de vague requis et non validé), vide sinon.
+        payload["claim_blocked_by"] = claim_refusal(service, task_id)
         return json.dumps(payload, indent=2, ensure_ascii=False)
     except (GrimoireError, OSError, ValueError) as exc:
         return _task_error(exc)

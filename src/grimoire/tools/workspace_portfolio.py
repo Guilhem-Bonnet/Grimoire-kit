@@ -34,6 +34,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from grimoire.costs import Cost
 from grimoire.missions.lease import DEFAULT_LEASE_TTL_SECONDS, LeaseFile
 from grimoire.missions.liveness import (
     INACTIF,
@@ -52,6 +53,7 @@ __all__ = [
     "DEFAULT_LIVE_MINUTES",
     "PRIORITY_BY_RISK",
     "SCHEMA_VERSION",
+    "annotate_cards",
     "portfolio_tasks",
     "resolve_registry_root",
     "resume_command",
@@ -176,12 +178,65 @@ def _sessions_index(project_root: Path) -> dict[str, dict[str, Any]]:
         index[session_id] = {
             "session_id": session_id,
             "updated_at": str(data.get("updated_at") or data.get("started_at") or ""),
+            "started_at": str(data.get("started_at") or ""),
+            "ended_at": str(data.get("ended_at") or ""),
             "ended": bool(data.get("ended_at")),
             "task_id": str(data.get("task_id") or ""),
             "host": str(data.get("host") or data.get("host_id") or ""),
             "journal": path.relative_to(project_root).as_posix(),
         }
     return index
+
+
+def session_duration(started_at: str | None, last_sign_at: str | None) -> int | None:
+    """Secondes entre le premier et le dernier signe de vie de la session, ou ``None``.
+
+    Jamais ``0`` par défaut : un journal sans ``started_at`` lisible, ou dont le
+    dernier signe précède le début, a une durée **inconnue**, pas nulle.
+    """
+    start, end = _parse_iso(started_at), _parse_iso(last_sign_at)
+    if start is None or end is None or end < start:
+        return None
+    return int((end - start).total_seconds())
+
+
+#: Le coût propre de la session hôte n'est mesuré nulle part dans le kit (voir
+#: ``flows.autonomy.COST_SCOPE``) : le dire, plutôt qu'afficher un zéro.
+SESSION_COST: dict[str, Any] = {"usd": None, "status": "unknown", "unpriced_calls": 0, "calls": 0, "scope": "host_session"}
+
+
+def dispatch_costs(ledger: Any) -> dict[str, dict[str, Any]]:
+    """Coût des tentatives de dispatch (``task.dispatched``) par tâche, en trois états (W1-01).
+
+    Une tentative sans ``cost_usd`` est non chiffrée : le total d'une tâche est
+    ``exact`` si tout est chiffré, ``lower_bound`` (un minimum) si certaines
+    seulement le sont, ``unknown`` si aucune ne l'est. Une tâche **sans aucun
+    dispatch** n'a pas un coût nul : le kit n'a rien mesuré, elle n'apparaît
+    pas ici (voir :func:`cost_of`). Portée ``dispatch`` : le coût de la session
+    qui a travaillé hors dispatch n'y est pas.
+    """
+    totals: dict[str, Cost] = {}
+    calls: dict[str, int] = {}
+    for event in ledger.list_events():
+        if event.event_type != "task.dispatched":
+            continue
+        totals[event.entity_id] = totals.get(event.entity_id, Cost.none()) + Cost.coerce(event.payload.get("cost_usd"))
+        calls[event.entity_id] = calls.get(event.entity_id, 0) + 1
+    return {
+        tid: {
+            "usd": None if cost.usd is None else round(cost.usd, 6),
+            "status": cost.status,
+            "unpriced_calls": cost.unpriced_calls,
+            "calls": calls[tid],
+            "scope": "dispatch",
+        }
+        for tid, cost in totals.items()
+    }
+
+
+def cost_of(costs: Mapping[str, dict[str, Any]], task_id: str) -> dict[str, Any]:
+    """Le coût de *task_id*, ou « inconnu, aucun dispatch » — jamais ``0``."""
+    return dict(costs.get(task_id) or {"usd": None, "status": "unknown", "unpriced_calls": 0, "calls": 0, "scope": "dispatch"})
 
 
 def _session_for(
@@ -247,10 +302,14 @@ def _session_for(
     # `session_host` : l'hôte de la session rattachée (lot A) ; `host_id` :
     # celui déclaré au claim ; le journal en dernier recours.
     host = str(claim.get("session_host") or claim.get("host_id") or (journal or {}).get("host") or "") or None
+    last_sign = (journal or {}).get("ended_at") or updated_at
     return {
         "id": session_id,
         "host": host,
         "updated_at": updated_at or None,
+        "started_at": (journal or {}).get("started_at") or None,
+        "duration_s": session_duration((journal or {}).get("started_at"), last_sign),
+        "cost": dict(SESSION_COST),
         "liveness": state.to_dict(),
         "progress_at": progress.isoformat() if progress else None,
         "attention": warn.to_dict() if warn else None,
@@ -277,6 +336,46 @@ def _project_row(entry: dict[str, str]) -> dict[str, Any]:
     }
 
 
+def annotate_cards(
+    project_root: Path,
+    service: Any,
+    tasks: list[Any],
+    cards: list[dict[str, Any]],
+    *,
+    now: datetime,
+    live_minutes: int = DEFAULT_LIVE_MINUTES,
+    probe: SessionProbe | None = None,
+) -> None:
+    """Pose sur chaque carte ``session`` (vivacité, dernier signe, durée) et ``cost``.
+
+    Partagé par le portefeuille et par la portée projet d'Exécuter
+    (:func:`grimoire.tools.workspace_api.tasks_view`) : une seule arithmétique,
+    donc la même carte dit la même chose dans les deux. La sonde d'hôte n'est
+    appelée qu'une fois par projet, et seulement si une tâche est tenue.
+    """
+    from grimoire.missions.schemas import TaskState
+
+    sessions = _sessions_index(project_root)
+    costs = dispatch_costs(service.ledger)
+    probed: Mapping[str, str] | None = None
+    probe_done = False
+    for task, card in zip(tasks, cards, strict=True):
+        held = task.status in (TaskState.CLAIMED, TaskState.RUNNING)
+        if held and probe is not None and not probe_done:
+            probed, probe_done = probe(), True  # une fois par projet, seulement si une tâche est tenue
+        card["session"] = _session_for(
+            card,
+            sessions,
+            now=now,
+            live_minutes=live_minutes,
+            lease=service.ledger.lease_file(task.id) if held else None,
+            probe=probed,
+            progress=task_progress(service.ledger, task.id, project_root) if held else None,
+            claimed_at=claim_time(service.ledger, task.id) if held else None,
+        )
+        card["cost"] = cost_of(costs, task.id)
+
+
 def _project_cards(
     entry: dict[str, str],
     row: dict[str, Any],
@@ -286,7 +385,6 @@ def _project_cards(
     probe: SessionProbe | None = None,
 ) -> list[dict[str, Any]]:
     """Les cartes d'un projet — et l'état de sa ligne, mis à jour en place."""
-    from grimoire.missions.schemas import TaskState
     from grimoire.missions.service import TaskService
     from grimoire.tools.workspace_api import _task_json
 
@@ -305,10 +403,7 @@ def _project_cards(
             row["reason"] = "aucun Mission Ledger — `grimoire task add` en ouvre un"
             return []
         tasks = service.list_tasks()
-        sessions = _sessions_index(project_root)
         cards: list[dict[str, Any]] = []
-        probed: Mapping[str, str] | None = None
-        probe_done = False
         for task in tasks:
             card = _task_json(task)
             card["project"] = {"slug": row["slug"], "name": row["name"]}
@@ -321,21 +416,10 @@ def _project_cards(
                 or card.get("priority")
                 or PRIORITY_BY_RISK.get(str(card.get("risk_profile")), "")
             )
-            held = task.status in (TaskState.CLAIMED, TaskState.RUNNING)
-            if held and probe is not None and not probe_done:
-                probed, probe_done = probe(), True  # une fois par projet, seulement si une tâche est tenue
-            card["session"] = _session_for(
-                card,
-                sessions,
-                now=now,
-                live_minutes=live_minutes,
-                lease=service.ledger.lease_file(task.id) if held else None,
-                probe=probed,
-                progress=task_progress(service.ledger, task.id, project_root) if held else None,
-                claimed_at=claim_time(service.ledger, task.id) if held else None,
-            )
-            card["unread_directives"] = unread_directives(card)
             cards.append(card)
+        annotate_cards(project_root, service, tasks, cards, now=now, live_minutes=live_minutes, probe=probe)
+        for card in cards:
+            card["unread_directives"] = unread_directives(card)
     except Exception as exc:
         # Un ledger corrompu sur UN projet de la flotte ne doit pas faire
         # tomber le portefeuille entier : la ligne du projet porte la raison.

@@ -491,14 +491,14 @@ class FlowEngine:
                 pending = checkpoints[-1].state.pending_steps
                 checkpoint_pending_head = pending[0] if pending else None
         else:
-            # RUNNING (ou CREATED, avant le tout premier advance_step ;
-            # PAUSED, jamais émis par RuntimeKernel — voir le docstring de
-            # rust/grimoire-flows-core/src/lib.rs).
+            # RUNNING (ou CREATED, avant le tout premier advance_step ; ou PAUSED,
+            # posé par le kernel à la frontière d'un node, K11 — voir le docstring
+            # de rust/grimoire-flows-core/src/lib.rs).
             for event in reversed(self._kernel.get_run_events(wfi.id)):
                 if event.event_type is RunEventType.STEP_STARTED:
                     last_step_started = event.payload.get("step_id")
                     break
-            if wfi.status is WorkflowStatus.RUNNING and last_step_started is not None:
+            if wfi.status in (WorkflowStatus.RUNNING, WorkflowStatus.PAUSED) and last_step_started is not None:
                 # W1-03b : le statut RUNNING est écrit AVANT STEP_STARTED (et
                 # avant le statut CHECKPOINTED d'un checkpoint déjà écrit). Si le
                 # dernier node ouvert est déjà dans le dernier checkpoint, il est
@@ -732,6 +732,19 @@ class FlowEngine:
             return None
         return state.grant_id, "" if state.active else refusal_note(state)
 
+    def _hold_in_force(self, wfi: WorkflowInstance) -> str:
+        """Le motif d'un ``hold`` qui couvre ce run (K11), ``""`` sinon.
+
+        Seul ``hold`` pose un run à la frontière de node : ``drain`` laisse les agents en cours finir leur tâche,
+        et un drapeau illisible vaut ``drain``. Les drapeaux sont relus à chaque frontière (deux lectures de fichier).
+        """
+        from grimoire.missions.pause import HOLD, home_root, read_pause
+
+        state = read_pause(home_root(Path(self._project_root)))
+        if state.mode_for(wfi.task_id) != HOLD:
+            return ""
+        return "pause hold en vigueur (" + "; ".join(f.label for f in state.applying(wfi.task_id)) + ")"
+
     def _present(self, run_id: str, contract: NodeContract | None) -> None:
         """Un checkpoint présenté émet son challenge, lié à la session courante (rien pour un autre kind)."""
         if contract is not None and contract.kind == "checkpoint":
@@ -862,8 +875,15 @@ class FlowEngine:
                 and str(refusal["reason"] or "").startswith("awaiting_human")
             )
             return Directive("blocked", run_id, node_id, did, attempt, "awaiting_human" if awaiting else "contract_violation")
+        if wfi.status is WorkflowStatus.PAUSED and self._hold_in_force(wfi):
+            # Pas de directive_id : aucune réponse n'est attendue tant que la pause dure.
+            return Directive("blocked", run_id, node_id, None, attempt, "paused")
         contract = contracts.get(node_id)
         kind = "checkpoint" if contract is not None and contract.kind == "checkpoint" else "execute"
+        if wfi.status is WorkflowStatus.PAUSED and kind == "checkpoint":
+            # K11 : la frontière a posé le run sans présenter ce checkpoint (donc sans challenge) ; la session qui
+            # reprend le reçoit ici, avant le tour humain qui doit y répondre. Idempotent pour une même session.
+            self._present(run_id, contract)
         return Directive(kind, run_id, node_id, did, attempt)
 
     def _directive_refusal(self, run_id: str, supplied: str, output: dict[str, Any], allow_replay: bool) -> None:
@@ -1061,11 +1081,21 @@ class FlowEngine:
                 f"run {run_id} : aucun node courant résoluble (status={wfi.status.value})", run_id, repaired_notes
             )
 
+        if wfi.status is WorkflowStatus.PAUSED and (held := self._hold_in_force(wfi)):
+            raise _refusal(
+                f"run {run_id} : {held} ; rien n'a été écrit. Reprendre après `grimoire orchestrate resume`.",
+                run_id,
+                repaired_notes,
+            )
         contract = contracts[current_id]
         faults = check_output_against_contract(contract, output)
         #: Le gate du node : une sortie refusée par son contrat révoque les octrois qui couvrent le run (W5-06).
         contract_faults = tuple(faults)
         if contract.kind == "checkpoint":
+            if wfi.status is WorkflowStatus.PAUSED and (digest is None or self._crossed_node_for_digest(wfi, digest) is None):
+                # K11 : pause levée, checkpoint jamais présenté : le challenge précède le jugement, sinon la décision
+                # courante serait refusée en `no_challenge` alors que personne n'a pu y répondre. (Pas pour un rejeu.)
+                self._present(run_id, contract)
             # Issue #207 : la décision d'hôte ("approve"/"reject"/"amend")
             # n'est pas une pin — jamais franchie côté Rust
             # (`check_output_against_contract` ci-dessus n'en sait toujours
@@ -1108,7 +1138,12 @@ class FlowEngine:
                     replay_of=crossed,
                     repaired=repaired_notes,
                 )
-        if wfi.status is not WorkflowStatus.RUNNING:
+        resumed_from_pause = wfi.status is WorkflowStatus.PAUSED
+        if resumed_from_pause:
+            # K11 : la pause est levée (sinon on a refusé plus haut) ; le challenge d'un checkpoint a été émis
+            # plus haut, pour la session qui reprend — celle qui a posé la pause n'est plus forcément là.
+            wfi = self._kernel.unpause(wfi.id, ctx)
+        if wfi.status is not WorkflowStatus.RUNNING or resumed_from_pause:
             # (Le docteur s'appuie sur ce test : un run déjà RUNNING n'est pas rouvert,
             # voir `doctor.resume_realigns_status`.)
             # CHECKPOINTED (crash avant le advance_step du node suivant) ou
@@ -1190,6 +1225,21 @@ class FlowEngine:
 
         assert next_id is not None  # finished est False => resume_outcome a nommé le node suivant
         next_contract = contracts[next_id]
+        held = self._hold_in_force(wfi)
+        if held:
+            # K11 : la frontière de node est le seul endroit où un run se pose sans rien casser — le node vient
+            # d'être franchi, le suivant n'est ni présenté, ni exécuté (un exécuteur par dispatch lancerait un agent).
+            self._kernel.pause(wfi.id, ctx, reason=held)
+            return ResumeOutcome(
+                ok=True,
+                finished=False,
+                node_id=next_id,
+                contract=None,
+                repaired=repaired_notes,
+                attestation=attestation,
+                warnings=(*warnings, held),
+                paused=True,
+            )
         self._present(run_id, next_contract)
         # Le node suivant n'est pas encore ouvert (pas de advance_step ici) :
         # un crash juste après cet appel laisse le kernel en CHECKPOINTED, et
@@ -1271,7 +1321,8 @@ class FlowEngine:
             pending_list = []
 
         contract = None
-        if include_contract and current_id is not None:
+        if include_contract and current_id is not None and not (wfi.status is WorkflowStatus.PAUSED and self._hold_in_force(wfi)):
+            # K11 : un run posé par un hold ne sert pas le contrat du node suivant, qu'aucun appelant ne doit exécuter.
             contract = build_node_contracts(
                 load_blueprint(self._blueprint_file(meta), self._project_root), self._project_root
             ).get(current_id)

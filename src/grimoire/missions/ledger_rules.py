@@ -1,26 +1,69 @@
 """Règles d'attente et de dépendances du ledger, sorties de ``ledger.py`` (plafond de 1500 lignes).
 
 Fonctions sans état : la garde des transitions vers/depuis ``waiting`` (K6), l'attente que
-la récolte pose à la place d'un silence, et la lecture du graphe de dépendances ``blocks``
-(W5-01). Le ledger les appelle sous son verrou ; rien ici n'écrit.
+la récolte pose à la place d'un silence, la lecture du graphe de dépendances ``blocks``
+(W5-01) et la lecture du journal ligne à ligne, qui rend les lignes illisibles au lieu de les
+taire (K12). Le ledger les appelle sous son verrou ; rien ici n'écrit.
 """
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from grimoire.core.exceptions import GrimoireMissionError
 from grimoire.missions.lease import MAX_ATTEMPTS, backoff_delay
-from grimoire.missions.schemas import DependencyKind, MissionTask, TaskState
+from grimoire.missions.schemas import DependencyKind, MissionTask, TaskDependency, TaskState
 from grimoire.missions.session_link import resume_command
 from grimoire.missions.waiting import Question, ResumeHint, Waiting, new_question_id
 
 if TYPE_CHECKING:
     from grimoire.missions.ledger import LeaseView
 
-__all__ = ["blocks_path", "deferred_waiting", "replay_steering", "unclosed_blockers", "unfenced_question", "waiting_guard"]
+__all__ = [
+    "UnjudgedClaimError", "blocks_path", "deferred_waiting", "parse_jsonl", "read_jsonl", "replay_link", "replay_steering", "unclosed_blockers", "unfenced_question",
+    "waiting_guard",
+]
+
+
+class UnjudgedClaimError(Exception):
+    """Levée par ``branch_hold`` quand le bail n'est plus celui que l'appelant a jugé : la tâche n'est pas jugée à ce tick (K12-SC2-02)."""
+
+
+def read_jsonl(path: Path) -> tuple[list[dict[str, Any]], tuple[int, ...]]:
+    """Les objets d'un journal JSON ligne à ligne, et les numéros (base 1) des lignes illisibles, ignorées.
+
+    Une coupure de courant pendant un ajout laisse une dernière ligne tronquée, parfois au milieu
+    d'un caractère multi-octet : la ligne est sautée — le rejeu reste celui du préfixe cohérent — et
+    son numéro rendu, jamais tu (K12, scénario H). Chaque ligne est décodée seule, en UTF-8 strict :
+    un octet tronqué n'emporte pas tout le journal. Le découpage se fait sur ``\\n`` seulement — un
+    ``U+2028`` écrit brut par ``ensure_ascii=False`` reste dans sa ligne (``str.splitlines`` la coupait).
+    """
+    if not path.exists():
+        return [], ()
+    return parse_jsonl(path.read_bytes())
+
+
+def parse_jsonl(data: bytes, first_line: int = 1) -> tuple[list[dict[str, Any]], tuple[int, ...]]:
+    """Comme :func:`read_jsonl` sur des octets déjà lus ; ``first_line`` numérote la première ligne (queue d'un instantané, K12 x K13)."""
+    records: list[dict[str, Any]] = []
+    unreadable: list[int] = []
+    for number, chunk in enumerate(data.split(b"\n"), start=first_line):
+        if not chunk.strip():
+            continue
+        try:
+            raw = json.loads(chunk.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raw = None
+        if isinstance(raw, dict):
+            records.append(raw)
+        else:
+            unreadable.append(number)
+    return records, tuple(unreadable)
+
 
 def waiting_guard(
     task: MissionTask,
@@ -89,8 +132,8 @@ def deferred_waiting(
             "la relancer encore, ou l'abandonner ?"
         )
         options, kind = ("réessayer", "abandonner"), "retry_exhausted"
-    else:
-        text, options, kind = question, ("reprendre", "abandonner"), "resume_unfenced"
+    else:  # resume_unfenced (hôte sans frein) ou resume_branch (commits non poussés, K12) : le texte est fourni
+        text, options, kind = question, ("reprendre", "abandonner"), cause
     return Waiting("human", "", Question(new_question_id(), kind, text, options, "tick", since), hint, since)
 
 def unfenced_question(view: LeaseView) -> str:
@@ -130,6 +173,25 @@ def blocks_path(tasks: Mapping[str, MissionTask], start: str, goal: str) -> list
             if dep.kind is DependencyKind.BLOCKS:
                 stack.append((dep.target, [*path, dep.target]))
     return []
+
+
+def replay_link(tasks: dict[str, MissionTask], raw: dict[str, Any], payload: dict[str, Any]) -> None:
+    """Ajoute la dépendance d'un événement de lien à la tâche source, sans doublon."""
+    tid = str(raw.get("entity_id") or payload.get("task_id") or "")
+    current = tasks.get(tid)
+    if current is None:
+        return
+    try:
+        if "dependency" in payload:
+            dep = TaskDependency.from_dict(payload["dependency"])
+        else:
+            dep = TaskDependency(DependencyKind(str(payload.get("kind", "blocks"))), str(payload["depends_on"]))
+    except (KeyError, ValueError, TypeError):
+        return
+    if dep not in current.dependencies:
+        tasks[tid] = MissionTask.from_dict(
+            {**current.to_dict(), "dependencies": [d.to_dict() for d in (*current.dependencies, dep)]}
+        )
 
 
 def replay_steering(tasks: dict[str, MissionTask], evt_type: str, payload: dict[str, Any]) -> None:
