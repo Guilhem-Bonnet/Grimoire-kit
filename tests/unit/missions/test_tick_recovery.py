@@ -293,7 +293,13 @@ def _slow_unpushed_work(monkeypatch: pytest.MonkeyPatch, journal: list[str], *, 
     real = task_worktree.unpushed_work
 
     def slow(service: TaskService, task_id: str) -> str:
-        journal.append("git-start")
+        import grimoire.core.fsio as fsio
+
+        try:  # le verrou du journal doit être libre quand les git démarrent
+            with fsio.locked(service.ledger._events_path, timeout=0.05):
+                journal.append("git-start")
+        except TimeoutError:
+            journal.append("git-start:verrou-tenu")
         time.sleep(seconds)
         out = real(service, task_id)
         journal.append("git-end")
