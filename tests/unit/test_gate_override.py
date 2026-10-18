@@ -202,3 +202,64 @@ def test_verify_lists_consumed_override_with_reason_and_timestamp(governed: Path
     checks = [c for c in verify_standard_profile(governed, task_id=tid).checks if c.id == "policy.override_consumed"]
     assert len(checks) == 1
     assert "client bloqué en prod" in checks[0].message and consumed["ts"] in checks[0].message
+
+
+def _bash(root: Path, command: str, session: str = "s-1") -> Any:
+    from grimoire.hosts.decisions import decide_tool_policy
+
+    hook = HookInput(
+        event=HookEvent.PRE_TOOL_USE,
+        project_root=root,
+        tool_name="Bash",
+        tool_input={"command": command},
+        session_id=session,
+        host=HOST,
+    )
+    return decide_tool_policy(hook)
+
+
+_FORGING_COMMANDS = (
+    # Nommer la fonction d'écriture depuis son module complet.
+    'python -c "from grimoire.hosts.decisions.gate_override import record_override_request as r; print(r)" > out.txt',
+    # Importer le module par le paquet : ni `hosts.decisions.gate_override` ni la fonction ne figurent au texte.
+    'python3 -c "from grimoire.hosts.decisions import gate_override as g; '
+    "g._append(__import__('pathlib').Path('.'), 'T', {'type': 'policy.override'})\"",
+    'python -c "import grimoire.hosts.decisions.gate_override as g; g._append(None, None, {})"',
+    "python -m grimoire.hosts.decisions.gate_override",
+    "python3 -m grimoire.hosts.decisions.gate_override --forge",
+    "uvx --from grimoire-kit python -m grimoire.hosts.decisions.gate_override",
+)
+
+
+@pytest.mark.parametrize("command", _FORGING_COMMANDS)
+def test_tool_cannot_name_the_override_writer_in_governed(governed: Path, command: str) -> None:
+    """Appeler le module du journal depuis un outil forgerait la paire demande/consommation.
+
+    ``record_override_request`` ne vérifie que ``turn_origin(hook)``, lu sur un
+    ``HookInput`` que l'appelant construit : seule la garde d'autorité empêche
+    qu'un outil l'atteigne, comme elle le fait déjà pour ``record_human_turn``.
+    """
+    _claimed(governed)
+    decision = _bash(governed, command)
+    assert decision.outcome is Outcome.DENY, command
+
+
+@pytest.mark.parametrize(
+    "command",
+    (
+        "cat src/grimoire/hosts/decisions/gate_override.py",
+        "grep -n gate_override src/grimoire/hosts/decisions/evidence_gate.py",
+    ),
+)
+def test_reading_the_override_module_stays_allowed(governed: Path, command: str) -> None:
+    _claimed(governed)
+    assert _bash(governed, command).outcome is Outcome.ALLOW, command
+
+
+def test_forged_pair_through_the_module_cannot_be_reached_to_lift_the_gate(governed: Path) -> None:
+    """Le chemin d'attaque complet : le `python -c` refusé, le Stop reste bloqué."""
+    tid = _claimed(governed)
+    forging = 'python -c "from grimoire.hosts.decisions import gate_override as g; g.record_override_request(None)"'
+    assert _bash(governed, forging).outcome is Outcome.DENY
+    assert not (governed / go.overrides_relpath(tid)).exists()
+    assert _stop(governed).outcome is Outcome.BLOCK

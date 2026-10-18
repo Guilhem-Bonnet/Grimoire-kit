@@ -70,7 +70,14 @@ _HOOK_MODULE_MARKERS = (
     "record_human_turn",
     "cli.cmd_host",
     "run_hook",
+    "record_override_request",
 )
+#: Le module qui écrit le journal des contournements (W2-06), nommé seul : un
+#: ``from grimoire.hosts.decisions import gate_override`` ne contient ni
+#: ``hosts.decisions.gate_override`` ni ``record_override_request``, mais
+#: ``gate_override._append`` suffit à écrire une paire forgée. Le mot entier,
+#: sans identifiant collé devant (``test_gate_override.py`` n'est pas le module).
+_GATE_OVERRIDE_WORD = re.compile(r"(?<![A-Za-z0-9_])gate_override(?![A-Za-z0-9])")
 _RESUME_LONG = ("--resume", "--continue", "--session-id")
 #: Programmes qui en lancent un autre : le binaire visé peut suivre à n'importe
 #: quelle position (``uvx --from grimoire-kit grimoire-hook``, ``timeout 5 …``).
@@ -95,6 +102,11 @@ def _norm(text: str) -> str:
     return text.replace("\\", "/")
 
 
+def _names_hook_module(text: str) -> bool:
+    """Vrai si *text* nomme un point d'entrée du hook ou le module du journal des contournements."""
+    return any(m in text for m in _HOOK_MODULE_MARKERS) or bool(_GATE_OVERRIDE_WORD.search(text))
+
+
 def _names_protected(text: str) -> str:
     normalized = _norm(text)
     for marker in _PROTECTED:
@@ -106,7 +118,12 @@ def _names_protected(text: str) -> str:
 _OPERATORS = ("&&", "||", "$(", ";", "|", "\n", "`", "(", ")")
 _ESCAPE = re.compile(r"\\(.)", re.DOTALL)
 #: Modules dont ``python -m`` est l'entrée du hook : les nommer, c'est le rejouer.
-_HOOK_MODULES = ("grimoire.hosts.runtime", "hosts.decisions.human_turns", "grimoire.cli.cmd_host")
+_HOOK_MODULES = (
+    "grimoire.hosts.runtime",
+    "hosts.decisions.human_turns",
+    "grimoire.cli.cmd_host",
+    "grimoire.hosts.decisions.gate_override",
+)
 
 
 def _command_words(text: str) -> list[list[str]]:
@@ -262,7 +279,7 @@ def forgery_vector(facts: ToolFacts) -> ForgeryVector | None:
         if marker:
             return ForgeryVector("journal", f"commande qui écrit un journal d'autorité ({marker})", governed_only=False)
     executed = [command_surface(command), *extract_c_bodies(command)]
-    if facts.mutation is not MutationClass.READ_ONLY and any(m in text for text in executed for m in _HOOK_MODULE_MARKERS):
+    if facts.mutation is not MutationClass.READ_ONLY and any(_names_hook_module(text) for text in executed):
         return ForgeryVector("hook-replay", "rejeu du hook UserPromptSubmit", governed_only=True)
     # Les programmes visés se lisent sur le texte non blanchi : un nom cité reste le nom lancé.
     for text in (_strip_heredoc_bodies(command), *extract_c_bodies(command)):
