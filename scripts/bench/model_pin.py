@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
@@ -166,6 +167,30 @@ def suite_saturation(rates: Mapping[str, float | None]) -> dict[str, Any]:
         "n_tasks_at_1": at_one,
         "ratio": ratio,
     }
+
+
+def saturation_exit_code(records: Sequence[Any], *, fail_on_saturated: bool) -> int:
+    """Code de sortie de la garde ``--fail-on-saturated`` (0 si la garde est inactive).
+
+    1 si la garde est demandée ET que le rapport conclut ``saturated is True``,
+    avec une ligne sur stderr. Même calcul que le rapport (``suite_saturation`` sur
+    les taux ``nu`` des mêmes lignes). ``NON SATURÉ`` et ``NON ÉVALUÉ`` ne font pas
+    échouer : sans mesure du ``nu``, on ne peut pas affirmer la saturation, et
+    on ne rougit pas sur une donnée absente. La garde est opt-in : sur la suite
+    actuelle (lot L, 20 tâches sur 20 à 1.0) elle rougirait en permanence si
+    elle était câblée sans demande.
+    """
+    if not fail_on_saturated:
+        return 0
+    saturation = suite_saturation(nu_baseline_pass_rates(records))
+    if saturation["saturated"] is not True:
+        return 0
+    print(
+        f"[saturation] suite SATURÉE : {saturation['n_tasks_at_1']}/{saturation['n_tasks_measured']} tâches à 1.0 "
+        f"pour le `nu` (> {saturation['threshold']:.0%}) ; --fail-on-saturated demandé, sortie en erreur.",
+        file=sys.stderr,
+    )
+    return 1
 
 
 def render_saturation_lines(saturation: Mapping[str, Any]) -> list[str]:

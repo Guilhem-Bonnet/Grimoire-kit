@@ -355,6 +355,59 @@ def test_a_non_saturated_suite_is_not_flagged() -> None:
     assert "**SATURÉ**" not in ta.render_report_markdown(report)
 
 
+# ── 4bis. garde opt-in ``--fail-on-saturated`` : la saturation devient un code de sortie ──
+
+
+def _lot_l_records() -> list[Any]:
+    frozen = json.loads(FIXTURE.read_text(encoding="utf-8"))["nu_successes_by_task"]
+    return [_record(task, "nu", i, ok) for task, runs in frozen.items() for i, ok in enumerate(runs)]
+
+
+def test_report_only_fails_on_the_saturated_lot_l_when_asked(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Fiche B-01 : une suite saturée doit rougir. Sur le lot L figé (20/20 à 1.0), le rapport est écrit ET la sortie est 1."""
+    _write_rows(tmp_path / "state" / "results.jsonl", _lot_l_records())
+    argv = ["--report-only", "--workspace", str(tmp_path), "--report-dir", str(tmp_path / "out")]
+
+    rc = ta.main([*argv, "--fail-on-saturated"])
+
+    assert rc == 1
+    assert "SATURÉE" in capsys.readouterr().err
+    saturation = json.loads((tmp_path / "out" / "report.json").read_text(encoding="utf-8"))["suite_saturation"]
+    assert saturation["verdict"] == "SATURÉ"  # le rapport reste écrit
+    assert ta.main(argv) == 0  # opt-in : sans le drapeau, comportement inchangé
+
+
+@pytest.mark.parametrize("kind", ["not-saturated", "unevaluated"])
+def test_fail_on_saturated_does_not_fail_without_a_saturation_verdict(kind: str, tmp_path: Path) -> None:
+    if kind == "not-saturated":
+        records = [_record(f"python/t{i}", "nu", j, ok) for i in range(4) for j, ok in enumerate((i < 1, True, True))]
+    else:
+        records = [_record(arm="kit-gov")]  # aucun run nu : on ne rougit pas sur une donnée absente
+    _write_rows(tmp_path / "state" / "results.jsonl", records)
+    rc = ta.main(
+        ["--report-only", "--workspace", str(tmp_path), "--report-dir", str(tmp_path / "out"), "--fail-on-saturated"]
+    )
+    assert rc == 0
+
+
+def test_full_campaign_fails_on_saturated_when_asked(
+    bench_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_main(monkeypatch, bench_root, tmp_path)
+    monkeypatch.setattr(ta, "_run_one", lambda task, arm, run_index, **kw: _record(task.task_id, arm, run_index))
+    base = ["--full", "--model", "claude-a"]
+    assert ta.main([*base, "--workspace", str(tmp_path / "ws-off")]) == 0
+    assert ta.main([*base, "--fail-on-saturated", "--workspace", str(tmp_path / "ws-on")]) == 1
+
+
+def test_saturation_exit_code_is_zero_when_the_guard_is_off() -> None:
+    records = [_record(f"python/t{i}", "nu", 0, True) for i in range(3)]
+    assert mp.saturation_exit_code(records, fail_on_saturated=False) == 0
+    assert mp.saturation_exit_code(records, fail_on_saturated=True) == 1
+
+
 # ── 5. ``claude --version`` ────────────────────────────────────────────────
 
 

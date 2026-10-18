@@ -494,6 +494,9 @@ changé entre K et L, `docs/bench/rejeu-lot-l-2026-10-02.md` §1.3) ; rien n'emp
 - **`nu_baseline_pass_rate`** : part de runs `nu` réussis, par tâche, dans `report.json` (`by_task`) ; `null` sans run `nu` valide (jamais 0.0). Les runs invalidés (W1-08b) sont exclus.
 - **SATURÉ** : strictement plus de 50 % des tâches à 1.0 pour le `nu` donne `suite_saturation.verdict = "SATURÉ"` et une mention en tête de `report.md`. Sans run `nu` : `NON ÉVALUÉ`.
   Sur les données figées du lot L (`tests/fixtures/bench/lot-l-nu-baseline.json`) : 20 tâches sur 20 à 1.0, SATURÉ.
+- **`--fail-on-saturated`** (opt-in, `--report-only` et `--full`) : le rapport est écrit, puis la sortie est 1 si le verdict est `SATURÉ`
+  (message sur stderr). `NON SATURÉ` et `NON ÉVALUÉ` sortent en 0 : une donnée absente ne fait pas rougir. Le drapeau n'est pas câblé en CI : sur la suite actuelle
+  (lot L) il rougirait en permanence.
 
 Limites. La version de Claude Code qui diffère dans un lot est signalée dans le rapport, pas refusée. Le modèle effectif des sous-agents n'est pas comparé : seul le modèle demandé l'est.
 `cost_gate.py` ne compare pas les modèles de sa référence (`cost-gate-baseline.json`, lot L). Aucune suite non saturée n'existe encore : choisir ou construire des tâches où le `nu`

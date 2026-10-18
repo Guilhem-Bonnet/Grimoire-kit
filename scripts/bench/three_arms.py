@@ -62,6 +62,7 @@ from model_pin import (
     ensure_results_match_model,
     pin_report_fields,
     render_pin_lines,
+    saturation_exit_code,
     selection_pin,
 )
 from results_io import read_results_rows
@@ -2166,6 +2167,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         "deux lots de modèles différents ne s'apparient pas.",
     )
     parser.add_argument(
+        "--fail-on-saturated",
+        action="store_true",
+        help="B-01 : sortie en erreur (code 1) si le rapport écrit conclut SATURÉ (> 50 %% des tâches à 1.0 pour le nu) ; "
+        "opt-in, le rapport est écrit dans tous les cas",
+    )
+    parser.add_argument(
         "--grimoire-bin",
         type=str,
         default=None,
@@ -2199,7 +2206,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.report_only:
         workspace = args.workspace or _default_workspace()
-        return _do_report_only(workspace, seed=args.seed, report_dir=args.report_dir, arms=args.arms, label=args.label)
+        return _do_report_only(
+            workspace,
+            seed=args.seed,
+            report_dir=args.report_dir,
+            arms=args.arms,
+            label=args.label,
+            fail_on_saturated=args.fail_on_saturated,
+        )
 
     workspace = args.workspace or _default_workspace()
     workspace.mkdir(parents=True, exist_ok=True)
@@ -2393,6 +2407,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif expected_cost_path.is_file():
         expected_cost = json.loads(expected_cost_path.read_text(encoding="utf-8"))
 
+    saturation_rc = 0
     if (args.full or disk_exhausted) and not contaminated:
         report_dir = args.report_dir or (workspace / "reports" / datetime.now(tz=UTC).strftime("%Y-%m-%d"))
         write_report(
@@ -2405,6 +2420,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             label=args.label,
             toolchain_check=toolchain_check,
         )
+        saturation_rc = saturation_exit_code(records, fail_on_saturated=args.fail_on_saturated)
         if disk_exhausted:
             print(f"[report] rapport PARTIEL (arrêt disque) écrit sous {report_dir}")
         else:
@@ -2451,7 +2467,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("[sécurité] aucune fuite d'ANTHROPIC_API_KEY détectée sous un HOME isolé ou un journal.")
 
     # Contamination : gardes de sécurité passées, mais la campagne est un échec.
-    return 1 if contaminated else 0
+    return 1 if contaminated else saturation_rc
 
 
 def _do_report_only(
@@ -2461,6 +2477,7 @@ def _do_report_only(
     report_dir: Path | None,
     arms: str | None = None,
     label: str | None = None,
+    fail_on_saturated: bool = False,
 ) -> int:
     state_dir = workspace / "state"
     results_path = state_dir / "results.jsonl"
@@ -2496,7 +2513,7 @@ def _do_report_only(
         print(str(exc), file=sys.stderr)
         return 1
     print(f"[report] écrit sous {out_dir}")
-    return 0
+    return saturation_exit_code(records, fail_on_saturated=fail_on_saturated)
 
 
 def _do_dry_run(

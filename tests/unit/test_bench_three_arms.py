@@ -2417,11 +2417,11 @@ def test_task_repo_guards_live_in_their_own_module_and_script_does_not_grow() ->
     appel de ``hidden_reads`` avec le dossier de l'exercice canonique) + 12 lignes
     pour signaler les transcriptions non évaluées (W1-08b-T1-03 : import, clé
     ``unevaluated_runs`` du rapport, section Markdown, alerte stderr) + 6 lignes pour le coût
-    connu ou inconnu (B-00 : import, champ ``cost_known`` de ``RunOutcome`` et de ``RunRecord``, câblage) + 4 lignes pour ``--subset`` + 61 lignes pour B-01 (champs de ``RunRecord``, option ``--model`` et son refus, pré-contrôle de ``results.jsonl``, ``selection.json``, câblage du rapport) ; le détecteur et le rendu vivent dans ``hidden_reads.py``, la logique de modèle et de saturation dans ``model_pin.py``."""
+    connu ou inconnu (B-00 : import, champ ``cost_known`` de ``RunOutcome`` et de ``RunRecord``, câblage) + 4 lignes pour ``--subset`` + 78 lignes pour B-01 (champs de ``RunRecord``, option ``--model`` et son refus, pré-contrôle de ``results.jsonl``, ``selection.json``, câblage du rapport, garde opt-in ``--fail-on-saturated``) ; le détecteur et le rendu vivent dans ``hidden_reads.py``, la logique de modèle et de saturation dans ``model_pin.py``."""
     for name in ("ContaminatedTaskRepoError", "assert_task_repo_clean", "reset_run_dir"):
         assert getattr(ta, name).__module__ == "task_repo"
     assert (SCRIPT.parent / "task_repo.py").is_file()
-    assert len(SCRIPT.read_text(encoding="utf-8").splitlines()) <= 2584 + 36 + 12 + 6 + 4 + 61
+    assert len(SCRIPT.read_text(encoding="utf-8").splitlines()) <= 2584 + 36 + 12 + 6 + 4 + 78
 
 
 # ── W1-08b (#694) : run invalidé si la transcription lit un test caché ─────
