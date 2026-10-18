@@ -86,7 +86,10 @@ def build_kit(root: Path) -> Path:
 
 
 @pytest.fixture
-def kit(tmp_path: Path) -> Path:
+def kit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    # En CI d'une PR, GITHUB_EVENT_PATH atteint les gardes (c'est voulu) et le titre de la PR
+    # réelle déciderait du verdict du clone jetable : on l'isole.
+    monkeypatch.delenv("GITHUB_EVENT_PATH", raising=False)
     return build_kit(tmp_path / "kit")
 
 
