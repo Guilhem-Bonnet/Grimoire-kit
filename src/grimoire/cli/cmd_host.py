@@ -23,7 +23,7 @@ from grimoire.bridges.schemas import HostId
 from grimoire.hosts.capabilities import all_profiles, gaps_for, profile_for, resolve_host
 from grimoire.hosts.collect import build_surface, collect_commands, entry_agent_name
 from grimoire.hosts.detection import alias_for_host, enabled_host_ids
-from grimoire.hosts.emitters import apply_plan, emitter_for, owned_managed_paths, supported_hosts
+from grimoire.hosts.emitters import apply_plan, apply_plans, emitter_for, owned_managed_paths, supported_hosts
 from grimoire.hosts.runtime import parse_event, run_hook
 from grimoire.hosts.surface import Enforcement
 
@@ -54,6 +54,14 @@ def _get_fmt(ctx: typer.Context) -> str:
     return str((ctx.obj or {}).get("output", "text") or "text")
 
 
+#: Ce que `host sync` dit d'un fichier qu'il n'écrase pas, selon la cause.
+_CONFLICT_TEXT = {
+    "edited": "fichier du kit modifié à la main depuis sa génération",
+    "foreign": "fichier non généré",
+    "unreadable": "fichier illisible",
+}
+
+
 @dataclass(slots=True)
 class _HostStatus:
     """One host's answer to: does this project run here as it claims to?"""
@@ -63,6 +71,9 @@ class _HostStatus:
     in_sync: bool
     pending: list[str] = field(default_factory=list)
     conflicts: list[str] = field(default_factory=list)
+    #: Cause de chaque conflit : ``edited`` (fichier du kit modifié depuis son émission),
+    #: ``foreign`` (jamais écrit par le kit) ou ``unreadable``.
+    conflict_causes: dict[str, str] = field(default_factory=dict)
     blocking_hooks: list[str] = field(default_factory=list)
     unsupported_events: list[str] = field(default_factory=list)
     degradations: list[dict[str, str]] = field(default_factory=list)
@@ -81,6 +92,7 @@ class _HostStatus:
             "in_sync": self.in_sync,
             "pending": self.pending,
             "conflicts": self.conflicts,
+            "conflict_causes": self.conflict_causes,
             "blocking_hooks": self.blocking_hooks,
             "unsupported_events": self.unsupported_events,
             "degradations": self.degradations,
@@ -204,13 +216,14 @@ def host_sync(
             raise typer.Exit(code=1)
 
     surface = build_surface(project_root)
-    results = []
+    plans = []
     for host_id in _resolve_targets(host, project_root):
         emitter = emitter_for(host_id)
         if emitter is None:  # pragma: no cover - filtered by _resolve_targets
             continue
-        plan = emitter.plan(surface, project_root)
-        results.append(apply_plan(plan, project_root, dry_run=dry_run, force=force))
+        plans.append(emitter.plan(surface, project_root))
+    # Tous les hôtes dans une seule transaction : une panne laisse l'arbre comme il était.
+    results = apply_plans(plans, project_root, dry_run=dry_run, force=force)
 
     pruned: list[str] = []
     if prune_disabled:
@@ -242,7 +255,8 @@ def host_sync(
         for label in result.written:
             console.print(f"    [green][OK][/green] {label}")
         for label in result.skipped:
-            console.print(f"    [yellow][!][/yellow] {label} — fichier non généré, préservé (utilisez --force)")
+            cause = _CONFLICT_TEXT.get(result.conflicts.get(label, ""), "conflit")
+            console.print(f"    [yellow][!][/yellow] {label} — {cause}, préservé (utilisez --force)")
         for degradation in result.degradations:
             console.print(f"    [dim]dégradé[/dim] {degradation.surface} — repli : {degradation.fallback}")
     if prune_disabled:
@@ -276,6 +290,7 @@ def host_status(
                 in_sync=not pending.written and not pending.skipped,
                 pending=list(pending.written),
                 conflicts=list(pending.skipped),
+                conflict_causes=dict(pending.conflicts),
                 blocking_hooks=[h.event.value for h in surface.hooks if h.enforcement is Enforcement.BLOCKING],
                 unsupported_events=[h.event.value for h in surface.hooks if not profile.supports_event(h.event)],
                 degradations=[d.to_dict() for d in plan.degradations],
@@ -328,7 +343,8 @@ def host_status(
         if item.pending:
             console.print(f"  {len(item.pending)} fichier(s) à régénérer — `grimoire host sync`")
         for label in item.conflicts:
-            console.print(f"  [yellow][!][/yellow] {label} — fichier non généré au chemin géré")
+            cause = _CONFLICT_TEXT.get(item.conflict_causes.get(label, ""), "conflit")
+            console.print(f"  [yellow][!][/yellow] {label} — {cause}, au chemin géré")
         if item.blocking_hooks:
             console.print(f"  hooks bloquants : {', '.join(item.blocking_hooks)}")
         if item.unsupported_events:

@@ -594,7 +594,16 @@ Les fichiers générés portent un marqueur `grimoire:managed`. La synchronisati
 ne réécrit qu'eux :
 
 - un fichier écrit à la main à un chemin géré est **préservé** et signalé comme
-  conflit (`--force` pour l'écraser sciemment) ;
+  conflit (`--force` pour l'écraser sciemment). Le marqueur porte l'empreinte du
+  fichier émis (`grimoire:managed sha256=…`) : un fichier généré puis modifié à la
+  main est un conflit `edited`, un fichier que le kit n'a jamais écrit un conflit
+  `foreign` (`host status --json` : `conflict_causes`) ;
+- `AGENTS.md` et `GEMINI.md` sont partagés : le kit n'y possède que le bloc
+  `<!-- grimoire:begin … -->` … `<!-- grimoire:end -->`, tout ce qui l'entoure est
+  préservé à l'octet près, `--force` compris ;
+- la synchronisation est transactionnelle : toutes les décisions sont prises
+  avant la première écriture, et une panne en cours de route rétablit l'arbre
+  (tous hôtes confondus). Un processus tué net n'est pas rétabli ;
 - `.claude/settings.json` n'est jamais réécrit en bloc : seules les entrées de
   hooks appartenant au kit sont remplacées, le reste de la configuration est
   conservé tel quel ;

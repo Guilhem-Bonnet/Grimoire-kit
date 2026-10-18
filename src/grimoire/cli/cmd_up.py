@@ -899,16 +899,16 @@ def _step_host_sync(state: _UpState, target: Path, *, dry_run: bool, blocked: bo
         return
     try:
         from grimoire.hosts.collect import build_surface
-        from grimoire.hosts.emitters import apply_plan, emitter_for, supported_hosts
+        from grimoire.hosts.emitters import apply_plans, emitter_for, supported_hosts
 
         surface = build_surface(target)
-        results = []
+        plans = []
         for host_id in supported_hosts():
             emitter = emitter_for(host_id)
             if emitter is None:  # pragma: no cover - supported_hosts() only lists emitted hosts
                 continue
-            plan = emitter.plan(surface, target)
-            results.append(apply_plan(plan, target, dry_run=False, force=False))
+            plans.append(emitter.plan(surface, target))
+        results = apply_plans(plans, target, dry_run=False, force=False)
     except (OSError, GrimoireError) as exc:
         state.steps.append(StepResult("host_sync", "failed", f"host sync error: {exc}"))
         return

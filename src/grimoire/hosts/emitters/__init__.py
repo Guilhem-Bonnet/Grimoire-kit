@@ -11,6 +11,7 @@ from grimoire.hosts.emitters.base import (
     Emitter,
     JsonMerge,
     apply_plan,
+    apply_plans,
     owned_managed_paths,
 )
 from grimoire.hosts.emitters.claude_code import ClaudeCodeEmitter
@@ -49,6 +50,7 @@ __all__ = [
     "JsonMerge",
     "OpenCodeEmitter",
     "apply_plan",
+    "apply_plans",
     "emitter_for",
     "owned_managed_paths",
     "supported_hosts",
