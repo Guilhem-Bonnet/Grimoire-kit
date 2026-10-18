@@ -25,7 +25,7 @@ de l'ASCII ou de l'ASCII accentué (homoglyphe cyrillique, grec ou latin comme
 glissé dans l'objet, portée absolue ou qui remonte (``..``).
 
 Couches, de la plus extérieure (qui l'emporte) à la plus intérieure :
-``organization``, ``project``, ``agent``. Les fichiers vivent sous
+``organization``, ``team``, ``project``, ``agent``. Les fichiers vivent sous
 ``_grimoire/standard/rules/<couche>.rules``.
 
 Décisions prises par le code (:func:`check_rule_conflicts`, fonction pure) :
@@ -90,7 +90,7 @@ __all__ = [
 MODALITIES: tuple[str, ...] = ("ALWAYS", "NEVER")
 
 #: Couches, de la plus extérieure (précédence maximale) à la plus intérieure.
-LAYERS: tuple[str, ...] = ("organization", "project", "agent")
+LAYERS: tuple[str, ...] = ("organization", "team", "project", "agent")
 
 #: Dossier des règles, à côté de ``standard-profile.yaml``.
 RULES_DIR = STANDARD_DIR / "rules"

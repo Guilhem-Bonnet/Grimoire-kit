@@ -226,7 +226,7 @@ exécuter. Détail et dégradations par hôte : [Surfaces hôtes](hosts.md).
 |---|---|
 | `grimoire host list` | Hôtes connus, surfaces natives de chacun, hôte détecté |
 | `grimoire host surface` | Description host-neutre du projet |
-| `grimoire host sync --host all` | Générer les surfaces (`--dry-run`, `--force`) |
+| `grimoire host sync --host all` | Générer les surfaces (`--dry-run`, `--force`). Les règles `team` et `project` partent en `.cursor/rules/grimoire-rules*.mdc` (`globs:`) et `.github/instructions/grimoire-rules*.instructions.md` (`applyTo:`) ; le fichier d'une règle retirée est retiré |
 | `grimoire host status` | Écart entre ce que le projet déclare et ce que l'hôte exécute |
 | `grimoire host run <slug>` | Corps d'une commande, pour un hôte sans commandes natives |
 | `grimoire host hook --host <h> --event <e>` | Point d'entrée des hooks générés (stdin vers stdout) |
@@ -802,6 +802,7 @@ et projections : [Système de mémoire](memory-system.md).
 | `grimoire memory bundle` | Construire, installer et vérifier les bundles de modèles d'embedding |
 | `grimoire memory shared` | Mémoire transverse : ce qui reste vrai d'un projet à l'autre |
 | `grimoire memory rules add` / `list` / `check` | Règles parsables par couche (`ALWAYS\|NEVER <verbe> <objet> [@portée]`) : conflits décidés par le code, plafond `rules.max_tokens_per_layer`, écriture via la frontière de confiance |
+| `grimoire memory rules explain <chemin>` | Règles qui valent pour un fichier : rang, couche d'origine (`organization` > `team` > `project` > `agent`), ce qui la fait céder, et si `host sync` la livre (couches `team` et `project` seulement) |
 | `grimoire memory facts` / `diary` | Graphe de faits temporels, journaux d'agents |
 | `grimoire memory migrate` | Planifier et exporter les migrations Memory OS |
 | `grimoire memory taxonomy` | Taxonomie aile / salle / pièce |

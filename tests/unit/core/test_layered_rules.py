@@ -390,7 +390,7 @@ def test_un_texte_qui_n_est_pas_une_chaine_est_refuse(value: object, tmp_path: P
 
 
 def test_une_couche_inconnue_est_refusee(tmp_path: Path) -> None:
-    for layer in ("../x", "team", "", "PROJECT"):
+    for layer in ("../x", "squad", "", "PROJECT"):
         with pytest.raises(RuleRefusedError) as raised:
             add_rule(tmp_path, layer, "ALWAYS run tests")
         assert raised.value.code == "rules.layer_unknown"
@@ -597,7 +597,7 @@ def test_un_conflit_entre_couches_est_decide_par_le_code_en_avertissement(tmp_pa
 
 
 def test_un_fichier_de_couche_inconnue_echappe_au_plafond_donc_echoue(tmp_path: Path) -> None:
-    _write_layer(tmp_path, "team", "ALWAYS run tests\n")
+    _write_layer(tmp_path, "squad", "ALWAYS run tests\n")
     (check,) = _checks(tmp_path, "rules.layer_unknown")
     assert check.is_error
 
