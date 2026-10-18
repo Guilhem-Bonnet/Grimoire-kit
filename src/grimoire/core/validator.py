@@ -101,7 +101,7 @@ _KNOWN_ARCHETYPES = frozenset({
     "infra-ops", "meta", "stack", "features", "platform-engineering",
 })
 
-_VALID_HOST_ALIASES = frozenset({"claude", "copilot", "codex", "cursor", "gemini"})
+_VALID_HOST_ALIASES = frozenset({"claude", "copilot", "codex", "cursor", "gemini", "opencode"})
 
 # Known keys per section for unknown-key detection
 _KNOWN_TOP_KEYS = frozenset({
