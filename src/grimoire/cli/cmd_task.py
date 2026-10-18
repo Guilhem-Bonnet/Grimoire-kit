@@ -953,6 +953,8 @@ def task_fold_usage(
     task_id: Annotated[str, typer.Argument(help="Identifiant de la tâche.")],
     transcript: Annotated[Path, typer.Argument(help="Journal de session Claude Code (.jsonl).")],
     mission_id: Annotated[str, typer.Option("--mission-id")] = "",
+    since: Annotated[str, typer.Option("--since", help="Début de la fenêtre de la tâche (ISO 8601, inclus).")] = "",
+    until: Annotated[str, typer.Option("--until", help="Fin de la fenêtre de la tâche (ISO 8601, inclus).")] = "",
     project_root: _PROJECT_ROOT = Path(),
     ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
     traces_root: _TRACES_ROOT = _DEFAULT_TRACES,
@@ -962,6 +964,10 @@ def task_fold_usage(
     Idempotent : rejouer la commande, ou la rejouer sur un journal qui a grandi,
     n'ajoute que les appels nouveaux. Un appel dont le coût ne peut pas être
     affirmé (modèle non tarifé, tokens de cache) est replié avec un coût inconnu.
+
+    Un appel n'appartient qu'à une tâche : un journal qui en couvre plusieurs se
+    répartit avec ``--since`` / ``--until`` (sinon la première tâche repliée
+    reçoit tout) ; les appels déjà tenus par une autre tâche sont nommés.
     """
     from grimoire.traces.ledger import TraceLedger
     from grimoire.traces.transcript_usage import fold_claude_transcript
@@ -970,7 +976,12 @@ def task_fold_usage(
     _require_task(_service(project_root, ledger_root), task_id)
     traces_path = traces_root if traces_root.is_absolute() else root / traces_root
     try:
-        result = fold_claude_transcript(TraceLedger(traces_path), transcript, task_id=task_id, mission_id=mission_id)
+        result = fold_claude_transcript(
+            TraceLedger(traces_path), transcript, task_id=task_id, mission_id=mission_id, since=since, until=until
+        )
+    except ValueError as exc:
+        console.print(f"[red]✗[/red] {escape(str(exc))}")
+        raise typer.Exit(2) from None
     except OSError as exc:
         console.print(f"[red]✗[/red] Journal illisible : {escape(str(exc))}")
         raise typer.Exit(1) from None
@@ -981,6 +992,13 @@ def task_fold_usage(
         f"[green]OK[/green] {result.new_calls} appel(s) replié(s), {result.already_folded} déjà connu(s)"
         f" ({result.unreadable_lines} ligne(s) illisible(s), {result.invalid_usage} sans compteurs valides)"
     )
+    if result.outside_window:
+        console.print(f"[dim]{result.outside_window} appel(s) hors de la fenêtre --since/--until, non attribués.[/dim]")
+    for holder, count in sorted(result.held_by_other_tasks.items()):
+        console.print(
+            f"[yellow]![/yellow] {count} appel(s) déjà attribué(s) à {escape(holder)}, non réattribués"
+            " (un appel n'appartient qu'à une tâche ; --since/--until répartit un journal)."
+        )
 
 
 @task_app.command("record-model-call")

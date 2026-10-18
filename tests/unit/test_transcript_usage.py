@@ -40,13 +40,23 @@ def _k0_usage() -> dict[str, Any]:
     return dict(data["observed"]["transcript_assistant_usage_sample"][0])
 
 
-def _line(message_id: str, uuid: str, usage: dict[str, Any], *, model: str = "claude-sonnet-5-5", block: str = "text") -> str:
+def _line(
+    message_id: str,
+    uuid: str,
+    usage: dict[str, Any],
+    *,
+    model: str = "claude-sonnet-5-5",
+    block: str = "text",
+    timestamp: str = "2026-10-16T14:47:37.997Z",
+    agent: str = "",
+) -> str:
     return json.dumps(
         {
             "type": "assistant",
             "uuid": uuid,
             "sessionId": "00000000-0000-4000-8000-000000000010",
-            "timestamp": "2026-10-16T14:47:37.997Z",
+            "timestamp": timestamp,
+            **({"attributionAgent": agent} if agent else {}),
             "message": {"id": message_id, "model": model, "role": "assistant", "content": [{"type": block}], "usage": usage},
         }
     )
@@ -256,3 +266,85 @@ def test_task_show_ne_cree_pas_le_dossier_de_traces(tmp_path: Path) -> None:
 
     assert json.loads(res.output)["usage"]["usage_source"] == "none"
     assert not (tmp_path / "_grimoire-output" / "traces").exists()
+
+
+def test_l_agent_du_journal_ne_gonfle_pas_l_usage_des_agents(tmp_path: Path) -> None:
+    """``attributionAgent`` est porté par chaque appel API : 40 appels ne sont pas 40 choix d'agent."""
+    from grimoire.core.standard_generation import TRACES_DIR
+    from grimoire.tools.workspace_api import _agent_usage
+
+    journal = _write(
+        tmp_path / "s.jsonl",
+        *(_line(f"msg_{i}", f"u{i}", PLAIN_USAGE, agent="security-auditor") for i in range(40)),
+    )
+    projet = tmp_path / "projet"
+    resultat = fold_claude_transcript(TraceLedger(projet / TRACES_DIR), journal, task_id="GAO-1")
+
+    assert resultat.new_calls == 40
+    assert _agent_usage(projet) == {}
+    # L'attribution n'est pas perdue : elle reste lisible, en tag.
+    traces = TraceLedger(projet / TRACES_DIR).list_traces(task_id="GAO-1")
+    assert all(t.agent_id == "" for t in traces)
+    assert all("usage.agent:security-auditor" in t.tags for t in traces)
+
+
+def _deux_taches_un_journal(tmp_path: Path) -> Path:
+    return _write(
+        tmp_path / "s.jsonl",
+        _line("msg_a1", "a1", PLAIN_USAGE, timestamp="2026-10-16T09:00:00Z"),
+        _line("msg_a2", "a2", PLAIN_USAGE, timestamp="2026-10-16T09:30:00Z"),
+        _line("msg_b1", "b1", PLAIN_USAGE, timestamp="2026-10-16T14:00:00Z"),
+        _line("msg_b2", "b2", PLAIN_USAGE, timestamp="2026-10-16T14:30:00Z"),
+    )
+
+
+def test_un_journal_sur_deux_fenetres_se_repartit_entre_deux_taches(tmp_path: Path, ledger: TraceLedger) -> None:
+    journal = _deux_taches_un_journal(tmp_path)
+
+    a = fold_claude_transcript(ledger, journal, task_id="GAO-A", until="2026-10-16T12:00:00Z")
+    b = fold_claude_transcript(ledger, journal, task_id="GAO-B", since="2026-10-16T12:00:00Z")
+
+    assert (a.new_calls, a.outside_window) == (2, 2)
+    assert (b.new_calls, b.outside_window, b.held_by_other_tasks) == (2, 2, {})
+    assert task_usage(ledger.list_traces(task_id="GAO-A"))["calls"] == 2
+    assert task_usage(ledger.list_traces(task_id="GAO-B"))["calls"] == 2
+
+
+def test_sans_fenetre_les_appels_deja_tenus_par_une_autre_tache_sont_nommes(tmp_path: Path, ledger: TraceLedger) -> None:
+    journal = _deux_taches_un_journal(tmp_path)
+
+    fold_claude_transcript(ledger, journal, task_id="GAO-A")
+    b = fold_claude_transcript(ledger, journal, task_id="GAO-B")
+    a_nouveau = fold_claude_transcript(ledger, journal, task_id="GAO-A")
+
+    assert (b.new_calls, b.already_folded, b.held_by_other_tasks) == (0, 4, {"GAO-A": 4})
+    assert b.to_dict()["held_by_other_tasks"] == {"GAO-A": 4}
+    assert a_nouveau.held_by_other_tasks == {}  # rejouer sa propre tâche n'est pas un conflit
+    assert task_usage(ledger.list_traces(task_id="GAO-B"))["calls"] == 0
+
+
+def test_fenetre_illisible_ou_vide_est_refusee_et_un_appel_sans_date_est_ecarte(tmp_path: Path, ledger: TraceLedger) -> None:
+    journal = _write(tmp_path / "s.jsonl", _line("msg_1", "u1", PLAIN_USAGE, timestamp="pas une date"))
+
+    with pytest.raises(ValueError, match="illisible"):
+        fold_claude_transcript(ledger, journal, task_id="GAO-1", since="hier")
+    with pytest.raises(ValueError, match="vide"):
+        fold_claude_transcript(ledger, journal, task_id="GAO-1", since="2026-10-17T00:00:00Z", until="2026-10-16T00:00:00Z")
+    sans_date = fold_claude_transcript(ledger, journal, task_id="GAO-1", since="2026-10-16T00:00:00Z")
+    assert (sans_date.new_calls, sans_date.outside_window) == (0, 1)
+
+
+def test_cli_fold_usage_repartit_par_fenetre_et_nomme_le_detenteur(tmp_path: Path) -> None:
+    tid_a, tid_b = _task(tmp_path), _task(tmp_path)
+    journal = _deux_taches_un_journal(tmp_path)
+    base = ["task", "fold-usage"]
+    racine = ["--project-root", str(tmp_path)]
+
+    a = runner.invoke(app, ["--output", "json", *base, tid_a, str(journal), "--until", "2026-10-16T12:00:00Z", *racine])
+    b_sans = runner.invoke(app, [*base, tid_b, str(journal), *racine])
+    illisible = runner.invoke(app, [*base, tid_b, str(journal), "--since", "hier", *racine])
+
+    assert json.loads(a.output)["new_calls"] == 2
+    assert b_sans.exit_code == 0, b_sans.output
+    assert tid_a in b_sans.output
+    assert illisible.exit_code == 2

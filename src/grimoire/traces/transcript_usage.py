@@ -23,6 +23,13 @@ Règles, chacune prise sur le journal réel :
   existent : la table de tarifs (:mod:`grimoire.tools.cost_model`) ne modélise pas
   les tarifs de cache, les chiffrer au tarif d'entrée serait faux.
 
+* **Une tâche à la fois, sur une fenêtre.** Un journal de session peut couvrir
+  plusieurs tâches successives ; ses appels n'appartiennent qu'à une seule trace
+  (clé sans la tâche). ``since`` / ``until`` bornent les appels attribués à la
+  tâche, et le repli dit quels appels étaient déjà tenus par une autre tâche
+  (:attr:`FoldResult.held_by_other_tasks`) plutôt que de les taire. Sans fenêtre,
+  tout le journal va à la tâche qui le replie en premier.
+
 Limite : seul le format de journal de Claude Code est lu. Un hôte sans source
 vérifiée (``local_token_usage`` de :mod:`grimoire.hosts.capabilities`) est déclaré
 ``unavailable`` par :func:`task_usage`, pas rempli d'estimations.
@@ -33,7 +40,8 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -47,6 +55,10 @@ SOURCE_CLAUDE_TRANSCRIPT = "claude-code-transcript"
 SOURCE_TAG_PREFIX = "usage.source:"
 CACHE_READ_TAG_PREFIX = "usage.cache_read:"
 CACHE_CREATION_TAG_PREFIX = "usage.cache_creation:"
+#: Agent que le journal attribue à l'appel (``attributionAgent``). Un tag, jamais ``agent_id`` :
+#: ``agent_id`` compte un *choix* d'agent (``workspace_api._agent_usage``), or une ligne du
+#: journal est un appel API, pas un choix.
+AGENT_TAG_PREFIX = "usage.agent:"
 TRANSCRIPT_RECIPE_ID = "grimoire.model-call.transcript"
 #: Recettes des traces dont le coût vient de l'ouvrier ou d'un appel déclaré à la main.
 REPORTED_RECIPE_IDS: frozenset[str] = frozenset({"grimoire.dispatch", "grimoire.model-call"})
@@ -93,6 +105,10 @@ class FoldResult:
     unreadable_lines: int
     invalid_usage: int
     synthetic: int
+    #: Appels du journal hors de la fenêtre ``since`` / ``until`` (ou sans horodatage lisible quand une fenêtre est posée).
+    outside_window: int = 0
+    #: Appels déjà repliés sous une autre tâche : ``{tâche: nombre d'appels}``. Ils ne sont pas réattribués.
+    held_by_other_tasks: dict[str, int] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -103,6 +119,8 @@ class FoldResult:
             "unreadable_lines": self.unreadable_lines,
             "invalid_usage": self.invalid_usage,
             "synthetic": self.synthetic,
+            "outside_window": self.outside_window,
+            "held_by_other_tasks": dict(self.held_by_other_tasks),
         }
 
 
@@ -231,7 +249,6 @@ def _trace_for(call: UsageCall, *, source: str, task_id: str, mission_id: str) -
         outcome=TraceOutcome.SUCCESS,
         started_at=call.timestamp,
         completed_at=call.timestamp,
-        agent_id=call.agent,
         host_id="host-claude-code-cli",
         model=call.model,
         token_usage=TokenUsage(
@@ -245,8 +262,32 @@ def _trace_for(call: UsageCall, *, source: str, task_id: str, mission_id: str) -
             f"{SOURCE_TAG_PREFIX}{SOURCE_CLAUDE_TRANSCRIPT}",
             f"{CACHE_READ_TAG_PREFIX}{call.cache_read_tokens}",
             f"{CACHE_CREATION_TAG_PREFIX}{call.cache_creation_tokens}",
+            *((f"{AGENT_TAG_PREFIX}{call.agent}",) if call.agent else ()),
         ),
     )
+
+
+def _parse_instant(value: str) -> datetime | None:
+    """Un instant ISO 8601 (``Z`` accepté, naïf lu en UTC), ``None`` s'il est illisible."""
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+
+
+def _in_window(call: UsageCall, since: datetime | None, until: datetime | None) -> bool:
+    """Vrai si l'appel tombe dans ``[since, until]`` ; sans fenêtre, tout appel est retenu.
+
+    Une fenêtre posée écarte un appel sans horodatage lisible : le placer au
+    hasard dans une tâche serait un rattachement inventé.
+    """
+    if since is None and until is None:
+        return True
+    instant = _parse_instant(call.timestamp)
+    if instant is None:
+        return False
+    return (since is None or instant >= since) and (until is None or instant <= until)
 
 
 def fold_claude_transcript(
@@ -255,17 +296,37 @@ def fold_claude_transcript(
     *,
     task_id: str,
     mission_id: str = "",
+    since: str = "",
+    until: str = "",
 ) -> FoldResult:
     """Replie les appels d'un journal Claude Code dans le *ledger*, rattachés à *task_id*.
 
     Idempotent : un appel déjà replié (même fichier, même ``message.id``) n'est
-    pas réécrit, même sous une autre tâche. Le fichier source est identifié par
-    son chemin résolu.
+    pas réécrit, même sous une autre tâche ; ceux qu'une autre tâche tient sont
+    comptés par tâche dans ``held_by_other_tasks``. *since* et *until*
+    (ISO 8601, bornes incluses) restreignent les appels attribués à la tâche :
+    c'est ce qui permet à un journal qui couvre plusieurs tâches d'être réparti.
+    Le fichier source est identifié par son chemin résolu. Lève ``ValueError``
+    si *since* ou *until* n'est pas un instant ISO 8601 ou si la fenêtre est vide.
     """
+    start = _parse_instant(since) if since else None
+    end = _parse_instant(until) if until else None
+    if (since and start is None) or (until and end is None):
+        raise ValueError(f"fenêtre illisible (ISO 8601 attendu) : since={since!r} until={until!r}")
+    if start is not None and end is not None and start > end:
+        raise ValueError(f"fenêtre vide : since={since!r} est après until={until!r}")
     source = str(path.resolve()).encode("utf-8", "surrogateescape").decode("utf-8", "backslashreplace")
     read = read_claude_transcript(path)
-    traces = [_trace_for(call, source=source, task_id=task_id, mission_id=mission_id) for call in read.calls]
+    kept = [call for call in read.calls if _in_window(call, start, end)]
+    traces = [_trace_for(call, source=source, task_id=task_id, mission_id=mission_id) for call in kept]
     written = ledger.append_new(traces)
+    written_ids = {t.id for t in written}
+    held: dict[str, int] = {}
+    if len(written) < len(traces):
+        pending = {t.id for t in traces} - written_ids
+        for existing in ledger.list_traces():
+            if existing.id in pending and existing.task_id != task_id:
+                held[existing.task_id] = held.get(existing.task_id, 0) + 1
     return FoldResult(
         source=source,
         new_calls=len(written),
@@ -273,6 +334,8 @@ def fold_claude_transcript(
         unreadable_lines=read.unreadable_lines,
         invalid_usage=read.invalid_usage,
         synthetic=read.synthetic,
+        outside_window=len(read.calls) - len(kept),
+        held_by_other_tasks=held,
     )
 
 
