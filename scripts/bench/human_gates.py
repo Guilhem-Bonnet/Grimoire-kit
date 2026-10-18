@@ -14,10 +14,14 @@ parenthèses : un même événement vu par deux traces ne compte qu'une fois) :
   *challenge* du journal d'autorité du kit (``challenge_id``), une décision de
   checkpoint sans challenge (ligne), un ``STAGE_AWAITING_APPROVAL`` d'AI-DLC
   (rang dans le fichier d'audit) ;
-- ``refusal`` — un refus qui demande une action humaine pour être levé : un
-  résultat d'outil en erreur qui porte une marque de ``HUMAN_ACTION_MARKERS``
-  (``tool_use_id``). Un refus que l'agent lève seul (une commande réversible
-  à la place) ne porte aucune de ces marques et ne compte pas ;
+- ``refusal`` — un ``ask`` du hook, ou un refus qui demande une action humaine
+  pour être levé. Deux traces le voient, une seule unité par appel : la trace
+  typée du kit (``_grimoire-output/traces/traces.jsonl``, un appel au verdict
+  ``ask``) et un résultat d'outil en erreur dont le texte est une raison d'``ask``
+  (``is_human_refusal`` : marques de ``HUMAN_ACTION_MARKERS``, panne « à toi de
+  décider », avertissement générique de la politique). Clé commune : l'outil, le
+  condensé de ses arguments et le rang de l'appel identique. Un refus que
+  l'agent lève seul (une commande réversible à la place) ne compte pas ;
 - ``question`` — une question posée à l'humain : un fichier ``[Answer]:``
   (chemin) ou un ``DECISION_RECORDED`` d'AI-DLC (son ``Questions File`` s'il en
   a un, sinon son rang), une ``task.question_asked`` du Mission Ledger du kit
@@ -42,6 +46,7 @@ Rejeu : ``python scripts/bench/human_gates.py --workspace <dossier du banc>``.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -72,6 +77,11 @@ HUMAN_ACTION_MARKERS = (
     "attended session",
     "withholds human authority",
 )
+#: Une panne du hook, du frein du bail ou de la garde d'autorité rend l'appel à l'utilisateur (``Outcome.ASK``).
+_UNJUDGED_MARKER = "à toi de décider"
+#: ``[Grimoire policy] <raison> (profil <p>).`` : l'avertissement (WARN) de la politique, règle maison ou
+#: mutation destructive au profil strict. Un refus (DENY) de la politique finit par sa consigne, pas par le profil.
+_POLICY_WARN = re.compile(r"^\[grimoire policy\] .+ \(profil [^)]+\)\.$", re.DOTALL)
 #: Un refus de la politique du kit qui renvoie l'agent à une commande réversible se lève sans humain.
 AGENT_LIFTABLE_MARKERS = ("passe par une commande réversible",)
 
@@ -79,6 +89,9 @@ AGENT_LIFTABLE_MARKERS = ("passe par une commande réversible",)
 _WRITE_TOOLS = ("Write", "Edit", "MultiEdit")
 _ANSWER_TAG = "[Answer]:"
 _AUTHORITY_SUFFIX = ".authority.jsonl"
+_TRACES_FILE = "traces.jsonl"
+_TRACES_PARENT = "_grimoire-output"
+_PRE_TOOL_TAG = "pre_tool_use"
 _GRANTS_PREFIX = "@autonomy-grants"
 _SKIPPED_DIRS = frozenset({".git", "node_modules", "target", "__pycache__", ".venv"})
 _AUDIT_FIELD = re.compile(r"^\*\*(?P<name>[^*]+)\*\*\s*:\s*(?P<value>.*)$")
@@ -136,10 +149,27 @@ def _written_texts(name: str, tool_input: Mapping[str, Any]) -> Iterable[str]:
 
 def is_human_refusal(text: str) -> bool:
     """Ce texte de refus demande-t-il une action humaine pour être levé ?"""
-    low = text.casefold()
+    low = text.casefold().strip()
     if any(marker in low for marker in AGENT_LIFTABLE_MARKERS):
         return False
-    return any(marker in low for marker in HUMAN_ACTION_MARKERS)
+    if any(marker in low for marker in HUMAN_ACTION_MARKERS):
+        return True
+    return low.startswith("[grimoire") and (_UNJUDGED_MARKER in low or bool(_POLICY_WARN.match(low)))
+
+
+def args_hash(tool_input: Mapping[str, Any]) -> str:
+    """Le condensé d'arguments que le hook du kit écrit dans la trace (``hosts.runtime._args_hash``)."""
+    try:
+        payload = json.dumps(tool_input, sort_keys=True, ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        payload = repr(tool_input)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def _ask_key(tool: str, digest: str, seen: dict[tuple[str, str], int]) -> str:
+    """Clé d'un appel refusé : deux traces du même appel la partagent, deux appels identiques ont deux rangs."""
+    rank = seen[(tool, digest)] = seen.get((tool, digest), 0) + 1
+    return f"ask:{tool}:{digest}:{rank}"
 
 
 def _answer_file_key(path: str) -> str:
@@ -149,6 +179,8 @@ def _answer_file_key(path: str) -> str:
 def transcript_events(objects: Sequence[Mapping[str, Any]], source: str) -> list[Event]:
     """Refus qui attendent un humain et fichiers ``[Answer]:`` d'une transcription ``stream-json``."""
     events: list[Event] = []
+    calls: dict[str, tuple[str, str]] = {}
+    seen: dict[tuple[str, str], int] = {}
     for obj in objects:
         message = obj.get("message")
         content = message.get("content") if isinstance(message, Mapping) else None
@@ -160,13 +192,38 @@ def transcript_events(objects: Sequence[Mapping[str, Any]], source: str) -> list
             kind = block.get("type")
             if obj.get("type") == "assistant" and kind == "tool_use":
                 tool_input = block.get("input")
+                if isinstance(tool_input, Mapping):
+                    calls[str(block.get("id", ""))] = (str(block.get("name", "")), args_hash(tool_input))
                 if block.get("name") in _WRITE_TOOLS and isinstance(tool_input, Mapping):
                     path = str(tool_input.get("file_path") or tool_input.get("path") or "")
                     if path and any(_ANSWER_TAG in t for t in _written_texts(str(block["name"]), tool_input)):
                         events.append(Event(KIND_QUESTION, _answer_file_key(path), source))
             elif obj.get("type") == "user" and kind == "tool_result" and block.get("is_error"):
                 if is_human_refusal(_text(block.get("content"))):
-                    events.append(Event(KIND_REFUSAL, f"refusal:{block.get('tool_use_id', '')}", source))
+                    call_id = str(block.get("tool_use_id", ""))
+                    call = calls.get(call_id)
+                    key = _ask_key(call[0], call[1], seen) if call else f"refusal:{call_id}"
+                    events.append(Event(KIND_REFUSAL, key, source))
+    return events
+
+
+def trace_events(path: Path, root: Path) -> list[Event]:
+    """Les appels d'outil au verdict ``ask`` de la trace typée que le hook du kit écrit à chaque PreToolUse."""
+    records = _json_lines(path)
+    if records is None:
+        return []
+    source = path.relative_to(root).as_posix()
+    events: list[Event] = []
+    seen: dict[tuple[str, str], int] = {}
+    for record in records:
+        tags = record.get("tags")
+        if not isinstance(tags, list) or _PRE_TOOL_TAG not in tags:
+            continue
+        calls = record.get("tool_calls")
+        for call in calls if isinstance(calls, list) else []:
+            if isinstance(call, Mapping) and call.get("verdict") == "ask":
+                key = _ask_key(str(call.get("tool", "")), str(call.get("args_hash", "")), seen)
+                events.append(Event(KIND_REFUSAL, key, source))
     return events
 
 
@@ -266,6 +323,9 @@ def run_events(run_dir: Path, stream: Path) -> list[Event] | None:
     events = transcript_events(objects, stream.name)
     for path in _files(run_dir, "authority", f"*{_AUTHORITY_SUFFIX}"):
         events.extend(authority_events(path, run_dir))
+    for path in _files(run_dir, "traces", _TRACES_FILE):
+        if path.parent.parent.name == _TRACES_PARENT:
+            events.extend(trace_events(path, run_dir))
     for path in _files(run_dir, "ledger", "events.jsonl"):
         events.extend(ledger_events(path, run_dir))
     for path in _files(run_dir, "audit", "*.md"):

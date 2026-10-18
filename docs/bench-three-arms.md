@@ -487,12 +487,12 @@ Une unité est comptée pour chaque événement suivant, une seule fois même si
 | Nature | Trace du kit | Trace d'AI-DLC |
 |---|---|---|
 | `gate` : un gate ou checkpoint présenté qui attend une réponse humaine, levé par un octroi ou par la configuration autonome compris | un *challenge* de `flows/authority/<run>.authority.jsonl` (ou une décision sans challenge) | un `STAGE_AWAITING_APPROVAL` de `audit/*.md` (sauf `Revalidated`) |
-| `refusal` : un refus qui demande une action humaine pour être levé | un résultat d'outil en erreur dont le texte porte une marque de `HUMAN_ACTION_MARKERS` (la raison d'un `ask` du hook : « Confirme ... ») | idem (« attended session », « withholds human authority ») |
+| `refusal` : un `ask` du hook, ou un refus qui demande une action humaine pour être levé | la trace typée `_grimoire-output/traces/traces.jsonl` (un appel `PreToolUse` au verdict `ask`) **et** un résultat d'outil en erreur dont le texte est une raison d'`ask` : « Confirme ... », panne du hook, du frein du bail ou de la garde d'autorité (« à toi de décider »), avertissement générique `[Grimoire policy] ... (profil X).` (règle maison, mutation destructive au profil strict) ; les deux voient un même appel, qui ne compte qu'une fois (outil, condensé des arguments, rang) | un résultat d'outil en erreur portant « attended session » ou « withholds human authority » |
 | `question` : une question posée à l'humain | `task.question_asked` du Mission Ledger, hors `origin: flow` (c'est le checkpoint, déjà un `gate`) | un fichier `[Answer]:` écrit par `Write`/`Edit`, ou un `DECISION_RECORDED` (le même fichier ne compte qu'une fois) |
 | `grant` : l'octroi W5-06 lui-même, 1 seul (son challenge n'est pas compté en plus) | une ligne `grant` de `@autonomy-grants.authority.jsonl` | sans objet |
 | `autonomy` : l'activation du mode autonome | sans objet (c'est l'octroi) | `AUTONOMY_MODE_SET` avec `Mode: autonomous` |
 
-Ne comptent pas : un refus que l'agent lève seul (le refus de la politique du kit qui renvoie à une commande réversible), un message
+Ne comptent pas : un refus (`deny`) que l'agent lève seul (le refus de la politique du kit qui renvoie à une commande réversible) ou qu'aucun humain ne lève (garde d'autorité, frein du bail), un message
 d'information, un tour humain (c'est la réponse, pas la sollicitation), une demande d'octroi jamais attestée.
 
 Un run dont le dépôt ou la transcription manque, ou dont la transcription n'a aucune ligne JSON, vaut `null` (inconnu), jamais 0 :

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import sys
@@ -375,3 +376,191 @@ def test_the_cli_prints_the_table_and_refuses_a_missing_results_file(
     payload = json.loads(capsys.readouterr().out)
     assert payload["arms"]["nu"]["median_human_gates_resolved"] == 0
     assert {e["kind"] for e in payload["runs"][0]["events"]} <= set(hg.KINDS)
+
+
+# --- B05-S1-01 : les raisons d'ask que le kit émet vraiment, et la trace typée -----------------------------------------
+
+#: Les cinq familles d'ask du kit, copiées sur les f-strings des décisions (tool_policy, decisions/__init__, lease_brake).
+KIT_ASK_REASONS = {
+    "warn-maison": "[Grimoire policy] Ecriture sensible a confirmer (profil standard).",
+    "warn-par-defaut": "[Grimoire policy] action sensible (profil governed).",
+    "destructif-strict": "[Grimoire policy] Destructive mutation requires explicit confirmation (profil strict).",
+    "hook-en-erreur": (
+        "[Grimoire] hook tool-policy en erreur \u2014 KeyError: 'x'. "
+        "La politique n'a pas pu juger Bash : \u00e0 toi de d\u00e9cider."
+    ),
+    "bail-en-erreur": (
+        "[Grimoire lease] frein du bail en erreur \u2014 OSError: disque. "
+        "Le bail n'a pas pu \u00eatre v\u00e9rifi\u00e9 pour Bash : \u00e0 toi de d\u00e9cider."
+    ),
+    "garde-d-autorite-en-erreur": (
+        "[Grimoire authority] garde d'autorit\u00e9 en erreur (OSError: x) : \u00e0 toi de d\u00e9cider. "
+        "Limite : un effet distant d\u00e9j\u00e0 parti n'est pas repris."
+    ),
+}
+#: Des refus que le kit émet et qu'aucun humain ne lève : l'agent change de commande, ou s'arrête.
+KIT_DENY_REASONS = {
+    "authority": (
+        "[Grimoire authority] Write refus\u00e9 \u2014 journal des tours humains. Le journal des tours humains "
+        "et les challenges de checkpoint ne s'\u00e9crivent que par le hook de l'h\u00f4te : c'est la preuve "
+        "qu'un humain a d\u00e9cid\u00e9."
+    ),
+    "bail": (
+        "[Grimoire lease] Bash refus\u00e9 \u2014 epoch p\u00e9rim\u00e9e. Cette session ne tient plus la t\u00e2che T-1 : "
+        "elle n'\u00e9crit plus pour elle. Arr\u00eate, dis-le \u00e0 l'utilisateur."
+    ),
+    "repetition": "[Grimoire] m\u00eame appel, m\u00eame \u00e9chec, 3 fois : change d'approche ou demande de l'aide.",
+}
+
+
+def _refused_call(tool_id: str, reason: str, **tool_input: Any) -> list[str]:
+    return [
+        _assistant(_tool_use(tool_id, "Bash", **tool_input)),
+        _tool_result(tool_id, reason, error=True),
+    ]
+
+
+@pytest.mark.parametrize("family", sorted(KIT_ASK_REASONS))
+def test_every_family_of_kit_ask_reason_is_a_refusal_waiting_for_a_human(family: str, tmp_path: Path) -> None:
+    _run(tmp_path, "kit-gov", "go/a", 0, [*_refused_call("t1", KIT_ASK_REASONS[family], command="ls")], {})
+    _results(tmp_path, [_row("go/a", "kit-gov")])
+    assert _by_arm(tmp_path)["kit-gov"]["by_kind"]["refusal"] == 1
+
+
+@pytest.mark.parametrize("family", sorted(KIT_DENY_REASONS))
+def test_a_kit_deny_is_still_not_counted(family: str, tmp_path: Path) -> None:
+    _run(tmp_path, "kit-gov", "go/a", 0, [*_refused_call("t1", KIT_DENY_REASONS[family], command="ls")], {})
+    _results(tmp_path, [_row("go/a", "kit-gov")])
+    assert _by_arm(tmp_path)["kit-gov"]["human_gates"] == 0
+
+
+def test_a_custom_warn_rule_reaches_the_count_through_the_real_policy(tmp_path: Path) -> None:
+    """Bout en bout : la raison réelle d'un ask de règle maison (profil governed) est comptée."""
+    from grimoire.core.agentic_standard import setup_standard_profile
+    from grimoire.hosts.decisions._shared import HookInput, Outcome
+    from grimoire.hosts.decisions.tool_policy import decide_tool_policy
+    from grimoire.hosts.events import HookEvent
+
+    project = tmp_path / "project"
+    setup_standard_profile(project, profile_id="governed", task_id="bootstrap")
+    policies = project / "_grimoire" / "standard" / "policies.yaml"
+    policies.parent.mkdir(parents=True, exist_ok=True)
+    policies.write_text(
+        "rules:\n  - id: confirm-writes\n    description: x\n    action_kinds: [file_write]\n"
+        "    mutation_classes: []\n    risk_profiles: []\n    verdict_on_match: warn\n"
+        '    reason_template: "Ecriture sensible a confirmer"\n',
+        encoding="utf-8",
+    )
+    decision = decide_tool_policy(
+        HookInput(
+            event=HookEvent.PRE_TOOL_USE,
+            project_root=project,
+            tool_name="Write",
+            tool_input={"file_path": str(project / "a.py"), "content": "x"},
+            session_id="s1",
+        )
+    )
+    assert decision.outcome is Outcome.ASK
+    assert hg.is_human_refusal(decision.reason)
+
+
+def _kit_args_hash(args: dict[str, Any]) -> str:
+    """Le condensé que le kit écrit dans la trace (``hosts.runtime._args_hash``), recalculé ici sans l'importer."""
+    return hashlib.sha256(
+        json.dumps(args, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
+    ).hexdigest()[:16]
+
+
+def test_the_script_hashes_a_call_the_way_the_kit_does() -> None:
+    from grimoire.hosts.runtime import _args_hash
+
+    for args in ({"command": "ls"}, {"file_path": "é.py", "content": "x\n"}, {}, {"b": [1, {"a": None}], "a": 2}):
+        assert hg.args_hash(args) == _args_hash(args) == _kit_args_hash(args)
+
+
+def _trace_line(tool: str, verdict: str, args: dict[str, Any], event: str = "pre_tool_use") -> str:
+    call = {"tool": tool, "verdict": verdict, "args_hash": _kit_args_hash(args), "call_id": ""}
+    return json.dumps({"run_id": "s1", "tool_calls": [call], "tags": [event, verdict]}) + "\n"
+
+
+TRACES = "_grimoire-output/traces/traces.jsonl"
+
+
+def test_an_ask_in_the_typed_trace_counts_without_any_error_result(tmp_path: Path) -> None:
+    """Un ask que la transcription ne montre pas (réponse donnée en séance, texte reformulé) reste compté."""
+    trace = _trace_line("Write", "ask", {"file_path": "a.py"}) + _trace_line("Bash", "allow", {"command": "ls"})
+    trace += _trace_line("Bash", "block", {"command": "rm"}) + _trace_line("Stop", "ask", {}, event="stop")
+    _run(tmp_path, "kit-gov", "go/a", 0, [json.dumps({"type": "result"})], {TRACES: trace})
+    _results(tmp_path, [_row("go/a", "kit-gov")])
+    run = _by_arm(tmp_path)["kit-gov"]
+    assert run["by_kind"]["refusal"] == 1
+    assert [e["source"] for e in run["events"]] == [TRACES]
+
+
+def test_the_same_ask_seen_in_the_trace_and_the_transcript_counts_once(tmp_path: Path) -> None:
+    args = {"command": "sed -i s/governed/starter/ standard-profile.yaml"}
+    transcript = [*_refused_call("t1", KIT_ASK_REASONS["warn-maison"], **args), json.dumps({"type": "result"})]
+    _run(tmp_path, "kit-gov", "go/a", 0, transcript, {TRACES: _trace_line("Bash", "ask", args)})
+    _results(tmp_path, [_row("go/a", "kit-gov")])
+    assert _by_arm(tmp_path)["kit-gov"]["by_kind"]["refusal"] == 1
+
+
+def test_two_identical_asks_are_two_interventions(tmp_path: Path) -> None:
+    args = {"command": "ls"}
+    transcript = [
+        *_refused_call("t1", KIT_ASK_REASONS["hook-en-erreur"], **args),
+        *_refused_call("t2", KIT_ASK_REASONS["hook-en-erreur"], **args),
+        json.dumps({"type": "result"}),
+    ]
+    trace = _trace_line("Bash", "ask", args) * 2
+    _run(tmp_path, "kit-gov", "go/a", 0, transcript, {TRACES: trace})
+    _results(tmp_path, [_row("go/a", "kit-gov")])
+    assert _by_arm(tmp_path)["kit-gov"]["by_kind"]["refusal"] == 2
+
+
+def test_a_trace_outside_the_standard_traces_directory_is_ignored(tmp_path: Path) -> None:
+    other = "src/fixtures/traces/traces.jsonl"
+    _run(tmp_path, "kit-gov", "go/a", 0, [json.dumps({"type": "result"})], {other: _trace_line("Bash", "ask", {})})
+    _results(tmp_path, [_row("go/a", "kit-gov")])
+    assert _by_arm(tmp_path)["kit-gov"]["human_gates"] == 0
+
+
+def test_the_hook_writes_the_ask_that_the_count_reads(tmp_path: Path) -> None:
+    """Bout en bout, du hook à la métrique : la trace réellement écrite par run_hook est comptée une fois."""
+    from grimoire.core.agentic_standard import setup_standard_profile
+    from grimoire.hosts.capabilities import HostId
+    from grimoire.hosts.events import HookEvent
+    from grimoire.hosts.runtime import run_hook
+
+    project = tmp_path / "bench" / "tasks" / "go__a" / "kit-gov" / "run0"
+    setup_standard_profile(project, profile_id="governed", task_id="bootstrap")
+    policies = project / "_grimoire" / "standard" / "policies.yaml"
+    policies.write_text(
+        "rules:\n  - id: confirm-writes\n    description: x\n    action_kinds: [file_write]\n"
+        "    mutation_classes: []\n    risk_profiles: []\n    verdict_on_match: warn\n"
+        '    reason_template: "Ecriture sensible a confirmer"\n',
+        encoding="utf-8",
+    )
+    tool_input = {"file_path": str(project / "a.py"), "content": "x"}
+    payload = {
+        "session_id": "s1",
+        "hook_event_name": "PreToolUse",
+        "cwd": str(project),
+        "tool_name": "Write",
+        "tool_input": tool_input,
+    }
+    _rendered, decision, _hook = run_hook(
+        payload, host_id=HostId.CLAUDE_CODE_CLI, event=HookEvent.PRE_TOOL_USE, project_root=project
+    )
+    assert decision.outcome.value == "ask"
+    assert (project / "_grimoire-output" / "traces" / "traces.jsonl").is_file()
+    bench = tmp_path / "bench"
+    write_call = _assistant({"type": "tool_use", "id": "w1", "name": "Write", "input": tool_input})
+    _write(
+        bench / "tasks" / "go__a" / "kit-gov" / "run0.stream.jsonl",
+        "\n".join([write_call, _tool_result("w1", decision.reason, error=True), json.dumps({"type": "result"})]),
+    )
+    _results(bench, [_row("go/a", "kit-gov")])
+    run = _by_arm(bench)["kit-gov"]
+    assert run["by_kind"]["refusal"] == 1
+    assert run["human_gates"] == 1
