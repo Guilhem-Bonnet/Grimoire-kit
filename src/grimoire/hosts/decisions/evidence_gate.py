@@ -274,9 +274,9 @@ def _continued_stop(hook: HookInput) -> Decision:
     est maintenu ; identique ou plafond atteint, la session sort et
     ``stop.released`` est tracé (journal de garde de la tâche).
 
-    Shadow d'abord (W2-02-S3) : tant que ni ``GRIMOIRE_DONE_GATE=enforce`` ni
-    ``options.done_gate: enforce`` n'est posé (le même interrupteur que le gate
-    « fini »), le refus maintenu n'est pas émis : il est calculé, compté et tracé
+    Shadow d'abord (W2-02-S3) : tant que le gate « fini » n'est pas armé (même
+    interrupteur : ``GRIMOIRE_DONE_GATE=enforce``, ``options.done_gate: enforce`` ou la
+    date d'armement, ``resolve_done_gate_mode``), le refus maintenu n'est pas émis : il est calculé, compté et tracé
     (``stop.would_block``), la session sort comme avant.
     """
     skipped = Decision(detail={"skipped": "stop_hook_already_active"})
@@ -291,12 +291,12 @@ def _continued_stop(hook: HookInput) -> Decision:
         ok, summary, detail = _gate_summary(hook.project_root, task_id)
         if ok:
             return skipped
-        from grimoire.hosts.decisions.done_gate import _is_enforced, record_stop_would_block, stop_step
+        from grimoire.hosts.decisions.done_gate import record_stop_would_block, resolve_done_gate_mode, stop_step
 
         signature = _signature_of(hook, task_id, summary, detail)
         now_iso = datetime.now(UTC).isoformat()
         step = stop_step(hook.project_root, task_id, profile, signature, summary, now_iso)
-        shadow = not step.release and not _is_enforced(hook.project_root, task_id)
+        shadow = not step.release and not resolve_done_gate_mode(hook.project_root, task_id, profile, now_iso).enforce
         if shadow:
             record_stop_would_block(hook.project_root, task_id, profile, step, signature, summary, now_iso)
     except Exception as exc:
@@ -347,19 +347,23 @@ def _with_done_gate(decision: Decision, hook: HookInput, task_id: str, profile: 
     detail = {**decision.detail, "done_gate": verdict.to_dict()}
     if not verdict.stale:
         return replace(decision, detail=detail)
-    _record_done_gate_hold(hook, task_id)
+    _record_done_gate_hold(hook, task_id, verdict.to_dict())
     if verdict.blocked and decision.outcome is not Outcome.BLOCK:
         reason = (
             f"[Grimoire] Tâche {task_id} : une mutation est postérieure au dernier check vert (profil {profile}).\n"
             f"Relance `{verdict.command_hint}` ; si c'est vert, conclus. Sinon, dis-le explicitement à "
             "l'utilisateur au lieu de conclure."
         )
+        if verdict.mode_source.endswith("_dated"):
+            reason += f"\n(Gate « fini » armé depuis le {verdict.armed_from} ; au plus 3 refus par session.)"
         return replace(decision, outcome=Outcome.BLOCK, reason=reason, detail=detail)
     if profile in _BLOCKING_PROFILES and decision.outcome is not Outcome.BLOCK:
         warning = (
             f"[Grimoire] Avertissement (gate « fini », shadow) : une mutation pour {task_id} est postérieure "
             f"au dernier check vert. Relance `{verdict.command_hint}` avant de conclure."
         )
+        if verdict.mode_source == "default" and verdict.armed_from:
+            warning += f" Le gate sera armé le {verdict.armed_from}."
         context = f"{decision.context}\n{warning}" if decision.context else warning
         return replace(decision, context=context, detail=detail)
     return replace(decision, detail=detail)
@@ -402,7 +406,13 @@ def _done_gate_unevaluable(decision: Decision, hook: HookInput, task_id: str, pr
             f"({type(resolution_exc).__name__}) : supprime ce fichier pour le réarmer."
         )
     verdict = DoneGateVerdict(
-        stale=False, reason=f"error:{type(exc).__name__}", enforce=enforce, blocked=blocked, capped=capped
+        stale=False,
+        reason=f"error:{type(exc).__name__}",
+        enforce=enforce,
+        blocked=blocked,
+        capped=capped,
+        mode="enforce" if enforce else "shadow",
+        mode_source="after_error",
     )
     detail = {**decision.detail, "done_gate": verdict.to_dict()}
     if blocked and decision.outcome is not Outcome.BLOCK:
@@ -419,7 +429,7 @@ def _done_gate_unevaluable(decision: Decision, hook: HookInput, task_id: str, pr
     return replace(decision, context=context, detail=detail)
 
 
-def _record_done_gate_hold(hook: HookInput, task_id: str) -> None:
+def _record_done_gate_hold(hook: HookInput, task_id: str, done_gate: dict[str, Any] | None = None) -> None:
     """Calibration (Refs #644): journal a stale ``done_gate`` verdict as a ``policy.hold``.
 
     Written whenever :func:`~grimoire.hosts.decisions.done_gate.
@@ -428,11 +438,15 @@ def _record_done_gate_hold(hook: HookInput, task_id: str) -> None:
     deciding whether ``GRIMOIRE_DONE_GATE=enforce`` is safe to widen. The
     fingerprint/target key are keyed on the task, not on a command or path
     — the "action" a done-gate hold is about is "close this task", not any
-    one tool call. Best-effort, same contract as
+    one tool call. The verdict's mode (``done_gate_mode:``, ``done_gate_source:``,
+    ``done_gate_armed_from:``) rides on the hold itself (W2-09-S1-01) : the release in
+    shadow is measured by these holds, which must tell a shadow hold from an armed one.
+    Best-effort, same contract as
     :mod:`.tool_policy`'s own ``_record_hold``.
     """
     try:
         from grimoire.hosts.decisions.calibration import action_fingerprint, record_policy_hold, target_key
+        from grimoire.hosts.decisions.done_gate import done_gate_mode_tags
 
         record_policy_hold(
             hook.project_root,
@@ -442,6 +456,7 @@ def _record_done_gate_hold(hook: HookInput, task_id: str) -> None:
             reason="done_gate:stale",
             fingerprint=action_fingerprint("done_gate", task_id),
             target=target_key("done_gate", task_id),
+            extra_tags=done_gate_mode_tags(done_gate),
         )
     except Exception:  # noqa: S110 — observabilité : jamais au prix de la décision elle-même
         pass
