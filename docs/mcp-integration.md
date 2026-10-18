@@ -1,3 +1,7 @@
+---
+audience: utilisateur
+---
+
 # Intégration MCP — Grimoire Kit v3
 
 > Exposer les outils Grimoire via le Model Context Protocol pour Copilot, Claude Desktop, et tout client MCP.

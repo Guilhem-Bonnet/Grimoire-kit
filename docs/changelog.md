@@ -1,3 +1,7 @@
+---
+audience: décision
+---
+
 # Changelog
 
 ## Dernière release

@@ -1,3 +1,7 @@
+---
+audience: décision
+---
+
 <p align="right"><a href="../README.md">README</a></p>
 
 # <img src="../assets/icons/clipboard.svg" width="32" height="32" alt=""> ADR-001 : Pourquoi l'orchestration n'est pas multi-LLM

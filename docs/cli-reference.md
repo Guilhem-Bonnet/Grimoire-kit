@@ -1,3 +1,7 @@
+---
+audience: référence
+---
+
 # Référence CLI
 
 Toutes les commandes disponibles via `grimoire [commande]`.
@@ -401,6 +405,24 @@ closes, chacune avec ses résultats enregistrés par modèle
 « fixe » (V0 vers `cheap`, V1 vers `mid`) : pass^1 du routeur >= base - 1 tâche
 et coût connu <= celui de la base. Un coût inconnu, un résultat manquant ou
 moins de 20 tâches rendent « non mesuré » : on n'active pas.
+
+## Gardes du dépôt : `grimoire gates repo`
+
+Dans un clone du kit, une seule commande lance les gardes que la CI exécute :
+cliquet de taille, cohérence du CHANGELOG, prose émise, waivers de dépendances,
+actions épinglées par SHA, tenets de `CONTRIBUTING.md`, audience et commandes
+citées de la documentation, chiffres de vitrine sourcés. Le pre-commit
+(hook `repo-gates`, au pre-push), le job `lint` de `ci-sdk.yml` et `make gates`
+appellent la même commande. Une garde qui ne peut pas rendre son verdict (script
+absent, délai dépassé) est « non évaluée » et fait échouer l'exécution.
+
+| Commande | Description |
+| --- | --- |
+| `grimoire gates repo [--profile dev\|release] [--only <garde>] [--json] [--root .]` | Exécute les gardes ; code 1 si l'une échoue ou n'a pas été évaluée, code 2 hors d'un clone du kit |
+
+Le profil `dev` (défaut) juge une branche : un commit `feat`/`fix`/`perf` exige
+une entrée sous `[Unreleased]`. Le profil `release` juge le tag : `[Unreleased]`
+vide, section la plus récente égale à `version.txt`.
 
 ## Besoins d'exécution : un flow déclare, le projet résout
 

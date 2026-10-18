@@ -1,3 +1,7 @@
+---
+audience: utilisateur
+---
+
 # Getting Started — Grimoire Kit v3
 
 <sub>English — <a href="getting-started.md">version française</a></sub>

@@ -46,9 +46,23 @@ chaque changement fusionné depuis le dernier tag a son entrée, au bon endroit
         reste refusé — le repli couvre un format de sujet connu, pas
         n'importe quelle absence.
 
+Deux profils, car la garde de release refuserait tout travail en cours
+(``[Unreleased]`` y est plein par construction) :
+
+``--dev`` (profil de ``grimoire gates repo``, pre-commit, CI de PR)
+    La même convention, posée à la PR plutôt qu'au tag : si la branche porte
+    un commit ``feat``/``fix``/``perf`` que ``main`` n'a pas, elle ajoute au
+    moins une entrée à ``CHANGELOG.md`` (état courant de l'arbre compris, donc
+    aussi le contenu indexé ou modifié non encore committé), et chaque entrée
+    ajoutée est sous ``[Unreleased]``. Sans base de comparaison atteignable
+    (``origin/main`` ou ``main``, ou ``--base``), la garde échoue : une plage
+    qu'on ne peut pas lire n'est pas une plage vide.
+
 Usage::
 
-    scripts/check-changelog-release.py
+    scripts/check-changelog-release.py                # profil release (tag)
+    scripts/check-changelog-release.py --dev          # profil branche/PR
+    scripts/check-changelog-release.py --dev --base origin/main
 """
 
 from __future__ import annotations
@@ -90,7 +104,7 @@ def _git(repo: Path, *args: str) -> str | None:
     import subprocess
 
     try:
-        proc = subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True, check=False, timeout=60)
+        proc = subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True, encoding="utf-8", errors="replace", check=False, timeout=60)
     except (OSError, subprocess.TimeoutExpired):
         return None
     return proc.stdout if proc.returncode == 0 else None
@@ -150,7 +164,88 @@ def coverage_problems(repo: Path, text: str, version: str) -> list[str]:
     return problems
 
 
-def main() -> int:
+def _resolve_base(repo: Path, requested: str | None) -> str | None:
+    """La référence de comparaison : celle demandée, sinon ``origin/main`` puis ``main``."""
+    for ref in ([requested] if requested else ["origin/main", "main"]):
+        if ref and _git(repo, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}") is not None:
+            return ref
+    return None
+
+
+def dev_problems(repo: Path, requested_base: str | None = None) -> list[str]:
+    """La convention « chaque PR feat/fix/perf ajoute son entrée », vérifiée avant le tag."""
+    if _git(repo, "rev-parse", "--git-dir") is None:
+        return ["profil --dev non vérifié : pas un dépôt git"]
+    changelog = repo / "CHANGELOG.md"
+    if not changelog.is_file():
+        return ["CHANGELOG.md absent"]
+    text = changelog.read_text(encoding="utf-8")
+    unreleased = _section_bodies(text).get("Unreleased")
+    if unreleased is None:
+        return ["CHANGELOG.md n'a pas de section [Unreleased] : aucune entrée de PR n'a où atterrir"]
+    base = _resolve_base(repo, requested_base)
+    if base is None:
+        return [
+            "aucune base de comparaison (origin/main, main, ou --base) : la plage de la branche "
+            "n'a pas pu être lue — clone shallow ou sans remote ? (non vérifié n'est pas vérifié)"
+        ]
+    merge_base = (_git(repo, "merge-base", base, "HEAD") or "").strip()
+    if not merge_base:
+        return [f"pas d'ancêtre commun entre {base} et HEAD : plage illisible"]
+    log = _git(repo, "log", "--no-merges", "--format=%H%x00%s", f"{merge_base}..HEAD")
+    if log is None:
+        return [f"git log {merge_base[:8]}..HEAD a échoué : plage illisible"]
+    noteworthy: list[str] = []
+    for line in log.splitlines():
+        sha, _, subject = line.partition("\x00")
+        if NOTEWORTHY.match(subject):
+            noteworthy.append(f"{sha[:8]} {subject[:70]}")
+    if not noteworthy:
+        return []
+    # Contre l'arbre de travail, pas contre HEAD : au pre-commit l'entrée est
+    # encore dans l'index, et un garde qui ne la verrait qu'après coup serait
+    # rouge pour la mauvaise raison.
+    diff = _git(repo, "diff", merge_base, "--", "CHANGELOG.md")
+    if diff is None:
+        return ["git diff CHANGELOG.md a échoué : entrées ajoutées illisibles"]
+    added = [line[3:].strip() for line in diff.splitlines() if line.startswith("+- ")]
+    if not added:
+        return [
+            f"{len(noteworthy)} commit(s) feat/fix/perf depuis {base} sans nouvelle entrée dans CHANGELOG.md "
+            "(sous [Unreleased]) : " + " ; ".join(noteworthy[:3])
+        ]
+    # Une entrée est une puce de premier niveau, quel que soit son style
+    # (`- **Titre.** …` des versions publiées, `- fix(scope): …` de [Unreleased]).
+    current = {line[2:].strip() for line in unreleased.splitlines() if line.startswith("- ")}
+    return [
+        f"l'entrée « {entry[:60]} » ajoutée par la branche n'est pas sous [Unreleased]"
+        for entry in added
+        if entry not in current
+    ]
+
+
+def _dev_main(base: str | None) -> int:
+    problems = dev_problems(REPO, base)
+    if problems:
+        print("::error::CHANGELOG.md ne couvre pas les changements de cette branche", file=sys.stderr)
+        for problem in problems:
+            print(f"  - {problem}", file=sys.stderr)
+        return 1
+    print("CHANGELOG couvre la branche — chaque commit feat/fix/perf a son entrée sous [Unreleased]")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = sys.argv[1:] if argv is None else argv
+    if "--dev" in args:
+        base: str | None = None
+        if "--base" in args:
+            position = args.index("--base") + 1
+            if position >= len(args):
+                print("--base demande une référence", file=sys.stderr)
+                return 2
+            base = args[position]
+        return _dev_main(base)
     version = VERSION_FILE.read_text(encoding="utf-8").strip()
     text = CHANGELOG.read_text(encoding="utf-8")
 

@@ -38,6 +38,10 @@ lint-fix: ## Run ruff linter with auto-fix
 ratchet: ## Code-size ratchet (framework frozen, src oversize guard)
 	$(PYTHON) scripts/check-code-ratchet.py
 
+.PHONY: gates
+gates: ## Toutes les gardes du dépôt (comme la CI et le pre-commit)
+	$(PYTHON) -m grimoire gates repo
+
 .PHONY: format
 format: ## Run ruff formatter
 	$(PYTHON) -m ruff format src/ tests/

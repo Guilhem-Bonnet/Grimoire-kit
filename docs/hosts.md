@@ -1,3 +1,7 @@
+---
+audience: référence
+---
+
 # Surfaces hôtes
 
 Un projet Grimoire décrit des personas, des compétences, des commandes et une

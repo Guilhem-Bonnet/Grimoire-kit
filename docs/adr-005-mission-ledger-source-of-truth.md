@@ -1,3 +1,7 @@
+---
+audience: décision
+---
+
 # ADR-005 — Le Mission Ledger est la source, le task board une projection
 
 - **Statut** : accepté (2026-08-27)

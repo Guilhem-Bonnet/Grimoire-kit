@@ -1,3 +1,7 @@
+---
+audience: utilisateur
+---
+
 <p align="right"><a href="../README.md">README</a></p>
 
 # <img src="../assets/icons/puzzle.svg" width="32" height="32" alt=""> Guide des Archétypes

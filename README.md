@@ -9,7 +9,6 @@
   <a href="https://pypi.org/project/grimoire-kit/"><img src="https://img.shields.io/pypi/v/grimoire-kit?style=for-the-badge&logo=pypi&logoColor=white&color=3775A9" alt="PyPI"></a>
   <a href="https://guilhem-bonnet.github.io/Grimoire-kit/"><img src="https://img.shields.io/badge/docs-online-8ca1ff?style=for-the-badge&logo=materialformkdocs&logoColor=white" alt="Docs"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-f0c674?style=for-the-badge" alt="License"></a>
-  <a href="#quality"><img src="https://img.shields.io/badge/tests-5990+-58a6ff?style=for-the-badge&logo=pytest&logoColor=white" alt="Tests"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.12+-3572A5?style=for-the-badge&logo=python&logoColor=white" alt="Python"></a>
   <a href="https://docs.astral.sh/ruff/"><img src="https://img.shields.io/badge/code%20style-ruff-c9a0ff?style=for-the-badge&logo=ruff&logoColor=white" alt="Ruff"></a>
   <a href="https://mypy-lang.org/"><img src="https://img.shields.io/badge/types-mypy%20strict-blue?style=for-the-badge&logo=python&logoColor=white" alt="Mypy"></a>
@@ -187,7 +186,7 @@ query *and enforce* the governed standard directly.
 <a id="quality"></a>
 ## Quality
 
-- **5 990+ tests** (pytest), coverage gate ≥ 70 % (Codecov)
+- **pytest** suite, coverage gate ≥ 75 % (Codecov) <!-- source: pyproject.toml ; recompute: grep fail_under pyproject.toml -->
 - **mypy strict** on the SDK, **ruff** lint + format
 - CI matrix: Ubuntu / Windows / macOS × Python 3.12 / 3.13, CodeQL, dependency audit
   with governed, time-boxed waivers

@@ -11,7 +11,16 @@ on:
       # Gouvernent le garde d'épinglage des actions : modifier un workflow ou
       # le garde doit relancer le job qui l'exécute.
       - ".github/workflows/**"
-      - "scripts/check-actions-pinned.py"
+      - "scripts/check-*.py"
+      # Lus par les gardes du dépôt (`grimoire gates repo`) : les modifier sans
+      # relancer le job qui les juge rendrait la garde décorative.
+      - "docs/**"
+      - "README.md"
+      - "README.fr.md"
+      - "CONTRIBUTING.md"
+      - "CHANGELOG.md"
+      - ".github/PULL_REQUEST_TEMPLATE.md"
+      - ".pre-commit-config.yaml"
       # Lus par tests/unit/test_evals_collect.py : une PR evals-only qui
       # modifie les suites doit exécuter le SDK CI (cf. main rouge du
       # 2026-07-13 — la #71 path-filtrée n'avait jamais lancé ces tests).
@@ -42,6 +51,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          # Historique complet : la garde `changelog` lit la plage de commits
+          # de la branche contre origin/main, un clone shallow la rendrait muette.
+          fetch-depth: 0
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7
         with:
@@ -55,14 +68,18 @@ jobs:
         # `# noqa: S310`). Keep in sync with the ruff version in uv.lock.
         run: pip install ruff==0.15.20 pyyaml
 
+      - name: Install the CLI (core dependencies only)
+        run: pip install -e .
+
       - name: Lint
         run: ruff check src/ tests/unit/ framework/memory/ --output-format=github
 
-      - name: Code-size ratchet
-        run: python scripts/check-code-ratchet.py
-
-      - name: Actions pinned by SHA
-        run: python scripts/check-actions-pinned.py
+      # La MÊME commande que le hook pre-push de .pre-commit-config.yaml
+      # (comparées par tests/unit/scripts/test_repo_gates.py) : cliquet de
+      # taille, CHANGELOG, prose émise, waivers, actions épinglées par SHA,
+      # tenets, audience et commandes citées de la documentation, chiffres de vitrine.
+      - name: Repo gates
+        run: grimoire gates repo
 
   typecheck:
     name: "mypy --strict"

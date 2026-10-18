@@ -1,3 +1,7 @@
+---
+audience: utilisateur
+---
+
 # Guide SDK Python — Grimoire Kit v3
 
 > Utiliser Grimoire Kit comme bibliothèque Python dans vos scripts et outils.
