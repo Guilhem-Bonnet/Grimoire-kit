@@ -847,6 +847,8 @@ def status(
         console.print(f"[red]Config error:[/red] {exc}")
         raise typer.Exit(_EXIT_CONFIG) from None
 
+    from grimoire.missions.decisions import decisions_summary
+
     dirs = [*_REQUIRED_DIRS, _MEMORY_DIR]
     dir_status = {d: (target / d).is_dir() for d in dirs}
 
@@ -858,6 +860,7 @@ def status(
             "memory": {"backend": cfg.memory.backend},
             "structure": dir_status,
             "version": __version__,
+            "decisions": decisions_summary(target),
         }
         typer.echo(json.dumps(data, indent=2))
         return
@@ -896,6 +899,14 @@ def status(
     for d, ok in dir_status.items():
         icon = "[green][OK][/green]" if ok else "[red][x][/red]"
         console.print(f"  {icon} {d}/")
+
+    # Décisions qui attendent un humain (K6) : jamais une exception ici, la ligne manque ou elle est là.
+    pending = decisions_summary(target)
+    if pending["count"]:
+        console.print(f"\n[bold]Décisions[/bold]\n  [yellow]{pending['line']}[/yellow]")
+        console.print("  [dim]`grimoire task decisions` les liste ; `grimoire task answer` y répond.[/dim]")
+    for failure in pending["notify_failures"]:
+        console.print(f"  [red]notification échouée[/red] {failure['task_id']} : {failure['error']}")
 
     console.print()
 
@@ -1279,6 +1290,7 @@ LazyTyperGroup.configure(
         "upgrade-flow": LazyGroupSpec("grimoire.cli.cmd_upgrade_flow", "upgrade_flow_app", rich_help_panel="Project"),
         "agent": LazyGroupSpec("grimoire.cli.cmd_agent", "agent_app", rich_help_panel="Agents"),
         "web": LazyGroupSpec("grimoire.cli.cmd_web", "web_app", rich_help_panel="Data"),
+        "autonomy": LazyGroupSpec("grimoire.cli.cmd_autonomy", "autonomy_app", rich_help_panel="Project"),
     },
     commands={
         "up": LazyCommandSpec("grimoire.cli.cmd_up", "up", rich_help_panel="Project"),
@@ -1299,6 +1311,7 @@ LazyTyperGroup.configure(
         "memory", "hooks", "cadrage", "debugger", "dbg", "registry", "workflows",
         "wf", "standard", "ext", "blueprint", "flow", "cockpit", "task",
         "stigmergy", "features", "host", "providers", "dispatch", "route", "needs", "proposals", "upgrade-flow", "agent", "web",
+        "autonomy",
         "config", "completion", "self", "plugins",
     ],
 )
