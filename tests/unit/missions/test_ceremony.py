@@ -182,6 +182,55 @@ def test_nature_des_commandes(cmd: str, kinds: set[str]) -> None:
     assert set(check_kinds(cmd)) == kinds
 
 
+#: Commandes vertes dont le code de sortie ne dit rien du test : segment court-circuité,
+#: masqué, détaché, sorti par un tube, ou qui n'affiche qu'une version.
+_COMMANDES_QUI_NE_VERIFIENT_RIEN = [
+    "true || pytest",
+    "pytest || true",
+    "pytest &",
+    "pytest ; true",
+    "pytest | tee out.log",
+    "pytest |& tee out.log",
+    "pytest -q || echo ignore",
+    "ruff check . || true && pytest || true",
+    "pytest --version",
+    "pytest --help",
+    "pytest --collect-only",
+    "pytest\ntrue",
+    "pytest &&",
+]
+
+
+@pytest.mark.parametrize("cmd", _COMMANDES_QUI_NE_VERIFIENT_RIEN)
+def test_une_commande_masquee_ou_court_circuitee_ne_verifie_rien(cmd: str) -> None:
+    assert check_kinds(cmd) == frozenset()
+    assert reached_depth([(cmd, True)]) is DepthLevel.FLOOR
+    assert depth_shortfall("standard", [(cmd, True)]) is not None
+
+
+@pytest.mark.parametrize("cmd", ["ruff --version && pytest --version", "ruff check . || true && pytest || true"])
+def test_strict_n_est_pas_atteint_par_des_segments_qui_ne_verifient_rien(cmd: str) -> None:
+    assert depth_shortfall("strict", [(cmd, True)]) is not None
+    assert reached_depth([(cmd, True)]) is DepthLevel.FLOOR
+
+
+@pytest.mark.parametrize(
+    ("cmd", "kinds"),
+    [
+        ("true ; pytest", {"test"}),
+        ("true\npytest", {"test"}),
+        ("ruff check src &&\n pytest -q", {"test", "static"}),
+        ("pytest -q && echo done", {"test"}),
+        ("pytest -q 2>&1", {"test"}),
+        ("pytest -q ;", {"test"}),
+        ('pytest -k "a || b"', {"test"}),
+        ("cd sub && ruff check . && pytest -q", {"test", "static"}),
+    ],
+)
+def test_une_chaine_dont_le_code_decide_garde_sa_nature(cmd: str, kinds: set[str]) -> None:
+    assert set(check_kinds(cmd)) == kinds
+
+
 def test_la_commande_de_test_declaree_par_le_projet_compte() -> None:
     assert check_kinds("tox -e py311 -- -q") == {"test"}
     assert check_kinds("./run-suite.sh --fast") == frozenset()

@@ -104,6 +104,18 @@ def test_sans_test_depth_le_gate_est_inchange(projet: Path) -> None:
     assert _depth(v) == [] and not v.blocked
 
 
+@pytest.mark.parametrize("cmd", ["true || pytest", "pytest || true", "pytest &", "pytest --version"])
+def test_une_commande_verte_qui_ne_lance_pas_le_test_est_refusee(projet: Path, cmd: str) -> None:
+    verdict(projet, (cmd, True))
+    v = check_transition(projet, tache(test_depth="standard"), "review", "accepted")
+    assert v.blocked and _depth(v) and "floor" in _depth(v)[0]
+
+
+def test_strict_refuse_des_segments_masques(projet: Path) -> None:
+    verdict(projet, ("ruff check . || true && pytest -q || true", True))
+    assert _depth(check_transition(projet, tache(test_depth="strict"), "review", "accepted"))
+
+
 def test_transition_non_declaree_garde_la_profondeur(projet: Path) -> None:
     """La profondeur suit la tâche, même là où le fichier de gates ne déclare rien."""
     v = check_transition(projet, tache(test_depth="standard"), "in_progress", "accepted")

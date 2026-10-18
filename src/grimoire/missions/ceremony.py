@@ -396,9 +396,54 @@ _WRAPPERS: tuple[tuple[str, ...], ...] = (
     ("uv", "run"), ("poetry", "run"), ("pipenv", "run"), ("hatch", "run"), ("pdm", "run"),
     ("pnpm", "exec"), ("npx",), ("bunx",), ("env",),
 )
-_SHELL_OPERATORS = frozenset({"&&", "||", ";", "|", "&"})
+_SHELL_OPERATORS = frozenset({"&&", "||", ";", "|", "&", "|&"})
 _ENV_ASSIGN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 _PYTHON = re.compile(r"^python(\d+(\.\d+)?)?$")
+#: Arguments qui n'exécutent rien : l'outil affiche une version ou une aide, ou liste sans lancer.
+_INFO_FLAGS = frozenset({"--version", "-V", "--help", "-h", "--collect-only", "--co", "--dry-run"})
+
+
+_PUNCTUATION = "();<>|&\n"
+
+
+def _tokens(cmd: str) -> list[str]:
+    """Les mots de la commande ; un opérateur entre guillemets reste dans son mot."""
+    try:
+        lexer = shlex.shlex(cmd, posix=True, punctuation_chars=_PUNCTUATION)
+        lexer.whitespace = " \t\r"
+        lexer.whitespace_split = True
+        raw = list(lexer)
+    except ValueError:
+        raw = cmd.split()
+    out: list[str] = []
+    for token in raw:
+        if "\n" in token and not token.strip(_PUNCTUATION):
+            # Un saut de ligne sépare deux commandes comme un « ; », sauf derrière un opérateur.
+            token = token.replace("\n", "") or ";"
+        out.append(token)
+    return out
+
+
+def _chain(cmd: str) -> list[tuple[str, list[str]]] | None:
+    """La commande en segments ``(opérateur qui les précède, mots)``, ``None`` si elle est mal formée.
+
+    Le premier segment est précédé de ``""``. Un ``;`` final est sans effet ;
+    un autre opérateur final (``&``, ``||``…), un segment vide ou un opérateur
+    en tête rendent la commande mal formée : on ne devine pas ce qu'elle lance.
+    """
+    segments: list[tuple[str, list[str]]] = [("", [])]
+    for token in _tokens(cmd):
+        if token in _SHELL_OPERATORS:
+            if not segments[-1][1]:
+                return None
+            segments.append((token, []))
+        else:
+            segments[-1][1].append(token)
+    if not segments[-1][1]:
+        if segments[-1][0] != ";":
+            return None
+        segments.pop()
+    return [(op, _strip(seg)) for op, seg in segments]
 
 
 def _segments(cmd: str) -> list[list[str]]:
@@ -445,7 +490,10 @@ def check_kinds(cmd: str, needs: Mapping[str, str | None] | None = None) -> froz
 
     Reconnaît les outils courants et, d'abord, les commandes que le projet
     déclare (``test-runner``, ``lint``, ``typecheck``). Une commande composée
-    (``a && b``) porte les natures de chacun de ses segments.
+    (``a && b``) porte les natures de ses segments reliés par ``&&`` qui
+    décident de son code de sortie ; un segment court-circuité (``true || pytest``),
+    masqué (``pytest || true``), détaché (``pytest &``) ou qui n'affiche qu'une
+    version ou une aide (``pytest --version``) ne vérifie rien.
     """
     declared = needs or {}
     test_prefixes = list(_TEST_RUNNERS)
@@ -456,12 +504,35 @@ def check_kinds(cmd: str, needs: Mapping[str, str | None] | None = None) -> froz
             for seg in _segments(command):
                 bucket.append(tuple(seg))
     kinds: set[str] = set()
-    for seg in _segments(cmd):
+    for seg in _deciding_segments(cmd):
+        if any(token in _INFO_FLAGS for token in seg):
+            continue
         if _starts(seg, test_prefixes):
             kinds.add("test")
         if _starts(seg, static_prefixes):
             kinds.add("static")
     return frozenset(kinds)
+
+
+def _deciding_segments(cmd: str) -> list[list[str]]:
+    """Les segments dont le code de sortie décide de la commande, et qui ont sûrement tourné.
+
+    Ce sont les segments finaux reliés par ``&&`` : le code de la commande est
+    celui du dernier, et chaque ``&&`` exige que le précédent ait réussi. La
+    chaîne ne compte que si elle démarre la commande ou suit un ``;`` : après un
+    ``||``, un ``&`` ou un ``|``, rien ne garantit que son premier segment a
+    tourné ni que son code compte (``true || pytest``, ``pytest &``,
+    ``pytest || true``, ``pytest | tee``).
+    """
+    chain = _chain(cmd)
+    if not chain:
+        return []
+    start = len(chain) - 1
+    while start > 0 and chain[start][0] == "&&":
+        start -= 1
+    if chain[start][0] not in ("", ";"):
+        return []
+    return [seg for _, seg in chain[start:]]
 
 
 def verified_commands(pack: EvidencePack | None, verdict: VerificationVerdict | None) -> tuple[tuple[str, bool], ...]:
