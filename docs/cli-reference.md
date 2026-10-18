@@ -456,6 +456,33 @@ critère ambigu suffit à faire monter la classe, jamais à la faire descendre.
 `task show` affiche, critère par critère, le motif reconnu — c'est ce qui rend
 lisible pourquoi une tâche n'est pas au niveau qu'on lui prêtait.
 
+### Rapport de mission
+
+| Commande | Description |
+| --- | --- |
+| `grimoire mission report <mission> [--json]` | Coût, acceptance, palier, preuves et rejeu d'une mission, chaque ligne avec sa source |
+
+`grimoire mission report` rassemble ce que trois journaux gardaient chacun de leur
+côté : les tentatives de la cascade (`task.dispatched`, Mission Ledger), le résumé
+de cascade et l'usage de tokens replié (TraceLedger) et les packs et verdicts
+(EvidenceService). Chaque tentative porte son `cost.status` (`exact` ou
+`unknown`), l'issue de l'acceptance (`passed`, `failed`, `unrunnable`, `not_run`)
+et le `trace_id` de sa cascade ; chaque ligne nomme sa source (`ledger:`,
+`traces:`, `evidence:`).
+
+- **Jamais de chiffre inventé.** Sans aucun coût connu, le rapport n'a aucun total
+  numérique et écrit « coût inconnu ». Un agrégat partiel est une borne basse
+  (`>= X USD`), et une tâche sans donnée de coût est comptée à part.
+- **Le journal de session et les tentatives ne s'additionnent pas.** Ce sont deux
+  vues des mêmes appels : une tâche retient le journal replié par `task fold-usage`
+  s'il existe, sinon les tentatives, et les deux vues restent affichées.
+- **Le lien tentative vers trace est exact ou absent.** Une cascade est rattachée à
+  l'unique trace `dispatch.outcome` écrite entre sa dernière tentative et la
+  première de la suivante ; sinon `trace_id` vaut `null` (`trace_link: none`).
+- **Lecture seule et déterministe.** Aucun dossier n'est créé, aucune date de
+  génération n'est écrite : deux exécutions sur les mêmes journaux donnent les
+  mêmes octets. Mission inconnue ou ledger absent : sortie 1.
+
 ### Plafonds MAST par instance de workflow
 
 Chaque instance créée par le RuntimeKernel (`create_instance`) porte deux
