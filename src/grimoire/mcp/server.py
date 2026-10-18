@@ -540,6 +540,7 @@ def grimoire_standard_score(project_path: str = ".", profile: str = "", task_id:
             "warnings": result.warnings,
             "errors": result.errors,
             "dimensions": result.dimensions,
+            **result.rules,
             "output_path": str(result.output_path),
         }, indent=2, ensure_ascii=False)
     except (GrimoireError, ValueError, FileNotFoundError, OSError) as exc:

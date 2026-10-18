@@ -441,6 +441,15 @@ class TestStandardScore:
             output_path = standard_project / output_path
         assert output_path.is_file()
 
+    def test_score_reports_enforced_and_advisory_rules_separately(self, standard_project: Path) -> None:
+        from grimoire.core.layered_rules import add_rule
+
+        add_rule(standard_project, "project", "NEVER use bare-except")
+        add_rule(standard_project, "project", "ALWAYS prefer pathlib")
+        data = _json(grimoire_standard_score(str(standard_project)))
+        assert data["rules_enforced"] == 1
+        assert data["rules_advisory"] == 1
+
     def test_empty_project_returns_result_or_error(self, tmp_path: Path) -> None:
         result = grimoire_standard_score(str(tmp_path))
         data = _json(result)

@@ -381,7 +381,7 @@ Le groupe `grimoire standard` pilote le standard agentique (profils, patterns go
 | `grimoire standard init [.] --needs <id>` | Générer les artefacts standard du projet |
 | `grimoire standard verify` | Vérifier les artefacts (fail-closed) |
 | `grimoire standard audit` | Rapport de conformité + gaps restants |
-| `grimoire standard score` | Calculer et persister un score de conformité |
+| `grimoire standard score` | Calculer et persister un score de conformité ; rapporte à part `rules_enforced` (règles de pack vérifiées), `rules_advisory`, `rules_failing`, `rules_unevaluated` et `rules_unclassified` |
 | `grimoire standard gate check [--strict] [--no-run]` | Gate CI : échoue si une preuve obligatoire manque ; chaque manque nomme son chemin et un remède copiable. `--strict` exécute lui-même `gate run-tests` si la tâche doit une preuve d'exécution et qu'aucun run vert et frais n'existe ; `--no-run` restaure l'ancien comportement |
 | `grimoire standard gate run-tests` | Exécuter la commande de test connue et enregistrer le verdict (`test-run.json`) |
 | `grimoire standard task scaffold [--task-id X] [--dry-run]` | Créer, s'ils manquent seulement, les artefacts par tâche que les gates exigent (enveloppe, pack de preuve, registre d'affirmations, dossier d'acceptance, context bundle, decision trace), pré-remplis depuis le Mission Ledger ; idempotent ; le hook SessionStart le fait déjà pour la tâche active |
@@ -699,6 +699,7 @@ et projections : [Système de mémoire](memory-system.md).
 | `grimoire memory shared` | Mémoire transverse : ce qui reste vrai d'un projet à l'autre |
 | `grimoire memory rules add` / `list` / `check` | Règles parsables par couche (`ALWAYS\|NEVER <verbe> <objet> [@portée]`) : conflits décidés par le code, plafond `rules.max_tokens_per_layer`, écriture via la frontière de confiance |
 | `grimoire memory rules explain <chemin>` | Règles qui valent pour un fichier : rang, couche d'origine (`organization` > `team` > `project` > `agent`), ce qui la fait céder, et si `host sync` la livre (couches `team` et `project` seulement) |
+| `grimoire memory rules pack list` / `show <id>` / `install <id> [--layer]` / `verify` | Packs de règles par stack (`python`) : chaque règle porte un vérificateur lu sur le code du projet, ou se déclare `advisory` (un pack de plus de 50 % d'advisory est refusé). `install` écrit les règles par la frontière de confiance ; `verify` rend `pass`, `fail` ou `unevaluated` par règle et sort en code 1 si l'une est violée |
 | `grimoire memory facts` / `diary` | Graphe de faits temporels, journaux d'agents |
 | `grimoire memory migrate` | Planifier et exporter les migrations Memory OS |
 | `grimoire memory taxonomy` | Taxonomie aile / salle / pièce |

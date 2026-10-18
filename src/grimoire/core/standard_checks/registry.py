@@ -377,6 +377,10 @@ CHECK_DIMENSIONS: dict[str, str] = {
     "rules.layer_unknown": "rule_packs",
     "rules.layer_unparsable": "rule_packs",
     "rules.none": "rule_packs",
+    # Packs de règles par stack (W6-08) — voir rules_check.verify_stack_packs.
+    "rules.pack_invalid": "rule_packs",
+    "rules.pack_unevaluated": "rule_packs",
+    "rules.pack_violation": "rule_packs",
     "rules.phase_missing": "rule_packs",
     "rules.policy_invalid": "rule_packs",
     "rules.remediation_missing": "rule_packs",

@@ -18,6 +18,7 @@ import typer
 # `memory vector` sur leurs sous-apps.
 from grimoire.cli import (
     cmd_memory_ops,  # noqa: F401
+    cmd_memory_packs,  # noqa: F401
     cmd_memory_projections,  # noqa: F401
     cmd_memory_rules,  # noqa: F401
     cmd_memory_shared,  # noqa: F401

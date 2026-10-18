@@ -894,6 +894,8 @@ def test_gate_check_strict_exits_2_for_every_profile(tmp_path: Path, profile_id:
             {
                 "schema", "ok", "profile", "score", "threshold", "warnings",
                 "errors", "dimensions", "output_path",
+                # W6-08 : règles de pack comptées à part (ajout, le schéma reste v1).
+                "rules_enforced", "rules_advisory", "rules_failing", "rules_unevaluated", "rules_unclassified",
             },
         ),
         (
