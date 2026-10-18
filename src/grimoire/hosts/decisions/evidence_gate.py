@@ -12,10 +12,13 @@ from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
 from grimoire.hosts.decisions.enrolment import (
     BLOCKING_PROFILES,
     NO_ACTIVE_TASK,
+    TASK_UNPARKED,
     ambiguity_text,
     expired_text,
     no_task_stop_reason,
+    record_unattached_work,
     session_mutation_count,
+    stop_scope,
 )
 from grimoire.hosts.decisions.gate_summary import _gate_summary
 
@@ -44,7 +47,7 @@ def decide_evidence_gate(hook: HookInput) -> Decision:
     if not is_standard_enrolled(hook.project_root):
         return Decision(detail={"skipped": "project_not_enrolled"})
 
-    active = resolve_active_task(hook.project_root, session_id=hook.session_id)
+    active = stop_scope(hook, resolve_active_task(hook.project_root, session_id=hook.session_id))
     task_id = active.task_id
     profile = active_profile_id(hook.project_root)
     if active.is_fallback:
@@ -73,6 +76,9 @@ def decide_evidence_gate(hook: HookInput) -> Decision:
         return _unevaluable_gate(task_id, profile, exc)
 
     if ok:
+        unparked = _unparked_task(hook, active, profile, detail)
+        if unparked is not None and detail.get("state") != "archived":
+            return unparked
         if detail.get("state") == "archived":
             # Issue #638 lot B : une tâche annulée depuis le cockpit (ou
             # archivée) n'a plus de gate à réclamer — dit en clair plutôt
@@ -115,6 +121,41 @@ def decide_evidence_gate(hook: HookInput) -> Decision:
     )
     _open_stop_chain(hook, task_id, summary, detail)
     return _with_done_gate(Decision(outcome=Outcome.BLOCK, reason=reason, detail=detail), hook, task_id, profile)
+
+
+def _unparked_task(hook: HookInput, active: Any, profile: str, detail: dict[str, Any]) -> Decision | None:
+    """§5.1 : une tâche rattachée à la session n'est quittée que fermée ou garée avec une raison.
+
+    Les gates de preuve sont verts, mais le ledger tient encore la tâche (``claimed`` ou
+    ``running``) : ni rendue pour vérification, ni bloquée, ni échouée, ni annulée. Un profil
+    bloquant refuse la clôture en nommant les gestes qui la garent ; les autres le disent.
+    L'état ``waiting`` (K6) n'existe pas encore : « garée » se lit aujourd'hui dans les états
+    du ledger. ``stop_hook_active`` passe avant ce contrôle : le second ``Stop`` sort toujours.
+    """
+    if active.source not in ("session_claim", "env", "ledger_claim"):
+        return None
+    try:
+        from grimoire.core.standard_state import LEDGER_RELPATH
+        from grimoire.missions.ledger import MissionLedger
+        from grimoire.missions.schemas import TaskState
+
+        events = hook.project_root.resolve() / LEDGER_RELPATH / "events.jsonl"
+        task = MissionLedger(events.parent).get_task(active.task_id) if events.is_file() else None
+    except Exception:
+        return None
+    if task is None or task.status not in (TaskState.CLAIMED, TaskState.RUNNING):
+        return None
+    message = (
+        f"[Grimoire] Tâche {task.id} encore {task.status.value} : cette session la tient (bail epoch "
+        f"{task.claim.lease_epoch if task.claim else 0}) et ne l'a ni fermée ni garée.\n"
+        f"Rends-la avant de conclure : `grimoire task move {task.id} --to needs_verification` (preuve remise), "
+        f"`grimoire task block {task.id} --reason ...` (bloquée), ou `grimoire task cancel {task.id} "
+        "--reason ...` (abandon). Si elle doit rester en cours, dis-le explicitement à l'utilisateur au lieu de conclure."
+    )
+    info = {**detail, "blocked_on": TASK_UNPARKED, "task_id": task.id, "task_state": task.status.value}
+    if profile in _BLOCKING_PROFILES:
+        return Decision(outcome=Outcome.BLOCK, reason=message, detail=info)
+    return Decision(context=message, detail=info)
 
 
 def _signature_of(hook: HookInput, task_id: str, summary: str, detail: dict[str, Any]) -> str:
@@ -371,6 +412,7 @@ def _no_task_closure(
     if mutations <= 0:
         return None
     detail = {"task_id": "bootstrap", "profile": profile, "blocked_on": NO_ACTIVE_TASK, "mutations": mutations}
+    detail["unattached_work"] = record_unattached_work(hook, mutations)
     reason = no_task_stop_reason(profile, mutations, candidates, expired)
     if profile in _BLOCKING_PROFILES:
         return Decision(outcome=Outcome.BLOCK, reason=reason, detail=detail)
