@@ -600,7 +600,13 @@ ne réécrit qu'eux :
   `foreign` (`host status --json` : `conflict_causes`) ;
 - `AGENTS.md` et `GEMINI.md` sont partagés : le kit n'y possède que le bloc
   `<!-- grimoire:begin … -->` … `<!-- grimoire:end -->`, tout ce qui l'entoure est
-  préservé à l'octet près, `--force` compris ;
+  préservé à l'octet près, `--force` compris (fins de ligne CRLF
+  comprises : le bloc suit le style du fichier). Un bloc abîmé (`END` absent ou
+  altéré) est un conflit `edited` que `--force` ne tranche pas : corrigez-le à la
+  main ;
+- un lien symbolique (`GEMINI.md` vers `AGENTS.md`, `settings.json` vers un dépôt
+  de dotfiles) reste un lien : la cible reçoit l'écriture, et le retour arrière
+  rétablit la cible ;
 - la synchronisation est transactionnelle : toutes les décisions sont prises
   avant la première écriture, et une panne en cours de route rétablit l'arbre
   (tous hôtes confondus). Un processus tué net n'est pas rétabli ;

@@ -154,7 +154,13 @@ _STAMP = re.compile(re.escape(MANAGED_MARKER) + r" sha256=([0-9a-f]{16})")
 #: ``GEMINI.md``) : tout ce qui est hors des bornes lui appartient.
 BLOCK_BEGIN = "<!-- grimoire:begin sha256={digest} -->"
 BLOCK_END = "<!-- grimoire:end -->"
-_BLOCK = re.compile(r"^<!-- grimoire:begin sha256=([0-9a-f]{16}) -->\n(.*?)\n<!-- grimoire:end -->(?:\n|\Z)", re.DOTALL | re.MULTILINE)
+#: Les fins de ligne ``\r\n`` sont acceptées : un fichier passé en CRLF par l'éditeur ou par git garde un bloc reconnu.
+_BLOCK = re.compile(
+    r"^<!-- grimoire:begin sha256=([0-9a-f]{16}) -->\r?\n(.*?)\r?\n<!-- grimoire:end -->(?:\r?\n|\Z)",
+    re.DOTALL | re.MULTILINE,
+)
+#: Toute ligne qui ouvre un bloc, qu'il soit bien formé ou non : un ``BEGIN`` sans ``END`` exact est un bloc abîmé.
+_BEGIN_LINE = re.compile(r"^<!-- grimoire:begin\b", re.MULTILINE)
 
 #: Causes d'un conflit, telles que ``host status`` les expose.
 CONFLICT_EDITED = "edited"  # fichier du kit modifié depuis son émission
@@ -184,8 +190,25 @@ def render_block(content: str) -> str:
     return f"{BLOCK_BEGIN.format(digest=_digest(body))}\n{body}\n{BLOCK_END}\n"
 
 
-def _read(path: Path, overlay: dict[Path, str]) -> str | None:
+def _target(path: Path) -> Path:
+    """Fichier réellement écrit pour *path* : la cible d'un lien symbolique, sinon *path*.
+
+    Écrire « à travers » le lien garde le lien en place (``GEMINI.md`` -> ``AGENTS.md``,
+    ``settings.json`` -> un dépôt de dotfiles) ; remplacer le lien par un fichier le casserait.
+    """
+    if not path.is_symlink():
+        return path
+    try:
+        return path.resolve()
+    except (OSError, RuntimeError):  # boucle de liens : on laisse l'écriture signaler l'erreur
+        return path
+
+
+def _read(path: Path, overlay: dict[Path, str], *, raw: bool = False) -> str | None:
     """Contenu courant de *path* (en tenant compte des écritures déjà décidées), ``None`` s'il n'existe pas.
+
+    *raw* garde les fins de ligne telles quelles (fichiers à bloc : le contenu de l'utilisateur
+    se préserve à l'octet près) ; sinon elles sont normalisées en LF.
 
     Lève ``OSError`` / ``ValueError`` pour un fichier présent mais illisible : l'appelant le préserve.
     """
@@ -193,7 +216,23 @@ def _read(path: Path, overlay: dict[Path, str]) -> str | None:
         return overlay[path]
     if not path.is_file():
         return None
+    if raw:
+        with path.open(encoding="utf-8", newline="") as fh:
+            return fh.read()
     return path.read_text(encoding="utf-8")
+
+
+def _block_body_digest(body: str) -> str:
+    """Empreinte du corps d'un bloc, indépendante du style de fin de ligne du fichier."""
+    return _digest(body.replace("\r\n", "\n"))
+
+
+def _is_legacy_whole_file(text: str) -> bool:
+    """Fichier entier de la version précédente : le marqueur ouvre le fichier et aucun bloc n'y figure."""
+    if _BEGIN_LINE.search(text) is not None:
+        return False
+    first = next((line for line in text.splitlines() if line.strip()), "")
+    return MANAGED_MARKER in first
 
 
 def _file_ownership(text: str, emitted: EmittedFile) -> str | None:
@@ -215,8 +254,10 @@ def _block_ownership(text: str) -> str | None:
     """Même question pour un fichier à bloc géré ; seul le contenu *du bloc* compte."""
     found = _BLOCK.search(text)
     if found is not None:
-        return None if _digest(found.group(2)) == found.group(1) else CONFLICT_EDITED
-    return None if MANAGED_MARKER in text[:4096] else CONFLICT_FOREIGN
+        return None if _block_body_digest(found.group(2)) == found.group(1) else CONFLICT_EDITED
+    if _BEGIN_LINE.search(text) is not None:
+        return CONFLICT_EDITED  # un BEGIN sans END exact : bloc abîmé, rien de ce qui suit n'est au kit
+    return None if _is_legacy_whole_file(text) else CONFLICT_FOREIGN
 
 
 def _kit_owns(path: Path, emitted: EmittedFile) -> bool:
@@ -230,8 +271,8 @@ def _kit_owns(path: Path, emitted: EmittedFile) -> bool:
     # Un fichier à bloc n'est « au kit » que s'il n'y a rien d'autre que le bloc : on ne le supprime jamais sinon.
     found = _BLOCK.fullmatch(text)
     if found is not None:
-        return _digest(found.group(2)) == found.group(1)
-    return MANAGED_MARKER in text[:4096] and _BLOCK.search(text) is None
+        return _block_body_digest(found.group(2)) == found.group(1)
+    return _is_legacy_whole_file(text)
 
 
 def owned_managed_paths(plan: EmitPlan, project_root: Path) -> list[Path]:
@@ -262,14 +303,19 @@ def _decide_block(current: str | None, emitted: EmittedFile, force: bool) -> tup
     cause = _block_ownership(current)
     if cause is not None and not force:
         return None, cause
+    nl = "\r\n" if "\r\n" in current else "\n"
+    if nl != "\n":  # le bloc suit le style du fichier ; ce qui l'entoure n'est jamais retouché
+        block = block.replace("\n", nl)
     found = _BLOCK.search(current)
     if found is not None:  # le bloc seul est remplacé : le reste est à l'utilisateur, même avec --force
         new = current[: found.start()] + block + current[found.end() :]
-    elif MANAGED_MARKER in current[:4096]:  # version précédente : tout le fichier était au kit
+    elif _is_legacy_whole_file(current):  # version précédente : tout le fichier était au kit
         new = block
+    elif _BEGIN_LINE.search(current) is not None:  # bloc abîmé : même --force ne devine pas où il finit
+        return None, CONFLICT_EDITED
     else:  # fichier de l'utilisateur, --force : on ajoute le bloc sans rien retirer
-        tail = current.rstrip("\n")
-        new = f"{tail}\n\n{block}" if tail else block
+        tail = current.rstrip("\r\n")
+        new = f"{tail}{nl}{nl}{block}" if tail else block
     return new, "unchanged" if new == current else "written"
 
 
@@ -277,12 +323,12 @@ def _decide_files(
     plan: EmitPlan, root: Path, result: EmitResult, overlay: dict[Path, str], writes: list[tuple[Path, str]], force: bool
 ) -> None:
     for emitted in plan.files:
-        dest = root / emitted.relpath
+        dest = _target(root / emitted.relpath)
         # POSIX form on purpose: a label is an identifier reported to the user
         # and asserted in tests, so it must not change shape with the host OS.
         label = emitted.relpath.as_posix()
         try:
-            current = _read(dest, overlay)
+            current = _read(dest, overlay, raw=emitted.block)
         except (OSError, ValueError):
             result.skip(label, CONFLICT_UNREADABLE)
             continue
@@ -310,7 +356,7 @@ def _decide_merges(
     plan: EmitPlan, root: Path, result: EmitResult, overlay: dict[Path, str], writes: list[tuple[Path, str]]
 ) -> None:
     for merge in plan.merges:
-        dest = root / merge.relpath
+        dest = _target(root / merge.relpath)
         label = merge.label or merge.relpath.as_posix()
         try:
             text = _read(dest, overlay)

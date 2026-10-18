@@ -279,3 +279,163 @@ def test_pruning_never_deletes_an_entrypoint_that_carries_user_content(project: 
     path.write_text("à moi\n\n" + path.read_text(encoding="utf-8"), encoding="utf-8")
 
     assert project / "AGENTS.md" not in owned_managed_paths(plan, project)
+
+
+# ── revue D-05 : blocs mal formés, liens symboliques, fins de ligne ──────────
+
+
+def _block_plan(catalog: str = "catalogue v2") -> EmitPlan:
+    content = f"{managed_header('.md')}\n\n# Proj — Codex\n\n{catalog}\n"
+    return EmitPlan(host_id=HostId.CODEX, files=(EmittedFile(relpath=Path("AGENTS.md"), content=content, block=True),))
+
+
+def _old_block() -> str:
+    from grimoire.hosts.emitters.base import render_block
+
+    return render_block(f"{managed_header('.md')}\n\n# Proj — Codex\n\ncatalogue v1\n")
+
+
+_TEAM = "# Règles d'équipe\n\nNe jamais pousser le vendredi.\n\n"
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        pytest.param(lambda b: b.replace("<!-- grimoire:end -->", "<!-- grimoire:end --> "), id="end-with-trailing-space"),
+        pytest.param(lambda b: b.replace("<!-- grimoire:end -->\n", "") + "\n## Après\nTexte après\n", id="end-missing"),
+    ],
+)
+@pytest.mark.parametrize("force", [False, True], ids=["plain", "force"])
+def test_a_block_whose_end_is_damaged_never_swallows_the_user_content(
+    tmp_path: Path, damage: object, force: bool
+) -> None:
+    path = tmp_path / "AGENTS.md"
+    original = _TEAM + damage(_old_block())  # type: ignore[operator]
+    path.write_text(original, encoding="utf-8")
+
+    result = apply_plan(_block_plan(), tmp_path, force=force)
+
+    assert result.conflicts == {"AGENTS.md": "edited"}
+    assert result.skipped and not result.written
+    assert path.read_text(encoding="utf-8") == original
+
+
+def test_user_text_before_an_unstamped_legacy_header_is_not_a_legacy_file(tmp_path: Path) -> None:
+    path = tmp_path / "AGENTS.md"
+    original = _TEAM + f"{managed_header('.md')}\n\n# ancien catalogue\n"
+    path.write_text(original, encoding="utf-8")
+
+    result = apply_plan(_block_plan(), tmp_path)
+
+    assert result.conflicts == {"AGENTS.md": "foreign"}
+    assert path.read_text(encoding="utf-8") == original
+    apply_plan(_block_plan(), tmp_path, force=True)
+    forced = path.read_text(encoding="utf-8")
+    assert forced.startswith(original.rstrip("\n"))  # --force ajoute le bloc sans rien retirer
+    assert forced.count("<!-- grimoire:begin") == 1
+
+
+def test_pruning_keeps_a_file_whose_block_is_damaged(tmp_path: Path) -> None:
+    from grimoire.hosts.emitters import owned_managed_paths
+
+    path = tmp_path / "AGENTS.md"
+    path.write_text(f"{managed_header('.md')}\n" + _old_block().replace("<!-- grimoire:end -->\n", ""), encoding="utf-8")
+
+    assert tmp_path / "AGENTS.md" not in owned_managed_paths(_block_plan(), tmp_path)
+
+
+def test_a_sync_keeps_user_lines_byte_for_byte_when_the_file_is_crlf(tmp_path: Path) -> None:
+    path = tmp_path / "AGENTS.md"
+    prefix = "# Règles\r\n\r\nLigne A\r\n\r\n".encode()
+    suffix = b"\r\nApres\r\n"
+    path.write_bytes(prefix + _old_block().replace("\n", "\r\n").encode() + suffix)
+
+    result = apply_plan(_block_plan(), tmp_path)
+
+    after = path.read_bytes()
+    assert result.written == ["AGENTS.md"] and not result.skipped
+    assert after.startswith(prefix) and after.endswith(suffix)
+    assert b"catalogue v2" in after
+    assert b"\n" not in after.replace(b"\r\n", b"")  # aucun LF nu : le style du fichier est suivi
+    again = apply_plan(_block_plan(), tmp_path)
+    assert again.unchanged == ["AGENTS.md"] and path.read_bytes() == after
+
+
+def test_a_lf_block_in_a_crlf_file_leaves_the_crlf_lines_around_it_alone(tmp_path: Path) -> None:
+    path = tmp_path / "AGENTS.md"
+    prefix = "# Règles\r\n\r\nLigne A\r\n\r\n".encode()
+    suffix = b"\r\nApres\r\n"
+    path.write_bytes(prefix + _old_block().encode() + suffix)
+
+    apply_plan(_block_plan(), tmp_path)
+
+    after = path.read_bytes()
+    assert after.startswith(prefix) and after.endswith(suffix)
+
+
+def test_force_appends_a_block_to_a_crlf_file_without_touching_its_lines(tmp_path: Path) -> None:
+    path = tmp_path / "AGENTS.md"
+    original = "# À moi\r\n\r\nContenu.\r\n".encode()
+    path.write_bytes(original)
+
+    apply_plan(_block_plan(), tmp_path, force=True)
+
+    after = path.read_bytes()
+    assert after.startswith(original)
+    assert b"\n" not in after.replace(b"\r\n", b"")
+
+
+symlinks = pytest.mark.skipif(not hasattr(__import__("os"), "symlink"), reason="liens symboliques indisponibles")
+
+
+@symlinks
+def test_a_symlinked_entrypoint_stays_a_link_and_its_target_gets_the_block(tmp_path: Path) -> None:
+    (tmp_path / "AGENTS.md").write_text("# Équipe\n\nx\n", encoding="utf-8")
+    link = tmp_path / "GEMINI.md"
+    link.symlink_to("AGENTS.md")
+    content = f"{managed_header('.md')}\n\n# Proj\n\ncatalogue\n"
+    plan = EmitPlan(host_id=HostId.GEMINI_CLI, files=(EmittedFile(relpath=Path("GEMINI.md"), content=content, block=True),))
+
+    result = apply_plan(plan, tmp_path, force=True)
+
+    assert result.written == ["GEMINI.md"]
+    assert link.is_symlink() and link.readlink() == Path("AGENTS.md")
+    target = (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
+    assert target.startswith("# Équipe\n\nx\n") and "catalogue" in target
+
+
+@symlinks
+def test_a_symlinked_json_merge_updates_the_target_and_keeps_the_link(tmp_path: Path) -> None:
+    (tmp_path / "dot").mkdir()
+    (tmp_path / "dot" / "settings.json").write_text('{"a": 1}\n', encoding="utf-8")
+    (tmp_path / ".claude").mkdir()
+    link = tmp_path / ".claude" / "settings.json"
+    link.symlink_to(Path("..") / "dot" / "settings.json")
+    plan = EmitPlan(
+        host_id=HostId.CLAUDE_CODE_CLI,
+        merges=(JsonMerge(relpath=Path(".claude/settings.json"), merge=lambda d: {**d, "b": 2}),),
+    )
+
+    apply_plan(plan, tmp_path)
+
+    assert link.is_symlink()
+    assert json.loads((tmp_path / "dot" / "settings.json").read_text(encoding="utf-8")) == {"a": 1, "b": 2}
+
+
+@symlinks
+def test_a_rollback_keeps_a_symlink_and_restores_its_target(tmp_path: Path) -> None:
+    (tmp_path / "blocked").write_text("fichier\n", encoding="utf-8")
+    (tmp_path / "AGENTS.md").write_text("# Équipe\n\nx\n", encoding="utf-8")
+    (tmp_path / "GEMINI.md").symlink_to("AGENTS.md")
+    content = f"{managed_header('.md')}\n\n# Proj\n\ncatalogue\n"
+    plan = EmitPlan(
+        host_id=HostId.GEMINI_CLI,
+        files=(EmittedFile(relpath=Path("GEMINI.md"), content=content, block=True), _managed("blocked/third.md")),
+    )
+    before = _snapshot(tmp_path)
+
+    with pytest.raises(OSError):
+        apply_plan(plan, tmp_path, force=True)
+
+    assert (tmp_path / "GEMINI.md").is_symlink()
+    assert _snapshot(tmp_path) == before
