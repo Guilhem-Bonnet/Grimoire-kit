@@ -260,6 +260,10 @@ class ResumeOutcome:
     #: Avertissements nommés : décision ``unattested`` acceptée sur un
     #: checkpoint non destructif (W2-01, décision 2).
     warnings: tuple[str, ...] = ()
+    #: ``True`` quand le node vient d'être accepté mais qu'un ``hold`` (K11) a posé le run en ``PAUSED`` à la
+    #: frontière : ``node_id`` nomme le node suivant, qui n'est ni présenté ni exécuté, ``contract`` est vide.
+    #: Un pilote qui enchaîne les nodes s'arrête là.
+    paused: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -274,6 +278,7 @@ class ResumeOutcome:
             "repaired": list(self.repaired),
             "attestation": self.attestation,
             "warnings": list(self.warnings),
+            "paused": self.paused,
         }
 
 

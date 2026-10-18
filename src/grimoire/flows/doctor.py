@@ -295,6 +295,10 @@ def _derive_from_events(
                 done.append(step)
             if open_node == step:
                 open_node = None
+        elif kind is RunEventType.WORKFLOW_PAUSED:
+            status = "paused"
+        elif kind is RunEventType.WORKFLOW_RESUMED:
+            status = "running"
         elif kind is RunEventType.WORKFLOW_COMPLETED:
             status = "completed"
         elif kind is RunEventType.WORKFLOW_ABORTED:

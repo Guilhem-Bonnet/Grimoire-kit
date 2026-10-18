@@ -72,6 +72,8 @@ def _render(plan: QueuePlan) -> None:
         f"tenues {len(plan.view.held)}, CI {len(plan.view.ci_occupants)}/{capacity.ci_runners}, "
         f"quota {quota} (consommé {consumed})"
     )
+    for flag in plan.pause.flags:
+        console.print(f"[yellow]pause : {flag.label} — aucune admission sous ce drapeau[/yellow]")
     for section, reason in capacity.errors.items():
         console.print(f"[red]capacité illisible ({section}) : {reason}[/red]")
     table = Table(title="Admission")

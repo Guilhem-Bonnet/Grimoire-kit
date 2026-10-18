@@ -715,6 +715,13 @@ def upgrade_flow_run(
         if outcome.finished:
             stopped_at = None
             break
+        if outcome.paused:
+            _fail_run(
+                ctx, f"pause en vigueur après le node {node_id} : {list(outcome.warnings)}",
+                json_flag=json_flag, run_id=run_id, done=done, failed_node=node_id,
+                backup_path=(node_outputs.get("backup") or {}).get("tarball"),
+            )
+            return
         assert outcome.contract is not None
         contract = outcome.contract
 

@@ -463,6 +463,47 @@ est `unknown` : refusée en autonome (`GRIMOIRE_UNATTENDED=1`), affichée en int
 **Famine** : une tâche différée depuis plus de 24 h (`queue.famine_hours`) monte au niveau 2
 d'attention, sa raison est affichée.
 
+## La pause : drain et hold, jamais un arrêt brutal
+
+`PAUSED` n'était émis nulle part et rien ne disait « stoppe tout » sans tuer les
+sessions. Le lot K11 de l'épopée #705 ajoute un **drapeau fichier**, lu sans ouvrir
+le ledger, et un tick qui le lit en premier.
+
+| Commande | Description |
+| --- | --- |
+| `grimoire orchestrate pause [--drain\|--hold] [--project\|--global] [--task <id>...] [--reason ...]` | Pose le drapeau (`drain` par défaut) ; `--global` (toute la machine) est un geste d'humain |
+| `grimoire orchestrate resume [--global] [--task <id>...]` | Lève le drapeau, ou seulement ces tâches ; geste d'humain (l'origine humaine est exigée, comme pour `queue release`) |
+| `grimoire orchestrate status [--json]` | Les drapeaux en vigueur et, pour chaque tâche tenue, ce que `hold` fait sur son hôte (« hold dégradé en drain (hôte sans frein) ») |
+| `grimoire orchestrate tick [--apply] [--json]` | Un tick : lit la pause, puis récolte, rend les attentes levées et calcule l'admission ; sans `--apply`, rien n'est écrit ; sous pause, sort en 0 sans ouvrir le ledger |
+
+**Portée.** `_grimoire-output/control/pause.json` porte sur le projet (avec `tasks: [...]`, seulement
+sur ces tâches) ; `$GRIMOIRE_CONTROL_HOME/pause.json` (par défaut `~/.grimoire/control/pause.json`) porte
+sur tous les projets de la machine. Le tick et le frein lisent les deux et appliquent l'**union** :
+`hold` l'emporte sur `drain`. Un drapeau **illisible** (JSON invalide, permission, mode inconnu) vaut `drain`
+à son niveau, avec une ligne d'attention ; `resume` le supprime.
+
+- **`drain`** : rien n'est admis (`Defer(pause)` au plan, claim refusé sous le verrou du ledger), les agents
+  en cours finissent leur tâche. Une attente `waiting(ci|quota)` reprend ; une attente `waiting(paused)` attend la fin de la pause.
+- **`hold`**, en plus de `drain`, sur un hôte dont le refus d'outil est prouvé pour sa version
+  (`hosts.capabilities`) : le `PreToolUse` refuse les outils mutants d'une session qui tient une tâche, avec
+  « pause : dépose ton point de reprise ». Le premier refus ouvre **une** écriture, `grimoire task wait <tâche> --reason paused`
+  (ou l'action MCP `wait` avec `to=paused`), qui note la branche et le HEAD du worktree. Ensuite tout outil mutant
+  reste refusé, les lectures passent et le `Stop` est permis. Sur un hôte sans frein, `hold` se dégrade en `drain`
+  et le dit : la consigne « pause demandée : gare-toi » est injectée au tour suivant.
+- **Flows.** À la frontière de node (le node vient d'être accepté, le suivant n'est pas encore ouvert), un `hold`
+  pose le run en `PAUSED` (`workflow.paused`) : le node suivant n'est ni présenté ni exécuté, `flow resume` rend
+  `paused: true` et les pilotes (`--executor dispatch`, `upgrade-flow`) s'arrêtent. Pendant la pause, `flow resume`
+  refuse sans rien écrire ; une fois levée, il rouvre le node suivant (`workflow.resumed`, une seule fois).
+  `drain` ne pose aucun run : ils finissent.
+- **`resume`** : le drapeau est supprimé. Le tick suivant rend les `waiting(paused)` en `ready`, **dans l'ordre
+  de la file** et sans leur faire perdre l'ancienneté d'avant leur claim. Une session restée ouverte lit à son tour
+  « Pause levée : ta tâche … est de nouveau ready » et peut la re-claimer ; une session fermée retrouve `resume_command`.
+
+Limites écrites : un outil MCP tiers n'est pas classé mutant par le kit (seuls `task_claim`, `task_update` et `task_add`
+du kit le sont pour le frein) ; la pause ne reprend pas un effet distant déjà parti ; le bail d'une tâche garée reste tenu
+jusqu'au réveil par le tick (K6) ; le frein ne juge pas une session qui ne tient aucune tâche ; un run de flow n'est pas
+refusé au démarrage sous `hold`.
+
 ## Besoins d'exécution : un flow déclare, le projet résout
 
 Un node de flow ne référence pas `pytest` ni `npm test` en dur : son
