@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
@@ -711,9 +712,10 @@ def test_a_simple_grimoire_task_command_still_passes_the_brake(governed: Path, c
 def _refusing_hook(path: Path, message: str, marker: Path | None = None) -> None:
     body = f"#!/bin/sh\necho {message} >&2\n"
     if marker is not None:
-        body += f'echo "$@" > {marker}\ncat >> {marker}\n'
+        quoted = shlex.quote(marker.as_posix())
+        body += f'echo "$@" > {quoted}\ncat >> {quoted}\n'
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(body + "exit 1\n", encoding="utf-8")
+    path.write_bytes((body + "exit 1\n").encode("utf-8"))  # LF strict
     path.chmod(0o755)
 
 

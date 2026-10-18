@@ -152,20 +152,21 @@ def install_fence(worktree: Path, ledger_root: Path, task_id: str, epoch: int, *
     origin = _origin_hooks_dir(worktree, root)
     lease = lease_path(ledger_root.resolve(), task_id)
     state = {
-        "$schema": _SCHEMA, "task_id": task_id, "epoch": epoch, "lease_file": str(lease), "hooks_dir": str(origin),
+        "$schema": _SCHEMA, "task_id": task_id, "epoch": epoch, "lease_file": str(lease), "hooks_dir": origin.as_posix(),
     }
     (root / "fence.json").write_text(json.dumps(state, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
     for name in RELAYED_HOOKS:
-        quoted = shlex.quote(str(origin / name))
+        quoted = shlex.quote((origin / name).as_posix())
         body = (
             _PRE_PUSH_TEMPLATE.format(
-                fence=shlex.quote(str(root / "fence.json")), orig=quoted, python=shlex.quote(python or sys.executable)
+                fence=shlex.quote((root / "fence.json").as_posix()), orig=quoted,
+                python=shlex.quote(Path(python or sys.executable).as_posix()),
             )
             if name == "pre-push"
             else _RELAY_TEMPLATE.format(orig=quoted)
         )
         hook = hooks / name
-        hook.write_text(body, encoding="utf-8")
+        hook.write_bytes(body.encode("utf-8"))  # LF strict : un CRLF casserait le shebang sous Windows
         hook.chmod(hook.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     _git(worktree, "config", "extensions.worktreeConfig", "true")
     _git(worktree, "config", "--worktree", "core.hooksPath", str(hooks))
@@ -204,10 +205,17 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     verdict = check_fence(Path(args[1]))
     if not verdict.ok:
-        sys.stderr.write(
+        message = (
             f"[Grimoire] push refusé — {verdict.reason}.\n"
             "Cette session ne tient plus la tâche : ne pousse pas. `grimoire task show` dit où elle en est.\n"
         )
+        # UTF-8 explicite : sous Windows, stderr est en code page locale et git/le lecteur attendent de l'UTF-8.
+        buffer = getattr(sys.stderr, "buffer", None)
+        if buffer is not None:
+            buffer.write(message.encode("utf-8"))
+            buffer.flush()
+        else:
+            sys.stderr.write(message)
         return 1
     return 0
 
