@@ -1041,11 +1041,13 @@ def _verify_acceptance_record(
         _add_check(result, "acceptance.empty", "warning", "Acceptance record still holds only the template criterion.", path=rel_path)
     failed = False
     passed_ids: list[str] = []
+    valid_rows: list[list[str]] = []
     for line in rows:
         cells = _cells(line)
         if len(cells) < 4:
             _add_check(result, "acceptance.row_invalid", "warning", f"Criterion row is malformed: {line[:60]}", path=rel_path)
             continue
+        valid_rows.append(cells)
         criterion_id, _criterion, proof, status = cells[:4]
         if status == "passé" and not proof:
             _add_check(
@@ -1061,6 +1063,12 @@ def _verify_acceptance_record(
         _cells(line) for line in text.splitlines()
         if line.startswith("| ") and _cells(line)[0] in {"accepté", "refusé", "ajustement demandé", "en attente"}
     ]
+    from grimoire.core.standard_checks.criterion_coverage import verify_criterion_coverage
+
+    verify_criterion_coverage(
+        root, profile, task_id, valid_rows,
+        accepted=any(cells[0] == "accepté" for cells in decisions), result=result, rel_path=rel_path,
+    )
     for cells in decisions:
         decision, validator, date = [*cells, "", "", ""][:3]
         if decision == "en attente":
