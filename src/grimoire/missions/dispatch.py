@@ -1274,6 +1274,8 @@ def run_dispatch(
             tier_candidates = tuple(p for p in tier_candidates if p.id == provider_id)
         tier_settled = False
         for provider in tier_candidates:
+            if routing.exhausted(attempt_no):
+                break  # K9 : `max_attempts` de la politique (mode actif)
             # Premier modèle du palier que le forfait n'a pas fermé.
             model = routing.pick(provider, tier, available_models(provider, tier, load_state(root), now=datetime.now(UTC)))
             attempt_no += 1

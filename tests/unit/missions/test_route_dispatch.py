@@ -543,6 +543,106 @@ def test_route_report_counts_and_says_not_measured_under_five(tmp_path: Path) ->
     assert shadow["disagreements"][0]["dispatched"] == ["cheap", "first"]
 
 
+def _labeled_task(service: TaskService, label: str) -> str:
+    mission = service.ledger.create_mission("Démo étiquetée", origin="test")
+    return service.ledger.create_task(mission.id, "Tâche étiquetée", acceptance=(V0,), owner="amelia", extra={"labels": [label]}).id
+
+
+_SHADOW_BLOCKED = (
+    "version: 1\nmode: shadow\nrules:\n"
+    "  - {id: r-blocked, when: {risk_any: [blocked]}, route: session}\n"
+    "  - {id: r-v0, when: {class: V0}, min_tier: cheap}\n"
+)
+
+
+def test_route_report_counts_a_session_outcome_followed_by_a_dispatch_as_a_disagreement(tmp_path: Path) -> None:
+    """K9-S2-01 : le routeur a rendu `session`, le dispatch shadow a pourtant appelé : ce n'est pas un accord."""
+    _registry(tmp_path, {"p": ["m1"]})
+    _policy(tmp_path, _SHADOW_BLOCKED)
+    service = TaskService(tmp_path, LEDGER)
+    agreeing = _task(service)
+    disagreeing = _labeled_task(service, "blocked")
+    run_dispatch(service, agreeing, checks=CHECK)
+    run_dispatch(service, disagreeing, checks=CHECK)
+    assert _routed(service, disagreeing)[0]["outcome"] == "session"
+
+    from grimoire.missions.route_report import build_report
+
+    shadow = build_report(service.ledger)["shadow_comparison"]
+
+    assert (shadow["compared"], shadow["agree"], shadow["agreement"]) == (2, 1, "50%")
+    assert [d["task_id"] for d in shadow["disagreements"]] == [disagreeing]
+    assert shadow["disagreements"][0]["routed_outcome"] == "session"
+
+
+def test_route_report_shadow_agreement_ignores_active_events(tmp_path: Path) -> None:
+    """K9-S2-01 : l'accord est celui du mode `shadow` ; un événement `active` ne le fait pas monter."""
+    service = TaskService(tmp_path, LEDGER)
+
+    def trace(task_id: str, mode: str, model: str) -> None:
+        decision = {"tier": "cheap", "model": model}
+        service.ledger.append_event(
+            ROUTED_EVENT, task_id, "task", "test", {"task_id": task_id, "mode": mode, "outcome": "route", "decision": decision}
+        )
+        service.ledger.append_event(
+            "task.dispatched", task_id, "task", "test", {"task_id": task_id, "attempt": 1, "tier": "cheap", "model": "m1"}
+        )
+
+    trace("T-shadow", "shadow", "other")
+    trace("T-active", "active", "m1")
+
+    from grimoire.missions.route_report import build_report
+
+    shadow = build_report(service.ledger)["shadow_comparison"]
+
+    assert (shadow["compared"], shadow["agree"], shadow["agreement"]) == (1, 0, "0%")
+
+
+def _three_tiers(root: Path) -> None:
+    _registry_with_currency(root, {"p": ("api", [("m1", "cheap"), ("m2", "mid"), ("m3", "strong")])})
+
+
+_RED = ("test -f absent.txt",)
+
+
+def test_active_max_attempts_caps_the_cascade(tmp_path: Path) -> None:
+    """K9-S2-02 : `max_attempts` est appliqué en mode actif ; il ne reste pas accepté puis ignoré."""
+    _three_tiers(tmp_path)
+    _policy(tmp_path, "version: 1\nmode: active\nmax_attempts: 1\nrules:\n  - {id: r-v0, when: {class: V0}, min_tier: cheap}\n")
+    service = TaskService(tmp_path, LEDGER)
+    tid = _task(service)
+
+    report = run_dispatch(service, tid, checks=_RED)
+
+    assert _calls(tmp_path) == ["m1"]
+    assert len(report.attempts) == 1
+    assert not report.succeeded
+
+
+def test_active_max_attempts_two_stops_after_two_calls(tmp_path: Path) -> None:
+    _three_tiers(tmp_path)
+    _policy(tmp_path, "version: 1\nmode: active\nmax_attempts: 2\nrules:\n  - {id: r-v0, when: {class: V0}, min_tier: cheap}\n")
+    service = TaskService(tmp_path, LEDGER)
+    report = run_dispatch(service, _task(service), checks=_RED)
+    assert _calls(tmp_path) == ["m1", "m2"]
+    assert len(report.attempts) == 2
+
+
+def test_shadow_max_attempts_changes_nothing_but_is_traced(tmp_path: Path) -> None:
+    """K9-S2-02 : en `shadow` l'ancien chemin gouverne ; la limite n'est que tracée dans les entrées."""
+    _three_tiers(tmp_path)
+    _policy(tmp_path, "version: 1\nmode: shadow\nmax_attempts: 1\nrules:\n  - {id: r-v0, when: {class: V0}, min_tier: cheap}\n")
+    service = TaskService(tmp_path, LEDGER)
+    tid = _task(service)
+
+    run_dispatch(service, tid, checks=_RED)
+
+    assert _calls(tmp_path) == ["m1", "m2", "m3"]
+    inputs = _routed(service, tid)[0]["inputs"]
+    assert isinstance(inputs, dict)
+    assert inputs["policy"]["max_attempts"] == 1
+
+
 # ── Évaluation hors ligne (D16) ────────────────────────────────────────────────
 
 
@@ -625,3 +725,13 @@ def test_ledger_is_not_otherwise_touched_by_routing(tmp_path: Path) -> None:
     run_dispatch(service, tid, checks=CHECK)
     after = {e.event_type for e in MissionLedger(tmp_path / LEDGER).list_events(tid)}
     assert after - before == {ROUTED_EVENT, "task.dispatched"}
+
+
+def test_route_eval_set_risk_and_type_are_normalized_like_ledger_labels() -> None:
+    """K9-S2-03 : un jeu d'évaluation écrit `Security` doit ranger la tâche comme le fait le ledger."""
+    from grimoire.missions.route_report import _parse_set
+
+    (entry,) = _parse_set({"version": 1, "tasks": [{"id": "E", "class": "V0", "type": "Implementation", "risk": [" Security "], "results": {}}]})
+
+    assert entry.task.risk_tags == ("security",)
+    assert entry.task.task_type == "implementation"

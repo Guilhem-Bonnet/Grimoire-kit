@@ -66,6 +66,12 @@ class DispatchRouting:
     policy_invalid: bool = False
     #: Monnaies imposées par les règles qui correspondent ; plusieurs : aucun fournisseur admissible.
     currencies: tuple[str, ...] = ()
+    #: ``max_attempts`` de la politique ; appliqué seulement quand le routeur gouverne (mode actif).
+    max_attempts: int | None = None
+
+    def exhausted(self, calls: int) -> bool:
+        """Vrai quand *calls* appels ont déjà eu lieu et que la politique active n'en permet pas davantage."""
+        return self.active and self.max_attempts is not None and calls >= self.max_attempts
 
     def refusal(self) -> tuple[str, str] | None:
         """``(code, raison)`` quand la cascade autonome ne doit pas partir, ``None`` sinon.
@@ -148,7 +154,7 @@ def record_route(service: TaskService, task: MissionTask, verifiability: Verifia
     root, ledger = service.project_root, service.ledger
     facts = routing_task_from(task, verifiability.value)
     history, decision, error = RouteHistory(), None, None
-    invalid, currencies = False, tuple[str, ...]()
+    invalid, currencies, max_attempts = False, tuple[str, ...](), None
     payload: dict[str, Any]
     try:
         load, facts, history, view, decision = _plan(root, ledger, task, verifiability.value)
@@ -158,7 +164,7 @@ def record_route(service: TaskService, task: MissionTask, verifiability: Verifia
             reason = f"politique illisible : {load.error}"
             decision, invalid = RouteDecision("refuse", reasons=(reason,)), True
         else:
-            currencies = required_currencies(facts, load.policy)
+            currencies, max_attempts = required_currencies(facts, load.policy), load.policy.max_attempts
             payload["inputs"] = inputs_dict(facts, history, view, load.policy)
     except Exception as exc:
         mode, error = "shadow", f"{type(exc).__name__}: {exc}"
@@ -169,7 +175,7 @@ def record_route(service: TaskService, task: MissionTask, verifiability: Verifia
         ledger.append_event(ROUTED_EVENT, task.id, "task", actor, payload)
     return DispatchRouting(
         root, facts, history.for_couple(facts.task_type, facts.verifiability), decision,
-        mode == "active" and decision.outcome == "route", mode, invalid, currencies,
+        mode == "active" and decision.outcome == "route", mode, invalid, currencies, max_attempts,
     )
 
 

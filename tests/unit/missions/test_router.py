@@ -40,6 +40,7 @@ from grimoire.missions.routing_policy import (
     Rule,
     load_policy,
     parse_policy,
+    rule_matches,
 )
 from grimoire.providers.state import ProviderRuntimeState, Suspension, save_state
 
@@ -424,3 +425,26 @@ def test_provider_view_reports_a_suspended_model_with_its_reopening(tmp_path: Pa
 def test_decision_serialises_to_strict_utf8() -> None:
     decision = route(_task("V1", risk_tags=("migration",)), RouteHistory(), FULL_VIEW)
     json.dumps(decision.to_dict(), ensure_ascii=False).encode("utf-8")
+
+
+# ── Casse des conditions : le routeur normalise les étiquettes, la politique aussi ─
+
+
+def test_risk_any_is_case_insensitive_like_the_task_labels() -> None:
+    """K9-S2-03 : `risk_any: [Security]` doit correspondre à l'étiquette `security`, pas rester muet."""
+    policy = parse_policy({"version": 1, "rules": [{"id": "r", "when": {"risk_any": [" Security "]}, "min_tier": "strong"}]})
+    task = _task("V0", risk_tags=("security",))
+    assert policy.rules[0].when["risk_any"] == ["security"]
+    assert rule_matches(policy.rules[0], task)
+    assert route(task, RouteHistory(), FULL_VIEW, policy=policy).tier == "strong"
+    assert parse_policy(policy.to_dict()) == policy, "la forme normalisée se rejoue à l'identique"
+
+
+def test_type_condition_is_case_insensitive() -> None:
+    policy = parse_policy({"version": 1, "rules": [{"id": "r", "when": {"type": "Implementation"}, "min_tier": "mid"}]})
+    assert rule_matches(policy.rules[0], _task("V0"))
+
+
+def test_blank_risk_label_is_refused() -> None:
+    with pytest.raises(PolicyError):
+        parse_policy({"version": 1, "rules": [{"id": "r", "when": {"risk_any": ["  "]}, "min_tier": "mid"}]})

@@ -3,7 +3,8 @@
 ``report`` ne fait que compter, depuis le Mission Ledger : réussite au premier essai (pass^1)
 par couple (type, classe, modèle), escalade par couple, et — en mode ``shadow`` — l'accord
 entre ce que le routeur aurait fait (``task.routed``) et ce que le dispatch a fait (la première
-tentative de ``task.dispatched``). Sous 5 observations, la réussite est « non mesuré », jamais 0.
+tentative de ``task.dispatched``). Seuls les événements ``shadow`` comptent ; une issue
+``session``, ``defer`` ou ``refuse`` suivie d'un appel est un désaccord. Sous 5 observations, la réussite est « non mesuré », jamais 0.
 
 ``eval`` rejoue un jeu fixe de tâches V0/V1 closes, chacune avec ses résultats enregistrés par
 modèle (``results``), contre la base « fixe » actuelle (V0 vers ``cheap``, V1 vers ``mid``,
@@ -80,15 +81,19 @@ def build_report(ledger: MissionLedger) -> dict[str, Any]:
             pending[str(p.get("task_id"))] = p
         elif event.event_type == "task.dispatched" and p.get("attempt") == 1 and str(p.get("task_id")) in pending:
             routed = pending.pop(str(p.get("task_id")))
+            if routed.get("mode") != "shadow":
+                continue  # l'accord se mesure en shadow : en `active` le dispatch suit le routeur, il s'accorde par construction
             decision = routed.get("decision", {})
-            if routed.get("outcome") != "route":
-                continue
+            outcome = routed.get("outcome")
+            routed_pair = [decision.get("tier"), decision.get("model")]
             compared.append(
                 {
                     "task_id": p.get("task_id"),
-                    "routed": [decision.get("tier"), decision.get("model")],
+                    "routed_outcome": outcome,
+                    "routed": routed_pair,
                     "dispatched": [p.get("tier"), p.get("model")],
-                    "agree": [decision.get("tier"), decision.get("model")] == [p.get("tier"), p.get("model")],
+                    # `session`, `defer`, `refuse` suivis d'un appel : le routeur n'aurait pas appelé, ce n'est pas un accord.
+                    "agree": outcome == "route" and routed_pair == [p.get("tier"), p.get("model")],
                 }
             )
     agree = sum(1 for c in compared if c["agree"])
@@ -128,11 +133,11 @@ def _parse_set(data: Any) -> tuple[_EvalTask, ...]:
                 raise EvalSetError(f"tâche {entry['id']} : résultat de {model} sans `passed` booléen")
             cost = outcome.get("cost_usd")
             results[str(model)] = (outcome["passed"], None if cost is None else float(cost))
-        risk = tuple(sorted(str(r) for r in entry.get("risk", ())))
+        risk = tuple(sorted({str(r).strip().lower() for r in entry.get("risk", ()) if str(r).strip()}))
         tasks.append(
             _EvalTask(
                 RoutingTask(
-                    str(entry["id"]), str(entry["class"]), str(entry.get("type", "implementation")), risk,
+                    str(entry["id"]), str(entry["class"]), str(entry.get("type", "implementation")).strip().lower(), risk,
                     int(entry.get("exclusive_files", 0)), bool(entry.get("needs_local", False)),
                 ),
                 results,

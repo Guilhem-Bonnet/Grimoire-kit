@@ -342,7 +342,7 @@ réouverture, comme un fournisseur injoignable.
 | Commande | Description |
 | --- | --- |
 | `grimoire route explain <tâche> [--json]` | Rejoue la dernière décision `task.routed` à partir de ses entrées et de `inputs_digest` ; sortie 1 si le rejeu diffère, 2 sans décision |
-| `grimoire route report [--json]` | Réussite au premier essai (pass^1) par (type, classe, modèle), escalade par couple, accord entre le routeur et le dispatch en mode `shadow` ; « non mesuré » sous 5 observations |
+| `grimoire route report [--json]` | Réussite au premier essai (pass^1) par (type, classe, modèle), escalade par couple, accord entre le routeur et le dispatch en mode `shadow` seulement (une issue `session`, `defer` ou `refuse` suivie d'un appel compte comme un désaccord) ; « non mesuré » sous 5 observations |
 | `grimoire route eval --set <jeu> [--json]` | Seuil d'activation D16 hors ligne ; sortie 0 (tenu), 1 (non tenu), 3 (non mesuré) |
 
 **Politique** : `_grimoire/standard/routing-policy.yaml`, sinon le défaut livré
@@ -352,7 +352,9 @@ règles. `route: session` est absorbant, V2 n'a jamais de route autonome, aucune
 règle qui correspond donne `session`, et le palier ne descend jamais sous le
 plancher de la classe (V0 `cheap`, V1 `mid`). Les conditions admises sont
 `class`, `type`, `risk_any`, `exclusive_files_gt`, `needs_local` : une règle qui
-nomme un quota ou un budget invalide la politique. Une politique malformée, sans
+nomme un quota ou un budget invalide la politique. `type` et `risk_any` se comparent
+en minuscules, sans espaces autour (comme les étiquettes de la tâche) : `risk_any: [Security]`
+vaut `[security]`, une étiquette vide est refusée. Une politique malformée, sans
 version ou de version inconnue n'est jamais remplacée par le défaut : aucune
 route autonome (`on_invalid: refuse`) : la décision tracée est `refuse` et
 `task dispatch` ne lance aucune cascade (refus `routing_policy_invalid`, sortie 2),
@@ -366,6 +368,10 @@ rules:
   - {id: r-risk, when: {risk_any: [security, migration]}, min_tier: strong}
   - {id: r-v1, when: {class: V1}, min_tier: mid}
 ```
+
+**Tentatives** : `max_attempts` (défaut 3) borne le nombre d'appels de la cascade
+en mode `active` (appels en échec compris, tous paliers confondus) ; en `shadow`
+rien n'est appliqué, la valeur n'est que tracée dans les entrées de `task.routed`.
 
 **Mode** : `shadow` (défaut) émet `task.routed` avant chaque cascade et laisse le
 dispatch suivre l'ancien chemin ; `active` fait gouverner la décision (palier de

@@ -150,12 +150,13 @@ def _parse_when(rule_id: str, raw: Any) -> dict[str, Any]:
             if value not in _CLASSES:
                 raise _fail(f"règle {rule_id!r} : class doit être l'une de {list(_CLASSES)}")
         elif key == "type":
-            if not isinstance(value, str) or not value:
+            if not isinstance(value, str) or not value.strip():
                 raise _fail(f"règle {rule_id!r} : type doit être une chaîne")
+            value = value.strip().lower()  # même normalisation que ``routing_task_from``
         elif key == "risk_any":
-            if not isinstance(value, list) or not value or not all(isinstance(v, str) and v for v in value):
-                raise _fail(f"règle {rule_id!r} : risk_any doit être une liste de chaînes non vide")
-            value = [str(v) for v in value]
+            if not isinstance(value, list) or not value or not all(isinstance(v, str) and v.strip() for v in value):
+                raise _fail(f"règle {rule_id!r} : risk_any doit être une liste de chaînes non vides")
+            value = [v.strip().lower() for v in value]  # les étiquettes de la tâche sont en minuscules
         elif key == "exclusive_files_gt":
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 raise _fail(f"règle {rule_id!r} : exclusive_files_gt doit être un entier >= 0")
