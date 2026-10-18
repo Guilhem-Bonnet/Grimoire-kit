@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from grimoire.core.standard_checks.evidence_journal import record_guard_error
-from grimoire.core.standard_state import is_standard_enrolled, resolve_active_task
+from grimoire.core.standard_state import active_profile_id, is_standard_enrolled, resolve_active_task
 from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
 from grimoire.hosts.decisions.enrolment import (
     BLOCKING_PROFILES,

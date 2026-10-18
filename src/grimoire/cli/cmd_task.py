@@ -678,53 +678,6 @@ def task_close(
     _transition(ctx, task_id, TaskState.CLOSED, project_root, ledger_root, actor)
 
 
-@task_app.command("review")
-def task_review(
-    ctx: typer.Context,
-    task_id: Annotated[str, typer.Argument()],
-    verdict: Annotated[str, typer.Option("--verdict", help="READY ou NOT-READY.")],
-    finding: Annotated[
-        list[str] | None,
-        typer.Option("--finding", help="Constat « résumé :: commande qui le montre » (répétable) ; sans « :: », une suggestion."),
-    ] = None,
-    reviewer: Annotated[str, typer.Option("--reviewer", help="Qui a relu (défaut : l'acteur).")] = "",
-    model: Annotated[str, typer.Option("--model", help="Modèle du relecteur, s'il en est un.")] = "",
-    project_root: _PROJECT_ROOT = Path(),
-    ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
-    actor: _ACTOR = "cli",
-) -> None:
-    """Écrit le reçu de revue d'une tâche, lié à l'empreinte présente de l'arbre (W3-01).
-
-    La clôture d'une tâche en `needs_verification` l'exige (V1/V2, et V0 en
-    profil governed) et recalcule l'empreinte : tout changement après le reçu
-    le périme (`review.receipt_stale`). Un NOT-READY doit porter au moins un
-    constat avec sa commande (`review.finding_ungrounded` sinon).
-    """
-    from grimoire.missions.review_receipt import ReviewFinding, ReviewReceiptError, write_receipt
-
-    service = _service(project_root, ledger_root)
-    _require_task(service, task_id)
-    findings = []
-    for raw in finding or ():
-        summary, _, cmd = raw.partition("::")
-        findings.append(ReviewFinding(summary.strip(), cmd.strip()))
-    try:
-        receipt = write_receipt(
-            service.project_root, task_id, verdict.strip().upper(), findings=findings,
-            reviewer_id=reviewer or actor, model=model,
-        )
-    except (ReviewReceiptError, ValueError) as exc:
-        console.print(f"[red]✗[/red] {escape(str(exc))}")
-        raise typer.Exit(1) from exc
-    if _fmt(ctx) == "json":
-        typer.echo(json.dumps(receipt.to_dict(), indent=2, ensure_ascii=False))
-        return
-    console.print(
-        f"[green]OK[/green] reçu {receipt.verdict} pour {task_id} "
-        f"[dim](empreinte {receipt.tree_fingerprint[:12]}, {len(receipt.grounded_findings)} constat(s) vérifiable(s))[/dim]"
-    )
-
-
 def _emit_note(ctx: typer.Context, note: Any) -> None:
     if _fmt(ctx) == "json":
         typer.echo(json.dumps(note.to_dict(), indent=2, ensure_ascii=False))
@@ -1520,3 +1473,8 @@ register_worktree_commands(task_app)
 from grimoire.cli.cmd_task_approve import register_approve_commands  # noqa: E402
 
 register_approve_commands(task_app)
+
+# W3-01 : `task review`, dans son module (plafond de taille d'un module).
+from grimoire.cli.cmd_task_review import register_review_commands  # noqa: E402
+
+register_review_commands(task_app)
