@@ -378,13 +378,16 @@ class TaskService:
 
     def waves(self, mission_id: str | None = None) -> dict[str, Any]:
         """Les vagues du plan, ``file_overlaps`` compris (:func:`grimoire.missions.waves.compute_waves`)."""
+        from grimoire.missions.wave_checkpoint import report
         from grimoire.missions.waves import compute_waves
 
         everything = self.ledger.list_tasks()
         if mission_id is None:
             return compute_waves(everything)
         # Les dépendances se résolvent contre tout le ledger, comme au claim : seul le rapport est filtré.
-        return compute_waves(everything, only=[t.id for t in everything if t.mission_id == mission_id])
+        plan = compute_waves(everything, only=[t.id for t in everything if t.mission_id == mission_id])
+        plan["checkpoints"] = report(self, mission_id)  # W5-05 : les vagues closes n'y figurent plus, leur checkpoint si
+        return plan
 
     def attach_session(
         self,
@@ -460,6 +463,11 @@ class TaskService:
     ) -> TaskMove:
         """ready → claimed, si le gate `ready_to_in_progress` l'accorde et si aucun
         autre claim actif ne réserve déjà l'un de *files*."""
+        from grimoire.missions.wave_checkpoint import claim_refusal
+
+        refusal = claim_refusal(self, task_id)
+        if refusal:
+            raise GrimoireMissionError(f"Claim refusé pour {task_id} : {refusal}")
         claim = TaskClaim.new(actor_id=actor, host_id=host, exclusive_files=files)
         return self.transition(task_id, TaskState.CLAIMED, actor, claim=claim)
 

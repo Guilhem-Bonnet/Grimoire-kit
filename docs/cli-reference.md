@@ -488,6 +488,7 @@ prochain export l'écrase.
 | `grimoire task board export . -o <chemin>` | Écrire ailleurs que dans le board du standard |
 | `grimoire task add "<titre>" -a "<critère>" [--owner <qui>] [--ready]` | Ouvrir une tâche (un critère d'acceptation au moins) ; `--ready` la rend réclamable tout de suite, gate `proposed_to_ready` compris |
 | `grimoire task list [--status <état>] [--mission <id>]` | Lister les tâches et leur colonne de board |
+| `grimoire task wave-checkpoint <mission> <vague> [--action status\|request\|require\|approve\|reject] [--fingerprint <empreinte>]` | Checkpoint humain d'une vague, lié à l'empreinte du contenu fusionné (arbres base, tête et merge de chaque tâche). `request` présente l'empreinte, `approve`/`reject` la citent et exigent un tour humain attesté postérieur (W2-01) ; `require` ferme le claim des vagues suivantes tant que la vague n'est pas `approved`. Une vague dont le contenu change devient `stale` |
 | `grimoire task show <id>` | Détailler une tâche et ce que chaque prochain pas exigera |
 | `grimoire task claim <id> [--actor <qui>] [--host <où>]` | Réclamer une tâche prête (`ready → claimed`) |
 | `grimoire task move <id> --to <état>` | Déplacer une tâche, si la machine à états et le gate le permettent |

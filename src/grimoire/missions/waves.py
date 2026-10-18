@@ -16,7 +16,7 @@ from typing import Any
 
 from grimoire.missions.schemas import DependencyKind, MissionTask, TaskState
 
-__all__ = ["compute_waves", "declared_files"]
+__all__ = ["compute_waves", "declared_files", "wave_levels"]
 
 _DONE = frozenset({TaskState.CLOSED, TaskState.CANCELLED})
 
@@ -172,3 +172,28 @@ def compute_waves(tasks: Iterable[MissionTask], *, only: Iterable[str] | None = 
         "blocked": {tid: ts for tid, ts in sorted(blocked.items()) if kept(tid)},
         "cyclic": sorted(tid for tid in cyclic | remaining if kept(tid)),
     }
+
+
+def wave_levels(tasks: Iterable[MissionTask]) -> dict[str, int]:
+    """Le numéro de vague de chaque tâche du ledger, closes comprises (W5-05).
+
+    :func:`compute_waves` retire les tâches closes : une vague entièrement
+    fusionnée disparaît de son rapport, alors que c'est elle qu'un humain doit
+    valider. Ici le niveau d'une tâche est ``1 + max`` des niveaux de ses
+    dépendances ``blocks`` (1 sans dépendance), closes comprises, comme
+    ``compute_waves`` pour les vagues encore ouvertes. Les tâches annulées, en
+    cycle ou qui attendent une dépendance inconnue ou annulée n'ont pas de niveau.
+    """
+    by_id = {t.id: t for t in tasks if t.status is not TaskState.CANCELLED}
+    deps = {
+        tid: [d.target for d in t.dependencies if d.kind is DependencyKind.BLOCKS] for tid, t in by_id.items()
+    }
+    level: dict[str, int] = {}
+    todo = set(by_id)
+    while True:
+        ready = sorted(tid for tid in todo if all(d in level for d in deps[tid]))
+        if not ready:
+            return level
+        for tid in ready:
+            level[tid] = 1 + max((level[d] for d in deps[tid]), default=0)
+        todo -= set(ready)

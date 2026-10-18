@@ -851,6 +851,8 @@ def task_waves(
         console.print(
             f"[yellow]![/yellow] vague {overlap['wave']} : {overlap['file']} visé par {', '.join(overlap['tasks'])}"
         )
+    for cp in plan.get("checkpoints", ()):
+        console.print(f"checkpoint vague {cp['wave']} : {cp['status']}{' (requis)' if cp['required'] else ''}")
     for tid, targets in plan["unresolved"].items():
         console.print(f"[yellow]![/yellow] {tid} : dépendance inconnue ou annulée ({', '.join(targets)})")
     for tid, causes in plan["blocked"].items():
@@ -1449,3 +1451,7 @@ _register_waiting(task_app)
 from grimoire.cli.cmd_task_worktree import register_worktree_commands  # noqa: E402
 
 register_worktree_commands(task_app)
+
+from grimoire.cli.cmd_task_wave import register_wave_commands  # noqa: E402
+
+register_wave_commands(task_app)
