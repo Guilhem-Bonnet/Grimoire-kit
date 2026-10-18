@@ -534,7 +534,7 @@ def task_renew(
     _emit_task(ctx, task, f"bail renouvelé, epoch {claim.lease_epoch}, plafond {claim.expires_at or '-'}" if claim else "")
 
 
-@task_app.command("note")
+# `task note` est servi par cmd_task_waiting (enregistré en dernier, il masquait cette définition).
 def task_note(
     ctx: typer.Context,
     task_id: Annotated[str, typer.Argument()],
