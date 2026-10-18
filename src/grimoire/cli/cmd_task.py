@@ -397,12 +397,14 @@ def task_show(
     # `model_hint` pour ne jamais afficher `None` littéralement.
     dispatch_events = [e for e in service.ledger.list_events(task_id) if e.event_type == "task.dispatched"]
     last_dispatch = dispatch_events[-1].payload if dispatch_events else None
+    usage = _usage_of(task, project_root.resolve())
     if _fmt(ctx) == "json":
         payload = task.to_dict()
         payload["verifiability"] = verifiabilite
         payload["recommended_model"] = advice["recommended_model"]
         payload["model_tier"] = advice["model_tier"]
         payload["last_dispatch"] = last_dispatch
+        payload["usage"] = usage
         typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
         return
     console.print(f"[bold]{task.id}[/bold] — {task.title}")
@@ -428,6 +430,7 @@ def task_show(
         _print_uncertainties(list(last_dispatch.get("uncertainties") or ()))
         for warning in last_dispatch.get("uncertainty_warnings") or ():
             console.print(f"  [yellow]![/yellow] {escape(str(warning))}")
+    console.print(f"  usage   : {_usage_line(usage)}")
     if task.owner or task.claim:
         console.print(f"  porté par : {task.owner or (task.claim.actor_id if task.claim else '—')}")
     if task.directives:
@@ -1449,3 +1452,8 @@ _register_waiting(task_app)
 from grimoire.cli.cmd_task_worktree import register_worktree_commands  # noqa: E402
 
 register_worktree_commands(task_app)
+
+# W4-01 : `task fold-usage` et l'usage affiché par `task show`, dans leur module (plafond de taille).
+from grimoire.cli.cmd_task_usage import _usage_line, _usage_of, register_usage_commands  # noqa: E402
+
+register_usage_commands(task_app)

@@ -11,7 +11,7 @@ import json
 import os
 import uuid
 import warnings
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -828,6 +828,35 @@ class TraceLedger:
             trace = replace(trace, id=self._next_id(run_id))
             self._write_line(trace.to_dict())
         return trace
+
+    def append_new(self, traces: Sequence[TraceRecord]) -> list[TraceRecord]:
+        """Ajoute les traces dont l'``id`` est absent du journal ; rend celles qui ont été écrites.
+
+        Lecture des identifiants et ajout dans la même section critique : deux
+        replis concurrents du même journal d'hôte n'écrivent pas deux fois le
+        même appel (W4-01). Un ``id`` répété dans le lot n'est écrit qu'une fois.
+        """
+        written: list[TraceRecord] = []
+        with locked(self._traces_path):
+            known = self._known_ids()
+            for trace in traces:
+                if trace.id in known:
+                    continue
+                known.add(trace.id)
+                self._write_line(trace.to_dict())
+                written.append(trace)
+        return written
+
+    def _known_ids(self) -> set[str]:
+        ids: set[str] = set()
+        if not self._traces_path.exists():
+            return ids
+        for line in self._traces_path.read_text(encoding="utf-8").splitlines():
+            with contextlib.suppress(json.JSONDecodeError, AttributeError):
+                found = json.loads(line).get("id")
+                if isinstance(found, str):
+                    ids.add(found)
+        return ids
 
     # ── Queries ────────────────────────────────────────────────────────────
 
