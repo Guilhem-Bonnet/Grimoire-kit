@@ -70,6 +70,12 @@ class PilotPolicy:
     #: silencieusement illimité (même doctrine que ``max_cost_usd_per_node`` :
     #: un plafond de sécurité absent n'est jamais un plafond infini implicite).
     max_fanout_n: int | None = None
+    #: Nombre maximal d'enfants d'un ``fanout`` actifs en même temps (W5-04).
+    #: ``1`` (défaut) : le comportement séquentiel historique, à l'identique.
+    #: Au-delà, le coût inconnu d'un enfant déjà terminé bloque les lancements
+    #: suivants dès qu'un plafond ``max_cost_usd_per_node`` est posé (W1-01) :
+    #: on ne lance pas en parallèle ce qu'on ne sait pas chiffrer.
+    max_parallel: int = 1
     #: Que faire d'un coût inconnu face à ``max_cost_usd_per_node`` (W1-01,
     #: issue #709) : ``stop`` (défaut, fail-closed) arrête l'escalade ;
     #: ``continue_flagged`` la laisse continuer, le coût restant signalé
@@ -81,7 +87,7 @@ _DEFAULT_POLICY = PilotPolicy()
 
 
 def _validate_and_build(data: dict[str, Any]) -> PilotPolicy:
-    known_keys = {"start_tier", "max_escalations", "max_cost_usd_per_node", "max_fanout_n", "on_unknown_cost"}
+    known_keys = {"start_tier", "max_escalations", "max_cost_usd_per_node", "max_fanout_n", "max_parallel", "on_unknown_cost"}
     unknown = sorted(set(data) - known_keys)
     if unknown:
         raise GrimoireRuntimeError(
@@ -122,6 +128,10 @@ def _validate_and_build(data: dict[str, Any]) -> PilotPolicy:
     ):
         raise GrimoireRuntimeError("pilot.yaml : 'max_fanout_n' doit être un entier strictement positif")
 
+    max_parallel = data.get("max_parallel", 1)
+    if isinstance(max_parallel, bool) or not isinstance(max_parallel, int) or max_parallel < 1:
+        raise GrimoireRuntimeError("pilot.yaml : 'max_parallel' doit être un entier strictement positif")
+
     on_unknown_cost = data.get("on_unknown_cost", POLICY_STOP)
     if on_unknown_cost not in COST_POLICIES:
         raise GrimoireRuntimeError(f"pilot.yaml : 'on_unknown_cost' doit valoir l'un de {list(COST_POLICIES)}")
@@ -132,6 +142,7 @@ def _validate_and_build(data: dict[str, Any]) -> PilotPolicy:
         max_escalations=max_escalations,
         max_cost_usd_per_node=float(max_cost) if max_cost is not None else None,
         max_fanout_n=max_fanout_n,
+        max_parallel=max_parallel,
     )
 
 

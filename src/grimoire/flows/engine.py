@@ -34,7 +34,7 @@ from typing import TYPE_CHECKING, Any
 
 from grimoire.core.exceptions import GrimoireRuntimeError
 from grimoire.core.fsio import atomic_write, locked
-from grimoire.flows.blueprint_loader import build_node_contracts, load_blueprint, topo_order
+from grimoire.flows.blueprint_loader import build_node_contracts, load_blueprint, ready_nodes, topo_order
 from grimoire.flows.directive import Directive, blueprint_digest, directive_id_for
 from grimoire.flows.doctor import FlowDoctorReport, checkpoint_interrupted, diagnose
 from grimoire.flows.executor import InteractiveNodeExecutor, NodeExecutor
@@ -1184,6 +1184,22 @@ class FlowEngine:
             blueprint_drift=self._drift_state(meta, wfi)[0] if include_contract else None,
             blueprint_sha256=meta.blueprint_sha256,
         )
+
+    def next_wave(self, run_id: str) -> list[str]:
+        """Les nodes prêts ensemble (W5-04) : non faits, tous leurs prédécesseurs du DAG faits.
+
+        Lecture seule. Un run terminé, abandonné ou refusé n'a pas de liste. Le
+        moteur n'ouvre toujours qu'un node à la fois : cette liste dit ce qui
+        peut s'exécuter en parallèle, elle n'en lance rien. Un node d'une vague
+        plus tardive y figure dès que ses propres prédécesseurs sont faits
+        (a -> b avec c indépendant : après a, b et c).
+        """
+        view = self.status(run_id, include_contract=False)
+        wfi = self._kernel.get_instance(run_id)
+        if wfi is None or _is_flow_terminal(wfi.status):
+            return []
+        meta = self._load_meta(run_id)
+        return ready_nodes(load_blueprint(self._blueprint_file(meta), self._project_root), view.completed_nodes)
 
     def doctor(self, run_id: str) -> FlowDoctorReport:
         """Rejoue le journal d'un run et vérifie ses invariants — lecture seule (W1-03b).
