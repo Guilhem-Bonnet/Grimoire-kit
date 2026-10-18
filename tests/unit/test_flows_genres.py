@@ -963,3 +963,96 @@ def test_juge_non_vert_garde_le_cout_des_candidats(tmp_path: Path, candidates: s
         assert d["cost_usd"] == pytest.approx(0.2 + judge_cost), d  # les 0.20 USD des candidats sont conservés
         assert outcome.to_dict()["total_cost_usd"] == pytest.approx(0.2 + judge_cost)
     assert d["attempts"] >= 2
+
+
+# ── 1 bis. fanout borné en parallèle (W5-04) ─────────────────────────────
+
+
+class _Probe:
+    """Compte les enfants actifs en même temps ; chaque faux enfant dort assez pour se chevaucher."""
+
+    def __init__(self, cost: object) -> None:
+        import threading
+
+        self.cost = cost
+        self.lock = threading.Lock()
+        self.active = 0
+        self.peak = 0
+        self.launched: list[str] = []
+
+    def __call__(self, executor, ref, *, node_id, run_id, blueprint_id, suffix, max_cost_usd, extra_context=""):  # type: ignore[no-untyped-def]
+        import time
+
+        from grimoire.flows.genres import _ChildRun
+
+        with self.lock:
+            self.active += 1
+            self.peak = max(self.peak, self.active)
+            self.launched.append(suffix)
+        time.sleep(0.1)
+        with self.lock:
+            self.active -= 1
+        return _ChildRun(
+            child_run_id=f"fake-{suffix}", status="finished", cost=self.cost, faults=(), host_reason=None,
+            attempts=1, escalations=0,
+        )
+
+
+def _fanout_with_probe(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pilot: str, cost: object, n: int = 6):  # type: ignore[no-untyped-def]
+    from grimoire.flows import genres
+
+    probe = _Probe(cost)
+    monkeypatch.setattr(genres, "_launch_child", probe)
+    _write_registry(tmp_path, _writer_script(tmp_path, extra_map={"spread": {"fanout_items": list("abcdefgh")[:n]}}))
+    _write_pilot_policy(tmp_path, pilot)
+    outcome = run_with_dispatch(_engine(tmp_path), _fanout_bp(tmp_path), project_root=tmp_path)
+    node = next(n_ for n_ in outcome.nodes if n_.node_id == "spread")
+    return probe, node
+
+
+def test_fanout_max_parallel_borne_les_enfants_actifs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from grimoire.costs import Cost
+
+    probe, node = _fanout_with_probe(tmp_path, monkeypatch, "max_fanout_n: 8\nmax_parallel: 2\n", Cost.exact(0.01))
+
+    assert node.verdict == "green"
+    assert len(probe.launched) == 6
+    assert probe.peak == 2  # jamais plus que le plafond, et le parallélisme est réel
+
+
+def test_fanout_sans_max_parallel_reste_sequentiel(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from grimoire.costs import Cost
+
+    probe, node = _fanout_with_probe(tmp_path, monkeypatch, "max_fanout_n: 8\n", Cost.exact(0.01))
+
+    assert node.verdict == "green"
+    assert probe.peak == 1
+    assert probe.launched == [f"fanout{i}" for i in range(6)]
+
+
+def test_fanout_parallele_le_plafond_de_cout_arrete_les_lancements(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from grimoire.costs import Cost
+
+    probe, node = _fanout_with_probe(
+        tmp_path, monkeypatch, "max_fanout_n: 8\nmax_parallel: 2\nmax_cost_usd_per_node: 0.2\n", Cost.exact(0.4)
+    )
+
+    assert node.verdict == "cost_capped"
+    assert node.cost_cap_reason == "cost_reached"
+    assert sorted(probe.launched) == ["fanout0", "fanout1"]  # les deux premiers partent ensemble, aucun autre
+
+
+def test_fanout_parallele_un_cout_inconnu_bloque_les_lancements(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from grimoire.costs import Cost
+
+    probe, node = _fanout_with_probe(
+        tmp_path, monkeypatch, "max_fanout_n: 8\nmax_parallel: 2\nmax_cost_usd_per_node: 100\n", Cost.unpriced()
+    )
+
+    assert node.verdict == "cost_capped"
+    assert node.cost_cap_reason == "cost_unknown"
+    assert sorted(probe.launched) == ["fanout0", "fanout1"]

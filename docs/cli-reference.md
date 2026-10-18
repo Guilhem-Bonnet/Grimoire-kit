@@ -825,6 +825,7 @@ seconde sortie, il ne retire rien.
 | --- | --- |
 | `grimoire flow run <fichier>` | Démarrer un run et présenter le contrat du premier node ; sans argument, liste les runs |
 | `grimoire flow status <run-id>` | État du run : node courant, nodes faits, dernier refus, contrat courant |
+| `grimoire flow next <run-id> [--wave]` | Le node courant ; avec `--wave`, tous les nodes prêts ensemble (vague du DAG). Lecture seule |
 | `grimoire flow resume <run-id> --result <fichier>` | Vérifier la sortie du node courant contre son contrat ; avance ou suspend |
 | `grimoire flow abort <run-id> [--reason]` | Abandonner un run — terminal, jamais repris |
 | `grimoire flow extract <run-id> [--out <fichier>]` | Extraire un blueprint brouillon de la séquence réellement exécutée par ce run |
@@ -948,6 +949,13 @@ fan-out est refusé : jamais une politique manquante ne vaut un plafond
 infini implicite. Vert seulement si les N enfants finissent tous verts ;
 recoller un résultat partiel comme s'il était le tout serait l'invention que
 l'issue refuse.
+
+`pilot.max_parallel` (défaut `1`, séquentiel) borne le nombre d'enfants actifs en
+même temps. Au-delà de 1, le plafond `max_cost_usd_per_node` est relu avant
+chaque lancement et un coût inconnu bloque les lancements suivants ; les
+enfants déjà en vol ne sont pas rétractés (dépassement borné par
+`max_parallel - 1` enfants). Les enfants partagent le même répertoire : à
+n'activer que pour des enfants qui n'écrivent pas les mêmes fichiers.
 
 **`verify-panel`** — k vérificateurs indépendants (`config.verifyPanel.k`),
 chacun sous un angle distinct (`.angles`, instruit de chercher à réfuter,

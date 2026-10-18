@@ -15,7 +15,9 @@ par accident. ``dispatch_executor.DispatchExecutor.execute`` importe ce module
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
 
@@ -136,6 +138,59 @@ def _launch_child(
         output=last_output,
         cost_cap_reason=cap_why,
     )
+
+
+def _fanout_parallel(
+    executor: DispatchExecutor,
+    ref: str,
+    n_items: int,
+    *,
+    node_id: str,
+    run_id: str,
+    blueprint_id: str,
+    start_cost: Cost,
+    cap: float | None,
+    workers: int,
+) -> tuple[list[_ChildRun], Cost, bool, str | None]:
+    """Lance les ``n_items`` enfants d'un fanout, ``workers`` au plus à la fois (W5-04).
+
+    Le plafond de coût est relu, sous verrou, *au moment où un enfant va
+    démarrer* : un montant connu qui l'atteint, ou un coût inconnu sous la
+    politique ``stop`` (W1-01), arrête tout lancement ultérieur. Les enfants
+    déjà en vol ne sont pas rétractés et leur coût n'est connu qu'à leur fin :
+    le dépassement possible est borné par ``workers - 1`` enfants. Les enfants
+    lancés sont toujours un préfixe des éléments (le refus est monotone).
+    """
+    lock = threading.Lock()
+    spent = [start_cost]
+    stop: list[str] = []
+
+    def run_one(i: int) -> _ChildRun | None:
+        with lock:
+            if stop:
+                return None
+            why = _cap_why(executor, spent[0], cap, siblings=False)
+            if why is not None:
+                stop.append(why)
+                return None
+        child = _launch_child(
+            executor,
+            ref,
+            node_id=node_id,
+            run_id=run_id,
+            blueprint_id=blueprint_id,
+            suffix=f"fanout{i}",
+            max_cost_usd=None,
+            extra_context=f"Élément de fan-out {i + 1}/{n_items}. [genre_attempt_index={i}]",
+        )
+        with lock:
+            spent[0] = spent[0] + child.cost
+        return child
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        launched = list(pool.map(run_one, range(n_items)))
+    children = [c for c in launched if c is not None]
+    return children, spent[0], bool(stop), (stop[0] if stop else None)
 
 
 def _child_row(index: int, child: _ChildRun) -> dict[str, Any]:
@@ -357,7 +412,30 @@ def _execute_fanout(executor: DispatchExecutor, contract: NodeContract, context_
     cap = executor._pilot_policy.max_cost_usd_per_node
     cost_capped = False
     cap_why: str | None = None
-    for i in range(len(items)):
+
+    def _waiting_host(i: int, child: _ChildRun, spent: Cost) -> NodeExecutionResult:
+        executor.host_node = node_id
+        executor.host_reason = f"fanout : élément {i} (sous-flow {child.child_run_id}) suspendu à l'hôte"
+        _record_genre_outcome(executor, 
+            node_id, run_id, verifiability_label="fanout", verdict="waiting_host",
+            cost=spent, attempts=sum(c.attempts for c in children),
+            escalations=sum(c.escalations for c in children),
+        )
+        waiting = NodeExecutionResult(pending=True, extra={"dispatch_refused": "fanout_waiting_host", "node_id": node_id})
+        executor.last_result = waiting
+        return waiting
+
+    max_parallel = executor._pilot_policy.max_parallel
+    if max_parallel > 1:
+        # W5-04 : au plus ``max_parallel`` enfants actifs ; ``1`` garde la boucle séquentielle ci-dessous, à l'identique.
+        children, total_cost, cost_capped, cap_why = _fanout_parallel(
+            executor, contract.ref, len(items), node_id=node_id, run_id=run_id, blueprint_id=blueprint_id,
+            start_cost=total_cost, cap=cap, workers=min(max_parallel, len(items)),
+        )
+        waiting_at = next((i for i, c in enumerate(children) if c.status == "waiting_host"), None)
+        if waiting_at is not None:
+            return _waiting_host(waiting_at, children[waiting_at], total_cost)
+    for i in range(len(items) if max_parallel == 1 else 0):
         cap_why = _cap_why(executor, total_cost, cap, siblings=True)
         if cap_why is not None:
             cost_capped = True
@@ -374,16 +452,7 @@ def _execute_fanout(executor: DispatchExecutor, contract: NodeContract, context_
         children.append(child)
         total_cost += child.cost
         if child.status == "waiting_host":
-            executor.host_node = node_id
-            executor.host_reason = f"fanout : élément {i} (sous-flow {child.child_run_id}) suspendu à l'hôte"
-            _record_genre_outcome(executor, 
-                node_id, run_id, verifiability_label="fanout", verdict="waiting_host",
-                cost=total_cost, attempts=sum(c.attempts for c in children),
-                escalations=sum(c.escalations for c in children),
-            )
-            result = NodeExecutionResult(pending=True, extra={"dispatch_refused": "fanout_waiting_host", "node_id": node_id})
-            executor.last_result = result
-            return result
+            return _waiting_host(i, child, total_cost)
 
     attempts = sum(c.attempts for c in children)
     escalations = sum(c.escalations for c in children)

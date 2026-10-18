@@ -35,6 +35,7 @@ __all__ = [
     "load_blueprint",
     "resolve_composite_ref",
     "topo_order",
+    "topo_waves",
     "validate_flow_composition",
 ]
 
@@ -290,12 +291,12 @@ def validate_flow_composition(
             load_blueprint(sub_path, project_root, new_chain)
 
 
-def topo_order(blueprint: dict[str, Any]) -> list[str]:
-    """Ordre d'exécution des nodes, dérivé des ``edges`` (Kahn, déterministe).
+def topo_waves(blueprint: dict[str, Any]) -> list[list[str]]:
+    """Les vagues d'exécution : les nodes dont toutes les pins amont sont franchies, ensemble (Kahn par niveaux).
 
-    Déterministe : à dépendances égales, les nodes prêts sont pris dans
-    l'ordre alphabétique de leur id, pas dans l'ordre d'apparition dans le
-    fichier — deux lectures du même blueprint rendent le même ordre.
+    Chaque vague est triée par id ; deux lectures du même blueprint rendent les
+    mêmes vagues. Un cycle (ou une dépendance non résoluble) est refusé avec
+    les nodes qui restent, jamais ignoré.
     """
     nodes = [n["id"] for n in blueprint["nodes"]]
     node_by_pin: dict[str, str] = {}
@@ -309,15 +310,28 @@ def topo_order(blueprint: dict[str, Any]) -> list[str]:
         if src is None or dst is None:
             raise GrimoireRuntimeError(f"edge non résoluble : {e['from']} -> {e['to']}")
         deps[dst].add(src)
-    order: list[str] = []
+    waves: list[list[str]] = []
+    done: set[str] = set()
     remaining = set(nodes)
     while remaining:
-        ready = sorted(n for n in remaining if deps[n] <= set(order))
+        ready = sorted(n for n in remaining if deps[n] <= done)
         if not ready:
             raise GrimoireRuntimeError(f"cycle ou dépendance non résolue dans le blueprint : {sorted(remaining)}")
-        order.extend(ready)
+        waves.append(ready)
+        done.update(ready)
         remaining -= set(ready)
-    return order
+    return waves
+
+
+def topo_order(blueprint: dict[str, Any]) -> list[str]:
+    """Ordre d'exécution des nodes, dérivé des ``edges`` (Kahn, déterministe).
+
+    Déterministe : à dépendances égales, les nodes prêts sont pris dans
+    l'ordre alphabétique de leur id, pas dans l'ordre d'apparition dans le
+    fichier — deux lectures du même blueprint rendent le même ordre. C'est
+    l'aplatissement de :func:`topo_waves`.
+    """
+    return [n for wave in topo_waves(blueprint) for n in wave]
 
 
 def _tool_boundary(node: dict[str, Any]) -> tuple[str, ...]:
