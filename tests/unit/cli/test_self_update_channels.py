@@ -68,7 +68,9 @@ def test_stable_ignores_the_github_prereleases_and_does_not_even_ask_for_them() 
     assert result.exit_code == 0, result.output
     assert "Updated to 3.62.0" in result.output
     assert FakeGithub.API not in net.requested
-    assert "rc" not in " ".join(calls[-1])
+    # Le nom du paquet seul : le dossier temporaire tiré au hasard peut contenir « rc ».
+    wheels = [Path(arg).name for arg in calls[-1] if arg.endswith(".whl")]
+    assert wheels and not any("rc" in name for name in wheels), calls[-1]
 
 
 # ── preview ───────────────────────────────────────────────────────────────────
