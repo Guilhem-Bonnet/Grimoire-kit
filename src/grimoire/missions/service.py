@@ -574,9 +574,23 @@ class TaskService:
 
         K12 : un worktree de tâche en avance sur la remote (commits non poussés, arbre modifié, état
         illisible) donne ``resume_branch`` — le travail local est à l'humain, pas au prochain repreneur.
+
+        K12-SC2-02 : les git de ``unpushed_work`` (jusqu'à 120 s) se jouent **avant** le verrou du journal,
+        sur les baux perdus à cet instant, et sont gardés par (tâche, epoch). Sous le verrou, un bail dont
+        l'epoch a changé depuis n'est pas jugé à ce tick (:class:`UnjudgedClaimError`) ; le suivant le jugera.
         """
         from grimoire.hosts.capabilities import claim_host_is_fenced
+        from grimoire.missions.ledger_rules import UnjudgedClaimError
         from grimoire.missions.task_worktree import unpushed_work
+
+        self.refresh()
+        held = {(v.task_id, v.epoch): unpushed_work(self, v.task_id) for v in self.ledger.expired_claims(now)}
+
+        def branch_hold(task: MissionTask) -> str:
+            key = (task.id, task.claim.lease_epoch if task.claim is not None else -1)
+            if key not in held:
+                raise UnjudgedClaimError(task.id)
+            return held[key]
 
         report = self.ledger.reap(
             quota_blocked=self._quota_blocked,
@@ -585,7 +599,7 @@ class TaskService:
             apply=apply,
             now=now,
             is_fenced=lambda view: claim_host_is_fenced(view.host, view.host_version),
-            branch_hold=lambda task: unpushed_work(self, task.id),
+            branch_hold=branch_hold,
         )
         if any(d.written and d.action == "ready" for d in report.decisions):
             self.project_board()

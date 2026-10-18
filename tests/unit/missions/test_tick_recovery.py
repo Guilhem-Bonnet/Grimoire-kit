@@ -284,6 +284,135 @@ def test_pushed_branch_is_reaped_and_a_dirty_tree_asks(repo: Path, tmp_path: Pat
     assert question is not None and "arbre de travail modifié" in question.text
 
 
+def _slow_unpushed_work(monkeypatch: pytest.MonkeyPatch, journal: list[str], *, seconds: float = 1.0) -> None:
+    """``unpushed_work`` ralenti (git lent) et journalisé : début et fin."""
+    import time
+
+    from grimoire.missions import task_worktree
+
+    real = task_worktree.unpushed_work
+
+    def slow(service: TaskService, task_id: str) -> str:
+        journal.append("git-start")
+        time.sleep(seconds)
+        out = real(service, task_id)
+        journal.append("git-end")
+        return out
+
+    monkeypatch.setattr(task_worktree, "unpushed_work", slow)
+
+
+def test_the_reap_runs_its_git_outside_the_ledger_lock(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """K12-SC2-02 : ``unpushed_work`` (git, jusqu'à 120 s) tournait sous le verrou du journal (30 s, sans keepalive)."""
+    import grimoire.core.fsio as fsio
+    from grimoire.missions import task_worktree
+
+    service, tid, path = _task_in_worktree(repo)
+    _commit(path, "travail.txt", "pas encore poussé\n")
+    _expire(service, tid)
+    real = task_worktree.unpushed_work
+    states: list[str] = []
+
+    def probing(svc: TaskService, task_id: str) -> str:
+        try:
+            with fsio.locked(svc.ledger._events_path, timeout=0.3):
+                states.append("libre")
+        except TimeoutError:
+            states.append("tenu")
+        return real(svc, task_id)
+
+    monkeypatch.setattr(task_worktree, "unpushed_work", probing)
+
+    [decision] = service.reap().decisions
+
+    assert states == ["libre"], "le verrou du journal ne doit pas être tenu pendant les git de la récolte"
+    assert (decision.action, decision.cause) == ("defer", "resume_branch")
+
+
+@pytest.mark.parametrize("fallback", [False, True], ids=["flock", "repli-sans-flock"])
+def test_a_writer_is_not_held_up_by_the_reap_git_nor_enters_its_critical_section(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, fallback: bool
+) -> None:
+    """K12-SC2-02, rejeu : un écrivain concurrent n'attend pas les git et n'entre pas dans la section critique de la récolte.
+
+    Avec ``flock`` : l'écrivain attendait la fin des git (``git-end`` avant ``writer``). Sans ``flock`` et
+    péremption comprimée : le verrou de la récolte était cassé et l'écrivain entrait sous elle.
+    """
+    import threading
+    import time
+
+    import grimoire.core.fsio as fsio
+
+    if fallback:
+        monkeypatch.setattr(fsio, "_fcntl", None)
+        monkeypatch.setattr(fsio, "_PID_LIVENESS", False)
+        monkeypatch.setattr(fsio, "_STALE_AFTER_S", 0.3)
+    service, tid, path = _task_in_worktree(repo)
+    _commit(path, "travail.txt", "pas encore poussé\n")
+    _expire(service, tid)
+    journal: list[str] = []
+    _slow_unpushed_work(monkeypatch, journal)
+    errors: list[BaseException] = []
+
+    def writer() -> None:
+        time.sleep(0.4)
+        try:
+            TaskService(repo).ledger.append_event("task.note", tid, "task", "ecrivain", {"text": "pendant les git"})
+            journal.append("writer")
+        except BaseException as exc:  # remonté au test
+            errors.append(exc)
+
+    thread = threading.Thread(target=writer)
+    thread.start()
+    [decision] = service.reap().decisions
+    thread.join()
+
+    assert not errors, errors
+    assert journal == ["git-start", "writer", "git-end"], journal
+    assert (decision.action, decision.cause) == ("defer", "resume_branch")
+    fresh = MissionLedger(service.ledger_root)
+    assert fresh.unreadable_lines() == ()
+    assert any(e.event_type == "task.note" for e in fresh.list_events(tid)), "l'événement de l'écrivain est dans le journal"
+
+
+def test_a_lease_that_changed_epoch_during_the_git_is_not_judged_on_the_old_verdict(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """K12-SC2-02 : le verdict git est gardé par (tâche, epoch) ; un autre epoch sous le verrou n'est pas jugé à ce tick."""
+    from grimoire.missions import task_worktree
+
+    remote = tmp_path / "remote.git"
+    _git(tmp_path, "init", "-q", "--bare", str(remote))
+    _git(repo, "remote", "add", "origin", str(remote))
+    service, tid, path = _task_in_worktree(repo)
+    _commit(path, "travail.txt", "poussé\n")
+    _git(path, "push", "-q", "origin", f"task/{tid}")
+    _expire(service, tid)
+    real = task_worktree.unpushed_work
+    calls: list[str] = []
+
+    def racing(svc: TaskService, task_id: str) -> str:
+        calls.append(task_id)
+        verdict = real(svc, task_id)
+        if len(calls) == 1:  # pendant le git : un autre tick récolte, un repreneur claim, son bail se perd à son tour
+            other = TaskService(repo)
+            assert [d.action for d in other.reap().decisions] == ["ready"]
+            other.claim(tid, "agent-b", host="host-claude-code-cli")
+            other.transition(tid, S.RUNNING, "agent-b")
+            other.attach_session(tid, "S2", session_host="claude-code-cli", actor="agent-b", host_version=FENCED_VERSION)
+            _expire(other, tid)
+        return verdict
+
+    monkeypatch.setattr(task_worktree, "unpushed_work", racing)
+
+    report = service.reap()
+
+    assert report.decisions == (), "l'epoch du bail a changé depuis le git : rien n'est jugé sur l'ancien verdict"
+    assert TaskService(repo).require(tid).status is S.RUNNING
+    [decision] = TaskService(repo).reap().decisions  # le tick suivant le juge, avec un git frais
+    assert decision.action == "ready" and len(calls) >= 3
+
+
 def test_worktree_never_under_tmp(repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import tempfile
 
@@ -346,14 +475,15 @@ def test_the_tick_observes_pending_effects_without_redoing_them(pushed: tuple[Ta
     from grimoire.missions import effects
 
     service, tid, target = pushed
-    absent_target = {**target, "branch": "task/jamais-poussee"}
+    _git(Path(target["repo"]), "push", "-q", "origin", target["branch"])
+    # « Jamais poussée » : un commit que la remote n'a pas (K12-SC2-01 — le sha de task/x, lui, y est).
+    never_pushed = _commit(Path(target["repo"]), "z.txt", "z\n")
+    absent_target = {**target, "branch": "task/jamais-poussee", "sha": never_pushed}
     for tgt in (target, absent_target):
         service.ledger.append_event(
             effects.EFFECT_INTENDED_EVENT, tid, "task", "agent-a",
             {"effect_id": effects.effect_id(tid, effects.GIT_PUSH, tgt), "task_id": tid, "kind": effects.GIT_PUSH, "target": tgt},
         )
-    _git(Path(target["repo"]), "push", "-q", "origin", target["branch"])
-
     report = run_tick(Path(target["repo"]), apply=True)
 
     statuses = {o.effect.target["branch"]: o.status for o in report.effects}
@@ -361,6 +491,78 @@ def test_the_tick_observes_pending_effects_without_redoing_them(pushed: tuple[Ta
     assert any("non constaté" in line and "task/jamais-poussee" in line for line in report.attention)
     [left] = effects.pending_effects(TaskService(Path(target["repo"])))
     assert left.target["branch"] == "task/jamais-poussee"
+
+
+def _intend(service: TaskService, tid: str, target: dict[str, str]) -> str:
+    from grimoire.missions import effects
+
+    eid = effects.effect_id(tid, effects.GIT_PUSH, target)
+    service.ledger.append_event(
+        effects.EFFECT_INTENDED_EVENT, tid, "task", "agent-a",
+        {"effect_id": eid, "task_id": tid, "kind": effects.GIT_PUSH, "target": target},
+    )
+    return eid
+
+
+def test_a_push_followed_by_other_commits_is_still_seen_as_pushed(pushed: tuple[TaskService, str, dict[str, str]]) -> None:
+    """K12-SC2-01 : la sonde comparait le sha à l'égalité avec la tête distante ; une branche qui a avancé passait pour « absente »."""
+    from grimoire.missions import effects
+
+    service, tid, target = pushed
+    repo = Path(target["repo"])
+    calls: list[str] = []
+    _intend(service, tid, target)
+    _git(repo, "push", "-q", "origin", target["branch"])  # S1 part, la trace manque
+    _commit(repo, "y.txt", "y\n")
+    _git(repo, "push", "-q", "origin", target["branch"])  # S2 : la tête distante n'est plus S1
+
+    [effect] = effects.pending_effects(service)
+    assert effects.default_probe(effect) == (effects.PRESENT, target["sha"])
+    assert [o.status for o in effects.reconcile(service, apply=False)] == ["reconciled"]
+    outcome = effects.perform(service, tid, effects.GIT_PUSH, target, lambda: calls.append("push") or "", actor="agent-b")
+    assert outcome.status == "reconciled" and calls == [], "le push de S1 n'est pas refait"
+
+
+def test_a_diverged_remote_branch_is_absent_not_present(pushed: tuple[TaskService, str, dict[str, str]]) -> None:
+    from grimoire.missions import effects
+
+    service, tid, target = pushed
+    repo = Path(target["repo"])
+    _git(repo, "checkout", "-q", "-b", "autre", "main")
+    other = _commit(repo, "autre.txt", "autre\n")
+    _git(repo, "push", "-q", "origin", f"{other}:refs/heads/{target['branch']}")  # la remote porte une autre histoire
+    _intend(service, tid, target)
+    [effect] = effects.pending_effects(service)
+    status, evidence = effects.default_probe(effect)
+    assert status == effects.ABSENT and other[:12] in evidence
+
+
+def test_a_branch_deleted_on_the_remote_after_the_push_is_unverifiable(
+    pushed: tuple[TaskService, str, dict[str, str]], tmp_path: Path
+) -> None:
+    """K12-SC2-01 : supprimée après le push (PR fusionnée), la branche n'est plus là ; la refaire la ressusciterait."""
+    from grimoire.missions import effects
+
+    service, tid, target = pushed
+    calls: list[str] = []
+    _intend(service, tid, target)
+    _git(Path(target["repo"]), "push", "-q", "origin", target["branch"])
+    _git(tmp_path / "remote.git", "update-ref", "-d", f"refs/heads/{target['branch']}")  # supprimée côté remote
+
+    [effect] = effects.pending_effects(service)
+    status, evidence = effects.default_probe(effect)
+    assert status == effects.UNKNOWN and "supprimée" in evidence
+    outcome = effects.perform(service, tid, effects.GIT_PUSH, target, lambda: calls.append("push") or "", actor="agent-b")
+    assert outcome.status == "unknown" and calls == [], "invérifiable : rien n'est refait"
+
+
+def test_a_never_pushed_branch_stays_absent_so_the_push_is_done_once(pushed: tuple[TaskService, str, dict[str, str]]) -> None:
+    from grimoire.missions import effects
+
+    service, tid, target = pushed
+    _intend(service, tid, target)
+    [effect] = effects.pending_effects(service)
+    assert effects.default_probe(effect) == (effects.ABSENT, "branche absente")
 
 
 def test_an_unverifiable_effect_is_not_redone(pushed: tuple[TaskService, str, dict[str, str]]) -> None:

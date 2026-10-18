@@ -20,7 +20,7 @@ import logging
 import re
 import uuid
 from collections.abc import Callable, Iterator, Mapping
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -42,6 +42,7 @@ from grimoire.missions.lease import (
     write_lease,
 )
 from grimoire.missions.ledger_rules import (
+    UnjudgedClaimError,
     blocks_path,
     deferred_waiting,
     read_jsonl,
@@ -1117,26 +1118,25 @@ class MissionLedger:
 
         Sous le verrou du journal, pour chaque bail perdu :
 
-        - fournisseur de la dernière route en quota (*quota_blocked*, défaut :
-          dernier ``task.dispatched`` en ``rate_limit``) : différée, cause
-          ``quota``, sans compter de tentative ;
+        - fournisseur de la dernière route en quota (*quota_blocked*, défaut : dernier
+          ``task.dispatched`` en ``rate_limit``) : différée, ``quota``, sans tentative comptée ;
         - plus de :data:`MAX_ATTEMPTS` tentatives : différée, ``retry_exhausted`` ;
-        - hôte sans frein vérifié : différée, ``resume_unfenced``, avec la question
-          posée à l'humain — on ne relance pas de doublon. Le verdict vient de
-          *is_fenced* (K3 : la table ``hosts.capabilities``, par hôte *et* par
-          version) ; sans lui, de l'appartenance à *fenced_hosts* (primitive de K2) ;
-        - travail local non poussé (*branch_hold* rend sa question, K12) : différée, ``resume_branch`` ;
+        - hôte sans frein vérifié : différée, ``resume_unfenced``, avec la question posée à
+          l'humain — on ne relance pas de doublon. Le verdict vient de *is_fenced* (K3 : la table
+          ``hosts.capabilities``, par hôte *et* par version) ; sans lui, de *fenced_hosts* (K2) ;
+        - travail local non poussé (*branch_hold* rend sa question, K12) : différée, ``resume_branch``.
+          Ses git sont lents : l'appelant les joue **avant** la récolte, hors du verrou, et
+          *branch_hold* lève :class:`UnjudgedClaimError` pour un bail non jugé (K12-SC2-02) ;
         - sinon : barrière (fichier de bail à l'epoch suivant, sans titulaire)
           puis ``task.transitioned`` vers ``ready`` marqué ``lease_lost``.
 
-        Une différée s'écrit une fois par (epoch, cause) en ``task.reap_deferred`` et la
-        tâche se gare en ``waiting`` (K6) et sort de la récolte. ``quota`` : ``waiting(quota)``
-        **datée** — la réouverture lue par *quota_until* (service : fin de suspension ou de
-        refroidissement du fournisseur), à défaut ``maintenant + backoff_delay(tentatives)`` —
-        pour que le tick (``wake_due``) la rende ``ready`` ; jamais ``unknown`` ici, aucune sonde
-        ne la lèverait. ``retry_exhausted`` et ``resume_unfenced`` : ``waiting(human)`` avec la
-        question posée, que seule une réponse humaine (``task answer``) rend. Horloge
-        incohérente : rien n'est jugé. *apply* faux : les décisions sans aucune écriture.
+        Une différée s'écrit une fois par (epoch, cause) en ``task.reap_deferred`` et la tâche se gare en
+        ``waiting`` (K6), hors de la récolte. ``quota`` : ``waiting(quota)`` **datée** — réouverture lue
+        par *quota_until* (service : fin de suspension ou de refroidissement du fournisseur), à défaut
+        ``maintenant + backoff_delay(tentatives)`` — que le tick (``wake_due``) rend ``ready`` ; jamais
+        ``unknown`` ici, aucune sonde ne la lèverait. Les autres causes : ``waiting(human)`` avec la
+        question, que seule une réponse humaine (``task answer``) rend. Horloge incohérente : rien
+        n'est jugé. *apply* faux : les décisions sans aucune écriture.
         """
         is_quota = quota_blocked or self._last_route_quota
         with _ledger_file_lock(self._events_path):
@@ -1149,7 +1149,8 @@ class MissionLedger:
             for view in self.expired_claims(moment):
                 task = self._tasks[view.task_id]
                 fenced = is_fenced if is_fenced is not None else (lambda v: v.host in fenced_hosts)
-                decisions.append(self._reap_one(task, view, moment, fenced, is_quota, actor_id, apply, quota_until, branch_hold))
+                with suppress(UnjudgedClaimError):  # bail changé depuis le jugement fait hors verrou : pas jugé à ce tick
+                    decisions.append(self._reap_one(task, view, moment, fenced, is_quota, actor_id, apply, quota_until, branch_hold))
             return ReapReport("ok", tuple(decisions))
 
     def _reap_one(

@@ -24,9 +24,13 @@ if TYPE_CHECKING:
     from grimoire.missions.ledger import LeaseView
 
 __all__ = [
-    "blocks_path", "deferred_waiting", "read_jsonl", "replay_steering", "unclosed_blockers", "unfenced_question",
+    "UnjudgedClaimError", "blocks_path", "deferred_waiting", "read_jsonl", "replay_steering", "unclosed_blockers", "unfenced_question",
     "waiting_guard",
 ]
+
+
+class UnjudgedClaimError(Exception):
+    """Levée par ``branch_hold`` quand le bail n'est plus celui que l'appelant a jugé : la tâche n'est pas jugée à ce tick (K12-SC2-02)."""
 
 
 def read_jsonl(path: Path) -> tuple[list[dict[str, Any]], tuple[int, ...]]:

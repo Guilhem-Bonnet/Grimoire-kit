@@ -524,7 +524,11 @@ Le lot K12 de l'épopée #705 rend le tick sûr à relancer, à interrompre et �
   au lieu de `ready`. Un worktree de tâche n'est jamais créé sous un dossier temporaire du système (`tempfile.gettempdir()`, qui suit `TMPDIR`, et aussi `/tmp`, `/var/tmp`, `/dev/shm` ; `%TEMP%` et `%TMP%` sous Windows).
 - **Effets externes réconciliés.** Un push ou une PR passe par `effect.intended` puis `effect.observed` ; une intention
   sans constat est vérifiée sur la remote (`git ls-remote`, `gh pr list --head`) avant tout nouvel essai : présent,
-  constaté sans être refait ; absent, fait une fois ; invérifiable, rien n'est fait. Le tick constate, il ne refait pas.
+  constaté sans être refait ; absent, fait une fois ; invérifiable, rien n'est fait. Un push est « présent » quand le
+  commit poussé est la tête de la branche distante **ou son ancêtre** (la branche a avancé depuis) ; une branche
+  disparue de la remote alors qu'une branche distante suivie localement contient le commit est « invérifiable »
+  (supprimée après le push : la refaire la ressusciterait). Le tick constate, il ne refait pas. Les `git` de la
+  récolte (`resume_branch`) tournent avant le verrou du journal, jamais dessous.
 - **Journal tronqué.** Une dernière ligne coupée par une coupure de courant est ignorée au rejeu, l'ajout suivant ne s'y
   colle plus, et le tick l'affiche en attention.
 - **Minuteur optionnel, désactivé par défaut.** `install-timer` écrit `grimoire-tick-<nom>-<empreinte>.service` et `.timer`

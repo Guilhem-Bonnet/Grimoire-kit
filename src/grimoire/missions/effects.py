@@ -212,6 +212,44 @@ def _run(cwd: Path, *argv: str) -> subprocess.CompletedProcess[str] | None:
         return None
 
 
+def _probe_push(repo: Path, remote: str, branch: str, sha: str) -> tuple[str, str]:
+    """Le *sha* poussé est-il sur la remote ? Par ascendance, pas par égalité avec la tête (K12-SC2-01).
+
+    Une branche qui a avancé depuis le push porte encore le *sha* : le tenir pour absent ferait refaire
+    un push déjà fait. Branche présente : égalité, sinon ``merge-base --is-ancestor`` après ``fetch`` de la
+    branche ; pas ancêtre = ``absent``, un git muet = ``unknown``. Branche absente : le *sha* est une tête de
+    la remote = ``present`` ; connu d'une branche distante suivie localement = la branche a été supprimée
+    après le push, ``unknown`` (la refaire la ressusciterait) ; sinon jamais poussée, ``absent``.
+    """
+    done = _run(repo, "git", "ls-remote", remote, f"refs/heads/{branch}")
+    if done is None or done.returncode != 0:
+        return UNKNOWN, "git ls-remote a échoué" + (f" : {done.stderr.strip()[:200]}" if done is not None else "")
+    heads = [line.split()[0] for line in done.stdout.splitlines() if line.strip()]
+    if sha in heads:
+        return PRESENT, sha
+    if heads:
+        tip = heads[0]
+        fetched = _run(repo, "git", "fetch", "--quiet", "--no-tags", remote, f"refs/heads/{branch}")
+        if fetched is None or fetched.returncode != 0:
+            return UNKNOWN, f"git fetch a échoué, ascendance de {sha[:12]} invérifiable"
+        verdict = _run(repo, "git", "merge-base", "--is-ancestor", sha, tip)
+        if verdict is None or verdict.returncode not in (0, 1):
+            return UNKNOWN, f"ascendance de {sha[:12]} invérifiable"
+        return (PRESENT, sha) if verdict.returncode == 0 else (ABSENT, f"remote à {tip[:12]}")
+    everywhere = _run(repo, "git", "ls-remote", "--heads", remote)
+    if everywhere is None or everywhere.returncode != 0:
+        return UNKNOWN, "git ls-remote a échoué"
+    if any(line.split()[0] == sha for line in everywhere.stdout.splitlines() if line.strip()):
+        return PRESENT, sha
+    tracked = _run(repo, "git", "for-each-ref", "--contains", sha, "--format=%(refname:short)", f"refs/remotes/{remote}/")
+    if tracked is None or tracked.returncode != 0:
+        return UNKNOWN, f"branche absente, {sha[:12]} inconnu de ce dépôt : invérifiable"
+    seen = tracked.stdout.split()
+    if seen:
+        return UNKNOWN, f"branche absente, connue de la remote ({seen[0]}) : supprimée, invérifiable"
+    return ABSENT, "branche absente"
+
+
 def default_probe(effect: Effect) -> tuple[str, str]:
     """Vérifie l'effet sur la remote : ``git ls-remote`` pour un push, ``gh pr list --head`` pour une PR."""
     target = effect.target
@@ -221,11 +259,7 @@ def default_probe(effect: Effect) -> tuple[str, str]:
         sha = target.get("sha", "")
         if not branch or not sha:
             return UNKNOWN, "cible incomplète (branch, sha)"
-        done = _run(repo, "git", "ls-remote", target.get("remote", "origin") or "origin", f"refs/heads/{branch}")
-        if done is None or done.returncode != 0:
-            return UNKNOWN, "git ls-remote a échoué" + (f" : {done.stderr.strip()[:200]}" if done is not None else "")
-        heads = [line.split()[0] for line in done.stdout.splitlines() if line.strip()]
-        return (PRESENT, sha) if sha in heads else (ABSENT, f"remote à {heads[0][:12]}" if heads else "branche absente")
+        return _probe_push(repo, target.get("remote", "origin") or "origin", branch, sha)
     if effect.kind == GH_PR:
         if not branch:
             return UNKNOWN, "cible incomplète (branch)"
