@@ -112,6 +112,17 @@ def _build_red(root: Path) -> None:
     (root / _GATE_ARTIFACT).unlink(missing_ok=True)
 
 
+def _build_green(root: Path) -> None:
+    _build_governed(root)
+    _in_progress(root)
+    scaffold_task_artifacts(root, task_id=TASK)
+
+
+def _green_gates(root: Path) -> Path:
+    """Une tâche gouvernée en cours dont tous les artefacts de preuve sont là : seul le gate « fini » peut refuser."""
+    return _materialise(root, "green", _build_green)
+
+
 def _red_gates(root: Path) -> Path:
     """Une tâche gouvernée en cours dont un artefact de preuve manque : la clôture doit être refusée."""
     return _materialise(root, "red", _build_red)
@@ -202,6 +213,27 @@ def _stop(root: Path, *, active: bool = False) -> str:
 
 def _stop_red_gates(root: Path, _mp: pytest.MonkeyPatch) -> Measure:
     _red_gates(root)
+
+    def measure(fault: Fault) -> str:
+        with fault:
+            return _stop(root)
+
+    return measure
+
+
+def _stop_stale_mutation(root: Path, mp: pytest.MonkeyPatch) -> Measure:
+    """Gates verts, ``enforce`` posé, une écriture postérieure au dernier check vert : seul le gate « fini » refuse.
+
+    Le sandbox de :func:`_run` retire ``GRIMOIRE_DONE_GATE`` : on le remet ici, comme ``_stop_continued``.
+    Sans cela (ou avec des gates rouges) le ``BLOCK`` sain venait déjà des gates et masquait un gate « fini »
+    devenu fail-open (W2-08-S1).
+    """
+    from grimoire.core.standard_checks.evidence_journal import build_bash_event
+
+    mp.setenv("GRIMOIRE_DONE_GATE", "enforce")
+    _green_gates(root)
+    append_evidence_event(root, TASK, build_bash_event("pytest -q", exit_code=0))
+    append_evidence_event(root, TASK, build_file_write_event(str(root / "src" / "foo.py")))
 
     def measure(fault: Fault) -> str:
         with fault:
@@ -303,6 +335,7 @@ SCENARIOS: dict[str, tuple[Scenario, str]] = {
     "pre_untrusted": (_pre_untrusted, "ask"),
     "pre_stale_lease": (_pre_stale_lease, "deny"),
     "stop_red_gates": (_stop_red_gates, "block"),
+    "stop_stale_mutation": (_stop_stale_mutation, "block"),
     "stop_no_task": (_stop_no_task, "block"),
     "stop_continued": (_stop_continued, "block"),
     "prompt_turn": (_prompt_turn, "attested"),
@@ -368,8 +401,10 @@ CASES: tuple[FaultCase, ...] = (
         "session_memory",
         "pre_untrusted",
         "",
-        "couche qui ne sait que durcir un allow en ask (session_memory.py:save_session_memory) : une mémoire "
-        "illisible rend une session neuve et le moteur de règles décide seul ; elle ne relâche jamais un refus",
+        "ask -> allow : la mémoire de session ne sait que durcir un allow en ask (session_memory.py:load_session_memory), "
+        "une mémoire illisible rend une session neuve et le moteur de règles décide seul. Elle relâche donc la question "
+        "posée sur une commande vue seulement dans un contenu non fiable ; elle n'est consultée que si le moteur a dit allow "
+        "(tool_policy.py:_untrusted_escalation), donc ne touche pas aux deny",
         _corrupt_session_memory,
     ),
     # ── Stop : refuse une clôture dont les gates sont rouges
@@ -378,13 +413,13 @@ CASES: tuple[FaultCase, ...] = (
     _closed(_EG, "evidence_gate", "stop_red_gates", _P + "evidence_gate.resolve_active_task", "block"),
     _closed(_EG, "evidence_gate", "stop_red_gates", _P + "evidence_gate.active_profile_id", "block"),
     _closed(_EG, "enrolment", "stop_red_gates", _P + "evidence_gate.stop_scope", "block"),
-    _closed(_EG, "done_gate", "stop_red_gates", _P + "done_gate.evaluate_done_gate", "block"),
+    _closed(_EG, "done_gate", "stop_stale_mutation", _P + "done_gate.evaluate_done_gate", "block"),
     _open(
         _EG,
         "enrolment",
         "stop_no_task",
         "grimoire.policies.session_state.session_mutations",
-        "journal de session illisible = « rien rattaché » (enrolment.py:session_mutation_count) : choix écrit pour ne "
+        "block -> allow : journal de session illisible = « rien rattaché » (enrolment.py:session_mutation_count) : choix écrit pour ne "
         "jamais casser la session ; même effet qu'un hôte sans session_id. Limite : la clôture hors tâche n'est alors pas vue",
     ),
     _open(
@@ -392,7 +427,7 @@ CASES: tuple[FaultCase, ...] = (
         "done_gate",
         "stop_continued",
         _P + "done_gate.stop_step",
-        "le Stop continué doit toujours laisser sortir la session (stop_hook_already_active) ; la panne est "
+        "block -> allow : le Stop continué doit toujours laisser sortir la session (stop_hook_already_active) ; la panne est "
         "tracée en guard.error (evidence_gate._continued_stop), le refus déjà émis n'est pas répété",
     ),
     # ── UserPromptSubmit : un tour qui ne s'écrit pas n'atteste rien
@@ -602,6 +637,20 @@ def test_une_garde_ouverte_dit_pourquoi_et_une_garde_fermee_ne_le_pretend_pas() 
     for case in CASES:
         assert bool(case.open_why.strip()) == bool(case.expected & {"allow", "attested"}), case.id
     assert len({c.id for c in CASES}) == len(CASES), "deux cas portent le même identifiant"
+
+
+def test_une_garde_ouverte_qui_relache_un_refus_nomme_la_transition_mesuree() -> None:
+    """W2-08-S2 : « elle ne relâche jamais un refus » contredisait la mesure (ask -> allow) sans qu'aucun test le voie.
+
+    Quand le scénario sain refuse (ou pose une question) et que la panne rend ``allow``, la justification doit
+    écrire la transition mesurée ``<sain> -> <sous panne>`` ; elle ne peut pas non plus prétendre le contraire.
+    """
+    relaxing = [o for o in (observe(c) for c in CASES) if o.case.open_why and o.healthy in CLOSED_LABELS and not o.closed]
+    assert relaxing, "aucune garde ouverte ne relâche de refus : ce test ne garde plus rien"
+    for o in relaxing:
+        transition = f"{o.healthy} -> {o.faulted}"
+        assert transition in o.case.open_why, f"{o.case.id} : la mesure est {transition!r}, la justification ne le dit pas"
+        assert "ne relâche jamais" not in o.case.open_why, o.case.id
 
 
 def test_fail_closed_guards_est_recalcule_et_publie() -> None:
