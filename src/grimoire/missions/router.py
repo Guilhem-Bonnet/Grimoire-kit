@@ -65,6 +65,7 @@ __all__ = [
     "model_sort_key",
     "provider_view",
     "replay_route_history",
+    "required_currencies",
     "route",
     "routing_task_from",
     "unit_cost_per_mtok",
@@ -172,7 +173,9 @@ class HistoryRow:
             "model": self.model,
             "observations": self.observations,
             "successes": self.successes,
-            "cost_known_usd": round(float(self.cost_known_usd), 6),
+            # Pas d'arrondi : le coût moyen de la décision part de cette somme, et un float JSON fait
+            # l'aller-retour sans perte. Arrondir ici faisait diverger le rejeu (route explain).
+            "cost_known_usd": float(self.cost_known_usd),
             "cost_priced": self.cost_priced,
             "cost_unpriced": self.cost_unpriced,
         }
@@ -476,6 +479,14 @@ def model_sort_key(
     )
 
 
+def required_currencies(task: RoutingTask, policy: RoutingPolicy) -> tuple[str, ...]:
+    """Les monnaies imposées par les règles qui correspondent (``providers: {currency: ...}``), triées.
+
+    Plus d'une monnaie : aucun fournisseur n'est admissible. Vide : aucune contrainte.
+    """
+    return tuple(sorted({r.currency for r in policy.rules if rule_matches(r, task) and r.currency is not None}))
+
+
 def route(
     task: RoutingTask,
     history: RouteHistory,
@@ -513,7 +524,7 @@ def route(
         reasons.append(f"historique : {recommended[1]}")
     reasons.append(f"palier retenu : {tier}")
 
-    currencies = {r.currency for r in matched if r.currency is not None}
+    currencies = set(required_currencies(task, policy))
     excluded: list[dict[str, Any]] = []
     pool: list[tuple[int, ModelOption]] = []
     for position, option in enumerate(provider_state.models):

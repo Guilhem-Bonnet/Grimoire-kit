@@ -61,6 +61,29 @@ def _registry(root: Path, providers: dict[str, list[str]], *, tier: str = "cheap
     )
 
 
+def _registry_with_currency(root: Path, providers: dict[str, tuple[str, list[tuple[str, str]]]]) -> None:
+    """Comme :func:`_registry`, avec une monnaie par fournisseur et un palier par modèle."""
+    script = root / "scripts" / "fake.py"
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text(_SCRIPT, encoding="utf-8")
+    blocks = []
+    for pid, (currency, models) in providers.items():
+        listing = "\n".join(f'      - {{id: "{m}", tier: "{tier}"}}' for m, tier in models)
+        blocks.append(
+            f'  - id: "{pid}"\n    enabled: true\n    provider_type: "hosted"\n'
+            f'    allowed_capabilities: ["chat", "code"]\n    default_models: ["{models[0][0]}"]\n    currency: "{currency}"\n'
+            f'    invocation: "{Path(sys.executable).as_posix()} {script.as_posix()} {{prompt}} --model {{model}}"\n'
+            f"    models:\n{listing}\n    fallback_order: []\n"
+        )
+    std = root / "_grimoire" / "standard"
+    std.mkdir(parents=True, exist_ok=True)
+    (std / "llm-provider-registry.yaml").write_text(
+        '$schema: "grimoire-llm-provider-registry/v1"\nproviders:\n' + "".join(blocks)
+        + "routing:\n  default_provider: \"\"\n  default_fallback_chain: []\n",
+        encoding="utf-8",
+    )
+
+
 def _policy(root: Path, text: str) -> None:
     path = root / POLICY_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -70,6 +93,11 @@ def _policy(root: Path, text: str) -> None:
 def _task(service: TaskService, criterion: str = V0) -> str:
     mission = service.ledger.create_mission("Démo routeur", origin="test")
     return service.ledger.create_task(mission.id, "Tâche", acceptance=(criterion,), owner="amelia").id
+
+
+def _local_task(service: TaskService) -> str:
+    mission = service.ledger.create_mission("Démo local", origin="test")
+    return service.ledger.create_task(mission.id, "Tâche locale", acceptance=(V0,), owner="amelia", extra={"needs_local": True}).id
 
 
 def _seed(service: TaskService, model: str, green: int, red: int, *, cost: float | None = None) -> None:
@@ -212,7 +240,7 @@ def test_active_mode_raises_the_start_tier_for_a_risky_task(tmp_path: Path) -> N
 
 
 def test_explicit_start_tier_still_wins_over_the_router(tmp_path: Path) -> None:
-    _registry(tmp_path, {"p": ["m"]}, tier="mid")
+    _registry_with_currency(tmp_path, {"p": ("api", [("m", "mid"), ("big", "strong")])})  # le routeur dit `route`, au palier strong
     _policy(tmp_path, "version: 1\nmode: active\nrules:\n  - {id: r-v0, when: {class: V0}, min_tier: strong}\n")
     service = TaskService(tmp_path, LEDGER)
     tid = _task(service)
@@ -220,10 +248,138 @@ def test_explicit_start_tier_still_wins_over_the_router(tmp_path: Path) -> None:
     assert report.start_tier == "mid"
 
 
+# ── Mode actif : la décision `session` / `defer` n'est pas contournée ──────────
+
+
+_SESSION_RULE = "version: 1\nmode: active\nrules:\n  - {id: s, when: {type: implementation}, route: session}\n  - {id: r-v0, when: {class: V0}, min_tier: cheap}\n"
+
+
+def test_active_session_rule_runs_no_cascade(tmp_path: Path) -> None:
+    """`route: session` l'emporte sur tout : la décision `session` ne retombe pas sur l'ancien chemin."""
+    _registry(tmp_path, {"p": ["m1"]})
+    _policy(tmp_path, _SESSION_RULE)
+    service = TaskService(tmp_path, LEDGER)
+    tid = _task(service)
+
+    report = run_dispatch(service, tid, checks=CHECK)
+
+    assert _routed(service, tid)[0]["outcome"] == "session"
+    assert _calls(tmp_path) == [], "active + session : aucun appel autonome"
+    assert report.attempts == ()
+    assert report.refusal == "routed_to_session"
+    assert report.exit_code == 2
+    assert report.refusal_message
+    assert not [e for e in service.ledger.list_events(tid) if e.event_type == "task.dispatched"]
+
+
+def test_active_without_a_matching_rule_runs_no_cascade(tmp_path: Path) -> None:
+    """Aucune règle qui correspond donne `session` : en mode actif, rien ne part."""
+    _registry(tmp_path, {"p": ["m1"]})
+    _policy(tmp_path, "version: 1\nmode: active\nrules:\n  - {id: r-v1, when: {class: V1}, min_tier: mid}\n")
+    service = TaskService(tmp_path, LEDGER)
+    tid = _task(service)
+
+    report = run_dispatch(service, tid, checks=CHECK)
+
+    assert _routed(service, tid)[0]["outcome"] == "session"
+    assert _calls(tmp_path) == []
+    assert report.refusal == "routed_to_session"
+
+
+def test_shadow_keeps_the_old_path_even_when_the_router_would_say_session(tmp_path: Path) -> None:
+    _registry(tmp_path, {"p": ["m1"]})
+    _policy(tmp_path, _SESSION_RULE.replace("mode: active", "mode: shadow"))
+    service = TaskService(tmp_path, LEDGER)
+    tid = _task(service)
+    report = run_dispatch(service, tid, checks=CHECK)
+    assert _routed(service, tid)[0]["outcome"] == "session"
+    assert _calls(tmp_path) == ["m1"]
+    assert report.refusal is None
+
+
+def test_active_defer_runs_no_cascade(tmp_path: Path) -> None:
+    """Aucun modèle disponible au palier retenu : `defer`, jamais d'appel hors décision."""
+    from datetime import UTC, datetime, timedelta
+
+    _registry(tmp_path, {"p": ["m1"]})
+    _policy(tmp_path, "version: 1\nmode: active\nrules:\n  - {id: r-v0, when: {class: V0}, min_tier: cheap}\n")
+    save_state(tmp_path, {"p": ProviderRuntimeState(model_suspensions={"m1": Suspension(datetime.now(UTC) + timedelta(hours=2), "resets_at")})})
+    service = TaskService(tmp_path, LEDGER)
+    tid = _task(service)
+
+    report = run_dispatch(service, tid, checks=CHECK)
+
+    assert _routed(service, tid)[0]["outcome"] == "defer"
+    assert _calls(tmp_path) == []
+    assert report.refusal == "routed_defer"
+    assert report.exit_code == 2
+
+
+def test_routing_refusals_are_reported_by_the_cli(tmp_path: Path) -> None:
+    _registry(tmp_path, {"p": ["m1"]})
+    _policy(tmp_path, _SESSION_RULE)
+    service = TaskService(tmp_path, LEDGER)
+    tid = _task(service)
+    result = runner.invoke(app, ["task", "dispatch", tid, "--check", CHECK[0], "--project-root", str(tmp_path)])
+    assert result.exit_code == 2, result.output
+    assert "session" in result.output
+    assert _calls(tmp_path) == []
+
+
+# ── Mode actif : la contrainte de monnaie vaut pour l'appel, pas seulement pour la trace ──
+
+_LOCAL_RULES = "version: 1\nmode: active\nrules:\n  - {id: r-local, when: {needs_local: true}, providers: {currency: local}}\n  - {id: r-v0, when: {class: V0}, min_tier: cheap}\n"
+
+
+def test_active_needs_local_calls_only_the_local_provider(tmp_path: Path) -> None:
+    _registry_with_currency(tmp_path, {"cloud": ("api", [("cloudm", "cheap")]), "loc": ("local", [("localm", "cheap")])})
+    _policy(tmp_path, _LOCAL_RULES)
+    service = TaskService(tmp_path, LEDGER)
+    tid = _local_task(service)
+
+    report = run_dispatch(service, tid, checks=CHECK)
+
+    decision = _routed(service, tid)[0]["decision"]
+    assert isinstance(decision, dict)
+    assert (decision["provider"], decision["model"]) == ("loc", "localm")
+    assert _calls(tmp_path) == ["localm"], "l'appel suit la décision tracée"
+    assert [a.provider for a in report.attempts] == ["loc"]
+
+
+def test_active_needs_local_never_escalates_to_a_cloud_provider(tmp_path: Path) -> None:
+    """Le palier suivant n'admet pas non plus un fournisseur hors de la monnaie requise."""
+    _registry_with_currency(
+        tmp_path,
+        {"cloud": ("api", [("cloudm", "cheap"), ("cloudmid", "mid")]), "loc": ("local", [("localm", "cheap")])},
+    )
+    _policy(tmp_path, _LOCAL_RULES)
+    service = TaskService(tmp_path, LEDGER)
+    tid = _local_task(service)
+
+    report = run_dispatch(service, tid, checks=("test -f absent.txt",))  # rouge : la cascade escalade
+
+    assert _calls(tmp_path) == ["localm"]
+    assert {a.provider for a in report.attempts} == {"loc"}
+
+
+def test_active_needs_local_without_a_local_provider_defers_instead_of_calling_the_cloud(tmp_path: Path) -> None:
+    _registry_with_currency(tmp_path, {"cloud": ("api", [("cloudm", "cheap")])})
+    _policy(tmp_path, _LOCAL_RULES)
+    service = TaskService(tmp_path, LEDGER)
+    tid = _local_task(service)
+
+    report = run_dispatch(service, tid, checks=CHECK)
+
+    assert _routed(service, tid)[0]["outcome"] == "defer"
+    assert _calls(tmp_path) == []
+    assert report.refusal == "routed_defer"
+
+
 # ── Politique invalide / routeur en panne : jamais au prix du dispatch ─────────
 
 
-def test_invalid_policy_cannot_activate_the_router_and_is_traced_as_a_refusal(tmp_path: Path) -> None:
+def test_invalid_policy_refuses_the_cascade_and_is_traced_as_a_refusal(tmp_path: Path) -> None:
+    """`on_invalid: refuse` : un fichier de politique qui ne se valide pas ne laisse aucune route autonome."""
     _registry(tmp_path, {"p": ["first", "second"]})
     _policy(tmp_path, "version: 1\nmode: active\nrules:\n  - {id: r, when: {quota_left: 1}, min_tier: strong}\n")
     service = TaskService(tmp_path, LEDGER)
@@ -232,12 +388,36 @@ def test_invalid_policy_cannot_activate_the_router_and_is_traced_as_a_refusal(tm
 
     report = run_dispatch(service, tid, checks=CHECK)
 
-    assert report.exit_code == 0
-    assert _calls(tmp_path) == ["first"], "la politique illisible n'active rien"
+    assert report.refusal == "routing_policy_invalid"
+    assert report.exit_code == 2
+    assert report.attempts == ()
+    assert _calls(tmp_path) == [], "la politique illisible ne laisse aucun appel autonome"
+    assert report.start_tier_reason is not None
+    assert "quota_left" in report.start_tier_reason or "politique" in report.start_tier_reason
     payload = _routed(service, tid)[0]
     assert payload["outcome"] == "refuse"
     assert "politique illisible" in str(payload["reasons"])
     assert payload["policy_error"]
+
+
+def test_unparsable_policy_file_refuses_too(tmp_path: Path) -> None:
+    _registry(tmp_path, {"p": ["m"]})
+    _policy(tmp_path, "version: [unclosed\n")
+    service = TaskService(tmp_path, LEDGER)
+    tid = _task(service)
+    report = run_dispatch(service, tid, checks=CHECK)
+    assert (report.refusal, report.exit_code, _calls(tmp_path)) == ("routing_policy_invalid", 2, [])
+
+
+def test_invalid_policy_dry_run_traces_nothing_but_says_it_would_refuse(tmp_path: Path) -> None:
+    _registry(tmp_path, {"p": ["m"]})
+    _policy(tmp_path, "version: 9\n")
+    service = TaskService(tmp_path, LEDGER)
+    tid = _task(service)
+    report = run_dispatch(service, tid, checks=CHECK, dry_run=True)
+    assert report.refusal == "routing_policy_invalid"
+    assert report.exit_code == 0, "--dry-run ne sort jamais en erreur"
+    assert _routed(service, tid) == []
 
 
 def test_a_router_crash_never_breaks_the_dispatch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -287,6 +467,24 @@ def test_replay_survives_the_ledger_round_trip_with_prices_and_costs(tmp_path: P
     _, same, _ = replay_event(payload)
     assert same
     assert payload["decision"]["model"] == "claude-haiku-3-5", "à réussite égale, le prix catalogue le plus bas"  # type: ignore[index]
+
+
+def test_replay_is_identical_with_a_cost_that_the_serialisation_must_not_round(tmp_path: Path) -> None:
+    """Un coût moyen à plus de six décimales : les entrées tracées reproduisent exactement la décision."""
+    _registry(tmp_path, {"p": ["claude-haiku-4-5"]})
+    service = TaskService(tmp_path, LEDGER)
+    _seed(service, "claude-haiku-4-5", green=5, red=0, cost=0.01234567)
+    tid = _task(service)
+    run_dispatch(service, tid, checks=CHECK)
+    reloaded = MissionLedger(tmp_path / LEDGER)
+    payload = next(e.payload for e in reloaded.list_events(tid) if e.event_type == ROUTED_EVENT)
+    replayed, same, _ = replay_event(payload)
+    assert replayed is not None
+    assert replayed.to_dict() == payload["decision"]
+    assert same
+    result = runner.invoke(app, ["route", "explain", tid, "--project-root", str(tmp_path), "--json"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["replay_identical"] is True
 
 
 def test_route_explain_replays_and_detects_tampering(tmp_path: Path) -> None:

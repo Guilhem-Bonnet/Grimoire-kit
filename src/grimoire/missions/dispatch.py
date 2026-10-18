@@ -703,6 +703,9 @@ _REFUSAL_MESSAGES: dict[str, str] = {
     "no_check": "au moins un `--check` est requis : la classe dit que le verdict est mécanique, la commande dit lequel",
     "no_tier": "aucun palier disponible entre le plancher de la classe et --max-tier",
     "no_provider": "aucun fournisseur invocable sur la chaîne de paliers prévue",
+    "routing_policy_invalid": "politique de routage illisible : aucune route autonome (`on_invalid: refuse`)",
+    "routed_to_session": "le routeur actif décide `session` : aucun appel autonome, la session tranche",
+    "routed_defer": "le routeur actif décide `defer` : aucun modèle admis disponible, attente",
 }
 
 
@@ -1191,6 +1194,9 @@ def run_dispatch(
             prompt=prompt,
             refusal="v2",
         )
+
+    if (refused := routing.refusal()) is not None:  # K9 : politique illisible, `session`, `defer` (mode actif)
+        return DispatchReport(task_id, verifiability.value, dry_run, (), prompt, refusal=refused[0], start_tier_reason=refused[1])
 
     if start_tier is not None:
         # L'option explicite ne peut que monter : le plancher de la classe est

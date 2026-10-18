@@ -354,7 +354,10 @@ plancher de la classe (V0 `cheap`, V1 `mid`). Les conditions admises sont
 `class`, `type`, `risk_any`, `exclusive_files_gt`, `needs_local` : une règle qui
 nomme un quota ou un budget invalide la politique. Une politique malformée, sans
 version ou de version inconnue n'est jamais remplacée par le défaut : aucune
-route autonome (`on_invalid: refuse`), la décision tracée est `refuse`.
+route autonome (`on_invalid: refuse`) : la décision tracée est `refuse` et
+`task dispatch` ne lance aucune cascade (refus `routing_policy_invalid`, sortie 2),
+en `shadow` comme en `active`. Seul un routeur en panne (exception) laisse le
+dispatch suivre l'ancien chemin, avec une décision `refuse` et son erreur tracées.
 
 ```yaml
 version: 1
@@ -373,6 +376,14 @@ croissant (un prix inconnu passe après), puis ordre déclaré. Les modèles
 suspendus ou refroidis sont listés dans `excluded[]` avec leur raison. Sans
 candidat, la décision est `defer` : jamais de descente de palier. Revenir à
 `shadow` se fait en un seul champ.
+
+En `active`, la décision n'est pas contournée : une issue `session` (règle
+`route: session`, V2, aucune règle qui correspond) ou `defer` ne lance aucune
+cascade (refus `routed_to_session` ou `routed_defer`, sortie 2, aucun
+`task.dispatched`). Les fournisseurs appelés sont ceux que la décision admet : une
+règle `providers: {currency: local}` vaut pour tous les paliers de la cascade, un
+fournisseur d'une autre monnaie n'est jamais appelé, et au palier retenu seuls les
+fournisseurs du classement le sont. En `shadow`, ces issues ne restent qu'une trace.
 
 **Attribution** : chaque tentative (`task.dispatched`) compte pour le couple
 (type, classe, modèle) de cette tentative ; un 429, un timeout ou une panne
