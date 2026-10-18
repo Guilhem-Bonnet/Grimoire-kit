@@ -1,0 +1,12 @@
+{
+  "recordVersion": 1,
+  "provenance": "fixture synthetique ecrite a la main pour demontrer le rejeu ; aucun run reel, aucun compteur mesure",
+  "runs": {
+    "__blueprint__": {
+      "cout-du-pipeline-sous-plafond": {
+        "tokens": { "input": 30000, "output": 9000 },
+        "verdict": "pass"
+      }
+    }
+  }
+}

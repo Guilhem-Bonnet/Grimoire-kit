@@ -286,7 +286,9 @@ consignation. Un cas absent de la trace est rapporté « non exécuté » — ja
 comme un échec.
 
 - Schéma de référence : `schemas/blueprint-v1.schema.json`
-- Exemples prêts à l'emploi : `registry/blueprints/` (`minimal`, `web-pipeline`)
+- Exemples rejouables (sans modèle, vérifiés en CI) : `examples/blueprint-minimal/` et
+  `examples/blueprint-web-pipeline/` — `bash examples/<nom>/replay.sh` ; sources dans
+  `registry/blueprints/`
 - L'atelier visuel reste disponible via `grimoire serve` (le cockpit
   multi-projets, lui, est servi par `grimoire cockpit`)
 
