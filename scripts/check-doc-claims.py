@@ -41,7 +41,7 @@ SCOPE = ("README.md", "README.fr.md", "docs/index.md")
 VERSION_LABELS = frozenset({"python", "node", "rust", "version"})
 
 _ANCHOR = re.compile(r"<!--\s*source:\s*(?P<ref>[^;>]*?)\s*(?:;\s*recompute:\s*(?P<cmd>[^>]*?))?\s*-->")
-_COMMENT = re.compile(r"<!--.*?-->")
+_COMMENT = re.compile(r"<!--.*?--!?>", re.DOTALL)
 _BADGE = re.compile(r"img\.shields\.io/badge/(?P<spec>[^\"'?)\s]+)")
 _TAG = re.compile(r"<[^>]*>")
 _LINK = re.compile(r"!?\[(?P<text>[^\]]*)\]\([^)]*\)")

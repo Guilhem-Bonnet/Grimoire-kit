@@ -70,19 +70,19 @@ def _children(command: Any, ctx: Any) -> dict[str, Any] | None:
 
 
 def load_root() -> tuple[Any, Any]:
-    import click
     import typer
 
     from grimoire.cli.app import app
 
+    # Pas d'`import click` : depuis typer 0.27 click n'est plus une dépendance
+    # (le CI n'installe que les dépendances du noyau). La classe de contexte se
+    # lit sur la commande elle-même, quelle que soit la bibliothèque qui l'a bâtie.
     root = typer.main.get_command(app)
-    return root, click.Context(root)
+    return root, root.context_class(root)
 
 
 def unknown_command(citation: str, root: Any, root_ctx: Any) -> str | None:
     """Le préfixe de ``citation`` qui n'existe pas dans l'arbre, ou ``None`` si elle est valide."""
-    import click
-
     match = _COMMAND.match(citation)
     if not match:
         return None
@@ -95,7 +95,7 @@ def unknown_command(citation: str, root: Any, root_ctx: Any) -> str | None:
         if word not in children or children[word] is None:
             return "grimoire " + " ".join(words[: index + 1])
         command = children[word]
-        ctx = click.Context(command, parent=ctx)
+        ctx = command.context_class(command, parent=ctx)
     return None
 
 
