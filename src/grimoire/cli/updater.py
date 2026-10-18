@@ -360,7 +360,8 @@ def run_update(
                 console.print(f"  [dim]{escape(manual_hint)}[/dim]")
                 raise typer.Exit(1) from None
 
-        offline_dir = (bundle.link_dir or Path(scratch)) if bundle is not None else None
+        # le dossier temporaire, jamais celui du bundle : il ne contient que les wheels vérifiées
+        offline_dir = Path(scratch) if bundle is not None else None
         cmd = verified_install_cmd(wheel, extras, manager=manager, carry=carry, offline_dir=offline_dir)
         console.print(f"  [dim]$ {escape(' '.join(cmd))}[/dim]")
 

@@ -159,6 +159,37 @@ def test_a_missing_source_is_refused(tmp_path: Path) -> None:
         bundles.open_bundle(tmp_path / "absent")
 
 
+def test_only_listed_wheels_reach_the_directory_given_to_the_installer(tmp_path: Path) -> None:
+    """Le gestionnaire lit ``--find-links`` : une page HTML, un sous-dossier ou un intrus n'y entrent pas (D04-S1-01)."""
+    bundle = tmp_path / "bundle"
+    (bundle / "sub").mkdir(parents=True)
+    kit = _wheel(bundle, "grimoire-kit", "99.0.0")
+    dep = _wheel(bundle, "zz-offline-dep", "1.2.3")
+    (bundle / "SHA256SUMS").write_text(_sums(kit, dep), encoding="utf-8")
+    (bundle / "links.html").write_text('<a href="../outside/evil-1.0-py3-none-any.whl">evil</a>', encoding="utf-8")
+    (bundle / "sub" / "evil-1.0-py3-none-any.whl").write_bytes(b"x")
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    staged, _ = bundles.stage_and_verify(bundles.open_bundle(bundle), scratch)
+    assert staged.parent == scratch
+    assert sorted(p.name for p in scratch.iterdir()) == sorted([kit.name, dep.name])
+
+
+def test_a_dependency_swapped_after_the_check_is_not_what_gets_installed(tmp_path: Path) -> None:
+    """Les dépendances sont copiées puis hachées : plus de fenêtre entre la vérification et l'installation."""
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    kit = _wheel(bundle, "grimoire-kit", "99.0.0")
+    dep = _wheel(bundle, "zz-offline-dep", "1.2.3")
+    (bundle / "SHA256SUMS").write_text(_sums(kit, dep), encoding="utf-8")
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    bundles.stage_and_verify(bundles.open_bundle(bundle), scratch)
+    original = dep.read_bytes()
+    dep.write_bytes(b"swapped after the check")
+    assert (scratch / dep.name).read_bytes() == original
+
+
 # ── commandes d'installation hors ligne ───────────────────────────────────────
 
 
@@ -235,7 +266,7 @@ def test_a_real_pip_install_from_a_bundle_works_in_a_network_less_namespace(tmp_
     scratch.mkdir()
     staged, verdict = bundles.stage_and_verify(bundles.open_bundle(bundle), scratch)
     assert verdict.level == "bundle"
-    cmd = verified_install_cmd(staged, [], manager=("pip", None), offline_dir=bundle)
+    cmd = verified_install_cmd(staged, [], manager=("pip", None), offline_dir=scratch)
     cmd[0] = python
 
     def netless(*argv: str) -> subprocess.CompletedProcess[str]:

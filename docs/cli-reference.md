@@ -1260,11 +1260,15 @@ qui refait une installation du registre est affichée.
 Un bundle est un dossier contenant la wheel de grimoire-kit, son `SHA256SUMS` (celui de la release) et, si
 l'environnement n'a pas déjà les dépendances, leurs wheels (`pip download grimoire-kit==X -d <dossier>`, à faire une
 fois en ligne ; ajouter leurs empreintes à `SHA256SUMS`). Toute wheel du dossier doit figurer dans `SHA256SUMS` avec la
-bonne empreinte, sinon le bundle entier est refusé. Une pré-version dans un bundle exige `--channel preview`.
+bonne empreinte, sinon le bundle entier est refusé. Le gestionnaire n'est jamais pointé sur le dossier du bundle : `self update`
+copie la wheel du kit et les autres wheels du dossier (toutes listées, hachées après copie) dans un dossier temporaire et ne
+donne que celui-là à `--find-links`. Le reste du dossier (une page `links.html`, un sous-dossier, tout fichier qui n'est pas
+une wheel) est ignoré : `pip` suit les pages HTML d'un `--find-links`, et une wheel que `SHA256SUMS` ne liste pas ne peut pas
+entrer par là. Une pré-version dans un bundle exige `--channel preview`.
 
 Limite écrite : le `SHA256SUMS` d'un bundle voyage avec ses fichiers, donc le niveau rendu est `bundle`, jamais
-`verified` : il garantit l'intégrité du bundle, pas son origine. Les dépendances sont vérifiées en place, entre la
-vérification et l'installation un processus qui écrit dans le dossier peut les remplacer. Hors ligne,
+`verified` : il garantit l'intégrité du bundle, pas son origine. Les dépendances sont copiées puis hachées comme la wheel du kit :
+rien n'est lu dans le dossier du bundle après la vérification. Hors ligne,
 `gh attestation verify` n'est pas rejoué.
 
 | `trust_level` | Sens |

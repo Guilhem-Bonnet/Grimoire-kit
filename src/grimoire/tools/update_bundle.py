@@ -6,16 +6,20 @@ socket : ni PyPI, ni GitHub, ni index pour les dépendances (``--no-index`` /
 
 * **Vérifié** : la wheel du kit figure dans le ``SHA256SUMS`` du bundle avec la
   même empreinte, et chaque autre wheel du dossier (dépendances) aussi, parce
-  que le gestionnaire les lirait à son tour (``--find-links``). Une wheel
-  absente de la liste ou altérée refuse tout le bundle.
+  que le gestionnaire les lirait à son tour. Une wheel absente de la liste ou
+  altérée refuse tout le bundle.
 * **Non vérifié** : l'origine. Le ``SHA256SUMS`` voyage avec les fichiers, donc
   un bundle entièrement remplacé reste cohérent. Le niveau rendu est
   ``bundle``, jamais ``verified``. Pour remonter à la source, joindre la liste
   à celle de la release (``gh attestation verify``, à faire en ligne ailleurs).
-* **Fenêtre** : la wheel du kit est copiée puis hachée *après* copie (ce qui est
-  installé est ce qui est vérifié). Les dépendances sont vérifiées en place,
-  entre la vérification et l'installation un processus qui écrit dans le
-  dossier peut les remplacer.
+* **Ce que le gestionnaire voit** : jamais le dossier du bundle, seulement un
+  dossier temporaire où ne sont copiées que les wheels listées, hachées *après*
+  copie (ce qui est installé est ce qui est vérifié, sans fenêtre entre la
+  vérification et l'installation). Le reste du dossier (une page ``links.html``
+  qui renverrait vers un fichier extérieur, un sous-dossier, tout fichier qui
+  n'est pas une wheel) n'est pas copié, donc jamais lu : ``--find-links`` suit
+  les pages HTML, et une wheel que le bundle ne liste pas ne peut pas entrer par
+  là.
 """
 
 from __future__ import annotations
@@ -35,9 +39,7 @@ class Bundle:
     wheel: Path
     version: Version
     sums: dict[str, str]
-    #: Dossier à fournir au gestionnaire pour les dépendances ; ``None`` pour une wheel seule.
-    link_dir: Path | None
-    #: Autres wheels du dossier, vérifiées elles aussi.
+    #: Autres wheels du dossier (dépendances), copiées et vérifiées elles aussi.
     others: tuple[Path, ...]
 
 
@@ -61,10 +63,10 @@ def open_bundle(source: Path) -> Bundle:
             raise TrustError(f"aucune wheel {DIST_NAME} dans {source}")
         if len(kits) > 1:
             raise TrustError(f"plusieurs wheels {DIST_NAME} dans {source} ({', '.join(p.name for p in kits)}) : en garder une")
-        wheel, link_dir = kits[0], directory
+        wheel = kits[0]
         others = tuple(p for p in wheels if p != wheel)
     else:
-        wheel, directory, link_dir, others = source, source.parent, None, ()
+        wheel, directory, others = source, source.parent, ()
         if _kit_version(wheel.name) is None:
             raise TrustError(f"{wheel.name} n'est pas une wheel {DIST_NAME}")
     version = _kit_version(wheel.name)
@@ -77,7 +79,7 @@ def open_bundle(source: Path) -> Bundle:
         sums = parse_sha256sums(sums_file.read_text(encoding="utf-8"))
     except UnicodeDecodeError:
         raise TrustError(f"{SUMS_NAME} illisible (UTF-8 invalide)") from None
-    return Bundle(wheel, version, sums, link_dir, others)
+    return Bundle(wheel, version, sums, others)
 
 
 def _check_listed(path: Path, sums: dict[str, str]) -> None:
@@ -91,16 +93,25 @@ def _check_listed(path: Path, sums: dict[str, str]) -> None:
         )
 
 
-def stage_and_verify(bundle: Bundle, scratch: Path) -> tuple[Path, Verdict]:
-    """Copie la wheel du kit dans *scratch*, vérifie la copie et les dépendances du dossier."""
-    staged = scratch / bundle.wheel.name
+def _stage(source: Path, scratch: Path) -> Path:
+    target = scratch / source.name
     try:
-        shutil.copyfile(bundle.wheel, staged)
+        shutil.copyfile(source, target)
     except OSError as exc:
-        raise TrustError(f"{bundle.wheel.name} illisible ({type(exc).__name__})") from None
+        raise TrustError(f"{source.name} illisible ({type(exc).__name__})") from None
+    return target
+
+
+def stage_and_verify(bundle: Bundle, scratch: Path) -> tuple[Path, Verdict]:
+    """Copie dans *scratch* la wheel du kit et les autres wheels listées, puis vérifie les copies.
+
+    *scratch* est le seul dossier à donner au gestionnaire (``--find-links``) : il ne contient
+    que des fichiers vérifiés, rien de ce que le dossier du bundle abrite d'autre.
+    """
+    staged = _stage(bundle.wheel, scratch)
     _check_listed(staged, bundle.sums)
     for other in bundle.others:
-        _check_listed(other, bundle.sums)
+        _check_listed(_stage(other, scratch), bundle.sums)
     count = 1 + len(bundle.others)
     return staged, Verdict(
         "bundle",

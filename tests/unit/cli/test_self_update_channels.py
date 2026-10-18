@@ -10,13 +10,17 @@ from __future__ import annotations
 
 import json
 import socket
+import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 from typer.testing import CliRunner
 
 from grimoire.cli.app import app
 
+from ..test_update_channels import _sums, _wheel
 from ._fake_release import FakeGithub, FakeRelease, sha
 
 runner = CliRunner()
@@ -210,8 +214,52 @@ def test_a_bundle_installs_with_every_socket_closed(tmp_path: Path) -> None:
     assert "trust_level: bundle" in result.output
     cmd = calls[-1]
     assert "--no-index" in cmd and "--only-binary" in cmd
-    assert cmd[cmd.index("--find-links") + 1] == str(bundle)
+    link = cmd[cmd.index("--find-links") + 1]
+    # jamais le dossier du bundle (HTML, intrus) : le dossier temporaire où la wheel vérifiée a été copiée
+    assert link != str(bundle) and cmd[-1].startswith(f"grimoire-kit @ {Path(link).as_uri()}/")
     assert cmd[-1].startswith("grimoire-kit @ file://") and cmd[-1].endswith("grimoire_kit-99.0.0-py3-none-any.whl")
+
+
+def test_a_real_pip_cannot_reach_a_wheel_the_bundle_does_not_list(tmp_path: Path) -> None:
+    """D04-S1-01 : un ``links.html`` du bundle vers une wheel extérieure ne fait pas entrer une dépendance non listée.
+
+    La vraie commande de ``self update --from`` est exécutée par un vrai ``pip`` (venv neuf).
+    """
+    bundle, outside = tmp_path / "bundle", tmp_path / "outside"
+    bundle.mkdir()
+    outside.mkdir()
+    kit = _wheel(bundle, "grimoire-kit", "99.0.0", "Requires-Dist: depx\n")
+    depx = _wheel(outside, "depx", "1.0")
+    (bundle / "SHA256SUMS").write_text(_sums(kit), encoding="utf-8")  # depx n'est listée nulle part
+    (bundle / "links.html").write_text(f'<a href="{depx.as_uri()}">depx</a>', encoding="utf-8")
+
+    env_dir = tmp_path / "venv"
+    made = subprocess.run([sys.executable, "-m", "venv", str(env_dir)], capture_output=True, text=True, encoding="utf-8", timeout=120, check=False)
+    if made.returncode != 0:
+        pytest.skip(f"venv indisponible : {made.stderr[-200:]}")
+    python = str(env_dir / "bin" / "python")
+    real_run = subprocess.run
+    ran: list[subprocess.CompletedProcess[str]] = []
+
+    def run(cmd, **_kw):
+        if "install" in cmd:  # l'installation, pour de vrai, dans le venv jeté
+            done = real_run(
+                [python, *cmd[1:]], capture_output=True, text=True, encoding="utf-8", timeout=180, check=False,
+                env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "PIP_CONFIG_FILE": "/dev/null", "PIP_DISABLE_PIP_VERSION_CHECK": "1"},
+            )
+            ran.append(done)
+            return MagicMock(returncode=done.returncode)
+        return MagicMock(returncode=0)
+
+    with patch("grimoire.cli.app.is_online", side_effect=AssertionError("sonde interdite")), \
+         patch("grimoire.cli.app.__version__", "3.0.0"), patch("urllib.request.urlopen", _NoNetwork()), \
+         patch("shutil.which", side_effect=lambda _n: None), \
+         patch("grimoire.tools.install_trust.installed_extras", return_value=[]), \
+         patch("subprocess.run", side_effect=run):
+        result = runner.invoke(app, ["self", "update", "--from", str(bundle)])
+    probe = real_run([python, "-c", "import depx"], capture_output=True, text=True, encoding="utf-8", timeout=60, check=False)
+    assert probe.returncode != 0, "depx, absente de SHA256SUMS, s'est installée depuis l'extérieur du bundle : " + (ran[-1].stdout if ran else "")
+    assert result.exit_code != 0 and ran and ran[-1].returncode != 0  # pip ne résout pas depx : l'installation échoue
 
 
 def test_a_single_wheel_beside_its_sums_installs_too(tmp_path: Path) -> None:
@@ -240,7 +288,8 @@ def test_uv_and_pipx_get_their_own_offline_flags(tmp_path: Path) -> None:
         assert result.exit_code == 0, result.output
         install = next(c for c in calls if "install" in c)
         assert any(part.startswith(expected) for part in install), install
-        assert str(bundle) in " ".join(install)
+        assert str(bundle) not in " ".join(install)
+        assert "--find-links" in " ".join(install)
 
 
 def test_a_bundle_wheel_altered_after_the_sums_were_written_is_refused(tmp_path: Path) -> None:
