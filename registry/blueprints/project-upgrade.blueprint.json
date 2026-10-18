@@ -233,7 +233,7 @@
       "ref": "",
       "label": "Retrait — toujours un refus tracé",
       "description": "V2 — checkpoint forcé (jamais auto-décidé par la cascade, `--executor dispatch` s'arrête toujours ici en `waiting_host`) : tout retrait réel de mémoire ou d'override (au-delà d'un déplacement vers _archive/) doit remonter à l'humain nommément. Ce nœud n'exécute rien lui-même — sa seule présence dans le blueprint est le refus tracé que l'issue #490 demande.",
-      "config": {"checkpoint": {"destructive": true}},
+      "config": {"checkpoint": {"destructive": true, "plan": "upgrade-removals"}},
       "pins": [
         {
           "id": "in",

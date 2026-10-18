@@ -617,10 +617,23 @@ class FlowEngine:
 
         return CheckpointJournal(self._flows_root, run_id)
 
-    def _present(self, run_id: str, contract: NodeContract | None) -> None:
-        """Un checkpoint présenté émet son challenge, lié à la session courante (rien pour un autre kind)."""
+    def _projected_plan(self, blueprint: Mapping[str, Any], node_id: str) -> dict[str, Any] | None:
+        """Le plan projeté maintenant pour *node_id* (W2-11), ``None`` si le node n'en déclare pas."""
+        from grimoire.flows.attestation import plan_providers, project_plan
+
+        provider = plan_providers(blueprint).get(node_id)
+        return None if provider is None else project_plan(provider, self._project_root)
+
+    def _present(self, run_id: str, contract: NodeContract | None, blueprint: Mapping[str, Any]) -> None:
+        """Un checkpoint présenté émet son challenge, lié à la session courante (rien pour un autre kind).
+
+        Le challenge porte le plan projeté s'il est déclaré (W2-11) : c'est
+        contre lui que la décision sera comparée.
+        """
         if contract is not None and contract.kind == "checkpoint":
-            self._authority(run_id).issue_challenge(contract.node_id)
+            self._authority(run_id).issue_challenge(
+                contract.node_id, plan=self._projected_plan(blueprint, contract.node_id)
+            )
 
     # ── Commandes ────────────────────────────────────────────────────────────
 
@@ -677,7 +690,7 @@ class FlowEngine:
         )
 
         contract = contracts[order[0]]
-        self._present(wfi.id, contract)
+        self._present(wfi.id, contract, blueprint)
         (executor or InteractiveNodeExecutor()).execute(contract, context_pack=self._context_pack(wfi, blueprint_id))
         return wfi, contract
 
@@ -969,6 +982,7 @@ class FlowEngine:
                 output,
                 destructive=current_id in destructive_checkpoints(blueprint),
                 cap=max_amendments(blueprint).get(current_id, DEFAULT_MAX_AMENDMENTS),
+                plan=self._projected_plan(blueprint, current_id),
             )
             if gate is not None and gate.refusal:
                 faults.append(gate.refusal)
@@ -999,11 +1013,17 @@ class FlowEngine:
             wfi = self._kernel.advance_step(wfi.id, ctx, step_id=current_id)
         if faults:
             wfi = self._kernel.fail_step(wfi.id, ctx, step_id=current_id, reason="; ".join(faults))
-            if gate is not None and gate.decision in ("reject", "amend"):
-                # Un refus ou un amendement est une décision : il consomme son
-                # challenge, la présentation suivante en émet un neuf.
-                self._authority(run_id).record_decision(current_id, gate.decision, gate.reason, gate.attestation)
-            self._present(run_id, contract)
+            if gate is not None and (gate.decision in ("reject", "amend") or gate.drifted):
+                # Un refus, un amendement ou une dérive de plan (W2-11) est une
+                # décision : il consomme son challenge, la présentation suivante
+                # en émet un neuf (sur le plan courant, pour une dérive).
+                self._authority(run_id).record_decision(
+                    current_id,
+                    "plan_drifted" if gate.drifted else gate.decision,
+                    gate.refusal if gate.drifted else gate.reason,
+                    gate.attestation,
+                )
+            self._present(run_id, contract, blueprint)
             return ResumeOutcome(
                 ok=False,
                 finished=False,
@@ -1064,7 +1084,7 @@ class FlowEngine:
 
         assert next_id is not None  # finished est False => resume_outcome a nommé le node suivant
         next_contract = contracts[next_id]
-        self._present(run_id, next_contract)
+        self._present(run_id, next_contract, blueprint)
         # Le node suivant n'est pas encore ouvert (pas de advance_step ici) :
         # un crash juste après cet appel laisse le kernel en CHECKPOINTED, et
         # le prochain resume() rouvrira ce même node suivant en premier —

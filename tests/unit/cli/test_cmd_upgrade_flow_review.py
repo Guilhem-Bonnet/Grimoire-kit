@@ -98,3 +98,33 @@ def test_review_text_output_never_applies_a_decision(
     assert "checkpoint destructif en attente" in result.output
     assert "grimoire flow resume r-upgrade-2" in result.output
     assert list_proposals(cli_project, sync=False) == []
+
+
+def test_review_montre_le_plan_de_retrait_lie_au_checkpoint(
+    cli_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """W2-11 : ce que l'humain décide est ce que le challenge a haché — la revue l'affiche, sans rien écrire."""
+    from grimoire.flows.attestation import CheckpointJournal, plan_fingerprint
+
+    monkeypatch.setattr(
+        "grimoire.tools.flow_runs.list_flow_runs",
+        lambda _root, **_kw: [
+            {"runId": "r-upgrade-3", "blueprintId": "project-upgrade", "status": "checkpointed", "currentNode": "destructive"}
+        ],
+    )
+    items = ["archived:_grimoire/kit/agents/vieux.md", "orphan:.claude/agents/vieux.md"]
+    journal = CheckpointJournal(cli_project / "_grimoire-runtime-output" / "flows", "r-upgrade-3")
+    journal.issue_challenge(
+        "destructive", plan={"provider": "upgrade-removals", "sha256": plan_fingerprint(items), "items": items}
+    )
+
+    result = runner.invoke(app, ["upgrade-flow", "review", "--project-root", str(cli_project), "--json"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output.strip().splitlines()[-1])
+    assert payload["checkpoint_plan"]["items"] == items
+    assert payload["checkpoint_plan"]["sha256"] == plan_fingerprint(items)
+
+    text = runner.invoke(app, ["upgrade-flow", "review", "--project-root", str(cli_project)])
+    assert "plan de retrait présenté : 2 élément(s)" in text.output
+    assert "orphan:.claude/agents/vieux.md" in text.output

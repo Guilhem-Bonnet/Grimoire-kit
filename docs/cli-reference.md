@@ -912,6 +912,14 @@ existe ; le ledger le rejoue dans la tâche (`accepted_risks`) et `classify` la 
 au moins en V1 pour toute surface (`task show`, MCP `task_show`/`task_claim`,
 `dispatch_advice`, transition `needs_verification` de `task dispatch`).
 Limite : le compteur est celui du journal du run, `amend` non attesté compris.
+`config.checkpoint.plan` (W2-11, fournisseur connu : `upgrade-removals`) lie la
+décision à la liste projetée de ce qu'elle engage : hachée à la présentation
+(inscrite dans le challenge), recalculée à la décision. `approve` et
+`accept_as_is` dont le plan a changé — ou dont la projection est impossible —
+sont refusés en `plan_drifted` avec les écarts, sans consommer le tour humain ;
+le challenge suivant porte le plan courant et exige un nouveau tour. Limite :
+l'empreinte couvre la projection du fournisseur, pas ce qu'un exécuteur ferait
+après la décision. `grimoire upgrade-flow review` affiche le plan présenté.
 
 **`budget`** — plafond de coût déclaré (`config.budget.maxCostUsd`),
 abandon des passes optionnelles avant dépassement. `passes` est une liste

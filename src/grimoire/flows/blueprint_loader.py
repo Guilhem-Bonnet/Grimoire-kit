@@ -243,6 +243,14 @@ def _validate_genre_config(node: dict[str, Any]) -> None:
             raise GrimoireRuntimeError(
                 f"node={node_id} : config.checkpoint.max_amendments doit être un entier >= 1"
             )
+        # W2-11 : `plan` (optionnel) = fournisseur de la liste projetée à
+        # laquelle la décision est liée. Un nom connu, jamais deviné.
+        from grimoire.flows.attestation import PLAN_PROVIDERS
+
+        if "plan" in c and c["plan"] not in PLAN_PROVIDERS:
+            raise GrimoireRuntimeError(
+                f"node={node_id} : config.checkpoint.plan doit être l'un de {list(PLAN_PROVIDERS)} (reçu {c['plan']!r})"
+            )
     # "fanout" : aucune clé de config obligatoire — le plafond du nombre
     # d'éléments (pilot.max_fanout_n) est une politique de projet, vérifiée à
     # l'exécution (flows/dispatch_executor.py, DispatchExecutor._execute_fanout),

@@ -1164,3 +1164,36 @@ def test_flow_extract_reproduces_an_incomplete_upgrade_run(tmp_path_factory: pyt
     assert extracted["blueprint_id"] == f"{run_id.lower()}-extract" or "extract" in extracted["blueprint_id"]
     node_ids = {n["node_id"] for n in extracted["nodes"]}
     assert {"backup", "preview", "apply", "orphans", "overrides", "memory", "needs-hosts", "verify"} <= node_ids
+
+
+# ── plan de retrait du checkpoint destructif (W2-11) ─────────────────────────
+
+
+def test_projected_removals_voit_l_orphelin_puis_l_archive(tmp_path_factory: pytest.TempPathFactory) -> None:
+    """Le plan relève l'orphelin encore en place, puis le même fichier une fois archivé —
+    sans que l'empreinte ne dépende du dossier d'archive daté."""
+    from grimoire.flows.attestation import plan_fingerprint
+    from grimoire.tools.project_upgrade import archive_orphans, find_orphans, projected_removals
+
+    root = tmp_path_factory.mktemp("upgrade-plan") / "projet"
+    root.mkdir(parents=True)
+    created = _grimoire(["init", ".", "-y", "--name", "upgrade-plan"], root)
+    if not (root / "_grimoire" / "kit").is_dir():
+        pytest.skip(f"`grimoire init` indisponible ici : {created.stderr[-400:]}")
+
+    clean = projected_removals(root)
+    name = _seed_orphan(root)
+    with_orphan = projected_removals(root)
+
+    assert f"orphan:_grimoire/kit/agents/{name}.md" in with_orphan
+    assert f"orphan:.claude/agents/{name}.md" in with_orphan
+    assert plan_fingerprint(with_orphan) != plan_fingerprint(clean)
+
+    archive_orphans(root, find_orphans(root))
+    archived = projected_removals(root)
+
+    assert not any(i.startswith("orphan:") and name in i for i in archived)
+    assert f"archived:_grimoire/kit/agents/{name}.md" in archived
+    assert f"archived:.claude/agents/{name}.md" in archived
+    assert not any(i.endswith("README.md") for i in archived)
+    assert projected_removals(root) == archived  # relu sans effet de bord
