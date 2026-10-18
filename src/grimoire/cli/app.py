@@ -672,6 +672,10 @@ def doctor(
         from grimoire.core.task_unification_doctor import apply_task_unification_check
         apply_task_unification_check(target, results, fmt=fmt, console=console)
 
+    with _timed_phase("profile_floor"):  # 4octies. Plancher de profil committé (W2-07).
+        from grimoire.core.profile_floor_doctor import apply_profile_floor_check
+        apply_profile_floor_check(target, results, fmt=fmt, console=console)
+
     # 5. Config semantic validation
     if cfg:
         warnings = cfg.validate()
