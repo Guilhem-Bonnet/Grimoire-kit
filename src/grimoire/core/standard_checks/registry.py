@@ -114,6 +114,7 @@ CHECK_DIMENSIONS: dict[str, str] = {
     "browser.screenshot_required": "evidence_gates",
     "evidence.inventory_placeholder": "evidence_gates",
     "guard.error_recorded": "evidence_gates",
+    "policy.override_consumed": "evidence_gates",
     "evidence.pending_gate": "evidence_gates",
     "evidence.summary_placeholder": "evidence_gates",
     "gate.codegraph_fresh": "evidence_gates",

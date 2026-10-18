@@ -38,7 +38,17 @@ def decide_evidence_gate(hook: HookInput) -> Decision:
     The kit's own directive says a closure without green gates is an unfinished
     task. Said in a prompt, that is a suggestion; said here, it is the rule —
     this is the only decision in the package that can make a host refuse.
+
+    W2-06 : un refus sur une tâche est levé, une fois, par un contournement
+    tapé par l'humain dans la session qui tient la tâche
+    (:mod:`.gate_override`), journalisé avant d'être appliqué.
     """
+    from grimoire.hosts.decisions.gate_override import apply_override
+
+    return apply_override(hook, _decide_stop(hook))
+
+
+def _decide_stop(hook: HookInput) -> Decision:
     if hook.stop_active:
         # The host is already re-running us after a previous block. Blocking
         # again without limit is how a session becomes unexitable : W2-02 keeps

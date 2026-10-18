@@ -54,14 +54,18 @@ def decide_task_context(hook: HookInput) -> Decision:
     steering, steering_detail = steering_context(hook.project_root, active.task_id, hook.session_id)
     if active.is_fallback:
         context = no_task_context(profile, active.candidates, active.expired)
-        if steering:
-            context = f"{context}\n{steering}"
-        return Decision(outcome=Outcome.ALLOW, context=context, detail={**detail, **steering_detail})
-    link = link_session(hook, active)
-    context = (
-        f"[Grimoire] Tâche courante : {active.task_id} (profil {profile}). "
-        f"Toute preuve va dans _grimoire-output/evidence/{active.task_id}/."
+        link: dict[str, object] = {}
+    else:
+        link = link_session(hook, active)
+        context = (
+            f"[Grimoire] Tâche courante : {active.task_id} (profil {profile}). "
+            f"Toute preuve va dans _grimoire-output/evidence/{active.task_id}/."
+        )
+    # W2-06 : la phrase « Override Gate <tâche>: <raison> » — après le rattachement de session ci-dessus.
+    from grimoire.hosts.decisions.gate_override import record_override_request
+
+    override, override_detail = record_override_request(hook)
+    context = "\n".join(part for part in (context, steering, override) if part)
+    return Decision(
+        outcome=Outcome.ALLOW, context=context, detail={**detail, **link, **steering_detail, **override_detail}
     )
-    if steering:
-        context = f"{context}\n{steering}"
-    return Decision(outcome=Outcome.ALLOW, context=context, detail={**detail, **link, **steering_detail})

@@ -703,6 +703,10 @@ def _verify_guard_errors(root: Path, task_id: str, result: StandardVerificationR
     message = describe_guard_errors(root, task_id)
     if message:
         _add_check(result, "guard.error_recorded", "warning", message)
+    from grimoire.hosts.decisions.gate_override import describe_consumed_overrides  # W2-06
+
+    if overrides := describe_consumed_overrides(root, task_id):
+        _add_check(result, "policy.override_consumed", "warning", overrides)
 
 
 def _verify_evidence_pack(root: Path, task_id: str, result: StandardVerificationResult) -> None:
