@@ -173,12 +173,52 @@ def test_les_tiroirs_s_ouvrent_et_se_ferment_au_clavier(phone: Page) -> None:
     assert phone.locator("#panel-inspector").is_hidden(), "un seul tiroir à la fois"
 
 
+_FOCUS_ON_RAIL_JS = "() => document.activeElement?.matches('.rail-btn[data-panel=\"inspector\"]') ?? false"
+
+
+def _open_inspector_with_keyboard(page: Page) -> None:
+    page.locator('.rail-btn[data-panel="inspector"]').focus()
+    page.keyboard.press("Enter")
+    page.locator("#panel-inspector").wait_for(state="visible")
+    assert page.evaluate("() => document.activeElement?.classList.contains('panel-close')"), (
+        "le focus doit être entré dans le tiroir"
+    )
+
+
 def test_un_tiroir_se_ferme_d_un_appui_hors_de_lui(phone: Page) -> None:
-    phone.locator('.rail-btn[data-panel="inspector"]').click()
-    phone.locator("#panel-inspector").wait_for(state="visible")
+    """Un appui sur le voile referme le tiroir ET rend le focus au bouton du rail
+    qui l'avait ouvert, comme Échap et « Fermer ».
+
+    Défaut d'origine : le listener ``pointerdown`` fermait le panneau sans passer
+    par ``leaveDrawer()`` : le focus, resté dans le tiroir devenu masqué,
+    retombait sur ``<body>`` et ``drawerOpener`` gardait une référence périmée.
+    """
+    _open_inspector_with_keyboard(phone)
     # Le voile qui recouvre la toile reçoit l'appui (c'est lui que la personne touche).
     phone.mouse.click(10, 300)
     phone.locator("#panel-inspector").wait_for(state="hidden")
+    assert phone.evaluate(_FOCUS_ON_RAIL_JS), phone.evaluate(
+        "() => [document.activeElement?.tagName, document.activeElement?.className]"
+    )
+    assert phone.locator('.rail-btn[data-panel="inspector"]').get_attribute("aria-expanded") == "false"
+
+
+def test_un_tiroir_se_ferme_d_un_appui_tactile_hors_de_lui_et_rend_le_focus(browser: Browser, served: str) -> None:
+    """Même garde au toucher. L'appui doit tomber HORS du tiroir (x = 10) : le
+    tiroir de droite occupe de 46,8 à 390 px, un appui à 370 px est dedans."""
+    context = browser.new_context(viewport=PHONE, reduced_motion="reduce", has_touch=True)
+    try:
+        page = context.new_page()
+        page.goto(f"{served}/workspace/index.html", wait_until="domcontentloaded")
+        page.wait_for_selector("body[data-ready='1']", timeout=30_000)
+        _open_inspector_with_keyboard(page)
+        page.touchscreen.tap(10, 300)
+        page.locator("#panel-inspector").wait_for(state="hidden")
+        assert page.evaluate(_FOCUS_ON_RAIL_JS), page.evaluate(
+            "() => [document.activeElement?.tagName, document.activeElement?.className]"
+        )
+    finally:
+        context.close()
 
 
 def test_a_1440_px_les_panneaux_restent_en_colonnes(workspace: Page) -> None:

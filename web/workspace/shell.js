@@ -569,12 +569,24 @@ function buildRail() {
   // Un clic hors d'un panneau entrouvert le referme ; un panneau épinglé reste.
   // Sous 900 px il n'y a pas d'épinglage : tout tiroir ouvert se referme.
   document.addEventListener('pointerdown', (event) => {
+    if (event.target.closest('.rail-btn')) return;
+    if (isNarrow()) {
+      // Un tiroir se ferme comme à Échap : le focus retourne au bouton du rail.
+      const outside = Object.values(PANELS).some((elementId) => {
+        const el = $(elementId);
+        return el.dataset.state !== 'collapsed' && !el.contains(event.target);
+      });
+      if (outside) {
+        // Sans cela le navigateur déplace le focus vers la cible juste après
+        // l'appui et annule le retour au rail ; le clic qui suit reste émis.
+        event.preventDefault();
+        leaveDrawer();
+      }
+      return;
+    }
     for (const [id, elementId] of Object.entries(PANELS)) {
       const el = $(elementId);
-      const closable = el.dataset.state === 'peek' || (isNarrow() && el.dataset.state === 'pinned');
-      if (closable && !el.contains(event.target) && !event.target.closest('.rail-btn')) {
-        setPanel(id, 'collapsed', { persist: !isNarrow() });
-      }
+      if (el.dataset.state === 'peek' && !el.contains(event.target)) setPanel(id, 'collapsed');
     }
   });
 }
