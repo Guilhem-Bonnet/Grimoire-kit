@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -216,9 +217,12 @@ class TestGuardFailsClosedWhenTheBinaryIsMissing:
         (root / "harness.mjs").write_text(self.HARNESS, encoding="utf-8")
         empty = root / "empty-bin"
         empty.mkdir()
-        return subprocess.run(
-            [node, "harness.mjs"], cwd=root, env={"PATH": str(empty)}, capture_output=True, text=True, timeout=60, check=False
-        )
+        env = {"PATH": str(empty)}
+        # Node abandonne (abort 134) sous Windows sans SystemRoot : on le conserve, PATH reste vide.
+        for key in ("SYSTEMROOT", "SystemRoot", "WINDIR"):
+            if key in os.environ:
+                env[key] = os.environ[key]
+        return subprocess.run([node, "harness.mjs"], cwd=root, env=env, capture_output=True, text=True, timeout=60, check=False)
 
     def test_governed_project_refuses_the_tool(self, governed: Path) -> None:
         _emit(governed)
