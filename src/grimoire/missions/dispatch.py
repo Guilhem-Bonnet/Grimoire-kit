@@ -95,6 +95,8 @@ from grimoire.providers.state import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from grimoire.missions.schemas import MissionTask
     from grimoire.missions.service import TaskService
 
@@ -1115,6 +1117,7 @@ def run_dispatch(
     replay_key: str | None = None,
     max_cost_usd: float | None = None,
     cost_unknown_policy: str = POLICY_STOP,
+    check_runner: Callable[..., tuple[CheckResult, ...]] | None = None,
 ) -> DispatchReport:
     """Cascade la tâche *task_id* à travers les paliers de fournisseurs.
 
@@ -1306,7 +1309,7 @@ def run_dispatch(
                 continue  # fournisseur suivant, même palier
 
             record_success(root, provider.id, model)
-            check_results = _run_checks(
+            check_results = (check_runner or _run_checks)(  # W3-03 : `CheckGate.run` (approbation par empreinte)
                 checks,
                 project_root=root,
                 expect_exits=check_expect_exits,
