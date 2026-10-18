@@ -40,6 +40,12 @@ def _load_module() -> ModuleType:
 ta = _load_module()
 
 
+@pytest.fixture(autouse=True)
+def _no_real_claude_version(monkeypatch: pytest.MonkeyPatch) -> None:
+    """B-01 : ``claude --version`` ne part jamais en sous-processus réel depuis ces tests."""
+    monkeypatch.setattr(ta, "detect_claude_code_version", lambda **k: "9.9.9 (Claude Code)")
+
+
 # ── Fixtures : un catalogue synthétique, format Exercism minimal ───────────
 
 
@@ -284,7 +290,7 @@ def test_main_stops_without_recording_when_repo_contaminated(
     monkeypatch.setattr(ta, "_run_one", _contaminated)
     monkeypatch.setattr(ta, "write_report", _no_report)
 
-    rc = ta.main(["--full", "--workspace", str(workspace)])
+    rc = ta.main(["--full", "--model", "claude-test", "--workspace", str(workspace)])
 
     assert rc != 0
     assert len(attempts) == 1  # la campagne s'arrête au premier dépôt contaminé
@@ -917,7 +923,7 @@ def test_main_full_stops_cleanly_and_writes_a_partial_report_on_low_disk(
 
     monkeypatch.setattr(ta, "write_report", _fake_write_report)
 
-    rc = ta.main(["--full", "--workspace", str(workspace)])
+    rc = ta.main(["--full", "--model", "claude-test", "--workspace", str(workspace)])
 
     assert rc == 0
     assert written, "un rapport (même vide) doit être écrit à l'arrêt disque"
@@ -1398,7 +1404,7 @@ def test_main_full_only_replays_the_selected_arms(
             for run_index in range(ta.K_REPLAY):
                 record = ta.RunRecord(
                     task.task_id, task.language, arm, run_index, True, 0.1, 10, 10, 2, 5.0, "completed",
-                    recorded_at="2026-09-17T06:00:00+00:00",
+                    recorded_at="2026-09-17T06:00:00+00:00", model_id="claude-test",
                 )
                 carried_over_lines.append(json.dumps(record.to_dict()))
     (state_dir / "results.jsonl").write_text("\n".join(carried_over_lines) + "\n", encoding="utf-8")
@@ -1420,7 +1426,7 @@ def test_main_full_only_replays_the_selected_arms(
 
     monkeypatch.setattr(ta, "write_report", _fake_write_report)
 
-    rc = ta.main(["--full", "--resume", "--arms", "kit", "--label", "lot E", "--workspace", str(workspace)])
+    rc = ta.main(["--full", "--model", "claude-test", "--resume", "--arms", "kit", "--label", "lot E", "--workspace", str(workspace)])
 
     assert rc == 0
     assert called_arms and set(called_arms) == {"kit"}
@@ -2250,7 +2256,7 @@ def _ok_record(task: Any, arm: str, run_index: int, cost: float = 0.5) -> Any:
     return ta.RunRecord(
         task_id=task.task_id, language=task.language, arm=arm, run_index=run_index, success=True,
         total_cost_usd=cost, input_tokens=1, output_tokens=1, num_turns=1, wall_seconds=1.0,
-        terminated_reason="completed",
+        terminated_reason="completed", model_id="claude-test",
     )
 
 
@@ -2293,7 +2299,7 @@ def test_main_runs_security_guards_when_contamination_follows_a_real_run(
     monkeypatch.setattr(ta, "_run_one", _one)
     monkeypatch.setattr(ta, "write_report", _no_report)
 
-    rc = ta.main(["--full", "--workspace", str(workspace)])
+    rc = ta.main(["--full", "--model", "claude-test", "--workspace", str(workspace)])
 
     assert rc == 1
     assert len(attempts) == 2  # la campagne s'arrête au premier dépôt contaminé
@@ -2322,7 +2328,7 @@ def test_main_warns_before_erasing_a_completed_run_dir_without_resume(
         json.dumps(_ok_record(task, "nu", 0).to_dict()) + "\n", encoding="utf-8"
     )
 
-    ta.main(["--full", "--workspace", str(workspace)])
+    ta.main(["--full", "--model", "claude-test", "--workspace", str(workspace)])
 
     err = capsys.readouterr().err
     assert str(run_dir) in err
@@ -2346,7 +2352,7 @@ def test_main_full_tolerates_blank_lines_in_results_without_resume(
         json.dumps(_ok_record(task, "nu", 0).to_dict()) + "\n\n", encoding="utf-8"
     )
 
-    assert ta.main(["--full", "--workspace", str(workspace)]) == 0
+    assert ta.main(["--full", "--model", "claude-test", "--workspace", str(workspace)]) == 0
 
 
 def test_main_full_tolerates_blank_lines_in_results_with_resume(
@@ -2363,7 +2369,7 @@ def test_main_full_tolerates_blank_lines_in_results_with_resume(
         "\n" + json.dumps(_ok_record(task, "nu", 0).to_dict()) + "\n  \n", encoding="utf-8"
     )
 
-    assert ta.main(["--full", "--resume", "--workspace", str(workspace)]) == 0
+    assert ta.main(["--full", "--model", "claude-test", "--resume", "--workspace", str(workspace)]) == 0
 
 
 def test_main_names_the_truncated_results_line(
@@ -2378,7 +2384,7 @@ def test_main_names_the_truncated_results_line(
     good = json.dumps(_ok_record(task, "nu", 0).to_dict())
     (workspace / "state" / "results.jsonl").write_text(good + '\n{"task_id": "pyth', encoding="utf-8")
 
-    assert ta.main(["--full", "--workspace", str(workspace)]) == 1
+    assert ta.main(["--full", "--model", "claude-test", "--workspace", str(workspace)]) == 1
     err = capsys.readouterr().err
     assert "results.jsonl" in err
     assert "ligne 2" in err
@@ -2398,7 +2404,7 @@ def test_main_does_not_warn_for_interrupted_run_residue(
     run_dir.mkdir(parents=True)
     (run_dir / "TASK.md").write_text("résidu\n", encoding="utf-8")
 
-    ta.main(["--full", "--workspace", str(workspace)])
+    ta.main(["--full", "--model", "claude-test", "--workspace", str(workspace)])
 
     assert "effacé" not in capsys.readouterr().err
 
@@ -2411,11 +2417,11 @@ def test_task_repo_guards_live_in_their_own_module_and_script_does_not_grow() ->
     appel de ``hidden_reads`` avec le dossier de l'exercice canonique) + 12 lignes
     pour signaler les transcriptions non évaluées (W1-08b-T1-03 : import, clé
     ``unevaluated_runs`` du rapport, section Markdown, alerte stderr) + 6 lignes pour le coût
-    connu ou inconnu (B-00 : import, champ ``cost_known`` de ``RunOutcome`` et de ``RunRecord``, câblage) + 4 lignes pour ``--subset`` ; le détecteur et le rendu vivent dans ``hidden_reads.py``."""
+    connu ou inconnu (B-00 : import, champ ``cost_known`` de ``RunOutcome`` et de ``RunRecord``, câblage) + 4 lignes pour ``--subset`` + 78 lignes pour B-01 (champs de ``RunRecord``, option ``--model`` et son refus, pré-contrôle de ``results.jsonl``, ``selection.json``, câblage du rapport, garde opt-in ``--fail-on-saturated``) ; le détecteur et le rendu vivent dans ``hidden_reads.py``, la logique de modèle et de saturation dans ``model_pin.py``."""
     for name in ("ContaminatedTaskRepoError", "assert_task_repo_clean", "reset_run_dir"):
         assert getattr(ta, name).__module__ == "task_repo"
     assert (SCRIPT.parent / "task_repo.py").is_file()
-    assert len(SCRIPT.read_text(encoding="utf-8").splitlines()) <= 2584 + 36 + 12 + 6 + 4
+    assert len(SCRIPT.read_text(encoding="utf-8").splitlines()) <= 2584 + 36 + 12 + 6 + 4 + 78
 
 
 # ── W1-08b (#694) : run invalidé si la transcription lit un test caché ─────
@@ -2836,7 +2842,7 @@ def _invalid_record(task: Any, arm: str = "kit-gov", run_index: int = 2, *, succ
     return ta.RunRecord(
         task_id=task.task_id, language=task.language, arm=arm, run_index=run_index, success=success,
         total_cost_usd=0.4, input_tokens=1, output_tokens=1, num_turns=1, wall_seconds=1.0,
-        terminated_reason="completed", transcript_check="invalid", hidden_test_reads=reads,
+        terminated_reason="completed", transcript_check="invalid", hidden_test_reads=reads, model_id="claude-test",
     )  # fmt: skip
 
 
@@ -2968,7 +2974,7 @@ def test_main_announces_an_invalid_run_on_stderr(
     _spy_security_guards(monkeypatch)
     monkeypatch.setattr(ta, "_run_one", lambda task, arm, run_index, **kw: _invalid_record(task, arm, run_index))
 
-    ta.main(["--pilot", "--workspace", str(workspace)])
+    ta.main(["--pilot", "--model", "claude-test", "--workspace", str(workspace)])
 
     err = capsys.readouterr().err
     assert "[INVALIDE]" in err
@@ -3092,7 +3098,7 @@ def test_main_announces_an_unevaluated_run_on_stderr(
 
     monkeypatch.setattr(ta, "_run_one", _unevaluated)
 
-    ta.main(["--pilot", "--workspace", str(workspace)])
+    ta.main(["--pilot", "--model", "claude-test", "--workspace", str(workspace)])
 
     err = capsys.readouterr().err
     assert "[NON ÉVALUÉ]" in err
