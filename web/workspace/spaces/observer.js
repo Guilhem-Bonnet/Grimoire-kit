@@ -21,7 +21,7 @@
 // tâche dans l'espace Exécuter (`ctx.goto('executer', { task, view:
 // 'timeline' })`) — pure navigation, aucune lecture supplémentaire ici.
 
-import { icon } from '../shell.js';
+import { icon, stateIcon } from '../shell.js';
 
 const STYLE_ID = 'ob-styles';
 
@@ -64,7 +64,7 @@ function injectStyles() {
   document.head.append(style);
 }
 
-const dot = (cls) => Object.assign(document.createElement('span'), { className: 'dot' + (cls ? ' ' + cls : '') });
+const dot = (cls) => stateIcon(cls);
 function text(tag, className, value) {
   const node = document.createElement(tag);
   if (className) node.className = className;

@@ -86,7 +86,15 @@ export function icon(name, label) {
 }
 
 /** Icône d'un état (point + mot reste la règle : l'icône double le mot). */
-export const STATE_ICON = { ok: 'check', warn: 'alert', bad: 'cross', '': 'info' };
+export const STATE_ICON = { ok: 'check', warn: 'alert', bad: 'cross', acc: 'info', '': 'info' };
+
+/** Pastille d'état « icône + mot » : remplace l'ancien point coloré (`.dot`). */
+export function stateIcon(cls) {
+  const span = document.createElement('span');
+  span.className = 'sico' + (cls ? ' ' + cls : '');
+  span.append(icon(STATE_ICON[cls] ?? 'info'));
+  return span;
+}
 
 // ── État mémorisé par espace et par projet (spec §3.1) ──────────────────────
 

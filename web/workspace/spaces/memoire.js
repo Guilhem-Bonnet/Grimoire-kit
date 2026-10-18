@@ -26,7 +26,7 @@
 // API consommées : api.memoryStatus(), api.memoryOverview(projects),
 // api.memorySearch(q, projects).
 
-import { icon, STATE_ICON } from '../shell.js';
+import { icon, STATE_ICON, stateIcon } from '../shell.js';
 
 const STYLE_ID = 'me-styles';
 
@@ -65,7 +65,7 @@ function injectStyles() {
   document.head.append(style);
 }
 
-const dot = (cls) => Object.assign(document.createElement('span'), { className: 'dot' + (cls ? ' ' + cls : '') });
+const dot = (cls) => stateIcon(cls);
 function text(tag, className, value) {
   const node = document.createElement(tag);
   if (className) node.className = className;

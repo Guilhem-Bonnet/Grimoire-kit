@@ -48,7 +48,7 @@ const scope = { mode: 'project', state: '', slug: '', live: false };
 
 // Colonnes du standard, dans l'ordre normatif (grimoire.missions.board.BOARD_LIFECYCLE).
 const LIFECYCLE = ['proposed', 'ready', 'in_progress', 'blocked', 'review', 'accepted', 'released', 'archived'];
-import { icon } from '../shell.js';
+import { icon, stateIcon } from '../shell.js';
 
 const COLUMN_LABEL = {
   proposed: 'Proposée', ready: 'Prête', in_progress: 'En cours', blocked: 'Bloquée',
@@ -163,7 +163,7 @@ function injectStyles() {
   document.head.append(style);
 }
 
-const dot = (cls) => Object.assign(document.createElement('span'), { className: 'dot' + (cls ? ' ' + cls : '') });
+const dot = (cls) => stateIcon(cls);
 function text(tag, className, value) {
   const node = document.createElement(tag);
   if (className) node.className = className;

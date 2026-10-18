@@ -148,6 +148,35 @@ select {
   flex: none;
 }
 
+.sico {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  color: var(--ink3);
+}
+.sico .ico {
+  width: 13px;
+  height: 13px;
+}
+.sico.ok { color: var(--ok); }
+.sico.warn { color: var(--warn); }
+.sico.bad { color: var(--bad); }
+.sico.acc { color: var(--acc); }
+
+/* En-tête de tableau sobre : pas de soulignement ; une infobulle (data-term)
+ * s'indique par une icône discrète, pas par un pointillé de lien. */
+th[data-term] {
+  text-decoration: none;
+  cursor: help;
+}
+th .th-hint {
+  width: 11px;
+  height: 11px;
+  margin-left: 4px;
+  vertical-align: -1px;
+  opacity: 0.5;
+}
+
 .dot.ok {
   background: var(--ok);
 }
@@ -220,6 +249,7 @@ select {
   height: var(--h-ctl);
   display: inline-flex;
   align-items: center;
+  gap: 6px;
   padding: 0 var(--sp-3);
   border: 1px solid var(--line);
   border-radius: var(--r);

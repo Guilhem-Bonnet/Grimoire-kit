@@ -45,7 +45,8 @@ function injectStyles() {
   style.textContent = `
     .pl-sheet { padding: var(--sp-4) var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-5); }
     .pl-sheet > h2 { margin: 0; }
-    .pl-wrap { padding: var(--sp-4) var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-5); }
+    .pl-fleet-actions { display: flex; justify-content: flex-end; }
+.pl-wrap { padding: var(--sp-4) var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-5); }
     .pl-kpi { display: flex; border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); overflow: hidden; }
     .pl-kpi-item { flex: 1; padding: var(--sp-3) var(--sp-4); border-left: 1px solid var(--line); border-top: 3px solid var(--tone, transparent); }
     .pl-kpi-item:first-child { border-left: 0; }
@@ -336,15 +337,18 @@ function renderFleet(root, ctx, rows, onSelect, onRefresh) {
   if (onRefresh) {
     const refreshBtn = document.createElement('button');
     refreshBtn.type = 'button';
-    refreshBtn.className = 'btn';
-    refreshBtn.textContent = 'Rafraîchir la flotte';
+    refreshBtn.className = 'btn pl-refresh';
+    refreshBtn.append(icon('refresh'), 'Rafraîchir la flotte');
     refreshBtn.title = "Relit health() et memoryStatus() pour chaque projet, sans attendre le cache (60 s).";
     refreshBtn.addEventListener('click', () => {
       refreshBtn.disabled = true;
-      refreshBtn.textContent = 'Rafraîchissement…';
+      refreshBtn.replaceChildren(icon('refresh'), 'Rafraîchissement…');
       onRefresh();
     });
-    wrap.append(refreshBtn);
+    const actions = document.createElement('div');
+    actions.className = 'pl-fleet-actions';
+    actions.append(refreshBtn);
+    wrap.append(actions);
   }
 
   // Le cockpit ne scanne jamais le disque (#341) : un registre vide rend une
@@ -408,7 +412,12 @@ function renderFleet(root, ctx, rows, onSelect, onRefresh) {
   const headTerms = { Projet: 'projet', Kit: 'kit', Antifragilité: 'antifragilite', Mémoire: 'memoire', Flows: 'workflow' };
   for (const label of ['Projet', 'Kit', 'CI', 'Commits', 'Antifragilité', 'Mémoire', 'Flows', 'Dernier événement']) {
     const th = text('th', null, label);
-    if (headTerms[label]) th.dataset.term = headTerms[label];
+    if (headTerms[label]) {
+      th.dataset.term = headTerms[label];
+      const hint = icon('info');
+      hint.classList.add('th-hint');
+      th.append(hint);
+    }
     headRow.append(th);
   }
   thead.append(headRow);
