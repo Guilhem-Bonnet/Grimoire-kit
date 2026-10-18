@@ -415,3 +415,33 @@ def task_usage(traces: Sequence[TraceRecord], *, host_usage_available: bool | No
         ),
         "discrepancy": discrepancy,
     }
+
+
+#: Rendu d'un montant ou d'un total que le ledger ne permet pas d'affirmer.
+STATUSLINE_UNKNOWN = "n/a"
+
+
+def statusline_segment(traces: Sequence[TraceRecord], *, host_usage_available: bool | None = None) -> str:
+    """Le segment de statusline d'une tâche : ``<tokens> tok | <coût>``, sans rien inventer (W4-06, OBS-9).
+
+    Lit uniquement les traces du ledger (:func:`task_usage`), jamais le journal de
+    session : la statusline s'exécute à chaque rafraîchissement de l'hôte et ne doit
+    pas ouvrir un fichier qui grandit. Règles :
+
+    * ``n/a`` quand rien n'a été replié depuis le journal de l'hôte (une trace
+      déclarée à la main, ``reported``, ne fait pas le coût de la session) ;
+    * un coût exact s'écrit ``0.0070 USD`` ;
+    * une borne basse (une partie des appels non tarifée) s'écrit ``>= 0.0070 USD`` ;
+    * un coût inconnu s'écrit ``n/a``, jamais ``0``.
+    """
+    usage = task_usage(traces, host_usage_available=host_usage_available)
+    if usage["usage_source"] != SOURCE_CLAUDE_TRANSCRIPT or not usage["calls"]:
+        return STATUSLINE_UNKNOWN
+    status = usage["cost_status"]
+    if status == "exact":
+        cost_text = f"{usage['cost_usd']:.4f} USD"
+    elif status == "lower_bound":
+        cost_text = f">= {usage['cost_usd']:.4f} USD"
+    else:
+        cost_text = STATUSLINE_UNKNOWN
+    return f"{usage['total_tokens']} tok | {cost_text}"
