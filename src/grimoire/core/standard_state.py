@@ -24,6 +24,8 @@ from grimoire.bridges.schemas import HostId
 # le chemin des hooks, à chaque appel d'outil, et importer le moteur du standard
 # pour lire deux chemins et un identifiant coûtait 48 ms par appel.
 from grimoire.core.standard_generation import (
+    PROFILE_FLOOR_FILE,
+    PROFILE_LADDER,
     STANDARD_DIR,
     STANDARD_PROFILE_FILE,
     normalize_task_id,
@@ -215,15 +217,8 @@ def is_standard_enrolled(project_root: Path) -> bool:
     return (root / STANDARD_PROFILE_FILE).is_file() or (root / TASK_BOARD_RELPATH).is_file()
 
 
-def active_profile_id(project_root: Path, *, write_cache: bool = True) -> str:
-    """Profile a project is enrolled in, ``starter`` when it declares none.
-
-    *write_cache* defaults to ``True`` — the lifecycle hook path (and the CLI)
-    both want the derived JSON cache written back so the *next* call is
-    cheap. A caller that has promised no side effects at all (an MCP tool
-    annotated ``readOnlyHint``) passes ``False``: it still benefits from a
-    cache another caller warmed, it just never creates or repairs one itself.
-    """
+def declared_profile_id(project_root: Path, *, write_cache: bool = True) -> str:
+    """Le profil que ``standard-profile.yaml`` déclare, ``starter`` à défaut — plancher non appliqué."""
     root = project_root.resolve()
 
     def compute() -> str:
@@ -231,6 +226,51 @@ def active_profile_id(project_root: Path, *, write_cache: bool = True) -> str:
         return str(profile) if profile else "starter"
 
     return str(_cached_or_fresh(root, "profile_id", STANDARD_PROFILE_FILE, compute, write_cache=write_cache))
+
+
+def profile_floor_id(project_root: Path, *, write_cache: bool = True) -> str:
+    """Le plancher committé (``profile-floor.yaml``, clé ``floor``), ``""`` sans fichier (W2-07).
+
+    Un fichier présent dont la valeur n'est pas un profil connu (YAML cassé,
+    clé absente, faute de frappe) vaut ``governed`` : un plancher qu'on ne sait
+    pas lire ne doit pas se lire comme « pas de plancher » (fail-closed).
+    """
+    root = project_root.resolve()
+
+    def compute() -> str:
+        path = root / PROFILE_FLOOR_FILE
+        if not path.is_file():
+            return ""
+        floor = _load_mapping(path).get("floor")
+        return str(floor) if isinstance(floor, str) and floor in PROFILE_LADDER else "governed"
+
+    return str(_cached_or_fresh(root, "profile_floor", PROFILE_FLOOR_FILE, compute, write_cache=write_cache))
+
+
+def profile_below_floor(declared: str, floor: str) -> bool:
+    """Vrai quand *floor* existe et que *declared* est strictement plus léger (ou inconnu)."""
+    if not floor:
+        return False
+    rank = PROFILE_LADDER.index(declared) if declared in PROFILE_LADDER else -1
+    return rank < PROFILE_LADDER.index(floor)
+
+
+def active_profile_id(project_root: Path, *, write_cache: bool = True) -> str:
+    """Profile a project is enrolled in, ``starter`` when it declares none.
+
+    Le plancher committé (:func:`profile_floor_id`, W2-07) s'applique ici : un
+    profil déclaré sous le plancher est ignoré, le plancher le remplace. Tous
+    les lecteurs (hooks, CLI, MCP, cockpit) voient donc le même profil.
+
+    *write_cache* defaults to ``True`` — the lifecycle hook path (and the CLI)
+    both want the derived JSON cache written back so the *next* call is
+    cheap. A caller that has promised no side effects at all (an MCP tool
+    annotated ``readOnlyHint``) passes ``False``: it still benefits from a
+    cache another caller warmed, it just never creates or repairs one itself.
+    """
+    declared = declared_profile_id(project_root, write_cache=write_cache)
+    floor = profile_floor_id(project_root, write_cache=write_cache)
+    return floor if profile_below_floor(declared, floor) else declared
 
 
 #: Le Mission Ledger, source des tâches (ADR-005). Lu ici sans importer le

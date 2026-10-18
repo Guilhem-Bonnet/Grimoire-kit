@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from grimoire.core.standard_state import active_profile_id, is_standard_enrolled, resolve_active_task
+from grimoire.core.standard_state import is_standard_enrolled, resolve_active_task
 from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
 from grimoire.hosts.decisions.enrolment import link_session, no_task_context
+from grimoire.hosts.decisions.profile_floor import record_lowering_request, session_profile
 
 
 def decide_task_context(hook: HookInput) -> Decision:
@@ -39,7 +40,9 @@ def decide_task_context(hook: HookInput) -> Decision:
     if not is_standard_enrolled(hook.project_root):
         return Decision()
     active = resolve_active_task(hook.project_root, session_id=hook.session_id)
-    profile = active_profile_id(hook.project_root)
+    # W2-07 : la phrase « Lower Profile <profil>: <raison> » avant de lire le profil de ce tour.
+    lowering, lowering_detail = record_lowering_request(hook)
+    profile = session_profile(hook)
     detail = {"task_id": active.task_id, "profile": profile, "task_source": active.source}
     # Issue #638 lot B : ce que l'orchestrateur humain a dit depuis le cockpit
     # — consignes non livrées de la tâche active, annulation de celle que la
@@ -65,7 +68,7 @@ def decide_task_context(hook: HookInput) -> Decision:
     from grimoire.hosts.decisions.gate_override import record_override_request
 
     override, override_detail = record_override_request(hook)
-    context = "\n".join(part for part in (context, steering, override) if part)
+    context = "\n".join(part for part in (context, steering, override, lowering) if part)
     return Decision(
-        outcome=Outcome.ALLOW, context=context, detail={**detail, **link, **steering_detail, **override_detail}
+        outcome=Outcome.ALLOW, context=context, detail={**detail, **link, **steering_detail, **override_detail, **lowering_detail}
     )

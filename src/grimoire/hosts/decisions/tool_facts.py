@@ -306,6 +306,10 @@ class ToolFacts:
     #: against the project's current profile — this module has no notion of
     #: "current", only of "proposed".
     standard_profile_write: str | None = None
+    #: Même contrat pour ``_grimoire/standard/profile-floor.yaml`` (W2-07) : la
+    #: valeur du champ ``floor:`` proposée par un ``Write``/``Edit``, ``""`` pour
+    #: une commande shell dont le résultat ne se lit pas, ``None`` sans écriture.
+    profile_floor_write: str | None = None
 
     @property
     def family(self) -> str:
@@ -420,6 +424,11 @@ _STANDARD_PROFILE_SUFFIX = "_grimoire/standard/standard-profile.yaml"
 _PROFILE_FIELD_RE = re.compile(r'(?m)^[ \t]*profile[ \t]*:[ \t]*["\']?([A-Za-z0-9_-]+)')
 
 
+#: Le plancher de profil (W2-07) : même garde, fichier voisin, champ ``floor:``.
+_PROFILE_FLOOR_SUFFIX = "_grimoire/standard/profile-floor.yaml"
+_FLOOR_FIELD_RE = re.compile(r'(?m)^[ \t]*floor[ \t]*:[ \t]*["\']?([A-Za-z0-9_-]+)')
+
+
 def _targets_standard_profile_file(path: str) -> bool:
     """*path* is (or resolves to) the profile file — a ``Write``/``Edit`` target."""
     return path.replace("\\", "/").rstrip("/").endswith(_STANDARD_PROFILE_SUFFIX)
@@ -515,6 +524,19 @@ def classify_tool(tool_name: str, tool_input: dict[str, Any] | None = None) -> T
         # targeted-but-unreadable rather than guessing a direction.
         standard_profile_write = ""
 
+    profile_floor_write: str | None = None
+    if is_write and any(t.replace("\\", "/").rstrip("/").endswith(_PROFILE_FLOOR_SUFFIX) for t in targets):
+        floor_text = _first_str(payload, "content", "new_string")
+        floor_match = _FLOOR_FIELD_RE.search(floor_text) if floor_text else None
+        profile_floor_write = floor_match.group(1) if floor_match else ""
+    elif (
+        not is_write
+        and command
+        and mutation is not MutationClass.READ_ONLY
+        and _PROFILE_FLOOR_SUFFIX in command.replace("\\", "/")
+    ):
+        profile_floor_write = ""
+
     return ToolFacts(
         kind=kind,
         mutation=mutation,
@@ -523,4 +545,5 @@ def classify_tool(tool_name: str, tool_input: dict[str, Any] | None = None) -> T
         destructive_reason=destructive_reason,
         secret_target=secret_target,
         standard_profile_write=standard_profile_write,
+        profile_floor_write=profile_floor_write,
     )

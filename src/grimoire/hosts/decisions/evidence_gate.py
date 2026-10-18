@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from grimoire.core.standard_checks.evidence_journal import record_guard_error
-from grimoire.core.standard_state import active_profile_id, is_standard_enrolled, resolve_active_task
+from grimoire.core.standard_state import is_standard_enrolled, resolve_active_task
 from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
 from grimoire.hosts.decisions.enrolment import (
     BLOCKING_PROFILES,
@@ -21,6 +21,7 @@ from grimoire.hosts.decisions.enrolment import (
     stop_scope,
 )
 from grimoire.hosts.decisions.gate_summary import _gate_summary
+from grimoire.hosts.decisions.profile_floor import session_profile
 
 #: Board states that owe no evidence artifact yet. A task parked here passes
 #: every gate by construction — see ``check_evidence_gates``.
@@ -59,7 +60,7 @@ def _decide_stop(hook: HookInput) -> Decision:
 
     active = stop_scope(hook, resolve_active_task(hook.project_root, session_id=hook.session_id))
     task_id = active.task_id
-    profile = active_profile_id(hook.project_root)
+    profile = session_profile(hook)
     if active.is_fallback:
         no_task = _no_task_closure(hook, profile, active.candidates, active.expired)
         if no_task is not None:
@@ -207,7 +208,7 @@ def _continued_stop(hook: HookInput) -> Decision:
         if not is_standard_enrolled(hook.project_root):
             return skipped
         active = resolve_active_task(hook.project_root, session_id=hook.session_id)
-        profile = active_profile_id(hook.project_root)
+        profile = session_profile(hook)
         if active.is_fallback or profile not in _BLOCKING_PROFILES:
             return skipped
         task_id = active.task_id

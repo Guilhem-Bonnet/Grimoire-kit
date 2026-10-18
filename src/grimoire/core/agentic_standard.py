@@ -73,6 +73,7 @@ from grimoire.core.standard_generation import (
     CONTEXT_DIR,
     DECISION_DIR,
     EVIDENCE_DIR,
+    PROFILE_LADDER,
     SCORE_DIR,
     STANDARD_DIR,
     STANDARD_PROFILE_FILE,
@@ -86,7 +87,6 @@ from grimoire.data import framework_path
 PROFILE_MAP_PATH = Path("agentic-standard/profile-map.yaml")
 CAPABILITY_MAP_PATH = Path("agentic-standard/capability-map.yaml")
 NEEDS_CATALOG_PATH = Path("agentic-standard/needs-catalog.yaml")
-PROFILE_LADDER = ("starter", "controlled", "orchestrated", "governed", "production")
 EVENT_DIR = Path("_grimoire-output/events")
 KNOWLEDGE_DIR = Path("_grimoire-output/knowledge")
 
