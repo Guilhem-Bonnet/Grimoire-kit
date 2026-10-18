@@ -26,6 +26,7 @@ from grimoire.tools.project_registry import DEFAULT_SCAN_DEPTH, looks_grimoire, 
 from grimoire.tools.request_guard import (
     check_host,
     check_mutation,
+    drain_body,
     has_body,
     inject_session_token,
     new_session_token,
@@ -98,6 +99,7 @@ def make_handler(api: ForgeAPI) -> type[BaseHTTPRequestHandler]:
             )
             if refused:
                 self._error(refused[1], refused[0])
+                drain_body(self.headers, self.rfile)
                 return False
             return True
 

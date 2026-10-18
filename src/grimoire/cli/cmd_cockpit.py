@@ -60,6 +60,7 @@ from grimoire.tools.project_update import update_project
 from grimoire.tools.request_guard import (
     check_host,
     check_mutation,
+    drain_body,
     has_body,
     inject_session_token,
     new_session_token,
@@ -298,6 +299,7 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         )
         if refused:
             self._send_json(refused[0], {"ok": False, "error": refused[1]})
+            drain_body(self.headers, self.rfile)
             return False
         return True
 

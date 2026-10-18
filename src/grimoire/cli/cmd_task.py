@@ -495,6 +495,66 @@ def task_attach(
     console.print(f"[green]✓[/green] Session {sid} rattachée à {task.id}")
 
 
+@task_app.command("renew")
+def task_renew(
+    ctx: typer.Context,
+    task_id: Annotated[str, typer.Argument()],
+    epoch: Annotated[int | None, typer.Option("--epoch", help="Epoch du bail tenu (défaut : celui du claim de --actor).")] = None,
+    project_root: _PROJECT_ROOT = Path(),
+    ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
+    actor: _ACTOR = "cli",
+) -> None:
+    """Renouvelle le bail d'une tâche tenue ; un epoch périmé est refusé."""
+    from grimoire.core.exceptions import GrimoireError
+
+    service = _service(project_root, ledger_root)
+    _require_task(service, task_id)
+    try:
+        task = service.renew(task_id, actor, epoch=epoch)
+    except GrimoireError as exc:
+        console.print(f"[red]✗[/red] {exc}")
+        raise typer.Exit(1) from exc
+    claim = task.claim
+    _emit_task(ctx, task, f"bail renouvelé, epoch {claim.lease_epoch}, plafond {claim.expires_at or '-'}" if claim else "")
+
+
+@task_app.command("reap")
+def task_reap(
+    ctx: typer.Context,
+    fenced_host: Annotated[
+        list[str] | None,
+        typer.Option("--fenced-host", help="Hôte dont le frein d'outil est vérifié : ses baux perdus sont relancés (répétable)."),
+    ] = None,
+    apply: Annotated[bool, typer.Option("--apply", help="Écrire les décisions (sinon : les montrer seulement).")] = False,
+    project_root: _PROJECT_ROOT = Path(),
+    ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
+    actor: _ACTOR = "tick",
+) -> None:
+    """Récolte les baux perdus : relance (running → ready) ou différée nommée. Sans --apply, rien n'est écrit."""
+    from grimoire.core.exceptions import GrimoireError
+
+    service = _service(project_root, ledger_root)
+    try:
+        report = service.reap(fenced_hosts=frozenset(fenced_host or ()), apply=apply, actor=actor)
+    except GrimoireError as exc:
+        console.print(f"[red]✗[/red] {exc}")
+        raise typer.Exit(1) from exc
+    if _fmt(ctx) == "json":
+        typer.echo(json.dumps({**report.to_dict(), "applied": apply}, indent=2, ensure_ascii=False))
+        return
+    if report.clock == "unknown":
+        console.print("[yellow]![/yellow] Horloge incohérente (plus tôt que le dernier événement) : rien n'est récolté.")
+        return
+    if not report.decisions:
+        console.print("[green]OK[/green] Aucun bail perdu.")
+        return
+    for d in report.decisions:
+        suite = f"relancée, réadmise après {d.retry_at}" if d.action == "ready" else f"différée ({d.cause})"
+        console.print(f"  - {d.task_id} epoch {d.epoch} : {suite}, tentatives {d.attempts}")
+    if not apply:
+        console.print("[dim]Aperçu : relancer avec --apply pour écrire.[/dim]")
+
+
 @task_app.command("move")
 def task_move(
     ctx: typer.Context,

@@ -19,6 +19,7 @@ Le module ne dépend d'aucun serveur : il lit un objet d'en-têtes et rend un re
 
 from __future__ import annotations
 
+import contextlib
 import hmac
 import secrets
 from typing import TYPE_CHECKING
@@ -152,3 +153,19 @@ def has_body(headers: _Headers) -> bool:
         return int(headers.get("Content-Length") or 0) > 0
     except ValueError:
         return True
+
+
+def drain_body(headers: _Headers, rfile: object, limit: int = 1 << 20) -> None:
+    """Consomme le corps d'une requête refusée, borné, sans le interpréter.
+
+    Répondre sans lire un corps déjà envoyé puis fermer la connexion provoque,
+    sous Windows, un RST qui fait échouer le client avant qu'il lise le refus.
+    Le corps n'est jamais décodé ni utilisé ; chunked n'est pas drainé.
+    """
+    try:
+        n = min(int(headers.get("Content-Length") or 0), limit)
+    except ValueError:
+        return
+    if n > 0:
+        with contextlib.suppress(OSError, ValueError):
+            rfile.read(n)  # type: ignore[attr-defined]
