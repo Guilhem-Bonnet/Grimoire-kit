@@ -243,6 +243,8 @@ def host_sync(
             console.print(f"    [green][OK][/green] {label}")
         for label in result.skipped:
             console.print(f"    [yellow][!][/yellow] {label} — fichier non généré, préservé (utilisez --force)")
+        for label in result.removed:
+            console.print(f"    [yellow][-][/yellow] {label} — {'retirerait' if dry_run else 'retiré'} : la règle source n'existe plus")
         for degradation in result.degradations:
             console.print(f"    [dim]dégradé[/dim] {degradation.surface} — repli : {degradation.fallback}")
     if prune_disabled:
@@ -273,8 +275,8 @@ def host_status(
             _HostStatus(
                 host=host_id.value,
                 display_name=profile.display_name,
-                in_sync=not pending.written and not pending.skipped,
-                pending=list(pending.written),
+                in_sync=not pending.written and not pending.skipped and not pending.removed,
+                pending=[*pending.written, *pending.removed],
                 conflicts=list(pending.skipped),
                 blocking_hooks=[h.event.value for h in surface.hooks if h.enforcement is Enforcement.BLOCKING],
                 unsupported_events=[h.event.value for h in surface.hooks if not profile.supports_event(h.event)],

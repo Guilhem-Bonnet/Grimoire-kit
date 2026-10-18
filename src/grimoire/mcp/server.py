@@ -540,6 +540,7 @@ def grimoire_standard_score(project_path: str = ".", profile: str = "", task_id:
             "warnings": result.warnings,
             "errors": result.errors,
             "dimensions": result.dimensions,
+            **result.rules,
             "output_path": str(result.output_path),
         }, indent=2, ensure_ascii=False)
     except (GrimoireError, ValueError, FileNotFoundError, OSError) as exc:
@@ -1040,8 +1041,8 @@ def grimoire_host_status(project_path: str = ".") -> str:
         hosts.append({
             "host": host_id.value,
             "display_name": profile.display_name,
-            "in_sync": not pending.written and not pending.skipped,
-            "pending": pending.written,
+            "in_sync": not pending.written and not pending.skipped and not pending.removed,
+            "pending": [*pending.written, *pending.removed],
             "conflicts": pending.skipped,
             "degradations": [d.to_dict() for d in plan.degradations],
             "capability_gaps": [g.surface for g in gaps_for(profile)],

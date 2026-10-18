@@ -94,6 +94,11 @@ class EmitPlan:
     files: tuple[EmittedFile, ...] = ()
     merges: tuple[JsonMerge, ...] = ()
     degradations: tuple[Degradation, ...] = ()
+    #: Motifs (relatifs à la racine) des fichiers générés par ce plan dont la
+    #: disparition de la source doit retirer le fichier : un fichier marqué qui
+    #: correspond à un motif sans être dans ``files`` est périmé (règle retirée,
+    #: portée renommée) et ``apply_plan`` le supprime. Jamais un fichier sans marqueur.
+    owned_globs: tuple[str, ...] = ()
 
     def labels(self) -> list[str]:
         return [f.relpath.as_posix() for f in self.files] + [m.relpath.as_posix() for m in self.merges]
@@ -105,6 +110,7 @@ class EmitResult:
     written: list[str] = field(default_factory=list)
     unchanged: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
+    removed: list[str] = field(default_factory=list)
     degradations: list[Degradation] = field(default_factory=list)
     dry_run: bool = False
 
@@ -119,6 +125,7 @@ class EmitResult:
             "written": list(self.written),
             "unchanged": list(self.unchanged),
             "skipped": list(self.skipped),
+            "removed": list(self.removed),
             "degradations": [d.to_dict() for d in self.degradations],
         }
 
@@ -215,7 +222,21 @@ def apply_plan(plan: EmitPlan, project_root: Path, *, dry_run: bool = False, for
             dest.write_text(rendered, encoding="utf-8")
         result.written.append(label)
 
+    _remove_stale(plan, root, result, dry_run=dry_run)
     return result
+
+
+def _remove_stale(plan: EmitPlan, root: Path, result: EmitResult, *, dry_run: bool) -> None:
+    """Retirer les fichiers marqués que ``plan.owned_globs`` désigne et que le plan n'émet plus."""
+    planned = {f.relpath.as_posix() for f in plan.files}
+    for pattern in plan.owned_globs:
+        for stale in sorted(root.glob(pattern)):
+            label = stale.relative_to(root).as_posix()
+            if label in planned or stale.is_symlink() or not stale.is_file() or not _is_managed(stale):
+                continue
+            if not dry_run:
+                stale.unlink()
+            result.removed.append(label)
 
 
 class Emitter:

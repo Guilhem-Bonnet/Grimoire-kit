@@ -894,6 +894,8 @@ def test_gate_check_strict_exits_2_for_every_profile(tmp_path: Path, profile_id:
             {
                 "schema", "ok", "profile", "score", "threshold", "warnings",
                 "errors", "dimensions", "output_path",
+                # W6-08 : règles de pack comptées à part (ajout, le schéma reste v1).
+                "rules_enforced", "rules_advisory", "rules_failing", "rules_unevaluated", "rules_unclassified",
             },
         ),
         (
@@ -1351,7 +1353,11 @@ def _emitted_check_ids() -> set[str]:
                core / "standard_checks" / "claim_ledger_verify.py",
                core / "standard_checks" / "no_tests_collected.py",
                core / "standard_checks" / "gate_codegraph.py",
-               core / "standard_checks" / "criterion_coverage.py"]
+               core / "standard_checks" / "criterion_coverage.py",
+               # W4-05 : dispatch.cost_slo extrait de verifiers.py (ratchet de taille).
+               core / "standard_checks" / "dispatch_cost_slo.py",
+               # W6-03 : règles parsables par couche, extrait de verifiers.py (ratchet de taille).
+               core / "standard_checks" / "rules_check.py"]
     trees = {path: ast.parse(path.read_text(encoding="utf-8")) for path in
              [*modules, core / "standard_checks" / "base.py"]}
 
