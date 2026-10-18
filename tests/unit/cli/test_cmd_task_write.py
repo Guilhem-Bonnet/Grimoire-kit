@@ -112,6 +112,11 @@ def test_scenario_complet_add_claim_move_block_move_close(projet: Path) -> None:
 
     prouve(projet, tid)
     assert run(projet, "move", tid, "--to", "needs_verification").exit_code == 0
+    # W3-01 : sans reçu de revue, needs_verification ne se ferme pas.
+    sans_recu = run(projet, "close", tid)
+    assert sans_recu.exit_code == 1 and "review.receipt_missing" in sans_recu.output
+    recu = run(projet, "review", tid, "--verdict", "READY", "--reviewer", "relecteur")
+    assert recu.exit_code == 0, recu.output
     ferme = run(projet, "close", tid)
     assert ferme.exit_code == 0, ferme.output
 
@@ -142,6 +147,13 @@ def test_un_verdict_echoue_ne_ferme_pas(projet: Path) -> None:
     res = run(projet, "close", tid)
     assert res.exit_code == 1
     assert "failed" in res.output
+
+
+def test_review_not_ready_sans_commande_est_refuse(projet: Path) -> None:
+    tid = ajoute(projet)
+    res = run(projet, "review", tid, "--verdict", "NOT-READY", "--finding", "le nommage est confus")
+    assert res.exit_code == 1
+    assert "review.finding_ungrounded" in res.output
 
 
 def test_la_machine_a_etats_refuse_avant_le_gate(projet: Path) -> None:

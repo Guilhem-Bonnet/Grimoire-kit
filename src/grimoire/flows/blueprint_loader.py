@@ -195,6 +195,12 @@ def _validate_genre_config(node: dict[str, Any]) -> None:
                 f"node={node_id} : config.verifyPanel.angles doit être une liste de {k} chaînes non vides "
                 "— un angle distinct par vérificateur, jamais moins que k"
             )
+        panel_class = vp.get("class")
+        if panel_class is not None and panel_class not in ("V1", "V2"):
+            raise GrimoireRuntimeError(
+                f"node={node_id} : config.verifyPanel.class doit valoir V1 (majorité des votes exprimés) "
+                f"ou V2 (unanimité), trouvé {panel_class!r}"
+            )
     elif kind == "loop-until-dry":
         lud = config.get("loopUntilDry") or {}
         if not _require_positive_int(lud.get("maxRounds"), minimum=1):

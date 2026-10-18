@@ -35,6 +35,7 @@ from grimoire.mcp.server import (
     task_update,
 )
 from grimoire.missions.ledger import MissionLedger
+from grimoire.missions.review_receipt import write_receipt
 from grimoire.missions.schemas import TaskState
 from grimoire.missions.service import DEFAULT_LEDGER_RELPATH
 
@@ -213,6 +214,7 @@ def test_un_client_mcp_liste_reclame_deplace_et_clot_une_tache_reelle(projet: Pa
     async def cloture(session: ClientSession) -> None:
         revue = await call(session, "task_update", task_id=tid, action="move", to="needs_verification", project_path=str(projet))
         assert revue["board"] == "review"
+        write_receipt(projet, tid, "READY", reviewer_id="relecteur")  # W3-01 : la clôture exige le reçu
         clos = await call(session, "task_update", task_id=tid, action="close", project_path=str(projet))
         assert clos["transition"] == "needs_verification → closed"
 
