@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import multiprocessing
 import os
+import shutil
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -32,6 +33,8 @@ from grimoire.missions.lease import (
 )
 from grimoire.missions.ledger import MissionLedger
 from grimoire.missions.schemas import TaskClaim, TaskState
+from grimoire.missions.service import TaskService
+from grimoire.missions.waiting import parse_until
 
 FENCED = frozenset({"claude-code-cli"})
 
@@ -356,16 +359,21 @@ def test_attempts_derived_from_ledger(tmp_path: Path) -> None:
     clock.now = datetime.now(UTC)
     decision = _lose_and_reap(ledger, clock, tid)
     assert (decision.action, decision.cause, decision.written) == ("defer", "retry_exhausted", True)
-    assert ledger.reap(fenced_hosts=FENCED).decisions[0].written is False
+    assert ledger.reap(fenced_hosts=FENCED).decisions == ()  # K6 : la différée s'est garée en waiting, la récolte n'y revient pas
     task = ledger.get_task(tid)
-    assert task is not None and task.status is TaskState.CLAIMED
+    assert task is not None and task.status is TaskState.WAITING
+    assert task.waiting is not None and task.waiting.reason == "human"
+    assert task.waiting.question is not None and task.waiting.question.kind == "retry_exhausted"
     assert ledger.attempts(tid) == 3
 
     # Un dispatch rouge compte, un rate_limit non ; une réponse humaine remet à zéro.
     ledger.append_event("task.dispatched", tid, "task", "dispatch", {"task_id": tid, "verdict": "red"})
     ledger.append_event("task.dispatched", tid, "task", "dispatch", {"task_id": tid, "verdict": "rate_limit"})
     assert ledger.attempts(tid) == 4
-    ledger.append_event("task.human_answered", tid, "task", "guilhem", {"task_id": tid})
+    # Seul le canal humain remet le compteur à zéro : un agent qui écrit l'événement lui-même n'y gagne rien.
+    ledger.append_event("task.human_answered", tid, "task", "agent-a", {"task_id": tid, "origin": "agent"})
+    assert ledger.attempts(tid) == 4
+    ledger.append_event("task.human_answered", tid, "task", "guilhem", {"task_id": tid, "origin": "human"})
     assert ledger.attempts(tid) == 0 and ledger.backoff_until(tid) is None
     assert backoff_delay(0) == timedelta(0)
     assert sorted(p.name for p in (tmp_path / "ledger").iterdir() if not p.name.startswith(".")) == [
@@ -387,11 +395,13 @@ def test_reap_under_quota_waits_not_retries(tmp_path: Path) -> None:
     [decision] = ledger.reap(fenced_hosts=FENCED).decisions
     assert (decision.action, decision.cause, decision.attempts, decision.written) == ("defer", "quota", 0, True)
     task = ledger.get_task(tid)
-    assert task is not None and task.status is TaskState.RUNNING  # jamais relancée dans le mur du forfait
+    assert task is not None and task.status is TaskState.WAITING  # jamais relancée dans le mur du forfait : garée (K6)
+    assert task.waiting is not None and task.waiting.reason == "quota"
+    assert parse_until(task.waiting.until) is not None  # datée (K6-S1-01) : le tick la lève, aucune sonde n'est requise
     assert ledger.attempts(tid) == 0
     deferred = [e for e in ledger.list_events(tid) if e.event_type == ledger_mod.REAP_DEFERRED_EVENT]
     assert [e.payload["cause"] for e in deferred] == ["quota"]
-    ledger.reap(fenced_hosts=FENCED)  # la suivante ne répète pas la même différée
+    assert ledger.reap(fenced_hosts=FENCED).decisions == ()  # la suivante ne répète pas la même différée
     assert len([e for e in ledger.list_events(tid) if e.event_type == ledger_mod.REAP_DEFERRED_EVENT]) == 1
 
 
@@ -427,7 +437,9 @@ def test_unfenced_host_is_never_relaunched(tmp_path: Path) -> None:
     [decision] = ledger.reap(fenced_hosts=FENCED).decisions
     assert (decision.action, decision.cause) == ("defer", "resume_unfenced")
     task = ledger.get_task(tid)
-    assert task is not None and task.status is TaskState.RUNNING
+    assert task is not None and task.status is TaskState.WAITING  # jamais relancée : garée, la question est à l'humain
+    assert task.waiting is not None and task.waiting.question is not None
+    assert task.waiting.question.kind == "resume_unfenced"
 
 
 # ── renouvellement ──────────────────────────────────────────────────────────
@@ -567,9 +579,11 @@ def test_cli_renew_and_reap(tmp_path: Path) -> None:
     write_lease(lease_path(ledger._root, tid2), LeaseFile(tid2, 1, (datetime.now(UTC) - timedelta(hours=1)).isoformat()))
     res = runner.invoke(task_app, ["reap", "--apply", *common])
     assert res.exit_code == 0 and "différée (resume_unfenced)" in res.output
+    assert MissionLedger(ledger._root).get_task(tid2).status is TaskState.WAITING  # type: ignore[union-attr]  # K6 : garée, plus récoltée
+    # Aperçu : la prochaine passe n'a plus rien à juger sur une tâche garée.
     res = runner.invoke(task_app, ["reap", *common], obj={"output": "json"})
     assert res.exit_code == 0, res.output
-    assert json.loads(res.output)["decisions"][0]["cause"] == "resume_unfenced"
+    assert json.loads(res.output)["decisions"] == []
 
 
 def test_cli_reap_says_clock_unknown_and_lock_refusal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -677,9 +691,10 @@ def test_reap_deferred_once_per_epoch_and_cause_even_when_the_cause_alternates(t
     for i in range(5):
         ledger.reap(quota_blocked=lambda _t, flag=(i % 2 == 0): flag)  # quota, hors quota, quota…
     deferred = [e for e in ledger.list_events(tid) if e.event_type == ledger_mod.REAP_DEFERRED_EVENT]
-    assert sorted((e.payload["lease_epoch_lost"], e.payload["cause"]) for e in deferred) == [
-        (1, "quota"), (1, "resume_unfenced"),
-    ]
+    # K6 : la première différée gare la tâche (waiting), la récolte n'y revient plus.
+    assert sorted((e.payload["lease_epoch_lost"], e.payload["cause"]) for e in deferred) == [(1, "quota")]
+    task = ledger.get_task(tid)
+    assert task is not None and task.status is TaskState.WAITING
 
 
 # ── CA : la sortie de needs_verification rend le bail (K2-S2-01) ────────────
@@ -765,7 +780,7 @@ def test_interrupted_hand_back_is_not_relaunched_on_an_unfenced_host(
     [decision] = report.decisions
     assert (decision.action, decision.cause) == ("defer", "resume_unfenced")
     task = MissionLedger(root).get_task(tid)
-    assert task is not None and task.status is TaskState.RUNNING  # pas relancée : la décision reste à l'humain
+    assert task is not None and task.status is TaskState.WAITING  # pas relancée : la décision reste à l'humain (K6)
 
 
 def test_interrupted_hand_back_still_honours_quota_and_exhausted_attempts(
@@ -777,10 +792,22 @@ def test_interrupted_hand_back_still_honours_quota_and_exhausted_attempts(
         _fail_cancel_write(patch)
         with pytest.raises(OSError, match="No space"):
             ledger.transition_task(tid, TaskState.CANCELLED, actor_id="human")
+    # Deux fois le même état interrompu : l'un sous quota, l'autre sans.
+    shutil.copytree(tmp_path / "ledger", tmp_path / "ledger2")
+    # Sous quota (écrit, K6) : la tâche est garée avec une échéance, puis le tick la rend quand le quota est levé.
     [decision] = MissionLedger(tmp_path / "ledger").reap(fenced_hosts=FENCED, quota_blocked=lambda _t: True).decisions
     assert (decision.action, decision.cause) == ("defer", "quota")
+    parked = MissionLedger(tmp_path / "ledger").get_task(tid)
+    assert parked is not None and parked.status is TaskState.WAITING and parked.waiting is not None
+    due = parse_until(parked.waiting.until)
+    assert parked.waiting.reason == "quota" and due is not None
+    service = TaskService(tmp_path, ledger_root=tmp_path / "ledger")
+    assert service.wake_due(now=due - timedelta(seconds=1))[0].action == "keep"
+    assert service.wake_due(now=due)[0].action == "wake"
+    back = MissionLedger(tmp_path / "ledger").get_task(tid)
+    assert back is not None and back.status is TaskState.READY  # le quota levé, la tâche revient (K6-S1-01)
     # Sans quota, sur un hôte fencé, la tâche est relancée comme pour tout bail perdu.
-    [decision] = MissionLedger(tmp_path / "ledger").reap(fenced_hosts=FENCED).decisions
+    [decision] = MissionLedger(tmp_path / "ledger2").reap(fenced_hosts=FENCED).decisions
     assert (decision.action, decision.cause) == ("ready", "fence_pending")
 
 
@@ -802,3 +829,18 @@ def test_lease_file_without_origin_reads_as_empty_and_is_not_a_reap(tmp_path: Pa
     path.write_text(json.dumps(raw), encoding="utf-8")
     lease = read_lease(path)
     assert lease is not None and lease.origin == ""
+
+
+def test_cli_note_writes_a_progress_event_and_refuses_a_task_nobody_holds(tmp_path: Path) -> None:
+    """K5-S1-02 : `task note` est le producteur réel de `task.progress_noted`."""
+    runner = CliRunner()
+    ledger = MissionLedger(tmp_path / "_grimoire-runtime-output" / "ledger")
+    tid = _running(ledger, actor="cli")
+    common = ["--project-root", str(tmp_path)]
+    res = runner.invoke(task_app, ["note", tid, "tests écrits", *common])
+    assert res.exit_code == 0, res.output
+    fresh = MissionLedger(tmp_path / "_grimoire-runtime-output" / "ledger")
+    assert [e.event_type for e in fresh.list_events(tid)][-1] == "task.progress_noted"
+    ledger.transition_task(tid, TaskState.CANCELLED, actor_id="cli")
+    res = runner.invoke(task_app, ["note", tid, "trop tard", *common])
+    assert res.exit_code == 1 and "refusée" in res.output

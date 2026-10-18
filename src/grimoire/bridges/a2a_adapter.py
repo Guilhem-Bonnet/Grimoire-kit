@@ -204,6 +204,9 @@ _GRIMOIRE_TO_A2A: dict[TaskState, str] = {
     TaskState.CANCELLED: A2ATaskState.CANCELED,
     # État inconnu de ce lecteur : une tâche figée attend un humain, elle ne « travaille » pas.
     TaskState.UNKNOWN: A2ATaskState.INPUT_REQUIRED,
+    # K6 : une attente nommée. Seule celle d'un humain demande une entrée à l'appelant ;
+    # ci, quota et pause se résolvent sans lui (voir ``export_task_status``).
+    TaskState.WAITING: A2ATaskState.INPUT_REQUIRED,
 }
 
 
@@ -403,6 +406,8 @@ class A2AAdapter:
     def export_task_status(self, task: MissionTask) -> dict[str, Any]:
         """Export a Grimoire task as an A2A-compatible status response."""
         a2a_state = _GRIMOIRE_TO_A2A.get(task.status, A2ATaskState.WORKING)
+        if task.status is TaskState.WAITING and not (task.waiting and task.waiting.is_human):
+            a2a_state = A2ATaskState.WORKING
         return {
             "id": task.id,
             "status": {

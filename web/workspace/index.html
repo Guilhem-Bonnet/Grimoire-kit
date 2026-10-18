@@ -23,7 +23,7 @@
 
   <!-- Barre d'application : marque, projet, espaces, palette -->
   <header id="appbar">
-    <div id="brand">GRIMOIRE</div>
+    <div id="brand"><svg class="ico" aria-hidden="true"><use href="icons.svg#grimoire"/></svg><span>GRIMOIRE</span></div>
     <div class="row">
       <button class="chip chip-pick" id="project-chip" type="button" data-term="projet"
               title="Changer de projet ou naviguer (ouvre la palette)">
@@ -36,7 +36,7 @@
     <div class="grow"></div>
     <div class="row">
       <button class="chip" id="palette-open" type="button" style="width:250px;justify-content:space-between">
-        <span>Rechercher ou commander</span><span class="kbd">⌘K</span>
+        <span class="row" style="gap:6px"><svg class="ico ico-s" aria-hidden="true"><use href="icons.svg#search"/></svg>Rechercher ou commander</span><span class="kbd">⌘K</span>
       </button>
     </div>
   </header>
@@ -53,7 +53,7 @@
         <span class="grow"></span>
         <span class="kbd">1</span>
         <button class="pin" type="button" aria-pressed="true" aria-label="Épingler l'explorateur" data-pin="explorer">
-          <svg class="ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" style="width:14px;height:14px"><rect x="5" y="9" width="10" height="8" rx="1.5"/><path d="M7 9V6.5a3 3 0 0 1 6 0V9"/></svg>
+          <svg class="ico ico-s" aria-hidden="true"><use href="icons.svg#lock"/></svg>
         </button>
       </div>
       <div class="panel-body tree" id="explorer-body"></div>
@@ -85,7 +85,7 @@
         <span class="grow"></span>
         <span class="kbd">4</span>
         <button class="pin" type="button" aria-pressed="true" aria-label="Épingler l'inspecteur" data-pin="inspector">
-          <svg class="ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" style="width:14px;height:14px"><rect x="5" y="9" width="10" height="8" rx="1.5"/><path d="M7 9V6.5a3 3 0 0 1 6 0V9"/></svg>
+          <svg class="ico ico-s" aria-hidden="true"><use href="icons.svg#lock"/></svg>
         </button>
       </div>
       <div class="panel-body" id="inspector-body"></div>
@@ -100,7 +100,7 @@
         <span class="grow"></span>
         <span class="kbd">3</span>
         <button class="pin" type="button" aria-pressed="false" aria-label="Épingler les preuves" data-pin="evidence">
-          <svg class="ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" style="width:14px;height:14px"><rect x="5" y="9" width="10" height="8" rx="1.5"/><path d="M7 9V6.5a3 3 0 0 1 6 0V9"/></svg>
+          <svg class="ico ico-s" aria-hidden="true"><use href="icons.svg#lock"/></svg>
         </button>
       </div>
       <div class="panel-body" id="evidence-body"></div>

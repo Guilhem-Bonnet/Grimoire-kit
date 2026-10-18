@@ -15,6 +15,8 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Any
 
+from grimoire.missions.waiting import Waiting
+
 _log = logging.getLogger(__name__)
 
 #: Durée par défaut avant qu'un claim n'expire de lui-même — assez pour une
@@ -71,6 +73,11 @@ class TaskState(StrEnum):
     FAILED = "failed"
     CLOSED = "closed"
     CANCELLED = "cancelled"
+    #: Une attente nommée (K6, issue #771) : ``MissionTask.waiting`` dit pourquoi
+    #: (``human``, ``ci``, ``quota``, ``paused``), jusqu'à quand et, pour un humain,
+    #: la question posée. Le claim est gardé (reprise sur place, même epoch) tant
+    #: que personne n'a rendu le bail.
+    WAITING = "waiting"
     #: Jamais écrit : ce que lit un lecteur plus ancien devant un état qu'il ne
     #: connaît pas (écrit par une version plus récente). La valeur brute reste
     #: dans ``MissionTask.raw_status`` ; aucune transition ne part de cet état
@@ -504,6 +511,9 @@ class MissionTask:
     #: (``status is TaskState.UNKNOWN``) ; ``""`` sinon. Réécrite telle quelle
     #: par ``to_dict`` : relire puis réécrire ne perd pas l'état d'origine.
     raw_status: str = ""
+    #: L'attente nommée quand ``status is TaskState.WAITING`` (K6) ; ``None`` sinon.
+    #: Posée par la transition vers ``waiting``, effacée par toute autre.
+    waiting: Waiting | None = None
 
     @property
     def is_unknown_state(self) -> bool:
@@ -573,6 +583,8 @@ class MissionTask:
             d["accepted_risks"] = [dict(risk) for risk in self.accepted_risks]
         if self.checks:
             d["checks"] = [check.to_dict() for check in self.checks]
+        if self.waiting is not None:
+            d["waiting"] = self.waiting.to_dict()
         return d
 
     @classmethod
@@ -611,6 +623,7 @@ class MissionTask:
             accepted_risks=tuple(dict(risk) for risk in d.get("accepted_risks", [])),
             raw_status=raw_status if status is TaskState.UNKNOWN else "",
             checks=tuple(TaskCheck.from_dict(c) for c in d.get("checks", [])),
+            waiting=Waiting.from_dict(d["waiting"]) if isinstance(d.get("waiting"), dict) else None,
         )
 
 

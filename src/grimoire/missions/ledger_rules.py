@@ -1,0 +1,163 @@
+"""Règles d'attente et de dépendances du ledger, sorties de ``ledger.py`` (plafond de 1500 lignes).
+
+Fonctions sans état : la garde des transitions vers/depuis ``waiting`` (K6), l'attente que
+la récolte pose à la place d'un silence, et la lecture du graphe de dépendances ``blocks``
+(W5-01). Le ledger les appelle sous son verrou ; rien ici n'écrit.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from datetime import datetime
+from typing import TYPE_CHECKING, Any
+
+from grimoire.core.exceptions import GrimoireMissionError
+from grimoire.missions.lease import MAX_ATTEMPTS, backoff_delay
+from grimoire.missions.schemas import DependencyKind, MissionTask, TaskState
+from grimoire.missions.session_link import resume_command
+from grimoire.missions.waiting import Question, ResumeHint, Waiting, new_question_id
+
+if TYPE_CHECKING:
+    from grimoire.missions.ledger import LeaseView
+
+__all__ = ["blocks_path", "deferred_waiting", "replay_steering", "unclosed_blockers", "unfenced_question", "waiting_guard"]
+
+def waiting_guard(
+    task: MissionTask,
+    to_state: TaskState,
+    extra_payload: dict[str, Any] | None,
+    lease_epoch: int | None,
+    waker: bool,
+    attested: bool = False,
+) -> None:
+    """Les trois règles de l'état ``waiting`` (K6, §2.1), tenues ici pour qu'aucune surface ne les contourne.
+
+    - vers ``waiting`` : l'attente est écrite, nommée et valide (``task ask`` / ``task wait``) ;
+    - ``waiting → ready`` : le tick seul (:meth:`wake`), jamais un geste ``move`` ;
+    - ``waiting → running`` : la même session, au même epoch — reprise sur place, sauf
+      ``waiting(human)`` : une question en attente (``task ask``, ou posée par la récolte) ne
+      se lève que par la réponse humaine (``ready``), jamais par un agent — hors *attested* (:meth:`resume_attested`).
+    """
+    if to_state is TaskState.WAITING:
+        raw = (extra_payload or {}).get("waiting")
+        problem = Waiting.from_dict(raw).problem() if isinstance(raw, dict) else "aucune attente décrite"
+        if problem:
+            raise GrimoireMissionError(
+                f"Transition vers waiting refusée pour {task.id} : {problem} "
+                "(poser l'attente par `grimoire task ask` ou `grimoire task wait`)"
+            )
+    if task.status is TaskState.WAITING and to_state is TaskState.READY and not waker:
+        raise GrimoireMissionError(
+            f"Transition refusée pour {task.id} : waiting → ready est réservé au tick "
+            "(`grimoire task wake`) ; une réponse humaine (`grimoire task answer`) le déclenche"
+        )
+    if (
+        task.status is TaskState.WAITING and to_state is TaskState.RUNNING
+        and task.waiting is not None and task.waiting.reason == "human" and not attested
+    ):
+        asked = task.waiting.question.id if task.waiting.question is not None else "?"
+        raise GrimoireMissionError(
+            f"Reprise refusée pour {task.id} : waiting(human) attend la réponse de l'humain (question {asked}) ; "
+            "seule `grimoire task answer` (canal humain) la lève — un agent ne reprend pas sur sa propre question"
+        )
+    if task.status is TaskState.WAITING and to_state is TaskState.RUNNING and lease_epoch is None:
+        raise GrimoireMissionError(
+            f"Reprise refusée pour {task.id} : waiting → running est la reprise sur place de la même session, "
+            "au même epoch — présenter l'epoch tenu (`grimoire task resume --epoch`)"
+        )
+
+def deferred_waiting(
+    task: MissionTask, view: LeaseView, cause: str, attempts: int, question: str, moment: datetime,
+    reopens: datetime | None = None,
+) -> Waiting:
+    """L'attente que la récolte pose à la place d'un silence : quota, ou une décision humaine nommée (§2.3, §2.6).
+
+    Le quota porte une échéance : *reopens* si elle est future, sinon un délai
+    ``backoff_delay`` des tentatives (au moins un cran) — le tick la rend alors ``ready``.
+    """
+    hint = ResumeHint(
+        session_id=view.session_id, host=view.host,
+        resume_command=resume_command(view.host, view.session_id),
+    )
+    since = moment.isoformat()
+    if cause == "quota":
+        due = reopens if reopens is not None and reopens > moment else moment + backoff_delay(max(attempts, 1))
+        return Waiting("quota", due.isoformat(), None, hint, since)
+    if cause == "retry_exhausted":
+        text = (
+            f"{task.id} a perdu son bail {attempts} fois (plafond {MAX_ATTEMPTS}) : "
+            "la relancer encore, ou l'abandonner ?"
+        )
+        options, kind = ("réessayer", "abandonner"), "retry_exhausted"
+    else:
+        text, options, kind = question, ("reprendre", "abandonner"), "resume_unfenced"
+    return Waiting("human", "", Question(new_question_id(), kind, text, options, "tick", since), hint, since)
+
+def unfenced_question(view: LeaseView) -> str:
+    """La question de §2.4 : un hôte sans frein vérifié ne se relance pas, on demande (K3)."""
+    who = f"la session {view.session_id}" if view.session_id else f"la session de {view.actor_id}"
+    version = f" {view.host_version}" if view.host_version else ", version inconnue"
+    return f"{who} (hôte {view.host}{version}, sans frein) ne donne plus signe ; reprendre ?"
+
+def unclosed_blockers(tasks: Mapping[str, MissionTask], task: MissionTask) -> list[str]:
+    """Les dépendances ``blocks`` de *task* qui ne sont pas closes, chacune avec son état."""
+    out: list[str] = []
+    for dep in task.dependencies:
+        if dep.kind is not DependencyKind.BLOCKS:
+            continue
+        target = tasks.get(dep.target)
+        if target is None:
+            out.append(f"{dep.target} (inconnue du ledger)")
+        elif target.status is not TaskState.CLOSED:
+            out.append(f"{dep.target} ({target.status.value})")
+    return out
+
+def blocks_path(tasks: Mapping[str, MissionTask], start: str, goal: str) -> list[str]:
+    """Un chemin de dépendances ``blocks`` de *start* vers *goal* (``[start, …, goal]``), ``[]`` s'il n'y en a pas."""
+    stack = [(start, [start])]
+    seen: set[str] = set()
+    while stack:
+        node, path = stack.pop()
+        if node == goal:
+            return path
+        if node in seen:
+            continue
+        seen.add(node)
+        current = tasks.get(node)
+        if current is None:
+            continue
+        for dep in current.dependencies:
+            if dep.kind is DependencyKind.BLOCKS:
+                stack.append((dep.target, [*path, dep.target]))
+    return []
+
+
+def replay_steering(tasks: dict[str, MissionTask], evt_type: str, payload: dict[str, Any]) -> None:
+    """Pilotage humain (issue #638) : priorité et journal de consignes.
+
+    Chaque événement ne touche qu'un champ dérivé de la tâche ; le texte
+    d'une consigne n'est jamais réécrit — livraison et accusé de réception
+    s'ajoutent comme horodatages sur l'entrée existante.
+    """
+    tid = payload.get("task_id", "")
+    task = tasks.get(tid)
+    if task is None:
+        return
+    data = task.to_dict()
+    if evt_type == "task.prioritized":
+        data["priority"] = payload.get("to_priority", "")
+    elif evt_type == "task.directive_added":
+        data["directives"] = [*data.get("directives", []), dict(payload.get("directive", {}))]
+    elif evt_type == "task.directive_delivered":
+        ids, at = set(payload.get("directive_ids", [])), str(payload.get("delivered_at", ""))
+        data["directives"] = [
+            {**d, "delivered_at": d.get("delivered_at") or at} if d.get("id") in ids else d
+            for d in data.get("directives", [])
+        ]
+    elif evt_type == "task.directive_acknowledged":
+        did, at = payload.get("directive_id"), str(payload.get("acknowledged_at", ""))
+        data["directives"] = [
+            {**d, "acknowledged_at": d.get("acknowledged_at") or at} if d.get("id") == did else d
+            for d in data.get("directives", [])
+        ]
+    tasks[tid] = MissionTask.from_dict(data)
