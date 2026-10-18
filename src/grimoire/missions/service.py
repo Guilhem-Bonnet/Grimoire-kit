@@ -266,8 +266,20 @@ class TaskService:
         return self.list_tasks(mission_id, TaskState.READY.value)
 
     def gate(self, task: MissionTask, target: TaskState) -> GateVerdict:
-        """Le verdict du gate pour cette transition, sans rien écrire."""
-        return check_transition(self.project_root, task, board_status_of(task.status), board_status_of(target))
+        """Le verdict du gate pour cette transition, sans rien écrire.
+
+        La clôture d'une tâche relue (``needs_verification → closed``) exige en
+        plus le reçu de revue (W3-01, :mod:`grimoire.missions.review_receipt`),
+        quel que soit le profil : sans reçu frais, le refus est bloquant.
+        """
+        verdict = check_transition(self.project_root, task, board_status_of(task.status), board_status_of(target))
+        if task.status is TaskState.NEEDS_VERIFICATION and target is TaskState.CLOSED:
+            from grimoire.missions.review_receipt import check_receipt
+
+            refusal = check_receipt(self.project_root, task)
+            if refusal is not None:
+                return GateVerdict("review_receipt", "hard_fail", (refusal, *verdict.refusals))
+        return verdict
 
     # ── Écriture ───────────────────────────────────────────────────────────
 

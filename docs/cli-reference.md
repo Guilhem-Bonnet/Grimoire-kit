@@ -415,7 +415,8 @@ prochain export l'écrase.
 | `grimoire task claim <id> [--actor <qui>] [--host <où>]` | Réclamer une tâche prête (`ready → claimed`) |
 | `grimoire task move <id> --to <état>` | Déplacer une tâche, si la machine à états et le gate le permettent |
 | `grimoire task block <id> --reason "<motif>"` | Bloquer en disant pourquoi |
-| `grimoire task close <id>` | Fermer une tâche vérifiée (verdict accepté exigé) |
+| `grimoire task close <id>` | Fermer une tâche vérifiée (verdict accepté exigé ; depuis `needs_verification`, reçu de revue frais exigé) |
+| `grimoire task review <id> --verdict READY\|NOT-READY [--finding "résumé :: commande"]` | Écrire le reçu de revue, lié à l'empreinte présente de l'arbre (`_grimoire-output/reviews/<id>/review-receipt.json`) |
 | `grimoire task prioritize <id> --to low\|medium\|high\|critical [--reason "<motif>"]` | Changer la priorité (issue #638) — l'historique reste au ledger, le board se retrie |
 | `grimoire task comment <id> "<texte>" [--kind comment\|directive]` | Poser un commentaire ou une consigne ; la session qui tient la tâche la lit au prochain `UserPromptSubmit` |
 | `grimoire task cancel <id> --reason "<motif>" [--force]` | Annuler avec sa raison (obligatoire) ; tenue par une autre session, elle exige `--force` |
@@ -854,7 +855,7 @@ Paramétrage refusé nommément **au chargement du blueprint**
 | Genre | `ref` | `config.<genre>` requis |
 | --- | --- | --- |
 | `fanout` | sous-flow modèle | — (voir ci-dessous) |
-| `verify-panel` | sous-flow vérificateur | `k` (entier ≥ 2), `angles` (liste de `k` chaînes) |
+| `verify-panel` | sous-flow vérificateur | `k` (entier ≥ 2), `angles` (liste de `k` chaînes) ; `class` optionnelle (`V1` ou `V2`, défaut `V2`) |
 | `loop-until-dry` | sous-flow | `maxRounds` (entier ≥ 1) |
 | `judge` | sous-flow candidat | `n` (entier ≥ 2), `angles` (liste de `n` chaînes) |
 | `checkpoint` | ignorée (chaîne vide par convention) | — |
@@ -874,7 +875,13 @@ l'issue refuse.
 
 **`verify-panel`** — k vérificateurs indépendants (`config.verifyPanel.k`),
 chacun sous un angle distinct (`.angles`, instruit de chercher à réfuter,
-jamais de confirmer par défaut), majorité requise. Coût = k tentatives,
+jamais de confirmer par défaut). Chaque vérificateur vote par un `verdict`
+structuré (`READY` ou `NOT-READY`) dans sa sortie ; sans verdict, il
+s'abstient (finir n'est pas approuver). `config.verifyPanel.class` : `V1`
+exige la majorité stricte des votes exprimés, `V2` (défaut) leur unanimité.
+Si les votes exprimés ne sont pas une majorité de k, le node rend
+`inconclusive` ; des `tree_fingerprint` différentes parmi les votants le
+rendent `invalid`. Coût = k tentatives,
 **toujours** — jamais une cascade qui s'arrête au premier consensus
 apparent : un plafond de coût qui empêche de compléter les k tentatives
 referme le node en `cost_capped`, jamais sur un vote partiel (« jamais un

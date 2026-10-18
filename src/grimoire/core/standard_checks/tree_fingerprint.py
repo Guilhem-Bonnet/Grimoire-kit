@@ -41,6 +41,7 @@ import hashlib
 import shlex
 import shutil
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
 
 __all__ = ["compute_tree_fingerprint"]
@@ -129,7 +130,19 @@ def _content_digest(path: Path) -> str | None:
     return digest.hexdigest()
 
 
-def _content_entries(root: Path, rel_path: str) -> list[str]:
+def _excluded(rel_posix: str, parts: tuple[str, ...], extra: Sequence[str]) -> bool:
+    """*rel_posix* est-il hors empreinte : sous un dossier exclu par nom, ou sous un chemin de *extra* ?"""
+    if any(part in _EXCLUDED_DIRS for part in parts):
+        return True
+    return any(rel_posix == prefix or rel_posix.startswith(f"{prefix}/") for prefix in extra)
+
+
+def _extra_pathspecs(extra: Sequence[str]) -> tuple[str, ...]:
+    """Les exclusions d'un appelant, chemins relatifs à la racine : le chemin lui-même et tout ce qu'il contient."""
+    return tuple(spec for prefix in extra for spec in (f":(exclude,glob){prefix}", f":(exclude,glob){prefix}/**"))
+
+
+def _content_entries(root: Path, rel_path: str, extra: Sequence[str] = ()) -> list[str]:
     """``(chemin, sha256 du contenu)`` pour *rel_path* — un fichier, ou récursivement un dossier.
 
     Les caches d'outillage restent exclus même s'ils apparaissent à
@@ -144,7 +157,7 @@ def _content_entries(root: Path, rel_path: str) -> list[str]:
         if not path.is_file():
             continue
         rel = path.relative_to(root)
-        if any(part in _EXCLUDED_DIRS for part in rel.parts):
+        if _excluded(rel.as_posix(), rel.parts, extra):
             continue
         digest = _content_digest(path)
         if digest is not None:
@@ -175,17 +188,18 @@ def _toolchain_identity(root: Path) -> str:
     return f"test-runner:{need.command}\n{executable or 'absent'}"
 
 
-def _git_fingerprint(root: Path) -> str | None:
+def _git_fingerprint(root: Path, extra: Sequence[str] = ()) -> str | None:
     head = _run_git(root, "rev-parse", "HEAD")
     if head is None:
         return None
-    status = _run_git(root, "status", "--porcelain=v1", "-z", "--", ".", *_EXCLUDE_PATHSPECS)
-    diff = _run_git(root, "diff", "HEAD", "--", ".", *_EXCLUDE_PATHSPECS)
+    specs = (*_EXCLUDE_PATHSPECS, *_extra_pathspecs(extra))
+    status = _run_git(root, "status", "--porcelain=v1", "-z", "--", ".", *specs)
+    diff = _run_git(root, "diff", "HEAD", "--", ".", *specs)
     if status is None or diff is None:
         return None
     untracked_entries: list[str] = []
     for rel_path in _untracked_paths(status):
-        untracked_entries.extend(_content_entries(root, rel_path))
+        untracked_entries.extend(_content_entries(root, rel_path, extra))
     digest = hashlib.sha256()
     digest.update(head.encode("utf-8"))
     digest.update(status.encode("utf-8"))
@@ -195,13 +209,13 @@ def _git_fingerprint(root: Path) -> str | None:
     return digest.hexdigest()
 
 
-def _fs_fingerprint(root: Path) -> str:
+def _fs_fingerprint(root: Path, extra: Sequence[str] = ()) -> str:
     entries: list[str] = []
     for path in sorted(root.rglob("*")):
         if not path.is_file():
             continue
         rel = path.relative_to(root)
-        if any(part in _EXCLUDED_DIRS for part in rel.parts):
+        if _excluded(rel.as_posix(), rel.parts, extra):
             continue
         digest = _content_digest(path)
         if digest is not None:
@@ -212,8 +226,15 @@ def _fs_fingerprint(root: Path) -> str:
     return fingerprint.hexdigest()
 
 
-def compute_tree_fingerprint(root: Path) -> str:
+def compute_tree_fingerprint(root: Path, *, extra_excludes: Sequence[str] = ()) -> str:
     """L'empreinte de l'arbre de travail, calculée maintenant — jamais mise en cache.
+
+    *extra_excludes* : chemins relatifs à *root* (POSIX, fichier ou dossier)
+    ignorés en plus des exclusions communes, dans les deux modes. Le reçu de
+    revue (:mod:`grimoire.missions.review_receipt`, W3-01) y met l'état que le
+    kit réécrit lui-même entre le reçu et le gate (journal des tâches, board
+    projeté) : sans quoi le premier geste du kit périmerait le reçu. Vide par
+    défaut — l'empreinte d'un run de test ne change pas.
 
     Git-aware (voir le docstring du module) ; retombe sur le parcours du
     système de fichiers quand *root* n'est pas un dépôt git, ou quand git
@@ -231,8 +252,9 @@ def compute_tree_fingerprint(root: Path) -> str:
     de test pourrait légitimement écrire sous les sources (fichiers générés
     commités par la suite, par exemple).
     """
+    extra = tuple(prefix.strip("/") for prefix in extra_excludes if prefix.strip("/"))
     if _is_git_repo(root):
-        fingerprint = _git_fingerprint(root)
+        fingerprint = _git_fingerprint(root, extra)
         if fingerprint is not None:
             return fingerprint
-    return _fs_fingerprint(root)
+    return _fs_fingerprint(root, extra)
