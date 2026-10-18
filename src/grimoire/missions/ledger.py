@@ -41,10 +41,19 @@ from grimoire.missions.lease import (
     read_lease,
     write_lease,
 )
+from grimoire.missions.ledger_rules import (
+    blocks_path,
+    deferred_waiting,
+    replay_steering,
+    unclosed_blockers,
+    unfenced_question,
+    waiting_guard,
+)
 from grimoire.missions.schemas import (
     DEFAULT_CLAIM_TTL_SECONDS,
     ORIGIN_AGENT,
     ORIGIN_HUMAN,
+    DependencyKind,
     Incident,
     IncidentSeverity,
     IncidentStatus,
@@ -60,13 +69,10 @@ from grimoire.missions.schemas import (
     TaskState,
     TaskType,
 )
-from grimoire.missions.session_link import canonical_host, resume_command
+from grimoire.missions.session_link import canonical_host
 from grimoire.missions.waiting import (
     HUMAN_ANSWERED_EVENT,
-    Question,
-    ResumeHint,
-    Waiting,
-    new_question_id,
+    PROGRESS_NOTED_EVENT,
 )
 
 _log = logging.getLogger(__name__)
@@ -114,7 +120,7 @@ _TASK_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
 
 
 #: Événements du pilotage humain (issue #638, lot B) rejoués par
-#: :meth:`MissionLedger._replay_steering`.
+#: :func:`~grimoire.missions.ledger_rules.replay_steering`.
 _STEERING_EVENTS = frozenset({
     "task.prioritized",
     "task.directive_added",
@@ -128,6 +134,11 @@ SESSION_ATTACHED_EVENT = "task.session_attached"
 #: Un risque accepté en l'état sur une tâche (W2-10) : ``accept_as_is`` d'un
 #: checkpoint de flow (``FlowEngine``). Rejoué dans ``MissionTask.accepted_risks``.
 RISK_ACCEPTED_EVENT = "task.risk_accepted"
+
+#: W5-01 : un lien de dépendance entre deux tâches. ``task.dependency.added`` est
+#: l'ancien nom (import Beads) : les deux se rejouent, un seul s'écrit.
+TASK_LINKED_EVENT = "task.linked"
+_LEGACY_LINK_EVENT = "task.dependency.added"
 
 #: K2 (issue #767) : le plafond dur ``expires_at`` du claim repoussé par ``task renew``.
 LEASE_RENEWED_EVENT = "task.lease_renewed"
@@ -363,7 +374,7 @@ class MissionLedger:
                     claim = replace(current.claim, expires_at=str(payload.get("expires_at", "") or ""))
                     self._tasks[tid] = MissionTask.from_dict({**current.to_dict(), "claim": claim.to_dict()})
             elif evt_type in _STEERING_EVENTS:
-                self._replay_steering(evt_type, payload)
+                replay_steering(self._tasks, evt_type, payload)
             elif evt_type == SESSION_ATTACHED_EVENT:
                 # Issue #638 lot A : le claim apprend sa session après coup. Un
                 # événement de plus dans le journal, jamais une ligne réécrite ;
@@ -383,6 +394,11 @@ class MissionLedger:
                         host_version=str(payload.get("session_host_version", "") or ""),
                     )
                     self._tasks[tid] = MissionTask.from_dict({**current.to_dict(), "claim": claim.to_dict()})
+            elif evt_type in (TASK_LINKED_EVENT, _LEGACY_LINK_EVENT):
+                # W5-01 : ni ``task.linked`` ni ``task.dependency.added`` n'étaient
+                # rejoués — ``task link`` écrivait un événement que rien ne lisait,
+                # et ``MissionTask.dependencies`` restait vide.
+                self._replay_link(raw, payload)
             elif evt_type == RISK_ACCEPTED_EVENT:
                 # W2-10 : la tâche ciblée est ``entity_id``, comme pour la session.
                 # Un événement orphelin n'invente rien ; l'horodatage de
@@ -395,6 +411,24 @@ class MissionLedger:
                         {**current.to_dict(), "accepted_risks": [*(dict(r) for r in current.accepted_risks), risk]}
                     )
             self._events.append(LedgerEvent.from_dict(raw))
+
+    def _replay_link(self, raw: dict[str, Any], payload: dict[str, Any]) -> None:
+        """Ajoute la dépendance d'un événement de lien à la tâche source, sans doublon."""
+        tid = str(raw.get("entity_id") or payload.get("task_id") or "")
+        current = self._tasks.get(tid)
+        if current is None:
+            return
+        try:
+            if "dependency" in payload:
+                dep = TaskDependency.from_dict(payload["dependency"])
+            else:
+                dep = TaskDependency(DependencyKind(str(payload.get("kind", "blocks"))), str(payload["depends_on"]))
+        except (KeyError, ValueError, TypeError):
+            return
+        if dep not in current.dependencies:
+            self._tasks[tid] = MissionTask.from_dict(
+                {**current.to_dict(), "dependencies": [d.to_dict() for d in (*current.dependencies, dep)]}
+            )
 
     def _apply_transition(self, tid: str, payload: dict[str, Any]) -> None:
         old_task = self._tasks[tid]
@@ -440,36 +474,6 @@ class MissionLedger:
             # resterait « le plus haut » et un effet périmé s'appliquerait à l'écriture comme au rejeu.
             return f"epoch {epoch!r} périmé : {task.id} est {task.status.value}, le bail est rendu"
         return ""
-
-    def _replay_steering(self, evt_type: str, payload: dict[str, Any]) -> None:
-        """Pilotage humain (issue #638) : priorité et journal de consignes.
-
-        Chaque événement ne touche qu'un champ dérivé de la tâche ; le texte
-        d'une consigne n'est jamais réécrit — livraison et accusé de réception
-        s'ajoutent comme horodatages sur l'entrée existante.
-        """
-        tid = payload.get("task_id", "")
-        task = self._tasks.get(tid)
-        if task is None:
-            return
-        data = task.to_dict()
-        if evt_type == "task.prioritized":
-            data["priority"] = payload.get("to_priority", "")
-        elif evt_type == "task.directive_added":
-            data["directives"] = [*data.get("directives", []), dict(payload.get("directive", {}))]
-        elif evt_type == "task.directive_delivered":
-            ids, at = set(payload.get("directive_ids", [])), str(payload.get("delivered_at", ""))
-            data["directives"] = [
-                {**d, "delivered_at": d.get("delivered_at") or at} if d.get("id") in ids else d
-                for d in data.get("directives", [])
-            ]
-        elif evt_type == "task.directive_acknowledged":
-            did, at = payload.get("directive_id"), str(payload.get("acknowledged_at", ""))
-            data["directives"] = [
-                {**d, "acknowledged_at": d.get("acknowledged_at") or at} if d.get("id") == did else d
-                for d in data.get("directives", [])
-            ]
-        self._tasks[tid] = MissionTask.from_dict(data)
 
     def _replay_incidents(self) -> None:
         if not self._incidents_path.exists():
@@ -741,6 +745,13 @@ class MissionLedger:
                 f"Claim refusé pour {task_id} : déjà {task.status.value} par {held.actor_id}{session} "
                 f"jusqu'à {held.expires_at or 'sans expiration'}"
             )
+        if to_state is TaskState.CLAIMED:
+            waiting = unclosed_blockers(self._tasks, task)
+            if waiting:
+                raise GrimoireMissionError(
+                    f"Claim refusé pour {task_id} : dépend de {'; '.join(waiting)} — "
+                    "une tâche ne se réclame que lorsque ses dépendances `blocks` sont closes"
+                )
         if expected_from is not None and task.status is not expected_from:
             raise GrimoireMissionError(
                 f"Transition refusée pour {task_id} : l'état a changé entre-temps "
@@ -756,7 +767,7 @@ class MissionLedger:
             raise GrimoireMissionError(
                 f"Invalid task transition {task.status.value} → {to_state.value} for {task_id}"
             )
-        self._waiting_guard(task, to_state, extra_payload, lease_epoch, reaper, attested)
+        waiting_guard(task, to_state, extra_payload, lease_epoch, reaper, attested)
         payload: dict[str, Any] = {
             "task_id": task_id,
             "from_state": task.raw_status if task.is_unknown_state else task.status.value,
@@ -812,51 +823,6 @@ class MissionLedger:
         self._load()
         return self._tasks[task_id]
 
-    @staticmethod
-    def _waiting_guard(
-        task: MissionTask,
-        to_state: TaskState,
-        extra_payload: dict[str, Any] | None,
-        lease_epoch: int | None,
-        waker: bool,
-        attested: bool = False,
-    ) -> None:
-        """Les trois règles de l'état ``waiting`` (K6, §2.1), tenues ici pour qu'aucune surface ne les contourne.
-
-        - vers ``waiting`` : l'attente est écrite, nommée et valide (``task ask`` / ``task wait``) ;
-        - ``waiting → ready`` : le tick seul (:meth:`wake`), jamais un geste ``move`` ;
-        - ``waiting → running`` : la même session, au même epoch — reprise sur place, sauf
-          ``waiting(human)`` : une question en attente (``task ask``, ou posée par la récolte) ne
-          se lève que par la réponse humaine (``ready``), jamais par un agent — hors *attested* (:meth:`resume_attested`).
-        """
-        if to_state is TaskState.WAITING:
-            raw = (extra_payload or {}).get("waiting")
-            problem = Waiting.from_dict(raw).problem() if isinstance(raw, dict) else "aucune attente décrite"
-            if problem:
-                raise GrimoireMissionError(
-                    f"Transition vers waiting refusée pour {task.id} : {problem} "
-                    "(poser l'attente par `grimoire task ask` ou `grimoire task wait`)"
-                )
-        if task.status is TaskState.WAITING and to_state is TaskState.READY and not waker:
-            raise GrimoireMissionError(
-                f"Transition refusée pour {task.id} : waiting → ready est réservé au tick "
-                "(`grimoire task wake`) ; une réponse humaine (`grimoire task answer`) le déclenche"
-            )
-        if (
-            task.status is TaskState.WAITING and to_state is TaskState.RUNNING
-            and task.waiting is not None and task.waiting.reason == "human" and not attested
-        ):
-            asked = task.waiting.question.id if task.waiting.question is not None else "?"
-            raise GrimoireMissionError(
-                f"Reprise refusée pour {task.id} : waiting(human) attend la réponse de l'humain (question {asked}) ; "
-                "seule `grimoire task answer` (canal humain) la lève — un agent ne reprend pas sur sa propre question"
-            )
-        if task.status is TaskState.WAITING and to_state is TaskState.RUNNING and lease_epoch is None:
-            raise GrimoireMissionError(
-                f"Reprise refusée pour {task.id} : waiting → running est la reprise sur place de la même session, "
-                "au même epoch — présenter l'epoch tenu (`grimoire task resume --epoch`)"
-            )
-
     def wake(self, task_id: str, *, actor_id: str = "tick", reason: str = "", cause: str = "") -> MissionTask:
         """``waiting → ready`` — le seul chemin, réservé au tick : réponse reçue, échéance passée, quota ou CI rendus.
 
@@ -896,6 +862,42 @@ class MissionLedger:
             return self._transition_locked(
                 task_id, TaskState.RUNNING, actor_id, reason, None, None, TaskState.WAITING, epoch, attested=True
             )
+
+    def link_tasks(
+        self, task_id: str, depends_on: str, kind: DependencyKind = DependencyKind.BLOCKS, *, actor_id: str = "system"
+    ) -> MissionTask:
+        """Déclare « *task_id* dépend de *depends_on* » — refusé si cela ferme un cycle ``blocks``.
+
+        Le contrôle se fait sous le verrou du journal, sur l'état relu : deux
+        liens concurrents A→B et B→A ne passent pas tous les deux. Un lien déjà
+        présent est un succès sans nouvel événement.
+        """
+        with _ledger_file_lock(self._events_path):
+            self._invalidate()
+            self._load()
+            task = self._tasks.get(task_id)
+            if task is None:
+                raise GrimoireMissionError(f"Task not found: {task_id}")
+            if depends_on not in self._tasks:
+                raise GrimoireMissionError(f"Task not found: {depends_on}")
+            if depends_on == task_id:
+                raise GrimoireMissionError(f"Lien refusé : {task_id} ne peut pas dépendre d'elle-même")
+            dep = TaskDependency(kind, depends_on)
+            if dep in task.dependencies:
+                return task
+            if kind is DependencyKind.BLOCKS:
+                path = blocks_path(self._tasks, depends_on, task_id)
+                if path:
+                    raise GrimoireMissionError(
+                        f"Lien refusé : {task_id} → {depends_on} fermerait le cycle "
+                        f"{' → '.join([task_id, *path])}"
+                    )
+            self._append_event(
+                TASK_LINKED_EVENT, task_id, "task", actor_id,
+                {"task_id": task_id, "depends_on": depends_on, "kind": kind.value}, lock_held=True,
+            )
+            self._load()
+            return self._tasks[task_id]
 
     def claim_task(self, task_id: str, actor_id: str, host_id: str, exclusive_files: tuple[str, ...] = ()) -> MissionTask:
         """Convenience: READY → CLAIMED."""
@@ -995,6 +997,10 @@ class MissionLedger:
         views = [self._lease_view(t, moment, clock) for t in self.list_tasks()]
         return [v for v in views if v is not None and v.status == "lost"]
 
+    def lease_file(self, task_id: str) -> LeaseFile | None:
+        """Le fichier de bail de *task_id* (indice, jamais vérité) ; ``None`` s'il manque ou est illisible."""
+        return read_lease(lease_path(self._root, task_id))
+
     def renew_lease(
         self,
         task_id: str,
@@ -1039,6 +1045,26 @@ class MissionLedger:
                 self._append_event(LEASE_RENEWED_EVENT, task_id, "task", actor_id, payload, lock_held=True)
                 self._load()
             return self._tasks[task_id]
+
+    def note_progress(self, task_id: str, text: str, *, actor_id: str = "system") -> LedgerEvent:
+        """Note de progression du titulaire : ce que ``progress_at`` (K5) lit, sans changer d'état.
+
+        Un battement de bail n'est pas une progression ; une note, si. Refusée
+        pour une tâche inconnue, non tenue (``claimed``/``running``) ou sans texte.
+        """
+        text = text.strip()
+        if not text:
+            raise GrimoireMissionError("Une note de progression ne peut pas être vide")
+        with _ledger_file_lock(self._events_path):
+            self._invalidate()
+            self._load()
+            task = self._tasks.get(task_id)
+            if task is None:
+                raise GrimoireMissionError(f"Task not found: {task_id}")
+            if task.status not in _HELD or task.claim is None:
+                raise GrimoireMissionError(f"Note refusée pour {task_id} : tâche {task.status.value}, personne ne la tient")
+            payload = {"task_id": task_id, "lease_epoch": task.claim.lease_epoch, "note": text, "actor_id": actor_id}
+            return self._append_event(PROGRESS_NOTED_EVENT, task_id, "task", actor_id, payload, lock_held=True)
 
     def _since_last_answer(self, task_id: str) -> list[LedgerEvent]:
         events = [e for e in self.list_events(task_id) if e.id not in self._rejected]
@@ -1146,9 +1172,9 @@ class MissionLedger:
                 cause = "resume_unfenced"
         if cause:
             written = apply and not self._already_deferred(task.id, view.epoch, cause)
-            question = self._unfenced_question(view) if cause == "resume_unfenced" else ""
+            question = unfenced_question(view) if cause == "resume_unfenced" else ""
             reopens = quota_until(task) if cause == "quota" and quota_until is not None else None
-            waiting = self._deferred_waiting(task, view, cause, before, question, moment, reopens)
+            waiting = deferred_waiting(task, view, cause, before, question, moment, reopens)
             if written:
                 payload: dict[str, Any] = {
                     "task_id": task.id, "lease_epoch_lost": view.epoch, "cause": cause,
@@ -1183,41 +1209,6 @@ class MissionLedger:
             {LEASE_LOST_KEY: lost, "fence_epoch": fence}, None, reaper=True,
         )
         return ReapDecision(task.id, "ready", view.reason, view.epoch, attempt, retry_at, written=True)
-
-    @staticmethod
-    def _deferred_waiting(
-        task: MissionTask, view: LeaseView, cause: str, attempts: int, question: str, moment: datetime,
-        reopens: datetime | None = None,
-    ) -> Waiting:
-        """L'attente que la récolte pose à la place d'un silence : quota, ou une décision humaine nommée (§2.3, §2.6).
-
-        Le quota porte une échéance : *reopens* si elle est future, sinon un délai
-        ``backoff_delay`` des tentatives (au moins un cran) — le tick la rend alors ``ready``.
-        """
-        hint = ResumeHint(
-            session_id=view.session_id, host=view.host,
-            resume_command=resume_command(view.host, view.session_id),
-        )
-        since = moment.isoformat()
-        if cause == "quota":
-            due = reopens if reopens is not None and reopens > moment else moment + backoff_delay(max(attempts, 1))
-            return Waiting("quota", due.isoformat(), None, hint, since)
-        if cause == "retry_exhausted":
-            text = (
-                f"{task.id} a perdu son bail {attempts} fois (plafond {MAX_ATTEMPTS}) : "
-                "la relancer encore, ou l'abandonner ?"
-            )
-            options, kind = ("réessayer", "abandonner"), "retry_exhausted"
-        else:
-            text, options, kind = question, ("reprendre", "abandonner"), "resume_unfenced"
-        return Waiting("human", "", Question(new_question_id(), kind, text, options, "tick", since), hint, since)
-
-    @staticmethod
-    def _unfenced_question(view: LeaseView) -> str:
-        """La question de §2.4 : un hôte sans frein vérifié ne se relance pas, on demande (K3)."""
-        who = f"la session {view.session_id}" if view.session_id else f"la session de {view.actor_id}"
-        version = f" {view.host_version}" if view.host_version else ", version inconnue"
-        return f"{who} (hôte {view.host}{version}, sans frein) ne donne plus signe ; reprendre ?"
 
     def _already_deferred(self, task_id: str, epoch: int, cause: str) -> bool:
         return any(

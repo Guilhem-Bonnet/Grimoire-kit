@@ -37,6 +37,7 @@ from grimoire.missions.schemas import (
     DIRECTIVE_KINDS,
     ORIGIN_AGENT,
     ORIGIN_HUMAN,
+    DependencyKind,
     MissionTask,
     RiskProfile,
     TaskCheck,
@@ -47,7 +48,6 @@ from grimoire.missions.schemas import (
 from grimoire.missions.waiting import (
     ABANDON,
     HUMAN_ANSWERED_EVENT,
-    PROGRESS_NOTED_EVENT,
     QUESTION_ASKED_EVENT,
     UNTIL_UNKNOWN,
     WAIT_REASONS,
@@ -318,6 +318,7 @@ class TaskService:
         origin: str = "cli",
         ready: bool = False,
         checks: tuple[TaskCheck, ...] = (),
+        files: tuple[str, ...] = (),
     ) -> TaskAdded:
         """Ouvre une tâche — le geste que ``grimoire task add`` et ``task_add`` (MCP) partagent.
 
@@ -349,10 +350,27 @@ class TaskService:
         task = ledger.create_task(
             mission_id, title, acceptance=acceptance, owner=owner, expected_evidence=expected_evidence,
             risk_profile=risk, checks=checks,
+            extra={"files": [f for f in (x.strip() for x in files) if f]} if any(x.strip() for x in files) else None,
         )
         if ready:
             task = self.transition(task.id, TaskState.READY, actor).task
         return TaskAdded(task=task, mission_id=mission_id, mission_created=created_mission, board_path=self.project_board())
+
+    def link(self, task_id: str, depends_on: str, kind: DependencyKind = DependencyKind.BLOCKS, *, actor: str = "cli") -> MissionTask:
+        """« *task_id* dépend de *depends_on* » ; un lien qui ferme un cycle ``blocks`` est refusé (W5-01)."""
+        task = self.ledger.link_tasks(task_id, depends_on, kind, actor_id=actor)
+        self.project_board()
+        return task
+
+    def waves(self, mission_id: str | None = None) -> dict[str, Any]:
+        """Les vagues du plan, ``file_overlaps`` compris (:func:`grimoire.missions.waves.compute_waves`)."""
+        from grimoire.missions.waves import compute_waves
+
+        everything = self.ledger.list_tasks()
+        if mission_id is None:
+            return compute_waves(everything)
+        # Les dépendances se résolvent contre tout le ledger, comme au claim : seul le rapport est filtré.
+        return compute_waves(everything, only=[t.id for t in everything if t.mission_id == mission_id])
 
     def attach_session(
         self,
@@ -447,6 +465,12 @@ class TaskService:
                 )
             epoch = task.claim.lease_epoch
         return self.ledger.renew_lease(task_id, epoch, actor_id=actor)
+
+    def note_progress(self, task_id: str, text: str, actor: str) -> MissionTask:
+        """Pose une note de progression sur une tâche tenue (:meth:`MissionLedger.note_progress`)."""
+        self.require(task_id)
+        self.ledger.note_progress(task_id, text, actor_id=actor)
+        return self.require(task_id)
 
     def reap(self, *, apply: bool = True, actor: str = "tick") -> ReapReport:
         """Récolte des baux perdus (:meth:`MissionLedger.reap`), quota lu dans l'état des fournisseurs.
@@ -698,17 +722,6 @@ class TaskService:
             ):
                 return str(event.payload.get("answer", ""))
         return None
-
-    def note_progress(self, task_id: str, note: str, actor: str) -> MissionTask:
-        """``task.progress_noted`` : ce que l'agent dit avoir fait — information, jamais décision ni preuve."""
-        cleaned = note.strip()
-        if not cleaned:
-            raise ValueError("`note` requise : une note de progression vide n'apprend rien")
-        self.require(task_id)
-        self.ledger.append_event(
-            PROGRESS_NOTED_EVENT, task_id, "task", actor, {"task_id": task_id, "note": cleaned, "actor_id": actor}
-        )
-        return self.require(task_id)
 
     def pending_decisions(self) -> list[Any]:
         from grimoire.missions.decisions import pending_decisions

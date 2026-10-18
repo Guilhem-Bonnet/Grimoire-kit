@@ -205,6 +205,10 @@ def task_add(
         list[str] | None,
         typer.Option("--check", help="Commande dont le code de sortie 0 rend le verdict (répétable) ; sans elle, jamais V0 (#772)."),
     ] = None,
+    files: Annotated[
+        list[str] | None,
+        typer.Option("--file", help="Fichier que la tâche touchera (répétable) ; `task waves` signale ceux que deux tâches parallèles partagent."),
+    ] = None,
     project_root: _PROJECT_ROOT = Path(),
     ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
     actor: _ACTOR = "cli",
@@ -226,6 +230,7 @@ def task_add(
             title, tuple(acceptance), mission_id=mission, owner=owner,
             expected_evidence=tuple(evidence or ()), actor=actor, ready=ready,
             checks=tuple(TaskCheck(cmd=c) for c in (check or ()) if c.strip()),
+            files=tuple(files or ()),
         )
     except TaskRefusedError as refused:
         _refuse(ctx, refused)
@@ -312,10 +317,17 @@ def _list_all_projects(
     """Le portefeuille : tableau lisible, ou la charge utile JSON telle quelle."""
     from rich.table import Table
 
+    from grimoire.missions.liveness import label as liveness_label
+    from grimoire.missions.liveness import probe_claude_agents
     from grimoire.tools.workspace_portfolio import portfolio_tasks
 
     view = portfolio_tasks(
-        project_root.resolve(), state=status, project=project, live=live, live_minutes=live_minutes
+        project_root.resolve(),
+        state=status,
+        project=project,
+        live=live,
+        live_minutes=live_minutes,
+        probe=probe_claude_agents,
     )
     if _fmt(ctx) == "json":
         typer.echo(json.dumps(view, indent=2, ensure_ascii=False))
@@ -326,7 +338,10 @@ def _list_all_projects(
     for card in view["tasks"]:
         session = card.get("session") or {}
         if session:
-            session_text = f"{'vivante' if session.get('live') else 'inactive'} · {session.get('id', '')}"
+            state = session.get("liveness") or {}
+            session_text = f"{liveness_label(state.get('state', 'inconnu'))} · {session.get('id', '')}"
+            if session.get("attention"):
+                session_text += f" · attention : {session['attention']['reason']}"
         else:
             session_text = "—"
         unread = card.get("unread_directives") or 0
@@ -349,8 +364,9 @@ def _list_all_projects(
     summary = view["summary"]
     console.print(
         f"[dim]{summary['projects']} projet(s), {summary['readable']} lisible(s) · "
-        f"{summary['tasks']} tâche(s), {summary['live']} session(s) vivante(s) "
-        f"(< {view['live_minutes']} min)[/dim]"
+        f"{summary['tasks']} tâche(s) · vivacité "
+        + ", ".join(f"{n} {name}" for name, n in summary["liveness"].items() if n)
+        + f" (journal < {view['live_minutes']} min)[/dim]"
     )
 
 
@@ -516,6 +532,28 @@ def task_renew(
         raise typer.Exit(1) from exc
     claim = task.claim
     _emit_task(ctx, task, f"bail renouvelé, epoch {claim.lease_epoch}, plafond {claim.expires_at or '-'}" if claim else "")
+
+
+@task_app.command("note")
+def task_note(
+    ctx: typer.Context,
+    task_id: Annotated[str, typer.Argument()],
+    text: Annotated[str, typer.Argument(help="Ce qui vient d'avancer (une phrase).")],
+    project_root: _PROJECT_ROOT = Path(),
+    ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
+    actor: _ACTOR = "cli",
+) -> None:
+    """Note une progression sur une tâche tenue : c'est ce qui évite l'alerte « vivant, sans progression »."""
+    from grimoire.core.exceptions import GrimoireError
+
+    service = _service(project_root, ledger_root)
+    _require_task(service, task_id)
+    try:
+        task = service.note_progress(task_id, text, actor)
+    except GrimoireError as exc:
+        console.print(f"[red]✗[/red] {exc}")
+        raise typer.Exit(1) from exc
+    _emit_task(ctx, task, "progression notée")
 
 
 @task_app.command("reap")
@@ -782,15 +820,45 @@ def task_link(
         console.print(f"[red]✗[/red] Nature de lien inconnue : {kind}")
         console.print("[dim]natures : " + ", ".join(k.value for k in DependencyKind) + "[/dim]")
         raise typer.Exit(1) from None
-    service.ledger.append_event(
-        "task.linked", task.id, "task", actor,
-        {"task_id": task.id, "depends_on": depends_on, "kind": dependency_kind.value},
-    )
-    service.project_board()
+    from grimoire.core.exceptions import GrimoireError
+
+    try:
+        service.link(task.id, depends_on, dependency_kind, actor=actor)
+    except GrimoireError as exc:
+        console.print(f"[red]✗[/red] {escape(str(exc))}")
+        raise typer.Exit(1) from exc
     if _fmt(ctx) == "json":
         typer.echo(json.dumps({"task": task.id, "depends_on": depends_on, "kind": dependency_kind.value}, indent=2))
         return
     console.print(f"[green]OK[/green] {task.id} dépend de {depends_on} ({dependency_kind.value})")
+
+
+@task_app.command("waves")
+def task_waves(
+    ctx: typer.Context,
+    mission: Annotated[str | None, typer.Option("--mission", help="Restreindre à une mission.")] = None,
+    project_root: _PROJECT_ROOT = Path(),
+    ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
+) -> None:
+    """Les vagues du plan : ce qui peut partir en parallèle, et les fichiers que deux tâches d'une vague se disputent."""
+    plan = _service(project_root, ledger_root).waves(mission)
+    if _fmt(ctx) == "json":
+        typer.echo(json.dumps(plan, indent=2, ensure_ascii=False))
+        return
+    for wave in plan["waves"]:
+        console.print(f"vague {wave['wave']} : {', '.join(wave['tasks'])}")
+    for overlap in plan["file_overlaps"]:
+        console.print(
+            f"[yellow]![/yellow] vague {overlap['wave']} : {overlap['file']} visé par {', '.join(overlap['tasks'])}"
+        )
+    for tid, targets in plan["unresolved"].items():
+        console.print(f"[yellow]![/yellow] {tid} : dépendance inconnue ou annulée ({', '.join(targets)})")
+    for tid, causes in plan["blocked"].items():
+        console.print(f"[yellow]![/yellow] {tid} : attend une tâche qui ne peut pas être planifiée ({', '.join(causes)})")
+    if plan["cyclic"]:
+        console.print(f"[red]✗[/red] tâches en cycle : {', '.join(plan['cyclic'])}")
+    if not plan["waves"]:
+        console.print("[dim]aucune tâche en attente[/dim]")
 
 
 @task_app.command("context")

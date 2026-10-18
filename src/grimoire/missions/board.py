@@ -145,12 +145,16 @@ def _waiting_reason(task: MissionTask) -> str:
     return f"en attente ({waiting.reason}){until}"
 
 
-def _blockers(task: MissionTask) -> list[dict[str, str]]:
-    """Blocages déclarés — le vérificateur exige un motif sur toute carte bloquée."""
+def _blockers(task: MissionTask, closed: frozenset[str] = frozenset()) -> list[dict[str, str]]:
+    """Blocages déclarés — le vérificateur exige un motif sur toute carte bloquée.
+
+    Une dépendance ``blocks`` déjà close ne bloque plus rien (W5-01 : les liens
+    sont désormais rejoués, une carte ne garde pas un blocage levé).
+    """
     out = [
         {"reason": f"dépend de {dep.target}", "target": dep.target}
         for dep in task.dependencies
-        if dep.kind is DependencyKind.BLOCKS
+        if dep.kind is DependencyKind.BLOCKS and dep.target not in closed
     ]
     if not out and task.status is TaskState.FAILED:
         out.append({"reason": "échec de la tâche, remédiation requise", "target": task.id})
@@ -167,7 +171,7 @@ def _blockers(task: MissionTask) -> list[dict[str, str]]:
     return out
 
 
-def _task_entry(task: MissionTask) -> dict[str, Any]:
+def _task_entry(task: MissionTask, closed: frozenset[str] = frozenset()) -> dict[str, Any]:
     status = board_status_of(task.status)
     owner = task.owner or (task.claim.actor_id if task.claim else "")
     entry: dict[str, Any] = {
@@ -184,7 +188,7 @@ def _task_entry(task: MissionTask) -> dict[str, Any]:
         "agent_roles": list(task.agent_roles) if task.agent_roles else [task.type.value],
         "acceptance_criteria": list(task.acceptance),
         "verifiability": verifiability_as_dict(task),
-        "blockers": _blockers(task),
+        "blockers": _blockers(task, closed),
         # Chemins conventionnels du standard, indexés par task_id.
         "context_bundle_ref": f"_grimoire-output/context/{task.id}/context-bundle.yaml",
         "decision_trace_ref": f"_grimoire-output/decisions/{task.id}/decision-trace.yaml",
@@ -234,8 +238,10 @@ def build_board(
     """
     # Ce qui attend la décision d'un humain passe en tête (K6) ; puis, dans chaque colonne, la plus
     # pressante d'abord (issue #638) ; à priorité égale, l'identifiant garde l'ordre stable qu'un diff attend.
+    all_tasks = ledger.list_tasks()
+    closed = frozenset(t.id for t in all_tasks if t.status is TaskState.CLOSED)
     tasks = sorted(
-        ledger.list_tasks(mission_id),
+        (t for t in all_tasks if mission_id is None or t.mission_id == mission_id),
         key=lambda t: (
             attention_rank(t), BOARD_LIFECYCLE.index(board_status_of(t.status)), -priority_rank(priority_of(t)), t.id
         ),
@@ -250,7 +256,7 @@ def build_board(
         },
         "states": list(BOARD_LIFECYCLE),
         "transitions": _TRANSITIONS,
-        "tasks": [_task_entry(task) for task in tasks],
+        "tasks": [_task_entry(task, closed) for task in tasks],
     }
 
 
