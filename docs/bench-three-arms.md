@@ -475,3 +475,34 @@ d'avant dérogation.
 
 `--subset` restreint le tirage aux 4 tâches déclarées et s'arrête avant tout run si l'une manque. Limites : un changement de modèle entre deux
 barrières est signalé en avertissement, pas refusé (voir B-01).
+
+## 12. Interventions humaines par tâche vérifiée (B-05)
+
+Le critère V3 du protocole comparatif (charge humaine de `kit-gov` face à `aidlc`) ne se lit jamais dans un champ déclaré par un
+bras : `scripts/bench/human_gates.py` recompte les interventions sur les traces de chaque run, avec la même règle (`human-gates/1`)
+pour tous les bras. L'étiquette du bras ne sert qu'à regrouper.
+
+Une unité est comptée pour chaque événement suivant, une seule fois même si deux traces le portent :
+
+| Nature | Trace du kit | Trace d'AI-DLC |
+|---|---|---|
+| `gate` : un gate ou checkpoint présenté qui attend une réponse humaine, levé par un octroi ou par la configuration autonome compris | un *challenge* de `flows/authority/<run>.authority.jsonl` (ou une décision sans challenge) | un `STAGE_AWAITING_APPROVAL` de `audit/*.md` (sauf `Revalidated`) |
+| `refusal` : un refus qui demande une action humaine pour être levé | un résultat d'outil en erreur dont le texte porte une marque de `HUMAN_ACTION_MARKERS` (la raison d'un `ask` du hook : « Confirme ... ») | idem (« attended session », « withholds human authority ») |
+| `question` : une question posée à l'humain | `task.question_asked` du Mission Ledger, hors `origin: flow` (c'est le checkpoint, déjà un `gate`) | un fichier `[Answer]:` écrit par `Write`/`Edit`, ou un `DECISION_RECORDED` (le même fichier ne compte qu'une fois) |
+| `grant` : l'octroi W5-06 lui-même, 1 seul (son challenge n'est pas compté en plus) | une ligne `grant` de `@autonomy-grants.authority.jsonl` | sans objet |
+| `autonomy` : l'activation du mode autonome | sans objet (c'est l'octroi) | `AUTONOMY_MODE_SET` avec `Mode: autonomous` |
+
+Ne comptent pas : un refus que l'agent lève seul (le refus de la politique du kit qui renvoie à une commande réversible), un message
+d'information, un tour humain (c'est la réponse, pas la sollicitation), une demande d'octroi jamais attestée.
+
+Un run dont le dépôt ou la transcription manque, ou dont la transcription n'a aucune ligne JSON, vaut `null` (inconnu), jamais 0 :
+`human_gates_known_ratio` le dit par bras, et la médiane par tâche résolue est inconnue dès qu'un run résolu l'est. Comme pour le coût,
+la métrique se lit par tâche résolue (`success` vrai, transcription non invalidée).
+
+```bash
+python scripts/bench/human_gates.py --workspace <workspace du banc> [--arm kit-gov --arm aidlc] [--json]
+```
+
+Limites : les marques de refus sont des sous-chaînes des textes actuels du kit et d'AI-DLC 2.11.0 lus dans leurs sources, pas observées
+dans une transcription d'AI-DLC (B-06) ; une question posée par un widget (`AskUserQuestion`) sans ligne de journal n'est pas vue ; la
+déclaration `AIDLC_UNATTENDED=1` faite au lancement n'est pas dans les traces du bras, le protocole d'équité de B-06 doit la compter à part.
