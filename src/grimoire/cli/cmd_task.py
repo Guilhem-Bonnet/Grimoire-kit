@@ -799,6 +799,12 @@ def task_waves(
         console.print(
             f"[yellow]![/yellow] vague {overlap['wave']} : {overlap['file']} visé par {', '.join(overlap['tasks'])}"
         )
+    for cp in plan.get("checkpoints", ()):
+        console.print(
+            f"checkpoint vague {cp['wave']} ({', '.join(cp['tasks'])}) : {cp['status']}{' (requis)' if cp['required'] else ''}"
+        )
+    for tid, why in plan.get("claim_blocked", {}).items():
+        console.print(f"[yellow]![/yellow] {tid} : claim fermé — {why}")
     for tid, targets in plan["unresolved"].items():
         console.print(f"[yellow]![/yellow] {tid} : dépendance inconnue ou annulée ({', '.join(targets)})")
     for tid, causes in plan["blocked"].items():
@@ -1434,6 +1440,10 @@ register_approve_commands(task_app)
 from grimoire.cli.cmd_task_review import register_review_commands  # noqa: E402
 
 register_review_commands(task_app)
+
+from grimoire.cli.cmd_task_wave import register_wave_commands  # noqa: E402
+
+register_wave_commands(task_app)
 
 # W4-01 : `task fold-usage` et l'usage affiché par `task show`, dans leur module (plafond de taille).
 from grimoire.cli.cmd_task_usage import _usage_line, _usage_of, register_usage_commands  # noqa: E402

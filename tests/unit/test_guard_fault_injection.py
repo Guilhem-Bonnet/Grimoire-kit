@@ -207,6 +207,48 @@ def _pre_stale_lease(root: Path, mp: pytest.MonkeyPatch) -> Measure:
     return _pre(root, "Bash", {"command": "touch EXECUTED.marker"})
 
 
+def _pre_pause_hold(root: Path, mp: pytest.MonkeyPatch) -> Measure:
+    """Une pause ``hold`` sur un hôte fencé : les écritures de la session qui tient une tâche sont refusées (K11)."""
+    from grimoire.bridges.schemas import HostId
+    from grimoire.hosts.runtime import run_hook
+    from grimoire.missions.pause import HOLD, write_pause
+    from grimoire.missions.service import TaskService
+    for var in ("GRIMOIRE_TASK_ID", "GRIMOIRE_ACTOR", "GRIMOIRE_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "GRIMOIRE_CONTROL_HOME"):
+        mp.delenv(var, raising=False)
+    _governed(root)
+    registry = root / "_grimoire/standard/llm-provider-registry.yaml"
+    registry.write_text(registry.read_text(encoding="utf-8").replace("enabled: false", "enabled: true", 1), encoding="utf-8")
+    service = TaskService(root)
+    tid = service.add("Tâche", ("le frein de pause refuse une écriture sous hold",), owner="g", actor="claude", ready=True).task.id
+    service.context(tid)
+    service.claim(tid, "claude", host="local")
+    transcript = root / "transcript.jsonl"
+    transcript.write_text('{"type":"user","version":"2.1.289"}\n{"type":"assistant","version":"2.1.301"}\n', encoding="utf-8")
+    payload = {
+        "session_id": SESSION,
+        "hook_event_name": "UserPromptSubmit",
+        "cwd": str(root),
+        "prompt": "go",
+        "transcript_path": str(transcript),
+    }
+    run_hook(payload, host_id=HostId.CLAUDE_CODE_CLI, event=HookEvent.USER_PROMPT_SUBMIT, project_root=root)
+    write_pause(root, mode=HOLD)
+
+    def measure(fault: Fault) -> str:
+        hook = _hook(
+            root,
+            HookEvent.PRE_TOOL_USE,
+            tool_name="Bash",
+            tool_input={"command": "touch EXECUTED.marker"},
+            host=HostId.CLAUDE_CODE_CLI.value,
+            raw={"transcript_path": str(transcript)},
+        )
+        with fault:
+            return _label(run_decision("grimoire.tool-policy", hook))
+
+    return measure
+
+
 def _stop(root: Path, *, active: bool = False) -> str:
     return _label(run_decision("grimoire.evidence-gate", _hook(root, HookEvent.STOP, stop_active=active)))
 
@@ -334,6 +376,7 @@ SCENARIOS: dict[str, tuple[Scenario, str]] = {
     "pre_destructive": (_pre_destructive, "deny"),
     "pre_untrusted": (_pre_untrusted, "ask"),
     "pre_stale_lease": (_pre_stale_lease, "deny"),
+    "pre_pause_hold": (_pre_pause_hold, "deny"),
     "stop_red_gates": (_stop_red_gates, "block"),
     "stop_stale_mutation": (_stop_stale_mutation, "block"),
     "stop_no_task": (_stop_no_task, "block"),
@@ -396,6 +439,9 @@ CASES: tuple[FaultCase, ...] = (
     _closed(_TP, "tool_policy", "pre_destructive", _P + "tool_policy._evaluate_temporal_layer", "ask"),
     _closed(_TP, "lease_brake", "pre_stale_lease", _P + "lease_brake._lease_state", "ask"),
     _closed(_TP, "lease_brake", "pre_stale_lease", _P + "lease_brake._lease_holder", "ask"),
+    _closed(_TP, "pause_brake", "pre_pause_hold", _P + "pause_brake._is_fenced", "ask"),
+    _closed(_TP, "pause_brake", "pre_pause_hold", _P + "pause_brake.read_pause", "ask"),
+    _closed(_TP, "pause_brake", "pre_pause_hold", _P + "pause_brake._lease_holder", "ask"),
     _open(
         _TP,
         "session_memory",
@@ -489,6 +535,7 @@ MODULES: dict[str, tuple[str, str]] = {
     "gate_summary": (SUPPORT, "résumé de gates lu par evidence_gate, subagent_gate et context_capsule : panne couverte par leurs cas"),
     "human_turns": (GUARD, ""),
     "lease_brake": (GUARD, ""),
+    "pause_brake": (GUARD, ""),
     "profile_floor": (SUPPORT, "plancher de profil lu par evidence_gate, activation, tool_policy et context_capsule : panne couverte par leurs cas"),
     "record": (SUPPORT, "journal d'observation (agent.dispatch / agent.miss) : ne change jamais une décision"),
     "repetition_guard": (GUARD, ""),

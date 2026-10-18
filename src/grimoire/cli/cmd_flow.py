@@ -201,6 +201,11 @@ def _emit_resume(ctx: typer.Context, run_id: str, outcome: ResumeOutcome) -> Non
             f"rien n'a changé ; attendu : {'(run terminé)' if outcome.finished else outcome.node_id}"
         )
         return
+    if outcome.paused:
+        console.print(f"[yellow]en pause[/yellow] {run_id} — node suivant : {outcome.node_id}, non présenté (hold)")
+        for warning in outcome.warnings:
+            console.print(f"  [dim]{warning}[/dim]")
+        return
     if outcome.finished:
         console.print(f"[green]terminé[/green] {run_id} — dernier node : {outcome.node_id}")
         return
@@ -238,6 +243,11 @@ def _emit_dispatch_outcome(ctx: typer.Context, outcome: FlowDispatchOutcome) -> 
     )
     if outcome.status == "finished":
         console.print(f"[green]terminé[/green] {outcome.run_id}")
+        return
+    if outcome.status == "paused":
+        console.print(f"[yellow]en pause[/yellow] {outcome.run_id} — avant le node « {outcome.node_id} »")
+        for note in outcome.faults:
+            console.print(f"  [dim]{note}[/dim]")
         return
     if outcome.status == "waiting_host":
         console.print(f"[yellow]suspendu[/yellow] {outcome.run_id} — node « {outcome.node_id} » revient à l'hôte")

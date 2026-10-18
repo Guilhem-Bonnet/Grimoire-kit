@@ -44,11 +44,13 @@ from __future__ import annotations
 import difflib
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from grimoire.hosts.surface import AgentSpec
+    from grimoire.missions.liveness import SessionProbe
     from grimoire.traces.ledger import AgentFreshness
 
 __all__ = [
@@ -254,7 +256,14 @@ def _task_json(task: Any) -> dict[str, Any]:
     return data
 
 
-def tasks_view(project_root: Path, *, mission: str | None = None, status: str | None = None) -> dict[str, Any]:
+def tasks_view(
+    project_root: Path,
+    *,
+    mission: str | None = None,
+    status: str | None = None,
+    probe: SessionProbe | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
     """Les tâches du projet et les colonnes du board gouverné.
 
     ``ledger: false`` n'est pas une erreur : un projet peut n'avoir jamais
@@ -295,7 +304,13 @@ def tasks_view(project_root: Path, *, mission: str | None = None, status: str | 
             payload["note"] = "aucun Mission Ledger — `grimoire task add` en ouvre un"
         return payload
     tasks = service.list_tasks(mission or None, status or None)
-    payload["tasks"] = [_task_json(t) for t in tasks]
+    cards = [_task_json(t) for t in tasks]
+    # UI-3 : la vivacité, le dernier signe de vie, la durée et le coût de chaque
+    # carte — la même arithmétique que le portefeuille, pas une seconde copie.
+    from grimoire.tools.workspace_portfolio import annotate_cards
+
+    annotate_cards(project_root, service, tasks, cards, now=now or datetime.now(UTC), probe=probe)
+    payload["tasks"] = cards
     payload["count"] = len(tasks)
     return payload
 

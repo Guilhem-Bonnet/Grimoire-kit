@@ -52,6 +52,11 @@ function injectStyles() {
     .pl-kpi-item:first-child { border-left: 0; }
     .pl-kpi-val { font-family: var(--font); font-size: var(--t-xl); font-weight: 600; color: var(--ink); line-height: 1.25; }
     .pl-kpi-lbl .ico { width: 14px; height: 14px; color: var(--tone, var(--ink3)); margin-right: 6px; vertical-align: -2px; }
+    @media (max-width: 900px) {
+      .pl-sheet, .pl-wrap { padding: var(--sp-3); }
+      .pl-kpi { flex-wrap: wrap; }
+      .pl-kpi-item { flex: 1 1 45%; border-left: 0; }
+    }
     .pl-kpi-item[data-tone="ok"] { --tone: var(--ok); }
     .pl-kpi-item[data-tone="warn"] { --tone: var(--warn); }
     .pl-kpi-item[data-tone="bad"] { --tone: var(--bad); }
@@ -163,6 +168,36 @@ function text(tag, className, value) {
   if (className) node.className = className;
   node.textContent = value;
   return node;
+}
+
+// La fiche ne calcule jamais `doctor` au premier rendu (~350 ms, issue #548) :
+// « diagnostic indisponible » y était donc affiché à chaque fois, sans cause.
+// Le bloc dit ce qu'il en est et porte le geste qui le calcule, à la demande.
+function doctorOnDemand(ctx, slug) {
+  const box = document.createElement('div');
+  box.className = 'pl-doctor';
+  const note = text('div', 'lbl', "Diagnostic non lancé : il n'est pas calculé à l'ouverture de la fiche.");
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'btn';
+  button.textContent = 'Lancer le diagnostic';
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    button.textContent = 'Diagnostic en cours…';
+    try {
+      const report = await ctx.api.doctor(slug || undefined);
+      box.replaceChildren(
+        pill(report.ok ? 'ok' : 'bad', report.ok ? 'doctor conforme' : 'doctor en écart'),
+        ...(report.ok ? [] : [text('div', 'lbl', 'Détail : grimoire doctor, ou l\'onglet Problèmes du dock.')]),
+      );
+    } catch (error) {
+      note.textContent = 'Diagnostic impossible : ' + error.message;
+      button.disabled = false;
+      button.textContent = 'Réessayer';
+    }
+  });
+  box.append(note, button);
+  return box;
 }
 
 // ── Statut du kit : aligné (contenu à jour) ≠ installé (CLI qui tourne) ─────
@@ -1368,7 +1403,7 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
   if (sheet.doctor) {
     standardBlock.append(pill(sheet.doctor.ok ? 'ok' : 'bad', sheet.doctor.ok ? 'doctor conforme' : 'doctor en écart'));
   } else {
-    standardBlock.append(text('div', 'lbl', 'diagnostic indisponible'));
+    standardBlock.append(doctorOnDemand(ctx, slug));
   }
   ctx.inspector.append(standardBlock);
 
@@ -1785,7 +1820,7 @@ export async function mount(root, ctx) {
       const knownTitle = cockpit ? selected : ctx.host.status?.slug;
       if (knownTitle) shell.append(text('h2', null, knownTitle));
     }
-    shell.append(text('p', 'lbl', 'Chargement…'));
+    shell.append(...ctx.loading('Chargement…', 3));
     root.replaceChildren(shell);
 
     if (level === 'flotte') {

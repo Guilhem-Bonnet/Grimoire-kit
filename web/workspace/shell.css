@@ -122,6 +122,14 @@ select {
   cursor: pointer;
 }
 
+/* `.chip` et `.seg` posent `display` : sans cette règle l'attribut `hidden`
+   (feuille du navigateur) ne cache rien — la pastille de validation et le
+   sélecteur de zoom, vides, restaient affichés dans la barre de document. */
+.chip[hidden],
+.seg[hidden] {
+  display: none;
+}
+
 .chip:hover {
   background: var(--e3);
   color: var(--ink);
@@ -385,6 +393,28 @@ body[data-active-space="source"] {
   cursor: not-allowed;
 }
 
+/* Sélecteur compact (barre d'état) : même `.seg`, plus bas que les 28 px. */
+.seg-s {
+  height: 22px;
+}
+
+.seg-s > button {
+  padding: 0 7px;
+}
+
+/* Texte pour les lecteurs d'écran seulement (états de chargement). */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 .kbd {
   display: inline-flex;
   align-items: center;
@@ -516,6 +546,75 @@ body[data-active-space="source"] {
   color: var(--ink);
 }
 
+.empty-actions {
+  margin-top: var(--sp-3);
+}
+
+/* Variante des zones latérales (explorateur, inspecteur) : pas de cadre centré. */
+.empty-compact {
+  margin: var(--sp-2) 0;
+  max-width: none;
+  padding: var(--sp-3);
+}
+
+.empty-compact h2 {
+  font-size: var(--t-m);
+}
+
+/* Dans l'explorateur (`.tree`), tout enfant direct est une ligne de 28 px :
+   le bloc d'indication n'en est pas une. */
+.tree > .empty-compact {
+  display: block;
+  height: auto;
+  cursor: default;
+  white-space: normal;
+}
+
+/* ── Chargement : squelettes ───────────────────────────────────────────────
+ * La forme de ce qui vient, décorative (`aria-hidden`) ; le texte du chargement
+ * est un `.sr-only` à côté. Sans mouvement sous prefers-reduced-motion (règle
+ * globale plus haut). */
+.skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+}
+
+/* Squelette de la toile : recouvre la zone le temps du chargement. */
+.skeleton-cover {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: var(--bg);
+  pointer-events: none;
+}
+
+.skeleton-line {
+  height: 14px;
+  border-radius: var(--r);
+  background: linear-gradient(90deg, var(--e2) 25%, var(--e3) 50%, var(--e2) 75%);
+  background-size: 300% 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+.skeleton-line:nth-child(odd) {
+  width: 92%;
+}
+
+.skeleton-line:nth-child(3n) {
+  width: 64%;
+}
+
+@keyframes skeleton-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+
 /* ── Coque ─────────────────────────────────────────────────────────────────*/
 
 #shell {
@@ -546,9 +645,26 @@ body[data-active-space="source"] {
   font-size: var(--t-min);
 }
 
+.spaces-nav {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+}
+
 #spaces {
   display: flex;
+  position: relative;
   margin-left: var(--sp-4);
+  min-width: 0;
+}
+
+#palette-open {
+  width: 250px;
+  justify-content: space-between;
+}
+
+.palette-what {
+  gap: 6px;
 }
 
 #middle {
@@ -719,6 +835,17 @@ body[data-active-space] .panel-head {
   color: var(--acc);
 }
 
+/* Fermer un tiroir : n'existe que sous 900 px (voir plus bas). */
+.panel-close {
+  display: none;
+  background: none;
+  border: 0;
+  color: var(--ink2);
+  cursor: pointer;
+  padding: var(--sp-1);
+  border-radius: var(--r);
+}
+
 /* Poignée de redimensionnement : seulement quand le panneau est épingle
  * dans la grille (spec §3.1 « cadenas ou ⌘+clic : épingle, le contenu se
  * redimensionne »). En surimpression ou replié, il n'y a rien à tirer. */
@@ -846,6 +973,27 @@ body[data-active-space] .panel-head {
   flex: none;
 }
 
+/* Pouls (UI-3) : l'horodatage d'actualisation de la barre d'état, et le
+   compteur de décisions de la barre du haut. */
+#st-live {
+  white-space: nowrap;
+}
+
+#st-live[data-state="error"],
+#st-live[data-state="paused"] {
+  color: var(--ink2);
+}
+
+#st-live[data-state="error"] {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+#decisions-pill {
+  font-weight: 500;
+  white-space: nowrap;
+}
+
 /* ── Palette de commandes ──────────────────────────────────────────────────*/
 
 #palette[hidden] {
@@ -945,6 +1093,12 @@ body[data-active-space] .panel-head {
   color: var(--ink2);
 }
 
+/* Le texte discret d'une infobulle (« Alt · épingler ») porte --ink2 : --ink3,
+ * pensé pour --e1 et --bar, tombait à 2,69:1 sur le fond --e3 de la bulle. */
+.tip .lbl {
+  color: var(--ink2);
+}
+
 .tip .t {
   font-size: var(--t-s);
   font-weight: 500;
@@ -982,4 +1136,225 @@ body[data-active-space] .panel-head {
 
 :root[data-focus="on"] #dock {
   display: none;
+}
+
+/* ── Sous 900 px : une colonne, des tiroirs ────────────────────────────────
+ * Mesuré à 390 px avant ce bloc : explorateur (236) et inspecteur (300) épinglés
+ * laissaient 0 px au centre, la barre d'application poussait ses onglets
+ * jusqu'à 820 px. Désormais :
+ *   - le rail devient une barre basse (icônes seules, libellés en aria-label) ;
+ *   - explorateur, inspecteur et preuves sont des tiroirs en surimpression, un
+ *     seul à la fois, fermés à l'arrivée, ouverts par le rail, refermés par
+ *     Échap, par leur bouton ou par un appui hors d'eux ;
+ *   - les barres (application, document, état, dock) défilent ou se délestent
+ *     de leurs éléments secondaires au lieu de déborder. */
+@media (max-width: 900px) {
+  :root {
+    --h-dock: 140px;
+    --h-railbar: 48px;
+  }
+
+  #appbar {
+    gap: var(--sp-2);
+    padding: 0 var(--sp-2);
+  }
+
+  #brand span,
+  #appbar > .grow,
+  .palette-lbl,
+  .pill-lbl,
+  .live-pre,
+  #palette-open .kbd,
+  #project-chip .chevron {
+    display: none;
+  }
+
+  #project-chip {
+    max-width: 112px;
+  }
+
+  #project-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .spaces-nav {
+    flex: 1 1 0;
+  }
+
+  #spaces {
+    margin-left: 0;
+    flex: 1 1 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  #spaces::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Seul l'espace courant garde son libellé : les cinq autres sont des icônes. */
+  #spaces .tab {
+    flex: none;
+    padding: 0 var(--sp-2);
+  }
+
+  #spaces .tab[aria-selected="false"] .tab-lbl {
+    display: none;
+  }
+
+  #palette-open {
+    width: auto;
+    justify-content: center;
+  }
+
+  #middle {
+    position: relative;
+    flex-direction: column;
+  }
+
+  #center {
+    order: 1;
+    flex: 1 1 0;
+    width: 100%;
+  }
+
+  :root[data-density] #rail {
+    order: 2;
+    flex-direction: row;
+    width: 100%;
+    height: var(--h-railbar);
+    padding: 0;
+    border-right: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  :root[data-density] #rail .rail-btn {
+    flex: 1 1 0;
+    width: auto;
+    height: 100%;
+    border-left: 0;
+    border-top: 2px solid transparent;
+  }
+
+  :root[data-density] #rail .rail-btn[aria-pressed="true"] {
+    border-top-color: var(--acc);
+  }
+
+  :root[data-density] #rail .rail-lbl,
+  #rail > .grow {
+    display: none;
+  }
+
+  /* Tiroirs : sortis de la grille, par-dessus le centre, au-dessus de la barre basse. */
+  :root[data-density] .panel[data-state="pinned"],
+  :root[data-density] .panel[data-state="peek"] {
+    position: absolute;
+    top: 0;
+    bottom: var(--h-railbar);
+    z-index: 40;
+    width: min(88vw, 360px) !important;
+    margin: 0;
+    box-shadow: var(--shadow-tip);
+  }
+
+  :root[data-density] .panel.panel-left[data-state] {
+    left: 0;
+    border-right: 1px solid var(--line);
+  }
+
+  :root[data-density] .panel-right[data-state] {
+    right: 0;
+    left: auto;
+    border-left: 1px solid var(--line);
+  }
+
+  /* Voile derrière le tiroir : un appui dessus le referme (shell.js). */
+  #middle[data-drawer]::after {
+    content: "";
+    position: absolute;
+    inset: 0 0 var(--h-railbar) 0;
+    z-index: 39;
+    background: var(--scrim);
+  }
+
+  .panel-resize,
+  .panel-head .kbd,
+  .pin {
+    display: none;
+  }
+
+  .panel-close {
+    display: flex;
+  }
+
+  body[data-active-space] .panel-head {
+    border-top-width: 3px;
+  }
+
+  /* La barre de document passe à la ligne plutôt que de défiler : les vues
+     (Workflow, Board…) sont des commandes, elles ne se cachent pas hors écran. */
+  #docbar {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: var(--h-doc);
+    gap: var(--sp-1) var(--sp-2);
+    padding: var(--sp-1) var(--sp-2);
+  }
+
+  #docbar > .grow {
+    display: none;
+  }
+
+  #statusbar {
+    gap: var(--sp-3);
+    padding: 0 var(--sp-2);
+    overflow: hidden;
+  }
+
+  #statusbar > * {
+    flex: none;
+    white-space: nowrap;
+  }
+
+  #statusbar > .grow {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .st-extra {
+    display: none;
+  }
+
+  #dock-tabs {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  #dock-tabs > * {
+    flex: none;
+  }
+
+  #dock-echo,
+  #dock-tabs .kbd {
+    display: none;
+  }
+
+  #dock-tabs > .row:last-child {
+    display: none;
+  }
+
+  .empty {
+    margin: var(--sp-4) 0;
+    max-width: none;
+  }
+
+  /* Un tableau plus large que l'écran défile dans sa propre boîte : c'est
+     lui qui défile, pas la toile ni la page. */
+  #canvas table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+  }
 }

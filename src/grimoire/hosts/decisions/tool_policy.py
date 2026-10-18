@@ -300,13 +300,16 @@ def _authority_guard(hook: HookInput, facts: ToolFacts) -> Decision | None:
         profile = session_profile(hook, journal=False)
         if vector.governed_only and profile not in _AUTHORITY_PROFILES:
             return None
+        why = (
+            "L'instantané du ledger est un cache dérivé du journal, restauré sans rejouer le préfixe qu'il couvre : "
+            "écrit à la main, il imposerait un état que le journal ne dit pas. Il ne s'écrit que par le ledger."
+            if vector.code == "ledger-snapshot"
+            else "Le journal des tours humains et les challenges de checkpoint ne s'écrivent que par "
+            "le hook de l'hôte : c'est la preuve qu'un humain a décidé."
+        )
         return Decision(
             outcome=Outcome.DENY,
-            reason=(
-                f"[Grimoire authority] {hook.tool_name or 'action'} refusé — {vector.what}. "
-                "Le journal des tours humains et les challenges de checkpoint ne s'écrivent que par "
-                f"le hook de l'hôte : c'est la preuve qu'un humain a décidé. {limit}"
-            ),
+            reason=f"[Grimoire authority] {hook.tool_name or 'action'} refusé — {vector.what}. {why} {limit}",
             detail={"tool": hook.tool_name, "authority_vector": vector.code, "profile": profile},
         )
     except Exception as exc:
@@ -370,7 +373,7 @@ def _record_hold(hook: HookInput, decision: Decision) -> None:
         record_policy_hold(
             hook.project_root,
             session_id=hook.session_id,
-            task_id=active_task_id(hook.project_root),
+            task_id=str(decision.detail.get("task_id") or active_task_id(hook.project_root)),
             hook_id="grimoire.tool-policy",
             reason=f"tool_policy:{decision.outcome.value}",
             fingerprint=action_fingerprint(tool_name, detail),
@@ -396,6 +399,13 @@ def _evaluate_tool_policy(hook: HookInput) -> Decision:
     braked = lease_brake(hook, facts)
     if braked is not None:
         return braked
+    # K11 : un `hold` refuse les outils mutants d'une session qui tient une tâche, sauf son point de
+    # reprise ; `drain`, hôte sans frein et drapeau illisible ne refusent rien (voir pause_brake).
+    from grimoire.hosts.decisions.pause_brake import pause_brake
+
+    paused = pause_brake(hook, facts)
+    if paused is not None:
+        return paused
     custom_rules = load_custom_rules(hook.project_root)
     # A temporal rule (require_approval/per_session/cooldown_after) commonly
     # leaves action_kinds/mutation_classes/risk_profiles empty — it has no
@@ -411,7 +421,11 @@ def _evaluate_tool_policy(hook: HookInput) -> Decision:
     if read_only and not has_temporal_rules:
         return _untrusted_escalation(hook, facts) or Decision()
 
-    task_id = active_task_id(hook.project_root, session_id=hook.session_id)
+    # K13 : la tâche d'une session qui tient son bail se lit dans son fichier de bail ; le ledger
+    # n'est rejoué que pour une session sans bail noté (PreToolUse p95 ≤ 50 ms, D21).
+    from grimoire.hosts.decisions.lease_brake import held_task_id
+
+    task_id = held_task_id(hook) or active_task_id(hook.project_root, session_id=hook.session_id)
     risk = _risk_profile(hook)
     base_verdict = (
         _engine(base_rules).evaluate(_policy_request(hook, facts, task_id, risk))
@@ -430,6 +444,9 @@ def _evaluate_tool_policy(hook: HookInput) -> Decision:
 
     detail = {
         "tool": hook.tool_name,
+        # Gardée dans le détail : la trace du gateway et le journal des holds la reprennent
+        # au lieu de la résoudre une deuxième fois, ledger rejoué à chaque fois.
+        "task_id": task_id,
         "family": facts.family,
         "mutation": facts.mutation.value,
         "risk_profile": risk,

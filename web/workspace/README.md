@@ -53,6 +53,7 @@ démonstration dans cette suite, et il ne doit jamais y en avoir.
 | `tokens.css` | **La seule source de couleur.** Sombre et clair, densités, géométrie | lot 1 |
 | `shell.css` | Grille de la coque, trois états de panneau, primitives (`.btn`, `.chip`, `.seg`, `.kbd`, `.tab`, `.dot`, `.tree`, `.empty`) | lot 1 |
 | `shell.js` | Panneaux, dock, palette, raccourcis, thème, densité, routage des espaces | lot 1 |
+| `live.js` | Le pouls : une boucle de sondage pour toute la coque, suspendue onglet masqué ; les mots du temps relatif, de la durée et du coût (trois états) | UI-3 |
 | `fonts/` | Geist et Geist Mono en woff2 | lot 1 |
 | `glossary.js` | Chargement du glossaire et pile d'infobulles épinglables | lot 2 |
 | `api.js` | **Le seul module qui appelle `fetch`.** Cible le bon projet sur les deux hôtes | figé par le squelette |
@@ -85,10 +86,13 @@ directement dans le DOM de la coque :
 | `ctx.inspector` | L'élément du panneau droit — idem |
 | `ctx.docbar` | `setBreadcrumb`, `setZoom`, `setViews`, `setValidation` |
 | `ctx.dock` | `log(onglet, …lignes)`, `clear`, `setTab`, `echo(commande)` |
-| `ctx.empty` | `(titre, phrase, commande)` → le bloc d'état vide unique |
+| `ctx.empty` | `(titre, phrase, commande, action?)` → le bloc d'état vide unique ; `action` est `{ label, run }` (un bouton qui fait, pas une commande à recopier) ; sans `action`, une commande que la Console du dock sait exécuter (liste blanche, sans argument) reçoit un bouton « Lancer dans la Console » |
+| `ctx.loading` | `(libellé, lignes?)` → `[squelette, texte pour lecteurs d'écran]` à poser dans une zone qui attend ses données (jamais un « Chargement… » nu) ; la coque en pose un sur la toile à chaque changement d'espace et le retire dès que l'espace y écrit du contenu |
+| `ctx.openPanel` | `(id)` → ouvre un panneau latéral (`explorer`, `inspector`, `evidence`) : épinglé au bureau, en tiroir sous 900 px |
 | `ctx.signal` | Un `AbortSignal` annulé quand l'espace est démonté |
 | `ctx.goto` | `goto(id, params?)` — naviguer vers un autre espace ; `params` n'est vu qu'au montage qui suit (ex. `goto('source', { file })` depuis ⌘K), jamais persisté dans le hash |
 | `ctx.params` | Ce que l'appelant de `goto()` a demandé pour CE montage — `{}` la plupart du temps |
+| `ctx.live` | `{ on(handler) }` — appelé quand le pouls annonce un changement du ledger ou des sessions (`live.js`) ; l'espace relit SES données, sans rien jeter de ce que l'utilisateur écrit ; remis à zéro par la coque à chaque changement d'espace |
 | `ctx.rail` | `{ on(id, handler) }` — enregistre ce que fait un rail sans panneau dédié (ex. « 2 », bibliothèque de Concevoir) tant que cet espace reste monté ; remis à zéro par la coque à chaque changement d'espace |
 
 Deux règles opposables :
@@ -99,6 +103,62 @@ Deux règles opposables :
 2. **Aucun module d'espace n'écrit une couleur.** Il utilise les tokens et les
    primitives de `shell.css`. `tests/unit/test_workspace_tokens.py` refuse tout
    littéral de couleur ailleurs que dans `tokens.css`.
+
+## Petits écrans, thème, accessibilité
+
+- **Sous 900 px** (`@media (max-width: 900px)` dans `shell.css`, `matchMedia`
+  identique dans `shell.js` : les deux seuils sont gardés par
+  `tests/unit/test_workspace_responsive.py`) la coque tient en une colonne. Le
+  rail devient une barre basse, explorateur, inspecteur et preuves sont des
+  **tiroirs** en surimpression (un seul à la fois, fermés à l'arrivée, jamais
+  mémorisés : un tiroir ouvert sur mobile ne rouvre pas, épinglé, sur le bureau).
+  Le bouton du rail ouvre, le focus entre dans le tiroir, Échap, son bouton
+  « Fermer » ou un appui sur le voile le referment et rendent le focus au rail.
+  La barre de document passe à la ligne ; les onglets des espaces défilent.
+- **Mesure** : `scrollWidth` du document ne prouve rien ici (`#shell` est en
+  `overflow: hidden`, il vaut `innerWidth` même quand le centre est écrasé à
+  0 px). `tests/e2e/test_workspace_responsive_a11y.py` mesure la largeur du
+  centre, le contenu de la toile et les bords des barres. Un espace qui ajoute
+  une grille ou un tableau large la garde dans sa propre boîte défilante.
+- **Thème** : trois états (`#st-theme`), `system` (suit `prefers-color-scheme` en
+  direct), `light`, `dark` ; défaut `dark`, mémorisé par projet. `data-theme-pref`
+  porte le choix, `data-theme` le thème résolu — tokens.css ne lit que lui.
+- **Onglets** : `role="tablist"` / `tab` / `tabpanel`, un seul onglet dans l'ordre
+  de tabulation, flèches gauche/droite (rebouclage), Début/Fin. Dock : la flèche
+  active ; espaces : elle déplace le focus et Entrée active (monter un espace
+  coûte des requêtes).
+- **Chargement** : `ctx.loading()` pose un squelette décoratif et un texte pour
+  les lecteurs d'écran ; la coque en pose un sur la toile à chaque changement
+  d'espace et le retire dès que l'espace y écrit du contenu. Les zones de données
+  (`#canvas`, `#explorer-body`, `#inspector-body`, `#evidence-body`) sont des
+  régions `aria-live="polite"`.
+- **États vides** : un bouton qui fait (`ctx.empty(…, action)`), pas une commande
+  à recopier. Sans `action`, une commande que la Console sait exécuter (liste
+  blanche, sans argument) reçoit « Lancer dans la Console ». Un explorateur ou un
+  inspecteur laissé muet par un espace reçoit une explication et un bouton.
+
+## Actualisation sans rechargement (UI-3)
+
+La coque se met à jour seule : `live.js` sonde `/api/workspace/pulse` à
+l'intervalle que **le serveur déclare** (`interval_seconds`) et, quand
+l'empreinte change, appelle les espaces inscrits par `ctx.live.on`. Quatre règles,
+chacune gardée par `tests/e2e/test_workspace_live_pilot.py` :
+
+1. **Un onglet masqué ne fait aucune requête** (`visibilitychange` : requête en
+   cours annulée, minuteur coupé) ; revenu visible, un sondage part tout de suite.
+2. **Sans changement, rien n'est relu** : le pouls répond `changed: false` et le
+   DOM de l'espace n'est pas touché.
+3. **Rien n'est jeté sous les doigts** : une réponse en cours de saisie (champ actif,
+   ou texte déjà écrit) retarde l'actualisation de l'espace ; le défilement du
+   board et la carte au clavier sont conservés.
+4. **Un coût inconnu se lit « inconnu »**, une borne basse « ≥ X USD », jamais
+   « 0 » (`costText`) ; une durée incalculable « inconnue ». Le coût d'une carte est
+   celui des tentatives de dispatch ; celui de la session hôte n'est mesuré nulle part.
+
+Le compteur de décisions de la barre du haut (`#decisions-pill`) est global sur le
+cockpit (tout le registre), propre au projet sur l'atelier, caché à zéro, et ouvre
+la vue Décisions d'Exécuter. La barre d'état dit « mis à jour il y a Xs », ou
+« actualisation suspendue » (onglet masqué), ou « API injoignable depuis Xs ».
 
 ## Citer un concept
 
@@ -125,7 +185,8 @@ l'atelier mono-projet, parce que le cockpit se déclare `readOnly`.
 | Route | Rend |
 |---|---|
 | `GET /api/workspace/glossary` | `{schema, source, count, entries[]}` — `entries[]` : `{id, nom, definition, raccourci, termes[], doc}` |
-| `GET /api/workspace/tasks?mission=&status=` | `{columns[8], states[9], ledger, count, tasks[], note?}` |
+| `GET /api/workspace/tasks?mission=&status=` | `{columns[8], states[9], ledger, count, tasks[], note?}` — chaque carte porte `session` (vivacité K5, `updated_at` = dernier signe de vie, `duration_s` du premier au dernier signe, `cost` de session) et `cost` (dispatch : `{usd, status exact\|lower_bound\|unknown, unpriced_calls, calls, scope}`, `usd: null` quand rien n'est chiffré, jamais `0`) |
+| `GET /api/workspace/pulse?since=&scope=` | Le pouls (UI-3) : `{fingerprint, changed, interval_seconds, scope, decisions?}`. L'empreinte est calculée par `stat` seulement ; avec `since` identique, `changed: false` et aucun détail ; sinon `decisions: {pending, oldest_at, projects[], unreadable?}` (la lecture de `grimoire status`). `scope=portfolio` agrège le registre du cockpit. `interval_seconds` : `GRIMOIRE_PULSE_SECONDS`, borné à 1..300, défaut 5 |
 | `GET /api/workspace/tasks/<id>` | La tâche + `board` + `next_moves_require: {colonne: [preuves]}` |
 | `GET /api/workspace/tasks/<id>/trace` | `{task_id, task, sources{ledger,hooks,runtime,evidence}, entries[], causes[]}` |
 | `GET /api/workspace/files?tier=` | `{projectRoot, tiers[]}` — `tiers[]` : `{id, term, label, note, roots[], editable, exists, truncated, count, files[]}` |

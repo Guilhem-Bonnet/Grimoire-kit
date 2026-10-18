@@ -58,7 +58,15 @@ def decide_task_context(hook: HookInput) -> Decision:
     # K5 : une tâche reprise n'est plus celle de la session (statut `ready`, ou
     # claim d'une autre session) — l'annonce se lit par session, pas par tâche
     # active, donc dans les deux branches.
+    from grimoire.hosts.decisions.pause_brake import pause_context, pause_lifted_notices
     from grimoire.hosts.decisions.self_view import takeover_notices
+
+    # K11 : la pause demandée, et la pause levée pour une tâche que la session avait garée.
+    pause = "\n".join(
+        part
+        for part in (pause_context(hook, active.task_id), pause_lifted_notices(hook.project_root, hook.session_id))
+        if part
+    )
 
     if active.is_fallback:
         context = no_task_context(profile, active.candidates, active.expired)
@@ -82,7 +90,7 @@ def decide_task_context(hook: HookInput) -> Decision:
     from grimoire.hosts.decisions.gate_override import record_override_request
 
     override, override_detail = record_override_request(hook)
-    context = "\n".join(part for part in (context, steering, override, lowering) if part)
+    context = "\n".join(part for part in (context, pause, steering, override, lowering) if part)
     return Decision(
         outcome=Outcome.ALLOW, context=context, detail={**detail, **link, **steering_detail, **override_detail, **lowering_detail}
     )

@@ -1096,5 +1096,8 @@ def _drive_composite_child(
             return "blocked", outcome.faults, _total_cost(executor), None, None, None
         if outcome.finished:
             return "finished", (), _total_cost(executor), None, last_output, None
+        if outcome.paused:
+            # K11 : un hold a posé le sous-flow en PAUSED ; le genre qui l'a lancé le rend en l'état, bloqué sur la pause.
+            return "blocked", outcome.warnings, _total_cost(executor), None, None, None
         assert outcome.contract is not None  # non fini : le moteur a rouvert le node suivant
         result = executor.last_result or NodeExecutionResult(pending=True)

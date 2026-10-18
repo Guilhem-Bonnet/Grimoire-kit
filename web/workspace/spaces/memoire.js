@@ -335,7 +335,7 @@ function renderFleet(wrap, ctx, state) {
   const projectsParam = () => (state.scope === 'all' ? 'all' : undefined);
 
   const loadOverview = async () => {
-    tableHost.replaceChildren(text('p', 'lbl', 'Chargement…'));
+    tableHost.replaceChildren(...ctx.loading('Chargement…', 3));
     const data = await ctx.api.memoryOverview(projectsParam()).catch(() => null);
     tableHost.replaceChildren(fleetOverviewTable(ctx, data));
   };

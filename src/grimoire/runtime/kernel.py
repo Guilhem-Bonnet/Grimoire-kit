@@ -74,7 +74,10 @@ _WF_TRANSITIONS: dict[WorkflowStatus, frozenset[WorkflowStatus]] = {
         WorkflowStatus.ABORTED,
         WorkflowStatus.REFUSED,
     }),
-    WorkflowStatus.CHECKPOINTED: frozenset({WorkflowStatus.RUNNING, WorkflowStatus.ABORTED, WorkflowStatus.REFUSED}),
+    # CHECKPOINTED → PAUSED (K11) : la pause se pose à la frontière de node, node franchi et suivant pas encore ouvert.
+    WorkflowStatus.CHECKPOINTED: frozenset(
+        {WorkflowStatus.RUNNING, WorkflowStatus.PAUSED, WorkflowStatus.ABORTED, WorkflowStatus.REFUSED}
+    ),
     WorkflowStatus.PAUSED: frozenset({WorkflowStatus.RUNNING, WorkflowStatus.ABORTED, WorkflowStatus.REFUSED}),
     WorkflowStatus.BLOCKED: frozenset({WorkflowStatus.RUNNING, WorkflowStatus.ABORTED, WorkflowStatus.REFUSED}),
     WorkflowStatus.COMPLETED: frozenset({WorkflowStatus.VERIFIED}),
@@ -564,6 +567,30 @@ class RuntimeKernel:
             wfi = WorkflowInstance.from_dict({**wfi.to_dict(), "evidence_pack_id": evidence_pack_id})
             self._save_instance(wfi)
         self._emit(RunEventType.WORKFLOW_COMPLETED, wfi, ctx)
+        return wfi
+
+    def pause(self, wfi_id: str, ctx: ExecutionContext, *, reason: str = "") -> WorkflowInstance:
+        """Pose le run en ``PAUSED`` à une frontière de node (K11, plan §2.2) et le journalise (``workflow.paused``).
+
+        Légal depuis RUNNING et CHECKPOINTED (le node vient d'être franchi, le suivant n'est pas ouvert).
+        Le run n'avance plus tant que :meth:`unpause` ne l'a pas rouvert : ``advance_step`` refuse PAUSED.
+        """
+        instances = self._load_instances()
+        wfi = instances.get(wfi_id)
+        if wfi is None:
+            raise GrimoireRuntimeError(f"WorkflowInstance not found: {wfi_id}")
+        wfi = self._transition(wfi, WorkflowStatus.PAUSED)
+        self._emit(RunEventType.WORKFLOW_PAUSED, wfi, ctx, payload={"reason": reason})
+        return wfi
+
+    def unpause(self, wfi_id: str, ctx: ExecutionContext) -> WorkflowInstance:
+        """``PAUSED → RUNNING`` (``workflow.resumed``). Le node à ouvrir l'est ensuite par ``advance_step``."""
+        instances = self._load_instances()
+        wfi = instances.get(wfi_id)
+        if wfi is None:
+            raise GrimoireRuntimeError(f"WorkflowInstance not found: {wfi_id}")
+        wfi = self._transition(wfi, WorkflowStatus.RUNNING)
+        self._emit(RunEventType.WORKFLOW_RESUMED, wfi, ctx)
         return wfi
 
     def abort(self, wfi_id: str, ctx: ExecutionContext, *, reason: str = "") -> WorkflowInstance:

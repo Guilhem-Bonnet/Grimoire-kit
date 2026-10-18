@@ -172,7 +172,10 @@ def _transition_task(ledger: MissionLedger, task_id: str, target: TaskState, *, 
         elif state == TaskState.FAILED and target != TaskState.FAILED:
             ledger.transition_task(task_id, TaskState.READY, actor_id="task-flow", reason=reason)
         elif state == TaskState.NEEDS_VERIFICATION and target == TaskState.RUNNING:
-            ledger.transition_task(task_id, TaskState.RUNNING, actor_id="task-flow", reason=reason)
+            try:
+                ledger.transition_task(task_id, TaskState.RUNNING, actor_id="task-flow", reason=reason)
+            except GrimoireMissionError as exc:  # WIP plein (K10) : la tâche reste en needs_verification, l'événement est différé
+                return changed, str(exc)
         else:
             break
         changed = True

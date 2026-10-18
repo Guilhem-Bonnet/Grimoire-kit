@@ -80,14 +80,17 @@
 //! pas si l'hote comptait reprendre. Voir
 //! `tests/unit/test_flows_rust_parity.py::test_aborted_run_status_slicing_reflects_real_progress`.
 //!
-//! Le statut `PAUSED` est declare dans `_WF_TRANSITIONS` (Python) mais
-//! aucune methode de `RuntimeKernel` ne l'atteint jamais — mort cote
-//! emission, vivant cote table de transition. `current_node_core`
-//! ci-dessous doit neanmoins statuer dessus (`match` exhaustif oblige) :
-//! il suit la meme branche que RUNNING/CREATED, comme le fait deja
-//! implicitement le `if`/`elif`/else de `_current_node` cote Python (ni
-//! BLOCKED ni CHECKPOINTED -> le else générique). Documente ici, jamais
-//! rendu explicite cote Python avant ce port.
+//! Le statut `PAUSED` est pose par `RuntimeKernel.pause` (K11, epopee
+//! #705) a la frontiere d'un node : depuis RUNNING, ou depuis CHECKPOINTED
+//! (le node vient d'etre franchi, le suivant n'est pas ouvert — arete
+//! `Checkpointed -> Paused` ajoutee des deux cotes). `current_node_core`
+//! statue dessus (`match` exhaustif oblige) : il suit la meme branche que
+//! RUNNING/CREATED, comme le fait le `if`/`elif`/else de `_current_node`
+//! cote Python (ni BLOCKED ni CHECKPOINTED -> le else generique). Le
+//! cote Python ramene lui-meme `last_step_started` au node suivant quand
+//! le dernier node ouvert est deja dans le dernier checkpoint (meme
+//! correction que pour RUNNING), donc les deux backends rendent le meme
+//! node pour un run en pause.
 //!
 //! Un statut inconnu dans des metadonnees persistees a la main
 //! (`instances.jsonl` edite manuellement) fait deja lever `WorkflowStatus(d
@@ -277,7 +280,7 @@ fn allowed_transitions(status: WorkflowStatus) -> &'static [WorkflowStatus] {
     match status {
         Created => &[Running, Aborted, Refused],
         Running => &[Checkpointed, Paused, Blocked, Completed, Aborted, Refused],
-        Checkpointed => &[Running, Aborted, Refused],
+        Checkpointed => &[Running, Paused, Aborted, Refused],
         Paused => &[Running, Aborted, Refused],
         Blocked => &[Running, Aborted, Refused],
         Completed => &[Verified],
@@ -397,9 +400,10 @@ fn current_node_core(
             CheckpointPendingHead::NoCheckpoints => order.first().cloned(),
             CheckpointPendingHead::PendingHead(head) => head,
         },
-        // RUNNING, CREATED ou PAUSED (mort cote emission, voir le docstring
-        // de ce module) : meme branche que la reference Python — dernier
-        // node demarre, sinon le premier de l'ordre.
+        // RUNNING, CREATED ou PAUSED (pose a la frontiere de node, voir le
+        // docstring de ce module) : meme branche que la reference Python —
+        // dernier node demarre (deja ramene au suivant cote Python s'il est
+        // dans le dernier checkpoint), sinon le premier de l'ordre.
         WorkflowStatus::Running | WorkflowStatus::Created | WorkflowStatus::Paused => {
             last_step_started
                 .map(str::to_string)
@@ -814,7 +818,7 @@ mod tests {
                 Running,
                 &[Checkpointed, Paused, Blocked, Completed, Aborted, Refused],
             ),
-            (Checkpointed, &[Running, Aborted, Refused]),
+            (Checkpointed, &[Running, Paused, Aborted, Refused]),
             (Paused, &[Running, Aborted, Refused]),
             (Blocked, &[Running, Aborted, Refused]),
             (Completed, &[Verified]),

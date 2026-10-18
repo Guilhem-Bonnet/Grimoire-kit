@@ -30,11 +30,13 @@ garde de chemin.
 
 from __future__ import annotations
 
+import os
 import re
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
-from grimoire.core.standard_state import LEDGER_RELPATH
+from grimoire.core.standard_generation import normalize_task_id
+from grimoire.core.standard_state import LEDGER_RELPATH, TASK_ENV
 from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
 from grimoire.hosts.decisions.tool_facts import ToolFacts, command_surface
 from grimoire.missions.lease import ORIGIN_CANCEL, ORIGIN_HAND_BACK, LeaseFile, lease_path, read_lease
@@ -83,6 +85,34 @@ def _lease_holder(hook: HookInput) -> tuple[str, int]:
 
     state = load_session_state(hook.project_root, hook.session_id, now_iso="")
     return (state.task_id, state.lease_epoch) if state.task_id and state.lease_epoch > 0 else ("", 0)
+
+
+def held_task_id(hook: HookInput) -> str:
+    """La tâche que cette session tient d'après son journal et le fichier de bail, ``""`` sinon (K13).
+
+    La même lecture que le frein — un ``stat`` et un fichier, jamais le journal du ledger — pour
+    que le reste du PreToolUse sache *quelle* tâche sans relancer ``resolve_active_task``, qui
+    rejoue tout le ledger (≈ 0,4 s à 10 000 événements, contre 50 ms de budget). Vide, la
+    résolution classique reste la règle : ``GRIMOIRE_TASK_ID`` d'abord, un fichier absent, une
+    barrière, un autre epoch, une session sans bail noté, une tâche garée (``waiting``, marque
+    du fichier de bail) ou un bail perdu (``renewed_at`` + TTL et ``busy_until`` dépassés, comme
+    ``LeaseFile.is_lost``) renvoient au ledger : ``resolve_active_task`` ne nomme ni une tâche
+    garée ni un claim expiré, et le chemin rapide ne doit pas dire autre chose que lui (K13-S1-01).
+    """
+    if os.environ.get(TASK_ENV, "").strip():
+        return ""
+    try:
+        task_id, epoch = _lease_holder(hook)
+        if not task_id:
+            return ""
+        cached = read_lease(lease_path(hook.project_root.resolve() / LEDGER_RELPATH, task_id))
+        if cached is None or not cached.holder or cached.epoch != epoch or cached.waiting:
+            return ""
+        if cached.is_lost(datetime.now(UTC)):
+            return ""  # bail perdu (TTL, ``busy_until`` dépassés) : la résolution écarte aussi un claim expiré
+        return normalize_task_id(task_id)
+    except Exception:
+        return ""
 
 
 _HELD = "held"
