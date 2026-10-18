@@ -18,7 +18,7 @@ from grimoire.core.exceptions import GrimoireConfigError
 from grimoire.hosts.capabilities import HOST_ALIASES, resolve_host
 
 #: Ordre canonique — celui de l'issue #177 et du texte d'aide `--host` du CLI.
-KNOWN_HOST_ALIASES: tuple[str, ...] = ("claude", "copilot", "gemini", "cursor", "codex")
+KNOWN_HOST_ALIASES: tuple[str, ...] = ("claude", "copilot", "gemini", "cursor", "codex", "opencode")
 
 __all__ = [
     "KNOWN_HOST_ALIASES",
@@ -48,6 +48,8 @@ def detect_enabled_hosts(project_root: Path) -> tuple[str, ...]:
         found.append("cursor")
     if (root / "AGENTS.md").is_file() and (root / ".codex").exists():
         found.append("codex")
+    if (root / ".opencode").is_dir() or (root / "opencode.json").is_file():
+        found.append("opencode")
     if not found:
         found.append("claude")
     return tuple(found)

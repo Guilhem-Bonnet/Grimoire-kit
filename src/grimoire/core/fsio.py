@@ -109,7 +109,10 @@ def _break_if_abandoned(lock: Path) -> bool:
     except OSError:
         return False
     try:
-        after = grave.stat()
+        try:
+            after = grave.stat()
+        except OSError:  # Windows : tombe disparue entre rename et stat, on ne peut rien conclure
+            return False
         if (after.st_ino, after.st_mtime_ns) == (before.st_ino, before.st_mtime_ns):
             return True
         # Pas celui qu'on a jugé : verrou neuf d'un autre, on le restitue (échoue si recréé entre-temps ;

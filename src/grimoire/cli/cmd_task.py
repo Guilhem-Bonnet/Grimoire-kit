@@ -1196,6 +1196,8 @@ def _emit_dispatch(ctx: typer.Context, report: Any) -> None:
             console.print(
                 f"[dim]  départ retenu : {report.start_tier} — {escape(report.start_tier_reason or '')}[/dim]"
             )
+        elif report.start_tier_reason:  # refus du routeur (K9) : pas de palier, un motif
+            console.print(f"[dim]  motif : {escape(report.start_tier_reason)}[/dim]")
         raise typer.Exit(report.exit_code)
 
     if report.dry_run:

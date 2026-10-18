@@ -16,6 +16,7 @@ from grimoire.hosts.emitters.base import (
 from grimoire.hosts.emitters.claude_code import ClaudeCodeEmitter
 from grimoire.hosts.emitters.copilot import CopilotEmitter
 from grimoire.hosts.emitters.generic import GenericEmitter
+from grimoire.hosts.emitters.opencode import OpenCodeEmitter
 
 _EMITTERS: dict[HostId, Emitter] = {
     HostId.CLAUDE_CODE_CLI: ClaudeCodeEmitter(),
@@ -23,6 +24,7 @@ _EMITTERS: dict[HostId, Emitter] = {
     HostId.CODEX: GenericEmitter(HostId.CODEX),
     HostId.CURSOR: GenericEmitter(HostId.CURSOR),
     HostId.GEMINI_CLI: GenericEmitter(HostId.GEMINI_CLI),
+    HostId.OPENCODE: OpenCodeEmitter(),
 }
 
 
@@ -45,6 +47,7 @@ __all__ = [
     "Emitter",
     "GenericEmitter",
     "JsonMerge",
+    "OpenCodeEmitter",
     "apply_plan",
     "emitter_for",
     "owned_managed_paths",
