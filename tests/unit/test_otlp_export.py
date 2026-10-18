@@ -408,3 +408,11 @@ def test_cli_otlp_envoie_au_collecteur_et_echoue_sur_refus(tmp_path: Path, colle
 
     missing = runner.invoke(task_app, ["trace-export", "--format", "otlp", "--project-root", str(tmp_path)])
     assert missing.exit_code == 2
+
+
+def test_le_gestionnaire_de_redirection_refuse_de_suivre() -> None:
+    """urllib appelle redirect_request : renvoyer None transforme le 3xx en HTTPError."""
+    from grimoire.traces.otlp import _NoRedirect
+
+    handler = _NoRedirect()
+    assert handler.redirect_request(None, None, 307, "Temporary Redirect", {}, "http://x/") is None
