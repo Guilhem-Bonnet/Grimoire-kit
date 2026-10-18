@@ -1,8 +1,9 @@
-"""CLI ``grimoire orchestrate`` — la pause drain/hold et le tick (K11, épopée #705, plan §4.4).
+"""CLI ``grimoire orchestrate`` — la pause drain/hold, le tick et son minuteur (K11, K12, épopée #705, plan §4.4-§4.6).
 
 ``pause`` pose un drapeau fichier (projet, machine ou tâches nommées), ``resume`` le lève, ``status`` dit ce
 qui est en pause et ce qu'un ``hold`` fait vraiment sur chaque hôte, ``tick`` est la fonction que les
-déclencheurs appellent. Aucune de ces commandes n'appelle de LLM. ``resume`` et la pause de toute la
+déclencheurs appellent (``--plan`` : le tick joué sur une copie du ledger, rien n'est écrit), ``install-timer``
+et ``uninstall-timer`` posent et retirent son minuteur optionnel. Aucune de ces commandes n'appelle de LLM. ``resume`` et la pause de toute la
 machine sont des gestes d'humain : l'origine humaine est exigée comme pour ``queue release``.
 """
 
@@ -20,7 +21,7 @@ if TYPE_CHECKING:
     from grimoire.missions.pause import PauseState
 
 orchestrate_app = typer.Typer(
-    help="Pause drain/hold (projet, machine, tâches) et tick d'orchestration : pause, resume, status, tick.",
+    help="Pause drain/hold (projet, machine, tâches), tick d'orchestration et son minuteur optionnel.",
     no_args_is_help=True,
 )
 console = Console()
@@ -150,13 +151,16 @@ def orchestrate_status(
 ) -> None:
     """Les drapeaux de pause en vigueur (projet et machine), leur périmètre, et l'effet d'un hold par tâche tenue."""
     from grimoire.missions.pause import home_root, read_pause
+    from grimoire.missions.timer import timer_status
 
     root = project_root.resolve()
     state = read_pause(home_root(root))
     lines = _hold_lines(root, ledger_root, state) if state.active else []
+    timer = timer_status(home_root(root))
     if _as_json(ctx, json_output):
-        typer.echo(json.dumps({**state.to_dict(), "held_tasks": lines}, indent=2, ensure_ascii=False))
+        typer.echo(json.dumps({**state.to_dict(), "held_tasks": lines, "timer": timer}, indent=2, ensure_ascii=False))
         return
+    console.print(f"[dim]{timer}[/dim]")
     if not state.active:
         console.print("Pas de pause : le tick admet normalement.")
         return
@@ -173,14 +177,18 @@ def orchestrate_status(
 def _render_tick(report: TickReport) -> None:
     if report.status == "paused":
         console.print("Pause en vigueur : le tick sort sans ouvrir le ledger ni rien dispatcher.")
+    elif report.status == "busy":
+        console.print("Un autre tick est en cours : celui-ci saute.")
     elif report.status == "idle":
         console.print("Aucun ledger : rien à faire.")
     else:
         plan = report.plan
         admitted = len(plan.admitted) if plan is not None else 0
         deferred = len(plan.deferred) if plan is not None else 0
+        reconciled = sum(1 for e in report.effects if e.status == "reconciled")
         console.print(
-            f"Tick : {len(report.reaped)} récolte(s), {sum(1 for w in report.woken if w.action == 'wake')} réveil(s), "
+            f"{'Plan' if report.mode == 'plan' else 'Tick'} : {len(report.reaped)} récolte(s), "
+            f"{sum(1 for w in report.woken if w.action == 'wake')} réveil(s), {reconciled} effet(s) constaté(s), "
             f"{admitted} admise(s), {deferred} différée(s)."
         )
     for attention in report.attention:
@@ -192,18 +200,26 @@ def _render_tick(report: TickReport) -> None:
 @orchestrate_app.command("tick")
 def orchestrate_tick(
     ctx: typer.Context,
-    apply: Annotated[bool, typer.Option("--apply", help="Écrire (sinon : montrer seulement).")] = False,
+    apply: Annotated[bool, typer.Option("--apply", help="Écrire (sinon : le plan, sans rien écrire).")] = False,
+    plan: Annotated[
+        bool, typer.Option("--plan", help="Le tick joué sur une copie du ledger : ce que --apply ferait (défaut).")
+    ] = False,
     project_root: Annotated[Path, _PROJECT_ROOT_OPTION] = Path(),
     ledger_root: Annotated[Path, _LEDGER_ROOT_OPTION] = _DEFAULT_LEDGER,
     json_output: Annotated[bool, _JSON_OPTION] = False,
 ) -> None:
-    """Un tick : lit les drapeaux de pause d'abord, puis récolte, rend les attentes levées et calcule l'admission.
+    """Un tick : lit les drapeaux de pause d'abord, puis récolte, rend les attentes levées, constate les effets, admet.
 
     Sous une pause de tout le périmètre, il sort sans ouvrir le ledger, avec le code 0 : une pause n'est pas une
-    panne, un minuteur ne doit pas la lire comme un échec. Sans `--apply`, rien n'est écrit.
+    panne, un minuteur ne doit pas la lire comme un échec. Un second tick pendant le premier saute (code 0).
+    Sans `--apply`, c'est le plan : le même tick, joué sur une copie du ledger, puis jeté.
     """
     from grimoire.core.exceptions import GrimoireError
     from grimoire.missions.orchestrate import run_tick
+
+    if apply and plan:
+        typer.echo("--apply et --plan s'excluent.", err=True)
+        raise typer.Exit(2)
 
     try:
         report = run_tick(project_root.resolve(), ledger_root=ledger_root, apply=apply)
@@ -215,4 +231,48 @@ def orchestrate_tick(
     else:
         _render_tick(report)
         if not apply and report.status == "ran":
-            console.print("[dim]Aperçu : relancer avec --apply pour écrire.[/dim]")
+            console.print("[dim]Plan (copie du ledger, rien n'est écrit) : relancer avec --apply pour écrire.[/dim]")
+
+
+@orchestrate_app.command("install-timer")
+def orchestrate_install_timer(
+    ctx: typer.Context,
+    interval: Annotated[str, typer.Option("--interval", help="Période du tick : 5m, 15min, 1h…")] = "5m",
+    enable: Annotated[bool, typer.Option("--enable/--no-enable", help="Activer le minuteur (systemctl --user).")] = True,
+    project_root: Annotated[Path, _PROJECT_ROOT_OPTION] = Path(),
+    json_output: Annotated[bool, _JSON_OPTION] = False,
+) -> None:
+    """Pose le minuteur optionnel du tick (unité systemd utilisateur `oneshot` + `.timer`) ; sans systemd, la ligne crontab."""
+    from grimoire.missions.pause import home_root
+    from grimoire.missions.timer import install_timer
+
+    try:
+        timer, done = install_timer(home_root(project_root.resolve()), interval, enable=enable)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from exc
+    if _as_json(ctx, json_output):
+        typer.echo(json.dumps({**timer.to_dict(), "done": done}, indent=2, ensure_ascii=False))
+        return
+    for line in done:
+        console.print(line)
+    for note in timer.notes:
+        console.print(f"[yellow]limite : {note}[/yellow]")
+
+
+@orchestrate_app.command("uninstall-timer")
+def orchestrate_uninstall_timer(
+    ctx: typer.Context,
+    project_root: Annotated[Path, _PROJECT_ROOT_OPTION] = Path(),
+    json_output: Annotated[bool, _JSON_OPTION] = False,
+) -> None:
+    """Désactive et retire le minuteur du projet."""
+    from grimoire.missions.pause import home_root
+    from grimoire.missions.timer import uninstall_timer
+
+    timer, done = uninstall_timer(home_root(project_root.resolve()))
+    if _as_json(ctx, json_output):
+        typer.echo(json.dumps({**timer.to_dict(), "done": done}, indent=2, ensure_ascii=False))
+        return
+    for line in done:
+        console.print(line)

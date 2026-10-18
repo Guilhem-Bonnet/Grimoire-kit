@@ -44,6 +44,7 @@ import hashlib
 import json
 import os
 import subprocess
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -69,6 +70,7 @@ __all__ = [
     "find_task_worktree",
     "home_of_worktree",
     "merge_task",
+    "unpushed_work",
 ]
 
 #: La convention de branche de la fence git (K3) : une tâche, une branche ``task/<id>``.
@@ -224,6 +226,68 @@ def home_of_worktree(project_root: Path) -> tuple[Path, Path] | None:
     return home, ledger
 
 
+def _temp_roots() -> tuple[Path, ...]:
+    """Les dossiers que le système vide : ``tempfile.gettempdir()`` (suit ``TMPDIR``) **et** les racines fixes.
+
+    ``TMPDIR`` pointé ailleurs ne rend pas ``/tmp`` sûr : le redémarrage le vide quand même (K12-SC1-02).
+    """
+    raw = [tempfile.gettempdir()]
+    if os.name == "posix":
+        raw += ["/tmp", "/var/tmp", "/dev/shm"]  # noqa: S108 - racines à refuser, rien n'y est écrit
+    else:
+        raw += [os.environ.get(var, "") for var in ("TEMP", "TMP")]
+    return tuple({Path(r).resolve() for r in raw if r})
+
+
+def _refuse_temp_target(repo: Path, target: Path) -> None:
+    """Un worktree vit sous le projet, jamais sous le dossier temporaire du système (K12, §4.6).
+
+    Un ``/tmp`` vidé au redémarrage emporte le travail non poussé d'une tâche que la récolte
+    rendrait ensuite à un repreneur parti de rien. Un dépôt lui-même posé sous le dossier
+    temporaire (un test, un bac à sable) garde ses worktrees chez lui : seul l'*ailleurs* est refusé.
+    """
+    homes = (repo, _state_dir(repo).parent.resolve())
+    if any(target.is_relative_to(temp) for temp in _temp_roots()) and not any(target.is_relative_to(home) for home in homes):
+        raise GrimoireMissionError(
+            f"Worktree refusé sous le dossier temporaire ({target}) : un redémarrage le viderait. "
+            "Le défaut (sous le dossier git commun du projet) ou un dossier du projet le gardent"
+        )
+
+
+def unpushed_work(service: TaskService, task_id: str) -> str:
+    """Le travail local du worktree de *task_id* que la remote n'a pas — la question de la récolte (K12), ou ``""``.
+
+    ``""`` sans worktree noté au ledger (rien à protéger) ou quand toute la branche est sur une
+    branche distante et l'arbre propre. Sinon : commits de ``task/<id>`` au-delà de la base absents
+    de toute branche distante, arbre de travail modifié, ou état illisible — un git muet ne vaut
+    pas « rien à perdre » (fail-closed) : la tâche attend l'humain au lieu d'être rendue.
+    """
+    wt = find_task_worktree(service, task_id)
+    if wt is None:
+        return ""
+    repo = wt.path if wt.path.is_dir() else service.home_root
+    found: list[str] = []
+    try:
+        ahead = _git(repo, "rev-list", "--count", f"refs/heads/{wt.branch}", "--not", "--remotes", wt.base_sha, check=False)
+        dirty = _git(wt.path, "status", "--porcelain", check=False) if wt.path.is_dir() else None
+    except (OSError, subprocess.SubprocessError) as exc:
+        found.append(f"état git illisible ({type(exc).__name__})")
+    else:
+        count = ahead.stdout.strip()
+        if ahead.returncode != 0 or not count.isdigit():
+            found.append(f"branche {wt.branch} illisible")
+        elif int(count):
+            found.append(f"{count} commit(s) non poussé(s)")
+        if dirty is not None and (dirty.returncode != 0 or dirty.stdout.strip()):
+            found.append("arbre de travail modifié" if dirty.returncode == 0 else "arbre de travail illisible")
+    if not found:
+        return ""
+    return (
+        f"{task_id} a perdu son bail avec du travail local que la remote n'a pas ({', '.join(found)} ; {wt.path}) : "
+        f"reprendre depuis {wt.branch}, ou abandonner ?"
+    )
+
+
 def find_task_worktree(service: TaskService, task_id: str) -> TaskWorktree | None:
     """Le dernier worktree que le ledger a noté pour *task_id*."""
     for event in reversed(service.ledger.events_for(task_id)):
@@ -265,6 +329,7 @@ def create_task_worktree(
     if _rev(repo, f"refs/heads/{branch}"):
         raise GrimoireMissionError(f"La branche {branch} existe déjà sans worktree noté au ledger : rien n'est écrasé")
     target = (path or _state_dir(repo) / "worktrees" / task_id).resolve()
+    _refuse_temp_target(repo, target)
     target.parent.mkdir(parents=True, exist_ok=True)
     _git(repo, "worktree", "add", "--quiet", "-b", branch, str(target), base_sha)
     gitdir = Path(_git(target, "rev-parse", "--absolute-git-dir").stdout.strip())
