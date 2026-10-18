@@ -287,6 +287,10 @@ class TaskService:
             self._ledger.claim_guard = _claim_guards(self.home_root)  # K10 WIP + K11 pause, sous le verrou
         return self._ledger
 
+    def refresh(self) -> None:
+        """Oublie le cache du ledger : la lecture suivante relit le disque (les écritures d'un autre processus y sont)."""
+        self.ledger._invalidate()
+
     @property
     def has_ledger(self) -> bool:
         return (self.ledger_root / "events.jsonl").is_file()

@@ -18,8 +18,12 @@ K12 — **idempotent et rejouable** :
 
 - un seul tick écrit à la fois : ``_grimoire-output/control/.tick.lock`` (:func:`grimoire.core.fsio.locked`,
   sans attente). Un second tick qui le trouve pris saute (``busy``, code 0 : un minuteur ne doit pas le lire
-  comme une panne) ; un tick tué rend le verrou avec son processus, et le suivant reprend : chaque étape
-  relit le ledger et ne réécrit pas ce qui y est déjà (récolte à barrière, différée unique, réveil rejoué) ;
+  comme une panne). Avec ``flock`` (POSIX), un tick tué rend le verrou avec son processus. Sans ``flock``
+  (Windows), le repli est un fichier dont la date fait foi : le tick la rafraîchit tant qu'il tourne
+  (``keepalive``), pour qu'un tick de plus de 60 s ne soit pas cassé par un second ; un tick tué laisse ce
+  fichier jusqu'à sa péremption (60 s, ou son pid mort sur un POSIX sans ``fcntl``). Le suivant reprend :
+  chaque étape relit le ledger et ne réécrit pas ce qui y est déjà (récolte à barrière, différée unique,
+  réveil rejoué) ;
 - le plan à blanc (``apply=False``, ``orchestrate tick --plan``) **est** le tick appliqué, joué sur une copie
   du ledger : mêmes récoltes, mêmes réveils, et une admission qui voit les tâches que ces gestes rendent.
   Avant K12, l'aperçu calculait l'admission sur le ledger d'avant les gestes : une tâche réveillée n'y était
@@ -125,7 +129,7 @@ def run_tick(
 
     with contextlib.ExitStack() as stack:
         try:
-            stack.enter_context(locked(service.home_root / TICK_LOCK_RELPATH, timeout=0))
+            stack.enter_context(locked(service.home_root / TICK_LOCK_RELPATH, timeout=0, keepalive=True))
         except TimeoutError:
             return TickReport(
                 "busy", state, state.attention(),

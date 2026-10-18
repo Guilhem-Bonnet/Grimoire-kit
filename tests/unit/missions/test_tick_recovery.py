@@ -462,3 +462,113 @@ def test_generated_units_pass_systemd_analyze_verify(tmp_path: Path, monkeypatch
     )
     assert done.returncode == 0, done.stderr
     assert f"WorkingDirectory={projet.resolve()}".replace("%", "%%") in plan.service
+
+
+# ── Reprise sceptique de K12 : cache périmé, temporaire hors TMPDIR, repli sans flock ──────────────────
+
+
+def test_a_second_executor_with_a_loaded_cache_does_not_redo_the_effect(projet: Path) -> None:
+    """K12-SC1-01 : l'état est relu du disque sous le verrou de l'effet, pas servi par le cache chargé avant lui."""
+    from grimoire.missions import effects
+
+    first = TaskService(projet)
+    tid = _ready(first, "Effet")
+    second = TaskService(projet)
+    second.require(tid)  # le second exécutant a déjà chargé son cache : l'intention du premier n'y est pas
+    target = {"repo": str(projet), "branch": "task/x", "sha": "a" * 40}
+    calls: list[str] = []
+
+    def act(who: str) -> Any:
+        def _do() -> str:
+            calls.append(who)
+            return target["sha"]
+
+        return _do
+
+    absent = lambda _effect: (effects.ABSENT, "branche absente")  # noqa: E731
+    one = effects.perform(first, tid, effects.GIT_PUSH, target, act("A"), actor="A", probe=absent)
+    two = effects.perform(second, tid, effects.GIT_PUSH, target, act("B"), actor="B", probe=absent)
+    assert (one.status, two.status) == ("done", "already")
+    assert calls == ["A"], f"effet refait par le second exécutant : {calls}"
+
+
+def test_the_tick_reads_effects_written_by_another_process_after_its_cache(projet: Path) -> None:
+    """K12-SC1-01 (tick) : ``reconcile`` voit une intention écrite après le chargement du cache du service."""
+    from grimoire.missions import effects
+
+    writer = TaskService(projet)
+    tid = _ready(writer, "Effet")
+    ticking = TaskService(projet)
+    ticking.require(tid)  # cache chargé avant l'écriture
+    target = {"repo": str(projet), "branch": "task/y", "sha": "b" * 40}
+    eid = effects.effect_id(tid, effects.GIT_PUSH, target)
+    writer.ledger.append_event(
+        effects.EFFECT_INTENDED_EVENT, tid, "task", "A",
+        {"effect_id": eid, "task_id": tid, "kind": effects.GIT_PUSH, "target": target},
+    )
+    [outcome] = effects.reconcile(ticking, apply=False, probe=lambda _e: (effects.ABSENT, "branche absente"))
+    assert (outcome.effect.effect_id, outcome.status) == (eid, "absent")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="/tmp et /var/tmp n'existent pas sous Windows")
+@pytest.mark.parametrize("system_tmp", ["/tmp", "/var/tmp"])
+def test_worktree_never_under_a_system_tmp_even_when_tmpdir_points_elsewhere(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, system_tmp: str
+) -> None:
+    """K12-SC1-02 : ``TMPDIR`` ailleurs ne rouvre pas ``/tmp`` ni ``/var/tmp`` (la garde ne suivait que ``gettempdir()``)."""
+    import tempfile
+    import uuid
+
+    elsewhere = tmp_path / "ailleurs"
+    elsewhere.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(elsewhere))
+    service = TaskService(repo)
+    tid = _running(service, "Sous /tmp")
+    target = Path(system_tmp) / f"k12-sc1-02-{uuid.uuid4().hex}"
+    try:
+        with pytest.raises(GrimoireMissionError, match="dossier temporaire"):
+            create_task_worktree(service, tid, repo=repo, path=target)
+        assert not target.exists(), "rien n'est créé sous le dossier temporaire"
+        assert _git(repo, "worktree", "list").count("\n") == 0, "aucun worktree n'a été ajouté"
+    finally:  # rouge-avant, la base crée le worktree : on ne laisse rien sous le temporaire du système
+        shutil.rmtree(target, ignore_errors=True)
+
+
+def test_the_tick_lock_fallback_is_kept_fresh_while_a_tick_runs(projet: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """K12-SC1-03 : sans ``flock`` (Windows), un verrou de tick vivant n'est pas cassé au bout de 60 s.
+
+    Le repli casse un ``.xlock`` plus vieux que 60 s ; un tick peut durer plus (sondes à 30 s, git à 120 s).
+    Pendant le tick, la date du verrou est donc rafraîchie : vieillie à 61 s, elle redevient récente et un
+    second tick trouve ``busy``.
+    """
+    import os
+    import time
+
+    import grimoire.core.fsio as fsio
+    from grimoire.missions import orchestrate
+
+    monkeypatch.setattr(fsio, "_fcntl", None)  # le repli de Windows
+    monkeypatch.setattr(fsio, "_PID_LIVENESS", False)
+    monkeypatch.setattr(fsio, "_KEEPALIVE_S", 0.02, raising=False)
+    TaskService(projet).add("Une tâche", (ACC,), actor="t", owner="amelia", ready=True)
+    seen: list[str] = []
+    entered: list[bool] = []
+    real = orchestrate._one_pass
+
+    def during_the_first_tick(*args: Any, **kwargs: Any) -> Any:
+        if entered:  # un second tick qui entrerait ne doit pas relancer le scénario
+            return real(*args, **kwargs)
+        entered.append(True)
+        xlock = fsio._lock_path(projet / orchestrate.TICK_LOCK_RELPATH)
+        old = time.time() - 61
+        os.utime(xlock, (old, old))  # le premier tick dure depuis 61 s
+        deadline = time.monotonic() + 1.0
+        while time.time() - xlock.stat().st_mtime > 30 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        seen.append(run_tick(projet, apply=True).status)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(orchestrate, "_one_pass", during_the_first_tick)
+    assert run_tick(projet, apply=True).status == "ran"
+    assert seen == ["busy"], "un second tick est entré pendant le premier"
+    assert run_tick(projet, apply=True).status == "ran", "le verrou est rendu à la fin du tick"

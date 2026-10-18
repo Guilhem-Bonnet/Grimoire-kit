@@ -511,14 +511,17 @@ refusé au démarrage sous `hold`.
 Le lot K12 de l'épopée #705 rend le tick sûr à relancer, à interrompre et à prévisualiser.
 
 - **Un seul tick à la fois.** `_grimoire-output/control/.tick.lock` (verrou `fsio`, sans attente) : un second tick
-  qui le trouve pris saute, code 0. Un tick tué rend le verrou avec son processus ; le suivant reprend, et chaque
-  étape relit le ledger sans réécrire ce qui y est déjà (récolte à barrière, différée unique, réveil rejoué).
+  qui le trouve pris saute, code 0. Avec `flock` (POSIX), un tick tué rend le verrou avec son processus. Sans `flock`
+  (Windows), le repli est un fichier dont la date fait foi : le tick la rafraîchit tant qu'il tourne, pour qu'un tick
+  de plus de 60 s ne soit pas cassé par un second ; un tick tué laisse ce fichier jusqu'à sa péremption (60 s). Le
+  suivant reprend, et chaque étape relit le ledger sans réécrire ce qui y est déjà (récolte à barrière, différée
+  unique, réveil rejoué) ; un effet relit l'état sur le disque sous son verrou, jamais un cache chargé avant lui.
 - **Le plan est l'application.** `orchestrate tick --plan` (le défaut sans `--apply`) joue le tick appliqué sur une
   copie du ledger sous `_grimoire-output/control/tick-plan-*`, jamais sous `/tmp`, puis la retire : mêmes récoltes,
   mêmes réveils, et une admission qui voit les tâches que ces gestes rendent. Ni board, ni mémoire, ni dispatch ne bougent.
 - **Le travail local n'est pas rendu.** Un bail perdu dont le worktree `task/<id>` porte des commits absents de toute
   branche distante, un arbre modifié ou un état git illisible passe en `waiting(human, resume_branch)` avec la question,
-  au lieu de `ready`. Un worktree de tâche n'est jamais créé sous le dossier temporaire du système.
+  au lieu de `ready`. Un worktree de tâche n'est jamais créé sous un dossier temporaire du système (`tempfile.gettempdir()`, qui suit `TMPDIR`, et aussi `/tmp`, `/var/tmp`, `/dev/shm` ; `%TEMP%` et `%TMP%` sous Windows).
 - **Effets externes réconciliés.** Un push ou une PR passe par `effect.intended` puis `effect.observed` ; une intention
   sans constat est vérifiée sur la remote (`git ls-remote`, `gh pr list --head`) avant tout nouvel essai : présent,
   constaté sans être refait ; absent, fait une fois ; invérifiable, rien n'est fait. Le tick constate, il ne refait pas.

@@ -97,7 +97,13 @@ def effect_id(task_id: str, kind: str, target: Mapping[str, str]) -> str:
 
 
 def _states(service: TaskService, task_id: str | None = None) -> tuple[dict[str, Effect], dict[str, str]]:
-    """``(intentions par id, preuve par id constaté)`` relus du ledger."""
+    """``(intentions par id, preuve par id constaté)`` relus **du disque**, pas du cache (K12-SC1-01).
+
+    Le cache d'un service n'est invalidé que par ses propres écritures : l'intention qu'un autre processus
+    a écrite depuis son chargement n'y est pas. Appelé sous le verrou de l'effet, ce rechargement est ce
+    qui fait voir à un second exécutant l'intention (et le constat) du premier.
+    """
+    service.refresh()
     intended: dict[str, Effect] = {}
     observed: dict[str, str] = {}
     for event in service.ledger.list_events(task_id):

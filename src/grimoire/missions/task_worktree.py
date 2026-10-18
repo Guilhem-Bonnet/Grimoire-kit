@@ -226,6 +226,19 @@ def home_of_worktree(project_root: Path) -> tuple[Path, Path] | None:
     return home, ledger
 
 
+def _temp_roots() -> tuple[Path, ...]:
+    """Les dossiers que le système vide : ``tempfile.gettempdir()`` (suit ``TMPDIR``) **et** les racines fixes.
+
+    ``TMPDIR`` pointé ailleurs ne rend pas ``/tmp`` sûr : le redémarrage le vide quand même (K12-SC1-02).
+    """
+    raw = [tempfile.gettempdir()]
+    if os.name == "posix":
+        raw += ["/tmp", "/var/tmp", "/dev/shm"]  # noqa: S108 - racines à refuser, rien n'y est écrit
+    else:
+        raw += [os.environ.get(var, "") for var in ("TEMP", "TMP")]
+    return tuple({Path(r).resolve() for r in raw if r})
+
+
 def _refuse_temp_target(repo: Path, target: Path) -> None:
     """Un worktree vit sous le projet, jamais sous le dossier temporaire du système (K12, §4.6).
 
@@ -233,9 +246,8 @@ def _refuse_temp_target(repo: Path, target: Path) -> None:
     rendrait ensuite à un repreneur parti de rien. Un dépôt lui-même posé sous le dossier
     temporaire (un test, un bac à sable) garde ses worktrees chez lui : seul l'*ailleurs* est refusé.
     """
-    temp = Path(tempfile.gettempdir()).resolve()
     homes = (repo, _state_dir(repo).parent.resolve())
-    if target.is_relative_to(temp) and not any(target.is_relative_to(home) for home in homes):
+    if any(target.is_relative_to(temp) for temp in _temp_roots()) and not any(target.is_relative_to(home) for home in homes):
         raise GrimoireMissionError(
             f"Worktree refusé sous le dossier temporaire ({target}) : un redémarrage le viderait. "
             "Le défaut (sous le dossier git commun du projet) ou un dossier du projet le gardent"
