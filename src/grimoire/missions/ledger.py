@@ -49,6 +49,7 @@ from grimoire.missions.ledger_rules import (
     deferred_waiting,
     parse_jsonl,
     read_jsonl,
+    replay_link,
     replay_steering,
     unclosed_blockers,
     unfenced_question,
@@ -406,7 +407,7 @@ class MissionLedger:
                 # W5-01 : ni ``task.linked`` ni ``task.dependency.added`` n'étaient
                 # rejoués — ``task link`` écrivait un événement que rien ne lisait,
                 # et ``MissionTask.dependencies`` restait vide.
-                self._replay_link(raw, payload)
+                replay_link(self._tasks, raw, payload)
             elif evt_type == RISK_ACCEPTED_EVENT:
                 # W2-10 : la tâche ciblée est ``entity_id``, comme pour la session.
                 # Un événement orphelin n'invente rien ; l'horodatage de
@@ -420,24 +421,6 @@ class MissionLedger:
                     )
             self._events.append(LedgerEvent.from_dict(raw))
         snapshot.save_if_slow(self, replay)
-
-    def _replay_link(self, raw: dict[str, Any], payload: dict[str, Any]) -> None:
-        """Ajoute la dépendance d'un événement de lien à la tâche source, sans doublon."""
-        tid = str(raw.get("entity_id") or payload.get("task_id") or "")
-        current = self._tasks.get(tid)
-        if current is None:
-            return
-        try:
-            if "dependency" in payload:
-                dep = TaskDependency.from_dict(payload["dependency"])
-            else:
-                dep = TaskDependency(DependencyKind(str(payload.get("kind", "blocks"))), str(payload["depends_on"]))
-        except (KeyError, ValueError, TypeError):
-            return
-        if dep not in current.dependencies:
-            self._tasks[tid] = MissionTask.from_dict(
-                {**current.to_dict(), "dependencies": [d.to_dict() for d in (*current.dependencies, dep)]}
-            )
 
     def _apply_transition(self, tid: str, payload: dict[str, Any]) -> None:
         old_task = self._tasks[tid]

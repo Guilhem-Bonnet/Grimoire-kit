@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 from grimoire.core.exceptions import GrimoireMissionError
 from grimoire.missions.lease import MAX_ATTEMPTS, backoff_delay
-from grimoire.missions.schemas import DependencyKind, MissionTask, TaskState
+from grimoire.missions.schemas import DependencyKind, MissionTask, TaskDependency, TaskState
 from grimoire.missions.session_link import resume_command
 from grimoire.missions.waiting import Question, ResumeHint, Waiting, new_question_id
 
@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from grimoire.missions.ledger import LeaseView
 
 __all__ = [
-    "UnjudgedClaimError", "blocks_path", "deferred_waiting", "parse_jsonl", "read_jsonl", "replay_steering", "unclosed_blockers", "unfenced_question",
+    "UnjudgedClaimError", "blocks_path", "deferred_waiting", "parse_jsonl", "read_jsonl", "replay_link", "replay_steering", "unclosed_blockers", "unfenced_question",
     "waiting_guard",
 ]
 
@@ -173,6 +173,25 @@ def blocks_path(tasks: Mapping[str, MissionTask], start: str, goal: str) -> list
             if dep.kind is DependencyKind.BLOCKS:
                 stack.append((dep.target, [*path, dep.target]))
     return []
+
+
+def replay_link(tasks: dict[str, MissionTask], raw: dict[str, Any], payload: dict[str, Any]) -> None:
+    """Ajoute la dépendance d'un événement de lien à la tâche source, sans doublon."""
+    tid = str(raw.get("entity_id") or payload.get("task_id") or "")
+    current = tasks.get(tid)
+    if current is None:
+        return
+    try:
+        if "dependency" in payload:
+            dep = TaskDependency.from_dict(payload["dependency"])
+        else:
+            dep = TaskDependency(DependencyKind(str(payload.get("kind", "blocks"))), str(payload["depends_on"]))
+    except (KeyError, ValueError, TypeError):
+        return
+    if dep not in current.dependencies:
+        tasks[tid] = MissionTask.from_dict(
+            {**current.to_dict(), "dependencies": [d.to_dict() for d in (*current.dependencies, dep)]}
+        )
 
 
 def replay_steering(tasks: dict[str, MissionTask], evt_type: str, payload: dict[str, Any]) -> None:
