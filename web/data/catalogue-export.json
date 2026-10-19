@@ -1293,7 +1293,7 @@
       "name": "Secure local coordinator",
       "intent": "Coordonner plusieurs agents locaux sans proxy de credentials ni canal opaque.",
       "problem": "Un coordinateur local peut devenir un relais de tokens, un bus non audité ou un contournement des policies.",
-      "solution": "Utiliser inbox signée, terminal bridge officiel, sessions bornées, env scrub et gates avant action.",
+      "solution": "Utiliser inbox, terminal bridge officiel, sessions bornées, env scrub et gates avant action.",
       "docPath": "nodal/reference/patterns/runtime-et-evolution/#run-12",
       "controls": [
         "Agent privilege boundary",
@@ -4163,7 +4163,7 @@
     {
       "id": "uc-43",
       "name": "Génération procédurale (PCG) gouvernée",
-      "description": "« Nova » génère des donjons rogue-like. COG-01 décompose les contraintes (connexité, densité d'ennemis, clé avant porte) ; QUA-14 définit le schéma de salle. La génération part d'une seed journalisée (QUA-04). Le harnais (UC-13) valide chaque donjon : il détecte 2 % de seeds plaçant la clé derrière la porte qu'elle ouvre — un soft-lock — bloqué par GOV-08 jusqu'au correctif de la grammaire. Le rejeu d'une seed reproduit exactement le donjon et le bug, facilitant la correction. QUA-15 juge la diversité (pas de motif répété sur 1000 seeds). Evidence pack scellé. Palier Standard, Frontier pour la grammaire.",
+      "description": "« Nova » génère des donjons rogue-like. COG-01 décompose les contraintes (connexité, densité d'ennemis, clé avant porte) ; QUA-14 définit le schéma de salle. La génération part d'une seed journalisée (QUA-04). Le harnais (UC-13) valide chaque donjon : il détecte 2 % de seeds plaçant la clé derrière la porte qu'elle ouvre — un soft-lock — bloqué par GOV-08 jusqu'au correctif de la grammaire. Le rejeu d'une seed reproduit exactement le donjon et le bug, facilitant la correction. QUA-15 juge la diversité (pas de motif répété sur 1000 seeds). Evidence pack produit. Palier Standard, Frontier pour la grammaire.",
       "patterns": [
         "COG-01",
         "GOV-08",
