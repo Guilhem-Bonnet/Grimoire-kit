@@ -1,0 +1,12 @@
+# Sorties du rendu : jamais commitées (voir README.md)
+footage/
+frames/
+shots/
+storyboard/
+scene4.html
+clips.manifest.json
+bande-son-brute.wav
+bande-son.wav
+*.mp4
+*.wav
+__pycache__/
