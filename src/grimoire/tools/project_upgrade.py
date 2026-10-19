@@ -623,6 +623,9 @@ class ApplyResult:
     ``"<name>: <detail>"`` signature. Never a reason `ok` is False on their
     own; see :func:`propose_repairs`/:func:`propose_doctor_repairs`."""
     repairs_proposed: int = 0
+    host_drift: tuple[str, ...] = ()
+    """Host files still missing or stale on disk after ``up`` (D-07, ``host_sync.ok``
+    obligatoire) — the probe's verdict, not ``up``'s own claim."""
     failing_checks: tuple[str, ...] = ()
     """Names of the checks that actually caused ``ok`` to be ``False`` —
     ``"up"`` (the upgrade itself failed), ``"hook"`` (the replayed hook
@@ -639,8 +642,24 @@ class ApplyResult:
             "hook": self.hook.to_dict(),
             "preexisting_failures": list(self.preexisting_failures),
             "repairs_proposed": self.repairs_proposed,
+            "host_drift": list(self.host_drift),
             "failing_checks": list(self.failing_checks),
         }
+
+
+def _host_drift(target: Path) -> tuple[str, ...]:
+    """Fichiers hôtes manquants ou périmés (jamais modifiés à la main) des hôtes activés, lus sur le disque.
+
+    Une panne de la sonde est elle-même un écart : inconnu n'est pas OK.
+    """
+    from grimoire.hosts.detection import enabled_host_ids
+    from grimoire.hosts.probe import probe_hosts
+
+    try:
+        enabled = tuple(sorted(enabled_host_ids(target), key=lambda h: h.value))
+        return probe_hosts(target, enabled).drift if enabled else ()
+    except Exception as exc:
+        return (f"sonde d'hôtes en échec ({type(exc).__name__}: {exc})",)
 
 
 def apply_upgrade(target: Path, *, host: str = "claude") -> ApplyResult:
@@ -722,6 +741,10 @@ def apply_upgrade(target: Path, *, host: str = "claude") -> ApplyResult:
     hook = probe_hook(target, host=host)
     if not hook.ok:
         failing_checks.append("hook")
+    host_drift = _host_drift(target)
+    if host_drift:
+        failures.append(f"surfaces hôtes absentes ou périmées après `up` : {', '.join(host_drift[:5])}")
+        failing_checks.append("host_sync")
     return ApplyResult(
         ok=not failures and hook.ok,
         up_ok=True,
@@ -729,6 +752,7 @@ def apply_upgrade(target: Path, *, host: str = "claude") -> ApplyResult:
         hook=hook,
         preexisting_failures=preexisting,
         repairs_proposed=repairs_proposed,
+        host_drift=host_drift,
         failing_checks=tuple(failing_checks),
     )
 
