@@ -109,6 +109,17 @@ def _pr_cited(subject: str, version_body: str) -> bool:
     return f"#{match.group('num')}" in version_body
 
 
+def _sha_cited(sha: str, version_body: str) -> bool:
+    """Le corps de la section publiée cite-t-il le commit par ses huit premiers caractères ?
+
+    Pour un commit poussé sur ``main`` sans PR (donc sans ``(#NNN)`` au sujet)
+    et sans toucher ``CHANGELOG.md`` : même rattrapage que le numéro de PR,
+    même portée (la seule section publiée par ``version.txt``), mais la
+    preuve est le hash cité, explicite et vérifiable, jamais une absence.
+    """
+    return len(sha) >= 8 and sha[:8] in version_body
+
+
 def _git(repo: Path, *args: str) -> str | None:
     import subprocess
 
@@ -154,7 +165,7 @@ def coverage_problems(repo: Path, text: str, version: str) -> list[str]:
             continue
         touched = _git(repo, "diff-tree", "--no-commit-id", "--name-only", "-r", sha) or ""
         if "CHANGELOG.md" not in touched.split():
-            if _pr_cited(subject, bodies.get(version, "")):
+            if _pr_cited(subject, bodies.get(version, "")) or _sha_cited(sha, bodies.get(version, "")):
                 continue
             match = PR_NUMBER.search(subject)
             detail = f", et #{match.group('num')} n'apparaît pas dans [{version}]" if match else ""
