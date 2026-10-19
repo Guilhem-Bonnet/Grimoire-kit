@@ -256,3 +256,55 @@ def test_outil_nomme_dans_une_phrase_n_est_pas_une_commande() -> None:
 
 def test_commande_nue_ne_masque_pas_une_revue() -> None:
     assert classify(tache(acceptance=("pytest tests/unit à la main",))) is Verifiability.V1
+
+
+# --- Défaut K : une preuve attendue en prose n'est pas un critère de verdict ---
+
+
+def test_preuve_attendue_en_prose_ne_baisse_pas_la_classe() -> None:
+    t = tache(
+        acceptance=("fichier _scratch/x.json existe", "fichier _scratch/x.md existe"),
+        expected_evidence=("x.json et x.md",),
+    )
+    assert classify(t) is Verifiability.V0
+
+
+def test_preuve_attendue_seule_en_prose_reste_v2() -> None:
+    # Rien d'autre ne porte de critère : ignorer la prose ne doit pas créer un V0.
+    assert classify(tache(acceptance=(), expected_evidence=("x.json et x.md",))) is Verifiability.V2
+
+
+def test_preuve_attendue_reconnue_compte_toujours() -> None:
+    assert classify(tache(acceptance=("pytest vert",), expected_evidence=("revue par un pair",))) is Verifiability.V1
+
+
+def test_critere_d_acceptance_ambigu_reste_v2_malgre_preuve_mecanique() -> None:
+    t = tache(acceptance=("le code est élégant",), expected_evidence=("pytest vert",))
+    assert classify(t) is Verifiability.V2
+
+
+# --- Défaut L : formulations voisines de « fichier X existe » ---
+
+
+def test_fichier_attendu_formulations_acceptees() -> None:
+    for texte in (
+        "Le fichier attendu docs/x.md existe",
+        "le fichier docs/x.md est présent",
+        "le fichier docs/x.md est créé",
+        "le fichier docs/x.md existe bien",
+        "le fichier généré docs/x.md existe",
+        "le fichier de sortie out.json est produit",
+        "le fichier produit existe",
+    ):
+        assert classify(tache(acceptance=(texte,), checks=(TaskCheck(cmd="true"),))) is Verifiability.V0, texte
+
+
+def test_fichier_attendu_formulations_refusees() -> None:
+    for texte in (
+        "a file explains why the design exists",
+        "un fichier décrit pourquoi X existe",
+        "le fichier README explique pourquoi le module existe",
+        "le fichier attendu est bien organisé",
+        "le fichier docs/x.md est lisible",
+    ):
+        assert classify(tache(acceptance=(texte,))) is Verifiability.V2, texte
