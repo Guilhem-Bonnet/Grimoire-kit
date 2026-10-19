@@ -829,3 +829,44 @@ En `unattended` à 1,48 $ : 111,85 $, 553,64 $ et 2 197,80 $. Ce pilote ne mesur
 - `build_report` n'agrège toujours pas `aidlc`.
 
 Données brutes hors dépôt : `_scratch/bench-aidlc-b06-pilot/` de la Forge (`budget.jsonl`, `ws-*/state/`, journaux `*.stream.jsonl`).
+
+### 15.6 Campagne palier 1 : pré-enregistrement (écrit le 2026-10-19, avant le premier run, non modifié ensuite)
+
+Autorisé par Guilhem : palier 1 seul (§15.5, « Plafond proposé »), **plafond dur de 160 $** pour toute la passe. Le palier 2 (k=3, 500 $ au total)
+n'est pas autorisé et n'est pas lancé : il se recalcule sur la médiane mesurée ici.
+
+**Configuration** (`state/aidlc-preregistration.json`, écrit par `--dry-run`, empreinte `config_digest` `496cf4c6c0735b1d7a80e3fb94ebb25ec5d1ac74ce121e2c3b39f9b02428617f`,
+sha256 du fichier `2b301dcf6ef968d193ef6d195a73df1b22b2a56fba3cbb84e2ce9f67047b1cb8`) :
+
+- bras `aidlc` seul, AI-DLC 2.11.0, scope `express`, pilote **`scripted-person`**, `k = 1`, graine 551 ;
+- les 20 tâches du lot L, dans l'ordre du tirage (identiques à `selection.json` du lot L), clone `polyglot-benchmark` `7e0611e7` du lot L (`--bench-root`), mêmes tests cachés :
+  `python/{zipper,react,list-ops,proverb,bowling}`, `javascript/{list-ops,go-counting,affine-cipher,queen-attack,transpose}`,
+  `go/{error-handling,simple-linked-list,palindrome-products,pov,bottle-song}`, `rust/{react,forth,scale-generator,two-bucket,poker}` ;
+- modèle `claude-opus-5-5` (`--model`), Claude Code 2.1.302, `--auth oauth-copy`, jamais `--bare` ; timeout 3600 s par run, 12 réponses au plus,
+  seuil de boucle 8 ;
+- journal de budget neuf (`state/aidlc-budget.jsonl`, cumul de départ 0 $), `--max-total-usd 160` ; environnement du lanceur vidé (`env -i`), `TMPDIR` sous le workspace ;
+- épinglage revérifié avant le premier run : `v2.11.0^{commit}` = `6a378b53` ; installeur mis en place = `git show v2.11.0:scripts/install.sh` (sha256 `aaa739b9…`) ;
+  binaire installé sha256 `2503ce11…` = ligne `aidlc-linux-x64` du `checksums.txt` de la release ; `version.json` installé : `sourceDigest` `6a378b53…` ; `aidlc version` :
+  `aidlc 2.11.0 (runtime 2.11.0)`. Provenance `gh attestation` désactivée (aucun jeton GitHub).
+
+**Limite d'équité, déclarée** : en `scripted-person`, AI-DLC reçoit une personne simulée qui répond `Approved.` à chaque fin de tour. Aucun bras du kit ne
+reçoit cette aide : les bras `nu` et `kit-gov` travaillent en un seul `claude -p` sans réponse humaine. Le pilote `unattended` n'est pas retenu : au pilote,
+il ne mesurait pas AI-DLC (§15.5).
+
+**Mesure principale** : succès aux tests cachés, par run, taux sur les runs exécutés avec **IC95 de Wilson** (le bootstrap du harnais dégénère à 0 % ou 100 %) ;
+le bootstrap de `three_arms.py` est donné à côté. Un run arrêté par `timeout`, `loop` ou `reply_cap` compte comme un échec (règle du bras). Un run non lancé faute de
+budget n'est **pas** un échec : il est rapporté « non exécuté », hors dénominateur.
+
+**Contrôle de transcription (W1-08b)** : taux principal sur les runs non `invalid` (règle de `build_report`) ; taux sur tous les runs à côté. Chaque `invalid`
+est relu à la main (faux positif connu sur le gras Markdown, §15.5) et le verdict de relecture est rapporté, sans changer le taux principal.
+
+**Mesures secondaires** : coût total et par run (médiane, min, max), coût par tâche résolue, temps mur, appels `claude -p` et reprises, tours, gates
+(`STAGE_AWAITING_APPROVAL` et `GATE_APPROVED` du journal d'audit), interventions humaines simulées (`human_gates.py`, B-05) et réponses jouées,
+`WORKFLOW_COMPLETED`, raison d'arrêt.
+
+**Comparaison** : descriptive, aux bras `nu` et `kit-gov` du lot L sur les mêmes 20 tâches (eux à k=3, ici k=1). Aucune conclusion de supériorité
+au-delà de ce que l'IC permet : à 20 tâches, l'écart minimal détectable est de **44 points** (pire cas, §13). Le lot L est saturé (60/60 pour les deux bras) :
+un écart de succès ne pourra aller que dans un sens.
+
+**Arrêt** : net au plafond (garde-fou du bras). Un défaut du bras ou du garde-fou (coût mal compté, blocage) arrête la campagne ; il est corrigé avec un test
+rouge puis vert, et la campagne reprend sous le même plafond cumulé (le journal repart du cumul, les runs déjà écrits ne sont pas rejoués).
