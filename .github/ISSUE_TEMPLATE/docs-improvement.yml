@@ -1,4 +1,4 @@
-name: "📚 Amélioration de la documentation"
+name: "Amélioration de la documentation"
 description: Signaler une erreur ou proposer une amélioration dans la documentation.
 labels: ["type:docs"]
 body:

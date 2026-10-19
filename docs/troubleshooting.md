@@ -4,14 +4,14 @@ audience: utilisateur
 
 <p align="right"><a href="../README.md">README</a></p>
 
-# <img src="../assets/icons/microscope.svg" width="32" height="32" alt=""> Troubleshooting — Grimoire Custom Kit
+# <img src="../assets/icons/search.svg" width="32" height="32" alt=""> Troubleshooting — Grimoire Custom Kit
 
 Solutions aux problèmes les plus fréquents.
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
 
-## <img src="../assets/icons/brain.svg" width="28" height="28" alt=""> 1. La mémoire sémantique ne fonctionne pas
+## <img src="../assets/icons/book.svg" width="28" height="28" alt=""> 1. La mémoire sémantique ne fonctionne pas
 
 **Symptôme** : `**Attention** Mémoire sémantique indisponible` ou recherche peu pertinente
 
@@ -47,7 +47,7 @@ grimoire memory status
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/microscope.svg" width="28" height="28" alt=""> 2. cc-verify.sh ne trouve pas le bon stack
+## <img src="../assets/icons/search.svg" width="28" height="28" alt=""> 2. cc-verify.sh ne trouve pas le bon stack
 
 **Symptôme** : `**Attention** Aucun stack reconnu` sur un projet Go/TypeScript/etc.
 
@@ -73,7 +73,7 @@ bash _grimoire/kit/framework/cc-verify.sh --stack go,docker
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/microscope.svg" width="28" height="28" alt=""> 3. Le pre-commit hook bloque le commit
+## <img src="../assets/icons/search.svg" width="28" height="28" alt=""> 3. Le pre-commit hook bloque le commit
 
 **Symptôme** : ` Commit bloqué — CC FAIL détecté`
 
@@ -125,7 +125,7 @@ bash grimoire-init.sh --name "..." --user "..." --target /chemin/vers/projet
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/microscope.svg" width="28" height="28" alt=""> 5. sil-collect.sh ne génère rien
+## <img src="../assets/icons/search.svg" width="28" height="28" alt=""> 5. sil-collect.sh ne génère rien
 
 **Symptôme** : `Aucune source de données disponible` / rapport vide
 
@@ -148,7 +148,7 @@ bash _grimoire/kit/framework/sil-collect.sh --force-empty
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/team.svg" width="28" height="28" alt=""> 6. Les agents ne se souviennent pas du contexte entre sessions
+## <img src="../assets/icons/fleet.svg" width="28" height="28" alt=""> 6. Les agents ne se souviennent pas du contexte entre sessions
 
 **Symptôme** : L'agent ne connaît pas le projet au démarrage
 
@@ -170,7 +170,7 @@ grimoire memory search "nom du projet"
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/puzzle.svg" width="28" height="28" alt=""> 7. auto_select_archetype détecte le mauvais archétype
+## <img src="../assets/icons/layers.svg" width="28" height="28" alt=""> 7. auto_select_archetype détecte le mauvais archétype
 
 **Symptôme** : `--auto` sélectionne `minimal` au lieu de `web-app` ou `infra-ops`
 
@@ -196,7 +196,7 @@ bash grimoire-init.sh --name "..." --user "..." --archetype web-app
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/microscope.svg" width="28" height="28" alt=""> 8. Erreur `Permission denied` sur les scripts
+## <img src="../assets/icons/search.svg" width="28" height="28" alt=""> 8. Erreur `Permission denied` sur les scripts
 
 ```bash
 chmod +x _grimoire/kit/framework/cc-verify.sh
@@ -206,7 +206,7 @@ chmod +x .git/hooks/pre-commit
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/microscope.svg" width="28" height="28" alt=""> 9. `python3 maintenance.py health-check` échoue
+## <img src="../assets/icons/search.svg" width="28" height="28" alt=""> 9. `python3 maintenance.py health-check` échoue
 
 ```bash
 # Vérifier Python
@@ -222,7 +222,7 @@ pip3 install -r requirements.txt
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/team.svg" width="28" height="28" alt=""> 10. `guard` ne trouve aucun agent
+## <img src="../assets/icons/fleet.svg" width="28" height="28" alt=""> 10. `guard` ne trouve aucun agent
 
 ```bash
 # Vérifier depuis le bon répertoire (doit être la racine du kit ou du projet)
@@ -241,7 +241,7 @@ Si aucun agent trouvé, vérifiez que `<activation` ou `NEVER break character` e
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/dna.svg" width="28" height="28" alt=""> 11. `evolve` génère 0 mutations
+## <img src="../assets/icons/vector.svg" width="28" height="28" alt=""> 11. `evolve` génère 0 mutations
 
 C'est **normal** pour un projet neuf ou le repo kit lui-même (pas de Grimoire_TRACE).
 
@@ -262,7 +262,7 @@ Après quelques semaines d'usage réel (5+ interactions par agent), les mutation
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/team.svg" width="28" height="28" alt=""> 12. `forge` génère un agent avec de mauvais tags / nommage incorrect
+## <img src="../assets/icons/fleet.svg" width="28" height="28" alt=""> 12. `forge` génère un agent avec de mauvais tags / nommage incorrect
 
 ```bash
 # Vérifier la description (éviter les caractères spéciaux)
@@ -279,7 +279,7 @@ Les tags sont dérivés des 12 domaines prédéfinis (database, security, fronte
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/microscope.svg" width="28" height="28" alt=""> 13. `bench` ne trouve pas de données / rapport vide
+## <img src="../assets/icons/search.svg" width="28" height="28" alt=""> 13. `bench` ne trouve pas de données / rapport vide
 
 ```bash
 # Vérifier que des sessions existent
@@ -298,7 +298,7 @@ Le rapport hebdomadaire publié automatiquement par la CI (workflow « Grimoire 
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/cognition.svg" width="28" height="28" alt=""> 14. Rate limit Copilot — « exhausted this model's rate limit »
+## 14. Rate limit Copilot — « exhausted this model's rate limit »
 
 Ce message vient du provider (GitHub / OpenAI / Anthropic) quand le quota de requêtes ou tokens par période est dépassé.
 
@@ -392,7 +392,7 @@ python3 -m unittest discover -s tests -p 'test_*.py'
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/network.svg" width="28" height="28" alt=""> 16. Erreurs réseau — ERR_CONNECTION_CLOSED
+## <img src="../assets/icons/graph.svg" width="28" height="28" alt=""> 16. Erreurs réseau — ERR_CONNECTION_CLOSED
 
 **Symptôme** : `net::ERR_CONNECTION_CLOSED` ou `Désolé, erreur au niveau du réseau` dans Copilot Chat. Les agents sont interrompus en pleine exécution.
 
@@ -424,7 +424,7 @@ nordvpn allowlist add app /usr/share/code/code
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/team.svg" width="28" height="28" alt=""> 17. Confirmations bloquantes — agents interrompus
+## <img src="../assets/icons/fleet.svg" width="28" height="28" alt=""> 17. Confirmations bloquantes — agents interrompus
 
 **Symptôme** : L'agent demande confirmation à chaque commande terminal, chaque lecture de fichier, chaque outil — rendant les workflows inutilisables.
 
@@ -442,7 +442,7 @@ nordvpn allowlist add app /usr/share/code/code
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/lightbulb.svg" width="28" height="28" alt=""> Obtenir de l'aide
+## Obtenir de l'aide
 
 Si le problème persiste :
 

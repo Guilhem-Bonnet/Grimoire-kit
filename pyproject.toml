@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "grimoire-kit"
 dynamic = ["version"]
-description = "Composable AI agent platform — personas, memory, workflows, and quality automation for any project."
+description = "Dashboard, task board, project memory and evidence check for code you delegate to agents (Claude Code, Copilot)."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"

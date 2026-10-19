@@ -1,6 +1,6 @@
 <p align="right"><a href="../README.md">README</a> · <a href="../docs">Docs</a></p>
 
-# <img src="../docs/assets/icons/lightbulb.svg" width="32" height="32" alt=""> Question Escalation Chain (QEC) — Remontée Structurée des Incertitudes
+# Question Escalation Chain (QEC) — Remontée Structurée des Incertitudes
 
 > **BM-51** — Protocole de canalisation et agrégation des questions des sub-agents.
 >
@@ -15,7 +15,7 @@
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
 
-## <img src="../docs/assets/icons/temple.svg" width="28" height="28" alt=""> Architecture de la Chaîne
+## <img src="../docs/assets/icons/layers.svg" width="28" height="28" alt=""> Architecture de la Chaîne
 
 ```
 Sub-Agent (bloqué)
@@ -62,7 +62,7 @@ Sub-Agent (bloqué)
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Format d'une Question Escaladée
+## <img src="../docs/assets/icons/doc.svg" width="28" height="28" alt=""> Format d'une Question Escaladée
 
 Chaque question dans le buffer suit ce format :
 
@@ -93,7 +93,7 @@ escalated_question:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> Phase 1 — Collecte et Classification
+## Phase 1 — Collecte et Classification
 
 ### Réception
 
@@ -132,7 +132,7 @@ priority_rules:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/microscope.svg" width="28" height="28" alt=""> Phase 2 — Auto-résolution par Contexte
+## <img src="../docs/assets/icons/search.svg" width="28" height="28" alt=""> Phase 2 — Auto-résolution par Contexte
 
 Avant de déranger l'utilisateur, l'orchestrateur tente de résoudre chaque question :
 
@@ -184,7 +184,7 @@ POUR CHAQUE question dans le buffer :
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> Phase 3 — Présentation Groupée à l'Utilisateur
+## Phase 3 — Présentation Groupée à l'Utilisateur
 
 ### Déclencheur de présentation
 
@@ -230,7 +230,7 @@ La présentation est déclenchée quand :
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/boomerang.svg" width="28" height="28" alt=""> Redistribution des Réponses
+## <img src="../docs/assets/icons/undo.svg" width="28" height="28" alt=""> Redistribution des Réponses
 
 Quand l'utilisateur répond :
 
@@ -247,7 +247,7 @@ POUR CHAQUE réponse reçue :
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/brain.svg" width="28" height="28" alt=""> QA History — Mémoire des Questions-Réponses
+## <img src="../docs/assets/icons/book.svg" width="28" height="28" alt=""> QA History — Mémoire des Questions-Réponses
 
 Fichier : `_grimoire-output/.qa-history.yaml`
 
@@ -271,7 +271,7 @@ entries:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration Grimoire Trace
+## Intégration Grimoire Trace
 
 ```
 [timestamp] [orchestrator]  [QEC:received]       from=dev/Amelia | type=missing_data | priority=blocking
@@ -283,7 +283,7 @@ entries:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> Intégration dans les Workflows
+## Intégration dans les Workflows
 
 ### Dans un step `orchestrate` (subagent-orchestration.md)
 
@@ -318,7 +318,7 @@ entries:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Références Croisées
+## <img src="../docs/assets/icons/doc.svg" width="28" height="28" alt=""> Références Croisées
 
 - Orchestrator Gateway : [framework/orchestrator-gateway.md](orchestrator-gateway.md) (BM-53) — héberge le Question Buffer
 - Honest Uncertainty : [framework/honest-uncertainty-protocol.md](honest-uncertainty-protocol.md) (BM-50) — source des escalades

@@ -4,14 +4,14 @@ audience: utilisateur
 
 <p align="right"><a href="../README.md">README</a></p>
 
-# <img src="../assets/icons/team.svg" width="32" height="32" alt=""> Créer un agent — Guide
+# <img src="../assets/icons/fleet.svg" width="32" height="32" alt=""> Créer un agent — Guide
 
 > Ce guide répond au **comment**. Avant de commencer, vérifiez le **quand** dans
 > [Doctrine — quand créer un artefact](artifact-doctrine.md) : un agent n'est justifié que si la
 > décision est impossible à écrire d'avance et qu'il a une frontière d'outils qui lui est propre.
 > Sinon, un skill ou un prompt suffit et coûte moins cher.
 
-## <img src="../assets/icons/team.svg" width="28" height="28" alt=""> Voie rapide — Agent Forge (BM-52)
+## <img src="../assets/icons/fleet.svg" width="28" height="28" alt=""> Voie rapide — Agent Forge (BM-52)
 
 `agent-forge.py` génère un scaffold rempli intelligemment depuis un besoin textuel ou des gaps détectés automatiquement.
 
@@ -52,7 +52,7 @@ forge --from "..."
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/team.svg" width="28" height="28" alt=""> Anatomie d'un agent Grimoire Custom
+## <img src="../assets/icons/fleet.svg" width="28" height="28" alt=""> Anatomie d'un agent Grimoire Custom
 
 Un agent est un fichier Markdown structuré avec des balises XML qui définissent sa personnalité, ses capacités et ses actions.
 
@@ -66,7 +66,7 @@ mon-agent.md
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/team.svg" width="28" height="28" alt=""> Créer un agent de zéro
+## <img src="../assets/icons/fleet.svg" width="28" height="28" alt=""> Créer un agent de zéro
 
 ### 1. Copier le template
 
@@ -210,7 +210,7 @@ echo "# Learnings — Gardien" > _grimoire/_memory/agent-learnings/security-app.
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/lightbulb.svg" width="28" height="28" alt=""> Clause "Use when"
+## Clause "Use when"
 
 Depuis la doctrine d'emploi (voir [artifact-doctrine.md](artifact-doctrine.md)), la clause n'est
 plus une suggestion : `use_when`, `dont_use_when`, `tools` et `tool_boundary` sont des champs
@@ -256,7 +256,7 @@ Cette clause est lue par l'orchestrateur au moment du routage.
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/team.svg" width="28" height="28" alt=""> Personnaliser un agent du kit (override)
+## <img src="../assets/icons/fleet.svg" width="28" height="28" alt=""> Personnaliser un agent du kit (override)
 
 Un fichier sous `_grimoire/overrides/agents/<nom>.md` prime sur son homologue
 `_grimoire/kit/agents/<nom>.md` — c'est la seule façon sanctionnée de
@@ -329,7 +329,7 @@ l'override, se fait en supprimant le fichier `_grimoire/overrides/agents/<nom>.m
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/lightbulb.svg" width="28" height="28" alt=""> Bonnes pratiques
+## Bonnes pratiques
 
 ### Scope strict
 Chaque agent doit avoir un périmètre clair. Si deux agents se chevauchent, c'est un signe qu'il faut fusionner ou clarifier les frontières.

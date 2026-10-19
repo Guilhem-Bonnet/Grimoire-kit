@@ -70,8 +70,8 @@ const PANELS = { explorer: 'panel-explorer', inspector: 'panel-inspector', evide
 const $ = (id) => document.getElementById(id);
 const root = document.documentElement;
 
-// ── Icônes : le sprite icons.svg, généré depuis docs/assets/icons ───────────
-// `scripts/build-icon-sprite.py` produit le sprite ; tests/unit/
+// ── Icônes : le sprite icons.svg, figé jusqu'à sa bascule sur la famille ────
+// du site (docs/assets/brand/icons.svg) ; tests/unit/
 // test_workspace_icons.py échoue si un appel à icon() cite un symbole absent.
 // Décoratif par défaut (`aria-hidden`) : le libellé voisin porte le sens.
 // Avec `label`, l'icône porte elle-même le sens (`role="img"` + `aria-label`).

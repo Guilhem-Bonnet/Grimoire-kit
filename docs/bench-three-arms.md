@@ -4,7 +4,7 @@ audience: contributeur
 
 <p align="right"><a href="../README.md">README</a> · <a href="../CHANGELOG.md">Changelog</a> · <a href="index.md">Docs</a></p>
 
-# <img src="assets/icons/rocket.svg" width="32" height="32" alt=""> Banc à trois bras
+# <img src="assets/icons/play.svg" width="32" height="32" alt=""> Banc à trois bras
 
 > Issue [#551](https://github.com/Guilhem-Bonnet/Grimoire-kit/issues/551) —
 > plan produit 2026-Q4 (`docs/plan-2026-q4.md`), phase 1, lot 1.1. Protocole
