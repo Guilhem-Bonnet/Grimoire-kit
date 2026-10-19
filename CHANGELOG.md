@@ -7,7 +7,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
-- fix(missions): le classifieur de vérifiabilité ne fait plus monter en V2 sur une preuve attendue en prose, et reconnaît « fichier attendu X existe ». Constat du 2026-10-19 : une tâche aux critères « fichier _scratch/x.json existe » et « fichier _scratch/x.md existe » restait V2 parce que la preuve attendue « x.json et x.md » était comptée comme critère non reconnu, donc `recommended_model` nul et délégation sur le modèle de la session.
+- fix(missions): le classifieur de vérifiabilité ne fait plus monter en V2 sur une preuve attendue en prose, et reconnaît « fichier attendu X existe » (#835). Constat du 2026-10-19 : une tâche aux critères « fichier _scratch/x.json existe » et « fichier _scratch/x.md existe » restait V2 parce que la preuve attendue « x.json et x.md » était comptée comme critère non reconnu, donc `recommended_model` nul et délégation sur le modèle de la session.
   - Changement : `_criteres` garde toute l'`acceptance` mais n'ajoute une `expected_evidence` que si elle est reconnue (mécanique ou revue), car la preuve décrit ce qu'on produit, pas un verdict (le champ avait été inclus pour qu'un critère sérieux logé là ne passe pas en V0 faute d'être lu, cela reste vrai). Le motif `fichier_attendu` accepte un qualificatif fermé (attendu, généré, produit, créé, livré, de sortie) et « est présent / créé / généré / produit », « existe bien » ; aucun mot libre entre « fichier » et le verbe.
   - Rouge-avant / vert-après : `tests/unit/missions/test_verifiability.py` et le corpus étiqueté, 3 échecs sur `origin/main`, 0 après ; « un fichier décrit pourquoi X existe » reste V2. Non fait : formulations anglaises voisines (« expected file X exists »).
 
