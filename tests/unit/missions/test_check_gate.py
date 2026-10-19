@@ -136,6 +136,42 @@ def test_approved_command_runs(project: Path, outside: Path) -> None:
     assert _runs(outside, "ran") == 1
 
 
+@pytest.mark.covers("cli:task approve-check")
+def test_approve_check_cli_json_names_the_approved_command_and_refuses_a_bare_terminal(project: Path, outside: Path) -> None:
+    cmd = _marker_cmd(outside, "ran")
+    task = _task(project, TaskCheck(cmd=cmd))
+    journal = project / "_grimoire-output/.runs/check-approvals.authority.jsonl"
+
+    refused = runner.invoke(app, ["task", "approve-check", task.id, "--project-root", str(project)])
+    assert refused.exit_code == 3 and not journal.exists()
+
+    res = runner.invoke(
+        app, ["--output", "json", "task", "approve-check", task.id, "--allow-unattested", "--actor", "guilhem",
+              "--project-root", str(project)],
+    )
+    assert res.exit_code == 0, res.output
+    out = json.loads(res.output)
+    assert (out["status"], out["task_id"], out["actor"], out["attestation"]) == ("approved", task.id, "guilhem", "unattested")
+    assert len(out["approved"]) == 1 and journal.is_file()
+    assert _verify(project, task.id).exit_code == 0 and _runs(outside, "ran") == 1
+
+
+@pytest.mark.covers("cli:task approve-check")
+def test_approve_check_cli_without_declared_command_or_unknown_task_approves_nothing(project: Path) -> None:
+    empty = _task(project)
+    journal = project / "_grimoire-output/.runs/check-approvals.authority.jsonl"
+
+    nothing = runner.invoke(app, ["task", "approve-check", empty.id, "--allow-unattested", "--project-root", str(project)])
+    assert nothing.exit_code == 2 and "rien à approuver" in nothing.output
+    unknown = runner.invoke(app, ["task", "approve-check", "GAO-inconnue-001", "--project-root", str(project)])
+    assert unknown.exit_code == 1
+    named = runner.invoke(
+        app, ["task", "approve-check", empty.id, "--cmd", "true", "--allow-unattested", "--project-root", str(project)]
+    )
+    assert named.exit_code == 0 and "1 commande(s) approuvée(s)" in named.output
+    assert len(journal.read_text(encoding="utf-8").splitlines()) == 1
+
+
 def test_approval_log_records_sha_actor_and_ts(project: Path, outside: Path) -> None:
     cmd = _marker_cmd(outside, "ran")
     task = _task(project, TaskCheck(cmd=cmd))

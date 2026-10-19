@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+from grimoire.cli.app import app
 from grimoire.cli.cmd_task import task_app
 from grimoire.core.exceptions import GrimoireMissionError
 from grimoire.hosts.decisions import HookInput, run_decision
@@ -317,20 +318,38 @@ def test_la_vague_close_reste_visible_dans_task_waves(plan: Plan) -> None:
     assert report(plan.service, plan.mission)[0]["fingerprint"] == checkpoints[0]["fingerprint"]
 
 
+@pytest.mark.covers("cli:task wave-checkpoint")
 def test_cli_request_puis_approve(plan: Plan) -> None:
     plan.merge_wave_one()
-    base = ["wave-checkpoint", plan.mission, "1", "--project-root", str(plan.repo)]
+    base = ["--output", "json", "task", "wave-checkpoint", plan.mission, "1", "--project-root", str(plan.repo)]
 
-    asked = runner.invoke(task_app, [*base, "--action", "request"], obj=JSON)
+    asked = runner.invoke(app, [*base, "--action", "request"])
     assert asked.exit_code == 0, asked.output
     fp = json.loads(asked.output)["fingerprint"]
 
-    refused = runner.invoke(task_app, [*base, "--action", "approve", "--fingerprint", fp], obj=JSON)
+    refused = runner.invoke(app, [*base, "--action", "approve", "--fingerprint", fp])
     assert refused.exit_code == 1
     _human_turn(plan.repo)
-    approved = runner.invoke(task_app, [*base, "--action", "approve", "--fingerprint", fp], obj=JSON)
+    approved = runner.invoke(app, [*base, "--action", "approve", "--fingerprint", fp])
     assert approved.exit_code == 0, approved.output
     assert json.loads(approved.output)["status"] == "approved"
+
+
+@pytest.mark.covers("cli:task wave-checkpoint")
+def test_cli_wave_checkpoint_refuse_une_action_inconnue_et_une_empreinte_perimee(plan: Plan) -> None:
+    plan.merge_wave_one()
+    base = ["--output", "json", "task", "wave-checkpoint", plan.mission, "1", "--project-root", str(plan.repo)]
+    unknown = runner.invoke(app, [*base, "--action", "valider"])
+    assert unknown.exit_code == 2 and "inconnue" in unknown.output
+
+    request = runner.invoke(app, [*base, "--action", "request"])
+    assert request.exit_code == 0, request.output
+    _human_turn(plan.repo)
+    stale = runner.invoke(app, [*base, "--action", "approve", "--fingerprint", "0" * 64])
+    assert stale.exit_code == 1
+    assert json.loads(stale.output)["ok"] is False and json.loads(stale.output)["status"] != "approved"
+    status = runner.invoke(app, [*base, "--action", "status"])
+    assert json.loads(status.output)["status"] != "approved"
 
 
 # ── Correctifs de revue W5-05 : verrou contourné, numérotation, exposition MCP et cockpit ──
@@ -411,10 +430,11 @@ def test_task_waves_et_wave_checkpoint_parlent_de_la_meme_vague(plan: Plan) -> N
     assert {w["wave"]: w["tasks"] for w in out["waves"]}[2] == by_wave[2]
 
 
+@pytest.mark.covers("cli:task wave-checkpoint")
 def test_la_sortie_texte_du_checkpoint_nomme_les_taches_couvertes(plan: Plan) -> None:
     plan.merge_wave_one()
 
-    result = runner.invoke(task_app, ["wave-checkpoint", plan.mission, "1", "--project-root", str(plan.repo)])
+    result = runner.invoke(app, ["task", "wave-checkpoint", plan.mission, "1", "--project-root", str(plan.repo)])
 
     assert result.exit_code == 0, result.output
     assert plan.a in result.output and plan.b in result.output

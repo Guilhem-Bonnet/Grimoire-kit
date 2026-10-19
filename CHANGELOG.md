@@ -7,6 +7,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- test(cli): les 11 commandes de file, d'orchestration et de vague arrivées sans preuve (`queue plan`, `queue release`, `orchestrate pause|resume|status|tick|install-timer|uninstall-timer`, `task wave-checkpoint|approve-check|review`) portent le marqueur `covers` (D-09). Les tests existants qui les exerçaient par un sous-groupe Typer passent par l'application racine (`["queue", "plan", ...]`), les cas manquants sont écrits : `task review` (nominal, NOT-READY fondé, refus), `task approve-check` (JSON, terminal nu refusé, sans commande), `task wave-checkpoint` (action inconnue, empreinte périmée), `orchestrate tick` sans `--apply` (rien d'écrit), minuteur avec `systemctl` injecté et sans systemd. Aucun défaut trouvé dans les commandes. Non mesuré : le marqueur reste une déclaration que le script ne rejoue pas.
 - fix(missions): `mission report` lie une cascade à sa trace `dispatch.outcome` par l'id de sa dernière tentative, plus par horodatage (#827).
 - Changement : `_record_dispatch_outcome` pose le tag `ledger_event:<id>` ; `_link_traces` s'en sert d'abord et ne retombe sur la fenêtre temporelle que pour les traces sans tag. Sous Windows (horloge ~15 ms) deux écritures partageaient un horodatage et la première cascade perdait sa trace.
 - Rouge-avant / vert-après : `test_mission_report.py::test_two_cascades_each_link_to_their_own_trace` (horloges figées, rouge sur l'ancien lecteur) ; `test_untagged_legacy_trace_still_links_by_time_window` garde l'ancien chemin.
