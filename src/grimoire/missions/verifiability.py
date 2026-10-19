@@ -105,6 +105,9 @@ def _motifs(paires: tuple[tuple[str, str], ...]) -> tuple[tuple[str, re.Pattern[
     return tuple((motif, re.compile(pattern, re.IGNORECASE)) for motif, pattern in paires)
 
 
+#: Qualificatif admis entre « fichier » et son nom (ensemble fermé).
+_QUALIF_FICHIER = r"(?:attendu|g[ée]n[ée]r[ée]|produit|cr[ée][ée]|livr[ée]|de sortie)"
+
 #: Un nom de fichier : un jeton, ou une chaîne citée (« dist/out.json »).
 _NOM_FICHIER = r"(?:«[^»]*»|\"[^\"]*\"|'[^']*'|`[^`]*`|\S+)"
 
@@ -157,7 +160,11 @@ MECHANICAL_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = _motifs(
             # « a file explains why the design exists » n'est pas un verdict
             # sur un fichier (W3-05, revue S1-01).
             "fichier_attendu",
-            rf"(\bfichier(?:\s+(?:de\s+|nomm[ée]\s+)?{_NOM_FICHIER})?\s+existe\b|\bexistence du fichier\b|"
+            # Qualificatif et verbe en ensembles fermés : « fichier attendu X existe »,
+            # « fichier X est présent / créé », jamais un mot libre entre les deux.
+            rf"(\bfichier(?:\s+{_QUALIF_FICHIER})?(?:\s+(?:de\s+|nomm[ée]\s+)?{_NOM_FICHIER})?\s+"
+            rf"(?:existe(?:\s+bien)?|est\s+(?:bien\s+)?(?:pr[ée]sente?|cr[ée][ée]?|g[ée]n[ée]r[ée]e?|produite?))\b|"
+            rf"\bexistence du fichier\b|"
             rf"\bfile(?:\s+(?:named\s+|at\s+)?{_NOM_FICHIER})?\s+exists\b)",
         ),
         (
@@ -298,14 +305,23 @@ def _classer_critere(texte: str) -> _Verdict:
 
 
 def _criteres(task: MissionTask) -> tuple[str, ...]:
-    """Les deux champs qui portent un critère — jamais l'un sans l'autre.
+    """Les critères d'une tâche : ``acceptance``, plus la preuve attendue qui en est un.
 
     ``acceptance`` et ``expected_evidence`` disent la même chose à deux
     endroits du schéma (BM board vs. mission ledger) ; ignorer l'un des
     deux ferait passer en V0 une tâche dont le seul critère sérieux vit
-    dans le champ non lu.
+    dans le champ non lu. Une preuve attendue en prose (« x.json et x.md »)
+    décrit ce qu'on produit, pas un verdict : non reconnue, elle est
+    ignorée au lieu de faire monter la classe en V2. Reconnue (mécanique
+    ou revue), elle compte comme avant.
     """
-    return tuple(getattr(task, "acceptance", ()) or ()) + tuple(getattr(task, "expected_evidence", ()) or ())
+    acceptance = tuple(getattr(task, "acceptance", ()) or ())
+    preuves = tuple(
+        e
+        for e in (getattr(task, "expected_evidence", ()) or ())
+        if _classer_critere(e).categorie is not _Categorie.AMBIGU
+    )
+    return acceptance + preuves
 
 
 def classify_criteria(criteria: Sequence[str]) -> Verifiability:
@@ -425,6 +441,8 @@ def as_dict(task: MissionTask) -> dict[str, Any]:
             data["reason"] = "aucune commande déclarée (checks) : le verdict mécanique n'est pas exécutable"
             data["raised_by"] = "no_declared_command"
         else:
-            data["explanation"] = "Remontée de V0 : un risque a été accepté en l'état (accept_as_is) — une relecture reste due."
+            data["explanation"] = (
+                "Remontée de V0 : un risque a été accepté en l'état (accept_as_is) — une relecture reste due."
+            )
             data["raised_by"] = "accepted_risk"
     return data

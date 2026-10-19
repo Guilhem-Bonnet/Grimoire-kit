@@ -1,0 +1,589 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Teaser Grimoire — scène</title>
+<meta name="viewport" content="width=1920">
+<style>
+@font-face{font-family:"Instrument Sans";src:url(fonts/instrument-sans-400.woff2) format("woff2");font-weight:400}
+@font-face{font-family:"Instrument Sans";src:url(fonts/instrument-sans-500.woff2) format("woff2");font-weight:500}
+@font-face{font-family:"Instrument Sans";src:url(fonts/instrument-sans-600.woff2) format("woff2");font-weight:600}
+@font-face{font-family:"JetBrains Mono";src:url(fonts/JetBrainsMono-Regular.woff2) format("woff2");font-weight:400}
+@font-face{font-family:"JetBrains Mono";src:url(fonts/JetBrainsMono-SemiBold.woff2) format("woff2");font-weight:600}
+:root{--douce:#eef0f4;--card:#fff;--line:#e3e6eb;--ink:#14171d;--ink2:#4a515c;--ink3:#606874;--acc:#3451d1;--acc2:#8ea2ff;--rub:#b4441d;--rub2:#f08a5d;
+  --sp1:#5b8def;--sp2:#e0904a;--sp3:#3fbf9a;--sp4:#c46fd6;--ok:#1f7a4d;--okm:#22945c;
+  --night:#0e1118;--panel:#1b2030;--panel2:#222838;--pline:#303746;--pink:#eef0f4;--pink2:#b9c0cb;--pink3:#8a93a3}
+*{box-sizing:border-box}
+html,body{margin:0;background:#000;overflow:hidden}
+body{display:grid;place-items:center;min-height:100vh}
+body.render{display:block}
+#stage{position:relative;width:1920px;height:1080px;overflow:hidden;background:var(--night);font-family:"Instrument Sans",system-ui,sans-serif;color:var(--pink);transform-origin:0 0}
+.a{position:absolute;left:0;top:0;will-change:transform,opacity}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+#world{position:absolute;left:0;top:0;width:1920px;height:1080px;transform-origin:0 0}
+.clip{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
+.lb{left:0;width:1920px;height:138px;background:#000;z-index:30}
+#lbt{top:0}#lbb{top:942px}
+#grade{left:0;top:0;width:1920px;height:1080px;pointer-events:none;z-index:9;mix-blend-mode:soft-light}
+#post{position:absolute;inset:0;width:100%;height:100%;z-index:40;pointer-events:none}
+
+/* ACTE 1 : la note et les fenêtres */
+#act1{left:0;top:0;width:1920px;height:1080px}
+#note{width:620px;background:#f3f4f7;color:var(--ink);border-radius:18px;box-shadow:0 30px 80px rgba(0,0,0,.55);padding:24px 32px 28px;transform-origin:0 0}
+#note .bar{display:flex;align-items:center;gap:8px;margin-bottom:18px}
+#note .bar i{width:11px;height:11px;border-radius:6px;background:#d6dae2;display:inline-block}
+#note h2{margin:0 0 14px;font-size:38px;font-weight:600;letter-spacing:-.02em;color:var(--ink)}
+#note h2 .cur{display:inline-block;width:3px;height:36px;background:var(--acc);margin-left:3px;vertical-align:-4px}
+#note ul{list-style:none;margin:0;padding:0;display:grid;gap:9px}
+#note li{font-size:27px;line-height:1.25;color:var(--ink2);white-space:nowrap;display:flex;gap:14px;align-items:baseline;min-height:34px}
+#note li::before{content:"";width:8px;height:8px;border-radius:4px;background:var(--acc);flex:none;transform:translateY(-6px)}
+#note li.h{visibility:hidden}
+#note li .tx{display:inline-block}
+#note li .c{display:inline-block;width:2px;height:28px;background:var(--acc);vertical-align:-5px;margin-left:2px}
+.win{width:520px;height:292px;border-radius:12px;overflow:hidden;border:1px solid var(--pline);box-shadow:0 24px 60px rgba(0,0,0,.55);background:#000;transform-origin:0 0}
+.win .clip{filter:saturate(.7) contrast(1.1) brightness(.92)}
+#ideas{filter:none}
+/* ACTE 2 : terminal */
+#term{left:210px;top:110px;width:1500px;height:860px;background:#0d1017;border:1px solid #232834;border-radius:18px;box-shadow:0 40px 120px rgba(0,0,0,.6);overflow:hidden;transform-origin:50% 50%}
+#term .tb{height:46px;display:flex;align-items:center;gap:8px;padding:0 18px;border-bottom:1px solid #1c212b;color:#6b7383;font-size:15px}
+#term .tb i{width:12px;height:12px;border-radius:6px;background:#2a3140;display:inline-block}
+#term .tb span{margin-left:10px;font-family:"JetBrains Mono",monospace}
+#tv{position:absolute;left:0;top:46px;right:0;bottom:0;overflow:hidden;padding:18px 28px}
+#tl{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:23px;line-height:32px;white-space:pre;color:#d7dbe3;margin:0;will-change:transform}
+#tl .p{color:var(--rub2)}
+#tl .ok{color:#5cd39a}
+#tl .dim{color:#7d8597}
+#tl .k{color:#8ea2ff}
+#tl .box{color:#9aa3b5}
+#tl .cur{display:inline-block;width:12px;height:26px;background:#d7dbe3;vertical-align:-4px}
+#pbar{height:10px;width:560px;border-radius:5px;background:#1f2531;overflow:hidden}
+#pbar i{display:block;height:100%;background:linear-gradient(90deg,#5b8def,#8ea2ff);transform-origin:0 50%}
+/* cockpit (maquette) */
+#ck{left:80px;top:50px;width:1760px;height:960px;background:var(--douce);border-radius:22px;box-shadow:0 30px 80px rgba(10,14,30,.35);overflow:hidden;transform-origin:50% 50%;color:var(--ink)}
+#ck .top{height:70px;background:#fff;display:flex;align-items:center;gap:18px;padding:0 26px;box-shadow:0 1px 0 var(--line)}
+#ck .brand{font-weight:600;font-size:23px;letter-spacing:-.01em}#ck .brand b{color:var(--rub)}
+#ck .tabs{display:flex;gap:6px;margin-left:24px}
+#ck .tab{display:flex;align-items:center;gap:8px;height:42px;padding:0 17px;border-radius:999px;font-size:18px;font-weight:500;color:var(--ink2)}
+#ck .tab .i{width:17px;height:17px}
+#ck .tab.on{background:#eef1fd;color:var(--acc)}
+#ck .proj{margin-left:auto;font-size:16px;color:var(--ink3)}
+#ck .body{display:grid;grid-template-columns:380px 1fr 1fr 1fr;gap:22px;padding:26px 30px}
+#ck .col h4{margin:0 0 14px;font-size:17px;font-weight:600;color:var(--ink2);display:flex;align-items:center;gap:8px}
+#ck .col h4 .d{width:8px;height:8px;border-radius:4px;background:var(--rub)}
+#ck .kc{background:#fff;border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin-bottom:12px;box-shadow:0 1px 2px rgba(16,24,40,.06)}
+#ck .kc .t{font-size:19px;font-weight:600;line-height:1.25}
+#ck .kc .m{margin-top:9px;display:flex;align-items:center;gap:8px;font-size:15px;color:var(--ink3)}
+#ck .kc .pill{display:inline-flex;align-items:center;gap:6px;padding:3px 11px;border-radius:999px;background:#f3f5f8;color:var(--ink2);font-size:14.5px}
+#ck .kc .pill i{width:8px;height:8px;border-radius:4px;display:inline-block}
+#ck .grp{font-size:15px;color:var(--ink3);margin:2px 0 8px;font-weight:500}
+#ck .pr{border-color:#f0c9b6}
+#ck .pr .row{display:flex;align-items:center;gap:10px}
+#ck .pr .i{width:20px;height:20px;color:var(--rub)}
+#merge{width:44px;height:44px;margin-left:auto}
+#merge path{stroke:var(--acc);stroke-width:2.4;fill:none;stroke-linecap:round}
+#ck .sess{grid-column:1/-1;margin-top:10px;background:#fff;border:1px solid var(--line);border-radius:16px;padding:16px 20px}
+#ck .sess h4{margin:0 0 10px;font-size:17px;font-weight:600;color:var(--ink2)}
+#ck .srow{display:flex;align-items:center;gap:14px;padding:11px 0;border-top:1px solid var(--line);font-size:16px;color:var(--ink2)}
+#ck .srow:first-of-type{border-top:0}
+#ck .srow i{width:10px;height:10px;border-radius:5px;display:inline-block}
+#ck .srow b{color:var(--ink);font-weight:600;min-width:330px}
+#ck .srow .live{margin-left:auto;color:var(--ok);font-size:14.5px}
+.i{display:inline-block;background:currentColor;-webkit-mask:var(--m) center/contain no-repeat;mask:var(--m) center/contain no-repeat}
+#ckleg{left:1730px;top:1030px;font-size:18px;color:#4a515c;font-weight:500}
+#cur2{width:30px;height:30px;margin:-15px 0 0 -15px;border-radius:50%;border:3px solid var(--acc);box-shadow:0 0 0 6px rgba(52,81,209,.15)}
+#wipe{left:0;top:0;width:1920px;height:1080px;background:linear-gradient(90deg,transparent 0,#fff 45%,#fff 55%,transparent 100%);z-index:35;mix-blend-mode:normal}
+
+/* ACTE 3 : réalisé */
+.shot{left:0;top:0;width:1920px;height:1080px;overflow:hidden}
+.shot .clip{filter:saturate(1.08) contrast(1.03) brightness(1.02)}
+#game{image-rendering:pixelated;width:1920px;height:1080px}
+.screen{position:absolute;left:0;top:0;transform-origin:0 0;overflow:hidden;background:#000}
+.keyed{position:absolute;inset:0;width:100%;height:100%;filter:saturate(1.08) contrast(1.03) brightness(1.02)}
+.screen::after{content:"";position:absolute;inset:0;background:linear-gradient(115deg,rgba(255,255,255,.14),transparent 40%,transparent 70%,rgba(255,255,255,.06));pointer-events:none}
+/* UI boutique (téléphone 390×844) */
+#shop{width:1440px;height:900px;background:#fff;color:var(--ink);font-family:"Instrument Sans";position:relative}
+#shop .hd{height:78px;padding:0 56px;display:flex;align-items:center;gap:36px;border-bottom:1px solid var(--line)}
+#shop .hd b{font-weight:600;font-size:26px;letter-spacing:-.01em}
+#shop .hd span{font-size:17px;color:var(--ink2);font-weight:500;word-spacing:14px}
+#shop .hd em{margin-left:auto;font-style:normal;font-weight:600;font-size:17px;background:var(--acc);color:#fff;border-radius:999px;padding:10px 20px}
+#shop .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:26px;padding:48px 56px}
+#shop .pd{background:#f3f5f8;border-radius:20px;padding:18px;display:grid;gap:10px}
+#shop .bowl{height:250px;border-radius:16px;display:grid;place-items:center}
+#shop .bowl i{display:block;width:150px;height:84px;border-radius:0 0 78px 78px;box-shadow:inset 0 -14px 0 rgba(0,0,0,.08)}
+#shop .pd b{font-size:21px;font-weight:600}
+#shop .pd s{text-decoration:none;font-size:17px;color:var(--ink3)}
+#toast{position:absolute;left:56px;top:96px;width:440px;background:#14171d;color:#fff;border-radius:18px;padding:16px 18px;display:flex;gap:14px;align-items:center;box-shadow:0 14px 40px rgba(0,0,0,.28)}
+#toast .ic{width:46px;height:46px;border-radius:14px;background:var(--acc);display:grid;place-items:center;flex:none}
+#toast .ic .i{width:22px;height:22px;color:#fff}
+#toast b{display:block;font-size:18px}
+#toast span{font-size:15px;color:#b9c0cb}
+/* UI site (1440×900) */
+#site{width:1440px;height:900px;background:#fff;color:var(--ink);font-family:"Instrument Sans"}
+#site nav{height:72px;display:flex;align-items:center;gap:30px;padding:0 60px;font-weight:500;font-size:17px;color:var(--ink2);border-bottom:1px solid var(--line)}
+#site nav b{color:var(--ink);font-weight:600;font-size:21px;margin-right:auto}
+#site nav .b{background:var(--acc);color:#fff;border-radius:999px;padding:9px 18px}
+#site .hero{display:grid;grid-template-columns:1fr 1fr;gap:40px;padding:70px 60px;align-items:center}
+#site h1{margin:0 0 16px;font-size:58px;line-height:1.02;letter-spacing:-.035em;font-weight:600;text-wrap:balance}
+#site p{margin:0 0 26px;font-size:20px;color:var(--ink2);line-height:1.45;max-width:38ch}
+#site .pic{height:420px;border-radius:22px;overflow:hidden;background:#dfe5ee}
+#site .pic img{width:100%;height:100%;object-fit:cover;display:block}
+#site .cta{display:inline-flex;gap:12px}
+#site .cta span{border-radius:999px;padding:12px 22px;font-weight:600;font-size:17px;border:1px solid var(--line)}
+#site .cta span.p{background:var(--acc);color:#fff;border-color:var(--acc)}
+/* UI apprendre (carte flottante) */
+#learn{width:560px;background:#fff;color:var(--ink);border-radius:22px;box-shadow:0 30px 80px rgba(0,0,0,.35);padding:26px 28px;font-family:"Instrument Sans"}
+#learn .q{font-size:16px;color:var(--ink3);font-weight:500}
+#learn h3{margin:6px 0 18px;font-size:34px;letter-spacing:-.02em}
+#keys{position:relative;height:150px;display:flex;gap:3px}
+#keys .w{flex:1;background:#fff;border:1px solid #c9ced6;border-radius:0 0 8px 8px;position:relative}
+#keys .w.on{background:#dfe6ff;border-color:#8ea2ff}
+#keys .k{position:absolute;top:0;width:34px;height:92px;background:#1c2027;border-radius:0 0 6px 6px;z-index:2}
+#keys .k.on{background:#3451d1}
+#learn .r{margin-top:18px;display:flex;gap:10px;align-items:center;font-size:16px;color:var(--ink2)}
+#learn .r i{width:10px;height:10px;border-radius:5px;background:var(--okm);display:inline-block}
+/* UI photos */
+#photos{width:1120px;height:640px;background:var(--douce);color:var(--ink);font-family:"Instrument Sans";overflow:hidden;border-radius:18px;box-shadow:0 30px 80px rgba(0,0,0,.4)}
+#photos .top{height:56px;display:flex;align-items:center;gap:16px;padding:0 28px;background:#fff;border-bottom:1px solid var(--line);font-weight:600;font-size:19px}
+#photos .top span{font-weight:500;color:var(--ink3);font-size:16px;margin-left:12px;font-family:"JetBrains Mono"}
+.ph{position:absolute;width:124px;height:124px;border-radius:12px;overflow:hidden;box-shadow:0 10px 30px rgba(16,24,40,.18);transform-origin:50% 50%}
+.ph img{width:100%;height:100%;object-fit:cover;display:block}
+.fold{position:absolute;top:440px;width:260px;height:170px;border-radius:18px;background:#fff;border:1px solid var(--line);box-shadow:0 1px 2px rgba(16,24,40,.06);padding:16px 20px;font-weight:600;font-size:22px}
+.fold small{display:block;font-weight:500;font-size:15px;color:var(--ink3);margin-top:4px}
+/* note finale (claire) */
+#note2{left:420px;top:150px;width:1080px;background:#fff;color:var(--ink);border-radius:22px;box-shadow:0 30px 80px rgba(16,24,40,.18);padding:34px 44px 40px}
+#note2 h2{margin:0 0 22px;font-size:40px;font-weight:600;letter-spacing:-.02em}
+#note2 ul{list-style:none;margin:0;padding:0;display:grid;gap:14px}
+#note2 li{display:flex;align-items:center;gap:18px;font-size:28px;color:var(--ink2);min-height:72px}
+#note2 li::before{content:"";width:8px;height:8px;border-radius:4px;background:var(--acc);flex:none}
+#note2 li .th{width:128px;height:72px;border-radius:10px;overflow:hidden;margin-left:auto;background:#e3e6eb;flex:none}
+#note2 li .th img{width:100%;height:100%;object-fit:cover;display:block}
+#note2 li .c{display:inline-block;width:3px;height:30px;background:var(--acc);margin-left:2px}
+/* fin */
+#end{left:0;top:0;width:1920px;height:1080px;background:var(--douce);color:var(--ink);display:grid;place-content:center;justify-items:center;gap:30px}
+#end .word{font-size:124px;font-weight:600;letter-spacing:-.04em;line-height:1}#end .word b{color:var(--rub)}
+#end .cmd{font-family:"JetBrains Mono",monospace;font-size:36px;background:#fff;border:1px solid var(--line);border-radius:999px;padding:18px 36px;box-shadow:0 10px 30px rgba(16,24,40,.12);min-width:720px;text-align:left}
+#end .cmd b{color:var(--rub);font-weight:400}
+#end .cmd .cur{display:inline-block;width:14px;height:30px;background:var(--ink);vertical-align:-4px}
+#end .hosts{font-size:26px;color:var(--ink2);font-weight:500}
+#ctl{position:fixed;left:12px;bottom:12px;font:13px system-ui;color:#333;background:#fff;padding:6px 10px;border-radius:8px;z-index:99}
+body.render #ctl{display:none}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <filter id="mbx" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur id="mbxv" stdDeviation="0 0"/></filter>
+  <filter id="rgb"><feColorMatrix in="SourceGraphic" type="matrix" values="1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0" result="r"/><feColorMatrix in="SourceGraphic" type="matrix" values="0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 1 0" result="g"/><feColorMatrix in="SourceGraphic" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 1 0" result="b"/><feOffset id="rgbr" in="r" dx="0" dy="0" result="r2"/><feOffset id="rgbb" in="b" dx="0" dy="0" result="b2"/><feBlend in="r2" in2="g" mode="screen" result="rg"/><feBlend in="rg" in2="b2" mode="screen"/></filter>
+</svg>
+<div id="stage">
+  <div id="world">
+    <!-- ACTE 1 -->
+    <div class="a" id="act1">
+      <div id="ideas"></div>
+      <div class="a" id="note"><div class="bar"><i></i><i></i><i></i></div><h2><span class="tx" data-full="Idées"></span><span class="cur"></span></h2><ul id="ul"></ul></div>
+    </div>
+    <!-- ACTE 2 -->
+    <div class="a" id="term"><div class="tb"><i></i><i></i><i></i><span>~/projets/mon-projet</span></div><div id="tv"><pre id="tl"></pre></div></div>
+    <div class="a" id="ck">
+      <div class="top"><span class="brand"><b>›</b> Grimoire</span>
+        <div class="tabs"><span class="tab"><span class="i" data-i="inbox"></span>À traiter</span><span class="tab on"><span class="i" data-i="board"></span>Travail</span><span class="tab"><span class="i" data-i="fleet"></span>Flotte</span><span class="tab"><span class="i" data-i="sliders"></span>Configuration</span></div>
+        <span class="proj">mon-projet · boutique · site-asso</span></div>
+      <div class="body">
+        <div class="col"><h4><span class="d"></span>À traiter</h4>
+          <div class="kc pr" id="prcard"><div class="row"><span class="i" data-i="pr"></span><div><div class="t">Écran de pause du jeu</div><div class="m">PR prête à fusionner · mon-projet</div></div>
+            <svg id="merge" viewBox="0 0 44 44"><path id="mg1" pathLength="1" d="M10 8 C10 22 22 24 30 30"/><path d="M10 8 L10 36"/><circle cx="30" cy="30" r="3.5" fill="#3451d1"/></svg></div></div>
+          <div class="kc"><div class="t">Choisir le nom de la boutique</div><div class="m"><span class="pill"><i style="background:var(--acc)"></i>dans ta session</span></div></div>
+        </div>
+        <div class="col"><h4>Prêtes</h4><div class="grp">site-asso</div>
+          <div class="kc"><div class="t">Page des événements</div><div class="m">critère : revue nommée</div></div>
+          <div class="grp">boutique</div><div class="kc"><div class="t">Export des commandes</div><div class="m">critère : test</div></div></div>
+        <div class="col"><h4>En cours</h4><div class="grp">mon-projet</div>
+          <div class="kc" id="kc-move"><div class="t">Niveau 2 du jeu</div><div class="m"><span class="pill"><i style="background:var(--sp2)"></i>session vivante</span></div></div>
+          <div class="kc"><div class="t">Tri des photos par date</div><div class="m"><span class="pill"><i style="background:var(--sp3)"></i>session vivante</span></div></div>
+          <div class="grp">boutique</div><div class="kc"><div class="t">Panier et paiement</div><div class="m"><span class="pill"><i style="background:var(--sp4)"></i>session vivante</span></div></div></div>
+        <div class="col"><h4>En revue</h4><div class="grp">site-asso</div>
+          <div class="kc"><div class="t">Formulaire d'adhésion</div><div class="m"><span class="pill"><i style="background:var(--sp1)"></i>PR ouverte</span></div></div></div>
+        <div class="sess"><h4>Sessions</h4>
+          <div class="srow"><i style="background:var(--sp2)"></i><b>Niveau 2 du jeu</b>mon-projet<span class="live">vivante</span></div>
+          <div class="srow"><i style="background:var(--sp3)"></i><b>Tri des photos par date</b>mon-projet<span class="live">vivante</span></div>
+          <div class="srow"><i style="background:var(--sp4)"></i><b>Panier et paiement</b>boutique<span class="live">vivante</span></div>
+          <div class="srow"><i style="background:var(--sp1)"></i><b>Formulaire d'adhésion</b>site-asso<span class="live" style="color:var(--ink3)">inactive</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="a" id="ckleg">maquette</div>
+    <div class="a" id="cur2"></div>
+    <!-- ACTE 3 -->
+    <div class="a shot" id="s_game"><canvas id="game" width="320" height="180"></canvas></div>
+    <div class="a shot" id="s_screen"><div class="screen" id="scr_game"><canvas id="game2" width="320" height="180" style="width:100%;height:100%;image-rendering:pixelated"></canvas></div><canvas class="keyed" data-clip="r_jeu_screen" width="1920" height="1080"></canvas></div>
+    <div class="a shot" id="s_player"><img class="clip" data-clip="r_jeu_player" alt=""></div>
+    <div class="a shot" id="s_shop"><div class="screen" id="scr_shop"><div id="shop"><div class="hd"><b>Atelier Mirelle</b><span>Bols · Tasses · Vases · L'atelier</span><em>Panier</em></div>
+      <div class="grid"><div class="pd"><div class="bowl" style="background:#f7e9dc"><i style="background:#c98a62"></i></div><b>Bol « Sable »</b><s>28 €</s></div><div class="pd"><div class="bowl" style="background:#e4ecf5"><i style="background:#5b7fa6"></i></div><b>Tasse « Marée »</b><s>22 €</s></div><div class="pd"><div class="bowl" style="background:#eef3e6"><i style="background:#7e9a5a"></i></div><b>Assiette « Mousse »</b><s>34 €</s></div><div class="pd"><div class="bowl" style="background:#f3e6ee"><i style="background:#a86c8d"></i></div><b>Vase « Pivoine »</b><s>46 €</s></div></div>
+      <div id="toast"><div class="ic"><span class="i" data-i="tag"></span></div><div><b>Nouvelle commande</b><span>2 bols « Sable » · à expédier</span></div></div></div></div><canvas class="keyed" data-clip="r_shop" width="1920" height="1080"></canvas></div>
+    <div class="a shot" id="s_pack"><img class="clip" data-clip="r_pack" alt=""></div>
+    <div class="a shot" id="s_site"><div class="screen" id="scr_site"><div id="site"><nav><b>Les Jardins Partagés</b><span>Parcelles</span><span>Événements</span><span>Adhérer</span><span class="b">Nous rejoindre</span></nav>
+      <div class="hero"><div><h1>Un bout de terre, à plusieurs.</h1><p>Trente-deux parcelles, une serre, un composteur et des samedis qui sentent la tomate. Les inscriptions pour la saison sont ouvertes.</p><div class="cta"><span class="p">Demander une parcelle</span><span>Voir les événements</span></div></div><div class="pic"><img id="sitepic" alt=""></div></div></div></div><canvas class="keyed" data-clip="r_site" width="1920" height="1080"></canvas></div>
+    <div class="a shot" id="s_piano"><img class="clip" data-clip="r_piano" alt=""><div class="a" id="learn"><div class="q">Leçon 4 · accords</div><h3>Joue un Ré majeur</h3><div id="keys"></div><div class="r"><i></i>Ré · Fa# · La — c'est ça</div></div></div>
+    <div class="a shot" id="s_photos"><img class="clip" data-clip="r_photos" alt=""><div class="a" id="photos"><div class="top">Photos<span>trier par date</span></div><div id="phs"></div><div class="fold" style="left:70px">2024<small>412 photos</small></div><div class="fold" style="left:430px">2025<small>1 087 photos</small></div><div class="fold" style="left:790px">Vacances<small>236 photos</small></div></div></div>
+    <!-- note finale -->
+    <div class="a" id="note2"><h2>Idées</h2><ul id="ul2"></ul></div>
+    <!-- fin -->
+    <div class="a" id="end"><div class="word"><b>›</b> Grimoire</div><div class="cmd"><b>$ </b><span class="tx" data-full="uv tool install grimoire-kit"></span><span class="cur"></span></div><div class="hosts">Open source · Claude Code · Copilot</div></div>
+  </div>
+  <div class="a" id="grade"></div>
+  <div class="a" id="wipe"></div>
+  <div class="a lb" id="lbt"></div><div class="a lb" id="lbb"></div>
+  <canvas id="post" width="1920" height="1080"></canvas>
+</div>
+<div id="ctl">espace : pause · ← → : ±1 s · R : début · <span id="tc"></span></div>
+
+<script>
+/*ICONS*/
+/*TERM*/
+/*CLIPS*/
+// ===================== moteur =====================
+const $=s=>document.getElementById(s);
+const BPM=90,BEAT=60/BPM,BAR=4*BEAT,B=(bar,beat=1)=>(bar-1)*BAR+(beat-1)*BEAT;
+function bez(x1,y1,x2,y2){const cx=3*x1,bx=3*(x2-x1)-cx,ax=1-cx-bx,cy=3*y1,by=3*(y2-y1)-cy,ay=1-cy-by;
+  const X=t=>((ax*t+bx)*t+cx)*t,Y=t=>((ay*t+by)*t+cy)*t,dX=t=>(3*ax*t+2*bx)*t+cx;
+  return x=>{if(x<=0)return 0;if(x>=1)return 1;let t=x;for(let i=0;i<8;i++){const d=dX(t);if(Math.abs(d)<1e-6)break;t-=(X(t)-x)/d}
+    let lo=0,hi=1;for(let i=0;i<30&&Math.abs(X(t)-x)>1e-5;i++){if(X(t)<x)lo=t;else hi=t;t=(lo+hi)/2}return Y(t)}}
+const EZ={lin:x=>x,out:bez(.2,.8,.2,1),in:bez(.4,0,1,1),move:bez(.65,0,.35,1),anticip:bez(.36,0,.66,-.56),back:bez(.34,1.56,.64,1),reveal:bez(.16,1,.3,1),expo:bez(.7,0,.84,0),cut:x=>x<1?0:1};
+function rng(seed){let s=seed>>>0;return()=>{s=(s+0x6D2B79F5)>>>0;let t=s;t=Math.imul(t^t>>>15,t|1);t^=t+Math.imul(t^t>>>7,t|61);return((t^t>>>14)>>>0)/4294967296}}
+document.querySelectorAll('[data-i]').forEach(e=>e.style.setProperty('--m',`url("data:image/svg+xml;utf8,${encodeURIComponent(ICONS[e.dataset.i])}")`));
+const TR=[],BASE=new Map(),STATE=new Map();
+const el=x=>typeof x==='string'?$(x):x;
+function at(e,x,y){e=el(e);BASE.set(e,[x,y]);return e}
+function k(e,prop,keys){TR.push({e:el(e),prop,keys})}
+function val(keys,t){if(t<=keys[0][0])return keys[0][1];
+  for(let i=1;i<keys.length;i++){const [t1,v1,e]=keys[i];if(t<t1){const [t0,v0]=keys[i-1];return v0+(v1-v0)*EZ[e||'lin']((t-t0)/(t1-t0))}}
+  return keys[keys.length-1][1]}
+function evalAt(t){STATE.clear();for(const tr of TR){let s=STATE.get(tr.e);if(!s){s={};STATE.set(tr.e,s)}
+  if(!(tr.prop in s)||t>=tr.keys[0][0])s[tr.prop]=val(tr.keys,t)}}
+const S=e=>STATE.get(el(e))||{};
+function applyDom(){
+  for(const [e,s] of STATE){
+    if(!(e instanceof Element))continue;
+    if('n' in s){const tx=e.classList.contains('tx')?e:e.querySelector('.tx');if(tx){const full=tx.dataset.full;tx.textContent=full.slice(0,Math.round(Math.max(0,Math.min(1,s.n))*full.length))}}
+    if('draw' in s)e.querySelectorAll('[pathLength]').forEach(p=>p.style.strokeDashoffset=1-s.draw);
+    if('blur' in s)e.style.filter=s.blur>0.05?`blur(${s.blur.toFixed(2)}px)`:'';
+    if('vis' in s)e.style.visibility=s.vis>0.5?'visible':'hidden';
+    if(e instanceof SVGElement&&!(e instanceof SVGSVGElement)){if('o' in s)e.style.opacity=s.o;continue}
+    const b=BASE.get(e);const tf=[];
+    if(b||'x' in s||'y' in s)tf.push(`translate(${((b?b[0]:0)+(s.x||0)).toFixed(2)}px,${((b?b[1]:0)+(s.y||0)).toFixed(2)}px)`);
+    if('r' in s)tf.push(`rotate(${s.r.toFixed(3)}deg)`);
+    if('s' in s)tf.push(`scale(${s.s.toFixed(4)})`);
+    if('sx' in s)tf.push(`scaleX(${s.sx.toFixed(4)})`);
+    if('m3' in s&&e._quad)tf.push(e._quad);
+    e.style.transform=tf.join(' ');
+    if('o' in s)e.style.opacity=s.o.toFixed(3);
+  }
+  for(const [e,b] of BASE)if(!STATE.has(e))e.style.transform=`translate(${b[0]}px,${b[1]}px)`;
+}
+// ---- rushes : séquences d'images ----
+const IMGS=new Map();
+function clipFrame(id,sec,q=1){const m=CLIPS[id];if(!m)return null;let i=Math.floor(sec*m.fps);if(q>1)i=Math.floor(i/q)*q;i=Math.max(1,Math.min(m.n,1+i));return `frames/${id}/${String(i).padStart(4,'0')}.jpg`}
+const clipEls=[...document.querySelectorAll('img.clip[data-clip]')];
+const keyedEls=[...document.querySelectorAll('canvas.keyed[data-clip]')];const KEYIMG=new Map();
+async function loadClips(){
+  const waits=[];
+  for(const img of clipEls){const id=img.dataset.clip,s=STATE.get(img);const f=s&&'f' in s?s.f:-1;
+    if(f<0){continue}
+    const src=clipFrame(id,f,img.dataset.q?+img.dataset.q:1);if(!src)continue;
+    if(img.getAttribute('src')!==src){img.src=src;waits.push(img.decode().catch(()=>{}))}}
+  // rushes à clé verte : on charge l'image, le shader fera la découpe
+  for(const c of keyedEls){const id=c.dataset.clip,s=STATE.get(c);const f=s&&'f' in s?s.f:-1;if(f<0)continue;const src=clipFrame(id,f);if(!src)continue;
+    let im=KEYIMG.get(c);if(!im){im=new Image();KEYIMG.set(c,im)}if(im.getAttribute('src')!==src){im.src=src;waits.push(im.decode().then(()=>{c._dirty=true}).catch(()=>{}))}}
+  await Promise.all(waits);
+}
+// ---- homographie : 4 coins (dans l'élément) → 4 coins (dans le monde) ----
+function homography(w,h,dst){
+  const src=[[0,0],[w,0],[w,h],[0,h]];const A=[],bv=[];
+  for(let i=0;i<4;i++){const [x,y]=src[i],[X,Y]=dst[i];A.push([x,y,1,0,0,0,-X*x,-X*y]);bv.push(X);A.push([0,0,0,x,y,1,-Y*x,-Y*y]);bv.push(Y)}
+  // Gauss
+  const n=8;for(let c=0;c<n;c++){let p=c;for(let r=c+1;r<n;r++)if(Math.abs(A[r][c])>Math.abs(A[p][c]))p=r;[A[c],A[p]]=[A[p],A[c]];[bv[c],bv[p]]=[bv[p],bv[c]];
+    for(let r=0;r<n;r++){if(r===c)continue;const f=A[r][c]/A[c][c];for(let j=c;j<n;j++)A[r][j]-=f*A[c][j];bv[r]-=f*bv[c]}}
+  const hh=bv.map((v,i)=>v/A[i][i]);const [a,b,c,d,e,f,g,hgt]=hh;
+  return `matrix3d(${a},${d},0,${g},${b},${e},0,${hgt},0,0,1,0,${c},${f},0,1)`;
+}
+function screen(id,w,h,quad){const e=$(id);e.style.width=w+'px';e.style.height=h+'px';e._quad=homography(w,h,quad);k(e,'m3',[[0,1]])}
+
+// ===================== contenu =====================
+const IDEES=["un petit jeu vidéo","une boutique pour mes céramiques","le site de l'asso","une app pour apprendre le piano","un script qui range mes photos",
+ "un bot pour le serveur","un portfolio","un suivi de dépenses","une API pour la serre","un générateur de recettes","un lecteur RSS","un jeu de cartes","un quiz pour les enfants","une appli de randonnée","un traducteur de recettes","un minuteur de pâtisserie"];
+const WCLIPS=["i_jeu","i_boutique","i_site","i_piano","i_code","i_carnet","i_flash","i_postit","i_casque","i_terminal","i_marche"];
+// note : lignes
+const ul=$('ul');IDEES.forEach((s,i)=>{const li=document.createElement('li');li.className='h';li.innerHTML=`<span class="tx" data-full="${s}"></span><span class="c"></span>`;ul.appendChild(li)});
+const LIS=[...ul.children];
+// fenêtres
+const R=rng(7);const WINS=[];
+for(let i=0;i<16;i++){const w=document.createElement('div');w.className='a win';w.id='w'+i;const cid=WCLIPS[i%WCLIPS.length];
+  w.innerHTML=`<img class="clip" data-clip="${cid}" data-q="2" alt="">`;$('ideas').appendChild(w);WINS.push(w)}
+const wimgs=[...document.querySelectorAll('#ideas img.clip')];clipEls.push(...wimgs);
+
+// ---- repères de temps ----
+const T_LINE=[B(1,3),B(2,1),B(2,3),B(3,1),B(3,3),B(4,1),B(4,2),B(4,3),B(4,4),B(5,1),B(5,1)+BEAT/2,B(5,2),B(5,2)+BEAT/2,B(5,3),B(5,3)+BEAT/3,B(5,3)+2*BEAT/3];
+const T_BLACK=B(5,4);            // smash cut
+const T_TERM=B(6,1);             // terminal
+const T_CK=B(9,2);               // cockpit (chargement)
+const T_ACT3=B(10,1);            // réalisé
+const T_NOTE2=B(15,1);
+const T_END=B(16,1);
+const DUR=48;
+const CUES={type:[],pop:[],enter:[],flood:[],cuts:[],shots:[],photos:[],coins:[],jumps:[]};window.__cues=CUES;
+
+// ===================== ACTE 1 =====================
+at('note',640,250);
+k('note','o',[[0,0],[0.5,0],[1.0,1,'out'],[B(5,2),1],[B(5,2)+0.15,0,'in']]);
+k('note','x',[[0,0],[B(3,1),0],[B(4,1),-520,'move']]);
+k('note','y',[[0,0],[B(3,1),0],[B(4,1),-90,'move']]);
+k('note','s',[[0,1],[B(3,1),1],[B(4,1),.8,'move']]);
+k($('note').querySelector('.tx'),'n',[[0,0],[0.95,0],[1.25,1,'lin']]);CUES.type.push({t:0.95,d:0.3,n:5});
+k($('note').querySelector('h2 .cur'),'o',[[0,1],[1.3,1],[1.31,0]]);
+LIS.forEach((li,i)=>{const t=T_LINE[i];const len=IDEES[i].length;const d=Math.min(0.75,Math.max(0.18,len*0.028))*(i<5?1:i<9?.55:.35);
+  k(li,'vis',[[0,0],[t-0.001,0],[t,1]]);k(li.querySelector('.tx'),'n',[[0,0],[t,0],[t+d,1,'lin']]);CUES.type.push({t,d,n:len});
+  const nxt=T_LINE[i+1]??T_BLACK;k(li.querySelector('.c'),'o',[[0,0],[t,1],[nxt-0.001,1],[nxt,0]])});
+// fenêtres : position dispersée (graine fixe), puis grille 3×3 à M5.2 et 4×4 à M5.3
+const SLOTS=[[1180,150],[1300,560],[620,760],[1480,330],[820,-20],[1560,720],[120,140],[1240,860],[260,520],[1000,380],[1620,60],[60,820],[700,260],[1450,520],[400,0],[1150,700]];
+const G3=(i)=>[[(i%3)*640,Math.floor(i/3)*360],640/520];const G4=(i)=>[[(i%4)*480,Math.floor(i/4)*270],480/520];
+WINS.forEach((w,i)=>{const t=T_LINE[i]+(i<5?0.55:0.22);CUES.pop.push(t);const [sx,sy]=SLOTS[i];at(w,sx,sy);
+  const [g3,s3]=G3(i<9?i:(i%9)),[g4,s4]=G4(i);
+  k(w,'o',[[0,0],[t,0],[t+0.25,1,'back'],[T_BLACK-0.001,1],[T_BLACK,0]]);
+  k(w,'s',[[0,.7],[t,.7],[t+0.3,1,'back'],[B(5,2),1],[B(5,2)+0.18,s3,'move'],[B(5,3),s3],[B(5,3)+0.12,s4,'move']]);
+  k(w,'x',[[0,0],[t,0],[B(4,1),0],[B(5,2),(i%2?6:-6)*(i+1)/3,'move'],[B(5,2)+0.18,g3[0]-sx,'move'],[B(5,3),g3[0]-sx],[B(5,3)+0.12,g4[0]-sx,'move']]);
+  k(w,'y',[[0,0],[t,0],[B(4,1),0],[B(5,2),(i%3-1)*8,'move'],[B(5,2)+0.18,g3[1]-sy,'move'],[B(5,3),g3[1]-sy],[B(5,3)+0.12,g4[1]-sy,'move']]);
+  const img=w.querySelector('img');const inpt=(i*0.7)%2.2;
+  k(img,'f',[[0,-1],[t-0.05,-1],[t,inpt],[T_BLACK,inpt+(T_BLACK-t)*1.0]]);   // lecture à vitesse réelle
+  if(i>=9)k(w,'vis',[[0,1],[B(5,2),1],[B(5,2)+0.001,0],[B(5,3),0],[B(5,3)+0.001,1]]);  // 3×3 : 9 fenêtres, 4×4 : 16
+});
+// whip pans (caméra monde) + flou directionnel
+const CAM={},MB={};
+k(CAM,'x',[[0,0],[B(4,3),0],[B(4,3)+0.14,-260,'in'],[B(4,3)+0.3,0,'out'],[B(5,1),0],[B(5,1)+0.12,220,'in'],[B(5,1)+0.26,0,'out']]);
+k(MB,'v',[[0,0],[B(4,3),0],[B(4,3)+0.1,26,'in'],[B(4,3)+0.3,0,'out'],[B(5,1),0],[B(5,1)+0.09,22,'in'],[B(5,1)+0.26,0,'out']]);
+k(CAM,'s',[[0,1],[B(5,2),1],[B(5,3),1.02,'lin'],[T_BLACK,1.05,'expo']]);
+const GL={};k(GL,'glitch',[[0,0],[B(5,3)-0.001,0],[B(5,3),14],[B(5,3)+0.1,0],[T_BLACK-0.12,0],[T_BLACK-0.11,18],[T_BLACK-0.06,0],[T_BLACK-0.05,10],[T_BLACK,0]]);
+k('act1','o',[[0,1],[T_BLACK-0.001,1],[T_BLACK,0]]);
+at('lbt',0,0);at('lbb',0,0);
+k('lbt','y',[[0,0],[T_TERM,0],[T_TERM+0.6,-138,'move'],[T_ACT3-0.4,-138],[T_ACT3,0,'move'],[T_NOTE2-0.3,0],[T_NOTE2,-138,'move']]);
+k('lbb','y',[[0,0],[T_TERM,0],[T_TERM+0.6,138,'move'],[T_ACT3-0.4,138],[T_ACT3,0,'move'],[T_NOTE2-0.3,0],[T_NOTE2,138,'move']]);
+// étalonnage : froid à l'acte 1, chaud à l'acte 3
+const GR={};k(GR,'cool',[[0,1],[T_BLACK,1],[T_TERM,0]]);k(GR,'warm',[[0,0],[T_ACT3-0.2,0],[T_ACT3+0.4,1,'out'],[T_NOTE2,1],[T_NOTE2+0.3,0]]);
+
+// ===================== ACTE 2 : terminal =====================
+// toutes les lignes réelles, dans l'ordre ; les commandes sont tapées, les sorties tombent
+const LINES=[];
+function cmd(s){LINES.push({t:'cmd',s})}function outl(arr,cls){arr.forEach(s=>LINES.push({t:'out',s,cls}))}
+cmd(TERM.uv[0].slice(2));outl(TERM.uv.slice(1,3));LINES.push({t:'bar'});outl(TERM.uv.slice(3));
+cmd(TERM.init[0].slice(2));outl(TERM.init.slice(1));cmd(TERM.std[0].slice(2));outl(TERM.std.slice(1));
+const tl=$('tl');const LEL=LINES.map(l=>{const d=document.createElement('div');d.className='ln';
+  if(l.t==='cmd'){d.innerHTML=`<span class="p">$ </span><span class="tx" data-full="${l.s.replace(/"/g,'&quot;')}"></span>`}
+  else if(l.t==='bar'){d.innerHTML=`<div id="pbar"><i></i></div>`;d.style.cssText='height:32px;display:flex;align-items:center'}
+  else{let s=l.s.replace(/&/g,'&amp;').replace(/</g,'&lt;');
+    s=s.replace(/^(\s*)\[OK\]/,'$1<span class="ok">[OK]</span>').replace(/^( \+ )/,'<span class="k">$1</span>').replace(/^([╭│╰].*)$/,'<span class="box">$1</span>');
+    if(/^Installed 3 executables|^Installed 9 packages|^Resolved|^Prepared/.test(s))s=`<span class="ok">${s}</span>`;
+    d.innerHTML=s||' '}
+  tl.appendChild(d);return d});
+const LH=32,VISH=860-46-36;
+// révélation : L = nombre de lignes affichées (fractionnaire pour la frappe)
+const TL={};const Lk=[[0,0],[T_TERM+1.2,0]];
+const i_uv=0,i_bar=LINES.findIndex(l=>l.t==='bar'),i_init=LINES.findIndex((l,i)=>l.t==='cmd'&&i>0),i_std=LINES.findIndex((l,i)=>l.t==='cmd'&&i>i_init);
+const t_type1=B(6,3);Lk.push([t_type1,0],[t_type1+0.95,1,'lin'],[t_type1+1.1,1],[t_type1+1.2,2],[t_type1+1.35,3]);CUES.type.push({t:t_type1,d:0.95,n:28});CUES.enter.push(t_type1+1.0);          // uv : résolu, téléchargement
+const t_bar=t_type1+1.35;k(TL,'pb',[[0,0],[t_bar,0],[t_bar+1.35,1,'out']]);CUES.bar=[t_bar,t_bar+1.35];CUES.flood.push([t_bar+1.4,t_bar+1.9]);
+Lk.push([t_bar+1.35,3],[t_bar+1.4,4],[t_bar+1.5,7],[t_bar+1.9,i_init,'lin']);                                           // téléchargé, préparé, installé, + paquets, exécutables
+const t_type2=B(7,4);Lk.push([t_type2,i_init],[t_type2+0.7,i_init+1,'lin'],[t_type2+0.85,i_init+1],[t_type2+1.6,i_std,'expo']);CUES.type.push({t:t_type2,d:0.7,n:25});CUES.enter.push(t_type2+0.75);CUES.flood.push([t_type2+0.85,t_type2+1.6]);  // init : 54 lignes en 0,75 s
+const t_type3=19.8;Lk.push([t_type3,i_std],[t_type3+0.9,i_std+1,'lin'],[t_type3+1.0,i_std+1],[t_type3+1.55,LINES.length,'expo']);CUES.type.push({t:t_type3,d:0.9,n:43});CUES.enter.push(t_type3+0.95);CUES.flood.push([t_type3+1.0,t_type3+1.55]);
+k(TL,'L',Lk);
+at('term',0,0);k('term','o',[[0,0],[T_TERM,0],[T_TERM+0.5,1,'out'],[T_CK-0.001,1],[T_CK,0]]);
+k('term','s',[[0,1.02],[T_TERM,1.02],[T_CK,1,'lin']]);
+
+// ===================== chargement : cockpit (maquette), 4 coupes =====================
+at('ck',0,0);at('ckleg',0,0);at('cur2',0,0);
+k('ck','o',[[0,0],[T_CK,0],[T_CK+0.001,1],[T_ACT3-0.001,1],[T_ACT3,0]]);k('ckleg','o',[[0,0],[T_CK,0],[T_CK+0.001,1],[T_ACT3-0.001,1],[T_ACT3,0]]);
+// coupe 1 : large ; coupe 2 : zoom « En cours » ; coupe 3 : zoom « À traiter », curseur ; coupe 4 : fusion
+k('ck','s',[[0,1],[T_CK+BEAT,1],[T_CK+BEAT+0.001,1.9],[T_CK+2*BEAT,1.95,'lin'],[T_CK+2*BEAT+0.001,2.2],[T_CK+3*BEAT,2.25,'lin']]);
+k('ck','x',[[0,0],[T_CK+BEAT,0],[T_CK+BEAT+0.001,-420],[T_CK+2*BEAT,-440,'lin'],[T_CK+2*BEAT+0.001,860],[T_CK+3*BEAT,850,'lin']]);
+k('ck','y',[[0,0],[T_CK+BEAT,0],[T_CK+BEAT+0.001,180],[T_CK+2*BEAT,170,'lin'],[T_CK+2*BEAT+0.001,560],[T_CK+3*BEAT,550,'lin']]);
+CUES.cuts.push(T_CK,T_CK+BEAT,T_CK+2*BEAT);const T_MERGE=T_CK+2*BEAT+0.4;CUES.merge=T_MERGE;
+k('cur2','o',[[0,0],[T_CK+2*BEAT,0],[T_CK+2*BEAT+0.1,1,'out'],[T_ACT3-0.001,1],[T_ACT3,0]]);
+k('cur2','x',[[0,520],[T_CK+2*BEAT,520],[T_MERGE,470,'move']]);k('cur2','y',[[0,470],[T_CK+2*BEAT,470],[T_MERGE,395,'move']]);
+k('cur2','s',[[0,1],[T_MERGE-0.05,1],[T_MERGE,.8,'in'],[T_MERGE+0.2,1,'back']]);
+const MG={};k(MG,'v',[[0,0],[T_MERGE,0],[T_MERGE+0.4,1,'move']]);
+at('wipe',-2200,0);k('wipe','x',[[0,0],[T_ACT3-0.35,0],[T_ACT3+0.3,4400,'in']]);k('wipe','o',[[0,0],[T_ACT3-0.35,0],[T_ACT3-0.34,1],[T_ACT3+0.3,1],[T_ACT3+0.31,0]]);
+
+// ===================== ACTE 3 : réalisé =====================
+const SH=[['s_game',T_ACT3,T_ACT3+2*BEAT],['s_screen',T_ACT3+2*BEAT,T_ACT3+4*BEAT],['s_player',T_ACT3+4*BEAT,B(11,2)],['s_shop',B(11,2),B(11,2)+1.5],['s_pack',B(11,2)+1.5,B(12,2)],['s_site',B(12,2),B(13,2)],['s_piano',B(13,2),B(14,2)],['s_photos',B(14,2),T_NOTE2]];
+for(const [id,t0,t1] of SH){CUES.shots.push([id,t0,t1]);at(id,0,0);k(id,'o',[[0,0],[t0-0.001,0],[t0,1],[t1-0.001,1],[t1,0]]);
+  const img=$(id).querySelector('img.clip, canvas.keyed');if(img)k(img,'f',[[0,-1],[t0-0.05,-1],[t0,0.2],[t1,0.2+(t1-t0)*0.85,'lin']]);   // léger ralenti
+  k(id,'s',[[0,1],[t0,1.0],[t1,1.045,'lin']]);}   // poussée lente
+$('s_game').style.transformOrigin='50% 50%';
+// écrans incrustés (quads par défaut, à ajuster rush par rush dans SCREENS)
+const SCR_DEF={scr_game:{quad:[[520,170],[1420,190],[1410,790],[530,770]]},scr_shop:{quad:[[380,150],[1540,160],[1530,900],[390,890]]},scr_site:{quad:[[380,150],[1540,160],[1530,900],[390,890]]}};
+const SCREENS={};for(const kk of Object.keys(SCR_DEF)){const v=(window.SCREENS||{})[kk];SCREENS[kk]=v?(Array.isArray(v)?{quad:v}:v):SCR_DEF[kk]}
+screen('scr_game',320*4,180*4,SCREENS.scr_game.quad);screen('scr_shop',1440,900,SCREENS.scr_shop.quad);screen('scr_site',1440,900,SCREENS.scr_site.quad);
+// boutique : le toast arrive
+CUES.toast=B(11,2)+0.7;CUES.chord=B(13,2)+0.5;at('toast',0,0);k('toast','y',[[0,-120],[B(11,2)+0.6,-120],[B(11,2)+1.0,0,'back']]);k('toast','o',[[0,0],[B(11,2)+0.6,0],[B(11,2)+0.8,1]]);
+// apprendre : carte flottante + touches
+at('learn',1180,540);at('photos',400,220);k('learn','o',[[0,0],[B(13,2)+0.3,0],[B(13,2)+0.7,1,'out']]);k('learn','y',[[0,20],[B(13,2)+0.3,20],[B(13,2)+0.7,0,'out']]);
+{const ks=$('keys');const whites=['C','D','E','F','G','A','B','C','D','E'];whites.forEach((n,i)=>{const w=document.createElement('div');w.className='w'+(n==='D'&&i===1||n==='A'&&i===5?' on':'');ks.appendChild(w)});
+  const bl=[0,1,3,4,5,7,8];bl.forEach(i=>{const kk=document.createElement('div');kk.className='k'+(i===1?' on':'');kk.style.left=`calc(${(i+1)*10}% - 17px)`;ks.appendChild(kk)})}
+// photos : vignettes qui filent dans les dossiers
+{const ph=$('phs');const src=['i_marche','i_flash','i_piano','r_piano','i_postit','i_site','r_pack','i_carnet','i_jeu','r_photos'];const rr=rng(3);
+  for(let i=0;i<18;i++){const d=document.createElement('div');d.className='a ph';const c=src[i%src.length];const m=CLIPS[c];const fr=1+Math.floor(rr()*(m?m.n:1));
+    d.innerHTML=`<img src="frames/${c}/${String(fr).padStart(4,'0')}.jpg" alt="">`;ph.appendChild(d);
+    const x0=60+(i%6)*170,y0=84+Math.floor(i/6)*150;at(d,x0,y0);const fold=[70,430,790][i%3]+60+(i%4)*30,ty=470;
+    const t0=B(14,2)+0.75+i*0.045;CUES.photos.push(t0);k(d,'x',[[0,0],[t0,0],[t0+0.55,fold-x0,'move']]);k(d,'y',[[0,0],[t0,0],[t0+0.55,ty-y0,'move']]);k(d,'s',[[0,1],[t0,1],[t0+0.55,.35,'move']]);k(d,'o',[[0,1],[t0+0.5,1],[t0+0.6,0]])}}
+
+// ===================== note finale =====================
+{const ul2=$('ul2');const ths=[null,'r_pack',null,'r_piano','r_photos'];
+  IDEES.slice(0,5).forEach((s,i)=>{const li=document.createElement('li');const inner=i===0?'<canvas id="game3" width="320" height="180" style="width:128px;height:72px;image-rendering:pixelated"></canvas>':i===2?'<div id="site3" style="width:1440px;height:900px;transform:scale(.0889);transform-origin:0 0"></div>':`<img alt="" src="frames/${ths[i]}/0030.jpg">`;li.innerHTML=`<span>${s}</span><span class="th">${inner}</span>`;ul2.appendChild(li);
+    at(li,0,0);const t=T_NOTE2+0.3+i*0.22;k(li,'o',[[0,0],[t,0],[t+0.35,1,'out']]);k(li,'y',[[0,14],[t,14],[t+0.35,0,'out']])});
+  const li=document.createElement('li');li.innerHTML=`<span class="tx" data-full="un "></span><span class="c"></span>`;ul2.appendChild(li);at(li,0,0);
+  k(li,'o',[[0,0],[T_NOTE2+1.7,0],[T_NOTE2+1.9,1]]);}
+at('note2',0,0);k('note2','o',[[0,0],[T_NOTE2,0],[T_NOTE2+0.4,1,'out'],[T_END-0.001,1],[T_END,0]]);k('note2','s',[[0,1],[T_NOTE2,.98],[T_END,1.02,'lin']]);
+$('note2').style.transformOrigin='50% 50%';
+// fond clair pendant la note finale
+const BGc={};k(BGc,'light',[[0,0],[T_NOTE2-0.001,0],[T_NOTE2,1]]);
+
+// ===================== fin =====================
+at('end',0,0);k('end','o',[[0,0],[T_END-0.001,0],[T_END,1]]);
+k($('end').querySelector('.cmd .tx'),'n',[[0,0],[B(16,3),0],[B(16,3)+0.9,1,'lin']]);CUES.type.push({t:B(16,3),d:0.9,n:28});CUES.black=T_BLACK;CUES.term=T_TERM;CUES.ck=T_CK;CUES.act3=T_ACT3;CUES.note2=T_NOTE2;CUES.end=T_END;CUES.grid3=B(5,2);CUES.grid4=B(5,3);
+// pièces et sauts du mini-jeu (temps film) : objets tous les 60 px, défilement 90 px/s, départ gt = t - T_ACT3 + 3.2
+for(let n=0;n<40;n++){const gt=n*60/90;const t=T_ACT3-3.2+gt;if(t<T_ACT3||t>B(11,2))continue;if(n%3===2)CUES.jumps.push(+(t-0.35).toFixed(3));else CUES.coins.push(+t.toFixed(3))}
+k($('end').querySelector('.hosts'),'o',[[0,0],[B(17,2),0],[B(17,2)+0.4,1,'out']]);
+k($('end').querySelector('.word'),'o',[[0,0],[T_END,0],[T_END+0.5,1,'out']]);k($('end').querySelector('.word'),'y',[[0,16],[T_END,16],[T_END+0.5,0,'out']]);
+k($('end').querySelector('.cmd'),'o',[[0,0],[B(16,3)-0.1,0],[B(16,3),1]]);
+
+// ===================== mini-jeu (déterministe) =====================
+const PAL={sky1:'#0d1030',sky2:'#2a1f55',hill1:'#17224a',hill2:'#1f2f63',hill3:'#2b4080',ground:'#3b2a5a',ground2:'#4a3570',hero:'#8ea2ff',hero2:'#dfe6ff',coin:'#ffd166',coin2:'#fff2b3',obst:'#f08a5d',star:'#c9d2ff'};
+const DIG={'0':[7,5,5,5,7],'1':[2,6,2,2,7],'2':[7,1,7,4,7],'3':[7,1,7,1,7],'4':[5,5,7,1,1],'5':[7,4,7,1,7],'6':[7,4,7,5,7],'7':[7,1,1,1,1],'8':[7,5,7,5,7],'9':[7,5,7,1,7]};
+function drawGame(ctx,gt){const W=320,H=180;ctx.imageSmoothingEnabled=false;
+  const g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,PAL.sky1);g.addColorStop(1,PAL.sky2);ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  const sr=rng(11);ctx.fillStyle=PAL.star;for(let i=0;i<40;i++){const x=(sr()*W+gt*2)%W,y=sr()*90;if(((i+Math.floor(gt*3))%7)!==0)ctx.fillRect(Math.floor(x),Math.floor(y),1,1)}
+  const hills=(spd,base,amp,col,seed)=>{ctx.fillStyle=col;const r=rng(seed);const off=gt*spd;for(let x=0;x<W;x++){const u=(x+off)/40;const y=base-amp*(0.6+0.4*Math.sin(u)+0.3*Math.sin(u*2.3+1)+0.2*Math.sin(u*5.1));ctx.fillRect(x,Math.floor(y),1,H)}};
+  hills(10,140,22,PAL.hill1,1);hills(22,150,16,PAL.hill2,2);hills(40,158,10,PAL.hill3,3);
+  const gy=150;ctx.fillStyle=PAL.ground;ctx.fillRect(0,gy,W,H-gy);ctx.fillStyle=PAL.ground2;const go=Math.floor(gt*90)%16;for(let x=-16;x<W;x+=16)ctx.fillRect(x-go,gy,8,3);
+  // pièces et obstacles (monde qui défile à 90 px/s)
+  const sx=gt*90;let score=0;
+  for(let n=0;n<400;n++){const wx=60+n*60;const x=wx-sx;if(x<-10){if(n%3!==2)score++;continue}if(x>W+10)break;
+    if(n%3===2){ctx.fillStyle=PAL.obst;ctx.fillRect(Math.floor(x),gy-9,7,9);ctx.fillStyle='#ffb48f';ctx.fillRect(Math.floor(x)+2,gy-9,2,2)}
+    else{const bob=Math.sin(gt*6+n)*2;const cx=Math.floor(x),cy=Math.floor(gy-26+bob);ctx.fillStyle=PAL.coin;ctx.fillRect(cx+1,cy,4,6);ctx.fillRect(cx,cy+1,6,4);ctx.fillStyle=PAL.coin2;ctx.fillRect(cx+2,cy+1,1,2)}}
+  // héros : saut périodique (période 1,6 s, départ 0,55 s avant chaque obstacle)
+  const hx=60;const per=2.0;const ph=(((gt-0.983)%per)+per)%per/per;const jump=ph<0.36?Math.sin(ph/0.36*Math.PI)*28:0;const hy=gy-14-jump;
+  const run=Math.floor(gt*10)%2;ctx.fillStyle=PAL.hero;ctx.fillRect(hx,Math.floor(hy),10,11);ctx.fillRect(hx+(run?1:3),Math.floor(hy)+11,3,3);ctx.fillRect(hx+(run?6:4),Math.floor(hy)+11,3,3);
+  ctx.fillStyle=PAL.hero2;ctx.fillRect(hx+6,Math.floor(hy)+3,2,2);ctx.fillRect(hx+2,Math.floor(hy)+1,6,1);
+  // traînée
+  ctx.fillStyle='rgba(142,162,255,.35)';for(let i=1;i<4;i++)ctx.fillRect(hx-i*4,Math.floor(hy)+6+i,3,2);
+  // HUD
+  const s=String(score).padStart(4,'0');ctx.fillStyle=PAL.coin;ctx.fillRect(8,8,4,6);ctx.fillRect(7,9,6,4);
+  [...s].forEach((ch,i)=>{const bm=DIG[ch];bm.forEach((row,y)=>{for(let x=0;x<3;x++)if(row&(4>>x)){ctx.fillStyle='#fff';ctx.fillRect(18+i*8+x*2,8+y*2,2,2)}})});
+}
+const gctx=$('game').getContext('2d'),gctx2=$('game2').getContext('2d'),gctx3=$('game3').getContext('2d');
+$('site3').appendChild($('site').cloneNode(true));$('site3').firstElementChild.removeAttribute('id');$('site3').querySelector('#sitepic')?.removeAttribute('id');
+$('game').style.width='1920px';$('game').style.height='1080px';
+
+// ===================== clé verte (WebGL2) =====================
+const keyCv=document.createElement('canvas');keyCv.width=1920;keyCv.height=1080;
+const kgl=keyCv.getContext('webgl2',{premultipliedAlpha:true,preserveDrawingBuffer:true,alpha:true});
+const KVS=`#version 300 es
+in vec2 p;out vec2 uv;void main(){uv=vec2(p.x*.5+.5,.5-p.y*.5);gl_Position=vec4(p,0,1);}`;
+const KFS=`#version 300 es
+precision highp float;uniform sampler2D uTex;uniform vec3 uKey;in vec2 uv;out vec4 o;
+void main(){vec3 c=texture(uTex,uv).rgb;
+  // distance de chrominance à la couleur clé (espace YCbCr approché)
+  float cb=c.b-c.g,cr=c.r-c.g;float kcb=uKey.b-uKey.g,kcr=uKey.r-uKey.g;
+  float d=length(vec2(cb-kcb,cr-kcr));float a=smoothstep(0.10,0.26,d);
+  // suppression du débordement vert sur les bords
+  float g=c.g-max(c.r,c.b);if(g>0.0)c.g-=g*(1.0-a)*0.9+g*0.35*a*(1.0-a);
+  o=vec4(c*a,a);}`;
+let kprog,KU={};
+if(kgl){const sh=(t,s)=>{const x=kgl.createShader(t);kgl.shaderSource(x,s);kgl.compileShader(x);if(!kgl.getShaderParameter(x,kgl.COMPILE_STATUS))console.error(kgl.getShaderInfoLog(x));return x};
+  kprog=kgl.createProgram();kgl.attachShader(kprog,sh(kgl.VERTEX_SHADER,KVS));kgl.attachShader(kprog,sh(kgl.FRAGMENT_SHADER,KFS));kgl.linkProgram(kprog);kgl.useProgram(kprog);
+  const buf=kgl.createBuffer();kgl.bindBuffer(kgl.ARRAY_BUFFER,buf);kgl.bufferData(kgl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),kgl.STATIC_DRAW);kgl.enableVertexAttribArray(0);kgl.vertexAttribPointer(0,2,kgl.FLOAT,false,0,0);
+  const tex=kgl.createTexture();kgl.bindTexture(kgl.TEXTURE_2D,tex);kgl.texParameteri(kgl.TEXTURE_2D,kgl.TEXTURE_MIN_FILTER,kgl.LINEAR);kgl.texParameteri(kgl.TEXTURE_2D,kgl.TEXTURE_WRAP_S,kgl.CLAMP_TO_EDGE);kgl.texParameteri(kgl.TEXTURE_2D,kgl.TEXTURE_WRAP_T,kgl.CLAMP_TO_EDGE);
+  KU.uTex=kgl.getUniformLocation(kprog,'uTex');KU.uKey=kgl.getUniformLocation(kprog,'uKey');}
+const KEYCOL={r_jeu_screen:SCREENS.scr_game.key||[0,1,0],r_shop:SCREENS.scr_shop.key||[0,1,0],r_site:SCREENS.scr_site.key||[0.72,0.9,0.0]};
+function drawKeyed(){
+  for(const c of keyedEls){const im=KEYIMG.get(c);if(!im||!im.complete||!im.naturalWidth)continue;if(!c._dirty)continue;c._dirty=false;
+    kgl.viewport(0,0,1920,1080);kgl.clearColor(0,0,0,0);kgl.clear(kgl.COLOR_BUFFER_BIT);kgl.texImage2D(kgl.TEXTURE_2D,0,kgl.RGBA,kgl.RGBA,kgl.UNSIGNED_BYTE,im);
+    const kc=KEYCOL[c.dataset.clip]||[0,1,0];kgl.uniform3f(KU.uKey,kc[0],kc[1],kc[2]);kgl.uniform1i(KU.uTex,0);kgl.drawArrays(kgl.TRIANGLES,0,3);
+    const ctx=c.getContext('2d');ctx.clearRect(0,0,1920,1080);ctx.drawImage(keyCv,0,0)}
+}
+
+// ===================== post : grain, vignette, fuite de lumière =====================
+const gl=$('post').getContext('webgl2',{premultipliedAlpha:true,preserveDrawingBuffer:true,alpha:true});
+const VS=`#version 300 es
+in vec2 p;void main(){gl_Position=vec4(p,0,1);}`;
+const FS=`#version 300 es
+precision highp float;uniform vec2 uRes;uniform float uFrame,uGrain,uVig,uLeak,uCool,uWarm;uniform vec2 uLeakPos;out vec4 o;
+float h(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+void main(){vec2 f=gl_FragCoord.xy;vec2 q=f/uRes-.5;
+  float g=(h(f+uFrame*1.7)-.5)*uGrain;
+  float v=dot(q,q)*uVig;
+  vec2 lp=(f-uLeakPos)/uRes;float leak=exp(-dot(lp,lp)*14.0)*uLeak;
+  vec3 col=vec3(0.0);float a=0.0;
+  // teintes : froid (bleu dans les ombres) ou chaud (ambre)
+  col+=vec3(0.05,0.10,0.25)*uCool*0.5;a+=0.07*uCool;
+  col+=vec3(0.98,0.72,0.42)*uWarm*0.55;a+=0.10*uWarm;
+  col+=vec3(1.0,0.78,0.55)*leak;a+=leak*0.9;
+  col+=vec3(g);a+=abs(g)*2.0;
+  col=mix(col,vec3(0.0),v);a=min(1.0,a+v);
+  o=vec4(col*min(a,1.0)/max(a,1e-4)*min(a,1.0),min(a,1.0));}`;
+let prog,U={};
+if(gl){const sh=(t,s)=>{const x=gl.createShader(t);gl.shaderSource(x,s);gl.compileShader(x);if(!gl.getShaderParameter(x,gl.COMPILE_STATUS))console.error(gl.getShaderInfoLog(x));return x};
+  prog=gl.createProgram();gl.attachShader(prog,sh(gl.VERTEX_SHADER,VS));gl.attachShader(prog,sh(gl.FRAGMENT_SHADER,FS));gl.linkProgram(prog);gl.useProgram(prog);
+  const buf=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buf);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),gl.STATIC_DRAW);gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,2,gl.FLOAT,false,0,0);
+  for(const n of ['uRes','uFrame','uGrain','uVig','uLeak','uCool','uWarm','uLeakPos'])U[n]=gl.getUniformLocation(prog,n);
+  gl.enable(gl.BLEND);gl.blendFunc(gl.ONE,gl.ONE_MINUS_SRC_ALPHA)}
+const PO={};k(PO,'grain',[[0,.07],[T_BLACK,.07],[T_TERM,.03],[T_ACT3,.06],[T_NOTE2,.025],[T_END,.02]]);
+k(PO,'vig',[[0,.5],[T_BLACK,.5],[T_TERM,.4],[T_ACT3,.55],[T_NOTE2,.2],[T_END,.12]]);
+k(PO,'leak',[[0,0],[T_ACT3-0.2,0],[T_ACT3,.7,'out'],[T_ACT3+1.6,0,'in'],[B(11,2),0],[B(11,2)+0.05,.6],[B(11,2)+1.2,0,'in'],[B(12,2),0],[B(12,2)+0.05,.5],[B(12,2)+1.2,0,'in'],[B(13,2),0],[B(13,2)+0.05,.5],[B(13,2)+1.2,0,'in']]);
+k(PO,'lx',[[0,1700],[T_ACT3,1700],[T_ACT3+1.6,1200,'lin'],[B(11,2),300],[B(11,2)+1.2,500,'lin'],[B(12,2),1600],[B(12,2)+1.2,1400,'lin'],[B(13,2),200],[B(13,2)+1.2,400,'lin']]);
+
+// ===================== rendu =====================
+const mbxv=document.getElementById('mbxv'),rgbr=document.getElementById('rgbr'),rgbb=document.getElementById('rgbb');
+async function render(t){
+  evalAt(t);applyDom();
+  // caméra et flou directionnel
+  const cs=S(CAM).s??1,cx=S(CAM).x||0;$('world').style.transform=`translate(${960-960*cs+cx}px,${540-540*cs}px) scale(${cs})`;
+  const mb=S(MB).v||0;mbxv.setAttribute('stdDeviation',`${mb.toFixed(1)} 0`);$('act1').style.filter=mb>0.3?'url(#mbx)':'';
+  const gli=S(GL).glitch||0;rgbr.setAttribute('dx',gli);rgbb.setAttribute('dx',-gli);$('ideas').style.filter=gli>0.5?'url(#rgb)':'';
+  // fond
+  $('stage').style.background=(S(BGc).light||0)>0.5?'#eef0f4':(t<T_TERM&&t>=T_BLACK)?'#000':'#0b0d13';
+  $('grade').style.background=(S(GR).cool||0)>0.5?'rgba(60,90,160,.22)':(S(GR).warm||0)>0.5?'rgba(255,170,90,.16)':'transparent';
+  // terminal
+  const L=S(TL).L??0;const full=Math.floor(L),frac=L-full;let hgt=0;
+  LEL.forEach((d,i)=>{const on=i<full||(i===full&&LINES[i].t==='cmd');d.style.display=on?'':'none';if(on)hgt+=LH;
+    if(i===full&&LINES[i].t==='cmd'){const tx=d.querySelector('.tx');tx.textContent=LINES[i].s.slice(0,Math.round(frac*LINES[i].s.length))}
+    else if(LINES[i].t==='cmd'&&i<full){const tx=d.querySelector('.tx');tx.textContent=LINES[i].s}});
+  const bar=$('pbar');if(bar){bar.firstElementChild.style.transform=`scaleX(${(S(TL).pb||0).toFixed(3)})`;bar.parentElement.style.display=(full>i_bar&&(S(TL).pb||0)>=1)?'none':(full>=i_bar?'flex':'none')}
+  tl.style.transform=`translateY(${-Math.max(0,hgt-VISH)}px)`;
+  // curseur du terminal : après la dernière ligne affichée
+  let curEl=$('tcur');if(!curEl){curEl=document.createElement('span');curEl.id='tcur';curEl.className='cur';}
+  const lastIdx=Math.min(LINES.length-1,full);const target=(full<LINES.length&&LINES[full].t==='cmd')?LEL[full]:LEL[Math.max(0,full-1)];
+  if(target&&target!==curEl.parentElement){curEl.remove();target.appendChild(curEl)}curEl.style.visibility=(Math.floor(t*2.4)%2===0&&t>=T_TERM+0.5)?'visible':'hidden';
+  // fusion (maquette)
+  const mv=S(MG).v||0;$('mg1').setAttribute('d',`M10 8 C10 ${22-14*mv} ${22-8*mv} ${24-4*mv} 30 30`);
+  // mini-jeu
+  if(t>=T_ACT3-0.1&&t<B(11,2)+0.1){const gt=t-T_ACT3+3.2;drawGame(gctx,gt);drawGame(gctx2,gt)}
+  if(t>=T_NOTE2-0.2&&t<T_END+0.1&&!gctx3._done){drawGame(gctx3,5.0);gctx3._done=true;const im=$('site3').querySelector('img');if(im&&!im.getAttribute('src'))im.src=clipFrame('i_marche',1.0)||''}
+  // photo du site : une image d'un rush
+  const sp=$('sitepic');if(!sp.getAttribute('src'))sp.src=clipFrame('i_marche',1.0)||'';
+  // curseurs clignotants
+  const endc=$('end').querySelector('.cur');endc.style.visibility=Math.floor(t*2.4)%2===0?'visible':'hidden';
+  const n2c=$('note2').querySelector('.c');if(n2c)n2c.style.visibility=Math.floor(t*2.4)%2===0?'visible':'hidden';
+  await loadClips();drawKeyed();
+  // post
+  if(gl){gl.viewport(0,0,1920,1080);gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT);gl.uniform2f(U.uRes,1920,1080);gl.uniform1f(U.uFrame,Math.round(t*30));
+    gl.uniform1f(U.uGrain,S(PO).grain||0);gl.uniform1f(U.uVig,S(PO).vig||0);gl.uniform1f(U.uLeak,S(PO).leak||0);gl.uniform1f(U.uCool,S(GR).cool||0);gl.uniform1f(U.uWarm,S(GR).warm||0);
+    gl.uniform2f(U.uLeakPos,S(PO).lx||0,1080-200);gl.drawArrays(gl.TRIANGLES,0,3)}
+}
+window.__duration=DUR*1000;window.__seek=ms=>render(ms/1000);
+const P=new URLSearchParams(location.search);
+if(P.has('render'))document.body.classList.add('render');
+else{const fit=()=>{const s=Math.min(innerWidth/1920,innerHeight/1080);$('stage').style.transform=`scale(${s})`;$('stage').style.marginRight=`${1920*(s-1)}px`;$('stage').style.marginBottom=`${1080*(s-1)}px`};fit();addEventListener('resize',fit);
+  let t0=performance.now(),paused=false,cur=+(P.get('t')||0)*1000,busy=false;
+  const loop=async now=>{if(!paused){cur+=now-t0;if(cur>window.__duration)cur=0}t0=now;if(!busy){busy=true;await render(cur/1000);busy=false}$('tc').textContent=(cur/1000).toFixed(2)+' s';requestAnimationFrame(loop)};requestAnimationFrame(loop);
+  addEventListener('keydown',e=>{if(e.key===' ')paused=!paused;if(e.key==='ArrowRight')cur+=1000;if(e.key==='ArrowLeft')cur=Math.max(0,cur-1000);if(e.key==='r'||e.key==='R')cur=0});}
+render(0);
+</script>
+</body>
+</html>

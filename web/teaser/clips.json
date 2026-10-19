@@ -1,0 +1,118 @@
+{
+ "i_jeu": {
+  "file": "jeu/pexels-7240607-manette-lumiere-chaude.mp4",
+  "in": 2.0,
+  "dur": 3,
+  "label": "manette",
+  "force": true
+ },
+ "i_boutique": {
+  "file": "boutique/pexels-6169088-scotch-carton.mp4",
+  "in": 1.0,
+  "dur": 3,
+  "label": "colis",
+  "force": true
+ },
+ "i_site": {
+  "file": "site/pexels-7655496-designer-croquis-carnet.mp4",
+  "in": 8.0,
+  "dur": 3,
+  "label": "croquis",
+  "force": true
+ },
+ "i_piano": {
+  "file": "apprendre/pixabay-279215-piano-doigt.mp4",
+  "in": 2.0,
+  "dur": 3,
+  "label": "piano",
+  "force": true
+ },
+ "i_code": {
+  "file": "script/mixkit-1728-code-ecran-gros-plan.mp4",
+  "in": 3.0,
+  "dur": 3,
+  "label": "code",
+  "force": true
+ },
+ "i_carnet": {
+  "file": "broll/pexels-5900627-main-ecrit-liste.mp4",
+  "in": 4.0,
+  "dur": 3,
+  "label": "liste",
+  "force": true
+ },
+ "i_flash": {
+  "file": "apprendre/coverr-4670-flashcards.mp4",
+  "in": 3.0,
+  "dur": 3,
+  "label": "fiches"
+ },
+ "i_postit": {
+  "file": "broll/pexels-7710864-post-it-mur.mp4",
+  "in": 2.0,
+  "dur": 3,
+  "label": "post-it"
+ },
+ "i_casque": {
+  "file": "apprendre/pexels-5881540-casque-portable-dos.mp4",
+  "in": 4.0,
+  "dur": 3,
+  "label": "casque"
+ },
+ "i_terminal": {
+  "file": "script/pexels-35475345-terminal-installation.mp4",
+  "in": 3.0,
+  "dur": 3,
+  "label": "terminal"
+ },
+ "i_marche": {
+  "file": "boutique/pixabay-209456-sans-contact-marche.mp4",
+  "in": 5.0,
+  "dur": 3,
+  "label": "marché"
+ },
+ "r_jeu_screen": {
+  "file": "jeu/pixabay-154511-tv-verte-salon.mp4",
+  "in": 1.0,
+  "dur": 2.5,
+  "label": "télé"
+ },
+ "r_jeu_player": {
+  "file": "jeu/pexels-5901406-mains-manette.mp4",
+  "in": 1.5,
+  "dur": 1.2,
+  "label": "joueur"
+ },
+ "r_shop": {
+  "file": "site/pixabay-168192-portable-vert-epaule.mp4",
+  "in": 3.0,
+  "dur": 2.0,
+  "label": "boutique"
+ },
+ "r_pack": {
+  "file": "boutique/pexels-7855142-vendeur-emballe-commande.mp4",
+  "in": 9.5,
+  "dur": 1.6,
+  "label": "colis fermé"
+ },
+ "r_site": {
+  "file": "site/coverr-4751-designer-tablette-portable-vert.mp4",
+  "in": 4.0,
+  "dur": 3,
+  "label": "site",
+  "force": true
+ },
+ "r_piano": {
+  "file": "apprendre/pexels-15507823-piano-mains.mp4",
+  "in": 6.0,
+  "dur": 3,
+  "label": "piano",
+  "force": true
+ },
+ "r_photos": {
+  "file": "script/pexels-5674557-photos-imprimees.mp4",
+  "in": 0.5,
+  "dur": 1.6,
+  "label": "photos"
+ }
+}
