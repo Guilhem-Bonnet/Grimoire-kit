@@ -29,11 +29,17 @@ Configuration épinglée (pré-enregistrée par ``--dry-run`` dans
 
 Garde-fou de budget, fermé par défaut (:class:`BudgetGuard`) : ``--run`` refuse
 de partir sans ``--max-total-usd`` explicite ; avant CHAQUE appel ``claude -p``
-(y compris une reprise de session), le coût cumulé connu est comparé au plafond ;
-un coût inconnu (pas de ``total_cost_usd``, appel commencé mais jamais terminé
-dans le journal) ne vaut jamais 0 et bloque tout appel suivant. Le cumul vit
-dans ``state/aidlc-budget.jsonl``, écrit avant et après chaque appel : une
+(y compris une reprise de session), le coût cumulé connu est comparé au plafond,
+et l'appel reçoit le reste en ``--max-budget-usd`` (arrêt par Claude Code
+lui-même pendant l'appel) ; un coût inconnu (pas de ``total_cost_usd``, appel
+commencé mais jamais terminé dans le journal) ne vaut jamais 0 et bloque tout
+appel suivant. Le cumul vit dans ``state/aidlc-budget.jsonl`` (ou le journal
+partagé de ``--budget-ledger``), écrit avant et après chaque appel : une
 campagne relancée repart du cumul, jamais de zéro.
+
+Sous ``--resume``, ``total_cost_usd`` et ``modelUsage`` cumulent toute la
+session (mesuré au pilote B-06, Claude Code 2.1.302) : le coût d'un appel est
+la différence avec le total précédent de la même session, jamais le total.
 
 ``--dry-run`` ne lance aucun modèle : il vérifie l'épinglage, prépare les
 dépôts, installe et configure AI-DLC (local, sans fournisseur), écrit le
@@ -267,6 +273,9 @@ class BudgetGuard:
             }
         )
 
+    def remaining_usd(self) -> float:
+        return max(0.0, self.cap_usd - self.spent_usd)
+
     def snapshot(self) -> dict[str, Any]:
         return {
             "cap_usd": self.cap_usd,
@@ -437,6 +446,7 @@ class Invoker(Protocol):
         model: str | None,
         resume: str | None,
         log_path: Path,
+        max_budget_usd: float | None = None,
     ) -> ta.RunOutcome: ...
 
 
@@ -449,6 +459,7 @@ def claude_invoker(
     model: str | None,
     resume: str | None,
     log_path: Path,
+    max_budget_usd: float | None = None,
 ) -> ta.RunOutcome:
     """Un appel ``claude -p`` réel, jamais ``--bare`` (qui couperait les hooks et la skill d'AI-DLC)."""
     return ta.run_claude_headless(
@@ -460,13 +471,21 @@ def claude_invoker(
         repeat_threshold=LOOP_REPEAT_THRESHOLD,
         log_path=log_path,
         model=model,
-        extra_args=["--resume", resume] if resume else (),
+        extra_args=_extra_args(resume=resume, max_budget_usd=max_budget_usd),
         append_log=True,
         bare=False,
     )
 
 
-def planned_claude_command(prompt: str, *, model: str | None, resume: str | None) -> list[str]:
+def _extra_args(*, resume: str | None, max_budget_usd: float | None) -> list[str]:
+    """``--max-budget-usd`` (le reste du plafond, appliqué par Claude Code pendant l'appel), puis ``--resume``."""
+    args = ["--max-budget-usd", f"{max_budget_usd:.4f}"] if max_budget_usd is not None else []
+    return [*args, "--resume", resume] if resume else args
+
+
+def planned_claude_command(
+    prompt: str, *, model: str | None, resume: str | None, max_budget_usd: float | None = None
+) -> list[str]:
     """La commande que :func:`claude_invoker` lancerait (affichée par ``--dry-run``, jamais exécutée)."""
     cmd = [
         "claude",
@@ -482,8 +501,7 @@ def planned_claude_command(prompt: str, *, model: str | None, resume: str | None
     ]
     if model:
         cmd.extend(["--model", model])
-    if resume:
-        cmd.extend(["--resume", resume])
+    cmd.extend(_extra_args(resume=resume, max_budget_usd=max_budget_usd))
     return cmd
 
 
@@ -507,7 +525,7 @@ def workflow_completed(task_dir: Path) -> bool:
 class Invocation:
     index: int
     kind: str  # "task" | "reply"
-    cost_usd: float
+    cost_usd: float  # coût de CET appel (delta du total de session sous --resume)
     cost_known: bool
     num_turns: int
     input_tokens: int
@@ -517,7 +535,8 @@ class Invocation:
     wall_seconds: float
     terminated_reason: str
     session_id: str | None
-    model_usage: dict[str, Any] = field(default_factory=dict)
+    model_usage: dict[str, Any] = field(default_factory=dict)  # cumulé sur la session, tel que rendu
+    session_total_usd: float | None = None  # ``total_cost_usd`` brut rendu par l'appel (cumulé sur la session)
 
 
 @dataclass
@@ -545,8 +564,16 @@ class DriveResult:
         return sum(i.wall_seconds for i in self.invocations)
 
     def model_usage(self) -> dict[str, Any]:
-        merged: dict[str, dict[str, Any]] = {}
+        """``modelUsage`` cumule la session : la dernière valeur de chaque session, sommée entre sessions."""
+        last_per_session: dict[str, Invocation] = {}
+        unsessioned: list[Invocation] = []
         for inv in self.invocations:
+            if inv.session_id is None:
+                unsessioned.append(inv)
+            else:
+                last_per_session[inv.session_id] = inv
+        merged: dict[str, dict[str, Any]] = {}
+        for inv in [*last_per_session.values(), *unsessioned]:
             for model, usage in inv.model_usage.items():
                 slot = merged.setdefault(model, {})
                 for key, value in (usage or {}).items():
@@ -559,6 +586,18 @@ class DriveResult:
                     else:
                         slot.setdefault(key, value)
         return merged
+
+
+def session_call_cost(session_total: float, previous_total: float | None) -> float:
+    """Coût d'un appel : son total moins le total précédent de la session reprise.
+
+    Sans total précédent (premier appel), ou si le total baisse (copie de
+    session, compteur remis à zéro), l'appel compte en entier : jamais un
+    delta négatif, au pire un surcompte.
+    """
+    if previous_total is None or session_total < previous_total:
+        return session_total
+    return session_total - previous_total
 
 
 def drive_run(
@@ -590,6 +629,7 @@ def drive_run(
         run_env.pop("AIDLC_UNATTENDED", None)
     result = DriveResult(driver=driver)
     prompt, kind, session = aidlc_prompt(scope, task_prompt), "task", None
+    session_totals: dict[str, float] = {}
     remaining = float(run_timeout_s)
     while True:
         call_id = f"{call_prefix}#{len(result.invocations)}"
@@ -607,16 +647,20 @@ def drive_run(
             model=model,
             resume=session,
             log_path=log_path,
+            max_budget_usd=guard.remaining_usd(),
         )
         known = bool(outcome.cost_known)
-        guard.record(call_id, outcome.total_cost_usd, known)
         raw = outcome.raw_result or {}
         session_id = raw.get("session_id") if isinstance(raw.get("session_id"), str) else None
+        call_cost = session_call_cost(outcome.total_cost_usd, session_totals.get(session) if session else None)
+        if known and session_id is not None:
+            session_totals[session_id] = outcome.total_cost_usd
+        guard.record(call_id, call_cost, known)
         result.invocations.append(
             Invocation(
                 index=len(result.invocations),
                 kind=kind,
-                cost_usd=outcome.total_cost_usd,
+                cost_usd=call_cost,
                 cost_known=known,
                 num_turns=outcome.num_turns,
                 input_tokens=outcome.input_tokens,
@@ -627,6 +671,7 @@ def drive_run(
                 terminated_reason=outcome.terminated_reason,
                 session_id=session_id,
                 model_usage=dict(outcome.model_usage or {}),
+                session_total_usd=outcome.total_cost_usd if known else None,
             )
         )
         remaining -= outcome.wall_seconds
@@ -771,6 +816,8 @@ def preregistration(
         "run_timeout_s": run_timeout_s,
         "loop_repeat_threshold": LOOP_REPEAT_THRESHOLD,
         "never_bare": True,
+        "per_call_cap": "--max-budget-usd = reste du plafond",
+        "resumed_call_cost": "delta du total de session",
         "k": k,
         "seed": seed,
         "tasks": list(task_ids),
@@ -1056,6 +1103,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-person-replies", type=int, default=DEFAULT_MAX_PERSON_REPLIES)
     parser.add_argument("--auth", choices=ta.AUTH_MODES, default=None)
     parser.add_argument(
+        "--budget-ledger",
+        type=Path,
+        default=None,
+        help="journal de budget partagé entre workspaces (un seul plafond pour plusieurs pilotes) ; défaut : state/",
+    )
+    parser.add_argument(
         "--no-install", action="store_true", help="--dry-run seulement : ne pas installer ni configurer AI-DLC"
     )
     parser.add_argument("--n", type=str, default="20,99,393", help="--estimate : tailles de suite (tâches par bras)")
@@ -1120,7 +1173,7 @@ def main(argv: Sequence[str] | None = None, *, invoke: Invoker = claude_invoker,
     try:
         ensure_preregistered(state_dir, prereg)
         ensure_results_match_model(state_dir / "results.jsonl", args.model)
-        guard = BudgetGuard.open(args.max_total_usd, state_dir / BUDGET_LEDGER)
+        guard = BudgetGuard.open(args.max_total_usd, args.budget_ledger or state_dir / BUDGET_LEDGER)
         guard.check_before_call()
     except (PreregistrationError, ModelMismatchError, BudgetError, ValueError) as exc:
         print(str(exc), file=sys.stderr)

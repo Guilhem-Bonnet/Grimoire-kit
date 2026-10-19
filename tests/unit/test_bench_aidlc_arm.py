@@ -76,11 +76,13 @@ class FakeInvoker:
         model: str | None,
         resume: str | None,
         log_path: Path,
+        max_budget_usd: float | None = None,
     ) -> ta.RunOutcome:
         self.calls.append(
             {
                 "prompt": prompt,
                 "resume": resume,
+                "max_budget_usd": max_budget_usd,
                 "unattended": env.get("AIDLC_UNATTENDED"),
                 "timeout_s": timeout_s,
                 "model": model,
@@ -94,7 +96,13 @@ class FakeInvoker:
         return self.outcomes.pop(0)
 
 
-def _outcome(cost: float | None, *, session: str | None = "sess-1", reason: str = "completed") -> ta.RunOutcome:
+def _outcome(
+    cost: float | None,
+    *,
+    session: str | None = "sess-1",
+    reason: str = "completed",
+    model_usage: dict[str, Any] | None = None,
+) -> ta.RunOutcome:
     raw: dict[str, Any] = {"type": "result", "session_id": session} if session else {"type": "result"}
     return ta.RunOutcome(
         total_cost_usd=cost or 0.0,
@@ -103,6 +111,7 @@ def _outcome(cost: float | None, *, session: str | None = "sess-1", reason: str 
         wall_seconds=1.0,
         terminated_reason=reason,
         raw_result=raw,
+        model_usage=model_usage or {},
     )
 
 
@@ -174,7 +183,8 @@ def test_run_without_model_is_refused(tmp_path: Path) -> None:
 
 def test_guard_stops_the_run_once_known_spend_reaches_the_cap(tmp_path: Path) -> None:
     guard = aa.BudgetGuard.open("1.0", tmp_path / "budget.jsonl")
-    invoker = FakeInvoker([_outcome(0.6), _outcome(0.6), _outcome(0.6)])
+    # Totaux de session cumulés sous --resume : 0,6 $ par appel.
+    invoker = FakeInvoker([_outcome(0.6), _outcome(1.2), _outcome(1.8)])
 
     drive = _drive(tmp_path, invoker, guard, driver=aa.DRIVER_SCRIPTED)
 
@@ -254,7 +264,9 @@ def test_scripted_driver_resumes_the_session_with_the_fixed_reply_until_workflow
             (audit / "shard.md").write_text("## Workflow Completed\n**Event**: WORKFLOW_COMPLETED\n", encoding="utf-8")
 
     guard = aa.BudgetGuard.open("10", None)
-    invoker = FakeInvoker([_outcome(0.2, session="s-42")] * 5, on_call=complete_on_third_call)
+    invoker = FakeInvoker(
+        [_outcome(round(0.2 * n, 6), session="s-42") for n in range(1, 6)], on_call=complete_on_third_call
+    )
 
     drive = _drive(tmp_path, invoker, guard, driver=aa.DRIVER_SCRIPTED)
 
@@ -271,6 +283,100 @@ def test_scripted_driver_stops_at_the_reply_cap(tmp_path: Path) -> None:
     drive = _drive(tmp_path, invoker, aa.BudgetGuard.open("10", None), driver=aa.DRIVER_SCRIPTED, replies=2)
     assert len(invoker.calls) == 3
     assert drive.terminated_reason == "reply_cap"
+
+
+# ── Coût d'une reprise de session (mesuré au pilote B-06) ────────────────────
+#
+# Run de contrôle du pilote (Claude Code 2.1.302, deux appels de la même session,
+# le second en ``--resume``) : ``usage`` est propre à l'appel, mais
+# ``total_cost_usd`` et ``modelUsage`` cumulent toute la session (0,0921 $ puis
+# 0,1618 $ = 0,0921 + 0,0697, le coût des jetons du seul second appel).
+
+
+def _complete_on_call(n_done: int) -> Any:
+    def hook(n: int, task_dir: Path) -> None:
+        if n == n_done:
+            audit = task_dir / "aidlc" / "audit"
+            audit.mkdir(parents=True, exist_ok=True)
+            (audit / "shard.md").write_text("**Event**: WORKFLOW_COMPLETED\n", encoding="utf-8")
+
+    return hook
+
+
+def test_a_resumed_call_costs_the_delta_of_the_cumulative_session_total(tmp_path: Path) -> None:
+    ledger = tmp_path / "budget.jsonl"
+    guard = aa.BudgetGuard.open("10", ledger)
+    invoker = FakeInvoker(
+        [_outcome(0.2, session="s"), _outcome(0.5, session="s"), _outcome(0.9, session="s")],
+        on_call=_complete_on_call(3),
+    )
+
+    drive = _drive(tmp_path, invoker, guard, driver=aa.DRIVER_SCRIPTED)
+
+    assert [round(i.cost_usd, 6) for i in drive.invocations] == [0.2, 0.3, 0.4]
+    assert math.isclose(drive.total_cost_usd, 0.9)
+    assert math.isclose(guard.spent_usd, 0.9)
+    assert math.isclose(aa.BudgetGuard.open("10", ledger).spent_usd, 0.9)  # le journal porte le coût par appel
+
+
+def test_a_session_total_that_goes_down_is_charged_in_full(tmp_path: Path) -> None:
+    """Total de session en baisse (copie de session, compteur remis à zéro) : jamais un delta négatif, l'appel compte en entier."""
+    guard = aa.BudgetGuard.open("10", None)
+    invoker = FakeInvoker([_outcome(0.5, session="s"), _outcome(0.2, session="s")], on_call=_complete_on_call(2))
+
+    _drive(tmp_path, invoker, guard, driver=aa.DRIVER_SCRIPTED)
+
+    assert math.isclose(guard.spent_usd, 0.7)
+
+
+def test_model_usage_of_a_resumed_session_is_its_last_cumulative_value_not_a_sum(tmp_path: Path) -> None:
+    first = {"claude-test": {"costUSD": 0.2, "outputTokens": 10, "contextWindow": 1000}}
+    last = {"claude-test": {"costUSD": 0.5, "outputTokens": 25, "contextWindow": 1000}}
+    invoker = FakeInvoker(
+        [_outcome(0.2, session="s", model_usage=first), _outcome(0.5, session="s", model_usage=last)],
+        on_call=_complete_on_call(2),
+    )
+
+    drive = _drive(tmp_path, invoker, aa.BudgetGuard.open("10", None), driver=aa.DRIVER_SCRIPTED)
+
+    assert drive.model_usage() == last
+
+
+def test_each_call_is_capped_by_the_remaining_budget(tmp_path: Path) -> None:
+    """Le plafond n'est plus vérifié seulement entre deux appels : chaque appel reçoit le reste en ``--max-budget-usd``."""
+    invoker = FakeInvoker([_outcome(0.3, session="s"), _outcome(0.6, session="s"), _outcome(0.9, session="s")])
+
+    _drive(tmp_path, invoker, aa.BudgetGuard.open("1.0", None), driver=aa.DRIVER_SCRIPTED, replies=2)
+
+    assert [round(c["max_budget_usd"], 6) for c in invoker.calls] == [1.0, 0.7, 0.4]
+
+
+def test_claude_invoker_passes_the_per_call_cap_and_never_bare(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, Any] = {}
+
+    def fake_headless(task_dir: Path, prompt: str, **kwargs: Any) -> ta.RunOutcome:
+        seen.update(kwargs)
+        return _outcome(0.1)
+
+    monkeypatch.setattr(ta, "run_claude_headless", fake_headless)
+    aa.claude_invoker(
+        tmp_path,
+        "Approved.",
+        env={"HOME": str(tmp_path)},
+        timeout_s=10,
+        model="m",
+        resume="s-1",
+        log_path=tmp_path / "log.jsonl",
+        max_budget_usd=1.25,
+    )
+
+    assert list(seen["extra_args"]) == ["--max-budget-usd", "1.2500", "--resume", "s-1"]
+    assert seen["bare"] is False
+
+
+def test_planned_command_carries_the_per_call_cap() -> None:
+    cmd = aa.planned_claude_command("x", model="m", resume=None, max_budget_usd=1.5)
+    assert cmd[cmd.index("--max-budget-usd") + 1] == "1.5000"
 
 
 def test_planned_command_is_never_bare() -> None:
@@ -486,6 +592,49 @@ def test_run_refuses_to_start_when_the_ledger_already_reaches_the_cap(
 
     assert aa.main(args, invoke=invoker, run=FakeRunner()) == 2
     assert invoker.calls == []
+
+
+def test_budget_ledger_option_shares_one_cap_across_workspaces(
+    tmp_path: Path, reference_clone: Path, bench_root: Path
+) -> None:
+    """Pilote B-06 : deux pilotes, deux workspaces (un pré-enregistrement chacun), un seul plafond pour la passe."""
+    assert (
+        aa.main(
+            _dry_run_args(tmp_path, reference_clone, bench_root, driver=aa.DRIVER_SCRIPTED),
+            invoke=FakeInvoker([]),
+            run=FakeRunner(),
+        )
+        == 0
+    )
+    shared = tmp_path / "shared-budget.jsonl"
+    shared.write_text(
+        json.dumps({"event": "end", "call_id": "other-ws", "cost_usd": 20.0, "cost_known": True}) + "\n",
+        encoding="utf-8",
+    )
+    invoker = FakeInvoker([])
+    args = [
+        "--run",
+        "--driver",
+        aa.DRIVER_SCRIPTED,
+        "--aidlc-clone",
+        str(reference_clone),
+        "--bench-root",
+        str(bench_root),
+        "--workspace",
+        str(tmp_path / "ws"),
+        "--model",
+        "claude-test",
+        "--max-total-usd",
+        "20",
+        "--tasks",
+        "1",
+        "--budget-ledger",
+        str(shared),
+    ]
+
+    assert aa.main(args, invoke=invoker, run=FakeRunner()) == 2
+    assert invoker.calls == []
+    assert not (tmp_path / "ws" / "state" / aa.BUDGET_LEDGER).exists()
 
 
 # ── Estimation ────────────────────────────────────────────────────────────────
