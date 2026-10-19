@@ -18,6 +18,8 @@ from grimoire.cli.app import app
 from grimoire.core.config import GrimoireConfig
 from grimoire.memory.backends.base import MemoryEntry
 
+pytestmark = pytest.mark.covers("cli:memory doctor")
+
 runner = CliRunner()
 
 

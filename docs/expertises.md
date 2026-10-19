@@ -1,3 +1,7 @@
+---
+audience: référence
+---
+
 <p align="right"><a href="../README.md">README</a></p>
 
 # <img src="assets/icons/puzzle.svg" width="32" height="32" alt=""> Catalogue d'expertises — langages, ingénierie, cloud
@@ -25,7 +29,7 @@ Ce même principe a corrigé un défaut du mécanisme historique (issue #375) : 
 non — un projet Python nu payait six skills transversaux pour rien. Depuis cette issue, seule la
 détection réelle du projet (`grimoire.core.scanner.StackScanner`) décide du sous-ensemble attaché
 par défaut ; le reste s'ajoute à la demande via ce même catalogue (voir
-`ProjectScaffolder._detected_stack_skill_slugs` dans `src/grimoire/core/scaffold.py`).
+`grimoire.core.stack_skills.detected_stack_skill_slugs`, appelé par `ProjectScaffolder` dans `src/grimoire/core/scaffold.py`).
 
 ## <img src="assets/icons/hexagon.svg" width="28" height="28" alt=""> Le registre — `registry/expertises.yaml`
 
