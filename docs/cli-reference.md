@@ -694,6 +694,12 @@ prochain export l'écrase.
 | `grimoire task cancel <id> --reason "<motif>" [--force]` | Annuler avec sa raison (obligatoire) ; tenue par une autre session, elle exige `--force` |
 | `grimoire task ack <id> <dir-…>` | Accuser réception d'une consigne de l'orchestrateur |
 | `grimoire task link <id> --depends-on <id>` | Déclarer une dépendance |
+| `grimoire task ask <id> "<question>" [--kind <nature>] [-o <option>] [--non-blocking] [--why "<pourquoi>"] [--key <clé>]` | Poser une question à l'humain : une bloquante gare la tâche en `waiting(human)` et remonte au cockpit ; `--non-blocking` l'inscrit sans garer la tâche |
+| `grimoire task ask <id> --from <lot.yaml\|->` | Poser un lot de questions (JSON ou YAML) en **une** interruption et une notification ; une question déjà répondue (même clé) n'est pas reposée |
+| `grimoire task answer <id> "<réponse>" [--question <q-…>]` | Répondre (canal humain seulement) ; la tâche n'est rendue que quand toutes les bloquantes du lot ont leur réponse |
+| `grimoire task questions [<id>] [--open]` | Le registre des questions : statut, bloquante ou non, pourquoi, qui a répondu, par quel canal ou sur quelle source, et le nombre d'interruptions |
+| `grimoire task resolve <id> <q-…> "<réponse>" --source <d'où>` | Déduire la réponse d'une question **non bloquante**, source citée ; une bloquante est refusée |
+| `grimoire task decisions` | Les décisions qui attendent un humain (un lot = une décision, ses questions ouvertes listées) |
 | `grimoire task context <id>` | Produire le context bundle d'une tâche réelle |
 | `grimoire task trace <id> [--causes]` | Timeline unifiée d'une tâche : transitions, outils refusés, gates rouges, checkpoints, abort, preuves, incidents |
 | `grimoire task approve-check <id> [--cmd "<commande>"] [--allow-unattested]` | Approuver par empreinte les commandes de vérification de la tâche, pour cette tâche seule (governed/production : sans approbation, `task verify` et le dispatch de flow ne lancent rien) ; l'acteur est attesté par un tour humain postérieur au challenge de cet ensemble exact de commandes ; sans attestation (terminal nu), l'approbation est refusée sauf `--allow-unattested` (journalisée `unattested`) ; les caractères cachés (U+202E, U+200B) sont refusés |
@@ -715,6 +721,45 @@ Les mêmes gestes sont exposés aux agents par le serveur MCP (`task_add`,
 `task_list_ready`, `task_show`, `task_waves`, `task_claim`, `task_update`, `task_context`) :
 même service (`TaskService.add` pour l'ouverture), même gate, même refus. Voir
 [Intégration MCP](mcp-integration.md).
+
+### Questions structurées
+
+Une question posée à l'humain est un objet du Mission Ledger, pas une phrase dans le
+fil de discussion (W6-07, issue #564). Chaque tâche porte le registre de ses questions
+(`task show --json`, champ `questions` ; `task questions` le rend à plat avec son statut) :
+
+- **bloquante ou non** : une bloquante gare la tâche en `waiting(human)` ; une non
+  bloquante ne la gare pas, l'humain y répond quand il veut ;
+- **par lot** : `task ask --from` (ou l'outil MCP `task_update` avec `questions`) pose
+  plusieurs questions en **une** attente, une carte du cockpit et une notification ;
+  la tâche n'est rendue qu'une fois toutes les bloquantes du lot tranchées ;
+- **pourquoi** (`why`) : la raison de la question, montrée au cockpit et dans le registre ;
+- **qui a répondu** : `answered` vient du canal humain (cockpit, CLI interactive) ;
+  `deduced` vient de l'agent, **source citée** (`task resolve`, ou `answer` et `source`
+  dans le lot), et n'est permis que pour une non bloquante ; `not_awaited` est une
+  bloquante restée sans réponse que la tâche n'attend pas ou plus (run de flow abandonné,
+  tâche annulée) : elle n'est pas comptée comme répondue ;
+- **reprise** : une question du lot dont la clé (`key`, ou le texte normalisé) est déjà
+  répondue ou déduite n'est pas reposée ; sa réponse est rendue dans `reused`.
+
+```yaml
+# lot.yaml — grimoire task ask <id> --from lot.yaml
+questions:
+  - text: Maquette ou version peaufinée ?
+    options: [maquette, peaufiné]
+    why: la finition n'est pas déterminable depuis le dépôt
+  - text: Supprimer la table users_v1 ?
+    kind: permission
+    why: arbitrage irréversible
+  - text: Quel gestionnaire de paquets ?
+    blocking: false
+    answer: uv
+    source: uv.lock
+```
+
+Un agent ne répond jamais à une question bloquante, ni par la CLI hors terminal humain,
+ni par le MCP : `task ask` sans les options du lot garde le comportement d'origine
+(une question, reposée telle quelle si on la repose).
 
 ### Vérifiabilité d'une tâche
 
