@@ -120,7 +120,7 @@ avertissement — voir `resolve_auth_mode()`) :
 
 | Mode | Ce qui est transmis à `claude -p` | Copie d'identifiant | Risque |
 |---|---|---|---|
-| `api-key` (préféré) | `--bare` + `ANTHROPIC_API_KEY` (héritée de l'environnement du lanceur par `run_environment()`) | Aucune | Aucun |
+| `api-key` (préféré, bras `nu` seul : voir le piège `--bare` ci-dessous) | `--bare` + `ANTHROPIC_API_KEY` (héritée de l'environnement du lanceur par `run_environment()`) | Aucune | Aucun |
 | `oauth-copy` (repli) | Rien de spécial ; `~/.claude/.credentials.json` copié dans le `HOME` isolé du run | Temporaire, un fichier par run | Rotation de jeton partagée (voir §3.2) |
 
 ### 3.1 Mode `api-key` (lot J, #582)
@@ -143,6 +143,19 @@ et la contient donc déjà si elle est exportée dans l'environnement du
 lanceur. Aucun fichier de config supplémentaire (`.claude.json` ou autre)
 n'est nécessaire — `--bare` est justement documenté comme la voie CI
 recommandée pour éviter tout onboarding interactif.
+
+**Piège `--bare` : refusé pour tout bras gouverné (B-06).** `claude --help`
+(2.1.302) : `--bare` saute les hooks, les skills et la découverte de `CLAUDE.md`.
+Un bras dont la mesure dépend de ceux du projet (`ecc`, `kit`, `kit-gov`, `aidlc`)
+lancé en `--auth api-key` ne serait donc pas gouverné, sans aucun signal :
+résultat faux. `scripts/bench/bare_guard.py` (`refuse_bare_for_governed_arms`)
+fait échouer le banc (`SystemExit`, message explicite) dès `main`, avant tout
+appel payant, et `run_claude_headless(arm=...)` refuse aussi un `--bare` forcé
+pour ces bras. Seul `nu` (ni hook, ni skill, ni instruction) garde `--bare` :
+`--auth api-key` ne vaut donc que pour `--arms nu`. Les autres bras se lancent en
+`--auth oauth-copy` (rotation de jeton : §3.2). Non implémenté : lancer
+`api-key` sans `--bare` (la doc d'authentification donne la priorité à
+`ANTHROPIC_API_KEY` sur OAuth même hors `--bare`) ; non vérifié sur un appel réel.
 
 **Garde de fin de campagne (mode `api-key`).** `find_leaked_api_keys(workspace,
 api_key=...)` balaie les `HOME` isolés (`root/homes/**`) et les journaux de
@@ -601,7 +614,7 @@ Code : `scripts/bench/aidlc_arm.py`. Tests : `tests/unit/test_bench_aidlc_arm.py
 | Modèle | aucune politique de modèle : les agents héritent du modèle de session, celui de `--model` (B-01). `express` n'a pas de relecteur, seul agent à tier propre | `docs/guide/18-install-and-lifecycle.md:462` |
 | Scope | `express` (10 stages sur 33) : relecture `none`, Guard Policy, capteurs, apprentissages, confirmation de résumé et approbation du plan `off`. `bugfix` (9 stages) reste disponible | `core/scopes/aidlc-express.md`, `core/scopes/aidlc-bugfix.md`, `docs/guide/workflow-profiles.md:25`, `:30` |
 | Premier message | `/aidlc express ` suivi de la consigne des autres bras (`BUILD_PROMPT_TEMPLATE`) | `harness/claude/skills/aidlc/SKILL.md` (boucle de transfert) |
-| Jamais `--bare` | le mode `--bare` ignore hooks et skills du projet, donc AI-DLC entier ; le bras le refuse même en `--auth api-key` (`ANTHROPIC_API_KEY` l'emporte de toute façon, §3.1) | §3.1 |
+| Jamais `--bare` | le mode `--bare` ignore hooks et skills du projet, donc AI-DLC entier ; le banc le refuse pour tout bras gouverné en `--auth api-key` (`bare_guard.py`, §3.1) | §3.1 |
 | Timeout, boucle | 3600 s par run (toutes reprises comprises), seuil de boucle à 8 commandes identiques (le conducteur relance `orchestrate next` par construction) | constantes `DEFAULT_RUN_TIMEOUT_S`, `LOOP_REPEAT_THRESHOLD` |
 
 `express` plutôt que `bugfix` : un exercice polyglotte part d'un fichier de départ à compléter, pas d'un défaut connu. `bugfix` déclare `existing_code: true`
@@ -728,7 +741,7 @@ Autorisé par Guilhem : plafond dur de 16 $ pour toute la passe (contrôle compr
 - les lots K et L ont tourné en `oauth-copy` (`rejeu-lot-k-2026-09-29.md:43`, `rejeu-lot-l-2026-10-02.md:14`) ;
 - aucune ligne `auth_mode: "api-key"` dans les `results.jsonl` des lots, et `evals/runner.py`, `evals/grounding-probe.py` lancent `claude -p` sans jamais `--bare`.
 
-Le mode reste un piège pour un futur lot `kit-gov`. Le bras `aidlc` force `bare=False`.
+Ce piège est désormais refusé par le banc pour tout bras gouverné (§3.1, `bare_guard.py`). Le bras `aidlc` force aussi `bare=False`.
 
 **Doute 2, coût d'une reprise.** Un run de contrôle (deux appels d'une même session, le second en `--resume`) a été compté dans le plafond. Résultat :
 
@@ -754,7 +767,7 @@ le contrôle surcompté (0,2540 $ inscrits pour 0,1618 $ dépensés), écrit ava
 | Interventions (`human_gates.py`, B-05) | 6 (4 gates, 2 questions) | non compté (run invalide), 1 déclarée |
 | `WORKFLOW_COMPLETED` | oui | non |
 | Tests cachés | **réussis** | réussis |
-| Contrôle de transcription (W1-08b) | `clean` | **`invalid`** |
+| Contrôle de transcription (W1-08b) | `clean` | **`invalid`** à l'époque, `clean` après correction du détecteur (voir ci-dessous) |
 | Cumul du journal partagé après le run | 5,1503 $ | 6,6337 $ |
 
 Dépense exacte de la passe : 0,1618 $ (contrôle) + 4,8963 $ + 1,4835 $ = **6,5416 $** sur 16 $. Le journal en compte 6,6337 $ (surcompte du contrôle).
@@ -766,7 +779,11 @@ Lecture, sans conclusion de supériorité :
   `aidlc-log engine log link` refuse un lien sans `--artifact`. Les tests cachés passent donc sans qu'AI-DLC ait produit le code. Ce run ne mesure pas
   AI-DLC.
 - Le `invalid` d'`unattended` vient du détecteur W1-08b, qui lit le gras Markdown `**zipper**` d'un heredoc comme un glob. Les tests cachés n'étaient
-  pas dans le dépôt : c'est très probablement un faux positif, non corrigé ici. Les artefacts d'AI-DLC, très riches en Markdown, en produiront d'autres.
+  pas dans le dépôt : c'était un faux positif. Corrigé ensuite (B-06) : le corps d'un heredoc que `cat`/`tee` écrit vers un fichier de prose
+  (`.md`, `.markdown`, `.txt`, `.rst`, `.adoc`), sans tube en fin de ligne, n'est plus lu comme une référence de chemin ; tout le reste l'est encore (corps
+  envoyé à un shell ou à `python`, écrit vers un script, cible inconnue, redirection d'entrée). Rejouée sur la transcription réelle
+  (`ws-unattended/.../run0.stream.jsonl`), la vérification rend `clean`. Aucun résultat publié n'est reclassé (aucune ligne publiée ne porte ce
+  contrôle) ; le tableau ci-dessus garde les valeurs de l'époque, et le compte d'interventions du run `unattended` (« non compté ») n'a pas été recalculé.
 - Le même `.claude/settings.json` porte 45 entrées `permissions.allow` ignorées (« workspace has not been trusted ») : sans effet sous
   `bypassPermissions`.
 

@@ -1559,6 +1559,64 @@ def test_run_claude_headless_omits_bare_flag_in_oauth_copy_mode(
     assert "--bare" not in seen_cmds[0]
 
 
+class _NoSpawnPopen:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        raise AssertionError("aucun `claude -p` ne doit être lancé")
+
+
+@pytest.mark.parametrize("arm", ["ecc", "kit", "kit-gov", "aidlc"])
+def test_run_claude_headless_refuses_bare_for_a_governed_arm(
+    arm: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """B-06 : `--bare` ignore hooks, skills et CLAUDE.md du projet ; un bras gouverné ainsi lancé serait faux."""
+    monkeypatch.setattr(ta.subprocess, "Popen", _NoSpawnPopen)
+    task_dir = tmp_path / "run0"
+    task_dir.mkdir()
+
+    with pytest.raises(SystemExit, match="--bare"):
+        ta.run_claude_headless(task_dir, "x", home=tmp_path, timeout_s=5, auth_mode="api-key", arm=arm)
+    with pytest.raises(SystemExit, match="--bare"):  # forcé explicitement, quel que soit le mode
+        ta.run_claude_headless(task_dir, "x", home=tmp_path, timeout_s=5, bare=True, arm=arm)
+
+
+def test_run_claude_headless_keeps_bare_for_the_nu_arm_and_governed_arms_without_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen_cmds: list[list[str]] = []
+
+    class _RecordingFakePopen(_FakePopen):
+        def __init__(self, cmd: list[str], *, cwd: Path, env: dict[str, str], stdout: Any, stderr: Any) -> None:
+            seen_cmds.append(cmd)
+            super().__init__(cmd, cwd=cwd, env=env, stdout=stdout, stderr=stderr)
+
+    monkeypatch.setattr(ta.subprocess, "Popen", _RecordingFakePopen)
+    for index, (arm, mode) in enumerate([("nu", "api-key"), ("kit-gov", "oauth-copy"), ("aidlc", "api-key")]):
+        task_dir = tmp_path / f"run{index}"
+        task_dir.mkdir()
+        bare = False if arm == "aidlc" else None
+        ta.run_claude_headless(task_dir, "x", home=tmp_path, timeout_s=5, poll_interval=0.0, auth_mode=mode, arm=arm, bare=bare)
+
+    assert ["--bare" in cmd for cmd in seen_cmds] == [True, False, False]
+
+
+@pytest.mark.parametrize("arms", ["kit-gov", "nu,kit", "ecc"])
+def test_main_refuses_api_key_with_a_governed_arm_before_any_run(
+    arms: str, synthetic_bench_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_main_environment(monkeypatch, synthetic_bench_root, tmp_path)
+    _spy_security_guards(monkeypatch)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
+    monkeypatch.setattr(ta.subprocess, "Popen", _NoSpawnPopen)
+
+    def no_run(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("aucun run ne doit démarrer")
+
+    monkeypatch.setattr(ta, "_run_one", no_run)
+
+    with pytest.raises(SystemExit, match="gouverné"):
+        ta.main(["--full", "--model", "claude-test", "--workspace", str(tmp_path / "ws"), "--arms", arms, "--auth", "api-key"])
+
+
 def test_run_one_api_key_mode_never_calls_credentials_provisioned_nor_writes_any_credentials(
     synthetic_bench_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2424,7 +2482,7 @@ def test_task_repo_guards_live_in_their_own_module_and_script_does_not_grow() ->
     for name in ("ContaminatedTaskRepoError", "assert_task_repo_clean", "reset_run_dir"):
         assert getattr(ta, name).__module__ == "task_repo"
     assert (SCRIPT.parent / "task_repo.py").is_file()
-    assert len(SCRIPT.read_text(encoding="utf-8").splitlines()) <= 2584 + 36 + 12 + 6 + 4 + 78 + 7 + 9
+    assert len(SCRIPT.read_text(encoding="utf-8").splitlines()) <= 2584 + 36 + 12 + 6 + 4 + 78 + 7 + 9 + 5  # + 5 : B-06, garde `--bare` (bare_guard.py)
 
 
 # ── W1-08b (#694) : run invalidé si la transcription lit un test caché ─────
@@ -2791,6 +2849,55 @@ def test_heredoc_without_a_read_in_its_opening_line_stays_clean(tmp_path: Path) 
         "echo $((1 << 3))\nls",
     ):
         assert layout.find(_tool_line("Bash", command=command)) == [], command
+
+
+# ── B-06 : le gras Markdown d'un artefact écrit n'est pas un motif de lecture ─────
+
+_PILOT_HEREDOC = (
+    "D={run_dir}/aidlc/spaces/default/codekb/run0\nmkdir -p $D && cd $D\n"
+    "cat > business-overview.md <<'EOF'\n# Vue d'ensemble\n"
+    "Implémenter un **ex_test** purement fonctionnel, patron **zipper de Huet**.\nEOF\n"
+    "cd ../../../.. && aidlc engine workspace codekb-scope-diff --check $D/x.md 2>&1 | tail -8"
+)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        pytest.param(_PILOT_HEREDOC, id="cas-reel-du-pilote-aidlc"),
+        pytest.param("cd ..\ncat > n.md <<'EOF'\nun **ex_test** ici\nEOF", id="cat-vers-md"),
+        pytest.param("cd ..\ncat >> n.txt <<EOF\nun **ex_test**\nEOF", id="cat-append-txt"),
+        pytest.param("cd ..\ncat <<'EOF' > n.md\nun **ex_test**\nEOF", id="redirection-apres-le-heredoc"),
+        pytest.param("cd ..\ntee n.md <<'EOF'\nun **ex_test**\nEOF", id="tee-vers-md"),
+        pytest.param("cd ..\ncat > n.md 2>&1 <<'EOF'\nun **ex_test**\nEOF", id="duplication-de-descripteur"),
+    ],
+)
+def test_markdown_emphasis_in_a_prose_heredoc_is_not_a_read(tmp_path: Path, command: str) -> None:
+    """B-06 : ``**zipper**`` dans un heredoc écrit vers un fichier de prose n'est pas un glob qui vise les tests cachés."""
+    layout = _Layout(tmp_path)
+    command = command.replace("{run_dir}", str(layout.run_dir))
+    assert layout.find(_tool_line("Bash", command=command)) == [], command
+
+
+@pytest.mark.parametrize(
+    ("command", "kind"),
+    [
+        pytest.param("cd ..\ncat > n.py <<'EOF'\nun **ex_test**\nEOF", "glob", id="ecrit-vers-un-script"),
+        pytest.param("cd ..\ncat > n.md <<'EOF'\nun **ex_test**\nEOF\ncat ../run0/ex_test.py", "direct", id="lecture-apres-le-heredoc"),
+        pytest.param("cd ..\ncat > n.md <<'EOF' && cat run0/ex_test.py\nx\nEOF", "direct", id="lecture-en-fin-de-ligne"),
+        pytest.param("cd ..\ncat <<'EOF' | bash\nun **ex_test**\nEOF", "glob", id="corps-envoye-a-un-shell"),
+        pytest.param("cd ..\nbash <<'EOF'\ncat run0/ex_test.py\nEOF", "direct", id="shell-sur-entree-standard"),
+        pytest.param("cd ..\npython3 - <<'EOF'\nprint(open('run0/ex_test.py').read())\nEOF", "direct", id="python-sur-entree-standard"),
+        pytest.param("cd ..\ncat > n.md.sh <<'EOF'\ncat run0/ex_test.py\nEOF", "direct", id="suffixe-trompeur"),
+        pytest.param("cd ..\ncat > $T <<'EOF'\ncat run0/ex_test.py\nEOF", "direct", id="cible-inconnue"),
+        pytest.param("cd ..\ncat n.md > m.md <<'EOF'\nx\nEOF\ncat run0/ex_test.py", "direct", id="lecture-suivante"),
+        pytest.param("cd ..\ncat < run0/ex_test.py > n.md <<'EOF'\nx\nEOF", "direct", id="entree-redirigee"),
+    ],
+)
+def test_prose_heredoc_exemption_does_not_hide_real_reads(tmp_path: Path, command: str, kind: str) -> None:
+    """B-06, contre-épreuve : seul le corps d'un ``cat``/``tee`` vers de la prose est exempté ; le reste reste lu."""
+    found = _Layout(tmp_path).find(_tool_line("Bash", command=command))
+    assert [r.kind for r in found] == [kind], command
 
 
 # ── W1-08b-T1-02 : un cd peut échouer, et le shell reste où il était ─────

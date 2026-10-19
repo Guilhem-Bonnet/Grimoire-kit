@@ -46,6 +46,7 @@ from typing import Any
 
 # Gardes du dépôt de tâche (W1-08a) : module voisin, aussi quand ce script est chargé par chemin.
 sys.path.append(str(Path(__file__).resolve().parent))
+from bare_guard import refuse_bare_for_governed_arms
 from cost_gate import cost_from_result, cost_known_fields, filter_tasks, partial_cost_notes
 from hidden_reads import (
     check_transcript,
@@ -1562,6 +1563,7 @@ def run_claude_headless(
     extra_args: Sequence[str] = (),
     append_log: bool = False,
     bare: bool | None = None,
+    arm: str | None = None,
 ) -> RunOutcome:
     """Lance ``claude -p`` en tête sans tête, avec garde-fou timeout + boucle.
 
@@ -1585,9 +1587,11 @@ def run_claude_headless(
     ``ANTHROPIC_API_KEY`` (ou un ``apiKeyHelper``) — déjà présente dans
     *env* puisque :func:`run_environment` part de ``os.environ``. Aucun
     identifiant n'est donc jamais copié pour ce mode (voir ``_run_one``).
-    B-06 (``aidlc_arm.py``) : *extra_args* (``--resume``) ajouté à la commande, *append_log* n'écrase pas le journal et
+    B-06 : *arm* (bras du run) refuse ``--bare`` pour un bras gouverné (``bare_guard``). ``aidlc_arm.py`` : *extra_args* (``--resume``) ajouté à la commande, *append_log* n'écrase pas le journal et
     seules les lignes de CET appel comptent, *bare* force ou interdit ``--bare`` (``None`` : déduit de *auth_mode*).
     """
+    if arm is not None:
+        refuse_bare_for_governed_arms([arm], auth_mode, bare=bare)  # B-06, avant tout appel payant
     log_path = log_path or (task_dir.parent / f"{task_dir.name}.stream.jsonl")
     effective_env = dict(env) if env is not None else {**os.environ, "HOME": str(home)}
     cmd = [
@@ -2275,6 +2279,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     # par run — voir `resolve_auth_mode`. Lève `SystemExit` si `--auth
     # api-key` est demandé explicitement sans `ANTHROPIC_API_KEY`.
     auth_mode = resolve_auth_mode(args.auth)
+    refuse_bare_for_governed_arms(selected_arms, auth_mode)  # B-06 : jamais `--bare` sur un bras gouverné
     print(f"[auth] mode : {auth_mode}")
 
     # Garde-fou lot H (#582) : avant tout appel `claude -p` (jamais pour
@@ -2643,7 +2648,7 @@ def _run_one(
         # précisément ce qui élimine le bug de rotation OAuth partagée :
         # rien n'est jamais écrit dans `home`.
         outcome = run_claude_headless(
-            run_dir, build_prompt(task), home=home, env=env, timeout_s=run_timeout_s, auth_mode=auth_mode, model=model
+            run_dir, build_prompt(task), home=home, env=env, timeout_s=run_timeout_s, auth_mode=auth_mode, model=model, arm=arm
         )
     else:
         # Les identifiants ne vivent dans `home` que le temps de cet appel : le
@@ -2658,7 +2663,7 @@ def _run_one(
                     "ou passe --auth api-key avec ANTHROPIC_API_KEY exportée."
                 )
             outcome = run_claude_headless(
-                run_dir, build_prompt(task), home=home, env=env, timeout_s=run_timeout_s, auth_mode=auth_mode, model=model
+                run_dir, build_prompt(task), home=home, env=env, timeout_s=run_timeout_s, auth_mode=auth_mode, model=model, arm=arm
             )
 
     # W1-08b : ce que l'agent a réellement lu, y compris pour un run tué (timeout, boucle).

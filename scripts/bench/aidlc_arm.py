@@ -474,6 +474,7 @@ def claude_invoker(
         extra_args=_extra_args(resume=resume, max_budget_usd=max_budget_usd),
         append_log=True,
         bare=False,
+        arm="aidlc",
     )
 
 
