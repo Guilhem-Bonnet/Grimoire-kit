@@ -40,6 +40,17 @@ import pytest
 
 from grimoire.hosts.emitters.base import Emitter
 
+pytestmark = pytest.mark.covers(
+    "hook:activation",
+    "hook:context-capsule",
+    "hook:evidence-gate",
+    "hook:evidence-trace",
+    "hook:subagent-gate",
+    "hook:task-context",
+    "hook:tool-policy",
+    level="real",
+)
+
 #: Modules a hook decision must never pull at import time. Each one is a heavy
 #: subtree that only the closure path (or a specific decision) needs, loaded
 #: lazily where it is used.
@@ -121,7 +132,7 @@ def test_the_hook_path_does_not_import_the_standard_engine() -> None:
     # grimoire happens to be installed in the ambient environment.
     env = {**os.environ, "PYTHONPATH": os.pathsep.join(p for p in sys.path if p)}
     result = subprocess.run(
-        [sys.executable, "-c", probe], capture_output=True, text=True, check=True, env=env
+        [sys.executable, "-c", probe], capture_output=True, text=True, encoding="utf-8", errors="replace", check=True, env=env
     )
     leaked = result.stdout.strip()
     assert not leaked, (

@@ -28,6 +28,7 @@ from grimoire.hosts.emitters.base import (
     managed_header,
     map_verbs,
 )
+from grimoire.hosts.emitters.rules import with_rule_layers
 from grimoire.hosts.hook_launcher import BARE, HookLauncher, resolve_hook_launcher
 from grimoire.hosts.surface import (
     AgentSpec,
@@ -327,4 +328,5 @@ class CopilotEmitter(Emitter):
         )
         blocking = [h for h in surface.hooks if h.enforcement is Enforcement.BLOCKING]
         files.append(_readme(surface, blocking, degradations))
-        return EmitPlan(host_id=self.host_id, files=tuple(files), merges=(), degradations=tuple(degradations))
+        plan = EmitPlan(host_id=self.host_id, files=tuple(files), merges=(), degradations=tuple(degradations))
+        return with_rule_layers(plan, project_root)

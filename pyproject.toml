@@ -100,6 +100,7 @@ dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
     "pytest-xdist>=3.0",
+    "pytest-timeout>=2.3",
     # Fuzzing basé sur les propriétés — cœur de métier de l'agent
     # security-auditor (issue #352) : campagnes reproductibles sur les
     # lecteurs de YAML édité à la main (registre de fournisseurs, profil du
@@ -231,12 +232,18 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-addopts = "-q --tb=short -x"
+# Pas de `-x` ici : il masquait chaque échec derrière le premier, y compris en CI (D-10).
+# `perf` (bancs de latence, K13) est hors CI par défaut ; `-m perf` les lance (le dernier `-m` l'emporte).
+addopts = "-q --tb=short -m 'not perf'"
 markers = [
+    "covers(*units, level='unit'): surfaces que le test couvre (cli:flow run, genre:fanout, hook:tool-policy, host:opencode), relevées par scripts/check-surface-coverage.py ; level borné par ce que le fichier permet (D-09)",
+    "no_session_token: le test envoie ses écritures sans le jeton de session des serveurs locaux",
     "slow: marks tests as slow (deselect with -m 'not slow')",
     "integration: marks tests requiring external services (network, Ollama, Qdrant)",
     "regression: marks known regression tests",
     "bench: marks performance benchmark tests",
+    "crash_bench: banc de coupure du tick (K12) — coupures simulées, rapides ; `-m crash_bench` les isole",
+    "perf: bancs de latence chronométrés (budgets de D21), hors CI par défaut ; lancer avec -m perf",
 ]
 
 [tool.coverage.run]

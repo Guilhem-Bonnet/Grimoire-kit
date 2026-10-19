@@ -21,9 +21,25 @@ RESUME_COMMANDS: dict[str, str] = {
 }
 
 
+def canonical_host(host: str) -> str:
+    """La graphie canonique (valeur de ``HostId``) de *host*.
+
+    Une seule table d'alias, celle de la CLI (:func:`grimoire.hosts.capabilities.resolve_host`,
+    insensible à la casse) : le ledger a reçu ``claude-code-cli`` (``task attach`` /
+    ``task_claim``) en plus de ``host-claude-code-cli`` (hooks), et ``task claim --host``
+    prend du texte libre (``claude``, ``claude-code``, ``Claude``). Un hôte inconnu reste
+    tel quel, nettoyé.
+    """
+    from grimoire.hosts.capabilities import resolve_host
+
+    cleaned = (host or "").strip()
+    resolved = resolve_host(cleaned)
+    return resolved.value if resolved is not None else cleaned
+
+
 def resume_command(session_host: str, session_id: str) -> str:
     """La commande qui reprend *session_id* sur *session_host*, ou ``""`` si inconnue."""
-    template = RESUME_COMMANDS.get(session_host, "")
+    template = RESUME_COMMANDS.get(canonical_host(session_host), "")
     if not template or not session_id:
         return ""
     return template.format(session_id=session_id)
@@ -35,7 +51,7 @@ def session_fields(task: Any) -> dict[str, Any]:
     if claim is None:
         return {"session_id": "", "host": "", "resume_command": ""}
     session_id = str(getattr(claim, "session_id", "") or "")
-    host = str(getattr(claim, "session_host", "") or "")
+    host = canonical_host(str(getattr(claim, "session_host", "") or ""))
     return {
         "session_id": session_id,
         "host": host,

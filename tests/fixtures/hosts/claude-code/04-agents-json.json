@@ -1,0 +1,52 @@
+{
+  "host": "claude-code",
+  "host_version": "2.1.301",
+  "point": 4,
+  "capability": "liveness_probe",
+  "captured_on": "2026-10-16",
+  "captured_with": "claude agents --json",
+  "observed": {
+    "top_level_type": "array",
+    "entries_seen": 5,
+    "kinds_seen": [
+      "interactive"
+    ],
+    "status_values_seen": [
+      "busy",
+      "idle"
+    ],
+    "fields_seen": [
+      "cwd",
+      "kind",
+      "name",
+      "pid",
+      "sessionId",
+      "startedAt",
+      "status"
+    ],
+    "state_field_present": false,
+    "waitingFor_field_present": false,
+    "empty_when_filtered_by_cwd": "[] (`--cwd <path>` with no session under it, with and without `--all`)",
+    "scope": "interactive sessions only. Entries of kind `bg` (fields `state` / `waitingFor`) were NOT observed: no background session could be started (see 07)."
+  },
+  "entries_sanitized_sample": [
+    {
+      "pid": 40250,
+      "cwd": "<PROJECT-1>",
+      "kind": "interactive",
+      "startedAt": 0,
+      "sessionId": "00000000-0000-4000-8000-000000000008",
+      "name": "session-1",
+      "status": "idle"
+    },
+    {
+      "pid": 2704689,
+      "cwd": "<PROJECT-2>",
+      "kind": "interactive",
+      "startedAt": 0,
+      "sessionId": "00000000-0000-4000-8000-000000000009",
+      "name": "session-2",
+      "status": "busy"
+    }
+  ]
+}

@@ -34,6 +34,7 @@
 // (`ctx.host.readOnly`) hors projet d'accueil, comme le reste de la fiche.
 
 import { renderMarkdown, truncateMarkdown } from '../markdown.js';
+import { icon, STATE_ICON } from '../shell.js';
 
 const STYLE_ID = 'pl-styles';
 
@@ -42,12 +43,24 @@ function injectStyles() {
   const style = document.createElement('style');
   style.id = STYLE_ID;
   style.textContent = `
-    .pl-wrap { padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-5); }
+    .pl-sheet { padding: var(--sp-4) var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-5); }
+    .pl-sheet > h2 { margin: 0; }
+    .pl-fleet-actions { display: flex; justify-content: flex-end; }
+.pl-wrap { padding: var(--sp-4) var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-5); }
     .pl-kpi { display: flex; border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); overflow: hidden; }
-    .pl-kpi-item { flex: 1; padding: var(--sp-3) var(--sp-4); border-left: 1px solid var(--line); }
+    .pl-kpi-item { flex: 1; padding: var(--sp-3) var(--sp-4); border-left: 1px solid var(--line); border-top: 3px solid var(--tone, transparent); }
     .pl-kpi-item:first-child { border-left: 0; }
-    .pl-kpi-val { font-family: var(--mono); font-size: var(--t-xl); font-weight: 600; color: var(--ink); }
-    .pl-kpi-lbl { font-size: var(--t-min); color: var(--ink3); margin-top: 2px; }
+    .pl-kpi-val { font-family: var(--font); font-size: var(--t-xl); font-weight: 600; color: var(--ink); line-height: 1.25; }
+    .pl-kpi-lbl .ico { width: 14px; height: 14px; color: var(--tone, var(--ink3)); margin-right: 6px; vertical-align: -2px; }
+    @media (max-width: 900px) {
+      .pl-sheet, .pl-wrap { padding: var(--sp-3); }
+      .pl-kpi { flex-wrap: wrap; }
+      .pl-kpi-item { flex: 1 1 45%; border-left: 0; }
+    }
+    .pl-kpi-item[data-tone="ok"] { --tone: var(--ok); }
+    .pl-kpi-item[data-tone="warn"] { --tone: var(--warn); }
+    .pl-kpi-item[data-tone="bad"] { --tone: var(--bad); }
+    .pl-kpi-lbl { font-size: var(--t-min); color: var(--ink3); margin-top: 2px;  display: flex; align-items: center; }
     .pl-section h3 { font-size: var(--t-m); font-weight: 500; margin: 0 0 var(--sp-2); color: var(--ink); }
     .pl-watch { display: flex; flex-direction: column; gap: 6px; }
     .pl-watch-row { display: flex; align-items: center; gap: var(--sp-2); padding: 8px var(--sp-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); }
@@ -68,7 +81,6 @@ function injectStyles() {
       .pl-table-wrap { display: none; }
       .pl-cards { display: flex; }
     }
-    .pl-sheet { display: flex; flex-direction: column; gap: var(--sp-4); }
     .pl-insp-block { margin-bottom: var(--sp-4); }
     .pl-insp-block h4 { font-size: var(--t-min); text-transform: none; color: var(--ink3); margin: 0 0 6px; font-weight: 500; }
     .pl-insp-row { display: flex; justify-content: space-between; gap: var(--sp-2); padding: 4px 0; font-size: var(--t-s); }
@@ -140,7 +152,7 @@ function dot(cls) {
 function pill(cls, word) {
   const span = document.createElement('span');
   span.className = 'chip pill' + (cls ? ' ' + cls : '');
-  span.textContent = word;
+  span.append(icon(STATE_ICON[cls] ?? 'info'), word);
   return span;
 }
 
@@ -156,6 +168,36 @@ function text(tag, className, value) {
   if (className) node.className = className;
   node.textContent = value;
   return node;
+}
+
+// La fiche ne calcule jamais `doctor` au premier rendu (~350 ms, issue #548) :
+// « diagnostic indisponible » y était donc affiché à chaque fois, sans cause.
+// Le bloc dit ce qu'il en est et porte le geste qui le calcule, à la demande.
+function doctorOnDemand(ctx, slug) {
+  const box = document.createElement('div');
+  box.className = 'pl-doctor';
+  const note = text('div', 'lbl', "Diagnostic non lancé : il n'est pas calculé à l'ouverture de la fiche.");
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'btn';
+  button.textContent = 'Lancer le diagnostic';
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    button.textContent = 'Diagnostic en cours…';
+    try {
+      const report = await ctx.api.doctor(slug || undefined);
+      box.replaceChildren(
+        pill(report.ok ? 'ok' : 'bad', report.ok ? 'doctor conforme' : 'doctor en écart'),
+        ...(report.ok ? [] : [text('div', 'lbl', 'Détail : grimoire doctor, ou l\'onglet Problèmes du dock.')]),
+      );
+    } catch (error) {
+      note.textContent = 'Diagnostic impossible : ' + error.message;
+      button.disabled = false;
+      button.textContent = 'Réessayer';
+    }
+  });
+  box.append(note, button);
+  return box;
 }
 
 // ── Statut du kit : aligné (contenu à jour) ≠ installé (CLI qui tourne) ─────
@@ -232,7 +274,10 @@ function kpiCard(items) {
   for (const item of items) {
     const cell = document.createElement('div');
     cell.className = 'pl-kpi-item';
-    cell.append(text('div', 'pl-kpi-val mono', item.value), text('div', 'pl-kpi-lbl', item.label));
+    if (item.tone) cell.dataset.tone = item.tone;
+    const lbl = text('div', 'pl-kpi-lbl', item.label);
+    if (item.icon) lbl.prepend(icon(item.icon));
+    cell.append(text('div', 'pl-kpi-val', item.value), lbl);
     card.append(cell);
   }
   return card;
@@ -327,15 +372,18 @@ function renderFleet(root, ctx, rows, onSelect, onRefresh) {
   if (onRefresh) {
     const refreshBtn = document.createElement('button');
     refreshBtn.type = 'button';
-    refreshBtn.className = 'btn';
-    refreshBtn.textContent = 'Rafraîchir la flotte';
+    refreshBtn.className = 'btn pl-refresh';
+    refreshBtn.append(icon('refresh'), 'Rafraîchir la flotte');
     refreshBtn.title = "Relit health() et memoryStatus() pour chaque projet, sans attendre le cache (60 s).";
     refreshBtn.addEventListener('click', () => {
       refreshBtn.disabled = true;
-      refreshBtn.textContent = 'Rafraîchissement…';
+      refreshBtn.replaceChildren(icon('refresh'), 'Rafraîchissement…');
       onRefresh();
     });
-    wrap.append(refreshBtn);
+    const actions = document.createElement('div');
+    actions.className = 'pl-fleet-actions';
+    actions.append(refreshBtn);
+    wrap.append(actions);
   }
 
   // Le cockpit ne scanne jamais le disque (#341) : un registre vide rend une
@@ -356,10 +404,10 @@ function renderFleet(root, ctx, rows, onSelect, onRefresh) {
   const watch = rows.flatMap((r) => watchReasons(r.entry, r.health).map((reason) => ({ ...r, reason })));
 
   wrap.append(kpiCard([
-    { value: fmtInt(rows.length), label: 'projets' },
-    { value: fmtInt(aligned), label: 'kit aligné' },
-    { value: fmtInt(watch.length), label: 'à traiter' },
-    { value: fmtInt(active), label: 'actifs (15 min)' },
+    { value: fmtInt(rows.length), label: 'projets', icon: 'folder-tree' },
+    { value: fmtInt(aligned), label: 'kit aligné', icon: 'seal', tone: aligned === rows.length ? 'ok' : 'warn' },
+    { value: fmtInt(watch.length), label: 'à traiter', icon: watch.length ? 'alert' : 'check', tone: watch.length ? 'warn' : 'ok' },
+    { value: fmtInt(active), label: 'actifs (15 min)', icon: 'bolt' },
   ]));
 
   const watchSection = document.createElement('div');
@@ -399,7 +447,12 @@ function renderFleet(root, ctx, rows, onSelect, onRefresh) {
   const headTerms = { Projet: 'projet', Kit: 'kit', Antifragilité: 'antifragilite', Mémoire: 'memoire', Flows: 'workflow' };
   for (const label of ['Projet', 'Kit', 'CI', 'Commits', 'Antifragilité', 'Mémoire', 'Flows', 'Dernier événement']) {
     const th = text('th', null, label);
-    if (headTerms[label]) th.dataset.term = headTerms[label];
+    if (headTerms[label]) {
+      th.dataset.term = headTerms[label];
+      const hint = icon('info');
+      hint.classList.add('th-hint');
+      th.append(hint);
+    }
     headRow.append(th);
   }
   thead.append(headRow);
@@ -1263,10 +1316,10 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
   wrap.append(text('h2', null, name || slug || ctx.host.project || 'Projet servi'));
 
   const kpi = kpiCard([
-    { value: health?.kit?.scaffolded ? kitStatus(health.kit).word : 'absent', label: 'kit' },
-    { value: ciWord(health?.ci_status), label: 'CI' },
-    { value: fmtInt(health?.commits_total), label: 'commits' },
-    { value: fmtInt((health?.flows || []).length), label: 'flows' },
+    { value: health?.kit?.scaffolded ? kitStatus(health.kit).word : 'absent', label: 'kit', icon: 'seal', tone: health?.kit?.scaffolded ? kitStatus(health.kit).dot : 'warn' },
+    { value: ciWord(health?.ci_status), label: 'CI', icon: 'check', tone: ciDotClass(health?.ci_status) },
+    { value: fmtInt(health?.commits_total), label: 'commits', icon: 'branch' },
+    { value: fmtInt((health?.flows || []).length), label: 'flows', icon: 'workflow' },
   ]);
   wrap.append(kpi);
 
@@ -1350,7 +1403,7 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
   if (sheet.doctor) {
     standardBlock.append(pill(sheet.doctor.ok ? 'ok' : 'bad', sheet.doctor.ok ? 'doctor conforme' : 'doctor en écart'));
   } else {
-    standardBlock.append(text('div', 'lbl', 'diagnostic indisponible'));
+    standardBlock.append(doctorOnDemand(ctx, slug));
   }
   ctx.inspector.append(standardBlock);
 
@@ -1767,7 +1820,7 @@ export async function mount(root, ctx) {
       const knownTitle = cockpit ? selected : ctx.host.status?.slug;
       if (knownTitle) shell.append(text('h2', null, knownTitle));
     }
-    shell.append(text('p', 'lbl', 'Chargement…'));
+    shell.append(...ctx.loading('Chargement…', 3));
     root.replaceChildren(shell);
 
     if (level === 'flotte') {

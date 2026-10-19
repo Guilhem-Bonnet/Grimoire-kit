@@ -37,6 +37,21 @@ d'amendements, plafond, motif) dans la décision. Limite : le compteur est celui
 du journal du run, y compris des ``amend`` non attestés — il borne la
 persévérance, il ne prouve pas que N humains ont relu ; l'attestation de
 ``accept_as_is`` reste, elle, exigée comme celle de ``approve``.
+Plan de retrait (W2-11) : un node ``checkpoint`` peut déclarer
+``config.checkpoint.plan`` (un fournisseur de la liste projetée de ce que la
+décision engage, ``PLAN_PROVIDERS``). La liste est hachée à la présentation et
+inscrite dans le challenge ; à la décision elle est recalculée. Un écart (ou
+une projection impossible, d'un côté ou de l'autre) refuse ``approve`` et
+``accept_as_is`` en ``plan_drifted``, nomme les écarts, consomme le challenge
+sans consommer le tour humain, et la présentation suivante en émet un neuf
+sur le plan courant : il faut un nouveau tour humain. Limite : l'empreinte
+couvre la projection du fournisseur, pas ce qu'un exécuteur ferait réellement
+après la décision ; ``reject`` et ``amend`` n'avancent pas, donc n'y sont pas soumis.
+Octroi d'autonomie (W5-06, :mod:`.autonomy`) : une décision ``approve`` ou
+``accept_as_is`` non attestée, sur un checkpoint que couvre un octroi valide,
+est acceptée avec le statut ``granted:<grant_id>`` — jamais ``attested`` :
+aucun humain n'a vu ce checkpoint. Un octroi révoqué qui le couvrait est nommé
+dans le refus.
 Python seul : aucune de ces décisions ne traverse ``grimoire_flows_core``.
 """
 
@@ -46,7 +61,7 @@ import hashlib
 import json
 import re
 import uuid
-from collections.abc import Collection, Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -61,7 +76,10 @@ __all__ = [
     "ATTESTED",
     "CONSUMED_TURNS_FILENAME",
     "DEFAULT_MAX_AMENDMENTS",
+    "GRANTED_PREFIX",
     "NO_HUMAN_TURN",
+    "PLAN_DRIFTED",
+    "PLAN_PROVIDERS",
     "UNATTESTED",
     "Attestation",
     "CheckpointGate",
@@ -70,6 +88,9 @@ __all__ = [
     "destructive_checkpoints",
     "judge_checkpoint",
     "max_amendments",
+    "plan_fingerprint",
+    "plan_providers",
+    "project_plan",
     "refusal_text",
     "warning_text",
 ]
@@ -79,8 +100,16 @@ DEFAULT_MAX_AMENDMENTS = 3
 
 ATTESTED = "attested"
 UNATTESTED = "unattested"
+#: Statut d'une décision prise sous octroi d'autonomie (W5-06) : ``granted:<grant_id>``.
+GRANTED_PREFIX = "granted:"
+#: Ce que l'octroi qui couvre un checkpoint dit de lui (W5-06) : ``(grant_id, texte de révocation)``,
+#: texte vide si l'octroi est valide, ``None`` si aucun octroi ne couvre ce checkpoint.
+GrantLookup = Callable[[], tuple[str, str] | None]
 
 NO_HUMAN_TURN = "no_human_turn_since_challenge"
+PLAN_DRIFTED = "plan_drifted"
+#: Les fournisseurs de plan que ``config.checkpoint.plan`` peut nommer (W2-11).
+PLAN_PROVIDERS: tuple[str, ...] = ("upgrade-removals",)
 _REASONS: dict[str, str] = {
     "unattended": "GRIMOIRE_UNATTENDED=1 : exécution déclarée sans humain",
     "no_challenge": "aucun challenge émis pour ce checkpoint",
@@ -88,6 +117,7 @@ _REASONS: dict[str, str] = {
     "other_session": "la décision vient d'une autre session que celle qui a présenté le checkpoint",
     "human_authority_unprovable": "aucun hook de prompt n'a jamais écrit le journal des tours",
     NO_HUMAN_TURN: "aucun tour humain de cette session depuis la présentation du checkpoint",
+    PLAN_DRIFTED: "le plan projeté a changé depuis la présentation du checkpoint",
 }
 
 _SAFE_ID = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
@@ -124,6 +154,10 @@ class Attestation:
     @property
     def attested(self) -> bool:
         return self.status == ATTESTED
+
+    @property
+    def granted(self) -> bool:
+        return self.status.startswith(GRANTED_PREFIX)
 
     def explain(self) -> str:
         return _REASONS.get(self.reason, self.reason)
@@ -180,6 +214,69 @@ def max_amendments(blueprint: Mapping[str, Any]) -> dict[str, int]:
     return out
 
 
+def plan_providers(blueprint: Mapping[str, Any]) -> dict[str, str]:
+    """Le fournisseur de plan de chaque node ``checkpoint`` qui en déclare un (``config.checkpoint.plan``, W2-11)."""
+    out: dict[str, str] = {}
+    for node in blueprint.get("nodes") or []:
+        if not isinstance(node, dict) or node.get("kind") != "checkpoint":
+            continue
+        config = (node.get("config") or {}).get("checkpoint") or {}
+        provider = config.get("plan") if isinstance(config, dict) else None
+        if isinstance(provider, str) and provider in PLAN_PROVIDERS:
+            out[str(node.get("id"))] = provider
+    return out
+
+
+def plan_fingerprint(items: Collection[str]) -> str:
+    """L'empreinte d'une liste projetée : insensible à l'ordre et aux doublons, ASCII pur avant hachage."""
+    canonical = json.dumps(sorted(set(items)), ensure_ascii=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("ascii")).hexdigest()
+
+
+def _projected_items(provider: str, project_root: Path) -> list[str]:
+    if provider == "upgrade-removals":
+        from grimoire.tools import project_upgrade
+
+        return list(project_upgrade.projected_removals(project_root))
+    raise ValueError(f"fournisseur de plan inconnu : {provider!r}")
+
+
+def project_plan(provider: str, project_root: Path) -> dict[str, Any]:
+    """La liste projetée par *provider* et son empreinte ; une panne est inscrite (``error``, empreinte vide), jamais avalée."""
+    try:
+        items = sorted(set(_projected_items(provider, project_root)))
+    except Exception as exc:  # la panne devient le plan : rien ne peut alors être approuvé
+        return {"provider": provider, "sha256": "", "items": [], "error": f"{type(exc).__name__}: {exc}"}
+    return {"provider": provider, "sha256": plan_fingerprint(items), "items": items}
+
+
+def _listing(items: Collection[str], limit: int = 20) -> str:
+    shown = sorted(items)
+    more = f" … +{len(shown) - limit}" if len(shown) > limit else ""
+    return ", ".join(shown[:limit]) + more
+
+
+def _plan_drift(baseline: object, current: Mapping[str, Any]) -> str:
+    """Le motif de ``plan_drifted`` (écarts nommés), ou ``""`` si le plan courant est celui qui a été présenté."""
+    error = current.get("error")
+    if error:
+        return f"projection impossible à la décision ({error})"
+    base: Mapping[str, Any] = baseline if isinstance(baseline, Mapping) else {}
+    base_sha = str(base.get("sha256") or "")
+    if not base_sha:
+        return "aucun plan lié à la présentation du checkpoint (projection impossible alors, ou challenge antérieur au plan)"
+    if base_sha == current.get("sha256"):
+        return ""
+    before = {str(i) for i in base.get("items") or []}
+    now = {str(i) for i in current.get("items") or []}
+    parts = []
+    if now - before:
+        parts.append(f"ajoutés depuis la présentation : {_listing(now - before)}")
+    if before - now:
+        parts.append(f"retirés depuis la présentation : {_listing(before - now)}")
+    return "; ".join(parts) or "empreinte différente"
+
+
 class CheckpointJournal:
     """Challenges et décisions de checkpoint d'un run — ajout seul, sous verrou."""
 
@@ -206,27 +303,72 @@ class CheckpointJournal:
         with locked(self.path), self.path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(entry, ensure_ascii=True) + "\n")
 
-    def open_challenge(self, node_id: str) -> dict[str, Any] | None:
-        """Le dernier challenge de *node_id* qu'aucune décision n'a encore consommé."""
+    def open_challenge(self, node_id: str, session_id: str | None = None) -> dict[str, Any] | None:
+        """Le dernier challenge de *node_id* qu'aucune décision n'a encore consommé.
+
+        Avec *session_id*, le challenge émis par cette session est préféré à un
+        challenge plus récent d'une autre session (ou sans session) : une session
+        ne peut attester que le sien. À défaut, le dernier challenge du node, que
+        ``attest`` refusera avec son motif (``no_session``, ``other_session``).
+        Les challenges antérieurs à la dernière décision ``reject`` ou ``amend``
+        du node sont périmés, quelle que soit leur session.
+        """
         entries = self.entries()
         consumed = {e.get("challenge_id") for e in entries if e.get("type") == "decision"}
-        for entry in reversed(entries):
-            if entry.get("type") == "challenge" and entry.get("node_id") == node_id:
-                return None if entry.get("challenge_id") in consumed else entry
-        return None
+        # Un reject ou un amend ferme tout ce que le node avait d'ouvert, quelle
+        # que soit la session du challenge : le tour humain qui précède cette
+        # décision ne peut plus attester la version qui la suit. Un approve
+        # refusé ne consomme que le sien (voir record_decision).
+        start = 0
+        for i, e in enumerate(entries):
+            if e.get("type") == "decision" and e.get("node_id") == node_id and e.get("decision") in ("reject", "amend"):
+                start = i + 1
+        challenges = [
+            e for e in entries[start:] if e.get("type") == "challenge" and e.get("node_id") == node_id
+        ]
+        if session_id is not None:
+            own = [e for e in challenges if e.get("session_id", "") == session_id]
+            if own:
+                challenges = own
+        if not challenges:
+            return None
+        last = challenges[-1]
+        return None if last.get("challenge_id") in consumed else last
 
-    def issue_challenge(self, node_id: str, env: Mapping[str, str] | None = None) -> dict[str, Any]:
-        """Émet le challenge de *node_id*, lié à la session courante — ou rend celui encore ouvert."""
-        existing = self.open_challenge(node_id)
-        if existing is not None:
-            return existing
+    def issue_challenge(
+        self,
+        node_id: str,
+        env: Mapping[str, str] | None = None,
+        plan: Mapping[str, Any] | None = None,
+        bound: Mapping[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Émet le challenge de *node_id*, lié à la session courante — ou rend celui qu'elle a encore ouvert.
+
+        Un challenge ouvert sans session, ou par une autre session, ne vaut rien
+        pour celle-ci : le rendre figerait le checkpoint (``no_session`` ou
+        ``other_session`` à chaque décision, sans que le refus le consomme).
+
+        *plan* (W2-11) : le plan projeté à la présentation (:func:`project_plan`), inscrit tel quel.
+        *bound* (W5-05) : des valeurs que le challenge porte (l'empreinte d'une vague). Un
+        challenge ouvert qui ne porte pas les mêmes valeurs est périmé : il n'est pas rendu,
+        un nouveau est émis, et son horodatage exige un tour humain postérieur.
+        """
         session_id, _host = current_session(env)
+        existing = self.open_challenge(node_id, session_id)
+        if (
+            existing is not None
+            and existing.get("session_id", "") == session_id
+            and all(existing.get(k) == v for k, v in (bound or {}).items())
+        ):
+            return existing
         entry = {
+            **(bound or {}),
             "type": "challenge",
             "challenge_id": f"CHL-{uuid.uuid4().hex[:12]}",
             "node_id": node_id,
             "session_id": session_id,
             "ts": _now(),
+            **({"plan": dict(plan)} if plan is not None else {}),
         }
         self._append(entry)
         return entry
@@ -251,7 +393,8 @@ class CheckpointJournal:
                 out.add((str(data.get("session_id", "")), str(data.get("turn_ts", "")), str(data.get("turn_sha256", ""))))
         return frozenset(out)
 
-    def _consume_turn(self, node_id: str, attestation: Attestation) -> None:
+    def consume_turn(self, node_id: str, attestation: Attestation) -> None:
+        """Inscrit le tour qui atteste *attestation* au registre commun : il n'attestera plus rien."""
         entry = {
             "session_id": attestation.session_id,
             "turn_ts": attestation.turn_ts,
@@ -279,13 +422,15 @@ class CheckpointJournal:
         reason: str,
         attestation: Attestation,
         accepted_risk: Mapping[str, Any] | None = None,
+        bound: Mapping[str, str] | None = None,
     ) -> None:
         if attestation.attested:
-            self._consume_turn(node_id, attestation)
+            self.consume_turn(node_id, attestation)
         extra = {"accepted_risk": dict(accepted_risk)} if accepted_risk else {}
         self._append(
             {
                 **extra,
+                **(bound or {}),
                 "type": "decision",
                 "challenge_id": attestation.challenge_id,
                 "node_id": node_id,
@@ -372,6 +517,8 @@ class CheckpointGate:
     warning: str = ""
     #: ``accept_as_is`` accepté (W2-10) : amendements, plafond, motif.
     accepted_risk: Mapping[str, Any] | None = None
+    #: ``approve``/``accept_as_is`` refusé car le plan projeté a changé (W2-11) : à journaliser en ``plan_drifted``.
+    drifted: bool = False
 
 
 def judge_checkpoint(
@@ -383,6 +530,8 @@ def judge_checkpoint(
     destructive: bool,
     cap: int = DEFAULT_MAX_AMENDMENTS,
     env: Mapping[str, str] | None = None,
+    plan: Mapping[str, Any] | None = None,
+    grant: GrantLookup | None = None,
 ) -> CheckpointGate | None:
     """Classe la décision de *output* ; ``None`` si elle n'est pas une décision valide (déjà un défaut nommé).
 
@@ -391,13 +540,21 @@ def judge_checkpoint(
     compte vers *cap*. ``accept_as_is`` est refusé tant que *cap* amendements
     ne sont pas inscrits, puis exige le risque nommé ; accepté, il porte
     ``accepted_risk``. ``approve``/``accept_as_is`` non attestés sont refusés
-    sur un checkpoint destructif (``refusal``), acceptés avec ``warning`` ailleurs.
+    sur un checkpoint destructif (``refusal``), acceptés avec ``warning`` ailleurs —
+    sauf sous un octroi valide (*grant*, W5-06) : acceptés ``granted:<grant_id>``.
+    *grant* n'est consulté que pour une décision qui avance sans attestation.
+
+    *plan* (W2-11) : le plan projeté maintenant, pour un node qui en déclare un.
+    Une décision qui avance et dont le plan diffère de celui du challenge ouvert
+    est refusée en ``plan_drifted`` avant toute attestation (le tour humain
+    n'est pas consommé).
     """
     decision = output.get("checkpoint_decision")
     if decision not in ("approve", "reject", "amend", "accept_as_is"):
         return None
     reason = str(output.get("checkpoint_reason") or "")
-    attestation = attest(project_root, journal.open_challenge(node_id), env, journal.consumed_turns())
+    challenge = journal.open_challenge(node_id, current_session(env)[0])
+    attestation = attest(project_root, challenge, env, journal.consumed_turns())
     done = journal.amendment_count(node_id)
     if decision == "amend":
         refusal = (
@@ -415,10 +572,27 @@ def judge_checkpoint(
             refusal = "accept_as_is refusé : 'checkpoint_reason' doit nommer le risque accepté"
             return CheckpointGate("accept_as_is", reason, attestation, refusal=refusal)
         accepted = {"amendments": done, "cap": cap, "reason": reason}
+    if plan is not None and decision in _ADVANCING:
+        drift = _plan_drift((challenge or {}).get("plan"), plan)
+        if drift:
+            decider, _host = current_session(env)
+            unattested = Attestation(UNATTESTED, PLAN_DRIFTED, attestation.challenge_id, decider)
+            refusal = (
+                f"{PLAN_DRIFTED} : {drift}. Un nouveau challenge est émis sur le plan courant "
+                f"(empreinte {str(plan.get('sha256') or '-')[:12]}) : relire la liste, puis décider après un nouveau tour humain."
+            )
+            return CheckpointGate(str(decision), reason, unattested, refusal=refusal, drifted=True)
     if decision not in _ADVANCING or attestation.attested:
         return CheckpointGate(str(decision), reason, attestation, accepted_risk=accepted)
+    found = grant() if grant is not None else None
+    if found is not None and not found[1]:
+        granted = Attestation(GRANTED_PREFIX + found[0], "", attestation.challenge_id, attestation.session_id)
+        return CheckpointGate(str(decision), reason, granted, accepted_risk=accepted)
+    note = f" {found[1]}" if found is not None else ""
     if destructive:
         return CheckpointGate(
-            str(decision), reason, attestation, refusal=refusal_text(attestation), accepted_risk=accepted
+            str(decision), reason, attestation, refusal=refusal_text(attestation) + note, accepted_risk=accepted
         )
-    return CheckpointGate(str(decision), reason, attestation, warning=warning_text(attestation), accepted_risk=accepted)
+    return CheckpointGate(
+        str(decision), reason, attestation, warning=warning_text(attestation) + note, accepted_risk=accepted
+    )

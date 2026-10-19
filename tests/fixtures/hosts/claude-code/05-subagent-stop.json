@@ -1,0 +1,69 @@
+{
+  "host": "claude-code",
+  "host_version": "2.1.301",
+  "point": 5,
+  "capability": "subagent_model",
+  "captured_on": "2026-10-16",
+  "captured_with": "claude -p sub --model haiku --setting-sources project --output-format stream-json --verbose --max-turns 4",
+  "setup": "main session on haiku; sub-agent file `.claude/agents/k0probe.md` declares `model: sonnet`.",
+  "observed": {
+    "model_field_in_SubagentStop_payload": false,
+    "payload_keys": [
+      "agent_id",
+      "agent_transcript_path",
+      "agent_type",
+      "background_tasks",
+      "cwd",
+      "effort",
+      "hook_event_name",
+      "last_assistant_message",
+      "permission_mode",
+      "prompt_id",
+      "scratchpad_dir",
+      "session_crons",
+      "session_id",
+      "stop_hook_active",
+      "transcript_path"
+    ],
+    "effective_model_channel": "assistant line of the file named by `agent_transcript_path`: `message.model` (and `requestedModel`)",
+    "sub_agent_transcript_assistant_line": {
+      "agentId": "a8952584bb862045a",
+      "message_model": "claude-sonnet-5-5",
+      "requestedModel": "claude-sonnet-5-5",
+      "attributionAgent": "k0probe"
+    },
+    "result_modelUsage_models": [
+      "claude-haiku-5-5",
+      "claude-sonnet-5-5"
+    ]
+  },
+  "payloads": {
+    "SubagentStop": {
+      "session_id": "00000000-0000-4000-8000-000000000010",
+      "transcript_path": "<HOME>/.claude/projects/<PROJECT-SLUG>/00000000-0000-4000-8000-000000000010.jsonl",
+      "cwd": "<PROJECT>",
+      "scratchpad_dir": "<HOME>/.cache/cct/claude-<UID>/<PROJECT-SLUG>/00000000-0000-4000-8000-000000000010/scratchpad",
+      "prompt_id": "00000000-0000-4000-8000-000000000011",
+      "permission_mode": "default",
+      "agent_id": "a8952584bb862045a",
+      "agent_type": "k0probe",
+      "effort": {
+        "level": "medium"
+      },
+      "hook_event_name": "SubagentStop",
+      "stop_hook_active": false,
+      "agent_transcript_path": "<HOME>/.claude/projects/<PROJECT-SLUG>/00000000-0000-4000-8000-000000000010/subagents/agent-a8952584bb862045a.jsonl",
+      "last_assistant_message": "ok",
+      "background_tasks": [
+        {
+          "id": "a8952584bb862045a",
+          "type": "subagent",
+          "status": "running",
+          "description": "Probe sub-agent call",
+          "agent_type": "k0probe"
+        }
+      ],
+      "session_crons": []
+    }
+  }
+}

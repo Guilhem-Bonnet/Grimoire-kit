@@ -52,7 +52,7 @@ def git_ls_remote(remote: str, branch: str, *, timeout: float = 15.0) -> str | N
         proc = subprocess.run(
             ["git", "ls-remote", remote, f"refs/heads/{branch}"],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=timeout,
             check=False,
         )

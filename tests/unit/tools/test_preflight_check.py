@@ -16,7 +16,7 @@ from grimoire.tools.preflight_check import CheckItem, PreflightCheck, PreflightR
 @pytest.fixture()
 def project(tmp_path: Path) -> Path:
     """Minimal Grimoire project."""
-    (tmp_path / "project-context.yaml").write_text("project:\n  name: test\n")
+    (tmp_path / "project-context.yaml").write_text("project:\n  name: test\n", encoding="utf-8")
     (tmp_path / "_grimoire" / "_memory").mkdir(parents=True)
     (tmp_path / ".git").mkdir()
     return tmp_path
@@ -131,7 +131,7 @@ class TestToolChecks:
 
 class TestGitChecks:
     def test_no_git_dir(self, tmp_path: Path) -> None:
-        (tmp_path / "project-context.yaml").write_text("project:\n  name: t\n")
+        (tmp_path / "project-context.yaml").write_text("project:\n  name: t\n", encoding="utf-8")
         (tmp_path / "_grimoire" / "_memory").mkdir(parents=True)
         pc = PreflightCheck(tmp_path)
         report = pc.run()
@@ -141,7 +141,7 @@ class TestGitChecks:
 
     def test_git_with_uncommitted(self, project: Path) -> None:
         # Create uncommitted file in _grimoire
-        (project / "_grimoire" / "new-file.md").write_text("new")
+        (project / "_grimoire" / "new-file.md").write_text("new", encoding="utf-8")
         pc = PreflightCheck(project)
         report = pc.run()
         # May or may not detect depending on real git state
@@ -219,7 +219,7 @@ class TestMemoryChecks:
     def test_stale_session_detected(self, project: Path) -> None:
         """Session file older than 1 week should produce info check."""
         session = project / "_grimoire" / "_memory" / "session-state.md"
-        session.write_text("# Session state\n")
+        session.write_text("# Session state\n", encoding="utf-8")
         # Set mtime to 10 days ago
         import os
         old_time = (datetime.now() - timedelta(days=10)).timestamp()
@@ -234,7 +234,7 @@ class TestMemoryChecks:
     def test_fresh_session_no_warning(self, project: Path) -> None:
         """Recent session file should not trigger stale warning."""
         session = project / "_grimoire" / "_memory" / "session-state.md"
-        session.write_text("# Fresh session\n")
+        session.write_text("# Fresh session\n", encoding="utf-8")
         pc = PreflightCheck(project)
         report = pc.run()
         stale = [c for c in report.checks if c.name == "stale-session"]
@@ -242,7 +242,7 @@ class TestMemoryChecks:
 
     def test_contradiction_entries(self, project: Path) -> None:
         contradictions = project / "_grimoire" / "_memory" / "contradiction-log.md"
-        contradictions.write_text("# Log\n- [ ] unresolved issue one\n- [ ] unresolved issue two\n")
+        contradictions.write_text("# Log\n- [ ] unresolved issue one\n- [ ] unresolved issue two\n", encoding="utf-8")
         pc = PreflightCheck(project)
         report = pc.run()
         contra = [c for c in report.checks if c.name == "contradictions"]

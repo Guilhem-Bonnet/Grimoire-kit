@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from grimoire.core.standard_state import active_profile_id, is_standard_enrolled, resolve_active_task
+from grimoire.core.standard_state import is_standard_enrolled, resolve_active_task
 from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
 from grimoire.hosts.decisions.enrolment import link_session, no_task_context
+from grimoire.hosts.decisions.profile_floor import record_lowering_request, session_profile
 
 
 def decide_task_context(hook: HookInput) -> Decision:
@@ -39,7 +40,9 @@ def decide_task_context(hook: HookInput) -> Decision:
     if not is_standard_enrolled(hook.project_root):
         return Decision()
     active = resolve_active_task(hook.project_root, session_id=hook.session_id)
-    profile = active_profile_id(hook.project_root)
+    # W2-07 : la phrase « Lower Profile <profil>: <raison> » avant de lire le profil de ce tour.
+    lowering, lowering_detail = record_lowering_request(hook)
+    profile = session_profile(hook)
     detail = {"task_id": active.task_id, "profile": profile, "task_source": active.source}
     # Issue #638 lot B : ce que l'orchestrateur humain a dit depuis le cockpit
     # — consignes non livrées de la tâche active, annulation de celle que la
@@ -52,16 +55,42 @@ def decide_task_context(hook: HookInput) -> Decision:
     from grimoire.hosts.decisions.steering import steering_context
 
     steering, steering_detail = steering_context(hook.project_root, active.task_id, hook.session_id)
-    if active.is_fallback:
-        context = no_task_context(profile, active.candidates)
-        if steering:
-            context = f"{context}\n{steering}"
-        return Decision(outcome=Outcome.ALLOW, context=context, detail={**detail, **steering_detail})
-    link = link_session(hook, active)
-    context = (
-        f"[Grimoire] Tâche courante : {active.task_id} (profil {profile}). "
-        f"Toute preuve va dans _grimoire-output/evidence/{active.task_id}/."
+    # K5 : une tâche reprise n'est plus celle de la session (statut `ready`, ou
+    # claim d'une autre session) — l'annonce se lit par session, pas par tâche
+    # active, donc dans les deux branches.
+    from grimoire.hosts.decisions.pause_brake import pause_context, pause_lifted_notices
+    from grimoire.hosts.decisions.self_view import takeover_notices
+
+    # K11 : la pause demandée, et la pause levée pour une tâche que la session avait garée.
+    pause = "\n".join(
+        part
+        for part in (pause_context(hook, active.task_id), pause_lifted_notices(hook.project_root, hook.session_id))
+        if part
     )
-    if steering:
-        context = f"{context}\n{steering}"
-    return Decision(outcome=Outcome.ALLOW, context=context, detail={**detail, **link, **steering_detail})
+
+    if active.is_fallback:
+        context = no_task_context(profile, active.candidates, active.expired)
+        link: dict[str, object] = {}
+        self_view = ""
+    else:
+        link = link_session(hook, active)
+        from grimoire.hosts.decisions.self_view import self_view_context
+
+        self_view = self_view_context(hook.project_root, active.task_id, hook.session_id)
+        context = (
+            f"[Grimoire] Tâche courante : {active.task_id} (profil {profile}). "
+            f"Toute preuve va dans _grimoire-output/evidence/{active.task_id}/."
+        )
+    if self_view:
+        context = f"{context}\n{self_view}"
+    takeover = takeover_notices(hook.project_root, hook.session_id)
+    if takeover:
+        context = f"{context}\n{takeover}"
+    # W2-06 : la phrase « Override Gate <tâche>: <raison> » — après le rattachement de session ci-dessus.
+    from grimoire.hosts.decisions.gate_override import record_override_request
+
+    override, override_detail = record_override_request(hook)
+    context = "\n".join(part for part in (context, pause, steering, override, lowering) if part)
+    return Decision(
+        outcome=Outcome.ALLOW, context=context, detail={**detail, **link, **steering_detail, **override_detail, **lowering_detail}
+    )

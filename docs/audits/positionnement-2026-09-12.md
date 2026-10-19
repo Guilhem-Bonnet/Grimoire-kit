@@ -1,3 +1,7 @@
+---
+audience: décision
+---
+
 <p align="right"><a href="../../README.md">README</a></p>
 
 # <img src="../assets/icons/microscope.svg" width="32" height="32" alt=""> Audit de positionnement — 2026-09-12

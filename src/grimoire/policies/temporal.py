@@ -231,7 +231,11 @@ def _is_repair_exempt(is_write: bool, tool_detail: str) -> bool:
     """
     if not is_write:
         return True
-    if any(glob_match(pattern, tool_detail) for pattern in _REPAIR_EXEMPT_DETAIL_PATTERNS):
+    # Les motifs sont écrits avec « / » : un chemin Windows (antislashs) ne les
+    # atteindrait jamais, et l'édition qui sort de l'impasse serait refusée par
+    # le budget qu'elle doit réparer.
+    posix_detail = tool_detail.replace("\\", "/")
+    if any(glob_match(pattern, posix_detail) for pattern in _REPAIR_EXEMPT_DETAIL_PATTERNS):
         return True
     return _looks_like_grimoire_policies_command(tool_detail)
 

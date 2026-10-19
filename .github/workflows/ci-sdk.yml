@@ -11,12 +11,23 @@ on:
       # Gouvernent le garde d'épinglage des actions : modifier un workflow ou
       # le garde doit relancer le job qui l'exécute.
       - ".github/workflows/**"
-      - "scripts/check-actions-pinned.py"
+      - "scripts/check-*.py"
+      # Lus par les gardes du dépôt (`grimoire gates repo`) : les modifier sans
+      # relancer le job qui les juge rendrait la garde décorative.
+      - "docs/**"
+      - "README.md"
+      - "README.fr.md"
+      - "CONTRIBUTING.md"
+      - "CHANGELOG.md"
+      - ".github/PULL_REQUEST_TEMPLATE.md"
+      - ".pre-commit-config.yaml"
       # Lus par tests/unit/test_evals_collect.py : une PR evals-only qui
       # modifie les suites doit exécuter le SDK CI (cf. main rouge du
       # 2026-07-13 — la #71 path-filtrée n'avait jamais lancé ces tests).
       - "evals/tasks/**"
       - "evals/collect.py"
+      # Budget de cérémonie (W6-01) : un budget modifié doit être revérifié.
+      - "evals/ceremony-budget.yaml"
       # Gouvernent le job dep-audit : sans eux dans le filtre, ajouter un
       # waiver ou en laisser expirer un ne relance jamais l'audit qu'ils
       # pilotent — le controle serait modifie sans etre reverifie.
@@ -28,6 +39,9 @@ on:
       - "framework/agentic-standard/**"
   pull_request:
     branches: [main]
+    # `edited` : la garde `changelog` juge le titre de la PR (celui que le
+    # squash-merge conserve) ; le renommer doit relancer le job qui le lit.
+    types: [opened, synchronize, reopened, edited]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -42,6 +56,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          # Historique complet : la garde `changelog` lit la plage de commits
+          # de la branche contre origin/main, un clone shallow la rendrait muette.
+          fetch-depth: 0
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7
         with:
@@ -55,14 +73,18 @@ jobs:
         # `# noqa: S310`). Keep in sync with the ruff version in uv.lock.
         run: pip install ruff==0.15.20 pyyaml
 
+      - name: Install the CLI (core dependencies only)
+        run: pip install -e .
+
       - name: Lint
         run: ruff check src/ tests/unit/ framework/memory/ --output-format=github
 
-      - name: Code-size ratchet
-        run: python scripts/check-code-ratchet.py
-
-      - name: Actions pinned by SHA
-        run: python scripts/check-actions-pinned.py
+      # La MÊME commande que le hook pre-push de .pre-commit-config.yaml
+      # (comparées par tests/unit/scripts/test_repo_gates.py) : cliquet de
+      # taille, CHANGELOG, prose émise, waivers, actions épinglées par SHA,
+      # tenets, audience et commandes citées de la documentation, chiffres de vitrine.
+      - name: Repo gates
+        run: grimoire gates repo
 
   typecheck:
     name: "mypy --strict"
@@ -83,6 +105,12 @@ jobs:
 
       - name: Type check (Windows, fsio)
         run: mypy --strict --platform win32 --follow-imports=silent src/grimoire/core/fsio.py
+
+      # W6-01 : une route qui coûte plus que son budget, un seuil non recopié,
+      # une tâche type qui change de route ou une calibration de plus de deux
+      # versions mineures fait échouer la CI.
+      - name: Ceremony budget
+        run: grimoire ceremony budget --file evals/ceremony-budget.yaml
 
   dep-audit:
     name: "Dependency audit"
@@ -113,6 +141,10 @@ jobs:
   test:
     name: "Tests (Python ${{ matrix.python-version }}, ${{ matrix.os }})"
     runs-on: ${{ matrix.os }}
+    # Sans borne, un test qui se bloque sous Windows garde le job six heures
+    # (défaut GitHub). 60 min coupait le job Windows à ~86 % de la suite
+    # (processus et antivirus coûtent plus cher que sous Linux) : 120 min.
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
@@ -135,24 +167,21 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Run unit tests with coverage
+        # La suite complète sur les trois systèmes (D-10) : l'ancien sous-ensemble
+        # Windows et le `-x` (arrêt au premier échec, aussi posé par `addopts`)
+        # cachaient chaque défaut derrière le précédent. xdist (`-n auto`) paie
+        # le surcoût ; `--maxfail` n'est volontairement pas posé. `--dist loadfile` :
+        # la répartition par test (défaut) mélange les fichiers sur un même worker et
+        # révèle des états partagés (21 échecs en `-n 8` contre 10 en série) ; par
+        # fichier, on retrouve exactement l'ensemble des échecs de la série.
         shell: bash
         run: |
-          if [[ "${{ runner.os }}" == "Windows" ]]; then
-            pytest \
-              tests/unit/cli/test_app.py::TestGlobalFlags \
-              tests/unit/cli/test_app.py::TestVersion \
-              tests/unit/cli/test_app.py::TestInit \
-              tests/unit/cli/test_app.py::TestDoctor \
-              tests/unit/test_fsio.py \
-              tests/test_agentic_standard.py \
-              -q --tb=short -x
-          else
-            pytest tests/unit/ tests/test_agentic_standard.py -q --tb=short -x \
-              --cov=src/grimoire \
-              --cov-report=xml \
-              --cov-report=term-missing \
-              --cov-fail-under=75
-          fi
+          pytest tests/unit/ tests/test_agentic_standard.py -q --tb=short -n auto --dist loadfile \
+            --timeout=300 --durations=25 \
+            --cov=src/grimoire \
+            --cov-report=xml \
+            --cov-report=term-missing \
+            --cov-fail-under=75
 
       - name: Upload coverage
         if: matrix.python-version == '3.12' && matrix.os == 'ubuntu-latest'
@@ -194,7 +223,37 @@ jobs:
           playwright install --with-deps chromium
 
       - name: Run the workspace browser harness
+        # Mode strict : un skip (Playwright, Chromium, `grimoire init` absents)
+        # est un échec, pas un faux vert (tests/e2e/_strict.py).
+        env:
+          GRIMOIRE_E2E_STRICT: "1"
         run: pytest tests/e2e -q --tb=short
+
+  surface-coverage:
+    name: "Surface coverage ratchet"
+    # Sur une PR seulement : le cliquet compare au point de départ (D-09). Il
+    # nomme l'unité (sous-commande, hook, genre de flow, hôte) dont le dernier
+    # test a disparu, là où `--cov-fail-under` ne voit qu'un pourcentage.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install package + dev deps
+        run: pip install -e ".[dev]"
+
+      - name: Registry guards and monotonic ratchet against the base
+        env:
+          # Par l'environnement, jamais interpolé dans le script (injection).
+          BASE_REF: origin/${{ github.base_ref }}
+        run: python scripts/check-surface-coverage.py --check --base "$BASE_REF"
 
   build:
     name: "Build package"

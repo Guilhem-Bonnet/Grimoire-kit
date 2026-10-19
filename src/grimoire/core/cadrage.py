@@ -163,7 +163,7 @@ def phase_report(root: Path, phase: Phase) -> dict[str, Any]:
     path = root / CADRAGE_DIR / phase.filename
     report: dict[str, Any] = {
         "phase": phase.id,
-        "file": str(CADRAGE_DIR / phase.filename),
+        "file": (CADRAGE_DIR / phase.filename).as_posix(),
         "state": "missing",
         "sections": {},
         "gate": phase.gate,

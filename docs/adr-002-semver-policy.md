@@ -1,3 +1,7 @@
+---
+audience: décision
+---
+
 # ADR-002 — Politique de versionnage et stabilité API
 
 **Statut** : Accepté  

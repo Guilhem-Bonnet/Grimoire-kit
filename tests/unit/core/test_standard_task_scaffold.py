@@ -68,7 +68,7 @@ def test_scaffold_paths_match_the_profile_map_and_the_gate_keys() -> None:
     """Une seule convention de chemins : la table du remède, la carte des profils, le gate."""
     targets = _generation_targets()
     for key in ("task_envelope", "evidence_pack", "claim_ledger", "acceptance_record"):
-        assert str(gate_artifact_relpath(key, "T-1")) == targets[key].replace("{task-id}", "T-1")
+        assert gate_artifact_relpath(key, "T-1").as_posix() == targets[key].replace("{task-id}", "T-1")
     assert set(task_artifact_relpaths("T-1")) == TASK_LEVEL_KEYS
     for key in GATE_ARTIFACT_KEYS:
         assert remedy_command(key, root=Path("/p"), task_id="T-1", profile_id="starter").startswith("grimoire ")

@@ -21,6 +21,15 @@
 // et zone de consigne dans l'inspecteur, « Annuler » avec raison exigée, tri
 // par priorité dans chaque colonne, badge « consigne non lue » sur la carte.
 //
+// Attente nommée (K6, issue #771) : un état `waiting` à raison nommée
+// (`human`, `ci`, `quota`, `paused`). `waiting(human)` porte une question ;
+// la vue « Décisions » (et le bandeau au-dessus du board) les liste, la plus
+// ancienne d'abord, avec les réponses proposées. Répondre est `api.taskAction(
+// id, 'answer', { text, question_id })` — le serveur pose l'origine humaine
+// (canal cockpit, jeton de session), jamais ce corps. Une question posée par
+// un checkpoint de flow ne se tranche pas ici : la décision s'atteste dans le
+// flux, la vue le dit au lieu d'offrir un bouton qui ne déciderait rien.
+//
 // Timeline (#139) : `api.taskTrace(id)` porte maintenant jusqu'à cinq sources
 // (ledger, hooks, gate, runtime, evidence, otel) triées dans le temps —
 // filtrables par source et par gravité, chaque ligne s'ouvrant en accordéon
@@ -31,7 +40,7 @@
 // Portefeuille (#638, lot C) : la portée « Tous les projets » lit
 // `api.portfolioTasks()` — toutes les tâches de tous les projets du registre
 // cockpit, agrégées côté serveur — avec une puce projet par carte, la session
-// qui la porte (point + mot : vivante / inactive), sa priorité et ses
+// qui la porte (point + mot : vivante / inactive / inconnue), sa priorité et ses
 // consignes non lues quand le champ existe. Les cartes se clé-ent par
 // (projet, id) : deux ledgers peuvent dériver le même identifiant d'un même
 // titre. Une action depuis le portefeuille passe par
@@ -48,6 +57,9 @@ const scope = { mode: 'project', state: '', slug: '', live: false };
 
 // Colonnes du standard, dans l'ordre normatif (grimoire.missions.board.BOARD_LIFECYCLE).
 const LIFECYCLE = ['proposed', 'ready', 'in_progress', 'blocked', 'review', 'accepted', 'released', 'archived'];
+import { icon, stateIcon } from '../shell.js';
+import { agoText, costText, durationText } from '../live.js';
+
 const COLUMN_LABEL = {
   proposed: 'Proposée', ready: 'Prête', in_progress: 'En cours', blocked: 'Bloquée',
   review: 'Revue', accepted: 'Acceptée', released: 'Publiée', archived: 'Archivée',
@@ -55,10 +67,10 @@ const COLUMN_LABEL = {
 // Board à 4 colonnes : regroupement des 8 états du standard. Les colonnes
 // repliées sont nommées sous le titre, jamais tues (revue §4.3).
 const GROUPS4 = [
-  { id: 'todo', label: 'À faire', cols: ['proposed', 'ready'] },
-  { id: 'doing', label: 'En cours', cols: ['in_progress', 'blocked'] },
-  { id: 'review', label: 'Revue', cols: ['review'] },
-  { id: 'done', label: 'Fait', cols: ['accepted', 'released', 'archived'] },
+  { id: 'todo', icon: 'clipboard', label: 'À faire', cols: ['proposed', 'ready'] },
+  { id: 'doing', icon: 'bolt', label: 'En cours', cols: ['in_progress', 'blocked'] },
+  { id: 'review', icon: 'microscope', label: 'Revue', cols: ['review'] },
+  { id: 'done', icon: 'seal', label: 'Fait', cols: ['accepted', 'released', 'archived'] },
 ];
 // Board → état ledger, pour appeler `move` (grimoire.missions.board._FROM_BOARD).
 const BOARD_TO_STATE = {
@@ -91,20 +103,46 @@ const PRIORITY_DOT = { low: '', medium: '', high: 'warn', critical: 'bad' };
 const priorityRank = (p) => PRIORITIES.indexOf(p);
 // Dans une colonne, la plus pressante d'abord ; à égalité, l'identifiant
 // garde un ordre stable (même règle que `build_board`).
+// Ce qui attend la décision d'un humain passe devant tout (K6).
+const isHumanWait = (t) => t.status === 'waiting' && !!t.waiting && t.waiting.reason === 'human' && !!t.waiting.question;
 const byPriority = (a, b) =>
+  (Number(isHumanWait(b)) - Number(isHumanWait(a))) ||
   (priorityRank(b.effective_priority || 'medium') - priorityRank(a.effective_priority || 'medium')) ||
   String(a.id).localeCompare(String(b.id));
+// La raison d'une attente, en clair — point + mot, jamais la couleur seule.
+const WAIT_LABEL = { human: 'décision attendue', ci: 'attend la CI', quota: 'attend le quota', paused: 'en pause' };
+const QUESTION_KIND_LABEL = {
+  merge: 'fusion', permission: 'permission', choice: 'choix', resume_branch: 'reprise de branche',
+  resume_unfenced: 'reprise sans frein', retry_exhausted: 'tentatives épuisées',
+};
+function waitingText(waiting) {
+  const label = WAIT_LABEL[waiting.reason] || `attente (${waiting.reason})`;
+  if (waiting.reason === 'human') return label;
+  if (waiting.until && waiting.until !== 'unknown') return `${label} jusqu'à ${waiting.until.slice(0, 16).replace('T', ' ')}`;
+  return `${label}, échéance inconnue`;
+}
+function ageText(iso) {
+  const then = Date.parse(iso || '');
+  if (Number.isNaN(then)) return '';
+  const minutes = Math.max(0, Math.round((Date.now() - then) / 60000));
+  if (minutes < 60) return `depuis ${minutes} min`;
+  const hours = Math.round(minutes / 60);
+  return hours < 48 ? `depuis ${hours} h` : `depuis ${Math.round(hours / 24)} j`;
+}
 
 function injectStyles() {
   if (document.getElementById(STYLE_ID)) return;
   const style = document.createElement('style');
   style.id = STYLE_ID;
   style.textContent = `
-    .ex-wrap { padding: var(--sp-4); height: 100%; display: flex; flex-direction: column; gap: var(--sp-3); }
+    .ex-wrap { padding: var(--sp-4) var(--sp-5); height: 100%; display: flex; flex-direction: column; gap: var(--sp-3); }
+    @media (max-width: 900px) { .ex-wrap { padding: var(--sp-3); } }
     .ex-board { display: flex; gap: var(--sp-3); align-items: flex-start; overflow-x: auto; flex-grow: 1; }
     .ex-col { width: 260px; flex: none; display: flex; flex-direction: column; gap: var(--sp-2); }
     .ex-col-head { padding: 6px 2px; }
-    .ex-col-title { font-size: var(--t-s); font-weight: 500; color: var(--ink); display: flex; justify-content: space-between; }
+    .ex-col-title { font-size: var(--t-s); font-weight: 500; color: var(--ink); display: flex; align-items: center; gap: 6px; }
+    .ex-col-title > span:first-of-type { margin-right: auto; }
+    .ex-col-title .ico { width: 16px; height: 16px; color: var(--ink2); }
     .ex-col-gate { font-size: var(--t-min); color: var(--ink3); margin-top: 2px; }
     .ex-col-body { display: flex; flex-direction: column; gap: 6px; min-height: 60px; }
     .ex-col-body.empty { border: 1px dashed var(--line); border-radius: var(--r); align-items: center; justify-content: center; color: var(--ink3); font-size: var(--t-min); padding: var(--sp-4) 0; }
@@ -115,6 +153,8 @@ function injectStyles() {
     .ex-card-meta { font-size: var(--t-s); color: var(--ink2); display: flex; align-items: center; gap: 6px; }
     .ex-card-chips { display: flex; flex-wrap: wrap; gap: 4px; }
     .ex-card-next { font-size: var(--t-s); color: var(--ink2); display: flex; justify-content: space-between; align-items: center; gap: 6px; border-top: 1px solid var(--line); padding-top: 6px; }
+    .ex-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; font-size: var(--t-min); }
+    .ex-cost { font-size: var(--t-min); }
     .ex-list-wrap { overflow: auto; border: 1px solid var(--line); border-radius: var(--r); }
     .ex-list { width: 100%; border-collapse: collapse; font-size: var(--t-s); }
     .ex-list th { text-align: left; font-size: var(--t-min); color: var(--ink3); font-weight: 500; padding: 8px var(--sp-3); border-bottom: 1px solid var(--line); background: var(--bar); }
@@ -155,11 +195,22 @@ function injectStyles() {
     .ex-steer-form { display: flex; flex-direction: column; gap: 6px; }
     .ex-steer-form textarea { min-height: 56px; font: inherit; font-size: var(--t-s); }
     .ex-steer-row { display: flex; gap: 6px; align-items: center; }
+    .ex-wait { font-size: var(--t-s); color: var(--ink2); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .ex-wait.human { color: var(--ink); font-weight: 500; }
+    .ex-banner { display: flex; align-items: center; gap: var(--sp-3); padding: 8px var(--sp-3); border: 1px solid var(--warn); border-radius: var(--r); background: var(--e1); font-size: var(--t-s); }
+    .ex-decisions { display: flex; flex-direction: column; gap: var(--sp-3); max-width: 760px; }
+    .ex-decision { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3); border: 1px solid var(--line); border-left: 3px solid var(--warn); border-radius: var(--r); background: var(--e1); }
+    .ex-decision-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: var(--t-s); color: var(--ink2); }
+    .ex-decision-title { font-size: var(--t-s); font-weight: 500; color: var(--ink); }
+    .ex-decision-question { font-size: var(--t-m, var(--t-s)); color: var(--ink); margin: 0; white-space: pre-wrap; }
+    .ex-decision-options { display: flex; flex-wrap: wrap; gap: 6px; }
+    .ex-decision textarea { min-height: 44px; font: inherit; font-size: var(--t-s); }
+    .ex-decision-note { font-size: var(--t-min); color: var(--ink3); }
   `;
   document.head.append(style);
 }
 
-const dot = (cls) => Object.assign(document.createElement('span'), { className: 'dot' + (cls ? ' ' + cls : '') });
+const dot = (cls) => stateIcon(cls);
 function text(tag, className, value) {
   const node = document.createElement(tag);
   if (className) node.className = className;
@@ -215,7 +266,7 @@ function portfolioRow(task) {
   line.append(project);
   const session = task.session;
   if (session && session.id) {
-    line.append(row(dot(session.live ? 'ok' : ''), text('span', null, session.live ? 'session vivante' : 'session inactive')));
+    line.append(row(dot(livenessDot(session)), text('span', null, `session ${livenessLabel(session)}`)));
   } else {
     line.append(text('span', 'lbl', 'aucune session'));
   }
@@ -225,6 +276,57 @@ function portfolioRow(task) {
   if (task.unread_directives) {
     line.append(row(dot('warn'), text('span', null, `${task.unread_directives} consigne(s) non lue(s)`)));
   }
+  return line;
+}
+
+// Dernier signe de vie, durée et coût d'une session / d'une carte (UI-3). Le
+// temps relatif est un <time data-since> : le minuteur de la coque le tient à
+// jour entre deux sondages. Un coût que personne n'a mesuré se lit « inconnu »,
+// jamais « 0 » (W1-01) ; la portée du chiffre (dispatch) est écrite, parce que
+// le coût de la session hôte n'est mesuré nulle part.
+function sinceNode(iso) {
+  const node = document.createElement('time');
+  node.dateTime = iso;
+  node.dataset.since = iso;
+  node.title = iso;
+  node.textContent = agoText(Date.now() - Date.parse(iso));
+  return node;
+}
+
+function liveRow(session, { withState = true } = {}) {
+  const line = document.createElement('div');
+  line.className = 'ex-facts lbl';
+  line.dataset.role = 'live-facts';
+  if (withState) line.append(row(dot(livenessDot(session)), text('span', null, `session ${livenessLabel(session)}`)));
+  if (session.updated_at && !Number.isNaN(Date.parse(session.updated_at))) {
+    const sign = text('span', null, 'signe ');
+    sign.append(sinceNode(session.updated_at));
+    line.append(sign);
+  } else {
+    line.append(text('span', null, 'aucun signe de vie lu'));
+  }
+  line.append(text('span', null, `durée ${durationText(session.duration_s)}`));
+  return line;
+}
+
+// Un coût d'étape non démarrée (proposée, prête, annulée) n'a rien à dire : la
+// ligne « coût inconnu » sur chaque carte du backlog serait du bruit. Dès qu'un
+// dispatch existe, ou que le travail a commencé, la ligne est toujours là.
+const COST_QUIET = new Set(['proposed', 'ready', 'cancelled']);
+function costLabel(cost) {
+  const unpriced = cost && cost.unpriced_calls ? `, ${cost.unpriced_calls} non chiffré(s)` : '';
+  const text_ = costText(cost);
+  if (text_ === 'inconnu') return unpriced ? `coût inconnu${unpriced}` : 'coût inconnu';
+  return `coût ${text_} (dispatch${unpriced})`;
+}
+function costRow(task) {
+  if (COST_QUIET.has(task.status) && !(task.cost && task.cost.calls)) return null;
+  const line = text('div', 'ex-cost lbl', costLabel(task.cost));
+  line.dataset.role = 'cost';
+  line.dataset.costStatus = (task.cost && task.cost.status) || 'unknown';
+  line.title = task.cost && task.cost.calls
+    ? `${task.cost.calls} tentative(s) de dispatch. Le coût de la session hôte n'est pas mesuré.`
+    : "Aucun dispatch : le kit n'a rien mesuré. Le coût de la session hôte n'est pas mesuré non plus.";
   return line;
 }
 
@@ -255,6 +357,16 @@ function taskCard(task, onSelect, portfolio = false) {
     meta.append(text('span', 'ex-badge', `consigne non accusée (${task.directives_unacknowledged})`));
   }
   card.append(meta);
+  if (task.status === 'waiting' && task.waiting) {
+    const human = isHumanWait(task);
+    const line = document.createElement('div');
+    line.className = 'ex-wait' + (human ? ' human' : '');
+    line.dataset.role = 'waiting';
+    line.append(dot(human ? 'warn' : ''), text('span', null, waitingText(task.waiting)));
+    if (human) line.append(text('span', 'lbl', QUESTION_KIND_LABEL[task.waiting.question.kind] || task.waiting.question.kind));
+    card.append(line);
+    if (human) card.append(text('div', 'lbl', task.waiting.question.text));
+  }
 
   const chips = document.createElement('div');
   chips.className = 'ex-card-chips';
@@ -266,6 +378,11 @@ function taskCard(task, onSelect, portfolio = false) {
   // viennent du claim, posés par le hook UserPromptSubmit de la session —
   // absents tant qu'aucune session d'hôte n'a travaillé sous ce claim.
   if (task.session_id) card.append(sessionLine(task));
+  // UI-3 : vivacité, dernier signe, durée — en portefeuille l'état est déjà dans
+  // la ligne projet (portfolioRow), on n'y ajoute que signe et durée.
+  if (task.session && task.session.id) card.append(liveRow(task.session, { withState: !portfolio }));
+  const cost = costRow(task);
+  if (cost) card.append(cost);
 
   const next = nextColumn(task.board);
   const nextRow = document.createElement('div');
@@ -298,7 +415,7 @@ function renderBoard(root, ctx, tasks, groups, onSelect, portfolio = false) {
     head.className = 'ex-col-head';
     const title = document.createElement('div');
     title.className = 'ex-col-title';
-    title.append(text('span', null, group.label), text('span', 'mono lbl', String(inColumn.length)));
+    title.append(icon(group.icon), text('span', null, group.label), text('span', 'mono lbl', String(inColumn.length)));
     if (group.cols.length > 1) title.dataset.term = 'porte-de-preuve';
     head.append(title);
     if (group.cols.length > 1) {
@@ -330,13 +447,13 @@ function renderList(root, ctx, tasks, onSelect, portfolio = false) {
   const thead = document.createElement('thead');
   const headRow = document.createElement('tr');
   const columns = portfolio
-    ? ['Projet', 'Tâche', 'État', 'Session', 'Priorité', 'Owner', 'Prochaine porte']
-    : ['Tâche', 'État', 'Priorité', 'Owner', 'Session', 'Preuves', 'Prochaine porte'];
+    ? ['Projet', 'Tâche', 'État', 'Session', 'Priorité', 'Owner', 'Coût', 'Prochaine porte']
+    : ['Tâche', 'État', 'Priorité', 'Owner', 'Session', 'Preuves', 'Coût', 'Prochaine porte'];
   for (const label of columns) headRow.append(text('th', null, label));
   thead.append(headRow);
   table.append(thead);
   const tbody = document.createElement('tbody');
-  const ordered = [...tasks].sort((a, b) => (LIFECYCLE.indexOf(a.board) - LIFECYCLE.indexOf(b.board)) || byPriority(a, b));
+  const ordered = [...tasks].sort((a, b) => (Number(isHumanWait(b)) - Number(isHumanWait(a))) || (LIFECYCLE.indexOf(a.board) - LIFECYCLE.indexOf(b.board)) || byPriority(a, b));
   for (const task of ordered) {
     const tr = document.createElement('tr');
     tr.dataset.project = task.project?.slug || '';
@@ -345,13 +462,17 @@ function renderList(root, ctx, tasks, onSelect, portfolio = false) {
     if (portfolio) tr.append(text('td', null, task.project?.name || task.project?.slug || '—'));
     tr.append(text('td', null, task.title || task.id));
     const stateCell = document.createElement('td');
-    stateCell.append(row(dot(task.board === 'blocked' ? 'bad' : (task.board === 'accepted' || task.board === 'released' ? 'ok' : '')), text('span', null, COLUMN_LABEL[task.board] || task.board)));
+    const waitingNow = task.status === 'waiting' && task.waiting;
+    stateCell.append(row(
+      dot(waitingNow ? 'warn' : (task.board === 'blocked' ? 'bad' : (task.board === 'accepted' || task.board === 'released' ? 'ok' : ''))),
+      text('span', null, waitingNow ? waitingText(task.waiting) : (COLUMN_LABEL[task.board] || task.board)),
+    ));
     tr.append(stateCell);
     if (portfolio) {
       const sessionCell = document.createElement('td');
       const session = task.session;
       if (session && session.id) {
-        sessionCell.append(row(dot(session.live ? 'ok' : ''), text('span', null, session.live ? 'vivante' : 'inactive')));
+        sessionCell.append(row(dot(livenessDot(session)), text('span', null, livenessLabel(session))));
       } else {
         sessionCell.append(text('span', 'lbl', '—'));
       }
@@ -377,6 +498,8 @@ function renderList(root, ctx, tasks, onSelect, portfolio = false) {
       if (!(task.expected_evidence || []).length) evCell.append(text('span', 'lbl', '—'));
       tr.append(evCell);
     }
+    // Coût : « inconnu » reste lisible, et une tâche jamais démarrée garde un tiret.
+    tr.append(text('td', 'lbl', costRow(task) ? costLabel(task.cost).replace(/^coût /, '') : '—'));
     const next = nextColumn(task.board);
     tr.append(text('td', 'lbl', next ? `→ ${COLUMN_LABEL[next]}` : '—'));
     tbody.append(tr);
@@ -494,20 +617,146 @@ async function renderTimeline(root, ctx, task) {
   ctx.dock.log('traces', ...allEntries.map((e) => `${e.at} · ${e.source} · ${e.summary}`));
 }
 
+// ── Décisions en attente (K6) ─────────────────────────────────────────────
+
+// Une décision : la question, ses réponses proposées, une zone libre. Le clic
+// poste `answer` ; le serveur répond 200 avec la tâche rendue (`ready`) ou
+// refuse (question déjà tranchée, question de flow) — le refus s'affiche.
+function decisionCard(ctx, task, portfolio, onWritten) {
+  const q = task.waiting.question;
+  const node = document.createElement('div');
+  node.className = 'ex-decision';
+  node.dataset.role = 'decision';
+  node.dataset.task = task.id;
+  const head = document.createElement('div');
+  head.className = 'ex-decision-head';
+  if (portfolio) head.append(text('span', 'chip', task.project?.name || task.project?.slug || 'projet'));
+  head.append(
+    text('span', 'ex-decision-title', task.title || task.id),
+    text('span', 'lbl', QUESTION_KIND_LABEL[q.kind] || q.kind),
+    text('span', 'lbl', ageText(task.waiting.since || q.asked_at)),
+  );
+  node.append(head, text('p', 'ex-decision-question', q.text));
+
+  const hint = task.waiting.resume_hint;
+  if (hint && hint.session_id) {
+    node.append(text('div', 'ex-decision-note', `session ${hint.session_id}` + (hint.resume_command ? ` — ${hint.resume_command}` : '')));
+  }
+  if (q.origin === 'flow') {
+    node.append(text('div', 'ex-decision-note', "Cette décision est celle d'un checkpoint de flow : elle s'atteste dans le flux (un tour humain de la session qui l'a présenté, puis la même décision renvoyée), pas ici."));
+    return node;
+  }
+
+  const locked = !portfolio && ctx.host.readOnly;
+  const feedback = document.createElement('div');
+  const area = document.createElement('textarea');
+  area.className = 'input';
+  area.placeholder = 'Votre réponse (ou choisissez une option)';
+  area.dataset.role = 'answer-text';
+  area.disabled = locked;
+  const send = async (value) => {
+    const answer = (value || '').trim();
+    if (!answer) { feedback.replaceChildren(text('div', 'ex-refusal', 'une réponse vide ne tranche rien')); return; }
+    const body = { text: answer, question_id: q.id };
+    ctx.dock.echo(`grimoire task answer ${task.id} "${answer}"` + (portfolio ? `  # projet ${task.project?.slug}` : ''));
+    try {
+      if (portfolio) await ctx.api.portfolioTaskAction(task.id, 'answer', body, task.project?.slug);
+      else await ctx.api.taskAction(task.id, 'answer', body);
+      onWritten();
+    } catch (error) {
+      feedback.replaceChildren(text('div', 'ex-refusal', 'échec : ' + error.message));
+    }
+  };
+  const options = document.createElement('div');
+  options.className = 'ex-decision-options';
+  for (const option of q.options || []) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn' + (option.toLowerCase() === 'abandonner' ? '' : ' pri');
+    btn.textContent = option;
+    btn.dataset.role = 'answer-option';
+    btn.disabled = locked;
+    btn.addEventListener('click', () => send(option));
+    options.append(btn);
+  }
+  const submit = document.createElement('button');
+  submit.type = 'button';
+  submit.className = 'btn';
+  submit.textContent = 'Répondre';
+  submit.dataset.role = 'answer-submit';
+  submit.disabled = locked;
+  submit.addEventListener('click', () => send(area.value));
+  node.append(options, area, row(submit), feedback);
+  if (locked) node.append(text('div', 'ex-decision-note', "le cockpit est en lecture seule : ouvrez l'atelier de ce projet, ou la portée « Tous les projets »"));
+  return node;
+}
+
+function renderDecisions(root, ctx, tasks, portfolio, onWritten) {
+  const pending = tasks.filter(isHumanWait).sort((a, b) =>
+    String(a.waiting.since || '').localeCompare(String(b.waiting.since || '')) || String(a.id).localeCompare(String(b.id)));
+  const wrap = document.createElement('div');
+  wrap.className = 'ex-decisions';
+  if (!pending.length) {
+    wrap.append(ctx.empty('Décisions en attente', "Aucune décision n'attend un humain.", 'grimoire task decisions'));
+  }
+  for (const task of pending) wrap.append(decisionCard(ctx, task, portfolio, onWritten));
+  root.append(wrap);
+}
+
+// Le bandeau au-dessus du board : ce qui attend un humain ne se découvre pas en cherchant.
+function decisionsBanner(count, onOpen) {
+  const banner = document.createElement('div');
+  banner.className = 'ex-banner';
+  banner.dataset.role = 'decisions-banner';
+  banner.append(dot('warn'), text('span', null, `${count} décision${count > 1 ? 's' : ''} en attente d'un humain`));
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'btn pri';
+  btn.textContent = 'Voir les décisions';
+  btn.addEventListener('click', onOpen);
+  banner.append(btn);
+  return banner;
+}
+
 // ── Inspecteur ────────────────────────────────────────────────────────────
+
+// Vivacité calculée à quatre valeurs (K5, #770) : jamais un booléen. `inconnu`
+// n'est pas « mort » ; `attention` (vivant sans progression, inconnu prolongé)
+// colore le point sans rien tuer.
+function livenessLabel(session) {
+  const l = session.liveness || { state: 'inconnu' };
+  // Accord avec « session » : les valeurs stockées restent masculines.
+  const word = { vivant: 'vivante', inactif: 'inactive', inconnu: 'inconnue', 'terminé': 'terminée' }[l.state] || l.state;
+  return l.reason && l.state === 'inactif' ? `${word} (${l.reason})` : word;
+}
+function livenessDot(session) {
+  if (session.attention) return 'warn';
+  return (session.liveness || {}).state === 'vivant' ? 'ok' : '';
+}
 
 // « Reprendre la session » (#638) : copie la commande sur l'hôte Claude Code,
 // affiche l'identifiant ailleurs — jamais d'exécution depuis la webview.
-function sessionBlock(session) {
+function sessionBlock(session, { resume = true } = {}) {
   const block = document.createElement('div');
   block.className = 'ex-insp-block ex-session';
   block.append(text('h4', null, 'Session'));
   block.append(row(
-    dot(session.live ? 'ok' : ''),
-    text('span', null, `${session.live ? 'vivante' : 'inactive'} · ${session.id}` + (session.host ? ` · ${session.host}` : '')),
+    dot(livenessDot(session)),
+    text('span', null, `${livenessLabel(session)} · ${session.id}` + (session.host ? ` · ${session.host}` : '')),
   ));
-  if (session.updated_at) block.append(text('div', 'lbl', `dernier signe : ${session.updated_at}`));
+  if (session.attention) block.append(text('div', 'lbl', `attention : ${session.attention.reason}`));
+  if (session.updated_at && !Number.isNaN(Date.parse(session.updated_at))) {
+    const sign = text('div', 'lbl', 'dernier signe de vie : ');
+    sign.dataset.role = 'last-sign';
+    sign.append(sinceNode(session.updated_at));
+    block.append(sign);
+  } else {
+    block.append(text('div', 'lbl', 'aucun signe de vie lu'));
+  }
+  block.append(text('div', 'lbl', `durée : ${durationText(session.duration_s)}` + (session.duration_s == null ? '' : ' (du premier au dernier signe de vie)')));
+  block.append(text('div', 'lbl', `coût de la session : ${costText(session.cost)}` + (costText(session.cost) === 'inconnu' ? " (non mesuré par le kit)" : '')));
   const feedback = text('div', 'lbl', '');
+  if (!resume) return block;
   if (session.resume_command) {
     const cmd = document.createElement('pre');
     cmd.className = 'ex-session-cmd';
@@ -564,7 +813,19 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
   if (portfolio) {
     ctx.inspector.append(text('div', 'lbl', `Projet : ${task.project?.name || task.project?.slug || '—'}`));
     if (task.session && task.session.id) ctx.inspector.append(sessionBlock(task.session));
+  } else if (task.session && task.session.id) {
+    // Portée projet : vivacité, signes de vie, durée ; la reprise reste dans le bloc « Session » plus bas.
+    ctx.inspector.append(sessionBlock(task.session, { resume: false }));
   }
+  const costBlock = document.createElement('div');
+  costBlock.className = 'ex-insp-block';
+  costBlock.dataset.role = 'cost-block';
+  costBlock.append(text('h4', null, 'Coût'));
+  costBlock.append(text('p', null, costLabel(task.cost)));
+  costBlock.append(text('p', 'lbl', task.cost && task.cost.calls
+    ? `${task.cost.calls} tentative(s) de dispatch. Le coût de la session hôte n'est mesuré nulle part dans le kit.`
+    : "Aucun dispatch sur cette tâche : le kit n'a rien mesuré, ce qui n'est pas un coût nul."));
+  ctx.inspector.append(costBlock);
 
   // Finition (lot 4.3, issue #561) : lecture seule ici — le champ existe déjà
   // au ledger et à la projection board (ADR-007 point 6) mais aucune
@@ -635,6 +896,19 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
     pre.textContent = recall.text;
     recallBlock.append(pre);
     ctx.inspector.append(recallBlock);
+  }
+
+  if (detail.status === 'waiting' && detail.waiting) {
+    const waitBlock = document.createElement('div');
+    waitBlock.className = 'ex-insp-block';
+    waitBlock.dataset.role = 'waiting-block';
+    waitBlock.append(text('h4', null, 'En attente'));
+    waitBlock.append(row(dot(detail.waiting.reason === 'human' ? 'warn' : ''), text('span', null, waitingText(detail.waiting))));
+    if (detail.waiting.since) waitBlock.append(text('div', 'lbl', ageText(detail.waiting.since)));
+    if (isHumanWait(detail)) {
+      waitBlock.append(decisionCard(ctx, { ...detail, project: task.project }, portfolio, onWritten));
+    }
+    ctx.inspector.append(waitBlock);
   }
 
   renderSteering(ctx, detail, onWritten);
@@ -711,6 +985,7 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
     let reasonInput = null;
     if (target === 'blocked') {
       reasonInput = document.createElement('input');
+      reasonInput.type = 'text';
       reasonInput.className = 'input';
       reasonInput.placeholder = 'raison du blocage';
       gateRow.append(reasonInput);
@@ -883,6 +1158,7 @@ function renderSteeringInto(container, ctx, detail, onWritten) {
     cancelBlock.className = 'ex-insp-block';
     cancelBlock.append(text('h4', null, 'Annuler'));
     const reason = document.createElement('input');
+    reason.type = 'text';
     reason.className = 'input';
     reason.placeholder = "raison de l'annulation (obligatoire)";
     reason.dataset.role = 'cancel-reason';
@@ -997,7 +1273,7 @@ function scopeToolbar(ctx, portfolio, onChange) {
     liveLabel.append(liveBox, text('span', null, `Sessions vivantes (< ${portfolio.live_minutes} min)`));
 
     const summary = portfolio.summary || {};
-    const count = text('span', 'ex-count', `${portfolio.count} / ${summary.tasks ?? 0} tâche(s) · ${summary.live ?? 0} session(s) vivante(s) · ${summary.readable ?? 0}/${summary.projects ?? 0} projet(s) lisible(s)`);
+    const count = text('span', 'ex-count', `${portfolio.count} / ${summary.tasks ?? 0} tâche(s) · ${(summary.liveness || {}).vivant ?? 0} session(s) vivante(s) · ${summary.readable ?? 0}/${summary.projects ?? 0} projet(s) lisible(s)`);
     bar.append(stateLabel, projectLabel, liveLabel, count);
   }
   return bar;
@@ -1016,6 +1292,34 @@ function unreadableNotice(portfolio) {
   return notice;
 }
 
+// Ce qu'une actualisation conserve : défilement de la toile et du board / de la
+// liste, et la carte qui avait le focus clavier.
+function captureView(wrap) {
+  const canvas = wrap.parentElement;
+  const board = wrap.querySelector('.ex-board, .ex-list-wrap');
+  const focus = document.activeElement && document.activeElement.closest ? document.activeElement.closest('.ex-card, tr[data-task]') : null;
+  return {
+    canvasTop: canvas ? canvas.scrollTop : 0,
+    wrapTop: wrap.scrollTop,
+    boardLeft: board ? board.scrollLeft : 0,
+    boardTop: board ? board.scrollTop : 0,
+    focus: focus && wrap.contains(focus) ? { task: focus.dataset.task || '', project: focus.dataset.project || '' } : null,
+  };
+}
+
+function restoreView(wrap, kept) {
+  const canvas = wrap.parentElement;
+  if (canvas) canvas.scrollTop = kept.canvasTop;
+  wrap.scrollTop = kept.wrapTop;
+  const board = wrap.querySelector('.ex-board, .ex-list-wrap');
+  if (board) { board.scrollLeft = kept.boardLeft; board.scrollTop = kept.boardTop; }
+  if (kept.focus && kept.focus.task) {
+    const same = [...wrap.querySelectorAll('.ex-card, tr[data-task]')]
+      .find((n) => n.dataset.task === kept.focus.task && (n.dataset.project || '') === kept.focus.project);
+    if (same && typeof same.focus === 'function') same.focus({ preventScroll: true });
+  }
+}
+
 export async function mount(root, ctx) {
   injectStyles();
   const wrap = document.createElement('div');
@@ -1026,18 +1330,21 @@ export async function mount(root, ctx) {
   // Observer s'en sert pour ouvrir directement la timeline d'une tâche depuis
   // un span OTel qui en porte l'identifiant (#139). `scope: 'portfolio'`
   // ouvre directement le portefeuille (#638).
-  let view = ctx.params.view === 'timeline' ? 'timeline' : 'board4';
+  // `decisions` : le compteur de la barre du haut (UI-3) ouvre directement la vue.
+  let view = ['timeline', 'decisions'].includes(ctx.params.view) ? ctx.params.view : 'board4';
   // Sélection par (projet, id) : en portée projet, `project` reste vide.
   let selected = ctx.params.task ? { id: ctx.params.task, project: '' } : null;
   if (ctx.params.scope === 'portfolio' && ctx.host.kind === 'cockpit') scope.mode = 'portfolio';
+  else if (ctx.params.scope === 'project') scope.mode = 'project';
   if (ctx.host.kind !== 'cockpit') scope.mode = 'project';
-  const board = await ctx.api.tasks();
+  let board = await ctx.api.tasks();
 
   const VIEW_LABELS = [
     { id: 'board4', label: 'Board 4' },
     { id: 'board8', label: 'Board 8' },
     { id: 'liste', label: 'Liste' },
     { id: 'timeline', label: 'Timeline' },
+    { id: 'decisions', label: 'Décisions' },
   ];
 
   const setView = (id) => { view = id; draw(); };
@@ -1101,12 +1408,31 @@ export async function mount(root, ctx) {
     ctx.dock.echo('grimoire task add');
   }
 
+  // Un seul dessin « gagne » : un clic pendant qu'une actualisation est en vol,
+  // ou deux actualisations qui se chevauchent, ne s'écrasent pas à moitié.
+  let drawSeq = 0;
+  // Signature de la carte rendue dans l'inspecteur : une actualisation ne le
+  // reconstruit (trois lectures, perte du défilement) que si la carte a changé.
+  let inspectedSig = '';
+
   async function draw(opts = {}) {
-    wrap.replaceChildren();
+    const seq = ++drawSeq;
     const portfolioMode = scope.mode === 'portfolio';
     if (!portfolioMode && !board.ledger) {
-      renderNoLedger();
-      return;
+      // Le ledger peut naître HORS du navigateur (`grimoire task add`) pendant que cet état vide
+      // est affiché : on relit avant de choisir, sinon le pouls tourne pour rien (UI3-S1-01).
+      const latest = await ctx.api.tasks();
+      if (ctx.signal.aborted || seq !== drawSeq) return;
+      const unchanged = !latest.ledger && !board.ledger
+        && (latest.note || '') === (board.note || '')
+        && !!latest.migration_available === !!board.migration_available;
+      board = latest;
+      if (!board.ledger) {
+        if (opts.live && unchanged) return; // rien de neuf : on ne redessine pas l'état vide
+        wrap.replaceChildren();
+        renderNoLedger();
+        return;
+      }
     }
     let tasks = [];
     let portfolio = null;
@@ -1121,10 +1447,15 @@ export async function mount(root, ctx) {
       const fresh = await ctx.api.tasks();
       tasks = fresh.tasks || [];
     }
+    if (ctx.signal.aborted || seq !== drawSeq) return;
     ctx.docbar.setBreadcrumb([portfolioMode ? 'Tous les projets' : (ctx.host.project || 'projet'), 'Exécuter']);
     ctx.docbar.setViews(VIEW_LABELS, view, setView);
-    if (ctx.signal.aborted) return;
 
+    // Les données sont là : on remplace d'un geste synchrone, en gardant le
+    // défilement du board et la carte au clavier (une actualisation ne doit
+    // pas renvoyer l'utilisateur au début ni lui voler le focus).
+    const kept = captureView(wrap);
+    wrap.replaceChildren();
     wrap.append(scopeToolbar(ctx, portfolio, redraw));
     if (portfolio) {
       const notice = unreadableNotice(portfolio);
@@ -1137,7 +1468,15 @@ export async function mount(root, ctx) {
       draw();
     };
 
-    if (view === 'board4') {
+    // K6 : ce qui attend un humain ne se cherche pas dans une colonne — bandeau sur le board,
+    // vue dédiée « Décisions ».
+    const waitingHuman = tasks.filter(isHumanWait).length;
+    if (waitingHuman && view !== 'decisions' && view !== 'timeline') {
+      wrap.append(decisionsBanner(waitingHuman, () => setView('decisions')));
+    }
+    if (view === 'decisions') {
+      renderDecisions(wrap, ctx, tasks, portfolioMode, () => draw());
+    } else if (view === 'board4') {
       renderBoard(wrap, ctx, tasks, GROUPS4, onSelect, portfolioMode);
     } else if (view === 'board8') {
       renderBoard(wrap, ctx, tasks, LIFECYCLE.map((id) => ({ id, label: COLUMN_LABEL[id], cols: [id] })), onSelect, portfolioMode);
@@ -1150,8 +1489,10 @@ export async function mount(root, ctx) {
       } else {
         selected = { id: task.id, project: task.project?.slug || '' };
         await renderTimeline(wrap, ctx, task);
+        if (seq !== drawSeq) return;
       }
     }
+    restoreView(wrap, kept);
 
     // `{ skipInspector: true }` (issue #638, lot B) : le pilotage humain
     // réécrit son propre bloc en place (`renderSteeringInto`) et ne déclenche
@@ -1162,14 +1503,44 @@ export async function mount(root, ctx) {
 
     const current = tasks.find(same);
     if (current) {
+      const sig = JSON.stringify(current);
+      if (opts.live && sig === inspectedSig) return;
+      inspectedSig = sig;
       const onTimeline = (id) => { selected = { id, project: current.project?.slug || '' }; setView('timeline'); };
       await renderInspector(ctx, current, draw, onTimeline, portfolioMode);
       ctx.dock.echo(`grimoire task show ${current.id}`);
     } else {
+      inspectedSig = '';
       ctx.inspector.replaceChildren(text('p', 'lbl', 'Sélectionnez une tâche pour voir sa porte suivante.'));
       ctx.dock.echo(portfolioMode ? 'grimoire task list --all-projects' : 'grimoire task board');
     }
   }
+
+  // Actualisation sans rechargement (UI-3) : quand le pouls annonce un changement,
+  // l'espace relit SES données. Rien n'est jeté sous les doigts de l'utilisateur :
+  // tant qu'il écrit une réponse ou une consigne (champ actif, ou texte déjà
+  // saisi), l'actualisation attend — elle repart à la sortie du champ.
+  let refreshPending = false;
+  const editing = () => {
+    const active = document.activeElement;
+    const focused = !!active && !!active.closest && (wrap.contains(active) || ctx.inspector.contains(active))
+      && (active.tagName === 'TEXTAREA' || (active.tagName === 'INPUT' && !['checkbox', 'radio', 'button'].includes(active.type)));
+    if (focused) return true;
+    // Un `<input>` sans attribut `type` (raison de blocage, raison d'annulation) vaut « text » mais
+    // n'est pas trouvé par `input[type="text"]` : on filtre sur la propriété (UI3-S1-02).
+    const typed = (root) => [...root.querySelectorAll('textarea, input')]
+      .filter((field) => field.tagName === 'TEXTAREA' || field.type === 'text');
+    return [...typed(wrap), ...typed(ctx.inspector)].some((field) => field.value.trim() !== '');
+  };
+  const refresh = () => {
+    if (editing()) { refreshPending = true; return; }
+    refreshPending = false;
+    draw({ live: true });
+  };
+  ctx.live.on(refresh);
+  const retry = () => { if (refreshPending) setTimeout(refresh, 0); };
+  wrap.addEventListener('focusout', retry, { signal: ctx.signal });
+  ctx.inspector.addEventListener('focusout', retry, { signal: ctx.signal });
 
   await draw();
 }

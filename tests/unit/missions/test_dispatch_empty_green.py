@@ -9,6 +9,7 @@ commandes shell qui impriment la sortie réelle de l'outil puis sortent en 0.
 from __future__ import annotations
 
 import shlex
+import sys
 from pathlib import Path
 
 import pytest
@@ -35,6 +36,12 @@ def _check(tmp_path: Path, printed: str, *, stream: str = "stdout", runner: str 
     return result
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : les commandes d'acceptation sont du shell POSIX (fonctions shell, printf) et « shell=True » lance cmd.exe sous Windows : le contrat de la commande de check est POSIX"
+    ),
+)
 @pytest.mark.parametrize(
     ("label", "printed", "stream"),
     [
@@ -61,6 +68,12 @@ def test_un_vert_vide_est_inexecutable_meme_a_code_de_sortie_zero(
     assert result.ok is False
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : les commandes d'acceptation sont du shell POSIX (fonctions shell, printf) et « shell=True » lance cmd.exe sous Windows : le contrat de la commande de check est POSIX"
+    ),
+)
 @pytest.mark.parametrize(
     ("label", "printed"),
     [
@@ -110,6 +123,12 @@ _GO_JSON = (
 )
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : les commandes d'acceptation sont du shell POSIX (fonctions shell, printf) et « shell=True » lance cmd.exe sous Windows : le contrat de la commande de check est POSIX"
+    ),
+)
 @pytest.mark.parametrize(
     ("label", "printed"),
     [
@@ -146,6 +165,12 @@ def test_une_preuve_d_execution_de_n_importe_quel_outil_l_emporte_sur_un_vide(
     assert result.ok is True
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : les commandes d'acceptation sont du shell POSIX (fonctions shell, printf) et « shell=True » lance cmd.exe sous Windows : le contrat de la commande de check est POSIX"
+    ),
+)
 def test_un_vrai_rouge_qui_cite_un_motif_de_vide_reste_un_rouge(tmp_path: Path) -> None:
     """Le motif cité dans un identifiant de test ne transforme pas le rouge en inexécutable."""
     out = (
@@ -200,6 +225,12 @@ def test_un_binaire_cargo_avorte_reste_un_rouge(output: str, exit_code: int) -> 
     assert _classify_unrunnable("cargo test --offline", exit_code, output, "") is None
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : les commandes d'acceptation sont du shell POSIX (fonctions shell, printf) et « shell=True » lance cmd.exe sous Windows : le contrat de la commande de check est POSIX"
+    ),
+)
 def test_un_binaire_cargo_avorte_via_un_vrai_check_reste_un_rouge(tmp_path: Path) -> None:
     (result,) = _run_checks((_cmd(_CARGO_AVORTE, runner="cargo test", exit_code=101),), project_root=tmp_path)
 
@@ -224,6 +255,12 @@ def test_go_sans_aucun_test_a_lancer_est_inexecutable(output: str, exit_code: in
     assert _classify_unrunnable("go test ./...", exit_code, output, "") is not None
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : les commandes d'acceptation sont du shell POSIX (fonctions shell, printf) et « shell=True » lance cmd.exe sous Windows : le contrat de la commande de check est POSIX"
+    ),
+)
 def test_go_sans_aucun_test_a_lancer_via_un_vrai_check_est_inexecutable(tmp_path: Path) -> None:
     result = _check(tmp_path, _GO_VIDE + _GO_AUCUN_TEST)
 
@@ -254,6 +291,12 @@ _PNPM_VITEST_VIDE = "packages/web test: No test files found, exiting with code 1
 _PNPM_MOCHA_VIDE = "packages/web test: No test files found...\n"
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : les commandes d'acceptation sont du shell POSIX (fonctions shell, printf) et « shell=True » lance cmd.exe sous Windows : le contrat de la commande de check est POSIX"
+    ),
+)
 @pytest.mark.parametrize(
     ("label", "printed", "exit_code"),
     [
@@ -311,6 +354,12 @@ _MINITEST = "Finished in 0.001s\n3 runs, 5 assertions, 0 failures, 0 errors, 0 s
 _MINITEST_ROUGE = "3 runs, 5 assertions, 1 failures, 0 errors, 0 skips\n"
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : les commandes d'acceptation sont du shell POSIX (fonctions shell, printf) et « shell=True » lance cmd.exe sous Windows : le contrat de la commande de check est POSIX"
+    ),
+)
 @pytest.mark.parametrize(
     ("label", "printed", "exit_code"),
     [
@@ -379,6 +428,12 @@ _ESC_PYTEST_ROUGE = (
 _ESC_MOCHA_OK = "\x1b[92m  4 passing\x1b[0m\x1b[90m (8ms)\x1b[0m\n"
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : les commandes d'acceptation sont du shell POSIX (fonctions shell, printf) et « shell=True » lance cmd.exe sous Windows : le contrat de la commande de check est POSIX"
+    ),
+)
 @pytest.mark.parametrize(
     ("label", "printed", "exit_code"),
     [
@@ -544,6 +599,12 @@ def test_go_cover_sans_aucun_test_est_inexecutable(printed: str, exit_code: int)
     assert "go test" in reason
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : les commandes d'acceptation sont du shell POSIX (fonctions shell, printf) et « shell=True » lance cmd.exe sous Windows : le contrat de la commande de check est POSIX"
+    ),
+)
 def test_go_cover_sans_test_est_inexecutable_dans_un_vrai_check(tmp_path: Path) -> None:
     result = _check(tmp_path, _GO_COVER_VIDE, runner="go test -cover ./...")
 

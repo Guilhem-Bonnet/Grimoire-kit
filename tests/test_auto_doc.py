@@ -178,7 +178,7 @@ class T(unittest.TestCase):
         _write(self.tmpdir, "README.md", "Suite de 1 tests.\n")
         _report, changes = self.mod.sync_readme(self.tmpdir)
         self.assertGreaterEqual(changes, 1)
-        text = (self.tmpdir / "README.md").read_text()
+        text = (self.tmpdir / "README.md").read_text(encoding="utf-8")
         self.assertIn("3", text)
 
     def test_sync_no_readme(self):
@@ -196,7 +196,7 @@ def test_b(): pass
 """)
         _report, changes = self.mod.sync_readme(self.tmpdir)
         self.assertGreaterEqual(changes, 1)
-        text = (self.tmpdir / "README.md").read_text()
+        text = (self.tmpdir / "README.md").read_text(encoding="utf-8")
         self.assertIn("test_x.py", text)
 
 

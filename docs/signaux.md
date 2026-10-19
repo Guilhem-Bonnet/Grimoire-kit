@@ -1,3 +1,7 @@
+---
+audience: utilisateur
+---
+
 # Signaux & nouveautés
 
 Les ajouts publics les plus structurants du kit sont consolidés ici. La même source alimente aussi l'accueil et la présentation.

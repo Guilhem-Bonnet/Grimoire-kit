@@ -118,14 +118,14 @@ def served_upgrade_checkpoint(
     env["NO_COLOR"] = "1"
     init = subprocess.run(
         [sys.executable, "-m", "grimoire", "init", ".", "-y", "--name", "projet-checkpoint-badge"],
-        cwd=str(root), env=env, capture_output=True, text=True, check=False, timeout=180,
+        cwd=str(root), env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", check=False, timeout=180,
     )
     if not (root / "_grimoire" / "kit").is_dir():
         pytest.skip(f"`grimoire init` indisponible ici : {init.stderr[-400:]}")
 
     fabricate = subprocess.run(
         [sys.executable, "-c", _FABRICATE_CHECKPOINTED_RUN, str(root)],
-        cwd=str(root), env=env, capture_output=True, text=True, check=False, timeout=60,
+        cwd=str(root), env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", check=False, timeout=60,
     )
     if fabricate.returncode != 0:
         pytest.skip(f"fabrication du run checkpointé impossible : {fabricate.stderr[-800:]}")
@@ -135,7 +135,7 @@ def served_upgrade_checkpoint(
     env["GRIMOIRE_COCKPIT_HOME"] = str(cockpit_home)
     added = subprocess.run(
         [sys.executable, "-m", "grimoire", "cockpit", "add", str(root)],
-        env=env, capture_output=True, text=True, check=False, timeout=60,
+        env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", check=False, timeout=60,
     )
     registry_path = cockpit_home / "registry.json"
     if not registry_path.is_file():

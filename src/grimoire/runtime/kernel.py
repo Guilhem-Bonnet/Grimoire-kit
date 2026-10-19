@@ -74,7 +74,10 @@ _WF_TRANSITIONS: dict[WorkflowStatus, frozenset[WorkflowStatus]] = {
         WorkflowStatus.ABORTED,
         WorkflowStatus.REFUSED,
     }),
-    WorkflowStatus.CHECKPOINTED: frozenset({WorkflowStatus.RUNNING, WorkflowStatus.ABORTED, WorkflowStatus.REFUSED}),
+    # CHECKPOINTED → PAUSED (K11) : la pause se pose à la frontière de node, node franchi et suivant pas encore ouvert.
+    WorkflowStatus.CHECKPOINTED: frozenset(
+        {WorkflowStatus.RUNNING, WorkflowStatus.PAUSED, WorkflowStatus.ABORTED, WorkflowStatus.REFUSED}
+    ),
     WorkflowStatus.PAUSED: frozenset({WorkflowStatus.RUNNING, WorkflowStatus.ABORTED, WorkflowStatus.REFUSED}),
     WorkflowStatus.BLOCKED: frozenset({WorkflowStatus.RUNNING, WorkflowStatus.ABORTED, WorkflowStatus.REFUSED}),
     WorkflowStatus.COMPLETED: frozenset({WorkflowStatus.VERIFIED}),
@@ -566,6 +569,30 @@ class RuntimeKernel:
         self._emit(RunEventType.WORKFLOW_COMPLETED, wfi, ctx)
         return wfi
 
+    def pause(self, wfi_id: str, ctx: ExecutionContext, *, reason: str = "") -> WorkflowInstance:
+        """Pose le run en ``PAUSED`` à une frontière de node (K11, plan §2.2) et le journalise (``workflow.paused``).
+
+        Légal depuis RUNNING et CHECKPOINTED (le node vient d'être franchi, le suivant n'est pas ouvert).
+        Le run n'avance plus tant que :meth:`unpause` ne l'a pas rouvert : ``advance_step`` refuse PAUSED.
+        """
+        instances = self._load_instances()
+        wfi = instances.get(wfi_id)
+        if wfi is None:
+            raise GrimoireRuntimeError(f"WorkflowInstance not found: {wfi_id}")
+        wfi = self._transition(wfi, WorkflowStatus.PAUSED)
+        self._emit(RunEventType.WORKFLOW_PAUSED, wfi, ctx, payload={"reason": reason})
+        return wfi
+
+    def unpause(self, wfi_id: str, ctx: ExecutionContext) -> WorkflowInstance:
+        """``PAUSED → RUNNING`` (``workflow.resumed``). Le node à ouvrir l'est ensuite par ``advance_step``."""
+        instances = self._load_instances()
+        wfi = instances.get(wfi_id)
+        if wfi is None:
+            raise GrimoireRuntimeError(f"WorkflowInstance not found: {wfi_id}")
+        wfi = self._transition(wfi, WorkflowStatus.RUNNING)
+        self._emit(RunEventType.WORKFLOW_RESUMED, wfi, ctx)
+        return wfi
+
     def abort(self, wfi_id: str, ctx: ExecutionContext, *, reason: str = "") -> WorkflowInstance:
         instances = self._load_instances()
         wfi = instances.get(wfi_id)
@@ -576,6 +603,32 @@ class RuntimeKernel:
         return wfi
 
     # ── Queries ─────────────────────────────────────────────────────────────
+
+    def export_instance(self, wfi_id: str) -> dict[str, Any]:
+        """L'instance, ses événements et ses checkpoints, en données sérialisables (W2-04)."""
+        wfi = self.get_instance(wfi_id)
+        if wfi is None:
+            raise GrimoireRuntimeError(f"WorkflowInstance not found: {wfi_id}")
+        return {
+            "instance": wfi.to_dict(),
+            "events": [e.to_dict() for e in self.get_run_events(wfi_id)],
+            "checkpoints": [c.to_dict() for c in self.list_checkpoints(wfi_id)],
+        }
+
+    def import_instance(self, data: dict[str, Any]) -> WorkflowInstance:
+        """Inverse de :meth:`export_instance` ; refuse une instance déjà présente (jamais d'écrasement)."""
+        wfi = WorkflowInstance.from_dict(data["instance"])
+        events = [RunEvent.from_dict(e) for e in data["events"]]
+        checkpoints = [Checkpoint.from_dict(c) for c in data["checkpoints"]]
+        with locked(self._instances_path):
+            if wfi.id in self._load_instances():
+                raise GrimoireRuntimeError(f"WorkflowInstance already exists: {wfi.id}")
+            for e in events:
+                self._append_event(e)
+            for c in checkpoints:
+                self._append_checkpoint(c)
+            self._store_instance(wfi)
+        return wfi
 
     def get_instance(self, wfi_id: str) -> WorkflowInstance | None:
         return self._load_instances().get(wfi_id)

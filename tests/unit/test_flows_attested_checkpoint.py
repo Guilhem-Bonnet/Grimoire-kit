@@ -97,8 +97,13 @@ def load_turns(root: Path) -> Any:
     return _load(root)
 
 
-def _approve(engine: FlowEngine, run_id: str, **extra: Any) -> Any:
-    return engine.resume(run_id, output={**_GATE_OUT, "checkpoint_decision": "approve", **extra}, executor=_quiet())
+def _approve(engine: FlowEngine, run_id: str, *, directive_id: str | None = None, **extra: Any) -> Any:
+    return engine.resume(
+        run_id,
+        output={**_GATE_OUT, "checkpoint_decision": "approve", **extra},
+        executor=_quiet(),
+        directive_id=directive_id,
+    )
 
 
 def test_approve_sans_tour_posterieur_au_challenge_est_refuse(tmp_path: Path) -> None:
@@ -322,3 +327,104 @@ def test_le_checkpoint_de_project_upgrade_est_declare_destructif() -> None:
 
     blueprint = json.loads(bundled_blueprint_path().read_text(encoding="utf-8"))
     assert destructive_checkpoints(blueprint) == {"destructive"}
+
+
+def test_directive_perimee_sur_checkpoint_destructif_est_refusee_sans_consommer_le_tour(tmp_path: Path) -> None:
+    """W2-01 + W2-03 ensemble : le directive_id gouverne AVANT l'attestation.
+
+    Le refus ``awaiting_human`` est un ``blocked`` (quatre kinds) à tentative
+    suivante ; une décision visant la directive d'avant est rejetée sans rien
+    écrire, donc sans consommer le tour humain, qui sert ensuite la bonne.
+    """
+    engine, run_id = _start(tmp_path)
+    first = engine.directive(run_id)
+    assert first.kind == "checkpoint" and first.node_id == "gate"
+
+    assert _approve(engine, run_id, directive_id=first.directive_id).ok is False  # parked
+    parked = engine.directive(run_id)
+    assert parked.kind == "blocked" and parked.reason == "awaiting_human"
+    assert parked.node_id == "gate" and parked.attempt == 2
+    assert parked.directive_id != first.directive_id
+
+    _human_turn(tmp_path)
+    decisions_before = engine.status(run_id).checkpoint_decisions
+    with pytest.raises(GrimoireRuntimeError, match="directive_id"):
+        _approve(engine, run_id, directive_id=first.directive_id)  # vise la directive d'avant le refus
+    after_stale = engine.status(run_id)
+    assert after_stale.status == "blocked" and after_stale.current_node == "gate"
+    assert after_stale.checkpoint_decisions == decisions_before
+
+    released = _approve(engine, run_id, directive_id=parked.directive_id)
+    assert released.ok is True and released.attestation["status"] == "attested"  # le tour n'avait pas été brûlé
+    assert released.directive is not None and released.directive.node_id == "after"
+
+
+@pytest.mark.parametrize("first_session", [None, "S0"])
+def test_un_challenge_sans_session_ou_d_une_autre_session_ne_bloque_pas_la_session_courante(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, first_session: str | None
+) -> None:
+    """Un run présenté depuis un terminal sans session (ou une autre session) reste décidable par S1."""
+    if first_session is None:
+        monkeypatch.delenv("GRIMOIRE_SESSION_ID")
+    else:
+        monkeypatch.setenv("GRIMOIRE_SESSION_ID", first_session)
+    engine, run_id = _start(tmp_path)
+    monkeypatch.setenv("GRIMOIRE_SESSION_ID", "S1")
+
+    first = _approve(engine, run_id)  # S1 décide : refusé, et le checkpoint est représenté à S1
+    assert first.ok is False
+    _human_turn(tmp_path)  # le tour humain de S1, postérieur à son challenge
+    released = _approve(engine, run_id)
+
+    assert released.ok is True and released.attestation["status"] == "attested"
+
+
+def test_la_tentative_d_une_sous_session_ne_prend_pas_le_challenge_de_la_session_parente(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    engine, run_id = _start(tmp_path)  # challenge de S1
+    _human_turn(tmp_path)  # tour humain de S1, postérieur à son challenge
+    monkeypatch.setenv("GRIMOIRE_SESSION_ID", "S2")  # une sous-session tente la décision
+    assert _approve(engine, run_id).attestation["reason"] == "other_session"
+
+    monkeypatch.setenv("GRIMOIRE_SESSION_ID", "S1")
+    released = _approve(engine, run_id)
+
+    assert released.ok is True and released.attestation["status"] == "attested"
+
+
+def test_un_tour_anterieur_a_l_amendement_n_atteste_pas_la_version_amendee(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Un amend ferme tout challenge ouvert du node, même celui d'une autre session (W5-06-S3)."""
+    engine, run_id = _start(tmp_path)  # C1 (S1)
+    _human_turn(tmp_path)  # tour de S1, antérieur à l'amendement
+    monkeypatch.setenv("GRIMOIRE_SESSION_ID", "S2")
+    assert _approve(engine, run_id).ok is False  # refusé (other_session), représenté à S2 : C2
+    amended = engine.resume(
+        run_id, output={**_GATE_OUT, "checkpoint_decision": "amend", "checkpoint_reason": "revoir"}, executor=_quiet()
+    )
+    assert amended.ok is False  # l'amend consomme C2 et périme C1, le node est rouvert
+
+    monkeypatch.setenv("GRIMOIRE_SESSION_ID", "S1")
+    stale = _approve(engine, run_id)  # S1 approuve la version amendée sans nouveau tour humain
+    assert stale.ok is False
+    assert stale.attestation["status"] != "attested"
+
+    # Le refus a représenté le node à S1 (challenge neuf) : un tour postérieur à celui-ci atteste.
+    _human_turn(tmp_path)
+    released = _approve(engine, run_id)
+    assert released.ok is True and released.attestation["status"] == "attested"
+
+
+def test_un_approve_refuse_ne_perime_pas_le_challenge_des_autres_sessions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Seuls reject et amend consomment : le refus d'un approve de S2 laisse S1 attester."""
+    engine, run_id = _start(tmp_path)  # C1 (S1)
+    monkeypatch.setenv("GRIMOIRE_SESSION_ID", "S2")
+    assert _approve(engine, run_id).ok is False
+    monkeypatch.setenv("GRIMOIRE_SESSION_ID", "S1")
+    _human_turn(tmp_path)
+    released = _approve(engine, run_id)
+    assert released.ok is True and released.attestation["status"] == "attested"

@@ -264,5 +264,11 @@ class TestF4Root:
 
     def test_ci_runs_the_guard(self) -> None:
         ci = (REPO_ROOT / ".github" / "workflows" / "ci-sdk.yml").read_text(encoding="utf-8")
-        assert "scripts/check-actions-pinned.py" in ci
+        # Le garde tourne via `grimoire gates repo` (même commande que le pre-push) ;
+        # le registre des gardes le désigne, le filtre de chemins relance le job.
+        from grimoire.repo_gates import GATES
+
+        assert "run: grimoire gates repo" in ci
+        assert any(gate.script == "check-actions-pinned.py" for gate in GATES)
+        assert '"scripts/check-*.py"' in ci
         assert '".github/workflows/**"' in ci

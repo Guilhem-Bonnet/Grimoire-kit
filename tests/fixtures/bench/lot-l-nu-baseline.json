@@ -1,0 +1,106 @@
+{
+  "schema": "grimoire.bench.nu-baseline.v1",
+  "source": "lot L (docs/bench/rejeu-lot-l-2026-10-02.md), bras nu, 20 tâches x k=3, relu dans results.jsonl local (hors dépôt) ; aucun nouveau run",
+  "nu_successes_by_task": {
+    "go/bottle-song": [
+      true,
+      true,
+      true
+    ],
+    "go/error-handling": [
+      true,
+      true,
+      true
+    ],
+    "go/palindrome-products": [
+      true,
+      true,
+      true
+    ],
+    "go/pov": [
+      true,
+      true,
+      true
+    ],
+    "go/simple-linked-list": [
+      true,
+      true,
+      true
+    ],
+    "javascript/affine-cipher": [
+      true,
+      true,
+      true
+    ],
+    "javascript/go-counting": [
+      true,
+      true,
+      true
+    ],
+    "javascript/list-ops": [
+      true,
+      true,
+      true
+    ],
+    "javascript/queen-attack": [
+      true,
+      true,
+      true
+    ],
+    "javascript/transpose": [
+      true,
+      true,
+      true
+    ],
+    "python/bowling": [
+      true,
+      true,
+      true
+    ],
+    "python/list-ops": [
+      true,
+      true,
+      true
+    ],
+    "python/proverb": [
+      true,
+      true,
+      true
+    ],
+    "python/react": [
+      true,
+      true,
+      true
+    ],
+    "python/zipper": [
+      true,
+      true,
+      true
+    ],
+    "rust/forth": [
+      true,
+      true,
+      true
+    ],
+    "rust/poker": [
+      true,
+      true,
+      true
+    ],
+    "rust/react": [
+      true,
+      true,
+      true
+    ],
+    "rust/scale-generator": [
+      true,
+      true,
+      true
+    ],
+    "rust/two-bucket": [
+      true,
+      true,
+      true
+    ]
+  }
+}

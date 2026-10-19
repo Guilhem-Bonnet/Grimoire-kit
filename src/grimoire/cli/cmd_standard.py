@@ -20,7 +20,6 @@ from grimoire.core.agentic_standard import (
     StandardRemediationApplyResult,
     StandardRuntimeArtifact,
     StandardVerificationResult,
-    _read_manifest_profile,
     apply_remediation_actions,
     audit_runtime_events,
     build_context_bundle,
@@ -54,6 +53,7 @@ from grimoire.core.standard_checks.gate_test_run import (
     ensure_fresh_test_run,
     resolve_gate_check_task_id,
 )
+from grimoire.core.standard_effective_profile import effective_manifest_profile
 from grimoire.core.standard_task_scaffold import scaffold_task_artifacts
 from grimoire.hosts.sync import HostSyncOutcome, sync_host_surfaces
 
@@ -331,7 +331,7 @@ def traceability(
     from grimoire.core.standard_traceability import matrix_for, with_verdicts
 
     if project_root is not None and profile is None:
-        profile = _read_manifest_profile(project_root.resolve())
+        profile = effective_manifest_profile(project_root.resolve())
     matrix = matrix_for(profile or "governed")
     if project_root is not None:
         matrix = with_verdicts(matrix, project_root, task_id=task_id)
@@ -1431,6 +1431,7 @@ def score(
         "warnings": result.warnings,
         "errors": result.errors,
         "dimensions": result.dimensions,
+        **result.rules,
         "output_path": str(result.output_path),
     }
     if _get_fmt(ctx) == "json":
@@ -1438,6 +1439,7 @@ def score(
         raise typer.Exit(0 if result.ok else 1)
     status = "[green]OK[/green]" if result.ok else "[red]FAIL[/red]"
     console.print(f"{status} compliance score {result.score}/{result.threshold} written to {result.output_path}")
+    console.print(f"rules: {result.rules.get('rules_enforced')} enforced, {result.rules.get('rules_advisory')} advisory")
     table = Table(title="Compliance dimensions")
     table.add_column("Dimension")
     table.add_column("Score")

@@ -52,7 +52,7 @@ def test_evidence_item_from_text_digest(svc):
 
 def test_evidence_item_from_file(tmp_path):
     p = tmp_path / "test_output.txt"
-    p.write_text("PASSED: 42 tests")
+    p.write_text("PASSED: 42 tests", encoding="utf-8")
     item = EvidenceItem.from_file("item-test", EvidenceKind.TEST, p, summary="tests pass")
     assert item.digest.startswith("sha256-")
     assert item.uri == str(p)

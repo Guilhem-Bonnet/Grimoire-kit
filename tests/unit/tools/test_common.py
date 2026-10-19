@@ -22,11 +22,11 @@ from grimoire.tools._common import (
 
 class TestFindProjectRoot:
     def test_finds_root_in_current_dir(self, tmp_path: Path) -> None:
-        (tmp_path / "project-context.yaml").write_text("project:\n  name: test\n")
+        (tmp_path / "project-context.yaml").write_text("project:\n  name: test\n", encoding="utf-8")
         assert find_project_root(tmp_path) == tmp_path
 
     def test_finds_root_in_parent(self, tmp_path: Path) -> None:
-        (tmp_path / "project-context.yaml").write_text("project:\n  name: test\n")
+        (tmp_path / "project-context.yaml").write_text("project:\n  name: test\n", encoding="utf-8")
         sub = tmp_path / "src" / "deep"
         sub.mkdir(parents=True)
         assert find_project_root(sub) == tmp_path
@@ -38,7 +38,7 @@ class TestFindProjectRoot:
             find_project_root(sub)
 
     def test_defaults_to_cwd(self, tmp_path: Path) -> None:
-        (tmp_path / "project-context.yaml").write_text("project:\n  name: cwd\n")
+        (tmp_path / "project-context.yaml").write_text("project:\n  name: cwd\n", encoding="utf-8")
         with patch("grimoire.tools._common.Path.cwd", return_value=tmp_path):
             assert find_project_root() == tmp_path
 
@@ -48,14 +48,14 @@ class TestFindProjectRoot:
 class TestLoadYaml:
     def test_load_simple(self, tmp_path: Path) -> None:
         f = tmp_path / "test.yaml"
-        f.write_text("key: value\nlist:\n  - a\n  - b\n")
+        f.write_text("key: value\nlist:\n  - a\n  - b\n", encoding="utf-8")
         data = load_yaml(f)
         assert data["key"] == "value"
         assert data["list"] == ["a", "b"]
 
     def test_load_empty(self, tmp_path: Path) -> None:
         f = tmp_path / "empty.yaml"
-        f.write_text("")
+        f.write_text("", encoding="utf-8")
         assert load_yaml(f) is None
 
     def test_load_missing_raises(self, tmp_path: Path) -> None:
@@ -166,7 +166,7 @@ class TestLoadYamlRoundtrip:
         import builtins
 
         f = tmp_path / "test.yaml"
-        f.write_text("key: value\n")
+        f.write_text("key: value\n", encoding="utf-8")
         real_import = builtins.__import__
 
         def fake_import(name: str, *args: object, **kwargs: object) -> object:
@@ -195,7 +195,7 @@ class TestLoadYamlPyYamlFallback:
         import grimoire.tools._common as mod
 
         f = tmp_path / "test.yaml"
-        f.write_text("key: value\n")
+        f.write_text("key: value\n", encoding="utf-8")
 
         mock_yaml = MagicMock()
         mock_yaml.safe_load.return_value = {"key": "value"}
@@ -218,7 +218,7 @@ class TestLoadYamlPyYamlFallback:
 
     def test_load_invalid_yaml_raises(self, tmp_path: Path) -> None:
         f = tmp_path / "bad.yaml"
-        f.write_text(":\n  :\n    - [\n")
+        f.write_text(":\n  :\n    - [\n", encoding="utf-8")
         with pytest.raises(OSError, match="Cannot parse YAML"):
             load_yaml(f)
 

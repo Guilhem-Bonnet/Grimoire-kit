@@ -138,7 +138,7 @@ class TestPersistence:
         assert loaded.total_emitted == 1
 
     def test_load_corrupted_json(self, root: Path) -> None:
-        (root / "_grimoire-output" / "pheromone-board.json").write_text("{bad")
+        (root / "_grimoire-output" / "pheromone-board.json").write_text("{bad", encoding="utf-8")
         b = load_board(root)
         assert len(b.pheromones) == 0
 
@@ -709,3 +709,22 @@ class TestBulkDeposit:
         # Missing required key 'ptype'
         result = bulk_deposit(root, [{"location": "x", "text": "y", "emitter": "z"}])
         assert result == 0
+
+
+def test_two_identical_emits_in_one_clock_tick_get_distinct_ids(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Horloge figée (tic de ~15 ms sous Windows) : l'id ne doit pas se répéter."""
+    import grimoire.tools.stigmergy as st
+
+    frozen = datetime(2026, 10, 18, 12, 0, 0, tzinfo=UTC)
+
+    class _FrozenClock(datetime):
+        @classmethod
+        def now(cls, tz=None):  # type: ignore[no-untyped-def,override]
+            return frozen
+
+    monkeypatch.setattr(st, "datetime", _FrozenClock)
+    board = PheromoneBoard()
+    first = emit_pheromone(board, "NEED", "test/loc", "done", "tool")
+    second = emit_pheromone(board, "NEED", "test/loc", "done", "tool")
+    third = emit_pheromone(board, "NEED", "test/loc", "done", "tool")
+    assert len({first.pheromone_id, second.pheromone_id, third.pheromone_id}) == 3

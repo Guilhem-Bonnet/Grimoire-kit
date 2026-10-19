@@ -65,6 +65,7 @@ import contextlib
 import json
 import os
 import re
+import shlex
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePath
@@ -481,6 +482,49 @@ def _in_arithmetic(prefix: str) -> bool:
     return prefix.rfind("((") > prefix.rfind("))")
 
 
+#: Extensions de fichiers de prose : un heredoc écrit par ``cat``/``tee`` vers eux n'est pas du code (B-06).
+_PROSE_SUFFIXES = (".md", ".markdown", ".txt", ".rst", ".adoc")
+_WRITER_CUT = re.compile(r"&&|\|\||[;|(\n]|(?<!>)&(?![>])")
+_REDIRECT = re.compile(r"^(?:\d*>>?|&>>?)(.*)$")
+
+
+def _writes_prose_only(prefix: str, tail: str) -> bool:
+    """Le heredoc ouvert par *prefix* ``<<`` *tail* n'est que le texte d'un ``cat``/``tee`` vers des fichiers de prose.
+
+    Le gras Markdown ``**zipper**`` d'un artefact écrit n'est pas un motif de lecture (B-06, pilote). Fail-closed :
+    tout doute (autre commande, tube en fin de ligne, redirection d'entrée, cible hors prose, shell illisible)
+    laisse le corps analysé, comme avant. Un corps écrit vers un script (``.py``, ``.sh``...) reste analysé :
+    il peut lire un test caché une fois lancé.
+    """
+    first = re.split(_WRITER_CUT, tail, maxsplit=1)[0]
+    if "|" in first.replace("||", ""):
+        return False
+    try:
+        words = shlex.split(_WRITER_CUT.split(prefix)[-1] + " " + first)
+    except ValueError:
+        return False
+    while words and re.fullmatch(r"\w+=\S*", words[0]):
+        words = words[1:]
+    if not words or words[0] not in ("cat", "tee") or any("<" in w for w in words):
+        return False
+    targets: list[str] = []
+    take_next = False
+    for word in words[1:]:
+        if take_next:
+            targets.append(word)
+            take_next = False
+        elif (m := _REDIRECT.match(word)) is not None:
+            if m.group(1).startswith("&"):  # ``2>&1`` : duplication de descripteur, pas un fichier
+                continue
+            if m.group(1):
+                targets.append(m.group(1))
+            else:
+                take_next = True
+        elif words[0] == "tee" and not word.startswith("-"):
+            targets.append(word)
+    return not take_next and bool(targets) and all(t.lower().endswith(_PROSE_SUFFIXES) for t in targets)
+
+
 def _split_heredocs(command: str) -> tuple[str, list[str]]:
     """``(texte hors heredoc, corps de heredoc)`` d'une commande.
 
@@ -508,7 +552,8 @@ def _split_heredocs(command: str) -> tuple[str, list[str]]:
         if end is None:
             head, pos = before + command[match.start() : match.start() + 2], match.start() + 2
             continue
-        bodies.append(command[match.end() + 1 : end.start()])
+        if not _writes_prose_only(before.rsplit("\n", 1)[-1], match.group(4)):
+            bodies.append(command[match.end() + 1 : end.start()])
         head, pos = before + match.group(4), end.end()
 
 

@@ -28,7 +28,7 @@ import shutil
 import subprocess
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
@@ -73,7 +73,7 @@ def _probe_version(resolved_path: str) -> str | None:
         completed = subprocess.run(
             [resolved_path, "--version"],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=_VERSION_TIMEOUT_S,
             check=False,
         )
@@ -178,10 +178,8 @@ def audit_providers(root: Path, *, now: datetime | None = None) -> tuple[ProbeRe
     state = load_state(root)
     for result in results:
         previous = state.get(result.provider_id, ProviderRuntimeState())
-        state[result.provider_id] = ProviderRuntimeState(
-            cooldown_until=previous.cooldown_until,
-            last_failure=previous.last_failure,
-            failure_count=previous.failure_count,
+        state[result.provider_id] = replace(
+            previous,
             available=result.available,
             probed_at=effective_now.isoformat(),
             models_seen=result.models_seen,

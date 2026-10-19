@@ -157,12 +157,24 @@ class TestCatalogRefuses:
 
 
 class TestCatalogAccepts:
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason=(
+            "Windows : rejoue un garde de workflow écrit pour bash sous ubuntu-latest (CI) ; Git Bash de Windows (CRLF, chemins, sortie redirigée) n'est pas la cible de ce garde"
+        ),
+    )
     def test_a_fully_catalogued_tree(self, catalog: ModuleType) -> None:
         _track(catalog.REPO, "framework/outil.md", "contenu\n")
         _catalogued(catalog, {"framework/outil.md": "contenu\n"})
         cat = json.loads(catalog.OUT.read_text(encoding="utf-8"))["digests"]
         assert catalog._check(cat, "9.9.9") == 0
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason=(
+            "Windows : rejoue un garde de workflow écrit pour bash sous ubuntu-latest (CI) ; Git Bash de Windows (CRLF, chemins, sortie redirigée) n'est pas la cible de ce garde"
+        ),
+    )
     def test_an_untracked_file_is_not_catalogued(self, catalog: ModuleType) -> None:
         """Régression : un `__pycache__` laissé par des tests injectait des
         digests de bytecode, propres à une version de Python. 304 s'étaient
@@ -320,6 +332,24 @@ class TestChangelogCoverage:
         assert released_repo.main() == 1
         assert "sans toucher CHANGELOG.md" in capsys.readouterr().err
 
+    def test_a_direct_push_without_pr_is_accepted_when_the_release_note_cites_its_hash(
+        self, released_repo: ModuleType
+    ) -> None:
+        """Un commit poussé sans PR : la section de la release le cite par son hash."""
+        _commit(released_repo.REPO, "fix(web): un correctif poussé direct")
+        sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=released_repo.REPO, check=True, capture_output=True, text=True
+        ).stdout.strip()
+        self._close(released_repo, "3.37.0")
+        text = released_repo.CHANGELOG.read_text(encoding="utf-8")
+        text = text.replace(
+            "## [3.37.0] - 2026-09-04\n",
+            f"## [3.37.0] - 2026-09-04\n\n- **Un correctif (`{sha[:8]}`).** Détail.\n",
+            1,
+        )
+        released_repo.CHANGELOG.write_text(text, encoding="utf-8")
+        assert released_repo.main() == 0
+
     def test_a_feature_without_a_pr_number_and_without_an_entry_stays_refused(
         self, released_repo: ModuleType, capsys: pytest.CaptureFixture[str]
     ) -> None:
@@ -385,6 +415,12 @@ def test_pr_title_gate_refuses(title: str) -> None:
     assert _title_gate(title) == 1
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : rejoue un garde de workflow écrit pour bash sous ubuntu-latest (CI) ; Git Bash de Windows (CRLF, chemins, sortie redirigée) n'est pas la cible de ce garde"
+    ),
+)
 @pytest.mark.parametrize(
     "title",
     [

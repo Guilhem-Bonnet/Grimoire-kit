@@ -24,6 +24,7 @@ from grimoire.hosts.emitters.base import (
     managed_header,
     map_verbs,
 )
+from grimoire.hosts.emitters.rules import with_rule_layers
 from grimoire.hosts.hook_launcher import BARE, HookLauncher, resolve_hook_launcher
 from grimoire.hosts.surface import (
     AgentSpec,
@@ -445,11 +446,14 @@ class ClaudeCodeEmitter(Emitter):
         files.extend(_command_file(command) for command in surface.commands)
         blocking = [h for h in surface.hooks if h.enforcement is Enforcement.BLOCKING]
         files.append(_readme(surface, blocking))
-        return EmitPlan(
-            host_id=self.host_id,
-            files=tuple(files),
-            merges=(_settings_merge(surface, launcher),),
-            degradations=Emitter.launcher_degradations(launcher),
+        return with_rule_layers(
+            EmitPlan(
+                host_id=self.host_id,
+                files=tuple(files),
+                merges=(_settings_merge(surface, launcher),),
+                degradations=Emitter.launcher_degradations(launcher),
+            ),
+            project_root,
         )
 
 

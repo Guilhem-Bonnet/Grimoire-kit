@@ -136,7 +136,7 @@ def scan(files: list[Path] | None = None) -> list[Hit]:
     allowed = allowlist()
     hits: list[Hit] = []
     for path in files if files is not None else corpus():
-        rel = str(path.relative_to(ROOT))
+        rel = path.relative_to(ROOT).as_posix()
         for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             for rule, pattern in RULES.items():
                 if pattern.search(line) and (rel, rule) not in allowed:

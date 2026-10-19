@@ -29,7 +29,7 @@ def _tree(tmp_path: Path) -> Path:
     root = tmp_path / "dev"
     managed_ctx = root / "alpha"
     managed_ctx.mkdir(parents=True)
-    (managed_ctx / "project-context.yaml").write_text("project: alpha\n")
+    (managed_ctx / "project-context.yaml").write_text("project: alpha\n", encoding="utf-8")
     managed_rt = root / "nested" / "beta"
     (managed_rt / "_grimoire").mkdir(parents=True)
     bare = root / "gamma"

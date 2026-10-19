@@ -101,7 +101,7 @@ _KNOWN_ARCHETYPES = frozenset({
     "infra-ops", "meta", "stack", "features", "platform-engineering",
 })
 
-_VALID_HOST_ALIASES = frozenset({"claude", "copilot", "codex", "cursor", "gemini"})
+_VALID_HOST_ALIASES = frozenset({"claude", "copilot", "codex", "cursor", "gemini", "opencode"})
 
 # Known keys per section for unknown-key detection
 _KNOWN_TOP_KEYS = frozenset({
@@ -131,7 +131,7 @@ _KNOWN_AGENTS_KEYS = frozenset({
 })
 
 _KNOWN_HOSTS_KEYS = frozenset({
-    "enabled",
+    "enabled", "preserve",
 })
 
 _VALID_EXECUTION_NEED_IDS = frozenset({
@@ -577,6 +577,31 @@ def _validate_hosts(section: Any, errors: list[ValidationError]) -> None:
                     ))
                 else:
                     seen.add(host_id)
+
+    preserve = section.get("preserve")
+    if preserve is not None:
+        if not isinstance(preserve, list):
+            errors.append(ValidationError(
+                path="hosts.preserve",
+                message="'hosts.preserve' must be a list of relative file paths.",
+            ))
+        else:
+            for i, item in enumerate(preserve):
+                if not isinstance(item, str):
+                    errors.append(ValidationError(
+                        path=f"hosts.preserve[{i}]",
+                        message="Preserved path must be a string.",
+                    ))
+                    continue
+                text = item.strip().replace("\\", "/").removeprefix("./")
+                if not text or text.startswith("/") or ".." in text.split("/") or (len(text) > 1 and text[1] == ":"):
+                    errors.append(ValidationError(
+                        path=f"hosts.preserve[{i}]",
+                        message=(
+                            f"Invalid path '{item}' in 'hosts.preserve': "
+                            "expected a path relative to the project root."
+                        ),
+                    ))
 
     _check_unknown_keys(section, _KNOWN_HOSTS_KEYS, "hosts", errors)
 

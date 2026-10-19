@@ -30,6 +30,14 @@ from grimoire.flows.extract import extract_blueprint
 from grimoire.flows.registry import describe_flow
 from grimoire.runtime.schemas import WorkflowStatus
 
+pytestmark = pytest.mark.covers(
+    "genre:composite",
+)
+
+# Commande d'acceptation « qui réussit », valable sous sh comme sous cmd.exe
+# (`true` n'existe pas sous Windows, où `shell=True` lance cmd.exe).
+_TRUE = f'"{sys.executable}" -c pass'
+
 STANDARD = Path("_grimoire/standard")
 REGISTRY = STANDARD / "llm-provider-registry.yaml"
 PILOT_POLICY = STANDARD / "pilot.yaml"
@@ -60,7 +68,7 @@ def _writer_script(tmp_path: Path, name: str, *, cost: float) -> Path:
 
 
 def _invocation(script: Path) -> str:
-    return f"{sys.executable} {script} {{prompt}} --model {{model}}"
+    return f"{Path(sys.executable).as_posix()} {Path(script).as_posix()} {{prompt}} --model {{model}}"
 
 
 def _provider_yaml(pid: str, tier: str, invocation: str) -> str:
@@ -128,7 +136,7 @@ def _leaf_node(node_id: str, *, out_contract: str | None = None, in_contract: st
         "kind": "pattern",
         "ref": "ORC-01",
         "label": node_id,
-        "acceptance": [{"run": "true"}],
+        "acceptance": [{"run": _TRUE}],
         "pins": pins,
     }
 
@@ -207,7 +215,9 @@ def test_composite_lance_un_sous_flow_avec_son_propre_run_et_remonte_le_cout(tmp
     child_meta = engine.run_meta(sub.child_run_id)
     assert child_meta.parent_run_id == outcome.run_id
     assert child_meta.parent_node_id == "sub"
-    assert Path(child_meta.blueprint_path) == child_path.resolve() or Path(child_meta.blueprint_path) == child_path
+    # W2-04 : le chemin stocké est relatif à la racine du projet, jamais absolu.
+    assert not Path(child_meta.blueprint_path).is_absolute()
+    assert engine.blueprint_file(sub.child_run_id) == child_path.resolve()
 
 
 # ── 2. Cycle de composition refusé au chargement ────────────────────────────

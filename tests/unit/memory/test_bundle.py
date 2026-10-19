@@ -36,13 +36,13 @@ def fake_model(tmp_path: Path) -> Path:
     """A directory shaped like a sentence-transformers model."""
     root = tmp_path / "src-model"
     (root / "1_Pooling").mkdir(parents=True)
-    (root / "config.json").write_text(json.dumps({"hidden_size": 768}))
-    (root / "1_Pooling" / "config.json").write_text(json.dumps({"word_embedding_dimension": 384}))
+    (root / "config.json").write_text(json.dumps({"hidden_size": 768}), encoding="utf-8")
+    (root / "1_Pooling" / "config.json").write_text(json.dumps({"word_embedding_dimension": 384}), encoding="utf-8")
     (root / "model.safetensors").write_bytes(b"weights" * 100)
-    (root / "tokenizer.json").write_text('{"vocab": []}')
+    (root / "tokenizer.json").write_text('{"vocab": []}', encoding="utf-8")
     # Download metadata that must not travel with the bundle.
     (root / ".cache").mkdir()
-    (root / ".cache" / "junk.lock").write_text("x")
+    (root / ".cache" / "junk.lock").write_text("x", encoding="utf-8")
     return root
 
 
@@ -69,7 +69,7 @@ def test_detect_dim_prefers_pooling_config(fake_model: Path) -> None:
 def test_detect_dim_falls_back_to_hidden_size(tmp_path: Path) -> None:
     root = tmp_path / "m"
     root.mkdir()
-    (root / "config.json").write_text(json.dumps({"hidden_size": 1024}))
+    (root / "config.json").write_text(json.dumps({"hidden_size": 1024}), encoding="utf-8")
     assert detect_dim(root) == 1024
 
 
@@ -172,7 +172,7 @@ def test_install_refuses_to_overwrite_without_force(tmp_path: Path, bundle_archi
 def test_install_replaces_with_force(tmp_path: Path, bundle_archive: Path) -> None:
     dest = tmp_path / "cache"
     first = install_bundle(bundle_archive, dest_root=dest)
-    (first.model_dir / "stale.txt").write_text("leftover")
+    (first.model_dir / "stale.txt").write_text("leftover", encoding="utf-8")
     second = install_bundle(bundle_archive, dest_root=dest, force=True)
     assert not (second.model_dir / "stale.txt").exists()
 
@@ -194,7 +194,7 @@ def test_install_fails_closed_on_tampered_file(tmp_path: Path, fake_model: Path)
         files=(mod.BundleFile(path="model/weights.bin", sha256="0" * 64, size=6),),
         created_at="2026-01-01T00:00:00",
     )
-    (staged / "manifest.json").write_text(json.dumps(manifest.to_dict()))
+    (staged / "manifest.json").write_text(json.dumps(manifest.to_dict()), encoding="utf-8")
 
     archive = tmp_path / "tampered.tar.gz"
     with tarfile.open(archive, "w:gz") as tar:
@@ -213,7 +213,7 @@ def test_install_fails_closed_on_missing_declared_file(tmp_path: Path) -> None:
         dim=None,
         files=(mod.BundleFile(path="model/absent.bin", sha256="a" * 64, size=1),),
     )
-    (staged / "manifest.json").write_text(json.dumps(manifest.to_dict()))
+    (staged / "manifest.json").write_text(json.dumps(manifest.to_dict()), encoding="utf-8")
     archive = tmp_path / "incomplete.tar.gz"
     with tarfile.open(archive, "w:gz") as tar:
         tar.add(staged, arcname="grimoire-embedding-bundle")
@@ -230,7 +230,7 @@ def test_install_rejects_traversal_path_in_manifest(tmp_path: Path) -> None:
         dim=None,
         files=(mod.BundleFile(path="../../etc/passwd", sha256="b" * 64, size=1),),
     )
-    (staged / "manifest.json").write_text(json.dumps(manifest.to_dict()))
+    (staged / "manifest.json").write_text(json.dumps(manifest.to_dict()), encoding="utf-8")
     archive = tmp_path / "evil.tar.gz"
     with tarfile.open(archive, "w:gz") as tar:
         tar.add(staged, arcname="grimoire-embedding-bundle")
@@ -242,7 +242,7 @@ def test_install_rejects_traversal_path_in_manifest(tmp_path: Path) -> None:
 def test_install_rejects_archive_without_expected_root(tmp_path: Path) -> None:
     stray = tmp_path / "stray"
     stray.mkdir()
-    (stray / "file.txt").write_text("x")
+    (stray / "file.txt").write_text("x", encoding="utf-8")
     archive = tmp_path / "stray.tar.gz"
     with tarfile.open(archive, "w:gz") as tar:
         tar.add(stray, arcname="somewhere-else")
@@ -254,7 +254,7 @@ def test_install_rejects_archive_without_expected_root(tmp_path: Path) -> None:
 def test_install_rejects_unknown_schema(tmp_path: Path) -> None:
     staged = tmp_path / "grimoire-embedding-bundle"
     (staged / "model").mkdir(parents=True)
-    (staged / "manifest.json").write_text(json.dumps({"schema": "something/9", "model": "x", "files": []}))
+    (staged / "manifest.json").write_text(json.dumps({"schema": "something/9", "model": "x", "files": []}), encoding="utf-8")
     archive = tmp_path / "future.tar.gz"
     with tarfile.open(archive, "w:gz") as tar:
         tar.add(staged, arcname="grimoire-embedding-bundle")
@@ -326,7 +326,7 @@ def test_verify_accepts_the_bundle_root_too(tmp_path: Path, bundle_archive: Path
 
 def test_verify_detects_corruption_after_install(tmp_path: Path, bundle_archive: Path) -> None:
     installed = install_bundle(bundle_archive, dest_root=tmp_path / "cache")
-    (installed.model_dir / "tokenizer.json").write_text('{"vocab": ["tampered"]}')
+    (installed.model_dir / "tokenizer.json").write_text('{"vocab": ["tampered"]}', encoding="utf-8")
     report = verify_bundle(installed.model_dir, embed=False)
 
     assert not report.ok
@@ -346,7 +346,7 @@ def test_verify_skips_embed_when_digests_already_broken(
     tmp_path: Path, bundle_archive: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     installed = install_bundle(bundle_archive, dest_root=tmp_path / "cache")
-    (installed.model_dir / "tokenizer.json").write_text("tampered")
+    (installed.model_dir / "tokenizer.json").write_text("tampered", encoding="utf-8")
 
     called = False
 
@@ -403,9 +403,9 @@ def test_configure_project_preserves_comments(tmp_path: Path) -> None:
         '  name: "Demo"          # inline comment\n'
         "memory:\n"
         "  backend: auto         # keep me\n",
-    )
+    encoding="utf-8",)
     mod.configure_project(config, tmp_path / "models" / "acme" / "model")
-    text = config.read_text()
+    text = config.read_text(encoding="utf-8")
 
     assert "# Grimoire project context" in text
     assert "# keep me" in text
@@ -416,9 +416,9 @@ def test_configure_project_preserves_comments(tmp_path: Path) -> None:
 
 def test_configure_project_creates_memory_section(tmp_path: Path) -> None:
     config = tmp_path / "project-context.yaml"
-    config.write_text("project:\n  name: Demo\n")
+    config.write_text("project:\n  name: Demo\n", encoding="utf-8")
     mod.configure_project(config, tmp_path / "m")
-    assert "embedding_model:" in config.read_text()
+    assert "embedding_model:" in config.read_text(encoding="utf-8")
 
 
 def test_configure_project_rejects_missing_file(tmp_path: Path) -> None:
@@ -428,6 +428,6 @@ def test_configure_project_rejects_missing_file(tmp_path: Path) -> None:
 
 def test_configure_project_rejects_empty_file(tmp_path: Path) -> None:
     config = tmp_path / "project-context.yaml"
-    config.write_text("")
+    config.write_text("", encoding="utf-8")
     with pytest.raises(BundleError, match="empty"):
         mod.configure_project(config, tmp_path / "m")

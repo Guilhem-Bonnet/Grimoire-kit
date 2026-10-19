@@ -129,14 +129,14 @@ class TestExtractAgentName:
 
 class TestFindExistingAgents:
     def test_finds_agents(self, root: Path) -> None:
-        (root / "_grimoire/_config/agents/analyst.md").write_text("# Analyst")
-        (root / "_grimoire/core/agents/dev.md").write_text("# Dev")
+        (root / "_grimoire/_config/agents/analyst.md").write_text("# Analyst", encoding="utf-8")
+        (root / "_grimoire/core/agents/dev.md").write_text("# Dev", encoding="utf-8")
         agents = find_existing_agents(root)
         assert "analyst" in agents
         assert "dev" in agents
 
     def test_excludes_templates(self, root: Path) -> None:
-        (root / "_grimoire/_config/agents/template-base.md").write_text("tpl")
+        (root / "_grimoire/_config/agents/template-base.md").write_text("tpl", encoding="utf-8")
         agents = find_existing_agents(root)
         assert "template-base" not in agents
 
@@ -202,7 +202,7 @@ class TestAgentForgeTool:
         assert proposal.domain_key == "custom"
 
     def test_run_detects_overlap(self, root: Path) -> None:
-        (root / "_grimoire/_config/agents/database-admin.md").write_text("# DB Admin")
+        (root / "_grimoire/_config/agents/database-admin.md").write_text("# DB Admin", encoding="utf-8")
         forge = AgentForge(root)
         proposal = forge.run(description="Handle database operations and migrations")
         assert len(proposal.overlap) > 0

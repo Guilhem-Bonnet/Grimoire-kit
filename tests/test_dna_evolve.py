@@ -55,8 +55,8 @@ class TestParseDna(unittest.TestCase):
             "  - id: no-manual-changes\n"
             "    enforcement: hard\n"
             "values:\n"
-            "  - name: automation-first\n"
-        )
+            "  - name: automation-first\n",
+        encoding="utf-8",)
         snap = self.evolve.parse_dna(f)
         self.assertEqual(snap.archetype_id, "infra-ops")
         self.assertEqual(snap.version, "2.0.0")
@@ -74,14 +74,14 @@ class TestParseDna(unittest.TestCase):
 
     def test_empty_dna(self):
         f = self.tmpdir / "empty.dna.yaml"
-        f.write_text("# Empty DNA\n")
+        f.write_text("# Empty DNA\n", encoding="utf-8")
         snap = self.evolve.parse_dna(f)
         self.assertEqual(snap.archetype_id, "unknown")
 
     def test_preserves_raw_content(self):
         f = self.tmpdir / "test.dna.yaml"
         content = "id: test\nversion: '1.0'\n"
-        f.write_text(content)
+        f.write_text(content, encoding="utf-8")
         snap = self.evolve.parse_dna(f)
         self.assertEqual(snap.raw_content, content)
 
@@ -103,8 +103,8 @@ class TestAnalyzeTrace(unittest.TestCase):
             "Running terraform plan\n"
             "Running docker build\n"
             "Running docker push\n"
-            "terraform apply complete\n"
-        )
+            "terraform apply complete\n",
+        encoding="utf-8",)
         tools, _patterns = self.evolve.analyze_trace(f)
         self.assertIn("terraform", tools)
         self.assertIn("docker", tools)
@@ -118,14 +118,14 @@ class TestAnalyzeTrace(unittest.TestCase):
         for i in range(5):
             lines.append(f"## 2026-01-{i+1:02d} | dev | S1\n")
             lines.append(f"[CHECKPOINT] checkpoint_id: ckpt-00{i}\n")
-        f.write_text("".join(lines))
+        f.write_text("".join(lines), encoding="utf-8")
         _tools, patterns = self.evolve.analyze_trace(f)
         pat_ids = [p.pattern_id for p in patterns]
         self.assertIn("checkpoint-heavy", pat_ids)
 
     def test_empty_trace(self):
         f = self.tmpdir / "empty.md"
-        f.write_text("")
+        f.write_text("", encoding="utf-8")
         tools, patterns = self.evolve.analyze_trace(f)
         self.assertEqual(len(tools), 0)
         self.assertEqual(len(patterns), 0)
@@ -141,8 +141,8 @@ class TestAnalyzeTrace(unittest.TestCase):
             "Running pytest old tests\n"
             "\n"
             "## 2026-06-01 | dev | new\n"
-            "Running pytest new tests\n"
-        )
+            "Running pytest new tests\n",
+        encoding="utf-8",)
         tools, _ = self.evolve.analyze_trace(f, since="2026-01-01")
         # pytest should be detected from the filtered content
         if "pytest" in tools:
@@ -175,7 +175,7 @@ class TestAnalyzeDecisionsLog(unittest.TestCase):
 
     def test_no_patterns(self):
         f = self.tmpdir / "decisions-log.md"
-        f.write_text("## 2026-01-01\n| Agent | Decision |\n| dev | Did something |\n")
+        f.write_text("## 2026-01-01\n| Agent | Decision |\n| dev | Did something |\n", encoding="utf-8")
         patterns = self.evolve.analyze_decisions_log(f)
         self.assertEqual(len(patterns), 0)
 
@@ -201,8 +201,8 @@ class TestAnalyzeLearnings(unittest.TestCase):
             "# Dev Learnings\n"
             "- outil manquant: besoin de jq\n"
             "- tool not found error with yq\n"
-            "- besoin tool manquant helm\n"
-        )
+            "- besoin tool manquant helm\n",
+        encoding="utf-8",)
         patterns = self.evolve.analyze_learnings(mem)
         pat_ids = [p.pattern_id for p in patterns]
         self.assertIn("missing-tool", pat_ids)
@@ -211,8 +211,8 @@ class TestAnalyzeLearnings(unittest.TestCase):
         mem = self.tmpdir / "memory"
         mem.mkdir()
         (mem / "agent-learnings-dev.md").write_text(
-            "# Dev Learnings\n- Everything works great\n"
-        )
+            "# Dev Learnings\n- Everything works great\n",
+        encoding="utf-8",)
         patterns = self.evolve.analyze_learnings(mem)
         self.assertEqual(len(patterns), 0)
 

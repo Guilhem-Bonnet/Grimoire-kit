@@ -283,13 +283,13 @@ class TestPersistence:
 
     def test_corrupt_file(self, tmp_path: Path) -> None:
         f = tmp_path / "bad.json"
-        f.write_text("not valid json{{{")
+        f.write_text("not valid json{{{", encoding="utf-8")
         b = LocalMemoryBackend(f)
         assert b.count() == 0  # graceful recovery
 
     def test_empty_file(self, tmp_path: Path) -> None:
         f = tmp_path / "empty.json"
-        f.write_text("")
+        f.write_text("", encoding="utf-8")
         b = LocalMemoryBackend(f)
         assert b.count() == 0
 
