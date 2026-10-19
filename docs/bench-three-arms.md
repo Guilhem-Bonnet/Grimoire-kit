@@ -585,3 +585,113 @@ python scripts/bench/human_gates.py --workspace <workspace du banc> [--arm kit-g
 Limites : les marques de refus sont des sous-chaînes des textes actuels du kit et d'AI-DLC 2.11.0 lus dans leurs sources, pas observées
 dans une transcription d'AI-DLC (B-06) ; une question posée par un widget (`AskUserQuestion`) sans ligne de journal n'est pas vue ; la
 déclaration `AIDLC_UNATTENDED=1` faite au lancement n'est pas dans les traces du bras, le protocole d'équité de B-06 doit la compter à part.
+
+## 15. Bras `aidlc` : AI-DLC 2.11.0, scope express, HOME isolé (B-06)
+
+Le troisième bras du protocole comparatif (plan « Dépasser AI-DLC », section 6) : AI-DLC 2.11.0 sur les mêmes tâches que `nu` et `kit-gov`.
+Code : `scripts/bench/aidlc_arm.py`. Tests : `tests/unit/test_bench_aidlc_arm.py`. Aucun run réel n'a été lancé par ce chantier.
+
+### 15.1 Configuration épinglée
+
+| Élément | Valeur | Source (clone `awslabs/aidlc-workflows`, tag `v2.11.0`) |
+|---|---|---|
+| Version | `2.11.0`, commit `6a378b53c0a4fe0641ed7d8de8dfff94264d5b6a`, vérifié par `git rev-parse` avant tout travail | `CHANGELOG.md:4` |
+| Installation | installeur du tag, `install.sh --version 2.11.0 --yes --quiet`, sous `homes/aidlc` : `AIDLC_BIN_DIR`, `AIDLC_INSTALL_ROOT` et `XDG_DATA_HOME` pointent dans ce `HOME` | `docs/guide/18-install-and-lifecycle.md:191-198`, `:224` |
+| Projet | `aidlc config --harness claude --mcp none --yes`, dans chaque dépôt de tâche ; un `.claude/settings.json` sans hooks arrête le run avant tout appel | `docs/guide/18-install-and-lifecycle.md:418-433` |
+| Modèle | aucune politique de modèle : les agents héritent du modèle de session, celui de `--model` (B-01). `express` n'a pas de relecteur, seul agent à tier propre | `docs/guide/18-install-and-lifecycle.md:462` |
+| Scope | `express` (10 stages sur 33) : relecture `none`, Guard Policy, capteurs, apprentissages, confirmation de résumé et approbation du plan `off`. `bugfix` (9 stages) reste disponible | `core/scopes/aidlc-express.md`, `core/scopes/aidlc-bugfix.md`, `docs/guide/workflow-profiles.md:25`, `:30` |
+| Premier message | `/aidlc express ` suivi de la consigne des autres bras (`BUILD_PROMPT_TEMPLATE`) | `harness/claude/skills/aidlc/SKILL.md` (boucle de transfert) |
+| Jamais `--bare` | le mode `--bare` ignore hooks et skills du projet, donc AI-DLC entier ; le bras le refuse même en `--auth api-key` (`ANTHROPIC_API_KEY` l'emporte de toute façon, §3.1) | §3.1 |
+| Timeout, boucle | 3600 s par run (toutes reprises comprises), seuil de boucle à 8 commandes identiques (le conducteur relance `orchestrate next` par construction) | constantes `DEFAULT_RUN_TIMEOUT_S`, `LOOP_REPEAT_THRESHOLD` |
+
+`express` plutôt que `bugfix` : un exercice polyglotte part d'un fichier de départ à compléter, pas d'un défaut connu. `bugfix` déclare `existing_code: true`
+et garde l'approbation du plan et les capteurs ; `express` est le scope qu'AI-DLC recommande pour « a small change or a quick end-to-end try »
+(`docs/guide/facilitator-guide.md:130`).
+
+Effet assumé : `express` est aussi le scope le moins coûteux d'AI-DLC, donc le plus favorable à AI-DLC sur le critère V2 (coût). Le choix est pré-enregistré.
+
+### 15.2 Équité : deux pilotes, un seul pré-enregistré
+
+AI-DLC ne documente pas de mode sans humain qui lève ses gates. `AIDLC_UNATTENDED=1` est le mode prévu pour un pilote sans personne présente,
+et il **retient** l'autorité humaine : aucun `HUMAN_TURN` n'est émis, donc aucun gate d'approbation ne se lève (`CHANGELOG.md:129`, `:281-284`,
+`core/knowledge/aidlc-shared/audit-format.md:86`). Le mode autonome (`AUTONOMY_MODE_SET`) ne couvre que les checkpoints de Construction après le
+squelette, absent d'`express` (`docs/guide/glossary.md:11`). Les tests de bout en bout d'AI-DLC jouent la personne par un script séparé de l'agent
+(`tests/harness/scope-run.ts:1-14`, `PersonScript`). D'où deux pilotes, au choix de `--driver` :
+
+| Pilote | Ce qu'il fait | Interventions comptées |
+|---|---|---|
+| `unattended` (mode documenté) | un seul `claude -p` avec `AIDLC_UNATTENDED=1` ; personne ne répond | les gates du journal d'audit (B-05), plus 1 déclarée par run (`declared_interventions`, l'activation du mode sans humain, que les traces ne portent pas : limite de B-05) |
+| `scripted-person` (configuration spéciale, déclarée) | `AIDLC_UNATTENDED` retiré ; à chaque fin de tour sans `WORKFLOW_COMPLETED` dans `audit/*.md`, la même session est reprise (`claude -p --resume <session_id>`) avec la réponse fixe `Approved.`, au plus 12 fois | chaque `STAGE_AWAITING_APPROVAL` et chaque question du journal d'audit, par `human_gates.py` (B-05) ; `person_replies` noté à part |
+
+Attendu, non vérifié : en `unattended`, le run s'arrête au premier gate (Requirements Analysis) sans code, donc échoue. C'est un résultat honnête du mode
+documenté, mais il ne dit rien de la qualité d'AI-DLC. Le pilote `scripted-person` est ce qui rend la comparaison informative ; il donne à AI-DLC une
+personne qui approuve tout, ce qu'aucun bras du kit ne reçoit. Le rapport doit le dire.
+
+### 15.3 Garde-fous avant toute dépense
+
+- **Pré-enregistrement** : `--dry-run` écrit `state/aidlc-preregistration.json` (configuration complète et son empreinte sha256) ;
+  `--run` refuse de partir (code 2) sans ce fichier ou si la configuration diffère (pilote, scope, modèle, tâches, k, timeout).
+- **Plafond explicite** : `--run` sans `--max-total-usd` (ou avec un montant nul, négatif, non fini, non numérique) est refusé par l'analyseur
+  d'arguments avant tout travail, réseau ou disque.
+- **Cumul fermé par défaut** : `state/aidlc-budget.jsonl` reçoit une ligne `begin` avant chaque appel `claude -p` (reprises comprises) et une ligne
+  `end` après. Avant chaque appel, le cumul connu est comparé au plafond : atteint, l'appel n'est pas lancé et la campagne s'arrête (code 3).
+  Un `end` sans coût, un `begin` sans `end` (processus tué), une ligne illisible valent *inconnu* : jamais 0, et tout appel suivant est refusé.
+  Une campagne relancée relit ce journal : elle repart du cumul, pas de zéro.
+- **Limite** : le plafond est vérifié entre deux appels, pas pendant. Un appel peut le dépasser d'au plus son propre coût (borne : le timeout du run).
+- **Sorties** : `results.jsonl` (une ligne `RunRecord`, `arm: "aidlc"`, coût = somme des appels connus, `cost_known` faux dès qu'un appel est inconnu),
+  `aidlc-runs.jsonl` (pilote, réponses jouées, interventions déclarées, détail par appel, état du budget). Utiliser un workspace propre au bras :
+  `build_report` de `three_arms.py` n'agrège pas encore `aidlc`, et des lignes mêlées casseraient le sceau de B-02.
+
+```bash
+# 0 $ : pré-enregistrement, dépôts, installation d'AI-DLC sous HOME isolé, commandes prévues, couverture du plafond
+python scripts/bench/aidlc_arm.py --dry-run --driver scripted-person --aidlc-clone <clone aidlc-workflows> \
+    --workspace <workspace neuf> --model <identifiant> --max-total-usd <plafond>
+# Estimation seule, sans réseau
+python scripts/bench/aidlc_arm.py --estimate --n 20,99,393
+# Payant, après décision du plafond par Guilhem (décision 5 du plan)
+python scripts/bench/aidlc_arm.py --run --driver scripted-person --aidlc-clone <clone> --workspace <même workspace> \
+    --model <identifiant> --max-total-usd <plafond> --auth oauth-copy
+```
+
+### 15.4 Estimation chiffrée (aucune mesure AI-DLC)
+
+**Mesuré** (lot L, Opus 5.5, 20 tâches, k=3) : `nu` 10,15 $ pour 60 runs, `kit-gov` 12,69 $ (`docs/bench/rejeu-lot-l-2026-10-02.md:17`), soit 0,169 $
+et 0,212 $ par run en moyenne, 0,159 $ et 0,198 $ en médiane par tâche résolue (`:55-56`), 3 tours médians (`:55-56`). Tarif implicite de `claude -p`,
+ajusté sur le `modelUsage` des 120 runs (données brutes hors dépôt, résidu < 1e-14) : 4 $ par million de jetons en entrée, 20 $ en sortie,
+0,20 $ en lecture de cache, 8 $ en écriture de cache. Un run `nu` médian : 86 k jetons lus en cache, 12,8 k écrits, 1,8 k en sortie.
+
+**Structure d'AI-DLC express** (tag `v2.11.0`) : 10 stages, dont 3 d'initialisation sans gate et 4 CONDITIONAL (Reverse Engineering, queue Operation) ;
+Code Generation en mode `subagent` (`core/aidlc-common/stages/construction/code-generation.md`, front-matter). Volume d'instructions : la skill du
+conducteur fait 87 669 octets (`harness/claude/skills/aidlc/SKILL.md`), le protocole de stage 103 313 (`core/aidlc-common/protocols/stage-protocol.md`),
+le protocole de Construction 90 325, les 10 fichiers de stage 117 842 au total (Reverse Engineering 27 590, Code Generation 32 139). Quelle part
+entre réellement dans le contexte n'est pas mesuré : depuis 2.11.0, une étape « nomme les règles que la conversation porte déjà au lieu de les renvoyer »
+(`CHANGELOG.md:4`, puce « Long runs carry less »).
+
+Modèle de coût (`RunScenario.cost_usd`) : lectures de cache = appels × contexte moyen, plus écritures de cache, plus sortie, au tarif ci-dessus.
+
+| Hypothèse | Appels (principal + sous-agent) | Contexte de départ → final | Écrit en cache | Sortie | Coût d'un run |
+|---|---|---|---|---|---:|
+| `scripted-person`, bas | 35 + 10 | 55 k → 100 k | 130 k | 23 k | **2,13 $** |
+| `scripted-person`, haut | 90 + 30 | 60 k → 200 k | 380 k | 95 k | **7,70 $** |
+| `unattended`, bas (arrêt au premier gate) | 15 | 55 k → 85 k | 60 k | 6 k | 0,81 $ |
+| `unattended`, haut | 25 | 55 k → 110 k | 90 k | 10 k | 1,33 $ |
+
+Un run `aidlc` coûterait donc de 13 à 48 fois un run `nu`. Protocole complet, trois bras (`nu`, `kit-gov`, `aidlc`), k=3, pilote `scripted-person`,
+`nu` et `kit-gov` au coût moyen mesuré :
+
+| Tâches par bras | Ce que la taille permet (§13, pire cas) | Runs `aidlc` | `aidlc` | `nu` + `kit-gov` | Total |
+|---:|---|---:|---:|---:|---:|
+| 20 (banc actuel) | MDE de 44 points | 60 | 128 – 462 $ | 22,84 $ | **151 – 485 $** |
+| 99 | MDE de 20 points | 297 | 633 – 2 287 $ | 113 $ | **746 – 2 400 $** |
+| 393 (n requis par B-02) | MDE de 10 points | 1 179 | 2 514 – 9 078 $ | 449 $ | **2 963 – 9 527 $** |
+
+Hypothèses : modèle Opus 5.5 au tarif du lot L ; pas de compaction (fenêtre de 1 M) ; cache d'une heure tenu entre deux reprises ; tâches de la difficulté
+du lot L. Le protocole demande des tâches plus dures (où le `nu` échoue ou varie, multi-fichiers) : les trois bras coûteraient plus, d'un facteur non mesuré.
+393 tâches par bras n'existent pas dans le polyglotte (§13).
+
+**Non mesurable sans dépense** : le nombre réel d'appels et de reprises d'un run AI-DLC ; la part des 400 ko d'instructions qui entre dans le contexte ;
+si un gate se lève sous `claude -p` (hooks de projet chargés, `HUMAN_TURN` émis par une reprise) ; si `--resume` rend un `total_cost_usd` propre à l'appel
+ou cumulé sur la session (le bras somme les appels, ce qui surcompterait dans le second cas) ; le temps mur ; le coût de `kit-gov` sous octroi W5-06.
+
+**Ce qui lève ces inconnues au moindre coût** : un `--dry-run` complet (0 $, installe et configure réellement AI-DLC), puis un pilote d'une tâche par
+pilote, k=1, sous un plafond qui couvre deux runs à l'hypothèse haute (environ 16 $). Le plafond reste la décision de Guilhem (décision 5).

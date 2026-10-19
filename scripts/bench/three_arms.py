@@ -1559,6 +1559,9 @@ def run_claude_headless(
     log_path: Path | None = None,
     auth_mode: str = "oauth-copy",
     model: str | None = None,
+    extra_args: Sequence[str] = (),
+    append_log: bool = False,
+    bare: bool | None = None,
 ) -> RunOutcome:
     """Lance ``claude -p`` en tête sans tête, avec garde-fou timeout + boucle.
 
@@ -1582,6 +1585,8 @@ def run_claude_headless(
     ``ANTHROPIC_API_KEY`` (ou un ``apiKeyHelper``) — déjà présente dans
     *env* puisque :func:`run_environment` part de ``os.environ``. Aucun
     identifiant n'est donc jamais copié pour ce mode (voir ``_run_one``).
+    B-06 (``aidlc_arm.py``) : *extra_args* (``--resume``) ajouté à la commande, *append_log* n'écrase pas le journal et
+    seules les lignes de CET appel comptent, *bare* force ou interdit ``--bare`` (``None`` : déduit de *auth_mode*).
     """
     log_path = log_path or (task_dir.parent / f"{task_dir.name}.stream.jsonl")
     effective_env = dict(env) if env is not None else {**os.environ, "HOME": str(home)}
@@ -1597,19 +1602,21 @@ def run_claude_headless(
         "--setting-sources",
         "project,local",
     ]
-    if auth_mode == "api-key":
+    if (auth_mode == "api-key") if bare is None else bare:
         cmd.append("--bare")
     if model:
         # B-01 : sans ``--model`` le modèle est celui par défaut de l'outil, qui change d'une version à l'autre.
         cmd.extend(["--model", model])
+    cmd.extend(extra_args)
 
     outcome = RunOutcome()
     start = time.monotonic()
     seen_commands: list[str] = []
+    start_offset = log_path.stat().st_size if append_log and log_path.is_file() else 0
 
-    with open(log_path, "wb") as logf:
+    with open(log_path, "ab" if append_log else "wb") as logf:
         proc = subprocess.Popen(cmd, cwd=task_dir, env=effective_env, stdout=logf, stderr=subprocess.STDOUT)
-        last_pos = 0
+        last_pos = start_offset
         while True:
             returncode = proc.poll()
             elapsed = time.monotonic() - start
@@ -1644,7 +1651,9 @@ def run_claude_headless(
     outcome.toolchain_friction_bash_calls = count_toolchain_friction_bash_calls(seen_commands)
 
     try:
-        lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        with open(log_path, "rb") as f:
+            f.seek(start_offset)
+            lines = f.read().decode("utf-8", errors="replace").splitlines()
     except OSError:
         lines = []
     result = parse_result_event(lines)
