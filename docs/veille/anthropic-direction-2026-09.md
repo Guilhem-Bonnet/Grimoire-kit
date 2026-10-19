@@ -6,7 +6,7 @@ audience: décision
 
 # <img src="../assets/icons/microscope.svg" width="32" height="32" alt=""> Direction d'Anthropic — chevaucher / envelopper / ignorer (2026-09)
 
-> Lot 1.2 du [plan produit 2026-Q4](../plan-2026-q4.md#phase-1--veille-en-un-bloc--banc-à-trois-bras-issue-551),
+> Lot 1.2 du [plan produit 2026-Q4](../_archive/plan-2026-q4.md#phase-1--veille-en-un-bloc--banc-à-trois-bras-issue-551),
 > issue [#551](https://github.com/Guilhem-Bonnet/Grimoire-kit/issues/551).
 > Sources lues le 2026-09-16 (documentation officielle Anthropic/Claude Code,
 > voir liste en bas de page). Étiquettes de provenance identiques à
@@ -16,7 +16,7 @@ audience: décision
 >
 > Segment jugé : couches agentiques pour développeurs sur un hôte (Claude
 > Code, Copilot, Cursor, Codex, Gemini) — pas l'ensemble de l'écosystème
-> agentique. Colonne « lot » = lot du [plan 2026-Q4](../plan-2026-q4.md) qui
+> agentique. Colonne « lot » = lot du [plan 2026-Q4](../_archive/plan-2026-q4.md) qui
 > absorbe le verdict, ou « à créer » si aucun lot existant ne le couvre.
 
 <img src="../assets/divider.svg" width="100%" alt="">
