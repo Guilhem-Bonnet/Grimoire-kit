@@ -26,6 +26,7 @@ from grimoire.core import layout
 from grimoire.core.archetype_resolver import ResolvedArchetype
 from grimoire.core.expertises import _safe_skill_source
 from grimoire.core.scanner import ScanResult
+from grimoire.core.stack_skills import detected_stack_skill_slugs
 from grimoire.core.standard_generation import GITIGNORE_MARKER, GITIGNORE_SECTION
 from grimoire.data import framework_path
 from grimoire.hosts.detection import detect_enabled_hosts
@@ -576,62 +577,9 @@ class ProjectScaffolder:
         "cicd": ("pipeline-architect", "deploy-orchestrator"),
     }
 
-    # `archetypes/stack/skills/stack-*.md` used to attach in block to
-    # `stack-engineer` regardless of what the project actually uses (issue
-    # #375's own defect, found while building the on-demand expertise
-    # catalogue of issue #616): a bare Python project selecting the `stack`
-    # archetype paid for six skills it never touches, transversal at project
-    # scope the moment they were not all referenced by name in the agent's
-    # `skills:` frontmatter. Keyed by `grimoire.core.scanner.StackScanner`'s
-    # own detection names (issue #616 reuses that scanner rather than
-    # inventing a second one) — `"kubernetes"` is the one name that does not
-    # match its skill slug (`stack-k8s`, not `stack-kubernetes`).
-    _STACK_SKILL_BY_DETECTION: ClassVar[dict[str, str]] = {
-        "python": "stack-python",
-        "go": "stack-go",
-        "typescript": "stack-typescript",
-        "docker": "stack-docker",
-        "terraform": "stack-terraform",
-        "ansible": "stack-ansible",
-        "kubernetes": "stack-k8s",
-    }
-
     def _detected_stack_skill_slugs(self) -> tuple[str, ...]:
-        """Slugs of ``archetypes/stack/skills/stack-*.md`` this project's own
-        detection (``self._scan``) actually warrants attaching by default.
-
-        Anything not detected here is never lost — its body lives in the kit
-        package (not only in a project's own copy), so ``grimoire expertise
-        add <id>`` (:mod:`grimoire.core.expertises`) can attach it later, on
-        request, the same on-demand mechanism issue #616 gives every other
-        language, pattern and cloud provider. Order follows the mapping
-        above (deterministic, not scan order) so the rendered ``skills:``
-        list is stable across runs on the same project.
-
-        ``grimoire up`` builds its scaffolder with ``scan=None`` (it refreshes
-        the kit tier without re-detecting the stack — three call sites in
-        ``cmd_up.py``, none of them this issue's to change). Recomputing from
-        an absent scan would read as "nothing detected" and silently regress
-        an already-installed project's kit-tier default to an empty list on
-        every update. When there is no scan to detect from, this keeps
-        whatever the project's own kit-tier ``stack-engineer.md`` already
-        declares instead of recomputing — refresh never narrows a selection
-        it didn't itself re-derive.
-        """
-        if self._scan is not None:
-            detected = {d.name for d in self._scan.stacks}
-            return tuple(
-                slug for name, slug in self._STACK_SKILL_BY_DETECTION.items() if name in detected
-            )
-        existing = self._agents_dir() / "stack-engineer.md"
-        if not existing.is_file():
-            return ()
-        from grimoire.hosts.collect import parse_frontmatter
-
-        meta, _ = parse_frontmatter(existing.read_text(encoding="utf-8"))
-        # `_safe_skill_source` (tout consommateur) revalide forme + confine le chemin (CodeQL 599/600).
-        known_slugs = set(self._STACK_SKILL_BY_DETECTION.values())
-        return tuple(str(s) for s in (meta.get("skills") or []) if str(s) in known_slugs)
+        """Stack skills this project's detection warrants (see :mod:`grimoire.core.stack_skills`)."""
+        return detected_stack_skill_slugs(self._scan, self._agents_dir())
 
     def _archetype_render_vars(self, planned_agents: dict[str, str]) -> dict[str, str]:
         """Resolve the install-time placeholders for this project.
