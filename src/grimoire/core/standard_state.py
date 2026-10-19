@@ -24,6 +24,8 @@ from grimoire.bridges.schemas import HostId
 # le chemin des hooks, à chaque appel d'outil, et importer le moteur du standard
 # pour lire deux chemins et un identifiant coûtait 48 ms par appel.
 from grimoire.core.standard_generation import (
+    PROFILE_FLOOR_FILE,
+    PROFILE_LADDER,
     STANDARD_DIR,
     STANDARD_PROFILE_FILE,
     normalize_task_id,
@@ -215,15 +217,8 @@ def is_standard_enrolled(project_root: Path) -> bool:
     return (root / STANDARD_PROFILE_FILE).is_file() or (root / TASK_BOARD_RELPATH).is_file()
 
 
-def active_profile_id(project_root: Path, *, write_cache: bool = True) -> str:
-    """Profile a project is enrolled in, ``starter`` when it declares none.
-
-    *write_cache* defaults to ``True`` — the lifecycle hook path (and the CLI)
-    both want the derived JSON cache written back so the *next* call is
-    cheap. A caller that has promised no side effects at all (an MCP tool
-    annotated ``readOnlyHint``) passes ``False``: it still benefits from a
-    cache another caller warmed, it just never creates or repairs one itself.
-    """
+def declared_profile_id(project_root: Path, *, write_cache: bool = True) -> str:
+    """Le profil que ``standard-profile.yaml`` déclare, ``starter`` à défaut — plancher non appliqué."""
     root = project_root.resolve()
 
     def compute() -> str:
@@ -231,6 +226,53 @@ def active_profile_id(project_root: Path, *, write_cache: bool = True) -> str:
         return str(profile) if profile else "starter"
 
     return str(_cached_or_fresh(root, "profile_id", STANDARD_PROFILE_FILE, compute, write_cache=write_cache))
+
+
+def profile_floor_id(project_root: Path, *, write_cache: bool = True) -> str:
+    """Le plancher committé (``profile-floor.yaml``, clé ``floor``), ``""`` sans fichier (W2-07).
+
+    Un fichier présent dont la valeur n'est pas un profil connu (YAML cassé,
+    clé absente, faute de frappe) vaut ``governed`` : un plancher qu'on ne sait
+    pas lire ne doit pas se lire comme « pas de plancher » (fail-closed).
+
+    Relu à chaque appel, jamais mis en cache : l'empreinte mtime+taille du cache
+    se recopie, et un ``Write`` du cache suffisait à effacer un plancher qui
+    promettait de tenir face aux écritures. Le fichier est petit ; le coût est un
+    ``stat`` quand il est absent et un parse YAML quand il est là (non mesuré).
+    *write_cache* est conservé pour la symétrie des signatures et n'a plus d'effet.
+    """
+    del write_cache
+    path = project_root.resolve() / PROFILE_FLOOR_FILE
+    if not path.is_file():
+        return ""
+    floor = _load_mapping(path).get("floor")
+    return str(floor) if isinstance(floor, str) and floor in PROFILE_LADDER else "governed"
+
+
+def profile_below_floor(declared: str, floor: str) -> bool:
+    """Vrai quand *floor* existe et que *declared* est strictement plus léger (ou inconnu)."""
+    if not floor:
+        return False
+    rank = PROFILE_LADDER.index(declared) if declared in PROFILE_LADDER else -1
+    return rank < PROFILE_LADDER.index(floor)
+
+
+def active_profile_id(project_root: Path, *, write_cache: bool = True) -> str:
+    """Profile a project is enrolled in, ``starter`` when it declares none.
+
+    Le plancher committé (:func:`profile_floor_id`, W2-07) s'applique ici : un
+    profil déclaré sous le plancher est ignoré, le plancher le remplace. Tous
+    les lecteurs (hooks, CLI, MCP, cockpit) voient donc le même profil.
+
+    *write_cache* defaults to ``True`` — the lifecycle hook path (and the CLI)
+    both want the derived JSON cache written back so the *next* call is
+    cheap. A caller that has promised no side effects at all (an MCP tool
+    annotated ``readOnlyHint``) passes ``False``: it still benefits from a
+    cache another caller warmed, it just never creates or repairs one itself.
+    """
+    declared = declared_profile_id(project_root, write_cache=write_cache)
+    floor = profile_floor_id(project_root, write_cache=write_cache)
+    return floor if profile_below_floor(declared, floor) else declared
 
 
 #: Le Mission Ledger, source des tâches (ADR-005). Lu ici sans importer le
@@ -276,11 +318,17 @@ class ActiveTask:
     ``ambiguous`` (plusieurs claims, aucun rattaché à cette session : la tâche
     reste ``bootstrap`` mais *candidates* nomme les claims en concurrence, pour
     que le message dise lesquels au lieu de « aucune tâche »).
+
+    *expired* (issue #710) : les claims dont le bail est dépassé et qui
+    auraient sinon désigné la tâche — rattachés à cette session, ou sans
+    session. Ils ne désignent plus rien ; ils sont nommés pour que le message
+    dise « claim expiré » plutôt que « aucune tâche ».
     """
 
     task_id: str
     source: str
     candidates: tuple[str, ...] = ()
+    expired: tuple[str, ...] = ()
 
     @property
     def is_fallback(self) -> bool:
@@ -328,10 +376,13 @@ class _Claim(NamedTuple):
     actor: str
     #: ISO 8601 du dernier ``task attach`` explicite, ``""`` sinon (issue #695).
     explicit_at: str
+    #: Bail dépassé (:meth:`TaskClaim.is_expired`, issue #710) : le claim ne
+    #: désigne plus aucune tâche, il n'est plus lu que pour le dire.
+    expired: bool = False
 
 
-def _active_claims(project_root: Path, *, actor: str = "") -> list[_Claim]:
-    """Les claims ``claimed``/``running`` — ``session_id`` vide si non rattaché.
+def _held_claims(project_root: Path, *, actor: str = "") -> list[_Claim]:
+    """Les claims ``claimed``/``running``, expirés compris — ``session_id`` vide si non rattaché.
 
     Ne lève jamais : un ledger illisible vaut « aucun claim ».
     """
@@ -349,10 +400,20 @@ def _active_claims(project_root: Path, *, actor: str = "") -> list[_Claim]:
     if actor:
         active = [t for t in active if t.claim is not None and t.claim.actor_id == actor]
     return [
-        _Claim(t.id, t.claim.session_id, t.claim.actor_id, t.claim.attached_explicit_at)
+        _Claim(t.id, t.claim.session_id, t.claim.actor_id, t.claim.attached_explicit_at, t.claim.is_expired())
         for t in active
         if t.claim is not None
     ]
+
+
+def _active_claims(project_root: Path, *, actor: str = "") -> list[_Claim]:
+    """Les claims vivants : ``claimed``/``running`` *et* bail non expiré (issue #710).
+
+    Un claim expiré ne désigne plus la tâche de personne — ni de la session qui
+    le portait, ni d'une autre : le bail est la seule preuve que quelqu'un y
+    travaille encore. Ne lève jamais : un ledger illisible vaut « aucun claim ».
+    """
+    return [c for c in _held_claims(project_root, actor=actor) if not c.expired]
 
 
 def claimed_task_ids(project_root: Path, *, actor: str = "") -> list[str]:
@@ -413,10 +474,20 @@ def resolve_active_task(
     3. The Mission Ledger's single ``claimed``/``running`` task, restricted to
        ``GRIMOIRE_ACTOR``'s claims when that is set. The ledger is the source
        (ADR-005); a claim is visible here the moment it is written, whether or
-       not the board has been re-projected since.
+       not the board has been re-projected since. When the caller knows its
+       session, a claim attached to *another* session is never inherited
+       (issue #710): only a claim with no session yet qualifies — the one the
+       hook then attaches (:func:`grimoire.hosts.decisions.enrolment.link_session`).
+       A caller with no identifiable session (CLI outside any host) cannot
+       tell whose claim it is and keeps the single claim.
     4. The board's single ``in_progress`` task — a project whose board was
        written by hand, or imported, and has no ledger.
     5. ``bootstrap``.
+
+    Claims whose lease has expired (:meth:`TaskClaim.is_expired`, issue #710)
+    take part in none of these rules, a session's own included: the answer
+    falls back and names them in ``expired``. Hence a claim without a session
+    is retained only while its lease runs.
 
     Several claims and none attached to this session are ambiguous: the answer
     is ``bootstrap`` with source ``ambiguous`` and the competing claims in
@@ -433,8 +504,11 @@ def resolve_active_task(
 
     session = session_id.strip() or current_session_id(environ)
     actor = str(environ.get(ACTOR_ENV, "")).strip()
+    # Un seul rejeu du ledger par résolution (K13) : les claims tenus servent à la règle 2
+    # comme à la règle 3, qui les relisaient chacune en entier.
+    every_held = _held_claims(project_root)
     if session:
-        mine = [c for c in _active_claims(project_root) if c.session_id == session]
+        mine = [c for c in every_held if not c.expired and c.session_id == session]
         chosen = _claim_of_session(mine, actor)
         if chosen is not None:
             try:
@@ -442,12 +516,16 @@ def resolve_active_task(
             except ValueError:
                 pass
 
-    claims = _active_claims(project_root, actor=actor)
-    if len(claims) == 1:
+    held = [c for c in every_held if c.actor == actor] if actor else every_held
+    claims = [c for c in held if not c.expired]
+    # Issue #710 : un claim d'une autre session ne désigne jamais la tâche de
+    # celle-ci — B retombe sur bootstrap/ambiguous, jamais sur la tâche de A.
+    if len(claims) == 1 and (not session or claims[0].session_id in ("", session)):
         try:
             return ActiveTask(normalize_task_id(claims[0].task_id), "ledger_claim")
         except ValueError:
             pass
+    expired = tuple(c.task_id for c in held if c.expired and c.session_id in ("", session))
 
     root = project_root.resolve()
 
@@ -464,11 +542,17 @@ def resolve_active_task(
     in_progress = _cached_or_fresh(
         root, "board_in_progress", TASK_BOARD_RELPATH, compute, write_cache=write_cache
     )
+    # Le board projette les claims du ledger en `in_progress` : sans ce filtre,
+    # un claim expiré ou tenu par une autre session reviendrait par la règle 4.
+    disqualified = {
+        c.task_id for c in every_held if c.expired or (session and c.session_id not in ("", session))
+    }
+    in_progress = [tid for tid in in_progress if tid not in disqualified]
     if len(in_progress) == 1:
         return ActiveTask(normalize_task_id(in_progress[0]), "board")
     if len(claims) > 1:
-        return ActiveTask("bootstrap", "ambiguous", tuple(c.task_id for c in claims))
-    return ActiveTask("bootstrap", "bootstrap")
+        return ActiveTask("bootstrap", "ambiguous", tuple(c.task_id for c in claims), expired)
+    return ActiveTask("bootstrap", "bootstrap", expired=expired)
 
 
 def active_task_id(

@@ -15,7 +15,9 @@ par accident. ``dispatch_executor.DispatchExecutor.execute`` importe ce module
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
 
@@ -136,6 +138,77 @@ def _launch_child(
         output=last_output,
         cost_cap_reason=cap_why,
     )
+
+
+def _fanout_parallel(
+    executor: DispatchExecutor,
+    ref: str,
+    n_items: int,
+    *,
+    node_id: str,
+    run_id: str,
+    blueprint_id: str,
+    start_cost: Cost,
+    cap: float | None,
+    workers: int,
+) -> tuple[list[_ChildRun], Cost, bool, str | None]:
+    """Lance les ``n_items`` enfants d'un fanout, ``workers`` au plus à la fois (W5-04).
+
+    Chaque worker réserve l'élément suivant, sous verrou, puis relit le plafond
+    de coût et l'arrêt *au moment où il va démarrer* : un montant connu qui
+    atteint le plafond, un coût inconnu sous la politique ``stop`` (W1-01) ou un
+    enfant suspendu à l'hôte arrêtent tout lancement ultérieur, comme la boucle
+    séquentielle. Les enfants déjà en vol ne sont pas rétractés et leur coût
+    n'est connu qu'à leur fin : le dépassement possible est borné par
+    ``workers - 1`` enfants. Les indices sont attribués sous le même verrou que
+    la décision d'arrêt (pas par ``pool.map``) : les enfants lancés sont un
+    préfixe des éléments, dans l'ordre, et ``children[i]`` est l'élément ``i``.
+    """
+    lock = threading.Lock()
+    spent = [start_cost]
+    stop: list[str] = []
+    halted = [False]  # un enfant suspendu à l'hôte ou en erreur : plus aucun lancement
+    next_index = [0]
+    results: list[_ChildRun | None] = [None] * n_items
+
+    def worker() -> None:
+        while True:
+            with lock:
+                if halted[0] or stop or next_index[0] >= n_items:
+                    return
+                why = _cap_why(executor, spent[0], cap, siblings=False)
+                if why is not None:
+                    stop.append(why)
+                    return
+                i = next_index[0]
+                next_index[0] += 1
+            try:
+                child = _launch_child(
+                    executor,
+                    ref,
+                    node_id=node_id,
+                    run_id=run_id,
+                    blueprint_id=blueprint_id,
+                    suffix=f"fanout{i}",
+                    max_cost_usd=None,
+                    extra_context=f"Élément de fan-out {i + 1}/{n_items}. [genre_attempt_index={i}]",
+                )
+            except BaseException:
+                with lock:
+                    halted[0] = True
+                raise
+            with lock:
+                spent[0] = spent[0] + child.cost
+                results[i] = child
+                if child.status == "waiting_host":
+                    halted[0] = True
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(worker) for _ in range(workers)]
+        for fut in futures:
+            fut.result()
+    children = [c for c in results if c is not None]
+    return children, spent[0], bool(stop), (stop[0] if stop else None)
 
 
 def _child_row(index: int, child: _ChildRun) -> dict[str, Any]:
@@ -357,7 +430,33 @@ def _execute_fanout(executor: DispatchExecutor, contract: NodeContract, context_
     cap = executor._pilot_policy.max_cost_usd_per_node
     cost_capped = False
     cap_why: str | None = None
-    for i in range(len(items)):
+
+    def _waiting_host(i: int, child: _ChildRun, spent: Cost) -> NodeExecutionResult:
+        executor.host_node = node_id
+        executor.host_reason = f"fanout : élément {i} (sous-flow {child.child_run_id}) suspendu à l'hôte"
+        also = [j for j, c in enumerate(children) if c.status == "waiting_host" and j != i]
+        if also:  # W5-04 : des enfants déjà en vol ont pu se suspendre aussi, on les nomme
+            executor.host_reason += f" ; aussi suspendus : {', '.join(f'élément {j} (sous-flow {children[j].child_run_id})' for j in also)}"
+        _record_genre_outcome(executor, 
+            node_id, run_id, verifiability_label="fanout", verdict="waiting_host",
+            cost=spent, attempts=sum(c.attempts for c in children),
+            escalations=sum(c.escalations for c in children),
+        )
+        waiting = NodeExecutionResult(pending=True, extra={"dispatch_refused": "fanout_waiting_host", "node_id": node_id})
+        executor.last_result = waiting
+        return waiting
+
+    max_parallel = executor._pilot_policy.max_parallel
+    if max_parallel > 1:
+        # W5-04 : au plus ``max_parallel`` enfants actifs ; ``1`` garde la boucle séquentielle ci-dessous, à l'identique.
+        children, total_cost, cost_capped, cap_why = _fanout_parallel(
+            executor, contract.ref, len(items), node_id=node_id, run_id=run_id, blueprint_id=blueprint_id,
+            start_cost=total_cost, cap=cap, workers=min(max_parallel, len(items)),
+        )
+        waiting_at = next((i for i, c in enumerate(children) if c.status == "waiting_host"), None)
+        if waiting_at is not None:
+            return _waiting_host(waiting_at, children[waiting_at], total_cost)
+    for i in range(len(items) if max_parallel == 1 else 0):
         cap_why = _cap_why(executor, total_cost, cap, siblings=True)
         if cap_why is not None:
             cost_capped = True
@@ -374,16 +473,7 @@ def _execute_fanout(executor: DispatchExecutor, contract: NodeContract, context_
         children.append(child)
         total_cost += child.cost
         if child.status == "waiting_host":
-            executor.host_node = node_id
-            executor.host_reason = f"fanout : élément {i} (sous-flow {child.child_run_id}) suspendu à l'hôte"
-            _record_genre_outcome(executor, 
-                node_id, run_id, verifiability_label="fanout", verdict="waiting_host",
-                cost=total_cost, attempts=sum(c.attempts for c in children),
-                escalations=sum(c.escalations for c in children),
-            )
-            result = NodeExecutionResult(pending=True, extra={"dispatch_refused": "fanout_waiting_host", "node_id": node_id})
-            executor.last_result = result
-            return result
+            return _waiting_host(i, child, total_cost)
 
     attempts = sum(c.attempts for c in children)
     escalations = sum(c.escalations for c in children)
@@ -412,7 +502,13 @@ def _execute_fanout(executor: DispatchExecutor, contract: NodeContract, context_
 
 
 def _execute_verify_panel(executor: DispatchExecutor, contract: NodeContract, context_pack: dict[str, Any]) -> NodeExecutionResult:
-    """``kind: "verify-panel"`` (issue #207) : k vérificateurs indépendants, majorité requise.
+    """``kind: "verify-panel"`` (issue #207) : k vérificateurs indépendants, verdict structuré (W3-01).
+
+    Chaque vérificateur vote par ``verdict`` (``READY``/``NOT-READY``) dans sa
+    sortie ; sans verdict il s'abstient. ``config.verifyPanel.class`` (``V1`` :
+    majorité des votes exprimés ; ``V2``, le défaut : unanimité) ; trop
+    d'abstentions donnent ``inconclusive``, des ``tree_fingerprint`` divergentes
+    ``invalid`` (:func:`grimoire.missions.review_receipt.tally_panel`).
 
     k et les angles imposés (un par vérificateur, distincts) sont validés
     au chargement (:func:`grimoire.flows.blueprint_loader._validate_genre_config`).
@@ -453,6 +549,9 @@ def _execute_verify_panel(executor: DispatchExecutor, contract: NodeContract, co
             extra_context=(
                 f"Angle de vérification imposé ({i + 1}/{k}) : {angles[i]}\n"
                 "Instruction : cherche activement à réfuter, ne confirme jamais par défaut.\n"
+                "Sortie : écris dans l'objet de sortie 'verdict' : 'READY' ou 'NOT-READY' "
+                "(et 'tree_fingerprint', l'empreinte de l'arbre relu, si on te l'a donnée) ; "
+                "sans 'verdict' tu t'abstiens et ta sortie ne compte pas comme un vote.\n"
                 f"[genre_attempt_index={i}]"
             ),
         )
@@ -470,9 +569,14 @@ def _execute_verify_panel(executor: DispatchExecutor, contract: NodeContract, co
             executor.last_result = result
             return result
 
-    greens = sum(1 for c in children if c.status == "finished")
-    majority = greens > k / 2
-    verdict = "green" if majority else "red"
+    # W3-01 : un vérificateur vote par un verdict structuré (`verdict` READY/NOT-READY
+    # dans sa sortie), jamais par le seul fait d'avoir fini ; sans verdict, il s'abstient.
+    from grimoire.missions.review_receipt import tally_panel
+
+    panel_class = str(vp.get("class") or "V2")
+    tally = tally_panel([c.output if c.status == "finished" else None for c in children], panel_class)
+    greens = tally.approve
+    verdict = tally.verdict
     attempts = sum(c.attempts for c in children)
     escalations = sum(c.escalations for c in children)
     _record_genre_outcome(executor, 
@@ -487,13 +591,17 @@ def _execute_verify_panel(executor: DispatchExecutor, contract: NodeContract, co
         executor.blocked_node = node_id
         result = NodeExecutionResult(
             pending=False, output=None,
-            extra={"verify_panel_results": panel_results, "verify_panel_greens": greens, "verify_panel_k": k},
+            extra={
+                "verify_panel_results": panel_results, "verify_panel_greens": greens, "verify_panel_k": k,
+                "verify_panel_tally": tally.to_dict(),
+            },
         )
         executor.last_result = result
         return result
     output: dict[str, Any] = {"pins": {pin.pin_id: {"contract": pin.contract} for pin in contract.outputs}}
     output["verify_panel_results"] = panel_results
     output["verify_panel_greens"] = greens
+    output["verify_panel_tally"] = tally.to_dict()
     result = NodeExecutionResult(pending=False, output=output)
     executor.last_result = result
     return result
@@ -988,5 +1096,8 @@ def _drive_composite_child(
             return "blocked", outcome.faults, _total_cost(executor), None, None, None
         if outcome.finished:
             return "finished", (), _total_cost(executor), None, last_output, None
+        if outcome.paused:
+            # K11 : un hold a posé le sous-flow en PAUSED ; le genre qui l'a lancé le rend en l'état, bloqué sur la pause.
+            return "blocked", outcome.warnings, _total_cost(executor), None, None, None
         assert outcome.contract is not None  # non fini : le moteur a rouvert le node suivant
         result = executor.last_result or NodeExecutionResult(pending=True)

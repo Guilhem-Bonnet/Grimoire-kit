@@ -1,3 +1,7 @@
+---
+audience: utilisateur
+---
+
 # Grimoire Kit
 
 **The missing operating system for AI agents in your IDE.**
@@ -74,12 +78,12 @@ grimoire-kit/
 | [Plan produit 2026-Q4](plan-2026-q4.md) | Cible, métriques mesurées, phases, matrice de parité, registre des risques |
 | [Banc à trois bras](bench-three-arms.md) | Protocole Claude Code nu / + ecc / + grimoire-kit, rejouable (issue #551) |
 | [Diagnostic du surcoût kit (2026-09-17)](bench/diagnostic-surcout-kit-2026-09-17.md) | Attribution du surcoût mesuré sur le banc, preuve des gates verts déconnectés des tests, lots de cœur |
-| [Rejeu du banc après les lots A/B/C (2026-09-17)](bench/rejeu-lot-e-2026-09-17.md) | Verdict du lot E : surcoût de tours éliminé, coût encore au-dessus de 70 % du nu, lot B jamais exercé par le banc |
-| [Rejeu du bras `kit-gov` (2026-09-17)](bench/rejeu-lot-f-2026-09-17.md) | Verdict du lot F : la gouvernance non dosée coûte ×4,6 pour -7 points de succès sur un projet réellement enrôlé, lot B enfin mesurable |
-| [Rejeu du bras `kit-gov` après les lots G1-G4 (2026-09-18)](bench/rejeu-lot-h-2026-09-18.md) | Verdict du lot H : surcoût de gouvernance réduit ÷2,4-2,5 et succès aligné sur `kit`, critère de sortie de phase toujours non atteint ; incident et correctif du binaire `grimoire` résolu en absolu |
-| [Rejeu du bras `kit-gov` après le lot I (2026-09-18)](bench/rejeu-lot-j-2026-09-18.md) | Verdict du lot J : tours identiques à `nu` (1,0×) et succès au-dessus de `nu`, coût à ≈112 % du nu — deux critères de sortie de phase sur trois atteints, décision de dégel proposée à Guilhem sous réserve de re-base du critère de coût |
-| [Rejeu du bras `kit-gov` après le lot K (2026-09-29)](bench/rejeu-lot-k-2026-09-29.md) | Verdict du lot K : aucun des quatre critères chiffrés de l'issue #642 n'est atteint — excursions 30,0 % → 26,7 % (cible < 10 %), coût ≈112 % → ≈122 % du nu (cible ≤ 105 %), succès 96,7 % → 90,0 % (cible ≥ 96,7 %), `gate check` vert 60/60 seul acquis ; régression `rust/scale-generator` non tranchée |
-| [Rejeu `nu` et `kit-gov` le même jour (lot L, 2026-10-02)](bench/rejeu-lot-l-2026-10-02.md) | Verdict du lot L : trois critères de #642 sur quatre atteints, pas le coût (≈124 % du nu, surcoût fixe) ; excursions coûteuses 8,3 % ; régression `rust/scale-generator` du lot K = contamination du lot J ; modèle changé entre K et L |
+| [Rejeu du banc après les lots A/B/C (2026-09-17)](bench/rejeu-lot-e-2026-09-17.md) | Verdict du lot E : surcoût de tours éliminé, coût encore au-dessus de 70 % du nu, lot B jamais exercé par le banc | <!-- source: docs/bench/rejeu-lot-e-2026-09-17.md -->
+| [Rejeu du bras `kit-gov` (2026-09-17)](bench/rejeu-lot-f-2026-09-17.md) | Verdict du lot F : la gouvernance non dosée coûte ×4,6 pour -7 points de succès sur un projet réellement enrôlé, lot B enfin mesurable | <!-- source: docs/bench/rejeu-lot-f-2026-09-17.md -->
+| [Rejeu du bras `kit-gov` après les lots G1-G4 (2026-09-18)](bench/rejeu-lot-h-2026-09-18.md) | Verdict du lot H : surcoût de gouvernance réduit ÷2,4-2,5 et succès aligné sur `kit`, critère de sortie de phase toujours non atteint ; incident et correctif du binaire `grimoire` résolu en absolu | <!-- source: docs/bench/rejeu-lot-h-2026-09-18.md -->
+| [Rejeu du bras `kit-gov` après le lot I (2026-09-18)](bench/rejeu-lot-j-2026-09-18.md) | Verdict du lot J : tours identiques à `nu` (1,0×) et succès au-dessus de `nu`, coût à ≈112 % du nu — deux critères de sortie de phase sur trois atteints, décision de dégel proposée à Guilhem sous réserve de re-base du critère de coût | <!-- source: docs/bench/rejeu-lot-j-2026-09-18.md -->
+| [Rejeu du bras `kit-gov` après le lot K (2026-09-29)](bench/rejeu-lot-k-2026-09-29.md) | Verdict du lot K : aucun des quatre critères chiffrés de l'issue #642 n'est atteint — excursions 30,0 % → 26,7 % (cible < 10 %), coût ≈112 % → ≈122 % du nu (cible ≤ 105 %), succès 96,7 % → 90,0 % (cible ≥ 96,7 %), `gate check` vert 60/60 seul acquis ; régression `rust/scale-generator` non tranchée | <!-- source: docs/bench/rejeu-lot-k-2026-09-29.md -->
+| [Rejeu `nu` et `kit-gov` le même jour (lot L, 2026-10-02)](bench/rejeu-lot-l-2026-10-02.md) | Verdict du lot L : trois critères de #642 sur quatre atteints, pas le coût (≈124 % du nu, surcoût fixe) ; excursions coûteuses 8,3 % ; régression `rust/scale-generator` du lot K = contamination du lot J ; modèle changé entre K et L | <!-- source: docs/bench/rejeu-lot-l-2026-10-02.md -->
 | [Direction d'Anthropic — chevaucher/envelopper/ignorer](veille/anthropic-direction-2026-09.md) | Verdict par capacité Anthropic récente, lot du plan qui l'absorbe |
 | [Idées à récolter — instruction et verdict](veille/idees-a-recolter-2026-09.md) | Adopter/adapter/écarter par idée concurrente, fichier source et licence |
 | [Modèles de décision (Jev et clones)](veille/decision-models-2026-09.md) | Verdict mesuré écarter pour l'instant, conditions de réouverture, récolte sans modèle |

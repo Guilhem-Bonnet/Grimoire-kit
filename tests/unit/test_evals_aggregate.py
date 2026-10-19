@@ -136,3 +136,62 @@ def test_summarize_exposes_pass_hat_k_and_cost_by_model(monkeypatch) -> None:
     assert summary["pass_hat_k_capability"] == 1.0
     assert summary["pass_hat_k_regression"] is None
     assert summary["cost_by_model"] == {"claude-sonnet-4-6": 1.0}
+
+
+# ── B-02 : un coût inconnu n'est pas 0 $ ────────────────────────────────────
+
+
+def _row_cost(cost: float | None, *, completed: bool = True) -> dict:
+    row = _row("feat-due-dates", completed=completed)
+    row["external"]["tokens_cost"] = cost
+    return row
+
+
+def test_summarize_publishes_cost_known_ratio_and_flags_a_lower_bound() -> None:
+    mod = _load_module()
+    summary = mod.summarize([_row_cost(1.0), _row_cost(None), _row_cost(1.0), _row_cost(None)])
+    assert summary["cost_known_runs"] == 2
+    assert summary["cost_known_ratio"] == 0.5
+    assert summary["cost_is_lower_bound"] is True
+    assert summary["cost_total"] == 2.0  # borne basse, signalée comme telle
+
+
+def test_summarize_full_cost_is_not_a_lower_bound() -> None:
+    mod = _load_module()
+    summary = mod.summarize([_row_cost(1.0), _row_cost(2.0)])
+    assert summary["cost_known_ratio"] == 1.0
+    assert summary["cost_is_lower_bound"] is False
+    assert summary["cost_total"] == 3.0
+
+
+def test_summarize_with_no_known_cost_gives_null_not_zero() -> None:
+    mod = _load_module()
+    summary = mod.summarize([_row_cost(None), _row_cost(None)])
+    assert summary["cost_known_ratio"] == 0.0
+    assert summary["cost_total"] is None
+    assert summary["cost_per_run"] is None
+    assert summary["cost_per_completed"] is None
+
+
+def test_summarize_a_zero_cost_is_a_measure_a_missing_cost_is_not() -> None:
+    mod = _load_module()
+    summary = mod.summarize([_row_cost(0.0), _row_cost(None)])
+    assert summary["cost_known_runs"] == 1
+    assert summary["cost_total"] == 0.0
+
+
+def test_verdict_does_not_conclude_on_a_partial_cost() -> None:
+    """Deux bornes basses ne se comparent pas : le bras testé « moins cher » parce qu'il lui manque des coûts."""
+    mod = _load_module()
+    tested = mod.summarize([_row_cost(1.0), _row_cost(None), _row_cost(None), _row_cost(None)])
+    reference = mod.summarize([_row_cost(5.0), _row_cost(5.0), _row_cost(5.0), _row_cost(5.0)])
+    cost_row = next(r for r in mod.verdict(tested, reference) if r[0] == "Coût par tâche complétée")
+    assert cost_row[3].startswith("NON CALCULABLE")
+
+
+def test_verdict_still_compares_complete_costs() -> None:
+    mod = _load_module()
+    tested = mod.summarize([_row_cost(1.0), _row_cost(1.0)])
+    reference = mod.summarize([_row_cost(2.0), _row_cost(2.0)])
+    cost_row = next(r for r in mod.verdict(tested, reference) if r[0] == "Coût par tâche complétée")
+    assert cost_row[3] == "ATTEINT"

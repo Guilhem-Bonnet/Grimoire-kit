@@ -1,3 +1,7 @@
+---
+audience: utilisateur
+---
+
 # Migration v2 → v3
 
 > Guide pour migrer un projet Grimoire existant (v2) vers la structure v3.

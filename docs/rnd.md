@@ -1,3 +1,7 @@
+---
+audience: contributeur
+---
+
 # R&D expérimental
 
 Ces features fonctionnent et sont testées, mais leur surface est **exploratoire** :

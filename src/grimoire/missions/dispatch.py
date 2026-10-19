@@ -80,6 +80,7 @@ from grimoire.core.standard_generation import STANDARD_DIR
 from grimoire.costs import POLICY_STOP, Cost, cap_reason, validate_policy
 from grimoire.missions.dispatch_history import recommend_start_tier
 from grimoire.missions.empty_green import classify_empty_green, invokes_test_runner
+from grimoire.missions.route_dispatch import record_route
 from grimoire.missions.schemas import TaskState
 from grimoire.missions.verifiability import Verifiability, classify
 from grimoire.providers.quota import QuotaSignal, classify_failure, observe_window
@@ -95,7 +96,7 @@ from grimoire.providers.state import (
 )
 
 if TYPE_CHECKING:
-    from grimoire.missions.schemas import MissionTask
+    from grimoire.missions.schemas import LedgerEvent, MissionTask
     from grimoire.missions.service import TaskService
 
 try:
@@ -702,6 +703,9 @@ _REFUSAL_MESSAGES: dict[str, str] = {
     "no_check": "au moins un `--check` est requis : la classe dit que le verdict est mécanique, la commande dit lequel",
     "no_tier": "aucun palier disponible entre le plancher de la classe et --max-tier",
     "no_provider": "aucun fournisseur invocable sur la chaîne de paliers prévue",
+    "routing_policy_invalid": "politique de routage illisible : aucune route autonome (`on_invalid: refuse`)",
+    "routed_to_session": "le routeur actif décide `session` : aucun appel autonome, la session tranche",
+    "routed_defer": "le routeur actif décide `defer` : aucun modèle admis disponible, attente",
 }
 
 
@@ -1022,6 +1026,7 @@ def _record_dispatch_outcome(
     *,
     acceptance_declared: bool,
     replay_key: str | None,
+    last_event: LedgerEvent | None = None,
 ) -> None:
     """Journaliser dans le journal de traces le résumé d'une cascade de dispatch terminée.
 
@@ -1054,7 +1059,7 @@ def _record_dispatch_outcome(
         return
     try:
         from grimoire.core.standard_generation import TRACES_DIR
-        from grimoire.traces.ledger import DISPATCH_OUTCOME_TAG, TraceLedger
+        from grimoire.traces.ledger import DISPATCH_OUTCOME_TAG, LEDGER_EVENT_TAG_PREFIX, TraceLedger
         from grimoire.traces.schemas import TraceOutcome
 
         tiers = dict.fromkeys(attempt.tier for attempt in report.attempts)  # ordonné, dédupliqué
@@ -1074,6 +1079,8 @@ def _record_dispatch_outcome(
         ]
         if last.provider:
             tags.append(f"provider:{last.provider}")
+        if last_event is not None:
+            tags.append(f"{LEDGER_EVENT_TAG_PREFIX}{last_event.id}")  # lien exact cascade -> trace
         if report.cost_cap_reason:
             tags.append(f"cost_cap:{report.cost_cap_reason}")
 
@@ -1115,6 +1122,7 @@ def run_dispatch(
     replay_key: str | None = None,
     max_cost_usd: float | None = None,
     cost_unknown_policy: str = POLICY_STOP,
+    check_runner: Any = None,  # W3-03 : `CheckGate.run` (approbation par empreinte)
 ) -> DispatchReport:
     """Cascade la tâche *task_id* à travers les paliers de fournisseurs.
 
@@ -1178,6 +1186,7 @@ def run_dispatch(
     )
     declared_context = agent_declared_context(project_root, agent) if agent and project_root else ()
     prompt = build_prompt(task, agent_context=declared_context, project_root=project_root)
+    routing = record_route(service, task, verifiability, actor=actor, write=not dry_run)  # K9 : task.routed
 
     floor = start_tier_for(verifiability)
     if floor is None:
@@ -1189,6 +1198,9 @@ def run_dispatch(
             prompt=prompt,
             refusal="v2",
         )
+
+    if (refused := routing.refusal()) is not None:  # K9 : politique illisible, `session`, `defer` (mode actif)
+        return DispatchReport(task_id, verifiability.value, dry_run, (), prompt, refusal=refused[0], start_tier_reason=refused[1])
 
     if start_tier is not None:
         # L'option explicite ne peut que monter : le plancher de la classe est
@@ -1207,7 +1219,7 @@ def run_dispatch(
         else:
             start_tier_reason = "palier de départ explicite (--start-tier)"
     else:
-        chosen_tier, start_tier_reason = recommend_start_tier(
+        chosen_tier, start_tier_reason = routing.start() or recommend_start_tier(
             service.ledger, task_type=task.type.value, verifiability=verifiability.value, floor=floor
         )
 
@@ -1249,6 +1261,15 @@ def run_dispatch(
 
     root = service.project_root
     attempts: list[DispatchAttempt] = []
+    last_event: LedgerEvent | None = None
+
+    def log_attempt(attempt: DispatchAttempt) -> LedgerEvent:
+        payload = _dispatch_event_payload(
+            attempt, task, verifiability, chosen_tier, start_tier_reason,
+            acceptance_declared=acceptance_declared, verifiability_warning=verifiability_warning,
+        )
+        return service.ledger.append_event("task.dispatched", task_id, "task", actor, payload)
+
     attempt_no = 0
     capped_before_next_tier = False
     cap_why: str | None = None
@@ -1261,12 +1282,15 @@ def run_dispatch(
         # jamais sondé n'est pas candidat : personne ne verrait qu'il est cassé.
         autonomous = os.environ.get("GRIMOIRE_UNATTENDED", "").strip() == "1"
         tier_candidates = tuple(p for p in provider_candidates(root, tier, autonomous=autonomous) if p.invocation)
+        tier_candidates = routing.order(tier, tier_candidates)
         if provider_id:
             tier_candidates = tuple(p for p in tier_candidates if p.id == provider_id)
         tier_settled = False
         for provider in tier_candidates:
+            if routing.exhausted(attempt_no):
+                break  # K9 : `max_attempts` de la politique (mode actif)
             # Premier modèle du palier que le forfait n'a pas fermé.
-            model = available_models(provider, tier, load_state(root), now=datetime.now(UTC))[0].id
+            model = routing.pick(provider, tier, available_models(provider, tier, load_state(root), now=datetime.now(UTC)))
             attempt_no += 1
             code, stdout, _stderr, duration, failure_kind, signal = _run_provider_call(
                 root, provider, model, prompt, call_timeout=call_timeout
@@ -1288,30 +1312,13 @@ def run_dispatch(
                     cost_usd=None,
                 )
                 attempts.append(attempt)
-                service.ledger.append_event(
-                    "task.dispatched",
-                    task_id,
-                    "task",
-                    actor,
-                    _dispatch_event_payload(
-                        attempt,
-                        task,
-                        verifiability,
-                        chosen_tier,
-                        start_tier_reason,
-                        acceptance_declared=acceptance_declared,
-                        verifiability_warning=verifiability_warning,
-                    ),
-                )
+                last_event = log_attempt(attempt)
                 continue  # fournisseur suivant, même palier
 
             record_success(root, provider.id, model)
-            check_results = _run_checks(
-                checks,
-                project_root=root,
-                expect_exits=check_expect_exits,
-                expect_stdout_contains=check_expect_stdout_contains,
-                timeouts=check_timeouts,
+            check_results = (check_runner or _run_checks)(
+                checks, project_root=root, expect_exits=check_expect_exits,
+                expect_stdout_contains=check_expect_stdout_contains, timeouts=check_timeouts,
             )
             # Un check « inexécutable » (issue #428) prime sur tout le reste :
             # aucun verdict n'a pu être rendu, donc ni vert ni même un rouge
@@ -1348,21 +1355,7 @@ def run_dispatch(
                 uncertainty_warnings=uncertainty_warnings,
             )
             attempts.append(attempt)
-            service.ledger.append_event(
-                "task.dispatched",
-                task_id,
-                "task",
-                actor,
-                _dispatch_event_payload(
-                    attempt,
-                    task,
-                    verifiability,
-                    chosen_tier,
-                    start_tier_reason,
-                    acceptance_declared=acceptance_declared,
-                    verifiability_warning=verifiability_warning,
-                ),
-            )
+            last_event = log_attempt(attempt)
             if verdict == "unrunnable":
                 # Arrêt immédiat de la cascade entière : escalader vers un
                 # palier plus cher n'aide pas un environnement qui ne peut pas
@@ -1381,7 +1374,8 @@ def run_dispatch(
                     unrunnable="; ".join(unrunnable_reasons),
                 )
                 _record_dispatch_outcome(
-                    root, task, unrunnable_report, acceptance_declared=acceptance_declared, replay_key=replay_key
+                    root, task, unrunnable_report, acceptance_declared=acceptance_declared, replay_key=replay_key,
+                    last_event=last_event,
                 )
                 return unrunnable_report
             tier_settled = True
@@ -1423,7 +1417,9 @@ def run_dispatch(
             ),
             cost_cap_reason=cap_why,
         )
-        _record_dispatch_outcome(root, task, capped_report, acceptance_declared=acceptance_declared, replay_key=replay_key)
+        _record_dispatch_outcome(
+            root, task, capped_report, acceptance_declared=acceptance_declared, replay_key=replay_key, last_event=last_event
+        )
         return capped_report
 
     if not attempts:
@@ -1452,7 +1448,9 @@ def run_dispatch(
         start_tier=chosen_tier,
         start_tier_reason=start_tier_reason,
     )
-    _record_dispatch_outcome(root, task, report, acceptance_declared=acceptance_declared, replay_key=replay_key)
+    _record_dispatch_outcome(
+        root, task, report, acceptance_declared=acceptance_declared, replay_key=replay_key, last_event=last_event
+    )
     if not report.succeeded:
         return report
     if verifiability is not Verifiability.V1:

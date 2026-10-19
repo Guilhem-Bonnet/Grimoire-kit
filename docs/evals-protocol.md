@@ -1,3 +1,7 @@
+---
+audience: contributeur
+---
+
 # Protocole d'évaluation — effet mesuré du standard gouverné
 
 > **Statut : protocole, pas de résultats.** Ce document définit comment mesurer

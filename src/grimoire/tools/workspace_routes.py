@@ -63,10 +63,13 @@ tests, donc une route ajoutée sans test de cible se voit.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+import threading
+import time
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
+from grimoire.missions.liveness import probe_claude_agents
 from grimoire.tools import (
     source_assist,
     workspace_api,
@@ -74,6 +77,7 @@ from grimoire.tools import (
     workspace_language,
     workspace_memory,
     workspace_portfolio,
+    workspace_pulse,
 )
 
 __all__ = [
@@ -130,10 +134,44 @@ def _glossary(project_root: Path, _query: _Query) -> Any:
     return workspace_api.glossary_view(project_root)
 
 
+#: La sonde d'hôte (``claude agents --json``) lance un sous-processus. Avec
+#: l'actualisation automatique de l'interface (UI-3), chaque lecture des tâches
+#: d'un projet dont une session bat ferait un lancement : un résultat vaut donc
+#: ce délai, pour les deux lectures qui l'utilisent (projet et portefeuille).
+_PROBE_TTL_SECONDS = 10.0
+_probe_memo: tuple[float, Mapping[str, str] | None] | None = None
+_probe_lock = threading.Lock()
+
+
+def _host_probe() -> Mapping[str, str] | None:
+    global _probe_memo
+    with _probe_lock:
+        now = time.monotonic()
+        if _probe_memo is not None and now - _probe_memo[0] < _PROBE_TTL_SECONDS:
+            return _probe_memo[1]
+        result = probe_claude_agents()
+        _probe_memo = (now, result)
+        return result
+
+
 def _tasks(project_root: Path, query: _Query) -> Any:
     return workspace_api.tasks_view(
-        project_root, mission=_one(query, "mission"), status=_one(query, "status")
+        project_root, mission=_one(query, "mission"), status=_one(query, "status"), probe=_host_probe
     )
+
+
+def _waves(project_root: Path, query: _Query) -> Any:
+    """``GET /api/workspace/waves[?mission=<id>]`` — les vagues du plan et, pour une mission, le checkpoint de chacune (W5-05).
+
+    ``checkpoints`` (statut, empreinte du diff fusionné, tâches couvertes, requis ou non) et
+    ``claim_blocked`` (le motif exact qui ferme le claim d'une tâche) sont ceux de ``grimoire task waves``.
+    """
+    from grimoire.missions.service import TaskService
+
+    service = TaskService(project_root.resolve())
+    if not service.has_ledger:
+        return {"waves": [], "ledger": False}
+    return {**service.waves(_one(query, "mission") or None), "ledger": True}
 
 
 def _files(project_root: Path, query: _Query) -> Any:
@@ -223,6 +261,24 @@ def _portfolio_tasks(project_root: Path, query: _Query) -> Any:
         project=_one(query, "slug") or None,
         live=live_raw not in (None, "", "0", "false"),
         live_minutes=int(minutes_raw) if minutes_raw else workspace_portfolio.DEFAULT_LIVE_MINUTES,
+        probe=_host_probe,
+    )
+
+
+def _pulse(project_root: Path, query: _Query) -> Any:
+    """``GET /api/workspace/pulse`` — « quelque chose a-t-il changé ? » (UI-3).
+
+    ``since`` est l'empreinte que l'interface connaît : identique, la réponse
+    ne relit rien et dit ``changed: false`` ; différente, elle porte le compte
+    des décisions en attente. ``scope=portfolio`` agrège le registre du
+    cockpit (le compteur de la barre du haut), sinon le projet servi seul.
+    ``interval_seconds`` est l'intervalle de sondage que l'interface doit
+    suivre (:data:`workspace_pulse.INTERVAL_ENV`).
+    """
+    return workspace_pulse.pulse_view(
+        project_root,
+        since=_one(query, "since") or None,
+        portfolio=_one(query, "scope") == "portfolio",
     )
 
 
@@ -284,6 +340,7 @@ def _language(project_root: Path, query: _Query) -> Any:
 GET_ROUTES: dict[str, _GetHandler] = {
     f"{PREFIX}glossary": _glossary,
     f"{PREFIX}tasks": _tasks,
+    f"{PREFIX}waves": _waves,
     f"{PREFIX}files": _files,
     f"{PREFIX}file": _file,
     f"{PREFIX}file/diff": _file_diff,
@@ -299,6 +356,7 @@ GET_ROUTES: dict[str, _GetHandler] = {
     f"{PREFIX}sheet": _sheet,
     f"{PREFIX}evidence": _evidence,
     f"{PREFIX}portfolio/tasks": _portfolio_tasks,
+    f"{PREFIX}pulse": _pulse,
     f"{PREFIX}flows/runs": _flow_runs,
     f"{PREFIX}memory/overview": _memory_overview,
     f"{PREFIX}memory/search": _memory_search,
@@ -483,7 +541,7 @@ POST_ROUTES: dict[str, _PostHandler] = {
 }
 
 def _task_steer(service: Any, task_id: str, action: str, actor: str, body: dict[str, Any]) -> Any:
-    """Les gestes de l'orchestrateur humain (issue #638, lot B) — refus rendus par le service."""
+    """Les gestes de l'orchestrateur humain (issue #638, lot B ; K6 : répondre) — refus rendus par le service."""
     from grimoire.missions.schemas import ORIGIN_HUMAN
 
     if action == "prioritize":
@@ -496,6 +554,13 @@ def _task_steer(service: Any, task_id: str, action: str, actor: str, body: dict[
         )
     if action == "cancel":
         return service.cancel(task_id, str(body.get("reason") or ""), actor, force=body.get("force") is True)
+    if action == "answer":
+        # K6 : la réponse à une décision attendue. Le cockpit local, derrière le jeton de session
+        # (W1-10), est le canal de l'humain : l'origine est posée ici, jamais lue du corps.
+        return service.answer(
+            task_id, str(body.get("text") or ""), actor, origin=ORIGIN_HUMAN,
+            question_id=str(body.get("question_id") or ""),
+        )
     directive_id = str(body.get("directive_id") or "")
     if not directive_id:
         raise ValueError("`directive_id` requis pour accuser réception")
@@ -505,7 +570,7 @@ def _task_steer(service: Any, task_id: str, action: str, actor: str, body: dict[
 #: Les gestes de pilotage humain (issue #638) : jamais une transition d'état
 #: sauf `cancel`, qui passe par le même gate que `move --to cancelled` plus la
 #: raison obligatoire et le verrou de claim.
-_STEERING_ACTIONS = ("prioritize", "comment", "cancel", "ack")
+_STEERING_ACTIONS = ("prioritize", "comment", "cancel", "ack", "answer")
 
 #: Les verbes qu'une tâche accepte depuis l'interface.
 TASK_ACTIONS = ("claim", "move", "block", "close", *_STEERING_ACTIONS)

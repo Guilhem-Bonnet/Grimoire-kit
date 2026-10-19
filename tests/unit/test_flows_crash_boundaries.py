@@ -748,14 +748,14 @@ def test_a_refusal_without_a_repair_keeps_its_message(tmp_path: Path, caplog: py
 
 
 def test_every_refusal_raised_after_the_reconcile_goes_through_the_repair_note() -> None:
-    """Les trois `raise` de `resume` postérieurs à `_reconcile` passent par `_refusal` : aucun ne perd `repaired_notes`."""
+    """Les quatre `raise` de `resume` postérieurs à `_reconcile` (dont le refus d'un run en pause, K11) passent par `_refusal` : aucun ne perd `repaired_notes`."""
     import inspect
     import re
 
     source = inspect.getsource(FlowEngine._resume_core)
     after = source.split("self._reconcile(wfi, ctx)", 1)[1]
     assert not re.search(r"raise GrimoireRuntimeError\(", after), "un refus de resume ignore les réparations déjà écrites"
-    assert after.count("raise _refusal(") == 3
+    assert after.count("raise _refusal(") == 4
 
 
 def test_refusal_formats_the_repairs_and_logs_them(caplog: pytest.LogCaptureFixture) -> None:

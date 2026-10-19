@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from grimoire.core.exceptions import GrimoireMissionError
 from grimoire.missions.ledger import MissionLedger
 from grimoire.missions.schemas import IncidentSeverity, MissionState, RiskProfile, TaskState, TaskType
 
@@ -26,6 +27,7 @@ class TaskFlowImportReport:
     events_read: int = 0
     events_imported: int = 0
     events_skipped: int = 0
+    events_deferred: int = 0
     mission_created: bool = False
     tasks_created: int = 0
     tasks_updated: int = 0
@@ -37,6 +39,7 @@ class TaskFlowImportReport:
             "events_read": self.events_read,
             "events_imported": self.events_imported,
             "events_skipped": self.events_skipped,
+            "events_deferred": self.events_deferred,
             "mission_created": self.mission_created,
             "tasks_created": self.tasks_created,
             "tasks_updated": self.tasks_updated,
@@ -137,10 +140,16 @@ def _source_event_imported(ledger: MissionLedger, task_id: str, source_event_id:
     return False
 
 
-def _transition_task(ledger: MissionLedger, task_id: str, target: TaskState, *, reason: str) -> bool:
+def _transition_task(ledger: MissionLedger, task_id: str, target: TaskState, *, reason: str) -> tuple[bool, str]:
+    """Mène la tâche vers *target* ; rend ``(a_changé, refus)``.
+
+    Un claim que le ledger refuse (dépendance ``blocks`` non close, W5-01)
+    n'avorte pas l'import : la tâche reste là où elle est et le refus est rendu,
+    pour que l'événement soit différé plutôt que perdu.
+    """
     task = ledger.get_task(task_id)
     if task is None or task.status == target or task.status in {TaskState.CLOSED, TaskState.CANCELLED}:
-        return False
+        return False, ""
     changed = False
 
     def current() -> TaskState:
@@ -152,7 +161,10 @@ def _transition_task(ledger: MissionLedger, task_id: str, target: TaskState, *, 
         if state == TaskState.PROPOSED:
             ledger.transition_task(task_id, TaskState.READY, actor_id="task-flow", reason=reason)
         elif state == TaskState.READY:
-            ledger.claim_task(task_id, actor_id="task-flow", host_id="host-task-flow")
+            try:
+                ledger.claim_task(task_id, actor_id="task-flow", host_id="host-task-flow")
+            except GrimoireMissionError as exc:
+                return changed, str(exc)
         elif state == TaskState.CLAIMED:
             ledger.transition_task(task_id, TaskState.RUNNING, actor_id="task-flow", reason=reason)
         elif state == TaskState.RUNNING and target in {TaskState.NEEDS_VERIFICATION, TaskState.FAILED}:
@@ -160,11 +172,14 @@ def _transition_task(ledger: MissionLedger, task_id: str, target: TaskState, *, 
         elif state == TaskState.FAILED and target != TaskState.FAILED:
             ledger.transition_task(task_id, TaskState.READY, actor_id="task-flow", reason=reason)
         elif state == TaskState.NEEDS_VERIFICATION and target == TaskState.RUNNING:
-            ledger.transition_task(task_id, TaskState.RUNNING, actor_id="task-flow", reason=reason)
+            try:
+                ledger.transition_task(task_id, TaskState.RUNNING, actor_id="task-flow", reason=reason)
+            except GrimoireMissionError as exc:  # WIP plein (K10) : la tâche reste en needs_verification, l'événement est différé
+                return changed, str(exc)
         else:
             break
         changed = True
-    return changed
+    return changed, ""
 
 
 def _target_state(raw: dict[str, Any]) -> TaskState:
@@ -209,6 +224,7 @@ def import_task_flow_events(
 
     events_imported = 0
     events_skipped = 0
+    events_deferred = 0
     tasks_created = 0
     tasks_updated = 0
     incidents_created = 0
@@ -221,13 +237,18 @@ def import_task_flow_events(
             events_skipped += 1
             continue
 
-        changed = _transition_task(
+        changed, refusal = _transition_task(
             ledger,
             task_id,
             _target_state(raw),
             reason=f"task-flow import {source_event_id[:12]}",
         )
         tasks_updated += int(changed)
+        if refusal:
+            # Claim refusé (dépendance non close) : l'événement n'est pas marqué importé,
+            # un import ultérieur le rejoue quand la dépendance sera close ; les autres tâches continuent.
+            events_deferred += 1
+            continue
         incidents_created += int(_maybe_open_failure_incident(ledger, mission_id, task_id, raw))
         ledger.append_event(
             "task_flow.imported",
@@ -255,6 +276,7 @@ def import_task_flow_events(
         events_read=len(events),
         events_imported=events_imported,
         events_skipped=events_skipped,
+        events_deferred=events_deferred,
         mission_created=mission_created,
         tasks_created=tasks_created,
         tasks_updated=tasks_updated,

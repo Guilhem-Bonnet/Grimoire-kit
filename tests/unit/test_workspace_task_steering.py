@@ -75,6 +75,9 @@ def _reclame(projet: Path, titre: str, actor: str = "claude-session") -> str:
     # Le claim passe par le ledger, pas par le gate `ready_to_in_progress` du
     # projet réel (context bundle, fournisseur activé) : ce fichier prouve le
     # pilotage d'une tâche tenue, pas la porte du claim — `test_service.py` s'en charge.
+    # Le WIP du standard (K10, `limit_per_role: 2`) est une autre porte : ce fichier tient plus de
+    # deux tâches d'un même rôle, il ne la franchit donc pas.
+    service.ledger.claim_guard = None
     service.ledger.claim_task(task.id, actor, "claude")
     service.project_board()
     return task.id

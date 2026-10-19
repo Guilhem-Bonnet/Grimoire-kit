@@ -1,3 +1,7 @@
+---
+audience: utilisateur
+---
+
 # Système de mémoire
 
 [README](https://github.com/Guilhem-Bonnet/Grimoire-kit)

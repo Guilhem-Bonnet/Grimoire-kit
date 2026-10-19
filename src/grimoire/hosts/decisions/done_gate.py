@@ -19,30 +19,45 @@ whatever else is true — see :func:`evaluate_done_gate`, the ``green_after``
 short-circuit. Nothing in this module can turn that back into a stale
 verdict.
 
-Shadow by default
-------------------
+Shadow by default, armed on a date (W2-09)
+------------------------------------------
 :func:`evaluate_done_gate` computes a verdict on every eligible ``Stop``, but
 only *reports* it (:mod:`.evidence_gate` writes it to
 ``Decision.detail["done_gate"]``, plus a warning context in a blocking
-profile) — it does not, by itself, make :mod:`.evidence_gate` refuse a
-closure. Refusing costs a whole turn on a false positive, and this gate has
-had zero hours of production journal to be wrong against: the classification
-it depends on (:func:`grimoire.hosts.decisions.tool_facts.
-is_read_only_command`) is already conservative in the *policy* direction
-(unrecognised → mutation), which is the wrong bias for a gate that blocks —
-here an unrecognised verb should not manufacture a stale verdict either. The
-kit's own directive (:mod:`.evidence_gate`'s docstring) already promotes a
-*prompt-level* suggestion to a hard rule once it has been read from a
-project's journals; this module earns that promotion the same way — after a
-project has logged real ``done_gate`` verdicts and someone has read whether
-they tracked reality. Until then, opting a project in early is one line:
-``GRIMOIRE_DONE_GATE=enforce`` in the environment, or ``options: {done_gate:
-enforce}`` in ``_grimoire/standard/standard-profile.yaml`` (read the same way
-:mod:`grimoire.core.standard_checks.gate_test_run` reads that file's
-``profile`` key — see :func:`_is_enforced`). Even enforced, a blocking
-profile (:data:`grimoire.hosts.decisions.enrolment.BLOCKING_PROFILES`) is the
-only one this can ever refuse in; every other profile only ever gets the
-warning context, exactly like a red evidence gate today.
+profile) until the gate is armed — refusing costs a whole turn on a false
+positive, and this gate has had zero hours of production journal to be wrong
+against: the classification it depends on (:func:`grimoire.hosts.decisions.
+tool_facts.is_read_only_command`) is already conservative in the *policy*
+direction (unrecognised → mutation), which is the wrong bias for a gate that
+blocks — here an unrecognised verb should not manufacture a stale verdict
+either. The promotion is the one the kit's own directive already applies to a
+*prompt-level* suggestion: after a release has logged real ``done_gate``
+verdicts and someone has read whether they tracked reality.
+
+The mode is resolved once, by :func:`resolve_done_gate_mode`, in this order, and
+the answer (``mode`` and ``mode_source``) is written on **every** verdict:
+
+1. ``GRIMOIRE_DONE_GATE=enforce`` in the environment — it arms, it never disarms: a
+   ``shadow`` there is ignored (it is neither a source nor an override), because the plan
+   forbids any switch-off by variable — autonomy goes through a traced grant;
+2. ``options: {done_gate: enforce | shadow}`` in ``_grimoire/standard/
+   standard-profile.yaml`` (read the same way :mod:`grimoire.core.
+   standard_checks.gate_test_run` reads that file's ``profile`` key — see
+   :func:`_read_options`);
+3. the arming date: ``options: {done_gate_enforce_from: YYYY-MM-DD}`` in that
+   file, else the kit default :data:`GOVERNED_ENFORCE_FROM`. From that day on
+   (UTC), a blocking profile
+   (:data:`grimoire.hosts.decisions.enrolment.BLOCKING_PROFILES`) is armed
+   without any variable; before it, and for every other profile, the gate stays
+   in shadow and the pending date is still reported (``armed_from``);
+4. otherwise shadow.
+
+:data:`GOVERNED_ENFORCE_FROM` ships ``None``: this release carries the
+mechanism and the shadow measurement, and flipping the default is a deliberate
+one-line change (with its test) once the measurement has been read — decision 3
+of the plan. Even armed, a blocking profile is the only one this can ever
+refuse in; every other profile only ever gets the warning context, exactly like
+a red evidence gate today.
 
 Caps
 ----
@@ -64,7 +79,7 @@ import os
 import re
 import subprocess
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -78,13 +93,17 @@ from grimoire.hosts.decisions.enrolment import BLOCKING_PROFILES
 from grimoire.hosts.decisions.tool_facts import command_surface, is_read_only_command
 
 __all__ = [
+    "GOVERNED_ENFORCE_FROM",
+    "DoneGateMode",
     "DoneGateVerdict",
     "StopStep",
+    "done_gate_mode_tags",
     "evaluate_done_gate",
     "record_stop_block",
     "record_stop_would_block",
     "resolve_done_gate_block",
     "resolve_done_gate_block_after_crash",
+    "resolve_done_gate_mode",
     "stop_cap",
     "stop_signature",
     "stop_step",
@@ -111,9 +130,20 @@ _COOLDOWN_SECONDS = 60.0
 #: (jev-belay/pi-warden: "trois par session").
 _SESSION_CAP = 3
 
-#: ``GRIMOIRE_DONE_GATE=enforce`` — the escape hatch named in the issue when
-#: no project/profile option exists yet (see the module docstring).
+#: ``GRIMOIRE_DONE_GATE=enforce`` — the environment switch (see the module docstring) ; it only arms.
 _ENFORCE_ENV = "GRIMOIRE_DONE_GATE"
+
+MODE_ENFORCE = "enforce"
+MODE_SHADOW = "shadow"
+
+#: ``options.done_gate_enforce_from`` — the project's own arming date.
+_ENFORCE_FROM_OPTION = "done_gate_enforce_from"
+
+#: The kit's default arming date for a blocking profile (W2-09, decision 3 of the plan).
+#: ``None`` = shadow everywhere unless a project opts in. A date here arms every
+#: governed/production project from that day (UTC) without a variable ; it is set
+#: once the shadow release's ``done_gate:stale`` holds have been measured.
+GOVERNED_ENFORCE_FROM: date | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,6 +175,15 @@ class DoneGateVerdict:
     command when one exists, else the last recognised check command seen in
     the journal, else a generic hint."""
     last_mutation_ts: str = ""
+    mode: str = MODE_SHADOW
+    """``shadow`` or ``enforce`` : the mode this verdict was produced under (W2-09),
+    present on every verdict — not only on the stale ones."""
+    mode_source: str = ""
+    """Where the mode came from : ``env``, ``option``, ``option_dated``,
+    ``kit_dated``, ``default`` (or ``after_error`` when the resolution itself
+    crashed, see :func:`.evidence_gate._done_gate_unevaluable`)."""
+    armed_from: str = ""
+    """The arming date in force (``YYYY-MM-DD``), armed yet or not — empty when none."""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -155,7 +194,23 @@ class DoneGateVerdict:
             "capped": self.capped,
             "command_hint": self.command_hint,
             "last_mutation_ts": self.last_mutation_ts,
+            "mode": self.mode,
+            "mode_source": self.mode_source,
+            "armed_from": self.armed_from,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class DoneGateMode:
+    """The resolved mode of the « fini » gate and where it came from (W2-09)."""
+
+    mode: str
+    source: str
+    armed_from: str = ""
+
+    @property
+    def enforce(self) -> bool:
+        return self.mode == MODE_ENFORCE
 
 
 def _entry_ts(entry: dict[str, Any]) -> str:
@@ -379,25 +434,19 @@ def _resolved_test_command(project_root: Path) -> str:
     return str(need.command) if need.resolved and need.command else ""
 
 
-def _is_enforced(project_root: Path, task_id: str) -> bool:
-    """Whether this project/environment opted into a real ``BLOCK`` — see the
-    module docstring for why shadow is the default. Checked in this order:
-    the environment variable (cheapest, and the one named in the issue when
-    no project option exists yet), then an ``options.done_gate: enforce`` key
-    hand-added to ``standard-profile.yaml``.
+def _read_options(project_root: Path, task_id: str) -> dict[str, Any]:
+    """The ``options`` mapping of ``standard-profile.yaml`` ; ``{}`` when absent.
 
-    An unreadable profile still answers ``False`` (shadow is the safe default
-    for the opt-in), but no longer silently (W1-06) : the failure is traced as
-    a ``guard.error`` (``guard_id`` ``done_gate.enforce_option``) for *task_id*,
-    so ``grimoire standard verify`` shows that the option could not be read.
+    An unreadable profile still answers ``{}`` (shadow is the safe default for the
+    opt-in), but no longer silently (W1-06) : the failure is traced as a
+    ``guard.error`` (``guard_id`` ``done_gate.enforce_option``) for *task_id*, so
+    ``grimoire standard verify`` shows that the option could not be read.
     "Unreadable" covers an invalid YAML, a file that is not valid UTF-8, an I/O
     error and a root that is not a mapping. The profile is parsed here rather
     than through ``standard_state._load_mapping``, which swallows those very
     errors and returns ``{}``: the failure would never reach this ``except``.
     A missing profile, or one without the option, is not a failure.
     """
-    if os.environ.get(_ENFORCE_ENV, "").strip().lower() == "enforce":
-        return True
     try:
         from ruamel.yaml import YAML
 
@@ -405,19 +454,97 @@ def _is_enforced(project_root: Path, task_id: str) -> bool:
 
         profile = project_root.resolve() / STANDARD_PROFILE_FILE
         if not profile.is_file():
-            return False
+            return {}
         data = YAML(typ="safe").load(profile)
         if data is None:
-            return False
+            return {}
         if not isinstance(data, dict):
             raise TypeError(f"{STANDARD_PROFILE_FILE} : la racine n'est pas un mapping ({type(data).__name__})")
     except Exception as exc:
         record_guard_error(project_root, task_id, "done_gate.enforce_option", type(exc).__name__, str(exc))
-        return False
+        return {}
     options = data.get("options")
-    if not isinstance(options, dict):
-        return False
-    return str(options.get("done_gate", "")).strip().lower() == "enforce"
+    return options if isinstance(options, dict) else {}
+
+
+def _today(now_iso: str) -> date:
+    """The UTC day of *now_iso* ; the real clock when it is absent or unparseable."""
+    try:
+        moment = datetime.fromisoformat(now_iso)
+        return (moment.astimezone(UTC) if moment.tzinfo else moment).date()
+    except (ValueError, TypeError):
+        return datetime.now(UTC).date()
+
+
+def _parse_arming_date(raw: Any) -> date:
+    """``YYYY-MM-DD`` (a string, or the ``date`` YAML builds from an unquoted one) ; ``ValueError`` otherwise."""
+    if isinstance(raw, datetime):
+        return raw.date()
+    if isinstance(raw, date):
+        return raw
+    if isinstance(raw, str):
+        return date.fromisoformat(raw.strip())
+    raise ValueError(f"date d'armement illisible : {raw!r}")
+
+
+def resolve_done_gate_mode(
+    project_root: Path, task_id: str, profile: str = "", now_iso: str = ""
+) -> DoneGateMode:
+    """The mode of the « fini » gate for *profile* — see the module docstring for the order.
+
+    Never raises on a bad profile or a bad date : both are traced (``guard.error``,
+    ``done_gate.enforce_option``) and the mode falls back to ``shadow``, the safe
+    default of an opt-in. The arming date only arms a profile that can refuse
+    (:data:`BLOCKING_PROFILES`).
+    """
+    # W2-09-S1-02 : la variable n'arme que. ``GRIMOIRE_DONE_GATE=shadow`` ne désarme ni une
+    # option ni une date échue, comme sur la base où seule ``enforce`` était lue : le plan
+    # interdit toute désactivation par variable d'environnement (elle passe par un octroi
+    # tracé), et une session peut poser une variable, pas lever un gate armé.
+    if os.environ.get(_ENFORCE_ENV, "").strip().lower() == MODE_ENFORCE:
+        return DoneGateMode(MODE_ENFORCE, "env")
+    options = _read_options(project_root, task_id)
+    option = str(options.get("done_gate", "")).strip().lower()
+    if option in (MODE_ENFORCE, MODE_SHADOW):
+        return DoneGateMode(option, "option")
+    armed_from = ""
+    source = "kit_dated"
+    arming: Any = GOVERNED_ENFORCE_FROM
+    if options.get(_ENFORCE_FROM_OPTION) is not None:
+        arming, source = options[_ENFORCE_FROM_OPTION], "option_dated"
+    if arming is not None:
+        try:
+            day = _parse_arming_date(arming)
+        except ValueError as exc:
+            record_guard_error(project_root, task_id, "done_gate.enforce_option", type(exc).__name__, str(exc))
+        else:
+            armed_from = day.isoformat()
+            if profile in BLOCKING_PROFILES and _today(now_iso) >= day:
+                return DoneGateMode(MODE_ENFORCE, source, armed_from)
+    return DoneGateMode(MODE_SHADOW, "default", armed_from)
+
+
+def done_gate_mode_tags(done_gate: Any) -> list[str]:
+    """Ledger tags that say under which mode a ``done_gate`` verdict was produced (W2-09-S1-01).
+
+    *done_gate* is ``Decision.detail["done_gate"]`` (:meth:`DoneGateVerdict.to_dict`) ; anything
+    else gives ``[]``. ``done_gate_mode:<mode>``, ``done_gate_source:<source>`` and, when a
+    date is in force, ``done_gate_armed_from:<YYYY-MM-DD>`` : the only place where the
+    ``done_gate:stale`` holds that justify flipping the default can be split by mode.
+    """
+    if not isinstance(done_gate, dict):
+        return []
+    tags = []
+    for key, name in (("mode", "mode"), ("mode_source", "source"), ("armed_from", "armed_from")):
+        value = done_gate.get(key)
+        if isinstance(value, str) and value:
+            tags.append(f"done_gate_{name}:{value}")
+    return tags
+
+
+def _is_enforced(project_root: Path, task_id: str, profile: str = "", now_iso: str = "") -> bool:
+    """Whether the gate is armed for *profile* — :func:`resolve_done_gate_mode`, as a boolean."""
+    return resolve_done_gate_mode(project_root, task_id, profile, now_iso).enforce
 
 
 def _caps_path(project_root: Path, task_id: str) -> Path:
@@ -506,7 +633,13 @@ def _check_and_record_cap(project_root: Path, task_id: str, session_id: str, now
 
 
 def resolve_done_gate_block(
-    project_root: Path, task_id: str, session_id: str, profile: str, now_iso: str
+    project_root: Path,
+    task_id: str,
+    session_id: str,
+    profile: str,
+    now_iso: str,
+    *,
+    mode: DoneGateMode | None = None,
 ) -> tuple[bool, bool, bool]:
     """``(enforce, blocked, capped)`` : la résolution unique du refus du gate « fini ».
 
@@ -514,9 +647,10 @@ def resolve_done_gate_block(
     (:mod:`.evidence_gate`) : un refus n'est possible que dans un profil
     bloquant ET avec l'opt-in ``enforce``, et passe alors par le
     refroidissement et le plafond de session. Consomme un tour du plafond
-    uniquement quand un refus est dû.
+    uniquement quand un refus est dû. *mode* évite de relire le profil quand l'appelant
+    l'a déjà résolu.
     """
-    enforce = _is_enforced(project_root, task_id)
+    enforce = (mode or resolve_done_gate_mode(project_root, task_id, profile, now_iso)).enforce
     if profile in BLOCKING_PROFILES and enforce:
         capped = _check_and_record_cap(project_root, task_id, session_id, now_iso)
         return enforce, not capped, capped
@@ -541,7 +675,7 @@ def resolve_done_gate_block_after_crash(
     lieu d'être réécrit à ``False``.
     """
     try:
-        enforce = _is_enforced(project_root, task_id)
+        enforce = _is_enforced(project_root, task_id, profile)
     except Exception as exc:
         record_guard_error(project_root, task_id, "done_gate.enforce_option", type(exc).__name__, str(exc))
         enforce = False
@@ -565,6 +699,9 @@ def evaluate_done_gate(hook: Any, task_id: str, profile: str, *, now_iso: str | 
     callers get the actual clock.
     """
     now_iso = now_iso or datetime.now(UTC).isoformat()
+    # W2-09 : le mode est résolu avant tout verdict et porté par chacun d'eux — un
+    # « pas de mutation » sous enforce se distingue d'un « pas de mutation » en shadow.
+    mode = resolve_done_gate_mode(hook.project_root, task_id, profile, now_iso)
     entries = read_evidence_log(hook.project_root, task_id)
     # Pass 1, cheap and resolve-free: candidates only (see
     # :func:`_is_mutation_candidate` for why ``test_run`` is excluded
@@ -575,14 +712,32 @@ def evaluate_done_gate(hook: Any, task_id: str, profile: str, *, now_iso: str | 
         index for index, entry in enumerate(entries) if _is_mutation_candidate(entry, hook.project_root)
     ]
     if not candidate_indices:
-        return DoneGateVerdict(stale=False, reason="no_mutation", enforce=False, blocked=False, capped=False)
+        return DoneGateVerdict(
+            stale=False,
+            reason="no_mutation",
+            enforce=mode.enforce,
+            blocked=False,
+            capped=False,
+            mode=mode.mode,
+            mode_source=mode.source,
+            armed_from=mode.armed_from,
+        )
 
     resolved_command = _resolved_test_command(hook.project_root)
     mutation_indices = [index for index in candidate_indices if not _is_check_entry(entries[index], resolved_command)]
     if not mutation_indices:
         # Every candidate mutation was actually the resolved test command
         # itself (a ``bash`` entry the cheap pass could not rule out).
-        return DoneGateVerdict(stale=False, reason="no_mutation", enforce=False, blocked=False, capped=False)
+        return DoneGateVerdict(
+            stale=False,
+            reason="no_mutation",
+            enforce=mode.enforce,
+            blocked=False,
+            capped=False,
+            mode=mode.mode,
+            mode_source=mode.source,
+            armed_from=mode.armed_from,
+        )
     # Ordering by *list position*, not by the ``ts`` string: the journal is
     # append-only, so position already is the true sequence, and two events
     # appended microseconds apart can carry the identical ISO timestamp
@@ -604,15 +759,18 @@ def evaluate_done_gate(hook: Any, task_id: str, profile: str, *, now_iso: str | 
         return DoneGateVerdict(
             stale=False,
             reason="green_check_after_mutation",
-            enforce=False,
+            enforce=mode.enforce,
             blocked=False,
             capped=False,
             last_mutation_ts=last_mutation_ts,
+            mode=mode.mode,
+            mode_source=mode.source,
+            armed_from=mode.armed_from,
         )
 
     command_hint = resolved_command or _last_check_command(check_entries) or "ta commande de test"
     enforce, blocked, capped = resolve_done_gate_block(
-        hook.project_root, task_id, hook.session_id, profile, now_iso
+        hook.project_root, task_id, hook.session_id, profile, now_iso, mode=mode
     )
     return DoneGateVerdict(
         stale=True,
@@ -622,6 +780,9 @@ def evaluate_done_gate(hook: Any, task_id: str, profile: str, *, now_iso: str | 
         capped=capped,
         command_hint=command_hint,
         last_mutation_ts=last_mutation_ts,
+        mode=mode.mode,
+        mode_source=mode.source,
+        armed_from=mode.armed_from,
     )
 
 

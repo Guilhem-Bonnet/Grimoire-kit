@@ -44,6 +44,7 @@ from grimoire.flows import pilot
 from grimoire.flows.blueprint_loader import build_node_contracts, load_blueprint
 from grimoire.flows.engine import FlowEngine, check_output_against_contract
 from grimoire.flows.schemas import NodeContract, NodeExecutionResult, ResumeOutcome
+from grimoire.missions.check_gate import UNAPPROVED, CheckGate, CheckSpec
 from grimoire.missions.dispatch import DEFAULT_CALL_TIMEOUT_S, DispatchReport, run_dispatch
 from grimoire.missions.schemas import MissionTask, TaskCheck, TaskState
 from grimoire.missions.service import TaskRefusedError, TaskService
@@ -483,7 +484,32 @@ class DispatchExecutor:
         # le même gate, dans le même appel de cascade. Sans elle, un texte
         # d'acceptance conforme n'engageait jamais aucune commande réelle.
         acceptance_cmds, acceptance_expects, acceptance_stdout, acceptance_timeouts = _acceptance_checks(contract)
-        checks = (_verify_command(sys.executable, self._blueprint_path, node_id, result_path), *acceptance_cmds)
+        envelope = _verify_command(sys.executable, self._blueprint_path, node_id, result_path)
+        checks = (envelope, *acceptance_cmds)
+        # W3-03 : en profil governed/production, une acceptance que personne n'a
+        # approuvée (empreinte de la commande et de ce qu'elle doit rendre) ne
+        # lance rien, et le fournisseur n'est pas appelé pour rien. Le contrôle
+        # d'enveloppe est assemblé par le kit : il est de confiance. Modifier le
+        # blueprint change l'empreinte, donc redemande l'approbation.
+        gate = CheckGate(self._project_root, task_id, trusted=(envelope,))
+        unapproved = gate.preflight(
+            tuple(
+                CheckSpec(c, e, n, t)
+                for c, e, n, t in zip(acceptance_cmds, acceptance_expects, acceptance_stdout, acceptance_timeouts, strict=True)
+            )
+        )
+        if unapproved:
+            self.host_node = node_id
+            self.host_reason = (
+                f"{UNAPPROVED} : {len(unapproved)} commande(s) d'acceptance sans approbation, aucune lancée — "
+                f"`grimoire task approve-check {task_id}` (ou `--cmd`) après les avoir lues : "
+                + " ; ".join(f"{b.display} ({b.reason})" for b in unapproved)
+            )
+            result = NodeExecutionResult(
+                pending=True, extra={"dispatch_refused": "unapproved_check", "node_id": node_id, "task_id": task_id}
+            )
+            self.last_result = result
+            return result
         # Le pilote (issue #209) décide du palier de départ et du plafond de
         # coût avant cet appel — jamais après. `self._max_tier` (le
         # `--max-tier` explicite de la CLI) reste prioritaire sur le plafond
@@ -515,6 +541,7 @@ class DispatchExecutor:
             # node compteraient comme deux séries à une seule observation
             # chacune, jamais comme une série rejouée.
             replay_key=f"{blueprint_id}:{node_id}",
+            check_runner=gate.run,
         )
         self.node_outcomes[node_id] = _node_outcome_from_report(
             node_id,
@@ -593,7 +620,8 @@ class FlowDispatchOutcome:
     ``status`` vaut ``"finished"`` (tous les nodes verts, run terminé),
     ``"waiting_host"`` (V2, ou tâche non préparable — le node nommé revient à
     ``flow resume`` comme en mode interactif), ou ``"blocked"`` (chaîne
-    épuisée sur ce node, ou sortie non conforme malgré un vert de cascade).
+    épuisée sur ce node, ou sortie non conforme malgré un vert de cascade), ou ``"paused"`` (un ``hold`` a
+    posé le run à la frontière de node, K11 : rien n'est perdu, la reprise suit ``orchestrate resume``).
     """
 
     run_id: str
@@ -687,6 +715,11 @@ def _drive(
             )
         if outcome.finished:
             return _outcome(executor, run_id, status="finished", node_id=outcome.node_id, repaired=repaired)
+        if outcome.paused:
+            # K11 : un hold a posé le run en PAUSED à la frontière ; le node suivant n'est ni présenté ni exécuté.
+            return _outcome(
+                executor, run_id, status="paused", node_id=outcome.node_id, faults=outcome.warnings, repaired=repaired
+            )
         assert outcome.contract is not None  # non fini : le moteur a rouvert le node suivant
         contract = outcome.contract
         result = executor.last_result or NodeExecutionResult(pending=True)
@@ -731,6 +764,11 @@ def resume_with_dispatch(
     """
     meta = engine.run_meta(run_id)
     status = engine.status(run_id, include_contract=True)
+    if status.directive is not None and status.directive.kind == "blocked" and status.directive.reason == "paused":
+        # K11 : un hold est en vigueur ; l'agent du node suivant ne se lance pas pour se faire refuser ensuite.
+        raise GrimoireRuntimeError(
+            f"run {run_id} : pause hold en vigueur, aucun agent lancé ; reprendre après `grimoire orchestrate resume`"
+        )
     if status.contract is None:
         raise GrimoireRuntimeError(f"run {run_id} : rien à reprendre (status={status.status})")
     executor = DispatchExecutor(

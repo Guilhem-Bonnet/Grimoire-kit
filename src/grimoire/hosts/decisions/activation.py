@@ -8,10 +8,11 @@ from typing import TYPE_CHECKING, Any
 
 from grimoire.bridges.schemas import HostId
 from grimoire.core.claude_activation import activation_context_text
-from grimoire.core.standard_state import active_profile_id, resolve_active_task
+from grimoire.core.standard_state import resolve_active_task
 from grimoire.flows.live_runs import active_flow_lines
 from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
 from grimoire.hosts.decisions.enrolment import BLOCKING_PROFILES, link_session, no_task_context
+from grimoire.hosts.decisions.profile_floor import session_profile
 from grimoire.hosts.decisions.record import _record_agent_dispatch
 
 if TYPE_CHECKING:
@@ -216,6 +217,31 @@ def _proposals_status_line(project_root: Path) -> str:
         return ""
 
 
+def _decisions_line(project_root: Path) -> str:
+    """One-line pointer to the decisions waiting for a human, for session start (K6, issue #771).
+
+    A question the agent asked is a task parked as ``waiting(human)``: the next session on the
+    project should learn that someone is still owed an answer, not discover it in the cockpit.
+    Silent at zero, and silent when the ledger cannot be read — best-effort like every other line.
+    """
+    try:
+        from grimoire.missions.decisions import decisions_summary
+
+        summary = decisions_summary(project_root)
+    except Exception:
+        return ""
+    if not summary["count"]:
+        return ""
+    return f"{summary['line']} — voir le cockpit ou `grimoire task decisions`"
+
+
+def _pause_line(hook: HookInput, task_id: str) -> str:
+    """The pause in force for this session at start (K11, plan §5.1): drain, hold, degraded hold or unreadable flag."""
+    from grimoire.hosts.decisions.pause_brake import pause_context
+
+    return pause_context(hook, task_id)
+
+
 def _reset_temporal_session(hook: HookInput) -> None:
     """Drop the previous temporal-policy session state, if any (issue #429, point 3).
 
@@ -364,9 +390,9 @@ def decide_activation(hook: HookInput) -> Decision:
     link: dict[str, Any] = {}
     if governed:
         if active.is_fallback:
-            profile = active_profile_id(hook.project_root)
+            profile = session_profile(hook)
             if profile in BLOCKING_PROFILES:
-                enrolment = no_task_context(profile, active.candidates)
+                enrolment = no_task_context(profile, active.candidates, active.expired)
         else:
             link = link_session(hook, active)
     directive = (
@@ -396,6 +422,8 @@ def decide_activation(hook: HookInput) -> Decision:
     steering, steering_detail = _steering(hook, task_id)
     providers_line = _providers_status_line(hook.project_root)
     proposals_line = _proposals_status_line(hook.project_root)
+    decisions_line = _decisions_line(hook.project_root)
+    pause_line = _pause_line(hook, task_id)
     context = "\n".join(
         part
         for part in (
@@ -408,6 +436,8 @@ def decide_activation(hook: HookInput) -> Decision:
             directive,
             providers_line,
             proposals_line,
+            decisions_line,
+            pause_line,
         )
         if part
     )

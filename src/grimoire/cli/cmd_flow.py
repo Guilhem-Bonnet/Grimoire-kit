@@ -201,6 +201,11 @@ def _emit_resume(ctx: typer.Context, run_id: str, outcome: ResumeOutcome) -> Non
             f"rien n'a changé ; attendu : {'(run terminé)' if outcome.finished else outcome.node_id}"
         )
         return
+    if outcome.paused:
+        console.print(f"[yellow]en pause[/yellow] {run_id} — node suivant : {outcome.node_id}, non présenté (hold)")
+        for warning in outcome.warnings:
+            console.print(f"  [dim]{warning}[/dim]")
+        return
     if outcome.finished:
         console.print(f"[green]terminé[/green] {run_id} — dernier node : {outcome.node_id}")
         return
@@ -238,6 +243,11 @@ def _emit_dispatch_outcome(ctx: typer.Context, outcome: FlowDispatchOutcome) -> 
     )
     if outcome.status == "finished":
         console.print(f"[green]terminé[/green] {outcome.run_id}")
+        return
+    if outcome.status == "paused":
+        console.print(f"[yellow]en pause[/yellow] {outcome.run_id} — avant le node « {outcome.node_id} »")
+        for note in outcome.faults:
+            console.print(f"  [dim]{note}[/dim]")
         return
     if outcome.status == "waiting_host":
         console.print(f"[yellow]suspendu[/yellow] {outcome.run_id} — node « {outcome.node_id} » revient à l'hôte")
@@ -422,6 +432,38 @@ def flow_status(
         _fail(ctx, exc)
         return
     _emit_status(ctx, view, project_root)
+
+
+@flow_app.command("next")
+def flow_next(
+    ctx: typer.Context,
+    run_id: Annotated[str, typer.Argument(help="Identifiant du run (WFI-...).")],
+    wave: Annotated[
+        bool, typer.Option("--wave", help="Tous les nodes prêts (prédécesseurs faits), au lieu du seul node courant.")
+    ] = False,
+    project_root: _PROJECT_ROOT = Path(),
+) -> None:
+    """Le node courant du run, ou avec ``--wave`` tous les nodes prêts.
+
+    Prêt : non fait, et tous ses prédécesseurs du DAG sont faits. Lecture
+    seule : ne démarre aucun node. Sur un diamant A -> (B, C) -> D,
+    ``--wave`` rend B et C ensemble une fois A franchi.
+    """
+    engine = _engine(project_root)
+    try:
+        nodes = engine.next_wave(run_id) if wave else engine.status(run_id, include_contract=False).current_node
+    except GrimoireRuntimeError as exc:
+        _fail(ctx, exc)
+        return
+    ready = list(nodes) if isinstance(nodes, list) else ([nodes] if nodes else [])
+    if _fmt(ctx) == "json":
+        typer.echo(json.dumps({"run_id": run_id, "wave": wave, "nodes": ready}, indent=2, ensure_ascii=False))
+        return
+    if not ready:
+        console.print("[dim]Aucun node prêt.[/dim]")
+        return
+    for node in ready:
+        console.print(f"  {node}")
 
 
 def _emit_doctor(ctx: typer.Context, report: FlowDoctorReport, as_json: bool) -> None:

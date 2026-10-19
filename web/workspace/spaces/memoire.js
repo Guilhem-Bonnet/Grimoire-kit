@@ -26,6 +26,8 @@
 // API consommées : api.memoryStatus(), api.memoryOverview(projects),
 // api.memorySearch(q, projects).
 
+import { icon, STATE_ICON, stateIcon } from '../shell.js';
+
 const STYLE_ID = 'me-styles';
 
 function injectStyles() {
@@ -33,12 +35,16 @@ function injectStyles() {
   const style = document.createElement('style');
   style.id = STYLE_ID;
   style.textContent = `
-    .me-wrap { padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-5); }
+    .me-wrap { padding: var(--sp-4) var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-5); }
     .me-kpi { display: flex; border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); overflow: hidden; }
-    .me-kpi-item { flex: 1; padding: var(--sp-3) var(--sp-4); border-left: 1px solid var(--line); }
+    .me-kpi-item { flex: 1; padding: var(--sp-3) var(--sp-4); border-left: 1px solid var(--line); border-top: 3px solid var(--tone, transparent); }
     .me-kpi-item:first-child { border-left: 0; }
-    .me-kpi-val { font-family: var(--mono); font-size: var(--t-xl); font-weight: 600; color: var(--ink); }
-    .me-kpi-lbl { font-size: var(--t-min); color: var(--ink3); margin-top: 2px; }
+    .me-kpi-val { font-family: var(--font); font-size: var(--t-xl); font-weight: 600; color: var(--ink); line-height: 1.25; }
+    .me-kpi-lbl .ico { width: 14px; height: 14px; color: var(--tone, var(--ink3)); margin-right: 6px; vertical-align: -2px; }
+    .me-kpi-item[data-tone="ok"] { --tone: var(--ok); }
+    .me-kpi-item[data-tone="warn"] { --tone: var(--warn); }
+    .me-kpi-item[data-tone="bad"] { --tone: var(--bad); }
+    .me-kpi-lbl { font-size: var(--t-min); color: var(--ink3); margin-top: 2px;  display: flex; align-items: center; }
     .me-graph { display: flex; gap: var(--sp-4); align-items: center; padding: var(--sp-4); border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); }
     .me-graph-node { flex: 1; text-align: center; padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--e2); }
     .me-graph-node .val { font-family: var(--mono); font-size: var(--t-l); color: var(--ink); }
@@ -59,7 +65,7 @@ function injectStyles() {
   document.head.append(style);
 }
 
-const dot = (cls) => Object.assign(document.createElement('span'), { className: 'dot' + (cls ? ' ' + cls : '') });
+const dot = (cls) => stateIcon(cls);
 function text(tag, className, value) {
   const node = document.createElement(tag);
   if (className) node.className = className;
@@ -80,7 +86,10 @@ function kpiCard(items) {
   for (const item of items) {
     const cell = document.createElement('div');
     cell.className = 'me-kpi-item';
-    cell.append(text('div', 'me-kpi-val mono', item.value), text('div', 'me-kpi-lbl', item.label));
+    if (item.tone) cell.dataset.tone = item.tone;
+    const lbl = text('div', 'me-kpi-lbl', item.label);
+    if (item.icon) lbl.prepend(icon(item.icon));
+    cell.append(text('div', 'me-kpi-val', item.value), lbl);
     card.append(cell);
   }
   return card;
@@ -88,10 +97,10 @@ function kpiCard(items) {
 
 function renderStore(wrap, ctx, memory) {
   wrap.append(kpiCard([
-    { value: memory.entries == null ? '—' : String(memory.entries), label: 'entrées' },
-    { value: memory.configuredBackend || '—', label: 'backend configuré' },
-    { value: memory.resolvedBackend || '—', label: 'backend résolu' },
-    { value: STATE_WORD[memory.state] || memory.state, label: 'état' },
+    { value: memory.entries == null ? '—' : String(memory.entries), label: 'entrées', icon: 'inbox' },
+    { value: memory.configuredBackend || '—', label: 'backend configuré', icon: 'server' },
+    { value: memory.resolvedBackend || '—', label: 'backend résolu', icon: 'plug' },
+    { value: STATE_WORD[memory.state] || memory.state, label: 'état', icon: STATE_ICON[STATE_DOT[memory.state] || ''], tone: STATE_DOT[memory.state] || '' },
   ]));
 
   const status = document.createElement('div');
@@ -326,7 +335,7 @@ function renderFleet(wrap, ctx, state) {
   const projectsParam = () => (state.scope === 'all' ? 'all' : undefined);
 
   const loadOverview = async () => {
-    tableHost.replaceChildren(text('p', 'lbl', 'Chargement…'));
+    tableHost.replaceChildren(...ctx.loading('Chargement…', 3));
     const data = await ctx.api.memoryOverview(projectsParam()).catch(() => null);
     tableHost.replaceChildren(fleetOverviewTable(ctx, data));
   };

@@ -69,10 +69,12 @@ from grimoire.core.standard_checks.verifiers import (
     _verify_memory_policy,
     run_verifiers,
 )
+from grimoire.core.standard_effective_profile import effective_manifest_profile
 from grimoire.core.standard_generation import (
     CONTEXT_DIR,
     DECISION_DIR,
     EVIDENCE_DIR,
+    PROFILE_LADDER,
     SCORE_DIR,
     STANDARD_DIR,
     STANDARD_PROFILE_FILE,
@@ -86,7 +88,6 @@ from grimoire.data import framework_path
 PROFILE_MAP_PATH = Path("agentic-standard/profile-map.yaml")
 CAPABILITY_MAP_PATH = Path("agentic-standard/capability-map.yaml")
 NEEDS_CATALOG_PATH = Path("agentic-standard/needs-catalog.yaml")
-PROFILE_LADDER = ("starter", "controlled", "orchestrated", "governed", "production")
 EVENT_DIR = Path("_grimoire-output/events")
 KNOWLEDGE_DIR = Path("_grimoire-output/knowledge")
 
@@ -207,6 +208,8 @@ class StandardScoreResult:
     errors: int
     output_path: Path
     dimensions: dict[str, dict[str, int]] = field(default_factory=dict)
+    #: Règles de packs par stack, comptées à part (W6-08) : voir ``stack_packs.rules_score_fields``.
+    rules: dict[str, int | None] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -850,38 +853,6 @@ def _read_manifest_profile(project_root: Path) -> str | None:
     return read_profile(project_root / STANDARD_PROFILE_FILE)
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 def _memory_os_context(memory_policy: Mapping[str, Any]) -> dict[str, Any]:
     memory_os = memory_policy.get("memory_os")
     if not isinstance(memory_os, dict):
@@ -902,66 +873,6 @@ def _memory_os_context(memory_policy: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 def verify_standard_profile(
     project_root: Path,
     *,
@@ -970,7 +881,7 @@ def verify_standard_profile(
 ) -> StandardVerificationResult:
     """Verify that required standard-aware artifacts exist and parse."""
     root = project_root.resolve()
-    selected_profile = profile_id or _read_manifest_profile(root)
+    selected_profile = profile_id or effective_manifest_profile(root)
     if selected_profile is None:
         selected_profile = "starter"
     profile = get_profile(selected_profile)
@@ -999,7 +910,7 @@ def verify_standard_profile(
 
 
 def _selected_profile(project_root: Path, profile_id: str | None) -> StandardProfile:
-    selected_profile = profile_id or _read_manifest_profile(project_root) or "starter"
+    selected_profile = profile_id or effective_manifest_profile(project_root) or "starter"
     return get_profile(selected_profile)
 
 
@@ -1746,6 +1657,9 @@ def calculate_compliance_score(
     total_weight = sum(item["weight"] for item in dimensions.values())
     total_earned = sum(item["earned"] for item in dimensions.values())
     score = int((total_earned / total_weight) * 100) if total_weight else max(0, min(100, 100 - (result.error_count * 20) - (result.warning_count * 3)))
+    from grimoire.core.stack_packs import rules_score_fields
+
+    rules = rules_score_fields(root)
     data = {
         "$schema": "grimoire-agentic-standard-score-result/v1",
         "task_id": normalized_task_id,
@@ -1757,6 +1671,7 @@ def calculate_compliance_score(
         "warnings": result.warning_count,
         "generated_at": datetime.now(UTC).isoformat(),
         "dimensions": dimensions,
+        "rules": rules,
     }
     rel_path = SCORE_DIR / normalized_task_id / "compliance-score.yaml"
     written = _write_yaml_mapping(root, rel_path, data)
@@ -1770,6 +1685,7 @@ def calculate_compliance_score(
         errors=result.error_count,
         output_path=written,
         dimensions=dimensions,
+        rules=rules,
     )
 
 

@@ -157,6 +157,8 @@
 
   /* ── Ombre de la surface posée ────────────────────────────────────────── */
   --shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+  /* Voile derrière un tiroir ouvert (sous 900 px) : le contenu reste lisible. */
+  --scrim: rgba(0, 0, 0, 0.5);
   --shadow-tip: 0 16px 40px rgba(0, 0, 0, 0.35);
 
   /* ── Typographie ──────────────────────────────────────────────────────── */
@@ -185,7 +187,7 @@
   --w-rail: 44px;
   /* Découverte : le rail porte ses libellés, donc il s'élargit — le plancher
      typographique ne se négocie pas contre une largeur de chrome. */
-  --w-rail-wide: 84px;
+  --w-rail-wide: 100px;
   --w-panel: 236px;
   --w-inspector: 300px;
   --h-dock: 200px;
@@ -243,6 +245,7 @@
     --term: #1b1f25;
     --termink: #d6dae0;
     --line: rgba(23, 25, 28, 0.16);
+    --scrim: rgba(23, 25, 28, 0.4);
     --ink: #17191c;
     --ink2: #34383e;
     --ink3: #42454b;
@@ -284,6 +287,7 @@
   --term: #1b1f25;
   --termink: #d6dae0;
   --line: rgba(23, 25, 28, 0.16);
+  --scrim: rgba(23, 25, 28, 0.4);
   --ink: #17191c;
   --ink2: #34383e;
   --ink3: #42454b;

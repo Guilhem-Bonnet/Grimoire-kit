@@ -40,6 +40,12 @@ def _load_module() -> ModuleType:
 ta = _load_module()
 
 
+@pytest.fixture(autouse=True)
+def _no_real_claude_version(monkeypatch: pytest.MonkeyPatch) -> None:
+    """B-01 : ``claude --version`` ne part jamais en sous-processus réel depuis ces tests."""
+    monkeypatch.setattr(ta, "detect_claude_code_version", lambda **k: "9.9.9 (Claude Code)")
+
+
 # ── Fixtures : un catalogue synthétique, format Exercism minimal ───────────
 
 
@@ -284,7 +290,7 @@ def test_main_stops_without_recording_when_repo_contaminated(
     monkeypatch.setattr(ta, "_run_one", _contaminated)
     monkeypatch.setattr(ta, "write_report", _no_report)
 
-    rc = ta.main(["--full", "--workspace", str(workspace)])
+    rc = ta.main(["--full", "--model", "claude-test", "--workspace", str(workspace)])
 
     assert rc != 0
     assert len(attempts) == 1  # la campagne s'arrête au premier dépôt contaminé
@@ -910,18 +916,21 @@ def test_main_full_stops_cleanly_and_writes_a_partial_report_on_low_disk(
         rerun_arms: Any = None,
         label: Any = None,
         toolchain_check: Any = None,
+        results_path: Any = None,
     ) -> None:
         del total_tasks, expected_cost, seed, rerun_arms, label, toolchain_check
+        written["results_path"] = results_path
         written["records"] = list(records)
         written["out_dir"] = out_dir
 
     monkeypatch.setattr(ta, "write_report", _fake_write_report)
 
-    rc = ta.main(["--full", "--workspace", str(workspace)])
+    rc = ta.main(["--full", "--model", "claude-test", "--workspace", str(workspace)])
 
     assert rc == 0
     assert written, "un rapport (même vide) doit être écrit à l'arrêt disque"
     assert written["records"] == []
+    assert Path(written["results_path"]).name == "results.jsonl"  # B-02 : le rapport cite le hash de ce fichier
 
 
 # ── 9. ``--arms`` (lot E, #582) : filtre et repli ──────────────────────────
@@ -1398,7 +1407,7 @@ def test_main_full_only_replays_the_selected_arms(
             for run_index in range(ta.K_REPLAY):
                 record = ta.RunRecord(
                     task.task_id, task.language, arm, run_index, True, 0.1, 10, 10, 2, 5.0, "completed",
-                    recorded_at="2026-09-17T06:00:00+00:00",
+                    recorded_at="2026-09-17T06:00:00+00:00", model_id="claude-test",
                 )
                 carried_over_lines.append(json.dumps(record.to_dict()))
     (state_dir / "results.jsonl").write_text("\n".join(carried_over_lines) + "\n", encoding="utf-8")
@@ -1420,7 +1429,7 @@ def test_main_full_only_replays_the_selected_arms(
 
     monkeypatch.setattr(ta, "write_report", _fake_write_report)
 
-    rc = ta.main(["--full", "--resume", "--arms", "kit", "--label", "lot E", "--workspace", str(workspace)])
+    rc = ta.main(["--full", "--model", "claude-test", "--resume", "--arms", "kit", "--label", "lot E", "--workspace", str(workspace)])
 
     assert rc == 0
     assert called_arms and set(called_arms) == {"kit"}
@@ -1548,6 +1557,64 @@ def test_run_claude_headless_omits_bare_flag_in_oauth_copy_mode(
     ta.run_claude_headless(task_dir, "peu importe", home=tmp_path, timeout_s=5, poll_interval=0.0)
 
     assert "--bare" not in seen_cmds[0]
+
+
+class _NoSpawnPopen:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        raise AssertionError("aucun `claude -p` ne doit être lancé")
+
+
+@pytest.mark.parametrize("arm", ["ecc", "kit", "kit-gov", "aidlc"])
+def test_run_claude_headless_refuses_bare_for_a_governed_arm(
+    arm: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """B-06 : `--bare` ignore hooks, skills et CLAUDE.md du projet ; un bras gouverné ainsi lancé serait faux."""
+    monkeypatch.setattr(ta.subprocess, "Popen", _NoSpawnPopen)
+    task_dir = tmp_path / "run0"
+    task_dir.mkdir()
+
+    with pytest.raises(SystemExit, match="--bare"):
+        ta.run_claude_headless(task_dir, "x", home=tmp_path, timeout_s=5, auth_mode="api-key", arm=arm)
+    with pytest.raises(SystemExit, match="--bare"):  # forcé explicitement, quel que soit le mode
+        ta.run_claude_headless(task_dir, "x", home=tmp_path, timeout_s=5, bare=True, arm=arm)
+
+
+def test_run_claude_headless_keeps_bare_for_the_nu_arm_and_governed_arms_without_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen_cmds: list[list[str]] = []
+
+    class _RecordingFakePopen(_FakePopen):
+        def __init__(self, cmd: list[str], *, cwd: Path, env: dict[str, str], stdout: Any, stderr: Any) -> None:
+            seen_cmds.append(cmd)
+            super().__init__(cmd, cwd=cwd, env=env, stdout=stdout, stderr=stderr)
+
+    monkeypatch.setattr(ta.subprocess, "Popen", _RecordingFakePopen)
+    for index, (arm, mode) in enumerate([("nu", "api-key"), ("kit-gov", "oauth-copy"), ("aidlc", "api-key")]):
+        task_dir = tmp_path / f"run{index}"
+        task_dir.mkdir()
+        bare = False if arm == "aidlc" else None
+        ta.run_claude_headless(task_dir, "x", home=tmp_path, timeout_s=5, poll_interval=0.0, auth_mode=mode, arm=arm, bare=bare)
+
+    assert ["--bare" in cmd for cmd in seen_cmds] == [True, False, False]
+
+
+@pytest.mark.parametrize("arms", ["kit-gov", "nu,kit", "ecc"])
+def test_main_refuses_api_key_with_a_governed_arm_before_any_run(
+    arms: str, synthetic_bench_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_main_environment(monkeypatch, synthetic_bench_root, tmp_path)
+    _spy_security_guards(monkeypatch)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
+    monkeypatch.setattr(ta.subprocess, "Popen", _NoSpawnPopen)
+
+    def no_run(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("aucun run ne doit démarrer")
+
+    monkeypatch.setattr(ta, "_run_one", no_run)
+
+    with pytest.raises(SystemExit, match="gouverné"):
+        ta.main(["--full", "--model", "claude-test", "--workspace", str(tmp_path / "ws"), "--arms", arms, "--auth", "api-key"])
 
 
 def test_run_one_api_key_mode_never_calls_credentials_provisioned_nor_writes_any_credentials(
@@ -2250,7 +2317,7 @@ def _ok_record(task: Any, arm: str, run_index: int, cost: float = 0.5) -> Any:
     return ta.RunRecord(
         task_id=task.task_id, language=task.language, arm=arm, run_index=run_index, success=True,
         total_cost_usd=cost, input_tokens=1, output_tokens=1, num_turns=1, wall_seconds=1.0,
-        terminated_reason="completed",
+        terminated_reason="completed", model_id="claude-test",
     )
 
 
@@ -2293,7 +2360,7 @@ def test_main_runs_security_guards_when_contamination_follows_a_real_run(
     monkeypatch.setattr(ta, "_run_one", _one)
     monkeypatch.setattr(ta, "write_report", _no_report)
 
-    rc = ta.main(["--full", "--workspace", str(workspace)])
+    rc = ta.main(["--full", "--model", "claude-test", "--workspace", str(workspace)])
 
     assert rc == 1
     assert len(attempts) == 2  # la campagne s'arrête au premier dépôt contaminé
@@ -2322,7 +2389,7 @@ def test_main_warns_before_erasing_a_completed_run_dir_without_resume(
         json.dumps(_ok_record(task, "nu", 0).to_dict()) + "\n", encoding="utf-8"
     )
 
-    ta.main(["--full", "--workspace", str(workspace)])
+    ta.main(["--full", "--model", "claude-test", "--workspace", str(workspace)])
 
     err = capsys.readouterr().err
     assert str(run_dir) in err
@@ -2346,7 +2413,7 @@ def test_main_full_tolerates_blank_lines_in_results_without_resume(
         json.dumps(_ok_record(task, "nu", 0).to_dict()) + "\n\n", encoding="utf-8"
     )
 
-    assert ta.main(["--full", "--workspace", str(workspace)]) == 0
+    assert ta.main(["--full", "--model", "claude-test", "--workspace", str(workspace)]) == 0
 
 
 def test_main_full_tolerates_blank_lines_in_results_with_resume(
@@ -2363,7 +2430,7 @@ def test_main_full_tolerates_blank_lines_in_results_with_resume(
         "\n" + json.dumps(_ok_record(task, "nu", 0).to_dict()) + "\n  \n", encoding="utf-8"
     )
 
-    assert ta.main(["--full", "--resume", "--workspace", str(workspace)]) == 0
+    assert ta.main(["--full", "--model", "claude-test", "--resume", "--workspace", str(workspace)]) == 0
 
 
 def test_main_names_the_truncated_results_line(
@@ -2378,7 +2445,7 @@ def test_main_names_the_truncated_results_line(
     good = json.dumps(_ok_record(task, "nu", 0).to_dict())
     (workspace / "state" / "results.jsonl").write_text(good + '\n{"task_id": "pyth', encoding="utf-8")
 
-    assert ta.main(["--full", "--workspace", str(workspace)]) == 1
+    assert ta.main(["--full", "--model", "claude-test", "--workspace", str(workspace)]) == 1
     err = capsys.readouterr().err
     assert "results.jsonl" in err
     assert "ligne 2" in err
@@ -2398,7 +2465,7 @@ def test_main_does_not_warn_for_interrupted_run_residue(
     run_dir.mkdir(parents=True)
     (run_dir / "TASK.md").write_text("résidu\n", encoding="utf-8")
 
-    ta.main(["--full", "--workspace", str(workspace)])
+    ta.main(["--full", "--model", "claude-test", "--workspace", str(workspace)])
 
     assert "effacé" not in capsys.readouterr().err
 
@@ -2411,11 +2478,11 @@ def test_task_repo_guards_live_in_their_own_module_and_script_does_not_grow() ->
     appel de ``hidden_reads`` avec le dossier de l'exercice canonique) + 12 lignes
     pour signaler les transcriptions non évaluées (W1-08b-T1-03 : import, clé
     ``unevaluated_runs`` du rapport, section Markdown, alerte stderr) + 6 lignes pour le coût
-    connu ou inconnu (B-00 : import, champ ``cost_known`` de ``RunOutcome`` et de ``RunRecord``, câblage) + 4 lignes pour ``--subset`` ; le détecteur et le rendu vivent dans ``hidden_reads.py``."""
+    connu ou inconnu (B-00 : import, champ ``cost_known`` de ``RunOutcome`` et de ``RunRecord``, câblage) + 4 lignes pour ``--subset`` + 7 lignes pour B-02 (import, paramètre ``results_path`` de ``write_report``, bloc ``data`` du rapport, ligne Markdown, deux appels ; le calcul vit dans ``recompute.py``) + 78 lignes pour B-01 (champs de ``RunRecord``, option ``--model`` et son refus, pré-contrôle de ``results.jsonl``, ``selection.json``, câblage du rapport, garde opt-in ``--fail-on-saturated``) ; le détecteur et le rendu vivent dans ``hidden_reads.py``, la logique de modèle et de saturation dans ``model_pin.py`` ; + 9 lignes pour B-06 (``run_claude_headless`` : ``extra_args``, ``append_log``, ``bare``, le bras ``aidlc`` vit dans ``aidlc_arm.py``)."""
     for name in ("ContaminatedTaskRepoError", "assert_task_repo_clean", "reset_run_dir"):
         assert getattr(ta, name).__module__ == "task_repo"
     assert (SCRIPT.parent / "task_repo.py").is_file()
-    assert len(SCRIPT.read_text(encoding="utf-8").splitlines()) <= 2584 + 36 + 12 + 6 + 4
+    assert len(SCRIPT.read_text(encoding="utf-8").splitlines()) <= 2584 + 36 + 12 + 6 + 4 + 78 + 7 + 9 + 5  # + 5 : B-06, garde `--bare` (bare_guard.py)
 
 
 # ── W1-08b (#694) : run invalidé si la transcription lit un test caché ─────
@@ -2784,6 +2851,55 @@ def test_heredoc_without_a_read_in_its_opening_line_stays_clean(tmp_path: Path) 
         assert layout.find(_tool_line("Bash", command=command)) == [], command
 
 
+# ── B-06 : le gras Markdown d'un artefact écrit n'est pas un motif de lecture ─────
+
+_PILOT_HEREDOC = (
+    "D={run_dir}/aidlc/spaces/default/codekb/run0\nmkdir -p $D && cd $D\n"
+    "cat > business-overview.md <<'EOF'\n# Vue d'ensemble\n"
+    "Implémenter un **ex_test** purement fonctionnel, patron **zipper de Huet**.\nEOF\n"
+    "cd ../../../.. && aidlc engine workspace codekb-scope-diff --check $D/x.md 2>&1 | tail -8"
+)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        pytest.param(_PILOT_HEREDOC, id="cas-reel-du-pilote-aidlc"),
+        pytest.param("cd ..\ncat > n.md <<'EOF'\nun **ex_test** ici\nEOF", id="cat-vers-md"),
+        pytest.param("cd ..\ncat >> n.txt <<EOF\nun **ex_test**\nEOF", id="cat-append-txt"),
+        pytest.param("cd ..\ncat <<'EOF' > n.md\nun **ex_test**\nEOF", id="redirection-apres-le-heredoc"),
+        pytest.param("cd ..\ntee n.md <<'EOF'\nun **ex_test**\nEOF", id="tee-vers-md"),
+        pytest.param("cd ..\ncat > n.md 2>&1 <<'EOF'\nun **ex_test**\nEOF", id="duplication-de-descripteur"),
+    ],
+)
+def test_markdown_emphasis_in_a_prose_heredoc_is_not_a_read(tmp_path: Path, command: str) -> None:
+    """B-06 : ``**zipper**`` dans un heredoc écrit vers un fichier de prose n'est pas un glob qui vise les tests cachés."""
+    layout = _Layout(tmp_path)
+    command = command.replace("{run_dir}", str(layout.run_dir))
+    assert layout.find(_tool_line("Bash", command=command)) == [], command
+
+
+@pytest.mark.parametrize(
+    ("command", "kind"),
+    [
+        pytest.param("cd ..\ncat > n.py <<'EOF'\nun **ex_test**\nEOF", "glob", id="ecrit-vers-un-script"),
+        pytest.param("cd ..\ncat > n.md <<'EOF'\nun **ex_test**\nEOF\ncat ../run0/ex_test.py", "direct", id="lecture-apres-le-heredoc"),
+        pytest.param("cd ..\ncat > n.md <<'EOF' && cat run0/ex_test.py\nx\nEOF", "direct", id="lecture-en-fin-de-ligne"),
+        pytest.param("cd ..\ncat <<'EOF' | bash\nun **ex_test**\nEOF", "glob", id="corps-envoye-a-un-shell"),
+        pytest.param("cd ..\nbash <<'EOF'\ncat run0/ex_test.py\nEOF", "direct", id="shell-sur-entree-standard"),
+        pytest.param("cd ..\npython3 - <<'EOF'\nprint(open('run0/ex_test.py').read())\nEOF", "direct", id="python-sur-entree-standard"),
+        pytest.param("cd ..\ncat > n.md.sh <<'EOF'\ncat run0/ex_test.py\nEOF", "direct", id="suffixe-trompeur"),
+        pytest.param("cd ..\ncat > $T <<'EOF'\ncat run0/ex_test.py\nEOF", "direct", id="cible-inconnue"),
+        pytest.param("cd ..\ncat n.md > m.md <<'EOF'\nx\nEOF\ncat run0/ex_test.py", "direct", id="lecture-suivante"),
+        pytest.param("cd ..\ncat < run0/ex_test.py > n.md <<'EOF'\nx\nEOF", "direct", id="entree-redirigee"),
+    ],
+)
+def test_prose_heredoc_exemption_does_not_hide_real_reads(tmp_path: Path, command: str, kind: str) -> None:
+    """B-06, contre-épreuve : seul le corps d'un ``cat``/``tee`` vers de la prose est exempté ; le reste reste lu."""
+    found = _Layout(tmp_path).find(_tool_line("Bash", command=command))
+    assert [r.kind for r in found] == [kind], command
+
+
 # ── W1-08b-T1-02 : un cd peut échouer, et le shell reste où il était ─────
 
 
@@ -2836,7 +2952,7 @@ def _invalid_record(task: Any, arm: str = "kit-gov", run_index: int = 2, *, succ
     return ta.RunRecord(
         task_id=task.task_id, language=task.language, arm=arm, run_index=run_index, success=success,
         total_cost_usd=0.4, input_tokens=1, output_tokens=1, num_turns=1, wall_seconds=1.0,
-        terminated_reason="completed", transcript_check="invalid", hidden_test_reads=reads,
+        terminated_reason="completed", transcript_check="invalid", hidden_test_reads=reads, model_id="claude-test",
     )  # fmt: skip
 
 
@@ -2968,7 +3084,7 @@ def test_main_announces_an_invalid_run_on_stderr(
     _spy_security_guards(monkeypatch)
     monkeypatch.setattr(ta, "_run_one", lambda task, arm, run_index, **kw: _invalid_record(task, arm, run_index))
 
-    ta.main(["--pilot", "--workspace", str(workspace)])
+    ta.main(["--pilot", "--model", "claude-test", "--workspace", str(workspace)])
 
     err = capsys.readouterr().err
     assert "[INVALIDE]" in err
@@ -3092,7 +3208,7 @@ def test_main_announces_an_unevaluated_run_on_stderr(
 
     monkeypatch.setattr(ta, "_run_one", _unevaluated)
 
-    ta.main(["--pilot", "--workspace", str(workspace)])
+    ta.main(["--pilot", "--model", "claude-test", "--workspace", str(workspace)])
 
     err = capsys.readouterr().err
     assert "[NON ÉVALUÉ]" in err

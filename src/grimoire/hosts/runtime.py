@@ -277,6 +277,7 @@ def _record_decision(
         return
     try:
         from grimoire.core.standard_generation import TRACES_DIR
+        from grimoire.hosts.decisions.done_gate import done_gate_mode_tags
         from grimoire.traces.ledger import TraceLedger
         from grimoire.traces.schemas import TraceOutcome
 
@@ -321,7 +322,7 @@ def _record_decision(
             tool_calls=tool_calls,
             evidence_refs=[f"_grimoire-output/evidence/{task_id}"] if task_id else [],
             latency_ms=latency_ms,
-            tags=[hook.event.value, verdict],
+            tags=[hook.event.value, verdict, *done_gate_mode_tags(detail.get("done_gate"))],
         )
     except Exception:
         return

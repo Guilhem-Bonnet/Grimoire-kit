@@ -540,6 +540,7 @@ def grimoire_standard_score(project_path: str = ".", profile: str = "", task_id:
             "warnings": result.warnings,
             "errors": result.errors,
             "dimensions": result.dimensions,
+            **result.rules,
             "output_path": str(result.output_path),
         }, indent=2, ensure_ascii=False)
     except (GrimoireError, ValueError, FileNotFoundError, OSError) as exc:
@@ -643,7 +644,7 @@ def grimoire_codegraph_index(project_path: str = ".", source_dir: str = "src") -
 # donc le même gate de preuve : une transition que le CLI refuse, MCP la
 # refuse, et le refus nomme la preuve manquante et le remède.
 
-_TASK_ACTIONS = ("move", "block", "close", "prioritize", "comment", "cancel", "ack")
+_TASK_ACTIONS = ("move", "block", "close", "prioritize", "comment", "cancel", "ack", "ask", "wait", "resume")
 
 
 def _task_service(project_path: str, ledger_root: str) -> Any:
@@ -758,6 +759,29 @@ def task_list_ready(
 
 
 @mcp.tool(annotations=_reads())
+def task_waves(
+    mission: str = "", project_path: str = ".", ledger_root: str = "_grimoire-runtime-output/ledger"
+) -> str:
+    """Show the plan's waves, and for one mission the human checkpoint of each wave.
+
+    A wave checkpoint is tied to the fingerprint of the merged diff and goes stale when the
+    content changes. `claim_blocked` names, per task, the checkpoint that currently refuses its claim.
+
+    Args:
+        mission: Mission id. Empty string lists the waves of every mission (no checkpoints then).
+        project_path: Path to project root (default: current directory).
+        ledger_root: Mission Ledger directory, relative to the project root.
+    """
+    try:
+        service = _task_service(project_path, ledger_root)
+        if not service.has_ledger:
+            return json.dumps({"waves": [], "note": "no Mission Ledger yet — `task add` opens one"})
+        return json.dumps(service.waves(mission or None), indent=2, ensure_ascii=False)
+    except (GrimoireError, OSError, ValueError) as exc:
+        return _task_error(exc)
+
+
+@mcp.tool(annotations=_reads())
 def task_show(task_id: str, project_path: str = ".", ledger_root: str = "_grimoire-runtime-output/ledger") -> str:
     """Show one task: state, acceptance, claim, and what each next move will require.
 
@@ -768,6 +792,7 @@ def task_show(task_id: str, project_path: str = ".", ledger_root: str = "_grimoi
     """
     from grimoire.missions.board import board_status_of
     from grimoire.missions.gates import declared_transitions
+    from grimoire.missions.wave_checkpoint import claim_refusal
 
     try:
         service = _task_service(project_path, ledger_root)
@@ -780,6 +805,8 @@ def task_show(task_id: str, project_path: str = ".", ledger_root: str = "_grimoi
         }
         payload = _task_json(task)
         payload["next_moves_require"] = requires
+        # W5-05 : le motif exact que `task_claim` opposerait (checkpoint de vague requis et non validé), vide sinon.
+        payload["claim_blocked_by"] = claim_refusal(service, task_id)
         return json.dumps(payload, indent=2, ensure_ascii=False)
     except (GrimoireError, OSError, ValueError) as exc:
         return _task_error(exc)
@@ -838,8 +865,12 @@ def task_update(
         action: "move" (needs `to`), "block" (needs `reason`), "close", "prioritize" (needs `to`
             = low|medium|high|critical), "comment" (needs `text`, optional `kind`), "cancel"
             (needs `reason`; `force` to cancel a task another session holds), or "ack"
-            (needs `directive_id` — acknowledges a directive the orchestrator posted).
-        to: Target ledger state for "move", or the priority for "prioritize".
+            (needs `directive_id` — acknowledges a directive the orchestrator posted),
+            "ask" (needs `text`, optional `kind`: parks the task as waiting(human) with a question —
+            only a human answers it, from the cockpit or the CLI, never through this tool),
+            "wait" (needs `to` = ci|quota|paused, optional `reason` as note), or "resume"
+            (waiting → running, same session and epoch).
+        to: Target ledger state for "move", the priority for "prioritize", the wait reason for "wait".
         reason: Why — required for "block" and "cancel", optional otherwise.
         actor: Who acts (default: "mcp-agent").
         project_path: Path to project root (default: current directory).
@@ -853,6 +884,8 @@ def task_update(
 
     if action not in _TASK_ACTIONS:
         return _tool_error({"error": f"unknown action {action!r}", "actions": list(_TASK_ACTIONS)})
+    if action in ("ask", "wait", "resume"):
+        return _task_wait(task_id, action, project_path, ledger_root, actor, to=to, reason=reason, text=text, kind=kind)
     if action in ("prioritize", "comment", "cancel", "ack"):
         return _task_steer(task_id, action, project_path, ledger_root, actor, to=to, reason=reason,
                            text=text, kind=kind, directive_id=directive_id, force=force)
@@ -870,6 +903,26 @@ def task_update(
     try:
         move = _task_service(project_path, ledger_root).transition(task_id, target, actor, reason)
         return json.dumps(move.to_dict(), indent=2, ensure_ascii=False)
+    except (GrimoireError, OSError, ValueError) as exc:
+        return _task_error(exc)
+
+
+def _task_wait(
+    task_id: str, action: str, project_path: str, ledger_root: str, actor: str, *,
+    to: str, reason: str, text: str, kind: str,
+) -> str:
+    """Se garer avec une raison nommée (K6, issue #771) — un agent pose sa question, il n'y répond jamais."""
+    try:
+        service = _task_service(project_path, ledger_root)
+        if action == "ask":
+            if not text.strip():
+                return _tool_error({"error": "ask requires a text"})
+            result = service.ask(task_id, text, actor, kind=kind if kind != "comment" else "choice")
+        elif action == "wait":
+            result = service.wait(task_id, to, actor, note=reason)
+        else:
+            result = service.resume(task_id, actor)
+        return json.dumps(result.to_dict(), indent=2, ensure_ascii=False)
     except (GrimoireError, OSError, ValueError) as exc:
         return _task_error(exc)
 
@@ -1014,9 +1067,10 @@ def grimoire_host_status(project_path: str = ".") -> str:
         hosts.append({
             "host": host_id.value,
             "display_name": profile.display_name,
-            "in_sync": not pending.written and not pending.skipped,
-            "pending": pending.written,
+            "in_sync": not pending.written and not pending.skipped and not pending.removed,
+            "pending": [*pending.written, *pending.removed],
             "conflicts": pending.skipped,
+            "conflict_causes": pending.conflicts,
             "degradations": [d.to_dict() for d in plan.degradations],
             "capability_gaps": [g.surface for g in gaps_for(profile)],
         })

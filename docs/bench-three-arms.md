@@ -1,3 +1,7 @@
+---
+audience: contributeur
+---
+
 <p align="right"><a href="../README.md">README</a> · <a href="../CHANGELOG.md">Changelog</a> · <a href="index.md">Docs</a></p>
 
 # <img src="assets/icons/rocket.svg" width="32" height="32" alt=""> Banc à trois bras
@@ -28,12 +32,13 @@ d'abord, puis temps, puis coût. Le critère d'arrêt du plan (§3 du plan
 | `kit` | `grimoire init . --backend local --no-cockpit` puis `grimoire host sync --host claude` (grimoire-kit ≥ 3.53.0, installé depuis PyPI). | `HOME` isolé partagé (évite d'écrire dans `~/.grimoire`) ; l'état projet (`_grimoire/`) vit dans le dépôt de tâche lui-même. |
 | `kit-gov` | Le bras `kit`, PLUS `grimoire standard init` (profil `starter`, celui qu'un développeur seul obtient sans option) et une tâche de board — à l'id de la tâche du banc — posée en `in_progress` via `grimoire task migrate-standard` (ADR-007). | `HOME` isolé propre à ce bras (`workspace/homes/kit-gov`), jamais partagé avec `kit`. |
 
-Aucun bras ne force `--model` : les quatre utilisent le modèle par défaut de
-Claude Code pour l'environnement d'exécution. C'est volontaire — les bras
-`kit`/`kit-gov` ont le droit de cascader vers un modèle moins cher via leurs
-propres hooks et leur propre routage ; c'est précisément ce que la mesure de
-coût doit révéler, pas quelque chose à neutraliser en figeant un modèle
-unique.
+Depuis B-01, `--model` est obligatoire pour `--pilot` et `--full` : les quatre
+bras partent sur le même modèle demandé (voir §12). Avant B-01 ils utilisaient
+le modèle par défaut de Claude Code, qui a changé entre le lot K et le lot L.
+Le modèle demandé fixe la session principale ; les bras `kit`/`kit-gov` gardent
+le droit de cascader vers un modèle moins cher via leurs propres hooks et leur
+propre routage, et `model_usage` (modèle effectif) le révèle : c'est ce que la
+mesure de coût doit montrer, pas quelque chose à neutraliser.
 
 ### Ce que le bras `ecc` ajoute exactement
 
@@ -115,7 +120,7 @@ avertissement — voir `resolve_auth_mode()`) :
 
 | Mode | Ce qui est transmis à `claude -p` | Copie d'identifiant | Risque |
 |---|---|---|---|
-| `api-key` (préféré) | `--bare` + `ANTHROPIC_API_KEY` (héritée de l'environnement du lanceur par `run_environment()`) | Aucune | Aucun |
+| `api-key` (préféré, bras `nu` seul : voir le piège `--bare` ci-dessous) | `--bare` + `ANTHROPIC_API_KEY` (héritée de l'environnement du lanceur par `run_environment()`) | Aucune | Aucun |
 | `oauth-copy` (repli) | Rien de spécial ; `~/.claude/.credentials.json` copié dans le `HOME` isolé du run | Temporaire, un fichier par run | Rotation de jeton partagée (voir §3.2) |
 
 ### 3.1 Mode `api-key` (lot J, #582)
@@ -138,6 +143,19 @@ et la contient donc déjà si elle est exportée dans l'environnement du
 lanceur. Aucun fichier de config supplémentaire (`.claude.json` ou autre)
 n'est nécessaire — `--bare` est justement documenté comme la voie CI
 recommandée pour éviter tout onboarding interactif.
+
+**Piège `--bare` : refusé pour tout bras gouverné (B-06).** `claude --help`
+(2.1.302) : `--bare` saute les hooks, les skills et la découverte de `CLAUDE.md`.
+Un bras dont la mesure dépend de ceux du projet (`ecc`, `kit`, `kit-gov`, `aidlc`)
+lancé en `--auth api-key` ne serait donc pas gouverné, sans aucun signal :
+résultat faux. `scripts/bench/bare_guard.py` (`refuse_bare_for_governed_arms`)
+fait échouer le banc (`SystemExit`, message explicite) dès `main`, avant tout
+appel payant, et `run_claude_headless(arm=...)` refuse aussi un `--bare` forcé
+pour ces bras. Seul `nu` (ni hook, ni skill, ni instruction) garde `--bare` :
+`--auth api-key` ne vaut donc que pour `--arms nu`. Les autres bras se lancent en
+`--auth oauth-copy` (rotation de jeton : §3.2). Non implémenté : lancer
+`api-key` sans `--bare` (la doc d'authentification donne la priorité à
+`ANTHROPIC_API_KEY` sur OAuth même hors `--bare`) ; non vérifié sur un appel réel.
 
 **Garde de fin de campagne (mode `api-key`).** `find_leaked_api_keys(workspace,
 api_key=...)` balaie les `HOME` isolés (`root/homes/**`) et les journaux de
@@ -389,11 +407,11 @@ python scripts/bench/three_arms.py --dry-run --workspace /chemin/scratch/bench-w
 
 # 2. Pilote réel : 2 tâches x 3 bras x 1 rejeu (6 appels claude -p réels).
 #    Écrit workspace/state/expected_cost.json (coût attendu extrapolé).
-python scripts/bench/three_arms.py --pilot --workspace /chemin/scratch/bench-workspace
+python scripts/bench/three_arms.py --pilot --model <identifiant-de-modele> --workspace /chemin/scratch/bench-workspace
 
 # 3. Campagne complète : jusqu'à 20 tâches x 3 bras x k=3 (180 runs), avec
 #    arrêt anticipé si le critère statistique est atteint plus tôt.
-python scripts/bench/three_arms.py --full --workspace /chemin/scratch/bench-workspace \
+python scripts/bench/three_arms.py --full --model <identifiant-de-modele> --workspace /chemin/scratch/bench-workspace \
     --resume  # relance sans rejouer ce qui est déjà dans results.jsonl
 
 # 4. Régénérer report.md/report.json depuis results.jsonl sans rien rejouer :
@@ -402,7 +420,7 @@ python scripts/bench/three_arms.py --report-only --workspace /chemin/scratch/ben
 # Authentification (lot J, #582, voir §3) : --auth api-key explicite (recommandé,
 # aucune copie d'identifiant) ou --auth oauth-copy explicite (repli historique) ;
 # sans l'option, le mode est déduit de la présence d'ANTHROPIC_API_KEY.
-ANTHROPIC_API_KEY=sk-ant-... python scripts/bench/three_arms.py --pilot \
+ANTHROPIC_API_KEY=sk-ant-... python scripts/bench/three_arms.py --pilot --model <identifiant-de-modele> \
     --workspace /chemin/scratch/bench-workspace --auth api-key
 ```
 
@@ -458,7 +476,7 @@ on rejoue un **sous-lot fixe** par `nu` et `kit-gov` et on compare le ratio à c
 Lancer le sous-lot (dépense réelle, environ 4 $ au tarif du lot L ; non lancé par le chantier B-00) puis évaluer :
 
 ```bash
-python scripts/bench/three_arms.py --full --arms nu,kit-gov --seed 551 --auth oauth-copy \
+python scripts/bench/three_arms.py --full --model <identifiant-de-modele> --arms nu,kit-gov --seed 551 --auth oauth-copy \
     --workspace <workspace neuf> --grimoire-bin <chemin absolu> --label barriere-N \
     --subset docs/bench/cost-gate-subset.json
 python scripts/bench/cost_gate.py --results <workspace>/state/results.jsonl \
@@ -475,3 +493,339 @@ d'avant dérogation.
 
 `--subset` restreint le tirage aux 4 tâches déclarées et s'arrête avant tout run si l'une manque. Limites : un changement de modèle entre deux
 barrières est signalé en avertissement, pas refusé (voir B-01).
+
+## 12. Modèle épinglé, appariement et saturation (B-01)
+
+Trois défauts constatés sur le lot L : `claude -p` partait sans `--model` (le modèle effectif n'était que relu dans `model_usage`, et il avait
+changé entre K et L, `docs/bench/rejeu-lot-l-2026-10-02.md` §1.3) ; rien n'empêchait de reprendre un lot sur un autre modèle ; le `nu` réussissait
+60 runs sur 60, donc le banc ne pouvait montrer aucun gain de succès. Code : `scripts/bench/model_pin.py`, tests : `tests/unit/test_bench_model_pin.py`.
+
+- **`--model <id>`** : obligatoire pour `--pilot` et `--full` (refus avant tout travail, code de sortie 2), transmis à `claude -p --model`. Préférer un identifiant
+  complet : un alias peut pointer plus tard vers un autre modèle, et le banc ne le détecte pas.
+- **Où il est noté** : `state/selection.json` (`model_id`, `claude_code_version`, lue par `claude --version`, `null` si illisible), chaque ligne de `results.jsonl`
+  (`model_id`, `claude_code_version`) et `report.json`/`report.md` (`model_id`, `claude_code_versions`). Un `--dry-run` ne touche pas au modèle déjà noté.
+- **Appariement refusé** : un rapport (`build_report`, donc `--report-only` et la fin d'une campagne) dont les lignes viennent de deux modèles est refusé
+  (`ModelMismatchError`, aucun fichier écrit). Une campagne `--pilot`/`--full` refuse aussi, avant d'écraser `selection.json` et avant tout run, de s'ajouter à un
+  `results.jsonl` d'un autre modèle. Une ligne sans `model_id` (lot antérieur à B-01) est INCONNUE : elle ne s'apparie avec aucun modèle noté, et un lot entièrement
+  antérieur reste lisible avec la mention « non enregistré ». Pour changer de modèle : un workspace neuf.
+- **`nu_baseline_pass_rate`** : part de runs `nu` réussis, par tâche, dans `report.json` (`by_task`) ; `null` sans run `nu` valide (jamais 0.0). Les runs invalidés (W1-08b) sont exclus.
+- **SATURÉ** : strictement plus de 50 % des tâches à 1.0 pour le `nu` donne `suite_saturation.verdict = "SATURÉ"` et une mention en tête de `report.md`. Sans run `nu` : `NON ÉVALUÉ`.
+  Sur les données figées du lot L (`tests/fixtures/bench/lot-l-nu-baseline.json`) : 20 tâches sur 20 à 1.0, SATURÉ.
+- **`--fail-on-saturated`** (opt-in, `--report-only` et `--full`) : le rapport est écrit, puis la sortie est 1 si le verdict est `SATURÉ`
+  (message sur stderr). `NON SATURÉ` et `NON ÉVALUÉ` sortent en 0 : une donnée absente ne fait pas rougir. Le drapeau n'est pas câblé en CI : sur la suite actuelle
+  (lot L) il rougirait en permanence.
+
+Limites. La version de Claude Code qui diffère dans un lot est signalée dans le rapport, pas refusée. Le modèle effectif des sous-agents n'est pas comparé : seul le modèle demandé l'est.
+`cost_gate.py` ne compare pas les modèles de sa référence (`cost-gate-baseline.json`, lot L). Aucune suite non saturée n'existe encore : choisir ou construire des tâches où le `nu`
+échoue ou varie reste à faire, et ne se fait pas sans run payant.
+
+## 13. Recalcul, hash des données, MDE et n requis (B-02)
+
+Trois manques constatés : aucun moyen de refaire un rapport depuis ses données brutes (le mot `recompute` n'existait nulle part) ; aucun calcul de l'effet que
+la suite peut détecter, donc « pas de différence » pouvait se lire « équivalents » ; `evals/aggregate.py` sommait les coûts `null` comme s'ils étaient absents
+(`cost_total` à 0.0 sans aucun coût connu) sans publier `cost_known_ratio`. Code : `scripts/bench/recompute.py`, `scripts/bench/power_calc.py`, tests :
+`tests/unit/test_bench_recompute.py`, `tests/unit/test_evals_aggregate.py`.
+
+```bash
+python scripts/bench/recompute.py --results <workspace>/state/results.jsonl --report <rapport>/report.json [--mde 0.10] [--arms nu,kit-gov] [--require-seal] [--report-md <report.md>]
+python scripts/bench/power_calc.py --mde 0.10 --tasks 20
+```
+
+- **Recalcul** : `report.json` est reconstruit par le même `build_report` à partir de `results.jsonl` seul. Chaque champ dérivé (`per_arm`, `by_task`, `kit_runs`,
+  `kit_gov_runs`, `invalid_runs`, `unevaluated_runs`, `auth_modes`, `model_id`, `claude_code_versions`, `suite_saturation`, `tasks_run`, `k`) qui ne se
+  recalcule pas à 1e-9 près est listé (chemin, valeur publiée, valeur recalculée) et la sortie est 1. Graine, étiquette, coût attendu, contrôle de toolchain et bras repris sont
+  des entrées : non recalculés, et listés comme tels.
+- **Hash des données** : `write_report` (campagne et `--report-only`) écrit dans `report.json` un bloc `data` (`results_file`, `results_rows`, `results_sha256`, sha256
+  des octets de `results.jsonl`) et le cite dans `report.md`. `recompute` compare : fichier modifié depuis = `mismatch`, sortie 1. Un rapport antérieur à B-02 est « NON SCELLÉ » :
+  ses chiffres se recalculent, mais rien ne prouve que le fichier est celui d'origine ; `--require-seal` en fait une erreur (à utiliser à la barrière 3).
+- **Ce que le sceau couvre** : `write_report` ne cite un hash que si `results.jsonl` contient exactement les lignes que le rapport agrège (mêmes clés tâche/bras/rejeu). Un pilote
+  suivi de `--full` sans `--resume`, ou `--full --arms kit` sur un fichier qui contient déjà `nu`/`ecc`, laisse des lignes que le rapport n'a pas comptées : le bloc `data` porte alors
+  `sealed: false`, `report_rows` et la raison, sans hash, et `report.md` écrit « NON SCELLÉ ». `recompute` rend « NON SCELLÉ (rien n'a été recalculé) » (sortie 0, 1 avec `--require-seal`) : il ne
+  peut pas refaire ce rapport depuis ce fichier, et le dit au lieu d'annoncer un hash « ok » suivi d'écarts.
+- **Schéma antérieur** : un champ absent du rapport publié, ou publié à `null` quand le recalcul en donne une valeur (`cost_known_*`, `n_invalid`, `suite_saturation`,
+  `nu_baseline_pass_rate`...), n'est pas un écart : il est listé sous « NON PUBLIÉS ». Une valeur publiée non nulle qui diffère reste REFUSÉE. Limite : un champ mis à `null` à la main n'est pas non plus un écart.
+- **`report.md`** : régénéré par `render_report_markdown` depuis le rapport recalculé (entrées et `data` repris du rapport publié) puis comparé ligne à ligne ; tout écart donne REFUSÉ, les lignes
+  fautives sont listées. Par défaut `report.md` à côté de `report.json` (s'il existe) ; `--report-md` en désigne un autre. Un rapport d'un schéma antérieur n'est pas comparé (le rendu actuel a des sections que
+  son Markdown n'avait pas) : « NON VÉRIFIÉ », dit.
+- **Clés dupliquées** : deux lignes pour la même (tâche, bras, rejeu) sont refusées. Le rapport les compterait deux fois et le recalcul aussi, donc aucun écart ne le trahirait.
+- **`cost_known_ratio`** : repris par bras dans le verdict (déjà dans `report.json` depuis B-00). Dans `evals/aggregate.py`, `summarize` publie maintenant
+  `cost_known_runs`, `cost_known_ratio` et `cost_is_lower_bound`, `cost_total` vaut `null` (et non 0.0) sans aucun coût connu, et le critère de coût du verdict A1 rend
+  « NON CALCULABLE » quand l'un des deux bras n'a qu'un coût partiel (deux bornes basses ne se comparent pas).
+- **MDE et n requis** : approximation normale, deux bras de `n` tâches, une tâche = une unité binaire (`pass^k`), alpha 0,05 bilatéral, puissance 0,80.
+  `MDE(n) = (z_{1-α/2} + z_{puissance}) · sqrt((Var_a + Var_b) / n)`, `Var = p(1-p)`. Deux bases toujours côte à côte : **pire cas** (p = 0,5) et **variance observée**
+  sur les deux bras comparés (`--arms`, défaut `nu,kit-gov`). Un taux observé de 0 ou 1 (suite saturée, lot L) donne « NON ESTIMABLE » et non un MDE nul.
+
+  | Base pire cas | Valeur |
+  |---|---|
+  | n requis pour un MDE de 10 points | 393 tâches par bras (310 en unilatéral) |
+  | n requis pour un MDE de 20 points | 99 |
+  | MDE à n = 3 | 114 points : aucun effet détectable |
+  | MDE à n = 20 (taille du banc) | 44 points |
+  | MDE à n = 30 | 36 points |
+
+Limites. L'approximation normale est grossière pour `n` petit (3, 30) ; les tâches sont traitées comme indépendantes et de même difficulté ; la variance observée sur peu de tâches est
+elle-même incertaine ; le seuil de non-infériorité de 5 points (V1) n'a pas son calcul dédié : seul l'écart détectable bilatéral est chiffré. Le hash cité dans le rapport est aussi
+réécrivable que le rapport : il rend la falsification visible à qui compare avec une copie versionnée ou un hash publié ailleurs, il ne la rend pas impossible. Le n requis n'est atteint
+par aucun lot existant (20 tâches) : atteindre 393 tâches par bras n'est pas réaliste sur le polyglotte, et la barrière 3 doit donc re-fixer le MDE visé avant tout run.
+
+## 14. Interventions humaines par tâche vérifiée (B-05)
+
+Le critère V3 du protocole comparatif (charge humaine de `kit-gov` face à `aidlc`) ne se lit jamais dans un champ déclaré par un
+bras : `scripts/bench/human_gates.py` recompte les interventions sur les traces de chaque run, avec la même règle (`human-gates/1`)
+pour tous les bras. L'étiquette du bras ne sert qu'à regrouper.
+
+Une unité est comptée pour chaque événement suivant, une seule fois même si deux traces le portent :
+
+| Nature | Trace du kit | Trace d'AI-DLC |
+|---|---|---|
+| `gate` : un gate ou checkpoint présenté qui attend une réponse humaine, levé par un octroi ou par la configuration autonome compris | un *challenge* de `flows/authority/<run>.authority.jsonl` (ou une décision sans challenge) | un `STAGE_AWAITING_APPROVAL` de `audit/*.md` (sauf `Revalidated`) |
+| `refusal` : un `ask` du hook, ou un refus qui demande une action humaine pour être levé | la trace typée `_grimoire-output/traces/traces.jsonl` (un appel `PreToolUse` au verdict `ask`) **et** un résultat d'outil en erreur dont le texte est une raison d'`ask` : « Confirme ... », panne du hook, du frein du bail ou de la garde d'autorité (« à toi de décider »), avertissement générique `[Grimoire policy] ... (profil X).` (règle maison, mutation destructive au profil strict) ; les deux voient un même appel, qui ne compte qu'une fois (outil, condensé des arguments, rang) | un résultat d'outil en erreur portant « attended session » ou « withholds human authority » |
+| `question` : une question posée à l'humain | `task.question_asked` du Mission Ledger, hors `origin: flow` (c'est le checkpoint, déjà un `gate`) | un fichier `[Answer]:` écrit par `Write`/`Edit`, ou un `DECISION_RECORDED` (le même fichier ne compte qu'une fois) |
+| `grant` : l'octroi W5-06 lui-même, 1 seul (son challenge n'est pas compté en plus) | une ligne `grant` de `@autonomy-grants.authority.jsonl` | sans objet |
+| `autonomy` : l'activation du mode autonome | sans objet (c'est l'octroi) | `AUTONOMY_MODE_SET` avec `Mode: autonomous` |
+
+Ne comptent pas : un refus (`deny`) que l'agent lève seul (le refus de la politique du kit qui renvoie à une commande réversible) ou qu'aucun humain ne lève (garde d'autorité, frein du bail), un message
+d'information, un tour humain (c'est la réponse, pas la sollicitation), une demande d'octroi jamais attestée.
+
+Un run dont le dépôt ou la transcription manque, ou dont la transcription n'a aucune ligne JSON, vaut `null` (inconnu), jamais 0 :
+`human_gates_known_ratio` le dit par bras, et la médiane par tâche résolue est inconnue dès qu'un run résolu l'est. Comme pour le coût,
+la métrique se lit par tâche résolue (`success` vrai, transcription non invalidée).
+
+```bash
+python scripts/bench/human_gates.py --workspace <workspace du banc> [--arm kit-gov --arm aidlc] [--json]
+```
+
+Limites : les marques de refus sont des sous-chaînes des textes actuels du kit et d'AI-DLC 2.11.0 lus dans leurs sources, pas observées
+dans une transcription d'AI-DLC (B-06) ; une question posée par un widget (`AskUserQuestion`) sans ligne de journal n'est pas vue ; la
+déclaration `AIDLC_UNATTENDED=1` faite au lancement n'est pas dans les traces du bras, le protocole d'équité de B-06 doit la compter à part.
+
+## 15. Bras `aidlc` : AI-DLC 2.11.0, scope express, HOME isolé (B-06)
+
+Le troisième bras du protocole comparatif (plan « Dépasser AI-DLC », section 6) : AI-DLC 2.11.0 sur les mêmes tâches que `nu` et `kit-gov`.
+Code : `scripts/bench/aidlc_arm.py`. Tests : `tests/unit/test_bench_aidlc_arm.py`. Un pilote payant d'une tâche par pilote (k=1, 6,54 $) est décrit au §15.5.
+
+### 15.1 Configuration épinglée
+
+| Élément | Valeur | Source (clone `awslabs/aidlc-workflows`, tag `v2.11.0`) |
+|---|---|---|
+| Version | `2.11.0`, commit `6a378b53c0a4fe0641ed7d8de8dfff94264d5b6a`, vérifié par `git rev-parse` avant tout travail | `CHANGELOG.md:4` |
+| Installation | installeur du tag, `install.sh --version 2.11.0 --yes --quiet`, sous `homes/aidlc` : `AIDLC_BIN_DIR`, `AIDLC_INSTALL_ROOT` et `XDG_DATA_HOME` pointent dans ce `HOME` | `docs/guide/18-install-and-lifecycle.md:191-198`, `:224` |
+| Projet | `aidlc config --harness claude --mcp none --yes`, dans chaque dépôt de tâche ; un `.claude/settings.json` sans hooks arrête le run avant tout appel | `docs/guide/18-install-and-lifecycle.md:418-433` |
+| Modèle | aucune politique de modèle : les agents héritent du modèle de session, celui de `--model` (B-01). `express` n'a pas de relecteur, seul agent à tier propre | `docs/guide/18-install-and-lifecycle.md:462` |
+| Scope | `express` (10 stages sur 33) : relecture `none`, Guard Policy, capteurs, apprentissages, confirmation de résumé et approbation du plan `off`. `bugfix` (9 stages) reste disponible | `core/scopes/aidlc-express.md`, `core/scopes/aidlc-bugfix.md`, `docs/guide/workflow-profiles.md:25`, `:30` |
+| Premier message | `/aidlc express ` suivi de la consigne des autres bras (`BUILD_PROMPT_TEMPLATE`) | `harness/claude/skills/aidlc/SKILL.md` (boucle de transfert) |
+| Jamais `--bare` | le mode `--bare` ignore hooks et skills du projet, donc AI-DLC entier ; le banc le refuse pour tout bras gouverné en `--auth api-key` (`bare_guard.py`, §3.1) | §3.1 |
+| Timeout, boucle | 3600 s par run (toutes reprises comprises), seuil de boucle à 8 commandes identiques (le conducteur relance `orchestrate next` par construction) | constantes `DEFAULT_RUN_TIMEOUT_S`, `LOOP_REPEAT_THRESHOLD` |
+
+`express` plutôt que `bugfix` : un exercice polyglotte part d'un fichier de départ à compléter, pas d'un défaut connu. `bugfix` déclare `existing_code: true`
+et garde l'approbation du plan et les capteurs ; `express` est le scope qu'AI-DLC recommande pour « a small change or a quick end-to-end try »
+(`docs/guide/facilitator-guide.md:130`).
+
+Effet assumé : `express` est aussi le scope le moins coûteux d'AI-DLC, donc le plus favorable à AI-DLC sur le critère V2 (coût). Le choix est pré-enregistré.
+
+### 15.2 Équité : deux pilotes, un seul pré-enregistré
+
+AI-DLC ne documente pas de mode sans humain qui lève ses gates. `AIDLC_UNATTENDED=1` est le mode prévu pour un pilote sans personne présente,
+et il **retient** l'autorité humaine : aucun `HUMAN_TURN` n'est émis, donc aucun gate d'approbation ne se lève (`CHANGELOG.md:129`, `:281-284`,
+`core/knowledge/aidlc-shared/audit-format.md:86`). Le mode autonome (`AUTONOMY_MODE_SET`) ne couvre que les checkpoints de Construction après le
+squelette, absent d'`express` (`docs/guide/glossary.md:11`). Les tests de bout en bout d'AI-DLC jouent la personne par un script séparé de l'agent
+(`tests/harness/scope-run.ts:1-14`, `PersonScript`). D'où deux pilotes, au choix de `--driver` :
+
+| Pilote | Ce qu'il fait | Interventions comptées |
+|---|---|---|
+| `unattended` (mode documenté) | un seul `claude -p` avec `AIDLC_UNATTENDED=1` ; personne ne répond | les gates du journal d'audit (B-05), plus 1 déclarée par run (`declared_interventions`, l'activation du mode sans humain, que les traces ne portent pas : limite de B-05) |
+| `scripted-person` (configuration spéciale, déclarée) | `AIDLC_UNATTENDED` retiré ; à chaque fin de tour sans `WORKFLOW_COMPLETED` dans `audit/*.md`, la même session est reprise (`claude -p --resume <session_id>`) avec la réponse fixe `Approved.`, au plus 12 fois | chaque `STAGE_AWAITING_APPROVAL` et chaque question du journal d'audit, par `human_gates.py` (B-05) ; `person_replies` noté à part |
+
+Attendu, non vérifié : en `unattended`, le run s'arrête au premier gate (Requirements Analysis) sans code, donc échoue. C'est un résultat honnête du mode
+documenté, mais il ne dit rien de la qualité d'AI-DLC. Le pilote `scripted-person` est ce qui rend la comparaison informative ; il donne à AI-DLC une
+personne qui approuve tout, ce qu'aucun bras du kit ne reçoit. Le rapport doit le dire.
+
+### 15.3 Garde-fous avant toute dépense
+
+- **Pré-enregistrement** : `--dry-run` écrit `state/aidlc-preregistration.json` (configuration complète et son empreinte sha256) ;
+  `--run` refuse de partir (code 2) sans ce fichier ou si la configuration diffère (pilote, scope, modèle, tâches, k, timeout).
+- **Plafond explicite** : `--run` sans `--max-total-usd` (ou avec un montant nul, négatif, non fini, non numérique) est refusé par l'analyseur
+  d'arguments avant tout travail, réseau ou disque.
+- **Cumul fermé par défaut** : `state/aidlc-budget.jsonl` (ou le journal partagé de `--budget-ledger`, un seul plafond pour plusieurs workspaces) reçoit une ligne `begin` avant chaque appel `claude -p` (reprises comprises) et une ligne
+  `end` après. Avant chaque appel, le cumul connu est comparé au plafond : atteint, l'appel n'est pas lancé et la campagne s'arrête (code 3).
+  Un `end` sans coût, un `begin` sans `end` (processus tué), une ligne illisible valent *inconnu* : jamais 0, et tout appel suivant est refusé.
+  Une campagne relancée relit ce journal : elle repart du cumul, pas de zéro.
+- **Plafond pendant l'appel** : chaque appel reçoit le reste du plafond en `--max-budget-usd` ; Claude Code arrête lui-même l'appel qui l'atteint.
+  Ce que ce drapeau compte sous `--resume` (l'appel ou la session) n'est pas mesuré : dans le second cas il s'arrête plus tôt, jamais plus tard.
+- **Coût d'une reprise** : sous `--resume`, `total_cost_usd` et `modelUsage` cumulent la session (mesuré, §15.5). Le coût d'un appel est la
+  différence avec le total précédent de la même session ; un total en baisse compte en entier (surcompte, jamais sous-compte). `modelUsage` d'un run
+  est la dernière valeur de chaque session, pas une somme.
+- **Sorties** : `results.jsonl` (une ligne `RunRecord`, `arm: "aidlc"`, coût = somme des appels connus, `cost_known` faux dès qu'un appel est inconnu),
+  `aidlc-runs.jsonl` (pilote, réponses jouées, interventions déclarées, détail par appel, état du budget). Utiliser un workspace propre au bras :
+  `build_report` de `three_arms.py` n'agrège pas encore `aidlc`, et des lignes mêlées casseraient le sceau de B-02.
+
+```bash
+# 0 $ : pré-enregistrement, dépôts, installation d'AI-DLC sous HOME isolé, commandes prévues, couverture du plafond
+python scripts/bench/aidlc_arm.py --dry-run --driver scripted-person --aidlc-clone <clone aidlc-workflows> \
+    --workspace <workspace neuf> --model <identifiant> --max-total-usd <plafond>
+# Estimation seule, sans réseau
+python scripts/bench/aidlc_arm.py --estimate --n 20,99,393
+# Payant, après décision du plafond par Guilhem (décision 5 du plan)
+python scripts/bench/aidlc_arm.py --run --driver scripted-person --aidlc-clone <clone> --workspace <même workspace> \
+    --model <identifiant> --max-total-usd <plafond> --auth oauth-copy [--budget-ledger <journal partagé>]
+```
+
+### 15.4 Estimation chiffrée (aucune mesure AI-DLC)
+
+**Mesuré** (lot L, Opus 5.5, 20 tâches, k=3) : `nu` 10,15 $ pour 60 runs, `kit-gov` 12,69 $ (`docs/bench/rejeu-lot-l-2026-10-02.md:17`), soit 0,169 $
+et 0,212 $ par run en moyenne, 0,159 $ et 0,198 $ en médiane par tâche résolue (`:55-56`), 3 tours médians (`:55-56`). Tarif implicite de `claude -p`,
+ajusté sur le `modelUsage` des 120 runs (données brutes hors dépôt, résidu < 1e-14) : 4 $ par million de jetons en entrée, 20 $ en sortie,
+0,20 $ en lecture de cache, 8 $ en écriture de cache. Un run `nu` médian : 86 k jetons lus en cache, 12,8 k écrits, 1,8 k en sortie.
+
+**Structure d'AI-DLC express** (tag `v2.11.0`) : 10 stages, dont 3 d'initialisation sans gate et 4 CONDITIONAL (Reverse Engineering, queue Operation) ;
+Code Generation en mode `subagent` (`core/aidlc-common/stages/construction/code-generation.md`, front-matter). Volume d'instructions : la skill du
+conducteur fait 87 669 octets (`harness/claude/skills/aidlc/SKILL.md`), le protocole de stage 103 313 (`core/aidlc-common/protocols/stage-protocol.md`),
+le protocole de Construction 90 325, les 10 fichiers de stage 117 842 au total (Reverse Engineering 27 590, Code Generation 32 139). Quelle part
+entre réellement dans le contexte n'est pas mesuré : depuis 2.11.0, une étape « nomme les règles que la conversation porte déjà au lieu de les renvoyer »
+(`CHANGELOG.md:4`, puce « Long runs carry less »).
+
+Modèle de coût (`RunScenario.cost_usd`) : lectures de cache = appels × contexte moyen, plus écritures de cache, plus sortie, au tarif ci-dessus.
+
+| Hypothèse | Appels (principal + sous-agent) | Contexte de départ → final | Écrit en cache | Sortie | Coût d'un run |
+|---|---|---|---|---|---:|
+| `scripted-person`, bas | 35 + 10 | 55 k → 100 k | 130 k | 23 k | **2,13 $** |
+| `scripted-person`, haut | 90 + 30 | 60 k → 200 k | 380 k | 95 k | **7,70 $** |
+| `unattended`, bas (arrêt au premier gate) | 15 | 55 k → 85 k | 60 k | 6 k | 0,81 $ |
+| `unattended`, haut | 25 | 55 k → 110 k | 90 k | 10 k | 1,33 $ |
+
+Un run `aidlc` coûterait donc de 13 à 48 fois un run `nu`. Protocole complet, trois bras (`nu`, `kit-gov`, `aidlc`), k=3, pilote `scripted-person`,
+`nu` et `kit-gov` au coût moyen mesuré :
+
+| Tâches par bras | Ce que la taille permet (§13, pire cas) | Runs `aidlc` | `aidlc` | `nu` + `kit-gov` | Total |
+|---:|---|---:|---:|---:|---:|
+| 20 (banc actuel) | MDE de 44 points | 60 | 128 – 462 $ | 22,84 $ | **151 – 485 $** |
+| 99 | MDE de 20 points | 297 | 633 – 2 287 $ | 113 $ | **746 – 2 400 $** |
+| 393 (n requis par B-02) | MDE de 10 points | 1 179 | 2 514 – 9 078 $ | 449 $ | **2 963 – 9 527 $** |
+
+Hypothèses : modèle Opus 5.5 au tarif du lot L ; pas de compaction (fenêtre de 1 M) ; cache d'une heure tenu entre deux reprises ; tâches de la difficulté
+du lot L. Le protocole demande des tâches plus dures (où le `nu` échoue ou varie, multi-fichiers) : les trois bras coûteraient plus, d'un facteur non mesuré.
+393 tâches par bras n'existent pas dans le polyglotte (§13).
+
+**Non mesurable sans dépense** (état avant le pilote, levé en partie au §15.5) : le nombre réel d'appels et de reprises d'un run AI-DLC ; la part des 400 ko d'instructions qui entre dans le contexte ;
+si un gate se lève sous `claude -p` (hooks de projet chargés, `HUMAN_TURN` émis par une reprise) ; si `--resume` rend un `total_cost_usd` propre à l'appel
+ou cumulé sur la session (le bras somme les appels, ce qui surcompterait dans le second cas) ; le temps mur ; le coût de `kit-gov` sous octroi W5-06.
+
+**Ce qui lève ces inconnues au moindre coût** : un `--dry-run` complet (0 $, installe et configure réellement AI-DLC), puis un pilote d'une tâche par
+pilote, k=1, sous un plafond qui couvre deux runs à l'hypothèse haute (environ 16 $). Le plafond reste la décision de Guilhem (décision 5).
+
+### 15.5 Pilote B-06 (2026-10-19) : une tâche par pilote, k=1, mesures réelles
+
+Autorisé par Guilhem : plafond dur de 16 $ pour toute la passe (contrôle compris), un seul journal de budget partagé (`--budget-ledger`).
+**n = 1 par pilote : aucune conclusion de supériorité, ni de fiabilité, ne se tire de ces chiffres.** Ils servent au chiffrage et aux garde-fous.
+
+**Conditions.**
+
+- AI-DLC 2.11.0 installé par l'installeur du tag sous le `HOME` isolé de chaque workspace : `aidlc version` rend `aidlc 2.11.0 (runtime 2.11.0)`.
+- Épinglage vérifié :
+  - `v2.11.0^{commit}` vaut `6a378b53c0a4fe0641ed7d8de8dfff94264d5b6a` ;
+  - le `version.json` de la release porte `sourceRef: refs/tags/v2.11.0` et `sourceDigest: 6a378b53…` ;
+  - sa somme sha256 est celle de `checksums.txt` ;
+  - l'`install.sh` publié ne diffère de celui du tag que par `PACKAGED_VERSION='2.11.0'` ;
+  - l'installeur vérifie lui-même les sha256 du binaire `aidlc-linux-x64` et du runtime.
+- La vérification de provenance par `gh attestation` est désactivée (`AIDLC_GH_BIN` invalide) pour ne présenter aucun jeton GitHub.
+- Rien n'a été écrit dans le `HOME` réel.
+- Tâche `python/zipper` : la première du tirage (graine 551). Au lot L, le `nu` a résolu les 20 tâches 3 fois sur 3 : aucune tâche où il échoue ou varie.
+- Modèle `claude-opus-5-5`, Claude Code 2.1.302, `--auth oauth-copy` (aucune `ANTHROPIC_API_KEY` sur le poste), jamais `--bare`.
+- Environnement du lanceur vidé (`env -i`) : aucune variable de la session Claude Code parente, `TMPDIR` sous le workspace.
+- Les hooks d'AI-DLC tournent sous `claude -p` : `SessionStart` répond dans le flux, et le journal d'audit est écrit par les outils d'AI-DLC.
+
+**Doute 1, `--bare`.** `claude --help` (2.1.302) : `--bare` « skip hooks […] and CLAUDE.md auto-discovery ». `run_claude_headless` l'ajoute en
+`--auth api-key` (§3.1). Un bras `kit-gov` lancé en `api-key` ne serait donc pas gouverné. Aucun résultat publié n'est concerné :
+
+- les lots E, F, H et J ont tourné avant le mode `api-key` (PR #610), et le lot J a été relancé en `oauth-copy` (`rejeu-lot-j-2026-09-18.md:100`) ;
+- les lots K et L ont tourné en `oauth-copy` (`rejeu-lot-k-2026-09-29.md:43`, `rejeu-lot-l-2026-10-02.md:14`) ;
+- aucune ligne `auth_mode: "api-key"` dans les `results.jsonl` des lots, et `evals/runner.py`, `evals/grounding-probe.py` lancent `claude -p` sans jamais `--bare`.
+
+Ce piège est désormais refusé par le banc pour tout bras gouverné (§3.1, `bare_guard.py`). Le bras `aidlc` force aussi `bare=False`.
+
+**Doute 2, coût d'une reprise.** Un run de contrôle (deux appels d'une même session, le second en `--resume`) a été compté dans le plafond. Résultat :
+
+- `usage` est propre à l'appel ;
+- `total_cost_usd` et `modelUsage` cumulent la session : 0,0921 $, puis 0,1618 $ = 0,0921 + 0,0697, et 0,0697 $ est le coût des jetons du seul second appel ;
+- les jetons de `modelUsage` du second appel sont la somme des deux appels (10 718 + 14 345 = 25 063 lus en cache).
+
+Le garde-fou sommait les totaux. Il compte désormais la différence avec le total précédent de la session (tests rouges puis verts). Avant correction, le
+run `scripted-person` ci-dessous aurait été compté 19,37 $ (somme des totaux cumulés) au lieu de 4,90 $ : le garde l'aurait arrêté au plafond sans motif. Le journal partagé garde
+le contrôle surcompté (0,2540 $ inscrits pour 0,1618 $ dépensés), écrit avant la correction.
+
+**Mesures.**
+
+| | `scripted-person` | `unattended` |
+|---|---:|---:|
+| Coût (`total_cost_usd`, final de session) | **4,8963 $** | **1,4835 $** |
+| Appels `claude -p` (dont reprises) | 6 (5) | 1 (0) |
+| Tours (`num_turns`, boucle principale) | 85 | 11 |
+| Jetons lus / écrits en cache, sortie (`modelUsage`, sous-agents compris) | 8 830 938 / 326 827 / 44 602 | 1 069 923 / 130 991 / 18 847 |
+| Temps mur des appels | 618 s | 168 s |
+| Stages (sur 10) | 7 terminés, 3 sautés (queue Operation) | 3 terminés, arrêt en Reverse Engineering (`ERROR_LOGGED`) |
+| Gates rencontrés / levés | 4 `STAGE_AWAITING_APPROVAL` / 4 `GATE_APPROVED`, 1 question, 5 `HUMAN_TURN` | 0 / 0 |
+| Interventions (`human_gates.py`, B-05) | 6 (4 gates, 2 questions) | non compté (run invalide), 1 déclarée |
+| `WORKFLOW_COMPLETED` | oui | non |
+| Tests cachés | **réussis** | réussis |
+| Contrôle de transcription (W1-08b) | `clean` | **`invalid`** à l'époque, `clean` après correction du détecteur (voir ci-dessous) |
+| Cumul du journal partagé après le run | 5,1503 $ | 6,6337 $ |
+
+Dépense exacte de la passe : 0,1618 $ (contrôle) + 4,8963 $ + 1,4835 $ = **6,5416 $** sur 16 $. Le journal en compte 6,6337 $ (surcompte du contrôle).
+
+Lecture, sans conclusion de supériorité :
+
+- En `scripted-person`, le code est écrit dans le stage Code Generation, par le sous-agent prévu (appel 4).
+- En `unattended`, l'agent principal écrit le fichier de solution de la tâche `zipper` **avant** d'entrer dans le workflow. Le workflow s'arrête ensuite en Reverse Engineering :
+  `aidlc-log engine log link` refuse un lien sans `--artifact`. Les tests cachés passent donc sans qu'AI-DLC ait produit le code. Ce run ne mesure pas
+  AI-DLC.
+- Le `invalid` d'`unattended` vient du détecteur W1-08b, qui lit le gras Markdown `**zipper**` d'un heredoc comme un glob. Les tests cachés n'étaient
+  pas dans le dépôt : c'était un faux positif. Corrigé ensuite (B-06) : le corps d'un heredoc que `cat`/`tee` écrit vers un fichier de prose
+  (`.md`, `.markdown`, `.txt`, `.rst`, `.adoc`), sans tube en fin de ligne, n'est plus lu comme une référence de chemin ; tout le reste l'est encore (corps
+  envoyé à un shell ou à `python`, écrit vers un script, cible inconnue, redirection d'entrée). Rejouée sur la transcription réelle
+  (`ws-unattended/.../run0.stream.jsonl`), la vérification rend `clean`. Aucun résultat publié n'est reclassé (aucune ligne publiée ne porte ce
+  contrôle) ; le tableau ci-dessus garde les valeurs de l'époque, et le compte d'interventions du run `unattended` (« non compté ») n'a pas été recalculé.
+- Le même `.claude/settings.json` porte 45 entrées `permissions.allow` ignorées (« workspace has not been trusted ») : sans effet sous
+  `bypassPermissions`.
+
+**Comparaison à l'estimation (§15.4).**
+
+| | Estimation basse | Mesuré | Estimation haute |
+|---|---:|---:|---:|
+| `scripted-person`, coût | 2,13 $ | **4,90 $** | 7,70 $ |
+| `scripted-person`, lus en cache | 3,16 M | 8,83 M | 13,8 M |
+| `scripted-person`, écrits en cache | 130 k | 327 k | 380 k |
+| `scripted-person`, sortie | 23 k | 44,6 k | 95 k |
+| `unattended`, coût | 0,81 $ | **1,48 $** | 1,33 $ (dépassée de 11 %) |
+
+Sur la même tâche au lot L, le `nu` a coûté 0,141 à 0,165 $ (moyenne 0,155 $), et `kit-gov` 0,195 à 0,333 $. Le run `scripted-person` coûte
+31,6 fois la moyenne du `nu`, et `zipper` est l'une des tâches les moins chères du lot.
+
+**Campagne recalculée** (k=3, pilote `scripted-person` au coût mesuré, `nu` et `kit-gov` au coût moyen du lot L) :
+
+| Tâches par bras | Runs `aidlc` | `aidlc` à 4,90 $ | `nu` + `kit-gov` | Total | Ancienne fourchette |
+|---:|---:|---:|---:|---:|---:|
+| 20 | 60 | 293,78 $ | 22,84 $ | **316,62 $** | 151 – 485 $ |
+| 99 | 297 | 1 454,21 $ | 113,06 $ | **1 567,27 $** | 746 – 2 400 $ |
+| 393 | 1 179 | 5 772,77 $ | 448,81 $ | **6 221,57 $** | 2 963 – 9 527 $ |
+
+En `unattended` à 1,48 $ : 111,85 $, 553,64 $ et 2 197,80 $. Ce pilote ne mesure pas AI-DLC (voir plus haut).
+
+**Plafond proposé** (décision 5, à Guilhem) : une campagne `scripted-person` en deux paliers, chacun sous `--max-total-usd` et un journal partagé.
+
+1. **Palier 1 : 20 tâches, k=1, `aidlc` seul, 160 $.** C'est 20 × 5,35 $ × 1,5. Le 5,35 $ vient du rapport mesuré de 31,6 fois le `nu`, appliqué
+   au coût moyen du `nu` sur le lot L. La marge de 1,5 couvre la variance inconnue, sur n = 1 et sur les tâches Rust et Go, plus chères au lot L.
+2. **Palier 2 : k=3 complet à 20 tâches, 500 $ au total, palier 1 compris.** Le palier 2 se recalcule sur la médiane mesurée au palier 1 avant
+   d'être lancé.
+
+99 tâches demanderaient environ 2 400 $. 393 tâches n'existent pas dans le polyglotte (§13).
+
+**Limites.**
+
+- n = 1 par pilote.
+- La tâche est la plus simple des deux critères du protocole : le `nu` n'y échoue jamais, et elle tient en un seul fichier.
+- Tarif « list » de Claude Code sous abonnement OAuth : un coût rapporté, pas une facture.
+- Ce que `--max-budget-usd` compte sous `--resume` n'est pas mesuré : il n'a jamais été atteint.
+- Les champs de jetons de `RunRecord` somment `usage`, qui couvre la boucle principale sans les sous-agents. `modelUsage` couvre les sous-agents.
+- `build_report` n'agrège toujours pas `aidlc`.
+
+Données brutes hors dépôt : `_scratch/bench-aidlc-b06-pilot/` de la Forge (`budget.jsonl`, `ws-*/state/`, journaux `*.stream.jsonl`).

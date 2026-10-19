@@ -34,7 +34,7 @@ from typing import TYPE_CHECKING, Any
 
 from grimoire.core.exceptions import GrimoireRuntimeError
 from grimoire.core.fsio import atomic_write, locked
-from grimoire.flows.blueprint_loader import build_node_contracts, load_blueprint, topo_order
+from grimoire.flows.blueprint_loader import build_node_contracts, load_blueprint, ready_nodes, topo_order
 from grimoire.flows.directive import Directive, blueprint_digest, directive_id_for
 from grimoire.flows.doctor import FlowDoctorReport, checkpoint_interrupted, diagnose
 from grimoire.flows.executor import InteractiveNodeExecutor, NodeExecutor
@@ -54,6 +54,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from grimoire.flows.attestation import CheckpointJournal
+    from grimoire.flows.autonomy import GrantJournal
 
 __all__ = [
     "FlowEngine",
@@ -166,6 +167,11 @@ def _is_flow_terminal(status: WorkflowStatus) -> bool:
         assert _rust_core is not None  # guarded by _use_rust_backend
         return bool(_rust_core.is_flow_terminal_status(status.value))
     return status in _TERMINAL_STATUSES
+
+
+def _flow_question_id(run_id: str, node_id: str) -> str:
+    """L'identifiant stable de la question qu'un checkpoint pose à l'humain sur la tâche liée (K6)."""
+    return f"q-flow-{run_id}-{node_id}"
 
 
 def _now_iso() -> str:
@@ -485,14 +491,14 @@ class FlowEngine:
                 pending = checkpoints[-1].state.pending_steps
                 checkpoint_pending_head = pending[0] if pending else None
         else:
-            # RUNNING (ou CREATED, avant le tout premier advance_step ;
-            # PAUSED, jamais émis par RuntimeKernel — voir le docstring de
-            # rust/grimoire-flows-core/src/lib.rs).
+            # RUNNING (ou CREATED, avant le tout premier advance_step ; ou PAUSED,
+            # posé par le kernel à la frontière d'un node, K11 — voir le docstring
+            # de rust/grimoire-flows-core/src/lib.rs).
             for event in reversed(self._kernel.get_run_events(wfi.id)):
                 if event.event_type is RunEventType.STEP_STARTED:
                     last_step_started = event.payload.get("step_id")
                     break
-            if wfi.status is WorkflowStatus.RUNNING and last_step_started is not None:
+            if wfi.status in (WorkflowStatus.RUNNING, WorkflowStatus.PAUSED) and last_step_started is not None:
                 # W1-03b : le statut RUNNING est écrit AVANT STEP_STARTED (et
                 # avant le statut CHECKPOINTED d'un checkpoint déjà écrit). Si le
                 # dernier node ouvert est déjà dans le dernier checkpoint, il est
@@ -612,15 +618,150 @@ class FlowEngine:
             {"run_id": run_id, "node_id": node_id, **risk},
         )
 
+    def _linked_service(self, wfi: WorkflowInstance) -> Any:
+        """Le ``TaskService`` du projet si le run a une tâche de ledger liée (K6), sinon ``None``.
+
+        Même règle que :meth:`_record_accepted_risk` : ni ledger ni tâche n'est créé pour un run
+        qui n'en a pas ; il garde sa question dans le journal du run (``flow status``).
+        """
+        from grimoire.missions.service import DEFAULT_LEDGER_RELPATH, TaskService
+
+        root = Path(self._project_root) / DEFAULT_LEDGER_RELPATH
+        if not (root / "events.jsonl").is_file():
+            return None
+        service = TaskService(Path(self._project_root))
+        return service if service.ledger.get_task(wfi.task_id) is not None else None
+
+    def _ask_linked_task(self, wfi: WorkflowInstance, run_id: str, node_id: str, why: str) -> None:
+        """Un checkpoint destructif sans décision attestée (W2-01) devient une question tracée sur la tâche liée (K6).
+
+        La tâche tenue se gare en ``waiting(human)`` ; une tâche qui n'est pas tenue reçoit
+        seulement l'événement ``task.question_asked``. L'identifiant de la question est celui du
+        checkpoint : un refus répété ne la repose pas. Meilleur effort : le flux n'en dépend pas.
+        """
+        import contextlib
+
+        from grimoire.core.exceptions import GrimoireError
+        from grimoire.missions.schemas import TaskState
+        from grimoire.missions.waiting import QUESTION_ASKED_EVENT, Question
+
+        service = self._linked_service(wfi)
+        if service is None:
+            return
+        qid = _flow_question_id(run_id, node_id)
+        text = (
+            f"Checkpoint destructif « {node_id} » du run {run_id} : la décision attend un humain "
+            f"(tour humain de la session qui l'a présenté, ou jeton cockpit) — {why}"
+        )
+        with contextlib.suppress(GrimoireError, OSError, ValueError):
+            task = service.require(wfi.task_id)
+            if task.status in (TaskState.CLAIMED, TaskState.RUNNING):
+                service.ask(
+                    wfi.task_id, text, self._actor_id, kind="permission",
+                    options=("approve", "reject", "amend"), origin="flow", question_id=qid,
+                )
+            elif not any(
+                e.event_type == QUESTION_ASKED_EVENT and e.payload.get("question", {}).get("id") == qid
+                for e in service.ledger.list_events(wfi.task_id)
+            ):
+                question = Question(qid, "permission", text, ("approve", "reject", "amend"), "flow")
+                service.ledger.append_event(
+                    QUESTION_ASKED_EVENT, wfi.task_id, "task", self._actor_id,
+                    {"task_id": wfi.task_id, "reason": "human", "question": question.to_dict(),
+                     "actor_id": self._actor_id},
+                )
+
+    def _settle_linked_question(self, wfi: WorkflowInstance, run_id: str, node_id: str, decision: str) -> None:
+        """La décision d'un checkpoint est attestée humaine : elle répond à la question de la tâche liée (K6).
+
+        L'attestation est la preuve d'autorité (un tour humain, W2-01) : c'est elle, et non le
+        champ ``actor``, qui fait de ceci une réponse du canal humain.
+        """
+        import contextlib
+
+        from grimoire.core.exceptions import GrimoireError
+        from grimoire.missions.schemas import ORIGIN_HUMAN, TaskState
+
+        service = self._linked_service(wfi)
+        if service is None:
+            return
+        qid = _flow_question_id(run_id, node_id)
+        with contextlib.suppress(GrimoireError, OSError, ValueError):
+            task = service.require(wfi.task_id)
+            waiting = task.waiting
+            if task.status is TaskState.WAITING and waiting is not None and waiting.question is not None \
+                    and waiting.question.id == qid:
+                service.answer(
+                    wfi.task_id, f"décision de checkpoint attestée : {decision}", self._actor_id,
+                    origin=ORIGIN_HUMAN, question_id=qid, attested_by_flow=True,
+                )
+
+    def _release_linked_question(self, run_id: str, order: list[str], wfi: WorkflowInstance) -> None:
+        """Un run abandonné ne tranchera plus sa question de checkpoint : la tâche liée qu'elle garait se réveille (K6-S2-01).
+
+        Meilleur effort, comme :meth:`_ask_linked_task` : l'abandon du run ne dépend pas du ledger.
+        """
+        import contextlib
+
+        from grimoire.core.exceptions import GrimoireError
+
+        service = self._linked_service(wfi)
+        if service is None:
+            return
+        with contextlib.suppress(GrimoireError, OSError, ValueError):
+            service.release_flow_question(
+                wfi.task_id, {_flow_question_id(run_id, node) for node in order}, self._actor_id, cause="flow_aborted"
+            )
+
     def _authority(self, run_id: str) -> CheckpointJournal:
         from grimoire.flows.attestation import CheckpointJournal
 
         return CheckpointJournal(self._flows_root, run_id)
 
-    def _present(self, run_id: str, contract: NodeContract | None) -> None:
-        """Un checkpoint présenté émet son challenge, lié à la session courante (rien pour un autre kind)."""
+    def _projected_plan(self, blueprint: Mapping[str, Any], node_id: str) -> dict[str, Any] | None:
+        """Le plan projeté maintenant pour *node_id* (W2-11), ``None`` si le node n'en déclare pas."""
+        from grimoire.flows.attestation import plan_providers, project_plan
+
+        provider = plan_providers(blueprint).get(node_id)
+        return None if provider is None else project_plan(provider, self._project_root)
+
+    def _grants(self) -> GrantJournal:
+        from grimoire.flows.autonomy import GrantJournal
+
+        return GrantJournal(self._flows_root, Path(self._project_root))
+
+    def _grant_lookup(self, run_id: str, node_id: str) -> tuple[str, str] | None:
+        """L'octroi d'autonomie qui couvre ce checkpoint (W5-06) — ``(grant_id, texte de révocation)``."""
+        from grimoire.flows.autonomy import refusal_note
+
+        state = self._grants().for_checkpoint(run_id, node_id)
+        if state is None:
+            return None
+        return state.grant_id, "" if state.active else refusal_note(state)
+
+    def _hold_in_force(self, wfi: WorkflowInstance) -> str:
+        """Le motif d'un ``hold`` qui couvre ce run (K11), ``""`` sinon.
+
+        Seul ``hold`` pose un run à la frontière de node : ``drain`` laisse les agents en cours finir leur tâche,
+        et un drapeau illisible vaut ``drain``. Les drapeaux sont relus à chaque frontière (deux lectures de fichier).
+        """
+        from grimoire.missions.pause import HOLD, home_root, read_pause
+
+        state = read_pause(home_root(Path(self._project_root)))
+        if state.mode_for(wfi.task_id) != HOLD:
+            return ""
+        return "pause hold en vigueur (" + "; ".join(f.label for f in state.applying(wfi.task_id)) + ")"
+
+    def _present(self, run_id: str, contract: NodeContract | None, blueprint: Mapping[str, Any]) -> None:
+        """Un checkpoint présenté émet son challenge, lié à la session courante (rien pour un autre kind).
+
+        Le challenge porte le plan projeté s'il est déclaré (W2-11) : c'est
+        contre lui que la décision sera comparée.
+        """
         if contract is not None and contract.kind == "checkpoint":
-            self._authority(run_id).issue_challenge(contract.node_id)
+            self._authority(run_id).issue_challenge(
+                contract.node_id, plan=self._projected_plan(blueprint, contract.node_id)
+            )
 
     # ── Commandes ────────────────────────────────────────────────────────────
 
@@ -677,7 +818,7 @@ class FlowEngine:
         )
 
         contract = contracts[order[0]]
-        self._present(wfi.id, contract)
+        self._present(wfi.id, contract, blueprint)
         (executor or InteractiveNodeExecutor()).execute(contract, context_pack=self._context_pack(wfi, blueprint_id))
         return wfi, contract
 
@@ -731,9 +872,8 @@ class FlowEngine:
         if self._drift_state(meta, wfi)[0] is not None:
             # Pas de directive_id : aucune réponse n'est attendue tant que le blueprint a dérivé.
             return Directive("blocked", run_id, node_id, None, self._attempt(run_id, node_id), DRIFT_KIND)
-        contracts = build_node_contracts(
-            load_blueprint(self._blueprint_file(meta), self._project_root), self._project_root
-        )
+        blueprint = load_blueprint(self._blueprint_file(meta), self._project_root)
+        contracts = build_node_contracts(blueprint, self._project_root)
         attempt = self._attempt(run_id, node_id)
         did = directive_id_for(run_id, node_id, attempt, self._digest_of(contracts, order))
         if wfi.status is WorkflowStatus.BLOCKED:
@@ -747,8 +887,15 @@ class FlowEngine:
                 and str(refusal["reason"] or "").startswith("awaiting_human")
             )
             return Directive("blocked", run_id, node_id, did, attempt, "awaiting_human" if awaiting else "contract_violation")
+        if wfi.status is WorkflowStatus.PAUSED and self._hold_in_force(wfi):
+            # Pas de directive_id : aucune réponse n'est attendue tant que la pause dure.
+            return Directive("blocked", run_id, node_id, None, attempt, "paused")
         contract = contracts.get(node_id)
         kind = "checkpoint" if contract is not None and contract.kind == "checkpoint" else "execute"
+        if wfi.status is WorkflowStatus.PAUSED and kind == "checkpoint":
+            # K11 : la frontière a posé le run sans présenter ce checkpoint (donc sans challenge) ; la session qui
+            # reprend le reçoit ici, avant le tour humain qui doit y répondre. Idempotent pour une même session.
+            self._present(run_id, contract, blueprint)
         return Directive(kind, run_id, node_id, did, attempt)
 
     def _directive_refusal(self, run_id: str, supplied: str, output: dict[str, Any], allow_replay: bool) -> None:
@@ -946,9 +1093,21 @@ class FlowEngine:
                 f"run {run_id} : aucun node courant résoluble (status={wfi.status.value})", run_id, repaired_notes
             )
 
+        if wfi.status is WorkflowStatus.PAUSED and (held := self._hold_in_force(wfi)):
+            raise _refusal(
+                f"run {run_id} : {held} ; rien n'a été écrit. Reprendre après `grimoire orchestrate resume`.",
+                run_id,
+                repaired_notes,
+            )
         contract = contracts[current_id]
         faults = check_output_against_contract(contract, output)
+        #: Le gate du node : une sortie refusée par son contrat révoque les octrois qui couvrent le run (W5-06).
+        contract_faults = tuple(faults)
         if contract.kind == "checkpoint":
+            if wfi.status is WorkflowStatus.PAUSED and (digest is None or self._crossed_node_for_digest(wfi, digest) is None):
+                # K11 : pause levée, checkpoint jamais présenté : le challenge précède le jugement, sinon la décision
+                # courante serait refusée en `no_challenge` alors que personne n'a pu y répondre. (Pas pour un rejeu.)
+                self._present(run_id, contract, blueprint)
             # Issue #207 : la décision d'hôte ("approve"/"reject"/"amend")
             # n'est pas une pin — jamais franchie côté Rust
             # (`check_output_against_contract` ci-dessus n'en sait toujours
@@ -969,6 +1128,8 @@ class FlowEngine:
                 output,
                 destructive=current_id in destructive_checkpoints(blueprint),
                 cap=max_amendments(blueprint).get(current_id, DEFAULT_MAX_AMENDMENTS),
+                plan=self._projected_plan(blueprint, current_id),
+                grant=lambda: self._grant_lookup(run_id, current_id),
             )
             if gate is not None and gate.refusal:
                 faults.append(gate.refusal)
@@ -990,7 +1151,12 @@ class FlowEngine:
                     replay_of=crossed,
                     repaired=repaired_notes,
                 )
-        if wfi.status is not WorkflowStatus.RUNNING:
+        resumed_from_pause = wfi.status is WorkflowStatus.PAUSED
+        if resumed_from_pause:
+            # K11 : la pause est levée (sinon on a refusé plus haut) ; le challenge d'un checkpoint a été émis
+            # plus haut, pour la session qui reprend — celle qui a posé la pause n'est plus forcément là.
+            wfi = self._kernel.unpause(wfi.id, ctx)
+        if wfi.status is not WorkflowStatus.RUNNING or resumed_from_pause:
             # (Le docteur s'appuie sur ce test : un run déjà RUNNING n'est pas rouvert,
             # voir `doctor.resume_realigns_status`.)
             # CHECKPOINTED (crash avant le advance_step du node suivant) ou
@@ -999,11 +1165,23 @@ class FlowEngine:
             wfi = self._kernel.advance_step(wfi.id, ctx, step_id=current_id)
         if faults:
             wfi = self._kernel.fail_step(wfi.id, ctx, step_id=current_id, reason="; ".join(faults))
-            if gate is not None and gate.decision in ("reject", "amend"):
-                # Un refus ou un amendement est une décision : il consomme son
-                # challenge, la présentation suivante en émet un neuf.
-                self._authority(run_id).record_decision(current_id, gate.decision, gate.reason, gate.attestation)
-            self._present(run_id, contract)
+            if contract_faults:
+                self._grants().revoke_on_red_gate(run_id, current_id, contract_faults)
+            if gate is not None and (gate.decision in ("reject", "amend") or gate.drifted):
+                # Un refus, un amendement ou une dérive de plan (W2-11) est une
+                # décision : il consomme son challenge, la présentation suivante
+                # en émet un neuf (sur le plan courant, pour une dérive).
+                self._authority(run_id).record_decision(
+                    current_id,
+                    "plan_drifted" if gate.drifted else gate.decision,
+                    gate.refusal if gate.drifted else gate.reason,
+                    gate.attestation,
+                )
+                if gate.attestation.attested:
+                    self._settle_linked_question(wfi, run_id, current_id, gate.decision)
+            if gate is not None and gate.refusal and gate.refusal.startswith("awaiting_human"):
+                self._ask_linked_task(wfi, run_id, current_id, gate.attestation.explain())
+            self._present(run_id, contract, blueprint)
             return ResumeOutcome(
                 ok=False,
                 finished=False,
@@ -1050,6 +1228,8 @@ class FlowEngine:
             )
             if gate.accepted_risk is not None:
                 self._record_accepted_risk(wfi, run_id, current_id, gate.accepted_risk)
+            if gate.attestation.attested:
+                self._settle_linked_question(wfi, run_id, current_id, gate.decision)
         if finished:
             self._kernel.complete(wfi.id, ctx)
             return ResumeOutcome(
@@ -1064,7 +1244,22 @@ class FlowEngine:
 
         assert next_id is not None  # finished est False => resume_outcome a nommé le node suivant
         next_contract = contracts[next_id]
-        self._present(run_id, next_contract)
+        held = self._hold_in_force(wfi)
+        if held:
+            # K11 : la frontière de node est le seul endroit où un run se pose sans rien casser — le node vient
+            # d'être franchi, le suivant n'est ni présenté, ni exécuté (un exécuteur par dispatch lancerait un agent).
+            self._kernel.pause(wfi.id, ctx, reason=held)
+            return ResumeOutcome(
+                ok=True,
+                finished=False,
+                node_id=next_id,
+                contract=None,
+                repaired=repaired_notes,
+                attestation=attestation,
+                warnings=(*warnings, held),
+                paused=True,
+            )
+        self._present(run_id, next_contract, blueprint)
         # Le node suivant n'est pas encore ouvert (pas de advance_step ici) :
         # un crash juste après cet appel laisse le kernel en CHECKPOINTED, et
         # le prochain resume() rouvrira ce même node suivant en premier —
@@ -1145,7 +1340,8 @@ class FlowEngine:
             pending_list = []
 
         contract = None
-        if include_contract and current_id is not None:
+        if include_contract and current_id is not None and not (wfi.status is WorkflowStatus.PAUSED and self._hold_in_force(wfi)):
+            # K11 : un run posé par un hold ne sert pas le contrat du node suivant, qu'aucun appelant ne doit exécuter.
             contract = build_node_contracts(
                 load_blueprint(self._blueprint_file(meta), self._project_root), self._project_root
             ).get(current_id)
@@ -1164,6 +1360,22 @@ class FlowEngine:
             blueprint_drift=self._drift_state(meta, wfi)[0] if include_contract else None,
             blueprint_sha256=meta.blueprint_sha256,
         )
+
+    def next_wave(self, run_id: str) -> list[str]:
+        """Les nodes prêts ensemble (W5-04) : non faits, tous leurs prédécesseurs du DAG faits.
+
+        Lecture seule. Un run terminé, abandonné ou refusé n'a pas de liste. Le
+        moteur n'ouvre toujours qu'un node à la fois : cette liste dit ce qui
+        peut s'exécuter en parallèle, elle n'en lance rien. Un node d'une vague
+        plus tardive y figure dès que ses propres prédécesseurs sont faits
+        (a -> b avec c indépendant : après a, b et c).
+        """
+        view = self.status(run_id, include_contract=False)
+        wfi = self._kernel.get_instance(run_id)
+        if wfi is None or _is_flow_terminal(wfi.status):
+            return []
+        meta = self._load_meta(run_id)
+        return ready_nodes(load_blueprint(self._blueprint_file(meta), self._project_root), view.completed_nodes)
 
     def doctor(self, run_id: str) -> FlowDoctorReport:
         """Rejoue le journal d'un run et vérifie ses invariants — lecture seule (W1-03b).
@@ -1204,4 +1416,6 @@ class FlowEngine:
         wfi = self._kernel.get_instance(run_id)
         if wfi is None:
             raise GrimoireRuntimeError(f"run introuvable côté kernel : {run_id}")
-        return self._kernel.abort(wfi.id, self._ctx_for(wfi), reason=reason)
+        aborted = self._kernel.abort(wfi.id, self._ctx_for(wfi), reason=reason)
+        self._release_linked_question(run_id, list(self._load_meta(run_id).order), wfi)
+        return aborted

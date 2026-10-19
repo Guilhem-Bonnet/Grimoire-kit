@@ -379,8 +379,16 @@ def emit_pheromone(board: PheromoneBoard, ptype: str, location: str,
                    intensity: float = DEFAULT_INTENSITY) -> Pheromone:
     """Emit a pheromone onto the board."""
     now = datetime.now(tz=UTC).isoformat()
+    # Deux dépôts identiques dans le même tic d'horloge (~15 ms sous Windows)
+    # donneraient le même id : on dérive un suffixe tant que l'id est déjà pris.
+    taken = {existing.pheromone_id for existing in board.pheromones}
+    pheromone_id = _generate_id(ptype, location, text, now)
+    salt = 0
+    while pheromone_id in taken:
+        salt += 1
+        pheromone_id = _generate_id(ptype, location, text, f"{now}#{salt}")
     p = Pheromone(
-        pheromone_id=_generate_id(ptype, location, text, now),
+        pheromone_id=pheromone_id,
         pheromone_type=ptype, location=location, text=text,
         emitter=emitter, timestamp=now,
         intensity=min(max(intensity, 0.0), MAX_INTENSITY),

@@ -58,6 +58,28 @@ def test_fs_fallback_ignores_grimoire_output(tmp_path: Path) -> None:
     assert before == after
 
 
+def test_fs_fallback_ignores_runtime_output(tmp_path: Path) -> None:
+    """Le ledger, les preuves et les journaux d'autorité sont écrits par le mécanisme lui-même (W3-03)."""
+    (tmp_path / "app.py").write_text("print('v1')\n", encoding="utf-8")
+    before = compute_tree_fingerprint(tmp_path)
+    for rel in ("ledger/events.jsonl", "evidence/pack.json", "flows/authority/check-approval.authority.jsonl"):
+        path = tmp_path / "_grimoire-runtime-output" / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{}\n", encoding="utf-8")
+    assert compute_tree_fingerprint(tmp_path) == before
+
+
+def test_git_mode_ignores_runtime_output(tmp_path: Path) -> None:
+    _git_repo(tmp_path)
+    (tmp_path / "app.py").write_text("print('v1')\n", encoding="utf-8")
+    _commit(tmp_path, "init")
+    before = compute_tree_fingerprint(tmp_path)
+    path = tmp_path / "_grimoire-runtime-output" / "ledger" / "events.jsonl"
+    path.parent.mkdir(parents=True)
+    path.write_text("{}\n", encoding="utf-8")
+    assert compute_tree_fingerprint(tmp_path) == before
+
+
 def test_fs_fallback_ignores_dependency_and_build_dirs(tmp_path: Path) -> None:
     (tmp_path / "app.py").write_text("print('v1')\n", encoding="utf-8")
     before = compute_tree_fingerprint(tmp_path)
