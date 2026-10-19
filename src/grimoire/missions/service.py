@@ -46,6 +46,7 @@ from grimoire.missions.intake import IntakeRequest, MissionIntakeService
 from grimoire.missions.ledger import MissionLedger, ReapReport
 from grimoire.missions.pause import PAUSE_LIFTED_CAUSE, PauseState, pause_claim_guard, read_pause
 from grimoire.missions.recall import DEFAULT_TOKEN_BUDGET, TaskRecall, build_task_recall, consolidate_task_memory
+from grimoire.missions.reservation import find_conflict, reservation_refusal
 from grimoire.missions.schemas import (
     DIRECTIVE_KINDS,
     ORIGIN_AGENT,
@@ -240,12 +241,12 @@ class WakeDecision:
         }
 
 
-def _claim_guards(root: Path) -> Callable[[Mapping[str, MissionTask], MissionTask], str]:
-    """Les gardes que le ledger appelle sous son verrou : la pause d'abord (K11), puis le WIP (K10)."""
+def _claim_guards(root: Path) -> Callable[..., str]:
+    """Les gardes que le ledger appelle sous son verrou : la pause (K11), le WIP (K10), puis les fichiers exclusifs (W1-07)."""
     pause, wip = pause_claim_guard(root), wip_claim_guard(root)
 
-    def guard(tasks: Mapping[str, MissionTask], task: MissionTask) -> str:
-        return pause(tasks, task) or wip(tasks, task)
+    def guard(tasks: Mapping[str, MissionTask], task: MissionTask, claim: TaskClaim | None = None) -> str:
+        return pause(tasks, task) or wip(tasks, task) or reservation_refusal(tasks, task, claim)
 
     return guard
 
@@ -1116,39 +1117,13 @@ class TaskService:
         deux agents n'écrivent jamais le même fichier en même temps. Un claim
         expiré ne bloque plus personne : le temps a suffi, sans geste humain.
         """
-        if not claim.exclusive_files:
+        conflict = find_conflict({t.id: t for t in self.ledger.list_tasks()}, task, claim)
+        if conflict is None:
             return
-        requested = set(claim.exclusive_files)
-        for other in self.ledger.list_tasks():
-            if other.id == task.id or other.status not in (TaskState.CLAIMED, TaskState.RUNNING, TaskState.WAITING):
-                continue
-            held = other.claim
-            # Une tâche en attente (K6) garde ses fichiers : elle reprend sur place, son bail n'est plus jugé.
-            parked = other.status is TaskState.WAITING
-            expired = held.is_expired() if held is not None and not parked else False
-            if held is None or not held.exclusive_files or expired:
-                continue
-            overlap = requested & set(held.exclusive_files)
-            if not overlap:
-                continue
-            fichier = min(overlap)
-            if parked:
-                # Pas la date d'expiration du claim (périmée, sans effet ici) : ce qui rend les fichiers.
-                due = other.waiting.until if other.waiting is not None else ""
-                reason, remedy = (
-                    f"réservé par {other.id} ({held.actor_id}), en attente"
-                    + (f" ({other.waiting.reason})" if other.waiting is not None else "")
-                    + (f" jusqu'à {due}" if due and due != "unknown" else ""),
-                    "répondre à sa question (`grimoire task answer`) ou attendre son réveil (`grimoire task wake`), "
-                    "ou réclamer une autre tâche",
-                )
-            else:
-                reason = f"réservé par {other.id} ({held.actor_id}) jusqu'à {held.expires_at or 'sans expiration'}"
-                remedy = "attendre l'expiration du claim ou réclamer une autre tâche"
-            refusal = GateRefusal(evidence=fichier, reason=reason, remedy=remedy)
-            verdict = GateVerdict(transition_id="exclusive_files", strictness="hard_fail", refusals=(refusal,))
-            self._record_refusal(task, target, verdict, claim.actor_id)
-            raise TaskRefusedError(task.id, verdict)
+        refusal = GateRefusal(evidence=conflict.file, reason=conflict.reason, remedy=conflict.remedy)
+        verdict = GateVerdict(transition_id="exclusive_files", strictness="hard_fail", refusals=(refusal,))
+        self._record_refusal(task, target, verdict, claim.actor_id)
+        raise TaskRefusedError(task.id, verdict)
 
     def _consolidate(self, task: MissionTask, target: TaskState, *, actor: str, reason: str) -> None:
         """Clôture ou blocage : ce que la roadmap Memory OS autorise à écrire.
