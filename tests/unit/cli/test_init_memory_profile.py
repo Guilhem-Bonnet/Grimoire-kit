@@ -45,7 +45,7 @@ class TestChoiceIsAComposition:
     ) -> None:
         _with_capabilities(monkeypatch, profiles.REQ_EGRESS)
 
-        profile_id, backend, offline, qdrant = cmd_init._choose_memory_profile(
+        profile_id, backend, offline, qdrant, _start_stack = cmd_init._choose_memory_profile(
             "qdrant-local", offer_qdrant_docker=False
         )
 
@@ -61,7 +61,7 @@ class TestChoiceIsAComposition:
         _with_capabilities(monkeypatch, profiles.REQ_EGRESS, profiles.REQ_DOCKER)
         answers["choice"] = "3"  # graphe
 
-        profile_id, backend, _, _ = cmd_init._choose_memory_profile("qdrant-local", offer_qdrant_docker=False)
+        profile_id, backend, _, _, _ = cmd_init._choose_memory_profile("qdrant-local", offer_qdrant_docker=False)
 
         assert profile_id == "graphe"
         assert backend == "weaviate-server"
@@ -98,7 +98,7 @@ class TestEgress:
         _with_capabilities(monkeypatch, profiles.REQ_EGRESS, profiles.REQ_DOCKER)
         answers["egress"] = False
 
-        profile_id, _, offline, qdrant = cmd_init._choose_memory_profile("local", offer_qdrant_docker=True)
+        profile_id, _, offline, qdrant, _start_stack = cmd_init._choose_memory_profile("local", offer_qdrant_docker=True)
 
         assert answers["choices"] == ["1", "2"]
         assert profile_id in ("lexical", "standard")
@@ -133,7 +133,7 @@ class TestQdrantContainer:
         _with_capabilities(monkeypatch, profiles.REQ_EGRESS)
         answers["docker"] = True
 
-        profile_id, backend, _, qdrant = cmd_init._choose_memory_profile("local", offer_qdrant_docker=True)
+        profile_id, backend, _, qdrant, _start_stack = cmd_init._choose_memory_profile("local", offer_qdrant_docker=True)
 
         assert profile_id == "standard"
         assert qdrant is True
@@ -145,10 +145,64 @@ class TestQdrantContainer:
         _with_capabilities(monkeypatch, profiles.REQ_EGRESS)
         answers["docker"] = False
 
-        _, backend, _, qdrant = cmd_init._choose_memory_profile("local", offer_qdrant_docker=True)
+        _, backend, _, qdrant, _start_stack = cmd_init._choose_memory_profile("local", offer_qdrant_docker=True)
 
         assert qdrant is False
         assert backend == "local"
+
+
+class TestStartCompletStackNow:
+    """2026-09-18 arbitrage (Guilhem, #619): choosing `complet` asks a
+    dedicated question, defaulting to *yes* — the point of recommending the
+    richest composition is that its potential gets exploited right away."""
+
+    @pytest.fixture()
+    def defaults(self, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+        """Records each Confirm's own ``default=`` kwarg by prompt text,
+        distinct from ``answers`` above: this question's *default* is the
+        thing under test, not a canned reply."""
+        seen: dict[str, Any] = {}
+
+        def fake_confirm(prompt: str, **kwargs: Any) -> bool:
+            seen[prompt] = kwargs.get("default")
+            return bool(kwargs.get("default"))
+
+        def fake_prompt(prompt: str, **kwargs: Any) -> str:
+            return str(kwargs.get("default"))
+
+        monkeypatch.setattr(cmd_init.Confirm, "ask", staticmethod(fake_confirm))
+        monkeypatch.setattr(cmd_init.Prompt, "ask", staticmethod(fake_prompt))
+        return seen
+
+    def test_defaults_to_yes(self, defaults: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
+        _with_capabilities(monkeypatch, profiles.REQ_EGRESS, profiles.REQ_DOCKER, profiles.REQ_REDIS)
+        monkeypatch.setattr(cmd_init.Prompt, "ask", staticmethod(lambda *a, **k: "4"))  # complet
+
+        *_rest, start_stack = cmd_init._choose_memory_profile("local", offer_qdrant_docker=False)
+
+        assert start_stack is True
+        prompt = next(p for p in defaults if "Démarrer la pile mémoire complète" in p)
+        assert defaults[prompt] is True
+
+    def test_declining_is_honoured(self, answers: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
+        _with_capabilities(monkeypatch, profiles.REQ_EGRESS, profiles.REQ_DOCKER, profiles.REQ_REDIS)
+        answers["choice"] = "4"
+        answers["docker"] = False  # the shared fake_confirm answers every non-egress question
+
+        *_rest, start_stack = cmd_init._choose_memory_profile("local", offer_qdrant_docker=False)
+
+        assert start_stack is False
+
+    def test_never_asked_for_other_compositions(
+        self, answers: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _with_capabilities(monkeypatch, profiles.REQ_EGRESS, profiles.REQ_DOCKER, profiles.REQ_REDIS)
+        answers["choice"] = "3"  # graphe, not complet
+
+        *_rest, start_stack = cmd_init._choose_memory_profile("local", offer_qdrant_docker=False)
+
+        assert start_stack is False
+        assert not any("Démarrer la pile mémoire complète" in prompt for prompt in answers["asked"])
 
 
 class TestCapabilityProbing:

@@ -115,6 +115,9 @@ class TestBuildNextSteps:
                 resolved=resolved,
                 backend="qdrant-local",
                 no_cockpit=False,
+                # Already the richest composition — no machine capability
+                # (docker, embedding) could ever suggest going further.
+                layer_profile="complet",
             )
         assert panel.unexploited_line is None
 

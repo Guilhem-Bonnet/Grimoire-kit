@@ -88,5 +88,12 @@ class TestUnexploitedHints:
         manifest.parent.mkdir(parents=True)
         manifest.write_text("profile: governed\n", encoding="utf-8")
         with patch("grimoire.core.project_capabilities.slug_for_path", return_value="demo"):
-            hints = unexploited_hints(tmp_path, archetype="infra-ops", backend="qdrant-local")
+            hints = unexploited_hints(
+                tmp_path,
+                archetype="infra-ops",
+                backend="qdrant-local",
+                # Already the richest composition — nothing left to suggest
+                # regardless of this machine's docker/embedding capability.
+                layer_profile="complet",
+            )
         assert hints == []

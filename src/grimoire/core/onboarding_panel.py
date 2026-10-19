@@ -61,12 +61,22 @@ def build_next_steps(
     resolved: ResolvedArchetype,
     backend: str,
     no_cockpit: bool = False,
+    layer_profile: str = "",
 ) -> NextStepsPanel:
-    """Build the panel body for one freshly initialised (or refreshed) project."""
+    """Build the panel body for one freshly initialised (or refreshed) project.
+
+    ``layer_profile`` (the config's ``memory.layer_profile``, when the caller
+    has it — ``grimoire init`` does, right after its Memory step) drives
+    whether "upgrade the memory" is offered: below what this machine can
+    serve, not just "still lexical" (2026-09-18 onboarding decision, PR2).
+    """
     info_reason = resolved.reason
     headline = f"Archetype [bold]{resolved.archetype}[/bold] installed ({info_reason}) — memory {backend}."
 
-    hints = unexploited_hints(target, archetype=resolved.archetype, backend=backend, no_cockpit=no_cockpit)
+    hints = unexploited_hints(
+        target, archetype=resolved.archetype, backend=backend, no_cockpit=no_cockpit,
+        layer_profile=layer_profile,
+    )
     hint_by_command = {h.command: h for h in hints}
 
     candidates: list[str] = []
@@ -82,10 +92,9 @@ def build_next_steps(
     if standard_hint:
         candidates.append(f"{standard_hint.label.capitalize()}: `{standard_hint.command}`")
 
-    if "grimoire memory up --profile standard --apply" in hint_by_command:
-        candidates.append(
-            "Upgrade to a richer memory profile: `grimoire memory up --profile standard --apply`"
-        )
+    memory_hint = next((h for h in hints if h.command.startswith("grimoire memory up")), None)
+    if memory_hint:
+        candidates.append(f"Upgrade to a richer memory profile: `{memory_hint.command}`")
 
     # Always-available fallback so a fully-specialized, fully-governed project
     # still gets three concrete actions instead of trailing off short.
@@ -107,7 +116,7 @@ def build_next_steps(
     exploited_categories = {
         "cockpit": no_cockpit or "grimoire cockpit" not in hint_by_command,
         "standard": not any(h.command.startswith("grimoire standard") for h in hints),
-        "memory": backend not in ("lexical", "local"),
+        "memory": memory_hint is None,
     }
     missing = [label for key, label in _ALL_CAPABILITY_LABELS.items() if not exploited_categories[key]]
     unexploited_line = (
