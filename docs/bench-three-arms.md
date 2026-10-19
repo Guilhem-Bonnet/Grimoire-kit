@@ -602,7 +602,7 @@ déclaration `AIDLC_UNATTENDED=1` faite au lancement n'est pas dans les traces d
 ## 15. Bras `aidlc` : AI-DLC 2.11.0, scope express, HOME isolé (B-06)
 
 Le troisième bras du protocole comparatif (plan « Dépasser AI-DLC », section 6) : AI-DLC 2.11.0 sur les mêmes tâches que `nu` et `kit-gov`.
-Code : `scripts/bench/aidlc_arm.py`. Tests : `tests/unit/test_bench_aidlc_arm.py`. Un pilote payant d'une tâche par pilote (k=1, 6,54 $) est décrit au §15.5.
+Code : `scripts/bench/aidlc_arm.py`. Tests : `tests/unit/test_bench_aidlc_arm.py`. Un pilote payant d'une tâche par pilote (k=1, 6,54 $) est décrit au §15.5, la campagne palier 1 (20 tâches, k=1, 87,24 $) aux §15.6 et §15.7.
 
 ### 15.1 Configuration épinglée
 
@@ -829,6 +829,133 @@ En `unattended` à 1,48 $ : 111,85 $, 553,64 $ et 2 197,80 $. Ce pilote ne mesur
 - `build_report` n'agrège toujours pas `aidlc`.
 
 Données brutes hors dépôt : `_scratch/bench-aidlc-b06-pilot/` de la Forge (`budget.jsonl`, `ws-*/state/`, journaux `*.stream.jsonl`).
+
+### 15.6 Campagne palier 1 : pré-enregistrement (écrit le 2026-10-19, avant le premier run, non modifié ensuite)
+
+Autorisé par Guilhem : palier 1 seul (§15.5, « Plafond proposé »), **plafond dur de 160 $** pour toute la passe. Le palier 2 (k=3, 500 $ au total)
+n'est pas autorisé et n'est pas lancé : il se recalcule sur la médiane mesurée ici.
+
+**Configuration** (`state/aidlc-preregistration.json`, écrit par `--dry-run`, empreinte `config_digest` `496cf4c6c0735b1d7a80e3fb94ebb25ec5d1ac74ce121e2c3b39f9b02428617f`,
+sha256 du fichier `2b301dcf6ef968d193ef6d195a73df1b22b2a56fba3cbb84e2ce9f67047b1cb8`) :
+
+- bras `aidlc` seul, AI-DLC 2.11.0, scope `express`, pilote **`scripted-person`**, `k = 1`, graine 551 ;
+- les 20 tâches du lot L, dans l'ordre du tirage (identiques à `selection.json` du lot L), clone `polyglot-benchmark` `7e0611e7` du lot L (`--bench-root`), mêmes tests cachés :
+  `python/{zipper,react,list-ops,proverb,bowling}`, `javascript/{list-ops,go-counting,affine-cipher,queen-attack,transpose}`,
+  `go/{error-handling,simple-linked-list,palindrome-products,pov,bottle-song}`, `rust/{react,forth,scale-generator,two-bucket,poker}` ;
+- modèle `claude-opus-5-5` (`--model`), Claude Code 2.1.302, `--auth oauth-copy`, jamais `--bare` ; timeout 3600 s par run, 12 réponses au plus,
+  seuil de boucle 8 ;
+- journal de budget neuf (`state/aidlc-budget.jsonl`, cumul de départ 0 $), `--max-total-usd 160` ; environnement du lanceur vidé (`env -i`), `TMPDIR` sous le workspace ;
+- épinglage revérifié avant le premier run : `v2.11.0^{commit}` = `6a378b53` ; installeur mis en place = `git show v2.11.0:scripts/install.sh` (sha256 `aaa739b9…`) ;
+  binaire installé sha256 `2503ce11…` = ligne `aidlc-linux-x64` du `checksums.txt` de la release ; `version.json` installé : `sourceDigest` `6a378b53…` ; `aidlc version` :
+  `aidlc 2.11.0 (runtime 2.11.0)`. Provenance `gh attestation` désactivée (aucun jeton GitHub).
+
+**Limite d'équité, déclarée** : en `scripted-person`, AI-DLC reçoit une personne simulée qui répond `Approved.` à chaque fin de tour. Aucun bras du kit ne
+reçoit cette aide : les bras `nu` et `kit-gov` travaillent en un seul `claude -p` sans réponse humaine. Le pilote `unattended` n'est pas retenu : au pilote,
+il ne mesurait pas AI-DLC (§15.5).
+
+**Mesure principale** : succès aux tests cachés, par run, taux sur les runs exécutés avec **IC95 de Wilson** (le bootstrap du harnais dégénère à 0 % ou 100 %) ;
+le bootstrap de `three_arms.py` est donné à côté. Un run arrêté par `timeout`, `loop` ou `reply_cap` compte comme un échec (règle du bras). Un run non lancé faute de
+budget n'est **pas** un échec : il est rapporté « non exécuté », hors dénominateur.
+
+**Contrôle de transcription (W1-08b)** : taux principal sur les runs non `invalid` (règle de `build_report`) ; taux sur tous les runs à côté. Chaque `invalid`
+est relu à la main (faux positif connu sur le gras Markdown, §15.5) et le verdict de relecture est rapporté, sans changer le taux principal.
+
+**Mesures secondaires** : coût total et par run (médiane, min, max), coût par tâche résolue, temps mur, appels `claude -p` et reprises, tours, gates
+(`STAGE_AWAITING_APPROVAL` et `GATE_APPROVED` du journal d'audit), interventions humaines simulées (`human_gates.py`, B-05) et réponses jouées,
+`WORKFLOW_COMPLETED`, raison d'arrêt.
+
+**Comparaison** : descriptive, aux bras `nu` et `kit-gov` du lot L sur les mêmes 20 tâches (eux à k=3, ici k=1). Aucune conclusion de supériorité
+au-delà de ce que l'IC permet : à 20 tâches, l'écart minimal détectable est de **44 points** (pire cas, §13). Le lot L est saturé (60/60 pour les deux bras) :
+un écart de succès ne pourra aller que dans un sens.
+
+**Arrêt** : net au plafond (garde-fou du bras). Un défaut du bras ou du garde-fou (coût mal compté, blocage) arrête la campagne ; il est corrigé avec un test
+rouge puis vert, et la campagne reprend sous le même plafond cumulé (le journal repart du cumul, les runs déjà écrits ne sont pas rejoués).
+
+### 15.7 Campagne palier 1 (2026-10-19) : résultats
+
+Lancée à 18:01 UTC, terminée à 20:41 UTC, sans incident : 20 runs sur 20, code de sortie 0, aucun coût inconnu, aucun appel ouvert dans le journal,
+aucun identifiant laissé dans le `HOME` isolé. Le §15.6 n'a pas été modifié après le premier run (commit du pré-enregistrement antérieur au premier `begin`
+du journal). **k = 1 : aucune conclusion de supériorité ni de fiabilité ne se tire de ces chiffres.**
+
+**Dépense exacte : 87,2406 $** sur 160 $ (somme des 125 lignes `end` du journal). Contrôle croisé : la somme des `costUSD` du `modelUsage` final de chaque
+session vaut aussi 87,241 $. Le coût d'une reprise, compté par différence du total de session (§15.3), ne surcompte donc rien sur cette campagne.
+
+**Mesures.**
+
+| | Valeur |
+|---|---|
+| Succès aux tests cachés, mesure principale (runs non `invalid`) | **17/17**, IC95 Wilson [81,6 %, 100 %] ; bootstrap du harnais [100 %, 100 %] (dégénéré) |
+| Succès, tous runs | 20/20, IC95 Wilson [83,9 %, 100 %] |
+| Coût par run : médiane / min / max / moyenne | **4,592 $** / 0,886 $ / 5,930 $ / 4,362 $ |
+| Coût médian par tâche résolue | 4,593 $ |
+| Coût par langue (médiane ; total) | python 4,47 $ (19,20 $) ; javascript 4,74 $ (23,40 $) ; go 4,57 $ (19,53 $) ; rust 5,03 $ (25,11 $) |
+| Temps mur des appels : total / médiane / min / max | 9 435 s (2 h 37) / 494 s / 110 s / 782 s |
+| Appels `claude -p` : total / médiane par run | 125 (20 premiers messages + 105 réponses `Approved.`) / 5 |
+| Tours (`num_turns`) : médiane par run | 76 |
+| Jetons (`modelUsage`, sous-agents compris, 20 runs) | 156,8 M lus en cache, 5,50 M écrits en cache, 861 k en sortie, 2,7 k en entrée ; modèle unique `claude-opus-5-5` |
+| `WORKFLOW_COMPLETED` | 18/20 |
+| Raison d'arrêt | `completed` 18, `reply_cap` 2 (`python/zipper`, `go/bottle-song`) |
+| Gates (`audit/*.md`) | 72 `STAGE_AWAITING_APPROVAL`, 72 `GATE_APPROVED` (4 par run terminé, 0 dans les deux runs parqués) |
+| Interventions humaines simulées (`human_gates.py`, B-05) | runs valides : 67 (60 `gate`, 7 `question`), médiane **4** par tâche résolue ; 20 runs : 79 (72 + 7) |
+| Contrôle de transcription (W1-08b) | 17 `clean`, 3 `invalid` (`javascript/queen-attack`, `go/simple-linked-list`, `rust/forth`) |
+
+**Relecture des trois `invalid`** : les trois signalements sont de type `directory`, sur `./` (le dépôt de run, cité par `aidlc engine workspace
+codekb-publish --paths ./`) et sur `/` (un `cd /` en fin de commande). Les tests cachés ne sont pas dans le dépôt pendant le run (ils y sont copiés après), et
+aucune transcription ne cite le dossier `hidden-tests`. Verdict de relecture : faux positifs ; le taux principal ne change pas (17/17).
+
+**Qui écrit le code.** Dans **18 runs sur 20**, l'agent principal écrit le fichier de solution dans ses 3 à 11 premiers appels d'outils, avant toute référence au
+stage Code Generation ; seuls `python/proverb` et `rust/scale-generator` voient la solution écrite d'abord par le sous-agent de Code Generation. Le sous-agent
+retouche ensuite la solution dans 11 runs. Dans les deux runs `reply_cap`, l'agent parque le workflow en Reverse Engineering (`WORKFLOW_PARKED`) en citant la
+consigne commune (« Termine dès que tu es raisonnablement confiant »), puis répond « rien à valider » aux 12 `Approved.` : 0,29 $ et 0,22 $ de réponses
+inutiles, comptées. Le succès aux tests cachés mesure donc surtout le modèle, AI-DLC chargé ; le coût, lui, mesure bien la cérémonie AI-DLC (7 stages
+terminés, 3 sautés, 4 gates dans les 18 runs terminés). Au pilote, le code était écrit dans Code Generation : n = 1 ne le montrait pas.
+
+**Comparaison descriptive au lot L, mêmes 20 tâches** (`nu` et `kit-gov` à k = 3, `aidlc` à k = 1, même modèle, Claude Code 2.1.287 au lot L, 2.1.302 ici) :
+
+| | `nu` (lot L) | `kit-gov` (lot L) | `aidlc` (palier 1) |
+|---|---:|---:|---:|
+| Runs | 60 | 60 | 20 |
+| Succès par run | 60/60, IC95 [94,0 %, 100 %] | 60/60, IC95 [94,0 %, 100 %] | 17/17 valides, IC95 [81,6 %, 100 %] |
+| Tâches toujours résolues | 20/20, IC95 [83,9 %, 100 %] | 20/20, IC95 [83,9 %, 100 %] | 20/20 (k = 1), IC95 [83,9 %, 100 %] |
+| Coût médian par run | 0,159 $ | 0,198 $ | **4,592 $** |
+| Coût moyen par run | 0,169 $ | 0,211 $ | 4,362 $ |
+| Rapport `aidlc` / bras, médiane des rapports par tâche (min – max) | **27,9×** (5,1 – 38,2) | **22,2×** (4,4 – 30,2) | |
+| Temps mur médian par run | 22 s | 24 s | 494 s |
+| Tours médians | 3 | 3 | 76 |
+| Interventions humaines par tâche résolue (médiane) | non mesuré ici | non mesuré ici | 4 |
+
+Lecture : les trois bras résolvent tout ; le succès ne discrimine rien (banc saturé, §12), et à 20 tâches l'écart minimal détectable est de **44 points**
+(pire cas, §13) : aucune différence de succès ne pourrait être établie, ni dans un sens ni dans l'autre. Le coût, le temps et les interventions se lisent
+sans test : le bras `aidlc` coûte environ 28 fois le `nu` par tâche, prend environ 22 fois plus de temps et demande 4 approbations par tâche, que la
+personne simulée donne sans lire.
+
+**Palier 2 recalculé** (k = 3 complet à 20 tâches, soit 40 runs `aidlc` de plus, au coût mesuré ; le palier 1 compté à sa dépense exacte) :
+
+| Base | 40 runs de plus | Total `aidlc` palier 1 + 2 |
+|---|---:|---:|
+| Médiane mesurée (4,592 $) | 183,68 $ | **270,92 $** |
+| Moyenne mesurée (4,362 $) | 174,48 $ | 261,72 $ |
+| Médiane × 1,5 (marge du §15.5) | 275,52 $ | 362,76 $ |
+| Maximum mesuré (5,930 $) partout | 237,21 $ | 324,45 $ |
+
+Si le protocole exige `nu` et `kit-gov` rejoués le même jour à k = 3 (22,84 $ au lot L) : 293,76 $ à la médiane, 385,60 $ avec la marge. Le plafond de 500 $
+proposé au §15.5 couvre donc le palier 2 avec marge ; un plafond de 300 $ pour les 40 runs `aidlc` seuls suffirait au maximum mesuré. L'ancien calcul
+(316,62 $ pour les trois bras) était fondé sur le pilote à 4,90 $ ; la médiane mesurée est 6 % plus basse.
+
+**Limites.**
+
+- k = 1 : la variance par tâche n'est pas mesurée ; les deux runs à moins de 1,30 $ (workflow parqué) tirent la moyenne vers le bas.
+- Pilote `scripted-person` : AI-DLC reçoit une personne qui approuve tout (§15.6) ; en `unattended`, il s'arrêterait au premier gate.
+- Le succès mesure surtout le modèle (18/20 solutions écrites avant Code Generation) ; un protocole qui veut mesurer le code d'AI-DLC doit changer la
+  consigne commune ou refuser les écritures hors stage, ce qui serait une autre configuration, à pré-enregistrer.
+- Les agents sous test ont écrit dans `/tmp` (10 runs sur 20) malgré `TMPDIR` : fichiers de vérification à eux, déplacés après la campagne dans les données
+  brutes (`agent-tmp-leftovers/`). Aucun ne porte d'identifiant.
+- Tarif « list » de Claude Code sous OAuth : un coût rapporté, pas une facture. Claude Code 2.1.302 contre 2.1.287 au lot L.
+- `build_report` n'agrège toujours pas `aidlc` : les chiffres ci-dessus viennent d'une analyse à part (`analyze.py`), pas d'un `report.json` scellé.
+
+Données brutes hors dépôt, comme celles du lot L : `_scratch/bench-aidlc-b06-p1/` de la Forge (`ws/state/{results.jsonl,aidlc-runs.jsonl,aidlc-budget.jsonl,
+aidlc-preregistration.json}`, `ws/tasks/*/aidlc/run0.stream.jsonl`, `analysis.json`, `analyze.py`, `campaign.log`). sha256 : `results.jsonl`
+`5d7f0d77…`, `aidlc-budget.jsonl` `ad8a6cec…`, `aidlc-runs.jsonl` `aa3047ac…`, pré-enregistrement `2b301dcf…` (inchangé depuis le §15.6).
 
 ## 16. E2E live Claude Code : le hook de preuve bloque, puis le gate se ferme (D-12)
 
