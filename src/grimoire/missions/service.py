@@ -388,13 +388,28 @@ class TaskService:
         release_capacity(self.ledger, task_id, pool, actor=actor, reason=reason)
 
     def gate(self, task: MissionTask, target: TaskState) -> GateVerdict:
-        """Le verdict du gate pour cette transition, sans rien écrire."""
+        """Le verdict du gate pour cette transition, sans rien écrire.
+
+        La clôture d'une tâche relue (``needs_verification → closed``) exige en
+        plus le reçu de revue (W3-01, :mod:`grimoire.missions.review_receipt`),
+        quel que soit le profil : sans reçu frais, le refus est bloquant.
+        """
         from_board, to_board = board_status_of(task.status), board_status_of(target)
         if self.home_root == self.project_root:
-            return check_transition(self.project_root, task, from_board, to_board)
-        # Worktree de tâche (W5-02) : la transition s'écrit au ledger du projet d'origine,
-        # donc ce sont ses déclarations de gate qui l'opposent ; les preuves restent lues ici.
-        return check_transition(self.project_root, task, from_board, to_board, declarations_root=self.home_root)
+            verdict = check_transition(self.project_root, task, from_board, to_board)
+        else:
+            # Worktree de tâche (W5-02) : la transition s'écrit au ledger du projet d'origine,
+            # donc ce sont ses déclarations de gate qui l'opposent ; les preuves restent lues ici.
+            verdict = check_transition(
+                self.project_root, task, from_board, to_board, declarations_root=self.home_root
+            )
+        if task.status is TaskState.NEEDS_VERIFICATION and target is TaskState.CLOSED:
+            from grimoire.missions.review_receipt import check_receipt
+
+            refusal = check_receipt(self.project_root, task)
+            if refusal is not None:
+                return GateVerdict("review_receipt", "hard_fail", (refusal, *verdict.refusals))
+        return verdict
 
     # ── Écriture ───────────────────────────────────────────────────────────
 

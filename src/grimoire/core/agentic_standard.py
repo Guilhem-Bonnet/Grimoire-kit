@@ -69,10 +69,12 @@ from grimoire.core.standard_checks.verifiers import (
     _verify_memory_policy,
     run_verifiers,
 )
+from grimoire.core.standard_effective_profile import effective_manifest_profile
 from grimoire.core.standard_generation import (
     CONTEXT_DIR,
     DECISION_DIR,
     EVIDENCE_DIR,
+    PROFILE_LADDER,
     SCORE_DIR,
     STANDARD_DIR,
     STANDARD_PROFILE_FILE,
@@ -86,7 +88,6 @@ from grimoire.data import framework_path
 PROFILE_MAP_PATH = Path("agentic-standard/profile-map.yaml")
 CAPABILITY_MAP_PATH = Path("agentic-standard/capability-map.yaml")
 NEEDS_CATALOG_PATH = Path("agentic-standard/needs-catalog.yaml")
-PROFILE_LADDER = ("starter", "controlled", "orchestrated", "governed", "production")
 EVENT_DIR = Path("_grimoire-output/events")
 KNOWLEDGE_DIR = Path("_grimoire-output/knowledge")
 
@@ -852,38 +853,6 @@ def _read_manifest_profile(project_root: Path) -> str | None:
     return read_profile(project_root / STANDARD_PROFILE_FILE)
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 def _memory_os_context(memory_policy: Mapping[str, Any]) -> dict[str, Any]:
     memory_os = memory_policy.get("memory_os")
     if not isinstance(memory_os, dict):
@@ -904,66 +873,6 @@ def _memory_os_context(memory_policy: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 def verify_standard_profile(
     project_root: Path,
     *,
@@ -972,7 +881,7 @@ def verify_standard_profile(
 ) -> StandardVerificationResult:
     """Verify that required standard-aware artifacts exist and parse."""
     root = project_root.resolve()
-    selected_profile = profile_id or _read_manifest_profile(root)
+    selected_profile = profile_id or effective_manifest_profile(root)
     if selected_profile is None:
         selected_profile = "starter"
     profile = get_profile(selected_profile)
@@ -1001,7 +910,7 @@ def verify_standard_profile(
 
 
 def _selected_profile(project_root: Path, profile_id: str | None) -> StandardProfile:
-    selected_profile = profile_id or _read_manifest_profile(project_root) or "starter"
+    selected_profile = profile_id or effective_manifest_profile(project_root) or "starter"
     return get_profile(selected_profile)
 
 

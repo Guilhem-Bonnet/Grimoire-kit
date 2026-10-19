@@ -70,6 +70,8 @@ _WRITER_TMPL = f"""\
     if key in fail_for or node in fail_for:
         sys.exit(0)  # rien écrit : le check échoue, la cascade lit un rouge.
     payload.update(extra_map.get(key, extra_map.get(node, {{}})))
+    if VERDICT_IF_ASKED and re.search(r"'verdict'.*READY", prompt, re.DOTALL):
+        payload["verdict"] = "READY"  # un fournisseur qui obéit à la consigne reçue, jamais à un index
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(payload, fh)
     cost = cost_map.get(key, cost_map.get(node, 0.05))
@@ -84,6 +86,7 @@ def _writer_script(
     extra_map: dict[str, dict] | None = None,
     cost_map: dict[str, float | None] | None = None,
     fail_for: tuple[str, ...] = (),
+    verdict_if_asked: bool = False,
 ) -> Path:
     path = tmp_path / "scripts" / "writer.py"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -91,6 +94,7 @@ def _writer_script(
         _WRITER_TMPL.replace("EXTRA_MAP_JSON", json.dumps(extra_map or {}))
         .replace("COST_MAP_JSON", repr(cost_map or {}))  # repr, pas json : ``None`` (muet), pas ``null``
         .replace("FAIL_FOR_JSON", json.dumps(list(fail_for)))
+        .replace("VERDICT_IF_ASKED", repr(verdict_if_asked))
     )
     path.write_text(dedent(body), encoding="utf-8")
     return path
@@ -198,22 +202,27 @@ def test_fanout_sans_plafond_pilote_est_refuse(tmp_path: Path) -> None:
 # ── 2. verify-panel ──────────────────────────────────────────────────────
 
 
-def test_verify_panel_majorite_verte_ferme_le_node(tmp_path: Path) -> None:
-    _write_registry(tmp_path, _writer_script(tmp_path))
+_READY = {"verdict": "READY", "tree_fingerprint": "arbre-1"}
+_NOT_READY = {"verdict": "NOT-READY", "tree_fingerprint": "arbre-1"}
+
+
+def _panel_bp(tmp_path: Path, panel_class: str | None = None) -> Path:
     _child(tmp_path)
-    bp = _write_bp(
+    config: dict = {"k": 3, "angles": ["a", "b", "c"]}
+    if panel_class is not None:
+        config["class"] = panel_class
+    return _write_bp(
         tmp_path / "bp.blueprint.json",
         "panel-demo",
-        [
-            {
-                "id": "panel",
-                "kind": "verify-panel",
-                "ref": "child.blueprint.json",
-                "config": {"verifyPanel": {"k": 3, "angles": ["a", "b", "c"]}},
-                "pins": [],
-            }
-        ],
+        [{"id": "panel", "kind": "verify-panel", "ref": "child.blueprint.json",
+          "config": {"verifyPanel": config}, "pins": []}],
     )
+
+
+def test_verify_panel_majorite_verte_ferme_le_node(tmp_path: Path) -> None:
+    votes = {"idx0": _READY, "idx1": _READY, "idx2": _NOT_READY}
+    _write_registry(tmp_path, _writer_script(tmp_path, extra_map=votes))
+    bp = _panel_bp(tmp_path, "V1")
     engine = _engine(tmp_path)
 
     outcome = run_with_dispatch(engine, bp, project_root=tmp_path)
@@ -222,6 +231,68 @@ def test_verify_panel_majorite_verte_ferme_le_node(tmp_path: Path) -> None:
     node = next(n for n in outcome.nodes if n.node_id == "panel")
     assert node.verdict == "green"
     assert node.attempts == 3
+
+
+def test_verify_panel_v2_deux_contre_un_est_rouge(tmp_path: Path) -> None:
+    votes = {"idx0": _READY, "idx1": _READY, "idx2": _NOT_READY}
+    _write_registry(tmp_path, _writer_script(tmp_path, extra_map=votes))
+
+    outcome = run_with_dispatch(_engine(tmp_path), _panel_bp(tmp_path), project_root=tmp_path)
+
+    assert outcome.status == "blocked"
+    node = next(n for n in outcome.nodes if n.node_id == "panel")
+    assert node.verdict == "red"
+
+
+def test_verify_panel_fini_sans_verdict_nest_pas_un_vote(tmp_path: Path) -> None:
+    """W3-01 : finir n'est pas approuver — trois vérificateurs muets sur le verdict ne font pas un vert."""
+    _write_registry(tmp_path, _writer_script(tmp_path))
+
+    outcome = run_with_dispatch(_engine(tmp_path), _panel_bp(tmp_path, "V1"), project_root=tmp_path)
+
+    assert outcome.status == "blocked", outcome.to_dict()
+    node = next(n for n in outcome.nodes if n.node_id == "panel")
+    assert node.verdict == "inconclusive"
+
+
+def test_verify_panel_demande_un_verdict_au_verificateur(tmp_path: Path) -> None:
+    """W3-01-S3 : un fournisseur qui n'écrit `verdict` que si sa consigne le demande doit donner un vote.
+
+    Le contexte du vérificateur doit nommer `verdict` et ses deux valeurs : sans cela
+    (consigne = l'objet `pins` seul), le panel ne reçoit jamais que des abstentions.
+    """
+    _write_registry(tmp_path, _writer_script(tmp_path, verdict_if_asked=True))
+
+    outcome = run_with_dispatch(_engine(tmp_path), _panel_bp(tmp_path), project_root=tmp_path)
+
+    assert outcome.status == "finished", outcome.to_dict()
+    node = next(n for n in outcome.nodes if n.node_id == "panel")
+    assert node.verdict == "green"
+
+
+def test_verify_panel_deux_abstentions_sur_trois_est_inconclusive(tmp_path: Path) -> None:
+    _write_registry(tmp_path, _writer_script(tmp_path, extra_map={"idx0": _READY}, fail_for=("idx1",)))
+
+    outcome = run_with_dispatch(_engine(tmp_path), _panel_bp(tmp_path, "V1"), project_root=tmp_path)
+
+    node = next(n for n in outcome.nodes if n.node_id == "panel")
+    assert node.verdict == "inconclusive"
+
+
+def test_verify_panel_empreintes_divergentes_invalident(tmp_path: Path) -> None:
+    votes = {"idx0": _READY, "idx1": _READY, "idx2": {"verdict": "READY", "tree_fingerprint": "arbre-2"}}
+    _write_registry(tmp_path, _writer_script(tmp_path, extra_map=votes))
+
+    outcome = run_with_dispatch(_engine(tmp_path), _panel_bp(tmp_path, "V1"), project_root=tmp_path)
+
+    node = next(n for n in outcome.nodes if n.node_id == "panel")
+    assert node.verdict == "invalid"
+
+
+def test_verify_panel_classe_inconnue_refusee_au_chargement(tmp_path: Path) -> None:
+    bp = _panel_bp(tmp_path, "V3")
+    with pytest.raises(GrimoireRuntimeError, match=r"verifyPanel\.class"):
+        load_blueprint(bp, tmp_path)
 
 
 def test_verify_panel_minorite_verte_nest_jamais_un_vert(tmp_path: Path) -> None:
@@ -596,8 +667,8 @@ def test_demo_sept_genres_tourne_sextrait_et_se_rejoue_a_lidentique(tmp_path: Pa
             extra_map={
                 "spread": {"fanout_items": ["a", "b"]},
                 "judge": {"judge_winner": 0},
-                "idx0": {"novelty_key": "k1"},
-                "idx1": {"novelty_key": "k1"},
+                "idx0": {"novelty_key": "k1", "verdict": "READY"},
+                "idx1": {"novelty_key": "k1", "verdict": "READY"},
             },
             cost_map={"leaf": 0.05},
         ),
@@ -843,6 +914,7 @@ def _sibling_bp(tmp_path: Path, kind: str) -> tuple[Path, str, dict[str, dict]]:
         extra["gn"] = {"fanout_items": ["a", "b", "c"]}
     elif kind == "verify-panel":
         node["config"] = {"verifyPanel": {"k": 3, "angles": ["a", "b", "c"]}}
+        extra.update({f"idx{i}": {"verdict": "READY"} for i in range(3)})
     elif kind == "loop-until-dry":
         node["config"] = {"loopUntilDry": {"maxRounds": 4}}
         extra.update({f"idx{i}": {"novelty_key": f"k{i}"} for i in range(4)})

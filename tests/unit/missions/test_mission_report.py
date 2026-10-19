@@ -25,7 +25,7 @@ from grimoire.core.standard_generation import TRACES_DIR
 from grimoire.evidence import EvidenceItem, EvidenceKind, EvidenceProfile, EvidenceService
 from grimoire.missions.ledger import MissionLedger
 from grimoire.missions.report import DEFAULT_LEDGER_RELPATH, build_mission_report, render_json, render_markdown
-from grimoire.traces.ledger import DISPATCH_OUTCOME_TAG, TraceLedger
+from grimoire.traces.ledger import DISPATCH_OUTCOME_TAG, LEDGER_EVENT_TAG_PREFIX, TraceLedger
 from grimoire.traces.schemas import TraceOutcome
 
 runner = CliRunner()
@@ -56,7 +56,9 @@ def _attempt_payload(n: int, verdict: str, *, cost: float | None, acceptance_sta
     return payload
 
 
-def _outcome_trace(root: Path, task_id: str, *, resolved: bool, replay: str, cost: float | None = None) -> str:
+def _outcome_trace(
+    root: Path, task_id: str, *, resolved: bool, replay: str, cost: float | None = None, last_event: str | None = None
+) -> str:
     trace = TraceLedger(root / TRACES_DIR).record(
         run_id="dispatch-x",
         workflow_instance_id="",
@@ -66,7 +68,7 @@ def _outcome_trace(root: Path, task_id: str, *, resolved: bool, replay: str, cos
         outcome=TraceOutcome.SUCCESS if resolved else TraceOutcome.FAILURE,
         started_at=_now(),
         token_usage={"estimated_cost_usd": cost, "unpriced_calls": 0 if cost is not None else 1},
-        tags=[DISPATCH_OUTCOME_TAG, "class:V0", "tier:cheap", f"resolved:{'true' if resolved else 'false'}", f"replay:{replay}"],
+        tags=[DISPATCH_OUTCOME_TAG, "class:V0", "tier:cheap", f"resolved:{'true' if resolved else 'false'}", f"replay:{replay}", *([f"{LEDGER_EVENT_TAG_PREFIX}{last_event}"] if last_event else [])],
     )
     return trace.id
 
@@ -266,17 +268,32 @@ def test_transcript_only_stays_exact(tmp_path: Path) -> None:
 # ── Lien tentative -> trace : exact ou absent ─────────────────────────────────
 
 
-def test_two_cascades_each_link_to_their_own_trace(tmp_path: Path) -> None:
+def test_two_cascades_each_link_to_their_own_trace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Horloge figée : tous les horodatages sont égaux, comme sous Windows (résolution ~15 ms).
+    # Le lien ne doit donc dépendre que de l'id de la dernière tentative porté par la trace.
+    frozen = "2026-01-01T00:00:00+00:00"
+    monkeypatch.setattr("grimoire.missions.ledger._now_iso", lambda: frozen)
+    monkeypatch.setattr(sys.modules[__name__], "_now", lambda: frozen)
     ledger, mission_id, (task_id,) = _mission(tmp_path)
+    e1 = _dispatch(ledger, task_id, _attempt_payload(1, "red", cost=0.1))
+    first = _outcome_trace(tmp_path, task_id, resolved=False, replay="k", last_event=e1)
     _dispatch(ledger, task_id, _attempt_payload(1, "red", cost=0.1))
-    first = _outcome_trace(tmp_path, task_id, resolved=False, replay="k")
-    _dispatch(ledger, task_id, _attempt_payload(1, "red", cost=0.1))
-    _dispatch(ledger, task_id, _attempt_payload(2, "green", cost=0.2, tier="mid"))
-    second = _outcome_trace(tmp_path, task_id, resolved=True, replay="k")
+    e3 = _dispatch(ledger, task_id, _attempt_payload(2, "green", cost=0.2, tier="mid"))
+    second = _outcome_trace(tmp_path, task_id, resolved=True, replay="k", last_event=e3)
 
     attempts = _report(tmp_path, mission_id)["tasks"][0]["attempts"]
 
     assert [(a["cascade"], a["attempt"], a["trace_id"]) for a in attempts] == [(1, 1, first), (2, 1, second), (2, 2, second)]
+
+
+def test_untagged_legacy_trace_still_links_by_time_window(tmp_path: Path) -> None:
+    ledger, mission_id, (task_id,) = _mission(tmp_path)
+    _dispatch(ledger, task_id, _attempt_payload(1, "green", cost=0.1))
+    only = _outcome_trace(tmp_path, task_id, resolved=True, replay="k")
+
+    [attempt] = _report(tmp_path, mission_id)["tasks"][0]["attempts"]
+
+    assert attempt["trace_id"] == only
 
 
 def test_a_cascade_whose_trace_was_never_written_is_unlinked_not_guessed(tmp_path: Path) -> None:

@@ -44,6 +44,7 @@ from grimoire.flows import pilot
 from grimoire.flows.blueprint_loader import build_node_contracts, load_blueprint
 from grimoire.flows.engine import FlowEngine, check_output_against_contract
 from grimoire.flows.schemas import NodeContract, NodeExecutionResult, ResumeOutcome
+from grimoire.missions.check_gate import UNAPPROVED, CheckGate, CheckSpec
 from grimoire.missions.dispatch import DEFAULT_CALL_TIMEOUT_S, DispatchReport, run_dispatch
 from grimoire.missions.schemas import MissionTask, TaskCheck, TaskState
 from grimoire.missions.service import TaskRefusedError, TaskService
@@ -483,7 +484,32 @@ class DispatchExecutor:
         # le même gate, dans le même appel de cascade. Sans elle, un texte
         # d'acceptance conforme n'engageait jamais aucune commande réelle.
         acceptance_cmds, acceptance_expects, acceptance_stdout, acceptance_timeouts = _acceptance_checks(contract)
-        checks = (_verify_command(sys.executable, self._blueprint_path, node_id, result_path), *acceptance_cmds)
+        envelope = _verify_command(sys.executable, self._blueprint_path, node_id, result_path)
+        checks = (envelope, *acceptance_cmds)
+        # W3-03 : en profil governed/production, une acceptance que personne n'a
+        # approuvée (empreinte de la commande et de ce qu'elle doit rendre) ne
+        # lance rien, et le fournisseur n'est pas appelé pour rien. Le contrôle
+        # d'enveloppe est assemblé par le kit : il est de confiance. Modifier le
+        # blueprint change l'empreinte, donc redemande l'approbation.
+        gate = CheckGate(self._project_root, task_id, trusted=(envelope,))
+        unapproved = gate.preflight(
+            tuple(
+                CheckSpec(c, e, n, t)
+                for c, e, n, t in zip(acceptance_cmds, acceptance_expects, acceptance_stdout, acceptance_timeouts, strict=True)
+            )
+        )
+        if unapproved:
+            self.host_node = node_id
+            self.host_reason = (
+                f"{UNAPPROVED} : {len(unapproved)} commande(s) d'acceptance sans approbation, aucune lancée — "
+                f"`grimoire task approve-check {task_id}` (ou `--cmd`) après les avoir lues : "
+                + " ; ".join(f"{b.display} ({b.reason})" for b in unapproved)
+            )
+            result = NodeExecutionResult(
+                pending=True, extra={"dispatch_refused": "unapproved_check", "node_id": node_id, "task_id": task_id}
+            )
+            self.last_result = result
+            return result
         # Le pilote (issue #209) décide du palier de départ et du plafond de
         # coût avant cet appel — jamais après. `self._max_tier` (le
         # `--max-tier` explicite de la CLI) reste prioritaire sur le plafond
@@ -515,6 +541,7 @@ class DispatchExecutor:
             # node compteraient comme deux séries à une seule observation
             # chacune, jamais comme une série rejouée.
             replay_key=f"{blueprint_id}:{node_id}",
+            check_runner=gate.run,
         )
         self.node_outcomes[node_id] = _node_outcome_from_report(
             node_id,

@@ -718,6 +718,13 @@ class FlowEngine:
 
         return CheckpointJournal(self._flows_root, run_id)
 
+    def _projected_plan(self, blueprint: Mapping[str, Any], node_id: str) -> dict[str, Any] | None:
+        """Le plan projeté maintenant pour *node_id* (W2-11), ``None`` si le node n'en déclare pas."""
+        from grimoire.flows.attestation import plan_providers, project_plan
+
+        provider = plan_providers(blueprint).get(node_id)
+        return None if provider is None else project_plan(provider, self._project_root)
+
     def _grants(self) -> GrantJournal:
         from grimoire.flows.autonomy import GrantJournal
 
@@ -745,10 +752,16 @@ class FlowEngine:
             return ""
         return "pause hold en vigueur (" + "; ".join(f.label for f in state.applying(wfi.task_id)) + ")"
 
-    def _present(self, run_id: str, contract: NodeContract | None) -> None:
-        """Un checkpoint présenté émet son challenge, lié à la session courante (rien pour un autre kind)."""
+    def _present(self, run_id: str, contract: NodeContract | None, blueprint: Mapping[str, Any]) -> None:
+        """Un checkpoint présenté émet son challenge, lié à la session courante (rien pour un autre kind).
+
+        Le challenge porte le plan projeté s'il est déclaré (W2-11) : c'est
+        contre lui que la décision sera comparée.
+        """
         if contract is not None and contract.kind == "checkpoint":
-            self._authority(run_id).issue_challenge(contract.node_id)
+            self._authority(run_id).issue_challenge(
+                contract.node_id, plan=self._projected_plan(blueprint, contract.node_id)
+            )
 
     # ── Commandes ────────────────────────────────────────────────────────────
 
@@ -805,7 +818,7 @@ class FlowEngine:
         )
 
         contract = contracts[order[0]]
-        self._present(wfi.id, contract)
+        self._present(wfi.id, contract, blueprint)
         (executor or InteractiveNodeExecutor()).execute(contract, context_pack=self._context_pack(wfi, blueprint_id))
         return wfi, contract
 
@@ -859,9 +872,8 @@ class FlowEngine:
         if self._drift_state(meta, wfi)[0] is not None:
             # Pas de directive_id : aucune réponse n'est attendue tant que le blueprint a dérivé.
             return Directive("blocked", run_id, node_id, None, self._attempt(run_id, node_id), DRIFT_KIND)
-        contracts = build_node_contracts(
-            load_blueprint(self._blueprint_file(meta), self._project_root), self._project_root
-        )
+        blueprint = load_blueprint(self._blueprint_file(meta), self._project_root)
+        contracts = build_node_contracts(blueprint, self._project_root)
         attempt = self._attempt(run_id, node_id)
         did = directive_id_for(run_id, node_id, attempt, self._digest_of(contracts, order))
         if wfi.status is WorkflowStatus.BLOCKED:
@@ -883,7 +895,7 @@ class FlowEngine:
         if wfi.status is WorkflowStatus.PAUSED and kind == "checkpoint":
             # K11 : la frontière a posé le run sans présenter ce checkpoint (donc sans challenge) ; la session qui
             # reprend le reçoit ici, avant le tour humain qui doit y répondre. Idempotent pour une même session.
-            self._present(run_id, contract)
+            self._present(run_id, contract, blueprint)
         return Directive(kind, run_id, node_id, did, attempt)
 
     def _directive_refusal(self, run_id: str, supplied: str, output: dict[str, Any], allow_replay: bool) -> None:
@@ -1095,7 +1107,7 @@ class FlowEngine:
             if wfi.status is WorkflowStatus.PAUSED and (digest is None or self._crossed_node_for_digest(wfi, digest) is None):
                 # K11 : pause levée, checkpoint jamais présenté : le challenge précède le jugement, sinon la décision
                 # courante serait refusée en `no_challenge` alors que personne n'a pu y répondre. (Pas pour un rejeu.)
-                self._present(run_id, contract)
+                self._present(run_id, contract, blueprint)
             # Issue #207 : la décision d'hôte ("approve"/"reject"/"amend")
             # n'est pas une pin — jamais franchie côté Rust
             # (`check_output_against_contract` ci-dessus n'en sait toujours
@@ -1116,6 +1128,7 @@ class FlowEngine:
                 output,
                 destructive=current_id in destructive_checkpoints(blueprint),
                 cap=max_amendments(blueprint).get(current_id, DEFAULT_MAX_AMENDMENTS),
+                plan=self._projected_plan(blueprint, current_id),
                 grant=lambda: self._grant_lookup(run_id, current_id),
             )
             if gate is not None and gate.refusal:
@@ -1154,15 +1167,21 @@ class FlowEngine:
             wfi = self._kernel.fail_step(wfi.id, ctx, step_id=current_id, reason="; ".join(faults))
             if contract_faults:
                 self._grants().revoke_on_red_gate(run_id, current_id, contract_faults)
-            if gate is not None and gate.decision in ("reject", "amend"):
-                # Un refus ou un amendement est une décision : il consomme son
-                # challenge, la présentation suivante en émet un neuf.
-                self._authority(run_id).record_decision(current_id, gate.decision, gate.reason, gate.attestation)
+            if gate is not None and (gate.decision in ("reject", "amend") or gate.drifted):
+                # Un refus, un amendement ou une dérive de plan (W2-11) est une
+                # décision : il consomme son challenge, la présentation suivante
+                # en émet un neuf (sur le plan courant, pour une dérive).
+                self._authority(run_id).record_decision(
+                    current_id,
+                    "plan_drifted" if gate.drifted else gate.decision,
+                    gate.refusal if gate.drifted else gate.reason,
+                    gate.attestation,
+                )
                 if gate.attestation.attested:
                     self._settle_linked_question(wfi, run_id, current_id, gate.decision)
             if gate is not None and gate.refusal and gate.refusal.startswith("awaiting_human"):
                 self._ask_linked_task(wfi, run_id, current_id, gate.attestation.explain())
-            self._present(run_id, contract)
+            self._present(run_id, contract, blueprint)
             return ResumeOutcome(
                 ok=False,
                 finished=False,
@@ -1240,7 +1259,7 @@ class FlowEngine:
                 warnings=(*warnings, held),
                 paused=True,
             )
-        self._present(run_id, next_contract)
+        self._present(run_id, next_contract, blueprint)
         # Le node suivant n'est pas encore ouvert (pas de advance_step ici) :
         # un crash juste après cet appel laisse le kernel en CHECKPOINTED, et
         # le prochain resume() rouvrira ce même node suivant en premier —

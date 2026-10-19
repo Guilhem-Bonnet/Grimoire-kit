@@ -58,6 +58,7 @@ __all__ = [
     "HOLD_LABEL_RESPECTED",
     "HOLD_LABEL_RETRIED_SAME",
     "HOLD_LABEL_RETRIED_VARIANT",
+    "LEDGER_EVENT_TAG_PREFIX",
     "POLICY_HOLD_TAG",
     "AgentFreshness",
     "DispatchOutcomeGroupStats",
@@ -177,6 +178,8 @@ DELEGATION_TAG = "agent.delegation"
 #: mesurent une fois, cet événement le rend continu et lisible par un gate —
 #: voir :meth:`TraceLedger.dispatch_outcome_stats`.
 DISPATCH_OUTCOME_TAG = "dispatch.outcome"
+#: Préfixe du tag qui porte l'id du dernier événement ``task.dispatched`` de la cascade : lien exact.
+LEDGER_EVENT_TAG_PREFIX = "ledger_event:"
 
 #: Tag qui marque un enregistrement comme un verdict de hook non-``allow``
 #: (``done_gate`` périmé, ``tool_policy`` ``ask``/``deny``) — calibration des

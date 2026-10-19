@@ -96,7 +96,7 @@ from grimoire.providers.state import (
 )
 
 if TYPE_CHECKING:
-    from grimoire.missions.schemas import MissionTask
+    from grimoire.missions.schemas import LedgerEvent, MissionTask
     from grimoire.missions.service import TaskService
 
 try:
@@ -1026,6 +1026,7 @@ def _record_dispatch_outcome(
     *,
     acceptance_declared: bool,
     replay_key: str | None,
+    last_event: LedgerEvent | None = None,
 ) -> None:
     """Journaliser dans le journal de traces le résumé d'une cascade de dispatch terminée.
 
@@ -1058,7 +1059,7 @@ def _record_dispatch_outcome(
         return
     try:
         from grimoire.core.standard_generation import TRACES_DIR
-        from grimoire.traces.ledger import DISPATCH_OUTCOME_TAG, TraceLedger
+        from grimoire.traces.ledger import DISPATCH_OUTCOME_TAG, LEDGER_EVENT_TAG_PREFIX, TraceLedger
         from grimoire.traces.schemas import TraceOutcome
 
         tiers = dict.fromkeys(attempt.tier for attempt in report.attempts)  # ordonné, dédupliqué
@@ -1078,6 +1079,8 @@ def _record_dispatch_outcome(
         ]
         if last.provider:
             tags.append(f"provider:{last.provider}")
+        if last_event is not None:
+            tags.append(f"{LEDGER_EVENT_TAG_PREFIX}{last_event.id}")  # lien exact cascade -> trace
         if report.cost_cap_reason:
             tags.append(f"cost_cap:{report.cost_cap_reason}")
 
@@ -1119,6 +1122,7 @@ def run_dispatch(
     replay_key: str | None = None,
     max_cost_usd: float | None = None,
     cost_unknown_policy: str = POLICY_STOP,
+    check_runner: Any = None,  # W3-03 : `CheckGate.run` (approbation par empreinte)
 ) -> DispatchReport:
     """Cascade la tâche *task_id* à travers les paliers de fournisseurs.
 
@@ -1257,6 +1261,15 @@ def run_dispatch(
 
     root = service.project_root
     attempts: list[DispatchAttempt] = []
+    last_event: LedgerEvent | None = None
+
+    def log_attempt(attempt: DispatchAttempt) -> LedgerEvent:
+        payload = _dispatch_event_payload(
+            attempt, task, verifiability, chosen_tier, start_tier_reason,
+            acceptance_declared=acceptance_declared, verifiability_warning=verifiability_warning,
+        )
+        return service.ledger.append_event("task.dispatched", task_id, "task", actor, payload)
+
     attempt_no = 0
     capped_before_next_tier = False
     cap_why: str | None = None
@@ -1299,30 +1312,13 @@ def run_dispatch(
                     cost_usd=None,
                 )
                 attempts.append(attempt)
-                service.ledger.append_event(
-                    "task.dispatched",
-                    task_id,
-                    "task",
-                    actor,
-                    _dispatch_event_payload(
-                        attempt,
-                        task,
-                        verifiability,
-                        chosen_tier,
-                        start_tier_reason,
-                        acceptance_declared=acceptance_declared,
-                        verifiability_warning=verifiability_warning,
-                    ),
-                )
+                last_event = log_attempt(attempt)
                 continue  # fournisseur suivant, même palier
 
             record_success(root, provider.id, model)
-            check_results = _run_checks(
-                checks,
-                project_root=root,
-                expect_exits=check_expect_exits,
-                expect_stdout_contains=check_expect_stdout_contains,
-                timeouts=check_timeouts,
+            check_results = (check_runner or _run_checks)(
+                checks, project_root=root, expect_exits=check_expect_exits,
+                expect_stdout_contains=check_expect_stdout_contains, timeouts=check_timeouts,
             )
             # Un check « inexécutable » (issue #428) prime sur tout le reste :
             # aucun verdict n'a pu être rendu, donc ni vert ni même un rouge
@@ -1359,21 +1355,7 @@ def run_dispatch(
                 uncertainty_warnings=uncertainty_warnings,
             )
             attempts.append(attempt)
-            service.ledger.append_event(
-                "task.dispatched",
-                task_id,
-                "task",
-                actor,
-                _dispatch_event_payload(
-                    attempt,
-                    task,
-                    verifiability,
-                    chosen_tier,
-                    start_tier_reason,
-                    acceptance_declared=acceptance_declared,
-                    verifiability_warning=verifiability_warning,
-                ),
-            )
+            last_event = log_attempt(attempt)
             if verdict == "unrunnable":
                 # Arrêt immédiat de la cascade entière : escalader vers un
                 # palier plus cher n'aide pas un environnement qui ne peut pas
@@ -1392,7 +1374,8 @@ def run_dispatch(
                     unrunnable="; ".join(unrunnable_reasons),
                 )
                 _record_dispatch_outcome(
-                    root, task, unrunnable_report, acceptance_declared=acceptance_declared, replay_key=replay_key
+                    root, task, unrunnable_report, acceptance_declared=acceptance_declared, replay_key=replay_key,
+                    last_event=last_event,
                 )
                 return unrunnable_report
             tier_settled = True
@@ -1434,7 +1417,9 @@ def run_dispatch(
             ),
             cost_cap_reason=cap_why,
         )
-        _record_dispatch_outcome(root, task, capped_report, acceptance_declared=acceptance_declared, replay_key=replay_key)
+        _record_dispatch_outcome(
+            root, task, capped_report, acceptance_declared=acceptance_declared, replay_key=replay_key, last_event=last_event
+        )
         return capped_report
 
     if not attempts:
@@ -1463,7 +1448,9 @@ def run_dispatch(
         start_tier=chosen_tier,
         start_tier_reason=start_tier_reason,
     )
-    _record_dispatch_outcome(root, task, report, acceptance_declared=acceptance_declared, replay_key=replay_key)
+    _record_dispatch_outcome(
+        root, task, report, acceptance_declared=acceptance_declared, replay_key=replay_key, last_event=last_event
+    )
     if not report.succeeded:
         return report
     if verifiability is not Verifiability.V1:

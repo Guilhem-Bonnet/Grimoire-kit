@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from grimoire.evidence.schemas import (
     EvidenceItem,
@@ -27,13 +27,14 @@ from grimoire.evidence.schemas import (
     VerificationVerdict,
 )
 from grimoire.evidence.service import EvidenceService
-from grimoire.missions.dispatch import CheckResult, _run_checks
+from grimoire.missions.check_gate import CheckGate, UnapprovedChecksError, specs_of_task
+from grimoire.missions.dispatch import CheckResult
 from grimoire.missions.verifiability import Verifiability, classify
 
 if TYPE_CHECKING:
     from grimoire.missions.schemas import MissionTask, TaskCheck
 
-__all__ = ["NoDeclaredChecksError", "VerifyOutcome", "verify_task"]
+__all__ = ["NoDeclaredChecksError", "UnapprovedChecksError", "VerifyOutcome", "verify_task"]
 
 
 class NoDeclaredChecksError(ValueError):
@@ -45,6 +46,8 @@ class VerifyOutcome:
     pack: EvidencePack
     verdict: VerificationVerdict
     results: tuple[CheckResult, ...]
+    #: Un reçu ``{command_sha256, tree_fingerprint, exit, reused}`` par commande lancée ou réutilisée (W3-03) ; ``()`` hors profil appliqué.
+    receipts: tuple[dict[str, Any], ...] = ()
 
     @property
     def passed(self) -> bool:
@@ -82,10 +85,19 @@ def verify_task(task: MissionTask, project_root: Path, evidence_root: Path) -> V
     verdict : un code de sortie inattendu, un délai dépassé ou une commande
     inexécutable (binaire absent) rend le verdict ``failed`` — jamais
     ``passed`` par défaut.
+
+    En profil governed/production (W3-03), une commande dont l'empreinte n'est
+    pas approuvée (``grimoire task approve-check``) lève
+    :class:`UnapprovedChecksError` avant tout sous-processus, et une commande
+    verte sur un arbre identique à celui d'un reçu n'est pas relancée.
     """
     if not task.checks:
         raise NoDeclaredChecksError(f"{task.id} ne déclare aucune commande (checks) : rien à vérifier mécaniquement")
-    results = _run_checks(
+    gate = CheckGate(project_root, task.id, reuse=True)
+    blocked = gate.preflight(specs_of_task(task))
+    if blocked:
+        raise UnapprovedChecksError(task.id, blocked)
+    results = gate.run(
         tuple(c.cmd for c in task.checks),
         project_root=project_root,
         expect_exits=tuple(c.expect_exit for c in task.checks),
@@ -96,6 +108,12 @@ def verify_task(task: MissionTask, project_root: Path, evidence_root: Path) -> V
     verdict_checks: list[VerificationCheck] = []
     for index, (check, result) in enumerate(zip(task.checks, results, strict=True), start=1):
         summary = f"{check.cmd} -> exit {result.exit_code} (attendu {check.expect_exit})"
+        receipt = gate.receipts[index - 1] if index <= len(gate.receipts) else None
+        if receipt is not None:
+            summary += (
+                f" [reçu sha256={receipt['command_sha256'][:12]} arbre={str(receipt['tree_fingerprint'])[:12]}"
+                f"{' réutilisé' if receipt.get('reused') else ''}]"
+            )
         items.append(
             EvidenceItem.from_text(
                 f"check-{index:02d}",
@@ -122,4 +140,6 @@ def verify_task(task: MissionTask, project_root: Path, evidence_root: Path) -> V
     service = EvidenceService(evidence_root)
     pack = service.create_pack(task.id, EvidenceProfile.LIGHT, items, acceptance=acceptance)
     verdict = service.verify(pack, extra_checks=tuple(verdict_checks))
-    return VerifyOutcome(pack=pack, verdict=verdict, results=results)
+    return VerifyOutcome(
+        pack=pack, verdict=verdict, results=results, receipts=tuple(r for r in gate.receipts if r is not None)
+    )

@@ -22,10 +22,11 @@ Règles :
   inconnue dans le total de la mission (borne basse).
 * **Le lien tentative -> trace est exact ou absent.** Les événements ``task.dispatched``
   ne portent pas l'identifiant de la trace de cascade. Une cascade (suite de tentatives
-  qui commence à ``attempt == 1``) est rattachée à l'unique trace ``dispatch.outcome``
-  de la même tâche écrite après sa dernière tentative et avant la première de la
-  cascade suivante ; zéro ou plusieurs candidates : ``trace_id`` est ``None`` et la
-  ligne le dit (``trace_link``).
+  qui commence à ``attempt == 1``) est rattachée à la trace ``dispatch.outcome`` qui porte
+  l'id de sa dernière tentative (tag ``ledger_event:``), indépendamment des horloges. Une
+  trace plus ancienne, sans ce tag, est rattachée par fenêtre temporelle (écrite après la
+  dernière tentative, avant la première de la suivante) si elle est seule ; sinon
+  ``trace_id`` est ``None`` et la ligne le dit (``trace_link``).
 * **Déterministe.** Aucune date de génération, aucun identifiant tiré au hasard,
   tris explicites : deux exécutions sur les mêmes journaux donnent les mêmes octets.
 
@@ -43,7 +44,7 @@ from typing import TYPE_CHECKING, Any
 
 from grimoire.costs import Cost, format_usd
 from grimoire.missions.ledger import MissionLedger
-from grimoire.traces.ledger import DISPATCH_OUTCOME_TAG, TraceLedger
+from grimoire.traces.ledger import DISPATCH_OUTCOME_TAG, LEDGER_EVENT_TAG_PREFIX, TraceLedger
 from grimoire.traces.transcript_usage import task_usage
 
 if TYPE_CHECKING:
@@ -119,10 +120,27 @@ def _cascades(events: list[LedgerEvent]) -> list[list[LedgerEvent]]:
 
 
 def _link_traces(cascades: list[list[LedgerEvent]], outcomes: list[TraceRecord]) -> list[TraceRecord | None]:
-    """Une trace ``dispatch.outcome`` par cascade, ou ``None`` : écrite après sa dernière tentative, avant la suivante."""
-    stamped = sorted(((_instant(t.started_at), t) for t in outcomes), key=lambda pair: (pair[1].started_at, pair[1].id))
+    """Une trace ``dispatch.outcome`` par cascade, ou ``None``.
+
+    Lien exact d'abord : une trace qui porte ``ledger_event:<id>`` appartient à la cascade
+    dont la dernière tentative a cet id, quelles que soient les horloges (résolution ~15 ms
+    sous Windows : deux écritures successives y partagent un horodatage). Les traces sans ce
+    tag (écrites avant lui) retombent sur la fenêtre temporelle : écrite après la dernière
+    tentative, avant la première de la suivante.
+    """
+    by_event = {
+        tag[len(LEDGER_EVENT_TAG_PREFIX) :]: trace
+        for trace in outcomes
+        for tag in trace.tags
+        if tag.startswith(LEDGER_EVENT_TAG_PREFIX)
+    }
+    legacy = [t for t in outcomes if not any(tag.startswith(LEDGER_EVENT_TAG_PREFIX) for tag in t.tags)]
+    stamped = sorted(((_instant(t.started_at), t) for t in legacy), key=lambda pair: (pair[1].started_at, pair[1].id))
     linked: list[TraceRecord | None] = []
     for index, group in enumerate(cascades):
+        if group[-1].id in by_event:
+            linked.append(by_event[group[-1].id])
+            continue
         last = _instant(group[-1].created_at)
         following = _instant(cascades[index + 1][0].created_at) if index + 1 < len(cascades) else None
         if last is None or (index + 1 < len(cascades) and following is None):

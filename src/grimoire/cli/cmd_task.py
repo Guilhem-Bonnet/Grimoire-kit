@@ -1098,7 +1098,8 @@ def task_verify(
     sortie inattendu, délai, commande inexécutable), 2 si la tâche ne déclare
     aucune commande : jamais un vert à vide.
     """
-    from grimoire.missions.verify import NoDeclaredChecksError, verify_task
+    from grimoire.cli.cmd_task_approve import report_unapproved, verify_payload
+    from grimoire.missions.verify import NoDeclaredChecksError, UnapprovedChecksError, verify_task
 
     root = project_root.resolve()
     service = _service(project_root, ledger_root)
@@ -1109,13 +1110,12 @@ def task_verify(
     except NoDeclaredChecksError as exc:
         console.print(f"[red]✗[/red] {exc}")
         raise typer.Exit(2) from exc
+    except UnapprovedChecksError as exc:
+        report_unapproved(exc, task_id, as_json=_fmt(ctx) == "json", console=console)  # W3-03 : rien n'a été lancé.
+        raise typer.Exit(3) from exc
 
     if _fmt(ctx) == "json":
-        typer.echo(
-            json.dumps(
-                {"pack": outcome.pack.to_dict(), "verdict": outcome.verdict.to_dict()}, indent=2, ensure_ascii=False
-            )
-        )
+        typer.echo(json.dumps(verify_payload(outcome), indent=2, ensure_ascii=False))
     else:
         icon = "[green]OK[/green]" if outcome.passed else "[red]✗[/red]"
         console.print(f"{icon} {task_id} — verdict {outcome.verdict.verdict.value} ({outcome.pack.id}, {outcome.verdict.id})")
@@ -1430,6 +1430,16 @@ _register_waiting(task_app)
 from grimoire.cli.cmd_task_worktree import register_worktree_commands  # noqa: E402
 
 register_worktree_commands(task_app)
+
+# W3-03 : `task approve-check`, dans son module (plafond de taille d'un module).
+from grimoire.cli.cmd_task_approve import register_approve_commands  # noqa: E402
+
+register_approve_commands(task_app)
+
+# W3-01 : `task review`, dans son module (plafond de taille d'un module).
+from grimoire.cli.cmd_task_review import register_review_commands  # noqa: E402
+
+register_review_commands(task_app)
 
 from grimoire.cli.cmd_task_wave import register_wave_commands  # noqa: E402
 

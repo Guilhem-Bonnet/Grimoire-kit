@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from grimoire.core.standard_state import active_profile_id, active_task_id, is_standard_enrolled
+from grimoire.core.standard_state import active_task_id, is_standard_enrolled
 from grimoire.flows.live_runs import active_flow_lines
 from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
 from grimoire.hosts.decisions.gate_summary import _gate_summary
+from grimoire.hosts.decisions.profile_floor import session_profile
 
 
 def decide_context_capsule(hook: HookInput) -> Decision:
@@ -19,7 +20,7 @@ def decide_context_capsule(hook: HookInput) -> Decision:
     if not is_standard_enrolled(hook.project_root):
         return Decision()
     task_id = active_task_id(hook.project_root, session_id=hook.session_id)
-    profile = active_profile_id(hook.project_root)
+    profile = session_profile(hook)
     try:
         ok, summary, detail = _gate_summary(hook.project_root, task_id)
     except Exception as exc:

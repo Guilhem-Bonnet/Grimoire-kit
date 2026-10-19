@@ -976,6 +976,32 @@ def archive_orphans(target: Path, report: OrphanReport) -> list[str]:
     return moved
 
 
+def projected_removals(target: Path) -> list[str]:
+    """La liste projetée des retraits que le checkpoint ``destructive`` engage (W2-11), triée, sans doublon.
+
+    Deux familles, relues sur le disque à chaque appel (jamais mémorisées) :
+
+    - ``orphan:<chemin>`` : un fichier que :func:`find_orphans` ferait
+      encore retirer de son emplacement installé ;
+    - ``archived:<chemin>`` : un fichier déjà déplacé sous
+      ``_archive/*/orphans/`` (chemin relatif à la racine du projet d'origine,
+      indépendant de la date du dossier d'archive).
+
+    Le checkpoint lie la décision humaine à l'empreinte de cette liste :
+    l'orphelin apparu ou l'archive restaurée entre la présentation et la
+    décision donne ``plan_drifted``. Limite : la liste dit ce que ce module sait
+    retirer ; elle ne couvre aucun retrait qu'un autre outil ferait.
+    """
+    items = {f"orphan:{path.relative_to(target).as_posix()}" for o in find_orphans(target).orphans for path in o.paths}
+    archive = target / "_archive"
+    if archive.is_dir():
+        for orphans_dir in sorted(archive.glob("*/orphans")):
+            for path in sorted(orphans_dir.rglob("*")):
+                if path.is_file() and path != orphans_dir / "README.md":
+                    items.add(f"archived:{path.relative_to(orphans_dir).as_posix()}")
+    return sorted(items)
+
+
 # ── repair (V1 proposals) ────────────────────────────────────────────────────
 
 

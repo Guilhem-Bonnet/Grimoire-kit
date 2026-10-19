@@ -8,10 +8,11 @@ from typing import TYPE_CHECKING, Any
 
 from grimoire.bridges.schemas import HostId
 from grimoire.core.claude_activation import activation_context_text
-from grimoire.core.standard_state import active_profile_id, resolve_active_task
+from grimoire.core.standard_state import resolve_active_task
 from grimoire.flows.live_runs import active_flow_lines
 from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
 from grimoire.hosts.decisions.enrolment import BLOCKING_PROFILES, link_session, no_task_context
+from grimoire.hosts.decisions.profile_floor import session_profile
 from grimoire.hosts.decisions.record import _record_agent_dispatch
 
 if TYPE_CHECKING:
@@ -389,7 +390,7 @@ def decide_activation(hook: HookInput) -> Decision:
     link: dict[str, Any] = {}
     if governed:
         if active.is_fallback:
-            profile = active_profile_id(hook.project_root)
+            profile = session_profile(hook)
             if profile in BLOCKING_PROFILES:
                 enrolment = no_task_context(profile, active.candidates, active.expired)
         else:

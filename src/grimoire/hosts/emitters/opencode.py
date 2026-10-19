@@ -26,6 +26,7 @@ from typing import Any
 
 from grimoire.bridges.schemas import HostId
 from grimoire.core.grounding import GROUNDING_RULE, UNCERTAINTIES_BLOCK_RULE
+from grimoire.core.standard_generation import PROFILE_LADDER
 from grimoire.hosts.emitters.base import (
     MANAGED_MARKER,
     Degradation,
@@ -162,6 +163,7 @@ const GUARDED = __GUARDED__
 const SECRET_PATTERNS = __SECRETS__.map((source) => new RegExp(source, "i"))
 const TIMEOUT_MS = __TIMEOUT__
 const BLOCKING_PROFILES = ["governed", "production"]
+const KNOWN_PROFILES = __PROFILES__
 let warned = false
 
 // Fail closed in a blocking profile (read from the standard profile manifest, like the Python gates),
@@ -172,7 +174,17 @@ function unavailable(directory, why) {
     const manifest = readFileSync(join(directory, "_grimoire", "standard", "standard-profile.yaml"), "utf8")
     profile = (manifest.match(/^profile:\\s*["']?([A-Za-z_-]+)/m) ?? [])[1] ?? ""
   } catch {}
-  if (BLOCKING_PROFILES.includes(profile)) {
+  // Plancher committé (W2-07) : il s'applique même sous un profil déclaré plus léger. Un fichier présent
+  // mais illisible, ou à valeur inconnue, vaut « governed » (fail-closed, comme profile_floor_id).
+  let floor = ""
+  try {
+    const raw = readFileSync(join(directory, "_grimoire", "standard", "profile-floor.yaml"), "utf8")
+    floor = (raw.match(/^floor:\\s*["']?([A-Za-z_-]+)/m) ?? [])[1] ?? ""
+    if (!KNOWN_PROFILES.includes(floor)) floor = "governed"
+  } catch (error) {
+    if (error?.code !== "ENOENT") floor = "governed"
+  }
+  if (BLOCKING_PROFILES.includes(profile) || BLOCKING_PROFILES.includes(floor)) {
     throw new Error(`grimoire-hook introuvable, garde indisponible ; installe le kit ou désactive le profil gouverné (${why})`)
   }
   if (!warned) {
@@ -237,6 +249,7 @@ def _guard_plugin(hook: HookSpec) -> EmittedFile:
         .replace("__GUARDED__", json.dumps(tools))
         .replace("__SECRETS__", json.dumps(list(secret_patterns()), ensure_ascii=False))
         .replace("__TIMEOUT__", str(hook.timeout * 1000))
+        .replace("__PROFILES__", json.dumps(list(PROFILE_LADDER)))
     )
     return EmittedFile(relpath=PLUGIN_RELPATH, content=content)
 

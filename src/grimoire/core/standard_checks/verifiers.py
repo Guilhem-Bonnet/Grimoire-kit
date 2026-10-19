@@ -573,6 +573,9 @@ def _verify_guard_errors(root: Path, task_id: str, result: StandardVerificationR
     message = describe_guard_errors(root, task_id)
     if message:
         _add_check(result, "guard.error_recorded", "warning", message)
+    from grimoire.hosts.decisions.gate_override import describe_consumed_overrides  # W2-06
+    if overrides := describe_consumed_overrides(root, task_id):
+        _add_check(result, "policy.override_consumed", "warning", overrides)
 
 
 def _verify_evidence_pack(root: Path, task_id: str, result: StandardVerificationResult) -> None:
@@ -581,12 +584,14 @@ def _verify_evidence_pack(root: Path, task_id: str, result: StandardVerification
     # voir evidence_journal). Lecture seule à dessein — cette fonction sert
     # aussi `grimoire_standard_verify`/`_audit` (MCP `readOnlyHint`) ; seule
     # `check_evidence_gates` projette (écrit) la section « Inventaire
-    # observé ». Toujours un avertissement, jamais une erreur (transition
-    # douce, comme le reste de cette fonction).
+    # observé ». Avertissements (transition douce), sauf une chaîne de journal
+    # rompue (W4-03), qui est une erreur.
+    from grimoire.core.standard_checks.evidence_chain import verify_evidence_chain
     from grimoire.core.standard_checks.evidence_journal import has_observed_inventory
 
     observed = has_observed_inventory(root, task_id)
     _verify_guard_errors(root, task_id, result)
+    verify_evidence_chain(root, task_id, result)
     rel_path = EVIDENCE_DIR / task_id / "evidence-pack.md"
     text = _text_file(root, rel_path)
     if not text:

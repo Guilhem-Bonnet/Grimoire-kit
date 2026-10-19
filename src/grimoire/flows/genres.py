@@ -502,7 +502,13 @@ def _execute_fanout(executor: DispatchExecutor, contract: NodeContract, context_
 
 
 def _execute_verify_panel(executor: DispatchExecutor, contract: NodeContract, context_pack: dict[str, Any]) -> NodeExecutionResult:
-    """``kind: "verify-panel"`` (issue #207) : k vérificateurs indépendants, majorité requise.
+    """``kind: "verify-panel"`` (issue #207) : k vérificateurs indépendants, verdict structuré (W3-01).
+
+    Chaque vérificateur vote par ``verdict`` (``READY``/``NOT-READY``) dans sa
+    sortie ; sans verdict il s'abstient. ``config.verifyPanel.class`` (``V1`` :
+    majorité des votes exprimés ; ``V2``, le défaut : unanimité) ; trop
+    d'abstentions donnent ``inconclusive``, des ``tree_fingerprint`` divergentes
+    ``invalid`` (:func:`grimoire.missions.review_receipt.tally_panel`).
 
     k et les angles imposés (un par vérificateur, distincts) sont validés
     au chargement (:func:`grimoire.flows.blueprint_loader._validate_genre_config`).
@@ -543,6 +549,9 @@ def _execute_verify_panel(executor: DispatchExecutor, contract: NodeContract, co
             extra_context=(
                 f"Angle de vérification imposé ({i + 1}/{k}) : {angles[i]}\n"
                 "Instruction : cherche activement à réfuter, ne confirme jamais par défaut.\n"
+                "Sortie : écris dans l'objet de sortie 'verdict' : 'READY' ou 'NOT-READY' "
+                "(et 'tree_fingerprint', l'empreinte de l'arbre relu, si on te l'a donnée) ; "
+                "sans 'verdict' tu t'abstiens et ta sortie ne compte pas comme un vote.\n"
                 f"[genre_attempt_index={i}]"
             ),
         )
@@ -560,9 +569,14 @@ def _execute_verify_panel(executor: DispatchExecutor, contract: NodeContract, co
             executor.last_result = result
             return result
 
-    greens = sum(1 for c in children if c.status == "finished")
-    majority = greens > k / 2
-    verdict = "green" if majority else "red"
+    # W3-01 : un vérificateur vote par un verdict structuré (`verdict` READY/NOT-READY
+    # dans sa sortie), jamais par le seul fait d'avoir fini ; sans verdict, il s'abstient.
+    from grimoire.missions.review_receipt import tally_panel
+
+    panel_class = str(vp.get("class") or "V2")
+    tally = tally_panel([c.output if c.status == "finished" else None for c in children], panel_class)
+    greens = tally.approve
+    verdict = tally.verdict
     attempts = sum(c.attempts for c in children)
     escalations = sum(c.escalations for c in children)
     _record_genre_outcome(executor, 
@@ -577,13 +591,17 @@ def _execute_verify_panel(executor: DispatchExecutor, contract: NodeContract, co
         executor.blocked_node = node_id
         result = NodeExecutionResult(
             pending=False, output=None,
-            extra={"verify_panel_results": panel_results, "verify_panel_greens": greens, "verify_panel_k": k},
+            extra={
+                "verify_panel_results": panel_results, "verify_panel_greens": greens, "verify_panel_k": k,
+                "verify_panel_tally": tally.to_dict(),
+            },
         )
         executor.last_result = result
         return result
     output: dict[str, Any] = {"pins": {pin.pin_id: {"contract": pin.contract} for pin in contract.outputs}}
     output["verify_panel_results"] = panel_results
     output["verify_panel_greens"] = greens
+    output["verify_panel_tally"] = tally.to_dict()
     result = NodeExecutionResult(pending=False, output=output)
     executor.last_result = result
     return result

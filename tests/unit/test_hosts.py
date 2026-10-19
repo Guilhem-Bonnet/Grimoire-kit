@@ -1617,6 +1617,9 @@ def test_done_gate_says_nothing_without_any_mutation(governed: Path) -> None:
         "capped": False,
         "command_hint": "",
         "last_mutation_ts": "",
+        "mode": "shadow",
+        "mode_source": "default",
+        "armed_from": "",
     }
 
 

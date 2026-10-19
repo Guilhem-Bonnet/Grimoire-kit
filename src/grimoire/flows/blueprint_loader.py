@@ -195,6 +195,12 @@ def _validate_genre_config(node: dict[str, Any]) -> None:
                 f"node={node_id} : config.verifyPanel.angles doit être une liste de {k} chaînes non vides "
                 "— un angle distinct par vérificateur, jamais moins que k"
             )
+        panel_class = vp.get("class")
+        if panel_class is not None and panel_class not in ("V1", "V2"):
+            raise GrimoireRuntimeError(
+                f"node={node_id} : config.verifyPanel.class doit valoir V1 (majorité des votes exprimés) "
+                f"ou V2 (unanimité), trouvé {panel_class!r}"
+            )
     elif kind == "loop-until-dry":
         lud = config.get("loopUntilDry") or {}
         if not _require_positive_int(lud.get("maxRounds"), minimum=1):
@@ -245,6 +251,14 @@ def _validate_genre_config(node: dict[str, Any]) -> None:
         if "max_amendments" in c and (not isinstance(cap, int) or isinstance(cap, bool) or cap < 1):
             raise GrimoireRuntimeError(
                 f"node={node_id} : config.checkpoint.max_amendments doit être un entier >= 1"
+            )
+        # W2-11 : `plan` (optionnel) = fournisseur de la liste projetée à
+        # laquelle la décision est liée. Un nom connu, jamais deviné.
+        from grimoire.flows.attestation import PLAN_PROVIDERS
+
+        if "plan" in c and c["plan"] not in PLAN_PROVIDERS:
+            raise GrimoireRuntimeError(
+                f"node={node_id} : config.checkpoint.plan doit être l'un de {list(PLAN_PROVIDERS)} (reçu {c['plan']!r})"
             )
     # "fanout" : aucune clé de config obligatoire — le plafond du nombre
     # d'éléments (pilot.max_fanout_n) est une politique de projet, vérifiée à
