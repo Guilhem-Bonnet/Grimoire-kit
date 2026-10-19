@@ -332,6 +332,24 @@ class TestChangelogCoverage:
         assert released_repo.main() == 1
         assert "sans toucher CHANGELOG.md" in capsys.readouterr().err
 
+    def test_a_direct_push_without_pr_is_accepted_when_the_release_note_cites_its_hash(
+        self, released_repo: ModuleType
+    ) -> None:
+        """Un commit poussé sans PR : la section de la release le cite par son hash."""
+        _commit(released_repo.REPO, "fix(web): un correctif poussé direct")
+        sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=released_repo.REPO, check=True, capture_output=True, text=True
+        ).stdout.strip()
+        self._close(released_repo, "3.37.0")
+        text = released_repo.CHANGELOG.read_text(encoding="utf-8")
+        text = text.replace(
+            "## [3.37.0] - 2026-09-04\n",
+            f"## [3.37.0] - 2026-09-04\n\n- **Un correctif (`{sha[:8]}`).** Détail.\n",
+            1,
+        )
+        released_repo.CHANGELOG.write_text(text, encoding="utf-8")
+        assert released_repo.main() == 0
+
     def test_a_feature_without_a_pr_number_and_without_an_entry_stays_refused(
         self, released_repo: ModuleType, capsys: pytest.CaptureFixture[str]
     ) -> None:
