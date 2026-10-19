@@ -85,3 +85,61 @@ class TestExpertiseAddRemove:
         result = runner.invoke(app, ["expertise", "add", "rust", "--project-root", str(tmp_path)])
         assert result.exit_code == 1
         assert "rust" in result.output
+
+
+class TestExpertiseTextOutput:
+    """Rendu texte (hors `-o json`) des trois commandes — lot onboarding."""
+
+    def test_list_groups_entries_by_family(self) -> None:
+        result = runner.invoke(app, ["expertise", "list"])
+        assert result.exit_code == 0, result.output
+        assert "languages" in result.output
+        assert "cloud" in result.output
+        assert "rust" in result.output
+
+    def test_list_detected_says_so_when_nothing_is_detected(self, tmp_path: Path) -> None:
+        result = runner.invoke(app, ["expertise", "list", "--detected", "--project-root", str(tmp_path)])
+        assert result.exit_code == 0, result.output
+        assert "Aucune expertise détectée" in result.output
+
+    def test_list_detected_prints_reason_and_confidence(self, tmp_path: Path) -> None:
+        (tmp_path / "Cargo.toml").write_text('[package]\nname = "demo"\n', encoding="utf-8")
+        result = runner.invoke(app, ["expertise", "list", "--detected", "--project-root", str(tmp_path)])
+        assert result.exit_code == 0, result.output
+        assert "rust" in result.output
+        assert "confiance" in result.output
+
+    def test_add_then_remove_report_in_text(self, tmp_path: Path) -> None:
+        _seed_stack_engineer(tmp_path)
+        add_result = runner.invoke(app, ["expertise", "add", "rust", "--project-root", str(tmp_path)])
+        assert add_result.exit_code == 0, add_result.output
+        assert "attaché" in add_result.output
+        assert "host sync" in add_result.output
+
+        again = runner.invoke(app, ["expertise", "add", "rust", "--project-root", str(tmp_path)])
+        assert again.exit_code == 0, again.output
+        assert "déjà attaché" in again.output
+
+        remove_result = runner.invoke(app, ["expertise", "remove", "rust", "--project-root", str(tmp_path)])
+        assert remove_result.exit_code == 0, remove_result.output
+        assert "détaché" in remove_result.output
+
+        not_attached = runner.invoke(app, ["expertise", "remove", "rust", "--project-root", str(tmp_path)])
+        assert not_attached.exit_code == 0, not_attached.output
+        assert "n'était pas attaché" in not_attached.output
+
+    def test_remove_unknown_id_is_a_named_refusal(self, tmp_path: Path) -> None:
+        _seed_stack_engineer(tmp_path)
+        result = runner.invoke(app, ["expertise", "remove", "nope", "--project-root", str(tmp_path)])
+        assert result.exit_code == 1
+        assert "inconnu" in result.output
+        assert "nope" in result.output
+
+    def test_remove_in_json_lists_results(self, tmp_path: Path) -> None:
+        _seed_stack_engineer(tmp_path)
+        runner.invoke(app, ["expertise", "add", "rust", "--project-root", str(tmp_path)])
+        result = runner.invoke(app, ["-o", "json", "expertise", "remove", "rust", "--project-root", str(tmp_path)])
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.output)
+        assert payload[0]["expertise_id"] == "rust"
+        assert payload[0]["was_attached"] is True
