@@ -132,9 +132,7 @@ class TestDetach:
         assert result.was_attached is False
         assert result.skill_removed is False
 
-    def test_detach_removes_an_orphaned_skill_file_even_without_an_agent_override(
-        self, tmp_path: Path
-    ) -> None:
+    def test_detach_removes_an_orphaned_skill_file_even_without_an_agent_override(self, tmp_path: Path) -> None:
         """Revue Copilot sur #618 : si l'override d'agent a disparu autrement
         qu'en passant par `detach_expertise` (retiré à la main, override
         drift reconverti…) mais que le fichier de skill est resté sur

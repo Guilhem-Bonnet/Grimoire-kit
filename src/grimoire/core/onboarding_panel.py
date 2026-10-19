@@ -74,7 +74,10 @@ def build_next_steps(
     headline = f"Archetype [bold]{resolved.archetype}[/bold] installed ({info_reason}) — memory {backend}."
 
     hints = unexploited_hints(
-        target, archetype=resolved.archetype, backend=backend, no_cockpit=no_cockpit,
+        target,
+        archetype=resolved.archetype,
+        backend=backend,
+        no_cockpit=no_cockpit,
         layer_profile=layer_profile,
     )
     hint_by_command = {h.command: h for h in hints}
@@ -98,10 +101,7 @@ def build_next_steps(
 
     # Always-available fallback so a fully-specialized, fully-governed project
     # still gets three concrete actions instead of trailing off short.
-    candidates.append(
-        'Run your first governed task: `grimoire task add "..."` '
-        "then `grimoire standard gate check`"
-    )
+    candidates.append('Run your first governed task: `grimoire task add "..."` then `grimoire standard gate check`')
 
     actions = tuple(dict.fromkeys(candidates))[:_MAX_ACTIONS]
 
@@ -120,9 +120,7 @@ def build_next_steps(
     }
     missing = [label for key, label in _ALL_CAPABILITY_LABELS.items() if not exploited_categories[key]]
     unexploited_line = (
-        f"This project also has: {', '.join(missing)} — `grimoire --all --help` to see everything."
-        if missing
-        else None
+        f"This project also has: {', '.join(missing)} — `grimoire --all --help` to see everything." if missing else None
     )
 
     return NextStepsPanel(headline=headline, actions=actions, unexploited_line=unexploited_line)

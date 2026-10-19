@@ -142,36 +142,46 @@ def unexploited_hints(
     hints: list[CapabilityHint] = []
 
     if archetype == "minimal":
-        hints.append(CapabilityHint(
-            "archetype still minimal (universal base, no specialization)",
-            "grimoire registry list",
-        ))
+        hints.append(
+            CapabilityHint(
+                "archetype still minimal (universal base, no specialization)",
+                "grimoire registry list",
+            )
+        )
 
     profile = standard_profile(target)
     if profile is None:
-        hints.append(CapabilityHint(
-            "agentic governance not started (standard profile)",
-            "grimoire standard needs",
-        ))
+        hints.append(
+            CapabilityHint(
+                "agentic governance not started (standard profile)",
+                "grimoire standard needs",
+            )
+        )
     elif profile == "starter" and archetype in _TEAM_SCALE_ARCHETYPES:
-        hints.append(CapabilityHint(
-            f"'starter' profile below target for a {archetype} archetype (team/enterprise)",
-            "grimoire standard init --profile governed",
-        ))
+        hints.append(
+            CapabilityHint(
+                f"'starter' profile below target for a {archetype} archetype (team/enterprise)",
+                "grimoire standard init --profile governed",
+            )
+        )
 
     effective_profile = layer_profile or ("lexical" if backend in _UNUPGRADED_BACKENDS else "standard")
     upgrade_to = memory_upgrade_target(effective_profile, probes=memory_probes)
     if upgrade_to:
-        hints.append(CapabilityHint(
-            f"memory profile '{effective_profile}' is below what this machine can serve ({upgrade_to})",
-            f"grimoire memory up --profile {upgrade_to} --apply",
-        ))
+        hints.append(
+            CapabilityHint(
+                f"memory profile '{effective_profile}' is below what this machine can serve ({upgrade_to})",
+                f"grimoire memory up --profile {upgrade_to} --apply",
+            )
+        )
 
     if not no_cockpit and not cockpit_registered(target):
-        hints.append(CapabilityHint(
-            "multi-project cockpit not opened yet",
-            "grimoire cockpit",
-        ))
+        hints.append(
+            CapabilityHint(
+                "multi-project cockpit not opened yet",
+                "grimoire cockpit",
+            )
+        )
 
     return hints
 

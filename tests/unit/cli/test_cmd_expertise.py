@@ -68,7 +68,9 @@ class TestExpertiseAddRemove:
         assert payload[0]["porteur"] == "stack-engineer"
         assert (tmp_path / "_grimoire" / "overrides" / "skills" / "expertise-rust.md").is_file()
 
-        remove_result = runner.invoke(app, ["-o", "json", "expertise", "remove", "rust", "--project-root", str(tmp_path)])
+        remove_result = runner.invoke(
+            app, ["-o", "json", "expertise", "remove", "rust", "--project-root", str(tmp_path)]
+        )
         assert remove_result.exit_code == 0, remove_result.output
         assert not (tmp_path / "_grimoire" / "overrides" / "skills" / "expertise-rust.md").exists()
 

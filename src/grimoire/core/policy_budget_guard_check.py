@@ -33,9 +33,7 @@ def apply_policy_budget_guard_check(target: Path, results: list[dict[str, Any]],
             console.print(f"  [red]FAIL[/red]  {detail}")
         return
 
-    blocking_global = [
-        r.id for r in budget_rules if r.tool_pattern == "*" and r.verdict_on_match is VerdictKind.BLOCK
-    ]
+    blocking_global = [r.id for r in budget_rules if r.tool_pattern == "*" and r.verdict_on_match is VerdictKind.BLOCK]
     if blocking_global:
         detail = (
             f"budget global bloquant ({', '.join(blocking_global)}) : une règle `per_session` sans "

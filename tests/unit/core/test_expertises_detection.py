@@ -48,7 +48,7 @@ class TestFileMarkerDetection:
     def test_stack_scanner_backed_languages_are_recommended(self, tmp_path: Path) -> None:
         """python/typescript/go/csharp/java réutilisent StackScanner — pas un
         second mécanisme de détection."""
-        (tmp_path / "pyproject.toml").write_text("[project]\nname = \"demo\"\n", encoding="utf-8")
+        (tmp_path / "pyproject.toml").write_text('[project]\nname = "demo"\n', encoding="utf-8")
 
         recommendations = detect_expertises(tmp_path, catalog=_CATALOG)
 
