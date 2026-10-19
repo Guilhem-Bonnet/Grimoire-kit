@@ -125,6 +125,8 @@ class EmitResult:
     #: depuis son émission), ``foreign`` (jamais écrit par le kit) ou ``unreadable``.
     conflicts: dict[str, str] = field(default_factory=dict)
     removed: list[str] = field(default_factory=list)
+    #: Fichiers que le projet a déclarés siens (``hosts.preserve``) : jamais écrits, jamais en conflit.
+    preserved: list[str] = field(default_factory=list)
     degradations: list[Degradation] = field(default_factory=list)
     dry_run: bool = False
 
@@ -145,6 +147,7 @@ class EmitResult:
             "skipped": list(self.skipped),
             "conflicts": dict(self.conflicts),
             "removed": list(self.removed),
+            "preserved": list(self.preserved),
             "degradations": [d.to_dict() for d in self.degradations],
         }
 
@@ -327,13 +330,22 @@ def _decide_block(current: str | None, emitted: EmittedFile, force: bool) -> tup
 
 
 def _decide_files(
-    plan: EmitPlan, root: Path, result: EmitResult, overlay: dict[Path, str], writes: list[tuple[Path, str]], force: bool
+    plan: EmitPlan,
+    root: Path,
+    result: EmitResult,
+    overlay: dict[Path, str],
+    writes: list[tuple[Path, str]],
+    force: bool,
+    preserved: frozenset[str] = frozenset(),
 ) -> None:
     for emitted in plan.files:
         dest = _target(root / emitted.relpath)
         # POSIX form on purpose: a label is an identifier reported to the user
         # and asserted in tests, so it must not change shape with the host OS.
         label = emitted.relpath.as_posix()
+        if label in preserved:
+            result.preserved.append(label)
+            continue
         try:
             current = _read(dest, overlay, raw=emitted.block)
         except (OSError, ValueError):
@@ -360,11 +372,19 @@ def _decide_files(
 
 
 def _decide_merges(
-    plan: EmitPlan, root: Path, result: EmitResult, overlay: dict[Path, str], writes: list[tuple[Path, str]]
+    plan: EmitPlan,
+    root: Path,
+    result: EmitResult,
+    overlay: dict[Path, str],
+    writes: list[tuple[Path, str]],
+    preserved: frozenset[str] = frozenset(),
 ) -> None:
     for merge in plan.merges:
         dest = _target(root / merge.relpath)
         label = merge.label or merge.relpath.as_posix()
+        if merge.relpath.as_posix() in preserved:
+            result.preserved.append(merge.relpath.as_posix())
+            continue
         try:
             text = _read(dest, overlay)
             loaded = json.loads(text) if text is not None else {}
@@ -452,7 +472,12 @@ def _commit(writes: list[tuple[Path, str]]) -> None:
 
 
 def apply_plans(
-    plans: Sequence[EmitPlan], project_root: Path, *, dry_run: bool = False, force: bool = False
+    plans: Sequence[EmitPlan],
+    project_root: Path,
+    *,
+    dry_run: bool = False,
+    force: bool = False,
+    preserve: frozenset[str] | None = None,
 ) -> list[EmitResult]:
     """Write every plan into *project_root* as one transaction, leaving hand-written files alone.
 
@@ -465,17 +490,25 @@ def apply_plans(
     Limite : la transaction vit en mémoire. Un processus tué en pleine écriture
     laisse les fichiers déjà remplacés ; chacun est entier (écriture atomique),
     mais l'ensemble n'est pas rétabli.
+
+    *preserve* : fichiers que le projet garde pour lui (``hosts.preserve``), jamais touchés, y
+    compris par ``force``. Omis, il vient de la config du projet — un seul écrivain, une seule règle.
     """
+    from grimoire.hosts.detection import preserved_paths
+
     root = project_root.resolve()
+    kept = preserve if preserve is not None else preserved_paths(root)
     overlay: dict[Path, str] = {}
     writes: list[tuple[Path, str]] = []
     stale: list[Path] = []
     results: list[EmitResult] = []
     for plan in plans:
         result = EmitResult(host_id=plan.host_id, degradations=list(plan.degradations), dry_run=dry_run)
-        _decide_files(plan, root, result, overlay, writes, force)
-        _decide_merges(plan, root, result, overlay, writes)
+        _decide_files(plan, root, result, overlay, writes, force, kept)
+        _decide_merges(plan, root, result, overlay, writes, kept)
         for path in _stale_files(plan, root):
+            if path.relative_to(root).as_posix() in kept:
+                continue
             result.removed.append(path.relative_to(root).as_posix())
             stale.append(path)
         results.append(result)
@@ -489,6 +522,28 @@ def apply_plans(
 def apply_plan(plan: EmitPlan, project_root: Path, *, dry_run: bool = False, force: bool = False) -> EmitResult:
     """Write *plan* into *project_root*, leaving hand-written files alone (see :func:`apply_plans`)."""
     return apply_plans([plan], project_root, dry_run=dry_run, force=force)[0]
+
+
+def conflict_path(label: str) -> str:
+    """Chemin d'un libellé de conflit (``.claude/settings.json (JSON illisible — …)`` -> ``.claude/settings.json``)."""
+    return label.partition(" (")[0]
+
+
+def conflict_exits(labels: list[str] | tuple[str, ...]) -> str:
+    """Les deux issues d'un conflit, dites ensemble : l'une garde le fichier de l'utilisateur, l'autre l'écrase."""
+    paths = ", ".join(f'"{conflict_path(label)}"' for label in labels)
+    return (
+        f"issues : garder le fichier (non destructif, durable) en le déclarant dans project-context.yaml "
+        f"(`hosts: {{preserve: [{paths}]}}`), ou laisser le kit l'écraser avec `grimoire host sync --force`"
+    )
+
+
+def host_conflict_detail(plan: EmitPlan, project_root: Path, alias: str) -> str:
+    """Fichiers de *plan* que le kit préserve sans que le projet l'ait déclaré ; vide s'il n'y en a pas (lu à blanc)."""
+    skipped = apply_plan(plan, project_root, dry_run=True).skipped
+    if not skipped:
+        return ""
+    return f"Hôte {alias} : {', '.join(skipped)} préservé(s), non synchronisé(s) — {conflict_exits(skipped)}"
 
 
 class Emitter:

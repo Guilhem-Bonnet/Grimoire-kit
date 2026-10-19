@@ -48,7 +48,7 @@ from grimoire.core.rule_resolution import (
 from grimoire.hosts.capabilities import profile_for
 from grimoire.hosts.emitters.base import Degradation, EmitPlan, EmittedFile, Emitter, managed_header
 
-__all__ = ["rule_file_name", "with_rule_layers"]
+__all__ = ["renders_rule_files", "rule_file_name", "with_rule_layers"]
 
 #: Portée d'une règle sans ``@portée`` (voir ``layered_rules.Rule.scope``).
 GLOBAL_SCOPE = "**"
@@ -64,6 +64,11 @@ def rule_file_name(scope: str, suffix: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", scope.lower()).strip("-")[:32] or "scope"
     digest = hashlib.sha256(scope.encode("utf-8")).hexdigest()[:8]
     return f"grimoire-rules-{slug}-{digest}{suffix}"
+
+
+def renders_rule_files(host_id: HostId) -> bool:
+    """Cet hôte reçoit-il un fichier de règles par portée ? Sinon il ne reçoit qu'une mention."""
+    return host_id in _RENDERERS
 
 
 def _bare(rule: Rule) -> str:
@@ -183,6 +188,9 @@ def with_rule_layers(plan: EmitPlan, project_root: Path) -> EmitPlan:
                 reason=f"{profile_for(plan.host_id).display_name} : le kit n'émet pas de fichier de règles par chemin pour cet hôte.",
                 fallback=f"{len(live)} règle(s) lisible(s) dans {RULES_DIR}/ ; `grimoire memory rules explain <chemin>` donne celles d'un fichier.",
             ))
+        # Une règle d'une couche non livrée, à l'ombre ou en conflit n'arrive pas non plus sur cet hôte :
+        # le dire ici évite qu'elle ne soit déclarée nulle part (D-07, matrice règle × hôte).
+        degradations.extend(_causes(report, resolved))
         return replace(plan, degradations=tuple(degradations))
 
     render = renderer[0]

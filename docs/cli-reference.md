@@ -232,6 +232,8 @@ exécuter. Détail et dégradations par hôte : [Surfaces hôtes](hosts.md).
 | `grimoire host surface` | Description host-neutre du projet |
 | `grimoire host sync --host all` | Générer les surfaces (`--dry-run`, `--force`). Les règles `team` et `project` partent en `.cursor/rules/grimoire-rules*.mdc` (`globs:`) et `.github/instructions/grimoire-rules*.instructions.md` (`applyTo:`) ; le fichier d'une règle retirée est retiré |
 | `grimoire host status` | Écart entre ce que le projet déclare et ce que l'hôte exécute |
+| `grimoire host matrix` | Matrice règle × hôte calculée depuis ce que chaque émetteur écrit ; sort en 1 si une règle n'est ni appliquée ni déclarée dégradée |
+| `grimoire host probe` | Vérifie sur le disque que les fichiers et hooks émis sont présents et à jour, sans rien écrire ; sort en 1 si un fichier manque, est périmé ou édité à la main |
 | `grimoire host run <slug>` | Corps d'une commande, pour un hôte sans commandes natives |
 | `grimoire host hook --host <h> --event <e>` | Point d'entrée des hooks générés (stdin vers stdout) |
 

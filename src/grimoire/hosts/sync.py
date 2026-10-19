@@ -16,9 +16,9 @@ from typing import Any
 
 from grimoire.hosts import collect
 from grimoire.hosts.detection import enabled_host_ids
-from grimoire.hosts.emitters import EmitPlan, apply_plans, emitter_for, supported_hosts
+from grimoire.hosts.emitters import EmitPlan, EmitResult, apply_plans, conflict_exits, emitter_for, supported_hosts
 
-__all__ = ["HostSyncOutcome", "sync_host_surfaces"]
+__all__ = ["HostSyncOutcome", "preserved_detail", "sync_host_surfaces", "unsynced_detail"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,20 +27,31 @@ class HostSyncOutcome:
 
     written: tuple[str, ...] = ()
     error: str = ""
+    #: Fichiers que le kit n'a pas pu réécrire parce que l'utilisateur les a modifiés (ou qu'ils
+    #: ne sont pas au kit). Préservés à raison — mais l'hôte ne reçoit pas ce que le projet déclare.
+    conflicts: tuple[str, ...] = ()
+    #: Fichiers que le projet a déclarés siens (``hosts.preserve``) : ni écrits, ni en conflit, ni « synchronisés ».
+    preserved: tuple[str, ...] = ()
 
     @property
     def ok(self) -> bool:
-        return not self.error
+        """Vrai seulement si chaque surface est à jour : un fichier préservé n'est pas un fichier synchronisé."""
+        return not self.error and not self.conflicts
 
     @property
     def warning(self) -> str:
         """The one line a caller prints when the sync failed; empty otherwise."""
         if self.ok:
             return ""
-        return f"surfaces hôtes non régénérées ({self.error}) — relance `grimoire host sync` après correction"
+        if self.error:
+            return f"surfaces hôtes non régénérées ({self.error}) — relance `grimoire host sync` après correction"
+        return (
+            f"surfaces hôtes non synchronisées : {', '.join(self.conflicts)} modifié(s) à la main ou étranger(s) au kit, "
+            f"préservé(s) — {conflict_exits(self.conflicts)} (`grimoire host probe` détaille)"
+        )
 
     def to_dict(self) -> dict[str, Any]:
-        return {"ok": self.ok, "written": list(self.written), "error": self.error}
+        return {"ok": self.ok, "written": list(self.written), "error": self.error, "conflicts": list(self.conflicts), "preserved": list(self.preserved)}
 
 
 def sync_host_surfaces(project_root: Path) -> HostSyncOutcome:
@@ -53,6 +64,8 @@ def sync_host_surfaces(project_root: Path) -> HostSyncOutcome:
     kept, not because nothing was tried.
     """
     out: list[str] = []
+    conflicts: list[str] = []
+    preserved: list[str] = []
     try:
         surface = collect.build_surface(project_root)
         # Issue #177 (petite version) : n'émettre que les hôtes déclarés dans
@@ -70,8 +83,40 @@ def sync_host_surfaces(project_root: Path) -> HostSyncOutcome:
         # Une seule transaction pour tous les hôtes : une panne laisse l'arbre comme il était.
         for result in apply_plans(plans, project_root):
             out.extend(result.written)
+            conflicts.extend(result.skipped)
+            preserved.extend(result.preserved)
     except Exception as exc:
         outcome = HostSyncOutcome(tuple(out), f"{type(exc).__name__}: {exc}")
         print(f"[grimoire] {outcome.warning}", file=sys.stderr)
         return outcome
-    return HostSyncOutcome(tuple(out))
+    outcome = HostSyncOutcome(tuple(out), conflicts=tuple(conflicts), preserved=tuple(preserved))
+    if not outcome.ok:
+        print(f"[grimoire] {outcome.warning}", file=sys.stderr)
+    return outcome
+
+
+def unsynced_detail(results: list[EmitResult], project_root: Path) -> str:
+    """Pourquoi une synchronisation déjà faite ne laisse pas les hôtes activés à jour ; vide si elle les y laisse.
+
+    ``host_sync.ok`` est exigé (D-07) : un fichier que le kit a préservé parce que l'utilisateur
+    l'a modifié reste, pour l'hôte, une surface périmée. Les conflits d'un hôte désactivé
+    (``hosts.enabled``) ne comptent pas : le projet ne demande pas que cet hôte soit à jour. Un
+    fichier déclaré dans ``hosts.preserve`` n'est pas un conflit (``EmitResult.skipped`` l'exclut).
+    """
+    enabled = enabled_host_ids(project_root)
+    conflicts = [label for r in results if r.host_id in enabled for label in r.skipped]
+    if not conflicts:
+        return ""
+    return (
+        f"{len(conflicts)} host file(s) edited by hand or not owned by the kit, left untouched: "
+        f"{', '.join(conflicts)} — {conflict_exits(conflicts)} (`grimoire host probe` details)"
+    )
+
+
+def preserved_detail(results: list[EmitResult], project_root: Path) -> str:
+    """Fichiers déclarés ``hosts.preserve`` des hôtes activés, à lister dans le rapport ; vide s'il n'y en a pas."""
+    enabled = enabled_host_ids(project_root)
+    kept = sorted({label for r in results if r.host_id in enabled for label in r.preserved})
+    if not kept:
+        return ""
+    return f"; {len(kept)} user-owned (hosts.preserve), not delivered by the kit: {', '.join(kept)}"

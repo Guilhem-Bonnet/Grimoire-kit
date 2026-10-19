@@ -23,7 +23,16 @@ from grimoire.bridges.schemas import HostId
 from grimoire.hosts.capabilities import all_profiles, gaps_for, profile_for, resolve_host
 from grimoire.hosts.collect import build_surface, collect_commands, entry_agent_name
 from grimoire.hosts.detection import alias_for_host, enabled_host_ids
-from grimoire.hosts.emitters import apply_plan, apply_plans, emitter_for, owned_managed_paths, supported_hosts
+from grimoire.hosts.emitters import (
+    apply_plan,
+    apply_plans,
+    conflict_exits,
+    emitter_for,
+    owned_managed_paths,
+    supported_hosts,
+)
+from grimoire.hosts.matrix import build_matrix
+from grimoire.hosts.probe import probe_hosts
 from grimoire.hosts.runtime import parse_event, run_hook
 from grimoire.hosts.surface import Enforcement
 
@@ -31,6 +40,7 @@ host_app = typer.Typer(help="Surfaces hôtes : agents, compétences, commandes e
 console = Console()
 
 _PROJECT_ROOT_OPTION = typer.Option(Path.cwd(), "--project-root", help="Racine du projet.", show_default=False)
+_HOST_ALL_OPTION = typer.Option("all", "--host", help="claude | copilot | codex | cursor | gemini | opencode | all | auto.")
 _HOST_OPTION = typer.Option("auto", "--host", help="claude | copilot | codex | cursor | gemini | opencode | all | auto.")
 _DRY_RUN_OPTION = typer.Option(False, "--dry-run", help="Montrer sans écrire.")
 _FORCE_OPTION = typer.Option(False, "--force", help="Écraser un fichier non généré occupant un chemin géré.")
@@ -256,7 +266,9 @@ def host_sync(
             console.print(f"    [green][OK][/green] {label}")
         for label in result.skipped:
             cause = _CONFLICT_TEXT.get(result.conflicts.get(label, ""), "conflit")
-            console.print(f"    [yellow][!][/yellow] {label} — {cause}, préservé (utilisez --force)")
+            console.print(f"    [yellow][!][/yellow] {label} — {cause}, préservé ({conflict_exits([label])})")
+        for label in result.preserved:
+            console.print(f"    [dim]{label} — à l'utilisateur (hosts.preserve), non écrit[/dim]")
         for label in result.removed:
             console.print(f"    [yellow][-][/yellow] {label} — {'retirerait' if dry_run else 'retiré'} : la règle source n'existe plus")
         for degradation in result.degradations:
@@ -374,6 +386,80 @@ def host_status(
             + " — `grimoire host sync --prune-disabled` pour les retirer"
         )
     raise typer.Exit(0 if all(item.in_sync for item in payload) else 1)
+
+
+@host_app.command("matrix")
+def host_matrix(
+    ctx: typer.Context,
+    project_root: Path = _PROJECT_ROOT_OPTION,
+    host: str = _HOST_ALL_OPTION,
+) -> None:
+    """Matrice règle × hôte, calculée depuis ce que chaque émetteur écrit réellement.
+
+    Sort en 1 si une règle n'est ni appliquée ni déclarée dégradée (`undeclared`),
+    écrite pour un événement que l'hôte ne déclenche pas (`inert`) ou écrite sans sa portée (`misscoped`).
+    """
+    targets = tuple(_resolve_targets(host, project_root))
+    matrix = build_matrix(project_root, targets)
+    if _get_fmt(ctx) == "json":
+        typer.echo(json.dumps(matrix.to_dict(), indent=2, ensure_ascii=False))
+        raise typer.Exit(0 if matrix.ok and matrix.hosts else 1)
+    if not matrix.hosts:
+        console.print("[red]Aucun hôte activé[/red] : rien n'a été calculé.")
+        raise typer.Exit(1)
+    table = Table(title="Matrice règle × hôte")
+    table.add_column("Règle")
+    for host_id in matrix.hosts:
+        table.add_column(profile_for(host_id).display_name)
+    subjects = list(dict.fromkeys(c.subject for c in matrix.cells))
+    for subject in subjects:
+        row = [subject]
+        for host_id in matrix.hosts:
+            cell = next((c for c in matrix.for_host(host_id) if c.subject == subject), None)
+            row.append("" if cell is None else (cell.status if cell.ok else f"[red]{cell.status}[/red]"))
+        table.add_row(*row)
+    console.print(table)
+    for cell in matrix.failing:
+        console.print(f"  [red][!][/red] {cell.host} {cell.subject} — {cell.status} : {cell.reason}")
+    raise typer.Exit(0 if matrix.ok else 1)
+
+
+@host_app.command("probe")
+def host_probe(
+    ctx: typer.Context,
+    project_root: Path = _PROJECT_ROOT_OPTION,
+    host: str = _HOST_ALL_OPTION,
+) -> None:
+    """Vérifier sur le disque que ce que chaque hôte doit appliquer l'est, à jour. N'écrit rien.
+
+    Sort en 1 si un fichier émis manque, est périmé ou modifié à la main, si une règle n'est
+    plus dans le fichier de l'hôte, ou si aucun hôte n'a pu être sondé (inconnu n'est pas OK).
+    """
+    targets = tuple(_resolve_targets(host, project_root))
+    report = probe_hosts(project_root, targets)
+    if _get_fmt(ctx) == "json":
+        typer.echo(json.dumps(report.to_dict(), indent=2, ensure_ascii=False))
+        raise typer.Exit(0 if report.ok else 1)
+    if not report.verified:
+        console.print("[red]Aucun hôte activé[/red] : rien n'a été vérifié.")
+        raise typer.Exit(1)
+    for item in report.hosts:
+        state = "[green]appliqué[/green]" if item.ok else "[red]non conforme[/red]"
+        console.print(f"[bold]{item.display_name}[/bold] {state}")
+        for file in item.files:
+            if file.state == "user-owned":
+                console.print(f"  [dim]{file.path} — à l'utilisateur (hosts.preserve), non livré par le kit[/dim]")
+            elif not file.ok:
+                console.print(f"  [red][!][/red] {file.path} — {file.state}{f' ({file.cause})' if file.cause else ''}")
+        for probed in item.cells:
+            if not probed.ok:
+                why = probed.cell.reason or ("hooks coupés par `disableAllHooks` dans les réglages de l'hôte" if probed.disk == "disabled" else "")
+                console.print(f"  [red][!][/red] {probed.cell.subject} — {probed.cell.status}/{probed.disk} {why}".rstrip())
+    if not report.ok:
+        console.print("`grimoire host sync` régénère ce qui manque ou est périmé ; un fichier modifié à la main reste préservé.")
+        if report.conflicts:
+            console.print(conflict_exits(list(report.conflicts)))
+    raise typer.Exit(0 if report.ok else 1)
 
 
 @host_app.command("run")

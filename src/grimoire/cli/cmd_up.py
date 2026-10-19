@@ -901,6 +901,7 @@ def _step_host_sync(state: _UpState, target: Path, *, dry_run: bool, blocked: bo
     try:
         from grimoire.hosts.collect import build_surface
         from grimoire.hosts.emitters import apply_plans, emitter_for, supported_hosts
+        from grimoire.hosts.sync import preserved_detail, unsynced_detail
 
         surface = build_surface(target)
         plans = []
@@ -914,16 +915,21 @@ def _step_host_sync(state: _UpState, target: Path, *, dry_run: bool, blocked: bo
         state.steps.append(StepResult("host_sync", "failed", f"host sync error: {exc}"))
         return
 
+    problem = unsynced_detail(results, target)  # host_sync.ok est obligatoire (D-07)
+    if problem:
+        state.steps.append(StepResult("host_sync", "failed", problem))
+        return
+
     written = sum(len(r.written) for r in results)
     unchanged = sum(len(r.unchanged) for r in results)
     if written:
         state.steps.append(StepResult(
             "host_sync", "done",
-            f"{written} host artifact(s) written, {unchanged} unchanged, across {len(results)} host(s)",
+            f"{written} host artifact(s) written, {unchanged} unchanged, across {len(results)} host(s){preserved_detail(results, target)}",
         ))
         state.actions.append(f"Synced {written} host artifact(s)")
     else:
-        state.steps.append(StepResult("host_sync", "done", f"{len(results)} host(s) already in sync"))
+        state.steps.append(StepResult("host_sync", "done", f"{len(results)} host(s) already in sync{preserved_detail(results, target)}"))
 
 
 def _step_structure(state: _UpState, target: Path, *, dry_run: bool) -> None:
