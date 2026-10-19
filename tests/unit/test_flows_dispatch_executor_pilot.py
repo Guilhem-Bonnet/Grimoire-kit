@@ -17,6 +17,10 @@ from textwrap import dedent
 from grimoire.flows.dispatch_executor import run_with_dispatch
 from grimoire.flows.engine import FlowEngine
 
+# Commande d'acceptation « qui réussit », valable sous sh comme sous cmd.exe
+# (`true` n'existe pas sous Windows, où `shell=True` lance cmd.exe).
+_TRUE = f'"{sys.executable}" -c pass'
+
 STANDARD = Path("_grimoire/standard")
 REGISTRY = STANDARD / "llm-provider-registry.yaml"
 PILOT_POLICY = STANDARD / "pilot.yaml"
@@ -43,7 +47,7 @@ def _writer_script(tmp_path: Path, name: str, *, cost: float) -> Path:
 
 
 def _invocation(script: Path) -> str:
-    return f"{sys.executable} {script} {{prompt}} --model {{model}}"
+    return f"{Path(sys.executable).as_posix()} {Path(script).as_posix()} {{prompt}} --model {{model}}"
 
 
 def _provider_yaml(pid: str, tier: str, invocation: str) -> str:
@@ -98,7 +102,7 @@ def _blueprint(tmp_path: Path) -> Path:
                 "id": "n",
                 "kind": "pattern",
                 "ref": "ORC-01",
-                "acceptance": ["la suite de tests passe", {"run": "true"}],
+                "acceptance": ["la suite de tests passe", {"run": _TRUE}],
                 "pins": [{"id": "out", "direction": "out", "contract": "c1"}],
             }
         ],
@@ -168,3 +172,51 @@ def test_pilot_max_cost_arrete_la_cascade_avec_un_refus_nomme(tmp_path: Path) ->
     assert node.verdict == "cost_capped"
     assert node.attempts == 1  # jamais tenté "mid" : le plafond était déjà dépassé
     assert node.provider == "cheap-writer"
+
+
+# ── 3. Coût inconnu et plafond : la politique `on_unknown_cost` atteint le dispatch (W1-01) ─
+
+
+def _setup_silent_red_then_mid(tmp_path: Path) -> None:
+    """Palier 1 muet (aucun ``total_cost_usd``) et rouge ; palier 2 vert."""
+    cheap_muet = tmp_path / "scripts" / "cheap_muet.py"
+    cheap_muet.parent.mkdir(parents=True, exist_ok=True)
+    cheap_muet.write_text("print('rien à signaler')\n", encoding="utf-8")  # ni enveloppe, ni coût
+    mid = _writer_script(tmp_path, "mid.py", cost=0.01)
+    _write_registry(
+        tmp_path,
+        _provider_yaml("cheap-writer", "cheap", _invocation(cheap_muet)),
+        _provider_yaml("mid-writer", "mid", _invocation(mid)),
+    )
+
+
+def test_palier_muet_et_plafond_pose_arretent_l_escalade_par_defaut(tmp_path: Path) -> None:
+    _setup_silent_red_then_mid(tmp_path)
+    _write_pilot_policy(tmp_path, "max_cost_usd_per_node: 0.4\n")  # `stop` par défaut
+
+    outcome = run_with_dispatch(_engine(tmp_path), _blueprint(tmp_path), project_root=tmp_path)
+
+    node = outcome.nodes[0]
+    assert node.verdict == "cost_capped", outcome.to_dict()
+    assert node.cost_cap_reason == "cost_unknown"
+    assert node.attempts == 1  # jamais tenté "mid"
+    assert node.provider == "cheap-writer"
+
+
+def test_on_unknown_cost_continue_flagged_atteint_le_dispatch_et_escalade(tmp_path: Path) -> None:
+    """La politique du ``pilot.yaml`` doit être transmise telle quelle à ``run_dispatch``.
+
+    Une mutation qui câble ``"continue_flagged"`` en dur (ou ``"stop"`` en dur)
+    laisserait ce test ou le précédent rouge.
+    """
+    _setup_silent_red_then_mid(tmp_path)
+    _write_pilot_policy(tmp_path, "max_cost_usd_per_node: 0.4\non_unknown_cost: continue_flagged\n")
+
+    outcome = run_with_dispatch(_engine(tmp_path), _blueprint(tmp_path), project_root=tmp_path)
+
+    node = outcome.nodes[0]
+    assert node.verdict == "green", outcome.to_dict()
+    assert node.cost_cap_reason is None
+    assert node.provider == "mid-writer"
+    assert node.escalations == 1
+    assert node.to_dict()["cost_status"] == "lower_bound"  # le palier muet reste signalé

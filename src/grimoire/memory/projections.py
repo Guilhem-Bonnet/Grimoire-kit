@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from grimoire.codegraph.graph import CodeGraph
+from grimoire.codegraph.parser import DEFAULT_EXCLUDE
 from grimoire.codegraph.schemas import CodeEdge, CodeNode, NodeKind
 from grimoire.evidence.service import EvidenceService
 from grimoire.missions.ledger import MissionLedger
@@ -49,6 +50,23 @@ def _unique_code_edges(edges: Iterable[CodeEdge]) -> list[CodeEdge]:
     return list(unique.values())
 
 
+def _code_files(project_root: Path, paths: Iterable[Path], exclude: set[str] | None) -> tuple[Path, list[Path], frozenset[str], dict[str, Path]]:
+    """Racine résolue, sources existantes, exclusions et liste unique des ``.py`` à projeter."""
+    from grimoire.codegraph.freshness import collect_sources
+
+    root = project_root.resolve()
+    sources = [p for p in ((raw if raw.is_absolute() else root / raw) for raw in paths) if p.exists()]
+    excluded = frozenset(exclude) if exclude else DEFAULT_EXCLUDE
+    return root, sources, excluded, collect_sources(root, sources, excluded)
+
+
+def _index_files(root: Path, files: Iterable[Path]) -> CodeGraph:
+    graph = CodeGraph()
+    for path in files:
+        graph.index_file(path, root=str(root))
+    return graph
+
+
 def build_code_graph(
     project_root: Path,
     paths: Iterable[Path],
@@ -56,17 +74,8 @@ def build_code_graph(
     exclude: set[str] | None = None,
 ) -> CodeGraph:
     """Build an in-memory code graph from project-relative files or directories."""
-    graph = CodeGraph()
-    root = project_root.resolve()
-    for raw_path in paths:
-        path = raw_path if raw_path.is_absolute() else root / raw_path
-        if not path.exists():
-            continue
-        if path.is_file() and path.suffix == ".py":
-            graph.index_file(path, root=str(root))
-        elif path.is_dir():
-            graph.index_directory(path, exclude=exclude, root=str(root))
-    return graph
+    root, _, _, files = _code_files(project_root, paths, exclude)
+    return _index_files(root, files.values())
 
 
 def sync_code_graph_projection(
@@ -76,13 +85,23 @@ def sync_code_graph_projection(
     paths: Iterable[Path],
     exclude: set[str] | None = None,
 ) -> dict[str, int]:
-    """Parse code and upsert its graph projection into Neo4j."""
-    code_graph = build_code_graph(project_root, paths, exclude=exclude)
+    """Parse code and upsert its graph projection into Neo4j.
+
+    Une fois l'écriture réussie, le reçu de fraîcheur est écrit (cible
+    ``neo4j``) : mêmes fichiers, mêmes exclusions, empreinte lue avant
+    l'indexation. Une écriture qui échoue ne laisse aucun reçu.
+    """
+    from grimoire.codegraph.freshness import hash_files, record_projection
+
+    root, sources, excluded, files = _code_files(project_root, paths, exclude)
+    hashes = hash_files(files)
+    code_graph = _index_files(root, files.values())
     nodes = list(code_graph.nodes)
     edges = _unique_code_edges(code_graph.edges)
     memory_graph.upsert_code_nodes(nodes)
     memory_graph.upsert_code_edges(edges)
     stats = code_graph.stats()
+    record_projection(root, sources, excluded, hashes, stats)
     return {
         "files": stats["files"],
         "code_nodes": len(nodes),
@@ -215,9 +234,9 @@ def _content_hash(text: str) -> str:
 def _relative_path(project_root: Path, file_path: str) -> str:
     path = Path(file_path)
     try:
-        return str(path.relative_to(project_root.resolve()))
+        return path.relative_to(project_root.resolve()).as_posix()
     except ValueError:
-        return str(path)
+        return path.as_posix()
 
 
 def _projection_entry(

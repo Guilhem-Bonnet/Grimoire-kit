@@ -38,6 +38,14 @@ lint-fix: ## Run ruff linter with auto-fix
 ratchet: ## Code-size ratchet (framework frozen, src oversize guard)
 	$(PYTHON) scripts/check-code-ratchet.py
 
+.PHONY: surface-coverage
+surface-coverage: ## Surface coverage registry guards (add BASE=origin/main for the ratchet)
+	$(PYTHON) scripts/check-surface-coverage.py --check $(if $(BASE),--base $(BASE),)
+
+.PHONY: gates
+gates: ## Toutes les gardes du dépôt (comme la CI et le pre-commit)
+	$(PYTHON) -m grimoire gates repo
+
 .PHONY: format
 format: ## Run ruff formatter
 	$(PYTHON) -m ruff format src/ tests/
@@ -117,14 +125,18 @@ release: check ## Release — bump version, tag, build
 	@echo "  git add version.txt src/grimoire/__version__.py registry/kit-file-hashes.json"
 	@echo "  git commit -m 'chore: release $(VERSION)'"
 	@echo "  git tag -a v$(VERSION) -m 'Release $(VERSION)'"
-	@echo "  git push origin main --tags"
-	@echo "\n  Then publish to PyPI:"
-	@echo "  make publish"
+	@echo "  git push origin main --tags   # publish.yml prend le relais (PyPI et release GitHub)"
 
+# Pas de voie manuelle vers PyPI : publish.yml est la seule voie de release
+# (gates, tests de la wheel, tag sur main, notes du CHANGELOG). Une cible qui
+# téléverserait dist/ contournerait ces gardes, et `skip-existing` du workflow
+# accepterait ensuite en silence les fichiers déjà envoyés. La cible reste pour
+# renvoyer au bon geste plutôt que de laisser un « No rule to make target ».
 .PHONY: publish
-publish: ## Upload dist/ to PyPI (requires TWINE_USERNAME + TWINE_PASSWORD or ~/.pypirc)
-	@test -d dist || (echo "No dist/ found. Run 'make build' or 'make release' first." && exit 1)
-	$(PYTHON) -m twine upload dist/*.whl dist/*.tar.gz
+publish: ## Refusé : la publication passe par le push d'un tag (publish.yml)
+	@echo "Publication manuelle refusée : publish.yml est la seule voie de release."
+	@echo "Poussez le tag vX.Y.Z sur main (voir CONTRIBUTING.md, section Release)."
+	@exit 1
 
 ## ─── Docs ──────────────────────────────────────────────────────
 .PHONY: docs

@@ -12,12 +12,17 @@ import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from grimoire.cli.app import app
 from grimoire.core.standard_generation import TRACES_DIR
 from grimoire.traces.ledger import DISPATCH_OUTCOME_TAG, TraceLedger
 from grimoire.traces.schemas import TraceOutcome
+
+pytestmark = pytest.mark.covers(
+    "cli:dispatch stats",
+)
 
 runner = CliRunner()
 

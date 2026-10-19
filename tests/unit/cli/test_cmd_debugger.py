@@ -7,10 +7,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from typer.testing import CliRunner
 
 from grimoire.cli.app import app
 from grimoire.cli.cmd_debugger import _load_debugger_module
+
+pytestmark = pytest.mark.covers(
+    "cli:debugger claims",
+    "cli:debugger generate",
+    "cli:debugger plan",
+    "cli:debugger status",
+)
 
 runner = CliRunner()
 KIT_DIR = Path(__file__).resolve().parents[3]

@@ -114,7 +114,7 @@ def test_write_migration_bundle(tmp_path: Path) -> None:
     assert (tmp_path / "memories.jsonl").is_file()
     assert (tmp_path / "weaviate-objects.jsonl").is_file()
     assert (tmp_path / "neo4j-import.cypher").is_file()
-    loaded = json.loads((tmp_path / "manifest.json").read_text())
+    loaded = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))
     assert loaded["target_vector_backend"] == "weaviate-server"
 
 

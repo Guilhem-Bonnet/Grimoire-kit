@@ -20,6 +20,7 @@ from grimoire.bridges.schemas import HostId
 from grimoire.core.grounding import GROUNDING_RULE, UNCERTAINTIES_BLOCK_RULE
 from grimoire.hosts.capabilities import HostProfile, profile_for
 from grimoire.hosts.emitters.base import Degradation, EmitPlan, EmittedFile, Emitter, managed_header
+from grimoire.hosts.emitters.rules import with_rule_layers
 from grimoire.hosts.surface import Enforcement, ProjectSurface
 
 #: Where each prose-only host looks first.
@@ -134,10 +135,11 @@ class GenericEmitter(Emitter):
         self.host_id = host_id
 
     def plan(self, surface: ProjectSurface, project_root: Path) -> EmitPlan:
-        del project_root
         profile = profile_for(self.host_id)
         entrypoint = _ENTRYPOINTS.get(self.host_id, Path("AGENTS.md"))
-        files = [EmittedFile(relpath=entrypoint, content=_catalog(surface, profile))]
+        # AGENTS.md et GEMINI.md sont des fichiers que le projet écrit aussi : le kit n'y possède qu'un bloc.
+        # La règle Cursor, elle, est au kit en entier (son frontmatter doit rester en tête de fichier).
+        files = [EmittedFile(relpath=entrypoint, content=_catalog(surface, profile), block=entrypoint.suffix == ".md")]
         files.extend(_skill_copies(surface))
         degradations = [
             Degradation(
@@ -161,4 +163,5 @@ class GenericEmitter(Emitter):
                 fallback="gouvernance énoncée comme règle dans l'entrypoint, opposable en CI uniquement.",
             ),
         ]
-        return EmitPlan(host_id=self.host_id, files=tuple(files), merges=(), degradations=tuple(degradations))
+        plan = EmitPlan(host_id=self.host_id, files=tuple(files), merges=(), degradations=tuple(degradations))
+        return with_rule_layers(plan, project_root)

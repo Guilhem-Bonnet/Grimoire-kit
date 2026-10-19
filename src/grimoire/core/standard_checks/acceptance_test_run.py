@@ -14,6 +14,7 @@ seul le chemin est partagé.
 from __future__ import annotations
 
 import json
+import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -129,6 +130,7 @@ def record_acceptance_test_run(project_root: Path, *, task_id: str = "bootstrap"
     result_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "task_id": normalized_task_id,
+        "run_id": uuid.uuid4().hex[:12],
         "command": need.command,
         "ok": recorded_ok,
         "collected": collected,

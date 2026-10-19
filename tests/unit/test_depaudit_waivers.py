@@ -69,3 +69,42 @@ def test_repo_waivers_file_parses() -> None:
     # be empty once every waiver expires.
     ids = mod.active_vulnerability_ids(mod.WAIVERS_FILE, today=TODAY)
     assert isinstance(ids, list)
+
+
+# ── --check : le fichier de waivers comme garde de dépôt ──────────────────────────
+
+_FULL = (
+    'waivers:\n  - waiver_id: "W-1"\n    vulnerability_id: "CVE-2025-3000"\n    reason: "pas de surface"\n'
+    '    approved_by: "g"\n    expires_at: "{expiry}"\n'
+)
+
+
+def test_check_accepts_a_complete_active_waiver(tmp_path: Path) -> None:
+    mod = _load_module()
+    waivers = _write_waivers(tmp_path / "w.yaml", _FULL.format(expiry="2026-09-30"))
+    assert mod.waiver_problems(waivers, today=TODAY) == []
+
+
+def test_check_refuses_an_expired_waiver_that_the_audit_step_merely_drops(tmp_path: Path) -> None:
+    mod = _load_module()
+    waivers = _write_waivers(tmp_path / "w.yaml", _FULL.format(expiry="2026-06-30"))
+    found = mod.waiver_problems(waivers, today=TODAY)
+    assert len(found) == 1 and "expire le 2026-06-30" in found[0]
+    assert mod.active_vulnerability_ids(waivers, today=TODAY) == []  # l'audit, lui, se tait
+
+
+def test_check_refuses_a_waiver_without_reason_or_approver(tmp_path: Path) -> None:
+    mod = _load_module()
+    waivers = _write_waivers(
+        tmp_path / "w.yaml",
+        'waivers:\n  - waiver_id: "W-1"\n    vulnerability_id: "CVE-1"\n    expires_at: "2026-09-30"\n',
+    )
+    found = "\n".join(mod.waiver_problems(waivers, today=TODAY))
+    assert "`reason`" in found and "`approved_by`" in found
+
+
+def test_check_refuses_an_unreadable_file_instead_of_passing(tmp_path: Path) -> None:
+    mod = _load_module()
+    waivers = _write_waivers(tmp_path / "w.yaml", "waivers: [unclosed\n")
+    assert "illisible" in mod.waiver_problems(waivers, today=TODAY)[0]
+

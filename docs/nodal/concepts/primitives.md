@@ -1,3 +1,7 @@
+---
+audience: utilisateur
+---
+
 # Sept primitives, pas vingt types de node
 
 La palette de l'atelier expose 17 cases. Le format de fichier, lui, n'en

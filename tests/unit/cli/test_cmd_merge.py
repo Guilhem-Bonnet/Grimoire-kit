@@ -11,6 +11,10 @@ from grimoire.cli.app import app
 from grimoire.cli.cmd_merge import run_merge, run_undo
 from grimoire.core.exceptions import GrimoireMergeError
 
+pytestmark = pytest.mark.covers(
+    "cli:merge",
+)
+
 runner = CliRunner()
 
 
@@ -22,8 +26,8 @@ def source(tmp_path: Path) -> Path:
     d = tmp_path / "src"
     d.mkdir()
     (d / "_grimoire").mkdir()
-    (d / "_grimoire" / "config.yaml").write_text("version: 3\n")
-    (d / "hello.txt").write_text("hello\n")
+    (d / "_grimoire" / "config.yaml").write_text("version: 3\n", encoding="utf-8")
+    (d / "hello.txt").write_text("hello\n", encoding="utf-8")
     return d
 
 
@@ -49,16 +53,16 @@ class TestRunMerge:
         assert not (target / "hello.txt").exists()
 
     def test_force(self, source: Path, target: Path) -> None:
-        (target / "hello.txt").write_text("old\n")
+        (target / "hello.txt").write_text("old\n", encoding="utf-8")
         _plan, result = run_merge(source, target, force=True)
         assert "hello.txt" in result.files_created
-        assert (target / "hello.txt").read_text() == "hello\n"
+        assert (target / "hello.txt").read_text(encoding="utf-8") == "hello\n"
 
     def test_skip_conflicts(self, source: Path, target: Path) -> None:
-        (target / "hello.txt").write_text("keep\n")
+        (target / "hello.txt").write_text("keep\n", encoding="utf-8")
         _plan, result = run_merge(source, target)
         assert "hello.txt" in result.files_skipped
-        assert (target / "hello.txt").read_text() == "keep\n"
+        assert (target / "hello.txt").read_text(encoding="utf-8") == "keep\n"
 
 
 class TestRunUndo:
@@ -91,10 +95,10 @@ class TestMergeCLI:
         assert not (target / "hello.txt").exists()
 
     def test_merge_force(self, source: Path, target: Path) -> None:
-        (target / "hello.txt").write_text("old\n")
+        (target / "hello.txt").write_text("old\n", encoding="utf-8")
         result = runner.invoke(app, ["merge", str(source), "--target", str(target), "--force"])
         assert result.exit_code == 0
-        assert (target / "hello.txt").read_text() == "hello\n"
+        assert (target / "hello.txt").read_text(encoding="utf-8") == "hello\n"
 
     def test_merge_undo(self, source: Path, target: Path) -> None:
         runner.invoke(app, ["merge", str(source), "--target", str(target)])
@@ -111,9 +115,9 @@ class TestMergeCLI:
         # Create sensitive conflict
         gh = target / ".github"
         gh.mkdir()
-        (gh / "copilot-instructions.md").write_text("existing\n")
+        (gh / "copilot-instructions.md").write_text("existing\n", encoding="utf-8")
         (source / ".github").mkdir()
-        (source / ".github" / "copilot-instructions.md").write_text("new\n")
+        (source / ".github" / "copilot-instructions.md").write_text("new\n", encoding="utf-8")
         result = runner.invoke(app, ["merge", str(source), "--target", str(target)])
         assert result.exit_code == 0
         assert "skipped" in result.output

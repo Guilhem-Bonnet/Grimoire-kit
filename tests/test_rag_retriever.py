@@ -18,12 +18,12 @@ Note : Les tests qui nécessitent qdrant-client ou sentence-transformers
        sont skippés si non disponibles.
 """
 
+import contextlib
 import importlib
 import importlib.util
+import io
 import json
 import shutil
-import contextlib
-import io
 import subprocess
 import sys
 import tempfile
@@ -579,7 +579,7 @@ class TestCLIIntegration(unittest.TestCase):
     def test_help_exits_zero(self):
         result = subprocess.run(
             [sys.executable, str(TOOL), "--help"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
         )
         self.assertEqual(result.returncode, 0)
         self.assertIn("retrieve", result.stdout)
@@ -587,7 +587,7 @@ class TestCLIIntegration(unittest.TestCase):
     def test_version_exits_zero(self):
         result = subprocess.run(
             [sys.executable, str(TOOL), "--version"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
         )
         self.assertEqual(result.returncode, 0)
         self.assertIn("rag-retriever", result.stdout)
@@ -595,7 +595,7 @@ class TestCLIIntegration(unittest.TestCase):
     def test_no_command_shows_help(self):
         result = subprocess.run(
             [sys.executable, str(TOOL)],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
         )
         # Should exit non-zero (no command)
         self.assertNotEqual(result.returncode, 0)
@@ -606,7 +606,7 @@ class TestCLIIntegration(unittest.TestCase):
             [sys.executable, str(TOOL),
              "--project-root", str(KIT_DIR),
              "retrieve", "--query", "memory system", "--fallback", "--json"],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
         )
         self.assertEqual(result.returncode, 0)
         data = json.loads(result.stdout)
@@ -619,7 +619,7 @@ class TestCLIIntegration(unittest.TestCase):
             [sys.executable, str(TOOL),
              "--project-root", str(KIT_DIR),
              "retrieve", "--query", "workflow design", "--fallback"],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
         )
         self.assertEqual(result.returncode, 0)
         self.assertIn("RAG Retrieval", result.stdout)

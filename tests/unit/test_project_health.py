@@ -8,6 +8,7 @@ d'événements et du board. Aucune ne doit pouvoir répondre « oui » par défa
 from __future__ import annotations
 
 import json
+import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -106,8 +107,48 @@ def test_an_unchanged_file_is_not_behind_just_because_it_is_old(
 
 def test_version_ordering_survives_a_non_numeric_chunk() -> None:
     assert ph._version_key("3.34.2") > ph._version_key("3.9.0")
-    assert ph._version_key("3.34.2rc1") >= ph._version_key("3.34.2")
-    assert ph._version_key("") == (0,)
+    assert ph._version_key("3.34.2rc1") < ph._version_key("3.34.2")
+    assert ph._version_key("") < ph._version_key("0.0.1")
+    for unparseable in ("", "dev", "n/a", "-", "+local"):
+        ph._version_key(unparseable)  # tolérant : jamais d'exception
+
+
+@pytest.mark.parametrize(
+    "ordered",
+    [
+        # Le cas reproduit (D01-T2-01) : la stable dépasse sa pré-version, qui
+        # elle-même reste sous la stable suivante.
+        ["3.62.9", "3.63.0-rc1", "3.63.0", "3.63.1"],
+        ["3.63.0-rc1", "3.63.0-rc2", "3.63.0-rc10", "3.63.0"],
+        ["3.63.0-alpha1", "3.63.0-beta1", "3.63.0-rc1", "3.63.0"],
+        ["3.63.0-rc1", "3.63.0", "3.63.0.post1", "3.63.1-rc1"],
+        ["3.9.0", "3.10.0-rc1", "3.10.0"],
+    ],
+)
+def test_prereleases_sort_below_their_stable_and_above_the_previous_one(
+    ordered: list[str],
+) -> None:
+    keys = [ph._version_key(v) for v in ordered]
+    assert keys == sorted(keys)
+    assert len(set(keys)) == len(keys), f"deux graphies distinctes confondues : {ordered}"
+
+
+@pytest.mark.parametrize(
+    "spellings",
+    [
+        ("3.63.0-rc1", "3.63.0rc1", "v3.63.0-rc.1", "3.63.0.rc1", "3.63.0-RC1"),
+        ("3.63", "3.63.0", "3.63.0+build5"),
+    ],
+)
+def test_equivalent_spellings_share_one_key(spellings: tuple[str, ...]) -> None:
+    """``make release`` écrit ``-rc1`` ; PEP 440 normalise en ``rc1`` : même version."""
+    assert len({ph._version_key(v) for v in spellings}) == 1
+
+
+def test_a_prerelease_digit_is_not_glued_to_the_patch_number() -> None:
+    """Défaut d'origine : ``3.63.0-rc1`` devenait ``(3, 63, 1)``, à égalité avec 3.63.1."""
+    assert ph._version_key("3.63.0-rc1") != ph._version_key("3.63.1")
+    assert ph._version_key("3.63.0rc1") < ph._version_key("3.63.1")
 
 
 # ── Flows ────────────────────────────────────────────────────────────────────
@@ -491,6 +532,12 @@ def test_declared_project_tool_ignores_a_tool_field_pointing_nowhere(project: Pa
     assert ph._declared_project_tool(project) is None
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : fabrique un exécutable factice (script shell sans extension .exe/.cmd, bit x) que Windows ne lance pas par son nom"
+    ),
+)
 def test_project_tool_version_runs_the_declared_binary(project: Path) -> None:
     venv_bin = project / ".venv" / "bin"
     venv_bin.mkdir(parents=True)
@@ -537,6 +584,12 @@ def test_kit_alignment_up_version_reads_the_marker_written_by_up(project: Path) 
     assert kit["upVersion"] == "3.51.1"
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : fabrique un exécutable factice (script shell sans extension .exe/.cmd, bit x) que Windows ne lance pas par son nom"
+    ),
+)
 def test_kit_alignment_carries_the_declared_project_tool(project: Path) -> None:
     venv_bin = project / ".venv" / "bin"
     venv_bin.mkdir(parents=True)
@@ -647,3 +700,103 @@ def test_tool_version_gap_is_not_outdated_on_equality(
     gap = ph.tool_version_gap(project)
 
     assert gap == {"installed": "3.50.2", "aligned": "3.50.2", "outdated": False}
+
+
+# ── Pré-versions dans le catalogue de digests (D01-T2-01) ───────────────────
+#
+# `make release VERSION=x.y.z-rc1` lance gen-kit-hashes, qui inscrit cette
+# version au catalogue ; `kit_alignment` et `tool_version_gap` la comparent.
+
+
+def _stage_one_kit_file(project: Path) -> None:
+    kit_dir = project / "_grimoire" / "kit"
+    kit_dir.mkdir(parents=True)
+    (kit_dir / "x.md").write_text("contenu\n", encoding="utf-8")
+
+
+def test_newest_version_by_path_keeps_the_stable_over_its_prerelease(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for catalog in (
+        {"d1": {"version": "3.63.0-rc1", "path": "kit/x.md"},
+         "d2": {"version": "3.63.0", "path": "kit/x.md"}},
+        {"d2": {"version": "3.63.0", "path": "kit/x.md"},
+         "d1": {"version": "3.63.0-rc1", "path": "kit/x.md"}},
+    ):
+        ph._newest_version_by_path.cache_clear()
+        monkeypatch.setattr(ph, "load_catalog", lambda c=catalog: c)
+        assert ph._newest_version_by_path() == {"kit/x.md": "3.63.0"}
+    ph._newest_version_by_path.cache_clear()
+
+
+def test_content_at_the_stable_version_is_not_behind_its_own_prerelease(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _stage_one_kit_file(project)
+    ph._newest_version_by_path.cache_clear()
+    monkeypatch.setattr(ph, "_installed_kit_version", lambda: "3.63.0")
+    monkeypatch.setattr(ph, "load_catalog", lambda: {
+        "d1": {"version": "3.63.0-rc1", "path": "kit/x.md"},
+        "d2": {"version": "3.63.0", "path": "kit/x.md"},
+    })
+    monkeypatch.setattr(
+        ph, "shipped_by_kit", lambda _p: {"version": "3.63.0", "path": "kit/x.md"}
+    )
+
+    kit = ph.kit_alignment(project)
+
+    assert kit["behind"] == 0
+    assert kit["upToDate"] is True
+    ph._newest_version_by_path.cache_clear()
+
+
+def test_content_at_a_prerelease_is_behind_the_stable_that_replaced_it(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _stage_one_kit_file(project)
+    ph._newest_version_by_path.cache_clear()
+    monkeypatch.setattr(ph, "_installed_kit_version", lambda: "3.63.0")
+    monkeypatch.setattr(ph, "load_catalog", lambda: {
+        "d1": {"version": "3.63.0-rc1", "path": "kit/x.md"},
+        "d2": {"version": "3.63.0", "path": "kit/x.md"},
+    })
+    monkeypatch.setattr(
+        ph, "shipped_by_kit", lambda _p: {"version": "3.63.0-rc1", "path": "kit/x.md"}
+    )
+
+    kit = ph.kit_alignment(project)
+
+    assert kit["behind"] == 1
+    assert kit["aligned"] == "3.63.0-rc1"
+    ph._newest_version_by_path.cache_clear()
+
+
+@pytest.mark.parametrize(
+    ("installed", "aligned", "outdated"),
+    [
+        ("3.63.0-rc1", "3.63.0", True),   # l'outil rc1 est en retard sur la stable
+        ("3.63.0", "3.63.0-rc1", False),  # l'outil stable ne l'est pas sur une rc1
+        ("3.63.0-rc1", "3.63.0-rc1", False),
+        ("3.63.0-rc1", "3.63.1", True),
+        ("3.63.1", "3.63.0-rc1", False),
+        ("3.62.9", "3.63.0-rc1", True),
+    ],
+)
+def test_tool_version_gap_orders_prereleases(
+    project: Path, monkeypatch: pytest.MonkeyPatch,
+    installed: str, aligned: str, outdated: bool,
+) -> None:
+    _stage_one_kit_file(project)
+    ph._newest_version_by_path.cache_clear()
+    monkeypatch.setattr(ph, "_installed_kit_version", lambda: installed)
+    monkeypatch.setattr(ph, "load_catalog", lambda: {
+        "d": {"version": aligned, "path": "kit/x.md"},
+    })
+    monkeypatch.setattr(
+        ph, "shipped_by_kit", lambda _p: {"version": aligned, "path": "kit/x.md"}
+    )
+
+    gap = ph.tool_version_gap(project)
+
+    assert gap == {"installed": installed, "aligned": aligned, "outdated": outdated}
+    ph._newest_version_by_path.cache_clear()

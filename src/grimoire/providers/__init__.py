@@ -12,6 +12,7 @@ sans dépenser — PATH, ``--version``, modèles Ollama — pour nourrir cet ét
 from __future__ import annotations
 
 from grimoire.providers.audit import ProbeResult, audit_providers, probe_provider
+from grimoire.providers.quota import QuotaObservation, QuotaSignal, classify_failure, observe_window
 from grimoire.providers.registry import (
     REGISTRY_FILE,
     SUPPORTED_CURRENCIES,
@@ -26,10 +27,15 @@ from grimoire.providers.routing import choose
 from grimoire.providers.state import (
     PROVIDERS_STATE_FILE,
     ProviderRuntimeState,
+    Suspension,
+    available_models,
+    clear_unknown_suspensions,
     cooling_down_entry,
     load_state,
     record_failure,
+    record_quota_observation,
     record_success,
+    record_suspension,
     save_state,
 )
 
@@ -43,14 +49,23 @@ __all__ = [
     "ProviderRegistryError",
     "ProviderRuntimeState",
     "ProviderSpec",
+    "QuotaObservation",
+    "QuotaSignal",
+    "Suspension",
     "audit_providers",
+    "available_models",
     "choose",
+    "classify_failure",
+    "clear_unknown_suspensions",
     "cooling_down_entry",
     "load_state",
+    "observe_window",
     "probe_provider",
     "read_default_fallback_chain",
     "read_registry",
     "record_failure",
+    "record_quota_observation",
     "record_success",
+    "record_suspension",
     "save_state",
 ]

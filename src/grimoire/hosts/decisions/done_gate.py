@@ -19,30 +19,45 @@ whatever else is true — see :func:`evaluate_done_gate`, the ``green_after``
 short-circuit. Nothing in this module can turn that back into a stale
 verdict.
 
-Shadow by default
-------------------
+Shadow by default, armed on a date (W2-09)
+------------------------------------------
 :func:`evaluate_done_gate` computes a verdict on every eligible ``Stop``, but
 only *reports* it (:mod:`.evidence_gate` writes it to
 ``Decision.detail["done_gate"]``, plus a warning context in a blocking
-profile) — it does not, by itself, make :mod:`.evidence_gate` refuse a
-closure. Refusing costs a whole turn on a false positive, and this gate has
-had zero hours of production journal to be wrong against: the classification
-it depends on (:func:`grimoire.hosts.decisions.tool_facts.
-is_read_only_command`) is already conservative in the *policy* direction
-(unrecognised → mutation), which is the wrong bias for a gate that blocks —
-here an unrecognised verb should not manufacture a stale verdict either. The
-kit's own directive (:mod:`.evidence_gate`'s docstring) already promotes a
-*prompt-level* suggestion to a hard rule once it has been read from a
-project's journals; this module earns that promotion the same way — after a
-project has logged real ``done_gate`` verdicts and someone has read whether
-they tracked reality. Until then, opting a project in early is one line:
-``GRIMOIRE_DONE_GATE=enforce`` in the environment, or ``options: {done_gate:
-enforce}`` in ``_grimoire/standard/standard-profile.yaml`` (read the same way
-:mod:`grimoire.core.standard_checks.gate_test_run` reads that file's
-``profile`` key — see :func:`_is_enforced`). Even enforced, a blocking
-profile (:data:`grimoire.hosts.decisions.enrolment.BLOCKING_PROFILES`) is the
-only one this can ever refuse in; every other profile only ever gets the
-warning context, exactly like a red evidence gate today.
+profile) until the gate is armed — refusing costs a whole turn on a false
+positive, and this gate has had zero hours of production journal to be wrong
+against: the classification it depends on (:func:`grimoire.hosts.decisions.
+tool_facts.is_read_only_command`) is already conservative in the *policy*
+direction (unrecognised → mutation), which is the wrong bias for a gate that
+blocks — here an unrecognised verb should not manufacture a stale verdict
+either. The promotion is the one the kit's own directive already applies to a
+*prompt-level* suggestion: after a release has logged real ``done_gate``
+verdicts and someone has read whether they tracked reality.
+
+The mode is resolved once, by :func:`resolve_done_gate_mode`, in this order, and
+the answer (``mode`` and ``mode_source``) is written on **every** verdict:
+
+1. ``GRIMOIRE_DONE_GATE=enforce`` in the environment — it arms, it never disarms: a
+   ``shadow`` there is ignored (it is neither a source nor an override), because the plan
+   forbids any switch-off by variable — autonomy goes through a traced grant;
+2. ``options: {done_gate: enforce | shadow}`` in ``_grimoire/standard/
+   standard-profile.yaml`` (read the same way :mod:`grimoire.core.
+   standard_checks.gate_test_run` reads that file's ``profile`` key — see
+   :func:`_read_options`);
+3. the arming date: ``options: {done_gate_enforce_from: YYYY-MM-DD}`` in that
+   file, else the kit default :data:`GOVERNED_ENFORCE_FROM`. From that day on
+   (UTC), a blocking profile
+   (:data:`grimoire.hosts.decisions.enrolment.BLOCKING_PROFILES`) is armed
+   without any variable; before it, and for every other profile, the gate stays
+   in shadow and the pending date is still reported (``armed_from``);
+4. otherwise shadow.
+
+:data:`GOVERNED_ENFORCE_FROM` ships ``None``: this release carries the
+mechanism and the shadow measurement, and flipping the default is a deliberate
+one-line change (with its test) once the measurement has been read — decision 3
+of the plan. Even armed, a blocking profile is the only one this can ever
+refuse in; every other profile only ever gets the warning context, exactly like
+a red evidence gate today.
 
 Caps
 ----
@@ -58,25 +73,55 @@ alone — see :func:`_caps_path`.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import os
 import re
+import subprocess
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
-from grimoire.core.standard_checks.evidence_journal import evidence_log_relpath, read_evidence_log
+from grimoire.core.standard_checks.evidence_journal import (
+    append_guard_event,
+    evidence_log_relpath,
+    read_evidence_log,
+    record_guard_error,
+)
 from grimoire.hosts.decisions.enrolment import BLOCKING_PROFILES
 from grimoire.hosts.decisions.tool_facts import command_surface, is_read_only_command
 
-__all__ = ["DoneGateVerdict", "evaluate_done_gate"]
+__all__ = [
+    "GOVERNED_ENFORCE_FROM",
+    "DoneGateMode",
+    "DoneGateVerdict",
+    "StopStep",
+    "done_gate_mode_tags",
+    "evaluate_done_gate",
+    "record_stop_block",
+    "record_stop_would_block",
+    "resolve_done_gate_block",
+    "resolve_done_gate_block_after_crash",
+    "resolve_done_gate_mode",
+    "stop_cap",
+    "stop_signature",
+    "stop_step",
+]
 
 #: Same directory as ``evidence-log.jsonl`` (see the module docstring) —
 #: never ``_grimoire-output/evidence`` (the versioned pack): a per-task
 #: cooldown/cap counter is exactly the kind of run state ``RUNS_DIR`` exists
 #: for, and it must never be committed.
 _CAPS_STATE_FILENAME = "done-gate-state.json"
+
+#: Sidecar of the "after a crash of the resolution" path (W1-06) : the sessions
+#: already refused once there. Separate from :data:`_CAPS_STATE_FILENAME` on
+#: purpose — that file is exactly what could not be read when this path runs.
+_CRASH_BLOCKS_FILENAME = "done-gate-crash-blocks.json"
+
+#: Sessions remembered in that sidecar (oldest dropped) — keeps the file bounded.
+_CRASH_BLOCKS_MAX = 50
 
 #: One refusal per task per this many seconds (jev-belay/pi-warden: "60 s").
 _COOLDOWN_SECONDS = 60.0
@@ -85,9 +130,20 @@ _COOLDOWN_SECONDS = 60.0
 #: (jev-belay/pi-warden: "trois par session").
 _SESSION_CAP = 3
 
-#: ``GRIMOIRE_DONE_GATE=enforce`` — the escape hatch named in the issue when
-#: no project/profile option exists yet (see the module docstring).
+#: ``GRIMOIRE_DONE_GATE=enforce`` — the environment switch (see the module docstring) ; it only arms.
 _ENFORCE_ENV = "GRIMOIRE_DONE_GATE"
+
+MODE_ENFORCE = "enforce"
+MODE_SHADOW = "shadow"
+
+#: ``options.done_gate_enforce_from`` — the project's own arming date.
+_ENFORCE_FROM_OPTION = "done_gate_enforce_from"
+
+#: The kit's default arming date for a blocking profile (W2-09, decision 3 of the plan).
+#: ``None`` = shadow everywhere unless a project opts in. A date here arms every
+#: governed/production project from that day (UTC) without a variable ; it is set
+#: once the shadow release's ``done_gate:stale`` holds have been measured.
+GOVERNED_ENFORCE_FROM: date | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,18 +153,21 @@ class DoneGateVerdict:
     inferred from the outcome."""
 
     stale: bool
-    """A mutation with no green check after it — the only condition that
-    can ever lead to a refusal via this path."""
+    """A mutation with no green check after it. ``False`` for a crash of the
+    evaluation itself (``reason`` ``error:*``) : no mutation was judged stale
+    there, but a refusal can still follow (see ``blocked``)."""
     reason: str
-    """One of ``no_mutation``, ``green_check_after_mutation`` (the veto dur)
-    or ``mutation_after_last_check``."""
+    """One of ``no_mutation``, ``green_check_after_mutation`` (the veto dur),
+    ``mutation_after_last_check``, or ``error:<ExceptionType>`` when the
+    evaluation crashed (:func:`.evidence_gate._done_gate_unevaluable`)."""
     enforce: bool
     """Whether this project/environment opted into a real ``BLOCK`` (see the
     module docstring) — independent of whether *this* call actually used it."""
     blocked: bool
     """``True`` only when :mod:`.evidence_gate` should escalate its outcome
     to :attr:`~grimoire.hosts.decisions._shared.Outcome.BLOCK` for this call:
-    stale, enforced, a blocking profile, and the caps below did not apply."""
+    stale (or the evaluation crashed, ``reason`` ``error:*``), enforced, a
+    blocking profile, and the caps below did not apply."""
     capped: bool
     """A refusal was due here but a cooldown or session cap suppressed it."""
     command_hint: str = ""
@@ -116,6 +175,15 @@ class DoneGateVerdict:
     command when one exists, else the last recognised check command seen in
     the journal, else a generic hint."""
     last_mutation_ts: str = ""
+    mode: str = MODE_SHADOW
+    """``shadow`` or ``enforce`` : the mode this verdict was produced under (W2-09),
+    present on every verdict — not only on the stale ones."""
+    mode_source: str = ""
+    """Where the mode came from : ``env``, ``option``, ``option_dated``,
+    ``kit_dated``, ``default`` (or ``after_error`` when the resolution itself
+    crashed, see :func:`.evidence_gate._done_gate_unevaluable`)."""
+    armed_from: str = ""
+    """The arming date in force (``YYYY-MM-DD``), armed yet or not — empty when none."""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -126,7 +194,23 @@ class DoneGateVerdict:
             "capped": self.capped,
             "command_hint": self.command_hint,
             "last_mutation_ts": self.last_mutation_ts,
+            "mode": self.mode,
+            "mode_source": self.mode_source,
+            "armed_from": self.armed_from,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class DoneGateMode:
+    """The resolved mode of the « fini » gate and where it came from (W2-09)."""
+
+    mode: str
+    source: str
+    armed_from: str = ""
+
+    @property
+    def enforce(self) -> bool:
+        return self.mode == MODE_ENFORCE
 
 
 def _entry_ts(entry: dict[str, Any]) -> str:
@@ -350,49 +434,149 @@ def _resolved_test_command(project_root: Path) -> str:
     return str(need.command) if need.resolved and need.command else ""
 
 
-def _is_enforced(project_root: Path) -> bool:
-    """Whether this project/environment opted into a real ``BLOCK`` — see the
-    module docstring for why shadow is the default. Checked in this order:
-    the environment variable (cheapest, and the one named in the issue when
-    no project option exists yet), then an ``options.done_gate: enforce`` key
-    hand-added to ``standard-profile.yaml`` — the same file and the same
-    ``_load_mapping`` helper :func:`grimoire.core.standard_checks.
-    gate_test_run.board_state_of_task` already reads privately across module
-    boundaries for a project-declared value, so this is not a new pattern.
-    """
-    if os.environ.get(_ENFORCE_ENV, "").strip().lower() == "enforce":
-        return True
-    try:
-        from grimoire.core.standard_generation import STANDARD_PROFILE_FILE
-        from grimoire.core.standard_state import _load_mapping
+def _read_options(project_root: Path, task_id: str) -> dict[str, Any]:
+    """The ``options`` mapping of ``standard-profile.yaml`` ; ``{}`` when absent.
 
-        options = _load_mapping(project_root.resolve() / STANDARD_PROFILE_FILE).get("options")
-    except Exception:
-        return False
-    if not isinstance(options, dict):
-        return False
-    return str(options.get("done_gate", "")).strip().lower() == "enforce"
+    An unreadable profile still answers ``{}`` (shadow is the safe default for the
+    opt-in), but no longer silently (W1-06) : the failure is traced as a
+    ``guard.error`` (``guard_id`` ``done_gate.enforce_option``) for *task_id*, so
+    ``grimoire standard verify`` shows that the option could not be read.
+    "Unreadable" covers an invalid YAML, a file that is not valid UTF-8, an I/O
+    error and a root that is not a mapping. The profile is parsed here rather
+    than through ``standard_state._load_mapping``, which swallows those very
+    errors and returns ``{}``: the failure would never reach this ``except``.
+    A missing profile, or one without the option, is not a failure.
+    """
+    try:
+        from ruamel.yaml import YAML
+
+        from grimoire.core.standard_generation import STANDARD_PROFILE_FILE
+
+        profile = project_root.resolve() / STANDARD_PROFILE_FILE
+        if not profile.is_file():
+            return {}
+        data = YAML(typ="safe").load(profile)
+        if data is None:
+            return {}
+        if not isinstance(data, dict):
+            raise TypeError(f"{STANDARD_PROFILE_FILE} : la racine n'est pas un mapping ({type(data).__name__})")
+    except Exception as exc:
+        record_guard_error(project_root, task_id, "done_gate.enforce_option", type(exc).__name__, str(exc))
+        return {}
+    options = data.get("options")
+    return options if isinstance(options, dict) else {}
+
+
+def _today(now_iso: str) -> date:
+    """The UTC day of *now_iso* ; the real clock when it is absent or unparseable."""
+    try:
+        moment = datetime.fromisoformat(now_iso)
+        return (moment.astimezone(UTC) if moment.tzinfo else moment).date()
+    except (ValueError, TypeError):
+        return datetime.now(UTC).date()
+
+
+def _parse_arming_date(raw: Any) -> date:
+    """``YYYY-MM-DD`` (a string, or the ``date`` YAML builds from an unquoted one) ; ``ValueError`` otherwise."""
+    if isinstance(raw, datetime):
+        return raw.date()
+    if isinstance(raw, date):
+        return raw
+    if isinstance(raw, str):
+        return date.fromisoformat(raw.strip())
+    raise ValueError(f"date d'armement illisible : {raw!r}")
+
+
+def resolve_done_gate_mode(
+    project_root: Path, task_id: str, profile: str = "", now_iso: str = ""
+) -> DoneGateMode:
+    """The mode of the « fini » gate for *profile* — see the module docstring for the order.
+
+    Never raises on a bad profile or a bad date : both are traced (``guard.error``,
+    ``done_gate.enforce_option``) and the mode falls back to ``shadow``, the safe
+    default of an opt-in. The arming date only arms a profile that can refuse
+    (:data:`BLOCKING_PROFILES`).
+    """
+    # W2-09-S1-02 : la variable n'arme que. ``GRIMOIRE_DONE_GATE=shadow`` ne désarme ni une
+    # option ni une date échue, comme sur la base où seule ``enforce`` était lue : le plan
+    # interdit toute désactivation par variable d'environnement (elle passe par un octroi
+    # tracé), et une session peut poser une variable, pas lever un gate armé.
+    if os.environ.get(_ENFORCE_ENV, "").strip().lower() == MODE_ENFORCE:
+        return DoneGateMode(MODE_ENFORCE, "env")
+    options = _read_options(project_root, task_id)
+    option = str(options.get("done_gate", "")).strip().lower()
+    if option in (MODE_ENFORCE, MODE_SHADOW):
+        return DoneGateMode(option, "option")
+    armed_from = ""
+    source = "kit_dated"
+    arming: Any = GOVERNED_ENFORCE_FROM
+    if options.get(_ENFORCE_FROM_OPTION) is not None:
+        arming, source = options[_ENFORCE_FROM_OPTION], "option_dated"
+    if arming is not None:
+        try:
+            day = _parse_arming_date(arming)
+        except ValueError as exc:
+            record_guard_error(project_root, task_id, "done_gate.enforce_option", type(exc).__name__, str(exc))
+        else:
+            armed_from = day.isoformat()
+            if profile in BLOCKING_PROFILES and _today(now_iso) >= day:
+                return DoneGateMode(MODE_ENFORCE, source, armed_from)
+    return DoneGateMode(MODE_SHADOW, "default", armed_from)
+
+
+def done_gate_mode_tags(done_gate: Any) -> list[str]:
+    """Ledger tags that say under which mode a ``done_gate`` verdict was produced (W2-09-S1-01).
+
+    *done_gate* is ``Decision.detail["done_gate"]`` (:meth:`DoneGateVerdict.to_dict`) ; anything
+    else gives ``[]``. ``done_gate_mode:<mode>``, ``done_gate_source:<source>`` and, when a
+    date is in force, ``done_gate_armed_from:<YYYY-MM-DD>`` : the only place where the
+    ``done_gate:stale`` holds that justify flipping the default can be split by mode.
+    """
+    if not isinstance(done_gate, dict):
+        return []
+    tags = []
+    for key, name in (("mode", "mode"), ("mode_source", "source"), ("armed_from", "armed_from")):
+        value = done_gate.get(key)
+        if isinstance(value, str) and value:
+            tags.append(f"done_gate_{name}:{value}")
+    return tags
+
+
+def _is_enforced(project_root: Path, task_id: str, profile: str = "", now_iso: str = "") -> bool:
+    """Whether the gate is armed for *profile* — :func:`resolve_done_gate_mode`, as a boolean."""
+    return resolve_done_gate_mode(project_root, task_id, profile, now_iso).enforce
 
 
 def _caps_path(project_root: Path, task_id: str) -> Path:
     return project_root / evidence_log_relpath(task_id).parent / _CAPS_STATE_FILENAME
 
 
+def caps_state_relpath(task_id: str) -> Path:
+    """Project-relative path of the cooldown/cap state of *task_id* (named in the messages that ask to delete it)."""
+    return evidence_log_relpath(task_id).parent / _CAPS_STATE_FILENAME
+
+
+def _crash_blocks_path(project_root: Path, task_id: str) -> Path:
+    return project_root / evidence_log_relpath(task_id).parent / _CRASH_BLOCKS_FILENAME
+
+
 def _load_caps(path: Path) -> dict[str, Any]:
+    """The JSON object stored at *path*, ``{}`` when missing, unreadable, not UTF-8 or not an object."""
     try:
-        raw = path.read_text(encoding="utf-8")
-    except OSError:
-        return {}
-    try:
-        data = json.loads(raw)
-    except ValueError:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):  # ``UnicodeDecodeError`` and ``JSONDecodeError`` are ``ValueError``
         return {}
     return data if isinstance(data, dict) else {}
 
 
-def _save_caps(path: Path, data: dict[str, Any]) -> None:
+def _save_caps(path: Path, data: dict[str, Any]) -> bool:
     """Atomic write, best-effort — mirrors
-    :func:`grimoire.policies.session_state.save_session_state`."""
+    :func:`grimoire.policies.session_state.save_session_state`.
+
+    Returns whether the state reached the disk (W2-02-S2) : the cooldown/cap
+    callers ignore it, but a counter that cannot be written must never be
+    mistaken for one that advanced (see :func:`stop_step`).
+    """
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -401,13 +585,16 @@ def _save_caps(path: Path, data: dict[str, Any]) -> None:
     except OSError:
         with contextlib.suppress(OSError):
             tmp.unlink(missing_ok=True)
+        return False
+    return True
 
 
 def _seconds_between(a: str, b: str) -> float:
     try:
         return abs((datetime.fromisoformat(b) - datetime.fromisoformat(a)).total_seconds())
-    except ValueError:
-        # Unparseable state: never let a corrupt timestamp hold a cooldown
+    except (ValueError, TypeError):
+        # Unparseable state (or a naive timestamp against an aware one, which
+        # raises ``TypeError``): never let a corrupt timestamp hold a cooldown
         # open forever — treat it as long enough ago to have expired.
         return _COOLDOWN_SECONDS + 1.0
 
@@ -425,7 +612,17 @@ def _check_and_record_cap(project_root: Path, task_id: str, session_id: str, now
     session_blocks_raw = state.get("session_blocks")
     session_blocks: dict[str, int] = session_blocks_raw if isinstance(session_blocks_raw, dict) else {}
     sid = session_id or "unknown"
-    count = int(session_blocks.get(sid, 0) or 0)
+    raw_count = session_blocks.get(sid, 0)
+    if isinstance(raw_count, int) and not isinstance(raw_count, bool) and raw_count >= 0:
+        count = raw_count
+    else:
+        # État de plafond corrompu (W1-06) : une valeur non entière ne doit ni planter la
+        # résolution du refus ni la faire taire. Comptée 0 (le refus reste possible, le
+        # fichier est réécrit sain), et la corruption est tracée.
+        record_guard_error(
+            project_root, task_id, "done_gate.caps_state", "ValueError", f"session_blocks[{sid!r}]={raw_count!r}"
+        )
+        count = 0
     if count >= _SESSION_CAP:
         return True
     session_blocks[sid] = count + 1
@@ -433,6 +630,65 @@ def _check_and_record_cap(project_root: Path, task_id: str, session_id: str, now
     state["session_blocks"] = session_blocks
     _save_caps(path, state)
     return False
+
+
+def resolve_done_gate_block(
+    project_root: Path,
+    task_id: str,
+    session_id: str,
+    profile: str,
+    now_iso: str,
+    *,
+    mode: DoneGateMode | None = None,
+) -> tuple[bool, bool, bool]:
+    """``(enforce, blocked, capped)`` : la résolution unique du refus du gate « fini ».
+
+    Partagée par le verdict ``stale`` et par l'échec d'évaluation
+    (:mod:`.evidence_gate`) : un refus n'est possible que dans un profil
+    bloquant ET avec l'opt-in ``enforce``, et passe alors par le
+    refroidissement et le plafond de session. Consomme un tour du plafond
+    uniquement quand un refus est dû. *mode* évite de relire le profil quand l'appelant
+    l'a déjà résolu.
+    """
+    enforce = (mode or resolve_done_gate_mode(project_root, task_id, profile, now_iso)).enforce
+    if profile in BLOCKING_PROFILES and enforce:
+        capped = _check_and_record_cap(project_root, task_id, session_id, now_iso)
+        return enforce, not capped, capped
+    return enforce, False, False
+
+
+def resolve_done_gate_block_after_crash(
+    project_root: Path, task_id: str, profile: str, session_id: str = ""
+) -> tuple[bool, bool, bool]:
+    """``(enforce, blocked, capped)`` quand :func:`resolve_done_gate_block` a lui-même planté (W1-06).
+
+    Fail-closed là où le profil le promet : profil bloquant ET opt-in
+    ``enforce`` → ``blocked``. Mais le refroidissement et le plafond de session
+    ne peuvent plus s'appuyer sur leur état (c'est justement lui qui n'a pas pu
+    être lu) : un sidecar minimal (``done-gate-crash-blocks.json``) retient les
+    sessions déjà refusées une fois ici, et une session ne l'est qu'une fois —
+    la règle « prévenue une fois, pas bouclée » s'applique aussi à ce chemin.
+    Un sidecar illisible compte pour vide (refus fail-closed, réécrit sain) ; un
+    sidecar impossible à écrire ne peut rien retenir (l'hôte laisse de toute
+    façon passer le second ``Stop``, ``stop_active``). Ailleurs, jamais de refus.
+    ``enforce`` est relu séparément (``_is_enforced`` trace sa propre panne) au
+    lieu d'être réécrit à ``False``.
+    """
+    try:
+        enforce = _is_enforced(project_root, task_id, profile)
+    except Exception as exc:
+        record_guard_error(project_root, task_id, "done_gate.enforce_option", type(exc).__name__, str(exc))
+        enforce = False
+    if not (enforce and profile in BLOCKING_PROFILES):
+        return enforce, False, False
+    path = _crash_blocks_path(project_root, task_id)
+    raw = _load_caps(path).get("sessions")
+    sessions = [s for s in raw if isinstance(s, str)] if isinstance(raw, list) else []
+    sid = session_id or "unknown"
+    if sid in sessions:
+        return enforce, False, True
+    _save_caps(path, {"sessions": [*sessions, sid][-_CRASH_BLOCKS_MAX:]})
+    return enforce, True, False
 
 
 def evaluate_done_gate(hook: Any, task_id: str, profile: str, *, now_iso: str | None = None) -> DoneGateVerdict:
@@ -443,6 +699,9 @@ def evaluate_done_gate(hook: Any, task_id: str, profile: str, *, now_iso: str | 
     callers get the actual clock.
     """
     now_iso = now_iso or datetime.now(UTC).isoformat()
+    # W2-09 : le mode est résolu avant tout verdict et porté par chacun d'eux — un
+    # « pas de mutation » sous enforce se distingue d'un « pas de mutation » en shadow.
+    mode = resolve_done_gate_mode(hook.project_root, task_id, profile, now_iso)
     entries = read_evidence_log(hook.project_root, task_id)
     # Pass 1, cheap and resolve-free: candidates only (see
     # :func:`_is_mutation_candidate` for why ``test_run`` is excluded
@@ -453,14 +712,32 @@ def evaluate_done_gate(hook: Any, task_id: str, profile: str, *, now_iso: str | 
         index for index, entry in enumerate(entries) if _is_mutation_candidate(entry, hook.project_root)
     ]
     if not candidate_indices:
-        return DoneGateVerdict(stale=False, reason="no_mutation", enforce=False, blocked=False, capped=False)
+        return DoneGateVerdict(
+            stale=False,
+            reason="no_mutation",
+            enforce=mode.enforce,
+            blocked=False,
+            capped=False,
+            mode=mode.mode,
+            mode_source=mode.source,
+            armed_from=mode.armed_from,
+        )
 
     resolved_command = _resolved_test_command(hook.project_root)
     mutation_indices = [index for index in candidate_indices if not _is_check_entry(entries[index], resolved_command)]
     if not mutation_indices:
         # Every candidate mutation was actually the resolved test command
         # itself (a ``bash`` entry the cheap pass could not rule out).
-        return DoneGateVerdict(stale=False, reason="no_mutation", enforce=False, blocked=False, capped=False)
+        return DoneGateVerdict(
+            stale=False,
+            reason="no_mutation",
+            enforce=mode.enforce,
+            blocked=False,
+            capped=False,
+            mode=mode.mode,
+            mode_source=mode.source,
+            armed_from=mode.armed_from,
+        )
     # Ordering by *list position*, not by the ``ts`` string: the journal is
     # append-only, so position already is the true sequence, and two events
     # appended microseconds apart can carry the identical ISO timestamp
@@ -482,19 +759,19 @@ def evaluate_done_gate(hook: Any, task_id: str, profile: str, *, now_iso: str | 
         return DoneGateVerdict(
             stale=False,
             reason="green_check_after_mutation",
-            enforce=False,
+            enforce=mode.enforce,
             blocked=False,
             capped=False,
             last_mutation_ts=last_mutation_ts,
+            mode=mode.mode,
+            mode_source=mode.source,
+            armed_from=mode.armed_from,
         )
 
-    enforce = _is_enforced(hook.project_root)
     command_hint = resolved_command or _last_check_command(check_entries) or "ta commande de test"
-    capped = False
-    blocked = False
-    if profile in BLOCKING_PROFILES and enforce:
-        capped = _check_and_record_cap(hook.project_root, task_id, hook.session_id, now_iso)
-        blocked = not capped
+    enforce, blocked, capped = resolve_done_gate_block(
+        hook.project_root, task_id, hook.session_id, profile, now_iso, mode=mode
+    )
     return DoneGateVerdict(
         stale=True,
         reason="mutation_after_last_check",
@@ -503,4 +780,218 @@ def evaluate_done_gate(hook: Any, task_id: str, profile: str, *, now_iso: str | 
         capped=capped,
         command_hint=command_hint,
         last_mutation_ts=last_mutation_ts,
+        mode=mode.mode,
+        mode_source=mode.source,
+        armed_from=mode.armed_from,
+    )
+
+
+# --- W2-02 : signature de progrès du Stop ---------------------------------
+#
+# Le compteur ci-dessus (``done-gate-state.json``) est étendu, pas doublé : la
+# clé ``stop`` y porte la chaîne de refus des gates de preuve rouges. Avant, un
+# ``Stop`` continué (``stop_hook_active``) passait sans rien regarder : un seul
+# refus, que la session ait avancé ou non. Désormais le refus est maintenu tant
+# que la signature change (la session avance), et libère dès qu'une signature se
+# répète (elle tourne en rond) ou que le plafond du profil est atteint.
+
+#: Plafond de refus par chaîne de ``Stop``, par profil. Jamais une variable
+#: d'environnement : un plafond réglable par l'agent serait un plafond désarmé.
+_STOP_CAPS: dict[str, int] = {"governed": 4, "production": 8}
+_STOP_CAP_DEFAULT = 2
+
+#: Événement tracé à chaque relâchement (journal de garde de la tâche).
+STOP_RELEASED_EVENT = "stop.released"
+
+#: Événement tracé en shadow (W2-02-S3) : le refus maintenu aurait été émis, il ne l'est pas.
+STOP_WOULD_BLOCK_EVENT = "stop.would_block"
+
+_STOP_KEY = "stop"
+_FINGERPRINT_TIMEOUT_SECONDS = 5.0
+
+
+@dataclass(frozen=True, slots=True)
+class StopStep:
+    """Décision d'un ``Stop`` continué : ``release`` (la session sort) ou refus maintenu."""
+
+    release: bool
+    reason: str = ""
+    count: int = 0
+    cap: int = 0
+
+
+def stop_cap(profile: str) -> int:
+    """Plafond de refus consécutifs du profil *profile* (2 par défaut, 4 governed, 8 production)."""
+    return _STOP_CAPS.get(profile, _STOP_CAP_DEFAULT)
+
+
+def _fingerprint_excluded_prefixes() -> tuple[str, ...]:
+    """Préfixes (POSIX, avec ``/`` final) des dossiers écrits par le hook ``Stop`` lui-même."""
+    from grimoire.core.agentic_standard import EVENT_DIR
+    from grimoire.core.standard_generation import RUNS_DIR, TRACES_DIR
+
+    return tuple(f"{folder.as_posix()}/" for folder in (RUNS_DIR, EVENT_DIR, TRACES_DIR))
+
+
+def _tree_fingerprint(project_root: Path, task_id: str) -> str:
+    """Empreinte de l'arbre de travail : fichiers modifiés ou non suivis, taille et mtime.
+
+    Hors de tout ce que le hook ``Stop`` écrit lui-même (W2-02-S1) :
+    ``RUNS_DIR`` (le compteur y vit), ``EVENT_DIR`` (le journal d'événements
+    que ``_gate_summary`` alimente à chaque évaluation) et ``TRACES_DIR`` (la
+    trace de ``run_hook``). Ces dossiers ne sont pas ignorés par git : sans
+    cette exclusion, chaque ``Stop`` changerait l'empreinte et la signature ne
+    serait jamais identique. Sans git, repli sur le journal d'actions de la
+    tâche (taille). Jamais d'exception.
+    """
+    excluded = _fingerprint_excluded_prefixes()
+    try:
+        listing = subprocess.run(
+            ["git", "-C", str(project_root), "ls-files", "-m", "-o", "--exclude-standard", "-z"],
+            capture_output=True,
+            timeout=_FINGERPRINT_TIMEOUT_SECONDS,
+            check=True,
+        ).stdout
+        digest = hashlib.sha256()
+        for raw in sorted(listing.split(b"\0")):
+            rel = raw.decode("utf-8", errors="replace")
+            if not rel or rel.startswith(excluded):
+                continue
+            try:
+                st = (project_root / rel).stat()
+                digest.update(f"{rel}\0{st.st_size}\0{st.st_mtime_ns}\n".encode())
+            except OSError:
+                digest.update(f"{rel}\0gone\n".encode())
+        return "git:" + digest.hexdigest()[:16]
+    except (OSError, subprocess.SubprocessError):
+        pass
+    try:
+        size = (project_root / evidence_log_relpath(task_id)).stat().st_size
+    except OSError:
+        size = 0
+    return f"journal:{size}"
+
+
+def stop_signature(
+    project_root: Path, task_id: str, summary: str, missing: list[str], *, flow_node: str = ""
+) -> str:
+    """Signature de progrès : ``(tâche, digest des gates rouges, empreinte d'arbre, node de flow)``.
+
+    ``flow_node`` n'est pas lu dans un hook (le moteur de flows n'est pas
+    accessible à bas coût depuis ``Stop``) : le paramètre fixe l'emplacement du
+    composant, vide tant que rien ne l'alimente.
+    """
+    gates = hashlib.sha256((summary + "\0" + "\0".join(sorted(missing))).encode("utf-8", "replace")).hexdigest()[:16]
+    return "|".join((task_id, gates, _tree_fingerprint(project_root, task_id), flow_node))
+
+
+def _load_stop_chain(state: dict[str, Any], project_root: Path, task_id: str) -> tuple[str, int]:
+    """``(dernière signature, refus émis)`` ; un état corrompu revient à ``("", 0)``, tracé."""
+    raw = state.get(_STOP_KEY)
+    if raw is None:
+        return "", 0
+    count = raw.get("count") if isinstance(raw, dict) else None
+    signature = raw.get("signature") if isinstance(raw, dict) else None
+    if isinstance(count, int) and not isinstance(count, bool) and count >= 0 and isinstance(signature, str):
+        return signature, count
+    record_guard_error(project_root, task_id, "done_gate.stop_state", "ValueError", f"stop={raw!r}")
+    return "", 0
+
+
+def record_stop_block(project_root: Path, task_id: str, signature: str) -> bool:
+    """Un ``Stop`` initial vient de refuser : ouvre la chaîne (compte 1). Best-effort.
+
+    Rend ``False`` quand la chaîne n'a pas pu être écrite (W2-02-S2) : le
+    prochain ``Stop`` continué ne la trouvera pas et sortira par ``no_chain``.
+    """
+    path = _caps_path(project_root, task_id)
+    state = _load_caps(path)
+    state[_STOP_KEY] = {"signature": signature, "count": 1}
+    return _save_caps(path, state)
+
+
+def stop_step(project_root: Path, task_id: str, profile: str, signature: str, red_gates: str, now_iso: str) -> StopStep:
+    """Un ``Stop`` continué avec des gates rouges : maintenir le refus ou relâcher.
+
+    Relâche (et trace ``stop.released``) quand la signature est identique à celle
+    du dernier refus (la session ne progresse pas), quand le plafond du profil
+    est atteint (le (cap+1)-ième ``Stop`` passe toujours), ou quand aucune chaîne
+    n'est connue (état absent ou corrompu : rien ne prouve un progrès, la session
+    sort comme avant). Sinon le refus est maintenu et le compteur avance.
+
+    Fail-open (W2-02-S2) : si le compteur ne peut pas être écrit, il n'avancerait
+    jamais et le refus se répéterait sans fin ; la session sort (``state_unwritable``),
+    tracé en ``stop.released`` et en ``guard.error``.
+    """
+    path = _caps_path(project_root, task_id)
+    state = _load_caps(path)
+    last_signature, count = _load_stop_chain(state, project_root, task_id)
+    cap = stop_cap(profile)
+    if count <= 0:
+        return StopStep(release=True, reason="no_chain", count=0, cap=cap)
+    why = "same_signature" if signature == last_signature else "cap_reached" if count >= cap else ""
+    if why:
+        append_guard_event(
+            project_root,
+            task_id,
+            {
+                "ts": now_iso,
+                "type": STOP_RELEASED_EVENT,
+                "guard_id": "done_gate.stop_signature",
+                "reason": why,
+                "profile": profile,
+                "blocks": count,
+                "cap": cap,
+                "signature": signature,
+                "red_gates": red_gates,
+            },
+        )
+        state[_STOP_KEY] = {"signature": signature, "count": 0}
+        _save_caps(path, state)
+        return StopStep(release=True, reason=why, count=count, cap=cap)
+    state[_STOP_KEY] = {"signature": signature, "count": count + 1}
+    if not _save_caps(path, state):
+        record_guard_error(
+            project_root,
+            task_id,
+            "done_gate.stop_state",
+            "OSError",
+            f"compteur du Stop non inscriptible ({path.name}) : le refus maintenu serait sans fin, la session sort",
+        )
+        append_guard_event(
+            project_root,
+            task_id,
+            {
+                "ts": now_iso,
+                "type": STOP_RELEASED_EVENT,
+                "guard_id": "done_gate.stop_signature",
+                "reason": "state_unwritable",
+                "profile": profile,
+                "blocks": count,
+                "cap": cap,
+                "signature": signature,
+                "red_gates": red_gates,
+            },
+        )
+        return StopStep(release=True, reason="state_unwritable", count=count, cap=cap)
+    return StopStep(release=False, reason="signature_changed", count=count + 1, cap=cap)
+
+
+def record_stop_would_block(
+    project_root: Path, task_id: str, profile: str, step: StopStep, signature: str, red_gates: str, now_iso: str
+) -> None:
+    """Shadow (W2-02-S3) : trace le refus maintenu qui aurait été émis (``stop.would_block``). Best-effort."""
+    append_guard_event(
+        project_root,
+        task_id,
+        {
+            "ts": now_iso,
+            "type": STOP_WOULD_BLOCK_EVENT,
+            "guard_id": "done_gate.stop_signature",
+            "profile": profile,
+            "blocks": step.count,
+            "cap": step.cap,
+            "signature": signature,
+            "red_gates": red_gates,
+        },
     )

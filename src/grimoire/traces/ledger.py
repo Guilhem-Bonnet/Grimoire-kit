@@ -10,14 +10,18 @@ import contextlib
 import json
 import os
 import uuid
-from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+import warnings
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
 from grimoire.core.exceptions import GrimoireRuntimeError
+from grimoire.core.fsio import locked
+from grimoire.costs import Cost
+from grimoire.traces.intervals import ratio_interval95, wilson_interval95
 from grimoire.traces.otel_conventions import (
     ATTR_AGENT_NAME,
     ATTR_CONVERSATION_ID,
@@ -56,6 +60,7 @@ __all__ = [
     "HOLD_LABEL_RESPECTED",
     "HOLD_LABEL_RETRIED_SAME",
     "HOLD_LABEL_RETRIED_VARIANT",
+    "LEDGER_EVENT_TAG_PREFIX",
     "POLICY_HOLD_TAG",
     "AgentFreshness",
     "DispatchOutcomeGroupStats",
@@ -73,13 +78,33 @@ except ImportError:  # pragma: no cover - exercised by the dedicated Rust CI job
     _rust_core = None
 
 
+#: Version de l'ABI Python/Rust attendue (W1-01, revue S8). ``dispatch_outcome_stats``
+#: échange des tuples de longueur fixe : une extension plus ancienne, encore installée,
+#: lèverait un ``ValueError`` opaque. Le cœur exporte la même constante ``ABI_VERSION`` ;
+#: à incrémenter des deux côtés à chaque changement de signature ou de forme d'échange.
+RUST_ABI_VERSION = 2
+
+
+def _rust_abi_mismatch() -> str | None:
+    """Pourquoi le module Rust importé est inutilisable, ou ``None`` s'il est absent ou compatible."""
+    if _rust_core is None:
+        return None
+    found = getattr(_rust_core, "ABI_VERSION", None)
+    if found == RUST_ABI_VERSION:
+        return None
+    return (
+        f"grimoire_traces_core a l'ABI {found!r}, ce kit attend l'ABI {RUST_ABI_VERSION} "
+        "(extension périmée : la reconstruire avec `maturin develop` dans rust/grimoire-traces-core/)"
+    )
+
+
 def rust_backend_available() -> bool:
-    """Whether the compiled ``grimoire_traces_core`` module is importable.
+    """Whether a *compatible* compiled ``grimoire_traces_core`` module is importable.
 
     Purely informational (used by tests and diagnostics) — every call site
     below decides its own backend fresh via :func:`_use_rust_backend`.
     """
-    return _rust_core is not None
+    return _rust_core is not None and _rust_abi_mismatch() is None
 
 
 def _use_rust_backend() -> bool:
@@ -102,9 +127,16 @@ def _use_rust_backend() -> bool:
                 "localement (voir CONTRIBUTING.md, `maturin develop` dans "
                 "rust/grimoire-traces-core/) ou revenir a auto/python."
             )
+        mismatch = _rust_abi_mismatch()
+        if mismatch is not None:
+            raise GrimoireRuntimeError(f"GRIMOIRE_TRACES_BACKEND=rust : {mismatch}")
         return True
     if override not in ("auto", ""):
         raise GrimoireRuntimeError(f"GRIMOIRE_TRACES_BACKEND invalide: {override!r} (attendu auto/python/rust)")
+    mismatch = _rust_abi_mismatch()
+    if mismatch is not None:
+        warnings.warn(f"{mismatch} — repli sur le backend Python.", RuntimeWarning, stacklevel=2)
+        return False
     return _rust_core is not None
 
 #: Tag qui marque un enregistrement comme « un agent a été choisi » plutôt
@@ -159,6 +191,8 @@ DELEGATION_BURST_WINDOW_S = 10.0
 #: mesurent une fois, cet événement le rend continu et lisible par un gate —
 #: voir :meth:`TraceLedger.dispatch_outcome_stats`.
 DISPATCH_OUTCOME_TAG = "dispatch.outcome"
+#: Préfixe du tag qui porte l'id du dernier événement ``task.dispatched`` de la cascade : lien exact.
+LEDGER_EVENT_TAG_PREFIX = "ledger_event:"
 
 #: Tag qui marque un enregistrement comme un verdict de hook non-``allow``
 #: (``done_gate`` périmé, ``tool_policy`` ``ask``/``deny``) — calibration des
@@ -273,11 +307,30 @@ class DispatchOutcomeGroupStats:
     resolved: int
     inexecutable: int
     escalated: int
-    total_cost_usd: float
+    #: Somme des seuls montants connus — un minimum, jamais le total quand
+    #: ``unpriced_calls > 0``. Lire :attr:`total_cost_usd` (``None`` si rien
+    #: n'est chiffré), pas ce champ brut (W1-01, issue #709).
+    known_usd: float
+    priced_calls: int
+    unpriced_calls: int
+
+    @property
+    def cost(self) -> Cost:
+        return Cost(self.known_usd, self.priced_calls, self.unpriced_calls)
+
+    @property
+    def total_cost_usd(self) -> float | None:
+        return self.cost.usd
 
     @property
     def cost_per_resolved_task_usd(self) -> float | None:
-        return self.total_cost_usd / self.resolved if self.resolved else None
+        """Coût connu / résolus ; ``None`` sans résolu ou sans aucun coût chiffré.
+
+        Un minimum quand ``cost.status == "lower_bound"`` : ne jamais le
+        comparer à un plafond comme s'il était exact.
+        """
+        usd = self.cost.usd
+        return usd / self.resolved if self.resolved and usd is not None else None
 
     @property
     def escalation_rate(self) -> float | None:
@@ -293,7 +346,9 @@ class DispatchOutcomeGroupStats:
             "resolved": self.resolved,
             "inexecutable": self.inexecutable,
             "escalated": self.escalated,
-            "total_cost_usd": round(self.total_cost_usd, 6),
+            "total_cost_usd": None if self.total_cost_usd is None else round(self.total_cost_usd, 6),
+            "cost_status": self.cost.status,
+            "unpriced_calls": self.unpriced_calls,
             "cost_per_resolved_task_usd": self.cost_per_resolved_task_usd,
             "escalation_rate": self.escalation_rate,
             "inexecutable_share": self.inexecutable_share,
@@ -339,6 +394,11 @@ class DispatchOutcomeStats:
     def pass_k_rate(self) -> float | None:
         return self.pass_k_fully_green / self.pass_k_observations if self.pass_k_observations else None
 
+    @property
+    def pass_k_ci95(self) -> tuple[float, float] | None:
+        """Intervalle de Wilson à 95 % de :attr:`pass_k_rate` ; ``None`` sans série rejouée (W4-05)."""
+        return wilson_interval95(self.pass_k_fully_green, self.pass_k_observations)
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "overall": self.overall.to_dict(),
@@ -348,6 +408,7 @@ class DispatchOutcomeStats:
             "pass_k_observations": self.pass_k_observations,
             "pass_k_fully_green": self.pass_k_fully_green,
             "pass_k_rate": self.pass_k_rate,
+            "pass_k_ci95": self.pass_k_ci95,
         }
 
 
@@ -365,14 +426,27 @@ def _last_tag_value(tags: Iterable[str], prefix: str) -> str:
     return value
 
 
-def _by_flow_groups(records: list[tuple[tuple[str, ...], float]]) -> dict[str, DispatchOutcomeGroupStats]:
+def _new_group() -> dict[str, Any]:
+    return {
+        "total": 0, "resolved": 0, "inexecutable": 0, "escalated": 0,
+        "known_usd": 0.0, "priced_calls": 0, "unpriced_calls": 0,
+    }
+
+
+def _add_cost(group: dict[str, Any], cost: Cost) -> None:
+    group["known_usd"] += cost.known_usd
+    group["priced_calls"] += cost.priced_calls
+    group["unpriced_calls"] += cost.unpriced_calls
+
+
+def _normalised(cost: Cost) -> Cost:
+    return Cost.from_parts(cost.usd, cost.unpriced_calls)
+
+
+def _by_flow_groups(records: list[tuple[tuple[str, ...], Cost]]) -> dict[str, DispatchOutcomeGroupStats]:
     """Ventilation par flow (issue #208) : voir le docstring de ``DispatchOutcomeStats.by_flow``."""
-
-    def _new_group() -> dict[str, Any]:
-        return {"total": 0, "resolved": 0, "inexecutable": 0, "escalated": 0, "total_cost_usd": 0.0}
-
     groups: dict[str, dict[str, Any]] = {}
-    for tags, cost_usd in records:
+    for tags, cost in records:
         if DISPATCH_OUTCOME_TAG not in tags:
             continue
         replay_key = _last_tag_value(tags, "replay:")
@@ -384,7 +458,7 @@ def _by_flow_groups(records: list[tuple[tuple[str, ...], float]]) -> dict[str, D
         resolved = _last_tag_value(tags, "resolved:") == "true"
         group = groups.setdefault(blueprint_id, _new_group())
         group["total"] += 1
-        group["total_cost_usd"] += cost_usd
+        _add_cost(group, cost)
         if resolved:
             group["resolved"] += 1
         if acceptance == "unrunnable":
@@ -395,9 +469,14 @@ def _by_flow_groups(records: list[tuple[tuple[str, ...], float]]) -> dict[str, D
 
 
 def compute_dispatch_outcome_stats(
-    records: Iterable[tuple[tuple[str, ...], float]],
+    records: Iterable[tuple[tuple[str, ...], Cost | float | None]],
 ) -> DispatchOutcomeStats:
-    """Agréger une séquence ``(tags, cost_usd)`` en coût par tâche résolue et pass^k.
+    """Agréger une séquence ``(tags, coût)`` en coût par tâche résolue et pass^k.
+
+    Le coût d'un enregistrement est un :class:`~grimoire.costs.Cost`, un
+    nombre (exact) ou ``None`` (inconnu) : un coût inconnu n'entre jamais dans
+    la somme comme ``0.0`` — le groupe est ``lower_bound`` ou ``unknown`` et
+    ``cost_per_resolved_task_usd`` ne prétend pas à un total (W1-01, issue #709).
 
     Lit exclusivement les enregistrements tagués :data:`DISPATCH_OUTCOME_TAG`
     — tout le reste du journal (choix d'agent, non-choix, gates de tâche)
@@ -422,13 +501,18 @@ def compute_dispatch_outcome_stats(
     :func:`_use_rust_backend`. Le chemin Python ci-dessous est
     l'implémentation de référence.
     """
-    records = list(records)  # itéré deux fois ci-dessous (backend + _by_flow_groups) — jamais un générateur épuisé
-    by_flow = _by_flow_groups(records)
+    # Itéré deux fois ci-dessous (backend + _by_flow_groups) — jamais un générateur épuisé.
+    # Re-normalisé par (usd, unpriced) : c'est la forme exacte que reçoit le cœur Rust,
+    # donc les deux backends additionnent le même objet.
+    normalised = [(tags, _normalised(Cost.coerce(cost))) for tags, cost in records]
+    by_flow = _by_flow_groups(normalised)
 
     if _use_rust_backend():
         assert _rust_core is not None  # guarded by _use_rust_backend
         raw_overall, raw_by_class, raw_by_provider, pass_k_observations, pass_k_fully_green = (
-            _rust_core.dispatch_outcome_stats([(list(tags), cost_usd) for tags, cost_usd in records])
+            _rust_core.dispatch_outcome_stats(
+                [(list(tags), cost.usd, cost.unpriced_calls) for tags, cost in normalised]
+            )
         )
         return DispatchOutcomeStats(
             overall=_group_stats_from_tuple(raw_overall),
@@ -439,12 +523,9 @@ def compute_dispatch_outcome_stats(
             pass_k_fully_green=int(pass_k_fully_green),
         )
 
-    def _new_group() -> dict[str, Any]:
-        return {"total": 0, "resolved": 0, "inexecutable": 0, "escalated": 0, "total_cost_usd": 0.0}
-
-    def _accumulate(group: dict[str, Any], *, resolved: bool, inexecutable: bool, escalated: bool, cost_usd: float) -> None:
+    def _accumulate(group: dict[str, Any], *, resolved: bool, inexecutable: bool, escalated: bool, cost: Cost) -> None:
         group["total"] += 1
-        group["total_cost_usd"] += cost_usd
+        _add_cost(group, cost)
         if resolved:
             group["resolved"] += 1
         if inexecutable:
@@ -458,7 +539,7 @@ def compute_dispatch_outcome_stats(
     replay_totals: dict[str, int] = {}
     replay_resolved: dict[str, int] = {}
 
-    for tags, cost_usd in records:
+    for tags, cost in normalised:
         if DISPATCH_OUTCOME_TAG not in tags:
             continue
         class_ = _last_tag_value(tags, "class:")
@@ -470,16 +551,16 @@ def compute_dispatch_outcome_stats(
         escalated = len(tiers) > 1
         inexecutable = acceptance == "unrunnable"
 
-        _accumulate(overall, resolved=resolved, inexecutable=inexecutable, escalated=escalated, cost_usd=cost_usd)
+        _accumulate(overall, resolved=resolved, inexecutable=inexecutable, escalated=escalated, cost=cost)
         if class_:
             _accumulate(
                 by_class.setdefault(class_, _new_group()),
-                resolved=resolved, inexecutable=inexecutable, escalated=escalated, cost_usd=cost_usd,
+                resolved=resolved, inexecutable=inexecutable, escalated=escalated, cost=cost,
             )
         if provider:
             _accumulate(
                 by_provider.setdefault(provider, _new_group()),
-                resolved=resolved, inexecutable=inexecutable, escalated=escalated, cost_usd=cost_usd,
+                resolved=resolved, inexecutable=inexecutable, escalated=escalated, cost=cost,
             )
         if replay_key:
             replay_totals[replay_key] = replay_totals.get(replay_key, 0) + 1
@@ -505,10 +586,11 @@ def compute_dispatch_outcome_stats(
     )
 
 
-def _group_stats_from_tuple(raw: tuple[int, int, int, int, float]) -> DispatchOutcomeGroupStats:
-    total, resolved, inexecutable, escalated, total_cost_usd = raw
+def _group_stats_from_tuple(raw: tuple[int, int, int, int, float, int, int]) -> DispatchOutcomeGroupStats:
+    total, resolved, inexecutable, escalated, known_usd, priced_calls, unpriced_calls = raw
     return DispatchOutcomeGroupStats(
-        total=total, resolved=resolved, inexecutable=inexecutable, escalated=escalated, total_cost_usd=total_cost_usd
+        total=total, resolved=resolved, inexecutable=inexecutable, escalated=escalated,
+        known_usd=known_usd, priced_calls=priced_calls, unpriced_calls=unpriced_calls,
     )
 
 
@@ -685,6 +767,11 @@ class TraceLedger:
     # ── Private helpers ────────────────────────────────────────────────────
 
     def _append(self, record: dict[str, Any]) -> None:
+        with locked(self._traces_path):
+            self._write_line(record)
+
+    def _write_line(self, record: dict[str, Any]) -> None:
+        """Ajoute une ligne ; l'appelant tient déjà ``locked(self._traces_path)``."""
         line = json.dumps(record, ensure_ascii=False) + "\n"
         with open(self._traces_path, "a", encoding="utf-8") as fh:
             fh.write(line)
@@ -733,7 +820,7 @@ class TraceLedger:
         trace_id: str | None = None,
     ) -> TraceRecord:
         trace = TraceRecord(
-            id=trace_id or self._next_id(run_id),
+            id=trace_id or "",
             run_id=run_id,
             workflow_instance_id=workflow_instance_id,
             mission_id=mission_id,
@@ -755,8 +842,44 @@ class TraceLedger:
             token_usage=TokenUsage.from_dict(token_usage or {}),
             tags=tuple(tags or []),
         )
-        self._append(trace.to_dict())
+        if trace_id:
+            self._append(trace.to_dict())
+            return trace
+        # Identifiant dérivé du décompte : lecture, calcul et ajout dans la même section
+        # critique, sinon deux processus lisent le même décompte et écrivent le même id.
+        with locked(self._traces_path):
+            trace = replace(trace, id=self._next_id(run_id))
+            self._write_line(trace.to_dict())
         return trace
+
+    def append_new(self, traces: Sequence[TraceRecord]) -> list[TraceRecord]:
+        """Ajoute les traces dont l'``id`` est absent du journal ; rend celles qui ont été écrites.
+
+        Lecture des identifiants et ajout dans la même section critique : deux
+        replis concurrents du même journal d'hôte n'écrivent pas deux fois le
+        même appel (W4-01). Un ``id`` répété dans le lot n'est écrit qu'une fois.
+        """
+        written: list[TraceRecord] = []
+        with locked(self._traces_path):
+            known = self._known_ids()
+            for trace in traces:
+                if trace.id in known:
+                    continue
+                known.add(trace.id)
+                self._write_line(trace.to_dict())
+                written.append(trace)
+        return written
+
+    def _known_ids(self) -> set[str]:
+        ids: set[str] = set()
+        if not self._traces_path.exists():
+            return ids
+        for line in self._traces_path.read_text(encoding="utf-8").splitlines():
+            with contextlib.suppress(json.JSONDecodeError, AttributeError):
+                found = json.loads(line).get("id")
+                if isinstance(found, str):
+                    ids.add(found)
+        return ids
 
     # ── Queries ────────────────────────────────────────────────────────────
 
@@ -1071,8 +1194,26 @@ class TraceLedger:
         traces = self._load_all()
         if since_iso:
             traces = [t for t in traces if t.started_at >= since_iso]
-        records = [(trace.tags, trace.token_usage.estimated_cost_usd) for trace in traces]
+        records = [(trace.tags, trace.token_usage.cost) for trace in traces]
         return compute_dispatch_outcome_stats(records)
+
+    def dispatch_cost_interval(self, *, since_iso: str | None = None) -> tuple[float, float] | None:
+        """IC95 du coût par tâche résolue, ou ``None`` s'il n'est pas estimable (W4-05).
+
+        Calculé sur les coûts par dispatch (jamais sur l'agrégat). ``None`` dès
+        qu'un appel n'a pas de coût : un minimum n'a pas d'intervalle, le
+        contrôle retombe sur son message « non évalué ». Sans variance
+        estimable (moins de deux dispatchs), ``None`` aussi.
+        """
+        samples: list[tuple[float, int]] = []
+        for trace in self._load_all():
+            if DISPATCH_OUTCOME_TAG not in trace.tags or (since_iso and trace.started_at < since_iso):
+                continue
+            cost = trace.token_usage.cost
+            if cost.usd is None or cost.unpriced_calls:
+                return None
+            samples.append((cost.usd, 1 if _last_tag_value(trace.tags, "resolved:") == "true" else 0))
+        return ratio_interval95(samples)
 
     def record_hold_followup(self, *, hold: TraceRecord, label: str) -> None:
         """Label *hold* (a :data:`POLICY_HOLD_TAG` record from :meth:`open_policy_hold`)
@@ -1167,13 +1308,13 @@ class TraceLedger:
         not traces, whenever a trace carries tool calls.
         No opentelemetry-sdk dependency required — pure JSONL output.
         """
-        traces = self.list_traces(mission_id=mission_id)
-        lines: list[str] = []
-        for trace in traces:
-            for span in self._to_otel_spans(trace):
-                lines.append(json.dumps(span, ensure_ascii=False))
+        lines = [json.dumps(span, ensure_ascii=False) for span in self.otel_spans(mission_id=mission_id)]
         dest.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
         return len(lines)
+
+    def otel_spans(self, *, mission_id: str | None = None) -> list[dict[str, Any]]:
+        """Les spans ``grimoire.otel.v2`` du journal : source unique du JSONL et de l'export OTLP."""
+        return [span for trace in self.list_traces(mission_id=mission_id) for span in self._to_otel_spans(trace)]
 
     # ── Langfuse JSONL export ──────────────────────────────────────────────
 
@@ -1275,6 +1416,12 @@ class TraceLedger:
         }
         if trace.agent_id:
             attrs[ATTR_AGENT_NAME] = trace.agent_id
+        # Coût à trois états (W1-01) : un montant inconnu n'est pas écrit, le statut le dit.
+        cost = trace.token_usage.cost
+        attrs["grimoire.cost.status"] = cost.status
+        attrs["grimoire.cost.unpriced_calls"] = cost.unpriced_calls
+        if cost.usd is not None:
+            attrs["grimoire.cost.usd"] = cost.usd
 
         parent_name = agent_span_name(trace.agent_id) if trace.agent_id else model_span_name(OP_INVOKE_AGENT, trace.recipe_id)
 

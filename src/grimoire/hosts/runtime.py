@@ -25,7 +25,7 @@ from typing import Any
 
 from grimoire.bridges.schemas import HostId
 from grimoire.core.standard_generation import CONTEXT_DIR
-from grimoire.core.standard_state import active_task_id
+from grimoire.core.standard_state import active_task_id, suspended_state_writes
 from grimoire.hosts.capabilities import profile_for
 from grimoire.hosts.decisions import (
     DEFAULT_DECISION_BY_EVENT,
@@ -90,25 +90,57 @@ def _as_dict(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, dict) else {}
 
 
-def resolve_project_root(payload: dict[str, Any] | None = None, explicit: Path | None = None) -> Path:
-    """Project root for a hook run.
+#: Le marqueur d'un projet Grimoire : le dossier qu'on trouve à sa racine.
+PROJECT_MARKER = "_grimoire"
+_ROOT_PAYLOAD_KEYS = ("cwd", "workspaceFolder", "workspace_folder", "project_root", "projectRoot")
+_ROOT_ENV_VARS = ("GRIMOIRE_PROJECT_ROOT", "COPILOT_WORKSPACE_FOLDER")
 
-    Order: an explicit ``--project-root``, then the host's own signal (its
-    payload ``cwd`` or the project-dir variable it exports), then the process
-    working directory. A hook that guesses this wrong evaluates the gates of
-    the wrong project, so every candidate is a value the host actually stated.
+
+def _nearest_project_root(start: Path) -> Path | None:
+    """Le plus proche ancêtre de *start* (lui compris) qui porte ``_grimoire/``."""
+    for candidate in (start, *start.parents):
+        if (candidate / PROJECT_MARKER).is_dir():
+            return candidate
+    return None
+
+
+def locate_project_root(payload: dict[str, Any] | None = None, explicit: Path | None = None) -> tuple[Path, bool]:
+    """``(racine, reconnue)`` pour un run de hook.
+
+    Ordre : ``--project-root`` ; ``CLAUDE_PROJECT_DIR`` (Claude Code l'exporte
+    et il reste la racine du projet) ; puis le ``cwd`` du payload ou les
+    variables des autres hôtes. Un ``cwd`` n'énonce pas le projet : sur Claude
+    Code c'est le répertoire courant du shell, qui suit chaque ``cd`` de
+    l'agent (issue #717). On remonte donc jusqu'au premier dossier qui porte
+    ``_grimoire/`` ; sans marqueur, le candidat est gardé tel quel mais la
+    racine n'est pas « reconnue » (aucun hook n'y écrit d'état).
     """
     if explicit is not None:
-        return explicit.resolve()
+        return explicit.resolve(), True
+    stated = os.environ.get("CLAUDE_PROJECT_DIR", "").strip()
+    if stated:
+        return Path(stated).resolve(), True
     data = payload or {}
-    candidate = _pick(data, "cwd", "workspaceFolder", "workspace_folder", "project_root", "projectRoot")
-    if isinstance(candidate, str) and candidate.strip():
-        return Path(candidate).resolve()
-    for var in ("CLAUDE_PROJECT_DIR", "GRIMOIRE_PROJECT_ROOT", "COPILOT_WORKSPACE_FOLDER"):
-        value = os.environ.get(var, "").strip()
-        if value:
-            return Path(value).resolve()
-    return Path.cwd().resolve()
+    candidates: list[str] = []
+    picked = _pick(data, *_ROOT_PAYLOAD_KEYS)
+    if isinstance(picked, str) and picked.strip():
+        candidates.append(picked)
+    candidates.extend(v for v in (os.environ.get(var, "").strip() for var in _ROOT_ENV_VARS) if v)
+    first: Path | None = None
+    for raw in candidates:
+        path = Path(raw).resolve()
+        first = first or path
+        found = _nearest_project_root(path)
+        if found is not None:
+            return found, True
+    start = first or Path.cwd().resolve()
+    found = _nearest_project_root(start) if first is None else None
+    return (found, True) if found is not None else (start, False)
+
+
+def resolve_project_root(payload: dict[str, Any] | None = None, explicit: Path | None = None) -> Path:
+    """Project root for a hook run — see :func:`locate_project_root`."""
+    return locate_project_root(payload, explicit)[0]
 
 
 def normalize_input(
@@ -133,6 +165,7 @@ def normalize_input(
         session_id=str(_pick(payload, "session_id", "sessionId", default="") or ""),
         stop_active=stop_active,
         host=host_id.value if host_id is not None and host_id is not HostId.UNKNOWN else "",
+        tool_use_id=str(_pick(payload, "tool_use_id", "toolUseId", "tool_call_id", "toolCallId", default="") or ""),
         raw=dict(payload),
     )
 
@@ -244,6 +277,7 @@ def _record_decision(
         return
     try:
         from grimoire.core.standard_generation import TRACES_DIR
+        from grimoire.hosts.decisions.done_gate import done_gate_mode_tags
         from grimoire.traces.ledger import TraceLedger
         from grimoire.traces.schemas import TraceOutcome
 
@@ -288,7 +322,7 @@ def _record_decision(
             tool_calls=tool_calls,
             evidence_refs=[f"_grimoire-output/evidence/{task_id}"] if task_id else [],
             latency_ms=latency_ms,
-            tags=[hook.event.value, verdict],
+            tags=[hook.event.value, verdict, *done_gate_mode_tags(detail.get("done_gate"))],
         )
     except Exception:
         return
@@ -324,10 +358,24 @@ def run_hook(
     resolved_decision = decision_id or DEFAULT_DECISION_BY_EVENT.get(hook.event, "")
     started_at = _now_iso()
     started = time.perf_counter()
-    decision = run_decision(resolved_decision, hook) if resolved_decision else Decision()
+    # Hors d'une racine reconnue (aucun `_grimoire/` au-dessus du cwd) il n'y a pas
+    # de projet auquel rattacher un état. Les décisions qui écrivent (`_grimoire-output/`)
+    # sont inertes ; PreToolUse, le garde-fou, garde sa décision mais en lecture
+    # seule : ni cache d'état, ni hold, ni trace, ni capsule (#717).
+    recognized = locate_project_root(payload, project_root)[1]
+    if not recognized and hook.event is not HookEvent.PRE_TOOL_USE:
+        decision = Decision()
+    elif not recognized:
+        with suspended_state_writes():
+            decision = run_decision(resolved_decision, hook) if resolved_decision else Decision()
+    else:
+        decision = run_decision(resolved_decision, hook) if resolved_decision else Decision()
     latency_ms = (time.perf_counter() - started) * 1000
-    _record_decision(hook, decision, host_id, latency_ms, started_at)
-    capsule, capsule_error = _persist_capsule(hook, decision)
+    if recognized:
+        _record_decision(hook, decision, host_id, latency_ms, started_at)
+        capsule, capsule_error = _persist_capsule(hook, decision)
+    else:
+        capsule, capsule_error = None, ""
     if capsule is not None or capsule_error:
         stamp = {"capsule": str(capsule)} if capsule is not None else {"capsule_error": capsule_error}
         decision = Decision(

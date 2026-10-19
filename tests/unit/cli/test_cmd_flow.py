@@ -7,9 +7,22 @@ import sys
 from pathlib import Path
 from textwrap import dedent
 
+import pytest
 from typer.testing import CliRunner
 
 from grimoire.cli.app import app
+
+pytestmark = pytest.mark.covers(
+    "cli:flow abort",
+    "cli:flow list",
+    "cli:flow resume",
+    "cli:flow run",
+    "cli:flow status",
+)
+
+# Commande d'acceptation « qui réussit », valable sous sh comme sous cmd.exe
+# (`true` n'existe pas sous Windows, où `shell=True` lance cmd.exe).
+_TRUE = f'"{sys.executable}" -c pass'
 
 runner = CliRunner()
 
@@ -95,6 +108,50 @@ def test_flow_resume_refuses_non_conforming_output_with_nonzero_exit(tmp_path: P
     assert any("pin=out" in f for f in body["faults"])
 
 
+def test_flow_resume_replays_an_already_accepted_output_without_failing_the_run(tmp_path: Path) -> None:
+    """W1-03 : le même ``--result`` renvoyé deux fois répond `replay` (exit 0), le run reste sain."""
+    blueprint = {
+        "blueprintVersion": 1,
+        "id": "cli-replay",
+        "name": "CLI replay",
+        "nodes": [
+            {"id": "a", "kind": "pattern", "ref": "ORC-01", "pins": [{"id": "out", "direction": "out", "contract": "c1"}]},
+            {
+                "id": "b",
+                "kind": "pattern",
+                "ref": "QUA-04",
+                "pins": [
+                    {"id": "in", "direction": "in", "contract": "c1"},
+                    {"id": "out", "direction": "out", "contract": "c2"},
+                ],
+            },
+        ],
+        "edges": [{"from": "a.out", "to": "b.in", "contract": "c1"}],
+    }
+    bp = tmp_path / "cli-replay.blueprint.json"
+    bp.write_text(json.dumps(blueprint), encoding="utf-8")
+    result = runner.invoke(app, ["--output", "json", "flow", "run", str(bp), "--project-root", str(tmp_path)])
+    run_id = json.loads(result.output)["run_id"]
+    output_file = tmp_path / "a-output.json"
+    output_file.write_text(json.dumps({"pins": {"out": {"contract": "c1"}}}), encoding="utf-8")
+    args = ["--output", "json", "flow", "resume", run_id, "--result", str(output_file), "--project-root", str(tmp_path)]
+
+    first = runner.invoke(app, args)
+    second = runner.invoke(app, args)
+
+    assert first.exit_code == 0, first.output
+    assert second.exit_code == 0, second.output
+    replayed = json.loads(second.output)
+    assert replayed["ok"] is True
+    assert replayed["replay"] is True
+    assert replayed["replay_of"] == "a"
+    assert replayed["node_id"] == "b"
+    status = runner.invoke(app, ["--output", "json", "flow", "status", run_id, "--project-root", str(tmp_path)])
+    body = json.loads(status.output)
+    assert body["status"] != "blocked"
+    assert body["last_refusal"] is None
+
+
 def test_flow_abort(tmp_path: Path) -> None:
     bp = _write_blueprint(tmp_path)
     result = runner.invoke(app, ["--output", "json", "flow", "run", str(bp), "--project-root", str(tmp_path)])
@@ -163,7 +220,7 @@ providers:
     allowed_capabilities: ["chat", "code"]
     default_models: ["writer-model"]
     currency: "api"
-    invocation: "{sys.executable} {script} {{prompt}} --model {{model}}"
+    invocation: "{Path(sys.executable).as_posix()} {Path(script).as_posix()} {{prompt}} --model {{model}}"
     models:
       - id: "writer-model"
         tier: "cheap"
@@ -188,18 +245,18 @@ def _write_dispatchable_blueprint(tmp_path: Path) -> Path:
                 "id": "a",
                 "kind": "pattern",
                 "ref": "ORC-01",
-                # `{"run": "true"}` (issue #428, suite) : garde ce node
+                # `{"run": _TRUE}` (issue #428, suite) : garde ce node
                 # authentiquement V0 (cheap, jamais needs_verification) — sans
                 # acceptance structurée, un V0 purement textuel est traité
                 # comme V1, ce que ce test-ci ne veut pas exercer.
-                "acceptance": ["la suite de tests passe", {"run": "true"}],
+                "acceptance": ["la suite de tests passe", {"run": _TRUE}],
                 "pins": [{"id": "out", "direction": "out", "contract": "c1"}],
             },
             {
                 "id": "b",
                 "kind": "pattern",
                 "ref": "QUA-04",
-                "acceptance": ["la suite de tests passe", {"run": "true"}],
+                "acceptance": ["la suite de tests passe", {"run": _TRUE}],
                 "pins": [{"id": "in", "direction": "in", "contract": "c1"}],
             },
         ],

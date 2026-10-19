@@ -20,6 +20,7 @@ from grimoire.memory.backends.local import LocalMemoryBackend
 from grimoire.memory.manager import MemoryManager
 from grimoire.missions import service as service_module
 from grimoire.missions.gates import GATES_FILE, GateRefusal, GateVerdict
+from grimoire.missions.review_receipt import write_receipt
 from grimoire.missions.schemas import TaskClaim, TaskState
 from grimoire.missions.service import TaskRefusedError, TaskService
 
@@ -76,6 +77,11 @@ def prouve(projet: Path, task_id: str, *, verifie: bool = True) -> None:
     )
     if verifie:
         svc.verify(pack, acceptance=(ACCEPTATION,))
+
+
+def relu(projet: Path, task_id: str) -> None:
+    """Le reçu de revue que la clôture depuis needs_verification exige (W3-01)."""
+    write_receipt(projet, task_id, "READY", reviewer_id="relecteur")
 
 
 def board_status(projet: Path, task_id: str) -> str:
@@ -150,6 +156,7 @@ def test_list_ready_claim_move_close_de_bout_en_bout(projet: Path) -> None:
 
     prouve(projet, tid)
     service.transition(tid, TaskState.NEEDS_VERIFICATION, "agent-mcp")
+    relu(projet, tid)
     ferme = service.transition(tid, TaskState.CLOSED, "agent-mcp")
     assert ferme.to_dict()["transition"] == "needs_verification → closed"
     assert board_status(projet, tid) == "accepted"
@@ -208,6 +215,7 @@ def test_sans_verdict_accepte_la_fermeture_est_refusee(projet: Path) -> None:
     service.transition(tid, TaskState.RUNNING, "a")
     prouve(projet, tid, verifie=False)
     service.transition(tid, TaskState.NEEDS_VERIFICATION, "a")
+    relu(projet, tid)
     with pytest.raises(TaskRefusedError) as refus:
         service.transition(tid, TaskState.CLOSED, "a")
     assert refus.value.to_dict()["refusals"][0]["evidence"] == "review_gate"
@@ -285,6 +293,7 @@ def _amene_a_needs_verification(projet: Path, service: TaskService, tid: str) ->
     service.transition(tid, TaskState.RUNNING, "a")
     prouve(projet, tid)
     service.transition(tid, TaskState.NEEDS_VERIFICATION, "a")
+    relu(projet, tid)
 
 
 def test_recall_refuse_une_tache_inconnue_avant_tout_calcul(projet: Path) -> None:

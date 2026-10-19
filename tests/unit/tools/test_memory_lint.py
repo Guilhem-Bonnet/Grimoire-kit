@@ -30,7 +30,7 @@ from grimoire.tools.memory_lint import (
 
 @pytest.fixture()
 def project(tmp_path: Path) -> Path:
-    (tmp_path / "project-context.yaml").write_text("project:\n  name: test\n")
+    (tmp_path / "project-context.yaml").write_text("project:\n  name: test\n", encoding="utf-8")
     (tmp_path / "_grimoire" / "_memory" / "agent-learnings").mkdir(parents=True)
     (tmp_path / "_grimoire-output").mkdir(parents=True)
     return tmp_path
@@ -125,7 +125,7 @@ class TestNlpHelpers:
 class TestParsing:
     def test_parse_markdown(self, tmp_path: Path) -> None:
         f = tmp_path / "test.md"
-        f.write_text("# Title\n- [2024-01-15] Entry one\n- [2024-02-01] Entry two\n")
+        f.write_text("# Title\n- [2024-01-15] Entry one\n- [2024-02-01] Entry two\n", encoding="utf-8")
         entries = _parse_markdown(f)
         assert len(entries) == 2
         assert entries[0] == ("2024-01-15", "[2024-01-15] Entry one")
@@ -137,7 +137,7 @@ class TestParsing:
 
     def test_parse_trace(self, tmp_path: Path) -> None:
         f = tmp_path / "trace.md"
-        f.write_text("[2024-03-01 10:00] [INFO] [analyst] Started analysis\n")
+        f.write_text("[2024-03-01 10:00] [INFO] [analyst] Started analysis\n", encoding="utf-8")
         entries = _parse_trace(f)
         assert len(entries) == 1
         assert entries[0][0] == "2024-03-01"
@@ -148,14 +148,14 @@ class TestParsing:
 
     def test_parse_jsonl(self, tmp_path: Path) -> None:
         f = tmp_path / "data.jsonl"
-        f.write_text('{"timestamp":"2024-01-01T00:00:00","title":"Test entry"}\n')
+        f.write_text('{"timestamp":"2024-01-01T00:00:00","title":"Test entry"}\n', encoding="utf-8")
         entries = _parse_jsonl(f)
         assert len(entries) == 1
         assert entries[0] == ("2024-01-01", "Test entry")
 
     def test_parse_jsonl_invalid(self, tmp_path: Path) -> None:
         f = tmp_path / "bad.jsonl"
-        f.write_text("not json\n")
+        f.write_text("not json\n", encoding="utf-8")
         entries = _parse_jsonl(f)
         assert entries == []
 
@@ -169,28 +169,28 @@ class TestCollectMemoryFiles:
 
     def test_finds_learnings(self, project: Path) -> None:
         learn = project / "_grimoire" / "_memory" / "agent-learnings" / "dev.md"
-        learn.write_text("# Dev Learnings\n- [2024-06-01] Learned TDD\n")
+        learn.write_text("# Dev Learnings\n- [2024-06-01] Learned TDD\n", encoding="utf-8")
         files = collect_memory_files(project)
         assert len(files) == 1
         assert files[0].kind == "learnings"
 
     def test_finds_decisions(self, project: Path) -> None:
         dec = project / "_grimoire" / "_memory" / "decisions-log.md"
-        dec.write_text("# Decisions\n- [2024-01-01] Use Python 3.12\n")
+        dec.write_text("# Decisions\n- [2024-01-01] Use Python 3.12\n", encoding="utf-8")
         files = collect_memory_files(project)
         assert len(files) == 1
         assert files[0].kind == "decisions"
 
     def test_finds_trace(self, project: Path) -> None:
         trace = project / "_grimoire-output" / "Grimoire_TRACE.md"
-        trace.write_text("[2024-03-01 10:00] [INFO] [analyst] Hello\n")
+        trace.write_text("[2024-03-01 10:00] [INFO] [analyst] Hello\n", encoding="utf-8")
         files = collect_memory_files(project)
         assert len(files) == 1
         assert files[0].kind == "trace"
 
     def test_finds_jsonl(self, project: Path) -> None:
         cc = project / "_grimoire" / "_memory" / "cc-feedback.jsonl"
-        cc.write_text('{"timestamp":"2024-01-01","title":"Feedback"}\n')
+        cc.write_text('{"timestamp":"2024-01-01","title":"Feedback"}\n', encoding="utf-8")
         files = collect_memory_files(project)
         assert len(files) == 1
         assert files[0].kind == "cc-feedback"
@@ -359,7 +359,7 @@ class TestMemoryLint:
 
     def test_with_learnings(self, project: Path) -> None:
         learn = project / "_grimoire" / "_memory" / "agent-learnings" / "dev.md"
-        learn.write_text("# Dev\n- [2024-06-01] Learned TDD patterns\n")
+        learn.write_text("# Dev\n- [2024-06-01] Learned TDD patterns\n", encoding="utf-8")
         ml = MemoryLint(project)
         report = ml.run()
         assert report.files_scanned == 1
@@ -368,9 +368,9 @@ class TestMemoryLint:
     def test_issues_sorted(self, project: Path) -> None:
         # Create files that produce both errors and warnings
         learn = project / "_grimoire" / "_memory" / "agent-learnings" / "dev.md"
-        learn.write_text("# Dev\n- [2024-01-01] TDD approach adopted and validated for backend\n")
+        learn.write_text("# Dev\n- [2024-01-01] TDD approach adopted and validated for backend\n", encoding="utf-8")
         dec = project / "_grimoire" / "_memory" / "decisions-log.md"
-        dec.write_text("# Dec\n- [2024-01-02] TDD approach rejected and abandoned for backend\n")
+        dec.write_text("# Dec\n- [2024-01-02] TDD approach rejected and abandoned for backend\n", encoding="utf-8")
         ml = MemoryLint(project)
         report = ml.run()
         if len(report.issues) >= 2:

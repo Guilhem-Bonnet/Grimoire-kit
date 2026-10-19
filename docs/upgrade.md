@@ -1,3 +1,7 @@
+---
+audience: utilisateur
+---
+
 # Mettre à jour un projet (`grimoire upgrade-flow`)
 
 Issue [#490](https://github.com/Guilhem-Bonnet/Grimoire-kit/issues/490). `grimoire up` régénère le tier
@@ -138,7 +142,11 @@ aussi.
 - **Le checkpoint `destructive`** : présent dans le blueprint précisément pour qu'aucun exécuteur —
   humain via `--executor interactive`, cascade via `--executor dispatch` — ne puisse faire disparaître
   quoi que ce soit sans une décision nommée. `grimoire upgrade-flow run` ne soumet jamais de
-  `checkpoint_decision` à sa place.
+  `checkpoint_decision` à sa place. Le nœud est déclaré destructif (`config.checkpoint.destructive`) :
+  un `approve` n'y passe qu'attesté, c'est-à-dire soumis depuis la session d'hôte qui a présenté le
+  checkpoint, après un tour humain de cette session. Sinon le run reste `blocked` avec le motif
+  `awaiting_human`. Le kit ne peut pas prouver davantage : une garde de chemin se contourne par du code
+  arbitraire, l'attestation rend la falsification plus coûteuse et visible, pas impossible.
 - **Une conversion d'override qui fusionnerait du texte** : refusée nommément (voir ci-dessus), avec le
   diff exact dans le message de refus.
 - **`--dry-run` combiné à `--executor dispatch`** : refusé — la cascade de dispatch n'a pas de notion

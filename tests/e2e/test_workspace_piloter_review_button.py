@@ -124,7 +124,7 @@ def _init_project(root: Path, name: str) -> subprocess.CompletedProcess[str]:
     env["NO_COLOR"] = "1"
     return subprocess.run(
         [sys.executable, "-m", "grimoire", "init", ".", "-y", "--name", name],
-        cwd=str(root), env=env, capture_output=True, text=True, check=False, timeout=180,
+        cwd=str(root), env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", check=False, timeout=180,
     )
 
 
@@ -138,7 +138,7 @@ def _serve(root: Path, tmp_path_factory: pytest.TempPathFactory, label: str) -> 
     env["GRIMOIRE_COCKPIT_HOME"] = str(cockpit_home)
     added = subprocess.run(
         [sys.executable, "-m", "grimoire", "cockpit", "add", str(root)],
-        env=env, capture_output=True, text=True, check=False, timeout=60,
+        env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", check=False, timeout=60,
     )
     registry_path = cockpit_home / "registry.json"
     if not registry_path.is_file():
@@ -186,7 +186,7 @@ def served_pending_proposal_project(tmp_path_factory: pytest.TempPathFactory) ->
     env["GRIMOIRE_NO_COCKPIT"] = "1"
     write = subprocess.run(
         [sys.executable, "-c", _WRITE_PENDING_PROPOSAL, str(root)],
-        cwd=str(root), env=env, capture_output=True, text=True, check=False, timeout=60,
+        cwd=str(root), env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", check=False, timeout=60,
     )
     if write.returncode != 0:
         pytest.skip(f"écriture de la proposition impossible : {write.stderr[-800:]}")
@@ -204,7 +204,7 @@ def served_checkpoint_project(tmp_path_factory: pytest.TempPathFactory) -> Itera
     env["GRIMOIRE_NO_COCKPIT"] = "1"
     fabricate = subprocess.run(
         [sys.executable, "-c", _FABRICATE_CHECKPOINTED_RUN, str(root)],
-        cwd=str(root), env=env, capture_output=True, text=True, check=False, timeout=60,
+        cwd=str(root), env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", check=False, timeout=60,
     )
     if fabricate.returncode != 0:
         pytest.skip(f"fabrication du run checkpointé impossible : {fabricate.stderr[-800:]}")

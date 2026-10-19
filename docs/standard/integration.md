@@ -1,3 +1,7 @@
+---
+audience: utilisateur
+---
+
 # Intégration du standard agentique
 
 Grimoire Kit ne remplace pas le corpus normatif agentique. Il sert de **kit consommable** pour appliquer ce corpus dans un projet réel : profils, templates, registres, limites d'outils, preuves et déclarations de conformité.
@@ -94,7 +98,15 @@ borné, `open_delegation: forbidden`), AG-AUD-001 par la section `Traceability`
 de `compliance-declaration.md`.
 
 `grimoire standard verify` les lit tous. Un registre vierge est un
-avertissement : il attend d'être rempli. Ce qui est une erreur, c'est une
+avertissement : il attend d'être rempli — sauf le claim-ledger en `governed` et
+`production`, où un registre vierge, vidé ou absent est une erreur dès `review`
+(exception : une tâche classée V0 hors `governed` n'a pas à le remplir, lot I
+de #582 ; `grimoire standard verify` et le gate appliquent la même exception).
+Une ligne sans affirmation, ou dont l'identifiant n'est pas `CL-NNN`, est
+signalée mal formée, mais ses contradictions sont tout de même contrôlées.
+Pendant `in_progress`, une ligne de claim mal formée ou hors
+vocabulaire reste un avertissement ; seuls « prouvé » sans preuve et « utiliser »
+sans « prouvé » bloquent. Ce qui est une erreur, c'est une
 déclaration fausse — un critère `passé` sans preuve, un livrable `accepté`
 sans validateur, une source `superseded` sans remplaçante, un `on_critical`
 qui n'est ni `stop` ni `reduce_autonomy`, une délégation ouverte — et, en
@@ -192,6 +204,14 @@ plancher de données) :
 - `FAIL` à la place du `WARN` ci-dessus, uniquement si `enforce: true` — un
   dépassement reste silencieux (`WARN`) par défaut, jamais bloquant sans
   décision explicite du projet.
+- `WARN` « non évalué » quand des appels dispatchés n'ont pas de coût
+  (`unpriced_calls > 0`, fournisseur muet) et que le minimum connu ne dépasse
+  pas encore le SLO : le SLO n'est ni tenu ni violé. C'est un `WARN` même avec
+  `enforce: true` — `enforce` ne durcit qu'un dépassement prouvé. Un minimum
+  déjà au-dessus du SLO (« au moins X ») compte, lui, comme un dépassement.
+  Les traces `grimoire.trace.v1` écrivaient `0.0` sans distinguer « gratuit »
+  d'« inconnu » : elles sont relues comme inconnues, donc comptées dans
+  `unpriced_calls` tant qu'elles restent dans le journal.
 
 Le cockpit n'affiche pas encore ces chiffres — seuls `grimoire dispatch
 stats` et `grimoire standard verify`/`gate` les exposent pour l'instant.
@@ -496,6 +516,21 @@ promouvra `acceptance.passed_without_test_run` (et `acceptance.test_run_stale`)
 en erreur bloquante pour les profils `governed`/`production`, le temps que
 les projets déjà gouvernés adoptent `gate run-tests` (ou une intégration CI
 équivalente) dans leur boucle de clôture de tâche.
+
+**Couverture critère → preuve.** Le dossier d'acceptance relève aussi les
+critères sans preuve et les preuves sans critère
+(`standard_checks/criterion_coverage.py`) :
+
+- `acceptance.uncovered` : un critère sans preuve une fois le livrable accepté
+  (décision `accepté`, tâche `accepted`/`released`, ou gate évalué vers l'un de
+  ces états, par exemple `gate check --target-state accepted`), ou un critère de
+  `acceptance_criteria` du tableau de tâches qui n'a aucune ligne dans le
+  dossier (reconnu par son identifiant d'ordre `AC-NNN` ou par son texte).
+  Erreur en `governed`/`production` dès que le livrable est accepté ou en passe
+  de l'être ; avertissement avant (tâche en cours) et dans les autres profils. Un critère
+  `à vérifier` avant la décision, ou `échoué`, n'est pas relevé ;
+- `evidence.orphan` : une ligne qui cite une preuve sans dire quel critère
+  elle démontre (avertissement).
 
 ## Gate auto-suffisant : chemin, remède, scaffold, tests intégrés
 

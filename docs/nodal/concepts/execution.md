@@ -1,3 +1,7 @@
+---
+audience: utilisateur
+---
+
 # Ce que le graphe fait, et ce qu'il ne fait pas
 
 C'est la première chose à comprendre, et celle qui surprend : **le Studio

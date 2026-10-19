@@ -894,6 +894,8 @@ def test_gate_check_strict_exits_2_for_every_profile(tmp_path: Path, profile_id:
             {
                 "schema", "ok", "profile", "score", "threshold", "warnings",
                 "errors", "dimensions", "output_path",
+                # W6-08 : règles de pack comptées à part (ajout, le schéma reste v1).
+                "rules_enforced", "rules_advisory", "rules_failing", "rules_unevaluated", "rules_unclassified",
             },
         ),
         (
@@ -1150,6 +1152,17 @@ def test_gate_check_surfaces_an_unproven_passed_criterion_without_failing(tmp_pa
         encoding="utf-8",
     )
 
+    ledger = tmp_path / "_grimoire-output/evidence/bootstrap/claim-ledger.md"
+    ledger.write_text(
+        ledger.read_text(encoding="utf-8")
+        .replace(
+            "| CL-001 |  | fait |  | hypothèse | faible | vérifier |",
+            "| CL-001 | a | fait | src/x | prouvé | haute | utiliser |",
+        )
+        .replace("| Affirmations bloquantes non prouvées |  |", "| Affirmations bloquantes non prouvées | 0 |"),
+        encoding="utf-8",
+    )
+
     result = check_evidence_gates(tmp_path, task_id="bootstrap", target_state="accepted")
 
     assert any(check.id == "acceptance.passed_without_test_run" for check in result.checks)
@@ -1338,7 +1351,13 @@ def _emitted_check_ids() -> set[str]:
                # sans ces trois modules, le registre certifierait moins que ce que le kit émet.
                core / "standard_checks" / "gate_test_run.py",
                core / "standard_checks" / "claim_ledger_verify.py",
-               core / "standard_checks" / "no_tests_collected.py"]
+               core / "standard_checks" / "no_tests_collected.py",
+               core / "standard_checks" / "gate_codegraph.py",
+               core / "standard_checks" / "criterion_coverage.py",
+               # W4-05 : dispatch.cost_slo extrait de verifiers.py (ratchet de taille).
+               core / "standard_checks" / "dispatch_cost_slo.py",
+               # W6-03 : règles parsables par couche, extrait de verifiers.py (ratchet de taille).
+               core / "standard_checks" / "rules_check.py"]
     trees = {path: ast.parse(path.read_text(encoding="utf-8")) for path in
              [*modules, core / "standard_checks" / "base.py"]}
 
@@ -1627,6 +1646,7 @@ def test_cli_gate_check_strict_runs_the_tests_itself_and_reuses_a_fresh_run(tmp_
     recorded = json.loads((tmp_path / f"_grimoire-output/evidence/{task_id}/test-run.json").read_text(encoding="utf-8"))
     assert recorded["ok"] is True and "sys.exit(0)" in recorded["command"]
     assert second["test_run"]["ran"] is False and second["test_run"]["reason"] == "fresh_run"
+    assert first["test_run"]["reused"] is False and second["test_run"]["reused"] is True, "W3-04 : reused exposé"
 
 
 def test_cli_gate_check_strict_fails_only_on_a_red_fresh_run(tmp_path: Path) -> None:
@@ -1683,7 +1703,7 @@ def test_gate_check_strict_owes_no_run_before_the_task_starts(tmp_path: Path) ->
     result = json.loads(runner.invoke(app, ["-o", "json", "standard", "gate", "check", str(tmp_path), "--task-id", task.id, "--strict"]).output)
 
     assert result["ok"] is True and result["test_run"] == {
-        "ran": False, "reason": "state_owes_no_run", "command": "", "ok": None, "exit_code": None, "path": None,
+        "ran": False, "reason": "state_owes_no_run", "reused": False, "command": "", "ok": None, "exit_code": None, "path": None,
     }
 
 
@@ -1804,7 +1824,7 @@ def test_cli_gate_check_strict_does_not_rerun_a_matching_red_run(tmp_path: Path,
     second = json.loads(runner.invoke(app, argv).output)
 
     assert first["test_run"]["ran"] is True and first["test_run"]["ok"] is False
-    assert second["test_run"] == {**first["test_run"], "ran": False, "reason": "fresh_run"}
+    assert second["test_run"] == {**first["test_run"], "ran": False, "reason": "fresh_run", "reused": True}
     assert len(calls) == 1, "run rouge identique : une seule exécution, pas deux"
 
     rerun = json.loads(runner.invoke(app, [*argv, "--rerun"]).output)
@@ -1845,14 +1865,16 @@ def test_cli_gate_check_strict_does_not_rerun_a_matching_nothing_collected_run(
 def test_cli_gate_check_v0_task_is_ok_with_no_content_warnings_at_review(tmp_path: Path) -> None:
     """I-3 rouge-avant : une tâche V0 verte, en revue, portait `acceptance.decision_pending` et `claims.empty` ; plus après."""
     from grimoire.core.standard_task_scaffold import scaffold_task_artifacts
-    from grimoire.missions.schemas import TaskState
+    from grimoire.missions.schemas import TaskCheck, TaskState
     from grimoire.missions.service import TaskService
 
     setup_standard_profile(tmp_path, profile_id="starter")
     (tmp_path / "project-context.yaml").write_text(_test_runner_context(0), encoding="utf-8")
     service = TaskService(tmp_path)
     mission = service.ledger.create_mission(title="Travaux", origin="test")
-    task = service.ledger.create_task(mission.id, "Ajouter une fonction", acceptance=("les tests passent",))
+    task = service.ledger.create_task(
+        mission.id, "Ajouter une fonction", acceptance=("les tests passent",), checks=(TaskCheck(cmd="true"),)
+    )
     service.ledger.transition_task(task.id, TaskState.READY, actor_id="a")
     service.ledger.claim_task(task.id, "a", "local")
     service.project_board()

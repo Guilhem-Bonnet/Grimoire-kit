@@ -116,7 +116,7 @@ def _iter_source_files() -> list[Path]:
         ["git", "ls-files", "--", "*.py", "*.md"],
         cwd=ROOT,
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         check=True,
     ).stdout
     files = [ROOT / line for line in out.splitlines() if line.strip()]

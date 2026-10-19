@@ -18,13 +18,14 @@ from grimoire.core.exceptions import GrimoireConfigError
 from grimoire.hosts.capabilities import HOST_ALIASES, resolve_host
 
 #: Ordre canonique — celui de l'issue #177 et du texte d'aide `--host` du CLI.
-KNOWN_HOST_ALIASES: tuple[str, ...] = ("claude", "copilot", "gemini", "cursor", "codex")
+KNOWN_HOST_ALIASES: tuple[str, ...] = ("claude", "copilot", "gemini", "cursor", "codex", "opencode")
 
 __all__ = [
     "KNOWN_HOST_ALIASES",
     "alias_for_host",
     "detect_enabled_hosts",
     "enabled_host_ids",
+    "preserved_paths",
     "resolve_enabled_hosts",
 ]
 
@@ -48,6 +49,8 @@ def detect_enabled_hosts(project_root: Path) -> tuple[str, ...]:
         found.append("cursor")
     if (root / "AGENTS.md").is_file() and (root / ".codex").exists():
         found.append("codex")
+    if (root / ".opencode").is_dir() or (root / "opencode.json").is_file():
+        found.append("opencode")
     if not found:
         found.append("claude")
     return tuple(found)
@@ -88,3 +91,17 @@ def enabled_host_ids(project_root: Path, cfg: GrimoireConfig | None = None) -> s
         if resolved is not None:
             ids.add(resolved)
     return ids
+
+
+def preserved_paths(project_root: Path, cfg: GrimoireConfig | None = None) -> frozenset[str]:
+    """Fichiers hôtes que le projet déclare siens (``hosts.preserve``) ; vide si la config manque ou ne se lit pas.
+
+    C'est l'issue non destructive d'un conflit : le fichier reste à l'utilisateur, le kit ne le
+    réécrit pas (donc pas de ``--force``) et le dit — l'élément du kit qu'il aurait porté n'est pas livré.
+    """
+    if cfg is None:
+        try:
+            cfg = GrimoireConfig.from_yaml(project_root / "project-context.yaml")
+        except GrimoireConfigError:
+            return frozenset()
+    return frozenset(cfg.hosts.preserve)

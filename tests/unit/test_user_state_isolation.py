@@ -49,7 +49,11 @@ class TestUserHomeIsolation:
         ],
     )
     def test_every_state_root_falls_outside_the_user_home(
-        self, label: str, resolver: Callable[[], Path], real_home: Path
+        self,
+        label: str,
+        resolver: Callable[[], Path],
+        real_home: Path,
+        tmp_path_factory: pytest.TempPathFactory,
     ) -> None:
         """Aucune racine d'état ne doit se résoudre sous le vrai répertoire personnel.
 
@@ -58,7 +62,14 @@ class TestUserHomeIsolation:
         qu'elle passe par ``Path.home()``.
         """
         resolved = resolver().resolve()
-        assert real_home.resolve() not in resolved.parents, f"{label} pointe dans {real_home}"
+        # Sous Windows (et sur tout poste dont TMPDIR est sous le home), le bac à
+        # sable pytest est lui-même sous le vrai répertoire personnel : « hors du
+        # home » s'entend alors « dans le bac à sable du test », jamais dans le
+        # home lui-même.
+        sandbox = tmp_path_factory.getbasetemp().resolve()
+        assert sandbox in resolved.parents or real_home.resolve() not in resolved.parents, (
+            f"{label} pointe dans {real_home}"
+        )
 
 
 class TestCockpitRegistry:

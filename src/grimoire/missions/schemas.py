@@ -15,6 +15,8 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Any
 
+from grimoire.missions.waiting import Waiting
+
 _log = logging.getLogger(__name__)
 
 #: Durée par défaut avant qu'un claim n'expire de lui-même — assez pour une
@@ -31,6 +33,25 @@ _FINITION_VALUES = frozenset({"", "maquette", "peaufine"})
 #: informe ; ``directive`` dirige — les deux sont livrées à la session au tour
 #: suivant, seule la distinction change la formulation du rappel.
 DIRECTIVE_KINDS: tuple[str, ...] = ("comment", "directive")
+#: D'où vient une note, posé par le canal (jamais par l'appelant, issue #706) :
+#: ``human`` (cockpit local, CLI interactive), ``agent`` (MCP, hooks, sous-agents),
+#: ``unverified`` (événement antérieur au champ, ou terminal interactif sans
+#: confirmation humaine : la provenance n'est pas établie).
+ORIGIN_HUMAN = "human"
+ORIGIN_AGENT = "agent"
+ORIGIN_UNVERIFIED = "unverified"
+DIRECTIVE_ORIGINS: tuple[str, ...] = (ORIGIN_HUMAN, ORIGIN_AGENT, ORIGIN_UNVERIFIED)
+
+
+def _int_or_zero(value: Any) -> int:
+    """Epoch lu d'un ledger : entier >= 0, sinon ``0`` (absent ou illisible, jamais d'exception).
+
+    ``0`` n'est attribué à aucun claim posé par le ledger : un epoch illisible
+    (texte, booléen, négatif) ne peut donc se réclamer d'aucun titulaire.
+    """
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return 0
+    return value
 
 
 class MissionState(StrEnum):
@@ -52,6 +73,20 @@ class TaskState(StrEnum):
     FAILED = "failed"
     CLOSED = "closed"
     CANCELLED = "cancelled"
+    #: Une attente nommée (K6, issue #771) : ``MissionTask.waiting`` dit pourquoi
+    #: (``human``, ``ci``, ``quota``, ``paused``), jusqu'à quand et, pour un humain,
+    #: la question posée. Le claim est gardé (reprise sur place, même epoch) tant
+    #: que personne n'a rendu le bail.
+    WAITING = "waiting"
+    #: Jamais écrit : ce que lit un lecteur plus ancien devant un état qu'il ne
+    #: connaît pas (écrit par une version plus récente). La valeur brute reste
+    #: dans ``MissionTask.raw_status`` ; aucune transition ne part de cet état
+    #: ni n'y arrive. Épopée #705, lot K1.
+    UNKNOWN = "unknown"
+
+
+#: Les états qu'un opérateur peut viser (tout sauf le sentinelle de lecture).
+TARGETABLE_TASK_STATES: tuple[TaskState, ...] = tuple(s for s in TaskState if s is not TaskState.UNKNOWN)
 
 
 class TaskType(StrEnum):
@@ -127,6 +162,22 @@ class TaskClaim:
     #: si une commande de reprise existe (``claude --resume``), jamais une
     #: valeur devinée.
     session_host: str = ""
+    #: Version de l'hôte de la session rattachée (K3, issue #768), lue par le hook
+    #: dans le journal de l'hôte — jamais devinée. Une preuve de fencing vaut pour
+    #: la version sur laquelle elle a été capturée (``hosts.capabilities``) :
+    #: ``""`` = version inconnue, donc hôte non fencé.
+    session_host_version: str = ""
+    #: Quand la session a *explicitement* déclaré ce claim sien (``grimoire task
+    #: attach``, issue #695), ISO 8601 UTC du dernier tel rattachement. Les
+    #: sous-agents héritent du ``session_id`` de leur parent : leurs claims s'y
+    #: rattachent automatiquement ; seul ce marqueur dit laquelle des tâches
+    #: d'une session est celle que l'opérateur a désignée. ``""`` = jamais.
+    attached_explicit_at: str = ""
+    #: Jeton de fencing du bail (K2, issue #767) : croît à chaque nouveau claim
+    #: de la tâche, posé par le ledger sous son verrou — jamais par l'appelant.
+    #: Un effet porteur d'un autre epoch vient d'un titulaire périmé et il est
+    #: refusé. ``0`` = claim antérieur au fencing (aucun epoch à présenter).
+    lease_epoch: int = 0
 
     @classmethod
     def new(
@@ -181,6 +232,13 @@ class TaskClaim:
             "expires_at": self.expires_at,
             "session_id": self.session_id,
             "session_host": self.session_host,
+            # Absent tant qu'aucune version n'est connue : sérialisation inchangée.
+            **({"session_host_version": self.session_host_version} if self.session_host_version else {}),
+            # Absent tant qu'aucun attach explicite : les sérialisations
+            # existantes (board, cockpit, tests) ne changent pas.
+            **({"attached_explicit_at": self.attached_explicit_at} if self.attached_explicit_at else {}),
+            # Absent sur un claim d'avant le fencing : sa sérialisation ne change pas.
+            **({"lease_epoch": self.lease_epoch} if self.lease_epoch else {}),
         }
 
     @classmethod
@@ -192,10 +250,21 @@ class TaskClaim:
             expires_at=d.get("expires_at", ""),
             session_id=str(d.get("session_id", "") or ""),
             session_host=str(d.get("session_host", "") or ""),
+            session_host_version=str(d.get("session_host_version", "") or ""),
+            attached_explicit_at=str(d.get("attached_explicit_at", "") or ""),
+            lease_epoch=_int_or_zero(d.get("lease_epoch")),
         )
 
-    def with_session(self, session_id: str, session_host: str = "") -> TaskClaim:
-        """Le même claim, rattaché à *session_id* — une valeur, jamais une mutation."""
+    def with_session(
+        self, session_id: str, session_host: str = "", *, explicit_at: str = "", host_version: str = ""
+    ) -> TaskClaim:
+        """Le même claim, rattaché à *session_id* — une valeur, jamais une mutation.
+
+        *explicit_at* date un rattachement explicite (``task attach``) ; sans lui,
+        un rattachement automatique conserve la date du dernier explicite.
+        *host_version* (K3) : la version de l'hôte, ou celle déjà connue de la même
+        session si l'événement n'en porte pas.
+        """
         return TaskClaim(
             actor_id=self.actor_id,
             host_id=self.host_id,
@@ -203,6 +272,64 @@ class TaskClaim:
             expires_at=self.expires_at,
             session_id=session_id,
             session_host=session_host,
+            session_host_version=host_version or (self.session_host_version if session_id == self.session_id else ""),
+            attached_explicit_at=explicit_at or self.attached_explicit_at,
+            lease_epoch=self.lease_epoch,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class TaskCheck:
+    """Une commande déclarée dont le code de sortie rend le verdict (issue #772, D9).
+
+    C'est la seule chose qui autorise une tâche à être V0 : un critère écrit
+    « les tests passent » n'exécute rien. ``cmd`` est lancée par
+    ``grimoire task verify`` dans la racine du projet, comme le ``--check`` de
+    ``task dispatch`` (même confiance : c'est l'auteur de la tâche qui l'écrit) ;
+    ``expect_exit`` est le code attendu (0 par défaut) ; ``expect_stdout_contains``
+    (sous-chaîne exigée de la sortie standard) et ``timeout_s`` (délai propre à la
+    commande) reprennent ce que déclare une acceptance structurée de flow : sans
+    eux, un exit 0 affichant « 3 FAILED » passerait pour un vert.
+    """
+
+    cmd: str
+    expect_exit: int = 0
+    expect_stdout_contains: str | None = None
+    timeout_s: float | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.cmd, str) or not self.cmd.strip():
+            raise ValueError("TaskCheck.cmd : commande vide")
+        if isinstance(self.expect_exit, bool) or not isinstance(self.expect_exit, int):
+            raise ValueError(f"TaskCheck.expect_exit : entier attendu, reçu {self.expect_exit!r}")
+        if self.expect_stdout_contains is not None and not isinstance(self.expect_stdout_contains, str):
+            raise ValueError(
+                f"TaskCheck.expect_stdout_contains : chaîne attendue, reçu {self.expect_stdout_contains!r}"
+            )
+        if self.timeout_s is not None and (
+            isinstance(self.timeout_s, bool)
+            or not isinstance(self.timeout_s, (int, float))
+            or not self.timeout_s > 0
+        ):
+            raise ValueError(f"TaskCheck.timeout_s : nombre strictement positif attendu, reçu {self.timeout_s!r}")
+
+    def to_dict(self) -> dict[str, Any]:
+        # Les champs optionnels ne sont écrits que renseignés : une ligne de
+        # ledger antérieure garde sa forme et se relit à l'identique.
+        data: dict[str, Any] = {"cmd": self.cmd, "expect_exit": self.expect_exit}
+        if self.expect_stdout_contains is not None:
+            data["expect_stdout_contains"] = self.expect_stdout_contains
+        if self.timeout_s is not None:
+            data["timeout_s"] = self.timeout_s
+        return data
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> TaskCheck:
+        return cls(
+            cmd=d["cmd"],
+            expect_exit=d.get("expect_exit", 0),
+            expect_stdout_contains=d.get("expect_stdout_contains"),
+            timeout_s=d.get("timeout_s"),
         )
 
 
@@ -223,8 +350,19 @@ class TaskDirective:
     kind: str = "comment"
     delivered_at: str = ""
     acknowledged_at: str = ""
+    origin: str = ORIGIN_AGENT
+    """Le canal qui a posé la note. Seule l'origine ``human`` fait autorité ; le
+    défaut est la plus prudente, et un événement sans champ est ``unverified``."""
+
+    @property
+    def is_human(self) -> bool:
+        return self.origin == ORIGIN_HUMAN
 
     def __post_init__(self) -> None:
+        if self.origin not in DIRECTIVE_ORIGINS:
+            accepted = ", ".join(repr(v) for v in DIRECTIVE_ORIGINS)
+            msg = f"origin invalide : {self.origin!r}. Valeurs acceptées : {accepted}."
+            raise ValueError(msg)
         if self.kind not in DIRECTIVE_KINDS:
             accepted = ", ".join(repr(v) for v in DIRECTIVE_KINDS)
             msg = f"kind invalide : {self.kind!r}. Valeurs acceptées : {accepted}."
@@ -247,6 +385,7 @@ class TaskDirective:
             "kind": self.kind,
             "delivered_at": self.delivered_at,
             "acknowledged_at": self.acknowledged_at,
+            "origin": self.origin,
         }
 
     @classmethod
@@ -259,6 +398,7 @@ class TaskDirective:
             kind=d.get("kind", "comment"),
             delivered_at=d.get("delivered_at", ""),
             acknowledged_at=d.get("acknowledged_at", ""),
+            origin=d.get("origin", ORIGIN_UNVERIFIED),
         )
 
 
@@ -361,6 +501,40 @@ class MissionTask:
     #: par ``task.directive_delivered`` / ``task.directive_acknowledged`` au
     #: rejeu du ledger — jamais posé à la création.
     directives: tuple[TaskDirective, ...] = ()
+    #: Risques acceptés en l'état (W2-10) : un ``accept_as_is`` de checkpoint de
+    #: flow lié à cette tâche. Alimenté au rejeu par ``task.risk_accepted``,
+    #: jamais posé à la création. ``classify`` le lit : c'est ce qui fait de la
+    #: remontée V0 -> V1 un fait de la tâche, vu par toute surface qui décide,
+    #: et non un affichage propre à une commande.
+    accepted_risks: tuple[dict[str, Any], ...] = ()
+    #: Valeur brute de ``status`` quand ce lecteur ne la connaît pas
+    #: (``status is TaskState.UNKNOWN``) ; ``""`` sinon. Réécrite telle quelle
+    #: par ``to_dict`` : relire puis réécrire ne perd pas l'état d'origine.
+    raw_status: str = ""
+    #: L'attente nommée quand ``status is TaskState.WAITING`` (K6) ; ``None`` sinon.
+    #: Posée par la transition vers ``waiting``, effacée par toute autre.
+    waiting: Waiting | None = None
+
+    @property
+    def is_unknown_state(self) -> bool:
+        return self.status is TaskState.UNKNOWN
+
+    @property
+    def status_label(self) -> str:
+        """L'état à afficher : la valeur brute inconnue, jamais un état voisin."""
+        if self.status is TaskState.UNKNOWN:
+            return f"inconnu ({self.raw_status})" if self.raw_status else "inconnu"
+        return self.status.value
+
+    #: Commandes déclarées dont le code de sortie rend le verdict (issue #772).
+    #: Sans elles, ``classify`` ne rend jamais V0 : un vocabulaire mécanique
+    #: sans commande à lancer n'est qu'une promesse.
+    checks: tuple[TaskCheck, ...] = ()
+    #: Profondeur de test exigée à la fermeture (W6-01) : ``floor``, ``standard``
+    #: ou ``strict`` ; ``""`` = aucune exigence. Gardée telle quelle, jamais
+    #: validée à la lecture : une valeur inconnue (écrite par une version plus
+    #: récente) se relit, et c'est le gate qui la refuse.
+    test_depth: str = ""
 
     @property
     def pending_directives(self) -> tuple[TaskDirective, ...]:
@@ -385,7 +559,7 @@ class MissionTask:
             "mission_id": self.mission_id,
             "title": self.title,
             "description": self.description,
-            "status": self.status.value,
+            "status": self.raw_status if self.status is TaskState.UNKNOWN and self.raw_status else self.status.value,
             "type": self.type.value,
             "risk_profile": self.risk_profile.value,
             "surface": self.surface,
@@ -410,16 +584,31 @@ class MissionTask:
             d["extra"] = dict(self.extra)
         if self.directives:
             d["directives"] = [directive.to_dict() for directive in self.directives]
+        if self.accepted_risks:
+            d["accepted_risks"] = [dict(risk) for risk in self.accepted_risks]
+        if self.checks:
+            d["checks"] = [check.to_dict() for check in self.checks]
+        if self.waiting is not None:
+            d["waiting"] = self.waiting.to_dict()
+        if self.test_depth:
+            d["test_depth"] = self.test_depth
         return d
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> MissionTask:
         claim = TaskClaim.from_dict(d["claim"]) if d.get("claim") else None
+        raw_status = str(d["status"])
+        try:
+            status = TaskState(raw_status)
+        except ValueError:
+            # État écrit par une version plus récente : on le garde tel quel,
+            # affiché « inconnu » et figé, au lieu de rendre le ledger illisible.
+            status = TaskState.UNKNOWN
         return cls(
             id=d["id"],
             mission_id=d["mission_id"],
             title=d["title"],
-            status=TaskState(d["status"]),
+            status=status,
             type=TaskType(d["type"]),
             risk_profile=RiskProfile(d["risk_profile"]),
             acceptance=tuple(d.get("acceptance", [])),
@@ -438,6 +627,11 @@ class MissionTask:
             remediation_ref=d.get("remediation_ref", ""),
             extra=dict(d.get("extra", {})),
             directives=tuple(TaskDirective.from_dict(item) for item in d.get("directives", [])),
+            accepted_risks=tuple(dict(risk) for risk in d.get("accepted_risks", [])),
+            raw_status=raw_status if status is TaskState.UNKNOWN else "",
+            checks=tuple(TaskCheck.from_dict(c) for c in d.get("checks", [])),
+            waiting=Waiting.from_dict(d["waiting"]) if isinstance(d.get("waiting"), dict) else None,
+            test_depth=str(d.get("test_depth", "") or ""),
         )
 
 

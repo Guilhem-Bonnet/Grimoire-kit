@@ -1,0 +1,76 @@
+{
+  "host": "opencode",
+  "host_version": "1.17.11",
+  "captured_on": "2026-10-17",
+  "capabilities": {
+    "pretooluse_deny": {
+      "status": "verified",
+      "fixtures": [
+        "opencode/01-pretooluse-control-allow.json",
+        "opencode/01-pretooluse-deny-throw.json"
+      ],
+      "channel": "plugin .opencode/plugin : le hook tool.execute.before lève une Error",
+      "note": "Avec refus : l'outil ne s'exécute pas (fichier absent), l'agent reçoit le motif dans un état d'outil en erreur ; témoin sans refus : fichier créé. Le plugin n'est pas observé sur les sous-agents."
+    },
+    "session_end": {
+      "status": "unverified",
+      "fixtures": [],
+      "channel": "",
+      "note": "Non vérifié : aucune capture de opencode sur ce point (sonde du 2026-10-17 limitée à pretooluse_deny, avec un fournisseur local factice)."
+    },
+    "quota_signal": {
+      "status": "unverified",
+      "fixtures": [],
+      "channel": "",
+      "note": "Non vérifié : aucune capture de opencode sur ce point (sonde du 2026-10-17 limitée à pretooluse_deny, avec un fournisseur local factice)."
+    },
+    "liveness_probe": {
+      "status": "unverified",
+      "fixtures": [],
+      "channel": "",
+      "note": "Non vérifié : aucune capture de opencode sur ce point (sonde du 2026-10-17 limitée à pretooluse_deny, avec un fournisseur local factice)."
+    },
+    "subagent_model": {
+      "status": "unverified",
+      "fixtures": [],
+      "channel": "",
+      "note": "Non vérifié : aucune capture de opencode sur ce point (sonde du 2026-10-17 limitée à pretooluse_deny, avec un fournisseur local factice)."
+    },
+    "resume_after_quota": {
+      "status": "unverified",
+      "fixtures": [],
+      "channel": "",
+      "note": "Non vérifié : aucune capture de opencode sur ce point (sonde du 2026-10-17 limitée à pretooluse_deny, avec un fournisseur local factice)."
+    },
+    "bg_workspace_trust": {
+      "status": "unverified",
+      "fixtures": [],
+      "channel": "",
+      "note": "Non vérifié : aucune capture de opencode sur ce point (sonde du 2026-10-17 limitée à pretooluse_deny, avec un fournisseur local factice)."
+    },
+    "bg_cost_source": {
+      "status": "unverified",
+      "fixtures": [],
+      "channel": "",
+      "note": "Non vérifié : aucune capture de opencode sur ce point (sonde du 2026-10-17 limitée à pretooluse_deny, avec un fournisseur local factice)."
+    },
+    "bg_wake": {
+      "status": "unverified",
+      "fixtures": [],
+      "channel": "",
+      "note": "Non vérifié : aucune capture de opencode sur ce point (sonde du 2026-10-17 limitée à pretooluse_deny, avec un fournisseur local factice)."
+    },
+    "local_token_usage": {
+      "status": "unverified",
+      "fixtures": [],
+      "channel": "",
+      "note": "Non vérifié : aucune capture de opencode sur ce point (sonde du 2026-10-17 limitée à pretooluse_deny, avec un fournisseur local factice)."
+    },
+    "systemd_user_linger": {
+      "status": "unverified",
+      "fixtures": [],
+      "channel": "",
+      "note": "Non vérifié : aucune capture de opencode sur ce point (sonde du 2026-10-17 limitée à pretooluse_deny, avec un fournisseur local factice)."
+    }
+  }
+}

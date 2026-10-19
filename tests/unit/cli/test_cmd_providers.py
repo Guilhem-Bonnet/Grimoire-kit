@@ -9,11 +9,20 @@ fournisseur du prochain choix.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from grimoire.cli.app import app
+
+pytestmark = pytest.mark.covers(
+    "cli:providers audit",
+    "cli:providers cooldown",
+    "cli:providers history",
+    "cli:providers status",
+)
 
 runner = CliRunner()
 STANDARD = Path("_grimoire/standard")
@@ -152,6 +161,12 @@ def test_status_never_lists_memory_or_source_assist_cooldown_ids(tmp_path: Path)
 # ── `grimoire providers audit` (issue #330) ───────────────────────────────
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : fabrique un exécutable factice (script shell sans extension .exe/.cmd, bit x) que Windows ne lance pas par son nom"
+    ),
+)
 def test_audit_json_marks_missing_executable_unavailable(tmp_path: Path, monkeypatch) -> None:
     root = _project(tmp_path)
     bin_dir = tmp_path / "bin"

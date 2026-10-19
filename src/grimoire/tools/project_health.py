@@ -20,6 +20,7 @@ Les trois réponses viennent de faits sur disque, jamais d'une estimation :
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from datetime import UTC, datetime
 from functools import lru_cache
@@ -176,13 +177,59 @@ def project_tool_version(project_root: Path) -> dict[str, Any]:
     return {"version": version, "source": str(binary)}
 
 
-def _version_key(version: str) -> tuple[int, ...]:
-    """Ordre de version tolérant : ce qui n'est pas numérique passe en dernier."""
-    parts: list[int] = []
-    for chunk in str(version).split("."):
-        digits = "".join(c for c in chunk if c.isdigit())
-        parts.append(int(digits) if digits else 0)
-    return tuple(parts) or (0,)
+#: Rang d'une pré-version, sous celui d'une version stable (``_RANK_FINAL``).
+#: Un suffixe inconnu (``-foo``) compte comme une pré-version : en SemVer comme
+#: en PEP 440, un suffixe n'élève jamais une version au-dessus de sa stable.
+_RANK_PRE_UNKNOWN = 0
+_RANK_PRE = {
+    "dev": 0,
+    "a": 1,
+    "alpha": 1,
+    "b": 2,
+    "beta": 2,
+    "c": 3,
+    "rc": 3,
+    "pre": 3,
+    "preview": 3,
+}
+_RANK_FINAL = 4
+_RANK_POST = 5
+
+#: ``X.Y.Z`` puis, facultativement, un suffixe de pré-version / post-version
+#: (``-rc1``, ``rc1``, ``.rc.1``, ``-beta.2``, ``.post1``) ; ``v`` initial et
+#: métadonnée ``+build`` tolérés. Les graphies ``3.63.0-rc1`` (celle de
+#: ``make release``) et ``3.63.0rc1`` (celle que PEP 440 normalise) donnent la
+#: même clé.
+_VERSION_RE = re.compile(
+    r"^v?(?P<release>\d+(?:\.\d+)*)"
+    r"(?:[-._]?(?P<tag>[A-Za-z]+)[-._]?(?P<num>\d*))?",
+)
+
+
+def _version_key(version: str) -> tuple[tuple[int, ...], int, int]:
+    """Clé d'ordre de version, tolérante : jamais d'exception.
+
+    Les pré-versions sont placées sous leur version stable
+    (``3.63.0-rc1 < 3.63.0``) et au-dessus de la précédente
+    (``3.62.9 < 3.63.0-rc1``) : le suffixe n'est plus avalé dans le dernier
+    champ numérique. Zéros terminaux ignorés (``3.63 == 3.63.0``). Une chaîne
+    qui ne commence pas par un numéro (vide, ``dev``) passe en tout premier.
+    """
+    match = _VERSION_RE.match(str(version).strip())
+    if match is None:
+        return ((), _RANK_FINAL, 0)
+    release = [int(chunk) for chunk in match["release"].split(".")]
+    while release and release[-1] == 0:
+        release.pop()
+    tag = (match["tag"] or "").lower()
+    number = int(match["num"]) if match["num"] else 0
+    if not tag:
+        rank = _RANK_FINAL
+    elif tag in ("post", "rev", "r"):
+        rank = _RANK_POST
+    else:
+        rank = _RANK_PRE.get(tag, _RANK_PRE_UNKNOWN)
+    return (tuple(release), rank, number)
 
 
 @lru_cache(maxsize=1)
@@ -587,7 +634,7 @@ def commits_total(project_root: Path) -> int | None:
             ["git", "rev-list", "--count", "HEAD"],
             cwd=project_root,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=_GIT_TIMEOUT_S,
             check=False,
         )

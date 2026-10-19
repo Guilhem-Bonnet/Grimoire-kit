@@ -1,3 +1,7 @@
+---
+audience: utilisateur
+---
+
 # Les trois canaux
 
 Une edge ne dit pas seulement *quoi* circule — le contrat — mais aussi *sur

@@ -151,3 +151,88 @@ def test_pass_k_sous_le_seuil_est_un_warning(tmp_path: Path) -> None:
     assert len(checks) == 1
     assert checks[0].severity == "warning"
     assert "pass^k" in checks[0].message
+
+
+def test_cout_inconnu_n_est_jamais_un_succes_silencieux(tmp_path: Path) -> None:
+    """W1-01 (#709) : des dispatchs résolus sans coût rapporté valaient 0.0, donc « SLO tenu »."""
+    _write_registry(
+        tmp_path,
+        "dispatch_cost_slo:\n  max_cost_per_resolved_task_usd: 0.01\n  min_resolved_observations: 2\n"
+        "  min_pass_k_observations: 1\n",
+    )
+    for day in (1, 2, 3):
+        _write_dispatch_outcome_unknown_cost(tmp_path, day=day)
+
+    result = verify_standard_profile(tmp_path)
+
+    costs = [c for c in _checks(result) if "per resolved task" in c.message]
+    assert len(costs) == 1
+    assert costs[0].severity == "warning"
+    assert "not evaluated" in costs[0].message
+
+
+def test_cout_partiel_deja_au_dessus_du_slo_le_depasse_pour_de_bon(tmp_path: Path) -> None:
+    _write_registry(
+        tmp_path,
+        "dispatch_cost_slo:\n  max_cost_per_resolved_task_usd: 0.01\n  min_resolved_observations: 2\n"
+        "  min_pass_k_observations: 1\n",
+    )
+    _write_dispatch_outcome(tmp_path, day=1, resolved=True, cost=5.0, replay="a")
+    _write_dispatch_outcome_unknown_cost(tmp_path, day=2)
+
+    result = verify_standard_profile(tmp_path)
+
+    costs = [c for c in _checks(result) if "per resolved task" in c.message]
+    assert len(costs) == 1
+    assert costs[0].message.startswith("At least:")
+    assert "exceeds" in costs[0].message
+
+
+def _write_dispatch_outcome_unknown_cost(root: Path, *, day: int) -> None:
+    TraceLedger(root / TRACES_DIR).record(
+        run_id=f"dispatch-{day}",
+        workflow_instance_id="",
+        mission_id="",
+        task_id=f"GAO-{day}",
+        recipe_id="grimoire.dispatch",
+        outcome=TraceOutcome.SUCCESS,
+        started_at=f"2026-01-{day:02d}T00:00:00+00:00",
+        token_usage={"prompt_tokens": 10},  # aucun coût rapporté : ce que écrit un fournisseur muet
+        tags=[DISPATCH_OUTCOME_TAG, "class:V0", "tier:cheap", "acceptance:judged", "resolved:true", f"replay:n{day}"],
+    )
+
+
+def test_historique_v1_a_zero_avec_enforce_ne_donne_pas_d_erreur_permanente(tmp_path: Path) -> None:
+    """Revue S2 : « non évalué » reste un warning, même sous ``enforce`` (relecture v1 ``0.0`` = inconnu)."""
+    import json
+
+    _write_registry(
+        tmp_path,
+        "dispatch_cost_slo:\n  max_cost_per_resolved_task_usd: 2.0\n  min_resolved_observations: 2\n"
+        "  min_pass_k_observations: 1\n  enforce: true\n",
+    )
+    path = tmp_path / TRACES_DIR / "traces.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as fh:
+        for day in (1, 2, 3):
+            fh.write(
+                json.dumps(
+                    {
+                        "id": f"TRC-{day}", "schema_version": "grimoire.trace.v1", "run_id": f"r{day}",
+                        "workflow_instance_id": "", "mission_id": "", "task_id": f"GAO-{day}",
+                        "recipe_id": "grimoire.dispatch", "outcome": "success",
+                        "started_at": f"2026-01-0{day}T00:00:00+00:00", "token_usage": {"estimated_cost_usd": 0.0},
+                        "tags": [DISPATCH_OUTCOME_TAG, "class:V0", "tier:cheap", "acceptance:judged",
+                                 "resolved:true", f"replay:n{day}"],
+                    }
+                )
+                + "\n"
+            )
+
+    result = verify_standard_profile(tmp_path)
+
+    costs = [c for c in _checks(result) if "per resolved task" in c.message]
+    assert len(costs) == 1
+    assert "not evaluated" in costs[0].message
+    assert costs[0].severity == "warning"
+    assert all(c.severity != "error" for c in _checks(result))

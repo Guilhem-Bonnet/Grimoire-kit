@@ -186,7 +186,7 @@ class TestCLIIntegration(unittest.TestCase):
     def test_help_exits_zero(self):
         result = subprocess.run(
             [sys.executable, str(TOOL), "--help"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
         )
         self.assertEqual(result.returncode, 0)
         self.assertIn("Grimoire MCP Tools Server", result.stdout)
@@ -194,7 +194,7 @@ class TestCLIIntegration(unittest.TestCase):
     def test_version_exits_zero(self):
         result = subprocess.run(
             [sys.executable, str(TOOL), "--version"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
         )
         self.assertEqual(result.returncode, 0)
         self.assertIn("grimoire-mcp-tools", result.stdout)
@@ -202,7 +202,7 @@ class TestCLIIntegration(unittest.TestCase):
     def test_list_tools(self):
         result = subprocess.run(
             [sys.executable, str(TOOL), "--list-tools"],
-            capture_output=True, text=True, timeout=15,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15,
         )
         self.assertEqual(result.returncode, 0)
         self.assertIn("grimoire_route_request", result.stdout)
@@ -215,7 +215,7 @@ class TestCLIIntegration(unittest.TestCase):
     def test_help_shows_config_example(self):
         result = subprocess.run(
             [sys.executable, str(TOOL), "--help"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
         )
         self.assertIn("grimoire-intelligence", result.stdout)
         self.assertIn("GRIMOIRE_PROJECT_ROOT", result.stdout)
@@ -333,7 +333,7 @@ class TestAutoDiscovery(unittest.TestCase):
     def test_list_tools_cli_shows_discovered(self):
         result = subprocess.run(
             [sys.executable, str(TOOL), "--list-tools"],
-            capture_output=True, text=True, timeout=15,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15,
         )
         self.assertEqual(result.returncode, 0)
         self.assertIn("Auto-Discovered", result.stdout)
@@ -342,7 +342,7 @@ class TestAutoDiscovery(unittest.TestCase):
     def test_help_shows_discovered_count(self):
         result = subprocess.run(
             [sys.executable, str(TOOL), "--help"],
-            capture_output=True, text=True, timeout=15,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15,
         )
         self.assertEqual(result.returncode, 0)
         self.assertIn("Auto-Discovered", result.stdout)

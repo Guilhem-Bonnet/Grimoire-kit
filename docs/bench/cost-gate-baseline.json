@@ -1,0 +1,10 @@
+{
+  "schema": "grimoire.bench.cost-gate.v1",
+  "verdict": "baseline",
+  "source": "sous-lot de docs/bench/cost-gate-subset.json relu dans les 120 lignes du lot L (docs/bench/rejeu-lot-l-2026-10-02.md), aucun nouveau run. Données brutes locales, hors dépôt : _scratch/bench-l/workspace/state/results.jsonl",
+  "ratio_pct": 118.42661718122973,
+  "median_cost_usd_resolved": {"nu": 0.1684536, "kit-gov": 0.1994939},
+  "n_runs_per_arm": 12,
+  "models": ["claude-haiku-4-5-20251001", "claude-opus-5-5"],
+  "note": "le 124 % du lot L porte sur les 20 tâches ; le sous-lot de 4 tâches donne 118,4 % sur les mêmes lignes. La base est le sous-lot, pas le lot entier."
+}

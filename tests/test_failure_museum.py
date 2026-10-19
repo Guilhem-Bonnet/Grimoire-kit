@@ -314,7 +314,7 @@ class TestCLIIntegration(unittest.TestCase):
     def test_version(self):
         r = subprocess.run(
             [sys.executable, str(TOOL), "--version"],
-            capture_output=True, text=True, timeout=30
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30
         )
         self.assertEqual(r.returncode, 0)
         self.assertIn("failure-museum", r.stdout.lower() + r.stderr.lower())
@@ -328,7 +328,7 @@ class TestCLIIntegration(unittest.TestCase):
                  "add", "--title", "test-crash", "--severity", "high",
                  "--description", "it broke", "--root-cause", "bug",
                  "--fix", "fixed it"],
-                capture_output=True, text=True, timeout=30
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30
             )
             self.assertEqual(r.returncode, 0)
             self.assertIn("FM-001", r.stdout)
@@ -336,7 +336,7 @@ class TestCLIIntegration(unittest.TestCase):
             r2 = subprocess.run(
                 [sys.executable, str(TOOL), "--project-root", str(tmpdir),
                  "list"],
-                capture_output=True, text=True, timeout=30
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30
             )
             self.assertEqual(r2.returncode, 0)
             self.assertIn("test-crash", r2.stdout)

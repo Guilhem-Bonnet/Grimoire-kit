@@ -227,7 +227,7 @@ def run_command(
             command,
             cwd=str(project_root),
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=timeout,
             check=False,
             env=env,

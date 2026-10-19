@@ -161,7 +161,7 @@ def read_at_ref(root: Path, relpath: Path, ref: str = "HEAD") -> dict[str, Any] 
     try:
         out = subprocess.run(
             ["git", "-C", str(root), "show", f"{ref}:{relpath.as_posix()}"],
-            capture_output=True, text=True, timeout=10, check=True,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10, check=True,
         )
     except (OSError, subprocess.SubprocessError):
         return None

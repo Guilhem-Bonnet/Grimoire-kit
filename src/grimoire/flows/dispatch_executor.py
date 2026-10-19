@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import shlex
+import subprocess
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -38,12 +39,14 @@ from pathlib import Path
 from typing import Any
 
 from grimoire.core.exceptions import GrimoireMissionError, GrimoireRuntimeError
+from grimoire.costs import Cost, cap_reason
 from grimoire.flows import pilot
 from grimoire.flows.blueprint_loader import build_node_contracts, load_blueprint
 from grimoire.flows.engine import FlowEngine, check_output_against_contract
 from grimoire.flows.schemas import NodeContract, NodeExecutionResult, ResumeOutcome
+from grimoire.missions.check_gate import UNAPPROVED, CheckGate, CheckSpec
 from grimoire.missions.dispatch import DEFAULT_CALL_TIMEOUT_S, DispatchReport, run_dispatch
-from grimoire.missions.schemas import MissionTask, TaskState
+from grimoire.missions.schemas import MissionTask, TaskCheck, TaskState
 from grimoire.missions.service import TaskRefusedError, TaskService
 from grimoire.missions.verifiability import Verifiability, classify
 
@@ -94,6 +97,11 @@ def _result_path(project_root: Path, run_id: str, node_id: str) -> Path:
     return project_root / DISPATCH_RESULTS_RELPATH / run_id / f"{node_id}.result.json"
 
 
+def _quote(part: str) -> str:
+    """Un argument pour ``shell=True`` : cmd.exe ne connaît pas les apostrophes de ``shlex.quote``."""
+    return subprocess.list2cmdline([part]) if sys.platform == "win32" else shlex.quote(part)
+
+
 def _verify_command(python: str, blueprint_path: Path, node_id: str, result_path: Path) -> str:
     """La commande ``--check`` : relit le même contrat, appelle la même fonction.
 
@@ -105,7 +113,7 @@ def _verify_command(python: str, blueprint_path: Path, node_id: str, result_path
     n'appelle jamais à la main.
     """
     return " ".join(
-        shlex.quote(part)
+        _quote(part)
         for part in (
             python,
             "-m",
@@ -143,17 +151,21 @@ def _acceptance_checks(
     expect_stdout: list[str | None] = []
     timeouts: list[float | None] = []
     for run in contract.acceptance_runs:
-        raw = run.raw if run.cwd in (".", "") else f"cd {shlex.quote(run.cwd)} && {run.raw}"
+        raw = run.raw if run.cwd in (".", "") else f"cd {_quote(run.cwd)} && {run.raw}"
         cmds.append(raw)
         expect_exits.append(run.expect_exit)
         expect_stdout.append(run.expect_stdout_contains)
         timeouts.append(run.timeout_s)
     for evidence in contract.acceptance_evidence:
         if evidence.kind == "path_exists":
-            cmds.append(f"test -e {shlex.quote(evidence.value)}")
+            if sys.platform == "win32":  # `test` n'existe pas sous cmd.exe
+                probe = "import os, sys; sys.exit(0 if os.path.exists(sys.argv[1]) else 1)"
+                cmds.append(" ".join(_quote(part) for part in (sys.executable, "-c", probe, evidence.value)))
+            else:
+                cmds.append(f"test -e {shlex.quote(evidence.value)}")
         else:  # "test" — le seul autre genre que blueprint_loader produit
             pytest_argv = (sys.executable, *_PYTEST_MODULE_INVOCATION, evidence.value)
-            cmds.append(" ".join(shlex.quote(part) for part in pytest_argv))
+            cmds.append(" ".join(_quote(part) for part in pytest_argv))
         expect_exits.append(0)
         expect_stdout.append(None)
         timeouts.append(None)
@@ -212,6 +224,20 @@ class NodeDispatchOutcome:
     #: (par node) vit dans le Mission Ledger de CE run, pas dans celui du
     #: parent : ``grimoire flow status <child_run_id>`` la montre.
     child_run_id: str | None = None
+    #: Appels de ce node sans prix (W1-01, issue #709) : ``cost_usd`` est alors
+    #: un minimum (``lower_bound``) ou ``None`` (``unknown``), jamais un total.
+    unpriced_calls: int = 0
+    #: Pourquoi le node a été arrêté sur le plafond de coût (``cost_reached`` | ``cost_unknown``),
+    #: ``None`` hors verdict ``cost_capped`` (W1-01, revue S3).
+    cost_cap_reason: str | None = None
+    #: Un plafond de coût est posé, la politique est ``stop`` et le node porte des appels sans prix :
+    #: le plafond n'a PAS pu être évalué (un genre à frères continue malgré tout, revue S1), et le node
+    #: le dit ici plutôt que de passer pour « sous le plafond » (W1-01, revue tour 3).
+    cost_cap_unevaluated: bool = False
+
+    @property
+    def cost(self) -> Cost:
+        return Cost.from_parts(self.cost_usd, self.unpriced_calls)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -224,6 +250,10 @@ class NodeDispatchOutcome:
             "attempts": self.attempts,
             "escalations": self.escalations,
             "cost_usd": self.cost_usd,
+            "cost_status": self.cost.status,
+            "unpriced_calls": self.unpriced_calls,
+            "cost_cap_reason": self.cost_cap_reason,
+            "cost_cap_unevaluated": self.cost_cap_unevaluated,
             "uncertainties": [dict(u) for u in self.uncertainties],
             "acceptance_status": self.acceptance_status,
             "verifiability_warning": self.verifiability_warning,
@@ -266,7 +296,7 @@ def _node_outcome_from_report(
     verifiability_warning: str | None = None,
 ) -> NodeDispatchOutcome:
     last = report.attempts[-1] if report.attempts else None
-    known_costs = [a.cost_usd for a in report.attempts if a.cost_usd is not None]
+    cost = report.cost
     if report.unrunnable is not None:
         verdict = "acceptance_unrunnable"
     elif report.cost_capped is not None:
@@ -285,7 +315,9 @@ def _node_outcome_from_report(
         provider=last.provider if last else None,
         attempts=len(report.attempts),
         escalations=_escalations(report),
-        cost_usd=sum(known_costs) if known_costs else None,
+        cost_usd=cost.usd,
+        unpriced_calls=cost.unpriced_calls,
+        cost_cap_reason=report.cost_cap_reason,
         uncertainties=tuple(u.to_dict() for u in report.uncertainties),
         acceptance_status=_acceptance_status(report, has_structured_acceptance=has_structured_acceptance),
         verifiability_warning=verifiability_warning,
@@ -348,6 +380,11 @@ class DispatchExecutor:
         self.host_reason: str | None = None
         self.blocked_node: str | None = None
         self.blocked_report: DispatchReport | None = None
+        #: Plafond de coût du sous-flow que CETTE instance exécute (posé par ``genres._launch_child``) :
+        #: vérifié avant de lancer un node, jamais sur la sortie d'un node déjà produit (revue S1).
+        self.node_cost_cap: float | None = None
+        #: ``cost_reached`` | ``cost_unknown`` quand ``node_cost_cap`` a refusé de lancer un node.
+        self.cost_cap_stop: str | None = None
 
     def execute(self, contract: NodeContract, *, context_pack: dict[str, Any]) -> NodeExecutionResult:
         # Issues #206/#207 : un node de genre (composite, fanout, verify-panel,
@@ -359,6 +396,22 @@ class DispatchExecutor:
         # `DispatchExecutor` depuis CE module ; un import en tête de fichier
         # ici formerait un cycle au chargement.
         from grimoire.flows import genres
+
+        if self.node_cost_cap is not None and self.node_outcomes:
+            why = cap_reason(
+                Cost.total(o.cost for o in self.node_outcomes.values()),
+                self.node_cost_cap,
+                self._pilot_policy.on_unknown_cost,
+                inclusive=False,
+            )
+            if why is not None:
+                # Le node précédent est déjà vert et soumis : seul CE node-ci n'est pas lancé.
+                self.cost_cap_stop = why
+                stopped = NodeExecutionResult(
+                    pending=False, output=None, extra={"cost_capped": why, "node_id": contract.node_id}
+                )
+                self.last_result = stopped
+                return stopped
 
         genre_result = genres.execute_genre_node(self, contract, context_pack)
         if genre_result is not None:
@@ -431,7 +484,32 @@ class DispatchExecutor:
         # le même gate, dans le même appel de cascade. Sans elle, un texte
         # d'acceptance conforme n'engageait jamais aucune commande réelle.
         acceptance_cmds, acceptance_expects, acceptance_stdout, acceptance_timeouts = _acceptance_checks(contract)
-        checks = (_verify_command(sys.executable, self._blueprint_path, node_id, result_path), *acceptance_cmds)
+        envelope = _verify_command(sys.executable, self._blueprint_path, node_id, result_path)
+        checks = (envelope, *acceptance_cmds)
+        # W3-03 : en profil governed/production, une acceptance que personne n'a
+        # approuvée (empreinte de la commande et de ce qu'elle doit rendre) ne
+        # lance rien, et le fournisseur n'est pas appelé pour rien. Le contrôle
+        # d'enveloppe est assemblé par le kit : il est de confiance. Modifier le
+        # blueprint change l'empreinte, donc redemande l'approbation.
+        gate = CheckGate(self._project_root, task_id, trusted=(envelope,))
+        unapproved = gate.preflight(
+            tuple(
+                CheckSpec(c, e, n, t)
+                for c, e, n, t in zip(acceptance_cmds, acceptance_expects, acceptance_stdout, acceptance_timeouts, strict=True)
+            )
+        )
+        if unapproved:
+            self.host_node = node_id
+            self.host_reason = (
+                f"{UNAPPROVED} : {len(unapproved)} commande(s) d'acceptance sans approbation, aucune lancée — "
+                f"`grimoire task approve-check {task_id}` (ou `--cmd`) après les avoir lues : "
+                + " ; ".join(f"{b.display} ({b.reason})" for b in unapproved)
+            )
+            result = NodeExecutionResult(
+                pending=True, extra={"dispatch_refused": "unapproved_check", "node_id": node_id, "task_id": task_id}
+            )
+            self.last_result = result
+            return result
         # Le pilote (issue #209) décide du palier de départ et du plafond de
         # coût avant cet appel — jamais après. `self._max_tier` (le
         # `--max-tier` explicite de la CLI) reste prioritaire sur le plafond
@@ -452,6 +530,7 @@ class DispatchExecutor:
             start_tier=pilot_decision.start_tier,
             max_tier=effective_max_tier,
             max_cost_usd=pilot_decision.max_cost_usd,
+            cost_unknown_policy=pilot_decision.cost_unknown_policy,
             call_timeout=self._call_timeout,
             actor=self._actor,
             agent=self._agent,
@@ -462,6 +541,7 @@ class DispatchExecutor:
             # node compteraient comme deux séries à une seule observation
             # chacune, jamais comme une série rejouée.
             replay_key=f"{blueprint_id}:{node_id}",
+            check_runner=gate.run,
         )
         self.node_outcomes[node_id] = _node_outcome_from_report(
             node_id,
@@ -516,6 +596,9 @@ class DispatchExecutor:
             description = f"{description}\n\n{self._extra_context}"
         guardrails = tuple(f"Outil autorisé : {tool}" for tool in contract.tool_boundary)
         acceptance = contract.acceptance or (f"node {contract.node_id} : aucun critère d'acceptation déclaré",)
+        # Les commandes structurées du node sont les commandes déclarées de la
+        # tâche (issue #772) : sans elles, `classify` ne rendrait jamais V0.
+        cmds, exits, needles, timeouts = _acceptance_checks(contract)
         return ledger.create_task(
             mission_id,
             contract.label or contract.node_id,
@@ -523,6 +606,10 @@ class DispatchExecutor:
             description=description,
             guardrails=guardrails,
             task_id=task_id,
+            checks=tuple(
+                TaskCheck(cmd=c, expect_exit=e, expect_stdout_contains=n, timeout_s=t)
+                for c, e, n, t in zip(cmds, exits, needles, timeouts, strict=True)
+            ),
         )
 
 
@@ -533,7 +620,8 @@ class FlowDispatchOutcome:
     ``status`` vaut ``"finished"`` (tous les nodes verts, run terminé),
     ``"waiting_host"`` (V2, ou tâche non préparable — le node nommé revient à
     ``flow resume`` comme en mode interactif), ou ``"blocked"`` (chaîne
-    épuisée sur ce node, ou sortie non conforme malgré un vert de cascade).
+    épuisée sur ce node, ou sortie non conforme malgré un vert de cascade), ou ``"paused"`` (un ``hold`` a
+    posé le run à la frontière de node, K11 : rien n'est perdu, la reprise suit ``orchestrate resume``).
     """
 
     run_id: str
@@ -543,11 +631,18 @@ class FlowDispatchOutcome:
     faults: tuple[str, ...] = ()
     host_reason: str | None = None
     contract: NodeContract | None = None
+    #: Ce que ``resume`` a complété d'une écriture interrompue par un crash
+    #: (``ResumeOutcome.repaired``, cumulé sur tout l'appel) — jamais silencieux (W1-03b).
+    repaired: tuple[str, ...] = ()
+
+    @property
+    def cost(self) -> Cost:
+        return Cost.total(n.cost for n in self.nodes)
 
     @property
     def total_cost_usd(self) -> float | None:
-        known = [n.cost_usd for n in self.nodes if n.cost_usd is not None]
-        return sum(known) if known else None
+        """Le coût connu du run — un minimum quand ``cost.status == "lower_bound"``, ``None`` si inconnu."""
+        return self.cost.usd
 
     @property
     def escalations(self) -> int:
@@ -562,8 +657,11 @@ class FlowDispatchOutcome:
             "faults": list(self.faults),
             "host_reason": self.host_reason,
             "total_cost_usd": self.total_cost_usd,
+            "cost_status": self.cost.status,
+            "unpriced_calls": self.cost.unpriced_calls,
             "escalations": self.escalations,
             "contract": self.contract.to_dict() if self.contract else None,
+            "repaired": list(self.repaired),
         }
 
 
@@ -575,6 +673,7 @@ def _outcome(
     node_id: str | None,
     faults: tuple[str, ...] = (),
     contract: NodeContract | None = None,
+    repaired: tuple[str, ...] = (),
 ) -> FlowDispatchOutcome:
     return FlowDispatchOutcome(
         run_id=run_id,
@@ -584,6 +683,7 @@ def _outcome(
         faults=faults,
         host_reason=executor.host_reason,
         contract=contract,
+        repaired=repaired,
     )
 
 
@@ -597,16 +697,29 @@ def _drive(
     boucle ne fait qu'interpréter ``executor.last_result``, jamais un second
     appel à l'exécuteur.
     """
+    repaired: tuple[str, ...] = ()
     while True:
         if result.pending:
-            return _outcome(executor, run_id, status="waiting_host", node_id=contract.node_id, contract=contract)
+            return _outcome(
+                executor, run_id, status="waiting_host", node_id=contract.node_id, contract=contract, repaired=repaired
+            )
         if result.output is None:
-            return _outcome(executor, run_id, status="blocked", node_id=contract.node_id, contract=contract)
-        outcome: ResumeOutcome = engine.resume(run_id, output=result.output, executor=executor)
+            return _outcome(
+                executor, run_id, status="blocked", node_id=contract.node_id, contract=contract, repaired=repaired
+            )
+        outcome: ResumeOutcome = engine.resume(run_id, output=result.output, executor=executor, allow_replay=False)
+        repaired = (*repaired, *outcome.repaired)
         if not outcome.ok:
-            return _outcome(executor, run_id, status="blocked", node_id=outcome.node_id, faults=outcome.faults)
+            return _outcome(
+                executor, run_id, status="blocked", node_id=outcome.node_id, faults=outcome.faults, repaired=repaired
+            )
         if outcome.finished:
-            return _outcome(executor, run_id, status="finished", node_id=outcome.node_id)
+            return _outcome(executor, run_id, status="finished", node_id=outcome.node_id, repaired=repaired)
+        if outcome.paused:
+            # K11 : un hold a posé le run en PAUSED à la frontière ; le node suivant n'est ni présenté ni exécuté.
+            return _outcome(
+                executor, run_id, status="paused", node_id=outcome.node_id, faults=outcome.warnings, repaired=repaired
+            )
         assert outcome.contract is not None  # non fini : le moteur a rouvert le node suivant
         contract = outcome.contract
         result = executor.last_result or NodeExecutionResult(pending=True)
@@ -651,11 +764,16 @@ def resume_with_dispatch(
     """
     meta = engine.run_meta(run_id)
     status = engine.status(run_id, include_contract=True)
+    if status.directive is not None and status.directive.kind == "blocked" and status.directive.reason == "paused":
+        # K11 : un hold est en vigueur ; l'agent du node suivant ne se lance pas pour se faire refuser ensuite.
+        raise GrimoireRuntimeError(
+            f"run {run_id} : pause hold en vigueur, aucun agent lancé ; reprendre après `grimoire orchestrate resume`"
+        )
     if status.contract is None:
         raise GrimoireRuntimeError(f"run {run_id} : rien à reprendre (status={status.status})")
     executor = DispatchExecutor(
         project_root=project_root,
-        blueprint_path=Path(meta.blueprint_path),
+        blueprint_path=engine.blueprint_file(run_id),
         max_tier=max_tier,
         call_timeout=call_timeout,
         engine=engine,
@@ -687,6 +805,7 @@ def node_dispatch_history(project_root: Path, run_id: str, node_ids: Sequence[st
         if not events:
             continue
         last = events[-1].payload
+        node_cost = Cost.total(Cost.coerce(e.payload.get("cost_usd")) for e in events)
         rows.append(
             {
                 "node_id": node_id,
@@ -697,7 +816,11 @@ def node_dispatch_history(project_root: Path, run_id: str, node_ids: Sequence[st
                 "provider": last.get("provider"),
                 "tier": last.get("tier"),
                 "verdict": last.get("verdict"),
-                "cost_usd": last.get("cost_usd"),
+                # Coût du node entier (toutes ses tentatives), pas de la seule dernière :
+                # une tentative muette rend le total ``lower_bound``/``unknown`` (W1-01).
+                "cost_usd": node_cost.usd,
+                "cost_status": node_cost.status,
+                "unpriced_calls": node_cost.unpriced_calls,
                 "uncertainties": last.get("uncertainties", []),
                 # « executed »/« unrunnable »/« judged » (issue #428) — absent
                 # (``None``) sur un événement écrit avant ce correctif.

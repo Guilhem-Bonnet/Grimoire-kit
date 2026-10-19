@@ -49,7 +49,7 @@ _KNOWN_ARCHETYPES = sorted([
     "minimal", "web-app", "creative-studio", "fix-loop",
     "infra-ops", "meta", "stack", "features", "platform-engineering",
 ])
-_VALID_HOST_ALIASES = sorted(["claude", "copilot", "codex", "cursor", "gemini"])
+_VALID_HOST_ALIASES = sorted(["claude", "copilot", "codex", "cursor", "gemini", "opencode"])
 _VALID_EXECUTION_NEED_IDS = sorted(["test-runner", "lint", "typecheck", "build", "migration-tool", "format"])
 
 
@@ -347,6 +347,16 @@ def _hosts_schema() -> dict[str, Any]:
                 "items": {"type": "string", "enum": _VALID_HOST_ALIASES},
                 "uniqueItems": True,
                 "description": "Subset of known hosts this project emits files for.",
+            },
+            "preserve": {
+                "type": "array",
+                "items": {"type": "string"},
+                "uniqueItems": True,
+                "description": (
+                    "Host files (paths relative to the project root) the project keeps for itself: "
+                    "`grimoire host sync` never writes them and reports them as user-owned; "
+                    "the kit element they would carry is not delivered on that host (D-07)."
+                ),
             },
         },
     }

@@ -18,7 +18,10 @@ Deux familles bien séparées, à dessein :
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from grimoire.flows.directive import Directive
 
 __all__ = [
     "AcceptanceEvidence",
@@ -192,6 +195,12 @@ class FlowRunMeta:
     #: L'id du node composite du run parent qui a lancé ce run — ``None`` ssi
     #: ``parent_run_id`` l'est aussi (les deux sont posés ou absents ensemble).
     parent_node_id: str | None = None
+    #: W2-04 — sha256 des contrats compilés (dans ``order``) au lancement, et le
+    #: sha256 de chaque contrat. ``None``/vide pour un run antérieur : sa dérive
+    #: est alors « non vérifiée », jamais déclarée absente. Seul ``flow migrate``
+    #: réécrit ces champs et ``order`` (acte explicite de l'utilisateur).
+    blueprint_sha256: str | None = None
+    node_digests: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -203,6 +212,8 @@ class FlowRunMeta:
             "created_at": self.created_at,
             "parent_run_id": self.parent_run_id,
             "parent_node_id": self.parent_node_id,
+            "blueprint_sha256": self.blueprint_sha256,
+            "node_digests": dict(self.node_digests),
         }
 
     @classmethod
@@ -216,6 +227,8 @@ class FlowRunMeta:
             schema_version=d.get("schema_version", "grimoire.flow_run_meta.v1"),
             parent_run_id=d.get("parent_run_id"),
             parent_node_id=d.get("parent_node_id"),
+            blueprint_sha256=d.get("blueprint_sha256"),
+            node_digests=dict(d.get("node_digests") or {}),
         )
 
 
@@ -228,14 +241,44 @@ class ResumeOutcome:
     node_id: str | None
     faults: tuple[str, ...] = ()
     contract: NodeContract | None = None
+    #: ``True`` quand la sortie soumise rejoue celle déjà acceptée pour un
+    #: node franchi (``replay_of``) : ``ok`` reste vrai, rien n'a été écrit,
+    #: ``node_id``/``contract`` désignent toujours ce que le run attend.
+    replay: bool = False
+    replay_of: str | None = None
+    #: Ce que cette reprise a complété d'une écriture qu'un crash avait
+    #: interrompue (W1-03b) — vide dans le cas normal. Une réparation n'est
+    #: jamais silencieuse.
+    repaired: tuple[str, ...] = ()
+    #: La directive qui suit cette reprise (W2-03) : ce à quoi l'hôte répondra
+    #: ensuite, avec son ``directive_id`` à renvoyer à ``resume``.
+    directive: Directive | None = None
+    #: Classement de la décision d'un checkpoint (W2-01) —
+    #: :meth:`grimoire.flows.attestation.Attestation.to_dict`, ``None`` hors
+    #: checkpoint ou sur un rejeu.
+    attestation: dict[str, Any] | None = None
+    #: Avertissements nommés : décision ``unattested`` acceptée sur un
+    #: checkpoint non destructif (W2-01, décision 2).
+    warnings: tuple[str, ...] = ()
+    #: ``True`` quand le node vient d'être accepté mais qu'un ``hold`` (K11) a posé le run en ``PAUSED`` à la
+    #: frontière : ``node_id`` nomme le node suivant, qui n'est ni présenté ni exécuté, ``contract`` est vide.
+    #: Un pilote qui enchaîne les nodes s'arrête là.
+    paused: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "directive": self.directive.to_dict() if self.directive else None,
             "ok": self.ok,
             "finished": self.finished,
             "node_id": self.node_id,
             "faults": list(self.faults),
             "contract": self.contract.to_dict() if self.contract else None,
+            "replay": self.replay,
+            "replay_of": self.replay_of,
+            "repaired": list(self.repaired),
+            "attestation": self.attestation,
+            "warnings": list(self.warnings),
+            "paused": self.paused,
         }
 
 
@@ -256,9 +299,22 @@ class FlowStatusView:
     #: argument, la liste des runs) puissent l'afficher sans redemander la
     #: méta directement.
     parent_run_id: str | None = None
+    #: La directive courante (W2-03), ``None`` quand la vue est une simple ligne de liste.
+    directive: Directive | None = None
+    #: Décisions de checkpoint journalisées (W2-01) : node, décision, motif
+    #: (celui d'un ``amend`` compris), attestation et son motif, horodatage.
+    checkpoint_decisions: tuple[dict[str, Any], ...] = ()
+    #: W2-04 — le constat ``blueprint_drift`` (nodes franchis modifiés, retirés ou
+    #: réordonnés depuis le lancement) ou ``None``. ``blueprint_sha256`` ``None``
+    #: dit « non vérifié » (run antérieur) : ``None`` ici ne veut alors pas dire « sain ».
+    blueprint_drift: dict[str, Any] | None = None
+    blueprint_sha256: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "directive": self.directive.to_dict() if self.directive else None,
+            "blueprint_sha256": self.blueprint_sha256,
+            "blueprint_drift": self.blueprint_drift,
             "run_id": self.run_id,
             "blueprint_id": self.blueprint_id,
             "status": self.status,
@@ -268,6 +324,7 @@ class FlowStatusView:
             "last_refusal": self.last_refusal,
             "contract": self.contract.to_dict() if self.contract else None,
             "parent_run_id": self.parent_run_id,
+            "checkpoint_decisions": [dict(d) for d in self.checkpoint_decisions],
         }
 
 

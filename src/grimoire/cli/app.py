@@ -22,6 +22,7 @@ from grimoire.__version__ import __version__
 from grimoire.cli._condensed_help import _RootHelpGroup
 from grimoire.cli._lazy import LazyCommandSpec, LazyGroupSpec, LazyTyperGroup
 from grimoire.cli._shared import _AUDIT_FILENAME, _log_operation, _status_spinner
+from grimoire.cli.cmd_self_update import self_update_command
 from grimoire.core import layout
 from grimoire.core.config import GrimoireConfig
 from grimoire.core.exceptions import GrimoireConfigError, GrimoireError
@@ -453,6 +454,16 @@ def doctor(
     if cfg and cfg.agents.archetype:
         _record("archetype", passed=True, detail=f"Archetype configured: {cfg.agents.archetype}")
 
+    # 4ter. Tarifs de coût : une table datée depuis plus de 90 jours est signalée
+    # (avertissement, sans échec : le coût reste un ordre de grandeur).
+    from datetime import date as _date
+
+    from grimoire.tools.cost_model import rate_card_age_warning
+
+    rates_warning = rate_card_age_warning(_date.today())
+    if rates_warning:
+        _record("model_rates_dated", passed=True, detail=f"avertissement : {rates_warning}")
+
     # 4bis. --fix: regenerate missing VS Code agent wrappers and .mcp.json
     # (reuses ProjectScaffolder logic — idempotent, never overwrites).
     if fix:
@@ -546,6 +557,25 @@ def doctor(
                         f"({gap['aligned']})"
                     ),
                 )
+
+    # 4quater-ter. Confiance dans l'installation de l'outil (D-03) : les fichiers
+    # installés sont-ils ceux de leur RECORD ? Hors ligne ; la provenance se
+    # vérifie par `grimoire verify-install --online`. FAIL seulement si un
+    # fichier a changé depuis l'installation.
+    with _timed_phase("trust_level"):
+        from grimoire.tools.install_trust import local_trust
+
+        trust_verdict = local_trust()
+        trust_entry: dict[str, Any] = {
+            "name": "trust_level",
+            "passed": trust_verdict.ok,
+            "detail": f"trust_level={trust_verdict.level} : {trust_verdict.detail}",
+            "trust_level": trust_verdict.level,
+        }
+        results.append(trust_entry)
+        if fmt != "json":
+            tag = "[green]OK[/green]" if trust_verdict.ok else "[red]FAIL[/red]"
+            console.print(f"  {tag}  {trust_entry['detail']}")
 
     # 4quinquies. Override drift (issue #427) — un override est une copie ou
     # une extension du kit, jamais une garantie qu'il en reçoit encore les
@@ -662,20 +692,23 @@ def doctor(
         from grimoire.core.task_unification_doctor import apply_task_unification_check
         apply_task_unification_check(target, results, fmt=fmt, console=console)
 
+    with _timed_phase("profile_floor"):  # 4octies. Plancher de profil committé (W2-07).
+        from grimoire.core.profile_floor_doctor import apply_profile_floor_check
+        apply_profile_floor_check(target, results, fmt=fmt, console=console)
+
     # 5. Config semantic validation
     if cfg:
         warnings = cfg.validate()
         for w in warnings:
             _record("semantic", passed=False, detail=w)
 
-    # 5bis. Hosts declared vs emitted (issue #177) — jamais FAIL : une dette de
-    # déclaration, pas une panne. INFO pour les fichiers orphelins d'un hôte
-    # désactivé (`hosts.enabled`), WARN si un hôte activé n'a rien émis du tout.
+    # 5bis. Hosts declared vs emitted (issue #177) : INFO orphelins d'un hôte désactivé, WARN hôte activé
+    # sans fichier, FAIL fichier hôte préservé non déclaré dans `hosts.preserve` (D-07, comme `up`).
     if cfg:
         with _timed_phase("hosts_enabled"):
             from grimoire.hosts.collect import build_surface
             from grimoire.hosts.detection import alias_for_host, enabled_host_ids
-            from grimoire.hosts.emitters import emitter_for, owned_managed_paths, supported_hosts
+            from grimoire.hosts.emitters import emitter_for, host_conflict_detail, owned_managed_paths, supported_hosts
 
             host_surface = build_surface(target)
             enabled = enabled_host_ids(target, cfg)
@@ -687,6 +720,8 @@ def doctor(
                 owned = owned_managed_paths(plan, target)
                 alias = alias_for_host(host_id)
                 if host_id in enabled:
+                    if detail := host_conflict_detail(plan, target, alias):  # D-07 : `up` échoue dessus, doctor aussi
+                        _record(f"host_sync_{alias}", passed=False, detail=detail)
                     if not owned:
                         detail = (
                             f"Hôte {alias} activé (`hosts.enabled`) mais aucun fichier émis — "
@@ -837,6 +872,8 @@ def status(
         console.print(f"[red]Config error:[/red] {exc}")
         raise typer.Exit(_EXIT_CONFIG) from None
 
+    from grimoire.missions.decisions import decisions_summary
+
     dirs = [*_REQUIRED_DIRS, _MEMORY_DIR]
     dir_status = {d: (target / d).is_dir() for d in dirs}
 
@@ -848,6 +885,7 @@ def status(
             "memory": {"backend": cfg.memory.backend},
             "structure": dir_status,
             "version": __version__,
+            "decisions": decisions_summary(target),
         }
         typer.echo(json.dumps(data, indent=2))
         return
@@ -886,6 +924,14 @@ def status(
     for d, ok in dir_status.items():
         icon = "[green][OK][/green]" if ok else "[red][x][/red]"
         console.print(f"  {icon} {d}/")
+
+    # Décisions qui attendent un humain (K6) : jamais une exception ici, la ligne manque ou elle est là.
+    pending = decisions_summary(target)
+    if pending["count"]:
+        console.print(f"\n[bold]Décisions[/bold]\n  [yellow]{pending['line']}[/yellow]")
+        console.print("  [dim]`grimoire task decisions` les liste ; `grimoire task answer` y répond.[/dim]")
+    for failure in pending["notify_failures"]:
+        console.print(f"  [red]notification échouée[/red] {failure['task_id']} : {failure['error']}")
 
     console.print()
 
@@ -1221,10 +1267,7 @@ def lint(
 # ── grimoire update ────────────────────────────────────────────────────────────────
 
 
-@app.command("update", rich_help_panel="Info")
-def update_cmd() -> None:
-    """Update grimoire-kit to the latest version (alias for 'self update')."""
-    self_update()
+app.command("update", rich_help_panel="Info")(self_update_command)  # alias de `self update`
 
 
 # ── Lazy sub-commands (issue #405) ─────────────────────────────────────────────
@@ -1247,6 +1290,7 @@ LazyTyperGroup.configure(
         "memory": LazyGroupSpec("grimoire.cli.cmd_memory_lexical", "memory_app", rich_help_panel="Data"),
         "hooks": LazyGroupSpec("grimoire.cli.cmd_hooks", "hooks_app", rich_help_panel="Project"),
         "cadrage": LazyGroupSpec("grimoire.cli.cmd_cadrage", "cadrage_app", rich_help_panel="Project"),
+        "ceremony": LazyGroupSpec("grimoire.cli.cmd_ceremony", "ceremony_app", rich_help_panel="Project"),
         "debugger": LazyGroupSpec("grimoire.cli.cmd_debugger", "debugger_app", rich_help_panel="Data"),
         "dbg": LazyGroupSpec("grimoire.cli.cmd_debugger", "debugger_app", hidden=True),
         "workflows": LazyGroupSpec("grimoire.cli.cmd_workflows", "workflows_app", rich_help_panel="Project"),
@@ -1257,23 +1301,30 @@ LazyTyperGroup.configure(
         "flow": LazyGroupSpec("grimoire.cli.cmd_flow", "flow_app", rich_help_panel="Project"),
         "cockpit": LazyGroupSpec("grimoire.cli.cmd_cockpit", "cockpit_app", rich_help_panel="Project"),
         "task": LazyGroupSpec("grimoire.cli.cmd_task", "task_app", rich_help_panel="Project"),
+        "mission": LazyGroupSpec("grimoire.cli.cmd_mission", "mission_app", rich_help_panel="Project"),
         "stigmergy": LazyGroupSpec("grimoire.cli.cmd_stigmergy", "stigmergy_app", rich_help_panel="Data"),
         "features": LazyGroupSpec("grimoire.cli.cmd_features", "features_app", rich_help_panel="Project"),
         "host": LazyGroupSpec("grimoire.cli.cmd_host", "host_app", rich_help_panel="Project"),
         "providers": LazyGroupSpec("grimoire.cli.cmd_providers", "providers_app", rich_help_panel="Project"),
         "dispatch": LazyGroupSpec("grimoire.cli.cmd_dispatch", "dispatch_app", rich_help_panel="Project"),
+        "route": LazyGroupSpec("grimoire.cli.cmd_route", "route_app", rich_help_panel="Project"),
+        "queue": LazyGroupSpec("grimoire.cli.cmd_queue", "queue_app", rich_help_panel="Project"),
+        "orchestrate": LazyGroupSpec("grimoire.cli.cmd_orchestrate", "orchestrate_app", rich_help_panel="Project"),
         "needs": LazyGroupSpec("grimoire.cli.cmd_needs", "needs_app", rich_help_panel="Project"),
+        "gates": LazyGroupSpec("grimoire.cli.cmd_gates", "gates_app", rich_help_panel="Utilities"),
         "policies": LazyGroupSpec("grimoire.cli.cmd_policies", "policies_app", rich_help_panel="Project"),
         "proposals": LazyGroupSpec("grimoire.cli.cmd_proposals", "proposals_app", rich_help_panel="Agents"),
         "upgrade-flow": LazyGroupSpec("grimoire.cli.cmd_upgrade_flow", "upgrade_flow_app", rich_help_panel="Project"),
         "agent": LazyGroupSpec("grimoire.cli.cmd_agent", "agent_app", rich_help_panel="Agents"),
         "web": LazyGroupSpec("grimoire.cli.cmd_web", "web_app", rich_help_panel="Data"),
+        "autonomy": LazyGroupSpec("grimoire.cli.cmd_autonomy", "autonomy_app", rich_help_panel="Project"),
     },
     commands={
         "up": LazyCommandSpec("grimoire.cli.cmd_up", "up", rich_help_panel="Project"),
         "context-pack": LazyCommandSpec("grimoire.cli.cmd_context_pack", "context_pack_command", rich_help_panel="Data"),
         "migrate": LazyCommandSpec("grimoire.cli.cmd_migrate", "migrate_command", rich_help_panel="Project"),
         "upgrade": LazyCommandSpec("grimoire.cli.cmd_upgrade", "upgrade_command", rich_help_panel="Utilities"),
+        "verify-install": LazyCommandSpec("grimoire.cli.cmd_verify_install", "verify_install_command", rich_help_panel="Utilities"),
         "serve": LazyCommandSpec("grimoire.cli.cmd_serve", "serve", hidden=True),  # alias déprécié — voir `cockpit serve` (#351)
     },
     # Exact pre-#405 order: every @app.command/app.command() in file order,
@@ -1282,12 +1333,13 @@ LazyTyperGroup.configure(
     # `LazyTyperGroup.configure`'s docstring for why this is needed.
     order=[
         "version", "init", "doctor", "status", "add", "remove", "agent-miss",
-        "validate", "lint", "update", "up", "context-pack", "migrate", "upgrade",
+        "validate", "lint", "update", "up", "context-pack", "migrate", "upgrade", "verify-install",
         "serve", "diff", "schema", "check", "merge", "setup", "env", "history",
         "repair",
         "memory", "hooks", "cadrage", "debugger", "dbg", "registry", "workflows",
-        "wf", "standard", "ext", "blueprint", "flow", "cockpit", "task",
-        "stigmergy", "features", "host", "providers", "dispatch", "needs", "proposals", "upgrade-flow", "agent", "web",
+        "wf", "standard", "ext", "blueprint", "flow", "cockpit", "task", "mission",
+        "stigmergy", "features", "host", "providers", "dispatch", "route", "queue", "orchestrate", "needs", "gates", "proposals", "upgrade-flow", "agent", "web",
+        "autonomy",
         "config", "completion", "self", "plugins",
     ],
 )
@@ -1898,7 +1950,7 @@ def _generate_completion_script(shell: str) -> str:
     env = {**os.environ, "_GRIMOIRE_COMPLETE": f"{shell}_source"}
     result = subprocess.run(
         [sys.executable, "-m", "grimoire"],
-        capture_output=True, text=True, env=env, timeout=10,
+        capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=10,
     )
 
     if result.returncode != 0 or not result.stdout.strip():
@@ -2007,12 +2059,7 @@ def self_version(ctx: typer.Context) -> None:
         console.print("  [dim]Could not check for updates[/dim]")
 
 
-@self_app.command("update")
-def self_update() -> None:
-    """Update grimoire-kit to the latest version from PyPI."""
-    from grimoire.cli.updater import run_update
-
-    run_update(__version__, online=is_online(), console=console)
+self_app.command("update")(self_update_command)
 
 
 @self_app.command("diagnose")

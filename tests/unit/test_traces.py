@@ -336,7 +336,7 @@ class TestTraceLedger:
         assert out.exists()
         import json
 
-        lines = [json.loads(line) for line in out.read_text().splitlines()]
+        lines = [json.loads(line) for line in out.read_text(encoding="utf-8").splitlines()]
         parent = lines[0]
         assert "traceId" in parent
         assert parent["name"] == "invoke_agent grimoire-master"
@@ -358,7 +358,7 @@ class TestTraceLedger:
         ledger.export_otel_jsonl(out)
         import json
 
-        lines = [json.loads(line) for line in out.read_text().splitlines()]
+        lines = [json.loads(line) for line in out.read_text(encoding="utf-8").splitlines()]
         tool_spans = [line for line in lines if line.get("parentSpanId")]
         assert len(tool_spans) == 2
         for span in tool_spans:
@@ -395,7 +395,7 @@ class TestTraceLedger:
         ledger.export_otel_jsonl(out)
         import json
 
-        lines = [json.loads(line) for line in out.read_text().splitlines()]
+        lines = [json.loads(line) for line in out.read_text(encoding="utf-8").splitlines()]
         child = next(line for line in lines if line.get("parentSpanId"))
         expected_start_ns = int(
             __import__("datetime").datetime.fromisoformat("2026-01-01T00:00:30+00:00").timestamp() * 1_000_000_000
