@@ -31,10 +31,14 @@ from grimoire.hosts.hook_launcher import (
 )
 from grimoire.hosts.surface import HookSpec
 
+#: Sous Windows, ``shutil.which`` ne retient qu'un fichier dont l'extension est
+#: dans ``PATHEXT`` : le point d'entrée réel y est ``grimoire-hook.exe``.
+_EXE = ".exe" if os.name == "nt" else ""
+
 
 def _make_script(directory: Path) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
-    script = directory / "grimoire-hook"
+    script = directory / f"grimoire-hook{_EXE}"
     script.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     script.chmod(script.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     return script
@@ -91,7 +95,7 @@ def test_venv_outside_the_project_gives_a_machine_specific_path(tmp_path: Path) 
     project.mkdir()
     launcher = resolve_hook_launcher(project, environ={"PATH": ""}, executable=python, prefix=str(venv), base_prefix="/usr")
     assert launcher.machine_specific
-    assert launcher.posix == (venv / "bin" / "grimoire-hook").as_posix()
+    assert launcher.posix == (venv / "bin" / f"grimoire-hook{_EXE}").as_posix()
     assert Emitter.launcher_degradations(launcher)
 
 
@@ -134,9 +138,9 @@ def test_path_with_a_space_is_quoted() -> None:
 
 def test_program_resolution(tmp_path: Path) -> None:
     _make_script(tmp_path / ".venv" / "bin")
-    assert hook_program_resolves(".venv/bin/grimoire-hook", tmp_path)
-    assert hook_program_resolves("./.venv/bin/grimoire-hook", tmp_path)
-    assert hook_program_resolves('"$CLAUDE_PROJECT_DIR"/.venv/bin/grimoire-hook', tmp_path)
+    assert hook_program_resolves(f".venv/bin/grimoire-hook{_EXE}", tmp_path)
+    assert hook_program_resolves(f"./.venv/bin/grimoire-hook{_EXE}", tmp_path)
+    assert hook_program_resolves(f'"$CLAUDE_PROJECT_DIR"/.venv/bin/grimoire-hook{_EXE}', tmp_path)
     assert not hook_program_resolves("grimoire-hook", tmp_path, environ={"PATH": ""})
     assert not hook_program_resolves(".venv/bin/absent", tmp_path)
     assert not hook_program_resolves("../outside/grimoire-hook", tmp_path / ".venv")
