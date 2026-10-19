@@ -363,6 +363,17 @@ def upgrade_flow_check(
 # ── review — read-only context for a human deciding what `run` left pending ──
 
 
+def _pending_checkpoint_plan(root: Path, last_run: dict[str, Any]) -> dict[str, Any] | None:
+    """Le plan de retrait inscrit dans le challenge ouvert du checkpoint ``destructive`` (W2-11), lecture seule."""
+    from grimoire.flows.attestation import CheckpointJournal
+
+    challenge = CheckpointJournal(root / "_grimoire-runtime-output" / "flows", str(last_run.get("runId", ""))).open_challenge(
+        "destructive"
+    )
+    plan = (challenge or {}).get("plan")
+    return plan if isinstance(plan, dict) else None
+
+
 @upgrade_flow_app.command("review")
 def upgrade_flow_review(
     ctx: typer.Context,
@@ -409,12 +420,14 @@ def upgrade_flow_review(
     last_run = runs[0] if runs else None
     checkpoint_pending = bool(last_run and last_run.get("currentNode") == "destructive")
     proposals = [p.to_dict() for p in list_proposals(root, sync=False) if p.status == "pending"]
+    checkpoint_plan = _pending_checkpoint_plan(root, last_run) if checkpoint_pending and last_run else None
 
     payload: dict[str, Any] = {
         "ok": True,
         "tool_version": gap,
         "last_run": last_run,
         "checkpoint_pending": checkpoint_pending,
+        "checkpoint_plan": checkpoint_plan,
         "pending_proposals": proposals,
     }
     if _fmt(ctx, json_flag=json_flag) == "json":
@@ -440,6 +453,14 @@ def upgrade_flow_review(
                 "un `approve` n'est accepté qu'attesté : soumis depuis la session d'hôte qui a présenté "
                 "le checkpoint, après un tour humain de cette session"
             )
+            if checkpoint_plan is not None:
+                items = checkpoint_plan.get("items") or []
+                console.print(
+                    f"plan de retrait présenté : {len(items)} élément(s), empreinte "
+                    f"{str(checkpoint_plan.get('sha256') or 'indisponible')[:12]} — la décision y est liée "
+                    "(écart = `plan_drifted`, nouveau tour humain exigé)"
+                    + ("".join(f"\n  - {i}" for i in items[:20]))
+                )
     if not proposals:
         console.print("Aucune proposition en attente (`grimoire proposals list`).")
     else:
@@ -715,6 +736,13 @@ def upgrade_flow_run(
         if outcome.finished:
             stopped_at = None
             break
+        if outcome.paused:
+            _fail_run(
+                ctx, f"pause en vigueur après le node {node_id} : {list(outcome.warnings)}",
+                json_flag=json_flag, run_id=run_id, done=done, failed_node=node_id,
+                backup_path=(node_outputs.get("backup") or {}).get("tarball"),
+            )
+            return
         assert outcome.contract is not None
         contract = outcome.contract
 

@@ -1,3 +1,7 @@
+---
+audience: utilisateur
+---
+
 <p align="right"><a href="../README.md">README</a></p>
 
 # <img src="../assets/icons/team.svg" width="32" height="32" alt=""> Créer un agent — Guide

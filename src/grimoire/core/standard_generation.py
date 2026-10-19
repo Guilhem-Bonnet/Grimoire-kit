@@ -55,6 +55,15 @@ STANDARD_GENERATION_MANIFEST = STANDARD_DIR / ".generated.json"
 
 STANDARD_PROFILE_FILE = STANDARD_DIR / "standard-profile.yaml"
 
+#: Plancher de profil committé (W2-07) : un fichier à part, jamais généré, que
+#: ``up --force`` ne réécrit donc pas. Une clé ``floor`` dans le manifeste
+#: ci-dessus serait perdue à la première régénération.
+PROFILE_FLOOR_FILE = STANDARD_DIR / "profile-floor.yaml"
+
+#: Du plus léger au plus strict. Ici, avec les chemins, pour que le lecteur du
+#: chemin des hooks compare deux profils sans importer le moteur du standard.
+PROFILE_LADDER = ("starter", "controlled", "orchestrated", "governed", "production")
+
 #: Where the governed standard writes what a task produced. Plain paths, kept
 #: with the rest of the vocabulary so that naming an artifact never requires
 #: importing the engine that fills it.

@@ -11,12 +11,18 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from grimoire.cli.app import app
 from grimoire.policies.rules_config import load_custom_rules
 from grimoire.policies.session_state import SessionState, save_session_state, session_state_path
 from grimoire.policies.temporal import action_fingerprint, record_post_tool_use_approval
+
+pytestmark = pytest.mark.covers(
+    "cli:policies reset-session",
+    "cli:policies status",
+)
 
 runner = CliRunner()
 

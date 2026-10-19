@@ -1,3 +1,7 @@
+---
+audience: décision
+---
+
 <p align="right"><a href="../../README.md">README</a> · <a href="../../CHANGELOG.md">Changelog</a> · <a href="../index.md">Docs</a></p>
 
 # <img src="../assets/icons/microscope.svg" width="32" height="32" alt=""> Direction d'Anthropic — chevaucher / envelopper / ignorer (2026-09)

@@ -20,13 +20,14 @@ import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 import webbrowser
 from dataclasses import dataclass
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 from urllib.parse import parse_qs, urlparse
 
 import typer
@@ -56,6 +57,14 @@ from grimoire.tools.project_registry import (
     write_state,
 )
 from grimoire.tools.project_update import update_project
+from grimoire.tools.request_guard import (
+    check_host,
+    check_mutation,
+    drain_body,
+    has_body,
+    inject_session_token,
+    new_session_token,
+)
 from grimoire.tools.workspace_legacy import legacy_redirect_target
 
 cockpit_app = typer.Typer(
@@ -206,6 +215,50 @@ def _is_plain_argument(value: str) -> bool:
     return bool(value) and not value.startswith("-") and "\x00" not in value and len(value) <= _MAX_ARGUMENT_LEN
 
 
+_MEMORY_TIMEOUT_S = 30
+# CliRunner remplace ``sys.stdout``/``sys.stderr`` pour tout le processus : deux
+# invocations simultanées s'écraseraient la sortie. Ce verrou ne protège que cela
+# (pas le répertoire courant, jamais modifié).
+_CLI_CAPTURE_LOCK = threading.Lock()
+
+
+@dataclass(frozen=True)
+class _CliResult:
+    returncode: int
+    stdout: str
+    stderr: str
+
+
+def _invoke_memory_cli(proot: Path, argv: list[str]) -> _CliResult:
+    """Exécute la CLI ``grimoire`` dans ce processus, pour le projet ``proot``.
+
+    Le projet est porté par une ``ContextVar`` (propre au thread appelant) :
+    aucun ``chdir``, donc aucune interférence avec les requêtes concurrentes.
+    """
+    from typer.testing import CliRunner
+
+    from grimoire.cli.app import app
+    from grimoire.cli.cmd_memory import project_root_override
+
+    with _CLI_CAPTURE_LOCK, project_root_override(proot):
+        res = CliRunner().invoke(app, argv)
+    return _CliResult(res.exit_code, res.stdout, res.stderr)
+
+
+def _run_memory_in_process(proot: Path, argv: list[str]) -> _CliResult:
+    """Comme ``_invoke_memory_cli`` avec une échéance (``TimeoutError``)."""
+    from concurrent.futures import ThreadPoolExecutor
+    from concurrent.futures import TimeoutError as FutureTimeout
+
+    pool = ThreadPoolExecutor(max_workers=1)
+    try:
+        return pool.submit(_invoke_memory_cli, proot, argv).result(timeout=_MEMORY_TIMEOUT_S)
+    except FutureTimeout:
+        raise TimeoutError from None
+    finally:
+        pool.shutdown(wait=False)
+
+
 class _CockpitHandler(SimpleHTTPRequestHandler):
     """Static file server + a tiny POST ``/api/memory`` governance endpoint."""
 
@@ -225,9 +278,28 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         if self.client_address[0] not in _LOCAL_HOSTS:
             self._send_json(403, {"ok": False, "error": "cockpit local only"})
             return False
-        host = (self.headers.get("Host") or "").split(":")[0].lower()
-        if host not in ("127.0.0.1", "localhost", "::1", ""):
-            self._send_json(403, {"ok": False, "error": "hôte non autorisé"})
+        refused = check_host(self.headers)
+        if refused:
+            self._send_json(refused[0], {"ok": False, "error": refused[1]})
+            return False
+        return True
+
+    def _guard_mutation(self) -> bool:
+        """Garde des écritures (``POST``/``PUT``), commune avec l'atelier.
+
+        Pair et hôte (``_local_only``), puis ``Origin`` égal à l'origine servie,
+        ``Sec-Fetch-Site`` et type de contenu JSON — avant toute lecture du corps.
+        Une page tierce sait émettre un ``POST`` « simple » vers la loopback ; le
+        contrôle d'hôte seul ne la voit pas.
+        """
+        if not self._local_only():
+            return False
+        refused = check_mutation(
+            self.headers, int(cast(tuple[str, int], self.server.server_address)[1]), with_body=has_body(self.headers)
+        )
+        if refused:
+            self._send_json(refused[0], {"ok": False, "error": refused[1]})
+            drain_body(self.headers, self.rfile)
             return False
         return True
 
@@ -257,6 +329,22 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         """
         return bool(_HOME_SLUG) and self._query_slug() == _HOME_SLUG
 
+    def _serve_static(self) -> None:
+        """Fichier statique ; une page HTML reçoit le jeton de session."""
+        target = Path(self.translate_path(self.path))
+        if target.is_dir():
+            target = target / "index.html"
+        if target.suffix.lower() != ".html" or not target.is_file():
+            super().do_GET()
+            return
+        body = inject_session_token(target.read_bytes())
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self) -> None:  # http.server contract
         parsed = urlparse(self.path)
         path = parsed.path
@@ -271,7 +359,7 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
                 self.send_header("Content-Length", "0")
                 self.end_headers()
                 return
-            super().do_GET()
+            self._serve_static()
             return
         if not self._local_only():
             return
@@ -345,7 +433,7 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         # il faut donc comparer le chemin sans sa query string, sinon chaque
         # route ci-dessous reste injoignable dès qu'un projet est sélectionné.
         path = urlparse(self.path).path
-        if not self._local_only():
+        if not self._guard_mutation():
             return
         from grimoire.tools.workspace_routes import PREFIX as WORKSPACE_PREFIX
 
@@ -669,14 +757,16 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         if not all(_is_plain_argument(v) for v in values):
             self._send_json(400, {"ok": False, "error": "valeur d'argument refusée"})
             return
+        # La commande est rejouée dans le processus, via l'application Typer :
+        # aucun sous-processus, aucune ligne de commande construite pour l'OS.
         # Les valeurs venant de la requête passent après ``--`` : la sous-commande
         # les lit comme des positionnels, jamais comme des options.
-        cmd = [sys.executable, "-m", "grimoire", "--output", "json", "memory", subcmd, *flags]
+        argv = ["--output", "json", "memory", subcmd, *flags]
         if values:
-            cmd += ["--", *values]
+            argv += ["--", *values]
         try:
-            res = subprocess.run(cmd, cwd=str(proot), capture_output=True, text=True, timeout=30)
-        except subprocess.TimeoutExpired:
+            res = _run_memory_in_process(proot, argv)
+        except TimeoutError:
             self._send_json(504, {"ok": False, "error": "timeout"})
             return
         self._send_json(200, {
@@ -701,7 +791,7 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         travail (#356).
         """
         path = urlparse(self.path).path
-        if not self._local_only():
+        if not self._guard_mutation():
             return
         if not path.startswith("/api/blueprints/"):
             self._send_json(404, {"ok": False, "error": "route inconnue"})
@@ -1038,7 +1128,7 @@ def _generate_data(serve_dir: Path, with_tests: bool) -> bool:
     cmd = [sys.executable, str(gen), "--registry", str(registry_file()), "--out-dir", str(serve_dir / "data")]
     if with_tests:
         cmd.append("--with-tests")
-    res = subprocess.run(cmd, capture_output=True, text=True)
+    res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if res.returncode != 0:
         console.print("[yellow]⚠[/yellow] Génération partielle (voir détail) — repli sur les données disponibles.")
         if res.stderr.strip():
@@ -1089,6 +1179,7 @@ def serve(
         if notice:
             console.print(notice)
 
+    new_session_token()
     handler = partial(_CockpitHandler, directory=str(serve_dir))
     try:
         httpd = ThreadingHTTPServer(("127.0.0.1", port), handler)

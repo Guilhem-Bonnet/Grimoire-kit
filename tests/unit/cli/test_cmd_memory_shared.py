@@ -15,6 +15,12 @@ from typer.testing import CliRunner
 
 from grimoire.cli.app import app
 
+pytestmark = pytest.mark.covers(
+    "cli:memory shared confirm",
+    "cli:memory shared promote",
+    "cli:memory shared recall",
+)
+
 runner = CliRunner()
 
 PATTERN = "les migrations Alembic cassent quand deux heads coexistent dans le dépôt"

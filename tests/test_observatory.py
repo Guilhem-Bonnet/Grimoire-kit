@@ -164,7 +164,7 @@ class TestParseEventLog:
 
     def test_malformed_line_skipped(self, tmp_path):
         f = tmp_path / "bad.jsonl"
-        f.write_text('{"id":"ok","ts":"T","agent":"a","type":"t"}\nnot-json\n{"id":"ok2","ts":"T2","agent":"b","type":"t2"}\n')
+        f.write_text('{"id":"ok","ts":"T","agent":"a","type":"t"}\nnot-json\n{"id":"ok2","ts":"T2","agent":"b","type":"t2"}\n', encoding="utf-8")
         events = obs.parse_event_log(f)
         assert len(events) == 2
 
@@ -439,7 +439,7 @@ class TestFindOutputDir:
     def test_prefers_grimoire_trace_naming(self, tmp_path):
         go = tmp_path / "_grimoire-output"
         go.mkdir()
-        (go / "Grimoire_TRACE.md").write_text("# trace\n")
+        (go / "Grimoire_TRACE.md").write_text("# trace\n", encoding="utf-8")
         assert obs._find_output_dir(tmp_path) == go
 
     def test_fallback_to_existing_dir(self, tmp_path):
@@ -455,7 +455,7 @@ class TestFindOutputDir:
 
 class TestFindTrace:
     def test_finds_grimoire_trace(self, tmp_path):
-        (tmp_path / "Grimoire_TRACE.md").write_text("# trace\n")
+        (tmp_path / "Grimoire_TRACE.md").write_text("# trace\n", encoding="utf-8")
         assert obs._find_trace(tmp_path) == tmp_path / "Grimoire_TRACE.md"
 
     def test_fallback_when_neither_exists(self, tmp_path):

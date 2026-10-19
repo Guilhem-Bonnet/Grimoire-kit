@@ -21,6 +21,8 @@ import typer
 from rich.console import Console
 from rich.markup import escape
 
+from grimoire.cli.cmd_task_portfolio import list_all_projects
+
 task_app = typer.Typer(
     help="Tâches agentiques : projection du Mission Ledger vers le board gouverné.",
     no_args_is_help=True,
@@ -201,6 +203,21 @@ def task_add(
     owner: Annotated[str, typer.Option("--owner", help="Qui en répond.")] = "",
     evidence: Annotated[list[str] | None, typer.Option("--expect-evidence", help="Preuve attendue (répétable).")] = None,
     ready: Annotated[bool, typer.Option("--ready", help="La rendre réclamable tout de suite (proposed → ready, gate compris).")] = False,
+    check: Annotated[
+        list[str] | None,
+        typer.Option("--check", help="Commande dont le code de sortie 0 rend le verdict (répétable) ; sans elle, jamais V0 (#772)."),
+    ] = None,
+    files: Annotated[
+        list[str] | None,
+        typer.Option("--file", help="Fichier que la tâche touchera (répétable) ; `task waves` signale ceux que deux tâches parallèles partagent."),
+    ] = None,
+    test_depth: Annotated[
+        str,
+        typer.Option(
+            "--test-depth",
+            help="Profondeur de test exigée à la fermeture : floor, standard, strict, ou auto (celle de `ceremony suggest`).",
+        ),
+    ] = "",
     project_root: _PROJECT_ROOT = Path(),
     ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
     actor: _ACTOR = "cli",
@@ -213,13 +230,20 @@ def task_add(
     service sert l'outil MCP ``task_add`` (issue #638).
     """
     from grimoire.core.exceptions import GrimoireError
+    from grimoire.missions.schemas import TaskCheck
     from grimoire.missions.service import TaskRefusedError
 
     service = _service(project_root, ledger_root)
+    checks = tuple(TaskCheck(cmd=c) for c in (check or ()) if c.strip())
+    if test_depth == "auto":
+        test_depth = _auto_test_depth(project_root, title, tuple(acceptance), tuple(evidence or ()), bool(checks))
     try:
         added = service.add(
             title, tuple(acceptance), mission_id=mission, owner=owner,
             expected_evidence=tuple(evidence or ()), actor=actor, ready=ready,
+            checks=tuple(TaskCheck(cmd=c) for c in (check or ()) if c.strip()),
+            files=tuple(files or ()),
+            test_depth=test_depth,
         )
     except TaskRefusedError as refused:
         _refuse(ctx, refused)
@@ -232,6 +256,24 @@ def task_add(
     if added.mission_created:
         console.print(f"[dim]Mission créée : {added.mission_id} (aucune n'existait).[/dim]")
     _emit_task(ctx, added.task, added.task.status.value)
+
+
+def _auto_test_depth(
+    project_root: Path, title: str, acceptance: tuple[str, ...], evidence: tuple[str, ...], has_checks: bool,
+) -> str:
+    """La profondeur de la route que `ceremony suggest` calcule pour cette tâche (W6-01).
+
+    Les fichiers touchés ne sont pas connus à la création : la route ne descend
+    pas sous `checked`, donc jamais sous `standard`.
+    """
+    from grimoire.core.execution_needs import resolve_need
+    from grimoire.missions.ceremony import inputs_for, suggest
+
+    inputs = inputs_for(
+        title=title, acceptance=acceptance, expected_evidence=evidence, has_checks=has_checks, files=None,
+        test_runner=resolve_need("test-runner", project_root.resolve()).command, impact_files=None,
+    )
+    return suggest(inputs).route.test_depth.value
 
 
 @task_app.command("list")
@@ -269,7 +311,7 @@ def task_list(
     from grimoire.missions.board import board_status_of
 
     if all_projects:
-        _list_all_projects(ctx, project_root, status=status, project=project, live=live, live_minutes=live_minutes)
+        list_all_projects(ctx, project_root, status=status, project=project, live=live, live_minutes=live_minutes)
         return
 
     if project is not None or live or live_minutes != 30:
@@ -290,64 +332,8 @@ def task_list(
     for task in tasks:
         # Sans échappement, Rich prend les crochets pour une balise de style
         # et fait disparaître l'état — la ligne restait muette sur l'essentiel.
-        etat = escape(f"[{task.status.value} · {board_status_of(task.status)}]")
+        etat = escape(f"[{task.status_label} · {board_status_of(task.status)}]")
         console.print(f"  {task.id}  {etat}  {task.title}")
-
-
-def _list_all_projects(
-    ctx: typer.Context,
-    project_root: Path,
-    *,
-    status: str | None,
-    project: str | None,
-    live: bool,
-    live_minutes: int,
-) -> None:
-    """Le portefeuille : tableau lisible, ou la charge utile JSON telle quelle."""
-    from rich.table import Table
-
-    from grimoire.tools.workspace_portfolio import portfolio_tasks
-
-    view = portfolio_tasks(
-        project_root.resolve(), state=status, project=project, live=live, live_minutes=live_minutes
-    )
-    if _fmt(ctx) == "json":
-        typer.echo(json.dumps(view, indent=2, ensure_ascii=False))
-        return
-    table = Table(title="Portefeuille de tâches", show_lines=False)
-    for column in ("Projet", "Tâche", "État", "Board", "Priorité", "Session", "Mis à jour"):
-        table.add_column(column)
-    for card in view["tasks"]:
-        session = card.get("session") or {}
-        if session:
-            session_text = f"{'vivante' if session.get('live') else 'inactive'} · {session.get('id', '')}"
-        else:
-            session_text = "—"
-        unread = card.get("unread_directives") or 0
-        table.add_row(
-            escape(str(card["project"]["name"])),
-            escape(f"{card['id']}  {card.get('title', '')}") + (f"  ({unread} consigne(s) non lue(s))" if unread else ""),
-            escape(str(card.get("status", ""))),
-            escape(str(card.get("board", ""))),
-            escape(str(card.get("priority", "") or "—")),
-            escape(session_text),
-            escape(str(card.get("updated_at", ""))[:19]),
-        )
-    if view["tasks"]:
-        console.print(table)
-    else:
-        console.print("[dim]Aucune tâche dans le portefeuille pour ces filtres.[/dim]")
-    for row in view["projects"]:
-        if row["state"] != "ok":
-            console.print(f"[red]✗[/red] {escape(row['slug'])} — {escape(str(row['reason']))}")
-    summary = view["summary"]
-    console.print(
-        f"[dim]{summary['projects']} projet(s), {summary['readable']} lisible(s) · "
-        f"{summary['tasks']} tâche(s), {summary['live']} session(s) vivante(s) "
-        f"(< {view['live_minutes']} min)[/dim]"
-    )
-
-
 @task_app.command("show")
 def task_show(
     ctx: typer.Context,
@@ -375,19 +361,26 @@ def task_show(
     # `model_hint` pour ne jamais afficher `None` littéralement.
     dispatch_events = [e for e in service.ledger.list_events(task_id) if e.event_type == "task.dispatched"]
     last_dispatch = dispatch_events[-1].payload if dispatch_events else None
+    usage = _usage_of(task, project_root.resolve())
     if _fmt(ctx) == "json":
         payload = task.to_dict()
         payload["verifiability"] = verifiabilite
         payload["recommended_model"] = advice["recommended_model"]
         payload["model_tier"] = advice["model_tier"]
         payload["last_dispatch"] = last_dispatch
+        payload["usage"] = usage
         typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
         return
     console.print(f"[bold]{task.id}[/bold] — {task.title}")
-    console.print(f"  état    : {task.status.value} (board : {board_status_of(task.status)})")
+    console.print(f"  état    : {task.status_label} (board : {board_status_of(task.status)})")
     console.print(f"  accepte : {', '.join(task.acceptance) or '—'}")
     console.print(f"  vérifiabilité : {verifiabilite['class']} — {verifiabilite['explanation']}")
     console.print(f"  modèle recommandé : {model_hint(advice)} [dim](palier : {advice['model_tier']})[/dim]")
+    for risque in task.accepted_risks:
+        console.print(
+            f"  [yellow]risque accepté[/yellow] : {escape(str(risque.get('reason', '')))} "
+            f"[dim]({risque.get('amendments')}/{risque.get('cap')} amendements, run {risque.get('run_id')})[/dim]"
+        )
     for entree in verifiabilite["criteria"]:
         motif = entree["pattern"] or "non reconnu"
         console.print(f"    [dim]- {escape(entree['criterion'])} → {motif}[/dim]")
@@ -401,6 +394,7 @@ def task_show(
         _print_uncertainties(list(last_dispatch.get("uncertainties") or ()))
         for warning in last_dispatch.get("uncertainty_warnings") or ():
             console.print(f"  [yellow]![/yellow] {escape(str(warning))}")
+    console.print(f"  usage   : {_usage_line(usage)}")
     if task.owner or task.claim:
         console.print(f"  porté par : {task.owner or (task.claim.actor_id if task.claim else '—')}")
     if task.directives:
@@ -408,7 +402,7 @@ def task_show(
 
         console.print("  consignes de l'orchestrateur :")
         for directive in task.directives:
-            marque = escape(f"[{directive.kind}, {directive_status(directive)}]")
+            marque = escape(f"[{directive.kind}, {directive.origin}, {directive_status(directive)}]")
             console.print(
                 f"    - {marque} {escape(directive.author)}, "
                 f"{directive.created_at[:16]} : {escape(directive.text)}  [dim]{directive.id}[/dim]"
@@ -484,6 +478,98 @@ def task_attach(
     console.print(f"[green]✓[/green] Session {sid} rattachée à {task.id}")
 
 
+@task_app.command("renew")
+def task_renew(
+    ctx: typer.Context,
+    task_id: Annotated[str, typer.Argument()],
+    epoch: Annotated[int | None, typer.Option("--epoch", help="Epoch du bail tenu (défaut : celui du claim de --actor).")] = None,
+    project_root: _PROJECT_ROOT = Path(),
+    ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
+    actor: _ACTOR = "cli",
+) -> None:
+    """Renouvelle le bail d'une tâche tenue ; un epoch périmé est refusé."""
+    from grimoire.core.exceptions import GrimoireError
+
+    service = _service(project_root, ledger_root)
+    _require_task(service, task_id)
+    try:
+        task = service.renew(task_id, actor, epoch=epoch)
+    except GrimoireError as exc:
+        console.print(f"[red]✗[/red] {exc}")
+        raise typer.Exit(1) from exc
+    claim = task.claim
+    _emit_task(ctx, task, f"bail renouvelé, epoch {claim.lease_epoch}, plafond {claim.expires_at or '-'}" if claim else "")
+
+
+# `task note` est défini et enregistré dans cmd_task_waiting.
+
+
+@task_app.command("reap")
+def task_reap(
+    ctx: typer.Context,
+    apply: Annotated[bool, typer.Option("--apply", help="Écrire les décisions (sinon : les montrer seulement).")] = False,
+    project_root: _PROJECT_ROOT = Path(),
+    ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
+    actor: _ACTOR = "tick",
+) -> None:
+    """Récolte les baux perdus : relance (running → ready) ou différée nommée. Sans --apply, rien n'est écrit.
+
+    Seul un hôte dont le refus d'outil est prouvé, à la version de la session, est relancé
+    (table `hosts.capabilities`, fixtures de K0) ; tout autre pose la question à l'humain.
+    """
+    from grimoire.core.exceptions import GrimoireError
+
+    service = _service(project_root, ledger_root)
+    try:
+        report = service.reap(apply=apply, actor=actor)
+    except GrimoireError as exc:
+        console.print(f"[red]✗[/red] {exc}")
+        raise typer.Exit(1) from exc
+    if _fmt(ctx) == "json":
+        typer.echo(json.dumps({**report.to_dict(), "applied": apply}, indent=2, ensure_ascii=False))
+        return
+    if report.clock == "unknown":
+        console.print("[yellow]![/yellow] Horloge incohérente (plus tôt que le dernier événement) : rien n'est récolté.")
+        return
+    if not report.decisions:
+        console.print("[green]OK[/green] Aucun bail perdu.")
+        return
+    for d in report.decisions:
+        suite = f"relancée, réadmise après {d.retry_at}" if d.action == "ready" else f"différée ({d.cause})"
+        console.print(f"  - {d.task_id} epoch {d.epoch} : {suite}, tentatives {d.attempts}")
+        if d.question:
+            console.print(f"    ? {d.question}")
+    if not apply:
+        console.print("[dim]Aperçu : relancer avec --apply pour écrire.[/dim]")
+
+
+@task_app.command("fence")
+def task_fence(
+    ctx: typer.Context,
+    task_id: Annotated[str, typer.Argument()],
+    worktree: Annotated[Path, typer.Option("--worktree", help="Worktree de la tâche (défaut : le dossier courant).")] = Path(),
+    project_root: _PROJECT_ROOT = Path(),
+    ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
+    actor: _ACTOR = "cli",
+) -> None:
+    """Pose dans le worktree un pre-push qui refuse le push d'un titulaire périmé (fence git, K3)."""
+    from grimoire.missions.prepush_fence import install_fence
+
+    service = _service(project_root, ledger_root)
+    task = _require_task(service, task_id)
+    claim = task.claim
+    if claim is None or claim.lease_epoch <= 0 or claim.actor_id != actor:
+        holder = claim.actor_id if claim is not None else "personne"
+        console.print(f"[red]✗[/red] {task_id} n'est pas tenue par {actor} (claim de {holder}) : pas d'epoch à fencer")
+        raise typer.Exit(1)
+    try:
+        hook = install_fence(worktree.resolve(), service.ledger_root, task_id, claim.lease_epoch)
+    except (RuntimeError, OSError) as exc:
+        console.print(f"[red]✗[/red] {exc}")
+        raise typer.Exit(1) from exc
+    console.print(f"[green]OK[/green] fence posée (epoch {claim.lease_epoch}) : {hook}")
+
+
 @task_app.command("move")
 def task_move(
     ctx: typer.Context,
@@ -495,13 +581,13 @@ def task_move(
     actor: _ACTOR = "cli",
 ) -> None:
     """Déplace une tâche, si l'état le permet et si la preuve suit."""
-    from grimoire.missions.schemas import TaskState
+    from grimoire.missions.schemas import TARGETABLE_TASK_STATES, TaskState
 
     try:
         target = TaskState(to)
     except ValueError:
         console.print(f"[red]✗[/red] État inconnu : {to}")
-        console.print("[dim]états : " + ", ".join(s.value for s in TaskState) + "[/dim]")
+        console.print("[dim]états : " + ", ".join(s.value for s in TARGETABLE_TASK_STATES) + "[/dim]")
         raise typer.Exit(1) from None
     _transition(ctx, task_id, target, project_root, ledger_root, actor, reason)
 
@@ -584,6 +670,41 @@ def task_prioritize(
     _steer(ctx, project_root, ledger_root, task_id, lambda s: s.prioritize(task_id, to, actor, reason))
 
 
+def _comment_origin() -> str:
+    """Le canal de ``task comment`` : l'origine humaine exige un signal positif.
+
+    ``agent`` : une session d'hôte (identifiant de session ou variable de terminal
+    d'agent, voir ``AGENT_MARKER_ENVS``), une exécution déclarée sans humain
+    (``GRIMOIRE_UNATTENDED=1``) ou une entrée qui n'est pas un terminal. Un
+    terminal interactif sans aucun de ces signaux ne suffit plus : un terminal
+    d'agent qui n'exporte rien (Copilot) en est indiscernable. L'humain confirme
+    alors à l'écran que la note est de lui ; sans réponse positive l'origine est
+    ``unverified`` (le ledger refuse alors une consigne). L'option ``--actor``
+    n'y change rien (issue #706).
+    """
+    import os
+    import sys
+
+    from grimoire.core.standard_state import agent_marker, current_session_id
+    from grimoire.missions.schemas import ORIGIN_AGENT, ORIGIN_HUMAN, ORIGIN_UNVERIFIED
+
+    if os.environ.get("GRIMOIRE_UNATTENDED", "").strip() == "1" or current_session_id() or agent_marker():
+        return ORIGIN_AGENT
+    try:
+        interactive = sys.stdin.isatty() and sys.stderr.isatty()
+    except (AttributeError, ValueError):
+        interactive = False
+    if not interactive:
+        return ORIGIN_AGENT
+    try:
+        sys.stderr.write("Cette note sera enregistrée au nom d'un humain. Est-ce bien toi qui la donnes ? [o/N] ")
+        sys.stderr.flush()
+        answer = sys.stdin.readline().strip().lower()
+    except (OSError, ValueError):
+        return ORIGIN_UNVERIFIED
+    return ORIGIN_HUMAN if answer in ("o", "oui", "y", "yes") else ORIGIN_UNVERIFIED
+
+
 @task_app.command("comment")
 def task_comment(
     ctx: typer.Context,
@@ -595,7 +716,7 @@ def task_comment(
     actor: _ACTOR = "cli",
 ) -> None:
     """Pose un commentaire ou une consigne sur la tâche ; la session la lit au tour suivant."""
-    _steer(ctx, project_root, ledger_root, task_id, lambda s: s.comment(task_id, text, actor, kind))
+    _steer(ctx, project_root, ledger_root, task_id, lambda s: s.comment(task_id, text, actor, kind, origin=_comment_origin()))
 
 
 @task_app.command("cancel")
@@ -647,15 +768,51 @@ def task_link(
         console.print(f"[red]✗[/red] Nature de lien inconnue : {kind}")
         console.print("[dim]natures : " + ", ".join(k.value for k in DependencyKind) + "[/dim]")
         raise typer.Exit(1) from None
-    service.ledger.append_event(
-        "task.linked", task.id, "task", actor,
-        {"task_id": task.id, "depends_on": depends_on, "kind": dependency_kind.value},
-    )
-    service.project_board()
+    from grimoire.core.exceptions import GrimoireError
+
+    try:
+        service.link(task.id, depends_on, dependency_kind, actor=actor)
+    except GrimoireError as exc:
+        console.print(f"[red]✗[/red] {escape(str(exc))}")
+        raise typer.Exit(1) from exc
     if _fmt(ctx) == "json":
         typer.echo(json.dumps({"task": task.id, "depends_on": depends_on, "kind": dependency_kind.value}, indent=2))
         return
     console.print(f"[green]OK[/green] {task.id} dépend de {depends_on} ({dependency_kind.value})")
+
+
+@task_app.command("waves")
+def task_waves(
+    ctx: typer.Context,
+    mission: Annotated[str | None, typer.Option("--mission", help="Restreindre à une mission.")] = None,
+    project_root: _PROJECT_ROOT = Path(),
+    ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
+) -> None:
+    """Les vagues du plan : ce qui peut partir en parallèle, et les fichiers que deux tâches d'une vague se disputent."""
+    plan = _service(project_root, ledger_root).waves(mission)
+    if _fmt(ctx) == "json":
+        typer.echo(json.dumps(plan, indent=2, ensure_ascii=False))
+        return
+    for wave in plan["waves"]:
+        console.print(f"vague {wave['wave']} : {', '.join(wave['tasks'])}")
+    for overlap in plan["file_overlaps"]:
+        console.print(
+            f"[yellow]![/yellow] vague {overlap['wave']} : {overlap['file']} visé par {', '.join(overlap['tasks'])}"
+        )
+    for cp in plan.get("checkpoints", ()):
+        console.print(
+            f"checkpoint vague {cp['wave']} ({', '.join(cp['tasks'])}) : {cp['status']}{' (requis)' if cp['required'] else ''}"
+        )
+    for tid, why in plan.get("claim_blocked", {}).items():
+        console.print(f"[yellow]![/yellow] {tid} : claim fermé — {why}")
+    for tid, targets in plan["unresolved"].items():
+        console.print(f"[yellow]![/yellow] {tid} : dépendance inconnue ou annulée ({', '.join(targets)})")
+    for tid, causes in plan["blocked"].items():
+        console.print(f"[yellow]![/yellow] {tid} : attend une tâche qui ne peut pas être planifiée ({', '.join(causes)})")
+    if plan["cyclic"]:
+        console.print(f"[red]✗[/red] tâches en cycle : {', '.join(plan['cyclic'])}")
+    if not plan["waves"]:
+        console.print("[dim]aucune tâche en attente[/dim]")
 
 
 @task_app.command("context")
@@ -927,28 +1084,98 @@ def task_pack(
         console.print(f"  - [{item.kind.value}] {escape(item.summary or item.uri)}  [dim]{item.uri}[/dim]")
 
 
+@task_app.command("verify")
+def task_verify(
+    ctx: typer.Context,
+    task_id: Annotated[str, typer.Argument(help="Identifiant de la tâche.")],
+    project_root: _PROJECT_ROOT = Path(),
+    ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
+    evidence_root: _EVIDENCE_ROOT = _DEFAULT_EVIDENCE,
+) -> None:
+    """Lance les commandes déclarées de la tâche, écrit le pack et le verdict (#772).
+
+    Code de sortie 0 si le verdict est `passed`, 1 s'il est `failed` (code de
+    sortie inattendu, délai, commande inexécutable), 2 si la tâche ne déclare
+    aucune commande : jamais un vert à vide.
+    """
+    from grimoire.cli.cmd_task_approve import report_unapproved, verify_payload
+    from grimoire.missions.verify import NoDeclaredChecksError, UnapprovedChecksError, verify_task
+
+    root = project_root.resolve()
+    service = _service(project_root, ledger_root)
+    task = _require_task(service, task_id)
+    evidence_path = evidence_root if evidence_root.is_absolute() else root / evidence_root
+    try:
+        outcome = verify_task(task, root, evidence_path)
+    except NoDeclaredChecksError as exc:
+        console.print(f"[red]✗[/red] {exc}")
+        raise typer.Exit(2) from exc
+    except UnapprovedChecksError as exc:
+        report_unapproved(exc, task_id, as_json=_fmt(ctx) == "json", console=console)  # W3-03 : rien n'a été lancé.
+        raise typer.Exit(3) from exc
+
+    if _fmt(ctx) == "json":
+        typer.echo(json.dumps(verify_payload(outcome), indent=2, ensure_ascii=False))
+    else:
+        icon = "[green]OK[/green]" if outcome.passed else "[red]✗[/red]"
+        console.print(f"{icon} {task_id} — verdict {outcome.verdict.verdict.value} ({outcome.pack.id}, {outcome.verdict.id})")
+        for chk in outcome.verdict.checks:
+            if chk.reason:
+                console.print(f"  - {chk.id} : {escape(chk.reason)}")
+        for criterion in outcome.uncovered:
+            console.print(f"  - critère non couvert par les commandes : {escape(criterion)}")
+    raise typer.Exit(0 if outcome.passed else 1)
+
+
 @task_app.command("trace-export")
 def task_trace_export(
-    dest: Annotated[Path, typer.Argument(help="Fichier JSONL de sortie.")],
-    fmt: Annotated[str, typer.Option("--format", help="otel ou langfuse.")] = "otel",
+    dest: Annotated[Path | None, typer.Argument(help="Fichier JSONL de sortie (inutile avec --format otlp).")] = None,
+    fmt: Annotated[str, typer.Option("--format", help="otel, langfuse ou otlp.")] = "otel",
     mission_id: Annotated[str | None, typer.Option("--mission-id", help="Filtre sur une mission.")] = None,
+    endpoint: Annotated[str | None, typer.Option("--endpoint", help="Collecteur OTLP/HTTP (--format otlp).")] = None,
+    header: Annotated[list[str] | None, typer.Option("--header", help="En-tête NOM=VALEUR, répétable (--format otlp).")] = None,
     project_root: _PROJECT_ROOT = Path(),
 ) -> None:
-    """Exporte le TraceLedger (traces d'outils, verdicts de policy) en JSONL.
+    """Exporte le TraceLedger (traces d'outils, verdicts de policy).
 
-    ``--format otel`` suit les conventions sémantiques OTel GenAI ;
-    ``--format langfuse`` le contrat REST ``/api/public/traces`` de Langfuse.
-    Aucun SDK tiers requis dans les deux cas.
+    ``--format otel`` écrit du JSONL aux conventions sémantiques OTel GenAI ;
+    ``--format langfuse`` le contrat REST ``/api/public/traces`` de Langfuse ;
+    ``--format otlp --endpoint URL`` envoie les mêmes spans à un collecteur
+    OTLP/HTTP (JSON) et échoue si le collecteur ne les accepte pas.
+    Aucun SDK tiers requis.
     """
     from grimoire.core.standard_generation import TRACES_DIR
     from grimoire.traces.ledger import TraceLedger
 
-    if fmt not in {"otel", "langfuse"}:
-        console.print(f"[red]✗[/red] Format inconnu : {fmt} (attendu : otel, langfuse)")
+    if fmt not in {"otel", "langfuse", "otlp"}:
+        console.print(f"[red]✗[/red] Format inconnu : {fmt} (attendu : otel, langfuse, otlp)")
         raise typer.Exit(2)
 
     root = project_root.resolve()
     ledger = TraceLedger(root / TRACES_DIR)
+    if fmt == "otlp":
+        from grimoire.traces.otlp import OtlpExportError, export_otlp
+
+        if not endpoint:
+            console.print("[red]✗[/red] --format otlp exige --endpoint (ex. http://127.0.0.1:4318).")
+            raise typer.Exit(2)
+        headers: dict[str, str] = {}
+        for item in header or []:
+            name, sep, value = item.partition("=")
+            if not sep or not name.strip():
+                console.print(f"[red]✗[/red] --header attend NOM=VALEUR, reçu : {escape(item)}")
+                raise typer.Exit(2)
+            headers[name.strip()] = value
+        try:
+            sent = export_otlp(ledger, endpoint, mission_id=mission_id, headers=headers)
+        except OtlpExportError as exc:
+            console.print(f"[red]✗[/red] {escape(str(exc))}")
+            raise typer.Exit(1) from exc
+        console.print(f"[green]OK[/green] {sent} span(s) acceptés par {escape(endpoint)}")
+        return
+    if dest is None:
+        console.print(f"[red]✗[/red] Le format {fmt} écrit un fichier : passez le chemin de sortie.")
+        raise typer.Exit(2)
     count = ledger.export_otel_jsonl(dest, mission_id=mission_id) if fmt == "otel" else ledger.export_langfuse(dest, mission_id=mission_id)
     console.print(f"[green]OK[/green] {count} trace(s) exportée(s) au format {fmt} → {dest}")
 
@@ -958,13 +1185,15 @@ def task_trace_export(
 # de l'épic — l'hôte tient la session, le kit remet une tranche de travail à un
 # exécuteur puis applique le gate — se livre ici au niveau d'une tâche unique,
 # en croisant la classe de vérifiabilité (#309) et le registre par palier de
-# coût (#310). Pas de juge LLM, pas de worktree automatique : l'utilisateur
-# travaille sur une branche propre, et c'est un `--check` mécanique qui décide.
+# coût (#310). Pas de juge LLM ; le worktree par tâche et le merge vérifié sont
+# `task worktree` / `task merge` (W5-02) ; c'est un `--check` mécanique qui décide.
 
 _VERDICT_ICON: dict[str, str] = {
     "green": "[green]vert[/green]",
     "red": "[red]rouge[/red]",
     "rate_limit": "[yellow]limite/429[/yellow]",
+    "quota": "[yellow]forfait épuisé[/yellow]",
+    "overloaded": "[yellow]surcharge/529[/yellow]",
     "timeout": "[yellow]timeout[/yellow]",
     # « acceptance inexécutable » (issue #428) : un `--check` n'a rendu aucun
     # verdict exploitable (binaire absent, pytest 5/4, erreur d'import) — la
@@ -984,6 +1213,8 @@ def _emit_dispatch(ctx: typer.Context, report: Any) -> None:
             console.print(
                 f"[dim]  départ retenu : {report.start_tier} — {escape(report.start_tier_reason or '')}[/dim]"
             )
+        elif report.start_tier_reason:  # refus du routeur (K9) : pas de palier, un motif
+            console.print(f"[dim]  motif : {escape(report.start_tier_reason)}[/dim]")
         raise typer.Exit(report.exit_code)
 
     if report.dry_run:
@@ -1187,3 +1418,34 @@ def task_migrate_standard(
     )
     if not dry_run and report.snapshot_path:
         console.print(f"[dim]Instantané : {report.snapshot_path} (restaurer avec --restore {report.stamp})[/dim]")
+
+
+# K6 (issue #771) : `ask`, `answer`, `wait`, `resume`, `wake`, `note`, `decisions`, `lint-decisions`
+# vivent dans leur module — celui-ci porte déjà de quoi se relire.
+from grimoire.cli.cmd_task_waiting import register as _register_waiting  # noqa: E402
+
+_register_waiting(task_app)
+
+# W5-02 : `task worktree` et `task merge`, dans leur module (plafond de taille d'un module).
+from grimoire.cli.cmd_task_worktree import register_worktree_commands  # noqa: E402
+
+register_worktree_commands(task_app)
+
+# W3-03 : `task approve-check`, dans son module (plafond de taille d'un module).
+from grimoire.cli.cmd_task_approve import register_approve_commands  # noqa: E402
+
+register_approve_commands(task_app)
+
+# W3-01 : `task review`, dans son module (plafond de taille d'un module).
+from grimoire.cli.cmd_task_review import register_review_commands  # noqa: E402
+
+register_review_commands(task_app)
+
+from grimoire.cli.cmd_task_wave import register_wave_commands  # noqa: E402
+
+register_wave_commands(task_app)
+
+# W4-01 : `task fold-usage` et l'usage affiché par `task show`, dans leur module (plafond de taille).
+from grimoire.cli.cmd_task_usage import _usage_line, _usage_of, register_usage_commands  # noqa: E402
+
+register_usage_commands(task_app)

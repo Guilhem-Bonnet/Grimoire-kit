@@ -17,6 +17,10 @@ from textwrap import dedent
 from grimoire.flows.dispatch_executor import run_with_dispatch
 from grimoire.flows.engine import FlowEngine
 
+# Commande d'acceptation « qui réussit », valable sous sh comme sous cmd.exe
+# (`true` n'existe pas sous Windows, où `shell=True` lance cmd.exe).
+_TRUE = f'"{sys.executable}" -c pass'
+
 STANDARD = Path("_grimoire/standard")
 REGISTRY = STANDARD / "llm-provider-registry.yaml"
 PILOT_POLICY = STANDARD / "pilot.yaml"
@@ -43,7 +47,7 @@ def _writer_script(tmp_path: Path, name: str, *, cost: float) -> Path:
 
 
 def _invocation(script: Path) -> str:
-    return f"{sys.executable} {script} {{prompt}} --model {{model}}"
+    return f"{Path(sys.executable).as_posix()} {Path(script).as_posix()} {{prompt}} --model {{model}}"
 
 
 def _provider_yaml(pid: str, tier: str, invocation: str) -> str:
@@ -98,7 +102,7 @@ def _blueprint(tmp_path: Path) -> Path:
                 "id": "n",
                 "kind": "pattern",
                 "ref": "ORC-01",
-                "acceptance": ["la suite de tests passe", {"run": "true"}],
+                "acceptance": ["la suite de tests passe", {"run": _TRUE}],
                 "pins": [{"id": "out", "direction": "out", "contract": "c1"}],
             }
         ],

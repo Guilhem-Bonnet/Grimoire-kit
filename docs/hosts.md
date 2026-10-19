@@ -1,7 +1,11 @@
+---
+audience: référence
+---
+
 # Surfaces hôtes
 
 Un projet Grimoire décrit des personas, des compétences, des commandes et une
-gouvernance. Chaque hôte agentique — Claude Code, GitHub Copilot, Codex, Cursor,
+gouvernance. Chaque hôte agentique — Claude Code, GitHub Copilot, opencode, Codex, Cursor,
 Gemini CLI — expose une part de cela sous forme **exécutable** : fichiers de
 sous-agents chargés dans leur propre fenêtre de contexte, compétences chargées à
 la demande, commandes utilisateur, hooks de cycle de vie capables de refuser une
@@ -19,6 +23,7 @@ projet (agents, standard, mémoire)
         │
         ├──▶ émetteur Claude Code  → .claude/{agents,skills,commands}, settings.json
         ├──▶ émetteur Copilot      → .github/{agents,skills,prompts,hooks}
+        ├──▶ émetteur opencode     → .opencode/{agent,skill,command,plugin}, opencode.json
         └──▶ émetteur prose        → AGENTS.md · GEMINI.md · .cursor/rules
 ```
 
@@ -35,6 +40,8 @@ Copilot, parce que c'est la même décision.
 | `grimoire host surface` | Description host-neutre du projet |
 | `grimoire host sync --host all` | Génère les surfaces (ajouter `--dry-run` pour voir sans écrire) |
 | `grimoire host status` | Écart entre ce que le projet déclare et ce que l'hôte exécute |
+| `grimoire host matrix` | Matrice règle × hôte calculée depuis ce que chaque émetteur écrit ; sort en 1 si une règle n'est ni appliquée ni déclarée dégradée |
+| `grimoire host probe` | Vérifie sur le disque que les fichiers et hooks émis sont présents et à jour, sans rien écrire ; sort en 1 si un fichier manque, est périmé ou édité à la main (hors fichier déclaré `hosts.preserve`, rendu `user-owned`), ou si les hooks sont coupés par `disableAllHooks` |
 | `grimoire host run <slug>` | Corps d'une commande, pour un hôte sans commandes natives |
 
 `grimoire init`, `grimoire up --fix` et `grimoire standard init` appellent la
@@ -47,6 +54,7 @@ ajouté ou modifié une persona.
 |---|---|---|---|---|---|
 | Claude Code | oui | oui | oui | oui | oui |
 | GitHub Copilot | oui | oui | oui | oui | non |
+| opencode | oui | oui | oui | oui (plugin `tool.execute.before`, vérifié) | non (non prouvé) |
 | Codex | non | non | non | non | non |
 | Cursor | non | non | non | non | non |
 | Gemini CLI | non | non | non | non | non |
@@ -56,9 +64,62 @@ comme **dégradation**, avec son repli, et remonté par `grimoire host status` :
 
 - Copilot n'a pas de table de permissions déclarative : les mêmes règles sont
   appliquées par le hook `PreToolUse`, avec la même formulation de refus.
+- opencode n'a ni table de permissions prouvée ni autre hook sondé que
+  `tool.execute.before` : exécution, écriture et lecture de secrets passent par
+  le plugin `.opencode/plugin/grimoire-guard.js` (même décision, même
+  formulation de refus) ; une décision `ask` y est refusée avec son motif, un
+  plugin ne pouvant pas interroger l'utilisateur ; si `grimoire-hook` est
+  introuvable, le plugin refuse l'outil en profil `governed`/`production` (lu dans
+  `_grimoire/standard/standard-profile.yaml`) et se contente d'un avertissement
+  unique sur stderr sinon.
 - Les hôtes en prose n'ont pas de hooks : la gouvernance y est énoncée comme
   règle dans le fichier d'entrée, et n'est opposable qu'en CI. Le catalogue le
   dit explicitement plutôt que de laisser croire à une protection.
+
+## Ce que le kit a observé (contrats réels)
+
+Le tableau ci-dessus dit ce que le kit sait **écrire** pour un hôte. Il ne dit pas
+ce que l'hôte **fait** : « Hooks bloquants : oui » pour Copilot est une
+documentation, pas une observation. Le fencing d'un bail (refuser les effets
+d'une session périmée) ne s'appuie donc pas sur ce tableau mais sur
+`grimoire.hosts.capabilities.contract_for`, rempli **uniquement** depuis des
+captures versées sous `tests/fixtures/hosts/<hôte>/` (un `manifest.json` par
+hôte, une fixture par point). Règle unique : une capacité sans fixture vaut
+`false`, et un hôte dont `pretooluse_deny` n'est pas vérifié est **non fencé**.
+Une preuve vaut pour la version d'hôte sur laquelle elle a été capturée :
+`contract_for(host, version)` et `is_fenced(host, version)` exigent la version
+et rendent un contrat entièrement non vérifié (donc non fencé) si elle est
+absente, inconnue ou différente de la version capturée. `recorded_contract(host)`
+ne sert qu'à auditer la table.
+
+| Capacité | Claude Code 2.1.301 | opencode 1.17.11 | Copilot, Codex, Cursor, Gemini |
+|---|---|---|---|
+| `pretooluse_deny` : un refus arrête l'outil | vérifiée (exit 2 + stderr, ou `permissionDecision: deny` ; l'agent reçoit le motif) | **vérifiée** : un plugin lève une `Error` dans `tool.execute.before`, l'outil ne s'exécute pas, l'agent reçoit le motif (fixture) | non vérifié |
+| `session_end` | vérifiée, sortie propre de `claude -p` seulement (kill non observé) | non vérifié | non vérifié |
+| `quota_signal` : un hook reçoit l'échec de forfait | **non vérifiée** (aucun forfait épuisé observé ; `rate_limit_event` du flux vu en `allowed`, date en epoch secondes) | non vérifié | non vérifié |
+| `liveness_probe` | vérifiée : `claude agents --json` (`pid`, `kind`, `sessionId`, `status` idle/busy ; ni `state` ni `waitingFor` sur les sessions interactives) | non vérifié | non vérifié |
+| `subagent_model` | vérifiée **par le journal du sous-agent** (`agent_transcript_path`) : la charge utile de `SubagentStop` n'a aucun champ modèle | non vérifié | non vérifié |
+| `resume_after_quota` | non vérifiée (forfait épuisé non provoqué) | non vérifié | non vérifié |
+| `bg_workspace_trust` | vérifiée : `claude --bg` refuse un dossier non approuvé (code 1), alors que `claude -p` ne demande rien | non vérifié | non vérifié |
+| `bg_cost_source`, `bg_wake` | non vérifiées (aucune session `--bg` démarrée) | non vérifié | non vérifié |
+| `local_token_usage` | vérifiée : `usage` et `modelUsage` du flux stream-json, `message.usage` du journal de session | non vérifié | non vérifié |
+| `systemd_user_linger` | vérifiée sur le poste de capture (`Linger=yes`, minuteur utilisateur déclenché, session ouverte) | non vérifié | non vérifié |
+
+Les captures Claude Code ont été faites sans opérateur, par des appels `claude -p`
+d'un mot dans un projet jetable. Celles d'opencode (17 octobre 2026) l'ont été
+avec un fournisseur HTTP local factice (compatible OpenAI, aucun modèle réel) qui
+demande un appel d'outil `bash` : le refus vient de l'hôte, pas du modèle. Le
+palier gratuit d'opencode exige 1.18.0 ou plus (1.17.11 installée) : aucun appel
+de modèle réel n'a été fait. Ce qui est chargé par l'hôte (instructions via
+`opencode.json` > `instructions`, agents, skills, commandes, MCP `type: local`) a
+été vérifié avec `opencode debug config|agent|skill` et une requête réelle vers le
+fournisseur factice ; ce qui ne l'est pas : le plugin sur les sous-agents, une
+table `permission` (un refus de lecture en glob n'a pas arrêté une lecture), les
+autres événements de cycle de vie, un MCP effectivement lancé. Copilot (VS Code), Codex, Cursor et Gemini n'ont pas été
+lancés : leurs manifestes disent « non vérifié » et la capture reste à faire au
+poste. Les fixtures remplacent les chemins personnels, l'utilisateur et les
+identifiants de session par des marqueurs ; un test refuse tout chemin, courriel
+ou jeton.
 
 ## Hôtes activés
 
@@ -73,13 +134,13 @@ séparé.
 
 ```yaml
 hosts:
-  enabled: [claude, copilot]   # sous-ensemble de : claude, copilot, codex, cursor, gemini
+  enabled: [claude, copilot]   # sous-ensemble de : claude, copilot, codex, cursor, gemini, opencode
 ```
 
 **Absence de la clé** : le comportement bascule en détection — un hôte est
 émis s'il a déjà des fichiers dans le dépôt (`.claude/` → claude,
 `.github/copilot-instructions.md` ou `.github/agents/` → copilot, `GEMINI.md`
-→ gemini, `.cursor/` → cursor, `AGENTS.md` **et** `.codex` → codex), et
+→ gemini, `.cursor/` → cursor, `.opencode/` ou `opencode.json` → opencode, `AGENTS.md` **et** `.codex` → codex), et
 `claude` seul si rien n'est détecté. Un projet existant qui n'a jamais connu
 cette clé garde donc exactement les fichiers qu'il a déjà — rien ne se
 supprime au premier `grimoire up` qui suit une mise à jour du kit.
@@ -102,9 +163,46 @@ hôtes activés.
   `.mcp.json`) ne sont jamais retirées : elles portent aussi la configuration
   propre du projet.
 
-`grimoire doctor` complète ce tableau sans jamais faire échouer le diagnostic :
-INFO pour les fichiers orphelins d'un hôte désactivé, WARN si un hôte activé
-n'a encore rien émis (généralement : `grimoire host sync` n'a pas tourné).
+`grimoire doctor` complète ce tableau : INFO pour les fichiers orphelins d'un
+hôte désactivé, WARN si un hôte activé n'a encore rien émis (généralement :
+`grimoire host sync` n'a pas tourné), et **FAIL** (`host_sync_<hôte>`) si un
+fichier hôte est préservé sans avoir été déclaré (voir ci-dessous) — `doctor` ne
+peut pas répondre « tout va bien » quand `grimoire up` échoue.
+
+### Un fichier hôte qui est à vous : `hosts.preserve`
+
+Le kit n'écrase jamais un fichier de chemin géré qu'il n'a pas écrit (un
+`.claude/agents/concierge.md` à vous, un `.claude/settings.json` avec commentaires
+ou virgule finale) ni un fichier du kit que vous avez modifié. Un tel fichier n'est
+pas synchronisé : `grimoire up` (étape `host_sync`), `grimoire doctor` et
+`grimoire upgrade-flow apply` échouent, à chaque passage, et nomment les deux issues.
+
+- **Garder le fichier** (non destructif, durable) : le déclarer dans
+  `project-context.yaml`.
+
+  ```yaml
+  hosts:
+    preserve: [".claude/agents/concierge.md"]
+  ```
+
+  Chemins relatifs à la racine, avec `/`, sans `..`. Le fichier n'est jamais écrit
+  (`--force` compris). `up` passe (code 0) en listant « user-owned (hosts.preserve) » ;
+  `host probe` le rend `user-owned`, jamais `applied` ; `host matrix` ajoute une ligne
+  `file:<chemin>` au statut `preserved` — et tout hook ou règle que ce fichier aurait
+  porté passe aussi `preserved` : l'élément du kit n'est **pas livré** sur cet hôte
+  (dégradation déclarée, à vous d'en assurer l'équivalent).
+- **Laisser le kit l'écraser** : `grimoire host sync --force` (destructif).
+
+Le choix « échec » plutôt qu'« avertissement » sans déclaration est volontaire : un
+avertissement permanent s'ignore, et un fichier préservé ne doit jamais passer pour
+synchronisé. La déclaration est ce qui transforme le conflit en décision.
+
+### Hooks coupés par l'hôte
+
+`grimoire host probe` lit `disableAllHooks` dans `.claude/settings.json` et
+`.claude/settings.local.json`. À `true`, les hooks câblés sont rendus `disabled` et la
+sonde sort en 1 : les hooks sont dans le fichier, l'hôte ne les exécute pas. Limite : les
+réglages utilisateur (`~/.claude/settings.json`) et d'organisation ne sont pas lus.
 
 ## Persona d'entrée
 
@@ -539,7 +637,22 @@ Les fichiers générés portent un marqueur `grimoire:managed`. La synchronisati
 ne réécrit qu'eux :
 
 - un fichier écrit à la main à un chemin géré est **préservé** et signalé comme
-  conflit (`--force` pour l'écraser sciemment) ;
+  conflit (`--force` pour l'écraser sciemment). Le marqueur porte l'empreinte du
+  fichier émis (`grimoire:managed sha256=…`) : un fichier généré puis modifié à la
+  main est un conflit `edited`, un fichier que le kit n'a jamais écrit un conflit
+  `foreign` (`host status --json` : `conflict_causes`) ;
+- `AGENTS.md` et `GEMINI.md` sont partagés : le kit n'y possède que le bloc
+  `<!-- grimoire:begin … -->` … `<!-- grimoire:end -->`, tout ce qui l'entoure est
+  préservé à l'octet près, `--force` compris (fins de ligne CRLF
+  comprises : le bloc suit le style du fichier). Un bloc abîmé (`END` absent ou
+  altéré) est un conflit `edited` que `--force` ne tranche pas : corrigez-le à la
+  main ;
+- un lien symbolique (`GEMINI.md` vers `AGENTS.md`, `settings.json` vers un dépôt
+  de dotfiles) reste un lien : la cible reçoit l'écriture, et le retour arrière
+  rétablit la cible ;
+- la synchronisation est transactionnelle : toutes les décisions sont prises
+  avant la première écriture, et une panne en cours de route rétablit l'arbre
+  (tous hôtes confondus). Un processus tué net n'est pas rétabli ;
 - `.claude/settings.json` n'est jamais réécrit en bloc : seules les entrées de
   hooks appartenant au kit sont remplacées, le reste de la configuration est
   conservé tel quel ;

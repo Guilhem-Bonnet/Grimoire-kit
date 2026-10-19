@@ -4,12 +4,20 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
 from grimoire.cli.app import app
+
+pytestmark = pytest.mark.covers(
+    "cli:hooks calibrate",
+    "cli:hooks install",
+    "cli:hooks list",
+    "cli:hooks status",
+)
 
 runner = CliRunner()
 
@@ -30,6 +38,12 @@ def kit_repo(tmp_path: Path) -> Path:
 
 
 class TestHooksInstall:
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason=(
+            "Windows : dépend de la sémantique POSIX des droits (bit x, geteuid) qui n'existe pas sous Windows"
+        ),
+    )
     def test_installs_all_hooks(self, kit_repo: Path) -> None:
         result = runner.invoke(app, ["-o", "json", "hooks", "install", str(kit_repo)])
         assert result.exit_code == 0

@@ -266,3 +266,43 @@ def test_le_hook_de_prompt_journalise_le_tour_sans_son_texte(tmp_path: Path) -> 
     assert turns is not None and len(turns) == 1
     assert (turns[0].session_id, turns[0].origin) == ("S1", "user")
     assert "approuve" not in turns_path(tmp_path).read_text(encoding="utf-8")
+
+
+# ── K13-S1-02 : l'instantané du ledger n'est pas un fichier qu'un agent écrit ────────────────────
+
+_SNAPSHOT = "_grimoire-runtime-output/ledger/ledger.snapshot.json"
+
+
+@pytest.mark.parametrize(
+    ("tool", "tool_input"),
+    [
+        ("Write", {"file_path": _SNAPSHOT, "content": "{}\n"}),
+        ("Edit", {"file_path": f"/abs/project/{_SNAPSHOT}", "old_string": "a", "new_string": "b"}),
+        ("Bash", {"command": f"echo '{{}}' > {_SNAPSHOT}"}),
+        ("Bash", {"command": f"python -c \"open('{_SNAPSHOT}', 'w').write('x')\""}),
+        ("Bash", {"command": f"cp forged.json {_SNAPSHOT}"}),
+        ("Bash", {"command": f"sed -i 's/waiting/closed/' {_SNAPSHOT}"}),
+    ],
+)
+def test_ecrire_l_instantane_du_ledger_est_refuse_quel_que_soit_le_profil(
+    tmp_path: Path, tool: str, tool_input: dict[str, object]
+) -> None:
+    """Un instantané falsifié, au hash de préfixe valide, impose au rejeu un état que le journal ne dit pas."""
+    decision = _pre(tmp_path, tool, tool_input)  # projet non enrôlé : profil starter
+    assert decision.outcome is Outcome.DENY, decision
+    assert decision.detail["authority_vector"] == "ledger-snapshot"
+    assert "instantané du ledger" in decision.reason
+    assert "Limite" in decision.reason
+
+
+def test_lire_l_instantane_du_ledger_reste_permis(tmp_path: Path) -> None:
+    decision = _pre(tmp_path, "Bash", {"command": f"cat {_SNAPSHOT}"})
+    assert "authority_vector" not in decision.detail
+
+
+def test_le_nom_de_l_instantane_est_celui_du_ledger() -> None:
+    """Recopié dans la garde pour que PreToolUse n'importe pas le ledger : l'égalité est figée ici."""
+    from grimoire.hosts.decisions.authority_guard import SNAPSHOT_FILENAME
+    from grimoire.missions.ledger_snapshot import SNAPSHOT_FILENAME as LEDGER_SNAPSHOT_FILENAME
+
+    assert SNAPSHOT_FILENAME == LEDGER_SNAPSHOT_FILENAME

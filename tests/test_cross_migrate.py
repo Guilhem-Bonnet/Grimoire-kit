@@ -330,7 +330,7 @@ class TestExportConsensus(BaseTest):
         cm = _import_cm()
         out = self.root / "_grimoire-output"
         out.mkdir(parents=True, exist_ok=True)
-        (out / "consensus-history.json").write_text("not json")
+        (out / "consensus-history.json").write_text("not json", encoding="utf-8")
         self.assertEqual(cm.export_consensus(self.root), [])
 
 
@@ -417,7 +417,7 @@ class TestSaveLoadBundle(BaseTest):
     def test_load_invalid_magic(self):
         cm = _import_cm()
         path = self.root / "bad.json"
-        path.write_text(json.dumps({"manifest": {"magic": "wrong"}}))
+        path.write_text(json.dumps({"manifest": {"magic": "wrong"}}), encoding="utf-8")
         with self.assertRaises(ValueError):
             cm.load_bundle(path)
 
@@ -511,7 +511,7 @@ class TestImportBundle(BaseTest):
         # Pre-create the file
         d = self.root / "_grimoire-output" / "dna-proposals" / "migrated"
         d.mkdir(parents=True, exist_ok=True)
-        (d / "p1.yaml").write_text("existing")
+        (d / "p1.yaml").write_text("existing", encoding="utf-8")
 
         bundle = cm.MigrationBundle(
             manifest=cm.BundleManifest(),

@@ -721,6 +721,12 @@ def test_scan_job_runs_this_test_module_with_gitleaks_required() -> None:
     assert any(st.get("uses", "").startswith("actions/setup-python") for st in steps)
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : vide PATH à dessein pour retirer gitleaks : sous Windows l'interpréteur Python ne démarre plus sans System32 dans PATH"
+    ),
+)
 def test_missing_gitleaks_fails_when_required_and_skips_otherwise(tmp_path: Path) -> None:
     empty_bin = tmp_path / "bin"
     empty_bin.mkdir()

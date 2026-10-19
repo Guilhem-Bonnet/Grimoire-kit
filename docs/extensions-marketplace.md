@@ -1,3 +1,7 @@
+---
+audience: utilisateur
+---
+
 # Extensions et marketplace
 
 Une extension est un bundle d'artefacts gouvernés — agents, skills, hooks,

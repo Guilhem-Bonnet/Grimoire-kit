@@ -54,6 +54,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from grimoire.core.standard_checks.evidence_chain import append_chained, record_dropped_write
 from grimoire.core.standard_generation import EVIDENCE_DIR, RUNS_DIR, normalize_task_id
 
 __all__ = [
@@ -165,22 +166,21 @@ def build_file_write_event(path: str) -> dict[str, Any]:
 
 
 def append_evidence_event(project_root: Path, task_id: str, event: dict[str, Any]) -> None:
-    """Append one JSON line to the task's evidence log. Best-effort: never raises.
+    """Append one chained JSON line to the task's evidence log. Never raises.
 
     Callers (the ``PostToolUse`` hook) run on every tool call of every
     session; a read-only project mount or a permission error here must
-    degrade to "nothing logged this call", never to a broken hook.
+    degrade to "nothing logged this call", never to a broken hook. The loss is
+    no longer silent (W4-03) : it is *counted* (``dropped_writes``, held next
+    to the journal, see :mod:`.evidence_chain`) and ``standard verify`` says it.
+    Each line carries the digest of the previous one (``prev``).
     """
+    full_path = project_root / evidence_log_relpath(task_id)
     try:
-        rel_path = evidence_log_relpath(task_id)
-        full_path = project_root / rel_path
-        full_path.parent.mkdir(parents=True, exist_ok=True)
-        line = json.dumps(event, ensure_ascii=False)
-        with open(full_path, "a", encoding="utf-8") as handle:
-            handle.write(_line_break_if_cut(full_path) + line + "\n")
-    except (OSError, ValueError, TypeError):  # silent-ok — hook best-effort, jamais cassé (docstring)
+        append_chained(full_path, event)
+    except (OSError, ValueError, TypeError):  # silent-ok — hook best-effort, jamais cassé ; la perte est comptée (docstring)
         # ``ValueError`` : ``UnicodeEncodeError`` (substitut isolé dans une commande), JSON non sérialisable.
-        return
+        record_dropped_write(full_path)
 
 
 def append_guard_event(project_root: Path, task_id: str, event: dict[str, Any]) -> None:

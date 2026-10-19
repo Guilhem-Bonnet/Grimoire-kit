@@ -365,6 +365,12 @@ REAL_GUARD = (Path(__file__).resolve().parents[3] / "scripts" / "check-regressio
 )
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : rejoue un garde de workflow écrit pour bash sous ubuntu-latest (CI) ; Git Bash de Windows (CRLF, chemins, sortie redirigée) n'est pas la cible de ce garde"
+    ),
+)
 def test_workflow_step_bootstraps_when_the_pr_itself_adds_the_guard(good_repo, tmp_path):
     """D14-T1-3 : sous `bash -e`, `git show base:guard` échouait avant tout verdict
     pour la PR qui introduit le garde. D14-T2-2 : l'amorçage n'est admis que dans ce cas.
@@ -379,6 +385,12 @@ def test_workflow_step_bootstraps_when_the_pr_itself_adds_the_guard(good_repo, t
     assert "amorçage" in text and "sans objet" in text
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : rejoue un garde de workflow écrit pour bash sous ubuntu-latest (CI) ; Git Bash de Windows (CRLF, chemins, sortie redirigée) n'est pas la cible de ce garde"
+    ),
+)
 def test_workflow_step_bootstrap_does_not_let_a_fix_pr_skip_the_replay(good_repo, tmp_path):
     """D14-T3-3 : une PR `fix:` qui ajoute le garde et un correctif sans test passait
     en 0 (« rejeu sans objet »). Le garde de la tête, seul disponible, la juge."""
@@ -392,6 +404,12 @@ def test_workflow_step_bootstrap_does_not_let_a_fix_pr_skip_the_replay(good_repo
     assert "sans test" in summary.read_text(encoding="utf-8")
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : rejoue un garde de workflow écrit pour bash sous ubuntu-latest (CI) ; Git Bash de Windows (CRLF, chemins, sortie redirigée) n'est pas la cible de ce garde"
+    ),
+)
 def test_workflow_step_fails_when_the_guard_vanished_from_base(good_repo, tmp_path):
     """D14-T2-2 : base valide mais sans garde, que la PR n'ajoute pas (renommé ou
     supprimé sur main) : l'ancien pas sortait en 0 comme pour l'amorçage."""
@@ -404,6 +422,12 @@ def test_workflow_step_fails_when_the_guard_vanished_from_base(good_repo, tmp_pa
     assert "amorçage" not in text
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : rejoue un garde de workflow écrit pour bash sous ubuntu-latest (CI) ; Git Bash de Windows (CRLF, chemins, sortie redirigée) n'est pas la cible de ce garde"
+    ),
+)
 def test_workflow_step_fails_when_the_base_object_is_missing(good_repo, tmp_path):
     """D14-T2-2 : un `base.sha` absent du dépôt ne doit pas passer pour un amorçage."""
     root, _ = good_repo
@@ -416,6 +440,12 @@ def test_workflow_step_fails_when_the_base_object_is_missing(good_repo, tmp_path
     assert "amorçage" not in text
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : rejoue un garde de workflow écrit pour bash sous ubuntu-latest (CI) ; Git Bash de Windows (CRLF, chemins, sortie redirigée) n'est pas la cible de ce garde"
+    ),
+)
 def test_workflow_step_still_runs_the_guard_from_base_when_present(good_repo, tmp_path):
     """Le garde exécuté est celui de `base.sha`, pas celui de la tête (D14-T2-3 :
     la tête porte un garde différent, qui sortirait en 0)."""
@@ -429,6 +459,12 @@ def test_workflow_step_still_runs_the_guard_from_base_when_present(good_repo, tm
     assert done.returncode == 7, done.stderr
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : rejoue un garde de workflow écrit pour bash sous ubuntu-latest (CI) ; Git Bash de Windows (CRLF, chemins, sortie redirigée) n'est pas la cible de ce garde"
+    ),
+)
 def test_workflow_step_run_from_the_checkout_would_be_caught(good_repo, tmp_path):
     """D14-T2-3 : contre-épreuve par mutation, le pas qui lirait le garde de la
     tête (`scripts/...` du checkout) ne rend plus 7 et le test ci-dessus le voit."""
@@ -562,6 +598,12 @@ def test_stale_branch_real_regression_is_still_accepted(tmp_path: Path):
     assert verdict.ok and verdict.status == "red-on-base", verdict.message
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : rejoue un garde de workflow écrit pour bash sous ubuntu-latest (CI) ; Git Bash de Windows (CRLF, chemins, sortie redirigée) n'est pas la cible de ce garde"
+    ),
+)
 def test_workflow_env_keeps_the_host_environment(good_repo, tmp_path, monkeypatch):
     """D14-T3-5 : le pas hérite de l'environnement (SYSTEMROOT, indispensable à
     CPython sous Windows) au lieu d'un dictionnaire réduit à quelques variables."""

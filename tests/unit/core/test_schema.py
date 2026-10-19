@@ -51,7 +51,7 @@ class TestGenerateSchema:
         schema = generate_schema()
         enabled = schema["properties"]["hosts"]["properties"]["enabled"]
         assert enabled["type"] == "array"
-        assert enabled["items"]["enum"] == ["claude", "codex", "copilot", "cursor", "gemini"]
+        assert enabled["items"]["enum"] == ["claude", "codex", "copilot", "cursor", "gemini", "opencode"]
         assert enabled["uniqueItems"] is True
 
     def test_has_needs_property(self) -> None:

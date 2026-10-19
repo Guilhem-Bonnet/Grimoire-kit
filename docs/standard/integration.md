@@ -1,3 +1,7 @@
+---
+audience: utilisateur
+---
+
 # Intégration du standard agentique
 
 Grimoire Kit ne remplace pas le corpus normatif agentique. Il sert de **kit consommable** pour appliquer ce corpus dans un projet réel : profils, templates, registres, limites d'outils, preuves et déclarations de conformité.
@@ -512,6 +516,21 @@ promouvra `acceptance.passed_without_test_run` (et `acceptance.test_run_stale`)
 en erreur bloquante pour les profils `governed`/`production`, le temps que
 les projets déjà gouvernés adoptent `gate run-tests` (ou une intégration CI
 équivalente) dans leur boucle de clôture de tâche.
+
+**Couverture critère → preuve.** Le dossier d'acceptance relève aussi les
+critères sans preuve et les preuves sans critère
+(`standard_checks/criterion_coverage.py`) :
+
+- `acceptance.uncovered` : un critère sans preuve une fois le livrable accepté
+  (décision `accepté`, tâche `accepted`/`released`, ou gate évalué vers l'un de
+  ces états, par exemple `gate check --target-state accepted`), ou un critère de
+  `acceptance_criteria` du tableau de tâches qui n'a aucune ligne dans le
+  dossier (reconnu par son identifiant d'ordre `AC-NNN` ou par son texte).
+  Erreur en `governed`/`production` dès que le livrable est accepté ou en passe
+  de l'être ; avertissement avant (tâche en cours) et dans les autres profils. Un critère
+  `à vérifier` avant la décision, ou `échoué`, n'est pas relevé ;
+- `evidence.orphan` : une ligne qui cite une preuve sans dire quel critère
+  elle démontre (avertissement).
 
 ## Gate auto-suffisant : chemin, remède, scaffold, tests intégrés
 

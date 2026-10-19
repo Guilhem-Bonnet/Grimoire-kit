@@ -27,7 +27,7 @@ from rich.table import Table
 from grimoire.providers.audit import audit_providers
 from grimoire.providers.registry import SUPPORTED_MODEL_TIERS, ProviderRegistryError, ProviderSpec, read_registry
 from grimoire.providers.routing import choose
-from grimoire.providers.state import ProviderRuntimeState, load_state, record_failure
+from grimoire.providers.state import ProviderRuntimeState, clear_unknown_suspensions, load_state, record_failure
 
 providers_app = typer.Typer(
     help="Fournisseurs LLM : disponibilité par palier de coût, refroidissement après échec.",
@@ -37,7 +37,7 @@ console = Console()
 
 _PROJECT_ROOT_OPTION = typer.Option("--project-root", help="Racine du projet.", show_default=False)
 _JSON_OPTION = typer.Option("--json", help="Sortie JSON.")
-_REASON_OPTION = typer.Option("--reason", help="Motif de l'échec : rate_limit | timeout.")
+_REASON_OPTION = typer.Option("--reason", help="Motif de l'échec : rate_limit | timeout | overloaded.")
 
 #: Même défaut que ``grimoire task`` (``cmd_task._DEFAULT_LEDGER``) — l'historique
 #: des dispatchs (issue #312) lit le même Mission Ledger que `task dispatch` écrit.
@@ -47,7 +47,7 @@ _LEDGER_ROOT_OPTION = typer.Option("--ledger-root", help="Racine du Mission Ledg
 #: Motifs reconnus par la table de refroidissement (grimoire.providers.state).
 #: Un autre libellé est accepté (repli 5 min) mais on préfère le signaler ici
 #: plutôt que laisser un fournisseur silencieusement mal calibré.
-_KNOWN_REASONS = ("rate_limit", "timeout")
+_KNOWN_REASONS = ("rate_limit", "timeout", "overloaded")
 
 
 def _get_fmt(ctx: typer.Context) -> str:
@@ -57,6 +57,10 @@ def _get_fmt(ctx: typer.Context) -> str:
 
 def _state_label(provider_id: str, state: dict[str, ProviderRuntimeState], *, now: datetime) -> str:
     entry = state.get(provider_id)
+    if entry is not None and entry.is_suspended(now=now) and entry.suspension is not None:
+        if entry.suspension.until is None:
+            return "[red]suspendu, date inconnue (providers probe)[/red]"
+        return f"[yellow]suspendu jusqu'à {entry.suspension.until.isoformat(timespec='seconds')} ({entry.suspension.source})[/yellow]"
     if entry is not None and entry.is_cooling_down(now=now):
         until = entry.cooldown_until.isoformat(timespec="seconds") if entry.cooldown_until else "?"
         return f"[yellow]refroidi jusqu'à {until}[/yellow]"
@@ -92,6 +96,16 @@ def _provider_json(provider: ProviderSpec, state: dict[str, ProviderRuntimeState
         "cooling_down": cooling_down,
         "cooldown_until": entry.cooldown_until.isoformat() if entry and entry.cooldown_until else None,
         "failure_count": entry.failure_count if entry else 0,
+        "suspended": entry is not None and entry.is_suspended(now=now),
+        "suspended_until": entry.suspension.until.isoformat()
+        if entry and entry.suspension and entry.suspension.until
+        else None,
+        "suspension_source": entry.suspension.source if entry and entry.suspension else None,
+        "suspended_models": sorted(
+            model_id
+            for model_id in (entry.model_suspensions if entry else {})
+            if entry and entry.is_model_suspended(model_id, now=now)
+        ),
         # Issue #330 : dernier résultat de `providers audit`, jamais du registre.
         "available": entry.available if entry is not None else True,
         "probed_at": entry.probed_at if entry is not None else None,
@@ -228,6 +242,92 @@ def providers_audit(
             result.probe_note,
         )
     console.print(table)
+
+
+def _quota_json(provider_id: str, entry: ProviderRuntimeState | None) -> dict[str, Any]:
+    """Fenêtre de forfait : un minorant daté (``lower_bound``) ou ``unknown``, jamais 0."""
+    observation = entry.quota_observation if entry is not None else None
+    used = observation.get("utilization") if observation else None
+    if observation is None or isinstance(used, bool) or not isinstance(used, (int, float)) or used <= 0:
+        return {"id": provider_id, "status": "unknown"}
+    return {
+        "id": provider_id,
+        "status": "lower_bound",
+        "used_fraction": used,
+        "window": observation.get("window"),
+        "resets_at": observation.get("resets_at"),
+        "observed_at": observation.get("observed_at"),
+    }
+
+
+@providers_app.command("quota")
+def providers_quota(
+    ctx: typer.Context,
+    project_root: Annotated[Path, _PROJECT_ROOT_OPTION] = Path(),
+    json_output: Annotated[bool, _JSON_OPTION] = False,
+) -> None:
+    """Fenêtre de forfait lue dans les flux d'appel : minorant daté ou ``unknown``.
+
+    Seule source : les lignes ``rate_limit_event`` vues lors de `task dispatch`.
+    Une lecture est un **minorant** (la consommation n'a pu que croître depuis) ;
+    sans lecture positive, le résultat est ``unknown`` — jamais 0.
+    """
+    root = project_root.resolve()
+    try:
+        providers = read_registry(root)
+    except ProviderRegistryError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    state = load_state(root)
+    rows = [_quota_json(provider.id, state.get(provider.id)) for provider in providers if provider.enabled]
+    if json_output or _get_fmt(ctx) == "json":
+        typer.echo(json.dumps({"providers": rows}, indent=2, ensure_ascii=False))
+        return
+    if not rows:
+        console.print("[dim]Aucun fournisseur activé (`grimoire providers status`).[/dim]")
+        return
+    table = Table(title="Forfaits")
+    for column in ("Fournisseur", "État", "Consommé (au moins)", "Fenêtre", "Réinitialisation", "Lu le"):
+        table.add_column(column)
+    for row in rows:
+        known = row["status"] == "lower_bound"
+        table.add_row(
+            row["id"],
+            row["status"],
+            f"{row['used_fraction']:.0%}" if known else "—",
+            str(row.get("window") or "—"),
+            str(row.get("resets_at") or "—"),
+            str(row.get("observed_at") or "—"),
+        )
+    console.print(table)
+
+
+@providers_app.command("probe")
+def providers_probe(
+    ctx: typer.Context,
+    provider_id: Annotated[str | None, typer.Argument(help="Un seul fournisseur (défaut : tous).")] = None,
+    project_root: Annotated[Path, _PROJECT_ROOT_OPTION] = Path(),
+    json_output: Annotated[bool, _JSON_OPTION] = False,
+) -> None:
+    """Sonder (comme `audit`) puis rouvrir ce qu'une date illisible avait fermé.
+
+    Une suspension à date n'est jamais levée ici : la date fait foi.
+    """
+    root = project_root.resolve()
+    try:
+        results = audit_providers(root)
+    except ProviderRegistryError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    cleared = clear_unknown_suspensions(root, provider_id)
+    if json_output or _get_fmt(ctx) == "json":
+        payload = {
+            "probed": [r.provider_id for r in results if provider_id in (None, r.provider_id)],
+            "reopened": list(cleared),
+        }
+        typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+        return
+    console.print(f"Sondés : {len(results)} ; rouverts (date illisible) : {', '.join(cleared) or 'aucun'}")
 
 
 def _escalation_label(stats: Any | None) -> str:

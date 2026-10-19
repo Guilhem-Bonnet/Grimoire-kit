@@ -10,17 +10,22 @@ call — imports a small module instead of the whole standard engine.
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import json
 import os
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NamedTuple
+
+from grimoire.bridges.schemas import HostId
 
 # Tout vient de ``standard_generation``, le module léger : ce lecteur tourne dans
 # le chemin des hooks, à chaque appel d'outil, et importer le moteur du standard
 # pour lire deux chemins et un identifiant coûtait 48 ms par appel.
 from grimoire.core.standard_generation import (
+    PROFILE_FLOOR_FILE,
+    PROFILE_LADDER,
     STANDARD_DIR,
     STANDARD_PROFILE_FILE,
     normalize_task_id,
@@ -35,6 +40,28 @@ TASK_BOARD_RELPATH = STANDARD_DIR / "task-board.yaml"
 #: l'état de session éphémère et gitignoré ; ce cache y vit au même titre.
 _CACHE_RELPATH = Path("_grimoire-output") / ".runs" / "standard-state-cache.json"
 _CACHE_VERSION = 1
+
+
+_WRITES_SUSPENDED: contextvars.ContextVar[bool] = contextvars.ContextVar("grimoire_state_writes_suspended", default=False)
+
+
+@contextlib.contextmanager
+def suspended_state_writes() -> Iterator[None]:
+    """Le temps du bloc, aucune écriture d'état de hook (cache, holds) : lecture seule.
+
+    Pour un hook lancé hors de toute racine de projet reconnue : la décision se
+    prend, mais il n'y a pas de projet auquel rattacher du cache ni un journal.
+    """
+    token = _WRITES_SUSPENDED.set(True)
+    try:
+        yield
+    finally:
+        _WRITES_SUSPENDED.reset(token)
+
+
+def state_writes_allowed() -> bool:
+    """``False`` sous :func:`suspended_state_writes`."""
+    return not _WRITES_SUSPENDED.get()
 
 
 def _stat_fingerprint(path: Path) -> list[int] | None:
@@ -111,7 +138,7 @@ def _cached_or_fresh(
     if isinstance(cached, dict) and cached.get("fingerprint") == fingerprint and "value" in cached:
         return cached["value"]
     value = compute()
-    if write_cache:
+    if write_cache and state_writes_allowed():
         entries[key] = {"path": str(relpath), "fingerprint": fingerprint, "value": value}
         _write_cache_entries(root, entries)
     return value
@@ -190,15 +217,8 @@ def is_standard_enrolled(project_root: Path) -> bool:
     return (root / STANDARD_PROFILE_FILE).is_file() or (root / TASK_BOARD_RELPATH).is_file()
 
 
-def active_profile_id(project_root: Path, *, write_cache: bool = True) -> str:
-    """Profile a project is enrolled in, ``starter`` when it declares none.
-
-    *write_cache* defaults to ``True`` — the lifecycle hook path (and the CLI)
-    both want the derived JSON cache written back so the *next* call is
-    cheap. A caller that has promised no side effects at all (an MCP tool
-    annotated ``readOnlyHint``) passes ``False``: it still benefits from a
-    cache another caller warmed, it just never creates or repairs one itself.
-    """
+def declared_profile_id(project_root: Path, *, write_cache: bool = True) -> str:
+    """Le profil que ``standard-profile.yaml`` déclare, ``starter`` à défaut — plancher non appliqué."""
     root = project_root.resolve()
 
     def compute() -> str:
@@ -206,6 +226,53 @@ def active_profile_id(project_root: Path, *, write_cache: bool = True) -> str:
         return str(profile) if profile else "starter"
 
     return str(_cached_or_fresh(root, "profile_id", STANDARD_PROFILE_FILE, compute, write_cache=write_cache))
+
+
+def profile_floor_id(project_root: Path, *, write_cache: bool = True) -> str:
+    """Le plancher committé (``profile-floor.yaml``, clé ``floor``), ``""`` sans fichier (W2-07).
+
+    Un fichier présent dont la valeur n'est pas un profil connu (YAML cassé,
+    clé absente, faute de frappe) vaut ``governed`` : un plancher qu'on ne sait
+    pas lire ne doit pas se lire comme « pas de plancher » (fail-closed).
+
+    Relu à chaque appel, jamais mis en cache : l'empreinte mtime+taille du cache
+    se recopie, et un ``Write`` du cache suffisait à effacer un plancher qui
+    promettait de tenir face aux écritures. Le fichier est petit ; le coût est un
+    ``stat`` quand il est absent et un parse YAML quand il est là (non mesuré).
+    *write_cache* est conservé pour la symétrie des signatures et n'a plus d'effet.
+    """
+    del write_cache
+    path = project_root.resolve() / PROFILE_FLOOR_FILE
+    if not path.is_file():
+        return ""
+    floor = _load_mapping(path).get("floor")
+    return str(floor) if isinstance(floor, str) and floor in PROFILE_LADDER else "governed"
+
+
+def profile_below_floor(declared: str, floor: str) -> bool:
+    """Vrai quand *floor* existe et que *declared* est strictement plus léger (ou inconnu)."""
+    if not floor:
+        return False
+    rank = PROFILE_LADDER.index(declared) if declared in PROFILE_LADDER else -1
+    return rank < PROFILE_LADDER.index(floor)
+
+
+def active_profile_id(project_root: Path, *, write_cache: bool = True) -> str:
+    """Profile a project is enrolled in, ``starter`` when it declares none.
+
+    Le plancher committé (:func:`profile_floor_id`, W2-07) s'applique ici : un
+    profil déclaré sous le plancher est ignoré, le plancher le remplace. Tous
+    les lecteurs (hooks, CLI, MCP, cockpit) voient donc le même profil.
+
+    *write_cache* defaults to ``True`` — the lifecycle hook path (and the CLI)
+    both want the derived JSON cache written back so the *next* call is
+    cheap. A caller that has promised no side effects at all (an MCP tool
+    annotated ``readOnlyHint``) passes ``False``: it still benefits from a
+    cache another caller warmed, it just never creates or repairs one itself.
+    """
+    declared = declared_profile_id(project_root, write_cache=write_cache)
+    floor = profile_floor_id(project_root, write_cache=write_cache)
+    return floor if profile_below_floor(declared, floor) else declared
 
 
 #: Le Mission Ledger, source des tâches (ADR-005). Lu ici sans importer le
@@ -220,7 +287,21 @@ TASK_ENV = "GRIMOIRE_TASK_ID"
 #: (``CLAUDE_CODE_SESSION_ID``) aux commandes que la session lance.
 SESSION_ENV = "GRIMOIRE_SESSION_ID"
 #: variable d'environnement exportée par l'hôte → identifiant d'hôte (``HookInput.host``).
-HOST_SESSION_ENVS = {"CLAUDE_CODE_SESSION_ID": "claude-code-cli"}
+HOST_SESSION_ENVS = {"CLAUDE_CODE_SESSION_ID": HostId.CLAUDE_CODE_CLI.value}
+#: Variables qu'un terminal d'agent exporte aux commandes qu'il lance, même sans
+#: identifiant de session. Elles disent « un agent tient ce shell », jamais qui il
+#: est : ``AI_AGENT`` et ``CLAUDECODE`` ont été observées dans une session Claude
+#: Code ; ``CURSOR_AGENT``, ``GEMINI_CLI`` et ``CODEX_SANDBOX*`` sont celles que
+#: Cursor, Gemini CLI et Codex documentent, non observées ici. Copilot n'en pose
+#: aucune connue : le canal CLI ne s'y fie donc pas seul (voir ``_comment_origin``).
+AGENT_MARKER_ENVS = (
+    "AI_AGENT",
+    "CLAUDECODE",
+    "CURSOR_AGENT",
+    "GEMINI_CLI",
+    "CODEX_SANDBOX",
+    "CODEX_SANDBOX_NETWORK_DISABLED",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -237,11 +318,17 @@ class ActiveTask:
     ``ambiguous`` (plusieurs claims, aucun rattaché à cette session : la tâche
     reste ``bootstrap`` mais *candidates* nomme les claims en concurrence, pour
     que le message dise lesquels au lieu de « aucune tâche »).
+
+    *expired* (issue #710) : les claims dont le bail est dépassé et qui
+    auraient sinon désigné la tâche — rattachés à cette session, ou sans
+    session. Ils ne désignent plus rien ; ils sont nommés pour que le message
+    dise « claim expiré » plutôt que « aucune tâche ».
     """
 
     task_id: str
     source: str
     candidates: tuple[str, ...] = ()
+    expired: tuple[str, ...] = ()
 
     @property
     def is_fallback(self) -> bool:
@@ -267,6 +354,15 @@ def current_session(env: Mapping[str, str] | None = None) -> tuple[str, str]:
     return "", ""
 
 
+def agent_marker(env: Mapping[str, str] | None = None) -> str:
+    """Le nom de la première variable de :data:`AGENT_MARKER_ENVS` posée, ``""`` sinon."""
+    environ = os.environ if env is None else env
+    for name in AGENT_MARKER_ENVS:
+        if str(environ.get(name, "")).strip().lower() not in ("", "0", "false"):
+            return name
+    return ""
+
+
 def current_session_id(env: Mapping[str, str] | None = None) -> str:
     """Le ``session_id`` d'hôte de :func:`current_session` — ``""`` s'il n'y en a pas."""
     return current_session(env)[0]
@@ -280,10 +376,13 @@ class _Claim(NamedTuple):
     actor: str
     #: ISO 8601 du dernier ``task attach`` explicite, ``""`` sinon (issue #695).
     explicit_at: str
+    #: Bail dépassé (:meth:`TaskClaim.is_expired`, issue #710) : le claim ne
+    #: désigne plus aucune tâche, il n'est plus lu que pour le dire.
+    expired: bool = False
 
 
-def _active_claims(project_root: Path, *, actor: str = "") -> list[_Claim]:
-    """Les claims ``claimed``/``running`` — ``session_id`` vide si non rattaché.
+def _held_claims(project_root: Path, *, actor: str = "") -> list[_Claim]:
+    """Les claims ``claimed``/``running``, expirés compris — ``session_id`` vide si non rattaché.
 
     Ne lève jamais : un ledger illisible vaut « aucun claim ».
     """
@@ -301,10 +400,20 @@ def _active_claims(project_root: Path, *, actor: str = "") -> list[_Claim]:
     if actor:
         active = [t for t in active if t.claim is not None and t.claim.actor_id == actor]
     return [
-        _Claim(t.id, t.claim.session_id, t.claim.actor_id, t.claim.attached_explicit_at)
+        _Claim(t.id, t.claim.session_id, t.claim.actor_id, t.claim.attached_explicit_at, t.claim.is_expired())
         for t in active
         if t.claim is not None
     ]
+
+
+def _active_claims(project_root: Path, *, actor: str = "") -> list[_Claim]:
+    """Les claims vivants : ``claimed``/``running`` *et* bail non expiré (issue #710).
+
+    Un claim expiré ne désigne plus la tâche de personne — ni de la session qui
+    le portait, ni d'une autre : le bail est la seule preuve que quelqu'un y
+    travaille encore. Ne lève jamais : un ledger illisible vaut « aucun claim ».
+    """
+    return [c for c in _held_claims(project_root, actor=actor) if not c.expired]
 
 
 def claimed_task_ids(project_root: Path, *, actor: str = "") -> list[str]:
@@ -365,10 +474,20 @@ def resolve_active_task(
     3. The Mission Ledger's single ``claimed``/``running`` task, restricted to
        ``GRIMOIRE_ACTOR``'s claims when that is set. The ledger is the source
        (ADR-005); a claim is visible here the moment it is written, whether or
-       not the board has been re-projected since.
+       not the board has been re-projected since. When the caller knows its
+       session, a claim attached to *another* session is never inherited
+       (issue #710): only a claim with no session yet qualifies — the one the
+       hook then attaches (:func:`grimoire.hosts.decisions.enrolment.link_session`).
+       A caller with no identifiable session (CLI outside any host) cannot
+       tell whose claim it is and keeps the single claim.
     4. The board's single ``in_progress`` task — a project whose board was
        written by hand, or imported, and has no ledger.
     5. ``bootstrap``.
+
+    Claims whose lease has expired (:meth:`TaskClaim.is_expired`, issue #710)
+    take part in none of these rules, a session's own included: the answer
+    falls back and names them in ``expired``. Hence a claim without a session
+    is retained only while its lease runs.
 
     Several claims and none attached to this session are ambiguous: the answer
     is ``bootstrap`` with source ``ambiguous`` and the competing claims in
@@ -385,8 +504,11 @@ def resolve_active_task(
 
     session = session_id.strip() or current_session_id(environ)
     actor = str(environ.get(ACTOR_ENV, "")).strip()
+    # Un seul rejeu du ledger par résolution (K13) : les claims tenus servent à la règle 2
+    # comme à la règle 3, qui les relisaient chacune en entier.
+    every_held = _held_claims(project_root)
     if session:
-        mine = [c for c in _active_claims(project_root) if c.session_id == session]
+        mine = [c for c in every_held if not c.expired and c.session_id == session]
         chosen = _claim_of_session(mine, actor)
         if chosen is not None:
             try:
@@ -394,12 +516,16 @@ def resolve_active_task(
             except ValueError:
                 pass
 
-    claims = _active_claims(project_root, actor=actor)
-    if len(claims) == 1:
+    held = [c for c in every_held if c.actor == actor] if actor else every_held
+    claims = [c for c in held if not c.expired]
+    # Issue #710 : un claim d'une autre session ne désigne jamais la tâche de
+    # celle-ci — B retombe sur bootstrap/ambiguous, jamais sur la tâche de A.
+    if len(claims) == 1 and (not session or claims[0].session_id in ("", session)):
         try:
             return ActiveTask(normalize_task_id(claims[0].task_id), "ledger_claim")
         except ValueError:
             pass
+    expired = tuple(c.task_id for c in held if c.expired and c.session_id in ("", session))
 
     root = project_root.resolve()
 
@@ -416,11 +542,17 @@ def resolve_active_task(
     in_progress = _cached_or_fresh(
         root, "board_in_progress", TASK_BOARD_RELPATH, compute, write_cache=write_cache
     )
+    # Le board projette les claims du ledger en `in_progress` : sans ce filtre,
+    # un claim expiré ou tenu par une autre session reviendrait par la règle 4.
+    disqualified = {
+        c.task_id for c in every_held if c.expired or (session and c.session_id not in ("", session))
+    }
+    in_progress = [tid for tid in in_progress if tid not in disqualified]
     if len(in_progress) == 1:
         return ActiveTask(normalize_task_id(in_progress[0]), "board")
     if len(claims) > 1:
-        return ActiveTask("bootstrap", "ambiguous", tuple(c.task_id for c in claims))
-    return ActiveTask("bootstrap", "bootstrap")
+        return ActiveTask("bootstrap", "ambiguous", tuple(c.task_id for c in claims), expired)
+    return ActiveTask("bootstrap", "bootstrap", expired=expired)
 
 
 def active_task_id(

@@ -219,7 +219,7 @@ if __name__ == "__main__":
 
     def test_discover_shell_tool(self):
         tool_file = self.tools_dir / "deploy.sh"
-        tool_file.write_text("#!/bin/bash\n# Deploy the application\necho 'deploying'\n")
+        tool_file.write_text("#!/bin/bash\n# Deploy the application\necho 'deploying'\n", encoding="utf-8")
         d = self.mod.ToolDiscoverer(self.tmpdir)
         tools = d.discover_all()
         self.assertEqual(len(tools), 1)
@@ -227,14 +227,14 @@ if __name__ == "__main__":
 
     def test_discover_markdown_tool(self):
         tool_file = self.tools_dir / "guide.md"
-        tool_file.write_text("# Grimoire Usage Guide\n\nThis is a guide.\n")
+        tool_file.write_text("# Grimoire Usage Guide\n\nThis is a guide.\n", encoding="utf-8")
         d = self.mod.ToolDiscoverer(self.tmpdir)
         tools = d.discover_all()
         self.assertEqual(len(tools), 1)
         self.assertEqual(tools[0].tool_type, "doc")
 
     def test_skip_underscore_files(self):
-        (self.tools_dir / "_internal.py").write_text("# internal")
+        (self.tools_dir / "_internal.py").write_text("# internal", encoding="utf-8")
         d = self.mod.ToolDiscoverer(self.tmpdir)
         tools = d.discover_all()
         self.assertEqual(tools, [])
@@ -296,8 +296,8 @@ class TestToolRegistry(unittest.TestCase):
             '"""\ntool-a.py — Tool A description.\n"""\nTOOL_A_VERSION = "1.0.0"\n',
             encoding="utf-8",
         )
-        (self.tools_dir / "tool-b.sh").write_text("#!/bin/bash\n# Tool B shell\n")
-        (self.tools_dir / "tool-c.md").write_text("# Tool C Guide\n")
+        (self.tools_dir / "tool-b.sh").write_text("#!/bin/bash\n# Tool B shell\n", encoding="utf-8")
+        (self.tools_dir / "tool-c.md").write_text("# Tool C Guide\n", encoding="utf-8")
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
@@ -394,7 +394,7 @@ class TestCLIIntegration(unittest.TestCase):
     def _run(self, *args):
         return subprocess.run(
             [sys.executable, str(TOOL), *args],
-            capture_output=True, text=True, timeout=15,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15,
         )
 
     def test_help(self):

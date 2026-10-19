@@ -86,6 +86,28 @@ select {
   flex: none;
 }
 
+/* Icône du sprite (icons.svg) : suit la couleur du texte, jamais une teinte
+ * propre ; `.ico-s` pour les contrôles compacts (cadenas, champ de recherche). */
+.ico-s {
+  width: 14px;
+  height: 14px;
+}
+
+.chip .ico,
+.btn .ico {
+  width: 14px;
+  height: 14px;
+}
+
+.chip.pill {
+  white-space: nowrap;
+}
+
+.chip.pill .ico {
+  width: 13px;
+  height: 13px;
+}
+
 .chip {
   display: inline-flex;
   align-items: center;
@@ -98,6 +120,14 @@ select {
   background: var(--e2);
   color: var(--ink2);
   cursor: pointer;
+}
+
+/* `.chip` et `.seg` posent `display` : sans cette règle l'attribut `hidden`
+   (feuille du navigateur) ne cache rien — la pastille de validation et le
+   sélecteur de zoom, vides, restaient affichés dans la barre de document. */
+.chip[hidden],
+.seg[hidden] {
+  display: none;
 }
 
 .chip:hover {
@@ -124,6 +154,35 @@ select {
   border-radius: 999px;
   background: var(--ink3);
   flex: none;
+}
+
+.sico {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  color: var(--ink3);
+}
+.sico .ico {
+  width: 13px;
+  height: 13px;
+}
+.sico.ok { color: var(--ok); }
+.sico.warn { color: var(--warn); }
+.sico.bad { color: var(--bad); }
+.sico.acc { color: var(--acc); }
+
+/* En-tête de tableau sobre : pas de soulignement ; une infobulle (data-term)
+ * s'indique par une icône discrète, pas par un pointillé de lien. */
+th[data-term] {
+  text-decoration: none;
+  cursor: help;
+}
+th .th-hint {
+  width: 11px;
+  height: 11px;
+  margin-left: 4px;
+  vertical-align: -1px;
+  opacity: 0.5;
 }
 
 .dot.ok {
@@ -198,6 +257,7 @@ select {
   height: var(--h-ctl);
   display: inline-flex;
   align-items: center;
+  gap: 6px;
   padding: 0 var(--sp-3);
   border: 1px solid var(--line);
   border-radius: var(--r);
@@ -257,22 +317,33 @@ body[data-active-space="source"] {
   height: 100%;
   display: flex;
   align-items: center;
+  gap: 7px;
   padding: 0 var(--sp-3);
   color: var(--ink2);
   background: none;
-  border: 0;
+  border: 1px solid transparent;
   border-bottom: 2px solid transparent;
+  border-radius: var(--r) var(--r) 0 0;
   cursor: pointer;
-  transition: color var(--dur);
+  transition: color var(--dur), background var(--dur);
+}
+
+.tab .ico {
+  width: 16px;
+  height: 16px;
 }
 
 .tab:hover {
   color: var(--ink);
+  background: var(--e1);
 }
 
 .tab[aria-selected="true"],
 .tab.on {
   color: var(--ink);
+  border-left-color: var(--line);
+  border-right-color: var(--line);
+  border-top-color: var(--line);
   background: var(--accsoft);
   border-bottom-width: 3px;
   border-bottom-color: var(--id-current, var(--acc));
@@ -310,7 +381,38 @@ body[data-active-space="source"] {
 .seg > button:disabled {
   color: var(--ink3);
   cursor: not-allowed;
-  opacity: 0.5;
+}
+
+/* Désactivé sans transparence : l'opacité faisait tomber --ink3 sous 4,5:1
+ * (mesuré par test_workspace_tokens.py). La différence se lit à la couleur
+ * d'encre et au curseur, pas à un fondu. */
+.btn:disabled,
+.chip:disabled {
+  color: var(--ink3);
+  background: var(--e1);
+  cursor: not-allowed;
+}
+
+/* Sélecteur compact (barre d'état) : même `.seg`, plus bas que les 28 px. */
+.seg-s {
+  height: 22px;
+}
+
+.seg-s > button {
+  padding: 0 7px;
+}
+
+/* Texte pour les lecteurs d'écran seulement (états de chargement). */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
 .kbd {
@@ -424,15 +526,93 @@ body[data-active-space="source"] {
 }
 
 .empty h2 {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
   margin: 0 0 var(--sp-2);
   font-size: var(--t-l);
   font-weight: 500;
   color: var(--ink);
 }
 
+.empty h2 .ico {
+  width: 22px;
+  height: 22px;
+  color: var(--ink2);
+}
+
 .empty code {
   font-family: var(--mono);
   color: var(--ink);
+}
+
+.empty-actions {
+  margin-top: var(--sp-3);
+}
+
+/* Variante des zones latérales (explorateur, inspecteur) : pas de cadre centré. */
+.empty-compact {
+  margin: var(--sp-2) 0;
+  max-width: none;
+  padding: var(--sp-3);
+}
+
+.empty-compact h2 {
+  font-size: var(--t-m);
+}
+
+/* Dans l'explorateur (`.tree`), tout enfant direct est une ligne de 28 px :
+   le bloc d'indication n'en est pas une. */
+.tree > .empty-compact {
+  display: block;
+  height: auto;
+  cursor: default;
+  white-space: normal;
+}
+
+/* ── Chargement : squelettes ───────────────────────────────────────────────
+ * La forme de ce qui vient, décorative (`aria-hidden`) ; le texte du chargement
+ * est un `.sr-only` à côté. Sans mouvement sous prefers-reduced-motion (règle
+ * globale plus haut). */
+.skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+}
+
+/* Squelette de la toile : recouvre la zone le temps du chargement. */
+.skeleton-cover {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: var(--bg);
+  pointer-events: none;
+}
+
+.skeleton-line {
+  height: 14px;
+  border-radius: var(--r);
+  background: linear-gradient(90deg, var(--e2) 25%, var(--e3) 50%, var(--e2) 75%);
+  background-size: 300% 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+.skeleton-line:nth-child(odd) {
+  width: 92%;
+}
+
+.skeleton-line:nth-child(3n) {
+  width: 64%;
+}
+
+@keyframes skeleton-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
 }
 
 /* ── Coque ─────────────────────────────────────────────────────────────────*/
@@ -459,14 +639,32 @@ body[data-active-space="source"] {
 #brand {
   display: flex;
   align-items: center;
+  gap: 8px;
   font-weight: 600;
   letter-spacing: 0.08em;
   font-size: var(--t-min);
 }
 
+.spaces-nav {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+}
+
 #spaces {
   display: flex;
+  position: relative;
   margin-left: var(--sp-4);
+  min-width: 0;
+}
+
+#palette-open {
+  width: 250px;
+  justify-content: space-between;
+}
+
+.palette-what {
+  gap: 6px;
 }
 
 #middle {
@@ -584,13 +782,20 @@ body[data-active-space="source"] {
 
 /* Panneau actif (seconde marche) : liseré plus large, à la place du 1px
    discret, sur le panneau qui contient réellement le focus clavier — pas
-   besoin d'un état posé par shell.js, `:focus-within` suffit. */
+   besoin d'un état posé par shell.js, `:focus-within` suffit. Le liseré grossit
+   de 2px sans bouger le contenu : la largeur croît d'autant et la marge
+   négative la rend, sinon le panneau se reflue entre `mousedown` et `mouseup`
+   et le clic atterrit à côté du bouton pressé. */
 .panel-left:focus-within {
   border-right: 3px solid var(--id-current, var(--acc));
+  width: calc(var(--w-panel) + 2px);
+  margin-right: -2px;
 }
 
 .panel-right:focus-within {
   border-left: 3px solid var(--id-current, var(--acc));
+  width: calc(var(--w-inspector) + 2px);
+  margin-left: -2px;
 }
 
 .panel-head {
@@ -628,6 +833,17 @@ body[data-active-space] .panel-head {
 
 .pin[aria-pressed="true"] {
   color: var(--acc);
+}
+
+/* Fermer un tiroir : n'existe que sous 900 px (voir plus bas). */
+.panel-close {
+  display: none;
+  background: none;
+  border: 0;
+  color: var(--ink2);
+  cursor: pointer;
+  padding: var(--sp-1);
+  border-radius: var(--r);
 }
 
 /* Poignée de redimensionnement : seulement quand le panneau est épingle
@@ -757,6 +973,27 @@ body[data-active-space] .panel-head {
   flex: none;
 }
 
+/* Pouls (UI-3) : l'horodatage d'actualisation de la barre d'état, et le
+   compteur de décisions de la barre du haut. */
+#st-live {
+  white-space: nowrap;
+}
+
+#st-live[data-state="error"],
+#st-live[data-state="paused"] {
+  color: var(--ink2);
+}
+
+#st-live[data-state="error"] {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+#decisions-pill {
+  font-weight: 500;
+  white-space: nowrap;
+}
+
 /* ── Palette de commandes ──────────────────────────────────────────────────*/
 
 #palette[hidden] {
@@ -856,6 +1093,12 @@ body[data-active-space] .panel-head {
   color: var(--ink2);
 }
 
+/* Le texte discret d'une infobulle (« Alt · épingler ») porte --ink2 : --ink3,
+ * pensé pour --e1 et --bar, tombait à 2,69:1 sur le fond --e3 de la bulle. */
+.tip .lbl {
+  color: var(--ink2);
+}
+
 .tip .t {
   font-size: var(--t-s);
   font-weight: 500;
@@ -878,6 +1121,13 @@ body[data-active-space] .panel-head {
   text-underline-offset: 3px;
 }
 
+/* Les contrôles ne se soulignent pas comme des liens : un onglet, un bouton
+ * de rail ou de segment reste un onglet. La définition vit toujours sur
+ * `data-term` (survol, focus, Tab) — seul le soulignement disparaît. */
+:where(.tab, .seg, .seg > button, .rail-btn, .btn, .chip)[data-term] {
+  text-decoration: none;
+}
+
 /* ── Mode concentration ────────────────────────────────────────────────────*/
 
 :root[data-focus="on"] .panel[data-state="pinned"] {
@@ -886,4 +1136,225 @@ body[data-active-space] .panel-head {
 
 :root[data-focus="on"] #dock {
   display: none;
+}
+
+/* ── Sous 900 px : une colonne, des tiroirs ────────────────────────────────
+ * Mesuré à 390 px avant ce bloc : explorateur (236) et inspecteur (300) épinglés
+ * laissaient 0 px au centre, la barre d'application poussait ses onglets
+ * jusqu'à 820 px. Désormais :
+ *   - le rail devient une barre basse (icônes seules, libellés en aria-label) ;
+ *   - explorateur, inspecteur et preuves sont des tiroirs en surimpression, un
+ *     seul à la fois, fermés à l'arrivée, ouverts par le rail, refermés par
+ *     Échap, par leur bouton ou par un appui hors d'eux ;
+ *   - les barres (application, document, état, dock) défilent ou se délestent
+ *     de leurs éléments secondaires au lieu de déborder. */
+@media (max-width: 900px) {
+  :root {
+    --h-dock: 140px;
+    --h-railbar: 48px;
+  }
+
+  #appbar {
+    gap: var(--sp-2);
+    padding: 0 var(--sp-2);
+  }
+
+  #brand span,
+  #appbar > .grow,
+  .palette-lbl,
+  .pill-lbl,
+  .live-pre,
+  #palette-open .kbd,
+  #project-chip .chevron {
+    display: none;
+  }
+
+  #project-chip {
+    max-width: 112px;
+  }
+
+  #project-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .spaces-nav {
+    flex: 1 1 0;
+  }
+
+  #spaces {
+    margin-left: 0;
+    flex: 1 1 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  #spaces::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Seul l'espace courant garde son libellé : les cinq autres sont des icônes. */
+  #spaces .tab {
+    flex: none;
+    padding: 0 var(--sp-2);
+  }
+
+  #spaces .tab[aria-selected="false"] .tab-lbl {
+    display: none;
+  }
+
+  #palette-open {
+    width: auto;
+    justify-content: center;
+  }
+
+  #middle {
+    position: relative;
+    flex-direction: column;
+  }
+
+  #center {
+    order: 1;
+    flex: 1 1 0;
+    width: 100%;
+  }
+
+  :root[data-density] #rail {
+    order: 2;
+    flex-direction: row;
+    width: 100%;
+    height: var(--h-railbar);
+    padding: 0;
+    border-right: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  :root[data-density] #rail .rail-btn {
+    flex: 1 1 0;
+    width: auto;
+    height: 100%;
+    border-left: 0;
+    border-top: 2px solid transparent;
+  }
+
+  :root[data-density] #rail .rail-btn[aria-pressed="true"] {
+    border-top-color: var(--acc);
+  }
+
+  :root[data-density] #rail .rail-lbl,
+  #rail > .grow {
+    display: none;
+  }
+
+  /* Tiroirs : sortis de la grille, par-dessus le centre, au-dessus de la barre basse. */
+  :root[data-density] .panel[data-state="pinned"],
+  :root[data-density] .panel[data-state="peek"] {
+    position: absolute;
+    top: 0;
+    bottom: var(--h-railbar);
+    z-index: 40;
+    width: min(88vw, 360px) !important;
+    margin: 0;
+    box-shadow: var(--shadow-tip);
+  }
+
+  :root[data-density] .panel.panel-left[data-state] {
+    left: 0;
+    border-right: 1px solid var(--line);
+  }
+
+  :root[data-density] .panel-right[data-state] {
+    right: 0;
+    left: auto;
+    border-left: 1px solid var(--line);
+  }
+
+  /* Voile derrière le tiroir : un appui dessus le referme (shell.js). */
+  #middle[data-drawer]::after {
+    content: "";
+    position: absolute;
+    inset: 0 0 var(--h-railbar) 0;
+    z-index: 39;
+    background: var(--scrim);
+  }
+
+  .panel-resize,
+  .panel-head .kbd,
+  .pin {
+    display: none;
+  }
+
+  .panel-close {
+    display: flex;
+  }
+
+  body[data-active-space] .panel-head {
+    border-top-width: 3px;
+  }
+
+  /* La barre de document passe à la ligne plutôt que de défiler : les vues
+     (Workflow, Board…) sont des commandes, elles ne se cachent pas hors écran. */
+  #docbar {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: var(--h-doc);
+    gap: var(--sp-1) var(--sp-2);
+    padding: var(--sp-1) var(--sp-2);
+  }
+
+  #docbar > .grow {
+    display: none;
+  }
+
+  #statusbar {
+    gap: var(--sp-3);
+    padding: 0 var(--sp-2);
+    overflow: hidden;
+  }
+
+  #statusbar > * {
+    flex: none;
+    white-space: nowrap;
+  }
+
+  #statusbar > .grow {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .st-extra {
+    display: none;
+  }
+
+  #dock-tabs {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  #dock-tabs > * {
+    flex: none;
+  }
+
+  #dock-echo,
+  #dock-tabs .kbd {
+    display: none;
+  }
+
+  #dock-tabs > .row:last-child {
+    display: none;
+  }
+
+  .empty {
+    margin: var(--sp-4) 0;
+    max-width: none;
+  }
+
+  /* Un tableau plus large que l'écran défile dans sa propre boîte : c'est
+     lui qui défile, pas la toile ni la page. */
+  #canvas table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+  }
 }

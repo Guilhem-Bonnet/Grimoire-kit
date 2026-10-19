@@ -1,3 +1,7 @@
+---
+audience: référence
+---
+
 # Référence des contrôles gouvernés
 
 > Page de référence générée depuis `framework/agentic-standard/templates/pattern-catalog.yaml`

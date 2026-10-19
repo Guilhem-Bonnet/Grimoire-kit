@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+
+# Rich lit COLUMNS à la construction d'une Console, et plusieurs modules du kit
+# en construisent une à l'import. La fixture ci-dessous arrive trop tard pour
+# eux : sur un runner CI sans terminal (80 colonnes), un chemin ou un
+# identifiant long est coupé en deux et l'assertion échoue sans rapport avec ce
+# qu'elle teste. On fixe donc la largeur avant tout import du kit.
+os.environ["COLUMNS"] = "200"
 
 # ── Path setup ────────────────────────────────────────────────────────────────
 
@@ -183,7 +191,7 @@ def _grimoire(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
         [sys.executable, "-m", "grimoire", *args],
         cwd=str(cwd),
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         check=False,
         timeout=180,
     )
@@ -363,3 +371,35 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
             terminal.write_line(message, red=True, bold=True)
         else:
             print(message)
+
+
+# ── Jeton de session des serveurs locaux (W1-10) ─────────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def _session_token_on_writes(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Une écriture de test porte le jeton, comme le ferait la page servie.
+
+    Le cockpit et l'atelier exigent ``X-Grimoire-Session`` sur toute mutation ;
+    les tests qui parlent à un vrai serveur passent par ``http.client``. Un test
+    qui prouve le refus sans jeton se marque ``no_session_token``.
+    """
+    if request.node.get_closest_marker("no_session_token"):
+        return
+    import http.client
+
+    from grimoire.tools import request_guard
+
+    original = http.client.HTTPConnection.request
+
+    def request_with_token(self, method, url, body=None, headers=None, **kw):  # type: ignore[no-untyped-def]
+        headers = dict(headers or {})
+        if method.upper() not in ("GET", "HEAD", "OPTIONS") and not any(
+            k.lower() == request_guard.SESSION_HEADER.lower() for k in headers
+        ):
+            headers[request_guard.SESSION_HEADER] = request_guard.session_token()
+        return original(self, method, url, body, headers, **kw)
+
+    monkeypatch.setattr(http.client.HTTPConnection, "request", request_with_token)

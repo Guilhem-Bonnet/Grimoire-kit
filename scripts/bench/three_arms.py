@@ -46,6 +46,7 @@ from typing import Any
 
 # Gardes du dépôt de tâche (W1-08a) : module voisin, aussi quand ce script est chargé par chemin.
 sys.path.append(str(Path(__file__).resolve().parent))
+from bare_guard import refuse_bare_for_governed_arms
 from cost_gate import cost_from_result, cost_known_fields, filter_tasks, partial_cost_notes
 from hidden_reads import (
     check_transcript,
@@ -56,6 +57,16 @@ from hidden_reads import (
     unevaluated_run_alert,
     unevaluated_runs_rows,
 )
+from model_pin import (
+    ModelMismatchError,
+    detect_claude_code_version,
+    ensure_results_match_model,
+    pin_report_fields,
+    render_pin_lines,
+    saturation_exit_code,
+    selection_pin,
+)
+from recompute import data_seal, render_seal_lines
 from results_io import read_results_rows
 from task_repo import (
     ContaminatedTaskRepoError,
@@ -208,6 +219,12 @@ class RunRecord:
     transcript_check: str | None = None
     hidden_test_reads: list[dict[str, Any]] | None = None
     cost_known: bool | None = None  # B-00 ; None = ligne antérieure, voir cost_gate.row_cost_known
+    # B-01 : modèle DEMANDÉ (``--model``) et version de Claude Code de ce run.
+    # ``None`` = ligne antérieure à B-01 (modèle inconnu, jamais reconstruit) :
+    # elle ne s'apparie avec aucune ligne au modèle enregistré, voir
+    # ``model_pin.require_single_model``. Le modèle EFFECTIF reste dans ``model_usage``.
+    model_id: str | None = None
+    claude_code_version: str | None = None
 
     @property
     def invalid(self) -> bool:
@@ -1542,6 +1559,11 @@ def run_claude_headless(
     poll_interval: float = DEFAULT_POLL_INTERVAL_S,
     log_path: Path | None = None,
     auth_mode: str = "oauth-copy",
+    model: str | None = None,
+    extra_args: Sequence[str] = (),
+    append_log: bool = False,
+    bare: bool | None = None,
+    arm: str | None = None,
 ) -> RunOutcome:
     """Lance ``claude -p`` en tête sans tête, avec garde-fou timeout + boucle.
 
@@ -1565,7 +1587,11 @@ def run_claude_headless(
     ``ANTHROPIC_API_KEY`` (ou un ``apiKeyHelper``) — déjà présente dans
     *env* puisque :func:`run_environment` part de ``os.environ``. Aucun
     identifiant n'est donc jamais copié pour ce mode (voir ``_run_one``).
+    B-06 : *arm* (bras du run) refuse ``--bare`` pour un bras gouverné (``bare_guard``). ``aidlc_arm.py`` : *extra_args* (``--resume``) ajouté à la commande, *append_log* n'écrase pas le journal et
+    seules les lignes de CET appel comptent, *bare* force ou interdit ``--bare`` (``None`` : déduit de *auth_mode*).
     """
+    if arm is not None:
+        refuse_bare_for_governed_arms([arm], auth_mode, bare=bare)  # B-06, avant tout appel payant
     log_path = log_path or (task_dir.parent / f"{task_dir.name}.stream.jsonl")
     effective_env = dict(env) if env is not None else {**os.environ, "HOME": str(home)}
     cmd = [
@@ -1580,16 +1606,21 @@ def run_claude_headless(
         "--setting-sources",
         "project,local",
     ]
-    if auth_mode == "api-key":
+    if (auth_mode == "api-key") if bare is None else bare:
         cmd.append("--bare")
+    if model:
+        # B-01 : sans ``--model`` le modèle est celui par défaut de l'outil, qui change d'une version à l'autre.
+        cmd.extend(["--model", model])
+    cmd.extend(extra_args)
 
     outcome = RunOutcome()
     start = time.monotonic()
     seen_commands: list[str] = []
+    start_offset = log_path.stat().st_size if append_log and log_path.is_file() else 0
 
-    with open(log_path, "wb") as logf:
+    with open(log_path, "ab" if append_log else "wb") as logf:
         proc = subprocess.Popen(cmd, cwd=task_dir, env=effective_env, stdout=logf, stderr=subprocess.STDOUT)
-        last_pos = 0
+        last_pos = start_offset
         while True:
             returncode = proc.poll()
             elapsed = time.monotonic() - start
@@ -1624,7 +1655,9 @@ def run_claude_headless(
     outcome.toolchain_friction_bash_calls = count_toolchain_friction_bash_calls(seen_commands)
 
     try:
-        lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        with open(log_path, "rb") as f:
+            f.seek(start_offset)
+            lines = f.read().decode("utf-8", errors="replace").splitlines()
     except OSError:
         lines = []
     result = parse_result_event(lines)
@@ -1776,6 +1809,8 @@ def build_report(
     ``state/toolchain_check.json`` — ``None`` pour un rapport reconstruit
     sans ce fichier (campagnes antérieures à ce lot).
     """
+    # B-01 : deux modèles dans un même rapport = comparaison entre bras faussée, refusée avant tout calcul.
+    pin_fields, nu_rates = pin_report_fields(records)
     # W1-08b : un run invalidé (transcription qui désigne un test caché) sort de
     # tous les taux et médianes ; son coût reste dans ``spent_by_arm``.
     by_arm: dict[str, list[RunRecord]] = defaultdict(list)
@@ -1841,7 +1876,10 @@ def build_report(
     task_ids = sorted({r.task_id for r in records})
     for task_id in task_ids:
         task_records = [r for r in records if r.task_id == task_id and not r.invalid]
-        row: dict[str, Any] = {"language": next((r.language for r in records if r.task_id == task_id), "?")}
+        row: dict[str, Any] = {
+            "language": next((r.language for r in records if r.task_id == task_id), "?"),
+            "nu_baseline_pass_rate": nu_rates.get(task_id),
+        }
         for arm in ARMS:
             arm_task_records = [r for r in task_records if r.arm == arm]
             row[arm] = {
@@ -1880,6 +1918,7 @@ def build_report(
         "generated_at": datetime.now(tz=UTC).isoformat(),
         "seed": seed,
         "label": label,
+        **pin_fields,  # B-01 : modèle demandé, versions de Claude Code, saturation de la suite
         "total_tasks": total_tasks,
         "tasks_run": len(task_ids),
         "k": K_REPLAY,
@@ -1917,6 +1956,9 @@ def render_report_markdown(report: dict[str, Any]) -> str:
     if report.get("label"):
         lines.append(f"Étiquette : **{report['label']}**.")
         lines.append("")
+
+    lines.extend(render_pin_lines(report))
+    lines.extend(render_seal_lines(report))
 
     auth_modes = report.get("auth_modes") or []
     if auth_modes:
@@ -2074,6 +2116,7 @@ def write_report(
     rerun_arms: Sequence[str] | None = None,
     label: str | None = None,
     toolchain_check: dict[str, Any] | None = None,
+    results_path: Path | None = None,
 ) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     report = build_report(
@@ -2085,6 +2128,8 @@ def write_report(
         label=label,
         toolchain_check=toolchain_check,
     )
+    if results_path is not None:  # B-02 : le rapport cite le hash de ses données brutes
+        report = {**report, "data": data_seal(results_path, records)}
     (out_dir / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     (out_dir / "report.md").write_text(render_report_markdown(report), encoding="utf-8")
 
@@ -2132,6 +2177,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--subset", type=Path, default=None, help="B-00 : ne rejoue que les tâches de ce fichier (docs/bench/cost-gate-subset.json)")
     parser.add_argument("--label", type=str, default=None, help="étiquette libre reprise dans report.md")
     parser.add_argument(
+        "--model",
+        type=str,
+        default=None,
+        help="B-01 : modèle passé à `claude -p --model`, obligatoire pour --pilot et --full (identifiant complet "
+        "de préférence : un alias peut changer de cible). Noté dans selection.json et sur chaque ligne ; "
+        "deux lots de modèles différents ne s'apparient pas.",
+    )
+    parser.add_argument(
+        "--fail-on-saturated",
+        action="store_true",
+        help="B-01 : sortie en erreur (code 1) si le rapport écrit conclut SATURÉ (> 50 %% des tâches à 1.0 pour le nu) ; "
+        "opt-in, le rapport est écrit dans tous les cas",
+    )
+    parser.add_argument(
         "--grimoire-bin",
         type=str,
         default=None,
@@ -2159,9 +2218,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ValueError as exc:
         parser.error(str(exc))
 
+    args.model = args.model.strip() if args.model else None
+    if (args.pilot or args.full) and not args.model:
+        parser.error("--model est obligatoire pour --pilot et --full : un run payant ne part pas sur le modèle par défaut")
+
     if args.report_only:
         workspace = args.workspace or _default_workspace()
-        return _do_report_only(workspace, seed=args.seed, report_dir=args.report_dir, arms=args.arms, label=args.label)
+        return _do_report_only(
+            workspace,
+            seed=args.seed,
+            report_dir=args.report_dir,
+            arms=args.arms,
+            label=args.label,
+            fail_on_saturated=args.fail_on_saturated,
+        )
 
     workspace = args.workspace or _default_workspace()
     workspace.mkdir(parents=True, exist_ok=True)
@@ -2175,8 +2245,24 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     state_dir = workspace / "state"
     state_dir.mkdir(parents=True, exist_ok=True)
+    if args.pilot or args.full:
+        # B-01 : avant d'écraser selection.json et avant toute dépense, refus de mêler ce modèle à un autre.
+        try:
+            ensure_results_match_model(state_dir / "results.jsonl", args.model)
+        except (ModelMismatchError, ValueError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+    claude_code_version = detect_claude_code_version() if (args.pilot or args.full) else None
     (state_dir / "selection.json").write_text(
-        json.dumps({"seed": args.seed, "ecc_commit": ecc_commit, "tasks": [t.to_dict() for t in tasks]}, indent=2),
+        json.dumps(
+            {
+                "seed": args.seed,
+                "ecc_commit": ecc_commit,
+                **selection_pin(state_dir / "selection.json", args.model, claude_code_version),
+                "tasks": [t.to_dict() for t in tasks],
+            },
+            indent=2,
+        ),
         encoding="utf-8",
     )
 
@@ -2193,6 +2279,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     # par run — voir `resolve_auth_mode`. Lève `SystemExit` si `--auth
     # api-key` est demandé explicitement sans `ANTHROPIC_API_KEY`.
     auth_mode = resolve_auth_mode(args.auth)
+    refuse_bare_for_governed_arms(selected_arms, auth_mode)  # B-06 : jamais `--bare` sur un bras gouverné
     print(f"[auth] mode : {auth_mode}")
 
     # Garde-fou lot H (#582) : avant tout appel `claude -p` (jamais pour
@@ -2291,6 +2378,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                             run_timeout_s=args.run_timeout_s,
                             grimoire_bin=grimoire_bin,
                             auth_mode=auth_mode,
+                            model=args.model,
+                            claude_code_version=claude_code_version,
                         )
                     except ContaminatedTaskRepoError as exc:
                         # W1-08a : arrêt à 0 $, comme la garde du lot H. Rien n'est
@@ -2337,6 +2426,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif expected_cost_path.is_file():
         expected_cost = json.loads(expected_cost_path.read_text(encoding="utf-8"))
 
+    saturation_rc = 0
     if (args.full or disk_exhausted) and not contaminated:
         report_dir = args.report_dir or (workspace / "reports" / datetime.now(tz=UTC).strftime("%Y-%m-%d"))
         write_report(
@@ -2348,7 +2438,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             rerun_arms=selected_arms,
             label=args.label,
             toolchain_check=toolchain_check,
+            results_path=results_path,
         )
+        saturation_rc = saturation_exit_code(records, fail_on_saturated=args.fail_on_saturated)
         if disk_exhausted:
             print(f"[report] rapport PARTIEL (arrêt disque) écrit sous {report_dir}")
         else:
@@ -2395,7 +2487,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("[sécurité] aucune fuite d'ANTHROPIC_API_KEY détectée sous un HOME isolé ou un journal.")
 
     # Contamination : gardes de sécurité passées, mais la campagne est un échec.
-    return 1 if contaminated else 0
+    return 1 if contaminated else saturation_rc
 
 
 def _do_report_only(
@@ -2405,6 +2497,7 @@ def _do_report_only(
     report_dir: Path | None,
     arms: str | None = None,
     label: str | None = None,
+    fail_on_saturated: bool = False,
 ) -> int:
     state_dir = workspace / "state"
     results_path = state_dir / "results.jsonl"
@@ -2425,18 +2518,23 @@ def _do_report_only(
     # annoter le rapport (quels bras la campagne dont ``results.jsonl`` est
     # issu a réellement rejoués), pas à filtrer quoi que ce soit.
     rerun_arms = parse_arms(arms) if arms else None
-    write_report(
-        records,
-        out_dir,
-        total_tasks=total_tasks,
-        expected_cost=expected_cost,
-        seed=seed,
-        rerun_arms=rerun_arms,
-        label=label,
-        toolchain_check=toolchain_check,
-    )
+    try:
+        write_report(
+            records,
+            out_dir,
+            total_tasks=total_tasks,
+            expected_cost=expected_cost,
+            seed=seed,
+            rerun_arms=rerun_arms,
+            label=label,
+            toolchain_check=toolchain_check,
+            results_path=results_path,
+        )
+    except ModelMismatchError as exc:  # B-01 : appariement refusé, aucun rapport écrit
+        print(str(exc), file=sys.stderr)
+        return 1
     print(f"[report] écrit sous {out_dir}")
-    return 0
+    return saturation_exit_code(records, fail_on_saturated=fail_on_saturated)
 
 
 def _do_dry_run(
@@ -2486,6 +2584,8 @@ def _run_one(
     run_timeout_s: int,
     grimoire_bin: str,
     auth_mode: str = "oauth-copy",
+    model: str | None = None,
+    claude_code_version: str | None = None,
 ) -> RunRecord:
     run_dir = run_dir_for(workspace, task, arm, run_index)
     reset_run_dir(run_dir)
@@ -2548,7 +2648,7 @@ def _run_one(
         # précisément ce qui élimine le bug de rotation OAuth partagée :
         # rien n'est jamais écrit dans `home`.
         outcome = run_claude_headless(
-            run_dir, build_prompt(task), home=home, env=env, timeout_s=run_timeout_s, auth_mode=auth_mode
+            run_dir, build_prompt(task), home=home, env=env, timeout_s=run_timeout_s, auth_mode=auth_mode, model=model, arm=arm
         )
     else:
         # Les identifiants ne vivent dans `home` que le temps de cet appel : le
@@ -2563,7 +2663,7 @@ def _run_one(
                     "ou passe --auth api-key avec ANTHROPIC_API_KEY exportée."
                 )
             outcome = run_claude_headless(
-                run_dir, build_prompt(task), home=home, env=env, timeout_s=run_timeout_s, auth_mode=auth_mode
+                run_dir, build_prompt(task), home=home, env=env, timeout_s=run_timeout_s, auth_mode=auth_mode, model=model, arm=arm
             )
 
     # W1-08b : ce que l'agent a réellement lu, y compris pour un run tué (timeout, boucle).
@@ -2616,6 +2716,8 @@ def _run_one(
         auth_mode=auth_mode,
         transcript_check=transcript_check,
         hidden_test_reads=hidden_test_reads,
+        model_id=model,
+        claude_code_version=claude_code_version,
     )
 
 

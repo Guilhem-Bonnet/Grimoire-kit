@@ -21,7 +21,7 @@ def _project(tmp_path: Path, memory_block: str) -> Path:
         '  description: "d"\n'
         '  type: "infrastructure"\n'
         f"memory:\n{memory_block}",
-    )
+    encoding="utf-8",)
     return tmp_path
 
 
@@ -43,7 +43,7 @@ def test_declared_model_path_that_exists_is_ok(tmp_path: Path) -> None:
     model = tmp_path / "model"
     model.mkdir()
     (model / "model.onnx").write_bytes(b"x")
-    root = _project(tmp_path, f'  backend: "qdrant-local"\n  embedding_model_path: "{model}"\n')
+    root = _project(tmp_path, f'  backend: "qdrant-local"\n  embedding_model_path: "{model.as_posix()}"\n')
 
     check = check_embedding_model(root)
 
@@ -52,7 +52,7 @@ def test_declared_model_path_that_exists_is_ok(tmp_path: Path) -> None:
 
 
 def test_declared_model_path_that_is_missing_is_flagged(tmp_path: Path) -> None:
-    root = _project(tmp_path, f'  backend: "qdrant-local"\n  embedding_model_path: "{tmp_path / "absent"}"\n')
+    root = _project(tmp_path, f'  backend: "qdrant-local"\n  embedding_model_path: "{(tmp_path / "absent").as_posix()}"\n')
     check = check_embedding_model(root)
 
     assert check.level == "warn"
@@ -63,7 +63,7 @@ def test_declared_model_path_that_is_empty_is_flagged(tmp_path: Path) -> None:
     """An empty directory is not a model — a half-finished copy must not pass."""
     empty = tmp_path / "hollow"
     empty.mkdir()
-    root = _project(tmp_path, f'  backend: "qdrant-local"\n  embedding_model_path: "{empty}"\n')
+    root = _project(tmp_path, f'  backend: "qdrant-local"\n  embedding_model_path: "{empty.as_posix()}"\n')
 
     assert check_embedding_model(root).level == "warn"
 

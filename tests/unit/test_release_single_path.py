@@ -148,9 +148,18 @@ def test_failed_gates_stop_everything() -> None:
     assert {n: r for n, r in results.items() if n != "gates"} == {
         "build": "skipped",
         "test": "skipped",
+        "attest": "skipped",
         "publish-pypi": "skipped",
         "github-release": "skipped",
     }
+
+
+@pytest.mark.parametrize("stable", [True, False])
+def test_a_failed_attestation_blocks_publication_and_release(stable: bool) -> None:
+    # D-03 : sans attestation, ni PyPI ni la release GitHub ne partent.
+    results = _simulate(stable=stable, failing=frozenset({"attest"}))
+    assert results["publish-pypi"] == "skipped"
+    assert results["github-release"] == "skipped"
 
 
 # ── 3. Les notes sont la section du CHANGELOG validée ────────────────────────
@@ -393,7 +402,12 @@ def _contributing_release_section() -> str:
 
 
 def _changelog_d01_entry() -> str:
+    # L'entrée vit dans le CHANGELOG tant que la note de sa version tient sous la
+    # limite de GitHub ; sinon dans le détail intégral de la version (3.63.0).
     text = (_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    detail = _ROOT / "docs" / "changelog-3.63.0-detail.md"
+    if detail.is_file():
+        text += "\n" + detail.read_text(encoding="utf-8")
     start = text.index("- fix(release): une seule voie de release")
     end = text.find("\n## [", start)
     return text[start : end if end != -1 else len(text)]
@@ -477,6 +491,12 @@ def _tag_gate_passes(root: Path, version: str) -> bool:
     return done.returncode == 0
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : rejoue un garde de workflow écrit pour bash sous ubuntu-latest (CI) ; Git Bash de Windows (CRLF, chemins, sortie redirigée) n'est pas la cible de ce garde"
+    ),
+)
 @pytest.mark.parametrize("version", ["3.63.0", "3.63.0-rc1"])
 def test_a_release_version_crosses_both_gates(tmp_path: Path, version: str) -> None:
     root = _gate_repo(tmp_path / "r", version)
@@ -484,6 +504,12 @@ def test_a_release_version_crosses_both_gates(tmp_path: Path, version: str) -> N
     assert _version_sync_passes(root), "test_version_sync refuse la version que le garde de tag accepte"
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : rejoue un garde de workflow écrit pour bash sous ubuntu-latest (CI) ; Git Bash de Windows (CRLF, chemins, sortie redirigée) n'est pas la cible de ce garde"
+    ),
+)
 @pytest.mark.parametrize("version", ["3.63.0", "3.63.0-rc1", "3.63.0rc1", "3.63", "3.63.0-"])
 def test_the_two_gates_agree_on_every_spelling(tmp_path: Path, version: str) -> None:
     root = _gate_repo(tmp_path / "r", version)

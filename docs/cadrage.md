@@ -1,3 +1,7 @@
+---
+audience: utilisateur
+---
+
 # Cadrage produit
 
 Comprendre avant de construire. Le cadrage (brique B4) pose un chemin guidé en

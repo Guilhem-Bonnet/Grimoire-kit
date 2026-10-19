@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from grimoire.core.standard_checks.evidence_journal import record_guard_error
@@ -12,11 +13,17 @@ from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
 from grimoire.hosts.decisions.enrolment import (
     BLOCKING_PROFILES,
     NO_ACTIVE_TASK,
+    TASK_UNPARKED,
     ambiguity_text,
+    expired_text,
     no_task_stop_reason,
+    record_unattached_work,
     session_mutation_count,
+    stop_scope,
+    waiting_task_of_session,
 )
 from grimoire.hosts.decisions.gate_summary import _gate_summary
+from grimoire.hosts.decisions.profile_floor import session_profile
 
 #: Board states that owe no evidence artifact yet. A task parked here passes
 #: every gate by construction — see ``check_evidence_gates``.
@@ -34,7 +41,79 @@ def decide_evidence_gate(hook: HookInput) -> Decision:
     The kit's own directive says a closure without green gates is an unfinished
     task. Said in a prompt, that is a suggestion; said here, it is the rule —
     this is the only decision in the package that can make a host refuse.
+
+    W2-08 : une panne imprévue de la garde elle-même (lecture du profil, de la
+    tâche active, de la portée du ``Stop``…) ne devient jamais un ``ALLOW`` :
+    voir :func:`_stop_guard_crashed`.
+
+    W2-06 : un refus sur une tâche est levé, une fois, par un contournement
+    tapé par l'humain dans la session qui tient la tâche
+    (:mod:`.gate_override`), journalisé avant d'être appliqué.
     """
+    return _guarded_stop(hook)
+
+
+def _guarded_stop(hook: HookInput) -> Decision:
+    """:func:`_decide_stop` puis la levée W2-06, sous le filet W2-08 : une panne devient un refus tracé, jamais un ALLOW."""
+    from grimoire.hosts.decisions.gate_override import apply_override
+
+    try:
+        return apply_override(hook, _decide_stop(hook))
+    except Exception as exc:
+        return _stop_guard_crashed(hook, exc)
+
+
+def _crash_profile(project_root: Path) -> str:
+    """Le profil à appliquer à une garde en panne ; ``governed`` si un standard est posé mais illisible.
+
+    Même règle que la garde d'autorité (:func:`grimoire.hosts.decisions.tool_policy._authority_guard`) :
+    un profil qu'on ne peut pas lire ne relâche pas le refus. Un projet sans dossier de standard
+    n'a rien à refuser (``""``).
+    """
+    try:
+        return active_profile_id(project_root)
+    except Exception:
+        try:
+            return "governed" if (project_root / "_grimoire" / "standard").is_dir() else ""
+        except Exception:
+            return "governed"
+
+
+def _stop_guard_crashed(hook: HookInput, exc: Exception) -> Decision:
+    """W2-08 : le ``Stop`` a planté hors des gates — tracé, puis refusé là où le profil le promet.
+
+    Avant, l'exception remontait à :func:`grimoire.hosts.decisions.run_decision`, qui rend
+    ``ALLOW`` sur tout événement autre que ``PreToolUse`` : sur ``Stop`` aucun hôte ne lit
+    le contexte, donc une lecture de profil ou de tâche en panne clôturait en silence une
+    tâche gouvernée aux gates rouges. Un profil bloquant refuse maintenant, avec la cause ;
+    les autres sont prévenus. Le ``Stop`` continué passe toujours (``stop_active`` est testé
+    avant tout) : la panne coûte un tour, jamais la session.
+    """
+    cause = f"{type(exc).__name__}: {exc}"
+    profile = _crash_profile(hook.project_root)
+    record_guard_error(hook.project_root, "bootstrap", "evidence_gate", type(exc).__name__, str(exc))
+    detail = {"error": cause, "profile": profile, "ok": False, "guard_error": "evidence_gate"}
+    if profile in _BLOCKING_PROFILES:
+        return Decision(
+            outcome=Outcome.BLOCK,
+            reason=(
+                f"[Grimoire] Garde de clôture en erreur (profil {profile}) — {cause}\n"
+                "Elle n'a pas pu juger la tâche : ce n'est pas un vert. Cette panne est tracée "
+                "(guard.error). Corrige la cause ; si la tâche doit rester ouverte, dis-le "
+                "explicitement à l'utilisateur au lieu de conclure. Le Stop suivant passe."
+            ),
+            detail=detail,
+        )
+    if not profile:
+        return Decision(detail={**detail, "skipped": "project_not_enrolled"})
+    return Decision(
+        context=f"[Grimoire] Garde de clôture en erreur (profil {profile}, non bloquant) : {cause}",
+        detail=detail,
+    )
+
+
+def _decide_stop(hook: HookInput) -> Decision:
+    """The body of :func:`decide_evidence_gate`, split out so one ``try`` covers every unforeseen failure."""
     if hook.stop_active:
         # The host is already re-running us after a previous block. Blocking
         # again without limit is how a session becomes unexitable : W2-02 keeps
@@ -43,11 +122,14 @@ def decide_evidence_gate(hook: HookInput) -> Decision:
     if not is_standard_enrolled(hook.project_root):
         return Decision(detail={"skipped": "project_not_enrolled"})
 
-    active = resolve_active_task(hook.project_root, session_id=hook.session_id)
+    active = stop_scope(hook, resolve_active_task(hook.project_root, session_id=hook.session_id))
     task_id = active.task_id
-    profile = active_profile_id(hook.project_root)
+    profile = session_profile(hook)
     if active.is_fallback:
-        no_task = _no_task_closure(hook, profile, active.candidates)
+        parked = _parked_waiting(hook)
+        if parked is not None:
+            return parked
+        no_task = _no_task_closure(hook, profile, active.candidates, active.expired)
         if no_task is not None:
             return no_task
         if active.source == "ambiguous":
@@ -59,12 +141,22 @@ def decide_evidence_gate(hook: HookInput) -> Decision:
                 context=f"[Grimoire] {ambiguity_text(active.candidates)}",
                 detail={"task_id": task_id, "task_source": active.source, "candidates": list(active.candidates)},
             )
+        if active.expired:
+            # Issue #710 : même logique que #692 — rien d'écrit, pas de blocage,
+            # mais dire « claim expiré » plutôt que juger la tâche fantôme.
+            return Decision(
+                context=f"[Grimoire] {expired_text(active.expired)}",
+                detail={"task_id": task_id, "task_source": active.source, "expired": list(active.expired)},
+            )
     try:
         ok, summary, detail = _gate_summary(hook.project_root, task_id)
     except Exception as exc:
         return _unevaluable_gate(task_id, profile, exc)
 
     if ok:
+        unparked = _unparked_task(hook, active, profile, detail)
+        if unparked is not None and detail.get("state") != "archived":
+            return unparked
         if detail.get("state") == "archived":
             # Issue #638 lot B : une tâche annulée depuis le cockpit (ou
             # archivée) n'a plus de gate à réclamer — dit en clair plutôt
@@ -109,6 +201,62 @@ def decide_evidence_gate(hook: HookInput) -> Decision:
     return _with_done_gate(Decision(outcome=Outcome.BLOCK, reason=reason, detail=detail), hook, task_id, profile)
 
 
+def _parked_waiting(hook: HookInput) -> Decision | None:
+    """K6 : la tâche de la session est garée en ``waiting`` — la session peut s'arrêter, et le dit.
+
+    Sans cela, une session qui vient de poser sa question (``task ask``) ou son attente
+    (``task wait``) était refusée au ``Stop`` en profil gouverné comme un travail hors tâche.
+    """
+    task = waiting_task_of_session(hook)
+    if task is None:
+        return None
+    reason = task.waiting.reason if task.waiting is not None else "?"
+    return Decision(
+        context=(
+            f"[Grimoire] Tâche {task.id} garée en attente ({reason}) : la session peut s'arrêter ; "
+            "elle reprendra avec `grimoire task resume` ou par un nouveau claim une fois l'attente levée."
+        ),
+        detail={"task_id": task.id, "task_state": task.status.value, "waiting_reason": reason, "parked": True},
+    )
+
+
+def _unparked_task(hook: HookInput, active: Any, profile: str, detail: dict[str, Any]) -> Decision | None:
+    """§5.1 : une tâche rattachée à la session n'est quittée que fermée ou garée avec une raison.
+
+    Les gates de preuve sont verts, mais le ledger tient encore la tâche (``claimed`` ou
+    ``running``) : ni rendue pour vérification, ni bloquée, ni échouée, ni annulée. Un profil
+    bloquant refuse la clôture en nommant les gestes qui la garent ; les autres le disent.
+    « Garée » : ``needs_verification``/``blocked``/``failed``/``cancelled``, ou ``waiting`` (K6,
+    :func:`_parked_waiting`). ``stop_hook_active`` passe avant ce contrôle : le second ``Stop`` sort toujours.
+    """
+    if active.source not in ("session_claim", "env", "ledger_claim"):
+        return None
+    try:
+        from grimoire.core.standard_state import LEDGER_RELPATH
+        from grimoire.missions.ledger import MissionLedger
+        from grimoire.missions.schemas import TaskState
+
+        events = hook.project_root.resolve() / LEDGER_RELPATH / "events.jsonl"
+        task = MissionLedger(events.parent).get_task(active.task_id) if events.is_file() else None
+    except Exception:
+        return None
+    if task is None or task.status not in (TaskState.CLAIMED, TaskState.RUNNING):
+        return None
+    message = (
+        f"[Grimoire] Tâche {task.id} encore {task.status.value} : cette session la tient (bail epoch "
+        f"{task.claim.lease_epoch if task.claim else 0}) et ne l'a ni fermée ni garée.\n"
+        f"Rends-la avant de conclure : `grimoire task move {task.id} --to needs_verification` (preuve remise), "
+        f"`grimoire task block {task.id} --reason ...` (bloquée), `grimoire task ask {task.id} \"...\"` "
+        f"(une décision attend l'humain), `grimoire task wait {task.id} --reason ci|quota|paused` (attente nommée), "
+        f"ou `grimoire task cancel {task.id} --reason ...` (abandon). "
+        "Si elle doit rester en cours, dis-le explicitement à l'utilisateur au lieu de conclure."
+    )
+    info = {**detail, "blocked_on": TASK_UNPARKED, "task_id": task.id, "task_state": task.status.value}
+    if profile in _BLOCKING_PROFILES:
+        return Decision(outcome=Outcome.BLOCK, reason=message, detail=info)
+    return Decision(context=message, detail=info)
+
+
 def _signature_of(hook: HookInput, task_id: str, summary: str, detail: dict[str, Any]) -> str:
     from grimoire.hosts.decisions.done_gate import stop_signature
 
@@ -138,9 +286,9 @@ def _continued_stop(hook: HookInput) -> Decision:
     est maintenu ; identique ou plafond atteint, la session sort et
     ``stop.released`` est tracé (journal de garde de la tâche).
 
-    Shadow d'abord (W2-02-S3) : tant que ni ``GRIMOIRE_DONE_GATE=enforce`` ni
-    ``options.done_gate: enforce`` n'est posé (le même interrupteur que le gate
-    « fini »), le refus maintenu n'est pas émis : il est calculé, compté et tracé
+    Shadow d'abord (W2-02-S3) : tant que le gate « fini » n'est pas armé (même
+    interrupteur : ``GRIMOIRE_DONE_GATE=enforce``, ``options.done_gate: enforce`` ou la
+    date d'armement, ``resolve_done_gate_mode``), le refus maintenu n'est pas émis : il est calculé, compté et tracé
     (``stop.would_block``), la session sort comme avant.
     """
     skipped = Decision(detail={"skipped": "stop_hook_already_active"})
@@ -148,19 +296,19 @@ def _continued_stop(hook: HookInput) -> Decision:
         if not is_standard_enrolled(hook.project_root):
             return skipped
         active = resolve_active_task(hook.project_root, session_id=hook.session_id)
-        profile = active_profile_id(hook.project_root)
+        profile = session_profile(hook)
         if active.is_fallback or profile not in _BLOCKING_PROFILES:
             return skipped
         task_id = active.task_id
         ok, summary, detail = _gate_summary(hook.project_root, task_id)
         if ok:
             return skipped
-        from grimoire.hosts.decisions.done_gate import _is_enforced, record_stop_would_block, stop_step
+        from grimoire.hosts.decisions.done_gate import record_stop_would_block, resolve_done_gate_mode, stop_step
 
         signature = _signature_of(hook, task_id, summary, detail)
         now_iso = datetime.now(UTC).isoformat()
         step = stop_step(hook.project_root, task_id, profile, signature, summary, now_iso)
-        shadow = not step.release and not _is_enforced(hook.project_root, task_id)
+        shadow = not step.release and not resolve_done_gate_mode(hook.project_root, task_id, profile, now_iso).enforce
         if shadow:
             record_stop_would_block(hook.project_root, task_id, profile, step, signature, summary, now_iso)
     except Exception as exc:
@@ -211,19 +359,23 @@ def _with_done_gate(decision: Decision, hook: HookInput, task_id: str, profile: 
     detail = {**decision.detail, "done_gate": verdict.to_dict()}
     if not verdict.stale:
         return replace(decision, detail=detail)
-    _record_done_gate_hold(hook, task_id)
+    _record_done_gate_hold(hook, task_id, verdict.to_dict())
     if verdict.blocked and decision.outcome is not Outcome.BLOCK:
         reason = (
             f"[Grimoire] Tâche {task_id} : une mutation est postérieure au dernier check vert (profil {profile}).\n"
             f"Relance `{verdict.command_hint}` ; si c'est vert, conclus. Sinon, dis-le explicitement à "
             "l'utilisateur au lieu de conclure."
         )
+        if verdict.mode_source.endswith("_dated"):
+            reason += f"\n(Gate « fini » armé depuis le {verdict.armed_from} ; au plus 3 refus par session.)"
         return replace(decision, outcome=Outcome.BLOCK, reason=reason, detail=detail)
     if profile in _BLOCKING_PROFILES and decision.outcome is not Outcome.BLOCK:
         warning = (
             f"[Grimoire] Avertissement (gate « fini », shadow) : une mutation pour {task_id} est postérieure "
             f"au dernier check vert. Relance `{verdict.command_hint}` avant de conclure."
         )
+        if verdict.mode_source == "default" and verdict.armed_from:
+            warning += f" Le gate sera armé le {verdict.armed_from}."
         context = f"{decision.context}\n{warning}" if decision.context else warning
         return replace(decision, context=context, detail=detail)
     return replace(decision, detail=detail)
@@ -266,7 +418,13 @@ def _done_gate_unevaluable(decision: Decision, hook: HookInput, task_id: str, pr
             f"({type(resolution_exc).__name__}) : supprime ce fichier pour le réarmer."
         )
     verdict = DoneGateVerdict(
-        stale=False, reason=f"error:{type(exc).__name__}", enforce=enforce, blocked=blocked, capped=capped
+        stale=False,
+        reason=f"error:{type(exc).__name__}",
+        enforce=enforce,
+        blocked=blocked,
+        capped=capped,
+        mode="enforce" if enforce else "shadow",
+        mode_source="after_error",
     )
     detail = {**decision.detail, "done_gate": verdict.to_dict()}
     if blocked and decision.outcome is not Outcome.BLOCK:
@@ -283,7 +441,7 @@ def _done_gate_unevaluable(decision: Decision, hook: HookInput, task_id: str, pr
     return replace(decision, context=context, detail=detail)
 
 
-def _record_done_gate_hold(hook: HookInput, task_id: str) -> None:
+def _record_done_gate_hold(hook: HookInput, task_id: str, done_gate: dict[str, Any] | None = None) -> None:
     """Calibration (Refs #644): journal a stale ``done_gate`` verdict as a ``policy.hold``.
 
     Written whenever :func:`~grimoire.hosts.decisions.done_gate.
@@ -292,11 +450,15 @@ def _record_done_gate_hold(hook: HookInput, task_id: str) -> None:
     deciding whether ``GRIMOIRE_DONE_GATE=enforce`` is safe to widen. The
     fingerprint/target key are keyed on the task, not on a command or path
     — the "action" a done-gate hold is about is "close this task", not any
-    one tool call. Best-effort, same contract as
+    one tool call. The verdict's mode (``done_gate_mode:``, ``done_gate_source:``,
+    ``done_gate_armed_from:``) rides on the hold itself (W2-09-S1-01) : the release in
+    shadow is measured by these holds, which must tell a shadow hold from an armed one.
+    Best-effort, same contract as
     :mod:`.tool_policy`'s own ``_record_hold``.
     """
     try:
         from grimoire.hosts.decisions.calibration import action_fingerprint, record_policy_hold, target_key
+        from grimoire.hosts.decisions.done_gate import done_gate_mode_tags
 
         record_policy_hold(
             hook.project_root,
@@ -306,6 +468,7 @@ def _record_done_gate_hold(hook: HookInput, task_id: str) -> None:
             reason="done_gate:stale",
             fingerprint=action_fingerprint("done_gate", task_id),
             target=target_key("done_gate", task_id),
+            extra_tags=done_gate_mode_tags(done_gate),
         )
     except Exception:  # noqa: S110 — observabilité : jamais au prix de la décision elle-même
         pass
@@ -343,7 +506,9 @@ def _unevaluable_gate(task_id: str, profile: str, exc: Exception) -> Decision:
     )
 
 
-def _no_task_closure(hook: HookInput, profile: str, candidates: tuple[str, ...] = ()) -> Decision | None:
+def _no_task_closure(
+    hook: HookInput, profile: str, candidates: tuple[str, ...] = (), expired: tuple[str, ...] = ()
+) -> Decision | None:
     """Issue #638 lot A: a session that wrote without a task is not a finished task.
 
     ``bootstrap`` is a fallback, not a task: nothing in the Mission Ledger
@@ -361,7 +526,8 @@ def _no_task_closure(hook: HookInput, profile: str, candidates: tuple[str, ...] 
     if mutations <= 0:
         return None
     detail = {"task_id": "bootstrap", "profile": profile, "blocked_on": NO_ACTIVE_TASK, "mutations": mutations}
-    reason = no_task_stop_reason(profile, mutations, candidates)
+    detail["unattached_work"] = record_unattached_work(hook, mutations)
+    reason = no_task_stop_reason(profile, mutations, candidates, expired)
     if profile in _BLOCKING_PROFILES:
         return Decision(outcome=Outcome.BLOCK, reason=reason, detail=detail)
     return Decision(context=reason, detail=detail)

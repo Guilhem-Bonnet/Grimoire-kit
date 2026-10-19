@@ -46,6 +46,10 @@ def render() -> str:
     by_id = {entry["id"]: entry for entry in entries}
 
     out = [
+        "---",
+        "audience: référence",
+        "---",
+        "",
         "# Glossaire",
         "",
         "> Page générée depuis `framework/glossary.yaml` (source unique). Régénérer",

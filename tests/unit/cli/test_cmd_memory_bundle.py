@@ -12,6 +12,13 @@ from grimoire.cli.app import app
 from grimoire.memory import bundle as mod
 from grimoire.memory.bundle import export_bundle, install_bundle
 
+pytestmark = pytest.mark.covers(
+    "cli:memory bundle export",
+    "cli:memory bundle install",
+    "cli:memory bundle verify",
+    "cli:memory bundle where",
+)
+
 runner = CliRunner()
 
 
@@ -19,9 +26,9 @@ runner = CliRunner()
 def fake_model(tmp_path: Path) -> Path:
     root = tmp_path / "src-model"
     (root / "1_Pooling").mkdir(parents=True)
-    (root / "config.json").write_text(json.dumps({"hidden_size": 384}))
-    (root / "1_Pooling" / "config.json").write_text(json.dumps({"word_embedding_dimension": 384}))
-    (root / "tokenizer.json").write_text('{"vocab": []}')
+    (root / "config.json").write_text(json.dumps({"hidden_size": 384}), encoding="utf-8")
+    (root / "1_Pooling" / "config.json").write_text(json.dumps({"word_embedding_dimension": 384}), encoding="utf-8")
+    (root / "tokenizer.json").write_text('{"vocab": []}', encoding="utf-8")
     return root
 
 
@@ -108,7 +115,7 @@ def test_install_configure_updates_project_config(
     project = tmp_path / "proj"
     project.mkdir()
     config = project / "project-context.yaml"
-    config.write_text("project:\n  name: Demo\nmemory:\n  backend: auto   # keep\n")
+    config.write_text("project:\n  name: Demo\nmemory:\n  backend: auto   # keep\n", encoding="utf-8")
     monkeypatch.chdir(project)
 
     result = runner.invoke(
@@ -117,7 +124,7 @@ def test_install_configure_updates_project_config(
     )
 
     assert result.exit_code == 0, result.output
-    text = config.read_text()
+    text = config.read_text(encoding="utf-8")
     assert "embedding_model:" in text
     assert "# keep" in text
 
@@ -139,7 +146,7 @@ def test_verify_ok_exits_0(tmp_path: Path, archive: Path) -> None:
 
 def test_verify_corrupted_exits_1(tmp_path: Path, archive: Path) -> None:
     installed = install_bundle(archive, dest_root=tmp_path / "cache")
-    (installed.model_dir / "tokenizer.json").write_text("tampered")
+    (installed.model_dir / "tokenizer.json").write_text("tampered", encoding="utf-8")
     result = runner.invoke(app, ["memory", "bundle", "verify", str(installed.model_dir)])
 
     assert result.exit_code == 1

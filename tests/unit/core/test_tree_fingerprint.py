@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -55,6 +56,28 @@ def test_fs_fallback_ignores_grimoire_output(tmp_path: Path) -> None:
     (output_dir / "test-run.json").write_text("{}\n", encoding="utf-8")
     after = compute_tree_fingerprint(tmp_path)
     assert before == after
+
+
+def test_fs_fallback_ignores_runtime_output(tmp_path: Path) -> None:
+    """Le ledger, les preuves et les journaux d'autorité sont écrits par le mécanisme lui-même (W3-03)."""
+    (tmp_path / "app.py").write_text("print('v1')\n", encoding="utf-8")
+    before = compute_tree_fingerprint(tmp_path)
+    for rel in ("ledger/events.jsonl", "evidence/pack.json", "flows/authority/check-approval.authority.jsonl"):
+        path = tmp_path / "_grimoire-runtime-output" / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{}\n", encoding="utf-8")
+    assert compute_tree_fingerprint(tmp_path) == before
+
+
+def test_git_mode_ignores_runtime_output(tmp_path: Path) -> None:
+    _git_repo(tmp_path)
+    (tmp_path / "app.py").write_text("print('v1')\n", encoding="utf-8")
+    _commit(tmp_path, "init")
+    before = compute_tree_fingerprint(tmp_path)
+    path = tmp_path / "_grimoire-runtime-output" / "ledger" / "events.jsonl"
+    path.parent.mkdir(parents=True)
+    path.write_text("{}\n", encoding="utf-8")
+    assert compute_tree_fingerprint(tmp_path) == before
 
 
 def test_fs_fallback_ignores_dependency_and_build_dirs(tmp_path: Path) -> None:
@@ -234,6 +257,12 @@ def _pytest_project(root: Path) -> None:
     (root / "app.py").write_text("print('v1')\n", encoding="utf-8")
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : fabrique un exécutable factice (script shell sans extension .exe/.cmd, bit x) que Windows ne lance pas par son nom"
+    ),
+)
 def test_another_toolchain_changes_the_fingerprint(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
     """Un binaire de test résolu ailleurs sur le PATH invalide le run (W3-04, acceptation 2)."""
     _pytest_project(tmp_path)
@@ -247,6 +276,12 @@ def test_another_toolchain_changes_the_fingerprint(tmp_path: Path, tmp_path_fact
     assert compute_tree_fingerprint(tmp_path) != before
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : fabrique un exécutable factice (script shell sans extension .exe/.cmd, bit x) que Windows ne lance pas par son nom"
+    ),
+)
 def test_a_missing_test_runner_changes_the_fingerprint(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
     """Le même arbre sans binaire de test sur le PATH n'est pas la toolchain qui a produit le run."""
     _pytest_project(tmp_path)

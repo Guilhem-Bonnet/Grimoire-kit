@@ -648,7 +648,7 @@ def _new_task(home_root: Path, title: str) -> str:
             "-a", "Le board affiche la tâche", "-a", "Le refus nomme la preuve",
             "--owner", "winston",
         ],
-        cwd=str(home_root), capture_output=True, text=True, check=False, timeout=180,
+        cwd=str(home_root), capture_output=True, text=True, encoding="utf-8", errors="replace", check=False, timeout=180,
     )
     match = re.search(r"(GAO-[a-zA-Z0-9-]+)", added.stdout + added.stderr)
     if not match:

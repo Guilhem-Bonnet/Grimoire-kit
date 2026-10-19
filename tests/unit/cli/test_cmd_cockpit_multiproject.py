@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from functools import partial
 from pathlib import Path
@@ -205,11 +207,11 @@ def test_argv_values_cannot_pose_as_options(
     """Pas de shell ici, mais `--yes` en valeur vaudrait confirmation."""
     calls: list[list[str]] = []
 
-    def _fake_run(cmd: list[str], **kw: Any) -> _FakeProc:
-        calls.append(cmd)
-        return _FakeProc(0, stdout="{}")
+    def _fake_invoke(proot: Path, argv: list[str]) -> Any:
+        calls.append(argv)
+        return cmd_cockpit._CliResult(0, "{}", "")
 
-    monkeypatch.setattr(cmd_cockpit.subprocess, "run", _fake_run)
+    monkeypatch.setattr(cmd_cockpit, "_invoke_memory_cli", _fake_invoke)
     for hostile in ("--help", "-x", "--yes", "a" * 600, "nul\x00byte"):
         status, body = _post_json(
             solo_server, "/api/memory", {"action": "search", "project": "served", "query": hostile}
@@ -223,15 +225,105 @@ def test_argv_values_are_passed_after_a_separator(
 ) -> None:
     captured: dict[str, Any] = {}
 
-    def _fake_run(cmd: list[str], **kw: Any) -> _FakeProc:
-        captured["cmd"] = cmd
-        return _FakeProc(0, stdout="{}")
+    def _fake_invoke(proot: Path, argv: list[str]) -> Any:
+        captured["argv"] = argv
+        return cmd_cockpit._CliResult(0, "{}", "")
 
-    monkeypatch.setattr(cmd_cockpit.subprocess, "run", _fake_run)
+    monkeypatch.setattr(cmd_cockpit, "_invoke_memory_cli", _fake_invoke)
     _post_json(
         solo_server, "/api/memory", {"action": "search", "project": "served", "query": "mémoire"}
     )
-    assert captured["cmd"][-2:] == ["--", "mémoire"]
+    assert captured["argv"][-2:] == ["--", "mémoire"]
+
+
+def test_api_memory_spawns_no_subprocess(
+    solo_server: int, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CodeQL #223 : la requête n'atteint plus aucun sous-processus."""
+
+    def _boom(*a: Any, **kw: Any) -> Any:
+        raise AssertionError("sous-processus lancé par /api/memory")
+
+    monkeypatch.setattr(cmd_cockpit.subprocess, "run", _boom)
+    monkeypatch.setattr(cmd_cockpit.subprocess, "Popen", _boom)
+    before = Path.cwd()
+    status, body = _post_json(
+        solo_server, "/api/memory", {"action": "search", "project": "served", "query": "mémoire"}
+    )
+    assert status == 200
+    assert set(body) == {"ok", "code", "stdout", "stderr", "action", "mutation"}
+    assert body["action"] == "search" and body["mutation"] is False
+    # Même résultat que la CLI lancée directement dans le projet servi.
+    served = tmp_path / "served"
+    expected = cmd_cockpit._invoke_memory_cli(served, ["--output", "json", "memory", "search", "--", "mémoire"])
+    assert (body["code"], body["stdout"]) == (expected.returncode, expected.stdout)
+    assert Path.cwd() == before
+
+
+def test_api_memory_never_changes_process_cwd(
+    solo_server: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _boom(*a: Any, **kw: Any) -> None:
+        raise AssertionError("os.chdir appelé par /api/memory")
+
+    monkeypatch.setattr(cmd_cockpit.os, "chdir", _boom)
+    monkeypatch.setattr("os.chdir", _boom)
+    before = Path.cwd()
+    status, _body = _post_json(
+        solo_server, "/api/memory", {"action": "search", "project": "served", "query": "x"}
+    )
+    assert status == 200
+    assert Path.cwd() == before
+
+
+def test_api_memory_concurrent_projects_each_get_their_own(
+    duo_server: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Deux requêtes simultanées sur deux projets : chacune lit SON projet."""
+    from grimoire.cli import cmd_memory
+
+    port, alpha, beta = duo_server
+    for proj in (alpha, beta):
+        (proj / "project-context.yaml").write_text("x: 1\n", encoding="utf-8")
+
+    class _Entry:
+        def __init__(self, text: str) -> None:
+            self.text = text
+
+        def to_dict(self) -> dict[str, str]:
+            return {"text": self.text}
+
+    class _Mgr:
+        prefers_hybrid = False
+
+        def __init__(self, root: Path) -> None:
+            self.root = root
+
+        @classmethod
+        def from_config(cls, cfg: Any, project_root: Path) -> _Mgr:
+            return cls(project_root)
+
+    def _search(mgr: _Mgr, query: str, **kw: Any) -> list[_Entry]:
+        time.sleep(0.2)  # laisse la requête voisine arriver
+        return [_Entry(mgr.root.name)]
+
+    monkeypatch.setattr(cmd_memory, "MemoryManager", _Mgr)
+    monkeypatch.setattr(cmd_memory, "run_memory_search", _search)
+    monkeypatch.setattr(cmd_memory.GrimoireConfig, "from_yaml", classmethod(lambda cls, p: object()))
+    out: dict[str, Any] = {}
+
+    def _call(slug: str) -> None:
+        out[slug] = _post_json(port, "/api/memory", {"action": "search", "project": slug, "query": "q"})
+
+    threads = [threading.Thread(target=_call, args=(slug,)) for slug in ("alpha", "beta")]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(10)
+    for slug in ("alpha", "beta"):
+        status, body = out[slug]
+        assert status == 200 and body["ok"], body
+        assert json.loads(body["stdout"]) == [{"text": slug}], body
 
 
 def test_select_rejects_malformed_json(duo_server: Any) -> None:
@@ -279,3 +371,22 @@ def test_fleet_endpoint_aggregates_health_and_memory_for_every_registered_projec
         # un `.git`, voir `_project()` ci-dessus) : simples dépôts git, pas
         # initialisés Grimoire.
         assert entry["managed"] is False
+
+
+def test_portfolio_action_on_an_unregistered_project_is_refused_and_writes_nothing(
+    duo_server: Any, tmp_path: Path
+) -> None:
+    """``?project=`` n'est qu'une clé du registre : un chemin ou un slug inconnu ne mène à aucun ledger."""
+    port, alpha, beta = duo_server
+    stray = _project(tmp_path, "non-enregistre")
+    before = sorted(p.relative_to(tmp_path) for p in tmp_path.rglob("*"))
+    for key in (str(stray), "/tmp/x", "../../", "ghost"):
+        status, _body = _post_json(
+            port,
+            "/api/workspace/portfolio/tasks/T-1/claim?project=" + urllib.parse.quote(key, safe=""),
+            {"project": key, "actor": "x"},
+        )
+        assert status == 404, key
+    assert sorted(p.relative_to(tmp_path) for p in tmp_path.rglob("*")) == before
+    assert not list(tmp_path.rglob("events.jsonl"))
+    assert alpha.is_dir() and beta.is_dir()

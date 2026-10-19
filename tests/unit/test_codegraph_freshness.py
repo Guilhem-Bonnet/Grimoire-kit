@@ -213,8 +213,10 @@ class TestExclusionsFollowTheRelativePath:
 
 def _non_utf8_name_or_skip(directory: Path) -> Path:
     """Fichier dont le nom n'est pas de l'UTF-8 valide, sans littéral de substitut dans la source."""
-    target = Path(os.fsdecode(os.fsencode(directory) + b"/caf\xe9.py"))
     try:
+        # Sous Windows `fsdecode` lui-même refuse l'octet isolé : le système de
+        # fichiers n'admet pas ces noms, ce qui est exactement le cas à sauter.
+        target = Path(os.fsdecode(os.fsencode(directory) + b"/caf\xe9.py"))
         target.write_text("w = 4\n", encoding="utf-8")
     except (OSError, UnicodeError):
         pytest.skip("système de fichiers qui refuse les noms non UTF-8")

@@ -23,7 +23,7 @@ from grimoire.missions.dispatch_advice import (
     model_tier_for,
     recommended_model_for,
 )
-from grimoire.missions.schemas import MissionTask, RiskProfile, TaskState, TaskType
+from grimoire.missions.schemas import MissionTask, RiskProfile, TaskCheck, TaskState, TaskType
 from grimoire.missions.verifiability import Verifiability, classify
 
 
@@ -37,6 +37,7 @@ def tache(**kw: object) -> MissionTask:
         "risk_profile": RiskProfile.STANDARD,
         "acceptance": (),
         "created_at": "2026-08-27T00:00:00Z",
+        "checks": (TaskCheck(cmd="true"),),
     }
     base.update(kw)
     return MissionTask(**base)  # type: ignore[arg-type]

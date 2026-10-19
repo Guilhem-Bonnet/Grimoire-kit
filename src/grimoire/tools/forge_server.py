@@ -101,9 +101,9 @@ from grimoire.tools.project_registry import (
     DEFAULT_SCAN_DEPTH,
     browse,
     looks_grimoire,
-    path_for_slug,
     projects_payload,
     register_project,
+    registered_root,
     resolve_within_allowed,
     scan_payload,
     set_selected_slug,
@@ -222,16 +222,11 @@ class ForgeAPI:
 
         ``grimoire serve`` reste un serveur unique : changer de projet déplace
         la racine servie plutôt que d'exiger un second processus. Le projet
-        choisi est enrôlé au passage — c'est ainsi que le registre se remplit
-        de ce qu'on ouvre vraiment.
+        choisi doit déjà figurer au registre (``project_add`` l'y met) : la
+        requête désigne un projet connu, elle ne fournit jamais le chemin.
         """
-        target: Path | None = None
-        if path:
-            candidate = Path(path).expanduser()
-            target = candidate.resolve() if candidate.is_dir() else None
-        elif slug:
-            registered = path_for_slug(slug)
-            target = registered.resolve() if registered and registered.is_dir() else None
+        # Le chemin d'une requête n'est qu'une clé : la racine vient du registre.
+        target = registered_root(slug=slug, path=path) if (path or slug) else None
         if target is None:
             msg = f"projet introuvable : {path or slug or '(vide)'}"
             raise FileNotFoundError(msg)
@@ -356,18 +351,12 @@ class ForgeAPI:
         plutôt que repliée sur le projet courant.
         """
         target = self.project_root
-        if path:
-            candidate = Path(path).expanduser()
-            if not candidate.is_dir():
-                msg = f"projet introuvable : {path}"
+        if path or slug:
+            registered = registered_root(slug=slug, path=path)
+            if registered is None:
+                msg = f"projet introuvable : {path or slug}"
                 raise FileNotFoundError(msg)
-            target = candidate.resolve()
-        elif slug:
-            registered = path_for_slug(slug)
-            if registered is None or not registered.is_dir():
-                msg = f"projet introuvable : {slug}"
-                raise FileNotFoundError(msg)
-            target = registered.resolve()
+            target = registered
         return update_project(target, dry_run=dry_run)
 
     # ── extensions ────────────────────────────────────────────────────────

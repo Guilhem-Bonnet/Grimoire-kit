@@ -1,3 +1,7 @@
+---
+audience: référence
+---
+
 # Glossaire
 
 > Page générée depuis `framework/glossary.yaml` (source unique). Régénérer

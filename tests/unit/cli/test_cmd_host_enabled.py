@@ -14,9 +14,15 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from grimoire.cli.app import app
+
+pytestmark = pytest.mark.covers(
+    "cli:host status",
+    "cli:host sync",
+)
 
 runner = CliRunner()
 

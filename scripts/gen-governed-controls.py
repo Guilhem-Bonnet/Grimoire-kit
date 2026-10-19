@@ -29,6 +29,10 @@ def render() -> str:
     ordered = [c for c in ORDER if c in groups] + [c for c in sorted(groups) if c not in ORDER]
 
     out = [
+        "---",
+        "audience: référence",
+        "---",
+        "",
         "# Référence des contrôles gouvernés",
         "",
         "> Page de référence générée depuis `framework/agentic-standard/templates/pattern-catalog.yaml`",
