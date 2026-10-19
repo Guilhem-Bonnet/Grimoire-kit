@@ -21,8 +21,7 @@ import pytest
 from typer.testing import CliRunner
 
 from grimoire.bridges.schemas import HostId
-from grimoire.cli.cmd_orchestrate import orchestrate_app
-from grimoire.cli.cmd_queue import queue_app
+from grimoire.cli.app import app
 from grimoire.core.agentic_standard import setup_standard_profile
 from grimoire.core.exceptions import GrimoireMissionError
 from grimoire.hosts.decisions import Outcome
@@ -324,7 +323,7 @@ def test_paused_tick_exits_without_loading_the_ledger_or_dispatching(
     assert "continuent de courir" in report.notes[0]
     # Même verdict par le chemin par défaut (sans fabrique injectée) et par la CLI : code 0, rien d'ouvert.
     assert run_tick(projet).status == "paused"
-    res = runner.invoke(orchestrate_app, ["tick", "--apply", "--project-root", str(projet)])
+    res = runner.invoke(app, ["orchestrate", "tick", "--apply", "--project-root", str(projet)])
     assert res.exit_code == 0, res.output
     assert "sort sans ouvrir le ledger" in res.output
 
@@ -425,52 +424,55 @@ def test_pause_wakes_are_applied_by_the_tick(projet: Path, service: TaskService,
 # ── CLI ──────────────────────────────────────────────────────────────────────
 
 
+@pytest.mark.covers("cli:orchestrate pause", "cli:orchestrate resume", "cli:orchestrate status")
 def test_cli_pause_status_resume_roundtrip(projet: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = ["--project-root", str(projet)]
     monkeypatch.setattr("grimoire.cli.cmd_task._comment_origin", lambda: "human")
 
-    posted = runner.invoke(orchestrate_app, ["pause", "--hold", "--task", "T-1", "--task", "T-2", "--reason", "revue", *root])
+    posted = runner.invoke(app, ["orchestrate", "pause", "--hold", "--task", "T-1", "--task", "T-2", "--reason", "revue", *root])
     assert posted.exit_code == 0, posted.output
     flag = json.loads((projet / PAUSE_RELPATH).read_text(encoding="utf-8"))
     assert (flag["mode"], flag["tasks"], flag["reason"]) == ("hold", ["T-1", "T-2"], "revue")
 
-    status = runner.invoke(orchestrate_app, ["status", "--json", *root])
+    status = runner.invoke(app, ["orchestrate", "status", "--json", *root])
     assert status.exit_code == 0 and json.loads(status.output)["flags"][0]["mode"] == "hold"
-    assert "hold projet, tâches T-1, T-2" in runner.invoke(orchestrate_app, ["status", *root]).output
+    assert "hold projet, tâches T-1, T-2" in runner.invoke(app, ["orchestrate", "status", *root]).output
 
-    assert runner.invoke(orchestrate_app, ["pause", "--drain", "--hold", *root]).exit_code == 2
-    assert runner.invoke(orchestrate_app, ["pause", "--global", "--task", "T-1", *root]).exit_code == 2
+    assert runner.invoke(app, ["orchestrate", "pause", "--drain", "--hold", *root]).exit_code == 2
+    assert runner.invoke(app, ["orchestrate", "pause", "--global", "--task", "T-1", *root]).exit_code == 2
 
-    lifted = runner.invoke(orchestrate_app, ["resume", "--task", "T-1", *root])
+    lifted = runner.invoke(app, ["orchestrate", "resume", "--task", "T-1", *root])
     assert lifted.exit_code == 0 and json.loads((projet / PAUSE_RELPATH).read_text(encoding="utf-8"))["tasks"] == ["T-2"]
-    assert runner.invoke(orchestrate_app, ["resume", *root]).exit_code == 0
+    assert runner.invoke(app, ["orchestrate", "resume", *root]).exit_code == 0
     assert not (projet / PAUSE_RELPATH).exists()
-    assert "Pas de pause" in runner.invoke(orchestrate_app, ["status", *root]).output
-    assert "Aucune pause" in runner.invoke(orchestrate_app, ["resume", *root]).output
+    assert "Pas de pause" in runner.invoke(app, ["orchestrate", "status", *root]).output
+    assert "Aucune pause" in runner.invoke(app, ["orchestrate", "resume", *root]).output
 
 
+@pytest.mark.covers("cli:orchestrate pause", "cli:orchestrate resume")
 def test_resume_and_global_pause_are_human_gestures(projet: Path, machine: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = ["--project-root", str(projet)]
     monkeypatch.setattr("grimoire.cli.cmd_task._comment_origin", lambda: "agent")
-    assert runner.invoke(orchestrate_app, ["pause", *root]).exit_code == 0  # se garer est le sens sûr
-    assert runner.invoke(orchestrate_app, ["pause", "--global", *root]).exit_code == 1
+    assert runner.invoke(app, ["orchestrate", "pause", *root]).exit_code == 0  # se garer est le sens sûr
+    assert runner.invoke(app, ["orchestrate", "pause", "--global", *root]).exit_code == 1
     assert not (machine / "pause.json").exists()
-    assert runner.invoke(orchestrate_app, ["resume", *root]).exit_code == 1  # un agent ne lève pas la pause
+    assert runner.invoke(app, ["orchestrate", "resume", *root]).exit_code == 1  # un agent ne lève pas la pause
     assert (projet / PAUSE_RELPATH).exists()
     monkeypatch.setattr("grimoire.cli.cmd_task._comment_origin", lambda: "human")
-    assert runner.invoke(orchestrate_app, ["pause", "--global", "--hold", *root]).exit_code == 0
+    assert runner.invoke(app, ["orchestrate", "pause", "--global", "--hold", *root]).exit_code == 0
     assert json.loads((machine / "pause.json").read_text(encoding="utf-8"))["mode"] == "hold"
-    assert runner.invoke(orchestrate_app, ["resume", "--global", *root]).exit_code == 0
+    assert runner.invoke(app, ["orchestrate", "resume", "--global", *root]).exit_code == 0
     assert not (machine / "pause.json").exists()
 
 
+@pytest.mark.covers("cli:queue plan")
 def test_queue_plan_shows_the_pause(projet: Path, service: TaskService, mission: str) -> None:
     _pret(service, mission, "A")
     _flag(projet, mode="hold")
-    res = runner.invoke(queue_app, ["plan", "--no-routes", "--project-root", str(projet)])
+    res = runner.invoke(app, ["queue", "plan", "--no-routes", "--project-root", str(projet)])
     assert res.exit_code == 0, res.output
     assert "pause : hold projet" in res.output and "Defer(pause)" in res.output
-    data = json.loads(runner.invoke(queue_app, ["plan", "--no-routes", "--json", "--project-root", str(projet)]).output)
+    data = json.loads(runner.invoke(app, ["queue", "plan", "--no-routes", "--json", "--project-root", str(projet)]).output)
     assert data["pause"]["flags"][0]["mode"] == "hold" and data["admitted"] == []
 
 
@@ -639,7 +641,7 @@ def test_hold_degrades_to_drain_on_unfenced_host(governed: Path) -> None:
     ledger = TaskService(governed).ledger
     assert ledger.get_task(tid) is not None
     TaskService(governed).attach_session(tid, SESSION, session_host="copilot", actor="claude", host_version="1.0")
-    status = runner.invoke(orchestrate_app, ["status", "--project-root", str(governed)])
+    status = runner.invoke(app, ["orchestrate", "status", "--project-root", str(governed)])
     assert f"{tid} : drain — hold dégradé en drain (hôte sans frein)" in status.output
 
 

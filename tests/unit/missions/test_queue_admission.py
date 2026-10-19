@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from grimoire.cli.cmd_queue import queue_app
+from grimoire.cli.app import app
 from grimoire.core.exceptions import GrimoireMissionError
 from grimoire.missions import admission
 from grimoire.missions.admission import (
@@ -467,36 +467,39 @@ def test_plan_is_pure_and_writes_nothing(service: TaskService, mission: str) -> 
 # ── CLI ────────────────────────────────────────────────────────────────────────
 
 
+@pytest.mark.covers("cli:queue plan")
 def test_queue_plan_cli_json_and_famine_exit(projet: Path, service: TaskService, mission: str) -> None:
     _capacity(projet, "version: 1\npools:\n  ci:\n    runners: 1\n")
     _pret(service, mission, "a", owner="x")
     _pret(service, mission, "b", owner="y")
     service.ledger.append_event(CI_PUSHED_EVENT, service.list_ready()[0].id, "task", "tick", {})
-    result = runner.invoke(queue_app, ["plan", "--project-root", str(projet), "--no-routes", "--json"])
+    result = runner.invoke(app, ["queue", "plan", "--project-root", str(projet), "--no-routes", "--json"])
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
     assert {d["reason"] for d in data["deferred"]} == {"ci"}
     assert data["occupancy"]["ci"] == {"busy": 1, "runners": 1}
-    text = runner.invoke(queue_app, ["plan", "--project-root", str(projet), "--no-routes"])
+    text = runner.invoke(app, ["queue", "plan", "--project-root", str(projet), "--no-routes"])
     assert text.exit_code == 0 and "Defer(ci)" in text.output
 
 
+@pytest.mark.covers("cli:queue plan")
 def test_queue_plan_cli_exits_one_on_unreadable_capacity(projet: Path, service: TaskService, mission: str) -> None:
     _capacity(projet, "version: 1\nquota:\n  tokens_per_day: 0\n")
     _pret(service, mission, "t")
-    result = runner.invoke(queue_app, ["plan", "--project-root", str(projet), "--no-routes"])
+    result = runner.invoke(app, ["queue", "plan", "--project-root", str(projet), "--no-routes"])
     assert result.exit_code == 1 and "capacité illisible" in result.output
 
 
+@pytest.mark.covers("cli:queue release")
 def test_queue_release_needs_a_human_origin(projet: Path, service: TaskService, mission: str, monkeypatch: pytest.MonkeyPatch) -> None:
     task = _pret(service, mission, "t")
     monkeypatch.setenv("GRIMOIRE_UNATTENDED", "1")
-    refused = runner.invoke(queue_app, ["release", task.id, "--project-root", str(projet)])
+    refused = runner.invoke(app, ["queue", "release", task.id, "--project-root", str(projet)])
     assert refused.exit_code == 1 and "humain" in refused.output
     assert not [e for e in service.ledger.list_events(task.id) if e.event_type == CAPACITY_RELEASED_EVENT]
     monkeypatch.delenv("GRIMOIRE_UNATTENDED")
     monkeypatch.setattr("grimoire.cli.cmd_task._comment_origin", lambda: "human")
-    done = runner.invoke(queue_app, ["release", task.id, "--project-root", str(projet), "--reason", "PR fusionnée"])
+    done = runner.invoke(app, ["queue", "release", task.id, "--project-root", str(projet), "--reason", "PR fusionnée"])
     assert done.exit_code == 0, done.output
     assert [e for e in TaskService(projet).ledger.list_events(task.id) if e.event_type == CAPACITY_RELEASED_EVENT]
 

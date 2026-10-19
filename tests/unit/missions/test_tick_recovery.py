@@ -30,7 +30,7 @@ from typing import Any
 import pytest
 from typer.testing import CliRunner
 
-from grimoire.cli.cmd_orchestrate import orchestrate_app
+from grimoire.cli.app import app
 from grimoire.core.exceptions import GrimoireMissionError
 from grimoire.missions.lease import LeaseFile, backoff_delay, lease_path, parse_instant, write_lease
 from grimoire.missions.ledger import MissionLedger
@@ -176,6 +176,7 @@ def test_tick_twice_same_state(projet: Path) -> None:
     assert not any(d.written for d in second.reaped) and not any(w.written for w in second.woken)
 
 
+@pytest.mark.covers("cli:orchestrate tick")
 def test_a_second_tick_skips_while_the_first_holds_the_lock(projet: Path) -> None:
     from grimoire.core.fsio import locked
     from grimoire.missions.orchestrate import TICK_LOCK_RELPATH
@@ -191,20 +192,37 @@ def test_a_second_tick_skips_while_the_first_holds_the_lock(projet: Path) -> Non
     # Le verrou rendu (tick tué ou fini), le suivant reprend.
     assert run_tick(projet, apply=True).status == "ran"
     assert TaskService(projet).require(lost).status is S.READY
-    res = runner.invoke(orchestrate_app, ["tick", "--apply", "--plan", "--project-root", str(projet)])
+    res = runner.invoke(app, ["orchestrate", "tick", "--apply", "--plan", "--project-root", str(projet)])
     assert res.exit_code == 2
 
 
+@pytest.mark.covers("cli:orchestrate tick")
 def test_tick_without_session_reaps(projet: Path) -> None:
     service = TaskService(projet)
     lost = _running(service, "Perdue")
     _expire(service, lost)
-    res = runner.invoke(orchestrate_app, ["tick", "--apply", "--project-root", str(projet), "--json"])
+    res = runner.invoke(app, ["orchestrate", "tick", "--apply", "--project-root", str(projet), "--json"])
     assert res.exit_code == 0, res.output
     payload = json.loads(res.output)
     assert [(d["task_id"], d["action"]) for d in payload["reaped"]] == [(lost, "ready")]
     task = TaskService(projet).require(lost)
     assert task.status is S.READY
+
+
+@pytest.mark.covers("cli:orchestrate tick")
+def test_tick_cli_without_apply_is_a_plan_and_writes_nothing(projet: Path) -> None:
+    service = TaskService(projet)
+    lost = _running(service, "Perdue")
+    _expire(service, lost)
+    before = _events(service)
+    res = runner.invoke(app, ["orchestrate", "tick", "--project-root", str(projet), "--json"])
+    assert res.exit_code == 0, res.output
+    payload = json.loads(res.output)
+    assert payload["applied"] is False and [(d["task_id"], d["action"]) for d in payload["reaped"]] == [(lost, "ready")]
+    after = TaskService(projet)
+    assert _events(after) == before and after.require(lost).status is S.RUNNING
+    text = runner.invoke(app, ["orchestrate", "tick", "--project-root", str(projet)])
+    assert text.exit_code == 0 and "rien n'est écrit" in text.output
 
 
 def test_backoff_then_human_after_3(tmp_path: Path) -> None:
@@ -638,22 +656,62 @@ def test_without_systemd_the_timer_is_a_crontab_line(projet: Path, tmp_path: Pat
     for bad in ("", "0m", "5s", "25h", "cinq"):
         with pytest.raises(ValueError):
             timer.parse_interval(bad)
-    res = runner.invoke(orchestrate_app, ["install-timer", "--interval", "5s", "--project-root", str(projet)])
+    res = runner.invoke(app, ["orchestrate", "install-timer", "--interval", "5s", "--project-root", str(projet)])
     assert res.exit_code == 2
 
 
-def test_cli_install_timer_without_enabling(projet: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+@pytest.mark.covers("cli:orchestrate install-timer", "cli:orchestrate uninstall-timer")
+def test_cli_install_then_uninstall_timer_with_an_injected_systemctl(
+    projet: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Le CLI écrit les unités dans le répertoire XDG injecté, les retire, et ne touche jamais au vrai systemd."""
     from grimoire.missions import timer
 
-    if timer.shutil.which("systemctl") is None:
-        pytest.skip("systemctl absent : la branche crontab est couverte ailleurs")
-    res = runner.invoke(orchestrate_app, ["install-timer", "--no-enable", "--project-root", str(projet), "--json"])
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    spy = _Systemctl()
+    monkeypatch.setattr(timer, "_systemctl", lambda run: spy)
+
+    res = runner.invoke(app, ["orchestrate", "install-timer", "--interval", "15m", "--project-root", str(projet), "--json"])
     assert res.exit_code == 0, res.output
     payload = json.loads(res.output)
-    assert Path(payload["timer_path"]).is_file() and "non activé" in payload["done"][-1]
-    res = runner.invoke(orchestrate_app, ["uninstall-timer", "--project-root", str(projet)])
-    assert res.exit_code == 0 and not Path(payload["timer_path"]).exists()
+    service, unit_timer = Path(payload["service_path"]), Path(payload["timer_path"])
+    assert service.parent.as_posix() == (tmp_path / "xdg" / "systemd" / "user").as_posix()
+    assert "OnUnitActiveSec=15min" in unit_timer.read_text(encoding="utf-8")
+    assert "Type=oneshot" in service.read_text(encoding="utf-8")
+    assert payload["minutes"] == 15 and payload["done"][-1] == f"activé : {payload['name']}.timer"
+    assert spy.calls[-1] == ["systemctl", "--user", "enable", "--now", f"{payload['name']}.timer"]
+
+    res = runner.invoke(app, ["orchestrate", "uninstall-timer", "--project-root", str(projet), "--json"])
+    assert res.exit_code == 0, res.output
+    assert not service.exists() and not unit_timer.exists()
+    assert ["systemctl", "--user", "disable", "--now", f"{payload['name']}.timer"] in spy.calls
+    assert any(line.startswith("retiré : ") for line in json.loads(res.output)["done"])
+
+    again = runner.invoke(app, ["orchestrate", "uninstall-timer", "--project-root", str(projet)])
+    assert again.exit_code == 0 and "aucun minuteur installé" in again.output
+
+
+@pytest.mark.covers("cli:orchestrate install-timer", "cli:orchestrate uninstall-timer")
+def test_cli_timer_without_systemd_writes_nothing_and_refuses_a_bad_interval(
+    projet: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from grimoire.missions import timer
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setattr(timer.shutil, "which", lambda _name: None)
+
+    res = runner.invoke(app, ["orchestrate", "install-timer", "--project-root", str(projet), "--json"])
+    assert res.exit_code == 0, res.output
+    payload = json.loads(res.output)
+    assert "systemd absent" in payload["done"][0] and payload["cron"].startswith("*/5 * * * * ")
+    assert not (tmp_path / "xdg").exists(), "sans systemd, aucune unité n'est écrite"
+
+    res = runner.invoke(app, ["orchestrate", "uninstall-timer", "--project-root", str(projet)])
+    assert res.exit_code == 0 and "systemd absent" in res.output
+
+    bad = runner.invoke(app, ["orchestrate", "install-timer", "--interval", "25h", "--project-root", str(projet)])
+    assert bad.exit_code == 2 and "hors bornes" in bad.output
+    assert not (tmp_path / "xdg").exists()
 
 
 @pytest.mark.skipif(shutil.which("systemd-analyze") is None, reason="systemd-analyze absent")

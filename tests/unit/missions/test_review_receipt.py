@@ -16,7 +16,9 @@ import sys
 from pathlib import Path
 
 import pytest
+from typer.testing import CliRunner
 
+from grimoire.cli.app import app
 from grimoire.evidence import EvidenceItem, EvidenceKind, EvidenceProfile, EvidenceService
 from grimoire.missions import review_receipt as rr
 from grimoire.missions.gates import GATES_FILE
@@ -401,3 +403,57 @@ def test_panel_fini_sans_verdict_n_est_jamais_un_vert() -> None:
 def test_panel_empreintes_divergentes_l_invalident() -> None:
     tally = tally_panel([_vote("READY", "a"), _vote("READY", "a"), _vote("READY", "b")], "V1")
     assert tally.verdict == "invalid"
+
+
+# ── La commande `task review` ───────────────────────────────────────────────
+
+
+@pytest.mark.covers("cli:task review")
+def test_cli_task_review_ecrit_le_recu_qui_ouvre_la_cloture(tmp_path: Path) -> None:
+    root = _projet(tmp_path)
+    service, tid = _a_relire(root)
+    assert _refus(service, tid) == "review.receipt_missing"
+
+    res = CliRunner().invoke(
+        app, ["--output", "json", "task", "review", tid, "--verdict", "ready", "--reviewer", "relecteur",
+              "--model", "sonnet", "--finding", "style discutable", "--project-root", str(root)],
+    )
+
+    assert res.exit_code == 0, res.output
+    out = json.loads(res.output)
+    assert (out["verdict"], out["reviewer_id"], out["model"], out["task_id"]) == ("READY", "relecteur", "sonnet", tid)
+    assert out["tree_fingerprint"] and [f["grounded"] for f in out["findings"]] == [False]
+    on_disk = json.loads((root / "_grimoire-output/reviews" / tid / "review-receipt.json").read_text(encoding="utf-8"))
+    assert on_disk["tree_fingerprint"] == out["tree_fingerprint"]
+    assert TaskService(root).transition(tid, TaskState.CLOSED, "amelia").task.status is TaskState.CLOSED
+
+
+@pytest.mark.covers("cli:task review")
+def test_cli_task_review_not_ready_fonde_bloque_la_cloture_et_le_texte_compte_les_constats(tmp_path: Path) -> None:
+    root = _projet(tmp_path)
+    _, tid = _a_relire(root)
+
+    res = CliRunner().invoke(
+        app, ["task", "review", tid, "--verdict", "NOT-READY", "--finding", "import cassé :: python -c 'import src'",
+              "--finding", "nommage", "--project-root", str(root)],
+    )
+
+    assert res.exit_code == 0, res.output
+    assert "NOT-READY" in res.output and "1 constat(s) vérifiable(s)" in res.output
+    assert _refus(TaskService(root), tid) == "review.not_ready"
+
+
+@pytest.mark.covers("cli:task review")
+def test_cli_task_review_refuse_sans_rien_ecrire(tmp_path: Path) -> None:
+    root = _projet(tmp_path)
+    _, tid = _a_relire(root)
+    receipt = root / "_grimoire-output/reviews" / tid / "review-receipt.json"
+    base = ["task", "review", tid, "--project-root", str(root)]
+
+    ungrounded = CliRunner().invoke(app, [*base, "--verdict", "NOT-READY", "--finding", "juste une suggestion"])
+    assert ungrounded.exit_code == 1 and "NOT-READY sans constat vérifiable" in ungrounded.output
+    unknown = CliRunner().invoke(app, [*base, "--verdict", "PEUT-ETRE"])
+    assert unknown.exit_code == 1 and "PEUT-ETRE" in unknown.output
+    missing = CliRunner().invoke(app, ["task", "review", "GAO-inconnue-001", "--verdict", "READY", "--project-root", str(root)])
+    assert missing.exit_code == 1
+    assert not receipt.exists()
