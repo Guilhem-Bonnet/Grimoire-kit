@@ -951,10 +951,10 @@ proposé au §15.5 couvre donc le palier 2 avec marge ; un plafond de 300 $ pour
 - Les agents sous test ont écrit dans `/tmp` (10 runs sur 20) malgré `TMPDIR` : fichiers de vérification à eux, déplacés après la campagne dans les données
   brutes (`agent-tmp-leftovers/`). Aucun ne porte d'identifiant.
 - Tarif « list » de Claude Code sous OAuth : un coût rapporté, pas une facture. Claude Code 2.1.302 contre 2.1.287 au lot L.
-- `build_report` n'agrège toujours pas `aidlc` : les chiffres ci-dessus viennent d'une analyse à part (`analyze.py`), pas d'un `report.json` scellé.
+- `build_report` n'agrège toujours pas `aidlc` : les chiffres ci-dessus viennent d'une analyse à part (script d'analyse de la passe, non livré dans le dépôt), pas d'un `report.json` scellé.
 
 Données brutes hors dépôt, comme celles du lot L : `_scratch/bench-aidlc-b06-p1/` de la Forge (`ws/state/{results.jsonl,aidlc-runs.jsonl,aidlc-budget.jsonl,
-aidlc-preregistration.json}`, `ws/tasks/*/aidlc/run0.stream.jsonl`, `analysis.json`, `analyze.py`, `campaign.log`). sha256 : `results.jsonl`
+aidlc-preregistration.json}`, `ws/tasks/*/aidlc/run0.stream.jsonl`, `analysis.json`, le script d'analyse, `campaign.log`). sha256 : `results.jsonl`
 `5d7f0d77…`, `aidlc-budget.jsonl` `ad8a6cec…`, `aidlc-runs.jsonl` `aa3047ac…`, pré-enregistrement `2b301dcf…` (inchangé depuis le §15.6).
 
 ## 16. E2E live Claude Code : le hook de preuve bloque, puis le gate se ferme (D-12)
