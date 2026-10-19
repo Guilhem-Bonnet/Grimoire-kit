@@ -548,8 +548,14 @@ def _run_wizard(
     console.print("  [bold]minimal[/bold] is always included — it's the base.")
     console.print("  Choose specializations to add:\n")
 
-    # Compute auto-detected defaults from resolver
-    auto_suggested = list(resolved.archetypes) if resolved.archetypes else [resolved.archetype]
+    # Compute auto-detected defaults from resolver — a best-guess pick
+    # (decision 2026-09-18: resolve() never guesses `minimal`, but a guess is
+    # still not a confident rule match) is never pre-filled as if detected;
+    # the wizard falls through to guided discovery for it instead (below).
+    auto_suggested: list[str] = (
+        [] if resolved.is_best_guess
+        else (list(resolved.archetypes) if resolved.archetypes else [resolved.archetype])
+    )
     auto_indices: list[str] = []
     for idx, key in enumerate(_ARCHETYPE_KEYS, 1):
         label, agent_count, traits = _ARCHETYPE_INFO[key]
@@ -562,10 +568,16 @@ def _run_wizard(
     console.print("    [bold]0[/bold]) Not sure — help me choose")
     console.print()
 
-    default_input = ",".join(auto_indices) if auto_indices else ""
+    # Onboarding audit 2026-09-18, constat #2: a blank default here used to
+    # be "none" (→ minimal, no specialization), even though guided discovery
+    # (option "0") already existed and worked. When a rule already detected
+    # a specialization, its numeric auto-selection stays the default; only
+    # the *no-signal* case (a bare Enter would previously install minimal in
+    # silence) now defaults to guided discovery instead.
+    default_input = ",".join(auto_indices) if auto_indices else "0"
     arch_input = Prompt.ask(
         "  [bold]Choice (ex: 1,3,5 or all)[/bold]",
-        default=default_input or "none",
+        default=default_input,
     )
 
     # Parse selection
@@ -687,13 +699,16 @@ def _guided_discovery(scan: ScanResult | None) -> list[str]:
     if q3:
         result.append("fix-loop")
 
-    # If nothing selected, check for platform patterns
-    if not result and detected & {"python", "go", "fastapi", "django"}:
-        result.append("platform-engineering")
-
+    # Decision 2026-09-18 (Guilhem, corrected same day): even a "no" to all
+    # three questions never ends in `minimal` — no asserted domain (web,
+    # infra, fix-loop) means `stack` (Atlas, the kit's generalist for exactly
+    # this case), not `platform-engineering`.
     if not result:
-        console.print("  [dim]No specialization selected — using minimal base.[/dim]")
-        return ["minimal"]
+        console.print(
+            "  [dim]No specialization selected — stack (Atlas, the kit's generalist "
+            "for a project with no asserted domain) covers this best.[/dim]"
+        )
+        return ["stack"]
 
     names = ", ".join(result)
     console.print(f"\n  [bold]Recommended:[/bold] {names}")
@@ -734,6 +749,7 @@ def _display_report(
     qdrant_docker_message: str = "",
     lite: bool = False,
     detected_service: str = "local",
+    no_cockpit: bool = False,
 ) -> None:
     """Display a rich post-install report."""
     console.print()
@@ -755,6 +771,17 @@ def _display_report(
     else:
         info = _ARCHETYPE_INFO.get(resolved.archetype, (resolved.archetype, "", ""))
         console.print(f"  [cyan]Archetype:[/cyan] {info[0]} ({resolved.reason})")
+        # Decision 2026-09-18 (Guilhem): resolve() never installs `minimal`
+        # automatically — an ambiguous stack still gets a named, applied,
+        # specialized archetype (`is_best_guess`). That is never the same as
+        # a deliberate choice, so it is always named as a guess with its
+        # override command, never left to look like a confident detection.
+        if resolved.is_best_guess:
+            console.print(
+                "  [yellow]Best guess:[/yellow] no confident match for this stack — "
+                "change it with [cyan]grimoire up -a <archetype>[/cyan] or discover a "
+                "better fit with [cyan]grimoire init --interactive[/cyan]."
+            )
     console.print(f"  [cyan]Memory:[/cyan] {backend}")
     _backend_tips = {
         "local": "Mémoire fichier locale — aucune dépendance requise",
@@ -810,17 +837,26 @@ def _display_report(
         ))
         console.print()
 
-    # Next steps
+    # Next steps — dynamic (onboarding audit 2026-09-18, constat #3): the old
+    # panel was byte-identical across every stack/archetype/profile
+    # combination. This names what was installed and why, then offers at
+    # most three actions chosen from the project's real state.
+    from grimoire.core.onboarding_panel import build_next_steps
+
+    panel = build_next_steps(
+        target, resolved=resolved, backend=backend, no_cockpit=no_cockpit,
+    )
+    body_lines = [
+        "[bold]Your project is alive![/bold]\n",
+        f"  {panel.headline}\n",
+        f"  [bold cyan]Open it:[/bold cyan] [cyan]code {target.name}[/cyan]\n",
+    ]
+    for action in panel.actions:
+        body_lines.append(f"  {action}")
+    if panel.unexploited_line:
+        body_lines.append(f"\n  [dim]{panel.unexploited_line}[/dim]")
     console.print(Panel(
-        "[bold]Your project is alive![/bold]\n\n"
-        f"  [bold cyan]Step 1:[/bold cyan] Open your project in VS Code\n"
-        f"           [cyan]code {target.name}[/cyan]\n\n"
-        "  [bold cyan]Step 2:[/bold cyan] Talk to your AI concierge\n"
-        "           Open Copilot Chat → type [cyan]@concierge[/cyan]\n"
-        "           Marcel will guide you through your first session.\n\n"
-        "  [dim]Optional:[/dim]\n"
-        "  Health check:   [cyan]grimoire doctor[/cyan]\n"
-        "  Agent registry: [cyan]grimoire status[/cyan]",
+        "\n".join(body_lines),
         title="[bold green]Next Steps[/bold green]",
         border_style="green",
     ))
@@ -1058,11 +1094,23 @@ def run_init(
     no_cockpit: bool = False,
     lite: bool = False,
     memory_collection: str = "",
+    interactive: bool = False,
 ) -> None:
     """Execute the enhanced init flow: scan → resolve → wizard → scaffold → report."""
     target = target.resolve()
     fmt = (ctx.obj or {}).get("output", "text")
     yes = (ctx.obj or {}).get("yes", False)
+
+    # Same opt-out as `--no-cockpit` (documented as such on both `init` and
+    # `up`, and already honoured by `_maybe_register_cockpit` below) —
+    # resolved once, here, so every consumer downstream (the dynamic Next
+    # Steps panel via `_display_report`/`build_next_steps`, not just the
+    # actual registry write) agrees with it. Found via the real rejeu for
+    # PR #617: `GRIMOIRE_NO_COCKPIT=1 grimoire init -y` still printed "Open
+    # the multi-project cockpit: `grimoire cockpit`" in its own report even
+    # though the env var was set — the flag reached the registry write but
+    # never reached the report.
+    no_cockpit = no_cockpit or bool(os.environ.get("GRIMOIRE_NO_COCKPIT"))
 
     # ── Lite profile (issue Grimoire-kit#552, lot 2.6) ──────────────────────
     # A named preset, not a new mechanism: every knob it sets already exists
@@ -1143,9 +1191,21 @@ def run_init(
     skill_level = "intermediate"
     offline = False
 
-    is_interactive = sys.stdin.isatty() and not yes and fmt != "json"
+    has_tty = sys.stdin.isatty()
+    is_interactive = (has_tty or interactive) and not yes and fmt != "json"
 
     offer_qdrant_docker = requested_backend == "auto" and detected_service == "local"
+
+    # Onboarding audit 2026-09-18, constat #1: without a real TTY, bare
+    # `grimoire init` (no `-y`) used to run the express path in total
+    # silence — indistinguishable from `-y` in its own output, with no sign
+    # a choice was ever taken away. Named here, once, before the branch that
+    # decides whether the wizard actually runs.
+    if not is_interactive and not yes and not dry_run and fmt != "json" and not has_tty:
+        console.print(
+            "[dim]Express mode (no interactive terminal): "
+            "`grimoire init --interactive` to rerun with guidance.[/dim]"
+        )
 
     if is_interactive and not dry_run:
         wizard_result = _run_wizard(
@@ -1286,6 +1346,7 @@ def run_init(
             qdrant_docker_message=qdrant_docker_message,
             lite=lite,
             detected_service=detected_service,
+            no_cockpit=no_cockpit,
         )
 
     _maybe_register_cockpit(target, project_name, fmt, no_cockpit=no_cockpit)
