@@ -1,7 +1,7 @@
 """Contrôle ``hook_commands`` de ``grimoire doctor`` (issue #760).
 
 Séparé de :mod:`grimoire.cli.cmd_up` pour tenir sous le plafond de taille des
-modules ; ``run_env_checks`` l'importe à l'appel.
+modules.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ import os
 import sys
 from pathlib import Path
 
-from grimoire.cli.cmd_up import EnvCheck
+from grimoire.cli.env_checks import EnvCheck
 from grimoire.hosts.hook_launcher import hook_program_resolves
 
 
