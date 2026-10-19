@@ -10,13 +10,13 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from grimoire.core.exceptions import GrimoireMissionError
 from grimoire.missions.lease import MAX_ATTEMPTS, backoff_delay
-from grimoire.missions.schemas import DependencyKind, MissionTask, TaskDependency, TaskState
+from grimoire.missions.schemas import DEFAULT_CLAIM_TTL_SECONDS, DependencyKind, MissionTask, TaskDependency, TaskState
 from grimoire.missions.session_link import resume_command
 from grimoire.missions.waiting import Question, ResumeHint, Waiting, new_question_id
 
@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from grimoire.missions.ledger import LeaseView
 
 __all__ = [
-    "UnjudgedClaimError", "blocks_path", "deferred_waiting", "parse_jsonl", "read_jsonl", "replay_link", "replay_steering", "unclosed_blockers", "unfenced_question",
+    "UnjudgedClaimError", "blocks_path", "default_claim_expiry", "deferred_waiting", "parse_jsonl", "read_jsonl", "replay_link", "replay_steering", "unclosed_blockers", "unfenced_question",
     "waiting_guard",
 ]
 
@@ -223,3 +223,20 @@ def replay_steering(tasks: dict[str, MissionTask], evt_type: str, payload: dict[
             for d in data.get("directives", [])
         ]
     tasks[tid] = MissionTask.from_dict(data)
+
+
+def default_claim_expiry(claim: Any, claimed_at: str) -> Any:
+    """Un claim écrit sans ``expires_at`` reçoit celui de son événement plus le TTL par défaut (W1-07).
+
+    ``TaskClaim.is_expired`` tient « pas d'expiration » pour « jamais » : un claim hérité d'avant
+    les baux gardait ses fichiers à vie. Le rejeu le dérive de l'horodatage de l'événement qui l'a
+    posé — déterministe, sans écrire à la lecture — et un claim plus vieux que le TTL est alors
+    expiré, donc libère ses fichiers. Sans horodatage lisible rien n'est inventé : le claim reste tel quel.
+    """
+    if not isinstance(claim, dict) or claim.get("expires_at"):
+        return claim
+    try:
+        at = datetime.fromisoformat(claimed_at)
+    except ValueError:
+        return claim
+    return {**claim, "expires_at": (at + timedelta(seconds=DEFAULT_CLAIM_TTL_SECONDS)).isoformat()}
