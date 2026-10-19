@@ -149,6 +149,10 @@ CORPUS: tuple[tuple[str, str, str], ...] = (
     ("Run pytest tests/unit/missions", "en", "V0"),
     ("le fichier README existe", "fr", "V0"),
     ("the file README.md exists", "en", "V0"),
+    ("le fichier attendu docs/x.md existe", "fr", "V0"),
+    ("le fichier docs/x.md est présent", "fr", "V0"),
+    ("le fichier docs/x.md est créé", "fr", "V0"),
+    ("un fichier décrit pourquoi X existe", "fr", "V2"),  # piège
     ("le fichier « dist/out.json » existe (acceptance exécutée)", "fr", "V0"),
     # --- Revue S1 (W3-05) : « exists » / « existe » loin du fichier n'est pas un verdict
     ("a file explains why the design exists", "en", "V2"),  # piège
