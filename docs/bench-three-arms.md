@@ -775,7 +775,7 @@ Dépense exacte de la passe : 0,1618 $ (contrôle) + 4,8963 $ + 1,4835 $ = **6,5
 Lecture, sans conclusion de supériorité :
 
 - En `scripted-person`, le code est écrit dans le stage Code Generation, par le sous-agent prévu (appel 4).
-- En `unattended`, l'agent principal écrit `zipper.py` **avant** d'entrer dans le workflow. Le workflow s'arrête ensuite en Reverse Engineering :
+- En `unattended`, l'agent principal écrit le fichier de solution de la tâche `zipper` **avant** d'entrer dans le workflow. Le workflow s'arrête ensuite en Reverse Engineering :
   `aidlc-log engine log link` refuse un lien sans `--artifact`. Les tests cachés passent donc sans qu'AI-DLC ait produit le code. Ce run ne mesure pas
   AI-DLC.
 - Le `invalid` d'`unattended` vient du détecteur W1-08b, qui lit le gras Markdown `**zipper**` d'un heredoc comme un glob. Les tests cachés n'étaient
