@@ -240,9 +240,9 @@ class WakeDecision:
         }
 
 
-def _claim_guards(root: Path) -> Callable[[Mapping[str, MissionTask], MissionTask], str]:
-    """Les gardes que le ledger appelle sous son verrou : la pause d'abord (K11), puis le WIP (K10)."""
-    pause, wip = pause_claim_guard(root), wip_claim_guard(root)
+def _claim_guards(root: Path, ledger_root: Path | None = None) -> Callable[[Mapping[str, MissionTask], MissionTask], str]:
+    """Les gardes que le ledger appelle sous son verrou : la pause d'abord (K11), puis le WIP (K10) des claims vivants."""
+    pause, wip = pause_claim_guard(root), wip_claim_guard(root, ledger_root=ledger_root)
 
     def guard(tasks: Mapping[str, MissionTask], task: MissionTask) -> str:
         return pause(tasks, task) or wip(tasks, task)
@@ -284,7 +284,7 @@ class TaskService:
     def ledger(self) -> MissionLedger:
         if self._ledger is None:
             self._ledger = MissionLedger(self.ledger_root)
-            self._ledger.claim_guard = _claim_guards(self.home_root)  # K10 WIP + K11 pause, sous le verrou
+            self._ledger.claim_guard = _claim_guards(self.home_root, self.ledger_root)  # K10 WIP + K11 pause, sous le verrou
         return self._ledger
 
     def refresh(self) -> None:

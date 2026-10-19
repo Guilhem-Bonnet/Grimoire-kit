@@ -890,10 +890,11 @@ def task_update(
         return _task_steer(task_id, action, project_path, ledger_root, actor, to=to, reason=reason,
                            text=text, kind=kind, directive_id=directive_id, force=force)
     if action == "move":
-        try:
-            target = TaskState(to)
-        except ValueError:
+        # Les états qu'on peut viser, jamais le sentinelle de lecture ``unknown`` (KAN-FRICTIONS).
+        found = next((s for s in TARGETABLE_TASK_STATES if s.value == to), None)
+        if found is None:
             return _tool_error({"error": f"unknown state {to!r}", "states": [s.value for s in TARGETABLE_TASK_STATES]})
+        target = found
     elif action == "block":
         if not reason.strip():
             return _tool_error({"error": "block requires a reason"})

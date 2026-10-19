@@ -1091,24 +1091,31 @@ def task_verify(
     project_root: _PROJECT_ROOT = Path(),
     ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
     evidence_root: _EVIDENCE_ROOT = _DEFAULT_EVIDENCE,
+    evidence: Annotated[list[str] | None, typer.Option(
+        "--evidence", help="Tâche sans commande : fichier de preuve du projet (répétable) — pack déclaratif, verdict skipped.",
+    )] = None,
 ) -> None:
     """Lance les commandes déclarées de la tâche, écrit le pack et le verdict (#772).
 
     Code de sortie 0 si le verdict est `passed`, 1 s'il est `failed` (code de
     sortie inattendu, délai, commande inexécutable), 2 si la tâche ne déclare
-    aucune commande : jamais un vert à vide.
+    aucune commande : jamais un vert à vide. Avec `--evidence` (tâche sans
+    commande) : pack déclaratif des fichiers cités, haché, verdict `skipped`,
+    code 4 — la revue s'ouvre, la clôture reste à un humain.
     """
-    from grimoire.cli.cmd_task_approve import report_unapproved, verify_payload
+    from grimoire.cli.cmd_task_approve import report_declarative, report_unapproved, verify_payload
     from grimoire.missions.verify import NoDeclaredChecksError, UnapprovedChecksError, verify_task
 
     root = project_root.resolve()
     service = _service(project_root, ledger_root)
     task = _require_task(service, task_id)
     evidence_path = evidence_root if evidence_root.is_absolute() else root / evidence_root
+    if evidence:
+        raise typer.Exit(report_declarative(task, root, evidence_path, evidence, as_json=_fmt(ctx) == "json", console=console))
     try:
         outcome = verify_task(task, root, evidence_path)
     except NoDeclaredChecksError as exc:
-        console.print(f"[red]✗[/red] {exc}")
+        console.print(f"[red]✗[/red] {exc} — preuve faite de fichiers : `--evidence <fichier>` (pack déclaratif)")
         raise typer.Exit(2) from exc
     except UnapprovedChecksError as exc:
         report_unapproved(exc, task_id, as_json=_fmt(ctx) == "json", console=console)  # W3-03 : rien n'a été lancé.
