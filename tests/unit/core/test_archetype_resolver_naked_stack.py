@@ -146,3 +146,30 @@ class TestResolveWithoutConfidentRule:
         resolved = ArchetypeResolver().resolve(_scan(tmp_path), archetype_override="minimal")
         assert resolved.archetype == "minimal"
         assert resolved.is_best_guess is False
+
+
+class TestResolverNeverFatalOnOddRoots:
+    def test_unreadable_test_dir_is_ignored(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        (tmp_path / "tests").mkdir()
+
+        def _boom(self: Path):  # type: ignore[no-untyped-def]
+            raise OSError("illisible")
+
+        monkeypatch.setattr(Path, "iterdir", _boom)
+        hint = recommend_naked_stack(_scan(tmp_path, ("python", ("pyproject.toml",))))
+        assert "with a tests/" not in hint.reason
+        assert weak_signal_suggestion(_scan(tmp_path, ("python", ("pyproject.toml",)))) is None
+
+    def test_package_json_that_is_not_an_object_has_neither_runner_nor_bundler(self, tmp_path: Path) -> None:
+        (tmp_path / "package.json").write_text("[1, 2]", encoding="utf-8")
+        scan = _scan(tmp_path, ("javascript", ("package.json",)))
+        assert "(package.json)" in recommend_naked_stack(scan).reason
+        assert weak_signal_suggestion(scan) is None
+
+    def test_missing_package_json_is_no_bundler_signal(self, tmp_path: Path) -> None:
+        assert weak_signal_suggestion(_scan(tmp_path, ("typescript", ("tsconfig.json",)))) is None
+
+    def test_confident_rule_still_wins_and_is_not_a_guess(self, tmp_path: Path) -> None:
+        resolved = ArchetypeResolver().resolve(_scan(tmp_path, ("terraform", ("main.tf",))))
+        assert resolved.archetype != "stack"
+        assert resolved.is_best_guess is False

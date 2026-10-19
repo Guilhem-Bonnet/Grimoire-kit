@@ -371,3 +371,48 @@ rules:
     payload = json.loads(result.output)
     names = [c["name"] for c in payload["checks"]]
     assert "policy_budget_duration_guard" not in names
+
+
+def test_doctor_fails_on_an_invalid_policies_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Un `GrimoirePolicyError` du chargeur est un FAIL nommé du check `policy_budget_guard`
+    (pas une trace) — en JSON comme en texte."""
+    from grimoire.core.exceptions import GrimoirePolicyError
+
+    runner.invoke(app, ["init", str(tmp_path)])
+
+    def _boom(*a: object, **k: object) -> None:
+        raise GrimoirePolicyError("règle 'x' : champ `description` manquant")
+
+    monkeypatch.setattr("grimoire.policies.rules_config.load_custom_rules", _boom)
+    result = runner.invoke(app, ["-o", "json", "doctor", str(tmp_path)])
+    data = json.loads(result.output)
+    guard = next(c for c in data["checks"] if c["name"] == "policy_budget_guard")
+    assert guard["passed"] is False
+    assert "policies.yaml invalide" in guard["detail"]
+    assert "champ `description` manquant" in guard["detail"]
+
+    text = runner.invoke(app, ["doctor", str(tmp_path)])
+    assert "FAIL" in text.output
+    assert "policies.yaml invalide" in text.output
+
+
+def test_doctor_warns_on_a_short_global_duration_window(tmp_path: Path) -> None:
+    runner.invoke(app, ["init", str(tmp_path)])
+    _write_policies_yaml(
+        tmp_path,
+        """
+rules:
+  - id: short-window
+    description: "fenêtre courte"
+    action_kinds: []
+    mutation_classes: []
+    risk_profiles: []
+    verdict_on_match: block
+    reason_template: "budget"
+    tool_pattern: "*"
+    per_session: {max_writes: 800, max_tool_calls: 3000, max_duration_min: 60}
+""",
+    )
+    result = runner.invoke(app, ["doctor", str(tmp_path)])
+    assert "short-window" in result.output
+    assert "max_duration_min" in result.output

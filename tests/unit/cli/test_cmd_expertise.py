@@ -143,3 +143,37 @@ class TestExpertiseTextOutput:
         payload = json.loads(result.output)
         assert payload[0]["expertise_id"] == "rust"
         assert payload[0]["was_attached"] is True
+
+
+class TestExpertiseNamedRefusals:
+    """Un registre illisible ou un détachement qui échoue sortent en 1 avec le message, jamais une trace."""
+
+    def _broken_catalog(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from grimoire.core.exceptions import GrimoireRegistryError
+
+        def _boom(*a: object, **k: object) -> None:
+            raise GrimoireRegistryError("registre cassé pour le test")
+
+        monkeypatch.setattr("grimoire.core.expertises.load_catalog", _boom)
+
+    @pytest.mark.parametrize("args", [["list"], ["add", "rust"], ["remove", "rust"]])
+    def test_unreadable_registry_is_a_named_refusal(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, args: list[str]
+    ) -> None:
+        self._broken_catalog(monkeypatch)
+        result = runner.invoke(app, ["expertise", *args, "--project-root", str(tmp_path)])
+        assert result.exit_code == 1
+        assert "registre cassé pour le test" in result.output
+
+    def test_detach_failure_is_a_named_refusal(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        from grimoire.core.exceptions import GrimoireAgentError
+
+        _seed_stack_engineer(tmp_path)
+
+        def _boom(*a: object, **k: object) -> None:
+            raise GrimoireAgentError("détachement refusé pour le test")
+
+        monkeypatch.setattr("grimoire.core.expertises.detach_expertise", _boom)
+        result = runner.invoke(app, ["expertise", "remove", "rust", "--project-root", str(tmp_path)])
+        assert result.exit_code == 1
+        assert "détachement refusé pour le test" in result.output

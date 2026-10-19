@@ -4182,3 +4182,23 @@ class TestDiscoverFooter:
         )
         assert result.exit_code == 0, result.output
         assert "grimoire cockpit" not in result.output
+
+
+class TestDoctorMemoryStackNotStarted:
+    """2026-09-18 arbitrage (#619) : une pile configurée mais jamais démarrée est un WARN nommé, jamais un FAIL."""
+
+    def test_doctor_warns_with_the_start_command(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        runner.invoke(app, ["-y", "init", str(tmp_path), "--no-cockpit"])
+        monkeypatch.setattr(
+            "grimoire.tools.memory_setup.unreached_configured_services", lambda *a, **k: ["weaviate", "neo4j"]
+        )
+        result = runner.invoke(app, ["doctor", str(tmp_path)])
+        assert result.exit_code == 0, result.output
+        assert "pile mémoire non démarrée (weaviate, neo4j)" in result.output
+        assert "--start --apply" in result.output
+
+        as_json = runner.invoke(app, ["-o", "json", "doctor", str(tmp_path)])
+        data = json.loads(as_json.output)
+        check = next(c for c in data["checks"] if c["name"] == "memory_stack_started")
+        assert check["passed"] is True
+        assert check["level"] == "warn"

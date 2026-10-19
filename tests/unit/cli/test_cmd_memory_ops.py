@@ -300,3 +300,86 @@ class TestMemoryDoctor:
         assert result.exit_code == 0, result.output
         data = json.loads(result.output)
         assert data["graph_drift"] is None
+
+
+class TestMemoryUpStartRefusal:
+    """Un gabarit compose illisible (`GrimoireRuntimeError`) est un refus nommé, en texte comme en JSON."""
+
+    @pytest.mark.parametrize("as_json", [True, False])
+    def test_unreadable_template_exits_one_with_the_message(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, as_json: bool
+    ) -> None:
+        from grimoire.core.exceptions import GrimoireRuntimeError
+
+        _write_config(tmp_path)
+        monkeypatch.chdir(tmp_path)
+
+        def _boom(*a: object, **k: object) -> None:
+            raise GrimoireRuntimeError("gabarit illisible pour le test")
+
+        monkeypatch.setattr("grimoire.tools.memory_setup.start_memory_stack", _boom)
+        args = ["-o", "json"] if as_json else []
+        result = runner.invoke(app, [*args, "memory", "up", "--profile", "complet", "--start"])
+        assert result.exit_code == 1
+        if as_json:
+            assert json.loads(result.output) == {"ok": False, "error": "gabarit illisible pour le test"}
+        else:
+            assert "gabarit illisible pour le test" in result.output
+
+    def test_text_mode_echoes_the_started_lines(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        _write_config(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        with patch("grimoire.tools.memory_setup.start_memory_stack", return_value=["Weaviate : démarré"]):
+            result = runner.invoke(app, ["memory", "up", "--profile", "complet", "--start"])
+        assert result.exit_code == 0, result.output
+        assert "Weaviate : démarré" in result.output
+
+
+class TestMemoryDoctorTextBranches:
+    def test_text_report_dry_run_names_candidates_and_the_backup(self, doctor_context) -> None:
+        result = runner.invoke(app, ["memory", "doctor"])
+        assert result.exit_code == 0, result.output
+        assert "Dérive du graphe" in result.output
+        assert "export-bundle" in result.output
+        assert "--apply" in result.output
+
+    def test_text_report_apply_says_purged(self, doctor_context) -> None:
+        result = runner.invoke(app, ["memory", "doctor", "--apply"])
+        assert result.exit_code == 0, result.output
+        assert "Purgés" in result.output
+        assert "1/1" in result.output
+
+    def test_text_report_with_no_orphan(self, doctor_context) -> None:
+        _mgr, graph = doctor_context
+        graph.find_orphan_memory_nodes.return_value = []
+        result = runner.invoke(app, ["memory", "doctor"])
+        assert result.exit_code == 0, result.output
+        assert "Aucun nœud orphelin" in result.output
+
+    def test_graph_loader_failure_is_reported_not_raised(self, doctor_context) -> None:
+        with patch("grimoire.cli.cmd_memory_ops._load_neo4j_graph", side_effect=RuntimeError("bolt KO")):
+            result = runner.invoke(app, ["memory", "doctor"])
+        assert result.exit_code == 0, result.output
+        assert "Non vérifiable" in result.output
+        assert "bolt KO" in result.output
+
+    def test_probe_failure_closes_the_graph_and_is_reported(self, doctor_context) -> None:
+        mgr, graph = doctor_context
+        mgr.get_all.side_effect = RuntimeError("store KO")
+        result = runner.invoke(app, ["-o", "json", "memory", "doctor"])
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert data["graph_drift"] is None
+        assert "store KO" in data["graph_drift_error"]
+        graph.close.assert_called_once()
+
+    def test_unavailable_backend_is_printed_in_text(self, doctor_context) -> None:
+        from grimoire.core.exceptions import GrimoireMemoryError
+
+        with patch(
+            "grimoire.cli.cmd_memory_ops.MemoryManager.from_config", side_effect=GrimoireMemoryError("backend KO")
+        ):
+            result = runner.invoke(app, ["memory", "doctor"])
+        assert result.exit_code == 0, result.output
+        assert "Indisponible" in result.output
+        assert "backend KO" in result.output

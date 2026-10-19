@@ -721,3 +721,78 @@ class TestStartMemoryStack:
 
         messages = ms.start_memory_stack("complet", tmp_path)
         assert any("échoué" in m for m in messages)
+
+
+class TestStartStackFailureLines:
+    """Les pannes de `docker compose` / `docker run` deviennent des lignes de statut, jamais des traces."""
+
+    @pytest.fixture
+    def _docker_ready(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+        monkeypatch.setattr(ms, "docker_daemon_reachable", lambda *a, **k: True)
+        down = ms.ServiceProbe(id="x", url="http://localhost:1", reachable=False, extra="x", extra_installed=True)
+        monkeypatch.setattr(
+            ms, "probe_services",
+            lambda *a, **k: {"weaviate": down, "neo4j": down, "redis": down, "qdrant": down, "ollama": down},
+        )
+        monkeypatch.setattr(ms, "_wait_reachable", lambda *a, **k: True)
+        return tmp_path
+
+    def test_compose_oserror_is_reported(self, _docker_ready: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        def _boom(*a: object, **k: object) -> None:
+            raise OSError("docker absent")
+
+        monkeypatch.setattr(ms.subprocess, "run", _boom)
+        messages = ms.start_memory_stack("complet", _docker_ready)
+        assert messages == ["docker compose : docker absent"]
+
+    def test_compose_nonzero_is_reported_with_stderr(self, _docker_ready: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        class _Result:
+            returncode = 1
+            stdout = ""
+            stderr = "port occupé"
+
+        monkeypatch.setattr(ms.subprocess, "run", lambda *a, **k: _Result())
+        messages = ms.start_memory_stack("complet", _docker_ready)
+        assert messages == ["docker compose a échoué : port occupé"]
+
+    def test_redis_oserror_is_reported_after_the_stack(self, _docker_ready: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        class _Ok:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        def _run(cmd: list[str], **k: object) -> _Ok:
+            if cmd[:2] == ["docker", "compose"]:
+                return _Ok()
+            raise OSError("redis KO")
+
+        monkeypatch.setattr(ms.subprocess, "run", _run)
+        messages = ms.start_memory_stack("complet", _docker_ready)
+        assert "Weaviate : démarré" in messages
+        assert "Neo4j : démarré" in messages
+        assert "Redis : redis KO" in messages
+
+
+class TestUnreachedQdrantServer:
+    def test_configured_qdrant_server_that_does_not_answer_is_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from grimoire.core.config import MemoryConfig
+
+        monkeypatch.setattr(ms, "_tcp_reachable", lambda *a, **k: False)
+        memory = MemoryConfig(backend="qdrant-server", qdrant_url="http://localhost:6333")
+        assert ms.unreached_configured_services(memory) == ["qdrant"]
+
+
+class TestEnsureComposeFileWriteFailure:
+    def test_unwritable_destination_is_a_runtime_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        from grimoire.core.exceptions import GrimoireRuntimeError
+
+        real = Path.write_text
+
+        def _write(self: Path, *a: object, **k: object) -> int:
+            if self.parent == tmp_path:
+                raise OSError("disque plein")
+            return real(self, *a, **k)
+
+        monkeypatch.setattr(Path, "write_text", _write)
+        with pytest.raises(GrimoireRuntimeError, match="impossible d'écrire"):
+            ms._ensure_compose_file(tmp_path)
