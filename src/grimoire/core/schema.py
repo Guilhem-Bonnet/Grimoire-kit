@@ -348,6 +348,16 @@ def _hosts_schema() -> dict[str, Any]:
                 "uniqueItems": True,
                 "description": "Subset of known hosts this project emits files for.",
             },
+            "preserve": {
+                "type": "array",
+                "items": {"type": "string"},
+                "uniqueItems": True,
+                "description": (
+                    "Host files (paths relative to the project root) the project keeps for itself: "
+                    "`grimoire host sync` never writes them and reports them as user-owned; "
+                    "the kit element they would carry is not delivered on that host (D-07)."
+                ),
+            },
         },
     }
 

@@ -41,7 +41,7 @@ Copilot, parce que c'est la même décision.
 | `grimoire host sync --host all` | Génère les surfaces (ajouter `--dry-run` pour voir sans écrire) |
 | `grimoire host status` | Écart entre ce que le projet déclare et ce que l'hôte exécute |
 | `grimoire host matrix` | Matrice règle × hôte calculée depuis ce que chaque émetteur écrit ; sort en 1 si une règle n'est ni appliquée ni déclarée dégradée |
-| `grimoire host probe` | Vérifie sur le disque que les fichiers et hooks émis sont présents et à jour, sans rien écrire ; sort en 1 si un fichier manque, est périmé ou édité à la main |
+| `grimoire host probe` | Vérifie sur le disque que les fichiers et hooks émis sont présents et à jour, sans rien écrire ; sort en 1 si un fichier manque, est périmé ou édité à la main (hors fichier déclaré `hosts.preserve`, rendu `user-owned`), ou si les hooks sont coupés par `disableAllHooks` |
 | `grimoire host run <slug>` | Corps d'une commande, pour un hôte sans commandes natives |
 
 `grimoire init`, `grimoire up --fix` et `grimoire standard init` appellent la
@@ -163,9 +163,46 @@ hôtes activés.
   `.mcp.json`) ne sont jamais retirées : elles portent aussi la configuration
   propre du projet.
 
-`grimoire doctor` complète ce tableau sans jamais faire échouer le diagnostic :
-INFO pour les fichiers orphelins d'un hôte désactivé, WARN si un hôte activé
-n'a encore rien émis (généralement : `grimoire host sync` n'a pas tourné).
+`grimoire doctor` complète ce tableau : INFO pour les fichiers orphelins d'un
+hôte désactivé, WARN si un hôte activé n'a encore rien émis (généralement :
+`grimoire host sync` n'a pas tourné), et **FAIL** (`host_sync_<hôte>`) si un
+fichier hôte est préservé sans avoir été déclaré (voir ci-dessous) — `doctor` ne
+peut pas répondre « tout va bien » quand `grimoire up` échoue.
+
+### Un fichier hôte qui est à vous : `hosts.preserve`
+
+Le kit n'écrase jamais un fichier de chemin géré qu'il n'a pas écrit (un
+`.claude/agents/concierge.md` à vous, un `.claude/settings.json` avec commentaires
+ou virgule finale) ni un fichier du kit que vous avez modifié. Un tel fichier n'est
+pas synchronisé : `grimoire up` (étape `host_sync`), `grimoire doctor` et
+`grimoire upgrade-flow apply` échouent, à chaque passage, et nomment les deux issues.
+
+- **Garder le fichier** (non destructif, durable) : le déclarer dans
+  `project-context.yaml`.
+
+  ```yaml
+  hosts:
+    preserve: [".claude/agents/concierge.md"]
+  ```
+
+  Chemins relatifs à la racine, avec `/`, sans `..`. Le fichier n'est jamais écrit
+  (`--force` compris). `up` passe (code 0) en listant « user-owned (hosts.preserve) » ;
+  `host probe` le rend `user-owned`, jamais `applied` ; `host matrix` ajoute une ligne
+  `file:<chemin>` au statut `preserved` — et tout hook ou règle que ce fichier aurait
+  porté passe aussi `preserved` : l'élément du kit n'est **pas livré** sur cet hôte
+  (dégradation déclarée, à vous d'en assurer l'équivalent).
+- **Laisser le kit l'écraser** : `grimoire host sync --force` (destructif).
+
+Le choix « échec » plutôt qu'« avertissement » sans déclaration est volontaire : un
+avertissement permanent s'ignore, et un fichier préservé ne doit jamais passer pour
+synchronisé. La déclaration est ce qui transforme le conflit en décision.
+
+### Hooks coupés par l'hôte
+
+`grimoire host probe` lit `disableAllHooks` dans `.claude/settings.json` et
+`.claude/settings.local.json`. À `true`, les hooks câblés sont rendus `disabled` et la
+sonde sort en 1 : les hooks sont dans le fichier, l'hôte ne les exécute pas. Limite : les
+réglages utilisateur (`~/.claude/settings.json`) et d'organisation ne sont pas lus.
 
 ## Persona d'entrée
 

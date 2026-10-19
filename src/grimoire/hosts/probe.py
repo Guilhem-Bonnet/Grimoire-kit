@@ -13,7 +13,11 @@ Verdict par cellule (``disk``) :
 - ``missing``  : le fichier n'existe pas ;
 - ``stale``    : le fichier existe mais ne porte pas, ou plus, la règle ;
 - ``conflict`` : le fichier a été modifié à la main ou n'est pas au kit : le kit
-  ne le réécrit pas, donc la règle n'est pas garantie.
+  ne le réécrit pas, donc la règle n'est pas garantie ;
+- ``user-owned`` : le projet a déclaré le fichier sien (``hosts.preserve``) : le kit n'y touche pas,
+  l'élément qu'il aurait porté n'est pas livré — déclaré, donc conforme, mais jamais ``applied`` ;
+- ``disabled`` : le hook est câblé mais l'hôte est configuré pour ne rien exécuter
+  (``disableAllHooks`` dans ``.claude/settings.json`` ou ``settings.local.json``).
 
 Une cellule dont le statut de matrice échoue (``undeclared``, ``inert``,
 ``misscoped``) fait échouer la sonde : un fichier parfaitement à jour qui ment
@@ -26,6 +30,7 @@ l'hôte lit, pas que l'hôte l'exécute. Rejouer le hook est l'affaire de
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -34,7 +39,7 @@ from grimoire.bridges.schemas import HostId
 from grimoire.hosts.capabilities import profile_for
 from grimoire.hosts.emitters import emitter_for
 from grimoire.hosts.emitters.base import EmitPlan, EmitResult, apply_plan
-from grimoire.hosts.matrix import Cell, Matrix, build_matrix, carrier_present
+from grimoire.hosts.matrix import ADVISORY, ENFORCED, PRESERVED, Cell, Matrix, build_matrix, carrier_present
 from grimoire.hosts.surface import ProjectSurface
 
 __all__ = ["FileProbe", "HostProbe", "ProbeReport", "ProbedCell", "probe_hosts"]
@@ -44,21 +49,27 @@ DECLARED = "declared"
 MISSING = "missing"
 STALE = "stale"
 CONFLICT = "conflict"
+USER_OWNED = "user-owned"
+DISABLED = "disabled"
+
+#: Fichiers où Claude Code lit ``disableAllHooks`` (le projet ; la copie locale l'emporte sur la partagée).
+_CLAUDE_SETTINGS = (".claude/settings.json", ".claude/settings.local.json")
 
 #: États d'un fichier émis.
 FILE_OK = "ok"
 FILE_ORPHAN = "orphan"  # marqué du kit, plus émis : ``host sync`` le retirerait
+FILE_USER_OWNED = "user-owned"  # déclaré dans ``hosts.preserve`` : à l'utilisateur, ni écrit ni en conflit
 
 
 @dataclass(frozen=True, slots=True)
 class FileProbe:
     path: str
-    state: str  # ok | missing | stale | conflict | orphan
+    state: str  # ok | missing | stale | conflict | orphan | user-owned
     cause: str = ""
 
     @property
     def ok(self) -> bool:
-        return self.state == FILE_OK
+        return self.state in {FILE_OK, FILE_USER_OWNED}
 
     def to_dict(self) -> dict[str, str]:
         return {"path": self.path, "state": self.state, "cause": self.cause}
@@ -71,7 +82,7 @@ class ProbedCell:
 
     @property
     def ok(self) -> bool:
-        return self.cell.ok and self.disk in {APPLIED, DECLARED}
+        return self.cell.ok and self.disk in {APPLIED, DECLARED, USER_OWNED}
 
     def to_dict(self) -> dict[str, Any]:
         return {**self.cell.to_dict(), "disk": self.disk, "ok": self.ok}
@@ -124,6 +135,10 @@ class ProbeReport:
     def drift(self) -> tuple[str, ...]:
         return tuple(p for h in self.hosts for p in h.drift)
 
+    @property
+    def conflicts(self) -> tuple[str, ...]:
+        return tuple(p for h in self.hosts for p in h.conflicts)
+
     def to_dict(self) -> dict[str, Any]:
         return {"ok": self.ok, "verified": self.verified, "hosts": [h.to_dict() for h in self.hosts]}
 
@@ -142,6 +157,8 @@ def _file_states(plan: EmitPlan, result: EmitResult, root: Path) -> list[FilePro
         states[label] = FileProbe(paths.get(known, Path(known)).as_posix(), CONFLICT, result.conflicts.get(label, ""))
     for label in result.removed:
         states[label] = FileProbe(label, FILE_ORPHAN)
+    for label in result.preserved:
+        states[label] = FileProbe(label, FILE_USER_OWNED, "déclaré dans hosts.preserve")
     return sorted(states.values(), key=lambda f: f.path)
 
 
@@ -153,6 +170,8 @@ def _read(root: Path, rel: str) -> str | None:
 
 
 def _disk_verdict(cell: Cell, files: dict[str, FileProbe], root: Path) -> str:
+    if cell.status == PRESERVED:
+        return USER_OWNED
     if not cell.carriers:
         return DECLARED
     verdicts: list[str] = []
@@ -173,6 +192,32 @@ def _disk_verdict(cell: Cell, files: dict[str, FileProbe], root: Path) -> str:
     return APPLIED
 
 
+def _hooks_disabled(root: Path, host: HostId) -> str:
+    """Fichier Claude Code qui coupe tous les hooks (``disableAllHooks: true``), sinon ``""``.
+
+    Lu tel qu'il est sur le disque : un JSON illisible ne dit rien (le conflit est déjà rapporté).
+    Les réglages de l'utilisateur (``~/.claude``) et de l'organisation ne sont pas lus.
+    """
+    if host is not HostId.CLAUDE_CODE_CLI:
+        return ""
+    for rel in _CLAUDE_SETTINGS:
+        text = _read(root, rel)
+        try:
+            data = json.loads(text) if text is not None else None
+        except ValueError:
+            continue
+        if isinstance(data, dict) and data.get("disableAllHooks") is True:
+            return rel
+    return ""
+
+
+def _gated(cell: Cell, disk: str, disabled_by: str) -> str:
+    """Un hook câblé mais coupé par l'hôte n'est pas appliqué."""
+    if disabled_by and disk == APPLIED and cell.kind == "hook" and cell.status in {ENFORCED, ADVISORY}:
+        return DISABLED
+    return disk
+
+
 def probe_hosts(
     project_root: Path,
     host_ids: tuple[HostId, ...] | None = None,
@@ -191,6 +236,7 @@ def probe_hosts(
         result = apply_plan(plan, root, dry_run=True)
         files = _file_states(plan, result, root)
         by_path = {f.path: f for f in files}
-        cells = tuple(ProbedCell(c, _disk_verdict(c, by_path, root)) for c in m.for_host(host))
+        off = _hooks_disabled(root, host)
+        cells = tuple(ProbedCell(c, _gated(c, _disk_verdict(c, by_path, root), off)) for c in m.for_host(host))
         probes.append(HostProbe(host.value, profile_for(host).display_name, tuple(files), cells))
     return ProbeReport(tuple(probes))

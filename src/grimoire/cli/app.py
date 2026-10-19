@@ -702,14 +702,13 @@ def doctor(
         for w in warnings:
             _record("semantic", passed=False, detail=w)
 
-    # 5bis. Hosts declared vs emitted (issue #177) — jamais FAIL : une dette de
-    # déclaration, pas une panne. INFO pour les fichiers orphelins d'un hôte
-    # désactivé (`hosts.enabled`), WARN si un hôte activé n'a rien émis du tout.
+    # 5bis. Hosts declared vs emitted (issue #177) : INFO orphelins d'un hôte désactivé, WARN hôte activé
+    # sans fichier, FAIL fichier hôte préservé non déclaré dans `hosts.preserve` (D-07, comme `up`).
     if cfg:
         with _timed_phase("hosts_enabled"):
             from grimoire.hosts.collect import build_surface
             from grimoire.hosts.detection import alias_for_host, enabled_host_ids
-            from grimoire.hosts.emitters import emitter_for, owned_managed_paths, supported_hosts
+            from grimoire.hosts.emitters import emitter_for, host_conflict_detail, owned_managed_paths, supported_hosts
 
             host_surface = build_surface(target)
             enabled = enabled_host_ids(target, cfg)
@@ -721,6 +720,8 @@ def doctor(
                 owned = owned_managed_paths(plan, target)
                 alias = alias_for_host(host_id)
                 if host_id in enabled:
+                    if detail := host_conflict_detail(plan, target, alias):  # D-07 : `up` échoue dessus, doctor aussi
+                        _record(f"host_sync_{alias}", passed=False, detail=detail)
                     if not owned:
                         detail = (
                             f"Hôte {alias} activé (`hosts.enabled`) mais aucun fichier émis — "

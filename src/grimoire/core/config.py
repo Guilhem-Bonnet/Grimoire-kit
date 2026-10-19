@@ -296,11 +296,15 @@ class HostsConfig:
     """
 
     enabled: tuple[str, ...] | None = None
+    #: Fichiers hôtes (chemins relatifs à la racine, ``/``) que le projet garde pour lui : le kit
+    #: ne les écrit jamais, ne les compte ni en conflit ni en synchronisés (D-07).
+    preserve: tuple[str, ...] = ()
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> HostsConfig:
+        preserve = _parse_preserve(data.get("preserve"))
         if "enabled" not in data or data.get("enabled") is None:
-            return cls(enabled=None)
+            return cls(enabled=None, preserve=preserve)
         raw = data["enabled"]
         if not isinstance(raw, list):
             raise GrimoireConfigError(
@@ -315,7 +319,26 @@ class HostsConfig:
                 f"expected a subset of {sorted(_VALID_HOST_ALIASES)}",
                 error_code=CONFIG_PARSE_ERROR.code,
             )
-        return cls(enabled=values)
+        return cls(enabled=values, preserve=preserve)
+
+
+def _parse_preserve(raw: Any) -> tuple[str, ...]:
+    """``hosts.preserve`` : liste de chemins relatifs, sans ``..`` ; une entrée invalide est refusée, pas ignorée."""
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise GrimoireConfigError("'hosts.preserve' must be a list of relative file paths", error_code=CONFIG_PARSE_ERROR.code)
+    out: list[str] = []
+    for item in raw:
+        text = str(item).strip().replace("\\", "/").removeprefix("./")
+        if not text or text.startswith("/") or ".." in text.split("/") or (len(text) > 1 and text[1] == ":"):
+            raise GrimoireConfigError(
+                f"Invalid path in 'hosts.preserve': {item!r}, expected a path relative to the project root",
+                error_code=CONFIG_PARSE_ERROR.code,
+            )
+        if text not in out:
+            out.append(text)
+    return tuple(out)
 
 
 _VALID_EXECUTION_NEED_IDS = frozenset({

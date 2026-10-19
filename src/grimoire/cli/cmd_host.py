@@ -23,7 +23,14 @@ from grimoire.bridges.schemas import HostId
 from grimoire.hosts.capabilities import all_profiles, gaps_for, profile_for, resolve_host
 from grimoire.hosts.collect import build_surface, collect_commands, entry_agent_name
 from grimoire.hosts.detection import alias_for_host, enabled_host_ids
-from grimoire.hosts.emitters import apply_plan, apply_plans, emitter_for, owned_managed_paths, supported_hosts
+from grimoire.hosts.emitters import (
+    apply_plan,
+    apply_plans,
+    conflict_exits,
+    emitter_for,
+    owned_managed_paths,
+    supported_hosts,
+)
 from grimoire.hosts.matrix import build_matrix
 from grimoire.hosts.probe import probe_hosts
 from grimoire.hosts.runtime import parse_event, run_hook
@@ -259,7 +266,9 @@ def host_sync(
             console.print(f"    [green][OK][/green] {label}")
         for label in result.skipped:
             cause = _CONFLICT_TEXT.get(result.conflicts.get(label, ""), "conflit")
-            console.print(f"    [yellow][!][/yellow] {label} — {cause}, préservé (utilisez --force)")
+            console.print(f"    [yellow][!][/yellow] {label} — {cause}, préservé ({conflict_exits([label])})")
+        for label in result.preserved:
+            console.print(f"    [dim]{label} — à l'utilisateur (hosts.preserve), non écrit[/dim]")
         for label in result.removed:
             console.print(f"    [yellow][-][/yellow] {label} — {'retirerait' if dry_run else 'retiré'} : la règle source n'existe plus")
         for degradation in result.degradations:
@@ -438,13 +447,18 @@ def host_probe(
         state = "[green]appliqué[/green]" if item.ok else "[red]non conforme[/red]"
         console.print(f"[bold]{item.display_name}[/bold] {state}")
         for file in item.files:
-            if not file.ok:
+            if file.state == "user-owned":
+                console.print(f"  [dim]{file.path} — à l'utilisateur (hosts.preserve), non livré par le kit[/dim]")
+            elif not file.ok:
                 console.print(f"  [red][!][/red] {file.path} — {file.state}{f' ({file.cause})' if file.cause else ''}")
         for probed in item.cells:
             if not probed.ok:
-                console.print(f"  [red][!][/red] {probed.cell.subject} — {probed.cell.status}/{probed.disk} {probed.cell.reason}".rstrip())
+                why = probed.cell.reason or ("hooks coupés par `disableAllHooks` dans les réglages de l'hôte" if probed.disk == "disabled" else "")
+                console.print(f"  [red][!][/red] {probed.cell.subject} — {probed.cell.status}/{probed.disk} {why}".rstrip())
     if not report.ok:
         console.print("`grimoire host sync` régénère ce qui manque ou est périmé ; un fichier modifié à la main reste préservé.")
+        if report.conflicts:
+            console.print(conflict_exits(list(report.conflicts)))
     raise typer.Exit(0 if report.ok else 1)
 
 

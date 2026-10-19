@@ -31,6 +31,7 @@ from grimoire.bridges.schemas import HostId
 from grimoire.core.layered_rules import LAYERS, Rule, analyze
 from grimoire.core.rule_resolution import emitted_rules, resolve_rules
 from grimoire.hosts.capabilities import HostProfile, profile_for
+from grimoire.hosts.detection import preserved_paths
 from grimoire.hosts.emitters import emitter_for, supported_hosts
 from grimoire.hosts.emitters.base import Degradation, EmitPlan
 from grimoire.hosts.emitters.rules import renders_rule_files
@@ -55,6 +56,7 @@ DEGRADED = "degraded"  # règle non écrite, et l'émetteur le dit
 UNDECLARED = "undeclared"  # ni écrit ni déclaré dégradé : l'émetteur ment par omission
 INERT = "inert"  # écrit pour un événement que l'hôte ne déclenche pas
 MISSCOPED = "misscoped"  # règle scopée écrite sans sa portée
+PRESERVED = "preserved"  # fichier déclaré à l'utilisateur (`hosts.preserve`) : l'élément du kit qu'il porterait n'est pas livré
 
 #: Une cellule dans l'un de ces statuts rend la matrice, donc la sonde, non conforme.
 FAILING = frozenset({UNDECLARED, INERT, MISSCOPED})
@@ -72,7 +74,7 @@ def _norm(name: str) -> str:
 class Cell:
     """Une règle sur un hôte : ce qui est promis, et par quels fichiers."""
 
-    kind: str  # "hook" | "rule"
+    kind: str  # "hook" | "rule" | "file"
     subject: str
     host: str
     status: str
@@ -224,6 +226,24 @@ def _key(rule: Rule) -> tuple[str, int, str]:
     return (rule.layer, rule.line, rule.render())
 
 
+def _with_preserved(cells: list[Cell], host: HostId, plan: EmitPlan, preserved: frozenset[str]) -> list[Cell]:
+    """Une cellule dont tous les fichiers porteurs sont à l'utilisateur n'est pas livrée ; chaque fichier gardé a sa ligne."""
+    if not preserved:
+        return cells
+    note = "fichier déclaré dans hosts.preserve : à l'utilisateur, l'élément du kit qu'il porterait n'est pas livré sur cet hôte"
+    out = [
+        Cell(c.kind, c.subject, c.host, PRESERVED, carriers=c.carriers, reason=note)
+        if c.carriers and all(p in preserved for p in c.carriers)
+        else c
+        for c in cells
+    ]
+    out.extend(
+        Cell("file", f"file:{path}", host.value, PRESERVED, carriers=(path,), reason=note)
+        for path in sorted({p for p in plan.labels() if p in preserved})
+    )
+    return out
+
+
 def build_matrix(
     project_root: Path,
     host_ids: tuple[HostId, ...] | None = None,
@@ -238,6 +258,7 @@ def build_matrix(
     hosts = tuple(h for h in (host_ids if host_ids is not None else supported_hosts()) if emitter_for(h) is not None)
     cells: list[Cell] = []
     plans: dict[HostId, EmitPlan] = {}
+    preserved = preserved_paths(root)
     for host in hosts:
         emitter = emitter_for(host)
         assert emitter is not None  # filtré ci-dessus
@@ -245,6 +266,7 @@ def build_matrix(
         plans[host] = plan
         profile = profile_for(host)
         texts = _texts(plan)
-        cells.extend(_hook_cell(hook, host, profile, plan, texts) for hook in surf.hooks)
-        cells.extend(_rule_cells(host, plan, texts, root))
+        host_cells = [_hook_cell(hook, host, profile, plan, texts) for hook in surf.hooks]
+        host_cells.extend(_rule_cells(host, plan, texts, root))
+        cells.extend(_with_preserved(host_cells, host, plan, preserved))
     return Matrix(hosts=hosts, cells=tuple(cells), plans=plans)
