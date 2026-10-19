@@ -55,6 +55,7 @@ from grimoire.missions.ledger_rules import (
     unfenced_question,
     waiting_guard,
 )
+from grimoire.missions.questions import QUESTION_EVENTS
 from grimoire.missions.schemas import (
     DEFAULT_CLAIM_TTL_SECONDS,
     ORIGIN_AGENT,
@@ -132,7 +133,7 @@ _STEERING_EVENTS = frozenset({
     "task.directive_added",
     "task.directive_delivered",
     "task.directive_acknowledged",
-})
+}) | QUESTION_EVENTS  # W6-07 : questions et réponses, rejouées dans ``MissionTask.questions``
 
 #: L'événement qui rattache une session d'hôte au claim d'une tâche (issue #638).
 SESSION_ATTACHED_EVENT = "task.session_attached"
@@ -383,7 +384,7 @@ class MissionLedger:
                     claim = replace(current.claim, expires_at=str(payload.get("expires_at", "") or ""))
                     self._tasks[tid] = MissionTask.from_dict({**current.to_dict(), "claim": claim.to_dict()})
             elif evt_type in _STEERING_EVENTS:
-                replay_steering(self._tasks, evt_type, payload)
+                replay_steering(self._tasks, evt_type, payload, str(raw.get("created_at", "") or ""))
             elif evt_type == SESSION_ATTACHED_EVENT:
                 # Issue #638 lot A : le claim apprend sa session après coup. Un
                 # événement de plus dans le journal, jamais une ligne réécrite ;

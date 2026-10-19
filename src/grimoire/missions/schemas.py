@@ -15,6 +15,7 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Any
 
+from grimoire.missions.questions import QuestionRecord
 from grimoire.missions.waiting import Waiting
 
 _log = logging.getLogger(__name__)
@@ -535,6 +536,10 @@ class MissionTask:
     #: validée à la lecture : une valeur inconnue (écrite par une version plus
     #: récente) se relit, et c'est le gate qui la refuse.
     test_depth: str = ""
+    #: Les questions posées sur la tâche et leurs réponses (W6-07, issue #564), dans l'ordre. Rejouées
+    #: depuis ``task.question_asked``, ``task.human_answered`` et ``task.question_resolved`` — jamais
+    #: posées à la création. Le statut se lit par :mod:`grimoire.missions.questions`.
+    questions: tuple[QuestionRecord, ...] = ()
 
     @property
     def pending_directives(self) -> tuple[TaskDirective, ...]:
@@ -592,6 +597,8 @@ class MissionTask:
             d["waiting"] = self.waiting.to_dict()
         if self.test_depth:
             d["test_depth"] = self.test_depth
+        if self.questions:
+            d["questions"] = [record.to_dict() for record in self.questions]
         return d
 
     @classmethod
@@ -632,6 +639,7 @@ class MissionTask:
             checks=tuple(TaskCheck.from_dict(c) for c in d.get("checks", [])),
             waiting=Waiting.from_dict(d["waiting"]) if isinstance(d.get("waiting"), dict) else None,
             test_depth=str(d.get("test_depth", "") or ""),
+            questions=tuple(QuestionRecord.from_dict(q) for q in d.get("questions") or () if isinstance(q, dict)),
         )
 
 
