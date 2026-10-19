@@ -103,6 +103,12 @@ _WELL_FORMED_CASES: tuple[dict, ...] = (
     {"project": {"name": "x"}, "hosts": {"enabled": ["claude", "claude"]}},
     {"project": {"name": "x"}, "hosts": {"enabled": [3]}},
     {"project": {"name": "x"}, "hosts": "nope"},
+    {"project": {"name": "x"}, "hosts": {"preserve": [".github/copilot-instructions.md", "./AGENTS.md"]}},
+    {"project": {"name": "x"}, "hosts": {"preserve": ["../escape.md"]}},
+    {"project": {"name": "x"}, "hosts": {"preserve": ["/abs.md"]}},
+    {"project": {"name": "x"}, "hosts": {"preserve": ["C:/x.md"]}},
+    {"project": {"name": "x"}, "hosts": {"preserve": [3, ""]}},
+    {"project": {"name": "x"}, "hosts": {"preserve": "AGENTS.md"}},
     {"project": {"name": "x"}, "zzzzz_garbage": 42},
     {
         "project": {

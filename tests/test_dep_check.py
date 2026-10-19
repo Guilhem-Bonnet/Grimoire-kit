@@ -59,26 +59,26 @@ class TestScanDependencies(unittest.TestCase):
         self.assertEqual(graph, {})
 
     def test_standalone_tool(self):
-        (self.tools_dir / "my-tool.py").write_text("x = 1\n")
+        (self.tools_dir / "my-tool.py").write_text("x = 1\n", encoding="utf-8")
         graph = dc.scan_dependencies(Path(self.tmpdir))
         self.assertIn("my-tool", graph)
         self.assertEqual(graph["my-tool"], [])
 
     def test_load_tool_dep(self):
-        (self.tools_dir / "alpha.py").write_text('x = _load_tool("beta")\n')
-        (self.tools_dir / "beta.py").write_text("y = 1\n")
+        (self.tools_dir / "alpha.py").write_text('x = _load_tool("beta")\n', encoding="utf-8")
+        (self.tools_dir / "beta.py").write_text("y = 1\n", encoding="utf-8")
         graph = dc.scan_dependencies(Path(self.tmpdir))
         self.assertEqual(graph["alpha"], ["beta"])
         self.assertEqual(graph["beta"], [])
 
     def test_local_import(self):
-        (self.tools_dir / "main.py").write_text("from rnd_core import foo\n")
-        (self.tools_dir / "rnd_core.py").write_text("foo = 1\n")
+        (self.tools_dir / "main.py").write_text("from rnd_core import foo\n", encoding="utf-8")
+        (self.tools_dir / "rnd_core.py").write_text("foo = 1\n", encoding="utf-8")
         graph = dc.scan_dependencies(Path(self.tmpdir))
         self.assertEqual(graph["main"], ["rnd_core"])
 
     def test_self_reference_excluded(self):
-        (self.tools_dir / "alpha.py").write_text('x = _load_tool("alpha")\n')
+        (self.tools_dir / "alpha.py").write_text('x = _load_tool("alpha")\n', encoding="utf-8")
         graph = dc.scan_dependencies(Path(self.tmpdir))
         self.assertEqual(graph["alpha"], [])
 

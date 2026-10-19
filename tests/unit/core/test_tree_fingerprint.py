@@ -8,8 +8,12 @@ modifie le code, et le gate reste vert sur du code jamais exercé.
 
 from __future__ import annotations
 
+import os
 import subprocess
+import sys
 from pathlib import Path
+
+import pytest
 
 from grimoire.core.standard_checks.tree_fingerprint import compute_tree_fingerprint
 
@@ -52,6 +56,28 @@ def test_fs_fallback_ignores_grimoire_output(tmp_path: Path) -> None:
     (output_dir / "test-run.json").write_text("{}\n", encoding="utf-8")
     after = compute_tree_fingerprint(tmp_path)
     assert before == after
+
+
+def test_fs_fallback_ignores_runtime_output(tmp_path: Path) -> None:
+    """Le ledger, les preuves et les journaux d'autorité sont écrits par le mécanisme lui-même (W3-03)."""
+    (tmp_path / "app.py").write_text("print('v1')\n", encoding="utf-8")
+    before = compute_tree_fingerprint(tmp_path)
+    for rel in ("ledger/events.jsonl", "evidence/pack.json", "flows/authority/check-approval.authority.jsonl"):
+        path = tmp_path / "_grimoire-runtime-output" / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{}\n", encoding="utf-8")
+    assert compute_tree_fingerprint(tmp_path) == before
+
+
+def test_git_mode_ignores_runtime_output(tmp_path: Path) -> None:
+    _git_repo(tmp_path)
+    (tmp_path / "app.py").write_text("print('v1')\n", encoding="utf-8")
+    _commit(tmp_path, "init")
+    before = compute_tree_fingerprint(tmp_path)
+    path = tmp_path / "_grimoire-runtime-output" / "ledger" / "events.jsonl"
+    path.parent.mkdir(parents=True)
+    path.write_text("{}\n", encoding="utf-8")
+    assert compute_tree_fingerprint(tmp_path) == before
 
 
 def test_fs_fallback_ignores_dependency_and_build_dirs(tmp_path: Path) -> None:
@@ -187,3 +213,82 @@ def test_git_fingerprint_changes_when_a_file_under_an_untracked_dir_is_edited(tm
     (new_dir / "generated.py").write_text("print('new')\nprint('edited')\n", encoding="utf-8")
     after = compute_tree_fingerprint(tmp_path)
     assert before != after
+
+
+# ── W3-04 : empreinte de contenu (pas de mtime) et identité de toolchain ───
+
+
+def _push_mtime_into_the_future(path: Path) -> None:
+    """Un ``touch`` : même contenu, mtime nettement différente."""
+    stat = path.stat()
+    os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 60 * 10**9))
+
+
+def test_fs_fallback_ignores_a_touch(tmp_path: Path) -> None:
+    """Un ``touch`` ne change pas l'empreinte : seul le contenu compte (W3-04, acceptation 1)."""
+    (tmp_path / "app.py").write_text("print('v1')\n", encoding="utf-8")
+    before = compute_tree_fingerprint(tmp_path)
+    _push_mtime_into_the_future(tmp_path / "app.py")
+    assert compute_tree_fingerprint(tmp_path) == before
+
+
+def test_git_fingerprint_ignores_a_touch_of_an_untracked_file(tmp_path: Path) -> None:
+    """Même garde pour un fichier non suivi, dont l'empreinte portait la mtime."""
+    _git_repo(tmp_path)
+    (tmp_path / "app.py").write_text("print('v1')\n", encoding="utf-8")
+    _commit(tmp_path, "init")
+    (tmp_path / "new_file.py").write_text("print('new')\n", encoding="utf-8")
+    before = compute_tree_fingerprint(tmp_path)
+    _push_mtime_into_the_future(tmp_path / "new_file.py")
+    assert compute_tree_fingerprint(tmp_path) == before
+
+
+def _fake_test_runner(bin_dir: Path) -> None:
+    """Un exécutable ``pytest`` factice : suffit à ce que ``shutil.which`` le résolve."""
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    executable = bin_dir / "pytest"
+    executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    executable.chmod(0o755)
+
+
+def _pytest_project(root: Path) -> None:
+    """Un projet que ``resolve_need("test-runner")`` détecte comme ``pytest -q``."""
+    (root / "pyproject.toml").write_text("[project]\nname = 'demo'\n", encoding="utf-8")
+    (root / "app.py").write_text("print('v1')\n", encoding="utf-8")
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : fabrique un exécutable factice (script shell sans extension .exe/.cmd, bit x) que Windows ne lance pas par son nom"
+    ),
+)
+def test_another_toolchain_changes_the_fingerprint(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Un binaire de test résolu ailleurs sur le PATH invalide le run (W3-04, acceptation 2)."""
+    _pytest_project(tmp_path)
+    toolchain_a = tmp_path_factory.mktemp("toolchain-a")
+    toolchain_b = tmp_path_factory.mktemp("toolchain-b")
+    _fake_test_runner(toolchain_a)
+    _fake_test_runner(toolchain_b)
+    monkeypatch.setenv("PATH", str(toolchain_a))
+    before = compute_tree_fingerprint(tmp_path)
+    monkeypatch.setenv("PATH", str(toolchain_b))
+    assert compute_tree_fingerprint(tmp_path) != before
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows : fabrique un exécutable factice (script shell sans extension .exe/.cmd, bit x) que Windows ne lance pas par son nom"
+    ),
+)
+def test_a_missing_test_runner_changes_the_fingerprint(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Le même arbre sans binaire de test sur le PATH n'est pas la toolchain qui a produit le run."""
+    _pytest_project(tmp_path)
+    toolchain = tmp_path_factory.mktemp("toolchain")
+    empty = tmp_path_factory.mktemp("empty-path")
+    _fake_test_runner(toolchain)
+    monkeypatch.setenv("PATH", str(toolchain))
+    present = compute_tree_fingerprint(tmp_path)
+    monkeypatch.setenv("PATH", str(empty))
+    assert compute_tree_fingerprint(tmp_path) != present

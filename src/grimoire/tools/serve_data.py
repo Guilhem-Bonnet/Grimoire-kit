@@ -217,7 +217,7 @@ class DataLayer:
                 root.name,
             ],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=GENERATION_TIMEOUT_S,
             check=False,
         )

@@ -1,3 +1,7 @@
+---
+audience: utilisateur
+---
+
 # Getting Started — Grimoire Kit v3
 
 <sub>English — <a href="getting-started.md">version française</a></sub>
@@ -230,7 +234,9 @@ then `blueprint evals` checks the recording. A case missing from the record is
 reported as "not executed" — never as a failure.
 
 - Reference schema: `schemas/blueprint-v1.schema.json`
-- Ready-to-use examples: `registry/blueprints/` (`minimal`, `web-pipeline`)
+- Replayable examples (no model, checked in CI): `examples/blueprint-minimal/` and
+  `examples/blueprint-web-pipeline/` — `bash examples/<name>/replay.sh`; sources in
+  `registry/blueprints/`
 - The visual studio remains available through `grimoire serve` (the
   multi-project cockpit is served by `grimoire cockpit`)
 

@@ -5,9 +5,22 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from grimoire.cli.app import app
+
+pytestmark = pytest.mark.covers(
+    "cli:stigmergy amplify",
+    "cli:stigmergy emit",
+    "cli:stigmergy evaporate",
+    "cli:stigmergy install-hooks",
+    "cli:stigmergy resolve",
+    "cli:stigmergy sense",
+    "cli:stigmergy stats",
+    "cli:stigmergy trails",
+    "cli:stigmergy uninstall-hooks",
+)
 
 runner = CliRunner()
 

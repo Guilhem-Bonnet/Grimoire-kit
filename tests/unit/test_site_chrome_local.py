@@ -76,7 +76,7 @@ def _render(origin: str) -> dict[str, str]:
     proc = subprocess.run(
         [node, "-e", _HARNESS, origin, str(WEB / "grimoire-mode.js"), str(WEB / "forge-nav.js")],
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         check=False,
         timeout=30,
     )

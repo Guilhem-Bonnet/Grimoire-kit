@@ -7,6 +7,9 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
@@ -84,6 +87,22 @@ _vector_granularity_opt = typer.Option(
 )
 
 
+# Racine de projet imposée à la place du répertoire courant, par contexte
+# d'exécution (donc par thread de requête) : le cockpit sert plusieurs projets
+# depuis un seul processus et ne doit jamais faire de ``chdir``.
+_PROJECT_ROOT_OVERRIDE: ContextVar[Path | None] = ContextVar("grimoire_memory_project_root", default=None)
+
+
+@contextmanager
+def project_root_override(path: Path) -> Iterator[None]:
+    """Résout le projet des commandes ``memory`` depuis ``path`` dans ce contexte."""
+    token = _PROJECT_ROOT_OVERRIDE.set(path)
+    try:
+        yield
+    finally:
+        _PROJECT_ROOT_OVERRIDE.reset(token)
+
+
 def _get_fmt(ctx: typer.Context) -> str:
     return str((ctx.obj or {}).get("output", "text"))
 
@@ -102,7 +121,8 @@ def _load_config_context(path: Path = Path()) -> tuple[GrimoireConfig, Path]:
     """Resolve project config without instantiating the memory backend."""
     from grimoire.tools._common import find_project_root
 
-    target = path.resolve()
+    override = _PROJECT_ROOT_OVERRIDE.get()
+    target = (override if override is not None and path == Path() else path).resolve()
     config_path = target / "project-context.yaml"
     if not config_path.is_file():
         try:
@@ -145,7 +165,11 @@ def _load_mempalace_backend(palace: Path) -> Any:
 
 
 def _parse_paths(raw: str) -> list[Path]:
-    return [Path(item.strip()) for item in raw.split(",") if item.strip()]
+    paths = [Path(item.strip()) for item in raw.split(",") if item.strip()]
+    override = _PROJECT_ROOT_OVERRIDE.get()
+    if override is None:
+        return paths
+    return [item if item.is_absolute() else override / item for item in paths]
 
 
 def _parse_exclude(raw: str) -> set[str]:
@@ -758,8 +782,12 @@ def memory_search(
     hall: str = typer.Option("", "--hall", help="Filter by palace hall."),
     room: str = typer.Option("", "--room", help="Filter by palace room."),
     hybrid: bool | None = typer.Option(None, "--hybrid/--no-hybrid", help="Fuse vector and lexical BM25 rankings (RRF). Default: on when the project has both."),
+    include_superseded: bool = typer.Option(False, "--include-superseded", help="Also return memories replaced by a newer one (metadata superseded_by). Hidden by default."),
 ) -> None:
     """Search memories by keyword or semantic similarity.
+
+    Memories whose metadata names a replacement (`superseded_by`) are not
+    served unless --include-superseded is given.
 
     Fusion is the default wherever there are two rankings to fuse. It used to
     be opt-in behind a flag nobody passed, so a project paying for a vector
@@ -767,7 +795,7 @@ def memory_search(
     """
     mgr = _load_manager()
     use_hybrid = mgr.prefers_hybrid if hybrid is None else hybrid
-    results = run_memory_search(mgr, query, hybrid=use_hybrid, user_id=user_id, limit=limit, wing=wing, hall=hall, room=room)
+    results = run_memory_search(mgr, query, hybrid=use_hybrid, user_id=user_id, limit=limit, wing=wing, hall=hall, room=room, include_superseded=include_superseded)
     fmt = _get_fmt(ctx)
 
     if fmt == "json":
@@ -802,6 +830,38 @@ def memory_search(
         )
 
     console.print(tbl)
+
+
+# ── grimoire memory bench ─────────────────────────────────────────────────────
+
+
+_bench_queries_arg = typer.Argument(..., help="Queries to replay against the memory read path.")
+
+
+@memory_app.command("bench")
+def memory_bench(
+    ctx: typer.Context,
+    queries: list[str] = _bench_queries_arg,
+    limit: int = typer.Option(5, "--limit", "-n", min=1, help="Results per query."),
+    include_superseded: bool = typer.Option(False, "--include-superseded", help="Measure with replaced memories served (exposure baseline)."),
+) -> None:
+    """Measure what memory search serves: stale-as-fact rate and recall tokens p95.
+
+    A rate with no result served is null, not zero; tokens are an estimate
+    (chars/4), declared in the output.
+    """
+    from grimoire.memory.supersession import bench_supersession
+
+    report = bench_supersession(_load_manager(), list(queries), limit=limit, include_superseded=include_superseded)
+    if _get_fmt(ctx) == "json":
+        typer.echo(json.dumps(report, indent=2))
+        return
+    rate = report["stale_served_as_fact_rate"]
+    p95 = report["recall_tokens_p95"]
+    console.print(f"Queries              : {report['queries']}")
+    console.print(f"Results served       : {report['results_served']} (stale: {report['stale_served']})")
+    console.print(f"stale_served_as_fact : {'null (nothing served)' if rate is None else f'{rate:.1%}'}")
+    console.print(f"recall_tokens_p95    : {'null (nothing served)' if p95 is None else f'{p95} ({report['tokens_basis']} estimate)'}")
 
 
 # ── grimoire memory remember / recall (protocole agent typé, ADR-003) ────────

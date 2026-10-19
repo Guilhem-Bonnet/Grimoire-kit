@@ -67,6 +67,8 @@ async function request(path, options = {}) {
       ...options,
     });
   } catch (cause) {
+    // Une requête annulée par l'appelant (onglet masqué) n'est pas une panne.
+    if (cause && cause.name === 'AbortError') throw cause;
     throw new ApiError('API locale injoignable', 0, { cause: String(cause) });
   }
   const text = await response.text();
@@ -81,9 +83,9 @@ async function request(path, options = {}) {
   return payload;
 }
 
-function get(path, params) {
+function get(path, params, options) {
   const query = params ? '?' + new URLSearchParams(params).toString() : '';
-  return request(path + query);
+  return request(path + query, options);
 }
 
 function post(path, body) {
@@ -166,6 +168,14 @@ export const api = {
   },
 
   // ── Vue de travail ────────────────────────────────────────────────────────
+  // Le pouls (UI-3) : « quelque chose a-t-il changé depuis `since` ? ». Sans
+  // changement la réponse est minuscule (`changed: false`) ; sinon elle porte
+  // le compte des décisions en attente. `scope: 'portfolio'` agrège tout le
+  // registre du cockpit. `signal` annule le sondage quand l'onglet est masqué.
+  pulse: (since, scope, signal) => {
+    const params = { ...(since ? { since } : {}), ...(scope ? { scope } : {}) };
+    return get(WS + 'pulse', Object.keys(params).length ? params : undefined, signal ? { signal } : undefined);
+  },
   glossary: () => get(WS + 'glossary'),
   tasks: (params) => get(WS + 'tasks', params),
   // `project` cible un AUTRE projet que celui déjà résolu par l'hôte — même

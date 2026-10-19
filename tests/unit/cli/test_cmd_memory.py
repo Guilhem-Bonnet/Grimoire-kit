@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import json
 from pathlib import Path
 from typing import Any
@@ -72,6 +73,20 @@ def mock_manager():
         "memory": {"backend": "local"},
         "agents": {"archetype": "minimal"},
     })
+
+    # Les sous-commandes mémoire sont chargées paresseusement et lient
+    # ``_load_manager_context`` à l'import (``from ... import``). Un premier
+    # import fait *pendant* le patch figerait le MagicMock dans le module pour
+    # toute la session du worker, et un test voisin (cmd_memory_shared) lirait
+    # alors « Hello world » au lieu de sa propre mémoire — selon l'ordre.
+    for _module in (
+        "cmd_memory_shared",
+        "cmd_memory_ops",
+        "cmd_memory_bundle",
+        "cmd_memory_lexical",
+        "cmd_memory_projections",
+    ):
+        importlib.import_module(f"grimoire.cli.{_module}")
 
     with (
         patch("grimoire.cli.cmd_memory._load_manager", return_value=mgr),
@@ -190,7 +205,7 @@ class TestMemorySearch:
         result = runner.invoke(app, ["memory", "search", "hello"])
         assert result.exit_code == 0
         assert "Hello world" in result.output
-        mock_manager.search_taxonomy.assert_called_once_with("hello", user_id="", limit=10, wing="", hall="", room="")
+        mock_manager.search_taxonomy.assert_called_once_with("hello", user_id="", limit=10, wing="", hall="", room="", include_superseded=False)
 
     def test_search_fuses_by_default_when_the_project_composes(self, mock_manager: MagicMock) -> None:
         """A project with both rankings reads from both without asking.
@@ -226,12 +241,12 @@ class TestMemorySearch:
     def test_search_with_limit(self, mock_manager: MagicMock) -> None:
         result = runner.invoke(app, ["memory", "search", "hello", "-n", "3"])
         assert result.exit_code == 0
-        mock_manager.search_taxonomy.assert_called_once_with("hello", user_id="", limit=3, wing="", hall="", room="")
+        mock_manager.search_taxonomy.assert_called_once_with("hello", user_id="", limit=3, wing="", hall="", room="", include_superseded=False)
 
     def test_search_with_user(self, mock_manager: MagicMock) -> None:
         result = runner.invoke(app, ["memory", "search", "hello", "-u", "bob"])
         assert result.exit_code == 0
-        mock_manager.search_taxonomy.assert_called_once_with("hello", user_id="bob", limit=10, wing="", hall="", room="")
+        mock_manager.search_taxonomy.assert_called_once_with("hello", user_id="bob", limit=10, wing="", hall="", room="", include_superseded=False)
 
     def test_search_no_results(self, mock_manager: MagicMock) -> None:
         mock_manager.search_taxonomy.return_value = []
@@ -341,7 +356,7 @@ class TestMemoryExport:
         result = runner.invoke(app, ["memory", "export", "-f", str(out)])
         assert result.exit_code == 0
         assert out.exists()
-        data = json.loads(out.read_text())
+        data = json.loads(out.read_text(encoding="utf-8"))
         assert data["count"] == 2
 
     def test_export_with_user_filter(self, mock_manager: MagicMock) -> None:

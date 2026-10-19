@@ -8,9 +8,11 @@ from typing import TYPE_CHECKING, Any
 
 from grimoire.bridges.schemas import HostId
 from grimoire.core.claude_activation import activation_context_text
-from grimoire.core.standard_state import active_profile_id, resolve_active_task
+from grimoire.core.standard_state import resolve_active_task
+from grimoire.flows.live_runs import active_flow_lines
 from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
 from grimoire.hosts.decisions.enrolment import BLOCKING_PROFILES, link_session, no_task_context
+from grimoire.hosts.decisions.profile_floor import session_profile
 from grimoire.hosts.decisions.record import _record_agent_dispatch
 
 if TYPE_CHECKING:
@@ -122,8 +124,8 @@ def _claude_dispatch_context(project_root: Path, agents: tuple[AgentSpec, ...]) 
     roster = "\n".join(f"- `{agent.name}` → {_model_for(agent)}" for agent in routable)
     return (
         f"{_dispatch_policy_section()}\nPersonas routables (`subagent_type` → modèle) :\n{roster}\n"
-        "Ce modèle est le défaut de la persona, appliqué si tu omets `model=` ; la classe "
-        "de la sous-tâche déléguée prime : passe `model=` selon la politique ci-dessus.\n"
+        "Ce modèle n'est que le défaut de la persona, appliqué si tu omets `model=` ; la classe "
+        "de la sous-tâche déléguée prime : passe toujours `model=` selon la politique ci-dessus.\n"
     )
 
 
@@ -213,6 +215,31 @@ def _proposals_status_line(project_root: Path) -> str:
         return f"{pending} proposition(s) d'artefact en attente, voir le cockpit ou `grimoire proposals`"
     except Exception:
         return ""
+
+
+def _decisions_line(project_root: Path) -> str:
+    """One-line pointer to the decisions waiting for a human, for session start (K6, issue #771).
+
+    A question the agent asked is a task parked as ``waiting(human)``: the next session on the
+    project should learn that someone is still owed an answer, not discover it in the cockpit.
+    Silent at zero, and silent when the ledger cannot be read — best-effort like every other line.
+    """
+    try:
+        from grimoire.missions.decisions import decisions_summary
+
+        summary = decisions_summary(project_root)
+    except Exception:
+        return ""
+    if not summary["count"]:
+        return ""
+    return f"{summary['line']} — voir le cockpit ou `grimoire task decisions`"
+
+
+def _pause_line(hook: HookInput, task_id: str) -> str:
+    """The pause in force for this session at start (K11, plan §5.1): drain, hold, degraded hold or unreadable flag."""
+    from grimoire.hosts.decisions.pause_brake import pause_context
+
+    return pause_context(hook, task_id)
 
 
 def _reset_temporal_session(hook: HookInput) -> None:
@@ -363,9 +390,9 @@ def decide_activation(hook: HookInput) -> Decision:
     link: dict[str, Any] = {}
     if governed:
         if active.is_fallback:
-            profile = active_profile_id(hook.project_root)
+            profile = session_profile(hook)
             if profile in BLOCKING_PROFILES:
-                enrolment = no_task_context(profile, active.candidates)
+                enrolment = no_task_context(profile, active.candidates, active.expired)
         else:
             link = link_session(hook, active)
     directive = (
@@ -386,12 +413,32 @@ def decide_activation(hook: HookInput) -> Decision:
         _claude_dispatch_context(hook.project_root, agents) if hook.host == HostId.CLAUDE_CODE_CLI.value else ""
     )
     recall = _claimed_task_recall(hook.project_root, task_id)
+    # W2-05 : après une compaction, la fenêtre repart de zéro ; le run de flow
+    # en vol (run_id, nœud) n'est plus nulle part dans le contexte. Seule cette
+    # source le réinjecte : une session neuve n'a rien à reprendre.
+    flow_part = (
+        "\n".join(active_flow_lines(hook.project_root)) if str(hook.raw.get("source") or "") == "compact" else ""
+    )
     steering, steering_detail = _steering(hook, task_id)
     providers_line = _providers_status_line(hook.project_root)
     proposals_line = _proposals_status_line(hook.project_root)
+    decisions_line = _decisions_line(hook.project_root)
+    pause_line = _pause_line(hook, task_id)
     context = "\n".join(
         part
-        for part in (persona, dispatch_context, recall, enrolment, steering, directive, providers_line, proposals_line)
+        for part in (
+            persona,
+            dispatch_context,
+            recall,
+            flow_part,
+            enrolment,
+            steering,
+            directive,
+            providers_line,
+            proposals_line,
+            decisions_line,
+            pause_line,
+        )
         if part
     )
     return Decision(
@@ -402,6 +449,7 @@ def decide_activation(hook: HookInput) -> Decision:
             "task_source": active.source,
             "entry_agent": entry_name,
             "recall_injected": bool(recall),
+            "flow_lines_injected": bool(flow_part),
             "dispatch_context_injected": bool(dispatch_context),
             "governed": governed,
             **scaffold_detail,

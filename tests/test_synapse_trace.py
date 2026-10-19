@@ -156,7 +156,7 @@ class TestSynapseTracer(unittest.TestCase):
         entry = mod.TraceEntry(tool="router", operation="classify")
         tracer.record(entry)
         self.assertTrue(tracer.trace_path.exists())
-        content = tracer.trace_path.read_text()
+        content = tracer.trace_path.read_text(encoding="utf-8")
         self.assertIn("[SYNAPSE]", content)
         self.assertIn("router.classify", content)
 
@@ -323,7 +323,7 @@ class TestClear(unittest.TestCase):
         tracer.record(mod.TraceEntry(tool="test", operation="op"))
         tracer.clear_synapse_entries()
 
-        content = trace_path.read_text()
+        content = trace_path.read_text(encoding="utf-8")
         self.assertIn("Some other trace", content)
         self.assertNotIn("[SYNAPSE]", content)
 

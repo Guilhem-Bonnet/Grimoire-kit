@@ -54,7 +54,7 @@ class TestSaveSession(unittest.TestCase):
                 next_step="Write tests",
             )
         self.assertTrue(self.ss.SESSION_FILE.exists())
-        content = self.ss.SESSION_FILE.read_text()
+        content = self.ss.SESSION_FILE.read_text(encoding="utf-8")
         self.assertIn("dev", content)
         self.assertIn("Implemented feature X", content)
         self.assertIn("src/main.py", content)
@@ -73,7 +73,7 @@ class TestSaveSession(unittest.TestCase):
         captured = StringIO()
         with patch("sys.stdout", captured):
             self.ss.save_session(agent="forge")
-        content = self.ss.SESSION_FILE.read_text()
+        content = self.ss.SESSION_FILE.read_text(encoding="utf-8")
         self.assertIn("forge", content)
         self.assertIn("aucune action", content)
 
@@ -85,7 +85,7 @@ class TestSaveSession(unittest.TestCase):
                 agent="dev",
                 work=["Action 1", "Action 2", "Action 3"],
             )
-        content = self.ss.SESSION_FILE.read_text()
+        content = self.ss.SESSION_FILE.read_text(encoding="utf-8")
         self.assertIn("Action 1", content)
         self.assertIn("Action 2", content)
         self.assertIn("Action 3", content)
@@ -98,7 +98,7 @@ class TestSaveSession(unittest.TestCase):
                 agent="forge",
                 handoffs=["hawk: check monitoring alerts"],
             )
-        content = self.ss.SESSION_FILE.read_text()
+        content = self.ss.SESSION_FILE.read_text(encoding="utf-8")
         self.assertIn("hawk: check monitoring alerts", content)
 
     def test_state_field(self):
@@ -109,7 +109,7 @@ class TestSaveSession(unittest.TestCase):
                 agent="dev",
                 state="All tests passing, deploy ready",
             )
-        content = self.ss.SESSION_FILE.read_text()
+        content = self.ss.SESSION_FILE.read_text(encoding="utf-8")
         self.assertIn("All tests passing", content)
 
     def test_duration(self):
@@ -117,7 +117,7 @@ class TestSaveSession(unittest.TestCase):
         captured = StringIO()
         with patch("sys.stdout", captured):
             self.ss.save_session(agent="dev", duration="45 min")
-        content = self.ss.SESSION_FILE.read_text()
+        content = self.ss.SESSION_FILE.read_text(encoding="utf-8")
         self.assertIn("45 min", content)
 
     def test_overwrites_previous_session(self):
@@ -127,7 +127,7 @@ class TestSaveSession(unittest.TestCase):
             self.ss.save_session(agent="dev", work=["First session"])
         with patch("sys.stdout", captured):
             self.ss.save_session(agent="qa", work=["Second session"])
-        content = self.ss.SESSION_FILE.read_text()
+        content = self.ss.SESSION_FILE.read_text(encoding="utf-8")
         self.assertIn("Second session", content)
         self.assertNotIn("First session", content)
 

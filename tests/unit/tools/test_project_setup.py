@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import stat
+import sys
 from pathlib import Path
 
 import pytest
@@ -111,6 +112,12 @@ class TestExecuteSetupPlanRefusesFailClosed:
             )
         assert not target.exists()
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason=(
+            "Windows : dépend de la sémantique POSIX des droits (bit x, geteuid) qui n'existe pas sous Windows"
+        ),
+    )
     def test_unwritable_path_refuses_and_names_the_cause(self, tmp_path: Path) -> None:
         locked = tmp_path / "locked"
         locked.mkdir()

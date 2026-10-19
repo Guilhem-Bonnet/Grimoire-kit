@@ -134,6 +134,7 @@ def test_browse_refuses_a_file(api: ForgeAPI, tmp_path: Path) -> None:
 
 def test_selecting_a_project_reroots_the_server(api: ForgeAPI, tmp_path: Path) -> None:
     other = _make_project(tmp_path, "autre", managed=True)
+    api.project_add(str(other))
     status = api.select_project(path=str(other))
 
     assert status["projectRoot"] == str(other)
@@ -254,3 +255,37 @@ def test_a_sibling_prefix_is_not_mistaken_for_containment() -> None:
     """``/home/uX`` n'est pas contenu dans ``/home/u`` — le séparateur le dit."""
     with pytest.raises(PermissionError):
         reg.resolve_within_allowed(str(Path.home()) + "X")
+
+
+def test_a_request_path_outside_the_registry_never_becomes_a_root(
+    api: ForgeAPI, tmp_path: Path
+) -> None:
+    """Un chemin arbitraire (même existant) est refusé : ni sélection, ni écriture."""
+    stray = _make_project(tmp_path, "non-enregistre", managed=True)
+    served = api.project_root
+    for raw in (str(stray), "/tmp/x", "../../", str(stray / ".." / "..")):
+        with pytest.raises(FileNotFoundError):
+            api.select_project(path=raw)
+        with pytest.raises(FileNotFoundError):
+            api.project_update(dry_run=True, path=raw)
+    assert api.project_root == served
+    assert not (stray / "_grimoire" / "task-board.yaml").exists()
+
+
+def test_the_sanitizing_guard_is_a_standalone_startswith() -> None:
+    """CodeQL py/path-injection (ledger.py:218/219/515, PR #781) : le chemin venu du corps
+    de ``POST /api/projects/setup`` n'est reconnu assaini que si le ``startswith`` est la
+    seule condition de sa branche. Avec ``egal or startswith`` le flux restait ouvert
+    jusqu'au ledger et ses 224 alertes ; ce test fige la forme reconnue."""
+    import ast
+    import inspect
+
+    tree = ast.parse(inspect.getsource(reg.resolve_within_allowed))
+    guards = [
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.If) and "root_path" in ast.unparse(n.test) and "startswith" in ast.unparse(n.test)
+    ]
+    assert guards, "la garde startswith a disparu"
+    assert all(not isinstance(g.test, ast.BoolOp) for g in guards)
+    root = Path(reg.allowed_roots()[0])
+    assert reg.resolve_within_allowed(str(root)) == Path(root).resolve()

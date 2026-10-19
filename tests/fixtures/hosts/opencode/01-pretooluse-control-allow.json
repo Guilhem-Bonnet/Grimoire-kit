@@ -1,0 +1,32 @@
+{
+  "host": "opencode",
+  "host_version": "1.17.11",
+  "point": 1,
+  "capability": "pretooluse_deny",
+  "captured_on": "2026-10-17",
+  "captured_with": "opencode run --format json \"EXECUTE touch ALLOWED.marker #\"",
+  "setup": "projet jetable avec un plugin <PROJECT>/.opencode/plugin/guard.js exportant un hook `tool.execute.before` qui journalise l'appel puis, en mode refus, lève une Error sur la commande bash `touch EXECUTED.marker`. Fournisseur : serveur HTTP local compatible OpenAI (aucun modèle réel, aucun appel payant) qui répond au premier tour par un appel d'outil bash, puis par du texte. Le refus est donc décidé par l'hôte, indépendamment du modèle. Témoin : la commande n'est pas celle que le plugin refuse.",
+  "observed": {
+    "tool_executed": true,
+    "marker_file_created": true,
+    "tool_state": {
+      "status": "completed",
+      "exit": 0,
+      "output": "(no output)"
+    },
+    "plugin_saw_call": true
+  },
+  "payloads": {
+    "tool.execute.before": {
+      "input": {
+        "tool": "bash"
+      },
+      "output": {
+        "args": {
+          "command": "touch ALLOWED.marker #",
+          "description": "probe"
+        }
+      }
+    }
+  }
+}

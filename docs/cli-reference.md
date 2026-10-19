@@ -1,3 +1,7 @@
+---
+audience: référence
+---
+
 # Référence CLI
 
 Toutes les commandes disponibles via `grimoire [commande]`.
@@ -226,8 +230,10 @@ exécuter. Détail et dégradations par hôte : [Surfaces hôtes](hosts.md).
 |---|---|
 | `grimoire host list` | Hôtes connus, surfaces natives de chacun, hôte détecté |
 | `grimoire host surface` | Description host-neutre du projet |
-| `grimoire host sync --host all` | Générer les surfaces (`--dry-run`, `--force`) |
+| `grimoire host sync --host all` | Générer les surfaces (`--dry-run`, `--force`). Les règles `team` et `project` partent en `.cursor/rules/grimoire-rules*.mdc` (`globs:`) et `.github/instructions/grimoire-rules*.instructions.md` (`applyTo:`) ; le fichier d'une règle retirée est retiré |
 | `grimoire host status` | Écart entre ce que le projet déclare et ce que l'hôte exécute |
+| `grimoire host matrix` | Matrice règle × hôte calculée depuis ce que chaque émetteur écrit ; sort en 1 si une règle n'est ni appliquée ni déclarée dégradée |
+| `grimoire host probe` | Vérifie sur le disque que les fichiers et hooks émis sont présents et à jour, sans rien écrire ; sort en 1 si un fichier manque, est périmé ou édité à la main |
 | `grimoire host run <slug>` | Corps d'une commande, pour un hôte sans commandes natives |
 | `grimoire host hook --host <h> --event <e>` | Point d'entrée des hooks générés (stdin vers stdout) |
 
@@ -251,7 +257,9 @@ appeler maintenant, pour quel palier de coût (`cheap`/`mid`/`strong`) ?
 | --- | --- |
 | `grimoire providers status [--json]` | Fournisseurs activés, modèles par palier, disponibilité (refroidissement + dernier audit), prochain choix |
 | `grimoire providers audit [--json]` | Sonder chaque fournisseur activé sans dépenser (PATH, `--version`, modèles Ollama) et journaliser `available`/`models_seen`/`probe_note` dans l'état |
-| `grimoire providers cooldown <id> --reason rate_limit\|timeout` | Enregistrer un échec à la main (429, timeout) |
+| `grimoire providers cooldown <id> --reason rate_limit\|timeout\|overloaded` | Enregistrer un échec à la main (429, timeout, 529) |
+| `grimoire providers probe [<id>] [--json]` | Sonder (comme `audit`) puis rouvrir les fournisseurs fermés par une date de forfait illisible (`unknown`) ; une suspension à date n'est jamais levée |
+| `grimoire providers quota [--json]` | Fenêtre de forfait lue dans les flux d'appel : `lower_bound` (minorant daté) ou `unknown`, jamais 0 |
 | `grimoire providers history [--ledger-root <chemin>] [--json]` | Historique des dispatchs par couple (type de tâche, classe) et palier de départ recommandé |
 
 `providers audit` ne fait jamais l'appel réel : présence du premier mot de
@@ -323,6 +331,241 @@ Le contrôle du standard `dispatch.cost_slo` (voir
 mêmes agrégats — cette commande en est la vue humaine, jamais un second
 calcul.
 
+## Routeur de LLM : une politique déclarative, tracée avant d'être activée
+
+`grimoire task dispatch` choisit un palier de départ par la classe de
+vérifiabilité et l'historique d'escalade, puis prend le premier modèle du palier
+que le forfait n'a pas fermé. Le routeur (épopée #705, lot K9, issue #774) y
+ajoute une décision **déclarative et rejouable**, sans rien changer à ce chemin
+tant qu'on ne l'active pas : `route(task, history, provider_state)` choisit un
+modèle d'après la tâche seule (classe, type, difficulté), l'historique de
+réussite par modèle et la disponibilité du fournisseur. Il ne lit jamais le
+quota, le budget ni les tokens restants, et ne change jamais de modèle pour
+économiser : ces notions relèvent de l'admission, pas du choix. Un fournisseur
+suspendu par son forfait y figure comme indisponible, jusqu'à sa date de
+réouverture, comme un fournisseur injoignable.
+
+| Commande | Description |
+| --- | --- |
+| `grimoire route explain <tâche> [--json]` | Rejoue la dernière décision `task.routed` à partir de ses entrées et de `inputs_digest` ; sortie 1 si le rejeu diffère, 2 sans décision |
+| `grimoire route report [--json]` | Réussite au premier essai (pass^1) par (type, classe, modèle), escalade par couple, accord entre le routeur et le dispatch en mode `shadow` seulement (une issue `session`, `defer` ou `refuse` suivie d'un appel compte comme un désaccord) ; « non mesuré » sous 5 observations |
+| `grimoire route eval --set <jeu> [--json]` | Seuil d'activation D16 hors ligne ; sortie 0 (tenu), 1 (non tenu), 3 (non mesuré) |
+
+**Politique** : `_grimoire/standard/routing-policy.yaml`, sinon le défaut livré
+par le kit. Toutes les règles qui correspondent s'appliquent et le palier retenu
+est le maximum de leurs `min_tier` : le résultat ne dépend pas de l'ordre des
+règles. `route: session` est absorbant, V2 n'a jamais de route autonome, aucune
+règle qui correspond donne `session`, et le palier ne descend jamais sous le
+plancher de la classe (V0 `cheap`, V1 `mid`). Les conditions admises sont
+`class`, `type`, `risk_any`, `exclusive_files_gt`, `needs_local` : une règle qui
+nomme un quota ou un budget invalide la politique. `type` et `risk_any` se comparent
+en minuscules, sans espaces autour (comme les étiquettes de la tâche) : `risk_any: [Security]`
+vaut `[security]`, une étiquette vide est refusée. Une politique malformée, sans
+version ou de version inconnue n'est jamais remplacée par le défaut : aucune
+route autonome (`on_invalid: refuse`) : la décision tracée est `refuse` et
+`task dispatch` ne lance aucune cascade (refus `routing_policy_invalid`, sortie 2),
+en `shadow` comme en `active`. Seul un routeur en panne (exception) laisse le
+dispatch suivre l'ancien chemin, avec une décision `refuse` et son erreur tracées.
+
+```yaml
+version: 1
+mode: shadow            # défaut ; `active` fait gouverner la décision
+rules:
+  - {id: r-risk, when: {risk_any: [security, migration]}, min_tier: strong}
+  - {id: r-v1, when: {class: V1}, min_tier: mid}
+```
+
+**Tentatives** : `max_attempts` (défaut 3) borne le nombre d'appels de la cascade
+en mode `active` (appels en échec compris, tous paliers confondus) ; en `shadow`
+rien n'est appliqué, la valeur n'est que tracée dans les entrées de `task.routed`.
+
+**Mode** : `shadow` (défaut) émet `task.routed` avant chaque cascade et laisse le
+dispatch suivre l'ancien chemin ; `active` fait gouverner la décision (palier de
+départ sauf `--start-tier` explicite, ordre des fournisseurs, modèle dans le
+palier). Dans le palier, le départage est : réussite au premier essai (au moins 5
+observations, fenêtre de 50), puis, à réussite égale seulement, prix catalogue
+croissant (un prix inconnu passe après), puis ordre déclaré. Les modèles
+suspendus ou refroidis sont listés dans `excluded[]` avec leur raison. Sans
+candidat, la décision est `defer` : jamais de descente de palier. Revenir à
+`shadow` se fait en un seul champ.
+
+En `active`, la décision n'est pas contournée : une issue `session` (règle
+`route: session`, V2, aucune règle qui correspond) ou `defer` ne lance aucune
+cascade (refus `routed_to_session` ou `routed_defer`, sortie 2, aucun
+`task.dispatched`). Les fournisseurs appelés sont ceux que la décision admet : une
+règle `providers: {currency: local}` vaut pour tous les paliers de la cascade, un
+fournisseur d'une autre monnaie n'est jamais appelé, et au palier retenu seuls les
+fournisseurs du classement le sont. En `shadow`, ces issues ne restent qu'une trace.
+
+**Attribution** : chaque tentative (`task.dispatched`) compte pour le couple
+(type, classe, modèle) de cette tentative ; un 429, un timeout ou une panne
+d'appel sont non attribués et ne comptent jamais comme un succès.
+
+**Évaluation** : le jeu est un fichier `version: 1` / `tasks:` de tâches V0/V1
+closes, chacune avec ses résultats enregistrés par modèle
+(`results: {<modèle>: {passed, cost_usd}}`). Le routeur est comparé à la base
+« fixe » (V0 vers `cheap`, V1 vers `mid`) : pass^1 du routeur >= base - 1 tâche
+et coût connu <= celui de la base. Un coût inconnu, un résultat manquant ou
+moins de 20 tâches rendent « non mesuré » : on n'active pas.
+
+## Gardes du dépôt : `grimoire gates repo`
+
+Dans un clone du kit, une seule commande lance les gardes que la CI exécute :
+cliquet de taille, cohérence du CHANGELOG, prose émise, waivers de dépendances,
+actions épinglées par SHA, tenets de `CONTRIBUTING.md`, audience et commandes
+citées de la documentation, chiffres de vitrine sourcés. Le pre-commit
+(hook `repo-gates`, au pre-push), le job `lint` de `ci-sdk.yml` et `make gates`
+appellent la même commande. Une garde qui ne peut pas rendre son verdict (script
+absent, délai dépassé) est « non évaluée » et fait échouer l'exécution.
+
+| Commande | Description |
+| --- | --- |
+| `grimoire gates repo [--profile dev\|release] [--only <garde>] [--json] [--root .]` | Exécute les gardes ; code 1 si l'une échoue ou n'a pas été évaluée, code 2 hors d'un clone du kit |
+
+Le profil `dev` (défaut) juge une branche : un commit `feat`/`fix`/`perf` exige
+une entrée sous `[Unreleased]`. Le profil `release` juge le tag : `[Unreleased]`
+vide, section la plus récente égale à `version.txt`.
+
+## La file et l'admission : des réservoirs déclarés, jamais devinés
+
+`task_list_ready` rendait les tâches dans l'ordre du ledger, rien ne bornait la
+concurrence au claim et aucune sonde de ressource n'existait. Le lot K10 de
+l'épopée #705 ajoute une file triée et une admission pure (aucun appel de LLM,
+aucun démon) ; le routeur ne lit pas ce module, le quota relève de l'admission seule.
+
+| Commande | Description |
+| --- | --- |
+| `grimoire queue plan [--json] [--no-routes]` | Ce que l'admission déciderait maintenant, à blanc : l'ordre de la file, les tâches admises, et pour chaque `Defer` sa raison ; sortie 1 si la capacité déclarée est illisible, 2 si une tâche est en famine |
+| `grimoire queue release <tâche> [--pool ci] [--reason ...]` | Libère un créneau CI dont la fin des checks n'est pas observable (`capacity.released`) ; geste d'humain, l'origine humaine est exigée comme pour `task comment` |
+
+**File** : priorité, puis vieillissement (+1 cran toutes les 24 h passées à l'état `ready`,
+plafonné à `critical`), puis ancienneté. `TaskService.list_ready` et l'outil MCP `task_list_ready` rendent cet ordre.
+Une tâche dont une dépendance `blocks` n'est pas close, ou dont le backoff de réadmission n'est
+pas échu, reste `ready` mais sort de la file du plan (`hors file`).
+
+**Admission** : `Admit`, ou `Defer(raison)` avec la date de reprise ou `unknown`. Toutes les
+gardes échouent fermées. Ordre : pause, route différée par le routeur, WIP, `ci`, `host`, `llm`, quota.
+Le **WIP** global et par rôle (rôle = `owner` de la tâche) vient de `capacity.yaml`, sinon de
+`orchestration-policy.yaml` (`wip.limit_global`, `wip.limit_per_role`) ; il est appliqué **au claim**,
+sous le verrou du ledger. Une limite illisible refuse le claim. Sans limite déclarée, rien n'est refusé.
+Seules les tâches `claimed` et `running` comptent : un bail perdu occupe son créneau jusqu'à `task reap`.
+La **reprise** `waiting → running` (simple ou attestée) repasse par la même garde : sans place, elle est
+refusée (« Reprise refusée … elle attend une place ») et la tâche reste `waiting`.
+
+**Capacité** : `_grimoire/standard/capacity.yaml` (facultatif, `version: 1`). Un pool non
+déclaré n'est pas sondé ; une section invalide refuse la garde qu'elle porte, les autres continuent. La table `pools` est une seule section : une clé inconnue ou mal casée (`gpu`, `Ci`) la rend illisible et fait refuser `ci`, `host` et `llm` (`Defer(unknown)`), jamais ignorer un pool déclaré.
+
+```yaml
+version: 1
+quota:
+  tokens_per_day: unlimited   # défaut ; ou un entier > 0. 0 et les valeurs illisibles sont refusés, jamais lus comme « illimité »
+pools:
+  ci:
+    runners: 3                # défaut 3 ; analysis et architecture ne prennent pas de créneau (exempt_types)
+  host:                       # facultatif : lu dans /proc ; hors Linux ou illisible, Defer(unknown)
+    max_load_per_cpu: 1.5
+    min_mem_available_mb: 2048
+  llm:
+    claude: {sessions: 2}     # sessions concurrentes par fournisseur, d'après la route du dernier task.routed
+wip: {limit_global: 5, limit_per_role: 2}
+queue: {aging_hours: 24, famine_hours: 24}
+```
+
+**Occupation** : dérivée du ledger à chaque appel, aucun compteur ni fichier `held/`. Un créneau
+`ci` est réservé dès le claim (type non exempté) ou par un push observé (`task.ci_pushed`) et reste
+pris jusqu'à `task.ci_finished` ou `capacity.released`, tant que la tâche est `claimed`, `running`,
+`needs_verification` ou `waiting` : se garer ne rend pas le créneau, les checks n'ont pas fini.
+La clôture, l'annulation, l'échec ou le retour à `ready` le rendent. Si la fin des checks
+n'est pas observable, le créneau reste pris et visible dans `queue plan` jusqu'à `queue release`.
+
+**Quota** : `unlimited` est la valeur par défaut, acceptée par la configuration : le kit ne pose
+alors jamais `Defer(quota)`, seul un refus du fournisseur le peut. Fini, le jour (UTC) est atteint
+à la consommation connue, un minimum lu dans `quota.consumed` ; la décision porte la route du
+routeur, inchangée. Si des appels ont eu lieu aujourd'hui sans chiffre de tokens, la consommation
+est `unknown` : refusée en autonome (`GRIMOIRE_UNATTENDED=1`), affichée en interactif.
+
+**Famine** : une tâche différée depuis plus de 24 h (`queue.famine_hours`) monte au niveau 2
+d'attention, sa raison est affichée.
+
+## La pause : drain et hold, jamais un arrêt brutal
+
+`PAUSED` n'était émis nulle part et rien ne disait « stoppe tout » sans tuer les
+sessions. Le lot K11 de l'épopée #705 ajoute un **drapeau fichier**, lu sans ouvrir
+le ledger, et un tick qui le lit en premier.
+
+| Commande | Description |
+| --- | --- |
+| `grimoire orchestrate pause [--drain\|--hold] [--project\|--global] [--task <id>...] [--reason ...]` | Pose le drapeau (`drain` par défaut) ; `--global` (toute la machine) est un geste d'humain |
+| `grimoire orchestrate resume [--global] [--task <id>...]` | Lève le drapeau, ou seulement ces tâches ; geste d'humain (l'origine humaine est exigée, comme pour `queue release`) |
+| `grimoire orchestrate status [--json]` | Les drapeaux en vigueur et, pour chaque tâche tenue, ce que `hold` fait sur son hôte (« hold dégradé en drain (hôte sans frein) ») |
+| `grimoire orchestrate tick [--apply\|--plan] [--json]` | Un tick : lit la pause, puis récolte, rend les attentes levées, constate les effets externes et calcule l'admission ; sans `--apply` (ou avec `--plan`), le même tick joué sur une copie du ledger, rien n'est écrit ; sous pause, sort en 0 sans ouvrir le ledger ; un second tick simultané saute, en 0 |
+| `grimoire orchestrate install-timer [--interval 5m] [--no-enable]` | Pose le minuteur optionnel du tick (unité systemd utilisateur `oneshot` et son `.timer`) ; sans systemd, rend la ligne crontab à poser à la main |
+| `grimoire orchestrate uninstall-timer` | Désactive et retire le minuteur du projet |
+
+**Portée.** `_grimoire-output/control/pause.json` porte sur le projet (avec `tasks: [...]`, seulement
+sur ces tâches) ; `$GRIMOIRE_CONTROL_HOME/pause.json` (par défaut `~/.grimoire/control/pause.json`) porte
+sur tous les projets de la machine. Le tick et le frein lisent les deux et appliquent l'**union** :
+`hold` l'emporte sur `drain`. Un drapeau **illisible** (JSON invalide, permission, mode inconnu) vaut `drain`
+à son niveau, avec une ligne d'attention ; `resume` le supprime.
+
+- **`drain`** : rien n'est admis (`Defer(pause)` au plan, claim refusé sous le verrou du ledger), les agents
+  en cours finissent leur tâche. Une attente `waiting(ci|quota)` reprend ; une attente `waiting(paused)` attend la fin de la pause.
+- **`hold`**, en plus de `drain`, sur un hôte dont le refus d'outil est prouvé pour sa version
+  (`hosts.capabilities`) : le `PreToolUse` refuse les outils mutants d'une session qui tient une tâche, avec
+  « pause : dépose ton point de reprise ». Le premier refus ouvre **une** écriture, `grimoire task wait <tâche> --reason paused`
+  (ou l'action MCP `wait` avec `to=paused`), qui note la branche et le HEAD du worktree. Ensuite tout outil mutant
+  reste refusé, les lectures passent et le `Stop` est permis. Sur un hôte sans frein, `hold` se dégrade en `drain`
+  et le dit : la consigne « pause demandée : gare-toi » est injectée au tour suivant.
+- **Flows.** À la frontière de node (le node vient d'être accepté, le suivant n'est pas encore ouvert), un `hold`
+  pose le run en `PAUSED` (`workflow.paused`) : le node suivant n'est ni présenté ni exécuté, `flow resume` rend
+  `paused: true` et les pilotes (`--executor dispatch`, `upgrade-flow`) s'arrêtent. Pendant la pause, `flow resume`
+  refuse sans rien écrire ; une fois levée, il rouvre le node suivant (`workflow.resumed`, une seule fois).
+  `drain` ne pose aucun run : ils finissent.
+- **`resume`** : le drapeau est supprimé. Le tick suivant rend les `waiting(paused)` en `ready`, **dans l'ordre
+  de la file** et sans leur faire perdre l'ancienneté d'avant leur claim. Une session restée ouverte lit à son tour
+  « Pause levée : ta tâche … est de nouveau ready » et peut la re-claimer ; une session fermée retrouve `resume_command`.
+
+Limites écrites : un outil MCP tiers n'est pas classé mutant par le kit (seuls `task_claim`, `task_update` et `task_add`
+du kit le sont pour le frein) ; la pause ne reprend pas un effet distant déjà parti ; le bail d'une tâche garée reste tenu
+jusqu'au réveil par le tick (K6) ; le frein ne juge pas une session qui ne tient aucune tâche ; un run de flow n'est pas
+refusé au démarrage sous `hold`.
+
+## Le tick : idempotent, rejouable, et son minuteur
+
+Le lot K12 de l'épopée #705 rend le tick sûr à relancer, à interrompre et à prévisualiser.
+
+- **Un seul tick à la fois.** `_grimoire-output/control/.tick.lock` (verrou `fsio`, sans attente) : un second tick
+  qui le trouve pris saute, code 0. Avec `flock` (POSIX), un tick tué rend le verrou avec son processus. Sans `flock`
+  (Windows), le repli est un fichier dont la date fait foi : le tick la rafraîchit tant qu'il tourne, pour qu'un tick
+  de plus de 60 s ne soit pas cassé par un second ; un tick tué laisse ce fichier jusqu'à sa péremption (60 s). Le
+  suivant reprend, et chaque étape relit le ledger sans réécrire ce qui y est déjà (récolte à barrière, différée
+  unique, réveil rejoué) ; un effet relit l'état sur le disque sous son verrou, jamais un cache chargé avant lui.
+- **Le plan est l'application.** `orchestrate tick --plan` (le défaut sans `--apply`) joue le tick appliqué sur une
+  copie du ledger sous `_grimoire-output/control/tick-plan-*`, jamais sous `/tmp`, puis la retire : mêmes récoltes,
+  mêmes réveils, et une admission qui voit les tâches que ces gestes rendent. Ni board, ni mémoire, ni dispatch ne bougent.
+- **Le travail local n'est pas rendu.** Un bail perdu dont le worktree `task/<id>` porte des commits absents de toute
+  branche distante, un arbre modifié ou un état git illisible passe en `waiting(human, resume_branch)` avec la question,
+  au lieu de `ready`. Un worktree de tâche n'est jamais créé sous un dossier temporaire du système (`tempfile.gettempdir()`, qui suit `TMPDIR`, et aussi `/tmp`, `/var/tmp`, `/dev/shm` ; `%TEMP%` et `%TMP%` sous Windows).
+- **Effets externes réconciliés.** Un push ou une PR passe par `effect.intended` puis `effect.observed` ; une intention
+  sans constat est vérifiée sur la remote (`git ls-remote`, `gh pr list --head`) avant tout nouvel essai : présent,
+  constaté sans être refait ; absent, fait une fois ; invérifiable, rien n'est fait. Un push est « présent » quand le
+  commit poussé est la tête de la branche distante **ou son ancêtre** (la branche a avancé depuis) ; une branche
+  disparue de la remote alors qu'une branche distante suivie localement contient le commit est « invérifiable »
+  (supprimée après le push : la refaire la ressusciterait). Le tick constate, il ne refait pas. Les `git` de la
+  récolte (`resume_branch`) tournent avant le verrou du journal, jamais dessous.
+- **Journal tronqué.** Une dernière ligne coupée par une coupure de courant est ignorée au rejeu, l'ajout suivant ne s'y
+  colle plus, et le tick l'affiche en attention.
+- **Minuteur optionnel, désactivé par défaut.** `install-timer` écrit `grimoire-tick-<nom>-<empreinte>.service` et `.timer`
+  sous `$XDG_CONFIG_HOME/systemd/user`, puis `systemctl --user enable --now` (sauf `--no-enable`). `orchestrate status`
+  dit s'il est posé. Sans minuteur, après une coupure ou un forfait épuisé, rien ne reprend avant la prochaine session
+  ou commande.
+
+Limites écrites : sans `loginctl enable-linger`, un minuteur utilisateur ne tourne pas tant que l'utilisateur ne s'est pas
+reconnecté après un redémarrage (non vérifié sur un poste) ; le banc de coupure (`pytest -m crash_bench`, scénarios A à H)
+simule les points de coupure, il ne tue aucun processus ; un backoff se compte depuis l'horodatage d'écriture de la récolte,
+si bien que plan et application diffèrent de quelques millisecondes sur cette date ; aucun job du kit n'appelle encore
+`effects.perform` (la primitive et la réconciliation du tick existent, le push et la PR restent à brancher).
+
 ## Besoins d'exécution : un flow déclare, le projet résout
 
 Un node de flow ne référence pas `pytest` ni `npm test` en dur : son
@@ -379,7 +622,7 @@ Le groupe `grimoire standard` pilote le standard agentique (profils, patterns go
 | `grimoire standard init [.] --needs <id>` | Générer les artefacts standard du projet |
 | `grimoire standard verify` | Vérifier les artefacts (fail-closed) |
 | `grimoire standard audit` | Rapport de conformité + gaps restants |
-| `grimoire standard score` | Calculer et persister un score de conformité |
+| `grimoire standard score` | Calculer et persister un score de conformité ; rapporte à part `rules_enforced` (règles de pack vérifiées), `rules_advisory`, `rules_failing`, `rules_unevaluated` et `rules_unclassified` |
 | `grimoire standard gate check [--strict] [--no-run]` | Gate CI : échoue si une preuve obligatoire manque ; chaque manque nomme son chemin et un remède copiable. `--strict` exécute lui-même `gate run-tests` si la tâche doit une preuve d'exécution et qu'aucun run vert et frais n'existe ; `--no-run` restaure l'ancien comportement |
 | `grimoire standard gate run-tests` | Exécuter la commande de test connue et enregistrer le verdict (`test-run.json`) |
 | `grimoire standard task scaffold [--task-id X] [--dry-run]` | Créer, s'ils manquent seulement, les artefacts par tâche que les gates exigent (enveloppe, pack de preuve, registre d'affirmations, dossier d'acceptance, context bundle, decision trace), pré-remplis depuis le Mission Ledger ; idempotent ; le hook SessionStart le fait déjà pour la tâche active |
@@ -409,11 +652,13 @@ prochain export l'écrase.
 | `grimoire task board export . -o <chemin>` | Écrire ailleurs que dans le board du standard |
 | `grimoire task add "<titre>" -a "<critère>" [--owner <qui>] [--ready]` | Ouvrir une tâche (un critère d'acceptation au moins) ; `--ready` la rend réclamable tout de suite, gate `proposed_to_ready` compris |
 | `grimoire task list [--status <état>] [--mission <id>]` | Lister les tâches et leur colonne de board |
+| `grimoire task wave-checkpoint <mission> <vague> [--action status\|request\|require\|approve\|reject] [--fingerprint <empreinte>]` | Checkpoint humain d'une vague, lié à l'empreinte du contenu fusionné (arbres base, tête et merge de chaque tâche). `request` présente l'empreinte, `approve`/`reject` la citent et exigent un tour humain attesté postérieur (W2-01) ; `require` ferme le claim des vagues suivantes tant que la vague n'est pas `approved`. Une vague dont le contenu change devient `stale`. Le numéro de vague est celui de `task waves` (niveau absolu, vagues closes comprises) ; le verrou s'applique à toute transition vers `claimed` |
 | `grimoire task show <id>` | Détailler une tâche et ce que chaque prochain pas exigera |
 | `grimoire task claim <id> [--actor <qui>] [--host <où>]` | Réclamer une tâche prête (`ready → claimed`) |
 | `grimoire task move <id> --to <état>` | Déplacer une tâche, si la machine à états et le gate le permettent |
 | `grimoire task block <id> --reason "<motif>"` | Bloquer en disant pourquoi |
-| `grimoire task close <id>` | Fermer une tâche vérifiée (verdict accepté exigé) |
+| `grimoire task close <id>` | Fermer une tâche vérifiée (verdict accepté exigé ; depuis `needs_verification`, reçu de revue frais exigé) |
+| `grimoire task review <id> --verdict READY\|NOT-READY [--finding "résumé :: commande"]` | Écrire le reçu de revue, lié à l'empreinte présente de l'arbre (`_grimoire-output/reviews/<id>/review-receipt.json`) |
 | `grimoire task prioritize <id> --to low\|medium\|high\|critical [--reason "<motif>"]` | Changer la priorité (issue #638) — l'historique reste au ledger, le board se retrie |
 | `grimoire task comment <id> "<texte>" [--kind comment\|directive]` | Poser un commentaire ou une consigne ; la session qui tient la tâche la lit au prochain `UserPromptSubmit` |
 | `grimoire task cancel <id> --reason "<motif>" [--force]` | Annuler avec sa raison (obligatoire) ; tenue par une autre session, elle exige `--force` |
@@ -421,7 +666,8 @@ prochain export l'écrase.
 | `grimoire task link <id> --depends-on <id>` | Déclarer une dépendance |
 | `grimoire task context <id>` | Produire le context bundle d'une tâche réelle |
 | `grimoire task trace <id> [--causes]` | Timeline unifiée d'une tâche : transitions, outils refusés, gates rouges, checkpoints, abort, preuves, incidents |
-| `grimoire task trace-export <dest> [--format otel\|langfuse] [--mission-id <id>]` | Exporte le TraceLedger en JSONL, conventions sémantiques OTel GenAI ou contrat REST Langfuse |
+| `grimoire task approve-check <id> [--cmd "<commande>"] [--allow-unattested]` | Approuver par empreinte les commandes de vérification de la tâche, pour cette tâche seule (governed/production : sans approbation, `task verify` et le dispatch de flow ne lancent rien) ; l'acteur est attesté par un tour humain postérieur au challenge de cet ensemble exact de commandes ; sans attestation (terminal nu), l'approbation est refusée sauf `--allow-unattested` (journalisée `unattested`) ; les caractères cachés (U+202E, U+200B) sont refusés |
+| `grimoire task trace-export [<dest>] [--format otel\|langfuse\|otlp] [--endpoint <url>] [--header NOM=VALEUR] [--mission-id <id>]` | Exporte le TraceLedger : JSONL aux conventions OTel GenAI ou Langfuse, ou `--format otlp --endpoint` vers un collecteur OTLP/HTTP (échoue si le lot n'est pas accepté) |
 | `grimoire task recall <id>` | Ce que la mémoire du projet sait de cette tâche et de ses voisines — borné en tokens |
 | `grimoire task dispatch <id> --check "<commande>" [--check ...] [--dry-run] [--max-tier cheap\|mid\|strong] [--start-tier cheap\|mid\|strong] [--provider <id>] [--timeout <s>]` | Déléguer la tâche en cascade par palier de fournisseur |
 
@@ -436,7 +682,7 @@ reprojeté depuis le ledger si le projet est enrôlé (`_grimoire/standard/` pr�
 — plus besoin de relancer `task board export` pour qu'un claim se voie.
 
 Les mêmes gestes sont exposés aux agents par le serveur MCP (`task_add`,
-`task_list_ready`, `task_show`, `task_claim`, `task_update`, `task_context`) :
+`task_list_ready`, `task_show`, `task_waves`, `task_claim`, `task_update`, `task_context`) :
 même service (`TaskService.add` pour l'ouverture), même gate, même refus. Voir
 [Intégration MCP](mcp-integration.md).
 
@@ -453,6 +699,72 @@ façon vague (« le code est propre ») ne peut jamais produire un V0 : un seul
 critère ambigu suffit à faire monter la classe, jamais à la faire descendre.
 `task show` affiche, critère par critère, le motif reconnu — c'est ce qui rend
 lisible pourquoi une tâche n'est pas au niveau qu'on lui prêtait.
+
+### Route de cérémonie et profondeur de test
+
+`grimoire ceremony suggest` calcule, sans LLM, la cérémonie qu'une tâche
+mérite : une route parmi cinq, et la profondeur de test exigée à la fermeture.
+Deux appels sur les mêmes entrées rendent les mêmes octets (`--json`, avec
+l'empreinte `inputs_digest` des entrées et des seuils).
+
+| Commande | Description |
+| --- | --- |
+| `grimoire ceremony suggest <id> [-f <fichier>…] [--diff-base <ref>] [--impact <n> \| --measure-impact] [--json]` | Route d'une tâche du ledger |
+| `grimoire ceremony suggest --title "<titre>" -a "<critère>" [--check "<cmd>"] [--risk <profil>] …` | Route d'une tâche décrite en ligne |
+| `grimoire ceremony budget [--file evals/ceremony-budget.yaml] [--json]` | Vérifier un budget de cérémonie ; sortie 1 au premier écart (job CI du kit) |
+| `grimoire task add "<titre>" -a "<critère>" --test-depth <floor\|standard\|strict\|auto>` | Exiger une profondeur de test à la fermeture (`auto` : celle de la route) |
+
+Les routes, de la plus légère à la plus lourde : `express` (verdict mécanique
+seul, profondeur `floor`), `checked` (tests puis relecture par un agent,
+`standard`), `reviewed` (plus une relecture humaine, `standard`), `guarded`
+(tests et analyse statique, double relecture, checkpoint humain, `strict`),
+`session` (jugement ou conception en session avec une personne, `strict`).
+Chaque règle donne un plancher et la route est le maximum des planchers :
+V1 → `checked`, V2 → `session`, risque `strict` → `reviewed`, risque
+`security_critical` ou `release` → `guarded`, fichier de secret, de workflow CI,
+de migration ou de publication → `guarded`, plus de `files_wide` fichiers ou
+plus de `impact_wide` importeurs directs des `.py` touchés (`--measure-impact`, lu par `ast` ; le code graph du kit ne résout pas ses arêtes d'import) → `checked`. Des fichiers
+inconnus montent la route à `checked` ; un impact non mesuré ne la monte pas,
+et la sortie le dit dans `limits`. Les seuils portent `calibrated` et leur
+date : aucun n'est calibré sur des runs réels aujourd'hui.
+
+La profondeur se mesure sur les commandes du **dernier verdict**
+`grimoire task verify`, pas sur celles que la tâche promet : `floor` (une
+commande verte), `standard` (dont une commande de test : celle que le projet
+déclare en `needs.commands.test-runner`, ou un outil reconnu comme `pytest`,
+`go test`, `npm test`), `strict` (en plus une analyse statique verte : `lint`,
+`typecheck` déclarés, ou `ruff`, `mypy`, `eslint`, `tsc`…). Une tâche qui
+déclare `test_depth` ne passe en `accepted` ou `released` qu'à cette profondeur ;
+sinon le gate refuse avec `acceptance.depth_floor_unmet` (bloquant selon la
+sévérité du profil, comme les autres preuves). Une profondeur inconnue est un
+refus. Le routeur ne choisit pas de modèle : il choisit la cérémonie.
+
+### Rapport de mission
+
+| Commande | Description |
+| --- | --- |
+| `grimoire mission report <mission> [--json]` | Coût, acceptance, palier, preuves et rejeu d'une mission, chaque ligne avec sa source |
+
+`grimoire mission report` rassemble ce que trois journaux gardaient chacun de leur
+côté : les tentatives de la cascade (`task.dispatched`, Mission Ledger), le résumé
+de cascade et l'usage de tokens replié (TraceLedger) et les packs et verdicts
+(EvidenceService). Chaque tentative porte son `cost.status` (`exact` ou
+`unknown`), l'issue de l'acceptance (`passed`, `failed`, `unrunnable`, `not_run`)
+et le `trace_id` de sa cascade ; chaque ligne nomme sa source (`ledger:`,
+`traces:`, `evidence:`).
+
+- **Jamais de chiffre inventé.** Sans aucun coût connu, le rapport n'a aucun total
+  numérique et écrit « coût inconnu ». Un agrégat partiel est une borne basse
+  (`>= X USD`), et une tâche sans donnée de coût est comptée à part.
+- **Le journal de session et les tentatives ne s'additionnent pas.** Ce sont deux
+  vues des mêmes appels : une tâche retient le journal replié par `task fold-usage`
+  s'il existe, sinon les tentatives, et les deux vues restent affichées.
+- **Le lien tentative vers trace est exact ou absent.** Une cascade est rattachée à
+  l'unique trace `dispatch.outcome` écrite entre sa dernière tentative et la
+  première de la suivante ; sinon `trace_id` vaut `null` (`trace_link: none`).
+- **Lecture seule et déterministe.** Aucun dossier n'est créé, aucune date de
+  génération n'est écrite : deux exécutions sur les mêmes journaux donnent les
+  mêmes octets. Mission inconnue ou ledger absent : sortie 1.
 
 ### Plafonds MAST par instance de workflow
 
@@ -561,6 +873,7 @@ start_tier:
   V0: mid          # ne peut jamais descendre sous le plancher de la classe
 max_escalations: 1  # 0 = aucune escalade permise, absent = pas de plafond posé ici
 max_cost_usd_per_node: 0.50
+on_unknown_cost: stop  # défaut ; ou continue_flagged
 ```
 
 `max_cost_usd_per_node` s'applique dans `missions.dispatch.run_dispatch`
@@ -572,6 +885,27 @@ apparaît avec le verdict `cost_capped`. Un `pilot.yaml` malformé refuse
 nommément le chargement plutôt que de retomber en silence sur « aucun
 plafond » — contrairement à `orchestration-policy.yaml`, un plafond de coût
 est un mécanisme de sécurité.
+
+Un fournisseur qui ne rend pas son coût (aucun JSON portant `total_cost_usd`,
+le cas de la plupart des fournisseurs headless) laisse ce coût *inconnu* :
+il n'est jamais compté pour zéro. `on_unknown_cost: stop` (défaut,
+fail-closed) arrête l'escalade dès qu'un palier a répondu sans coût alors
+qu'un plafond est posé — le rapport porte `cost_capped` avec la raison
+`cost_unknown` (`cost_cap_reason`). `continue_flagged` laisse escalader ;
+le coût reste alors signalé `lower_bound` (`>= 0.4200 USD (1 non pricés)`) ou
+`unknown` dans le rapport, la trace `dispatch.outcome`, `grimoire dispatch
+stats`, `flow status`, `flow list` et le contrôle `dispatch.cost_slo`
+(tous rendent le même format, avec le décompte des appels sans prix). Dans un
+flow, `cost_unknown` ne sert qu'à l'escalade, à l'enchaînement des nodes d'un
+sous-flow et aux passes optionnelles de `budget` (non lancées sous `stop`,
+`skipped_reason: cost_unknown`) : un coût inconnu ne jette jamais un node déjà vert ni les éléments
+frères d'un `fanout`, `verify-panel`, `loop-until-dry`, `judge` ou `replay-diff`
+(seul un montant connu qui atteint le plafond, `cost_reached`, les arrête).
+Ces nodes continuent donc sous `stop` malgré un coût inconnu, mais ne passent pas pour
+« sous le plafond » : le node porte `cost_cap_unevaluated: true` (plafond posé, politique
+`stop`, appels sans prix — le plafond n'a pas pu être jugé), à lire avec `cost_status`.
+Le node porte `cost_cap_reason` (`cost_reached` | `cost_unknown`). La politique
+`assume_tier_ceiling` (estimer au plafond du palier) n'existe pas encore.
 
 #### Classe de relisibilité
 
@@ -673,6 +1007,11 @@ et projections : [Système de mémoire](memory-system.md).
 | `grimoire memory graph` / `vector` | Synchroniser et vérifier les projections |
 | `grimoire memory bundle` | Construire, installer et vérifier les bundles de modèles d'embedding |
 | `grimoire memory shared` | Mémoire transverse : ce qui reste vrai d'un projet à l'autre |
+| `grimoire memory rules add` / `list` / `check` | Règles parsables par couche (`ALWAYS\|NEVER <verbe> <objet> [@portée]`) : conflits décidés par le code, plafond `rules.max_tokens_per_layer`, écriture via la frontière de confiance |
+| `grimoire memory rules explain <chemin>` | Règles qui valent pour un fichier : rang, couche d'origine (`organization` > `team` > `project` > `agent`), ce qui la fait céder, et si `host sync` la livre (couches `team` et `project` seulement) |
+| `grimoire memory rules pack list` / `show <id>` / `install <id> [--layer]` / `verify` | Packs de règles par stack (`python`) : chaque règle porte un vérificateur lu sur le code du projet, ou se déclare `advisory` (un pack de plus de 50 % d'advisory est refusé). `install` écrit les règles par la frontière de confiance ; `verify` rend `pass`, `fail` ou `unevaluated` par règle et sort en code 1 si l'une est violée |
+| `grimoire memory rules propose` / `proposals [--pending]` / `accept <id> [--layer]` / `reject <id>` | Règles candidates tirées des refus de gate observés (TraceLedger, recette `grimoire.task-gate`) : une signature (transition, preuve manquante) vue sur au moins 2 tâches distinctes devient `ALWAYS provide <preuve> before <transition>`, avec ses citations de preuve. Rejouer `propose` ne réécrit rien ; `accept` passe par les contrôles de `rules add` (un refus n'écrit rien) ; une proposition refusée ne revient qu'une fois ses tâches doublées. Aucune question n'est posée pendant un flow |
+| `grimoire memory rules effect [--min-tasks 5]` | Effet de chaque règle acceptée sur sa signature : `before_rate`, `after_rate`, `n_before`, `n_after`, `status` (`effective`, `unproven`, `harmful`, test exact de Fisher unilatéral à 5 %). Sous le seuil de tâches de chaque côté, `unproven` quel que soit l'écart ; `retire_suggested` sur `harmful` ou sur `unproven` après 20 tâches. JSON reproductible, aucun score de confiance |
 | `grimoire memory facts` / `diary` | Graphe de faits temporels, journaux d'agents |
 | `grimoire memory migrate` | Planifier et exporter les migrations Memory OS |
 | `grimoire memory taxonomy` | Taxonomie aile / salle / pièce |
@@ -724,6 +1063,7 @@ seconde sortie, il ne retire rien.
 | --- | --- |
 | `grimoire flow run <fichier>` | Démarrer un run et présenter le contrat du premier node ; sans argument, liste les runs |
 | `grimoire flow status <run-id>` | État du run : node courant, nodes faits, dernier refus, contrat courant |
+| `grimoire flow next <run-id> [--wave]` | Le node courant ; avec `--wave`, tous les nodes prêts (non faits, prédécesseurs du DAG faits). Lecture seule |
 | `grimoire flow resume <run-id> --result <fichier>` | Vérifier la sortie du node courant contre son contrat ; avance ou suspend |
 | `grimoire flow abort <run-id> [--reason]` | Abandonner un run — terminal, jamais repris |
 | `grimoire flow extract <run-id> [--out <fichier>]` | Extraire un blueprint brouillon de la séquence réellement exécutée par ce run |
@@ -830,7 +1170,7 @@ Paramétrage refusé nommément **au chargement du blueprint**
 | Genre | `ref` | `config.<genre>` requis |
 | --- | --- | --- |
 | `fanout` | sous-flow modèle | — (voir ci-dessous) |
-| `verify-panel` | sous-flow vérificateur | `k` (entier ≥ 2), `angles` (liste de `k` chaînes) |
+| `verify-panel` | sous-flow vérificateur | `k` (entier ≥ 2), `angles` (liste de `k` chaînes) ; `class` optionnelle (`V1` ou `V2`, défaut `V2`) |
 | `loop-until-dry` | sous-flow | `maxRounds` (entier ≥ 1) |
 | `judge` | sous-flow candidat | `n` (entier ≥ 2), `angles` (liste de `n` chaînes) |
 | `checkpoint` | ignorée (chaîne vide par convention) | — |
@@ -848,9 +1188,23 @@ infini implicite. Vert seulement si les N enfants finissent tous verts ;
 recoller un résultat partiel comme s'il était le tout serait l'invention que
 l'issue refuse.
 
+`pilot.max_parallel` (défaut `1`, séquentiel) borne le nombre d'enfants actifs en
+même temps. Au-delà de 1, le plafond `max_cost_usd_per_node` est relu avant
+chaque lancement et un coût inconnu bloque les lancements suivants, comme un
+enfant suspendu à l'hôte (aucun lancement après la suspension) ; les
+enfants déjà en vol ne sont pas rétractés (dépassement borné par
+`max_parallel - 1` enfants). Les enfants partagent le même répertoire : à
+n'activer que pour des enfants qui n'écrivent pas les mêmes fichiers.
+
 **`verify-panel`** — k vérificateurs indépendants (`config.verifyPanel.k`),
 chacun sous un angle distinct (`.angles`, instruit de chercher à réfuter,
-jamais de confirmer par défaut), majorité requise. Coût = k tentatives,
+jamais de confirmer par défaut). Chaque vérificateur vote par un `verdict`
+structuré (`READY` ou `NOT-READY`) dans sa sortie ; sans verdict, il
+s'abstient (finir n'est pas approuver). `config.verifyPanel.class` : `V1`
+exige la majorité stricte des votes exprimés, `V2` (défaut) leur unanimité.
+Si les votes exprimés ne sont pas une majorité de k, le node rend
+`inconclusive` ; des `tree_fingerprint` différentes parmi les votants le
+rendent `invalid`. Coût = k tentatives,
 **toujours** — jamais une cascade qui s'arrête au premier consensus
 apparent : un plafond de coût qui empêche de compléter les k tentatives
 referme le node en `cost_capped`, jamais sur un vote partiel (« jamais un
@@ -878,9 +1232,56 @@ l'exécuteur qui a conduit le reste du run) doit porter
 `checkpoint_decision` (`approve`/`reject`/`amend`) ; `reject` bloque le run
 en nommant le motif (`checkpoint_reason`) dans l'événement de refus du
 kernel — « le motif dans le graphe de décision » — une reprise ultérieure
-rouvre exactement ce même node. Limite documentée : `amend` avance
-identiquement à `approve` au niveau du moteur, son motif n'est pas persisté
-séparément dans ce lot (le kernel n'a pas de canal pour un motif de succès).
+rouvre exactement ce même node. `amend` (W2-10) demande une révision : le
+node reste ouvert, la décision et son motif sont inscrits dans le journal du
+run (relu par `flow status`) et comptés. `accept_as_is` n'est accepté qu'après
+`config.checkpoint.max_amendments` amendements (entier >= 1, 3 par défaut) ; il
+exige `checkpoint_reason` (le risque nommé), inscrit `accepted_risk`, et pose
+`task.risk_accepted` sur la tâche du ledger liée au run (`--task-id`) si elle
+existe ; le ledger le rejoue dans la tâche (`accepted_risks`) et `classify` la remonte
+au moins en V1 pour toute surface (`task show`, MCP `task_show`/`task_claim`,
+`dispatch_advice`, transition `needs_verification` de `task dispatch`).
+Limite : le compteur est celui du journal du run, `amend` non attesté compris.
+`config.checkpoint.plan` (W2-11, fournisseur connu : `upgrade-removals`) lie la
+décision à la liste projetée de ce qu'elle engage : hachée à la présentation
+(inscrite dans le challenge), recalculée à la décision. `approve` et
+`accept_as_is` dont le plan a changé — ou dont la projection est impossible —
+sont refusés en `plan_drifted` avec les écarts, sans consommer le tour humain ;
+le challenge suivant porte le plan courant et exige un nouveau tour. Limite :
+l'empreinte couvre la projection du fournisseur, pas ce qu'un exécuteur ferait
+après la décision. `grimoire upgrade-flow review` affiche le plan présenté.
+
+**Octroi d'autonomie (`grimoire autonomy`, W5-06)** — la seule voie pour
+faire franchir un checkpoint destructif sans humain (CI, banc) ;
+`GRIMOIRE_UNATTENDED=1` seul n'ouvre rien.
+
+| Commande | Effet |
+|---|---|
+| `grimoire autonomy grant --scope <sel> --max-cost-usd <usd> --until <échéance>` | Demander un octroi. `<sel>` : `run:<id>` ou `blueprint:<id>`, `/<node>` en option, répétable, aucun joker ; `<échéance>` : `+30m`, `+2h`, `+1d` ou un instant ISO 8601 avec fuseau. Les trois bornes sont obligatoires. |
+| `grimoire autonomy status` | Chaque octroi réévalué maintenant : actif ou révoqué (motif), coût dépensé, échéance ; `-o json` ajoute les événements. |
+| `grimoire autonomy revoke <grant-id> [--reason]` | Révoquer à la main, toujours permis. |
+
+L'octroi est lui-même une décision attestée : la première demande émet un
+challenge lié à la session et sort en code 3 (décision humaine requise) ; un
+tour humain de cette session, puis la même commande relancée, l'inscrit et
+consomme ce tour. Seul un challenge émis par la session courante est repris : un
+challenge ouvert sans session ou par une autre session n'empêche pas la demande
+d'une session, qui reçoit alors le sien. Un `/<node>` restreint le seul run que
+désigne le sélecteur, pas ses sous-flows ni les nodes homonymes d'un autre
+blueprint ; sans `/<node>`, les sous-flows sont couverts. Tant qu'il est valide, un
+`approve` ou `accept_as_is` non attesté sur un checkpoint du périmètre est accepté avec
+`attestation=granted:<grant-id>`, distinct d'`attested`. Il est révoqué, une
+fois pour toutes, à l'échéance (`expired`), quand le coût atteint le plafond
+(`cost_reached`), au premier coût inconnu (`cost_unknown`, politique `stop`
+sans alternative), et au premier gate rouge du périmètre (`gate_red` : une
+sortie refusée par son contrat, ou une tentative de dispatch `red` ou
+`unrunnable`). Le checkpoint suivant repasse en `awaiting_human` et le refus
+nomme l'octroi révoqué. Chaque challenge, octroi et révocation est une ligne de
+`_grimoire-runtime-output/flows/authority/@autonomy-grants.authority.jsonl`,
+journal que la garde d'autorité interdit d'écrire à l'agent.
+Limite : le coût mesuré est celui des tentatives `task.dispatched` des runs
+couverts, postérieures à l'octroi ; le coût de la session hôte n'est mesuré
+nulle part dans le kit et n'y entre pas (`cost_scope` dans `status`).
 
 **`budget`** — plafond de coût déclaré (`config.budget.maxCostUsd`),
 abandon des passes optionnelles avant dépassement. `passes` est une liste
@@ -1191,7 +1592,8 @@ suivi de la commande.
 | Commande | Description |
 | --- | --- |
 | `grimoire context-pack` | Écrire un context-pack durable (contrat catalogue) pour le dépôt |
-| `grimoire update` | Mettre à jour grimoire-kit — alias de `grimoire self update` |
+| `grimoire update` | Mettre à jour grimoire-kit — alias de `grimoire self update` ; la wheel est vérifiée avant installation (`--channel stable\|preview`, `--check`, `--offline`, `--from <bundle>`) |
+| `grimoire verify-install` | Vérifier l'installation de grimoire-kit (`--online` : contre la wheel et le `SHA256SUMS` publiés) |
 | `grimoire debugger status` | État de la réalité et du débogage des agents |
 | `grimoire debugger claims` | Affirmations enregistrées par les agents |
 | `grimoire debugger plan` | Plan de débogage courant |
@@ -1199,6 +1601,64 @@ suivi de la commande.
 | `grimoire debugger serve` | Servir la vue de débogage |
 
 L'alias court `grimoire dbg` existe pour `debugger`.
+
+### Confiance dans l'installation (`trust_level`)
+
+`grimoire self update` ne laisse plus le gestionnaire (uv, pipx, pip) retélécharger « la dernière version » : il
+télécharge la wheel, la confronte à l'empreinte annoncée par PyPI **et** au `SHA256SUMS` de la release GitHub,
+puis installe ce fichier. Un écart, un fichier absent de la liste ou une liste injoignable refuse l'installation
+(« Nothing was installed »). Seule exception, affichée : une version antérieure à la première qui publie
+`SHA256SUMS` s'installe avec `trust_level: pypi-only`.
+
+Sous `uv tool`, les `--with` et le `--python` de l'installation d'origine (lus dans `uv-receipt.toml`) sont rejoués ;
+une option qu'on ne sait pas rejouer (`constraints`, `overrides`, `options`, un `--with` par chemin, dépôt git ou
+index) refuse la mise à jour avec la commande manuelle correspondante. Une fois l'installation faite, le chemin de
+la wheel temporaire est retiré du reçu (`uv-receipt.toml`, ou `pipx_metadata.json` pour pipx) : `uv tool upgrade` /
+`pipx upgrade` continuent de fonctionner ensuite. Si ce reçu a une forme inconnue, il n'est pas touché et la commande
+qui refait une installation du registre est affichée.
+
+### Canaux, contrôle sans réseau et bundle hors ligne
+
+| Option de `grimoire self update` | Effet |
+| --- | --- |
+| `--channel stable` (défaut) | Plus haute version **stable** de PyPI. Ne choisit jamais une pré-version, même quand PyPI rend une pré-version comme `info.version` faute de stable. |
+| `--channel preview` | La plus haute entre la stable de PyPI et la pré-version publiée sur GitHub (une pré-version `vX.Y.Z-rc1` n'est pas envoyée à PyPI, seulement à une release GitHub *pre-release*). Une pré-version ne s'installe que si le `SHA256SUMS` de sa release la liste : `trust_level: release-only`, jamais d'exception. |
+| `--check [--json]` | Rend `up-to-date`, `update-available` ou `offline`, sans rien télécharger ni installer. Code de sortie 0 dans ces trois cas, 1 si la vérification elle-même échoue. |
+| `--offline` | Aucune requête réseau, pas même la sonde de connectivité. Avec `--check` : statut `offline`. Sans `--check` : exige `--from`. |
+| `--from <dossier\|wheel>` | Installe un bundle hors ligne. Aucune requête, index fermé (`--no-index` / `--offline`), wheels seulement (`--only-binary :all:` / `--no-build`). |
+
+Un bundle est un dossier contenant la wheel de grimoire-kit, son `SHA256SUMS` (celui de la release) et, si
+l'environnement n'a pas déjà les dépendances, leurs wheels (`pip download grimoire-kit==X -d <dossier>`, à faire une
+fois en ligne ; ajouter leurs empreintes à `SHA256SUMS`). Toute wheel du dossier doit figurer dans `SHA256SUMS` avec la
+bonne empreinte, sinon le bundle entier est refusé. Le gestionnaire n'est jamais pointé sur le dossier du bundle : `self update`
+copie la wheel du kit et les autres wheels du dossier (toutes listées, hachées après copie) dans un dossier temporaire et ne
+donne que celui-là à `--find-links`. Le reste du dossier (une page `links.html`, un sous-dossier, tout fichier qui n'est pas
+une wheel) est ignoré : `pip` suit les pages HTML d'un `--find-links`, et une wheel que `SHA256SUMS` ne liste pas ne peut pas
+entrer par là. Une pré-version dans un bundle exige `--channel preview`.
+
+Limite écrite : le `SHA256SUMS` d'un bundle voyage avec ses fichiers, donc le niveau rendu est `bundle`, jamais
+`verified` : il garantit l'intégrité du bundle, pas son origine. Les dépendances sont copiées puis hachées comme la wheel du kit :
+rien n'est lu dans le dossier du bundle après la vérification. Hors ligne,
+`gh attestation verify` n'est pas rejoué.
+
+| `trust_level` | Sens |
+| --- | --- |
+| `verified` | La wheel installée est celle de la release (PyPI et `SHA256SUMS` concordent, `RECORD` identique) |
+| `pypi-only` | Empreinte conforme à PyPI seul : la release ne publie pas de `SHA256SUMS` |
+| `release-only` | Pré-version GitHub : conforme au `SHA256SUMS` de sa release, seule source (PyPI n'a pas cette version) |
+| `bundle` | Bundle hors ligne : conforme au `SHA256SUMS` livré avec la wheel ; origine non confrontée à une source indépendante |
+| `intact` | Les fichiers installés correspondent à leur `RECORD` ; provenance non vérifiée |
+| `dev` | Installation éditable : rien à attester |
+| `unknown` | Pas de `RECORD` pour comparer |
+| `modified` | Au moins un fichier diffère de ce qui a été installé : `doctor` échoue, `verify-install` sort en 1 |
+
+`grimoire doctor` affiche le niveau hors ligne ; `grimoire verify-install --online` va jusqu'à la comparaison avec
+la wheel publiée (pour une pré-version installée : celle de sa release GitHub). Les fichiers de chaque release (wheel, sdist, SBOM CycloneDX de la wheel seule, `SHA256SUMS`)
+portent aussi une attestation de provenance Sigstore : `gh attestation verify <fichier> --repo Guilhem-Bonnet/Grimoire-kit`.
+
+Limites : les dépendances de grimoire-kit viennent de l'index sans empreinte publiée par le kit ; une somme et une
+attestation rendent la falsification plus coûteuse, pas impossible ; `install.sh --legacy` (clone de `main`) n'est
+pas couvert.
 
 ---
 

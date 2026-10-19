@@ -1,3 +1,7 @@
+---
+audience: décision
+---
+
 # ADR-007 — Finir ce qu'ADR-005 a décidé : le Mission Ledger comme seule source de tâches
 
 - **Statut** : accepté (2026-09-17)

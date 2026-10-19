@@ -269,8 +269,8 @@ const KNOWN_TOP_KEYS: &[&str] = &[
     "proposals",
     "source",
 ];
-const VALID_HOST_ALIASES: &[&str] = &["claude", "copilot", "codex", "cursor", "gemini"];
-const KNOWN_HOSTS_KEYS: &[&str] = &["enabled"];
+const VALID_HOST_ALIASES: &[&str] = &["claude", "copilot", "codex", "cursor", "gemini", "opencode"];
+const KNOWN_HOSTS_KEYS: &[&str] = &["enabled", "preserve"];
 const VALID_EXECUTION_NEED_IDS: &[&str] = &[
     "test-runner",
     "lint",
@@ -774,7 +774,8 @@ fn hosts_schema() -> Value {
         ("additionalProperties", Value::Bool(false)),
         (
             "properties",
-            obj(vec![(
+            obj(vec![
+                (
                 "enabled",
                 obj(vec![
                     ("type", s("array")),
@@ -791,7 +792,24 @@ fn hosts_schema() -> Value {
                         s("Subset of known hosts this project emits files for."),
                     ),
                 ]),
-            )]),
+            ),
+                (
+                    "preserve",
+                    obj(vec![
+                        ("type", s("array")),
+                        ("items", obj(vec![("type", s("string"))])),
+                        ("uniqueItems", Value::Bool(true)),
+                        (
+                            "description",
+                            s(
+                                "Host files (paths relative to the project root) the project keeps for itself: \
+                                 `grimoire host sync` never writes them and reports them as user-owned; \
+                                 the kit element they would carry is not delivered on that host (D-07).",
+                            ),
+                        ),
+                    ]),
+                ),
+            ]),
         ),
     ])
 }
@@ -1289,6 +1307,18 @@ fn validate_agents(section: &Value, errors: &mut Vec<RawError>) {
     check_unknown_keys(section, KNOWN_AGENTS_KEYS, "agents", "agents", errors);
 }
 
+/// Same rule as `grimoire.core.config._parse_preserve`: relative, no `..`, no drive letter.
+fn is_relative_preserve_path(raw: &str) -> bool {
+    let text = raw.trim().replace('\\', "/");
+    let text = text.strip_prefix("./").unwrap_or(&text);
+    let mut chars = text.chars();
+    let second = chars.nth(1);
+    !(text.is_empty()
+        || text.starts_with('/')
+        || text.split('/').any(|seg| seg == "..")
+        || (text.chars().count() > 1 && second == Some(':')))
+}
+
 fn validate_hosts(section: &Value, errors: &mut Vec<RawError>) {
     if !section.is_map() {
         errors.push(err("hosts", "'hosts' must be a mapping."));
@@ -1328,6 +1358,35 @@ fn validate_hosts(section: &Value, errors: &mut Vec<RawError>) {
             _ => errors.push(err(
                 "hosts.enabled",
                 "'hosts.enabled' must be a list of host ids.",
+            )),
+        }
+    }
+
+    if let Some(preserve) = field(section, "preserve") {
+        match preserve {
+            Value::Null => {}
+            Value::List(items) => {
+                for (i, item) in items.iter().enumerate() {
+                    let Value::Str(raw) = item else {
+                        errors.push(err(
+                            format!("hosts.preserve[{i}]"),
+                            "Preserved path must be a string.",
+                        ));
+                        continue;
+                    };
+                    if !is_relative_preserve_path(raw) {
+                        errors.push(err(
+                            format!("hosts.preserve[{i}]"),
+                            format!(
+                                "Invalid path '{raw}' in 'hosts.preserve': expected a path relative to the project root."
+                            ),
+                        ));
+                    }
+                }
+            }
+            _ => errors.push(err(
+                "hosts.preserve",
+                "'hosts.preserve' must be a list of relative file paths.",
             )),
         }
     }

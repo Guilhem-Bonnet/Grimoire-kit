@@ -173,7 +173,7 @@ class TestPlanCopilotPrompts:
         """
         prompts_dir = temp_project / ".github" / "prompts"
         prompts_dir.mkdir(parents=True)
-        (prompts_dir / "grimoire-session-bootstrap.prompt.md").write_text("# Old version\n")
+        (prompts_dir / "grimoire-session-bootstrap.prompt.md").write_text("# Old version\n", encoding="utf-8")
 
         plan = ScaffoldPlan()
         scaffolder._plan_copilot_prompts(plan)
@@ -233,7 +233,7 @@ class TestPlanCopilotInstructions:
         """Instruction files follow the kit for the same reason prompts do."""
         instr_dir = temp_project / ".github" / "instructions"
         instr_dir.mkdir(parents=True)
-        (instr_dir / "grimoire-project.instructions.md").write_text("# Old version\n")
+        (instr_dir / "grimoire-project.instructions.md").write_text("# Old version\n", encoding="utf-8")
 
         plan = ScaffoldPlan()
         scaffolder._plan_copilot_instruction_files(plan)
@@ -309,11 +309,11 @@ class TestFullScaffoldPlan:
         """The full plan updates kit artifacts while sparing project-owned ones."""
         prompts_dir = temp_project / ".github" / "prompts"
         prompts_dir.mkdir(parents=True)
-        (prompts_dir / "grimoire-session-bootstrap.prompt.md").write_text("# Old\n")
+        (prompts_dir / "grimoire-session-bootstrap.prompt.md").write_text("# Old\n", encoding="utf-8")
 
         instructions_dir = temp_project / ".github" / "instructions"
         instructions_dir.mkdir(parents=True)
-        (instructions_dir / "grimoire-project.instructions.md").write_text("# Old\n")
+        (instructions_dir / "grimoire-project.instructions.md").write_text("# Old\n", encoding="utf-8")
 
         plan = scaffolder.plan()
 

@@ -108,8 +108,13 @@ def resolve_within_allowed(raw: str | Path | None, *extra: Path | str | None) ->
     resolved = os.path.realpath(requested)
     for root in allowed_roots(*extra):
         root_path = os.path.realpath(str(root))
-        if resolved == root_path or resolved.startswith(root_path + os.sep):
+        # Deux gardes distinctes, pas un ``or`` : l'analyse statique ne
+        # reconnaît comme assainissement que le ``startswith`` isolé, dont la
+        # branche vraie est la seule à laisser sortir le chemin.
+        if resolved.startswith(root_path + os.sep):
             return Path(resolved)
+        if resolved == root_path:
+            return Path(root_path)
     msg = f"chemin hors des racines autorisées : {resolved}"
     raise PermissionError(msg)
 
@@ -244,10 +249,22 @@ def slug_for_path(path: Path) -> str | None:
     return None
 
 
-def path_for_slug(slug: str) -> Path | None:
-    for p in load_registry():
-        if p.get("slug") == slug:
-            return Path(str(p.get("path", "")))
+def registered_root(*, slug: str = "", path: str = "") -> Path | None:
+    """Racine d'un projet connu du registre — et du registre seul.
+
+    Une valeur venue d'une requête (``slug`` ou ``path``) ne devient jamais un
+    chemin : elle sert de clé de recherche, et c'est le chemin *enregistré*
+    qui est rendu. ``None`` si aucune entrée ne correspond ou si le dossier a
+    disparu. Un ``path`` n'est comparé qu'en texte, sans toucher au disque.
+    """
+    wanted_path = path.strip()
+    wanted_slug = slug.strip()
+    for entry in load_registry():
+        by_slug = bool(wanted_slug) and entry.get("slug") == wanted_slug
+        by_path = bool(wanted_path) and entry.get("path") == wanted_path
+        if by_slug or by_path:
+            root = Path(str(entry.get("path", "")))
+            return root.resolve() if root.is_dir() else None
     return None
 
 

@@ -9,9 +9,7 @@
   <a href="https://pypi.org/project/grimoire-kit/"><img src="https://img.shields.io/pypi/v/grimoire-kit?style=for-the-badge&logo=pypi&logoColor=white&color=3775A9" alt="PyPI"></a>
   <a href="https://guilhem-bonnet.github.io/Grimoire-kit/"><img src="https://img.shields.io/badge/docs-online-8ca1ff?style=for-the-badge&logo=materialformkdocs&logoColor=white" alt="Docs"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-f0c674?style=for-the-badge" alt="License"></a>
-  <a href="#-tests"><img src="https://img.shields.io/badge/tests-5990+-58a6ff?style=for-the-badge&logo=pytest&logoColor=white" alt="Tests"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.12+-3572A5?style=for-the-badge&logo=python&logoColor=white" alt="Python"></a>
-  <a href="#-outils-cli"><img src="https://img.shields.io/badge/tools-46-c9a0ff?style=for-the-badge&logo=toolbox&logoColor=white" alt="Tools"></a>
   <a href="https://docs.astral.sh/ruff/"><img src="https://img.shields.io/badge/code%20style-ruff-c9a0ff?style=for-the-badge&logo=ruff&logoColor=white" alt="Ruff"></a>
   <a href="https://mypy-lang.org/"><img src="https://img.shields.io/badge/types-mypy%20strict-blue?style=for-the-badge&logo=python&logoColor=white" alt="Mypy"></a>
   <a href="https://codecov.io/gh/Guilhem-Bonnet/Grimoire-kit"><img src="https://img.shields.io/codecov/c/github/Guilhem-Bonnet/Grimoire-kit?style=for-the-badge&logo=codecov&logoColor=white" alt="Codecov"></a>
@@ -545,7 +543,7 @@ bash grimoire-init.sh --auto   # détecte le stack → choisit les bons agents
 
 ## <img src="docs/assets/icons/wrench.svg" width="28" height="28" alt=""> Outils CLI
 
-**46 outils Python** organisés par domaine. Tous accessibles via CLI et programmables en Python.
+**46 outils Python** organisés par domaine <!-- source: framework/tools ; recompute: ls framework/tools/*.py | wc -l -->. Tous accessibles via CLI et programmables en Python.
 
 <details>
 <summary><b><img src="docs/assets/icons/brain.svg" width="18" height="18" alt=""> Cognition & Mémoire</b> — 6 outils</summary>
@@ -653,7 +651,7 @@ Compatible avec tout IDE supportant le [Model Context Protocol](https://modelcon
 <tr>
 <td>
 
-**5 990+ tests** couvrant l'intégralité du framework :
+**La suite pytest** couvrant l'intégralité du framework (le nombre se recalcule : `python3 -m pytest tests/ --collect-only -q`) :
 
 ```bash
 # Tous les tests

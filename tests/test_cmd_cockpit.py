@@ -337,17 +337,18 @@ def test_api_dispatches_allowlisted_action(
 ) -> None:
     captured: dict[str, Any] = {}
 
-    def _fake_run(cmd: list[str], **kw: Any) -> _FakeProc:
-        captured["cmd"] = cmd
-        captured["cwd"] = kw.get("cwd")
-        return _FakeProc(0, stdout='{"backend": "qdrant"}')
+    def _fake_invoke(proot: Path, argv: list[str]) -> cmd_cockpit._CliResult:
+        captured["argv"] = argv
+        captured["proot"] = proot
+        return cmd_cockpit._CliResult(0, '{"backend": "qdrant"}', "")
 
-    monkeypatch.setattr(cmd_cockpit.subprocess, "run", _fake_run)
+    monkeypatch.setattr(cmd_cockpit, "_invoke_memory_cli", _fake_invoke)
     status, body = _post_api(api_server, {"action": "status", "project": "served"})
     assert status == 200
     assert body["ok"] is True
     assert "qdrant" in body["stdout"]
-    assert captured["cmd"][-3:] == ["memory", "status"] or "status" in captured["cmd"]
+    assert "status" in captured["argv"]
+    assert captured["proot"].name == "served"
 
 
 def test_api_rejects_unknown_action(api_server: int) -> None:
@@ -377,15 +378,15 @@ def test_api_mutation_requires_confirm(api_server: int, monkeypatch: pytest.Monk
 def test_api_gc_runs_with_confirm(api_server: int, monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, Any] = {}
 
-    def _fake_run(cmd: list[str], **kw: Any) -> _FakeProc:
-        captured["cmd"] = cmd
-        return _FakeProc(0, stdout='{"consolidated": 3}')
+    def _fake_invoke(proot: Path, argv: list[str]) -> cmd_cockpit._CliResult:
+        captured["argv"] = argv
+        return cmd_cockpit._CliResult(0, '{"consolidated": 3}', "")
 
-    monkeypatch.setattr(cmd_cockpit.subprocess, "run", _fake_run)
+    monkeypatch.setattr(cmd_cockpit, "_invoke_memory_cli", _fake_invoke)
     status, body = _post_api(api_server, {"action": "gc", "project": "served", "confirm": True})
     assert status == 200
     assert body["ok"] is True and body["mutation"] is True
-    assert captured["cmd"][-1] == "gc"
+    assert captured["argv"][-1] == "gc"
 
 
 def test_api_delete_requires_id(api_server: int, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -397,11 +398,11 @@ def test_api_delete_requires_id(api_server: int, monkeypatch: pytest.MonkeyPatch
 def test_api_delete_dispatches_id_with_yes(api_server: int, monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, Any] = {}
 
-    def _fake_run(cmd: list[str], **kw: Any) -> _FakeProc:
-        captured["cmd"] = cmd
-        return _FakeProc(0, stdout='{"deleted": true}')
+    def _fake_invoke(proot: Path, argv: list[str]) -> cmd_cockpit._CliResult:
+        captured["cmd"] = argv
+        return cmd_cockpit._CliResult(0, '{"deleted": true}', "")
 
-    monkeypatch.setattr(cmd_cockpit.subprocess, "run", _fake_run)
+    monkeypatch.setattr(cmd_cockpit, "_invoke_memory_cli", _fake_invoke)
     status, body = _post_api(
         api_server, {"action": "delete", "project": "served", "confirm": True, "id": "dec-03"}
     )
@@ -414,11 +415,11 @@ def test_api_delete_dispatches_id_with_yes(api_server: int, monkeypatch: pytest.
 def test_api_sync_maps_to_gate_with_confirm(api_server: int, monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, Any] = {}
 
-    def _fake_run(cmd: list[str], **kw: Any) -> _FakeProc:
-        captured["cmd"] = cmd
-        return _FakeProc(0, stdout='{"synced": true}')
+    def _fake_invoke(proot: Path, argv: list[str]) -> cmd_cockpit._CliResult:
+        captured["cmd"] = argv
+        return cmd_cockpit._CliResult(0, '{"synced": true}', "")
 
-    monkeypatch.setattr(cmd_cockpit.subprocess, "run", _fake_run)
+    monkeypatch.setattr(cmd_cockpit, "_invoke_memory_cli", _fake_invoke)
     status, body = _post_api(api_server, {"action": "sync", "project": "served", "confirm": True})
     assert status == 200
     assert body["ok"] is True and body["mutation"] is True
@@ -432,7 +433,8 @@ def test_api_sync_requires_confirm(api_server: int) -> None:
 
 def test_api_404_on_other_path(api_server: int) -> None:
     req = urllib.request.Request(
-        f"http://127.0.0.1:{api_server}/api/other", data=b"{}", method="POST"
+        f"http://127.0.0.1:{api_server}/api/other", data=b"{}", method="POST",
+        headers={"Content-Type": "application/json"},
     )
     try:
         urllib.request.urlopen(req, timeout=5)  # noqa: S310

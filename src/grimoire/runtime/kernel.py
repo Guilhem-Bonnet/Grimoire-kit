@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from grimoire.core.exceptions import GrimoireRuntimeError
+from grimoire.core.fsio import atomic_write, locked
 from grimoire.runtime.schemas import (
     DEFAULT_MAX_BUDGET,
     DEFAULT_MAX_TOOL_CALLS,
@@ -73,7 +74,10 @@ _WF_TRANSITIONS: dict[WorkflowStatus, frozenset[WorkflowStatus]] = {
         WorkflowStatus.ABORTED,
         WorkflowStatus.REFUSED,
     }),
-    WorkflowStatus.CHECKPOINTED: frozenset({WorkflowStatus.RUNNING, WorkflowStatus.ABORTED, WorkflowStatus.REFUSED}),
+    # CHECKPOINTED → PAUSED (K11) : la pause se pose à la frontière de node, node franchi et suivant pas encore ouvert.
+    WorkflowStatus.CHECKPOINTED: frozenset(
+        {WorkflowStatus.RUNNING, WorkflowStatus.PAUSED, WorkflowStatus.ABORTED, WorkflowStatus.REFUSED}
+    ),
     WorkflowStatus.PAUSED: frozenset({WorkflowStatus.RUNNING, WorkflowStatus.ABORTED, WorkflowStatus.REFUSED}),
     WorkflowStatus.BLOCKED: frozenset({WorkflowStatus.RUNNING, WorkflowStatus.ABORTED, WorkflowStatus.REFUSED}),
     WorkflowStatus.COMPLETED: frozenset({WorkflowStatus.VERIFIED}),
@@ -165,11 +169,22 @@ class RuntimeKernel:
         return instances
 
     def _save_instance(self, wfi: WorkflowInstance) -> None:
-        """Replace the serialized instance in the instances file."""
+        """Replace the serialized instance in the instances file.
+
+        Relecture, remplacement puis ré-écriture se font sous le verrou du
+        fichier (``fsio.locked``) et la ré-écriture est atomique
+        (``fsio.atomic_write``) : deux écrivains concurrents ne se perdent plus
+        l'un l'autre et un crash ne laisse jamais un fichier tronqué.
+        """
+        with locked(self._instances_path):
+            self._store_instance(wfi)
+
+    def _store_instance(self, wfi: WorkflowInstance) -> None:
+        """Corps de :meth:`_save_instance` ; l'appelant tient déjà le verrou."""
         instances = self._load_instances()
         instances[wfi.id] = wfi
         lines = [json.dumps(v.to_dict(), ensure_ascii=False) for v in instances.values()]
-        self._instances_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        atomic_write(self._instances_path, "\n".join(lines) + "\n")
 
     def _append_event(self, event: RunEvent) -> None:
         line = json.dumps(event.to_dict(), ensure_ascii=False) + "\n"
@@ -249,26 +264,29 @@ class RuntimeKernel:
         the module-level defaults are the "reasonable default" caps.
         """
         run_id = ctx.run_id or f"RUN-{uuid.uuid4().hex[:12]}"
-        instances = self._load_instances()
-        if wfi_id is None:
-            slug = _slug_for_recipe_id(recipe_id)
-            seq = sum(1 for k in instances if k.startswith(f"WFI-{slug}")) + 1
-            wfi_id = f"WFI-{slug}-{seq:03d}"
-        wfi = WorkflowInstance(
-            id=wfi_id,
-            recipe_id=recipe_id,
-            recipe_version=recipe_version,
-            mission_id=ctx.mission_id,
-            task_id=ctx.task_id,
-            run_id=run_id,
-            status=WorkflowStatus.CREATED,
-            host_id=ctx.host_id,
-            actor_id=ctx.actor_id,
-            created_at=_now_iso(),
-            max_tool_calls=max_tool_calls,
-            max_budget=max_budget,
-        )
-        self._save_instance(wfi)
+        # Le numéro de séquence est pris SOUS le verrou, dans la même section
+        # critique que l'écriture : sinon deux créations concurrentes lisent le
+        # même décompte, obtiennent le même identifiant et l'une écrase l'autre.
+        with locked(self._instances_path):
+            if wfi_id is None:
+                slug = _slug_for_recipe_id(recipe_id)
+                seq = sum(1 for k in self._load_instances() if k.startswith(f"WFI-{slug}")) + 1
+                wfi_id = f"WFI-{slug}-{seq:03d}"
+            wfi = WorkflowInstance(
+                id=wfi_id,
+                recipe_id=recipe_id,
+                recipe_version=recipe_version,
+                mission_id=ctx.mission_id,
+                task_id=ctx.task_id,
+                run_id=run_id,
+                status=WorkflowStatus.CREATED,
+                host_id=ctx.host_id,
+                actor_id=ctx.actor_id,
+                created_at=_now_iso(),
+                max_tool_calls=max_tool_calls,
+                max_budget=max_budget,
+            )
+            self._store_instance(wfi)
         return wfi
 
     def start(self, wfi_id: str, ctx: ExecutionContext) -> WorkflowInstance:
@@ -374,18 +392,35 @@ class RuntimeKernel:
             safe_to_resume=True,
             evidence_refs=tuple(evidence_refs or []),
         )
-        self._append_checkpoint(chk)
-        updated_refs = (*wfi.checkpoint_refs, chk.id)
-        wfi = self._transition(wfi, WorkflowStatus.CHECKPOINTED)
-        # Store the new checkpoint ref
-        wfi = WorkflowInstance.from_dict({**wfi.to_dict(), "checkpoint_refs": list(updated_refs)})
-        self._save_instance(wfi)
-        self._emit(RunEventType.CHECKPOINT_SAVED, wfi, ctx, payload={"checkpoint_id": chk.id, "step_id": step_id})
+        # W1-03b : un checkpoint est écrit en cinq temps (fichier de checkpoints,
+        # statut, références, deux événements) sans transaction commune. Rejouer
+        # cet appel pour le même step COMPLÈTE ce qui manque au lieu de le
+        # dupliquer : c'est ce qui rend sûre la reprise après un crash entre
+        # deux de ces écritures (voir ``FlowEngine._reconcile``).
+        already = any(c.id == chk.id for c in self.list_checkpoints(wfi_id))
+        if not already:
+            self._append_checkpoint(chk)
+        if not (already and wfi.status is WorkflowStatus.CHECKPOINTED):
+            wfi = self._transition(wfi, WorkflowStatus.CHECKPOINTED)
+        if chk.id not in wfi.checkpoint_refs:
+            # Store the new checkpoint ref
+            wfi = WorkflowInstance.from_dict({**wfi.to_dict(), "checkpoint_refs": [*wfi.checkpoint_refs, chk.id]})
+            self._save_instance(wfi)
+        have_saved = have_completed = False
+        if already:
+            for evt in self.get_run_events(wfi_id):
+                if evt.event_type is RunEventType.CHECKPOINT_SAVED and evt.payload.get("checkpoint_id") == chk.id:
+                    have_saved = True
+                elif evt.event_type is RunEventType.STEP_COMPLETED and evt.payload.get("step_id") == step_id:
+                    have_completed = True
+        if not have_saved:
+            self._emit(RunEventType.CHECKPOINT_SAVED, wfi, ctx, payload={"checkpoint_id": chk.id, "step_id": step_id})
         # Un checkpoint clôt toujours le step qu'il nomme : STEP_COMPLETED est
         # l'événement de step, CHECKPOINT_SAVED celui de persistance. Les deux
         # sont vrais en même temps, `missions/trace.py` ne lisait jusqu'ici
         # que le second faute d'un producteur pour le premier.
-        self._emit(RunEventType.STEP_COMPLETED, wfi, ctx, payload={"step_id": step_id})
+        if not have_completed:
+            self._emit(RunEventType.STEP_COMPLETED, wfi, ctx, payload={"step_id": step_id})
         return wfi, chk
 
     def resume_from_checkpoint(self, wfi_id: str, ctx: ExecutionContext) -> tuple[WorkflowInstance, Checkpoint | None]:
@@ -516,6 +551,15 @@ class RuntimeKernel:
         wfi = instances.get(wfi_id)
         if wfi is None:
             raise GrimoireRuntimeError(f"WorkflowInstance not found: {wfi_id}")
+        if wfi.status in (WorkflowStatus.COMPLETED, WorkflowStatus.VERIFIED):
+            # W1-03b : le statut est écrit avant l'événement ; un crash entre les
+            # deux laisse une instance terminée sans ``workflow.completed``.
+            # Rejouer ``complete`` ne refait que l'événement manquant.
+            if not any(
+                e.event_type is RunEventType.WORKFLOW_COMPLETED for e in self.get_run_events(wfi_id)
+            ):
+                self._emit(RunEventType.WORKFLOW_COMPLETED, wfi, ctx)
+            return wfi
         if wfi.status == WorkflowStatus.CHECKPOINTED:
             wfi = self._transition(wfi, WorkflowStatus.RUNNING)
         wfi = self._transition(wfi, WorkflowStatus.COMPLETED)
@@ -523,6 +567,30 @@ class RuntimeKernel:
             wfi = WorkflowInstance.from_dict({**wfi.to_dict(), "evidence_pack_id": evidence_pack_id})
             self._save_instance(wfi)
         self._emit(RunEventType.WORKFLOW_COMPLETED, wfi, ctx)
+        return wfi
+
+    def pause(self, wfi_id: str, ctx: ExecutionContext, *, reason: str = "") -> WorkflowInstance:
+        """Pose le run en ``PAUSED`` à une frontière de node (K11, plan §2.2) et le journalise (``workflow.paused``).
+
+        Légal depuis RUNNING et CHECKPOINTED (le node vient d'être franchi, le suivant n'est pas ouvert).
+        Le run n'avance plus tant que :meth:`unpause` ne l'a pas rouvert : ``advance_step`` refuse PAUSED.
+        """
+        instances = self._load_instances()
+        wfi = instances.get(wfi_id)
+        if wfi is None:
+            raise GrimoireRuntimeError(f"WorkflowInstance not found: {wfi_id}")
+        wfi = self._transition(wfi, WorkflowStatus.PAUSED)
+        self._emit(RunEventType.WORKFLOW_PAUSED, wfi, ctx, payload={"reason": reason})
+        return wfi
+
+    def unpause(self, wfi_id: str, ctx: ExecutionContext) -> WorkflowInstance:
+        """``PAUSED → RUNNING`` (``workflow.resumed``). Le node à ouvrir l'est ensuite par ``advance_step``."""
+        instances = self._load_instances()
+        wfi = instances.get(wfi_id)
+        if wfi is None:
+            raise GrimoireRuntimeError(f"WorkflowInstance not found: {wfi_id}")
+        wfi = self._transition(wfi, WorkflowStatus.RUNNING)
+        self._emit(RunEventType.WORKFLOW_RESUMED, wfi, ctx)
         return wfi
 
     def abort(self, wfi_id: str, ctx: ExecutionContext, *, reason: str = "") -> WorkflowInstance:
@@ -535,6 +603,32 @@ class RuntimeKernel:
         return wfi
 
     # ── Queries ─────────────────────────────────────────────────────────────
+
+    def export_instance(self, wfi_id: str) -> dict[str, Any]:
+        """L'instance, ses événements et ses checkpoints, en données sérialisables (W2-04)."""
+        wfi = self.get_instance(wfi_id)
+        if wfi is None:
+            raise GrimoireRuntimeError(f"WorkflowInstance not found: {wfi_id}")
+        return {
+            "instance": wfi.to_dict(),
+            "events": [e.to_dict() for e in self.get_run_events(wfi_id)],
+            "checkpoints": [c.to_dict() for c in self.list_checkpoints(wfi_id)],
+        }
+
+    def import_instance(self, data: dict[str, Any]) -> WorkflowInstance:
+        """Inverse de :meth:`export_instance` ; refuse une instance déjà présente (jamais d'écrasement)."""
+        wfi = WorkflowInstance.from_dict(data["instance"])
+        events = [RunEvent.from_dict(e) for e in data["events"]]
+        checkpoints = [Checkpoint.from_dict(c) for c in data["checkpoints"]]
+        with locked(self._instances_path):
+            if wfi.id in self._load_instances():
+                raise GrimoireRuntimeError(f"WorkflowInstance already exists: {wfi.id}")
+            for e in events:
+                self._append_event(e)
+            for c in checkpoints:
+                self._append_checkpoint(c)
+            self._store_instance(wfi)
+        return wfi
 
     def get_instance(self, wfi_id: str) -> WorkflowInstance | None:
         return self._load_instances().get(wfi_id)

@@ -422,13 +422,20 @@ def test_observer_sans_trace_rend_un_seul_bloc_vide_sans_erreur_console(workspac
 
 
 def test_memoire_montre_le_store_avant_l_architecture(workspace: Page) -> None:
+    # Un projet jamais sondé est « uninitialized » et n'offre que la Flotte : le
+    # test ne prouvait rien (ou échouait) selon l'ordre des autres tests. On
+    # sonde explicitement — le geste du bouton « Sonder la mémoire », qui ne
+    # touche que le cache de santé, aucune entrée — puis on recharge.
+    status = workspace.evaluate("() => fetch('/api/memory/status?probe=1').then(r => r.status)")
+    assert status == 200, f"sonde mémoire refusée : HTTP {status}"
+    workspace.reload(wait_until="domcontentloaded")
+    workspace.wait_for_selector("body[data-ready='1']", timeout=30_000)
     _goto(workspace, "memoire")
     workspace.wait_for_selector(".me-wrap, .empty")
     views = workspace.locator("#view-seg button")
-    if views.count():
-        labels = [views.nth(i).inner_text() for i in range(views.count())]
-        assert labels[0] == "Store", "le store est la vue par défaut, pas l'explication"
-        assert "Architecture" in labels
+    labels = [views.nth(i).inner_text() for i in range(views.count())]
+    assert labels[:1] == ["Store"], f"le store est la vue par défaut, pas l'explication (observé : {labels})"
+    assert "Architecture" in labels
 
 
 # ── Cockpit : écritures désactivées (spec §5, critère 8) ───────────────────

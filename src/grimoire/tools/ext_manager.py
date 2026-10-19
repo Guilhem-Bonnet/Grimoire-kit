@@ -218,7 +218,7 @@ def _run_script(
             "GRIMOIRE_EXT_DIR": str(ext_dir),
         },
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         check=False,
     )
     if result.returncode != 0:
@@ -276,7 +276,7 @@ def install_extension(
             result = subprocess.run(
                 [str(pip), "install", "--quiet", *step["packages"]],
                 capture_output=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
                 check=False,
             )
             if result.returncode != 0:
@@ -289,7 +289,7 @@ def install_extension(
             result = subprocess.run(
                 ["npm", "install", "--prefix", str(project_root), *step["packages"]],
                 capture_output=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
                 check=False,
             )
             if result.returncode != 0:
@@ -431,11 +431,18 @@ def publish_extension(ext_dir: Path, registry_dir: Path) -> dict[str, Any]:
 
 def validate_blueprint_file(bp_path: Path) -> tuple[dict[str, Any], list[str]]:
     """Validation structurelle légère d'un fichier .blueprint.json."""
-    errors: list[str] = []
     try:
         blueprint = json.loads(bp_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise ExtensionError(f"{bp_path} : illisible ({exc})") from exc
+    return blueprint, validate_blueprint_data(blueprint)
+
+
+def validate_blueprint_data(blueprint: Any) -> list[str]:
+    """Validation structurelle légère d'un blueprint déjà décodé (même contrôle que le fichier)."""
+    errors: list[str] = []
+    if not isinstance(blueprint, dict):
+        return [f"un blueprint est un objet JSON, pas {type(blueprint).__name__}"]
     if blueprint.get("blueprintVersion") != 1:
         errors.append(
             f"blueprintVersion non supporté : {blueprint.get('blueprintVersion')!r} "
@@ -456,7 +463,7 @@ def validate_blueprint_file(bp_path: Path) -> tuple[dict[str, Any], list[str]]:
             "edges absent (attendu : liste, éventuellement vide, d'objets "
             "{from, to, contract})"
         )
-    return blueprint, errors
+    return errors
 
 
 def publish_blueprint(bp_path: Path, registry_dir: Path) -> dict[str, Any]:

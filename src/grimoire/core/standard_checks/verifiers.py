@@ -31,6 +31,7 @@ from grimoire.core.standard_checks.base import (
     _require_keys,
     _text_file,
 )
+from grimoire.core.standard_checks.claim_ledger_verify import v0_non_governed
 from grimoire.core.standard_checks.claim_ledger_verify import verify_claim_ledger as _verify_claim_ledger
 from grimoire.core.standard_checks.controls import (
     _verify_acceptance_record,
@@ -63,16 +64,16 @@ from grimoire.core.standard_checks.controls import (
     _verify_workflow_state_manifest,
     _verify_workspace_isolation,
 )
+from grimoire.core.standard_checks.dispatch_cost_slo import _verify_dispatch_cost_slo
 from grimoire.core.standard_checks.pattern_codes import catalog_pattern_ids
+from grimoire.core.standard_checks.rules_check import verify_layered_rules
 from grimoire.core.standard_generation import (
     EVIDENCE_DIR,
     STANDARD_DIR,
     STANDARD_PROFILE_FILE,
-    TRACES_DIR,
     normalize_task_id,
 )
 from grimoire.providers.registry import SUPPORTED_CURRENCIES, SUPPORTED_MODEL_TIERS
-from grimoire.traces.ledger import TraceLedger
 
 
 def _verify_manifest(
@@ -336,133 +337,6 @@ def _verify_provider_registry(root: Path, profile: StandardProfile, result: Stan
             )
 
 
-#: Valeurs par défaut documentées de ``dispatch.cost_slo`` (issue #442, point
-#: 5 de l'audit de positionnement du 2026-09-12) quand `llm-provider-
-#: registry.yaml` ne déclare pas de clé ``dispatch_cost_slo``, ou en omet
-#: une : le contrôle reste actif sans configuration explicite plutôt que de
-#: se taire faute de réglage — un projet qui n'a jamais entendu parler de ce
-#: contrôle en bénéficie quand même, avec un seuil raisonnable.
-DEFAULT_MAX_COST_PER_RESOLVED_TASK_USD = 2.0
-DEFAULT_MIN_PASS_K_RATE = 0.8
-#: Nombre minimal de dispatchs résolus avant que le coût par tâche résolue ne
-#: soit jugé — en dessous, le signal est trop bruité pour un seuil fixe.
-DEFAULT_MIN_RESOLVED_OBSERVATIONS = 5
-#: Nombre minimal de séries pass^k (nodes rejoués au moins deux fois) avant
-#: que son taux ne soit jugé — dénominateur distinct de celui du coût : un
-#: projet peut avoir beaucoup de dispatchs résolus sans qu'aucun ne soit
-#: jamais rejoué.
-DEFAULT_MIN_PASS_K_OBSERVATIONS = 3
-
-
-def _dispatch_cost_slo_config(data: dict[str, Any]) -> dict[str, Any]:
-    """Résout la config ``dispatch_cost_slo`` déclarée, complétée par les défauts documentés."""
-
-    def _positive_number(value: Any, default: float) -> float:
-        return float(value) if isinstance(value, int | float) and not isinstance(value, bool) and value > 0 else default
-
-    def _positive_int(value: Any, default: int) -> int:
-        return int(value) if isinstance(value, int) and not isinstance(value, bool) and value > 0 else default
-
-    slo = data.get("dispatch_cost_slo")
-    slo = slo if isinstance(slo, dict) else {}
-    return {
-        "max_cost_per_resolved_task_usd": _positive_number(
-            slo.get("max_cost_per_resolved_task_usd"), DEFAULT_MAX_COST_PER_RESOLVED_TASK_USD
-        ),
-        "min_pass_k_rate": _positive_number(slo.get("min_pass_k_rate"), DEFAULT_MIN_PASS_K_RATE),
-        "min_resolved_observations": _positive_int(
-            slo.get("min_resolved_observations"), DEFAULT_MIN_RESOLVED_OBSERVATIONS
-        ),
-        "min_pass_k_observations": _positive_int(
-            slo.get("min_pass_k_observations"), DEFAULT_MIN_PASS_K_OBSERVATIONS
-        ),
-        "enforce": slo.get("enforce") is True,
-    }
-
-
-def _verify_dispatch_cost_slo(root: Path, result: StandardVerificationResult) -> None:
-    """``dispatch.cost_slo`` : coût par tâche résolue et pass^k, en continu (issue #442).
-
-    Point 5 de l'audit de positionnement du 2026-09-12 : le kit journalise
-    déjà chaque cascade (``dispatch.outcome``, voir
-    ``missions.dispatch._record_dispatch_outcome``) mais rien ne le lisait
-    depuis un gate avant ce contrôle — les campagnes d'évals manuelles (#308)
-    restaient le seul endroit où ce signal existait. Lit
-    ``TraceLedger.dispatch_outcome_stats`` (même agrégation que ``grimoire
-    dispatch stats``, jamais un second calcul) et compare au SLO déclaré
-    dans ``dispatch_cost_slo:`` de ``llm-provider-registry.yaml`` — l'artefact
-    du pattern ``provider-cost-slo`` — ou aux valeurs par défaut documentées
-    ci-dessus quand cette clé, ou l'une de ses sous-clés, est absente.
-
-    Skip entièrement si ``llm-provider-registry.yaml`` n'existe pas ou n'est
-    pas un mapping — même règle que tous les autres ``_verify_*`` de ce
-    module : sans artefact, rien à comparer.
-
-    Trois issues, jamais un ``error`` par défaut :
-
-    - ``info`` quand trop peu de données existent (moins de
-      ``min_resolved_observations`` dispatchs résolus pour le coût, moins de
-      ``min_pass_k_observations`` séries rejouées pour le pass^k) — chaque
-      métrique a son propre plancher de données, jugée indépendamment de
-      l'autre.
-    - ``warning`` quand le coût par tâche résolue dépasse le SLO, ou que le
-      pass^k mesuré est sous le seuil déclaré.
-    - ``error`` à la place du ``warning`` ci-dessus, uniquement quand le
-      projet déclare ``dispatch_cost_slo.enforce: true`` — un dépassement
-      silencieux par défaut, un gate dur seulement sur demande explicite.
-    """
-    rel_path = STANDARD_DIR / "llm-provider-registry.yaml"
-    data = _load_yaml_file(root, rel_path, result)
-    if not isinstance(data, dict):
-        return
-
-    config = _dispatch_cost_slo_config(data)
-    severity = "error" if config["enforce"] else "warning"
-    stats = TraceLedger(root / TRACES_DIR).dispatch_outcome_stats()
-
-    if stats.overall.resolved < config["min_resolved_observations"]:
-        _add_check(
-            result,
-            "dispatch.cost_slo",
-            "info",
-            f"Only {stats.overall.resolved} resolved dispatch(es) observed "
-            f"(< {config['min_resolved_observations']}) — cost per resolved task is not judged yet.",
-            path=rel_path,
-        )
-    else:
-        cost = stats.overall.cost_per_resolved_task_usd
-        max_cost = config["max_cost_per_resolved_task_usd"]
-        if cost is not None and cost > max_cost:
-            _add_check(
-                result,
-                "dispatch.cost_slo",
-                severity,
-                f"Cost per resolved task (${cost:.4f}) exceeds the declared SLO (${max_cost:.4f}).",
-                path=rel_path,
-            )
-
-    if stats.pass_k_observations < config["min_pass_k_observations"]:
-        _add_check(
-            result,
-            "dispatch.cost_slo",
-            "info",
-            f"Only {stats.pass_k_observations} replayed dispatch series observed "
-            f"(< {config['min_pass_k_observations']}) — pass^k is not judged yet.",
-            path=rel_path,
-        )
-    else:
-        rate = stats.pass_k_rate
-        min_rate = config["min_pass_k_rate"]
-        if rate is not None and rate < min_rate:
-            _add_check(
-                result,
-                "dispatch.cost_slo",
-                severity,
-                f"pass^k ({rate:.0%}) is below the declared reliability SLO ({min_rate:.0%}).",
-                path=rel_path,
-            )
-
-
 def _verify_cadrage(root: Path, result: StandardVerificationResult) -> None:
     """Cadrage produit (B4, issue #173) — gate de complétude visible du standard.
 
@@ -692,17 +566,32 @@ def _has_pending_gate(text: str) -> bool:
     return False
 
 
+def _verify_guard_errors(root: Path, task_id: str, result: StandardVerificationResult) -> None:
+    """W1-06 : une garde tombée en panne (``guard.error``) est dite, jamais muette."""
+    from grimoire.core.standard_checks.evidence_journal import describe_guard_errors
+
+    message = describe_guard_errors(root, task_id)
+    if message:
+        _add_check(result, "guard.error_recorded", "warning", message)
+    from grimoire.hosts.decisions.gate_override import describe_consumed_overrides  # W2-06
+    if overrides := describe_consumed_overrides(root, task_id):
+        _add_check(result, "policy.override_consumed", "warning", overrides)
+
+
 def _verify_evidence_pack(root: Path, task_id: str, result: StandardVerificationResult) -> None:
     # Issue #582 lot G2 : le journal observé par les hooks compte comme
     # preuve d'inventaire (garde fermée : absent/illisible = rien observé,
     # voir evidence_journal). Lecture seule à dessein — cette fonction sert
     # aussi `grimoire_standard_verify`/`_audit` (MCP `readOnlyHint`) ; seule
     # `check_evidence_gates` projette (écrit) la section « Inventaire
-    # observé ». Toujours un avertissement, jamais une erreur (transition
-    # douce, comme le reste de cette fonction).
+    # observé ». Avertissements (transition douce), sauf une chaîne de journal
+    # rompue (W4-03), qui est une erreur.
+    from grimoire.core.standard_checks.evidence_chain import verify_evidence_chain
     from grimoire.core.standard_checks.evidence_journal import has_observed_inventory
 
     observed = has_observed_inventory(root, task_id)
+    _verify_guard_errors(root, task_id, result)
+    verify_evidence_chain(root, task_id, result)
     rel_path = EVIDENCE_DIR / task_id / "evidence-pack.md"
     text = _text_file(root, rel_path)
     if not text:
@@ -1407,7 +1296,7 @@ def _verify_pattern_catalog_ref(pattern: dict[str, Any], rel_path: Path, result:
         return
     try:
         catalog_ids = catalog_pattern_ids()
-    except (OSError, ValueError):
+    except (OSError, ValueError):  # silent-ok — catalogue injoignable : dégradation voulue (commentaire)
         # Bundled catalogue unreachable in this environment — degrade silently
         # rather than fail a check the project artifact itself did not cause.
         return
@@ -1437,7 +1326,7 @@ def run_verifiers(root: Path, profile: StandardProfile, task_id: str, result: St
     _verify_knowledge_registry(root, profile, result)
     _verify_task_envelope(root, profile, task_id, result)
     _verify_evidence_pack(root, task_id, result)
-    _verify_claim_ledger(root, profile, task_id, result)
+    _verify_claim_ledger(root, profile, task_id, result, suppress_v0=v0_non_governed(root, profile, task_id))
     _verify_acceptance_record(root, profile, task_id, result)
     _verify_compliance_declaration(root, result)
     _verify_compliance_traceability(root, profile, result)
@@ -1447,6 +1336,7 @@ def run_verifiers(root: Path, profile: StandardProfile, task_id: str, result: St
     _verify_context_contract(root, result)
     _verify_decision_graph(root, result)
     _verify_rule_packs(root, result)
+    verify_layered_rules(root, result)
     _verify_hook_registry(root, result)
     _verify_runtime_surface_registry(root, profile, result)
     _verify_retention_registry(root, profile, result)

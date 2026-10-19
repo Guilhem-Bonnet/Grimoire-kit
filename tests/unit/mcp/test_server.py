@@ -85,8 +85,8 @@ def project(tmp_path: Path) -> Path:
         "memory:\n"
         "  backend: local\n"
         "agents:\n"
-        "  archetype: minimal\n"
-    )
+        "  archetype: minimal\n",
+    encoding="utf-8",)
     (tmp_path / "_grimoire" / "_memory").mkdir(parents=True)
     (tmp_path / "_grimoire-output").mkdir()
     return tmp_path
@@ -193,14 +193,14 @@ class TestStatus:
 
     def test_partial(self, tmp_path: Path) -> None:
         # Config exists but dirs missing
-        (tmp_path / "project-context.yaml").write_text("project:\n  name: partial\n")
+        (tmp_path / "project-context.yaml").write_text("project:\n  name: partial\n", encoding="utf-8")
         result = grimoire_status(str(tmp_path))
         data = _json(result)
         assert data["passed"] < data["total"]
 
     def test_invalid_config(self, tmp_path: Path) -> None:
         # Config exists but is invalid YAML structure (missing required fields)
-        (tmp_path / "project-context.yaml").write_text("not_a_valid: config\n")
+        (tmp_path / "project-context.yaml").write_text("not_a_valid: config\n", encoding="utf-8")
         (tmp_path / "_grimoire" / "_memory").mkdir(parents=True)
         (tmp_path / "_grimoire-output").mkdir()
         result = grimoire_status(str(tmp_path))
@@ -272,7 +272,7 @@ class TestConfig:
         assert "error" in data
 
     def test_malformed_yaml(self, tmp_path: Path) -> None:
-        (tmp_path / "project-context.yaml").write_text(": :\n  invalid yaml:: {{{\n")
+        (tmp_path / "project-context.yaml").write_text(": :\n  invalid yaml:: {{{\n", encoding="utf-8")
         result = grimoire_config(str(tmp_path))
         data = _json(result)
         assert "error" in data
@@ -440,6 +440,15 @@ class TestStandardScore:
         if not output_path.is_absolute():
             output_path = standard_project / output_path
         assert output_path.is_file()
+
+    def test_score_reports_enforced_and_advisory_rules_separately(self, standard_project: Path) -> None:
+        from grimoire.core.layered_rules import add_rule
+
+        add_rule(standard_project, "project", "NEVER use bare-except")
+        add_rule(standard_project, "project", "ALWAYS prefer pathlib")
+        data = _json(grimoire_standard_score(str(standard_project)))
+        assert data["rules_enforced"] == 1
+        assert data["rules_advisory"] == 1
 
     def test_empty_project_returns_result_or_error(self, tmp_path: Path) -> None:
         result = grimoire_standard_score(str(tmp_path))
@@ -734,8 +743,10 @@ class TestReadOnlyToolsWriteNothing:
         "grimoire_memory_search": {"query": "quoi que ce soit"},
         "grimoire_standard_verify": {},
         "grimoire_standard_audit": {},
+        "grimoire_codegraph_freshness": {},
         "task_list_ready": {},
         "task_show": {"task_id": "bootstrap"},
+        "task_waves": {},
         "task_recall": {"task_id": "bootstrap"},
         "grimoire_host_status": {},
         "grimoire_providers_status": {},

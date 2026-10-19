@@ -54,7 +54,10 @@ class RuleState:
     writes: int = 0
     cost_usd: float = 0.0
     approved: bool = False
-    """Set the first time a ``require_approval`` rule matched and asked."""
+    """Au moins une action a été approuvée (``approved_fingerprints`` non vide)."""
+    approved_fingerprints: list[str] = field(default_factory=list)
+    """Empreintes (voir ``temporal.action_fingerprint``) des actions réellement
+    exécutées après un ``ask`` : l'approbation porte sur l'action, pas sur la règle."""
     hits: list[str] = field(default_factory=list)
     """ISO timestamps of past matches, kept for :class:`CooldownRule` windows."""
 
@@ -64,6 +67,7 @@ class RuleState:
             "writes": self.writes,
             "cost_usd": self.cost_usd,
             "approved": self.approved,
+            "approved_fingerprints": list(self.approved_fingerprints),
             "hits": list(self.hits),
         }
 
@@ -74,6 +78,7 @@ class RuleState:
             writes=int(d.get("writes", 0)) if isinstance(d.get("writes"), int | float) else 0,
             cost_usd=float(d.get("cost_usd", 0.0)) if isinstance(d.get("cost_usd"), int | float) else 0.0,
             approved=bool(d.get("approved", False)),
+            approved_fingerprints=[str(f) for f in d.get("approved_fingerprints", []) if isinstance(f, str)],
             hits=[str(h) for h in d.get("hits", []) if isinstance(h, str)],
         )
 
@@ -91,11 +96,26 @@ class SessionState:
     #: posée par le hook ``UserPromptSubmit`` dès que la tâche résolue n'est
     #: plus ``bootstrap``. ``""`` = aucune tâche connue pour cette session.
     task_id: str = ""
+    #: L'epoch du bail que cette session tient sur ``task_id`` (K3, issue #768), posé
+    #: quand la session se rattache au claim. C'est ce que le frein ``PreToolUse``
+    #: compare au fichier de bail : une session reprise ailleurs garde son ancien
+    #: epoch et se reconnaît périmée. ``0`` = aucun bail connu, donc aucun frein.
+    lease_epoch: int = 0
+    #: Travail hors tâche constaté au ``Stop`` (``session.unattached_work``, K3) :
+    #: ``{"mutations": n, "files": [...], "at": iso}``, ``{}`` s'il n'y en a pas.
+    unattached_work: dict[str, Any] = field(default_factory=dict)
     #: Nombre d'actions d'écriture observées par ``PostToolUse`` dans cette
     #: session (fichier écrit ou édité, commande Bash non lecture seule) —
     #: jamais leur contenu. C'est ce que ``Stop`` lit pour distinguer une
     #: session qui a travaillé hors tâche d'une session qui n'a fait que lire.
     mutations: int = 0
+    #: Approbations en attente, par identifiant d'appel d'outil de l'hôte :
+    #: ``{"fingerprint": ..., "rules": [...]}`` posé au PreToolUse, repris au
+    #: PostToolUse (W1-09). Le PostToolUse peut recevoir une entrée réécrite par
+    #: un hook (``git status`` -> ``rtk git status``) : recalculer l'empreinte
+    #: depuis elle approuverait une autre action. Ni commande ni argument ici,
+    #: seulement l'empreinte (un hachage) et des identifiants de règles.
+    pending_approvals: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def rule_state(self, rule_id: str) -> RuleState:
         return self.rules.setdefault(rule_id, RuleState())
@@ -108,7 +128,10 @@ class SessionState:
             "updated_at": self.updated_at,
             "rules": {rule_id: state.to_dict() for rule_id, state in self.rules.items()},
             "task_id": self.task_id,
+            "lease_epoch": self.lease_epoch,
+            "unattached_work": dict(self.unattached_work),
             "mutations": self.mutations,
+            "pending_approvals": {key: dict(value) for key, value in self.pending_approvals.items()},
         }
 
     @classmethod
@@ -120,18 +143,37 @@ class SessionState:
             if isinstance(state, dict)
         } if isinstance(rules_raw, dict) else {}
         mutations = d.get("mutations", 0)
+        pending_raw = d.get("pending_approvals", {})
+        pending: dict[str, dict[str, Any]] = {}
+        if isinstance(pending_raw, dict):
+            for key, entry in pending_raw.items():
+                if not isinstance(entry, dict) or not isinstance(entry.get("fingerprint"), str):
+                    continue
+                rule_ids = entry.get("rules", [])
+                pending[str(key)] = {
+                    "fingerprint": entry["fingerprint"],
+                    "rules": [str(r) for r in rule_ids if isinstance(r, str)] if isinstance(rule_ids, list) else [],
+                }
         return cls(
             session_id=session_id,
             started_at=str(d.get("started_at") or started_at),
             updated_at=str(d.get("updated_at", "")),
             rules=rules,
             task_id=str(d.get("task_id", "") or ""),
+            lease_epoch=_epoch_of(d.get("lease_epoch")),
+            unattached_work=dict(d["unattached_work"]) if isinstance(d.get("unattached_work"), dict) else {},
             mutations=int(mutations) if isinstance(mutations, int | float) and not isinstance(mutations, bool) else 0,
+            pending_approvals=pending,
         )
 
     @classmethod
     def new(cls, session_id: str, started_at: str) -> SessionState:
         return cls(session_id=session_id, started_at=started_at, updated_at=started_at)
+
+
+def _epoch_of(value: Any) -> int:
+    """Un epoch lu du journal : entier >= 0, sinon ``0`` (illisible = aucun bail connu)."""
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
 
 
 def load_session_state(project_root: Path, session_id: str, *, now_iso: str) -> SessionState:
@@ -200,24 +242,44 @@ def note_session_mutation(project_root: Path, session_id: str, *, task_id: str, 
     state = load_session_state(project_root, session_id, now_iso=now_iso)
     state.mutations += 1
     if task_id and task_id != "bootstrap":
+        if state.task_id != task_id:
+            state.lease_epoch = 0  # l'epoch tenu portait une autre tâche
         state.task_id = task_id
     save_session_state(project_root, state, now_iso=now_iso)
 
 
-def note_session_task(project_root: Path, session_id: str, task_id: str, *, now_iso: str) -> bool:
+def note_session_task(
+    project_root: Path, session_id: str, task_id: str, *, now_iso: str, lease_epoch: int | None = None
+) -> bool:
     """Pose *task_id* sur le journal de *session_id* — ``True`` si le fichier a changé.
 
     ``bootstrap`` n'est pas une tâche : il n'est jamais écrit, et un journal
     qui portait déjà cette tâche n'est pas réécrit.
+
+    *lease_epoch* (K3) : l'epoch que la session tient sur la tâche. Une tâche
+    différente de celle du journal repart sans epoch tant qu'on n'en donne pas.
     """
     if not session_id or not task_id or task_id == "bootstrap":
         return False
     state = load_session_state(project_root, session_id, now_iso=now_iso)
-    if state.task_id == task_id:
+    wanted = _epoch_of(lease_epoch) if lease_epoch is not None else (state.lease_epoch if state.task_id == task_id else 0)
+    if state.task_id == task_id and state.lease_epoch == wanted:
         return False
     state.task_id = task_id
+    state.lease_epoch = wanted
     save_session_state(project_root, state, now_iso=now_iso)
     return True
+
+
+def note_unattached_work(
+    project_root: Path, session_id: str, *, mutations: int, files: tuple[str, ...], now_iso: str
+) -> None:
+    """Journalise ``session.unattached_work{files, mutations}`` (K3) : écrit sans tâche, constaté au ``Stop``."""
+    if not session_id:
+        return
+    state = load_session_state(project_root, session_id, now_iso=now_iso)
+    state.unattached_work = {"mutations": mutations, "files": list(files), "at": now_iso}
+    save_session_state(project_root, state, now_iso=now_iso)
 
 
 def session_mutations(project_root: Path, session_id: str) -> int:

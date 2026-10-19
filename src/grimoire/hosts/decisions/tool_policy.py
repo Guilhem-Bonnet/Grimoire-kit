@@ -12,13 +12,14 @@ from __future__ import annotations
 import os
 import uuid
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import TYPE_CHECKING
 
-from grimoire.core.standard_state import active_profile_id, active_task_id
+from grimoire.core.standard_state import active_profile_id, active_task_id, profile_floor_id, state_writes_allowed
 from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
+from grimoire.hosts.decisions.profile_floor import session_profile
 from grimoire.hosts.decisions.tool_facts import (
     ToolFacts,
+    approval_fingerprint,
     classify_tool,
     command_surface,
     extract_c_bodies,
@@ -44,8 +45,8 @@ if TYPE_CHECKING:
 _RISK_BY_PROFILE = {"starter": "light", "governed": "standard", "production": "strict"}
 
 
-def _risk_profile(project_root: Path) -> str:
-    return _RISK_BY_PROFILE.get(active_profile_id(project_root), "light")
+def _risk_profile(hook: HookInput) -> str:
+    return _RISK_BY_PROFILE.get(session_profile(hook, journal=False), "light")
 
 
 #: The engine's built-in ``no-destructive-without-strict`` rule blocks
@@ -113,18 +114,32 @@ def _evaluate_temporal_layer(
         return VerdictKind.ALLOW, "", []
 
     from grimoire.policies.session_state import load_session_state, save_session_state
-    from grimoire.policies.temporal import evaluate_temporal
+    from grimoire.policies.temporal import evaluate_temporal, remember_pending_approval
 
     now = datetime.now(UTC)
     now_iso = now.isoformat()
     state = load_session_state(hook.project_root, hook.session_id, now_iso=now_iso)
+    tool_name = hook.tool_name or "unknown"
+    tool_detail = policy_tool_detail(facts)
+    fingerprint = approval_fingerprint(tool_name, hook.tool_input, facts)
     decision = evaluate_temporal(
         temporal_rules,
         state,
-        tool_name=hook.tool_name or "unknown",
-        tool_detail=policy_tool_detail(facts),
+        tool_name=tool_name,
+        tool_detail=tool_detail,
         is_write=facts.mutation is not MutationClass.READ_ONLY,
         now=now,
+        fingerprint=fingerprint,
+    )
+    # Un hook peut réécrire l'entrée avant l'exécution : le PostToolUse reprend
+    # l'empreinte d'ici par `tool_use_id` au lieu de la recalculer (W1-09).
+    remember_pending_approval(
+        temporal_rules,
+        decision.state,
+        tool_use_id=hook.tool_use_id,
+        tool_name=tool_name,
+        tool_detail=tool_detail,
+        fingerprint=fingerprint,
     )
     save_session_state(hook.project_root, decision.state, now_iso=now_iso)
     return decision.verdict, decision.reason, [rule.rule_id for rule in decision.matched_rules]
@@ -197,6 +212,8 @@ def _profile_downgrade_check(hook: HookInput, facts: ToolFacts) -> Decision | No
     downgrade is legitimate (a project winding down, an experiment scoped
     back) is a human call the standard has no way to make for itself.
     """
+    if facts.profile_floor_write is not None:
+        return _floor_write_check(hook, facts.profile_floor_write)
     if facts.standard_profile_write is None:
         return None
 
@@ -230,6 +247,89 @@ def _profile_downgrade_check(hook: HookInput, facts: ToolFacts) -> Decision | No
     return None
 
 
+def _floor_write_check(hook: HookInput, proposed: str) -> Decision | None:
+    """W2-07 : écrire ``profile-floor.yaml`` ne baisse ni ne retire le plancher sans question.
+
+    Créer un plancher ou le relever ne dit rien. Le baisser, le retirer, ou une
+    commande dont on ne lit pas le résultat : ``ask``. Le plancher est
+    committé, mais un ``git commit`` n'est pas une décision humaine ; la
+    question l'est.
+    """
+    from grimoire.core.standard_generation import PROFILE_LADDER
+
+    current = profile_floor_id(hook.project_root)
+    if proposed in PROFILE_LADDER and (not current or PROFILE_LADDER.index(proposed) >= PROFILE_LADDER.index(current)):
+        return None
+    shown = f"« {proposed} »" if proposed else "illisible depuis la commande"
+    return Decision(
+        outcome=Outcome.ASK,
+        reason=(
+            "[Grimoire policy] Cette écriture touche le plancher de profil "
+            f"(_grimoire/standard/profile-floor.yaml, plancher actuel : « {current or 'aucun'} », proposé : {shown}). "
+            "Le plancher est ce qu'aucun profil déclaré ne peut passer sous ; l'abaisser ou le retirer "
+            "relâche tous les seuils de gouvernance. Pour un besoin d'une session, tape plutôt "
+            "`Lower Profile <profil>: <raison>`. Confirme si l'abaissement du plancher est voulu."
+        ),
+        detail={"tool": hook.tool_name, "current_floor": current, "proposed_floor": proposed},
+    )
+
+
+#: Profils où une garde d'autorité en erreur refuse (fail-closed) et où les
+#: vecteurs ``governed_only`` de :mod:`.authority_guard` comptent.
+_AUTHORITY_PROFILES = frozenset({"governed", "production"})
+
+
+def _authority_guard(hook: HookInput, facts: ToolFacts) -> Decision | None:
+    """W2-01 : refuse ce qui fabriquerait la preuve d'un tour humain (:mod:`.authority_guard`).
+
+    Évaluée avant tout le reste, même sur un appel classé en lecture seule :
+    un ``echo >>`` vers le journal des tours n'a pas à attendre le moteur de
+    règles pour être refusé. Une exception ici ne devient jamais un ``allow`` :
+    refus en governed et production (profil illisible compris), question
+    ailleurs — c'est le cas de panne que W2-08 rejoue.
+    """
+    limit = "Limite : une garde de chemin se contourne par du code arbitraire."
+    try:
+        from grimoire.hosts.decisions.authority_guard import LIMIT_NOTE, forgery_vector
+
+        limit = LIMIT_NOTE
+
+        vector = forgery_vector(facts)
+        if vector is None:
+            return None
+        profile = session_profile(hook, journal=False)
+        if vector.governed_only and profile not in _AUTHORITY_PROFILES:
+            return None
+        why = (
+            "L'instantané du ledger est un cache dérivé du journal, restauré sans rejouer le préfixe qu'il couvre : "
+            "écrit à la main, il imposerait un état que le journal ne dit pas. Il ne s'écrit que par le ledger."
+            if vector.code == "ledger-snapshot"
+            else "Le journal des tours humains et les challenges de checkpoint ne s'écrivent que par "
+            "le hook de l'hôte : c'est la preuve qu'un humain a décidé."
+        )
+        return Decision(
+            outcome=Outcome.DENY,
+            reason=f"[Grimoire authority] {hook.tool_name or 'action'} refusé — {vector.what}. {why} {limit}",
+            detail={"tool": hook.tool_name, "authority_vector": vector.code, "profile": profile},
+        )
+    except Exception as exc:
+        try:
+            profile = session_profile(hook, journal=False)
+        except Exception:
+            profile = "governed"
+        cause = f"{type(exc).__name__}: {exc}"
+        outcome = Outcome.DENY if profile in _AUTHORITY_PROFILES else Outcome.ASK
+        return Decision(
+            outcome=outcome,
+            reason=(
+                f"[Grimoire authority] garde d'autorité en erreur ({cause}) : "
+                f"{'refus par défaut en profil ' + profile if outcome is Outcome.DENY else 'à toi de décider'}. "
+                f"{limit}"
+            ),
+            detail={"tool": hook.tool_name, "authority_vector": "guard-error", "error": cause, "profile": profile},
+        )
+
+
 def decide_tool_policy(hook: HookInput) -> Decision:
     """Pre tool use: run the pending call through the policy engine.
 
@@ -247,7 +347,7 @@ def decide_tool_policy(hook: HookInput) -> Decision:
     behaves exactly as it did before this change.
     """
     decision = _evaluate_tool_policy(hook)
-    if decision.outcome is not Outcome.ALLOW:
+    if decision.outcome is not Outcome.ALLOW and state_writes_allowed():
         _record_hold(hook, decision)
     return decision
 
@@ -273,7 +373,7 @@ def _record_hold(hook: HookInput, decision: Decision) -> None:
         record_policy_hold(
             hook.project_root,
             session_id=hook.session_id,
-            task_id=active_task_id(hook.project_root),
+            task_id=str(decision.detail.get("task_id") or active_task_id(hook.project_root)),
             hook_id="grimoire.tool-policy",
             reason=f"tool_policy:{decision.outcome.value}",
             fingerprint=action_fingerprint(tool_name, detail),
@@ -289,6 +389,23 @@ def _evaluate_tool_policy(hook: HookInput) -> Decision:
     sites.
     """
     facts = classify_tool(hook.tool_name, hook.tool_input)
+    forged = _authority_guard(hook, facts)
+    if forged is not None:
+        return forged
+    # K3 (issue #768) : une session qui ne tient plus son bail n'écrit plus, quel que soit
+    # le profil — le frein précède le moteur de règles, comme la garde d'autorité.
+    from grimoire.hosts.decisions.lease_brake import lease_brake
+
+    braked = lease_brake(hook, facts)
+    if braked is not None:
+        return braked
+    # K11 : un `hold` refuse les outils mutants d'une session qui tient une tâche, sauf son point de
+    # reprise ; `drain`, hôte sans frein et drapeau illisible ne refusent rien (voir pause_brake).
+    from grimoire.hosts.decisions.pause_brake import pause_brake
+
+    paused = pause_brake(hook, facts)
+    if paused is not None:
+        return paused
     custom_rules = load_custom_rules(hook.project_root)
     # A temporal rule (require_approval/per_session/cooldown_after) commonly
     # leaves action_kinds/mutation_classes/risk_profiles empty — it has no
@@ -304,8 +421,12 @@ def _evaluate_tool_policy(hook: HookInput) -> Decision:
     if read_only and not has_temporal_rules:
         return _untrusted_escalation(hook, facts) or Decision()
 
-    task_id = active_task_id(hook.project_root, session_id=hook.session_id)
-    risk = _risk_profile(hook.project_root)
+    # K13 : la tâche d'une session qui tient son bail se lit dans son fichier de bail ; le ledger
+    # n'est rejoué que pour une session sans bail noté (PreToolUse p95 ≤ 50 ms, D21).
+    from grimoire.hosts.decisions.lease_brake import held_task_id
+
+    task_id = held_task_id(hook) or active_task_id(hook.project_root, session_id=hook.session_id)
+    risk = _risk_profile(hook)
     base_verdict = (
         _engine(base_rules).evaluate(_policy_request(hook, facts, task_id, risk))
         if not read_only
@@ -323,6 +444,9 @@ def _evaluate_tool_policy(hook: HookInput) -> Decision:
 
     detail = {
         "tool": hook.tool_name,
+        # Gardée dans le détail : la trace du gateway et le journal des holds la reprennent
+        # au lieu de la résoudre une deuxième fois, ledger rejoué à chaque fois.
+        "task_id": task_id,
         "family": facts.family,
         "mutation": facts.mutation.value,
         "risk_profile": risk,

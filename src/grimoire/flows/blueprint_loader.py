@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import re
 import shlex
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -33,8 +34,10 @@ __all__ = [
     "build_node_contracts",
     "hardcoded_command_warnings",
     "load_blueprint",
+    "ready_nodes",
     "resolve_composite_ref",
     "topo_order",
+    "topo_waves",
     "validate_flow_composition",
 ]
 
@@ -192,6 +195,12 @@ def _validate_genre_config(node: dict[str, Any]) -> None:
                 f"node={node_id} : config.verifyPanel.angles doit être une liste de {k} chaînes non vides "
                 "— un angle distinct par vérificateur, jamais moins que k"
             )
+        panel_class = vp.get("class")
+        if panel_class is not None and panel_class not in ("V1", "V2"):
+            raise GrimoireRuntimeError(
+                f"node={node_id} : config.verifyPanel.class doit valoir V1 (majorité des votes exprimés) "
+                f"ou V2 (unanimité), trouvé {panel_class!r}"
+            )
     elif kind == "loop-until-dry":
         lud = config.get("loopUntilDry") or {}
         if not _require_positive_int(lud.get("maxRounds"), minimum=1):
@@ -225,6 +234,31 @@ def _validate_genre_config(node: dict[str, Any]) -> None:
             raise GrimoireRuntimeError(
                 f"node={node_id} : config.budget.passes doit être une liste non vide de refs "
                 "(chacune résolue comme la ref d'un node composite)"
+            )
+    elif kind == "checkpoint":
+        # W2-01 : `config.checkpoint.destructive` (optionnel) refuse toute
+        # décision non attestée. Un booléen strict : `"yes"` ou `1` n'y
+        # passent pas pour un `true` que personne n'a écrit.
+        c = config.get("checkpoint") or {}
+        if not isinstance(c, dict) or ("destructive" in c and not isinstance(c["destructive"], bool)):
+            raise GrimoireRuntimeError(
+                f"node={node_id} : config.checkpoint.destructive doit être un booléen (true/false)"
+            )
+        # W2-10 : `max_amendments` (optionnel) = amendements requis avant
+        # `accept_as_is`. Un entier ≥ 1 strict : `"3"`, `true` ou 0 (qui
+        # rendrait l'acceptation en l'état immédiate) sont refusés.
+        cap = c.get("max_amendments")
+        if "max_amendments" in c and (not isinstance(cap, int) or isinstance(cap, bool) or cap < 1):
+            raise GrimoireRuntimeError(
+                f"node={node_id} : config.checkpoint.max_amendments doit être un entier >= 1"
+            )
+        # W2-11 : `plan` (optionnel) = fournisseur de la liste projetée à
+        # laquelle la décision est liée. Un nom connu, jamais deviné.
+        from grimoire.flows.attestation import PLAN_PROVIDERS
+
+        if "plan" in c and c["plan"] not in PLAN_PROVIDERS:
+            raise GrimoireRuntimeError(
+                f"node={node_id} : config.checkpoint.plan doit être l'un de {list(PLAN_PROVIDERS)} (reçu {c['plan']!r})"
             )
     # "fanout" : aucune clé de config obligatoire — le plafond du nombre
     # d'éléments (pilot.max_fanout_n) est une politique de projet, vérifiée à
@@ -273,34 +307,65 @@ def validate_flow_composition(
             load_blueprint(sub_path, project_root, new_chain)
 
 
-def topo_order(blueprint: dict[str, Any]) -> list[str]:
-    """Ordre d'exécution des nodes, dérivé des ``edges`` (Kahn, déterministe).
-
-    Déterministe : à dépendances égales, les nodes prêts sont pris dans
-    l'ordre alphabétique de leur id, pas dans l'ordre d'apparition dans le
-    fichier — deux lectures du même blueprint rendent le même ordre.
-    """
-    nodes = [n["id"] for n in blueprint["nodes"]]
+def _node_deps(blueprint: dict[str, Any]) -> dict[str, set[str]]:
+    """Les prédécesseurs directs de chaque node, lus dans les ``edges``."""
     node_by_pin: dict[str, str] = {}
     for n in blueprint["nodes"]:
         for p in n.get("pins", []):
             node_by_pin[f"{n['id']}.{p['id']}"] = n["id"]
-    deps: dict[str, set[str]] = {nid: set() for nid in nodes}
+    deps: dict[str, set[str]] = {n["id"]: set() for n in blueprint["nodes"]}
     for e in blueprint.get("edges", []):
         src = node_by_pin.get(e["from"])
         dst = node_by_pin.get(e["to"])
         if src is None or dst is None:
             raise GrimoireRuntimeError(f"edge non résoluble : {e['from']} -> {e['to']}")
         deps[dst].add(src)
-    order: list[str] = []
-    remaining = set(nodes)
+    return deps
+
+
+def topo_waves(blueprint: dict[str, Any]) -> list[list[str]]:
+    """Les vagues d'exécution : les nodes dont toutes les pins amont sont franchies, ensemble (Kahn par niveaux).
+
+    Chaque vague est triée par id ; deux lectures du même blueprint rendent les
+    mêmes vagues. Un cycle (ou une dépendance non résoluble) est refusé avec
+    les nodes qui restent, jamais ignoré.
+    """
+    deps = _node_deps(blueprint)
+    waves: list[list[str]] = []
+    done: set[str] = set()
+    remaining = set(deps)
     while remaining:
-        ready = sorted(n for n in remaining if deps[n] <= set(order))
+        ready = sorted(n for n in remaining if deps[n] <= done)
         if not ready:
             raise GrimoireRuntimeError(f"cycle ou dépendance non résolue dans le blueprint : {sorted(remaining)}")
-        order.extend(ready)
+        waves.append(ready)
+        done.update(ready)
         remaining -= set(ready)
-    return order
+    return waves
+
+
+def ready_nodes(blueprint: dict[str, Any], completed: Iterable[str]) -> list[str]:
+    """Les nodes prêts, au sens du DAG : non faits, tous leurs prédécesseurs dans ``completed``.
+
+    Dans l'ordre des vagues puis des ids. Contrairement au reste de la première
+    vague non franchie, un node d'une vague plus tardive est prêt dès que ses
+    propres prédécesseurs sont faits (a -> b avec c indépendant : après a,
+    b et c). Un cycle est refusé comme dans :func:`topo_waves`.
+    """
+    deps = _node_deps(blueprint)
+    done = set(completed)
+    return [n for wave in topo_waves(blueprint) for n in wave if n not in done and deps[n] <= done]
+
+
+def topo_order(blueprint: dict[str, Any]) -> list[str]:
+    """Ordre d'exécution des nodes, dérivé des ``edges`` (Kahn, déterministe).
+
+    Déterministe : à dépendances égales, les nodes prêts sont pris dans
+    l'ordre alphabétique de leur id, pas dans l'ordre d'apparition dans le
+    fichier — deux lectures du même blueprint rendent le même ordre. C'est
+    l'aplatissement de :func:`topo_waves`.
+    """
+    return [n for wave in topo_waves(blueprint) for n in wave]
 
 
 def _tool_boundary(node: dict[str, Any]) -> tuple[str, ...]:
@@ -346,7 +411,7 @@ def _tool_boundary(node: dict[str, Any]) -> tuple[str, ...]:
         if kind == "judge":
             return (f"judge(n={config.get('n')}):{node.get('ref', '')}",)
         if kind == "checkpoint":
-            return ("checkpoint(approve/reject/amend)",)
+            return ("checkpoint(approve/reject/amend/accept_as_is)",)
         if kind == "budget":
             passes = config.get("passes") or []
             return (f"budget(max_cost_usd={config.get('maxCostUsd')}, passes={len(passes)})",)

@@ -123,7 +123,7 @@ def _use_rust_backend() -> bool:
 DEFAULT_THRESHOLD = 2
 _MIN_THRESHOLD = 2
 
-_STATUSES = frozenset({"pending", "accepted", "rejected"})
+_STATUSES = frozenset({"pending", "accepted", "rejected", "resolved"})
 
 #: Substrings that mechanically suggest a specialty needs to *run* something,
 #: not just read and search — a small, documented heuristic, never a model
@@ -143,7 +143,7 @@ class Proposal:
     slug: str
     specialty: str
     artifact_type: str  # "agent" | "skill"
-    status: str  # "pending" | "accepted" | "rejected"
+    status: str  # "pending" | "accepted" | "rejected" | "resolved"
     count: int
     category: str = ""
     fallback_agent: str = ""
@@ -166,6 +166,11 @@ class Proposal:
     accepted_path: str = ""
     rejected_at: str = ""
     rejected_at_count: int | None = None
+    resolved_at: str = ""
+    resolved_reason: str = ""
+    """``"resolved"`` (issue #681) : la condition de la proposition est satisfaite
+    sans qu'elle ait été acceptée (l'utilisateur a agi à la main) — jamais un
+    refus. ``resolved_reason`` en porte la preuve, relue sur disque."""
     artifact_ref: str = ""
     """Generic payload for an ``artifact_type`` that names neither an agent
     nor a skill (issue #490) — a memory fiche's path for ``"memory-link"``,
@@ -196,6 +201,8 @@ class Proposal:
             "accepted_path": self.accepted_path,
             "rejected_at": self.rejected_at,
             "rejected_at_count": self.rejected_at_count,
+            "resolved_at": self.resolved_at,
+            "resolved_reason": self.resolved_reason,
             "artifact_ref": self.artifact_ref,
         }
 
@@ -569,13 +576,16 @@ def create_manual_proposal(
     A pending proposal at *slug* is refreshed in place (count/carrier reason
     updated, identity kept); an already-decided one (``accepted``/
     ``rejected``) is left untouched — a fresh run of the flow does not
-    resurrect a choice the human already made for the exact same slug.
+    resurrect a choice the human already made for the exact same slug. A
+    ``resolved`` one (issue #681) is reopened : the flow only proposes what it
+    finds unsatisfied *now*, so proposing it again means the condition is no
+    longer met.
     """
     root = project_root.resolve()
     path = _proposal_path(root, slug)
     existing = _load_proposal(path)
     now = datetime.now(UTC).isoformat()
-    if existing is not None and existing.status != "pending":
+    if existing is not None and existing.status not in ("pending", "resolved"):
         return existing
     proposal = Proposal(
         slug=slug,
@@ -635,6 +645,9 @@ def _sync_decision(
     l'appelant, exactement comme le fait le cœur Rust.
     """
     existing_status = existing.status if existing is not None else None
+    if existing_status == "resolved":
+        # Une proposition résolue est une décision terminale, comme accepted.
+        existing_status = "accepted"
     existing_count = existing.count if existing is not None else 0
     existing_rejected_at_count = existing.rejected_at_count if existing is not None else None
     if _use_rust_backend():
@@ -656,6 +669,79 @@ def _sync_decision(
         reopen_at = 2 * max(base, 1)
         return ("keep_rejected" if observed_count < reopen_at else "reopen"), threshold, reopen_at
     return "refresh_pending", threshold, None
+
+
+# ── Résolution — la condition relue sur disque (issue #681) ─────────────────
+
+
+def _resolution_reason(root: Path, proposal: Proposal) -> str:
+    """Why a pending flow proposal's condition already holds, or ``""``.
+
+    Only the ``override-migration`` and ``needs-hosts`` shapes are checked —
+    the ones whose condition is a plain fact on disk. Best-effort : an
+    unreadable config or override leaves the proposal pending, never an error.
+    """
+    from grimoire.core import layout
+
+    try:
+        if proposal.artifact_type == "override-migration" and proposal.target_agent:
+            from grimoire.hosts.collect import parse_frontmatter
+
+            path = layout.overrides_dir(root) / layout.AGENTS_SUBDIR / f"{proposal.target_agent}.md"
+            if not path.is_file():
+                # Pas d'override à relire : la condition de la migration n'est
+                # pas démontrée satisfaite (agent kit, revue en attente).
+                return ""
+            meta, _ = parse_frontmatter(path.read_text(encoding="utf-8"))
+            if str(meta.get("extends", "")).strip().lower() == "kit":
+                return f"override « {proposal.target_agent} » déjà partiel (`extends: kit`)"
+        elif proposal.artifact_type == "needs-hosts" and proposal.slug == _NEEDS_HOSTS_ENABLED_SLUG:
+            detected = [h for h in proposal.artifact_ref.split(",") if h]
+            declared = _declared_hosts(root)
+            if declared is not None and set(detected) <= set(declared):
+                return f"hosts.enabled déclare déjà : {', '.join(declared) or '(vide)'}"
+        elif proposal.artifact_type == "needs-hosts" and proposal.slug == _NEEDS_HOSTS_COMMANDS_SLUG:
+            from grimoire.core.execution_needs import resolve_execution_needs
+
+            ids = [i for i in proposal.artifact_ref.split(",") if i]
+            resolved = resolve_execution_needs(root)
+            if ids and all(i in resolved and resolved[i].resolved for i in ids):
+                return f"besoins résolus : {', '.join(ids)}"
+    except Exception:
+        return ""
+    return ""
+
+
+def _declared_hosts(root: Path) -> list[str] | None:
+    """``hosts.enabled`` as declared in ``project-context.yaml``, ``None`` if absent."""
+    from grimoire.tools._common import load_yaml
+
+    config_path = root / "project-context.yaml"
+    if not config_path.is_file():
+        return None
+    data = load_yaml(config_path)
+    hosts = data.get("hosts") if isinstance(data, dict) else None
+    enabled = hosts.get("enabled") if isinstance(hosts, dict) else None
+    return [str(h) for h in enabled] if isinstance(enabled, list) else None
+
+
+def _revalidate(root: Path, proposal: Proposal, *, persist: bool) -> Proposal:
+    """Turn a pending proposal whose condition now holds into ``resolved``.
+
+    ``persist=False`` (lecture seule : comptage du SessionStart) renvoie la
+    proposition résolue en mémoire sans rien écrire.
+    """
+    if proposal.status != "pending":
+        return proposal
+    reason = _resolution_reason(root, proposal)
+    if not reason:
+        return proposal
+    resolved = replace(
+        proposal, status="resolved", resolved_at=datetime.now(UTC).isoformat(), resolved_reason=reason
+    )
+    if persist:
+        _save_proposal(_proposal_path(root, proposal.slug), resolved)
+    return resolved
 
 
 # ── The déclencheur ──────────────────────────────────────────────────────────
@@ -803,7 +889,7 @@ def sync_proposals(project_root: Path, *, threshold: int | None = None) -> list[
                 results.append(existing)
                 seen.add(path.stem)
 
-    return sorted(results, key=lambda p: p.slug)
+    return sorted((_revalidate(root, p, persist=True) for p in results), key=lambda p: p.slug)
 
 
 def list_proposals(project_root: Path, *, sync: bool = True, threshold: int | None = None) -> list[Proposal]:
@@ -819,7 +905,8 @@ def list_proposals(project_root: Path, *, sync: bool = True, threshold: int | No
     if not proposals_dir.is_dir():
         return []
     found = (_load_proposal(path) for path in sorted(proposals_dir.glob("*.yaml")))
-    return sorted((p for p in found if p is not None), key=lambda p: p.slug)
+    root = project_root.resolve()
+    return sorted((_revalidate(root, p, persist=False) for p in found if p is not None), key=lambda p: p.slug)
 
 
 def count_pending(project_root: Path) -> int:
@@ -850,8 +937,15 @@ def accept_proposal(project_root: Path, slug: str) -> dict[str, Any]:
     proposal = _load_proposal(path)
     if proposal is None:
         return {"ok": False, "error": f"proposition introuvable : {slug}"}
-    if proposal.status == "accepted":
-        return {"ok": False, "error": "proposition déjà acceptée", "path": proposal.accepted_path}
+    if proposal.status in ("accepted", "resolved"):
+        # Idempotent (issue #681) : rien à refaire, dit explicitement.
+        return {
+            "ok": True,
+            "status": "already-resolved",
+            "artifact_type": proposal.artifact_type,
+            "path": proposal.accepted_path,
+            "reason": proposal.resolved_reason or "déjà acceptée",
+        }
 
     accept_by_type = {
         "skill": _accept_skill,
@@ -866,6 +960,16 @@ def accept_proposal(project_root: Path, slug: str) -> dict[str, Any]:
         result = accept_fn(root, proposal)
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
+
+    if result.get("status") == "already-resolved":
+        resolved = replace(
+            proposal,
+            status="resolved",
+            resolved_at=datetime.now(UTC).isoformat(),
+            resolved_reason=str(result.get("reason", "")),
+        )
+        _save_proposal(path, resolved)
+        return {"ok": True, **result}
 
     accepted = replace(
         proposal,
@@ -1122,7 +1226,16 @@ def _accept_needs_hosts(project_root: Path, proposal: Proposal) -> dict[str, Any
     if not isinstance(hosts, dict):
         hosts = {}
         data["hosts"] = hosts
-    hosts["enabled"] = detected
+    current = [str(h) for h in hosts.get("enabled") or []]
+    merged = [*current, *(h for h in detected if h not in current)]
+    if merged == current and "enabled" in hosts:
+        return {
+            "status": "already-resolved",
+            "artifact_type": "needs-hosts",
+            "path": str(config_path),
+            "reason": f"hosts.enabled déclare déjà : {', '.join(current)}",
+        }
+    hosts["enabled"] = merged
     save_yaml(data, config_path)
     return {"status": "declared", "artifact_type": "needs-hosts", "path": str(config_path)}
 
@@ -1142,6 +1255,8 @@ def reject_proposal(project_root: Path, slug: str) -> dict[str, Any]:
         return {"ok": False, "error": f"proposition introuvable : {slug}"}
     if proposal.status == "accepted":
         return {"ok": False, "error": "proposition déjà acceptée — le refus n'a plus d'effet"}
+    if proposal.status == "resolved":
+        return {"ok": False, "error": "proposition déjà résolue — la condition est satisfaite, rien à refuser"}
 
     rejected = replace(
         proposal,

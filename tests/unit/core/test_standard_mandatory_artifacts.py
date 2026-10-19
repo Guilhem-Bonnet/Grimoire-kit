@@ -2,9 +2,9 @@
 
 `claim-ledger` (AG-QUA-002, dès N1) et `runtime-surface-registry` (AG-TOL-007,
 AG-RET-006, dès N4). Un projet neuf les reçoit ; un registre vierge est un
-avertissement, pas une erreur — il attend d'être rempli ; ce qui est une
-erreur, c'est une affirmation dite prouvée sans preuve, ou une surface sans
-owner en profil gouverné.
+avertissement en profil non-gouverné et une erreur en profil gouverné (W1-05).
+Ce qui est une erreur, c'est une affirmation dite prouvée sans preuve, ou une
+surface sans owner en profil gouverné.
 """
 
 from __future__ import annotations
@@ -30,7 +30,11 @@ def test_governed_ships_both_and_still_verifies(tmp_path: Path) -> None:
     result = verify_standard_profile(tmp_path)
     assert "claims.empty" in _ids(result, "claims.")
     assert "surfaces.no_control_surface" in _ids(result, "surfaces.")
-    assert not [c for c in result.checks if c.id.startswith(("claims.", "surfaces.")) and c.severity == "error"]
+    # W1-05: empty claim ledger is now an error in governed profile
+    claims_errors = [c for c in result.checks if c.id.startswith("claims.") and c.severity == "error"]
+    assert len(claims_errors) == 1 and claims_errors[0].id == "claims.empty"
+    # No surface errors expected since the registry is empty (just a warning)
+    assert not [c for c in result.checks if c.id.startswith("surfaces.") and c.severity == "error"]
 
 
 def test_a_claim_marked_proved_without_evidence_is_an_error(tmp_path: Path) -> None:

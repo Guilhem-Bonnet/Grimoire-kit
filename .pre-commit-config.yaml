@@ -1,3 +1,9 @@
+# `repo-gates` tourne au pre-push : c'est là que la plage de commits de la
+# branche est complète, donc là que la garde `changelog` (une entrée par
+# feat/fix/perf) a quelque chose à lire, et une dizaine de secondes de gardes
+# ne pèsent pas sur chaque commit.
+default_install_hook_types: [pre-commit, pre-push]
+
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.9.10
@@ -43,9 +49,14 @@ repos:
 
   - repo: local
     hooks:
-      - id: emitted-prose-guard
-        name: prose émise sans chiffre à remplir de tête (#613)
-        entry: python3 scripts/check-emitted-prose.py
+      # LA commande des gardes du dépôt : ratchet, changelog, prose, waivers,
+      # actions épinglées, tenets, documentation. Identique à l'étape "Repo
+      # gates" du job lint de ci-sdk.yml (comparées par
+      # tests/unit/scripts/test_repo_gates.py) — une garde rouge en CI l'est ici.
+      - id: repo-gates
+        name: gardes du dépôt (grimoire gates repo)
+        entry: grimoire gates repo
         language: system
         pass_filenames: false
-        files: ^(framework/|archetypes/|scripts/check-emitted-prose\.py|scripts/emitted-prose-allowlist\.txt|src/grimoire/core/scaffold\.py)
+        always_run: true
+        stages: [pre-push]

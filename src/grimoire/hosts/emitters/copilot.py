@@ -29,6 +29,7 @@ from grimoire.hosts.emitters.base import (
     map_verbs,
     parallel_brainstorm_section,
 )
+from grimoire.hosts.emitters.rules import with_rule_layers
 from grimoire.hosts.surface import (
     AgentSpec,
     CommandSpec,
@@ -276,7 +277,6 @@ class CopilotEmitter(Emitter):
     host_id = HostId.GITHUB_COPILOT
 
     def plan(self, surface: ProjectSurface, project_root: Path) -> EmitPlan:
-        del project_root
         files: list[EmittedFile] = []
         by_slug = {skill.slug: skill for skill in surface.skills}
         attached_slugs = {slug for agent in surface.agents for slug in agent.skills}
@@ -328,4 +328,5 @@ class CopilotEmitter(Emitter):
         )
         blocking = [h for h in surface.hooks if h.enforcement is Enforcement.BLOCKING]
         files.append(_readme(surface, blocking, degradations))
-        return EmitPlan(host_id=self.host_id, files=tuple(files), merges=(), degradations=tuple(degradations))
+        plan = EmitPlan(host_id=self.host_id, files=tuple(files), merges=(), degradations=tuple(degradations))
+        return with_rule_layers(plan, project_root)

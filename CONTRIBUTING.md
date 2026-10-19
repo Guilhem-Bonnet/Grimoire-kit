@@ -88,6 +88,56 @@ docs: update getting-started for v3
 
 Types : `feat`, `fix`, `docs`, `refactor`, `test`, `chore`
 
+## Tenets
+
+Quatre principes s'imposent à toute contribution. Chacun est tenu par un test,
+pas par l'attention d'un relecteur : si le test disparaît, `scripts/check-contributing.py`
+(garde `tenets` de `grimoire gates repo`) échoue.
+
+### Tenet 1 — Une garde échoue fermée, et un test le prouve
+
+Une garde qui n'a jamais été vue rouge n'est pas une garde. Chaque garde du
+dépôt a un test qui construit l'état qu'elle refuse et vérifie qu'elle refuse ;
+une garde qui ne peut pas rendre son verdict (script absent, dépôt illisible)
+échoue, elle ne passe pas. Une PR `fix:` apporte un test rouge sur sa base.
+
+Tenu par : `tests/unit/scripts/test_release_gates.py`, `tests/unit/scripts/test_repo_gates.py`,
+`tests/unit/scripts/test_check_regression_on_base.py`.
+
+### Tenet 2 — Aucun chiffre sans source
+
+Un chiffre émis ou publié (prose des agents, README, docs) vient d'une commande
+exécutée ou d'un fichier lu, nommés ; sinon il s'écrit « non mesuré ». La vitrine
+n'affiche pas de compteur de vanité.
+
+Tenu par : `tests/unit/test_grounding_prose.py`, `tests/unit/scripts/test_check_doc_claims.py`.
+
+### Tenet 3 — Un mécanisme par invariant
+
+Un verrou, une écriture atomique, une garde de silence : un seul utilitaire, pas
+une variante locale. Une exception silencieuse se justifie sur sa ligne.
+
+Tenu par : `tests/unit/test_fsio.py`, `tests/unit/core/test_claim_ledger_scan_invariants.py`.
+
+### Tenet 4 — La chaîne d'outils et la documentation ne pourrissent pas
+
+Les actions CI sont épinglées par SHA. Chaque fichier de `docs/` déclare son
+public, et une commande `grimoire ...` citée en documentation existe dans la CLI.
+
+Tenu par : `tests/unit/scripts/test_check_actions_pinned.py`,
+`tests/unit/scripts/test_check_doc_audience.py`, `tests/unit/scripts/test_check_doc_commands.py`.
+
+### Lancer toutes les gardes d'un coup
+
+```bash
+grimoire gates repo              # profil dev : ce qu'une branche doit satisfaire
+grimoire gates repo --profile release   # ce que le tag exige en plus
+grimoire gates repo --only changelog    # une seule garde
+```
+
+La même commande est appelée par le pre-commit (`.pre-commit-config.yaml`) et par
+le job `lint` de `ci-sdk.yml` ; `tests/unit/scripts/test_repo_gates.py` compare les deux.
+
 ## Pas de chiffre sans mesure — la pyramide de gardes
 
 Un agent Grimoire ne produit jamais un chiffre, un score, une tendance ou un
@@ -97,7 +147,7 @@ gardes le tiennent, du plus rapide au plus coûteux :
 
 | Étage | Garde | Quand elle tourne | Ce qu'elle refuse |
 |---|---|---|---|
-| Statique | `scripts/check-emitted-prose.py` | pre-commit, `make lint`, `tests/unit/test_grounding_prose.py` en CI | un gabarit émis qui demande `X/10`, `confidence: 0.92`, `trust_score: 91`, une estimation chiffrée |
+| Statique | `scripts/check-emitted-prose.py` | pre-commit (via `grimoire gates repo`), `make lint`, `tests/unit/test_grounding_prose.py` en CI | un gabarit émis qui demande `X/10`, `confidence: 0.92`, `trust_score: 91`, une estimation chiffrée |
 | Émission | `tests/unit/test_hosts.py` (`*grounding*`) | `pytest tests/unit` | un hôte ou un ouvrier headless dont le texte émis ne porte pas `grimoire.core.grounding.GROUNDING_RULE` ni le bloc `grimoire-uncertainties` |
 | Comportement | `evals/grounding-probe.py` (témoin : `evals/grounding-probe-witness.py`) | chaque lundi dans `weekly-bench.yml` si `ANTHROPIC_API_KEY` est dans les secrets (sauté sinon, jamais vert par défaut), et à la main avant une release qui touche les wrappers | une persona émise qui répond un pourcentage ou une quantité à une question dont toute réponse chiffrée est inventée (deux questions en gate ; la note sur demande explicite reste hors gate, mesurée 3/3 fabriquée sur haiku) |
 
@@ -302,8 +352,9 @@ où un numéro consommé l'est définitivement :
    wheel puis exécute `make wheel-check` : installation de la wheel dans un
    venv neuf (`.wheel-check-venv/`), `grimoire --version`, import du SDK.
    Une wheel qui ne démarre pas ne se tague pas.
-2. **Au tag, dans `release.yml`** — trois gardes bloquants : le tag et
-   `version.txt` disent la même chose, `scripts/gen-kit-hashes.py --check`
+2. **Au tag, dans le job `gates` de `publish.yml`** — quatre gardes bloquants,
+   avant tout `build` : le tag et `version.txt` disent la même chose et le tag
+   pointe un commit de `main` (`scripts/check-release-tag.py`), `scripts/gen-kit-hashes.py --check`
    couvre les fichiers livrés, `scripts/check-changelog-release.py` décrit la
    version publiée. Ce dernier exige que chaque commit `feat`/`fix`/`perf`
    fusionné depuis le tag précédent touche `CHANGELOG.md` — sauf repli : un
@@ -319,6 +370,22 @@ où un numéro consommé l'est définitivement :
    chaque Python supporté et importe le SDK. `publish-pypi` dépend des deux :
    rien ne part si l'un échoue, et aucun job n'est en `continue-on-error`.
 
+`publish.yml` est la seule voie de release : `gates` → `build` → `test` →
+`publish-pypi` → `github-release`. PyPI part sur un tag stable (`vX.Y.Z`) ;
+une pré-version (`vX.Y.Z-rc1`) ne produit qu'une release GitHub marquée
+pre-release, sans PyPI — `make release VERSION=x.y.z-rc1` écrit alors
+`x.y.z-rc1` dans `version.txt` et `__version__` (la graphie SemVer ; hatch la
+normalise en `x.y.zrc1` dans les métadonnées de la wheel), et
+`tests/unit/test_version_sync.py` accepte cette forme parce qu'il lit le même
+prédicat que le garde de tag. Le job `publish-pypi` relance sans échouer sur un
+fichier déjà reçu (`skip-existing`) : après un téléversement interrompu, relancer
+les jobs en échec suffit à créer la release. Le `Makefile` n'a aucune voie manuelle vers PyPI : `make publish` refuse
+et renvoie à ce push de tag (un téléversement hors `publish.yml` contournerait
+les gardes, et `skip-existing` accepterait ensuite le fichier sans comparer son
+contenu). La release GitHub est créée après la publication, et le
+corps est la section du `CHANGELOG.md` que `gates` vient de valider
+(`scripts/changelog-section.py`) — rien n'est généré à partir de `git log`.
+
 ```bash
 make release VERSION=x.y.z      # check + hashes + build + wheel-check
 git add version.txt src/grimoire/__version__.py registry/kit-file-hashes.json
@@ -326,6 +393,36 @@ git commit -m "chore: release x.y.z"
 git tag -a vx.y.z -m "Release x.y.z"
 git push origin main --tags     # publish.yml prend le relais
 ```
+
+### Contrôles hors arbre
+
+La voie unique et le garde « tag sur `main` » vivent dans l'arbre du tag : ils
+ne valent que pour un arbre qui contient ce changement (`publish.yml` sans
+`release.yml`, `scripts/check-release-tag.py`). Un arbre antérieur garde
+l'ancienne paire de workflows — PyPI s'y ouvre dès que la variable de dépôt
+`GRIMOIRE_ENABLE_PYPI` vaut `true`, et deux créateurs de release s'y exécutent
+de nouveau. Un arbre taggué peut aussi modifier le script ou l'étape qui le
+surveille, donc désarmer son propre garde. Rien de cela ne se ferme par du
+code : c'est de la configuration GitHub, à faire une fois la voie unique
+fusionnée.
+
+1. **Supprimer** la variable de dépôt `GRIMOIRE_ENABLE_PYPI` (Settings →
+   Secrets and variables → Actions → Variables). Elle ne pilote plus rien dans
+   `publish.yml` ; supprimée, elle ferme PyPI aux anciens arbres.
+2. **Restreindre l'environnement `pypi`** par une politique de déploiement sur
+   les tags `v*`. Cela réduit la surface, mais l'environnement ne vérifie pas
+   l'ascendance `main` : il ne remplace pas le garde.
+3. **Ajouter un ruleset de tags** sur `refs/tags/v*` qui limite qui peut créer
+   ou déplacer un tag de release. C'est le seul contrôle réel contre un tag
+   posé sur un arbre qui n'a pas les gardes. Le ruleset `Base` existant cible
+   des branches (`target: branch`) et n'agit pas sur les tags.
+4. **Rebaser les branches `aidlc/*`** (et toute branche antérieure au merge)
+   sur `origin/main` avant d'y poser un tag : un tag posé sur leur arbre
+   rejouerait l'ancienne paire de workflows.
+
+Ces contrôles ne sont pas vérifiables depuis le dépôt : `gh api
+repos/<org>/<repo>/environments/pypi` et le listing des rulesets disent leur
+état, et la lecture de `actions/variables` exige un droit que l'App de CI n'a pas.
 
 ## Questions ?
 

@@ -1,4 +1,21 @@
-name: Publish to PyPI
+name: Publish
+
+# Voie unique de release (D-01). Ce workflow est le seul à créer la release
+# GitHub : il n'existe plus de second workflow sur le même tag, donc plus de
+# course entre deux créateurs ni de notes réécrites par l'un ou l'autre.
+#
+#   gates ─► build ─► test ─► attest ─► publish-pypi ─► github-release
+#
+# * `gates` porte les garde-fous qui vivaient dans l'ancien release.yml, et en
+#   ajoute un : le tag doit pointer un commit de main.
+# * PyPI part sur un tag stable (vX.Y.Z). Une pré-version (vX.Y.Z-rc1, avec
+#   `version.txt` et `__version__` à 3.63.0-rc1 : tests/unit/test_version_sync.py
+#   et scripts/check-release-tag.py partagent la même graphie) ne
+#   produit qu'une release GitHub marquée pre-release : `publish-pypi` est
+#   alors ignoré, et `github-release` tourne quand même.
+# * `github-release` passe après la publication : aucune release n'annonce un
+#   paquet que PyPI n'a pas reçu. Son corps est la section du CHANGELOG
+#   validée par `gates`, tel quel (scripts/changelog-section.py).
 
 on:
   push:
@@ -7,17 +24,57 @@ on:
       - "v*.*.*-*"
 
 permissions:
-  contents: write
-  id-token: write
+  contents: read
 
 jobs:
+  gates:
+    name: "Garde-fous du tag"
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+      stable: ${{ steps.tag.outputs.stable }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          fetch-depth: 0  # le tag doit être atteignable depuis origin/main ; le CHANGELOG se confronte à git
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: pip install pyyaml
+
+      # Le tag et version.txt disent la même chose, et le tag est sur main.
+      - name: Le tag est publiable
+        id: tag
+        run: python scripts/check-release-tag.py --tag "${GITHUB_REF_NAME}" --github-output "$GITHUB_OUTPUT"
+
+      - name: Validate DNA avant release
+        run: bash grimoire-init.sh validate --all
+
+      # Sans le catalogue à jour, `grimoire migrate` gèle hors des mises à jour
+      # chaque fichier introduit, chez tous les projets installés — le dégât
+      # n'apparaît que des mois plus tard.
+      - name: Le catalogue couvre les fichiers livrés
+        run: python scripts/gen-kit-hashes.py --check
+
+      - name: Le CHANGELOG décrit la version publiée
+        run: python scripts/check-changelog-release.py
+
+      - name: La section du CHANGELOG existe et n'est pas vide
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: python scripts/changelog-section.py "$VERSION" > /dev/null
+
   build:
     name: "Build package"
     runs-on: ubuntu-latest
+    needs: gates
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
 
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7
         with:
           python-version: "3.12"
 
@@ -27,29 +84,50 @@ jobs:
       - name: Build sdist + wheel
         run: python -m build
 
-      - name: Verify wheel installs
+      # La wheel s'installe et démarre dans un environnement neuf, sans pip ni
+      # outil de build : cet environnement est aussi celui que décrit le SBOM.
+      # Un SBOM pris dans l'environnement du runner listerait build, pip et
+      # cyclonedx-bom, c'est-à-dire des paquets que la wheel n'embarque pas.
+      - name: Verify wheel installs (environnement neuf)
         run: |
-          pip install dist/*.whl
-          grimoire --version
+          python -m venv --without-pip .wheel-env
+          pip --python .wheel-env/bin/python install dist/*.whl
+          .wheel-env/bin/grimoire --version
 
-      - name: Generate SBOM (CycloneDX)
+      - name: Generate SBOM (CycloneDX) de la wheel seule
         run: |
           pip install cyclonedx-bom
           mkdir -p sbom
-          cyclonedx-py environment --output-format json -o sbom/sbom.cdx.json
+          cyclonedx-py environment --output-format json -o sbom/sbom.cdx.json .wheel-env/bin/python
           echo "SBOM generated: sbom/sbom.cdx.json"
 
+      # Les sommes couvrent ce que la release publie : la wheel, le sdist et le
+      # SBOM. `grimoire self update` les confronte à l'empreinte de PyPI avant
+      # toute installation.
+      - name: SHA256SUMS
+        run: |
+          mkdir -p stage checksums
+          cp dist/* sbom/sbom.cdx.json stage/
+          (cd stage && sha256sum -- * > ../checksums/SHA256SUMS && sha256sum --check ../checksums/SHA256SUMS)
+          cat checksums/SHA256SUMS
+
       - name: Upload dist artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         with:
           name: dist
           path: dist/
 
       - name: Upload SBOM
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         with:
           name: sbom
           path: sbom/
+
+      - name: Upload SHA256SUMS
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
+        with:
+          name: checksums
+          path: checksums/
 
   # La pré-vérification avant publication, c'est ce job : la wheel construite
   # est installée dans un runner neuf, sur chaque Python supporté, et doit
@@ -64,14 +142,14 @@ jobs:
       matrix:
         python-version: ["3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
 
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7
         with:
           python-version: ${{ matrix.python-version }}
 
       - name: Download dist
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8
         with:
           name: dist
           path: dist/
@@ -82,74 +160,159 @@ jobs:
           grimoire --version
           python -c "from grimoire.core.config import GrimoireConfig; print('SDK OK')"
 
-  publish-pypi:
-    name: "Publish to PyPI"
+
+      # Le parcours J1 de docs/onboarding.md, prouvé et chronométré sur la roue
+      # installée dans un environnement vierge : le hook SessionStart doit tirer,
+      # un premier gate doit passer au vert, et la durée tenir le budget que le
+      # document déclare (scripts/check-up-prove-budget.py).
+      - name: up --prove sur une installation vierge
+        env:
+          GRIMOIRE_NO_COCKPIT: "1"
+        run: |
+          python -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install dist/*.whl
+          mkdir "$RUNNER_TEMP/proj"
+          git -C "$RUNNER_TEMP/proj" init -q
+          PATH="$RUNNER_TEMP/venv/bin:$PATH" grimoire -o json up "$RUNNER_TEMP/proj" --backend local --prove > "$RUNNER_TEMP/prove.json"
+          python scripts/check-up-prove-budget.py --report "$RUNNER_TEMP/prove.json" --doc docs/onboarding.md
+
+  # Attestation de provenance (SLSA, Sigstore) des fichiers publiés. Ce job est
+  # une condition de la publication : sans attestation, ni PyPI ni la release
+  # GitHub ne partent. `attest-build-provenance` échoue si Sigstore ou l'API
+  # d'attestations répond en erreur ; l'étape suivante échoue en plus si une
+  # attestation manque pour l'un des fichiers (`gh attestation verify`).
+  attest:
+    name: "Attestation de provenance"
     runs-on: ubuntu-latest
-    # PyPI publishing is opt-in: set repo variable GRIMOIRE_ENABLE_PYPI=true to enable.
-    # Disabled by default so a release tag produces a GitHub Release only (release.yml).
-    if: ${{ vars.GRIMOIRE_ENABLE_PYPI == 'true' }}
-    needs: [build, test]
-    environment: pypi
+    needs: [gates, build, test]
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     steps:
       - name: Download dist
-        uses: actions/download-artifact@v8
-        with:
-          name: dist
-          path: dist/
-
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-
-  github-release:
-    name: "GitHub Release"
-    runs-on: ubuntu-latest
-    needs: publish-pypi
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - name: Download dist
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8
         with:
           name: dist
           path: dist/
 
       - name: Download SBOM
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8
         with:
           name: sbom
           path: sbom/
 
-      - name: Generate release notes
-        id: notes
+      - name: Download SHA256SUMS
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8
+        with:
+          name: checksums
+          path: checksums/
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
+        with:
+          subject-path: |
+            dist/*
+            sbom/sbom.cdx.json
+            checksums/SHA256SUMS
+
+      - name: Chaque fichier publié a son attestation
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="${GITHUB_REF_NAME}"
-          PREV_TAG=$(git tag --sort=-v:refname | grep -v "$TAG" | head -1 || echo "")
-          if [ -n "$PREV_TAG" ]; then
-            NOTES=$(git log --oneline --no-merges "${PREV_TAG}..${TAG}")
-          else
-            NOTES=$(git log --oneline --no-merges -20)
-          fi
-          echo "notes<<EOF" >> "$GITHUB_OUTPUT"
-          echo "$NOTES" >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
+          for f in dist/* sbom/sbom.cdx.json checksums/SHA256SUMS; do
+            gh attestation verify "$f" --repo "$GITHUB_REPOSITORY"
+          done
+
+  publish-pypi:
+    name: "Publish to PyPI"
+    runs-on: ubuntu-latest
+    # PyPI part sur un tag stable. Une pré-version n'y va pas : le numéro d'une
+    # publication PyPI est consommé pour toujours.
+    if: ${{ needs.gates.outputs.stable == 'true' }}
+    needs: [gates, build, test, attest]
+    environment: pypi
+    permissions:
+      id-token: write  # Trusted Publisher
+    steps:
+      - name: Download dist
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8
+        with:
+          name: dist
+          path: dist/
+
+      # `skip-existing` : un téléversement interrompu entre le sdist et la wheel
+      # se relance sans échouer sur le fichier déjà reçu ; sinon `github-release`
+      # (qui dépend de ce job) ne se créerait jamais, et il n'y a plus d'autre
+      # workflow pour le rattraper.
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # v1.14.2
+        with:
+          skip-existing: true
+
+  # Seul créateur de la release GitHub. `if` explicite : sans fonction de
+  # statut, GitHub ignorerait ce job dès que `publish-pypi` l'est (pré-version).
+  # Il tourne si tout ce qui précède a réussi, `publish-pypi` compris sur un
+  # tag stable, et il est toléré ignoré sur une pré-version seulement.
+  github-release:
+    name: "GitHub Release"
+    runs-on: ubuntu-latest
+    needs: [gates, build, test, attest, publish-pypi]
+    if: >-
+      ${{ !cancelled()
+      && needs.gates.result == 'success'
+      && needs.build.result == 'success'
+      && needs.test.result == 'success'
+      && needs.attest.result == 'success'
+      && (needs.publish-pypi.result == 'success'
+      || (needs.gates.outputs.stable != 'true' && needs.publish-pypi.result == 'skipped')) }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7
+        with:
+          python-version: "3.12"
+
+      - name: Download dist
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8
+        with:
+          name: dist
+          path: dist/
+
+      - name: Download SBOM
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8
+        with:
+          name: sbom
+          path: sbom/
+
+      - name: Download SHA256SUMS
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8
+        with:
+          name: checksums
+          path: checksums/
+
+      - name: Notes de version = section du CHANGELOG
+        env:
+          VERSION: ${{ needs.gates.outputs.version }}
+        run: python scripts/changelog-section.py "$VERSION" --output RELEASE_NOTES.md
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64  # v3
         with:
-          body: |
-            ## Changes
-
-            ${{ steps.notes.outputs.notes }}
-
-            ## Installation
-
-            ```bash
-            pip install grimoire-kit==${GITHUB_REF_NAME#v}
-            ```
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          body_path: RELEASE_NOTES.md
+          draft: false
+          prerelease: ${{ needs.gates.outputs.stable != 'true' }}
+          # Le corps est la section du CHANGELOG, rien d'autre : pas de notes
+          # générées qui s'y ajouteraient.
+          generate_release_notes: false
           files: |
             dist/*.whl
             dist/*.tar.gz
             sbom/sbom.cdx.json
-          generate_release_notes: true
+            checksums/SHA256SUMS
+            grimoire-init.sh
+            framework/archetype-dna.schema.yaml

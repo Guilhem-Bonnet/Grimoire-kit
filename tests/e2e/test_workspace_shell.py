@@ -506,7 +506,7 @@ def test_choisir_un_fichier_dans_la_palette_l_ouvre_dans_source(workspace: Page)
 
 def test_le_theme_et_la_densite_se_choisissent_et_survivent_au_rechargement(workspace: Page, served: str) -> None:
     """L'état est mémorisé par projet, côté client (spec §3.1)."""
-    workspace.locator("#st-theme").click()
+    workspace.locator('#st-theme [data-theme-pref="light"]').click()
     assert workspace.evaluate("() => window.GrimoireWorkspace.theme") == "light"
 
     workspace.reload(wait_until="domcontentloaded")

@@ -2,6 +2,8 @@
 
 # <img src="../../docs/assets/icons/grimoire.svg" width="32" height="32" alt=""> Exemple — Application Web (SPA + API Go + PostgreSQL)
 
+> **Illustratif, non rejouable.** Les sorties ci-dessous sont mises en forme à la main : aucun script `replay.sh` ni `expected.json` ne les rejoue. Les exemples vérifiés en CI sont listés dans [`examples/README.md`](../README.md).
+
 Démonstration de l'archétype `web-app` sur un projet concret : une application de gestion de tâches avec frontend React, API Go, et base PostgreSQL.
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">

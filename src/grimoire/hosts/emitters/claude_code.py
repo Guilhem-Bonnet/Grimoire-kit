@@ -24,6 +24,7 @@ from grimoire.hosts.emitters.base import (
     map_verbs,
     parallel_brainstorm_section,
 )
+from grimoire.hosts.emitters.rules import with_rule_layers
 from grimoire.hosts.surface import (
     AgentSpec,
     CommandSpec,
@@ -101,10 +102,11 @@ _OWNED_COMMAND_MARKERS = OWNED_COMMAND_MARKERS
 def _model_for(agent: AgentSpec) -> str:
     """Croise ``reasoning`` et ``cost`` : le premier signal fort gagne.
 
-    ``reasoning: high`` l'emporte toujours — un agent qui a besoin de
-    raisonnement profond ne doit pas être rétrogradé parce qu'il est aussi
-    déclaré peu coûteux (ex. le concierge : gros raisonnement de triage, mais
-    invoqué à chaque tour, donc `cost: low`). En dessous de ce plancher,
+    ``reasoning: high`` donne ``opus``, sauf s'il est aussi déclaré
+    ``cost: low`` : un agent invoqué souvent (le concierge, qui trie en
+    lecture seule) prend alors ``sonnet``, le palier qui raisonne sans payer
+    ``opus`` à chaque appel — mesuré le 2026-10-12, 54 % des délégations sans
+    ``model=`` tombaient sur ce défaut (#740). En dessous de ce plancher,
     `cost: low` prime sur `reasoning` : un agent qu'on veut bon marché doit
     rester bon marché même à raisonnement moyen. Ce n'est qu'en l'absence de
     tout signal fort — ni gros raisonnement, ni petit coût, ni petit
@@ -113,7 +115,7 @@ def _model_for(agent: AgentSpec) -> str:
     """
     reasoning = agent.affinity.reasoning.lower()
     if reasoning == "high":
-        return "opus"
+        return "sonnet" if agent.affinity.cost.lower() == "low" else "opus"
     if agent.affinity.cost.lower() == "low":
         return "haiku"
     return _MODEL_BY_REASONING.get(reasoning, "inherit")
@@ -179,7 +181,10 @@ vérifiabilité de la tâche (celle que `grimoire task dispatch` calcule) :
 - **V2** — {Verifiability.V2.explanation} → {_model_label(Verifiability.V2)}.
 
 Sur une tâche réclamée, `task_claim` et `task_context` rendent déjà cette classe
-et `recommended_model` : suis-les plutôt que de reclasser.
+et `recommended_model` : suis-les plutôt que de reclasser. Sans classe calculée,
+une recherche, une lecture ou une mesure part en `haiku`, une revue ou une analyse
+en `sonnet`. N'omets `model=` que si la sous-tâche exige ton propre jugement :
+l'omettre la fait tourner sur ton modèle, ou sur le défaut de la persona.
 
 Exige de chaque sous-agent, en fin de réponse, un bloc ```grimoire-uncertainties```
 portant une liste JSON d'objets `{{"where": ..., "what": ..., "why": ...}}` —
@@ -409,7 +414,6 @@ class ClaudeCodeEmitter(Emitter):
     host_id = HostId.CLAUDE_CODE_CLI
 
     def plan(self, surface: ProjectSurface, project_root: Path) -> EmitPlan:
-        del project_root  # every path is project-relative
         files: list[EmittedFile] = []
         by_slug = {skill.slug: skill for skill in surface.skills}
         attached_slugs = {slug for agent in surface.agents for slug in agent.skills}
@@ -428,11 +432,14 @@ class ClaudeCodeEmitter(Emitter):
         files.extend(_command_file(command) for command in surface.commands)
         blocking = [h for h in surface.hooks if h.enforcement is Enforcement.BLOCKING]
         files.append(_readme(surface, blocking))
-        return EmitPlan(
-            host_id=self.host_id,
-            files=tuple(files),
-            merges=(_settings_merge(surface),),
-            degradations=(),
+        return with_rule_layers(
+            EmitPlan(
+                host_id=self.host_id,
+                files=tuple(files),
+                merges=(_settings_merge(surface),),
+                degradations=(),
+            ),
+            project_root,
         )
 
 

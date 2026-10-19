@@ -44,6 +44,38 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+# Gardes du dépôt de tâche (W1-08a) : module voisin, aussi quand ce script est chargé par chemin.
+sys.path.append(str(Path(__file__).resolve().parent))
+from bare_guard import refuse_bare_for_governed_arms
+from cost_gate import cost_from_result, cost_known_fields, filter_tasks, partial_cost_notes
+from hidden_reads import (
+    check_transcript,
+    invalid_run_alert,
+    invalid_runs_rows,
+    render_invalid_runs,
+    render_unevaluated_runs,
+    unevaluated_run_alert,
+    unevaluated_runs_rows,
+)
+from model_pin import (
+    ModelMismatchError,
+    detect_claude_code_version,
+    ensure_results_match_model,
+    pin_report_fields,
+    render_pin_lines,
+    saturation_exit_code,
+    selection_pin,
+)
+from recompute import data_seal, render_seal_lines
+from results_io import read_results_rows
+from task_repo import (
+    ContaminatedTaskRepoError,
+    assert_task_repo_clean,
+    prepare_task_repo,
+    reset_run_dir,
+    run_dir_for,
+)
+
 # ── Constantes du protocole ──────────────────────────────────────────────────
 
 POLYGLOT_REPO_URL = "https://github.com/Aider-AI/polyglot-benchmark.git"
@@ -100,6 +132,7 @@ class RunOutcome:
 
     success: bool | None = None  # rempli après exécution des tests
     total_cost_usd: float = 0.0
+    cost_known: bool | None = None  # B-00 : False = le 0.0 n'est pas une mesure
     input_tokens: int = 0
     output_tokens: int = 0
     cache_read_input_tokens: int = 0
@@ -178,6 +211,24 @@ class RunRecord:
     # avant ce lot (toutes en ``oauth-copy`` de fait, jamais reconstruit a
     # posteriori — même convention que ``recorded_at``).
     auth_mode: str | None = None
+    # W1-08b (#694) : verdict de ``hidden_reads.check_transcript`` — ``"clean"``,
+    # ``"invalid"`` (la transcription désigne un test caché : le run sort des
+    # taux, ``hidden_test_reads`` porte les lignes déclenchantes pour revue
+    # humaine) ou ``"unevaluated"`` (transcription illisible : jamais « propre »).
+    # ``None`` pour les lignes antérieures, jamais reconstruit.
+    transcript_check: str | None = None
+    hidden_test_reads: list[dict[str, Any]] | None = None
+    cost_known: bool | None = None  # B-00 ; None = ligne antérieure, voir cost_gate.row_cost_known
+    # B-01 : modèle DEMANDÉ (``--model``) et version de Claude Code de ce run.
+    # ``None`` = ligne antérieure à B-01 (modèle inconnu, jamais reconstruit) :
+    # elle ne s'apparie avec aucune ligne au modèle enregistré, voir
+    # ``model_pin.require_single_model``. Le modèle EFFECTIF reste dans ``model_usage``.
+    model_id: str | None = None
+    claude_code_version: str | None = None
+
+    @property
+    def invalid(self) -> bool:
+        return self.transcript_check == "invalid"
 
     def to_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
@@ -253,54 +304,6 @@ def sample_tasks(
         rng = random.Random(f"{seed}:{language}")  # noqa: S311 - reproductibilité, pas cryptographie
         selected.extend(rng.sample(pool, per_language))
     return selected
-
-
-def _read_instructions(exercise_dir: Path) -> str:
-    docs_dir = exercise_dir / ".docs"
-    parts = []
-    main = docs_dir / "instructions.md"
-    if main.is_file():
-        parts.append(main.read_text(encoding="utf-8"))
-    appendix = docs_dir / "instructions.append.md"
-    if appendix.is_file():
-        parts.append(appendix.read_text(encoding="utf-8"))
-    return "\n\n".join(parts).strip() + "\n"
-
-
-def prepare_task_repo(task: TaskMeta, dest: Path, *, include_tests: bool = False) -> None:
-    """Construit un dépôt de tâche jetable pour ``task`` dans ``dest``.
-
-    Copie l'énoncé (``TASK.md``) et les fichiers stub/support de l'exercice ;
-    les fichiers de test sont exclus par défaut (« tests cachés à l'agent »),
-    tout comme tout ce qui vit sous ``.meta/`` et ``.docs/`` (solution de
-    référence, générateurs). ``git init`` pour que l'agent puisse diffs/commits
-    s'il le souhaite.
-    """
-    dest.mkdir(parents=True, exist_ok=True)
-    (dest / "TASK.md").write_text(_read_instructions(task.exercise_dir), encoding="utf-8")
-
-    test_set = set(task.test_files)
-    for item in sorted(task.exercise_dir.rglob("*")):
-        if item.is_dir():
-            continue
-        rel = item.relative_to(task.exercise_dir)
-        rel_parts = rel.parts
-        if rel_parts[0] in (".meta", ".docs"):
-            continue
-        rel_str = rel.as_posix()
-        if rel_str in test_set and not include_tests:
-            continue
-        target = dest / rel
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(item, target)
-
-    subprocess.run(["git", "init", "-q", "."], cwd=dest, check=True)
-    subprocess.run(["git", "add", "-A"], cwd=dest, check=True)
-    subprocess.run(
-        ["git", "-c", "user.email=bench@grimoire-kit.local", "-c", "user.name=grimoire-bench", "commit", "-q", "-m", "task: état initial"],
-        cwd=dest,
-        check=True,
-    )
 
 
 def hidden_tests_dir(task: TaskMeta, dest: Path) -> Path:
@@ -543,7 +546,8 @@ def should_alert_cost_overrun(expected_usd: float, actual_usd: float, *, factor:
 def aggregate_success_by_arm(records: Sequence[RunRecord]) -> dict[str, list[bool]]:
     by_arm: dict[str, list[bool]] = defaultdict(list)
     for record in records:
-        by_arm[record.arm].append(record.success)
+        if not record.invalid:  # W1-08b : un run invalidé n'entre dans aucun taux
+            by_arm[record.arm].append(record.success)
     return dict(by_arm)
 
 
@@ -559,7 +563,7 @@ def should_stop_early(
     Retourne ``(arrêt?, motif)``. Ne se prononce pas avant ``min_tasks``
     tâches entièrement rejouées sur les trois bras (bruit sinon).
     """
-    tasks_done = len({record.task_id for record in records})
+    tasks_done = len({record.task_id for record in records if not record.invalid})
     if tasks_done < min_tasks:
         return (False, f"seulement {tasks_done}/{total_tasks} tâches, minimum {min_tasks}")
     if tasks_done >= total_tasks:
@@ -1555,6 +1559,11 @@ def run_claude_headless(
     poll_interval: float = DEFAULT_POLL_INTERVAL_S,
     log_path: Path | None = None,
     auth_mode: str = "oauth-copy",
+    model: str | None = None,
+    extra_args: Sequence[str] = (),
+    append_log: bool = False,
+    bare: bool | None = None,
+    arm: str | None = None,
 ) -> RunOutcome:
     """Lance ``claude -p`` en tête sans tête, avec garde-fou timeout + boucle.
 
@@ -1578,7 +1587,11 @@ def run_claude_headless(
     ``ANTHROPIC_API_KEY`` (ou un ``apiKeyHelper``) — déjà présente dans
     *env* puisque :func:`run_environment` part de ``os.environ``. Aucun
     identifiant n'est donc jamais copié pour ce mode (voir ``_run_one``).
+    B-06 : *arm* (bras du run) refuse ``--bare`` pour un bras gouverné (``bare_guard``). ``aidlc_arm.py`` : *extra_args* (``--resume``) ajouté à la commande, *append_log* n'écrase pas le journal et
+    seules les lignes de CET appel comptent, *bare* force ou interdit ``--bare`` (``None`` : déduit de *auth_mode*).
     """
+    if arm is not None:
+        refuse_bare_for_governed_arms([arm], auth_mode, bare=bare)  # B-06, avant tout appel payant
     log_path = log_path or (task_dir.parent / f"{task_dir.name}.stream.jsonl")
     effective_env = dict(env) if env is not None else {**os.environ, "HOME": str(home)}
     cmd = [
@@ -1593,16 +1606,21 @@ def run_claude_headless(
         "--setting-sources",
         "project,local",
     ]
-    if auth_mode == "api-key":
+    if (auth_mode == "api-key") if bare is None else bare:
         cmd.append("--bare")
+    if model:
+        # B-01 : sans ``--model`` le modèle est celui par défaut de l'outil, qui change d'une version à l'autre.
+        cmd.extend(["--model", model])
+    cmd.extend(extra_args)
 
     outcome = RunOutcome()
     start = time.monotonic()
     seen_commands: list[str] = []
+    start_offset = log_path.stat().st_size if append_log and log_path.is_file() else 0
 
-    with open(log_path, "wb") as logf:
+    with open(log_path, "ab" if append_log else "wb") as logf:
         proc = subprocess.Popen(cmd, cwd=task_dir, env=effective_env, stdout=logf, stderr=subprocess.STDOUT)
-        last_pos = 0
+        last_pos = start_offset
         while True:
             returncode = proc.poll()
             elapsed = time.monotonic() - start
@@ -1637,13 +1655,15 @@ def run_claude_headless(
     outcome.toolchain_friction_bash_calls = count_toolchain_friction_bash_calls(seen_commands)
 
     try:
-        lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        with open(log_path, "rb") as f:
+            f.seek(start_offset)
+            lines = f.read().decode("utf-8", errors="replace").splitlines()
     except OSError:
         lines = []
     result = parse_result_event(lines)
     if result is not None:
         outcome.raw_result = result
-        outcome.total_cost_usd = float(result.get("total_cost_usd") or 0.0)
+        outcome.total_cost_usd, outcome.cost_known = cost_from_result(result)
         usage = result.get("usage") or {}
         outcome.input_tokens = int(usage.get("input_tokens") or 0)
         outcome.output_tokens = int(usage.get("output_tokens") or 0)
@@ -1789,9 +1809,16 @@ def build_report(
     ``state/toolchain_check.json`` — ``None`` pour un rapport reconstruit
     sans ce fichier (campagnes antérieures à ce lot).
     """
+    # B-01 : deux modèles dans un même rapport = comparaison entre bras faussée, refusée avant tout calcul.
+    pin_fields, nu_rates = pin_report_fields(records)
+    # W1-08b : un run invalidé (transcription qui désigne un test caché) sort de
+    # tous les taux et médianes ; son coût reste dans ``spent_by_arm``.
     by_arm: dict[str, list[RunRecord]] = defaultdict(list)
+    spent_by_arm: dict[str, list[RunRecord]] = defaultdict(list)
     for record in records:
-        by_arm[record.arm].append(record)
+        spent_by_arm[record.arm].append(record)
+        if not record.invalid:
+            by_arm[record.arm].append(record)
 
     carried_over_notes: dict[str, str] = {}
     if rerun_arms is not None:
@@ -1802,6 +1829,7 @@ def build_report(
     per_arm: dict[str, Any] = {}
     for arm in ARMS:
         arm_records = by_arm.get(arm, [])
+        spent_records = spent_by_arm.get(arm, [])
         successes = [r.success for r in arm_records]
         success_values = [1.0 if s else 0.0 for s in successes]
         success_ci = bootstrap_ci(success_values, seed=seed)
@@ -1813,6 +1841,8 @@ def build_report(
         pass_k_ci = bootstrap_ci([float(v) for v in pass_k_values], seed=seed)
         per_arm[arm] = {
             "n_runs": len(arm_records),
+            "n_invalid": len(spent_records) - len(arm_records),
+            "n_transcript_unevaluated": sum(1 for r in arm_records if r.transcript_check == "unevaluated"),
             "n_tasks": len(by_task),
             "success_rate": statistics.fmean(success_values) if success_values else 0.0,
             "success_rate_ci95": list(success_ci),
@@ -1820,7 +1850,8 @@ def build_report(
             "pass_hat_k_ci95": list(pass_k_ci),
             "median_wall_seconds": _median([r.wall_seconds for r in arm_records]),
             "median_cost_usd_resolved": _median([r.total_cost_usd for r in resolved]),
-            "total_cost_usd": sum(r.total_cost_usd for r in arm_records),
+            "total_cost_usd": sum(r.total_cost_usd for r in spent_records),
+            **cost_known_fields([r.to_dict() for r in spent_records]),
             "median_num_turns": _median([r.num_turns for r in arm_records]),
             "terminated_reasons": {
                 reason: sum(1 for r in arm_records if r.terminated_reason == reason)
@@ -1844,8 +1875,11 @@ def build_report(
     by_task_arm: dict[str, dict[str, Any]] = {}
     task_ids = sorted({r.task_id for r in records})
     for task_id in task_ids:
-        task_records = [r for r in records if r.task_id == task_id]
-        row: dict[str, Any] = {"language": task_records[0].language if task_records else "?"}
+        task_records = [r for r in records if r.task_id == task_id and not r.invalid]
+        row: dict[str, Any] = {
+            "language": next((r.language for r in records if r.task_id == task_id), "?"),
+            "nu_baseline_pass_rate": nu_rates.get(task_id),
+        }
         for arm in ARMS:
             arm_task_records = [r for r in task_records if r.arm == arm]
             row[arm] = {
@@ -1884,6 +1918,7 @@ def build_report(
         "generated_at": datetime.now(tz=UTC).isoformat(),
         "seed": seed,
         "label": label,
+        **pin_fields,  # B-01 : modèle demandé, versions de Claude Code, saturation de la suite
         "total_tasks": total_tasks,
         "tasks_run": len(task_ids),
         "k": K_REPLAY,
@@ -1893,6 +1928,8 @@ def build_report(
         "kit_runs": kit_runs,
         "kit_gov_runs": kit_gov_runs,
         "carried_over_notes": carried_over_notes,
+        "invalid_runs": invalid_runs_rows(records),
+        "unevaluated_runs": unevaluated_runs_rows(records),
         "agent_toolchain_check": toolchain_check,
         # Lot J (#582) : mode(s) d'authentification effectivement utilisés
         # par les runs de CE rapport — voir ``RunRecord.auth_mode``. Vide
@@ -1919,6 +1956,9 @@ def render_report_markdown(report: dict[str, Any]) -> str:
     if report.get("label"):
         lines.append(f"Étiquette : **{report['label']}**.")
         lines.append("")
+
+    lines.extend(render_pin_lines(report))
+    lines.extend(render_seal_lines(report))
 
     auth_modes = report.get("auth_modes") or []
     if auth_modes:
@@ -1958,6 +1998,7 @@ def render_report_markdown(report: dict[str, Any]) -> str:
         )
     lines.append("")
 
+    lines.extend(partial_cost_notes(report["per_arm"], ARMS))
     lines.append("## Par tâche")
     lines.append("")
     lines.append("| Tâche | Langue | " + " | ".join(ARMS) + " |")
@@ -1969,6 +2010,9 @@ def render_report_markdown(report: dict[str, Any]) -> str:
             cells.append(f"{arm_row.get('successes', 0)}/{arm_row.get('runs', 0)}")
         lines.append(f"| {task_id} | {row.get('language', '?')} | " + " | ".join(cells) + " |")
     lines.append("")
+
+    lines.extend(render_invalid_runs(report.get("invalid_runs") or []))
+    lines.extend(render_unevaluated_runs(report.get("unevaluated_runs") or []))
 
     def _render_governed_detail(title: str, rows: list[dict[str, Any]]) -> None:
         if not rows:
@@ -2072,6 +2116,7 @@ def write_report(
     rerun_arms: Sequence[str] | None = None,
     label: str | None = None,
     toolchain_check: dict[str, Any] | None = None,
+    results_path: Path | None = None,
 ) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     report = build_report(
@@ -2083,6 +2128,8 @@ def write_report(
         label=label,
         toolchain_check=toolchain_check,
     )
+    if results_path is not None:  # B-02 : le rapport cite le hash de ses données brutes
+        report = {**report, "data": data_seal(results_path, records)}
     (out_dir / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     (out_dir / "report.md").write_text(render_report_markdown(report), encoding="utf-8")
 
@@ -2127,7 +2174,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="sous-ensemble de bras à rejouer, ex. 'kit' ou 'nu,ecc,kit' (défaut : les trois) ; "
         "combiné à --resume, les lignes results.jsonl des autres bras restent comptées dans le rapport",
     )
+    parser.add_argument("--subset", type=Path, default=None, help="B-00 : ne rejoue que les tâches de ce fichier (docs/bench/cost-gate-subset.json)")
     parser.add_argument("--label", type=str, default=None, help="étiquette libre reprise dans report.md")
+    parser.add_argument(
+        "--model",
+        type=str,
+        default=None,
+        help="B-01 : modèle passé à `claude -p --model`, obligatoire pour --pilot et --full (identifiant complet "
+        "de préférence : un alias peut changer de cible). Noté dans selection.json et sur chaque ligne ; "
+        "deux lots de modèles différents ne s'apparient pas.",
+    )
+    parser.add_argument(
+        "--fail-on-saturated",
+        action="store_true",
+        help="B-01 : sortie en erreur (code 1) si le rapport écrit conclut SATURÉ (> 50 %% des tâches à 1.0 pour le nu) ; "
+        "opt-in, le rapport est écrit dans tous les cas",
+    )
     parser.add_argument(
         "--grimoire-bin",
         type=str,
@@ -2156,9 +2218,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ValueError as exc:
         parser.error(str(exc))
 
+    args.model = args.model.strip() if args.model else None
+    if (args.pilot or args.full) and not args.model:
+        parser.error("--model est obligatoire pour --pilot et --full : un run payant ne part pas sur le modèle par défaut")
+
     if args.report_only:
         workspace = args.workspace or _default_workspace()
-        return _do_report_only(workspace, seed=args.seed, report_dir=args.report_dir, arms=args.arms, label=args.label)
+        return _do_report_only(
+            workspace,
+            seed=args.seed,
+            report_dir=args.report_dir,
+            arms=args.arms,
+            label=args.label,
+            fail_on_saturated=args.fail_on_saturated,
+        )
 
     workspace = args.workspace or _default_workspace()
     workspace.mkdir(parents=True, exist_ok=True)
@@ -2168,12 +2241,28 @@ def main(argv: Sequence[str] | None = None) -> int:
     bench_root = ensure_polyglot_benchmark(workspace)
     ecc_repo, ecc_commit = ensure_ecc_repo(workspace)
     catalog = discover_catalog(bench_root)
-    tasks = sample_tasks(catalog, seed=args.seed)
+    tasks = filter_tasks(sample_tasks(catalog, seed=args.seed), args.subset)
 
     state_dir = workspace / "state"
     state_dir.mkdir(parents=True, exist_ok=True)
+    if args.pilot or args.full:
+        # B-01 : avant d'écraser selection.json et avant toute dépense, refus de mêler ce modèle à un autre.
+        try:
+            ensure_results_match_model(state_dir / "results.jsonl", args.model)
+        except (ModelMismatchError, ValueError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+    claude_code_version = detect_claude_code_version() if (args.pilot or args.full) else None
     (state_dir / "selection.json").write_text(
-        json.dumps({"seed": args.seed, "ecc_commit": ecc_commit, "tasks": [t.to_dict() for t in tasks]}, indent=2),
+        json.dumps(
+            {
+                "seed": args.seed,
+                "ecc_commit": ecc_commit,
+                **selection_pin(state_dir / "selection.json", args.model, claude_code_version),
+                "tasks": [t.to_dict() for t in tasks],
+            },
+            indent=2,
+        ),
         encoding="utf-8",
     )
 
@@ -2190,6 +2279,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     # par run — voir `resolve_auth_mode`. Lève `SystemExit` si `--auth
     # api-key` est demandé explicitement sans `ANTHROPIC_API_KEY`.
     auth_mode = resolve_auth_mode(args.auth)
+    refuse_bare_for_governed_arms(selected_arms, auth_mode)  # B-06 : jamais `--bare` sur un bras gouverné
     print(f"[auth] mode : {auth_mode}")
 
     # Garde-fou lot H (#582) : avant tout appel `claude -p` (jamais pour
@@ -2226,11 +2316,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     (state_dir / "toolchain_check.json").write_text(json.dumps(toolchain_check, indent=2), encoding="utf-8")
 
     results_path = state_dir / "results.jsonl"
-    already_done: set[tuple[str, str, int]] = set()
-    if args.resume and results_path.is_file():
-        for line in results_path.read_text(encoding="utf-8").splitlines():
-            record = json.loads(line)
-            already_done.add((record["task_id"], record["arm"], record["run_index"]))
+    # Clés enregistrées : sautées avec ``--resume`` ; sinon rejouées, dossier effacé (alerte plus bas).
+    try:
+        previous_rows = read_results_rows(results_path) if results_path.is_file() else []
+    except ValueError as exc:  # ligne tronquée : arrêt net avant tout run
+        print(str(exc), file=sys.stderr)
+        return 1
+    recorded_keys = {(row["task_id"], row["arm"], row["run_index"]) for row in previous_rows}
+    already_done = recorded_keys if args.resume else set()
 
     if args.pilot:
         selected = tasks[:2]
@@ -2240,19 +2333,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         k = K_REPLAY
 
     records: list[RunRecord] = []
-    if args.resume and results_path.is_file():
-        for line in results_path.read_text(encoding="utf-8").splitlines():
-            d = json.loads(line)
-            records.append(RunRecord(**d))
+    if args.resume:
+        records.extend(RunRecord(**row) for row in previous_rows)
 
     disk_exhausted = False
+    contaminated = False
     with open(results_path, "a", encoding="utf-8") as results_f:
         for task in selected:
-            if disk_exhausted:
+            if disk_exhausted or contaminated:
                 break
             order = [arm for arm in select_run_order(ARMS, task_id=task.task_id, seed=args.seed) if arm in selected_arms]
             for arm in order:
-                if disk_exhausted:
+                if disk_exhausted or contaminated:
                     break
                 for run_index in range(k):
                     key = (task.task_id, arm, run_index)
@@ -2266,18 +2358,44 @@ def main(argv: Sequence[str] | None = None) -> int:
                             file=sys.stderr,
                         )
                         break
-                    record = _run_one(
-                        task,
-                        arm,
-                        run_index,
-                        workspace=workspace,
-                        ecc_repo=ecc_repo,
-                        homes=homes,
-                        go_bin=go_bin,
-                        run_timeout_s=args.run_timeout_s,
-                        grimoire_bin=grimoire_bin,
-                        auth_mode=auth_mode,
-                    )
+                    existing_dir = run_dir_for(workspace, task, arm, run_index)
+                    if key in recorded_keys and existing_dir.exists():
+                        print(
+                            f"[ALERTE EFFACEMENT] {key} figure déjà dans results.jsonl : son dossier "
+                            f"{existing_dir} est effacé puis le run rejoué (sans --resume tout est "
+                            "rejoué) ; la ligne d'origine reste, la clé aura une ligne en double.",
+                            file=sys.stderr,
+                        )
+                    try:
+                        record = _run_one(
+                            task,
+                            arm,
+                            run_index,
+                            workspace=workspace,
+                            ecc_repo=ecc_repo,
+                            homes=homes,
+                            go_bin=go_bin,
+                            run_timeout_s=args.run_timeout_s,
+                            grimoire_bin=grimoire_bin,
+                            auth_mode=auth_mode,
+                            model=args.model,
+                            claude_code_version=claude_code_version,
+                        )
+                    except ContaminatedTaskRepoError as exc:
+                        # W1-08a : arrêt à 0 $, comme la garde du lot H. Rien n'est
+                        # écrit pour ce run : sa clé reste rejouable avec ``--resume``.
+                        print(
+                            f"[contaminated] {task.task_id} / {arm} / run{run_index} : {exc} — "
+                            "campagne arrêtée avant tout appel modèle pour ce run, 0 $ dépensé.",
+                            file=sys.stderr,
+                        )
+                        # Pas de ``return`` : les gardes de sécurité de fin de campagne doivent tourner.
+                        contaminated = True
+                        break
+                    if record.invalid:
+                        print(invalid_run_alert(record), file=sys.stderr)
+                    elif record.transcript_check == "unevaluated":
+                        print(unevaluated_run_alert(record), file=sys.stderr)
                     records.append(record)
                     results_f.write(json.dumps(record.to_dict()) + "\n")
                     results_f.flush()
@@ -2291,7 +2409,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             # déclencherait un arrêt immédiat (« les 20 tâches ont été
             # rejouées ») dès la première tâche kit. Le critère ne s'applique
             # donc qu'à une campagne qui rejoue bien les trois bras.
-            if not disk_exhausted and args.full and selected_arms == ARMS:
+            if not (disk_exhausted or contaminated) and args.full and selected_arms == ARMS:
                 stop, reason = should_stop_early(records, total_tasks=len(tasks), seed=args.seed)
                 print(f"[stop-check] {reason}")
                 if stop:
@@ -2300,7 +2418,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     expected_cost = None
     expected_cost_path = state_dir / "expected_cost.json"
-    if args.pilot:
+    if args.pilot and not contaminated:
         planned = {arm: len(tasks) * K_REPLAY for arm in ARMS}
         expected_cost = expected_cost_report(records, planned_runs_per_arm=planned)
         expected_cost_path.write_text(json.dumps(expected_cost, indent=2), encoding="utf-8")
@@ -2308,7 +2426,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif expected_cost_path.is_file():
         expected_cost = json.loads(expected_cost_path.read_text(encoding="utf-8"))
 
-    if args.full or disk_exhausted:
+    saturation_rc = 0
+    if (args.full or disk_exhausted) and not contaminated:
         report_dir = args.report_dir or (workspace / "reports" / datetime.now(tz=UTC).strftime("%Y-%m-%d"))
         write_report(
             records,
@@ -2319,7 +2438,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             rerun_arms=selected_arms,
             label=args.label,
             toolchain_check=toolchain_check,
+            results_path=results_path,
         )
+        saturation_rc = saturation_exit_code(records, fail_on_saturated=args.fail_on_saturated)
         if disk_exhausted:
             print(f"[report] rapport PARTIEL (arrêt disque) écrit sous {report_dir}")
         else:
@@ -2365,7 +2486,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif auth_mode == "api-key":
         print("[sécurité] aucune fuite d'ANTHROPIC_API_KEY détectée sous un HOME isolé ou un journal.")
 
-    return 0
+    # Contamination : gardes de sécurité passées, mais la campagne est un échec.
+    return 1 if contaminated else saturation_rc
 
 
 def _do_report_only(
@@ -2375,6 +2497,7 @@ def _do_report_only(
     report_dir: Path | None,
     arms: str | None = None,
     label: str | None = None,
+    fail_on_saturated: bool = False,
 ) -> int:
     state_dir = workspace / "state"
     results_path = state_dir / "results.jsonl"
@@ -2395,18 +2518,23 @@ def _do_report_only(
     # annoter le rapport (quels bras la campagne dont ``results.jsonl`` est
     # issu a réellement rejoués), pas à filtrer quoi que ce soit.
     rerun_arms = parse_arms(arms) if arms else None
-    write_report(
-        records,
-        out_dir,
-        total_tasks=total_tasks,
-        expected_cost=expected_cost,
-        seed=seed,
-        rerun_arms=rerun_arms,
-        label=label,
-        toolchain_check=toolchain_check,
-    )
+    try:
+        write_report(
+            records,
+            out_dir,
+            total_tasks=total_tasks,
+            expected_cost=expected_cost,
+            seed=seed,
+            rerun_arms=rerun_arms,
+            label=label,
+            toolchain_check=toolchain_check,
+            results_path=results_path,
+        )
+    except ModelMismatchError as exc:  # B-01 : appariement refusé, aucun rapport écrit
+        print(str(exc), file=sys.stderr)
+        return 1
     print(f"[report] écrit sous {out_dir}")
-    return 0
+    return saturation_exit_code(records, fail_on_saturated=fail_on_saturated)
 
 
 def _do_dry_run(
@@ -2417,7 +2545,13 @@ def _do_dry_run(
     for task in tasks:
         for arm in ARMS:
             task_dir = tasks_root / task.task_id.replace("/", "__") / arm / "prep"
+            reset_run_dir(task_dir)
             prepare_task_repo(task, task_dir)
+            try:
+                assert_task_repo_clean(task, task_dir)
+            except ContaminatedTaskRepoError as exc:
+                print(f"[contaminated] {task.task_id} / {arm} : {exc} — arrêt, 0 $ dépensé.", file=sys.stderr)
+                return 1
             hidden_tests_dir(task, tasks_root / task.task_id.replace("/", "__") / "hidden-tests")
             if arm == "nu":
                 setup_arm_nu(task_dir, npm_cache_dir=npm_cache_dir)
@@ -2450,8 +2584,11 @@ def _run_one(
     run_timeout_s: int,
     grimoire_bin: str,
     auth_mode: str = "oauth-copy",
+    model: str | None = None,
+    claude_code_version: str | None = None,
 ) -> RunRecord:
-    run_dir = workspace / "tasks" / task.task_id.replace("/", "__") / arm / f"run{run_index}"
+    run_dir = run_dir_for(workspace, task, arm, run_index)
+    reset_run_dir(run_dir)
     prepare_task_repo(task, run_dir)
     hidden_dir = hidden_tests_dir(task, workspace / "tasks" / task.task_id.replace("/", "__") / "hidden-tests")
 
@@ -2475,6 +2612,12 @@ def _run_one(
         )
     else:
         setup_result = None
+
+    # W1-08a : contrôle du dépôt préparé AVANT tout appel au modèle (0 $).
+    # ``ContaminatedTaskRepoError`` remonte : un dépôt contaminé n'est pas un
+    # résultat (jamais un RunRecord, que ``--resume`` sauterait et que
+    # l'agrégation compterait comme un échec) ; ``main`` arrête la campagne.
+    assert_task_repo_clean(task, run_dir)
 
     test_deps_install_ok: bool | None = None
     if setup_result is not None:
@@ -2505,7 +2648,7 @@ def _run_one(
         # précisément ce qui élimine le bug de rotation OAuth partagée :
         # rien n'est jamais écrit dans `home`.
         outcome = run_claude_headless(
-            run_dir, build_prompt(task), home=home, env=env, timeout_s=run_timeout_s, auth_mode=auth_mode
+            run_dir, build_prompt(task), home=home, env=env, timeout_s=run_timeout_s, auth_mode=auth_mode, model=model, arm=arm
         )
     else:
         # Les identifiants ne vivent dans `home` que le temps de cet appel : le
@@ -2520,8 +2663,17 @@ def _run_one(
                     "ou passe --auth api-key avec ANTHROPIC_API_KEY exportée."
                 )
             outcome = run_claude_headless(
-                run_dir, build_prompt(task), home=home, env=env, timeout_s=run_timeout_s, auth_mode=auth_mode
+                run_dir, build_prompt(task), home=home, env=env, timeout_s=run_timeout_s, auth_mode=auth_mode, model=model, arm=arm
             )
+
+    # W1-08b : ce que l'agent a réellement lu, y compris pour un run tué (timeout, boucle).
+    transcript_check, hidden_test_reads = check_transcript(
+        run_dir.parent / f"{run_dir.name}.stream.jsonl",
+        test_files=task.test_files,
+        run_dir=run_dir,
+        hidden_dir=hidden_dir,
+        canonical_dirs=(task.exercise_dir,),
+    )
 
     if outcome.terminated_reason in ("timeout", "loop"):
         success = False
@@ -2547,6 +2699,7 @@ def _run_one(
         run_index=run_index,
         success=success,
         total_cost_usd=outcome.total_cost_usd,
+        cost_known=bool(outcome.cost_known),
         input_tokens=outcome.input_tokens,
         output_tokens=outcome.output_tokens,
         recorded_at=datetime.now(tz=UTC).isoformat(),
@@ -2561,6 +2714,10 @@ def _run_one(
         dispatch_stats=dispatch_stats,
         toolchain_friction_bash_calls=outcome.toolchain_friction_bash_calls,
         auth_mode=auth_mode,
+        transcript_check=transcript_check,
+        hidden_test_reads=hidden_test_reads,
+        model_id=model,
+        claude_code_version=claude_code_version,
     )
 
 
