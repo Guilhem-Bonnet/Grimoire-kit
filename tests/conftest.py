@@ -144,6 +144,32 @@ def _default_no_docker_daemon(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("grimoire.tools.memory_setup.docker_daemon_reachable", lambda: False)
 
 
+@pytest.fixture(autouse=True)
+def _default_local_embedding_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The express Memory step's other machine-dependent input: whether a
+    local embedding engine (``fastembed``/``sentence-transformers``) is
+    importable (``grimoire.tools.memory_setup.local_embedding_available``).
+    The dev extras install one, the lean ``Framework Tools`` CI job
+    (``pip install -e . pytest pyyaml jsonschema``) does not — so the same
+    ``grimoire init -y`` wrote ``qdrant-local`` on one runner and ``lexical``
+    on the other, and every test of the express default failed on the lean
+    one (lot #843). Same shape as ``_default_no_docker_daemon``: one
+    deterministic default — "fastembed is importable" — for every test that
+    does not care, patched at ``_module_installed`` (the single probe
+    ``local_embedding_available`` reads) so the public function itself stays
+    real. A test that *does* care patches ``local_embedding_available`` or
+    ``_module_installed`` itself and overrides this.
+    """
+    from grimoire.tools import memory_setup
+
+    real = memory_setup._module_installed
+
+    def _with_fastembed(names: tuple[str, ...]) -> bool:
+        return "fastembed" in names or real(names)
+
+    monkeypatch.setattr(memory_setup, "_module_installed", _with_fastembed)
+
+
 @pytest.fixture(scope="session")
 def real_home() -> Path:
     """Le vrai ``$HOME``, pour les tests qui doivent prouver qu'on n'y touche pas."""
