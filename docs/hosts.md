@@ -545,6 +545,41 @@ couverte par l'exemption de réparation ("Exemption de réparation"
 ci-dessus) : un refus ne nomme jamais une commande qu'il refuserait
 lui-même. Le cockpit n'a pas de vue équivalente pour l'instant.
 
+### Règles d'armement
+
+Issue #666 (phase 5) : aucune règle ci-dessus ne juge une *composition*
+d'appels. Éditer un manifeste Flux puis `kubectl apply`, `chmod +x` puis
+exécuter, `git remote set-url` puis `git push`, `rm_target=…` puis `rm -rf
+"$rm_target"` — chaque appel isolé est sûr, la séquence ne l'est pas. Une
+règle `arms` déclare une action qui *arme* et l'action armée :
+
+```yaml
+rules:
+  - id: flux-then-apply
+    description: "éditer un manifeste Flux puis kubectl apply demande confirmation"
+    verdict_on_match: warn          # warn → ask côté hôte ; block → refus ; allow refusé au chargement
+    reason_template: "Un manifeste Flux vient d'être édité : confirme l'apply"
+    arms: {pattern: "Write(*flux/*)", then: "Bash(kubectl apply:*)", minutes: 10}
+```
+
+`pattern` et `then` parlent le langage de `tool_pattern` (ci-dessus). Un
+appel qui correspond à `pattern` pose `armed[<id>] = now + minutes` dans
+l'état de session ; tant que l'échéance n'est pas passée, un appel qui
+correspond à `then` reçoit `verdict_on_match`. L'appel courant arme *avant*
+d'être comparé à `then`, et pour un `Bash` chaque segment (`&&`, `;`, `|`)
+est comparé en plus de la ligne entière : `chmod +x s.sh && ./s.sh` est jugé
+armé d'un coup. Les antislashs d'un chemin Windows sont lus comme des `/`
+pour le motif. Fail-closed : une échéance illisible vaut armement et est
+réécrite. Une règle d'armement n'a ni compteur, ni empreinte, ni
+refroidissement — seul le couple identifiant/échéance est écrit, jamais la
+commande ni la cible qui a armé — et le calcul reste en Python (rien ne
+traverse le cœur Rust, qui reste l'oracle des compteurs).
+
+**Le kit ne livre aucune règle d'armement** (décision du 2026-10-20) : la
+première fausse alerte tuerait la confiance dans tous les budgets et
+refroidissements. Un projet déclare les siennes ; `pattern` ou `then` à `*`,
+`minutes` ≤ 0 ou une clé inconnue échouent au chargement (`GR-POL-002`).
+
 ## Coût des hooks
 
 Un hook s'exécute une fois par appel d'outil : son coût est une propriété de
