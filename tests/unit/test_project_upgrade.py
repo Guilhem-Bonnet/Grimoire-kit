@@ -914,6 +914,114 @@ def test_verify_upgrade_refuses_without_a_manifest(tmp_path: Path) -> None:
         verify_upgrade(tmp_path, tmp_path / "nope.txt")
 
 
+# Issue #691 : six sessions écrivaient la mémoire du homelab pendant la mise à
+# jour ; `verify` refusait une mise à jour réussie sur `sqlite3` et
+# `shared-context.md`, avec `manquants=[]` lisible comme « fichiers manquants ».
+
+
+def _seed_memory(root: Path) -> dict[str, Path]:
+    mem = root / "_grimoire" / "_memory"
+    (mem / "agent-learnings").mkdir(parents=True)
+    (mem / "telemetry").mkdir()
+    files = {
+        "db": mem / "grimoire_lexical.sqlite3",
+        "ctx": mem / "shared-context.md",
+        "log": mem / "activity.jsonl",
+        "tel": mem / "telemetry" / "skill-usage.jsonl",
+        "fiche": mem / "agent-learnings" / "x.md",
+    }
+    for path in files.values():
+        path.write_text("avant la mise à jour", encoding="utf-8")
+    return files
+
+
+def test_verify_upgrade_tolere_la_memoire_vivante_reecrite_par_une_session(tmp_path: Path) -> None:
+    from grimoire.tools.project_upgrade import backup_project, verify_upgrade
+
+    files = _seed_memory(tmp_path)
+    result = backup_project(tmp_path)
+    for key in ("db", "ctx", "log", "tel"):
+        files[key].write_text("écrit par une session pendant apply", encoding="utf-8")
+
+    verified = verify_upgrade(tmp_path, result.manifest)
+
+    assert verified.ok
+    assert verified.unexpected_diffs == ()
+    assert set(verified.live_diffs) == {
+        "_grimoire/_memory/grimoire_lexical.sqlite3",
+        "_grimoire/_memory/shared-context.md",
+        "_grimoire/_memory/activity.jsonl",
+        "_grimoire/_memory/telemetry/skill-usage.jsonl",
+    }
+    assert "état vivant réécrit par une session" in verified.report_path.read_text(encoding="utf-8")
+    assert verified.to_dict()["live_diffs"] == list(verified.live_diffs)
+
+
+def test_verify_upgrade_refuse_une_memoire_vivante_tronquee(tmp_path: Path) -> None:
+    """Une session réécrit, elle ne vide pas : un fichier vivant vidé reste une altération."""
+    from grimoire.tools.project_upgrade import backup_project, verify_upgrade
+
+    files = _seed_memory(tmp_path)
+    result = backup_project(tmp_path)
+    files["db"].write_bytes(b"")
+
+    verified = verify_upgrade(tmp_path, result.manifest)
+
+    assert not verified.ok
+    assert verified.unexpected_diffs == ("_grimoire/_memory/grimoire_lexical.sqlite3",)
+    assert verified.live_diffs == ()
+
+
+def test_verify_upgrade_une_fiche_du_kit_modifiee_reste_un_ecart(tmp_path: Path) -> None:
+    from grimoire.tools.project_upgrade import backup_project, verify_upgrade
+
+    files = _seed_memory(tmp_path)
+    result = backup_project(tmp_path)
+    files["fiche"].write_text("altérée", encoding="utf-8")
+    files["ctx"].write_text("session", encoding="utf-8")
+
+    verified = verify_upgrade(tmp_path, result.manifest)
+
+    assert not verified.ok
+    assert verified.unexpected_diffs == ("_grimoire/_memory/agent-learnings/x.md",)
+    assert verified.live_diffs == ("_grimoire/_memory/shared-context.md",)
+
+
+def test_verify_node_message_distingue_ecarts_manquants_et_vivants(tmp_path: Path) -> None:
+    from grimoire.cli.cmd_upgrade_flow import _node_handlers
+    from grimoire.core.exceptions import GrimoireRuntimeError
+    from grimoire.tools.project_upgrade import backup_project
+
+    files = _seed_memory(tmp_path)
+    result = backup_project(tmp_path)
+    files["fiche"].write_text("altérée", encoding="utf-8")
+    files["ctx"].write_text("session", encoding="utf-8")
+    files["log"].unlink()
+
+    verify = _node_handlers({"backup": result.to_dict()})["verify"]
+    with pytest.raises(GrimoireRuntimeError) as excinfo:
+        verify(tmp_path)
+
+    message = str(excinfo.value)
+    assert "écarts=['_grimoire/_memory/agent-learnings/x.md']" in message
+    assert "manquants=['_grimoire/_memory/activity.jsonl']" in message
+    assert "vivants=['_grimoire/_memory/shared-context.md']" in message
+
+
+def test_verify_node_ne_refuse_pas_une_mise_a_jour_sur_la_seule_memoire_vivante(tmp_path: Path) -> None:
+    from grimoire.cli.cmd_upgrade_flow import _node_handlers
+    from grimoire.tools.project_upgrade import backup_project
+
+    files = _seed_memory(tmp_path)
+    result = backup_project(tmp_path)
+    files["db"].write_text("session", encoding="utf-8")
+
+    detail = _node_handlers({"backup": result.to_dict()})["verify"](tmp_path)
+
+    assert detail["ok"] is True
+    assert detail["live_diffs"] == ["_grimoire/_memory/grimoire_lexical.sqlite3"]
+
+
 # ── probe-hook ────────────────────────────────────────────────────────────────
 
 
