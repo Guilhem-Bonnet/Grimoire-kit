@@ -376,6 +376,7 @@ def test_live_test_is_deselected_by_default_and_skips_without_a_cap(tmp_path: Pa
     base = [sys.executable, "-m", "pytest", str(live), "-p", "no:cacheprovider", "--rootdir", str(ROOT)]
     env = {k: v for k, v in os.environ.items() if not k.startswith(("GRIMOIRE_LIVE", "GRIMOIRE_REQUIRE"))}
     env["PYTHONPATH"] = str(ROOT / "src")
+    env["PYTHONUTF8"] = "1"  # sous Windows, la sortie du sous-processus serait en cp1252 et « exigé » illisible
 
     runs: list[str] = []
 
