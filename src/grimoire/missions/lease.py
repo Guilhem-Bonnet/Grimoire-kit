@@ -25,9 +25,12 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from grimoire.core.fsio import atomic_write
+
+if TYPE_CHECKING:
+    from grimoire.missions.schemas import MissionTask
 
 #: Durée de vie d'un bail sans battement de cœur (§2.3 du plan, 20 min).
 DEFAULT_LEASE_TTL_SECONDS = 20 * 60
@@ -155,19 +158,48 @@ def write_lease(path: Path, lease: LeaseFile) -> None:
     atomic_write(path, json.dumps(lease.to_dict(), ensure_ascii=False, sort_keys=True) + "\n")
 
 
-def mark_waiting(path: Path, *, entering: bool, leaving: bool) -> None:
+def mark_waiting(path: Path, *, entering: bool, leaving: bool, now: str = "") -> None:
     """Pose ou retire la marque ``waiting`` d'un fichier de bail de titulaire (K13) ; sans effet sur une barrière.
 
     Appelée avant l'événement de transition (§2.3 : le fichier d'abord). Une barrière
     (``holder=False``) n'est jamais réécrite : elle dit déjà « personne ne tient ». Fichier
     absent ou illisible : rien — le ledger tranche, comme partout.
+
+    En sortie d'attente, *now* devient le battement de cœur (KAN-FRICTIONS) : le bail ne se
+    renouvelle pas pendant l'attente, et sans cela une reprise après une longue pause rendait
+    une tâche aussitôt jugée perdue (``heartbeat``), récoltable ou re-réclamable par un autre.
     """
     if not (entering or leaving):
         return
     cached = read_lease(path)
     if cached is None or not cached.holder or cached.waiting is entering:
         return
+    if leaving and now:
+        write_lease(path, replace(cached, waiting=False, renewed_at=now, busy_until=""))
+        return
     write_lease(path, replace(cached, waiting=entering))
+
+
+def lost_reason(ledger_root: Path, task: MissionTask, now: datetime) -> str:
+    """Pourquoi le bail du claim de *task* est perdu à *now* ; ``""`` s'il vit encore (KAN-FRICTIONS).
+
+    La règle de :meth:`MissionLedger.lease_view`, sans l'horloge du journal : ``fence_pending``
+    (fichier de bail en avance sur le claim), ``expires_at`` (plafond dur passé) ou ``heartbeat``
+    (``renewed_at`` + TTL et ``busy_until`` dépassés). L'appelant ne la consulte que pour une tâche
+    tenue (``claimed``/``running``). Une horloge qui recule ne rend aucun bail perdu : elle ne libère
+    jamais une place à tort.
+    """
+    claim = task.claim
+    if claim is None:
+        return ""
+    cached = read_lease(lease_path(ledger_root, task.id))
+    if cached is not None and cached.epoch > claim.lease_epoch:
+        return "fence_pending"
+    if claim.is_expired(now):
+        return "expires_at"
+    if cached is not None and cached.epoch == claim.lease_epoch and cached.is_lost(now):
+        return "heartbeat"
+    return ""
 
 
 def backoff_delay(attempts: int) -> timedelta:

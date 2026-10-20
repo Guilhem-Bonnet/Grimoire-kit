@@ -244,6 +244,9 @@ def _resolve_review_gate(root: Path, task: Any, name: str) -> GateRefusal | None
     if verdict is None:
         return GateRefusal(name, "aucun verdict de vérification",
                            "faire vérifier le pack de preuve avant de fermer")
+    if verdict.verdict is not VerdictResult.PASSED and verdict.created_by == "declarative":  # KAN-FRICTIONS
+        return GateRefusal(name, f"dernier verdict : {verdict.verdict.value} (preuve déclarative, aucune commande lancée)",
+                           "une preuve déclarative ne ferme pas une tâche : la décision revient à un humain")
     if verdict.verdict is not VerdictResult.PASSED:
         return GateRefusal(name, f"dernier verdict : {verdict.verdict.value}",
                            "corriger ce que le verdict signale, puis revérifier")
