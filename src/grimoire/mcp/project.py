@@ -79,6 +79,10 @@ def root_dir(uri: str) -> Path | None:
         candidate = Path(url2pathname(unquote(parsed.path)))
         if parsed.netloc and parsed.netloc not in ("", "localhost"):
             return None
+    elif Path(text).is_absolute():
+        # Chemin nu, avant tout autre schéma : sous Windows, `urlparse` prend
+        # la lettre de lecteur de `C:\…` pour un schéma (vu en CI, #723).
+        candidate = Path(text)
     elif parsed.scheme:
         return None
     else:
