@@ -123,15 +123,9 @@ _STACK_SKILL_FOR_STACK: dict[str, str] = {
 def _stack_skills_for(detected: set[str]) -> list[str]:
     """Stack skills *relevant to* `detected` — named in the recommendation reason.
 
-    KNOWN GAP (verified 2026-09-18, reported rather than silently claimed
-    fixed): the scaffolder (`ProjectScaffolder._plan_archetype_agents`) does
-    not filter `archetypes/stack/skills/*.md` by detected technology — it
-    installs Atlas (stack-engineer) with *all seven* stack skills together,
-    unconditionally, whenever `stack` is the resolved (or an incidentally
-    detected) archetype. This function names the skill(s) actually relevant
-    to what was detected for the reason text; it does not change what the
-    scaffolder writes. Filtering the scaffolder's skill set to match is a
-    separate, not-yet-implemented change.
+    The scaffolder attaches the same subset (`grimoire.core.stack_skills`,
+    keyed by the scanner's detection names, #618) — this only derives the
+    text; it does not change what the scaffolder writes.
     """
     return sorted({_STACK_SKILL_FOR_STACK[name] for name in detected if name in _STACK_SKILL_FOR_STACK})
 

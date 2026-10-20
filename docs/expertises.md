@@ -126,7 +126,8 @@ tier que `up` ne régénère jamais.
 
 ## <img src="assets/icons/clipboard.svg" width="28" height="28" alt=""> État de la couverture
 
-24 des 28 entrées ont un skill livré (première et seconde vagues, issue #616). Une seule entrée
+28 des 28 entrées ont un skill livré (25 nouveaux sous `framework/expertises/skills/`, plus
+`stack-python`/`stack-typescript`/`stack-go` réutilisés tels quels, issue #616). Une seule entrée
 n'a pas encore de détection fiable : `kubernetes-managed` (distinguer une ressource de cluster
 managé d'un simple provider `aws`/`azurerm`/`google` utilisé pour autre chose demande un détecteur
 par nom de ressource Terraform, pas encore écrit) — le skill existe, l'attachement manuel
