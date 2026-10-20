@@ -1542,6 +1542,7 @@ sévérités et intégration au gate : [docs/cadrage.md](cadrage.md).
 | `grimoire cadrage init` | Poser les cinq phases du cadrage |
 | `grimoire cadrage status` | Progression, phase par phase |
 | `grimoire cadrage check` | Gate de complétude : exigences et cahier des charges doivent être renseignés |
+| `grimoire cadrage plan` | Une tâche du ledger par exigence `REQ-NNN`, ambiguïtés posées en questions (aperçu ; `--yes` écrit, `--check` couverture) |
 
 Le même gate est aussi visible dans `grimoire standard verify`/`gate`/`score`/
 `audit` : `error` sur les phases exigences/cahier-des-charges quand le need
