@@ -425,7 +425,7 @@ def _evaluate_tool_policy(hook: HookInput) -> Decision:
     # n'est rejoué que pour une session sans bail noté (PreToolUse p95 ≤ 50 ms, D21).
     from grimoire.hosts.decisions.lease_brake import held_task_id
 
-    task_id = held_task_id(hook) or active_task_id(hook.project_root, session_id=hook.session_id)
+    task_id = held_task_id(hook) or active_task_id(hook.project_root, session_id=hook.session_id, agent_id=hook.agent_id)
     risk = _risk_profile(hook)
     base_verdict = (
         _engine(base_rules).evaluate(_policy_request(hook, facts, task_id, risk))

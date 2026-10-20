@@ -1473,6 +1473,7 @@ def registry_dispatches(ctx: typer.Context) -> None:
     counts = ledger.agent_dispatch_counts()
     misses = ledger.agent_miss_counts()
     delegations = ledger.delegation_counts()
+    bursts = ledger.delegation_bursts()
 
     cfg: GrimoireConfig | None = None
     try:
@@ -1509,6 +1510,7 @@ def registry_dispatches(ctx: typer.Context) -> None:
         counts=counts,
         misses=misses,
         delegations=delegations,
+        bursts=bursts,
         freshness=freshness,
         freshness_payload=freshness_payload,
     )
