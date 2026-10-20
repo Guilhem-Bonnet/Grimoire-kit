@@ -517,7 +517,7 @@ changé entre K et L, `docs/bench/rejeu-lot-l-2026-10-02.md` §1.3) ; rien n'emp
 
 Limites. La version de Claude Code qui diffère dans un lot est signalée dans le rapport, pas refusée. Le modèle effectif des sous-agents n'est pas comparé : seul le modèle demandé l'est.
 `cost_gate.py` ne compare pas les modèles de sa référence (`cost-gate-baseline.json`, lot L). Aucune suite non saturée n'existe encore : choisir ou construire des tâches où le `nu`
-échoue ou varie reste à faire, et ne se fait pas sans run payant.
+échoue ou varie reste à faire, et ne se fait pas sans run payant (proposition : §16).
 
 ## 13. Recalcul, hash des données, MDE et n requis (B-02)
 
@@ -829,3 +829,159 @@ En `unattended` à 1,48 $ : 111,85 $, 553,64 $ et 2 197,80 $. Ce pilote ne mesur
 - `build_report` n'agrège toujours pas `aidlc`.
 
 Données brutes hors dépôt : `_scratch/bench-aidlc-b06-pilot/` de la Forge (`budget.jsonl`, `ws-*/state/`, journaux `*.stream.jsonl`).
+
+## 16. Lot M : tâches discriminantes, proposition (B-07)
+
+**Statut : proposition. Aucun run payant, aucune charge IA locale.** Ce qui a été exécuté pour l'écrire : lecture du banc (`scripts/bench/`), relecture des
+`results.jsonl` des lots E à L, recherche des sources publiques, et rejeu sans modèle des tests de régression candidats tirés de l'historique du kit
+(test du correctif posé sur le parent, puis sur le correctif).
+
+### 16.1 Constat de départ
+
+- Lot L (§12) : le `nu` réussit 60 runs sur 60 et `kit-gov` aussi. Le palier 1 de B-06 (bras `aidlc`, 20 tâches, k = 1) résout aussi tout. Dans 18 runs
+  sur 20, l'agent principal écrit la solution avant le stage Code Generation. Ces résultats sont décrits aux §15.6 et §15.7 de la branche `aidlc/lot-g`,
+  qui n'est pas encore sur `main`.
+- Lots E à K (modèle par défaut, non épinglé) : le `nu` n'échoue que sur `go/palindrome-products` (0/3) et `rust/scale-generator` (1/3). Au lot L, avec
+  `claude-opus-5-5`, ces deux tâches passent 3 fois sur 3. Le dernier échec du `nu` venait d'une ambiguïté de l'énoncé (`ERRATA-lot-j-contamination.md`).
+  Le modèle actuel la tranche.
+- Le banc ne sait charger que le format polyglotte : `<langue>/exercises/practice/<slug>/.meta/config.json`. Il le tire au sort (`sample_tasks`, 5 par
+  langue, graine 551). `--subset` (B-00) ne filtre que ce tirage : avant B-07, aucune tâche hors du tirage ne pouvait être nommée. Le clone polyglotte
+  suit la tête du dépôt amont (`git clone --depth 1`) et son commit n'était pas noté.
+- Avec 0 tâche non saturée sur 20, la borne haute de Wilson à 95 % de la part de tâches où le `nu` échoue ou varie est de 16 %. Sur les 132 tâches polyglottes
+  jamais jouées avec ce modèle, on attend au plus une vingtaine de tâches discriminantes, et probablement beaucoup moins. Le polyglotte seul ne suffit pas.
+
+### 16.2 Sources évaluées
+
+| Source | Licence | Hors ligne pendant le run | Tests cachés | Contamination | Coût d'infra | Verdict |
+|---|---|---|---|---|---|---|
+| [Aider polyglot-benchmark](https://github.com/Aider-AI/polyglot-benchmark), exercices non joués | Exercism, MIT par piste | oui (toolchains locales, §4) | oui (`.meta/config.json`, `files.test`) | élevée : exercices publics depuis 2024. Les 225 sont ceux que [3 modèles sur 7 au plus résolvaient en décembre 2024](https://aider.chat/2024/12/21/polyglot.html), mais le [classement](https://aider.chat/docs/leaderboards/) atteint 88 % (gpt-5 high) et 72 % pour Claude Opus 4. | nul : déjà chargé | **à tamiser** : coût bas, rendement attendu faible. Aucune liste publique de difficulté par exercice : `benchmark/problem_stats.py` d'Aider la calcule à partir de résultats locaux, qui ne sont pas publiés. |
+| Polyglotte Java (47) et C++ (26) | idem | oui si JDK et g++ | oui | idem | `javac` et `g++` absents du poste de référence, seul `java` (JRE) est présent | écarté tant que la toolchain manque |
+| Historique de grimoire-kit : bugs réels, avec le test de régression du correctif comme test caché | celle du dépôt | oui (pytest, aucun réseau) | oui (fichiers de test du commit de correctif) | **faible** pour le modèle épinglé : les 16 candidats sont datés du 28 août au 19 octobre 2026, après sa date de coupure. Le risque monte pour les modèles suivants si le dépôt est public, et pendant le run par le réseau (voir §16.4). | venv de test préconstruit, ~1 900 fichiers par dépôt de tâche | **cœur du lot M** |
+| [SWE-bench Verified](https://huggingface.co/datasets/princeton-nlp/SWE-bench_Verified) (500) et [Lite](https://huggingface.co/datasets/princeton-nlp/SWE-bench_Lite) (300) | harnais MIT ([SWE-bench](https://github.com/SWE-bench/SWE-bench)) | oui une fois les images construites | oui (FAIL_TO_PASS) | **élevée** : [The SWE-Bench Illusion](https://arxiv.org/abs/2506.12286) mesure jusqu'à 76 % de fichiers fautifs retrouvés à partir de l'énoncé seul, contre 53 % hors du benchmark | Docker obligatoire ; le README recommande 120 Go libres, 16 Go de RAM et 8 cœurs | écarté du premier tour. Seule la colonne `difficulty` de Verified (« 1-4 hours », « >4 hours ») servirait à viser les tâches dures. |
+| SWE-bench Pro, jeu public (731 tâches, dépôts GPL) | non vérifiée | Docker | oui | non chiffrée | Docker | écarté : Docker, et un audit public (juillet 2026) jugerait environ 30 % des tâches cassées (source secondaire, non vérifiée) |
+| [SWE-rebench](https://arxiv.org/abs/2505.20411) (tâches fraîches, décontaminées par date) | non vérifiée | Docker | oui | faible par construction | Docker, images par tâche | piste pour un lot N, pas pour M |
+| [LiveCodeBench](https://livecodebench.github.io/) (concours datés) | non vérifiée | oui | tests du concours | faible si filtré après la coupure | nul | écarté : algorithmique sur un seul fichier, aucune prise pour la spécification ou le découpage |
+| [Terminal-Bench](https://github.com/laude-institute/terminal-bench) (~100 tâches, Apache-2.0) | Apache-2.0 | Docker | script de test par tâche | non chiffrée | Docker | écarté du premier tour |
+
+### 16.3 Le lot M proposé
+
+Deux blocs. Cible : 30 tâches qui survivent au tamis (§16.5). Si moins de 20 survivent, on ne lance pas la campagne et on retravaille le lot.
+
+**Bloc P, polyglotte, 132 candidats → 0 à 10 retenus.** Les 132 tâches du catalogue (python 29, javascript 44, go 34, rust 25) qui n'étaient pas dans le
+lot L sont nommées dans `docs/bench/lot-m-polyglot-sieve.json`, épinglé au commit `7e0611e77b54e2dea774cdc0aa00cf9f7ed6144f`, celui du lot L. On ne garde que
+celles où le `nu` échoue au tamis. Elles sont difficiles par construction : elles font partie des 225 que les modèles de 2024 ratent. Elles ne tiennent
+qu'en un fichier, et une méthode a peu de prise sur elles.
+
+**Bloc K, historique de grimoire-kit, 16 candidats vérifiés.** Pour chaque candidat, le dépôt est mis à l'état du parent du correctif, avec un seul commit.
+L'énoncé est le symptôme décrit dans l'issue, sans le correctif. Le test caché est la version des fichiers de test au commit de correctif. Le rejeu sans
+modèle (`_scratch/aidlc-prs/B-07.kit-history-replay.{py,jsonl}` de la Forge) donne, pour les 16 : tests verts au correctif, rouges au parent. Un 17e
+candidat, `74832783a` (#500), échoue aussi au correctif dans cet environnement : il est écarté.
+
+| Id | Correctif (parent) | Fichiers src | Test caché | Énoncé (symptôme) | Pourquoi c'est dur | Interface |
+|---|---|---:|---|---|---|---|
+| K01 | `f8cff53b5` #836 (`45c476bb0`) | 4 | `tests/unit/missions/test_locked_reservation.py` | deux claims concurrents réservent le même fichier exclusif ; un claim hérité sans `expires_at` ne libère jamais | TOCTOU entre service et ledger, threads et processus | propre |
+| K02 | `9164d8e3b` #742 (`ec88170ae`) | 3 | `tests/unit/test_runtime_atomic_writes.py` | créations concurrentes d'instances, de métadonnées de run et de traces perdues ou corrompues | concurrence sur kernel, engine et ledger | un test AST impose `core/fsio` : à citer ou retirer |
+| K03 | `ebee1a481` #695 (`5bd9464e6`) | 5 | `tests/unit/test_active_task_subagent_claims.py` | tâche active fausse après `task attach` quand les sous-agents partagent le `session_id` | invariant à travers ledger, schémas et CLI | nommer l'événement `task.session_attached` |
+| K04 | `0ea75c39c` #680 (`a1ddbefd6`) | 14 | `tests/unit/test_active_task_multi_session.py` (+ `tests/conftest.py`) | deux sessions, deux claims : chaque session doit résoudre la sienne | 14 fichiers (hooks, MCP, CLI) | fixture de `conftest` dans le patch caché |
+| K05 | `9680ae2b2` #267 (`9f0d5f00e`) | 2 | `tests/unit/missions/test_gates.py`, `tests/unit/cli/test_cmd_task_write.py` (`-k illisible`) | un `evidence-gates.yaml` cassé laisse passer `task move` et `task close` | garde qui échoue ouvert | fuite : `GatesFileError` à nommer |
+| K06 | `d9b9b9b3b` #211 (`1a3df9dfd`) | 2 | `tests/test_agentic_standard.py` (2 tests) | `gate check` sur une tâche inconnue du board répond `ok: true` | échec ouvert, sans casser `proposed` ni le cas sans board | nommer le check `gate.task_not_on_board` |
+| K07 | `30f769218` #614 (`4254aa36d`) | 3 | `tests/test_agentic_standard.py` (1 test) | une affirmation « utiliser » non prouvée passe `gate check --strict` pendant `in_progress` | contrôle ligne à ligne sans ledger fini | propre |
+| K08 | `aa6e891f3` #734 (`11cf44f0c`) | 7 | `tests/unit/core/test_claim_ledger_fail_closed.py`, `tests/unit/core/test_claim_ledger_scan_invariants.py` | en profil governed, une ligne de claim malformée ne donne qu'un avertissement | sévérité selon le profil, exemption V0 | propre |
+| K09 | `836930e30` #453 (`44f5b0e24`) | 4 | `tests/unit/test_temporal_policies.py` (`-k command_prefix_end_to_end`) | `Bash(git push:*)` n'est jamais reconnu ; `require_approval` laisse passer le premier appel | PreToolUse et PostToolUse, préfixe en mot entier | fuite : `tool_pattern_matches` ; backend Python imposé |
+| K10 | `2ed48ab30` #465 (`b2b454a62`) | 6 | `tests/unit/test_temporal_policies.py` (2 tests) | une règle `per_session` sans `tool_pattern` verrouille toute la session, `policies.yaml` compris | lecture contre mutation, exemption de réparation | fuite : `is_read_only_command` |
+| K11 | `f0233f9a6` #731 (`5e5d98927`) | 9 | `tests/unit/test_temporal_policies.py`, `tests/unit/test_hosts.py` (2 tests) | approuver une commande destructive en autorise une autre du même outil | empreinte d'action normalisée | à vérifier (trace d'import au parent) |
+| K12 | `c79292fa8` #643 (`da4e5e2ee`) | 2 | `tests/unit/test_tool_facts.py` (2 tests) | `find -delete` et `cat <<EOF > f` passent pour de la lecture seule | analyse shell sans faux positifs | propre |
+| K13 | `d5503f736` #663 (`e9e0867ac`) | 3 | `tests/security/test_injections.py` (`-k wrapped_injection`) | une commande non fiable emballée dans `bash -c` échappe à l'escalade | mémoire de session entre hooks | propre |
+| K14 | `5e5d98927` #744 (`9ba8614e1`) | 6 | `tests/unit/cli/test_cmd_flow.py` (1 test) | renvoyer une sortie déjà acceptée bloque le run au nœud suivant | idempotence de reprise | propre |
+| K15 | `38b4e468e` #595 (`a8598d8ba`) | 2 | `tests/unit/test_project_upgrade.py`, `tests/unit/cli/test_cmd_upgrade_flow_run.py` (2 tests) | `verify` ne trouve pas le manifeste quand la sauvegarde du jour est suffixée `-2` | trois endroits dupliqués | propre |
+| K17 | `fba452332` #761 (`f8cff53b5`) | 1 | `tests/test_policy_windows_destructive.py` | les suppressions destructives PowerShell et cmd ne sont pas reconnues | 22 formes exactes | énoncé à donner par familles |
+
+Réserve, si l'interface est donnée dans l'énoncé (non rejouée) : `15bf7c97a` (#194), `09c1cf464` (W1-06), `1d07927ab` (#757), `91232952d` (#752),
+`6f2b6002f` (#746), `01edb4c7c` (#226), `3329a7263` (#430). Écartés : #179 et #153 (correctif dans `conftest` seul, le test ne discrimine pas) ; les
+correctifs du coût inconnu (B-02) et du double comptage à la reprise (B-06), fondus dans des squash de lot ; #760 et #763, absents de `main`.
+
+Ce bloc est le seul à donner prise à une méthode. Les gardes qui échouent ouvert, la concurrence et les invariants multi-fichiers sont les défauts où une
+spécification, une revue ou une preuve changent le résultat. Ce sont aussi des bugs réels, livrés puis corrigés sur un dépôt développé avec des agents :
+des angles morts constatés, pas supposés.
+
+### 16.4 Chargement : ce qui existe, ce qu'il faut coder
+
+**Livré par B-07** (`scripts/bench/task_lot.py`, tests `tests/unit/test_bench_task_lot.py`, rouges puis verts) : `--task-lot <fichier>` sur
+`three_arms.py` et `aidlc_arm.py`. Le fichier, au schéma `grimoire.bench.task-lot.v1`, nomme les tâches du catalogue dans l'ordre déclaré, au lieu du
+tirage. Refus avant tout run :
+
+- fichier mal formé, identifiant hors forme `<langue>/<slug>` ou en double ;
+- tâche absente du catalogue ;
+- clone polyglotte à un autre commit que `polyglot_commit`.
+
+`selection.json` note `task_lot` et `polyglot_commit`. Le pré-enregistrement d'`aidlc` contient déjà les `task_ids`. `--subset` reste applicable après.
+
+**À coder avant le tamis** (non fait, effort estimé) :
+
+| Travail | Pourquoi | Effort |
+|---|---|---|
+| `--k` sur `three_arms.py` (aujourd'hui `--full` vaut k = 3 et `--pilot` k = 1 sur 2 tâches), champ `k` du rapport | tamis à k = 1 | 0,5 j |
+| Plafond total `--max-total-usd` et journal de budget sur `three_arms.py` (la classe `BudgetGuard` d'`aidlc_arm.py`) | le lanceur des bras `nu`/`kit-gov` n'a aucun plafond de campagne | 0,5 j |
+| Matérialiseur du bloc K : pour chaque tâche, un exercice au format polyglotte sous une langue `kit` (arbre du parent par `git archive`, `.docs/instructions.md` = énoncé, `.meta/config.json` avec `files.test` = fichiers de test du correctif), commande de test `python -m pytest -q <nœuds>` avec `GRIMOIRE_POLICIES_BACKEND=python`, dans un venv préconstruit qui ne contient **pas** grimoire-kit | réutiliser `prepare_task_repo`, `assert_task_repo_clean` (un seul commit, tests absents) et `hidden_reads` sans les dupliquer | 1,5 à 2 j |
+| Rédaction des 16 énoncés (symptôme, sans le correctif ; interface citée là où le tableau dit « fuite »), relus par Guilhem | une tâche injuste mesure l'énoncé, pas la méthode | 0,5 j |
+| Fermeture du réseau de l'agent : `--disallowedTools WebFetch,WebSearch` pour tous les bras, et détection dans la transcription de `pip download`/`pip install grimoire-kit`, des URL du dépôt et de `site-packages/grimoire` | le correctif du bloc K est public (GitHub, PyPI) : un agent en ligne peut le lire | 0,5 j |
+
+Un fichier de test modifié par le correctif (K05, K06, K07, K09 à K11, K15) est retiré entièrement du dépôt de l'agent : `assert_task_repo_clean` refuse
+un chemin de test caché présent. L'agent perd donc les tests existants de ce fichier. C'est la même règle pour tous les bras, mais elle est à déclarer.
+
+### 16.5 Protocole de validation à coût minimal
+
+Référence de coût mesurée : au lot L, le `nu` coûte 0,159 $ en médiane par run, 0,169 $ en moyenne et 0,271 $ au maximum ; `kit-gov` coûte 1,25 fois le
+`nu` en moyenne (0,211 / 0,169). `aidlc` coûte 4,592 $ en médiane au palier 1 de B-06. **Aucun coût n'est mesuré sur une tâche du bloc K** : les chiffres
+ci-dessous sont des estimations, à remplacer par la médiane mesurée après le tamis.
+
+**Étape 1, tamis : `nu` seul, k = 1, un seul journal de budget.**
+
+| Bloc | Runs | Base | Coût central | Coût haut |
+|---|---:|---|---:|---:|
+| P | 132 | 0,169 $ (moyenne) ; 0,271 $ (max lot L) | 22,31 $ | 35,77 $ |
+| K | 16 | 1,20 $ estimé ; 3,00 $ haut (dépôt de 1 900 fichiers, plusieurs modules à lire) | 19,20 $ | 48,00 $ |
+| Total | 148 | | **41,51 $** | 83,77 $ |
+
+Plafond recommandé : **90 $**. Règle de sélection, à pré-enregistrer avant le premier run : une tâche est retenue si le `nu` échoue (tests cachés rouges,
+`timeout`, `loop`), hors runs `invalid` (W1-08b), toujours relus. À k = 1, une tâche que le `nu` rate une fois sur trois n'est attrapée qu'une fois sur
+trois. Option 1b : un second run `nu` sur les seules tâches K réussies au tamis (16 × 1,20 $ = 19,20 $ estimés, plafond 50 $). Les runs du tamis
+n'entrent jamais dans la comparaison : ils ont servi à choisir, les réutiliser biaiserait le `nu` vers l'échec.
+
+**Étape 2, campagne 3 bras, k = 3, sur les tâches retenues.** Hypothèse de composition : 10 tâches P et 20 tâches K (bloc K complété par la réserve).
+`aidlc` est estimé à 9 $ par run K (fourchette 7 à 12 $) : sa cérémonie fixe d'environ 4,6 $, plus l'exploration d'un vrai dépôt.
+
+| Bras | Runs | Coût central | Coût haut |
+|---|---:|---:|---:|
+| `nu` | 90 | 77,07 $ (30 × 0,169 + 60 × 1,20) | 188,13 $ (30 × 0,271 + 60 × 3,00) |
+| `kit-gov` | 90 | 96,34 $ (× 1,25) | 235,16 $ |
+| `aidlc` | 90 | 677,76 $ (30 × 4,592 + 60 × 9) | 897,90 $ (30 × 5,930 + 60 × 12) |
+| Total | 270 | **851,17 $** | 1 321,19 $ |
+
+Plafonds recommandés, par paliers, chacun recalculé sur la médiane mesurée au palier précédent :
+
+1. **2a** : `nu` et `kit-gov`, k = 3 ; 173,41 $ estimés, plafond **260 $**. Si le `nu` réussit plus de 50 % des tâches à 1,0 (verdict `SATURÉ`, §12),
+   on arrête : le tamis a laissé passer des tâches trop faciles.
+2. **2b** : `aidlc`, k = 1 sur les 30 tâches ; 225,92 $ estimés (10 × 4,592 + 20 × 9), plafond **340 $**.
+3. **2c** : `aidlc`, 2 runs de plus par tâche ; 451,84 $ estimés, plafond à fixer sur la médiane de 2b (environ 680 $ à 1,5 fois l'estimation).
+
+**Écart minimal détectable** (`scripts/bench/power_calc.py`, B-02 §13, pire cas p = 0,5, alpha 0,05 bilatéral, puissance 0,80, deux bras non appariés) :
+**44,3 points à 20 tâches, 36,2 à 30, 31,3 à 40**. Un lot choisi parce que le `nu` y échoue ou varie place son taux près de 0,5, donc près du pire cas.
+Un effet de 20 points demanderait 99 tâches par bras. Le lot M ne peut conclure qu'à un écart massif (un bras qui résout la majorité de ce que le
+`nu` rate) ; un écart plus faible se rapportera « non détectable », jamais « équivalent ».
+
+### 16.6 Limites
+
+- Le rendement du tamis polyglotte est inconnu. Il peut être nul : le modèle épinglé a déjà levé les deux seules tâches que le `nu` ratait aux lots E à K.
+- Le coût des tâches K n'est mesuré pour aucun bras. Le tableau de l'étape 2 est une estimation, pas une mesure.
+- Le bloc K vient du dépôt du kit lui-même. Les bras `kit` et `kit-gov` pourraient y être avantagés : le kit installé dans le dépôt de tâche est celui de
+  PyPI, pas l'arbre du parent, mais ses fichiers de règles parlent des mêmes concepts. À déclarer, et à lire tâche par tâche.
+- Pour les bras `kit` et `kit-gov`, le binaire `grimoire` vient d'un venv où grimoire-kit est installé dans une version qui contient déjà les correctifs du
+  bloc K : un agent qui lit ce `site-packages` lit la solution. Il faut soit un kit installé antérieur au plus ancien correctif retenu (3.x d'août 2026),
+  soit étendre la détection de la transcription à ce chemin, soit les deux.
+- Le constat de B-06 (le code écrit avant le workflow AI-DLC) peut se répéter sur le bloc K. Il faut relever qui écrit le correctif, run par run.
+- Le rejeu sans modèle prouve que chaque test caché discrimine le parent du correctif. Il ne prouve pas que l'énoncé suffit pour le résoudre. Une tâche
+  ratée par les trois bras ne mesure rien.
+- `power_calc.py` traite les bras comme indépendants. Un test apparié (McNemar sur les mêmes tâches) serait plus puissant ; il n'est pas codé.
+- Données sources : les classements et les audits cités sont lus en ligne le 2026-10-20. Ceux de SWE-bench Pro, SWE-rebench et LiveCodeBench ne
+  donnent pas de licence lisible sur les pages consultées.

@@ -2482,7 +2482,7 @@ def test_task_repo_guards_live_in_their_own_module_and_script_does_not_grow() ->
     for name in ("ContaminatedTaskRepoError", "assert_task_repo_clean", "reset_run_dir"):
         assert getattr(ta, name).__module__ == "task_repo"
     assert (SCRIPT.parent / "task_repo.py").is_file()
-    assert len(SCRIPT.read_text(encoding="utf-8").splitlines()) <= 2584 + 36 + 12 + 6 + 4 + 78 + 7 + 9 + 5  # + 5 : B-06, garde `--bare` (bare_guard.py)
+    assert len(SCRIPT.read_text(encoding="utf-8").splitlines()) <= 2584 + 36 + 12 + 6 + 4 + 78 + 7 + 9 + 5 + 5  # + 5 : B-06, garde `--bare` (bare_guard.py) ; + 5 : B-07, `--task-lot` (logique dans task_lot.py)
 
 
 # ── W1-08b (#694) : run invalidé si la transcription lit un test caché ─────
