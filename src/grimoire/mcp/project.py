@@ -28,7 +28,7 @@ import os
 import warnings
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import unquote, urlparse
 from urllib.request import url2pathname
 
@@ -139,11 +139,13 @@ async def client_roots(ctx: Any) -> list[str]:
 
 
 def _context_class() -> type[Any]:
+    # Une seule des deux façades existe dans un environnement donné (voir
+    # server.py) : l'analyse statique ne peut résoudre qu'un import sur deux.
     try:  # mcp >= 2
-        from mcp.server.mcpserver import Context
+        from mcp.server.mcpserver import Context  # type: ignore[import-not-found,unused-ignore]
     except ImportError:  # mcp 1.x
-        from mcp.server.fastmcp import Context
-    return Context
+        from mcp.server.fastmcp import Context  # type: ignore[import-not-found,attr-defined,unused-ignore,no-redef]
+    return cast(type[Any], Context)
 
 
 def project_scoped(fn: Callable[..., Any], *, error: ErrorRenderer) -> Callable[..., Any]:
