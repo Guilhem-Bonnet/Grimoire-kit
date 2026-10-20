@@ -461,6 +461,8 @@ grimoire host sync             # sinon : réécrit les hooks avec le chemin du v
 
 Depuis la correction de l'issue #760, `grimoire host sync` écrit le chemin `.venv/bin/grimoire-hook` (et sa variante Windows pour Copilot) quand le programme n'est pas dans le PATH global. `GRIMOIRE_HOOK_COMMAND` force la commande à écrire.
 
+Le serveur MCP suit la même règle. Un projet créé ensuite reçoit dans `.mcp.json` la commande `${CLAUDE_PROJECT_DIR:-.}/.venv/bin/grimoire-mcp`, forme documentée par Claude Code. Le plugin de garde opencode et l'entrée `mcp` d'`opencode.json` reçoivent un chemin vers le venv : opencode ne documentant pas la résolution d'un chemin relatif, celui d'`opencode.json` est absolu. `GRIMOIRE_MCP_COMMAND` force la commande. `.mcp.json` n'est jamais réécrit sur un projet existant : si `grimoire doctor` signale `mcp_grimoire`, corriger sa ligne `command` à la main, ou installer le kit globalement.
+
 <img src="../assets/divider.svg" width="100%" alt="">
 
 ## <img src="../assets/icons/lightbulb.svg" width="28" height="28" alt=""> Obtenir de l'aide

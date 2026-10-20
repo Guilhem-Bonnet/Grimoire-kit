@@ -24,8 +24,11 @@ from grimoire.hosts.events import HookEvent
 from grimoire.hosts.hook_launcher import (
     BARE,
     ENV_OVERRIDE,
+    MCP_ENV_OVERRIDE,
     HookLauncher,
+    expand_project_dir,
     hook_program_resolves,
+    mcp_command,
     path_without_active_venv,
     resolve_hook_launcher,
 )
@@ -36,9 +39,9 @@ from grimoire.hosts.surface import HookSpec
 _EXE = ".exe" if os.name == "nt" else ""
 
 
-def _make_script(directory: Path) -> Path:
+def _make_script(directory: Path, name: str = "grimoire-hook") -> Path:
     directory.mkdir(parents=True, exist_ok=True)
-    script = directory / f"grimoire-hook{_EXE}"
+    script = directory / f"{name}{_EXE}"
     script.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     script.chmod(script.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     return script
@@ -55,6 +58,7 @@ def _venv(root: Path) -> tuple[Path, str]:
 @pytest.fixture(autouse=True)
 def _no_override(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(ENV_OVERRIDE, raising=False)
+    monkeypatch.delenv(MCP_ENV_OVERRIDE, raising=False)
 
 
 def test_override_wins(tmp_path: Path) -> None:
@@ -175,3 +179,73 @@ def test_doctor_accepts_a_project_venv_path(tmp_path: Path, monkeypatch: pytest.
 
 def test_doctor_silent_without_generated_hooks(tmp_path: Path) -> None:
     assert check_hook_commands(tmp_path) == []
+
+
+# --- grimoire-mcp et le plugin opencode : même défaut, même résolution ---
+
+
+def test_mcp_command_from_a_project_venv(tmp_path: Path) -> None:
+    project = tmp_path / "proj"
+    venv, python = _venv(project / ".venv")
+    _make_script(venv / "bin", "grimoire-mcp")
+    env = {"PATH": str(venv / "bin"), "VIRTUAL_ENV": str(venv)}
+    command = mcp_command(project, environ=env, executable=python, prefix=str(venv), base_prefix="/usr")
+    expected = ".venv/Scripts/grimoire-mcp.exe" if os.name == "nt" else ".venv/bin/grimoire-mcp"
+    assert command == "${CLAUDE_PROJECT_DIR:-.}/" + expected
+    assert expand_project_dir(command, project) == str(project) + "/" + expected
+
+
+def test_mcp_command_keeps_the_bare_name_for_a_global_install(tmp_path: Path) -> None:
+    global_bin = tmp_path / "global-bin"
+    _make_script(global_bin, "grimoire-mcp")
+    assert mcp_command(tmp_path, environ={"PATH": str(global_bin)}) == "grimoire-mcp"
+    assert mcp_command(tmp_path, environ={MCP_ENV_OVERRIDE: "/opt/grimoire-mcp", "PATH": ""}) == "/opt/grimoire-mcp"
+
+
+def test_scaffold_writes_the_resolved_mcp_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from grimoire.core.scaffold import ProjectScaffolder, ScaffoldPlan
+
+    monkeypatch.setenv(MCP_ENV_OVERRIDE, "${CLAUDE_PROJECT_DIR:-.}/.venv/bin/grimoire-mcp")
+    scaffolder = ProjectScaffolder.__new__(ProjectScaffolder)
+    scaffolder._target = tmp_path
+    plan = ScaffoldPlan()
+    scaffolder._plan_mcp_config(plan)
+    (render,) = plan.templates
+    assert json.loads(render.content)["mcpServers"]["grimoire"]["command"] == "${CLAUDE_PROJECT_DIR:-.}/.venv/bin/grimoire-mcp"
+
+
+def test_opencode_plugin_runs_the_resolved_hook() -> None:
+    from grimoire.hosts.emitters.opencode import _guard_plugin
+
+    hook = HookSpec(event=HookEvent.PRE_TOOL_USE, decision="policy")
+    content = _guard_plugin(hook, _RELATIVE).content
+    assert 'spawnSync(hookProgram(directory), [' in content
+    assert '"posix": ".venv/bin/grimoire-hook"' in content
+    assert 'spawnSync("grimoire-hook"' not in content
+    assert '"windows": null' in _guard_plugin(hook).content
+
+
+def test_opencode_mcp_command_is_absolute(tmp_path: Path) -> None:
+    from grimoire.hosts.emitters.opencode import _config_merge
+    from grimoire.hosts.surface import McpServerSpec
+
+    surface = type("S", (), {"mcp_servers": (McpServerSpec(name="grimoire", command="${CLAUDE_PROJECT_DIR:-.}/.venv/bin/grimoire-mcp"),)})()
+    data = _config_merge(surface, tmp_path).merge({})  # type: ignore[arg-type]
+    assert data["mcp"]["grimoire"]["command"] == [str(tmp_path) + "/.venv/bin/grimoire-mcp"]
+
+
+def test_doctor_mcp_check_ignores_the_active_venv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from grimoire.cli.cmd_up import check_mcp_json
+
+    venv = tmp_path / "venv"
+    _make_script(venv / "bin", "grimoire-mcp")
+    monkeypatch.setenv("PATH", str(venv / "bin"))
+    monkeypatch.setenv("VIRTUAL_ENV", str(venv))
+    (tmp_path / ".mcp.json").write_text(json.dumps({"mcpServers": {"grimoire": {"command": "grimoire-mcp"}}}), encoding="utf-8")
+    (check,) = check_mcp_json(tmp_path)
+    assert not check.passed
+    project_cmd = "${CLAUDE_PROJECT_DIR:-.}/.venv/bin/grimoire-mcp" + _EXE
+    _make_script(tmp_path / ".venv" / "bin", "grimoire-mcp")
+    (tmp_path / ".mcp.json").write_text(json.dumps({"mcpServers": {"grimoire": {"command": project_cmd}}}), encoding="utf-8")
+    (check,) = check_mcp_json(tmp_path)
+    assert check.passed, check.detail
