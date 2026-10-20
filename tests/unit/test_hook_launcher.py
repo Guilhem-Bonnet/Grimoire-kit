@@ -148,7 +148,7 @@ def test_program_resolution(tmp_path: Path) -> None:
 
 def _write_copilot_hook(project: Path, command: str) -> None:
     hooks = project / ".github" / "hooks"
-    hooks.mkdir(parents=True)
+    hooks.mkdir(parents=True, exist_ok=True)
     payload = {"hooks": {"PreToolUse": [{"type": "command", "command": command, "timeout": 10}]}}
     (hooks / "grimoire-pre-tool-use.json").write_text(json.dumps(payload), encoding="utf-8")
 
@@ -175,3 +175,82 @@ def test_doctor_accepts_a_project_venv_path(tmp_path: Path, monkeypatch: pytest.
 
 def test_doctor_silent_without_generated_hooks(tmp_path: Path) -> None:
     assert check_hook_commands(tmp_path) == []
+
+
+_GATEWAY_ARGS = "--hook-id grimoire-pre-compact --event PreCompact --control-file .github/hooks/forge-pre-compact.json"
+
+
+def _write_gateway(project: Path, *, executable: bool = True) -> None:
+    script = project / ".github" / "hooks" / "scripts" / "grimoire-hook-gateway.sh"
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8", newline="\n")
+    mode = script.stat().st_mode
+    script.chmod(mode | stat.S_IXUSR if executable else mode & ~(stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH))
+
+
+def _doctor_on_project_script(project: Path, monkeypatch: pytest.MonkeyPatch, command: str) -> list:
+    monkeypatch.setenv("PATH", "")
+    _write_copilot_hook(project, command)
+    return check_hook_commands(project)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="un script .sh relatif se lance par bash sous Windows")
+def test_doctor_accepts_a_relative_script_with_arguments(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write_gateway(tmp_path)
+    (check,) = _doctor_on_project_script(
+        tmp_path, monkeypatch, f".github/hooks/scripts/grimoire-hook-gateway.sh {_GATEWAY_ARGS}"
+    )
+    assert check.passed, check.detail
+
+
+def test_doctor_flags_a_missing_relative_script(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (check,) = _doctor_on_project_script(
+        tmp_path, monkeypatch, f".github/hooks/scripts/grimoire-hook-gateway.sh {_GATEWAY_ARGS}"
+    )
+    assert check.level == "fail"
+    assert "grimoire-hook-gateway.sh (not found)" in check.detail
+    assert "--control-file" not in check.detail  # le programme seul, pas ses arguments
+
+
+@pytest.mark.skipif(os.name == "nt", reason="le bit exécutable n'existe pas sous Windows")
+def test_doctor_flags_a_non_executable_relative_script(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write_gateway(tmp_path, executable=False)
+    (check,) = _doctor_on_project_script(
+        tmp_path, monkeypatch, f".github/hooks/scripts/grimoire-hook-gateway.sh {_GATEWAY_ARGS}"
+    )
+    assert check.level == "fail"
+    assert "(not executable)" in check.detail
+
+
+@pytest.mark.skipif(os.name == "nt", reason="un script .sh relatif se lance par bash sous Windows")
+@pytest.mark.parametrize("prefix", ['"$CLAUDE_PROJECT_DIR"/', "${workspaceFolder}/", "$CLAUDE_PROJECT_DIR/"])
+def test_doctor_accepts_a_project_dir_variable_with_arguments(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, prefix: str
+) -> None:
+    _write_gateway(tmp_path)
+    (check,) = _doctor_on_project_script(
+        tmp_path, monkeypatch, f"{prefix}.github/hooks/scripts/grimoire-hook-gateway.sh {_GATEWAY_ARGS}"
+    )
+    assert check.passed, check.detail
+
+
+def test_doctor_still_flags_a_venv_only_hook_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (check,) = _doctor_on_project_script(tmp_path, monkeypatch, "grimoire-hook --host copilot --event Stop")
+    assert check.level == "fail"
+    assert "(not found)" in check.detail
+
+
+def test_relative_script_cannot_escape_the_project(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    _make_script(tmp_path / "outside")
+    assert not hook_program_resolves(f"../outside/grimoire-hook{_EXE}", project)
+
+
+def test_command_program_splits_the_arguments() -> None:
+    from grimoire.hosts.hook_launcher import command_program
+
+    assert command_program("a/b.sh --x y") == "a/b.sh"
+    assert command_program('"/opt/my tools/p" --x') == '"/opt/my tools/p"'
+    assert command_program('"$CLAUDE_PROJECT_DIR"/a/b.sh --x') == '"$CLAUDE_PROJECT_DIR"/a/b.sh'
+    assert command_program(".\\a\\b.cmd --x") == ".\\a\\b.cmd"
