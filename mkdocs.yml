@@ -137,6 +137,7 @@ nav:
           - "004 — Gouvernance des runtimes cloud": adr-004-gouvernance-des-runtimes-cloud.md
           - "005 — Mission Ledger source de vérité": adr-005-mission-ledger-source-of-truth.md
       - "006 — Vue de travail": adr-006-vue-de-travail.md
+      - "008 — Actions d'infrastructure locale (proposé)": adr-008-actions-infrastructure-locale-typees.md
   - Système nodal:
       - nodal/index.md
       - Votre premier blueprint: nodal/premier-blueprint.md
