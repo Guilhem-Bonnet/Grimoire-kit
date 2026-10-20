@@ -700,6 +700,7 @@ def task_add(
     expected_evidence: list[str] | None = None,
     actor: str = "mcp-agent",
     ready: bool = False,
+    description: str = "",
     project_path: str = ".",
     ledger_root: str = "_grimoire-runtime-output/ledger",
 ) -> str:
@@ -718,6 +719,7 @@ def task_add(
         expected_evidence: Evidence the task is expected to produce (optional).
         actor: Who acts (default: "mcp-agent").
         ready: Also move it `proposed → ready` so it can be claimed right away (through the gate).
+        description: Context, rationale and leads for whoever claims the task — plain text, at most 4000 characters (#714). Shown by `task_show`, `task_context` and the cockpit card.
         project_path: Path to project root (default: current directory).
         ledger_root: Mission Ledger directory, relative to the project root.
     """
@@ -731,6 +733,7 @@ def task_add(
             actor=actor,
             origin="mcp",
             ready=ready,
+            description=description,
         )
         return json.dumps(added.to_dict(), indent=2, ensure_ascii=False)
     except (GrimoireError, OSError, ValueError) as exc:

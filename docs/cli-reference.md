@@ -686,6 +686,7 @@ prochain export l'écrase.
 | `grimoire task board export . --mission <id>` | N'exporter qu'une mission |
 | `grimoire task board export . -o <chemin>` | Écrire ailleurs que dans le board du standard |
 | `grimoire task add "<titre>" -a "<critère>" [--owner <qui>] [--ready]` | Ouvrir une tâche (un critère d'acceptation au moins) ; `--ready` la rend réclamable tout de suite, gate `proposed_to_ready` compris |
+| `grimoire task add "<titre>" -a "<critère>" --description "<brief>"` ou `--description-file <fichier>` | Donner à la tâche son contexte (pourquoi, pistes) au-delà du titre : texte brut, 4000 caractères au plus ; rendu par `task show`, l'outil MCP `task_show`, `task_context` (bundle) et la carte du cockpit (#714) |
 | `grimoire task list [--status <état>] [--mission <id>]` | Lister les tâches et leur colonne de board |
 | `grimoire task wave-checkpoint <mission> <vague> [--action status\|request\|require\|approve\|reject] [--fingerprint <empreinte>]` | Checkpoint humain d'une vague, lié à l'empreinte du contenu fusionné (arbres base, tête et merge de chaque tâche). `request` présente l'empreinte, `approve`/`reject` la citent et exigent un tour humain attesté postérieur (W2-01) ; `require` ferme le claim des vagues suivantes tant que la vague n'est pas `approved`. Une vague dont le contenu change devient `stale`. Le numéro de vague est celui de `task waves` (niveau absolu, vagues closes comprises) ; le verrou s'applique à toute transition vers `claimed` |
 | `grimoire task show <id>` | Détailler une tâche et ce que chaque prochain pas exigera |
