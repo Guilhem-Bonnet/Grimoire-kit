@@ -47,15 +47,15 @@ const SPACES = [
 // Rail : 1 explorateur, 2 bibliothèque, 3 preuves, 4 inspecteur, 5 dock.
 const RAIL = [
   { key: '1', id: 'explorer',  label: 'Explorateur', term: 'explorateur',
-    icon: 'folder-tree' },
+    icon: 'i-ui-panel-left' },
   { key: '2', id: 'library',   label: 'Bibliothèque', term: 'pattern',
-    icon: 'puzzle' },
+    icon: 'i-space-savoir' },
   { key: '3', id: 'evidence',  label: 'Preuves', term: 'evidence-pack',
-    icon: 'seal' },
+    icon: 'i-ui-files' },
   { key: '4', id: 'inspector', label: 'Inspecteur', term: 'inspecteur',
-    icon: 'clipboard' },
+    icon: 'i-ui-panel-right' },
   { key: '5', id: 'dock',      label: 'Dock', term: 'dock',
-    icon: 'terminal' },
+    icon: 'i-ui-dock' },
 ];
 
 const DOCK_TABS = [

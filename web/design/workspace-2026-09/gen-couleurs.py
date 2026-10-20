@@ -119,7 +119,7 @@ html = f'''<!doctype html>
 <body>
 <x-dc>
 <helmet>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500&amp;display=swap">
+  <link rel="stylesheet" href="../../fonts/fonts.css">
   <style>
     body {{ margin: 0; font-family: 'Geist', system-ui, sans-serif; color: #1C1E22; background: #F4F4F2; }}
     a {{ color: #B4432B; }} a:hover {{ color: #1C1E22; }}
