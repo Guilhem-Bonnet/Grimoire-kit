@@ -24,12 +24,8 @@ jobs:
     name: "Titre de PR conventionnel"
     runs-on: ubuntu-latest
     steps:
-      # La note de version et le numéro de version se déduisent du préfixe de
-      # ce titre (voir .github/release-drafter.yml). Deux raisons de le faire
-      # ici plutôt que par l'`autolabeler` de release-drafter : sur événement
-      # de PR ce dernier tourne en `[dry-run]` et ne pose rien, et la règle
-      # serait écrite deux fois — une pour valider, une pour étiqueter. Une
-      # seule expression décide, et c'est celle qui refuse.
+      # La catégorie de la PR et l'incrément de version se déduisent du préfixe
+      # de ce titre. Une seule expression décide, et c'est celle qui refuse.
       - name: Le préfixe décide de la catégorie et de l'incrément
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

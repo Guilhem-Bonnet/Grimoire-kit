@@ -1,6 +1,6 @@
 <p align="right"><a href="../README.md">README</a> · <a href="../docs">Docs</a></p>
 
-# <img src="../docs/assets/icons/clipboard.svg" width="32" height="32" alt=""> Agent Rules — Override DNA par dossier (BM-25)
+# <img src="../docs/assets/icons/doc.svg" width="32" height="32" alt=""> Agent Rules — Override DNA par dossier (BM-25)
 
 > Inspiré de `.cursorrules` / `.github/copilot-instructions.md` — des règles contextuelles
 > qui s'appliquent automatiquement quand un agent travaille dans un dossier ou module donné.
@@ -11,7 +11,7 @@
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
 
-## <img src="../docs/assets/icons/team.svg" width="28" height="28" alt=""> Format d'un fichier `.agent-rules`
+## <img src="../docs/assets/icons/fleet.svg" width="28" height="28" alt=""> Format d'un fichier `.agent-rules`
 
 Créer un fichier `.agent-rules` dans n'importe quel dossier :
 
@@ -57,7 +57,7 @@ reminders:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/microscope.svg" width="28" height="28" alt=""> Résolution des règles (priorité d'application)
+## <img src="../docs/assets/icons/search.svg" width="28" height="28" alt=""> Résolution des règles (priorité d'application)
 
 ```
 Ordre de résolution (du + spécifique au + général) :
@@ -73,7 +73,7 @@ En cas de conflit entre un `.agent-rules` enfant et un `.agent-rules` parent :
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/boomerang.svg" width="28" height="28" alt=""> Intégration dans le Context Budget Router (BM-07)
+## <img src="../docs/assets/icons/undo.svg" width="28" height="28" alt=""> Intégration dans le Context Budget Router (BM-07)
 
 Le `context-router.md` charge automatiquement les `.agent-rules` en priorité **P0** :
 
@@ -88,7 +88,7 @@ AGENT RULES RESOLUTION PROTOCOL :
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/rocket.svg" width="28" height="28" alt=""> Exemples d'usage
+## <img src="../docs/assets/icons/play.svg" width="28" height="28" alt=""> Exemples d'usage
 
 ### Sécurité renforcée sur un module critique
 
@@ -137,7 +137,7 @@ auto_load:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/plug.svg" width="28" height="28" alt=""> Création rapide
+## <img src="../docs/assets/icons/link.svg" width="28" height="28" alt=""> Création rapide
 
 ```bash
 # Dans n'importe quel dossier
@@ -154,7 +154,7 @@ EOF
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Référence croisée
+## <img src="../docs/assets/icons/doc.svg" width="28" height="28" alt=""> Référence croisée
 
 - Context Router : [framework/context-router.md](context-router.md) — chargement P0 des `.agent-rules`
 - Archetype DNA : [framework/archetype-dna.schema.yaml](archetype-dna.schema.yaml) — règles globales

@@ -1,10 +1,10 @@
 <p align="right"><a href="../../README.md">README</a> · <a href="../../docs">Docs</a></p>
 
-# <img src="../../docs/assets/icons/grimoire.svg" width="32" height="32" alt=""> Grimoire Copilot Extension — `@grimoire` — BM-23
+# Grimoire Copilot Extension — `@grimoire` — BM-23
 
 > Intégration native de Grimoire dans GitHub Copilot Chat via l'API GitHub Copilot Extensions.
 
-## <img src="../../docs/assets/icons/lightbulb.svg" width="28" height="28" alt=""> Concept
+## Concept
 
 L'extension `@grimoire` permet d'activer les agents et workflows Grimoire directement depuis l'interface Copilot Chat dans VS Code, sans quitter l'éditeur, sans copier-coller de contexte.
 
@@ -17,7 +17,7 @@ L'extension `@grimoire` permet d'activer les agents et workflows Grimoire direct
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/temple.svg" width="28" height="28" alt=""> Architecture
+## <img src="../../docs/assets/icons/layers.svg" width="28" height="28" alt=""> Architecture
 
 ```
 VS Code Copilot Chat
@@ -58,7 +58,7 @@ Grimoire MCP Server (local ou distant)
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/folder-tree.svg" width="28" height="28" alt=""> Structure du projet d'extension
+## <img src="../../docs/assets/icons/layers.svg" width="28" height="28" alt=""> Structure du projet d'extension
 
 ```
 grimoire-copilot-extension/
@@ -84,7 +84,7 @@ grimoire-copilot-extension/
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/team.svg" width="28" height="28" alt=""> Manifest de l'extension (`agent.yml`)
+## <img src="../../docs/assets/icons/fleet.svg" width="28" height="28" alt=""> Manifest de l'extension (`agent.yml`)
 
 ```yaml
 name: Grimoire
@@ -183,7 +183,7 @@ npm run dev
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/rocket.svg" width="28" height="28" alt=""> Roadmap
+## <img src="../../docs/assets/icons/play.svg" width="28" height="28" alt=""> Roadmap
 
 | Version | Features |
 |---------|---------|
@@ -194,7 +194,7 @@ npm run dev
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/network.svg" width="28" height="28" alt=""> Dépendances avec d'autres BM
+## <img src="../../docs/assets/icons/graph.svg" width="28" height="28" alt=""> Dépendances avec d'autres BM
 
 - **BM-20 (MCP Server)** : prérequis — le MCP Server doit être opérationnel
 - **BM-05 (Repo Map)** : utilisé par `/repo-map`
