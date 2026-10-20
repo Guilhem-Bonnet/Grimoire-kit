@@ -1106,6 +1106,10 @@
    "version": "3.4.2",
    "path": "archetypes/platform-engineering/shared-context.tpl.md"
   },
+  "4f48cafd08d570204d1aa5d6c53bea9d28f5a0b7bf5b6a33af6cba68f962b4ab": {
+   "version": "3.63.0",
+   "path": "framework/workflows/party-mode.md"
+  },
   "4f92d0051658af4b04666e1595aae12d1fd98397caa9f10e490c3884decb92e0": {
    "version": "3.6.1",
    "path": "framework/cc-verify.sh"
