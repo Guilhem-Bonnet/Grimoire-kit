@@ -70,8 +70,9 @@ def build_next_steps(
     whether "upgrade the memory" is offered: below what this machine can
     serve, not just "still lexical" (2026-09-18 onboarding decision, PR2).
     """
-    info_reason = resolved.reason
-    headline = f"Archetype [bold]{resolved.archetype}[/bold] installed ({info_reason}) — memory {backend}."
+    # One sentence, no nested parentheses: the reason already carries its own.
+    info_reason = resolved.reason.rstrip(".")
+    headline = f"Archetype [bold]{resolved.archetype}[/bold] installed, memory {backend} — {info_reason}."
 
     hints = unexploited_hints(
         target,
@@ -120,7 +121,7 @@ def build_next_steps(
     }
     missing = [label for key, label in _ALL_CAPABILITY_LABELS.items() if not exploited_categories[key]]
     unexploited_line = (
-        f"This project also has: {', '.join(missing)} — `grimoire --all --help` to see everything." if missing else None
+        f"Not yet used: {', '.join(missing)} — `grimoire --all --help` to see everything." if missing else None
     )
 
     return NextStepsPanel(headline=headline, actions=actions, unexploited_line=unexploited_line)

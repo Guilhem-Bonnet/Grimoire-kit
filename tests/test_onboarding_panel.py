@@ -154,3 +154,32 @@ class TestCockpitProbeIsNotDuplicated:
             panel = build_next_steps(tmp_path, resolved=resolved, backend="lexical", no_cockpit=True)
         assert mock_slug.call_count == 0
         assert "cockpit" not in (panel.unexploited_line or "")
+
+
+class TestPanelWording:
+    """Relecture du lot : titre sans parenthèses imbriquées, ligne « Not yet used »."""
+
+    def test_headline_has_no_nested_parentheses_and_names_memory(self, tmp_path: Path) -> None:
+        from grimoire.core.archetype_resolver import ArchetypeResolver
+        from grimoire.core.scanner import ScanResult, StackDetection
+
+        scan = ScanResult(
+            stacks=(StackDetection(name="python", confidence=0.9, evidence=("pyproject.toml",)),),
+            project_type="generic", root=tmp_path,
+        )
+        resolved = ArchetypeResolver().resolve(scan)
+        with patch("grimoire.core.project_capabilities.slug_for_path", return_value=None):
+            panel = build_next_steps(tmp_path, resolved=resolved, backend="qdrant-local")
+        assert panel.headline.startswith("Archetype [bold]stack[/bold] installed, memory qdrant-local — ")
+        assert "((" not in panel.headline
+        assert "installed (" not in panel.headline
+
+    def test_unexploited_line_says_not_yet_used(self, tmp_path: Path) -> None:
+        from grimoire.core.archetype_resolver import ResolvedArchetype
+
+        resolved = ResolvedArchetype(archetype="minimal", stack_agents=(), feature_agents=(), reason="r", archetypes=("minimal",))
+        with patch("grimoire.core.project_capabilities.slug_for_path", return_value=None):
+            panel = build_next_steps(tmp_path, resolved=resolved, backend="lexical")
+        assert panel.unexploited_line is not None
+        assert panel.unexploited_line.startswith("Not yet used: ")
+        assert "also has" not in panel.unexploited_line
