@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 from grimoire.core.exceptions import GrimoireMissionError
 from grimoire.missions.lease import MAX_ATTEMPTS, backoff_delay
+from grimoire.missions.questions import QUESTION_EVENTS, replay_question
 from grimoire.missions.schemas import DEFAULT_CLAIM_TTL_SECONDS, DependencyKind, MissionTask, TaskDependency, TaskState
 from grimoire.missions.session_link import resume_command
 from grimoire.missions.waiting import Question, ResumeHint, Waiting, new_question_id
@@ -194,19 +195,21 @@ def replay_link(tasks: dict[str, MissionTask], raw: dict[str, Any], payload: dic
         )
 
 
-def replay_steering(tasks: dict[str, MissionTask], evt_type: str, payload: dict[str, Any]) -> None:
-    """Pilotage humain (issue #638) : priorité et journal de consignes.
+def replay_steering(tasks: dict[str, MissionTask], evt_type: str, payload: dict[str, Any], at: str = "") -> None:
+    """Pilotage humain (issue #638) : priorité et journal de consignes ; questions et réponses (W6-07).
 
     Chaque événement ne touche qu'un champ dérivé de la tâche ; le texte
     d'une consigne n'est jamais réécrit — livraison et accusé de réception
-    s'ajoutent comme horodatages sur l'entrée existante.
+    s'ajoutent comme horodatages sur l'entrée existante. *at* : l'horodatage de l'événement.
     """
     tid = payload.get("task_id", "")
     task = tasks.get(tid)
     if task is None:
         return
     data = task.to_dict()
-    if evt_type == "task.prioritized":
+    if evt_type in QUESTION_EVENTS:
+        replay_question(data, evt_type, payload, at)
+    elif evt_type == "task.prioritized":
         data["priority"] = payload.get("to_priority", "")
     elif evt_type == "task.directive_added":
         data["directives"] = [*data.get("directives", []), dict(payload.get("directive", {}))]
