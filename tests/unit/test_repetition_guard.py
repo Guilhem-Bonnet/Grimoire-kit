@@ -314,6 +314,16 @@ def test_decide_evidence_trace_repetition_never_breaks_on_a_corrupted_state_file
 # ── Budget : PostToolUse réel ─────────────────────────────────────────────────
 
 
+def _interpreter_start_ms(env: dict[str, str]) -> float:
+    """Médiane sur cinq lancements d'un interpréteur vide, dans les mêmes conditions."""
+    samples: list[float] = []
+    for _ in range(5):
+        started = time.perf_counter()
+        subprocess.run([sys.executable, "-c", "pass"], env=env, check=True, timeout=10, capture_output=True)
+        samples.append((time.perf_counter() - started) * 1000)
+    return statistics.median(samples)
+
+
 def test_post_tool_use_budget_with_the_repetition_guard(tmp_path: Path) -> None:
     """Médiane sur 5 exécutions du hook ``PostToolUse`` réel (point d'entrée
     ``grimoire-hook``), fenêtre de répétition déjà remplie. Rapportée dans la
@@ -371,5 +381,13 @@ def test_post_tool_use_budget_with_the_repetition_guard(tmp_path: Path) -> None:
     # Lancer un interpréteur coûte plus cher hors Linux : sur un runner partagé, sous
     # xdist, la médiane a mesuré 268 et 292 ms sous Windows, 292 ms sous macOS, sans
     # aucune régression. Le plafond serré ne vaut que sous Linux.
-    ceiling_ms = 250 if sys.platform.startswith("linux") else 500
-    assert median_ms < ceiling_ms, f"médiane {median_ms:.1f} ms — régression franche par rapport au coût de base"
+    # Un runner saturé (dix workflows en file, nuit du 2026-10-20) a mesuré 270 et
+    # 326 ms sous Linux sans régression : le plafond absolu est doublé d'un plafond
+    # relatif au coût d'un interpréteur vide, mesuré dans les mêmes conditions.
+    baseline_ms = _interpreter_start_ms(env)
+    ceiling_ms = max(250 if sys.platform.startswith("linux") else 500, 10 * baseline_ms)
+    print(f"[hook-budget] interpréteur vide : {baseline_ms:.1f} ms — plafond : {ceiling_ms:.1f} ms")
+    assert median_ms < ceiling_ms, (
+        f"médiane {median_ms:.1f} ms — régression franche par rapport au coût de base "
+        f"(interpréteur vide {baseline_ms:.1f} ms, plafond {ceiling_ms:.1f} ms)"
+    )
