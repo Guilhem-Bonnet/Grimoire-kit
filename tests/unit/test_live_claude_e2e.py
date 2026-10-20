@@ -392,7 +392,9 @@ def test_live_test_is_deselected_by_default_and_skips_without_a_cap(tmp_path: Pa
     _, default = run()
     assert "1 deselected" in default, default
     code, skipped = run("-m", "live_host", "-rs")
-    assert code == 0 and "GRIMOIRE_LIVE_CLAUDE_MAX_USD absent" in skipped, (code, skipped)
+    # Sous Windows, la plateforme est refusée avant le plafond : le scénario live est POSIX seulement.
+    reason = "Linux/macOS seulement" if sys.platform == "win32" else "GRIMOIRE_LIVE_CLAUDE_MAX_USD absent"
+    assert code == 0 and reason in skipped, (code, skipped)
     code, required = run("-m", "live_host", GRIMOIRE_REQUIRE_LIVE="1")
     assert code == 1 and "live exigé" in required, (code, required)
 
