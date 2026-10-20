@@ -4,9 +4,9 @@ audience: utilisateur
 
 <p align="right"><a href="../README.md">README</a></p>
 
-# <img src="../assets/icons/puzzle.svg" width="32" height="32" alt=""> Guide des Archétypes
+# <img src="../assets/icons/layers.svg" width="32" height="32" alt=""> Guide des Archétypes
 
-## <img src="../assets/icons/puzzle.svg" width="28" height="28" alt=""> Qu'est-ce qu'un archétype ?
+## <img src="../assets/icons/layers.svg" width="28" height="28" alt=""> Qu'est-ce qu'un archétype ?
 
 Un archétype est un ensemble pré-configuré d'agents, de workflows, d'un DNA de comportements et de templates adapté à un type de projet spécifique. Chaque archétype déclare ses **traits** (règles comportementales), ses **constraints** (bloquants), ses **tools_required** et ses **acceptance_criteria** machine-lisibles.
 
@@ -36,7 +36,7 @@ bash grimoire-init.sh validate --all
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/puzzle.svg" width="28" height="28" alt=""> Archétypes disponibles
+## <img src="../assets/icons/layers.svg" width="28" height="28" alt=""> Archétypes disponibles
 
 ### `minimal` — Archétype racine universel
 
@@ -272,7 +272,7 @@ python3 framework/tools/gen-tests.py \
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/team.svg" width="28" height="28" alt=""> .agent-rules — Override DNA par dossier (BM-25)
+## <img src="../assets/icons/fleet.svg" width="28" height="28" alt=""> .agent-rules — Override DNA par dossier (BM-25)
 
 Un fichier `.agent-rules` dans n'importe quel dossier surcharge localement le DNA global :
 
@@ -294,7 +294,7 @@ Référence : [framework/agent-rules.md](https://github.com/Guilhem-Bonnet/Grimo
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/puzzle.svg" width="28" height="28" alt=""> Créer un nouvel archétype
+## <img src="../assets/icons/layers.svg" width="28" height="28" alt=""> Créer un nouvel archétype
 
 ```bash
 # Structure minimale
@@ -327,7 +327,7 @@ Voir : [creating-agents.md](creating-agents.md) et [framework/archetype-dna.sche
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/puzzle.svg" width="28" height="28" alt=""> Personnaliser un archétype installé
+## <img src="../assets/icons/layers.svg" width="28" height="28" alt=""> Personnaliser un archétype installé
 
 ### Étape 1 : Adapter les identités agents
 
@@ -368,7 +368,7 @@ echo 'rules: [{id: no-plaintext-secrets, description: "No secrets in yaml", enfo
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/microscope.svg" width="28" height="28" alt=""> Diagnostics
+## <img src="../assets/icons/search.svg" width="28" height="28" alt=""> Diagnostics
 
 ```bash
 # Health check complet
@@ -398,7 +398,7 @@ Voir [framework/tools/README.md](https://github.com/Guilhem-Bonnet/Grimoire-kit/
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/rocket.svg" width="28" height="28" alt=""> Ressources complémentaires
+## <img src="../assets/icons/play.svg" width="28" height="28" alt=""> Ressources complémentaires
 
 - [getting-started.md](getting-started.md) — Démarrage en 7 étapes
 - [memory-system.md](memory-system.md) — Mémoire Qdrant multi-collection
@@ -468,7 +468,7 @@ bash grimoire-init.sh --name "Mon App" --user "Guilhem" --auto
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/puzzle.svg" width="28" height="28" alt=""> Personnaliser un archétype
+## <img src="../assets/icons/layers.svg" width="28" height="28" alt=""> Personnaliser un archétype
 
 ### Étape 1 : Adapter les identités
 
@@ -507,7 +507,7 @@ Ce fichier est la source de vérité lue par tous les agents. Décrivez-y :
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/puzzle.svg" width="28" height="28" alt=""> Créer un nouvel archétype
+## <img src="../assets/icons/layers.svg" width="28" height="28" alt=""> Créer un nouvel archétype
 
 Pour contribuer un archétype au kit :
 

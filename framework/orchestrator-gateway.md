@@ -1,6 +1,6 @@
 <p align="right"><a href="../README.md">README</a> · <a href="../docs">Docs</a></p>
 
-# <img src="../docs/assets/icons/boomerang.svg" width="32" height="32" alt=""> Smart Orchestrator Gateway (SOG) — Point d'Entrée Unique Utilisateur
+# <img src="../docs/assets/icons/undo.svg" width="32" height="32" alt=""> Smart Orchestrator Gateway (SOG) — Point d'Entrée Unique Utilisateur
 
 > **BM-53** — Protocole d'orchestration intelligente : un seul agent face à l'utilisateur,
 > tous les autres sont des sub-agents silencieux.
@@ -15,7 +15,7 @@
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
 
-## <img src="../docs/assets/icons/temple.svg" width="28" height="28" alt=""> Architecture
+## <img src="../docs/assets/icons/layers.svg" width="28" height="28" alt=""> Architecture
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
@@ -52,7 +52,7 @@
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/boomerang.svg" width="28" height="28" alt=""> Modules de l'Orchestrateur
+## <img src="../docs/assets/icons/undo.svg" width="28" height="28" alt=""> Modules de l'Orchestrateur
 
 ### 1. Intention Analyzer — Comprendre AVANT d'agir
 
@@ -279,7 +279,7 @@ session_knowledge_graph:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/rocket.svg" width="28" height="28" alt=""> AORA — Retiré (2026-07-12)
+## <img src="../docs/assets/icons/play.svg" width="28" height="28" alt=""> AORA — Retiré (2026-07-12)
 
 > Retiré du socle le 2026-07-12 (voir `CHANGELOG.md`), zéro usage constaté. Pour les tâches
 > multi-step, le SOG continue de décomposer en checklist et d'itérer sans rendre la main entre
@@ -291,7 +291,7 @@ session_knowledge_graph:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/cognition.svg" width="28" height="28" alt=""> PCS — Progressive Context Summarization
+## PCS — Progressive Context Summarization
 
 > Pour les sessions longues (10+ échanges, 50K+ tokens estimés), le SOG gère activement le contexte.
 
@@ -339,7 +339,7 @@ Ce mécanisme permet à l'orchestrateur de maintenir la cohérence sur 50+ écha
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration avec les Protocoles Existants
+## Intégration avec les Protocoles Existants
 
 | Protocole | Relation avec SOG |
 |-----------|------------------|
@@ -364,7 +364,7 @@ Ce mécanisme permet à l'orchestrateur de maintenir la cohérence sur 50+ écha
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/cognition.svg" width="28" height="28" alt=""> Mode de Fonctionnement
+## Mode de Fonctionnement
 
 ### Mode Transparent (défaut)
 
@@ -389,7 +389,7 @@ Le Party Mode (EPIC 5) est un mode spécial de SOG où :
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration Grimoire Trace
+## Intégration Grimoire Trace
 
 ```
 [timestamp] [SOG]            [INTENT:analyzed]    primary="{intent}" | shadows={count} | complexity={level}
@@ -404,7 +404,7 @@ Le Party Mode (EPIC 5) est un mode spécial de SOG où :
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/rocket.svg" width="28" height="28" alt=""> Exemple Complet — Flux End-to-End
+## <img src="../docs/assets/icons/play.svg" width="28" height="28" alt=""> Exemple Complet — Flux End-to-End
 
 ```
 Guilhem : "Implémente l'authentification JWT pour le projet"

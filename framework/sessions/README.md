@@ -1,6 +1,6 @@
 <p align="right"><a href="../../README.md">README</a> · <a href="../../docs">Docs</a></p>
 
-# <img src="../../docs/assets/icons/grimoire.svg" width="32" height="32" alt=""> Session Branching — Guide
+# Session Branching — Guide
 
 > **BM-16** — Les sessions Grimoire peuvent être branchées comme un repo Git.
 >
@@ -13,7 +13,7 @@
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
 
-## <img src="../../docs/assets/icons/folder-tree.svg" width="28" height="28" alt=""> Structure
+## <img src="../../docs/assets/icons/layers.svg" width="28" height="28" alt=""> Structure
 
 ```
 _grimoire-output/
@@ -71,7 +71,7 @@ EOF
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> Workflow d'Exploration Branché
+## Workflow d'Exploration Branché
 
 Scénario typique : on veut comparer deux architectures avant de choisir.
 
@@ -113,7 +113,7 @@ grimoire-init.sh session-branch --cherry-pick explore-graphql "_grimoire-output/
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Convention de Nommage
+## <img src="../../docs/assets/icons/doc.svg" width="28" height="28" alt=""> Convention de Nommage
 
 ```
 {type}-{description-courte}
@@ -130,7 +130,7 @@ grimoire-init.sh session-branch --cherry-pick explore-graphql "_grimoire-output/
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/team.svg" width="28" height="28" alt=""> Intégration avec les Agents
+## <img src="../../docs/assets/icons/fleet.svg" width="28" height="28" alt=""> Intégration avec les Agents
 
 Les agents reçoivent la branche active dans leur contexte et écrivent leurs outputs dans le bon répertoire :
 

@@ -1,6 +1,6 @@
 <p align="right"><a href="../README.md">README</a> · <a href="../docs">Docs</a></p>
 
-# <img src="../docs/assets/icons/hexagon.svg" width="32" height="32" alt=""> Grimoire Agent Base Protocol v2
+# Grimoire Agent Base Protocol v2
 
 > Ce fichier contient le protocole d'activation et les règles communes à tous les agents custom.
 > **Référence complète, chargée à la demande.** Depuis 3.24, les fiches d'agents
@@ -26,7 +26,7 @@
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/cognition.svg" width="28" height="28" alt=""> HUP — Incertitude déclarée (Règle Absolue)
+## HUP — Incertitude déclarée (Règle Absolue)
 
 > **LE DEUXIÈME PRINCIPE FONDATEUR** : Un agent qui hallucine est plus dangereux qu'un agent qui dit précisément ce qui lui manque.
 
@@ -43,7 +43,7 @@
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/team.svg" width="28" height="28" alt=""> AMN — Agent Mesh Network (Conscience du Réseau)
+## <img src="../docs/assets/icons/fleet.svg" width="28" height="28" alt=""> AMN — Agent Mesh Network (Conscience du Réseau)
 
 > **TROISIÈME PRINCIPE** : Un agent n'est pas seul. Il fait partie d'un réseau maillé.
 
@@ -70,7 +70,7 @@
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/cognition.svg" width="28" height="28" alt=""> �Plan/Act Mode — Switch de Comportement
+## �Plan/Act Mode — Switch de Comportement
 
 L'agent supporte deux modes d'exécution explicites. 
 Le mode actif est indiqué en début de session ou changé à tout moment par l'utilisateur.
@@ -106,7 +106,7 @@ Mode par défaut si non précisé : [ACT]
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/cognition.svg" width="28" height="28" alt=""> Extended Thinking — Délibération Profonde
+## Extended Thinking — Délibération Profonde
 
 Pour les décisions critiques (choix d'architecture, launch/no-launch, choix de stack, revue de sécurité), utiliser le mode de délibération étendue :
 
@@ -129,7 +129,7 @@ Ne jamais sortir de [THINK] sans une décision claire et documentée.
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Maximes de Communication (Grice)
+## <img src="../docs/assets/icons/doc.svg" width="28" height="28" alt=""> Maximes de Communication (Grice)
 
 Chaque réponse d'un agent DOIT respecter les 4 maximes conversationnelles :
 
@@ -153,7 +153,7 @@ Chaque réponse d'un agent DOIT respecter les 4 maximes conversationnelles :
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/chart.svg" width="28" height="28" alt=""> Chunking 7±2 — Structure des Outputs
+## <img src="../docs/assets/icons/board.svg" width="28" height="28" alt=""> Chunking 7±2 — Structure des Outputs
 
 > Loi de Miller : la mémoire de travail humaine retient 7±2 éléments.
 
@@ -172,7 +172,7 @@ Chaque réponse d'un agent DOIT respecter les 4 maximes conversationnelles :
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/brain.svg" width="28" height="28" alt=""> Affordance Contextuelle
+## <img src="../docs/assets/icons/book.svg" width="28" height="28" alt=""> Affordance Contextuelle
 
 > Chaque réponse d'un agent DOIT se terminer par les actions disponibles.
 
@@ -195,7 +195,7 @@ Chaque réponse d'un agent DOIT respecter les 4 maximes conversationnelles :
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/team.svg" width="28" height="28" alt=""> Camouflage Adaptatif — Adaptation au Skill Level
+## <img src="../docs/assets/icons/fleet.svg" width="28" height="28" alt=""> Camouflage Adaptatif — Adaptation au Skill Level
 
 L'agent adapte automatiquement sa communication selon `{user_skill_level}` (défini dans project-context.yaml) :
 
@@ -224,7 +224,7 @@ L'agent adapte automatiquement sa communication selon `{user_skill_level}` (déf
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/cognition.svg" width="28" height="28" alt=""> Priming Cognitif
+## Priming Cognitif
 
 > **Règle** : Toujours charger le contexte pertinent AVANT de poser une question ou de demander un input.
 
@@ -242,7 +242,7 @@ L'agent adapte automatiquement sa communication selon `{user_skill_level}` (déf
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/cognition.svg" width="28" height="28" alt=""> ALS — Autonomy Level System
+## ALS — Autonomy Level System
 
 > **CINQUIÈME PRINCIPE** : L'autonomie est proportionnelle au risque, pas à l'habitude.
 > Un expert sur du code non-prod mérite un agent autonome, pas un assistant timide.
@@ -348,7 +348,7 @@ L'agent détermine le niveau via ces signaux (premier match) :
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/cognition.svg" width="28" height="28" alt=""> Plan d'exécution — Circuit Breaker & Cascading Initiative
+## Plan d'exécution — Circuit Breaker & Cascading Initiative
 
 > **AORA (Act → Observe → Reflect → Act) retiré du socle le 2026-07-12** (voir `CHANGELOG.md`,
 > zéro usage constaté). Les deux règles opposables qu'AORA portait survivent sans son nom :
@@ -420,7 +420,7 @@ Exemple : en fixant un test, l'agent voit que 2 autres tests ont le même patter
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/chart.svg" width="28" height="28" alt=""> DCF — Retiré (2026-07-12)
+## <img src="../docs/assets/icons/board.svg" width="28" height="28" alt=""> DCF — Retiré (2026-07-12)
 
 > **DCF (Decision Confidence Framework) retiré du socle le 2026-07-12** (voir `CHANGELOG.md`,
 > zéro usage constaté). La calibration exécuter/proposer/escalader reste portée par **ALS**
@@ -480,7 +480,7 @@ Budget par session :
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/lightbulb.svg" width="28" height="28" alt=""> Wabi-sabi — Acceptation de l'Imperfection
+## Wabi-sabi — Acceptation de l'Imperfection
 
 > Un MVP imparfait livré vaut mieux qu'un produit parfait jamais terminé.
 
@@ -562,7 +562,7 @@ Si >5 items domaine sont nécessaires :
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Règles Communes
+## <img src="../docs/assets/icons/doc.svg" width="28" height="28" alt=""> Règles Communes
 
 ### Communication
 - ALWAYS communicate in `{communication_language}`
@@ -657,7 +657,7 @@ Types : `agent-learnings` | `decisions` | `shared-context` | `failures`
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/chart.svg" width="28" height="28" alt=""> Self-Critique Post-Output
+## <img src="../docs/assets/icons/board.svg" width="28" height="28" alt=""> Self-Critique Post-Output
 
 > Avant de livrer un output significatif (plan, code, décision), appliquer un check rapide.
 
@@ -677,7 +677,7 @@ Types : `agent-learnings` | `decisions` | `shared-context` | `failures`
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/microscope.svg" width="28" height="28" alt=""> Référence industrielle
+## <img src="../docs/assets/icons/search.svg" width="28" height="28" alt=""> Référence industrielle
 
 > Avant de dessiner un workflow, d'arbitrer mono-agent contre multi-agent, d'ajouter un
 > outil, un serveur MCP, un hook ou un sous-agent, ou quand une revue demande « est-ce
