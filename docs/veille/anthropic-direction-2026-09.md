@@ -4,7 +4,7 @@ audience: décision
 
 <p align="right"><a href="../../README.md">README</a> · <a href="../../CHANGELOG.md">Changelog</a> · <a href="../index.md">Docs</a></p>
 
-# <img src="../assets/icons/microscope.svg" width="32" height="32" alt=""> Direction d'Anthropic — chevaucher / envelopper / ignorer (2026-09)
+# <img src="../assets/icons/search.svg" width="32" height="32" alt=""> Direction d'Anthropic — chevaucher / envelopper / ignorer (2026-09)
 
 > Lot 1.2 du [plan produit 2026-Q4](../plan-2026-q4.md#phase-1--veille-en-un-bloc--banc-à-trois-bras-issue-551),
 > issue [#551](https://github.com/Guilhem-Bonnet/Grimoire-kit/issues/551).
@@ -50,7 +50,7 @@ audience: décision
 | **Prompt caching** | TTL 5 min/1h, jusqu'à 4 points de coupure, hiérarchie `tools → system → messages`, au moins 13 correctifs de cache dans les changelogs de septembre 2026 (reprise mi-thought, effort, retry, teammates) [doc] (platform.claude.com/docs/en/build-with-claude/prompt-caching, code.claude.com/docs/en/changelog) | Le kit ne fait pas d'appel API brut pour le compte des hôtes gouvernés ; il mesure son propre surcoût de contexte injecté (métrique 3b, `additionalContext` de `SessionStart`) | **Ignorer** la mécanique de cache elle-même / **Envelopper** la mesure de surcoût | Le kit ne gère pas le cache — mais chaque octet ajouté par le kit dans `additionalContext` est un candidat à casser un point de coupure de l'hôte ; la métrique 3b existante doit rester suivie en continu, pas ponctuelle | 2.5 (déjà planifié, confirmé pertinent) |
 | **MCP Apps / MCP UI** | Extension MCP 2026-01-26 : un serveur MCP sert aussi des ressources UI interactives rendues dans le chat (formulaires, graphiques), portable entre Claude et d'autres hôtes MCP [blog] (blog.modelcontextprotocol.io/posts/2026-01-26-mcp-apps, claude.com/blog/bringing-mcp-2026-07-28-to-claude) | Le kit consomme MCP (`src/grimoire/mcp/server.py`), révision protocole 2026-07-28 déjà absorbée (PR kit #437, `framework/agentic-industry-reference.md`) ; aucune UI interactive exposée | **Ignorer** pour l'instant | Le kit produit des reçus et des rapports texte/structurés, pas des composants de chat interactifs ; à revisiter seulement si le cockpit veut s'exposer comme app MCP, aucune demande nommée aujourd'hui | — |
 
-<img src="../assets/icons/divider.svg" width="100%" alt="" style="display:none">
+
 
 ## Synthèse — dix lignes
 
