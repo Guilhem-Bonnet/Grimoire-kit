@@ -68,7 +68,7 @@ Fichiers CSS : `forge-tokens.css` 2,2 Ko, `forge-base.css` 21,3 Ko,
 ### 3.2 Constats secondaires
 
 - **Fontes distantes dans un outil local.** Chaque page importe Geist (5
-  graisses) et Geist Mono (3 graisses) depuis `fonts.googleapis.com` : 68 Ko,
+  graisses) et Geist Mono (3 graisses) depuis le CDN de Google Fonts : 68 Ko,
   et hors ligne tout retombe sur `system-ui` sans que la mise en page l'ait
   prévu. `kanban.html` ajoute deux `preconnect`.
 - **Focus clavier presque absent.** 2 à 9 règles `:focus`/`:focus-visible` par

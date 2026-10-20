@@ -379,7 +379,7 @@ def decide_activation(hook: HookInput) -> Decision:
     on its own failed collection.
     """
     _reset_temporal_session(hook)
-    active = resolve_active_task(hook.project_root, session_id=hook.session_id)
+    active = resolve_active_task(hook.project_root, session_id=hook.session_id, agent_id=hook.agent_id)
     task_id = active.task_id
     governed = _is_governed(hook.project_root)
     scaffold_detail = _scaffold_active_task(hook.project_root, task_id) if governed else {}

@@ -44,6 +44,11 @@ class HookInput:
     prompt: str = ""
     agent_name: str = ""
     session_id: str = ""
+    agent_id: str = ""
+    """The host's identifier of the subagent this hook fires in (Claude Code:
+    ``agent_id`` on tool events inside an ``Agent`` run, issue #698), or ``""``
+    in the main loop or on a host that sends none. Also read by #716 alongside
+    ``agent_type`` below."""
     stop_active: bool = False
     """True when the host is already re-running the agent because of a previous
     block. Blocking again here is how a session gets stuck in a loop."""
@@ -57,10 +62,6 @@ class HookInput:
     (issue #716). Claude Code sends ``agent_type`` on ``SessionStart`` for a
     session opened with ``claude --agent <name>`` (or the ``agent`` setting),
     and on every event fired inside a sub-agent call. ``""`` otherwise."""
-    agent_id: str = ""
-    """The host's identifier of the sub-agent instance a hook fires in
-    (Claude Code ``agent_id``, present only inside a sub-agent call — issue
-    #716). What a claim keyed on ``(session_id, agent_id)`` (#698) reads."""
     tool_use_id: str = ""
     """The host's identifier of this tool call, shared by its ``PreToolUse`` and
     ``PostToolUse`` payloads, or ``""`` when the host sends none. The temporal

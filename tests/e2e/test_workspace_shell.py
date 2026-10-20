@@ -181,12 +181,17 @@ def test_aucune_encre_rendue_sous_45(workspace: Page, theme: str) -> None:
 #: cette revue — perceptiblement une seule teinte plate malgré cinq tokens
 #: déclarés. La cible visée par tokens.css est ~1,30 ; le plancher du test
 #: garde une marge sous cette cible plutôt que de figer la valeur exacte.
-MIN_SURFACE_RATIO = 1.25
+MIN_SURFACE_RATIO = 1.05
 
 #: Les quatre paires déclarées dans l'ordre de tokens.css — pas toutes les
 #: combinaisons : ce sont les voisins qui se touchent réellement à l'écran
 #: (panneau sur toile, barre sur panneau, carte sur barre, survol sur carte).
-SURFACE_PAIRS = (("--bg", "--e1"), ("--e1", "--bar"), ("--bar", "--e2"), ("--e2", "--e3"))
+SURFACE_PAIRS = (("--ground", "--panel"),)
+
+# Douce (2026-10-17) : la profondeur ne vient plus de l'écart de luminance entre
+# cinq niveaux mais de deux seulement — la page et le panneau — plus --line et
+# --shadow. Panneau, carte et surcouche partagent le blanc en clair ; le seuil
+# descend donc à 1,05 sur la seule paire qui doit se distinguer.
 
 _SURFACE_JS = """
 (names) => {
