@@ -431,8 +431,10 @@ body[data-active-space="source"] {
 }
 
 /* Sélecteur compact (barre d'état) : même `.seg`, plus bas que les 28 px. */
+/* Variante compacte (barre d'état) : 26 px bord compris, soit des boutons de
+ * 24 px, la cible minimale (WCAG 2.5.8, test_workspace_target_size.py). */
 .seg-s {
-  height: 22px;
+  height: 26px;
 }
 
 .seg-s > button {

@@ -1,3 +1,7 @@
+---
+audience: décision
+---
+
 # ADR-008 — Actions d'infrastructure locale typées depuis le cockpit
 
 - **Statut** : proposé (en attente de la décision de Guilhem)
