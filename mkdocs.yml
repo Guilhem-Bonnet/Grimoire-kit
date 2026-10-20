@@ -49,6 +49,7 @@ plugins:
         adr-005-mission-ledger-source-of-truth.md: explications/decisions/adr-005-mission-ledger-source-of-truth.md
         adr-006-vue-de-travail.md: explications/decisions/adr-006-vue-de-travail.md
         adr-007-unification-des-taches.md: explications/decisions/adr-007-unification-des-taches.md
+        adr-008-actions-infrastructure-locale-typees.md: explications/decisions/adr-008-actions-infrastructure-locale-typees.md
         api-reference.md: reference/api.md
         archetype-guide.md: guides/choisir-un-archetype.md
         artifact-doctrine.md: explications/quand-creer-un-artefact.md
@@ -213,3 +214,4 @@ nav:
           - "005 — Mission Ledger source de vérité": explications/decisions/adr-005-mission-ledger-source-of-truth.md
           - "006 — Vue de travail": explications/decisions/adr-006-vue-de-travail.md
           - "007 — Unification des tâches": explications/decisions/adr-007-unification-des-taches.md
+          - "008 — Actions d'infrastructure locale (proposé)": explications/decisions/adr-008-actions-infrastructure-locale-typees.md

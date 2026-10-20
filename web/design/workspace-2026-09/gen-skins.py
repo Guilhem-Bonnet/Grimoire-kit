@@ -3,9 +3,10 @@ import pathlib
 HERE = pathlib.Path(__file__).parent
 TPL = (HERE / "shell.tpl.html").read_text()
 
-GEIST = '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500&amp;display=swap">'
-PLEX = '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap">'
-SOURCE = '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600&amp;family=Source+Code+Pro:wght@400;500&amp;display=swap">'
+GEIST = '<link rel="stylesheet" href="../../fonts/fonts.css">'
+# IBM Plex et Source Sans ne sont pas vendorisées : pas de lien, repli sur la pile système.
+PLEX = ''
+SOURCE = ''
 
 SKINS = {
     # Direction retenue, identité actuelle resserrée (tokens réels de forge-tokens.css)

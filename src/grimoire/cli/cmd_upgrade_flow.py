@@ -268,8 +268,10 @@ def upgrade_flow_verify(ctx: typer.Context, project_root: _PROJECT_ROOT = Path()
         typer.echo(json.dumps({"ok": result.ok, **result.to_dict()}, ensure_ascii=False))
     elif result.ok:
         console.print(f"[green]OK[/green] rapport : {result.report_path}")
+        if result.live_diffs:
+            console.print(f"[dim]état vivant réécrit par une session (toléré) : {list(result.live_diffs)}[/dim]")
     else:
-        console.print(f"[red]anomalie[/red] écarts={list(result.unexpected_diffs)} manquants={list(result.missing)}")
+        console.print(f"[red]anomalie[/red] {result.summary()}")
     if not result.ok:
         raise typer.Exit(1)
 
@@ -327,7 +329,7 @@ def _check_verify(root: Path) -> tuple[bool, str]:
         result = verify_upgrade(root, manifest)
     except GrimoireRuntimeError as exc:
         return False, str(exc)
-    return result.ok, f"unexpected={list(result.unexpected_diffs)} missing={list(result.missing)}"
+    return result.ok, result.summary()
 
 
 _CHECKS: dict[str, Any] = {
@@ -543,7 +545,7 @@ def _node_handlers(node_outputs: dict[str, dict[str, Any]]) -> dict[str, Any]:
         manifest = Path(backup_manifest) if backup_manifest else latest_backup_manifest(root)
         result = verify_upgrade(root, manifest)
         if not result.ok:
-            raise GrimoireRuntimeError(f"verify refusé : {list(result.unexpected_diffs)} manquants={list(result.missing)}")
+            raise GrimoireRuntimeError(f"verify refusé : {result.summary()}")
         return result.to_dict()
 
     return {
