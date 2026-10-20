@@ -39,7 +39,7 @@ def decide_task_context(hook: HookInput) -> Decision:
     record_human_turn(hook)
     if not is_standard_enrolled(hook.project_root):
         return Decision()
-    active = resolve_active_task(hook.project_root, session_id=hook.session_id)
+    active = resolve_active_task(hook.project_root, session_id=hook.session_id, agent_id=hook.agent_id)
     # W2-07 : la phrase « Lower Profile <profil>: <raison> » avant de lire le profil de ce tour.
     lowering, lowering_detail = record_lowering_request(hook)
     profile = session_profile(hook)
