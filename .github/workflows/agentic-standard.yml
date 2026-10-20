@@ -15,7 +15,7 @@ on:
       - "src/grimoire/core/agentic_standard.py"
       - "src/grimoire/cli/cmd_standard.py"
       - "tests/test_agentic_standard.py"
-      - "docs/standard/integration.md"
+      - "docs/guides/rendre-la-preuve-bloquante.md"
       - ".github/workflows/agentic-standard.yml"
 
 permissions:

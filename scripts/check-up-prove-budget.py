@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Budget de la preuve d'onboarding : ``grimoire up --prove`` tient sa durée déclarée.
 
-``docs/onboarding.md`` annonce un parcours J1 court. Un texte ne se vérifie
+``docs/tutoriels/onboarding.md`` annonce un parcours J1 court. Un texte ne se vérifie
 pas ; ce garde le transforme en budget testé. Il lit la sortie JSON de
 ``grimoire up --prove`` (produite par le job de release sur la roue installée
 dans un environnement vierge) et échoue si :
 
 - le rapport est illisible ou n'a pas les trois champs de la preuve ;
 - ``hooks_fired`` n'est pas vrai, ou ``first_gate`` n'est pas ``green`` ;
-- ``time_to_first_proof_s`` dépasse le budget que ``docs/onboarding.md``
+- ``time_to_first_proof_s`` dépasse le budget que ``docs/tutoriels/onboarding.md``
   déclare (``<!-- up-prove-budget-s: N -->``).
 
 Un budget absent du document échoue aussi (code 2) : un seuil qu'on ne trouve
@@ -20,7 +20,7 @@ les imports du processus avant que la commande ne démarre.
 
 Usage::
 
-    scripts/check-up-prove-budget.py --report prove.json [--doc docs/onboarding.md]
+    scripts/check-up-prove-budget.py --report prove.json [--doc docs/tutoriels/onboarding.md]
 """
 
 from __future__ import annotations
@@ -66,7 +66,7 @@ def main(argv: list[str] | None = None) -> int:
             reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--report", type=Path, required=True, help="sortie JSON de `grimoire up --prove`")
-    parser.add_argument("--doc", type=Path, default=REPO / "docs" / "onboarding.md")
+    parser.add_argument("--doc", type=Path, default=REPO / "docs" / "tutoriels" / "onboarding.md")
     args = parser.parse_args(argv)
 
     try:

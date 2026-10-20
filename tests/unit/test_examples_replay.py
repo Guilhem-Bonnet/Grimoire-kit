@@ -4,7 +4,7 @@ Un exemple du kit n'est publiable que s'il est rejouable : un répertoire
 ``examples/<nom>/`` avec ``replay.sh`` (sans modèle, déterministe) et
 ``expected.json`` (sortie attendue + paquet de preuve). Trois gardes :
 
-- chaque exemple cité par ``docs/getting-started*.md`` est rejouable ;
+- chaque exemple cité par ``docs/tutoriels/premier-projet.md`` est rejouable ;
 - chaque répertoire d'``examples/`` est rejouable ou figure dans la liste
   fermée des exemples illustratifs (qui portent la mention « non rejouable ») ;
 - chaque rejeu est exécuté et sa sortie comparée à ``expected.json``.
@@ -30,7 +30,7 @@ import pytest
 
 KIT_ROOT = Path(__file__).resolve().parents[2]
 EXAMPLES = KIT_ROOT / "examples"
-GETTING_STARTED = ("docs/getting-started.md", "docs/getting-started.en.md")
+GETTING_STARTED = ("docs/tutoriels/premier-projet.md",)
 
 # Liste fermée : récits mis en forme à la main, jamais rejoués. Un nouvel
 # exemple n'y entre pas — il doit être rejouable.
