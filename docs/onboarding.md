@@ -21,10 +21,12 @@ audience: utilisateur
 # Chemin recommandé (SDK, aucun clone nécessaire)
 pipx install grimoire-kit
 cd votre-projet
-grimoire up . --name "Mon Projet" --user "Votre Nom" --archetype minimal
+grimoire up . --name "Mon Projet" --user "Votre Nom"
 ```
 
-`grimoire up` enchaîne : init express, propagation de l'identité, standard
+L'archétype est détecté depuis la pile du projet (`stack` pour une pile
+sans domaine affirmé, `web-app`, `infra-ops`… sinon) ; `minimal` ne s'obtient
+que sur demande explicite (`-a minimal`). `grimoire up` enchaîne : init express, propagation de l'identité, standard
 agentique gouverné (profil `starter`), puis diagnostic. Idempotent — relancez-le
 quand vous voulez, il ne touche que ce qui manque. Pour le wizard complet :
 `grimoire up . --interactive`.
@@ -35,8 +37,7 @@ quand vous voulez, il ne touche que ce qui manque. Pour le wizard complet :
 ```bash
 curl -fsSL <url-install.sh> | bash -s -- --legacy \
   --name "Mon Projet" \
-  --user "Votre Nom" \
-  --archetype minimal
+  --user "Votre Nom"
 ```
 
 Sans `--legacy`, `install.sh` affiche les instructions SDK et s'arrête.
@@ -102,13 +103,14 @@ chemins qui existent mais ne portent plus de marqueur Grimoire.
 
 ### 4. Première interaction
 
-Ouvrez VS Code, activez GitHub Copilot Chat, puis tapez :
+Ouvrez votre hôte (Claude Code, Copilot Chat, Cursor…) dans le projet : les
+agents installés sont disponibles comme personas, et le hook `SessionStart`
+charge le contexte du projet. Depuis le terminal :
 
+```bash
+grimoire status          # état du projet, agents, mémoire
+grimoire --all --help    # toutes les commandes, y compris celles masquées par défaut
 ```
-/grimoire-master
-```
-
-L'agent Grimoire Master se présente avec un menu numéroté. Tapez le numéro d'une option pour commencer.
 
 ### 5. Structure à connaître
 
@@ -183,7 +185,7 @@ Le système de mémoire à 4 couches :
 
 ```bash
 # Vérifier la santé de la mémoire
-python3 framework/memory/maintenance.py health-check
+grimoire memory doctor
 
 # Voir l'état de la mémoire
 grimoire memory status
@@ -195,13 +197,13 @@ Le kit inclut une CLI unifiée :
 
 ```bash
 # Vue d'ensemble
-bash grimoire.sh status
+grimoire status
 
 # Santé du système
-bash grimoire.sh doctor
+grimoire doctor
 
-# Liste des outils disponibles
-bash grimoire.sh tools
+# Toutes les commandes disponibles
+grimoire --all --help
 
 # Qualité des artefacts
 grimoire standard score
@@ -216,12 +218,13 @@ Les archétypes sont des configurations pré-packagées pour différents types d
 
 | Archétype | Pour qui | Agents inclus |
 |-----------|---------|---------------|
-| minimal | Tout projet | Base seulement |
+| stack | Toute pile sans domaine affirmé (défaut détecté) | Atlas (stack-engineer) + skills de la pile détectée |
 | web-app | Apps web full-stack | Frontend Specialist, Fullstack Dev |
 | infra-ops | DevOps/Infrastructure | Ops Engineer, SRE |
+| platform-engineering | Plateforme, backend, SRE | Backend Engineer, Platform Architect |
 | fix-loop | Debugging intensif | Bug Hunter, Analyzer |
-| features | Feature development | Tous agents de dev |
-| meta | Framework Grimoire lui-même | Agent Optimizer, Art Director, Toolsmith |
+| creative-studio | Contenu, design | Agents créatifs |
+| minimal | Base seule, sur demande explicite (`-a minimal`) | Meta-agents seulement |
 
 ```bash
 # Installer un archétype
@@ -231,19 +234,15 @@ grimoire init . -a web-app
 grimoire registry list
 ```
 
-### Semaine 4 : NSO et Intelligence Layer
-
-Le Nervous System Orchestrator (NSO) est le méta-outil qui orchestre tout le système :
+### Semaine 4 : Expertises et mise à jour
 
 ```bash
-# Run complet du système nerveux
-python3 framework/tools/nso.py --project-root . run
+# Attacher une expertise à la demande (langage, cloud, compétence)
+grimoire expertise list --detected
+grimoire expertise add rust aws
 
-# Mode rapide
-python3 framework/tools/nso.py --project-root . run --quick
-
-# Rétrospective automatique
-python3 framework/tools/nso.py --project-root . retro
+# Mettre à jour le kit d'un projet déjà enrôlé
+grimoire upgrade-flow run --dry-run
 ```
 
 ### Workflow typique M1
@@ -254,7 +253,7 @@ python3 framework/tools/nso.py --project-root . retro
 3. [ACT]  Le SM découpe en stories
 4. [ACT]  Le Dev implémente (TDD + CC)
 5. [ACT]  Le QA valide la couverture
-6.        Le NSO fait une rétrospective
+6.        `grimoire standard gate check` prouve la clôture
 ```
 
 <img src="../assets/divider.svg" width="100%" alt="">
@@ -263,10 +262,10 @@ python3 framework/tools/nso.py --project-root . retro
 
 | Besoin | Commande |
 |--------|---------|
-| Aide Grimoire | `/grimoire-master` puis option aide |
-| Diagnostic | `bash grimoire.sh doctor` |
+| Aide Grimoire | `grimoire --all --help` |
+| Diagnostic | `grimoire doctor` |
 | Sync config | `grimoire setup --check` |
-| État mémoire | `python3 framework/memory/maintenance.py status` |
+| État mémoire | `grimoire memory status` |
 | Qualité sortie | `grimoire standard score` |
 
 
