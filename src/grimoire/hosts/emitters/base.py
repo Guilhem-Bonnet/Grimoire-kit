@@ -30,6 +30,7 @@ from typing import Any
 
 from grimoire.bridges.schemas import HostId
 from grimoire.core.fsio import atomic_write
+from grimoire.hosts.hook_launcher import HookLauncher
 from grimoire.hosts.surface import AgentSpec, ProjectSurface, ToolVerb
 
 #: Marker identifying a kit-generated artifact. Present in every managed file.
@@ -557,7 +558,7 @@ class Emitter:
     # ── helpers shared by concrete emitters ──────────────────────────────
 
     @staticmethod
-    def hook_command(host_alias: str, wire_event: str) -> str:
+    def hook_command(host_alias: str, wire_event: str, program: str = "grimoire-hook") -> str:
         """Invocation a generated hook configuration runs.
 
         A console script rather than a shell snippet keeps the hook portable
@@ -570,8 +571,33 @@ class Emitter:
         the dedicated entry point. A hook runs once per tool call, so that
         difference is paid on every action of every session. The subcommand
         stays available for humans.
+
+        *program* est ce que :func:`grimoire.hosts.hook_launcher.resolve_hook_launcher`
+        a résolu (issue #760) : le nom nu quand l'hôte le trouve dans son PATH,
+        sinon un chemin vers le venv.
         """
-        return f"grimoire-hook --host {host_alias} --event {wire_event}"
+        return f"{program} --host {host_alias} --event {wire_event}"
+
+    @staticmethod
+    def quoted_program(program: str) -> str:
+        """Entourer de guillemets un chemin qui contient une espace."""
+        return f'"{program}"' if " " in program and not program.startswith('"') else program
+
+    @staticmethod
+    def launcher_degradations(launcher: HookLauncher) -> tuple[Degradation, ...]:
+        """Signaler un hook qui ne marchera que sur cette machine (issue #760)."""
+        if not launcher.machine_specific:
+            return ()
+        return (
+            Degradation(
+                surface="hook command",
+                reason=(
+                    "grimoire-hook n'est ni dans le PATH ni dans un venv du projet : "
+                    f"chemin absolu écrit ({launcher.posix}), propre à cette machine."
+                ),
+                fallback="installer le kit avec `uv tool install grimoire-kit` (ou pipx), puis `grimoire host sync`.",
+            ),
+        )
 
     @staticmethod
     def frontmatter(fields: dict[str, Any]) -> str:

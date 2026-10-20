@@ -30,6 +30,7 @@ from grimoire.hosts.emitters.base import (
     parallel_brainstorm_section,
 )
 from grimoire.hosts.emitters.rules import with_rule_layers
+from grimoire.hosts.hook_launcher import BARE, HookLauncher, resolve_hook_launcher
 from grimoire.hosts.surface import (
     AgentSpec,
     CommandSpec,
@@ -195,19 +196,19 @@ def _prompt_file(command: CommandSpec) -> EmittedFile:
     return EmittedFile(relpath=GH_DIR / "prompts" / f"{command.slug}.prompt.md", content=content)
 
 
-def _hook_file(hook: HookSpec) -> EmittedFile:
+def _hook_file(hook: HookSpec, launcher: HookLauncher = BARE) -> EmittedFile:
     event = _WIRE_NAMES[hook.event]
-    payload: dict[str, Any] = {
-        "hooks": {
-            event: [
-                {
-                    "type": "command",
-                    "command": Emitter.hook_command(HOST_ALIAS, event),
-                    "timeout": hook.timeout,
-                }
-            ]
-        }
-    }
+    entry: dict[str, Any] = {"type": "command"}
+    if launcher.project_relative and launcher.windows:
+        # Issue #760 : un venv du projet n'est pas dans le PATH de VS Code. Le
+        # chemin part de la racine (``cwd``), et Windows a sa propre forme.
+        entry["command"] = Emitter.hook_command(HOST_ALIAS, event, f"./{launcher.posix}")
+        entry["windows"] = Emitter.hook_command(HOST_ALIAS, event, f".\\{launcher.windows}")
+        entry["cwd"] = "."
+    else:
+        entry["command"] = Emitter.hook_command(HOST_ALIAS, event, Emitter.quoted_program(launcher.posix))
+    entry["timeout"] = hook.timeout
+    payload: dict[str, Any] = {"hooks": {event: [entry]}}
     slug = hook.event.value.replace("_", "-")
     return EmittedFile(
         relpath=GH_DIR / "hooks" / f"grimoire-{slug}.json",
@@ -277,6 +278,7 @@ class CopilotEmitter(Emitter):
     host_id = HostId.GITHUB_COPILOT
 
     def plan(self, surface: ProjectSurface, project_root: Path) -> EmitPlan:
+        launcher = resolve_hook_launcher(project_root)
         files: list[EmittedFile] = []
         by_slug = {skill.slug: skill for skill in surface.skills}
         attached_slugs = {slug for agent in surface.agents for slug in agent.skills}
@@ -296,9 +298,9 @@ class CopilotEmitter(Emitter):
         # make two writers for one path, and every sync would report a
         # conflict on a file nobody actually edited.
         files.extend(_prompt_file(c) for c in surface.commands if c.source != "workflow")
-        files.extend(_hook_file(hook) for hook in surface.hooks)
+        files.extend(_hook_file(hook, launcher) for hook in surface.hooks)
 
-        degradations: list[Degradation] = []
+        degradations: list[Degradation] = list(Emitter.launcher_degradations(launcher))
         if not surface.permissions.is_empty():
             degradations.append(
                 Degradation(

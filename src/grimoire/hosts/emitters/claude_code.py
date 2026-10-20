@@ -8,6 +8,7 @@ what the host executes.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,7 @@ from grimoire.hosts.emitters.base import (
     parallel_brainstorm_section,
 )
 from grimoire.hosts.emitters.rules import with_rule_layers
+from grimoire.hosts.hook_launcher import BARE, HookLauncher, resolve_hook_launcher
 from grimoire.hosts.surface import (
     AgentSpec,
     CommandSpec,
@@ -300,7 +302,20 @@ def _matcher(hook: HookSpec, *, covered: frozenset[str] = frozenset()) -> str:
     return "|".join(tools)
 
 
-def _hook_entry(hook: HookSpec) -> dict[str, Any]:
+def _hook_program(launcher: HookLauncher) -> str:
+    """Le programme d'un hook Claude Code (issue #760).
+
+    Claude Code lance ses hooks dans un shell POSIX (Git Bash sous Windows) et
+    exporte ``CLAUDE_PROJECT_DIR`` : un venv du projet s'écrit donc depuis
+    cette variable, et non depuis le répertoire courant qui suit les ``cd``.
+    """
+    if launcher.project_relative and launcher.windows:
+        tail = launcher.windows.replace("\\", "/") if os.name == "nt" else launcher.posix
+        return f'"$CLAUDE_PROJECT_DIR"/{tail}'
+    return Emitter.quoted_program(launcher.posix)
+
+
+def _hook_entry(hook: HookSpec, launcher: HookLauncher = BARE) -> dict[str, Any]:
     entry: dict[str, Any] = {}
     if hook.event not in _MATCHERLESS:
         matcher = _matcher(hook, covered=_DECLARATIVELY_COVERED)
@@ -309,7 +324,7 @@ def _hook_entry(hook: HookSpec) -> dict[str, Any]:
     entry["hooks"] = [
         {
             "type": "command",
-            "command": Emitter.hook_command(HOST_ALIAS, _WIRE_NAMES[hook.event]),
+            "command": Emitter.hook_command(HOST_ALIAS, _WIRE_NAMES[hook.event], _hook_program(launcher)),
             "timeout": hook.timeout,
         }
     ]
@@ -343,10 +358,10 @@ def _permission_rules(surface: ProjectSurface) -> dict[str, list[str]]:
     return out
 
 
-def _settings_merge(surface: ProjectSurface) -> JsonMerge:
+def _settings_merge(surface: ProjectSurface, launcher: HookLauncher = BARE) -> JsonMerge:
     hooks_by_event: dict[str, list[dict[str, Any]]] = {}
     for hook in surface.hooks:
-        hooks_by_event.setdefault(_WIRE_NAMES[hook.event], []).append(_hook_entry(hook))
+        hooks_by_event.setdefault(_WIRE_NAMES[hook.event], []).append(_hook_entry(hook, launcher))
     permissions = _permission_rules(surface)
 
     def merge(data: dict[str, Any]) -> dict[str, Any]:
@@ -414,6 +429,7 @@ class ClaudeCodeEmitter(Emitter):
     host_id = HostId.CLAUDE_CODE_CLI
 
     def plan(self, surface: ProjectSurface, project_root: Path) -> EmitPlan:
+        launcher = resolve_hook_launcher(project_root)
         files: list[EmittedFile] = []
         by_slug = {skill.slug: skill for skill in surface.skills}
         attached_slugs = {slug for agent in surface.agents for slug in agent.skills}
@@ -436,8 +452,8 @@ class ClaudeCodeEmitter(Emitter):
             EmitPlan(
                 host_id=self.host_id,
                 files=tuple(files),
-                merges=(_settings_merge(surface),),
-                degradations=(),
+                merges=(_settings_merge(surface, launcher),),
+                degradations=Emitter.launcher_degradations(launcher),
             ),
             project_root,
         )
