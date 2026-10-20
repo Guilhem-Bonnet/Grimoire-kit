@@ -379,6 +379,8 @@ class _Claim(NamedTuple):
     #: Bail dépassé (:meth:`TaskClaim.is_expired`, issue #710) : le claim ne
     #: désigne plus aucune tâche, il n'est plus lu que pour le dire.
     expired: bool = False
+    #: Le sous-agent que le hook a vu réclamer (issue #698), ``""`` pour la boucle principale.
+    agent_id: str = ""
 
 
 def _held_claims(project_root: Path, *, actor: str = "") -> list[_Claim]:
@@ -400,7 +402,14 @@ def _held_claims(project_root: Path, *, actor: str = "") -> list[_Claim]:
     if actor:
         active = [t for t in active if t.claim is not None and t.claim.actor_id == actor]
     return [
-        _Claim(t.id, t.claim.session_id, t.claim.actor_id, t.claim.attached_explicit_at, t.claim.is_expired())
+        _Claim(
+            t.id,
+            t.claim.session_id,
+            t.claim.actor_id,
+            t.claim.attached_explicit_at,
+            t.claim.is_expired(),
+            t.claim.agent_id,
+        )
         for t in active
         if t.claim is not None
     ]
@@ -425,19 +434,26 @@ def claimed_task_ids(project_root: Path, *, actor: str = "") -> list[str]:
     return [claim.task_id for claim in _active_claims(project_root, actor=actor)]
 
 
-def _claim_of_session(mine: list[_Claim], actor: str) -> str | None:
+def _claim_of_session(mine: list[_Claim], actor: str, agent_id: str = "") -> str | None:
     """La tâche qu'une session désigne parmi ses claims, ``None`` si elle n'en désigne pas une seule.
 
     Un seul claim rattaché : c'est lui. Plusieurs (issue #695 : les sous-agents
     héritent du ``session_id`` de leur parent et rattachent leurs claims à la
-    session de l'orchestrateur) : le dernier rattachement *explicite* gagne —
-    une déclaration d'intention vaut plus qu'un claim incident — puis, à défaut,
-    le claim unique de ``GRIMOIRE_ACTOR`` dans cette session. Une égalité
-    (même horodatage explicite, plusieurs claims du même acteur) ne départage
-    rien : l'appelant retombe sur l'ambiguïté nommée.
+    session de l'orchestrateur) : d'abord le claim que *ce* sous-agent tient
+    (issue #698 : ``agent_id`` du payload de hook, posé sur le claim par le hook
+    qui a observé le ``task claim``), puis le dernier rattachement *explicite* —
+    une déclaration d'intention vaut plus qu'un claim incident — puis le claim
+    unique de ``GRIMOIRE_ACTOR`` dans cette session, enfin, pour la boucle
+    principale (sans ``agent_id``), le seul claim qu'aucun sous-agent ne tient.
+    Une égalité (même horodatage explicite, plusieurs claims du même acteur) ne
+    départage rien : l'appelant retombe sur l'ambiguïté nommée.
     """
     if len(mine) == 1:
         return mine[0].task_id
+    if agent_id:
+        own = [c for c in mine if c.agent_id == agent_id]
+        if len(own) == 1:
+            return own[0].task_id
     explicit = [c for c in mine if c.explicit_at]
     if explicit:
         latest = max(c.explicit_at for c in explicit)
@@ -448,6 +464,10 @@ def _claim_of_session(mine: list[_Claim], actor: str) -> str | None:
         by_actor = [c for c in mine if c.actor == actor]
         if len(by_actor) == 1:
             return by_actor[0].task_id
+    if not agent_id:
+        unowned = [c for c in mine if not c.agent_id]
+        if len(unowned) == 1:
+            return unowned[0].task_id
     return None
 
 
@@ -457,6 +477,7 @@ def resolve_active_task(
     env: Mapping[str, str] | None = None,
     write_cache: bool = True,
     session_id: str = "",
+    agent_id: str = "",
 ) -> ActiveTask:
     """Task a lifecycle hook should evaluate, with the rule that chose it.
 
@@ -470,7 +491,11 @@ def resolve_active_task(
        is what tells their tasks apart. When one session holds several claims
        (subagents inherit their parent's session id, issue #695) the latest
        explicit ``grimoire task attach`` wins, then the claim of
-       ``GRIMOIRE_ACTOR`` when it is unique in the session.
+       ``GRIMOIRE_ACTOR`` when it is unique in the session. A hook fired from
+       a subagent passes the host's *agent_id* (issue #698): the claim that
+       subagent was seen taking is resolved first, so two subagents of one
+       session each get their own task; the main loop (no *agent_id*) falls
+       back on the one claim no subagent holds.
     3. The Mission Ledger's single ``claimed``/``running`` task, restricted to
        ``GRIMOIRE_ACTOR``'s claims when that is set. The ledger is the source
        (ADR-005); a claim is visible here the moment it is written, whether or
@@ -509,7 +534,7 @@ def resolve_active_task(
     every_held = _held_claims(project_root)
     if session:
         mine = [c for c in every_held if not c.expired and c.session_id == session]
-        chosen = _claim_of_session(mine, actor)
+        chosen = _claim_of_session(mine, actor, agent_id.strip())
         if chosen is not None:
             try:
                 return ActiveTask(normalize_task_id(chosen), "session_claim")
@@ -561,6 +586,9 @@ def active_task_id(
     env: Mapping[str, str] | None = None,
     write_cache: bool = True,
     session_id: str = "",
+    agent_id: str = "",
 ) -> str:
     """Task a lifecycle hook should evaluate — see :func:`resolve_active_task`."""
-    return resolve_active_task(project_root, env=env, write_cache=write_cache, session_id=session_id).task_id
+    return resolve_active_task(
+        project_root, env=env, write_cache=write_cache, session_id=session_id, agent_id=agent_id
+    ).task_id
