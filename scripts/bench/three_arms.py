@@ -46,6 +46,7 @@ from typing import Any
 
 # Gardes du dépôt de tâche (W1-08a) : module voisin, aussi quand ce script est chargé par chemin.
 sys.path.append(str(Path(__file__).resolve().parent))
+import host_isolation
 import kit_lot
 from bare_guard import refuse_bare_for_governed_arms
 from budget_guard import BudgetError, BudgetGuard, budget_args, cap_coverage, estimate_plan, parse_cap, positive_int
@@ -58,6 +59,7 @@ from hidden_reads import (
     unevaluated_run_alert,
     unevaluated_runs_rows,
 )
+from host_isolation import verify_arms as verify_host_isolation
 from model_pin import (
     ModelMismatchError,
     detect_claude_code_version,
@@ -798,6 +800,8 @@ def run_environment(
 
     if npm_cache_dir is not None:
         env["npm_config_cache"] = str(npm_cache_dir)
+    env["TMPDIR"] = str(workspace / "tmp")  # B-08 : jamais /tmp ni le TMPDIR d'une session parente
+    (workspace / "tmp").mkdir(parents=True, exist_ok=True)
 
     return env
 
@@ -1595,7 +1599,8 @@ def run_claude_headless(
     if arm is not None:
         refuse_bare_for_governed_arms([arm], auth_mode, bare=bare)  # B-06, avant tout appel payant
     log_path = log_path or (task_dir.parent / f"{task_dir.name}.stream.jsonl")
-    effective_env = dict(env) if env is not None else {**os.environ, "HOME": str(home)}
+    # B-08 (§17.8) : rien de la session de l'opérateur (jetons, MCP claude.ai), et seuls les serveurs MCP déclarés.
+    effective_env = host_isolation.without_operator_session(env if env is not None else {**os.environ, "HOME": str(home)})
     cmd = [
         "claude",
         "-p",
@@ -1613,6 +1618,7 @@ def run_claude_headless(
     if model:
         # B-01 : sans ``--model`` le modèle est celui par défaut de l'outil, qui change d'une version à l'autre.
         cmd.extend(["--model", model])
+    cmd.extend(host_isolation.mcp_isolation_args(host_isolation.declared_mcp_servers(arm, task_dir)))
     cmd.extend(extra_args)
 
     outcome = RunOutcome()
@@ -2156,7 +2162,8 @@ def build_prompt(task: TaskMeta) -> str:
 
 
 def _default_workspace() -> Path:
-    return Path(os.environ.get("GRIMOIRE_BENCH_WORKSPACE", "bench-workspace")).resolve()
+    return Path(os.environ.get("GRIMOIRE_BENCH_WORKSPACE") or host_isolation.DEFAULT_WORKSPACE).resolve()
+
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -2187,6 +2194,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--kit-repo", type=Path, default=None, help="B-08 : clone de grimoire-kit (lu) qui charge le bloc K du lot M")
     parser.add_argument("--kit-tasks", type=Path, default=kit_lot.DEFAULT_TASKS_FILE, help="B-08 : tâches K (grimoire.bench.kit-tasks.v1)")
     parser.add_argument("--kit-test-venv", type=Path, default=None, help="B-08 : venv de test K sans grimoire-kit (défaut : <workspace>/kit-test-venv)")
+    parser.add_argument(host_isolation.ALLOW_OPTION, action="store_true", help="B-08 : accepte un workspace sous un projet (CLAUDE.md, .mcp.json… chargés), §3")
     parser.add_argument(
         "--model",
         type=str,
@@ -2250,6 +2258,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
 
     workspace = args.workspace or _default_workspace()
+    try:  # B-08 (§17.8) : avant tout travail, un workspace dont un ancêtre est un projet est refusé
+        host_isolation.refuse_project_ancestors(workspace, allow=args.allow_project_ancestors)
+    except host_isolation.IsolationError as exc:
+        print(f"[isolation] {exc}", file=sys.stderr)
+        return 1
     workspace.mkdir(parents=True, exist_ok=True)
 
     grimoire_bin = resolve_grimoire_bin(args.grimoire_bin)
@@ -2353,6 +2366,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     except BudgetError as exc:
         parser.error(str(exc))
     selected, k = (tasks[:2] if args.pilot else tasks), k_runs
+    try:  # B-08 (§17.8) : un contrôle d'isolation par bras avant toute tâche, compté au journal ; rouge = refus (W1-08a)
+        controls = verify_host_isolation(selected_arms, root=workspace / "isolation-control", homes=homes, guard=guard, runner=run_claude_headless, provision=credentials_provisioned, budget_args=budget_args, auth_mode=auth_mode, model=args.model, env_for=lambda arm, repo: run_environment(repo, arm, home=homes[arm], grimoire_bin=grimoire_bin, workspace=workspace, go_bin=go_bin, npm_cache_dir=npm_cache_dir))  # fmt: skip
+    except (BudgetError, host_isolation.IsolationError) as exc:
+        controls = [{"arm": "?", "ok": False, "problems": [str(exc)]}]
+    (state_dir / "isolation_control.json").write_text(json.dumps(controls, indent=2, ensure_ascii=False), encoding="utf-8")
+    if failed := [c for c in controls if not c["ok"]]:
+        print("\n".join(f"[isolation] contrôle {c['arm']} refusé : {'; '.join(c['problems'])} — aucune tâche lancée." for c in failed), file=sys.stderr)
+        return 1
 
     records: list[RunRecord] = []
     if args.resume:

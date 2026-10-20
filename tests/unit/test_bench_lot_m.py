@@ -360,6 +360,7 @@ def _patch_main(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(ta, "verify_agent_toolchain_environment", lambda *a, **k: {})
     monkeypatch.setattr(ta, "detect_claude_code_version", lambda: "test")
     monkeypatch.setattr(ta, "write_report", lambda *a, **k: None)
+    monkeypatch.setattr(ta, "verify_host_isolation", lambda *a, **k: [])  # B-08 : contrôle réel testé à part
 
 
 def _fake_runs(monkeypatch: pytest.MonkeyPatch, costs: list[tuple[float, bool]]) -> list[dict[str, Any]]:

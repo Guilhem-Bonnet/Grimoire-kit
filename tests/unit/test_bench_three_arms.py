@@ -268,6 +268,7 @@ def _patch_main_environment(monkeypatch: pytest.MonkeyPatch, synthetic_bench_roo
     monkeypatch.setattr(ta, "verify_grimoire_binary_matches_template", lambda *a, **k: None)
     monkeypatch.setattr(ta, "ensure_system_toolchains_present", lambda languages: None)
     monkeypatch.setattr(ta, "verify_agent_toolchain_environment", lambda *a, **k: {})
+    monkeypatch.setattr(ta, "verify_host_isolation", lambda *a, **k: [])  # B-08 : contrôle réel testé à part
 
 
 def test_main_stops_without_recording_when_repo_contaminated(
@@ -903,6 +904,7 @@ def test_main_full_stops_cleanly_and_writes_a_partial_report_on_low_disk(
         raise AssertionError("un run a été lancé malgré le disque sous le seuil")
 
     monkeypatch.setattr(ta, "_run_one", _fail_if_called)
+    monkeypatch.setattr(ta, "verify_host_isolation", lambda *a, **k: [])  # B-08 : contrôle réel testé à part
 
     written: dict[str, Any] = {}
 
@@ -1420,6 +1422,7 @@ def test_main_full_only_replays_the_selected_arms(
         return ta.RunRecord(task.task_id, task.language, arm, run_index, True, 0.05, 5, 5, 1, 2.0, "completed")
 
     monkeypatch.setattr(ta, "_run_one", _fake_run_one)
+    monkeypatch.setattr(ta, "verify_host_isolation", lambda *a, **k: [])  # B-08 : contrôle réel testé à part
 
     written: dict[str, Any] = {}
 
@@ -2482,7 +2485,7 @@ def test_task_repo_guards_live_in_their_own_module_and_script_does_not_grow() ->
     for name in ("ContaminatedTaskRepoError", "assert_task_repo_clean", "reset_run_dir"):
         assert getattr(ta, name).__module__ == "task_repo"
     assert (SCRIPT.parent / "task_repo.py").is_file()
-    assert len(SCRIPT.read_text(encoding="utf-8").splitlines()) <= 2584 + 36 + 12 + 6 + 4 + 78 + 7 + 9 + 5 + 5 + 26  # + 5 : B-06, garde `--bare` (bare_guard.py) ; + 5 : B-07, `--task-lot` (logique dans task_lot.py) ; + 26 : B-08, `--k`, plafond de campagne et bloc K (logique dans budget_guard.py et kit_lot.py)
+    assert len(SCRIPT.read_text(encoding="utf-8").splitlines()) <= 2584 + 36 + 12 + 6 + 4 + 78 + 7 + 9 + 5 + 5 + 26 + 21  # + 5 : B-06, garde `--bare` (bare_guard.py) ; + 5 : B-07, `--task-lot` (logique dans task_lot.py) ; + 26 : B-08, `--k`, plafond de campagne et bloc K (logique dans budget_guard.py et kit_lot.py) ; + 21 : B-08, isolation de l'hôte et contrôle avant dépense (logique dans host_isolation.py)
 
 
 # ── W1-08b (#694) : run invalidé si la transcription lit un test caché ─────

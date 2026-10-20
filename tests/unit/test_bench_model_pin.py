@@ -140,6 +140,7 @@ def _patch_main(monkeypatch: pytest.MonkeyPatch, bench_root: Path, tmp_path: Pat
     monkeypatch.setattr(ta, "find_leaked_api_keys", lambda ws, api_key=None: [])
     # B-06 : api-key ajoute --bare, refusé pour les bras gouvernés ; ces tests jouent tous les bras
     monkeypatch.setattr(ta, "resolve_auth_mode", lambda explicit: "oauth-copy")
+    monkeypatch.setattr(ta, "verify_host_isolation", lambda *a, **k: [])  # B-08 : contrôle réel testé à part
 
 
 @pytest.fixture

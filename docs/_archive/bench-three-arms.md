@@ -32,6 +32,14 @@ d'abord, puis temps, puis coût. Le critère d'arrêt du plan (§3 du plan
 | `kit` | `grimoire init . --backend local --no-cockpit` puis `grimoire host sync --host claude` (grimoire-kit ≥ 3.53.0, installé depuis PyPI). | `HOME` isolé partagé (évite d'écrire dans `~/.grimoire`) ; l'état projet (`_grimoire/`) vit dans le dépôt de tâche lui-même. |
 | `kit-gov` | Le bras `kit`, PLUS `grimoire standard init` (profil `starter`, celui qu'un développeur seul obtient sans option) et une tâche de board — à l'id de la tâche du banc — posée en `in_progress` via `grimoire task migrate-standard` (ADR-007). | `HOME` isolé propre à ce bras (`workspace/homes/kit-gov`), jamais partagé avec `kit`. |
 
+**Ce que « nu » voulait dire avant le lot M, et ce qu'il veut dire depuis (B-08).** Des lots E à L, chaque run héritait de la
+configuration de l'opérateur : les dépôts de tâche vivaient sous l'arbre de la Forge, et Claude Code, qui remonte l'arborescence,
+chargeait son `.mcp.json` (`grimoire`, `playwright`, `context7`), ses skills et agents de projet, plus les connecteurs claude.ai du
+compte copié. Au lot L, `grimoire`, `playwright` et `context7` sont connectés dans 57 des 60 runs `nu`. Aucun appel MCP n'est
+constaté au lot L. La ligne `nu` du tableau n'était donc pas tenue pour ces lots. À partir du lot M, chaque bras est isolé de
+l'hôte (§3.3) et le bras `nu` n'a plus aucun serveur MCP. Les tâches P du lot M ne sont donc pas strictement comparables à celles
+du lot L : même modèle et même consigne, mais un hôte sans serveurs ni instructions hérités.
+
 Depuis B-01, `--model` est obligatoire pour `--pilot` et `--full` : les quatre
 bras partent sur le même modèle demandé (voir §12). Avant B-01 ils utilisaient
 le modèle par défaut de Claude Code, qui a changé entre le lot K et le lot L.
@@ -227,6 +235,35 @@ dans une campagne saine. Preuve par test :
 
 Le rapport (`report.md`, voir §10) nomme le ou les modes effectivement
 utilisés par la campagne (`report["auth_modes"]`, `RunRecord.auth_mode`).
+
+### 3.3 Isolation de l'hôte (B-08, à partir du lot M)
+
+Un `HOME` isolé ne suffit pas : Claude Code lit aussi la configuration des répertoires parents du dépôt de tâche et hérite de
+l'environnement du lanceur. Lots E à L : serveurs MCP de la Forge chargés (voir §2). `scripts/bench/host_isolation.py` ferme quatre
+voies, pour chaque `claude -p` du banc (`three_arms.py`, `aidlc_arm.py` ; `live_claude_e2e.py` avait déjà `--strict-mcp-config`).
+
+| Voie | Mesure | Preuve |
+|---|---|---|
+| Serveurs MCP de l'opérateur ou d'un projet parent | `--strict-mcp-config --mcp-config '{"mcpServers":{}}'` pour `nu`. Un autre bras ne déclare que le `.mcp.json` que son installation a écrit dans le dépôt de tâche (`kit` et `kit-gov` : `grimoire-mcp` ; `ecc` et `aidlc` : aucun au 2026-10-20). | `test_bench_host_isolation.py` ; `init` du contrôle |
+| Connecteurs claude.ai du compte | `ENABLE_CLAUDEAI_MCP_SERVERS=false` | `init` du contrôle |
+| Environnement d'une session parente | retirés : `CLAUDECODE`, `CLAUDE_CODE_*` (dont le jeton de messagerie entre sessions), `VSCODE_*`, `GIT_CONFIG_*` (assistant d'identifiants GitHub), `GH_*`, `GITHUB_*`, `SSH_AUTH_SOCK`, et tout nom en `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL` ou `_KEY` sauf `ANTHROPIC_API_KEY` (mode `api-key`) ; `TMPDIR` sous `<workspace>/tmp` | `test_bench_host_isolation.py` |
+| `CLAUDE.md`, `AGENTS.md`, `.claude/`, `.mcp.json` d'un répertoire parent | le workspace est refusé si lui-même ou un ancêtre en porte un. Défaut : `/mnt/Travail/Projets/Dev/_bench-grimoire` (aucun marqueur dans ses ancêtres), ou `GRIMOIRE_BENCH_WORKSPACE`. Un workspace sous le `HOME` réel est refusé : `~/.claude/` est un marqueur. `--allow-project-ancestors` lève le refus en connaissance de cause. | `test_workspace_under_a_project_is_refused` |
+
+**Contrôle avant dépense.** Avant la première tâche de `--pilot` ou `--full`, un run de contrôle par bras, dans l'environnement
+exact d'un run, sur un dépôt jetable (`<workspace>/isolation-control/<bras>/repo`). Ce dépôt ne contient qu'un `CLAUDE.md` témoin.
+Consigne : répondre « ok » sans outil ; plafond `min(0,50 $, reste)`. Le coût est inscrit au journal de budget
+(`isolation-control/<bras>`). Un hook `InstructionsLoaded`, passé par `--settings`, journalise chaque fichier d'instructions
+chargé. Refus de la campagne (code 1, aucune tâche lancée, constat dans `state/isolation_control.json`) si l'une de ces conditions
+n'est pas tenue :
+
+- l'événement `init` liste un serveur MCP non déclaré, ou un outil `mcp__*` alors qu'aucun serveur n'est déclaré ;
+- un chemin de `memory_paths` sort du `HOME` isolé ;
+- un fichier d'instructions est chargé hors du dépôt de contrôle ;
+- le `CLAUDE.md` témoin n'est pas journalisé. Le hook serait alors muet et l'absence de fuite ne serait pas prouvée : échec fermé.
+
+Limites. Le système de fichiers de l'opérateur reste lisible par l'agent (§17.7.4) : l'isolation porte sur ce que l'hôte charge,
+pas sur ce que l'agent peut aller lire. Le contrôle n'a pas les fichiers d'installation d'un bras gouverné : il vérifie l'absence
+de configuration héritée, pas la configuration propre du bras.
 
 ## 4. Jeu de tâches
 

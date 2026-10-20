@@ -64,6 +64,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 sys.path.append(str(Path(__file__).resolve().parent))
+import host_isolation
 import three_arms as ta
 from budget_guard import BudgetError, BudgetGuard, _now, budget_args, parse_cap, session_call_cost
 from cost_gate import filter_tasks
@@ -348,9 +349,13 @@ def _extra_args(*, resume: str | None, max_budget_usd: float | None) -> list[str
 
 
 def planned_claude_command(
-    prompt: str, *, model: str | None, resume: str | None, max_budget_usd: float | None = None
+    prompt: str, *, model: str | None, resume: str | None, max_budget_usd: float | None = None, task_dir: Path | None = None
 ) -> list[str]:
-    """La commande que :func:`claude_invoker` lancerait (affichée par ``--dry-run``, jamais exécutée)."""
+    """La commande que :func:`claude_invoker` lancerait (affichée par ``--dry-run``, jamais exécutée).
+
+    B-08 (§17.8) : comme :func:`three_arms.run_claude_headless`, config MCP stricte, limitée au ``.mcp.json`` qu'AI-DLC
+    aurait écrit dans *task_dir* (``--mcp none`` : aucun).
+    """
     cmd = [
         "claude",
         "-p",
@@ -365,6 +370,8 @@ def planned_claude_command(
     ]
     if model:
         cmd.extend(["--model", model])
+    servers = host_isolation.declared_mcp_servers(ARM, task_dir) if task_dir is not None else {}
+    cmd.extend(host_isolation.mcp_isolation_args(servers))
     cmd.extend(_extra_args(resume=resume, max_budget_usd=max_budget_usd))
     return cmd
 
@@ -980,6 +987,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--no-install", action="store_true", help="--dry-run seulement : ne pas installer ni configurer AI-DLC"
     )
+    parser.add_argument(host_isolation.ALLOW_OPTION, action="store_true", help="B-08 : workspace sous un projet accepté, §3")
     parser.add_argument("--n", type=str, default="20,99,393", help="--estimate : tailles de suite (tâches par bras)")
     return parser
 
@@ -1014,6 +1022,11 @@ def main(argv: Sequence[str] | None = None, *, invoke: Invoker = claude_invoker,
         parser.error("--aidlc-clone est obligatoire : chemin du clone de référence d'aidlc-workflows")
     args.model = args.model.strip() if args.model else None
     workspace = (args.workspace or ta._default_workspace()).resolve()
+    try:  # B-08 (§17.8) : workspace hors de tout projet, comme three_arms.py
+        host_isolation.refuse_project_ancestors(workspace, allow=args.allow_project_ancestors)
+    except host_isolation.IsolationError as exc:
+        print(f"[isolation] {exc}", file=sys.stderr)
+        return 1
     state_dir = workspace / "state"
     state_dir.mkdir(parents=True, exist_ok=True)
     try:
