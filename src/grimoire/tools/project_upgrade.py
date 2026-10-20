@@ -53,6 +53,7 @@ __all__ = [
     "backup_project",
     "bundled_blueprint_path",
     "find_orphans",
+    "is_live_memory_path",
     "latest_backup_manifest",
     "preview_upgrade",
     "probe_hook",
@@ -110,6 +111,41 @@ BACKUP_PATHS: tuple[str, ...] = (
 #: any other manifest diff is an anomaly, not an expected side effect.
 #: ``config.yaml``: the version header ``up``'s identity step rewrites.
 EXPECTED_MEMORY_DIFFS: frozenset[str] = frozenset({"_grimoire/_memory/config.yaml"})
+
+#: Live project state under ``_grimoire/_memory/`` that a running host session
+#: writes on its own — memory databases, activity and audit journals, the
+#: shared context — and that ``up`` never touches (issue #691: six sessions
+#: writing the homelab's memory during a 3.61.1 → 3.62.0 upgrade turned a
+#: successful ``apply`` into a ``verify`` refusal). A diff on one of these is
+#: reported as *live*, never as an anomaly — unless the file was emptied,
+#: which no session does and which ``verify`` still refuses.
+LIVE_MEMORY_SUFFIXES: tuple[str, ...] = (
+    ".sqlite3",
+    ".sqlite3-wal",
+    ".sqlite3-shm",
+    ".db",
+    ".db-wal",
+    ".db-shm",
+    ".jsonl",
+    ".lock",
+)
+LIVE_MEMORY_NAMES: frozenset[str] = frozenset(
+    {"shared-context.md", "session-state.md", "handoff-log.md", "memories.json"}
+)
+LIVE_MEMORY_DIRS: tuple[str, ...] = ("_grimoire/_memory/qdrant_data/", "_grimoire/_memory/telemetry/")
+
+#: SHA-256 of zero bytes — what a truncated live file hashes to.
+_EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
+
+
+def is_live_memory_path(rel: str) -> bool:
+    """Whether *rel* (POSIX, project-relative) is live session state rather than a kit-owned file."""
+    name = rel.rsplit("/", 1)[-1]
+    return (
+        name in LIVE_MEMORY_NAMES
+        or name.endswith(LIVE_MEMORY_SUFFIXES)
+        or any(rel.startswith(prefix) for prefix in LIVE_MEMORY_DIRS)
+    )
 
 _UPGRADE_OUTPUT_DIR = Path("_grimoire-output") / "upgrade"
 
@@ -1342,6 +1378,8 @@ class VerifyResult:
     expected_diffs: tuple[str, ...]
     missing: tuple[str, ...]
     report_path: Path
+    #: Live session state rewritten since ``backup`` (issue #691) — reported, never refused.
+    live_diffs: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -1349,12 +1387,27 @@ class VerifyResult:
             "unexpected_diffs": list(self.unexpected_diffs),
             "expected_diffs": list(self.expected_diffs),
             "missing": list(self.missing),
+            "live_diffs": list(self.live_diffs),
             "report_path": str(self.report_path),
         }
+
+    def summary(self) -> str:
+        """``écarts=[…] manquants=[…] vivants=[…]`` — each bucket named, so a refusal is never read as *missing* files."""
+        return (
+            f"écarts={list(self.unexpected_diffs)} manquants={list(self.missing)}"
+            f" vivants={list(self.live_diffs)}"
+        )
 
 
 def verify_upgrade(target: Path, manifest: Path, *, extra_expected: frozenset[str] = frozenset()) -> VerifyResult:
     """Re-compare the pre-upgrade memory manifest; only :data:`EXPECTED_MEMORY_DIFFS` may differ.
+
+    Live session state (:func:`is_live_memory_path`, issue #691) that changed
+    since ``backup`` is listed in ``live_diffs`` and does not refuse: a host
+    session writing its memory during the upgrade is legitimate, and ``up``
+    never writes those files. A live file that is now *empty* while the
+    manifest recorded content is a truncation, not a session write — it stays
+    an unexpected diff.
 
     Raises :class:`GrimoireRuntimeError` if *manifest* itself is unreadable —
     a missing manifest means ``backup`` never ran, which is a refusal this
@@ -1367,6 +1420,7 @@ def verify_upgrade(target: Path, manifest: Path, *, extra_expected: frozenset[st
     unexpected: list[str] = []
     expected_hit: list[str] = []
     missing: list[str] = []
+    live: list[str] = []
     for line in manifest.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
@@ -1375,8 +1429,15 @@ def verify_upgrade(target: Path, manifest: Path, *, extra_expected: frozenset[st
         if not path.is_file():
             missing.append(rel)
             continue
-        if _sha256(path) != digest:
-            (expected_hit if rel in expected else unexpected).append(rel)
+        current = _sha256(path)
+        if current == digest:
+            continue
+        if rel in expected:
+            expected_hit.append(rel)
+        elif is_live_memory_path(rel) and not (current == _EMPTY_SHA256 and digest != _EMPTY_SHA256):
+            live.append(rel)
+        else:
+            unexpected.append(rel)
 
     report = run_output_dir(target) / "report.md"
     ok = not unexpected and not missing
@@ -1386,7 +1447,8 @@ def verify_upgrade(target: Path, manifest: Path, *, extra_expected: frozenset[st
         f"Verdict : {'OK' if ok else 'ANOMALIE'}\n\n"
         f"- écarts attendus (ex. `_memory/config.yaml`) : {', '.join(expected_hit) or 'aucun'}\n"
         f"- écarts inattendus : {', '.join(unexpected) or 'aucun'}\n"
-        f"- fichiers manquants : {', '.join(missing) or 'aucun'}\n",
+        f"- fichiers manquants : {', '.join(missing) or 'aucun'}\n"
+        f"- état vivant réécrit par une session (toléré) : {', '.join(live) or 'aucun'}\n",
         encoding="utf-8",
     )
     return VerifyResult(
@@ -1395,4 +1457,5 @@ def verify_upgrade(target: Path, manifest: Path, *, extra_expected: frozenset[st
         expected_diffs=tuple(expected_hit),
         missing=tuple(missing),
         report_path=report,
+        live_diffs=tuple(live),
     )
