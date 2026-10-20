@@ -70,6 +70,7 @@ from cost_gate import filter_tasks
 from hidden_reads import check_transcript
 from model_pin import ModelMismatchError, detect_claude_code_version, ensure_results_match_model
 from results_io import read_results_rows
+from task_lot import resolve_task_lot
 from task_repo import (
     ContaminatedTaskRepoError,
     assert_task_repo_clean,
@@ -854,10 +855,21 @@ def ensure_preregistered(state_dir: Path, expected: Mapping[str, Any]) -> None:
 
 
 def _task_list(
-    workspace: Path, *, bench_root: Path | None, seed: int, subset: Path | None, limit: int | None
+    workspace: Path,
+    *,
+    bench_root: Path | None,
+    seed: int,
+    subset: Path | None,
+    limit: int | None,
+    task_lot: Path | None = None,
 ) -> list[ta.TaskMeta]:
     root = bench_root or ta.ensure_polyglot_benchmark(workspace)
-    tasks = filter_tasks(ta.sample_tasks(ta.discover_catalog(root), seed=seed), subset)
+    catalog = ta.discover_catalog(root)
+    if task_lot is not None:  # B-07 : lot nommé ; ses identifiants entrent dans le pré-enregistrement (task_ids)
+        drawn, _commit = resolve_task_lot(task_lot, catalog, root)
+    else:
+        drawn = ta.sample_tasks(catalog, seed=seed)
+    tasks = filter_tasks(drawn, subset)
     return tasks[:limit] if limit else tasks
 
 
@@ -1099,6 +1111,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--k", type=int, default=ta.K_REPLAY)
     parser.add_argument("--seed", type=int, default=ta.DEFAULT_SEED)
     parser.add_argument("--subset", type=Path, default=None)
+    parser.add_argument(
+        "--task-lot",
+        type=Path,
+        default=None,
+        help="B-07 : tâches nommées (grimoire.bench.task-lot.v1) au lieu du tirage",
+    )
     parser.add_argument("--tasks", type=int, default=None, help="ne garder que les N premières tâches du tirage")
     parser.add_argument("--run-timeout-s", type=int, default=DEFAULT_RUN_TIMEOUT_S)
     parser.add_argument("--max-person-replies", type=int, default=DEFAULT_MAX_PERSON_REPLIES)
@@ -1153,7 +1171,14 @@ def main(argv: Sequence[str] | None = None, *, invoke: Invoker = claude_invoker,
     except PinError as exc:
         print(str(exc), file=sys.stderr)
         return 1
-    tasks = _task_list(workspace, bench_root=args.bench_root, seed=args.seed, subset=args.subset, limit=args.tasks)
+    tasks = _task_list(
+        workspace,
+        bench_root=args.bench_root,
+        seed=args.seed,
+        subset=args.subset,
+        limit=args.tasks,
+        task_lot=args.task_lot,
+    )
     prereg = preregistration(
         scope=args.scope,
         driver=args.driver,

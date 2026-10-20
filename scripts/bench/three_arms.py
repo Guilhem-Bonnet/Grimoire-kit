@@ -68,6 +68,7 @@ from model_pin import (
 )
 from recompute import data_seal, render_seal_lines
 from results_io import read_results_rows
+from task_lot import resolve_task_lot
 from task_repo import (
     ContaminatedTaskRepoError,
     assert_task_repo_clean,
@@ -2175,6 +2176,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "combiné à --resume, les lignes results.jsonl des autres bras restent comptées dans le rapport",
     )
     parser.add_argument("--subset", type=Path, default=None, help="B-00 : ne rejoue que les tâches de ce fichier (docs/bench/cost-gate-subset.json)")
+    parser.add_argument("--task-lot", type=Path, default=None, help="B-07 : tâches nommées (grimoire.bench.task-lot.v1), pas de tirage")
     parser.add_argument("--label", type=str, default=None, help="étiquette libre reprise dans report.md")
     parser.add_argument(
         "--model",
@@ -2241,7 +2243,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     bench_root = ensure_polyglot_benchmark(workspace)
     ecc_repo, ecc_commit = ensure_ecc_repo(workspace)
     catalog = discover_catalog(bench_root)
-    tasks = filter_tasks(sample_tasks(catalog, seed=args.seed), args.subset)
+    drawn, polyglot_commit = resolve_task_lot(args.task_lot, catalog, bench_root) if args.task_lot else (sample_tasks(catalog, seed=args.seed), None)
+    tasks = filter_tasks(drawn, args.subset)
 
     state_dir = workspace / "state"
     state_dir.mkdir(parents=True, exist_ok=True)
@@ -2258,6 +2261,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             {
                 "seed": args.seed,
                 "ecc_commit": ecc_commit,
+                "task_lot": str(args.task_lot) if args.task_lot else None,  # B-07 : lot nommé, None pour un tirage
+                "polyglot_commit": polyglot_commit,
                 **selection_pin(state_dir / "selection.json", args.model, claude_code_version),
                 "tasks": [t.to_dict() for t in tasks],
             },
