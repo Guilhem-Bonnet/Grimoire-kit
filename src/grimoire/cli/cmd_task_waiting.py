@@ -43,17 +43,52 @@ def register(task_app: typer.Typer) -> None:
     def task_ask(
         ctx: typer.Context,
         task_id: Annotated[str, typer.Argument()],
-        text: Annotated[str, typer.Argument(help="La question posée à l'humain.")],
+        text: Annotated[str, typer.Argument(help="La question posée à l'humain (sans `--from`).")] = "",
         kind: Annotated[str, typer.Option("--kind", help=f"Nature : {', '.join(QUESTION_KINDS)}.")] = "choice",
         option: Annotated[list[str] | None, typer.Option("--option", "-o", help="Réponse proposée (répétable).")] = None,
+        non_blocking: Annotated[
+            bool, typer.Option("--non-blocking", help="Ne gare pas la tâche : l'agent continue, l'humain répond quand il veut.")
+        ] = False,
+        why: Annotated[str, typer.Option("--why", help="Pourquoi la question est posée (ce que le reçu montre).")] = "",
+        key: Annotated[str, typer.Option("--key", help="Identité stable : une reprise ne repose pas une question déjà répondue.")] = "",
+        from_file: Annotated[
+            str, typer.Option("--from", help="Un lot de questions (JSON ou YAML, `-` : entrée standard), posé en une interruption.")
+        ] = "",
         epoch: _EPOCH = None,
         project_root: _PROJECT_ROOT = Path(),
         ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
         actor: _ACTOR = "cli",
     ) -> None:
-        """Pose une question à l'humain : la tâche se gare en `waiting(human)` et remonte au cockpit."""
-        run(ctx, project_root, ledger_root, task_id,
-            lambda s: s.ask(task_id, text, actor, kind=kind, options=tuple(option or ()), epoch=epoch))
+        """Pose une question à l'humain (ou un lot, `--from`) : la tâche se gare en `waiting(human)` et remonte au cockpit."""
+        if not from_file and not (non_blocking or why or key):
+            if not text.strip():
+                console.print("[red]✗[/red] une question (texte) ou un lot (`--from`)")
+                raise typer.Exit(1)
+            run(ctx, project_root, ledger_root, task_id,
+                lambda s: s.ask(task_id, text, actor, kind=kind, options=tuple(option or ()), epoch=epoch))
+            return
+        from grimoire.cli.cmd_task_questions import emit_batch, read_specs
+        from grimoire.core.exceptions import GrimoireError
+        from grimoire.missions.questions import QuestionSpec
+        from grimoire.missions.service import TaskRefusedError
+
+        try:
+            specs = read_specs(from_file) if from_file else [
+                QuestionSpec(text, kind, tuple(option or ()), blocking=not non_blocking, why=why, key=key)
+            ]
+        except ValueError as exc:
+            console.print(f"[red]✗[/red] {exc}")
+            raise typer.Exit(1) from exc
+        service = ct._service(project_root, ledger_root)
+        ct._require_task(service, task_id)
+        try:
+            outcome = service.ask_batch(task_id, specs, actor, epoch=epoch)
+        except TaskRefusedError as refused:
+            ct._refuse(ctx, refused)
+        except (GrimoireError, ValueError) as exc:
+            console.print(f"[red]✗[/red] {exc}")
+            raise typer.Exit(1) from exc
+        emit_batch(ctx, outcome)
 
     @task_app.command("answer")
     def task_answer(
@@ -179,9 +214,11 @@ def register(task_app: typer.Typer) -> None:
             console.print("[green]OK[/green] Aucune décision en attente.")
             return
         for d in pending:
-            console.print(f"  - {d.task_id} [{d.question.kind}] {d.question.text}  ({d.question.id})")
-            if d.question.options:
-                console.print(f"    [dim]options : {' | '.join(d.question.options)}[/dim]")
+            for q in d.questions or (d.question,):
+                flag = "" if q.blocking else " [non bloquante]"
+                console.print(f"  - {d.task_id} [{q.kind}]{flag} {q.text}  ({q.id})")
+                if q.options:
+                    console.print(f"    [dim]options : {' | '.join(q.options)}[/dim]")
 
     @task_app.command("lint-decisions")
     def task_lint_decisions(
@@ -208,6 +245,11 @@ def register(task_app: typer.Typer) -> None:
             "Poser la question par `task ask` pour qu'elle remonte.[/dim]"
         )
         raise typer.Exit(1)
+
+    # W6-07 : `task questions` (le registre) et `task resolve` (réponse déduite, source citée).
+    from grimoire.cli.cmd_task_questions import register as register_questions
+
+    register_questions(task_app)
 
 
 __all__ = ["register"]

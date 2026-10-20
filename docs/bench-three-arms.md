@@ -602,7 +602,7 @@ déclaration `AIDLC_UNATTENDED=1` faite au lancement n'est pas dans les traces d
 ## 15. Bras `aidlc` : AI-DLC 2.11.0, scope express, HOME isolé (B-06)
 
 Le troisième bras du protocole comparatif (plan « Dépasser AI-DLC », section 6) : AI-DLC 2.11.0 sur les mêmes tâches que `nu` et `kit-gov`.
-Code : `scripts/bench/aidlc_arm.py`. Tests : `tests/unit/test_bench_aidlc_arm.py`. Un pilote payant d'une tâche par pilote (k=1, 6,54 $) est décrit au §15.5.
+Code : `scripts/bench/aidlc_arm.py`. Tests : `tests/unit/test_bench_aidlc_arm.py`. Un pilote payant d'une tâche par pilote (k=1, 6,54 $) est décrit au §15.5, la campagne palier 1 (20 tâches, k=1, 87,24 $) aux §15.6 et §15.7.
 
 ### 15.1 Configuration épinglée
 
@@ -829,3 +829,229 @@ En `unattended` à 1,48 $ : 111,85 $, 553,64 $ et 2 197,80 $. Ce pilote ne mesur
 - `build_report` n'agrège toujours pas `aidlc`.
 
 Données brutes hors dépôt : `_scratch/bench-aidlc-b06-pilot/` de la Forge (`budget.jsonl`, `ws-*/state/`, journaux `*.stream.jsonl`).
+
+### 15.6 Campagne palier 1 : pré-enregistrement (écrit le 2026-10-19, avant le premier run, non modifié ensuite)
+
+Autorisé par Guilhem : palier 1 seul (§15.5, « Plafond proposé »), **plafond dur de 160 $** pour toute la passe. Le palier 2 (k=3, 500 $ au total)
+n'est pas autorisé et n'est pas lancé : il se recalcule sur la médiane mesurée ici.
+
+**Configuration** (`state/aidlc-preregistration.json`, écrit par `--dry-run`, empreinte `config_digest` `496cf4c6c0735b1d7a80e3fb94ebb25ec5d1ac74ce121e2c3b39f9b02428617f`,
+sha256 du fichier `2b301dcf6ef968d193ef6d195a73df1b22b2a56fba3cbb84e2ce9f67047b1cb8`) :
+
+- bras `aidlc` seul, AI-DLC 2.11.0, scope `express`, pilote **`scripted-person`**, `k = 1`, graine 551 ;
+- les 20 tâches du lot L, dans l'ordre du tirage (identiques à `selection.json` du lot L), clone `polyglot-benchmark` `7e0611e7` du lot L (`--bench-root`), mêmes tests cachés :
+  `python/{zipper,react,list-ops,proverb,bowling}`, `javascript/{list-ops,go-counting,affine-cipher,queen-attack,transpose}`,
+  `go/{error-handling,simple-linked-list,palindrome-products,pov,bottle-song}`, `rust/{react,forth,scale-generator,two-bucket,poker}` ;
+- modèle `claude-opus-5-5` (`--model`), Claude Code 2.1.302, `--auth oauth-copy`, jamais `--bare` ; timeout 3600 s par run, 12 réponses au plus,
+  seuil de boucle 8 ;
+- journal de budget neuf (`state/aidlc-budget.jsonl`, cumul de départ 0 $), `--max-total-usd 160` ; environnement du lanceur vidé (`env -i`), `TMPDIR` sous le workspace ;
+- épinglage revérifié avant le premier run : `v2.11.0^{commit}` = `6a378b53` ; installeur mis en place = `git show v2.11.0:scripts/install.sh` (sha256 `aaa739b9…`) ;
+  binaire installé sha256 `2503ce11…` = ligne `aidlc-linux-x64` du `checksums.txt` de la release ; `version.json` installé : `sourceDigest` `6a378b53…` ; `aidlc version` :
+  `aidlc 2.11.0 (runtime 2.11.0)`. Provenance `gh attestation` désactivée (aucun jeton GitHub).
+
+**Limite d'équité, déclarée** : en `scripted-person`, AI-DLC reçoit une personne simulée qui répond `Approved.` à chaque fin de tour. Aucun bras du kit ne
+reçoit cette aide : les bras `nu` et `kit-gov` travaillent en un seul `claude -p` sans réponse humaine. Le pilote `unattended` n'est pas retenu : au pilote,
+il ne mesurait pas AI-DLC (§15.5).
+
+**Mesure principale** : succès aux tests cachés, par run, taux sur les runs exécutés avec **IC95 de Wilson** (le bootstrap du harnais dégénère à 0 % ou 100 %) ;
+le bootstrap de `three_arms.py` est donné à côté. Un run arrêté par `timeout`, `loop` ou `reply_cap` compte comme un échec (règle du bras). Un run non lancé faute de
+budget n'est **pas** un échec : il est rapporté « non exécuté », hors dénominateur.
+
+**Contrôle de transcription (W1-08b)** : taux principal sur les runs non `invalid` (règle de `build_report`) ; taux sur tous les runs à côté. Chaque `invalid`
+est relu à la main (faux positif connu sur le gras Markdown, §15.5) et le verdict de relecture est rapporté, sans changer le taux principal.
+
+**Mesures secondaires** : coût total et par run (médiane, min, max), coût par tâche résolue, temps mur, appels `claude -p` et reprises, tours, gates
+(`STAGE_AWAITING_APPROVAL` et `GATE_APPROVED` du journal d'audit), interventions humaines simulées (`human_gates.py`, B-05) et réponses jouées,
+`WORKFLOW_COMPLETED`, raison d'arrêt.
+
+**Comparaison** : descriptive, aux bras `nu` et `kit-gov` du lot L sur les mêmes 20 tâches (eux à k=3, ici k=1). Aucune conclusion de supériorité
+au-delà de ce que l'IC permet : à 20 tâches, l'écart minimal détectable est de **44 points** (pire cas, §13). Le lot L est saturé (60/60 pour les deux bras) :
+un écart de succès ne pourra aller que dans un sens.
+
+**Arrêt** : net au plafond (garde-fou du bras). Un défaut du bras ou du garde-fou (coût mal compté, blocage) arrête la campagne ; il est corrigé avec un test
+rouge puis vert, et la campagne reprend sous le même plafond cumulé (le journal repart du cumul, les runs déjà écrits ne sont pas rejoués).
+
+### 15.7 Campagne palier 1 (2026-10-19) : résultats
+
+Lancée à 18:01 UTC, terminée à 20:41 UTC, sans incident : 20 runs sur 20, code de sortie 0, aucun coût inconnu, aucun appel ouvert dans le journal,
+aucun identifiant laissé dans le `HOME` isolé. Le §15.6 n'a pas été modifié après le premier run (commit du pré-enregistrement antérieur au premier `begin`
+du journal). **k = 1 : aucune conclusion de supériorité ni de fiabilité ne se tire de ces chiffres.**
+
+**Dépense exacte : 87,2406 $** sur 160 $ (somme des 125 lignes `end` du journal). Contrôle croisé : la somme des `costUSD` du `modelUsage` final de chaque
+session vaut aussi 87,241 $. Le coût d'une reprise, compté par différence du total de session (§15.3), ne surcompte donc rien sur cette campagne.
+
+**Mesures.**
+
+| | Valeur |
+|---|---|
+| Succès aux tests cachés, mesure principale (runs non `invalid`) | **17/17**, IC95 Wilson [81,6 %, 100 %] ; bootstrap du harnais [100 %, 100 %] (dégénéré) |
+| Succès, tous runs | 20/20, IC95 Wilson [83,9 %, 100 %] |
+| Coût par run : médiane / min / max / moyenne | **4,592 $** / 0,886 $ / 5,930 $ / 4,362 $ |
+| Coût médian par tâche résolue | 4,593 $ |
+| Coût par langue (médiane ; total) | python 4,47 $ (19,20 $) ; javascript 4,74 $ (23,40 $) ; go 4,57 $ (19,53 $) ; rust 5,03 $ (25,11 $) |
+| Temps mur des appels : total / médiane / min / max | 9 435 s (2 h 37) / 494 s / 110 s / 782 s |
+| Appels `claude -p` : total / médiane par run | 125 (20 premiers messages + 105 réponses `Approved.`) / 5 |
+| Tours (`num_turns`) : médiane par run | 76 |
+| Jetons (`modelUsage`, sous-agents compris, 20 runs) | 156,8 M lus en cache, 5,50 M écrits en cache, 861 k en sortie, 2,7 k en entrée ; modèle unique `claude-opus-5-5` |
+| `WORKFLOW_COMPLETED` | 18/20 |
+| Raison d'arrêt | `completed` 18, `reply_cap` 2 (`python/zipper`, `go/bottle-song`) |
+| Gates (`audit/*.md`) | 72 `STAGE_AWAITING_APPROVAL`, 72 `GATE_APPROVED` (4 par run terminé, 0 dans les deux runs parqués) |
+| Interventions humaines simulées (`human_gates.py`, B-05) | runs valides : 67 (60 `gate`, 7 `question`), médiane **4** par tâche résolue ; 20 runs : 79 (72 + 7) |
+| Contrôle de transcription (W1-08b) | 17 `clean`, 3 `invalid` (`javascript/queen-attack`, `go/simple-linked-list`, `rust/forth`) |
+
+**Relecture des trois `invalid`** : les trois signalements sont de type `directory`, sur `./` (le dépôt de run, cité par `aidlc engine workspace
+codekb-publish --paths ./`) et sur `/` (un `cd /` en fin de commande). Les tests cachés ne sont pas dans le dépôt pendant le run (ils y sont copiés après), et
+aucune transcription ne cite le dossier `hidden-tests`. Verdict de relecture : faux positifs ; le taux principal ne change pas (17/17).
+
+**Qui écrit le code.** Dans **18 runs sur 20**, l'agent principal écrit le fichier de solution dans ses 3 à 11 premiers appels d'outils, avant toute référence au
+stage Code Generation ; seuls `python/proverb` et `rust/scale-generator` voient la solution écrite d'abord par le sous-agent de Code Generation. Le sous-agent
+retouche ensuite la solution dans 11 runs. Dans les deux runs `reply_cap`, l'agent parque le workflow en Reverse Engineering (`WORKFLOW_PARKED`) en citant la
+consigne commune (« Termine dès que tu es raisonnablement confiant »), puis répond « rien à valider » aux 12 `Approved.` : 0,29 $ et 0,22 $ de réponses
+inutiles, comptées. Le succès aux tests cachés mesure donc surtout le modèle, AI-DLC chargé ; le coût, lui, mesure bien la cérémonie AI-DLC (7 stages
+terminés, 3 sautés, 4 gates dans les 18 runs terminés). Au pilote, le code était écrit dans Code Generation : n = 1 ne le montrait pas.
+
+**Comparaison descriptive au lot L, mêmes 20 tâches** (`nu` et `kit-gov` à k = 3, `aidlc` à k = 1, même modèle, Claude Code 2.1.287 au lot L, 2.1.302 ici) :
+
+| | `nu` (lot L) | `kit-gov` (lot L) | `aidlc` (palier 1) |
+|---|---:|---:|---:|
+| Runs | 60 | 60 | 20 |
+| Succès par run | 60/60, IC95 [94,0 %, 100 %] | 60/60, IC95 [94,0 %, 100 %] | 17/17 valides, IC95 [81,6 %, 100 %] |
+| Tâches toujours résolues | 20/20, IC95 [83,9 %, 100 %] | 20/20, IC95 [83,9 %, 100 %] | 20/20 (k = 1), IC95 [83,9 %, 100 %] |
+| Coût médian par run | 0,159 $ | 0,198 $ | **4,592 $** |
+| Coût moyen par run | 0,169 $ | 0,211 $ | 4,362 $ |
+| Rapport `aidlc` / bras, médiane des rapports par tâche (min – max) | **27,9×** (5,1 – 38,2) | **22,2×** (4,4 – 30,2) | |
+| Temps mur médian par run | 22 s | 24 s | 494 s |
+| Tours médians | 3 | 3 | 76 |
+| Interventions humaines par tâche résolue (médiane) | non mesuré ici | non mesuré ici | 4 |
+
+Lecture : les trois bras résolvent tout ; le succès ne discrimine rien (banc saturé, §12), et à 20 tâches l'écart minimal détectable est de **44 points**
+(pire cas, §13) : aucune différence de succès ne pourrait être établie, ni dans un sens ni dans l'autre. Le coût, le temps et les interventions se lisent
+sans test : le bras `aidlc` coûte environ 28 fois le `nu` par tâche, prend environ 22 fois plus de temps et demande 4 approbations par tâche, que la
+personne simulée donne sans lire.
+
+**Palier 2 recalculé** (k = 3 complet à 20 tâches, soit 40 runs `aidlc` de plus, au coût mesuré ; le palier 1 compté à sa dépense exacte) :
+
+| Base | 40 runs de plus | Total `aidlc` palier 1 + 2 |
+|---|---:|---:|
+| Médiane mesurée (4,592 $) | 183,68 $ | **270,92 $** |
+| Moyenne mesurée (4,362 $) | 174,48 $ | 261,72 $ |
+| Médiane × 1,5 (marge du §15.5) | 275,52 $ | 362,76 $ |
+| Maximum mesuré (5,930 $) partout | 237,21 $ | 324,45 $ |
+
+Si le protocole exige `nu` et `kit-gov` rejoués le même jour à k = 3 (22,84 $ au lot L) : 293,76 $ à la médiane, 385,60 $ avec la marge. Le plafond de 500 $
+proposé au §15.5 couvre donc le palier 2 avec marge ; un plafond de 300 $ pour les 40 runs `aidlc` seuls suffirait au maximum mesuré. L'ancien calcul
+(316,62 $ pour les trois bras) était fondé sur le pilote à 4,90 $ ; la médiane mesurée est 6 % plus basse.
+
+**Limites.**
+
+- k = 1 : la variance par tâche n'est pas mesurée ; les deux runs à moins de 1,30 $ (workflow parqué) tirent la moyenne vers le bas.
+- Pilote `scripted-person` : AI-DLC reçoit une personne qui approuve tout (§15.6) ; en `unattended`, il s'arrêterait au premier gate.
+- Le succès mesure surtout le modèle (18/20 solutions écrites avant Code Generation) ; un protocole qui veut mesurer le code d'AI-DLC doit changer la
+  consigne commune ou refuser les écritures hors stage, ce qui serait une autre configuration, à pré-enregistrer.
+- Les agents sous test ont écrit dans `/tmp` (10 runs sur 20) malgré `TMPDIR` : fichiers de vérification à eux, déplacés après la campagne dans les données
+  brutes (`agent-tmp-leftovers/`). Aucun ne porte d'identifiant.
+- Tarif « list » de Claude Code sous OAuth : un coût rapporté, pas une facture. Claude Code 2.1.302 contre 2.1.287 au lot L.
+- `build_report` n'agrège toujours pas `aidlc` : les chiffres ci-dessus viennent d'une analyse à part (script d'analyse de la passe, non livré dans le dépôt), pas d'un `report.json` scellé.
+
+Données brutes hors dépôt, comme celles du lot L : `_scratch/bench-aidlc-b06-p1/` de la Forge (`ws/state/{results.jsonl,aidlc-runs.jsonl,aidlc-budget.jsonl,
+aidlc-preregistration.json}`, `ws/tasks/*/aidlc/run0.stream.jsonl`, `analysis.json`, le script d'analyse, `campaign.log`). sha256 : `results.jsonl`
+`5d7f0d77…`, `aidlc-budget.jsonl` `ad8a6cec…`, `aidlc-runs.jsonl` `aa3047ac…`, pré-enregistrement `2b301dcf…` (inchangé depuis le §15.6).
+
+## 16. E2E live Claude Code : le hook de preuve bloque, puis le gate se ferme (D-12)
+
+`scripts/bench/live_claude_e2e.py` joue un scénario de bout en bout contre un vrai `claude -p`. Il ne compare aucun bras : il vérifie que les
+hooks du kit, émis pour Claude Code dans un projet `governed`, refusent une clôture sans preuve et la laissent passer une fois la preuve
+remise. Le test `tests/live/test_claude_code_live.py` (marqueur `live_host`) l'appelle et lit son rapport.
+
+### 16.1 Lancer
+
+```bash
+GRIMOIRE_LIVE_CLAUDE_MAX_USD=5 \
+GRIMOIRE_LIVE_WORKSPACE=<dossier neuf> \
+GRIMOIRE_LIVE_BUDGET_LEDGER=<journal partagé entre passes> \
+python -m pytest tests/live -m live_host -o addopts="" -q
+```
+
+Ou sans pytest : `python scripts/bench/live_claude_e2e.py --workspace <dossier neuf> --max-total-usd 5 [--budget-ledger <journal>]`.
+`--dry-run` prépare le projet et émet les deux challenges, sans aucun modèle.
+
+- `addopts` désélectionne `live_host` : ni la CI ni un `pytest` nu ne le lancent.
+- Sélectionné sans `GRIMOIRE_LIVE_CLAUDE_MAX_USD` ou sans `claude` sur le `PATH`, le test est ignoré et dit pourquoi. Avec
+  `GRIMOIRE_REQUIRE_LIVE=1`, il échoue : un e2e qui n'a pas tourné n'est pas un vert.
+- Linux et macOS seulement (relais `#!/bin/sh`).
+
+### 16.2 Déroulé
+
+| Étape | Modèle | Ce qui est vérifié |
+|---|---|---|
+| Préparation : `git init`, `calc.add` qui lève, `grimoire init`, `host sync --host claude`, `standard init --profile governed --provider anthropic`, `needs.commands.test-runner`, une tâche `ready` avec `--check` | non | `.claude/settings.json` porte `grimoire-hook --host claude --event <E>` pour `SessionStart`, `UserPromptSubmit`, `PreToolUse` et `Stop` |
+| Octroi W5-06 et approbation de la commande de vérification (W3-03) : le lanceur émet chaque challenge sous une session choisie (`GRIMOIRE_SESSION_ID`), puis un `claude -p --session-id` de cette session porte le message pré-enregistré de l'opérateur, outils de mutation et MCP interdits ; la commande relancée consomme le tour | oui (2 appels) | `attestation: attested` dans le journal de l'octroi et dans celui des approbations |
+| U1, sans humain (`GRIMOIRE_UNATTENDED=1`), tâche réclamée pour une troisième session : écrire le code, aucune preuve, finir le tour | oui | premier `Stop` de U1 en `block` au TraceLedger ; après U1, aucun pack de preuve au ledger et la tâche toujours tenue |
+| U2, `--resume` : remettre la preuve selon le protocole du kit, rendre la tâche | oui | dernier `Stop` de U2 en `allow`, `gate check --strict` vert, tâche en `needs_verification` |
+
+Les deux tours humains comptent pour deux interventions (règle de comptage du §14). L'octroi reste actif jusqu'au bout, mais rien ne le
+consulte ici : aucun flow ne tourne, et le gate de clôture n'est pas levable par un octroi.
+
+### 16.3 Garde-fous
+
+- Plafond obligatoire. Coût d'un appel : `total_cost_usd`, moins le total précédent de la session sous `--resume`. Le reste du plafond
+  passe en `--max-budget-usd`. Un coût inconnu arrête tout. Ce sont la `BudgetGuard` et `session_call_cost` du §15.
+- Jamais `--bare`. `bare_guard` le refuserait pour un bras gouverné.
+- Un appel en erreur (`is_error`, timeout, boucle) arrête le scénario. Le premier passage réel a enchaîné quatre « Not logged in » à 0 $.
+- `oauth-copy` copie les identifiants depuis le vrai `HOME`, en lecture seule. La suite de tests isole `HOME` : le test passe la fixture
+  `real_home`. Sans identifiant à copier, rien ne part.
+- L'environnement des sous-processus est construit de zéro. Une session Claude Code parente (`CLAUDE_CODE_SESSION_ID`) ou un
+  `GRIMOIRE_SESSION_ID` hérités rattacheraient claims et tours à la mauvaise session.
+- `--strict-mcp-config` : seul le serveur MCP du projet est chargé, et aucun pour les appels qui ne portent qu'un tour humain. Sans
+  lui, Claude Code a chargé le `.mcp.json` d'un dépôt parent. Un serveur OAuth y a échoué, a réécrit les identifiants copiés, et la
+  session est sortie « Not logged in ».
+- `claudeMdExcludes` (`.claude/settings.local.json` du projet) écarte les `CLAUDE.md` des dossiers parents. Le `HOME` isolé approuve le
+  dossier du projet (`hasTrustDialogAccepted`), comme après une première session interactive.
+- En fin de run, les identifiants encore présents dans le `HOME` isolé sont supprimés et listés. Le rapport, les journaux, le projet et
+  le `HOME` sont balayés à la recherche d'un jeton `sk-ant-…`. Le test échoue si l'un ou l'autre n'est pas vide.
+
+### 16.4 Passe du 2026-10-19 (Claude Code 2.1.302, `claude-opus-5-5`, `oauth-copy`)
+
+Autorisée par Guilhem : plafond dur de 5 $ pour toute la passe, un seul journal de budget.
+
+| Passage | Résultat | Dépense |
+|---|---|---:|
+| 1 | 4 appels « Not logged in » : MCP d'un dépôt parent et `HOME` isolé par la suite de tests. Le scénario continuait sur une erreur, c'est corrigé. | 0 $ |
+| 2 | arrêt au premier appel en erreur, même cause (`HOME` de la suite) | 0 $ |
+| diagnostic | un appel `claude-haiku-4-5` : authentification, `CLAUDE.md` et MCP chargés | 0,0652 $ |
+| 3 | vert ; refus de U1 lu dans le texte de l'agent seulement | 0,4592 $ |
+| 4 | vert, motif du refus au TraceLedger (`refusal:task_unparked`) | 0,4875 $ |
+| **Total** | | **1,0118 $** |
+
+Passage 4 :
+
+- U1 : le premier `Stop` est refusé (`refusal:task_unparked`). Après U1, la tâche est `claimed`, sans pack au ledger ni run de test
+  enregistré.
+- U2 : la session lance la skill `grimoire-proof` et `gate run-tests`, remplit le claim ledger et le pack, passe `task verify` (verdict
+  `passed`), puis `task move` vers `running` et `needs_verification`. Le premier `Stop` de U2 sort en `allow`.
+- Coût par appel : 0,0846 $, 0,0849 $, 0,1360 $ et 0,1820 $. U2 a pris 8 tours et 40 s.
+
+Ce que le passage a montré du produit :
+
+- Une session qui rend sa tâche (`needs_verification`) se voyait refuser la clôture comme « hors tâche ». C'était pourtant le geste
+  que le refus de `Stop` lui demandait. Le cas est corrigé, avec `blocked`, `failed`, `cancelled` et `closed`. Rendue, la tâche reste
+  jugée sur ses gates de preuve.
+- La consigne de `Stop` pour une tâche `claimed` (`task move --to needs_verification`) était une transition refusée par le ledger. Elle
+  passe désormais par `running`.
+- Dès le début de la session, le hook d'activation écrit les gabarits de preuve de la tâche (horodatage de `decision-trace.yaml` au
+  démarrage de U1). En état `in_progress`, ses gates sont donc verts. Le refus de U1 vient de la tâche tenue et non rendue, pas de
+  gates rouges : la preuve n'est exigée qu'au passage en revue.
+- Le contexte de `Stop` sur `bootstrap` (« encore en état proposed… passe la tâche à in_progress ») pousse l'agent à agir. Au
+  diagnostic, haiku a déplacé `bootstrap` par les outils MCP du kit alors qu'il ne devait que répondre.
+
+### 16.5 Limites
+
+- n = 1, une tâche d'un fichier. Le passage prouve le branchement des hooks sous un vrai hôte, pas une fiabilité.
+- Les deux tours humains sont des messages écrits d'avance, rejoués avec l'autorisation de l'opérateur. Le hook ne distingue pas
+  un humain d'un `claude -p` attendu (limite de W2-01).
+- U1 demande explicitement de ne remettre aucune preuve : c'est un test du refus, pas un agent pris en faute.
+- Tarif « list » de Claude Code sous abonnement OAuth : un coût rapporté, pas une facture.
+- Copilot n'est pas couvert. Aucun job CI ni garde de release n'exige ce test : le coût et les identifiants restent à décider
+  (décision 11 du plan).
+
+Données brutes hors dépôt : `_scratch/d12-live/` de la Forge (`budget.jsonl`, `run*/live-claude-report.json`, `run*/logs/`).

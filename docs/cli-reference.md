@@ -521,6 +521,11 @@ sur tous les projets de la machine. Le tick et le frein lisent les deux et appli
   `paused: true` et les pilotes (`--executor dispatch`, `upgrade-flow`) s'arrêtent. Pendant la pause, `flow resume`
   refuse sans rien écrire ; une fois levée, il rouvre le node suivant (`workflow.resumed`, une seule fois).
   `drain` ne pose aucun run : ils finissent.
+- **Tâche garée et frein du bail.** Une tâche `waiting` garde le bail de sa session pour la reprise, mais il ne se renouvelle
+  pas pendant l'attente. Tant que l'outil tient dans le bail, rien ne change ; au-delà, le `PreToolUse` refuse les commandes
+  de la session **sauf** `grimoire task resume|show|attach|renew <sa tâche>` (options `--epoch`, `--actor`, `--session-id`
+  seulement, sans guillemets ni enchaînement) : la session reprend elle-même par `grimoire task resume <id> --epoch N`,
+  qui renouvelle aussitôt le battement de cœur. Une autre tâche, une écriture ou une forme non reconnue restent refusées.
 - **`resume`** : le drapeau est supprimé. Le tick suivant rend les `waiting(paused)` en `ready`, **dans l'ordre
   de la file** et sans leur faire perdre l'ancienneté d'avant leur claim. Une session restée ouverte lit à son tour
   « Pause levée : ta tâche … est de nouveau ready » et peut la re-claimer ; une session fermée retrouve `resume_command`.
@@ -637,6 +642,36 @@ Sous-groupes (chacun avec `--help`) : `board`, `memory`, `context`, `decision`, 
 
 ---
 
+## Preuves d'une plage git : `grimoire evidence resolve`
+
+Juge chaque preuve écrite dans une plage de commits contre les objets git de la
+tête de plage, jamais contre l'arbre de travail. Les preuves d'une plage sont les
+jetons de la cellule Preuve (`chemin:ligne`, `chemin#L12-L20`, `@sha256:`,
+`test-run.json#<run_id>`, `mem:`, URL, texte libre) des lignes de
+`claim-ledger.md` qu'un commit de la plage a écrites ou modifiées (`git blame`).
+Le journal chaîné `evidence-log.jsonl` n'en fait pas partie : il est local et
+ignoré par git.
+
+| Commande | Description |
+| --- | --- |
+| `grimoire evidence resolve <base>..<head> [--project-root .]` | Un statut par preuve ; code 1 dès qu'une preuve n'est pas `resolved`, code 2 sur une plage illisible ou hors d'un dépôt git |
+| `grimoire evidence resolve <commit>` | Les preuves écrites par ce seul commit |
+| `grimoire -o json evidence resolve <plage>` | Même verdict en JSON : `anchor` (base, tête, commits, tête publiée), `summary`, une entrée par preuve avec `claim_commit`, `status`, `reason`, `fingerprint` |
+
+| Statut | Sens |
+| --- | --- |
+| `resolved` | La cible existe à la tête et correspond : lignes citées identiques à celles du commit qui a écrit l'affirmation, empreinte épinglée égale, run enregistré vert et inchangé |
+| `stale` | La cible existe à la tête mais ne correspond plus (lignes modifiées depuis l'affirmation, empreinte différente, run remplacé ou rouge) |
+| `missing` | La cible n'existe pas à la tête (fichier non commité, ligne hors du fichier, nœud de test absent, chemin hors du projet, affirmation « prouvé » sans preuve) |
+| `unknown` | Rien dans git ne permet de trancher : mémoire, URL, texte libre, fichier absent au commit de l'affirmation, `test-run.json` illisible ou sans empreinte |
+
+Seul `resolved` compte : un statut inconnu n'est jamais rendu comme résolu. Une
+plage sans preuve rend `empty` (code 0) et le dit : rien n'est prouvé, rien
+n'est réfuté. `head_published` dit si la tête est contenue dans une branche
+distante ; une tête locale peut encore être réécrite.
+
+---
+
 ## Tâches agentiques
 
 Le task board gouverné est une **projection** du Mission Ledger, pas une source
@@ -654,16 +689,23 @@ prochain export l'écrase.
 | `grimoire task list [--status <état>] [--mission <id>]` | Lister les tâches et leur colonne de board |
 | `grimoire task wave-checkpoint <mission> <vague> [--action status\|request\|require\|approve\|reject] [--fingerprint <empreinte>]` | Checkpoint humain d'une vague, lié à l'empreinte du contenu fusionné (arbres base, tête et merge de chaque tâche). `request` présente l'empreinte, `approve`/`reject` la citent et exigent un tour humain attesté postérieur (W2-01) ; `require` ferme le claim des vagues suivantes tant que la vague n'est pas `approved`. Une vague dont le contenu change devient `stale`. Le numéro de vague est celui de `task waves` (niveau absolu, vagues closes comprises) ; le verrou s'applique à toute transition vers `claimed` |
 | `grimoire task show <id>` | Détailler une tâche et ce que chaque prochain pas exigera |
-| `grimoire task claim <id> [--actor <qui>] [--host <où>]` | Réclamer une tâche prête (`ready → claimed`) |
+| `grimoire task claim <id> [--actor <qui>] [--host <où>]` | Réclamer une tâche prête (`ready → claimed`). Une tâche `claimed`/`running` dont le bail est perdu (`expires_at` passé, battement de cœur perdu) se réclame directement : barrière du bail, retour `ready` journalisé (`reclaimed`), nouveau claim au nouvel epoch ; un autre acteur que le titulaire seulement si l'hôte du claim a un frein vérifié, sinon `grimoire task reap` pose la question à l'humain. Le WIP ne compte que les claims vivants |
 | `grimoire task move <id> --to <état>` | Déplacer une tâche, si la machine à états et le gate le permettent |
 | `grimoire task block <id> --reason "<motif>"` | Bloquer en disant pourquoi |
 | `grimoire task close <id>` | Fermer une tâche vérifiée (verdict accepté exigé ; depuis `needs_verification`, reçu de revue frais exigé) |
 | `grimoire task review <id> --verdict READY\|NOT-READY [--finding "résumé :: commande"]` | Écrire le reçu de revue, lié à l'empreinte présente de l'arbre (`_grimoire-output/reviews/<id>/review-receipt.json`) |
+| `grimoire task verify <id> [--evidence <fichier> ...]` | Lancer les commandes déclarées de la tâche, écrire le pack et le verdict (0 `passed`, 1 `failed`, 2 aucune commande, 3 commandes non approuvées). Pour une tâche **sans** commande, `--evidence` (répétable) écrit un pack **déclaratif** : chaque fichier doit exister sous la racine du projet, il entre haché (SHA-256, taille, URI `file:<chemin>`), le verdict est `skipped` (`created_by: declarative`, contrôle `declarative-only`) et le code de sortie 4 : la revue peut s'ouvrir (`needs_verification`), la clôture reste refusée (`review_gate`) — une preuve déclarative n'est jamais un vert mécanique |
 | `grimoire task prioritize <id> --to low\|medium\|high\|critical [--reason "<motif>"]` | Changer la priorité (issue #638) — l'historique reste au ledger, le board se retrie |
 | `grimoire task comment <id> "<texte>" [--kind comment\|directive]` | Poser un commentaire ou une consigne ; la session qui tient la tâche la lit au prochain `UserPromptSubmit` |
 | `grimoire task cancel <id> --reason "<motif>" [--force]` | Annuler avec sa raison (obligatoire) ; tenue par une autre session, elle exige `--force` |
 | `grimoire task ack <id> <dir-…>` | Accuser réception d'une consigne de l'orchestrateur |
 | `grimoire task link <id> --depends-on <id>` | Déclarer une dépendance |
+| `grimoire task ask <id> "<question>" [--kind <nature>] [-o <option>] [--non-blocking] [--why "<pourquoi>"] [--key <clé>]` | Poser une question à l'humain : une bloquante gare la tâche en `waiting(human)` et remonte au cockpit ; `--non-blocking` l'inscrit sans garer la tâche |
+| `grimoire task ask <id> --from <lot.yaml\|->` | Poser un lot de questions (JSON ou YAML) en **une** interruption et une notification ; une question déjà répondue (même clé) n'est pas reposée |
+| `grimoire task answer <id> "<réponse>" [--question <q-…>]` | Répondre (canal humain seulement) ; la tâche n'est rendue que quand toutes les bloquantes du lot ont leur réponse |
+| `grimoire task questions [<id>] [--open]` | Le registre des questions : statut, bloquante ou non, pourquoi, qui a répondu, par quel canal ou sur quelle source, et le nombre d'interruptions |
+| `grimoire task resolve <id> <q-…> "<réponse>" --source <d'où>` | Déduire la réponse d'une question **non bloquante**, source citée ; une bloquante est refusée |
+| `grimoire task decisions` | Les décisions qui attendent un humain (un lot = une décision, ses questions ouvertes listées) |
 | `grimoire task context <id>` | Produire le context bundle d'une tâche réelle |
 | `grimoire task trace <id> [--causes]` | Timeline unifiée d'une tâche : transitions, outils refusés, gates rouges, checkpoints, abort, preuves, incidents |
 | `grimoire task approve-check <id> [--cmd "<commande>"] [--allow-unattested]` | Approuver par empreinte les commandes de vérification de la tâche, pour cette tâche seule (governed/production : sans approbation, `task verify` et le dispatch de flow ne lancent rien) ; l'acteur est attesté par un tour humain postérieur au challenge de cet ensemble exact de commandes ; sans attestation (terminal nu), l'approbation est refusée sauf `--allow-unattested` (journalisée `unattested`) ; les caractères cachés (U+202E, U+200B) sont refusés |
@@ -685,6 +727,45 @@ Les mêmes gestes sont exposés aux agents par le serveur MCP (`task_add`,
 `task_list_ready`, `task_show`, `task_waves`, `task_claim`, `task_update`, `task_context`) :
 même service (`TaskService.add` pour l'ouverture), même gate, même refus. Voir
 [Intégration MCP](mcp-integration.md).
+
+### Questions structurées
+
+Une question posée à l'humain est un objet du Mission Ledger, pas une phrase dans le
+fil de discussion (W6-07, issue #564). Chaque tâche porte le registre de ses questions
+(`task show --json`, champ `questions` ; `task questions` le rend à plat avec son statut) :
+
+- **bloquante ou non** : une bloquante gare la tâche en `waiting(human)` ; une non
+  bloquante ne la gare pas, l'humain y répond quand il veut ;
+- **par lot** : `task ask --from` (ou l'outil MCP `task_update` avec `questions`) pose
+  plusieurs questions en **une** attente, une carte du cockpit et une notification ;
+  la tâche n'est rendue qu'une fois toutes les bloquantes du lot tranchées ;
+- **pourquoi** (`why`) : la raison de la question, montrée au cockpit et dans le registre ;
+- **qui a répondu** : `answered` vient du canal humain (cockpit, CLI interactive) ;
+  `deduced` vient de l'agent, **source citée** (`task resolve`, ou `answer` et `source`
+  dans le lot), et n'est permis que pour une non bloquante ; `not_awaited` est une
+  bloquante restée sans réponse que la tâche n'attend pas ou plus (run de flow abandonné,
+  tâche annulée) : elle n'est pas comptée comme répondue ;
+- **reprise** : une question du lot dont la clé (`key`, ou le texte normalisé) est déjà
+  répondue ou déduite n'est pas reposée ; sa réponse est rendue dans `reused`.
+
+```yaml
+# lot.yaml — grimoire task ask <id> --from lot.yaml
+questions:
+  - text: Maquette ou version peaufinée ?
+    options: [maquette, peaufiné]
+    why: la finition n'est pas déterminable depuis le dépôt
+  - text: Supprimer la table users_v1 ?
+    kind: permission
+    why: arbitrage irréversible
+  - text: Quel gestionnaire de paquets ?
+    blocking: false
+    answer: uv
+    source: uv.lock
+```
+
+Un agent ne répond jamais à une question bloquante, ni par la CLI hors terminal humain,
+ni par le MCP : `task ask` sans les options du lot garde le comportement d'origine
+(une question, reposée telle quelle si on la repose).
 
 ### Vérifiabilité d'une tâche
 
