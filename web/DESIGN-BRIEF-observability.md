@@ -128,7 +128,7 @@ Spans groupés par `trace_id` = arbres causaux parent→enfant (waterfall).
 ## 5. Trame indicative (à réorganiser librement)
 
 Hero + badge état (LIVE / SNAPSHOT DÉMO) · KPIs runtime (traces/agents/sessions/types) ·
-métriques perf (coût, tokens, p50/p95/p99) · multi-LLM (coût & % par modèle/provider) ·
+métriques perf (coût, tokens, p50/p95/p99) · multi-modèle (coût & % par modèle/provider) ·
 constellation d'agents (relations pondérées) · chaînes causales (waterfall de spans) ·
 gouvernance (jauge antifragile + radar dimensions) · inventaire (agents par archétype +
 familles) · économie RTK (96.1%) · activité projet (commits/jour, contributeurs, PRs,
