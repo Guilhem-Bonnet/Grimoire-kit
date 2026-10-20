@@ -25,10 +25,11 @@ if TYPE_CHECKING:
     from grimoire.core.expertises import Expertise
 
 expertise_app = typer.Typer(help="Catalogue d'expertises optionnelles : langages, ingénierie, cloud.")
-# `stderr=True` : convention du dépôt pour tout ce qui supporte `-o json`
-# (`app.py`, `cmd_agent.py`, `cmd_init.py`…) — la sortie Rich décorative ne
-# doit jamais polluer un `grimoire -o json expertise ...` sur stdout.
-console = Console(stderr=True)
+# Sortie texte sur stdout (`grimoire expertise list | grep …` doit voir la
+# liste) ; `-o json` n'écrit son JSON que via `typer.echo` et sort avant tout
+# rendu Rich, donc stdout reste propre dans ce mode. Les refus vont sur stderr.
+console = Console()
+errors = Console(stderr=True)
 
 _PROJECT_ROOT_OPTION = typer.Option(Path.cwd(), "--project-root", help="Racine du projet.", show_default=False)
 _DETECTED_OPTION = typer.Option(False, "--detected", help="N'afficher que les expertises recommandées par détection.")
@@ -57,7 +58,7 @@ def expertise_list(
     try:
         catalog = load_catalog()
     except GrimoireRegistryError as exc:
-        console.print(f"[red]{exc}[/red]")
+        errors.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from exc
 
     if detected:
@@ -138,11 +139,11 @@ def expertise_add(
     try:
         catalog = load_catalog()
     except GrimoireRegistryError as exc:
-        console.print(f"[red]{exc}[/red]")
+        errors.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from exc
     entries, unknown = _resolve_ids(catalog, ids)
     if unknown:
-        console.print(f"[red]Id(s) inconnu(s) :[/red] {', '.join(unknown)} — voir `grimoire expertise list`.")
+        errors.print(f"[red]Id(s) inconnu(s) :[/red] {', '.join(unknown)} — voir `grimoire expertise list`.")
         raise typer.Exit(1)
 
     results = []
@@ -150,7 +151,7 @@ def expertise_add(
         try:
             result = attach_expertise(root, entry)
         except GrimoireAgentError as exc:
-            console.print(f"[red]{exc}[/red]")
+            errors.print(f"[red]{exc}[/red]")
             raise typer.Exit(1) from exc
         results.append(result)
 
@@ -185,11 +186,11 @@ def expertise_remove(
     try:
         catalog = load_catalog()
     except GrimoireRegistryError as exc:
-        console.print(f"[red]{exc}[/red]")
+        errors.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from exc
     entries, unknown = _resolve_ids(catalog, ids)
     if unknown:
-        console.print(f"[red]Id(s) inconnu(s) :[/red] {', '.join(unknown)} — voir `grimoire expertise list`.")
+        errors.print(f"[red]Id(s) inconnu(s) :[/red] {', '.join(unknown)} — voir `grimoire expertise list`.")
         raise typer.Exit(1)
 
     results = []
@@ -197,7 +198,7 @@ def expertise_remove(
         try:
             result = detach_expertise(root, entry)
         except GrimoireAgentError as exc:
-            console.print(f"[red]{exc}[/red]")
+            errors.print(f"[red]{exc}[/red]")
             raise typer.Exit(1) from exc
         results.append(result)
 

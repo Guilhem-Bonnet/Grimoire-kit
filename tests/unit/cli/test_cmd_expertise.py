@@ -177,3 +177,21 @@ class TestExpertiseNamedRefusals:
         result = runner.invoke(app, ["expertise", "remove", "rust", "--project-root", str(tmp_path)])
         assert result.exit_code == 1
         assert "détachement refusé pour le test" in result.output
+
+
+class TestExpertiseStreams:
+    """Relecture du lot : la liste texte va sur stdout (`grimoire expertise list | grep …`),
+    seuls les refus vont sur stderr."""
+
+    def test_list_text_goes_to_stdout(self) -> None:
+        result = runner.invoke(app, ["expertise", "list"])
+        assert result.exit_code == 0, result.output
+        assert "rust" in result.stdout
+        assert "languages" in result.stdout
+
+    def test_refusal_goes_to_stderr_not_stdout(self, tmp_path: Path) -> None:
+        _seed_stack_engineer(tmp_path)
+        result = runner.invoke(app, ["expertise", "add", "nope", "--project-root", str(tmp_path)])
+        assert result.exit_code == 1
+        assert "inconnu" in result.stderr
+        assert "inconnu" not in result.stdout
