@@ -1,4 +1,4 @@
-name: "✨ Feature request"
+name: "Feature request"
 description: "Proposer une nouvelle fonctionnalité ou amélioration"
 title: "feat: Description courte"
 labels: ["enhancement", "triage"]

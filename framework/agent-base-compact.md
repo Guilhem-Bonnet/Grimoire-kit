@@ -1,13 +1,13 @@
 <p align="right"><a href="../README.md">README</a> · <a href="../docs">Docs</a></p>
 
-# <img src="../docs/assets/icons/hexagon.svg" width="32" height="32" alt=""> Grimoire Agent Core Protocol — Version Compacte
+# Grimoire Agent Core Protocol — Version Compacte
 
 > Version condensée du protocole agent (~30 lignes core). Pour la version complète, charger `agent-base.md`.
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
 
-## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Règles absolues (non-négociables)
+## <img src="../docs/assets/icons/doc.svg" width="28" height="28" alt=""> Règles absolues (non-négociables)
 
 1. **CC (Completion Contract)** — Jamais dire "terminé" sans vérification : `bash {project-root}/_grimoire/kit/framework/cc-verify.sh` → `&#x2713; CC PASS` ou ` CC FAIL` → corriger immédiatement
 2. **HUP (Incertitude déclarée)** — Jamais halluciner : source (commande exécutée, fichier:ligne) ou « non vérifié » ; un score n'existe que calculé ; bloc ```grimoire-uncertainties``` en fin de réponse ; information manquante bloquante = Uncertainty Report escaladé via QEC, jamais une réponse inventée. "Je ne sais pas" autorisé UNIQUEMENT avec preuve d'effort. (Échelle VERT/JAUNE/ROUGE retirée le 2026-09-26.)
@@ -36,7 +36,7 @@ Quand l'utilisateur contredit une décision existante, activer ce protocole :
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/chart.svg" width="28" height="28" alt=""> Self-Critique Post-Output
+## <img src="../docs/assets/icons/board.svg" width="28" height="28" alt=""> Self-Critique Post-Output
 
 Avant de livrer un output significatif, vérifier mentalement :
 

@@ -1,209 +1,96 @@
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/banner-dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="docs/assets/banner-light.svg">
-  <img alt="Grimoire Kit — Composable AI Agent Platform" src="docs/assets/banner-dark.svg" width="100%">
-</picture>
-
 <p align="center">
-  <a href="https://github.com/Guilhem-Bonnet/Grimoire-kit/actions/workflows/ci-sdk.yml"><img src="https://img.shields.io/github/actions/workflow/status/Guilhem-Bonnet/Grimoire-kit/ci-sdk.yml?branch=main&style=for-the-badge&logo=github-actions&logoColor=white&label=CI" alt="CI"></a>
-  <a href="https://pypi.org/project/grimoire-kit/"><img src="https://img.shields.io/pypi/v/grimoire-kit?style=for-the-badge&logo=pypi&logoColor=white&color=3775A9" alt="PyPI"></a>
-  <a href="https://guilhem-bonnet.github.io/Grimoire-kit/"><img src="https://img.shields.io/badge/docs-online-8ca1ff?style=for-the-badge&logo=materialformkdocs&logoColor=white" alt="Docs"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-f0c674?style=for-the-badge" alt="License"></a>
-  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.12+-3572A5?style=for-the-badge&logo=python&logoColor=white" alt="Python"></a>
-  <a href="https://docs.astral.sh/ruff/"><img src="https://img.shields.io/badge/code%20style-ruff-c9a0ff?style=for-the-badge&logo=ruff&logoColor=white" alt="Ruff"></a>
-  <a href="https://mypy-lang.org/"><img src="https://img.shields.io/badge/types-mypy%20strict-blue?style=for-the-badge&logo=python&logoColor=white" alt="Mypy"></a>
-  <a href="https://codecov.io/gh/Guilhem-Bonnet/Grimoire-kit"><img src="https://img.shields.io/codecov/c/github/Guilhem-Bonnet/Grimoire-kit?style=for-the-badge&logo=codecov&logoColor=white" alt="Codecov"></a>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/wordmark-dark.svg">
+    <img src="docs/assets/brand/wordmark-light.svg" width="220" alt="Grimoire">
+  </picture>
 </p>
 
-<p align="center">
-  <i>The governed operating system for AI agents in your IDE — verify, don't trust.</i>
-</p>
+# grimoire-kit
 
-<p align="center">
-  <sub>English — <a href="README.fr.md">version française (complète)</a></sub>
-</p>
+[![PyPI](https://img.shields.io/pypi/v/grimoire-kit?style=flat&label=PyPI)](https://pypi.org/project/grimoire-kit/)
+[![CI](https://img.shields.io/github/actions/workflow/status/Guilhem-Bonnet/Grimoire-kit/ci-sdk.yml?branch=main&style=flat&label=CI)](https://github.com/Guilhem-Bonnet/Grimoire-kit/actions/workflows/ci-sdk.yml)
+[![License](https://img.shields.io/github/license/Guilhem-Bonnet/Grimoire-kit?style=flat&label=license)](LICENSE)
 
-<p align="center">
-  <a href="#quick-start">Quick Start</a> •
-  <a href="#the-governed-agentic-standard">Governed Standard</a> •
-  <a href="#architecture">Architecture</a> •
-  <a href="#features">Features</a> •
-  <a href="docs/getting-started.md">Full guide</a> •
-  <a href="CHANGELOG.md">Changelog</a>
-</p>
+Grimoire installs into your repository and gives you, for the code you delegate to agents
+(Claude Code, Copilot), a local dashboard, tasks, project memory and an evidence check.
 
----
-
-## Why Grimoire Kit?
-
-AI coding assistants run on trust: you *hope* the agent kept its guardrails, remembered
-the context, and produced evidence for what it claims. Grimoire Kit replaces that hope
-with **verifiable governance**:
-
-- **A governed agentic standard** — 36 declarative patterns (security, memory, context,
-  observability, quality…) verified *fail-closed* by `grimoire standard verify` /
-  `audit` / `score` / `gate check`. If a required proof is missing, the gate fails.
-- **Agent teams with personas and semantic memory** — specialized agents, persistent
-  memory across sessions, delivery contracts, quality automation.
-- **One config, every assistant** — `grimoire init` generates portable entrypoints
-  (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.cursorrules`) plus a `.mcp.json`, so the
-  same project works with Copilot, Claude Code, Codex, Gemini CLI and Cursor.
-- **Native on each host, not lowest-common-denominator** — one host-neutral
-  description of the project is rendered per host: sub-agents with their own
-  context window and tool boundary, on-demand skills, slash commands, and
-  lifecycle hooks that actually refuse a destructive call, or the closure of a
-  task whose evidence gates are red. What a host cannot execute is reported as
-  an explicit degradation, never dropped in silence. See `grimoire host --help`
-  and [docs/hosts.md](docs/hosts.md).
-
-## Quick Start
-
-<img src="docs/assets/demo-quickstart.svg" width="100%" alt="Animated demo: grimoire init, standard init --needs, verify OK, compliance score 81/70, gate check OK">
+[Website](https://guilhem-bonnet.github.io/Grimoire-kit/) ·
+[Manual (in French)](https://guilhem-bonnet.github.io/Grimoire-kit/docs/) ·
+[Version française](README.fr.md)
 
 ```bash
-# Install (uv recommended)
-uv tool install grimoire-kit
-
-# Or with pipx
-pipx install grimoire-kit
-
-# One command: init + identity + governed standard + health check
-grimoire up my-project --archetype web-app
-
-# Existing project (idempotent — re-running only fills the gaps)
-cd your-project/
-grimoire up . --name "My Project"
-
-# Detect and enroll existing projects on your machine
-grimoire cockpit scan ~/dev
-
-# Health check + repair (regenerates missing wrappers and .mcp.json)
-grimoire doctor . --fix
-
-# Local multi-project dashboard (background + browser)
-grimoire cockpit
+uv tool install grimoire-kit                   # or: pipx install grimoire-kit
+grimoire init . --lite -y                      # sets up the current repository, light profile (no service)
+grimoire standard init . --profile governed    # makes the evidence check blocking
 ```
 
-<details>
-<summary>Step-by-step path (what <code>grimoire up</code> chains for you)</summary>
+## The five tools
+
+### The dashboard
+
+A local web page that gathers the Grimoire projects on your machine and their tasks. Started
+from a project, it adds that project and opens on it; it does not start sessions, that stays
+in your editor.
 
 ```bash
-grimoire init . --name "My Project"   # scaffold: context, agents, memory, entrypoints
-grimoire setup                        # propagate identity into instructions
-grimoire standard init . --needs ...  # governed standard artifacts
-grimoire doctor                       # health check
+grimoire cockpit start    # starts in the background and opens the browser
 ```
 
-</details>
+### Tasks
 
-> **Multi-assistant** — `grimoire init` writes portable assistant entrypoints pointing
-> to a single canonical instruction file, and registers the Grimoire MCP server in
-> `.mcp.json` (OS-neutral, via `grimoire-mcp`). No per-assistant duplication.
-
-## The governed agentic standard
-
-Declare **what your project needs**; Grimoire resolves a maturity **profile**
-(`starter → controlled → orchestrated → governed → production`) and activates
-**governed patterns** — 36 in the catalog. Each pattern scaffolds a declarative
-artifact (`_grimoire/standard/*.yaml`) and a *fail-closed* check:
+Each piece of work becomes a task with an acceptance criterion. A session takes a task and
+hands its work back to you for review.
 
 ```bash
-grimoire standard needs                        # needs grouped by tier, with footprint
-grimoire standard plan --needs solo-prototyping  # preview without writing anything
-grimoire standard init . --needs solo-prototyping # minimal recommended start
-grimoire standard init . --interactive         # guided setup
-
-grimoire standard verify       # artifacts present + conform to the profile
-grimoire standard audit        # compliance report + remediation actions
-grimoire standard score        # multi-dimensional compliance score
-grimoire standard gate check   # CI gate: fails when required evidence is missing
+grimoire task add "Fix the CSV export" -a "pytest tests/test_export.py passes" --ready
 ```
 
-Example controls: tool blast-radius limits, controller/agent privilege separation,
-prompt-injection firewall, decision council, memory integrity, LLM cost registry +
-reliability SLO, guardrail contracts (input/output/tool/model), visual evidence,
-workspace isolation, per-environment policies.
+### Project memory
 
-Reference: [governed controls (36 patterns)](docs/standard/controles-gouvernes.md) ·
-[standard integration](docs/standard/integration.md) ·
-[install by needs](docs/standard/install-by-needs.md)
-
-The `project-discovery` need scaffolds a guided five-phase product cadrage
-(`_grimoire/cadrage/`: brief → brainstorm → understanding → requirements →
-spec) and turns its completeness into a `standard verify` gate. Details:
-[docs/cadrage.md](docs/cadrage.md).
-
-## Architecture
-
-Three layers, one wheel (`pip install grimoire-kit`):
-
-| Layer | What it provides |
-|---|---|
-| **SDK Python** (`src/grimoire/`) | `grimoire` CLI (Typer), governed standard engine, memory manager with pluggable backends, MCP server, archetype registry |
-| **Shell framework** (`framework/`) | 108 standalone Python tools (agent lifecycle, quality, orchestration), lifecycle hooks, prompt templates |
-| **Archetypes** (`archetypes/`) | Pre-configured agent packs: `web-app`, `infra-ops`, `platform-engineering`, `creative-studio`, `fix-loop`, `minimal`… |
-
-Details in [ARCHITECTURE.md](ARCHITECTURE.md).
-
-## Features
-
-| Feature | Description |
-|---|---|
-| **Team of Teams** | Vision / Build / Ops agent teams with delivery contracts between them |
-| **Semantic memory** | Qdrant vector search with JSON fallback; contradiction detection, consolidation, failure museum |
-| **Completion contract** | `cc-verify.sh` detects the stack and verifies build + tests + lint before anything is called "done" |
-| **Local cockpit** | Packaged local dashboard for all your Grimoire projects: portfolio, cost/trace observability, governed memory management (`127.0.0.1` only) |
-| **Boomerang orchestration** | The orchestrator decomposes, delegates to sub-agents in parallel, aggregates results |
-| **MCP server** | 12 tools exposed to any MCP client — including the governed standard itself |
-
-Experimental R&D features (session branching, agent darwinism, stigmergy, dream mode…)
-are documented separately in [docs/rnd.md](docs/rnd.md) — functional and tested, but
-exploratory surface.
-
-## CLI, SDK and MCP
+What the project decided carries over from one session to the next. Memory belongs to each
+project; in the light profile it needs no service.
 
 ```bash
-grimoire init | doctor | status | up | validate     # project lifecycle
-grimoire add <agent> | remove <agent> | registry    # agents & archetypes
-grimoire standard …                                 # governed standard (see above)
-grimoire cockpit …                                  # local dashboard daemon
-grimoire memory …                                   # governed memory operations
+grimoire memory remember "We keep SQLite while the volume allows it"
 ```
 
-```python
-from pathlib import Path
-from grimoire.tools import PreflightCheck
+### Evidence check
 
-report = PreflightCheck(Path(".")).run()
-print(report.status)  # GO / GO-WITH-WARNINGS / NO-GO
+Before a task changes state, Grimoire checks that its evidence exists: a test run, a written
+review, a produced file. It refuses for real in the `governed` profile and warns elsewhere;
+either way, it names what is missing.
+
+```bash
+grimoire standard gate check    # tells which evidence is missing, if any
 ```
 
-MCP server (`grimoire-mcp`, stdio) exposes 12 tools: `project_context`, `status`,
-`agent_list`, `config`, `harmony_check`, `memory_store`, `memory_search`, `add_agent`,
-`standard_verify`, `standard_audit`, `standard_score`, `standard_gate` — agents can
-query *and enforce* the governed standard directly.
+### Install
 
-<a id="quality"></a>
-## Quality
+Start small and enable only what the project needs. Updating goes through a backup and a
+preview; anything that needs your call is proposed instead of applied.
 
-- **pytest** suite, coverage gate ≥ 75 % (Codecov) <!-- source: pyproject.toml ; recompute: grep fail_under pyproject.toml -->
-- **mypy strict** on the SDK, **ruff** lint + format
-- CI matrix: Ubuntu / Windows / macOS × Python 3.12 / 3.13, CodeQL, dependency audit
-  with governed, time-boxed waivers
-- Releases: SBOM (CycloneDX) of the wheel alone, `SHA256SUMS`, Sigstore build-provenance attestations, smoke tests, PyPI trusted publishing (OIDC); `grimoire self update` verifies the wheel before installing it (`grimoire verify-install`)
+```bash
+grimoire upgrade-flow run    # guided update, backup first
+```
 
-## Documentation
+## Under the hood
 
-[Getting started](docs/getting-started.md) ·
-[Concepts](docs/concepts.md) ·
-[SDK guide](docs/sdk-guide.md) ·
-[CLI reference](docs/cli-reference.md) ·
-[Cadrage](docs/cadrage.md) ·
-[MCP integration](docs/mcp-integration.md) ·
-[FAQ](docs/faq.md) — full docs (French) on the
-[documentation site](https://guilhem-bonnet.github.io/Grimoire-kit/).
+The manual is in French.
 
-## Contributing & License
+- [Getting started](https://guilhem-bonnet.github.io/Grimoire-kit/docs/getting-started/) ·
+  [Command reference](https://guilhem-bonnet.github.io/Grimoire-kit/docs/cli-reference/)
+- [Project memory](https://guilhem-bonnet.github.io/Grimoire-kit/docs/memory-system/) ·
+  [Evidence check](https://guilhem-bonnet.github.io/Grimoire-kit/docs/standard/) ·
+  [Updating](https://guilhem-bonnet.github.io/Grimoire-kit/docs/upgrade/)
+- [Hosts, surface by surface](https://guilhem-bonnet.github.io/Grimoire-kit/docs/hosts/)
+- [Repository architecture](ARCHITECTURE.md) · [Changelog](CHANGELOG.md)
 
-Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
+## Contributing
+
+Issues and change proposals are welcome. The path (environment, tests, contribution rules) is
+in [CONTRIBUTING.md](CONTRIBUTING.md). A change to a command updates its reference page in the
+same commit.
+
+## License
+
 MIT — see [LICENSE](LICENSE).

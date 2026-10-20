@@ -4,7 +4,7 @@ audience: utilisateur
 
 <p align="right"><a href="../README.md">README</a></p>
 
-# <img src="../assets/icons/workflow.svg" width="32" height="32" alt=""> Patterns de Design — Workflows Agentiques
+# Patterns de Design — Workflows Agentiques
 
 > Patterns extraits de 86 fixes appliqués au workflow `closed-loop-fix` v2.6.
 > Ces patterns sont universels et s'appliquent à tout workflow d'agent Grimoire.
@@ -12,7 +12,7 @@ audience: utilisateur
 <img src="../assets/divider.svg" width="100%" alt="">
 
 
-## <img src="../assets/icons/workflow.svg" width="28" height="28" alt=""> PATTERN 1 — DoD avant fix (Definition of Done)
+## PATTERN 1 — DoD avant fix (Definition of Done)
 
 **Problème résolu :** Agent déclare "done" sans critères de succès définis.
 
@@ -31,7 +31,7 @@ VALIDATOR → exécute EXACTEMENT les commandes de la DoD
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/workflow.svg" width="28" height="28" alt=""> PATTERN 2 — Evidence-First (Preuves avant verdict)
+## PATTERN 2 — Evidence-First (Preuves avant verdict)
 
 **Problème résolu :** Agent affirme que quelque chose fonctionne sans sortie de commande.
 
@@ -52,7 +52,7 @@ evidence:
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/workflow.svg" width="28" height="28" alt=""> PATTERN 3 — Adversarial Challenger
+## PATTERN 3 — Adversarial Challenger
 
 **Problème résolu :** Validator passe mais le bug réapparaît en production.
 
@@ -74,7 +74,7 @@ Après validation réussie :
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/workflow.svg" width="28" height="28" alt=""> PATTERN 4 — Session Isolation (FER)
+## PATTERN 4 — Session Isolation (FER)
 
 **Problème résolu :** État de session contaminé entre deux cycles de fix.
 
@@ -92,7 +92,7 @@ current_phase: "INTAKE"
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/workflow.svg" width="28" height="28" alt=""> PATTERN 5 — Circuit-Breaker (Boucle bornée)
+## PATTERN 5 — Circuit-Breaker (Boucle bornée)
 
 **Problème résolu :** Agent boucle infiniment sur un problème complexe.
 
@@ -115,7 +115,7 @@ if challenger_failures >= 3:
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/microscope.svg" width="28" height="28" alt=""> PATTERN 6 — Root Cause Invalidation
+## <img src="../assets/icons/search.svg" width="28" height="28" alt=""> PATTERN 6 — Root Cause Invalidation
 
 **Problème résolu :** Agent continue d'appliquer des fixes sur une mauvaise root cause.
 
@@ -133,7 +133,7 @@ Si consecutive_failures >= 2 :
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/workflow.svg" width="28" height="28" alt=""> PATTERN 7 — Sévérité Adaptative
+## PATTERN 7 — Sévérité Adaptative
 
 **Problème résolu :** Processus trop lourd pour les petits fixes, trop léger pour les critiques.
 
@@ -150,7 +150,7 @@ S3 — Mineur : max 2 iterations, 6 phases (pas de Challenger ni Gatekeeper)
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/workflow.svg" width="28" height="28" alt=""> PATTERN 8 — Pre-flight Check
+## PATTERN 8 — Pre-flight Check
 
 **Problème résolu :** Validator utilise une iteration sur un environnement inaccessible.
 
@@ -170,7 +170,7 @@ Si pre-flight échoue → NE PAS incrémenter iteration
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/workflow.svg" width="28" height="28" alt=""> PATTERN 9 — Auto-amélioration (META-REVIEW)
+## PATTERN 9 — Auto-amélioration (META-REVIEW)
 
 **Problème résolu :** Le workflow ne s'améliore jamais face aux problèmes récurrents.
 
@@ -190,7 +190,7 @@ Après chaque cycle certifié (S1/S2) :
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/workflow.svg" width="28" height="28" alt=""> PATTERN 10 — Guardrail Destructif
+## PATTERN 10 — Guardrail Destructif
 
 **Problème résolu :** Agent exécute une commande destructive sans confirmation.
 
@@ -210,7 +210,7 @@ Si détecté → STOP + confirmation explicite
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/workflow.svg" width="28" height="28" alt=""> PATTERN 11 — Délégation avec Objectivité Garantie
+## PATTERN 11 — Délégation avec Objectivité Garantie
 
 **Problème résolu :** Agent délègue le fix ET la validation à la même entité.
 
@@ -232,7 +232,7 @@ EXPERT DÉLÉGUÉ :
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/workflow.svg" width="28" height="28" alt=""> PATTERN 12 — Patterns Périssables (90j)
+## PATTERN 12 — Patterns Périssables (90j)
 
 **Problème résolu :** Pattern basé sur une architecture qui a changé → mauvais fast-path.
 
@@ -250,7 +250,7 @@ valid_until = date d'enregistrement + 90 jours
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/workflow.svg" width="28" height="28" alt=""> PATTERN 13 — FER Taille Bornée
+## PATTERN 13 — FER Taille Bornée
 
 **Problème résolu :** FER devient ingérable après plusieurs itérations verboses.
 
@@ -269,7 +269,7 @@ Si dépassé en Phase 7 :
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/workflow.svg" width="28" height="28" alt=""> ANTI-PATTERNS À ÉVITER
+## ANTI-PATTERNS À ÉVITER
 
 | Anti-pattern | Conséquence | Correction |
 |---|---|---|
@@ -283,7 +283,7 @@ Si dépassé en Phase 7 :
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/workflow.svg" width="28" height="28" alt=""> COMBINAISONS DE PATTERNS RECOMMANDÉES
+## COMBINAISONS DE PATTERNS RECOMMANDÉES
 
 ### Stack "Rigueur maximale" (prod critique)
 ```
