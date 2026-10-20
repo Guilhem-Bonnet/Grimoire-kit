@@ -128,7 +128,7 @@ class ScannedFile:
     def from_dict(cls, d: dict[str, Any]) -> ScannedFile:
         return cls(
             path=str(d.get("path", "")),
-            classification=d.get("classification", "unrecognised"),  # type: ignore[arg-type]
+            classification=d.get("classification", "unrecognised"),
             size=int(d.get("size", 0)),
             digest=str(d.get("digest", "")),
             patterns=tuple(str(p) for p in d.get("patterns", ())),
