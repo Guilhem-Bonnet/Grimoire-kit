@@ -46,7 +46,7 @@ RESTES_D_OUTIL = [
     re.compile(r"postMessage\([^)]*'\*'\)"),
 ]
 
-PICTOGRAMMES = ["▶", "↳", "✓", "⚙", "→", "↓"]
+PICTOGRAMMES = ["▶", "↳", "✓", "⚙", "↓"]  # « → » (U+2192) est une flèche typographique, pas un pictogramme : le rejeu verbatim la garde
 
 FICHIERS_EXCLUS = {"workspace"}
 PREFIXES_EXCLUS = ("DESIGN-REVIEW-",)
