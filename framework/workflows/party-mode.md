@@ -8,11 +8,11 @@ triggers:
 ---
 <p align="right"><a href="../../README.md">README</a> · <a href="../../docs">Docs</a></p>
 
-# <img src="../../docs/assets/icons/team.svg" width="32" height="32" alt=""> Workflow Party Mode
+# <img src="../../docs/assets/icons/fleet.svg" width="32" height="32" alt=""> Workflow Party Mode
 
 **Type :** playbook — le LLM lit et suit ces instructions, aucune exécution programmatique (voir [taxonomie](../../docs/workflow-taxonomy.md)).
 
-## <img src="../../docs/assets/icons/lightbulb.svg" width="28" height="28" alt=""> À quoi ça sert
+## À quoi ça sert
 
 Une seule session LLM joue successivement plusieurs agents installés du projet, chacun depuis sa spécialité. Le but n'est pas de simuler une réunion : c'est d'obtenir des angles qu'un agent seul ne produit pas, puis de trancher.
 
@@ -20,7 +20,7 @@ Une seule session LLM joue successivement plusieurs agents installés du projet,
 
 **Ne pas utiliser quand :** la question a une seule bonne réponse technique. Un agent spécialisé répond mieux et plus vite qu'un panel.
 
-## <img src="../../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> Déroulé
+## Déroulé
 
 ### 1. Cadrer la question
 
@@ -78,7 +78,7 @@ Une fois la décision prise, l'écrire dans `_grimoire/_memory/decisions-log.md`
 - [YYYY-MM-DD] [party-mode] Sujet : [question] | Décision : [choix] | Écarté : [options] | Panel : [agents]
 ```
 
-## <img src="../../docs/assets/icons/shield-pulse.svg" width="28" height="28" alt=""> Garde-fous
+## <img src="../../docs/assets/icons/shield.svg" width="28" height="28" alt=""> Garde-fous
 
 | Règle | Pourquoi |
 |---|---|
@@ -88,6 +88,6 @@ Une fois la décision prise, l'écrire dans `_grimoire/_memory/decisions-log.md`
 | Aucun agent ne tranche | Le panel éclaire, {{user_name}} décide |
 | Désaccord nul = le dire | Un faux consensus coûte le temps du panel sans rien produire |
 
-## <img src="../../docs/assets/icons/puzzle.svg" width="28" height="28" alt=""> Sortie attendue
+## <img src="../../docs/assets/icons/layers.svg" width="28" height="28" alt=""> Sortie attendue
 
 Une synthèse, une liste d'options chiffrée, et une entrée dans `decisions-log.md` une fois l'arbitrage rendu. Pas de fichier intermédiaire.

@@ -4,7 +4,7 @@ audience: utilisateur
 
 <p align="right"><a href="../README.md">README</a></p>
 
-# <img src="../assets/icons/lightbulb.svg" width="32" height="32" alt=""> Concepts — Comprendre Grimoire Custom Kit
+# Concepts — Comprendre Grimoire Custom Kit
 
 > Ce guide explique **tous les concepts** du kit avec des analogies simples.
 > Lisez-le avant de plonger dans le code — tout deviendra limpide.
@@ -12,7 +12,7 @@ audience: utilisateur
 <img src="../assets/divider.svg" width="100%" alt="">
 
 
-## <img src="../assets/icons/grimoire.svg" width="28" height="28" alt=""> Vue d'ensemble en 30 secondes
+## Vue d'ensemble en 30 secondes
 
 Grimoire Custom Kit transforme votre IDE en **entreprise virtuelle** peuplée d'agents IA spécialisés.
 
@@ -29,7 +29,7 @@ Chaque agent a une **persona** (nom, style, expertise), suit des **règles commu
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/lightbulb.svg" width="28" height="28" alt=""> Les 3 piliers
+## Les 3 piliers
 
 ### 1. Les Agents — "Qui fait quoi"
 
@@ -88,7 +88,7 @@ _memory/
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/lightbulb.svg" width="28" height="28" alt=""> Les concepts clés expliqués
+## Les concepts clés expliqués
 
 ### Completion Contract (CC)
 
@@ -151,7 +151,7 @@ gouvernance, contexte, mémoire, observabilité…). Chaque pattern pose un arte
 (`_grimoire/standard/*.yaml`) et un contrôle *fail-closed* vérifié par `grimoire standard verify`
 / `audit` / `score` / `gate`. Référence : [Contrôles gouvernés](standard/controles-gouvernes.md).
 
-## <img src="../assets/icons/cognition.svg" width="28" height="28" alt=""> Le système cognitif (Vague 1)
+## Le système cognitif (Vague 1)
 
 Ces principes sont intégrés dans le protocole que TOUS les agents suivent :
 
@@ -270,7 +270,7 @@ Un MVP livré vaut mieux qu'un produit parfait jamais terminé. Les imperfection
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/temple.svg" width="28" height="28" alt=""> Architecture du projet
+## <img src="../assets/icons/layers.svg" width="28" height="28" alt=""> Architecture du projet
 
 ```
 grimoire-kit/
@@ -366,7 +366,7 @@ votre-projet/
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/plug.svg" width="28" height="28" alt=""> Glossaire rapide
+## <img src="../assets/icons/link.svg" width="28" height="28" alt=""> Glossaire rapide
 
 | Terme | Signification |
 |-------|--------------|
@@ -407,7 +407,7 @@ votre-projet/
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/rocket.svg" width="28" height="28" alt=""> Pour aller plus loin
+## <img src="../assets/icons/play.svg" width="28" height="28" alt=""> Pour aller plus loin
 
 - [getting-started.md](getting-started.md) — Guide d'installation pas à pas
 - [creating-agents.md](creating-agents.md) — Créer un agent custom

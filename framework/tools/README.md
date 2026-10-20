@@ -1,6 +1,6 @@
 <p align="right"><a href="../../README.md">README</a> · <a href="../../docs">Docs</a></p>
 
-# <img src="../../docs/assets/icons/grimoire.svg" width="32" height="32" alt=""> framework/tools — Référence des outils CLI
+# framework/tools — Référence des outils CLI
 
 Ce dossier contient les outils Python (stdlib only, Python 3.10+) invocables via `grimoire-init.sh`.
 
@@ -61,7 +61,7 @@ bash grimoire-init.sh forge --install db-migrator
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/brain.svg" width="28" height="28" alt=""> `context-guard.py` — Guard
+## <img src="../../docs/assets/icons/book.svg" width="28" height="28" alt=""> `context-guard.py` — Guard
 
 Mesure précisément le budget de contexte LLM consommé par chaque agent *avant la première question utilisateur*. Utile pour détecter les agents trop lourds et les optimiser.
 
@@ -96,7 +96,7 @@ bash grimoire-init.sh guard --json                   # sortie JSON (CI-compatibl
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/dna.svg" width="28" height="28" alt=""> `dna-evolve.py` — Evolve
+## <img src="../../docs/assets/icons/vector.svg" width="28" height="28" alt=""> `dna-evolve.py` — Evolve
 
 Analyse l'usage réel du projet (Grimoire_TRACE, fichiers de décisions, learnings agents) pour proposer des mutations à `archetype.dna.yaml`. Le gate humain est toujours conservé — `--apply` ne fait jamais une modification silencieuse.
 
@@ -121,7 +121,7 @@ bash grimoire-init.sh evolve --dna path/custom.dna.yaml  # DNA source spécifiqu
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/cognition.svg" width="28" height="28" alt=""> `dream.py` — Dream Mode
+## `dream.py` — Dream Mode
 
 Simule une phase de "rêve" : les agents relisent learnings, decisions, trace, failure museum et shared-context, puis produisent des insights cross-domaine qu'aucun agent n'aurait formulés en session. Mode read-only : aucun fichier source n'est modifié.
 
@@ -147,7 +147,7 @@ bash grimoire-init.sh dream --multi-project ../proj-a ../proj-b  # croiser entre
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/cognition.svg" width="28" height="28" alt=""> `adversarial-consensus.py` — Consensus
+## `adversarial-consensus.py` — Consensus
 
 Protocole BFT simplifié pour les décisions architecturales / techniques majeures. 3 votants (technique, business, risque) + 1 avocat du diable qui tente activement de casser la proposition.
 
@@ -168,7 +168,7 @@ bash grimoire-init.sh consensus --json          # sortie JSON
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/resilience.svg" width="28" height="28" alt=""> `antifragile-score.py` — Anti-Fragile Score
+## <img src="../../docs/assets/icons/refresh.svg" width="28" height="28" alt=""> `antifragile-score.py` — Anti-Fragile Score
 
 Mesure comment le système apprend et s'améliore à partir de ses échecs. Croise Failure Museum, SIL signals, contradictions, learnings et decisions pour un score composite 0-100.
 
@@ -196,7 +196,7 @@ bash grimoire-init.sh antifragile --multi-project ../proj-a ../proj-b  # compare
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/cognition.svg" width="28" height="28" alt=""> `reasoning-stream.py` — Reasoning Stream
+## `reasoning-stream.py` — Reasoning Stream
 
 Flux de raisonnement structuré pour capturer le POURQUOI des décisions. Enregistre hypothèses, doutes, assumptions et alternatives dans un stream JSONL avec analyse et compaction.
 
@@ -244,7 +244,7 @@ source ~/.zshrc
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/network.svg" width="28" height="28" alt=""> `cross-migrate.py` — Cross-Project Migration
+## <img src="../../docs/assets/icons/graph.svg" width="28" height="28" alt=""> `cross-migrate.py` — Cross-Project Migration
 
 Exporte et importe des artefacts Grimoire entre projets : learnings, règles du Failure Museum, DNA patches, agents forgés, historique consensus, historique anti-fragile.
 
@@ -273,7 +273,7 @@ bash grimoire-init.sh migrate import --bundle migration-bundle.json --dry-run
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/dna.svg" width="28" height="28" alt=""> `agent-darwinism.py` — Agent Darwinism
+## <img src="../../docs/assets/icons/vector.svg" width="28" height="28" alt=""> `agent-darwinism.py` — Agent Darwinism
 
 Évalue la fitness des agents sur des générations successives et propose des actions évolutives : promotion, amélioration, hybridation, dépréciation.
 
@@ -312,7 +312,7 @@ bash grimoire-init.sh darwinism lineage --agent dev
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/network.svg" width="28" height="28" alt=""> `stigmergy.py` — Coordination Stigmergique
+## <img src="../../docs/assets/icons/graph.svg" width="28" height="28" alt=""> `stigmergy.py` — Coordination Stigmergique
 
 Système de phéromones numériques : les agents déposent des signaux typés dans l'environnement, d'autres agents les captent et adaptent leur comportement. Coordination indirecte — l'environnement est le médium.
 
@@ -383,7 +383,7 @@ python framework/tools/stigmergy.py landscape
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
 
-## <img src="../../docs/assets/icons/temple.svg" width="28" height="28" alt=""> Architecture commune
+## <img src="../../docs/assets/icons/layers.svg" width="28" height="28" alt=""> Architecture commune
 
 Tous les outils Python suivent le même pattern :
 

@@ -173,7 +173,7 @@ resolution_rules:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/chart.svg" width="28" height="28" alt=""> Trust Score — Score de Confiance Composite
+## <img src="../docs/assets/icons/board.svg" width="28" height="28" alt=""> Trust Score — Score de Confiance Composite
 
 ### Calcul
 
@@ -208,7 +208,7 @@ Chaque output validé affiche ses verdicts par dimension :
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> Adversarial Review Pattern
+## Adversarial Review Pattern
 
 Pour les décisions les plus critiques, activer le mode **adversarial** :
 
@@ -274,7 +274,7 @@ adversarial_review:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/boomerang.svg" width="28" height="28" alt=""> Intégration dans Subagent Orchestration
+## <img src="../docs/assets/icons/undo.svg" width="28" height="28" alt=""> Intégration dans Subagent Orchestration
 
 Nouvelle stratégie de merge dans `subagent-orchestration.md` :
 
@@ -290,7 +290,7 @@ merge:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration Grimoire Trace
+## Intégration Grimoire Trace
 
 ```
 [timestamp] [orchestrator]    [CVTL:requested]   producer=dev/Amelia | validator=qa/Quinn | type=code
@@ -302,7 +302,7 @@ merge:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Références Croisées
+## <img src="../docs/assets/icons/doc.svg" width="28" height="28" alt=""> Références Croisées
 
 - Orchestrator Gateway : [framework/orchestrator-gateway.md](orchestrator-gateway.md) (BM-53) — déclenche les validations
 - Honest Uncertainty : [framework/honest-uncertainty-protocol.md](honest-uncertainty-protocol.md) (BM-50) — confiance des validateurs

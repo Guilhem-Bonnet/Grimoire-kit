@@ -12,7 +12,7 @@
 <img src="../../../../docs/assets/divider.svg" width="100%" alt="">
 
 
-## <img src="../../../../docs/assets/icons/brain.svg" width="28" height="28" alt=""> Structure d'un State File
+## <img src="../../../../docs/assets/icons/book.svg" width="28" height="28" alt=""> Structure d'un State File
 
 Chaque run de workflow `workflow.xml` crée automatiquement :
 
@@ -135,7 +135,7 @@ L'agent détecte automatiquement un run non-terminé si :
 
 <img src="../../../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../../../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> Intégration dans `workflow.xml`
+## Intégration dans `workflow.xml`
 
 Le workflow engine doit effectuer ces actions automatiquement :
 

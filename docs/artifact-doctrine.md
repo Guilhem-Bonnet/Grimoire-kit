@@ -4,7 +4,7 @@ audience: contributeur
 
 <p align="right"><a href="../README.md">README</a></p>
 
-# <img src="../assets/icons/lightbulb.svg" width="32" height="32" alt=""> Doctrine — quand créer un artefact, et quand s'en abstenir
+# Doctrine — quand créer un artefact, et quand s'en abstenir
 
 Ce document répond à **quand**. Il complète [Créer un agent](creating-agents.md), qui répond à
 **comment** — il ne le remplace pas. Les mêmes questions valent pour un skill ou un prompt, même
@@ -17,7 +17,7 @@ méritait d'exister. Cette doctrine comble ce vide.
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/lightbulb.svg" width="28" height="28" alt=""> Le critère qui discrimine les trois types
+## Le critère qui discrimine les trois types
 
 Une seule question : **la décision peut-elle être écrite à l'avance, et qui invoque ?**
 
@@ -30,7 +30,7 @@ Une seule question : **la décision peut-elle être écrite à l'avance, et qui 
 Si la réponse tient dans un skill ou un prompt, ne créez pas d'agent : c'est le chemin le plus
 cher pour le même résultat.
 
-## <img src="../assets/icons/lightbulb.svg" width="28" height="28" alt=""> La règle qui borne le nombre d'agents
+## La règle qui borne le nombre d'agents
 
 **Un agent doit avoir une frontière d'outils qui lui est propre.** À accès et droits identiques à
 ceux du généraliste, ce n'est pas un spécialiste, c'est un ton de voix. Les neuf agents fantômes
@@ -42,7 +42,7 @@ par le nombre de métiers imaginables. C'est pourquoi le gabarit d'agent (voir p
 `tool_boundary` comme champ obligatoire : chemins, commandes ou surfaces auxquelles l'agent a accès,
 distincts de ceux du généraliste ou des agents voisins.
 
-## <img src="../assets/icons/lightbulb.svg" width="28" height="28" alt=""> Les deux tests, avant de créer quoi que ce soit
+## Les deux tests, avant de créer quoi que ce soit
 
 1. **Si je le retire, qu'est-ce qui casse ?** Réponse « rien, on ferait pareil à la main » :
    l'artefact ne doit pas exister. Ce test seul aurait arrêté les trois échecs cités en
@@ -52,7 +52,7 @@ distincts de ceux du généraliste ou des agents voisins.
    coûte un contexte entier, un dispatch, et le risque de diverger. On prend le moins cher qui
    répond, jamais le plus prestigieux.
 
-## <img src="../assets/icons/lightbulb.svg" width="28" height="28" alt=""> Ce qui rend la règle vérifiable : la clause d'emploi
+## Ce qui rend la règle vérifiable : la clause d'emploi
 
 **Tout artefact déclare quand l'employer et quand ne pas l'employer.** Un artefact sans clause
 d'emploi ne pourra jamais être retiré, faute de pouvoir dire s'il a servi. C'est le chaînon entre
@@ -78,7 +78,7 @@ tool_boundary: "Frontière fine — chemins, commandes, surfaces (agents uniquem
 Un artefact qui ne sait pas répondre à `dont_use_when` est un candidat au retrait, pas un
 artefact à documenter de force : voir le test des deux questions ci-dessus.
 
-## <img src="../assets/icons/lightbulb.svg" width="28" height="28" alt=""> Décisions déjà prises
+## Décisions déjà prises
 
 - Un artefact est **proposé puis validé**, jamais créé d'office : un système qui crée seul sur un
   projet que personne ne regarde reproduit ce qu'on vient de nettoyer.
@@ -98,7 +98,7 @@ artefact à documenter de force : voir le test des deux questions ci-dessus.
   (`src/grimoire/hosts/surface.py`) pour la garde qui interdit à deux agents de déclarer le même
   faisceau outils + contexte + skills.
 
-## <img src="../assets/icons/lightbulb.svg" width="28" height="28" alt=""> Vérification
+## Vérification
 
 `tests/unit/test_artifact_employment_clause.py` échoue si un agent livré par le kit
 (`archetypes/*/agents/*.md`) ne déclare pas `use_when`, `dont_use_when` et `tool_boundary`. La
