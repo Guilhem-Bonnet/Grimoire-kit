@@ -322,10 +322,31 @@ def _record_decision(
             tool_calls=tool_calls,
             evidence_refs=[f"_grimoire-output/evidence/{task_id}"] if task_id else [],
             latency_ms=latency_ms,
-            tags=[hook.event.value, verdict, *done_gate_mode_tags(detail.get("done_gate"))],
+            tags=[hook.event.value, verdict, *_refusal_tags(decision), *done_gate_mode_tags(detail.get("done_gate"))],
         )
     except Exception:
         return
+
+
+def _refusal_tags(decision: Decision) -> list[str]:
+    """``refusal:<motif>`` sur un refus : pourquoi la clôture ou l'outil a été refusé, relisible au ledger (D-12).
+
+    Sans lui, une trace ``stop``/``block`` ne disait pas si la tâche était tenue sans être rendue
+    (``task_unparked``), sans tâche (``no_active_task``), aux gates rouges (``gates_red``) ou si la
+    garde elle-même était en panne (``guard_error``) : l'e2e live devait le déduire du texte de l'agent.
+    """
+    if not decision.is_refusal:
+        return []
+    detail = decision.detail
+    if detail.get("blocked_on"):
+        kind = str(detail["blocked_on"])
+    elif detail.get("guard_error"):
+        kind = "guard_error"
+    elif detail.get("ok") is False:
+        kind = "gates_red"
+    else:
+        kind = "other"
+    return [f"refusal:{kind}"]
 
 
 def _args_hash(tool_input: dict[str, Any]) -> str:

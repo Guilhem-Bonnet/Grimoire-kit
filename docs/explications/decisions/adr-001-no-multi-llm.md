@@ -4,7 +4,7 @@ audience: décision
 
 <p align="right"><a href="../../../README.md">README</a></p>
 
-# <img src="../../../assets/icons/clipboard.svg" width="32" height="32" alt=""> ADR-001 : Pourquoi l'orchestration n'est pas multi-LLM
+# <img src="../../assets/icons/doc.svg" width="32" height="32" alt=""> ADR-001 : Pourquoi l'orchestration n'est pas multi-LLM
 
 > **Date** : 2025-01-XX 
 > **Statut** : Accepté 
@@ -17,13 +17,13 @@ audience: décision
 > chemin d'accès ne les atteignait. Le texte ci-dessous est conservé tel quel :
 > il consigne pourquoi le multi-LLM a été écarté, ce qui reste valable.
 
-## <img src="../../../assets/icons/brain.svg" width="28" height="28" alt=""> Contexte
+## <img src="../../assets/icons/book.svg" width="28" height="28" alt=""> Contexte
 
 L'orchestrator.py propose trois modes d'exécution : `simulated`, `sequential`, et `concurrent-cpu` (anciennement nommé `parallel`). Le nom "parallel" suggérait que des LLMs distincts étaient invoqués en parallèle — ce qui n'est **pas** le cas.
 
-<img src="../../../assets/divider.svg" width="100%" alt="">
+<img src="../../assets/divider.svg" width="100%" alt="">
 
-## <img src="../../../assets/icons/clipboard.svg" width="28" height="28" alt=""> Décision
+## <img src="../../assets/icons/doc.svg" width="28" height="28" alt=""> Décision
 
 Le mode `concurrent-cpu` utilise `ThreadPoolExecutor` pour paralléliser des traitements Python (workers), **pas** des appels LLM. Voici la réalité :
 
@@ -34,9 +34,9 @@ Le mode `concurrent-cpu` utilise `ThreadPoolExecutor` pour paralléliser des tra
 | `message-bus.py` | Seul `InProcessBus` (queue mémoire) est implémenté ; Redis/NATS sont des stubs |
 | Party Mode | Un seul LLM simule plusieurs personas — c'est le pattern IDE correct |
 
-<img src="../../../assets/divider.svg" width="100%" alt="">
+<img src="../../assets/divider.svg" width="100%" alt="">
 
-## <img src="../../../assets/icons/lightbulb.svg" width="28" height="28" alt=""> Raison
+## Raison
 
 Dans un environnement IDE (VS Code + Copilot), une **seule session LLM** est active à la fois. Le multi-LLM réel nécessiterait :
 
@@ -44,9 +44,9 @@ Dans un environnement IDE (VS Code + Copilot), une **seule session LLM** est act
 2. **Un serveur d'orchestration externe** (LangGraph, CrewAI) — hors scope IDE
 3. **Ou le MCP Server** — nos tools sont exposés mais appelés séquentiellement par le LLM
 
-<img src="../../../assets/divider.svg" width="100%" alt="">
+<img src="../../assets/divider.svg" width="100%" alt="">
 
-## <img src="../../../assets/icons/cognition.svg" width="28" height="28" alt=""> Parallélisme réellement disponible
+## Parallélisme réellement disponible
 
 | Stratégie | Status | Description |
 |-----------|--------|-------------|
@@ -55,17 +55,17 @@ Dans un environnement IDE (VS Code + Copilot), une **seule session LLM** est act
 | Multi-IDE via A2A | Prototype | 2 IDE ouverts sur le même projet = 2 LLM réels |
 | API externe (Claude/OpenAI API) | Possible | Spawner des agents via API, coûteux |
 
-<img src="../../../assets/divider.svg" width="100%" alt="">
+<img src="../../assets/divider.svg" width="100%" alt="">
 
-## <img src="../../../assets/icons/clipboard.svg" width="28" height="28" alt=""> Conséquences
+## <img src="../../assets/icons/doc.svg" width="28" height="28" alt=""> Conséquences
 
 - Le mode `parallel` a été renommé en `concurrent-cpu` pour refléter honnêtement son fonctionnement
 - La documentation et les docstrings indiquent clairement "parallélisme CPU, PAS multi-LLM"
 - L'investissement futur pour du vrai multi-LLM passera par le MCP proxy (`mcp-proxy.py`)
 
-<img src="../../../assets/divider.svg" width="100%" alt="">
+<img src="../../assets/divider.svg" width="100%" alt="">
 
-## <img src="../../../assets/icons/clipboard.svg" width="28" height="28" alt=""> Alternatives rejetées
+## <img src="../../assets/icons/doc.svg" width="28" height="28" alt=""> Alternatives rejetées
 
 - **Prétendre du multi-LLM** : confus et trompeur
 - **Supprimer le mode parallel** : le parallélisme CPU reste utile pour les tâches lourdes (évaporation, indexation, validation)

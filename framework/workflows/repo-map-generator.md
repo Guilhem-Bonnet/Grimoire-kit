@@ -5,11 +5,11 @@ agents: [dev]
 ---
 <p align="right"><a href="../../README.md">README</a> · <a href="../../docs">Docs</a></p>
 
-# <img src="../../docs/assets/icons/folder-tree.svg" width="32" height="32" alt=""> Repo Map Generator — BM-05
+# <img src="../../docs/assets/icons/layers.svg" width="32" height="32" alt=""> Repo Map Generator — BM-05
 
 > Génère une carte statique du dépôt consultable par tous les agents, inspiré du Repo Map d'Aider.
 
-## <img src="../../docs/assets/icons/lightbulb.svg" width="28" height="28" alt=""> Concept
+## Concept
 
 La **Repo Map** est un index hiérarchique du projet : arborescence, symboles exportés, relations entre modules. Elle sert de "GPS du code" aux agents, réduisant les hallucinations de chemins et accélérant la navigation.
 
@@ -21,7 +21,7 @@ L'agent Atlas peut générer la Repo Map via la commande `[RM]` de son menu, ou 
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/lightbulb.svg" width="28" height="28" alt=""> Stratégies de génération
+## Stratégies de génération
 
 ### Stratégie 1 — `ctags` (universel, recommandé)
 
@@ -68,7 +68,7 @@ node framework/mcp/grimoire-tree-sitter-map.js --output _grimoire-output/repo-ma
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Format de sortie (`repo-map.md`)
+## <img src="../../docs/assets/icons/doc.svg" width="28" height="28" alt=""> Format de sortie (`repo-map.md`)
 
 ```markdown
 # Repo Map — {project_name}
@@ -109,7 +109,7 @@ node framework/mcp/grimoire-tree-sitter-map.js --output _grimoire-output/repo-ma
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/team.svg" width="28" height="28" alt=""> Intégration dans agent-base.md
+## <img src="../../docs/assets/icons/fleet.svg" width="28" height="28" alt=""> Intégration dans agent-base.md
 
 Chaque agent qui a besoin de naviguer le code peut appeler :
 
@@ -121,7 +121,7 @@ Atlas répond avec le chemin `_grimoire-output/repo-map.md` ou le régénère si
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> Mise à jour automatique
+## Mise à jour automatique
 
 Ajouter dans `.git/hooks/post-commit` (optionnel) :
 
@@ -135,7 +135,7 @@ fi
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/brain.svg" width="28" height="28" alt=""> Configuration dans `project-context.yaml`
+## <img src="../../docs/assets/icons/book.svg" width="28" height="28" alt=""> Configuration dans `project-context.yaml`
 
 ```yaml
 repo_map:

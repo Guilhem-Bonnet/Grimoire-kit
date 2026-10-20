@@ -28,9 +28,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from grimoire.missions.lease import parse_instant
-from grimoire.missions.schemas import ORIGIN_HUMAN, TaskState
+from grimoire.missions.questions import group_settled, open_in_group
+from grimoire.missions.schemas import TaskState
 from grimoire.missions.waiting import (
-    HUMAN_ANSWERED_EVENT,
     PROGRESS_NOTED_EVENT,
     QUESTION_ASKED_EVENT,
     QUESTION_NOTIFIED_EVENT,
@@ -66,12 +66,17 @@ MAX_NOTIFY_FAILURES = 3
 
 @dataclass(frozen=True, slots=True)
 class PendingDecision:
-    """Une question qui attend un humain, avec la tâche qui la porte."""
+    """Une question qui attend un humain, avec la tâche qui la porte.
+
+    ``question`` est la tête du lot (son identifiant clé la notification : une par lot) ; ``questions``
+    (W6-07) les questions du lot encore sans réponse, dans l'ordre — une seule question pour K6.
+    """
 
     task_id: str
     title: str
     question: Question
     since: str
+    questions: tuple[Question, ...] = ()
 
     def age_seconds(self, now: datetime) -> float:
         moment = parse_instant(self.since or self.question.asked_at)
@@ -81,31 +86,30 @@ class PendingDecision:
         data: dict[str, Any] = {
             "task_id": self.task_id, "title": self.title, "since": self.since,
             "question": self.question.to_dict(),
+            "questions": [q.to_dict() for q in self.questions or (self.question,)],
         }
         if now is not None:
             data["age_seconds"] = int(self.age_seconds(now))
         return data
 
 
-def _answered_ids(ledger: MissionLedger, task_id: str) -> set[str]:
-    """Les questions de la tâche déjà tranchées par le canal humain (réponse écrite, tâche pas encore réveillée)."""
-    return {
-        str(e.payload.get("question_id", ""))
-        for e in ledger.list_events(task_id)
-        if e.event_type == HUMAN_ANSWERED_EVENT and e.payload.get("origin") == ORIGIN_HUMAN
-    }
-
-
 def pending_decisions(ledger: MissionLedger) -> list[PendingDecision]:
-    """Les tâches ``waiting(human)`` dont la question n'a pas de réponse, la plus ancienne d'abord."""
+    """Les tâches ``waiting(human)`` dont le lot de questions n'est pas tranché, la plus ancienne d'abord.
+
+    Un lot dont toutes les bloquantes ont leur réponse humaine n'attend plus personne : le réveil
+    (``answer`` ou le tick) le rend, même si une non bloquante reste ouverte.
+    """
     out: list[PendingDecision] = []
     for task in ledger.list_tasks():
         waiting = task.waiting
         if task.status is not TaskState.WAITING or waiting is None or waiting.question is None:
             continue
-        if not waiting.is_human or waiting.question.id in _answered_ids(ledger, task.id):
+        if not waiting.is_human or group_settled(task):
             continue
-        out.append(PendingDecision(task.id, task.title, waiting.question, waiting.since or waiting.question.asked_at))
+        out.append(PendingDecision(
+            task.id, task.title, waiting.question, waiting.since or waiting.question.asked_at,
+            tuple(r.question for r in open_in_group(task)),
+        ))
     out.sort(key=lambda d: (parse_instant(d.since) or datetime.max.replace(tzinfo=UTC), d.task_id))
     return out
 

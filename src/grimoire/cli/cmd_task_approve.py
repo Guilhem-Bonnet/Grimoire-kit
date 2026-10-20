@@ -106,3 +106,28 @@ def verify_payload(outcome: Any) -> dict[str, Any]:
         "verdict": outcome.verdict.to_dict(),
         "receipts": [{k: r[k] for k in ("command_sha256", "tree_fingerprint", "exit", "reused")} for r in outcome.receipts],
     }
+
+
+def report_declarative(task: Any, root: Path, evidence_root: Path, paths: list[str], *, as_json: bool, console: Any) -> int:
+    """``task verify --evidence`` (KAN-FRICTIONS) : écrit le pack déclaratif, le présente, rend le code de sortie.
+
+    4 quand le pack est écrit (jamais 0 : ce n'est pas un vert mécanique), 2 quand un fichier est refusé.
+    """
+    from grimoire.missions.declarative_evidence import DeclarativeEvidenceError, declare_evidence
+
+    try:
+        outcome = declare_evidence(task, root, evidence_root, paths)
+    except DeclarativeEvidenceError as exc:
+        console.print(f"[red]✗[/red] {escape(str(exc))}")
+        return 2
+    if as_json:
+        typer.echo(json.dumps(outcome.to_dict(), indent=2, ensure_ascii=False))
+        return 4
+    console.print(
+        f"[yellow]DÉCLARATIF[/yellow] {task.id} — pack {outcome.pack.id} : {len(outcome.files)} fichier(s) présents et hachés, "
+        f"aucune commande lancée ; verdict {outcome.verdict.verdict.value} ({outcome.verdict.id}), jamais un vert mécanique."
+    )
+    for rel, digest, size in outcome.files:
+        console.print(f"  - {escape(rel)}  [dim]sha256 {digest[:12]}, {size} octets[/dim]")
+    console.print("  La revue peut s'ouvrir (`task move --to needs_verification`) ; la clôture reste à un humain.")
+    return 4

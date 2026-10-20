@@ -644,7 +644,7 @@ def grimoire_codegraph_index(project_path: str = ".", source_dir: str = "src") -
 # donc le même gate de preuve : une transition que le CLI refuse, MCP la
 # refuse, et le refus nomme la preuve manquante et le remède.
 
-_TASK_ACTIONS = ("move", "block", "close", "prioritize", "comment", "cancel", "ack", "ask", "wait", "resume")
+_TASK_ACTIONS = ("move", "block", "close", "prioritize", "comment", "cancel", "ack", "ask", "wait", "resume", "resolve")
 
 
 def _task_service(project_path: str, ledger_root: str) -> Any:
@@ -807,6 +807,10 @@ def task_show(task_id: str, project_path: str = ".", ledger_root: str = "_grimoi
         payload["next_moves_require"] = requires
         # W5-05 : le motif exact que `task_claim` opposerait (checkpoint de vague requis et non validé), vide sinon.
         payload["claim_blocked_by"] = claim_refusal(service, task_id)
+        # W6-07 : le registre des questions, statut lu (ouverte, répondue, déduite, plus attendue) et décompte.
+        from grimoire.missions.questions import questions_summary
+
+        payload["questions_summary"] = questions_summary(task)
         return json.dumps(payload, indent=2, ensure_ascii=False)
     except (GrimoireError, OSError, ValueError) as exc:
         return _task_error(exc)
@@ -857,6 +861,11 @@ def task_update(
     kind: str = "comment",
     directive_id: str = "",
     force: bool = False,
+    questions: str = "",
+    blocking: bool = True,
+    why: str = "",
+    question_id: str = "",
+    source: str = "",
 ) -> str:
     """Move, block, close, prioritize, comment on, cancel or acknowledge a task. Every transition passes the evidence gate: no proof, no move.
 
@@ -867,7 +876,13 @@ def task_update(
             (needs `reason`; `force` to cancel a task another session holds), or "ack"
             (needs `directive_id` — acknowledges a directive the orchestrator posted),
             "ask" (needs `text`, optional `kind`: parks the task as waiting(human) with a question —
-            only a human answers it, from the cockpit or the CLI, never through this tool),
+            only a human answers it, from the cockpit or the CLI, never through this tool; or `questions`,
+            a JSON list of {text, kind, options, blocking, why, key, answer, source} asked as ONE batch,
+            one interruption; a question already answered (same key) is not asked again; a non-blocking
+            question with `answer` + `source` is recorded as deduced, never asked; `blocking=false` or
+            `why` on a single `text` use the same batch path),
+            "resolve" (needs `question_id`, `text` = the deduced answer and `source`: answers a
+            NON-blocking open question, citing where the answer comes from — a blocking one is refused),
             "wait" (needs `to` = ci|quota|paused, optional `reason` as note), or "resume"
             (waiting → running, same session and epoch).
         to: Target ledger state for "move", the priority for "prioritize", the wait reason for "wait".
@@ -879,21 +894,30 @@ def task_update(
         kind: "comment" (informs) or "directive" (steers) for "comment".
         directive_id: The directive to acknowledge for "ack" (as listed by task_show / task_recall).
         force: For "cancel": cancel even if another session holds the task.
+        questions: For "ask": a JSON list of questions asked as one batch (see "ask").
+        blocking: For "ask" with `text`: false records a non-blocking question that does not park the task.
+        why: For "ask" with `text`: why the question is asked (shown in the task's question receipt).
+        question_id: For "resolve": the non-blocking question (q-…) to answer.
+        source: For "resolve": where the deduced answer comes from (file, memory, command).
     """
     from grimoire.missions.schemas import TARGETABLE_TASK_STATES, TaskState
 
     if action not in _TASK_ACTIONS:
         return _tool_error({"error": f"unknown action {action!r}", "actions": list(_TASK_ACTIONS)})
+    if action == "resolve" or (action == "ask" and (questions.strip() or not blocking or why.strip())):
+        return _task_questions(task_id, action, project_path, ledger_root, actor, text=text, kind=kind,
+                               questions=questions, blocking=blocking, why=why, question_id=question_id, source=source)
     if action in ("ask", "wait", "resume"):
         return _task_wait(task_id, action, project_path, ledger_root, actor, to=to, reason=reason, text=text, kind=kind)
     if action in ("prioritize", "comment", "cancel", "ack"):
         return _task_steer(task_id, action, project_path, ledger_root, actor, to=to, reason=reason,
                            text=text, kind=kind, directive_id=directive_id, force=force)
     if action == "move":
-        try:
-            target = TaskState(to)
-        except ValueError:
+        # Les états qu'on peut viser, jamais le sentinelle de lecture ``unknown`` (KAN-FRICTIONS).
+        found = next((s for s in TARGETABLE_TASK_STATES if s.value == to), None)
+        if found is None:
             return _tool_error({"error": f"unknown state {to!r}", "states": [s.value for s in TARGETABLE_TASK_STATES]})
+        target = found
     elif action == "block":
         if not reason.strip():
             return _tool_error({"error": "block requires a reason"})
@@ -923,6 +947,32 @@ def _task_wait(
         else:
             result = service.resume(task_id, actor)
         return json.dumps(result.to_dict(), indent=2, ensure_ascii=False)
+    except (GrimoireError, OSError, ValueError) as exc:
+        return _task_error(exc)
+
+
+def _task_questions(
+    task_id: str, action: str, project_path: str, ledger_root: str, actor: str, *,
+    text: str, kind: str, questions: str, blocking: bool, why: str, question_id: str, source: str,
+) -> str:
+    """Les questions structurées (W6-07) : un lot posé en une interruption, ou une réponse déduite source citée."""
+    from grimoire.missions.questions import QuestionSpec, parse_specs
+
+    try:
+        service = _task_service(project_path, ledger_root)
+        if action == "resolve":
+            task = service.resolve_question(task_id, question_id, text, source, actor)
+            return json.dumps(task.to_dict(), indent=2, ensure_ascii=False)
+        if questions.strip():
+            try:
+                specs = parse_specs(json.loads(questions))
+            except json.JSONDecodeError as exc:
+                return _tool_error({"error": f"questions: invalid JSON ({exc})"})
+        elif text.strip():
+            specs = [QuestionSpec(text, kind if kind != "comment" else "choice", blocking=blocking, why=why)]
+        else:
+            return _tool_error({"error": "ask requires a text or questions"})
+        return json.dumps(service.ask_batch(task_id, specs, actor).to_dict(), indent=2, ensure_ascii=False)
     except (GrimoireError, OSError, ValueError) as exc:
         return _task_error(exc)
 

@@ -1,22 +1,24 @@
-"""Garde du sprite d'icônes du cockpit (web/workspace/icons.svg).
+"""Garde des sprites d'icônes : celui du cockpit et celui de la marque.
 
-Le sprite est généré depuis docs/assets/icons par scripts/build-icon-sprite.py ;
-chaque `icon('x')`, `icon: 'x'` ou `icons.svg#x` cité sous web/workspace/ doit
-y avoir un symbole, et aucun symbole ne porte de couleur littérale (le sprite
-suit `currentColor`, donc le thème).
+Le sprite du cockpit (web/workspace/icons.svg) est figé sur l'ancienne famille
+jusqu'à sa bascule ; chaque `icon('x')`, `icon: 'x'` ou `icons.svg#x` cité sous
+web/workspace/ doit y avoir un symbole, et aucun symbole ne porte de couleur
+littérale (le sprite suit `currentColor`, donc le thème). Le sprite de la
+marque (docs/assets/brand/icons.svg) est généré depuis docs/assets/icons par
+scripts/build-brand.py et doit rester à jour.
 """
 
 from __future__ import annotations
 
+import importlib.util
 import re
-import subprocess
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKSPACE = ROOT / "web" / "workspace"
 SPRITE = WORKSPACE / "icons.svg"
-SCRIPT = ROOT / "scripts" / "build-icon-sprite.py"
+BRAND_SPRITE = ROOT / "docs" / "assets" / "brand" / "icons.svg"
+SCRIPT = ROOT / "scripts" / "build-brand.py"
 
 _REFS = (
     re.compile(r"""\bicon\(\s*['"]([a-z0-9-]+)['"]"""),
@@ -28,8 +30,16 @@ _REFS = (
 _STATE_ICON = re.compile(r"STATE_ICON\s*=\s*\{([^}]*)\}")
 
 
-def _symbols() -> set[str]:
-    return set(re.findall(r'<symbol id="([a-z0-9-]+)"', SPRITE.read_text(encoding="utf-8")))
+def _symbols(sprite: Path = SPRITE) -> set[str]:
+    return set(re.findall(r'<symbol id="([a-z0-9-]+)"', sprite.read_text(encoding="utf-8")))
+
+
+def _build_brand():
+    spec = importlib.util.spec_from_file_location("build_brand", SCRIPT)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _referenced() -> dict[str, set[str]]:
@@ -46,9 +56,10 @@ def _referenced() -> dict[str, set[str]]:
     return refs
 
 
-def test_sprite_is_up_to_date() -> None:
-    result = subprocess.run([sys.executable, str(SCRIPT), "--check"], capture_output=True, text=True, check=False)
-    assert result.returncode == 0, result.stderr
+def test_brand_sprite_is_up_to_date() -> None:
+    assert BRAND_SPRITE.read_text(encoding="utf-8") == _build_brand().build_sprite(), (
+        "docs/assets/brand/icons.svg périmé : lancer uv run scripts/build-brand.py"
+    )
 
 
 def test_every_referenced_icon_exists_in_sprite() -> None:
@@ -59,16 +70,17 @@ def test_every_referenced_icon_exists_in_sprite() -> None:
     assert not missing, f"icônes citées mais absentes du sprite : {missing}"
 
 
-def test_every_source_icon_is_in_sprite() -> None:
+def test_every_source_icon_is_in_brand_sprite() -> None:
     sources = {p.stem for p in (ROOT / "docs" / "assets" / "icons").glob("*.svg")}
-    assert sources == _symbols()
+    assert sources == _symbols(BRAND_SPRITE)
 
 
-def test_sprite_follows_current_color() -> None:
-    text = SPRITE.read_text(encoding="utf-8")
-    assert "<style" not in text
-    assert not re.search(r"#[0-9a-fA-F]{3,8}\b", text), "couleur littérale dans le sprite"
-    assert "currentColor" in text
+def test_sprites_follow_current_color() -> None:
+    for sprite in (SPRITE, BRAND_SPRITE):
+        text = sprite.read_text(encoding="utf-8")
+        assert "<style" not in text
+        assert not re.search(r"#[0-9a-fA-F]{3,8}\b", text), f"couleur littérale dans {sprite.name}"
+        assert "currentColor" in text
 
 
 def _lum(hex_color: str) -> float:
