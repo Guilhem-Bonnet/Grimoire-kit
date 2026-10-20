@@ -144,6 +144,14 @@ def _parse_block(text: str, header: str) -> dict[str, str]:
         if ":" in line and line.strip().startswith("--"):
             name, _, value = line.strip().partition(":")
             found[name.strip()] = value.strip().rstrip(";")
+    # Un alias `var(--x)` vaut la valeur de --x dans le même bloc : sans cette
+    # résolution, `--bg: var(--ground)` serait mesuré comme une chaîne.
+    for name, value in found.items():
+        alias = re.fullmatch(r"var\((--[\w-]+)\)", value)
+        while alias and alias.group(1) in found:
+            value = found[alias.group(1)]
+            alias = re.fullmatch(r"var\((--[\w-]+)\)", value)
+        found[name] = value
     return found
 
 
@@ -255,3 +263,225 @@ def test_les_deux_themes_declarent_exactement_les_memes_tokens() -> None:
     assert light <= set(_parse_block(text, THEMES["sombre"])), (
         "un token du thème clair sans définition sur :root n'a pas de valeur par défaut"
     )
+
+
+# ── Douce (P08) : surfaces, encres, accent, rubrique, états, color-scheme ───
+
+SHELL_CSS = WORKSPACE / "shell.css"
+LIGHT_MEDIA = ':root:not([data-theme="dark"]) {'
+
+SURFACES = ("--ground", "--panel", "--card", "--overlay")
+STATES = ("--ok", "--warn", "--bad")
+DOUCE_TOKENS = (
+    *SURFACES,
+    "--ink",
+    "--ink2",
+    "--ink3",
+    "--acc",
+    "--on-acc",
+    "--acc-soft",
+    "--rub",
+    *STATES,
+    *(f"{s}-mark" for s in STATES),
+    *(f"{s}-soft" for s in STATES),
+)
+
+#: Les trois déclarations du thème : sombre, clair explicite, clair par
+#: réglage système.
+ALL_BLOCKS = {**THEMES, "clair (système)": LIGHT_MEDIA}
+
+
+@pytest.mark.parametrize("theme,header", ALL_BLOCKS.items())
+def test_les_tokens_douce_sont_declares_dans_chaque_theme(theme: str, header: str) -> None:
+    tokens = _parse_block(TOKENS.read_text(encoding="utf-8"), header)
+
+    missing = [name for name in DOUCE_TOKENS if name not in tokens]
+
+    assert not missing, f"tokens Douce absents en thème {theme} : {missing}"
+
+
+def test_color_scheme_est_declare_et_suit_le_theme() -> None:
+    """Sans `color-scheme`, barres de défilement, listes natives et champs
+    restent clairs dans le thème sombre."""
+    text = _strip_comments(TOKENS.read_text(encoding="utf-8"))
+
+    def block(header: str) -> str:
+        start = text.index(header)
+        return text[start : text.index("}", start)]
+
+    assert "color-scheme: dark" in block(":root {")
+    assert "color-scheme: light" in block(THEMES["clair"])
+    assert "color-scheme: light" in block(LIGHT_MEDIA)
+
+
+def _hue_gap(a: str, b: str) -> float:
+    import colorsys
+
+    ha = colorsys.rgb_to_hsv(*_rgb(a))[0] * 360
+    hb = colorsys.rgb_to_hsv(*_rgb(b))[0] * 360
+    gap = abs(ha - hb)
+    return min(gap, 360 - gap)
+
+
+@pytest.mark.parametrize("theme,header", ALL_BLOCKS.items())
+@pytest.mark.parametrize("surface", SURFACES)
+@pytest.mark.parametrize("fg", ["--ink", "--ink2", "--acc", "--rub", *STATES])
+def test_le_texte_teinte_tient_45_sur_chaque_surface(
+    theme: str, header: str, surface: str, fg: str
+) -> None:
+    """L'encre, l'accent, la rubrique et les trois états portent du texte :
+    chacun tient 4,5:1 sur les quatre surfaces."""
+    tokens = _parse_block(TOKENS.read_text(encoding="utf-8"), header)
+
+    ratio = _ratio(tokens[fg], tokens[surface])
+
+    assert ratio >= 4.5, f"{fg} sur {surface} en thème {theme} : {ratio:.2f}:1"
+
+
+@pytest.mark.parametrize("theme,header", ALL_BLOCKS.items())
+@pytest.mark.parametrize("surface", SURFACES)
+def test_ink3_tient_45_sur_chaque_surface(theme: str, header: str, surface: str) -> None:
+    tokens = _parse_block(TOKENS.read_text(encoding="utf-8"), header)
+
+    ratio = _ratio(tokens["--ink3"], tokens[surface])
+
+    assert ratio >= 4.5, f"--ink3 sur {surface} en thème {theme} : {ratio:.2f}:1"
+
+
+@pytest.mark.parametrize("theme,header", ALL_BLOCKS.items())
+@pytest.mark.parametrize("state", STATES)
+def test_chaque_etat_tient_45_sur_son_fond_doux(theme: str, header: str, state: str) -> None:
+    tokens = _parse_block(TOKENS.read_text(encoding="utf-8"), header)
+
+    ratio = _ratio(tokens[state], tokens[f"{state}-soft"])
+
+    assert ratio >= 4.5, f"{state} sur {state}-soft en thème {theme} : {ratio:.2f}:1"
+
+
+@pytest.mark.parametrize("theme,header", ALL_BLOCKS.items())
+def test_le_texte_de_l_accent_tient_sur_le_fond_doux(theme: str, header: str) -> None:
+    tokens = _parse_block(TOKENS.read_text(encoding="utf-8"), header)
+
+    assert _ratio(tokens["--acc"], tokens["--acc-soft"]) >= 4.5
+    assert _ratio(tokens["--on-acc"], tokens["--acc"]) >= 4.5
+
+
+@pytest.mark.parametrize("theme,header", ALL_BLOCKS.items())
+@pytest.mark.parametrize("state", STATES)
+def test_chaque_marque_d_etat_se_voit_sur_la_carte(theme: str, header: str, state: str) -> None:
+    """La marque (point, aplat) n'est pas du texte : WCAG 1.4.11, 3:1."""
+    tokens = _parse_block(TOKENS.read_text(encoding="utf-8"), header)
+
+    ratio = _ratio(tokens[f"{state}-mark"], tokens["--card"])
+
+    assert ratio >= 3.0, f"{state}-mark sur --card en thème {theme} : {ratio:.2f}:1"
+
+
+@pytest.mark.parametrize("theme,header", ALL_BLOCKS.items())
+def test_l_action_primaire_se_distingue_de_l_erreur(theme: str, header: str) -> None:
+    """Avant Douce, `--pri` (orange) et `--bad` (rouge) se confondaient : la
+    primaire ne peut pas ressembler à ce qui échoue. Teinte écartée d'au moins
+    60° ; la couleur ne porte de toute façon jamais l'état seule."""
+    tokens = _parse_block(TOKENS.read_text(encoding="utf-8"), header)
+
+    gap = _hue_gap(tokens["--pri"], tokens["--bad"])
+
+    assert gap >= 60, f"--pri / --bad en thème {theme} : {gap:.0f}° d'écart de teinte"
+
+
+@pytest.mark.parametrize("theme,header", ALL_BLOCKS.items())
+def test_ink2_et_ink3_restent_distincts(theme: str, header: str) -> None:
+    """En clair, la hiérarchie d'encre était écrasée (1,23). Seuil : 1,25."""
+    tokens = _parse_block(TOKENS.read_text(encoding="utf-8"), header)
+
+    ratio = _ratio(tokens["--ink2"], tokens["--ink3"])
+
+    assert ratio >= 1.25, f"--ink2 / --ink3 en thème {theme} : {ratio:.2f}:1"
+
+
+# ── Contrôles natifs, boutons désactivés, cibles ────────────────────────────
+
+
+def _rule(css: str, selector: str) -> dict[str, str]:
+    """Déclarations cumulées, dans l'ordre de la feuille, des règles dont la
+    liste de sélecteurs contient exactement `selector`."""
+    css = _strip_comments(css)
+    found: dict[str, str] = {}
+    matched = False
+    for match in re.finditer(r"([^{}]+)\{([^{}]*)\}", css):
+        selectors = [s.strip() for s in match.group(1).split(",")]
+        if selector in selectors:
+            matched = True
+            for decl in match.group(2).split(";"):
+                name, _, value = decl.partition(":")
+                if value:
+                    found[name.strip()] = value.strip()
+    assert matched, f"aucune règle pour {selector} dans shell.css"
+    return found
+
+
+def _token_of(value: str) -> str:
+    found = re.fullmatch(r"var\((--[\w-]+)\)", value)
+    assert found, f"« {value} » doit être un token, pas une valeur"
+    return found.group(1)
+
+
+#: (sélecteur, règles dont il hérite) : les natifs posent fond et encre par
+#: token, et leur état désactivé surcharge la règle de base.
+NATIVE_CONTROLS = (
+    ("select", ()),
+    ("option", ("select",)),
+    ("input", ("select",)),
+    ("input:disabled", ("select", "input:disabled")),
+    ("select:disabled", ("select", "input:disabled")),
+)
+
+
+@pytest.mark.parametrize("theme,header", ALL_BLOCKS.items())
+@pytest.mark.parametrize("selector,inherits", NATIVE_CONTROLS)
+def test_les_controles_natifs_tiennent_45_dans_les_deux_themes(
+    theme: str, header: str, selector: str, inherits: tuple[str, ...]
+) -> None:
+    """select, option, input (et leur état désactivé) posent fond et encre par
+    token : mesuré sur les valeurs que ces tokens prennent dans le thème."""
+    tokens = _parse_block(TOKENS.read_text(encoding="utf-8"), header)
+    css = SHELL_CSS.read_text(encoding="utf-8")
+    rule: dict[str, str] = {}
+    for name in (*inherits, selector):
+        rule.update(_rule(css, name))
+
+    bg, fg = tokens[_token_of(rule["background-color"])], tokens[_token_of(rule["color"])]
+
+    assert _ratio(fg, bg) >= 4.5, f"{selector} en thème {theme} : {_ratio(fg, bg):.2f}:1"
+
+
+@pytest.mark.parametrize("theme,header", ALL_BLOCKS.items())
+def test_un_bouton_desactive_se_distingue_d_un_bouton_actif(theme: str, header: str) -> None:
+    """Fond retiré, bordure en tirets et encre secondaire : l'écart de contraste
+    du texte doit déjà être perceptible, et la règle couvre aussi le bouton
+    primaire et le bouton basculé."""
+    tokens = _parse_block(TOKENS.read_text(encoding="utf-8"), header)
+    css = SHELL_CSS.read_text(encoding="utf-8")
+    for selector in (".btn:disabled", ".btn.pri:disabled", '.btn[aria-pressed="true"]:disabled'):
+        rule = _rule(css, selector)
+        assert rule["background"] == "transparent", selector
+        assert rule["border-style"] == "dashed", selector
+        assert _token_of(rule["color"]) == "--ink3", selector
+
+    active = _ratio(tokens["--ink"], tokens["--card"])
+    disabled = _ratio(tokens["--ink3"], tokens["--card"])
+
+    assert disabled >= 4.5, "désactivé reste lisible"
+    assert active / disabled >= 1.3, (
+        f"actif {active:.1f}:1 contre désactivé {disabled:.1f}:1 en thème {theme}"
+    )
+
+
+def test_le_cadenas_d_epinglage_mesure_au_moins_24_px() -> None:
+    """Cible minimale WCAG 2.5.8 : la boîte du bouton porte la cible, pas le
+    glyphe. La mesure rendue, sur toutes les cibles, est dans
+    tests/e2e/test_workspace_target_size.py."""
+    rule = _rule(SHELL_CSS.read_text(encoding="utf-8"), ".pin")
+
+    assert float(rule["min-width"].removesuffix("px")) >= 24
+    assert float(rule["min-height"].removesuffix("px")) >= 24
