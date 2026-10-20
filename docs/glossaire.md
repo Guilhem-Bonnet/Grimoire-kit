@@ -76,7 +76,7 @@ Raccourci : ```
 
 Termes liés : [Dock](#dock), [Commande équivalente](#commande-equivalente)
 
-Documentation : [cli-reference.md](/cli-reference.md)
+Documentation : [reference/cli/index.md](/reference/cli/index.md)
 
 ## Commande équivalente {: #commande-equivalente }
 
@@ -84,7 +84,7 @@ La commande `grimoire …` qu'une action à la souris aurait produite, affichée
 
 Termes liés : [Console](#console), [Palette de commandes](#palette-de-commandes)
 
-Documentation : [cli-reference.md](/cli-reference.md)
+Documentation : [reference/cli/index.md](/reference/cli/index.md)
 
 ## Palette de commandes {: #palette-de-commandes }
 
@@ -146,7 +146,7 @@ L'hôte mono-projet servi par `grimoire serve` : la vue de travail appliquée au
 
 Termes liés : [Cockpit](#cockpit), [Projet](#projet), [Kit](#kit)
 
-Documentation : [cli-reference.md](/cli-reference.md)
+Documentation : [reference/cli/index.md](/reference/cli/index.md)
 
 ## Cockpit {: #cockpit }
 
@@ -154,7 +154,7 @@ L'hôte multi-projets servi par `grimoire cockpit serve` : la même coque que l'
 
 Termes liés : [Atelier](#atelier), [Flotte](#flotte), [Projet](#projet)
 
-Documentation : [cli-reference.md](/cli-reference.md)
+Documentation : [reference/cli/index.md](/reference/cli/index.md)
 
 ## Flotte {: #flotte }
 
@@ -218,7 +218,7 @@ L'unité de travail du Mission Ledger, avec ses critères d'acceptation, son pro
 
 Termes liés : [Mission Ledger](#mission-ledger), [Porte de preuve](#porte-de-preuve), [Board gouverné](#board-gouverne), [Rappel de tâche](#rappel-de-tache)
 
-Documentation : [cli-reference.md](/cli-reference.md)
+Documentation : [reference/cli/index.md](/reference/cli/index.md)
 
 ## Mission Ledger {: #mission-ledger }
 
@@ -226,7 +226,7 @@ Le journal en ajout seul qui est la source de vérité des missions, des tâches
 
 Termes liés : [Tâche](#tache), [Board gouverné](#board-gouverne), [TraceLedger](#trace-ledger)
 
-Documentation : [adr-005-mission-ledger-source-of-truth.md](/adr-005-mission-ledger-source-of-truth.md)
+Documentation : [explications/decisions/adr-005-mission-ledger-source-of-truth.md](/explications/decisions/adr-005-mission-ledger-source-of-truth.md)
 
 ## Board gouverné {: #board-gouverne }
 
@@ -234,7 +234,7 @@ La projection du Mission Ledger en huit colonnes — proposed, ready, in_progres
 
 Termes liés : [Mission Ledger](#mission-ledger), [Tâche](#tache), [Porte de preuve](#porte-de-preuve)
 
-Documentation : [cli-reference.md](/cli-reference.md)
+Documentation : [reference/cli/index.md](/reference/cli/index.md)
 
 ## Porte de preuve {: #porte-de-preuve }
 
@@ -248,7 +248,7 @@ Le relevé qui associe chaque affirmation d'une tâche à sa preuve — une affi
 
 Termes liés : [Porte de preuve](#porte-de-preuve), [Evidence pack](#evidence-pack), [Standard agentique](#standard-agentique)
 
-Documentation : [standard/integration.md](/standard/integration.md)
+Documentation : [guides/rendre-la-preuve-bloquante.md](/guides/rendre-la-preuve-bloquante.md)
 
 ## Evidence pack {: #evidence-pack }
 
@@ -280,7 +280,7 @@ Ce que le Mission Ledger et la mémoire du projet savent d'une tâche et de ses 
 
 Termes liés : [Tâche](#tache), [Mission Ledger](#mission-ledger), [Evidence pack](#evidence-pack)
 
-Documentation : [cli-reference.md](/cli-reference.md)
+Documentation : [reference/cli/index.md](/reference/cli/index.md)
 
 ## Standard agentique {: #standard-agentique }
 
@@ -318,7 +318,7 @@ La chronologie unifiée d'une tâche, qui recoud Mission Ledger, TraceLedger, ru
 
 Termes liés : [Tâche](#tache), [Trace](#trace), [Mission Ledger](#mission-ledger)
 
-Documentation : [cli-reference.md](/cli-reference.md)
+Documentation : [reference/cli/index.md](/reference/cli/index.md)
 
 ## Problème {: #probleme }
 
@@ -332,7 +332,7 @@ Le diagnostic du kit sur un projet : chemins qui ne se résolvent pas, hôtes d�
 
 Termes liés : [Problème](#probleme), [Projet](#projet), [Hôte](#hote)
 
-Documentation : [cli-reference.md](/cli-reference.md)
+Documentation : [reference/cli/index.md](/reference/cli/index.md)
 
 ## Validation {: #validation }
 
@@ -370,7 +370,7 @@ Un enchaînement de nœuds — agents, portes, décisions — que le projet peut
 
 Termes liés : [Nœud](#noeud), [Blueprint](#blueprint), [Validation](#validation)
 
-Documentation : [workflow-taxonomy.md](/workflow-taxonomy.md)
+Documentation : [explications/taxonomie-des-workflows.md](/explications/taxonomie-des-workflows.md)
 
 ## Nœud {: #noeud }
 

@@ -2674,6 +2674,10 @@
    "version": "3.4.2",
    "path": "framework/archetype-dna.schema.yaml"
   },
+  "ae755193685d6df79b0f8422998c298c04e9681b751bf32d6f3bf62b1274a79a": {
+   "version": "3.63.0",
+   "path": "framework/glossary.yaml"
+  },
   "ae8c583e9a4420979a534c134eef0a81791496ecaaede83c7ed561decf2d200c": {
    "version": "3.4.2",
    "path": "framework/tools/synapse-config.py"

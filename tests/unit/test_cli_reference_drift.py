@@ -20,7 +20,7 @@ import pytest
 from grimoire.cli.app import app
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_REFERENCE = _REPO_ROOT / "docs" / "cli-reference.md"
+_REFERENCE_DIR = _REPO_ROOT / "docs" / "reference" / "cli"
 
 
 def _visible_top_level_names() -> set[str]:
@@ -40,11 +40,11 @@ def _visible_top_level_names() -> set[str]:
     return names
 
 
-@pytest.mark.skipif(not _REFERENCE.is_file(), reason="dépôt source uniquement")
+@pytest.mark.skipif(not _REFERENCE_DIR.is_dir(), reason="dépôt source uniquement")
 def test_every_visible_command_appears_in_the_cli_reference() -> None:
-    reference = _REFERENCE.read_text(encoding="utf-8")
+    reference = "\n".join(page.read_text(encoding="utf-8") for page in sorted(_REFERENCE_DIR.glob("*.md")))
     undocumented = sorted(n for n in _visible_top_level_names() if f"grimoire {n}" not in reference)
     assert not undocumented, (
-        "commandes exposées mais absentes de docs/cli-reference.md : "
+        "commandes exposées mais absentes de docs/reference/cli/ : "
         f"{undocumented} — documenter, ou masquer la commande si elle n'est pas destinée à l'utilisateur"
     )
