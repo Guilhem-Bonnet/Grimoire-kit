@@ -1147,7 +1147,7 @@ tirage. Refus avant tout run :
 | `--k` sur `three_arms.py` (aujourd'hui `--full` vaut k = 3 et `--pilot` k = 1 sur 2 tâches), champ `k` du rapport | tamis à k = 1 | 0,5 j | fait (`k` noté dans `selection.json`, pas dans `report.json`) |
 | Plafond total `--max-total-usd` et journal de budget sur `three_arms.py` (la classe `BudgetGuard` d'`aidlc_arm.py`) | le lanceur des bras `nu`/`kit-gov` n'a aucun plafond de campagne | 0,5 j | fait (`budget_guard.py`, partagé avec `aidlc_arm.py`) |
 | Matérialiseur du bloc K : pour chaque tâche, un exercice au format polyglotte sous une langue `kit` (arbre du parent par `git archive`, `.docs/instructions.md` = énoncé, `.meta/config.json` avec `files.test` = fichiers de test du correctif), commande de test `python -m pytest <nœuds>` avec `GRIMOIRE_POLICIES_BACKEND=python`, dans un venv préconstruit qui ne contient **pas** grimoire-kit | réutiliser `prepare_task_repo`, `assert_task_repo_clean` (un seul commit, tests absents) et `hidden_reads` sans les dupliquer | 1,5 à 2 j | fait (`kit_lot.py`), plus un contrôle rouge au parent / vert au correctif avant toute dépense |
-| Rédaction des 16 énoncés (symptôme, sans le correctif ; interface citée là où le tableau dit « fuite »), relus par Guilhem | une tâche injuste mesure l'énoncé, pas la méthode | 0,5 j | rédigés (`docs/bench/lot-m-kit-tasks.json`), **relecture de Guilhem à faire** |
+| Rédaction des 16 énoncés (symptôme, sans le correctif ; interface citée là où le tableau dit « fuite »), relus par Guilhem | une tâche injuste mesure l'énoncé, pas la méthode | 0,5 j | rédigés (`docs/bench/lot-m-kit-tasks.json`), relus le 2026-10-20 (§17.7.3) : K08 réécrit, K09 élargi |
 | Fermeture du réseau de l'agent : `--disallowedTools WebFetch,WebSearch`, et détection dans la transcription de `pip download`/`pip install grimoire-kit`, des URL du dépôt et de `site-packages/grimoire` | le correctif du bloc K est public (GitHub, PyPI) : un agent en ligne peut le lire | 0,5 j | fait pour le bloc K, partiel par construction (§17.7.4) |
 
 Un fichier de test modifié par le correctif (K05, K06, K07, K09 à K11, K15) est retiré entièrement du dépôt de l'agent : `assert_task_repo_clean` refuse
@@ -1259,7 +1259,7 @@ Rédigés à partir de l'issue ou de la PR d'origine et des tests cachés lus au
 (symptôme reproductible au parent, comportement attendu, interfaces imposées, contraintes), sans dire quelle fonction changer ni comment.
 Toute interface que les tests sélectionnés importent et qui n'existe pas au parent est nommée avec son contrat observable : sans elle, la
 tâche mesurerait la chance de deviner un nom. Garde mécanique au chargement : un énoncé qui cite le sha du correctif, sa PR ou une URL GitHub ou
-PyPI est refusé. **Cette garde ne remplace pas la relecture de Guilhem, à faire avant le premier run payant.**
+PyPI est refusé. Cette garde ne remplace pas une relecture humaine.
 
 | Id | Origine | Interfaces nouvelles nommées par l'énoncé | Avis du rédacteur |
 |---|---|---|---|
@@ -1270,8 +1270,8 @@ PyPI est refusé. **Cette garde ne remplace pas la relecture de Guilhem, à fair
 | K05 | #267 | `grimoire.missions.gates.GatesFileError`, mot `illisible` dans la raison | interface nommée |
 | K06 | #211 | check `gate.task_not_on_board` | interface nommée |
 | K07 | #614 | aucune | propre |
-| K08 | #734 | `scan_claim_rows`, `claims.status_invalid`, `claims.decision_invalid`, `claims.summary` | **douteux** : une centaine de cas paramétrés, l'énoncé frôle l'algorithme |
-| K09 | #449 | `grimoire.policies.temporal.tool_pattern_matches` | interface nommée ; **faible** : importée au niveau du module de test, un des deux tests peut déjà passer au parent |
+| K08 | #734 | aucune (réécrit à la relecture, voir ci-dessous) | propre après réécriture : 14 tests, 11 rouges au parent |
+| K09 | #449 | `grimoire.policies.temporal.tool_pattern_matches` | interface nommée ; sélection élargie à la relecture (9 tests, 6 discriminants) |
 | K10 | #463 | `tool_facts.is_read_only_command`, `temporal.REPAIR_EXEMPTION_REASON`, `grimoire policies reset-session` dans le refus | interface nommée |
 | K11 | #731 | `temporal.action_fingerprint`, `RuleState.approved_fingerprints`, `remember_pending_approval`, `HookInput.tool_use_id` | interface nommée (B-07 « à vérifier » : confirmé, imports absents au parent) |
 | K12 | #643 | aucune | propre |
@@ -1279,6 +1279,31 @@ PyPI est refusé. **Cette garde ne remplace pas la relecture de Guilhem, à fair
 | K14 | #744 | clés JSON `replay` et `replay_of` de `flow resume` | interface nommée |
 | K15 | #595 | aucune | propre |
 | K17 | #761 | aucune (formes données par familles, avec les pièges) | propre |
+
+**Relecture sceptique (2026-10-20, avant le tamis).** Chaque énoncé est comparé à l'issue ou à la PR d'origine et au test du correctif.
+Trois critères de rejet : (a) l'énoncé révèle la solution au-delà d'un rapport de bug réel ; (b) le test exige une interface que l'énoncé ne nomme
+pas ; (c) le test caché peut passer au parent. Pour (b), les imports des tests cachés sont résolus contre l'arbre du parent. Pour (c), chaque test est
+rejoué un par un au parent et au correctif, sans `-x`. Pour les tâches dont une interface nommée manque au parent (K05, K09, K10, K11), le contrôle
+est refait avec un bouchon qui reproduit le comportement du parent sous le nouveau nom. Un test qui passe avec ce bouchon ne discrimine que par le
+nom.
+
+- Aucune issue d'origine n'est moins explicite que son énoncé : les issues nomment fichier, ligne et correctif (K02, K09, K12, K17) ; les énoncés
+  s'en tiennent au symptôme, au contrat observable et aux interfaces imposées.
+- (b) : aucun import manquant au parent hors des interfaces déjà nommées. Seul `normalize_command` (K11) manque, mais il n'est importé que par des
+  tests que le filtre `-k` ne sélectionne pas.
+- (c) : à part K09, chaque test qui passe au parent est un témoin de non-régression annoncé par l'énoncé : K01 2/7, K02 1/7, K03 3/7, K04 1/15,
+  K17 10/33. Avec bouchon, K05 (5/5), K10 (2/2) et K11 (2/2) restent rouges sur le fond.
+- **K08 réécrit.** L'énoncé de B-08 dictait l'algorithme de la PR #734 : sections `## Claims`, lignes sans barre, `\|`, vocabulaire et tolérances,
+  `scan_claim_rows`, `_cells`, commentaire `# silent-ok` exigé par un test AST. Ce sont des décisions prises en revue, sur 87 tests. Sans elles, la
+  tâche était infaisable ; avec elles, elle était dictée. Le nouvel énoncé s'en tient au défaut d'origine, le premier commit de la PR : en
+  `governed`/`production`, `claims.empty` et `claims.row_invalid` deviennent des erreurs, un registre vidé ou supprimé n'est plus muet, l'exemption
+  V0 est conservée. Le filtre `-k` sélectionne 14 tests : 11 rouges au parent, 3 témoins.
+- **K09 gardé, sélection élargie.** Avec `-k command_prefix_end_to_end`, seul le test `git push` discriminait. `rm -rf x` en profil `production` donne
+  déjà `ask` au parent par la règle destructive intégrée. Le filtre couvre maintenant les tests unitaires de `tool_pattern_matches`, l'écriture
+  `Write(_grimoire/standard/*)` et le `cooldown_after` à motif de commande. L'énoncé ajoute les deux derniers exemples. Bilan : 9 tests ; avec le
+  bouchon `glob_match(motif, nom)`, 6 rouges et 3 témoins (`*`, nom nu, `rm`).
+- Rouge au parent, vert au correctif (`kit_lot.verify_tasks`, venv de test sans le kit) : rejoué pour K08 et K09, puis pour les 16 tâches au
+  `--dry-run` du tamis (§17.8). Garde : `test_reviewed_statements_keep_k08_narrow_and_k09_discriminating`, rouge sur les données de B-08.
 
 #### 17.7.4 Réseau de l'agent : ce qui est fermé, ce qui ne l'est pas
 
@@ -1340,7 +1365,7 @@ via `127.0.0.1:9`), `git ls-remote` du dépôt du kit (échec), `urllib` (connex
 
 #### 17.7.7 Ce qui reste avant le tamis payant
 
-- Relecture des 16 énoncés par Guilhem (`docs/bench/lot-m-kit-tasks.json`, champ `statement`).
+- ~~Relecture des 16 énoncés~~ : faite le 2026-10-20 (§17.7.3).
 - Un run payant de contrôle, borné (une tâche K, `--max-total-usd 5`), pour vérifier ce que B-08 ne peut pas vérifier sans modèle :
   `--disallowedTools` effectif, `CLAUDE_ENV_FILE` lu par l'outil `Bash`, `--max-budget-usd` respecté, coût réel d'une tâche K.
 - `aidlc_arm.py` sur le bloc K (étape 2b) : `--kit-repo`, environnement K et détection de fuite, à reprendre de `kit_lot.py`.

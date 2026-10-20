@@ -148,6 +148,15 @@ def test_versioned_kit_tasks_file_is_valid_and_complete() -> None:
     assert kl.load_test_requirements(kl.DEFAULT_TASKS_FILE)
 
 
+def test_reviewed_statements_keep_k08_narrow_and_k09_discriminating() -> None:
+    """Relecture du 2026-10-20 : K08 ne dicte plus l'algorithme du correctif, K09 sélectionne les tests de l'interface nommée."""
+    tasks = {t.id: t for t in kl.load_kit_tasks(kl.DEFAULT_TASKS_FILE)}
+    for leaked in ("scan_claim_rows", "_cells", "silent-ok", "claims.summary", "status_invalid"):
+        assert leaked not in tasks["K08"].statement
+    assert tasks["K08"].pytest_k and "malformed_row_is" in tasks["K08"].pytest_k
+    assert tasks["K09"].pytest_k and "tool_pattern_matches" in tasks["K09"].pytest_k
+
+
 def test_versioned_lot_m_names_the_sieve_and_the_k_block() -> None:
     lot = json.loads((ROOT / "docs" / "bench" / "lot-m.json").read_text(encoding="utf-8"))
     sieve = json.loads((ROOT / "docs" / "bench" / "lot-m-polyglot-sieve.json").read_text(encoding="utf-8"))
