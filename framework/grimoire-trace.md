@@ -1,6 +1,6 @@
 <p align="right"><a href="../README.md">README</a> · <a href="../docs">Docs</a></p>
 
-# <img src="../docs/assets/icons/microscope.svg" width="32" height="32" alt=""> Grimoire Trace — Audit Trail des Sessions (BM-28)
+# <img src="../docs/assets/icons/search.svg" width="32" height="32" alt=""> Grimoire Trace — Audit Trail des Sessions (BM-28)
 
 > Chaque décision d'agent, chaque handoff, chaque `remember` Qdrant, chaque action critique
 > est loggé en append-only dans `Grimoire_TRACE.md`. Résultat : **sessions rejouables**, 
@@ -11,7 +11,7 @@
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
 
-## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Format d'une entrée TRACE
+## <img src="../docs/assets/icons/doc.svg" width="28" height="28" alt=""> Format d'une entrée TRACE
 
 ```
 [2026-02-27T14:32:01Z] [dev/Amelia]       [ACTION:implement]   story: US-042 | file: src/auth.ts
@@ -27,7 +27,7 @@
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/microscope.svg" width="28" height="28" alt=""> Structure du fichier `Grimoire_TRACE.md`
+## <img src="../docs/assets/icons/search.svg" width="28" height="28" alt=""> Structure du fichier `Grimoire_TRACE.md`
 
 Localisé à la racine du projet Grimoire : `_grimoire-output/Grimoire_TRACE.md`
 
@@ -45,7 +45,7 @@ Localisé à la racine du projet Grimoire : `_grimoire-output/Grimoire_TRACE.md`
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> Types d'événements
+## Types d'événements
 
 | Type | Description | Généré par |
 |------|-------------|-----------|
@@ -93,7 +93,7 @@ Localisé à la racine du projet Grimoire : `_grimoire-output/Grimoire_TRACE.md`
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/team.svg" width="28" height="28" alt=""> Protocole d'écriture (pour les agents)
+## <img src="../docs/assets/icons/fleet.svg" width="28" height="28" alt=""> Protocole d'écriture (pour les agents)
 
 Les agents loguent les événements critiques via le format standardisé :
 
@@ -128,7 +128,7 @@ def grimoire_trace(agent: str, event_type: str, payload: str):
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/microscope.svg" width="28" height="28" alt=""> Protocole de lecture (replay / forensics)
+## <img src="../docs/assets/icons/search.svg" width="28" height="28" alt=""> Protocole de lecture (replay / forensics)
 
 ```bash
 # Voir toutes les actions d'un agent
@@ -152,7 +152,7 @@ grep "Session abc123" _grimoire-output/Grimoire_TRACE.md -A 999 | head -200
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration dans `grimoire-init.sh`
+## Intégration dans `grimoire-init.sh`
 
 La commande `grimoire-init.sh trace` permet de gérer le trace file :
 
@@ -178,7 +178,7 @@ grimoire-init.sh trace --reset --confirm
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration dans `mem0-bridge.py`
+## Intégration dans `mem0-bridge.py`
 
 Chaque `remember` et `recall` est automatiquement tracé :
 
@@ -192,7 +192,7 @@ grimoire_trace("mem0-bridge", "RECALL", f"type: {memory_type} | query: \"{query[
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> Spans, coût & causalité (Synapse BM-46)
+## Spans, coût & causalité (Synapse BM-46)
 
 Au-delà de la ligne `[ts] [agent] [type] payload`, le middleware `synapse-trace.py`
 capture des **spans** structurés enrichissant chaque opération outillée. Une entrée
@@ -235,7 +235,7 @@ exposés par `tracer.get_stats()` et l'action MCP `grimoire_synapse_trace status
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/rocket.svg" width="28" height="28" alt=""> Utilisation enterprise
+## <img src="../docs/assets/icons/play.svg" width="28" height="28" alt=""> Utilisation enterprise
 
 Le `Grimoire_TRACE.md` est un artefact exploitable pour :
 - **Onboarding** : comprendre les décisions prises par les agents précédents

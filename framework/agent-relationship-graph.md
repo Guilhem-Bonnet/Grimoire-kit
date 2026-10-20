@@ -1,6 +1,6 @@
 <p align="right"><a href="../README.md">README</a> · <a href="../docs">Docs</a></p>
 
-# <img src="../docs/assets/icons/network.svg" width="32" height="32" alt=""> Agent Relationship Graph (ARG) — Registre de Compétences et Relations Inter-Agents
+# <img src="../docs/assets/icons/graph.svg" width="32" height="32" alt=""> Agent Relationship Graph (ARG) — Registre de Compétences et Relations Inter-Agents
 
 > **BM-57** — Graphe de connaissance mutuelle entre agents : qui sait quoi, qui a travaillé
 > avec qui, et qui est le plus fiable pour quel type de tâche.
@@ -18,7 +18,7 @@
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
 
-## <img src="../docs/assets/icons/temple.svg" width="28" height="28" alt=""> Architecture
+## <img src="../docs/assets/icons/layers.svg" width="28" height="28" alt=""> Architecture
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
@@ -50,7 +50,7 @@
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/folder-tree.svg" width="28" height="28" alt=""> Structure du Graphe
+## <img src="../docs/assets/icons/layers.svg" width="28" height="28" alt=""> Structure du Graphe
 
 Fichier : `_grimoire-output/.agent-graph.yaml`
 
@@ -192,7 +192,7 @@ agent_graph:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/dna.svg" width="28" height="28" alt=""> Enrichissement Dynamique
+## <img src="../docs/assets/icons/vector.svg" width="28" height="28" alt=""> Enrichissement Dynamique
 
 Le graphe se met à jour automatiquement via les événements ELSS :
 
@@ -235,7 +235,7 @@ enrichment_rules:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/boomerang.svg" width="28" height="28" alt=""> Usage par l'Orchestrateur (SOG)
+## <img src="../docs/assets/icons/undo.svg" width="28" height="28" alt=""> Usage par l'Orchestrateur (SOG)
 
 Le SOG utilise le graphe pour améliorer le routage :
 
@@ -309,7 +309,7 @@ L'utilisateur ou l'orchestrateur peut interroger le graphe :
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration Grimoire Trace
+## Intégration Grimoire Trace
 
 ```
 [timestamp] [orchestrator]   [ARG:bootstrap]   agents=8 | relationships=12 | source=static
@@ -321,7 +321,7 @@ L'utilisateur ou l'orchestrateur peut interroger le graphe :
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Référence Croisée
+## <img src="../docs/assets/icons/doc.svg" width="28" height="28" alt=""> Référence Croisée
 
 - Agent Manifest : `_grimoire/kit/agent-manifest.csv` — source statique des capabilities
 - Agent Worker : [framework/tools/agent-worker.py](tools/agent-worker.py) — KNOWN_AGENTS

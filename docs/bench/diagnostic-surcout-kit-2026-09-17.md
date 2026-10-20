@@ -4,7 +4,7 @@ audience: décision
 
 <p align="right"><a href="../../README.md">README</a> · <a href="../../CHANGELOG.md">Changelog</a> · <a href="../index.md">Docs</a></p>
 
-# <img src="../assets/icons/microscope.svg" width="32" height="32" alt=""> Diagnostic du surcoût kit — banc à trois bras 2026-09-17
+# <img src="../assets/icons/search.svg" width="32" height="32" alt=""> Diagnostic du surcoût kit — banc à trois bras 2026-09-17
 
 > Rapport du banc : branche `bench-reports`, commit `c43483ac`,
 > `_grimoire-output/bench-reports/three-arms/2026-09-17/{report.md,report.json}`.

@@ -6,7 +6,7 @@ patterns: [ORC-01]
 ---
 <p align="right"><a href="../../README.md">README</a> · <a href="../../docs">Docs</a></p>
 
-# <img src="../../docs/assets/icons/team.svg" width="32" height="32" alt=""> Subagent Orchestration Protocol
+# <img src="../../docs/assets/icons/fleet.svg" width="32" height="32" alt=""> Subagent Orchestration Protocol
 
 > **BM-19** — Architecture native pour spawner des sous-agents en parallèle depuis un workflow Grimoire.
 >
@@ -18,7 +18,7 @@ patterns: [ORC-01]
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
 
-## <img src="../../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> Syntaxe dans les Workflows YAML
+## Syntaxe dans les Workflows YAML
 
 ### Step type `orchestrate`
 
@@ -48,7 +48,7 @@ patterns: [ORC-01]
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> Stratégies de Merge
+## Stratégies de Merge
 
 | Stratégie | Description | Cas d'usage |
 |---|---|---|
@@ -61,7 +61,7 @@ patterns: [ORC-01]
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/team.svg" width="28" height="28" alt=""> Fallback pour LLMs sans support sous-agents natif
+## <img src="../../docs/assets/icons/fleet.svg" width="28" height="28" alt=""> Fallback pour LLMs sans support sous-agents natif
 
 Si le LLM ne supporte pas le spawn réel de sous-agents :
 
@@ -75,7 +75,7 @@ L'orchestrateur exécute les tâches une par une dans le même contexte, en simu
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> Patterns Recommandés
+## Patterns Recommandés
 
 ### Pattern 1 — Analyse Parallèle
 
@@ -192,7 +192,7 @@ on_escalation:
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Règles Obligatoires
+## <img src="../../docs/assets/icons/doc.svg" width="28" height="28" alt=""> Règles Obligatoires
 
 1. **Chaque sous-agent reçoit un contexte minimal** — uniquement les fichiers nécessaires à SA tâche
 2. **Chaque sous-agent retourne du JSON ou Markdown structuré** — jamais du prose non-parseable
@@ -208,7 +208,7 @@ on_escalation:
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/boomerang.svg" width="28" height="28" alt=""> Extension — Hybrid Orchestrate (BM-58)
+## <img src="../../docs/assets/icons/undo.svg" width="28" height="28" alt=""> Extension — Hybrid Orchestrate (BM-58)
 
 Pour les workflows complexes avec dépendances mixtes, utiliser `type: hybrid-orchestrate` :
 

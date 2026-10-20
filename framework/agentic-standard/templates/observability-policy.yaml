@@ -89,7 +89,9 @@ non_authoritative:
     - "evidence gates"
     - "compliance score"
     - "accepted risks"
+# Checks émis par `grimoire standard verify` (standard_checks/observability_check.py).
+# `observability.cockpit-read-only` reste une règle de code, sans check sur cet artefact.
 checks:
-  - observability.cockpit_mutation
-  - observability.input_undeclared
-  - observability.secret_export
+  - observability.policy_missing
+  - observability.inputs_undeclared
+  - observability.secret_export_allowed

@@ -1357,7 +1357,12 @@ def _emitted_check_ids() -> set[str]:
                # W4-05 : dispatch.cost_slo extrait de verifiers.py (ratchet de taille).
                core / "standard_checks" / "dispatch_cost_slo.py",
                # W6-03 : règles parsables par couche, extrait de verifiers.py (ratchet de taille).
-               core / "standard_checks" / "rules_check.py"]
+               core / "standard_checks" / "rules_check.py",
+               # #636 : les quatre patterns qui n'avaient aucun vérificateur.
+               core / "standard_checks" / "runtime_journal_check.py",
+               core / "standard_checks" / "observability_check.py",
+               core / "standard_checks" / "skills_check.py",
+               core / "standard_checks" / "hot_memory_check.py"]
     trees = {path: ast.parse(path.read_text(encoding="utf-8")) for path in
              [*modules, core / "standard_checks" / "base.py"]}
 

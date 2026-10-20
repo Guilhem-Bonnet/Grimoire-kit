@@ -1,16 +1,16 @@
 <p align="right"><a href="../../README.md">README</a> · <a href="../../docs">Docs</a></p>
 
-# <img src="../../docs/assets/icons/grimoire.svg" width="32" height="32" alt=""> Archétype Registry Grimoire — BM-21
+# Archétype Registry Grimoire — BM-21
 
 > Index des archétypes disponibles et protocole d'installation à la demande.
 
-## <img src="../../docs/assets/icons/lightbulb.svg" width="28" height="28" alt=""> Concept
+## Concept
 
 Le Registry permet d'installer des archétypes supplémentaires dans un projet existant sans réinitialiser. Équivalent de `npm install` mais pour les agents et workflows Grimoire.
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/puzzle.svg" width="28" height="28" alt=""> Archétypes disponibles
+## <img src="../../docs/assets/icons/layers.svg" width="28" height="28" alt=""> Archétypes disponibles
 
 ### Archétypes Built-in (locaux, dans ce kit)
 
@@ -74,7 +74,7 @@ grimoire-init.sh install --inspect infra-ops
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/puzzle.svg" width="28" height="28" alt=""> Format du manifest d'un archétype (`archetype.dna.yaml`)
+## <img src="../../docs/assets/icons/layers.svg" width="28" height="28" alt=""> Format du manifest d'un archétype (`archetype.dna.yaml`)
 
 Chaque archétype déclare sa "DNA" — ses traits, contraintes et valeurs — dans un fichier `archetype.dna.yaml` à la racine de son répertoire.
 
@@ -96,7 +96,7 @@ Lors d'un `install`, le script :
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/puzzle.svg" width="28" height="28" alt=""> Registre local (`project-context.yaml` → `installed_archetypes:`)
+## <img src="../../docs/assets/icons/layers.svg" width="28" height="28" alt=""> Registre local (`project-context.yaml` → `installed_archetypes:`)
 
 Créé automatiquement à l'init et mis à jour par chaque `install` :
 
@@ -116,7 +116,7 @@ installed:
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/puzzle.svg" width="28" height="28" alt=""> Versioning des archétypes
+## <img src="../../docs/assets/icons/layers.svg" width="28" height="28" alt=""> Versioning des archétypes
 
 Structure du champ `version` dans `archetype.dna.yaml` : `MAJOR.MINOR.PATCH`
 
@@ -126,7 +126,7 @@ Structure du champ `version` dans `archetype.dna.yaml` : `MAJOR.MINOR.PATCH`
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/folder-tree.svg" width="28" height="28" alt=""> Roadmap v2.0 — Registry Public
+## <img src="../../docs/assets/icons/layers.svg" width="28" height="28" alt=""> Roadmap v2.0 — Registry Public
 
 ```
 Phase 1 (actuelle) : archétypes built-in locaux

@@ -1,6 +1,6 @@
 <p align="right"><a href="../README.md">README</a> · <a href="../docs">Docs</a></p>
 
-# <img src="../docs/assets/icons/workflow.svg" width="32" height="32" alt=""> Event Log & Shared State (ELSS) — Journal d'Événements et État Partagé
+# Event Log & Shared State (ELSS) — Journal d'Événements et État Partagé
 
 > **BM-59** — Bus d'événements persistant et état partagé observable pour la coordination multi-agents.
 >
@@ -18,7 +18,7 @@
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
 
-## <img src="../docs/assets/icons/temple.svg" width="28" height="28" alt=""> Architecture
+## <img src="../docs/assets/icons/layers.svg" width="28" height="28" alt=""> Architecture
 
 ```
 ┌─────────┐  ┌─────────┐  ┌─────────┐
@@ -57,7 +57,7 @@
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> Types d'événements
+## Types d'événements
 
 | Type | Description | Émetteur typique | Exemple payload |
 |------|------------|------------------|-----------------|
@@ -80,7 +80,7 @@
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Format du Event Log
+## <img src="../docs/assets/icons/doc.svg" width="28" height="28" alt=""> Format du Event Log
 
 Fichier : `_grimoire-output/.event-log.jsonl` (JSON Lines, append-only)
 
@@ -137,7 +137,7 @@ confiance ne peut pas être « de confiance ».
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/brain.svg" width="28" height="28" alt=""> Shared State — État Reconstruit
+## <img src="../docs/assets/icons/book.svg" width="28" height="28" alt=""> Shared State — État Reconstruit
 
 Fichier : `_grimoire-output/.shared-state.yaml`
 
@@ -199,7 +199,7 @@ shared_state:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> Protocole d'Émission
+## Protocole d'Émission
 
 Chaque agent émet des événements via le message bus :
 
@@ -254,7 +254,7 @@ emit_protocol:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/chart.svg" width="28" height="28" alt=""> Protocole d'Observation
+## <img src="../docs/assets/icons/board.svg" width="28" height="28" alt=""> Protocole d'Observation
 
 Chaque agent peut observer l'état partagé :
 
@@ -287,7 +287,7 @@ observe_protocol:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/brain.svg" width="28" height="28" alt=""> State Projection — Reconstruction
+## <img src="../docs/assets/icons/book.svg" width="28" height="28" alt=""> State Projection — Reconstruction
 
 Le projecteur reconstruit `.shared-state.yaml` depuis `.event-log.jsonl` :
 
@@ -363,7 +363,7 @@ retention_policy:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration Grimoire Trace
+## Intégration Grimoire Trace
 
 Chaque événement est aussi loggé dans Grimoire_TRACE.md :
 
@@ -376,7 +376,7 @@ Chaque événement est aussi loggé dans Grimoire_TRACE.md :
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Référence Croisée
+## <img src="../docs/assets/icons/doc.svg" width="28" height="28" alt=""> Référence Croisée
 
 - Message Bus : [framework/tools/message-bus.py](tools/message-bus.py) — transport des événements
 - Grimoire Trace : [framework/grimoire-trace.md](grimoire-trace.md) — persistance audit trail

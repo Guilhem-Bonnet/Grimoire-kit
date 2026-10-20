@@ -782,6 +782,10 @@
    "version": "3.20.0",
    "path": "framework/tools/tool-resolver.py"
   },
+  "36d8023b4257b7895ae5f6aab5adacbe4555803309bab1e575fd970e728c0f51": {
+   "version": "3.64.0",
+   "path": "framework/agentic-standard/traceability.yaml"
+  },
   "37fb9a19d01016ec40c08bb06c87c532f7fdecfef1ec744fe021ecebcf04eddd": {
    "version": "3.5.0",
    "path": "framework/memory/docker-compose.memory-target.tpl.yml"
@@ -829,6 +833,10 @@
   "3c4f9a5d5178c1799f4503b0ac0e777a9183f943df48423240505323e11c1429": {
    "version": "3.21.1",
    "path": "framework/tools/desire-paths.py"
+  },
+  "3ce774cf04cecabdbb4a55bd469b29af6467442afafb4fc5cf1359f52af02c8c": {
+   "version": "3.64.0",
+   "path": "framework/agentic-standard/traceability.yaml"
   },
   "3d09192204b16b2594066081122072458bb209ff2cce721ffa9ebb5d66ac9b8b": {
    "version": "3.16.0",
@@ -1482,6 +1490,10 @@
    "version": "3.21.1",
    "path": "framework/tools/auto-doc.py"
   },
+  "674b294fccf495b773bea03c8f8025e921646a34df176b14392a5afcfa9d9a13": {
+   "version": "3.64.0",
+   "path": "framework/agentic-standard/templates/memory-policy.yaml"
+  },
   "67ae8d1324500a1cf754fb318099646e9e6b5441fbcff63462dc1bde5861410b": {
    "version": "3.4.2",
    "path": "framework/prompt-templates/network-troubleshoot.md"
@@ -1689,6 +1701,10 @@
   "709898082894e2aacb8c36422ce5dd90bc6bc90885b52b67bde91d06170d6edc": {
    "version": "3.35.0",
    "path": "framework/copilot/prompts/grimoire-health-check.prompt.md"
+  },
+  "70f9dadc58529e8fe5afec5fb2f1d789a95a61baae86e79abb698e9b8adc28da": {
+   "version": "3.64.0",
+   "path": "framework/agentic-standard/capability-map.yaml"
   },
   "710c4ef8944dce5582d042c8e8ce73e23cb47c78386e280b53d550649de5efb9": {
    "version": "3.16.0",
@@ -2413,6 +2429,10 @@
   "a31b5e5d7f7518aa7f07ab9ee33a0e4c0a04c91e293add4b466ef5c615967c31": {
    "version": "3.32.0",
    "path": "archetypes/stack/agents/k8s-expert.md"
+  },
+  "a38d26e502ffe63a6b28c10feb0e222961774893ab6b12ebf1c46a04029dcef2": {
+   "version": "3.64.0",
+   "path": "framework/agentic-standard/templates/pattern-catalog.yaml"
   },
   "a3a631538a9d02ce26834782bb2c93d9065f06fec711890e032379709955869f": {
    "version": "3.21.1",
@@ -3257,6 +3277,10 @@
   "d3946adf7164c450a80ceb1623b642fd527c143b881869a81ce257766bf16ac4": {
    "version": "3.4.2",
    "path": "framework/hooks/.pre-commit-config.tpl.yaml"
+  },
+  "d3d801623530fd29d1994a4098779efff11f919abf69731229773efb898e4837": {
+   "version": "3.64.0",
+   "path": "framework/agentic-standard/templates/observability-policy.yaml"
   },
   "d43cd77f2d32c86b2bf49a5654358981fdf6b3af473cea2ef7bd7789431ed301": {
    "version": "3.16.0",

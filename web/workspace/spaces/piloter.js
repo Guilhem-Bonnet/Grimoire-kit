@@ -1808,7 +1808,12 @@ export async function mount(root, ctx) {
 
   const drawOnce = async ({ forceFleet = false } = {}) => {
     ctx.docbar.setBreadcrumb([ctx.host.project || 'flotte', 'Piloter', level === 'flotte' ? 'Flotte' : 'Projet']);
-    ctx.docbar.setZoom(zoomLevels, level, (id) => { level = id; draw(); });
+    // Un clic sur le niveau déjà actif ne redessine pas (#850) : `draw()`
+    // repeignait la coquille « Chargement… », rechargeait la fiche, puis
+    // `renderSheet` vidait l'Inspecteur — y compris l'aperçu qu'un clic parti
+    // sur l'ANCIEN bouton « Mettre à jour » venait d'y écrire. Un zoom inchangé
+    // est un non-événement, comme pour `stateKey()` côté file d'attente.
+    ctx.docbar.setZoom(zoomLevels, level, (id) => { if (id === level) return; level = id; draw(); });
 
     // Coquille immédiate (#541 point 3) : jamais d'écran vide le temps que
     // les appels réseau reviennent — un état « chargement… » se peint tout

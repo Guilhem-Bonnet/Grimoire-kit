@@ -1615,13 +1615,7 @@ def _score_dimensions(
         elif check.severity == "warning":
             buckets[dimension]["warnings"] += 1
 
-    journal = audit_runtime_events(root)
-    journal_bucket = buckets.setdefault("runtime_journal", {"weight": 0, "errors": 0, "warnings": 0})
-    if not journal["ok"]:
-        journal_bucket["errors"] += 1
-    elif int(journal.get("event_count", 0)) == 0:
-        journal_bucket["warnings"] += 1
-
+    # Le journal est jugé par `journal.*` dans verify (#636), plus ici : un seul compte.
     dimensions: dict[str, dict[str, int]] = {}
     for dimension, bucket in buckets.items():
         weight = max(0, bucket["weight"])

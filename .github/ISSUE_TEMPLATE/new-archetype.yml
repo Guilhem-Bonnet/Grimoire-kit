@@ -1,4 +1,4 @@
-name: "🧬 Proposition d'archétype"
+name: "Proposition d'archétype"
 description: "Proposer un nouvel archétype ou un agent stack"
 title: "feat(archetype): [NOM] Description courte"
 labels: ["archetype", "enhancement"]
@@ -42,11 +42,11 @@ body:
     id: agents
     attributes:
       label: Agents proposés
-      description: "Liste des agents avec rôle et icône"
+      description: "Liste des agents avec leur rôle"
       placeholder: |
-        | Agent | Icône | Rôle |
-        |-------|-------|------|
-        | dbt-expert | 📊 | Transformation données, tests dbt |
+        | Agent | Rôle |
+        |-------|------|
+        | dbt-expert | Transformation données, tests dbt |
     validations:
       required: false
 

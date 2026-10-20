@@ -216,6 +216,8 @@ CHECK_DIMENSIONS: dict[str, str] = {
     "workspace.isolation_undeclared": "hook_registry",
     "workspace.network_open": "hook_registry",
     "workspace.writable_unbounded": "hook_registry",
+    # skill-classification-matrix (#636) — voir skills_check.py.
+    "skills.unclassified": "hook_registry",
     # -- knowledge_registry --------------------------------------------
     "docgraph.provenance_optional": "knowledge_registry",
     "docgraph.relations_disabled": "knowledge_registry",
@@ -249,6 +251,8 @@ CHECK_DIMENSIONS: dict[str, str] = {
     "memory.os_semantic_memory_target": "memory_os",
     "memory.os_sidecar_target": "memory_os",
     "memory.os_target_missing": "memory_os",
+    # redis-hot-memory-soft-gate (#636) — voir hot_memory_check.py.
+    "memory.hot_degradation_undeclared": "memory_os",
     # -- memory_policy -------------------------------------------------
     "retention.artifact_indexable_missing": "memory_policy",
     "retention.artifact_retention_missing": "memory_policy",
@@ -392,7 +396,16 @@ CHECK_DIMENSIONS: dict[str, str] = {
     "rules.source_normative_missing": "rule_packs",
     "rules.unknown_action": "rule_packs",
     "rules.unknown_phase": "rule_packs",
+    # -- observability_cockpit -----------------------------------------
+    # governed-observability-cockpit (#636) — voir observability_check.py.
+    "observability.inputs_undeclared": "observability_cockpit",
+    "observability.policy_missing": "observability_cockpit",
+    "observability.secret_export_allowed": "observability_cockpit",
     # -- runtime_journal -----------------------------------------------
+    # runtime-journal (#636) — voir runtime_journal_check.py.
+    "journal.line_invalid": "runtime_journal",
+    "journal.missing": "runtime_journal",
+    "journal.stale": "runtime_journal",
     "promptver.evals_unlinked": "runtime_journal",
     "promptver.tracking_incomplete": "runtime_journal",
     # -- task_board ----------------------------------------------------
@@ -431,6 +444,9 @@ DEFAULT_SCORE_DIMENSIONS = {
     "decision_graph": 6,
     "rule_packs": 6,
     "hook_registry": 6,
+    # Même poids que le gabarit compliance-score.yaml, qui le déclarait déjà
+    # sans qu'aucun check ne l'atteigne (#636).
+    "observability_cockpit": 6,
     "orchestration_policy": 10,
     "evidence_gates": 10,
     "runtime_journal": 4,
@@ -449,7 +465,8 @@ DIMENSION_CHECK_PREFIXES = {
     "context_contract": ("context.", "compression."),
     "decision_graph": ("decision.", "council."),
     "rule_packs": ("rules.", "guardrail."),
-    "hook_registry": ("hooks.", "tools.blast_radius", "privilege.", "firewall.", "workspace."),
+    "hook_registry": ("hooks.", "tools.blast_radius", "privilege.", "firewall.", "workspace.", "skills."),
+    "observability_cockpit": ("observability.",),
     "runtime_journal": ("journal.", "promptver."),
     "orchestration_policy": ("orchestration.", "wsm.", "flowdsl.", "runtime.", "k8s."),
     "evidence_gates": ("evidence.", "gate.", "visual.", "browser."),

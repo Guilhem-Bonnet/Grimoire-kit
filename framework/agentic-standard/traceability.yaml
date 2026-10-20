@@ -262,6 +262,7 @@ verifiers:
   orchestration: {prefix: "orchestration.", controls: [CTRL-AUT-001], note: "Ne lit que roles: ; handoffs: (AG-ORC-003) non vérifié."}
   gates: {prefix: "gates.", controls: [CTRL-QUA-003]}
   patterns: {prefix: "patterns.", controls: [CTRL-PAT-001]}
+  skills: {prefix: "skills.", controls: [CTRL-PAT-001], note: "#636 : classification des skills du projet (managed_sources.skills) avant promotion."}
   score: {prefix: "score.", controls: [CTRL-QUA-003]}
   risks: {prefix: "risks.", controls: [CTRL-QUA-003]}
   waivers: {prefix: "waivers.", controls: [CTRL-QUA-003]}
@@ -297,6 +298,7 @@ verifiers:
   artifact: {prefix: "artifact.", controls: [], reason: "Présence des fichiers requis par le profil ; prérequis, pas un contrôle de la norme."}
   gate: {prefix: "gate.", controls: [CTRL-QUA-003]}
   journal: {prefix: "journal.", controls: [CTRL-OBS-001]}
+  observability: {prefix: "observability.", controls: [CTRL-OBS-001], note: "#636 : observability-policy.yaml lu par observability_check.py (entrées déclarées, export sans secret)."}
   knowledge_index: {prefix: "knowledge_index.", controls: [CTRL-CTX-001]}
   release: {prefix: "release.", controls: [CTRL-QUA-003]}
   yaml: {prefix: "yaml.", controls: [], reason: "Syntaxe YAML ; prérequis technique."}

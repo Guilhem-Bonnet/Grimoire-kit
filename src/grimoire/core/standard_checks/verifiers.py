@@ -65,8 +65,12 @@ from grimoire.core.standard_checks.controls import (
     _verify_workspace_isolation,
 )
 from grimoire.core.standard_checks.dispatch_cost_slo import _verify_dispatch_cost_slo
+from grimoire.core.standard_checks.hot_memory_check import _verify_hot_memory_degradation
+from grimoire.core.standard_checks.observability_check import _verify_observability_policy
 from grimoire.core.standard_checks.pattern_codes import catalog_pattern_ids
 from grimoire.core.standard_checks.rules_check import verify_layered_rules
+from grimoire.core.standard_checks.runtime_journal_check import _verify_runtime_journal
+from grimoire.core.standard_checks.skills_check import _verify_skill_classification
 from grimoire.core.standard_generation import (
     EVIDENCE_DIR,
     STANDARD_DIR,
@@ -941,6 +945,7 @@ def _verify_memory_policy(root: Path, profile: StandardProfile, result: Standard
             )
     _verify_memory_write_validation(data, memory_types, profile=profile, result=result, path=rel_path)
     _verify_memory_os_contract(data, profile=profile, result=result, path=rel_path)
+    _verify_hot_memory_degradation(data, result=result, path=rel_path)
 
 
 def _verify_memory_write_validation(
@@ -1351,6 +1356,7 @@ def run_verifiers(root: Path, profile: StandardProfile, task_id: str, result: St
     _verify_rule_packs(root, result)
     verify_layered_rules(root, result)
     _verify_hook_registry(root, result)
+    _verify_skill_classification(root, result)
     _verify_runtime_surface_registry(root, profile, result)
     _verify_retention_registry(root, profile, result)
     _verify_tool_registry(root, profile, result)
@@ -1382,3 +1388,6 @@ def run_verifiers(root: Path, profile: StandardProfile, task_id: str, result: St
     _verify_doc_graph_pipeline(root, result)
     _verify_flow_dsl_manifest(root, result)
     _verify_workflow_state_manifest(root, result)
+    # Issue #636 : les patterns qui n'avaient aucun vérificateur.
+    _verify_observability_policy(root, profile, result)
+    _verify_runtime_journal(root, profile, result)
