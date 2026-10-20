@@ -24,7 +24,7 @@
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/rocket.svg" width="28" height="28" alt=""> Exemples de sortie
+## <img src="../docs/assets/icons/play.svg" width="28" height="28" alt=""> Exemples de sortie
 
 ### CC PASS
 ```

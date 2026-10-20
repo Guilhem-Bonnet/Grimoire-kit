@@ -1,6 +1,6 @@
 <p align="right"><a href="../../README.md">README</a></p>
 
-# <img src="../../docs/assets/icons/grimoire.svg" width="32" height="32" alt=""> Exemple — Application Web (SPA + API Go + PostgreSQL)
+# Exemple — Application Web (SPA + API Go + PostgreSQL)
 
 > **Illustratif, non rejouable.** Les sorties ci-dessous sont mises en forme à la main : aucun script `replay.sh` ni `expected.json` ne les rejoue. Les exemples vérifiés en CI sont listés dans [`examples/README.md`](../README.md).
 
@@ -9,7 +9,7 @@ Démonstration de l'archétype `web-app` sur un projet concret : une application
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
 
-## <img src="../../docs/assets/icons/puzzle.svg" width="28" height="28" alt=""> Stack détecté automatiquement
+## <img src="../../docs/assets/icons/layers.svg" width="28" height="28" alt=""> Stack détecté automatiquement
 
 ```bash
 bash /chemin/vers/grimoire-kit/grimoire.sh \
@@ -35,7 +35,7 @@ Agents déployés automatiquement :
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/folder-tree.svg" width="28" height="28" alt=""> Structure du projet type
+## <img src="../../docs/assets/icons/layers.svg" width="28" height="28" alt=""> Structure du projet type
 
 ```
 todo-app/
@@ -76,7 +76,7 @@ todo-app/
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/team.svg" width="28" height="28" alt=""> Exemple d'utilisation des agents
+## <img src="../../docs/assets/icons/fleet.svg" width="28" height="28" alt=""> Exemple d'utilisation des agents
 
 ### Feature end-to-end avec Stack 
 
@@ -152,7 +152,7 @@ git commit -m "feat: filtre par tag"
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/brain.svg" width="28" height="28" alt=""> shared-context.md rempli
+## <img src="../../docs/assets/icons/book.svg" width="28" height="28" alt=""> shared-context.md rempli
 
 Après installation, compléter `_grimoire/_memory/shared-context.md` :
 

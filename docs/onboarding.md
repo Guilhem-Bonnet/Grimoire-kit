@@ -4,7 +4,7 @@ audience: utilisateur
 
 <p align="right"><a href="../README.md">README</a></p>
 
-# <img src="../assets/icons/handshake.svg" width="32" height="32" alt=""> Guide de Démarrage Progressif — Grimoire Kit
+# <img src="../assets/icons/handoff.svg" width="32" height="32" alt=""> Guide de Démarrage Progressif — Grimoire Kit
 
 > **J1** → Première session en 10 minutes 
 > **S1** → Première semaine productive 
@@ -258,7 +258,7 @@ grimoire upgrade-flow run --dry-run
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/plug.svg" width="28" height="28" alt=""> Aide rapide
+## <img src="../assets/icons/link.svg" width="28" height="28" alt=""> Aide rapide
 
 | Besoin | Commande |
 |--------|---------|
