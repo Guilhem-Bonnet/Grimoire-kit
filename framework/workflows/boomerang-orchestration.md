@@ -6,7 +6,7 @@ patterns: [ORC-01]
 ---
 <p align="right"><a href="../../README.md">README</a> · <a href="../../docs">Docs</a></p>
 
-# <img src="../../docs/assets/icons/boomerang.svg" width="32" height="32" alt=""> Boomerang Orchestration Workflow
+# <img src="../../docs/assets/icons/undo.svg" width="32" height="32" alt=""> Boomerang Orchestration Workflow
 
 > **BM-11** — Workflow d'orchestration hiérarchique inspiré de Roo-Code Boomerang Tasks.
 >
@@ -19,7 +19,7 @@ patterns: [ORC-01]
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
 
-## <img src="../../docs/assets/icons/boomerang.svg" width="28" height="28" alt=""> Schéma d'Orchestration
+## <img src="../../docs/assets/icons/undo.svg" width="28" height="28" alt=""> Schéma d'Orchestration
 
 ```
 USER demande : "Implémenter la feature Authentification JWT"
@@ -58,7 +58,7 @@ USER demande : "Implémenter la feature Authentification JWT"
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> Fichier Workflow YAML
+## Fichier Workflow YAML
 
 ```yaml
 # framework/workflows/boomerang-feature.yaml
@@ -183,7 +183,7 @@ outputs:
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/boomerang.svg" width="28" height="28" alt=""> Rapport de Livraison Boomerang
+## <img src="../../docs/assets/icons/undo.svg" width="28" height="28" alt=""> Rapport de Livraison Boomerang
 
 Template auto-généré en step 6 :
 
@@ -218,7 +218,7 @@ Décisions clés : {key_decisions}
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Références Croisées
+## <img src="../../docs/assets/icons/doc.svg" width="28" height="28" alt=""> Références Croisées
 
 - Hybrid Parallelism Engine : [framework/hybrid-parallelism-engine.md](../framework/hybrid-parallelism-engine.md) (BM-58) — étend le boomerang avec DAG parallèle/séquentiel/opportuniste
 - Subagent Orchestration : [framework/workflows/subagent-orchestration.md](subagent-orchestration.md) (BM-19)

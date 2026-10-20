@@ -1,16 +1,16 @@
-<!-- Grimoire Kit — Pull Request Template -->
+<!-- grimoire-kit — gabarit de pull request -->
 <!-- Supprimez les sections non-applicables avant de soumettre -->
 
 ## Type de changement
 
 <!-- Cochez ce qui correspond -->
-- [ ] 🐛 Bug fix (`fix:`)
-- [ ] ✨ Nouvelle feature (`feat:`)
-- [ ] 📝 Documentation (`docs:`)
-- [ ] 🧬 Nouvel archétype / agent DNA
-- [ ] 🪝 Hook git
-- [ ] ⚙️ CI/CD / tooling
-- [ ] ♻️ Refactoring (pas de changement de comportement)
+- [ ] Bug fix (`fix:`)
+- [ ] Nouvelle feature (`feat:`)
+- [ ] Documentation (`docs:`)
+- [ ] Nouvel archétype / agent DNA
+- [ ] Hook git
+- [ ] CI/CD / tooling
+- [ ] Refactoring (pas de changement de comportement)
 
 ## Changements
 

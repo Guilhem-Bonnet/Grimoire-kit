@@ -1,6 +1,6 @@
 <p align="right"><a href="../README.md">README</a> · <a href="../docs">Docs</a></p>
 
-# <img src="../docs/assets/icons/team.svg" width="32" height="32" alt=""> Selective Huddle Protocol (SHP) — Concertation Ciblée On-Demand
+# <img src="../docs/assets/icons/fleet.svg" width="32" height="32" alt=""> Selective Huddle Protocol (SHP) — Concertation Ciblée On-Demand
 
 > **BM-56** — Mini sessions de discussion entre 2-4 agents sélectionnés par pertinence,
 > déclenchées automatiquement ou manuellement, sans overhead d'un party mode complet.
@@ -21,7 +21,7 @@
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
 
-## <img src="../docs/assets/icons/temple.svg" width="28" height="28" alt=""> Architecture
+## <img src="../docs/assets/icons/layers.svg" width="28" height="28" alt=""> Architecture
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
@@ -117,7 +117,7 @@ auto_triggers:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/team.svg" width="28" height="28" alt=""> Types de Huddle
+## <img src="../docs/assets/icons/fleet.svg" width="28" height="28" alt=""> Types de Huddle
 
 ### Quick-Consult (2-3 agents, 3-5 échanges)
 
@@ -210,7 +210,7 @@ review:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/team.svg" width="28" height="28" alt=""> Sélection des Participants
+## <img src="../docs/assets/icons/fleet.svg" width="28" height="28" alt=""> Sélection des Participants
 
 ```yaml
 participant_selection:
@@ -244,7 +244,7 @@ participant_selection:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/team.svg" width="28" height="28" alt=""> Lifecycle d'un Huddle
+## <img src="../docs/assets/icons/fleet.svg" width="28" height="28" alt=""> Lifecycle d'un Huddle
 
 ```yaml
 lifecycle:
@@ -300,7 +300,7 @@ lifecycle:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration avec le Party Mode (PCE)
+## Intégration avec le Party Mode (PCE)
 
 ```yaml
 huddle_vs_party:
@@ -328,7 +328,7 @@ huddle_vs_party:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration Grimoire Trace
+## Intégration Grimoire Trace
 
 ```
 [timestamp] [orchestrator]   [SHP:trigger]    auto | condition=cvtl_challenge | topic="auth pattern"
@@ -342,7 +342,7 @@ huddle_vs_party:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Référence Croisée
+## <img src="../docs/assets/icons/doc.svg" width="28" height="28" alt=""> Référence Croisée
 
 - Agent Mesh Network : [framework/agent-mesh-network.md](agent-mesh-network.md) (BM-55) — découverte et P2P
 - Agent Relationship Graph : [framework/agent-relationship-graph.md](agent-relationship-graph.md) (BM-57) — sélection

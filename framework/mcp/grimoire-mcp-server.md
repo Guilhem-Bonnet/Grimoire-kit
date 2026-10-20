@@ -1,6 +1,6 @@
 <p align="right"><a href="../../README.md">README</a> · <a href="../../docs">Docs</a></p>
 
-# <img src="../../docs/assets/icons/server.svg" width="32" height="32" alt=""> Grimoire MCP Server — Obsolète
+# <img src="../../docs/assets/icons/container.svg" width="32" height="32" alt=""> Grimoire MCP Server — Obsolète
 
 > **BM-20 — Obsolète.** Cette fiche décrivait neuf outils fictifs et une roadmap « MCP v2
 > Sampling » qui ne correspondent pas au serveur réel. Sampling est déprécié dans la
