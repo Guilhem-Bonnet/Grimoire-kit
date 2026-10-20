@@ -170,6 +170,36 @@ def test_verify_rejects_unknown_tier(tmp_path: Path) -> None:
     assert not result.ok
 
 
+def test_verify_rejects_an_invocation_without_prompt_placeholder(tmp_path: Path) -> None:
+    """Issue #700 : l'exemple ``ollama run {model}`` du gabarit ne transmettait jamais le prompt."""
+    _write_registry(
+        tmp_path,
+        _TIERED_REGISTRY.replace('invocation: "claude -p {prompt} --model {model}"', 'invocation: "ollama run {model}"'),
+    )
+    (tmp_path / STANDARD / "standard-profile.yaml").write_text("profile: controlled\n", encoding="utf-8")
+
+    result = verify_standard_profile(tmp_path, profile_id="controlled")
+
+    failing = [check for check in result.checks if check.id == "providers.invocation_prompt_missing"]
+    assert failing and "anthropic" in failing[0].message and "{prompt}" in failing[0].message
+    assert not result.ok
+
+
+def test_template_invocation_examples_carry_the_prompt_placeholder() -> None:
+    """Issue #700 : tout exemple ``invocation:`` commenté du gabarit doit porter ``{prompt}``."""
+    from grimoire.data import framework_path
+
+    template = framework_path().parent / "framework" / "agentic-standard" / "templates" / "llm-provider-registry.yaml"
+    examples = [
+        line.split("invocation:", 1)[1].strip()
+        for line in template.read_text(encoding="utf-8").splitlines()
+        if line.lstrip().startswith("# invocation:")
+    ]
+    assert examples, "le gabarit n'a plus d'exemple d'invocation"
+    assert all("{prompt}" in example for example in examples), examples
+    assert not any("claude-sonnet-4" in line or "claude-opus-4" in line or "claude-haiku-4" in line for line in template.read_text(encoding="utf-8").splitlines())
+
+
 def test_verify_passes_with_valid_tiers_and_currency(tmp_path: Path) -> None:
     _write_registry(tmp_path, _TIERED_REGISTRY)
     (tmp_path / STANDARD / "standard-profile.yaml").write_text("profile: controlled\n", encoding="utf-8")

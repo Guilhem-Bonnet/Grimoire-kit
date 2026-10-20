@@ -328,6 +328,7 @@ CHECK_DIMENSIONS: dict[str, str] = {
     "providers.hosted_forbidden_missing": "provider_policy",
     "providers.id_missing": "provider_policy",
     "providers.invalid_entry": "provider_policy",
+    "providers.invocation_prompt_missing": "provider_policy",
     "providers.model_id_missing": "provider_policy",
     "providers.model_tier_invalid": "provider_policy",
     "providers.models_missing": "provider_policy",

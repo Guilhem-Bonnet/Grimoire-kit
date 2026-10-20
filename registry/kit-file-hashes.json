@@ -2122,6 +2122,10 @@
    "version": "3.4.2",
    "path": "framework/tools/agent-lint.py"
   },
+  "90b11bc3c06828ca5f494bc143a2d5923f75fc2fa8ff44de9d08c9a81757abe5": {
+   "version": "3.63.0",
+   "path": "framework/agentic-standard/templates/llm-provider-registry.yaml"
+  },
   "90d3eb2888f77d7a24d86742b59506801135606ad1068706909f7c4f15c936e1": {
    "version": "3.33.0",
    "path": "framework/hosts/commands/grimoire-doctor.md"
@@ -2157,6 +2161,10 @@
   "92db4f8d3104e6e69544817f7d2207df6606f8cea49a770353a4c183e4c7b876": {
    "version": "3.4.2",
    "path": "framework/tools/decision-log.py"
+  },
+  "93031a4579166e4f0936fafc4e72e22e6edbb8768e40b269d51766635ddf7fb0": {
+   "version": "3.63.0",
+   "path": "framework/agentic-standard/templates/llm-provider-registry.yaml"
   },
   "9460a0425ed146b54aca0671e5ebbb1a8230a577290086ab8aebc38a69820de9": {
    "version": "3.4.2",
