@@ -12,7 +12,7 @@ sans interruptions ni confirmations intempestives.
 <img src="../assets/divider.svg" width="100%" alt="">
 
 
-## <img src="../assets/icons/clipboard.svg" width="28" height="28" alt=""> Table des matières
+## <img src="../assets/icons/doc.svg" width="28" height="28" alt=""> Table des matières
 
 1. [Configuration rapide (copier-coller)](#1-configuration-rapide)
 2. [Auto-approbation des outils agents](#2-auto-approbation-des-outils-agents)
@@ -63,7 +63,7 @@ Ajouter ces settings dans **User Settings** (`Ctrl+Shift+P` → `Preferences: Op
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/team.svg" width="28" height="28" alt=""> 2. Auto-approbation des outils agents {#2-auto-approbation-des-outils-agents}
+## <img src="../assets/icons/fleet.svg" width="28" height="28" alt=""> 2. Auto-approbation des outils agents {#2-auto-approbation-des-outils-agents}
 
 Par défaut, VS Code demande confirmation à **chaque** appel d'outil par un agent
 (lecture de fichier, recherche, édition, terminal). Pour les agents Grimoire qui
@@ -229,7 +229,7 @@ complète**, pas juste le premier mot :
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/microscope.svg" width="28" height="28" alt=""> 4. Fichiers et éditions {#4-fichiers-et-éditions}
+## <img src="../assets/icons/search.svg" width="28" height="28" alt=""> 4. Fichiers et éditions {#4-fichiers-et-éditions}
 
 ### Désactiver les confirmations de création/édition de fichiers
 
@@ -302,7 +302,7 @@ pour basculer.
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/microscope.svg" width="28" height="28" alt=""> 6. Diff editor {#6-diff-editor}
+## <img src="../assets/icons/search.svg" width="28" height="28" alt=""> 6. Diff editor {#6-diff-editor}
 
 ### Algorithme arrêté trop tôt
 
@@ -323,7 +323,7 @@ Cause : VS Code coupe le calcul de diff après 5 secondes par défaut.
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/network.svg" width="28" height="28" alt=""> 7. Réseau et VPN {#7-réseau-et-vpn}
+## <img src="../assets/icons/graph.svg" width="28" height="28" alt=""> 7. Réseau et VPN {#7-réseau-et-vpn}
 
 ### ERR_CONNECTION_CLOSED
 

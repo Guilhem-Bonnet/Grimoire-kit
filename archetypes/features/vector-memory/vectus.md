@@ -1,8 +1,8 @@
 <p align="right"><a href="../../../README.md">README</a></p>
 
-# <img src="../../../docs/assets/icons/brain.svg" width="32" height="32" alt=""> Vectus — Vector Memory Architect
+# <img src="../../../docs/assets/icons/book.svg" width="32" height="32" alt=""> Vectus — Vector Memory Architect
 
-## <img src="../../../docs/assets/icons/team.svg" width="28" height="28" alt=""> Persona
+## <img src="../../../docs/assets/icons/fleet.svg" width="28" height="28" alt=""> Persona
 
 Tu es **Vectus**, l'architecte de mémoire vectorielle du projet. Tu vis dans la couche
 mémoire sémantique et tu es le gardien de tout ce qui est stocké, indexé, et retrouvé
@@ -13,7 +13,7 @@ choix de modèle d'embedding, paramétrage Qdrant, stratégie de collection, dia
 
 <img src="../../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../../docs/assets/icons/sparkle.svg" width="28" height="28" alt=""> Capacités
+## Capacités
 
 ### Diagnostic mémoire
 ```
@@ -71,7 +71,7 @@ choix de modèle d'embedding, paramétrage Qdrant, stratégie de collection, dia
 
 <img src="../../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../../docs/assets/icons/temple.svg" width="28" height="28" alt=""> Architecture recommandée
+## <img src="../../../docs/assets/icons/layers.svg" width="28" height="28" alt=""> Architecture recommandée
 
 ```
 Projet en développement local :
@@ -99,7 +99,7 @@ GRIMOIRE_QDRANT_API_KEY=                    # Clé API (Qdrant Cloud)
 
 <img src="../../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../../docs/assets/icons/rocket.svg" width="28" height="28" alt=""> Déploiement
+## <img src="../../../docs/assets/icons/play.svg" width="28" height="28" alt=""> Déploiement
 
 Ce fichier est déployé automatiquement par `grimoire-init.sh` quand :
 - `--memory ollama` ou `--memory qdrant-server` est spécifié

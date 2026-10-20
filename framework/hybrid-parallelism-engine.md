@@ -1,6 +1,6 @@
 <p align="right"><a href="../README.md">README</a> · <a href="../docs">Docs</a></p>
 
-# <img src="../docs/assets/icons/cognition.svg" width="32" height="32" alt=""> Hybrid Parallelism Engine (HPE) — Orchestration Parallèle Adaptative
+# Hybrid Parallelism Engine (HPE) — Orchestration Parallèle Adaptative
 
 > **BM-58** — Moteur de parallélisme hybride qui combine exécution séquentielle, parallèle,
 > et opportuniste selon la nature des tâches et la disponibilité des agents.
@@ -21,7 +21,7 @@
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
 
-## <img src="../docs/assets/icons/temple.svg" width="28" height="28" alt=""> Architecture
+## <img src="../docs/assets/icons/layers.svg" width="28" height="28" alt=""> Architecture
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
@@ -58,7 +58,7 @@
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> DAG de Tâches — Définition
+## DAG de Tâches — Définition
 
 ### Syntaxe YAML
 
@@ -151,7 +151,7 @@
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/cognition.svg" width="28" height="28" alt=""> Modes d'Exécution
+## Modes d'Exécution
 
 ### Parallel (défaut pour tâches sans dépendances)
 
@@ -221,7 +221,7 @@ opportunistic_mode:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> Chemin Critique — Optimisation
+## Chemin Critique — Optimisation
 
 ```yaml
 critical_path:
@@ -250,7 +250,7 @@ critical_path:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/resilience.svg" width="28" height="28" alt=""> Gestion des Échecs
+## <img src="../docs/assets/icons/refresh.svg" width="28" height="28" alt=""> Gestion des Échecs
 
 ```yaml
 failure_handling:
@@ -321,7 +321,7 @@ checkpoints:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/chart.svg" width="28" height="28" alt=""> Visualisation du DAG
+## <img src="../docs/assets/icons/board.svg" width="28" height="28" alt=""> Visualisation du DAG
 
 L'utilisateur peut demander une vue du DAG :
 
@@ -356,7 +356,7 @@ Parallel workers: 1/5 active
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration avec les Protocoles Existants
+## Intégration avec les Protocoles Existants
 
 | Protocole | Utilisation dans HPE |
 |-----------|---------------------|
@@ -373,7 +373,7 @@ Parallel workers: 1/5 active
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration Grimoire Trace
+## Intégration Grimoire Trace
 
 ```
 [timestamp] [HPE]            [HPE:build-dag]   tasks=8 | layers=5 | critical_path=4
@@ -388,7 +388,7 @@ Parallel workers: 1/5 active
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Référence Croisée
+## <img src="../docs/assets/icons/doc.svg" width="28" height="28" alt=""> Référence Croisée
 
 - Subagent Orchestration : [framework/workflows/subagent-orchestration.md](workflows/subagent-orchestration.md) (BM-19)
 - Boomerang Orchestration : [framework/workflows/boomerang-orchestration.md](workflows/boomerang-orchestration.md) (BM-11)

@@ -1,6 +1,6 @@
 <p align="right"><a href="../README.md">README</a> · <a href="../docs">Docs</a></p>
 
-# <img src="../docs/assets/icons/shield-pulse.svg" width="32" height="32" alt=""> Honest Uncertainty Protocol (HUP) — Incertitude déclarée
+# <img src="../docs/assets/icons/shield.svg" width="32" height="32" alt=""> Honest Uncertainty Protocol (HUP) — Incertitude déclarée
 
 > **BM-50** — Ce qu'un agent Grimoire fait de ce qu'il ne sait pas.
 >
@@ -12,7 +12,7 @@
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Règle
+## <img src="../docs/assets/icons/doc.svg" width="28" height="28" alt=""> Règle
 
 Tout chiffre, tout verdict et toute affirmation sur un fichier cite la commande réellement
 exécutée ou le chemin lu (fichier:ligne). Ce qui n'a été ni lu ni mesuré s'écrit
@@ -22,7 +22,7 @@ comble le vide.
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/cognition.svg" width="28" height="28" alt=""> Le bloc d'incertitudes
+## Le bloc d'incertitudes
 
 Chaque réponse d'une persona routée ou d'un ouvrier headless se termine par :
 
@@ -78,7 +78,7 @@ protocoles — jamais une couleur de confiance.
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/shield-pulse.svg" width="28" height="28" alt=""> Anti-évitement
+## <img src="../docs/assets/icons/shield.svg" width="28" height="28" alt=""> Anti-évitement
 
 Le droit à l'incertitude ne dispense jamais d'une tâche gourmande :
 
@@ -89,7 +89,7 @@ Le droit à l'incertitude ne dispense jamais d'une tâche gourmande :
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration
+## Intégration
 
 - Question Escalation Chain (BM-51) : reçoit les Uncertainty Reports et en extrait les questions.
 - Cross-Validation Trust Layer (BM-52) : une réponse avec incertitudes déclarées est candidate à la relecture croisée ; un point bloquant déclaré l'impose.

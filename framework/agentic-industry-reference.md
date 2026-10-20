@@ -1,6 +1,6 @@
 <p align="right"><a href="../README.md">README</a> · <a href="../docs">Docs</a></p>
 
-# <img src="../docs/assets/icons/microscope.svg" width="32" height="32" alt=""> Référence agentique — état de l'art industriel
+# <img src="../docs/assets/icons/search.svg" width="32" height="32" alt=""> Référence agentique — état de l'art industriel
 
 > Chargé à la demande par tout agent ou workflow Grimoire qui conçoit, arbitre ou
 > révise un workflow agentique. Ce fichier condense la documentation officielle des
@@ -35,7 +35,7 @@
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> 0. Comment lire et utiliser ce fichier
+## <img src="../docs/assets/icons/doc.svg" width="28" height="28" alt=""> 0. Comment lire et utiliser ce fichier
 
 ### Niveaux de preuve
 
@@ -74,7 +74,7 @@ que si son étiquette le permet.
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/temple.svg" width="28" height="28" alt=""> 1. Boussole : douze règles opposables
+## <img src="../docs/assets/icons/layers.svg" width="28" height="28" alt=""> 1. Boussole : douze règles opposables
 
 Ces règles sont celles sur lesquelles au moins deux sources primaires indépendantes
 s'accordent. Elles priment sur toute préférence locale non justifiée.
@@ -96,7 +96,7 @@ s'accordent. Elles priment sur toute préférence locale non justifiée.
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> 2. Catalogue des patterns de workflow
+## 2. Catalogue des patterns de workflow
 
 ### 2.1 Patterns fondamentaux (consensus des trois laboratoires)
 
@@ -170,7 +170,7 @@ Chiffres lus dans les articles, dans le cadre de leur expérience.
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/brain.svg" width="28" height="28" alt=""> 3. Contexte, mémoire, harness
+## <img src="../docs/assets/icons/book.svg" width="28" height="28" alt=""> 3. Contexte, mémoire, harness
 
 ### 3.1 Principes de context engineering
 
@@ -231,7 +231,7 @@ est en revue (SEP-2640).
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/plug.svg" width="28" height="28" alt=""> 4. Outils et protocoles d'interopérabilité
+## <img src="../docs/assets/icons/link.svg" width="28" height="28" alt=""> 4. Outils et protocoles d'interopérabilité
 
 ### 4.1 Conception des outils : règles chiffrées
 
@@ -327,7 +327,7 @@ raison.
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/shield-pulse.svg" width="28" height="28" alt=""> 5. Sécurité, identité, gouvernance
+## <img src="../docs/assets/icons/shield.svg" width="28" height="28" alt=""> 5. Sécurité, identité, gouvernance
 
 ### 5.1 Patterns de défense prouvés
 
@@ -431,7 +431,7 @@ audience liée, chaîne de délégation auditable, aucun passthrough.
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/chart.svg" width="28" height="28" alt=""> 6. Évaluations, observabilité, benchmarks
+## <img src="../docs/assets/icons/board.svg" width="28" height="28" alt=""> 6. Évaluations, observabilité, benchmarks
 
 ### 6.1 Doctrine d'évaluation
 
@@ -532,7 +532,7 @@ n'expose pas son coût par tâche résolue n'est pas pilotable.
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/resilience.svg" width="28" height="28" alt=""> 8. Modes de défaillance documentés
+## <img src="../docs/assets/icons/refresh.svg" width="28" height="28" alt=""> 8. Modes de défaillance documentés
 
 ### 8.1 MAST : quatorze modes, prévalence mesurée `[papier]`
 
@@ -583,7 +583,7 @@ conditions d'arrêt) sont des défauts de harness, pas de modèle.
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/sparkle.svg" width="28" height="28" alt=""> 9. Frontière 2026 : prometteur mais non stabilisé
+## 9. Frontière 2026 : prometteur mais non stabilisé
 
 À suivre, à expérimenter derrière un flag, à ne pas prendre pour acquis.
 
@@ -603,7 +603,7 @@ conditions d'arrêt) sont des défauts de harness, pas de modèle.
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/handshake.svg" width="28" height="28" alt=""> 10. Correspondance Grimoire ↔ industrie
+## <img src="../docs/assets/icons/handoff.svg" width="28" height="28" alt=""> 10. Correspondance Grimoire ↔ industrie
 
 Mise à jour 2026-09-12, audit de positionnement (`docs/audits/positionnement-2026-09-12.md`),
 suite à la version 3.41.0 → 3.45.0. Statuts : **aligné** (même pratique, même
@@ -652,7 +652,7 @@ Grimoire-kit (jamais comme chantiers d'atelier) :
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/folder-tree.svg" width="28" height="28" alt=""> 11. Registre des sources
+## <img src="../docs/assets/icons/layers.svg" width="28" height="28" alt=""> 11. Registre des sources
 
 Pages lues le 2026-09-08 sauf mention. Les pages inaccessibles ce jour sont listées à
 la fin avec la meilleure URL connue.

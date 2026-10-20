@@ -1,4 +1,4 @@
-name: "🐛 Bug report"
+name: "Bug report"
 description: "Signaler un bug dans grimoire-init.sh, un hook, ou un archétype"
 title: "fix: [COMPOSANT] Description courte"
 labels: ["bug", "triage"]
@@ -8,7 +8,7 @@ body:
     attributes:
       value: |
         Merci de remplir ce formulaire aussi complètement que possible.
-        **Avant de soumettre**, assurez-vous d'avoir lancé `bash grimoire-init.sh doctor`.
+        **Avant de soumettre**, assurez-vous d'avoir lancé `grimoire doctor`.
 
   - type: dropdown
     id: component
@@ -41,7 +41,7 @@ body:
   - type: textarea
     id: doctor-output
     attributes:
-      label: Output de `grimoire-init.sh doctor`
+      label: Output de `grimoire doctor`
       description: "Collez le résultat complet ici"
       render: shell
     validations:
