@@ -168,10 +168,13 @@ def unexploited_hints(
     effective_profile = layer_profile or ("lexical" if backend in _UNUPGRADED_BACKENDS else "standard")
     upgrade_to = memory_upgrade_target(effective_profile, probes=memory_probes)
     if upgrade_to:
+        # Same command `grimoire init`'s report prints: the server-backed
+        # compositions need `--start` to actually come up, not just a config.
+        start_flag = " --start" if upgrade_to in ("graphe", "complet") else ""
         hints.append(
             CapabilityHint(
                 f"memory profile '{effective_profile}' is below what this machine can serve ({upgrade_to})",
-                f"grimoire memory up --profile {upgrade_to} --apply",
+                f"grimoire memory up --profile {upgrade_to}{start_flag} --apply",
             )
         )
 
@@ -187,10 +190,10 @@ def unexploited_hints(
 
 
 def discover_footer_line(hints: list[CapabilityHint]) -> str | None:
-    """The 'Découvrir' footer for ``grimoire doctor``/``status`` — ``None`` when
+    """The 'Discover' footer for ``grimoire doctor``/``status`` — ``None`` when
     *hints* is empty, so the footer stays silent once everything is exploited.
     """
     if not hints:
         return None
     commands = " · ".join(f"`{h.command}`" for h in hints)
-    return f"Découvrir : {commands}"
+    return f"Discover: {commands}"

@@ -61,7 +61,7 @@ class TestUnexploitedHints:
             hints = pc.unexploited_hints(
                 tmp_path, archetype="web-app", backend="qdrant-local", layer_profile="standard"
             )
-        assert [h.command for h in hints] == ["grimoire memory up --profile complet --apply"]
+        assert [h.command for h in hints] == ["grimoire memory up --profile complet --start --apply"]
         assert "'standard'" in hints[0].label
 
     def test_footer_line_is_empty_without_hints(self) -> None:
