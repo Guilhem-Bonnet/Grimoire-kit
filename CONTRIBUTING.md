@@ -326,14 +326,14 @@ commentaire en tête du `Cargo.toml` du crate.
 1. Créer `src/grimoire/tools/mon_outil.py` avec une classe publique
 2. Exporter dans `src/grimoire/tools/__init__.py`
 3. Créer `tests/unit/tools/test_mon_outil.py`
-4. Documenter dans `docs/sdk-guide.md`
+4. Documenter dans `docs/guides/sdk-python.md`
 
 ## Ajouter une commande CLI
 
 1. Créer `src/grimoire/cli/cmd_xxx.py` avec les fonctions métier
 2. Ajouter la commande dans `src/grimoire/cli/app.py`
 3. Créer `tests/unit/cli/test_cmd_xxx.py`
-4. Documenter dans `docs/getting-started.md` (table CLI)
+4. Documenter dans `docs/tutoriels/premier-projet.md` (table CLI)
 
 ## Ajouter un archétype
 

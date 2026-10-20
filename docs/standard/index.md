@@ -25,13 +25,13 @@ cette section décrit ce à quoi il vous engage quand vous activez le standard.
 
 <div class="grid cards" markdown>
 
-- **[Intégration](integration.md)**
+- **[Intégration](../guides/rendre-la-preuve-bloquante.md)**
 
     Comment le kit se branche sur le corpus normatif, qui fait autorité sur
     quoi, et où vit le pont. À lire en premier pour comprendre le
     positionnement.
 
-- **[Installation par besoins](install-by-needs.md)**
+- **[Installation par besoins](../guides/installer-par-besoins.md)**
 
     Vous déclarez ce que le projet doit faire ; le runtime résout le profil,
     les patterns, les artefacts à générer et les extras `pip` à installer.
@@ -73,7 +73,7 @@ soit.
 | `grimoire standard fix [--apply]` | planifier ou appliquer les correctifs sûrs |
 
 La référence complète des options est dans le manuel, page
-[CLI](../cli-reference.md).
+[CLI](../reference/cli/index.md).
 
 ## Ce qui n'est pas ici
 
