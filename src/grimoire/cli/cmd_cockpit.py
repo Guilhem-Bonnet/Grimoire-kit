@@ -259,11 +259,70 @@ def _run_memory_in_process(proot: Path, argv: list[str]) -> _CliResult:
         pool.shutdown(wait=False)
 
 
+class _CountingReader:
+    """``rfile`` qui compte les octets lus — pour savoir ce qu'il reste du corps.
+
+    ``http.client`` envoie l'en-tête et le corps en deux ``send`` distincts ;
+    sous charge, le serveur peut parser l'en-tête, refuser (403/404), répondre
+    et fermer avant que le corps n'arrive. Le corps atteint alors un socket
+    fermé : RST, que Windows répercute au client en jetant la réponse déjà
+    reçue (``WinError 10053``, #857). Compter ce qui a été lu permet à
+    :meth:`_CockpitHandler._drain_unread_body` de consommer *exactement* le
+    reste déclaré par ``Content-Length`` avant de répondre, sans jamais
+    bloquer sur un corps déjà lu.
+    """
+
+    def __init__(self, raw: Any) -> None:
+        self._raw = raw
+        self.consumed = 0
+
+    def read(self, *args: Any) -> bytes:
+        data: bytes = self._raw.read(*args)
+        self.consumed += len(data)
+        return data
+
+    def readline(self, *args: Any) -> bytes:
+        data: bytes = self._raw.readline(*args)
+        self.consumed += len(data)
+        return data
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._raw, name)
+
+
 class _CockpitHandler(SimpleHTTPRequestHandler):
     """Static file server + a tiny POST ``/api/memory`` governance endpoint."""
 
     def log_message(self, *args: object) -> None:
         return  # quiet by default
+
+    def setup(self) -> None:
+        super().setup()
+        self.rfile = _CountingReader(self.rfile)  # type: ignore[assignment]
+
+    def parse_request(self) -> bool:
+        ok = super().parse_request()
+        # Les octets lus jusqu'ici sont la ligne de requête et les en-têtes ;
+        # à partir de maintenant, le compteur ne mesure que le corps.
+        cast(_CountingReader, self.rfile).consumed = 0
+        return ok
+
+    def _drain_unread_body(self) -> None:
+        """Lit le reste du corps déclaré avant toute réponse (#857).
+
+        Une réponse émise puis fermée pendant que le corps est encore en
+        vol provoque un RST côté serveur ; sous Windows le client perd la
+        réponse (``ConnectionAbortedError``). Le reste est borné par
+        ``Content-Length`` et ignoré, jamais interprété.
+        """
+        rfile = cast(_CountingReader, self.rfile)
+        try:
+            declared = int(self.headers.get("Content-Length") or 0)
+        except (ValueError, TypeError):
+            return
+        remaining = declared - rfile.consumed
+        if remaining > 0:
+            drain_body({"Content-Length": str(remaining)}, rfile)
 
     def _local_only(self) -> bool:
         """Le cockpit ne répond qu'à sa propre UI, sur la loopback.
@@ -304,12 +363,26 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         return True
 
     def _send_json(self, code: int, payload: dict[str, object]) -> None:
+        # Le corps de la requête est lu en entier avant la première ligne de
+        # réponse (#857) ; la connexion est fermée après cette réponse
+        # (``HTTP/1.0``), l'en-tête le dit au client, et le tampon est vidé
+        # avant que ``finish`` ne ferme le socket.
+        self._drain_unread_body()
         body = json.dumps(payload).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(body)
+        self.wfile.flush()
+
+    def send_error(self, code: int, message: str | None = None, explain: str | None = None) -> None:
+        # Même contrat pour les refus de ``http.server`` lui-même (501, 404
+        # statique) : le corps en vol est consommé avant de répondre.
+        if self.command and hasattr(self, "headers"):
+            self._drain_unread_body()
+        super().send_error(code, message, explain)
 
     # ── Lectures : registre + API projet, repli statique ──────────────────
 
