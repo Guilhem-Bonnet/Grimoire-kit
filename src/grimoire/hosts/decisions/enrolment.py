@@ -22,7 +22,9 @@ en lecture seule dégradent en « rien rattaché », jamais en session cassée.
 from __future__ import annotations
 
 import contextlib
+import re
 import subprocess
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
@@ -190,6 +192,65 @@ def link_session(hook: HookInput, active: ActiveTask) -> dict[str, Any]:
             note_session_task(
                 hook.project_root, hook.session_id, task.id, now_iso=now_iso, lease_epoch=claim.lease_epoch
             )
+    except Exception:
+        return out
+    return out
+
+
+#: ``grimoire task claim <id>`` sur une ligne de commande — le premier mot après ``claim``.
+_CLAIM_COMMAND = re.compile(r"(?:^|[;&|]\s*)grimoire\s+task\s+claim\s+([A-Za-z0-9._-]+)")
+
+
+def claimed_task_in_call(tool_name: str, tool_input: Mapping[str, Any]) -> str:
+    """La tâche qu'un appel d'outil vient de réclamer — ``""`` si l'appel n'est pas un claim.
+
+    Deux formes, celles que :mod:`.pause_brake` connaît déjà : la CLI dans un
+    shell (``grimoire task claim <id>``) et l'outil MCP ``task_claim`` (nom
+    d'outil ``mcp__<serveur>__task_claim``, ``task_id`` dans ses arguments).
+    """
+    if tool_name.startswith("mcp__") and tool_name.endswith("task_claim"):
+        return str(tool_input.get("task_id", "") or "").strip()
+    command = tool_input.get("command")
+    if isinstance(command, str):
+        match = _CLAIM_COMMAND.search(command)
+        if match:
+            return match.group(1)
+    return ""
+
+
+def link_agent_claim(hook: HookInput) -> dict[str, Any]:
+    """Rattache le claim qu'un sous-agent vient de prendre à son ``agent_id`` (issue #698).
+
+    Un sous-agent hérite du ``session_id`` de son parent et ne peut pas poser
+    ``GRIMOIRE_ACTOR`` pour ses propres hooks : seul le ``PostToolUse`` qui
+    observe son ``task claim`` connaît à la fois la tâche et l'``agent_id`` que
+    l'hôte met dans le payload. Le claim apprend cet identifiant par un
+    événement ``task.session_attached`` de plus, et la résolution de la tâche
+    active le rend ensuite à ce sous-agent seul. Rien n'est écrit sans
+    ``agent_id`` ni ``session_id`` dans le payload, si l'appel n'est pas un
+    claim, si la tâche n'a pas de claim ou si son claim est tenu par une autre
+    session — et jamais une erreur : le claim, lui, a réussi.
+    """
+    out: dict[str, Any] = {"agent_claim_attached": False, "task_id": ""}
+    if not hook.agent_id or not hook.session_id:
+        return out
+    task_id = claimed_task_in_call(hook.tool_name, hook.tool_input)
+    if not task_id:
+        return out
+    out["task_id"] = task_id
+    try:
+        from grimoire.missions.service import TaskService
+
+        service = TaskService(hook.project_root)
+        task = service.ledger.get_task(task_id)
+        if task is None or task.claim is None or task.claim.agent_id:
+            return out
+        if task.claim.session_id and task.claim.session_id != hook.session_id:
+            return out
+        service.attach_session(
+            task_id, hook.session_id, session_host=hook.host, actor=task.claim.actor_id, agent_id=hook.agent_id
+        )
+        out["agent_claim_attached"] = True
     except Exception:
         return out
     return out

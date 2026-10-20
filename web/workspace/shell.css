@@ -41,6 +41,43 @@ select {
   color: inherit;
 }
 
+/* Contrôles natifs : sans fond ni encre posés, le navigateur peint les siens
+ * (fond blanc, texte noir) et la liste déroulante ignore le thème sombre. */
+select,
+option,
+input,
+textarea {
+  background-color: var(--card);
+  color: var(--ink);
+}
+
+option {
+  background-color: var(--overlay);
+}
+
+input:disabled,
+select:disabled,
+textarea:disabled {
+  background-color: var(--hover);
+  color: var(--ink3);
+  border-style: dashed;
+  cursor: not-allowed;
+}
+
+/* Un bouton désactivé ne ressemble pas à un bouton actif : fond retiré,
+ * bordure en tirets, encre secondaire (--ink3, 4,5:1 minimum sur --card). */
+.btn:disabled,
+.btn:disabled:hover,
+.btn.pri:disabled,
+.btn.on:disabled,
+.btn[aria-pressed="true"]:disabled {
+  background: transparent;
+  border-style: dashed;
+  border-color: var(--line);
+  color: var(--ink3);
+  cursor: not-allowed;
+}
+
 :focus-visible {
   outline: 2px solid var(--acc);
   outline-offset: 1px;
@@ -385,8 +422,8 @@ body[data-active-space="source"] {
 
 /* Désactivé sans transparence : l'opacité faisait tomber --ink3 sous 4,5:1
  * (mesuré par test_workspace_tokens.py). La différence se lit à la couleur
- * d'encre et au curseur, pas à un fondu. */
-.btn:disabled,
+ * d'encre et au curseur, pas à un fondu. Le bouton désactivé (`.btn:disabled`)
+ * suit la règle Douce plus haut : fond retiré, bordure en tirets, --ink3. */
 .chip:disabled {
   color: var(--ink3);
   background: var(--e1);
@@ -394,8 +431,10 @@ body[data-active-space="source"] {
 }
 
 /* Sélecteur compact (barre d'état) : même `.seg`, plus bas que les 28 px. */
+/* Variante compacte (barre d'état) : 26 px bord compris, soit des boutons de
+ * 24 px, la cible minimale (WCAG 2.5.8, test_workspace_target_size.py). */
 .seg-s {
-  height: 22px;
+  height: 26px;
 }
 
 .seg-s > button {
@@ -828,6 +867,10 @@ body[data-active-space] .panel-head {
   color: var(--ink3);
   cursor: pointer;
   display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  min-height: 24px;
   padding: 2px;
 }
 
