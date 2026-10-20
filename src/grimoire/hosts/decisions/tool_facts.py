@@ -252,6 +252,127 @@ def command_surface(command: str) -> str:
     return "".join(out)
 
 
+# ── Interpreted code (issue #724, §2) ────────────────────────────────────────
+#
+# ``python3 - <<'EOF' … shutil.rmtree("/x") … EOF`` used to pass with no
+# warning while ``rm -rf /x`` was refused: :func:`_strip_heredoc_bodies`
+# treats every heredoc body as data, but a body an *interpreter* reads on its
+# stdin is executed. Same for ``python -c "…"``, ``node -e "…"``,
+# ``perl -e``, ``ruby -e``, which :func:`command_surface` blanks as quoted
+# prose. Those bodies are collected here, inspected against a per-language
+# set of destructive calls plus the shell patterns (``os.system("rm -rf …")``),
+# and the call is at least *named* as interpreted code when nothing matches.
+
+#: The interpreter that will execute what follows (heredoc on stdin, or a
+#: ``-c``/``-e`` body), and the language label it is reported under.
+_INTERPRETERS: tuple[tuple[str, str], ...] = (
+    (r"python[0-9.]*", "python"),
+    (r"node|nodejs|deno|bun", "javascript"),
+    (r"perl", "perl"),
+    (r"ruby", "ruby"),
+    (r"php", "php"),
+    (r"bash|sh|zsh|dash|ksh|ash", "shell"),
+)
+_INTERPRETER_WORD = "|".join(pattern for pattern, _ in _INTERPRETERS)
+#: ``<interp> [flags] -`` or ``<interp>`` as the last word before ``<<TAG`` /
+#: after ``| `` on the opening line: the heredoc is its stdin.
+_STDIN_INTERPRETER_RE = re.compile(
+    rf"(?:^|[\s;&|(])(?:\S*/)?(?P<interp>{_INTERPRETER_WORD})(?:\s+-[A-Za-z]+)*(?:\s+-)?\s*$"
+)
+#: ``<interp> [flags] -c|-e <body>`` — the body is executed.
+_INLINE_INTERPRETER_RE = re.compile(
+    rf"(?:^|[\s;&|(])(?:\S*/)?(?P<interp>{_INTERPRETER_WORD})(?:\s+-[A-Za-z]+)*\s+-[A-Za-z]*[ce]\s*$"
+)
+
+#: What a body must contain to be a destructive action, per language family
+#: (``*`` applies to every body: an embedded shell string).
+_INTERPRETED_DESTRUCTIVE: tuple[tuple[str, str, str], ...] = (
+    ("python", r"\bshutil\s*\.\s*rmtree\s*\(", "recursive delete (shutil.rmtree)"),
+    ("python", r"\bos\s*\.\s*(?:remove|unlink|rmdir|removedirs)\s*\(", "file delete (os.remove/unlink/rmdir)"),
+    ("python", r"\.\s*(?:unlink|rmdir)\s*\(", "file delete (Path.unlink/rmdir)"),
+    ("python", r"\bsend2trash\s*\(", "file delete (send2trash)"),
+    (
+        "javascript",
+        r"(?:\bfs(?:\.promises)?|\))\s*\.\s*(?:rm|rmSync|rmdir|rmdirSync|unlink|unlinkSync)\s*\(",
+        "file delete (fs.rm*)",
+    ),
+    ("javascript", r"\brimraf\b", "recursive delete (rimraf)"),
+    ("javascript", r"\bDeno\s*\.\s*remove(?:Sync)?\s*\(", "file delete (Deno.remove)"),
+    ("perl", r"\b(?:unlink|rmdir|rmtree|remove_tree)\b", "file delete (unlink/rmtree)"),
+    ("ruby", r"\bFileUtils\s*\.\s*(?:rm_rf|rm_r|rm_f|rm|remove_dir|rmtree)\b", "recursive delete (FileUtils.rm_rf)"),
+    ("ruby", r"\b(?:File|Dir)\s*\.\s*(?:delete|unlink|rmdir)\b", "file delete (File.delete)"),
+    ("php", r"\b(?:unlink|rmdir)\s*\(", "file delete (unlink/rmdir)"),
+)
+
+
+def _label_for(interp: str) -> str:
+    for pattern, label in _INTERPRETERS:
+        if re.fullmatch(pattern, interp):
+            return label
+    return interp
+
+
+def interpreted_bodies(command: str) -> tuple[tuple[str, str], ...]:
+    """``(language, body)`` for every piece of *command* an interpreter will run.
+
+    Heredocs whose opening line ends in an interpreter reading stdin
+    (``python3 - <<'EOF'``, ``cat <<EOF | node``), and ``-c``/``-e`` bodies
+    of the same interpreters. A heredoc redirected to a file (``cat > f
+    <<EOF``) is data and is not returned.
+    """
+    found: list[tuple[str, str]] = []
+    for match in _HEREDOC_OPEN_RE.finditer(command):
+        line_end = command.find("\n", match.end())
+        if line_end < 0:
+            continue
+        opening = command[:match.start()]
+        rest_of_line = command[match.end():line_end]
+        tag = re.escape(match.group(2))
+        body_re = re.compile(rf"^(.*?)^[ \t]*{tag}[ \t]*$", re.DOTALL | re.MULTILINE)
+        body_match = body_re.match(command, line_end + 1)
+        if body_match is None:
+            continue
+        body = body_match.group(1)
+        consumer = _STDIN_INTERPRETER_RE.search(opening.rstrip())
+        if consumer is None:
+            piped = re.search(r"\|\s*(.*)$", rest_of_line)
+            consumer = _STDIN_INTERPRETER_RE.search(piped.group(1).rstrip()) if piped else None
+        if consumer is not None and body.strip():
+            found.append((_label_for(consumer.group("interp")), body))
+    surface_source = _strip_heredoc_bodies(command)
+    cursor = 0
+    for quoted in _QUOTED_RE.finditer(surface_source):
+        preceding = surface_source[cursor:quoted.start()]
+        cursor = quoted.end()
+        inline = _INLINE_INTERPRETER_RE.search(preceding.rstrip())
+        inner = quoted.group(0)[1:-1]
+        if inline is not None and inner.strip():
+            found.append((_label_for(inline.group("interp")), inner))
+    return tuple(found)
+
+
+#: A non-shell body hands a string to a shell through one of these; only then
+#: are the shell patterns read inside it — a python string that merely
+#: *documents* ``rm -rf`` (a changelog written through a heredoc) is data.
+_EXEC_CALL_RE = re.compile(
+    r"\b(?:os\.system|os\.popen|subprocess\.\w+|execSync|spawnSync|execFileSync|child_process\.\w+|"
+    r"system|exec|spawn|popen|shell_exec|passthru|backtick)\s*\("
+)
+
+
+def interpreted_destructive_reason(bodies: tuple[tuple[str, str], ...]) -> str:
+    """The first destructive call found in interpreted *bodies*, or ``""``."""
+    for language, body in bodies:
+        for lang, pattern, label in _INTERPRETED_DESTRUCTIVE:
+            if lang == language and re.search(pattern, body):
+                return f"{label} — code {language} interprété"
+        if language == "shell" or _EXEC_CALL_RE.search(body):
+            for pattern, label in _DESTRUCTIVE_PATTERNS:
+                if re.search(pattern, body, flags=re.IGNORECASE):
+                    return f"{label} — code {language} interprété"
+    return ""
+
+
 #: Same shape as ``_EVAL_INTRODUCER`` but reaching further: also matches the
 #: python interpreters (whose ``-c`` argument is executed as python, not
 #: shell — ``_EVAL_INTRODUCER`` deliberately leaves them out, so
@@ -312,6 +433,11 @@ class ToolFacts:
     targets: tuple[str, ...] = ()
     destructive_reason: str = ""
     secret_target: str = ""
+    #: Languages whose code this call executes from a heredoc or a ``-c``/``-e``
+    #: body (``"python"``, ``"javascript, shell"``…), ``""`` when none (#724).
+    #: Only the known destructive calls are inspected inside; the policy
+    #: names the rest as interpreted code it did not read.
+    interpreted_code: str = ""
     #: Governance profile guard (issue tracked in ``fix/profile-downgrade-guard``):
     #: ``None`` when this call does not mutate
     #: ``_grimoire/standard/standard-profile.yaml`` at all. ``""`` when it does,
@@ -474,17 +600,24 @@ def classify_tool(tool_name: str, tool_input: dict[str, Any] | None = None) -> T
     targets = _target_paths(payload)
     # Each candidate is matched on its own: joining them first turns the start
     # of a path into the middle of a blob, and ``.env`` stops looking like a
-    # path anchor.
-    candidates = [c.lower() for c in (command, *targets) if c]
+    # path anchor. The command is read *raw* on purpose — ``cat ".env"`` must
+    # stay a secret read — except for heredoc bodies the command only writes
+    # (``gh issue create --body-file - <<EOF``: data, not a read, #724) ; a
+    # body an interpreter executes is read on its own below. Case is kept and
+    # the match is case-insensitive instead of lower-casing: the env-file
+    # suffix rule relies on it (``.env.CLAUDE_CODE_TMPDIR`` is a jq field).
+    interpreted = interpreted_bodies(command) if command else ()
+    candidates = [c for c in (_strip_heredoc_bodies(command) if command else "", *targets) if c]
+    candidates.extend(body for _, body in interpreted)
 
     secret_target = ""
     for candidate in candidates:
         for pattern in secret_patterns():
-            match = re.search(pattern, candidate)
+            match = re.search(pattern, candidate, flags=re.IGNORECASE)
             if match:
                 # Report the fragment that matched, not the whole command line:
                 # the refusal must name the credential, not echo the shell.
-                secret_target = match.group(0).strip().strip("'\"=")
+                secret_target = match.group(0).strip().strip("'\"=").lower()
                 break
         if secret_target:
             break
@@ -496,6 +629,9 @@ def classify_tool(tool_name: str, tool_input: dict[str, Any] | None = None) -> T
             if re.search(pattern, surface, flags=re.IGNORECASE):
                 destructive_reason = label
                 break
+        if not destructive_reason and interpreted:
+            destructive_reason = interpreted_destructive_reason(interpreted)
+    interpreted_code = ", ".join(sorted({language for language, _ in interpreted}))
 
     is_execute = bool(command) or any(marker in name for marker in _EXECUTE_MARKERS)
     is_write = any(marker in name for marker in _WRITE_MARKERS)
@@ -561,6 +697,7 @@ def classify_tool(tool_name: str, tool_input: dict[str, Any] | None = None) -> T
         targets=targets,
         destructive_reason=destructive_reason,
         secret_target=secret_target,
+        interpreted_code=interpreted_code,
         standard_profile_write=standard_profile_write,
         profile_floor_write=profile_floor_write,
     )

@@ -19,12 +19,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-#: Accepted before a match: start of string, whitespace, ``=``, or either path
-#: separator. Patterns are tested against paths *and* command lines, and a
-#: Windows host hands over ``app\\.env``.
-_BEFORE = r"(?:^|[\s=/\\'\"])"
-#: Accepted after a match: end of string, whitespace, quote, or a separator.
-_AFTER = r"(?=$|[\s'\"/\\:])"
+#: Accepted before a match: start of string, whitespace, ``=``, ``/``, a
+#: quote, or a Windows separator *glued to a path* (``app\\.env``,
+#: ``C:\\.env``). Patterns are tested against paths *and* command lines.
+#: Issue #724: a backslash right after a quote or a space is a regex escape
+#: (``grep -E '\\.env\\b'``), not a path segment, so it is not an anchor.
+_BEFORE = r"(?:^|[\s=/'\"]|(?<=[A-Za-z0-9_.~)])\\)"
+#: Accepted after a match: end of string, whitespace, quote, ``/``, ``:``, or a
+#: Windows separator followed by a path character — ``\\b`` in a grep pattern
+#: is an escape, not ``.env`` opening a directory (#724).
+_AFTER = r"(?=$|[\s'\"/:]|\\(?=[A-Za-z0-9_.~]))"
+#: A Windows separator that opens a real path segment (same rule as above).
+_WIN_SEP = r"\\(?=[A-Za-z0-9_.~])"
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,7 +46,11 @@ class SecretRule:
 
 SECRET_RULES: tuple[SecretRule, ...] = (
     SecretRule("dotenv", rf"{_BEFORE}\.env{_AFTER}", ("**/.env",)),
-    SecretRule("dotenv-variant", rf"{_BEFORE}\.env\.[a-z0-9_-]+{_AFTER}", ("**/.env.*",)),
+    # Issue #724: the suffix of an env *file* is lower-case by convention
+    # (``.env.local``, ``.env.production``); ``(?-i:…)`` keeps it so under the
+    # case-insensitive match, so a jq path like ``.env.CLAUDE_CODE_TMPDIR`` —
+    # a field, not a file — is not a credential.
+    SecretRule("dotenv-variant", rf"{_BEFORE}\.env\.(?-i:[a-z0-9_-]+){_AFTER}", ("**/.env.*",)),
     SecretRule("npmrc", rf"{_BEFORE}\.npmrc{_AFTER}", ("**/.npmrc",)),
     SecretRule("pypirc", rf"{_BEFORE}\.pypirc{_AFTER}", ("**/.pypirc",)),
     SecretRule(
@@ -48,7 +58,9 @@ SECRET_RULES: tuple[SecretRule, ...] = (
         rf"{_BEFORE}id_(?:rsa|ed25519|ecdsa){_AFTER}",
         ("**/id_rsa", "**/id_ed25519", "**/id_ecdsa"),
     ),
-    SecretRule("secrets-dir", rf"{_BEFORE}secrets?[/\\]", ("**/secret/**", "**/secrets/**")),
+    # A *directory* named secret(s): the separator must open a path segment —
+    # ``'secret\|recursive'`` in a grep pattern is a word, not a path (#724).
+    SecretRule("secrets-dir", rf"{_BEFORE}secrets?(?:/|{_WIN_SEP})", ("**/secret/**", "**/secrets/**")),
     SecretRule(
         "key-material",
         r"\.(?:pem|p12|pfx|keystore|jks)" + _AFTER,

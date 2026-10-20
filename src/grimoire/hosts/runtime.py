@@ -216,6 +216,12 @@ def render(decision: Decision, hook: HookInput, host_id: HostId) -> dict[str, An
         elif decision.reason:
             # A host that cannot refuse or ask is at least told why it should.
             specific["additionalContext"] = decision.reason
+        if decision.context and decision.outcome is Outcome.ALLOW:
+            # Issue #724 : un avertissement non bloquant (code interprété non
+            # lu) accompagne un `allow` — `additionalContext` pour l'agent,
+            # `systemMessage` pour l'humain, puisque rien d'autre ne le porte.
+            specific["additionalContext"] = decision.context
+            payload["systemMessage"] = decision.context
         payload["hookSpecificOutput"] = specific
         return payload
 
