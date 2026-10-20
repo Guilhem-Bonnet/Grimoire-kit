@@ -76,63 +76,63 @@ patterns:
     category: runtime
     artifacts: []
     rules: []
-    checks: []
+    checks: [journal.missing, journal.line_invalid, journal.stale]
     tech_extras: []
     profile_min: governed
   redis-hot-memory-soft-gate:
     category: memory
     artifacts: [memory_policy]
     rules: [memory.hot-degrades-safely]
-    checks: []
+    checks: [memory.os_contract_missing, memory.os_hot_memory_target, memory.hot_degradation_undeclared]
     tech_extras: [redis]
     profile_min: governed
   governed-hook-gateway:
     category: governance
     artifacts: [hook_registry, rule_packs]
     rules: [hooks.must-use-gateway, hooks.no-destructive-bypass]
-    checks: []
+    checks: [hooks.none, hooks.invalid, hooks.unknown_action, rules.pack_violation]
     tech_extras: []
     profile_min: governed
   skill-classification-matrix:
     category: orchestration
     artifacts: [hook_registry, pattern_catalog]
     rules: [skills.classified-before-use]
-    checks: []
+    checks: [patterns.none, patterns.catalog_ref_unknown, patterns.check_refs_missing, skills.unclassified]
     tech_extras: []
     profile_min: governed
   governed-observability-cockpit:
     category: observability
     artifacts: [observability_policy]
     rules: [observability.cockpit-read-only, observability.inputs-are-declared, observability.no-secret-export]
-    checks: []
+    checks: [observability.policy_missing, observability.inputs_undeclared, observability.secret_export_allowed]
     tech_extras: []
     profile_min: governed
   code-graph-projection:
     category: memory
     artifacts: [memory_policy]
     rules: [memory.freshness-required]
-    checks: []
+    checks: [gate.codegraph_fresh, memory.os_graph_projection_target]
     tech_extras: [neo4j]
     profile_min: orchestrated
   governed-agent-orchestration:
     category: orchestration
     artifacts: [orchestration_policy]
     rules: [orchestration.no-undeclared-handoff]
-    checks: []
+    checks: [orchestration.roles_missing, orchestration.wip_missing, orchestration.role.handoff_contracts_missing]
     tech_extras: []
     profile_min: orchestrated
   governed-knowledge-indexing:
     category: knowledge
     artifacts: [knowledge_source_registry]
     rules: [knowledge.source-declared]
-    checks: []
+    checks: [knowledge.sources_missing, knowledge.locator_not_found, knowledge_index.missing]
     tech_extras: []
     profile_min: orchestrated
   mission-evidence-ledger:
     category: workflow
     artifacts: [evidence_gates, evidence_pack]
     rules: [gate.requires-evidence]
-    checks: []
+    checks: [gates.transitions_missing, evidence.pending_gate, evidence.orphan, claims.proved_without_evidence]
     tech_extras: []
     profile_min: governed
   tool-mediation-gate:
@@ -146,7 +146,7 @@ patterns:
     category: provider
     artifacts: [llm_provider_registry]
     rules: [provider.cost-budgeted]
-    checks: []
+    checks: [dispatch.cost_slo, cost.no_budget, cost.no_slo]
     tech_extras: []
     profile_min: production
   tool-blast-radius-limiter:

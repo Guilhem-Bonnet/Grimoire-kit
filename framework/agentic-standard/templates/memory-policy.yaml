@@ -29,6 +29,14 @@ memory_os:
     legacy_vector_sources:
       - "qdrant-local"
       - "qdrant-server"
+  # Porte douce Redis (pattern redis-hot-memory-soft-gate, regle memory.hot-degrades-safely) :
+  # sans Redis, la memoire chaude se replie sur le sidecar local et la degradation est
+  # journalisee ; les stores durables restent la source de verite. Verifie par
+  # `memory.hot_degradation_undeclared`.
+  hot_memory_degradation:
+    on_unavailable: "degrade"      # degrade | fail — `degrade` est ce que la regle exige
+    fallback: "sqlite"             # tech_extras.redis.degrades_to dans capability-map.yaml
+    record_event: "memory.hot.partial"
   no_vector_target:                # profil alternatif gouverne (vector_database=false)
     hot_memory: "sqlite"
     semantic_memory: "sqlite-fts5"
