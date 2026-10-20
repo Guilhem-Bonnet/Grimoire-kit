@@ -47,10 +47,12 @@ class SecretRule:
 SECRET_RULES: tuple[SecretRule, ...] = (
     SecretRule("dotenv", rf"{_BEFORE}\.env{_AFTER}", ("**/.env",)),
     # Issue #724: the suffix of an env *file* is lower-case by convention
-    # (``.env.local``, ``.env.production``); ``(?-i:…)`` keeps it so under the
-    # case-insensitive match, so a jq path like ``.env.CLAUDE_CODE_TMPDIR`` —
-    # a field, not a file — is not a credential.
-    SecretRule("dotenv-variant", rf"{_BEFORE}\.env\.(?-i:[a-z0-9_-]+){_AFTER}", ("**/.env.*",)),
+    # (``.env.local``, ``.env.production``). The runtime decision discards a
+    # match whose suffix carries an upper-case letter (``.env.CLAUDE_CODE_TMPDIR``
+    # is a jq field, not a file) — in ``classify_tool``, not here: these
+    # sources are also compiled by the opencode plugin as JavaScript ``RegExp``
+    # with the ``i`` flag, which has no inline ``(?-i:…)`` group.
+    SecretRule("dotenv-variant", rf"{_BEFORE}\.env\.[a-z0-9_-]+{_AFTER}", ("**/.env.*",)),
     SecretRule("npmrc", rf"{_BEFORE}\.npmrc{_AFTER}", ("**/.npmrc",)),
     SecretRule("pypirc", rf"{_BEFORE}\.pypirc{_AFTER}", ("**/.pypirc",)),
     SecretRule(

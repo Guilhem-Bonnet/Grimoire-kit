@@ -14,7 +14,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from grimoire.hosts.secrets import secret_patterns
+from grimoire.hosts.secrets import SECRET_RULES
 from grimoire.policies.schemas import ActionKind, MutationClass
 
 # ── Tool classification ──────────────────────────────────────────────────────
@@ -612,13 +612,19 @@ def classify_tool(tool_name: str, tool_input: dict[str, Any] | None = None) -> T
 
     secret_target = ""
     for candidate in candidates:
-        for pattern in secret_patterns():
-            match = re.search(pattern, candidate, flags=re.IGNORECASE)
-            if match:
-                # Report the fragment that matched, not the whole command line:
-                # the refusal must name the credential, not echo the shell.
-                secret_target = match.group(0).strip().strip("'\"=").lower()
-                break
+        for rule in SECRET_RULES:
+            match = re.search(rule.pattern, candidate, flags=re.IGNORECASE)
+            if not match:
+                continue
+            fragment = match.group(0).strip().strip("'\"=")
+            if rule.name == "dotenv-variant" and any(ch.isupper() for ch in fragment):
+                # An env *file* suffix is lower-case (``.env.local``); an
+                # upper-case one is a jq field (``.env.CLAUDE_CODE_TMPDIR``).
+                continue
+            # Report the fragment that matched, not the whole command line:
+            # the refusal must name the credential, not echo the shell.
+            secret_target = fragment.lower()
+            break
         if secret_target:
             break
 
