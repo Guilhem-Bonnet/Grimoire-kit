@@ -213,7 +213,7 @@ h1{font-family:var(--font-sans);font-weight:700;letter-spacing:-0.03em;line-heig
     review:      { name: 'Revue',    st: 'var(--cyan)',      gate: 'porte · <b>evidence pack</b> + decision trace' },
     accepted:    { name: 'Accepté',  st: 'var(--green)',     gate: 'porte · <b>review gate</b> + evidence gate' },
     released:    { name: 'Publié',   st: 'var(--violet)',    gate: 'porte · <b>release gate</b> franchi' },
-    archived:    { name: 'Archivé',  st: 'var(--ink-muted)', gate: 'terminal · trace scellée &amp; <b>rejouable</b>', open: true }
+    archived:    { name: 'Archivé',  st: 'var(--ink-muted)', gate: 'terminal · trace conservée &amp; <b>rejouable</b>', open: true }
   };
   const NEXT = {
     proposed:    { cls: 'wait',  txt: 'Prêt · requiert <b>critères d\u2019acceptation</b>' },
@@ -223,7 +223,7 @@ h1{font-family:var(--font-sans);font-weight:700;letter-spacing:-0.03em;line-heig
     review:      { cls: 'wait',  txt: 'Accepté · requiert <b>review gate</b> + <b>evidence gate</b>' },
     accepted:    { cls: 'wait',  txt: 'Publié · requiert <b>release gate</b>' },
     released:    { cls: 'term',  txt: 'Archivé après fenêtre de rétention' },
-    archived:    { cls: 'term',  txt: 'scellé · terminal' }
+    archived:    { cls: 'term',  txt: 'archivé · terminal' }
   };
   const PRIO = { high: 'var(--red)', medium: 'var(--amber)', low: 'var(--ink-muted)' };
 

@@ -25,7 +25,7 @@ contraintes:
   - budget_tokens: …
 
 done_when:
-  - evidence-pack signé, hashes joints
+  - evidence-pack, hashes joints
   - gate #GOV-01 verte (fail-closed)
 
 agents: @prd-author
@@ -98,7 +98,7 @@ sortie: compliance-declaration
 
 entree: decision-trace
 chaine: sha256, chaque entrée référence la précédente
-horodatage: signé
+horodatage: ISO 8601
 sortie: audit-log
 ` }];
   T['GOV-12'] = [{ id: 'threat-model.md', title: 'Threat model', required: ['surfaces', 'mitigations'],
@@ -176,7 +176,7 @@ contraintes:
   - modèle: sonnet
 
 done_when:
-  - evidence-pack signé, hashes joints
+  - evidence-pack, hashes joints
   - gate #GOV-01 verte (fail-closed)
   - décision au journal via #GOV-02
 
@@ -208,7 +208,7 @@ outils: déclarés dans ma fiche — tout le reste m'est refusé
 refus:
   - secrets en clair (hook scan-secrets actif)
   - écrire hors périmètre (hook block-scope actif)
-  - déclarer « fini » sans evidence-pack signé (#GOV-01)
+  - déclarer « fini » sans evidence-pack (#GOV-01)
 agents_amis: @reviewer relit, le testeur contre-vérifie
 `
   };
