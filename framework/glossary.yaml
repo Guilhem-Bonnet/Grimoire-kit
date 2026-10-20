@@ -97,7 +97,7 @@ entries:
       servi et refuse tout le reste.
     raccourci: "`"
     termes: [dock, commande-equivalente]
-    doc: cli-reference.md
+    doc: reference/cli/index.md
 
   - id: commande-equivalente
     nom: Commande équivalente
@@ -106,7 +106,7 @@ entries:
       affichée dans le dock pour que le clavier s'apprenne sans être imposé.
     raccourci: ""
     termes: [console, palette-de-commandes]
-    doc: cli-reference.md
+    doc: reference/cli/index.md
 
   - id: palette-de-commandes
     nom: Palette de commandes
@@ -182,7 +182,7 @@ entries:
       appliquée au projet courant.
     raccourci: ""
     termes: [cockpit, projet, kit]
-    doc: cli-reference.md
+    doc: reference/cli/index.md
 
   - id: cockpit
     nom: Cockpit
@@ -191,7 +191,7 @@ entries:
       que l'atelier, plus le niveau de zoom Flotte et le sélecteur de projet.
     raccourci: ""
     termes: [atelier, flotte, projet]
-    doc: cli-reference.md
+    doc: reference/cli/index.md
 
   - id: flotte
     nom: Flotte
@@ -288,7 +288,7 @@ entries:
       son propriétaire et les portes de preuve qu'elle doit franchir.
     raccourci: ""
     termes: [mission-ledger, porte-de-preuve, board-gouverne, rappel-de-tache]
-    doc: cli-reference.md
+    doc: reference/cli/index.md
 
   - id: mission-ledger
     nom: Mission Ledger
@@ -297,7 +297,7 @@ entries:
       tâches et de leurs transitions ; le board n'en est qu'une projection.
     raccourci: ""
     termes: [tache, board-gouverne, trace-ledger]
-    doc: adr-005-mission-ledger-source-of-truth.md
+    doc: explications/decisions/adr-005-mission-ledger-source-of-truth.md
 
   - id: board-gouverne
     nom: Board gouverné
@@ -307,7 +307,7 @@ entries:
       en quatre.
     raccourci: ""
     termes: [mission-ledger, tache, porte-de-preuve]
-    doc: cli-reference.md
+    doc: reference/cli/index.md
 
   - id: porte-de-preuve
     nom: Porte de preuve
@@ -327,7 +327,7 @@ entries:
       `_grimoire-output/evidence/<tâche>/claim-ledger.md`.
     raccourci: ""
     termes: [porte-de-preuve, evidence-pack, standard-agentique]
-    doc: standard/integration.md
+    doc: guides/rendre-la-preuve-bloquante.md
 
   - id: evidence-pack
     nom: Evidence pack
@@ -375,7 +375,7 @@ entries:
       réclamée seulement.
     raccourci: ""
     termes: [tache, mission-ledger, evidence-pack]
-    doc: cli-reference.md
+    doc: reference/cli/index.md
 
   - id: standard-agentique
     nom: Standard agentique
@@ -431,7 +431,7 @@ entries:
       TraceLedger, runtime et preuves en une seule suite d'événements datés.
     raccourci: ""
     termes: [tache, trace, mission-ledger]
-    doc: cli-reference.md
+    doc: reference/cli/index.md
 
   - id: probleme
     nom: Problème
@@ -449,7 +449,7 @@ entries:
       hôtes désynchronisés, standard incomplet.
     raccourci: ""
     termes: [probleme, projet, hote]
-    doc: cli-reference.md
+    doc: reference/cli/index.md
 
   - id: validation
     nom: Validation
@@ -507,7 +507,7 @@ entries:
       valider, simuler puis compiler.
     raccourci: ""
     termes: [noeud, blueprint, validation]
-    doc: workflow-taxonomy.md
+    doc: explications/taxonomie-des-workflows.md
 
   - id: noeud
     nom: Nœud

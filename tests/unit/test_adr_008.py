@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-ADR = ROOT / "docs" / "adr-008-actions-infrastructure-locale-typees.md"
+ADR = ROOT / "docs" / "explications" / "decisions" / "adr-008-actions-infrastructure-locale-typees.md"
 
 
 def _text() -> str:

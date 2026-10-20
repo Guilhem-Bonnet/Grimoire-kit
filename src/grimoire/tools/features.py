@@ -4,7 +4,7 @@ Le kit expose ses capacités par canal de maturité :
 
 - **stable** : contrat SemVer, activées d'office.
 - **beta** : fonctionnelles et testées, opt-in par projet, journalisées —
-  candidates à la promotion sur métriques d'usage (voir docs/rnd.md).
+  candidates à la promotion sur métriques d'usage (voir docs/explications/experimental.md).
 - **experimental** : surface R&D exploratoire, hors contrat, usage direct
   (CLI/outil) sans câblage dans le cycle agent.
 
@@ -64,7 +64,7 @@ FEATURES: dict[str, Feature] = {
             ),
             default_enabled=True,
             toggleable=False,
-            doc="docs/rnd.md",
+            doc="docs/explications/experimental.md",
             surfaces=("cli", "serve", "observatory"),
         ),
         Feature(
@@ -78,7 +78,7 @@ FEATURES: dict[str, Feature] = {
             ),
             default_enabled=False,
             toggleable=True,
-            doc="docs/cli-reference.md",
+            doc="docs/reference/cli/divers.md",
             surfaces=("hooks",),
         ),
     )
