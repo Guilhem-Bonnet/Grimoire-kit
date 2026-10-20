@@ -162,6 +162,10 @@ hôtes activés.
   explicite, jamais par défaut. Les fusions JSON (`.claude/settings.json`,
   `.mcp.json`) ne sont jamais retirées : elles portent aussi la configuration
   propre du projet.
+- Une entrée `type: http` de `.mcp.json` (le serveur partagé de
+  `grimoire mcp start`, voir [la référence CLI](cli-reference.md#serveur-mcp-partagé))
+  est portée telle quelle vers les hôtes qui distinguent local et distant
+  (OpenCode : `type: remote`).
 
 `grimoire doctor` complète ce tableau : INFO pour les fichiers orphelins d'un
 hôte désactivé, WARN si un hôte activé n'a encore rien émis (généralement :

@@ -302,10 +302,12 @@ def _config_merge(surface: ProjectSurface) -> JsonMerge:
             mcp = mcp if isinstance(mcp, dict) else {}
             for server in servers:
                 # A server the project already configured is its own; only add what is missing.
-                mcp.setdefault(
-                    server.name,
-                    {"type": "local", "command": [server.command, *server.args], "enabled": True},
+                entry: dict[str, Any] = (
+                    {"type": "remote", "url": server.url, "enabled": True}
+                    if server.url and not server.command
+                    else {"type": "local", "command": [server.command, *server.args], "enabled": True}
                 )
+                mcp.setdefault(server.name, entry)
             data["mcp"] = mcp
         return data
 
