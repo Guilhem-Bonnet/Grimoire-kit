@@ -505,6 +505,7 @@ class TaskService:
         actor: str = "hook",
         explicit: bool = False,
         host_version: str = "",
+        agent_id: str = "",
     ) -> MissionTask:
         """Rattache la session d'hôte courante au claim de *task_id* (issue #638).
 
@@ -516,7 +517,7 @@ class TaskService:
         """
         task = self.ledger.attach_session(
             task_id, session_id, session_host=session_host, actor_id=actor, explicit=explicit,
-            host_version=host_version,
+            host_version=host_version, agent_id=agent_id,
         )
         if explicit:
             # `task attach` (K3-S1-02) rattache une session à un claim qui peut être d'un autre

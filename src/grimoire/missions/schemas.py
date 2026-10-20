@@ -174,6 +174,14 @@ class TaskClaim:
     #: rattachent automatiquement ; seul ce marqueur dit laquelle des tâches
     #: d'une session est celle que l'opérateur a désignée. ``""`` = jamais.
     attached_explicit_at: str = ""
+    #: Le sous-agent qui tient ce claim dans la session (issue #698) : l'``agent_id``
+    #: que l'hôte met dans le payload des hooks tirés depuis un sous-agent (Claude
+    #: Code : outil ``Agent``, champs ``agent_id``/``agent_type``). Les sous-agents
+    #: héritent du ``session_id`` du parent et n'ont pas de ``GRIMOIRE_ACTOR`` propre ;
+    #: seul le hook qui observe le ``task claim`` connaît cette identité et la pose,
+    #: par le même événement ``task.session_attached``. ``""`` = claim de la boucle
+    #: principale, ou pris hors d'un hôte qui nomme ses sous-agents.
+    agent_id: str = ""
     #: Jeton de fencing du bail (K2, issue #767) : croît à chaque nouveau claim
     #: de la tâche, posé par le ledger sous son verrou — jamais par l'appelant.
     #: Un effet porteur d'un autre epoch vient d'un titulaire périmé et il est
@@ -238,6 +246,8 @@ class TaskClaim:
             # Absent tant qu'aucun attach explicite : les sérialisations
             # existantes (board, cockpit, tests) ne changent pas.
             **({"attached_explicit_at": self.attached_explicit_at} if self.attached_explicit_at else {}),
+            # Absent tant qu'aucun sous-agent n'est connu (issue #698).
+            **({"agent_id": self.agent_id} if self.agent_id else {}),
             # Absent sur un claim d'avant le fencing : sa sérialisation ne change pas.
             **({"lease_epoch": self.lease_epoch} if self.lease_epoch else {}),
         }
@@ -253,18 +263,26 @@ class TaskClaim:
             session_host=str(d.get("session_host", "") or ""),
             session_host_version=str(d.get("session_host_version", "") or ""),
             attached_explicit_at=str(d.get("attached_explicit_at", "") or ""),
+            agent_id=str(d.get("agent_id", "") or ""),
             lease_epoch=_int_or_zero(d.get("lease_epoch")),
         )
 
     def with_session(
-        self, session_id: str, session_host: str = "", *, explicit_at: str = "", host_version: str = ""
+        self,
+        session_id: str,
+        session_host: str = "",
+        *,
+        explicit_at: str = "",
+        host_version: str = "",
+        agent_id: str = "",
     ) -> TaskClaim:
         """Le même claim, rattaché à *session_id* — une valeur, jamais une mutation.
 
         *explicit_at* date un rattachement explicite (``task attach``) ; sans lui,
         un rattachement automatique conserve la date du dernier explicite.
         *host_version* (K3) : la version de l'hôte, ou celle déjà connue de la même
-        session si l'événement n'en porte pas.
+        session si l'événement n'en porte pas. *agent_id* (issue #698) : le
+        sous-agent observé par le hook, ou celui déjà connu.
         """
         return TaskClaim(
             actor_id=self.actor_id,
@@ -275,6 +293,7 @@ class TaskClaim:
             session_host=session_host,
             session_host_version=host_version or (self.session_host_version if session_id == self.session_id else ""),
             attached_explicit_at=explicit_at or self.attached_explicit_at,
+            agent_id=agent_id or self.agent_id,
             lease_epoch=self.lease_epoch,
         )
 
