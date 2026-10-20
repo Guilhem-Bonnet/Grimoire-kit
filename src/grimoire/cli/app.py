@@ -306,12 +306,10 @@ def init(
     ),
     memory_profile: str = typer.Option("", "--memory-profile", "-m", help="Memory composition (lexical, standard, graphe, complet). Inferred when omitted."),
     no_cockpit: bool = typer.Option(False, "--no-cockpit", help="Do not enrol this project in the local cockpit registry (~/.grimoire/cockpit/registry.json). Same effect as the GRIMOIRE_NO_COCKPIT env var."),
-    lite: bool = typer.Option(
-        False, "--lite",
+    lite: bool = typer.Option(False, "--lite",
         help="Deprecated — the light profile no longer exists (the installed experience is complete; the core adapts to each task). Behaves exactly like the default.",
     ),
-    profile: str = typer.Option(
-        "", "--profile",
+    profile: str = typer.Option("", "--profile",
         help="Deprecated. 'lite' is accepted for backward compatibility and behaves like the default; no other value is recognized.",
     ),
     memory_collection: str = typer.Option(
