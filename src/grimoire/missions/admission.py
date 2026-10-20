@@ -42,8 +42,9 @@ from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
 from grimoire.core.standard_generation import STANDARD_DIR
+from grimoire.core.standard_state import LEDGER_RELPATH
 from grimoire.missions.board import PRIORITIES, priority_of, priority_rank
-from grimoire.missions.lease import parse_instant
+from grimoire.missions.lease import lost_reason, parse_instant
 from grimoire.missions.ledger_rules import unclosed_blockers
 from grimoire.missions.liveness import Attention
 from grimoire.missions.pause import PAUSE_LIFTED_CAUSE, PauseState
@@ -435,7 +436,8 @@ def derive_view(ledger: MissionLedger, capacity: Capacity, *, now: datetime, hos
                 provider[tid] = str(decision.get("provider") or "")
             else:
                 provider.pop(tid, None)
-    held = tuple(Held(t.id, t.owner, provider.get(t.id, "")) for t in tasks.values() if t.status in _HELD)
+    lost = {v.task_id for v in ledger.expired_claims(now)}  # KAN-FRICTIONS : un bail perdu ne tient plus de place
+    held = tuple(Held(t.id, t.owner, provider.get(t.id, "")) for t in tasks.values() if t.status in _HELD and t.id not in lost)
     exempt = set(capacity.ci_exempt_types)
     ci = {tid for tid in reserved if tid in tasks and tasks[tid].status in _CI_HELD and tasks[tid].type.value not in exempt} | {tid for tid in pushed if tid in tasks}
     return LedgerView(now, held, frozenset(ci), _consumed_today(events, now), host)
@@ -761,16 +763,22 @@ def release_capacity(ledger: MissionLedger, task_id: str, pool: str, *, actor: s
     ledger.append_event(CAPACITY_RELEASED_EVENT, task_id, "task", actor, {"task_id": task_id, "pool": pool, "reason": reason})
 
 
-def wip_claim_guard(root: Path) -> Callable[[Mapping[str, MissionTask], MissionTask], str]:
+def wip_claim_guard(root: Path, *, ledger_root: Path | None = None) -> Callable[[Mapping[str, MissionTask], MissionTask], str]:
     """La garde que le ledger appelle sous son verrou, au claim : WIP global et par rôle.
 
     Elle relit la capacité à chaque claim (deux fichiers au plus). Une limite de WIP
     illisible refuse le claim (fail-closed) ; sans limite déclarée, rien n'est refusé.
+    Seuls les claims **vivants** occupent une place (KAN-FRICTIONS) : un claim dont le bail est
+    perdu (:func:`~grimoire.missions.lease.lost_reason`, fichiers de bail sous *ledger_root*) ne
+    bloque pas l'admission — la récolte ou une reprise le rendra. Une horloge qui recule ne rend
+    aucun bail perdu : elle ne libère jamais de place à tort.
     """
+    leases = ledger_root if ledger_root is not None else root / LEDGER_RELPATH
 
     def guard(tasks: Mapping[str, MissionTask], task: MissionTask) -> str:
         capacity = load_capacity(root)
-        held = tuple(Held(t.id, t.owner) for t in tasks.values() if t.status in _HELD)
+        now = datetime.now(UTC)
+        held = tuple(Held(t.id, t.owner) for t in tasks.values() if t.status in _HELD and not lost_reason(leases, t, now))
         refusal = _wip_refusal(task, capacity, held)
         return "" if refusal is None else refusal[1]
 

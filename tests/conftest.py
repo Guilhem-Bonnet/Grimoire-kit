@@ -114,6 +114,11 @@ def _isolate_user_state(tmp_path_factory: pytest.TempPathFactory) -> Iterator[No
         # pour une raison qui n'a rien à voir avec ce qu'elle teste. On fixe la
         # largeur pour que la sortie soit la même partout.
         mp.setenv("COLUMNS", "200")
+        # Issue #760 : la commande de hook émise dépend de l'installation du
+        # kit (PATH, venv). On la fige au nom nu pour que les fichiers générés
+        # soient les mêmes sur chaque poste et en CI ; les tests du résolveur
+        # retirent cette variable.
+        mp.setenv("GRIMOIRE_HOOK_COMMAND", "grimoire-hook")
         yield
 
 

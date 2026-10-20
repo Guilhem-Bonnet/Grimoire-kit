@@ -532,6 +532,11 @@ sur tous les projets de la machine. Le tick et le frein lisent les deux et appli
   `paused: true` et les pilotes (`--executor dispatch`, `upgrade-flow`) s'arrêtent. Pendant la pause, `flow resume`
   refuse sans rien écrire ; une fois levée, il rouvre le node suivant (`workflow.resumed`, une seule fois).
   `drain` ne pose aucun run : ils finissent.
+- **Tâche garée et frein du bail.** Une tâche `waiting` garde le bail de sa session pour la reprise, mais il ne se renouvelle
+  pas pendant l'attente. Tant que l'outil tient dans le bail, rien ne change ; au-delà, le `PreToolUse` refuse les commandes
+  de la session **sauf** `grimoire task resume|show|attach|renew <sa tâche>` (options `--epoch`, `--actor`, `--session-id`
+  seulement, sans guillemets ni enchaînement) : la session reprend elle-même par `grimoire task resume <id> --epoch N`,
+  qui renouvelle aussitôt le battement de cœur. Une autre tâche, une écriture ou une forme non reconnue restent refusées.
 - **`resume`** : le drapeau est supprimé. Le tick suivant rend les `waiting(paused)` en `ready`, **dans l'ordre
   de la file** et sans leur faire perdre l'ancienneté d'avant leur claim. Une session restée ouverte lit à son tour
   « Pause levée : ta tâche … est de nouveau ready » et peut la re-claimer ; une session fermée retrouve `resume_command`.
@@ -695,11 +700,12 @@ prochain export l'écrase.
 | `grimoire task list [--status <état>] [--mission <id>]` | Lister les tâches et leur colonne de board |
 | `grimoire task wave-checkpoint <mission> <vague> [--action status\|request\|require\|approve\|reject] [--fingerprint <empreinte>]` | Checkpoint humain d'une vague, lié à l'empreinte du contenu fusionné (arbres base, tête et merge de chaque tâche). `request` présente l'empreinte, `approve`/`reject` la citent et exigent un tour humain attesté postérieur (W2-01) ; `require` ferme le claim des vagues suivantes tant que la vague n'est pas `approved`. Une vague dont le contenu change devient `stale`. Le numéro de vague est celui de `task waves` (niveau absolu, vagues closes comprises) ; le verrou s'applique à toute transition vers `claimed` |
 | `grimoire task show <id>` | Détailler une tâche et ce que chaque prochain pas exigera |
-| `grimoire task claim <id> [--actor <qui>] [--host <où>]` | Réclamer une tâche prête (`ready → claimed`) |
+| `grimoire task claim <id> [--actor <qui>] [--host <où>]` | Réclamer une tâche prête (`ready → claimed`). Une tâche `claimed`/`running` dont le bail est perdu (`expires_at` passé, battement de cœur perdu) se réclame directement : barrière du bail, retour `ready` journalisé (`reclaimed`), nouveau claim au nouvel epoch ; un autre acteur que le titulaire seulement si l'hôte du claim a un frein vérifié, sinon `grimoire task reap` pose la question à l'humain. Le WIP ne compte que les claims vivants |
 | `grimoire task move <id> --to <état>` | Déplacer une tâche, si la machine à états et le gate le permettent |
 | `grimoire task block <id> --reason "<motif>"` | Bloquer en disant pourquoi |
 | `grimoire task close <id>` | Fermer une tâche vérifiée (verdict accepté exigé ; depuis `needs_verification`, reçu de revue frais exigé) |
 | `grimoire task review <id> --verdict READY\|NOT-READY [--finding "résumé :: commande"]` | Écrire le reçu de revue, lié à l'empreinte présente de l'arbre (`_grimoire-output/reviews/<id>/review-receipt.json`) |
+| `grimoire task verify <id> [--evidence <fichier> ...]` | Lancer les commandes déclarées de la tâche, écrire le pack et le verdict (0 `passed`, 1 `failed`, 2 aucune commande, 3 commandes non approuvées). Pour une tâche **sans** commande, `--evidence` (répétable) écrit un pack **déclaratif** : chaque fichier doit exister sous la racine du projet, il entre haché (SHA-256, taille, URI `file:<chemin>`), le verdict est `skipped` (`created_by: declarative`, contrôle `declarative-only`) et le code de sortie 4 : la revue peut s'ouvrir (`needs_verification`), la clôture reste refusée (`review_gate`) — une preuve déclarative n'est jamais un vert mécanique |
 | `grimoire task prioritize <id> --to low\|medium\|high\|critical [--reason "<motif>"]` | Changer la priorité (issue #638) — l'historique reste au ledger, le board se retrie |
 | `grimoire task comment <id> "<texte>" [--kind comment\|directive]` | Poser un commentaire ou une consigne ; la session qui tient la tâche la lit au prochain `UserPromptSubmit` |
 | `grimoire task cancel <id> --reason "<motif>" [--force]` | Annuler avec sa raison (obligatoire) ; tenue par une autre session, elle exige `--force` |

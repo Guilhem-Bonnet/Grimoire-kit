@@ -208,6 +208,12 @@ class EvidenceService:
         self._append(self._verdicts_path, verdict.to_dict())
         return verdict
 
+    def record_verdict(self, verdict: VerificationVerdict) -> None:
+        """Range un verdict déjà tranché par l'appelant (ex. ``skipped`` d'une preuve déclarative, KAN-FRICTIONS)."""
+        if self.get_pack(verdict.evidence_pack_id) is None:
+            raise GrimoireEvidenceError(f"verdict {verdict.id} : pack inconnu {verdict.evidence_pack_id}")
+        self._append(self._verdicts_path, verdict.to_dict())
+
     def _load_verdicts(self, task_id: str | None = None) -> list[VerificationVerdict]:
         verdicts: list[VerificationVerdict] = []
         if not self._verdicts_path.exists():

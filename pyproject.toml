@@ -236,7 +236,8 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 # Pas de `-x` ici : il masquait chaque échec derrière le premier, y compris en CI (D-10).
 # `perf` (bancs de latence, K13) est hors CI par défaut ; `-m perf` les lance (le dernier `-m` l'emporte).
-addopts = "-q --tb=short -m 'not perf'"
+# `live_host` (D-12, vrais appels `claude -p`, payants) aussi : `-m live_host` avec un plafond explicite.
+addopts = "-q --tb=short -m 'not perf and not live_host'"
 markers = [
     "covers(*units, level='unit'): surfaces que le test couvre (cli:flow run, genre:fanout, hook:tool-policy, host:opencode), relevées par scripts/check-surface-coverage.py ; level borné par ce que le fichier permet (D-09)",
     "no_session_token: le test envoie ses écritures sans le jeton de session des serveurs locaux",
@@ -246,6 +247,7 @@ markers = [
     "bench: marks performance benchmark tests",
     "crash_bench: banc de coupure du tick (K12) — coupures simulées, rapides ; `-m crash_bench` les isole",
     "perf: bancs de latence chronométrés (budgets de D21), hors CI par défaut ; lancer avec -m perf",
+    "live_host: e2e live d'un hôte réel (D-12, `claude -p` payant), hors CI ; exige GRIMOIRE_LIVE_CLAUDE_MAX_USD, lancer avec -m live_host",
 ]
 
 [tool.coverage.run]

@@ -38,6 +38,7 @@ from grimoire.missions.lease import (
     LeaseFile,
     backoff_delay,
     lease_path,
+    lost_reason,
     mark_waiting,
     parse_instant,
     read_lease,
@@ -57,6 +58,7 @@ from grimoire.missions.ledger_rules import (
     waiting_guard,
 )
 from grimoire.missions.questions import QUESTION_EVENTS
+from grimoire.missions.reclaim import release_lost_claim
 from grimoire.missions.schemas import (
     DEFAULT_CLAIM_TTL_SECONDS,
     ORIGIN_AGENT,
@@ -735,13 +737,9 @@ class MissionLedger:
                 f"Transition refusée pour {task_id} : running → ready est réservé à la récolte d'un bail perdu "
                 "(grimoire task reap) ; le titulaire rend la tâche par blocked, failed ou cancelled"
             )
-        held = task.claim
-        if to_state is TaskState.CLAIMED and task.status in (TaskState.CLAIMED, TaskState.RUNNING) and held is not None:
-            session = f", session {held.session_id}" if held.session_id else ""
-            raise GrimoireMissionError(
-                f"Claim refusé pour {task_id} : déjà {task.status.value} par {held.actor_id}{session} "
-                f"jusqu'à {held.expires_at or 'sans expiration'}"
-            )
+        judged = task.status  # l'état sur lequel l'appelant a jugé, avant une reprise de claim perdu
+        if to_state is TaskState.CLAIMED and task.status in _HELD and task.claim is not None:
+            task = release_lost_claim(self, task, actor_id)  # KAN-FRICTIONS : bail vivant → refus ; perdu → barrière, ready
         if to_state is TaskState.CLAIMED:
             waiting = unclosed_blockers(self._tasks, task)
             if waiting:
@@ -753,10 +751,10 @@ class MissionLedger:
                 raise GrimoireMissionError(f"Claim refusé pour {task_id} : {limit}")
         elif to_state is TaskState.RUNNING and task.status in _RESUMING and self.claim_guard is not None and (limit := self.claim_guard(self._tasks, task)):
             raise GrimoireMissionError(f"Reprise refusée pour {task_id} : {limit} — elle attend une place, la tâche reste {task.status.value}")
-        if expected_from is not None and task.status is not expected_from:
+        if expected_from is not None and judged is not expected_from:
             raise GrimoireMissionError(
                 f"Transition refusée pour {task_id} : l'état a changé entre-temps "
-                f"({expected_from.value} attendu, {task.status.value} trouvé) — relire la tâche puis réessayer"
+                f"({expected_from.value} attendu, {judged.value} trouvé) — relire la tâche puis réessayer"
             )
         allowed = _TASK_TRANSITIONS.get(task.status, frozenset())
         if to_state not in allowed:
@@ -794,7 +792,7 @@ class MissionLedger:
             payload["fence_epoch"] = self._epoch_high.get(task_id, 0) + 1
             hands_back = True
         entering, leaving = to_state is TaskState.WAITING, task.status is TaskState.WAITING  # K13 : marque de garde
-        mark_waiting(lease_path(self._root, task_id), entering=entering, leaving=leaving)
+        mark_waiting(lease_path(self._root, task_id), entering=entering, leaving=leaving, now=self._now().isoformat())
         if to_state is TaskState.CLAIMED and claim is not None:
             epoch = self._epoch_high.get(task_id, 0) + 1
             claim = replace(claim, lease_epoch=epoch)
@@ -984,14 +982,8 @@ class MissionLedger:
 
         if clock == "unknown":
             return view("unknown", "horloge incohérente : plus tôt que le dernier événement du journal")
-        cached = read_lease(lease_path(self._root, task.id))
-        if cached is not None and cached.epoch > claim.lease_epoch:
-            return view("lost", "fence_pending")
-        if claim.is_expired(moment):
-            return view("lost", "expires_at")
-        if cached is not None and cached.epoch == claim.lease_epoch and cached.is_lost(moment):
-            return view("lost", "heartbeat")
-        return view("valid", "")
+        reason = lost_reason(self._root, task, moment)
+        return view("lost", reason) if reason else view("valid", "")
 
     def expired_claims(self, now: datetime | None = None) -> list[LeaseView]:
         """Les baux perdus — vide quand l'horloge est incohérente (rien n'est jugé perdu)."""
