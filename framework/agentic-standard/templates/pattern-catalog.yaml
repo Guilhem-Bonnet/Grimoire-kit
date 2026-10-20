@@ -77,7 +77,7 @@ patterns:
     required_artifacts: ["runtime-journal.jsonl"]
     rule_refs: []
     hook_refs: []
-    check_refs: []
+    check_refs: ["journal.missing", "journal.line_invalid", "journal.stale"]
   - id: redis-hot-memory-soft-gate
     category: memory
     maturity: governed
@@ -87,7 +87,7 @@ patterns:
     required_artifacts: ["memory-policy.yaml", "evidence-pack.md"]
     rule_refs: ["memory.hot-degrades-safely"]
     hook_refs: ["memory.hot-soft-gate"]
-    check_refs: []
+    check_refs: ["memory.os_contract_missing", "memory.os_hot_memory_target", "memory.hot_degradation_undeclared"]
   - id: governed-hook-gateway
     category: governance
     maturity: governed
@@ -97,7 +97,7 @@ patterns:
     required_artifacts: ["hook-registry.yaml", "rule-packs.yaml"]
     rule_refs: ["hooks.must-use-gateway", "hooks.no-destructive-bypass"]
     hook_refs: ["hooks.gateway-required", "tools.terminal-guard"]
-    check_refs: []
+    check_refs: ["hooks.none", "hooks.invalid", "hooks.unknown_action", "rules.pack_violation"]
   - id: skill-classification-matrix
     category: orchestration
     maturity: governed
@@ -107,7 +107,7 @@ patterns:
     required_artifacts: ["hook-registry.yaml", "pattern-catalog.yaml"]
     rule_refs: ["skills.classified-before-use"]
     hook_refs: ["skills.require-classification"]
-    check_refs: []
+    check_refs: ["patterns.none", "patterns.catalog_ref_unknown", "patterns.check_refs_missing", "skills.unclassified"]
   - id: governed-observability-cockpit
     category: observability
     maturity: governed
@@ -117,7 +117,7 @@ patterns:
     required_artifacts: ["observability-policy.yaml", "runtime-journal.jsonl", "cockpit-report.md", "evidence-pack.md"]
     rule_refs: ["observability.cockpit-read-only", "observability.inputs-are-declared", "observability.no-secret-export"]
     hook_refs: []
-    check_refs: []
+    check_refs: ["observability.policy_missing", "observability.inputs_undeclared", "observability.secret_export_allowed"]
   - id: code-graph-projection
     category: memory
     maturity: orchestrated
@@ -127,7 +127,7 @@ patterns:
     required_artifacts: ["memory-policy.yaml"]
     rule_refs: ["memory.freshness-required"]
     hook_refs: []
-    check_refs: []
+    check_refs: ["gate.codegraph_fresh", "memory.os_graph_projection_target"]
   - id: governed-agent-orchestration
     category: orchestration
     maturity: orchestrated
@@ -137,7 +137,7 @@ patterns:
     required_artifacts: ["orchestration-policy.yaml"]
     rule_refs: ["orchestration.no-undeclared-handoff"]
     hook_refs: []
-    check_refs: []
+    check_refs: ["orchestration.roles_missing", "orchestration.wip_missing", "orchestration.role.handoff_contracts_missing"]
   - id: governed-knowledge-indexing
     category: knowledge
     maturity: orchestrated
@@ -147,7 +147,7 @@ patterns:
     required_artifacts: ["knowledge-source-registry.yaml"]
     rule_refs: ["knowledge.source-declared"]
     hook_refs: []
-    check_refs: []
+    check_refs: ["knowledge.sources_missing", "knowledge.locator_not_found", "knowledge_index.missing"]
   - id: mission-evidence-ledger
     category: workflow
     maturity: governed
@@ -157,7 +157,7 @@ patterns:
     required_artifacts: ["evidence-gates.yaml", "evidence-pack.md"]
     rule_refs: ["gate.requires-evidence"]
     hook_refs: ["release.require-score"]
-    check_refs: []
+    check_refs: ["gates.transitions_missing", "evidence.pending_gate", "evidence.orphan", "claims.proved_without_evidence"]
   - id: tool-mediation-gate
     category: security
     maturity: governed
@@ -177,7 +177,7 @@ patterns:
     required_artifacts: ["llm-provider-registry.yaml"]
     rule_refs: ["provider.cost-budgeted"]
     hook_refs: []
-    check_refs: ["dispatch.cost_slo"]
+    check_refs: ["dispatch.cost_slo", "cost.no_budget", "cost.no_slo"]
   - id: tool-blast-radius-limiter
     category: security
     maturity: starter
