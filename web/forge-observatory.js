@@ -214,7 +214,7 @@
       `<span class="slo-mark" style="left:50%"></span></div></div>`;
   }
 
-  /* ── Multi-LLM ── */
+  /* ── Multi-modèle ── */
   function renderLLM() {
     const m = OBS.metrics || {};
     const cbm = m.cost_by_model || {}, tbm = m.by_model || {}, cbp = m.cost_by_provider || {}, tbp = m.by_provider || {};
