@@ -121,6 +121,11 @@ class SessionState:
     #: passée, l'action ``arms.then`` reçoit le verdict de la règle. Jamais la
     #: commande ni la cible qui a armé : l'identifiant de règle et une date.
     armed: dict[str, str] = field(default_factory=dict)
+    #: Cache du scan des fichiers d'instructions (issue #667) : ``{"fingerprint",
+    #: "files": [...]}``, voir :mod:`grimoire.hosts.decisions.instruction_scan`.
+    #: Des chemins, des tailles, des digests et des codes de motif — jamais un
+    #: extrait de contenu.
+    instruction_scan: dict[str, Any] = field(default_factory=dict)
 
     def rule_state(self, rule_id: str) -> RuleState:
         return self.rules.setdefault(rule_id, RuleState())
@@ -138,6 +143,7 @@ class SessionState:
             "mutations": self.mutations,
             "pending_approvals": {key: dict(value) for key, value in self.pending_approvals.items()},
             "armed": dict(self.armed),
+            "instruction_scan": dict(self.instruction_scan),
         }
 
     @classmethod
@@ -175,6 +181,7 @@ class SessionState:
             mutations=int(mutations) if isinstance(mutations, int | float) and not isinstance(mutations, bool) else 0,
             pending_approvals=pending,
             armed=armed,
+            instruction_scan=dict(d["instruction_scan"]) if isinstance(d.get("instruction_scan"), dict) else {},
         )
 
     @classmethod

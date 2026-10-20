@@ -244,6 +244,33 @@ par `CLAUDE.md`, par exemple — déclare `entry: ""` et n'en reçoit pas un
 second. `grimoire host status` montre la persona retenue, et signale une clé
 qui nomme un agent que le projet n'a pas plutôt que d'en inventer un.
 
+## Scan des fichiers d'instructions
+
+Issue #667 (phase 5, lot 5.4) : au `SessionStart`, le kit énumère les
+fichiers d'instructions que l'hôte charge sans qu'on le lui demande —
+`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.cursorrules`,
+`.github/copilot-instructions.md` et `.github/{instructions,agents,prompts,skills,rules,commands}/`,
+tout `.md`/`.mdc` sous `.claude/`, `.cursor/`, `.codex/`, `.gemini/`,
+`.windsurf/` (400 fichiers et 256 Ko par fichier au plus) — et les classe par
+provenance : `kit-owned` (digest au catalogue des fichiers livrés,
+`registry/kit-file-hashes.json`, embarqué dans la wheel), `project-owned`
+(suivi par git et propre, donc relu par un humain à un commit),
+`unrecognised` (non suivi, modifié depuis le dernier commit, ou dépôt sans
+git). Seul ce dernier cas passe par des motifs déterministes — annulation
+des instructions précédentes, action cachée à l'utilisateur, exfiltration
+(`.env`, `.ssh`, jetons vers une URL de collecte), exécution d'un contenu
+distant (`curl … | sh`, « à chaque session, lance… »), texte invisible
+(largeur nulle, tags Unicode, bidi), directive dans un commentaire HTML.
+Même entrée, même sortie, aucun modèle.
+
+Silencieux par défaut : une ligne `[Grimoire — fichiers d'instructions]`
+n'apparaît que pour un fichier non reconnu qui porte un motif, et nomme le
+fichier et les codes. Le résultat est mis en cache dans l'état de session
+(empreinte de l'énumération par chemin, taille et mtime — jamais un extrait
+de contenu) ; `grimoire doctor` porte le même contrôle, `instruction_files`
+(`FAIL` nommant le fichier et le motif ; le remède est de relire, puis de
+committer si c'est voulu — le fichier devient alors du projet).
+
 ## Gouvernance
 
 Les hooks générés dépendent de l'enrôlement du projet dans le standard agentique.
