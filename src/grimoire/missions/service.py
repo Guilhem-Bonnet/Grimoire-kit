@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Any
 from grimoire.core.exceptions import GrimoireError, GrimoireMissionError
 from grimoire.core.standard_generation import STANDARD_DIR
 from grimoire.core.standard_state import current_session, invalidate_cache
+from grimoire.missions import question_gestures
 from grimoire.missions.admission import (
     QueuePlan,
     RouteRef,
@@ -45,6 +46,8 @@ from grimoire.missions.gates import GateRefusal, GateVerdict, check_transition
 from grimoire.missions.intake import IntakeRequest, MissionIntakeService
 from grimoire.missions.ledger import MissionLedger, ReapReport
 from grimoire.missions.pause import PAUSE_LIFTED_CAUSE, PauseState, pause_claim_guard, read_pause
+from grimoire.missions.question_gestures import BatchOutcome
+from grimoire.missions.questions import OPEN, QuestionSpec, group_settled, open_in_group, records_of
 from grimoire.missions.recall import DEFAULT_TOKEN_BUDGET, TaskRecall, build_task_recall, consolidate_task_memory
 from grimoire.missions.reservation import find_conflict, reservation_refusal
 from grimoire.missions.schemas import (
@@ -774,14 +777,7 @@ class TaskService:
                 "répond à une question — un agent ne tranche pas ce qu'il a demandé"
             )
         task = self.require(task_id)
-        waiting = task.waiting
-        if task.status is not TaskState.WAITING or waiting is None or waiting.question is None:
-            raise GrimoireMissionError(f"{task_id} n'attend aucune réponse (état {task.status.value})")
-        question = waiting.question
-        if question_id and question_id != question.id:
-            raise GrimoireMissionError(
-                f"Question {question_id} inconnue pour {task_id} : la question en attente est {question.id}"
-            )
+        question = self._question_to_answer(task, question_id)
         if question.origin == "flow" and not attested_by_flow:
             raise GrimoireMissionError(
                 f"Réponse refusée pour {task_id} : la question {question.id} vient d'un checkpoint de flow, dont la "
@@ -798,7 +794,48 @@ class TaskService:
         self.ledger.add_directive(
             task_id, f"Réponse à « {question.text} » : {answer}", actor_id=actor, kind="directive", origin=origin
         )
+        task = self.require(task_id)
+        abandon = answer.lower() == ABANDON and ABANDON in (o.lower() for o in question.options)
+        if task.status is TaskState.WAITING and not abandon and not group_settled(task):
+            # W6-07 : une bloquante du lot reste sans réponse — la tâche attend encore, rien d'autre ne bouge.
+            return TaskMove(task=task, previous=TaskState.WAITING, verdict=GateVerdict("", "", ()), board_path=None)
+        if task.status is not TaskState.WAITING:
+            # W6-07 : réponse à une question non bloquante d'une tâche qui ne l'attendait pas : tracée, sans réveil.
+            return TaskMove(task=task, previous=task.status, verdict=GateVerdict("", "", ()), board_path=None)
         return self._settle_answer(task, question, answer, actor, in_place=attested_by_flow)
+
+    def _question_to_answer(self, task: MissionTask, question_id: str) -> Question:
+        """La question visée par une réponse humaine : celle du lot en attente, ou une non bloquante encore ouverte.
+
+        Sans *question_id* : la première question ouverte du lot (la tête pour une question seule, K6).
+        """
+        records = {r.id: r for r in records_of(task)}
+        group = open_in_group(task)
+        waiting = task.waiting
+        if not question_id:
+            if task.status is not TaskState.WAITING or waiting is None or waiting.question is None or not group:
+                raise GrimoireMissionError(f"{task.id} n'attend aucune réponse (état {task.status.value})")
+            return group[0].question
+        record = records.get(question_id)
+        if record is not None and record.base_status != OPEN:
+            raise GrimoireMissionError(f"Question {question_id} déjà tranchée ({record.base_status}) pour {task.id}")
+        if record is not None and (record in group or not record.question.blocking):
+            return record.question
+        if task.status is not TaskState.WAITING or waiting is None or waiting.question is None:
+            raise GrimoireMissionError(f"{task.id} n'attend aucune réponse (état {task.status.value})")
+        raise GrimoireMissionError(
+            f"Question {question_id} inconnue pour {task.id} : la question en attente est {waiting.question.id}"
+        )
+
+    def ask_batch(
+        self, task_id: str, specs: list[QuestionSpec], actor: str, *, origin: str = "agent", epoch: int | None = None
+    ) -> BatchOutcome:
+        """Pose un lot de questions en une interruption (W6-07) — voir :func:`question_gestures.ask_batch`."""
+        return question_gestures.ask_batch(self, task_id, specs, actor, origin=origin, epoch=epoch)
+
+    def resolve_question(self, task_id: str, question_id: str, answer: str, source: str, actor: str) -> MissionTask:
+        """Déduit, source citée, la réponse d'une question non bloquante (W6-07)."""
+        return question_gestures.resolve_question(self, task_id, question_id, answer, source, actor)
 
     def _settle_answer(
         self, task: MissionTask, question: Question, answer: str, actor: str, *, in_place: bool = False
@@ -904,7 +941,7 @@ class TaskService:
         return [*rest, *sorted(lifted, key=lambda item: position[item[0].id])]
 
     def _answer_of(self, task: MissionTask, waiting: Waiting) -> str | None:
-        if waiting.question is None:
+        if waiting.question is None or not group_settled(task):
             return None
         for event in reversed(self.ledger.list_events(task.id)):
             if (

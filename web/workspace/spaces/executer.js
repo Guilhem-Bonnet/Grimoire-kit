@@ -206,6 +206,7 @@ function injectStyles() {
     .ex-decision-options { display: flex; flex-wrap: wrap; gap: 6px; }
     .ex-decision textarea { min-height: 44px; font: inherit; font-size: var(--t-s); }
     .ex-decision-note { font-size: var(--t-min); color: var(--ink3); }
+    .ex-decision-item { display: flex; flex-direction: column; gap: var(--sp-2); padding-top: var(--sp-2); border-top: 1px solid var(--line); }
   `;
   document.head.append(style);
 }
@@ -622,8 +623,21 @@ async function renderTimeline(root, ctx, task) {
 // Une décision : la question, ses réponses proposées, une zone libre. Le clic
 // poste `answer` ; le serveur répond 200 avec la tâche rendue (`ready`) ou
 // refuse (question déjà tranchée, question de flow) — le refus s'affiche.
+// W6-07 (issue #564) : un lot de questions posé en une fois est UNE carte, une
+// réponse par question encore ouverte (`waiting.batch`, statut lu au registre
+// `task.questions`) ; la tâche n'est rendue qu'une fois les bloquantes tranchées.
+function openQuestions(task) {
+  const w = task.waiting;
+  const group = [w.question, ...(w.batch || [])];
+  const answered = new Set((task.questions || [])
+    .filter((r) => r.answer_origin === 'human' && r.question).map((r) => r.question.id));
+  const open = group.filter((q) => !answered.has(q.id));
+  return open.length ? open : [w.question];
+}
+
 function decisionCard(ctx, task, portfolio, onWritten) {
-  const q = task.waiting.question;
+  const open = openQuestions(task);
+  const q = open[0];
   const node = document.createElement('div');
   node.className = 'ex-decision';
   node.dataset.role = 'decision';
@@ -633,21 +647,45 @@ function decisionCard(ctx, task, portfolio, onWritten) {
   if (portfolio) head.append(text('span', 'chip', task.project?.name || task.project?.slug || 'projet'));
   head.append(
     text('span', 'ex-decision-title', task.title || task.id),
-    text('span', 'lbl', QUESTION_KIND_LABEL[q.kind] || q.kind),
+    text('span', 'lbl', open.length > 1 ? `${open.length} questions en un lot` : (QUESTION_KIND_LABEL[q.kind] || q.kind)),
     text('span', 'lbl', ageText(task.waiting.since || q.asked_at)),
   );
-  node.append(head, text('p', 'ex-decision-question', q.text));
+  node.append(head);
 
   const hint = task.waiting.resume_hint;
-  if (hint && hint.session_id) {
-    node.append(text('div', 'ex-decision-note', `session ${hint.session_id}` + (hint.resume_command ? ` — ${hint.resume_command}` : '')));
-  }
+  const hintNote = hint && hint.session_id
+    ? text('div', 'ex-decision-note', `session ${hint.session_id}` + (hint.resume_command ? ` — ${hint.resume_command}` : ''))
+    : null;
   if (q.origin === 'flow') {
+    node.append(text('p', 'ex-decision-question', q.text));
+    if (hintNote) node.append(hintNote);
     node.append(text('div', 'ex-decision-note', "Cette décision est celle d'un checkpoint de flow : elle s'atteste dans le flux (un tour humain de la session qui l'a présenté, puis la même décision renvoyée), pas ici."));
     return node;
   }
-
   const locked = !portfolio && ctx.host.readOnly;
+  for (const question of open) {
+    const box = open.length > 1 ? document.createElement('div') : node;
+    if (box !== node) {
+      box.className = 'ex-decision-item';
+      box.dataset.role = 'decision-question';
+      box.dataset.question = question.id;
+      node.append(box);
+    }
+    appendQuestionForm(ctx, box, task, question, portfolio, locked, onWritten, open.length > 1);
+    if (box === node && hintNote) node.insertBefore(hintNote, node.querySelector('.ex-decision-options'));
+  }
+  if (open.length > 1 && hintNote) node.append(hintNote);
+  if (locked) node.append(text('div', 'ex-decision-note', "le cockpit est en lecture seule : ouvrez l'atelier de ce projet, ou la portée « Tous les projets »"));
+  return node;
+}
+
+function appendQuestionForm(ctx, box, task, q, portfolio, locked, onWritten, grouped) {
+  box.append(text('p', 'ex-decision-question', q.text));
+  const tags = [];
+  if (grouped) tags.push(QUESTION_KIND_LABEL[q.kind] || q.kind);
+  if (q.blocking === false) tags.push('non bloquante');
+  if (tags.length) box.append(text('div', 'ex-decision-note', tags.join(' · ')));
+  if (q.why) box.append(text('div', 'ex-decision-note', `pourquoi : ${q.why}`));
   const feedback = document.createElement('div');
   const area = document.createElement('textarea');
   area.className = 'input';
@@ -658,7 +696,7 @@ function decisionCard(ctx, task, portfolio, onWritten) {
     const answer = (value || '').trim();
     if (!answer) { feedback.replaceChildren(text('div', 'ex-refusal', 'une réponse vide ne tranche rien')); return; }
     const body = { text: answer, question_id: q.id };
-    ctx.dock.echo(`grimoire task answer ${task.id} "${answer}"` + (portfolio ? `  # projet ${task.project?.slug}` : ''));
+    ctx.dock.echo(`grimoire task answer ${task.id} "${answer}" --question ${q.id}` + (portfolio ? `  # projet ${task.project?.slug}` : ''));
     try {
       if (portfolio) await ctx.api.portfolioTaskAction(task.id, 'answer', body, task.project?.slug);
       else await ctx.api.taskAction(task.id, 'answer', body);
@@ -686,9 +724,7 @@ function decisionCard(ctx, task, portfolio, onWritten) {
   submit.dataset.role = 'answer-submit';
   submit.disabled = locked;
   submit.addEventListener('click', () => send(area.value));
-  node.append(options, area, row(submit), feedback);
-  if (locked) node.append(text('div', 'ex-decision-note', "le cockpit est en lecture seule : ouvrez l'atelier de ce projet, ou la portée « Tous les projets »"));
-  return node;
+  box.append(options, area, row(submit), feedback);
 }
 
 function renderDecisions(root, ctx, tasks, portfolio, onWritten) {
