@@ -13,6 +13,7 @@ Override the home dir with ``GRIMOIRE_COCKPIT_HOME``.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import shutil
@@ -259,6 +260,10 @@ def _run_memory_in_process(proot: Path, argv: list[str]) -> _CliResult:
         pool.shutdown(wait=False)
 
 
+#: Borne du drainage d'un corps refusé, comme ``request_guard.drain_body``.
+_DRAIN_LIMIT = 1 << 20
+
+
 class _CountingReader:
     """``rfile`` qui compte les octets lus — pour savoir ce qu'il reste du corps.
 
@@ -320,9 +325,10 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             declared = int(self.headers.get("Content-Length") or 0)
         except (ValueError, TypeError):
             return
-        remaining = declared - rfile.consumed
+        remaining = min(declared - rfile.consumed, _DRAIN_LIMIT)
         if remaining > 0:
-            drain_body({"Content-Length": str(remaining)}, rfile)
+            with contextlib.suppress(OSError, ValueError):
+                rfile.read(remaining)
 
     def _local_only(self) -> bool:
         """Le cockpit ne répond qu'à sa propre UI, sur la loopback.
