@@ -122,7 +122,7 @@ def _decide_stop(hook: HookInput) -> Decision:
     if not is_standard_enrolled(hook.project_root):
         return Decision(detail={"skipped": "project_not_enrolled"})
 
-    active = stop_scope(hook, resolve_active_task(hook.project_root, session_id=hook.session_id))
+    active = stop_scope(hook, resolve_active_task(hook.project_root, session_id=hook.session_id, agent_id=hook.agent_id))
     task_id = active.task_id
     profile = session_profile(hook)
     if active.is_fallback:
@@ -327,7 +327,7 @@ def _continued_stop(hook: HookInput) -> Decision:
     try:
         if not is_standard_enrolled(hook.project_root):
             return skipped
-        active = resolve_active_task(hook.project_root, session_id=hook.session_id)
+        active = resolve_active_task(hook.project_root, session_id=hook.session_id, agent_id=hook.agent_id)
         profile = session_profile(hook)
         if active.is_fallback or profile not in _BLOCKING_PROFILES:
             return skipped
