@@ -4136,13 +4136,13 @@ class TestDiscoverFooter:
     def test_doctor_names_a_discovery_command_on_fresh_project(self, fresh_project: Path) -> None:
         result = runner.invoke(app, ["doctor", str(fresh_project)])
         assert result.exit_code == 0, result.output
-        assert "Découvrir" in result.output
-        assert "grimoire" in result.output.split("Découvrir")[1]
+        assert "Discover" in result.output
+        assert "grimoire" in result.output.split("Discover")[1]
 
     def test_status_names_a_discovery_command_on_fresh_project(self, fresh_project: Path) -> None:
         result = runner.invoke(app, ["status", str(fresh_project)])
         assert result.exit_code == 0, result.output
-        assert "Découvrir" in result.output
+        assert "Discover" in result.output
 
     def test_doctor_footer_silent_when_everything_exploited(self, fresh_project: Path) -> None:
         with patch(
@@ -4150,7 +4150,7 @@ class TestDiscoverFooter:
             return_value=[],
         ):
             result = runner.invoke(app, ["doctor", str(fresh_project)])
-        assert "Découvrir" not in result.output
+        assert "Discover" not in result.output
 
     def test_status_footer_silent_when_everything_exploited(self, fresh_project: Path) -> None:
         with patch(
@@ -4158,11 +4158,11 @@ class TestDiscoverFooter:
             return_value=[],
         ):
             result = runner.invoke(app, ["status", str(fresh_project)])
-        assert "Découvrir" not in result.output
+        assert "Discover" not in result.output
 
     def test_doctor_json_has_no_footer_text(self, fresh_project: Path) -> None:
         result = runner.invoke(app, ["doctor", "-o", "json", str(fresh_project)])
-        assert "Découvrir" not in result.output
+        assert "Discover" not in result.output
 
     def test_doctor_never_suggests_cockpit_when_env_opts_out(self, fresh_project: Path) -> None:
         """Copilot review on PR #617: the footer must honour GRIMOIRE_NO_COCKPIT
@@ -4194,7 +4194,7 @@ class TestDoctorMemoryStackNotStarted:
         )
         result = runner.invoke(app, ["doctor", str(tmp_path)])
         assert result.exit_code == 0, result.output
-        assert "pile mémoire non démarrée (weaviate, neo4j)" in result.output
+        assert "memory stack not started (weaviate, neo4j)" in result.output
         assert "--start --apply" in result.output
 
         as_json = runner.invoke(app, ["-o", "json", "doctor", str(tmp_path)])

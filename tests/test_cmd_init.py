@@ -536,7 +536,7 @@ class TestInitNeverSilentlyAttaches:
         assert "Weaviate : démarré" in result.output
         assert "Neo4j : démarré" in result.output
         assert "Redis : démarré" in result.output
-        assert "pile mémoire non démarrée" not in result.output
+        assert "memory stack not started" not in result.output
 
     def test_bare_non_tty_with_docker_available_configures_but_never_starts(
         self, runner, app, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -563,7 +563,7 @@ class TestInitNeverSilentlyAttaches:
         content = (target / "project-context.yaml").read_text(encoding="utf-8")
         assert 'backend: "weaviate-server"' in content
         assert 'layer_profile: "complet"' in content
-        assert "pile mémoire non démarrée" in result.output
+        assert "memory stack not started" in result.output
         assert "grimoire memory up --profile complet --start --apply" in result.output
 
     def test_explicit_backend_is_still_honored_over_detection(
@@ -671,6 +671,13 @@ class TestParseArchetypeSelection:
     def test_none_returns_minimal(self) -> None:
         from grimoire.cli.cmd_init import _parse_archetype_selection
         assert _parse_archetype_selection("none") == ["minimal"]
+
+    def test_unreadable_input_never_falls_back_to_minimal(self) -> None:
+        """Décision 2026-09-18 : `minimal` ne s'obtient que sur demande (`none`),
+        jamais par défaut — une saisie illisible retombe sur `stack` (Atlas)."""
+        from grimoire.cli.cmd_init import _parse_archetype_selection
+        assert _parse_archetype_selection("zzz") == ["stack"]
+        assert _parse_archetype_selection("99") == ["stack"]
 
     def test_empty_returns_minimal(self) -> None:
         from grimoire.cli.cmd_init import _parse_archetype_selection

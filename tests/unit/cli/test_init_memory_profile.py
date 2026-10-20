@@ -181,7 +181,7 @@ class TestStartCompletStackNow:
         *_rest, start_stack = cmd_init._choose_memory_profile("local", offer_qdrant_docker=False)
 
         assert start_stack is True
-        prompt = next(p for p in defaults if "Démarrer la pile mémoire complète" in p)
+        prompt = next(p for p in defaults if "Start the full memory stack" in p)
         assert defaults[prompt] is True
 
     def test_declining_is_honoured(self, answers: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
@@ -202,7 +202,7 @@ class TestStartCompletStackNow:
         *_rest, start_stack = cmd_init._choose_memory_profile("local", offer_qdrant_docker=False)
 
         assert start_stack is False
-        assert not any("Démarrer la pile mémoire complète" in prompt for prompt in answers["asked"])
+        assert not any("Start the full memory stack" in prompt for prompt in answers["asked"])
 
 
 class TestCapabilityProbing:

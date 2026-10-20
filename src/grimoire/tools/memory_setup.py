@@ -268,7 +268,7 @@ def unreached_configured_services(memory: MemoryConfig) -> list[str]:
     were ever started — the express and interactive Memory steps in
     ``grimoire init`` write that aspirational config without starting
     anything unless consent was given (2026-09-18 arbitrage). This is the
-    gap ``grimoire doctor`` reports as *pile mémoire non démarrée*: never a
+    gap ``grimoire doctor`` reports as *memory stack not started*: never a
     diagnostic on whether the config is well-formed, only on whether the
     services it names are reachable this instant.
 

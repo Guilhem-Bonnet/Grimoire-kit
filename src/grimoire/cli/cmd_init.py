@@ -468,7 +468,7 @@ def _choose_memory_profile(
         choices.append(key)
         if profile.id == recommended_id:
             default_choice = key
-            console.print(f"    [bold]{key}[/bold]) {profile.label:<10} {profile.summary} [cyan]← recommandé[/cyan]")
+            console.print(f"    [bold]{key}[/bold]) {profile.label:<10} {profile.summary} [cyan]← recommended[/cyan]")
         else:
             console.print(f"    [bold]{key}[/bold]) {profile.label:<10} {profile.summary}")
 
@@ -504,12 +504,12 @@ def _choose_memory_profile(
     start_stack = False
     if chosen.id == "complet":
         start_stack = Confirm.ask(
-            "  [bold]Démarrer la pile mémoire complète (Weaviate + Neo4j + Redis) maintenant ?[/bold]",
+            "  [bold]Start the full memory stack (Weaviate + Neo4j + Redis) now?[/bold]",
             default=True,
         )
         if not start_stack:
             console.print(
-                "  [dim]→ config écrite pour `complet` ; démarrez-la plus tard avec "
+                "  [dim]→ config written for `complet`; start it later with "
                 "`grimoire memory up --profile complet --start --apply`.[/dim]"
             )
 
@@ -581,7 +581,7 @@ def _run_wizard(
 
     # ── Step 3/5 · Memory composition ─────────────────────────────────
     console.print()
-    console.print("  [dim]\\[###--] 3/5 · Mémoire[/dim]")
+    console.print("  [dim]\\[###--] 3/5 · Memory[/dim]")
     recommended_id, recommended_reason = _recommend_memory_profile()
     profile_id, backend, offline, qdrant_docker, start_stack = _choose_memory_profile(
         backend,
@@ -657,7 +657,7 @@ def _run_wizard(
     console.print(f"    Skill level: {skill_level}")
     console.print(f"    Archetypes:  {arch_display}")
     memory_profile = memory_profiles.resolve(profile_id)
-    console.print(f"    Mémoire:     {memory_profile.label} — {memory_profile.summary}")
+    console.print(f"    Memory:      {memory_profile.label} — {memory_profile.summary}")
     console.print(f"    Backend:     {backend}")
     if qdrant_docker:
         console.print("    Qdrant:      Docker local auto-start")
@@ -716,7 +716,7 @@ def _parse_archetype_selection(
             if key not in selected:
                 selected.append(key)
 
-    return selected or ["minimal"]
+    return selected or ["stack"]  # unreadable input never lands on `minimal` (2026-09-18); `none` is explicit
 
 
 def _guided_discovery(scan: ScanResult | None) -> list[str]:
@@ -775,6 +775,10 @@ def _display_composition_preview(archetypes: list[str]) -> None:
     for key in archetypes:
         if key == "minimal":
             continue
+        if key == "stack":  # not in `_ARCHETYPE_INFO` (fallback, never a menu entry): one generalist agent
+            console.print("  Stack (Atlas)          → +1 agent · generalist, skills of the detected stack")
+            total_agents += 1
+            continue
         info = _ARCHETYPE_INFO.get(key)
         if info:
             label, agent_count, traits = info
@@ -811,14 +815,12 @@ def _memory_step_summary(target: Path, *, applied_profile: str, reason: str) -> 
     backend = ""
     not_started: list[str] = []
     with contextlib.suppress(GrimoireConfigError, OSError):
-        # A reporting step must never break `init`: any config-read failure
-        # here just falls back to what this call already knows it applied.
+        # A reporting step must never break `init`: a config-read failure falls back to what was applied.
         cfg = GrimoireConfig.from_yaml(target / "project-context.yaml")
         served = cfg.memory.layer_profile or applied_profile
         backend = cfg.memory.backend
-        # A `complet`/`graphe` composition can be *configured* without ever
-        # being *started* (no consent given — arbitrage 2026-09-18 on #619):
-        # this is the gap `grimoire doctor` names "pile mémoire non démarrée".
+        # `complet`/`graphe` can be configured yet never started (no consent, arbitrage #619):
+        # the gap `grimoire doctor` names "memory stack not started".
         not_started = unreached_configured_services(cfg.memory)
 
     if not local_embedding_available():
@@ -913,7 +915,7 @@ def _display_report(
         # Configured (2026-09-18 arbitrage on #619) but not started — no
         # consent was given (bare non-TTY run, no `-y`, no `--memory-stack up`).
         console.print(
-            f"           [yellow]![/yellow] [dim]pile mémoire non démarrée ({', '.join(not_started)}) : "
+            f"           [yellow]![/yellow] [dim]memory stack not started ({', '.join(not_started)}): "
             f"grimoire memory up --profile {memory_summary['served']} --start --apply[/dim]"
         )
     else:
@@ -960,7 +962,7 @@ def _display_report(
         layer_profile=(memory_summary or {}).get("served", ""),
     )
     body_lines = [
-        "[bold]Your project is alive![/bold]\n",
+        "[bold]Project ready.[/bold]\n",
         f"  {panel.headline}\n",
         f"  [bold cyan]Open it:[/bold cyan] [cyan]code {target.name}[/cyan]\n",
     ]
@@ -1266,16 +1268,11 @@ def run_init(
     elif backend == "auto":
         detected_service = detect_memory_backend()
         backend = "lexical"
-        # Onboarding decision 2026-09-18 (PR2, revised same day by Guilhem's
-        # arbitrage on #619): the express/non-interactive path applies the
-        # richest composition this machine can serve — `complet` included —
-        # never a service merely *found* running (#496 stays intact: the
-        # backend a `complet` recommendation writes is always the kit's own
-        # fixed default, a fresh project-scoped collection, never whatever
-        # `detect_memory_backend()` happened to find). Whether the missing
-        # services actually get *started* is a separate consent question,
-        # resolved below (``start_memory_stack_consent``) — this only ever
-        # decides which profile gets written.
+        # Onboarding decision 2026-09-18 (PR2, arbitrage #619): the express path applies
+        # the richest composition this machine can serve — `complet` included — never a
+        # service merely *found* running (#496: a `complet` recommendation always writes the
+        # kit's own default, a fresh project-scoped collection). Whether the missing services
+        # get *started* is the separate consent question below (``start_memory_stack_consent``).
         if not memory_profile and not is_interactive:
             memory_profile, memory_default_reason = _recommend_memory_profile()
             if memory_profile == "standard":
