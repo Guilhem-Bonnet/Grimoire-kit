@@ -10,6 +10,7 @@ Chaque test dit ce qu'il empêche.
 from __future__ import annotations
 
 import json
+import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -147,9 +148,13 @@ def test_un_battement_de_session_change_l_empreinte(tmp_path: Path) -> None:
     now = datetime.now(UTC)
     path = _journal(tmp_path, "S1", task_id="T", started=now - timedelta(minutes=10), updated=now - timedelta(minutes=5))
     first = wp_fingerprint(tmp_path, now)
+    before = path.stat()
 
     path.write_text(path.read_text(encoding="utf-8").replace(
         (now - timedelta(minutes=5)).isoformat(), (now - timedelta(seconds=3)).isoformat()), encoding="utf-8")
+    # Même taille et même mtime qu'avant, comme sous l'horloge grossière de Windows : seul le contenu change.
+    os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+    assert path.stat().st_size == before.st_size
 
     assert wp_fingerprint(tmp_path, now) != first
 

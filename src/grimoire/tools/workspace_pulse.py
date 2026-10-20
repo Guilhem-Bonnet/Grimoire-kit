@@ -68,12 +68,21 @@ def pulse_interval() -> int:
     return max(MIN_INTERVAL_SECONDS, min(MAX_INTERVAL_SECONDS, value))
 
 
-def _stat(path: Path) -> tuple[str, int, int] | None:
+_CONTENT_HASH_MAX_BYTES = 64 * 1024
+
+
+def _stat(path: Path) -> tuple[str, int, int, str] | None:
     try:
         info = path.stat()
+        # Un petit JSON réécrit en place (session, bail) peut garder taille et mtime : l'horloge
+        # du système de fichiers est grossière sous Windows. Son contenu tranche ; le journal
+        # d'événements, lui, ne fait que croître.
+        content = ""
+        if path.suffix == ".json" and info.st_size <= _CONTENT_HASH_MAX_BYTES:
+            content = hashlib.blake2b(path.read_bytes(), digest_size=8).hexdigest()
     except OSError:
         return None  # absent ou illisible : l'absence fait elle-même partie de l'empreinte
-    return (path.name, info.st_mtime_ns, info.st_size)
+    return (path.name, info.st_mtime_ns, info.st_size, content)
 
 
 def _watched(root: Path) -> list[Path]:

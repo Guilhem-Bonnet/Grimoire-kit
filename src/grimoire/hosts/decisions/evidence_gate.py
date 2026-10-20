@@ -17,10 +17,10 @@ from grimoire.hosts.decisions.enrolment import (
     ambiguity_text,
     expired_text,
     no_task_stop_reason,
+    parked_task_of_session,
     record_unattached_work,
     session_mutation_count,
     stop_scope,
-    waiting_task_of_session,
 )
 from grimoire.hosts.decisions.gate_summary import _gate_summary
 from grimoire.hosts.decisions.profile_floor import session_profile
@@ -126,7 +126,7 @@ def _decide_stop(hook: HookInput) -> Decision:
     task_id = active.task_id
     profile = session_profile(hook)
     if active.is_fallback:
-        parked = _parked_waiting(hook)
+        parked = _parked_task(hook, profile)
         if parked is not None:
             return parked
         no_task = _no_task_closure(hook, profile, active.candidates, active.expired)
@@ -201,23 +201,49 @@ def _decide_stop(hook: HookInput) -> Decision:
     return _with_done_gate(Decision(outcome=Outcome.BLOCK, reason=reason, detail=detail), hook, task_id, profile)
 
 
-def _parked_waiting(hook: HookInput) -> Decision | None:
-    """K6 : la tâche de la session est garée en ``waiting`` — la session peut s'arrêter, et le dit.
+def _parked_task(hook: HookInput, profile: str) -> Decision | None:
+    """La tâche de la session n'est plus tenue mais garée ou rendue — la session peut s'arrêter, et le dit.
 
-    Sans cela, une session qui vient de poser sa question (``task ask``) ou son attente
-    (``task wait``) était refusée au ``Stop`` en profil gouverné comme un travail hors tâche.
+    K6 : une session qui vient de poser sa question (``task ask``) ou son attente (``task wait``) était
+    refusée au ``Stop`` en profil gouverné comme un travail hors tâche. D-12 : de même pour une tâche
+    rendue pour vérification — le geste que le refus de ``Stop`` demande lui-même —, bloquée, échouée,
+    annulée ou fermée. Rendue, elle reste jugée sur ses gates de preuve : rouges, le refus la nomme.
     """
-    task = waiting_task_of_session(hook)
+    task = parked_task_of_session(hook)
     if task is None:
         return None
-    reason = task.waiting.reason if task.waiting is not None else "?"
-    return Decision(
-        context=(
-            f"[Grimoire] Tâche {task.id} garée en attente ({reason}) : la session peut s'arrêter ; "
-            "elle reprendra avec `grimoire task resume` ou par un nouveau claim une fois l'attente levée."
-        ),
-        detail={"task_id": task.id, "task_state": task.status.value, "waiting_reason": reason, "parked": True},
+    state = task.status.value
+    info: dict[str, Any] = {"task_id": task.id, "task_state": state, "parked": True}
+    if state == "waiting":
+        reason = task.waiting.reason if task.waiting is not None else "?"
+        return Decision(
+            context=(
+                f"[Grimoire] Tâche {task.id} garée en attente ({reason}) : la session peut s'arrêter ; "
+                "elle reprendra avec `grimoire task resume` ou par un nouveau claim une fois l'attente levée."
+            ),
+            detail={**info, "waiting_reason": reason},
+        )
+    if state != "needs_verification":
+        return Decision(context=f"[Grimoire] Tâche {task.id} {state} : la session l'a lâchée, elle peut s'arrêter.", detail=info)
+    try:
+        ok, summary, detail = _gate_summary(hook.project_root, task.id)
+    except Exception as exc:
+        return _unevaluable_gate(task.id, profile, exc)
+    info = {**detail, **info}
+    if ok:
+        return Decision(
+            context=f"[Grimoire] Tâche {task.id} rendue pour vérification, gates de preuve verts : la session peut s'arrêter.",
+            detail=info,
+        )
+    reason = (
+        f"[Grimoire] Tâche {task.id} rendue pour vérification, mais ses gates de preuve sont rouges (profil {profile}).\n"
+        f"{summary}\n"
+        f"Complète _grimoire-output/evidence/{task.id}/ puis relance "
+        f"`grimoire standard gate check --task-id {task.id} --strict`."
     )
+    if profile in _BLOCKING_PROFILES:
+        return Decision(outcome=Outcome.BLOCK, reason=reason, detail=info)
+    return Decision(context=reason, detail=info)
 
 
 def _unparked_task(hook: HookInput, active: Any, profile: str, detail: dict[str, Any]) -> Decision | None:
@@ -227,7 +253,7 @@ def _unparked_task(hook: HookInput, active: Any, profile: str, detail: dict[str,
     ``running``) : ni rendue pour vérification, ni bloquée, ni échouée, ni annulée. Un profil
     bloquant refuse la clôture en nommant les gestes qui la garent ; les autres le disent.
     « Garée » : ``needs_verification``/``blocked``/``failed``/``cancelled``, ou ``waiting`` (K6,
-    :func:`_parked_waiting`). ``stop_hook_active`` passe avant ce contrôle : le second ``Stop`` sort toujours.
+    :func:`_parked_task`). ``stop_hook_active`` passe avant ce contrôle : le second ``Stop`` sort toujours.
     """
     if active.source not in ("session_claim", "env", "ledger_claim"):
         return None
@@ -242,10 +268,16 @@ def _unparked_task(hook: HookInput, active: Any, profile: str, detail: dict[str,
         return None
     if task is None or task.status not in (TaskState.CLAIMED, TaskState.RUNNING):
         return None
+    # D-12 : `claimed → needs_verification` est une transition refusée par le ledger ; le geste passe par `running`.
+    hand_over = (
+        f"`grimoire task move {task.id} --to running` puis `--to needs_verification`"
+        if task.status is TaskState.CLAIMED
+        else f"`grimoire task move {task.id} --to needs_verification`"
+    )
     message = (
         f"[Grimoire] Tâche {task.id} encore {task.status.value} : cette session la tient (bail epoch "
         f"{task.claim.lease_epoch if task.claim else 0}) et ne l'a ni fermée ni garée.\n"
-        f"Rends-la avant de conclure : `grimoire task move {task.id} --to needs_verification` (preuve remise), "
+        f"Rends-la avant de conclure : {hand_over} (preuve remise), "
         f"`grimoire task block {task.id} --reason ...` (bloquée), `grimoire task ask {task.id} \"...\"` "
         f"(une décision attend l'humain), `grimoire task wait {task.id} --reason ci|quota|paused` (attente nommée), "
         f"ou `grimoire task cancel {task.id} --reason ...` (abandon). "
