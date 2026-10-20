@@ -86,7 +86,7 @@ Dans `claude_desktop_config.json` :
 | `task_show` | Une tâche : état, acceptation, claim, et ce que chaque prochain pas exigera ; `claim_blocked_by` nomme le checkpoint de vague qui ferme son claim (vide sinon) | lecture |
 | `task_waves` | Les vagues du plan ; avec `mission`, le checkpoint de chaque vague (statut, empreinte du diff fusionné, tâches couvertes) et `claim_blocked`, le motif de refus par tâche (W5-05) | lecture |
 | `task_claim` | Réclamer une tâche prête (`ready → claimed`) | écriture, destructif |
-| `task_update` | Déplacer (`move`), bloquer (`block`) ou fermer (`close`) une tâche | écriture, destructif |
+| `task_update` | Déplacer (`move`), bloquer (`block`) ou fermer (`close`) une tâche ; poser une question ou un lot (`ask`, `questions` en JSON : une interruption), déduire une non bloquante source citée (`resolve`) — jamais répondre à une bloquante | écriture, destructif |
 | `task_context` | Sur quelle tâche la session est, et son context bundle | écriture : produit `context-bundle.yaml` et journalise |
 | `task_recall` | Ce que la mémoire du projet sait de cette tâche et de ses voisines — borné en tokens | lecture |
 
