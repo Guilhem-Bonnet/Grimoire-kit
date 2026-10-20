@@ -422,8 +422,8 @@ body[data-active-space="source"] {
 
 /* Désactivé sans transparence : l'opacité faisait tomber --ink3 sous 4,5:1
  * (mesuré par test_workspace_tokens.py). La différence se lit à la couleur
- * d'encre et au curseur, pas à un fondu. */
-.btn:disabled,
+ * d'encre et au curseur, pas à un fondu. Le bouton désactivé (`.btn:disabled`)
+ * suit la règle Douce plus haut : fond retiré, bordure en tirets, --ink3. */
 .chip:disabled {
   color: var(--ink3);
   background: var(--e1);

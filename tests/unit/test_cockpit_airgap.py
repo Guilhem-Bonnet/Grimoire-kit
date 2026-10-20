@@ -31,6 +31,7 @@ ROOT = Path(__file__).resolve().parents[2]
 WEB = ROOT / "web"
 FONTS = WEB / "fonts"
 FONT_BUDGET_BYTES = 90 * 1024
+COCKPIT_FONTS = {"Geist-Variable-latin.woff2", "GeistMono-Variable-latin.woff2"}
 GOOGLE_FONT_HOSTS = (b"fonts.googleapis.com", b"fonts.gstatic.com")
 SERVED_SUFFIXES = {".html", ".css", ".js"}
 
@@ -105,13 +106,15 @@ def test_no_google_font_host_left_in_web() -> None:
 
 
 def test_vendored_fonts_are_latin_woff2_within_budget() -> None:
+    """Tout woff2 de web/fonts est un vrai woff2 ; le budget de 90 Ko porte sur la
+    paire Geist du cockpit (le teaser vendorise ses propres fontes à côté)."""
     fonts = sorted(FONTS.glob("*.woff2"))
     names = {f.name for f in fonts}
-    assert {"Geist-Variable-latin.woff2", "GeistMono-Variable-latin.woff2"} <= names
+    assert names >= COCKPIT_FONTS
     for font in fonts:
         assert font.read_bytes()[:4] == b"wOF2", f"{font.name} n'est pas un woff2"
-    total = sum(f.stat().st_size for f in fonts)
-    assert total <= FONT_BUDGET_BYTES, f"{total} octets pour les polices, budget {FONT_BUDGET_BYTES}"
+    total = sum(f.stat().st_size for f in fonts if f.name in COCKPIT_FONTS)
+    assert total <= FONT_BUDGET_BYTES, f"{total} octets pour les polices du cockpit, budget {FONT_BUDGET_BYTES}"
 
 
 def test_fonts_stylesheet_points_to_files_that_exist() -> None:
