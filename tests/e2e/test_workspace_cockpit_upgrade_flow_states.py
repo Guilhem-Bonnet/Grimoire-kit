@@ -39,6 +39,22 @@ def _fulfill(route: Route, payload: dict) -> None:
     route.fulfill(status=200, content_type="application/json", body=json.dumps(payload))
 
 
+def _open_project_level(page: Page) -> None:
+    """Attend la fiche rendue, PUIS passe au niveau « Projet ».
+
+    Issue #850 : cliquer le zoom dès que `#zoom-seg` existe tombait parfois
+    après le premier rendu de la fiche (hôte servi : le niveau Projet est
+    déjà actif). Le clic relançait alors `draw()` ; le bouton « Mettre à
+    jour » de l'ancien Inspecteur restait cliquable le temps du rechargement,
+    puis `renderSheet` vidait l'Inspecteur avec l'aperçu dedans — timeout sur
+    « Confirmer la mise à jour ». Attendre `.pl-sheet` rend l'ordre
+    déterministe ; `piloter.js` ignore de son côté un zoom inchangé.
+    """
+    page.wait_for_selector(".pl-sheet", timeout=15_000)
+    page.wait_for_selector("#zoom-seg button")
+    page.locator("#zoom-seg button", has_text="Projet").click()
+
+
 def test_apercu_en_echec_affiche_l_erreur_et_reactive_le_bouton(workspace: Page) -> None:
     workspace.route(
         "**/api/projects/update*",
@@ -52,8 +68,7 @@ def test_apercu_en_echec_affiche_l_erreur_et_reactive_le_bouton(workspace: Page)
         ),
     )
     _goto(workspace, "piloter")
-    workspace.wait_for_selector("#zoom-seg button")
-    workspace.locator("#zoom-seg button", has_text="Projet").click()
+    _open_project_level(workspace)
 
     update_button = workspace.locator("button", has_text="Mettre à jour — aperçu")
     update_button.wait_for(state="visible", timeout=15_000)
@@ -90,8 +105,7 @@ def test_confirmer_upgraded_but_failed_devrait_rafraichir_les_propositions(works
 
     workspace.route("**/api/projects/update*", _route)
     _goto(workspace, "piloter")
-    workspace.wait_for_selector("#zoom-seg button")
-    workspace.locator("#zoom-seg button", has_text="Projet").click()
+    _open_project_level(workspace)
 
     update_button = workspace.locator("button", has_text="Mettre à jour — aperçu")
     update_button.wait_for(state="visible", timeout=15_000)
