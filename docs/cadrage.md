@@ -62,6 +62,66 @@ n'est ni un prérequis à `grimoire init`, ni une case du standard obligatoire
 par défaut. Il ne devient exigeant qu'au moment où on le demande (voir plus
 bas).
 
+## Du cadrage aux tâches : `grimoire cadrage plan`
+
+Identifiez chaque exigence par `REQ-` suivi de chiffres, en tête de ligne ou
+dans la première colonne d'un tableau. Ses critères d'acceptation vont en
+sous-liste :
+
+```markdown
+## Fonctionnelles
+
+- REQ-001 [Must] : l'utilisateur se connecte par lien magique
+  - `pytest tests/test_login.py`
+- REQ-002 (Should) : export CSV des commandes
+  - un test vérifie que l'export contient toutes les commandes
+
+| ID | Exigence | Priorité | Critère d'acceptation |
+|----|----------|----------|-----------------------|
+| REQ-003 | Temps de réponse < 200 ms | Could | la revue de performance valide le rapport |
+```
+
+Ce qui est lu :
+
+- dans une section « Critères d'acceptation », `- REQ-001 : …` ajoute un
+  critère à REQ-001 ;
+- dans « Priorisation (MoSCoW) », `- REQ-001 : Must` fixe la priorité ;
+- dans « Hors périmètre », l'exigence sort du plan, comme une priorité `Won't` ;
+- une exigence reprise dans le cahier des charges est la même exigence :
+  sa formulation y fait foi. Redéfinie autrement dans un même fichier, c'est
+  un conflit à trancher.
+
+Un cadrage sans identifiant reste valide. `cadrage plan` dit alors qu'il ne voit
+rien à planifier.
+
+```bash
+grimoire cadrage plan            # aperçu ; dans un terminal, propose d'écrire
+grimoire cadrage plan --yes      # écrit les tâches et pose les questions
+grimoire cadrage plan --check    # couverture : rend 1 s'il reste un trou
+grimoire -o json cadrage plan    # le plan en JSON, sans écrire
+```
+
+Pour chaque exigence, une tâche du ledger : critères repris tels quels,
+`covers: [REQ-…]`, priorité tirée du MoSCoW, classe de vérifiabilité calculée.
+Un critère qui n'est qu'une commande entre accents graves devient une commande
+de vérification de la tâche. Relancer ne recrée rien : une exigence déjà
+couverte par une tâche non annulée est sautée.
+
+Les ambiguïtés deviennent des questions, posées en un seul lot sur une tâche
+« Cadrage : trancher les questions des exigences ». Elles arrivent dans la vue
+**Décisions** du cockpit :
+
+| Ambiguïté | Question | Bloquante |
+|---|---|---|
+| Exigence sans critère | « À quoi verra-t-on qu'elle est satisfaite ? » (la réponse humaine devient le critère) | oui |
+| Même identifiant défini deux fois dans un fichier | « Quelle formulation fait foi ? » | oui |
+| Critère sans verdict reconnu (V2) | « Comment vérifier … ? » | non |
+| Deux identifiants pour la même exigence | « Les fusionner ? » | non |
+
+Code de sortie 1 quand une exigence reste sans critère vérifiable ou en conflit.
+Corriger le fichier suffit à rendre une question caduque, sans réponse
+fabriquée.
+
 ## Le gate, dans `standard verify`
 
 `cadrage check` (la commande) et le gate du standard (`grimoire standard
@@ -93,8 +153,20 @@ grimoire standard verify                  # FAIL tant que exigences/CDC sont inc
 grimoire standard verify                  # verdict propre
 ```
 
-Les deux identifiants émis, `cadrage.gate_incomplete` et
-`cadrage.phase_incomplete`, sont comptés dans la dimension de score
+Avec des exigences identifiées, le gate lit aussi le ledger :
+
+- `cadrage.question_open` (**erreur**, tout profil) : une question bloquante
+  posée par `cadrage plan` reste sans réponse humaine alors que son ambiguïté
+  est toujours dans le cadrage. Le message nomme la question et comment y
+  répondre. Une question non bloquante ne fait jamais échouer le gate ;
+- `cadrage.requirement_uncovered` (exigence sans tâche) et
+  `cadrage.task_orphan` (tâche qui couvre une exigence absente) :
+  avertissements. Ils deviennent des erreurs en profil `governed` ou
+  `production` quand le cahier des charges porte `status: accepted` dans son
+  front matter (même règle que `acceptance.uncovered`).
+
+Les identifiants émis, `cadrage.gate_incomplete` et
+`cadrage.phase_incomplete`, puis les trois ci-dessus, sont comptés dans la dimension de score
 `artifacts` (voir `grimoire.core.standard_checks.registry`).
 
 ## Voir aussi
