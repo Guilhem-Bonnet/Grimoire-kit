@@ -215,6 +215,11 @@ sur tous les projets de la machine. Le tick et le frein lisent les deux et appli
   `paused: true` et les pilotes (`--executor dispatch`, `upgrade-flow`) s'arrêtent. Pendant la pause, `flow resume`
   refuse sans rien écrire ; une fois levée, il rouvre le node suivant (`workflow.resumed`, une seule fois).
   `drain` ne pose aucun run : ils finissent.
+- **Tâche garée et frein du bail.** Une tâche `waiting` garde le bail de sa session pour la reprise, mais il ne se renouvelle
+  pas pendant l'attente. Tant que l'outil tient dans le bail, rien ne change ; au-delà, le `PreToolUse` refuse les commandes
+  de la session **sauf** `grimoire task resume|show|attach|renew <sa tâche>` (options `--epoch`, `--actor`, `--session-id`
+  seulement, sans guillemets ni enchaînement) : la session reprend elle-même par `grimoire task resume <id> --epoch N`,
+  qui renouvelle aussitôt le battement de cœur. Une autre tâche, une écriture ou une forme non reconnue restent refusées.
 - **`resume`** : le drapeau est supprimé. Le tick suivant rend les `waiting(paused)` en `ready`, **dans l'ordre
   de la file** et sans leur faire perdre l'ancienneté d'avant leur claim. Une session restée ouverte lit à son tour
   « Pause levée : ta tâche … est de nouveau ready » et peut la re-claimer ; une session fermée retrouve `resume_command`.

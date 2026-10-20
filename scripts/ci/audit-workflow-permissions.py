@@ -68,7 +68,6 @@ WRITE_ALLOWLIST: dict[str, dict[str, set[str]]] = {
         "publish-pypi": {"id-token"},
         "github-release": {"contents"},
     },
-    "release-drafter.yml": {WORKFLOW_SCOPE: {"contents", "pull-requests"}},
     "stale.yml": {WORKFLOW_SCOPE: {"issues", "pull-requests"}},  # ferme les inactifs
     "weekly-bench.yml": {WORKFLOW_SCOPE: {"contents", "issues"}},  # pousse le rapport, ouvre l'issue
 }

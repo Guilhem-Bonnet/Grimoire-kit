@@ -1,8 +1,8 @@
 <p align="right"><a href="../../README.md">README</a></p>
 
-# <img src="../../docs/assets/icons/grimoire.svg" width="32" height="32" alt=""> Archétype fix-loop
+# Archétype fix-loop
 
-## <img src="../../docs/assets/icons/lightbulb.svg" width="28" height="28" alt=""> Qu'est-ce que c'est ?
+## Qu'est-ce que c'est ?
 
 L'archétype **fix-loop** fournit un workflow de correction fermée certifiée, éprouvé sur 86 cycles d'amélioration. Il garantit qu'aucun problème n'est déclaré résolu sans preuve d'exécution réelle.
 
@@ -14,7 +14,7 @@ L'archétype **fix-loop** fournit un workflow de correction fermée certifiée, 
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/sparkle.svg" width="28" height="28" alt=""> Ce que ça apporte
+## Ce que ça apporte
 
 | Fonctionnalité | Détail |
 |----------------|--------|
@@ -34,7 +34,7 @@ L'archétype **fix-loop** fournit un workflow de correction fermée certifiée, 
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/folder-tree.svg" width="28" height="28" alt=""> Fichiers inclus
+## <img src="../../docs/assets/icons/layers.svg" width="28" height="28" alt=""> Fichiers inclus
 
 ```
 archetypes/fix-loop/
@@ -80,7 +80,7 @@ Si vous n'avez pas d'agents ops/debug → laisser le mode SOLO (défaut, aucun p
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/puzzle.svg" width="28" height="28" alt=""> Avec l'archétype infra-ops
+## <img src="../../docs/assets/icons/layers.svg" width="28" height="28" alt=""> Avec l'archétype infra-ops
 
 L'archétype fix-loop est **complémentaire** à infra-ops. Combinaison recommandée :
 
@@ -94,7 +94,7 @@ Le fix-loop délègue automatiquement :
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/shield-pulse.svg" width="28" height="28" alt=""> Quand le gauntlet se déclenche
+## <img src="../../docs/assets/icons/shield.svg" width="28" height="28" alt=""> Quand le gauntlet se déclenche
 
 CHALLENGER et GATEKEEPER forment le *gauntlet* : le passage adversarial du cycle. Il coûte cher, donc il ne tourne pas partout. Trois règles décident.
 
@@ -130,7 +130,7 @@ Dans ce cas la boucle s'arrête et escalade, sans consommer les itérations rest
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> Comment ça marche en pratique
+## Comment ça marche en pratique
 
 ```
 Guilhem : "Le playbook deploy-monitoring.yml plante sur le handler grafana"

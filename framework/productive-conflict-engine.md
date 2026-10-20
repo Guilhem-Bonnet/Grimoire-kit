@@ -1,6 +1,6 @@
 <p align="right"><a href="../README.md">README</a> · <a href="../docs">Docs</a></p>
 
-# <img src="../docs/assets/icons/cognition.svg" width="32" height="32" alt=""> Productive Conflict Engine (PCE) — Débats Structurés pour Party Mode
+# Productive Conflict Engine (PCE) — Débats Structurés pour Party Mode
 
 > **BM-54** — Protocole de conflit productif pour transformer le party mode en machine à débat.
 >
@@ -14,7 +14,7 @@
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
 
-## <img src="../docs/assets/icons/cognition.svg" width="28" height="28" alt=""> Modes de Discussion
+## Modes de Discussion
 
 Le facilitateur choisit le mode de discussion selon le sujet et l'objectif :
 
@@ -234,7 +234,7 @@ facilitator_actions:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/team.svg" width="28" height="28" alt=""> Mécanisme de Vote Structuré
+## <img src="../docs/assets/icons/fleet.svg" width="28" height="28" alt=""> Mécanisme de Vote Structuré
 
 Pour les décisions où le débat ne converge pas :
 
@@ -276,7 +276,7 @@ vote_protocol:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/team.svg" width="28" height="28" alt=""> Rôles Dynamiques — Rotation Automatique
+## <img src="../docs/assets/icons/fleet.svg" width="28" height="28" alt=""> Rôles Dynamiques — Rotation Automatique
 
 ```yaml
 dynamic_roles:
@@ -309,7 +309,7 @@ dynamic_roles:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/team.svg" width="28" height="28" alt=""> Système de Réactions Inter-Agents
+## <img src="../docs/assets/icons/fleet.svg" width="28" height="28" alt=""> Système de Réactions Inter-Agents
 
 Les agents peuvent réagir aux interventions des autres :
 
@@ -354,7 +354,7 @@ reaction_system:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration dans le Party Mode Existant
+## Intégration dans le Party Mode Existant
 
 ### Modifications à `step-02-discussion-orchestration.md`
 
@@ -416,7 +416,7 @@ Si discussion circulaire → STOP + résumé + proposition
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration Grimoire Trace
+## Intégration Grimoire Trace
 
 ```
 [timestamp] [PCE]            [MODE:selected]      mode=red_blue_team | topic="{sujet}"
@@ -432,7 +432,7 @@ Si discussion circulaire → STOP + résumé + proposition
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Références Croisées
+## <img src="../docs/assets/icons/doc.svg" width="28" height="28" alt=""> Références Croisées
 
 - Orchestrator Gateway : [framework/orchestrator-gateway.md](orchestrator-gateway.md) (BM-53) — mode party du SOG
 - Selective Huddle : [framework/selective-huddle-protocol.md](selective-huddle-protocol.md) (BM-56) — mini-débats avec techniques PCE

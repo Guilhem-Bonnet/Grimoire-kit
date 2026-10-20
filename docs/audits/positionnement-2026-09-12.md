@@ -4,7 +4,7 @@ audience: décision
 
 <p align="right"><a href="../../README.md">README</a></p>
 
-# <img src="../assets/icons/microscope.svg" width="32" height="32" alt=""> Audit de positionnement — 2026-09-12
+# <img src="../assets/icons/search.svg" width="32" height="32" alt=""> Audit de positionnement — 2026-09-12
 
 Demande de Guilhem, 2026-09-12 : « est-ce qu'on est bien situé, est-ce qu'on exploite bien le
 potentiel, qu'est-ce qui pourrait être mieux ». Portée : `framework/agentic-industry-reference.md`
@@ -14,7 +14,7 @@ est sourcée par un fichier, une commande ou une issue — pas une opinion.
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/clipboard.svg" width="28" height="28" alt=""> Verdict en dix lignes
+## <img src="../assets/icons/doc.svg" width="28" height="28" alt=""> Verdict en dix lignes
 
 1. Le kit applique correctement ses propres douze règles opposables ; aucune violation trouvée en
    relisant le code au 2026-09-12.
@@ -48,7 +48,7 @@ est sourcée par un fichier, une commande ou une issue — pas une opinion.
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/handshake.svg" width="28" height="28" alt=""> Tableau section 10 refait (2026-09-12)
+## <img src="../assets/icons/handoff.svg" width="28" height="28" alt=""> Tableau section 10 refait (2026-09-12)
 
 Reproduit tel qu'appliqué dans `framework/agentic-industry-reference.md` — voir ce fichier pour la
 version canonique et sa légende de statuts.
@@ -82,7 +82,7 @@ version canonique et sa légende de statuts.
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/temple.svg" width="28" height="28" alt=""> Douze règles opposables : le kit se les applique-t-il ?
+## <img src="../assets/icons/layers.svg" width="28" height="28" alt=""> Douze règles opposables : le kit se les applique-t-il ?
 
 | Règle | Le kit se l'applique-t-il ? | Preuve ou contre-exemple |
 |---|---|---|
@@ -105,7 +105,7 @@ Verdict : dix règles sur douze appliquées avec preuve directe, une appliquée 
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/sparkle.svg" width="28" height="28" alt=""> Frontière 2026 : où se situe le kit
+## Frontière 2026 : où se situe le kit
 
 | Sujet | Position du kit | Preuve |
 |---|---|---|
@@ -179,7 +179,7 @@ double par construction (leçon de l'audit du 2026-09-08).
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../assets/icons/folder-tree.svg" width="28" height="28" alt=""> Sources à rafraîchir
+## <img src="../assets/icons/layers.svg" width="28" height="28" alt=""> Sources à rafraîchir
 
 Aucune source du registre (section 11) ne dépasse six mois : la veille est datée du 2026-09-08,
 quatre jours avant cet audit. Rien à rafraîchir dans l'immédiat sur MCP, A2A ou les modèles.

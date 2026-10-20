@@ -312,6 +312,15 @@ le ledger. Depuis le lot A de l'issue #638 :
   que lire ou répondre n'est jamais bloquée, pas plus qu'un hôte qui n'envoie
   pas de `session_id` (aucun journal, compteur à zéro). `stop_hook_active`
   laisse toujours passer le second `Stop`.
+- une session qui a lâché sa tâche n'est pas « hors tâche » (D-12) : si le
+  journal de session nomme une tâche dont le claim est le sien et qui est
+  `waiting`, `blocked`, `failed`, `cancelled` ou `closed`, `stop` la laisse
+  sortir en le disant ; `needs_verification` (tâche rendue) est jugée sur ses
+  gates de preuve, et un refus nomme la tâche et ce qui manque. Une tâche
+  encore `claimed` reçoit la consigne `task move --to running` puis
+  `--to needs_verification` (le ledger refuse `claimed → needs_verification`).
+  Chaque refus porte son motif au TraceLedger (`refusal:task_unparked`,
+  `refusal:no_active_task`, `refusal:gates_red`, `refusal:guard_error`).
 
 Dès que la tâche résolue est un claim du ledger, `user_prompt_submit` (et
 `session_start`) rattachent la session à ce claim par un événement

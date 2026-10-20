@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg">
-  <!-- Généré par scripts/build-icon-sprite.py depuis docs/assets/icons — ne pas éditer. -->
+  <!-- Figé : ancienne famille, remplacée par docs/assets/brand/icons.svg à la bascule du cockpit. -->
   <symbol id="alert" viewBox="0 0 24 24" fill="none">
     <g stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none">
       <path d="M12 3.5 L21.5 20 H2.5 Z"/>

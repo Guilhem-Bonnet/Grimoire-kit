@@ -4,7 +4,7 @@ audience: décision
 
 <p align="right"><a href="../../README.md">README</a> · <a href="../../CHANGELOG.md">Changelog</a> · <a href="../index.md">Docs</a></p>
 
-# <img src="../assets/icons/microscope.svg" width="32" height="32" alt=""> Idées à récolter — instruction et verdict (2026-09)
+# <img src="../assets/icons/search.svg" width="32" height="32" alt=""> Idées à récolter — instruction et verdict (2026-09)
 
 > Lot 1.3 du [plan produit 2026-Q4](../_archive/plan-2026-q4.md#6-idées-à-récolter),
 > issue [#551](https://github.com/Guilhem-Bonnet/Grimoire-kit/issues/551).

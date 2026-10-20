@@ -4,14 +4,14 @@ audience: référence
 
 <p align="right"><a href="../../README.md">README</a></p>
 
-# <img src="../../assets/icons/workflow.svg" width="32" height="32" alt=""> Taxonomie des workflows Grimoire
+# Taxonomie des workflows Grimoire
 
 > **ADR-002** — Clarification des trois types d'exécution dans le Grimoire Kit.
 >
 > Cette page répond au **comment** un workflow s'exécute. Pour le **quand** créer un artefact
 > (agent, skill, prompt) plutôt qu'un autre, voir [Doctrine — quand créer un artefact](quand-creer-un-artefact.md).
 
-## <img src="../../assets/icons/workflow.svg" width="28" height="28" alt=""> Les trois catégories
+## Les trois catégories
 
 | Type | Format | Exécuteur | Exemple |
 |------|--------|-----------|---------|
@@ -19,9 +19,9 @@ audience: référence
 | **Pipeline** | Python (.py) | Exécution CPU directe (stdlib) | dream.py, stigmergy.py, session-lifecycle.py |
 | **Orchestration** | Python + workers | ThreadPoolExecutor CPU (PAS multi-LLM) | orchestrator.py mode concurrent-cpu |
 
-<img src="../../assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../../assets/icons/workflow.svg" width="28" height="28" alt=""> Playbook (MD pour LLM)
+## Playbook (MD pour LLM)
 
 Un playbook est un document Markdown que le LLM charge et suit comme un guide. Il ne génère **aucune exécution programmatique** — c'est le LLM qui interprète les instructions et agit dans l'IDE.
 
@@ -32,9 +32,9 @@ Un playbook est un document Markdown que le LLM charge et suit comme un guide. I
 - Pas de parallélisme — une seule session LLM
 - Exemples : party-mode, brainstorming, elicitation, reviews
 
-<img src="../../assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../../assets/icons/workflow.svg" width="28" height="28" alt=""> Pipeline (Python exécutable)
+## Pipeline (Python exécutable)
 
 Un pipeline est un script Python qui effectue des traitements locaux sans appel LLM. Il lit des fichiers, fait des calculs, écrit des résultats.
 
@@ -45,9 +45,9 @@ Un pipeline est un script Python qui effectue des traitements locaux sans appel 
 - Peut être lancé en background
 - Exemples : dream.py, stigmergy.py, rag-indexer.py, maintenance.py
 
-<img src="../../assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../../assets/icons/boomerang.svg" width="28" height="28" alt=""> Orchestration (multi-worker CPU)
+## <img src="../assets/icons/undo.svg" width="28" height="28" alt=""> Orchestration (multi-worker CPU)
 
 L'orchestration coordonne plusieurs workers Python en parallèle via `ThreadPoolExecutor`. Ce n'est **PAS** du multi-LLM — c'est du parallélisme CPU local.
 
@@ -58,9 +58,9 @@ L'orchestration coordonne plusieurs workers Python en parallèle via `ThreadPool
 - Le LLM IDE reste la seule session active
 - Voir [ADR-001](decisions/adr-001-no-multi-llm.md) pour les détails
 
-<img src="../../assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../../assets/icons/chart.svg" width="28" height="28" alt=""> Diagramme
+## <img src="../assets/icons/board.svg" width="28" height="28" alt=""> Diagramme
 
 ```
 Utilisateur
@@ -72,9 +72,9 @@ Utilisateur
                             └── Peut lancer une ORCHESTRATION (ThreadPool workers)
 ```
 
-<img src="../../assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="../../assets/icons/lightbulb.svg" width="28" height="28" alt=""> Quand utiliser quoi ?
+## Quand utiliser quoi ?
 
 | Besoin | Type | Pourquoi |
 |--------|------|----------|
