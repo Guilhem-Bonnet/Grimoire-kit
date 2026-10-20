@@ -75,6 +75,7 @@ grimoire-kit/
 | [Archétypes](archetype-guide.md) | Templates de projets |
 | [MCP](mcp-integration.md) | Intégration Model Context Protocol |
 | [Troubleshooting](troubleshooting.md) | Résolution de problèmes |
+| [Comparaison avec AWS AI-DLC](comparaison-ai-dlc.md) | Ce qui se vérifie sans exécuter de modèle : garanties, coût, outillage, et ce qu'AI-DLC fait que le kit ne fait pas |
 | [Plan produit 2026-Q4](plan-2026-q4.md) | Cible, métriques mesurées, phases, matrice de parité, registre des risques |
 | [Banc à trois bras](bench-three-arms.md) | Protocole Claude Code nu / + ecc / + grimoire-kit, rejouable (issue #551) |
 | [Diagnostic du surcoût kit (2026-09-17)](bench/diagnostic-surcout-kit-2026-09-17.md) | Attribution du surcoût mesuré sur le banc, preuve des gates verts déconnectés des tests, lots de cœur |
