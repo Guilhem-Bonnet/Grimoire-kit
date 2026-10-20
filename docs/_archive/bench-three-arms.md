@@ -1366,7 +1366,58 @@ via `127.0.0.1:9`), `git ls-remote` du dépôt du kit (échec), `urllib` (connex
 #### 17.7.7 Ce qui reste avant le tamis payant
 
 - ~~Relecture des 16 énoncés~~ : faite le 2026-10-20 (§17.7.3).
-- Un run payant de contrôle, borné (une tâche K, `--max-total-usd 5`), pour vérifier ce que B-08 ne peut pas vérifier sans modèle :
-  `--disallowedTools` effectif, `CLAUDE_ENV_FILE` lu par l'outil `Bash`, `--max-budget-usd` respecté, coût réel d'une tâche K.
+- Run de contrôle : fait par une sonde le 2026-10-20 (§17.8). `--disallowedTools` et `CLAUDE_ENV_FILE` sont effectifs. L'arrêt au
+  plafond `--max-budget-usd` et le coût d'une tâche K ne sont pas mesurés. **Bloquant** : les serveurs MCP de la Forge sont exposés au bras `nu` (§17.8).
 - `aidlc_arm.py` sur le bloc K (étape 2b) : `--kit-repo`, environnement K et détection de fuite, à reprendre de `kit_lot.py`.
 - Pré-enregistrer la règle de sélection du tamis (§17.5) avant le premier run.
+
+### 17.8 Tamis du lot M : arrêté avant le pilote (2026-10-20)
+
+**Statut : tamis non joué. Dépense totale 0,1383 $, une sonde. Arrêt volontaire sur un doute de sécurité et de validité, pas sur le plafond.**
+
+**`--dry-run` complet.** Paramètres : bras `nu`, k = 1, `docs/bench/lot-m.json`, `--max-total-usd 90`, journal
+`_scratch/bench-lot-m-sieve/budget-ledger.jsonl` de la Forge. Le venv de test K est construit sous Python 3.12, sans grimoire-kit. Résultat : code 0
+en 5 min 07 s, 148 dépôts préparés. Les 16 tâches K sont rouges au parent et vertes au correctif, sans cache, après la relecture du §17.7.3.
+Estimation inchangée : 41,53 $, haut 83,77 $.
+
+**Sonde réelle des mécanismes K** (`claude -p`, `claude-opus-5-5`, Claude Code 2.1.304, `oauth-copy`, HOME isolé, environnement construit par
+`run_environment` puis `kit_lot.k_environment`). Coût : 0,1383 $, inscrit au journal de budget.
+
+| Mécanisme | Constat | Verdict |
+|---|---|---|
+| `--disallowedTools WebFetch WebSearch` | absents de la liste `tools` de l'événement `init` ; l'agent confirme ne pas les avoir | **effectif** |
+| `CLAUDE_ENV_FILE` | dans l'outil `Bash`, `HTTPS_PROXY=http://127.0.0.1:9` et `PIP_NO_INDEX=1` ; `curl https://example.com` échoue (code 7, via `127.0.0.1`) | **effectif** |
+| `--max-budget-usd` | accepté par la CLI (aucune erreur d'option) ; l'arrêt au plafond n'a pas été éprouvé (sonde B non lancée, voir l'arrêt) | non vérifié |
+| identifiants | aucun `.credentials.json` restant sous les HOME isolés | conforme |
+
+**Ce qui a arrêté le tamis : le bras `nu` n'est pas nu, et le réseau de l'agent n'est pas fermé.** Les dépôts de tâche vivent sous
+`<Forge>/_scratch/…`. Claude Code remonte l'arborescence et charge le `.mcp.json` de la Forge. L'événement `init` d'un run lit
+`mcp_servers` : `grimoire` (connecté, source `project`), `playwright` et `context7`, plus les connecteurs claude.ai du compte OAuth copié.
+Les 60 runs `nu` du lot L ont le même `init` : `grimoire`, `playwright` et `context7` connectés dans 57 runs sur 60. Aucun n'a appelé d'outil MCP.
+
+- **Fuite de solution non détectée sur le bloc K.** `mcp__grimoire__*` exécute le kit installé dans la Forge, qui contient les correctifs, et
+  donne accès à la mémoire de la Forge, qui décrit ces bugs. Playwright est un navigateur lancé par le processus `claude`, pas par `Bash`.
+  Il échappe donc au `CLAUDE_ENV_FILE` et peut ouvrir GitHub. `--disallowedTools` ne vise que `WebFetch` et `WebSearch`.
+  `scan_solution_leaks` ne repère un appel MCP que s'il cite une URL ou un chemin connu, jamais une recherche dans la mémoire.
+- **Sécurité de l'atelier.** Un agent en `bypassPermissions` dispose des outils d'écriture du MCP `grimoire` de la Forge
+  (`task_update`, `task_claim`, `memory_store`…). Il peut écrire dans le ledger et la mémoire de l'opérateur.
+- **Validité des lots passés.** Les bras des lots E à L avaient ces serveurs. Aucun appel n'est constaté au lot L, mais la définition du bras
+  `nu` (§2) n'était pas respectée.
+- Non vérifié, sans dépense : le `CLAUDE.md` de la Forge est-il aussi chargé depuis un dépôt de tâche qui a son propre `.git` ? Il
+  désigne le clone local du kit.
+
+**Correctif proposé, non appliqué :**
+
+1. Passer `--strict-mcp-config --mcp-config '{"mcpServers":{}}'` à chaque `claude -p` de `three_arms.py`. Pour `ecc`, ses propres serveurs
+   doivent alors être déclarés explicitement. Test rouge/vert : la commande construite porte ces options.
+2. Contrôle avant dépense : dans un run de contrôle, l'événement `init` ne doit lister aucun `mcp_servers`. Sinon refus, avec le même
+   statut que W1-08a.
+3. Pour isoler aussi les `CLAUDE.md` des répertoires parents, placer le workspace hors de l'arbre de la Forge.
+
+Ce correctif change le protocole du bras `nu` par rapport au lot L : les tâches P ne seraient plus comparables au lot L. La décision
+revient à Guilhem.
+
+**Résultats du tamis : aucun.** Aucune tâche n'est jouée, retenue ou rejetée. La règle du §17.3 (« moins de 20 tâches retenues : pas de
+campagne ») ne peut pas encore s'appliquer. Le coût médian d'une tâche K reste inconnu ; l'estimation de 1,20 $ n'est pas mesurée.
+Données : `_scratch/bench-lot-m-sieve/` de la Forge (`dry-run.log`, `probe/A/probe.stream.jsonl`, `budget-ledger.jsonl`,
+`review/` pour la relecture).
