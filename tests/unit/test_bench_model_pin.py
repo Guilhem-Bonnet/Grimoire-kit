@@ -166,7 +166,7 @@ def test_selection_json_records_model_and_claude_code_version(
     workspace = tmp_path / "ws"
     _patch_main(monkeypatch, bench_root, tmp_path)
     monkeypatch.setattr(ta, "_run_one", lambda task, arm, run_index, **kw: _record(task.task_id, arm, run_index))
-    assert ta.main(["--full", "--model", "claude-pinned-1", "--workspace", str(workspace)]) == 0
+    assert ta.main(["--full", "--model", "claude-pinned-1", "--max-total-usd", "1000", "--workspace", str(workspace)]) == 0
     selection = json.loads((workspace / "state" / "selection.json").read_text(encoding="utf-8"))
     assert selection["model_id"] == "claude-pinned-1"
     assert selection["claude_code_version"] == "9.9.9 (Claude Code)"
@@ -280,7 +280,7 @@ def test_campaign_on_another_model_is_refused_before_any_run_or_write(
     selection = workspace / "state" / "selection.json"
     selection.write_text(json.dumps({"model_id": previous_model}), encoding="utf-8")
 
-    rc = ta.main(["--full", "--resume", "--model", "claude-b", "--workspace", str(workspace)])
+    rc = ta.main(["--full", "--resume", "--model", "claude-b", "--max-total-usd", "1000", "--workspace", str(workspace)])
 
     assert rc == 1
     assert "appariement refusé" in capsys.readouterr().err
@@ -294,7 +294,7 @@ def test_resume_on_the_same_model_is_accepted(
     _patch_main(monkeypatch, bench_root, tmp_path)
     monkeypatch.setattr(ta, "_run_one", lambda task, arm, run_index, **kw: _record(task.task_id, arm, run_index))
     _write_rows(workspace / "state" / "results.jsonl", [_record(model_id="claude-a")])
-    assert ta.main(["--full", "--resume", "--model", "claude-a", "--workspace", str(workspace)]) == 0
+    assert ta.main(["--full", "--resume", "--model", "claude-a", "--max-total-usd", "1000", "--workspace", str(workspace)]) == 0
 
 
 # ── 4. ``nu_baseline_pass_rate`` par tâche et mention SATURÉ ───────────────
@@ -398,7 +398,7 @@ def test_full_campaign_fails_on_saturated_when_asked(
 ) -> None:
     _patch_main(monkeypatch, bench_root, tmp_path)
     monkeypatch.setattr(ta, "_run_one", lambda task, arm, run_index, **kw: _record(task.task_id, arm, run_index))
-    base = ["--full", "--model", "claude-a"]
+    base = ["--full", "--model", "claude-a", "--max-total-usd", "1000"]
     assert ta.main([*base, "--workspace", str(tmp_path / "ws-off")]) == 0
     assert ta.main([*base, "--fail-on-saturated", "--workspace", str(tmp_path / "ws-on")]) == 1
 

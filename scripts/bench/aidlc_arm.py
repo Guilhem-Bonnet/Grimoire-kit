@@ -60,12 +60,12 @@ import subprocess
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
 sys.path.append(str(Path(__file__).resolve().parent))
 import three_arms as ta
+from budget_guard import BudgetError, BudgetGuard, _now, budget_args, parse_cap, session_call_cost
 from cost_gate import filter_tasks
 from hidden_reads import check_transcript
 from model_pin import ModelMismatchError, detect_claude_code_version, ensure_results_match_model
@@ -149,146 +149,8 @@ class InstallError(RuntimeError):
     """Installation ou configuration d'AI-DLC impossible (aucun modèle lancé)."""
 
 
-class BudgetError(RuntimeError):
-    """Le garde-fou de budget refuse l'appel suivant."""
-
-
 class PreregistrationError(RuntimeError):
     """``--run`` sans pré-enregistrement, ou avec une configuration différente."""
-
-
-# ── Garde-fou de budget (fermé par défaut) ───────────────────────────────────
-
-
-def parse_cap(raw: object) -> float:
-    """Le plafond en dollars, ou :class:`BudgetError` : absent, non numérique, non fini ou ≤ 0."""
-    if raw is None or (isinstance(raw, str) and not raw.strip()):
-        raise BudgetError("plafond en dollars absent : --max-total-usd est obligatoire pour lancer un run payant")
-    if isinstance(raw, bool):
-        raise BudgetError(f"plafond invalide : {raw!r}")
-    try:
-        cap = float(raw)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        raise BudgetError(f"plafond invalide : {raw!r} n'est pas un montant en dollars") from None
-    if not math.isfinite(cap) or cap <= 0:
-        raise BudgetError(f"plafond invalide : {raw!r} (attendu : un montant fini strictement positif)")
-    return cap
-
-
-@dataclass
-class BudgetGuard:
-    """Cumul des coûts d'appels ``claude -p`` du bras, adossé à un journal append-only.
-
-    Chaque appel est encadré par deux lignes (``begin`` puis ``end``). À la
-    relecture, un ``begin`` sans ``end`` (processus tué pendant l'appel) et un
-    ``end`` sans coût connu valent *inconnu* ; une ligne illisible aussi. Un
-    seul inconnu bloque tout appel suivant : il ne compte jamais pour 0.
-    """
-
-    cap_usd: float
-    ledger_path: Path | None = None
-    spent_usd: float = 0.0
-    unknown_calls: list[str] = field(default_factory=list)
-    calls: int = 0
-
-    @classmethod
-    def open(cls, cap: object, ledger_path: Path | None) -> BudgetGuard:
-        guard = cls(cap_usd=parse_cap(cap), ledger_path=ledger_path)
-        if ledger_path is not None and ledger_path.is_file():
-            guard._replay(ledger_path)
-        return guard
-
-    def _replay(self, path: Path) -> None:
-        open_calls: dict[str, int] = {}
-        for lineno, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), start=1):
-            if not line.strip():
-                continue
-            try:
-                row = json.loads(line)
-            except json.JSONDecodeError:
-                self.unknown_calls.append(f"{path.name}:{lineno} (ligne illisible)")
-                continue
-            if not isinstance(row, dict):
-                self.unknown_calls.append(f"{path.name}:{lineno} (ligne non objet)")
-                continue
-            call_id = str(row.get("call_id"))
-            if row.get("event") == "begin":
-                open_calls[call_id] = lineno
-            elif row.get("event") == "end":
-                open_calls.pop(call_id, None)
-                self.calls += 1
-                cost = row.get("cost_usd")
-                if (
-                    row.get("cost_known") is True
-                    and isinstance(cost, (int, float))
-                    and not isinstance(cost, bool)
-                    and math.isfinite(cost)
-                ):
-                    self.spent_usd += float(cost)
-                else:
-                    self.unknown_calls.append(call_id)
-            else:
-                self.unknown_calls.append(f"{path.name}:{lineno} (événement inconnu)")
-        for call_id in open_calls:
-            self.unknown_calls.append(f"{call_id} (commencé, jamais terminé)")
-
-    def check_before_call(self) -> None:
-        if self.unknown_calls:
-            raise BudgetError(
-                f"coût inconnu pour {len(self.unknown_calls)} appel(s) ({', '.join(self.unknown_calls[:3])}) : "
-                "un coût inconnu ne compte pas pour 0, aucun appel de plus n'est lancé"
-            )
-        if self.spent_usd >= self.cap_usd:
-            raise BudgetError(
-                f"plafond atteint : {self.spent_usd:.4f} $ dépensés pour un plafond de {self.cap_usd:.2f} $"
-            )
-
-    def _append(self, row: Mapping[str, Any]) -> None:
-        if self.ledger_path is None:
-            return
-        self.ledger_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.ledger_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(dict(row), ensure_ascii=False) + "\n")
-            f.flush()
-            with contextlib.suppress(OSError):
-                os.fsync(f.fileno())
-
-    def begin(self, call_id: str, **meta: Any) -> None:
-        self.check_before_call()
-        self._append({"event": "begin", "call_id": call_id, "at": _now(), **meta})
-
-    def record(self, call_id: str, cost_usd: float, cost_known: bool) -> None:
-        self.calls += 1
-        known = bool(cost_known) and math.isfinite(cost_usd)
-        if known:
-            self.spent_usd += cost_usd
-        else:
-            self.unknown_calls.append(call_id)
-        self._append(
-            {
-                "event": "end",
-                "call_id": call_id,
-                "at": _now(),
-                "cost_usd": cost_usd if known else None,
-                "cost_known": known,
-            }
-        )
-
-    def remaining_usd(self) -> float:
-        return max(0.0, self.cap_usd - self.spent_usd)
-
-    def snapshot(self) -> dict[str, Any]:
-        return {
-            "cap_usd": self.cap_usd,
-            "spent_usd": round(self.spent_usd, 6),
-            "calls": self.calls,
-            "unknown_calls": list(self.unknown_calls),
-            "blocked": bool(self.unknown_calls) or self.spent_usd >= self.cap_usd,
-        }
-
-
-def _now() -> str:
-    return datetime.now(tz=UTC).isoformat()
 
 
 # ── Épinglage et installation (aucun modèle) ─────────────────────────────────
@@ -481,7 +343,7 @@ def claude_invoker(
 
 def _extra_args(*, resume: str | None, max_budget_usd: float | None) -> list[str]:
     """``--max-budget-usd`` (le reste du plafond, appliqué par Claude Code pendant l'appel), puis ``--resume``."""
-    args = ["--max-budget-usd", f"{max_budget_usd:.4f}"] if max_budget_usd is not None else []
+    args = budget_args(max_budget_usd)
     return [*args, "--resume", resume] if resume else args
 
 
@@ -588,18 +450,6 @@ class DriveResult:
                     else:
                         slot.setdefault(key, value)
         return merged
-
-
-def session_call_cost(session_total: float, previous_total: float | None) -> float:
-    """Coût d'un appel : son total moins le total précédent de la session reprise.
-
-    Sans total précédent (premier appel), ou si le total baisse (copie de
-    session, compteur remis à zéro), l'appel compte en entier : jamais un
-    delta négatif, au pire un surcompte.
-    """
-    if previous_total is None or session_total < previous_total:
-        return session_total
-    return session_total - previous_total
 
 
 def drive_run(

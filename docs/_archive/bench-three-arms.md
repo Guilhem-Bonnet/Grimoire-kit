@@ -1055,9 +1055,9 @@ Ce que le passage a montré du produit :
   (décision 11 du plan).
 
 Données brutes hors dépôt : `_scratch/d12-live/` de la Forge (`budget.jsonl`, `run*/live-claude-report.json`, `run*/logs/`).
-## 17. Lot M : tâches discriminantes, proposition (B-07)
+## 17. Lot M : tâches discriminantes, proposition (B-07), chargeur exécutable (B-08)
 
-**Statut : proposition. Aucun run payant, aucune charge IA locale.** Ce qui a été exécuté pour l'écrire : lecture du banc (`scripts/bench/`), relecture des
+**Statut : proposition (B-07), rendue exécutable par B-08 (§17.7). Aucun run payant, aucune charge IA locale.** Ce qui a été exécuté pour l'écrire : lecture du banc (`scripts/bench/`), relecture des
 `results.jsonl` des lots E à L, recherche des sources publiques, et rejeu sans modèle des tests de régression candidats tirés de l'historique du kit
 (test du correctif posé sur le parent, puis sur le correctif).
 
@@ -1140,15 +1140,15 @@ tirage. Refus avant tout run :
 
 `selection.json` note `task_lot` et `polyglot_commit`. Le pré-enregistrement d'`aidlc` contient déjà les `task_ids`. `--subset` reste applicable après.
 
-**À coder avant le tamis** (non fait, effort estimé) :
+**À coder avant le tamis** : fait par B-08, voir §17.7 pour le détail et ce qui reste.
 
-| Travail | Pourquoi | Effort |
-|---|---|---|
-| `--k` sur `three_arms.py` (aujourd'hui `--full` vaut k = 3 et `--pilot` k = 1 sur 2 tâches), champ `k` du rapport | tamis à k = 1 | 0,5 j |
-| Plafond total `--max-total-usd` et journal de budget sur `three_arms.py` (la classe `BudgetGuard` d'`aidlc_arm.py`) | le lanceur des bras `nu`/`kit-gov` n'a aucun plafond de campagne | 0,5 j |
-| Matérialiseur du bloc K : pour chaque tâche, un exercice au format polyglotte sous une langue `kit` (arbre du parent par `git archive`, `.docs/instructions.md` = énoncé, `.meta/config.json` avec `files.test` = fichiers de test du correctif), commande de test `python -m pytest -q <nœuds>` avec `GRIMOIRE_POLICIES_BACKEND=python`, dans un venv préconstruit qui ne contient **pas** grimoire-kit | réutiliser `prepare_task_repo`, `assert_task_repo_clean` (un seul commit, tests absents) et `hidden_reads` sans les dupliquer | 1,5 à 2 j |
-| Rédaction des 16 énoncés (symptôme, sans le correctif ; interface citée là où le tableau dit « fuite »), relus par Guilhem | une tâche injuste mesure l'énoncé, pas la méthode | 0,5 j |
-| Fermeture du réseau de l'agent : `--disallowedTools WebFetch,WebSearch` pour tous les bras, et détection dans la transcription de `pip download`/`pip install grimoire-kit`, des URL du dépôt et de `site-packages/grimoire` | le correctif du bloc K est public (GitHub, PyPI) : un agent en ligne peut le lire | 0,5 j |
+| Travail | Pourquoi | Effort estimé (B-07) | Statut B-08 |
+|---|---|---|---|
+| `--k` sur `three_arms.py` (aujourd'hui `--full` vaut k = 3 et `--pilot` k = 1 sur 2 tâches), champ `k` du rapport | tamis à k = 1 | 0,5 j | fait (`k` noté dans `selection.json`, pas dans `report.json`) |
+| Plafond total `--max-total-usd` et journal de budget sur `three_arms.py` (la classe `BudgetGuard` d'`aidlc_arm.py`) | le lanceur des bras `nu`/`kit-gov` n'a aucun plafond de campagne | 0,5 j | fait (`budget_guard.py`, partagé avec `aidlc_arm.py`) |
+| Matérialiseur du bloc K : pour chaque tâche, un exercice au format polyglotte sous une langue `kit` (arbre du parent par `git archive`, `.docs/instructions.md` = énoncé, `.meta/config.json` avec `files.test` = fichiers de test du correctif), commande de test `python -m pytest <nœuds>` avec `GRIMOIRE_POLICIES_BACKEND=python`, dans un venv préconstruit qui ne contient **pas** grimoire-kit | réutiliser `prepare_task_repo`, `assert_task_repo_clean` (un seul commit, tests absents) et `hidden_reads` sans les dupliquer | 1,5 à 2 j | fait (`kit_lot.py`), plus un contrôle rouge au parent / vert au correctif avant toute dépense |
+| Rédaction des 16 énoncés (symptôme, sans le correctif ; interface citée là où le tableau dit « fuite »), relus par Guilhem | une tâche injuste mesure l'énoncé, pas la méthode | 0,5 j | rédigés (`docs/bench/lot-m-kit-tasks.json`), **relecture de Guilhem à faire** |
+| Fermeture du réseau de l'agent : `--disallowedTools WebFetch,WebSearch`, et détection dans la transcription de `pip download`/`pip install grimoire-kit`, des URL du dépôt et de `site-packages/grimoire` | le correctif du bloc K est public (GitHub, PyPI) : un agent en ligne peut le lire | 0,5 j | fait pour le bloc K, partiel par construction (§17.7.4) |
 
 Un fichier de test modifié par le correctif (K05, K06, K07, K09 à K11, K15) est retiré entièrement du dépôt de l'agent : `assert_task_repo_clean` refuse
 un chemin de test caché présent. L'agent perd donc les tests existants de ce fichier. C'est la même règle pour tous les bras, mais elle est à déclarer.
@@ -1202,10 +1202,146 @@ Un effet de 20 points demanderait 99 tâches par bras. Le lot M ne peut conclure
   PyPI, pas l'arbre du parent, mais ses fichiers de règles parlent des mêmes concepts. À déclarer, et à lire tâche par tâche.
 - Pour les bras `kit` et `kit-gov`, le binaire `grimoire` vient d'un venv où grimoire-kit est installé dans une version qui contient déjà les correctifs du
   bloc K : un agent qui lit ce `site-packages` lit la solution. Il faut soit un kit installé antérieur au plus ancien correctif retenu (3.x d'août 2026),
-  soit étendre la détection de la transcription à ce chemin, soit les deux.
+  soit étendre la détection de la transcription à ce chemin, soit les deux. Tranché par B-08 : `kit` et `kit-gov` sont exclus du bloc K (§17.7.5).
 - Le constat de B-06 (le code écrit avant le workflow AI-DLC) peut se répéter sur le bloc K. Il faut relever qui écrit le correctif, run par run.
 - Le rejeu sans modèle prouve que chaque test caché discrimine le parent du correctif. Il ne prouve pas que l'énoncé suffit pour le résoudre. Une tâche
   ratée par les trois bras ne mesure rien.
 - `power_calc.py` traite les bras comme indépendants. Un test apparié (McNemar sur les mêmes tâches) serait plus puissant ; il n'est pas codé.
 - Données sources : les classements et les audits cités sont lus en ligne le 2026-10-20. Ceux de SWE-bench Pro, SWE-rebench et LiveCodeBench ne
   donnent pas de licence lisible sur les pages consultées.
+
+### 17.7 Lot M exécutable (B-08)
+
+**Statut : code et données livrés, aucun run payant, aucune charge IA locale.** Tout ce qui suit a été vérifié sans appel de modèle : tests
+unitaires à fakes (`tests/unit/test_bench_lot_m.py`) et `--dry-run` complet du tamis (§17.7.6).
+
+#### 17.7.1 `--k` et plafond de campagne sur `three_arms.py`
+
+- `--k N` (entier ≥ 1) fixe le nombre de runs par tâche et par bras. Défaut inchangé : 1 en `--pilot`, 3 en `--full`. `selection.json` note `k`.
+- `--max-total-usd` est **obligatoire** pour `--pilot` et `--full` : absent, nul, négatif ou non numérique, le lanceur refuse avant tout travail
+  (rupture voulue : avant B-08, une campagne `--full` partait sans plafond). En `--dry-run`, il est facultatif et sert à afficher la couverture.
+- Le garde-fou est celui d'`aidlc_arm.py`, extrait sans changement dans `scripts/bench/budget_guard.py` (`BudgetGuard`, `parse_cap`,
+  `session_call_cost`) ; `aidlc_arm.py` l'importe au lieu de le définir. Avant chaque run : refus si le cumul connu atteint le plafond ou si un
+  coût est inconnu ; l'appel `claude -p` reçoit le reste du plafond en `--max-budget-usd`. Le journal (`state/three-arms-budget.jsonl`, ou le journal
+  partagé de `--budget-ledger`, le même fichier pour `three_arms.py` et `aidlc_arm.py`) encadre chaque run d'un `begin` et d'un `end` : une
+  campagne relancée repart du cumul. Arrêt au plafond : code de sortie 3, ligne `[budget]` finale avec l'état du garde-fou.
+- Coût d'un run : `total_cost_usd` de l'unique événement `result`, connu selon `cost_gate.row_cost_known`. `three_arms.py` ne reprend jamais une
+  session (`claude -p` sans `--resume`, un appel par run) : la différence de total de session (`session_call_cost`) ne s'applique qu'au pilote
+  `scripted-person` d'`aidlc_arm.py`, qui la garde.
+- Un dépôt contaminé (W1-08a) est refusé avant l'appel : le run est clos à 0 $ connu. Toute autre exception pendant un run laisse un `begin` sans
+  `end` : la campagne suivante refuse de partir (coût inconnu) tant que l'opérateur n'a pas vérifié la dépense réelle et complété le journal.
+- Le dépôt ecc n'est plus cloné quand le bras `ecc` n'est pas joué.
+
+#### 17.7.2 Bloc K : chargement, environnement, évaluation
+
+- Données : `docs/bench/lot-m-kit-tasks.json` (schéma `grimoire.bench.kit-tasks.v1`) : par tâche, le correctif et son parent (sha complets),
+  les fichiers de test cachés, le filtre `-k`, l'issue d'origine, l'énoncé, les interfaces nommées. `docs/bench/lot-m.json` est le lot complet du
+  tamis : les 132 tâches de `lot-m-polyglot-sieve.json` puis les 16 tâches K (`kit/<slug>`).
+- `--kit-repo <clone de grimoire-kit>` (lu, jamais écrit) charge le bloc : `scripts/bench/kit_lot.py` matérialise chaque tâche sous
+  `<workspace>/kit-lot/kit/exercises/practice/<slug>/` au format polyglotte (arbre du parent par `git archive`, tests cachés au correctif,
+  `.docs/instructions.md` = énoncé). `discover_catalog`, `prepare_task_repo`, `assert_task_repo_clean`, `hidden_tests_dir` et `hidden_reads`
+  servent tels quels. Refus : parent déclaré qui n'est pas le parent du correctif, test caché absent au correctif. Sans `--kit-repo`, les tâches
+  `kit/…` sont absentes du catalogue et `--task-lot` refuse le lot (B-07).
+- Venv de test (`--kit-test-venv`, défaut `<workspace>/kit-test-venv`) : construit par `uv` (ou `venv` + `pip`) avec les `test_requirements` du
+  fichier de données, puis **refusé s'il importe `grimoire`** sans `PYTHONPATH` (le kit installé contient les correctifs). Pendant un run K,
+  l'agent et l'évaluation partagent un seul environnement (règle du lot I) : ce venv en tête de `PATH`, `PYTHONPATH=<dépôt>/src`,
+  `GRIMOIRE_POLICIES_BACKEND=python`, `PYTHONNOUSERSITE=1`, `PIP_NO_INDEX=1`, `UV_OFFLINE=1`.
+- Avant toute dépense (y compris en `--dry-run`), chaque tâche K est rejouée dans ce venv : **rouge au parent, verte au correctif**, sinon refus de
+  la campagne. Le dépôt au correctif n'existe que le temps du contrôle (effacé ensuite). Un succès est mis en cache (`kit-lot/verified.json`) par
+  empreinte de tâche et interpréteur.
+- Évaluation : après le run, les tests du correctif sont posés dans le dépôt (écrasant ce que l'agent a écrit à ces chemins), puis
+  `python -m pytest <fichiers> [-k <filtre>]`. Succès = code 0, **au moins un test passé et aucun sauté** (un test caché sauté n'a rien vérifié).
+- Consigne : `kit_lot.K_PROMPT` (corriger le défaut décrit par `TASK.md` dans `src/`, tests autorisés), à la place du gabarit polyglotte.
+
+#### 17.7.3 Les 16 énoncés
+
+Rédigés à partir de l'issue ou de la PR d'origine et des tests cachés lus au correctif, au format rapport de bug et cahier des charges
+(symptôme reproductible au parent, comportement attendu, interfaces imposées, contraintes), sans dire quelle fonction changer ni comment.
+Toute interface que les tests sélectionnés importent et qui n'existe pas au parent est nommée avec son contrat observable : sans elle, la
+tâche mesurerait la chance de deviner un nom. Garde mécanique au chargement : un énoncé qui cite le sha du correctif, sa PR ou une URL GitHub ou
+PyPI est refusé. **Cette garde ne remplace pas la relecture de Guilhem, à faire avant le premier run payant.**
+
+| Id | Origine | Interfaces nouvelles nommées par l'énoncé | Avis du rédacteur |
+|---|---|---|---|
+| K01 | #836 | aucune (contrainte : `TaskService._check_exclusive_files` reste le contrôle préalable, l'évaluation la remplace) | propre |
+| K02 | #742 | aucune (contrainte d'un test AST : aucun `.write_text(` dans le kernel et le moteur ; `core/fsio` cité comme existant) | propre |
+| K03 | #695 | champ `explicit` de l'événement `task.session_attached` | interface nommée |
+| K04 | #680 | `resolve_active_task(..., session_id=)`, `ActiveTask.candidates`, sources `session_claim`/`ambiguous`, `grimoire task attach` | interface nommée, surface large |
+| K05 | #267 | `grimoire.missions.gates.GatesFileError`, mot `illisible` dans la raison | interface nommée |
+| K06 | #211 | check `gate.task_not_on_board` | interface nommée |
+| K07 | #614 | aucune | propre |
+| K08 | #734 | `scan_claim_rows`, `claims.status_invalid`, `claims.decision_invalid`, `claims.summary` | **douteux** : une centaine de cas paramétrés, l'énoncé frôle l'algorithme |
+| K09 | #449 | `grimoire.policies.temporal.tool_pattern_matches` | interface nommée ; **faible** : importée au niveau du module de test, un des deux tests peut déjà passer au parent |
+| K10 | #463 | `tool_facts.is_read_only_command`, `temporal.REPAIR_EXEMPTION_REASON`, `grimoire policies reset-session` dans le refus | interface nommée |
+| K11 | #731 | `temporal.action_fingerprint`, `RuleState.approved_fingerprints`, `remember_pending_approval`, `HookInput.tool_use_id` | interface nommée (B-07 « à vérifier » : confirmé, imports absents au parent) |
+| K12 | #643 | aucune | propre |
+| K13 | #663 | aucune | propre |
+| K14 | #744 | clés JSON `replay` et `replay_of` de `flow resume` | interface nommée |
+| K15 | #595 | aucune | propre |
+| K17 | #761 | aucune (formes données par familles, avec les pièges) | propre |
+
+#### 17.7.4 Réseau de l'agent : ce qui est fermé, ce qui ne l'est pas
+
+Le correctif de chaque tâche K est public (GitHub, PyPI, et le clone local du kit). Mécanisme retenu, le plus simple et portable :
+
+| Voie | Mesure (tâches K seulement) | Fermée ? |
+|---|---|---|
+| Outils `WebFetch` et `WebSearch` de l'agent | `--disallowedTools WebFetch WebSearch` sur `claude -p` | par Claude Code lui-même ; un appel tenté invalide le run (détection ci-dessous). Non vérifié par un run réel (aucun appel de modèle dans B-08). |
+| `pip`, `uv`, `npm` lancés par l'agent | `PIP_NO_INDEX=1`, `UV_OFFLINE=1`, `npm_config_offline=true` dans l'environnement ; `PYTHONNOUSERSITE=1` | oui pour un usage normal ; `--index-url` explicite la contourne |
+| `curl`, `git clone`, `urllib`… dans les commandes `Bash` | `CLAUDE_ENV_FILE` (`kit-lot/offline-env.sh`) exporte avant chaque commande des proxys HTTP(S) sur `127.0.0.1:9`, port fermé | non pour un contournement volontaire (`env -u HTTPS_PROXY`, socket brute, outil qui ignore les proxys). Le processus de Claude Code garde son accès à l'API : le fichier n'est lu que par l'outil `Bash`. Prise en charge de `CLAUDE_ENV_FILE` constatée dans le binaire 2.1.304, pas sur un run. |
+| Système de fichiers de l'opérateur (clone du kit avec son historique, `site-packages` d'un autre venv) | aucune fermeture | **non**. Détection seulement : un appel d'outil qui cite le clone source, le sha du correctif, `site-packages/grimoire`, une URL GitHub ou PyPI du kit, `pip download/install …grimoire…` ou `git clone/fetch/pull` rend le run `invalid` (sorti des taux, ligne listée pour revue), comme une lecture de test caché (W1-08b). Un chemin construit par une variable ou un script échappe à la détection. |
+
+Écartés : `unshare -n` et `bwrap --unshare-net` (présents sur le poste) coupent aussi l'API du modèle, puisque l'agent et ses commandes partagent
+le réseau du processus `claude`. Le bac à sable de Claude Code (réseau des commandes par liste de domaines) est la piste d'une vraie fermeture ;
+non retenu faute de pouvoir le vérifier sans run. Les tâches polyglottes (bloc P) gardent le protocole du lot L, outils web compris : une fuite
+de solution Exercism ne peut que faire réussir le `nu`, donc rendre le tamis plus sévère, pas plus favorable.
+
+#### 17.7.5 Bras `kit` et `kit-gov` sur le bloc K : exclus
+
+Décision : **les bras `kit` et `kit-gov` sont refusés sur une tâche K**, avant tout run (`kit_lot.refuse_governed_arms`, message qui renvoie à
+ce paragraphe). Pas d'exclusion silencieuse : le lot doit être lancé avec `--arms nu` (ou `ecc`).
+
+- Kit actuel (celui de PyPI) : son `site-packages` contient les 16 correctifs ; l'agent gouverné lit le kit qu'il exécute. Détecter la lecture ne
+  suffit pas : un agent qui exécute `grimoire` a ce code sur son chemin.
+- Kit installé au commit parent : il porterait le défaut dans ses propres gardes. Pour K09 à K13 et K17 (politiques et hooks), le bras gouverné
+  tournerait avec le bug à corriger actif dans ses hooks (K10 : une règle de budget qui verrouille la session) ; le résultat mesurerait ce bug,
+  pas la méthode. Il mesurerait aussi 16 versions du kit au lieu du produit livré, et la garde du lot H (binaire contre gabarit de ce dépôt) le
+  refuse par construction.
+
+Conséquence : le bloc K compare le `nu` à `aidlc` (et `ecc`), pas `kit-gov`. La comparaison `kit-gov` / `nu` / `aidlc` repose sur le bloc P et
+sur des tâches qui ne viennent pas de l'historique du kit (piste SWE-rebench, §17.2). Condition de réouverture : un dépôt cible autre que
+grimoire-kit pour les bugs réels. `aidlc_arm.py` n'est pas encore branché sur le bloc K (pas de `--kit-repo`) : une tâche `kit/…` y est refusée
+comme absente du catalogue.
+
+#### 17.7.6 `--dry-run` du tamis (bras `nu`, k = 1, lot M)
+
+Commande (aucun modèle lancé ; `--grimoire-bin` sert seulement à la résolution exigée par le lanceur) :
+
+```bash
+python scripts/bench/three_arms.py --dry-run --arms nu --k 1 \
+  --task-lot docs/bench/lot-m.json --max-total-usd 90 \
+  --kit-repo <clone de grimoire-kit> --workspace <workspace>
+```
+
+Résultat du 2026-10-20 (workspace sous `_scratch/bench-m-dry/` de la Forge, clone polyglotte au commit `7e0611e7` du lot L) : code 0,
+356 s, 148 dépôts de tâche préparés pour le bras `nu` (132 P, 16 K), 6,1 Go. Les 16 tâches K, rejouées sans cache dans le venv de test (sans
+grimoire-kit) : **rouges au parent, vertes au correctif, sans test sauté**. Un premier passage avait refusé K08 (`ModuleNotFoundError: yaml`) :
+le contrôle a attrapé un venv incomplet qui aurait rendu K08 rouge pour toutes les solutions ; `pyyaml` est ajouté aux `test_requirements`.
+
+| Bloc | Runs | Coût par run (central ; haut) | Base | Coût central | Coût haut |
+|---|---:|---|---|---:|---:|
+| P | 132 | 0,1692 $ ; 0,271 $ | mesuré (lot L) | 22,33 $ | 35,77 $ |
+| K | 16 | 1,20 $ ; 3,00 $ | **estimé, aucune mesure** | 19,20 $ | 48,00 $ |
+| Total | 148 | | | **41,53 $** | **83,77 $** |
+
+Couverture du plafond de 90 $ : couvre le central et le haut, marge de 6,23 $ au-dessus du haut. (41,51 $ au §17.5, calculé avec 0,169 $
+arrondi.) Le fichier d'environnement hors ligne, sourcé dans un shell, a été éprouvé sans modèle : `curl https://pypi.org` (connexion refusée
+via `127.0.0.1:9`), `git ls-remote` du dépôt du kit (échec), `urllib` (connexion refusée) ; le venv de test n'a pas de `pip`.
+
+#### 17.7.7 Ce qui reste avant le tamis payant
+
+- Relecture des 16 énoncés par Guilhem (`docs/bench/lot-m-kit-tasks.json`, champ `statement`).
+- Un run payant de contrôle, borné (une tâche K, `--max-total-usd 5`), pour vérifier ce que B-08 ne peut pas vérifier sans modèle :
+  `--disallowedTools` effectif, `CLAUDE_ENV_FILE` lu par l'outil `Bash`, `--max-budget-usd` respecté, coût réel d'une tâche K.
+- `aidlc_arm.py` sur le bloc K (étape 2b) : `--kit-repo`, environnement K et détection de fuite, à reprendre de `kit_lot.py`.
+- Pré-enregistrer la règle de sélection du tamis (§17.5) avant le premier run.
