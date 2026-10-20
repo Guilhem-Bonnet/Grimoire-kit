@@ -98,10 +98,11 @@ machine peut servir **sans jamais s'attacher à un service qu'elle a
 seulement trouvé en marche** : `standard` (vecteurs Qdrant embarqués — aucun
 service, aucun Docker) quand un moteur d'embedding local
 (fastembed/sentence-transformers) est installé, `lexical` sinon (BM25, aucune
-dépendance). `complet` (Weaviate + Neo4j + Redis) est nommé et sa commande
-d'activation affichée dès que Docker répond, mais jamais démarré sans
-consentement explicite (`--memory-stack up`) — démarrer des conteneurs sans
-le demander n'a pas sa place dans un run express.
+dépendance). `complet` (Weaviate + Neo4j + Redis) est retenu dès que Docker
+répond : `-y` vaut consentement et démarre la pile (Docker Compose, gabarits du
+kit) ; `--memory-stack up` donne le même consentement hors `-y` (script, CI).
+Sans l'un ni l'autre, `complet` est configuré mais rien n'est démarré, et
+`grimoire doctor` le signale (« memory stack not started »).
 
 Un service mémoire tournant déjà sur la machine (Weaviate, Qdrant, Ollama)
 n'est **jamais** attaché automatiquement, même si `init` l'a détecté ; le
@@ -116,11 +117,11 @@ Memory: qdrant-local
          ^ This machine can serve Complet: grimoire memory up --profile complet --start --apply
 ```
 
-Pour démarrer la pile `complet` (Docker Compose, gabarits du kit) dès
-l'`init`, sans passer par une seconde commande :
+Pour démarrer la pile `complet` depuis un run non interactif sans `-y`
+(script, CI) :
 
 ```bash
-grimoire init . -y --memory-stack up
+grimoire init . --memory-stack up
 ```
 
 Pour utiliser explicitement un backend partagé (Qdrant, Weaviate), passez

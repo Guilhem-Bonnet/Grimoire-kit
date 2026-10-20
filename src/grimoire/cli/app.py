@@ -294,8 +294,8 @@ def init(
             "qdrant-server, weaviate-server, mempalace, ollama). 'auto' never attaches "
             "silently to a service detected on this machine (issue #496) — it applies "
             "the richest private, consent-free composition this machine can serve "
-            "('qdrant-local' with a local embedding engine installed, 'lexical' "
-            "otherwise) and only suggests a detected external service in the report."
+            "('complet' when Docker answers, 'qdrant-local' with a local embedding engine, "
+            "'lexical' otherwise) and only suggests a detected external service in the report."
         ),
     ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show plan without writing."),
@@ -326,10 +326,10 @@ def init(
     memory_stack: str = typer.Option(
         "", "--memory-stack",
         help=(
-            "'up' starts (Docker) the services the recommended/chosen memory "
-            "profile needs and this machine does not yet serve — explicit "
-            "consent only, never implied by -y/express. No other value is "
-            "recognized."
+            "'up' starts (Docker) the services the recommended/chosen memory profile "
+            "needs and this machine does not yet serve. -y already gives that consent "
+            "(`complet` starts when Docker answers); --memory-stack up gives the same "
+            "consent without -y (script, CI). No other value is recognized."
         ),
     ),
 ) -> None:
@@ -352,19 +352,20 @@ def init(
     without ever attaching to a service it merely found running (issue
     #496): [cyan]standard[/cyan] (local vector embeddings, no server) when a local
     embedding engine (fastembed/sentence-transformers) is installed,
-    [cyan]lexical[/cyan] otherwise. [cyan]complet[/cyan] (Weaviate + Neo4j + Redis) is named
-    and its activation command shown whenever Docker is available, but never
-    started without [cyan]--memory-stack up[/cyan] — starting containers without
-    consent has no place in an express run.
+    [cyan]lexical[/cyan] otherwise. [cyan]complet[/cyan] (Weaviate + Neo4j + Redis) is picked
+    whenever Docker answers: [cyan]-y[/cyan] is the consent to start it (Docker Compose,
+    the kit's templates), and [cyan]--memory-stack up[/cyan] gives that same consent
+    without [cyan]-y[/cyan]. Without either (script, CI), [cyan]complet[/cyan] is configured
+    but nothing is started, and [cyan]grimoire doctor[/cyan] says so.
 
     [dim]Examples:[/dim]
       [cyan]grimoire init .[/cyan]                               Interactive wizard
-      [cyan]grimoire init . -y[/cyan]                            Express (auto-detect all) — private memory, no shared service
+      [cyan]grimoire init . -y[/cyan]                            Express (auto-detect all) — starts `complet` if Docker answers
       [cyan]grimoire init . -a infra-ops -b weaviate-server[/cyan]  Explicit archetype & backend
       [cyan]grimoire init . -a web-app,infra-ops[/cyan]         Multiple archetypes
       [cyan]grimoire init --dry-run[/cyan]                       Show plan without writing
       [cyan]grimoire init . -y --no-cockpit[/cyan]               Express, skip cockpit enrolment
-      [cyan]grimoire init . -y --memory-stack up[/cyan]          Express, also starts the `complet` stack via Docker
+      [cyan]grimoire init . --memory-stack up[/cyan]             Non-interactive, starts the `complet` stack without -y
       [cyan]grimoire init . -b weaviate-server --memory-collection team-x[/cyan]  Attach to an existing shared collection
     """
     from grimoire.cli.cmd_init import run_init, validate_init_flags
@@ -710,7 +711,7 @@ def doctor(
             missing = unreached_configured_services(cfg.memory)
             if missing:
                 detail = (
-                    f"pile mémoire non démarrée ({', '.join(missing)}) : "
+                    f"memory stack not started ({', '.join(missing)}): "
                     f"grimoire memory up --profile {cfg.memory.layer_profile} --start --apply"
                 )
                 results.append({"name": "memory_stack_started", "passed": True, "detail": detail, "level": "warn"})
