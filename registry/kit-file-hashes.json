@@ -338,6 +338,10 @@
    "version": "3.16.0",
    "path": "framework/tools/grimoire-log.py"
   },
+  "18c5652e8dd90368ce12c42ecb80e5b9312c4f4cc8f10c3a553ac835654b2017": {
+   "version": "3.63.0",
+   "path": "framework/expertises/skills/expertise-azure.md"
+  },
   "18eed65154460a8ed21b29fde82887d5a74a33179dba49b6577ecaf548228ba6": {
    "version": "3.4.2",
    "path": "framework/memory/backends/__init__.py"
@@ -781,6 +785,10 @@
   "364248402ee0b1d5aa0b225518854602adbe37e022bf700c30934f1e4d7c57a0": {
    "version": "3.24.0",
    "path": "framework/tools/grimoire-mcp-tools.py"
+  },
+  "364688d68119498aa0f0664536afa6eb0727c8347c55bf756224af4548fe06ab": {
+   "version": "3.63.0",
+   "path": "framework/expertises/skills/expertise-gcp.md"
   },
   "364e8c0d74f40855328cfc5213d57e377fea29a5909d0edff93a54dc401bdd09": {
    "version": "3.16.0",
@@ -2358,6 +2366,10 @@
    "version": "3.6.0",
    "path": "framework/agentic-standard/templates/memory-integrity.yaml"
   },
+  "9d3cd2c12bc66ccda8ca5c0fdeebdef57726f3f190539302e00638436bfb5237": {
+   "version": "3.63.0",
+   "path": "framework/expertises/skills/expertise-aws.md"
+  },
   "9d6ab535c8fae3ef3173696d8b81db28a32d0a6be21f2a44364e500026012eed": {
    "version": "3.23.0",
    "path": "framework/tools/stigmergy_hooks/scripts/stigmergy-emit-stop.sh"
@@ -2894,6 +2906,10 @@
    "version": "3.32.0",
    "path": "archetypes/fix-loop/workflows/workflow-closed-loop-fix.tpl.md"
   },
+  "b948d28f7a5832eaf67dd80e2c82e85926203f9a3b9cc338ca577f0dfdfae8cd": {
+   "version": "3.63.0",
+   "path": "framework/expertises/skills/expertise-c.md"
+  },
   "b9491aeb04baa595215272023745ab7e2de23979367c35790a5342d657876727": {
    "version": "3.20.0",
    "path": "framework/tools/concierge.py"
@@ -3014,6 +3030,10 @@
    "version": "3.35.0",
    "path": "framework/memory/network-topology.tpl.md"
   },
+  "bffbea4225c693ae0dad6b98893e95d48ebd40a9ea6cc428542326d7683542de": {
+   "version": "3.63.0",
+   "path": "framework/expertises/skills/expertise-java.md"
+  },
   "c007abe51f89cc767780aa7cbb40e4bb2ce4e4e68ba6a1037f9287c8105bf9d1": {
    "version": "3.4.4",
    "path": "framework/agentic-standard/templates/orchestration-policy.yaml"
@@ -3101,6 +3121,14 @@
   "c6b45eb452709fe6311ca416c534ca90bb4808c54a3d35dc14b84294b099a6b5": {
    "version": "3.4.2",
    "path": "archetypes/infra-ops/agents/monitoring-specialist.md"
+  },
+  "c6bb90fa7d45af1a369b53d4edd91be4925bcc4ce5f288b8efeaf77116d67c90": {
+   "version": "3.63.0",
+   "path": "framework/expertises/skills/expertise-cpp.md"
+  },
+  "c6d8f7d311daf06cbc00f6d50ceefed9b6a97456c97913c636876109388827de": {
+   "version": "3.63.0",
+   "path": "framework/expertises/skills/expertise-csharp.md"
   },
   "c6dec04c50fbadb55dcb0e72ba4fe6f0fd10afc386ea1e0bb305fba9b6e612df": {
    "version": "3.41.0",
@@ -3345,6 +3373,10 @@
   "d3946adf7164c450a80ceb1623b642fd527c143b881869a81ce257766bf16ac4": {
    "version": "3.4.2",
    "path": "framework/hooks/.pre-commit-config.tpl.yaml"
+  },
+  "d40fde6ba745d539d3335103d8f9f8d9872eab733477d534e867be425e2af45f": {
+   "version": "3.63.0",
+   "path": "framework/expertises/skills/expertise-rust.md"
   },
   "d43cd77f2d32c86b2bf49a5654358981fdf6b3af473cea2ef7bd7789431ed301": {
    "version": "3.16.0",

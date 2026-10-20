@@ -23,7 +23,7 @@ Toute taille de buffer calculée dynamiquement (concaténation, copie, allocatio
 
 ## Implémenter une feature
 
-Lire le fichier cible et son `.h` associé pour les conventions d'ownership déjà établies → identifier les fonctions et structures impactées → implémenter en vérifiant chaque allocation et chaque taille de buffer → écrire les tests (framework du projet : Unity, Check, ou tests manuels avec `assert`) → `cc-verify.sh --stack c` (build avec `-Wall -Wextra -Werror` + sanitizers + tests).
+Lire le fichier cible et son `.h` associé pour les conventions d'ownership déjà établies → identifier les fonctions et structures impactées → implémenter en vérifiant chaque allocation et chaque taille de buffer → écrire les tests (framework du projet : Unity, Check, ou tests manuels avec `assert`) → build du projet avec `-Wall -Wextra -Werror` et sanitizers (`-fsanitize=address,undefined`), puis ses tests (`make test`, `ctest`, ou le binaire de test du projet).
 
 ## Corriger un bug
 

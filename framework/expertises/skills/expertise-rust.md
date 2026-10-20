@@ -23,7 +23,7 @@ Tout `unsafe` touchant à des pointeurs bruts (déréférencement, `transmute`, 
 
 ## Implémenter une feature
 
-Lire le module cible et son `mod.rs`/`lib.rs` pour les conventions établies → identifier les types et traits impactés → implémenter en respectant l'ownership (pas de clone pour éviter un design correct) → écrire les tests dans le même fichier (`#[cfg(test)]`) ou dans `tests/` pour l'intégration → `cc-verify.sh --stack rust` (build + clippy + test).
+Lire le module cible et son `mod.rs`/`lib.rs` pour les conventions établies → identifier les types et traits impactés → implémenter en respectant l'ownership (pas de clone pour éviter un design correct) → écrire les tests dans le même fichier (`#[cfg(test)]`) ou dans `tests/` pour l'intégration → `cargo build && cargo clippy -- -D warnings && cargo test`.
 
 ## Corriger un bug
 

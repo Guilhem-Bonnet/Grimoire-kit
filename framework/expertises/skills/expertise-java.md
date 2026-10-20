@@ -23,7 +23,7 @@ Tout `catch` qui avale une exception (bloc vide ou seul `e.printStackTrace()`) o
 
 ## Implémenter une feature
 
-Lire le fichier cible et les interfaces qu'il implémente → identifier les types, DTOs et tests impactés → implémenter en respectant l'immuabilité par défaut et le contrat d'exceptions de la classe → écrire les tests JUnit5 (`@ParameterizedTest` pour les cas multiples) → `cc-verify.sh --stack java` (`mvn verify` ou `./gradlew check`).
+Lire le fichier cible et les interfaces qu'il implémente → identifier les types, DTOs et tests impactés → implémenter en respectant l'immuabilité par défaut et le contrat d'exceptions de la classe → écrire les tests JUnit5 (`@ParameterizedTest` pour les cas multiples) → `mvn verify` ou `./gradlew check`.
 
 ## Corriger un bug
 

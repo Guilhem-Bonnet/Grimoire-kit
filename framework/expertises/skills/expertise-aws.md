@@ -42,7 +42,7 @@ Lire les fichiers `.tf`/CDK et le state existant → `aws sts get-caller-identit
 l'identité et le compte ciblés → `terraform plan -out=plan.tfplan` (ou `cdk diff` en CDK) → relire
 le plan ligne à ligne, en particulier les `~ update in-place` sur IAM et réseau → appliquer
 (`terraform apply plan.tfplan` / `cdk deploy`) → vérifier les tags de coût sur les ressources créées
-→ `cc-verify.sh --stack aws` si le projet expose ce gate.
+→ `terraform validate && terraform plan -detailed-exitcode` (ou `cdk synth` + `cdk diff`), puis les tests du projet.
 
 ## Diagnostiquer un incident
 

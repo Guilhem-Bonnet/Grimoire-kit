@@ -23,7 +23,7 @@ Tout changement touchant l'état statique partagé (champs `static` mutables, si
 
 ## Implémenter une feature
 
-Lire le fichier cible et les interfaces/contrats qu'il implémente → identifier les types, DTOs et tests impactés → implémenter avec nullable annotations complètes et async correctement propagé → écrire les tests xUnit (`[Theory]`/`[InlineData]` pour les cas multiples) → `cc-verify.sh --stack csharp` (`dotnet build`, `dotnet test`, `dotnet format --verify-no-changes`).
+Lire le fichier cible et les interfaces/contrats qu'il implémente → identifier les types, DTOs et tests impactés → implémenter avec nullable annotations complètes et async correctement propagé → écrire les tests xUnit (`[Theory]`/`[InlineData]` pour les cas multiples) → `dotnet build && dotnet test && dotnet format --verify-no-changes`.
 
 ## Corriger un bug
 

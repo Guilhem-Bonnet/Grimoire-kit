@@ -23,7 +23,7 @@ Tout `new`/`delete` brut introduit hors d'une classe RAII dédiée (allocateur, 
 
 ## Implémenter une feature
 
-Lire le fichier cible et les headers inclus pour les conventions RAII déjà en place → identifier classes, interfaces et invariants impactés → implémenter en sémantique de valeur ou smart pointers, jamais de `new`/`delete` nu → écrire les tests (framework du projet : GoogleTest, Catch2) en couvrant les cas de copie/déplacement si la classe les définit → `cc-verify.sh --stack cpp` (build avec sanitizers + tests + clang-tidy).
+Lire le fichier cible et les headers inclus pour les conventions RAII déjà en place → identifier classes, interfaces et invariants impactés → implémenter en sémantique de valeur ou smart pointers, jamais de `new`/`delete` nu → écrire les tests (framework du projet : GoogleTest, Catch2) en couvrant les cas de copie/déplacement si la classe les définit → build avec sanitizers (`cmake --build build` / `make`), `ctest`, puis `clang-tidy` sur les fichiers touchés.
 
 ## Corriger un bug
 

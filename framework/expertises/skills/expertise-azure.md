@@ -42,7 +42,7 @@ Lire les fichiers `.tf`/`.bicep` et le state existant → `az account show` pour
 l'abonnement et le tenant ciblés → `terraform plan` (ou `az deployment group what-if` en Bicep/ARM)
 → relire le plan/what-if, en particulier les changements de rôle RBAC et de règles réseau →
 appliquer (`terraform apply` / `az deployment group create`) → vérifier les tags obligatoires sur
-les ressources créées → `cc-verify.sh --stack azure` si le projet expose ce gate.
+les ressources créées → `terraform validate && terraform plan -detailed-exitcode` (ou `az bicep build` + `az deployment group what-if`), puis les tests du projet.
 
 ## Diagnostiquer un incident
 

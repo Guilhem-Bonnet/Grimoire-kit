@@ -43,7 +43,7 @@ impactés et une confirmation explicite avant exécution.
 Lire les fichiers `.tf` et le state existant → `gcloud auth list` et `gcloud config get-value
 project` pour confirmer le compte et le projet ciblés → `terraform plan` → relire le plan, en
 particulier les changements d'IAM bindings et de règles firewall → `terraform apply` → vérifier les
-labels de coût sur les ressources créées → `cc-verify.sh --stack gcp` si le projet expose ce gate.
+labels de coût sur les ressources créées → `terraform validate && terraform plan -detailed-exitcode`, puis les tests du projet.
 
 ## Diagnostiquer un incident
 
