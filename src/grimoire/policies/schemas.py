@@ -220,6 +220,25 @@ class CooldownRule:
             ) from exc
 
 
+def _enum_member(enum_cls: type[StrEnum], raw: Any, *, field_name: str, context: str) -> Any:
+    """Convert *raw* to a member of *enum_cls*, or raise a named error.
+
+    ``VerdictKind("nope")`` raises a bare ``ValueError`` that nothing on the
+    ``grimoire doctor`` / ``policies status`` path catches (issue #844): the
+    command crashed with a traceback instead of reporting the rule. Every
+    enum-valued field of a rule goes through here so an invalid value is a
+    :class:`GrimoirePolicyError` naming the rule, the field and the value.
+    """
+    try:
+        return enum_cls(raw)
+    except ValueError as exc:
+        allowed = sorted(member.value for member in enum_cls)
+        raise GrimoirePolicyError(
+            f"{context}: {field_name} invalide {raw!r} (attendu : {allowed})",
+            error_code="GR-POL-002",
+        ) from exc
+
+
 def _reject_unknown_keys(d: dict[str, Any], known: set[str], *, context: str) -> None:
     """Raise a named error on any key ``d`` carries outside ``known``.
 
@@ -352,7 +371,8 @@ class PolicyRule:
         typo (``per_sesion``, ``requires_approval``) fails at load time
         instead of matching nothing forever.
         """
-        _reject_unknown_keys(d, _POLICY_RULE_KEYS, context=f"PolicyRule {d.get('id', '?')!r}")
+        context = f"PolicyRule {d.get('id', '?')!r}"
+        _reject_unknown_keys(d, _POLICY_RULE_KEYS, context=context)
         for required in ("id", "verdict_on_match"):
             if required not in d:
                 raise GrimoirePolicyError(
@@ -363,10 +383,18 @@ class PolicyRule:
         return cls(
             id=d["id"],
             description=d.get("description", ""),
-            action_kinds=tuple(ActionKind(k) for k in d.get("action_kinds", ())),
-            mutation_classes=tuple(MutationClass(m) for m in d.get("mutation_classes", ())),
+            action_kinds=tuple(
+                _enum_member(ActionKind, k, field_name="action_kinds", context=context)
+                for k in d.get("action_kinds", ())
+            ),
+            mutation_classes=tuple(
+                _enum_member(MutationClass, m, field_name="mutation_classes", context=context)
+                for m in d.get("mutation_classes", ())
+            ),
             risk_profiles=tuple(d.get("risk_profiles", ())),
-            verdict_on_match=VerdictKind(d["verdict_on_match"]),
+            verdict_on_match=_enum_member(
+                VerdictKind, d["verdict_on_match"], field_name="verdict_on_match", context=context
+            ),
             reason_template=d.get("reason_template", ""),
             tool_pattern=d.get("tool_pattern", "*"),
             require_approval=bool(d.get("require_approval", False)),
