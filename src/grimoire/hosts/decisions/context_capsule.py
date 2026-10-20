@@ -19,7 +19,7 @@ def decide_context_capsule(hook: HookInput) -> Decision:
     """
     if not is_standard_enrolled(hook.project_root):
         return Decision()
-    task_id = active_task_id(hook.project_root, session_id=hook.session_id)
+    task_id = active_task_id(hook.project_root, session_id=hook.session_id, agent_id=hook.agent_id)
     profile = session_profile(hook)
     try:
         ok, summary, detail = _gate_summary(hook.project_root, task_id)

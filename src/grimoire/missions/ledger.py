@@ -405,6 +405,7 @@ class MissionLedger:
                         # Issue #695 : seul un ``task attach`` marque ``explicit``.
                         explicit_at=str(raw.get("created_at", "") or "") if payload.get("explicit") else "",
                         host_version=str(payload.get("session_host_version", "") or ""),
+                        agent_id=str(payload.get("agent_id", "") or ""),
                     )
                     self._tasks[tid] = MissionTask.from_dict({**current.to_dict(), "claim": claim.to_dict()})
             elif evt_type in (TASK_LINKED_EVENT, _LEGACY_LINK_EVENT):
@@ -1302,6 +1303,7 @@ class MissionLedger:
         actor_id: str = "hook",
         explicit: bool = False,
         host_version: str = "",
+        agent_id: str = "",
     ) -> MissionTask:
         """Rattache *session_id* au claim de *task_id* — un événement, pas une réécriture.
 
@@ -1316,6 +1318,11 @@ class MissionLedger:
         *host_version* (K3) : la version de l'hôte lue par l'appelant ; un
         rattachement déjà fait qui l'apprend s'écrit une fois de plus, pour que la
         récolte sache si l'hôte est fencé à cette version.
+
+        *agent_id* (issue #698) : le sous-agent que le hook a vu réclamer ; un
+        claim de la même session qui ne le connaît pas encore l'apprend par un
+        événement de plus. Un claim déjà tenu par un autre sous-agent ne change
+        pas de main : l'identité observée en premier reste la sienne.
         """
         self._load()
         task = self._tasks.get(task_id)
@@ -1327,7 +1334,8 @@ class MissionLedger:
         if not session_id:
             raise GrimoireMissionError("A session id is required")
         learns_version = bool(host_version) and host_version != task.claim.session_host_version
-        if task.claim.session_id == session_id and not explicit and not learns_version:
+        learns_agent = bool(agent_id) and not task.claim.agent_id
+        if task.claim.session_id == session_id and not explicit and not learns_version and not learns_agent:
             return task
         if task.claim.session_id and task.claim.session_id != session_id:
             raise GrimoireMissionError(
@@ -1344,6 +1352,7 @@ class MissionLedger:
                 "session_host": canonical_host(session_host),
                 **({"session_host_version": host_version} if host_version else {}),
                 **({"explicit": True} if explicit else {}),
+                **({"agent_id": agent_id} if learns_agent else {}),
             },
         )
         self._load()

@@ -136,7 +136,7 @@ def _trace_floor_applied(hook: HookInput, declared: str, floor: str) -> None:
         from grimoire.core.standard_checks.evidence_journal import append_guard_event
         from grimoire.core.standard_state import resolve_active_task
 
-        task_id = resolve_active_task(hook.project_root, session_id=hook.session_id).task_id
+        task_id = resolve_active_task(hook.project_root, session_id=hook.session_id, agent_id=hook.agent_id).task_id
         append_guard_event(
             hook.project_root,
             task_id,

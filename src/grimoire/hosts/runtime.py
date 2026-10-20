@@ -163,6 +163,7 @@ def normalize_input(
         prompt=str(_pick(payload, "prompt", "userPrompt", "user_prompt", default="") or ""),
         agent_name=str(_pick(payload, "agent_name", "agentName", "subagent", default="") or ""),
         session_id=str(_pick(payload, "session_id", "sessionId", default="") or ""),
+        agent_id=str(_pick(payload, "agent_id", "agentId", default="") or ""),
         stop_active=stop_active,
         host=host_id.value if host_id is not None and host_id is not HostId.UNKNOWN else "",
         tool_use_id=str(_pick(payload, "tool_use_id", "toolUseId", "tool_call_id", "toolCallId", default="") or ""),
@@ -183,7 +184,7 @@ def _persist_capsule(hook: HookInput, decision: Decision) -> tuple[Path | None, 
     """
     if hook.event is not HookEvent.PRE_COMPACT or not decision.context:
         return None, ""
-    task_id = str(decision.detail.get("task_id") or active_task_id(hook.project_root, session_id=hook.session_id))
+    task_id = str(decision.detail.get("task_id") or active_task_id(hook.project_root, session_id=hook.session_id, agent_id=hook.agent_id))
     dest = hook.project_root / CONTEXT_DIR / task_id / "compaction-capsule.md"
     try:
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -286,7 +287,7 @@ def _record_decision(
         # pas dans son détail, donc chaque refus d'outil était journalisé sous
         # un task_id vide et `grimoire task trace` ne pouvait pas le retrouver.
         # Le gateway est l'unique écrivain de ce ledger ; c'est lui qui résout.
-        task_id = str(detail.get("task_id") or active_task_id(hook.project_root, session_id=hook.session_id))
+        task_id = str(detail.get("task_id") or active_task_id(hook.project_root, session_id=hook.session_id, agent_id=hook.agent_id))
         verdict = _LEDGER_VERDICT.get(decision.outcome, "allow")
         record_started_at = started_at or _now_iso()
         tool_calls = []
