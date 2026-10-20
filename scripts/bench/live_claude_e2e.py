@@ -234,7 +234,11 @@ Runner = Callable[[Sequence[str], Path, Mapping[str, str]], subprocess.Completed
 
 
 def _default_runner(argv: Sequence[str], cwd: Path, env: Mapping[str, str]) -> subprocess.CompletedProcess[str]:
-    return ta._run(list(argv), cwd=cwd, env=dict(env), timeout=300)
+    # stdin fermé : sous Windows, un stdin hérité peut se déclarer TTY et ouvrir un assistant interactif.
+    return subprocess.run(
+        list(argv), cwd=cwd, env=dict(env), stdin=subprocess.DEVNULL, capture_output=True, text=True,
+        encoding="utf-8", errors="replace", timeout=300, check=False,
+    )
 
 
 def run_step(
@@ -296,7 +300,7 @@ def provision(
     run_step(steps, "git-add", ["git", "add", "calc/__init__.py", "test_calc.py"], cwd=project, env=env, runner=runner)
     run_step(steps, "git-commit", [*git, "commit", "-q", "-m", "seed"], cwd=project, env=env, runner=runner)
     run_step(
-        steps, "grimoire-init", ["grimoire", "init", ".", "--backend", "local", "--no-cockpit"],
+        steps, "grimoire-init", ["grimoire", "init", ".", "--yes", "--backend", "local", "--no-cockpit"],
         cwd=project, env=env, runner=runner,
     )
     run_step(steps, "host-sync", ["grimoire", "host", "sync", "--host", "claude"], cwd=project, env=env, runner=runner)
@@ -799,6 +803,11 @@ def run_scenario(
     gate_step: Step | None = None
     stopped: str | None = None
     try:
+        source = (cfg.real_home or Path.home()) / ta.CREDENTIALS_REL_PATH
+        if auth_mode == "oauth-copy" and not cfg.dry_run and not source.is_file():
+            # Contrôle gratuit, fait avant toute étape : deux passages perdus ainsi (« Not logged in »,
+            # 0 $) quand le HOME est isolé par la suite de tests.
+            raise ScenarioError(f"oauth-copy : aucun identifiant à copier ({source.as_posix()} absent)")
         report["kit_version"] = run_step(steps, "version", ["grimoire", "--version"], cwd=ws, env=env(), runner=runner).output.strip()
         prov = provision(project, env=env(), python=cfg.python, steps=steps, runner=runner)
         task_id = prov["task_id"]
@@ -821,10 +830,6 @@ def run_scenario(
         if cfg.dry_run:
             stopped = "dry_run"
             return report
-        source = (cfg.real_home or Path.home()) / ta.CREDENTIALS_REL_PATH
-        if auth_mode == "oauth-copy" and not source.is_file():
-            # Deux passages perdus ainsi (« Not logged in », 0 $) : HOME isolé par la suite de tests.
-            raise ScenarioError(f"oauth-copy : aucun identifiant à copier ({source.as_posix()} absent)")
         caller.call(
             "A1-grant-turn",
             PROMPT_GRANT.format(scope=GRANT_SCOPE, cap=cfg.max_total_usd, until=GRANT_UNTIL),

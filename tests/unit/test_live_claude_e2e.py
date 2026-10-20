@@ -379,19 +379,22 @@ def test_live_test_is_deselected_by_default_and_skips_without_a_cap(tmp_path: Pa
 
     runs: list[str] = []
 
-    def run(*extra: str, **more: str) -> subprocess.CompletedProcess[str]:
+    def run(*extra: str, **more: str) -> tuple[int, str]:
+        """Code de sortie et sortie complète (stdout + stderr) ; jamais ``None``, même si le pipe se perd."""
         runs.append("x")
-        return subprocess.run(
+        proc = subprocess.run(
             [*base, f"--basetemp={tmp_path / f'run{len(runs)}'}", *extra], cwd=ROOT, env={**env, **more},
-            capture_output=True, text=True, encoding="utf-8", timeout=120, check=False,
+            stdin=subprocess.DEVNULL, capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=120, check=False,
         )
+        return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
 
-    default = run()
-    assert "1 deselected" in default.stdout, default.stdout + default.stderr
-    skipped = run("-m", "live_host", "-rs")
-    assert skipped.returncode == 0 and "GRIMOIRE_LIVE_CLAUDE_MAX_USD absent" in skipped.stdout, skipped.stdout
-    required = run("-m", "live_host", GRIMOIRE_REQUIRE_LIVE="1")
-    assert required.returncode == 1 and "live exigé" in required.stdout, required.stdout
+    _, default = run()
+    assert "1 deselected" in default, default
+    code, skipped = run("-m", "live_host", "-rs")
+    assert code == 0 and "GRIMOIRE_LIVE_CLAUDE_MAX_USD absent" in skipped, (code, skipped)
+    code, required = run("-m", "live_host", GRIMOIRE_REQUIRE_LIVE="1")
+    assert code == 1 and "live exigé" in required, (code, required)
 
 
 # ── Bout en bout sans modèle ─────────────────────────────────────────────────
