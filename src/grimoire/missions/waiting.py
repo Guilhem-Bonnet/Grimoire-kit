@@ -83,7 +83,13 @@ def parse_until(value: str) -> datetime | None:
 
 @dataclass(frozen=True, slots=True)
 class Question:
-    """Ce qu'on demande à l'humain, et qui le demande (``origin`` : ``agent``, ``tick`` ou ``flow``)."""
+    """Ce qu'on demande à l'humain, et qui le demande (``origin`` : ``agent``, ``tick`` ou ``flow``).
+
+    W6-07 (issue #564) : ``blocking`` (une question non bloquante ne gare pas la tâche), ``why``
+    (pourquoi elle est posée — ce que le reçu de la tâche montre) et ``key`` (identité stable de la
+    question, pour qu'une reprise ne la repose pas). Écrits seulement s'ils diffèrent du défaut : une
+    ligne de ledger antérieure garde sa forme et se relit à l'identique.
+    """
 
     id: str
     kind: str
@@ -91,6 +97,9 @@ class Question:
     options: tuple[str, ...] = ()
     origin: str = "agent"
     asked_at: str = ""
+    blocking: bool = True
+    why: str = ""
+    key: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {
@@ -99,6 +108,12 @@ class Question:
         }
         if self.asked_at:
             data["asked_at"] = self.asked_at
+        if not self.blocking:
+            data["blocking"] = False
+        if self.why:
+            data["why"] = self.why
+        if self.key:
+            data["key"] = self.key
         return data
 
     @classmethod
@@ -110,6 +125,9 @@ class Question:
             options=tuple(str(o) for o in d.get("options") or () if isinstance(o, str)),
             origin=str(d.get("origin", "agent") or "agent"),
             asked_at=str(d.get("asked_at", "") or ""),
+            blocking=d.get("blocking") is not False,
+            why=str(d.get("why", "") or ""),
+            key=str(d.get("key", "") or ""),
         )
 
 
@@ -149,6 +167,15 @@ class Waiting:
     question: Question | None = None
     resume_hint: ResumeHint | None = None
     since: str = ""
+    #: W6-07 (issue #564) : les autres questions posées **dans le même lot** que ``question`` — une seule
+    #: interruption, une seule notification. La tâche n'est rendue que quand toutes les bloquantes du lot
+    #: ont leur réponse humaine.
+    batch: tuple[Question, ...] = ()
+
+    @property
+    def group(self) -> tuple[Question, ...]:
+        """Toutes les questions du lot, celle de tête d'abord ; ``()`` sans question."""
+        return () if self.question is None else (self.question, *self.batch)
 
     def problem(self) -> str:
         """Pourquoi cette attente ne s'écrit pas ; ``""`` si elle est valide.
@@ -166,8 +193,10 @@ class Waiting:
                 return f"nature de question inconnue : {self.question.kind!r} — parmi {', '.join(QUESTION_KINDS)}"
             if self.until:
                 return "waiting(human) n'a pas d'échéance : aucune sortie au minuteur, jamais de décision à la place de l'humain"
-            return ""
-        if self.question is not None:
+            if not self.question.blocking:
+                return "la question de tête d'une attente humaine est bloquante : une question non bloquante ne gare pas la tâche"
+            return _batch_problem(self.group)
+        if self.question is not None or self.batch:
             return f"waiting({self.reason}) ne porte pas de question : seule l'attente d'un humain en pose une"
         if self.until and self.until != UNTIL_UNKNOWN and parse_until(self.until) is None:
             return f"échéance illisible : {self.until!r} — une date ISO 8601, ou 'unknown'"
@@ -187,6 +216,8 @@ class Waiting:
             data["resume_hint"] = self.resume_hint.to_dict()
         if self.since:
             data["since"] = self.since
+        if self.batch:
+            data["batch"] = [q.to_dict() for q in self.batch]
         return data
 
     @classmethod
@@ -199,7 +230,22 @@ class Waiting:
             question=Question.from_dict(question) if isinstance(question, dict) else None,
             resume_hint=ResumeHint.from_dict(hint) if isinstance(hint, dict) else None,
             since=str(d.get("since", "") or ""),
+            batch=tuple(Question.from_dict(q) for q in d.get("batch") or () if isinstance(q, dict)),
         )
+
+
+def _batch_problem(group: tuple[Question, ...]) -> str:
+    """Pourquoi ce lot de questions ne s'écrit pas ; ``""`` s'il est valide (identifiants uniques, textes, natures)."""
+    seen: set[str] = set()
+    for question in group:
+        if not question.id or not question.text.strip():
+            return "chaque question du lot exige un identifiant et un texte"
+        if question.kind not in QUESTION_KINDS:
+            return f"nature de question inconnue : {question.kind!r} — parmi {', '.join(QUESTION_KINDS)}"
+        if question.id in seen:
+            return f"question {question.id} en double dans le lot"
+        seen.add(question.id)
+    return ""
 
 
 # ── lint-decisions : une décision implicite dans un commentaire ──────────────

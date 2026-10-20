@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Any
 from grimoire.core.exceptions import GrimoireError, GrimoireMissionError
 from grimoire.core.standard_generation import STANDARD_DIR
 from grimoire.core.standard_state import current_session, invalidate_cache
+from grimoire.missions import question_gestures
 from grimoire.missions.admission import (
     QueuePlan,
     RouteRef,
@@ -45,7 +46,10 @@ from grimoire.missions.gates import GateRefusal, GateVerdict, check_transition
 from grimoire.missions.intake import IntakeRequest, MissionIntakeService
 from grimoire.missions.ledger import MissionLedger, ReapReport
 from grimoire.missions.pause import PAUSE_LIFTED_CAUSE, PauseState, pause_claim_guard, read_pause
+from grimoire.missions.question_gestures import BatchOutcome
+from grimoire.missions.questions import OPEN, QuestionSpec, group_settled, open_in_group, records_of
 from grimoire.missions.recall import DEFAULT_TOKEN_BUDGET, TaskRecall, build_task_recall, consolidate_task_memory
+from grimoire.missions.reservation import find_conflict, reservation_refusal
 from grimoire.missions.schemas import (
     DIRECTIVE_KINDS,
     ORIGIN_AGENT,
@@ -240,12 +244,12 @@ class WakeDecision:
         }
 
 
-def _claim_guards(root: Path) -> Callable[[Mapping[str, MissionTask], MissionTask], str]:
-    """Les gardes que le ledger appelle sous son verrou : la pause d'abord (K11), puis le WIP (K10)."""
+def _claim_guards(root: Path) -> Callable[..., str]:
+    """Les gardes que le ledger appelle sous son verrou : la pause (K11), le WIP (K10), puis les fichiers exclusifs (W1-07)."""
     pause, wip = pause_claim_guard(root), wip_claim_guard(root)
 
-    def guard(tasks: Mapping[str, MissionTask], task: MissionTask) -> str:
-        return pause(tasks, task) or wip(tasks, task)
+    def guard(tasks: Mapping[str, MissionTask], task: MissionTask, claim: TaskClaim | None = None) -> str:
+        return pause(tasks, task) or wip(tasks, task) or reservation_refusal(tasks, task, claim)
 
     return guard
 
@@ -773,14 +777,7 @@ class TaskService:
                 "répond à une question — un agent ne tranche pas ce qu'il a demandé"
             )
         task = self.require(task_id)
-        waiting = task.waiting
-        if task.status is not TaskState.WAITING or waiting is None or waiting.question is None:
-            raise GrimoireMissionError(f"{task_id} n'attend aucune réponse (état {task.status.value})")
-        question = waiting.question
-        if question_id and question_id != question.id:
-            raise GrimoireMissionError(
-                f"Question {question_id} inconnue pour {task_id} : la question en attente est {question.id}"
-            )
+        question = self._question_to_answer(task, question_id)
         if question.origin == "flow" and not attested_by_flow:
             raise GrimoireMissionError(
                 f"Réponse refusée pour {task_id} : la question {question.id} vient d'un checkpoint de flow, dont la "
@@ -797,7 +794,48 @@ class TaskService:
         self.ledger.add_directive(
             task_id, f"Réponse à « {question.text} » : {answer}", actor_id=actor, kind="directive", origin=origin
         )
+        task = self.require(task_id)
+        abandon = answer.lower() == ABANDON and ABANDON in (o.lower() for o in question.options)
+        if task.status is TaskState.WAITING and not abandon and not group_settled(task):
+            # W6-07 : une bloquante du lot reste sans réponse — la tâche attend encore, rien d'autre ne bouge.
+            return TaskMove(task=task, previous=TaskState.WAITING, verdict=GateVerdict("", "", ()), board_path=None)
+        if task.status is not TaskState.WAITING:
+            # W6-07 : réponse à une question non bloquante d'une tâche qui ne l'attendait pas : tracée, sans réveil.
+            return TaskMove(task=task, previous=task.status, verdict=GateVerdict("", "", ()), board_path=None)
         return self._settle_answer(task, question, answer, actor, in_place=attested_by_flow)
+
+    def _question_to_answer(self, task: MissionTask, question_id: str) -> Question:
+        """La question visée par une réponse humaine : celle du lot en attente, ou une non bloquante encore ouverte.
+
+        Sans *question_id* : la première question ouverte du lot (la tête pour une question seule, K6).
+        """
+        records = {r.id: r for r in records_of(task)}
+        group = open_in_group(task)
+        waiting = task.waiting
+        if not question_id:
+            if task.status is not TaskState.WAITING or waiting is None or waiting.question is None or not group:
+                raise GrimoireMissionError(f"{task.id} n'attend aucune réponse (état {task.status.value})")
+            return group[0].question
+        record = records.get(question_id)
+        if record is not None and record.base_status != OPEN:
+            raise GrimoireMissionError(f"Question {question_id} déjà tranchée ({record.base_status}) pour {task.id}")
+        if record is not None and (record in group or not record.question.blocking):
+            return record.question
+        if task.status is not TaskState.WAITING or waiting is None or waiting.question is None:
+            raise GrimoireMissionError(f"{task.id} n'attend aucune réponse (état {task.status.value})")
+        raise GrimoireMissionError(
+            f"Question {question_id} inconnue pour {task.id} : la question en attente est {waiting.question.id}"
+        )
+
+    def ask_batch(
+        self, task_id: str, specs: list[QuestionSpec], actor: str, *, origin: str = "agent", epoch: int | None = None
+    ) -> BatchOutcome:
+        """Pose un lot de questions en une interruption (W6-07) — voir :func:`question_gestures.ask_batch`."""
+        return question_gestures.ask_batch(self, task_id, specs, actor, origin=origin, epoch=epoch)
+
+    def resolve_question(self, task_id: str, question_id: str, answer: str, source: str, actor: str) -> MissionTask:
+        """Déduit, source citée, la réponse d'une question non bloquante (W6-07)."""
+        return question_gestures.resolve_question(self, task_id, question_id, answer, source, actor)
 
     def _settle_answer(
         self, task: MissionTask, question: Question, answer: str, actor: str, *, in_place: bool = False
@@ -903,7 +941,7 @@ class TaskService:
         return [*rest, *sorted(lifted, key=lambda item: position[item[0].id])]
 
     def _answer_of(self, task: MissionTask, waiting: Waiting) -> str | None:
-        if waiting.question is None:
+        if waiting.question is None or not group_settled(task):
             return None
         for event in reversed(self.ledger.list_events(task.id)):
             if (
@@ -1116,39 +1154,13 @@ class TaskService:
         deux agents n'écrivent jamais le même fichier en même temps. Un claim
         expiré ne bloque plus personne : le temps a suffi, sans geste humain.
         """
-        if not claim.exclusive_files:
+        conflict = find_conflict({t.id: t for t in self.ledger.list_tasks()}, task, claim)
+        if conflict is None:
             return
-        requested = set(claim.exclusive_files)
-        for other in self.ledger.list_tasks():
-            if other.id == task.id or other.status not in (TaskState.CLAIMED, TaskState.RUNNING, TaskState.WAITING):
-                continue
-            held = other.claim
-            # Une tâche en attente (K6) garde ses fichiers : elle reprend sur place, son bail n'est plus jugé.
-            parked = other.status is TaskState.WAITING
-            expired = held.is_expired() if held is not None and not parked else False
-            if held is None or not held.exclusive_files or expired:
-                continue
-            overlap = requested & set(held.exclusive_files)
-            if not overlap:
-                continue
-            fichier = min(overlap)
-            if parked:
-                # Pas la date d'expiration du claim (périmée, sans effet ici) : ce qui rend les fichiers.
-                due = other.waiting.until if other.waiting is not None else ""
-                reason, remedy = (
-                    f"réservé par {other.id} ({held.actor_id}), en attente"
-                    + (f" ({other.waiting.reason})" if other.waiting is not None else "")
-                    + (f" jusqu'à {due}" if due and due != "unknown" else ""),
-                    "répondre à sa question (`grimoire task answer`) ou attendre son réveil (`grimoire task wake`), "
-                    "ou réclamer une autre tâche",
-                )
-            else:
-                reason = f"réservé par {other.id} ({held.actor_id}) jusqu'à {held.expires_at or 'sans expiration'}"
-                remedy = "attendre l'expiration du claim ou réclamer une autre tâche"
-            refusal = GateRefusal(evidence=fichier, reason=reason, remedy=remedy)
-            verdict = GateVerdict(transition_id="exclusive_files", strictness="hard_fail", refusals=(refusal,))
-            self._record_refusal(task, target, verdict, claim.actor_id)
-            raise TaskRefusedError(task.id, verdict)
+        refusal = GateRefusal(evidence=conflict.file, reason=conflict.reason, remedy=conflict.remedy)
+        verdict = GateVerdict(transition_id="exclusive_files", strictness="hard_fail", refusals=(refusal,))
+        self._record_refusal(task, target, verdict, claim.actor_id)
+        raise TaskRefusedError(task.id, verdict)
 
     def _consolidate(self, task: MissionTask, target: TaskState, *, actor: str, reason: str) -> None:
         """Clôture ou blocage : ce que la roadmap Memory OS autorise à écrire.

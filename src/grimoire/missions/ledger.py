@@ -19,7 +19,7 @@ import json
 import logging
 import re
 import uuid
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
@@ -46,6 +46,7 @@ from grimoire.missions.lease import (
 from grimoire.missions.ledger_rules import (
     UnjudgedClaimError,
     blocks_path,
+    default_claim_expiry,
     deferred_waiting,
     parse_jsonl,
     read_jsonl,
@@ -55,6 +56,7 @@ from grimoire.missions.ledger_rules import (
     unfenced_question,
     waiting_guard,
 )
+from grimoire.missions.questions import QUESTION_EVENTS
 from grimoire.missions.schemas import (
     DEFAULT_CLAIM_TTL_SECONDS,
     ORIGIN_AGENT,
@@ -132,7 +134,7 @@ _STEERING_EVENTS = frozenset({
     "task.directive_added",
     "task.directive_delivered",
     "task.directive_acknowledged",
-})
+}) | QUESTION_EVENTS  # W6-07 : questions et réponses, rejouées dans ``MissionTask.questions``
 
 #: L'événement qui rattache une session d'hôte au claim d'une tâche (issue #638).
 SESSION_ATTACHED_EVENT = "task.session_attached"
@@ -332,7 +334,7 @@ class MissionLedger:
         #: K12 : lignes du journal illisibles au dernier rejeu (tronquées par une coupure), ignorées et rendues.
         self._unreadable: tuple[int, ...] = ()
         #: K10 : refus de claim posé par l'appelant (WIP), évalué sous le verrou ; ``""`` = accordé.
-        self.claim_guard: Callable[[Mapping[str, MissionTask], MissionTask], str] | None = None
+        self.claim_guard: Callable[..., str] | None = None
         self._loaded = False
         self._snapshot: snapshot.Cover | None = None  # K13 : ce que l'instantané restauré couvre
 
@@ -372,7 +374,7 @@ class MissionLedger:
                     if refusal:
                         self._rejected[str(raw.get("id", ""))] = refusal
                     else:
-                        self._apply_transition(tid, payload)
+                        self._apply_transition(tid, payload, str(raw.get("created_at", "")))
             elif evt_type == LEASE_RENEWED_EVENT:
                 tid = str(raw.get("entity_id") or payload.get("task_id") or "")
                 refusal = self._effect_refusal(tid, payload)
@@ -383,7 +385,7 @@ class MissionLedger:
                     claim = replace(current.claim, expires_at=str(payload.get("expires_at", "") or ""))
                     self._tasks[tid] = MissionTask.from_dict({**current.to_dict(), "claim": claim.to_dict()})
             elif evt_type in _STEERING_EVENTS:
-                replay_steering(self._tasks, evt_type, payload)
+                replay_steering(self._tasks, evt_type, payload, str(raw.get("created_at", "") or ""))
             elif evt_type == SESSION_ATTACHED_EVENT:
                 # Issue #638 lot A : le claim apprend sa session après coup. Un
                 # événement de plus dans le journal, jamais une ligne réécrite ;
@@ -422,13 +424,13 @@ class MissionLedger:
             self._events.append(LedgerEvent.from_dict(raw))
         snapshot.save_if_slow(self, replay)
 
-    def _apply_transition(self, tid: str, payload: dict[str, Any]) -> None:
+    def _apply_transition(self, tid: str, payload: dict[str, Any], at: str = "") -> None:
         old_task = self._tasks[tid]
         update: dict[str, Any] = {"status": payload["to_state"]}
         # K6 : l'attente n'existe que dans l'état ``waiting`` ; toute autre transition l'efface.
         update["waiting"] = payload.get("waiting") if payload["to_state"] == TaskState.WAITING.value else None
         if "claim" in payload:
-            update["claim"] = payload["claim"]
+            update["claim"] = default_claim_expiry(payload["claim"], at)  # W1-07 : pas de claim éternel
         self._tasks[tid] = MissionTask.from_dict({**old_task.to_dict(), **update})
         claim_epoch = payload.get("claim", {}).get("lease_epoch") if isinstance(payload.get("claim"), dict) else None
         for value in (claim_epoch, payload.get("fence_epoch")):
@@ -747,7 +749,7 @@ class MissionLedger:
                     f"Claim refusé pour {task_id} : dépend de {'; '.join(waiting)} — "
                     "une tâche ne se réclame que lorsque ses dépendances `blocks` sont closes"
                 )
-            if self.claim_guard is not None and (limit := self.claim_guard(self._tasks, task)):
+            if self.claim_guard is not None and (limit := self.claim_guard(self._tasks, task, claim)):
                 raise GrimoireMissionError(f"Claim refusé pour {task_id} : {limit}")
         elif to_state is TaskState.RUNNING and task.status in _RESUMING and self.claim_guard is not None and (limit := self.claim_guard(self._tasks, task)):
             raise GrimoireMissionError(f"Reprise refusée pour {task_id} : {limit} — elle attend une place, la tâche reste {task.status.value}")
