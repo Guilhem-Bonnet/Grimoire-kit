@@ -206,19 +206,23 @@ def _journal_epoch(hook: HookInput, task_id: str) -> int:
     return state.lease_epoch if state.task_id == task_id else 0
 
 
-def waiting_task_of_session(hook: HookInput) -> Any:
-    """La tâche que cette session a garée en ``waiting`` (K6), ou ``None``.
+#: États où la session a lâché sa tâche avec une raison : attente (K6), rendue pour vérification,
+#: bloquée, échouée, annulée, fermée (D-12). Seuls ``claimed``/``running`` la tiennent encore.
+PARKED_STATES = frozenset({"waiting", "needs_verification", "blocked", "failed", "cancelled", "closed"})
 
-    Une tâche en attente n'est plus ``claimed``/``running`` : la résolution de tâche active ne la
-    désigne plus, et le ``Stop`` prendrait le travail de la session pour une écriture hors tâche.
-    Le journal de la session dit quelle tâche elle a tenue ; le ledger, que ce claim est le sien et
-    qu'il attend. Une session qui se gare avec une raison peut s'arrêter — c'est le but de l'état.
+
+def parked_task_of_session(hook: HookInput) -> Any:
+    """La tâche que cette session tenait et a garée ou rendue (:data:`PARKED_STATES`), ou ``None``.
+
+    Une tâche qui n'est plus ``claimed``/``running`` n'est plus désignée par la résolution de tâche
+    active, et le ``Stop`` prendrait le travail de la session pour une écriture hors tâche. Le journal
+    de la session dit quelle tâche elle a tenue ; le ledger, que ce claim est le sien et ce qu'il est
+    devenu. Une autre session n'est jamais couverte par elle.
     """
     if not hook.session_id:
         return None
     try:
         from grimoire.missions.ledger import MissionLedger
-        from grimoire.missions.schemas import TaskState
         from grimoire.policies.session_state import load_session_state
 
         task_id = load_session_state(hook.project_root, hook.session_id, now_iso="").task_id
@@ -228,7 +232,7 @@ def waiting_task_of_session(hook: HookInput) -> Any:
         task = MissionLedger(events.parent).get_task(task_id)
     except Exception:
         return None
-    if task is None or task.status is not TaskState.WAITING or task.claim is None:
+    if task is None or task.status.value not in PARKED_STATES or task.claim is None:
         return None
     return task if task.claim.session_id == hook.session_id else None
 
