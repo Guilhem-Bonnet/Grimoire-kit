@@ -13,8 +13,9 @@ Deux preuves, sans Windows :
    sur la base, la réponse arrive alors que le corps n'est pas encore parti
    (rouge-avant / vert-après, reproduit en envoyant l'en-tête seul) ;
 2. côté client des tests, ``_cockpit_http`` retente sur une coupure franche
-   (``SO_LINGER`` à 0 → RST), relit la réponse en entier, et ne masque ni un
-   4xx ni un refus de connexion.
+   (``SO_LINGER`` à 0 → RST, rendu ``ConnectionResetError`` à la lecture ou
+   ``BrokenPipeError`` à l'envoi du corps sous macOS), relit la réponse en
+   entier, et ne masque ni un 4xx ni un refus de connexion.
 """
 
 from __future__ import annotations
@@ -126,15 +127,18 @@ class _CuttingServer:
                 continue
             self.accepted += 1
             with conn:
-                if self.accepted <= self.cuts:
-                    # Un RST immédiat, sans lire : ce que voit le client sous
-                    # Windows quand le serveur ferme sur un corps en vol.
-                    conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
-                    continue
                 conn.settimeout(5)
                 raw = b""
                 while b"\r\n\r\n" not in raw:
                     raw += conn.recv(4096)
+                if self.accepted <= self.cuts:
+                    # En-tête lu, puis RST sans répondre : ce que voit le client
+                    # sous Windows quand le serveur ferme sur un corps en vol.
+                    # (Lire d'abord évite que le RST tombe sur le ``send`` du
+                    # corps, où macOS le rend en ``BrokenPipeError`` — retenté
+                    # aussi, voir ``_cockpit_http.RETRIED``.)
+                    conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+                    continue
                 head, _, rest = raw.partition(b"\r\n\r\n")
                 length = 0
                 for line in head.split(b"\r\n"):

@@ -4,7 +4,7 @@ Un seul client pour tous les tests qui montent ``_CockpitHandler`` ou
 ``make_handler`` sur un port local. Il retente au plus :data:`ATTEMPTS` fois,
 uniquement quand la connexion est coupée avant que la réponse ait été lue
 (``ConnectionAbortedError`` — ``WinError 10053`` —, ``ConnectionResetError``,
-``RemoteDisconnected``), avec un court délai, et relit la réponse en entier.
+``BrokenPipeError``, ``RemoteDisconnected``), avec un court délai, et relit la réponse en entier.
 Il ne masque rien d'autre : une 4xx/5xx reste une 4xx/5xx, un refus de
 connexion reste un refus, un délai dépassé reste un délai dépassé.
 
@@ -28,7 +28,16 @@ ATTEMPTS = 3
 #: Délai entre deux essais, en secondes.
 RETRY_DELAY_S = 0.2
 #: Les seules erreurs retentées : la connexion est partie avant la réponse.
-RETRIED = (ConnectionAbortedError, ConnectionResetError, http.client.RemoteDisconnected)
+#: ``BrokenPipeError`` est le visage macOS du même RST : ``http.client`` envoie
+#: l'en-tête puis le corps en deux ``send``, et c'est le second qui échoue
+#: (``[Errno 32]``) quand le serveur a déjà fermé ; Windows et Linux le
+#: rendent sur la lecture (``ConnectionResetError``/``ConnectionAbortedError``).
+RETRIED = (
+    ConnectionAbortedError,
+    ConnectionResetError,
+    BrokenPipeError,
+    http.client.RemoteDisconnected,
+)
 
 
 def _decode(raw: bytes) -> Any:
