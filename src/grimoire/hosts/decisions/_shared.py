@@ -52,6 +52,15 @@ class HookInput:
     invoked for — ``grimoire-hook --host claude`` — or ``""`` when a decision is
     run without a host (tests, direct calls). Read by the session ↔ task link
     (issue #638): a resume command exists only for a host known to have one."""
+    agent_type: str = ""
+    """The named agent the session or sub-agent runs as, when the host says so
+    (issue #716). Claude Code sends ``agent_type`` on ``SessionStart`` for a
+    session opened with ``claude --agent <name>`` (or the ``agent`` setting),
+    and on every event fired inside a sub-agent call. ``""`` otherwise."""
+    agent_id: str = ""
+    """The host's identifier of the sub-agent instance a hook fires in
+    (Claude Code ``agent_id``, present only inside a sub-agent call — issue
+    #716). What a claim keyed on ``(session_id, agent_id)`` (#698) reads."""
     tool_use_id: str = ""
     """The host's identifier of this tool call, shared by its ``PreToolUse`` and
     ``PostToolUse`` payloads, or ``""`` when the host sends none. The temporal

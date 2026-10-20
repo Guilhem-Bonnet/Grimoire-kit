@@ -406,12 +406,21 @@ def decide_activation(hook: HookInput) -> Decision:
         agents = collect_agents(hook.project_root)
     except OSError:
         agents = ()
-    persona, entry_name = entry_persona_context(hook.project_root, agents)
-    if entry_name:
-        _record_agent_dispatch(hook.project_root, entry_name, task_id)
-    dispatch_context = (
-        _claude_dispatch_context(hook.project_root, agents) if hook.host == HostId.CLAUDE_CODE_CLI.value else ""
-    )
+    # Issue #716 : une session ouverte dans un agent nommé (``claude --agent
+    # <nom>``, clé ``agent``) l'a déjà pour identité — lui remettre en plus la
+    # persona d'entrée et la politique de dispatch de la boucle principale,
+    # c'est deux identités pour une session. La substitution par persona reste
+    # pour les sessions démarrées sans ``--agent`` (``agent_type`` vide).
+    if hook.agent_type:
+        persona, entry_name = "", ""
+        dispatch_context = ""
+    else:
+        persona, entry_name = entry_persona_context(hook.project_root, agents)
+        if entry_name:
+            _record_agent_dispatch(hook.project_root, entry_name, task_id)
+        dispatch_context = (
+            _claude_dispatch_context(hook.project_root, agents) if hook.host == HostId.CLAUDE_CODE_CLI.value else ""
+        )
     recall = _claimed_task_recall(hook.project_root, task_id)
     stigmergy_part = _stigmergy_context(hook.project_root)
     # W2-05 : après une compaction, la fenêtre repart de zéro ; le run de flow
@@ -450,6 +459,7 @@ def decide_activation(hook: HookInput) -> Decision:
             "task_id": task_id,
             "task_source": active.source,
             "entry_agent": entry_name,
+            "session_agent": hook.agent_type,
             "recall_injected": bool(recall),
             "stigmergy_injected": bool(stigmergy_part),
             "flow_lines_injected": bool(flow_part),
