@@ -56,8 +56,9 @@ l'atelier ni sur le cockpit. Ce n'est pas une ligne manquante de la table « Rou
 | Observer | 10 | 7 | 70% |
 | Mémoire | 9 | 4 | 44% |
 | Source | 17 | 15 | 88% |
+| Contrôles × états (coque) | 80 | 80 | 100% |
 | Routes API | 26 | 19 | 73% |
-| **TOTAL** | **169** | **133** | **79%** |
+| **TOTAL** | **249** | **213** | **86%** |
 <!-- END:cockpit-coverage-summary -->
 
 *(régénéré par `python scripts/cockpit-coverage.py` — recopier sa sortie ici après toute modification des tables ci-dessous ; la CI de PR 1 le vérifie via `--check`.)*
@@ -273,6 +274,106 @@ pour ce contrôle précis.
 | Bouton Suggérer — indisponible | `.sr-assist-btn` | `disabled` | idem (`available:false`) | statut lisible sans survol, raison affichée | `test_suggerer_indisponible_est_lisible_sans_survol` | oui |
 | Bouton Suggérer — clic (insérer) | `.sr-assist-btn` | `insérer` | `POST /api/workspace/assist` | aperçu + diagnostics recalculés | `test_suggerer_affiche_l_apercu_et_inserer_recalcule_les_diagnostics` | oui |
 | Bouton Suggérer — pendant chargement | idem | `disabled` puis réactivé | idem (`loading:true`) | désactivé puis réactivé | `test_bouton_desactive_pendant_le_chargement_puis_reactive` | oui |
+
+### Espace : Contrôles × états (coque)
+
+Lot E (#536) : chaque primitive de `shell.css` croisée avec chaque état qui
+s'y applique, rendue dans la surface que la feuille suppose et mesurée dans
+les deux thèmes par `tests/e2e/test_workspace_control_states.py` (état forcé
+par CDP `CSS.forcePseudoState` ou par attribut) et, sur les valeurs
+déclarées, par `tests/unit/test_workspace_control_states.py`. Les états sans
+règle propre (survol du rail, de l'épingle, du segment, du select) rendent
+comme l'état normal et sont mesurés tels quels. Le lien en ligne est exempté
+de la cible de 24 px (WCAG 2.5.8) ; sa couleur est celle du navigateur
+(`color-scheme`), mesurée ≥ 4,5:1 dans les deux thèmes mais hors tokens. Le
+chargement est un squelette décoratif plus un `.sr-only` : seule la présence
+du texte lecteur d'écran est vérifiée. Deux paires trouvées défaillantes et
+corrigées : `select` natif rendu à 21 px (cible 24 px) et placeholder à
+3,55:1 en sombre (encre du navigateur) — captures avant/après dans le
+rapport du lot.
+
+| Contrôle | Surface hôte | État | Mesure | Thèmes | Test(s) | Couvert |
+|---|---|---|---|---|---|---|
+| `btn` | `#canvas` | normal (`—`) | contraste ≥ 4,5:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[btn-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `btn` | `#canvas` | survol (`hover`) | contraste ≥ 4,5:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[btn-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `btn` | `#canvas` | focus visible (`focus, focus-visible`) | contraste ≥ 4,5:1 ; cible ≥ 24 px ; anneau visible ≥ 3:1 | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[btn-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `btn` | `#canvas` | actif (`aria-pressed=true`) | contraste ≥ 4,5:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[btn-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `btn` | `#canvas` | désactivé (`disabled=∅`) | contraste ≥ 4,5:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[btn-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `btn` | `#canvas` | chargement (`aria-busy=true`) | contraste ≥ 4,5:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[btn-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `btn.pri` | `#canvas` | normal (`—`) | contraste ≥ 4,5:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[btn.pri-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `btn.pri` | `#canvas` | survol (`hover`) | contraste ≥ 4,5:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[btn.pri-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `btn.pri` | `#canvas` | focus visible (`focus, focus-visible`) | contraste ≥ 4,5:1 ; cible ≥ 24 px ; anneau visible ≥ 3:1 | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[btn.pri-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `btn.pri` | `#canvas` | désactivé (`disabled=∅`) | contraste ≥ 4,5:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[btn.pri-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `btn.pri` | `#canvas` | chargement (`aria-busy=true`) | contraste ≥ 4,5:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[btn.pri-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `btn.on` | `#canvas` | normal (`—`) | contraste ≥ 4,5:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[btn.on-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `btn.on` | `#canvas` | survol (`hover`) | contraste ≥ 4,5:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[btn.on-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `btn.on` | `#canvas` | focus visible (`focus, focus-visible`) | contraste ≥ 4,5:1 ; cible ≥ 24 px ; anneau visible ≥ 3:1 | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[btn.on-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `btn.on` | `#canvas` | désactivé (`disabled=∅`) | contraste ≥ 4,5:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[btn.on-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `chip` | `#docbar` | normal (`—`) | contraste ≥ 4,5:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[chip-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `chip` | `#docbar` | survol (`hover`) | contraste ≥ 4,5:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[chip-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `chip` | `#docbar` | focus visible (`focus, focus-visible`) | contraste ≥ 4,5:1 ; cible ≥ 24 px ; anneau visible ≥ 3:1 | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[chip-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `chip` | `#docbar` | désactivé (`disabled=∅`) | contraste ≥ 4,5:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[chip-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `chip.pill.ok` | `#docbar` | normal (`—`) | contraste ≥ 4,5:1 | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[chip.pill.ok-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `chip.pill.warn` | `#docbar` | normal (`—`) | contraste ≥ 4,5:1 | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[chip.pill.warn-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `chip.pill.bad` | `#docbar` | normal (`—`) | contraste ≥ 4,5:1 | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[chip.pill.bad-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `chip.pill.acc` | `#docbar` | normal (`—`) | contraste ≥ 4,5:1 | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[chip.pill.acc-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `chip.pill.s1` | `#docbar` | normal (`—`) | contraste ≥ 4,5:1 | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[chip.pill.s1-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `chip.pill.s2` | `#docbar` | normal (`—`) | contraste ≥ 4,5:1 | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[chip.pill.s2-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `chip.pill.s3` | `#docbar` | normal (`—`) | contraste ≥ 4,5:1 | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[chip.pill.s3-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `select` | `#canvas` | normal (`—`) | contraste ≥ 4,5:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[select-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `select` | `#canvas` | survol (`hover`) | contraste ≥ 4,5:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[select-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `select` | `#canvas` | focus visible (`focus, focus-visible`) | contraste ≥ 4,5:1 ; cible ≥ 24 px ; anneau visible ≥ 3:1 | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[select-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `select` | `#canvas` | désactivé (`disabled=∅`) | contraste ≥ 4,5:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[select-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `input` | `#canvas` | normal (`—`) | contraste ≥ 4,5:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[input-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `input` | `#canvas` | survol (`hover`) | contraste ≥ 4,5:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[input-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `input` | `#canvas` | focus visible (`focus, focus-visible`) | contraste ≥ 4,5:1 ; cible ≥ 24 px ; anneau visible ≥ 3:1 | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[input-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `input` | `#canvas` | désactivé (`disabled=∅`) | contraste ≥ 4,5:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[input-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `input` | `#canvas` | erreur (`aria-invalid=true`) | contraste ≥ 4,5:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[input-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `input.vide` | `#canvas` | normal (`—`) | contraste ≥ 4,5:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[input.vide-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `input.vide` | `#canvas` | focus visible (`focus, focus-visible`) | contraste ≥ 4,5:1 ; cible ≥ 24 px ; anneau visible ≥ 3:1 | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[input.vide-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `.input` | `.panel-body` | normal (`—`) | contraste ≥ 4,5:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[.input-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `.input` | `.panel-body` | focus visible (`focus-within`) | contraste ≥ 4,5:1 ; cible ≥ 24 px ; anneau visible ≥ 3:1 | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[.input-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `lien` | `#canvas` | normal (`—`) | contraste ≥ 4,5:1 | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[lien-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `lien` | `#canvas` | survol (`hover`) | contraste ≥ 4,5:1 | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[lien-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `lien` | `#canvas` | focus visible (`focus, focus-visible`) | contraste ≥ 4,5:1 ; anneau visible ≥ 3:1 | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[lien-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `lien.panneau` | `.panel-body` | normal (`—`) | contraste ≥ 4,5:1 | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[lien.panneau-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `lien.panneau` | `.panel-body` | survol (`hover`) | contraste ≥ 4,5:1 | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[lien.panneau-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `lien.panneau` | `.panel-body` | focus visible (`focus, focus-visible`) | contraste ≥ 4,5:1 ; anneau visible ≥ 3:1 | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[lien.panneau-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `pin` | `.panel-head` | normal (`—`) | icône ≥ 3:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[pin-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `pin` | `.panel-head` | survol (`hover`) | icône ≥ 3:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[pin-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `pin` | `.panel-head` | focus visible (`focus, focus-visible`) | icône ≥ 3:1 ; cible ≥ 24 px ; anneau visible ≥ 3:1 | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[pin-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `pin` | `.panel-head` | actif (`aria-pressed=true`) | icône ≥ 3:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[pin-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `tab` | `#spaces` | normal (`—`) | contraste ≥ 4,5:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[tab-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `tab` | `#spaces` | survol (`hover`) | contraste ≥ 4,5:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[tab-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `tab` | `#spaces` | focus visible (`focus, focus-visible`) | contraste ≥ 4,5:1 ; cible ≥ 24 px ; anneau visible ≥ 3:1 | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[tab-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `tab` | `#spaces` | actif (`aria-selected=true`) | contraste ≥ 4,5:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[tab-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `seg` | `#docbar` | normal (`—`) | contraste ≥ 4,5:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[seg-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `seg` | `#docbar` | survol (`hover`) | contraste ≥ 4,5:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[seg-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `seg` | `#docbar` | focus visible (`focus, focus-visible`) | contraste ≥ 4,5:1 ; cible ≥ 24 px ; anneau visible ≥ 3:1 | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[seg-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `seg` | `#docbar` | actif (`aria-pressed=true`) | contraste ≥ 4,5:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[seg-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `seg` | `#docbar` | désactivé (`disabled=∅`) | contraste ≥ 4,5:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[seg-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `seg-s` | `#statusbar` | normal (`—`) | contraste ≥ 4,5:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[seg-s-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `seg-s` | `#statusbar` | focus visible (`focus, focus-visible`) | contraste ≥ 4,5:1 ; cible ≥ 24 px ; anneau visible ≥ 3:1 | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[seg-s-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `seg-s` | `#statusbar` | actif (`aria-pressed=true`) | contraste ≥ 4,5:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[seg-s-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `seg-s` | `#statusbar` | désactivé (`disabled=∅`) | contraste ≥ 4,5:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[seg-s-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `rail-btn` | `#rail` | normal (`—`) | icône ≥ 3:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[rail-btn-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `rail-btn` | `#rail` | survol (`hover`) | icône ≥ 3:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[rail-btn-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `rail-btn` | `#rail` | focus visible (`focus, focus-visible`) | icône ≥ 3:1 ; cible ≥ 24 px ; anneau visible ≥ 3:1 | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[rail-btn-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `rail-btn` | `#rail` | actif (`aria-pressed=true`) | icône ≥ 3:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[rail-btn-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `tree` | `.panel-body` | normal (`—`) | contraste ≥ 4,5:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[tree-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `tree` | `.panel-body` | survol (`hover`) | contraste ≥ 4,5:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[tree-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `tree` | `.panel-body` | focus visible (`focus, focus-visible`) | contraste ≥ 4,5:1 ; cible ≥ 24 px ; anneau visible ≥ 3:1 | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[tree-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `tree` | `.panel-body` | actif (`aria-current=true`) | contraste ≥ 4,5:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[tree-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `ev-row` | `.panel-body` | normal (`—`) | contraste ≥ 4,5:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[ev-row-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `ev-row` | `.panel-body` | survol (`hover`) | contraste ≥ 4,5:1 ; cible ≥ 24 px | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[ev-row-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `ev-row` | `.panel-body` | focus visible (`focus, focus-visible`) | contraste ≥ 4,5:1 ; cible ≥ 24 px ; anneau visible ≥ 3:1 | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[ev-row-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `kbd` | `.panel-head` | normal (`—`) | contraste ≥ 4,5:1 | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[kbd-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `lbl` | `.panel-body` | normal (`—`) | contraste ≥ 4,5:1 | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[lbl-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `empty` | `#canvas` | normal (`—`) | contraste ≥ 4,5:1 | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[empty-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `status.erreur` | `#statusbar` | normal (`—`) | contraste ≥ 4,5:1 | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[status.erreur-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `status.pause` | `#statusbar` | normal (`—`) | contraste ≥ 4,5:1 | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[status.pause-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `tip` | `#canvas` | normal (`—`) | contraste ≥ 4,5:1 | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[tip-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
+| `chargement` | `#canvas` | normal (`—`) | icône ≥ 3:1 | sombre, clair | `test_chaque_etat_du_controle_tient_contraste_cible_et_focus[chargement-*]`, `test_chaque_paire_controle_etat_tient_son_contraste` (unit) | oui |
 
 ## Routes API
 
