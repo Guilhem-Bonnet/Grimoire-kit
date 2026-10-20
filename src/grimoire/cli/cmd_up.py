@@ -31,6 +31,8 @@ from rich.console import Console
 from rich.table import Table
 
 from grimoire.cli import cmd_setup
+from grimoire.cli.doctor_hooks import check_hook_commands
+from grimoire.cli.env_checks import EnvCheck
 from grimoire.core import layout
 from grimoire.core.config import GrimoireConfig
 from grimoire.core.exceptions import GrimoireConfigError, GrimoireError
@@ -64,18 +66,6 @@ _STANDARD_PROFILE_MARKER = Path("_grimoire/standard/standard-profile.yaml")
 
 
 # ── Environment checks (shared with grimoire doctor) ─────────────────────────
-
-
-@dataclass
-class EnvCheck:
-    """Outcome of one environment probe."""
-
-    name: str
-    passed: bool
-    level: str  # "ok" | "info" | "warn" | "fail"
-    detail: str
-    remedy: str = ""
-    optional: bool = True
 
 
 def _tcp_reachable(url: str, default_port: int, *, timeout: float = _SOCKET_TIMEOUT) -> bool:
@@ -501,6 +491,7 @@ def run_env_checks(target: Path) -> list[EnvCheck]:
         check_ollama(),
         check_embedding_model(target),
         *check_mcp_json(target),
+        *check_hook_commands(target),
     ]
 
 
