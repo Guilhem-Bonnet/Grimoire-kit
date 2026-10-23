@@ -1,18 +1,24 @@
 // Le pouls de la coque (UI-3) : l'actualisation sans rechargement, et les mots
 // qui disent « il y a combien de temps » et « combien ça a coûté ».
 //
-// Une seule boucle de sondage pour toute la coque, jamais une par espace : elle
-// interroge `/api/workspace/pulse` (une empreinte calculée par `stat` côté
-// serveur, voir workspace_pulse.py), et ne relit rien tant que l'empreinte ne
-// bouge pas. Quand elle bouge, les espaces qui se sont inscrits (`ctx.live.on`)
-// rechargent leurs propres données — la coque ne sait pas ce qu'ils affichent.
+// Une seule source pour toute la coque, jamais une par espace. D'abord le flux
+// (P10) : un `EventSource` sur `/api/workspace/stream`, que le serveur nourrit
+// dès que l'empreinte bouge (ledger, journal de session, proposition) — moins
+// de 2 s après l'écriture, sans attendre l'intervalle. À défaut (navigateur sans
+// `EventSource`, hôte qui ne sert pas le flux), le sondage de `/api/workspace/pulse`
+// (une empreinte calculée par `stat` côté serveur, voir workspace_pulse.py), qui
+// ne relit rien tant que l'empreinte ne bouge pas. Dans les deux cas, quand elle
+// bouge, les espaces qui se sont inscrits (`ctx.live.on`) rechargent leurs propres
+// données — la coque ne sait pas ce qu'ils affichent.
 //
-// Règles tenues ici, chacune prouvée dans tests/e2e/test_workspace_live_pilot.py :
+// Règles tenues ici, prouvées dans tests/e2e/test_workspace_live_pilot.py et
+// tests/e2e/test_workspace_live_stream.py :
 //   - l'intervalle est celui que le serveur déclare (`interval_seconds`), pas une
-//     constante de l'interface ; avant la première réponse, un défaut prudent ;
-//   - un onglet masqué ne fait AUCUNE requête (`visibilitychange` : la requête en
-//     cours est annulée, le minuteur est coupé) ; revenu visible, un sondage
-//     part tout de suite ;
+//     constante de l'interface ; avant la première réponse, un défaut prudent. En
+//     flux, c'est la cadence du battement qui garde « mis à jour il y a N s » vrai ;
+//   - un onglet masqué ne fait AUCUNE requête (`visibilitychange` : le flux est
+//     fermé, la requête en cours annulée, le minuteur coupé) ; revenu visible, le
+//     flux se rouvre (ou un sondage part) tout de suite ;
 //   - deux sondages ne se chevauchent jamais (minuteur ré-armé APRÈS la réponse) ;
 //   - une API injoignable se voit (état `error` + durée), elle ne gèle pas
 //     silencieusement un « mis à jour il y a 2 s » mensonger.
@@ -20,6 +26,7 @@
 import { api, host } from './api.js';
 
 const DEFAULT_INTERVAL_MS = 5000;
+const FIRST_PULSE_TIMEOUT_MS = 5000;
 
 const hidden = () => document.visibilityState === 'hidden';
 
@@ -69,6 +76,8 @@ export function createLive({ onDecisions, onState } = {}) {
   const state = {
     // 'idle' | 'ok' | 'paused' | 'error' — lu par la coque pour écrire l'horodatage.
     status: 'idle',
+    // 'stream' (flux, P10) | 'poll' (sondage) : le flux d'abord, le sondage s'il manque.
+    transport: typeof EventSource === 'function' ? 'stream' : 'poll',
     intervalMs: DEFAULT_INTERVAL_MS,
     fingerprint: null,
     lastOkAt: null,
@@ -78,12 +87,37 @@ export function createLive({ onDecisions, onState } = {}) {
   let handlers = [];
   let timer = null;
   let inflight = null;
+  let source = null;
   let running = false;
+  // Résout l'attente de `start()` au premier pouls reçu, quel que soit le transport.
+  let settle = () => {};
+
+  const scope = () => (host.kind === 'cockpit' ? 'portfolio' : undefined);
 
   const notifyState = (status) => {
     state.status = status;
     if (onState) onState(state);
   };
+
+  /** Un pouls, sondé ou poussé : même traitement. */
+  function receive(pulse) {
+    const seconds = Number(pulse.interval_seconds);
+    if (seconds >= 1) state.intervalMs = seconds * 1000;
+    const first = state.fingerprint === null;
+    state.lastOkAt = Date.now();
+    state.failingSince = null;
+    const changed = Boolean(pulse.fingerprint) && pulse.fingerprint !== state.fingerprint;
+    if (changed) state.fingerprint = pulse.fingerprint;
+    if (onDecisions && pulse.decisions) onDecisions(pulse.decisions);
+    // Le tout premier pouls fixe la référence : l'espace vient d'être chargé,
+    // il n'a rien à recharger.
+    if (changed && !first) {
+      for (const handler of [...handlers]) {
+        try { handler(pulse); } catch (error) { console.error('actualisation de l\'espace :', error); }
+      }
+    }
+    notifyState('ok');
+  }
 
   function clearTimer() {
     if (timer !== null) { clearTimeout(timer); timer = null; }
@@ -91,7 +125,7 @@ export function createLive({ onDecisions, onState } = {}) {
 
   function schedule() {
     clearTimer();
-    if (!running || hidden()) return;
+    if (!running || hidden() || state.transport !== 'poll') return;
     timer = setTimeout(() => { poll(); }, state.intervalMs);
   }
 
@@ -102,33 +136,56 @@ export function createLive({ onDecisions, onState } = {}) {
     inflight = controller;
     state.requests += 1;
     try {
-      const scope = host.kind === 'cockpit' ? 'portfolio' : undefined;
-      const pulse = await api.pulse(state.fingerprint, scope, controller.signal);
-      const seconds = Number(pulse.interval_seconds);
-      if (seconds >= 1) state.intervalMs = seconds * 1000;
-      const first = state.fingerprint === null;
-      state.lastOkAt = Date.now();
-      state.failingSince = null;
-      if (pulse.changed) {
-        state.fingerprint = pulse.fingerprint;
-        if (onDecisions && pulse.decisions) onDecisions(pulse.decisions);
-        // Le tout premier sondage fixe la référence : l'espace vient d'être
-        // chargé, il n'a rien à recharger.
-        if (!first) {
-          for (const handler of [...handlers]) {
-            try { handler(pulse); } catch (error) { console.error('actualisation de l\'espace :', error); }
-          }
-        }
-      }
-      notifyState('ok');
+      receive(await api.pulse(state.fingerprint, scope(), controller.signal));
     } catch (error) {
       if (error && error.name === 'AbortError') return; // onglet masqué : ce n'est pas une panne
       if (state.failingSince === null) state.failingSince = Date.now();
       notifyState('error');
     } finally {
       inflight = null;
+      settle();
       schedule();
     }
+  }
+
+  function closeStream() {
+    if (source) { source.close(); source = null; }
+  }
+
+  function openStream() {
+    if (source || !running || hidden()) return;
+    const stream = new EventSource(api.pulseStreamUrl(state.fingerprint, scope()));
+    let heard = false;
+    source = stream;
+    state.requests += 1;
+    stream.addEventListener('pulse', (event) => {
+      if (source !== stream) return;
+      let pulse;
+      try { pulse = JSON.parse(event.data); } catch { return; }
+      heard = true;
+      receive(pulse);
+      settle();
+    });
+    stream.onerror = () => {
+      if (source !== stream) return;
+      if (!heard || stream.readyState === EventSource.CLOSED) {
+        // Jamais entendu : l'hôte ne sert pas le flux. Fermé : le navigateur a
+        // renoncé à se reconnecter. Dans les deux cas, on sonde.
+        closeStream();
+        state.transport = 'poll';
+        poll();
+        return;
+      }
+      // Coupé après avoir parlé : le navigateur se reconnecte seul (`retry`).
+      // En attendant, la panne se voit.
+      if (state.failingSince === null) state.failingSince = Date.now();
+      notifyState('error');
+    };
+  }
+
+  function resume() {
+    if (state.transport === 'stream') openStream();
+    else poll();
   }
 
   function onVisibility() {
@@ -136,26 +193,33 @@ export function createLive({ onDecisions, onState } = {}) {
     if (hidden()) {
       clearTimer();
       if (inflight) inflight.abort();
+      closeStream();
       notifyState('paused');
     } else {
-      poll();
+      resume();
     }
   }
 
   return {
     state,
-    /** Premier sondage (attendu par l'appelant), puis la boucle. */
+    /** Premier pouls (attendu par l'appelant), puis le flux ou la boucle. */
     async start() {
       if (running) return;
       running = true;
       document.addEventListener('visibilitychange', onVisibility);
       if (hidden()) { notifyState('paused'); return; }
-      await poll();
+      await new Promise((resolve) => {
+        settle = () => { settle = () => {}; resolve(); };
+        // Un flux muet (intermédiaire qui retient la réponse) ne bloque pas la coque.
+        setTimeout(() => settle(), FIRST_PULSE_TIMEOUT_MS);
+        resume();
+      });
     },
     stop() {
       running = false;
       clearTimer();
       if (inflight) inflight.abort();
+      closeStream();
       document.removeEventListener('visibilitychange', onVisibility);
     },
     /** Inscrit ce que l'espace courant fait quand le pouls annonce un changement. */

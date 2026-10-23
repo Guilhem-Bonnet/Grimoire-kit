@@ -136,11 +136,17 @@ def _empty_status(project_root: Path) -> dict[str, Any]:
     }
 
 
-def _probe_memory_link_status(project_root: Path, cfg: Any) -> dict[str, Any]:
+def _probe_memory_link_status(project_root: Path, cfg: Any, manager: Any | None = None) -> dict[str, Any]:
     """La sonde complète — coûteuse, réseau compris. Réservée à ``probe=True``.
 
     C'était tout le corps de :func:`memory_link_status` avant l'issue de perf
     du cockpit (mesuré 0,88s : trois sondes réseau séquentielles, zéro cache).
+
+    ``manager`` : un ``MemoryManager`` déjà construit par l'appelant, réutilisé
+    tel quel — l'aperçu de flotte n'en ouvre qu'un par projet.
+
+    Une sonde en échec (backend malade, sonde expirée) rend ``entries: None``
+    et sa raison dans ``error`` : une lecture ratée n'est pas un zéro (#264).
     """
     from grimoire.core.exceptions import GrimoireMemoryError
 
@@ -150,14 +156,20 @@ def _probe_memory_link_status(project_root: Path, cfg: Any) -> dict[str, Any]:
     try:
         from grimoire.memory.manager import MemoryManager
 
-        mgr = MemoryManager.from_config(cfg, project_root=project_root)
+        mgr = manager if manager is not None else MemoryManager.from_config(cfg, project_root=project_root)
         health = mgr.health_check()
         status["resolvedBackend"] = health.backend
         status["available"] = health.healthy
-        status["entries"] = health.entries
         status["detail"] = dict(health.detail)
-        status["state"] = "ok" if health.healthy else "unavailable"
-        status["parity"] = _store_graph_parity(mgr, health.entries)
+        if health.healthy:
+            status["state"] = "ok"
+            status["entries"] = health.entries
+            status["parity"] = _store_graph_parity(mgr, health.entries)
+        else:
+            status["state"] = "unavailable"
+            status["error"] = str(
+                health.detail.get("reason") or health.detail.get("error") or "backend indisponible"
+            )
         from grimoire.memory.profiles import retrieval_in_service
 
         status["retrieval"] = retrieval_in_service(mgr.prefers_hybrid, cfg.memory.layer_profile)
@@ -180,7 +192,7 @@ def _probe_memory_link_status(project_root: Path, cfg: Any) -> dict[str, Any]:
     return status
 
 
-def memory_link_status(project_root: Path, *, probe: bool = False) -> dict[str, Any]:
+def memory_link_status(project_root: Path, *, probe: bool = False, manager: Any | None = None) -> dict[str, Any]:
     """Statut du lien projet ↔ BDD mémoire, best-effort.
 
     États : ``uninitialized`` (pas de config projet), ``unavailable``
@@ -198,7 +210,8 @@ def memory_link_status(project_root: Path, *, probe: bool = False) -> dict[str, 
     une donnée périmée présentée comme fraîche. Sans cache, il rend la config
     connue seule (``configuredBackend``), sans sonder. ``probe=True`` force
     une sonde fraîche (coûteuse : réseau, jusqu'à trois services) et
-    rafraîchit le cache pour les lectures rapides suivantes.
+    rafraîchit le cache pour les lectures rapides suivantes ; ``manager``
+    (sonde seulement) réutilise un ``MemoryManager`` déjà ouvert.
     """
     from grimoire.core.config import GrimoireConfig
     from grimoire.core.exceptions import GrimoireConfigError
@@ -231,7 +244,7 @@ def memory_link_status(project_root: Path, *, probe: bool = False) -> dict[str, 
         status["stale"] = not cached.is_fresh()
         return status
 
-    status = _probe_memory_link_status(project_root, cfg)
+    status = _probe_memory_link_status(project_root, cfg, manager)
     health_cache.set_status(project_root, status)
     status = dict(status)
     status["probedAt"] = datetime.now(tz=UTC).isoformat()

@@ -774,6 +774,7 @@ class FlowEngine:
         task_id: str = "",
         parent_run_id: str | None = None,
         parent_node_id: str | None = None,
+        preview: bool = False,
     ) -> tuple[WorkflowInstance, NodeContract]:
         """Démarre un run : premier node ouvert, son contrat présenté.
 
@@ -781,6 +782,10 @@ class FlowEngine:
         ``flows.dispatch_executor`` quand ce run est le sous-flow d'un node
         ``kind: "composite"`` — ``None``/``None`` pour tout run racine, les
         deux sont toujours posés ou absents ensemble.
+
+        ``preview`` marque un aperçu (``upgrade-flow run --dry-run``) dans la
+        métadonnée du run : :func:`grimoire.tools.flow_runs.list_flow_runs` ne
+        le compte pas parmi les runs de flow.
         """
         blueprint = load_blueprint(blueprint_path, self._project_root)
         order = topo_order(blueprint)
@@ -814,6 +819,7 @@ class FlowEngine:
                 parent_node_id=parent_node_id,
                 blueprint_sha256=self._digest_of(contracts, order),
                 node_digests={n: contract_digest(contracts[n].to_dict()) for n in order if n in contracts},
+                preview=preview,
             )
         )
 

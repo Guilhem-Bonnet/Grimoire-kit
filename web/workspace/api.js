@@ -176,6 +176,13 @@ export const api = {
     const params = { ...(since ? { since } : {}), ...(scope ? { scope } : {}) };
     return get(WS + 'pulse', Object.keys(params).length ? params : undefined, signal ? { signal } : undefined);
   },
+  // Le même pouls en flux (P10) : l'URL que `live.js` ouvre en `EventSource`
+  // (qui ne passe pas par `fetch`), avec la même cible que toute lecture.
+  pulseStreamUrl: (since, scope) => {
+    const params = new URLSearchParams({ ...(since ? { since } : {}), ...(scope ? { scope } : {}) });
+    const query = params.toString();
+    return withProject(WS + 'stream' + (query ? '?' + query : ''));
+  },
   glossary: () => get(WS + 'glossary'),
   tasks: (params) => get(WS + 'tasks', params),
   // `project` cible un AUTRE projet que celui déjà résolu par l'hôte — même
