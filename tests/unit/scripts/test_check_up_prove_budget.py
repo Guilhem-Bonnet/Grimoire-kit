@@ -106,7 +106,7 @@ def test_onboarding_declares_a_budget_and_the_release_job_enforces_it() -> None:
         spec.loader.exec_module(module)
     finally:
         sys.path.remove(str(SCRIPT_PATH.parent))
-    doc = (REPO_ROOT / "docs" / "onboarding.md").read_text(encoding="utf-8")
+    doc = (REPO_ROOT / "docs" / "tutoriels" / "onboarding.md").read_text(encoding="utf-8")
     assert module.declared_budget(doc) is not None
     publish = (REPO_ROOT / ".github" / "workflows" / "publish.yml").read_text(encoding="utf-8")
     assert "grimoire -o json up" in publish

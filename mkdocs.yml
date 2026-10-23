@@ -1,5 +1,5 @@
-site_name: Grimoire Kit
-site_description: Composable AI Agent Platform — personas, memory, workflows, and quality automation.
+site_name: Grimoire
+site_description: Dashboard, task board, project memory and evidence check for code you delegate to agents (Claude Code, Copilot).
 site_url: https://guilhem-bonnet.github.io/Grimoire-kit/docs/
 repo_url: https://github.com/Guilhem-Bonnet/Grimoire-kit
 repo_name: Guilhem-Bonnet/Grimoire-kit
@@ -40,6 +40,52 @@ plugins:
       scripts:
         - scripts/gen_doc_reference.py
   - literate-nav
+  - redirects:
+      redirect_maps:
+        adr-001-no-multi-llm.md: explications/decisions/adr-001-no-multi-llm.md
+        adr-002-semver-policy.md: explications/decisions/adr-002-semver-policy.md
+        adr-003-memory-duality.md: explications/decisions/adr-003-memory-duality.md
+        adr-004-gouvernance-des-runtimes-cloud.md: explications/decisions/adr-004-gouvernance-des-runtimes-cloud.md
+        adr-005-mission-ledger-source-of-truth.md: explications/decisions/adr-005-mission-ledger-source-of-truth.md
+        adr-006-vue-de-travail.md: explications/decisions/adr-006-vue-de-travail.md
+        adr-007-unification-des-taches.md: explications/decisions/adr-007-unification-des-taches.md
+        adr-008-actions-infrastructure-locale-typees.md: explications/decisions/adr-008-actions-infrastructure-locale-typees.md
+        api-reference.md: reference/api.md
+        archetype-guide.md: guides/choisir-un-archetype.md
+        artifact-doctrine.md: explications/quand-creer-un-artefact.md
+        cadrage.md: guides/cadrage-produit.md
+        changelog.md: reference/changelog.md
+        cli-reference.md: reference/cli/index.md
+        concepts.md: explications/concepts.md
+        config-reference.md: reference/configuration.md
+        creating-agents.md: guides/creer-un-agent.md
+        evals-protocol.md: guides/evaluer-un-flow.md
+        expertises.md: guides/expertises.md
+        extensions-marketplace.md: guides/extensions.md
+        faq.md: guides/faq.md
+        getting-started.en.md: tutoriels/premier-projet.md
+        getting-started.md: tutoriels/premier-projet.md
+        grimoire-game-runtime-guardrails.md: explications/garde-fous-runtime.md
+        grimoire-yaml-reference.md: reference/grimoire-yaml.md
+        hosts.md: reference/hotes.md
+        mcp-integration.md: guides/mcp.md
+        memory-system.md: explications/memoire.md
+        migration-v2-v3.md: guides/migration-v2-v3.md
+        observatory-api.md: reference/observatoire.md
+        onboarding.md: tutoriels/onboarding.md
+        plugin-development.md: guides/developper-un-plugin.md
+        presentation-decouverte.md: index.md
+        rnd.md: explications/experimental.md
+        sdk-guide.md: guides/sdk-python.md
+        serve-blueprints.md: guides/atelier-blueprints.md
+        signaux.md: index.md
+        standard/install-by-needs.md: guides/installer-par-besoins.md
+        standard/integration.md: guides/rendre-la-preuve-bloquante.md
+        troubleshooting.md: guides/depannage.md
+        upgrade.md: guides/mettre-a-jour.md
+        vscode-setup.md: guides/vscode.md
+        workflow-design-patterns.md: explications/workflows.md
+        workflow-taxonomy.md: explications/taxonomie-des-workflows.md
   - mkdocstrings:
       handlers:
         python:
@@ -50,9 +96,6 @@ plugins:
             members_order: source
             docstring_style: numpy
             show_if_no_docstring: false
-
-hooks:
-  - mkdocs_hooks/signals.py
 
 markdown_extensions:
   - admonition
@@ -84,73 +127,93 @@ extra_css:
 extra_javascript:
   - javascripts/presentation-onepager.js
 
-# Trois corpus, trois onglets. Le manuel décrit ce que le produit fait ; le
-# standard décrit la norme qu'il applique. Les plans cibles et backlogs ne
-# sont pas de la documentation et vivent dans `planning/`, hors du site.
+# Le manuel suit Diátaxis : tutoriels (apprendre), guides (atteindre un but),
+# référence (consulter), explications (comprendre). Les plans cibles, bancs et
+# veilles ne sont pas de la documentation : ils sont exclus du site.
+exclude_docs: |
+  _archive/
+  audits/
+  bench/
+  security/
+  veille/
+  cockpit-coverage-matrix.md
+
 nav:
   - Accueil: index.md
-  - Manuel:
-      - Présentation & Découverte: presentation-decouverte.md
-      - Signaux & nouveautés: signaux.md
-      - Démarrage:
-          - Quick Start: getting-started.md
-          - Quick Start (English): getting-started.en.md
-          - Setup VS Code: vscode-setup.md
-          - Onboarding: onboarding.md
-      - Concepts:
-          - Architecture: concepts.md
-          - Surfaces hôtes: hosts.md
-          - Mémoire: memory-system.md
-          - Workflows: workflow-design-patterns.md
-          - Taxonomie Workflows: workflow-taxonomy.md
-          - Guardrails runtime agentiques: grimoire-game-runtime-guardrails.md
-      - Atelier local & blueprints: serve-blueprints.md
-      - Guides:
-          - Cadrage produit: cadrage.md
-          - Extensions & marketplace: extensions-marketplace.md
-          - SDK Python: sdk-guide.md
-          - Créer un agent: creating-agents.md
-          - "Doctrine : quand créer un artefact": artifact-doctrine.md
-          - Catalogue d'expertises: expertises.md
-          - Archétypes: archetype-guide.md
-          - Intégration MCP: mcp-integration.md
-          - Observatory API: observatory-api.md
-          - Référence YAML: grimoire-yaml-reference.md
-          - Plugin Development: plugin-development.md
-          - Protocole d'évaluation: evals-protocol.md
-          - R&D expérimental: rnd.md
-          - Bench cœurs Rust: rust-cores-benchmark.md
-      - Référence:
-          - CLI: cli-reference.md
-          - Configuration: config-reference.md
-          - API: api-reference.md
-          - Glossaire: glossaire.md
-          - Changelog: changelog.md
-      - Migration:
-          - v2 → v3: migration-v2-v3.md
-      - Aide:
-          - FAQ: faq.md
-          - Troubleshooting: troubleshooting.md
-      - ADR:
-          - "001 — No Multi-LLM": adr-001-no-multi-llm.md
-          - "002 — SemVer Policy": adr-002-semver-policy.md
-          - "003 — Dualité mémoire": adr-003-memory-duality.md
-          - "004 — Gouvernance des runtimes cloud": adr-004-gouvernance-des-runtimes-cloud.md
-          - "005 — Mission Ledger source de vérité": adr-005-mission-ledger-source-of-truth.md
-      - "006 — Vue de travail": adr-006-vue-de-travail.md
-      - "008 — Actions d'infrastructure locale (proposé)": adr-008-actions-infrastructure-locale-typees.md
-  - Système nodal:
-      - nodal/index.md
+  - Tutoriels:
+      - tutoriels/index.md
+      - Premier projet: tutoriels/premier-projet.md
+      - Onboarding: tutoriels/onboarding.md
       - Votre premier blueprint: nodal/premier-blueprint.md
-      - Comprendre:
+  - Guides:
+      - guides/index.md
+      - Installer par besoins: guides/installer-par-besoins.md
+      - Mettre à jour un projet: guides/mettre-a-jour.md
+      - Migration v2 → v3: guides/migration-v2-v3.md
+      - Rendre la preuve bloquante: guides/rendre-la-preuve-bloquante.md
+      - VS Code: guides/vscode.md
+      - Serveur MCP: guides/mcp.md
+      - SDK Python: guides/sdk-python.md
+      - Extensions: guides/extensions.md
+      - Développer un plugin: guides/developper-un-plugin.md
+      - Créer un agent: guides/creer-un-agent.md
+      - Choisir un archétype: guides/choisir-un-archetype.md
+      - Catalogue d'expertises: guides/expertises.md
+      - Cadrage produit: guides/cadrage-produit.md
+      - L'atelier de blueprints: guides/atelier-blueprints.md
+      - Évaluer un flow: guides/evaluer-un-flow.md
+      - Dépanner: guides/depannage.md
+      - Questions fréquentes: guides/faq.md
+  - Référence:
+      - reference/index.md
+      - Commandes:
+          - reference/cli/index.md
+          - Le projet: reference/cli/projet.md
+          - Le tableau de bord: reference/cli/tableau-de-bord.md
+          - Les tâches: reference/cli/taches.md
+          - La mémoire du projet: reference/cli/memoire.md
+          - Le contrôle des preuves: reference/cli/preuve.md
+          - La mise à jour: reference/cli/mise-a-jour.md
+          - Les flows: reference/cli/flows.md
+          - Fournisseurs, routeur, file, pause et tick: reference/cli/fournisseurs.md
+          - Configuration, registre et divers: reference/cli/divers.md
+      - Configuration: reference/configuration.md
+      - grimoire.yaml: reference/grimoire-yaml.md
+      - API Python: reference/api.md
+      - API de l'observatoire: reference/observatoire.md
+      - Surfaces hôtes: reference/hotes.md
+      - Contrôles gouvernés: standard/controles-gouvernes.md
+      - Flows (généré): nodal/reference/
+      - Glossaire: glossaire.md
+      - Changelog: reference/changelog.md
+  - Explications:
+      - explications/index.md
+      - Le tableau de bord: explications/le-tableau-de-bord.md
+      - Les tâches et les sessions: explications/les-taches-et-sessions.md
+      - La mémoire du projet: explications/memoire.md
+      - Le contrôle des preuves:
+          - standard/index.md
+          - Le refus de preuve, ligne par ligne: explications/le-refus-de-preuve.md
+      - Les limites: explications/les-limites.md
+      - Concepts: explications/concepts.md
+      - Les flows:
+          - nodal/index.md
           - Ce que le graphe fait: nodal/concepts/execution.md
           - Contrats et pins: nodal/concepts/contrats-et-pins.md
           - Les trois canaux: nodal/concepts/canaux.md
           - Les portes: nodal/concepts/portes.md
           - Sept primitives: nodal/concepts/primitives.md
-      - Référence: nodal/reference/
-  - Standard agentique:
-      - standard/index.md
-      - Intégration: standard/integration.md
-      - Installation par besoins: standard/install-by-needs.md
-      - Contrôles gouvernés: standard/controles-gouvernes.md
+      - Workflows: explications/workflows.md
+      - Taxonomie des workflows: explications/taxonomie-des-workflows.md
+      - "Doctrine : quand créer un artefact": explications/quand-creer-un-artefact.md
+      - Garde-fous du runtime: explications/garde-fous-runtime.md
+      - Expérimental: explications/experimental.md
+      - Décisions:
+          - "001 — No Multi-LLM": explications/decisions/adr-001-no-multi-llm.md
+          - "002 — SemVer Policy": explications/decisions/adr-002-semver-policy.md
+          - "003 — Dualité mémoire": explications/decisions/adr-003-memory-duality.md
+          - "004 — Gouvernance des runtimes cloud": explications/decisions/adr-004-gouvernance-des-runtimes-cloud.md
+          - "005 — Mission Ledger source de vérité": explications/decisions/adr-005-mission-ledger-source-of-truth.md
+          - "006 — Vue de travail": explications/decisions/adr-006-vue-de-travail.md
+          - "007 — Unification des tâches": explications/decisions/adr-007-unification-des-taches.md
+          - "008 — Actions d'infrastructure locale (proposé)": explications/decisions/adr-008-actions-infrastructure-locale-typees.md

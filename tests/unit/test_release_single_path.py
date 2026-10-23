@@ -405,7 +405,7 @@ def _changelog_d01_entry() -> str:
     # L'entrée vit dans le CHANGELOG tant que la note de sa version tient sous la
     # limite de GitHub ; sinon dans le détail intégral de la version (3.63.0).
     text = (_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    detail = _ROOT / "docs" / "changelog-3.63.0-detail.md"
+    detail = _ROOT / "docs" / "_archive" / "changelog-3.63.0-detail.md"
     if detail.is_file():
         text += "\n" + detail.read_text(encoding="utf-8")
     start = text.index("- fix(release): une seule voie de release")
