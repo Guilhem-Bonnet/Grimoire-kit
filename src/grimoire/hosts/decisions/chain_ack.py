@@ -112,17 +112,16 @@ def read_acks(project_root: Path, task_id: str) -> list[dict[str, Any]]:
 
 def covering_ack(acks: list[dict[str, Any]], task_id: str, inserted: InsertedLine) -> dict[str, Any] | None:
     """Le dernier acquittement qui couvre exactement *inserted* (ligne et empreintes des trois lignes), sinon ``None``."""
-    for ack in reversed(acks):
-        if (
-            ack.get("task_id") == task_id
-            and ack.get("kind") == "unchained_inserted"
-            and ack.get("line") == inserted.line
-            and ack.get("line_sha256") == inserted.sha256
-            and ack.get("prev_sha256") == inserted.prev_sha256
-            and ack.get("next_sha256") == inserted.next_sha256
-        ):
-            return ack
-    return None
+    expected = {
+        "task_id": task_id,
+        "kind": "unchained_inserted",
+        "line": inserted.line,
+        "line_sha256": inserted.sha256,
+        "prev_sha256": inserted.prev_sha256,
+        "next_sha256": inserted.next_sha256,
+    }
+    matching = [ack for ack in acks if all(ack.get(key) == value for key, value in expected.items())]
+    return matching[-1] if matching else None
 
 
 def _refused(why: str) -> tuple[str, dict[str, Any]]:
@@ -189,7 +188,9 @@ def record_chain_ack_request(hook: HookInput) -> tuple[str, dict[str, Any]]:
         "`standard verify` la passe en avertissement `evidence.chain_break_explained` et la liste toujours ; "
         f"le journal n'est pas modifié. {_LIMIT}"
     )
-    return context, {"chain_ack": {"status": "recorded", "ack_id": entry["ack_id"], "task_id": task_id, "line": target.line}}
+    return context, {
+        "chain_ack": {"status": "recorded", "ack_id": entry["ack_id"], "task_id": task_id, "line": target.line}
+    }
 
 
 def _append(project_root: Path, task_id: str, entry: dict[str, Any]) -> None:
