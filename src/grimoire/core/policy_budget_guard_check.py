@@ -39,7 +39,7 @@ def apply_policy_budget_guard_check(target: Path, results: list[dict[str, Any]],
             f"budget global bloquant ({', '.join(blocking_global)}) : une règle `per_session` sans "
             "`tool_pattern` en `verdict_on_match: block` refuse tout outil de la session une fois "
             "le plafond atteint — préférez un `tool_pattern` ciblé ou `verdict_on_match: warn` "
-            "(voir docs/hosts.md)"
+            "(voir docs/reference/hotes.md)"
         )
         results.append({"name": "policy_budget_guard", "passed": True, "detail": detail, "level": "warn"})
         if fmt != "json":
@@ -73,7 +73,7 @@ def apply_policy_budget_guard_check(target: Path, results: list[dict[str, Any]],
             f"fenêtre de durée courte ({', '.join(short_duration_global)}) : `max_duration_min` "
             "< 2880 (48h) sans `tool_pattern`, en `verdict_on_match: block` — une session Claude "
             "Code laissée ouverte plusieurs jours dépasse cette fenêtre bien avant toute vraie "
-            "dérive (voir docs/hosts.md)"
+            "dérive (voir docs/reference/hotes.md)"
         )
         results.append({"name": "policy_budget_duration_guard", "passed": True, "detail": detail, "level": "warn"})
         if fmt != "json":

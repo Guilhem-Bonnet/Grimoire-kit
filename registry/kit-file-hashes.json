@@ -1166,6 +1166,10 @@
    "version": "3.4.2",
    "path": "archetypes/platform-engineering/shared-context.tpl.md"
   },
+  "4f48cafd08d570204d1aa5d6c53bea9d28f5a0b7bf5b6a33af6cba68f962b4ab": {
+   "version": "3.63.0",
+   "path": "framework/workflows/party-mode.md"
+  },
   "4f92d0051658af4b04666e1595aae12d1fd98397caa9f10e490c3884decb92e0": {
    "version": "3.6.1",
    "path": "framework/cc-verify.sh"
@@ -1245,6 +1249,10 @@
   "5417380efe1b0f1c96850b068255b59c2d18cc35d22c3b5f7505a6b1239d03a5": {
    "version": "3.41.0",
    "path": "framework/event-log-shared-state.md"
+  },
+  "544efe8238d013c4bb223326282da2fae2bf7c9931b8fdcad79e087e0dd15d0f": {
+   "version": "3.64.0",
+   "path": "framework/workflows/party-mode.md"
   },
   "54509987d643d318e524bd6bcc3162d9b2d194ae9f9eedd04380032c9b576b40": {
    "version": "3.4.2",
@@ -1713,10 +1721,6 @@
   "6e949461c2a8ae3280224d021b1d67eac35be7fc3e898ca11088f0dc8a481792": {
    "version": "3.35.0",
    "path": "framework/tools/grimoire-setup.py"
-  },
-  "6eb3617f10f65dac42b65e2c6922bb43da6784159400c1e31c7817f7986847c9": {
-   "version": "3.64.0",
-   "path": "framework/workflows/party-mode.md"
   },
   "6f5bc141e22b00029f6a3f3f794f47ad4f370e62b8ce1db053c4bffa7732e442": {
    "version": "3.16.0",
@@ -2729,6 +2733,10 @@
   "ae549c338a206e87d474a692b660a8def59dc54e1344f387bf85ec3921602ce7": {
    "version": "3.4.2",
    "path": "framework/archetype-dna.schema.yaml"
+  },
+  "ae755193685d6df79b0f8422998c298c04e9681b751bf32d6f3bf62b1274a79a": {
+   "version": "3.63.0",
+   "path": "framework/glossary.yaml"
   },
   "ae8c583e9a4420979a534c134eef0a81791496ecaaede83c7ed561decf2d200c": {
    "version": "3.4.2",

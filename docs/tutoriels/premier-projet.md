@@ -1,0 +1,367 @@
+---
+audience: utilisateur
+---
+
+# Getting Started — Grimoire Kit v3
+
+<sub>Version française — <a href="../_archive/getting-started.en.md">English version</a></sub>
+
+> Ce guide vous accompagne de l'installation à votre premier projet Grimoire.
+
+## Les 5 commandes de la première heure
+
+Grimoire Kit expose plus de cinquante commandes (`grimoire --help --all`) —
+mais la première heure n'en demande que cinq :
+
+| Commande | À quoi elle sert |
+|----------|------------------|
+| `grimoire init` | Créer ou enrôler un projet — détection de stack, agents déployés |
+| `grimoire up` | Tout enchaîner en une commande — init, identité, standard, doctor |
+| `grimoire doctor` | Diagnostiquer la santé du projet — config, structure, agents |
+| `grimoire flow run` | Lancer et suivre un flow gouverné — le reçu de preuve d'une tâche |
+| `grimoire cockpit` | Ouvrir le tableau de bord — projets, activité, mises à jour |
+
+`grimoire --help` les affiche par défaut ; `grimoire --help --all` (ou
+`grimoire COMMAND --help`) donne accès à tout le reste — mémoire, standard,
+dispatch, hôtes, propositions, blueprints, tâches, outils… — sans qu'aucune
+commande ne soit renommée ni retirée. Référence complète :
+[`docs/reference/cli/`](../reference/cli/index.md).
+
+## Prérequis
+
+- **Python 3.12+**
+- **pip**, **pipx** (recommandé) ou **uv**
+- Un éditeur avec support Copilot / LLM (VS Code recommandé)
+
+## Installation
+
+```bash
+# Via pipx (recommandé — isolation automatique)
+pipx install grimoire-kit
+
+# Via pip dans un venv
+python3 -m venv .venv && source .venv/bin/activate
+pip install grimoire-kit
+
+# Avec le support MCP (Model Context Protocol)
+pip install grimoire-kit[mcp]
+
+# Toutes les extensions (MCP + Qdrant + Ollama)
+pip install grimoire-kit[all]
+```
+
+> **Note** : Sur Ubuntu/Debian, `pip install` en dehors d'un venv est bloqué (PEP 668).
+> Utilisez `pipx` ou un venv.
+
+Vérifiez l'installation :
+
+```bash
+grimoire --version
+```
+
+## Créer un projet
+
+### En une commande (recommandé)
+
+`grimoire up` enchaîne tout le parcours : init (mode express), propagation de
+l'identité, standard agentique gouverné, puis diagnostic de santé. La commande
+est idempotente — relancée sur un projet déjà en place, elle ne fait que
+combler les manques.
+
+```bash
+# Nouveau projet
+grimoire up mon-projet --archetype web-app --name "Mon Projet" --user "Alice"
+
+# Projet existant
+cd votre-projet/
+grimoire up .
+
+# Wizard interactif complet, ou sans le standard gouverné
+grimoire up . --interactive
+grimoire up . --no-standard
+```
+
+Archétypes disponibles : `minimal`, `web-app`, `infra-ops`, `platform-engineering`,
+`agentic-standard`, `creative-studio`, `fix-loop`.
+
+> **`--lite`/`--profile lite` sont dépréciés** (décision produit 2026-09-18) :
+> le profil léger n'existe plus — l'expérience installée est toujours
+> complète, le cœur s'adapte à chaque tâche par classe de travail. Les deux
+> drapeaux sont encore acceptés (avertissement affiché) mais se comportent
+> désormais exactement comme le défaut décrit ci-dessous.
+
+### Mémoire par défaut : le plus complet que la machine peut servir, jamais partagée à votre insu
+
+Sans `--backend`/`--memory-profile` explicite (le cas par défaut, y compris
+avec `-y`), l'étape Mémoire pose la composition la plus riche que cette
+machine peut servir **sans jamais s'attacher à un service qu'elle a
+seulement trouvé en marche** : `standard` (vecteurs Qdrant embarqués — aucun
+service, aucun Docker) quand un moteur d'embedding local
+(fastembed/sentence-transformers) est installé, `lexical` sinon (BM25, aucune
+dépendance). `complet` (Weaviate + Neo4j + Redis) est retenu dès que Docker
+répond : `-y` vaut consentement et démarre la pile (Docker Compose, gabarits du
+kit) ; `--memory-stack up` donne le même consentement hors `-y` (script, CI).
+Sans l'un ni l'autre, `complet` est configuré mais rien n'est démarré, et
+`grimoire doctor` le signale (« memory stack not started »).
+
+Un service mémoire tournant déjà sur la machine (Weaviate, Qdrant, Ollama)
+n'est **jamais** attaché automatiquement, même si `init` l'a détecté ; le
+rapport se contente de le signaler :
+
+```text
+Memory: qdrant-local
+         Qdrant embarqué (fichier local, aucun service) — recherche sémantique activée
+         ! détecté : Weaviate sur http://localhost:8080 — activez-le avec
+         `grimoire memory up --profile standard --apply`
+         local vector embeddings (fastembed/sentence-transformers) available — no server needed.
+         ^ This machine can serve Complet: grimoire memory up --profile complet --start --apply
+```
+
+Pour démarrer la pile `complet` depuis un run non interactif sans `-y`
+(script, CI) :
+
+```bash
+grimoire init . --memory-stack up
+```
+
+Pour utiliser explicitement un backend partagé (Qdrant, Weaviate), passez
+`--backend` : la collection est alors nommée d'après le projet (son slug), pas
+un nom générique partagé par tous les projets de la machine.
+
+```bash
+grimoire init . --backend weaviate-server
+```
+
+Si cette collection existe déjà et contient des données, `init` refuse de s'y
+attacher tant que vous ne le demandez pas explicitement avec
+`--memory-collection` :
+
+```bash
+grimoire init . --backend weaviate-server --memory-collection nom-existant
+```
+
+### Étape par étape (ce que `up` enchaîne)
+
+```bash
+grimoire init mon-projet --archetype web-app   # scaffold seul
+cd mon-projet
+grimoire setup                                 # propagation identité
+grimoire standard init . --needs solo-prototyping
+grimoire doctor
+```
+
+### Détecter vos projets existants
+
+Pour recenser les projets d'une machine et les enrôler dans le cockpit :
+
+```bash
+grimoire cockpit scan ~/dev            # crawl récursif (profondeur 4 par défaut)
+grimoire cockpit scan ~/dev --yes      # enrôle tous les projets Grimoire détectés
+```
+
+Les dépôts git non initialisés sont listés avec la suggestion `grimoire up <path>`.
+
+### Lancer un premier flow gouverné
+
+`grimoire flow run` conduit un blueprint node par node et consigne un reçu
+de preuve à chaque étape :
+
+```bash
+grimoire flow run                                    # liste les runs connus
+grimoire flow run mon-pipeline.blueprint.json         # démarre un run
+grimoire flow status <run-id>                         # où en est-il
+```
+
+## Structure générée
+
+```
+mon-projet/
+├── project-context.yaml          # Configuration centralisée
+├── _grimoire/
+│   ├── _config/
+│   │   ├── agents/               # Références agents installés
+│   │   ├── manifest.yaml         # Manifeste du projet
+│   │   └── custom/               # Surcharges locales
+│   ├── _memory/
+│   │   ├── shared-context.md     # Contexte partagé
+│   │   ├── decisions-log.yaml    # Journal des décisions
+│   │   └── learnings.yaml        # Apprentissages
+│   └── core/
+│       ├── agents/               # Agents déployés
+│       └── workflows/            # Workflows actifs
+└── .github/
+    └── copilot-instructions.md   # Instructions VS Code Copilot
+```
+
+## Aller au-delà des 5 commandes
+
+Un aperçu de ce qui vit derrière `grimoire --help --all` — `setup`, `status`,
+`validate`, `check`, `standard`, `merge`, `upgrade`, `registry`… — plus le
+détail des options de chacune : [`docs/reference/cli/`](../reference/cli/index.md).
+
+## Configurer votre identité
+
+Après `grimoire init`, configurez votre nom et votre langue. La commande `setup` propage ces valeurs dans tous les fichiers de configuration du projet (instructions Copilot).
+
+```bash
+# Synchroniser depuis project-context.yaml
+grimoire setup
+
+# Ou spécifier directement
+grimoire setup --user "Alice" --lang "English" --skill-level intermediate
+
+# Vérifier la synchronisation (utile en CI)
+grimoire setup --check
+```
+
+**Source de vérité** : `project-context.yaml` (section `user`). La commande `setup` propage les valeurs vers :
+
+- `.github/copilot-instructions.md` — instructions injectées dans Copilot Chat
+
+## Vérifier votre projet
+
+```bash
+grimoire doctor
+```
+
+Sortie attendue (extrait) :
+
+```text
+  OK  project-context.yaml found
+  OK  Config valid — project: Demo
+  OK  _grimoire/ present
+  OK  Archetype configured: minimal
+  OK  7 VS Code agent wrapper(s) in .github/agents/
+  OK  uv available (/home/user/.local/bin/uv)
+  OK  docker daemon reachable (server 29.6.1)
+  OK  Qdrant reachable at http://localhost:6333
+  OK  Ollama reachable at http://localhost:11434
+  OK  .mcp.json server 'grimoire' resolves (grimoire-mcp)
+
+17/17 checks passed
+```
+
+Les checks d'environnement (uv, docker, Qdrant, Ollama) sont optionnels : un
+avertissement affiche la commande de remédiation exacte sans bloquer. Une
+référence cassée dans `.mcp.json` est en revanche une erreur.
+
+Pour réparer un projet (wrappers agents ou `.mcp.json` manquants) :
+
+```bash
+grimoire doctor . --fix
+```
+
+## Adopter le standard agentique gouverné
+
+Au-delà du scaffold, Grimoire fournit un **standard agentique** : un besoin projet mappe sur
+un profil (`starter → controlled → orchestrated → governed → production`) qui active des
+**patterns gouvernés vérifiables** (36 au catalogue).
+
+```bash
+# Choisir par besoin (commencer petit)
+grimoire standard needs
+grimoire standard init . --needs solo-prototyping
+
+# Vérifier / auditer / scorer / gater la conformité (fail-closed)
+grimoire standard verify
+grimoire standard audit
+grimoire standard score
+grimoire standard gate
+```
+
+Référence des contrôles : [Contrôles gouvernés](../standard/controles-gouvernes.md) · intégration :
+[Standard agentique](../guides/rendre-la-preuve-bloquante.md) · installation par besoins :
+[Installation par besoins](../guides/installer-par-besoins.md).
+
+## Portabilité multi-assistant
+
+`grimoire init` génère des entrypoints portables — `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`,
+`.cursorrules` (pointant vers `.github/copilot-instructions.md`) et un `.mcp.json` OS-neutre —
+pour que le projet fonctionne avec Copilot, Claude Code, Codex, Gemini CLI et Cursor sans
+configuration manuelle.
+
+## Créer un blueprint
+
+Un blueprint décrit un pipeline d'agents (nodes, edges, contrats) compilable en
+mission pack. Le CLI couvre tout le cycle :
+
+```bash
+grimoire blueprint new mon-pipeline            # scaffold un .blueprint.json valide
+grimoire blueprint validate mon-pipeline.blueprint.json
+grimoire blueprint compile mon-pipeline.blueprint.json
+grimoire blueprint evals mon-pipeline.blueprint.json --record trace.json
+```
+
+Les évals attachées à un blueprint décrivent ce que le flow doit produire, pas
+seulement la forme qu'il doit avoir. Le Studio ne les exécute jamais : votre
+hôte fait tourner le flow une fois et consigne ce qui s'est passé (contrat rendu,
+tokens consommés, verdict, chemin suivi), puis `blueprint evals` vérifie la
+consignation. Un cas absent de la trace est rapporté « non exécuté » — jamais
+comme un échec.
+
+- Schéma de référence : `schemas/blueprint-v1.schema.json`
+- Exemples rejouables (sans modèle, vérifiés en CI) : `examples/blueprint-minimal/` et
+  `examples/blueprint-web-pipeline/` — `bash examples/<nom>/replay.sh` ; sources dans
+  `registry/blueprints/`
+- L'atelier visuel reste disponible via `grimoire serve` (le cockpit
+  multi-projets, lui, est servi par `grimoire cockpit`)
+
+Chaque erreur de validation indique le chemin JSON fautif, la valeur attendue et
+la remédiation ; une extension manquante à la compilation affiche la commande
+`grimoire ext add` exacte.
+
+## Utiliser le SDK Python
+
+```python
+from grimoire.core.config import GrimoireConfig
+from grimoire.core.project import GrimoireProject
+
+config = GrimoireConfig.from_yaml("project-context.yaml")
+project = GrimoireProject(config)
+
+# Lister les agents
+for agent in project.status().agents:
+    print(f"{agent.id}: {agent.name}")
+```
+
+## Serveur MCP
+
+Si vous avez installé `grimoire-kit[mcp]` :
+
+```bash
+grimoire-mcp
+```
+
+Configurez dans VS Code (`.vscode/mcp.json`) :
+
+```json
+{
+  "servers": {
+    "grimoire": {
+      "command": "grimoire-mcp"
+    }
+  }
+}
+```
+
+## Auto-complétion shell
+
+Grimoire Kit supporte l'auto-complétion pour Bash, Zsh et Fish :
+
+```bash
+# Installer l'auto-complétion pour votre shell
+grimoire --install-completion
+
+# Afficher le script sans l'installer
+grimoire --show-completion
+```
+
+Après installation, redémarrez votre terminal. Tapez `grimoire <TAB>` pour voir les commandes disponibles.
+
+## Prochaines étapes
+
+- [Référence YAML](../reference/grimoire-yaml.md) — schéma complet de `project-context.yaml`
+- [Guide SDK](../guides/sdk-python.md) — utilisation du SDK Python
+- [Intégration MCP](../guides/mcp.md) — serveur MCP pour Copilot
+- [Migration v2 → v3](../guides/migration-v2-v3.md) — migrer un projet existant
+- [Concepts](../explications/concepts.md) — architecture et principes
