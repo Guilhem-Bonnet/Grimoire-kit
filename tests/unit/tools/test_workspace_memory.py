@@ -179,3 +179,54 @@ class TestMemorySearch:
         by_slug = {p["slug"]: p for p in result["projects"]}
         assert by_slug["projet-c"]["reason"]
         assert by_slug["projet-c"]["count"] == 0
+
+    def test_results_carry_source_and_freshness_and_hidden_count(self, tmp_path: Path) -> None:
+        """EKP-E1 : le cockpit lit la même fraîcheur que le CLI et le MCP."""
+        from grimoire.core.config import GrimoireConfig
+        from grimoire.memory.manager import MemoryManager
+        from grimoire.memory.projections import sync_docs_projection
+
+        a = tmp_path / "projet-a"
+        _init_project(a, "Alpha")
+        (a / "docs").mkdir()
+        page = a / "docs" / "portail.md"
+        page.write_bytes(b"# Portail\n\nle portail local\n")
+        mgr = MemoryManager.from_config(GrimoireConfig.from_yaml(a / "project-context.yaml"), project_root=a)
+        sync_docs_projection(mgr, project_root=a, paths=[Path("docs")])
+        mgr.store("portail : une saisie libre")
+        reg.save_registry([{"slug": "projet-a", "name": "Alpha", "path": str(a)}])
+
+        fresh = {r["source"]: r["freshness"] for r in wm.memory_search(a, "portail", None)["results"]}
+        assert fresh == {"docs/portail.md": "a_jour", "saisie libre": "non_verifie"}
+
+        page.write_bytes(b"# Portail\n\nle portail a change\n")
+        outdated = {r["source"]: r["freshness"] for r in wm.memory_search(a, "portail", None)["results"]}
+        assert outdated["docs/portail.md"] == "perime"
+
+        page.unlink()
+        hidden = wm.memory_search(a, "portail", None)
+        assert [r["source"] for r in hidden["results"]] == ["saisie libre"]
+        assert hidden["projects"][0]["hiddenStale"] == 1
+        shown = wm.memory_search(a, "portail", None, include_stale=True)
+        assert {r["freshness"] for r in shown["results"]} == {"source_disparue", "non_verifie"}
+
+    def test_score_is_kept_and_named_by_what_it_measures(self, tmp_path: Path) -> None:
+        """Le score n'est pas perdu en route : BM25 du backend lexical, nommé `bm25`."""
+        a = tmp_path / "projet-a"
+        _init_project(a, "Alpha", backend="lexical")
+        _store(a, "le portail local rend des extraits")
+        _store(a, "autre sujet sans rapport")
+        reg.save_registry([{"slug": "projet-a", "name": "Alpha", "path": str(a)}])
+
+        results = wm.memory_search(a, "portail", None)["results"]
+
+        assert results[0]["scoreKind"] == "bm25"
+        assert isinstance(results[0]["score"], float)
+        assert results[0]["score"] > 0.0
+
+    def test_json_backend_score_kind_is_backend(self, tmp_path: Path) -> None:
+        a = tmp_path / "projet-a"
+        _init_project(a, "Alpha", backend="local")
+        _store(a, "le portail local rend des extraits")
+        reg.save_registry([{"slug": "projet-a", "name": "Alpha", "path": str(a)}])
+        assert wm.memory_search(a, "portail", None)["results"][0]["scoreKind"] == "backend"

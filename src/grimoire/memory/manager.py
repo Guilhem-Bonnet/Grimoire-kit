@@ -27,6 +27,7 @@ from grimoire.core.config import GrimoireConfig
 from grimoire.core.exceptions import GrimoireMemoryError
 from grimoire.memory.backends.base import BackendStatus, MemoryBackend, MemoryEntry
 from grimoire.memory.hot import HotMemoryStatus, RedisHotMemory
+from grimoire.memory.knowledge import FreshnessState, annotate, order_for_serving, stamp_write
 from grimoire.memory.profiles import VECTOR_BACKENDS
 from grimoire.memory.sidecar import DiaryRecord, KnowledgeFact, MemorySidecar
 from grimoire.memory.supersession import SUPERSEDED_KEY, search_live, supersession_state
@@ -416,6 +417,8 @@ class MemoryManager:
         self._hot_memory = hot_memory
         self._hot_memory_issue = hot_memory_issue
         self._lexical_companion = lexical_companion
+        #: Extraits « source disparue » écartés au dernier appel de lecture.
+        self.hidden_stale = 0
         # Racine du projet, pour invalider le cache de statut mémoire
         # (grimoire.memory.health_cache) sur toute écriture. ``None`` pour un
         # manager construit via ``from_backend`` (pas de notion de projet) —
@@ -546,6 +549,7 @@ class MemoryManager:
         stamped = dict(normalized or {})
         stamped.setdefault("project_name", self._project_name or "grimoire")
         stamped.setdefault("source_kind", "memory")
+        stamped = stamp_write(stamped, self._project_root)
         return validate_memory_write(
             text,
             metadata=stamped,
@@ -630,15 +634,32 @@ class MemoryManager:
 
     def search(
         self, query: str, *, user_id: str = "", limit: int = 5, include_superseded: bool = False,
+        include_stale: bool = False,
     ) -> list[MemoryEntry]:
         """Recherche ; les souvenirs remplacés (``superseded_by``) sont exclus par défaut."""
         if include_superseded:
-            return self._guarded_backend_search(query, user_id=user_id, limit=limit)
-        return search_live(
-            lambda size: self._guarded_backend_search(query, user_id=user_id, limit=size),
-            limit,
-            self.recall,
-        )
+            raw = self._guarded_backend_search(query, user_id=user_id, limit=limit)
+        else:
+            raw = search_live(
+                lambda size: self._guarded_backend_search(query, user_id=user_id, limit=size),
+                limit,
+                self.recall,
+            )
+        return self._serve(raw, limit=limit, include_stale=include_stale)
+
+    def _serve(self, entries: list[MemoryEntry], *, limit: int, include_stale: bool) -> list[MemoryEntry]:
+        """Fiche et fraîcheur calculées à la lecture ; source disparue non servie par défaut.
+
+        ``hidden_stale`` garde le nombre d'extraits écartés au dernier appel :
+        un résultat écarté ne disparaît jamais sans que l'appelant puisse le dire.
+        """
+        served = annotate(entries, self._project_root, project=self._project_name)
+        self.hidden_stale = 0
+        if not include_stale:
+            kept = [e for e in served if e.freshness != FreshnessState.SOURCE_DISPARUE]
+            self.hidden_stale = len(served) - len(kept)
+            served = kept
+        return order_for_serving(served)[:limit]
 
     # ── Hybrid retrieval (vector + lexical BM25, RRF fusion) ─────────────────
 
@@ -659,6 +680,7 @@ class MemoryManager:
 
     def hybrid_search(
         self, query: str, *, user_id: str = "", limit: int = 5, include_superseded: bool = False,
+        include_stale: bool = False,
     ) -> list[MemoryEntry]:
         """Fuse vector and lexical rankings via RRF.
 
@@ -668,7 +690,10 @@ class MemoryManager:
         sauf ``include_superseded``.
         """
         if self._lexical_companion is None:
-            return self.search(query, user_id=user_id, limit=limit, include_superseded=include_superseded)
+            return self.search(
+                query, user_id=user_id, limit=limit,
+                include_superseded=include_superseded, include_stale=include_stale,
+            )
         from grimoire.memory.retrieval import HybridRetriever
 
         # HybridRetriever n'appelle que `.search()` sur chaque entrée — le
@@ -682,7 +707,8 @@ class MemoryManager:
             ("vector", cast(MemoryBackend, vector)),
             ("lexical", cast(MemoryBackend, lexical)),
         ])
-        return retriever.search(query, user_id=user_id, limit=limit)
+        fused = retriever.search(query, user_id=user_id, limit=limit * 2)
+        return self._serve(fused, limit=limit, include_stale=include_stale)
 
     def reindex_lexical_companion(self) -> int:
         """Backfill the lexical companion from the primary backend.
@@ -719,8 +745,12 @@ class MemoryManager:
         text: str,
         *,
         tags: tuple[str, ...] = (),
+        source: str = "",
     ) -> MemoryEntry:
         """Typed, idempotent memory write (agent protocol).
+
+        ``source`` (chemin, ``task:<id>``, ``session:<id>``, ``commit:<sha>``)
+        dit d'où vient le fait ; sans lui c'est une saisie libre, jamais ``à jour``.
 
         Same text from the same agent always maps to the same entry id: backends
         with ``upsert`` replace in place; others fall back to a duplicate lookup
@@ -731,6 +761,8 @@ class MemoryManager:
             raise GrimoireMemoryError(msg)
         entry_id = self.typed_entry_id(agent, text)
         metadata = {"type": type_, "agent": agent, "dedup_key": entry_id}
+        if source:
+            metadata["source_uri"] = source
         validated = self._validated(text, user_id=agent, tags=tags, metadata=metadata, emitter="agent")
         text, normalized = validated.text, validated.metadata
         try:
@@ -785,6 +817,7 @@ class MemoryManager:
         hall: str = "",
         room: str = "",
         include_superseded: bool = False,
+        include_stale: bool = False,
     ) -> list[MemoryEntry]:
         filters = {"wing": wing, "hall": hall, "room": room}
         search_filtered = getattr(self._backend, "search_filtered", None)
@@ -799,9 +832,8 @@ class MemoryManager:
                     for entry in candidates
                     if entry_matches_filters(entry, wing=wing, hall=hall, room=room)
                 ][:size]
-        if include_superseded:
-            return fetch(limit)
-        return search_live(fetch, limit, self.recall)
+        raw = fetch(limit) if include_superseded else search_live(fetch, limit, self.recall)
+        return self._serve(raw, limit=limit, include_stale=include_stale)
 
     def supersede(self, old_id: str, new_id: str) -> MemoryEntry | None:
         """Marque ``old_id`` comme remplacé par ``new_id`` (métadonnées conservées).

@@ -184,7 +184,16 @@ def memory_overview(project_root: Path, requested: str | None) -> dict[str, Any]
     }
 
 
-def _search_project(entry: dict[str, str], query: str, limit: int) -> dict[str, Any]:
+def _score_kind(mgr: Any) -> str:
+    """Ce que ``score`` mesure : ``rrf`` (rang fusionné), ``bm25`` (lexical) ou ``backend`` (brut)."""
+    if mgr.prefers_hybrid:
+        return "rrf"
+    return "bm25" if type(mgr.backend).__name__ in {"LexicalMemoryBackend", "TantivyMemoryBackend"} else "backend"
+
+
+def _search_project(
+    entry: dict[str, str], query: str, limit: int, *, include_superseded: bool = False, include_stale: bool = False,
+) -> dict[str, Any]:
     slug = str(entry.get("slug", ""))
     name = str(entry.get("name", "")) or slug
     project_root, reason = _resolve_readable_root(entry)
@@ -204,11 +213,18 @@ def _search_project(entry: dict[str, str], query: str, limit: int) -> dict[str, 
 
         cfg = GrimoireConfig.from_yaml(config_path)
         mgr = MemoryManager.from_config(cfg, project_root=project_root)
-        found = run_memory_search(mgr, query, hybrid=mgr.prefers_hybrid, limit=limit)
+        found = run_memory_search(
+            mgr, query, hybrid=mgr.prefers_hybrid, limit=limit,
+            include_superseded=include_superseded, include_stale=include_stale,
+        )
     except (GrimoireConfigError, GrimoireMemoryError, ImportError, OSError, ValueError) as exc:
         return {"slug": slug, "name": name, "results": [], "reason": str(exc)}
-    results = [{**e.to_dict(), "projectSlug": slug, "projectName": name} for e in found]
-    return {"slug": slug, "name": name, "results": results, "reason": None}
+    kind = _score_kind(mgr)
+    results = [{**e.to_dict(), "projectSlug": slug, "projectName": name, "scoreKind": kind} for e in found]
+    return {
+        "slug": slug, "name": name, "results": results, "reason": None,
+        "hiddenStale": int(getattr(mgr, "hidden_stale", 0) or 0),
+    }
 
 
 def memory_search(
@@ -217,6 +233,8 @@ def memory_search(
     requested: str | None,
     *,
     limit: int = _DEFAULT_SEARCH_LIMIT,
+    include_superseded: bool = False,
+    include_stale: bool = False,
 ) -> dict[str, Any]:
     """Charge utile de ``GET /api/workspace/memory/search`` — lecture seule.
 
@@ -237,7 +255,10 @@ def memory_search(
             "results": [],
             "count": 0,
         }
-    per_project = [_search_project(e, normalized_query, limit) for e in entries]
+    per_project = [
+        _search_project(e, normalized_query, limit, include_superseded=include_superseded, include_stale=include_stale)
+        for e in entries
+    ]
     merged: list[dict[str, Any]] = []
     for found in per_project:
         merged.extend(found["results"])
@@ -251,7 +272,10 @@ def memory_search(
         "schemaVersion": SEARCH_SCHEMA_VERSION,
         "query": normalized_query,
         "projects": [
-            {"slug": p["slug"], "name": p["name"], "reason": p["reason"], "count": len(p["results"])}
+            {
+                "slug": p["slug"], "name": p["name"], "reason": p["reason"],
+                "count": len(p["results"]), "hiddenStale": p.get("hiddenStale", 0),
+            }
             for p in per_project
         ],
         "results": merged,
