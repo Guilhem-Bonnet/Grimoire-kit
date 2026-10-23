@@ -12,7 +12,8 @@ et projections : [Système de mémoire](../../explications/memoire.md).
 | Commande | Description |
 | --- | --- |
 | `grimoire memory status` | Santé du backend, nombre d'entrées, configuration |
-| `grimoire memory up` | Mettre en place la stack mémoire complète, plan par plan |
+| `grimoire memory up` | Mettre en place la stack mémoire complète ; `--start` démarre (Docker) les services manquants — consentement explicite |
+| `grimoire memory doctor` | Entretien minimal : santé des couches, pile démarrée ou non, dérive du graphe (nœuds orphelins), purge sur `--apply` |
 | `grimoire memory remember <texte>` | Écriture typée idempotente — même texte et même agent n'écrivent qu'une fois ; `--source` (chemin, `task:<id>`, `session:<id>`, `commit:<sha>`) dit d'où vient le fait, sans quoi c'est une saisie libre, jamais « à jour » |
 | `grimoire memory recall <requête>` | Rechercher parmi les mémoires typées |
 | `grimoire memory search <requête>` | Recherche par mot-clé ou similarité sémantique — fusionne vectoriel et BM25 (RRF) dès que le projet possède les deux ; `--no-hybrid` force le backend seul. Chaque résultat porte sa source, ses dates et sa fraîcheur (à jour, périmé, non vérifié, hypothèse) ; `--include-stale` ajoute les sources disparues, `--include-superseded` les décisions remplacées |

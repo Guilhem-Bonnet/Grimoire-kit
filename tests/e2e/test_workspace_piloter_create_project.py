@@ -154,8 +154,8 @@ def test_creating_a_project_from_the_fleet_makes_it_appear(
     # Le sélecteur de projets (le tableau Flotte) le montre, sans redémarrer
     # le cockpit : retour au niveau Flotte, dans la MÊME session navigateur.
     page.get_by_role("button", name="Flotte").click()
-    page.wait_for_selector(".pl-table-wrap")
-    table_text = page.locator(".pl-table-wrap").inner_text()
+    page.wait_for_selector(".tbl-wrap")
+    table_text = page.locator(".tbl-wrap").inner_text()
     assert "nouveau-jetable" in table_text
 
 
