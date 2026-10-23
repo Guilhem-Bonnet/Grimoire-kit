@@ -119,7 +119,6 @@ app = typer.Typer(
 console = Console(stderr=True)
 
 
-
 # ── Semantic exit codes ────────────────────────────────────────────────────────
 _EXIT_OK = 0
 _EXIT_USER = 1      # user/input error (missing file, bad arg, validation fail)
@@ -1280,8 +1279,8 @@ app.command("update", rich_help_panel="Info")(self_update_command)  # alias de `
 # real dispatch, or that command's own `--help`. `grimoire --version` and
 # `grimoire doctor .` never touch any of these modules.
 #
-# Name, rich_help_panel and hidden must match what the corresponding `add_typer`/`command`
-# call passed before — they are what `grimoire --help` renders without importing anything.
+# Name, rich_help_panel and hidden must match what the corresponding `add_typer`/`command` call passed
+# before — they are what `grimoire --help` renders without importing anything.
 
 LazyTyperGroup.configure(
     groups={
@@ -1317,6 +1316,7 @@ LazyTyperGroup.configure(
         "agent": LazyGroupSpec("grimoire.cli.cmd_agent", "agent_app", rich_help_panel="Agents"),
         "web": LazyGroupSpec("grimoire.cli.cmd_web", "web_app", rich_help_panel="Data"),
         "autonomy": LazyGroupSpec("grimoire.cli.cmd_autonomy", "autonomy_app", rich_help_panel="Project"),
+        "mcp": LazyGroupSpec("grimoire.cli.cmd_mcp", "mcp_app", rich_help_panel="Project"),
         "onboard": LazyGroupSpec("grimoire.cli.cmd_onboard", "onboard_app", rich_help_panel="Project"),
         "team": LazyGroupSpec("grimoire.cli.cmd_team", "team_app", rich_help_panel="Project"),
     },
@@ -1340,7 +1340,7 @@ LazyTyperGroup.configure(
         "memory", "hooks", "cadrage", "debugger", "dbg", "registry", "workflows",
         "wf", "standard", "ext", "blueprint", "flow", "cockpit", "task", "mission",
         "stigmergy", "features", "host", "providers", "dispatch", "route", "queue", "orchestrate", "needs", "evidence", "gates", "proposals", "upgrade-flow", "agent", "web",
-        "autonomy", "onboard", "team",
+        "autonomy", "mcp", "onboard", "team",
         "config", "completion", "self", "plugins",
     ],
 )
