@@ -121,7 +121,8 @@ def list_flow_runs(
     en attente » a besoin de savoir pour survivre à une navigation, plutôt
     que de rester un état client perdu au premier rendu suivant.
     """
-    return flow_runs_view(project_root, blueprint_id=blueprint_id, limit=limit)["runs"]
+    runs: list[dict[str, Any]] = flow_runs_view(project_root, blueprint_id=blueprint_id, limit=limit)["runs"]
+    return runs
 
 
 def flow_runs_view(
