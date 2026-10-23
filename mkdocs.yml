@@ -107,6 +107,7 @@ nav:
       - Atelier local & blueprints: serve-blueprints.md
       - Guides:
           - Cadrage produit: cadrage.md
+          - Travail en équipe: team-work.md
           - Extensions & marketplace: extensions-marketplace.md
           - SDK Python: sdk-guide.md
           - Créer un agent: creating-agents.md
