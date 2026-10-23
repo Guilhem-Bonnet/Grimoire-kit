@@ -37,7 +37,7 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from grimoire.policies.engine import _use_rust_backend, rust_core_module
@@ -392,7 +392,7 @@ def _evaluate_python(
     reason = ""
     now_iso = now.isoformat()
     for rule in rules:
-        if not rule.is_temporal or not tool_pattern_matches(rule.tool_pattern, tool_name, tool_detail):
+        if not rule.has_session_counters or not tool_pattern_matches(rule.tool_pattern, tool_name, tool_detail):
             continue
         rule_state = state.rule_state(rule.id)
         verdict, rule_reason, record_hit = _evaluate_one_rule(
@@ -438,7 +438,7 @@ def _evaluate_rust(
 ) -> tuple[VerdictKind, str, tuple[MatchedRule, ...]]:
     _rust_core = rust_core_module()
     assert _rust_core is not None
-    temporal_rules = [rule for rule in rules if rule.is_temporal]
+    temporal_rules = [rule for rule in rules if rule.has_session_counters]
     rule_tuples = [
         (
             rule.id,
@@ -549,7 +549,87 @@ def evaluate_temporal(
     finally:
         for rs in approval_states:
             rs.approved = bool(rs.approved_fingerprints)
-    return TemporalDecision(verdict=verdict, reason=reason, matched_rules=matched, state=state)
+    armed_verdict, armed_reason, armed_matched = _evaluate_arming(
+        rules, state, tool_name=tool_name, tool_detail=tool_detail, now=now
+    )
+    if _SEVERITY[armed_verdict] > _SEVERITY[verdict]:
+        verdict, reason = armed_verdict, armed_reason
+    return TemporalDecision(verdict=verdict, reason=reason, matched_rules=matched + armed_matched, state=state)
+
+
+# ── Règles d'armement (issue #666) ───────────────────────────────────────────
+
+_SHELL_SEGMENT_RE = re.compile(r"&&|\|\||;|\|")
+
+
+def _arming_matches(pattern: str, tool_name: str, tool_detail: str) -> bool:
+    """*pattern* contre l'appel : la clé entière, chaque segment shell, et la
+    même chose avec les antislashs rendus en ``/`` (chemins Windows, critère 4
+    de #666). Plus de façons de correspondre, jamais moins : une règle
+    d'armement qui doute arme."""
+    candidates = [tool_detail]
+    candidates.extend(seg.strip() for seg in _SHELL_SEGMENT_RE.split(tool_detail) if seg.strip())
+    candidates.extend(c.replace("\\", "/") for c in list(candidates) if "\\" in c)
+    return any(tool_pattern_matches(pattern, tool_name, candidate) for candidate in candidates)
+
+
+def _still_armed(expiry_iso: str, now: datetime) -> bool | None:
+    """``True`` armé, ``False`` échu, ``None`` échéance illisible (fail-closed : traitée comme armée)."""
+    try:
+        expiry = datetime.fromisoformat(expiry_iso)
+    except ValueError:
+        return None
+    if expiry.tzinfo is None:
+        expiry = expiry.replace(tzinfo=UTC)
+    return now < expiry
+
+
+def _evaluate_arming(
+    rules: Sequence[PolicyRule],
+    state: SessionState,
+    *,
+    tool_name: str,
+    tool_detail: str,
+    now: datetime,
+) -> tuple[VerdictKind, str, tuple[MatchedRule, ...]]:
+    """Arme sur ``arms.pattern``, élève sur ``arms.then`` tant que l'armement tient.
+
+    Ordre voulu : l'appel courant arme *d'abord*, puis est comparé à ``then`` —
+    une ligne qui fait les deux (``chmod +x s.sh && ./s.sh``) est donc jugée
+    armée. Un armement échu est retiré ; une échéance illisible vaut armement
+    (jamais ouvert) et est réécrite à ``now + minutes``. Python seul : rien de
+    ceci ne traverse le cœur Rust, qui reste l'oracle des seuls compteurs.
+    """
+    matched: list[MatchedRule] = []
+    effective = VerdictKind.ALLOW
+    reason = ""
+    for rule in rules:
+        arms = rule.arms
+        if arms is None:
+            continue
+        expiry = state.armed.get(rule.id)
+        if expiry is not None:
+            status = _still_armed(expiry, now)
+            if status is False:
+                del state.armed[rule.id]
+                expiry = None
+            elif status is None:
+                expiry = (now + timedelta(minutes=arms.minutes)).isoformat()
+                state.armed[rule.id] = expiry
+        if _arming_matches(arms.pattern, tool_name, tool_detail):
+            expiry = (now + timedelta(minutes=arms.minutes)).isoformat()
+            state.armed[rule.id] = expiry
+        if expiry is None or not _arming_matches(arms.then, tool_name, tool_detail):
+            continue
+        verdict = rule.verdict_on_match if rule.verdict_on_match is not VerdictKind.ALLOW else VerdictKind.WARN
+        rule_reason = rule.reason_template or (
+            f"Action armée : {arms.then!r} suit {arms.pattern!r} dans la fenêtre de {arms.minutes:g} min "
+            f"(règle {rule.id})"
+        )
+        matched.append(MatchedRule(rule_id=rule.id, verdict=verdict, reason=rule_reason))
+        if _SEVERITY[verdict] > _SEVERITY[effective]:
+            effective, reason = verdict, rule_reason
+    return effective, reason, tuple(matched)
 
 
 _MAX_APPROVED_FINGERPRINTS = 64
