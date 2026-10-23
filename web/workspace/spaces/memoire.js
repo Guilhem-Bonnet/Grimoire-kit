@@ -65,8 +65,6 @@ function injectStyles() {
     @media (max-width: 640px) {
       .me-wrap { padding: var(--sp-3); }
       .me-search { max-width: none; }
-      .me-kpi { flex-wrap: wrap; }
-      .me-kpi-item { flex: 1 1 45%; }
     }
   `;
   document.head.append(style);
