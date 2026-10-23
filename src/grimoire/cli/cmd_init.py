@@ -722,6 +722,21 @@ def _display_composition_preview(archetypes: list[str]) -> None:
 # ── Rich summary report ─────────────────────────────────────────────────────
 
 
+def brownfield_offer(target: Path) -> dict[str, Any] | None:
+    """Proposition (jamais imposée) de documenter un projet qui a déjà du code.
+
+    ``None`` pour un projet neuf, ou quand la base existe déjà.
+    """
+    from grimoire.core.project_kind import detect_project_kind
+    from grimoire.onboarding.brownfield import KNOWLEDGE_JSON
+
+    kind = detect_project_kind(target)
+    if kind.kind != "brownfield" or (target / KNOWLEDGE_JSON).is_file():
+        return None
+    return {"project_kind": kind.to_dict(), "command": "grimoire onboard brownfield",
+            "writes": KNOWLEDGE_JSON.parent.as_posix(), "model_calls": 0}
+
+
 def _display_report(
     target: Path,
     result: ScaffoldResult,
@@ -811,8 +826,15 @@ def _display_report(
         console.print()
 
     # Next steps
+    offer = brownfield_offer(target)
+    onboard_hint = (
+        "  [bold cyan]Code existant détecté[/bold cyan] "
+        f"([dim]{', '.join(offer['project_kind']['evidence'])}[/dim])\n"
+        "           Le documenter, sans modèle : [cyan]grimoire onboard brownfield[/cyan]\n\n"
+    ) if offer else ""
     console.print(Panel(
         "[bold]Your project is alive![/bold]\n\n"
+        f"{onboard_hint}"
         f"  [bold cyan]Step 1:[/bold cyan] Open your project in VS Code\n"
         f"           [cyan]code {target.name}[/cyan]\n\n"
         "  [bold cyan]Step 2:[/bold cyan] Talk to your AI concierge\n"
@@ -936,6 +958,9 @@ def _display_json(
         "files_copied": len(result.copied_files),
         "configs_generated": len(result.rendered_files),
     }
+    offer = brownfield_offer(target)
+    if offer:
+        data["onboard"] = offer
     if qdrant_docker is not None:
         data["qdrant_docker"] = qdrant_docker
     if collection:
@@ -1289,5 +1314,11 @@ def run_init(
         )
 
     _maybe_register_cockpit(target, project_name, fmt, no_cockpit=no_cockpit)
+    if is_interactive and brownfield_offer(target) and typer.confirm(
+        "Documenter le code existant maintenant (sans modèle, quelques secondes) ?", default=False,
+    ):
+        from grimoire.cli.cmd_onboard import brownfield
+
+        brownfield(target, check=False, as_json=False, no_memory=False)
 
 
