@@ -13,7 +13,8 @@ from typing import Any
 import typer
 from rich.table import Table
 
-from grimoire.cli.cmd_memory import _get_fmt, _load_manager, console, memory_app
+from grimoire.cli import cmd_memory
+from grimoire.cli.cmd_memory import _get_fmt, console, memory_app
 from grimoire.core.exceptions import GrimoireMemoryError
 from grimoire.memory.knowledge import label_of
 
@@ -70,7 +71,7 @@ def memory_supersede(
     --include-superseded is given. Refuses an unknown or already-replaced
     replacement and any cycle.
     """
-    mgr = _load_manager()
+    mgr = cmd_memory._load_manager()  # résolu à l'appel : simulable sur cmd_memory
     fmt = _get_fmt(ctx)
     try:
         updated = mgr.supersede(old_id, new_id)
