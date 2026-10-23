@@ -31,6 +31,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from grimoire.bridges.schemas import HostId
+from grimoire.core.fsio import atomic_write
 
 #: Capacité que la sonde établit.
 CAPABILITY = "pretooluse_deny"
@@ -95,10 +96,7 @@ def _record(proof: ProbeProof) -> None:
     data[proof.key] = {"ok": proof.ok, "probed_at": proof.probed_at, "reason": proof.reason}
     path = proofs_path()
     with contextlib.suppress(OSError):
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        tmp.replace(path)
+        atomic_write(path, json.dumps(data, indent=2, sort_keys=True) + "\n")
 
 
 def installed_version(host_id: HostId, binary: str | None = None) -> str:
